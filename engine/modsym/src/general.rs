@@ -80,12 +80,21 @@ impl Character {
         self.exponent(-1).map_or(true, |e| e as u64 % self.order == 0)
     }
 
+    /// The same character with `order` its exact order m (exponents
+    /// relative to zeta_m = zeta_order^(order/m)).
+    pub fn minimal(&self) -> Character {
+        let g = self.exps.iter().filter(|&&e| e != u32::MAX).fold(self.order, |g, &e| gcd(g, e as u64));
+        let s = g.max(1);
+        let exps = self.exps.iter().map(|&e| if e == u32::MAX { e } else { (e as u64 / s) as u32 }).collect();
+        Character { n: self.n, order: self.order / s, exps }
+    }
+
     pub fn is_trivial(&self) -> bool {
         self.exps.iter().all(|&e| e == 0 || e == u32::MAX)
     }
 }
 
-fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {
+pub(crate) fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {
     let mut r = 1u64;
     b %= p;
     while e > 0 {
@@ -98,44 +107,38 @@ fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {
     r
 }
 
-fn inv(a: u64, p: u64) -> u64 {
+pub(crate) fn inv(a: u64, p: u64) -> u64 {
     powmod(a, p - 2, p)
 }
 
-fn mul(a: u64, b: u64, p: u64) -> u64 {
-    (a as u128 * b as u128 % p as u128) as u64
+/// a b mod p for p < 2^31 (enforced by `new_mod`): the product fits in u64.
+#[inline]
+pub(crate) fn mul(a: u64, b: u64, p: u64) -> u64 {
+    a * b % p
 }
 
 /// The largest prime ell below `below` with ell = 1 mod order, and an
 /// element zeta of exact multiplicative order `order` in F_ell.
 pub fn prime_field(order: u64, below: u64) -> (u64, u64) {
-    let mut ell = below - 1;
-    loop {
-        if ell % order == 1 % order && ell > 2 && is_prime(ell) {
-            break;
-        }
-        ell -= 1;
-    }
-    let prime_factors = |mut m: u64| {
-        let mut out = vec![];
-        let mut d = 2;
-        while d * d <= m {
-            if m % d == 0 {
-                out.push(d);
-                while m % d == 0 {
-                    m /= d;
-                }
-            }
-            d += 1;
-        }
-        if m > 1 {
-            out.push(m);
-        }
-        out
-    };
-    let qs = prime_factors(ell - 1);
+    let ell = primes_one_mod(order, below).next().expect("a prime = 1 mod order");
+    (ell, root_of_unity(order, ell))
+}
+
+/// Primes ell = 1 mod order, 2 < ell < below, in decreasing order.
+pub fn primes_one_mod(order: u64, below: u64) -> impl Iterator<Item = u64> {
+    let order = order.max(1);
+    // Largest candidate = 1 mod order below `below`, then step down by order.
+    let start = (below - 1) - ((below - 1) % order) + 1 % order;
+    let start = if start >= below { start - order } else { start };
+    (0..).map(move |t| start.wrapping_sub(t * order)).take_while(move |&l| l > 2 && l < below).filter(|&l| is_prime(l))
+}
+
+/// An element of exact multiplicative order `order` in F_ell (order | ell - 1).
+pub fn root_of_unity(order: u64, ell: u64) -> u64 {
+    assert!((ell - 1) % order == 0);
+    let qs: Vec<u64> = crate::exact::factor(ell - 1).iter().map(|&(q, _)| q).collect();
     let g = (2..).find(|&g| qs.iter().all(|&q| powmod(g, (ell - 1) / q, ell) != 1)).unwrap();
-    (ell, powmod(g, (ell - 1) / order, ell))
+    powmod(g, (ell - 1) / order, ell)
 }
 
 /// Coefficients over X^r Y^(k-2-r), r = 0..=k-2, of P(aX + bY, cX + dY)
@@ -144,10 +147,22 @@ fn transform(k: usize, i: usize, h: [i64; 4], binom: &[Vec<u64>], p: u64) -> Vec
     let w = k - 2;
     let red = |x: i64| x.rem_euclid(p as i64) as u64;
     let (a, b, c, d) = (red(h[0]), red(h[1]), red(h[2]), red(h[3]));
-    // (aX + bY)^i = sum_s C(i, s) a^s b^(i-s) X^s Y^(i-s)
-    let first: Vec<u64> = (0..=i).map(|s| mul(binom[i][s], mul(powmod(a, s as u64, p), powmod(b, (i - s) as u64, p), p), p)).collect();
+    // (aX + bY)^i = sum_s C(i, s) a^s b^(i-s) X^s Y^(i-s), powers built
+    // incrementally (this runs once per symbol and relation).
+    let pows = |x: u64, n: usize| {
+        let mut v = Vec::with_capacity(n + 1);
+        let mut t = 1u64;
+        for _ in 0..=n {
+            v.push(t);
+            t = mul(t, x, p);
+        }
+        v
+    };
+    let (pa, pb) = (pows(a, i), pows(b, i));
+    let first: Vec<u64> = (0..=i).map(|s| mul(binom[i][s], mul(pa[s], pb[i - s], p), p)).collect();
     let j = w - i;
-    let second: Vec<u64> = (0..=j).map(|t| mul(binom[j][t], mul(powmod(c, t as u64, p), powmod(d, (j - t) as u64, p), p), p)).collect();
+    let (pc, pd) = (pows(c, j), pows(d, j));
+    let second: Vec<u64> = (0..=j).map(|t| mul(binom[j][t], mul(pc[t], pd[j - t], p), p)).collect();
     let mut out = vec![0u64; w + 1];
     for (s, &x) in first.iter().enumerate() {
         if x != 0 {
@@ -234,6 +249,9 @@ impl GeneralSpace {
     }
 
     pub fn new_mod(n: u64, k: usize, eps: &Character, sign: i32, p: u64, zeta: u64) -> Result<Self, String> {
+        if p >= 1 << 31 || (p - 1) % eps.order != 0 || powmod(zeta, eps.order, p) != 1 {
+            return Err("need a prime ell < 2^31 and zeta of order ord(eps) in F_ell".into());
+        }
         if k < 2 || eps.n != n || ![-1, 0, 1].contains(&sign) {
             return Err("need k >= 2, a character mod N and sign in {-1, 0, 1}".into());
         }
@@ -356,7 +374,24 @@ impl GeneralSpace {
         // 3-term relations x + x tau + x tau^2 = 0 as rows on generators.
         let tau = [0, -1, 1, -1];
         let tau2 = [-1, 1, -1, 0];
-        let rows: Vec<Vec<(u32, u64)>> = par::map_range(s, |a| {
+        // tau^3 = 1, so [P', g tau] + ... = R(P' tau^-1, g): the relations at
+        // the three points of a tau-orbit of P^1 span the same space (over
+        // all P).  One point per orbit suffices: about a third of the rows.
+        let mut seen = vec![false; l];
+        let mut reps = vec![];
+        for j in 0..l {
+            if !seen[j] {
+                reps.push(j);
+                let mut jj = j;
+                for _ in 0..3 {
+                    seen[jj] = true;
+                    let (c, d) = sp.p1.get(jj);
+                    jj = sp.p1.index(d as i64, -(c as i64) - d as i64);
+                }
+            }
+        }
+        let syms: Vec<usize> = reps.iter().flat_map(|&j| (0..=k - 2).map(move |i| i * l + j)).collect();
+        let rows: Vec<Vec<(u32, u64)>> = par::map_slice(&syms, |&a| {
             let (i, j) = (a / l, a % l);
             let (c, d) = sp.p1.get(j);
             let (c, d) = (c as i64, d as i64);

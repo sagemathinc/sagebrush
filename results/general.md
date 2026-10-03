@@ -54,19 +54,21 @@ The direction of the character relation matters. With $\varepsilon$ replaced by 
 
 | $N$ | $k$ | sign | ord $\varepsilon$ | dim | Sage: space | Sage: $T_2$ + charpoly | ours: space | ours: $T_2$ + charpoly mod $\ell$ |
 |---|---|---|---|---|---|---|---|---|
-| 1009 | 2 | 1 | 1 | 84 | 52 ms | 22 ms | 1.6 ms | 3.2 ms |
-| 50 | 12 | 1 | 1 | 85 | 1033 ms | 239 ms | 30 ms | 4.1 ms |
+| 1009 | 2 | 1 | 1 | 84 | 52 ms | 22 ms | 1.2 ms | 3.1 ms |
+| 50 | 12 | 1 | 1 | 85 | 1033 ms | 239 ms | 2.5 ms | 3.6 ms |
 | 91 | 2 | 0 | 6 | 20 | 24 ms | 36 ms | 0.2 ms | 0.4 ms |
-| 200 | 4 | 1 | 2 | 92 | 290 ms | 86 ms | 7.3 ms | 3.6 ms |
-| 131 | 3 | 1 | 2 | 22 | 23 ms | 1.9 ms | 0.6 ms | 0.5 ms |
-| 61 | 6 | 0 | 10 | 54 | 14,412 ms | 1,102 ms | 2.7 ms | 2.0 ms |
-| 400 | 4 | 1 | 4 | 182 | 8,384 ms | 14,849 ms | 25 ms | 12 ms |
-| 151 | 2 | 1 | 15 | 14 | 27 ms | 21 ms | 0.3 ms | 0.3 ms |
+| 200 | 4 | 1 | 2 | 92 | 290 ms | 86 ms | 1.7 ms | 3.4 ms |
+| 131 | 3 | 1 | 2 | 22 | 23 ms | 1.9 ms | 0.3 ms | 0.5 ms |
+| 61 | 6 | 0 | 10 | 54 | 14,412 ms | 1,102 ms | 0.4 ms | 1.8 ms |
+| 400 | 4 | 1 | 4 | 182 | 8,384 ms | 14,849 ms | 4.0 ms | 12 ms |
+| 151 | 2 | 1 | 15 | 14 | 27 ms | 21 ms | 0.2 ms | 0.3 ms |
+
+The "ours: space" column is after the $\tau$-orbit change described in `general-exact.md`. It made $N=50$, $k=12$ 12× faster to build, from 30 ms to 2.5 ms.
 
 The comparison is not like-for-like. Sage computes over $\mathbb{Q}(\zeta_m)$ exactly, while these timings are for a single prime $\ell$. Still, building the space is 30–5000× faster. Sage's cost is dominated by linear algebra over cyclotomic fields, and that also bounds its Hecke operators. Our cost per prime is unchanged from weight 2.
 
 ## Not done yet
 
-- **Exact results.** These need several primes $\ell\equiv1 \pmod e$, a CRT and rational reconstruction over $\mathbb{Z}[\zeta_e]$ in each $\mathbb{F}_\ell$-embedding, plus a coefficient bound. For the trivial character, the weight-2 multimodular code applies almost verbatim.
+- **Exact results.** Now done; see `general-exact.md`.
 - **Cuspidal and new subspaces** for $k>2$ or $\varepsilon\ne1$. They need the boundary map with character (Stein, *Modular Forms: A Computational Approach*, §8.4) and degeneracy maps; newform orbits are then as in weight 2.
 - Python, WASM and CLI bindings.

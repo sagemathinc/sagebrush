@@ -21,6 +21,7 @@ pub mod estimate;
 pub mod cusps;
 pub mod exact;
 pub mod general;
+pub mod general_exact;
 pub mod integral;
 pub mod linalg;
 pub mod newforms;
