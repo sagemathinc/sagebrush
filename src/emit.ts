@@ -189,7 +189,7 @@ export class Emitter {
       case "Yield":
         return `(yield ${e.value === null ? "null" : this.ex(e.value)})`;
       case "YieldFrom":
-        return `((yield* yieldFrom(${this.ex(e.value)})) ?? null)`;
+        return `yfr(yield* yieldFrom(${this.ex(e.value)}))`;
       case "NamedExpr": {
         const t = this.temp();
         let s: Scope = this.fn.scope;
@@ -968,7 +968,7 @@ const RUNTIME_NAMES = [
   "neg", "pos", "invert", "truth", "lt", "le", "gt", "ge", "eq", "ne", "is", "contains",
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",
   "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf",
-  "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom",
+  "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr",
   "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
   "importModule", "importTop", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
   "sortedKeys",
