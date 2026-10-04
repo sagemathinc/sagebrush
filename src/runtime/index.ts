@@ -139,11 +139,13 @@ export function yieldFrom(x: any): any {
     try {
       return { done: false, value: f() };
     } catch (e: any) {
+      adaptor.live = false;
       if (Obj.isinstance(e, T.StopIteration)) return stop(e);
       throw e;
     }
   };
-  const adaptor = {
+  const adaptor: any = {
+    live: true,
     [Symbol.iterator]() {
       return adaptor;
     },
@@ -158,6 +160,14 @@ export function yieldFrom(x: any): any {
       });
     },
     throw(e: any) {
+      // generator.throw(typ, val): a delegate's own throw() gets the
+      // arguments unchanged, as in CPython.
+      const raw = e?.$rawThrow;
+      if (raw !== undefined) {
+        const t0 = Obj.getattr(target, "throw", null);
+        if (t0 !== null) return step(() => Obj.callObj(t0, raw));
+        if (raw.invalid) throw Obj.T.TypeError(raw.invalid);
+      }
       if (Obj.isinstance(e, T.GeneratorExit)) {
         const c = Obj.getattr(target, "close", null);
         if (c !== null) Obj.callObj(c, []);
@@ -166,6 +176,7 @@ export function yieldFrom(x: any): any {
       const t = Obj.getattr(target, "throw", null);
       // CPython's CLEANUP_THROW: a StopIteration thrown in at a `yield from`
       // ends it with that value.
+      if (t === null) adaptor.live = false;
       if (t === null && Obj.isinstance(e, T.StopIteration)) return stop(e);
       if (t === null) throw e;
       return step(() => Obj.callObj(t, [e]));
