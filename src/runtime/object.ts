@@ -333,7 +333,7 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
   if (typeof f === "function") {
     if (names.length === 0) return f(...pos);
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
-    if (f.$sig !== undefined) return f(...bindArgs(f.__name__, f.$sig, pos, names, values));
+    if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
     raise(T.TypeError, `${f.__name__ ?? f.name}() takes no keyword arguments`);
   }
   const c = lookupType(typeOf(f), "__call__");
@@ -1046,7 +1046,13 @@ function arityError(name: string, min: number, max: number, n: number, self: boo
 // Wrap a builtin so calls with the wrong number of positional arguments
 // raise TypeError.  The wrapper has a fixed parameter list so V8 inlines it.
 export function checkArity(f: any, name: string, self: boolean, range?: [number, number]): any {
-  const [min, max] = range ?? jsArity(f);
+  let [min, max] = range ?? jsArity(f);
+  // Keyword-only parameters cannot be passed positionally.
+  const s = f.$sig;
+  if (range === undefined && s !== undefined && s !== null && s.vararg === null && s.kwonly.length > 0) {
+    max = s.args.length;
+    min = Math.min(min, max);
+  }
   let w: any;
   if (max === Infinity) {
     w = function (...a: any[]) {
@@ -1058,6 +1064,8 @@ export function checkArity(f: any, name: string, self: boolean, range?: [number,
     w = new Function("f", "err", `"use strict"; return function ${/^[A-Za-z_]\w*$/.test(name) ? name + "_" : "builtin"}(${ps}) { const n = arguments.length; if (n < ${min} || n > ${max}) err(n); return f(${ps}); };`)(f, (n: number) => arityError(name, min, max, n, self));
   }
   for (const k of Object.keys(f)) w[k] = f[k];
+  // Keyword calls bind all parameters and call the unchecked function.
+  w.$raw = f;
   return w;
 }
 
