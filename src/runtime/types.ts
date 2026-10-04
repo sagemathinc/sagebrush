@@ -158,7 +158,7 @@ property.$kw = (pos, names, values) => {
   return new PyProperty(b[0] ?? null, b[1] ?? null, b[2] ?? null, b[3] ?? null);
 };
 bindClass(PyProperty, property);
-method(property, "__get__", (p: PyProperty, o: any, _t: any) => {
+method(property, "__get__", (p: PyProperty, o: any, _t: any = null) => {
   if (o === null) return p;
   if (p.fget === null) raise(T.AttributeError, `property of '${typeName(o)}' object has no getter`);
   return callObj(p.fget, [o]);
@@ -566,8 +566,11 @@ method(int, "to_bytes", (x: any, length: any = 1, byteorder: string = "big", sig
   let v = BigInt(x);
   const n = Number(length);
   if (n < 0) raise(T.ValueError, "length argument must be non-negative");
+  if (O.truth(signed) && n > 0 && v >= 1n << BigInt(8 * n - 1)) raise(T.OverflowError, "int too big to convert");
+  if (O.truth(signed) && n === 0 && v !== 0n) raise(T.OverflowError, "int too big to convert");
   if (v < 0n) {
     if (!O.truth(signed)) raise(T.OverflowError, "can't convert negative int to unsigned");
+    if (n === 0 || v < -(1n << BigInt(8 * n - 1))) raise(T.OverflowError, "int too big to convert");
     v += 1n << BigInt(8 * n);
   }
   const a = new Uint8Array(n);
@@ -1243,7 +1246,19 @@ method(dict, "__contains__", (d: PyDict, k: any) => dictGet(d, k) !== undefined)
 method(dict, "__iter__", (d: PyDict) => new O.DictIter(d, 0));
 method(dict, "__eq__", (d: PyDict, o: any) => (o instanceof PyDict ? O.dictEquals(d, o) : NotImplemented));
 method(dict, "__ne__", (d: PyDict, o: any) => (o instanceof PyDict ? !O.dictEquals(d, o) : NotImplemented));
-method(dict, "__or__", (d: PyDict, o: any) => (o instanceof PyDict ? O.or(d, o) : NotImplemented));
+method(dict, "__or__", (d: PyDict, o: any) => {
+  if (!(o instanceof PyDict)) return NotImplemented;
+  const r = dictCall(d);
+  O.dictUpdate(r, o);
+  return r;
+});
+method(dict, "__ror__", (d: PyDict, o: any) => {
+  if (!(o instanceof PyDict)) return NotImplemented;
+  const r = dictCall(o);
+  O.dictUpdate(r, d);
+  return r;
+});
+method(dict, "__ior__", (d: PyDict, o: any) => (O.dictUpdate(d, o), d));
 method(dict, "__repr__", (d: PyDict) => dictRepr(d));
 dict.$dict.set("__hash__", null);
 
@@ -1455,7 +1470,8 @@ const grow = (b: PyByteArray, extra: number) => {
   }
 };
 method(bytearray, "append", (b: PyByteArray, x: any) => {
-  if (!O.isPyInt(x) || x < 0 || x > 255) raise(T.ValueError, "byte must be in range(0, 256)");
+  if (!O.isPyInt(x)) raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
+  if (x < 0 || x > 255) raise(T.ValueError, "byte must be in range(0, 256)");
   grow(b, 1);
   b.a[b.n++] = Number(x);
   return null;

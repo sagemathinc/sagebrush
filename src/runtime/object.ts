@@ -568,6 +568,10 @@ export function delattr(o: any, name: string): void {
 }
 
 export function genericDelattr(o: any, name: string, t: PyType): void {
+  if (name === "__dict__" && hasInstanceDict(o) && lookupType(t, "__dict__") === lookupType(T.object, "__dict__")) {
+    for (const k of Object.keys(o)) if (k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k))) delete o[k];
+    return;
+  }
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
     const del = lookupType(typeOf(d), "__delete__");

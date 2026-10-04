@@ -255,7 +255,7 @@ function subclassHook(spec: any, c: PyType): boolean {
 }
 function issubclassImpl(c: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => issubclassImpl(c, s));
-  if (!isType(c)) raise(T.TypeError, "issubclass() arg 1 must be a class");
+  if (!isType(c) && (isType(spec) || lookupType(typeOf(spec), "__subclasscheck__") === undefined)) raise(T.TypeError, "issubclass() arg 1 must be a class");
   if (!isType(spec)) {
     const sc = lookupType(typeOf(spec), "__subclasscheck__");
     if (sc !== undefined) return O.truth(sc(spec, c));
