@@ -16,6 +16,10 @@ export const loader: { load: (name: string) => any | null; exec: (src: string, g
   exec: () => null,
 };
 
+export function builtinModuleNames(): string[] {
+  return Object.keys(factories).filter((n) => !n.startsWith("_"));
+}
+
 export function newBuiltinModule(name: string, fill: (m: any) => void) {
   factories[name] = fill;
 }

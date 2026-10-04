@@ -459,6 +459,7 @@ export const R: any = {
   stdout: B.stdout,
   stderr: B.stderr,
   importModule: M.importModule,
+  builtinModuleNames: M.builtinModuleNames,
   PyComplex: Cx.PyComplex,
   importAs: M.importAs,
   importFromStmt: M.importFromStmt,
