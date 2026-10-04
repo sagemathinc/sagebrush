@@ -9,6 +9,7 @@ import * as B from "./builtins";
 import * as M from "./modules";
 import * as Arr from "./array";
 import "./struct";
+import "./memoryview";
 
 O.arrayHooks.cls = Arr.PyArray;
 O.arrayHooks.get = Arr.arrayGetitem;
@@ -254,6 +255,8 @@ Ty.getset(codeType, "co_name", () => "<module>");
 function sourceOf(src: any, fn: string): [string, string] {
   if (src instanceof CodeObject) return [src.src, src.filename];
   if (src instanceof Obj.PyBytes) return [Ty.decode(src), "<string>"];
+  const buf = O.bufferOf(src);
+  if (buf !== undefined) return [Ty.decode(new Obj.PyBytes(buf.slice())), "<string>"];
   if (typeof src !== "string") raise(T.TypeError, `${fn}() arg 1 must be a string, bytes or code object`);
   return [src, "<string>"];
 }
