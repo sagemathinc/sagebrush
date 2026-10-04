@@ -261,6 +261,30 @@ getset(fnType, "__globals__", (f) => {
   const g = f.$globals[NS_GLOBALS] ?? f.$globals;
   return g[NS_DICT] ?? globalsDict(g);
 });
+// A code object describing a compiled function's signature (no bytecode).
+export class FnCode {
+  constructor(public f: any) {}
+}
+const fnCodeType = builtinTypeFor("code", FnCode, "builtins", () => raise(T.TypeError, "cannot create 'code' objects"));
+{
+  const sigOf = (c: FnCode) => c.f.$sig ?? { args: [], posonly: 0, vararg: null, kwonly: [], kwarg: null };
+  getset(fnCodeType, "co_name", (c) => c.f.__name__);
+  getset(fnCodeType, "co_qualname", (c) => c.f.__qualname__);
+  getset(fnCodeType, "co_filename", (c) => c.f.$globals?.__file__ ?? "<string>");
+  getset(fnCodeType, "co_argcount", (c) => sigOf(c).args.length);
+  getset(fnCodeType, "co_posonlyargcount", (c) => sigOf(c).posonly);
+  getset(fnCodeType, "co_kwonlyargcount", (c) => sigOf(c).kwonly.length);
+  getset(fnCodeType, "co_varnames", (c) => {
+    const s = sigOf(c);
+    return tuple([...s.args, ...(s.vararg ? [s.vararg] : []), ...s.kwonly, ...(s.kwarg ? [s.kwarg] : [])]);
+  });
+  getset(fnCodeType, "co_flags", (c) => {
+    const s = sigOf(c);
+    return (s.vararg ? 4 : 0) | (s.kwarg ? 8 : 0) | (c.f.$isGen ? 0x20 : 0) | 3;
+  });
+  getset(fnCodeType, "co_firstlineno", () => 1);
+}
+getset(fnType, "__code__", (f) => (f.$code ??= new FnCode(f)));
 getset(fnType, "__defaults__", (f) => f.__defaults__ ?? null, (f, v) => void (f.__defaults__ = v));
 getset(fnType, "__kwdefaults__", (f) => f.__kwdefaults__ ?? null, (f, v) => {
   if (v !== null && !(v instanceof PyDict)) raise(T.TypeError, "__kwdefaults__ must be set to a dict object");

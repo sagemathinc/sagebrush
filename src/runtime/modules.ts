@@ -591,3 +591,66 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "exists", (path: string) => fs.existsSync(path));
   fn(m, "isdir", (path: string) => fs.existsSync(path) && fs.statSync(path).isDirectory());
 });
+
+// ------------------------------------------------------------------ os
+
+newBuiltinModule("os", (m) => {
+  const fs = require("fs");
+  const nodeOs = require("os");
+  const oserr = (e: any, path: any): never => {
+    const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EEXIST" ? T.FileExistsError : e.code === "EACCES" || e.code === "EPERM" ? T.PermissionError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "ENOTDIR" ? T.NotADirectoryError ?? T.OSError : T.OSError;
+    throw callObj(cls, [e.errno ? -e.errno : 0, String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]);
+  };
+  const wrap = (name: string, f: (...a: any[]) => any) =>
+    fn(m, name, (...a: any[]) => {
+      try {
+        return f(...a);
+      } catch (e: any) {
+        if (e && e.code && e.errno !== undefined) return oserr(e, a[0]);
+        throw e;
+      }
+    });
+  m.name = "posix";
+  m.sep = "/";
+  m.altsep = null;
+  m.extsep = ".";
+  m.pathsep = ":";
+  m.linesep = "\n";
+  m.curdir = ".";
+  m.pardir = "..";
+  m.devnull = "/dev/null";
+  const env = new PyDict();
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) dictSet(env, k, v);
+  m.environ = env;
+  fn(m, "getenv", (k: string, d: any = null) => dictGet(env, k) ?? d);
+  wrap("getcwd", () => process.cwd());
+  wrap("chdir", (p: string) => (process.chdir(p), null));
+  wrap("listdir", (p: string = ".") => fs.readdirSync(p));
+  wrap("mkdir", (p: string, _mode: any = 0o777) => (fs.mkdirSync(p), null));
+  wrap("makedirs", (p: string, _mode: any = 0o777, exist_ok: any = false) => {
+    if (fs.existsSync(p) && !O.truth(exist_ok)) fs.mkdirSync(p);
+    fs.mkdirSync(p, { recursive: true });
+    return null;
+  });
+  wrap("remove", (p: string) => (fs.unlinkSync(p), null));
+  wrap("unlink", (p: string) => (fs.unlinkSync(p), null));
+  wrap("rmdir", (p: string) => (fs.rmdirSync(p), null));
+  wrap("rename", (a: string, b: string) => (fs.renameSync(a, b), null));
+  wrap("replace", (a: string, b: string) => (fs.renameSync(a, b), null));
+  wrap("stat", (p: string) => {
+    const s = fs.statSync(p);
+    return Ty.structseq("os.stat_result", ["st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime", "st_mtime", "st_ctime"], [s.mode, s.ino, s.dev, s.nlink, s.uid, s.gid, s.size, O.mkfloat(s.atimeMs / 1000), O.mkfloat(s.mtimeMs / 1000), O.mkfloat(s.ctimeMs / 1000)]);
+  });
+  fn(m, "uname", () => Ty.structseq("posix.uname_result", ["sysname", "nodename", "release", "version", "machine"], [nodeOs.type(), nodeOs.hostname(), nodeOs.release(), String(nodeOs.version?.() ?? ""), nodeOs.machine?.() ?? nodeOs.arch()]));
+  fn(m, "getpid", () => process.pid);
+  fn(m, "cpu_count", () => nodeOs.cpus().length);
+  fn(m, "urandom", (n: any) => new PyBytes(new Uint8Array(require("crypto").randomBytes(Number(n)))));
+  fn(m, "fspath", (p: any) => {
+    if (typeof p === "string" || p instanceof PyBytes) return p;
+    const f = Ty.lookupDunder(p, "__fspath__");
+    if (f === undefined) raise(T.TypeError, `expected str, bytes or os.PathLike object, not ${typeName(p)}`);
+    return f(p);
+  });
+  m.path = importModule("posixpath");
+  dictSet(sysModules, "os.path", m.path);
+});
