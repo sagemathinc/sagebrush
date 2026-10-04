@@ -416,7 +416,7 @@ export class Emitter {
     else if (e.kind === "list") body = `${r}.push(${this.ex(e.elt)});`;
     else if (e.kind === "set") body = `setAdd(${r}, ${this.ex(e.elt)});`;
     else body = `dictSet(${r}, ${this.ex(e.elt)}, ${this.ex(e.value!)});`;
-    const locals = [...scope.bound].map(js);
+    const locals = [...scope.bound].filter((n) => resolve(scope, n).kind === "local").map(js);
     const decls = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
     if (eager !== null) {
       const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "0", any: "", all: "" };
@@ -497,7 +497,7 @@ export class Emitter {
     if (e.args.vararg) this.fn.assigned.add(e.args.vararg);
     if (e.args.kwarg) this.fn.assigned.add(e.args.kwarg);
     const body = this.ex(e.body);
-    const locals = [...scope.bound].filter((n) => !this.isParam(e.args, n)).map(js);
+    const locals = [...scope.bound].filter((n) => !this.isParam(e.args, n) && resolve(scope, n).kind === "local").map(js);
     const decls = [...locals, ...this.fn.temps];
     const star = scope.isGenerator ? "*" : "";
     this.fn = saved;
@@ -805,7 +805,7 @@ export class Emitter {
       this.w("return null;");
     });
     this.line = st.line;
-    const locals = [...scope.bound].filter((n) => !params.includes(n)).map(js);
+    const locals = [...scope.bound].filter((n) => !params.includes(n) && resolve(scope, n).kind === "local").map(js);
     const star = scope.isGenerator ? "*" : "";
     const f = this.temp();
     this.w(`${f} = defn(function${star} ${self}(${ps}) {`);
