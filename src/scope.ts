@@ -41,7 +41,9 @@ export function resolve(scope: Scope, name: string): Resolution {
     return s === null ? { kind: "global" } : { kind: "free", scope: s };
   }
   if (scope.bound.has(name)) {
-    if (scope.kind === "class") return { kind: "class", outer: resolveFree(scope.parent!, name) };
+    // A name bound in a class body is looked up in the class namespace and
+    // then the globals, never in enclosing functions (LOAD_NAME).
+    if (scope.kind === "class") return { kind: "class", outer: { kind: "global" } };
     return { kind: "local" };
   }
   if (scope.kind === "class") return { kind: "class", outer: resolveFree(scope.parent!, name) };
