@@ -48,7 +48,7 @@ writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "../../src/
 
 // 2. One CommonJS file for Node 22+ and Bun.
 run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace",
-  "--external", "web-tree-sitter", "--external", "tree-sitter-python", "--outfile", join(out, "pyjs.cjs")]);
+  "--outfile", join(out, "pyjs.cjs")]);
 const bundle = join(out, "pyjs.cjs");
 writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
 // A launcher that turns on Node's compile cache before loading the bundle
@@ -69,8 +69,7 @@ if (process.argv.includes("--sea")) {
 
 // 3b. Bun single-file executable.
 if (process.argv.includes("--bun")) {
-  run("bun", ["build", join(out, "entry.ts"), "--compile", "--minify", "--bytecode",
-    "--external", "web-tree-sitter", "--external", "tree-sitter-python", "--outfile", join(out, "pyjs-bun")]);
+  run("bun", ["build", join(out, "entry.ts"), "--compile", "--minify", "--bytecode", "--outfile", join(out, "pyjs-bun")]);
   console.log(`bun executable: ${join(out, "pyjs-bun")} (${(statSync(join(out, "pyjs-bun")).size / 1e6).toFixed(1)} MB)`);
 }
 

@@ -3,7 +3,6 @@
     python3 conformance/run.py                 # everything
     python3 conformance/run.py --suite micropython --show 40
     python3 conformance/run.py --only str_       # substring filter on case ids
-    PYJS_PARSER=tree-sitter python3 conformance/run.py   # old front end
 
 Corpus (conformance/upstream, from sagejs, licenses and provenance kept):
   * micropython: 508 programs from MicroPython tests/basics whose stdout and
@@ -90,7 +89,7 @@ total = collections.Counter(r["status"] for r in results)
 for s in sorted(by):
     n = sum(by[s].values())
     print(f"{s:12} {by[s]['pass']:4}/{n:<4} {dict(by[s])}")
-print(f"{'TOTAL':12} {total['pass']:4}/{len(results):<4} {dict(total)}  ({time.time() - t0:.0f} s, parser={os.environ.get('PYJS_PARSER', 'pyparse')})")
+print(f"{'TOTAL':12} {total['pass']:4}/{len(results):<4} {dict(total)}  ({time.time() - t0:.0f} s, runtime={args.runtime})")
 json.dump(results, open(args.json, "w"), indent=1)
 shown = 0
 for r in results:

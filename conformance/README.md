@@ -18,7 +18,7 @@ This directory measures the Python front end and the pyjs runtime against CPytho
 ```
 python3 conformance/run.py                    # everything (pyparse front end)
 python3 conformance/run.py --only str_ --show 40
-PYJS_PARSER=tree-sitter python3 conformance/run.py   # the old front end
+python3 conformance/run.py --runtime deno   # also: node-bundle, bun
 python3 conformance/regress.py OLD.json       # gained / LOST vs. a saved run
 bash conformance/diff1.sh string_split ...    # CPython vs pyjs diff per case
 ```
@@ -45,7 +45,7 @@ bash conformance/diff1.sh string_split ...    # CPython vs pyjs diff per case
 | `f02defa` / `5cafec7` | `os`, `re` | 529 |
 | HEAD | big ranges, raw `throw()` to delegates, `__import__`/`__build_class__` | **532** |
 
-The tree-sitter front end scored 370 on the same corpus before these runtime changes.
+The tree-sitter front end (removed in October 2026) scored 370 on the same corpus before these runtime changes.
 
 ### What is left
 
