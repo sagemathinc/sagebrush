@@ -406,6 +406,7 @@ export const objectInit = pyfn(function __init__(self: any, ...args: any[]) {
   return null;
 }, "__init__");
 export const objectNew = pyfn(function __new__(cls: PyType, ...args: any[]) {
+  if (!isType(cls)) raise(T.TypeError, `object.__new__(X): X is not a type object (${typeName(cls)})`);
   if (cls.$ctor === null) raise(T.TypeError, `object.__new__(${cls.$name}) is not safe, use ${cls.$name}.__new__()`);
   return new cls.$ctor();
 }, "__new__");
