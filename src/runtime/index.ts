@@ -358,7 +358,8 @@ function framesOf(e: any): Frame[] {
   }
   const frames: Frame[] = [];
   for (const cs of sites) {
-    const info = scripts.get(cs.getFileName?.() ?? "");
+    // Evaluated code (the browser build) has no file name, only a sourceURL.
+    const info = scripts.get(cs.getFileName?.() ?? "") ?? scripts.get(cs.getScriptNameOrSourceURL?.() ?? "");
     if (info === undefined) continue;
     const pyLine = info.lineMap[cs.getLineNumber()] ?? 0;
     let name = String(cs.getFunctionName() ?? "");

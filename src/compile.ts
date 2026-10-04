@@ -20,9 +20,17 @@ function displayExprs(body: any[]): void {
   }
 }
 
-export function compile(source: string, filename: string, moduleName: string, evalMode = false, single = false): Compiled {
+// A notebook cell (mode "cell"): like Jupyter, only a final expression
+// statement displays its value.
+function displayLast(body: any[]): void {
+  const st = body[body.length - 1];
+  if (st !== undefined && st.k === "Expr") displayExprs([st]);
+}
+
+export function compile(source: string, filename: string, moduleName: string, evalMode = false, single: boolean | "cell" = false): Compiled {
   const mod = parse(source, filename, evalMode ? "eval" : "exec");
-  if (single) displayExprs(mod.body);
+  if (single === "cell") displayLast(mod.body);
+  else if (single) displayExprs(mod.body);
   try {
     return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body, evalMode);
   } catch (e) {
@@ -76,13 +84,13 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string) => {
   const evalMode = mode === "eval" || mode === "check-eval";
   let compiled: Compiled;
   try {
-    compiled = compile(src, filename, "__main__", evalMode, mode === "single");
+    compiled = compile(src, filename, "__main__", evalMode, mode === "cell" ? "cell" : mode === "single");
   } catch (e) {
     if (e instanceof PySyntaxError) throw syntaxError(e);
     throw e;
   }
   if (mode === "check" || mode === "check-eval") return null;
-  const jsName = `py:<exec ${++execCounter}>`;
+  const jsName = `py:<exec-${++execCounter}>`; // no spaces: it may become a //# sourceURL
   R.scripts.set(jsName, { filename, lines: src.split("\n"), lineMap: compiled.lineMap });
   return runInThisContext(compiled.code, { filename: jsName })(ns, R);
 };

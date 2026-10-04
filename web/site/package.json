@@ -1,0 +1,15 @@
+{
+  "name": "sagebrush-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "cf build",
+    "deploy": "cf deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "beta",
+    "cf": "^1.0.0-beta.12",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}
