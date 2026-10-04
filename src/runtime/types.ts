@@ -2153,3 +2153,34 @@ for (const [name, bf] of Object.entries(bigRangeMethods)) {
     return n === 0n || (a.start === b.start && (n === 1n || a.step === b.step));
   });
 }
+
+// X | Y on types: types.UnionType, usable with isinstance/issubclass.
+export class PyUnion {
+  constructor(public args: any[]) {}
+}
+export const unionType = builtinTypeFor("UnionType", PyUnion, "types", () => raise(T.TypeError, "cannot create 'types.UnionType' instances"));
+{
+  const unionArg = (x: any): any[] | undefined => {
+    if (x === null) return [T.NoneType];
+    if (isType(x)) return [x];
+    if (x instanceof PyUnion) return x.args;
+    return undefined;
+  };
+  const make = (a: any, b: any): any => {
+    const x = unionArg(a), y = unionArg(b);
+    if (x === undefined || y === undefined) return NotImplemented;
+    const args: any[] = [];
+    for (const t of [...x, ...y]) if (!args.includes(t)) args.push(t);
+    return args.length === 1 ? args[0] : new PyUnion(args);
+  };
+  method(type, "__or__", (a: any, b: any) => make(a, b));
+  method(type, "__ror__", (a: any, b: any) => make(b, a));
+  method(unionType, "__or__", (a: any, b: any) => make(a, b));
+  method(unionType, "__ror__", (a: any, b: any) => make(b, a));
+  method(unionType, "__repr__", (u: PyUnion) => u.args.map((t) => (t === T.NoneType ? "None" : t.$module === "builtins" ? t.$qualname : `${t.$module}.${t.$qualname}`)).join(" | "));
+  method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.includes(t)) : NotImplemented));
+  method(unionType, "__hash__", (u: PyUnion) => u.args.reduce((h, t) => h ^ O.id(t), 0));
+  method(unionType, "__instancecheck__", (u: PyUnion, x: any) => u.args.some((t) => isinstance(x, t)));
+  method(unionType, "__subclasscheck__", (u: PyUnion, c: any) => u.args.some((t) => c.$mro.includes(t)));
+  getset(unionType, "__args__", (u: PyUnion) => tuple(u.args));
+}

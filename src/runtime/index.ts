@@ -11,6 +11,8 @@ import * as Arr from "./array";
 import "./struct";
 import "./memoryview";
 import "./re";
+import * as Cx from "./complex";
+O.complexHooks.pow = Cx.complexPow;
 
 O.arrayHooks.cls = Arr.PyArray;
 O.arrayHooks.get = Arr.arrayGetitem;
@@ -457,6 +459,7 @@ export const R: any = {
   stdout: B.stdout,
   stderr: B.stderr,
   importModule: M.importModule,
+  PyComplex: Cx.PyComplex,
   importAs: M.importAs,
   importFromStmt: M.importFromStmt,
   importTop: M.importTop,
