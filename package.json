@@ -4,6 +4,8 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc -p .",
+    "build:cli": "tsc -p . && node scripts/build-cli.mjs",
+    "build:exe": "tsc -p . && node scripts/build-cli.mjs --sea --bun",
     "test": "tsc -p . && node --test dist/test/ target/"
   },
   "dependencies": {

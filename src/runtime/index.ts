@@ -346,7 +346,16 @@ function framesOf(e: any): Frame[] {
   } finally {
     (Error as any).prepareStackTrace = prev;
   }
-  if (!Array.isArray(sites)) return [];
+  // JavaScriptCore (Bun) formats the stack when it is captured: parse
+  // "at name (file:line:col)" lines instead of V8 call sites.
+  if (!Array.isArray(sites)) {
+    const text = String(sites ?? holder.stack ?? "");
+    sites = [];
+    for (const l of text.split("\n")) {
+      const m = /at (?:(\S+) \()?(.+?):(\d+):\d+\)?\s*$/.exec(l);
+      if (m) sites.push({ getFileName: () => m[2], getLineNumber: () => Number(m[3]), getFunctionName: () => m[1] ?? "" });
+    }
+  }
   const frames: Frame[] = [];
   for (const cs of sites) {
     const info = scripts.get(cs.getFileName?.() ?? "");
