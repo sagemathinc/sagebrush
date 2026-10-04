@@ -1064,7 +1064,7 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
       err.__cause__ = e;
       throw err;
     }
-    if (e instanceof TypeError && /already running/.test(e.message)) raise(T.ValueError, "generator already executing");
+    if (e instanceof TypeError && /already running|is executing/.test(e.message)) raise(T.ValueError, "generator already executing");
     throw e;
   }
 }

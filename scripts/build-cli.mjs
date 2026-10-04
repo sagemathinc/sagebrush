@@ -30,7 +30,8 @@ const walk = (dir) => {
   }
 };
 walk(join(root, "lib"));
-writeFileSync(join(out, "lib.gen.js"), `globalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\n`);
+const version = JSON.parse(readFileSync(join(root, "packages", "sagebrush", "package.json"), "utf8")).version;
+writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\n`);
 writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "../../src/cli";\n`);
 
 // 2. One CommonJS file for Node 22+ and Bun.
@@ -41,6 +42,9 @@ writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").rep
 // A launcher that turns on Node's compile cache before loading the bundle
 // (about 20 ms off every start once the cache is warm).
 writeFileSync(join(out, "pyjs"), `#!/usr/bin/env node\ntry { require("node:module").enableCompileCache?.(); } catch {}\nrequire("./pyjs.cjs");\n`, { mode: 0o755 });
+// The npm package `sagebrush` (packages/sagebrush) ships this bundle.
+mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
+writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
 console.log(`bundle: ${bundle} (${(statSync(bundle).size / 1e6).toFixed(2)} MB, ${Object.keys(lib).length} library files)`);
 
 // 3a. Node single executable application (node --build-sea, Node >= 25.5).

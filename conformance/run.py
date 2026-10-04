@@ -28,7 +28,10 @@ ap.add_argument("--show", type=int, default=25)
 ap.add_argument("--python", default="python3")
 ap.add_argument("-j", type=int, default=os.cpu_count() or 4)
 ap.add_argument("--json", default="/tmp/conformance-results.json")
+ap.add_argument("--runtime", default="node", help="node (dist/), or node-bundle, deno, bun (the single-file bundle from scripts/build-cli.mjs)")
 args = ap.parse_args()
+BUNDLE = os.path.join(ROOT, "build", "cli", "pyjs.cjs")
+PYJS = {"node": ["node", CLI], "node-bundle": ["node", BUNDLE], "deno": ["deno", "run", "-A", BUNDLE], "bun": ["bun", BUNDLE]}[args.runtime]
 
 manifest = json.load(open(os.path.join(UP, "python-compat", "manifest.json")))
 cases = manifest["cases"]
@@ -54,7 +57,7 @@ def one(c):
         cwd = os.path.join(d, os.path.dirname(c["path"]))
         f = os.path.basename(c["path"])
         ref = run([args.python, f], cwd, timeout)
-        got = run(["node", CLI, f], cwd, timeout * 3)
+        got = run(PYJS + [f], cwd, timeout * 3)
         ok = got["code"] == ref["code"] and got["out"] == ref["out"]
         status = "pass" if ok else ("reviewed" if os.path.basename(f) in reviews else "fail")
     else:
@@ -65,7 +68,7 @@ def one(c):
             for fx in c["fixtures"]:
                 shutil.copy(os.path.join(d, fx["path"]), os.path.join(tmp, fx["destination"]))
             ref = run([args.python, "main.py"], tmp, timeout)
-            got = run(["node", CLI, "main.py"], tmp, timeout * 3)
+            got = run(PYJS + ["main.py"], tmp, timeout * 3)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         ok = got["code"] == 0 and got["out"] == b"" and got["err"] == b""

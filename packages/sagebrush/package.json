@@ -1,0 +1,31 @@
+{
+  "name": "sagebrush",
+  "version": "0.1.0",
+  "description": "Python 3.14 on a JavaScript runtime, for research mathematics: an interactive calculator and script runner that starts in ~80 ms (Node, Deno or Bun)",
+  "keywords": ["python", "mathematics", "computer-algebra", "repl", "sagemath", "mpmath", "sandbox"],
+  "bin": {
+    "sagebrush": "bin/sagebrush.cjs"
+  },
+  "files": [
+    "bin/sagebrush.cjs",
+    "dist/sagebrush.cjs",
+    "README.md",
+    "NOTICE.md",
+    "LICENSE-CPython.txt"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sagemathinc/sagebrush.git",
+    "directory": "packages/sagebrush"
+  },
+  "homepage": "https://github.com/sagemathinc/sagebrush#readme",
+  "bugs": "https://github.com/sagemathinc/sagebrush/issues",
+  "author": "William Stein <wstein@sagemath.com>",
+  "license": "SEE LICENSE IN NOTICE.md",
+  "publishConfig": {
+    "access": "public"
+  }
+}

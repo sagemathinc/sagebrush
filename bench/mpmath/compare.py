@@ -68,3 +68,5 @@ for mod in mods:
     tc += cp.get("passed", 0); tp += pj.get("passed", 0)
     if a and b: tcp += a; tpj += b
 print("passed: cpython %d, pyjs %d;  test time where both ran: cpython %.1fs, pyjs %.1fs (%.1fx)" % (tc, tp, tcp, tpj, tpj / tcp if tcp else 0))
+# Fail (for CI) if pyjs passes fewer tests than CPython.
+sys.exit(1 if tp < tc else 0)

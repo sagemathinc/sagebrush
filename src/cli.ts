@@ -1,6 +1,6 @@
 // pyjs: run Python programs, or an interactive prompt.
 //
-//   pyjs                      interactive prompt
+//   sagebrush                 interactive prompt
 //   pyjs program.py [args]    run a program
 //   pyjs -c 'code' [args]     run a string
 //   pyjs -m module [args]     run a library module as __main__
@@ -15,8 +15,8 @@ import { initParser, compile, execModule, R, libDir, findModuleSource } from "./
 import { parse, PySyntaxError } from "./parse";
 import { builtin, isType, typeName, getattr } from "./runtime/object";
 
-const VERSION = "pyjs 0.1 (Python 3.14 language, JavaScript runtime)";
-const USAGE = `usage: pyjs [-c cmd | -m mod | file | -] [args]
+const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
+const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   -c cmd   run the program passed as a string
   -m mod   run a library module as a script
   -i       inspect interactively after running a program
@@ -123,7 +123,7 @@ function completer(main: any) {
 function historyFile(): string | null {
   try {
     const base = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
-    const dir = join(base, "pyjs");
+    const dir = join(base, "sagebrush");
     mkdirSync(dir, { recursive: true });
     return join(dir, "history");
   } catch {

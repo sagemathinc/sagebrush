@@ -803,7 +803,7 @@ export function raiseExc(x: any, cause?: any): any {
 // Convert anything caught by a JS `catch` into a Python exception.
 export function toPyExc(e: any): any {
   if (e !== null && typeof e === "object" && e.$cls !== undefined && isinstance(e, T.BaseException)) return e;
-  if (e instanceof TypeError && /Generator is already running/.test(e.message)) {
+  if (e instanceof TypeError && /Generator is already running|Generator is executing/.test(e.message)) {
     const r = T.ValueError("generator already executing");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return r;

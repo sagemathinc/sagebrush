@@ -1,2 +1,2 @@
 allowBuilds:
-  tree-sitter-python: set this to true or false
+  tree-sitter-python: false
