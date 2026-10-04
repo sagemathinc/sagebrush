@@ -8,7 +8,14 @@ import * as TS from "./parse_treesitter";
 export { PySyntaxError } from "./frontend";
 export { decodeEscapes } from "./parse_treesitter";
 
-const useTreeSitter = typeof process !== "undefined" && process.env?.PYJS_PARSER === "tree-sitter";
+// (Reading the environment can be forbidden, e.g. under Deno permissions.)
+const useTreeSitter = (() => {
+  try {
+    return typeof process !== "undefined" && process.env?.PYJS_PARSER === "tree-sitter";
+  } catch {
+    return false;
+  }
+})();
 
 export async function initParser(): Promise<void> {
   if (useTreeSitter) await TS.initParser();

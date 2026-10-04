@@ -626,6 +626,7 @@ newBuiltinModule("gc", (m) => {
 newBuiltinModule("_fs", (m) => {
   const fs = require("fs");
   const oserr = (e: any, path: string): never => {
+    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]);
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
     throw callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : String(e.message), path]);
   };
@@ -646,8 +647,16 @@ newBuiltinModule("_fs", (m) => {
     }
     return null;
   });
-  fn(m, "exists", (path: string) => fs.existsSync(path));
-  fn(m, "isdir", (path: string) => fs.existsSync(path) && fs.statSync(path).isDirectory());
+  // Denied by a sandbox counts as absent, as os.path.exists does for EACCES.
+  const quiet = (f: () => boolean) => {
+    try {
+      return f();
+    } catch {
+      return false;
+    }
+  };
+  fn(m, "exists", (path: string) => quiet(() => fs.existsSync(path)));
+  fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(path) && fs.statSync(path).isDirectory()));
 });
 
 // ------------------------------------------------------------------ os
@@ -656,6 +665,7 @@ newBuiltinModule("os", (m) => {
   const fs = require("fs");
   const nodeOs = require("os");
   const oserr = (e: any, path: any): never => {
+    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]);
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EEXIST" ? T.FileExistsError : e.code === "EACCES" || e.code === "EPERM" ? T.PermissionError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "ENOTDIR" ? T.NotADirectoryError ?? T.OSError : T.OSError;
     throw callObj(cls, [e.errno ? -e.errno : 0, String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]);
   };
@@ -678,7 +688,11 @@ newBuiltinModule("os", (m) => {
   m.pardir = "..";
   m.devnull = "/dev/null";
   const env = new PyDict();
-  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) dictSet(env, k, v);
+  try {
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined) dictSet(env, k, v);
+  } catch {
+    // environment access denied (sandboxed runtime): os.environ is empty
+  }
   m.environ = env;
   fn(m, "getenv", (k: string, d: any = null) => dictGet(env, k) ?? d);
   wrap("getcwd", () => process.cwd());

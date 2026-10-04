@@ -808,6 +808,13 @@ export function toPyExc(e: any): any {
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return r;
   }
+  // A sandboxed runtime refused an operation: Deno permissions (NotCapable,
+  // PermissionDenied) or Node's permission model (ERR_ACCESS_DENIED).
+  if (e instanceof Error && (e.name === "NotCapable" || e.name === "PermissionDenied" || (e as any).code === "ERR_ACCESS_DENIED")) {
+    const r = T.PermissionError(e.message.split("\n")[0]);
+    Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
+    return r;
+  }
   if (e instanceof RangeError && /call stack/.test(e.message)) {
     const r = T.RecursionError("maximum recursion depth exceeded");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
