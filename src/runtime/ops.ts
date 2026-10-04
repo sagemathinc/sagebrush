@@ -67,7 +67,8 @@ function special(o: any, name: string): any {
   }
   const v = c[name];
   if (v !== undefined) return v === MISSING ? undefined : v;
-  const f = lookupType(t, name);
+  let f = lookupType(t, name);
+  if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
   c[name] = f === undefined ? MISSING : f;
   return f;
 }
@@ -92,9 +93,9 @@ const OPS: Record<string, [string, string, string]> = {
 export function binaryDunder(a: any, b: any, op: string): any {
   const [name, rname, sym] = OPS[op];
   const ta = typeOf(a), tb = typeOf(b);
-  const fa = lookupType(ta, name);
-  const fb = ta === tb ? undefined : lookupType(tb, rname);
-  if (fb !== undefined && tb.$mro.includes(ta) && fb !== lookupType(ta, rname)) {
+  const fa = special(a, name);
+  const fb = ta === tb ? undefined : special(b, rname);
+  if (fb !== undefined && tb.$mro.includes(ta) && fb !== special(a, rname)) {
     // A subclass's reflected method gets priority.
     const r = fb(b, a);
     if (r !== NotImplemented) return r;

@@ -10,6 +10,9 @@ export class Scope {
   bound = new Set<string>();
   globals = new Set<string>();
   nonlocals = new Set<string>();
+  params = new Set<string>();
+  iterVars = new Set<string>(); // comprehension targets
+  nonlocalLines = new Map<string, number>();
   isGenerator = false;
   isAsync = false;
   usesSuper = false;
@@ -83,7 +86,15 @@ export class SyntaxErr extends Error {
 export function analyze(mod: A.Module): Scope {
   const top = new Scope("module", "<module>", null, "");
   new Collector(top).stmts(mod.body);
+  checkNonlocals(top);
   return top;
+}
+
+function checkNonlocals(s: Scope) {
+  for (const [n, line] of s.nonlocalLines) {
+    if (findEnclosing(s.parent, n) === null) throw new SyntaxErr(`no binding for nonlocal '${n}' found`, line);
+  }
+  for (const c of s.children.values()) checkNonlocals(c);
 }
 
 class Collector {
@@ -127,9 +138,12 @@ class Collector {
 
   func(node: object, name: string, p: A.Params, body: () => void) {
     const fs = this.newScope("function", name, node);
-    for (const a of [...p.args, ...p.kwonly]) fs.bound.add(a.name);
-    if (p.vararg) fs.bound.add(p.vararg);
-    if (p.kwarg) fs.bound.add(p.kwarg);
+    const names = [...p.args.map((a) => a.name), ...(p.vararg ? [p.vararg] : []), ...p.kwonly.map((a) => a.name), ...(p.kwarg ? [p.kwarg] : [])];
+    for (const n of names) {
+      if (fs.bound.has(n)) throw new SyntaxErr(`duplicate argument '${n}' in function definition`, (node as any).line ?? 0);
+      fs.bound.add(n);
+      fs.params.add(n);
+    }
     const saved = this.s;
     this.s = fs;
     body();
@@ -194,13 +208,19 @@ class Collector {
         });
       case "Global":
         return st.names.forEach((n) => {
+          if (this.s.params.has(n)) throw new SyntaxErr(`name '${n}' is parameter and global`, st.line);
+          if (this.s.nonlocals.has(n)) throw new SyntaxErr(`name '${n}' is nonlocal and global`, st.line);
           if (this.s.bound.has(n)) throw new SyntaxErr(`name '${n}' is assigned to before global declaration`, st.line);
           this.s.globals.add(n);
         });
       case "Nonlocal":
         return st.names.forEach((n) => {
           if (this.s.kind === "module") throw new SyntaxErr("nonlocal declaration not allowed at module level", st.line);
+          if (this.s.params.has(n)) throw new SyntaxErr(`name '${n}' is parameter and nonlocal`, st.line);
+          if (this.s.globals.has(n)) throw new SyntaxErr(`name '${n}' is nonlocal and global`, st.line);
+          if (this.s.bound.has(n)) throw new SyntaxErr(`name '${n}' is assigned to before nonlocal declaration`, st.line);
           this.s.nonlocals.add(n);
+          if (this.s.kind !== "class") this.s.nonlocalLines.set(n, st.line);
         });
       case "Raise":
         if (st.exc) this.expr(st.exc);
@@ -289,6 +309,7 @@ class Collector {
         e.generators.forEach((g, i) => {
           if (i > 0) this.expr(g.iter);
           this.bindTarget(g.target);
+          for (const n of targetNames(g.target)) cs.iterVars.add(n);
           g.ifs.forEach((c) => this.expr(c));
         });
         this.expr(e.elt);
@@ -313,7 +334,10 @@ class Collector {
       case "NamedExpr": {
         // Binds in the nearest enclosing non-comprehension scope.
         let s: Scope = this.s;
-        while (s.kind === "comp") s = s.parent!;
+        while (s.kind === "comp") {
+          if (s.iterVars.has(e.target)) throw new SyntaxErr(`assignment expression cannot rebind comprehension iteration variable '${e.target}'`, e.line);
+          s = s.parent!;
+        }
         if (s !== this.s) {
           if (s.kind === "class") throw new SyntaxErr("assignment expression within a comprehension cannot be used in a class body", e.line);
           for (let c: Scope = this.s; c !== s; c = c.parent!) c.nonlocals.add(e.target);
@@ -328,5 +352,19 @@ class Collector {
   fpart(p: Exclude<A.FPart, string>) {
     this.expr(p.expr);
     if (p.spec) for (const q of p.spec) if (typeof q !== "string") this.fpart(q);
+  }
+}
+
+function targetNames(t: A.Expr): string[] {
+  switch (t.k) {
+    case "Name":
+      return [t.id];
+    case "Tuple":
+    case "List":
+      return t.elts.flatMap(targetNames);
+    case "Starred":
+      return targetNames(t.value);
+    default:
+      return [];
   }
 }

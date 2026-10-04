@@ -179,11 +179,21 @@ getset(property, "fget", (p) => p.fget);
 getset(property, "fset", (p) => p.fset);
 getset(property, "__doc__", (p) => p.doc ?? (p.fget !== null ? p.fget.__doc__ ?? null : null));
 
+// asDunder(): the function implicit special-method calls use, which take
+// the instance first (CPython binds the descriptor instead).
 export class PyStaticMethod {
   constructor(public f: any) {}
+  $d: any;
+  asDunder(): any {
+    return (this.$d ??= pyfn((_self: any, ...a: any[]) => callObj(this.f, a), "staticmethod"));
+  }
 }
 export class PyClassMethod {
   constructor(public f: any) {}
+  $d: any;
+  asDunder(): any {
+    return (this.$d ??= pyfn((self: any, ...a: any[]) => callObj(this.f, [isType(self) ? self : typeOf(self), ...a]), "classmethod"));
+  }
 }
 const staticmethod = builtinType("staticmethod", [object], (f: any) => new PyStaticMethod(f));
 bindClass(PyStaticMethod, staticmethod);
@@ -1378,6 +1388,7 @@ function toBytes(x: any, encoding: any = undefined): Uint8Array {
     return encode(x, encoding).a;
   }
   if (O.isPyInt(x)) {
+    if (typeof x === "bigint" || Number(x) > 2 ** 32) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
     if (Number(x) < 0) raise(T.ValueError, "negative count");
     return new Uint8Array(Number(x));
   }
@@ -1613,7 +1624,8 @@ export function dir(x: any = undefined): any[] {
 
 // Helpers for builtin modules.
 export function lookupDunder(x: any, name: string): any {
-  return lookupType(typeOf(x), name);
+  const f = lookupType(typeOf(x), name);
+  return f !== null && typeof f === "object" && f.asDunder !== undefined ? f.asDunder() : f;
 }
 // float(x) for objects with __float__/__index__, or undefined.
 export function floatCallSafe(x: any): number | undefined {
