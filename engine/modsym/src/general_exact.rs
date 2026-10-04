@@ -168,7 +168,7 @@ fn invert_mod(a: &[Vec<u64>], p: u64) -> Option<Vec<Vec<u64>>> {
 
 /// Bound A_j on every complex embedding of the coefficient of x^(d-j), as
 /// the coefficients of (1 + bE x)^nE (1 + bS x)^(d-nE).
-fn embedding_bounds(d: usize, n_e: usize, b_e: &BigUint, b_s: &BigUint) -> Vec<BigUint> {
+pub(crate) fn embedding_bounds(d: usize, n_e: usize, b_e: &BigUint, b_s: &BigUint) -> Vec<BigUint> {
     let mut poly = vec![BigUint::one()];
     for t in 0..d {
         let b = if t < n_e { b_e } else { b_s };
@@ -299,7 +299,7 @@ pub fn exact_charpoly(n: u64, k: usize, eps: &Character, sign: i32, q: u64) -> R
 }
 
 /// CRT to symmetric representatives; parallel over the coordinates.
-fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Vec<Vec<BigInt>> {
+pub(crate) fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Vec<Vec<BigInt>> {
     // Mixed-radix (Garner) digits in u64, then one Horner pass in BigUint.
     let ls: Vec<u64> = residues.iter().map(|r| r.0).collect();
     let r = ls.len();

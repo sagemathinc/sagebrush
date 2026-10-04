@@ -526,6 +526,22 @@ impl GeneralSpace {
         Ok(t)
     }
 
+    /// The characteristic polynomial of sum r T_q mod ell.
+    pub fn hecke_combo_charpoly(&self, ops: &[(u64, i64)]) -> Result<Vec<u64>, String> {
+        let (d, p) = (self.dimension(), self.p);
+        let mut t = vec![vec![0u64; d]; d];
+        for &(q, r) in ops {
+            let h = self.hecke_matrix(q)?;
+            let r = r.rem_euclid(p as i64) as u64;
+            for (row, hrow) in t.iter_mut().zip(&h) {
+                for (x, &y) in row.iter_mut().zip(hrow) {
+                    *x = (*x + mul(y, r, p)) % p;
+                }
+            }
+        }
+        Ok(linalg::charpoly(t, p))
+    }
+
     /// The characteristic polynomial of T_q mod ell (constant term first).
     pub fn hecke_charpoly(&self, q: u64) -> Result<Vec<u64>, String> {
         Ok(linalg::charpoly(self.hecke_matrix(q)?, self.p))
