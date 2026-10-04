@@ -303,9 +303,7 @@ function varsImpl(o: any = undefined): PyDict {
   if (o === undefined) raise(T.NotImplementedError, "vars() without an argument is not supported");
   if (isType(o)) return getattr(o, "__dict__");
   if (!hasInstanceDict(o)) raise(T.TypeError, "vars() argument must have __dict__ attribute");
-  const d = new PyDict();
-  for (const k of Object.keys(o)) dictSet(d, k, o[k]);
-  return d;
+  return getattr(o, "__dict__");
 }
 function hashImpl(x: any): any {
   return O.hashAny(x);

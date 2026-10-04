@@ -907,7 +907,8 @@ export const objectEq = markPy(function __eq__(self: any, other: any) {
   return self === other ? true : NotImplemented;
 }, "__eq__");
 export const objectNe = markPy(function __ne__(self: any, other: any) {
-  const r = richCompare(self, other, "__eq__");
+  const eq = lookupType(typeOf(self), "__eq__");
+  const r = eq === undefined ? NotImplemented : eq(self, other);
   return r === NotImplemented ? r : !truth(r);
 }, "__ne__");
 
