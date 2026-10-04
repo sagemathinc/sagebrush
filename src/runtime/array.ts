@@ -114,6 +114,7 @@ newBuiltinModule("array", (m) => {
     return r;
   };
   const A = Ty.builtinTypeFor("array", PyArray, "array", make);
+  Ty.subclassable(A, PyArray);
   const M = (name: string, f: any) => Ty.method(A, name, f);
   Ty.getset(A, "typecode", (r) => r.tc);
   Ty.getset(A, "itemsize", (r) => SIZES[r.tc]);

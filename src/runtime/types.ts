@@ -5,6 +5,7 @@ import {
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
   bindMethod, bindArgs, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
+  hooks, unbox, IntLayout, FloatLayout, StrLayout,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr } from "./format";
@@ -793,11 +794,11 @@ method(S, "format_map", (s: string, m: any) => strFormat(s, [], m));
 method(S, "__len__", (s: string) => s.length);
 method(S, "__contains__", (s: string, x: any) => O.contains(s, x));
 method(S, "__getitem__", (s: string, k: any) => O.getitem(s, k));
-method(S, "__add__", (s: string, x: any) => (typeof x === "string" ? s + x : NotImplemented));
+method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s + x : NotImplemented));
 method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? s.repeat(Math.max(0, Number(x))) : NotImplemented));
 method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
-method(S, "__eq__", (s: string, x: any) => (typeof x === "string" ? s === x : NotImplemented));
-method(S, "__lt__", (s: string, x: any) => (typeof x === "string" ? s < x : NotImplemented));
+method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
+method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s < x : NotImplemented));
 method(S, "__hash__", (s: string) => O.hashAny(s));
 method(S, "__str__", (s: string) => s);
 method(S, "__repr__", (s: string) => repr(s));
@@ -1606,3 +1607,136 @@ getset(object, "__dict__", (o) => {
   });
   method(T.OSError, "__str__", (self: any) => (self.errno !== null && self.errno !== undefined ? `[Errno ${str(self.errno)}] ${str(self.strerror)}${self.filename !== null && self.filename !== undefined ? `: ${repr(self.filename)}` : ""}` : T.BaseException.$dict.get("__str__")(self)));
 }
+
+// ------------------------------------------------------------------ subclassing builtin types
+
+// Numeric dunders on int and float, so `int.__add__(a, b)`, `super().__add__`
+// and reflected dispatch with subclasses behave as in CPython.
+{
+  const isNum = (x: any) => O.isPyInt(x) || O.isPyFloat(x);
+  const numDunders = (cls: PyType, ok: (x: any) => boolean, intOnly: boolean) => {
+    const bin = (name: string, f: (a: any, b: any) => any) => {
+      method(cls, `__${name}__`, (a: any, b: any) => ((b = unbox(b)), ok(b) ? f(unbox(a), b) : NotImplemented));
+      method(cls, `__r${name}__`, (a: any, b: any) => ((b = unbox(b)), ok(b) ? f(b, unbox(a)) : NotImplemented));
+    };
+    bin("add", O.add);
+    bin("sub", O.sub);
+    bin("mul", O.mul);
+    bin("truediv", O.truediv);
+    bin("floordiv", O.floordiv);
+    bin("mod", O.mod);
+    bin("divmod", O.divmod);
+    method(cls, "__pow__", (a: any, b: any, m: any = null) => ((b = unbox(b)), ok(b) ? (m === null ? O.pow(unbox(a), b) : O.pow(unbox(a), b, unbox(m))) : NotImplemented));
+    method(cls, "__rpow__", (a: any, b: any) => ((b = unbox(b)), ok(b) ? O.pow(b, unbox(a)) : NotImplemented));
+    if (intOnly) {
+      bin("lshift", O.lshift);
+      bin("rshift", O.rshift);
+      bin("and", O.and);
+      bin("or", O.or);
+      bin("xor", O.xor);
+      method(cls, "__invert__", (a: any) => O.invert(unbox(a)));
+    }
+    for (const [n, f] of [["eq", O.eq], ["ne", O.ne], ["lt", O.lt], ["le", O.le], ["gt", O.gt], ["ge", O.ge]] as const) {
+      method(cls, `__${n}__`, (a: any, b: any) => ((b = unbox(b)), isNum(b) ? f(unbox(a), b) : NotImplemented));
+    }
+    method(cls, "__neg__", (a: any) => O.neg(unbox(a)));
+    method(cls, "__pos__", (a: any) => O.pos(unbox(a)));
+    method(cls, "__abs__", (a: any) => O.abs(unbox(a)));
+    method(cls, "__bool__", (a: any) => O.truth(unbox(a)));
+  };
+  numDunders(int, O.isPyInt, true);
+  numDunders(float, isNum, false);
+  method(S, "__ne__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s !== x : NotImplemented));
+  method(S, "__le__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s <= x : NotImplemented));
+  method(S, "__gt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s > x : NotImplemented));
+  method(S, "__ge__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s >= x : NotImplemented));
+  method(S, "__rmul__", (s: string, x: any) => (O.isPyInt(unbox(x)) ? s.repeat(Math.max(0, Number(unbox(x)))) : NotImplemented));
+}
+
+// int, float, str: the subclass instance boxes the value.
+const proxies = new Map<PyType, PyType>();
+function unboxing(f: any): any {
+  const w = function (self: any, ...args: any[]) {
+    return f(unbox(self), ...args.map(unbox));
+  };
+  pyfn(w, f.__name__, f.$sig ?? null);
+  (w as any).$builtinMethod = true;
+  (w as any).__qualname__ = f.__qualname__;
+  (w as any).$unboxing = true;
+  return w;
+}
+hooks.primProxy = (base: PyType): PyType => {
+  let px = proxies.get(base);
+  if (px !== undefined) return px;
+  const d = new Map<string, any>();
+  for (const [k, v] of base.$dict) {
+    if (k === "__new__" || k === "__init__") continue;
+    if (typeof v === "function" && v.$builtinMethod === true) d.set(k, unboxing(v));
+    else if (v instanceof GetSet) d.set(k, new GetSet(v.name, (o) => v.get(unbox(o)), v.set));
+  }
+  px = { $name: base.$name, $qualname: base.$name, $module: "builtins", $dict: d, $bases: [], $mro: [], $subclasses: [], $ver: 0, $hidden: true } as any;
+  px!.$mro = [px!, ...base.$mro];
+  proxies.set(base, px!);
+  return px!;
+};
+for (const [P, L] of [[int, IntLayout], [float, FloatLayout], [S, StrLayout]] as const) {
+  P.$jsBase = L;
+  const nw = pyfn(function __new__(cls: PyType, ...args: any[]) {
+    const v = P(...args);
+    if (cls === P) return v;
+    if (!isType(cls) || !cls.$mro.includes(P)) raise(T.TypeError, `${P.$name}.__new__(X): X is not a subtype of ${P.$name}`);
+    const o = new cls.$ctor!();
+    o.$v = v;
+    return o;
+  }, "__new__");
+  nw.$kw = (pos: any[], names: string[], values: any[]) => {
+    const v = callKw(P, pos.slice(1), names, values);
+    if (pos[0] === P) return v;
+    const o = new pos[0].$ctor!();
+    o.$v = v;
+    return o;
+  };
+  P.$dict.set("__new__", nw);
+}
+getset(type, "__mro__", (c) => tuple(c.$mro.filter((x: any) => !x.$hidden)));
+method(type, "mro", (c: any) => c.$mro.filter((x: any) => !x.$hidden));
+
+// Types whose instances are runtime JS objects: a subclass instance is the
+// base type's object re-prototyped onto the subclass.
+export function subclassable(P: PyType, jsClass: any) {
+  P.$jsBase = jsClass;
+  const make = (cls: any, o: any) => {
+    if (cls === P) return o;
+    if (!isType(cls) || !cls.$mro.includes(P)) raise(T.TypeError, `${P.$name}.__new__(X): X is not a subtype of ${P.$name}`);
+    Object.setPrototypeOf(o, cls.$ctor!.prototype);
+    return o;
+  };
+  const nw = pyfn(function __new__(cls: PyType, ...args: any[]) {
+    return make(cls, P(...args));
+  }, "__new__");
+  nw.$kw = (pos: any[], names: string[], values: any[]) => make(pos[0], callKw(P, pos.slice(1), names, values));
+  P.$dict.set("__new__", nw);
+}
+subclassable(bytesType, PyBytes);
+subclassable(bytearray, PyByteArray);
+subclassable(T.map, MapIter);
+subclassable(T.filter, FilterIter);
+subclassable(T.zip, Zip);
+subclassable(T.enumerate, Enumerate);
+subclassable(T.reversed, ReversedIter);
+subclassable(staticmethod, PyStaticMethod);
+subclassable(classmethod, PyClassMethod);
+// property subclasses commonly override __init__ and call super().__init__.
+property.$jsBase = PyProperty;
+property.$dict.set("__new__", pyfn(function __new__(cls: PyType, ..._args: any[]) {
+  const o = cls === property ? new PyProperty(null, null, null, null) : new cls.$ctor!();
+  o.fget = o.fset = o.fdel = o.doc = null;
+  return o;
+}, "__new__"));
+method(property, "__init__", (p: PyProperty, fget: any = null, fset: any = null, fdel: any = null, doc: any = null) => {
+  p.fget = fget;
+  p.fset = fset;
+  p.fdel = fdel;
+  p.doc = doc;
+  return null;
+}, sig(["self", "fget", "fset", "fdel", "doc"]));
