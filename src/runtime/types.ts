@@ -1381,21 +1381,83 @@ export class PyRange {
     return start > stop ? Math.floor((start - stop - 1) / -step) + 1 : 0;
   }
 }
-const rangeArg = (v: any) => {
-  const i = O.index(v);
-  if (typeof i === "bigint") raise(T.OverflowError, "range() arguments beyond 2**53 are not supported yet");
-  return i as number;
-};
-export function makeRange(a: any, b: any = undefined, c: any = undefined): PyRange {
-  const r = b === undefined ? new PyRange(0, rangeArg(a), 1) : new PyRange(rangeArg(a), rangeArg(b), c === undefined ? 1 : rangeArg(c));
-  if (r.step === 0) raise(T.ValueError, "range() arg 3 must not be zero");
-  return r;
+// Ranges whose arguments do not all fit in doubles use BigInt arithmetic.
+export class PyBigRange {
+  constructor(public start: bigint, public stop: bigint, public step: bigint) {}
+  get length(): bigint {
+    const { start, stop, step } = this;
+    if (step > 0n) return start < stop ? (stop - start - 1n) / step + 1n : 0n;
+    return start > stop ? (start - stop - 1n) / -step + 1n : 0n;
+  }
+  at(i: bigint): any {
+    return O.normBig(this.start + i * this.step);
+  }
 }
+class BigRangeIter {
+  constructor(public cur: bigint, public left: bigint, public step: bigint) {}
+  $next(): any {
+    if (this.left <= 0n) return DONE;
+    const v = this.cur;
+    this.cur += this.step;
+    this.left--;
+    return O.normBig(v);
+  }
+}
+const rangeArg = (v: any) => O.index(v);
+export function makeRange(a: any, b: any = undefined, c: any = undefined): any {
+  const args = b === undefined ? [0, rangeArg(a), 1] : [rangeArg(a), rangeArg(b), c === undefined ? 1 : rangeArg(c)];
+  if (Number(args[2]) === 0) raise(T.ValueError, "range() arg 3 must not be zero");
+  if (args.some((x) => typeof x === "bigint")) return new PyBigRange(BigInt(args[0]), BigInt(args[1]), BigInt(args[2]));
+  return new PyRange(args[0] as number, args[1] as number, args[2] as number);
+}
+const bigRangeMethods: Record<string, (r: PyBigRange, ...a: any[]) => any> = {
+  __iter__: (r) => new BigRangeIter(r.start, r.length, r.step),
+  __reversed__: (r) => new BigRangeIter(r.start + (r.length - 1n) * r.step, r.length, -r.step),
+  __len__: (r) => {
+    const n = r.length;
+    if (n > 9223372036854775807n) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+    return O.normBig(n);
+  },
+  __contains__: (r, x) => {
+    if (!O.isPyInt(x)) return O.truth(O.eq(x, x)) && false;
+    const v = BigInt(x);
+    const inside = r.step > 0n ? v >= r.start && v < r.stop : v <= r.start && v > r.stop;
+    return inside && (v - r.start) % r.step === 0n;
+  },
+  __getitem__: (r, k) => {
+    const n = r.length;
+    if (k instanceof O.PySlice) {
+      const st = k.step === null ? 1n : BigInt(O.index(k.step));
+      if (st === 0n) raise(T.ValueError, "slice step cannot be zero");
+      const lo = st < 0n ? -1n : 0n, hi = st < 0n ? n - 1n : n;
+      const fix = (v: any, d: bigint) => {
+        if (v === null) return d;
+        let x = BigInt(O.index(v));
+        if (x < 0n) x = x + n < lo ? lo : x + n;
+        return x > hi ? hi : x;
+      };
+      const a = fix(k.start, st < 0n ? hi : lo), b = fix(k.stop, st < 0n ? lo : hi);
+      return makeRange(O.normBig(r.start + a * r.step), O.normBig(r.start + b * r.step), O.normBig(st * r.step));
+    }
+    let i = BigInt(O.index(k));
+    if (i < 0n) i += n;
+    if (i < 0n || i >= n) raise(T.IndexError, "range object index out of range");
+    return r.at(i);
+  },
+  index: (r, x) => {
+    if (!bigRangeMethods.__contains__(r, x)) raise(T.ValueError, `${repr(x)} is not in range`);
+    return O.normBig((BigInt(x) - r.start) / r.step);
+  },
+  count: (r, x) => (bigRangeMethods.__contains__(r, x) ? 1 : 0),
+  __repr__: (r) => (r.step === 1n ? `range(${r.start}, ${r.stop})` : `range(${r.start}, ${r.stop}, ${r.step})`),
+  __hash__: (r) => O.hashAny(tuple([O.normBig(r.length), O.normBig(r.start), O.normBig(r.step)])),
+};
 const range = builtinType("range", [object], makeRange);
 bindClass(PyRange, range);
-getset(range, "start", (r) => r.start);
-getset(range, "stop", (r) => r.stop);
-getset(range, "step", (r) => r.step);
+bindClass(PyBigRange, range);
+getset(range, "start", (r) => (typeof r.start === "bigint" ? O.normBig(r.start) : r.start));
+getset(range, "stop", (r) => (typeof r.stop === "bigint" ? O.normBig(r.stop) : r.stop));
+getset(range, "step", (r) => (typeof r.step === "bigint" ? O.normBig(r.step) : r.step));
 method(range, "__iter__", (r: PyRange) => new O.RangeIter(r.start, r.stop, r.step));
 method(range, "__reversed__", (r: PyRange) => {
   const n = r.length;
@@ -2063,4 +2125,21 @@ export function bytesHex(a: Uint8Array, sep: any = undefined, bps: any = undefin
 // bytes % args
 for (const [bt, Cls] of [[T.bytes, PyBytes], [T.bytearray, PyByteArray]] as const) {
   method(bt, "__mod__", (b: PyBytes, x: any) => new Cls(encode(percentFormat(decode(b, "latin1"), x, true), "latin1").a));
+}
+
+// Big ranges share the range type: each method dispatches on the class.
+for (const [name, bf] of Object.entries(bigRangeMethods)) {
+  const f = T.range.$dict.get(name);
+  method(T.range, name, (r: any, ...a: any[]) => (r instanceof PyBigRange ? bf(r, ...a) : f(r, ...a)));
+}
+{
+  const eq = T.range.$dict.get("__eq__");
+  method(T.range, "__eq__", (r: any, o: any) => {
+    if (!(r instanceof PyBigRange) && !(o instanceof PyBigRange)) return eq(r, o);
+    if (!(o instanceof PyRange) && !(o instanceof PyBigRange)) return NotImplemented;
+    const big = (x: any) => (x instanceof PyBigRange ? x : new PyBigRange(BigInt(x.start), BigInt(x.stop), BigInt(x.step)));
+    const a = big(r), b = big(o), n = a.length;
+    if (n !== b.length) return false;
+    return n === 0n || (a.start === b.start && (n === 1n || a.step === b.step));
+  });
 }

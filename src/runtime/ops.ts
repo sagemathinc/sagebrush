@@ -786,6 +786,10 @@ export function len(x: any): number {
     const n = f(x);
     if (!isPyInt(n)) raise(T.TypeError, `'${typeName(n)}' object cannot be interpreted as an integer`);
     if (n < 0) raise(T.ValueError, "__len__() should return >= 0");
+    if (typeof n === "bigint") {
+      if (n > 9223372036854775807n) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
+      return n as any; // exact, for lengths beyond 2**53 (big ranges)
+    }
     return Number(n);
   }
   raise(T.TypeError, `object of type '${typeName(x)}' has no len()`);
