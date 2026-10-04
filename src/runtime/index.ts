@@ -10,6 +10,7 @@ import * as M from "./modules";
 import * as Arr from "./array";
 import "./struct";
 import "./memoryview";
+import "./re";
 
 O.arrayHooks.cls = Arr.PyArray;
 O.arrayHooks.get = Arr.arrayGetitem;
