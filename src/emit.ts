@@ -503,7 +503,7 @@ export class Emitter {
     const decls = [...locals, ...this.fn.temps];
     const star = scope.isGenerator ? "*" : "";
     this.fn = saved;
-    return `defn(function${star} ${self}(${ps}) { ${pro.join(" ")} ${decls.length ? `let ${decls.join(", ")}; ` : ""}return ${body}; }, "<lambda>", ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, null)`;
+    return `defn(function${star} ${self}(${ps}) { ${pro.join(" ")} ${decls.length ? `let ${decls.join(", ")}; ` : ""}return ${body}; }, "<lambda>", ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, null, $g)`;
   }
 
   isParam(p: A.Params, n: string): boolean {
@@ -817,7 +817,7 @@ export class Emitter {
     this.indent--;
     this.splice(lines);
     this.line = st.line;
-    this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc});`);
+    this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc}, $g);`);
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, f)));
   }
 

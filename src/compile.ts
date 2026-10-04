@@ -10,8 +10,19 @@ import { R } from "./runtime/index";
 
 const builtinNames = new Set(Object.keys(R.builtins));
 
-export function compile(source: string, filename: string, moduleName: string, evalMode = false): Compiled {
+// compile(..., "single"): expression statements outside functions and
+// classes display their value, as at the interactive prompt.
+function displayExprs(body: any[]): void {
+  for (const st of body) {
+    if (st.k === "Expr") st.value = { k: "Call", line: st.line, func: { k: "Name", line: st.line, id: "__pyjs_displayhook__" }, args: [st.value], keywords: [] };
+    for (const key of ["body", "orelse", "finalbody"]) if (Array.isArray(st[key]) && st.k !== "FunctionDef" && st.k !== "ClassDef") displayExprs(st[key]);
+    if (st.k === "Try") for (const h of st.handlers) displayExprs(h.body);
+  }
+}
+
+export function compile(source: string, filename: string, moduleName: string, evalMode = false, single = false): Compiled {
   const mod = parse(source, filename, evalMode ? "eval" : "exec");
+  if (single) displayExprs(mod.body);
   try {
     return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body, evalMode);
   } catch (e) {
@@ -65,7 +76,7 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string) => {
   const evalMode = mode === "eval" || mode === "check-eval";
   let compiled: Compiled;
   try {
-    compiled = compile(src, filename, "__main__", evalMode);
+    compiled = compile(src, filename, "__main__", evalMode, mode === "single");
   } catch (e) {
     if (e instanceof PySyntaxError) throw syntaxError(e);
     throw e;
