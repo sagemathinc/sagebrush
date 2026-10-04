@@ -307,7 +307,13 @@ B.builtins.locals = Obj.builtin(() => raise(T.RuntimeError, "locals() called ind
 
 // ------------------------------------------------------------------ classes
 
+// builtins.__build_class__ can be replaced; the class body has already run
+// by the time it is called, so it receives a stand-in body function.
+export const defaultBuildClass = Obj.builtin((..._a: any[]) => raise(T.NotImplementedError, "calling __build_class__ directly is not supported"), "__build_class__");
+B.builtins.__build_class__ = defaultBuildClass;
 export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any>, kwNames: string[], kwValues: any[]): any {
+  const bc = B.builtins.__build_class__;
+  if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
   return Ty.makeClass(name, bases, ns, module, qualname, kwNames, kwValues);
 }
 
@@ -451,6 +457,8 @@ export const R: any = {
   stdout: B.stdout,
   stderr: B.stderr,
   importModule: M.importModule,
+  importAs: M.importAs,
+  importFromStmt: M.importFromStmt,
   importTop: M.importTop,
   importFrom: M.importFrom,
   importStar: M.importStar,

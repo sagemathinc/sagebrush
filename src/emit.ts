@@ -621,14 +621,13 @@ export class Emitter {
         return this.classDef(st);
       case "Import":
         for (const a of st.names) {
-          if (a.asname !== null) this.w(this.storeName(a.asname, `importModule(${q(a.name)})`));
-          else this.w(this.storeName(a.name.split(".")[0], `importTop(${q(a.name)})`));
+          if (a.asname !== null) this.w(this.storeName(a.asname, `importAs(${q(a.name)}, $g)`));
+          else this.w(this.storeName(a.name.split(".")[0], `importTop(${q(a.name)}, $g)`));
         }
         return;
       case "ImportFrom": {
         const m = this.temp();
-        const name = st.level ? `resolveRelative(${q(st.module)}, ${st.level}, $g.__package__)` : q(st.module);
-        this.w(`${m} = importModule(${name});`);
+        this.w(`${m} = importFromStmt(${q(st.module)}, [${st.names.map((a) => q(a.name)).join(", ")}], ${st.level}, $g);`);
         for (const a of st.names) {
           if (a.name === "*") {
             if (this.fn.scope.kind !== "module") this.fail("import * only allowed at module level");
@@ -972,6 +971,6 @@ const RUNTIME_NAMES = [
   "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf",
   "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr", "awaitIter", "markCoro",
   "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
-  "importModule", "importTop", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
+  "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
   "sortedKeys",
 ];
