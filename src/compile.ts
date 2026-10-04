@@ -92,7 +92,15 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string) => {
 // served under the virtual directory LIB_VIRTUAL.
 export const LIB_VIRTUAL = "/$pyjs/lib";
 const embedded: Record<string, string> | undefined = (globalThis as any).__PYJS_LIB__;
-const fileExists = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] !== undefined : existsSync(p));
+// A sandboxed runtime may refuse to look at a path: then it is not there.
+const safeExists = (p: string) => {
+  try {
+    return existsSync(p);
+  } catch {
+    return false;
+  }
+};
+const fileExists = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] !== undefined : safeExists(p));
 const fileRead = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] : readFileSync(p, "utf8"));
 export function libDir(): string {
   return embedded !== undefined ? LIB_VIRTUAL : resolvePath(__dirname, "../../lib");

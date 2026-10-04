@@ -5,6 +5,8 @@
 //   node scripts/build-cli.mjs --sea     + build/cli/pyjs-node   (Node single executable)
 //   node scripts/build-cli.mjs --bun     + build/cli/pyjs-bun    (bun build --compile)
 //   node scripts/build-cli.mjs --deno    + build/cli/pyjs-deno   (deno compile; --target=<triple> cross-compiles)
+//   node scripts/build-cli.mjs --sandbox + build/cli/pyjs-sandbox (deno compile with no permissions:
+//                                          no files, env, network or subprocesses; programs on stdin)
 //
 // The bundle is made by Bun (fast TypeScript bundler); the Python files in
 // lib/ become globalThis.__PYJS_LIB__ (see libDir() in src/compile.ts).
@@ -63,4 +65,17 @@ if (process.argv.includes("--deno")) {
   const exe = join(out, "pyjs-deno" + (target ? "-" + target.slice(9) : ""));
   run("deno", ["compile", "-A", "--no-check", ...(target ? [target] : []), "-o", exe, bundle]);
   console.log(`deno executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)`);
+}
+
+// 3d. The sandbox: a Deno executable granted nothing.  Permissions are fixed
+// at compile time and --no-prompt makes every denial a PermissionError
+// instead of a question on the terminal.  Programs come on stdin or as the
+// interactive prompt; the embedded library still imports.  Add scoped grants
+// with e.g. PYJS_SANDBOX_ALLOW="--allow-read=."
+if (process.argv.includes("--sandbox")) {
+  const target = process.argv.find((a) => a.startsWith("--target="));
+  const exe = join(out, "pyjs-sandbox" + (target ? "-" + target.slice(9) : ""));
+  const extra = (process.env.PYJS_SANDBOX_ALLOW ?? "").split(/\s+/).filter(Boolean);
+  run("deno", ["compile", "--no-prompt", "--no-check", ...extra, ...(target ? [target] : []), "-o", exe, bundle]);
+  console.log(`sandbox executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)${extra.length ? " grants: " + extra.join(" ") : ""}`);
 }

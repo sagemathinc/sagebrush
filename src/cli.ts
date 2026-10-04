@@ -121,9 +121,9 @@ function completer(main: any) {
 }
 
 function historyFile(): string | null {
-  const base = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
-  const dir = join(base, "pyjs");
   try {
+    const base = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
+    const dir = join(base, "pyjs");
     mkdirSync(dir, { recursive: true });
     return join(dir, "history");
   } catch {
