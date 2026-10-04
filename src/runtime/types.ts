@@ -534,6 +534,7 @@ export function intCall(x: any = 0, base: any = undefined): any {
   if (typeof x === "boolean") return +x;
   if (x instanceof FloatBox) return intCall(x.v === 0 ? 0 : x.v);
   if (typeof x === "string" || x instanceof PyBytes) return intCall(x, 10);
+  if (O.bufferOf(x) !== undefined) return intCall(new PyBytes(O.bufferOf(x)!.slice()), 10);
   for (const name of ["__int__", "__index__", "__trunc__"]) {
     const f = lookupType(typeOf(x), name);
     if (f !== undefined) {
@@ -1431,7 +1432,7 @@ bindClass(PyBytes, bytesType);
 bindClass(PyByteArray, bytearray);
 for (const bt of [bytesType, bytearray]) {
   method(bt, "decode", (b: PyBytes, encoding: any = "utf-8", errors: any = "strict") => decode(b, encoding, errors), sig(["self", "encoding", "errors"]));
-  method(bt, "hex", (b: PyBytes) => Buffer.from(b.a.subarray(0, b.n)).toString("hex"));
+  method(bt, "hex", (b: PyBytes, sep: any = undefined, bps: any = undefined) => bytesHex(b.a.subarray(0, b.n), sep, bps));
   method(bt, "__len__", (b: PyBytes) => b.n);
   method(bt, "__iter__", (b: PyBytes) => new O.BytesIter(b));
   method(bt, "__getitem__", (b: PyBytes, k: any) => O.getitem(b, k));
@@ -1737,10 +1738,21 @@ getset(object, "__dict__", (o) => {
       method(bt, name, m, f.$sig ?? null);
     }
   }
-  const fromhex = (cls: any, s: string) => {
-    const clean = s.replace(/\s+/g, "");
-    if (!/^([0-9a-fA-F]{2})*$/.test(clean)) raise(T.ValueError, "non-hexadecimal number found in fromhex() arg");
-    const a = Uint8Array.from(clean.match(/../g) ?? [], (h) => parseInt(h, 16));
+  const fromhex = (cls: any, s: any) => {
+    if (s instanceof PyBytes) s = decode(s, "ascii");
+    if (typeof s !== "string") raise(T.TypeError, `fromhex() argument must be str, not ${typeName(s)}`);
+    // Whitespace may only separate bytes.
+    const out: number[] = [];
+    for (let i = 0; i < s.length; ) {
+      if (/\s/.test(s[i])) {
+        i++;
+        continue;
+      }
+      if (!/^[0-9a-fA-F]{2}$/.test(s.slice(i, i + 2))) raise(T.ValueError, `non-hexadecimal number found in fromhex() arg at position ${/[0-9a-fA-F]/.test(s[i]) ? i + 1 : i}`);
+      out.push(parseInt(s.slice(i, i + 2), 16));
+      i += 2;
+    }
+    const a = Uint8Array.from(out);
     return cls === T.bytearray ? new PyByteArray(a) : new PyBytes(a);
   };
   T.bytes.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));
@@ -1968,4 +1980,24 @@ export function simpleNamespace(fields: Record<string, any>): any {
   const o = new SimpleNamespace.$ctor!();
   Object.assign(o, fields);
   return o;
+}
+
+// bytes.hex(sep, bytes_per_sep): groups count from the right when
+// bytes_per_sep > 0, from the left when < 0.
+export function bytesHex(a: Uint8Array, sep: any = undefined, bps: any = undefined): string {
+  const h = Buffer.from(a).toString("hex");
+  if (sep === undefined || sep === null) return h;
+  if (sep instanceof PyBytes) sep = decode(sep, "ascii");
+  if (typeof sep !== "string") raise(T.TypeError, "sep must be str or bytes.");
+  if ([...sep].length !== 1) raise(T.ValueError, "sep must be length 1.");
+  let k = bps === undefined ? 1 : Number(bps);
+  if (k === 0 || a.length === 0) return h;
+  const groups: string[] = [];
+  const n = a.length, size = Math.abs(k);
+  if (k > 0) {
+    for (let end = n; end > 0; end -= size) groups.unshift(h.slice(Math.max(0, end - size) * 2, end * 2));
+  } else {
+    for (let st = 0; st < n; st += size) groups.push(h.slice(st * 2, Math.min(n, st + size) * 2));
+  }
+  return groups.join(sep);
 }

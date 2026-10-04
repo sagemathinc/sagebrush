@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { T, FloatBox, PyDict, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw } from "./object";
+import { T, FloatBox, PyDict, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin } from "./builtins";
@@ -503,4 +503,62 @@ newBuiltinModule("_random", (m) => {
     return null;
   });
   m.Random = RandomType;
+});
+
+// ------------------------------------------------------------------ _weakref, gc
+
+// Weak references use JS WeakRef; callbacks run from a FinalizationRegistry,
+// i.e. some time after the referent is collected.
+export class PyWeakRef {
+  w: WeakRef<any>;
+  constructor(o: any, public cb: any) {
+    this.w = new WeakRef(o);
+  }
+}
+const weakable = (o: any) => (o !== null && typeof o === "object" && (hasInstanceDictLocal(o) || o instanceof O.PySet)) || (typeof o === "function");
+const hasInstanceDictLocal = (o: any) => o.$cls !== undefined && o.$cls.$ctor !== null && !Array.isArray(o);
+const registry = new FinalizationRegistry((r: PyWeakRef) => {
+  if (r.cb !== null && r.cb !== undefined) {
+    try {
+      callObj(r.cb, [r]);
+    } catch {
+      // ignored, as CPython prints and ignores
+    }
+  }
+});
+newBuiltinModule("_weakref", (m) => {
+  const ref = Ty.builtinTypeFor("weakref.ReferenceType", PyWeakRef, "weakref", (o: any, cb: any = null) => {
+    if (!weakable(o)) raise(T.TypeError, `cannot create weak reference to '${typeName(o)}' object`);
+    const r = new PyWeakRef(o, cb);
+    registry.register(o, r);
+    return r;
+  });
+  (ref as any).$name = "ReferenceType";
+  Ty.method(ref, "__call__", (r: PyWeakRef) => r.w.deref() ?? null);
+  Ty.method(ref, "__repr__", (r: PyWeakRef) => {
+    const o = r.w.deref();
+    return o === undefined ? `<weakref at 0x${O.id(r).toString(16)}; dead>` : `<weakref at 0x${O.id(r).toString(16)}; to '${typeName(o)}' at 0x${O.id(o).toString(16)}>`;
+  });
+  Ty.getset(ref, "__callback__", (r: PyWeakRef) => r.cb ?? null);
+  m.ref = ref;
+  m.ReferenceType = ref;
+  fn(m, "getweakrefcount", (_o: any) => 0);
+});
+newBuiltinModule("gc", (m) => {
+  let enabled = true;
+  fn(m, "enable", () => ((enabled = true), null));
+  fn(m, "disable", () => ((enabled = false), null));
+  fn(m, "isenabled", () => enabled);
+  fn(m, "collect", (_gen: any = 2) => {
+    const g = (globalThis as any).gc;
+    if (typeof g === "function") g();
+    return 0;
+  });
+  fn(m, "get_count", () => tuple([0, 0, 0]));
+  fn(m, "get_threshold", () => tuple([700, 10, 10]));
+  fn(m, "set_threshold", (..._a: any[]) => null);
+  fn(m, "is_tracked", (_o: any) => false);
+  fn(m, "get_referrers", (..._a: any[]) => []);
+  m.garbage = [];
+  m.callbacks = [];
 });
