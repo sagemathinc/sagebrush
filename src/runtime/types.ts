@@ -5,7 +5,7 @@ import {
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
+  hooks, unbox, instanceDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr } from "./format";
@@ -38,6 +38,7 @@ object.$dict.set("__setattr__", objectSetattr);
 object.$dict.set("__eq__", O.objectEq);
 object.$dict.set("__ne__", O.objectNe);
 object.$dict.set("__hash__", O.objectHash);
+for (const n of ["__lt__", "__le__", "__gt__", "__ge__"]) object.$dict.set(n, pyfn((_a: any, _b: any) => NotImplemented, n));
 method(object, "__repr__", (self: any) => defaultRepr(self));
 method(object, "__str__", (self: any) => repr(self));
 method(object, "__format__", (self: any, spec: string) => {
@@ -1624,9 +1625,13 @@ getset(object, "__class__", (o) => typeOf(o), (o, c) => {
 });
 getset(object, "__dict__", (o) => {
   if (!hasInstanceDict(o)) raise(T.AttributeError, `'${typeName(o)}' object has no attribute '__dict__'`);
-  const d = new PyDict();
-  for (const k of Object.keys(o)) if (k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k))) dictSet(d, k, o[k]);
-  return d;
+  return instanceDict(o);
+}, (o, v) => {
+  if (!hasInstanceDict(o)) raise(T.AttributeError, `'${typeName(o)}' object has no attribute '__dict__'`);
+  if (!(v instanceof PyDict)) raise(T.TypeError, `__dict__ must be set to a dictionary, not a '${typeName(v)}'`);
+  const items = [...v.$m].map(([k, x]) => [dictKeyOf(v, k), x]);
+  instanceDict(o).$m.clear();
+  for (const [k, x] of items) instanceDict(o).$m.set(k, x);
 });
 
 // bytes/bytearray methods that mirror str methods run the str version on a

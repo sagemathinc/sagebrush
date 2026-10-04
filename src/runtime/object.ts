@@ -835,6 +835,63 @@ export class PyDict {
   $buckets: Map<number, any[]> | null = null; // hash -> entries {k, h}
 }
 
+// The live `__dict__` of an instance: a PyDict whose `$m` is this Map-like
+// view of the object's own (non-`$`) properties.
+const isAttrKey = (o: any, k: string) => k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k));
+export class AttrMap {
+  constructor(public o: any) {}
+  private names(): string[] {
+    return Object.keys(this.o).filter((k) => isAttrKey(this.o, k));
+  }
+  get(k: any): any {
+    return typeof k === "string" && isAttrKey(this.o, k) && hasOwn.call(this.o, k) ? this.o[k] : undefined;
+  }
+  has(k: any): boolean {
+    return typeof k === "string" && isAttrKey(this.o, k) && hasOwn.call(this.o, k);
+  }
+  set(k: any, v: any): this {
+    if (typeof k !== "string") raise(T.TypeError, `instance __dict__ keys must be str here, not '${typeName(k)}'`);
+    this.o[k] = v;
+    return this;
+  }
+  delete(k: any): boolean {
+    if (!this.has(k)) return false;
+    delete this.o[k];
+    return true;
+  }
+  clear(): void {
+    for (const k of this.names()) delete this.o[k];
+  }
+  get size(): number {
+    return this.names().length;
+  }
+  keys(): IterableIterator<string> {
+    return this.names()[Symbol.iterator]();
+  }
+  values(): IterableIterator<any> {
+    return this.names().map((k) => this.o[k])[Symbol.iterator]();
+  }
+  entries(): IterableIterator<[string, any]> {
+    return this.names().map((k) => [k, this.o[k]] as [string, any])[Symbol.iterator]();
+  }
+  [Symbol.iterator](): IterableIterator<[string, any]> {
+    return this.entries();
+  }
+  forEach(f: (v: any, k: string) => void): void {
+    for (const k of this.names()) f(this.o[k], k);
+  }
+}
+const instanceDicts = new WeakMap<object, PyDict>();
+export function instanceDict(o: any): PyDict {
+  let d = instanceDicts.get(o);
+  if (d === undefined) {
+    d = new PyDict();
+    (d as any).$m = new AttrMap(o);
+    instanceDicts.set(o, d);
+  }
+  return d;
+}
+
 export function newDict(): PyDict {
   return new PyDict();
 }
