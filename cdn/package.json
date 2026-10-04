@@ -1,5 +1,5 @@
 {
-  "name": "@sagemathinc/sagebrush",
+  "name": "sagebrush-web",
   "version": "0.1.0",
   "description": "Sagebrush engines (Rust -> WebAssembly, single-file ES modules) and CPython's parser in TypeScript, for browsers and chat artifacts",
   "type": "module",
@@ -7,9 +7,21 @@
     "./engine": "./sagebrush-engine.mjs",
     "./pyparse": "./pyparse.mjs"
   },
-  "files": ["sagebrush-engine.mjs", "pyparse.mjs", "README.md"],
-  "repository": { "type": "git", "url": "git+https://github.com/sagemathinc/sagebrush.git", "directory": "cdn" },
+  "files": [
+    "sagebrush-engine.mjs",
+    "pyparse.mjs",
+    "README.md",
+    "NOTICE.md",
+    "LICENSE-CPython.txt"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sagemathinc/sagebrush.git",
+    "directory": "cdn"
+  },
   "homepage": "https://github.com/sagemathinc/sagebrush/tree/main/cdn",
-  "license": "UNLICENSED",
-  "private": true
+  "license": "SEE LICENSE IN NOTICE.md",
+  "publishConfig": {
+    "access": "public"
+  }
 }
