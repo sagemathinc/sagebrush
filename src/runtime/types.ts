@@ -366,7 +366,8 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   if (meta !== T.type) (cls as any).$meta = meta;
   cls.$qualname = ns.get("__qualname__");
   ns.delete("__qualname__");
-  for (const [k, v] of ns) {
+  // __set_name__ hooks see the original namespace even if one changes it.
+  for (const [k, v] of [...ns]) {
     if (v !== null && typeof v === "object") {
       const sn = lookupType(typeOf(v), "__set_name__");
       if (sn !== undefined) sn(v, cls, k);
