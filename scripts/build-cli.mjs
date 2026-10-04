@@ -4,6 +4,7 @@
 //   node scripts/build-cli.mjs           build/cli/pyjs.cjs (run with node or bun)
 //   node scripts/build-cli.mjs --sea     + build/cli/pyjs-node   (Node single executable)
 //   node scripts/build-cli.mjs --bun     + build/cli/pyjs-bun    (bun build --compile)
+//   node scripts/build-cli.mjs --deno    + build/cli/pyjs-deno   (deno compile; --target=<triple> cross-compiles)
 //
 // The bundle is made by Bun (fast TypeScript bundler); the Python files in
 // lib/ become globalThis.__PYJS_LIB__ (see libDir() in src/compile.ts).
@@ -53,4 +54,13 @@ if (process.argv.includes("--bun")) {
   run("bun", ["build", join(out, "entry.ts"), "--compile", "--minify", "--bytecode",
     "--external", "web-tree-sitter", "--external", "tree-sitter-python", "--outfile", join(out, "pyjs-bun")]);
   console.log(`bun executable: ${join(out, "pyjs-bun")} (${(statSync(join(out, "pyjs-bun")).size / 1e6).toFixed(1)} MB)`);
+}
+
+// 3c. Deno single-file executable (same V8 as Node; cross-compiles with
+// --target, e.g. aarch64-apple-darwin, x86_64-pc-windows-msvc).
+if (process.argv.includes("--deno")) {
+  const target = process.argv.find((a) => a.startsWith("--target="));
+  const exe = join(out, "pyjs-deno" + (target ? "-" + target.slice(9) : ""));
+  run("deno", ["compile", "-A", "--no-check", ...(target ? [target] : []), "-o", exe, bundle]);
+  console.log(`deno executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)`);
 }
