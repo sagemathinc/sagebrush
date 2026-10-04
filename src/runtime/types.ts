@@ -52,7 +52,7 @@ method(object, "__delattr__", (self: any, name: string) => {
   return null;
 }).$genericDelattr = true;
 method(object, "__init_subclass__", (_cls: any) => null);
-method(object, "__reduce_ex__", (_self: any) => raise(T.TypeError, "cannot pickle"));
+
 const objectDir = method(object, "__dir__", (self: any) => defaultDir(self));
 
 function typeCall(...args: any[]): any {
@@ -62,7 +62,7 @@ function typeCall(...args: any[]): any {
     if (!(ns instanceof PyDict)) raise(T.TypeError, `type.__new__() argument 3 must be dict, not ${typeName(ns)}`);
     const m = new Map<string, any>();
     for (const [k, v] of (ns as PyDict).$m) m.set(dictKeyOf(ns, k), v);
-    return makeClass(name, O.toArray(bases), m, m.get("__module__") ?? "__main__", name, [], []);
+    return makeClass(name, O.toArray(bases), m, m.get("__module__") ?? hooks.callerModule(), name, [], []);
   }
   raise(T.TypeError, "type() takes 1 or 3 arguments");
 }
@@ -121,7 +121,7 @@ function typeNewImpl(mcls: any, name: any, bases: any, ns: any, kw: Map<string, 
     if (mb.$mro.includes(winner)) winner = mb;
     else raise(T.TypeError, "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases");
   }
-  return buildClass(name, b, m, m.get("__module__") ?? "__main__", m.get("__qualname__") ?? name, kw, winner);
+  return buildClass(name, b, m, m.get("__module__") ?? hooks.callerModule(), m.get("__qualname__") ?? name, kw, winner);
 }
 const typeInit = method(type, "__init__", (_c: any, ..._args: any[]) => null);
 typeInit.$kw = () => null;
@@ -551,7 +551,7 @@ export function intCall(x: any = 0, base: any = undefined): any {
     return v;
   }
   if (typeof x === "number") {
-    if (isInt(x)) return x;
+    if (isInt(x)) return Number.isSafeInteger(x) ? x + 0 : O.normBig(BigInt(x));
     if (x !== x) raise(T.ValueError, "cannot convert float NaN to integer");
     if (!Number.isFinite(x)) raise(T.OverflowError, "cannot convert float infinity to integer");
     const t = Math.trunc(x);
@@ -2183,4 +2183,44 @@ export const unionType = builtinTypeFor("UnionType", PyUnion, "types", () => rai
   method(unionType, "__instancecheck__", (u: PyUnion, x: any) => u.args.some((t) => isinstance(x, t)));
   method(unionType, "__subclasscheck__", (u: PyUnion, c: any) => u.args.some((t) => c.$mro.includes(t)));
   getset(unionType, "__args__", (u: PyUnion) => tuple(u.args));
+}
+
+// Pickling support as in CPython's Objects/typeobject.c (reduce_newobj).
+{
+  const copyreg = () => hooks.importModule("copyreg");
+  const getstate = method(object, "__getstate__", (self: any) => {
+    if (!hasInstanceDict(self)) return null;
+    const d = new PyDict();
+    for (const k of Object.keys(self)) if (k[0] !== "$" && !(Array.isArray(self) && /^\d+$/.test(k))) dictSet(d, k, self[k]);
+    return d.$m.size ? d : null;
+  });
+  const reduceNewobj = (self: any) => {
+    const cls = typeOf(self);
+    if (cls.$ctor === null && cls.$module === "builtins" && lookupType(cls, "__getnewargs__") === undefined && lookupType(cls, "__getnewargs_ex__") === undefined) raise(T.TypeError, `cannot pickle '${cls.$name}' object`);
+    let args: any[] = [];
+    const gna = lookupType(cls, "__getnewargs_ex__");
+    if (gna !== undefined) {
+      const [a, kw] = gna(self);
+      if (kw instanceof PyDict && kw.$m.size) {
+        const st = lookupType(cls, "__getstate__")(self);
+        return tuple([getattr(copyreg(), "__newobj_ex__"), tuple([cls, a, kw]), st, null, null]);
+      }
+      args = O.toArray(a);
+    } else {
+      const gn = lookupType(cls, "__getnewargs__");
+      if (gn !== undefined) args = O.toArray(gn(self));
+    }
+    const state = lookupType(cls, "__getstate__")(self);
+    const listitems = Array.isArray(self) && !(self as any).$t ? O.iter(self) : null;
+    const dictitems = self instanceof PyDict ? O.iter(callObj(getattr(self, "items"), [])) : null;
+    return tuple([getattr(copyreg(), "__newobj__"), tuple([cls, ...args]), state, listitems, dictitems]);
+  };
+  const objectReduce = method(object, "__reduce__", (self: any) => callObj(getattr(copyreg(), "_reduce_ex"), [self, 0]));
+  method(object, "__reduce_ex__", (self: any, proto: any = 0) => {
+    const r = lookupType(typeOf(self), "__reduce__");
+    if (r !== objectReduce) return callObj(getattr(self, "__reduce__"), []);
+    if (Number(proto) >= 2) return reduceNewobj(self);
+    return callObj(getattr(copyreg(), "_reduce_ex"), [self, proto]);
+  });
+  void getstate;
 }

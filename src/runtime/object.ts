@@ -840,6 +840,30 @@ export class PyDict {
   $m = new Map<any, any>();
   $orig: Map<any, any> | null = null; // normalized -> original key, when they differ
   $buckets: Map<number, any[]> | null = null; // hash -> entries {k, h}
+  // hash -> numeric primitive keys, built on demand so that an object key
+  // equal to a number (e.g. mpmath's mpf(1) == 1) finds its entry.
+  $nidx: Map<number, any[]> | null = null;
+  $hasNum = false;
+}
+
+// The numeric primitive key in `d` equal to the object key `k`, if any.
+function numAlias(d: PyDict, k: any): any {
+  if (!d.$hasNum) return undefined;
+  let idx = d.$nidx;
+  if (idx === null) {
+    idx = d.$nidx = new Map();
+    for (const pk of d.$m.keys()) {
+      if (typeof pk === "number" || typeof pk === "bigint") {
+        const h = hooks.hash(pk);
+        const l = idx.get(h);
+        if (l === undefined) idx.set(h, [pk]);
+        else l.push(pk);
+      }
+    }
+  }
+  const l = idx.get(hooks.hash(k));
+  if (l !== undefined) for (const pk of l) if (hooks.eq(pk, k)) return pk;
+  return undefined;
 }
 
 // The live `__dict__` of an instance: a PyDict whose `$m` is this Map-like
@@ -904,8 +928,10 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any } = {
+export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string } = {
   typeCall: null,
+  importModule: () => null,
+  callerModule: () => "__main__",
   hash: () => 0,
   eq: (a, b) => a === b,
   repr: (x) => String(x),
@@ -950,13 +976,21 @@ function bucketEntry(d: PyDict, k: any, create: boolean): any {
 export function dictGet(d: PyDict, k: any): any {
   if (typeof k === "string") return d.$m.get(k);
   const p = primitiveKey(k);
-  if (p !== undefined) return d.$m.get(p);
+  if (p !== undefined) {
+    const v = d.$m.get(p);
+    if (v !== undefined || d.$buckets === null || typeof p === "string" || p === null) return v;
+    const e = bucketEntry(d, k, false);
+    return e === undefined ? undefined : d.$m.get(e);
+  }
   if (d.$buckets === null) {
     hooks.hash(k); // unhashable keys raise even on a miss
-    return undefined;
+    const a = numAlias(d, k);
+    return a === undefined ? undefined : d.$m.get(a);
   }
   const e = bucketEntry(d, k, false);
-  return e === undefined ? undefined : d.$m.get(e);
+  if (e !== undefined) return d.$m.get(e);
+  const a = numAlias(d, k);
+  return a === undefined ? undefined : d.$m.get(a);
 }
 
 export function dictSet(d: PyDict, k: any, v: any): void {
@@ -966,9 +1000,27 @@ export function dictSet(d: PyDict, k: any, v: any): void {
   }
   const p = primitiveKey(k);
   if (p !== undefined) {
+    if (typeof p !== "string" && p !== null && d.$buckets !== null && !d.$m.has(p)) {
+      const e = bucketEntry(d, k, false);
+      if (e !== undefined) {
+        d.$m.set(e, v);
+        return;
+      }
+    }
     if (p !== k && !d.$m.has(p)) (d.$orig ??= new Map()).set(p, k);
+    if (typeof p === "number" || typeof p === "bigint") {
+      d.$hasNum = true;
+      d.$nidx = null;
+    }
     d.$m.set(p, v);
     return;
+  }
+  if (d.$hasNum && (d.$buckets === null || bucketEntry(d, k, false) === undefined)) {
+    const a = numAlias(d, k);
+    if (a !== undefined) {
+      d.$m.set(a, v);
+      return;
+    }
   }
   d.$m.set(bucketEntry(d, k, true), v);
 }
@@ -977,11 +1029,21 @@ export function dictDelete(d: PyDict, k: any): boolean {
   const p = primitiveKey(k);
   if (p !== undefined) {
     d.$orig?.delete(p);
-    return d.$m.delete(p);
+    if (d.$m.delete(p)) {
+      d.$nidx = null;
+      return true;
+    }
+    if (typeof p === "string" || p === null || d.$buckets === null) return false;
   }
   const e = d.$buckets === null ? undefined : bucketEntry(d, k, false);
   if (e === undefined) {
     hooks.hash(k);
+    const a = p === undefined ? numAlias(d, k) : undefined;
+    if (a !== undefined) {
+      d.$orig?.delete(a);
+      d.$nidx = null;
+      return d.$m.delete(a);
+    }
     return false;
   }
   const list = d.$buckets!.get(e.h)!;
@@ -1000,6 +1062,7 @@ export function dictKeyOf(d: PyDict, mk: any): any {
 }
 
 export function dictClear(d: PyDict) {
+  d.$nidx = null;
   d.$m.clear();
   d.$orig = null;
   d.$buckets = null;
