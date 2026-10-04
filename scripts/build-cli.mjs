@@ -13,6 +13,18 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
+
+// deno compile embeds node_modules when it finds a package.json above the
+// entry point; compile a copy of the bundle from an empty directory.
+function denoCompile(flags, exe) {
+  const dir = mkdtempSync(join(tmpdir(), "sagebrush-deno-"));
+  copyFileSync(bundle, join(dir, "sagebrush.cjs"));
+  run("deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
+  // Windows targets get ".exe" appended.
+  return existsSync(exe) ? exe : exe + ".exe";
+}
 
 const root = new URL("..", import.meta.url).pathname;
 const out = join(root, "build", "cli");
@@ -66,8 +78,7 @@ if (process.argv.includes("--bun")) {
 // --target, e.g. aarch64-apple-darwin, x86_64-pc-windows-msvc).
 if (process.argv.includes("--deno")) {
   const target = process.argv.find((a) => a.startsWith("--target="));
-  const exe = join(out, "pyjs-deno" + (target ? "-" + target.slice(9) : ""));
-  run("deno", ["compile", "-A", "--no-check", ...(target ? [target] : []), "-o", exe, bundle]);
+  const exe = denoCompile(["-A", ...(target ? [target] : [])], join(out, "pyjs-deno" + (target ? "-" + target.slice(9) : "")));
   console.log(`deno executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)`);
 }
 
@@ -78,8 +89,7 @@ if (process.argv.includes("--deno")) {
 // with e.g. PYJS_SANDBOX_ALLOW="--allow-read=."
 if (process.argv.includes("--sandbox")) {
   const target = process.argv.find((a) => a.startsWith("--target="));
-  const exe = join(out, "pyjs-sandbox" + (target ? "-" + target.slice(9) : ""));
   const extra = (process.env.PYJS_SANDBOX_ALLOW ?? "").split(/\s+/).filter(Boolean);
-  run("deno", ["compile", "--no-prompt", "--no-check", ...extra, ...(target ? [target] : []), "-o", exe, bundle]);
+  const exe = denoCompile(["--no-prompt", ...extra, ...(target ? [target] : [])], join(out, "pyjs-sandbox" + (target ? "-" + target.slice(9) : "")));
   console.log(`sandbox executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)${extra.length ? " grants: " + extra.join(" ") : ""}`);
 }
