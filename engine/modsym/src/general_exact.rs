@@ -140,7 +140,7 @@ fn sign_str(s: i32) -> &'static str {
 }
 
 /// Inverse of a square matrix mod p (p prime), or None if singular.
-fn invert_mod(a: &[Vec<u64>], p: u64) -> Option<Vec<Vec<u64>>> {
+pub(crate) fn invert_mod(a: &[Vec<u64>], p: u64) -> Option<Vec<Vec<u64>>> {
     let n = a.len();
     let mut m: Vec<Vec<u64>> = a.iter().enumerate().map(|(i, row)| {
         let mut r = row.clone();

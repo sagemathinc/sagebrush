@@ -56,8 +56,30 @@ The candidates escalate in this order:
 
 The first two handle almost everything. In the first full run, 26 spaces needed the later stages, all of them with inner twists.
 
+## Trace forms and labels
+
+`engine/modsym/src/traces.rs` computes, for each orbit, the trace form $\operatorname{tr}a_n=\sum_\sigma a_n(f^\sigma)$ for $n\le B$. The call is `orbit_traces(n, k, &chi, &orbits, B)`.
+
+**For every newform with $k\ge2$ and $Nk^2\le1000$, the trace form up to $n=1000$ agrees with LMFDB's `mf_newforms.traces`: all 4843, in all 2653 nonzero spaces.** Sorting each space's orbits by dimension and then lexicographically by trace form reproduces LMFDB's orbit order, so this also reproduces every label, from `11.2.a.a` to `227.2.c.a`. The run takes 466 s on 16 cores with 485 MB peak; `227.2.c` is the slowest at 6.7 s.
+
+**Method.** Modulo $\ell$, for each conjugate $\chi^j$, an orbit's piece $W$ of $\mathbb{M}^+$ is $\ker u_j(T)$ with $u_j=\gcd(u,g^{\rm new}_j)$. Here $u\in\mathbb{Z}[x]$ is the orbit's charpoly of $T$. On $W$, $T$ has squarefree charpoly, so each $T_n$ acts as $P_n(T)$ for a polynomial $P_n$ modulo $u_j$. Only $P_p$ for primes $p\le B$ is computed directly:
+
+- **Functionals.** The columns $z_b=T^b\operatorname{cof}(T)c$ span the functionals that vanish off $W$, where $\operatorname{cof}=\operatorname{charpoly}/u_j$. Against the Krylov rows $e_t\operatorname{cof}(T)T^a$ the Gram matrix is Hankel: $G_t[a][b]=(T^{a+b}\operatorname{cof}(T)^2c)_t$. So $2w-1$ matrix–vector products give $G_t$ for every $t$, and the first invertible one fixes the Manin symbol $x_t$. The Krylov rows themselves are never formed.
+- **One symbol per prime.** $\Psi=ZG_t^{-1}$, extended to all generators, maps an element to the Krylov coordinates of its projection to $W$. So $P_p=\Psi(T_px_t)\cdot\operatorname{cof}\bmod u_j$ needs only the Heilbronn images of the single symbol $x_t$. Merel's matrices are cached across spaces, and the primes run in parallel.
+- **Self-check.** $\Psi(x_t)\cdot\operatorname{cof}\equiv1 \pmod{u_j}$ is verified for every orbit and embedding.
+
+Then $P_{p^r}=P_pP_{p^{r-1}}-\chi(p)p^{k-1}P_{p^{r-2}}$ and $P_{mn}=P_mP_n$. Finally $\operatorname{tr}P=\sum_ic_is_i$, where $s_i$ are the power sums of the roots of $u_j$. Summing over $j$ gives $\operatorname{tr}a_n\bmod\ell$, and CRT finishes the job up to the bound $\dim\cdot\sigma_0(n)\,n^{(k-1)/2}$.
+
+**Separating new from old.** Orbit dimensions only need $T$ to separate the newforms from each other. The projection also needs the new eigenvalues of $T$ to differ from every old and Eisenstein eigenvalue in $\mathbb{M}^+$. For example, for 33.2.a and 11.2.a with $T=T_2+T_5$, both give $-1$. The choice of $T$ now requires this too; orbit results are unchanged (5533/5533 again).
+
+Two details mattered:
+
+- **The orbit's piece in each embedding.** It must be cut out of the *new* part $g^{\rm new}_j$, not out of the whole charpoly. A conjugate orbit's eigenvalue can coincide with an old eigenvalue for a different $\chi^j$; this happens in 28.2.e.
+- **Sparse duals.** With $\dim=56$ in 210.2.a, an eigen-functional can vanish on many basis vectors. That is why $x_t$ is chosen by scanning the Hankel matrices rather than by trying a few $t$.
+
 ## Limits and next steps
 
 - **Size.** The norm $h$ has degree equal to the full $\mathbb{Q}$-dimension. That is fine up to a few thousand. For $Nk^2\le2000$ LMFDB has spaces of dimension 9282, and for $Nk^2\le4000$ of dimension 39690. Those need relative methods over $\mathbb{Q}(\zeta_m)$. In particular, an orbit that is irreducible modulo a degree-1 prime $\mathfrak{l}$ is certified irreducible without ever forming the norm.
-- **Traces and Hecke fields.** Next comes $\operatorname{tr}a_n$ for each orbit (LMFDB's trace forms), plus field polynomials and $q$-expansions. That needs the orbit subspaces themselves, not just their charpolys.
+- **Hecke fields and $q$-expansions.** The same machinery, with $P_p$ kept instead of traced, gives $a_p$ as polynomials in the eigenvalue of $T$. That is a $q$-expansion over $\mathbb{Q}(\lambda)=K_f$, and from it come field polynomials and LLL-reduced bases as in LMFDB.
+- **Speed.** Heilbronn images are recomputed for every embedding $j$. The union-find structure is the same for all $j$, so they could be computed once.
 - **Weight 1.** It is out of reach of modular symbols.

@@ -32,6 +32,7 @@ pub mod orbits;
 pub mod p1;
 pub mod presentation;
 pub mod space;
+pub mod traces;
 
 use presentation::Presentation;
 use space::Space;

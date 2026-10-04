@@ -47,20 +47,22 @@ pub struct NewspaceOrbits {
     /// The Hecke operator used: T = sum r T_q.
     pub ops: Vec<(u64, i64)>,
     pub primes_used: usize,
+    /// dim M_k(M, eps_M)^+ at each level M | N (certified).
+    pub dims_plus: Vec<usize>,
     pub status: &'static str,
     pub checks: Vec<String>,
 }
 
 // ---- polynomials mod p, constant term first, no trailing zeros ----
 
-fn trim(mut f: Vec<u64>) -> Vec<u64> {
+pub(crate) fn trim(mut f: Vec<u64>) -> Vec<u64> {
     while f.len() > 1 && *f.last().unwrap() == 0 {
         f.pop();
     }
     f
 }
 
-fn pmul(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
+pub(crate) fn pmul(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
     let mut out = vec![0u64; a.len() + b.len() - 1];
     for (i, &x) in a.iter().enumerate() {
         if x != 0 {
@@ -73,7 +75,7 @@ fn pmul(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
 }
 
 /// (quotient, remainder) of a by b (b nonzero).
-fn pdivrem(a: &[u64], b: &[u64], p: u64) -> (Vec<u64>, Vec<u64>) {
+pub(crate) fn pdivrem(a: &[u64], b: &[u64], p: u64) -> (Vec<u64>, Vec<u64>) {
     let mut r = a.to_vec();
     let db = b.len() - 1;
     if a.len() < b.len() {
@@ -94,12 +96,12 @@ fn pdivrem(a: &[u64], b: &[u64], p: u64) -> (Vec<u64>, Vec<u64>) {
     (trim(q), trim(r))
 }
 
-fn monic(f: Vec<u64>, p: u64) -> Vec<u64> {
+pub(crate) fn monic(f: Vec<u64>, p: u64) -> Vec<u64> {
     let inv = powmod(*f.last().unwrap(), p - 2, p);
     f.into_iter().map(|c| mul(c, inv, p)).collect()
 }
 
-fn pgcd(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
+pub(crate) fn pgcd(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
     let (mut a, mut b) = (trim(a.to_vec()), trim(b.to_vec()));
     while !(b.len() == 1 && b[0] == 0) {
         let r = pdivrem(&a, &b, p).1;
@@ -116,13 +118,13 @@ fn deriv(f: &[u64], p: u64) -> Vec<u64> {
     trim((1..f.len()).map(|i| mul(f[i], i as u64 % p, p)).collect())
 }
 
-fn deg(f: &[u64]) -> usize {
+pub(crate) fn deg(f: &[u64]) -> usize {
     f.len() - 1
 }
 
 // ---- levels, Eisenstein series ----
 
-struct Level {
+pub(crate) struct Level {
     m: u64,
     eps: Character,
     group: DirichletGroup,
@@ -176,7 +178,7 @@ fn eisenstein_series(g: &DirichletGroup, eps: &Character, k: usize, units: &[u64
     Ok(out)
 }
 
-fn levels(n: u64, k: usize, eps: &Character, units: &[u64], qs: &[u64]) -> Result<Vec<Level>, String> {
+pub(crate) fn levels(n: u64, k: usize, eps: &Character, units: &[u64], qs: &[u64]) -> Result<Vec<Level>, String> {
     let f = eps.conductor();
     let ms: Vec<u64> = (1..=n).filter(|&m| n % m == 0 && m % f == 0).collect();
     let mut out: Vec<Level> = vec![];
@@ -197,8 +199,9 @@ fn levels(n: u64, k: usize, eps: &Character, units: &[u64], qs: &[u64]) -> Resul
 
 /// g_new(N) mod ell for the embedding with zeta_ord = zm, or None if ell is
 /// bad for this embedding (a degree or divisibility check failed).
-fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: u64, z_e: u64, e_top: u64, jdx: usize, j: u64, dims_plus: &[usize]) -> Result<Option<Vec<u64>>, String> {
+pub(crate) fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: u64, z_e: u64, e_top: u64, jdx: usize, j: u64, dims_plus: &[usize]) -> Result<Option<(Vec<u64>, bool)>, String> {
     let mut news: Vec<Vec<u64>> = vec![];
+    let mut full = vec![];
     for (li, lv) in levels.iter().enumerate() {
         let ord = lv.eps.order;
         let zm = powmod(z_e, e_top / ord * j, ell);
@@ -207,6 +210,7 @@ fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: u64, z_e: u
             return Ok(None);
         }
         let mut f = sp.hecke_combo_charpoly(ops)?;
+        full = f.clone();
         // Eisenstein eigenvalues of T for eps^j.
         let ze = powmod(z_e, e_top / lv.group.exponent.max(1), ell);
         let mut e = vec![1u64];
@@ -243,7 +247,12 @@ fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: u64, z_e: u
         }
         news.push(f);
     }
-    Ok(news.pop())
+    // Are the new eigenvalues of T distinct from every other eigenvalue on
+    // M^+ (old and Eisenstein)?  Needed to cut out the newforms' subspaces.
+    let g = news.pop().unwrap();
+    let cof = pdivrem(&full, &g, ell).0;
+    let separated = deg(&pgcd(&g, &cof, ell)) == 0;
+    Ok(Some((g, separated)))
 }
 
 /// Primes not dividing N: the two smallest plus the least further primes
@@ -295,7 +304,7 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     let m = eps.order;
     if eps.is_even() != (k % 2 == 0) {
         // eps(-1) != (-1)^k: every space is zero.
-        return Ok(NewspaceOrbits { n, k, m, dim: 0, orbits: vec![], dims: vec![], ops: vec![], primes_used: 0, status: "proven", checks: vec!["eps(-1) != (-1)^k".into()] });
+        return Ok(NewspaceOrbits { n, k, m, dim: 0, orbits: vec![], dims: vec![], ops: vec![], primes_used: 0, dims_plus: vec![], status: "proven", checks: vec!["eps(-1) != (-1)^k".into()] });
     }
     let units: Vec<u64> = (0..m.max(1)).filter(|&j| gcd(j, m) == 1).collect();
     let phi = units.len();
@@ -331,7 +340,7 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     let top = lv.last().unwrap();
     let d = phi * top.dim_new;
     if top.dim_new == 0 {
-        return Ok(NewspaceOrbits { n, k, m, dim: 0, orbits: vec![], dims: vec![], ops: vec![], primes_used: 0, status: "proven", checks });
+        return Ok(NewspaceOrbits { n, k, m, dim: 0, orbits: vec![], dims: vec![], ops: vec![], primes_used: 0, dims_plus: vec![], status: "proven", checks });
     }
     let mut primes = primes_one_mod(e_top, 1 << 31);
     // Certify dim M^+ at every level with one prime: + and - add up to 2S + E.
@@ -360,28 +369,33 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
             break dp;
         }
     };
-    let compute = |ell: u64, ops: &[(u64, i64)]| -> Result<Option<Vec<u64>>, String> {
+    let compute = |ell: u64, ops: &[(u64, i64)]| -> Result<Option<(Vec<u64>, bool)>, String> {
         let z = root_of_unity(e_top, ell);
         let parts = par::map_range(phi, |jdx| new_poly_mod(&lv, k, ops, ell, z, e_top, jdx, units[jdx], &dims_plus));
         let mut h = vec![1u64];
+        let mut separated = true;
         for p in parts {
             match p? {
-                Some(g) => h = pmul(&h, &g, ell),
+                Some((g, s)) => {
+                    h = pmul(&h, &g, ell);
+                    separated &= s;
+                }
                 None => return Ok(None),
             }
         }
-        Ok(Some(h))
+        Ok(Some((h, separated)))
     };
-    // Pick T: the first candidate with h squarefree mod some good ell.
+    // Pick T: the first candidate with h squarefree mod some good ell and
+    // the new eigenvalues separated from the old and Eisenstein ones.
     let mut chosen = None;
     'outer: for ops in &candidates {
         for _ in 0..4 {
             let ell = primes.next().ok_or("ran out of primes")?;
-            if let Some(h) = compute(ell, ops)? {
+            if let Some((h, separated)) = compute(ell, ops)? {
                 if std::env::var("NEWSPACE_DEBUG").is_ok() {
                     eprintln!("N={} k={} ops {:?}: deg h {} deg gcd(h, h') {}", n, k, ops, deg(&h), deg(&pgcd(&h, &deriv(&h, ell), ell)));
                 }
-                if deg(&pgcd(&h, &deriv(&h, ell), ell)) == 0 {
+                if separated && deg(&pgcd(&h, &deriv(&h, ell), ell)) == 0 {
                     chosen = Some((ops.clone(), ell, h));
                     break 'outer;
                 }
@@ -406,7 +420,7 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
         let out = par::map_slice(&batch, |&ell| compute(ell, &ops));
         for (&ell, r) in batch.iter().zip(out) {
             match r? {
-                Some(h) if deg(&h) == d => {
+                Some((h, _)) if deg(&h) == d => {
                     residues.push((ell, h.iter().map(|&c| vec![c]).collect()));
                     modulus *= ell;
                 }
@@ -432,5 +446,5 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     let total: usize = dims.iter().sum();
     checks.push(format!("T = {:?}; h of degree {} = {} x {} (phi(ord eps) x dim S_k^new); {} primes, {} rejected", ops, d, phi, top.dim_new, residues.len(), rejected));
     let status = if monic && total == d { "proven" } else { "inconsistent" };
-    Ok(NewspaceOrbits { n, k, m, dim: d, orbits, dims, ops, primes_used: residues.len(), status, checks })
+    Ok(NewspaceOrbits { n, k, m, dim: d, orbits, dims, ops, primes_used: residues.len(), dims_plus, status, checks })
 }

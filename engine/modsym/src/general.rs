@@ -188,26 +188,26 @@ fn transform(k: usize, i: usize, h: [i64; 4], binom: &[Vec<u64>], p: u64) -> Vec
 
 /// Merel's matrices for T_p: [a b; c d] with ad - bc = p, a > b >= 0, d > c >= 0.
 pub fn heilbronn_merel(p: i64) -> Vec<[i64; 4]> {
+    // As in Sage's HeilbronnMerel: for each a, either ad = p (b = 0 or
+    // c = 0), or ad > p and bc = ad - p with b = bc / c < a, i.e.
+    // c > bc / a, and c < d.  O(p^2 log p) in all.
     let mut out = vec![];
     for a in 1..=p {
-        for d in 1..=(p + 1 - a) {
-            let m = a * d - p; // = b c
-            if m < 0 {
-                continue;
+        let q = p / a;
+        if q * a == p {
+            let d = q;
+            for b in 0..a {
+                out.push([a, b, 0, d]);
             }
-            if m == 0 {
-                // b = 0 (c any in 0..d) or c = 0 (b in 1..a)
-                for c in 0..d {
-                    out.push([a, 0, c, d]);
-                }
-                for b in 1..a {
-                    out.push([a, b, 0, d]);
-                }
-            } else {
-                for b in 1..a.min(m + 1) {
-                    if m % b == 0 && m / b < d {
-                        out.push([a, b, m / b, d]);
-                    }
+            for c in 1..d {
+                out.push([a, 0, c, d]);
+            }
+        }
+        for d in q + 1..=p {
+            let bc = a * d - p;
+            for c in bc / a + 1..d {
+                if bc % c == 0 {
+                    out.push([a, bc / c, c, d]);
                 }
             }
         }
@@ -455,7 +455,7 @@ impl GeneralSpace {
     }
 
     /// T_p(x_g) for a free generator g as a sparse combination of generators.
-    fn hecke_image(&self, hs: &[[i64; 4]], g: u32) -> Vec<(u32, u64)> {
+    pub(crate) fn hecke_image(&self, hs: &[[i64; 4]], g: u32) -> Vec<(u32, u64)> {
         let p = self.p;
         let (a, wa) = self.gen_sym[g as usize];
         // x_a = wa x_g, so x_g = wa^{-1} x_a.
@@ -528,6 +528,11 @@ impl GeneralSpace {
 
     /// The characteristic polynomial of sum r T_q mod ell.
     pub fn hecke_combo_charpoly(&self, ops: &[(u64, i64)]) -> Result<Vec<u64>, String> {
+        Ok(linalg::charpoly(self.hecke_combo_matrix(ops)?, self.p))
+    }
+
+    /// The matrix of sum r T_q mod ell (rows are images of basis elements).
+    pub fn hecke_combo_matrix(&self, ops: &[(u64, i64)]) -> Result<Vec<Vec<u64>>, String> {
         let (d, p) = (self.dimension(), self.p);
         let mut t = vec![vec![0u64; d]; d];
         for &(q, r) in ops {
@@ -539,7 +544,12 @@ impl GeneralSpace {
                 }
             }
         }
-        Ok(linalg::charpoly(t, p))
+        Ok(t)
+    }
+
+    /// The free generator underlying the i-th basis element.
+    pub(crate) fn basis_generator(&self, i: usize) -> u32 {
+        self.basis_gen[i]
     }
 
     /// The characteristic polynomial of T_q mod ell (constant term first).
