@@ -1561,7 +1561,17 @@ const genResult = (r: IteratorResult<any>) => {
 method(generator, "__iter__", (g: Generator) => g);
 method(generator, "__next__", (g: Generator) => genResult(O.genStep(g, false, undefined)));
 method(generator, "send", (g: Generator, v: any) => genResult(O.genStep(g, false, v)));
-method(generator, "throw", (g: Generator, e: any, v: any = undefined) => genResult(O.genStep(g, true, throwable(e, v))));
+method(generator, "throw", (g: Generator, e: any, v: any = undefined) => {
+  const x = throwable(e, v);
+  if (!isinstance(x, T.GeneratorExit)) return genResult(O.genStep(g, true, x));
+  const prev = O.closing.e;
+  O.closing.e = x;
+  try {
+    return genResult(O.genStep(g, true, x));
+  } finally {
+    O.closing.e = prev;
+  }
+});
 // close() throws GeneratorExit in at the paused yield, as CPython does, so
 // `except GeneratorExit` and `finally` both see it.
 method(generator, "close", (g: any) => {
@@ -1571,11 +1581,15 @@ method(generator, "close", (g: any) => {
     return null;
   }
   let r: IteratorResult<any>;
+  const prev = O.closing.e;
+  const ge = (O.closing.e = T.GeneratorExit());
   try {
-    r = O.genStep(g, true, T.GeneratorExit());
+    r = O.genStep(g, true, ge);
   } catch (e: any) {
     if (isinstance(e, T.GeneratorExit) || isinstance(e, T.StopIteration)) return null;
     throw e;
+  } finally {
+    O.closing.e = prev;
   }
   if (!r.done) raise(T.RuntimeError, "generator ignored GeneratorExit");
   return r.value ?? null;

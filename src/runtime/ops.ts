@@ -986,12 +986,17 @@ export class GenIter {
   }
 }
 
+// The GeneratorExit being thrown into a generator by close(), if any.
+export const closing: { e: any } = { e: null };
+
 // One step of a generator (next/send, or throw), with Python's rules: a
 // StopIteration escaping the body becomes RuntimeError (PEP 479), re-entry is
 // a ValueError, and a just-started generator only accepts None.
 export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any> {
-  if (!isThrow && !g.$started && arg !== undefined && arg !== null) raise(T.TypeError, "can't send non-None value to a just-started generator");
-  g.$started = true;
+  if (g.$started !== true) {
+    if (!isThrow && arg !== undefined && arg !== null) raise(T.TypeError, "can't send non-None value to a just-started generator");
+    g.$started = true;
+  }
   try {
     const r = isThrow ? g.throw(arg) : g.next(arg);
     if (r.done && r.value === undefined) r.value = null;

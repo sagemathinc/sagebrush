@@ -96,7 +96,7 @@ export function dictOf(...kv: any[]): Obj.PyDict {
 export function yieldFrom(x: any): any {
   if (Array.isArray(x) && (x as any).$cls === undefined) return x;
   const it = O.iter(x);
-  if (it instanceof O.GenIter) return genDelegate(it.g);
+  if (it instanceof O.GenIter) return it.g;
   const target = it instanceof O.ProtoIter ? it.o : it;
   const stop = (e: any) => ({ done: true, value: e.args?.length ? e.args[0] : null });
   const step = (f: () => any) => {
@@ -143,29 +143,12 @@ export function yieldFrom(x: any): any {
   return adaptor;
 }
 
-// `yield from gen`: like JS yield*, except GeneratorExit closes the inner
-// generator and is then raised here even if the inner one swallowed it.
-function genDelegate(g: any): any {
-  const d = {
-    [Symbol.iterator]() {
-      return d;
-    },
-    next(v: any) {
-      return O.genStep(g, false, v);
-    },
-    throw(e: any) {
-      if (Obj.isinstance(e, T.GeneratorExit)) {
-        T.generator.$dict.get("close")(g);
-        throw e;
-      }
-      return O.genStep(g, true, e);
-    },
-    return(v: any) {
-      T.generator.$dict.get("close")(g);
-      return { done: true, value: v };
-    },
-  };
-  return d;
+// The value of a `yield from` that delegated natively with yield*.  When the
+// delegating generator is being closed and the inner one swallowed the
+// GeneratorExit and returned, CPython still raises GeneratorExit here.
+export function yfr(v: any): any {
+  if (O.closing.e !== null) throw O.closing.e;
+  return v ?? null;
 }
 
 export function withEnter(m: any): any {
@@ -390,6 +373,7 @@ export const R: any = {
   callEx,
   dictOf,
   yieldFrom,
+  yfr,
   withEnter,
   withExit,
   reraise,
