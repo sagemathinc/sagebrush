@@ -1,0 +1,10 @@
+export const homedir = () => "/";
+export const tmpdir = () => "/tmp";
+export const type = () => "Browser";
+export const hostname = () => "browser";
+export const release = () => "";
+export const version = () => "";
+export const arch = () => "wasm";
+export const machine = () => "browser";
+export const cpus = () => [{}];
+export default { homedir, tmpdir, type, hostname, release, version, arch, machine, cpus };

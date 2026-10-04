@@ -9,7 +9,8 @@
 #   1. R2 bucket sagebrush-releases (location hint: western North America)
 #   2. https://get.sagebrush.space -> that bucket (public read, TLS >= 1.2)
 #   3. CORS on the bucket: GET/HEAD from any origin (browsers may load
-#      the bundles and WASM directly)
+#      the bundles and WASM directly), and a lifecycle rule deleting dev/
+#      builds after 30 days
 #   4. An account API token that can only read/write objects in that one
 #      bucket, stored as GitHub Actions secrets R2_ACCOUNT_ID,
 #      R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY for sagemathinc/sagebrush.
@@ -46,6 +47,10 @@ cf r2 buckets domains custom create "$BUCKET" --domain "$DOMAIN" --zone-id "$ZON
 echo "== 3. CORS"
 cf r2 buckets cors update "$BUCKET" --force "${dry[@]}" \
   --rules '[{"allowed":{"origins":["*"],"methods":["GET","HEAD"],"headers":["*"]},"maxAgeSeconds":86400}]' 2>&1 | quiet
+
+echo "== 3b. lifecycle: dev/ builds expire after 30 days (keeps Cloudflare's multipart rule)"
+cf r2 buckets lifecycle update "$BUCKET" --force "${dry[@]}" \
+  --rules '[{"id":"Default Multipart Abort Rule","enabled":true,"conditions":{},"abortMultipartUploadsTransition":{"condition":{"type":"Age","maxAge":604800}}},{"id":"Expire dev builds after 30 days","enabled":true,"conditions":{"prefix":"dev/"},"deleteObjectsTransition":{"condition":{"type":"Age","maxAge":2592000}}}]' 2>&1 | quiet
 
 echo "== 4. bucket-scoped token -> GitHub Actions secrets"
 policies="[{\"effect\":\"allow\",\"resources\":{\"com.cloudflare.edge.r2.bucket.${ACCOUNT}_default_${BUCKET}\":\"*\"},\"permission_groups\":[{\"id\":\"$PG_WRITE\"},{\"id\":\"$PG_READ\"}]}]"
