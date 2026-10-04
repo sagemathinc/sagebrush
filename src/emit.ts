@@ -231,8 +231,10 @@ export class Emitter {
         if (!Number.isFinite(v)) return v > 0 ? "Infinity" : "(-Infinity)";
         return v < 0 ? `(${String(v)})` : String(v);
       }
-      case "complex":
-        this.fail("complex numbers are not supported");
+      case "complex": {
+        const v = c.v;
+        return this.hoist(`new R.PyComplex(0, ${v !== v ? "NaN" : v === Infinity ? "Infinity" : String(v)})`);
+      }
       case "str":
         return q(c.v);
       case "bytes":

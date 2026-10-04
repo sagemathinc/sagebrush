@@ -43,6 +43,7 @@ function translate(p: string, flags: number): { src: string; flags: number } {
       }
     }
     if (c === "\\") {
+      classStart = false;
       const d = p[i + 1];
       if (d === undefined) raise(ReError, "bad escape (end of pattern)");
       i += 2;

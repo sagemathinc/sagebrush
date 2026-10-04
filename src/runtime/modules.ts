@@ -29,7 +29,12 @@ export function importModule(name: string): any {
   const existing = dictGet(sysModules, name);
   if (existing !== undefined) return existing;
   const dot = name.lastIndexOf(".");
-  if (dot > 0) importModule(name.slice(0, dot));
+  if (dot > 0) {
+    importModule(name.slice(0, dot));
+    // The parent's __init__ may have imported this module already.
+    const now = dictGet(sysModules, name);
+    if (now !== undefined) return now;
+  }
   const f = factories[name];
   let m: any;
   if (f !== undefined) {
@@ -149,6 +154,8 @@ export function importStar(m: any, g: any) {
 newBuiltinModule("sys", (m) => {
   m.argv = [];
   m.version = "3.14.0 (pyjs-spike)";
+  m.hash_info = Ty.structseq("sys.hash_info", ["width", "modulus", "inf", "nan", "imag", "algorithm", "hash_bits", "seed_bits", "cutoff"], [64, 2305843009213693951, 314159, 0, 1000003, "siphash13", 64, 128, 0]);
+  m.int_info = Ty.structseq("sys.int_info", ["bits_per_digit", "sizeof_digit", "default_max_str_digits", "str_digits_check_threshold"], [30, 4, 4300, 640]);
   m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0]);
   m.hexversion = 0x30e00f0;
   m.implementation = Ty.simpleNamespace({ name: "pyjs", cache_tag: null, version: m.version_info, _multiarch: "js" });
@@ -175,7 +182,7 @@ newBuiltinModule("sys", (m) => {
   fn(m, "intern", (s: string) => s);
   fn(m, "getsizeof", (_x: any) => 64);
   fn(m, "exc_info", () => tuple([null, null, null]));
-  m.float_info = tuple([1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
+  m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
 });
 dictSet(sysModules, "builtins", builtins);
 
@@ -406,6 +413,13 @@ newBuiltinModule("types", (m) => {
   m.NotImplementedType = T.NotImplementedType;
   m.EllipsisType = T.ellipsis;
   m.SimpleNamespace = Ty.SimpleNamespace;
+  m.UnionType = Ty.unionType;
+  m.CodeType = T.code;
+  m.MappingProxyType = T.dict;
+  m.GetSetDescriptorType = T.getset_descriptor;
+  for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "CellType", "FrameType", "TracebackType", "AsyncGeneratorType", "GenericAlias", "CapsuleType"]) {
+    m[n] = Ty.builtinTypeFor(n, class {}, "types", () => raise(T.TypeError, `cannot create '${n}' instances`));
+  }
   // A generator function whose generators may be awaited.
   fn(m, "coroutine", (f: any) => {
     if (typeof f !== "function") raise(T.TypeError, "types.coroutine() expects a callable");

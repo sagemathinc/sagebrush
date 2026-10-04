@@ -398,7 +398,7 @@ function powSlow(a: any, b: any): any {
 }
 function floatPow(x: number, y: number): any {
   if (x === 0 && y < 0) raise(T.ZeroDivisionError, "zero to a negative power");
-  if (x < 0 && !isInt(y) && Number.isFinite(y)) raise(T.ValueError, "complex numbers are not supported");
+  if (x < 0 && !isInt(y) && Number.isFinite(y)) return complexHooks.pow(x, y);
   const r = Math.pow(x, y);
   if (!Number.isFinite(r) && Number.isFinite(x) && Number.isFinite(y)) raise(T.OverflowError, "(34, 'Numerical result out of range')");
   return mkfloat(r);
@@ -1355,6 +1355,8 @@ export function dictGetitem(o: PyDict, k: any): any {
   if (v !== undefined) return v;
   return dictMissing(o, k);
 }
+// complex.ts: a negative float to a fractional power is complex.
+export const complexHooks: { pow: (x: number, y: number) => any } = { pow: () => raise(T.ValueError, "math domain error") };
 export const arrayHooks: { cls: any; get: any; set: any } = { cls: null, get: null, set: null };
 
 // The bytes of an object supporting the buffer protocol (bytes, bytearray,
