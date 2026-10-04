@@ -1687,7 +1687,7 @@ iteratorType("reversed", ReversedIter, (x: any) => {
 });
 
 // `gen.throw(E)`, `gen.throw(E, v)`, `gen.throw(e)`.
-function throwable(e: any, v: any): any {
+export function throwable(e: any, v: any): any {
   if (isType(e)) {
     if (!e.$mro.includes(T.BaseException)) raise(T.TypeError, "exceptions must be classes or instances deriving from BaseException, not type");
     return v === undefined || v === null ? e() : isinstance(v, e) ? v : e(v);
@@ -1705,8 +1705,18 @@ const genResult = (r: IteratorResult<any>) => {
 method(generator, "__iter__", (g: Generator) => g);
 method(generator, "__next__", (g: Generator) => genResult(O.genStep(g, false, undefined)));
 method(generator, "send", (g: Generator, v: any) => genResult(O.genStep(g, false, v)));
-method(generator, "throw", (g: Generator, e: any, v: any = undefined) => {
-  const x = throwable(e, v);
+method(generator, "throw", (g: any, e: any, v: any = undefined) => {
+  let x: any;
+  const args = v === undefined ? [e] : [e, v];
+  try {
+    x = throwable(e, v);
+  } catch (err: any) {
+    // Invalid here, but a delegate's throw() may accept it: send a TypeError
+    // that carries the original arguments (see yieldFrom).
+    x = err;
+    (args as any).invalid = err.args[0];
+  }
+  Object.defineProperty(x, "$rawThrow", { value: args, configurable: true, writable: true });
   if (!isinstance(x, T.GeneratorExit)) return genResult(O.genStep(g, true, x));
   const prev = O.closing.e;
   O.closing.e = x;
