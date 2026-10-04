@@ -1063,6 +1063,7 @@ Object.defineProperty(DictView.prototype, "$cls", {
 });
 
 method(dict, "keys", (d: PyDict) => new DictView(d, 0));
+method(dict, "__reversed__", (d: PyDict) => new O.ListIter(O.toArray(new O.DictIter(d, 0)).reverse()));
 method(dict, "values", (d: PyDict) => new DictView(d, 1));
 method(dict, "items", (d: PyDict) => new DictView(d, 2));
 method(dict, "get", (d: PyDict, k: any, dflt: any = null) => {

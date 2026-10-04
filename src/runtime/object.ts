@@ -348,7 +348,12 @@ function constructKw(cls: PyType, pos: any[], names: string[], values: any[]): a
     o = callKw(nw, [cls, ...pos], names, values);
     if (!isinstance(o, cls)) return o;
   } else o = new cls.$ctor!();
-  const r = callKw(lookupType(cls, "__init__"), [o, ...pos], names, values);
+  const init = lookupType(cls, "__init__");
+  if (init === objectInit) {
+    if (nw === undefined || nw === objectNew) raise(T.TypeError, `${cls.$name}() takes no arguments`);
+    return o;
+  }
+  const r = callKw(init, [o, ...pos], names, values);
   if (r !== null) raise(T.TypeError, `__init__() should return None, not '${typeName(r)}'`);
   return o;
 }
