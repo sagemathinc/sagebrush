@@ -1,0 +1,44 @@
+# Build pyjs and run its test suites on Node, Deno and Bun.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: oven-sh/setup-bun@v2
+      # The conformance oracle is CPython 3.14 itself.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node --test dist/test/ target/
+      - name: single-file bundle
+        run: node scripts/build-cli.mjs
+      - name: conformance (Node)
+        run: python3 conformance/run.py --runtime node --show 20
+      - name: conformance (Deno)
+        run: python3 conformance/run.py --runtime deno --show 20
+      - name: conformance (Bun)
+        run: python3 conformance/run.py --runtime bun --show 20
+      - name: mpmath test suite under CPython and pyjs
+        run: |
+          python3 -m pip install mpmath==1.3.0
+          python3 bench/mpmath/compare.py -j 4
