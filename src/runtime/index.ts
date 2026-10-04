@@ -8,6 +8,7 @@ import * as Ty from "./types";
 import * as B from "./builtins";
 import * as M from "./modules";
 import * as Arr from "./array";
+import "./struct";
 
 O.arrayHooks.cls = Arr.PyArray;
 O.arrayHooks.get = Arr.arrayGetitem;
@@ -216,6 +217,7 @@ export function localsDict(names: string[], values: any[]): Obj.PyDict {
 // The namespace exec/eval code runs in: explicit globals (and locals), or
 // the caller's module plus, inside a function, a snapshot of its locals.
 function execNamespace(globals: any, locals: any, g: any, callerLocals: any): any {
+  if (locals !== undefined && locals !== null && !(locals instanceof Obj.PyDict) && Ty.lookupDunder(locals, "__getitem__") === undefined) raise(T.TypeError, `locals must be a mapping or None, not ${typeName(locals)}`);
   if (globals !== undefined && globals !== null) {
     if (!(globals instanceof Obj.PyDict)) raise(T.TypeError, `globals must be a dict, not ${typeName(globals)}`);
     if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", B.builtins);
@@ -223,6 +225,7 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
     return locals !== undefined && locals !== null && locals !== globals ? layered(Obj.namespaceOf(locals), ns) : ns;
   }
   if (g === null || g === undefined) g = Obj.dictGet(M.sysModules, "__main__") ?? Ty.newModule("__main__");
+  if (locals !== undefined && locals !== null) return layered(Obj.namespaceOf(locals), g);
   if (callerLocals !== null && callerLocals !== undefined) return layered(Obj.namespaceOf(callerLocals), g);
   return g;
 }

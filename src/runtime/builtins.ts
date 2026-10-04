@@ -1,6 +1,6 @@
 // Builtin functions, the builtins module, stdout, and builtin modules.
 
-import { writeSync } from "fs";
+import { writeSync, readSync } from "fs";
 import {
   T, PyType, FloatBox, PyDict, DONE, NotImplemented, Ellipsis, typeOf, typeName, lookupType, isType, raise, builtin, sig, tuple,
   isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity,
@@ -44,6 +44,44 @@ Ty.method(streamType, "write", (s: StdStream, x: any) => {
 Ty.method(streamType, "flush", (s: StdStream) => (s.flush(), null));
 Ty.getset(streamType, "name", (s) => s.name);
 Ty.method(streamType, "isatty", () => false);
+Ty.method(streamType, "__repr__", (s: StdStream) => `<_io.TextIOWrapper name='${s.name}' mode='${s.fd === 0 ? "r" : "w"}' encoding='utf-8'>`);
+Ty.method(streamType, "fileno", (s: StdStream) => s.fd);
+Ty.getset(streamType, "encoding", () => "utf-8");
+Ty.getset(streamType, "closed", () => false);
+// stdin: read synchronously from fd 0.
+let stdinBuf = "", stdinEof = false;
+function stdinFill(): boolean {
+  if (stdinEof) return false;
+  const b = Buffer.alloc(65536);
+  let n = 0;
+  try {
+    n = readSync(0, b, 0, b.length, null);
+  } catch (e: any) {
+    if (e.code === "EAGAIN") return true;
+    n = 0;
+  }
+  if (n === 0) stdinEof = true;
+  else stdinBuf += b.toString("utf8", 0, n);
+  return n > 0;
+}
+export function stdinReadline(): string {
+  let i;
+  while ((i = stdinBuf.indexOf("\n")) < 0 && stdinFill());
+  i = stdinBuf.indexOf("\n");
+  const line = i < 0 ? stdinBuf : stdinBuf.slice(0, i + 1);
+  stdinBuf = stdinBuf.slice(line.length);
+  return line;
+}
+export const stdin = new StdStream(0, "<stdin>");
+Ty.method(streamType, "readline", (s: StdStream, _n: any = -1) => (s.fd === 0 ? stdinReadline() : raise(T.OSError, "not readable")));
+Ty.method(streamType, "read", (s: StdStream, n: any = -1) => {
+  if (s.fd !== 0) raise(T.OSError, "not readable");
+  while (stdinFill());
+  const k = n === null || Number(n) < 0 ? stdinBuf.length : Number(n);
+  const r = stdinBuf.slice(0, k);
+  stdinBuf = stdinBuf.slice(k);
+  return r;
+});
 
 // ------------------------------------------------------------------ builtin functions
 
@@ -68,7 +106,14 @@ function printImpl(args: any[], sep: any, end: any, file: any, flush: any) {
   } else if (file instanceof StdStream) {
     file.write(s);
   } else {
-    callObj(getattr(file, "write"), [s]);
+    // Other files get each piece written separately, as CPython does.
+    const w = getattr(file, "write");
+    for (let i = 0; i < args.length; i++) {
+      if (i) callObj(w, [sep]);
+      const a = args[i];
+      callObj(w, [typeof a === "string" ? a : str(a)]);
+    }
+    callObj(w, [end]);
     if (O.truth(flush)) callObj(getattr(file, "flush"), []);
   }
   return null;

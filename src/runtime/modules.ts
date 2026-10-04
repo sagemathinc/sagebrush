@@ -3,7 +3,7 @@
 import { T, FloatBox, PyDict, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
-import { builtins, stdout, stderr } from "./builtins";
+import { builtins, stdout, stderr, stdin } from "./builtins";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -120,6 +120,10 @@ newBuiltinModule("sys", (m) => {
   m.platform = process.platform === "win32" ? "win32" : process.platform;
   m.stdout = stdout;
   m.stderr = stderr;
+  m.stdin = stdin;
+  m.__stdout__ = stdout;
+  m.__stderr__ = stderr;
+  m.__stdin__ = stdin;
   m.modules = sysModules;
   m.path = [];
   m.flags = Ty.newModule("flags");

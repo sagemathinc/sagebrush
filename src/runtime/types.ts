@@ -1399,26 +1399,34 @@ method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(
 
 // ------------------------------------------------------------------ bytes, bytearray
 
-function toBytes(x: any, encoding: any = undefined): Uint8Array {
+const Ty_lookup = (x: any, name: string) => lookupType(typeOf(x), name);
+function toBytes(x: any, encoding: any = undefined, errors: any = undefined): Uint8Array {
   if (x === undefined) return new Uint8Array(0);
   if (typeof x === "string") {
     if (encoding === undefined) raise(T.TypeError, "string argument without an encoding");
-    return encode(x, encoding).a;
+    return encode(x, encoding, errors ?? "strict").a;
   }
+  if (encoding !== undefined) raise(T.TypeError, typeof x === "string" ? "" : "encoding without a string argument");
   if (O.isPyInt(x)) {
     if (typeof x === "bigint" || Number(x) > 2 ** 32) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
     if (Number(x) < 0) raise(T.ValueError, "negative count");
     return new Uint8Array(Number(x));
   }
-  if (x instanceof PyBytes) return x.a.slice(0, x.n);
+  const buf = O.bufferOf(x);
+  if (buf !== undefined) return buf.slice();
+  if (typeof x === "object" && x !== null && Ty_lookup(x, "__bytes__") !== undefined) {
+    const r = Ty_lookup(x, "__bytes__")(x);
+    if (!(r instanceof PyBytes)) raise(T.TypeError, `__bytes__ returned non-bytes (type ${typeName(r)})`);
+    return r.a.slice(0, r.n);
+  }
   return Uint8Array.from(O.toArray(x).map((v) => {
     if (!O.isPyInt(v)) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
     if (v < 0 || v > 255) raise(T.ValueError, "bytes must be in range(0, 256)");
     return Number(v);
   }));
 }
-const bytesType = builtinType("bytes", [object], (x: any = undefined, enc: any = undefined) => new PyBytes(toBytes(x, enc)));
-const bytearray = builtinType("bytearray", [object], (x: any = undefined, enc: any = undefined) => new PyByteArray(toBytes(x, enc)));
+const bytesType = builtinType("bytes", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyBytes(toBytes(x, enc, errors)));
+const bytearray = builtinType("bytearray", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyByteArray(toBytes(x, enc, errors)));
 bindClass(PyBytes, bytesType);
 bindClass(PyByteArray, bytearray);
 for (const bt of [bytesType, bytearray]) {
