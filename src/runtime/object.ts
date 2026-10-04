@@ -133,12 +133,30 @@ export function objectType(name: string, bases: PyType[], dict: Map<string, any>
   cls.$ctor = Ctor;
   cls.$jsBase = layout === null ? null : layout === ListLayout || layout === TupleLayout ? layout : Ctor;
   finishType(cls, name, bases, dict, module);
+  if (layout !== null && layout.prototype instanceof PrimBox) {
+    const i = cls.$mro.findIndex((c) => c.$ctor === null && c.$jsBase !== undefined && c.$jsBase !== null);
+    const px = hooks.primProxy(cls.$mro[i]);
+    if (!cls.$mro.includes(px)) cls.$mro.splice(i, 0, px);
+    refreshFlags(cls);
+  }
   return cls;
 }
 
 // Layout markers for subclasses of list and tuple (see objectType).
 export class ListLayout {}
 export class TupleLayout {}
+
+// Instances of Python subclasses of int, float and str box the primitive
+// value in `$v`.  The subclass's MRO gets a hidden copy of the base type
+// whose methods unbox their arguments (see primProxy in types.ts).
+export class PrimBox {
+  declare $cls: any;
+  $v: any;
+}
+export class IntLayout extends PrimBox {}
+export class FloatLayout extends PrimBox {}
+export class StrLayout extends PrimBox {}
+export const unbox = (x: any): any => (x instanceof PrimBox ? x.$v : x);
 
 export function isType(x: any): x is PyType {
   return typeof x === "function" && x.$dict !== undefined;
@@ -778,10 +796,11 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string } = {
+export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType } = {
   hash: () => 0,
   eq: (a, b) => a === b,
   repr: (x) => String(x),
+  primProxy: (b) => b,
 };
 
 function primitiveKey(k: any): any {
@@ -798,6 +817,9 @@ function primitiveKey(k: any): any {
         const v = k.v + 0;
         return Number.isSafeInteger(v) ? v : Number.isFinite(v) ? BigInt(v) : v;
       }
+      // A str/int/float subclass keeping the base __hash__ and __eq__ is
+      // the same key as its value.
+      if (k instanceof PrimBox && lookupType(k.$cls, "__hash__")?.$unboxing === true && lookupType(k.$cls, "__eq__")?.$unboxing === true) return primitiveKey(k.$v);
   }
   return undefined;
 }
