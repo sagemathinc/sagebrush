@@ -245,13 +245,22 @@ export abstract class BaseParser {
   // ---- running
 
   abstract file_rule(): any;
+  abstract eval_rule(): any;
+  abstract interactive_rule(): any;
 
-  /** _PyPegen_run_parser for file input. */
-  run(): any {
+  /** The grammar's start rule for a compile() mode. */
+  private start(mode: string): any {
+    if (mode === "eval") return this.eval_rule();
+    if (mode === "single") return this.interactive_rule();
+    return this.file_rule();
+  }
+
+  /** _PyPegen_run_parser; mode is "exec" (file input), "eval" or "single". */
+  run(mode = "exec"): any {
     let res: any = null;
     let err: PegenError | null = null;
     try {
-      res = this.file_rule();
+      res = this.start(mode);
     } catch (e) {
       if (!(e instanceof PegenError)) throw e;
       err = e;
@@ -265,7 +274,7 @@ export abstract class BaseParser {
       this.mark = 0;
       this.call_invalid_rules = true;
       try {
-        this.file_rule();
+        this.start(mode);
       } catch (e) {
         if (!(e instanceof PegenError)) throw e;
         err = e;

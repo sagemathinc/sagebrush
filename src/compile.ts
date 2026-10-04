@@ -11,7 +11,7 @@ import { R } from "./runtime/index";
 const builtinNames = new Set(Object.keys(R.builtins));
 
 export function compile(source: string, filename: string, moduleName: string, evalMode = false): Compiled {
-  const mod = parse(source, filename);
+  const mod = parse(source, filename, evalMode ? "eval" : "exec");
   try {
     return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body, evalMode);
   } catch (e) {
@@ -21,10 +21,14 @@ export function compile(source: string, filename: string, moduleName: string, ev
 }
 
 function syntaxError(e: PySyntaxError): any {
-  const err = R.T.SyntaxError(e.msg);
+  const cls = (R.T as any)[e.type] ?? R.T.SyntaxError;
+  const err = cls(e.msg);
   err.filename = e.filename;
   err.lineno = e.lineno;
   err.text = e.text;
+  err.offset = e.offset;
+  err.end_lineno = e.end_lineno;
+  err.end_offset = e.end_offset;
   return err;
 }
 
