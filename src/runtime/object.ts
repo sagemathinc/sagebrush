@@ -1052,6 +1052,8 @@ function arityError(name: string, min: number, max: number, n: number, self: boo
 // raise TypeError.  The wrapper has a fixed parameter list so V8 inlines it.
 export function checkArity(f: any, name: string, self: boolean, range?: [number, number]): any {
   let [min, max] = range ?? jsArity(f);
+  // A method written without parameters still receives self.
+  if (self && range === undefined && max === 0) max = 1;
   // Keyword-only parameters cannot be passed positionally.
   const s = f.$sig;
   if (range === undefined && s !== undefined && s !== null && s.vararg === null && s.kwonly.length > 0) {
