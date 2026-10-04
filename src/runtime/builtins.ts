@@ -186,7 +186,11 @@ function metaCheck(spec: any, name: string): any {
 }
 function isinstanceImpl(x: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => isinstanceImpl(x, s));
-  if (!isType(spec)) raise(T.TypeError, "isinstance() arg 2 must be a type, a tuple of types, or a union");
+  if (!isType(spec)) {
+    const ic = lookupType(typeOf(spec), "__instancecheck__");
+    if (ic !== undefined) return O.truth(ic(spec, x));
+    raise(T.TypeError, "isinstance() arg 2 must be a type, a tuple of types, or a union");
+  }
   const t = typeOf(x);
   if (t === spec) return true;
   const mc = metaCheck(spec, "__instancecheck__");
@@ -200,14 +204,18 @@ function subclassHook(spec: any, c: PyType): boolean {
   if (spec.$hookVer !== spec.$ver) {
     spec.$hookVer = spec.$ver;
     const h = spec.$ctor === null ? undefined : lookupType(spec, "__subclasshook__");
-    spec.$hook = h instanceof Ty.PyClassMethod ? h : null;
+    spec.$hook = h instanceof Ty.PyClassMethod && h.f.$default !== true ? h : null;
   }
   return spec.$hook !== null && spec.$hook.f(spec, c) === true;
 }
 function issubclassImpl(c: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => issubclassImpl(c, s));
   if (!isType(c)) raise(T.TypeError, "issubclass() arg 1 must be a class");
-  if (!isType(spec)) raise(T.TypeError, "issubclass() arg 2 must be a class, a tuple of classes, or a union");
+  if (!isType(spec)) {
+    const sc = lookupType(typeOf(spec), "__subclasscheck__");
+    if (sc !== undefined) return O.truth(sc(spec, c));
+    raise(T.TypeError, "issubclass() arg 2 must be a class, a tuple of classes, or a union");
+  }
   const mc = metaCheck(spec, "__subclasscheck__");
   if (mc !== undefined) return O.truth(mc(spec, c));
   return c.$mro.includes(spec) || subclassHook(spec, c);
