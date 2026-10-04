@@ -21,7 +21,9 @@ Here $[\chi]$ is the Galois orbit of $\chi$, and `factor` is a callback (FLINT i
 
 It includes 2692 spaces that are zero because $\chi(-1)\ne(-1)^k$, characters of order up to 113, CM forms, and forms with up to 8 inner twists.
 
-Time on 16 cores: 72 s for all 5533 spaces, with peak RSS 71 MB.
+**Further, for $Nk^2\le2000$: 15666 of 15666 newspaces agree (15660 orbits).** That is every space up to $\mathbb{Q}$-dimension 2016; the 66 larger ones, up to dimension 9282, were skipped. The run took 18 minutes on 16 cores with 122 MB peak RSS. The slowest space was 453.2.w at 14 s. Spaces are processed one at a time, so most of the machine sits idle during each FLINT factorization.
+
+Time on 16 cores for $Nk^2\le1000$: 72 s for all 5533 spaces, with peak RSS 71 MB.
 - Up to dimension 200 (5369 spaces): 32 s.
 - The other 164 (dimensions 201–2016): 40 s. The largest, `227.2.c`, is a single orbit of dimension 2016; its character has order 113 and its relative dimension is 18. It takes 3.5 s.
 
