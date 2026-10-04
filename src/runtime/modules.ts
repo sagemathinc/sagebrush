@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { T, FloatBox, PyDict, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName } from "./object";
+import { T, FloatBox, PyDict, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr } from "./builtins";
@@ -332,6 +332,31 @@ newBuiltinModule("math", (m) => {
 });
 
 // ------------------------------------------------------------------ __future__
+
+newBuiltinModule("types", (m) => {
+  m.FunctionType = m.LambdaType = T.function;
+  m.MethodType = T.method;
+  m.BuiltinFunctionType = m.BuiltinMethodType = T.builtin_function_or_method;
+  m.GeneratorType = T.generator;
+  m.CoroutineType = T.coroutine;
+  m.ModuleType = T.module;
+  m.NoneType = T.NoneType;
+  m.NotImplementedType = T.NotImplementedType;
+  m.EllipsisType = T.ellipsis;
+  // A generator function whose generators may be awaited.
+  fn(m, "coroutine", (f: any) => {
+    if (typeof f !== "function") raise(T.TypeError, "types.coroutine() expects a callable");
+    const w: any = (...a: any[]) => mark(f(...a));
+    const mark = (g: any) => {
+      if (g !== null && typeof g === "object" && g[Symbol.toStringTag] === "Generator") g.$awaitable = true;
+      return g;
+    };
+    w.$kw = (pos: any[], names: string[], values: any[]) => mark(callKw(f, pos, names, values));
+    w.$pyfn = true;
+    for (const k of ["__name__", "__qualname__", "__module__", "__doc__"]) w[k] = f[k] ?? null;
+    return w;
+  });
+});
 
 newBuiltinModule("__future__", (m) => {
   for (const f of ["annotations", "division", "absolute_import", "print_function", "unicode_literals", "generator_stop", "nested_scopes", "generators", "with_statement", "barry_as_FLUFL"]) m[f] = true;

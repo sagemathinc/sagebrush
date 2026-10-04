@@ -1595,9 +1595,9 @@ method(generator, "close", (g: any) => {
   return r.value ?? null;
 });
 getset(generator, "gi_running", () => false);
-getset(generator, "__name__", (g: any) => g.$name ?? "<genexpr>");
-getset(generator, "__qualname__", (g: any) => g.$qualname ?? g.$name ?? "<genexpr>");
-method(generator, "__repr__", (g: any) => `<generator object ${g.$name ?? "<genexpr>"} at 0x${O.id(g).toString(16)}>`);
+getset(generator, "__name__", (g: any) => g.$fn?.__name__ ?? "<genexpr>");
+getset(generator, "__qualname__", (g: any) => g.$fn?.__qualname__ ?? "<genexpr>");
+method(generator, "__repr__", (g: any) => `<generator object ${g.$fn?.__qualname__ ?? "<genexpr>"} at 0x${O.id(g).toString(16)}>`);
 
 // ------------------------------------------------------------------ dir
 
@@ -1865,3 +1865,27 @@ export function structseq(name: string, fields: string[], values: any[]): any {
   for (const v of values) o.push(v);
   return o;
 }
+
+// ------------------------------------------------------------------ coroutines
+
+// `async def` compiles to a JS generator function whose generator objects
+// have type coroutine (via `$cls` on the function's prototype).
+export const coroutine = builtinType("coroutine", [object], () => raise(T.TypeError, "cannot create 'coroutine' instances"));
+for (const n of ["send", "throw", "close"]) coroutine.$dict.set(n, generator.$dict.get(n));
+method(coroutine, "__repr__", (g: any) => `<coroutine object ${g.$fn?.__qualname__ ?? "?"} at 0x${O.id(g).toString(16)}>`);
+// coro.__await__() is an iterator over the same frames.
+export class CoroWrapper {
+  constructor(public g: any) {}
+  $next(): any {
+    const r = O.genStep(this.g, false, undefined);
+    return r.done ? (O.lastStop.e = O.stopIteration(r.value), DONE) : r.value;
+  }
+}
+const coroWrapper = iteratorType("coroutine_wrapper", CoroWrapper);
+method(coroWrapper, "send", (w: CoroWrapper, v: any) => genResult(O.genStep(w.g, false, v)));
+method(coroWrapper, "throw", (w: CoroWrapper, e: any, v: any = undefined) => generator.$dict.get("throw")(w.g, e, v));
+method(coroWrapper, "close", (w: CoroWrapper) => generator.$dict.get("close")(w.g));
+method(coroutine, "__await__", (g: any) => new CoroWrapper(g));
+getset(coroutine, "cr_running", () => false);
+getset(coroutine, "__name__", (g: any) => g.$fn?.__name__ ?? "?");
+getset(coroutine, "__qualname__", (g: any) => g.$fn?.__qualname__ ?? "?");

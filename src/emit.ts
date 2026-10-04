@@ -190,6 +190,8 @@ export class Emitter {
         return `(yield ${e.value === null ? "null" : this.ex(e.value)})`;
       case "YieldFrom":
         return `yfr(yield* yieldFrom(${this.ex(e.value)}))`;
+      case "Await":
+        return `yfr(yield* awaitIter(${this.ex(e.value)}))`;
       case "NamedExpr": {
         const t = this.temp();
         let s: Scope = this.fn.scope;
@@ -808,14 +810,14 @@ export class Emitter {
     const locals = [...scope.bound].filter((n) => !params.includes(n) && resolve(scope, n).kind === "local").map(js);
     const star = scope.isGenerator ? "*" : "";
     const f = this.temp();
-    this.w(`${f} = defn(function${star} ${self}(${ps}) {`);
+    this.w(`${f} = defn(${scope.isAsync ? "markCoro(" : ""}function${star} ${self}(${ps}) {`);
     this.indent++;
     for (const l of pro) this.w(l);
     if (locals.length + decls.length) this.w(`let ${[...locals, ...decls].join(", ")};`);
     this.indent--;
     this.splice(lines);
     this.line = st.line;
-    this.w(`}, ${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc});`);
+    this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc});`);
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, f)));
   }
 
@@ -968,7 +970,7 @@ const RUNTIME_NAMES = [
   "neg", "pos", "invert", "truth", "lt", "le", "gt", "ge", "eq", "ne", "is", "contains",
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",
   "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf",
-  "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr",
+  "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr", "awaitIter", "markCoro",
   "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
   "importModule", "importTop", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
   "sortedKeys",
