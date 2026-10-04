@@ -1139,6 +1139,7 @@ const viewTypes = ["dict_keys", "dict_values", "dict_items"].map((name, kind) =>
   const vt = builtinType(name, [object], () => raise(T.TypeError, `cannot create '${name}' instances`));
   method(vt, "__iter__", (v: DictView) => new O.DictIter(v.d, v.kind));
   method(vt, "__len__", (v: DictView) => v.d.$m.size);
+  if (kind !== 1) vt.$dict.set("__hash__", null);
   method(vt, "__reversed__", (v: DictView) => new O.ListIter(O.toArray(new O.DictIter(v.d, v.kind)).reverse()));
   method(vt, "__repr__", (v: DictView) => `${name}(${repr(O.toArray(new O.DictIter(v.d, v.kind)))})`);
   method(vt, "__contains__", (v: DictView, x: any) => {
@@ -1300,8 +1301,8 @@ const setMethods = (cls: PyType, mutable: boolean) => {
     return null;
   });
   for (const [name, f] of [["intersection_update", "and"], ["difference_update", "sub"], ["symmetric_difference_update", "xor"]] as const) {
-    method(cls, name, (s: O.PySet, o: any) => {
-      s.$d = O.setOp(s, asSet(o), f).$d;
+    method(cls, name, (s: O.PySet, ...os: any[]) => {
+      for (const o of os) s.$d = O.setOp(s, asSet(o), f).$d;
       return null;
     });
   }
@@ -1347,9 +1348,8 @@ method(range, "__contains__", (r: PyRange, x: any) => {
 });
 method(range, "__getitem__", (r: PyRange, k: any) => {
   if (k instanceof O.PySlice) {
-    const [start, step, n] = O.sliceIndices(k, r.length);
-    const s = r.start + start * r.step;
-    return new PyRange(s, s + n * step * r.step, step * r.step);
+    const [a, b, st] = O.sliceAdjust(k, r.length);
+    return new PyRange(r.start + a * r.step, r.start + b * r.step, st * r.step);
   }
   return r.start + O.seqIndex(k, r.length, "range object") * r.step;
 });
@@ -1373,9 +1373,9 @@ getset(sliceType, "start", (s) => s.start);
 getset(sliceType, "stop", (s) => s.stop);
 getset(sliceType, "step", (s) => s.step);
 method(sliceType, "indices", (s: O.PySlice, n: any) => {
-  const len = Number(n);
-  const [start, step, count] = O.sliceIndices(s, len);
-  return tuple([start, start + count * step, step]);
+  const len = Number(O.index(n));
+  if (len < 0) raise(T.ValueError, "length should not be negative");
+  return tuple(O.sliceAdjust(s, len));
 });
 method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(s.stop)}, ${repr(s.step)})`);
 
@@ -1543,7 +1543,8 @@ export class ReversedIter {
 iteratorType("reversed", ReversedIter, (x: any) => {
   if (Array.isArray(x)) return new ReversedIter(x, x.length - 1, (i) => x[i]);
   const r = lookupType(typeOf(x), "__reversed__");
-  if (r !== undefined) return O.iter(r(x));
+  if (r === null) raise(T.TypeError, `'${typeName(x)}' object is not reversible`);
+  if (r !== undefined) return r(x);
   const gi = lookupType(typeOf(x), "__getitem__");
   if (gi === undefined) raise(T.TypeError, `'${typeName(x)}' object is not reversible`);
   if (typeof x === "string") {

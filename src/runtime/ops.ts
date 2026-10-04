@@ -1271,7 +1271,8 @@ export function index(x: any): number | bigint {
 }
 
 // CPython's PySlice_GetIndicesEx: [start, step, count].
-export function sliceIndices(s: PySlice, len: number): [number, number, number] {
+// slice.indices(len): CPython's PySlice_AdjustIndices.
+export function sliceAdjust(s: PySlice, len: number): [number, number, number] {
   const step = s.step === null ? 1 : Number(index(s.step));
   if (step === 0) raise(T.ValueError, "slice step cannot be zero");
   const lo = step < 0 ? -1 : 0, hi = step < 0 ? len - 1 : len;
@@ -1281,8 +1282,11 @@ export function sliceIndices(s: PySlice, len: number): [number, number, number] 
     if (n < 0) return Math.max(n + len, lo);
     return Math.min(n, hi);
   };
-  const start = fix(s.start, step < 0 ? hi : lo);
-  const stop = fix(s.stop, step < 0 ? lo : hi);
+  return [fix(s.start, step < 0 ? hi : lo), fix(s.stop, step < 0 ? lo : hi), step];
+}
+
+export function sliceIndices(s: PySlice, len: number): [number, number, number] {
+  const [start, stop, step] = sliceAdjust(s, len);
   let n = 0;
   if (step > 0 ? start < stop : start > stop) n = Math.floor((stop - start - (step > 0 ? 1 : -1)) / step) + 1;
   return [start, step, n];
