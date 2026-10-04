@@ -87,6 +87,17 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string) => {
   return runInThisContext(compiled.code, { filename: jsName })(ns, R);
 };
 
+// The pure-Python library (../lib) can be embedded in a single-file build:
+// the bundler defines globalThis.__PYJS_LIB__ (relative path -> source),
+// served under the virtual directory LIB_VIRTUAL.
+export const LIB_VIRTUAL = "/$pyjs/lib";
+const embedded: Record<string, string> | undefined = (globalThis as any).__PYJS_LIB__;
+const fileExists = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] !== undefined : existsSync(p));
+const fileRead = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] : readFileSync(p, "utf8"));
+export function libDir(): string {
+  return embedded !== undefined ? LIB_VIRTUAL : resolvePath(__dirname, "../../lib");
+}
+
 // Import search: directories in sys.path, `name.py` or `name/__init__.py`.
 R.loader.load = (name: string) => {
   const sys = R.importModule("sys");
@@ -99,11 +110,31 @@ R.loader.load = (name: string) => {
   const leaf = parts[parts.length - 1];
   for (const d of dirs) {
     const pkg = join(d, leaf, "__init__.py");
-    if (existsSync(pkg)) return execModule(readFileSync(pkg, "utf8"), pkg, name, true);
+    if (fileExists(pkg)) return execModule(fileRead(pkg), pkg, name, true);
     const file = join(d, leaf + ".py");
-    if (existsSync(file)) return execModule(readFileSync(file, "utf8"), file, name);
+    if (fileExists(file)) return execModule(fileRead(file), file, name);
   }
   return null;
 };
+
+// `python -m name`: the source of module `name` (a package runs its
+// __main__), found as an import would, without importing it.
+export function findModuleSource(name: string): [string, string] | null {
+  const sys = R.importModule("sys");
+  const parts = name.split(".");
+  let dirs: string[] = R.toArray(sys.path);
+  if (parts.length > 1) {
+    const parent = R.importModule(parts.slice(0, -1).join("."));
+    dirs = parent?.__path__ ? R.toArray(parent.__path__) : [];
+  }
+  const leaf = parts[parts.length - 1];
+  for (const d of dirs) {
+    const main = join(d, leaf, "__main__.py");
+    if (fileExists(main)) return [fileRead(main), main];
+    const file = join(d, leaf + ".py");
+    if (fileExists(file)) return [fileRead(file), file];
+  }
+  return null;
+}
 
 export { initParser, R };
