@@ -427,7 +427,7 @@ export function hasInstanceDict(o: any): boolean {
 }
 
 function descrGet(d: any, o: any, t: PyType): any {
-  if (typeof d === "function") return d.$pyfn === true && o !== null ? bindMethod(d, o) : d;
+  if (typeof d === "function") return d.$pyfn === true && o !== null && d.$static !== true ? bindMethod(d, o) : d;
   if (d !== null && typeof d === "object") {
     const g = lookupType(typeOf(d), "__get__");
     if (g !== undefined) return g(d, o, t);
@@ -551,6 +551,7 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
 }
 
 export const objectSetattr = pyfn(function __setattr__(o: any, name: string, v: any) {
+  if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
   genericSetattr(o, name, v, typeOf(o));
   return null;
 }, "__setattr__");
@@ -675,7 +676,7 @@ function callMethodMiss(o: any, name: string, args: any[], S: any): any {
     const cls: PyType = o.$cls;
     if (!cls.$customGet && !(cls.$ctor !== null && hasOwn.call(o, name))) {
       const d = lookupType(cls, name);
-      if (typeof d === "function" && d.$pyfn === true) {
+      if (typeof d === "function" && d.$pyfn === true && d.$static !== true) {
         fillCallSite(S, cls, d);
         return d(o, ...args);
       }

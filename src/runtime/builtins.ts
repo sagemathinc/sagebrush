@@ -372,8 +372,12 @@ define("isinstance", isinstanceImpl);
 define("issubclass", issubclassImpl);
 define("hasattr", hasattrImpl);
 define("getattr", getattrImpl, [2, 3]);
-define("setattr", (o: any, n: string, v: any) => (setattr(o, n, v), null));
-define("delattr", (o: any, n: string) => (delattr(o, n), null));
+const attrName = (n: any) => {
+  if (typeof n !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(n)}'`);
+  return n;
+};
+define("setattr", (o: any, n: string, v: any) => (setattr(o, attrName(n), v), null));
+define("delattr", (o: any, n: string) => (delattr(o, attrName(n)), null));
 define("iter", iterImpl, [1, 2]);
 // async for / async with (see frontend.ts), and the aiter/anext builtins.
 const aiterImpl = (x: any) => {

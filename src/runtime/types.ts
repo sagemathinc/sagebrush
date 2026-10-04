@@ -5,7 +5,7 @@ import {
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, instanceDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
+  hooks, unbox, instanceDict, PrimBox, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr } from "./format";
@@ -222,7 +222,7 @@ const superType = builtinType("super", [object], (cls: any, obj: any) => {
   return new PySuper(cls, obj);
 });
 bindClass(PySuper, superType);
-method(superType, "__repr__", (s: PySuper) => (s.obj === undefined ? `<super: ${repr(s.cls)}, NULL>` : `<super: ${repr(s.cls)}, ${isType(s.obj) ? repr(s.obj) : `<${typeName(s.obj)} object>`}>`));
+method(superType, "__repr__", (s: PySuper) => `<super: <class '${s.cls.$name}'>, ${s.obj === undefined ? "NULL" : isType(s.obj) ? `<class '${s.obj.$name}'>` : `<${typeName(s.obj)} object>`}>`);
 method(superType, "__getattribute__", (s: PySuper, name: string) => {
   const start = isType(s.obj) && s.obj.$mro.includes(s.cls) ? s.obj : typeOf(s.obj);
   const mro = start.$mro;
@@ -283,7 +283,7 @@ method(methodType, "__call__", (m: any, ...a: any[]) => m(...a));
 // Other attributes of a bound method are those of its function.
 method(methodType, "__getattr__", (m: any, name: string) => getattr(m.$func, name));
 method(methodType, "__eq__", (m: any, o: any) => (typeof o === "function" && o.$self !== undefined ? m.$func === o.$func && m.$self === o.$self : NotImplemented));
-method(methodType, "__hash__", (m: any) => O.hashAny(m.$self) ^ O.id(m.$func));
+method(methodType, "__hash__", (m: any) => (O.id(m.$self) / 32) ^ O.id(m.$func));
 
 const moduleType = objectType("module", [object], new Map(), "builtins");
 T.module = moduleType;
@@ -348,8 +348,11 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   if (!ns.has("__module__")) ns.set("__module__", module);
   if (!ns.has("__qualname__")) ns.set("__qualname__", qualname);
   if (ns.has("__eq__") && !ns.has("__hash__")) ns.set("__hash__", null);
+  // __new__ is implicitly a static method.
   const nw = ns.get("__new__");
   if (nw instanceof PyStaticMethod) ns.set("__new__", nw.f);
+  const nw2 = ns.get("__new__");
+  if (typeof nw2 === "function") nw2.$static = true;
   for (const k of ["__init_subclass__", "__class_getitem__"]) {
     const f = ns.get(k);
     if (typeof f === "function") ns.set(k, new PyClassMethod(f));
@@ -528,7 +531,11 @@ export function intCall(x: any = 0, base: any = undefined): any {
   if (typeof x === "string" || x instanceof PyBytes) return intCall(x, 10);
   for (const name of ["__int__", "__index__", "__trunc__"]) {
     const f = lookupType(typeOf(x), name);
-    if (f !== undefined) return f(x);
+    if (f !== undefined) {
+      const r = f(x);
+      if (!O.isPyInt(r) && !(r instanceof PrimBox && isinstance(r, int))) raise(T.TypeError, `${name}() returned non-int (type ${typeName(r)})`);
+      return typeof r === "boolean" ? +r : unbox(r);
+    }
   }
   raise(T.TypeError, `int() argument must be a string, a bytes-like object or a real number, not '${typeName(x)}'`);
 }

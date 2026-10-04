@@ -873,7 +873,13 @@ export function hashAny(x: any): number {
   const t = typeOf(x);
   const f = lookupType(t, "__hash__");
   if (f === null) raise(T.TypeError, `unhashable type: '${t.$name}'`);
-  if (f !== undefined && f !== objectHash) return Number(f(x));
+  if (f !== undefined && f !== objectHash) {
+    const r = f(x);
+    if (typeof r === "number" && isInt(r)) return r;
+    if (typeof r === "boolean") return +r;
+    if (typeof r === "bigint") return hashInt(r);
+    raise(T.TypeError, "__hash__ method should return an integer");
+  }
   return id(x) / 32;
 }
 
