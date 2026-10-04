@@ -1,5 +1,5 @@
 {
-  "name": "pyjs-spike",
+  "name": "sagebrush-dev",
   "private": true,
   "type": "commonjs",
   "scripts": {
@@ -7,10 +7,6 @@
     "build:cli": "tsc -p . && node scripts/build-cli.mjs",
     "build:exe": "tsc -p . && node scripts/build-cli.mjs --sea --bun --deno",
     "test": "tsc -p . && node --test 'dist/test/*.test.js' 'target/*.test.js'"
-  },
-  "dependencies": {
-    "tree-sitter-python": "0.25.0",
-    "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
