@@ -504,6 +504,7 @@ export function iadd(a: any, b: any): any {
 }
 export function isub(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return sub(a, b);
+  if (a instanceof PySet && b instanceof PySet) return setInplace(a, b, "sub");
   return inplace(a, b, "sub", "__isub__");
 }
 export function imul(a: any, b: any): any {
