@@ -1122,10 +1122,12 @@ export function globalsDict(g: any): PyDict {
 }
 // The namespace object behind a globals dict, or a proxy over a plain dict
 // (exec/eval with an explicit globals mapping).
+export const NS_DICT = Symbol("globals dict");
+export const NS_GLOBALS = Symbol("globals of a layered namespace");
 export function namespaceOf(d: any): any {
   if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (typeof k === "string" ? dictGet(d, k) : undefined),
+    get: (_t, k) => (typeof k === "string" ? dictGet(d, k) : k === NS_DICT ? d : undefined),
     set: (_t, k, v) => (typeof k === "string" && dictSet(d, k, v), true),
     has: (_t, k) => typeof k === "string" && dictGet(d, k) !== undefined,
     deleteProperty: (_t, k) => (typeof k === "string" && dictDelete(d, k), true),

@@ -22,7 +22,7 @@ Error.stackTraceLimit = 200;
 // Create a Python function from a compiled implementation.  Simple
 // signatures (positional parameters with optional defaults) call the
 // implementation directly; others go through a binding wrapper.
-export function defn(impl: any, name: string, qualname: string, module: string, defaults: any[] | null, kwdefaults: Obj.PyDict | null, sig: Obj.Signature, doc: any): any {
+export function defn(impl: any, name: string, qualname: string, module: string, defaults: any[] | null, kwdefaults: Obj.PyDict | null, sig: Obj.Signature, doc: any, g?: any): any {
   const simple = sig.vararg === null && sig.kwarg === null && sig.kwonly.length === 0;
   let f = impl;
   if (!simple) {
@@ -40,6 +40,7 @@ export function defn(impl: any, name: string, qualname: string, module: string, 
   f.__doc__ = doc;
   f.__defaults__ = defaults === null ? null : tuple(defaults);
   f.__kwdefaults__ = kwdefaults;
+  f.$globals = g;
   // Generator and coroutine objects find their function's name through
   // their prototype (the generator function's `prototype`).
   if (impl.prototype !== undefined && Object.getPrototypeOf(impl) === GeneratorFunctionProto) impl.prototype.$fn = f;
@@ -228,7 +229,7 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
 // Reads see `front` then `back`; writes go to `front`.
 function layered(front: any, back: any): any {
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (k in front && front[k] !== undefined ? front[k] : back[k]),
+    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k in front && front[k] !== undefined ? front[k] : back[k]),
     set: (_t, k, v) => ((front[k] = v), true),
     has: (_t, k) => k in front || k in back,
     deleteProperty: (_t, k) => (delete front[k], true),
@@ -256,7 +257,7 @@ function sourceOf(src: any, fn: string): [string, string] {
 
 export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
   const [text, filename] = sourceOf(src, "exec");
-  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), "exec", filename);
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename);
   return null;
 }
 export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
@@ -272,6 +273,13 @@ function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
 }
 Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
+B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
+  if (v !== null) {
+    B.builtins._ = v;
+    B.stdout.write(F.repr(v) + "\n");
+  }
+  return null;
+}, "displayhook");
 B.builtins.exec = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => execIn(src, gl ?? null, lo, null, null), "exec");
 B.builtins.eval = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => evalIn(src, gl ?? null, lo, null, null), "eval");
 B.builtins.globals = Obj.builtin(() => raise(T.RuntimeError, "globals() called indirectly is not supported"), "globals");
