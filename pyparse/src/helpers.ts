@@ -329,8 +329,13 @@ export class UnicodeNameTable {
   private static prefixes: string[] = [];
   static lookup(name: string): number | undefined {
     if (UnicodeNameTable.map === null) {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const t = require("./unames.gen");
+      let t: any;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        t = require("./unames.gen");
+      } catch {
+        return undefined; // the optional name table is not bundled
+      }
       const m = new Map<string, number>();
       for (const line of (t.DATA as string).split("\n")) {
         const i = line.lastIndexOf(";");
