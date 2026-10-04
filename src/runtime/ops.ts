@@ -799,18 +799,47 @@ const HASH_MOD = (1n << 61n) - 1n;
 
 function hashInt(x: number | bigint): number {
   if (typeof x === "number" && x >= -1073741824 && x < 1073741824) return x === -1 ? -2 : x;
+  return Number(hashIntExact(x));
+}
+function hashIntExact(x: number | bigint): bigint {
   const b = big(x);
   const neg = b < 0n;
   let h = (neg ? -b : b) % HASH_MOD;
   if (neg) h = -h;
-  const r = Number(h);
-  return r === -1 ? -2 : r;
+  return h === -1n ? -2n : h;
+}
+
+// hash() as CPython computes it, exactly (dict internals use hashAny,
+// which may round large values to doubles).
+export function hashExact(x: any): any {
+  if (typeof x === "boolean") return +x;
+  if (isPyInt(x)) return normBig(hashIntExact(x));
+  if (typeof x === "number" || x instanceof FloatBox) {
+    const v = fv(x)!;
+    if (!Number.isFinite(v) || (isInt(v) && Math.abs(v) < 2 ** 52)) return hashFloat(v);
+    if (isInt(v)) return normBig(hashIntExact(BigInt(v)));
+    return normBig(hashFloatExact(v));
+  }
+  if (x !== null && typeof x === "object" && x.$cls !== undefined && !(x instanceof PySet)) {
+    const f = lookupType(x.$cls, "__hash__");
+    if (f !== undefined && f !== null && f !== objectHash) {
+      const r = f(x);
+      if (typeof r === "bigint") return normBig(hashIntExact(r));
+      if (typeof r === "boolean") return +r;
+      if (typeof r === "number" && isInt(r)) return r === -1 ? -2 : r;
+      raise(T.TypeError, "__hash__ method should return an integer");
+    }
+  }
+  return hashAny(x);
 }
 
 // CPython's _Py_HashDouble.
 function hashFloat(v: number): number {
   if (!Number.isFinite(v)) return Number.isNaN(v) ? 0 : v > 0 ? 314159 : -314159;
   if (isInt(v)) return hashInt(isSafe(v) ? v : BigInt(v));
+  return Number(hashFloatExact(v));
+}
+function hashFloatExact(v: number): bigint {
   let m = Math.abs(v);
   let e = 0;
   while (m >= 1) {
@@ -833,9 +862,8 @@ function hashFloat(v: number): number {
   }
   const ee = ((e % 61) + 61) % 61;
   x = ((x << BigInt(ee)) & HASH_MOD) | (x >> BigInt(61 - ee));
-  let r = Number(x);
-  if (v < 0) r = -r;
-  return r === -1 ? -2 : r;
+  if (v < 0) x = -x;
+  return x === -1n ? -2n : x;
 }
 
 // FNV-1a.  CPython randomizes str hashes per process, so programs cannot
