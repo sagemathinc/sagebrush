@@ -178,7 +178,7 @@ method(property, "setter", (p: PyProperty, f: any) => new PyProperty(p.fget, f, 
 method(property, "deleter", (p: PyProperty, f: any) => new PyProperty(p.fget, p.fset, f, p.doc));
 getset(property, "fget", (p) => p.fget);
 getset(property, "fset", (p) => p.fset);
-getset(property, "__doc__", (p) => p.doc ?? (p.fget !== null ? p.fget.__doc__ ?? null : null));
+getset(property, "__doc__", (p) => p.doc ?? (p.fget !== null ? p.fget.__doc__ ?? null : null), (p, v) => void (p.doc = v));
 
 // asDunder(): the function implicit special-method calls use, which take
 // the instance first (CPython binds the descriptor instead).
