@@ -4,9 +4,9 @@ Round two of the smoke test. Paste the prompt below into **claude.ai** and
 **ChatGPT** the same way as before, then copy the grey "SAGEBRUSH DEMO"
 block back.
 
-The page `import()`s two single-file modules from
-`cdn.jsdelivr.net/gh/sagemathinc/sagebrush@7dddf96…/cdn/`, the one path
-that worked in both sandboxes:
+The page `import()`s two single-file modules from the npm package
+`sagebrush-web` via `cdn.jsdelivr.net/npm/` (the only jsdelivr path Claude
+allows), falling back to `cdn.jsdelivr.net/gh/sagemathinc/sagebrush@7dddf96…/cdn/`:
 
 - `sagebrush-engine.mjs`: the Rust engines as wasm32, base64-inlined so that no `fetch()` is needed;
 - `pyparse.mjs`: CPython 3.14's parser in TypeScript.
@@ -72,23 +72,32 @@ a-invariants <input id="ainv" value="[0,0,1,-1,0]" style="width:160px"> p ≤ <i
 <pre id="report">running…</pre>
 
 <script type="module">
-const REF = "7dddf961a37a27d4f93a04ad93cfee34b452d277";
-const base = `https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@${REF}/cdn/`;
+// npm (the only jsdelivr path Claude's sandbox allows), then GitHub (works in ChatGPT and browsers).
+const BASES = [
+  "https://cdn.jsdelivr.net/npm/sagebrush-web@0.1.0/",
+  "https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@7dddf961a37a27d4f93a04ad93cfee34b452d277/cdn/",
+];
 const log = [];
 const note = (s) => { log.push(s); document.getElementById("report").textContent = "SAGEBRUSH DEMO\n" + log.join("\n"); };
 const $ = (id) => document.getElementById(id);
 
 let t = performance.now();
-let sb, py;
-try {
-  [sb, py] = await Promise.all([import(base + "sagebrush-engine.mjs"), import(base + "pyparse.mjs")]);
-  note(`OK   load engine (${(sb.wasmBytes / 1024) | 0} KB wasm) + parser: ${(performance.now() - t).toFixed(0)} ms`);
-  $("status").textContent = "ready";
-} catch (e) {
-  note("FAIL load: " + e);
-  $("status").textContent = "failed to load: " + e;
-  throw e;
+let sb, py, errors = [];
+for (const base of BASES) {
+  try {
+    [sb, py] = await Promise.all([import(base + "sagebrush-engine.mjs"), import(base + "pyparse.mjs")]);
+    note(`OK   load engine (${(sb.wasmBytes / 1024) | 0} KB wasm) + parser from ${base.split("/")[3]}: ${(performance.now() - t).toFixed(0)} ms`);
+    break;
+  } catch (e) {
+    errors.push(`${base.split("/")[3]}: ${e.message || e}`);
+  }
 }
+if (!sb) {
+  note("FAIL load: " + errors.join(" | "));
+  $("status").textContent = "failed to load: " + errors.join(" | ");
+  throw new Error("load failed");
+}
+$("status").textContent = "ready";
 
 function poly(coeffs) {
   // coeffs[j] are constant-term-first integers (strings) -> "x^3 - x^2 - 6*x"
@@ -175,5 +184,4 @@ note("     ua: " + navigator.userAgent);
 </script>
 </body>
 </html>
-
 ````
