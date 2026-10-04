@@ -56,8 +56,36 @@ jobs:
             case "$name" in *windows*.exe) ;; *windows*) name="$name.exe" ;; esac
             cp "$f" "release/$name"
           done
-          (cd release && for f in *; do xz -T0 -6 "$f"; done && sha256sum * > SHA256SUMS)
+          # Windows users get a .zip; everything else .xz
+          (cd release && for f in *; do
+             case "$f" in
+               *.exe) zip -q -j "${f%.exe}.zip" "$f" && rm "$f" ;;
+               *) xz -T0 -6 "$f" ;;
+             esac
+           done && sha256sum * > SHA256SUMS)
           ls -la release
+      # Upload to R2 (served at https://get.sagebrush.space): a tag goes to
+      # releases/<tag>/ and becomes "latest"; a manual run goes to dev/<sha>/
+      # (exercises the credentials without publishing anything).
+      - name: upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          s3() { aws s3 "$@" --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" --only-show-errors; }
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then dest="releases/$GITHUB_REF_NAME"; else dest="dev/$GITHUB_SHA"; fi
+          s3 cp release/ "s3://sagebrush-releases/$dest/" --recursive
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            printf '%s\n' "$GITHUB_REF_NAME" > latest
+            s3 cp latest s3://sagebrush-releases/latest --content-type text/plain --cache-control "max-age=60"
+            s3 cp scripts/install.sh s3://sagebrush-releases/install.sh --content-type text/plain --cache-control "max-age=300"
+          fi
+          echo "uploaded to https://get.sagebrush.space/$dest/"
+          curl -fsSI "https://get.sagebrush.space/$dest/SHA256SUMS" | head -1
       - name: publish to npm
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
