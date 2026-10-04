@@ -186,6 +186,7 @@ export function setTypeAttr(cls: PyType, name: string, value: any) {
 }
 
 export function delTypeAttr(cls: PyType, name: string) {
+  if (cls.$ctor === null && cls.$module === "builtins") raise(T.TypeError, `cannot delete '${name}' attribute of immutable type '${cls.$name}'`);
   if (!cls.$dict.delete(name)) raise(T.AttributeError, `type object '${cls.$name}' has no attribute '${name}'`);
   bumpVersion(cls);
 }

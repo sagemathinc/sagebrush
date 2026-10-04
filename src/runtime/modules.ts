@@ -107,8 +107,8 @@ newBuiltinModule("sys", (m) => {
   let limit = 1000;
   fn(m, "getrecursionlimit", () => limit);
   fn(m, "setrecursionlimit", (n: any) => ((limit = Number(n)), null));
-  fn(m, "exit", (code: any = null) => {
-    throw T.SystemExit(code);
+  fn(m, "exit", (code: any = undefined) => {
+    throw code === undefined ? T.SystemExit() : T.SystemExit(code);
   });
   fn(m, "intern", (s: string) => s);
   fn(m, "getsizeof", (_x: any) => 64);
