@@ -8,7 +8,7 @@ import {
   hooks, unbox, instanceDict, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
-import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr } from "./format";
+import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
@@ -1858,6 +1858,20 @@ hooks.primProxy = (base: PyType): PyType => {
     if (typeof v === "function" && v.$builtinMethod === true) d.set(k, unboxing(v));
     else if (v instanceof GetSet) d.set(k, new GetSet(v.name, (o) => v.get(unbox(o)), v.set));
   }
+  // int.__format__ with a float presentation type goes through float(self),
+  // which a subclass may override.
+  if (base === int) {
+    const f0 = d.get("__format__");
+    d.set("__format__", unboxing(f0));
+    const fmtW = pyfn((self: any, spec: string) => {
+      const fl = lookupType(typeOf(self), "__float__");
+      if (typeof spec === "string" && /[eEfFgG%]$/.test(spec) && fl !== undefined && fl.$unboxing !== true) return format(fl(self), spec);
+      return f0(unbox(self), spec);
+    }, "__format__");
+    (fmtW as any).$builtinMethod = true;
+    (fmtW as any).$unboxing = true;
+    d.set("__format__", fmtW);
+  }
   px = { $name: base.$name, $qualname: base.$name, $module: "builtins", $dict: d, $bases: [], $mro: [], $subclasses: [], $ver: 0, $hidden: true } as any;
   px!.$mro = [px!, ...base.$mro];
   proxies.set(base, px!);
@@ -1913,6 +1927,7 @@ subclassable(classmethod, PyClassMethod);
 // property subclasses commonly override __init__ and call super().__init__.
 property.$jsBase = PyProperty;
 property.$dict.set("__new__", pyfn(function __new__(cls: PyType, ..._args: any[]) {
+  if (!isType(cls) || !cls.$mro.includes(property)) raise(T.TypeError, `property.__new__(X): X is not a subtype of property`);
   const o = cls === property ? new PyProperty(null, null, null, null) : new cls.$ctor!();
   o.fget = o.fset = o.fdel = o.doc = null;
   return o;
@@ -2017,4 +2032,9 @@ export function bytesHex(a: Uint8Array, sep: any = undefined, bps: any = undefin
     for (let st = 0; st < n; st += size) groups.push(h.slice(st * 2, Math.min(n, st + size) * 2));
   }
   return groups.join(sep);
+}
+
+// bytes % args
+for (const [bt, Cls] of [[T.bytes, PyBytes], [T.bytearray, PyByteArray]] as const) {
+  method(bt, "__mod__", (b: PyBytes, x: any) => new Cls(encode(percentFormat(decode(b, "latin1"), x, true), "latin1").a));
 }
