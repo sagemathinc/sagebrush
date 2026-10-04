@@ -29,7 +29,7 @@ jobs:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: node --test dist/test/ target/
+      - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
       - name: single-file bundle
         run: node scripts/build-cli.mjs
       - name: conformance (Node)

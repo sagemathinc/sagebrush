@@ -35,7 +35,7 @@ jobs:
         run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: node --test dist/test/ target/
+      - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
       - name: versions match the tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
