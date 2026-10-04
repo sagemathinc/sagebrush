@@ -279,6 +279,8 @@ function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
 }
 Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
+B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
+B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw(Obj.getattr(M.importModule("_pyjs_open"), "open"), pos, names, values);
 B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
   if (v !== null) {
     B.builtins._ = v;

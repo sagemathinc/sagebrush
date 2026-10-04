@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { T, FloatBox, PyDict, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
+import { T, FloatBox, PyDict, PyBytes, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin } from "./builtins";
@@ -561,4 +561,33 @@ newBuiltinModule("gc", (m) => {
   fn(m, "get_referrers", (..._a: any[]) => []);
   m.garbage = [];
   m.callbacks = [];
+});
+
+// ------------------------------------------------------------------ _fs (backs open() in lib/_pyjs_open.py)
+
+newBuiltinModule("_fs", (m) => {
+  const fs = require("fs");
+  const oserr = (e: any, path: string): never => {
+    const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
+    throw callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : String(e.message), path]);
+  };
+  fn(m, "read", (path: string) => {
+    try {
+      return new PyBytes(new Uint8Array(fs.readFileSync(path)));
+    } catch (e: any) {
+      return oserr(e, path);
+    }
+  });
+  fn(m, "write", (path: string, data: any, append: any) => {
+    try {
+      const b = O.bufferOf(data)!;
+      if (O.truth(append)) fs.appendFileSync(path, b);
+      else fs.writeFileSync(path, b);
+    } catch (e: any) {
+      return oserr(e, path);
+    }
+    return null;
+  });
+  fn(m, "exists", (path: string) => fs.existsSync(path));
+  fn(m, "isdir", (path: string) => fs.existsSync(path) && fs.statSync(path).isDirectory());
 });
