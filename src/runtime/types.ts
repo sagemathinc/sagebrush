@@ -53,7 +53,7 @@ method(object, "__delattr__", (self: any, name: string) => {
 }).$genericDelattr = true;
 method(object, "__init_subclass__", (_cls: any) => null);
 method(object, "__reduce_ex__", (_self: any) => raise(T.TypeError, "cannot pickle"));
-method(object, "__dir__", (self: any) => dir(self));
+const objectDir = method(object, "__dir__", (self: any) => defaultDir(self));
 
 function typeCall(...args: any[]): any {
   if (args.length === 1) return typeOf(args[0]);
@@ -1627,10 +1627,20 @@ method(generator, "__repr__", (g: any) => `<generator object ${g.$fn?.__qualname
 // ------------------------------------------------------------------ dir
 
 export function dir(x: any = undefined): any[] {
+  if (!isType(x)) {
+    const f = lookupType(typeOf(x), "__dir__");
+    if (f !== undefined && f !== objectDir) {
+      const r = O.toArray(f(x));
+      return r.sort((a, b) => (O.truth(O.lt(a, b)) ? -1 : O.truth(O.lt(b, a)) ? 1 : 0));
+    }
+  }
+  return defaultDir(x);
+}
+function defaultDir(x: any): any[] {
   const names = new Set<string>();
   if (isType(x)) for (const c of x.$mro) for (const k of c.$dict.keys()) names.add(k);
   else {
-    if (hasInstanceDict(x)) for (const k of Object.keys(x)) names.add(k);
+    if (hasInstanceDict(x)) for (const k of Object.keys(x)) if (k[0] !== "$") names.add(k);
     for (const c of typeOf(x).$mro) for (const k of c.$dict.keys()) names.add(k);
   }
   return [...names].sort();
@@ -1915,3 +1925,34 @@ method(coroutine, "__await__", (g: any) => new CoroWrapper(g));
 getset(coroutine, "cr_running", () => false);
 getset(coroutine, "__name__", (g: any) => g.$fn?.__name__ ?? "?");
 getset(coroutine, "__qualname__", (g: any) => g.$fn?.__qualname__ ?? "?");
+
+// types.SimpleNamespace
+export const SimpleNamespace = objectType("SimpleNamespace", [object], new Map(), "types");
+{
+  const init = method(SimpleNamespace, "__init__", (self: any, ...a: any[]) => {
+    if (a.length) raise(T.TypeError, "SimpleNamespace() takes no positional arguments");
+    return null;
+  });
+  init.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (pos.length > 2) raise(T.TypeError, "SimpleNamespace expected at most 1 positional argument");
+    const self = pos[0];
+    if (pos.length === 2) O.forEach(callObj(T.dict, [pos[1]]), (k: any) => void (self[k] = O.getitem(pos[1], k)));
+    names.forEach((n, i) => (self[n] = values[i]));
+    return null;
+  };
+  method(SimpleNamespace, "__repr__", (self: any) => {
+    const ks = Object.keys(self).filter((k) => k[0] !== "$");
+    return `${typeOf(self) === SimpleNamespace ? "namespace" : typeName(self)}(${ks.map((k) => `${k}=${repr(self[k])}`).join(", ")})`;
+  });
+  method(SimpleNamespace, "__eq__", (a: any, b: any) => {
+    if (!isinstance(b, SimpleNamespace)) return NotImplemented;
+    const ka = Object.keys(a).filter((k) => k[0] !== "$"), kb = Object.keys(b).filter((k) => k[0] !== "$");
+    return ka.length === kb.length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && O.eqBool(a[k], b[k]));
+  });
+  SimpleNamespace.$dict.set("__hash__", null);
+}
+export function simpleNamespace(fields: Record<string, any>): any {
+  const o = new SimpleNamespace.$ctor!();
+  Object.assign(o, fields);
+  return o;
+}

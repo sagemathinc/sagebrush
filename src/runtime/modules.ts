@@ -67,6 +67,12 @@ export function resolveRelative(name: string, level: number, pkg: any): string {
 
 // `from m import name`
 export function importFrom(m: any, name: string): any {
+  if (!isinstance(m, T.module)) {
+    // sys.modules entries may be any object.
+    const v = getattr(m, name, null);
+    if (v !== null || hasattr(m, name)) return v;
+    raise(T.ImportError, `cannot import name '${name}' from '${typeName(m)}' object`);
+  }
   const v = m[name];
   if (v !== undefined && Object.prototype.hasOwnProperty.call(m, name)) return v;
   try {
@@ -77,11 +83,26 @@ export function importFrom(m: any, name: string): any {
   const err = T.ImportError(`cannot import name '${name}' from '${m.__name__}'`);
   throw err;
 }
+function hasattr(o: any, name: string): boolean {
+  try {
+    getattr(o, name);
+    return true;
+  } catch (e: any) {
+    if (isinstance(e, T.AttributeError)) return false;
+    throw e;
+  }
+}
 
 // `from m import *`
 export function importStar(m: any, g: any) {
-  const all = m.__all__;
-  const names = all !== undefined ? O.toArray(all) : Object.keys(m).filter((k) => !k.startsWith("_") && !k.startsWith("$"));
+  const all = getattr(m, "__all__", null);
+  let names: any[];
+  if (all !== null) names = O.toArray(all);
+  else {
+    const d = getattr(m, "__dict__", null);
+    if (d === null) raise(T.ImportError, "from-import-* object has no __dict__ and no __all__");
+    names = O.toArray(d).filter((k: any) => typeof k === "string" && !k.startsWith("_") && !k.startsWith("$"));
+  }
   for (const k of names) g[k] = getattr(m, k);
 }
 
@@ -92,8 +113,7 @@ newBuiltinModule("sys", (m) => {
   m.version = "3.14.0 (pyjs-spike)";
   m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0]);
   m.hexversion = 0x30e00f0;
-  m.implementation = Ty.newModule("implementation");
-  m.implementation.name = "pyjs";
+  m.implementation = Ty.simpleNamespace({ name: "pyjs", cache_tag: null, version: m.version_info, _multiarch: "js" });
   m.maxsize = 9223372036854775807n;
   m.maxunicode = 0x10ffff;
   m.byteorder = "little";
@@ -343,6 +363,7 @@ newBuiltinModule("types", (m) => {
   m.NoneType = T.NoneType;
   m.NotImplementedType = T.NotImplementedType;
   m.EllipsisType = T.ellipsis;
+  m.SimpleNamespace = Ty.SimpleNamespace;
   // A generator function whose generators may be awaited.
   fn(m, "coroutine", (f: any) => {
     if (typeof f !== "function") raise(T.TypeError, "types.coroutine() expects a callable");
