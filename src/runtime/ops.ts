@@ -144,11 +144,14 @@ function addSlow(a: any, b: any): any {
     const r = a.concat(b);
     return (a as any).$t ? tuple(r) : r;
   }
-  if (a instanceof PyBytes && b instanceof PyBytes) {
-    const r = new Uint8Array(a.n + b.n);
-    r.set(a.a.subarray(0, a.n), 0);
-    r.set(b.a.subarray(0, b.n), a.n);
-    return a instanceof PyByteArray ? new PyByteArray(r) : new PyBytes(r);
+  if (a instanceof PyBytes) {
+    const bb = bufferOf(b);
+    if (bb !== undefined) {
+      const r = new Uint8Array(a.n + bb.length);
+      r.set(a.a.subarray(0, a.n), 0);
+      r.set(bb, a.n);
+      return a instanceof PyByteArray ? new PyByteArray(r) : new PyBytes(r);
+    }
   }
   return binaryDunder(a, b, "add");
 }
@@ -727,9 +730,14 @@ export function contains(c: any, x: any): boolean {
   if (c instanceof PyDict && c.$cls === T.dict) return dictGet(c, x) !== undefined;
   if (c instanceof PySet && (c.$cls === T.set || c.$cls === T.frozenset)) return dictGet(c.$d, x) !== undefined;
   if (c instanceof PyBytes) {
-    if (isPyInt(x)) return c.a.subarray(0, c.n).includes(Number(x));
-    if (!(x instanceof PyBytes)) raise(T.TypeError, `a bytes-like object is required, not '${typeName(x)}'`);
-    return Buffer.from(c.a.buffer, c.a.byteOffset, c.n).includes(Buffer.from(x.a.buffer, x.a.byteOffset, x.n));
+    if (isPyInt(x)) {
+      const v = Number(x);
+      if (v < 0 || v > 255) raise(T.ValueError, "byte must be in range(0, 256)");
+      return c.a.subarray(0, c.n).includes(v);
+    }
+    const xb = bufferOf(x);
+    if (xb === undefined) raise(T.TypeError, `a bytes-like object is required, not '${typeName(x)}'`);
+    return Buffer.from(c.a.buffer, c.a.byteOffset, c.n).includes(Buffer.from(xb.buffer, xb.byteOffset, xb.length));
   }
   const f = special(c, "__contains__");
   if (f !== undefined) return truth(f(c, x));
@@ -1344,6 +1352,19 @@ export function dictGetitem(o: PyDict, k: any): any {
 }
 export const arrayHooks: { cls: any; get: any; set: any } = { cls: null, get: null, set: null };
 
+// The bytes of an object supporting the buffer protocol (bytes, bytearray,
+// array.array, memoryview), or undefined.
+export const bufferHooks: ((x: any) => Uint8Array | undefined)[] = [];
+export function bufferOf(x: any): Uint8Array | undefined {
+  if (x instanceof PyBytes) return x.a.subarray(0, x.n);
+  if (arrayHooks.cls !== null && x instanceof arrayHooks.cls) return x.bytes();
+  for (const h of bufferHooks) {
+    const r = h(x);
+    if (r !== undefined) return r;
+  }
+  return undefined;
+}
+
 function getitemSlow(o: any, k: any): any {
   if (o !== null && typeof o === "object") {
     const c = o.$cls;
@@ -1405,7 +1426,7 @@ function byteValue(v: any): number {
 }
 
 function bytearraySetSlice(o: PyByteArray, k: PySlice, v: any) {
-  const src: Uint8Array = v instanceof PyBytes ? v.a.slice(0, v.n) : Uint8Array.from(toArray(v).map(byteValue));
+  const src: Uint8Array = bufferOf(v)?.slice() ?? Uint8Array.from(toArray(v).map(byteValue));
   const [start, step, n] = sliceIndices(k, o.n);
   if (step === 1) {
     const r = new Uint8Array(o.n - n + src.length);
