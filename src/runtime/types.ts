@@ -355,6 +355,7 @@ exc("RecursionError", RuntimeError);
 exc("PythonFinalizationError", RuntimeError);
 const SyntaxError = exc("SyntaxError", Exception);
 exc("IndentationError", SyntaxError);
+exc("TabError", (T as any).IndentationError);
 exc("SystemError", Exception);
 exc("TypeError", Exception);
 const ValueError = exc("ValueError", Exception);
