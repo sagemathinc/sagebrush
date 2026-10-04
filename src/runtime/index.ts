@@ -493,3 +493,15 @@ M.newBuiltinModule("traceback", (m) => {
   fn("format_stack", (..._a: any[]) => []);
   fn("print_stack", (..._a: any[]) => null);
 });
+
+// The module whose Python code is calling (for type(name, bases, ns), which
+// CPython names after the caller's globals): the nearest compiled frame.
+Obj.hooks.callerModule = () => {
+  const stack = new Error().stack ?? "";
+  const m = /\((py:[^:)]+(?:\.py)?):\d+:\d+\)|at (py:[^:\s]+):\d+:\d+/.exec(stack.split("\n").slice(2).join("\n"));
+  const js = m ? m[1] ?? m[2] : undefined;
+  const info = js === undefined ? undefined : scripts.get(js);
+  if (info === undefined) return "__main__";
+  for (const mod of M.sysModules.$m.values()) if (mod !== null && typeof mod === "object" && mod.__file__ === info.filename) return mod.__name__;
+  return "__main__";
+};

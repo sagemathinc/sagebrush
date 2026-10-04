@@ -51,6 +51,15 @@ export function fv(x: any): number | undefined {
   return undefined;
 }
 
+// Both operands as doubles, or [undefined, undefined] unless both are ints
+// or floats: a huge int only overflows when it meets a float, not when the
+// other operand is an object whose reflected method should run.
+const isNumLike = (x: any) => typeof x === "number" || typeof x === "bigint" || typeof x === "boolean" || x instanceof FloatBox;
+function fv2(a: any, b: any): [number | undefined, number | undefined] {
+  if (!isNumLike(a) || !isNumLike(b)) return [undefined, undefined];
+  return [fv(a), fv(b)];
+}
+
 export function bigToFloat(x: bigint): number {
   const r = Number(x);
   if (!Number.isFinite(r)) raise(T.OverflowError, "int too large to convert to float");
@@ -138,7 +147,7 @@ export function add(a: any, b: any): any {
 }
 function addSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) + big(b));
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x + y);
   if (Array.isArray(a) && Array.isArray(b) && (a as any).$t === (b as any).$t) {
     const r = a.concat(b);
@@ -166,7 +175,7 @@ export function sub(a: any, b: any): any {
 }
 function subSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) - big(b));
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x - y);
   if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "sub");
   return binaryDunder(a, b, "sub");
@@ -187,7 +196,7 @@ function repeatCount(n: any): number | undefined {
 }
 function mulSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) * big(b));
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x * y);
   if (typeof a === "string" && repeatCount(b) !== undefined) return a.repeat(repeatCount(b)!);
   if (typeof b === "string" && repeatCount(a) !== undefined) return b.repeat(repeatCount(a)!);
@@ -223,7 +232,7 @@ function truedivSlow(a: any, b: any): any {
     if (big(b) === 0n) raise(T.ZeroDivisionError, "division by zero");
     return mkfloat(intTrueDiv(big(a), big(b)));
   }
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
     if (y === 0) raise(T.ZeroDivisionError, "float division by zero");
     return mkfloat(x / y);
@@ -293,7 +302,7 @@ function floordivSlow(a: any, b: any): any {
     if (x < 0n !== y < 0n && q * y !== x) q -= 1n;
     return normBig(q);
   }
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
     if (y === 0) raise(T.ZeroDivisionError, "float floor division by zero");
     return mkfloat(floatDivmod(x, y)[0]);
@@ -353,7 +362,7 @@ function modSlow(a: any, b: any): any {
     if (r !== 0n && r < 0n !== y < 0n) r += y;
     return normBig(r);
   }
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
     if (y === 0) raise(T.ZeroDivisionError, "float modulo by zero");
     return mkfloat(floatDivmod(x, y)[1]);
@@ -363,7 +372,7 @@ function modSlow(a: any, b: any): any {
 
 export function divmod(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return tuple([floordiv(a, b), mod(a, b)]);
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
     if (y === 0) raise(T.ZeroDivisionError, "float divmod()");
     const [q, r] = floatDivmod(x, y);
@@ -392,7 +401,7 @@ function powSlow(a: any, b: any): any {
     if (big(a) === 0n) raise(T.ZeroDivisionError, "0.0 cannot be raised to a negative power");
     return floatPow(fv(a)!, fv(b)!);
   }
-  const x = fv(a), y = fv(b);
+  const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return floatPow(x, y);
   return binaryDunder(a, b, "pow");
 }

@@ -220,17 +220,26 @@ function arg(x: any): [number, number] {
   if (c !== undefined) return c;
   return asComplex(x, "argument");
 }
+// The finite-value algorithms of CPython's Modules/cmathmodule.c.
 function csqrt(re: number, im: number): PyComplex {
-  if (re === 0 && im === 0) return C(0, im);
   if (!Number.isFinite(re) || !Number.isFinite(im)) {
     if (Math.abs(im) === Infinity) return C(Infinity, im);
-    if (re === -Infinity) return C(im !== im ? NaN : 0, Math.sign(im) * Infinity || Infinity);
-    if (re === Infinity) return C(Infinity, im !== im ? NaN : Math.sign(im) * 0);
+    if (re === -Infinity) return C(im !== im ? NaN : 0, im !== im ? NaN : im < 0 || Object.is(im, -0) ? -Infinity : Infinity);
+    if (re === Infinity) return C(Infinity, im !== im ? NaN : im < 0 || Object.is(im, -0) ? -0 : 0);
     return C(NaN, NaN);
   }
-  const s = Math.sqrt((Math.abs(re) + Math.hypot(re, im)) / 2);
-  if (re >= 0) return C(s, im / (2 * s));
-  return C(Math.abs(im) / (2 * s), im < 0 || Object.is(im, -0) ? -s : s);
+  if (re === 0 && im === 0) return C(0, im);
+  let ax = Math.abs(re), ay = Math.abs(im), sr: number, d: number;
+  if (ax < 2.2250738585072014e-308 && ay < 2.2250738585072014e-308) {
+    ax = ax * 2 ** 53;
+    sr = Math.sqrt((ax + Math.hypot(ax, ay * 2 ** 53)) / 2) * 2 ** -26.5;
+  } else {
+    ax /= 8;
+    sr = 2 * Math.sqrt(ax + Math.hypot(ax, ay / 8));
+  }
+  d = ay / (2 * sr);
+  const sgn = (v: number) => (im < 0 || Object.is(im, -0) ? -v : v);
+  return re >= 0 ? C(sr, sgn(d)) : C(d, sgn(sr));
 }
 function cexp(re: number, im: number): PyComplex {
   const e = Math.exp(re);
@@ -238,43 +247,49 @@ function cexp(re: number, im: number): PyComplex {
   return C(e * Math.cos(im), e * Math.sin(im));
 }
 function clog(re: number, im: number): PyComplex {
-  const r = Math.hypot(re, im);
-  if (r === 0) raise(T.ValueError, "math domain error");
-  return C(Math.log(r), Math.atan2(im, re));
+  const ax = Math.abs(re), ay = Math.abs(im);
+  if (ax === 0 && ay === 0) raise(T.ValueError, "math domain error");
+  const h = Math.hypot(ax, ay);
+  let lr: number;
+  if (0.71 <= h && h <= 1.73) {
+    const am = Math.max(ax, ay), an = Math.min(ax, ay);
+    lr = Math.log1p((am - 1) * (am + 1) + an * an) / 2;
+  } else lr = Math.log(h);
+  return C(lr, Math.atan2(im, re));
 }
 const mul = (a: PyComplex, b: PyComplex) => C(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
-const add = (a: PyComplex, b: PyComplex) => C(a.re + b.re, a.im + b.im);
-const sub = (a: PyComplex, b: PyComplex) => C(a.re - b.re, a.im - b.im);
 const div = (a: PyComplex, b: PyComplex) => cdiv([a.re, a.im], [b.re, b.im]);
-const ONE = C(1, 0), I = C(0, 1);
 function casinh(z: PyComplex): PyComplex {
-  // log(z + sqrt(z*z + 1))
-  const s = csqrt(...[mul(z, z).re + 1, mul(z, z).im] as [number, number]);
-  return clog(z.re + s.re, z.im + s.im);
+  const s1 = csqrt(1 + z.im, -z.re), s2 = csqrt(1 - z.im, z.re);
+  return C(Math.asinh(s1.re * s2.im - s2.re * s1.im), Math.atan2(z.im, s1.re * s2.re - s1.im * s2.im));
 }
 function casin(z: PyComplex): PyComplex {
-  // -i * asinh(i z)
-  const w = casinh(C(-z.im, z.re));
-  return C(w.im, -w.re);
+  const s = casinh(C(-z.im, z.re));
+  return C(s.im, -s.re);
 }
 function cacos(z: PyComplex): PyComplex {
-  const a = casin(z);
-  return C(Math.PI / 2 - a.re, -a.im);
-}
-function catanh(z: PyComplex): PyComplex {
-  // (log(1+z) - log(1-z)) / 2
-  if (z.im === 0 && Math.abs(z.re) === 1) raise(T.ValueError, "math domain error");
-  const a = clog(1 + z.re, z.im), b = clog(1 - z.re, -z.im);
-  return C((a.re - b.re) / 2, (a.im - b.im) / 2);
-}
-function catan(z: PyComplex): PyComplex {
-  const w = catanh(C(-z.im, z.re));
-  return C(w.im, -w.re);
+  const s1 = csqrt(1 - z.re, -z.im), s2 = csqrt(1 + z.re, z.im);
+  return C(2 * Math.atan2(s1.re, s2.re), Math.asinh(s2.re * s1.im - s2.im * s1.re));
 }
 function cacosh(z: PyComplex): PyComplex {
-  // log(z + sqrt(z+1) sqrt(z-1))
-  const s = mul(csqrt(z.re + 1, z.im), csqrt(z.re - 1, z.im));
-  return clog(z.re + s.re, z.im + s.im);
+  const s1 = csqrt(z.re - 1, z.im), s2 = csqrt(z.re + 1, z.im);
+  return C(Math.asinh(s1.re * s2.re + s1.im * s2.im), 2 * Math.atan2(s1.im, s2.re));
+}
+function catanh(z: PyComplex): PyComplex {
+  if (z.re < 0) {
+    const w = catanh(C(-z.re, -z.im));
+    return C(-w.re, -w.im);
+  }
+  const ay = Math.abs(z.im);
+  if (z.re === 1 && ay < 1.4916681462400413e-154) {
+    if (ay === 0) raise(T.ValueError, "math domain error");
+    return C(-Math.log(Math.sqrt(ay) / Math.sqrt(Math.hypot(ay, 2))), (z.im < 0 ? -1 : 1) * Math.atan2(2, -ay) / 2);
+  }
+  return C(Math.log1p((4 * z.re) / ((1 - z.re) * (1 - z.re) + ay * ay)) / 4, -Math.atan2(-2 * z.im, (1 - z.re) * (1 + z.re) - ay * ay) / 2);
+}
+function catan(z: PyComplex): PyComplex {
+  const s = catanh(C(-z.im, z.re));
+  return C(s.im, -s.re);
 }
 
 newBuiltinModule("cmath", (m) => {
@@ -282,7 +297,14 @@ newBuiltinModule("cmath", (m) => {
     f.__name__ = name;
     m[name] = f;
   };
-  const unary = (name: string, f: (z: PyComplex) => PyComplex) => fn(name, (x: any) => f(C(...arg(x))));
+  // As CPython, an infinite result from a finite argument is an OverflowError.
+  const unary = (name: string, f: (z: PyComplex) => PyComplex) =>
+    fn(name, (x: any) => {
+      const z = C(...arg(x));
+      const r = f(z);
+      if (Number.isFinite(z.re) && Number.isFinite(z.im) && (Math.abs(r.re) === Infinity || Math.abs(r.im) === Infinity)) raise(T.OverflowError, "math range error");
+      return r;
+    });
   m.pi = Math.PI;
   m.e = Math.E;
   m.tau = 2 * Math.PI;
@@ -337,10 +359,6 @@ newBuiltinModule("cmath", (m) => {
     const d = Math.hypot(x[0] - y[0], x[1] - y[1]);
     return d <= Math.max(kw.rel_tol * Math.max(Math.hypot(...x), Math.hypot(...y)), kw.abs_tol);
   };
-  void ONE;
-  void I;
-  void add;
-  void sub;
 });
 import { builtins } from "./builtins";
 builtins.complex = complexType;

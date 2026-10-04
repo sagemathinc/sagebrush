@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict } from "./object";
+import { globalsDict, hooks } from "./object";
 import { T, FloatBox, PyDict, PyBytes, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
@@ -180,6 +180,8 @@ newBuiltinModule("sys", (m) => {
     throw code === undefined ? T.SystemExit() : T.SystemExit(code);
   });
   fn(m, "intern", (s: string) => s);
+  fn(m, "audit", (..._a: any[]) => null);
+  fn(m, "addaudithook", (_f: any) => null);
   fn(m, "getsizeof", (_x: any) => 64);
   fn(m, "exc_info", () => tuple([null, null, null]));
   m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
@@ -709,3 +711,5 @@ newBuiltinModule("os", (m) => {
 
 builtin(defaultImport, "__import__", { args: ["name", "globals", "locals", "fromlist", "level"], posonly: 0, vararg: null, kwonly: [], kwarg: null });
 builtins.__import__ = defaultImport;
+
+hooks.importModule = importModule;
