@@ -222,6 +222,7 @@ function issubclassImpl(c: any, spec: any): boolean {
 }
 
 function hasattrImpl(o: any, name: string): boolean {
+  if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
   try {
     getattr(o, name);
     return true;
@@ -361,7 +362,7 @@ define("min", (...a: any[]) => minmax("min", a, null, undefined, false));
 builtins.min.$kw = minmaxKw("min", false);
 define("max", (...a: any[]) => minmax("max", a, null, undefined, true));
 builtins.max.$kw = minmaxKw("max", true);
-define("sorted", sorted, [1, 3]);
+define("sorted", sorted, [1, 1]);
 define("round", roundImpl, [1, 2]);
 define("divmod", O.divmod, [2, 2]);
 define("pow", powImpl, [2, 3]);

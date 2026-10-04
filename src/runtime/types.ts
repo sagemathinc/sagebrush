@@ -12,6 +12,7 @@ import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr }
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
+  if (s !== null) f.$sig = s;
   f = checkArity(f, name, true);
   pyfn(f, name, s);
   f.$builtinMethod = true;
@@ -214,9 +215,14 @@ export class PySuper {
 }
 const superType = builtinType("super", [object], (cls: any, obj: any) => {
   if (cls === undefined) raise(T.RuntimeError, "super(): no arguments");
+  if (!isType(cls)) raise(T.TypeError, `super() argument 1 must be a type, not ${typeName(cls)}`);
+  if (obj !== undefined && !(isType(obj) && obj.$mro.includes(cls)) && !isinstance(obj, cls)) {
+    raise(T.TypeError, `super(type, obj): obj (${isType(obj) ? "type" : "instance of"} ${isType(obj) ? obj.$name : typeName(obj)}) is not an instance or subtype of type (${cls.$name}).`);
+  }
   return new PySuper(cls, obj);
 });
 bindClass(PySuper, superType);
+method(superType, "__repr__", (s: PySuper) => (s.obj === undefined ? `<super: ${repr(s.cls)}, NULL>` : `<super: ${repr(s.cls)}, ${isType(s.obj) ? repr(s.obj) : `<${typeName(s.obj)} object>`}>`));
 method(superType, "__getattribute__", (s: PySuper, name: string) => {
   const start = isType(s.obj) && s.obj.$mro.includes(s.cls) ? s.obj : typeOf(s.obj);
   const mro = start.$mro;
