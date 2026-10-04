@@ -173,11 +173,13 @@ method(property, "__delete__", (p: PyProperty, o: any) => {
   callObj(p.fdel, [o]);
   return null;
 });
-method(property, "getter", (p: PyProperty, f: any) => new PyProperty(f, p.fset, p.fdel, p.doc));
-method(property, "setter", (p: PyProperty, f: any) => new PyProperty(p.fget, f, p.fdel, p.doc));
-method(property, "deleter", (p: PyProperty, f: any) => new PyProperty(p.fget, p.fset, f, p.doc));
+// getter/setter/deleter(None) keep the existing function, as CPython does.
+method(property, "getter", (p: PyProperty, f: any) => new PyProperty(f ?? p.fget, p.fset, p.fdel, p.doc));
+method(property, "setter", (p: PyProperty, f: any) => new PyProperty(p.fget, f ?? p.fset, p.fdel, p.doc));
+method(property, "deleter", (p: PyProperty, f: any) => new PyProperty(p.fget, p.fset, f ?? p.fdel, p.doc));
 getset(property, "fget", (p) => p.fget);
 getset(property, "fset", (p) => p.fset);
+getset(property, "fdel", (p) => p.fdel);
 getset(property, "__doc__", (p) => p.doc ?? (p.fget !== null ? p.fget.__doc__ ?? null : null), (p, v) => void (p.doc = v));
 
 // asDunder(): the function implicit special-method calls use, which take
