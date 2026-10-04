@@ -455,14 +455,28 @@ export function getattr(o: any, name: string, dflt?: any): any {
 
 export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any {
   const d = lookupType(t, name);
-  if (d !== undefined && isDataDescriptor(d)) return descrGet(d, o, t);
+  // A data descriptor without __get__ yields to the instance dict.
+  if (d !== undefined && isDataDescriptor(d) && (lookupType(typeOf(d), "__get__") !== undefined || !(hasInstanceDict(o) && hasOwn.call(o, name)))) return descrGetOrGetattr(d, o, t, name);
   if (hasInstanceDict(o) && hasOwn.call(o, name)) return o[name];
   if (typeof o === "function" && o.$attrs !== undefined && o.$attrs.has(name)) return o.$attrs.get(name);
-  if (d !== undefined) return descrGet(d, o, t);
+  if (d !== undefined) return descrGetOrGetattr(d, o, t, name);
   const gf = lookupType(t, "__getattr__");
   if (gf !== undefined) return gf(o, name);
   if (dflt !== undefined) return dflt;
   raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'`);
+}
+
+// An AttributeError from a descriptor's __get__ falls back to __getattr__.
+function descrGetOrGetattr(d: any, o: any, t: PyType, name: string): any {
+  if (d === null || typeof d !== "object") return descrGet(d, o, t);
+  const gf = lookupType(t, "__getattr__");
+  if (gf === undefined) return descrGet(d, o, t);
+  try {
+    return descrGet(d, o, t);
+  } catch (e) {
+    if (!isinstance(e, T.AttributeError)) throw e;
+    return gf(o, name);
+  }
 }
 
 function typeGetattr(cls: PyType, name: string, dflt?: any): any {
@@ -543,10 +557,14 @@ export function delattr(o: any, name: string): void {
   if (isType(o)) return delTypeAttr(o, name);
   const t = typeOf(o);
   const dl = lookupType(t, "__delattr__");
-  if (dl !== undefined) {
+  if (dl !== undefined && dl.$genericDelattr !== true) {
     dl(o, name);
     return;
   }
+  genericDelattr(o, name, t);
+}
+
+export function genericDelattr(o: any, name: string, t: PyType): void {
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
     const del = lookupType(typeOf(d), "__delete__");

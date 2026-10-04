@@ -57,6 +57,22 @@ class Convert {
     throw new PySyntaxError(`${what} is not supported yet`, this.filename, l, this.lines[l - 1] ?? "", (n.col_offset ?? 0) + 1);
   }
 
+  // Private name mangling: inside a class body, `__x` becomes `_Class__x`.
+  private klass: string | null = null;
+  m(name: string): string {
+    if (this.klass === null || !name.startsWith("__") || name.endsWith("__") || name.includes(".")) return name;
+    return `_${this.klass}${name}`;
+  }
+  withClass<R>(name: string | null, f: () => R): R {
+    const saved = this.klass;
+    this.klass = name === null ? null : name.replace(/^_+/, "") || null;
+    try {
+      return f();
+    } finally {
+      this.klass = saved;
+    }
+  }
+
   stmts(list: any[]): A.Stmt[] {
     const out: A.Stmt[] = [];
     for (const s of list) {
@@ -93,26 +109,29 @@ class Convert {
         return { k: "Pass", line };
       case "FunctionDef":
         if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: s.name, args: this.params(s.args), body: this.stmts(s.body), decorators: s.decorator_list.map((d: any) => this.expr(d)) };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.stmts(s.body), decorators: s.decorator_list.map((d: any) => this.expr(d)) };
       case "ClassDef": {
         if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "ClassDef", line, name: s.name, bases: s.bases.map((b: any) => this.expr(b)), keywords: s.keywords.map((k: any) => this.keyword(k)), body: this.stmts(s.body), decorators: s.decorator_list.map((d: any) => this.expr(d)) };
+        return {
+          k: "ClassDef", line, name: this.m(s.name), bases: s.bases.map((b: any) => this.expr(b)), keywords: s.keywords.map((k: any) => this.keyword(k)),
+          body: this.withClass(s.name, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)),
+        };
       }
       case "Import":
-        return { k: "Import", line, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ?? null })) };
+        return { k: "Import", line, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ? this.m(a.asname) : this.m(a.name) !== a.name ? this.m(a.name) : null })) };
       case "ImportFrom":
         if (s.module === "__future__") return null;
-        return { k: "ImportFrom", line, module: s.module ?? "", level: s.level ?? 0, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ?? null })) };
+        return { k: "ImportFrom", line, module: s.module ?? "", level: s.level ?? 0, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ? this.m(a.asname) : this.m(a.name) !== a.name ? this.m(a.name) : null })) };
       case "Global":
-        return { k: "Global", line, names: s.names };
+        return { k: "Global", line, names: s.names.map((n: string) => this.m(n)) };
       case "Nonlocal":
-        return { k: "Nonlocal", line, names: s.names };
+        return { k: "Nonlocal", line, names: s.names.map((n: string) => this.m(n)) };
       case "Raise":
         return { k: "Raise", line, exc: s.exc ? this.expr(s.exc) : null, cause: s.cause ? this.expr(s.cause) : null };
       case "Try":
         return {
           k: "Try", line, body: this.stmts(s.body),
-          handlers: s.handlers.map((h: any) => ({ line: h.lineno, type: h.type ? this.expr(h.type) : null, name: h.name ?? null, body: this.stmts(h.body) })),
+          handlers: s.handlers.map((h: any) => ({ line: h.lineno, type: h.type ? this.expr(h.type) : null, name: h.name ? this.m(h.name) : null, body: this.stmts(h.body) })),
           orelse: this.stmts(s.orelse), finalbody: this.stmts(s.finalbody),
         };
       case "With":
@@ -146,15 +165,15 @@ class Convert {
     const pos = [...a.posonlyargs, ...a.args];
     const nd = a.defaults.length;
     const args: A.Param[] = pos.map((p: any, i: number) => ({
-      name: p.arg,
+      name: this.m(p.arg),
       default: i >= pos.length - nd ? this.expr(a.defaults[i - (pos.length - nd)]) : null,
     }));
     return {
       posonly: a.posonlyargs.length,
       args,
-      vararg: a.vararg ? a.vararg.arg : null,
-      kwonly: a.kwonlyargs.map((p: any, i: number) => ({ name: p.arg, default: a.kw_defaults[i] ? this.expr(a.kw_defaults[i]) : null })),
-      kwarg: a.kwarg ? a.kwarg.arg : null,
+      vararg: a.vararg ? this.m(a.vararg.arg) : null,
+      kwonly: a.kwonlyargs.map((p: any, i: number) => ({ name: this.m(p.arg), default: a.kw_defaults[i] ? this.expr(a.kw_defaults[i]) : null })),
+      kwarg: a.kwarg ? this.m(a.kwarg.arg) : null,
     };
   }
 
@@ -200,7 +219,7 @@ class Convert {
     const line = e.lineno;
     switch (e._type) {
       case "Name":
-        return { k: "Name", line, id: e.id };
+        return { k: "Name", line, id: this.m(e.id) };
       case "Constant":
         return { k: "Const", line, value: this.constant(e.value) };
       case "JoinedStr":
@@ -226,7 +245,7 @@ class Convert {
       case "Call":
         return { k: "Call", line, func: this.expr(e.func), args: e.args.map((a: any) => this.expr(a)), keywords: e.keywords.map((k: any) => this.keyword(k)) };
       case "Attribute":
-        return { k: "Attribute", line, value: this.expr(e.value), attr: e.attr };
+        return { k: "Attribute", line, value: this.expr(e.value), attr: this.m(e.attr) };
       case "Subscript":
         return { k: "Subscript", line, value: this.expr(e.value), index: this.expr(e.slice) };
       case "Slice":
@@ -256,7 +275,7 @@ class Convert {
       case "YieldFrom":
         return { k: "YieldFrom", line, value: this.expr(e.value) };
       case "NamedExpr":
-        return { k: "NamedExpr", line, target: e.target.id, value: this.expr(e.value) };
+        return { k: "NamedExpr", line, target: this.m(e.target.id), value: this.expr(e.value) };
       case "Await":
         this.unsupported(e, "await");
       case "TemplateStr":

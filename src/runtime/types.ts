@@ -4,7 +4,7 @@ import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
-  bindMethod, bindArgs, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
+  bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
@@ -46,10 +46,9 @@ method(object, "__format__", (self: any, spec: string) => {
 });
 method(object, "__getattribute__", (self: any, name: string) => genericGetattr(self, name, typeOf(self)));
 method(object, "__delattr__", (self: any, name: string) => {
-  if (hasInstanceDict(self) && hasOwn.call(self, name)) delete self[name];
-  else raise(T.AttributeError, `'${typeName(self)}' object has no attribute '${name}'`);
+  genericDelattr(self, name, typeOf(self));
   return null;
-});
+}).$genericDelattr = true;
 method(object, "__init_subclass__", (_cls: any) => null);
 method(object, "__reduce_ex__", (_self: any) => raise(T.TypeError, "cannot pickle"));
 method(object, "__dir__", (self: any) => dir(self));
@@ -76,6 +75,10 @@ getset(type, "__base__", (c) => c.$bases[0] ?? null);
 getset(type, "__dict__", (c) => {
   const d = new PyDict();
   for (const [k, v] of c.$dict) dictSet(d, k, v);
+  // The class that first gives its instances a __dict__ shows the slot.
+  if (c.$ctor !== null && c !== object && !c.$dict.has("__slots__") && !c.$dict.has("__dict__") && c.$bases.every((b: any) => b.$ctor === null || b === object || b.$jsBase !== null)) {
+    dictSet(d, "__dict__", object.$dict.get("__dict__"));
+  }
   return d;
 });
 getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null);
@@ -187,6 +190,11 @@ method(staticmethod, "__get__", (s: PyStaticMethod, _o: any, _t: any) => s.f);
 getset(staticmethod, "__func__", (s) => s.f);
 const classmethod = builtinType("classmethod", [object], (f: any) => new PyClassMethod(f));
 bindClass(PyClassMethod, classmethod);
+{
+  const h = pyfn((_c: any, ..._a: any[]) => NotImplemented, "__subclasshook__");
+  h.$default = true;
+  object.$dict.set("__subclasshook__", new PyClassMethod(h));
+}
 method(classmethod, "__get__", (s: PyClassMethod, o: any, t: any) => bindMethod(s.f, t === null || t === undefined ? typeOf(o) : t));
 getset(classmethod, "__func__", (s) => s.f);
 
@@ -230,7 +238,10 @@ builtinType("ellipsis", [object], () => Ellipsis);
 const fnType = builtinType("function", [object], () => raise(T.TypeError, "cannot create 'function' instances"));
 for (const a of ["__name__", "__qualname__", "__module__", "__doc__"]) getset(fnType, a, (f) => f[a] ?? null, (f, v) => void (f[a] = v));
 getset(fnType, "__defaults__", (f) => f.__defaults__ ?? null, (f, v) => void (f.__defaults__ = v));
-getset(fnType, "__kwdefaults__", (f) => f.__kwdefaults__ ?? null);
+getset(fnType, "__kwdefaults__", (f) => f.__kwdefaults__ ?? null, (f, v) => {
+  if (v !== null && !(v instanceof PyDict)) raise(T.TypeError, "__kwdefaults__ must be set to a dict object");
+  f.__kwdefaults__ = v;
+});
 getset(fnType, "__dict__", (f) => {
   const d = new PyDict();
   if (f.$attrs) for (const [k, v] of f.$attrs) dictSet(d, k, v);
@@ -252,6 +263,8 @@ getset(methodType, "__name__", (m) => m.$func.__name__);
 getset(methodType, "__qualname__", (m) => m.$func.__qualname__);
 getset(methodType, "__doc__", (m) => m.$func.__doc__ ?? null);
 method(methodType, "__call__", (m: any, ...a: any[]) => m(...a));
+// Other attributes of a bound method are those of its function.
+method(methodType, "__getattr__", (m: any, name: string) => getattr(m.$func, name));
 method(methodType, "__eq__", (m: any, o: any) => (typeof o === "function" && o.$self !== undefined ? m.$func === o.$func && m.$self === o.$self : NotImplemented));
 method(methodType, "__hash__", (m: any) => O.hashAny(m.$self) ^ O.id(m.$func));
 
@@ -1814,3 +1827,22 @@ method(property, "__init__", (p: PyProperty, fget: any = null, fset: any = null,
   p.doc = doc;
   return null;
 }, sig(["self", "fget", "fset", "fdel", "doc"]));
+
+// Named tuples made by the runtime (sys.version_info, os.stat_result, ...).
+const structseqTypes = new Map<string, PyType>();
+export function structseq(name: string, fields: string[], values: any[]): any {
+  let cls = structseqTypes.get(name);
+  if (cls === undefined) {
+    const d = new Map<string, any>();
+    cls = objectType(name.slice(name.lastIndexOf(".") + 1), [tupleType], d, name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "builtins");
+    fields.forEach((f, i) => d.set(f, new GetSet(f, (o) => o[i])));
+    d.set("n_fields", fields.length);
+    d.set("_fields", tuple(fields));
+    const c = cls;
+    method(c, "__repr__", (o: any) => `${name}(${fields.map((f, i) => `${f}=${repr(o[i])}`).join(", ")})`);
+    structseqTypes.set(name, cls);
+  }
+  const o = new cls.$ctor!();
+  for (const v of values) o.push(v);
+  return o;
+}

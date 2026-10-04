@@ -90,7 +90,7 @@ export function importStar(m: any, g: any) {
 newBuiltinModule("sys", (m) => {
   m.argv = [];
   m.version = "3.14.0 (pyjs-spike)";
-  m.version_info = tuple([3, 14, 0, "final", 0]);
+  m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0]);
   m.hexversion = 0x30e00f0;
   m.implementation = Ty.newModule("implementation");
   m.implementation.name = "pyjs";
