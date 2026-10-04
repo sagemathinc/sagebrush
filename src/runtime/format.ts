@@ -450,7 +450,7 @@ export function fmt(v: any, conv: string | null, spec: string): string {
 // Follows CPython's unicode_format_arg_parse: a non-tuple mapping (anything
 // with __getitem__) is both the single positional argument and the source
 // of %(key) lookups; after a key lookup the looked-up value is the argument.
-export function percentFormat(fmtStr: string, args: any): string {
+export function percentFormat(fmtStr: string, args: any, bytesMode = false): string {
   const isTuple = Array.isArray(args) && (args as any).$t === true;
   const dict = !isTuple && typeof args !== "string" && (args instanceof PyDict || Array.isArray(args) || (args !== null && typeof args === "object" && lookupType(typeOf(args), "__getitem__") !== undefined)) ? args : null;
   let cur: any = args;
@@ -549,11 +549,21 @@ export function percentFormat(fmtStr: string, args: any): string {
     };
     let body: string;
     switch (type) {
+      case "b":
       case "s":
       case "r":
       case "a": {
         const v = nextArg();
-        body = type === "s" ? str(v) : type === "r" ? repr(v) : fmt(v, "a", "");
+        if (bytesMode && (type === "s" || type === "b")) {
+          if (v instanceof PyBytes) body = Buffer.from(v.a.subarray(0, v.n)).toString("latin1");
+          else {
+            const f = lookupType(typeOf(v), "__bytes__");
+            if (f === undefined) raise(T.TypeError, `%b requires a bytes-like object, or an object that implements __bytes__, not '${typeOf(v).$name}'`);
+            const r = f(v);
+            body = Buffer.from(r.a.subarray(0, r.n)).toString("latin1");
+          }
+        } else if (type === "b") raise(T.ValueError, `unsupported format character 'b' (0x62) at index ${i - 1}`);
+        else body = type === "s" ? str(v) : type === "r" && !bytesMode ? repr(v) : fmt(v, "a", "");
         if (precision >= 0) body = [...body].slice(0, precision).join("");
         body = padW(body, false);
         break;
@@ -561,7 +571,11 @@ export function percentFormat(fmtStr: string, args: any): string {
       case "c": {
         const v = nextArg();
         let c: string;
-        if (typeof v === "string") {
+        if (bytesMode) {
+          if (v instanceof PyBytes && v.n === 1) c = String.fromCharCode(v.a[0]);
+          else if (isPyInt(v) && Number(v) >= 0 && Number(v) < 256) c = String.fromCharCode(Number(v));
+          else raise(isPyInt(v) ? T.OverflowError : T.TypeError, isPyInt(v) ? "%c arg not in range(256)" : "%c requires an integer in range(256) or a single byte");
+        } else if (typeof v === "string") {
           if ([...v].length !== 1) raise(T.TypeError, `%c requires an int or a unicode character, not a string of length ${[...v].length}`);
           c = v;
         } else {
