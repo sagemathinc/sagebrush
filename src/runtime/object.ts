@@ -145,6 +145,8 @@ export function objectType(name: string, bases: PyType[], dict: Map<string, any>
 // Layout markers for subclasses of list and tuple (see objectType).
 export class ListLayout {}
 export class TupleLayout {}
+// Instances of metaclasses are type objects, made by type.__new__.
+export class TypeLayout {}
 
 // Instances of Python subclasses of int, float and str box the primitive
 // value in `$v`.  The subclass's MRO gets a hidden copy of the base type
@@ -209,7 +211,7 @@ export function typeOf(x: any): PyType {
     case "bigint":
       return T.int;
     case "function":
-      if (x.$dict !== undefined) return T.type;
+      if (x.$dict !== undefined) return x.$meta ?? T.type;
       if (x.$self !== undefined) return T.method;
       return x.$pyfn === true ? T.function : T.builtin_function_or_method;
     case "object": {
@@ -340,7 +342,22 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
 
 // ------------------------------------------------------------------ construction
 
+// Instances of a metaclass that overrides __call__ are created by it.
+function metaCall(cls: any): any {
+  const call = lookupType(cls.$meta, "__call__");
+  return call === hooks.typeCall ? undefined : call;
+}
+
 function construct(cls: PyType, args: any[]): any {
+  if ((cls as any).$meta !== undefined) {
+    const call = metaCall(cls);
+    if (call !== undefined) return call(cls, ...args);
+  }
+  return constructPlain(cls, args);
+}
+
+export function constructPlain(cls: PyType, args: any[]): any {
+  if (cls.$ctor === null) return cls(...args);
   let c = (cls as any).$ni;
   if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: lookupType(cls, "__new__"), init: lookupType(cls, "__init__") };
   const nw = c.nw;
@@ -360,6 +377,15 @@ function construct(cls: PyType, args: any[]): any {
 }
 
 function constructKw(cls: PyType, pos: any[], names: string[], values: any[]): any {
+  if ((cls as any).$meta !== undefined) {
+    const call = metaCall(cls);
+    if (call !== undefined) return callKw(call, [cls, ...pos], names, values);
+  }
+  return constructPlainKw(cls, pos, names, values);
+}
+
+export function constructPlainKw(cls: PyType, pos: any[], names: string[], values: any[]): any {
+  if (cls.$ctor === null) return callKw(cls, pos, names, values);
   const nw = lookupType(cls, "__new__");
   let o: any;
   if (nw !== undefined && nw !== objectNew) {
@@ -440,7 +466,7 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any
 }
 
 function typeGetattr(cls: PyType, name: string, dflt?: any): any {
-  const meta = T.type;
+  const meta = (cls as any).$meta ?? T.type;
   const md = lookupType(meta, name);
   if (md !== undefined && isDataDescriptor(md)) return descrGet(md, cls, meta);
   const d = lookupType(cls, name);
@@ -548,7 +574,7 @@ function getattrMiss(o: any, name: string, S: any): any {
     // on (class, version); descriptors and type's own attributes cannot.
     const v = getattr(o, name);
     const d = lookupType(o, name);
-    if (d !== undefined && d === v && lookupType(T.type, name) === undefined && (typeof d !== "object" || d === null || lookupType(typeOf(d), "__get__") === undefined)) {
+    if (d !== undefined && d === v && lookupType(typeOf(o), name) === undefined && (typeof d !== "object" || d === null || lookupType(typeOf(d), "__get__") === undefined)) {
       S.tc = o;
       S.tv = o.$ver;
       S.tval = v;
@@ -618,7 +644,7 @@ function callMethodMiss(o: any, name: string, args: any[], S: any): any {
     // Methods looked up on a class (functions, staticmethods, classmethods)
     // are stable for a given class version.
     const f = getattr(o, name);
-    if (typeof f === "function" && lookupType(T.type, name) === undefined) {
+    if (typeof f === "function" && lookupType(typeOf(o), name) === undefined) {
       S.tc = o;
       S.tv = o.$ver;
       S.tf = f;
@@ -796,7 +822,8 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType } = {
+export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any } = {
+  typeCall: null,
   hash: () => 0,
   eq: (a, b) => a === b,
   repr: (x) => String(x),

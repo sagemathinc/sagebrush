@@ -177,11 +177,21 @@ function roundImpl(x: any, nd: any = null): any {
   return nd === null ? f(x) : f(x, nd);
 }
 
+// A metaclass's own __instancecheck__ / __subclasscheck__, if any.
+function metaCheck(spec: any, name: string): any {
+  const m = spec.$meta;
+  if (m === undefined) return undefined;
+  const f = lookupType(m, name);
+  return f === T.type.$dict.get(name) ? undefined : f;
+}
 function isinstanceImpl(x: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => isinstanceImpl(x, s));
   if (!isType(spec)) raise(T.TypeError, "isinstance() arg 2 must be a type, a tuple of types, or a union");
   const t = typeOf(x);
-  if (t === spec || t.$mro.includes(spec) || spec === T.object) return true;
+  if (t === spec) return true;
+  const mc = metaCheck(spec, "__instancecheck__");
+  if (mc !== undefined) return O.truth(mc(spec, x));
+  if (t.$mro.includes(spec) || spec === T.object) return true;
   return subclassHook(spec, t);
 }
 // ABC-style structural checks: a class's __subclasshook__ classmethod,
@@ -198,6 +208,8 @@ function issubclassImpl(c: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => issubclassImpl(c, s));
   if (!isType(c)) raise(T.TypeError, "issubclass() arg 1 must be a class");
   if (!isType(spec)) raise(T.TypeError, "issubclass() arg 2 must be a class, a tuple of classes, or a union");
+  const mc = metaCheck(spec, "__subclasscheck__");
+  if (mc !== undefined) return O.truth(mc(spec, c));
   return c.$mro.includes(spec) || subclassHook(spec, c);
 }
 

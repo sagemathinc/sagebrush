@@ -165,7 +165,14 @@ export function repr(x: any): string {
     case "boolean":
       return x ? "True" : "False";
     case "function":
-      if (isType(x)) return `<class '${x.$module === "builtins" ? "" : x.$module + "."}${x.$qualname}'>`;
+      if (isType(x)) {
+        const m = (x as any).$meta;
+        if (m !== undefined) {
+          const f = lookupType(m, "__repr__");
+          if (f !== T.type.$dict.get("__repr__")) return f(x);
+        }
+        return `<class '${x.$module === "builtins" ? "" : x.$module + "."}${x.$qualname}'>`;
+      }
       if (x.$self !== undefined) return `<bound method ${x.$func.__qualname__ ?? x.$func.__name__} of ${repr(x.$self)}>`;
       if (x.$pyfn === true && x.$builtinMethod !== true) return `<function ${x.__qualname__} at ${hex(id(x))}>`;
       return `<built-in function ${x.__name__ ?? x.name}>`;

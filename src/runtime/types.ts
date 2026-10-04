@@ -5,7 +5,7 @@ import {
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
   bindMethod, bindArgs, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, IntLayout, FloatLayout, StrLayout,
+  hooks, unbox, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr } from "./format";
@@ -58,9 +58,10 @@ function typeCall(...args: any[]): any {
   if (args.length === 1) return typeOf(args[0]);
   if (args.length === 3) {
     const [name, bases, ns] = args;
+    if (!(ns instanceof PyDict)) raise(T.TypeError, `type.__new__() argument 3 must be dict, not ${typeName(ns)}`);
     const m = new Map<string, any>();
     for (const [k, v] of (ns as PyDict).$m) m.set(dictKeyOf(ns, k), v);
-    return makeClass(name, O.toArray(bases), m, "__main__", name, [], []);
+    return makeClass(name, O.toArray(bases), m, m.get("__module__") ?? "__main__", name, [], []);
   }
   raise(T.TypeError, "type() takes 1 or 3 arguments");
 }
@@ -83,8 +84,47 @@ method(type, "mro", (c: any) => c.$mro.slice());
 method(type, "__subclasses__", (c: any) => c.$subclasses.slice());
 method(type, "__instancecheck__", (c: any, x: any) => isinstance(x, c));
 method(type, "__subclasscheck__", (c: any, x: any) => x.$mro.includes(c));
-method(type, "__call__", (c: any, ...args: any[]) => c(...args));
 T.type = type;
+type.$jsBase = TypeLayout;
+// type.__call__ creates an instance without consulting the metaclass again,
+// so a metaclass __call__ can delegate to it through super().
+const typeCallM = method(type, "__call__", (c: any, ...args: any[]) => constructPlain(c, args));
+typeCallM.$kw = (pos: any[], names: string[], values: any[]) => constructPlainKw(pos[0], pos.slice(1), names, values);
+hooks.typeCall = typeCallM;
+// type.__new__(mcls, name, bases, ns, **kw)
+const typeNew = pyfn(function __new__(mcls: any, ...args: any[]) {
+  if (args.length === 1 && mcls === type) return typeOf(args[0]);
+  if (args.length !== 3) raise(T.TypeError, "type() takes 1 or 3 arguments");
+  return typeNewImpl(mcls, args[0], args[1], args[2], new Map());
+}, "__new__");
+typeNew.$kw = (pos: any[], names: string[], values: any[]) => {
+  if (pos.length !== 4) raise(T.TypeError, "type.__new__() takes exactly 3 arguments");
+  return typeNewImpl(pos[0], pos[1], pos[2], pos[3], new Map(names.map((n, i) => [n, values[i]])));
+};
+type.$dict.set("__new__", typeNew);
+function typeNewImpl(mcls: any, name: any, bases: any, ns: any, kw: Map<string, any>): PyType {
+  if (!isType(mcls) || !mcls.$mro.includes(type)) raise(T.TypeError, `type.__new__(X): X is not a type object (${typeName(mcls)})`);
+  if (typeof name !== "string") raise(T.TypeError, `type.__new__() argument 1 must be str, not ${typeName(name)}`);
+  if (!(ns instanceof PyDict)) raise(T.TypeError, `type.__new__() argument 3 must be dict, not ${typeName(ns)}`);
+  const m = new Map<string, any>();
+  for (const [k, v] of (ns as PyDict).$m) m.set(dictKeyOf(ns, k), v);
+  const b = O.toArray(bases);
+  let winner: PyType = mcls;
+  for (const x of b) {
+    const mb = typeOf(x);
+    if (winner.$mro.includes(mb)) continue;
+    if (mb.$mro.includes(winner)) winner = mb;
+    else raise(T.TypeError, "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases");
+  }
+  return buildClass(name, b, m, m.get("__module__") ?? "__main__", m.get("__qualname__") ?? name, kw, winner);
+}
+const typeInit = method(type, "__init__", (_c: any, ..._args: any[]) => null);
+typeInit.$kw = () => null;
+const typePrepare = pyfn(function __prepare__(..._a: any[]) {
+  return new PyDict();
+}, "__prepare__");
+typePrepare.$kw = () => new PyDict();
+type.$dict.set("__prepare__", typePrepare);
 
 // Mark runtime classes with their Python type.
 export function bindClass(jsClass: any, cls: PyType) {
@@ -240,8 +280,41 @@ export function makeClass(name: string, bases: any[], ns: Map<string, any>, modu
   let meta: any = null;
   const kw = new Map<string, any>();
   kwNames.forEach((k, i) => (k === "metaclass" ? (meta = kwValues[i]) : kw.set(k, kwValues[i])));
+  if (meta !== null && !isType(meta)) return callKw(meta, [name, tuple(bases), nsDict(ns, module, qualname)], [...kw.keys()], [...kw.values()]);
   for (const b of bases) if (!isType(b)) raise(T.TypeError, `bases must be types, not ${typeName(b)}`);
-  if (meta !== null && meta !== T.type && meta !== T.ABCMeta) raise(T.TypeError, "custom metaclasses are not supported yet");
+  // The most derived metaclass of the explicit one and the bases' types.
+  let winner: PyType = meta ?? T.type;
+  for (const b of bases) {
+    const mb = typeOf(b);
+    if (winner.$mro.includes(mb)) continue;
+    if (mb.$mro.includes(winner)) winner = mb;
+    else raise(T.TypeError, "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases");
+  }
+  if (winner !== T.type) {
+    const prep = getattr(winner, "__prepare__", null);
+    let d = nsDict(ns, module, qualname);
+    if (prep !== null && prep !== typePrepare) {
+      const pd = callKw(prep, [name, tuple(bases)], [...kw.keys()], [...kw.values()]);
+      if (pd instanceof PyDict) {
+        for (const [k, v] of d.$m) dictSet(pd, dictKeyOf(d, k), v);
+        d = pd;
+      }
+    }
+    return callKw(winner, [name, tuple(bases), d], [...kw.keys()], [...kw.values()]);
+  }
+  return buildClass(name, bases, ns, module, qualname, kw, T.type);
+}
+
+function nsDict(ns: Map<string, any>, module: string, qualname: string): PyDict {
+  const d = new PyDict();
+  if (!ns.has("__module__")) dictSet(d, "__module__", module);
+  if (!ns.has("__qualname__")) dictSet(d, "__qualname__", qualname);
+  for (const [k, v] of ns) dictSet(d, k, v);
+  return d;
+}
+
+function buildClass(name: string, bases: any[], ns: Map<string, any>, module: string, qualname: string, kw: Map<string, any>, meta: PyType): PyType {
+  for (const b of bases) if (!isType(b)) raise(T.TypeError, `bases must be types, not ${typeName(b)}`);
   if (!ns.has("__module__")) ns.set("__module__", module);
   if (!ns.has("__qualname__")) ns.set("__qualname__", qualname);
   if (ns.has("__eq__") && !ns.has("__hash__")) ns.set("__hash__", null);
@@ -252,6 +325,7 @@ export function makeClass(name: string, bases: any[], ns: Map<string, any>, modu
     if (typeof f === "function") ns.set(k, new PyClassMethod(f));
   }
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
+  if (meta !== T.type) (cls as any).$meta = meta;
   cls.$qualname = ns.get("__qualname__");
   ns.delete("__qualname__");
   for (const [k, v] of ns) {
