@@ -36,7 +36,7 @@ fn main() {
             v
         };
         let phi = e.coeffs.first().map_or(1, |c| c.len());
-        let same = e.m == g("order").max(1) && e.coeffs.len() == want.len() && e.coeffs.iter().zip(&want).all(|(a, b)| pad(a, phi) == pad(b, phi));
+        let same = e.status == "proven" && e.m == g("order").max(1) && e.coeffs.len() == want.len() && e.coeffs.iter().zip(&want).all(|(a, b)| pad(a, phi) == pad(b, phi));
         if same {
             ok += 1;
         } else {

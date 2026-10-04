@@ -24,11 +24,12 @@
 //!
 //! Dimension.  dim over F_ell >= dim over Q(zeta_m), with equality outside
 //! finitely many ell; when they are equal the F_ell charpoly is the
-//! reduction of the true one.  Primes (or conjugates) giving a larger
-//! dimension are rejected, a smaller one restarts the computation.  There is
-//! no independent dimension formula here yet, so the result is "proven
-//! given the dimension" (status "conditional"), unlike weight 2.
+//! reduction of the true one.  The true dimension comes from dims.rs:
+//! 2 dim S_k + dim E_k for sign 0; for sign +-1, from the first prime where
+//! dim M^+ + dim M^- equals that (both can only be too large, so both are
+//! right).  Primes or conjugates giving any other dimension are rejected.
 
+use crate::dims::dim_modsym;
 use crate::exact::{factor, level_data};
 use crate::general::{mul, powmod, primes_one_mod, root_of_unity, Character, GeneralSpace};
 use crate::p1::gcd;
@@ -134,6 +135,10 @@ pub fn powerful_to_power_norm(m: u64) -> u128 {
     rows.into_iter().max().unwrap()
 }
 
+fn sign_str(s: i32) -> &'static str {
+    if s > 0 { "+" } else { "-" }
+}
+
 /// Inverse of a square matrix mod p (p prime), or None if singular.
 fn invert_mod(a: &[Vec<u64>], p: u64) -> Option<Vec<Vec<u64>>> {
     let n = a.len();
@@ -195,10 +200,19 @@ pub fn exact_charpoly(n: u64, k: usize, eps: &Character, sign: i32, q: u64) -> R
     let (mut used, mut rejected) = (vec![], vec![]);
     // residues[r][j][i]: prime r, coefficient of x^j, coordinate i.
     let mut residues: Vec<(u64, Vec<Vec<u64>>)> = vec![];
-    let mut dim: Option<usize> = None;
+    // The certified dimension: from the formula for sign 0, and from the
+    // first prime where the two signs add up to it for sign +-1.
+    let total = dim_modsym(&eps, k) as usize;
+    let need_for = |d: usize| {
+        let bounds = embedding_bounds(d, cusps.min(d), &b_e, &b_s);
+        let amax = bounds.into_iter().max().unwrap();
+        &amax * &amax * (4u128 * c_norm * c_norm) << odd_primes as usize
+    };
+    let mut dim: Option<usize> = if sign == 0 { Some(total) } else { None };
+    let mut certified_by = format!("dim M = 2 dim S_k + dim E_k = {} (Cohen-Oesterle, regular cusps)", total);
     let mut modulus = BigUint::one();
     // Need modulus^2 > need_sq = 4 ||C||^2 2^odd max_j A_j^2.
-    let mut need_sq: Option<BigUint> = None;
+    let mut need_sq: Option<BigUint> = dim.map(|d| need_for(d));
     let mut primes = primes_one_mod(m, 1 << 31);
     loop {
         if let Some(ns) = &need_sq {
@@ -227,23 +241,29 @@ pub fn exact_charpoly(n: u64, k: usize, eps: &Character, sign: i32, q: u64) -> R
             let res: Vec<(usize, Vec<u64>)> = out[b * phi..(b + 1) * phi].iter().cloned().collect::<Result<_, _>>()?;
             let dmin = res.iter().map(|r| r.0).min().unwrap();
             let all_equal = res.iter().all(|r| r.0 == dmin);
-            if dim.map_or(false, |d| dmin < d) {
-                // Everything so far had too large a dimension.
-                rejected.extend(used.drain(..));
-                residues.clear();
-                modulus = BigUint::one();
-                need_sq = None;
-                dim = None;
-            }
-            if !all_equal || dim.map_or(false, |d| dmin > d) {
+            if !all_equal {
                 rejected.push(l);
                 continue;
             }
             if dim.is_none() {
+                // Sign +-1: certified at this prime if the other sign makes
+                // up the rest of the sign-0 dimension (each can only be too big).
+                let other = GeneralSpace::new_mod(n, k, &eps, -sign, l, powmod(roots[b].1, units[0], l))?.dimension();
+                if dmin + other != total {
+                    rejected.push(l);
+                    continue;
+                }
+                certified_by = format!("dim M^{} + dim M^{} = {} + {} = {} = 2 dim S_k + dim E_k at ell = {}", sign_str(sign), sign_str(-sign), dmin, other, total, l);
                 dim = Some(dmin);
-                let bounds = embedding_bounds(dmin, cusps.min(dmin), &b_e, &b_s);
-                let amax = bounds.into_iter().max().unwrap();
-                need_sq = Some(&amax * &amax * (4u128 * c_norm * c_norm) << odd_primes as usize);
+                need_sq = Some(need_for(dmin));
+            }
+            let target = dim.unwrap();
+            if dmin < target {
+                return Err(format!("dimension {} at ell = {} is below the certified {}", dmin, l, target));
+            }
+            if dmin > target {
+                rejected.push(l);
+                continue;
             }
             // Coordinates mod l: V[j][i] = z^(u_j i), solve V a = values.
             let z = roots[b].1;
@@ -273,8 +293,8 @@ pub fn exact_charpoly(n: u64, k: usize, eps: &Character, sign: i32, q: u64) -> R
     checks.push(format!("monic of degree {}: {}", d, monic));
     let max_bits = coeffs.iter().flatten().map(|c| c.bits()).max().unwrap_or(0);
     checks.push(format!("largest coordinate has {} bits; modulus {} bits, need > {:.0}", max_bits, modulus.bits(), bound_bits));
-    checks.push(format!("dimension {} at all {} primes x {} embeddings (not certified by a formula)", d, used.len(), phi));
-    let status = if monic && (max_bits as f64) < bound_bits { "conditional" } else { "inconsistent" };
+    checks.push(format!("dimension {} at all {} primes x {} embeddings; certified: {}", d, used.len(), phi, certified_by));
+    let status = if monic && (max_bits as f64) < bound_bits { "proven" } else { "inconsistent" };
     Ok(ExactGeneral { n, k, sign, q, m, dim: d, coeffs, primes_used: used, primes_rejected: rejected, bound_bits, status, checks })
 }
 
@@ -332,7 +352,7 @@ mod tests {
     #[test]
     fn level_one_weight_12_exact() {
         let e = exact_charpoly(1, 12, &Character::trivial(1), 1, 2).unwrap();
-        assert_eq!(e.status, "conditional");
+        assert_eq!(e.status, "proven");
         let c: Vec<i64> = e.coeffs.iter().map(|v| v[0].to_i64().unwrap()).collect();
         assert_eq!(c, vec![-49176, -2025, 1]);
     }
@@ -349,7 +369,7 @@ mod tests {
         }
         let eps = Character::from_exponents(13, 3, exps).unwrap();
         let e = exact_charpoly(13, 2, &eps, 0, 2).unwrap();
-        assert_eq!(e.status, "conditional", "{:?}", e.checks);
+        assert_eq!(e.status, "proven", "{:?}", e.checks);
         assert_eq!(e.m, 3);
         assert!(e.coeffs.iter().flatten().all(|c| c.bits() < 8));
     }

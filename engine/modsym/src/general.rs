@@ -89,6 +89,18 @@ impl Character {
         Character { n: self.n, order: self.order / s, exps }
     }
 
+    /// The conductor: the least M | N with eps(x) = 1 for all units
+    /// x = 1 mod M.
+    pub fn conductor(&self) -> u64 {
+        let n = self.n;
+        (1..=n).filter(|m| n % m == 0).find(|&m| {
+            (0..n / m).all(|t| {
+                let x = (1 + t * m) % n;
+                self.exponent(x as i64).map_or(true, |e| e as u64 % self.order == 0)
+            })
+        }).unwrap_or(1)
+    }
+
     pub fn is_trivial(&self) -> bool {
         self.exps.iter().all(|&e| e == 0 || e == u32::MAX)
     }

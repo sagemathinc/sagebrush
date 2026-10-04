@@ -55,17 +55,27 @@ The power basis can be badly conditioned when $m$ has several odd primes; $\Phi_
 $$L^2>4\,\|C\|^2\,2^{\omega_{\rm odd}(m)}\,\max_j A_j^2,$$
 compared exactly as integers, where $L$ is the product of the primes used. No floating point is involved.
 
-The bound runs 2–30 bits above the true size in the table. That costs at most one extra prime, except at $N=50$, $k=12$: 135 bits of slack there is about 4 of its 30 primes. A sum-of-squares refinement like the weight-2 one would recover that.
+The bound runs 2–145 bits above the true size in the table. The worst cases are $N=200$, $k=4$ (145 bits) and $N=50$, $k=12$ (135 bits), which cost about 5 and 4 extra primes. A sum-of-squares refinement like the weight-2 one would recover most of that.
 
-### 3. Dimension: the only unproven input
+### 3. Dimension: certified by formula
 
-$\dim_{\mathbb{F}_\ell}\ge\dim_{\mathbb{Q}(\zeta_m)}$, with equality for all but finitely many $\ell$. When they are equal, the localized presentation module has no $\mathfrak{l}$-torsion. The $\mathbb{F}_\ell$ charpoly is then the reduction of the true one, since $\ell$ is odd and the sign projection is defined integrally.
+$\dim_{\mathbb{F}_\ell}\ge\dim_{\mathbb{Q}(\zeta_m)}$, with equality for all but finitely many $\ell$. When they are equal, the localized presentation module has no $\mathfrak{l}$-torsion. The $\mathbb{F}_\ell$ charpoly is then the reduction of the true one, since $\ell$ is odd and the sign projection is defined integrally. So everything rests on knowing the true dimension.
 
-The code therefore:
-- rejects primes and conjugates that give a larger dimension;
-- restarts if a smaller dimension appears.
+`dims.rs` supplies it without using modular symbols:
 
-What it cannot do is prove that the common dimension is right. Weight 2 had an independent formula through `level_data`. Here there is none yet, so the result carries `status: "conditional"`. Certifying it needs Cohen–Oesterlé for $\dim S_k(N,\varepsilon)$ plus the Eisenstein count with sign. That is also exactly what the cuspidal/new subspace work needs, so it is the natural next step.
+- **Cusp forms.** $\dim S_k(N,\varepsilon)$ by Cohen–Oesterlé. The two character sums over $x^2+1\equiv0$ and $x^2+x+1\equiv0 \pmod N$ are computed in floating point; the result must be within $10^{-6}$ of a nonnegative integer, or the code panics.
+- **Eisenstein series.** $\dim E_k(N,\varepsilon)$ is the number of $\varepsilon$-regular cusps, minus 1 when $k=2$ and $\varepsilon=1$. A cusp with denominator $c\mid N$ is fixed by $\gamma\in\Gamma_0(N)$ with $d\equiv1 \pmod{N/\gcd(c,N/c)}$. On the boundary symbols at that cusp, the stabilizer acts unipotently twisted by $\varepsilon(d)$, so the cusp contributes one dimension exactly when $\operatorname{cond}(\varepsilon)\mid N/\gcd(c,N/c)$. The count factors over the primes dividing $N$.
+- **Sign 0.** $\dim\mathbb{M}_k=2\dim S_k+\dim E_k$, by Eichler–Shimura.
+- **Sign $\pm1$.** No formula for the split is needed. $\mathbb{M}=\mathbb{M}^+\oplus\mathbb{M}^-$ and each $\mathbb{F}_\ell$-dimension can only be too large. So at the first prime where $\dim_\ell\mathbb{M}^\pm+\dim_\ell\mathbb{M}^\mp$ equals the sign-0 formula, both are certified. That costs one extra space construction at one prime.
+
+Every later prime and conjugate must hit the certified dimension exactly; anything else is rejected. Results now carry `status: "proven"` and say in `checks` how the dimension was certified.
+
+Validation (`examples/dims_vs_sage.rs`, with reference data from `examples/sage/dims.sage`):
+
+- **Against Sage's formulas.** Conductor, $\dim S_k$ and $\dim E_k$ agree with Sage's `CuspForms`/`EisensteinForms` on **7931 of 7931** pairs. These are $N\le150$, $2\le k\le12$ with $Nk\le1200$, one character from every Galois orbit, with the right parity.
+- **Against our own presentations.** $2S+E$ agrees with the mod-$\ell$ presentations on **4898 of 4898** spaces ($Nk\le600$), both for sign 0 and as $\dim\mathbb{M}^++\dim\mathbb{M}^-$. This is the independent check: the presentation and the formulas share no code.
+- **Unit tests.** $\dim S_2(N)=$ genus of $X_0(N)$ for all $N<300$, and $\dim S_k(1)$ for $k\le26$.
+- **End to end.** All 1839 exact charpolys compared with Sage now come out `proven` and identical.
 
 ### 4. Rust-specific choices
 
@@ -82,6 +92,5 @@ Profiling showed space construction dominating at high weight: 32 ms of 37 ms at
 
 ## Next
 
-1. **Dimension formulas** (Cohen–Oesterlé plus Eisenstein with sign), which turn `conditional` into `proven`.
-2. **Reuse across primes.** The union-find graph and the $\tau$-orbits do not depend on $\ell$, and generically neither does the elimination pattern; only the weights do. Building them once would cut the per-prime cost again.
-3. **Cuspidal and new subspaces** and newform orbits for $k>2$ or $\varepsilon\ne1$, then the atlas.
+1. **Reuse across primes.** The union-find graph and the $\tau$-orbits do not depend on $\ell$, and generically neither does the elimination pattern; only the weights do. Building them once would cut the per-prime cost again.
+2. **Cuspidal and new subspaces** and newform orbits for $k>2$ or $\varepsilon\ne1$, then the atlas.

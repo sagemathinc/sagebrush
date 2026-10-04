@@ -19,6 +19,7 @@
 mod par;
 pub mod estimate;
 pub mod cusps;
+pub mod dims;
 pub mod exact;
 pub mod general;
 pub mod general_exact;
