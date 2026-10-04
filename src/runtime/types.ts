@@ -566,6 +566,11 @@ export function encode(s: string, encoding: any = "utf-8", errors: any = "strict
 }
 
 const isWs = (c: string) => /[\s\x1c-\x1f\x85]/.test(c);
+// Argument checks shared by str methods ("must be str, not int").
+function needStr(x: any, what = "must be str"): string {
+  if (typeof x !== "string") raise(T.TypeError, `${what}, not ${typeName(x)}`);
+  return x;
+}
 function stripChars(s: string, chars: any, left: boolean, right: boolean): string {
   if (chars !== null && chars !== undefined && typeof chars !== "string") raise(T.TypeError, `strip arg must be None or str`);
   let i = 0, j = s.length;
@@ -582,7 +587,7 @@ function splitWhitespace(s: string, maxsplit: number): string[] {
     while (i < n && isWs(s[i])) i++;
     if (i >= n) break;
     if (maxsplit >= 0 && out.length === maxsplit) {
-      out.push(stripChars(s.slice(i), null, false, true));
+      out.push(s.slice(i));
       return out;
     }
     let j = i;
@@ -599,7 +604,7 @@ function rsplitWhitespace(s: string, maxsplit: number): string[] {
     while (j > 0 && isWs(s[j - 1])) j--;
     if (j <= 0) break;
     if (out.length === maxsplit) {
-      out.push(stripChars(s.slice(0, j), null, true, false));
+      out.push(s.slice(0, j));
       break;
     }
     let i = j;
@@ -615,7 +620,7 @@ function clampRange(s: string, start: any, end: any): [number, number] {
   let b = end === undefined || end === null ? n : Number(end);
   if (a < 0) a = Math.max(0, a + n);
   if (b < 0) b = Math.max(0, b + n);
-  return [Math.min(a, n), Math.min(b, n)];
+  return [a, Math.min(b, n)];
 }
 method(S, "join", (sep: string, items: any) => {
   const parts = Array.isArray(items) ? items : O.toArray(items);
@@ -634,6 +639,7 @@ method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
 method(S, "rsplit", (s: string, sep: any = null, maxsplit: any = -1) => {
   const m = Number(maxsplit);
   if (sep === null) return m < 0 ? splitWhitespace(s, -1) : rsplitWhitespace(s, m);
+  needStr(sep);
   if (sep === "") raise(T.ValueError, "empty separator");
   const parts = s.split(sep);
   if (m >= 0 && parts.length > m + 1) return [parts.slice(0, parts.length - m).join(sep), ...parts.slice(parts.length - m)];
@@ -656,8 +662,11 @@ method(S, "strip", (s: string, chars: any = null) => stripChars(s, chars, true, 
 method(S, "lstrip", (s: string, chars: any = null) => stripChars(s, chars, true, false));
 method(S, "rstrip", (s: string, chars: any = null) => stripChars(s, chars, false, true));
 method(S, "replace", (s: string, a: string, b: string, count: any = -1) => {
-  const c = Number(count);
-  if (c < 0) return s.split(a).join(b);
+  needStr(a, "replace() argument 1 must be str");
+  needStr(b, "replace() argument 2 must be str");
+  let c = Number(count);
+  if (c < 0 && a !== "") return s.split(a).join(b);
+  if (c < 0) c = Infinity;
   let out = "", i = 0, k = 0;
   if (a === "") {
     for (const ch of s) out += k++ < c ? b + ch : ch;
@@ -673,8 +682,9 @@ method(S, "replace", (s: string, a: string, b: string, count: any = -1) => {
   return out + s.slice(i);
 });
 function findImpl(s: string, sub: string, start: any, end: any, rev: boolean): number {
+  needStr(sub);
   const [a, b] = clampRange(s, start, end);
-  if (b - a < sub.length) return -1;
+  if (b - a < sub.length || a > s.length) return -1;
   const j = rev ? s.lastIndexOf(sub, b - sub.length) : s.indexOf(sub, a);
   return j < a || j + sub.length > b ? -1 : j;
 }
@@ -691,7 +701,9 @@ method(S, "rindex", (s: string, sub: string, start: any = undefined, end: any = 
   return j;
 });
 method(S, "count", (s: string, sub: string, start: any = undefined, end: any = undefined) => {
+  needStr(sub);
   const [a, b] = clampRange(s, start, end);
+  if (a > s.length) return 0;
   const t = s.slice(a, b);
   return sub === "" ? t.length + 1 : t.split(sub).length - 1;
 });
@@ -699,6 +711,7 @@ function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean 
   if (Array.isArray(x)) return x.some((p) => affix(s, p, start, end, ends));
   if (typeof x !== "string") raise(T.TypeError, `${ends ? "endswith" : "startswith"} first arg must be str or a tuple of str, not ${typeName(x)}`);
   const [a, b] = clampRange(s, start, end);
+  if (a > s.length) return false;
   const t = s.slice(a, b);
   return ends ? t.endsWith(x) : t.startsWith(x);
 }
@@ -747,10 +760,12 @@ method(S, "zfill", (s: string, w: any) => {
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
 method(S, "partition", (s: string, sep: string) => {
+  if (needStr(sep) === "") raise(T.ValueError, "empty separator");
   const i = s.indexOf(sep);
   return i < 0 ? tuple([s, "", ""]) : tuple([s.slice(0, i), sep, s.slice(i + sep.length)]);
 });
 method(S, "rpartition", (s: string, sep: string) => {
+  if (needStr(sep) === "") raise(T.ValueError, "empty separator");
   const i = s.lastIndexOf(sep);
   return i < 0 ? tuple(["", "", s]) : tuple([s.slice(0, i), sep, s.slice(i + sep.length)]);
 });
@@ -1521,9 +1536,18 @@ getset(object, "__dict__", (o) => {
           if (!(v instanceof PyBytes)) raise(T.TypeError, `sequence item: expected a bytes-like object, ${typeName(v)} found`);
           return latin(v);
         })), Cls);
-        const conv = args.map((a, i) => (intArg && i === 0 && O.isPyInt(a) ? String.fromCharCode(Number(a)) : a === undefined ? a : latin(a)));
-        for (const a of conv) if (typeof a === "string" && false) void a;
-        return back(f(latin(self), ...conv), Cls);
+        const conv = args.map((a, i) => {
+          if (intArg && i === 0 && O.isPyInt(a)) {
+            const v = Number(a);
+            if (!(v >= 0 && v < 256)) raise(T.ValueError, "byte must be in range(0, 256)");
+            return String.fromCharCode(v);
+          }
+          if (typeof a === "string") raise(T.TypeError, `a bytes-like object is required, not 'str'`);
+          return a === undefined ? a : latin(a);
+        });
+        const r = f(latin(self), ...conv);
+        if (Cls === PyBytes && typeof r === "string" && r.length === self.n && /strip|just|center|zfill|remove/.test(name)) return self;
+        return back(r, Cls);
       };
       method(bt, name, m, f.$sig ?? null);
     }

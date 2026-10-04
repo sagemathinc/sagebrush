@@ -271,7 +271,7 @@ function parseSpec(spec: string): Spec {
   const m = /^(?:(.)?([<>=^]))?([-+ ])?(z)?(#)?(0)?(\d+)?([,_])?(?:\.(\d+))?([bcdeEfFgGnosxX%])?$/su.exec(spec);
   if (m === null) raise(T.ValueError, "Invalid format specifier '" + spec + "'");
   return {
-    fill: m[1] ?? (m[6] && !m[2] ? "0" : " "),
+    fill: m[1] ?? (m[6] ? "0" : " "),
     align: m[2] ?? (m[6] ? "=" : ""),
     sign: m[3] ?? "-",
     z: !!m[4],
@@ -282,6 +282,14 @@ function parseSpec(spec: string): Spec {
     precision: m[9] !== undefined ? parseInt(m[9]) : -1,
     type: m[10] ?? "",
   };
+}
+
+// Zero padding with a grouping separator pads the digits themselves, so the
+// zeros get separators too ('{:07,}'.format(0) == '000,000').
+function zeroGroup(digits: string, sep: string, n: number, need: number): string {
+  let g = group(digits, sep, n);
+  while (g.length < need) g = group((digits = "0" + digits), sep, n);
+  return g;
 }
 
 function group(digits: string, sep: string, n: number): string {
@@ -324,7 +332,8 @@ function formatInt(v: bigint, s: Spec): string {
     case "x": digits = a.toString(16); prefix = "0x"; break;
     case "X": digits = a.toString(16).toUpperCase(); prefix = "0X"; break;
     case "c":
-      return pad(String.fromCodePoint(Number(v)), "", s, "<");
+      if (s.sign !== "-" || s.alt) raise(T.ValueError, `${s.alt ? "Alternate form (#)" : "Sign"} not allowed with integer format specifier 'c'`);
+      return pad(String.fromCodePoint(Number(v)), "", s, ">");
     case "":
     case "d":
     case "n":
@@ -334,8 +343,9 @@ function formatInt(v: bigint, s: Spec): string {
       return formatFloat(Number(v), s);
   }
   if (s.precision >= 0) raise(T.ValueError, "Precision not allowed in integer format specifier");
-  digits = group(digits, s.grouping, s.type === "" || s.type === "d" || s.type === "n" ? 3 : 4);
   const sign = signOf(neg, s) + (s.alt ? prefix : "");
+  const gn = s.type === "" || s.type === "d" || s.type === "n" ? 3 : 4;
+  digits = s.grouping && s.zero && s.fill === "0" && s.align === "=" ? zeroGroup(digits, s.grouping, gn, s.width - sign.length) : group(digits, s.grouping, gn);
   return pad(digits, sign, s, ">");
 }
 
@@ -372,9 +382,11 @@ function formatFloat(x: number, s: Spec): string {
     if (s.type === "F" || s.type === "E" || s.type === "G") body = body.toUpperCase();
   }
   if (s.grouping) {
-    const [ip, fp] = body.split(/(?=[.eE%])/, 2);
-    body = group(ip, s.grouping, 3) + body.slice(ip.length);
-    void fp;
+    const [ip] = body.split(/(?=[.eE%])/, 2);
+    const negZero0 = s.z && neg && Number(body.replace(/[^0-9.e]/g, "")) === 0;
+    const signLen = signOf(neg && !negZero0, s).length;
+    const rest = body.slice(ip.length);
+    body = (s.zero && s.fill === "0" && s.align === "=" && /^\d+$/.test(ip) ? zeroGroup(ip, s.grouping, 3, s.width - signLen - rest.length) : group(ip, s.grouping, 3)) + rest;
   }
   const negZero = s.z && neg && Number(body.replace(/[^0-9.e]/g, "")) === 0;
   return pad(body, signOf(neg && !negZero, s), s, ">");
@@ -386,6 +398,12 @@ export function format(v: any, spec: string): string {
     const s = parseSpec(spec);
     if (s.type !== "" && s.type !== "s") raise(T.ValueError, `Unknown format code '${s.type}' for object of type 'str'`);
     if (s.sign !== "-" && spec.match(/[-+ ]/)) raise(T.ValueError, "Sign not allowed in string format specifier");
+    if (s.alt) raise(T.ValueError, "Alternate form (#) not allowed in string format specifier");
+    if (s.grouping) raise(T.ValueError, "Cannot specify ',' with 's'.");
+    if (s.align === "=") {
+      if (!s.zero || /^(.)?=/su.test(spec)) raise(T.ValueError, "'=' alignment not allowed in string format specifier");
+      s.align = "<";
+    }
     return pad(s.precision >= 0 ? [...v].slice(0, s.precision).join("") : v, "", s, "<");
   }
   if (typeof v === "boolean" && spec === "") return v ? "True" : "False";
@@ -422,67 +440,162 @@ export function fmt(v: any, conv: string | null, spec: string): string {
 
 // ------------------------------------------------------------------ str % args
 
+// Follows CPython's unicode_format_arg_parse: a non-tuple mapping (anything
+// with __getitem__) is both the single positional argument and the source
+// of %(key) lookups; after a key lookup the looked-up value is the argument.
 export function percentFormat(fmtStr: string, args: any): string {
-  const isMap = args instanceof PyDict || (args !== null && typeof args === "object" && !Array.isArray(args) && lookupType(typeOf(args), "__getitem__") !== undefined && !(typeof args === "string"));
-  const items: any[] = Array.isArray(args) && (args as any).$t === true ? args : [args];
-  let ai = 0;
+  const isTuple = Array.isArray(args) && (args as any).$t === true;
+  const dict = !isTuple && typeof args !== "string" && (args instanceof PyDict || Array.isArray(args) || (args !== null && typeof args === "object" && lookupType(typeOf(args), "__getitem__") !== undefined)) ? args : null;
+  let cur: any = args;
+  let arglen = isTuple ? args.length : -1;
+  let argidx = isTuple ? 0 : -2;
   const nextArg = () => {
-    if (ai >= items.length) raise(T.TypeError, "not enough arguments for format string");
-    return items[ai++];
+    if (argidx < arglen) {
+      if (arglen < 0) {
+        argidx = -1;
+        return cur;
+      }
+      return cur[argidx++];
+    }
+    raise(T.TypeError, "not enough arguments for format string");
+  };
+  const intOf = (v: any, type: string, needIndex: boolean): bigint => {
+    if (typeof v === "boolean") return BigInt(+v);
+    if (isPyInt(v)) return BigInt(v);
+    if (!needIndex && fv(v) !== undefined) return BigInt(Math.trunc(fv(v)!));
+    for (const name of needIndex ? ["__index__"] : ["__index__", "__int__"]) {
+      const f = lookupType(typeOf(v), name);
+      if (f !== undefined) {
+        const r = f(v);
+        return BigInt(typeof r === "boolean" ? +r : r);
+      }
+    }
+    raise(T.TypeError, `%${type} format: ${needIndex ? "an integer" : "a real number"} is required, not ${typeOf(v).$name}`);
   };
   let out = "";
-  const re = /%(?:\(([^)]*)\))?([-+ #0]*)(\*|\d+)?(?:\.(\*|\d+))?[hlL]?([diouxXeEfFgGcrsa%])/gy;
-  let last = 0;
-  for (let i = fmtStr.indexOf("%"); i >= 0; i = fmtStr.indexOf("%", last)) {
-    out += fmtStr.slice(last, i);
-    re.lastIndex = i;
-    const m = re.exec(fmtStr);
-    if (m === null) raise(T.ValueError, `unsupported format character '${fmtStr[i + 1] ?? ""}' (0x${(fmtStr.charCodeAt(i + 1) || 0).toString(16)}) at index ${i + 1}`);
-    last = re.lastIndex;
-    const [, key, flags, w, prec, type] = m;
-    if (type === "%") {
+  const n = fmtStr.length;
+  let i = 0;
+  while (i < n) {
+    const k = fmtStr.indexOf("%", i);
+    if (k < 0) {
+      out += fmtStr.slice(i);
+      break;
+    }
+    out += fmtStr.slice(i, k);
+    i = k + 1;
+    if (i < n && fmtStr[i] === "%") {
       out += "%";
+      i++;
       continue;
     }
-    let v: any;
-    let width = w === "*" ? Number(nextArg()) : w ? parseInt(w) : 0;
-    const precision = prec === "*" ? Number(nextArg()) : prec !== undefined ? parseInt(prec) : -1;
-    if (key !== undefined) {
-      if (!isMap) raise(T.TypeError, "format requires a mapping");
-      v = getitemMapping(args, key);
-    } else v = nextArg();
-    const left = flags.includes("-");
-    const s: Spec = { fill: flags.includes("0") && !left && !"sraTc".includes(type) ? "0" : " ", align: left ? "<" : flags.includes("0") && !"srac".includes(type) ? "=" : ">", sign: flags.includes("+") ? "+" : flags.includes(" ") ? " " : "-", z: false, alt: flags.includes("#"), zero: false, width, grouping: "", precision, type: "" };
+    if (i < n && fmtStr[i] === "(") {
+      if (dict === null) raise(T.TypeError, "format requires a mapping");
+      let depth = 1;
+      const ks = ++i;
+      while (i < n && depth > 0) {
+        if (fmtStr[i] === "(") depth++;
+        else if (fmtStr[i] === ")") depth--;
+        i++;
+      }
+      if (depth > 0) raise(T.ValueError, "incomplete format key");
+      cur = getitemMapping(dict, fmtStr.slice(ks, i - 1));
+      arglen = -1;
+      argidx = -2;
+    }
+    let flags = "";
+    while (i < n && "-+ #0".includes(fmtStr[i])) flags += fmtStr[i++];
+    let width = 0, precision = -1;
+    const num = (): number => {
+      if (fmtStr[i] === "*") {
+        i++;
+        const v = nextArg();
+        if (!isPyInt(v)) raise(T.TypeError, "* wants int");
+        return Number(v);
+      }
+      const m = /^\d+/.exec(fmtStr.slice(i, i + 20));
+      if (m === null) return -1;
+      i += m[0].length;
+      return parseInt(m[0]);
+    };
+    width = num();
+    let left = flags.includes("-");
+    if (width < -1 || (width < 0 && fmtStr[i - 1] === "*")) {
+      left = true;
+      width = -width;
+    }
+    if (width < 0) width = 0;
+    if (fmtStr[i] === ".") {
+      i++;
+      precision = Math.max(0, num());
+    }
+    while (i < n && "hlL".includes(fmtStr[i])) i++;
+    if (i >= n) raise(T.ValueError, "incomplete format");
+    const type = fmtStr[i++];
+    const zero = flags.includes("0") && !left;
+    const sign = flags.includes("+") ? "+" : flags.includes(" ") ? " " : "";
+    const padW = (body: string, numeric: boolean, signPart = ""): string => {
+      const len = [...body].length + signPart.length;
+      if (len >= width) return signPart + body;
+      if (left) return signPart + body + " ".repeat(width - len);
+      if (zero && numeric) return signPart + "0".repeat(width - len) + body;
+      return " ".repeat(width - len) + signPart + body;
+    };
     let body: string;
     switch (type) {
-      case "s": body = str(v); if (precision >= 0) body = body.slice(0, precision); body = pad(body, "", s, ">"); break;
-      case "r": case "a": body = repr(v); if (precision >= 0) body = body.slice(0, precision); body = pad(body, "", s, ">"); break;
-      case "c": body = pad(typeof v === "string" ? v : String.fromCodePoint(Number(v)), "", s, ">"); break;
-      case "d": case "i": case "u": {
-        if (!isPyInt(v) && fv(v) === undefined) raise(T.TypeError, `%${type} format: a real number is required, not ${typeOf(v).$name}`);
-        const n = isPyInt(v) ? BigInt(typeof v === "boolean" ? +v : v) : BigInt(Math.trunc(fv(v)!));
-        s.type = "d";
-        body = formatInt(n, s);
+      case "s":
+      case "r":
+      case "a": {
+        const v = nextArg();
+        body = type === "s" ? str(v) : type === "r" ? repr(v) : fmt(v, "a", "");
+        if (precision >= 0) body = [...body].slice(0, precision).join("");
+        body = padW(body, false);
         break;
       }
-      case "o": case "x": case "X": {
-        if (!isPyInt(v)) raise(T.TypeError, `%${type} format: an integer is required, not ${typeOf(v).$name}`);
-        s.type = type;
-        body = formatInt(BigInt(typeof v === "boolean" ? +v : v), s);
+      case "c": {
+        const v = nextArg();
+        let c: string;
+        if (typeof v === "string") {
+          if ([...v].length !== 1) raise(T.TypeError, `%c requires an int or a unicode character, not a string of length ${[...v].length}`);
+          c = v;
+        } else {
+          const x = intOf(v, "c", true);
+          if (x < 0n || x >= 0x110000n) raise(T.OverflowError, "%c arg not in range(0x110000)");
+          c = String.fromCodePoint(Number(x));
+        }
+        body = padW(c, false);
         break;
       }
-      default: {
-        const x = fv(v);
-        if (x === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
-        s.type = type;
-        if (precision < 0) s.precision = 6;
-        body = formatFloat(x, s);
+      case "d": case "i": case "u": case "o": case "x": case "X": {
+        const v = intOf(nextArg(), type, "oxX".includes(type));
+        const neg = v < 0n;
+        const a = neg ? -v : v;
+        let digits = type === "o" ? a.toString(8) : type === "x" ? a.toString(16) : type === "X" ? a.toString(16).toUpperCase() : a.toString();
+        if (precision > digits.length) digits = "0".repeat(precision - digits.length) + digits;
+        const prefix = flags.includes("#") && "oxX".includes(type) ? "0" + type : "";
+        body = padW(digits, true, (neg ? "-" : sign) + prefix);
+        break;
       }
+      case "e": case "E": case "f": case "F": case "g": case "G": {
+        const v = nextArg();
+        let x = fv(v);
+        if (x === undefined) {
+          if (isPyInt(v) || typeof v === "boolean") x = Number(v);
+          else {
+            const f = lookupType(typeOf(v), "__float__") ?? lookupType(typeOf(v), "__index__");
+            if (f === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
+            x = Number(fv(f(v)) ?? f(v));
+          }
+        }
+        const sp: Spec = { fill: zero ? "0" : " ", align: left ? "<" : zero ? "=" : ">", sign: sign || "-", z: false, alt: flags.includes("#"), zero: false, width, grouping: "", precision: precision < 0 ? 6 : precision, type };
+        body = formatFloat(x, sp);
+        break;
+      }
+      default:
+        raise(T.ValueError, `unsupported format character '${type}' (0x${type.charCodeAt(0).toString(16)}) at index ${i - 1}`);
     }
     out += body;
   }
-  out += fmtStr.slice(last);
-  if (!isMap && ai < items.length) raise(T.TypeError, "not all arguments converted during string formatting");
+  if (argidx < arglen && dict === null) raise(T.TypeError, "not all arguments converted during string formatting");
   return out;
 }
 
