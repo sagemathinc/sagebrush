@@ -52,6 +52,7 @@ function translate(p: string, flags: number): { src: string; flags: number } {
           out += inClass ? "" : "(?<![\\s\\S])";
           continue;
         case "Z":
+        case "z":
           out += inClass ? "" : "(?![\\s\\S])";
           continue;
         case "w":

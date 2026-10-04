@@ -352,7 +352,7 @@ function varsImpl(o: any = undefined): PyDict {
   return getattr(o, "__dict__");
 }
 function hashImpl(x: any): any {
-  return O.hashAny(x);
+  return O.hashExact(x);
 }
 function absImpl(x: any): any {
   return O.abs(x);

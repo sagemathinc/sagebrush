@@ -154,7 +154,7 @@ export function importStar(m: any, g: any) {
 newBuiltinModule("sys", (m) => {
   m.argv = [];
   m.version = "3.14.0 (pyjs-spike)";
-  m.hash_info = Ty.structseq("sys.hash_info", ["width", "modulus", "inf", "nan", "imag", "algorithm", "hash_bits", "seed_bits", "cutoff"], [64, 2305843009213693951, 314159, 0, 1000003, "siphash13", 64, 128, 0]);
+  m.hash_info = Ty.structseq("sys.hash_info", ["width", "modulus", "inf", "nan", "imag", "algorithm", "hash_bits", "seed_bits", "cutoff"], [64, 2305843009213693951n, 314159, 0, 1000003, "siphash13", 64, 128, 0]);
   m.int_info = Ty.structseq("sys.int_info", ["bits_per_digit", "sizeof_digit", "default_max_str_digits", "str_digits_check_threshold"], [30, 4, 4300, 640]);
   m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0]);
   m.hexversion = 0x30e00f0;
@@ -707,5 +707,5 @@ newBuiltinModule("os", (m) => {
   dictSet(sysModules, "os.path", m.path);
 });
 
-builtin(defaultImport, "__import__");
+builtin(defaultImport, "__import__", { args: ["name", "globals", "locals", "fromlist", "level"], posonly: 0, vararg: null, kwonly: [], kwarg: null });
 builtins.__import__ = defaultImport;

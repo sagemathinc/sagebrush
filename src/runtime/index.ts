@@ -472,3 +472,24 @@ export const R: any = {
   formatException,
   scripts,
 };
+
+// A small traceback module over the runtime's own traceback formatting.
+M.newBuiltinModule("traceback", (m) => {
+  const exc = (a: any, b: any) => (b !== undefined && b !== null ? b : a);
+  const lines = (s: string) => s.split(/(?<=\n)/).filter((l) => l.length);
+  const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
+  fn("format_exception", (a: any, b: any = undefined, _tb: any = undefined, ..._r: any[]) => lines(formatException(exc(a, b))));
+  fn("format_exception_only", (a: any, b: any = undefined) => {
+    const e = exc(a, b);
+    const s = F.str(e);
+    return [`${typeName(e)}${s ? ": " + s : ""}\n`];
+  });
+  fn("print_exception", (a: any, b: any = undefined, ..._r: any[]) => (B.stderr.write(formatException(exc(a, b))), null));
+  fn("format_exc", (..._a: any[]) => "NoneType: None\n");
+  fn("print_exc", (..._a: any[]) => null);
+  fn("format_tb", (..._a: any[]) => []);
+  fn("extract_tb", (..._a: any[]) => []);
+  fn("extract_stack", (..._a: any[]) => []);
+  fn("format_stack", (..._a: any[]) => []);
+  fn("print_stack", (..._a: any[]) => null);
+});

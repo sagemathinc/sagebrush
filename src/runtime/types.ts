@@ -585,7 +585,7 @@ method(int, "__index__", (x: any) => (typeof x === "boolean" ? +x : x));
 method(int, "__int__", (x: any) => (typeof x === "boolean" ? +x : x));
 method(int, "__float__", (x: any) => O.mkfloat(O.fv(x)!));
 method(int, "__repr__", (x: any) => repr(x));
-method(int, "__hash__", (x: any) => O.hashAny(x));
+method(int, "__hash__", (x: any) => O.hashExact(x));
 method(int, "__format__", (x: any, spec: string) => format(x, spec));
 method(int, "is_integer", () => true);
 method(int, "as_integer_ratio", (x: any) => tuple([x, 1]));
@@ -645,7 +645,7 @@ method(float, "__trunc__", (x: any) => intCall(x));
 method(float, "__floor__", (x: any) => intCall(Math.floor(O.fv(x)!)));
 method(float, "__ceil__", (x: any) => intCall(Math.ceil(O.fv(x)!)));
 method(float, "__repr__", (x: any) => floatRepr(O.fv(x)!));
-method(float, "__hash__", (x: any) => O.hashAny(x));
+method(float, "__hash__", (x: any) => O.hashExact(x));
 method(float, "__format__", (x: any, spec: string) => format(x, spec));
 method(float, "as_integer_ratio", (x: any) => {
   let v = O.fv(x)!;
