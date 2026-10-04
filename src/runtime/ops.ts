@@ -980,10 +980,35 @@ export class BytesIter {
 export class GenIter {
   constructor(public g: Generator) {}
   $next(): any {
-    const r = this.g.next();
+    const r = genStep(this.g, false, undefined);
     return r.done ? DONE : r.value;
   }
 }
+
+// One step of a generator (next/send, or throw), with Python's rules: a
+// StopIteration escaping the body becomes RuntimeError (PEP 479), re-entry is
+// a ValueError, and a just-started generator only accepts None.
+export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any> {
+  if (!isThrow && !g.$started && arg !== undefined && arg !== null) raise(T.TypeError, "can't send non-None value to a just-started generator");
+  g.$started = true;
+  try {
+    const r = isThrow ? g.throw(arg) : g.next(arg);
+    if (r.done && r.value === undefined) r.value = null;
+    return r;
+  } catch (e: any) {
+    if (isExc(e, T.StopIteration)) {
+      const err = T.RuntimeError(g.$async ? "coroutine raised StopIteration" : "generator raised StopIteration");
+      err.__cause__ = e;
+      throw err;
+    }
+    if (e instanceof TypeError && /already running/.test(e.message)) raise(T.ValueError, "generator already executing");
+    throw e;
+  }
+}
+// The StopIteration a ProtoIter swallowed most recently, so wrappers such as
+// enumerate and map can re-raise it with its value.
+export const lastStop: { e: any } = { e: null };
+
 // Any object implementing __next__.
 export class ProtoIter {
   nx: any;
@@ -996,7 +1021,10 @@ export class ProtoIter {
     try {
       return this.nx(this.o);
     } catch (e: any) {
-      if (isExc(e, T.StopIteration)) return DONE;
+      if (isExc(e, T.StopIteration)) {
+        lastStop.e = e;
+        return DONE;
+      }
       throw e;
     }
   }
@@ -1042,13 +1070,14 @@ export function iter(x: any): any {
 
 export function next(it: any, dflt?: any): any {
   if (it !== null && typeof it === "object" && typeof it.$next === "function") {
+    lastStop.e = null;
     const v = it.$next();
     if (v !== DONE) return v;
     if (dflt !== undefined) return dflt;
-    raise(T.StopIteration);
+    throw lastStop.e ?? T.StopIteration();
   }
   if (isGen(it)) {
-    const r = it.next();
+    const r = genStep(it, false, undefined);
     if (!r.done) return r.value;
     if (dflt !== undefined) return dflt;
     throw stopIteration(r.value);

@@ -90,23 +90,82 @@ export function dictOf(...kv: any[]): Obj.PyDict {
   return d;
 }
 
-// `yield from x`: a JS iterable delegating to x.
+// `yield from x`: a JS iterable delegating to x.  Generators delegate
+// natively; anything else gets an adaptor that forwards send() and throw()
+// and turns StopIteration(value) into the result of the `yield from`.
 export function yieldFrom(x: any): any {
-  if (x !== null && typeof x === "object" && x[Symbol.toStringTag] === "Generator") return x;
   if (Array.isArray(x) && (x as any).$cls === undefined) return x;
   const it = O.iter(x);
-  // A Python generator behind __iter__: delegate to it natively.
-  if (it instanceof O.GenIter) return it.g;
-  return {
+  if (it instanceof O.GenIter) return genDelegate(it.g);
+  const target = it instanceof O.ProtoIter ? it.o : it;
+  const stop = (e: any) => ({ done: true, value: e.args?.length ? e.args[0] : null });
+  const step = (f: () => any) => {
+    try {
+      return { done: false, value: f() };
+    } catch (e: any) {
+      if (Obj.isinstance(e, T.StopIteration)) return stop(e);
+      throw e;
+    }
+  };
+  const adaptor = {
     [Symbol.iterator]() {
-      return {
-        next() {
-          const v = it.$next();
-          return v === Obj.DONE ? { done: true, value: null } : { done: false, value: v };
-        },
-      };
+      return adaptor;
+    },
+    next(v: any) {
+      if (v !== undefined && v !== null) return step(() => Obj.callObj(Obj.getattr(target, "send"), [v]));
+      if (it instanceof O.ProtoIter) return step(() => it.nx(it.o));
+      return step(() => {
+        O.lastStop.e = null;
+        const r = it.$next();
+        if (r === Obj.DONE) throw O.lastStop.e ?? T.StopIteration();
+        return r;
+      });
+    },
+    throw(e: any) {
+      if (Obj.isinstance(e, T.GeneratorExit)) {
+        const c = Obj.getattr(target, "close", null);
+        if (c !== null) Obj.callObj(c, []);
+        throw e;
+      }
+      const t = Obj.getattr(target, "throw", null);
+      // CPython's CLEANUP_THROW: a StopIteration thrown in at a `yield from`
+      // ends it with that value.
+      if (t === null && Obj.isinstance(e, T.StopIteration)) return stop(e);
+      if (t === null) throw e;
+      return step(() => Obj.callObj(t, [e]));
+    },
+    return(v: any) {
+      const c = Obj.getattr(target, "close", null);
+      if (c !== null) Obj.callObj(c, []);
+      return { done: true, value: v };
     },
   };
+  return adaptor;
+}
+
+// `yield from gen`: like JS yield*, except GeneratorExit closes the inner
+// generator and is then raised here even if the inner one swallowed it.
+function genDelegate(g: any): any {
+  const d = {
+    [Symbol.iterator]() {
+      return d;
+    },
+    next(v: any) {
+      return O.genStep(g, false, v);
+    },
+    throw(e: any) {
+      if (Obj.isinstance(e, T.GeneratorExit)) {
+        T.generator.$dict.get("close")(g);
+        throw e;
+      }
+      return O.genStep(g, true, e);
+    },
+    return(v: any) {
+      T.generator.$dict.get("close")(g);
+      return { done: true, value: v };
+    },
+  };
+  return d;
 }
 
 export function withEnter(m: any): any {

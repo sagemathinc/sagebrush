@@ -189,7 +189,7 @@ export class Emitter {
       case "Yield":
         return `(yield ${e.value === null ? "null" : this.ex(e.value)})`;
       case "YieldFrom":
-        return `(yield* yieldFrom(${this.ex(e.value)}))`;
+        return `((yield* yieldFrom(${this.ex(e.value)})) ?? null)`;
       case "NamedExpr": {
         const t = this.temp();
         let s: Scope = this.fn.scope;

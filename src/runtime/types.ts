@@ -1352,8 +1352,9 @@ function iteratorType(name: string, jsClass: any, call?: (...a: any[]) => any): 
   bindClass(jsClass, t);
   method(t, "__iter__", (it: any) => it);
   method(t, "__next__", (it: any) => {
+    O.lastStop.e = null;
     const v = it.$next();
-    if (v === DONE) raise(T.StopIteration);
+    if (v === DONE) throw O.lastStop.e ?? T.StopIteration();
     return v;
   });
   return t;
@@ -1451,6 +1452,16 @@ iteratorType("reversed", ReversedIter, (x: any) => {
   return new ReversedIter(x, O.len(x) - 1, (i) => gi(x, i));
 });
 
+// `gen.throw(E)`, `gen.throw(E, v)`, `gen.throw(e)`.
+function throwable(e: any, v: any): any {
+  if (isType(e)) {
+    if (!e.$mro.includes(T.BaseException)) raise(T.TypeError, "exceptions must be classes or instances deriving from BaseException, not type");
+    return v === undefined || v === null ? e() : isinstance(v, e) ? v : e(v);
+  }
+  if (e === null || typeof e !== "object" || !isinstance(e, T.BaseException)) raise(T.TypeError, `exceptions must be classes or instances deriving from BaseException, not ${typeName(e)}`);
+  return e;
+}
+
 // Generators are JS generator objects.
 const generator = builtinType("generator", [object], () => raise(T.TypeError, "cannot create 'generator' instances"));
 const genResult = (r: IteratorResult<any>) => {
@@ -1458,13 +1469,30 @@ const genResult = (r: IteratorResult<any>) => {
   return r.value;
 };
 method(generator, "__iter__", (g: Generator) => g);
-method(generator, "__next__", (g: Generator) => genResult(g.next()));
-method(generator, "send", (g: Generator, v: any) => genResult(g.next(v)));
-method(generator, "throw", (g: Generator, e: any) => genResult(g.throw(isType(e) ? e() : e)));
-method(generator, "close", (g: Generator) => {
-  g.return(undefined as any);
-  return null;
+method(generator, "__next__", (g: Generator) => genResult(O.genStep(g, false, undefined)));
+method(generator, "send", (g: Generator, v: any) => genResult(O.genStep(g, false, v)));
+method(generator, "throw", (g: Generator, e: any, v: any = undefined) => genResult(O.genStep(g, true, throwable(e, v))));
+// close() throws GeneratorExit in at the paused yield, as CPython does, so
+// `except GeneratorExit` and `finally` both see it.
+method(generator, "close", (g: any) => {
+  if (!g.$started) {
+    g.$started = true;
+    g.return(undefined);
+    return null;
+  }
+  let r: IteratorResult<any>;
+  try {
+    r = O.genStep(g, true, T.GeneratorExit());
+  } catch (e: any) {
+    if (isinstance(e, T.GeneratorExit) || isinstance(e, T.StopIteration)) return null;
+    throw e;
+  }
+  if (!r.done) raise(T.RuntimeError, "generator ignored GeneratorExit");
+  return r.value ?? null;
 });
+getset(generator, "gi_running", () => false);
+getset(generator, "__name__", (g: any) => g.$name ?? "<genexpr>");
+getset(generator, "__qualname__", (g: any) => g.$qualname ?? g.$name ?? "<genexpr>");
 method(generator, "__repr__", (g: any) => `<generator object ${g.$name ?? "<genexpr>"} at 0x${O.id(g).toString(16)}>`);
 
 // ------------------------------------------------------------------ dir
