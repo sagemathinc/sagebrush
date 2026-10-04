@@ -22,6 +22,7 @@ export type Expr =
   | { k: "Lambda"; line: number; args: Params; body: Expr }
   | { k: "Starred"; line: number; value: Expr }
   | { k: "Yield"; line: number; value: Expr | null }
+  | { k: "Await"; line: number; value: Expr }
   | { k: "YieldFrom"; line: number; value: Expr }
   | { k: "NamedExpr"; line: number; target: string; value: Expr };
 
@@ -85,7 +86,7 @@ export type Stmt =
   | { k: "Break"; line: number }
   | { k: "Continue"; line: number }
   | { k: "Pass"; line: number }
-  | { k: "FunctionDef"; line: number; name: string; args: Params; body: Stmt[]; decorators: Expr[] }
+  | { k: "FunctionDef"; line: number; name: string; args: Params; body: Stmt[]; decorators: Expr[]; isAsync?: boolean }
   | { k: "ClassDef"; line: number; name: string; bases: Expr[]; keywords: Keyword[]; body: Stmt[]; decorators: Expr[] }
   | { k: "Import"; line: number; names: Alias[] }
   | { k: "ImportFrom"; line: number; module: string; level: number; names: Alias[] }

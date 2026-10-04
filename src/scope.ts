@@ -11,6 +11,7 @@ export class Scope {
   globals = new Set<string>();
   nonlocals = new Set<string>();
   isGenerator = false;
+  isAsync = false;
   usesSuper = false;
   children = new Map<object, Scope>();
   constructor(
@@ -169,7 +170,10 @@ class Collector {
         st.decorators.forEach((d) => this.expr(d));
         this.params(st.args);
         this.bind(st.name);
-        return this.func(st, st.name, st.args, () => this.stmts(st.body));
+        return this.func(st, st.name, st.args, () => {
+          if (st.isAsync) this.s.isAsync = this.s.isGenerator = true;
+          this.stmts(st.body);
+        });
       case "ClassDef": {
         st.decorators.forEach((d) => this.expr(d));
         st.bases.forEach((b) => this.expr(b));
@@ -297,9 +301,13 @@ class Collector {
         return this.func(e, "<lambda>", e.args, () => this.expr(e.body));
       case "Starred":
         return this.expr(e.value);
+      case "Await":
+        if (!this.s.isAsync) throw new SyntaxErr(this.s.kind === "comp" ? "await in comprehensions is not supported yet" : "'await' outside async function", e.line);
+        return this.expr(e.value);
       case "Yield":
       case "YieldFrom":
         if (this.s.kind !== "function") throw new SyntaxErr("'yield' outside function", e.line);
+        if (this.s.isAsync) throw new SyntaxErr(e.k === "YieldFrom" ? "'yield from' inside async function" : "async generators are not supported yet", e.line);
         this.s.isGenerator = true;
         return this.expr(e.value);
       case "NamedExpr": {

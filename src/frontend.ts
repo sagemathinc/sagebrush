@@ -57,6 +57,110 @@ class Convert {
     throw new PySyntaxError(`${what} is not supported yet`, this.filename, l, this.lines[l - 1] ?? "", (n.col_offset ?? 0) + 1);
   }
 
+  // Whether the innermost function is an `async def` (await, async for and
+  // async with are only allowed there), and a counter for desugaring temps.
+  private inAsync = false;
+  private tmp = 0;
+  asyncFn<R>(isAsync: boolean, f: () => R): R {
+    const saved = this.inAsync;
+    this.inAsync = isAsync;
+    try {
+      return f();
+    } finally {
+      this.inAsync = saved;
+    }
+  }
+  name(id: string, line: number): A.Expr {
+    return { k: "Name", line, id };
+  }
+  call(fn: string, args: A.Expr[], line: number): A.Expr {
+    return { k: "Call", line, func: this.name(fn, line), args, keywords: [] };
+  }
+  await(e: A.Expr, line: number): A.Expr {
+    return { k: "Await", line, value: e };
+  }
+
+  // async for t in it: body else: orelse
+  //   $ai = __pyjs_aiter__(it); $done = False
+  //   while True:
+  //     try: $v = await __pyjs_anext__($ai)
+  //     except StopAsyncIteration: $done = True; break
+  //     t = $v; body
+  //   if $done: orelse
+  asyncFor(s: any): A.Stmt {
+    const line = s.lineno;
+    if (!this.inAsync) throw new PySyntaxError("'async for' outside async function", this.filename, line, this.lines[line - 1] ?? "", (s.col_offset ?? 0) + 1);
+    const n = this.tmp++;
+    const ai = `$ai${n}`, done = `$done${n}`, v = `$v${n}`;
+    const T = (b: boolean): A.Expr => ({ k: "Const", line, value: { t: "bool", v: b } });
+    const body: A.Stmt[] = [
+      {
+        k: "Try", line,
+        body: [{ k: "Assign", line, targets: [this.name(v, line)], value: this.await(this.call("__pyjs_anext__", [this.name(ai, line)], line), line) }],
+        handlers: [{ line, type: this.name("StopAsyncIteration", line), name: null, body: [{ k: "Assign", line, targets: [this.name(done, line)], value: T(true) }, { k: "Break", line }] }],
+        orelse: [], finalbody: [],
+      },
+      { k: "Assign", line, targets: [this.expr(s.target)], value: this.name(v, line) },
+      ...this.stmts(s.body),
+    ];
+    const out: A.Stmt[] = [
+      { k: "Assign", line, targets: [this.name(ai, line)], value: this.call("__pyjs_aiter__", [this.expr(s.iter)], line) },
+      { k: "Assign", line, targets: [this.name(done, line)], value: T(false) },
+      { k: "While", line, test: T(true), body, orelse: [] },
+    ];
+    const orelse = this.stmts(s.orelse);
+    if (orelse.length) out.push({ k: "If", line, test: this.name(done, line), body: orelse, orelse: [] });
+    return { k: "If", line, test: T(true), body: out, orelse: [] };
+  }
+
+  // async with m as t: body   (one item; several items nest)
+  //   $m = m; $x = __pyjs_aexit__($m); t = await __pyjs_aenter__($m); $ok = True
+  //   try:
+  //     try: body
+  //     except BaseException as $e:
+  //       $ok = False
+  //       if not await $x(type($e), $e, $e.__traceback__): raise
+  //   finally:
+  //     if $ok: await $x(None, None, None)
+  asyncWith(s: any, items: any[]): A.Stmt[] {
+    const line = s.lineno;
+    if (!this.inAsync) throw new PySyntaxError("'async with' outside async function", this.filename, line, this.lines[line - 1] ?? "", (s.col_offset ?? 0) + 1);
+    const [item, ...rest] = items;
+    const n = this.tmp++;
+    const m = `$m${n}`, x = `$x${n}`, ok = `$ok${n}`, e = `$e${n}`;
+    const T = (b: boolean): A.Expr => ({ k: "Const", line, value: { t: "bool", v: b } });
+    const none: A.Expr = { k: "Const", line, value: { t: "None" } };
+    const enter = this.await(this.call("__pyjs_aenter__", [this.name(m, line)], line), line);
+    const inner = rest.length ? this.asyncWith(s, rest) : this.stmts(s.body);
+    const exitCall = (args: A.Expr[]): A.Expr => this.await({ k: "Call", line, func: this.name(x, line), args, keywords: [] }, line);
+    return [
+      { k: "Assign", line, targets: [this.name(m, line)], value: this.expr(item.context_expr) },
+      { k: "Assign", line, targets: [this.name(x, line)], value: this.call("__pyjs_aexit__", [this.name(m, line)], line) },
+      item.optional_vars ? { k: "Assign", line, targets: [this.expr(item.optional_vars)], value: enter } : { k: "Expr", line, value: enter },
+      { k: "Assign", line, targets: [this.name(ok, line)], value: T(true) },
+      {
+        k: "Try", line,
+        body: [{
+          k: "Try", line, body: inner,
+          handlers: [{
+            line, type: this.name("BaseException", line), name: e,
+            body: [
+              { k: "Assign", line, targets: [this.name(ok, line)], value: T(false) },
+              {
+                k: "If", line,
+                test: { k: "UnaryOp", line, op: "not", operand: exitCall([this.call("type", [this.name(e, line)], line), this.name(e, line), { k: "Attribute", line, value: this.name(e, line), attr: "__traceback__" }]) },
+                body: [{ k: "Raise", line, exc: null, cause: null }], orelse: [],
+              },
+            ],
+          }],
+          orelse: [], finalbody: [],
+        }],
+        handlers: [], orelse: [],
+        finalbody: [{ k: "If", line, test: this.name(ok, line), body: [{ k: "Expr", line, value: exitCall([none, none, none]) }], orelse: [] }],
+      },
+    ];
+  }
+
   // Private name mangling: inside a class body, `__x` becomes `_Class__x`.
   private klass: string | null = null;
   m(name: string): string {
@@ -109,7 +213,7 @@ class Convert {
         return { k: "Pass", line };
       case "FunctionDef":
         if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.stmts(s.body), decorators: s.decorator_list.map((d: any) => this.expr(d)) };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)) };
       case "ClassDef": {
         if (s.type_params.length) this.unsupported(s, "type parameters");
         return {
@@ -141,11 +245,12 @@ class Convert {
       case "Delete":
         return { k: "Delete", line, targets: s.targets.map((t: any) => this.expr(t)) };
       case "AsyncFunctionDef":
-        this.unsupported(s, "async def");
+        if (s.type_params.length) this.unsupported(s, "type parameters");
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(true, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), isAsync: true };
       case "AsyncFor":
-        this.unsupported(s, "async for");
+        return this.asyncFor(s);
       case "AsyncWith":
-        this.unsupported(s, "async with");
+        return { k: "If", line, test: { k: "Const", line, value: { t: "bool", v: true } }, body: this.asyncWith(s, s.items), orelse: [] };
       case "TryStar":
         this.unsupported(s, "except*");
       case "Match":
@@ -267,7 +372,10 @@ class Convert {
       case "DictComp":
         return this.comp(e, "dict");
       case "Lambda":
-        return { k: "Lambda", line, args: this.params(e.args), body: this.expr(e.body) };
+        return { k: "Lambda", line, args: this.params(e.args), body: this.asyncFn(false, () => this.expr(e.body)) };
+      case "Await":
+        if (!this.inAsync) throw new PySyntaxError("'await' outside async function", this.filename, line, this.lines[line - 1] ?? "", (e.col_offset ?? 0) + 1);
+        return this.await(this.expr(e.value), line);
       case "Starred":
         return { k: "Starred", line, value: this.expr(e.value) };
       case "Yield":

@@ -374,6 +374,31 @@ define("getattr", getattrImpl, [2, 3]);
 define("setattr", (o: any, n: string, v: any) => (setattr(o, n, v), null));
 define("delattr", (o: any, n: string) => (delattr(o, n), null));
 define("iter", iterImpl, [1, 2]);
+// async for / async with (see frontend.ts), and the aiter/anext builtins.
+const aiterImpl = (x: any) => {
+  const f = Ty.lookupDunder(x, "__aiter__");
+  if (f === undefined) raise(T.TypeError, `'async for' requires an object with __aiter__ method, got ${typeName(x)}`);
+  return f(x);
+};
+const anextImpl = (x: any) => {
+  const f = Ty.lookupDunder(x, "__anext__");
+  if (f === undefined) raise(T.TypeError, `'async for' received an object from __aiter__ that does not implement __anext__: ${typeName(x)}`);
+  return f(x);
+};
+define("aiter", aiterImpl, [1, 1]);
+define("anext", anextImpl, [1, 2]);
+define("__pyjs_aiter__", aiterImpl, [1, 1]);
+define("__pyjs_anext__", anextImpl, [1, 1]);
+define("__pyjs_aenter__", (m: any) => {
+  const f = Ty.lookupDunder(m, "__aenter__");
+  if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the asynchronous context manager protocol`);
+  return f(m);
+}, [1, 1]);
+define("__pyjs_aexit__", (m: any) => {
+  const f = Ty.lookupDunder(m, "__aexit__");
+  if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the asynchronous context manager protocol (missed __aexit__ method)`);
+  return builtin((t: any, v: any, tb: any) => f(m, t, v, tb), "__aexit__");
+}, [1, 1]);
 define("next", nextImpl, [1, 2]);
 define("any", anyImpl);
 define("all", allImpl);
