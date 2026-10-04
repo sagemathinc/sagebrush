@@ -1,5 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
+import { globalsDict } from "./object";
 import { T, FloatBox, PyDict, PyBytes, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
@@ -50,10 +51,47 @@ export function importModule(name: string): any {
   return m;
 }
 
+// builtins.__import__, and the import statements, which call a replaced
+// builtins.__import__ the way CPython does.
+export function defaultImport(name: any, globals: any = null, _locals: any = null, fromlist: any = null, level: any = 0): any {
+  if (typeof name !== "string") raise(T.TypeError, `module name must be str, not ${typeName(name)}`);
+  const lv = Number(level);
+  let full = name;
+  if (lv > 0) {
+    const pkg = globals instanceof PyDict ? dictGet(globals, "__package__") ?? dictGet(globals, "__name__") : null;
+    full = resolveRelative(name, lv, pkg);
+  }
+  const m = importModule(full);
+  if (fromlist !== null && O.truth(fromlist)) return m;
+  if (lv === 0) return dictGet(sysModules, name.split(".")[0]);
+  const base = full.slice(0, full.length - name.length);
+  return dictGet(sysModules, base + name.split(".")[0]);
+}
+const customImport = (): any => {
+  const f = builtins.__import__;
+  return f === defaultImport ? null : f;
+};
+const gdict = (g: any) => (g === undefined || g === null ? null : globalsDict(g));
 // `import a.b.c` binds `a`.
-export function importTop(name: string): any {
+export function importTop(name: string, g?: any): any {
+  const c = customImport();
+  if (c !== null) return callObj(c, [name, gdict(g), null, null, 0]);
   importModule(name);
   return dictGet(sysModules, name.split(".")[0]);
+}
+// `import a.b.c as x`
+export function importAs(name: string, g?: any): any {
+  const c = customImport();
+  if (c === null) return importModule(name);
+  let m = callObj(c, [name, gdict(g), null, null, 0]);
+  for (const part of name.split(".").slice(1)) m = getattr(m, part);
+  return m;
+}
+// The module of `from m import names` (relative when level > 0).
+export function importFromStmt(module: string, names: string[], level: number, g: any): any {
+  const c = customImport();
+  if (c !== null) return callObj(c, [module, gdict(g), null, tuple(names), level]);
+  return importModule(level ? resolveRelative(module, level, g.__package__) : module);
 }
 
 export function resolveRelative(name: string, level: number, pkg: any): string {
@@ -654,3 +692,6 @@ newBuiltinModule("os", (m) => {
   m.path = importModule("posixpath");
   dictSet(sysModules, "os.path", m.path);
 });
+
+builtin(defaultImport, "__import__");
+builtins.__import__ = defaultImport;
