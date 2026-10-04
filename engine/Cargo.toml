@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["modsym", "ap", "flint", "cli", "py", "wasm", "node"]
+members = ["modsym", "ap", "flint", "cli", "py", "wasm", "node", "web"]
 
 [profile.release]
 opt-level = 3
