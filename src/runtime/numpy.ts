@@ -20,6 +20,7 @@ import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
 import { glibcLog, glibcExp } from "./libm";
+import { gemmBuffers } from "./kernels";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
 
@@ -1368,6 +1369,23 @@ function matmul(x: any, y: any): any {
         for (let k = 0, x = pa + i * as0, y = pb; k < m; k++, x += as1, y += bs0) sum += ad[x] * bd[y];
         od[bk * n + i] = castNum(ct, sum);
       }
+    });
+    return squeezeMatmul(out, a, b, ct);
+  }
+  // WebAssembly SIMD (kernels/src/lib.rs), same sums in the same order
+  const W = gemmBuffers(n, p, m);
+  if (W) {
+    const f64out = ct === D.float64;
+    loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
+      const { a: wa, b: wb, c: wc } = W;
+      if (as1 === 1 && as0 === m) wa.set(ad.subarray(pa, pa + n * m) as any);
+      else for (let i = 0, t = 0; i < n; i++) for (let k = 0, x = pa + i * as0; k < m; k++, x += as1) wa[t++] = ad[x];
+      if (bs1 === 1 && bs0 === p) wb.set(bd.subarray(pb, pb + m * p) as any);
+      else for (let k = 0, t = 0; k < m; k++) for (let j = 0, y = pb + k * bs0; j < p; j++, y += bs1) wb[t++] = bd[y];
+      W.run();
+      const ob = bk * n * p;
+      if (f64out) (od as Float64Array).set(wc, ob);
+      else for (let t = 0; t < n * p; t++) od[ob + t] = castNum(ct, wc[t]);
     });
     return squeezeMatmul(out, a, b, ct);
   }
