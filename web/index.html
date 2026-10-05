@@ -84,6 +84,11 @@
   .interact .note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
   .interact .iout pre.txt { padding: 6px 0 0; }
   .interact .iout figure.plot { margin: 6px 0 0; }
+  .player { display: flex; gap: 10px; align-items: center; margin-top: 4px; max-width: 640px; font-size: 13px; }
+  .player button { padding: 1px 10px; min-width: 2.6em; }
+  .player input[type=range] { flex: 1; accent-color: var(--accent); }
+  .player output, .player select { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+  .interact button.play { padding: 0 8px; font-size: 12px; min-width: 2.2em; }
   #plottip { position: fixed; z-index: 20; pointer-events: none; background: var(--cell); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; font: 12px ui-monospace, Menlo, monospace; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
   .cell .time { font-size: 12px; color: var(--muted); padding: 0 12px 6px; }
   .cell .time:empty { display: none; }
@@ -201,12 +206,14 @@ const EXAMPLES = {
     "# Graphics add up\ng = plot(x^3 - 3*x, (x, -2.2, 2.2), thickness=2)\ng += point([(-1, 2), (1, -2)], size=60, color='red')\ng += text('local max', (-1, 2.5)) + text('local min', (1, -2.5))\ng",
     "# Drag the slider\n@interact\ndef rose(n=slider(1, 12, 1, 5), color=selector(['blue', 'green', 'purple']), filled=False):\n    g = polar_plot(cos(n*x), (x, 0, 2*pi), color=color, thickness=2)\n    if filled:\n        g += disk((0, 0), 1, alpha=0.1)\n    show(g, figsize=4.5)",
     "@interact\ndef damped(a=(0.1, 3.0), w=(1, 12)):\n    show(plot(exp(-a*x)*sin(w*x), (x, 0, 6), fill='axis', gridlines=True, ymin=-1, ymax=1, figsize=(7, 3)))",
-    "# The prime counting function against x/log(x)\nlist_plot([prime_pi(k) for k in range(2, 300)], plotjoined=True, legend_label='prime_pi') + plot(x/log(x), (x, 2, 300), color='red', legend_label='x/log(x)')",
+    "# The prime counting function against the PNT prediction (press ▶)\n@interact\ndef f(N=(10, 1000, 5)):\n    show(list_plot([prime_pi(k) for k in range(3, N)], plotjoined=True, legend_label='prime_pi') +\n         plot(x/(log(x) - 1), (x, 3, N), color='red', legend_label='x/(log(x)-1)'))",
+    "# animate: frames on common axes; the result is an animated SVG\na = animate([plot(sin(x - k)*exp(-x/6), (x, 0, 4*pi), fill='axis', thickness=2) for k in srange(0, 2*pi, 0.2)], figsize=(7, 3))\na.show(delay=5)",
   ],
   "matplotlib": [
     "import math\nimport matplotlib.pyplot as plt\nxs = [i / 20 for i in range(201)]\nplt.plot(xs, [math.sin(t) for t in xs], label='sin')\nplt.plot(xs, [math.cos(t) for t in xs], '--', label='cos')\nplt.title('Figures show when the cell ends'); plt.legend(); plt.grid(True)",
     "import random\nimport matplotlib.pyplot as plt\nrandom.seed(2)\ndata = [random.gauss(0, 1) for _ in range(5000)]\nfig, (a, b) = plt.subplots(1, 2, figsize=(9, 3.5))\na.hist(data, bins=40, edgecolor='white')\na.set_title('5000 normal samples')\nb.scatter(data[:300], data[300:600], c=data[600:900], s=18)\nb.set_title('scatter, colored by a third sample')",
     "import matplotlib.pyplot as plt\nplt.figure(figsize=(6, 3.5))\nplt.bar(['Python', 'Sage', 'JavaScript', 'Rust'], [42, 17, 30, 12], color=['C0', 'C1', 'C2', 'C3'])\nplt.ylabel('cells run today')",
+    "# matplotlib.animation.FuncAnimation\nimport math\nimport matplotlib.pyplot as plt\nfrom matplotlib.animation import FuncAnimation\nfig, ax = plt.subplots(figsize=(7, 3))\nxs = [i / 25 for i in range(160)]\nline, = ax.plot([], [], lw=2)\nax.set_xlim(0, xs[-1]); ax.set_ylim(-1.2, 1.2)\ndef update(k):\n    line.set_data(xs, [math.sin(3 * x - k / 4) * math.cos(x / 2) for x in xs])\n    ax.set_title(f'frame {k}')\nani = FuncAnimation(fig, update, frames=50, interval=40)",
     "# ipywidgets' interact works too\nimport math\nimport matplotlib.pyplot as plt\nfrom ipywidgets import interact\n\n@interact(k=(0.0, 1.0), w=(1, 10))\ndef damped(k=0.2, w=4):\n    t = [i / 50 for i in range(500)]\n    plt.figure(figsize=(7, 3))\n    plt.plot(t, [math.exp(-k * s) * math.cos(w * s) for s in t])\n    plt.ylim(-1, 1); plt.title(f'k = {k:.2f}, w = {w}')",
   ],
   "Text & data": [
@@ -322,7 +329,10 @@ function appendDisplay(box, b) {
   fig.className = "plot";
   const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
   const raster = b["image/png"] ? ["image/png", b["image/png"]] : b["image/jpeg"] ? ["image/jpeg", b["image/jpeg"]] : null;
-  if (svg) fig.appendChild(svg);
+  if (svg) {
+    fig.appendChild(svg);
+    if (svg.classList.contains("sb-anim")) player(fig, svg);
+  }
   else if (raster) fig.appendChild(Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }));
   else return appendText(box, (b["text/plain"] ?? "") + "\n", false);
   box.appendChild(fig);
@@ -351,6 +361,49 @@ function safeSvg(text) {
   };
   clean(root);
   return document.importNode(root, true);
+}
+
+// An animation (an SVG with one <g class="sb-frame"> per frame): play/pause,
+// a frame slider and speed.  Without this page the SVG plays itself by CSS.
+function player(fig, svg) {
+  const frames = [...svg.querySelectorAll(":scope > g.sb-frame")];
+  if (!frames.length) return;
+  const delay = +svg.dataset.delay || 200, iterations = +svg.dataset.iterations || 0;
+  const bar = fig.appendChild(Object.assign(document.createElement("div"), { className: "player" }));
+  bar.setAttribute("role", "group");
+  bar.setAttribute("aria-label", "Animation controls");
+  const btn = bar.appendChild(document.createElement("button"));
+  const range = bar.appendChild(Object.assign(document.createElement("input"), { type: "range", min: 0, max: frames.length - 1, step: 1, value: 0 }));
+  range.setAttribute("aria-label", "Frame");
+  const label = bar.appendChild(document.createElement("output"));
+  const speed = bar.appendChild(document.createElement("select"));
+  speed.setAttribute("aria-label", "Speed");
+  for (const v of [0.25, 0.5, 1, 2, 4]) speed.add(new Option(v + "×", v, false, v === 1));
+  let i = 0, timer = null, loops = 0;
+  const show = (k) => {
+    i = k;
+    frames.forEach((f, j) => { f.style.animation = "none"; f.style.visibility = j === k ? "visible" : "hidden"; });
+    range.value = k;
+    label.textContent = `${k + 1} / ${frames.length}`;
+  };
+  const stopPlay = () => { clearInterval(timer); timer = null; btn.textContent = "▶"; btn.setAttribute("aria-label", "Play"); };
+  const play = () => {
+    stopPlay();
+    btn.textContent = "❚❚";
+    btn.setAttribute("aria-label", "Pause");
+    loops = 0;
+    timer = setInterval(() => {
+      if (!fig.isConnected) return stopPlay();
+      if (i + 1 < frames.length) return show(i + 1);
+      if (iterations && ++loops >= iterations) return stopPlay();
+      show(0);
+    }, delay / +speed.value);
+  };
+  btn.onclick = () => (timer ? stopPlay() : play());
+  range.oninput = () => { stopPlay(); show(+range.value); };
+  speed.onchange = () => { if (timer) play(); };
+  show(0);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) stopPlay(); else play();
 }
 
 // Where output goes: {out, display, interact, clear} for a box.
@@ -408,10 +461,26 @@ function control(form, c, it) {
     };
     const show = document.createElement("output");
     if (c.kind === "slider") {
+      // ▶ steps the slider through its values, rerunning the function for
+      // each one as fast as it computes (at most 30 frames a second)
+      const playBtn = v.appendChild(Object.assign(document.createElement("button"), { className: "play", textContent: "▶" }));
+      playBtn.setAttribute("aria-label", `Play ${c.label}`);
       const inp = v.appendChild(one(c.value, ""));
       v.appendChild(show).textContent = fmt(c.value);
       const update = (x) => { inp.value = x; show.textContent = fmt(x); inp.setAttribute("aria-valuetext", fmt(x)); };
-      inp.oninput = () => { update(inp.value); set(+inp.value); };
+      let playing = false;
+      const halt = () => { playing = false; playBtn.textContent = "▶"; playBtn.setAttribute("aria-label", `Play ${c.label}`); };
+      const step = () => {
+        if (!playing || !inp.isConnected || it.gen !== generation) return halt();
+        let x = +inp.value + +c.step;
+        if (x > +c.max + 1e-9 * Math.abs(+c.step)) x = +c.min;
+        update(x);
+        const t0 = performance.now();
+        it.waiters.push(() => setTimeout(step, Math.max(0, 33 - (performance.now() - t0))));
+        set(+x);
+      };
+      playBtn.onclick = () => { if (playing) return halt(); playing = true; playBtn.textContent = "❚❚"; playBtn.setAttribute("aria-label", `Pause ${c.label}`); step(); };
+      inp.oninput = () => { halt(); update(inp.value); set(+inp.value); };
       it.setters[c.name] = (x) => { update(x); it.values[c.name] = +x; };
     } else {
       const lo = v.appendChild(one(c.value[0], "")), hi = v.appendChild(one(c.value[1], "b"));
@@ -818,7 +887,18 @@ function cellText(c) { return outputText(c.out); }
 // Pictures in an output as PNG (what multimodal agents take), drawn from the SVG.
 async function pictures(box) {
   const out = [];
-  for (const svg of [...box.querySelectorAll("figure.plot svg")].slice(0, 4)) {
+  // an animation contributes a few of its frames (first, middle, last)
+  const svgs = [];
+  for (const svg of box.querySelectorAll("figure.plot svg")) {
+    const frames = svg.querySelectorAll(":scope > g.sb-frame");
+    if (!frames.length) { svgs.push(svg); continue; }
+    for (const k of [...new Set([0, frames.length >> 1, frames.length - 1])]) {
+      const copy = svg.cloneNode(true);
+      copy.querySelectorAll(":scope > g.sb-frame").forEach((f, j) => (j === k ? f.setAttribute("style", "") : f.remove()));
+      svgs.push(copy);
+    }
+  }
+  for (const svg of svgs.slice(0, 6)) {
     const w = svg.viewBox.baseVal?.width || 640, h = svg.viewBox.baseVal?.height || 480;
     const img = new Image();
     img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(svg));
@@ -838,7 +918,7 @@ const result = async (box) => ({ content: [{ type: "text", text: outputText(box)
 const tools = [
   {
     name: "run_python",
-    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/... (sage=true). @interact functions get controls that set_interact can change.",
+    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/... (sage=true); animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
     inputSchema: {
       type: "object",
       properties: {

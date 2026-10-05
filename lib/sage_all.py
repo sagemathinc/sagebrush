@@ -22,7 +22,7 @@ __all__ = [
     # graphics
     "Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d", "point",
     "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk", "arrow", "arrow2d",
-    "bar_chart", "show", "graphics_array",
+    "bar_chart", "show", "graphics_array", "animate", "Animation",
     # interact
     "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
     "text_control",
@@ -33,7 +33,7 @@ from _sage_expr import (Expr as _Expr, var, x, pi, e, sin, cos, tan, asin, acos,
                         gamma)
 from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
-                       bar_chart, show, graphics_array)
+                       bar_chart, show, graphics_array, animate, Animation)
 from _interact import (interact, slider, range_slider, selector, checkbox, input_box,
                        color_selector, text_control)
 

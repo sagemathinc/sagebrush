@@ -779,8 +779,9 @@ def _strip_tags(s):
     return "".join(out)
 
 
-def render_svg(panels, width=640, height=480, title=None):
-    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
+def render_frame(panels, width=640, height=480, title=None):
+    """The SVG body (without the <svg> element) and description of panels laid
+    out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
     width, height = float(width), float(height)
     top = 30 if title else 0
     body, descs = [], []
@@ -792,9 +793,41 @@ def render_svg(panels, width=640, height=480, title=None):
         body.insert(0, '<text x="%s" y="20" text-anchor="middle" font-size="15" font-weight="600">%s</text>' % (_fmt(width / 2), _esc(title)))
     kind = "Plot" if len(panels) == 1 else "Figure with %d plots" % len(panels)
     desc = kind + (' "%s"' % title if title else "") + ": " + " | ".join(descs)
+    return "".join(body), desc
+
+
+def _svg_open(width, height, desc, cls="sb-plot", extra=""):
     return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s" width="%s" height="%s" role="img" aria-label="%s" '
-            'font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="currentColor" class="sb-plot">'
-            '<title>%s</title>%s</svg>') % (_fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), _esc(desc), "".join(body))
+            'font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="currentColor" class="%s"%s>'
+            '<title>%s</title>') % (_fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
+
+
+def render_svg(panels, width=640, height=480, title=None):
+    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
+    body, desc = render_frame(panels, width, height, title)
+    return _svg_open(float(width), float(height), desc) + body + "</svg>"
+
+
+def render_animation(frames, width=640, height=480, delay=200, iterations=0):
+    """An animated SVG from frames [(body, description), ...] shown `delay`
+    milliseconds each.  It plays by itself in a browser (CSS animation, looping;
+    `iterations` is a hint for players); a page can instead drive it by
+    showing one <g class="sb-frame"> at a time."""
+    n = len(frames)
+    if n == 0:
+        return render_svg([], width, height)
+    total = n * delay / 1000.0
+    desc = "Animation of %d frames, %s s each; first frame: %s; last frame: %s" % (
+        n, _short(delay / 1000.0), frames[0][1], frames[-1][1])
+    style = ("<style>.sb-frame{visibility:hidden;animation:sb-frame %ss step-end infinite}"
+             "@keyframes sb-frame{0%%{visibility:visible}%s%%{visibility:hidden}}</style>") % (
+                 _short(total), _short(100.0 / n))
+    out = [_svg_open(float(width), float(height), desc, "sb-plot sb-anim",
+                     ' data-frames="%d" data-delay="%d" data-iterations="%d"' % (n, int(delay), int(iterations or 0))), style]
+    for k, (body, _) in enumerate(frames):
+        out.append('<g class="sb-frame" style="animation-delay:%ss">%s</g>' % (_short(k * delay / 1000.0), body))
+    out.append("</svg>")
+    return "".join(out)
 
 
 def describe_svg(svg):

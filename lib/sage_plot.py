@@ -7,12 +7,12 @@ notebook and save to .svg files.
 """
 
 import math
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, render_svg,
-                       adaptive_sample, show as _show, save_svg, TAB10, describe_svg)
+from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, render_svg, render_frame,
+                       render_animation, adaptive_sample, show as _show, save_svg, TAB10, describe_svg)
 
 __all__ = ["Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d",
            "point", "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk",
-           "arrow", "arrow2d", "bar_chart", "show", "graphics_array"]
+           "arrow", "arrow2d", "bar_chart", "show", "graphics_array", "animate", "Animation"]
 
 # Options of a whole picture (the rest belong to its primitives).
 GRAPHICS_OPTIONS = {"title", "axes_labels", "xmin", "xmax", "ymin", "ymax", "aspect_ratio",
@@ -463,8 +463,108 @@ def graphics_array(array, nrows=None, ncols=None, figsize=None):
     return GraphicsArray(arr, figsize)
 
 
+class Animation:
+    """animate(frames): Graphics shown one after another, on common axes.
+
+        a = animate([plot(sin(x + k), (x, 0, 2*pi)) for k in srange(0, 2*pi, 0.2)])
+        a.show(delay=10)    # hundredths of a second per frame, as in Sage
+        a.save('wave.svg')  # an animated SVG: it plays in any web browser
+    """
+
+    def __init__(self, v=None, **kwds):
+        self._frames = list(v or [])
+        for f in self._frames:
+            if not isinstance(f, Graphics):
+                raise TypeError("animate() needs Graphics objects, got %s" % type(f).__name__)
+        self._kwds = kwds
+
+    def __repr__(self):
+        return "Animation with %d frames" % len(self._frames)
+
+    def __len__(self):
+        return len(self._frames)
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return Animation(self._frames[i], **self._kwds)
+        return self._frames[i]
+
+    def __iter__(self):
+        return iter(self._frames)
+
+    def __add__(self, other):
+        """Frame by frame: a + b draws b's frames over a's."""
+        if isinstance(other, Graphics):
+            return Animation([f + other for f in self._frames], **self._kwds)
+        if not isinstance(other, Animation):
+            return NotImplemented
+        kw = dict(self._kwds)
+        kw.update(other._kwds)
+        return Animation([f + g for f, g in zip(self._frames, other._frames)], **kw)
+
+    def __mul__(self, other):
+        """One after the other."""
+        if not isinstance(other, Animation):
+            return NotImplemented
+        kw = dict(self._kwds)
+        kw.update(other._kwds)
+        return Animation(self._frames + other._frames, **kw)
+
+    def _common(self):
+        # Sage animates on axes that fit every frame, so nothing jumps
+        boxes = [b for b in (Panel(f._primitives).data_bbox() for f in self._frames) if b is not None]
+        out = {}
+        if boxes:
+            out = {"xmin": min(b[0] for b in boxes), "xmax": max(b[1] for b in boxes),
+                   "ymin": min(b[2] for b in boxes), "ymax": max(b[3] for b in boxes)}
+        out.update(self._kwds)
+        return out
+
+    def _svg(self, delay=None, iterations=None):
+        opts = self._common()
+        delay = opts.pop("delay", 20) if delay is None else delay
+        iterations = opts.pop("iterations", 0) if iterations is None else iterations
+        frames, size = [], (640, 480)
+        for f in self._frames:
+            panel, size = f._panel(**opts)
+            frames.append(render_frame([(panel, (0, 0, 1, 1))], size[0], size[1]))
+        return render_animation(frames, size[0], size[1], float(delay) * 10, iterations)
+
+    def _repr_svg_(self):
+        return self._svg()
+
+    def description(self):
+        return describe_svg(self._svg())
+
+    def show(self, delay=None, iterations=None, **kwds):
+        a = Animation(self._frames, **dict(self._kwds, **kwds))
+        if delay is not None:
+            a._kwds["delay"] = delay
+        if iterations is not None:
+            a._kwds["iterations"] = iterations
+        _show(a, "animation")
+
+    def save(self, filename, delay=None, iterations=None, **kwds):
+        """Save as an animated .svg (plays in web browsers)."""
+        name = str(filename)
+        if not name.lower().endswith(".svg"):
+            raise ValueError("animations save as .svg (an animated SVG that plays in any web browser); GIF and video are not available")
+        save_svg(Animation(self._frames, **dict(self._kwds, **kwds))._svg(delay, iterations), filename)
+
+    def graphics_array(self, ncols=3):
+        return graphics_array(self._frames, ncols=ncols)
+
+
+def animate(frames, **kwds):
+    """An Animation of a list of Graphics; options (xmin, ymax, figsize, ...)
+    apply to every frame."""
+    return Animation(frames, **kwds)
+
+
 def show(obj, **options):
     """Show a picture (or print anything else)."""
+    if isinstance(obj, Animation):
+        return obj.show(**options)
     if isinstance(obj, (Graphics, GraphicsArray)):
         return obj.show(**options) if isinstance(obj, Graphics) else obj.show()
     import builtins

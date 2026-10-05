@@ -13,7 +13,7 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 """
 
 import math
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, render_svg,
+from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color, colormap, describe_svg)
 
 PT = 100 / 72  # pixels per point at 100 dpi
@@ -73,6 +73,26 @@ class Line2D:
     def get_ydata(self):
         return list(self._prim.ys)
 
+    def set_data(self, *args):
+        x, y = args if len(args) == 2 else args[0]
+        self.set_xdata(x)
+        self.set_ydata(y)
+
+    def set_xdata(self, x):
+        self._prim.xs = [None if v is None else float(v) for v in _list(x)]
+
+    def set_ydata(self, y):
+        self._prim.ys = [None if v is None else float(v) for v in _list(y)]
+
+    def set_visible(self, b):
+        self._prim.options["hidden"] = not b
+
+    def set_alpha(self, a):
+        self._prim.options["alpha"] = a
+
+    def set_linewidth(self, w):
+        self._prim.options["thickness"] = w * PT
+
     def __repr__(self):
         return "<matplotlib.lines.Line2D object at 0x%x>" % (id(self) & 0xffffffffffff)
 
@@ -80,6 +100,20 @@ class Line2D:
 class _Artist:
     def __init__(self, prim, kind):
         self._prim, self._kind = prim, kind
+
+    def set_text(self, s):
+        self._prim.string = str(s)
+
+    def set_position(self, xy):
+        self._prim.x, self._prim.y = float(xy[0]), float(xy[1])
+
+    def set_offsets(self, xy):
+        pts = [tuple(p) for p in (xy.tolist() if hasattr(xy, "tolist") else xy)]
+        self._prim.xs = [float(p[0]) for p in pts]
+        self._prim.ys = [float(p[1]) for p in pts]
+
+    def set_visible(self, b):
+        self._prim.options["hidden"] = not b
 
     def __repr__(self):
         return "<matplotlib.%s object at 0x%x>" % (self._kind, id(self) & 0xffffffffffff)
@@ -314,10 +348,17 @@ class Axes:
         self._add(AxLine(x, True, color=to_color(color or kw.get("c")) or "currentColor",
                          linestyle=kw.get("ls", linestyle), thickness=kw.get("lw", linewidth) * PT))
 
-    def text(self, x, y, s, fontsize=10, color=None, ha="left", va="baseline", rotation=0, **kw):
-        self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=color,
+    def text(self, x, y, s, fontsize=10, color=None, ha="left", va="baseline", rotation=0, transform=None, **kw):
+        if transform is not None and getattr(transform, "_axes_fraction", False):  # ax.transAxes
+            lo, hi = self.get_xlim(), self.get_ylim()
+            x, y = lo[0] + x * (lo[1] - lo[0]), hi[0] + y * (hi[1] - hi[0])
+        return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=color,
                        horizontal_alignment=kw.get("horizontalalignment", ha),
-                       vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True))
+                       vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True)), "text.Text")
+
+    @property
+    def transAxes(self):
+        return _AxesFraction()
 
     def annotate(self, text, xy, xytext=None, arrowprops=None, fontsize=10, ha="center", **kw):
         if xytext is None:
@@ -471,6 +512,7 @@ class Axes:
         o.setdefault("margins", 0.05)
         if o.get("legend") is None:
             o["legend"] = False  # matplotlib shows a legend only when asked
+        prims = [p for p in self._prims if not p.options.get("hidden")]
         if self._opts.get("_bars") and "ymin" not in o:
             bb = Panel(self._prims).data_bbox()
             if bb and bb[2] >= 0 and o.get("yscale") != "log":
@@ -479,7 +521,11 @@ class Axes:
             bb = Panel(self._prims).data_bbox()
             if bb and bb[0] >= 0 and o.get("xscale") != "log":
                 o["xmin"] = 0.0
-        return Panel(self._prims, **o)
+        return Panel(prims, **o)
+
+
+class _AxesFraction:
+    _axes_fraction = True
 
 
 class _AxesArray:
@@ -558,13 +604,21 @@ class Figure:
             w, h = w
         self._size = (float(w), float(h))
 
-    def _svg(self):
+    def _panels(self):
         panels = [(ax._panel(), ax._rect) for ax in self.axes]
-        if not panels:
-            panels = [(Panel([], frame=True), (0, 0, 1, 1))]
-        return render_svg(panels, self._size[0] * 100, self._size[1] * 100, self._suptitle)
+        return panels or [(Panel([], frame=True), (0, 0, 1, 1))]
+
+    def _frame(self):
+        """This figure as one animation frame: (SVG body, description)."""
+        return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle)
+
+    def _svg(self):
+        return render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle)
 
     def _repr_svg_(self):
+        anim = getattr(self, "_animation", None)
+        if anim is not None:  # a figure being animated shows its animation
+            return anim._repr_svg_()
         return self._svg()
 
     def description(self):
@@ -670,7 +724,7 @@ def savefig(fname, **kw):
 
 def _flush_figures():
     """The notebook calls this after a cell: show figures it left open, as Jupyter does."""
-    figs = [f for f in _figs if f.axes]
+    figs = [f for f in _figs if f.axes and not getattr(getattr(f, "_animation", None), "_displayed", False)]
     _figs.clear()
     _cur[0] = None
     for f in figs:

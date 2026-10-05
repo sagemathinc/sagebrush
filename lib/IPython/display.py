@@ -36,8 +36,11 @@ class SVG(DisplayObject):
 
 
 class HTML(DisplayObject):
-    def _repr_html_(self):
-        return self.data
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        svg = getattr(self.data, "_sagebrush_svg", None)  # HTML(anim.to_jshtml())
+        if svg is not None:
+            return {"image/svg+xml": svg}
+        return {"text/html": self.data}
 
 
 class Markdown(DisplayObject):
