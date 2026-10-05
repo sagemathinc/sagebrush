@@ -73,8 +73,12 @@ within 1.5); 34 larger spaces (levels 1000–6000, weights to 36) kept out of
 the fit 85% (68%). The misses are the search for T at highly composite
 levels: at 3105 every operator built from 12 or fewer primes repeats an
 eigenvalue, so each CRT prime computes 16 Hecke matrices at 16 levels
-(486 s against 31 predicted). Trying the large random-coefficient operators
-on 8 primes before those would make that case cheap. Peak memory is within a
+(486 s against 31 predicted). Natively that is 129 s: 41 s of CRT and 80 s
+factoring the degree-116 characteristic polynomial. Trying the large
+random-coefficient operators on 8 primes first was measured and is slower
+(over 4 minutes): large coefficients mean more CRT primes and a harder
+factorization. The fixes are a faster factorization and fewer Hecke
+operators per prime. Peak memory is within a
 factor 2 for 97% (at most a few MB for stored spaces). `aplist` for p < X costs 0.008 + 3.2e-8 X log X seconds for every
 curve (within 3% for X ≥ 10^5) and about 12 bytes per unit of X.
 

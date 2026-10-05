@@ -79,4 +79,10 @@ newBuiltinModule("_sbengine", (m) => {
       return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
     }
   }, "call");
+  // Sage mode gives Python ints Sage's Integer methods ((12).factor()), and
+  // builtin types refuse new attributes from Python code (as in CPython).
+  m.extend_type = Obj.builtin((cls: any, name: any, value: any) => {
+    cls.$dict.set(String(name), value);
+    return null;
+  }, "extend_type");
 });

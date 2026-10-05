@@ -2,6 +2,7 @@
 // which is CPython 3.14's own grammar generated in TypeScript.  Syntax
 // errors therefore match CPython exactly (message, line, offset, end).
 
+import { preparse } from "./sagepre";
 import * as A from "./ast";
 import { parse as pyparse, PegenError } from "../pyparse/src/index";
 import { PySingleton } from "../pyparse/src/helpers";
@@ -34,7 +35,7 @@ const CMP: Record<string, string> = {
 /** Parse `source` (mode "exec" or "eval") into the compiler's Module. */
 /** opts.sage: Sage syntax (`^` is `**`, `^^` is xor, int/int is a Rational). */
 export function parse(source: string, filename: string, mode: "exec" | "eval" = "exec", opts: { sage?: boolean } = {}): A.Module {
-  if (opts.sage) source = preparseGenerators(source);
+  if (opts.sage) source = preparse(source);
   const lines = source.split("\n");
   let tree: any;
   try {
@@ -51,28 +52,8 @@ export function parse(source: string, filename: string, mode: "exec" | "eval" = 
   return { body: c.stmts(tree.body), lines };
 }
 
-// Sage's generator syntax, as Sage's preparser rewrites it (on one line, so
-// line numbers stay): `R.<x> = ZZ[]` is `R = ZZ[('x',)]; (x,) = R._first_ngens(1)`
-// and `R.<y> = PolynomialRing(QQ)` is `R = PolynomialRing(QQ, names=('y',)); ...`.
-const GENS = /^(\s*)([A-Za-z_]\w*)\.<\s*([A-Za-z_][\w\s,]*)>\s*=\s*(.+?)\s*$/;
-export function preparseGenerators(source: string): string {
-  if (!source.includes(".<")) return source;
-  return source
-    .split("\n")
-    .map((line) => {
-      const m = GENS.exec(line);
-      if (!m) return line;
-      const [, indent, name, gens, rhs0] = m;
-      const names = gens.split(",").map((g) => g.trim()).filter(Boolean);
-      const tuple = `(${names.map((n) => `'${n}'`).join(", ")},)`;
-      let rhs = rhs0;
-      if (rhs.endsWith("[]")) rhs = rhs.slice(0, -2) + `[${tuple}]`;
-      else if (rhs.endsWith("()")) rhs = rhs.slice(0, -1) + `names=${tuple})`;
-      else if (rhs.endsWith(")")) rhs = rhs.slice(0, -1) + `, names=${tuple})`;
-      return `${indent}${name} = ${rhs}; (${names.join(", ")},) = ${name}._first_ngens(${names.length})`;
-    })
-    .join("\n");
-}
+// Sage's preparser: src/sagepre.ts
+export { preparse as preparseSage } from "./sagepre";
 
 class Convert {
   constructor(private filename: string, private lines: string[], private sage = false) {}

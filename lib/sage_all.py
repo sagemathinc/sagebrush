@@ -20,6 +20,8 @@ __all__ = [
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
     "binomial", "factorial", "fibonacci", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
+    # the language: [a..b], 1.5, f(x) = ...
+    "ellipsis_range", "ellipsis_iter", "RealNumber", "symbolic_expression",
     # symbolic expressions (just enough for plotting)
     "var", "x", "sin", "cos", "tan", "asin", "acos", "atan", "arcsin", "arccos", "arctan", "atan2",
     "arctan2", "sinh", "cosh", "tanh", "exp", "log", "ln", "floor", "ceil", "gamma",
@@ -115,8 +117,16 @@ class Rational(_Fraction):
     def __abs__(self):
         return Rational._from_coprime_ints(abs(self._numerator), self._denominator)
 
+    @property
+    def numerator(self):
+        return _CallableInt(self._numerator)
+
+    @property
+    def denominator(self):
+        return _CallableInt(self._denominator)
+
     def n(self, digits=None):
-        return float(self)
+        return RealNumber(float(self))
 
     def floor(self):
         return _math.floor(self)
@@ -156,8 +166,12 @@ def _QQ(x, d=None):
     return _q(f)
 
 
+from _sage_lang import (RealNumber, ellipsis_range, ellipsis_iter, symbolic_expression,
+                        SymbolicFunction, _install_int_methods, _CallableInt)
+
+
 def RR(x):
-    return float(x)
+    return RealNumber(float(x))
 
 
 def numerator(x):
@@ -169,8 +183,10 @@ def denominator(x):
 
 
 def n(x, digits=None):
-    """The numerical approximation of x (a float)."""
-    return float(x)
+    """The numerical approximation of x (an element of RR)."""
+    if hasattr(x, "n") and not isinstance(x, (int, float)):
+        return x.n()
+    return RealNumber(float(x))
 
 
 N = n
@@ -596,7 +612,7 @@ def sqrt(x):
             return _q(_Fraction(a, b))
     if x < 0:
         return complex(0, _math.sqrt(-x))
-    return _math.sqrt(x)
+    return RealNumber(_math.sqrt(x))
 
 
 def srange(start, stop=None, step=1):
@@ -641,3 +657,8 @@ def continued_fraction(x, nterms=20):
             break
         x = 1 / x
     return out
+
+
+# Sage's Integer methods on Python ints: (12).factor(), 13.is_prime()
+import sys as _sys
+_install_int_methods(_sys.modules[__name__])
