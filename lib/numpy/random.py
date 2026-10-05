@@ -206,14 +206,16 @@ class Generator:
         return low + (high - low) * u
 
     def standard_normal(self, size=None, dtype=_np.float64, out=None):
-        return _r.gauss_polar(self._g, _size(size))
+        return _r.zig_normal(self._g, _size(size))
 
     def normal(self, loc=0.0, scale=1.0, size=None):
-        return loc + scale * _r.gauss_polar(self._g, _size(size))
+        return loc + scale * _r.zig_normal(self._g, _size(size))
+
+    def standard_exponential(self, size=None, dtype=_np.float64, method="zig", out=None):
+        return _r.zig_exponential(self._g, _size(size))
 
     def exponential(self, scale=1.0, size=None):
-        u = _r.doubles(self._g, _size(size))
-        return scale * -_np.log1p(-u) if isinstance(u, _np.ndarray) else scale * -_math.log1p(-u)
+        return scale * _r.zig_exponential(self._g, _size(size))
 
     def poisson(self, lam=1.0, size=None):
         return _r.poisson(self._g, lam, _size(size))

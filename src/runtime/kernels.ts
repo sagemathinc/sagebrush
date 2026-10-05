@@ -339,10 +339,11 @@ export function wasmArgsort(x: Float64Array, out: Float64Array | number[], ooff:
 
 // numpy.random's fills (kernels/src/random.rs); dist as there: 0 uniform,
 // 1 legacy normal, 2 legacy exponential, 3 masked bounded, 4 Lemire
-// bounded, 5 Generator's normal.  The generator's state is copied in and
+// bounded, 5 polar normal, 6 ziggurat normal, 7 ziggurat exponential.  The generator's state is copied in and
 // back out: key (624 words) and meta [pos, has_gauss, gauss] for MT19937,
 // words [state lo, hi, inc lo, hi] and meta [has_u32, u32] for PCG64.
 const RANDOM_MIN = 256;
+// tabs: log's, exp's and the ziggurats' tables (RANDOM_TABLES)
 export function wasmRandom(gen: "mt" | "pcg", state: Uint32Array | BigUint64Array, meta: Float64Array, dist: number,
                            out: Float64Array, lo: number, rng: number, logtab: Float64Array): boolean {
   const n = out.length;

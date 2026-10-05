@@ -19,3 +19,16 @@ print(repr(g.permutation(10)), repr(g.choice(10, 3)), repr(g.choice(10, 4, repla
 g2 = np.random.default_rng(2024)
 print(repr(g2.random()), repr(g2.integers(1, 7, size=(2, 3))))
 b = np.arange(6); g2.shuffle(b); print(repr(b))
+
+# Generator's normals and exponentials: NumPy's ziggurats (with glibc's
+# exp and log1p in the rare branches), bit for bit
+for seed in (0, 7, 2024):
+    g = np.random.default_rng(seed)
+    a = g.standard_normal(200000)
+    print(repr(a[:3]), repr(float(a.sum())), repr(float(a.min())), repr(float(a.max())))
+    b = g.exponential(2.0, 100000)
+    print(repr(b[:3]), repr(float(b.sum())), repr(float(b.max())))
+    c = g.normal(5, 3, (100, 50))
+    print(repr(float(c.sum())), repr(g.standard_exponential(4)), repr(g.standard_normal()), repr(g.random(2)))
+x = np.random.default_rng(1).random(10**5) * 2 - 0.999
+print(repr(float(np.log1p(x).sum())), repr(np.log1p(np.array([1e-300, 0.25, -0.5, 3.0, 1e6, 2.0**52]))))

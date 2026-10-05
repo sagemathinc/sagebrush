@@ -25,9 +25,8 @@ be **byte-identical**. All 13 pass, and CI runs them.
     53-bit doubles, polar-method normals, masked-rejection integers, and
     NumPy's shuffle, Poisson (PTRS) and exponential.
   - `default_rng`: PCG64 seeded through NumPy's SeedSequence hashing, Lemire
-    bounded integers, and Floyd's algorithm for `choice(replace=False)`.
-  - `Generator.normal` uses a different algorithm (NumPy's ziggurat tables
-    are not ported yet), so its stream differs from NumPy's.
+    bounded integers, Floyd's algorithm for `choice(replace=False)`, and
+    NumPy's ziggurats for `normal` and `exponential`.
 - **Bit-for-bit math:** NumPy's distributions and ufuncs call glibc's libm,
   and V8's `Math.log` and `Math.exp` differ from it in the last bit for 7–10%
   of inputs. So `libm.ts` ports glibc's `log` and `exp`, which come from Arm's
@@ -81,7 +80,6 @@ be **byte-identical**. All 13 pass, and CI runs them.
 - masked arrays;
 - `np.save`/`np.load` (`savetxt`/`loadtxt` exist);
 - complex `linalg`;
-- `Generator.normal`'s exact stream.
 - int64 and uint64 are exact only up to 2^53, since they are stored as
   doubles.
 
@@ -126,7 +124,7 @@ Dense linear algebra, the FFT, `exp`, `log`, sorting and random number
 generation run in Rust
 ([kernels/src](kernels/src)). They are compiled for
 `wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
-to a 59 KB module:
+to a 70 KB module:
 
 - `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
 - `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
@@ -158,8 +156,16 @@ to a 59 KB module:
   the same streams bit for bit, with the generator state copied in and back
   out. In Node: `rand` 15.9 → 8.0 ms, `randn` 52.6 → 24 ms, `randint` 16.5 →
   4.5 ms per 10^6; `default_rng()` `random` 268 → 5.3 ms, `integers` 231 →
-  6.3 ms, `normal` 365 → 24 ms. These are also in the relaxed-SIMD module,
-  for the normals' `log`.
+  6.3 ms, `normal` 365 → 17 ms. These are also in the relaxed-SIMD module,
+  for the normals' `log`. Generator's `standard_normal`/`normal` and
+  `standard_exponential`/`exponential` are NumPy's ziggurats, with its
+  tables (src/runtime/ziggurat_data.ts) and glibc's `exp` and `log1p` in
+  the rare branches, so `default_rng` streams match NumPy for these too.
+  glibc 2.43's `log1p` (fdlibm's algorithm) is the FMA build's: the
+  polynomial's products are fused, except `s * (hfsq + R)`. That was found
+  against glibc on 250k inputs, with 0 mismatches. `np.log1p` and
+  `math.log1p` use it too; V8's `Math.log1p` evaluates the polynomial in
+  another order.
 
 glibc's `exp` and `log` are compiled with fused multiply-adds on x86-64 (the
 FMA build), and NumPy calls them, so matching NumPy bit for bit means
@@ -176,7 +182,7 @@ about 2 inputs in 10^5. JavaScript has no fused multiply-add, so the
 TypeScript computes one exactly with Dekker's product, at about 20
 operations each. WebAssembly's relaxed SIMD has `f64x2.relaxed_madd`, which
 V8 compiles to the hardware FMA, but the spec allows it to round twice. So
-`exp`, `log` and the random fills are also built as a separate 15 KB module with relaxed SIMD
+`exp`, `log` and the random fills are also built as a separate 25 KB module with relaxed SIMD
 ([kernels/relaxed](kernels/relaxed)), which is used only where a probe at
 startup shows that its multiply-add rounds once. The results are the same
 bits either way. In Node, per 10^6 values: `exp` 40 ms in TypeScript, 19 ms

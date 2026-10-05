@@ -95,7 +95,7 @@ const SHIFT: f64 = 6755399441055744.0;
 
 /// Tables for exp: tail[128], base[128] (2^(i/128)), c2..c5, and glibc's
 /// T[2i+1] = bits(base[i]) - (i << 45) as doubles' bits (tbits[128]).
-struct ExpTab(*const f64);
+pub(crate) struct ExpTab(pub(crate) *const f64);
 impl ExpTab {
     #[inline(always)]
     unsafe fn tail(&self, i: usize) -> f64 {
@@ -115,7 +115,7 @@ impl ExpTab {
     }
 }
 
-unsafe fn exp1(x: f64, t: &ExpTab) -> f64 {
+pub(crate) unsafe fn exp1(x: f64, t: &ExpTab) -> f64 {
     let ax = f64::from_bits(x.to_bits() & !(1u64 << 63));
     if !(ax >= 5.551115123125783e-17 && ax < 512.0) {
         return exp_slow(x, t);
@@ -356,4 +356,98 @@ pub unsafe extern "C" fn vlog(x: *const f64, y: *mut f64, n: usize, tab: *const 
     if i < n {
         *y.add(i) = log1(*x.add(i), &t);
     }
+}
+
+// ------------------------------------------------------------------ log1p
+
+const LP: [f64; 8] = [
+    0.0,
+    6.666666666666735130e-01,
+    3.999999999940941908e-01,
+    2.857142874366239149e-01,
+    2.222219843214978396e-01,
+    1.818357216161805012e-01,
+    1.531383769920937332e-01,
+    1.479819860511658591e-01,
+];
+const LN2_HI: f64 = 6.93147180369123816490e-01;
+const LN2_LO: f64 = 1.90821492927058770002e-10;
+
+#[inline(always)]
+fn set_hi(u: f64, h: u32) -> f64 {
+    f64::from_bits((u.to_bits() & 0xffffffff) | ((h as u64) << 32))
+}
+
+/// glibc's log1p as its x86-64 FMA build computes it: glibcLog1p() in the TS
+pub(crate) fn log1p(x: f64) -> f64 {
+    let hx = (x.to_bits() >> 32) as i32;
+    let ax = hx & 0x7fffffff;
+    let mut k = 1i32;
+    let mut f = 0.0;
+    let mut c = 0.0;
+    let mut hu = 0i32;
+    if hx < 0x3fda827a {
+        if ax >= 0x3ff00000 {
+            return if x == -1.0 { f64::NEG_INFINITY } else { f64::NAN };
+        }
+        if ax < 0x3e200000 {
+            return if ax < 0x3c900000 { x } else { fma(-(x * x), 0.5, x) };
+        }
+        if hx > 0 || hx <= 0xbfd2bec3u32 as i32 {
+            k = 0;
+            f = x;
+            hu = 1;
+        }
+    } else if hx >= 0x7ff00000 {
+        return x + x;
+    }
+    if k != 0 {
+        let mut u;
+        if hx < 0x43400000 {
+            u = 1.0 + x;
+            hu = (u.to_bits() >> 32) as i32;
+            k = (hu >> 20) - 1023;
+            c = if k > 0 { 1.0 - (u - x) } else { x - (u - 1.0) };
+            c /= u;
+        } else {
+            u = x;
+            hu = (u.to_bits() >> 32) as i32;
+            k = (hu >> 20) - 1023;
+            c = 0.0;
+        }
+        hu &= 0x000fffff;
+        if hu < 0x6a09e {
+            u = set_hi(u, (hu | 0x3ff00000) as u32);
+        } else {
+            k += 1;
+            u = set_hi(u, (hu | 0x3fe00000) as u32);
+            hu = (0x00100000 - hu) >> 2;
+        }
+        f = u - 1.0;
+    }
+    let kd = k as f64;
+    let hfsq = 0.5 * f * f;
+    if hu == 0 {
+        if f == 0.0 {
+            return if k == 0 { 0.0 } else { fma(kd, LN2_HI, fma(kd, LN2_LO, c)) };
+        }
+        let t = fma(-0.66666666666666666, f, 1.0);
+        if k == 0 {
+            return fma(-hfsq, t, f);
+        }
+        return fma(kd, LN2_HI, -(hfsq * t - fma(kd, LN2_LO, c) - f));
+    }
+    let s = f / (2.0 + f);
+    let z = s * s;
+    let z2 = z * z;
+    let z4 = z2 * z2;
+    let z6 = z4 * z2;
+    let r2 = fma(z, LP[3], LP[2]);
+    let r3 = fma(z, LP[5], LP[4]);
+    let r4 = fma(z, LP[7], LP[6]);
+    let r = fma(z6, r4, fma(z4, r3, fma(z, LP[1], z2 * r2)));
+    if k == 0 {
+        return f - (hfsq - s * (hfsq + r));
+    }
+    fma(kd, LN2_HI, -(hfsq - (s * (hfsq + r) + fma(kd, LN2_LO, c)) - f))
 }
