@@ -105,9 +105,10 @@ NumPy compiled to WebAssembly (Pyodide), see
 
 ### WebAssembly SIMD kernels
 
-Dense linear algebra runs in Rust ([kernels/src](kernels/src)). It is
-compiled for `wasm32-unknown-unknown` with `simd128`, `no_std` and without
-wasm-bindgen, to a 34 KB module:
+Dense linear algebra and the FFT run in Rust
+([kernels/src](kernels/src)). They are compiled for
+`wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
+to a 38 KB module:
 
 - `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
 - `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
@@ -116,11 +117,20 @@ wasm-bindgen, to a 34 KB module:
 - `dsyev`: tred2 + tql2 (`eigh`, `eigvalsh`);
 - `dgeev`: orthes + hqr2 (`eig`, `eigvals`, `roots`);
 - `dgesvd`: Golub–Kahan–Reinsch (`svd`, `pinv`, `lstsq`, `matrix_rank`,
-  `polyfit`).
+  `polyfit`);
+- `fft_stockham`/`rfft_rows`: the mixed-radix Stockham FFT (radix 4, 2, 3,
+  5 and generic 7–13 butterflies, one complex number per `f64x2`). This
+  covers every `numpy.fft` transform, including Bluestein's inner FFTs.
+  Twiddle tables come from the TypeScript (`Math.cos`/`Math.sin`) and stay
+  resident in WebAssembly memory between calls of the same length.
 
 Matrices whose columns an algorithm walks are stored transposed, so those
 walks are contiguous and the elementwise ones (rotations, rank-1 updates)
-run two lanes at a time.
+run two lanes at a time. Long dot products (QR) use four partial sums,
+the same in the TypeScript, since one running sum is limited by the latency
+of floating-point addition. Arrays are laid out a few cache lines apart
+beyond their lengths: power-of-two buffers placed back to back all fall
+into the same cache sets, which made the FFT slower than JavaScript.
 
 `scripts/build-kernels.mjs` embeds the module as base64 in
 `src/runtime/kernels_wasm.ts`, which is committed, so building sagebrush
@@ -139,8 +149,9 @@ TypeScript runs.
 
 In Node, against the TypeScript: matmul 300×300 12× faster (44 → 3.7 ms),
 `det` 1000×1000 4× (494 → 126 ms), `eigh` 200×200 4× (45 → 11.5 ms), `svd`
-200×200 5× (118 → 22 ms), `eig` 100×100 3× (18 → 5.6 ms). In the browser
-all of these are now faster than Pyodide's LAPACK; see
+200×200 5× (118 → 22 ms), `eig` 100×100 3× (18 → 5.6 ms), `rfft` of 10^6
+points 2× (48.6 → 23.4 ms). In the browser all the dense linear algebra
+except `solve` is now faster than Pyodide's LAPACK; see
 [bench/browser](bench/browser/README.md).
 
 # The investigation that led here

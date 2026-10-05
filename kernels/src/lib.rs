@@ -1,5 +1,6 @@
 //! WebAssembly SIMD kernels for sagebrush's numpy (src/runtime/numpy*.ts):
-//! matmul and LU here, QR, eigenproblems and the SVD in eigen.rs.
+//! matmul and LU here, QR, eigenproblems and the SVD in eigen.rs, the FFT
+//! in fft.rs.
 //!
 //! Plain exported functions on row-major f64 matrices in this module's
 //! linear memory; the TypeScript side copies operands in and results out.
@@ -12,6 +13,7 @@
 use core::arch::wasm32::*;
 
 mod eigen;
+mod fft;
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -130,6 +132,49 @@ pub unsafe extern "C" fn dgemm(a: *const f64, b: *const f64, c: *mut f64, m: usi
             *c.add(i * n + j) = s;
         }
         j += 1;
+    }
+}
+
+/// The dot product of x[0..n] and y[0..n] with four partial sums (of the
+/// terms i = 0, 1, 2, 3 mod 4), combined as (s0 + s2) + (s1 + s3), then the
+/// n mod 4 last terms in order: dot4() in the TS.
+#[inline(always)]
+pub(crate) unsafe fn dot4(x: *const f64, y: *const f64, n: usize) -> f64 {
+    let mut a0 = f64x2_splat(0.0);
+    let mut a1 = f64x2_splat(0.0);
+    let mut i = 0;
+    while i + 4 <= n {
+        a0 = f64x2_add(a0, f64x2_mul(ld(x.add(i)), ld(y.add(i))));
+        a1 = f64x2_add(a1, f64x2_mul(ld(x.add(i + 2)), ld(y.add(i + 2))));
+        i += 4;
+    }
+    let t = f64x2_add(a0, a1);
+    let mut r = f64x2_extract_lane::<0>(t) + f64x2_extract_lane::<1>(t);
+    while i < n {
+        r += *x.add(i) * *y.add(i);
+        i += 1;
+    }
+    r
+}
+
+/// dst (cols x rows) = the transpose of src (rows x cols), both row-major
+#[no_mangle]
+pub unsafe extern "C" fn transpose(src: *const f64, rows: usize, cols: usize, dst: *mut f64) {
+    const B: usize = 32;
+    let mut i0 = 0;
+    while i0 < rows {
+        let i1 = if i0 + B < rows { i0 + B } else { rows };
+        let mut j0 = 0;
+        while j0 < cols {
+            let j1 = if j0 + B < cols { j0 + B } else { cols };
+            for i in i0..i1 {
+                for j in j0..j1 {
+                    *dst.add(j * rows + i) = *src.add(i * cols + j);
+                }
+            }
+            j0 = j1;
+        }
+        i0 = i1;
     }
 }
 
