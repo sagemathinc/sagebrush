@@ -1,0 +1,15 @@
+# Sagebrush
+
+> Python 3.14 compiled to JavaScript, running entirely in the browser (no server, no WebAssembly). sagebrush.space is a small notebook for it; a Sage mode adds `^` as a power, exact rationals (`2/3`) and number theory functions (`factor`, `is_prime`, `next_prime`, `divisors`, `euler_phi`, `crt`, ...).
+
+## Using the page
+
+- Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
+- A notebook can be put in the URL: `https://sagebrush.space/#c=<base64url of a JSON array of cell sources>`; add `m=sage&` before `c=` for Sage mode, and `?run` to run all cells on load.
+- In-browser agents: the page registers WebMCP tools `run_python` (run code as a new cell and return its output) and `read_notebook` (cells and outputs as JSON).
+
+## Elsewhere
+
+- [Source code](https://github.com/sagemathinc/sagebrush): the pyjs compiler and runtime, and the Sagebrush Rust engines for research mathematics.
+- [Command line](https://get.sagebrush.space/install.sh): `curl -fsSL https://get.sagebrush.space/install.sh | sh` or `npx sagebrush` (`--sage` for Sage syntax).
+- [npm: sagebrush-web](https://www.npmjs.com/package/sagebrush-web): the browser build.

@@ -5,29 +5,45 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sagebrush — Python in your browser</title>
 <meta name="description" content="Python 3.14 compiled to JavaScript, running entirely in your browser. No server, no WebAssembly.">
+<link rel="alternate" type="text/markdown" href="/llms.txt" title="llms.txt">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
 <style>
   :root {
-    --bg: #fbfaf7; --fg: #1f2421; --muted: #6b726d; --line: #dcdcd4; --cell: #ffffff;
-    --accent: #5b7f5a; --accent2: #8aa37b; --err: #b3261e; --code: #f3f2ec;
-    --hk: #8a3b8f; --hb: #2a6fb0; --hs: #a35a00; --hn: #0f8a5f; --hc: #8a8f86; --hd: #9a6b00; --hf: #2350a8;
+    --scheme: light; color-scheme: light;
+    --bg: #fbfaf7; --fg: #1f2421; --muted: #5d645f; --line: #d4d4cb; --cell: #ffffff;
+    --accent: #4a6b49; --accent2: #8aa37b; --on-accent: #ffffff; --err: #b3261e; --code: #f3f2ec;
+    --hk: #8a3b8f; --hb: #2a6fb0; --hs: #975200; --hn: #0b7a52; --hc: #5f665f; --hd: #7f5800; --hf: #2350a8;
+  }
+  :root[data-theme="dark"] {
+    --scheme: dark; color-scheme: dark;
+    --bg: #161917; --fg: #e4e6e1; --muted: #a3aba4; --line: #39403a; --cell: #1d211e; --accent: #9cc28f; --accent2: #6f8f63; --on-accent: #10140f; --err: #ff8a80; --code: #222723;
+    --hk: #d49ad6; --hb: #7cc4dc; --hs: #e6b673; --hn: #8fd3a6; --hc: #8f988f; --hd: #e3c26b; --hf: #8fb5f2;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #161917; --fg: #e4e6e1; --muted: #9aa29b; --line: #2e332f; --cell: #1d211e; --accent: #9cc28f; --accent2: #6f8f63; --err: #ff8a80; --code: #222723;
-      --hk: #d49ad6; --hb: #7cc4dc; --hs: #e6b673; --hn: #8fd3a6; --hc: #7d857e; --hd: #e3c26b; --hf: #8fb5f2; }
+    :root:not([data-theme="light"]) {
+      --scheme: dark; color-scheme: dark;
+      --bg: #161917; --fg: #e4e6e1; --muted: #a3aba4; --line: #39403a; --cell: #1d211e; --accent: #9cc28f; --accent2: #6f8f63; --on-accent: #10140f; --err: #ff8a80; --code: #222723;
+      --hk: #d49ad6; --hb: #7cc4dc; --hs: #e6b673; --hn: #8fd3a6; --hc: #8f988f; --hd: #e3c26b; --hf: #8fb5f2;
+    }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header, main, footer { max-width: 920px; margin: 0 auto; padding: 0 20px; }
-  header { padding-top: 28px; }
+  header { padding-top: 28px; display: flex; align-items: flex-start; gap: 12px; }
+  header .title { flex: 1; }
   h1 { margin: 0; font-size: 28px; letter-spacing: -0.01em; }
   h1 span { color: var(--accent); }
   .tag { color: var(--muted); margin: 4px 0 14px; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 16px; }
   button, select { font: inherit; border: 1px solid var(--line); background: var(--cell); color: var(--fg); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
-  button:hover { border-color: var(--accent2); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:hover, select:hover { border-color: var(--accent2); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   button.stop { color: var(--err); }
-  #status { color: var(--muted); font-size: 13px; margin-left: auto; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  #status { color: var(--muted); font-size: 13px; flex-basis: 100%; text-align: right; min-height: 1.5em; } /* its own line: its length changes */
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .cell { position: relative; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; overflow: hidden; transition: border-color .12s, box-shadow .12s; }
   /* the focused cell: accent border and a bar on the left, as in Jupyter */
   .cell:focus-within { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent), 0 1px 6px rgba(0,0,0,.08); }
@@ -36,7 +52,7 @@
   /* the running cell: a sliding stripe under its header */
   .cell.running .head { background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--accent) 35%, transparent) 50%, transparent 100%) 0 0 / 50% 100% no-repeat; animation: slide 1.1s linear infinite; }
   @keyframes slide { from { background-position: -50% 0; } to { background-position: 150% 0; } }
-  .mode-sage .cell .head .lang { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .cell.running .head { animation: none; background-size: 100% 100%; } }
   .cell .head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
   .cell .head .n { font-family: ui-monospace, Menlo, monospace; }
   .cell .head .sp { flex: 1; }
@@ -54,31 +70,55 @@
   pre.out .e { color: var(--err); }
   .cell .time { font-size: 12px; color: var(--muted); padding: 0 12px 6px; }
   .cell .time:empty { display: none; }
+  /* the cell menu */
+  #cellmenu { position: absolute; z-index: 10; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  #cellmenu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; }
+  #cellmenu button:hover, #cellmenu button:focus { background: var(--code); outline: none; }
+  #cellmenu button kbd { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+  #cellmenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+  #cellmenu .danger { color: var(--err); }
+  /* the console, docked at the bottom */
+  #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
+  #console[hidden] { display: none; }
+  #console .grip { height: 9px; cursor: ns-resize; flex: none; display: flex; justify-content: center; align-items: center; }
+  #console .grip::after { content: ""; width: 40px; height: 3px; border-radius: 2px; background: var(--line); }
+  #console .grip:hover, #console .grip:focus-visible { background: var(--accent2); outline: none; }
+  #console .chead { display: flex; gap: 10px; align-items: center; padding: 0 12px 4px; font-size: 13px; color: var(--muted); flex: none; }
+  #console .chead b { color: var(--fg); }
+  #console .chead .sp { flex: 1; }
+  #console .chead button { padding: 1px 8px; font-size: 12px; }
+  #term { flex: 1; min-height: 0; padding: 0 0 4px 12px; }
   .about { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); margin-top: 26px; padding-top: 14px; }
-  .about code, .tag code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .about code, .tag code, footer code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   a { color: var(--accent); }
   footer { color: var(--muted); font-size: 13px; padding-bottom: 40px; }
+  #theme { font-size: 13px; padding: 3px 8px; margin-top: 6px; }
 </style>
 </head>
 <body>
 <header>
-  <h1><span>Sagebrush</span> · Python in your browser</h1>
-  <div class="tag">Python 3.14 compiled to JavaScript — runs entirely on your machine. No server, no WebAssembly, ~0.8&nbsp;MB.</div>
+  <div class="title">
+    <h1><span>Sagebrush</span> · Python in your browser</h1>
+    <p class="tag">Python 3.14 compiled to JavaScript — runs entirely on your machine. No server, no WebAssembly, ~0.8&nbsp;MB.</p>
+  </div>
+  <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
 </header>
 <main>
-  <div class="bar">
-    <button class="primary" id="runall" title="Run every cell (Ctrl/Cmd+Enter in a cell runs everything)">Run all</button>
-    <button id="add">+ Cell</button>
+  <div class="bar" role="toolbar" aria-label="Notebook">
+    <button class="primary" id="runall" title="Run every cell in order">Run all</button>
+    <button id="add" title="Add a cell at the end">+ Cell</button>
     <button class="stop" id="stop" title="Terminate the running program (forgets all variables)">Stop</button>
     <button id="restart" title="Fresh interpreter">Restart</button>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option></select>
-    <select id="examples" aria-label="Examples"><option value="">Examples…</option></select>
+    <select id="examples" aria-label="Load examples"><option value="">Examples…</option></select>
     <button id="share" title="Copy a link to these cells">Share</button>
-    <span id="status">loading…</span>
+    <button id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt that shares the notebook's variables">Console</button>
+    <span id="status" role="status">loading…</span>
   </div>
   <div id="cells"></div>
   <div class="about">
-    <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place. Variables persist between cells.
+    <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place; <b>Alt+↑/↓</b> moves it; the <b>⋯</b> menu inserts, moves and deletes cells.
+    In a cell, Tab indents: press <b>Esc</b> first to Tab out of it. Variables persist between cells and are shared with the <b>Console</b>.
     In <b>Sage</b> mode <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational and
     <code>factor</code>, <code>is_prime</code>, <code>next_prime</code>, <code>divisors</code>, <code>euler_phi</code>, <code>crt</code> &hellip; are built in.
     The language is CPython 3.14's own grammar (syntax errors match CPython), with big integers, <code>fractions</code>,
@@ -91,7 +131,24 @@
   <p>Command line: <code>curl -fsSL https://get.sagebrush.space/install.sh | sh</code> or <code>npx sagebrush</code>.
   Source: <a href="https://github.com/sagemathinc/sagebrush">github.com/sagemathinc/sagebrush</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a></p>
 </footer>
-<script type="module">
+<div id="cellmenu" role="menu" aria-label="Cell actions" hidden>
+  <button role="menuitem" data-m="above">Insert cell above</button>
+  <button role="menuitem" data-m="below">Insert cell below</button>
+  <hr>
+  <button role="menuitem" data-m="up">Move up <kbd>Alt+↑</kbd></button>
+  <button role="menuitem" data-m="down">Move down <kbd>Alt+↓</kbd></button>
+  <hr>
+  <button role="menuitem" data-m="clear">Clear output</button>
+  <button role="menuitem" data-m="delete" class="danger">Delete cell</button>
+</div>
+<section id="console" aria-label="Python console" hidden>
+  <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize console" tabindex="0"></div>
+  <div class="chead"><b>Console</b><span>shares variables with the notebook</span><span class="sp"></span><button id="closeconsole" aria-label="Close console">✕</button></div>
+  <div id="term"></div>
+</section>
+<div id="announce" class="sr" aria-live="polite"></div>
+<script id="app">
+// A classic script (not a module) so the cells exist before the first paint.
 const EXAMPLES = {
   "Welcome": [
     "# Big integers are exact\n2**200",
@@ -126,9 +183,12 @@ const EXAMPLES = {
 };
 
 const $ = (s) => document.querySelector(s);
-const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode");
-let worker, ready = false, nextId = 1, version = "", execCount = 0;
-const pending = new Map(); // id -> {cell, resolve}
+const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
+let worker, nextId = 1, version = "", execCount = 0;
+// id -> a sink {start(), out(text, isErr), done(ms), stopped(message)} for
+// running code, or {reply(message)} for a console question.
+const pending = new Map();
+const announce = (text) => ($("#announce").textContent = text);
 
 // ------------------------------------------------------------ highlighting
 // A small regex tokenizer for Python (and Sage's ^ and ^^): good enough for
@@ -158,74 +218,44 @@ function paint(cell) { cell.hl.innerHTML = highlight(cell.ta.value, isSage()); }
 
 // ------------------------------------------------------------ the worker
 function startWorker() {
-  ready = false;
   statusEl.textContent = "loading…";
   const t0 = performance.now();
   worker = new Worker("sagebrush-worker.js", { type: "module" });
   worker.onmessage = (ev) => {
     const m = ev.data;
     if (m.ready) {
-      ready = true;
       version = m.version || "";
       statusEl.textContent = `ready (sagebrush ${version}, ${Math.round(performance.now() - t0)} ms)`;
       return;
     }
     const p = pending.get(m.id);
     if (!p) return;
-    const cell = p.cell;
-    if (m.start) {
-      cell.el.classList.replace("queued", "running");
-      cell.t0 = performance.now();
-      cell.timer = setInterval(() => { cell.time.textContent = `running… ${((performance.now() - cell.t0) / 1000).toFixed(1)} s`; }, 250);
-    }
-    if (m.stream) append(cell, m.text, m.stream === "stderr");
-    if (m.done) {
-      finish(cell);
-      cell.n.textContent = `[${++execCount}]`;
-      cell.time.textContent = `${m.ms < 10 ? m.ms.toFixed(1) : Math.round(m.ms)} ms`;
-      pending.delete(m.id);
-      p.resolve();
-    }
+    if (p.reply) { pending.delete(m.id); return p.reply(m); }
+    if (m.start) p.start();
+    if (m.stream) p.out(m.text, m.stream === "stderr");
+    if (m.done) { pending.delete(m.id); p.done(m.ms); }
   };
   worker.onerror = (e) => { statusEl.textContent = "error: " + (e.message || e); };
 }
 
-function finish(cell) {
-  clearInterval(cell.timer);
-  cell.el.classList.remove("queued", "running");
-}
-
-function append(cell, text, isErr) {
-  const node = isErr ? Object.assign(document.createElement("span"), { className: "e", textContent: text }) : document.createTextNode(text);
-  cell.out.appendChild(node);
-}
-
-function run(cell) {
-  if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
-  cell.out.textContent = "";
-  cell.time.textContent = "";
-  cell.el.classList.add("queued");
-  cell.n.textContent = "[*]";
+// Send code to the worker; `sink` receives what happens to it.
+function submit(code, sink, extra = {}) {
   const id = nextId++;
-  return new Promise((resolve) => {
-    pending.set(id, { cell, resolve });
-    worker.postMessage({ id, code: cell.ta.value, sage: isSage() });
-  });
+  pending.set(id, sink);
+  worker.postMessage({ id, code, sage: isSage(), ...extra });
 }
-
-async function runAll() {
-  await Promise.all(cells().map(run)); // the worker runs them in order
+// Ask the worker a question (the console's "is this complete?" and Tab).
+function ask(msg, fallback) {
+  return new Promise((resolve) => {
+    const id = nextId++;
+    pending.set(id, { reply: resolve, stopped: () => resolve(fallback) });
+    worker.postMessage({ id, sage: isSage(), ...msg });
+  });
 }
 
 function stop(message) {
   worker.terminate();
-  for (const { cell, resolve } of pending.values()) {
-    finish(cell);
-    cell.n.textContent = "[ ]";
-    cell.time.textContent = "";
-    append(cell, message, true);
-    resolve();
-  }
+  for (const p of pending.values()) p.stopped(message);
   pending.clear();
   execCount = 0;
   startWorker();
@@ -236,44 +266,244 @@ function cells() {
   return [...cellsEl.querySelectorAll(".cell")].map((el) => el.cell);
 }
 
+function append(cell, text, isErr) {
+  const node = isErr ? Object.assign(document.createElement("span"), { className: "e", textContent: text }) : document.createTextNode(text);
+  cell.out.appendChild(node);
+}
+
+function settle(cell) {
+  clearInterval(cell.timer);
+  cell.el.classList.remove("queued", "running");
+}
+
+function run(cell) {
+  if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+  cell.out.textContent = "";
+  cell.time.textContent = "";
+  cell.el.classList.add("queued");
+  cell.n.textContent = "[*]";
+  let failed = false;
+  return new Promise((resolve) => submit(cell.ta.value, {
+    start() {
+      cell.el.classList.replace("queued", "running");
+      const t0 = performance.now();
+      cell.timer = setInterval(() => { cell.time.textContent = `running… ${((performance.now() - t0) / 1000).toFixed(1)} s`; }, 250);
+    },
+    out(text, isErr) { failed ||= isErr; append(cell, text, isErr); },
+    done(ms) {
+      settle(cell);
+      cell.n.textContent = `[${++execCount}]`;
+      cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+      announce(`Cell ${index(cell) + 1} ${failed ? "raised an error" : "finished"}`);
+      resolve();
+    },
+    stopped(message) {
+      settle(cell);
+      cell.n.textContent = "[ ]";
+      cell.time.textContent = "";
+      append(cell, message, true);
+      resolve();
+    },
+  }));
+}
+
+async function runAll() {
+  await Promise.all(cells().map(run)); // the worker runs them in order
+}
+
+const index = (cell) => cells().indexOf(cell);
+
 function autosize(ta) {
   ta.style.height = "auto";
   ta.style.height = ta.scrollHeight + "px";
 }
 
-function addCell(code = "", after = null, focus = false) {
+function addCell(code = "", where = null, focus = false) {
   const el = document.createElement("div");
   el.className = "cell";
-  el.innerHTML = `<div class="head"><span class="n">[ ]</span><span class="sp"></span><button data-a="run" title="Run (Shift+Enter)">▶ Run</button><button data-a="del" title="Delete cell">✕</button></div><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><pre class="out"></pre><div class="time"></div>`;
-  const cell = { el, ta: el.querySelector("textarea"), hl: el.querySelector(".ed pre"), out: el.querySelector(".out"), time: el.querySelector(".time"), n: el.querySelector(".n") };
+  el.setAttribute("role", "group");
+  el.innerHTML = `<div class="head"><span class="n">[ ]</span><span class="sp"></span><button data-a="run" title="Run (Shift+Enter)">▶ Run</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" aria-controls="cellmenu" title="Cell actions">⋯</button></div><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><pre class="out"></pre><div class="time"></div>`;
+  const cell = { el, ta: el.querySelector("textarea"), hl: el.querySelector(".ed pre"), out: el.querySelector(".out"), time: el.querySelector(".time"), n: el.querySelector(".n"), menuBtn: el.querySelector('[data-a="menu"]') };
   el.cell = cell;
   cell.ta.value = code;
+  let tabOut = false; // after Esc, Tab leaves the cell (no keyboard trap)
   cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); });
+  cell.ta.addEventListener("blur", () => (tabOut = false));
   cell.ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       run(cell);
       if (e.shiftKey) advance(cell);
-    } else if (e.key === "Tab" && !e.shiftKey) {
+    } else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      move(cell, e.key === "ArrowUp" ? -1 : 1);
+    } else if (e.key === "Escape") {
+      tabOut = true;
+    } else if (e.key === "Tab" && !e.shiftKey && !tabOut) {
       e.preventDefault();
       document.execCommand("insertText", false, "    "); // keeps undo working
+    } else if (e.key !== "Tab") {
+      tabOut = false;
     }
   });
   el.querySelector('[data-a="run"]').onclick = () => { run(cell); advance(cell); };
-  el.querySelector('[data-a="del"]').onclick = () => el.remove();
-  if (after) after.after(el); else cellsEl.appendChild(el);
+  cell.menuBtn.onclick = () => openMenu(cell);
+  if (where?.before) where.before.before(el);
+  else if (where?.after) where.after.after(el);
+  else cellsEl.appendChild(el);
   autosize(cell.ta);
   paint(cell);
+  relabel();
   if (focus) cell.ta.focus();
   return cell;
 }
 
+// Accessible names: "Cell 3", "Cell 3 code", ...
+function relabel() {
+  cells().forEach((c, i) => {
+    c.el.setAttribute("aria-label", `Cell ${i + 1}`);
+    c.ta.setAttribute("aria-label", `Cell ${i + 1} code`);
+    c.el.querySelector('[data-a="run"]').setAttribute("aria-label", `Run cell ${i + 1}`);
+    c.menuBtn.setAttribute("aria-label", `Cell ${i + 1} actions`);
+  });
+}
+
 // Move to the next cell, making one at the end.
 function advance(cell) {
-  const next = cell.el.nextElementSibling?.cell ?? addCell("", cell.el);
+  const next = cell.el.nextElementSibling?.cell ?? addCell("", { after: cell.el });
   next.ta.focus();
   next.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
+
+function move(cell, d) {
+  const sib = d < 0 ? cell.el.previousElementSibling : cell.el.nextElementSibling;
+  if (!sib) return;
+  const hadFocus = cell.el.contains(document.activeElement) ? document.activeElement : null;
+  if (d < 0) sib.before(cell.el); else sib.after(cell.el);
+  hadFocus?.focus();
+  cell.el.scrollIntoView({ block: "nearest" });
+  relabel();
+  announce(`Moved to position ${index(cell) + 1}`);
+}
+
+function remove(cell) {
+  const next = cell.el.nextElementSibling?.cell ?? cell.el.previousElementSibling?.cell;
+  cell.el.remove();
+  if (!cells().length) addCell("", null, true);
+  else next?.ta.focus();
+  relabel();
+  announce("Cell deleted");
+}
+
+// ------------------------------------------------------------ the cell menu
+let menuCell = null;
+function openMenu(cell) {
+  if (menuCell === cell) return closeMenu(true);
+  closeMenu(false);
+  menuCell = cell;
+  const r = cell.menuBtn.getBoundingClientRect();
+  menu.hidden = false;
+  menu.style.top = `${r.bottom + scrollY + 4}px`;
+  menu.style.left = `${Math.max(8, r.right + scrollX - menu.offsetWidth)}px`;
+  cell.menuBtn.setAttribute("aria-expanded", "true");
+  menu.querySelector("button").focus();
+}
+function closeMenu(refocus) {
+  if (!menuCell) return;
+  menuCell.menuBtn.setAttribute("aria-expanded", "false");
+  if (refocus) menuCell.menuBtn.focus();
+  menu.hidden = true;
+  menuCell = null;
+}
+menu.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || !menuCell) return;
+  const cell = menuCell;
+  closeMenu(false);
+  switch (b.dataset.m) {
+    case "above": return void addCell("", { before: cell.el }, true);
+    case "below": return void addCell("", { after: cell.el }, true);
+    case "up": move(cell, -1); return cell.menuBtn.focus();
+    case "down": move(cell, 1); return cell.menuBtn.focus();
+    case "clear": cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
+    case "delete": return remove(cell);
+  }
+});
+menu.addEventListener("keydown", (e) => {
+  const items = [...menu.querySelectorAll("button")];
+  const i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+  } else if (e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+    items[e.key === "Home" ? 0 : items.length - 1].focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeMenu(true);
+  } else if (e.key === "Tab") {
+    closeMenu(true);
+    e.preventDefault();
+  }
+});
+document.addEventListener("pointerdown", (e) => {
+  if (menuCell && !menu.contains(e.target) && e.target !== menuCell.menuBtn) closeMenu(false);
+});
+
+// ------------------------------------------------------------ the console
+let consoleUi = null;
+const consoleEl = $("#console"), consoleBtn = $("#consolebtn");
+async function toggleConsole(show = consoleEl.hidden) {
+  consoleEl.hidden = !show;
+  consoleBtn.setAttribute("aria-pressed", String(show));
+  document.body.style.paddingBottom = show ? consoleEl.offsetHeight + "px" : "";
+  if (!show) return consoleBtn.focus();
+  if (consoleUi) return consoleUi.focus();
+  statusEl.textContent = "loading console…";
+  const { openConsole } = await import(new URL("sagebrush-console.js", location.href).href); // loaded on demand, never bundled
+  consoleUi = openConsole($("#term"), {
+    run: (src, out) => new Promise((resolve) => submit(src, {
+      start() {}, out, done: () => resolve(),
+      stopped(message) { out("\n" + message.trim() + "\n", true); resolve(); },
+    }, { repl: true })),
+    more: (src) => ask({ check: src }, false).then((m) => !!m.more),
+    complete: (line) => ask({ complete: line }, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
+    interrupt: () => stop("\nKeyboardInterrupt (interpreter restarted; variables are gone).\n"),
+    sage: isSage,
+    version: () => version,
+    announce,
+  });
+  statusEl.textContent = `ready (sagebrush ${version})`;
+}
+consoleBtn.onclick = () => toggleConsole();
+$("#closeconsole").onclick = () => toggleConsole(false);
+{
+  const grip = consoleEl.querySelector(".grip");
+  const setH = (h) => {
+    consoleEl.style.height = Math.max(120, Math.min(innerHeight - 60, h)) + "px";
+    document.body.style.paddingBottom = consoleEl.offsetHeight + "px";
+  };
+  grip.addEventListener("pointerdown", (e) => {
+    grip.setPointerCapture(e.pointerId);
+    grip.onpointermove = (m) => setH(innerHeight - m.clientY);
+    grip.onpointerup = () => (grip.onpointermove = null);
+  });
+  grip.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); setH(consoleEl.offsetHeight + (e.key === "ArrowUp" ? 30 : -30)); }
+  });
+}
+
+// ------------------------------------------------------------ theme, mode, loading
+function setTheme(t) {
+  themeEl.value = t;
+  if (t === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("sagebrush-theme", t); } catch {}
+  consoleUi?.setTheme();
+}
+themeEl.onchange = () => setTheme(themeEl.value);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => consoleUi?.setTheme());
+themeEl.value = document.documentElement.dataset.theme || "system";
 
 function load(codes) {
   cellsEl.textContent = "";
@@ -284,7 +514,6 @@ function load(codes) {
 
 function setMode(mode) {
   modeEl.value = mode;
-  document.body.classList.toggle("mode-sage", mode === "sage");
   try { localStorage.setItem("sagebrush-mode", mode); } catch {}
   for (const c of cells()) paint(c);
 }
@@ -313,6 +542,49 @@ sel.onchange = () => {
   sel.value = "";
 };
 
+// ------------------------------------------------------------ WebMCP
+// Tools for AI agents in the browser (https://developer.chrome.com/docs/ai/webmcp).
+function cellText(c) { return c.out.textContent; }
+const tools = [
+  {
+    name: "run_python",
+    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned. Variables persist between calls.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "The Python source to run." },
+        sage: { type: "boolean", description: "Sage syntax: ^ is a power, 2/3 is an exact rational, factor() etc. are available." },
+      },
+      required: ["code"],
+    },
+    async execute({ code, sage }) {
+      if (sage !== undefined) setMode(sage ? "sage" : "python");
+      const last = cells().at(-1);
+      const cell = last && last.ta.value.trim() === "" ? last : addCell("");
+      cell.ta.value = code;
+      autosize(cell.ta);
+      paint(cell);
+      await run(cell);
+      return { content: [{ type: "text", text: cellText(cell) || "(no output)" }] };
+    },
+  },
+  {
+    name: "read_notebook",
+    description: "Return the notebook's cells (code and output) as JSON.",
+    inputSchema: { type: "object", properties: {} },
+    async execute() {
+      return { content: [{ type: "text", text: JSON.stringify({ mode: modeEl.value, cells: cells().map((c) => ({ code: c.ta.value, output: cellText(c) })) }) }] };
+    },
+  },
+];
+try {
+  const mc = navigator.modelContext;
+  if (mc?.registerTool) for (const t of tools) mc.registerTool(t);
+  else if (mc?.provideContext) mc.provideContext({ tools });
+} catch (e) {
+  console.warn("WebMCP:", e);
+}
+
 startWorker();
 let initial = EXAMPLES.Welcome, mode = "python";
 try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
@@ -322,6 +594,7 @@ else if (mode === "sage") initial = EXAMPLES.Sage;
 setMode(mode);
 load(initial);
 if (new URLSearchParams(location.search).has("run")) runAll();
+
 </script>
 </body>
 </html>
