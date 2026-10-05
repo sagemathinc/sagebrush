@@ -86,6 +86,11 @@ try {
   out = await runCode("open('up.csv').read().split()");
   ok(out.includes("['x,y', '3,4']"), "an uploaded file is visible to Python: " + out.trim());
   ok((await ev("document.querySelector('#filelist').textContent")).includes("data.txt"), "the files panel lists Python's files");
+  // Sage mode: polynomial factoring and newforms on the Rust engine (WebAssembly)
+  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
+  out = await runCode("R.<x> = ZZ[]\nprint((x^4 - 1).factor(), Newforms(37, names='a'))");
+  ok(out.includes("(x - 1) * (x + 1) * (x^2 + 1) [q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6), q + q^3 - 2*q^4 + O(q^6)]"), "Sage mode factors polynomials and finds newforms: " + out.trim());
+  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'python'; m.dispatchEvent(new Event('change')); })()");
   // share link round trip
   await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");
   await until("location.hash.includes('z=')");

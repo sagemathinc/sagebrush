@@ -408,6 +408,7 @@ dependencies = [
  "rayon",
  "sagebrush-ap",
  "sagebrush-flint",
+ "sagebrush-poly",
  "serde_json",
 ]
 
@@ -422,6 +423,16 @@ dependencies = [
  "rayon",
  "sagebrush-ap",
  "sagebrush-modsym",
+]
+
+[[package]]
+name = "sagebrush-poly"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "sagebrush-flint",
 ]
 
 [[package]]
@@ -450,6 +461,7 @@ dependencies = [
  "num-bigint",
  "sagebrush-ap",
  "sagebrush-modsym",
+ "sagebrush-poly",
  "serde_json",
 ]
 

@@ -1,0 +1,14 @@
+[package]
+name = "sagebrush-poly"
+version = "0.1.0"
+edition = "2021"
+description = "Polynomials over Z for the Sagebrush engines: factorization in pure Rust (Zassenhaus), for WebAssembly too"
+
+[dependencies]
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+
+[dev-dependencies]
+# LGPL; only the tests use it, as a reference
+sagebrush-flint = { path = "../flint" }

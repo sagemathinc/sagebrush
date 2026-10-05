@@ -12,7 +12,9 @@ from fractions import Fraction as _Fraction
 __all__ = [
     # modular forms and elliptic curves (Sagebrush's engines)
     "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
+    "Newforms", "newform_orbits",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
+    "PolynomialRing", "polygen", "parent",
     "is_prime", "is_prime_power", "is_square", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
@@ -37,7 +39,21 @@ from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, l
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
                        bar_chart, show, graphics_array, animate, Animation)
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
-                           EllipticCurve)
+                           EllipticCurve, Newforms, newform_orbits)
+from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
+
+
+def parent(x):
+    """The parent structure of x: ZZ, QQ, a polynomial ring, ..."""
+    if hasattr(x, "parent"):
+        return x.parent()
+    if isinstance(x, bool) or isinstance(x, int):
+        return ZZ
+    if isinstance(x, _Fraction):
+        return QQ
+    raise NotImplementedError("parent of %r" % (x,))
+
+
 from _interact import (interact, slider, range_slider, selector, checkbox, input_box,
                        color_selector, text_control)
 
@@ -132,10 +148,7 @@ def Integer(x):
     return int(x)
 
 
-ZZ = Integer
-
-
-def QQ(x, d=None):
+def _QQ(x, d=None):
     """QQ(2, 3) or QQ("2/3") or QQ(0.75): the exact rational."""
     f = _Fraction(x) if d is None else _Fraction(x, d)
     if type(f) is not _Fraction:
@@ -386,7 +399,10 @@ class Factorization(list):
 
 
 def factor(n):
-    """The prime factorization of a nonzero integer (or Rational)."""
+    """The prime factorization of a nonzero integer (or Rational), or of a
+    polynomial."""
+    if isinstance(n, _Polynomial):
+        return n.factor()
     if isinstance(n, _Fraction) and n.denominator != 1:
         num, den = factor(n.numerator), factor(n.denominator)
         pairs = sorted(list(num) + [(p, -e) for p, e in den])
@@ -473,6 +489,11 @@ def digits(n, base=10):
 def gcd(*args):
     if len(args) == 1:
         args = tuple(args[0])
+    if any(isinstance(a, _Polynomial) for a in args):
+        r = args[0]
+        for a in args[1:]:
+            r = r.gcd(a) if isinstance(r, _Polynomial) else a.gcd(r)
+        return r
     if any(isinstance(a, _Fraction) for a in args):
         r = _Fraction(0)
         for a in args:

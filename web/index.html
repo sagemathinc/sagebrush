@@ -207,7 +207,8 @@
     The language is CPython 3.14's own grammar (syntax errors match CPython), with big integers, <code>fractions</code>,
     <code>complex</code>/<code>cmath</code>, <code>re</code>, <code>json</code>, <code>collections</code>, <code>functools</code>, generators,
     <code>async</code>, classes and metaclasses. Pure-Python packages such as mpmath pass their own test suites.
-    In Sage mode <code>ModularSymbols</code>, <code>CuspForms</code>, <code>DirichletGroup</code> and <code>EllipticCurve</code> run on Sagebrush's Rust engines.
+    In Sage mode <code>ModularSymbols</code>, <code>CuspForms</code>, <code>Newforms</code>, <code>DirichletGroup</code>, <code>EllipticCurve</code> and
+    polynomial factoring over <code>ZZ</code> and <code>QQ</code> (<code>R.&lt;x&gt; = ZZ[]</code>) run on Sagebrush's Rust engines.
     Notebooks (with their output) and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>,
     and <b>Files</b> lists the files Python's <code>open()</code> sees (drop files on the page to add them).
     Your code runs in a Web Worker on this page; nothing is sent anywhere.
@@ -298,7 +299,15 @@ const EXAMPLES = {
     "# Elliptic curves: Cremona's curves of conductor < 1000 by label\nE = EllipticCurve('389a1')\nE, E.rank(), E.torsion_order(), E.aplist(50), E.anlist(12)",
     "# Sato-Tate: the moments of a_p^2/p over the primes below 10^7 tend to the Catalan numbers 1, 2, 5, 14\nEllipticCurve('11a1').sato_tate_moments(10^7)",
     "# The Sato-Tate distribution of a_p / 2 sqrt(p) against the semicircle\nimport matplotlib.pyplot as plt\nE = EllipticCurve([0, 0, 1, -7, 6])\nps = prime_range(3, 2*10^5)\nt = [a / (2 * sqrt(p)) for p, a in zip(ps, E.aplist(2*10^5)[1:])]\nplt.figure(figsize=(7, 3))\nplt.hist(t, bins=50, density=True, alpha=0.6)\nxs = [k / 100 for k in range(-100, 101)]\nplt.plot(xs, [2 / pi * sqrt(1 - u^2) for u in xs], 'r')\nplt.title('5077a: a_p / 2 sqrt(p), p < 200000')",
+    "# Newforms (when every coefficient is rational, exactly as Sage prints them)\nNewforms(57, names='a')",
+    "# Every Galois orbit of newforms, with its LMFDB label, dimension and trace form\nfor f in newform_orbits(389):\n    print(f)\nnewform_orbits(389)[-1].charpoly()",
     "# The engines directly: the same API as the native CPython package\nfrom sagebrush import modsym\nmodsym.rational_newforms(37, 50)",
+  ],
+  "Polynomials (Sage)": [
+    "# Polynomials over ZZ and QQ, factored by Sagebrush's Rust engine (Zassenhaus with Hensel lifting)\nR.<x> = ZZ[]\nf = (x^4 - 1)*(2*x + 3)^2*(x^2 - x - 1)\nf, f.factor()",
+    "factor(x^105 - 1)",
+    "# The Swinnerton-Dyer polynomial for 2, 3, 5, 7: irreducible, but it splits modulo every prime\ng = x^16 - 136*x^14 + 6476*x^12 - 141912*x^10 + 1513334*x^8 - 7453176*x^6 + 13950764*x^4 - 5596840*x^2 + 46225\ng.is_irreducible(), factor(g.discriminant())",
+    "S.<y> = QQ[]\nh = (y^2 - 1/4)*(3*y + 2)\nh.factor(), h.roots(), gcd(h, y^3 - 1/8)",
   ],
   "numpy": [
     "import numpy as np\na = np.arange(12).reshape(3, 4)\nprint(a)\na.sum(axis=0), a.mean(), a[a % 3 == 0], a.T @ a",
@@ -321,7 +330,7 @@ const EXAMPLES = {
   ],
 };
 
-const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)", "Modular forms (Sage)"]);
+const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)", "Polynomials (Sage)", "Modular forms (Sage)"]);
 const $ = (s) => document.querySelector(s);
 const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
 let worker, nextId = 1, version = "", execCount = 0, generation = 0;

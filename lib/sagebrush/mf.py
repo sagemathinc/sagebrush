@@ -33,3 +33,26 @@ def charpoly(n, k, q, chi=None, sign=0, threads=0):
     d = dict(call("charpoly", n=int(n), k=int(k), q=int(q), chi=chi_arg(chi), sign=int(sign)))
     d["coeffs"] = [[int(c) for c in row] for row in d["coeffs"]]
     return d
+
+
+def _orbits(d):
+    d = dict(d)
+    d["orbit_charpolys"] = [[int(c) for c in u] for u in d["orbit_charpolys"]]
+    d["T"] = [tuple(t) for t in d["T"]]
+    return d
+
+
+def newspace(n, k, factor=None, chi=None, threads=0):
+    """Galois orbits of newforms in S_k^new(N, [chi]): dimensions over Q
+    and each orbit's charpoly over Q of the Hecke operator T = sum r T_q.
+    (`factor` is the native package's factoring callback; here the engine
+    factors, in Rust.)"""
+    return _orbits(call("newspace", n=int(n), k=int(k), chi=chi_arg(chi)))
+
+
+def newforms(n, k, factor=None, chi=None, bound=100, threads=0):
+    """newspace(...) plus the trace form tr a_1..a_B of each orbit; orbits
+    in LMFDB order (by dimension, then trace form), with LMFDB's letters."""
+    d = _orbits(call("newforms", n=int(n), k=int(k), chi=chi_arg(chi), bound=int(bound)))
+    d["newforms"] = [dict(o, traces=[int(t) for t in o["traces"]], charpoly=[int(c) for c in o["charpoly"]]) for o in d["newforms"]]
+    return d
