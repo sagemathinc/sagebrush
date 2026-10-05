@@ -8,6 +8,10 @@ const BIN: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "/": "
 const CMP: Record<string, string> = { "<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "ne" };
 const UNARY: Record<string, string> = { "-": "neg", "+": "pos", "~": "invert" };
 
+const REUSING = new Set(["add", "sub", "mul", "truediv"]);
+const FRESH_OPS = new Set(["add", "sub", "mul", "truediv", "floordiv", "mod", "pow"]);
+const tmpOperand = (e: A.Expr) => (e.k === "BinOp" && FRESH_OPS.has(BIN[e.op])) || (e.k === "UnaryOp" && e.op === "-");
+
 export const q = (s: string) => JSON.stringify(s);
 const JS_ID = /^[\p{ID_Start}_$][\p{ID_Continue}$‌‍]*$/u;
 // Python names in JS: locals get a `$` suffix, which no Python name can
@@ -141,8 +145,13 @@ export class Emitter {
         return this.constant(e.value);
       case "FString":
         return this.fstring(e.parts);
-      case "BinOp":
+      case "BinOp": {
+        // an operand that is itself an operator expression may be a
+        // temporary array the operation can reuse (FRESH in runtime/ops.ts)
+        const w = (tmpOperand(e.left) ? 1 : 0) | (tmpOperand(e.right) ? 2 : 0);
+        if (w && REUSING.has(BIN[e.op])) return `${BIN[e.op]}T(${this.ex(e.left)}, ${this.ex(e.right)}, ${w})`;
         return `${BIN[e.op]}(${this.ex(e.left)}, ${this.ex(e.right)})`;
+      }
       case "UnaryOp":
         if (e.op === "not") return `!${this.bool(e.operand)}`;
         return `${UNARY[e.op]}(${this.ex(e.operand)})`;
@@ -968,6 +977,7 @@ function* allScopes(s: Scope): Generator<Scope> {
 const RUNTIME_NAMES = [
   "add", "sub", "mul", "truediv", "floordiv", "mod", "pow", "lshift", "rshift", "and", "or", "xor", "matmul",
   "iadd", "isub", "imul", "itruediv", "ifloordiv", "imod", "ipow", "ilshift", "irshift", "iand", "ior", "ixor", "imatmul",
+  "addT", "subT", "mulT", "truedivT",
   "sagediv", "isagediv", "sagepow", "isagepow",
   "neg", "pos", "invert", "truth", "lt", "le", "gt", "ge", "eq", "ne", "is", "contains",
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",

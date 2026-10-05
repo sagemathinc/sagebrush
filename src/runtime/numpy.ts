@@ -918,7 +918,11 @@ function stridedKernel(op: string): any {
   return k;
 }
 
-export function binary(op: string, x: any, y: any, out: NDArray | null = null): any {
+// With tryOut, the result goes into out only if it has exactly out's dtype
+// and shape (out C-contiguous from its start and sharing no memory with the
+// operands unless it is one of them, laid out alike): else undefined, before
+// anything is computed.
+export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false): any {
   const spec = BIN[op];
   const A = operand(x), B = operand(y);
   let ct = resultType(A, B); // type the computation runs in
@@ -932,15 +936,16 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null): 
   const rt = spec.out === "bool" ? D.bool : ct;
   const a = A.arr, b = B.arr;
   const shape = broadcastShapes(a.shape, b.shape);
+  if (tryOut && (rt !== out!.dt || out!.offset !== 0 || !out!.isC() || shape.length !== out!.ndim || shape.some((v, i) => v !== out!.shape[i]))) return undefined;
   // fast paths: real dtypes whose arithmetic needs no wrapping or truncation
   const plain = (d: DType) => d.kind === "f" || d.kind === "b" || (d.isInt && d.ctor !== Float64Array) || d === D.int64;
-  if (!out && !ct.cplx && FAST_EXPR[op] && plain(ct) && plain(rt) && !(op === "power" && ct.isInt) && !(ct === D.int64 && op === "multiply")
+  if ((!out || tryOut) && !ct.cplx && FAST_EXPR[op] && plain(ct) && plain(rt) && !(op === "power" && ct.isInt) && !(ct === D.int64 && op === "multiply")
       && (rt.kind !== "b" || spec.out === "bool") && !(rt.kind === "b" && spec.out !== "bool")) {
     const n = prod(shape);
     const aScalar = a.ndim === 0, bScalar = b.ndim === 0;
     const sameShape = a.ndim === b.ndim && a.shape.every((v, i) => v === b.shape[i]);
     if ((sameShape && isFlat(a) && isFlat(b)) || (aScalar && isFlat(b) && b.ndim > 0) || (bScalar && isFlat(a) && a.ndim > 0)) {
-      const res = empty(shape, rt);
+      const res = out ?? empty(shape, rt);
       const kind = aScalar && !bScalar ? "sa" : bScalar && !aScalar ? "as" : "aa";
       const av = aScalar ? a.data[a.offset] : 0, bv = bScalar ? b.data[b.offset] : 0;
       // operands of different storage types (int8 + float64 ...) read fine as numbers
@@ -948,7 +953,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null): 
       return res;
     }
     if (shape.length >= 1 && n > 0) {
-      const res = empty(shape, rt);
+      const res = out ?? empty(shape, rt);
       stridedKernel(op)(a.data, a.offset, bstrides(a, shape), b.data, b.offset, bstrides(b, shape), res.data, shape);
       return res;
     }
@@ -1851,10 +1856,12 @@ newBuiltinModule("_numpy", (m) => {
       const both = operand(a).arr.dt.kind === "b" && operand(b).arr.dt.kind === "b";
       return both ? boolOp(op) : op;
     };
-    M(`__${py}__`, (a: NDArray, o: any) => (isOperand(o) ? binary(pick(a, o), a, o) : NotImplemented));
-    M(`__r${py}__`, (a: NDArray, o: any) => (isOperand(o) ? binary(pick(o, a), o, a) : NotImplemented));
+    M(`__${py}__`, (a: NDArray, o: any) => (isOperand(o) ? (O.FRESH.v = binary(pick(a, o), a, o)) : NotImplemented)).$fresh = true;
+    M(`__r${py}__`, (a: NDArray, o: any) => (isOperand(o) ? (O.FRESH.v = binary(pick(o, a), o, a)) : NotImplemented)).$fresh = true;
     M(`__i${py}__`, (a: NDArray, o: any) => {
       if (!isOperand(o)) return NotImplemented;
+      // in place when the result has a's dtype and shape and o shares no memory with a
+      if (!(o instanceof NDArray && o.data.buffer === a.data.buffer) && binary(pick(a, o), a, o, a, true) !== undefined) return a;
       const r = binary(pick(a, o), a, o);
       const rt = r.dt;
       if (rt !== a.dt && !(promote(rt, a.dt) === a.dt)) raise(T.UFuncTypeError ?? T.TypeError, `Cannot cast ufunc '${op}' output from dtype('${rt.name}') to dtype('${a.dt.name}') with casting rule 'same_kind'`);
@@ -1867,7 +1874,17 @@ newBuiltinModule("_numpy", (m) => {
   M("__divmod__", (a: NDArray, o: any) => tuple([binary("floor_divide", a, o), binary("remainder", a, o)]));
   const CMPS: [string, string][] = [["eq", "equal"], ["ne", "not_equal"], ["lt", "less"], ["le", "less_equal"], ["gt", "greater"], ["ge", "greater_equal"]];
   for (const [py, op] of CMPS) M(`__${py}__`, (a: NDArray, o: any) => (isOperand(o) ? binary(op, a, o) : py === "eq" ? false : py === "ne" ? true : NotImplemented));
-  M("__neg__", (a: NDArray) => unary("negative", a));
+  M("__neg__", (a: NDArray) => (O.FRESH.v = unary("negative", a))).$fresh = true;
+  // reuse a temporary operand t (see FRESH in ops.ts) for t op o or o op t
+  const REUSE: Record<string, string> = { add: "add", sub: "subtract", mul: "multiply", truediv: "true_divide" };
+  const plainOperand = (o: any) => (o instanceof NDArray ? Obj.typeOf(o) === A : typeof o === "number" || typeof o === "boolean" || o instanceof Obj.FloatBox);
+  O.FRESH.inplace = (op: string, t: any, o: any, tLeft: boolean) => {
+    if (!(t instanceof NDArray) || t.dt.kind === "b" || !plainOperand(o)) return undefined;
+    const r = tLeft ? binary(REUSE[op], t, o, t, true) : binary(REUSE[op], o, t, t, true);
+    if (r === undefined) return undefined;
+    O.FRESH.v = r;
+    return r;
+  };
   M("__pos__", (a: NDArray) => unary("positive", a));
   M("__abs__", (a: NDArray) => unary("absolute", a));
   M("__invert__", (a: NDArray) => unary("invert", a));
