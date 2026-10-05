@@ -68,6 +68,14 @@ the engines.
   `2/3` is an exact rational, `[1..10]`, `[1,3..99]`, `(1..)`, `1.5` prints
   as `1.50000000000000`, `100r`, `12.factor()`, `R.<x> = ZZ[]`, `R.0`,
   `f(x) = x^2`; checked against Sage by `sage-tests/test_language.sage`.
+- **Magma** (`--magma`, implied for `.m` files; a mode of the notebook):
+  `src/magma.ts` translates Magma to Python, run on `lib/_magma.py` over
+  the same engines: the language (`:=`, `function`/`procedure` with `~x`
+  arguments, `$$`, `select`, comprehensions, ranges, multiple return
+  values, value semantics), Magma's printing (wrapped at 80 columns), and
+  integers, sequences, sets, tuples, reals to 30 digits, polynomials,
+  modular symbols, newforms and elliptic curves. `magma-tests/` checks
+  500 lines against Magma itself.
 - **Modular forms, elliptic curves and polynomials:** in Sage mode,
   `ModularSymbols`, `CuspForms`, `ModularForms`, `Newforms`, `Gamma0`,
   `DirichletGroup`, `EllipticCurve` and polynomial rings over `ZZ` and `QQ`

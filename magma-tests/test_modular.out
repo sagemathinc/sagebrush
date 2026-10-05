@@ -1,0 +1,99 @@
+Full modular symbols space for Gamma_0(11) of weight 2 and dimension 3 over 
+Rational Field
+Full modular symbols space for Gamma_0(11) of weight 2 and dimension 2 over 
+Rational Field
+2
+$.1^2 - $.1 - 6
+x^32 + 2*x^31 - 46*x^30 - 92*x^29 + 943*x^28 + 1890*x^27 - 11374*x^26 - 
+    22902*x^25 + 89765*x^24 + 182140*x^23 - 487738*x^22 - 1001198*x^21 + 
+    1869392*x^20 + 3902954*x^19 - 5092309*x^18 - 10900600*x^17 + 9794556*x^16 + 
+    21784924*x^15 - 12996766*x^14 - 30794038*x^13 + 11296103*x^12 + 
+    30077576*x^11 - 5661767*x^10 - 19515866*x^9 + 920776*x^8 + 7881954*x^7 + 
+    501504*x^6 - 1769048*x^5 - 255168*x^4 + 178368*x^3 + 32672*x^2 - 5904*x - 
+    1184
+[
+    <x - 3, 1>,
+    <x + 2, 1>
+]
+x^3 - 2*x^2 - 4*x + 3
+Univariate Polynomial Ring in x over Rational Field
+4 4
+Full modular symbols space for Gamma_0(37) of weight 2 and dimension 3 over 
+Rational Field
+14
+Modular symbols space for Gamma_0(33) of weight 4 and dimension 6 over Rational 
+Field
+Modular symbols space for Gamma_0(389) of weight 2 and dimension 32 over 
+Rational Field
+[
+    <x + 2, 1>,
+    <x^2 - 2, 1>,
+    <x^3 - 4*x - 2, 1>,
+    <x^6 + 3*x^5 - 2*x^4 - 8*x^3 + 2*x^2 + 4*x - 1, 1>,
+    <x^20 - 3*x^19 - 29*x^18 + 91*x^17 + 338*x^16 - 1130*x^15 - 2023*x^14 + 
+        7432*x^13 + 6558*x^12 - 28021*x^11 - 10909*x^10 + 61267*x^9 + 6954*x^8 -
+        74752*x^7 + 1407*x^6 + 46330*x^5 - 1087*x^4 - 12558*x^3 - 942*x^2 + 
+        960*x + 148, 1>
+]
+[
+    Modular symbols space for Gamma_0(389) of weight 2 and dimension 1 over 
+    Rational Field,
+    Modular symbols space for Gamma_0(389) of weight 2 and dimension 2 over 
+    Rational Field,
+    Modular symbols space for Gamma_0(389) of weight 2 and dimension 3 over 
+    Rational Field,
+    Modular symbols space for Gamma_0(389) of weight 2 and dimension 6 over 
+    Rational Field,
+    Modular symbols space for Gamma_0(389) of weight 2 and dimension 20 over 
+    Rational Field
+]
+Space of modular forms on Gamma_0(11) of weight 2 and dimension 1 over Integer 
+Ring.
+32
+[* [*
+    q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + 6*q^6 - q^7 + 6*q^9 + 4*q^10 - 5*q^11 + 
+    O(q^12)
+*], [*
+    q + q^3 - 2*q^4 - q^7 - 2*q^9 + 3*q^11 + O(q^12)
+*] *]
+2
+q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + 6*q^6 - q^7 + 6*q^9 + 4*q^10 - 5*q^11 + 
+O(q^12)
+Space of modular forms on Gamma_0(37) of weight 2 and dimension 1 over Rational 
+Field.
+q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + 6*q^6 - q^7 + 6*q^9 + O(q^10)
+[* [*
+    q - 2*q^2 - q^3 + 2*q^4 + q^5 + 2*q^6 - 2*q^7 - 2*q^9 - 2*q^10 + q^11 + 
+    O(q^12)
+*] *]
+q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)
+32 32
+Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+-2 11 [ 0, -1, 1, -10, -20 ]
+[ -2, -1, 1, -2, 1, 4, -2, 0, -1, 0 ]
+-161051
+Abelian Group isomorphic to Z/5
+Defined on 1 generator
+Relations:
+    5*$.1 = 0
+Elliptic Curve defined by y^2 + y = x^3 + x^2 - 2*x over Rational Field
+2
+Abelian Group isomorphic to Z/2 + Z/6
+Defined on 2 generators
+Relations:
+    2*$.1 = 0
+    6*$.2 = 0
+Abelian Group of order 1
+8
+Abelian Group isomorphic to Z/2 + Z/4
+Defined on 2 generators
+Relations:
+    2*$.1 = 0
+    4*$.2 = 0
+Elliptic Curve defined by y^2 + y = x^3 - x^2 over Rational Field
+-4096/11
+-11
+Elliptic Curve defined by y^2 = x^3 + x + 2 over Rational Field
+32
+Elliptic Curve defined by y^2 = x^3 - x over Rational Field
+11a1

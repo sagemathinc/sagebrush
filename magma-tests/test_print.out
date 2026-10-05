@@ -1,0 +1,23 @@
+2 Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+2 Full modular symbols space for Gamma_0(11) of weight 2 and dimension 3 over 
+Rational Field
+2 Space of modular forms on Gamma_0(11) of weight 2 and dimension 1 over Integer
+Ring.
+2 Integer Ring
+2 Univariate Polynomial Ring in x over Integer Ring
+2 
+Abelian Group isomorphic to Z/5
+Defined on 1 generator
+Relations:
+    5*$.1 = 0
+2 Gamma_0(11)
+2 $.1^3 + $.1^2 - 8*$.1 - 12
+2 { 1, 2 }
+2 <1, [ 2 ]>
+Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+2
+Abelian Group isomorphic to Z/5
+Defined on 1 generator
+Relations:
+    5*$.1 = 0
+2

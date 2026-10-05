@@ -329,7 +329,7 @@ def _check_index(n, i):
 
 
 def _index(s, i):
-    if isinstance(s, (MSeq, MRange, MTuple)):
+    if isinstance(s, (MSeq, MRange, MTuple, list)):
         if isinstance(i, (MSeq, MRange)):
             return MSeq(_index(s, j) for j in i)
         _check_index(len(s), i)
@@ -795,8 +795,19 @@ def _items(v):
     return ["undef" if x is _UNDEF else _inline(x) for x in items]
 
 
-def _str(v, indent=0):
-    """Magma's printing of v (possibly over several lines)."""
+def _str(v, indent=0, col=None):
+    """Magma's printing of v (possibly over several lines), starting at
+    column `col` (default: the indentation)."""
+    col = indent if col is None else col
+    if type(v).__name__ == "MList":
+        if not v:
+            return "[* *]"
+        if all(_atomic(x) for x in v):
+            return _wrap("[* " + ", ".join(_inline(x) for x in v) + " *]", indent, indent)
+        if all(type(x).__name__ == "MList" for x in v):
+            return "[* " + ", ".join(_str(x, indent) for x in v) + " *]"
+        pad = " " * (indent + 4)
+        return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]"
     if isinstance(v, MRange):
         return _range_str(v)
     if isinstance(v, MSet) and v.range is not None and v.kind == "set":
@@ -821,7 +832,42 @@ def _str(v, indent=0):
         pad = " " * (indent + 4)
         inner = [pad + _str(x, indent + 4) for x in raw]
         return o.strip() + "\n" + ",\n".join(inner) + "\n" + " " * indent + c.strip()
-    return _inline(v)
+    return _wrap(_inline(v), col, indent + _extra(v), indent)
+
+
+def _extra(v):
+    """Continuation indent of a wrapped value: polynomials (and tuples
+    holding one) indent 4 more, as Magma's polynomial printer does."""
+    if isinstance(v, _sp.Polynomial):
+        return 4
+    if isinstance(v, MTuple):
+        return max([_extra(x) for x in v] + [0])
+    return 0
+
+
+def _wrap(text, first_col, cont, indent=0):
+    """Magma's line breaking at WIDTH columns, at spaces: a word fits when it
+    does (the space after it only if there is room); continuation lines
+    start at column `cont`.  The first line starts at `first_col` (its
+    indentation already written)."""
+    if "\n" in text:
+        lines = text.split("\n")
+        return "\n".join(_wrap(l, first_col if k == 0 else 0, cont if k == 0 else 0) for k, l in enumerate(lines))
+    if first_col + len(text) <= WIDTH or " " not in text:
+        return text
+    words = text.split(" ")
+    lines, line = [], ""
+    for k, w in enumerate(words):
+        start = first_col if not lines else cont
+        if line and start + len(line) + len(w) > WIDTH:
+            lines.append(line)
+            line = ""
+            start = cont
+        line += w
+        if k < len(words) - 1 and start + len(line) + 1 <= WIDTH:
+            line += " "
+    lines.append(line)
+    return lines[0] + "".join("\n" + " " * cont + l for l in lines[1:])
 
 
 def _print_line(vals):
@@ -831,7 +877,10 @@ def _print_line(vals):
     for k, v in enumerate(vals):
         if k:
             out += " " if _atomic(vals[k - 1]) else "\n"
-        out += _str(v)
+            if getattr(v, "_magma_block", False) and _atomic(vals[k - 1]):
+                out += "\n"  # a group starts on its own line
+        col = len(out) - (out.rfind("\n") + 1)
+        out += _str(v, 0, col)
     _sys.stdout.write(out + "\n")
 
 
@@ -957,6 +1006,8 @@ RationalField = Rationals
 
 
 def Parent(x):
+    if hasattr(x, "_magma_parent"):
+        return x._magma_parent()
     if isinstance(x, bool):
         raise MagmaError("Parent of a boolean")
     if isinstance(x, int):
@@ -997,11 +1048,11 @@ def Type(x):
 # ------------------------------------------------------------------ polynomials
 
 def PolynomialRing(R, n=1):
+    """A new polynomial ring; its variable prints as $.1 until named."""
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing: only over Integers() and Rationals() so far")
-    P = _sp.PolynomialRing_(base, "$.1")
-    return P
+    return _sp.PolynomialRing_(base, "$.1")
 
 
 def AssignNames(R, names):
@@ -1047,7 +1098,7 @@ def Derivative(f):
 def Discriminant(f):
     if hasattr(f, "_magma_discriminant"):
         return f._magma_discriminant()
-    return f.discriminant()
+    return _m_num(f.discriminant())
 
 
 def Resultant(f, g):
@@ -1075,16 +1126,22 @@ def _factorization(n):
     if isinstance(n, _sp.Polynomial):
         F = n.factor()
         R = n._ring
-        out = []
+        consts, out = [], []
         for g, e in F:
+            if not isinstance(g, _sp.Polynomial):
+                if g != -1 and R._base is not _sp.QQ:
+                    consts.append((abs(g), e))  # over Z: the content's primes
+                continue
             if g.degree() == 0:
                 continue
             out.append(MTuple([g, e]))
         if R._base is _sp.QQ:
             # monic factors over Q, the leading coefficient apart
             out = [MTuple([g.monic(), e]) for g, e in out]
-        out.sort(key=lambda t: (t[0].degree(), [(-1 if c < 0 else 1, abs(c)) for c in reversed(t[0].list())]))
-        return _multi([MSeq(out), _m_num(n.leading_coefficient())], show=1)
+        # by degree, then the coefficients from the top (Magma's order)
+        out.sort(key=lambda t: (t[0].degree(), list(reversed(t[0].list()))))
+        consts = [MTuple([R(p), e]) for p, e in sorted(consts)]
+        return _multi([MSeq(consts + out), _m_num(n.leading_coefficient())], show=1)
     if isinstance(n, _Fraction) and not isinstance(n, int):
         raise MagmaError("Factorization of a rational")
     if n == 0:
@@ -1609,4 +1666,297 @@ def Random(s):
     return random.choice(list(_iter(s)))
 
 
-__all__ = [n for n in list(globals()) if n[:1].isupper() and not n.startswith("_")] + ["MSeq", "MSet", "MTuple", "MRange", "Multi"]
+# ------------------------------------------------------------------ modular forms
+
+import _sage_modular as _smod
+from sagebrush import mf as _mf
+
+
+_HECKE_RING = []
+
+
+def _qx(name=None):
+    """The polynomial ring of Magma's Hecke polynomials (one, cached): its
+    variable prints as $.1 until the cuspidal machinery names it x."""
+    if not _HECKE_RING:
+        _HECKE_RING.append(_sp.PolynomialRing_(_sp.QQ, "$.1"))
+    R = _HECKE_RING[0]
+    if name and R._name == "$.1":
+        R._name = name
+    return R
+
+
+class MGamma0:
+    def __init__(self, N):
+        self.N = N
+
+    def __repr__(self):
+        return "Gamma_0(%d)" % self.N
+
+
+def Gamma0(N):
+    return MGamma0(N)
+
+
+def _level(N):
+    return N.N if isinstance(N, MGamma0) else N
+
+
+class MModSym:
+    """A space of modular symbols for Gamma_0(N) (trivial character)."""
+
+    def __init__(self, N, k, sign, kind="full", dim=None, poly=None):
+        self.N, self.k, self.sign, self.kind = N, k, sign, kind
+        self._dim, self._poly = dim, poly  # an orbit: its T-charpoly
+
+    def _sage(self):
+        return _smod.ModularSymbols(self.N, self.k, self.sign)
+
+    def _dims(self):
+        return _mf.dims(self.N, self.k)
+
+    def _magma_dimension(self):
+        if self._dim is not None:
+            return self._dim
+        d = self._dims()
+        mult = 2 if self.sign == 0 else 1
+        if self.kind == "full":
+            return self._sage().dimension()
+        if self.kind == "cuspidal":
+            return mult * d["cusp"]
+        if self.kind == "new":
+            return mult * d["new"]
+        raise MagmaError("dimension")
+
+    def __repr__(self):
+        head = "Full modular symbols space" if self.kind == "full" else "Modular symbols space"
+        return "%s for Gamma_0(%d) of weight %d and dimension %d over Rational Field" % (head, self.N, self.k, self._magma_dimension())
+
+
+def ModularSymbols(N, k=2, sign=0):
+    return MModSym(_level(N), int(k), int(sign))
+
+
+def Dimension(M):
+    if hasattr(M, "_magma_dimension"):
+        return M._magma_dimension()
+    raise MagmaError("Dimension: bad argument")
+
+
+def CuspidalSubspace(M):
+    if M.kind not in ("full", "cuspidal"):
+        return M
+    return MModSym(M.N, M.k, M.sign, "cuspidal")
+
+
+def NewSubspace(M):
+    if M.kind == "full":
+        raise MagmaError("The given space must be contained in the cuspidal subspace")
+    return MModSym(M.N, M.k, M.sign, "new")
+
+
+def _cusp_poly(M, p):
+    # the charpoly of T_p on the full space, without the Eisenstein part
+    f = M._sage().hecke_polynomial(p)
+    d = M._dims()
+    eis = d["eisenstein"]
+    if M.sign == -1:
+        eis = 0
+    lam = 1 + p ** (M.k - 1) if M.N % p else None
+    if lam is None:
+        raise MagmaError("HeckePolynomial: p must not divide the level for a cuspidal space")
+    x = _sp.PolynomialRing(_sp.ZZ, "x").gen()
+    g = f
+    for _ in range(eis):
+        g = g // (x - lam)
+    return g
+
+
+def HeckePolynomial(M, p):
+    R = _qx("x" if M.kind != "full" else None)
+    if M.kind == "full":
+        f = M._sage().hecke_polynomial(p)
+    elif M.kind == "cuspidal":
+        f = _cusp_poly(M, p)
+    else:
+        raise MagmaError("HeckePolynomial on this space is not supported yet")
+    return R(f.list())
+
+
+class _HeckeOp:
+    def __init__(self, M, p):
+        self.M, self.p = M, p
+
+
+def HeckeOperator(M, p):
+    return _HeckeOp(M, p)
+
+
+def CharacteristicPolynomial(T):
+    if isinstance(T, _HeckeOp):
+        return HeckePolynomial(T.M, T.p)
+    raise MagmaError("CharacteristicPolynomial: matrices are not supported yet")
+
+
+def NewformDecomposition(M):
+    if M.kind not in ("cuspidal", "new"):
+        M = NewSubspace(CuspidalSubspace(M))
+    if M.kind == "cuspidal":
+        raise MagmaError("NewformDecomposition of a cuspidal space with old forms is not supported yet; use NewSubspace")
+    nf = _mf.newforms(M.N, M.k, bound=10)["newforms"]
+    mult = 2 if M.sign == 0 else 1
+    return MSeq(MModSym(M.N, M.k, M.sign, "orbit", mult * o["dim"], o["charpoly"]) for o in sorted(nf, key=lambda o: o["dim"]))
+
+
+def DimensionCuspFormsGamma0(N, k):
+    return _mf.dims(N, k)["cusp"]
+
+
+def DimensionNewCuspFormsGamma0(N, k):
+    return _mf.dims(N, k)["new"]
+
+
+def DimensionModularFormsGamma0(N, k):
+    d = _mf.dims(N, k)
+    return d["cusp"] + d["eisenstein"]
+
+
+class MModForms:
+    def __init__(self, N, k, cusp=True, base="Integer Ring", dim=None):
+        self.N, self.k, self.cusp, self.base, self.dim = N, k, cusp, base, dim
+
+    def _magma_dimension(self):
+        if self.dim is not None:
+            return self.dim
+        d = _mf.dims(self.N, self.k)
+        return d["cusp"] if self.cusp else d["cusp"] + d["eisenstein"]
+
+    def __repr__(self):
+        return "Space of modular forms on Gamma_0(%d) of weight %d and dimension %d over %s." % (self.N, self.k, self._magma_dimension(), self.base)
+
+
+def CuspForms(N, k=2):
+    return MModForms(_level(N), int(k))
+
+
+def ModularForms(N, k=2):
+    return MModForms(_level(N), int(k), cusp=False)
+
+
+class MNewform:
+    def __init__(self, N, k, traces, parent):
+        self.N, self.k, self.traces, self._parent = N, k, traces, parent
+
+    def __repr__(self):
+        return _qexp(self.traces, 12)
+
+    def _magma_parent(self):
+        return self._parent
+
+
+class MList(list):
+    """A list [* ... *]."""
+
+    def __repr__(self):
+        return _str(self)
+
+
+def _qexp(a, prec):
+    return _smod._qexp([int(t) for t in a], prec)
+
+
+def Newforms(S):
+    if not isinstance(S, MModForms):
+        raise MagmaError("Newforms: a space of cusp forms")
+    nf = _mf.newforms(S.N, S.k, bound=100)["newforms"]
+    out = MList()
+    for o in nf:
+        # a newform's parent is the space of its Galois orbit
+        parent = MModForms(S.N, S.k, True, "Rational Field", o["dim"])
+        if o["dim"] != 1:
+            raise MagmaError("Newforms with non-rational coefficients are not supported yet (use DimensionNewCuspFormsGamma0, NewformDecomposition)")
+        out.append(MList([MNewform(S.N, S.k, o["traces"], parent)]))
+    return out
+
+
+def qExpansion(f, prec=12):
+    if not isinstance(f, MNewform):
+        raise MagmaError("qExpansion: a newform")
+    if prec > len(f.traces) + 1:
+        f.traces = _mf.newforms(f.N, f.k, bound=prec)["newforms"][0]["traces"] if False else f.traces
+    return _PowerSeries(_qexp(f.traces, prec))
+
+
+class _PowerSeries(str):
+    def __repr__(self):
+        return str(self)
+
+
+# ------------------------------------------------------------------ elliptic curves
+
+def EllipticCurve(a, b=None):
+    try:
+        return _smod.EllipticCurve(list(a) if isinstance(a, (MSeq, MRange)) else a, b)
+    except (ValueError, ArithmeticError) as e:
+        raise MagmaError(str(e))
+
+
+def TraceOfFrobenius(E, p):
+    return E.ap(p)
+
+
+def Conductor(E):
+    return E.conductor()
+
+
+def aInvariants(E):
+    return MSeq(E.a_invariants())
+
+
+def jInvariant(E):
+    return _m_num(E.j_invariant())
+
+
+def Rank(E):
+    return E.rank()
+
+
+def CremonaReference(E):
+    return E.cremona_label()
+
+
+class _AbGroup:
+    _magma_block = True  # printed on a line of its own after other values
+
+    def __init__(self, invs):
+        self.invs = [d for d in invs if d > 1]
+
+    def _magma_card(self):
+        n = 1
+        for d in self.invs:
+            n *= d
+        return n
+
+    def __repr__(self):
+        if not self.invs:
+            return "Abelian Group of order 1"
+        lines = ["Abelian Group isomorphic to " + " + ".join("Z/%d" % d for d in self.invs),
+                 "Defined on %d generator%s" % (len(self.invs), "s" if len(self.invs) > 1 else ""), "Relations:"]
+        lines += ["    %d*$.%d = 0" % (d, i + 1) for i, d in enumerate(self.invs)]
+        return "\n".join(lines)
+
+
+def TorsionSubgroup(E):
+    n = E.torsion_order()
+    # rational 2-torsion: the rational roots of 4x^3 + b2 x^2 + 2 b4 x + b6
+    b2, b4, b6, _ = E.b_invariants()
+    R = _sp.PolynomialRing(_sp.QQ, "x")
+    x = R.gen()
+    two = 1 + len((4 * x ** 3 + b2 * x ** 2 + 2 * b4 * x + b6).roots())
+    if two == 4:
+        return _AbGroup([2, n // 2])
+    return _AbGroup([n])
+
+
+__all__ = [n for n, v in list(globals().items())
+           if not n.startswith("_") and (callable(v) or isinstance(v, type)) and getattr(v, "__module__", None) == __name__]

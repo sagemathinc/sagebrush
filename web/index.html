@@ -184,7 +184,7 @@
     <button id="addmd" title="Add a Markdown (text) cell at the end">+ Text</button>
     <button class="stop" id="stop" title="Terminate the running program (forgets all variables)">Stop</button>
     <button id="restart" title="Fresh interpreter">Restart</button>
-    <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option></select>
+    <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option></select>
     <select id="examples" aria-label="Load examples"><option value="">Examples…</option></select>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, download, upload and share notebooks">File ▾</button>
     <button id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
@@ -209,6 +209,7 @@
     <code>async</code>, classes and metaclasses. Pure-Python packages such as mpmath pass their own test suites.
     In Sage mode <code>ModularSymbols</code>, <code>CuspForms</code>, <code>Newforms</code>, <code>DirichletGroup</code>, <code>EllipticCurve</code> and
     polynomial factoring over <code>ZZ</code> and <code>QQ</code> (<code>R.&lt;x&gt; = ZZ[]</code>) run on Sagebrush's Rust engines.
+    In <b>Magma</b> mode, Magma programs are translated to Python in this page and print what Magma prints.
     Notebooks (with their output) and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>,
     and <b>Files</b> lists the files Python's <code>open()</code> sees (drop files on the page to add them).
     Your code runs in a Web Worker on this page; nothing is sent anywhere.
@@ -231,7 +232,7 @@
   <hr>
   <button role="menuitem" data-f="delete" class="danger">Delete notebook</button>
 </div>
-<input id="importinput" type="file" accept=".ipynb,.py,.sage" hidden>
+<input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag" hidden>
 <dialog id="opendlg" aria-labelledby="opentitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
   <ul id="nblist"></ul>
@@ -309,6 +310,15 @@ const EXAMPLES = {
     "# The Swinnerton-Dyer polynomial for 2, 3, 5, 7: irreducible, but it splits modulo every prime\ng = x^16 - 136*x^14 + 6476*x^12 - 141912*x^10 + 1513334*x^8 - 7453176*x^6 + 13950764*x^4 - 5596840*x^2 + 46225\ng.is_irreducible(), factor(g.discriminant())",
     "S.<y> = QQ[]\nh = (y^2 - 1/4)*(3*y + 2)\nh.factor(), h.roots(), gcd(h, y^3 - 1/8)",
   ],
+  "Magma": [
+    {"md": "## Magma\n\nMagma programs, translated to Python in this page and run on Sagebrush's engines. Sequences are 1-based with value semantics, `/` is exact, and values print as Magma prints them (checked against Magma itself)."},
+    "// Integers and sequences\nFactorization(2^64 - 1);\n[ p : p in [1..100] | IsPrime(p) and IsPrime(p + 2) ];\n&+[ 1/n : n in [1..10] ];",
+    "// Functions, procedures with reference arguments, recursion\nfib := function(n) if n le 2 then return 1; end if; return $$(n-1) + $$(n-2); end function;\n[ fib(n) : n in [1..20] ];\nprocedure Push(~L, x) Append(~L, x); end procedure;\nL := [1, 2]; Push(~L, 3); L;",
+    "// Polynomials over the integers and the rationals\nR<x> := PolynomialRing(Integers());\nFactorization(x^12 - 1);\nQ<y> := PolynomialRing(Rationals());\nRoots((y^2 - 1/4)*(3*y + 2));",
+    "// Modular symbols and newforms (Sagebrush's Rust engine, in WebAssembly)\nS := CuspidalSubspace(ModularSymbols(389, 2, 1));\nS;\nFactorization(HeckePolynomial(S, 2));\nNewformDecomposition(NewSubspace(S));",
+    "// Elliptic curves\nE := EllipticCurve(\"389a1\");\nE;\nRank(E), Conductor(E), TorsionSubgroup(E);\n[ TraceOfFrobenius(E, p) : p in PrimesUpTo(50) ];",
+    "Newforms(CuspForms(37, 2));",
+  ],
   "numpy": [
     "import numpy as np\na = np.arange(12).reshape(3, 4)\nprint(a)\na.sum(axis=0), a.mean(), a[a % 3 == 0], a.T @ a",
     "# Seeded streams match NumPy's exactly\nnp.random.seed(0)\nx = np.random.randn(100_000)\nx.mean(), x.std(), np.percentile(x, [5, 50, 95])",
@@ -331,6 +341,7 @@ const EXAMPLES = {
 };
 
 const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)", "Polynomials (Sage)", "Modular forms (Sage)"]);
+const MAGMA_EXAMPLES = new Set(["Magma"]);
 const $ = (s) => document.querySelector(s);
 const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
 let worker, nextId = 1, version = "", execCount = 0, generation = 0;
@@ -363,6 +374,8 @@ function highlight(src, sage) {
   return out + esc(src.slice(last)) + "\n"; // a final newline keeps the last line's height
 }
 const isSage = () => modeEl.value === "sage";
+const isMagma = () => modeEl.value === "magma";
+const MODES = ["python", "sage", "magma"];
 function paint(cell) { cell.hl.innerHTML = cell.type === "markdown" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
 
 // ------------------------------------------------------------ the worker
@@ -401,14 +414,14 @@ function startWorker() {
 function submit(code, sink, extra = {}) {
   const id = nextId++;
   pending.set(id, sink);
-  worker.postMessage({ id, code, sage: isSage(), ...extra });
+  worker.postMessage({ id, code, sage: isSage(), magma: isMagma(), ...extra });
 }
 // Ask the worker a question (the console's "is this complete?" and Tab).
 function ask(msg, fallback) {
   return new Promise((resolve) => {
     const id = nextId++;
     pending.set(id, { reply: resolve, stopped: () => resolve(fallback) });
-    worker.postMessage({ id, sage: isSage(), ...msg });
+    worker.postMessage({ id, sage: isSage(), magma: isMagma(), ...msg });
   });
 }
 
@@ -999,7 +1012,7 @@ for (const k of Object.keys(EXAMPLES)) sel.add(new Option(k, k));
 sel.onchange = () => {
   if (sel.value) {
     // examples open as a new notebook: yours stays saved
-    openNew(sel.value, SAGE_EXAMPLES.has(sel.value) ? "sage" : "python", EXAMPLES[sel.value]);
+    openNew(sel.value, SAGE_EXAMPLES.has(sel.value) ? "sage" : MAGMA_EXAMPLES.has(sel.value) ? "magma" : "python", EXAMPLES[sel.value]);
     history.replaceState(null, "", location.pathname);
   }
   sel.value = "";
@@ -1095,7 +1108,7 @@ function show(doc) {
   loading = true;
   nb = { id: doc.id };
   nbName.value = doc.name || "Untitled";
-  setMode(doc.mode === "sage" ? "sage" : "python");
+  setMode(MODES.includes(doc.mode) ? doc.mode : "python");
   cellsEl.textContent = "";
   execCount = 0;
   for (const c of doc.cells?.length ? doc.cells : [{ code: "" }]) {
@@ -1136,12 +1149,12 @@ function download(name, text, type = "application/json") {
 const fileBase = () => (nbName.value.trim() || "notebook").replace(/[\\/:*?"<>|]+/g, "_");
 const lines = (t) => t.split(/(?<=\n)/);
 function toIpynb() {
-  const sage = isSage();
+  const sage = isSage(), magma = isMagma();
   return JSON.stringify({
     cells: snapshot().cells.map((c) => (c.type === "markdown"
       ? { cell_type: "markdown", metadata: {}, source: lines(c.code), ...(c.attachments ? { attachments: c.attachments } : {}) }
       : { cell_type: "code", execution_count: c.n === null ? null : +c.n, metadata: {}, source: lines(c.code), outputs: c.outputs.map((o) => (o.output_type === "stream" ? { ...o, text: lines(o.text) } : o)) })),
-    metadata: { kernelspec: sage ? { name: "sagemath", display_name: "SageMath", language: "sage" } : { name: "python3", display_name: "Python 3", language: "python" }, language_info: { name: sage ? "sage" : "python" } },
+    metadata: { kernelspec: magma ? { name: "magma", display_name: "Magma", language: "magma" } : sage ? { name: "sagemath", display_name: "SageMath", language: "sage" } : { name: "python3", display_name: "Python 3", language: "python" }, language_info: { name: magma ? "magma" : sage ? "sage" : "python" } },
     nbformat: 4, nbformat_minor: 5,
   }, null, 1);
 }
@@ -1151,6 +1164,7 @@ function fromFile(name, text) {
     const j = JSON.parse(text);
     const k = j.metadata?.kernelspec ?? {};
     const sage = /sage/i.test(`${k.name ?? ""} ${k.language ?? ""} ${j.metadata?.language_info?.name ?? ""}`);
+    const magma = /magma/i.test(`${k.name ?? ""} ${k.language ?? ""} ${j.metadata?.language_info?.name ?? ""}`);
     const cells = (j.cells ?? j.worksheets?.[0]?.cells ?? []).map((c) => {
       const src = joinText(c.source ?? c.input);
       if (c.cell_type === "code") return { code: src, outputs: c.outputs ?? [], n: c.execution_count ?? null };
@@ -1158,21 +1172,22 @@ function fromFile(name, text) {
       // raw cells become comments
       return { code: src.split("\n").map((l) => (l ? "# " + l : "#")).join("\n") };
     });
-    return { name: base, mode: sage ? "sage" : "python", cells };
+    return { name: base, mode: magma ? "magma" : sage ? "sage" : "python", cells };
   }
-  // "# %%" starts a cell, "# %% [markdown]" a Markdown cell whose lines are comments (jupytext)
+  // "# %%" starts a cell, "# %% [markdown]" a Markdown cell whose lines are comments (jupytext);
+  // in Magma (.m), "// %%" and "//" comments
   const cells = [];
   let cur = { code: "" };
   for (const line of text.split("\n")) {
-    const m = /^# ?%%(.*)$/.exec(line);
+    const m = /^(?:#|\/\/) ?%%(.*)$/.exec(line);
     if (m) {
       if (cur.code.trim() || cells.length) cells.push(cur);
       cur = /\[markdown\]|\[md\]/.test(m[1]) ? { type: "markdown", code: "" } : { code: "" };
-    } else cur.code += (cur.type === "markdown" ? line.replace(/^# ?/, "") : line) + "\n";
+    } else cur.code += (cur.type === "markdown" ? line.replace(/^(?:#|\/\/) ?/, "") : line) + "\n";
   }
   cells.push(cur);
   for (const c of cells) c.code = c.code.replace(/\n+$/, "").replace(/^\n+/, "");
-  return { name: base, mode: /\.sage$/i.test(name) ? "sage" : modeEl.value, cells: cells.filter((c, i) => c.code || i === 0) };
+  return { name: base, mode: /\.sage$/i.test(name) ? "sage" : /\.(m|mag)$/i.test(name) ? "magma" : modeEl.value, cells: cells.filter((c, i) => c.code || i === 0) };
 }
 
 // Share links: the cells, deflated, in the URL fragment (never sent to a server).
@@ -1182,7 +1197,7 @@ async function pipe(u8, stream) { return new Uint8Array(await new Response(new B
 async function shareLink() {
   const json = new TextEncoder().encode(JSON.stringify(cells().map((c) => (c.type === "markdown" ? { md: c.ta.value } : c.ta.value))));
   const frag = typeof CompressionStream === "function" ? "z=" + enc64(await pipe(json, new CompressionStream("deflate-raw"))) : "c=" + enc64(json);
-  return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : "") + frag;
+  return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : isMagma() ? "m=magma&" : "") + frag;
 }
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
@@ -1218,7 +1233,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "open": await showOpen(); break;
     case "duplicate": await saveNow(); { const d = snapshot(); show({ ...d, id: newId(), name: d.name + " (copy)" }); saveNow(); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb()); break;
-    case "py": download(fileBase() + (isSage() ? ".sage" : ".py"), cells().map((c) => (c.type === "markdown" ? "# %% [markdown]\n" + c.ta.value.split("\n").map((l) => (l ? "# " + l : "#")).join("\n") : "# %%\n" + c.ta.value)).join("\n\n") + "\n", "text/x-python"); break;
+    case "py": { const cm = isMagma() ? "//" : "#"; download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), cells().map((c) => (c.type === "markdown" ? cm + " %% [markdown]\n" + c.ta.value.split("\n").map((l) => (l ? cm + " " + l : cm)).join("\n") : cm + " %%\n" + c.ta.value)).join("\n\n") + "\n", isMagma() ? "text/plain" : "text/x-python"); } break;
     case "import": $("#importinput").click(); break;
     case "share": {
       const url = await shareLink();
@@ -1385,11 +1400,13 @@ const tools = [
       properties: {
         code: { type: "string", description: "The Python source to run." },
         sage: { type: "boolean", description: "Sage syntax: ^ is a power, 2/3 is an exact rational, factor() etc. are available." },
+        magma: { type: "boolean", description: "The code is Magma (translated to Python in the browser): := assignment, statements end with ;, Factorization, ModularSymbols, EllipticCurve, ..." },
       },
       required: ["code"],
     },
-    async execute({ code, sage }) {
-      if (sage !== undefined) setMode(sage ? "sage" : "python");
+    async execute({ code, sage, magma }) {
+      if (magma) setMode("magma");
+      else if (sage !== undefined) setMode(sage ? "sage" : "python");
       const last = cells().at(-1);
       const cell = last && last.type === "code" && last.ta.value.trim() === "" ? last : addCell("");
       cell.ta.value = code;
@@ -1456,7 +1473,7 @@ try {
   let shared = null, last = null;
   try { shared = await fromLink(location.hash); } catch {}
   try { last = localStorage.getItem("sagebrush-current"); } catch {}
-  if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : "python", shared);
+  if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
   else if (!(last && (await openId(last)))) openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   document.body.classList.remove("opening");
   // the interpreter starts once the notebook has been drawn (it is not needed for that)
