@@ -119,6 +119,11 @@ class float64(float, floating):
     __slots__ = ()
     __hash__ = float.__hash__
 
+    def __new__(cls, v=0.0):
+        if isinstance(v, (list, tuple, ndarray)):
+            return asarray(v, float64)  # as NumPy: a sequence gives an array
+        return float.__new__(cls, v)
+
     def __repr__(self):
         return "np.float64(%s)" % float.__repr__(self)
 
@@ -139,6 +144,8 @@ class float32(float, floating):
     __hash__ = float.__hash__
 
     def __new__(cls, v=0.0):
+        if isinstance(v, (list, tuple, ndarray)):
+            return asarray(v, float32)
         return float.__new__(cls, _f32(v))
 
     def __repr__(self):
@@ -726,9 +733,15 @@ def var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=Tru
     if dtype is None and a.dtype.kind in "biu":
         dtype = float64
     arrmean = asarray(_np.sum(a, axis, True, dtype)) / n
+    if axis is None and dtype is None and not keepdims:
+        r = _np.sqdev_sum(a, arrmean.ravel()[0])  # no temporaries, the same bits
+        if r is not None:
+            return _out(float64(r) / _builtins.max(n - ddof, 0), out)
     x = asarray(a - arrmean)
     if x.dtype.kind == "c":
         x = (x * x.conj()).real
+    elif x.dtype.kind == "f":
+        x *= x  # in place, as NumPy
     else:
         x = x * x
     r = _np.sum(x, axis, keepdims, dtype)

@@ -20,3 +20,16 @@ print(repr(np.nanmax(np.array([1, np.nan, 3]))), repr(np.max(np.array([1, np.nan
 b = np.array([1, 2, 3], dtype=np.int8)
 print(repr(b.sum()), repr(b.sum().dtype), repr(np.array([1.5], dtype=np.float32).sum()), repr(np.array([], dtype=float).sum()))
 print(repr(np.cov(np.array([[1, 2, 3], [2, 4, 7]]))), repr(np.corrcoef(np.array([1, 2, 3, 4]), np.array([2, 4, 5, 9]))))
+
+# float32 sums accumulate in float32 (pairwise), as NumPy; var/std with no
+# temporaries; length-1 axes dropped before reducing
+np.random.seed(4)
+f = np.random.rand(100003).astype(np.float32)
+print(repr(f.sum()), repr(f[:7].sum()), repr(f[:100].sum()), repr(f.reshape(-1, 1).sum(axis=0)))
+print(repr(f[:100000].reshape(1000, 100).sum(axis=0)[:3]), repr(f[:100000].reshape(1000, 100).sum(axis=1)[:3]))
+print(repr(f.mean()), repr(np.cumsum(f)[-1]), repr(np.float32(49986.254) / 100003), repr(np.var(np.array([1, 2, 3.5], np.float32))))
+g = np.random.rand(100003)
+print(repr(g.reshape(-1, 1).sum(axis=0)), repr(g.reshape(-1, 1, 1).sum(axis=(0, 1))), repr(np.sum(g.reshape(-1, 1), axis=0, keepdims=True)))
+for n in [1, 5, 8, 9, 100, 128, 129, 1000, 4097, 100003]:
+    x = np.random.randn(n) * 1e3 + 7
+    print(n, repr(x.var()), repr(x.std()), repr(np.var(x, ddof=1)), repr(x.reshape(-1, 1).std()))
