@@ -465,6 +465,7 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any
   const gf = lookupType(t, "__getattr__");
   if (gf !== undefined) return gf(o, name);
   if (dflt !== undefined) return dflt;
+  if (t.$name === "module" && hasInstanceDict(o) && typeof o.__name__ === "string") raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'`);
   raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'`);
 }
 

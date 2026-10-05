@@ -1,7 +1,7 @@
-// bun web/build.ts  ->  web/dist/{index.html, sagebrush-worker.js}
+// bun web/build.ts  ->  web/dist/{index.html, llms.txt, sagebrush-worker.js, sagebrush-console.js}
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
 // web/shims, the Python library is embedded, the Unicode name table is not.
-import { mkdirSync, copyFileSync, statSync } from "node:fs";
+import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const here = import.meta.dir;
@@ -25,13 +25,40 @@ const result = await Bun.build({
     },
   ],
 });
-if (!result.success) {
-  for (const m of result.logs) console.error(m);
-  process.exit(1);
+// The console (xterm.js), loaded only when it is opened.
+const consoleResult = await Bun.build({
+  entrypoints: [join(here, "console.ts")],
+  outdir: join(here, "dist"),
+  naming: "sagebrush-console.js",
+  target: "browser",
+  format: "esm",
+  minify: true,
+});
+for (const r of [result, consoleResult]) {
+  if (!r.success) {
+    for (const m of r.logs) console.error(m);
+    process.exit(1);
+  }
 }
-copyFileSync(join(here, "index.html"), join(here, "dist", "index.html"));
-// The Cloudflare site (web/site) serves the same two files.
+// index.html with its page script minified (wrapped in a function, so its
+// names stay out of the global scope).
+{
+  const html = readFileSync(join(here, "index.html"), "utf8");
+  const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
+  const tmp = join(here, "dist", "app.tmp.js");
+  writeFileSync(tmp, m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
+  const app = await Bun.build({ entrypoints: [tmp], target: "browser", format: "iife", minify: true });
+  if (!app.success) {
+    for (const l of app.logs) console.error(l);
+    process.exit(1);
+  }
+  rmSync(tmp);
+  const js = (await app.outputs[0].text()).trim();
+  writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + "<script>" + js + "</script>" + html.slice(m.index + m[0].length));
+}
+copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
+// The Cloudflare site (web/site) serves the same files.
 mkdirSync(join(here, "site", "public"), { recursive: true });
-for (const f of ["index.html", "sagebrush-worker.js"]) copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
+for (const f of ["index.html", "llms.txt", "sagebrush-worker.js", "sagebrush-console.js"]) copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
-console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB`);
+console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);
