@@ -7,7 +7,10 @@
 //      {id, interact, values}     an @interact control changed: rerun it
 //      {id, check, sage?}         -> {id, more}: is this input incomplete?
 //      {id, complete}             -> {id, matches, prefix}: Tab completion
-// Out: {id, start}, then any of
+//      {files: [[path, bytes]]}   the page's saved files, as the worker starts
+//      {fsPut: path, data}        a file uploaded (data) or deleted (null) in the page
+// Out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
+//      {id, start}, then any of
 //      {id, target, stream: "stdout" | "stderr", text}
 //      {id, target, display: {mime: data}}   rich output (Jupyter MIME bundle)
 //      {id, target, interact: spec}           controls to draw
@@ -19,7 +22,7 @@ import "./shims/process";
 // the engines are a separate file, loaded (synchronously) the first time Python calls them
 (globalThis as any).__SAGEBRUSH_ENGINE_URL__ = new URL("sagebrush-engine.wasm", self.location.href).href;
 import "../build/cli/lib.gen.js";
-import { __hooks } from "./shims/fs";
+import { __hooks, load as loadFiles, put as putFile } from "./shims/fs";
 import { initParser, R, libDir } from "../src/compile";
 import { needsMore, complete } from "../src/interactive";
 
@@ -28,6 +31,7 @@ let target: number | null = null;
 __hooks.write = (fd, text) => {
   if (current !== null && text) postMessage({ id: current, target, stream: fd === 2 ? "stderr" : "stdout", text });
 };
+__hooks.changed = (path, data) => postMessage({ fsChanged: path, data });
 const flush = () => {
   R.stdout.flush();
   R.stderr.flush();
@@ -87,10 +91,13 @@ function run(src: string, ns: any, mode: string, filename: string, opts: { sage?
 }
 
 // Figures a cell made with matplotlib.pyplot and did not show: show them now, as Jupyter does.
-const FLUSH_FIGURES = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n";
+// And files the cell wrote without closing them: write them now.
+const FLUSH_FIGURES = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n";
 
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;
+  if (m.files) return loadFiles(m.files);
+  if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
   const { id } = m;
   const { main, host } = await ready;
   if (m.check !== undefined) {

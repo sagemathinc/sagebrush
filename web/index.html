@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sagebrush — Python in your browser</title>
-<meta name="description" content="Python 3.14 compiled to JavaScript, running entirely in your browser. No server, no WebAssembly.">
+<meta name="description" content="Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines, running entirely in your browser. No server.">
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="llms.txt">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
 <script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
@@ -93,7 +93,36 @@
   .cell .time { font-size: 12px; color: var(--muted); padding: 0 12px 6px; }
   .cell .time:empty { display: none; }
   /* the cell menu */
-  #cellmenu { position: absolute; z-index: 10; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  /* until the notebook is read from IndexedDB, nothing below it shows (no layout shift) */
+  body.opening .about, body.opening footer { display: none; }
+  #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+  #nbname { font: 600 16px system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; min-width: 8em; max-width: 100%; }
+  #nbname:hover, #nbname:focus { border-color: var(--line); background: var(--cell); }
+  #saved { color: var(--muted); font-size: 12px; }
+  #files { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+  #files[hidden] { display: none; }
+  #files.drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent2); }
+  #files .fhead { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+  #files .fhead b { color: var(--fg); font-size: 14px; }
+  #files .fhead .sp { flex: 1; }
+  #files ul { list-style: none; margin: 8px 0 0; padding: 0; font: 13px ui-monospace, Menlo, monospace; }
+  #files li { display: flex; gap: 10px; align-items: center; padding: 2px 0; }
+  #files li .nm { flex: 1; overflow-wrap: anywhere; }
+  #files li .sz { color: var(--muted); }
+  #files li button, #files .fhead button { padding: 1px 8px; font-size: 12px; }
+  #opendlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
+  #opendlg::backdrop { background: rgba(0,0,0,.35); }
+  #opendlg ul { list-style: none; margin: 10px 0; padding: 0; max-height: 60vh; overflow: auto; }
+  #opendlg li { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  #opendlg li .open { flex: 1; text-align: left; display: flex; justify-content: space-between; gap: 12px; }
+  #opendlg li .when { color: var(--muted); font-size: 12px; }
+  #opendlg li.current .open { border-color: var(--accent); }
+  #cellmenu, #filemenu { position: absolute; z-index: 10; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  #filemenu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; }
+  #filemenu button:hover, #filemenu button:focus { background: var(--code); outline: none; }
+  #filemenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+  #filemenu .danger { color: var(--err); }
+  #filemenu[hidden], #cellmenu[hidden] { display: none; }
   #cellmenu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; }
   #cellmenu button:hover, #cellmenu button:focus { background: var(--code); outline: none; }
   #cellmenu button kbd { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
@@ -120,15 +149,16 @@
   #theme { font-size: 13px; padding: 3px 8px; margin-top: 6px; }
 </style>
 </head>
-<body>
+<body class="opening">
 <header>
   <div class="title">
     <h1><span>Sagebrush</span> · Python in your browser</h1>
-    <p class="tag">Python 3.14 compiled to JavaScript — runs entirely on your machine. No server, no WebAssembly, ~0.8&nbsp;MB.</p>
+    <p class="tag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server.</p>
   </div>
   <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
 </header>
 <main>
+  <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span></div>
   <div class="bar" role="toolbar" aria-label="Notebook">
     <button class="primary" id="runall" title="Run every cell in order">Run all</button>
     <button id="add" title="Add a cell at the end">+ Cell</button>
@@ -136,10 +166,16 @@
     <button id="restart" title="Fresh interpreter">Restart</button>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option></select>
     <select id="examples" aria-label="Load examples"><option value="">Examples…</option></select>
-    <button id="share" title="Copy a link to these cells">Share</button>
+    <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, download, upload and share notebooks">File ▾</button>
+    <button id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
     <button id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt that shares the notebook's variables">Console</button>
     <span id="status" role="status">loading…</span>
   </div>
+  <section id="files" aria-label="Files" hidden>
+    <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
+    <ul id="filelist"></ul>
+    <input id="uploadinput" type="file" multiple hidden>
+  </section>
   <div id="cells"></div>
   <div class="about">
     <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place; <b>Alt+↑/↓</b> moves it; the <b>⋯</b> menu inserts, moves and deletes cells.
@@ -150,6 +186,9 @@
     The language is CPython 3.14's own grammar (syntax errors match CPython), with big integers, <code>fractions</code>,
     <code>complex</code>/<code>cmath</code>, <code>re</code>, <code>json</code>, <code>collections</code>, <code>functools</code>, generators,
     <code>async</code>, classes and metaclasses. Pure-Python packages such as mpmath pass their own test suites.
+    In Sage mode <code>ModularSymbols</code>, <code>CuspForms</code>, <code>DirichletGroup</code> and <code>EllipticCurve</code> run on Sagebrush's Rust engines.
+    Notebooks (with their output) and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>,
+    and <b>Files</b> lists the files Python's <code>open()</code> sees (drop files on the page to add them).
     Your code runs in a Web Worker on this page; nothing is sent anywhere.
   </div>
 </main>
@@ -157,6 +196,24 @@
   <p>Command line: <code>curl -fsSL https://get.sagebrush.space/install.sh | sh</code> or <code>npx sagebrush</code>.
   Source: <a href="https://github.com/sagemathinc/sagebrush">github.com/sagemathinc/sagebrush</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a></p>
 </footer>
+<div id="filemenu" role="menu" aria-label="Notebook" hidden>
+  <button role="menuitem" data-f="new">New notebook</button>
+  <button role="menuitem" data-f="open">Open…</button>
+  <button role="menuitem" data-f="duplicate">Duplicate</button>
+  <hr>
+  <button role="menuitem" data-f="ipynb">Download .ipynb</button>
+  <button role="menuitem" data-f="py">Download .py</button>
+  <button role="menuitem" data-f="import">Upload .ipynb or .py…</button>
+  <hr>
+  <button role="menuitem" data-f="share">Copy share link</button>
+  <hr>
+  <button role="menuitem" data-f="delete" class="danger">Delete notebook</button>
+</div>
+<input id="importinput" type="file" accept=".ipynb,.py,.sage" hidden>
+<dialog id="opendlg" aria-labelledby="opentitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
+  <ul id="nblist"></ul>
+</dialog>
 <div id="cellmenu" role="menu" aria-label="Cell actions" hidden>
   <button role="menuitem" data-m="above">Insert cell above</button>
   <button role="menuitem" data-m="below">Insert cell below</button>
@@ -281,8 +338,10 @@ function startWorker() {
   generation++;
   const t0 = performance.now();
   worker = new Worker("sagebrush-worker.js", { type: "module" });
+  sendFiles(worker);
   worker.onmessage = (ev) => {
     const m = ev.data;
+    if (m.fsChanged !== undefined) return fileChanged(m.fsChanged, m.data);
     if (m.ready) {
       version = m.version || "";
       statusEl.textContent = `ready (sagebrush ${version}, ${Math.round(performance.now() - t0)} ms)`;
@@ -860,29 +919,324 @@ function setMode(mode) {
   for (const c of cells()) paint(c);
 }
 
-// Share: cells in the URL fragment (never sent to a server).
-const enc = (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const dec = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)));
 
 $("#runall").onclick = runAll;
 $("#add").onclick = () => addCell("", null, true);
 $("#stop").onclick = () => stop("\nStopped (interpreter restarted; variables are gone).\n");
 $("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
-$("#share").onclick = async () => {
-  location.hash = (isSage() ? "m=sage&" : "") + "c=" + enc(JSON.stringify(cells().map((c) => c.ta.value)));
-  try { await navigator.clipboard.writeText(location.href); statusEl.textContent = "link copied"; } catch { statusEl.textContent = "link in the address bar"; }
-};
-modeEl.onchange = () => setMode(modeEl.value);
+modeEl.onchange = () => { setMode(modeEl.value); scheduleSave(); };
 const sel = $("#examples");
 for (const k of Object.keys(EXAMPLES)) sel.add(new Option(k, k));
 sel.onchange = () => {
   if (sel.value) {
-    setMode(SAGE_EXAMPLES.has(sel.value) ? "sage" : "python");
-    load(EXAMPLES[sel.value]);
+    // examples open as a new notebook: yours stays saved
+    openNew(sel.value, SAGE_EXAMPLES.has(sel.value) ? "sage" : "python", EXAMPLES[sel.value]);
     history.replaceState(null, "", location.pathname);
   }
   sel.value = "";
 };
+
+// ------------------------------------------------------------ notebooks and files
+// Notebooks (cells, outputs, mode) and files live in this browser's IndexedDB.
+// The notebook is saved as you work; File > Open lists the others.
+let db = null;
+function openDb() {
+  return new Promise((resolve) => {
+    try {
+      const r = indexedDB.open("sagebrush", 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore("notebooks", { keyPath: "id" }); r.result.createObjectStore("files"); };
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
+function idb(store, mode, f) {
+  return new Promise((resolve, reject) => {
+    if (!db) return resolve(undefined);
+    const tx = db.transaction(store, mode);
+    const r = f(tx.objectStore(store));
+    tx.oncomplete = () => resolve(r?.result);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// A cell's output as Jupyter outputs (stream and display_data).
+function saveOutputs(box) {
+  const outs = [];
+  const stream = (name, text) => {
+    const last = outs.at(-1);
+    if (last?.output_type === "stream" && last.name === name) last.text += text;
+    else outs.push({ output_type: "stream", name, text });
+  };
+  for (const el of box?.children ?? []) {
+    if (el.tagName === "PRE") {
+      for (const n of el.childNodes) stream(n.nodeType === 1 && n.classList.contains("e") ? "stderr" : "stdout", n.textContent);
+    } else if (el.tagName === "FIGURE") {
+      const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
+      if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }
+      else if (img) { const [head, b64] = img.src.split(","); data[head.slice(5, head.indexOf(";"))] = b64; data["text/plain"] = img.alt; }
+      outs.push({ output_type: "display_data", data, metadata: {} });
+    } else if (el.classList.contains("interact")) {
+      stream("stdout", "[interactive controls: run the cell to use them]\n");
+      outs.push(...saveOutputs(el.querySelector(".iout")));
+    }
+  }
+  return outs;
+}
+const joinText = (t) => (Array.isArray(t) ? t.join("") : t ?? "");
+function loadOutputs(box, outs) {
+  for (const o of outs ?? []) {
+    if (o.output_type === "stream") appendText(box, joinText(o.text), o.name === "stderr");
+    else if (o.output_type === "error") appendText(box, (o.traceback ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "") + "\n", true);
+    else if (o.data) {
+      const b = {};
+      for (const [k, v] of Object.entries(o.data)) b[k] = joinText(v);
+      if (b["text/plain"] && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"]) appendText(box, b["text/plain"] + "\n", false);
+      else appendDisplay(box, b);
+    }
+  }
+}
+
+let nb = { id: null, name: "Untitled" }, loading = false, saveTimer = null;
+const nbName = $("#nbname"), savedEl = $("#saved");
+const newId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2));
+function snapshot() {
+  return {
+    id: nb.id, name: nbName.value.trim() || "Untitled", mode: modeEl.value, updated: Date.now(),
+    cells: cells().map((c) => ({ code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null })),
+  };
+}
+function scheduleSave() {
+  if (loading || !nb.id) return;
+  clearTimeout(saveTimer);
+  savedEl.textContent = "";
+  saveTimer = setTimeout(saveNow, 500);
+}
+async function saveNow() {
+  clearTimeout(saveTimer);
+  if (loading || !nb.id || !db) return;
+  try {
+    await idb("notebooks", "readwrite", (st) => st.put(snapshot()));
+    savedEl.textContent = "saved in this browser";
+  } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
+}
+function show(doc) {
+  loading = true;
+  nb = { id: doc.id };
+  nbName.value = doc.name || "Untitled";
+  setMode(doc.mode === "sage" ? "sage" : "python");
+  cellsEl.textContent = "";
+  execCount = 0;
+  for (const c of doc.cells?.length ? doc.cells : [{ code: "" }]) {
+    const cell = addCell(c.code ?? "");
+    loadOutputs(cell.out, c.outputs);
+  }
+  document.title = `${nbName.value} — Sagebrush`;
+  try { localStorage.setItem("sagebrush-current", doc.id); } catch {}
+  loading = false;
+}
+function openNew(name, mode, codes) {
+  show({ id: newId(), name, mode, cells: codes.map((code) => ({ code })) });
+  saveNow();
+}
+async function openId(id) {
+  const doc = await idb("notebooks", "readonly", (st) => st.get(id));
+  if (doc) { await saveNow(); show(doc); savedEl.textContent = "opened"; }
+  return !!doc;
+}
+// Autosave: edits, cells added, moved or removed, and new output.
+cellsEl.addEventListener("input", scheduleSave);
+new MutationObserver(scheduleSave).observe(cellsEl, { childList: true, subtree: true, characterData: true });
+nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; scheduleSave(); });
+addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveNow(); });
+
+// .ipynb and .py, in and out
+function download(name, text, type = "application/json") {
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+const fileBase = () => (nbName.value.trim() || "notebook").replace(/[\\/:*?"<>|]+/g, "_");
+const lines = (t) => t.split(/(?<=\n)/);
+function toIpynb() {
+  const sage = isSage();
+  return JSON.stringify({
+    cells: snapshot().cells.map((c) => ({ cell_type: "code", execution_count: c.n === null ? null : +c.n, metadata: {}, source: lines(c.code), outputs: c.outputs.map((o) => (o.output_type === "stream" ? { ...o, text: lines(o.text) } : o)) })),
+    metadata: { kernelspec: sage ? { name: "sagemath", display_name: "SageMath", language: "sage" } : { name: "python3", display_name: "Python 3", language: "python" }, language_info: { name: sage ? "sage" : "python" } },
+    nbformat: 4, nbformat_minor: 5,
+  }, null, 1);
+}
+function fromFile(name, text) {
+  const base = name.replace(/\.[^.]*$/, "");
+  if (/\.ipynb$/i.test(name)) {
+    const j = JSON.parse(text);
+    const k = j.metadata?.kernelspec ?? {};
+    const sage = /sage/i.test(`${k.name ?? ""} ${k.language ?? ""} ${j.metadata?.language_info?.name ?? ""}`);
+    const cells = (j.cells ?? j.worksheets?.[0]?.cells ?? []).map((c) => {
+      const src = joinText(c.source ?? c.input);
+      if (c.cell_type === "code") return { code: src, outputs: c.outputs ?? [], n: c.execution_count ?? null };
+      // markdown and raw cells become comments
+      return { code: src.split("\n").map((l) => (l ? "# " + l : "#")).join("\n") };
+    });
+    return { name: base, mode: sage ? "sage" : "python", cells };
+  }
+  const parts = text.split(/^# ?%%.*\n/m).filter((p, i) => i > 0 || p.trim());
+  return { name: base, mode: /\.sage$/i.test(name) ? "sage" : modeEl.value, cells: parts.map((code) => ({ code: code.replace(/\n+$/, "") })) };
+}
+
+// Share links: the cells, deflated, in the URL fragment (never sent to a server).
+const enc64 = (u8) => { let b = ""; for (let i = 0; i < u8.length; i += 0x8000) b += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const dec64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function pipe(u8, stream) { return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(stream)).arrayBuffer()); }
+async function shareLink() {
+  const json = new TextEncoder().encode(JSON.stringify(cells().map((c) => c.ta.value)));
+  const frag = typeof CompressionStream === "function" ? "z=" + enc64(await pipe(json, new CompressionStream("deflate-raw"))) : "c=" + enc64(json);
+  return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : "") + frag;
+}
+async function fromLink(hash) {
+  const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
+  if (!z && !c) return null;
+  const bytes = z ? await pipe(dec64(z[1]), new DecompressionStream("deflate-raw")) : dec64(c[1]);
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+// The File menu
+const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
+function toggleFileMenu(open = fileMenu.hidden) {
+  fileMenu.hidden = !open;
+  fileBtn.setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  const r = fileBtn.getBoundingClientRect();
+  fileMenu.style.top = `${r.bottom + scrollY + 4}px`;
+  fileMenu.style.left = `${r.left + scrollX}px`;
+  fileMenu.querySelector("button").focus();
+}
+fileBtn.onclick = () => toggleFileMenu();
+document.addEventListener("pointerdown", (e) => { if (!fileMenu.hidden && !fileMenu.contains(e.target) && e.target !== fileBtn) toggleFileMenu(false); });
+fileMenu.addEventListener("keydown", (e) => {
+  const items = [...fileMenu.querySelectorAll("button")], i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+  else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); toggleFileMenu(false); fileBtn.focus(); }
+});
+fileMenu.addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  toggleFileMenu(false);
+  switch (b.dataset.f) {
+    case "new": await saveNow(); openNew("Untitled", modeEl.value, [""]); cells()[0].ta.focus(); break;
+    case "open": await showOpen(); break;
+    case "duplicate": await saveNow(); { const d = snapshot(); show({ ...d, id: newId(), name: d.name + " (copy)" }); saveNow(); } break;
+    case "ipynb": download(fileBase() + ".ipynb", toIpynb()); break;
+    case "py": download(fileBase() + (isSage() ? ".sage" : ".py"), cells().map((c) => "# %%\n" + c.ta.value).join("\n\n") + "\n", "text/x-python"); break;
+    case "import": $("#importinput").click(); break;
+    case "share": {
+      const url = await shareLink();
+      history.replaceState(null, "", url);
+      try { await navigator.clipboard.writeText(url); statusEl.textContent = "link copied"; } catch { statusEl.textContent = "link in the address bar"; }
+      break;
+    }
+    case "delete": {
+      if (!confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
+      await idb("notebooks", "readwrite", (st) => st.delete(nb.id));
+      const rest = ((await idb("notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
+      nb.id = null;
+      if (rest.length) show(rest[0]); else openNew("Untitled", modeEl.value, [""]);
+      announce("Notebook deleted");
+      break;
+    }
+  }
+});
+$("#importinput").onchange = async (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    const doc = fromFile(f.name, await f.text());
+    await saveNow();
+    show({ ...doc, id: newId() });
+    saveNow();
+    statusEl.textContent = `opened ${f.name}`;
+  } catch (err) { statusEl.textContent = `could not read ${f.name}: ${err.message ?? err}`; }
+};
+
+// File > Open
+const openDlg = $("#opendlg");
+async function showOpen() {
+  await saveNow();
+  const all = ((await idb("notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
+  const list = $("#nblist");
+  list.textContent = "";
+  for (const d of all) {
+    const li = list.appendChild(document.createElement("li"));
+    if (d.id === nb.id) li.className = "current";
+    const open = li.appendChild(Object.assign(document.createElement("button"), { className: "open" }));
+    open.append(Object.assign(document.createElement("span"), { textContent: d.name || "Untitled" }),
+      Object.assign(document.createElement("span"), { className: "when", textContent: `${d.mode === "sage" ? "Sage · " : ""}${d.cells?.length ?? 0} cells · ${new Date(d.updated).toLocaleString()}` }));
+    open.onclick = async () => { openDlg.close(); await openId(d.id); };
+    const del = li.appendChild(Object.assign(document.createElement("button"), { textContent: "✕", title: "Delete" }));
+    del.setAttribute("aria-label", `Delete ${d.name || "Untitled"}`);
+    del.onclick = async () => {
+      if (d.id === nb.id || !confirm(`Delete "${d.name}"?`)) return;
+      await idb("notebooks", "readwrite", (st) => st.delete(d.id));
+      li.remove();
+    };
+  }
+  if (!all.length) list.textContent = "No saved notebooks.";
+  openDlg.showModal();
+}
+
+// Files: Python's open() works on them; the panel uploads, downloads, deletes.
+const filesEl = $("#files"), filesBtn = $("#filesbtn");
+async function allFiles() { return (await idb("files", "readonly", (st) => st.getAll())) ?? []; }
+async function allPaths() { return (await idb("files", "readonly", (st) => st.getAllKeys())) ?? []; }
+async function sendFiles(w) {
+  if (!db) return;
+  const keys = await allPaths(), vals = await allFiles();
+  w.postMessage({ files: keys.map((k, i) => [k, vals[i]]) });
+}
+async function fileChanged(path, data) {
+  await idb("files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+  if (!filesEl.hidden) renderFiles();
+}
+const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+async function renderFiles() {
+  const keys = await allPaths(), vals = await allFiles();
+  const ul = $("#filelist");
+  ul.textContent = "";
+  keys.forEach((k, i) => {
+    const li = ul.appendChild(document.createElement("li"));
+    li.append(Object.assign(document.createElement("span"), { className: "nm", textContent: k.replace(/^\//, "") }),
+      Object.assign(document.createElement("span"), { className: "sz", textContent: fmtSize(vals[i].length) }));
+    const dl = li.appendChild(Object.assign(document.createElement("button"), { textContent: "Download" }));
+    dl.setAttribute("aria-label", `Download ${k}`);
+    dl.onclick = () => download(k.split("/").pop(), vals[i], "application/octet-stream");
+    const rm = li.appendChild(Object.assign(document.createElement("button"), { textContent: "✕" }));
+    rm.setAttribute("aria-label", `Delete ${k}`);
+    rm.onclick = async () => { await idb("files", "readwrite", (st) => st.delete(k)); worker.postMessage({ fsPut: k, data: null }); renderFiles(); };
+  });
+  if (!keys.length) ul.textContent = "No files yet.";
+}
+async function addFiles(list) {
+  for (const f of list) {
+    const data = new Uint8Array(await f.arrayBuffer()), path = "/" + f.name;
+    await idb("files", "readwrite", (st) => st.put(data, path));
+    worker.postMessage({ fsPut: path, data });
+  }
+  renderFiles();
+  announce(`${list.length} file${list.length === 1 ? "" : "s"} added`);
+}
+filesBtn.onclick = () => {
+  filesEl.hidden = !filesEl.hidden;
+  filesBtn.setAttribute("aria-pressed", String(!filesEl.hidden));
+  if (!filesEl.hidden) renderFiles();
+};
+$("#upload").onclick = () => $("#uploadinput").click();
+$("#uploadinput").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
+// drop files anywhere on the page
+addEventListener("dragover", (e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); filesEl.classList.add("drop"); if (filesEl.hidden) filesBtn.click(); } });
+addEventListener("dragleave", (e) => { if (!e.relatedTarget) filesEl.classList.remove("drop"); });
+addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventDefault(); filesEl.classList.remove("drop"); addFiles([...e.dataTransfer.files]); } });
 
 // ------------------------------------------------------------ WebMCP
 // Tools for AI agents in the browser (https://developer.chrome.com/docs/ai/webmcp).
@@ -991,15 +1345,20 @@ try {
   console.warn("WebMCP:", e);
 }
 
-startWorker();
-let initial = EXAMPLES.Welcome, mode = "python";
-try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
-const m = /c=([\w-]+)/.exec(location.hash);
-if (m) { try { initial = JSON.parse(dec(m[1])); } catch {} mode = /m=sage/.test(location.hash) ? "sage" : "python"; }
-else if (mode === "sage") initial = EXAMPLES.Sage;
-setMode(mode);
-load(initial);
-if (new URLSearchParams(location.search).has("run")) runAll();
+(async () => {
+  db = await openDb();
+  startWorker();
+  let mode = "python";
+  try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
+  // a shared link opens as a new notebook; else the last one; else the welcome
+  let shared = null, last = null;
+  try { shared = await fromLink(location.hash); } catch {}
+  try { last = localStorage.getItem("sagebrush-current"); } catch {}
+  if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : "python", shared);
+  else if (!(last && (await openId(last)))) openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  document.body.classList.remove("opening");
+  if (new URLSearchParams(location.search).has("run")) runAll();
+})();
 
 </script>
 </body>
