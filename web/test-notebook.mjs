@@ -32,6 +32,19 @@ try {
   await ready();
   await until("document.querySelectorAll('.cell').length > 0");
   ok((await ev("document.querySelector('#nbname').value")) === "Welcome", "fresh profile opens the Welcome notebook");
+  // Markdown: the welcome's first cell is text, with math typeset by KaTeX
+  await until("document.querySelector('.cell.markdown.rendered .katex')");
+  ok(true, "the welcome's Markdown cell is rendered, math by KaTeX");
+  await ev(`(() => { document.querySelector('#addmd').click(); const c = [...document.querySelectorAll('.cell')].at(-1); const ta = c.querySelector('textarea');
+    ta.value = '**bold** and <img src=x onerror=alert(1)> [bad](javascript:alert(1)) [good](https://sagemath.org)\\n\\n| a | b |\\n|---|---|\\n| 1 | 2 |';
+    ta.dispatchEvent(new Event('input', {bubbles: true})); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', shiftKey: true, bubbles: true})); })()`);
+  await until("[...document.querySelectorAll('.cell.markdown.rendered')].length >= 2");
+  const md = await ev("(() => { const m = [...document.querySelectorAll('.cell.markdown.rendered .mdout')].at(-1); return { strong: !!m.querySelector('strong'), img: !!m.querySelector('img'), js: [...m.querySelectorAll('a')].some(a => /javascript/i.test(a.href)), good: !!m.querySelector('a[href^=\"https://sagemath.org\"]'), table: !!m.querySelector('table td') }; })()");
+  ok(md.strong && md.table && md.good && !md.img && !md.js, "Shift+Enter renders Markdown, safely: " + JSON.stringify(md));
+  await ev("(() => { const m = [...document.querySelectorAll('.cell.markdown.rendered .mdout')].at(-1); m.dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); })()");
+  ok(await ev("![...document.querySelectorAll('.cell.markdown')].at(-1).classList.contains('rendered')"), "double-click edits a Markdown cell");
+  await ev("(() => { const ta = [...document.querySelectorAll('.cell.markdown textarea')].at(-1); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', ctrlKey: true, bubbles: true})); })()");
+  await until("[...document.querySelectorAll('.cell.markdown')].at(-1).classList.contains('rendered')");
   let out = await runCode("import os\nwith open('data.txt', 'w') as f:\n    f.write('hello from python')\nos.makedirs('sub/dir', exist_ok=True)\nopen('sub/dir/x.csv', 'w').write('a,b\\n1,2\\n')\nprint(sorted(os.listdir('.')), os.path.exists('sub/dir/x.csv'), os.path.getsize('data.txt'))");
   ok(out.includes("['data.txt', 'sub'] True 17"), "open() and os work: " + out.trim());
   await ev("document.querySelector('#nbname').value = 'My research'; document.querySelector('#nbname').dispatchEvent(new Event('input'))");
@@ -41,13 +54,15 @@ try {
   await until("document.querySelectorAll('.cell').length > 0");
   ok((await ev("document.querySelector('#nbname').value")) === "My research", "the notebook and its name survive a reload");
   ok((await ev("document.body.textContent.includes(\"['data.txt', 'sub'] True 17\")")), "outputs survive a reload");
+  ok((await ev("document.querySelectorAll('.cell.markdown.rendered').length")) === 2, "Markdown cells survive a reload, rendered");
   out = await runCode("print(open('data.txt').read(), open('sub/dir/x.csv').read().split())");
   ok(out.includes("hello from python ['a,b', '1,2']"), "files survive a reload: " + out.trim());
   // export .ipynb
   await ev("window.__blobs = []; URL.createObjectURL = (b) => { window.__blobs.push(b); return 'blob:x'; }; document.querySelector('[data-f=ipynb]').click()");
   const ipynb = await ev("window.__blobs[0].text()");
   const j = JSON.parse(ipynb);
-  ok(j.nbformat === 4 && j.cells.length >= 2 && j.cells.some(c => c.outputs.length), `ipynb export: ${j.cells.length} cells, kernel ${j.metadata.kernelspec.name}, outputs ${j.cells.map(c => c.outputs.length)}`);
+  ok(j.cells.filter((c) => c.cell_type === "markdown").length === 2, "ipynb export has the Markdown cells");
+  ok(j.nbformat === 4 && j.cells.length >= 2 && j.cells.some(c => c.outputs?.length), `ipynb export: ${j.cells.length} cells, kernel ${j.metadata.kernelspec.name}, outputs ${j.cells.map(c => c.outputs?.length ?? "md")}`);
   // new notebook, then import the ipynb
   await ev("document.querySelector('[data-f=new]').click()");
   await until("document.querySelector('#nbname').value === 'Untitled'");
@@ -55,6 +70,8 @@ try {
   await ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(ipynb)}], 'imported.ipynb')); const i = document.querySelector('#importinput'); i.files = dt.files; i.dispatchEvent(new Event('change')); })()`);
   await until("document.querySelector('#nbname').value === 'imported'");
   ok((await ev("document.body.textContent.includes('hello from python')")), "ipynb import restores cells and outputs");
+  await until("document.querySelectorAll('.cell.markdown.rendered').length === 2");
+  ok(true, "ipynb import restores Markdown cells");
   // open dialog lists the notebooks
   await ev("document.querySelector('[data-f=open]').click()");
   await until("document.querySelector('#opendlg').open");
