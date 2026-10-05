@@ -9,7 +9,8 @@ import * as Obj from "./object";
 import * as O from "./ops";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype } from "./numpy";
-import { glibcLog as crlog } from "./libm";
+import { glibcLog as crlog, LOG_TABLES } from "./libm";
+import { wasmRandom } from "./kernels";
 
 const { T, raise } = Obj;
 const M64 = (1n << 64n) - 1n;
@@ -328,10 +329,26 @@ function poisson(g: Gen, lam: number): number {
 newBuiltinModule("_nprandom", (m) => {
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
   const shape = (size: any): number[] | null => (size === null || size === undefined ? null : Array.isArray(size) ? size.map(Number) : [Number(size)]);
-  const fill = (size: any, dt: string, f: () => number): any => {
+  // the WebAssembly kernels for big fills (the same streams), else f()
+  const wasm = (g: Gen, dist: number, a: NDArray, lo = 0, rng = 0): boolean => {
+    if (!(a.data instanceof Float64Array)) return false;
+    if (g instanceof MT19937) {
+      const meta = Float64Array.of(g.pos, g.hasGauss ? 1 : 0, g.gauss);
+      if (!wasmRandom("mt", g.key, meta, dist, a.data, lo, rng, LOG_TABLES)) return false;
+      [g.pos, g.hasGauss, g.gauss] = [meta[0], meta[1] !== 0, meta[2]];
+      return true;
+    }
+    const words = BigUint64Array.of(g.state & M64, g.state >> 64n, g.inc & M64, g.inc >> 64n);
+    const meta = Float64Array.of(g.hasU32 ? 1 : 0, g.u32);
+    if (!wasmRandom("pcg", words, meta, dist, a.data, lo, rng, LOG_TABLES)) return false;
+    g.state = words[0] | (words[1] << 64n);
+    [g.hasU32, g.u32] = [meta[0] !== 0, meta[1]];
+    return true;
+  };
+  const fill = (size: any, dt: string, f: () => number, g?: Gen, dist = -1, lo = 0, rng = 0): any => {
     const sh = shape(size);
     const a = empty(sh ?? [1], toDtype(dt));
-    for (let i = 0; i < a.data.length; i++) a.data[i] = f();
+    if (!(g && dist >= 0 && sh !== null && wasm(g, dist, a, lo, rng))) for (let i = 0; i < a.data.length; i++) a.data[i] = f();
     return sh === null ? (dt === "float64" ? O.mkfloat(a.data[0]) : a.data[0]) : a;
   };
   fn("mt19937", (seed: any) => {
@@ -349,16 +366,16 @@ newBuiltinModule("_nprandom", (m) => {
     g.setSeed((s0 << 64n) | s1, (i0 << 64n) | i1);
     return g;
   });
-  fn("doubles", (g: Gen, size: any) => fill(size, "float64", () => g.nextDouble()));
-  fn("legacy_gauss", (g: MT19937, size: any) => fill(size, "float64", () => legacyGauss(g)));
-  fn("legacy_exponential", (g: MT19937, size: any) => fill(size, "float64", () => -crlog(1.0 - g.nextDouble())));
+  fn("doubles", (g: Gen, size: any) => fill(size, "float64", () => g.nextDouble(), g, 0));
+  fn("legacy_gauss", (g: MT19937, size: any) => fill(size, "float64", () => legacyGauss(g), g, 1));
+  fn("legacy_exponential", (g: MT19937, size: any) => fill(size, "float64", () => -crlog(1.0 - g.nextDouble()), g, 2));
   fn("poisson", (g: Gen, lam: any, size: any) => fill(size, "int64", () => poisson(g, O.fv(lam) ?? Number(lam))));
   // integers in [low, high] (inclusive) by the legacy masked method or Lemire's
   fn("bounded", (g: Gen, low: any, high: any, size: any, lemire: any) => {
     const lo = Number(low), rng = Number(high) - lo;
     if (rng < 0) raise(T.ValueError, "low >= high");
     const f = lemire ? () => lo + lemireBounded(g, rng) : () => lo + maskedBounded(g, rng);
-    return fill(size, "int64", f);
+    return rng <= 0xffffffff ? fill(size, "int64", f, g, lemire ? 4 : 3, lo, rng) : fill(size, "int64", f);
   });
   // in-place Fisher-Yates shuffle of an array's first axis, as NumPy (legacy: masked; Generator: Lemire)
   fn("shuffle_order", (g: Gen, n: any, lemire: any) => {
@@ -427,7 +444,7 @@ newBuiltinModule("_nprandom", (m) => {
       const f = Math.sqrt((-2.0 * crlog(r2)) / r2);
       spare = f * x1;
       return f * x2;
-    });
+    }, g, 5);
   });
   fn("get_state", (g: MT19937) => [Array.from(g.key), g.pos, g.hasGauss ? 1 : 0, g.gauss]);
   fn("set_state", (g: MT19937, key: any, pos: any, hasGauss: any, gauss: any) => {

@@ -223,7 +223,7 @@ pub unsafe extern "C" fn vexp(x: *const f64, y: *mut f64, n: usize, tab: *const 
 // ------------------------------------------------------------------ log
 
 /// Tables for log: tab[2*128] (invc, logc), a[5], b[11], ln2hi, ln2lo.
-struct LogTab(*const f64);
+pub(crate) struct LogTab(pub(crate) *const f64);
 impl LogTab {
     #[inline(always)]
     unsafe fn invc(&self, i: usize) -> f64 {
@@ -251,7 +251,7 @@ impl LogTab {
     }
 }
 
-unsafe fn log1(x: f64, t: &LogTab) -> f64 {
+pub(crate) unsafe fn log1(x: f64, t: &LogTab) -> f64 {
     if x >= 0.9375 && x < 1.064697265625 {
         if x == 1.0 {
             return 0.0;

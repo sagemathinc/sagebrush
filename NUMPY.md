@@ -122,10 +122,11 @@ Python arithmetic is unaffected.
 
 ### WebAssembly SIMD kernels
 
-Dense linear algebra, the FFT, `exp`, `log` and sorting run in Rust
+Dense linear algebra, the FFT, `exp`, `log`, sorting and random number
+generation run in Rust
 ([kernels/src](kernels/src)). They are compiled for
 `wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
-to a 47 KB module:
+to a 59 KB module:
 
 - `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
 - `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
@@ -150,7 +151,15 @@ to a 47 KB module:
   ms, `argsort` 422 → 37 ms, `unique` of 10^5 small ints 10.7 → 3.5 ms.
   NumPy's default `argsort` is not stable, and on x86-64 its order of equal
   elements depends on the CPU (the AVX2 and scalar builds differ), so
-  sagebrush keeps the stable order.
+  sagebrush keeps the stable order.;
+- `mt_fill`/`pcg_fill`: numpy.random's MT19937 (RandomState) and PCG64
+  (`default_rng`, native `u128` instead of JavaScript `BigInt`) filling
+  arrays with uniform doubles, normals, exponentials and bounded integers:
+  the same streams bit for bit, with the generator state copied in and back
+  out. In Node: `rand` 15.9 → 8.0 ms, `randn` 52.6 → 24 ms, `randint` 16.5 →
+  4.5 ms per 10^6; `default_rng()` `random` 268 → 5.3 ms, `integers` 231 →
+  6.3 ms, `normal` 365 → 24 ms. These are also in the relaxed-SIMD module,
+  for the normals' `log`.
 
 glibc's `exp` and `log` are compiled with fused multiply-adds on x86-64 (the
 FMA build), and NumPy calls them, so matching NumPy bit for bit means
@@ -167,7 +176,7 @@ about 2 inputs in 10^5. JavaScript has no fused multiply-add, so the
 TypeScript computes one exactly with Dekker's product, at about 20
 operations each. WebAssembly's relaxed SIMD has `f64x2.relaxed_madd`, which
 V8 compiles to the hardware FMA, but the spec allows it to round twice. So
-`exp` and `log` are also built as a separate 3 KB module with relaxed SIMD
+`exp`, `log` and the random fills are also built as a separate 15 KB module with relaxed SIMD
 ([kernels/relaxed](kernels/relaxed)), which is used only where a probe at
 startup shows that its multiply-add rounds once. The results are the same
 bits either way. In Node, per 10^6 values: `exp` 40 ms in TypeScript, 19 ms

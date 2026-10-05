@@ -21,6 +21,8 @@ interface Exports {
   dgesvd(a: number, m: number, n: number, u: number, v: number, s: number, e: number, work: number): number;
   vexp(x: number, y: number, n: number, tab: number): void;
   vlog(x: number, y: number, n: number, tab: number): void;
+  mt_fill(key: number, meta: number, dist: number, out: number, n: number, lo: number, rng: number, logtab: number): void;
+  pcg_fill(words: number, meta: number, dist: number, out: number, n: number, lo: number, rng: number, logtab: number): void;
   sort_f64(x: number, n: number, tmp: number, hist: number): void;
   argsort_f64(x: number, n: number, idx: number, keys: number, keys2: number, idx2: number, hist: number): void;
   transpose(src: number, rows: number, cols: number, dst: number): void;
@@ -249,7 +251,22 @@ interface Relaxed {
   memory: WebAssembly.Memory;
   vexp(x: number, y: number, n: number, tab: number): void;
   vlog(x: number, y: number, n: number, tab: number): void;
+  mt_fill: Exports["mt_fill"];
+  pcg_fill: Exports["pcg_fill"];
   fma_probe(): number;
+}
+// layout() in the relaxed module's memory: byte addresses, and the view
+function rlayout(R: { e: Relaxed; base: number; f64: Float64Array }, ...lens: number[]): number[] {
+  const at: number[] = [];
+  let o = 0;
+  for (const len of lens) {
+    at.push(R.base + o * 8);
+    o += len + (len & 1) + 72;
+  }
+  const mem = R.e.memory, need = R.base + o * 8;
+  if (mem.buffer.byteLength < need) mem.grow(Math.ceil((need - mem.buffer.byteLength) / 65536));
+  if (R.f64.buffer !== mem.buffer) R.f64 = new Float64Array(mem.buffer);
+  return at;
 }
 let RX: { e: Relaxed; base: number; f64: Float64Array; tab: string } | null | undefined;
 function relaxed() {
@@ -317,5 +334,32 @@ export function wasmArgsort(x: Float64Array, out: Float64Array | number[], ooff:
   const r = new Uint32Array(f64.buffer, idx, n);
   if (out instanceof Float64Array) out.set(r, ooff);
   else for (let i = 0; i < n; i++) out[ooff + i] = r[i];
+  return true;
+}
+
+// numpy.random's fills (kernels/src/random.rs); dist as there: 0 uniform,
+// 1 legacy normal, 2 legacy exponential, 3 masked bounded, 4 Lemire
+// bounded, 5 Generator's normal.  The generator's state is copied in and
+// back out: key (624 words) and meta [pos, has_gauss, gauss] for MT19937,
+// words [state lo, hi, inc lo, hi] and meta [has_u32, u32] for PCG64.
+const RANDOM_MIN = 256;
+export function wasmRandom(gen: "mt" | "pcg", state: Uint32Array | BigUint64Array, meta: Float64Array, dist: number,
+                           out: Float64Array, lo: number, rng: number, logtab: Float64Array): boolean {
+  const n = out.length;
+  if (n < RANDOM_MIN || !kernels()) return false;
+  // the relaxed-SIMD build where its FMA is fused (normals call log)
+  const R = relaxed();
+  const [t, st, m, o] = R ? rlayout(R, logtab.length, gen === "mt" ? 312 : 4, 4, n) : layout(logtab.length, gen === "mt" ? 312 : 4, 4, n);
+  const F = R ? R.f64 : f64, E = R ? R.e : K!;
+  const v = (addr: number, len: number) => F.subarray(addr / 8, addr / 8 + len);
+  v(t, logtab.length).set(logtab);
+  const S = gen === "mt" ? new Uint32Array(F.buffer, st, 624) : new BigUint64Array(F.buffer, st, 4);
+  S.set(state as any);
+  v(m, meta.length).set(meta);
+  (gen === "mt" ? E.mt_fill : E.pcg_fill)(st, m, dist, o, n, lo, rng, t);
+  state.set(S as any);
+  meta.set(v(m, meta.length));
+  out.set(v(o, n));
+  if (R) R.tab = "";
   return true;
 }
