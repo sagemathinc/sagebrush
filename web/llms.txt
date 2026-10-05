@@ -5,6 +5,7 @@
 ## Using the page
 
 - Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
+- Cells are code or Markdown (text with headings, lists, tables, links, images and LaTeX math `$...$`/`$$...$$`, rendered with KaTeX), as in Jupyter; the WebMCP tool `add_markdown` adds one.
 - Notebooks and their output are saved in the browser (IndexedDB) as you work; File opens, duplicates, deletes, downloads and uploads `.ipynb` (and `.py`). Python's `open()`, `os.listdir` etc. work on files kept in the browser; the Files panel uploads, downloads and deletes them.
 - A notebook can be put in the URL: `https://sagebrush.space/#c=<base64url of a JSON array of cell sources>`; add `m=sage&` before `c=` for Sage mode, and `?run` to run all cells on load.
 - numpy: the NumPy 2 API (ndarray, ufuncs, random, linalg, fft, polynomials), checked against NumPy itself: same printed output and the same seeded random numbers.

@@ -90,6 +90,25 @@
   .player output, .player select { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
   .interact button.play { padding: 0 8px; font-size: 12px; min-width: 2.2em; }
   #plottip { position: fixed; z-index: 20; pointer-events: none; background: var(--cell); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; font: 12px ui-monospace, Menlo, monospace; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  /* Markdown cells: the text, rendered; double-click (or Enter) to edit */
+  .cell.markdown .head .n { font-family: system-ui, sans-serif; }
+  .cell .mdout { display: none; padding: 6px 16px; overflow-wrap: anywhere; }
+  .cell.markdown.rendered .mdout { display: block; cursor: text; }
+  .cell.markdown.rendered .ed { display: none; }
+  .cell.markdown.rendered { border-color: transparent; background: transparent; }
+  .cell.markdown.rendered .head { visibility: hidden; position: absolute; top: 0; right: 0; z-index: 1; border: 0; background: transparent; }
+  .cell.markdown.rendered:hover .head, .cell.markdown.rendered:focus-within .head { visibility: visible; }
+  .cell.markdown.rendered:focus-within, .cell.markdown.rendered:hover { border-color: var(--line); }
+  .mdout :is(h1, h2, h3, h4) { margin: .6em 0 .3em; line-height: 1.25; }
+  .mdout h1 { font-size: 1.7em; } .mdout h2 { font-size: 1.4em; } .mdout h3 { font-size: 1.2em; }
+  .mdout p, .mdout ul, .mdout ol, .mdout blockquote, .mdout table, .mdout pre { margin: .5em 0; }
+  .mdout code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: .92em ui-monospace, Menlo, monospace; }
+  .mdout pre.code { background: var(--code); padding: 8px 12px; border-radius: 6px; overflow: auto; }
+  .mdout pre.code code { background: none; padding: 0; font-size: 13.5px; }
+  .mdout blockquote { border-left: 3px solid var(--line); margin-left: 0; padding-left: 12px; color: var(--muted); }
+  .mdout table { border-collapse: collapse; } .mdout th, .mdout td { border: 1px solid var(--line); padding: 3px 9px; }
+  .mdout img { max-width: 100%; } .mdout hr { border: 0; border-top: 1px solid var(--line); }
+  .mdout .math.display { display: block; overflow-x: auto; margin: .6em 0; }
   .cell .time { font-size: 12px; color: var(--muted); padding: 0 12px 6px; }
   .cell .time:empty { display: none; }
   /* the cell menu */
@@ -161,7 +180,8 @@
   <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span></div>
   <div class="bar" role="toolbar" aria-label="Notebook">
     <button class="primary" id="runall" title="Run every cell in order">Run all</button>
-    <button id="add" title="Add a cell at the end">+ Cell</button>
+    <button id="add" title="Add a code cell at the end">+ Code</button>
+    <button id="addmd" title="Add a Markdown (text) cell at the end">+ Text</button>
     <button class="stop" id="stop" title="Terminate the running program (forgets all variables)">Stop</button>
     <button id="restart" title="Fresh interpreter">Restart</button>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option></select>
@@ -178,6 +198,7 @@
   </section>
   <div id="cells"></div>
   <div class="about">
+    <b>+ Text</b> adds a Markdown cell (headings, lists, tables, links, <code>$math$</code>): <b>Shift+Enter</b> shows it, double-click edits it.
     <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place; <b>Alt+↑/↓</b> moves it; the <b>⋯</b> menu inserts, moves and deletes cells.
     In a cell, Tab indents: press <b>Esc</b> first to Tab out of it. Variables persist between cells and are shared with the <b>Console</b>.
     In <b>Sage</b> mode <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational and
@@ -221,6 +242,7 @@
   <button role="menuitem" data-m="up">Move up <kbd>Alt+↑</kbd></button>
   <button role="menuitem" data-m="down">Move down <kbd>Alt+↓</kbd></button>
   <hr>
+  <button role="menuitem" data-m="type">Change to Markdown</button>
   <button role="menuitem" data-m="clear">Clear output</button>
   <button role="menuitem" data-m="delete" class="danger">Delete cell</button>
 </div>
@@ -235,6 +257,7 @@
 // A classic script (not a module) so the cells exist before the first paint.
 const EXAMPLES = {
   "Welcome": [
+    {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$"},
     "# Big integers are exact\n2**200",
     "from fractions import Fraction\nH = sum(Fraction(1, n) for n in range(1, 31))\nH, float(H)",
     "def primes(n):\n    sieve = bytearray([1]) * (n + 1)\n    sieve[:2] = b'\\x00\\x00'\n    for p in range(2, int(n**0.5) + 1):\n        if sieve[p]:\n            sieve[p*p::p] = bytes(len(range(p*p, n + 1, p)))\n    return [i for i, ok in enumerate(sieve) if ok]\n\nps = primes(10**5)\nprint(len(ps), ps[-5:])",
@@ -268,6 +291,7 @@ const EXAMPLES = {
     "# animate: frames on common axes; the result is an animated SVG\na = animate([plot(sin(x - k)*exp(-x/6), (x, 0, 4*pi), fill='axis', thickness=2) for k in srange(0, 2*pi, 0.2)], figsize=(7, 3))\na.show(delay=5)",
   ],
   "Modular forms (Sage)": [
+    {"md": "## Modular forms\n\nThese run on Sagebrush's Rust engines, compiled to WebAssembly. The Hecke polynomial of $T_p$ on the modular symbols for $\\Gamma_0(N)$ is exact and *proven*, and the Sato–Tate moments of $a_p^2/p$ approach the Catalan numbers $1, 2, 5, 14, \\dots$"},
     "# Modular symbols, computed by Sagebrush's Rust engine in your browser:\n# exact Hecke polynomials, proven by a coefficient bound\nM = ModularSymbols(389, 2, sign=1)\nM, M.hecke_polynomial(2)",
     "# Spaces with a character (nebentypus)\neps = DirichletGroup(13).gen()^2\nM = ModularSymbols(eps, 2, sign=1)\nprint(eps)\nM, M.hecke_polynomial(2)",
     "# Dimensions of spaces of cusp forms and newforms\n[(N, CuspForms(N, 2).dimension(), Gamma0(N).dimension_new_cusp_forms(2)) for N in range(11, 31)]",
@@ -330,7 +354,7 @@ function highlight(src, sage) {
   return out + esc(src.slice(last)) + "\n"; // a final newline keeps the last line's height
 }
 const isSage = () => modeEl.value === "sage";
-function paint(cell) { cell.hl.innerHTML = highlight(cell.ta.value, isSage()); }
+function paint(cell) { cell.hl.innerHTML = cell.type === "markdown" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
 
 // ------------------------------------------------------------ the worker
 function startWorker() {
@@ -666,6 +690,7 @@ function settle(cell) {
 }
 
 function run(cell) {
+  if (cell.type === "markdown") return renderMd(cell);
   if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
   forgetInteracts(cell.out);
   cell.out.textContent = "";
@@ -710,13 +735,18 @@ function autosize(ta) {
   ta.style.height = ta.scrollHeight + "px";
 }
 
-function addCell(code = "", where = null, focus = false) {
+function addCell(code = "", where = null, focus = false, type = "code") {
   const el = document.createElement("div");
   el.className = "cell";
   el.setAttribute("role", "group");
-  el.innerHTML = `<div class="head"><span class="n">[ ]</span><span class="sp"></span><button data-a="run" title="Run (Shift+Enter)">▶ Run</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" aria-controls="cellmenu" title="Cell actions">⋯</button></div><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><div class="out"></div><div class="time"></div>`;
-  const cell = { el, ta: el.querySelector("textarea"), hl: el.querySelector(".ed pre"), out: el.querySelector(".out"), time: el.querySelector(".time"), n: el.querySelector(".n"), menuBtn: el.querySelector('[data-a="menu"]') };
+  el.innerHTML = `<div class="head"><span class="n">[ ]</span><span class="sp"></span><button data-a="run" title="Run (Shift+Enter)">▶ Run</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" aria-controls="cellmenu" title="Cell actions">⋯</button></div><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><div class="mdout" tabindex="0" title="Double-click or press Enter to edit"></div><div class="out"></div><div class="time"></div>`;
+  const cell = { el, type: "code", ta: el.querySelector("textarea"), hl: el.querySelector(".ed pre"), out: el.querySelector(".out"), md: el.querySelector(".mdout"), time: el.querySelector(".time"), n: el.querySelector(".n"), menuBtn: el.querySelector('[data-a="menu"]') };
   el.cell = cell;
+  cell.md.addEventListener("dblclick", () => editMd(cell));
+  cell.md.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); advance(cell); }
+    else if (e.key === "Enter" && !e.target.closest("a")) { e.preventDefault(); editMd(cell); }
+  });
   cell.ta.value = code;
   let tabOut = false; // after Esc, Tab leaves the cell (no keyboard trap)
   cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); });
@@ -743,6 +773,7 @@ function addCell(code = "", where = null, focus = false) {
   if (where?.before) where.before.before(el);
   else if (where?.after) where.after.after(el);
   else cellsEl.appendChild(el);
+  setType(cell, type);
   autosize(cell.ta);
   paint(cell);
   relabel();
@@ -750,10 +781,43 @@ function addCell(code = "", where = null, focus = false) {
   return cell;
 }
 
+// ------------------------------------------------------------ Markdown cells
+function setType(cell, type) {
+  cell.type = type === "markdown" ? "markdown" : "code";
+  cell.el.classList.toggle("markdown", cell.type === "markdown");
+  cell.el.classList.remove("rendered");
+  cell.n.textContent = cell.type === "markdown" ? "Markdown" : "[ ]";
+  cell.el.querySelector('[data-a="run"]').innerHTML = cell.type === "markdown" ? "▶ Show" : "▶ Run";
+  if (cell.type === "markdown") { forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; }
+  paint(cell);
+  relabel();
+}
+let mdModule = null, mathModule = null;
+const afterPaint = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+const loadMd = () => (mdModule ??= Promise.resolve(globalThis.__sbMarkdown)); // web/markdown.ts, bundled into this script by web/build.ts
+// Highlight fenced Python/Sage code in Markdown as in code cells.
+const mdHighlight = (code, lang) => (!lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
+async function renderMd(cell) {
+  const { render } = await loadMd();
+  cell.md.innerHTML = cell.ta.value.trim() ? render(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
+  cell.el.classList.add("rendered");
+  if (cell.md.querySelector(".math")) {
+    await afterPaint(); // the text shows first; KaTeX (275 KB) typesets the math after
+    try { (await (mathModule ??= import(new URL("sagebrush-math.js", location.href).href))).typeset(cell.md); } catch {}
+  }
+  scheduleSave();
+}
+function editMd(cell) {
+  cell.el.classList.remove("rendered");
+  autosize(cell.ta);
+  cell.ta.focus();
+}
+
 // Accessible names: "Cell 3", "Cell 3 code", ...
 function relabel() {
   cells().forEach((c, i) => {
-    c.el.setAttribute("aria-label", `Cell ${i + 1}`);
+    c.el.setAttribute("aria-label", `Cell ${i + 1}${c.type === "markdown" ? " (Markdown)" : ""}`);
+    c.md.setAttribute("aria-label", `Cell ${i + 1} text`);
     c.ta.setAttribute("aria-label", `Cell ${i + 1} code`);
     c.el.querySelector('[data-a="run"]').setAttribute("aria-label", `Run cell ${i + 1}`);
     c.menuBtn.setAttribute("aria-label", `Cell ${i + 1} actions`);
@@ -763,7 +827,7 @@ function relabel() {
 // Move to the next cell, making one at the end.
 function advance(cell) {
   const next = cell.el.nextElementSibling?.cell ?? addCell("", { after: cell.el });
-  next.ta.focus();
+  (next.el.classList.contains("rendered") ? next.md : next.ta).focus();
   next.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
@@ -798,6 +862,7 @@ function openMenu(cell) {
   menu.style.top = `${r.bottom + scrollY + 4}px`;
   menu.style.left = `${Math.max(8, r.right + scrollX - menu.offsetWidth)}px`;
   cell.menuBtn.setAttribute("aria-expanded", "true");
+  menu.querySelector('[data-m="type"]').textContent = cell.type === "markdown" ? "Change to Code" : "Change to Markdown";
   menu.querySelector("button").focus();
 }
 function closeMenu(refocus) {
@@ -817,7 +882,8 @@ menu.addEventListener("click", (e) => {
     case "below": return void addCell("", { after: cell.el }, true);
     case "up": move(cell, -1); return cell.menuBtn.focus();
     case "down": move(cell, 1); return cell.menuBtn.focus();
-    case "clear": forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
+    case "type": setType(cell, cell.type === "markdown" ? "code" : "markdown"); scheduleSave(); return cell.ta.focus();
+    case "clear": if (cell.type === "markdown") return cell.ta.focus(); forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
     case "delete": return remove(cell);
   }
 });
@@ -906,13 +972,6 @@ themeEl.onchange = () => setTheme(themeEl.value);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => consoleUi?.setTheme());
 themeEl.value = document.documentElement.dataset.theme || "system";
 
-function load(codes) {
-  cellsEl.textContent = "";
-  execCount = 0;
-  for (const c of codes) addCell(c);
-  if (!codes.length) addCell("");
-}
-
 function setMode(mode) {
   modeEl.value = mode;
   try { localStorage.setItem("sagebrush-mode", mode); } catch {}
@@ -922,8 +981,9 @@ function setMode(mode) {
 
 $("#runall").onclick = runAll;
 $("#add").onclick = () => addCell("", null, true);
+$("#addmd").onclick = () => addCell("", null, true, "markdown");
 $("#stop").onclick = () => stop("\nStopped (interpreter restarted; variables are gone).\n");
-$("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
+$("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
 modeEl.onchange = () => { setMode(modeEl.value); scheduleSave(); };
 const sel = $("#examples");
 for (const k of Object.keys(EXAMPLES)) sel.add(new Option(k, k));
@@ -1003,7 +1063,9 @@ const newId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.ran
 function snapshot() {
   return {
     id: nb.id, name: nbName.value.trim() || "Untitled", mode: modeEl.value, updated: Date.now(),
-    cells: cells().map((c) => ({ code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null })),
+    cells: cells().map((c) => (c.type === "markdown"
+      ? { type: "markdown", code: c.ta.value, ...(c.attachments ? { attachments: c.attachments } : {}) }
+      : { code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null })),
   };
 }
 function scheduleSave() {
@@ -1028,15 +1090,20 @@ function show(doc) {
   cellsEl.textContent = "";
   execCount = 0;
   for (const c of doc.cells?.length ? doc.cells : [{ code: "" }]) {
-    const cell = addCell(c.code ?? "");
-    loadOutputs(cell.out, c.outputs);
+    const cell = addCell(c.code ?? "", null, false, c.type);
+    if (cell.type === "markdown") {
+      cell.attachments = c.attachments ?? null;
+      renderMd(cell);
+    } else loadOutputs(cell.out, c.outputs);
   }
   document.title = `${nbName.value} — Sagebrush`;
   try { localStorage.setItem("sagebrush-current", doc.id); } catch {}
   loading = false;
 }
+// cells: code strings, or {md: text} for Markdown (examples, share links)
+const asCell = (c) => (typeof c === "string" ? { code: c } : c.md !== undefined ? { type: "markdown", code: c.md } : c);
 function openNew(name, mode, codes) {
-  show({ id: newId(), name, mode, cells: codes.map((code) => ({ code })) });
+  show({ id: newId(), name, mode, cells: codes.map(asCell) });
   saveNow();
 }
 async function openId(id) {
@@ -1062,7 +1129,9 @@ const lines = (t) => t.split(/(?<=\n)/);
 function toIpynb() {
   const sage = isSage();
   return JSON.stringify({
-    cells: snapshot().cells.map((c) => ({ cell_type: "code", execution_count: c.n === null ? null : +c.n, metadata: {}, source: lines(c.code), outputs: c.outputs.map((o) => (o.output_type === "stream" ? { ...o, text: lines(o.text) } : o)) })),
+    cells: snapshot().cells.map((c) => (c.type === "markdown"
+      ? { cell_type: "markdown", metadata: {}, source: lines(c.code), ...(c.attachments ? { attachments: c.attachments } : {}) }
+      : { cell_type: "code", execution_count: c.n === null ? null : +c.n, metadata: {}, source: lines(c.code), outputs: c.outputs.map((o) => (o.output_type === "stream" ? { ...o, text: lines(o.text) } : o)) })),
     metadata: { kernelspec: sage ? { name: "sagemath", display_name: "SageMath", language: "sage" } : { name: "python3", display_name: "Python 3", language: "python" }, language_info: { name: sage ? "sage" : "python" } },
     nbformat: 4, nbformat_minor: 5,
   }, null, 1);
@@ -1076,13 +1145,25 @@ function fromFile(name, text) {
     const cells = (j.cells ?? j.worksheets?.[0]?.cells ?? []).map((c) => {
       const src = joinText(c.source ?? c.input);
       if (c.cell_type === "code") return { code: src, outputs: c.outputs ?? [], n: c.execution_count ?? null };
-      // markdown and raw cells become comments
+      if (c.cell_type === "markdown") return { type: "markdown", code: src, attachments: c.attachments ?? null };
+      // raw cells become comments
       return { code: src.split("\n").map((l) => (l ? "# " + l : "#")).join("\n") };
     });
     return { name: base, mode: sage ? "sage" : "python", cells };
   }
-  const parts = text.split(/^# ?%%.*\n/m).filter((p, i) => i > 0 || p.trim());
-  return { name: base, mode: /\.sage$/i.test(name) ? "sage" : modeEl.value, cells: parts.map((code) => ({ code: code.replace(/\n+$/, "") })) };
+  // "# %%" starts a cell, "# %% [markdown]" a Markdown cell whose lines are comments (jupytext)
+  const cells = [];
+  let cur = { code: "" };
+  for (const line of text.split("\n")) {
+    const m = /^# ?%%(.*)$/.exec(line);
+    if (m) {
+      if (cur.code.trim() || cells.length) cells.push(cur);
+      cur = /\[markdown\]|\[md\]/.test(m[1]) ? { type: "markdown", code: "" } : { code: "" };
+    } else cur.code += (cur.type === "markdown" ? line.replace(/^# ?/, "") : line) + "\n";
+  }
+  cells.push(cur);
+  for (const c of cells) c.code = c.code.replace(/\n+$/, "").replace(/^\n+/, "");
+  return { name: base, mode: /\.sage$/i.test(name) ? "sage" : modeEl.value, cells: cells.filter((c, i) => c.code || i === 0) };
 }
 
 // Share links: the cells, deflated, in the URL fragment (never sent to a server).
@@ -1090,7 +1171,7 @@ const enc64 = (u8) => { let b = ""; for (let i = 0; i < u8.length; i += 0x8000) 
 const dec64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 async function pipe(u8, stream) { return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(stream)).arrayBuffer()); }
 async function shareLink() {
-  const json = new TextEncoder().encode(JSON.stringify(cells().map((c) => c.ta.value)));
+  const json = new TextEncoder().encode(JSON.stringify(cells().map((c) => (c.type === "markdown" ? { md: c.ta.value } : c.ta.value))));
   const frag = typeof CompressionStream === "function" ? "z=" + enc64(await pipe(json, new CompressionStream("deflate-raw"))) : "c=" + enc64(json);
   return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : "") + frag;
 }
@@ -1128,7 +1209,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "open": await showOpen(); break;
     case "duplicate": await saveNow(); { const d = snapshot(); show({ ...d, id: newId(), name: d.name + " (copy)" }); saveNow(); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb()); break;
-    case "py": download(fileBase() + (isSage() ? ".sage" : ".py"), cells().map((c) => "# %%\n" + c.ta.value).join("\n\n") + "\n", "text/x-python"); break;
+    case "py": download(fileBase() + (isSage() ? ".sage" : ".py"), cells().map((c) => (c.type === "markdown" ? "# %% [markdown]\n" + c.ta.value.split("\n").map((l) => (l ? "# " + l : "#")).join("\n") : "# %%\n" + c.ta.value)).join("\n\n") + "\n", "text/x-python"); break;
     case "import": $("#importinput").click(); break;
     case "share": {
       const url = await shareLink();
@@ -1301,7 +1382,7 @@ const tools = [
     async execute({ code, sage }) {
       if (sage !== undefined) setMode(sage ? "sage" : "python");
       const last = cells().at(-1);
-      const cell = last && last.ta.value.trim() === "" ? last : addCell("");
+      const cell = last && last.type === "code" && last.ta.value.trim() === "" ? last : addCell("");
       cell.ta.value = code;
       autosize(cell.ta);
       paint(cell);
@@ -1311,10 +1392,23 @@ const tools = [
   },
   {
     name: "read_notebook",
-    description: "Return the notebook's cells (code and output) as JSON.",
+    description: "Return the notebook's cells as JSON: code cells with their output, and Markdown (text) cells.",
     inputSchema: { type: "object", properties: {} },
     async execute() {
-      return { content: [{ type: "text", text: JSON.stringify({ mode: modeEl.value, cells: cells().map((c) => ({ code: c.ta.value, output: cellText(c) })) }) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ mode: modeEl.value, cells: cells().map((c) => (c.type === "markdown" ? { type: "markdown", text: c.ta.value } : { code: c.ta.value, output: cellText(c) })) }) }] };
+    },
+  },
+  {
+    name: "add_markdown",
+    description: "Add a Markdown (text) cell at the end of the notebook and show it rendered: headings, lists, tables, code, links, images and LaTeX math ($...$, $$...$$). Use it to explain results between code cells.",
+    inputSchema: { type: "object", properties: { text: { type: "string", description: "The Markdown source." } }, required: ["text"] },
+    async execute({ text }) {
+      const last = cells().at(-1);
+      const cell = last && last.ta.value.trim() === "" ? last : addCell("");
+      setType(cell, "markdown");
+      cell.ta.value = text;
+      await renderMd(cell);
+      return { content: [{ type: "text", text: cell.md.textContent.slice(0, 2000) }] };
     },
   },
   {
@@ -1347,7 +1441,6 @@ try {
 
 (async () => {
   db = await openDb();
-  startWorker();
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome
@@ -1357,6 +1450,9 @@ try {
   if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : "python", shared);
   else if (!(last && (await openId(last)))) openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   document.body.classList.remove("opening");
+  // the interpreter starts once the notebook has been drawn (it is not needed for that)
+  await afterPaint();
+  startWorker();
   if (new URLSearchParams(location.search).has("run")) runAll();
 })();
 

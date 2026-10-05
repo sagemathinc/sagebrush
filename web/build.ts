@@ -1,8 +1,8 @@
 // bun web/build.ts  ->  web/dist/{index.html, llms.txt, sagebrush-worker.js, sagebrush-console.js,
-//                                sagebrush-engine.wasm}
+//                                sagebrush-math.js, katex/, sagebrush-engine.wasm}
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
 // web/shims, the Python library is embedded, the Unicode name table is not.
-import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const here = import.meta.dir;
@@ -35,7 +35,10 @@ const consoleResult = await Bun.build({
   format: "esm",
   minify: true,
 });
-for (const r of [result, consoleResult]) {
+// Math in Markdown cells (KaTeX), loaded on first use.  (Markdown itself,
+// small and usually in the first cell, is part of the page script.)
+const mathResult = await Bun.build({ entrypoints: [join(here, "math.ts")], outdir: join(here, "dist"), naming: "sagebrush-math.js", target: "browser", format: "esm", minify: true });
+for (const r of [result, consoleResult, mathResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -47,7 +50,8 @@ for (const r of [result, consoleResult]) {
   const html = readFileSync(join(here, "index.html"), "utf8");
   const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
   const tmp = join(here, "dist", "app.tmp.js");
-  writeFileSync(tmp, m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
+  // web/markdown.ts is bundled in, as globalThis.__sbMarkdown
+  writeFileSync(tmp, `import * as __md from "../markdown.ts";\nglobalThis.__sbMarkdown = __md;\n` + m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
   const app = await Bun.build({ entrypoints: [tmp], target: "browser", format: "iife", minify: true });
   if (!app.success) {
     for (const l of app.logs) console.error(l);
@@ -60,8 +64,14 @@ for (const r of [result, consoleResult]) {
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
 // the engines (modular symbols, a_p ...), fetched by the worker on first use
 copyFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"), join(here, "dist", "sagebrush-engine.wasm"));
+// KaTeX's stylesheet and (woff2) fonts, for math in Markdown cells
+const katexDir = join(here, "..", "node_modules", "katex", "dist");
+const KATEX = ["katex/katex.min.css", ...readdirSync(join(katexDir, "fonts")).filter((f) => f.endsWith(".woff2")).map((f) => "katex/fonts/" + f)];
+mkdirSync(join(here, "dist", "katex", "fonts"), { recursive: true });
+for (const f of KATEX) copyFileSync(join(katexDir, f.slice("katex/".length)), join(here, "dist", f));
 // The Cloudflare site (web/site) serves the same files.
-mkdirSync(join(here, "site", "public"), { recursive: true });
-for (const f of ["index.html", "llms.txt", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-engine.wasm"]) copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
+mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
+for (const f of ["index.html", "llms.txt", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-engine.wasm", ...KATEX])
+  copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
 console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);
