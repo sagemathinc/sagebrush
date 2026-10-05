@@ -21,6 +21,8 @@ interface Exports {
   dgesvd(a: number, m: number, n: number, u: number, v: number, s: number, e: number, work: number): number;
   vexp(x: number, y: number, n: number, tab: number): void;
   vlog(x: number, y: number, n: number, tab: number): void;
+  sort_f64(x: number, n: number, tmp: number, hist: number): void;
+  argsort_f64(x: number, n: number, idx: number, keys: number, keys2: number, idx2: number, hist: number): void;
   transpose(src: number, rows: number, cols: number, dst: number): void;
   fft_stockham(x: number, y: number, n: number, f: number, nf: number, tc: number, ts: number, consts: number, inverse: number): number;
   rfft_rows(data: number, rows: number, n: number, out: number, z: number, y: number, f: number, nf: number,
@@ -289,5 +291,31 @@ export function wasmUnary(op: "vexp" | "vlog", tab: Float64Array, src: Float64Ar
   K![op](x, x, n, t);
   dst.set(view(x, n));
   resident = key;
+  return true;
+}
+
+// Sorting doubles (kernels/src/sort.rs: a stable radix sort, in the order of
+// a typed array's sort: -0 before +0, NaN last).
+const SORT_MIN = 64, HIST = (6 * 2048) / 2; // the histograms, in doubles
+export function wasmSort(x: Float64Array): boolean {
+  const n = x.length;
+  if (n < SORT_MIN || !kernels()) return false;
+  const [a, t, h] = layout(n, n, HIST);
+  view(a, n).set(x);
+  K!.sort_f64(a, n, t, h);
+  x.set(view(a, n));
+  return true;
+}
+// The stable argsort of x into out[ooff..ooff+n] (as numbers).
+export function wasmArgsort(x: Float64Array, out: Float64Array | number[], ooff: number): boolean {
+  const n = x.length;
+  if (n < SORT_MIN || n >= 2 ** 32 || !kernels()) return false;
+  const half = Math.ceil(n / 2);
+  const [a, idx, k1, k2, idx2, h] = layout(n, half, n, n, half, HIST);
+  view(a, n).set(x);
+  K!.argsort_f64(a, n, idx, k1, k2, idx2, h);
+  const r = new Uint32Array(f64.buffer, idx, n);
+  if (out instanceof Float64Array) out.set(r, ooff);
+  else for (let i = 0; i < n; i++) out[ooff + i] = r[i];
   return true;
 }

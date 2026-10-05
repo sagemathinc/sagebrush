@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-// The WebAssembly kernels (kernels/src: linear algebra, FFT) must give
+// The WebAssembly kernels (kernels/src: linear algebra, FFT, exp/log, sort) must give
 // exactly the bits of the JavaScript code they replace.
 const program = `
 import numpy as np, _nplinalg
@@ -50,6 +50,12 @@ for x in [np.random.randn(3001) * 300, np.random.rand(3001) * 3, 1 + np.random.r
           np.exp(np.random.uniform(-744, 709, 3001)), np.array(edge * 5)]:
     with np.errstate(all="ignore"):
         rec(np.exp(x), np.log(x))
+f = np.random.randn(3000)
+f[::7] = np.nan; f[::11] = 0.0; f[::13] = -0.0; f[::17] = np.inf; f[::19] = -np.inf; f[::23] = f[5]
+for x in [f, np.random.randint(0, 50, 2000), np.random.randint(-10**12, 10**12, 2000), np.random.randint(-100, 100, 999).astype(np.int8),
+          np.random.rand(500).astype(np.float32), np.ones(300), np.random.randint(0, 20, (40, 70)).astype(float)]:
+    s = np.sort(x)
+    print(repr(s.tolist()), repr(np.signbit(s).tolist()), repr(np.argsort(x).tolist()), repr(np.unique(x).tolist()))
 `;
 
 const run = (env: Record<string, string>) =>
