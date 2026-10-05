@@ -279,6 +279,10 @@ class Axes:
             rects = [(edges[i], 0, edges[i + 1] - edges[i], counts[i]) for i in builtin_range(nb)]
             self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=edgecolor))
         self._opts.setdefault("_bars", True)
+        import sys
+        np = sys.modules.get("numpy")
+        if np is not None:  # as matplotlib: arrays (without making numpy a dependency)
+            counts, edges = np.array(counts), np.array(edges)
         return counts, edges, _Artist(self._prims[-1], "container.BarContainer")
 
     def fill_between(self, x, y1, y2=0, alpha=None, color=None, label=None, where=None, **kw):

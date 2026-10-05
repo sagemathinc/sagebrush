@@ -75,7 +75,7 @@ Supported:
   `grid`, `legend` (`loc`), `axis('equal'|'off')` and `suptitle`.
 - `savefig('f.svg')`, and SVG only for now.
 
-numpy is not available yet, so pass lists.
+Pass numpy arrays or lists; numpy is built in (see [NUMPY.md](NUMPY.md)).
 
 ## Animation
 
@@ -168,7 +168,6 @@ sagejs does. That layer would load on demand.
 - 3D: planned as a Plotly renderer for `plot3d` and friends, loaded on
   demand, following sagejs.
 - `implicit_plot`, `contour_plot`/`density_plot` and vector fields.
-- numpy.
 - Zooming by resampling.
 - LaTeX labels (KaTeX).
 - PNG files from the command line (resvg).
