@@ -95,12 +95,37 @@ Measured in Node against NumPy (C, OpenBLAS) on the same machine:
 | `sin` (10^6) | 15 ms | 10 ms |
 | `sum` (10^6) | 0.9 ms | 0.2 ms |
 | `randn` (10^6) | 54 ms | 20 ms |
-| 300×300 matmul | 36 ms | 2.9 ms |
-| `inv` 200×200 | 15 ms | 0.7 ms |
+| 300×300 matmul | 3.7 ms | 2.9 ms |
+| `inv` 200×200 | 4.5 ms | 0.7 ms |
+| `det` 1000×1000 | 126 ms | 7.4 ms |
 
-Elementwise work is within a few times of NumPy. Dense linear algebra is
-where BLAS/LAPACK pull far ahead; the plan for that (and SIMD kernels) is
-below.
+Elementwise work is within a few times of NumPy. In the browser, against
+NumPy compiled to WebAssembly (Pyodide), see
+[bench/browser](bench/browser/README.md).
+
+### WebAssembly SIMD kernels
+
+The innermost dense linear algebra loops are written in Rust
+([kernels/src/lib.rs](kernels/src/lib.rs)). They are compiled for
+`wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
+to a 4.7 KB module:
+
+- `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
+- `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
+  `inv`).
+
+`scripts/build-kernels.mjs` embeds the module as base64 in
+`src/runtime/kernels_wasm.ts`, which is committed, so building sagebrush
+does not need Rust. `src/runtime/kernels.ts` compiles it synchronously on
+first use and copies operands into its linear memory. Copying is O(n²)
+against O(n³) work. Each kernel does the same floating-point operations in
+the same order as the JavaScript loops it replaces (no fused multiply-add),
+so results are bit-identical with or without WebAssembly. Where
+WebAssembly is unavailable, or with `globalThis.__SAGEBRUSH_NO_WASM__ =
+true`, the JavaScript code runs.
+
+The kernels made matmul 300×300 about 12× faster (44 → 3.7 ms), `det` of a
+1000×1000 matrix 4× faster (494 → 126 ms) and `inv` 200×200 3.5× faster.
 
 # The investigation that led here
 

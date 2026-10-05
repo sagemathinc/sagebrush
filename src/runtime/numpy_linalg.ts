@@ -10,6 +10,7 @@ import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype, ascontig, copy as npcopy } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
+import { wasmLU, wasmLuSolve } from "./kernels";
 
 const { T, raise, tuple } = Obj;
 const F64 = () => toDtype("float64");
@@ -51,6 +52,8 @@ function nrm2(x: Float64Array, off: number, n: number, stride: number): number {
 // ------------------------------------------------------------------ LU
 
 function lu(A: Float64Array, n: number): { lu: Float64Array; piv: number[]; sign: number; singular: boolean } {
+  const w = wasmLU(A, n);
+  if (w) return w;
   const a = Float64Array.from(A);
   const piv = Array.from({ length: n }, (_, i) => i);
   let sign = 1, singular = false;
@@ -83,6 +86,8 @@ function lu(A: Float64Array, n: number): { lu: Float64Array; piv: number[]; sign
 }
 
 function luSolve(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Array, m: number): Float64Array {
+  const w = wasmLuSolve(L, n, B, m);
+  if (w) return w;
   const a = L.lu;
   const x = new Float64Array(n * m);
   for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) x[i * m + j] = B[L.piv[i] * m + j];
