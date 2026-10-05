@@ -6,6 +6,7 @@ Python 3.14 on a JavaScript runtime, aimed at research mathematics.
 npx sagebrush                 # interactive prompt (tab completion, history)
 npx sagebrush script.py       # run a program
 npx sagebrush -c 'print(2**200)'
+npx sagebrush --sage          # Sage syntax: 2^3 == 8, 2/3 is exact, factor(), ...
 ```
 
 or `npm install -g sagebrush`, then `sagebrush`.

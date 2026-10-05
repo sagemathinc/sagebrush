@@ -9,9 +9,11 @@
   :root {
     --bg: #fbfaf7; --fg: #1f2421; --muted: #6b726d; --line: #dcdcd4; --cell: #ffffff;
     --accent: #5b7f5a; --accent2: #8aa37b; --err: #b3261e; --code: #f3f2ec;
+    --hk: #8a3b8f; --hb: #2a6fb0; --hs: #a35a00; --hn: #0f8a5f; --hc: #8a8f86; --hd: #9a6b00; --hf: #2350a8;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #161917; --fg: #e4e6e1; --muted: #9aa29b; --line: #2e332f; --cell: #1d211e; --accent: #9cc28f; --accent2: #6f8f63; --err: #ff8a80; --code: #222723; }
+    :root { --bg: #161917; --fg: #e4e6e1; --muted: #9aa29b; --line: #2e332f; --cell: #1d211e; --accent: #9cc28f; --accent2: #6f8f63; --err: #ff8a80; --code: #222723;
+      --hk: #d49ad6; --hb: #7cc4dc; --hs: #e6b673; --hn: #8fd3a6; --hc: #7d857e; --hd: #e3c26b; --hf: #8fb5f2; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -26,13 +28,27 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.stop { color: var(--err); }
   #status { color: var(--muted); font-size: 13px; margin-left: auto; }
-  .cell { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; overflow: hidden; }
-  .cell.running { border-color: var(--accent2); }
+  .cell { position: relative; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; overflow: hidden; transition: border-color .12s, box-shadow .12s; }
+  /* the focused cell: accent border and a bar on the left, as in Jupyter */
+  .cell:focus-within { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent), 0 1px 6px rgba(0,0,0,.08); }
+  .cell.queued .head .n, .cell.running .head .n { color: var(--accent); font-weight: 600; }
+  .cell.queued { border-style: dashed; }
+  /* the running cell: a sliding stripe under its header */
+  .cell.running .head { background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--accent) 35%, transparent) 50%, transparent 100%) 0 0 / 50% 100% no-repeat; animation: slide 1.1s linear infinite; }
+  @keyframes slide { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+  .mode-sage .cell .head .lang { color: var(--accent); }
   .cell .head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
   .cell .head .n { font-family: ui-monospace, Menlo, monospace; }
   .cell .head .sp { flex: 1; }
   .cell .head button { padding: 1px 8px; font-size: 12px; }
-  textarea { display: block; width: 100%; border: 0; outline: none; resize: none; overflow: hidden; padding: 10px 12px; background: var(--code); color: var(--fg); font: 14px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 4; min-height: 2.6em; }
+  /* editor: a transparent textarea over its syntax-highlighted copy */
+  .ed { position: relative; background: var(--code); }
+  .ed textarea, .ed pre { margin: 0; border: 0; padding: 10px 12px; font: 14px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ed pre { position: absolute; inset: 0; pointer-events: none; color: var(--fg); overflow: hidden; }
+  .ed textarea { position: relative; display: block; width: 100%; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--fg); min-height: 2.6em; }
+  .ed textarea::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: transparent; }
+  .hk { color: var(--hk); } .hb { color: var(--hb); } .hs { color: var(--hs); } .hn { color: var(--hn); }
+  .hc { color: var(--hc); font-style: italic; } .hd { color: var(--hd); } .hf { color: var(--hf); }
   pre.out { margin: 0; padding: 8px 12px; white-space: pre-wrap; word-break: break-word; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
   pre.out:empty { display: none; }
   pre.out .e { color: var(--err); }
@@ -55,6 +71,7 @@
     <button id="add">+ Cell</button>
     <button class="stop" id="stop" title="Terminate the running program (forgets all variables)">Stop</button>
     <button id="restart" title="Fresh interpreter">Restart</button>
+    <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option></select>
     <select id="examples" aria-label="Examples"><option value="">Examples…</option></select>
     <button id="share" title="Copy a link to these cells">Share</button>
     <span id="status">loading…</span>
@@ -62,6 +79,8 @@
   <div id="cells"></div>
   <div class="about">
     <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place. Variables persist between cells.
+    In <b>Sage</b> mode <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational and
+    <code>factor</code>, <code>is_prime</code>, <code>next_prime</code>, <code>divisors</code>, <code>euler_phi</code>, <code>crt</code> &hellip; are built in.
     The language is CPython 3.14's own grammar (syntax errors match CPython), with big integers, <code>fractions</code>,
     <code>complex</code>/<code>cmath</code>, <code>re</code>, <code>json</code>, <code>collections</code>, <code>functools</code>, generators,
     <code>async</code>, classes and metaclasses. Pure-Python packages such as mpmath pass their own test suites.
@@ -91,6 +110,14 @@ const EXAMPLES = {
     "class Vec:\n    def __init__(self, *xs): self.xs = xs\n    def __add__(self, o): return Vec(*(a + b for a, b in zip(self.xs, o.xs)))\n    def __mul__(self, k): return Vec(*(k * a for a in self.xs))\n    __rmul__ = __mul__\n    def __repr__(self): return f\"Vec{self.xs}\"\n\n3 * Vec(1, 2) + Vec(0, 1)",
     "# Coroutines, driven by hand\nasync def square(x):\n    return x * x\n\nasync def main():\n    total = 0\n    for i in range(5):\n        total += await square(i)\n    return total\n\nc = main()\ntry:\n    c.send(None)\nexcept StopIteration as e:\n    print('result', e.value)",
   ],
+  "Sage": [
+    "# Sage mode: ^ is a power and integer division is exact\n2^100, 2/3 + 1/6, (2/3)^-2",
+    "# Harmonic numbers, exactly\nH = sum(1/n for n in range(1, 21))\nH, n(H)",
+    "factor(2^64 - 1), factor(2^67 - 1)",
+    "p = next_prime(10^30)\np, is_prime(p), is_prime(p + 2)",
+    "divisors(360), euler_phi(360), sigma(28), crt(2, 3, 5, 7)",
+    "# The Mersenne exponents below 1000, by Lucas-Lehmer\ndef lucas_lehmer(p):\n    s, M = 4, 2^p - 1\n    for _ in range(p - 2):\n        s = (s^2 - 2) % M\n    return s == 0\n\n[p for p in prime_range(3, 1000) if lucas_lehmer(p)]",
+  ],
   "Text & data": [
     "import re, json\ntext = 'Euler 1707, Gauss 1777, Riemann 1826, Noether 1882'\npeople = {name: int(year) for name, year in re.findall(r'(\\w+) (\\d{4})', text)}\nprint(json.dumps(people, indent=2))",
     "from collections import Counter\nCounter('the quick brown fox jumps over the lazy dog'.replace(' ', '')).most_common(5)",
@@ -99,10 +126,37 @@ const EXAMPLES = {
 };
 
 const $ = (s) => document.querySelector(s);
-const cellsEl = $("#cells"), statusEl = $("#status");
-let worker, ready = false, nextId = 1, version = "";
+const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode");
+let worker, ready = false, nextId = 1, version = "", execCount = 0;
 const pending = new Map(); // id -> {cell, resolve}
 
+// ------------------------------------------------------------ highlighting
+// A small regex tokenizer for Python (and Sage's ^ and ^^): good enough for
+// a notebook, and no dependency.
+const KW = new Set("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield match case type self cls".split(" "));
+const BI = new Set("abs all any ascii bin bool breakpoint bytearray bytes callable chr classmethod compile complex delattr dict dir divmod enumerate eval exec filter float format frozenset getattr globals hasattr hash help hex id input int isinstance issubclass iter len list locals map max memoryview min next object oct open ord pow print property range repr reversed round set setattr slice sorted staticmethod str sum super tuple type vars zip __import__ Exception ValueError TypeError KeyError IndexError StopIteration ZeroDivisionError ArithmeticError RuntimeError NotImplementedError AttributeError NameError".split(" "));
+const SAGE_BI = new Set("factor is_prime is_prime_power is_square next_prime previous_prime nth_prime prime_range primes primes_first_n prime_pi divisors number_of_divisors sigma euler_phi moebius gcd lcm xgcd inverse_mod power_mod crt binomial factorial fibonacci isqrt sqrt srange prod continued_fraction numerator denominator valuation digits Rational Integer ZZ QQ RR n N".split(" "));
+const TOKEN = /(#.*)|((?:\b[rRbBuUfFtT]{1,2})?(?:"""[\s\S]*?(?:"""|$(?![\s\S]))|'''[\s\S]*?(?:'''|$(?![\s\S]))|"(?:\\.|[^"\\\n])*(?:"|$)|'(?:\\.|[^'\\\n])*(?:'|$)))|(^[ \t]*@[\w.]+)|(\b(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?[jJ]?)\b)|([A-Za-z_]\w*)/gm;
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+function highlight(src, sage) {
+  let out = "", last = 0, prev = "";
+  for (const m of src.matchAll(TOKEN)) {
+    out += esc(src.slice(last, m.index));
+    last = m.index + m[0].length;
+    let cls = m[1] ? "hc" : m[2] ? "hs" : m[3] ? "hd" : m[4] ? "hn" : "";
+    if (m[5]) {
+      const w = m[5];
+      cls = prev === "def" || prev === "class" ? "hf" : KW.has(w) ? "hk" : BI.has(w) || (sage && SAGE_BI.has(w)) ? "hb" : "";
+      prev = w;
+    }
+    out += cls ? `<span class="${cls}">${esc(m[0])}</span>` : esc(m[0]);
+  }
+  return out + esc(src.slice(last)) + "\n"; // a final newline keeps the last line's height
+}
+const isSage = () => modeEl.value === "sage";
+function paint(cell) { cell.hl.innerHTML = highlight(cell.ta.value, isSage()); }
+
+// ------------------------------------------------------------ the worker
 function startWorker() {
   ready = false;
   statusEl.textContent = "loading…";
@@ -118,15 +172,27 @@ function startWorker() {
     }
     const p = pending.get(m.id);
     if (!p) return;
-    if (m.stream) append(p.cell, m.text, m.stream === "stderr");
+    const cell = p.cell;
+    if (m.start) {
+      cell.el.classList.replace("queued", "running");
+      cell.t0 = performance.now();
+      cell.timer = setInterval(() => { cell.time.textContent = `running… ${((performance.now() - cell.t0) / 1000).toFixed(1)} s`; }, 250);
+    }
+    if (m.stream) append(cell, m.text, m.stream === "stderr");
     if (m.done) {
-      p.cell.el.classList.remove("running");
-      p.cell.time.textContent = `${m.ms < 10 ? m.ms.toFixed(1) : Math.round(m.ms)} ms`;
+      finish(cell);
+      cell.n.textContent = `[${++execCount}]`;
+      cell.time.textContent = `${m.ms < 10 ? m.ms.toFixed(1) : Math.round(m.ms)} ms`;
       pending.delete(m.id);
       p.resolve();
     }
   };
   worker.onerror = (e) => { statusEl.textContent = "error: " + (e.message || e); };
+}
+
+function finish(cell) {
+  clearInterval(cell.timer);
+  cell.el.classList.remove("queued", "running");
 }
 
 function append(cell, text, isErr) {
@@ -135,31 +201,37 @@ function append(cell, text, isErr) {
 }
 
 function run(cell) {
+  if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
   cell.out.textContent = "";
   cell.time.textContent = "";
-  cell.el.classList.add("running");
+  cell.el.classList.add("queued");
+  cell.n.textContent = "[*]";
   const id = nextId++;
   return new Promise((resolve) => {
     pending.set(id, { cell, resolve });
-    worker.postMessage({ id, code: cell.ta.value });
+    worker.postMessage({ id, code: cell.ta.value, sage: isSage() });
   });
 }
 
 async function runAll() {
-  for (const c of cells()) await run(c);
+  await Promise.all(cells().map(run)); // the worker runs them in order
 }
 
 function stop(message) {
   worker.terminate();
   for (const { cell, resolve } of pending.values()) {
-    cell.el.classList.remove("running");
+    finish(cell);
+    cell.n.textContent = "[ ]";
+    cell.time.textContent = "";
     append(cell, message, true);
     resolve();
   }
   pending.clear();
+  execCount = 0;
   startWorker();
 }
 
+// ------------------------------------------------------------ cells
 function cells() {
   return [...cellsEl.querySelectorAll(".cell")].map((el) => el.cell);
 }
@@ -172,43 +244,49 @@ function autosize(ta) {
 function addCell(code = "", after = null, focus = false) {
   const el = document.createElement("div");
   el.className = "cell";
-  el.innerHTML = `<div class="head"><span class="n"></span><span class="sp"></span><button data-a="run" title="Shift+Enter">▶ Run</button><button data-a="del" title="Delete cell">✕</button></div><textarea spellcheck="false" autocapitalize="off" autocomplete="off"></textarea><pre class="out"></pre><div class="time"></div>`;
-  const cell = { el, ta: el.querySelector("textarea"), out: el.querySelector(".out"), time: el.querySelector(".time") };
+  el.innerHTML = `<div class="head"><span class="n">[ ]</span><span class="sp"></span><button data-a="run" title="Run (Shift+Enter)">▶ Run</button><button data-a="del" title="Delete cell">✕</button></div><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><pre class="out"></pre><div class="time"></div>`;
+  const cell = { el, ta: el.querySelector("textarea"), hl: el.querySelector(".ed pre"), out: el.querySelector(".out"), time: el.querySelector(".time"), n: el.querySelector(".n") };
   el.cell = cell;
   cell.ta.value = code;
-  cell.ta.addEventListener("input", () => autosize(cell.ta));
+  cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); });
   cell.ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       run(cell);
-      if (e.shiftKey) {
-        const next = el.nextElementSibling?.cell ?? addCell("", el);
-        next.ta.focus();
-      }
-    } else if (e.key === "Tab") {
+      if (e.shiftKey) advance(cell);
+    } else if (e.key === "Tab" && !e.shiftKey) {
       e.preventDefault();
-      const { selectionStart: s, selectionEnd: t, value: v } = cell.ta;
-      cell.ta.value = v.slice(0, s) + "    " + v.slice(t);
-      cell.ta.selectionStart = cell.ta.selectionEnd = s + 4;
+      document.execCommand("insertText", false, "    "); // keeps undo working
     }
   });
-  el.querySelector('[data-a="run"]').onclick = () => run(cell);
-  el.querySelector('[data-a="del"]').onclick = () => { el.remove(); number(); };
+  el.querySelector('[data-a="run"]').onclick = () => { run(cell); advance(cell); };
+  el.querySelector('[data-a="del"]').onclick = () => el.remove();
   if (after) after.after(el); else cellsEl.appendChild(el);
   autosize(cell.ta);
-  number();
+  paint(cell);
   if (focus) cell.ta.focus();
   return cell;
 }
 
-function number() {
-  cells().forEach((c, i) => (c.el.querySelector(".n").textContent = `[${i + 1}]`));
+// Move to the next cell, making one at the end.
+function advance(cell) {
+  const next = cell.el.nextElementSibling?.cell ?? addCell("", cell.el);
+  next.ta.focus();
+  next.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function load(codes) {
   cellsEl.textContent = "";
+  execCount = 0;
   for (const c of codes) addCell(c);
   if (!codes.length) addCell("");
+}
+
+function setMode(mode) {
+  modeEl.value = mode;
+  document.body.classList.toggle("mode-sage", mode === "sage");
+  try { localStorage.setItem("sagebrush-mode", mode); } catch {}
+  for (const c of cells()) paint(c);
 }
 
 // Share: cells in the URL fragment (never sent to a server).
@@ -218,19 +296,30 @@ const dec = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g,
 $("#runall").onclick = runAll;
 $("#add").onclick = () => addCell("", null, true);
 $("#stop").onclick = () => stop("\nStopped (interpreter restarted; variables are gone).\n");
-$("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) { c.out.textContent = ""; c.time.textContent = ""; } };
+$("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) { c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
 $("#share").onclick = async () => {
-  location.hash = "c=" + enc(JSON.stringify(cells().map((c) => c.ta.value)));
+  location.hash = (isSage() ? "m=sage&" : "") + "c=" + enc(JSON.stringify(cells().map((c) => c.ta.value)));
   try { await navigator.clipboard.writeText(location.href); statusEl.textContent = "link copied"; } catch { statusEl.textContent = "link in the address bar"; }
 };
+modeEl.onchange = () => setMode(modeEl.value);
 const sel = $("#examples");
 for (const k of Object.keys(EXAMPLES)) sel.add(new Option(k, k));
-sel.onchange = () => { if (sel.value) { load(EXAMPLES[sel.value]); history.replaceState(null, "", location.pathname); } sel.value = ""; };
+sel.onchange = () => {
+  if (sel.value) {
+    setMode(sel.value === "Sage" ? "sage" : "python");
+    load(EXAMPLES[sel.value]);
+    history.replaceState(null, "", location.pathname);
+  }
+  sel.value = "";
+};
 
 startWorker();
-let initial = EXAMPLES.Welcome;
+let initial = EXAMPLES.Welcome, mode = "python";
+try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
 const m = /c=([\w-]+)/.exec(location.hash);
-if (m) { try { initial = JSON.parse(dec(m[1])); } catch {} }
+if (m) { try { initial = JSON.parse(dec(m[1])); } catch {} mode = /m=sage/.test(location.hash) ? "sage" : "python"; }
+else if (mode === "sage") initial = EXAMPLES.Sage;
+setMode(mode);
 load(initial);
 if (new URLSearchParams(location.search).has("run")) runAll();
 </script>
