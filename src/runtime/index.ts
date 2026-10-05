@@ -11,6 +11,7 @@ import * as Arr from "./array";
 import "./struct";
 import "./memoryview";
 import "./re";
+import "./numpy";
 import * as Cx from "./complex";
 O.complexHooks.pow = Cx.complexPow;
 

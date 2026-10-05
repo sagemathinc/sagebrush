@@ -173,7 +173,7 @@ export function lookupType(cls: PyType, name: string): any {
   return undefined;
 }
 
-function bumpVersion(cls: PyType) {
+export function bumpVersion(cls: PyType) {
   cls.$ver = versionCounter++;
   refreshFlags(cls);
   for (const s of cls.$subclasses) bumpVersion(s);
