@@ -9,7 +9,8 @@ import * as Obj from "./object";
 import * as O from "./ops";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype } from "./numpy";
-import { glibcLog as crlog, LOG_TABLES } from "./libm";
+import { glibcLog as crlog, glibcExp, glibcLog1p, LOG_TABLES, EXP_TABLES } from "./libm";
+import { KI, WI, FI, KE, WE, FE, ZIGGURAT_NOR_R, ZIGGURAT_NOR_INV_R, ZIGGURAT_EXP_R } from "./ziggurat_data";
 import { wasmRandom } from "./kernels";
 
 const { T, raise } = Obj;
@@ -203,6 +204,38 @@ function legacyGauss(g: MT19937): number {
   return f * x2;
 }
 
+// Generator.standard_normal and standard_exponential: NumPy's ziggurats
+// (numpy/random/src/distributions/distributions.c), on 64-bit draws
+function zigNormal(g: PCG64): number {
+  for (;;) {
+    const r64 = g.next64();
+    const idx = Number(r64 & 0xffn), r = r64 >> 8n;
+    const rabs = Number((r >> 1n) & 0x000fffffffffffffn);
+    let x = rabs * WI[idx];
+    if (r & 1n) x = -x;
+    if (rabs < KI[idx]) return x;
+    if (idx === 0) {
+      for (;;) {
+        const xx = -ZIGGURAT_NOR_INV_R * glibcLog1p(-g.nextDouble());
+        const yy = -glibcLog1p(-g.nextDouble());
+        if (yy + yy > xx * xx) return Math.floor(rabs / 256) & 1 ? -(ZIGGURAT_NOR_R + xx) : ZIGGURAT_NOR_R + xx;
+      }
+    } else if ((FI[idx - 1] - FI[idx]) * g.nextDouble() + FI[idx] < glibcExp(-0.5 * x * x)) return x;
+  }
+}
+function zigExponential(g: PCG64): number {
+  for (;;) {
+    const r64 = g.next64() >> 3n;
+    const idx = Number(r64 & 0xffn), ri = Number(r64 >> 8n);
+    const x = ri * WE[idx];
+    if (ri < KE[idx]) return x;
+    if (idx === 0) return ZIGGURAT_EXP_R - glibcLog1p(-g.nextDouble());
+    if ((FE[idx - 1] - FE[idx]) * g.nextDouble() + FE[idx] < glibcExp(-x)) return x;
+  }
+}
+// LOG_TABLES, EXP_TABLES and the ziggurat tables, for the kernels
+const RANDOM_TABLES = Float64Array.from([...LOG_TABLES, ...EXP_TABLES, ...KI, ...WI, ...FI, ...KE, ...WE, ...FE]);
+
 // Smallest 2^k - 1 >= max
 function mask32(max: number): number {
   let m = max >>> 0;
@@ -334,13 +367,13 @@ newBuiltinModule("_nprandom", (m) => {
     if (!(a.data instanceof Float64Array)) return false;
     if (g instanceof MT19937) {
       const meta = Float64Array.of(g.pos, g.hasGauss ? 1 : 0, g.gauss);
-      if (!wasmRandom("mt", g.key, meta, dist, a.data, lo, rng, LOG_TABLES)) return false;
+      if (!wasmRandom("mt", g.key, meta, dist, a.data, lo, rng, RANDOM_TABLES)) return false;
       [g.pos, g.hasGauss, g.gauss] = [meta[0], meta[1] !== 0, meta[2]];
       return true;
     }
     const words = BigUint64Array.of(g.state & M64, g.state >> 64n, g.inc & M64, g.inc >> 64n);
     const meta = Float64Array.of(g.hasU32 ? 1 : 0, g.u32);
-    if (!wasmRandom("pcg", words, meta, dist, a.data, lo, rng, LOG_TABLES)) return false;
+    if (!wasmRandom("pcg", words, meta, dist, a.data, lo, rng, RANDOM_TABLES)) return false;
     g.state = words[0] | (words[1] << 64n);
     [g.hasU32, g.u32] = [meta[0] !== 0, meta[1]];
     return true;
@@ -446,6 +479,8 @@ newBuiltinModule("_nprandom", (m) => {
       return f * x2;
     }, g, 5);
   });
+  fn("zig_normal", (g: PCG64, size: any) => fill(size, "float64", () => zigNormal(g), g, 6));
+  fn("zig_exponential", (g: PCG64, size: any) => fill(size, "float64", () => zigExponential(g), g, 7));
   fn("get_state", (g: MT19937) => [Array.from(g.key), g.pos, g.hasGauss ? 1 : 0, g.gauss]);
   fn("set_state", (g: MT19937, key: any, pos: any, hasGauss: any, gauss: any) => {
     g.key.set(key.map(Number));

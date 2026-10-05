@@ -19,7 +19,7 @@ import * as F from "./format";
 import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
-import { glibcLog, glibcExp, EXP_TABLES, LOG_TABLES } from "./libm";
+import { glibcLog, glibcExp, glibcLog1p, EXP_TABLES, LOG_TABLES } from "./libm";
 import { gemmBuffers, wasmUnary, wasmSort, wasmArgsort } from "./kernels";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
@@ -795,7 +795,7 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   arctan2: { f: Math.atan2, out: "float" },
   hypot: { f: Math.hypot, out: "float" },
   copysign: { f: (x, y) => (Object.is(Math.sign(y), -0) || y < 0 ? -Math.abs(x) : Math.abs(x)), out: "float" },
-  logaddexp: { f: (x, y) => { const m = Math.max(x, y); return m === -Infinity ? m : m + Math.log1p(Math.exp(-Math.abs(x - y))); }, out: "float" },
+  logaddexp: { f: (x, y) => { const m = Math.max(x, y); return m === -Infinity ? m : m + glibcLog1p(glibcExp(-Math.abs(x - y))); }, out: "float" },
   equal: { f: (x, y) => +(x === y), out: "bool", c: (a, b, c, d) => [+(a === c && b === d), 0] },
   not_equal: { f: (x, y) => +(x !== y), out: "bool", c: (a, b, c, d) => [+(a !== c || b !== d), 0] },
   less: { f: (x, y) => +(x < y), out: "bool" },
@@ -1007,7 +1007,7 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   log: { f: glibcLog, c: (a, b) => [glibcLog(Math.hypot(a, b)), Math.atan2(b, a)], float: true },
   log2: { f: Math.log2, float: true },
   log10: { f: Math.log10, float: true },
-  log1p: { f: Math.log1p, float: true },
+  log1p: { f: glibcLog1p, float: true },
   sin: { f: Math.sin, c: (a, b) => [Math.sin(a) * Math.cosh(b), Math.cos(a) * Math.sinh(b)], float: true },
   cos: { f: Math.cos, c: (a, b) => [Math.cos(a) * Math.cosh(b), -Math.sin(a) * Math.sinh(b)], float: true },
   tan: { f: Math.tan, float: true },
@@ -1048,7 +1048,7 @@ function roundHalfEven(x: number): number {
 const UN_EXPR: Record<string, string> = {
   negative: "-v", positive: "v", absolute: "Math.abs(v)", square: "v * v", sqrt: "Math.sqrt(v)", cbrt: "Math.cbrt(v)",
   exp: "EXP(v)", exp2: "2 ** v", expm1: "Math.expm1(v)", log: "LOG(v)", log2: "Math.log2(v)", log10: "Math.log10(v)",
-  log1p: "Math.log1p(v)", sin: "Math.sin(v)", cos: "Math.cos(v)", tan: "Math.tan(v)", arcsin: "Math.asin(v)",
+  log1p: "LOG1P(v)", sin: "Math.sin(v)", cos: "Math.cos(v)", tan: "Math.tan(v)", arcsin: "Math.asin(v)",
   arccos: "Math.acos(v)", arctan: "Math.atan(v)", sinh: "Math.sinh(v)", cosh: "Math.cosh(v)", tanh: "Math.tanh(v)",
   arcsinh: "Math.asinh(v)", arccosh: "Math.acosh(v)", arctanh: "Math.atanh(v)", floor: "Math.floor(v)", ceil: "Math.ceil(v)",
   trunc: "Math.trunc(v)", isnan: "+(v !== v)", isfinite: "+(v - v === 0)", isinf: "+(v === Infinity || v === -Infinity)",
@@ -1071,7 +1071,7 @@ function unaryKernel(op: string, contiguous: boolean): any {
            for (; d >= 0; d--) { p += st[d]; if (++idx[d] < shape[d]) break; p -= st[d] * shape[d]; idx[d] = 0; }
            if (d < 0) return;
          }`;
-    k = new Function("EXP", "LOG", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog);
+    k = new Function("EXP", "LOG", "LOG1P", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog, glibcLog1p);
     unKernels.set(key, k);
   }
   return k;

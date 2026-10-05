@@ -1,7 +1,7 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
 import { globalsDict, hooks } from "./object";
-import { glibcLog, glibcExp } from "./libm";
+import { glibcLog, glibcExp, glibcLog1p } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
@@ -260,7 +260,7 @@ newBuiltinModule("math", (m) => {
   unary("fabs", Math.abs);
   unary("log2", Math.log2, (x) => x > 0 || x !== x);
   unary("log10", Math.log10, (x) => x > 0 || x !== x);
-  unary("log1p", Math.log1p, (x) => x > -1 || x !== x);
+  unary("log1p", glibcLog1p, (x) => x > -1 || x !== x);
   unary("degrees", (x) => (x * 180) / Math.PI);
   unary("radians", (x) => (x * Math.PI) / 180);
   unary("cbrt", Math.cbrt);
