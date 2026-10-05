@@ -5,7 +5,7 @@ edition = "2021"
 description = "Sagebrush engines for browsers and chat artifacts: plain wasm32, JSON in/out, no wasm-bindgen"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 sagebrush-modsym = { path = "../modsym", default-features = false }

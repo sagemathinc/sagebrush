@@ -334,6 +334,18 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     for count in [8, 12, 16] {
         candidates.push((0..count.min(qs_all.len())).map(|i| (qs_all[i], i as i64 + 1)).collect());
     }
+    // Small coefficients can make a new eigenvalue of T equal an old one by
+    // accident (levels 448, 540, 960, ... at weight 2): then large
+    // (deterministic) pseudo-random coefficients.
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64 ^ n ^ ((k as u64) << 40);
+    for count in [8, 16, 8, 16] {
+        candidates.push((0..count.min(qs_all.len())).map(|i| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (qs_all[i], (seed % 9973) as i64 + 1)
+        }).collect());
+    }
     let mut checks = vec![];
     let qs: Vec<u64> = qs_all.clone();
     let lv = levels(n, k, &eps, &units, &qs)?;

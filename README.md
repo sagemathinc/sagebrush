@@ -69,12 +69,19 @@ the engines.
   `ModularSymbols`, `CuspForms`, `ModularForms`, `Newforms`, `Gamma0`,
   `DirichletGroup`, `EllipticCurve` and polynomial rings over `ZZ` and `QQ`
   (`R.<x> = ZZ[]`, `f.factor()`, `f.roots()`, `gcd`, `discriminant`) run on
-  the Sagebrush engines (a 770 KB WebAssembly build of `engine/web`, loaded
+  the Sagebrush engines (a 700 KB WebAssembly build of `engine/web`, loaded
   on first use), with Sage's printed output: `sage-tests/` checks 3,200
   lines against Sage. `newform_orbits(N, k)` lists every Galois orbit of
   newforms with its LMFDB label, dimension, trace form and Hecke
   characteristic polynomial. `from sagebrush import modsym, ap, mf` is the API
   of the native Python package.
+- **The Atlas** ([sagebrush.space/atlas](https://sagebrush.space/atlas/)):
+  an LMFDB-style site of the 7,961 Galois orbits of newforms of weight 2
+  and level ≤ 1000 (and weights 4–12 with Nk² ≤ 4000), proven by the
+  modular symbols engine, with LMFDB labels; all 5,951 weight-2 orbits
+  agree with the LMFDB. Every page is also JSON, other spaces are computed
+  in the browser, and any stored space can be recomputed there and compared
+  ([web/atlas](web/atlas/README.md)).
 - **numpy:** the NumPy 2 API in TypeScript (ndarray, ufuncs, random,
   linalg, fft, polynomials), checked against NumPy itself. Printed output and
   seeded random numbers are byte-identical. dense linear algebra, the FFT, `exp` and
