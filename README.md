@@ -64,6 +64,9 @@ the engines.
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
 - **Sage mode** (`--sage`): `2^3 == 8`, and `2/3` is an exact rational.
+- **numpy:** the NumPy 2 API in TypeScript (ndarray, ufuncs, random,
+  linalg, fft, polynomials), checked against NumPy itself. Printed output and
+  seeded random numbers are byte-identical. See [NUMPY.md](NUMPY.md).
 - **Plots and `@interact`:** Sage's `plot`/`point`/... and
   `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
   rerun a function in milliseconds. See [PLOTTING.md](PLOTTING.md).

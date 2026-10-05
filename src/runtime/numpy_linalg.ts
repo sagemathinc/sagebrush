@@ -9,6 +9,7 @@
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype, ascontig, copy as npcopy } from "./numpy";
+import { glibcLog, glibcExp } from "./libm";
 
 const { T, raise, tuple } = Obj;
 const F64 = () => toDtype("float64");
@@ -731,9 +732,15 @@ newBuiltinModule("_nplinalg", (m) => {
     const [A, r, c] = mat(a);
     if (r !== c) linalgError("Last 2 dimensions of the array must be square");
     const L = lu(A, r);
-    let d = L.sign;
-    for (let i = 0; i < r; i++) d *= L.lu[i * r + i];
-    return d;
+    // as numpy/linalg/umath_linalg.cpp: sign * exp(sum of log|u_ii|)
+    let sign = L.sign, logdet = 0;
+    for (let i = 0; i < r; i++) {
+      const v = L.lu[i * r + i];
+      if (v === 0) return 0;
+      if (v < 0) sign = -sign;
+      logdet += glibcLog(Math.abs(v));
+    }
+    return sign * glibcExp(logdet);
   });
   fn("slogdet", (a: NDArray) => {
     const [A, r] = mat(a);
@@ -743,7 +750,7 @@ newBuiltinModule("_nplinalg", (m) => {
       const v = L.lu[i * r + i];
       if (v === 0) return tuple([0, -Infinity]);
       if (v < 0) sign = -sign;
-      logdet += Math.log(Math.abs(v));
+      logdet += glibcLog(Math.abs(v));
     }
     return tuple([sign, logdet]);
   });

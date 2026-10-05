@@ -1,4 +1,110 @@
-# numpy for sagebrush: write our own, or expose numpy-ts?
+# numpy for sagebrush
+
+Status (2026-10-05): built, following the recommendation below. The core is
+`src/runtime/numpy.ts`, with `numpy_random.ts`, `numpy_linalg.ts`,
+`numpy_fft.ts` and `libm.ts` beside it; the Python API is `lib/numpy/`.
+
+## How it is checked
+
+`numpy-tests/` holds programs that print results: creation, arithmetic and
+promotion, ufuncs, reductions, indexing, shapes, printing, random, linalg,
+fft, polynomials. `python3 numpy-tests/run.py` runs each one under CPython
+with the real NumPy (2.5.1) and under sagebrush, and requires the output to
+be **byte-identical**. All 13 pass, and CI runs them.
+
+- **Printing:** `repr`/`str` port NumPy's `arrayprint` rules (dragon4
+  shortest digits, padding, line wrapping, summarization, `shape=`/`dtype=`
+  suffixes, float32 shortest forms), so printed arrays look exactly like
+  NumPy's.
+- **Arithmetic:** NumPy 2 promotion, with Python scalars "weak" (NEP 50),
+  and OverflowError for out-of-range Python ints. Float sums use NumPy's
+  pairwise summation, so they agree to the last bit. `mean`, `var` and `std`
+  follow NumPy's formulas.
+- **Random:** NumPy's exact streams.
+  - `np.random.seed` and `RandomState`: MT19937 with NumPy's legacy seeding,
+    53-bit doubles, polar-method normals, masked-rejection integers, and
+    NumPy's shuffle, Poisson (PTRS) and exponential.
+  - `default_rng`: PCG64 seeded through NumPy's SeedSequence hashing, Lemire
+    bounded integers, and Floyd's algorithm for `choice(replace=False)`.
+  - `Generator.normal` uses a different algorithm (NumPy's ziggurat tables
+    are not ported yet), so its stream differs from NumPy's.
+- **Bit-for-bit math:** NumPy's distributions and ufuncs call glibc's libm,
+  and V8's `Math.log` and `Math.exp` differ from it in the last bit for 7–10%
+  of inputs. So `libm.ts` ports glibc's `log` and `exp`, which come from Arm's
+  optimized-routines (MIT OR Apache-2.0 WITH LLVM-exception; the tables are
+  generated from `math/log_data.c` and `math/exp_data.c`). The port includes
+  the fused multiply-adds of glibc's x86-64 FMA build. It agrees with glibc on
+  every one of 200,000 test inputs each, and Python's `math.log`/`math.exp`
+  use it too, so they match CPython.
+- **Not bit-for-bit, to rounding error only:**
+  - `sin`, `cos`, `tan`, `arctan`... (glibc's are IBM's larger code; V8
+    differs in the last bit for a few percent of inputs).
+  - linalg decompositions (LAPACK's blocked algorithms order operations
+    differently).
+  - fft (pocketfft).
+  - float32 transcendentals.
+
+## What is there
+
+- **The `ndarray` and dtypes:** dtypes bool, int8–64, uint8–64, float32/64,
+  complex64/128. Arrays are views (`shape`, `strides`, `offset`).
+- **Indexing:** basic, advanced and boolean indexing, including NumPy's rule
+  for where mixed advanced indices put their axes. Assignment through all of
+  them.
+- **Broadcasting ufuncs** with `out`, `where`, `reduce`, `accumulate` and
+  `outer`.
+- **Reductions** with `axis` (int or tuple) and `keepdims`: `nan*`
+  variants, `median`, `percentile`/`quantile` (NumPy's `_lerp`), `average`,
+  `cov`, `corrcoef`.
+- **Shape functions:** `concatenate`, `stack`, `split`, `tile`, `repeat`,
+  `pad`, `roll`, `flip`, `rot90`, ...
+- **Searching and sorting:** `sort`, `argsort`, `unique` (with indices,
+  inverse and counts), `searchsorted`, `where`, `nonzero`, `histogram`,
+  `bincount`, `digitize`, `interp`, `convolve`, `gradient`, `trapezoid`,
+  `diff`, `cross`, `einsum` (without repeated indices), `tensordot`, `kron`.
+- **`linalg`:** `solve`, `inv`, `det`, `slogdet`, `qr`, `cholesky`,
+  `eigh`/`eigvalsh` (tred2/tql2), general `eig`/`eigvals` (orthes/hqr2, with
+  complex eigenvectors normalized as LAPACK does), `svd` (one-sided Jacobi),
+  `pinv`, `lstsq`, `matrix_rank`, `norm`, `cond`, `matrix_power`, and stacked
+  (batched) inputs.
+- **`fft`:** `fft`/`ifft`/`rfft`/`irfft`/`fft2`/`fftn`, ..., with norms,
+  `fftfreq` and `fftshift`.
+- **Polynomials:** `polyfit` (NumPy's scaled least squares), `polyval`,
+  `roots`, `poly1d`, `polyder`/`polyint`, ... and `np.polynomial.Polynomial`.
+- **`np.testing`.**
+- **Scalars:** NumPy 2's scalar types (`np.float64(1.5)`, `np.int64`,
+  `np.True_`) print and promote as in NumPy.
+
+**Not yet:**
+- string, object and structured arrays;
+- datetime;
+- masked arrays;
+- `np.save`/`np.load` (`savetxt`/`loadtxt` exist);
+- complex `linalg`;
+- `Generator.normal`'s exact stream.
+- int64 and uint64 are exact only up to 2^53, since they are stored as
+  doubles.
+
+## Speed
+
+Measured in Node against NumPy (C, OpenBLAS) on the same machine:
+
+| | sagebrush | NumPy |
+|---|---|---|
+| `x*2+1` (10^6) | 3.2 ms | 0.5 ms |
+| `sin` (10^6) | 15 ms | 10 ms |
+| `sum` (10^6) | 0.9 ms | 0.2 ms |
+| `randn` (10^6) | 54 ms | 20 ms |
+| 300×300 matmul | 36 ms | 2.9 ms |
+| `inv` 200×200 | 15 ms | 0.7 ms |
+
+Elementwise work is within a few times of NumPy. Dense linear algebra is
+where BLAS/LAPACK pull far ahead; the plan for that (and SIMD kernels) is
+below.
+
+# The investigation that led here
+
+## write our own, or expose numpy-ts?
 
 An investigation from 2026-10-05. numpy-ts 1.7.0 (MIT,
 github.com/dupontcyborg/numpy-ts) was measured in Node 26 against plain

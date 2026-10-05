@@ -146,6 +146,7 @@
     In a cell, Tab indents: press <b>Esc</b> first to Tab out of it. Variables persist between cells and are shared with the <b>Console</b>.
     In <b>Sage</b> mode <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational and
     <code>factor</code>, <code>is_prime</code>, <code>next_prime</code>, <code>divisors</code>, <code>euler_phi</code>, <code>crt</code> &hellip; are built in.
+    <code>numpy</code> (validated against NumPy itself: same printed output, same seeded random numbers), <code>matplotlib.pyplot</code>, Sage-style <code>plot</code>, <code>@interact</code> and <code>animate</code> are built in.
     The language is CPython 3.14's own grammar (syntax errors match CPython), with big integers, <code>fractions</code>,
     <code>complex</code>/<code>cmath</code>, <code>re</code>, <code>json</code>, <code>collections</code>, <code>functools</code>, generators,
     <code>async</code>, classes and metaclasses. Pure-Python packages such as mpmath pass their own test suites.
@@ -209,12 +210,19 @@ const EXAMPLES = {
     "# The prime counting function against the PNT prediction (press ▶)\n@interact\ndef f(N=(10, 1000, 5)):\n    show(list_plot([prime_pi(k) for k in range(3, N)], plotjoined=True, legend_label='prime_pi') +\n         plot(x/(log(x) - 1), (x, 3, N), color='red', legend_label='x/(log(x)-1)'))",
     "# animate: frames on common axes; the result is an animated SVG\na = animate([plot(sin(x - k)*exp(-x/6), (x, 0, 4*pi), fill='axis', thickness=2) for k in srange(0, 2*pi, 0.2)], figsize=(7, 3))\na.show(delay=5)",
   ],
+  "numpy": [
+    "import numpy as np\na = np.arange(12).reshape(3, 4)\nprint(a)\na.sum(axis=0), a.mean(), a[a % 3 == 0], a.T @ a",
+    "# Seeded streams match NumPy's exactly\nnp.random.seed(0)\nx = np.random.randn(100_000)\nx.mean(), x.std(), np.percentile(x, [5, 50, 95])",
+    "A = np.array([[4.0, 1, 2], [1, 3, 0], [2, 0, 5]])\nw, v = np.linalg.eigh(A)\nprint(w)\nnp.linalg.solve(A, [1, 2, 3]), np.linalg.det(A), np.allclose(v @ np.diag(w) @ v.T, A)",
+    "# Least squares and polynomials\nx = np.linspace(0, 1, 50)\ny = 3 * x**2 - x + 0.05 * np.sin(40 * x)\np = np.polyfit(x, y, 2)\np, np.roots(p)",
+    "# A spectrum with the FFT\nimport matplotlib.pyplot as plt\nt = np.linspace(0, 1, 512, endpoint=False)\nsignal = np.sin(2 * np.pi * 50 * t) + 0.5 * np.sin(2 * np.pi * 120 * t) + 0.3 * np.random.randn(512)\nfreq = np.fft.rfftfreq(512, d=1 / 512)\nplt.figure(figsize=(7, 3)); plt.plot(freq, np.abs(np.fft.rfft(signal))); plt.xlabel('Hz'); plt.title('|FFT|')",
+  ],
   "matplotlib": [
-    "import math\nimport matplotlib.pyplot as plt\nxs = [i / 20 for i in range(201)]\nplt.plot(xs, [math.sin(t) for t in xs], label='sin')\nplt.plot(xs, [math.cos(t) for t in xs], '--', label='cos')\nplt.title('Figures show when the cell ends'); plt.legend(); plt.grid(True)",
-    "import random\nimport matplotlib.pyplot as plt\nrandom.seed(2)\ndata = [random.gauss(0, 1) for _ in range(5000)]\nfig, (a, b) = plt.subplots(1, 2, figsize=(9, 3.5))\na.hist(data, bins=40, edgecolor='white')\na.set_title('5000 normal samples')\nb.scatter(data[:300], data[300:600], c=data[600:900], s=18)\nb.set_title('scatter, colored by a third sample')",
+    "import numpy as np\nimport matplotlib.pyplot as plt\nx = np.linspace(0, 10, 201)\nplt.plot(x, np.sin(x), label='sin')\nplt.plot(x, np.cos(x), '--', label='cos')\nplt.title('Figures show when the cell ends'); plt.legend(); plt.grid(True)",
+    "import numpy as np\nimport matplotlib.pyplot as plt\nrng = np.random.default_rng(2)\ndata = rng.normal(size=5000)\nfig, (a, b) = plt.subplots(1, 2, figsize=(9, 3.5))\na.hist(data, bins=40, edgecolor='white')\na.set_title('5000 normal samples')\nb.scatter(data[:300], data[300:600], c=data[600:900], s=18)\nb.set_title('scatter, colored by a third sample')",
     "import matplotlib.pyplot as plt\nplt.figure(figsize=(6, 3.5))\nplt.bar(['Python', 'Sage', 'JavaScript', 'Rust'], [42, 17, 30, 12], color=['C0', 'C1', 'C2', 'C3'])\nplt.ylabel('cells run today')",
-    "# matplotlib.animation.FuncAnimation\nimport math\nimport matplotlib.pyplot as plt\nfrom matplotlib.animation import FuncAnimation\nfig, ax = plt.subplots(figsize=(7, 3))\nxs = [i / 25 for i in range(160)]\nline, = ax.plot([], [], lw=2)\nax.set_xlim(0, xs[-1]); ax.set_ylim(-1.2, 1.2)\ndef update(k):\n    line.set_data(xs, [math.sin(3 * x - k / 4) * math.cos(x / 2) for x in xs])\n    ax.set_title(f'frame {k}')\nani = FuncAnimation(fig, update, frames=50, interval=40)",
-    "# ipywidgets' interact works too\nimport math\nimport matplotlib.pyplot as plt\nfrom ipywidgets import interact\n\n@interact(k=(0.0, 1.0), w=(1, 10))\ndef damped(k=0.2, w=4):\n    t = [i / 50 for i in range(500)]\n    plt.figure(figsize=(7, 3))\n    plt.plot(t, [math.exp(-k * s) * math.cos(w * s) for s in t])\n    plt.ylim(-1, 1); plt.title(f'k = {k:.2f}, w = {w}')",
+    "# matplotlib.animation.FuncAnimation\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom matplotlib.animation import FuncAnimation\nfig, ax = plt.subplots(figsize=(7, 3))\nx = np.linspace(0, 6.4, 160)\nline, = ax.plot([], [], lw=2)\nax.set_xlim(0, x[-1]); ax.set_ylim(-1.2, 1.2)\ndef update(k):\n    line.set_data(x, np.sin(3 * x - k / 4) * np.cos(x / 2))\n    ax.set_title(f'frame {k}')\nani = FuncAnimation(fig, update, frames=50, interval=40)",
+    "# ipywidgets' interact works too\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom ipywidgets import interact\n\n@interact(k=(0.0, 1.0), w=(1, 10))\ndef damped(k=0.2, w=4):\n    t = np.linspace(0, 10, 500)\n    plt.figure(figsize=(7, 3))\n    plt.plot(t, np.exp(-k * t) * np.cos(w * t))\n    plt.ylim(-1, 1); plt.title(f'k = {k:.2f}, w = {w}')",
   ],
   "Text & data": [
     "import re, json\ntext = 'Euler 1707, Gauss 1777, Riemann 1826, Noether 1882'\npeople = {name: int(year) for name, year in re.findall(r'(\\w+) (\\d{4})', text)}\nprint(json.dumps(people, indent=2))",
@@ -918,7 +926,7 @@ const result = async (box) => ({ content: [{ type: "text", text: outputText(box)
 const tools = [
   {
     name: "run_python",
-    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/... (sage=true); animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
+    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/... (sage=true); animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
     inputSchema: {
       type: "object",
       properties: {
