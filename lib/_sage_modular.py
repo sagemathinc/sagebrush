@@ -542,7 +542,10 @@ class ModularSymbols:
             raise NotImplementedError("hecke_polynomial is available for primes n")
         m = self._m()
         c = self._hecke(n)
-        return Polynomial([row if m > 2 else row[0] for row in c], var, m, _field_order(self._chi))
+        if m <= 2:
+            from _sage_poly import PolynomialRing, ZZ
+            return PolynomialRing(ZZ, var)([row[0] for row in c])
+        return Polynomial(c, var, m, _field_order(self._chi))
 
     def hecke_operator(self, n):
         return HeckeOperator(self, int(n))
@@ -623,6 +626,12 @@ class ModularForms:
     def new_subspace(self):
         return _Subspace(self, "Modular Forms subspace", self._dims()["new"])
 
+    def newforms(self, names=None):
+        return Newforms(self._chi or self._N, self._k, names=names)
+
+    def newform_orbits(self, prec=100):
+        return newform_orbits(self._chi or self._N, self._k, prec)
+
     def _ambient_repr(self):
         if self._chi is None:
             return "Modular Forms space of dimension %d for %s of weight %d over Rational Field" % (
@@ -649,6 +658,12 @@ class _Subspace:
 
     def new_subspace(self):
         return _Subspace(self._A, "Modular Forms subspace", self._A._dims()["new"])
+
+    def newforms(self, names=None):
+        return self._A.newforms(names)
+
+    def newform_orbits(self, prec=100):
+        return self._A.newform_orbits(prec)
 
     def __repr__(self):
         return "%s of dimension %d of %s" % (self._kind, self._dim, self._A._ambient_repr())
@@ -866,3 +881,131 @@ def EllipticCurve(x, y=None):
     if E.discriminant() == 0:
         raise ArithmeticError("invariants %s define a singular curve" % (tuple(a),))
     return E
+
+
+# ------------------------------------------------------------------ newforms
+
+def _qexp(coeffs, prec):
+    """sum coeffs[n-1] q^n + O(q^prec), as Sage prints a power series."""
+    terms = []
+    for n in range(1, prec):
+        a = coeffs[n - 1] if n - 1 < len(coeffs) else 0
+        if a == 0:
+            continue
+        mono = "q" if n == 1 else "q^%d" % n
+        coef = "" if abs(a) == 1 else "%d*" % abs(a)
+        terms.append((a < 0, coef + mono))
+    s = ""
+    for i, (neg, t) in enumerate(terms):
+        s += ("-" if neg else "") + t if i == 0 else (" - " if neg else " + ") + t
+    return (s + " + " if s else "") + "O(q^%d)" % prec
+
+
+class NewformOrbit:
+    """A Galois orbit of newforms (LMFDB's newform orbit): its label,
+    dimension over QQ, trace form and the characteristic polynomial over QQ
+    of the Hecke operator T that separates the orbits (a sagebrush
+    extension; Sage itself has no such object)."""
+
+    def __init__(self, N, k, chi, data, T):
+        self._N, self._k, self._chi = N, k, chi
+        self._letter = data["letter"]
+        self._dim = data["dim"]
+        self._traces = data["traces"]
+        self._charpoly = data["charpoly"]
+        self._T = T
+
+    def label(self):
+        """LMFDB's label N.k.a.x (for the trivial character)."""
+        return "%d.%d.a.%s" % (self._N, self._k, self._letter) if self._chi is None else None
+
+    def level(self):
+        return self._N
+
+    def weight(self):
+        return self._k
+
+    def dimension(self):
+        return self._dim
+
+    def traces(self, n=None):
+        """[tr a_1, ..., tr a_n] (traces down to QQ of the coefficients)."""
+        return self._traces[: n or len(self._traces)]
+
+    def trace_form(self, prec=6):
+        return _qexp(self._traces, prec)
+
+    def hecke_operator(self):
+        """T as [(q, r)]: T = sum r T_q."""
+        return list(self._T)
+
+    def charpoly(self, var="x"):
+        """The characteristic polynomial of T on this orbit (irreducible over QQ)."""
+        from _sage_poly import PolynomialRing, ZZ
+        return PolynomialRing(ZZ, var)(self._charpoly)
+
+    def __repr__(self):
+        name = self.label() or "Newform orbit %d.%d.%s" % (self._N, self._k, self._letter)
+        return "%s (dimension %d): %s" % (name, self._dim, self.trace_form())
+
+
+def newform_orbits(group=1, weight=2, prec=100):
+    """The Galois orbits of newforms in S_k^new(N, [chi]), in LMFDB order
+    (dimension, then trace form), with their trace forms to q^prec:
+    computed (and proven) by the Sagebrush engine."""
+    N, chi = _group_and_char(group)
+    if chi is not None and chi.order() == 1:
+        chi = None
+    d = _mf.newforms(N, int(weight), chi=chi, bound=int(prec))
+    return [NewformOrbit(N, int(weight), chi, o, d["T"]) for o in d["newforms"]]
+
+
+class Newform:
+    """A newform with rational coefficients, as Sage's Newform prints it."""
+
+    def __init__(self, orbit):
+        self._o = orbit
+
+    def level(self):
+        return self._o._N
+
+    def weight(self):
+        return self._o._k
+
+    def coefficients(self, n=None):
+        """[a_1, ..., a_n] (or the list for n a list of indices)."""
+        if isinstance(n, (list, tuple)):
+            return [self[i] for i in n]
+        return list(self._o._traces[: (n if n is not None else 20)])
+
+    def __getitem__(self, n):
+        if n == 0:
+            return 0
+        o = self._o
+        if n > len(o._traces):
+            more = newform_orbits(o._chi or o._N, o._k, prec=max(2 * n, 100))
+            self._o = o = [m for m in more if m._letter == o._letter][0]
+        return o._traces[n - 1]
+
+    def q_expansion(self, prec=6):
+        return _qexp(self._o._traces, prec)
+
+    def hecke_eigenvalue_field(self):
+        from _sage_poly import QQ
+        return QQ
+
+    def label(self):
+        return self._o.label()
+
+    def __repr__(self):
+        return self.q_expansion(6)
+
+
+def Newforms(group, weight=2, base_ring=None, names=None):
+    """The newforms of weight k on Gamma_0(N) (or with a character), as Sage's
+    Newforms, when they all have rational coefficients; otherwise use
+    newform_orbits(N, k), which describes every Galois orbit."""
+    orbits = newform_orbits(group, weight, prec=20)
+    if any(o.dimension() != 1 for o in orbits):
+        raise NotImplementedError("newforms with non-rational coefficients: sagebrush describes them by newform_orbits(%s, %s) (label, dimension, trace form)" % (group, weight))
+    return [Newform(o) for o in orbits]

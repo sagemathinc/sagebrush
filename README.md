@@ -10,7 +10,8 @@ in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: two engines (modular symbols with rational newforms, and a_p of elliptic curves), not
+Status: three engines (modular symbols with newforms, a_p of elliptic curves, and factoring
+in Z[x]), not
 published to any package registry, and no license chosen yet.
 
 ## What works today
@@ -64,11 +65,15 @@ the engines.
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
 - **Sage mode** (`--sage`): `2^3 == 8`, and `2/3` is an exact rational.
-- **Modular forms and elliptic curves:** in Sage mode, `ModularSymbols`,
-  `CuspForms`, `ModularForms`, `Gamma0`, `DirichletGroup` and `EllipticCurve`
-  run on the Sagebrush engines (a 500 KB WebAssembly build of `engine/web`,
-  loaded on first use), with Sage's printed output: `sage-tests/` checks
-  3,000 lines against Sage. `from sagebrush import modsym, ap, mf` is the API
+- **Modular forms, elliptic curves and polynomials:** in Sage mode,
+  `ModularSymbols`, `CuspForms`, `ModularForms`, `Newforms`, `Gamma0`,
+  `DirichletGroup`, `EllipticCurve` and polynomial rings over `ZZ` and `QQ`
+  (`R.<x> = ZZ[]`, `f.factor()`, `f.roots()`, `gcd`, `discriminant`) run on
+  the Sagebrush engines (a 770 KB WebAssembly build of `engine/web`, loaded
+  on first use), with Sage's printed output: `sage-tests/` checks 3,200
+  lines against Sage. `newform_orbits(N, k)` lists every Galois orbit of
+  newforms with its LMFDB label, dimension, trace form and Hecke
+  characteristic polynomial. `from sagebrush import modsym, ap, mf` is the API
   of the native Python package.
 - **numpy:** the NumPy 2 API in TypeScript (ndarray, ufuncs, random,
   linalg, fft, polynomials), checked against NumPy itself. Printed output and
@@ -120,7 +125,7 @@ fits within the bound.
 
 ## Tests
 
-`cd engine && cargo test -p sagebrush-modsym -p sagebrush-ap` runs in about 10 seconds after the
+`cd engine && cargo test -p sagebrush-modsym -p sagebrush-ap -p sagebrush-poly` runs in about 10 seconds after the
 first build. For `ap` it checks agreement with smalljac and Sage (see
 [results/ap.md](results/ap.md)). For `modsym` it checks:
 
@@ -137,6 +142,12 @@ first build. For `ap` it checks agreement with smalljac and Sage (see
 - the charpoly kernel against determinants, the AVX2 kernels against the
   portable ones, and P^1(Z/NZ) by brute force.
 
+For `poly` (Zassenhaus: square-free decomposition, Cantor-Zassenhaus modulo
+several primes, quadratic Hensel lifting on a factor tree, recombination) it
+checks the factorization against FLINT on 400 random products, the
+cyclotomic polynomials x^n - 1 and x^(2^k) + 1, and the Hecke polynomials of
+T_2 and T_3 at about 100 levels up to 2003.
+
 ## Performance
 
 On one thread, on the same machine, the engine computes proven exact
@@ -151,7 +162,7 @@ caveats: [results/engine-exact.md](results/engine-exact.md) and
 
 | path | contents |
 |---|---|
-| `engine/` | the Rust workspace: engines `modsym` and `ap`; bindings `cli`, `py`, `node`, `wasm`; `bench` |
+| `engine/` | the Rust workspace: engines `modsym`, `ap` and `poly`; bindings `cli`, `py`, `node`, `wasm`, `web`; `bench` |
 | `kernels/` | Rust WebAssembly SIMD kernels (matmul, LU, QR, eigenproblems, SVD, FFT, exp, log) for the numpy runtime |
 | `results/` | write-ups of every experiment, with numbers |
 | `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |

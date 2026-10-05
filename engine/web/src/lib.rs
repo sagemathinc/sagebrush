@@ -7,8 +7,8 @@
 //! sb_reply_len().  Requests are {"fn": NAME, ...args}; replies are
 //! {"ok": RESULT} or {"error": MESSAGE}.  Single-threaded.  The functions
 //! and their results mirror the Python bindings (py/src/lib.rs: modsym,
-//! ap, mf), except newspace/newforms, which need a polynomial factorer;
-//! big integers are decimal strings.
+//! ap, mf); newspace/newforms factor with sagebrush-poly (pure Rust) and
+//! "factor" exposes it.  Big integers are decimal strings.
 
 use num_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
@@ -72,6 +72,18 @@ fn exact_json(e: &sagebrush_modsym::exact::Exact) -> Value {
     json!({ "n": e.n, "q": e.q, "genus": e.genus, "cusps": e.cusps, "eisenstein": e.eis, "dim": e.dim,
             "charpoly": big(&e.coeffs), "primes_used": e.primes_used.len(), "bound_bits": e.bound_bits,
             "status": e.status, "checks": e.checks })
+}
+
+fn bigs(v: Option<&Value>) -> Result<Vec<BigInt>, String> {
+    v.and_then(Value::as_array)
+        .ok_or("missing integer list")?
+        .iter()
+        .map(|x| match x {
+            Value::String(s) => s.parse::<BigInt>().map_err(|e| e.to_string()),
+            Value::Number(n) => n.as_i64().map(BigInt::from).ok_or_else(|| "bad integer".to_string()),
+            _ => Err("integers are numbers or decimal strings".to_string()),
+        })
+        .collect()
 }
 
 fn big(v: &[BigInt]) -> Vec<String> {
@@ -170,6 +182,45 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "rational_newforms" => {
             let r = sagebrush_modsym::newforms::rational_newforms(u(v, "n")?, u(v, "bound").unwrap_or(1000), 40)?;
             Ok(json!(r.forms.into_iter().map(|f| f.ap).collect::<Vec<_>>()))
+        }
+        // ---- sagebrush.poly: factoring in Z[x] (pure Rust) ----
+        "factor" => {
+            let f = bigs(v.get("f"))?;
+            if f.iter().all(|c| c.sign() == num_bigint::Sign::NoSign) {
+                return Err("factor of the zero polynomial".into());
+            }
+            let (c, fs) = sagebrush_poly::factor(&f);
+            Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
+        }
+        // ---- sagebrush.mf: Galois orbits of newforms, factored here ----
+        "newspace" | "newforms" => {
+            let (n, k) = (u(v, "n")?, u(v, "k").unwrap_or(2) as usize);
+            let eps = character(n, v)?;
+            let fac = |f: &[BigInt]| sagebrush_poly::factor(f).1;
+            let r = sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &fac)?;
+            let mut out = json!({ "dim": r.dim, "order": r.m, "orbit_dims": r.dims, "orbit_charpolys": r.orbits.iter().map(|o| big(o)).collect::<Vec<_>>(),
+                                  "T": r.ops, "status": r.status, "checks": r.checks });
+            if f == "newforms" {
+                let bound = u(v, "bound").unwrap_or(100) as usize;
+                let tr = sagebrush_modsym::traces::orbit_traces(n, k, &eps, &r, bound)?;
+                // LMFDB order: by dimension, then trace form
+                let mut orbits: Vec<(usize, Vec<BigInt>, Vec<BigInt>)> = r.dims.iter().cloned().zip(tr).zip(r.orbits.iter().cloned()).map(|((d, t), u)| (d, t, u)).collect();
+                orbits.sort();
+                out["newforms"] = json!(orbits.iter().enumerate().map(|(i, (dim, t, u))| {
+                    let mut x = i;
+                    let mut s = vec![];
+                    loop {
+                        s.push((b'a' + (x % 26) as u8) as char);
+                        x /= 26;
+                        if x == 0 {
+                            break;
+                        }
+                    }
+                    let letter: String = s.iter().rev().collect();
+                    json!({ "letter": letter, "dim": dim, "traces": big(t), "charpoly": big(u) })
+                }).collect::<Vec<_>>());
+            }
+            Ok(out)
         }
         // ---- sagebrush.ap: traces of Frobenius of elliptic curves ----
         "ap" => {
