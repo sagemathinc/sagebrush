@@ -64,7 +64,10 @@ the engines.
   [web/README.md](web/README.md).
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
-- **Sage mode** (`--sage`): `2^3 == 8`, and `2/3` is an exact rational.
+- **Sage mode** (`--sage`): Sage's preparser (`src/sagepre.ts`): `2^3 == 8`,
+  `2/3` is an exact rational, `[1..10]`, `[1,3..99]`, `(1..)`, `1.5` prints
+  as `1.50000000000000`, `100r`, `12.factor()`, `R.<x> = ZZ[]`, `R.0`,
+  `f(x) = x^2`; checked against Sage by `sage-tests/test_language.sage`.
 - **Modular forms, elliptic curves and polynomials:** in Sage mode,
   `ModularSymbols`, `CuspForms`, `ModularForms`, `Newforms`, `Gamma0`,
   `DirichletGroup`, `EllipticCurve` and polynomial rings over `ZZ` and `QQ`

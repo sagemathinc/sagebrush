@@ -343,7 +343,8 @@ newBuiltinModule("math", (m) => {
   });
   fn(m, "ldexp", (x: any, i: any) => O.mkfloat(F(x) * Math.pow(2, Number(i))));
   const bigOf = (x: any): bigint => {
-    if (!O.isPyInt(x)) raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
+    // as CPython: anything with __index__ (int subclasses included)
+    if (!O.isPyInt(x)) x = O.index(x);
     return BigInt(typeof x === "boolean" ? +x : x);
   };
   fn(m, "factorial", (x: any) => {

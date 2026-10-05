@@ -169,9 +169,10 @@ class Expr:
         return complex(self._value())
 
     def n(self, digits=None):
-        return float(self)
+        from _sage_lang import RealNumber
+        return RealNumber(float(self))
 
-    numerical_approx = n
+    numerical_approx = N = n
 
 
 _SRC = {"abs": "_abs", "gamma": "_gamma"}
@@ -210,7 +211,11 @@ def _function(name, numeric):
     def f(*args):
         if any(isinstance(a, Expr) for a in args):
             return Expr("fn", (name,) + tuple(_wrap(a) for a in args))
-        return numeric(*args)
+        r = numeric(*args)
+        if type(r) is float:
+            from _sage_lang import RealNumber
+            return RealNumber(r)
+        return r
     f.__name__ = name
     return f
 
