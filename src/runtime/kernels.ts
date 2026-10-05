@@ -8,7 +8,7 @@
 // globalThis.__SAGEBRUSH_NO_WASM__ = true (or the environment variable
 // SAGEBRUSH_NO_WASM=1) before first use to disable.
 
-import { KERNELS_WASM } from "./kernels_wasm";
+import { KERNELS_WASM, KERNELS_RELAXED_WASM } from "./kernels_wasm";
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -19,6 +19,8 @@ interface Exports {
   dsyev(w: number, n: number, d: number, e: number): number;
   dgeev(h: number, n: number, w: number, d: number, e: number, ort: number, tmp: number): number;
   dgesvd(a: number, m: number, n: number, u: number, v: number, s: number, e: number, work: number): number;
+  vexp(x: number, y: number, n: number, tab: number): void;
+  vlog(x: number, y: number, n: number, tab: number): void;
   transpose(src: number, rows: number, cols: number, dst: number): void;
   fft_stockham(x: number, y: number, n: number, f: number, nf: number, tc: number, ts: number, consts: number, inverse: number): number;
   rfft_rows(data: number, rows: number, n: number, out: number, z: number, y: number, f: number, nf: number,
@@ -26,6 +28,13 @@ interface Exports {
 }
 
 let K: Exports | null | undefined;
+
+function instantiate(b64: string): WebAssembly.Exports {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+}
 let base = 0;
 let f64 = new Float64Array(0);
 let i32 = new Int32Array(0);
@@ -36,10 +45,7 @@ function kernels(): Exports | null {
   try {
     const g = globalThis as any;
     if (g.__SAGEBRUSH_NO_WASM__ || g.process?.env?.SAGEBRUSH_NO_WASM || typeof WebAssembly !== "object") return K;
-    const bin = atob(KERNELS_WASM);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    K = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports as unknown as Exports;
+    K = instantiate(KERNELS_WASM) as unknown as Exports;
     base = K.memory.buffer.byteLength;
   } catch {
     K = null; // no WebAssembly SIMD here: the JavaScript code is used
@@ -227,6 +233,61 @@ export function wasmRfftRows(data: Float64Array, off: number, rows: number, n: n
   view(d, rows * n).set(data.subarray(off, off + rows * n));
   K!.rfft_rows(d, rows, n, o, z, y, f, factors.length, tch, tsh, tcn, tsn, cs);
   out.set(view(o, rows * 2 * (h + 1)), ooff);
+  resident = key;
+  return true;
+}
+
+// exp and log also come in a module built with relaxed SIMD
+// (kernels/relaxed), whose fused multiply-adds are the hardware's.  The
+// WebAssembly spec lets relaxed_madd round once or twice, so it is used only
+// where fma_probe() shows that it rounds once: then results are the same
+// bits as the main module's exact software FMA, several times faster.
+// SAGEBRUSH_NO_RELAXED=1 turns it off.
+interface Relaxed {
+  memory: WebAssembly.Memory;
+  vexp(x: number, y: number, n: number, tab: number): void;
+  vlog(x: number, y: number, n: number, tab: number): void;
+  fma_probe(): number;
+}
+let RX: { e: Relaxed; base: number; f64: Float64Array; tab: string } | null | undefined;
+function relaxed() {
+  if (RX !== undefined) return RX;
+  RX = null;
+  try {
+    if ((globalThis as any).process?.env?.SAGEBRUSH_NO_RELAXED || !kernels()) return RX;
+    const e = instantiate(KERNELS_RELAXED_WASM) as unknown as Relaxed;
+    if (e.fma_probe() === 1) RX = { e, base: e.memory.buffer.byteLength, f64: new Float64Array(0), tab: "" };
+  } catch {
+    // no relaxed SIMD in this engine
+  }
+  return RX;
+}
+export function wasmFusedFMA(): boolean {
+  return relaxed() !== null;
+}
+
+// exp or log (glibc's, as libm.ts) of src[off..off+n] into dst[0..n].
+const UNARY_MIN = 64;
+export function wasmUnary(op: "vexp" | "vlog", tab: Float64Array, src: Float64Array, off: number, n: number, dst: Float64Array): boolean {
+  if (n < UNARY_MIN || !kernels()) return false;
+  const R = relaxed();
+  if (R) {
+    const t = R.base, x = t + 8 * (tab.length + 72), need = x + 8 * n, mem = R.e.memory;
+    if (mem.buffer.byteLength < need) mem.grow(Math.ceil((need - mem.buffer.byteLength) / 65536));
+    if (R.f64.buffer !== mem.buffer) R.f64 = new Float64Array(mem.buffer);
+    if (R.tab !== op) R.f64.set(tab, t / 8);
+    R.tab = op;
+    R.f64.set(src.subarray(off, off + n), x / 8);
+    R.e[op](x, x, n, t);
+    dst.set(R.f64.subarray(x / 8, x / 8 + n));
+    return true;
+  }
+  const key = op, keep = resident === key;
+  const [t, x] = layout(tab.length, n);
+  if (!keep) view(t, tab.length).set(tab);
+  view(x, n).set(src.subarray(off, off + n));
+  K![op](x, x, n, t);
+  dst.set(view(x, n));
   resident = key;
   return true;
 }

@@ -105,10 +105,10 @@ NumPy compiled to WebAssembly (Pyodide), see
 
 ### WebAssembly SIMD kernels
 
-Dense linear algebra and the FFT run in Rust
+Dense linear algebra, the FFT, `exp` and `log` run in Rust
 ([kernels/src](kernels/src)). They are compiled for
 `wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
-to a 38 KB module:
+to a 44 KB module:
 
 - `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
 - `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
@@ -122,7 +122,31 @@ to a 38 KB module:
   5 and generic 7–13 butterflies, one complex number per `f64x2`). This
   covers every `numpy.fft` transform, including Bluestein's inner FFTs.
   Twiddle tables come from the TypeScript (`Math.cos`/`Math.sin`) and stay
-  resident in WebAssembly memory between calls of the same length.
+  resident in WebAssembly memory between calls of the same length;
+- `vexp`/`vlog`: glibc's `exp` and `log` over arrays, two lanes at a time
+  (`np.exp`, `np.log`).
+
+glibc's `exp` and `log` are compiled with fused multiply-adds on x86-64 (the
+FMA build), and NumPy calls them, so matching NumPy bit for bit means
+matching the fusions GCC made. They were pinned down against glibc 2.43 on
+millions of inputs (0 mismatches in `exp`, `log` and `math.exp`/`math.log`):
+
+- in `exp`, the polynomial and the final `scale + scale*tmp` are fused, but
+  not in `specialcase` for results below 2^-1022;
+- in `log` near 1, the polynomial, `lo += B0 rlo (rhi + r)` and
+  `y = r3 P + lo` are fused; in the main path only `r = z invc - 1`.
+
+The previous port fused only the last step of `exp`, which was wrong for
+about 2 inputs in 10^5. JavaScript has no fused multiply-add, so the
+TypeScript computes one exactly with Dekker's product, at about 20
+operations each. WebAssembly's relaxed SIMD has `f64x2.relaxed_madd`, which
+V8 compiles to the hardware FMA, but the spec allows it to round twice. So
+`exp` and `log` are also built as a separate 3 KB module with relaxed SIMD
+([kernels/relaxed](kernels/relaxed)), which is used only where a probe at
+startup shows that its multiply-add rounds once. The results are the same
+bits either way. In Node, per 10^6 values: `exp` 40 ms in TypeScript, 19 ms
+in WebAssembly with software FMA, 7.6 ms with relaxed SIMD (3.3 ms of it the
+kernel; glibc itself takes 5 ms).
 
 Matrices whose columns an algorithm walks are stored transposed, so those
 walks are contiguous and the elementwise ones (rotations, rank-1 updates)
@@ -145,7 +169,7 @@ results are bit-identical with or without WebAssembly.
 is not specified bit for bit, and engines differ, so both sides use V8's
 two-argument algorithm, written out. Where WebAssembly is unavailable, or
 with `SAGEBRUSH_NO_WASM=1` or `globalThis.__SAGEBRUSH_NO_WASM__ = true`, the
-TypeScript runs.
+TypeScript runs. `SAGEBRUSH_NO_RELAXED=1` turns off the relaxed-SIMD module only.
 
 In Node, against the TypeScript: matmul 300×300 12× faster (44 → 3.7 ms),
 `det` 1000×1000 4× (494 → 126 ms), `eigh` 200×200 4× (45 → 11.5 ms), `svd`

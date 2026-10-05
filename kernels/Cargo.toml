@@ -9,6 +9,10 @@ description = "WebAssembly SIMD kernels (matmul, LU) for sagebrush's numpy"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
+[features]
+# set by kernels/relaxed, which includes src/libm.rs
+relaxed = []
+
 [profile.release]
 opt-level = 3
 lto = true

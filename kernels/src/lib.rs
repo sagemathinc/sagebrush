@@ -1,6 +1,6 @@
 //! WebAssembly SIMD kernels for sagebrush's numpy (src/runtime/numpy*.ts):
 //! matmul and LU here, QR, eigenproblems and the SVD in eigen.rs, the FFT
-//! in fft.rs.
+//! in fft.rs, glibc's exp and log over arrays in libm.rs.
 //!
 //! Plain exported functions on row-major f64 matrices in this module's
 //! linear memory; the TypeScript side copies operands in and results out.
@@ -14,6 +14,7 @@ use core::arch::wasm32::*;
 
 mod eigen;
 mod fft;
+mod libm;
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
