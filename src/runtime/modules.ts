@@ -1,6 +1,7 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
 import { globalsDict, hooks } from "./object";
+import { glibcLog, glibcExp } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
@@ -242,7 +243,7 @@ newBuiltinModule("math", (m) => {
   m.inf = new FloatBox(Infinity);
   m.nan = NaN;
   unary("sqrt", Math.sqrt, (x) => x >= 0 || x !== x);
-  unary("exp", Math.exp);
+  unary("exp", glibcExp);
   unary("expm1", Math.expm1);
   unary("sin", Math.sin, (x) => Number.isFinite(x) || x !== x);
   unary("cos", Math.cos, (x) => Number.isFinite(x) || x !== x);
@@ -267,12 +268,22 @@ newBuiltinModule("math", (m) => {
     const ln = (v: any) => {
       if (typeof v === "bigint") {
         if (v <= 0n) domain();
+        const d = Number(v);
+        if (d !== Infinity) return glibcLog(d);
+        // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
         const s = v.toString(2).length;
-        return s > 1000 ? Math.log(Number(v >> BigInt(s - 64))) + (s - 64) * Math.LN2 : Math.log(Number(v));
+        let top = v >> BigInt(s - 64);
+        if (top << BigInt(s - 64) !== v) top |= 1n; // sticky bit for correct rounding
+        let x = Number(top) / 18446744073709551616, e = s;
+        if (x === 1) {
+          x = 0.5;
+          e += 1;
+        }
+        return glibcLog(x) + e * Math.LN2;
       }
       const f = F(v);
       if (f <= 0) domain();
-      return Math.log(f);
+      return glibcLog(f);
     };
     const r = base === undefined ? ln(x) : ln(x) / ln(base);
     return O.mkfloat(r);

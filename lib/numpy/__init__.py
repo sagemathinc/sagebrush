@@ -214,18 +214,30 @@ class complex128(complex, complexfloating):
         return complex.__repr__(self)
 
 
-complex64 = complex128
+@_arith
+class complex64(complex, complexfloating):
+    __slots__ = ()
+    __hash__ = complex.__hash__
+
+    def __repr__(self):
+        r = complex.__repr__(self)
+        return "np.complex64(%s)" % (r[1:-1] if r.startswith("(") else r)
+
+    def __str__(self):
+        return complex.__repr__(self)
+
+
 True_ = bool_(True)
 False_ = bool_(False)
 
-_PLAIN = {float64: float, float32: float, complex128: complex, bool_: _builtins.bool}
+_PLAIN = {float64: float, float32: float, complex128: complex, complex64: complex, bool_: _builtins.bool}
 for _name in _INT_NAMES:
     _PLAIN[_g[_name]] = int
 for _name, _cls in (("float64", float64), ("float32", float32), ("complex128", complex128), ("bool", bool_),
                     ("int8", int8), ("int16", int16), ("int32", int32), ("int64", int64),
                     ("uint8", uint8), ("uint16", uint16), ("uint32", uint32), ("uint64", uint64)):
     _np.register_scalar(_name, _cls)
-_np.register_scalar("complex64", complex128)
+_np.register_scalar("complex64", complex64)
 
 double = float_ = float64
 single = float32
@@ -2005,3 +2017,262 @@ def loadtxt(fname, dtype=float, comments="#", delimiter=None, skiprows=0, usecol
 genfromtxt = loadtxt
 
 from numpy import linalg, random, fft, testing  # noqa: E402
+
+
+# ------------------------------------------------------------------ polynomials (numpy/lib/_polynomial_impl.py)
+
+def sort_complex(a):
+    b = array(a, copy=True)
+    vals = b.ravel().tolist()
+    vals.sort(key=lambda z: (z.real, z.imag) if isinstance(z, complex) else (z, 0))
+    return array(vals, dtype=complex128)
+
+
+def vander(x, N=None, increasing=False):
+    x = asarray(x)
+    if N is None:
+        N = len(x)
+    powers = arange(N) if increasing else arange(N - 1, -1, -1)
+    return power.outer(x, powers) if x.dtype.kind != "b" else power.outer(x.astype(int64), powers)
+
+
+def polyval(p, x):
+    p = asarray(p)
+    x = asarray(x)
+    y = zeros_like(x) if x.dtype.kind in "fc" else zeros(x.shape, result_type(p, float64) if p.dtype.kind == "f" else p.dtype)
+    if isinstance(p, poly1d):
+        p = p.coeffs
+    for pv in p:
+        y = y * x + pv
+    return y if y.ndim else y[()]
+
+
+def polyfit(x, y, deg, rcond=None, full=False, w=None, cov=False):
+    x = asarray(x, float64)
+    y = asarray(y, float64)
+    order = int(deg) + 1
+    if rcond is None:
+        rcond = len(x) * finfo(float64).eps
+    lhs = vander(x, order)
+    rhs = y
+    if w is not None:
+        w = asarray(w, float64)
+        lhs = lhs * w[:, None]
+        rhs = rhs * w if rhs.ndim == 1 else rhs * w[:, None]
+    scale = sqrt((lhs * lhs).sum(axis=0))
+    lhs = lhs / scale
+    c, resids, rank, s = linalg.lstsq(lhs, rhs, rcond)
+    c = (c.T / scale).T
+    if full:
+        return c, resids, rank, s, rcond
+    return c
+
+
+def roots(p):
+    p = atleast_1d(asarray(p))
+    nz = flatnonzero(p)
+    if len(nz) == 0:
+        return array([])
+    trailing = len(p) - nz[-1] - 1
+    p = p[int(nz[0]):int(nz[-1]) + 1]
+    N = len(p)
+    if N > 1:
+        A = diag(ones(N - 2, float64), -1)
+        A[0, :] = -p[1:] / p[0]
+        r = linalg.eigvals(A)
+    else:
+        r = array([])
+    return concatenate([r, zeros(trailing, r.dtype)]) if trailing else r
+
+
+def poly(seq_of_zeros):
+    a = array([1.0])
+    for z in atleast_1d(asarray(seq_of_zeros)).tolist():
+        a = convolve(a, array([1.0, -z]))
+    if a.dtype.kind == "c" and allclose(a.imag, 0):
+        a = a.real.copy()
+    return a
+
+
+def polyadd(a1, a2):
+    a1, a2 = atleast_1d(asarray(a1)), atleast_1d(asarray(a2))
+    diff = len(a2) - len(a1)
+    if diff > 0:
+        a1 = concatenate([zeros(diff, a1.dtype), a1])
+    elif diff < 0:
+        a2 = concatenate([zeros(-diff, a2.dtype), a2])
+    return a1 + a2
+
+
+def polysub(a1, a2):
+    return polyadd(a1, -asarray(a2))
+
+
+def polymul(a1, a2):
+    return convolve(a1, a2)
+
+
+def polydiv(u, v):
+    u, v = atleast_1d(asarray(u, float64)), atleast_1d(asarray(v, float64))
+    m, n = len(u) - 1, len(v) - 1
+    scale = 1.0 / v[0]
+    q = zeros(_builtins.max(m - n + 1, 1), float64)
+    r = u.copy()
+    for k in range(m - n + 1):
+        d = scale * r[k]
+        q[k] = d
+        r[k:k + n + 1] -= d * v
+    while allclose(r[0], 0, rtol=1e-14) and r.shape[-1] > 1:
+        r = r[1:]
+    return q, r
+
+
+def polyder(p, m=1):
+    p = asarray(p)
+    for _ in range(m):
+        n = len(p) - 1
+        p = p[:-1] * arange(n, 0, -1)
+    return p
+
+
+def polyint(p, m=1, k=None):
+    p = asarray(p, float64)
+    k = [0] * m if k is None else (list(k) if isinstance(k, (list, tuple)) else [k] * m)
+    for i in range(m):
+        n = len(p)
+        p = concatenate([p / arange(n, 0, -1), array([k[i]], float64)])
+    return p
+
+
+class poly1d:
+    """A one-dimensional polynomial, highest power first."""
+
+    def __init__(self, c_or_r, r=False, variable=None):
+        if isinstance(c_or_r, poly1d):
+            c_or_r = c_or_r.coeffs
+        c = poly(c_or_r) if r else atleast_1d(asarray(c_or_r))
+        nz = flatnonzero(c)
+        self.coeffs = c[int(nz[0]):] if len(nz) else c[-1:] * 0
+        self.variable = variable or "x"
+
+    @property
+    def order(self):
+        return len(self.coeffs) - 1
+
+    o = order
+
+    @property
+    def roots(self):
+        return roots(self.coeffs)
+
+    r = roots
+
+    @property
+    def c(self):
+        return self.coeffs
+
+    coef = coefficients = c
+
+    def __call__(self, val):
+        return polyval(self.coeffs, val)
+
+    def __len__(self):
+        return self.order
+
+    def __getitem__(self, power):
+        if power > self.order or power < 0:
+            return self.coeffs.dtype.type(0) if False else 0
+        return self.coeffs[self.order - power]
+
+    def __array__(self, *a):
+        return self.coeffs
+
+    def __repr__(self):
+        vals = repr(self.coeffs)
+        vals = vals[6:-1]
+        return "poly1d(%s)" % vals
+
+    def __str__(self):
+        thestr = "0"
+        var = self.variable
+        coeffs = self.coeffs[flatnonzero(self.coeffs)[0]:] if len(flatnonzero(self.coeffs)) else self.coeffs
+        N = len(coeffs) - 1
+
+        def fmt_float(q):
+            s = "%.4g" % q
+            if s.endswith(".0000"):
+                s = s[:-5]
+            return s
+
+        for k, coeff in enumerate(coeffs.tolist()):
+            if isinstance(coeff, complex):
+                coefstr = "(" + fmt_float(coeff.real) + (" + " if coeff.imag >= 0 else " - ") + fmt_float(abs(coeff.imag)) + "j)"
+            else:
+                coefstr = fmt_float(abs(coeff))
+            power = N - k
+            if power == 0:
+                newstr = "" if coefstr == "0" else coefstr
+            elif power == 1:
+                newstr = "" if coefstr == "0" else (var if coefstr == "b" else ("%s %s" % (coefstr, var) if coefstr != "1" else var))
+            else:
+                newstr = "" if coefstr == "0" else ("%s %s**%d" % (coefstr, var, power) if coefstr != "1" else "%s**%d" % (var, power))
+            if k > 0:
+                if newstr != "":
+                    if newstr.startswith("-"):
+                        thestr = "%s - %s" % (thestr, newstr[1:])
+                    elif not isinstance(coeff, complex) and coeff < 0:
+                        thestr = "%s - %s" % (thestr, newstr)
+                    else:
+                        thestr = "%s + %s" % (thestr, newstr)
+            else:
+                thestr = ("-" + newstr) if (not isinstance(coeff, complex) and coeff < 0) else newstr
+        # NumPy puts the exponents on a line above; ours keeps them inline with **
+        return thestr
+
+    def _other(self, o):
+        return o.coeffs if isinstance(o, poly1d) else asarray(o)
+
+    def __add__(self, o):
+        return poly1d(polyadd(self.coeffs, self._other(o)))
+
+    __radd__ = __add__
+
+    def __sub__(self, o):
+        return poly1d(polysub(self.coeffs, self._other(o)))
+
+    def __rsub__(self, o):
+        return poly1d(polysub(self._other(o), self.coeffs))
+
+    def __mul__(self, o):
+        if not isinstance(o, poly1d) and asarray(o).ndim == 0:
+            return poly1d(self.coeffs * o)
+        return poly1d(polymul(self.coeffs, self._other(o)))
+
+    __rmul__ = __mul__
+
+    def __neg__(self):
+        return poly1d(-self.coeffs)
+
+    def __pow__(self, n):
+        r = poly1d([1])
+        for _ in range(n):
+            r = r * self
+        return r
+
+    def __eq__(self, o):
+        return isinstance(o, poly1d) and array_equal(self.coeffs, o.coeffs)
+
+    def __truediv__(self, o):
+        if not isinstance(o, poly1d) and asarray(o).ndim == 0:
+            return poly1d(self.coeffs / o)
+        q, r = polydiv(self.coeffs, self._other(o))
+        return poly1d(q), poly1d(r)
+
+    def deriv(self, m=1):
+        return poly1d(polyder(self.coeffs, m))
+
+    def integ(self, m=1, k=0):
+        return poly1d(polyint(self.coeffs, m, k))
+
+
+from numpy import polynomial  # noqa: E402
