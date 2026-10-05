@@ -10,6 +10,8 @@ import math as _math
 from fractions import Fraction as _Fraction
 
 __all__ = [
+    # modular forms and elliptic curves (Sagebrush's engines)
+    "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "is_prime", "is_prime_power", "is_square", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
@@ -34,6 +36,8 @@ from _sage_expr import (Expr as _Expr, var, x, pi, e, sin, cos, tan, asin, acos,
 from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
                        bar_chart, show, graphics_array, animate, Animation)
+from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
+                           EllipticCurve)
 from _interact import (interact, slider, range_slider, selector, checkbox, input_box,
                        color_selector, text_control)
 

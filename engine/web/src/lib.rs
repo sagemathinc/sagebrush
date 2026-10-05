@@ -5,7 +5,10 @@
 //! ABI: sb_alloc(len) -> ptr; write a UTF-8 JSON request there;
 //! sb_call(ptr, len) -> ptr of a UTF-8 JSON reply whose length is
 //! sb_reply_len().  Requests are {"fn": NAME, ...args}; replies are
-//! {"ok": RESULT} or {"error": MESSAGE}.  Single-threaded.
+//! {"ok": RESULT} or {"error": MESSAGE}.  Single-threaded.  The functions
+//! and their results mirror the Python bindings (py/src/lib.rs: modsym,
+//! ap, mf), except newspace/newforms, which need a polynomial factorer;
+//! big integers are decimal strings.
 
 use num_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
@@ -59,6 +62,18 @@ fn character(n: u64, v: &Value) -> Result<Character, String> {
     }
 }
 
+fn curve(a: Option<&Value>) -> Result<sagebrush_ap::EllipticCurve, String> {
+    let a: Vec<i64> = a.and_then(Value::as_array).ok_or("missing a")?.iter().filter_map(Value::as_i64).collect();
+    let a: [i64; 5] = a.try_into().map_err(|_| "a curve is [a1, a2, a3, a4, a6]")?;
+    sagebrush_ap::EllipticCurve::new(a)
+}
+
+fn exact_json(e: &sagebrush_modsym::exact::Exact) -> Value {
+    json!({ "n": e.n, "q": e.q, "genus": e.genus, "cusps": e.cusps, "eisenstein": e.eis, "dim": e.dim,
+            "charpoly": big(&e.coeffs), "primes_used": e.primes_used.len(), "bound_bits": e.bound_bits,
+            "status": e.status, "checks": e.checks })
+}
+
 fn big(v: &[BigInt]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
 }
@@ -85,7 +100,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 }
                 let vals: Vec<u64> = g.gens.iter().map(|&x| chi.exponent(x as i64).unwrap() as u64).collect();
                 out.push(json!({ "order": chi.order, "conductor": chi.conductor(), "even": chi.is_even(),
-                                 "chi": [chi.order, g.gens.clone(), vals] }));
+                                 "gens": g.gens.clone(), "vals": vals.clone(), "chi": [chi.order, g.gens.clone(), vals] }));
             }
             Ok(json!(out))
         }
@@ -94,8 +109,14 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let n = u(v, "n")?;
             let k = u(v, "k")? as usize;
             let eps = character(n, v)?.minimal();
-            Ok(json!({ "order": eps.order, "conductor": eps.conductor(), "cusp": dim_cusp_forms(&eps, k),
-                       "eisenstein": dim_eisenstein(&eps, k), "modsym": dim_modsym(&eps, k) }))
+            // dim S^new(N) = sum over M (cond | M | N) of beta(N/M) dim S(M), beta = mu * mu.
+            let f = eps.conductor();
+            let beta = |x: u64| -> i64 {
+                sagebrush_modsym::exact::factor(x).iter().map(|&(_, e)| match e { 1 => -2, 2 => 1, _ => 0 }).product()
+            };
+            let new: i64 = (1..=n).filter(|m| n % m == 0 && m % f == 0).map(|m| beta(n / m) * dim_cusp_forms(&eps.restrict(m), k) as i64).sum();
+            Ok(json!({ "order": eps.order, "conductor": f, "cusp": dim_cusp_forms(&eps, k),
+                       "eisenstein": dim_eisenstein(&eps, k), "modsym": dim_modsym(&eps, k), "new": new }))
         }
         "charpoly" => {
             let (n, k, q) = (u(v, "n")?, u(v, "k").unwrap_or(2) as usize, u(v, "q")?);
@@ -103,26 +124,74 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let eps = character(n, v)?;
             let e = sagebrush_modsym::general_exact::exact_charpoly(n, k, &eps, sign, q)?;
             let coeffs: Vec<Vec<String>> = e.coeffs.iter().map(|c| big(c)).collect();
-            Ok(json!({ "m": e.m, "dim": e.dim, "coeffs": coeffs, "status": e.status, "checks": e.checks }))
+            Ok(json!({ "m": e.m, "dim": e.dim, "coeffs": coeffs, "primes_used": e.primes_used.len(), "status": e.status, "checks": e.checks }))
         }
         "charpoly_mod" => {
             let (n, k, q) = (u(v, "n")?, u(v, "k").unwrap_or(2) as usize, u(v, "q")?);
             let sign = v.get("sign").and_then(Value::as_i64).unwrap_or(0) as i32;
             let eps = character(n, v)?.minimal();
             let sp = GeneralSpace::new(n, k, &eps, sign)?;
-            Ok(json!({ "dim": sp.dimension(), "ell": sp.p, "charpoly": sp.hecke_charpoly(q)? }))
+            Ok(json!({ "dim": sp.dimension(), "ell": sp.p, "zeta": sp.zeta, "charpoly": sp.hecke_charpoly(q)? }))
         }
-        "weight2" => {
-            // The weight-2 trivial-character engine: proven charpoly of T_q on M_2(N)^+.
-            let e = sagebrush_modsym::exact::exact_charpoly(u(v, "n")?, u(v, "q")?)?;
-            Ok(json!({ "dim": e.dim, "genus": e.genus, "coeffs": big(&e.coeffs), "status": e.status }))
+        // ---- sagebrush.modsym: weight 2, trivial character, sign +1 ----
+        "hecke_charpoly" => {
+            let (n, q) = (u(v, "n")?, u(v, "q")?);
+            let p = u(v, "p").unwrap_or(67108859);
+            let r = sagebrush_modsym::hecke_charpoly(n, q, p)?;
+            Ok(json!({ "symbols": r.symbols, "gens": r.gens, "dim": r.dim, "charpoly": r.charpoly, "hash": r.hash(),
+                       "eisenstein_root": r.eisenstein_root(), "ms": r.ms.to_vec() }))
+        }
+        "weight2" | "charpoly_exact" => Ok(exact_json(&sagebrush_modsym::exact::exact_charpoly(u(v, "n")?, u(v, "q")?)?)),
+        "batch_exact" => {
+            let levels: Vec<u64> = v.get("levels").and_then(Value::as_array).ok_or("missing levels")?.iter().filter_map(Value::as_u64).collect();
+            let q = u(v, "q")?;
+            let rs = sagebrush_modsym::exact::batch_exact(&levels, q);
+            Ok(json!(levels.iter().zip(rs).map(|(&n, r)| match r {
+                Ok(e) => exact_json(&e),
+                Err(e) => json!({ "n": n, "error": e }),
+            }).collect::<Vec<_>>()))
+        }
+        "level_data" => {
+            let (psi, g, c, e, dim) = sagebrush_modsym::exact::level_data(u(v, "n")?);
+            Ok(json!({ "psi": psi, "genus": g, "cusps": c, "eisenstein": e, "dim": dim }))
+        }
+        "commute" => {
+            let p = u(v, "p").unwrap_or(67108859);
+            Ok(json!(sagebrush_modsym::hecke_commute(u(v, "n")?, u(v, "q")?, u(v, "r")?, p)?))
+        }
+        "estimate" => {
+            let (n, q) = (u(v, "n")?, u(v, "q")?);
+            sagebrush_modsym::validate(n, q, None)?;
+            let e = sagebrush_modsym::estimate::estimate(n, q);
+            Ok(json!({ "symbols": e.symbols, "dim": e.dim, "genus": e.genus, "primes": e.primes, "primes_max": e.primes_max,
+                       "bytes_modp": e.bytes_modp, "bytes_exact": e.bytes_exact, "seconds_modp": e.seconds_modp,
+                       "seconds_exact": e.seconds_exact }))
+        }
+        "rational_newforms" => {
+            let r = sagebrush_modsym::newforms::rational_newforms(u(v, "n")?, u(v, "bound").unwrap_or(1000), 40)?;
+            Ok(json!(r.forms.into_iter().map(|f| f.ap).collect::<Vec<_>>()))
+        }
+        // ---- sagebrush.ap: traces of Frobenius of elliptic curves ----
+        "ap" => {
+            let p = u(v, "p")?;
+            if p < 2 || !sagebrush_modsym::exact::is_prime(p) || p >= 1 << 62 {
+                return Err(format!("p = {} must be a prime below 2^62", p));
+            }
+            Ok(json!(curve(v.get("a"))?.ap(p)))
         }
         "aplist" => {
-            let a: Vec<i64> = v.get("a").and_then(Value::as_array).ok_or("missing a")?.iter().filter_map(Value::as_i64).collect();
-            let a: [i64; 5] = a.try_into().map_err(|_| "a must have 5 entries")?;
-            let e = sagebrush_ap::EllipticCurve::new(a)?;
-            let out: Vec<Value> = sagebrush_ap::aplist(&e, u(v, "n")?).into_iter().map(|(p, x)| json!([p, x])).collect();
-            Ok(json!(out))
+            let e = curve(v.get("a"))?;
+            Ok(json!(sagebrush_ap::aplist(&e, u(v, "n")?).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
+        }
+        "aplist_many" => {
+            let es = v.get("curves").and_then(Value::as_array).ok_or("missing curves")?.iter().map(|c| curve(Some(c))).collect::<Result<Vec<_>, _>>()?;
+            let r = sagebrush_ap::aplist_many(&es, u(v, "n")?);
+            Ok(json!(r.into_iter().map(|l| l.into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()).collect::<Vec<_>>()))
+        }
+        "moments" => {
+            let e = curve(v.get("a"))?;
+            let (count, m) = sagebrush_ap::moments(&e, u(v, "n")?, u(v, "kmax").unwrap_or(4) as usize);
+            Ok(json!([count, m]))
         }
         _ => Err(format!("unknown fn '{}'", f)),
     }

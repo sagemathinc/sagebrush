@@ -16,6 +16,8 @@
 // `target` is null for the cell's own output, or the id of the @interact
 // whose function is running, whose output area should receive it.
 import "./shims/process";
+// the engines are a separate file, loaded (synchronously) the first time Python calls them
+(globalThis as any).__SAGEBRUSH_ENGINE_URL__ = new URL("sagebrush-engine.wasm", self.location.href).href;
 import "../build/cli/lib.gen.js";
 import { __hooks } from "./shims/fs";
 import { initParser, R, libDir } from "../src/compile";

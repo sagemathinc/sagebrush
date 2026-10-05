@@ -232,10 +232,10 @@ pub fn rational_newforms(n: u64, bound: u64, max_split: usize) -> Result<Newform
     }
     let p = ELL;
     let debug = std::env::var("SAGEBRUSH_DEBUG").is_ok();
-    let t0 = std::time::Instant::now();
+    let t0 = crate::now();
     let lap = |what: &str| {
         if debug {
-            eprintln!("  N={} {:>8.3} s  {}", n, t0.elapsed().as_secs_f64(), what);
+            eprintln!("  N={} {:>8.3} s  {}", n, crate::elapsed_ms(t0, crate::now()) / 1000.0, what);
         }
     };
     let pres = Presentation::new(n);

@@ -1,6 +1,10 @@
 //! Arithmetic modulo an odd prime p < 2^62 in Montgomery form (R = 2^64):
 //! a value a is stored as a R mod p, so a product needs one 64x64 -> 128
 //! multiplication and one reduction (REDC), with no division.
+//!
+//! On wasm32, which has no 64x64 -> 128 multiplication (u128 products are
+//! library calls), primes p < 2^31 use R = 2^32 instead: products and
+//! reductions then fit in u64.  The results are the same.
 
 #[derive(Clone, Copy)]
 pub struct Fp {
@@ -8,6 +12,8 @@ pub struct Fp {
     pinv: u64, // -p^{-1} mod 2^64
     r2: u64,   // R^2 mod p
     pub one: u64,
+    #[cfg(target_arch = "wasm32")]
+    small: bool, // R = 2^32 (p < 2^31)
 }
 
 impl Fp {
@@ -17,9 +23,31 @@ impl Fp {
         for _ in 0..6 {
             inv = inv.wrapping_mul(2u64.wrapping_sub(p.wrapping_mul(inv)));
         }
+        #[cfg(target_arch = "wasm32")]
+        if p < 1 << 31 {
+            let r = (1u64 << 32) % p;
+            return Fp { p, pinv: inv.wrapping_neg() & 0xffff_ffff, r2: r * r % p, one: r, small: true };
+        }
         let r = ((1u128 << 64) % p as u128) as u64;
         let r2 = (r as u128 * r as u128 % p as u128) as u64;
-        Fp { p, pinv: inv.wrapping_neg(), r2, one: r }
+        Fp {
+            p,
+            pinv: inv.wrapping_neg(),
+            r2,
+            one: r,
+            #[cfg(target_arch = "wasm32")]
+            small: false,
+        }
+    }
+
+    /// REDC with R = 2^32, for t < p 2^32 and p < 2^31.
+    #[cfg(target_arch = "wasm32")]
+    #[inline(always)]
+    fn redc32(&self, t: u64) -> u64 {
+        let m = (t as u32).wrapping_mul(self.pinv as u32) as u64;
+        let u = (t + m * self.p) >> 32;
+        let (d, borrow) = u.overflowing_sub(self.p);
+        if borrow { u } else { d }
     }
 
     #[inline(always)]
@@ -32,6 +60,10 @@ impl Fp {
 
     #[inline(always)]
     pub fn mul(&self, a: u64, b: u64) -> u64 {
+        #[cfg(target_arch = "wasm32")]
+        if self.small {
+            return self.redc32(a * b);
+        }
         self.redc(a as u128 * b as u128)
     }
 
@@ -65,6 +97,10 @@ impl Fp {
 
     /// The integer in [0, p) represented by a.
     pub fn to_u64(&self, a: u64) -> u64 {
+        #[cfg(target_arch = "wasm32")]
+        if self.small {
+            return self.redc32(a);
+        }
         self.redc(a as u128)
     }
 

@@ -15,6 +15,7 @@ import "./numpy";
 import "./numpy_random";
 import "./numpy_linalg";
 import "./numpy_fft";
+import "./engine";
 import * as Cx from "./complex";
 O.complexHooks.pow = Cx.complexPow;
 

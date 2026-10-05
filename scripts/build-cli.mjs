@@ -44,7 +44,9 @@ const walk = (dir) => {
 walk(join(root, "lib"));
 const version = JSON.parse(readFileSync(join(root, "packages", "sagebrush", "package.json"), "utf8")).version;
 writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\n`);
-writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "../../src/cli";\n`);
+// The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
+writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n`);
+writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./engine.gen.js";\nimport "../../src/cli";\n`);
 
 // 2. One CommonJS file for Node 22+ and Bun.
 run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace",
