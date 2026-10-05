@@ -100,6 +100,31 @@ const OPS: Record<string, [string, string, string]> = {
   matmul: ["__matmul__", "__rmatmul__", "@"],
 };
 
+// Reusing temporaries, as NumPy does (where the reference count is 1): in
+// `a*2 + 1` the array from `a*2` exists only for the `+`, which can write
+// its result into it instead of allocating another.  numpy's operator
+// methods are tagged $fresh and record what they return in FRESH.v; any
+// other dunder that returns that array (a Python __mul__ that stored it, say)
+// clears FRESH.v.  The compiler emits addT/subT/mulT/truedivT for operators
+// whose operand is itself an operator expression, and those may reuse the
+// operand only while it is still FRESH.v: it then can only be on the JS stack.
+export const FRESH: { v: any; inplace: ((op: string, t: any, o: any, tLeft: boolean) => any) | null } = { v: null, inplace: null };
+function settle(f: any, r: any): any {
+  if (r === FRESH.v && f.$fresh !== true) FRESH.v = null;
+  return r;
+}
+function reuse(op: string, a: any, b: any, w: number): any {
+  const f = FRESH.v;
+  if (f === null) return undefined;
+  if (w & 1 && a === f) return FRESH.inplace!(op, a, b, true);
+  if (w & 2 && b === f) return FRESH.inplace!(op, b, a, false);
+  return undefined;
+}
+export const addT = (a: any, b: any, w: number): any => reuse("add", a, b, w) ?? add(a, b);
+export const subT = (a: any, b: any, w: number): any => reuse("sub", a, b, w) ?? sub(a, b);
+export const mulT = (a: any, b: any, w: number): any => reuse("mul", a, b, w) ?? mul(a, b);
+export const truedivT = (a: any, b: any, w: number): any => reuse("truediv", a, b, w) ?? truediv(a, b);
+
 export function binaryDunder(a: any, b: any, op: string): any {
   const [name, rname, sym] = OPS[op];
   const ta = typeOf(a), tb = typeOf(b);
@@ -107,19 +132,19 @@ export function binaryDunder(a: any, b: any, op: string): any {
   const fb = ta === tb ? undefined : special(b, rname);
   if (fb !== undefined && tb.$mro.includes(ta) && fb !== special(a, rname)) {
     // A subclass's reflected method gets priority.
-    const r = fb(b, a);
+    const r = settle(fb, fb(b, a));
     if (r !== NotImplemented) return r;
     if (fa !== undefined) {
-      const r2 = fa(a, b);
+      const r2 = settle(fa, fa(a, b));
       if (r2 !== NotImplemented) return r2;
     }
   } else {
     if (fa !== undefined) {
-      const r = fa(a, b);
+      const r = settle(fa, fa(a, b));
       if (r !== NotImplemented) return r;
     }
     if (fb !== undefined) {
-      const r = fb(b, a);
+      const r = settle(fb, fb(b, a));
       if (r !== NotImplemented) return r;
     }
   }
@@ -567,7 +592,7 @@ export function invert(a: any): any {
 }
 function unaryDunder(a: any, name: string, sym: string): any {
   const f = special(a, name);
-  if (f !== undefined) return f(a);
+  if (f !== undefined) return settle(f, f(a));
   raise(T.TypeError, `bad operand type for unary ${sym}: '${typeName(a)}'`);
 }
 

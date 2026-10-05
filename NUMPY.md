@@ -103,6 +103,23 @@ Elementwise work is within a few times of NumPy. In the browser, against
 NumPy compiled to WebAssembly (Pyodide), see
 [bench/browser](bench/browser/README.md).
 
+### Temporaries
+
+In Chromium, the first write to a freshly allocated 8 MB typed array costs
+about 4 ms of page faults (0.7 ms into an existing one), so allocation
+dominates simple elementwise work. NumPy reuses a temporary operand's
+buffer when its reference count is 1 (`a*2 + 1` computes `+ 1` in the
+array from `a*2`). pyjs has no reference counts, but the compiler knows
+when an operand is itself an operator expression, and then emits
+`addT`/`subT`/`mulT`/`truedivT` (src/emit.ts). numpy's operator methods
+record the array they return in `FRESH` (src/runtime/ops.ts), and any other
+dunder returning that array clears it (a Python `__mul__` that stored it,
+say). So an operand still equal to `FRESH.v` can only be on the JavaScript
+stack, and the outer operation writes into it when the dtype and shape
+match. `a += b` also computes in place now, unless `b` shares memory with
+`a`. In Chromium, `a*2 + 1` on 10^6 values went from 9.7 to 6.0 ms; pure
+Python arithmetic is unaffected.
+
 ### WebAssembly SIMD kernels
 
 Dense linear algebra, the FFT, `exp` and `log` run in Rust
