@@ -384,6 +384,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-classgroup"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "sagebrush-cli"
 version = "0.1.0"
 dependencies = [

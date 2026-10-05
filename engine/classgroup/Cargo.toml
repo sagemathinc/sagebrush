@@ -1,0 +1,11 @@
+[package]
+name = "sagebrush-classgroup"
+version = "0.1.0"
+edition = "2021"
+description = "Class groups of number fields, starting with imaginary quadratic fields (clean-room, MIT/Apache-2.0)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
