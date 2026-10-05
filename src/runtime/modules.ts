@@ -366,10 +366,20 @@ newBuiltinModule("math", (m) => {
     const n = bigOf(x);
     if (n < 0n) raise(T.ValueError, "isqrt() argument must be nonnegative");
     if (n < 2n) return Number(n);
-    let r = BigInt(Math.floor(Math.sqrt(Number(n))));
-    while (r * r > n) r--;
-    while ((r + 1n) * (r + 1n) <= n) r++;
-    return O.normBig(r);
+    if (n < 2n ** 52n) {
+      let r = BigInt(Math.floor(Math.sqrt(Number(n))));
+      while (r * r > n) r--;
+      while ((r + 1n) * (r + 1n) <= n) r++;
+      return O.normBig(r);
+    }
+    // Newton's method from above (a float start is off by far more than 1 here)
+    let g = 1n << BigInt(Math.ceil(n.toString(2).length / 2));
+    for (;;) {
+      const y = (g + n / g) >> 1n;
+      if (y >= g) break;
+      g = y;
+    }
+    return O.normBig(g);
   });
   fn(m, "comb", (nn: any, kk: any) => {
     const n = bigOf(nn);

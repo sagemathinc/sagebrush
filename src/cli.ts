@@ -12,6 +12,7 @@ import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
+import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { needsMore, complete } from "./interactive";
 import { builtin, isType, typeName, getattr } from "./runtime/object";
 
@@ -22,8 +23,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   -i       inspect interactively after running a program
   --sage   Sage syntax (2^3 == 8, 2/3 is a Rational) with sage_all imported;
            implied for .sage files
+  --magma  Magma: the program is Magma, translated to Python (src/magma.ts)
+           and run on lib/_magma.py; implied for .m and .mag files
   -q       no banner on the interactive prompt
-  --emit   print the JavaScript compiled from file
+  --emit   print the JavaScript compiled from file (with --magma: the Python)
   -V       print the version
 `;
 
@@ -71,6 +74,21 @@ R.host = {
 
 // --sage: Sage syntax for everything typed or passed on the command line.
 let sage = false;
+let magma = false;
+const isMagma = (f: string | null) => magma || (f !== null && /\.(m|mag|magma)$/.test(f));
+
+/** Magma source as Python, or null after reporting a syntax error. */
+function magmaSource(src: string, file: string): string | null {
+  try {
+    return magmaToPython(src, file);
+  } catch (e) {
+    if (!(e instanceof MagmaSyntaxError)) throw e;
+    const line = src.split("\n")[e.line - 1] ?? "";
+    process.stdout.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (${file}, line ${e.line})\n`);
+    process.exitCode = 1;
+    return null;
+  }
+}
 const opts = () => ({ sage });
 
 function mainModule(file: string): any {
@@ -228,6 +246,7 @@ async function main() {
     else if (a === "-i") inspect = true;
     else if (a === "-q") quiet = true;
     else if (a === "--sage") sage = true;
+    else if (a === "--magma") magma = true;
     else if (a === "-V" || a === "--version") {
       process.stdout.write(VERSION + "\n");
       return;
@@ -260,6 +279,11 @@ async function main() {
       process.exitCode = 2;
       return;
     }
+    if (isMagma(file)) {
+      const py = magmaSource(readFileSync(file, "utf8"), file);
+      if (py !== null) process.stdout.write(py);
+      return;
+    }
     process.stdout.write(compile(readFileSync(file, "utf8"), file, "__main__", false, false, { sage: sage || file.endsWith(".sage") }).code + "\n");
     return;
   }
@@ -272,12 +296,21 @@ async function main() {
   let code: number | null = null;
   let main: any = null;
   const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
-  if (cmd !== null) {
+  if (cmd !== null && isMagma(null)) {
+    main = mainModule("<string>");
+    const py = magmaSource(cmd, "<string>");
+    if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
+  } else if (cmd !== null) {
     main = mainModule("<string>");
     code = guarded(() => R.loader.exec(cmd!, main, "exec", "<string>", opts()));
   } else if (mod !== null) {
     code = guarded(() => {
       main = execModuleAsMain(mod!);
+    });
+  } else if (file !== null && file !== "-" && isMagma(file)) {
+    const py = magmaSource(readFileSync(file, "utf8"), file);
+    if (py !== null) code = guarded(() => {
+      main = execModule(py, file!, "__main__", false, false);
     });
   } else if (file !== null && file !== "-") {
     const source = readFileSync(file, "utf8");
