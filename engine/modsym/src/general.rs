@@ -187,6 +187,16 @@ fn transform(k: usize, i: usize, h: [i64; 4], binom: &[Vec<u64>], p: u64) -> Vec
 }
 
 /// Merel's matrices for T_p: [a b; c d] with ad - bc = p, a > b >= 0, d > c >= 0.
+/// Heilbronn matrices of determinant p for T_p on Manin symbols: Cremona's
+/// (from continued fractions, O(p log p) of them and of work) when p is a
+/// prime not dividing N, else Merel's (heilbronn_merel, O(p^2 log p) work).
+pub fn heilbronn_for(p: u64, n: u64) -> Vec<[i64; 4]> {
+    if n % p == 0 {
+        return heilbronn_merel(p as i64);
+    }
+    crate::linalg::heilbronn(p as i64).into_iter().map(|(a, b, c, d)| [a, b, c, d]).collect()
+}
+
 pub fn heilbronn_merel(p: i64) -> Vec<[i64; 4]> {
     // As in Sage's HeilbronnMerel: for each a, either ad = p (b = 0 or
     // c = 0), or ad > p and bc = ad - p with b = bc / c < a, i.e.
@@ -505,7 +515,7 @@ impl GeneralSpace {
         }
         let p = self.p;
         let d = self.dimension();
-        let hs = heilbronn_merel(q as i64);
+        let hs = heilbronn_for(q, self.n);
         let images = par::map_slice(&self.basis_gen, |&g| self.hecke_image(&hs, g));
         let mut t = vec![vec![0u64; d]; d];
         const BLOCK: usize = 64;

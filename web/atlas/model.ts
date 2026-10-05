@@ -25,6 +25,19 @@ export interface Orbit {
   curve?: Curve; // weight 2, dimension 1: the optimal curve of the isogeny class
 }
 
+/** The engine's prediction for computing a space here (estimate_newforms):
+ *  WebAssembly seconds, a likely range, and peak bytes. */
+export interface Estimate { seconds: number; low: number; high: number; bytes: number }
+
+/** "0.4 s", "about 8 s", "about 3 min". */
+export function fmtSeconds(s: number): string {
+  if (s < 1) return `${s.toFixed(1)} s`;
+  if (s < 90) return `about ${s < 10 ? s.toFixed(0) : Math.round(s / 5) * 5} s`;
+  if (s < 5400) return `about ${Math.round(s / 60)} min`;
+  return `about ${(s / 3600).toFixed(1)} h`;
+}
+export const fmtBytes = (b: number) => (b < 1e6 ? `${Math.ceil(b / 1e3)} KB` : `${Math.ceil(b / 1e6)} MB`);
+
 export interface Space {
   label: string; // N.k.a
   level: number;
@@ -36,6 +49,7 @@ export interface Space {
   checks: string[];
   seconds?: number; // engine time (native, one thread, for stored spaces)
   computed?: "atlas" | "browser";
+  estimate?: Estimate; // what recomputing it in a browser should take
   newforms: Orbit[];
 }
 

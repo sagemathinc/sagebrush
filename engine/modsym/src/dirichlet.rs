@@ -18,6 +18,9 @@ pub struct DirichletGroup {
     pub exponent: u64,
     /// logs[x]: exponent vector of x in the generators (empty for non-units).
     logs: Vec<Vec<u64>>,
+    /// For each generator: the prime power p^r of N it lives in, and for
+    /// p = 2 whether it is 5 (order 2^(r-2)) rather than -1 (order 2).
+    parts: Vec<(u64, u32, bool)>,
 }
 
 fn crt_lift(a: u64, q: u64, n: u64) -> u64 {
@@ -30,16 +33,19 @@ impl DirichletGroup {
     pub fn new(n: u64) -> Self {
         let mut gens = vec![];
         let mut orders = vec![];
+        let mut parts = vec![];
         for (p, r) in factor(n) {
             let q = p.pow(r);
             if p == 2 {
                 if r >= 2 {
                     gens.push(crt_lift(q - 1, q, n));
                     orders.push(2);
+                    parts.push((2, r, false));
                 }
                 if r >= 3 {
                     gens.push(crt_lift(5, q, n));
                     orders.push(q / 4);
+                    parts.push((2, r, true));
                 }
             } else {
                 // The least primitive root mod p^r.
@@ -48,6 +54,7 @@ impl DirichletGroup {
                 let g = (2..q).find(|&g| gcd(g, p) == 1 && fs.iter().all(|&f| pow_mod(g, phi / f, q) != 1)).unwrap();
                 gens.push(crt_lift(g, q, n));
                 orders.push(phi);
+                parts.push((p, r, false));
             }
         }
         let exponent = orders.iter().fold(1u64, |l, &o| l / gcd(l, o) * o);
@@ -69,7 +76,7 @@ impl DirichletGroup {
         if n == 1 {
             logs[0] = vec![];
         }
-        DirichletGroup { n, gens, orders, exponent, logs }
+        DirichletGroup { n, gens, orders, exponent, logs, parts }
     }
 
     pub fn is_unit(&self, x: u64) -> bool {
@@ -105,6 +112,39 @@ impl DirichletGroup {
         }
         let l = self.log(x);
         Some(l.iter().zip(v).zip(&self.orders).fold(0, |acc, ((&a, &c), &o)| (acc + a * c % o * (self.exponent / o)) % self.exponent))
+    }
+
+    /// The conductor of chi_v, from its components: for odd p a character of
+    /// (Z/p^r)^* of order o > 1 has conductor p^(1 + v_p(o)); mod 2^r one
+    /// whose restriction to <5> has order 2^s > 1 has conductor 2^(s+2), else
+    /// 4 if it is odd, else 1.  (Character::conductor scans every unit.)
+    pub fn conductor_of(&self, v: &[u64]) -> u64 {
+        let mut f = 1u64;
+        let (mut two_minus, mut two_five) = (false, 0u32);
+        for ((&(p, _, five), &c), &o) in self.parts.iter().zip(v).zip(&self.orders) {
+            let ord = o / gcd(c % o, o); // the order of this component
+            if p == 2 {
+                if five {
+                    two_five = ord.trailing_zeros();
+                } else {
+                    two_minus = ord > 1;
+                }
+            } else if ord > 1 {
+                let (mut e, mut x) = (1, ord);
+                while x % p == 0 {
+                    x /= p;
+                    e += 1;
+                }
+                f *= p.pow(e);
+            }
+        }
+        if two_five > 0 {
+            f << (two_five + 2)
+        } else if two_minus {
+            f * 4
+        } else {
+            f
+        }
     }
 
     pub fn character(&self, v: &[u64]) -> Character {
@@ -181,6 +221,17 @@ impl Character {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conductor_of_matches_the_scan() {
+        for n in 1..400u64 {
+            let g = DirichletGroup::new(n);
+            for c in 0..g.order() {
+                let v = g.vector(c);
+                assert_eq!(g.conductor_of(&v), g.character(&v).conductor(), "N = {} chi = {:?}", n, v);
+            }
+        }
+    }
 
     #[test]
     fn groups_and_conductors() {

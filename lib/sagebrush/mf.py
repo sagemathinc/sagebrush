@@ -56,3 +56,11 @@ def newforms(n, k, factor=None, chi=None, bound=100, threads=0):
     d = _orbits(call("newforms", n=int(n), k=int(k), chi=chi_arg(chi), bound=int(bound)))
     d["newforms"] = [dict(o, traces=[int(t) for t in o["traces"]], charpoly=[int(c) for c in o["charpoly"]]) for o in d["newforms"]]
     return d
+
+
+def estimate(n, k=2, bound=100):
+    """Predicted cost of newforms(n, k, bound=bound) in the WebAssembly engine
+    (one thread), without computing it: {'seconds', 'seconds_low',
+    'seconds_high' (the 10%-90% range of the actual time), 'bytes',
+    'dim_new', 'levels', 'primes', 'trace_primes', ...}.  Trivial character."""
+    return call("estimate_newforms", n=int(n), k=int(k), bound=int(bound))

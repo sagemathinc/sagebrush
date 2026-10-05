@@ -2,56 +2,76 @@
 // renders stored spaces with it, and the browser renders the spaces it
 // computes with the same functions.  No client JavaScript is needed to read
 // a page; atlas.js adds recomputation, computing on demand and WebMCP.
-import { BOUND, type Orbit, type Space, derive, factorInt, primesUpTo, quadraticField, sturmBound, spaceLabel } from "./model.ts";
+import katex from "katex";
+import { BOUND, type Orbit, type Space, derive, factorInt, fmtBytes, fmtSeconds, primesUpTo, quadraticField, sturmBound, spaceLabel } from "./model.ts";
+import { apCost, normalizedAp, satoTateSvg } from "./plot.ts";
 
 export const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const M = "−"; // minus sign
-const signed = (n: number) => (n > 0 ? "+" : M) + Math.abs(n);
-const sup = (s: string | number) => `<sup>${s}</sup>`;
-const big = (s: string) => (s.startsWith("-") ? M + s.slice(1) : s);
+const M = "−"; // minus sign, in text
 export const LMFDB = "https://www.lmfdb.org";
 export const lmfdbForm = (label: string) => `${LMFDB}/ModularForm/GL2/Q/holomorphic/${label.split(".").join("/")}/`;
 export const href = (label: string) => `/atlas/mf/${label}`;
 
-/** A polynomial with coefficients c[0] + c[1] x + ..., highest degree first. */
-export function polyHtml(c: string[], v = "x"): string {
+// ---- math: TeX rendered by KaTeX (in the Worker for stored pages, so the
+// page needs no script for it; memoized, since labels repeat)
+const memo = new Map<string, string>();
+/** Inline math from TeX. */
+export function m(tex: string): string {
+  let h = memo.get(tex);
+  if (h === undefined) {
+    h = katex.renderToString(tex, { throwOnError: false, output: "htmlAndMathml" });
+    if (memo.size > 20000) memo.clear();
+    memo.set(tex, h);
+  }
+  return h;
+}
+const sgn = (n: number) => m(n > 0 ? "+1" : "-1");
+const bigTex = (s: string) => s; // decimal strings are TeX as they are
+
+/** TeX for c[0] + c[1] x + ..., highest degree first. */
+export function polyTex(c: string[], v = "x"): string {
   let s = "";
   for (let i = c.length - 1; i >= 0; i--) {
     const a = c[i];
     if (a === "0") continue;
     const neg = a.startsWith("-"), abs = neg ? a.slice(1) : a;
-    const mono = i === 0 ? "" : `<i>${v}</i>` + (i > 1 ? sup(i) : "");
+    const mono = i === 0 ? "" : i === 1 ? v : `${v}^{${i}}`;
     const coef = abs === "1" && i > 0 ? "" : abs;
-    s += s === "" ? (neg ? M : "") + coef + mono : ` ${neg ? M : "+"} ` + coef + mono;
+    s += s === "" ? (neg ? "-" : "") + coef + mono : ` ${neg ? "-" : "+"} ` + coef + mono;
   }
   return s || "0";
 }
 
-/** sum a_n q^n + O(q^prec) from a_1, a_2, ... */
-export function qexpHtml(a: string[], prec: number): string {
+/** TeX for sum a_n q^n + O(q^prec) from a_1, a_2, ... */
+export function qexpTex(a: string[], prec: number): string {
   let s = "";
   for (let n = 1; n < prec && n <= a.length; n++) {
     const x = a[n - 1];
     if (x === "0") continue;
     const neg = x.startsWith("-"), abs = neg ? x.slice(1) : x;
-    const mono = "<i>q</i>" + (n > 1 ? sup(n) : "");
-    const t = (abs === "1" ? "" : abs) + mono;
-    s += s === "" ? (neg ? M : "") + t : ` ${neg ? M : "+"} ` + t;
+    const t = (abs === "1" ? "" : abs) + (n === 1 ? "q" : `q^{${n}}`);
+    s += s === "" ? (neg ? "-" : "") + t : ` ${neg ? "-" : "+"} ` + t;
   }
-  return (s ? s + " + " : "") + `<i>O</i>(<i>q</i>${sup(prec)})`;
+  return (s ? s + " + " : "") + `O(q^{${prec}})`;
 }
+export const polyHtml = (c: string[]) => m(polyTex(c));
+export const qexpHtml = (a: string[], prec: number) => m(qexpTex(a, prec));
 
-const factorHtml = (n: number) => (n === 1 ? "1" : factorInt(n).map(([p, e]) => (e > 1 ? p + sup(e) : String(p))).join(" · "));
-const levelHtml = (n: number) => (factorInt(n).length === 1 && factorInt(n)[0][1] === 1 ? `${n} (prime)` : n === 1 ? "1" : `${n} = ${factorHtml(n)}`);
-const Snew = (k: number, n: number | string) => `<i>S</i><sub>${k}</sub>${sup("new")}(Γ<sub>0</sub>(${n}))`;
+const factorTex = (n: number) => (n === 1 ? "1" : factorInt(n).map(([p, e]) => (e > 1 ? `${p}^{${e}}` : String(p))).join(" \\cdot "));
+const levelHtml = (n: number) => (n === 1 ? "1" : factorInt(n).length === 1 && factorInt(n)[0][1] === 1 ? `${n} (prime)` : m(`${n} = ${factorTex(n)}`));
+const SnewTex = (k: number, n: number | string, kind = "new") => `S_{${k}}^{\\mathrm{${kind}}}(\\Gamma_0(${n}))`;
+const Snew = (k: number, n: number | string) => m(SnewTex(k, n));
+const Ttex = (T: [number, number][]) => "T = " + T.map(([q, c], i) => `${i ? " + " : ""}${c === 1 ? "" : c}T_{${q}}`).join("");
+const fieldTex = (D: bigint | number) => `\\mathbb{Q}(\\sqrt{${D}})`;
+const QQ = () => m("\\mathbb{Q}");
+
 /** The coefficient field: Q, Q(sqrt D), or its degree. */
 export function fieldHtml(f: Orbit, long = false): string {
-  if (f.dim === 1) return "ℚ";
+  if (f.dim === 1) return QQ();
   const D = f.dim === 2 ? quadraticField(f.charpoly) : null;
-  if (D !== null) return `ℚ(√${D < 0n ? M + -D : D})`;
+  if (D !== null) return m(fieldTex(D));
   return long ? `a number field of degree ${f.dim}` : `degree ${f.dim}`;
 }
-const Tops = (T: [number, number][]) => T.map(([q, c], i) => `${i ? " + " : ""}${c === 1 ? "" : c}<i>T</i><sub>${q}</sub>`).join("");
 
 /** A link that opens the notebook at sagebrush.space with these Sage-mode cells. */
 export function notebookLink(cells: (string | { md: string })[]): string {
@@ -97,7 +117,7 @@ h1{font-size:26px;margin:4px 0 12px;letter-spacing:-.01em;font-weight:650}h2{fon
 table{border-collapse:collapse;margin:6px 0;font-size:14px}th,td{padding:4px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:600}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .scroll{overflow-x:auto;max-width:100%}
-.math{font-family:"Latin Modern Math","STIX Two Math","Cambria Math",Georgia,serif;font-size:16px;overflow-wrap:anywhere}
+.katex{font-size:1.08em}.math{overflow-wrap:anywhere}p.math .katex,td.math .katex{white-space:normal}
 .badge{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:10px;padding:0 8px;margin-right:4px;white-space:nowrap}
 .badge.ok{border-color:var(--ok);color:var(--ok)}.badge.bad{border-color:var(--err);color:var(--err)}
 code,pre{font-family:ui-monospace,Menlo,monospace;font-size:13px;background:var(--code);border-radius:4px}code{padding:1px 4px}pre{padding:10px 12px;overflow-x:auto}
@@ -126,6 +146,9 @@ ${o.json ? `<link rel="alternate" type="application/json" href="${esc(o.json)}">
 <link rel="alternate" type="text/markdown" href="/atlas/llms.txt" title="llms.txt">
 ${o.noindex ? '<meta name="robots" content="noindex">' : ""}
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
+<link rel="preload" href="/katex/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/katex/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/katex/katex.min.css">
 <style>${CSS}</style>
 <script type="module" src="/atlas/atlas.js"></script>
 </head><body>
@@ -160,23 +183,25 @@ export function spaceCrumbs(n: number, k: number): [string, string?][] {
 function orbitRow(sp: Space, f: Orbit): string {
   const d = derive(sp, f);
   const field = fieldHtml(f);
-  const al = d.al.map(([p, w]) => (w === null ? "" : `<span title="w_${p}">${w > 0 ? "+" : M}</span>`)).join("");
+  // the signs w_p for p || N, in the order of p (the title names them)
+  const known = d.al.filter(([, w]) => w !== null) as [number, number][];
+  const al = known.length ? `<span title="${known.map(([p, w]) => `w_${p} = ${w > 0 ? "+1" : "−1"}`).join(", ")}">${known.map(([, w]) => (w > 0 ? "+" : M)).join(" ")}</span>` : "";
   return `<tr><td><a href="${href(f.label)}">${f.label}</a></td><td class="n">${f.dim}</td><td>${field}</td>
-<td class="math">${qexpHtml(f.traces, 8)}</td><td>${al}</td><td>${d.sign === null ? "" : d.sign > 0 ? "+1" : M + "1"}</td>
-<td>${d.cm ? `ℚ(√${M}${-d.cm})` : ""}</td><td>${f.curve ? `<a href="${LMFDB}/EllipticCurve/Q/${f.curve.lmfdb.replace(".", "/")}/">${f.curve.cremona}</a> <span class="muted small">rank ${f.curve.rank}</span>` : ""}</td></tr>`;
+<td class="math">${qexpHtml(f.traces, 8)}</td><td>${al}</td><td>${d.sign === null ? "" : sgn(d.sign)}</td>
+<td>${d.cm ? m(fieldTex(d.cm)) : ""}</td><td>${f.curve ? `<a href="${LMFDB}/EllipticCurve/Q/${f.curve.lmfdb.replace(".", "/")}/">${f.curve.cremona}</a> <span class="muted small">rank ${f.curve.rank}</span>` : ""}</td></tr>`;
 }
 
 export function spaceBody(sp: Space, stored = true): string {
   const n = sp.level, k = sp.weight, oldDim = sp.dims.cusp - sp.dims.new;
   const orbits = sp.newforms.length
-    ? `<div class="scroll"><table><thead><tr><th>Label</th><th class="n">Dim</th><th>Coefficient field</th><th>Trace form</th><th title="Atkin-Lehner signs w_p for p dividing N (p exactly dividing N)">AL signs</th><th title="Sign of the functional equation">Sign</th><th>CM</th><th>Elliptic curve</th></tr></thead><tbody>${sp.newforms.map((f) => orbitRow(sp, f)).join("")}</tbody></table></div>`
-    : `<p>There are no newforms: ${Snew(k, n)} = 0.</p>`;
+    ? `<div class="scroll"><table><thead><tr><th>Label</th><th class="n">Dim</th><th>Coefficient field</th><th>Trace form</th><th title="Atkin-Lehner signs w_p for the primes p exactly dividing N">AL signs</th><th title="Sign of the functional equation">Sign</th><th>CM</th><th>Elliptic curve</th></tr></thead><tbody>${sp.newforms.map((f) => orbitRow(sp, f)).join("")}</tbody></table></div>`
+    : `<p>There are no newforms: ${m(SnewTex(k, n) + " = 0")}.</p>`;
   const polys = sp.newforms.length
-    ? `<h2>Hecke characteristic polynomials</h2><p>The eigenvalue of <span class="math"><i>T</i> = ${Tops(sp.T)}</span> generates each orbit's coefficient field; on the newspace its characteristic polynomial factors over ℚ as one irreducible factor per orbit:</p>
-<div class="scroll"><table><thead><tr><th>Orbit</th><th>Characteristic polynomial of <i>T</i></th></tr></thead><tbody>${sp.newforms.map((f) => `<tr><td><a href="${href(f.label)}">${f.label}</a></td><td class="math">${polyHtml(f.charpoly)}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<h2>Hecke characteristic polynomials</h2><p>The eigenvalue of ${m(Ttex(sp.T))} generates each orbit's coefficient field; on the newspace its characteristic polynomial factors over ${QQ()} as one irreducible factor per orbit:</p>
+<div class="scroll"><table><thead><tr><th>Orbit</th><th>Characteristic polynomial of ${m("T")}</th></tr></thead><tbody>${sp.newforms.map((f) => `<tr><td><a href="${href(f.label)}">${f.label}</a></td><td class="math">${polyHtml(f.charpoly)}</td></tr>`).join("")}</tbody></table></div>`
     : "";
   const old = sp.old.length
-    ? `<p class="math">${Snew(k, "").replace("new", "old")} = ${sp.old.map(([m, , mult]) => `<a href="${href(spaceLabel(m, k))}">${Snew(k, m)}</a>${mult > 1 ? sup("⊕" + mult) : ""}`).join(" ⊕ ")}</p>`
+    ? `<p class="math">${m(SnewTex(k, n, "old") + " =")} ${sp.old.map(([lv, , mult]) => `<a href="${href(spaceLabel(lv, k))}">${m(SnewTex(k, lv) + (mult > 1 ? `^{\\oplus ${mult}}` : ""))}</a>`).join(` ${m("\\oplus")} `)}</p>`
     : `<p>The old subspace is 0.</p>`;
   const props = prop([
     ["Level", levelHtml(n)],
@@ -189,14 +214,14 @@ export function spaceBody(sp: Space, stored = true): string {
     ["Data", stored ? "stored in the atlas" : "computed in your browser"],
   ]);
   const nav = [n > 1 ? `<a href="${href(spaceLabel(n - 1, k))}">← ${spaceLabel(n - 1, k)}</a>` : "", `<a href="${href(spaceLabel(n + 1, k))}">${spaceLabel(n + 1, k)} →</a>`].filter(Boolean).join(" · ");
-  return `<h1>${spaceTitle(n, k)}: <span class="math">${Snew(k, n)}</span></h1>
+  return `<h1>${spaceTitle(n, k)}: ${Snew(k, n)}</h1>
 <div class="grid"><div>
 <h2>Newforms</h2>${orbits}
 ${polys}
 <h2>Dimensions</h2>
 <table><tbody><tr><th>Newforms ${Snew(k, n)}</th><td class="n">${sp.dims.new}</td></tr><tr><th>Old forms</th><td class="n">${oldDim}</td></tr>
-<tr><th>Cusp forms <i>S</i><sub>${k}</sub>(Γ<sub>0</sub>(${n}))</th><td class="n">${sp.dims.cusp}</td></tr><tr><th>Eisenstein series</th><td class="n">${sp.dims.eisenstein}</td></tr>
-<tr><th>Modular forms <i>M</i><sub>${k}</sub>(Γ<sub>0</sub>(${n}))</th><td class="n">${sp.dims.cusp + sp.dims.eisenstein}</td></tr></tbody></table>
+<tr><th>Cusp forms ${m(`S_{${k}}(\\Gamma_0(${n}))`)}</th><td class="n">${sp.dims.cusp}</td></tr><tr><th>Eisenstein series ${m(`E_{${k}}(\\Gamma_0(${n}))`)}</th><td class="n">${sp.dims.eisenstein}</td></tr>
+<tr><th>Modular forms ${m(`M_{${k}}(\\Gamma_0(${n}))`)}</th><td class="n">${sp.dims.cusp + sp.dims.eisenstein}</td></tr></tbody></table>
 <h3>Decomposition of the old subspace</h3>${old}
 ${provenance(sp, null, stored)}
 <p class="small">${nav}</p>
@@ -210,29 +235,6 @@ export function orbitTitle(f: Orbit) {
   return `Newform orbit ${f.label}`;
 }
 
-/** A histogram of a_p / 2 p^((k-1)/2) against the Sato-Tate density. */
-export function satoTateSvg(xs: number[], label: string): string {
-  const bins = 24, h = new Array(bins).fill(0);
-  for (const x of xs) h[Math.min(bins - 1, Math.max(0, Math.floor(((x + 1) / 2) * bins)))]++;
-  const W = 480, H = 170, pad = 22, dx = (W - 2 * pad) / bins;
-  const dens = h.map((c) => (c / xs.length) * (bins / 2)); // density on [-1, 1]
-  const ymax = Math.max(0.75, ...dens) * 1.08;
-  const y = (v: number) => H - pad - (v / ymax) * (H - 2 * pad);
-  const bars = dens.map((v, i) => `<rect x="${(pad + i * dx + 0.5).toFixed(1)}" y="${y(v).toFixed(1)}" width="${(dx - 1).toFixed(1)}" height="${(H - pad - y(v)).toFixed(1)}" fill="var(--accent2)" opacity=".75"/>`).join("");
-  let path = "";
-  for (let i = 0; i <= 100; i++) {
-    const t = -1 + i / 50, v = (2 / Math.PI) * Math.sqrt(Math.max(0, 1 - t * t));
-    path += `${i ? "L" : "M"}${(pad + ((t + 1) / 2) * (W - 2 * pad)).toFixed(1)},${y(v).toFixed(1)}`;
-  }
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px" role="img" aria-label="${esc(label)}">${bars}<path d="${path}" fill="none" stroke="var(--err)" stroke-width="1.5"/>
-<line x1="${pad}" x2="${W - pad}" y1="${H - pad}" y2="${H - pad}" stroke="var(--line)"/><text x="${pad}" y="${H - 6}" text-anchor="middle">${M}1</text><text x="${W / 2}" y="${H - 6}" text-anchor="middle">0</text><text x="${W - pad}" y="${H - 6}" text-anchor="middle">1</text></svg>`;
-}
-
-export function normalizedAp(sp: Space, f: Orbit, upto = BOUND): number[] {
-  const k = sp.weight;
-  return primesUpTo(Math.min(upto, f.traces.length)).filter((p) => sp.level % p !== 0).map((p) => Number(f.traces[p - 1]) / (2 * Math.pow(p, (k - 1) / 2)));
-}
-
 export function orbitBody(sp: Space, f: Orbit, stored = true): string {
   const n = sp.level, k = sp.weight, d = derive(sp, f);
   const ps = primesUpTo(100);
@@ -244,29 +246,29 @@ export function orbitBody(sp: Space, f: Orbit, stored = true): string {
     ["Character", "trivial"],
     ["Dimension", String(f.dim)],
     ["Coefficient field", fieldHtml(f)],
-    ["CM", d.cm ? `ℚ(√${M}${-d.cm})` : "no"],
-    ["Sign", d.sign === null ? "—" : d.sign > 0 ? "+1" : M + "1"],
+    ["CM", d.cm ? m(fieldTex(d.cm)) : "no"],
+    ["Sign", d.sign === null ? "—" : sgn(d.sign)],
     ...(f.curve ? ([["Elliptic curve", `${f.curve.cremona} (rank ${f.curve.rank})`]] as [string, string][]) : []),
-    ["Status", badgeStatus(sp.status) + (f.lmfdb === "agrees" ? `<span class="badge ok" title="Label, dimension and tr a_p for every p < 1000 equal LMFDB's">LMFDB agrees</span>` : f.lmfdb ? `<span class="badge bad">differs from LMFDB</span>` : "")],
+    ["Status", badgeStatus(sp.status) + (f.lmfdb === "agrees" ? `<span class="badge ok" title="Label, dimension and tr a_p for every p &lt; 1000 equal LMFDB's">LMFDB agrees</span>` : f.lmfdb ? `<span class="badge bad">differs from LMFDB</span>` : "")],
   ]);
   const qx = f.dim === 1
-    ? `<h2><i>q</i>-expansion</h2><p class="math">${qexpHtml(f.traces, 25)}</p>`
-    : `<h2>Trace form</h2><p>The ${f.dim} newforms in this orbit are conjugate over ℚ; the sum of their <i>q</i>-expansions is</p><p class="math">${qexpHtml(f.traces, 25)}</p>`;
-  const coef = `<h2>Coefficient field</h2><p>The coefficients <i>a<sub>n</sub></i> generate ${field}.${f.dim > 1 ? ` It is generated by the eigenvalue α of <span class="math"><i>T</i> = ${Tops(sp.T)}</span>, whose minimal polynomial is` : ` The eigenvalue of <span class="math"><i>T</i> = ${Tops(sp.T)}</span> is a root of`}</p><p class="math">${polyHtml(f.charpoly)}</p>`;
+    ? `<h2>${m("q")}-expansion</h2><p class="math">${qexpHtml(f.traces, 25)}</p>`
+    : `<h2>Trace form</h2><p>The ${f.dim} newforms in this orbit are conjugate over ${QQ()}; the sum of their ${m("q")}-expansions is</p><p class="math">${qexpHtml(f.traces, 25)}</p>`;
+  const coef = `<h2>Coefficient field</h2><p>The coefficients ${m("a_n")} generate ${field}.${f.dim > 1 ? ` It is generated by the eigenvalue ${m("\\alpha")} of ${m(Ttex(sp.T))}, whose minimal polynomial is` : ` The eigenvalue of ${m(Ttex(sp.T))} is a root of`}</p><p class="math">${polyHtml(f.charpoly)}</p>`;
   const al = d.al.length
-    ? `<h2>Atkin–Lehner signs</h2><table><thead><tr><th><i>p</i></th><th>w<sub>p</sub></th></tr></thead><tbody>${d.al.map(([p, w]) => `<tr><td>${p}</td><td>${w === null ? `<span class="muted">— (${p}${sup(2)} divides ${n})</span>` : w > 0 ? "+1" : M + "1"}</td></tr>`).join("")}</tbody></table>
-<p class="small muted">For <i>p</i> exactly dividing <i>N</i>, every form in the orbit has <i>a<sub>p</sub></i> = ${M}<i>p</i>${sup("k/2−1")}<i>w<sub>p</sub></i>.${d.sign !== null ? ` The Fricke sign is ${signed(d.fricke as number)}, so the sign of the functional equation is (${M}1)${sup("k/2")}<i>w<sub>N</sub></i> = ${signed(d.sign)}: each L-function in the orbit has ${d.sign > 0 ? "even" : "odd"} analytic rank.` : ""}</p>`
+    ? `<h2>Atkin–Lehner signs</h2><table><thead><tr><th>${m("p")}</th><th>${m("w_p")}</th></tr></thead><tbody>${d.al.map(([p, w]) => `<tr><td>${p}</td><td>${w === null ? `<span class="muted">— (${m(`${p}^2 \\mid ${n}`)})</span>` : sgn(w)}</td></tr>`).join("")}</tbody></table>
+<p class="small muted">For ${m("p \\parallel N")} every form in the orbit has ${m("a_p = -p^{k/2-1} w_p")}.${d.sign !== null ? ` The Fricke sign is ${m(`w_N = ${d.fricke! > 0 ? "+" : "-"}1`)}, so the sign of the functional equation is ${m(`(-1)^{k/2} w_N = ${d.sign > 0 ? "+" : "-"}1`)}: each L-function in the orbit has ${d.sign > 0 ? "even" : "odd"} analytic rank.` : ""}</p>`
     : "";
-  const cm = d.cm ? `<p>This orbit has complex multiplication by ℚ(√${M}${-d.cm}): tr <i>a<sub>p</sub></i> = 0 for all ${d.cmInert} primes <i>p</i> &lt; ${BOUND} inert in it.</p>` : "";
-  const aps = `<h2>Traces of Hecke eigenvalues</h2><div class="scroll"><table><thead><tr><th><i>p</i></th>${ps.map((p) => `<th class="n">${p}</th>`).join("")}</tr></thead><tbody><tr><th>tr <i>a<sub>p</sub></i></th>${ps.map((p) => `<td class="n">${big(f.traces[p - 1])}</td>`).join("")}</tr></tbody></table></div>
-<p class="small muted">tr <i>a<sub>n</sub></i> for every <i>n</i> ≤ ${f.traces.length} is in the <a href="${href(f.label)}.json">JSON</a>.</p>`;
+  const cm = d.cm ? `<p>This orbit has complex multiplication by ${m(fieldTex(d.cm))}: ${m("\\operatorname{tr} a_p = 0")} for all ${d.cmInert} primes ${m(`p < ${BOUND}`)} inert in it.</p>` : "";
+  const aps = `<h2>Traces of Hecke eigenvalues</h2><div class="scroll"><table><thead><tr><th>${m("p")}</th>${ps.map((p) => `<th class="n">${p}</th>`).join("")}</tr></thead><tbody><tr><th>${m("\\operatorname{tr} a_p")}</th>${ps.map((p) => `<td class="n">${f.traces[p - 1].replace(/^-/, M)}</td>`).join("")}</tr></tbody></table></div>
+<p class="small muted">${m("\\operatorname{tr} a_n")} for every ${m(`n \\le ${f.traces.length}`)} is in the <a href="${href(f.label)}.json">JSON</a>.</p>`;
   const st = f.dim === 1
-    ? `<h2>Sato–Tate</h2><p>${d.cm ? "With CM the" : "The"} normalized <i>a<sub>p</sub></i>/2<i>p</i>${sup(`${k - 1}/2`)} for the primes <i>p</i> &lt; ${BOUND} not dividing ${n}, against ${d.cm ? "the semicircle (CM forms follow a different law)" : "the semicircle (2/π)√(1 − <i>x</i>²)"}:</p>
-<div id="st">${satoTateSvg(normalizedAp(sp, f), "Sato-Tate histogram")}</div>${f.curve ? `<div class="actions"><button data-st="${esc(JSON.stringify(f.curve.ainvs))}" data-level="${n}">Use the primes up to 10<sup>6</sup> (computed in your browser)</button><span class="status" id="st-status"></span></div>` : ""}`
+    ? `<h2>Sato–Tate</h2><p>${d.cm ? "With CM the" : "The"} normalized ${m(`a_p / 2p^{${k - 1}/2}`)} for the primes ${m(`p < ${BOUND}`)} not dividing ${n}, against the semicircle ${m("\\tfrac{2}{\\pi}\\sqrt{1 - x^2}")}${d.cm ? " (CM forms follow a different law)" : ""}:</p>
+<div id="st">${satoTateSvg(normalizedAp(sp, f), "Sato-Tate histogram")}</div>${f.curve ? `<div class="actions"><button data-st="${esc(JSON.stringify(f.curve.ainvs))}" data-level="${n}">Use the primes up to 10⁶ (computed in your browser, ${fmtSeconds(apCost(1e6).seconds)})</button><span class="status" id="st-status"></span></div>` : ""}`
     : "";
   const curve = f.curve
     ? `<h2>Elliptic curve</h2><p>By modularity this newform is the one attached to the isogeny class <a href="${LMFDB}/EllipticCurve/Q/${f.curve.lmfdb.replace(".", "/")}/">${f.curve.lmfdb}</a> (Cremona's ${f.curve.cremona.replace(/\d+$/, "")}). Its optimal curve ${f.curve.cremona} is</p>
-<p class="math">${weierstrass(f.curve.ainvs)}</p><p>of rank ${f.curve.rank} with torsion of order ${f.curve.torsion}. Its <i>a<sub>p</sub></i>, computed here by Sagebrush's point-counting engine, equal the newform's for every prime <i>p</i> &lt; ${BOUND}.</p>`
+<p class="math">${m(weierstrass(f.curve.ainvs))}</p><p>of rank ${f.curve.rank} with torsion of order ${f.curve.torsion}. Its ${m("a_p")}, computed by Sagebrush's point-counting engine, equal the newform's for every prime ${m(`p < ${BOUND}`)}.</p>`
     : "";
   return `<h1>${orbitTitle(f)}</h1>
 <div class="grid"><div>
@@ -277,9 +279,8 @@ ${provenance(sp, f, stored)}
 }
 
 function weierstrass(a: number[]): string {
-  const t = (c: number, m: string, first = false) => (c === 0 ? "" : (c < 0 ? (first ? M : ` ${M} `) : first ? "" : " + ") + (Math.abs(c) === 1 && m ? "" : Math.abs(c)) + m);
-  const x = "<i>x</i>", y = "<i>y</i>";
-  return `${y}${sup(2)}${t(a[0], x + y)}${t(a[2], y)} = ${x}${sup(3)}${t(a[1], x + sup(2))}${t(a[3], x)}${t(a[4], "")}`;
+  const t = (c: number, mono: string) => (c === 0 ? "" : (c < 0 ? " - " : " + ") + (Math.abs(c) === 1 && mono ? "" : Math.abs(c)) + mono);
+  return `y^2${t(a[0], "xy")}${t(a[2], "y")} = x^3${t(a[1], "x^2")}${t(a[3], "x")}${t(a[4], "")}`;
 }
 
 // ------------------------------------------------------------------ provenance and recipes
@@ -294,11 +295,11 @@ function provenance(sp: Space, f: Orbit | null, stored: boolean): string {
        `newform_orbits(${n}, ${k})`, `# T_2 on the modular symbols (sign +1), new and old\nModularSymbols(${n}, ${k}, sign=1).hecke_polynomial(2).factor()`];
   const checks = sp.checks.map((c) => `<li><code>${esc(c)}</code></li>`).join("");
   return `<h2>Provenance</h2>
-<p>${stored ? `Stored in the atlas: computed by Sagebrush's modular symbols engine${sp.seconds !== undefined ? ` in ${sp.seconds} s` : ""} (one thread) and` : `Computed in your browser by Sagebrush's modular symbols engine (WebAssembly)${sp.seconds !== undefined ? ` in ${sp.seconds} s` : ""}:`} <b>${esc(sp.status)}</b>: the dimensions are certified, and the characteristic polynomial of <i>T</i> over ℤ is reconstructed by CRT past a rigorous coefficient bound.
-${f?.lmfdb === "agrees" ? " The label, dimension and tr <i>a<sub>p</sub></i> for every <i>p</i> &lt; 1000 equal LMFDB's." : ""}</p>
+<p>${stored ? `Stored in the atlas: computed by Sagebrush's modular symbols engine${sp.seconds !== undefined ? ` in ${sp.seconds} s` : ""} (one thread) and` : `Computed in your browser by Sagebrush's modular symbols engine (WebAssembly)${sp.seconds !== undefined ? ` in ${sp.seconds} s` : ""}${sp.estimate ? ` (the <a href="/atlas/about#cost">cost model</a> predicted ${fmtSeconds(sp.estimate.seconds)})` : ""}:`} <b>${esc(sp.status)}</b>: the dimensions are certified, and the characteristic polynomial of ${m("T")} over ${m("\\mathbb{Z}")} is reconstructed by CRT past a rigorous coefficient bound.
+${f?.lmfdb === "agrees" ? ` The label, dimension and ${m("\\operatorname{tr} a_p")} for every ${m("p < 1000")} equal LMFDB's.` : ""}</p>
 <details><summary>The engine's checks</summary><ul>${checks}</ul></details>
 <div class="actions">
-${stored ? `<button class="primary" data-verify="${n},${k}">Recompute in your browser</button>` : ""}
+${stored ? `<button class="primary" data-verify="${n},${k}"${sp.estimate ? ` data-expect="${sp.estimate.seconds.toFixed(2)}" title="Predicted by the cost model: ${fmtSeconds(sp.estimate.seconds)}, ${fmtBytes(sp.estimate.bytes)} of memory"` : ""}>Recompute in your browser${sp.estimate ? ` (${fmtSeconds(sp.estimate.seconds)})` : ""}</button>` : ""}
 <a href="${notebookLink(cells)}">Open in the notebook</a> ·
 ${stored ? `<a href="${href(f ? f.label : sp.label)}.json">JSON</a> · <a href="/atlas/data/mf/${k}/${n}.json">stored data</a>` : `<a href="#" data-download>Download JSON</a>`}
 <span class="status" id="verify-status" role="status"></span></div>
@@ -313,9 +314,10 @@ export function pendingBody(n: number, k: number, letter?: string): string {
   const label = spaceLabel(n, k) + (letter ? "." + letter : "");
   return `<h1>${letter ? "Newform orbit" : "Newspace"} ${esc(label)}</h1>
 <div class="box" data-compute="${n},${k}"${letter ? ` data-letter="${esc(letter)}"` : ""}>
-<p><b>Not stored in the atlas</b> (it stores weight 2 up to level 1000, and weights 4–12 with <i>N</i><i>k</i>² ≤ 4000).
+<p><b>Not stored in the atlas</b> (it stores weight 2 up to level 1000, and weights 4–12 with ${m("Nk^2 \\le 4000")}).
 Your browser is computing it now with Sagebrush's engine, compiled to WebAssembly: the same proven computation as the stored spaces.</p>
 <div class="actions"><span class="status" id="compute-status" role="status">Starting…</span><button id="compute-stop">Stop</button></div>
+<p class="small muted" id="compute-estimate"></p>
 <noscript><p>Computing needs JavaScript. Or run <code>newform_orbits(${n}, ${k})</code> in Sage mode at <a href="/">sagebrush.space</a>.</p></noscript>
 </div>`;
 }
@@ -364,7 +366,7 @@ export function searchBody(q: Query, rows: IndexRow[], total: number, start: num
   const qs = (o: Query) => new URLSearchParams(Object.entries(o).filter(([, x]) => x !== undefined && x !== "" && x !== 0).map(([a, b]) => [a, String(b)])).toString();
   const nav = [start > 0 ? `<a href="/atlas/mf/?${qs({ ...q, start: Math.max(0, start - pageSize) })}">← previous</a>` : "", start + pageSize < total ? `<a href="/atlas/mf/?${qs({ ...q, start: start + pageSize })}">next →</a>` : ""].filter(Boolean).join(" · ");
   const table = rows.length
-    ? `<div class="scroll"><table><thead><tr><th>Label</th><th class="n">Dim</th><th>Trace form</th><th>Sign</th><th>CM</th><th>Curve</th></tr></thead><tbody>${rows.map((r) => `<tr><td><a href="${href(r[0])}">${r[0]}</a></td><td class="n">${r[3]}</td><td class="math">${qexpHtml(r[6], 8)}</td><td>${r[5] ? (r[5] > 0 ? "+1" : M + "1") : ""}</td><td>${r[4] ? `ℚ(√${M}${-r[4]})` : ""}</td><td>${r[7] ? `${r[7][0]} <span class="muted small">rank ${r[7][1]}</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div class="scroll"><table><thead><tr><th>Label</th><th class="n">Dim</th><th>Trace form</th><th>Sign</th><th>CM</th><th>Curve</th></tr></thead><tbody>${rows.map((r) => `<tr><td><a href="${href(r[0])}">${r[0]}</a></td><td class="n">${r[3]}</td><td class="math">${qexpHtml(r[6], 8)}</td><td>${r[5] ? sgn(r[5]) : ""}</td><td>${r[4] ? m(fieldTex(r[4])) : ""}</td><td>${r[7] ? `${r[7][0]} <span class="muted small">rank ${r[7][1]}</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`
     : "<p>No stored newform orbits match. Spaces that are not stored can still be computed: open a label such as <a href=\"/atlas/mf/1.24.a\">1.24.a</a>.</p>";
   return `<h1>Search newform orbits</h1>${searchForm(q)}
 <p class="status">${total} orbit${total === 1 ? "" : "s"}${total ? `; showing ${start + 1}–${start + rows.length}` : ""} · <a href="/atlas/mf/?${qs({ ...q, start: undefined })}&amp;format=json">JSON</a></p>${table}<p>${nav}</p>`;

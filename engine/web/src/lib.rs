@@ -184,6 +184,12 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                        "bytes_modp": e.bytes_modp, "bytes_exact": e.bytes_exact, "seconds_modp": e.seconds_modp,
                        "seconds_exact": e.seconds_exact }))
         }
+        "estimate_newforms" => {
+            let e = sagebrush_modsym::estimate::newforms(u(v, "n")?, u(v, "k").unwrap_or(2) as usize, u(v, "bound").unwrap_or(100) as usize);
+            Ok(json!({ "n": e.n, "k": e.k, "bound": e.bound, "dim_new": e.dim_new, "dim_top": e.dim_top, "levels": e.levels, "symbols": e.symbols,
+                       "primes": e.primes, "trace_primes": e.trace_primes, "terms": e.terms, "term_names": sagebrush_modsym::estimate::NEWFORMS_TERMS,
+                       "seconds": e.seconds, "seconds_low": e.seconds_low, "seconds_high": e.seconds_high, "bytes": e.bytes }))
+        }
         "rational_newforms" => {
             let r = sagebrush_modsym::newforms::rational_newforms(u(v, "n")?, u(v, "bound").unwrap_or(1000), 40)?;
             Ok(json!(r.forms.into_iter().map(|f| f.ap).collect::<Vec<_>>()))

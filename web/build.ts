@@ -72,8 +72,11 @@ for (const f of KATEX) copyFileSync(join(katexDir, f.slice("katex/".length)), jo
 // The atlas (web/atlas): its page script and engine worker, and llms.txt.
 // Its pages are rendered by the site's Worker; its data (web/dist/atlas/data)
 // comes from scripts/build-atlas.mjs and is not in git.
+// atlas.js loads KaTeX and the templates (a split chunk) only to show a
+// space computed in the browser.
+for (const f of existsSync(join(here, "dist", "atlas")) ? readdirSync(join(here, "dist", "atlas")) : []) if (/^atlas-.*\.js$/.test(f)) rmSync(join(here, "dist", "atlas", f));
 for (const [entry, name] of [["client.ts", "atlas.js"], ["engine-worker.ts", "atlas-engine.js"]]) {
-  const r = await Bun.build({ entrypoints: [join(here, "atlas", entry)], outdir: join(here, "dist", "atlas"), naming: name, target: "browser", format: "esm", minify: true });
+  const r = await Bun.build({ entrypoints: [join(here, "atlas", entry)], outdir: join(here, "dist", "atlas"), naming: { entry: name, chunk: "atlas-[hash].js" }, splitting: true, target: "browser", format: "esm", minify: true });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);

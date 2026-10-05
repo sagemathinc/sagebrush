@@ -39,17 +39,17 @@ use space::Space;
 
 // std::time::Instant panics on wasm32-unknown-unknown; time from the host there.
 #[cfg(not(target_arch = "wasm32"))]
-fn now() -> std::time::Instant {
+pub(crate) fn now() -> std::time::Instant {
     std::time::Instant::now()
 }
 #[cfg(not(target_arch = "wasm32"))]
-fn elapsed_ms(a: std::time::Instant, b: std::time::Instant) -> f64 {
+pub(crate) fn elapsed_ms(a: std::time::Instant, b: std::time::Instant) -> f64 {
     (b - a).as_secs_f64() * 1000.0
 }
 #[cfg(target_arch = "wasm32")]
-fn now() {}
+pub(crate) fn now() {}
 #[cfg(target_arch = "wasm32")]
-fn elapsed_ms(_: (), _: ()) -> f64 {
+pub(crate) fn elapsed_ms(_: (), _: ()) -> f64 {
     0.0
 }
 

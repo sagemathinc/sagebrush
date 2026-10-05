@@ -29,5 +29,6 @@
 ## Recompute
 
 - Sage mode (https://sagebrush.space notebook, or `npx sagebrush --sage`): newform_orbits(N, k) lists the orbits (label, dimension, trace form, .charpoly(), .traces(n)); Newforms(N, k) prints q-expansions as Sage does when all are rational.
+- Before computing: the engine predicts time and peak memory (WebAssembly, one thread) with estimate_newforms: in Sage mode `from sagebrush import mf; mf.estimate(N, k, bound)`, in a page the WebMCP tool atlas_estimate; https://sagebrush.space/atlas/about#cost shows its accuracy.
 - Rust: in engine/ of https://github.com/sagemathinc/sagebrush, `cargo run --release -p sagebrush-web --example atlas -- N:k 1000` prints the newspace as one JSON line (the atlas's input).
-- In a browser with WebMCP, atlas pages offer tools atlas_lookup(label), atlas_search(filters) and atlas_compute(level, weight).
+- In a browser with WebMCP, atlas pages offer tools atlas_lookup(label), atlas_search(filters), atlas_estimate(level, weight, bound) and atlas_compute(level, weight).

@@ -6,7 +6,8 @@
 //!     cargo run --release -p sagebrush-web --example atlas -- SPACES BOUND [THREADS] > out.jsonl
 //!
 //! SPACES is a list like 1-1000:2,1-250:4 (levels:weight); BOUND the number
-//! of traces a_1..a_BOUND.
+//! of traces a_1..a_BOUND.  With ATLAS_ESTIMATE=1 it prints the cost
+//! model's prediction for each space instead (estimate_newforms).
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -36,6 +37,13 @@ fn main() {
                     break;
                 }
                 let (n, k) = spaces[i];
+                if std::env::var("ATLAS_ESTIMATE").is_ok() {
+                    // the cost model's prediction only (web/atlas/fit-cost.py)
+                    let e = sagebrush_web::call(&format!(r#"{{"fn":"estimate_newforms","n":{},"k":{},"bound":{}}}"#, n, k, bound));
+                    use std::io::Write;
+                    writeln!(out.lock().unwrap(), "{}", e).unwrap();
+                    continue;
+                }
                 let t = Instant::now();
                 let dims = sagebrush_web::call(&format!(r#"{{"fn":"dims","n":{},"k":{}}}"#, n, k));
                 let nf = sagebrush_web::call(&format!(r#"{{"fn":"newforms","n":{},"k":{},"bound":{}}}"#, n, k, bound));

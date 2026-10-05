@@ -19,8 +19,8 @@ import { execSync } from "node:child_process";
 import { spaceFromEngine, derive, primesUpTo, BOUND, RANGES } from "../web/atlas/model.ts";
 
 const root = join(dirname(new URL(import.meta.url).pathname), "..");
-const [spacesFile, lmfdbFile] = process.argv.slice(2);
-if (!spacesFile) throw new Error("usage: node scripts/build-atlas.mjs SPACES.jsonl [LMFDB.json]");
+const [spacesFile, lmfdbFile, costFile] = process.argv.slice(2);
+if (!spacesFile) throw new Error("usage: node scripts/build-atlas.mjs SPACES.jsonl [LMFDB.json [COST-MODEL.json]]");
 const out = join(root, "web", "dist", "atlas", "data");
 
 const wasm = new WebAssembly.Instance(new WebAssembly.Module(readFileSync(join(root, "wasm", "sagebrush-engine.wasm"))), {}).exports;
@@ -44,6 +44,9 @@ for (const x of raw) {
   const nd = (m) => newDims.get(`${m}:${x.k}`) ?? engine({ fn: "dims", n: m, k: x.k }).new;
   const sp = spaceFromEngine(x.n, x.k, x.dims.ok, x.newforms.ok, nd, x.seconds);
   sp.computed = "atlas";
+  // what recomputing it in a browser should take (the engine's cost model)
+  const e = engine({ fn: "estimate_newforms", n: x.n, k: x.k, bound: BOUND });
+  sp.estimate = { seconds: +e.seconds.toFixed(3), low: +e.seconds_low.toFixed(3), high: +e.seconds_high.toFixed(3), bytes: Math.round(e.bytes) };
   spaces.push(sp);
 }
 spaces.sort((a, b) => a.weight - b.weight || a.level - b.level);
@@ -113,5 +116,7 @@ for (const sp of spaces) {
   }
 }
 writeFileSync(join(out, "index.json"), JSON.stringify(index));
+// predicted against measured (web/atlas/fit-cost.py), for the About page
+if (costFile) writeFileSync(join(out, "cost-model.json"), readFileSync(costFile));
 writeFileSync(join(out, "stats.json"), JSON.stringify(stats));
 console.log(`web/dist/atlas/data: ${spaces.length} spaces, ${stats.orbits} orbits; index ${(JSON.stringify(index).length / 1e6).toFixed(2)} MB`);

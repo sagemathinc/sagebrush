@@ -3,8 +3,12 @@
 // WebAssembly build): computing spaces that are not stored, recomputing
 // stored ones against their data, Sato-Tate with more primes, and WebMCP
 // tools for agents.
-import { BOUND, type Space, divisors, parseLabel, sameMath, spaceFromEngine, spaceLabel } from "./model.ts";
-import { href, normalizedAp, orbitBody, satoTateSvg, spaceBody } from "./render.ts";
+import { BOUND, type Estimate, type Space, divisors, fmtBytes, fmtSeconds, parseLabel, sameMath, spaceFromEngine, spaceLabel } from "./model.ts";
+import { apCost, satoTateSvg } from "./plot.ts";
+
+const href = (label: string) => `/atlas/mf/${label}`;
+// KaTeX and the page templates, only when a computed space is shown
+const render = () => import("./render.ts");
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement | null;
 
@@ -49,9 +53,19 @@ async function computeSpace(n: number, k: number): Promise<Space> {
   return sp;
 }
 
-function ticker(el: HTMLElement | null, text: string) {
+/** The cost model's prediction (engine/modsym/src/estimate.rs). */
+async function estimate(n: number, k: number): Promise<Estimate> {
+  const e = await call({ fn: "estimate_newforms", n, k, bound: BOUND });
+  return { seconds: e.seconds, low: e.seconds_low, high: e.seconds_high, bytes: e.bytes };
+}
+const describe = (e: Estimate) => `${fmtSeconds(e.seconds)} (likely ${fmtSeconds(e.low).replace("about ", "")}–${fmtSeconds(e.high).replace("about ", "")}), ${fmtBytes(e.bytes)} of memory`;
+
+function ticker(el: HTMLElement | null, text: string, expect?: number) {
   const t0 = performance.now();
-  const tick = () => { if (el) el.textContent = `${text} ${((performance.now() - t0) / 1000).toFixed(0)} s`; };
+  const tick = () => {
+    const s = (performance.now() - t0) / 1000;
+    if (el) el.textContent = `${text} ${s.toFixed(0)} s` + (expect ? ` (expected ${fmtSeconds(expect)})` : "");
+  };
   tick();
   const h = setInterval(tick, 1000);
   return () => clearInterval(h);
@@ -68,14 +82,30 @@ function download(name: string, data: unknown) {
 async function computePage(box: HTMLElement) {
   const [n, k] = box.dataset.compute!.split(",").map(Number);
   const letter = box.dataset.letter;
-  const status = $("#compute-status");
-  const done = ticker(status, `Computing ${spaceLabel(n, k)} in your browser…`);
+  const status = $("#compute-status"), note = $("#compute-estimate");
+  let done = () => {};
   $("#compute-stop")?.addEventListener("click", () => { stop(); done(); if (status) status.textContent = "Stopped."; });
   try {
     // a space computed earlier in this tab (its orbits link here) is reused
     let sp: Space | null = null;
     try { sp = JSON.parse(sessionStorage.getItem("atlas:" + spaceLabel(n, k)) ?? "null"); } catch {}
-    sp ??= await computeSpace(n, k);
+    if (!sp) {
+      const e = await estimate(n, k);
+      if (note) note.textContent = `Predicted by Sagebrush's cost model: ${describe(e)}.`;
+      if (e.seconds > 120) {
+        // a long computation starts only when asked
+        if (status) status.textContent = "";
+        const go = document.createElement("button");
+        go.className = "primary";
+        go.textContent = `Compute it (${fmtSeconds(e.seconds)})`;
+        status?.before(go);
+        await new Promise((r) => (go.onclick = r));
+        go.remove();
+      }
+      done = ticker(status, `Computing ${spaceLabel(n, k)} in your browser…`, e.seconds);
+      sp = await computeSpace(n, k);
+      sp.estimate = e;
+    }
     done();
     (window as any).__atlasSpace = sp;
     const f = letter ? sp.newforms.find((o) => o.letter === letter) : null;
@@ -84,7 +114,8 @@ async function computePage(box: HTMLElement) {
       main.innerHTML = `${crumbs}<h1>Not found</h1><p>The newspace <a href="${href(sp.label)}">${sp.label}</a> has ${sp.newforms.length} newform orbit${sp.newforms.length === 1 ? "" : "s"}; there is no ${spaceLabel(n, k)}.${letter}.</p>`;
       return;
     }
-    main.innerHTML = crumbs + (f ? orbitBody(sp, f, false) : spaceBody(sp, false));
+    const R = await render();
+    main.innerHTML = crumbs + (f ? R.orbitBody(sp, f, false) : R.spaceBody(sp, false));
     try { sessionStorage.setItem("atlas:" + sp.label, JSON.stringify(sp)); } catch {}
     wire();
   } catch (e) {
@@ -99,7 +130,7 @@ async function verify(btn: HTMLButtonElement) {
   const status = $("#verify-status")!;
   btn.disabled = true;
   status.className = "status";
-  const done = ticker(status, "Recomputing in your browser…");
+  const done = ticker(status, "Recomputing in your browser…", Number(btn.dataset.expect) || undefined);
   try {
     const [stored, sp] = await Promise.all([fetch(`/atlas/data/mf/${k}/${n}.json`).then((r) => r.json()), computeSpace(n, k)]);
     done();
@@ -123,7 +154,7 @@ async function satoTate(btn: HTMLButtonElement) {
   const status = $("#st-status")!;
   btn.disabled = true;
   const t = performance.now();
-  status.textContent = "Counting points…";
+  status.textContent = `Counting points on the curve modulo 78,498 primes (${fmtSeconds(apCost(1e6).seconds)})…`;
   try {
     const ap: [number, number][] = await call({ fn: "aplist", a, n: 1_000_000 });
     const xs = ap.filter(([p]) => n % p !== 0).map(([p, x]) => x / (2 * Math.sqrt(p)));
@@ -180,11 +211,22 @@ const tools = [
     },
   },
   {
+    name: "atlas_estimate",
+    description: "Predict, without computing, how long computing the newspace S_k^new(Gamma_0(N)) with traces a_1..a_bound takes in this browser (WebAssembly, one thread) and its peak memory: {seconds, seconds_low, seconds_high (10%-90% range of the actual time), bytes, dim_new, levels, primes, trace_primes, terms}. Use it before atlas_compute for large levels.",
+    inputSchema: { type: "object", properties: { level: { type: "number" }, weight: { type: "number" }, bound: { type: "number" } }, required: ["level"] },
+    async execute({ level, weight = 2, bound = BOUND }: { level: number; weight?: number; bound?: number }) {
+      return text(await call({ fn: "estimate_newforms", n: level, k: weight, bound }));
+    },
+  },
+  {
     name: "atlas_compute",
-    description: "Compute the newspace S_k^new(Gamma_0(N)) in this browser with Sagebrush's engine (proven: certified dimensions, exact characteristic polynomials by CRT), whether or not the atlas stores it. Returns the orbits with LMFDB labels, dimensions, characteristic polynomials and tr a_1..a_1000.",
+    description: "Compute the newspace S_k^new(Gamma_0(N)) in this browser with Sagebrush's engine (proven: certified dimensions, exact characteristic polynomials by CRT), whether or not the atlas stores it. Returns the orbits with LMFDB labels, dimensions, characteristic polynomials and tr a_1..a_1000, and the cost model's prediction next to the actual time. atlas_estimate says first how long it will take.",
     inputSchema: { type: "object", properties: { level: { type: "number" }, weight: { type: "number" } }, required: ["level"] },
     async execute({ level, weight = 2 }: { level: number; weight?: number }) {
-      return text(await computeSpace(level, weight));
+      const e = await estimate(level, weight);
+      const sp = await computeSpace(level, weight);
+      sp.estimate = e;
+      return text(sp);
     },
   },
 ];

@@ -7,7 +7,7 @@
 //   /atlas/mf/N.k.a[.json]  a newspace            /atlas/mf/N.k.a.x[.json]  a newform orbit
 import { type Orbit, type Space, derive, parseLabel, spaceLabel } from "./model.ts";
 import { type IndexRow, type Query, esc, href, orbitBody, orbitTitle, page, pendingBody, search, searchBody, spaceBody, spaceCrumbs, spaceTitle } from "./render.ts";
-import { type Stats, aboutBody, homeBody } from "./pages.ts";
+import { type CostModel, type Stats, aboutBody, homeBody } from "./pages.ts";
 
 type Asset = (path: string) => Promise<Response>;
 
@@ -69,7 +69,7 @@ export async function handleAtlas(request: Request, asset: Asset): Promise<Respo
     if (wantJson) return jsonResponse(st);
     return path === "/atlas/"
       ? html(page({ title: "Modular forms", description: `Every newform orbit of weight 2 and level up to 1000 (and weights 4-12), proven by Sagebrush's Rust engines; anything else computed in your browser.`, path, crumbs: [["Atlas"]], body: homeBody(st), json: "/atlas/data/stats.json" }))
-      : html(page({ title: "About", description: "How the Sagebrush Atlas is computed and checked.", path, crumbs: [["Atlas", "/atlas/"], ["About"]], body: aboutBody(st), json: "/atlas/data/stats.json" }));
+      : html(page({ title: "About", description: "How the Sagebrush Atlas is computed and checked, and how long a computation will take.", path, crumbs: [["Atlas", "/atlas/"], ["About"]], body: aboutBody(st, await json<CostModel>(asset, "/atlas/data/cost-model.json")), json: "/atlas/data/stats.json" }));
   }
   if (path === "/atlas/mf" || path === "/atlas/mf/") {
     const p = url.searchParams;

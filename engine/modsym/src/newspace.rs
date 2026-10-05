@@ -146,7 +146,7 @@ fn sigma0(n: u64) -> u32 {
 /// pairs (psi(q), phi(q)) for q in qs; checked against dim E_k.
 fn eisenstein_series(g: &DirichletGroup, eps: &Character, k: usize, units: &[u64], qs: &[u64]) -> Result<Vec<Vec<(Vec<u64>, Vec<u64>)>>, String> {
     let nchars = g.order();
-    let conductors: Vec<u64> = (0..nchars).map(|c| g.character(&g.vector(c)).conductor()).collect();
+    let conductors: Vec<u64> = (0..nchars).map(|c| g.conductor_of(&g.vector(c))).collect();
     let ve = g.vector_of(eps);
     let mut out = vec![];
     let mut total = 0usize;
@@ -348,7 +348,9 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     }
     let mut checks = vec![];
     let qs: Vec<u64> = qs_all.clone();
+    let t0 = crate::now();
     let lv = levels(n, k, &eps, &units, &qs)?;
+    let t_levels = crate::now();
     let top = lv.last().unwrap();
     let d = phi * top.dim_new;
     if top.dim_new == 0 {
@@ -399,10 +401,13 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     };
     // Pick T: the first candidate with h squarefree mod some good ell and
     // the new eigenvalues separated from the old and Eisenstein ones.
+    let t1 = crate::now();
+    let mut tried = 0;
     let mut chosen = None;
     'outer: for ops in &candidates {
         for _ in 0..4 {
             let ell = primes.next().ok_or("ran out of primes")?;
+            tried += 1;
             if let Some((h, separated)) = compute(ell, ops)? {
                 if std::env::var("NEWSPACE_DEBUG").is_ok() {
                     eprintln!("N={} k={} ops {:?}: deg h {} deg gcd(h, h') {}", n, k, ops, deg(&h), deg(&pgcd(&h, &deriv(&h, ell), ell)));
@@ -416,6 +421,7 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
         }
     }
     let (ops, ell0, h0) = chosen.ok_or("no Hecke operator with a squarefree newspace charpoly")?;
+    let t2 = crate::now();
     // CRT until the modulus exceeds twice Deligne's bound on the coefficients.
     let b: BigUint = ops.iter().map(|&(q, r)| {
         let q1 = BigUint::from(q).pow(k as u32 - 1);
@@ -443,8 +449,16 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
             return Err("too many bad primes".into());
         }
     }
+    let t3 = crate::now();
     let h: Vec<BigInt> = crt(&residues, d, 1).into_iter().map(|c| c[0].clone()).collect();
     let factors = factor_fn(&h);
+    if std::env::var("SAGEBRUSH_TIMING").is_ok() {
+        // stage seconds, for the cost model (estimate::newforms)
+        let t4 = crate::now();
+        eprintln!(r#"{{"n":{},"k":{},"d":{},"dims_plus":{:?},"levels":{:?},"t_levels":{:.4},"certify":{:.4},"choose":{:.4},"tried":{},"crt":{:.4},"primes":{},"factor":{:.4}}}"#,
+            n, k, d, dims_plus, lv.iter().map(|l| l.m).collect::<Vec<_>>(), crate::elapsed_ms(t0, t_levels) / 1e3, crate::elapsed_ms(t0, t1) / 1e3, crate::elapsed_ms(t1, t2) / 1e3, tried,
+            crate::elapsed_ms(t2, t3) / 1e3, residues.len(), crate::elapsed_ms(t3, t4) / 1e3);
+    }
     let mut orbits: Vec<Vec<BigInt>> = vec![];
     for (f, e) in factors {
         if e != 1 {
