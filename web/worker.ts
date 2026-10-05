@@ -25,6 +25,7 @@ import "../build/cli/lib.gen.js";
 import { __hooks, load as loadFiles, put as putFile } from "./shims/fs";
 import { initParser, R, libDir } from "../src/compile";
 import { needsMore, complete } from "../src/interactive";
+import { magmaToPython, MagmaSyntaxError } from "../src/magma";
 
 let current: number | null = null;
 let target: number | null = null;
@@ -101,7 +102,8 @@ self.onmessage = async (ev: MessageEvent) => {
   const { id } = m;
   const { main, host } = await ready;
   if (m.check !== undefined) {
-    postMessage({ id, more: needsMore(m.check, { sage: !!m.sage }) });
+    // Magma's console runs each line as it is entered
+    postMessage({ id, more: m.magma ? false : needsMore(m.check, { sage: !!m.sage }) });
     return;
   }
   if (m.complete !== undefined) {
@@ -120,8 +122,21 @@ self.onmessage = async (ev: MessageEvent) => {
       run("from sage_all import *\n", main, "exec", "<sage>");
       sageLoaded = true;
     }
-    // "cell" mode: the value of a final expression is displayed, as in Jupyter.
-    run(m.code + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage });
+    if (m.magma) {
+      // Magma: translated to Python (src/magma.ts); Magma prints its own values
+      let py: string | null = null;
+      try {
+        py = magmaToPython(m.code, m.repl ? "<stdin>" : "<cell>");
+      } catch (e) {
+        if (!(e instanceof MagmaSyntaxError)) throw e;
+        const line = m.code.split("\n")[e.line - 1] ?? "";
+        R.stderr.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (line ${e.line})\n`);
+      }
+      if (py !== null) run(py, main, "exec", "<cell>");
+    } else {
+      // "cell" mode: the value of a final expression is displayed, as in Jupyter.
+      run(m.code + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage });
+    }
     run(FLUSH_FIGURES, host, "exec", "<figures>");
   }
   flush();

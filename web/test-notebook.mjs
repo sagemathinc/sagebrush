@@ -90,6 +90,12 @@ try {
   await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R.<x> = ZZ[]\nprint((x^4 - 1).factor(), Newforms(37, names='a'))");
   ok(out.includes("(x - 1) * (x + 1) * (x^2 + 1) [q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6), q + q^3 - 2*q^4 + O(q^6)]"), "Sage mode factors polynomials and finds newforms: " + out.trim());
+  // Magma mode: translated to Python in the page
+  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
+  out = await runCode("R<x> := PolynomialRing(Integers());\nFactorization(x^4 - 1);\n[ p : p in [1..30] | IsPrime(p) ];");
+  ok(out.includes("[\n    <x - 1, 1>,\n    <x + 1, 1>,\n    <x^2 + 1, 1>\n]\n[ 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 ]"), "Magma mode runs Magma: " + JSON.stringify(out.trim().slice(0, 80)));
+  out = await runCode("x := ;");
+  ok(/bad syntax/.test(out), "a Magma syntax error is reported: " + JSON.stringify(out.trim().slice(0, 60)));
   await ev("(() => { const m = document.querySelector('#mode'); m.value = 'python'; m.dispatchEvent(new Event('change')); })()");
   // share link round trip
   await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");

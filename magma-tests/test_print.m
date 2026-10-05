@@ -1,0 +1,14 @@
+E := EllipticCurve("11a1");
+2, E;
+2, ModularSymbols(11,2);
+2, CuspForms(11,2);
+2, Integers();
+R<x> := PolynomialRing(Integers());
+2, R;
+2, TorsionSubgroup(E);
+2, Gamma0(11);
+2, HeckePolynomial(ModularSymbols(11,2), 2);
+2, {1,2};
+2, <1, [2]>;
+E, 2;
+TorsionSubgroup(E), 2;

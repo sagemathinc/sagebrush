@@ -1,0 +1,40 @@
+R<x> := PolynomialRing(Integers());
+f := (x-1)^2*(2*x+3)*(x^2+1);
+f; Degree(f); Coefficients(f); LeadingCoefficient(f);
+Factorization(f);
+Roots(f);
+Evaluate(f, 2), Evaluate(f, -1);
+Derivative(f);
+Discriminant(x^3 - 2), Resultant(x^2 + 1, x^2 - 1);
+Gcd(x^4 - 1, x^6 - 1);
+IsIrreducible(x^2 + 1), IsIrreducible(x^2 - 1);
+Factorization(x^12 - 1);
+Factorization(x^16 + 1);
+Factorization(12*x^2 - 12);
+Factorization(x^4 - 10*x^2 + 1);
+(x^3 + 1) div (x + 1), (x^3 + 2) mod (x + 1);
+Q<y> := PolynomialRing(Rationals());
+g := (y^2 - 1/4)*(3*y + 2);
+g;
+Factorization(g);
+Roots(g);
+Degree(g), LeadingCoefficient(g);
+seed := 12345;
+procedure rnd(~seed, m, ~r)
+    seed := (1103515245*seed + 12345) mod 2^31;
+    r := seed mod m;
+end procedure;
+r := 0;
+for t in [1..15] do
+    h := R!1;
+    rnd(~seed, 3, ~r);
+    for j in [1..1 + r] do
+        rnd(~seed, 4, ~r); d := 1 + r;
+        c := [];
+        for i in [0..d-1] do rnd(~seed, 21, ~r); Append(~c, r - 10); end for;
+        rnd(~seed, 3, ~r); lc := 1 + r;
+        rnd(~seed, 2, ~r); e := 1 + r;
+        h *:= (&+[ c[i+1]*x^i : i in [0..d-1] ] + lc*x^d)^e;
+    end for;
+    Factorization(h);
+end for;
