@@ -225,6 +225,8 @@ function castNum(dt: DType, v: number): number {
         return v;
       }
       return Number.isFinite(v) ? Math.trunc(v) : dt.kind === "i" ? RANGE[dt.name][0] : 0;
+    case "f":
+      return dt.ctor === Float32Array ? Math.fround(v) : v;
     default:
       return v;
   }
@@ -1156,6 +1158,69 @@ function pairwise(d: any, off: number, n: number, st: number): number {
   return pairwise(d, off, n2, st) + pairwise(d, off + n2 * st, n - n2, st);
 }
 
+// pairwise() in float32 arithmetic (NumPy sums float32 in float32): each
+// sum of two float32 values rounded to float32, which f64 + fround does
+// correctly.
+const f32 = Math.fround;
+function pairwise32(d: any, off: number, n: number, st: number): number {
+  if (n < 8) {
+    let res = -0;
+    for (let i = 0; i < n; i++) res = f32(res + d[off + i * st]);
+    return res;
+  }
+  if (n <= 128) {
+    const r = [d[off], d[off + st], d[off + 2 * st], d[off + 3 * st], d[off + 4 * st], d[off + 5 * st], d[off + 6 * st], d[off + 7 * st]];
+    let i = 8;
+    for (; i < n - (n % 8); i += 8) {
+      const p = off + i * st;
+      for (let j = 0; j < 8; j++) r[j] = f32(r[j] + d[p + j * st]);
+    }
+    let res = f32(f32(f32(r[0] + r[1]) + f32(r[2] + r[3])) + f32(f32(r[4] + r[5]) + f32(r[6] + r[7])));
+    for (; i < n; i++) res = f32(res + d[off + i * st]);
+    return res;
+  }
+  let n2 = Math.floor(n / 2);
+  n2 -= n2 % 8;
+  return f32(pairwise32(d, off, n2, st) + pairwise32(d, off + n2 * st, n - n2, st));
+}
+
+// pairwise() of (d[i] - m)^2: var's sum of squared deviations with NumPy's
+// bits (it computes a - mean, squares in place and sums pairwise) and no
+// temporary array.
+function pairwiseSqDev(d: any, off: number, n: number, m: number): number {
+  if (n < 8) {
+    let res = -0;
+    for (let i = 0; i < n; i++) {
+      const t = d[off + i] - m;
+      res += t * t;
+    }
+    return res;
+  }
+  if (n <= 128) {
+    const r = new Array(8);
+    for (let j = 0; j < 8; j++) {
+      const t = d[off + j] - m;
+      r[j] = t * t;
+    }
+    let i = 8;
+    for (; i < n - (n % 8); i += 8) {
+      for (let j = 0; j < 8; j++) {
+        const t = d[off + i + j] - m;
+        r[j] += t * t;
+      }
+    }
+    let res = r[0] + r[1] + (r[2] + r[3]) + (r[4] + r[5] + (r[6] + r[7]));
+    for (; i < n; i++) {
+      const t = d[off + i] - m;
+      res += t * t;
+    }
+    return res;
+  }
+  let n2 = Math.floor(n / 2);
+  n2 -= n2 % 8;
+  return pairwiseSqDev(d, off, n2, m) + pairwiseSqDev(d, off + n2, n - n2, m);
+}
+
 // Reduce `a` over `axes` with fold(acc, x) from init; `inner` reduces a run of
 // the innermost axis at once (pairwise sums).
 function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, fold: (acc: number, x: number) => number, inner?: (d: any, off: number, n: number, st: number) => number): NDArray {
@@ -1172,10 +1237,10 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   // pairwise only when the reduction is over the last axis (as NumPy's inner loop)
   // reducing the leading axes of a C-contiguous array: accumulate whole rows
   // (NumPy adds slice by slice in this case, so the order is NumPy's too)
-  if (inner && a.isC() && red.length < nd && red.every((x, i) => x === i) && !keepdims) {
+  if (inner && a.isC() && red.length < nd && red.every((x, i) => x === i) && !keepdims && prod(outShape) > 1) {
     const rows = rn, w = prod(outShape);
     const od = out.data;
-    const acc = new Float64Array(w);
+    const acc = rt === D.float32 ? new Float32Array(w) : new Float64Array(w);
     for (let j = 0; j < w; j++) acc[j] = d[a.offset + j];
     for (let i = 1; i < rows; i++) {
       const base = a.offset + i * w;
@@ -1183,6 +1248,12 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
     }
     for (let j = 0; j < w; j++) od[j] = castNum(rt, init + acc[j]);
     return out;
+  }
+  // everything that is not reduced has length 1: NumPy's iterator drops those
+  // axes, leaving one contiguous run, summed pairwise
+  if (inner && a.isC() && prod(outShape) === 1 && rn > 0) {
+    out.data[0] = castNum(rt, fold(init, inner(d, a.offset, rn, 1)));
+    return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
   }
   const usePairwise = inner && red.length >= 1 && red[red.length - 1] === nd - 1 && (red.length === 1 || a.isC());
   loop1(outShape, kstr, a.offset, (base, k) => {
@@ -1222,6 +1293,7 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
   }
   const src = rt !== a.dt && rt.kind === "f" ? copy(a, rt) : a;
+  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
   return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => x + y, rt.kind === "f" ? pairwise : undefined), axis, keepdims);
 }
 function finish(r: NDArray, axis: any, keepdims: boolean): any {
@@ -1297,7 +1369,8 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
   if (a.ndim === 1 && a.isC() && (dtype === null || dtype === undefined) && a.dt.kind === "f") {
     const out = empty(a.shape, a.dt), d = a.data, od = out.data, n = a.size;
     let acc = isProd ? 1 : 0;
-    for (let i = 0; i < n; i++) od[i] = acc = isProd ? acc * d[a.offset + i] : acc + d[a.offset + i];
+    if (a.dt === D.float32) for (let i = 0; i < n; i++) od[i] = acc = Math.fround(isProd ? acc * d[a.offset + i] : acc + d[a.offset + i]);
+    else for (let i = 0; i < n; i++) od[i] = acc = isProd ? acc * d[a.offset + i] : acc + d[a.offset + i];
     return out;
   }
   const ax = axis === null || axis === undefined ? 0 : normAxis(Number(Obj.unbox(axis)), a.ndim);
@@ -1860,8 +1933,9 @@ newBuiltinModule("_numpy", (m) => {
     M(`__r${py}__`, (a: NDArray, o: any) => (isOperand(o) ? (O.FRESH.v = binary(pick(o, a), o, a)) : NotImplemented)).$fresh = true;
     M(`__i${py}__`, (a: NDArray, o: any) => {
       if (!isOperand(o)) return NotImplemented;
-      // in place when the result has a's dtype and shape and o shares no memory with a
-      if (!(o instanceof NDArray && o.data.buffer === a.data.buffer) && binary(pick(a, o), a, o, a, true) !== undefined) return a;
+      // in place when the result has a's dtype and shape and o is a itself or
+      // shares no memory with it
+      if ((o === a || !(o instanceof NDArray && o.data.buffer === a.data.buffer)) && binary(pick(a, o), a, o, a, true) !== undefined) return a;
       const r = binary(pick(a, o), a, o);
       const rt = r.dt;
       if (rt !== a.dt && !(promote(rt, a.dt) === a.dt)) raise(T.UFuncTypeError ?? T.TypeError, `Cannot cast ufunc '${op}' output from dtype('${rt.name}') to dtype('${a.dt.name}') with casting rule 'same_kind'`);
@@ -2021,6 +2095,12 @@ newBuiltinModule("_numpy", (m) => {
     return x instanceof NDArray || y instanceof NDArray || Array.isArray(x) || Array.isArray(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
   fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
+  // sum((a - m)**2) over a whole C-contiguous float64 array, or None
+  fn("sqdev_sum", (x: any, m: any) => {
+    const a = asarray(x);
+    if (a.dt !== D.float64 || !a.isC() || a.size === 0) return null;
+    return 0 + pairwiseSqDev(a.data, a.offset, a.size, Number(Obj.unbox(m)));
+  });
   fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => {
     const x = asarray(a);
     const rt = dtype !== null ? toDtype(dtype) : sumType(x.dt);
