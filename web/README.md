@@ -13,13 +13,18 @@ and `index.html` is a small notebook UI:
   356 kB file loaded only when opened) sharing `__main__` with the notebook:
   history, Tab completion (the CLI's, from `src/interactive.ts`),
   auto-indent, paste, Ctrl+C.
+- Plots and `@interact` (see [../PLOTTING.md](../PLOTTING.md)): SVG
+  pictures from Python (sanitized before they are inserted), coordinates
+  under the mouse, controls whose changes rerun the function in ~10–30 ms;
+  the console shows its pictures in a panel beside it.
 - Light/dark/system themes; Python/Sage switch; shareable links in the URL
   fragment and `?run` to run on load.
 - Accessibility: labelled controls and cells, an ARIA menu with arrow keys,
   Esc then Tab leaves a cell, a live region announcing finished cells and
   console output, WCAG AA contrast in both themes, reduced motion.
-- For agents: `llms.txt`, and two WebMCP tools, `run_python` and
-  `read_notebook` (`navigator.modelContext`; Chrome 149 needs
+- For agents: `llms.txt`, and WebMCP tools `run_python` (returns text,
+  plot descriptions and plots as PNG), `read_notebook` and `set_interact`
+  (`navigator.modelContext`; Chrome 149 needs
   `--enable-experimental-web-platform-features`).
 
 Lighthouse 13.4 (mobile and desktop): 100 in performance, accessibility,

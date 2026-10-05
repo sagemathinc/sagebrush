@@ -7,9 +7,9 @@
 //   pyjs -i program.py        run, then stay interactive
 //   pyjs --emit program.py    print the generated JavaScript
 
-import { readFileSync, mkdirSync, appendFileSync } from "fs";
+import { readFileSync, mkdirSync, appendFileSync, writeFileSync } from "fs";
 import { dirname, resolve, join } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
 import { needsMore, complete } from "./interactive";
@@ -47,6 +47,27 @@ function guarded(fn: () => void): number | null {
     return 1;
   }
 }
+
+// Rich display on a terminal: a picture (SVG) is written to a file whose
+// path is printed with the picture's description; the rest prints its repr.
+let plotCount = 0;
+R.host = {
+  display(bundle: Record<string, string>): boolean {
+    const svg = bundle["image/svg+xml"];
+    if (svg === undefined) return false;
+    let path: string;
+    try {
+      path = join(tmpdir(), `sagebrush-${process.pid}-${++plotCount}.svg`);
+      writeFileSync(path, svg);
+    } catch {
+      return false; // e.g. a sandbox without environment or write access
+    }
+    const m = /<title>([^<]*)<\/title>/.exec(svg);
+    const desc = m ? m[1].replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") : "";
+    R.stdout.write(`${bundle["text/plain"] ?? ""}\nSaved ${path}${desc ? ` (${desc.length > 300 ? desc.slice(0, 300) + "…" : desc})` : ""}\n`);
+    return true;
+  },
+};
 
 // --sage: Sage syntax for everything typed or passed on the command line.
 let sage = false;
