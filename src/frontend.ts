@@ -32,11 +32,12 @@ const CMP: Record<string, string> = {
 };
 
 /** Parse `source` (mode "exec" or "eval") into the compiler's Module. */
-export function parse(source: string, filename: string, mode: "exec" | "eval" = "exec"): A.Module {
+/** opts.sage: Sage syntax (`^` is `**`, `^^` is xor, int/int is a Rational). */
+export function parse(source: string, filename: string, mode: "exec" | "eval" = "exec", opts: { sage?: boolean } = {}): A.Module {
   const lines = source.split("\n");
   let tree: any;
   try {
-    tree = pyparse(source, mode);
+    tree = pyparse(source, mode, opts);
   } catch (e) {
     if (e instanceof PegenError) {
       const i = e.info;
@@ -44,13 +45,19 @@ export function parse(source: string, filename: string, mode: "exec" | "eval" = 
     }
     throw e;
   }
-  const c = new Convert(filename, lines);
+  const c = new Convert(filename, lines, !!opts.sage);
   if (mode === "eval") return { body: [{ k: "Expr", line: tree.body.lineno, value: c.expr(tree.body) }], lines };
   return { body: c.stmts(tree.body), lines };
 }
 
 class Convert {
-  constructor(private filename: string, private lines: string[]) {}
+  constructor(private filename: string, private lines: string[], private sage = false) {}
+
+  binop(t: string): string {
+    if (this.sage && t === "Div") return "sage/";
+    if (this.sage && t === "Pow") return "sage**";
+    return BIN[t];
+  }
 
   unsupported(n: any, what: string): never {
     const l = n.lineno ?? 1;
@@ -194,7 +201,7 @@ class Convert {
       case "Assign":
         return { k: "Assign", line, targets: s.targets.map((t: any) => this.expr(t)), value: this.expr(s.value) };
       case "AugAssign":
-        return { k: "AugAssign", line, target: this.expr(s.target), op: BIN[s.op._type], value: this.expr(s.value) };
+        return { k: "AugAssign", line, target: this.expr(s.target), op: this.binop(s.op._type), value: this.expr(s.value) };
       case "AnnAssign":
         return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null };
       case "Return":
@@ -330,7 +337,7 @@ class Convert {
       case "JoinedStr":
         return { k: "FString", line, parts: this.fparts(e.values) };
       case "BinOp":
-        return { k: "BinOp", line, op: BIN[e.op._type], left: this.expr(e.left), right: this.expr(e.right) };
+        return { k: "BinOp", line, op: this.binop(e.op._type), left: this.expr(e.left), right: this.expr(e.right) };
       case "UnaryOp": {
         const operand = this.expr(e.operand);
         // Fold -literal so that e.g. -9223372036854775808 stays an exact constant.

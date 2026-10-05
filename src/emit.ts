@@ -4,7 +4,7 @@
 import * as A from "./ast";
 import { Scope, resolve, Resolution, SyntaxErr } from "./scope";
 
-const BIN: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "/": "truediv", "//": "floordiv", "%": "mod", "**": "pow", "<<": "lshift", ">>": "rshift", "&": "and", "|": "or", "^": "xor", "@": "matmul" };
+const BIN: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "/": "truediv", "//": "floordiv", "%": "mod", "**": "pow", "<<": "lshift", ">>": "rshift", "&": "and", "|": "or", "^": "xor", "@": "matmul", "sage/": "sagediv", "sage**": "sagepow" };
 const CMP: Record<string, string> = { "<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "ne" };
 const UNARY: Record<string, string> = { "-": "neg", "+": "pos", "~": "invert" };
 
@@ -968,6 +968,7 @@ function* allScopes(s: Scope): Generator<Scope> {
 const RUNTIME_NAMES = [
   "add", "sub", "mul", "truediv", "floordiv", "mod", "pow", "lshift", "rshift", "and", "or", "xor", "matmul",
   "iadd", "isub", "imul", "itruediv", "ifloordiv", "imod", "ipow", "ilshift", "irshift", "iand", "ior", "ixor", "imatmul",
+  "sagediv", "isagediv", "sagepow", "isagepow",
   "neg", "pos", "invert", "truth", "lt", "le", "gt", "ge", "eq", "ne", "is", "contains",
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",
   "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf",

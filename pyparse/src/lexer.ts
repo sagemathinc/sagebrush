@@ -117,8 +117,11 @@ export class TokState {
   modeIndex = 0;
   error: TokenizerError | null = null;
   source: string;
+  /** Sage syntax: `^` is exponentiation and `^^` is xor. */
+  sage: boolean;
 
-  constructor(source: string) {
+  constructor(source: string, opts: { sage?: boolean } = {}) {
+    this.sage = !!opts.sage;
     // translate_newlines: \r\n and \r -> \n, and end exec input with a newline.
     let s = source.replace(/\r\n?/g, "\n");
     if (s.length > 0 && !s.endsWith("\n")) s += "\n";
@@ -677,6 +680,22 @@ export class TokState {
             pEnd = this.cur;
             return MAKE(oneChar(c));
           }
+        }
+
+        if (this.sage && c === 0x5e /* ^ */) {
+          // Sage: ^ -> **, ^= -> **=, ^^ -> ^, ^^= -> ^=
+          let t = T.DOUBLESTAR;
+          let c2 = this.nextc();
+          if (c2 === 0x5e) {
+            t = T.CIRCUMFLEX;
+            c2 = this.nextc();
+            if (c2 === C.eq) t = T.CIRCUMFLEXEQUAL;
+            else this.backup(c2);
+          } else if (c2 === C.eq) t = T.DOUBLESTAREQUAL;
+          else this.backup(c2);
+          pStart = this.start;
+          pEnd = this.cur;
+          return MAKE(t);
         }
 
         {

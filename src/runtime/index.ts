@@ -410,11 +410,30 @@ export function formatException(e: any): string {
   return parts.join("");
 }
 
+// Sage mode: `/` on two ints is an exact rational (sage_all.Rational).
+let sageIntDiv: any;
+function sagediv(a: any, b: any): any {
+  if (O.isPyInt(a) && O.isPyInt(b)) {
+    sageIntDiv ??= Obj.getattr(M.importModule("sage_all"), "_intdiv");
+    return Obj.callObj(sageIntDiv, [a, b]);
+  }
+  return O.truediv(a, b);
+}
+const isagediv = (a: any, b: any) => (O.isPyInt(a) && O.isPyInt(b) ? sagediv(a, b) : O.itruediv(a, b));
+// ...and an int to a negative int power is a Rational too: 2^-1 == 1/2.
+const negIntPow = (a: any, b: any) => O.isPyInt(a) && O.isPyInt(b) && b < 0;
+const sagepow = (a: any, b: any) => (negIntPow(a, b) ? sagediv(1, O.pow(a, O.neg(b))) : O.pow(a, b));
+const isagepow = (a: any, b: any) => (negIntPow(a, b) ? sagepow(a, b) : O.ipow(a, b));
+
 // ------------------------------------------------------------------ the runtime object
 
 export const R: any = {
   ...O,
   ...F,
+  sagediv,
+  isagediv,
+  sagepow,
+  isagepow,
   T,
   FloatBox: Obj.FloatBox,
   PyDict: Obj.PyDict,

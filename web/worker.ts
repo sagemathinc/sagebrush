@@ -1,5 +1,7 @@
-// The pyjs runtime in a Web Worker.  Messages in: {id, code}; out:
-// {id, stream: "stdout"|"stderr", text} while running, then {id, done, ms}.
+// The pyjs runtime in a Web Worker.  Messages in: {id, code, sage?}; out:
+// {id, start} when the cell begins, {id, stream: "stdout"|"stderr", text}
+// while it runs, then {id, done, ms}.  `sage` compiles the cell in Sage mode
+// (2^3 == 8, 2/3 is a Rational) with sage_all imported.
 // A runaway program can only hang this worker; the page terminates it.
 import "./shims/process";
 import "../build/cli/lib.gen.js";
@@ -22,14 +24,20 @@ const ready = (async () => {
   return main;
 })();
 
+let sageLoaded = false;
 self.onmessage = async (ev: MessageEvent) => {
-  const { id, code } = ev.data;
+  const { id, code, sage } = ev.data;
   const main = await ready;
   current = id;
+  postMessage({ id, start: true });
   const t0 = performance.now();
   try {
+    if (sage && !sageLoaded) {
+      R.loader.exec("from sage_all import *\n", main, "exec", "<sage>");
+      sageLoaded = true;
+    }
     // "cell" mode: the value of a final expression is displayed, as in Jupyter.
-    R.loader.exec(code + "\n", main, "cell", "<cell>");
+    R.loader.exec(code + "\n", main, "cell", "<cell>", { sage: !!sage });
   } catch (e) {
     const exc = R.toPyExc(e);
     R.stdout.flush();

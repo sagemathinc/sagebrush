@@ -76,8 +76,8 @@ export abstract class BaseParser {
   abstract soft_keywords: string[];
   filename = "<string>";
 
-  constructor(source: string) {
-    this.tok = new TokState(source);
+  constructor(source: string, opts: { sage?: boolean } = {}) {
+    this.tok = new TokState(source, opts);
   }
 
   errorOccurred(): boolean {

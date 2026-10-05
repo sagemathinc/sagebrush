@@ -20,6 +20,8 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   -c cmd   run the program passed as a string
   -m mod   run a library module as a script
   -i       inspect interactively after running a program
+  --sage   Sage syntax (2^3 == 8, 2/3 is a Rational) with sage_all imported;
+           implied for .sage files
   -q       no banner on the interactive prompt
   --emit   print the JavaScript compiled from file
   -V       print the version
@@ -46,11 +48,16 @@ function guarded(fn: () => void): number | null {
   }
 }
 
+// --sage: Sage syntax for everything typed or passed on the command line.
+let sage = false;
+const opts = () => ({ sage });
+
 function mainModule(file: string): any {
   const m = R.newModule("__main__");
   m.__file__ = file;
   m.__builtins__ = R.builtins;
   R.dictSet(R.sysModules, "__main__", m);
+  if (sage) R.loader.exec("from sage_all import *\n", m, "exec", "<sage>");
   return m;
 }
 
@@ -65,7 +72,7 @@ function needsMore(src: string): boolean {
   if (/:\s*(#.*)?$/.test(lines[0]) || /^\s*@/.test(lines[0])) return last.trim() !== "";
   if (/\\$/.test(last)) return true;
   try {
-    parse(src + "\n", "<stdin>", "exec");
+    parse(src + "\n", "<stdin>", "exec", opts());
     return false;
   } catch (e: any) {
     return e instanceof PySyntaxError && /was never closed|unexpected EOF|unterminated triple-quoted|expected an indented block|incomplete input/.test(e.msg);
@@ -144,8 +151,8 @@ function repl(main: any, quiet: boolean): Promise<number> {
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main), history, historySize: 1000, terminal: process.stdin.isTTY });
   const sys = R.importModule("sys");
-  const ps1 = () => (typeof sys.ps1 === "string" ? sys.ps1 : ">>> ");
-  const ps2 = () => (typeof sys.ps2 === "string" ? sys.ps2 : "... ");
+  const ps1 = () => (typeof sys.ps1 === "string" ? sys.ps1 : sage ? "sage: " : ">>> ");
+  const ps2 = () => (typeof sys.ps2 === "string" ? sys.ps2 : sage ? "....: " : "... ");
   let buf: string[] = [];
   rl.setPrompt(ps1());
   rl.prompt();
@@ -175,7 +182,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
             // read-only home: no history
           }
         }
-        const code = guarded(() => R.loader.exec(src + "\n", main, "single", "<stdin>"));
+        const code = guarded(() => R.loader.exec(src + "\n", main, "single", "<stdin>", opts()));
         R.stdout.flush();
         R.stderr.flush();
         if (code !== null && code !== 1) return finish(code);
@@ -239,6 +246,7 @@ async function main() {
     if (a === "--emit") emit = true;
     else if (a === "-i") inspect = true;
     else if (a === "-q") quiet = true;
+    else if (a === "--sage") sage = true;
     else if (a === "-V" || a === "--version") {
       process.stdout.write(VERSION + "\n");
       return;
@@ -271,7 +279,7 @@ async function main() {
       process.exitCode = 2;
       return;
     }
-    process.stdout.write(compile(readFileSync(file, "utf8"), file, "__main__").code + "\n");
+    process.stdout.write(compile(readFileSync(file, "utf8"), file, "__main__", false, false, { sage: sage || file.endsWith(".sage") }).code + "\n");
     return;
   }
   const sys = R.importModule("sys");
@@ -285,7 +293,7 @@ async function main() {
   const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
   if (cmd !== null) {
     main = mainModule("<string>");
-    code = guarded(() => R.loader.exec(cmd!, main, "exec", "<string>"));
+    code = guarded(() => R.loader.exec(cmd!, main, "exec", "<string>", opts()));
   } else if (mod !== null) {
     code = guarded(() => {
       main = execModuleAsMain(mod!);
@@ -293,13 +301,13 @@ async function main() {
   } else if (file !== null && file !== "-") {
     const source = readFileSync(file, "utf8");
     code = guarded(() => {
-      main = execModule(source, file!, "__main__");
+      main = execModule(source, file!, "__main__", false, sage || file!.endsWith(".sage"));
     });
   } else if (!interactive) {
     // program on stdin
     const source = readFileSync(0, "utf8");
     main = mainModule("<stdin>");
-    code = guarded(() => R.loader.exec(source, main, "exec", "<stdin>"));
+    code = guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
   }
   R.stdout.flush();
   R.stderr.flush();

@@ -9,6 +9,6 @@ export { PySyntaxError } from "./frontend";
 // tree-sitter front end needed it); pyparse is synchronous.
 export async function initParser(): Promise<void> {}
 
-export function parse(source: string, filename: string, mode: "exec" | "eval" = "exec"): A.Module {
-  return F.parse(source, filename, mode);
+export function parse(source: string, filename: string, mode: "exec" | "eval" = "exec", opts: { sage?: boolean } = {}): A.Module {
+  return F.parse(source, filename, mode, opts);
 }

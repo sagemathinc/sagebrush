@@ -27,8 +27,13 @@ function displayLast(body: any[]): void {
   if (st !== undefined && st.k === "Expr") displayExprs([st]);
 }
 
-export function compile(source: string, filename: string, moduleName: string, evalMode = false, single: boolean | "cell" = false): Compiled {
-  const mod = parse(source, filename, evalMode ? "eval" : "exec");
+export interface CompileOptions {
+  /** Sage syntax: `^` is `**`, `^^` is xor, int/int is an exact Rational. */
+  sage?: boolean;
+}
+
+export function compile(source: string, filename: string, moduleName: string, evalMode = false, single: boolean | "cell" = false, opts: CompileOptions = {}): Compiled {
+  const mod = parse(source, filename, evalMode ? "eval" : "exec", opts);
   if (single === "cell") displayLast(mod.body);
   else if (single) displayExprs(mod.body);
   try {
@@ -52,7 +57,7 @@ function syntaxError(e: PySyntaxError): any {
 }
 
 // Execute `source` as module `name`, registering it in sys.modules first.
-export function execModule(source: string, filename: string, name: string, isPackage = false): any {
+export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage")): any {
   const m = R.newModule(name);
   m.__file__ = filename;
   m.__package__ = isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "";
@@ -61,7 +66,7 @@ export function execModule(source: string, filename: string, name: string, isPac
   R.dictSet(R.sysModules, name, m);
   let compiled: Compiled;
   try {
-    compiled = compile(source, filename, name);
+    compiled = compile(source, filename, name, false, false, { sage });
   } catch (e) {
     if (e instanceof PySyntaxError) throw syntaxError(e);
     throw e;
@@ -70,6 +75,7 @@ export function execModule(source: string, filename: string, name: string, isPac
   R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap });
   const fn = runInThisContext(compiled.code, { filename: jsName });
   try {
+    if (sage) R.loader.exec("from sage_all import *\n", m, "exec", "<sage>");
     fn(m, R);
   } catch (e) {
     R.sysModules.$m.delete(name);
@@ -80,11 +86,11 @@ export function execModule(source: string, filename: string, name: string, isPac
 
 // exec/eval/compile: compile `src` and run it with `ns` as its globals.
 let execCounter = 0;
-R.loader.exec = (src: string, ns: any, mode: string, filename: string) => {
+R.loader.exec = (src: string, ns: any, mode: string, filename: string, opts: CompileOptions = {}) => {
   const evalMode = mode === "eval" || mode === "check-eval";
   let compiled: Compiled;
   try {
-    compiled = compile(src, filename, "__main__", evalMode, mode === "cell" ? "cell" : mode === "single");
+    compiled = compile(src, filename, "__main__", evalMode, mode === "cell" ? "cell" : mode === "single", opts);
   } catch (e) {
     if (e instanceof PySyntaxError) throw syntaxError(e);
     throw e;
