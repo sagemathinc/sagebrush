@@ -31,6 +31,23 @@ function linalgError(msg: string): never {
   return raise(T.ValueError, msg);
 }
 
+// Euclidean norm of x[off + i*stride], i < n, scaled to avoid overflow (as dnrm2).
+function nrm2(x: Float64Array, off: number, n: number, stride: number): number {
+  let big = 0;
+  for (let i = 0, p = off; i < n; i++, p += stride) {
+    const a = Math.abs(x[p]);
+    if (a > big) big = a;
+  }
+  if (big === 0 || !Number.isFinite(big)) return big;
+  let sum = 0;
+  const inv = 1 / big;
+  for (let i = 0, p = off; i < n; i++, p += stride) {
+    const a = x[p] * inv;
+    sum += a * a;
+  }
+  return big * Math.sqrt(sum);
+}
+
 // ------------------------------------------------------------------ LU
 
 function lu(A: Float64Array, n: number): { lu: Float64Array; piv: number[]; sign: number; singular: boolean } {
@@ -87,50 +104,68 @@ function luSolve(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Ar
 // ------------------------------------------------------------------ QR (Householder)
 
 function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64Array, Float64Array, number] {
-  const a = Float64Array.from(A);
+  // columns stored contiguously: every Householder step works down columns
+  const cols: Float64Array[] = [];
+  for (let j = 0; j < n; j++) {
+    const c = new Float64Array(m);
+    for (let i = 0; i < m; i++) c[i] = A[i * n + j];
+    cols.push(c);
+  }
   const k = Math.min(m, n);
   const vs: Float64Array[] = [];
   const betas: number[] = [];
   for (let j = 0; j < k; j++) {
-    let norm = 0;
-    for (let i = j; i < m; i++) norm = Math.hypot(norm, a[i * n + j]);
+    const cj = cols[j];
+    const norm = nrm2(cj, j, m - j, 1);
     const v = new Float64Array(m);
     if (norm === 0) {
       vs.push(v);
       betas.push(0);
       continue;
     }
-    const alpha = a[j * n + j] > 0 ? -norm : norm;
-    for (let i = j; i < m; i++) v[i] = a[i * n + j];
+    const alpha = cj[j] > 0 ? -norm : norm;
+    for (let i = j; i < m; i++) v[i] = cj[i];
     v[j] -= alpha;
     let vv = 0;
     for (let i = j; i < m; i++) vv += v[i] * v[i];
     const beta = vv === 0 ? 0 : 2 / vv;
     for (let c = j; c < n; c++) {
-      let s = 0;
-      for (let i = j; i < m; i++) s += v[i] * a[i * n + c];
-      s *= beta;
-      for (let i = j; i < m; i++) a[i * n + c] -= s * v[i];
+      const cc = cols[c];
+      let sum = 0;
+      for (let i = j; i < m; i++) sum += v[i] * cc[i];
+      sum *= beta;
+      for (let i = j; i < m; i++) cc[i] -= sum * v[i];
     }
     vs.push(v);
     betas.push(beta);
   }
   const qc = complete ? m : k;
-  const Q = new Float64Array(m * qc);
-  for (let i = 0; i < Math.min(m, qc); i++) Q[i * qc + i] = 1;
+  const Qcols: Float64Array[] = [];
+  for (let c = 0; c < qc; c++) {
+    const q = new Float64Array(m);
+    if (c < m) q[c] = 1;
+    Qcols.push(q);
+  }
   for (let j = k - 1; j >= 0; j--) {
     const v = vs[j], beta = betas[j];
     if (beta === 0) continue;
     for (let c = 0; c < qc; c++) {
-      let s = 0;
-      for (let i = j; i < m; i++) s += v[i] * Q[i * qc + c];
-      s *= beta;
-      for (let i = j; i < m; i++) Q[i * qc + c] -= s * v[i];
+      const q = Qcols[c];
+      let sum = 0;
+      for (let i = j; i < m; i++) sum += v[i] * q[i];
+      if (sum === 0) continue;
+      sum *= beta;
+      for (let i = j; i < m; i++) q[i] -= sum * v[i];
     }
+  }
+  const Q = new Float64Array(m * qc);
+  for (let c = 0; c < qc; c++) {
+    const q = Qcols[c];
+    for (let i = 0; i < m; i++) Q[i * qc + c] = q[i];
   }
   const rr = complete ? m : k;
   const R = new Float64Array(rr * n);
-  for (let i = 0; i < rr; i++) for (let c = i; c < n; c++) R[i * n + c] = i < m ? a[i * n + c] : 0;
+  for (let i = 0; i < Math.min(rr, m); i++) for (let c = i; c < n; c++) R[i * n + c] = cols[c][i];
   return [Q, R, qc];
 }
 
@@ -644,69 +679,271 @@ function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float6
 
 // ------------------------------------------------------------------ SVD (one-sided Jacobi)
 
-function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array, Float64Array] {
-  // works on the transpose when m < n, so that U has at least as many rows
-  const trans = m < n;
-  const [M, N] = trans ? [n, m] : [m, n];
-  const U = new Float64Array(M * N);
-  for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) {
-    if (trans) U[j * N + i] = A[i * n + j];
-    else U[i * N + j] = A[i * n + j];
+// Golub-Kahan-Reinsch SVD of an m x n matrix with m >= n (Householder
+// bidiagonalization, then implicit shifted QR on the bidiagonal), as JAMA's
+// SingularValueDecomposition (public domain).  Returns U's columns, S, V's columns.
+function gkrSVD(Ain: Float64Array, m: number, n: number): [Float64Array[], Float64Array, Float64Array[]] {
+  const A: Float64Array[] = [];
+  for (let i = 0; i < m; i++) A.push(Ain.slice(i * n, i * n + n));
+  const nu = Math.min(m, n);
+  const s = new Float64Array(Math.min(m + 1, n));
+  const U: Float64Array[] = Array.from({ length: m }, () => new Float64Array(nu));
+  const V: Float64Array[] = Array.from({ length: n }, () => new Float64Array(n));
+  const e = new Float64Array(n), work = new Float64Array(m);
+  const nct = Math.min(m - 1, n), nrt = Math.max(0, Math.min(n - 2, m));
+  for (let k = 0; k < Math.max(nct, nrt); k++) {
+    if (k < nct) {
+      for (let i = k; i < m; i++) work[i] = A[i][k];
+      s[k] = nrm2(work, k, m - k, 1);
+      if (s[k] !== 0) {
+        if (A[k][k] < 0) s[k] = -s[k];
+        for (let i = k; i < m; i++) A[i][k] /= s[k];
+        A[k][k] += 1;
+      }
+      s[k] = -s[k];
+    }
+    for (let j = k + 1; j < n; j++) {
+      if (k < nct && s[k] !== 0) {
+        let t = 0;
+        for (let i = k; i < m; i++) t += A[i][k] * A[i][j];
+        t = -t / A[k][k];
+        for (let i = k; i < m; i++) A[i][j] += t * A[i][k];
+      }
+      e[j] = A[k][j];
+    }
+    if (k < nct) for (let i = k; i < m; i++) U[i][k] = A[i][k];
+    if (k < nrt) {
+      e[k] = nrm2(e, k + 1, n - k - 1, 1);
+      if (e[k] !== 0) {
+        if (e[k + 1] < 0) e[k] = -e[k];
+        for (let i = k + 1; i < n; i++) e[i] /= e[k];
+        e[k + 1] += 1;
+      }
+      e[k] = -e[k];
+      if (k + 1 < m && e[k] !== 0) {
+        for (let i = k + 1; i < m; i++) work[i] = 0;
+        for (let j = k + 1; j < n; j++) for (let i = k + 1; i < m; i++) work[i] += e[j] * A[i][j];
+        for (let j = k + 1; j < n; j++) {
+          const t = -e[j] / e[k + 1];
+          for (let i = k + 1; i < m; i++) A[i][j] += t * work[i];
+        }
+      }
+      for (let i = k + 1; i < n; i++) V[i][k] = e[i];
+    }
   }
-  const V = new Float64Array(N * N);
-  for (let i = 0; i < N; i++) V[i * N + i] = 1;
-  const eps = 2 ** -52;
-  for (let sweep = 0; sweep < 100; sweep++) {
-    let off = 0;
-    for (let p = 0; p < N - 1; p++) for (let q = p + 1; q < N; q++) {
-      let alpha = 0, beta = 0, gamma = 0;
-      for (let i = 0; i < M; i++) {
-        const up = U[i * N + p], uq = U[i * N + q];
-        alpha += up * up;
-        beta += uq * uq;
-        gamma += up * uq;
+  let p = Math.min(n, m + 1);
+  if (nct < n) s[nct] = A[nct][nct];
+  if (m < p) s[p - 1] = 0;
+  if (nrt + 1 < p) e[nrt] = A[nrt][p - 1];
+  e[p - 1] = 0;
+  for (let j = nct; j < nu; j++) {
+    for (let i = 0; i < m; i++) U[i][j] = 0;
+    U[j][j] = 1;
+  }
+  for (let k = nct - 1; k >= 0; k--) {
+    if (s[k] !== 0) {
+      for (let j = k + 1; j < nu; j++) {
+        let t = 0;
+        for (let i = k; i < m; i++) t += U[i][k] * U[i][j];
+        t = -t / U[k][k];
+        for (let i = k; i < m; i++) U[i][j] += t * U[i][k];
       }
-      if (Math.abs(gamma) <= eps * Math.sqrt(alpha * beta) || gamma === 0) continue;
-      off = Math.max(off, Math.abs(gamma) / Math.sqrt(alpha * beta));
-      const zeta = (beta - alpha) / (2 * gamma);
-      const t = Math.sign(zeta || 1) / (Math.abs(zeta) + Math.sqrt(1 + zeta * zeta));
-      const c = 1 / Math.sqrt(1 + t * t), s = c * t;
-      for (let i = 0; i < M; i++) {
-        const up = U[i * N + p], uq = U[i * N + q];
-        U[i * N + p] = c * up - s * uq;
-        U[i * N + q] = s * up + c * uq;
-      }
-      for (let i = 0; i < N; i++) {
-        const vp = V[i * N + p], vq = V[i * N + q];
-        V[i * N + p] = c * vp - s * vq;
-        V[i * N + q] = s * vp + c * vq;
+      for (let i = k; i < m; i++) U[i][k] = -U[i][k];
+      U[k][k] = 1 + U[k][k];
+      for (let i = 0; i < k - 1; i++) U[i][k] = 0;
+    } else {
+      for (let i = 0; i < m; i++) U[i][k] = 0;
+      U[k][k] = 1;
+    }
+  }
+  for (let k = n - 1; k >= 0; k--) {
+    if (k < nrt && e[k] !== 0) {
+      for (let j = k + 1; j < nu; j++) {
+        let t = 0;
+        for (let i = k + 1; i < n; i++) t += V[i][k] * V[i][j];
+        t = -t / V[k + 1][k];
+        for (let i = k + 1; i < n; i++) V[i][j] += t * V[i][k];
       }
     }
-    if (off <= eps) break;
+    for (let i = 0; i < n; i++) V[i][k] = 0;
+    V[k][k] = 1;
   }
-  const sv = new Float64Array(N);
-  for (let j = 0; j < N; j++) {
-    let nrm = 0;
-    for (let i = 0; i < M; i++) nrm = Math.hypot(nrm, U[i * N + j]);
-    sv[j] = nrm;
-    if (nrm > 0) for (let i = 0; i < M; i++) U[i * N + j] /= nrm;
+  const pp = p - 1, eps = 2 ** -52, tiny = 2 ** -966;
+  let iter = 0;
+  while (p > 0) {
+    let k: number, kase: number;
+    for (k = p - 2; k >= -1; k--) {
+      if (k === -1) break;
+      if (Math.abs(e[k]) <= tiny + eps * (Math.abs(s[k]) + Math.abs(s[k + 1]))) {
+        e[k] = 0;
+        break;
+      }
+    }
+    if (k === p - 2) kase = 4;
+    else {
+      let ks: number;
+      for (ks = p - 1; ks >= k; ks--) {
+        if (ks === k) break;
+        const t = (ks !== p ? Math.abs(e[ks]) : 0) + (ks !== k + 1 ? Math.abs(e[ks - 1]) : 0);
+        if (Math.abs(s[ks]) <= tiny + eps * t) {
+          s[ks] = 0;
+          break;
+        }
+      }
+      if (ks === k) kase = 3;
+      else if (ks === p - 1) kase = 1;
+      else {
+        kase = 2;
+        k = ks;
+      }
+    }
+    k++;
+    if (++iter > 75 * n + 1000) linalgError("SVD did not converge");
+    if (kase === 1) {
+      let f = e[p - 2];
+      e[p - 2] = 0;
+      for (let j = p - 2; j >= k; j--) {
+        let t = Math.hypot(s[j], f);
+        const cs = s[j] / t, sn = f / t;
+        s[j] = t;
+        if (j !== k) {
+          f = -sn * e[j - 1];
+          e[j - 1] = cs * e[j - 1];
+        }
+        for (let i = 0; i < n; i++) {
+          t = cs * V[i][j] + sn * V[i][p - 1];
+          V[i][p - 1] = -sn * V[i][j] + cs * V[i][p - 1];
+          V[i][j] = t;
+        }
+      }
+    } else if (kase === 2) {
+      let f = e[k - 1];
+      e[k - 1] = 0;
+      for (let j = k; j < p; j++) {
+        let t = Math.hypot(s[j], f);
+        const cs = s[j] / t, sn = f / t;
+        s[j] = t;
+        f = -sn * e[j];
+        e[j] = cs * e[j];
+        for (let i = 0; i < m; i++) {
+          t = cs * U[i][j] + sn * U[i][k - 1];
+          U[i][k - 1] = -sn * U[i][j] + cs * U[i][k - 1];
+          U[i][j] = t;
+        }
+      }
+    } else if (kase === 3) {
+      const scale = Math.max(Math.abs(s[p - 1]), Math.abs(s[p - 2]), Math.abs(e[p - 2]), Math.abs(s[k]), Math.abs(e[k]));
+      const sp = s[p - 1] / scale, spm1 = s[p - 2] / scale, epm1 = e[p - 2] / scale, sk = s[k] / scale, ek = e[k] / scale;
+      const b = ((spm1 + sp) * (spm1 - sp) + epm1 * epm1) / 2, c = sp * epm1 * (sp * epm1);
+      let shift = 0;
+      if (b !== 0 || c !== 0) {
+        shift = Math.sqrt(b * b + c);
+        if (b < 0) shift = -shift;
+        shift = c / (b + shift);
+      }
+      let f = (sk + sp) * (sk - sp) + shift, g = sk * ek;
+      for (let j = k; j < p - 1; j++) {
+        let t = Math.hypot(f, g);
+        let cs = f / t, sn = g / t;
+        if (j !== k) e[j - 1] = t;
+        f = cs * s[j] + sn * e[j];
+        e[j] = cs * e[j] - sn * s[j];
+        g = sn * s[j + 1];
+        s[j + 1] = cs * s[j + 1];
+        for (let i = 0; i < n; i++) {
+          t = cs * V[i][j] + sn * V[i][j + 1];
+          V[i][j + 1] = -sn * V[i][j] + cs * V[i][j + 1];
+          V[i][j] = t;
+        }
+        t = Math.hypot(f, g);
+        cs = f / t;
+        sn = g / t;
+        s[j] = t;
+        f = cs * e[j] + sn * s[j + 1];
+        s[j + 1] = -sn * e[j] + cs * s[j + 1];
+        g = sn * e[j + 1];
+        e[j + 1] = cs * e[j + 1];
+        if (j < m - 1) for (let i = 0; i < m; i++) {
+          t = cs * U[i][j] + sn * U[i][j + 1];
+          U[i][j + 1] = -sn * U[i][j] + cs * U[i][j + 1];
+          U[i][j] = t;
+        }
+      }
+      e[p - 2] = f;
+    } else {
+      if (s[k] <= 0) {
+        s[k] = s[k] < 0 ? -s[k] : 0;
+        for (let i = 0; i <= pp; i++) V[i][k] = -V[i][k];
+      }
+      while (k < pp) {
+        if (s[k] >= s[k + 1]) break;
+        let t = s[k];
+        s[k] = s[k + 1];
+        s[k + 1] = t;
+        if (k < n - 1) for (let i = 0; i < n; i++) {
+          t = V[i][k + 1];
+          V[i][k + 1] = V[i][k];
+          V[i][k] = t;
+        }
+        if (k < m - 1) for (let i = 0; i < m; i++) {
+          t = U[i][k + 1];
+          U[i][k + 1] = U[i][k];
+          U[i][k] = t;
+        }
+        k++;
+      }
+      iter = 0;
+      p--;
+    }
   }
+  // as columns
+  const Ucols = Array.from({ length: nu }, (_, j) => Float64Array.from({ length: m }, (_, i) => U[i][j]));
+  const Vcols = Array.from({ length: n }, (_, j) => Float64Array.from({ length: n }, (_, i) => V[i][j]));
+  return [Ucols, s.slice(0, n), Vcols];
+}
+
+function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array, Float64Array] {
+  // work on the transpose when m < n, so that the matrix is tall
+  const trans = m < n;
+  const [M, N] = trans ? [n, m] : [m, n];
+  let T = A;
+  if (trans) {
+    T = new Float64Array(M * N);
+    for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) T[j * N + i] = A[i * n + j];
+  }
+  // a tall matrix: QR first, then the SVD of the small R (U = Q U_R)
+  let Wcols: Float64Array[], S: Float64Array, Vcols: Float64Array[];
+  if (M > N + N / 2) {
+    const [Q, R] = qr(T, M, N, false);
+    const [Wr, Sr, Vr] = gkrSVD(R, N, N);
+    Wcols = Wr.map((col) => {
+      const u = new Float64Array(M);
+      for (let i = 0; i < M; i++) {
+        let sum = 0;
+        for (let k = 0; k < N; k++) sum += Q[i * N + k] * col[k];
+        u[i] = sum;
+      }
+      return u;
+    });
+    S = Sr;
+    Vcols = Vr;
+  } else [Wcols, S, Vcols] = gkrSVD(T, M, N);
   // descending singular values
-  const order = Array.from(sv.keys()).sort((a, b) => sv[b] - sv[a]);
-  const S = Float64Array.from(order.map((i) => sv[i]));
+  const order = Array.from(S.keys()).sort((a, b) => S[b] - S[a]);
+  const So = Float64Array.from(order.map((i) => S[i]));
   const Uo = new Float64Array(M * N), Vo = new Float64Array(N * N);
   order.forEach((src, dst) => {
-    for (let i = 0; i < M; i++) Uo[i * N + dst] = U[i * N + src];
-    for (let i = 0; i < N; i++) Vo[i * N + dst] = V[i * N + src];
+    for (let i = 0; i < M; i++) Uo[i * N + dst] = Wcols[src][i];
+    for (let i = 0; i < N; i++) Vo[i * N + dst] = Vcols[src][i];
   });
-  // fill zero columns of U with an orthonormal completion
+  // complete zero columns of U to an orthonormal set
   for (let j = 0; j < N; j++) {
-    if (S[j] > 0) continue;
+    if (So[j] > 0) continue;
     for (let e = 0; e < M; e++) {
       const col = new Float64Array(M);
       col[e] = 1;
       for (let k = 0; k < N; k++) {
-        if (k === j || (S[k] === 0 && k > j)) continue;
+        if (k === j || (So[k] === 0 && k > j)) continue;
         let dot = 0;
         for (let i = 0; i < M; i++) dot += Uo[i * N + k] * col[i];
         for (let i = 0; i < M; i++) col[i] -= dot * Uo[i * N + k];
@@ -719,8 +956,7 @@ function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array
       }
     }
   }
-  // A = U S V^T; for the transposed problem, A = V S U^T
-  return trans ? [Vo, S, Uo] : [Uo, S, Vo];
+  return trans ? [Vo, So, Uo] : [Uo, So, Vo];
 }
 
 // ------------------------------------------------------------------ the module

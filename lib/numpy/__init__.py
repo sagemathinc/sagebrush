@@ -1312,6 +1312,8 @@ def searchsorted(a, v, side="left", sorter=None):
 
 
 def unique(ar, return_index=False, return_inverse=False, return_counts=False, axis=None, *, equal_nan=True):
+    if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c":
+        return _np.unique1d(ar)
     a = asarray(ar).ravel()
     order = argsort(a)
     s = a[order]
@@ -1522,6 +1524,11 @@ def histogram(a, bins=10, range=None, density=None, weights=None):
     else:
         edges = asarray(bins, float64)
     nb = edges.size - 1
+    if isinstance(bins, int) and weights is None:
+        hist = _np.hist_uniform(a, edges[0], edges[-1], nb, edges)
+        if density:
+            hist = hist / diff(edges) / sum(hist)
+        return hist, edges
     e = edges.tolist()
     counts = [0] * nb
     w = asarray(weights).ravel().tolist() if weights is not None else None

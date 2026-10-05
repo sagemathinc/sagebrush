@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>pyodide bench</title>
+<script src="https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.js"></script>
+<script>
+window.bench = async (code) => {
+  const t0 = performance.now();
+  const py = await loadPyodide();
+  await py.loadPackage("numpy");
+  py.runPython("import numpy");
+  const ready = performance.now() - t0;
+  let out = "";
+  py.setStdout({ batched: (s) => (out += s + "\n") });
+  py.runPython(code);
+  return JSON.stringify({ ready, out, version: py.version, npver: py.runPython("numpy.__version__") });
+};
+</script>
