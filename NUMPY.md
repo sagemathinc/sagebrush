@@ -105,27 +105,43 @@ NumPy compiled to WebAssembly (Pyodide), see
 
 ### WebAssembly SIMD kernels
 
-The innermost dense linear algebra loops are written in Rust
-([kernels/src/lib.rs](kernels/src/lib.rs)). They are compiled for
-`wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
-to a 4.7 KB module:
+Dense linear algebra runs in Rust ([kernels/src](kernels/src)). It is
+compiled for `wasm32-unknown-unknown` with `simd128`, `no_std` and without
+wasm-bindgen, to a 34 KB module:
 
 - `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
 - `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
-  `inv`).
+  `inv`);
+- `dgeqr`: Householder QR (`qr`, and tall matrices before the SVD);
+- `dsyev`: tred2 + tql2 (`eigh`, `eigvalsh`);
+- `dgeev`: orthes + hqr2 (`eig`, `eigvals`, `roots`);
+- `dgesvd`: Golub–Kahan–Reinsch (`svd`, `pinv`, `lstsq`, `matrix_rank`,
+  `polyfit`).
+
+Matrices whose columns an algorithm walks are stored transposed, so those
+walks are contiguous and the elementwise ones (rotations, rank-1 updates)
+run two lanes at a time.
 
 `scripts/build-kernels.mjs` embeds the module as base64 in
 `src/runtime/kernels_wasm.ts`, which is committed, so building sagebrush
 does not need Rust. `src/runtime/kernels.ts` compiles it synchronously on
 first use and copies operands into its linear memory. Copying is O(n²)
-against O(n³) work. Each kernel does the same floating-point operations in
-the same order as the JavaScript loops it replaces (no fused multiply-add),
-so results are bit-identical with or without WebAssembly. Where
-WebAssembly is unavailable, or with `globalThis.__SAGEBRUSH_NO_WASM__ =
-true`, the JavaScript code runs.
+against O(n³) work.
 
-The kernels made matmul 300×300 about 12× faster (44 → 3.7 ms), `det` of a
-1000×1000 matrix 4× faster (494 → 126 ms) and `inv` 200×200 3.5× faster.
+Each kernel does the same floating-point operations in the same order as
+the TypeScript it replaces (no fused multiply-add, no reassociation), so
+results are bit-identical with or without WebAssembly.
+`test/kernels.test.ts` checks this on several hundred results. `Math.hypot`
+is not specified bit for bit, and engines differ, so both sides use V8's
+two-argument algorithm, written out. Where WebAssembly is unavailable, or
+with `SAGEBRUSH_NO_WASM=1` or `globalThis.__SAGEBRUSH_NO_WASM__ = true`, the
+TypeScript runs.
+
+In Node, against the TypeScript: matmul 300×300 12× faster (44 → 3.7 ms),
+`det` 1000×1000 4× (494 → 126 ms), `eigh` 200×200 4× (45 → 11.5 ms), `svd`
+200×200 5× (118 → 22 ms), `eig` 100×100 3× (18 → 5.6 ms). In the browser
+all of these are now faster than Pyodide's LAPACK; see
+[bench/browser](bench/browser/README.md).
 
 # The investigation that led here
 

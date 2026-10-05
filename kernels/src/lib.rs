@@ -1,4 +1,5 @@
-//! WebAssembly SIMD kernels for sagebrush's numpy (src/runtime/numpy*.ts).
+//! WebAssembly SIMD kernels for sagebrush's numpy (src/runtime/numpy*.ts):
+//! matmul and LU here, QR, eigenproblems and the SVD in eigen.rs.
 //!
 //! Plain exported functions on row-major f64 matrices in this module's
 //! linear memory; the TypeScript side copies operands in and results out.
@@ -10,18 +11,56 @@
 
 use core::arch::wasm32::*;
 
+mod eigen;
+
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
 #[inline(always)]
-unsafe fn ld(p: *const f64) -> v128 {
+pub(crate) unsafe fn ld(p: *const f64) -> v128 {
     v128_load(p as *const v128)
 }
 #[inline(always)]
-unsafe fn st(p: *mut f64, v: v128) {
+pub(crate) unsafe fn st(p: *mut f64, v: v128) {
     v128_store(p as *mut v128, v)
+}
+#[inline(always)]
+pub(crate) fn abs(x: f64) -> f64 {
+    f64::from_bits(x.to_bits() & !(1u64 << 63))
+}
+#[inline(always)]
+pub(crate) fn sqrt(x: f64) -> f64 {
+    f64x2_extract_lane::<0>(f64x2_sqrt(f64x2_splat(x)))
+}
+/// JavaScript's Math.max of two numbers that are not -0
+#[inline(always)]
+pub(crate) fn jsmax(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        f64::NAN
+    } else if a > b {
+        a
+    } else {
+        b
+    }
+}
+/// V8's Math.hypot of two numbers (src/builtins/math.tq, whose Kahan sum
+/// has no compensation to carry with two terms), as hypot() in the TS.
+pub(crate) fn hypot(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        return if abs(a) == f64::INFINITY || abs(b) == f64::INFINITY { f64::INFINITY } else { f64::NAN };
+    }
+    let (a, b) = (abs(a), abs(b));
+    let max = if a > b { a } else { b };
+    if max == f64::INFINITY {
+        return f64::INFINITY;
+    }
+    if max == 0.0 {
+        return 0.0;
+    }
+    let (x, y) = (a / max, b / max);
+    sqrt(x * x + y * y) * max
 }
 
 /// C (m x n) = A (m x k) . B (k x n); `bp` is scratch of k * 4 doubles.
@@ -94,9 +133,23 @@ pub unsafe extern "C" fn dgemm(a: *const f64, b: *const f64, c: *mut f64, m: usi
     }
 }
 
+/// y[0..len] += t * x[0..len]
+#[inline(always)]
+pub(crate) unsafe fn axpy(y: *mut f64, x: *const f64, t: f64, len: usize) {
+    let tv = f64x2_splat(t);
+    let mut i = 0;
+    while i + 2 <= len {
+        st(y.add(i), f64x2_add(ld(y.add(i)), f64x2_mul(tv, ld(x.add(i)))));
+        i += 2;
+    }
+    if i < len {
+        *y.add(i) += t * *x.add(i);
+    }
+}
+
 /// y[0..len] -= f * x[0..len]
 #[inline(always)]
-unsafe fn axpy_neg(y: *mut f64, x: *const f64, f: f64, len: usize) {
+pub(crate) unsafe fn axpy_neg(y: *mut f64, x: *const f64, f: f64, len: usize) {
     let fv = f64x2_splat(f);
     let mut t = 0;
     while t + 2 <= len {

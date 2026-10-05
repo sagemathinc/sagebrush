@@ -25,18 +25,18 @@ See `last-results.md` for the latest run.
 - **sagebrush is faster** at startup (~8×, 0.4 s vs 3.1 s), pure Python
   (up to ~12×) and converting to Python objects (`tolist`).
 - With the Rust/WebAssembly SIMD kernels ([kernels/](../../kernels)),
-  **sagebrush is faster at matmul** (300×300: 3.5 ms vs 25 ms, 7×), `det`
-  (1000×1000: 124 ms vs 184 ms) and `inv`; Pyodide's BLAS is scalar.
-- **They are even** on `sort` and `solve`.
+  **sagebrush is faster at dense linear algebra:** matmul 300×300 (3.6 ms
+  vs 25 ms, 7×), `det` 1000×1000 (123 vs 187 ms), `inv`, `eigh` (11.9 vs
+  14.4 ms), `svd` (23 vs 28 ms) and `eig` (5.9 vs 9.2 ms). `solve` is
+  close (2.3 vs 1.7 ms).
+- **They are even** on `sort`.
 - **sagebrush is within ~1.3–3×** on random numbers, `sin`, `cumsum`,
   `histogram`, `fft` and boolean masks.
 - **NumPy compiled to WebAssembly is ahead** on:
-  - the eigenvalue problems and SVD (3–5×), which still run in JavaScript;
   - `exp`, `rfft`, `polyfit` and broadcasting (3–6×);
   - elementwise arithmetic on large arrays (`a*2+1`: ~10×). Here every
     result is a fresh 8 MB typed array for the garbage collector to manage,
     where WebAssembly reuses `malloc`'d memory.
 
-**Next:** move the inner loops of `eigh`/`eig`/`svd` (Householder
-reductions, QR sweeps) and of the FFT into the same Rust kernels, and
-elementwise loops on pooled memory.
+**Next:** the FFT in the same Rust kernels, and elementwise loops on pooled
+memory.

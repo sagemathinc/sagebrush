@@ -291,6 +291,10 @@ def result_type(*arrays_and_dtypes):
     return _np.result_type(*arrays_and_dtypes)
 
 
+def promote_types(type1, type2):
+    return _np.result_type(dtype(type1), dtype(type2))
+
+
 def can_cast(from_, to, casting="safe"):
     a, b = dtype(from_), dtype(to)
     if a == b or casting == "unsafe":
@@ -2036,11 +2040,19 @@ def sort_complex(a):
 
 
 def vander(x, N=None, increasing=False):
+    # as NumPy: repeated multiplication (multiply.accumulate), not power
     x = asarray(x)
     if N is None:
         N = len(x)
-    powers = arange(N) if increasing else arange(N - 1, -1, -1)
-    return power.outer(x, powers) if x.dtype.kind != "b" else power.outer(x.astype(int64), powers)
+    v = empty((len(x), N), dtype=promote_types(x.dtype, int64))
+    tmp = v[:, ::-1] if not increasing else v
+    if N > 0:
+        tmp[:, 0] = 1
+    if N > 1:
+        tmp[:, 1] = x
+        for j in range(2, N):
+            multiply(tmp[:, j - 1], x, out=tmp[:, j])
+    return v
 
 
 def polyval(p, x):
