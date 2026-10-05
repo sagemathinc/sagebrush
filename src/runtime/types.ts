@@ -584,7 +584,7 @@ method(int, "conjugate", (x: any) => +x);
 method(int, "__index__", (x: any) => (typeof x === "boolean" ? +x : x));
 method(int, "__int__", (x: any) => (typeof x === "boolean" ? +x : x));
 method(int, "__float__", (x: any) => O.mkfloat(O.fv(x)!));
-method(int, "__repr__", (x: any) => repr(x));
+method(int, "__repr__", (x: any) => repr(unbox(x)));
 method(int, "__hash__", (x: any) => O.hashExact(x));
 method(int, "__format__", (x: any, spec: string) => format(x, spec));
 method(int, "is_integer", () => true);

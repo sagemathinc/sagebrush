@@ -4,7 +4,7 @@
 
 import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray,
+  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox,
 } from "./object";
 
 const isInt = Number.isInteger;
@@ -48,6 +48,7 @@ export function fv(x: any): number | undefined {
   if (x instanceof FloatBox) return x.v;
   if (t === "bigint") return bigToFloat(x);
   if (t === "boolean") return +x;
+  if (x instanceof PrimBox) return fv(x.$v); // an int or float subclass
   return undefined;
 }
 
