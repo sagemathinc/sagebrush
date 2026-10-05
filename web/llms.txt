@@ -6,7 +6,8 @@
 
 - Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
 - A notebook can be put in the URL: `https://sagebrush.space/#c=<base64url of a JSON array of cell sources>`; add `m=sage&` before `c=` for Sage mode, and `?run` to run all cells on load.
-- In-browser agents: the page registers WebMCP tools `run_python` (run code as a new cell and return its output) and `read_notebook` (cells and outputs as JSON).
+- Plots: matplotlib.pyplot (a subset; figures show when a cell ends) or Sage's plot/point/line/... in Sage mode; `@interact` (Sage) or `from ipywidgets import interact` adds live controls. Every plot is an SVG with a text description.
+- In-browser agents: the page registers WebMCP tools `run_python` (run code as a new cell; returns its output, plot descriptions and plots as PNG images), `read_notebook` (cells and outputs as JSON) and `set_interact` (change an interact's controls and get the new output).
 
 ## Elsewhere
 

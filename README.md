@@ -50,6 +50,24 @@ The same functions are available from:
 
 Every interface is multithreaded except WASM: `threads=0` means all cores.
 
+## The Python front end: pyjs
+
+`src/` and `lib/` are pyjs, the Python 3.14 language compiled to JavaScript.
+Its parser is generated from CPython's own grammar, so syntax errors match
+CPython's. It passes 532 of 536 conformance programs, and pure-Python
+packages such as mpmath pass their own test suites. It is the front end for
+the engines.
+
+- **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
+  console running in the page, and nothing is sent to a server. See
+  [web/README.md](web/README.md).
+- **Command line:** `npx sagebrush`, or one self-contained executable from
+  `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
+- **Sage mode** (`--sage`): `2^3 == 8`, and `2/3` is an exact rational.
+- **Plots and `@interact`:** Sage's `plot`/`point`/... and
+  `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
+  rerun a function in milliseconds. See [PLOTTING.md](PLOTTING.md).
+
 ## Try it
 
 You need Rust (stable), `uv` and Node.js.
@@ -126,7 +144,7 @@ caveats: [results/engine-exact.md](results/engine-exact.md) and
 | `engine/` | the Rust workspace: engines `modsym` and `ap`; bindings `cli`, `py`, `node`, `wasm`; `bench` |
 | `results/` | write-ups of every experiment, with numbers |
 | `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |
-| `src/`, `lib/`, `test/`, `target/`, `scripts/`, `PLAN.md` | the original pyjs experiment (below) |
+| `src/`, `lib/`, `test/`, `target/`, `scripts/`, `web/`, `PLAN.md` | pyjs, the Python front end: compiler, runtime, library, CLI and the browser notebook |
 
 ## History: from pyjs-spike to Sagebrush
 

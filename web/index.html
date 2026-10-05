@@ -65,9 +65,26 @@
   .ed textarea::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: transparent; }
   .hk { color: var(--hk); } .hb { color: var(--hb); } .hs { color: var(--hs); } .hn { color: var(--hn); }
   .hc { color: var(--hc); font-style: italic; } .hd { color: var(--hd); } .hf { color: var(--hf); }
-  pre.out { margin: 0; padding: 8px 12px; white-space: pre-wrap; word-break: break-word; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-  pre.out:empty { display: none; }
-  pre.out .e { color: var(--err); }
+  /* output: text runs, pictures and interact controls */
+  .out:empty { display: none; }
+  pre.txt { margin: 0; padding: 8px 12px; white-space: pre-wrap; word-break: break-word; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  pre.txt .e { color: var(--err); }
+  figure.plot { margin: 6px 12px; color: var(--fg); --sb-legend-bg: var(--cell); }
+  figure.plot svg, figure.plot img { display: block; max-width: 100%; height: auto; }
+  .interact { margin: 8px 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .interact .controls { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; align-items: center; font-size: 14px; }
+  .interact .controls label { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .interact .v { display: flex; gap: 10px; align-items: center; min-width: 0; }
+  .interact input[type=range] { flex: 1; min-width: 80px; accent-color: var(--accent); }
+  .interact input[type=text] { font: 13px ui-monospace, Menlo, monospace; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--code); color: var(--fg); width: 100%; }
+  .interact output { font: 13px ui-monospace, Menlo, monospace; min-width: 3.5em; }
+  .interact .seg { display: flex; flex-wrap: wrap; gap: 4px; }
+  .interact .seg button { padding: 2px 10px; font-size: 13px; }
+  .interact .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .interact .note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
+  .interact .iout pre.txt { padding: 6px 0 0; }
+  .interact .iout figure.plot { margin: 6px 0 0; }
+  #plottip { position: fixed; z-index: 20; pointer-events: none; background: var(--cell); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; font: 12px ui-monospace, Menlo, monospace; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
   .cell .time { font-size: 12px; color: var(--muted); padding: 0 12px 6px; }
   .cell .time:empty { display: none; }
   /* the cell menu */
@@ -87,7 +104,10 @@
   #console .chead b { color: var(--fg); }
   #console .chead .sp { flex: 1; }
   #console .chead button { padding: 1px 8px; font-size: 12px; }
-  #term { flex: 1; min-height: 0; padding: 0 0 4px 12px; }
+  #console .cbody { flex: 1; min-height: 0; display: flex; }
+  #term { flex: 1; min-width: 0; min-height: 0; padding: 0 0 4px 12px; }
+  #cplot { width: 45%; overflow: auto; border-left: 1px solid var(--line); background: var(--cell); }
+  #cplot[hidden] { display: none; }
   .about { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); margin-top: 26px; padding-top: 14px; }
   .about code, .tag code, footer code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   a { color: var(--accent); }
@@ -144,9 +164,10 @@
 <section id="console" aria-label="Python console" hidden>
   <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize console" tabindex="0"></div>
   <div class="chead"><b>Console</b><span>shares variables with the notebook</span><span class="sp"></span><button id="closeconsole" aria-label="Close console">✕</button></div>
-  <div id="term"></div>
+  <div class="cbody"><div id="term"></div><aside id="cplot" aria-label="Console output pictures" hidden></aside></div>
 </section>
 <div id="announce" class="sr" aria-live="polite"></div>
+<div id="plottip" hidden></div>
 <script id="app">
 // A classic script (not a module) so the cells exist before the first paint.
 const EXAMPLES = {
@@ -175,6 +196,19 @@ const EXAMPLES = {
     "divisors(360), euler_phi(360), sigma(28), crt(2, 3, 5, 7)",
     "# The Mersenne exponents below 1000, by Lucas-Lehmer\ndef lucas_lehmer(p):\n    s, M = 4, 2^p - 1\n    for _ in range(p - 2):\n        s = (s^2 - 2) % M\n    return s == 0\n\n[p for p in prime_range(3, 1000) if lucas_lehmer(p)]",
   ],
+  "Plots (Sage)": [
+    "# Hover over a plot to read coordinates\nplot(sin(x^2), (x, 0, 2*pi), color='red', legend_label='sin(x^2)', title='sin(x^2)')",
+    "# Graphics add up\ng = plot(x^3 - 3*x, (x, -2.2, 2.2), thickness=2)\ng += point([(-1, 2), (1, -2)], size=60, color='red')\ng += text('local max', (-1, 2.5)) + text('local min', (1, -2.5))\ng",
+    "# Drag the slider\n@interact\ndef rose(n=slider(1, 12, 1, 5), color=selector(['blue', 'green', 'purple']), filled=False):\n    g = polar_plot(cos(n*x), (x, 0, 2*pi), color=color, thickness=2)\n    if filled:\n        g += disk((0, 0), 1, alpha=0.1)\n    show(g, figsize=4.5)",
+    "@interact\ndef damped(a=(0.1, 3.0), w=(1, 12)):\n    show(plot(exp(-a*x)*sin(w*x), (x, 0, 6), fill='axis', gridlines=True, ymin=-1, ymax=1, figsize=(7, 3)))",
+    "# The prime counting function against x/log(x)\nlist_plot([prime_pi(k) for k in range(2, 300)], plotjoined=True, legend_label='prime_pi') + plot(x/log(x), (x, 2, 300), color='red', legend_label='x/log(x)')",
+  ],
+  "matplotlib": [
+    "import math\nimport matplotlib.pyplot as plt\nxs = [i / 20 for i in range(201)]\nplt.plot(xs, [math.sin(t) for t in xs], label='sin')\nplt.plot(xs, [math.cos(t) for t in xs], '--', label='cos')\nplt.title('Figures show when the cell ends'); plt.legend(); plt.grid(True)",
+    "import random\nimport matplotlib.pyplot as plt\nrandom.seed(2)\ndata = [random.gauss(0, 1) for _ in range(5000)]\nfig, (a, b) = plt.subplots(1, 2, figsize=(9, 3.5))\na.hist(data, bins=40, edgecolor='white')\na.set_title('5000 normal samples')\nb.scatter(data[:300], data[300:600], c=data[600:900], s=18)\nb.set_title('scatter, colored by a third sample')",
+    "import matplotlib.pyplot as plt\nplt.figure(figsize=(6, 3.5))\nplt.bar(['Python', 'Sage', 'JavaScript', 'Rust'], [42, 17, 30, 12], color=['C0', 'C1', 'C2', 'C3'])\nplt.ylabel('cells run today')",
+    "# ipywidgets' interact works too\nimport math\nimport matplotlib.pyplot as plt\nfrom ipywidgets import interact\n\n@interact(k=(0.0, 1.0), w=(1, 10))\ndef damped(k=0.2, w=4):\n    t = [i / 50 for i in range(500)]\n    plt.figure(figsize=(7, 3))\n    plt.plot(t, [math.exp(-k * s) * math.cos(w * s) for s in t])\n    plt.ylim(-1, 1); plt.title(f'k = {k:.2f}, w = {w}')",
+  ],
   "Text & data": [
     "import re, json\ntext = 'Euler 1707, Gauss 1777, Riemann 1826, Noether 1882'\npeople = {name: int(year) for name, year in re.findall(r'(\\w+) (\\d{4})', text)}\nprint(json.dumps(people, indent=2))",
     "from collections import Counter\nCounter('the quick brown fox jumps over the lazy dog'.replace(' ', '')).most_common(5)",
@@ -182,9 +216,10 @@ const EXAMPLES = {
   ],
 };
 
+const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)"]);
 const $ = (s) => document.querySelector(s);
 const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
-let worker, nextId = 1, version = "", execCount = 0;
+let worker, nextId = 1, version = "", execCount = 0, generation = 0;
 // id -> a sink {start(), out(text, isErr), done(ms), stopped(message)} for
 // running code, or {reply(message)} for a console question.
 const pending = new Map();
@@ -219,6 +254,7 @@ function paint(cell) { cell.hl.innerHTML = highlight(cell.ta.value, isSage()); }
 // ------------------------------------------------------------ the worker
 function startWorker() {
   statusEl.textContent = "loading…";
+  generation++;
   const t0 = performance.now();
   worker = new Worker("sagebrush-worker.js", { type: "module" });
   worker.onmessage = (ev) => {
@@ -232,7 +268,14 @@ function startWorker() {
     if (!p) return;
     if (p.reply) { pending.delete(m.id); return p.reply(m); }
     if (m.start) p.start();
-    if (m.stream) p.out(m.text, m.stream === "stderr");
+    // output of an @interact's function goes to that interact's area
+    const dest = m.target != null ? areaSink(interactBox(m.target)) : p;
+    if (dest) {
+      if (m.stream) dest.out(m.text, m.stream === "stderr");
+      if (m.display) dest.display(m.display);
+      if (m.interact) dest.interact(m.interact);
+      if (m.clear) dest.clear();
+    }
     if (m.done) { pending.delete(m.id); p.done(m.ms); }
   };
   worker.onerror = (e) => { statusEl.textContent = "error: " + (e.message || e); };
@@ -266,9 +309,210 @@ function cells() {
   return [...cellsEl.querySelectorAll(".cell")].map((el) => el.cell);
 }
 
-function append(cell, text, isErr) {
-  const node = isErr ? Object.assign(document.createElement("span"), { className: "e", textContent: text }) : document.createTextNode(text);
-  cell.out.appendChild(node);
+// ------------------------------------------------------------ output areas
+// Text goes into <pre> runs; pictures (Jupyter MIME bundles) into <figure>s.
+function appendText(box, text, isErr) {
+  let pre = box.lastElementChild;
+  if (!pre || pre.tagName !== "PRE") pre = box.appendChild(Object.assign(document.createElement("pre"), { className: "txt" }));
+  pre.appendChild(isErr ? Object.assign(document.createElement("span"), { className: "e", textContent: text }) : document.createTextNode(text));
+}
+
+function appendDisplay(box, b) {
+  const fig = document.createElement("figure");
+  fig.className = "plot";
+  const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
+  const raster = b["image/png"] ? ["image/png", b["image/png"]] : b["image/jpeg"] ? ["image/jpeg", b["image/jpeg"]] : null;
+  if (svg) fig.appendChild(svg);
+  else if (raster) fig.appendChild(Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }));
+  else return appendText(box, (b["text/plain"] ?? "") + "\n", false);
+  box.appendChild(fig);
+}
+
+// SVG from Python code is put in the page only after removing anything
+// active (scripts, event handlers, external links), with its ids made
+// unique so that several plots' clip paths cannot collide.
+const SVG_TAGS = new Set("svg g path line polyline polygon circle ellipse rect text tspan title desc defs clipPath linearGradient radialGradient stop use marker symbol mask pattern".split(" "));
+let svgCount = 0;
+function safeSvg(text) {
+  const root = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
+  if (root.localName !== "svg") return null;
+  const pre = `s${++svgCount}-`;
+  const clean = (el) => {
+    for (const child of [...el.children]) {
+      if (SVG_TAGS.has(child.localName)) clean(child); else child.remove();
+    }
+    for (const { name, value } of [...el.attributes]) {
+      const n = name.toLowerCase();
+      if (n.startsWith("on") || /javascript:|data:|@import|expression\(/i.test(value)) el.removeAttribute(name);
+      else if (n === "href" || n === "xlink:href") value.startsWith("#") ? el.setAttribute(name, "#" + pre + value.slice(1)) : el.removeAttribute(name);
+      else if (n === "id") el.setAttribute(name, pre + value);
+      else if (/url\(/i.test(value)) /url\(\s*#/i.test(value) ? el.setAttribute(name, value.replace(/url\(\s*#/gi, "url(#" + pre)) : el.removeAttribute(name);
+    }
+  };
+  clean(root);
+  return document.importNode(root, true);
+}
+
+// Where output goes: {out, display, interact, clear} for a box.
+function areaSink(box) {
+  if (!box) return null;
+  return {
+    out: (text, isErr) => appendText(box, text, isErr),
+    display: (b) => appendDisplay(box, b),
+    interact: (spec) => renderInteract(box, spec),
+    clear: () => box.replaceChildren(),
+  };
+}
+
+// ------------------------------------------------------------ @interact
+// Controls drawn from the worker's spec; each change reruns the function
+// (one update in flight at a time, always with the latest values), and its
+// new output replaces the old in one step, so dragging a slider does not flicker.
+const interacts = new Map(); // "generation:id" -> state
+let controlCount = 0;
+function interactBox(iid) {
+  const it = interacts.get(generation + ":" + iid);
+  return it ? (it.buffer ?? it.out) : null;
+}
+
+function renderInteract(box, spec) {
+  const it = { iid: spec.id, gen: generation, name: spec.name, values: {}, setters: {}, busy: false, dirty: false, buffer: null, waiters: [] };
+  const el = document.createElement("div");
+  el.className = "interact";
+  el.setAttribute("role", "group");
+  el.setAttribute("aria-label", `Controls of ${spec.name}`);
+  const form = el.appendChild(document.createElement("div"));
+  form.className = "controls";
+  for (const c of spec.controls) control(form, c, it);
+  it.out = el.appendChild(document.createElement("div"));
+  it.out.className = "iout";
+  it.out.setAttribute("aria-live", "polite");
+  box.appendChild(el);
+  el.dataset.key = it.gen + ":" + it.iid;
+  interacts.set(el.dataset.key, it);
+}
+
+function control(form, c, it) {
+  const id = `ctl${++controlCount}`;
+  const set = (v) => { it.values[c.name] = v; changed(it); };
+  it.values[c.name] = c.value;
+  if (c.kind === "text") return form.appendChild(Object.assign(document.createElement("div"), { className: "note", textContent: c.value }));
+  form.appendChild(Object.assign(document.createElement("label"), { htmlFor: id, textContent: c.label }));
+  const v = form.appendChild(Object.assign(document.createElement("div"), { className: "v" }));
+  if (c.kind === "slider" || c.kind === "range") {
+    const fmt = (x) => (c.labels ? c.labels[x] : c.ints ? String(Math.round(x)) : String(+(+x).toPrecision(6)));
+    const one = (val, suffix) => {
+      const inp = Object.assign(document.createElement("input"), { type: "range", id: id + suffix, min: c.min, max: c.max, step: c.step, value: val });
+      inp.setAttribute("aria-valuetext", fmt(val));
+      return inp;
+    };
+    const show = document.createElement("output");
+    if (c.kind === "slider") {
+      const inp = v.appendChild(one(c.value, ""));
+      v.appendChild(show).textContent = fmt(c.value);
+      const update = (x) => { inp.value = x; show.textContent = fmt(x); inp.setAttribute("aria-valuetext", fmt(x)); };
+      inp.oninput = () => { update(inp.value); set(+inp.value); };
+      it.setters[c.name] = (x) => { update(x); it.values[c.name] = +x; };
+    } else {
+      const lo = v.appendChild(one(c.value[0], "")), hi = v.appendChild(one(c.value[1], "b"));
+      hi.setAttribute("aria-label", c.label + " upper");
+      v.appendChild(show).textContent = `${fmt(c.value[0])} – ${fmt(c.value[1])}`;
+      const read = () => { const a = Math.min(+lo.value, +hi.value), b = Math.max(+lo.value, +hi.value); show.textContent = `${fmt(a)} – ${fmt(b)}`; return [a, b]; };
+      lo.oninput = hi.oninput = () => set(read());
+      it.setters[c.name] = (x) => { lo.value = x[0]; hi.value = x[1]; it.values[c.name] = read(); };
+    }
+  } else if (c.kind === "selector" && c.buttons) {
+    const seg = v.appendChild(Object.assign(document.createElement("div"), { className: "seg", id }));
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", c.label);
+    const buttons = c.options.map((o, i) => {
+      const b = seg.appendChild(Object.assign(document.createElement("button"), { textContent: o }));
+      b.setAttribute("aria-pressed", String(i === c.value));
+      b.onclick = () => { press(i); set(i); };
+      return b;
+    });
+    const press = (i) => buttons.forEach((b, j) => b.setAttribute("aria-pressed", String(i === j)));
+    it.setters[c.name] = (i) => { press(+i); it.values[c.name] = +i; };
+  } else if (c.kind === "selector") {
+    const sel = v.appendChild(Object.assign(document.createElement("select"), { id }));
+    c.options.forEach((o, i) => sel.add(new Option(o, i, false, i === c.value)));
+    sel.onchange = () => set(+sel.value);
+    it.setters[c.name] = (i) => { sel.value = i; it.values[c.name] = +i; };
+  } else if (c.kind === "checkbox") {
+    const box = v.appendChild(Object.assign(document.createElement("input"), { type: "checkbox", id, checked: !!c.value }));
+    box.onchange = () => set(box.checked);
+    it.setters[c.name] = (x) => { box.checked = !!x; it.values[c.name] = !!x; };
+  } else if (c.kind === "color") {
+    const inp = v.appendChild(Object.assign(document.createElement("input"), { type: "color", id, value: c.value }));
+    inp.oninput = () => set(inp.value);
+    it.setters[c.name] = (x) => { inp.value = x; it.values[c.name] = x; };
+  } else {
+    const inp = v.appendChild(Object.assign(document.createElement("input"), { type: "text", id, value: c.value, spellcheck: false }));
+    inp.onchange = () => set(inp.value);
+    it.setters[c.name] = (x) => { inp.value = x; it.values[c.name] = String(x); };
+  }
+}
+
+function changed(it) {
+  if (it.gen !== generation) {
+    it.out.replaceChildren();
+    appendText(it.out, "The interpreter restarted: run this cell again.\n", true);
+    for (const w of it.waiters.splice(0)) w();
+    return;
+  }
+  if (it.busy) { it.dirty = true; return; }
+  it.busy = true;
+  it.buffer = document.createElement("div");
+  const id = nextId++;
+  const finish = () => {
+    it.busy = false;
+    if (it.dirty) { it.dirty = false; return changed(it); }
+    for (const w of it.waiters.splice(0)) w();
+  };
+  pending.set(id, {
+    start() {},
+    ...areaSink(it.buffer),
+    done() { it.out.replaceChildren(...it.buffer.childNodes); it.buffer = null; finish(); },
+    stopped(message) { it.buffer = null; appendText(it.out, message, true); it.dirty = false; finish(); },
+  });
+  worker.postMessage({ id, interact: it.iid, values: it.values });
+}
+
+// Coordinates under the mouse, for plots made by _graphics (each panel
+// carries its data ranges and pixel box).
+{
+  const tip = $("#plottip");
+  let cross = null;
+  const hide = () => { tip.hidden = true; cross?.remove(); cross = null; };
+  const fmt = (v) => String(+v.toPrecision(5));
+  document.addEventListener("pointermove", (e) => {
+    const svg = e.target.closest?.("svg.sb-plot");
+    const ctm = svg?.getScreenCTM();
+    if (!ctm) return hide();
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
+    for (const g of svg.querySelectorAll("g.sb-panel")) {
+      const [bx, by, bw, bh] = g.dataset.box.split(" ").map(Number);
+      if (pt.x < bx || pt.x > bx + bw || pt.y < by || pt.y > by + bh) continue;
+      const [x0, x1] = g.dataset.xr.split(" ").map(Number), [y0, y1] = g.dataset.yr.split(" ").map(Number);
+      const at = (a, b, f, log) => (log ? 10 ** (Math.log10(a) + f * (Math.log10(b) - Math.log10(a))) : a + f * (b - a));
+      const x = at(x0, x1, (pt.x - bx) / bw, g.dataset.xlog), y = at(y0, y1, 1 - (pt.y - by) / bh, g.dataset.ylog);
+      tip.textContent = `x = ${fmt(x)}, y = ${fmt(y)}`;
+      tip.hidden = false;
+      tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 4) + "px";
+      tip.style.top = e.clientY + 16 + "px";
+      if (!cross || cross.ownerSVGElement !== svg) {
+        cross?.remove();
+        cross = svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path"));
+        cross.setAttribute("stroke", "currentColor");
+        cross.setAttribute("stroke-opacity", "0.35");
+        cross.setAttribute("stroke-dasharray", "3,3");
+        cross.setAttribute("pointer-events", "none");
+      }
+      cross.setAttribute("d", `M${pt.x} ${by}V${by + bh}M${bx} ${pt.y}H${bx + bw}`);
+      return;
+    }
+    hide();
+  });
 }
 
 function settle(cell) {
@@ -278,6 +522,7 @@ function settle(cell) {
 
 function run(cell) {
   if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+  forgetInteracts(cell.out);
   cell.out.textContent = "";
   cell.time.textContent = "";
   cell.el.classList.add("queued");
@@ -289,7 +534,8 @@ function run(cell) {
       const t0 = performance.now();
       cell.timer = setInterval(() => { cell.time.textContent = `running… ${((performance.now() - t0) / 1000).toFixed(1)} s`; }, 250);
     },
-    out(text, isErr) { failed ||= isErr; append(cell, text, isErr); },
+    ...areaSink(cell.out),
+    out(text, isErr) { failed ||= isErr; appendText(cell.out, text, isErr); },
     done(ms) {
       settle(cell);
       cell.n.textContent = `[${++execCount}]`;
@@ -301,7 +547,7 @@ function run(cell) {
       settle(cell);
       cell.n.textContent = "[ ]";
       cell.time.textContent = "";
-      append(cell, message, true);
+      appendText(cell.out, message, true);
       resolve();
     },
   }));
@@ -312,6 +558,7 @@ async function runAll() {
 }
 
 const index = (cell) => cells().indexOf(cell);
+const forgetInteracts = (box) => box.querySelectorAll(".interact").forEach((el) => interacts.delete(el.dataset.key));
 
 function autosize(ta) {
   ta.style.height = "auto";
@@ -322,7 +569,7 @@ function addCell(code = "", where = null, focus = false) {
   const el = document.createElement("div");
   el.className = "cell";
   el.setAttribute("role", "group");
-  el.innerHTML = `<div class="head"><span class="n">[ ]</span><span class="sp"></span><button data-a="run" title="Run (Shift+Enter)">▶ Run</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" aria-controls="cellmenu" title="Cell actions">⋯</button></div><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><pre class="out"></pre><div class="time"></div>`;
+  el.innerHTML = `<div class="head"><span class="n">[ ]</span><span class="sp"></span><button data-a="run" title="Run (Shift+Enter)">▶ Run</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" aria-controls="cellmenu" title="Cell actions">⋯</button></div><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><div class="out"></div><div class="time"></div>`;
   const cell = { el, ta: el.querySelector("textarea"), hl: el.querySelector(".ed pre"), out: el.querySelector(".out"), time: el.querySelector(".time"), n: el.querySelector(".n"), menuBtn: el.querySelector('[data-a="menu"]') };
   el.cell = cell;
   cell.ta.value = code;
@@ -425,7 +672,7 @@ menu.addEventListener("click", (e) => {
     case "below": return void addCell("", { after: cell.el }, true);
     case "up": move(cell, -1); return cell.menuBtn.focus();
     case "down": move(cell, 1); return cell.menuBtn.focus();
-    case "clear": cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
+    case "clear": forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
     case "delete": return remove(cell);
   }
 });
@@ -462,8 +709,12 @@ async function toggleConsole(show = consoleEl.hidden) {
   statusEl.textContent = "loading console…";
   const { openConsole } = await import(new URL("sagebrush-console.js", location.href).href); // loaded on demand, never bundled
   consoleUi = openConsole($("#term"), {
+    // Pictures (and @interact controls) from the console go to the panel beside it.
     run: (src, out) => new Promise((resolve) => submit(src, {
       start() {}, out, done: () => resolve(),
+      display(b) { const box = consolePictures(); box.replaceChildren(); appendDisplay(box, b); out(`[${b["text/plain"] ?? "picture"}: shown on the right]\n`, false); },
+      interact(spec) { const box = consolePictures(); forgetInteracts(box); box.replaceChildren(); renderInteract(box, spec); out("[controls shown on the right]\n", false); },
+      clear() {},
       stopped(message) { out("\n" + message.trim() + "\n", true); resolve(); },
     }, { repl: true })),
     more: (src) => ask({ check: src }, false).then((m) => !!m.more),
@@ -474,6 +725,11 @@ async function toggleConsole(show = consoleEl.hidden) {
     announce,
   });
   statusEl.textContent = `ready (sagebrush ${version})`;
+}
+function consolePictures() {
+  const box = $("#cplot");
+  box.hidden = false;
+  return box;
 }
 consoleBtn.onclick = () => toggleConsole();
 $("#closeconsole").onclick = () => toggleConsole(false);
@@ -525,7 +781,7 @@ const dec = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g,
 $("#runall").onclick = runAll;
 $("#add").onclick = () => addCell("", null, true);
 $("#stop").onclick = () => stop("\nStopped (interpreter restarted; variables are gone).\n");
-$("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) { c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
+$("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
 $("#share").onclick = async () => {
   location.hash = (isSage() ? "m=sage&" : "") + "c=" + enc(JSON.stringify(cells().map((c) => c.ta.value)));
   try { await navigator.clipboard.writeText(location.href); statusEl.textContent = "link copied"; } catch { statusEl.textContent = "link in the address bar"; }
@@ -535,7 +791,7 @@ const sel = $("#examples");
 for (const k of Object.keys(EXAMPLES)) sel.add(new Option(k, k));
 sel.onchange = () => {
   if (sel.value) {
-    setMode(sel.value === "Sage" ? "sage" : "python");
+    setMode(SAGE_EXAMPLES.has(sel.value) ? "sage" : "python");
     load(EXAMPLES[sel.value]);
     history.replaceState(null, "", location.pathname);
   }
@@ -544,11 +800,45 @@ sel.onchange = () => {
 
 // ------------------------------------------------------------ WebMCP
 // Tools for AI agents in the browser (https://developer.chrome.com/docs/ai/webmcp).
-function cellText(c) { return c.out.textContent; }
+// A cell's output as text: pictures by their descriptions, controls by their values.
+function outputText(box) {
+  const parts = [];
+  for (const el of box.children) {
+    if (el.tagName === "PRE") parts.push(el.textContent);
+    else if (el.tagName === "FIGURE") parts.push(`[picture: ${el.querySelector("svg")?.getAttribute("aria-label") ?? el.querySelector("img")?.alt ?? ""}]\n`);
+    else if (el.classList.contains("interact")) {
+      const it = interacts.get(el.dataset.key);
+      parts.push(`[interact ${it?.name ?? ""} id=${el.dataset.key} values=${JSON.stringify(it?.values ?? {})}]\n` + outputText(el.querySelector(".iout")));
+    }
+  }
+  return parts.join("");
+}
+function cellText(c) { return outputText(c.out); }
+
+// Pictures in an output as PNG (what multimodal agents take), drawn from the SVG.
+async function pictures(box) {
+  const out = [];
+  for (const svg of [...box.querySelectorAll("figure.plot svg")].slice(0, 4)) {
+    const w = svg.viewBox.baseVal?.width || 640, h = svg.viewBox.baseVal?.height || 480;
+    const img = new Image();
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+    try {
+      await img.decode();
+      const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      out.push({ type: "image", data: canvas.toDataURL("image/png").split(",")[1], mimeType: "image/png" });
+    } catch {}
+  }
+  return out;
+}
+const result = async (box) => ({ content: [{ type: "text", text: outputText(box) || "(no output)" }, ...(await pictures(box))] });
 const tools = [
   {
     name: "run_python",
-    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned. Variables persist between calls.",
+    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/... (sage=true). @interact functions get controls that set_interact can change.",
     inputSchema: {
       type: "object",
       properties: {
@@ -565,7 +855,7 @@ const tools = [
       autosize(cell.ta);
       paint(cell);
       await run(cell);
-      return { content: [{ type: "text", text: cellText(cell) || "(no output)" }] };
+      return result(cell.out);
     },
   },
   {
@@ -574,6 +864,25 @@ const tools = [
     inputSchema: { type: "object", properties: {} },
     async execute() {
       return { content: [{ type: "text", text: JSON.stringify({ mode: modeEl.value, cells: cells().map((c) => ({ code: c.ta.value, output: cellText(c) })) }) }] };
+    },
+  },
+  {
+    name: "set_interact",
+    description: "Change the controls of an @interact (its id is in run_python's or read_notebook's output, like id=1:2), rerun its function and return the new output and pictures. Sliders take numbers, selectors the index of an option, checkboxes booleans, input boxes strings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The interact's id, e.g. \"1:2\"." },
+        values: { type: "object", description: "Control name -> new value." },
+      },
+      required: ["id", "values"],
+    },
+    async execute({ id, values }) {
+      const it = interacts.get(id);
+      if (!it) return { content: [{ type: "text", text: `No interact ${id}; run_python or read_notebook lists them.` }] };
+      for (const [k, v] of Object.entries(values ?? {})) if (it.setters[k]) it.setters[k](v);
+      await new Promise((resolve) => { it.waiters.push(resolve); changed(it); });
+      return result(it.out);
     },
   },
 ];

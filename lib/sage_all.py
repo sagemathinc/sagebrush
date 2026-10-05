@@ -16,7 +16,26 @@ __all__ = [
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
     "binomial", "factorial", "fibonacci", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
+    # symbolic expressions (just enough for plotting)
+    "var", "x", "sin", "cos", "tan", "asin", "acos", "atan", "arcsin", "arccos", "arctan", "atan2",
+    "arctan2", "sinh", "cosh", "tanh", "exp", "log", "ln", "floor", "ceil", "gamma",
+    # graphics
+    "Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d", "point",
+    "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk", "arrow", "arrow2d",
+    "bar_chart", "show", "graphics_array",
+    # interact
+    "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
+    "text_control",
 ]
+
+from _sage_expr import (Expr as _Expr, var, x, pi, e, sin, cos, tan, asin, acos, atan, arcsin,
+                        arccos, arctan, atan2, arctan2, sinh, cosh, tanh, exp, log, ln, floor, ceil,
+                        gamma)
+from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
+                       points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
+                       bar_chart, show, graphics_array)
+from _interact import (interact, slider, range_slider, selector, checkbox, input_box,
+                       color_selector, text_control)
 
 
 # ------------------------------------------------------------------ Rational
@@ -138,8 +157,6 @@ def n(x, digits=None):
 
 
 N = n
-pi = _math.pi
-e = _math.e
 
 
 # ------------------------------------------------------------------ primes
@@ -542,6 +559,8 @@ def isqrt(n):
 
 def sqrt(x):
     """Exact for perfect squares (of integers and rationals), else a float."""
+    if isinstance(x, _Expr):
+        return _Expr("fn", ("sqrt", x))
     if isinstance(x, int) and x >= 0:
         r = _math.isqrt(x)
         if r * r == x:
@@ -575,6 +594,8 @@ def prod(xs, start=1):
 
 
 def continued_fraction(x, nterms=20):
+    if isinstance(x, _Expr):
+        x = float(x)
     """The (simple) continued fraction partial quotients of x."""
     if isinstance(x, (int, _Fraction)):
         f = _Fraction(x)

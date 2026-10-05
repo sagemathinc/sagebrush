@@ -298,10 +298,76 @@ B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw
 B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
   if (v !== null) {
     B.builtins._ = v;
-    B.stdout.write(F.repr(v) + "\n");
+    displayValue(v);
   }
   return null;
 }, "displayhook");
+
+// ------------------------------------------------------------------ rich display
+// Jupyter's display protocol: _repr_mimebundle_, _repr_svg_, ... make a MIME
+// bundle that the host shows (R.host.display, set by the browser worker),
+// when there is one; otherwise the text repr is printed.  R.host is also
+// reachable from Python as __pyjs_host__(op, *args) for things like
+// interact's output routing.
+const RICH: [string, string][] = [
+  ["_repr_svg_", "image/svg+xml"], ["_repr_png_", "image/png"], ["_repr_jpeg_", "image/jpeg"], ["_repr_html_", "text/html"],
+  ["_repr_markdown_", "text/markdown"], ["_repr_latex_", "text/latex"], ["_repr_json_", "application/json"],
+];
+function base64(b: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function mimeValue(v: any): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string") return v;
+  if (v instanceof Obj.PyBytes) return base64(v.a.subarray(0, v.n));
+  return F.str(v);
+}
+export function mimeBundle(v: any): Record<string, string> | null {
+  if (v === null || Obj.isType(v)) return null;
+  const out: Record<string, string> = {};
+  const mb = Obj.getattr(v, "_repr_mimebundle_", null);
+  if (mb !== null) {
+    let r = Obj.callObj(mb, []);
+    if (r !== null && !(r instanceof Obj.PyDict)) r = O.toArray(r)[0]; // (data, metadata)
+    if (r instanceof Obj.PyDict) {
+      for (const k of O.toArray(r)) {
+        const s = mimeValue(O.getitem(r, k));
+        if (s !== null) out[String(k)] = s;
+      }
+    }
+  }
+  for (const [method, mime] of RICH) {
+    if (mime in out) continue;
+    const f = Obj.getattr(v, method, null);
+    if (f === null) continue;
+    const s = mimeValue(Obj.callObj(f, []));
+    if (s !== null) out[mime] = s;
+  }
+  return Object.keys(out).length ? out : null;
+}
+// Show v richly if the host can, else print its repr; true if shown richly.
+function displayValue(v: any): boolean {
+  const host = R.host;
+  if (host?.display) {
+    const b = mimeBundle(v);
+    if (b !== null) {
+      b["text/plain"] ??= F.repr(v);
+      B.stdout.flush();
+      if (host.display(b)) return true;
+    }
+  }
+  B.stdout.write(F.repr(v) + "\n");
+  return false;
+}
+B.builtins.__pyjs_display__ = Obj.builtin((v: any) => displayValue(v), "display");
+B.builtins.__pyjs_host__ = Obj.builtin((op: any, ...args: any[]) => {
+  const f = R.host?.[op];
+  if (typeof f !== "function") return null;
+  B.stdout.flush();
+  return f(...args) ?? null;
+}, "__pyjs_host__");
 B.builtins.exec = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => execIn(src, gl ?? null, lo, null, null), "exec");
 B.builtins.eval = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => evalIn(src, gl ?? null, lo, null, null), "eval");
 B.builtins.globals = Obj.builtin(() => raise(T.RuntimeError, "globals() called indirectly is not supported"), "globals");
@@ -428,6 +494,9 @@ const isagepow = (a: any, b: any) => (negIntPow(a, b) ? sagepow(a, b) : O.ipow(a
 // ------------------------------------------------------------------ the runtime object
 
 export const R: any = {
+  /** Set by an embedding (the browser worker): display(bundle) -> shown?, and other hooks. */
+  host: null,
+  mimeBundle,
   ...O,
   ...F,
   sagediv,
