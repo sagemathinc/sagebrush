@@ -1,0 +1,33 @@
+# Sagebrush Atlas
+
+> Galois orbits of newforms (classical modular forms with trivial character), computed and proven by Sagebrush's Rust engines, with LMFDB labels. Stored: weight 2 with level N <= 1000, and weights 4-12 with N k^2 <= 4000 (1,490 newspaces, 7,961 orbits). All 5,951 weight-2 orbits agree with the LMFDB (label, dimension, tr a_p for p < 1000). Anything else is computed in the browser by the same engine (WebAssembly). No API key, no CAPTCHA; everything is static JSON or a page that is also JSON.
+
+## Pages (HTML; append .json, or send Accept: application/json)
+
+- https://sagebrush.space/atlas/mf/389.2.a : the newspace N.k.a (trivial character "a"): dimensions, orbits, characteristic polynomials of T, old-space decomposition, provenance.
+- https://sagebrush.space/atlas/mf/389.2.a.e : one Galois orbit N.k.a.x: q-expansion or trace form, coefficient field, Atkin-Lehner signs, sign of the functional equation, CM, elliptic curve, traces.
+- https://sagebrush.space/atlas/mf/?weight=2&level=1-100&dim=1&cm=no&sign=-1&rank=1&format=json : search the stored orbits (ranges "a-b"; start, limit <= 1000). q=<text> jumps to a label (389.2.a.e, 389.2.a, 389, 11a1, 11.a).
+- A label that is not stored (e.g. 1.24.a, or 1009.2.a) opens a page that computes it in the browser; its .json is a 404 with {"stored": false}.
+
+## Bulk data (static files)
+
+- /atlas/data/stats.json : what is stored, counts, engine commit, build date.
+- /atlas/data/index.json : one row per orbit: [label, level, weight, dim, cm (a negative discriminant D or 0), sign (+1/-1, or 0 if unknown), [tr a_1..a_10], curve ([cremona_label, rank, torsion] or 0), lmfdb (1 agrees, -1 differs, 0 not compared)].
+- /atlas/data/mf/{k}/{N}.json : the whole newspace N.k.a:
+  - label, level, weight; dims {new, cusp, eisenstein, modsym} (modsym: modular symbols, sign 0);
+  - old: [[M, dim S_k^new(M), multiplicity]] (S_k^old = sum over M | N, M < N, of S_k^new(M)^multiplicity);
+  - T: [[q, c], ...] meaning T = sum c T_q; its characteristic polynomial is squarefree on the newspace;
+  - status ("proven": dimensions certified, charpoly over Z by CRT past a rigorous coefficient bound), checks (the engine's), seconds (native, one thread);
+  - newforms: [{label, letter, dim, charpoly, traces, lmfdb?, curve?}], in LMFDB order (dimension, then trace form). charpoly: the characteristic polynomial of T on the orbit (irreducible over Q; its root generates the coefficient field), coefficients from x^0 up, decimal strings. traces: tr a_1 .. tr a_1000 as decimal strings (for dim 1, the coefficients themselves). curve (rational weight-2 forms): {cremona (optimal curve), lmfdb (isogeny class), ainvs, rank, torsion} from John Cremona's tables, matched by a_p for p < 1000.
+
+## Derived on each page (JSON field "derived")
+
+- al: [[p, w_p]] Atkin-Lehner signs for p | N, from tr a_p = -dim p^(k/2-1) w_p when p || N (null when p^2 | N).
+- fricke, sign: w_N and the sign of the functional equation (-1)^(k/2) w_N (null unless N is squarefree).
+- cm: D < 0 when tr a_p = 0 for every prime p < 1000 inert in Q(sqrt D) (cmInert counts them).
+
+## Recompute
+
+- Sage mode (https://sagebrush.space notebook, or `npx sagebrush --sage`): newform_orbits(N, k) lists the orbits (label, dimension, trace form, .charpoly(), .traces(n)); Newforms(N, k) prints q-expansions as Sage does when all are rational.
+- Rust: in engine/ of https://github.com/sagemathinc/sagebrush, `cargo run --release -p sagebrush-web --example atlas -- N:k 1000` prints the newspace as one JSON line (the atlas's input).
+- In a browser with WebMCP, atlas pages offer tools atlas_lookup(label), atlas_search(filters) and atlas_compute(level, weight).

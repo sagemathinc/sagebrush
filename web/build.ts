@@ -2,7 +2,7 @@
 //                                sagebrush-math.js, katex/, sagebrush-engine.wasm}
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
 // web/shims, the Python library is embedded, the Unicode name table is not.
-import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
+import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync } from "node:fs";
 import { join } from "node:path";
 
 const here = import.meta.dir;
@@ -69,7 +69,21 @@ const katexDir = join(here, "..", "node_modules", "katex", "dist");
 const KATEX = ["katex/katex.min.css", ...readdirSync(join(katexDir, "fonts")).filter((f) => f.endsWith(".woff2")).map((f) => "katex/fonts/" + f)];
 mkdirSync(join(here, "dist", "katex", "fonts"), { recursive: true });
 for (const f of KATEX) copyFileSync(join(katexDir, f.slice("katex/".length)), join(here, "dist", f));
+// The atlas (web/atlas): its page script and engine worker, and llms.txt.
+// Its pages are rendered by the site's Worker; its data (web/dist/atlas/data)
+// comes from scripts/build-atlas.mjs and is not in git.
+for (const [entry, name] of [["client.ts", "atlas.js"], ["engine-worker.ts", "atlas-engine.js"]]) {
+  const r = await Bun.build({ entrypoints: [join(here, "atlas", entry)], outdir: join(here, "dist", "atlas"), naming: name, target: "browser", format: "esm", minify: true });
+  if (!r.success) {
+    for (const l of r.logs) console.error(l);
+    process.exit(1);
+  }
+}
+copyFileSync(join(here, "atlas", "llms.txt"), join(here, "dist", "atlas", "llms.txt"));
+if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn("web/dist/atlas/data is missing: run scripts/build-atlas.mjs (see web/atlas/README.md)");
 // The Cloudflare site (web/site) serves the same files.
+rmSync(join(here, "site", "public", "atlas"), { recursive: true, force: true });
+cpSync(join(here, "dist", "atlas"), join(here, "site", "public", "atlas"), { recursive: true });
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
 for (const f of ["index.html", "llms.txt", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-engine.wasm", ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));

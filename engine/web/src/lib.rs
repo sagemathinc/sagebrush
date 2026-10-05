@@ -38,13 +38,18 @@ pub extern "C" fn sb_reply_len() -> usize {
 #[no_mangle]
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
-    let reply = match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
+    let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    *r = call(req).into_bytes();
+    r.as_ptr()
+}
+
+/// The same JSON call natively (examples/atlas.rs builds the atlas with it).
+pub fn call(req: &str) -> String {
+    match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
         Err(e) => json!({ "error": e }),
-    };
-    let r = &mut *std::ptr::addr_of_mut!(REPLY);
-    *r = reply.to_string().into_bytes();
-    r.as_ptr()
+    }
+    .to_string()
 }
 
 fn u(v: &Value, k: &str) -> Result<u64, String> {
