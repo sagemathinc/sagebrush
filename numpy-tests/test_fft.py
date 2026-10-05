@@ -1,0 +1,20 @@
+import numpy as np
+def show(name, x, digits=9):
+    x = np.asarray(x)
+    print(name, x.shape, x.dtype, (np.round(np.real(x), digits) + 0.0).tolist(), (np.round(np.imag(x), digits) + 0.0).tolist() if x.dtype.kind == "c" else "")
+np.random.seed(3)
+for n in [1, 2, 3, 4, 5, 8, 12, 16, 17, 100]:
+    x = np.random.rand(n)
+    show("fft %d" % n, np.fft.fft(x)); show("ifft %d" % n, np.fft.ifft(np.fft.fft(x)))
+    show("rfft %d" % n, np.fft.rfft(x)); show("irfft %d" % n, np.fft.irfft(np.fft.rfft(x), n))
+z = np.random.rand(6) + 1j * np.random.rand(6)
+show("cfft", np.fft.fft(z)); show("ortho", np.fft.fft(z, norm="ortho")); show("forward", np.fft.ifft(z, norm="forward"))
+show("pad", np.fft.fft([1, 2, 3], n=6)); show("trunc", np.fft.fft(np.arange(8), n=5))
+m = np.random.rand(4, 6)
+show("fft2", np.fft.fft2(m)); show("ifft2", np.fft.ifft2(np.fft.fft2(m))); show("rfft2", np.fft.rfft2(m)); show("irfft2", np.fft.irfft2(np.fft.rfft2(m), m.shape))
+show("fft axis0", np.fft.fft(m, axis=0)); show("fftn", np.fft.fftn(np.random.rand(2, 3, 4)))
+print(repr(np.fft.fftfreq(8)), repr(np.fft.fftfreq(7, d=0.5)), repr(np.fft.rfftfreq(8)), repr(np.fft.fftshift(np.arange(6))), repr(np.fft.ifftshift(np.arange(7))))
+t = np.linspace(0, 1, 128, endpoint=False)
+sig = np.sin(2 * np.pi * 10 * t) + 0.5 * np.sin(2 * np.pi * 25 * t)
+spec = np.abs(np.fft.rfft(sig))
+print(np.argsort(spec)[-2:].tolist(), np.round(spec[[10, 25]], 6).tolist())

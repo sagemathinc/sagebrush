@@ -19,6 +19,7 @@ import * as F from "./format";
 import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
+import { glibcLog, glibcExp } from "./libm";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
 
@@ -674,6 +675,23 @@ function intIndex(k: any, n: number, axis: number): number {
 }
 
 function getitem(a: NDArray, key: any): any {
+  // a[i] on a 1-D array
+  if (typeof key === "number" && a.ndim === 1 && Number.isInteger(key)) {
+    const n = a.shape[0];
+    const i = key < 0 ? key + n : key;
+    if (i >= 0 && i < n) return pyScalarOf(a.dt, a.data, a.offset + i * a.strides[0]);
+  }
+  // a[mask] with a boolean mask of a's shape
+  if (key instanceof NDArray && key.dt.kind === "b" && key.ndim === a.ndim && key.shape.every((v, i) => v === a.shape[i]) && !a.dt.cplx) {
+    const vals: number[] = [];
+    const ad = a.data, kd = key.data;
+    loop2(a.shape, a.strides, a.offset, key.strides, key.offset, (p, q) => {
+      if (kd[q]) vals.push(ad[p]);
+    });
+    const res = empty([vals.length], a.dt);
+    res.data.set(vals);
+    return res;
+  }
   const r = resolveIndex(a, key);
   if ("view" in r) {
     const v = r.view;
@@ -832,6 +850,31 @@ function resultType(a: { arr: NDArray; weak: Weak | null }, b: { arr: NDArray; w
   return promote(a.arr.dt, b.arr.dt);
 }
 
+// Tight loops for the common operations on contiguous data (V8 compiles
+// these monomorphic loops far better than a per-element callback):
+// kind "aa" (two arrays of one shape), "as" (array, scalar), "sa".
+const FAST_EXPR: Record<string, (x: string, y: string) => string> = {
+  add: (x, y) => `${x} + ${y}`, subtract: (x, y) => `${x} - ${y}`, multiply: (x, y) => `${x} * ${y}`, true_divide: (x, y) => `${x} / ${y}`,
+  equal: (x, y) => `+(${x} === ${y})`, not_equal: (x, y) => `+(${x} !== ${y})`, less: (x, y) => `+(${x} < ${y})`,
+  less_equal: (x, y) => `+(${x} <= ${y})`, greater: (x, y) => `+(${x} > ${y})`, greater_equal: (x, y) => `+(${x} >= ${y})`,
+  maximum: (x, y) => `(${x} !== ${x} || ${y} !== ${y} ? NaN : ${x} > ${y} ? ${x} : ${y})`,
+  minimum: (x, y) => `(${x} !== ${x} || ${y} !== ${y} ? NaN : ${x} < ${y} ? ${x} : ${y})`,
+  power: (x, y) => `Math.pow(${x}, ${y})`,
+};
+const kernels = new Map<string, any>();
+function fastKernel(op: string, kind: string): any {
+  const key = op + kind;
+  let k = kernels.get(key);
+  if (k === undefined) {
+    const e = FAST_EXPR[op];
+    const x = kind === "sa" ? "av" : "ad[ao + i]", y = kind === "as" ? "bv" : "bd[bo + i]";
+    k = new Function("ad", "ao", "av", "bd", "bo", "bv", "od", "n", `for (let i = 0; i < n; i++) od[i] = ${e(x, y)};`);
+    kernels.set(key, k);
+  }
+  return k;
+}
+const isFlat = (a: NDArray) => a.isC();
+
 export function binary(op: string, x: any, y: any, out: NDArray | null = null): any {
   const spec = BIN[op];
   const A = operand(x), B = operand(y);
@@ -846,6 +889,22 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null): 
   const rt = spec.out === "bool" ? D.bool : ct;
   const a = A.arr, b = B.arr;
   const shape = broadcastShapes(a.shape, b.shape);
+  // fast paths: real dtypes whose arithmetic needs no wrapping or truncation
+  const plain = (d: DType) => d.kind === "f" || d.kind === "b" || (d.isInt && d.ctor !== Float64Array) || d === D.int64;
+  if (!out && !ct.cplx && FAST_EXPR[op] && plain(ct) && plain(rt) && !(op === "power" && ct.isInt) && !(ct === D.int64 && op === "multiply")
+      && (rt.kind !== "b" || spec.out === "bool") && !(rt.kind === "b" && spec.out !== "bool")) {
+    const n = prod(shape);
+    const aScalar = a.ndim === 0, bScalar = b.ndim === 0;
+    const sameShape = a.ndim === b.ndim && a.shape.every((v, i) => v === b.shape[i]);
+    if ((sameShape && isFlat(a) && isFlat(b)) || (aScalar && isFlat(b) && b.ndim > 0) || (bScalar && isFlat(a) && a.ndim > 0)) {
+      const res = empty(shape, rt);
+      const kind = aScalar && !bScalar ? "sa" : bScalar && !aScalar ? "as" : "aa";
+      const av = aScalar ? a.data[a.offset] : 0, bv = bScalar ? b.data[b.offset] : 0;
+      // operands of different storage types (int8 + float64 ...) read fine as numbers
+      fastKernel(op, kind)(a.data, a.offset, av, b.data, b.offset, bv, res.data, n);
+      return res;
+    }
+  }
   const res = out ?? empty(shape, rt);
   const sa = bstrides(a, shape), sb = bstrides(b, shape);
   const ad = a.data, bd = b.data, od = res.data, ost = res.strides, oo = res.offset;
@@ -887,10 +946,10 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   square: { f: (x) => x * x, c: (a, b) => [a * a - b * b, 2 * a * b], keepInt: true },
   sqrt: { f: Math.sqrt, c: csqrt, float: true },
   cbrt: { f: Math.cbrt, float: true },
-  exp: { f: Math.exp, c: (a, b) => [Math.exp(a) * Math.cos(b), Math.exp(a) * Math.sin(b)], float: true },
+  exp: { f: glibcExp, c: (a, b) => [glibcExp(a) * Math.cos(b), glibcExp(a) * Math.sin(b)], float: true },
   exp2: { f: (x) => 2 ** x, float: true },
   expm1: { f: Math.expm1, float: true },
-  log: { f: Math.log, c: (a, b) => [Math.log(Math.hypot(a, b)), Math.atan2(b, a)], float: true },
+  log: { f: glibcLog, c: (a, b) => [glibcLog(Math.hypot(a, b)), Math.atan2(b, a)], float: true },
   log2: { f: Math.log2, float: true },
   log10: { f: Math.log10, float: true },
   log1p: { f: Math.log1p, float: true },

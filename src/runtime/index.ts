@@ -12,6 +12,9 @@ import "./struct";
 import "./memoryview";
 import "./re";
 import "./numpy";
+import "./numpy_random";
+import "./numpy_linalg";
+import "./numpy_fft";
 import * as Cx from "./complex";
 O.complexHooks.pow = Cx.complexPow;
 
