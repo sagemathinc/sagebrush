@@ -10,7 +10,7 @@ import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype, ascontig, copy as npcopy } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
-import { wasmLU, wasmLuSolve } from "./kernels";
+import { gemmBuffers, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 
 const { T, raise, tuple } = Obj;
 const F64 = () => toDtype("float64");
@@ -30,6 +30,20 @@ function linalgError(msg: string): never {
   const E = (globalThis as any).__npLinAlgError;
   if (E) throw Obj.callObj(E, [msg]);
   return raise(T.ValueError, msg);
+}
+
+// V8's Math.hypot of two numbers (src/builtins/math.tq, whose Kahan sum
+// has no compensation to carry with two terms), written out so that every
+// engine, and the WebAssembly kernels, compute the same bits.
+function hypot(a: number, b: number): number {
+  if (a !== a || b !== b) return Math.abs(a) === Infinity || Math.abs(b) === Infinity ? Infinity : NaN;
+  a = Math.abs(a);
+  b = Math.abs(b);
+  const max = a > b ? a : b;
+  if (max === Infinity) return Infinity;
+  if (max === 0) return 0;
+  const x = a / max, y = b / max;
+  return Math.sqrt(x * x + y * y) * max;
 }
 
 // Euclidean norm of x[off + i*stride], i < n, scaled to avoid overflow (as dnrm2).
@@ -109,6 +123,8 @@ function luSolve(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Ar
 // ------------------------------------------------------------------ QR (Householder)
 
 function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64Array, Float64Array, number] {
+  const w = wasmQR(A, m, n, complete);
+  if (w) return w;
   // columns stored contiguously: every Householder step works down columns
   const cols: Float64Array[] = [];
   for (let j = 0; j < n; j++) {
@@ -177,6 +193,18 @@ function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64A
 // ------------------------------------------------------------------ symmetric eigenproblem (tred2 + tql2)
 
 function symEig(A: Float64Array, n: number): [Float64Array, Float64Array] {
+  const ws = wasmSymEig(A, n);
+  if (ws === "noconv") linalgError("Eigenvalues did not converge");
+  if (ws) {
+    const { d, W } = ws;
+    const order = Array.from(d.keys()).sort((x, y) => d[x] - d[y]);
+    const w = new Float64Array(n), vec = new Float64Array(n * n);
+    order.forEach((src, dst) => {
+      w[dst] = d[src];
+      for (let k = 0; k < n; k++) vec[k * n + dst] = W[src * n + k];
+    });
+    return [w, vec];
+  }
   const V: number[][] = [];
   for (let i = 0; i < n; i++) V.push(Array.from(A.subarray(i * n, i * n + n)));
   const d = new Array(n).fill(0), e = new Array(n).fill(0);
@@ -270,7 +298,7 @@ function symEig(A: Float64Array, n: number): [Float64Array, Float64Array] {
         if (iter > 300) linalgError("Eigenvalues did not converge");
         let g = d[l];
         let p = (d[l + 1] - g) / (2 * e[l]);
-        let r = Math.hypot(p, 1);
+        let r = hypot(p, 1);
         if (p < 0) r = -r;
         d[l] = e[l] / (p + r);
         d[l + 1] = e[l] * (p + r);
@@ -288,7 +316,7 @@ function symEig(A: Float64Array, n: number): [Float64Array, Float64Array] {
           s2 = s;
           g = c * e[i];
           h = c * p;
-          r = Math.hypot(p, e[i]);
+          r = hypot(p, e[i]);
           e[i + 1] = s * r;
           s = e[i] / r;
           c = p / r;
@@ -321,6 +349,12 @@ function symEig(A: Float64Array, n: number): [Float64Array, Float64Array] {
 // ------------------------------------------------------------------ general eigenproblem (orthes + hqr2)
 
 function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float64Array] {
+  const g = wasmGenEig(A, n);
+  if (g === "noconv") linalgError("Eigenvalues did not converge");
+  if (g) {
+    const V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => g.W[j * n + i]));
+    return eigNormalize(n, Array.from(g.d), Array.from(g.e), V);
+  }
   const H: number[][] = [];
   for (let i = 0; i < n; i++) H.push(Array.from(A.subarray(i * n, i * n + n)));
   const V: number[][] = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
@@ -395,7 +429,7 @@ function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float6
     while (l > low) {
       s = Math.abs(H[l - 1][l - 1]) + Math.abs(H[l][l]);
       if (s === 0) s = norm;
-      if (Math.abs(H[l][l - 1]) < eps * s) break;
+      if (Math.abs(H[l][l - 1]) < eps * s || H[l][l - 1] === 0) break; // (JAMA misses the zero matrix)
       l--;
     }
     if (l === N) {
@@ -646,7 +680,11 @@ function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float6
       }
     }
   }
-  // complex eigenvectors: columns (re, im) pairs; normalize each to unit norm as LAPACK
+  return eigNormalize(n, d, e, V);
+}
+
+// complex eigenvectors: columns (re, im) pairs; normalize each to unit norm as LAPACK
+function eigNormalize(n: number, d: number[], e: number[], V: number[][]): [Float64Array, Float64Array, Float64Array] {
   const wr = Float64Array.from(d), wi = Float64Array.from(e);
   const vecs = new Float64Array(2 * n * n); // interleaved complex, row-major
   for (let j = 0; j < n; j++) {
@@ -688,6 +726,9 @@ function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float6
 // bidiagonalization, then implicit shifted QR on the bidiagonal), as JAMA's
 // SingularValueDecomposition (public domain).  Returns U's columns, S, V's columns.
 function gkrSVD(Ain: Float64Array, m: number, n: number): [Float64Array[], Float64Array, Float64Array[]] {
+  const r = wasmSVD(Ain, m, n);
+  if (r === "noconv") linalgError("SVD did not converge");
+  if (r) return r;
   const A: Float64Array[] = [];
   for (let i = 0; i < m; i++) A.push(Ain.slice(i * n, i * n + n));
   const nu = Math.min(m, n);
@@ -808,7 +849,7 @@ function gkrSVD(Ain: Float64Array, m: number, n: number): [Float64Array[], Float
       let f = e[p - 2];
       e[p - 2] = 0;
       for (let j = p - 2; j >= k; j--) {
-        let t = Math.hypot(s[j], f);
+        let t = hypot(s[j], f);
         const cs = s[j] / t, sn = f / t;
         s[j] = t;
         if (j !== k) {
@@ -825,7 +866,7 @@ function gkrSVD(Ain: Float64Array, m: number, n: number): [Float64Array[], Float
       let f = e[k - 1];
       e[k - 1] = 0;
       for (let j = k; j < p; j++) {
-        let t = Math.hypot(s[j], f);
+        let t = hypot(s[j], f);
         const cs = s[j] / t, sn = f / t;
         s[j] = t;
         f = -sn * e[j];
@@ -848,7 +889,7 @@ function gkrSVD(Ain: Float64Array, m: number, n: number): [Float64Array[], Float
       }
       let f = (sk + sp) * (sk - sp) + shift, g = sk * ek;
       for (let j = k; j < p - 1; j++) {
-        let t = Math.hypot(f, g);
+        let t = hypot(f, g);
         let cs = f / t, sn = g / t;
         if (j !== k) e[j - 1] = t;
         f = cs * s[j] + sn * e[j];
@@ -860,7 +901,7 @@ function gkrSVD(Ain: Float64Array, m: number, n: number): [Float64Array[], Float
           V[i][j + 1] = -sn * V[i][j] + cs * V[i][j + 1];
           V[i][j] = t;
         }
-        t = Math.hypot(f, g);
+        t = hypot(f, g);
         cs = f / t;
         sn = g / t;
         s[j] = t;
@@ -921,7 +962,18 @@ function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array
   if (M > N + N / 2) {
     const [Q, R] = qr(T, M, N, false);
     const [Wr, Sr, Vr] = gkrSVD(R, N, N);
-    Wcols = Wr.map((col) => {
+    // U = Q W, by matmul when it pays (the same sums in the same order)
+    const G = gemmBuffers(M, N, N);
+    if (G) {
+      G.a.set(Q);
+      for (let k = 0; k < N; k++) for (let j = 0; j < N; j++) G.b[k * N + j] = Wr[j][k];
+      G.run();
+      Wcols = Wr.map((_, j) => {
+        const u = new Float64Array(M);
+        for (let i = 0, t = j; i < M; i++, t += N) u[i] = G.c[t];
+        return u;
+      });
+    } else Wcols = Wr.map((col) => {
       const u = new Float64Array(M);
       for (let i = 0; i < M; i++) {
         let sum = 0;
@@ -969,6 +1021,7 @@ function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array
 newBuiltinModule("_nplinalg", (m) => {
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
   fn("set_error", (cls: any) => ((globalThis as any).__npLinAlgError = cls, null));
+  fn("wasm", () => wasmKernels());
   fn("det", (a: NDArray) => {
     const [A, r, c] = mat(a);
     if (r !== c) linalgError("Last 2 dimensions of the array must be square");

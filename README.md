@@ -66,7 +66,7 @@ the engines.
 - **Sage mode** (`--sage`): `2^3 == 8`, and `2/3` is an exact rational.
 - **numpy:** the NumPy 2 API in TypeScript (ndarray, ufuncs, random,
   linalg, fft, polynomials), checked against NumPy itself. Printed output and
-  seeded random numbers are byte-identical. matmul and LU run in Rust
+  seeded random numbers are byte-identical. dense linear algebra runs in Rust
   WebAssembly SIMD kernels ([kernels/](kernels)). See [NUMPY.md](NUMPY.md).
 - **Plots and `@interact`:** Sage's `plot`/`point`/... and
   `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
@@ -146,7 +146,7 @@ caveats: [results/engine-exact.md](results/engine-exact.md) and
 | path | contents |
 |---|---|
 | `engine/` | the Rust workspace: engines `modsym` and `ap`; bindings `cli`, `py`, `node`, `wasm`; `bench` |
-| `kernels/` | Rust WebAssembly SIMD kernels (matmul, LU) for the numpy runtime |
+| `kernels/` | Rust WebAssembly SIMD kernels (matmul, LU, QR, eigenproblems, SVD) for the numpy runtime |
 | `results/` | write-ups of every experiment, with numbers |
 | `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |
 | `src/`, `lib/`, `test/`, `target/`, `scripts/`, `web/`, `PLAN.md` | pyjs, the Python front end: compiler, runtime, library, CLI and the browser notebook |
