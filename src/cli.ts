@@ -163,6 +163,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
           }
         }
         const code = guarded(() => R.loader.exec(src + "\n", main, "single", "<stdin>", opts()));
+        flushFiles();
         R.stdout.flush();
         R.stderr.flush();
         if (code !== null && code !== 1) return finish(code);
@@ -289,15 +290,25 @@ async function main() {
     main = mainModule("<stdin>");
     code = guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
   }
+  flushFiles();
   R.stdout.flush();
   R.stderr.flush();
   if (interactive && (code === null || inspect)) {
     main ??= mainModule("<stdin>");
     code = await repl(main, quiet || inspect);
   }
+  flushFiles();
   R.stdout.flush();
   R.stderr.flush();
   process.exitCode = code ?? 0;
+}
+
+// Files written but never closed (no reference counting): write them, as
+// CPython does when it collects them (lib/_pyjs_open.py).
+function flushFiles() {
+  // no Python import here: a program may have replaced __import__
+  const o = R.sysModules.$m.get("_pyjs_open");
+  if (o) guarded(() => R.callObj(getattr(o, "_flush_all"), []));
 }
 
 // `-m name`: find the module's source along sys.path and run it as __main__.

@@ -715,6 +715,7 @@ newBuiltinModule("os", (m) => {
     fs.mkdirSync(p, { recursive: true });
     return null;
   });
+  m.makedirs.$sig = { args: ["name", "mode", "exist_ok"], posonly: 0, vararg: null, kwonly: [], kwarg: null };
   wrap("remove", (p: string) => (fs.unlinkSync(p), null));
   wrap("unlink", (p: string) => (fs.unlinkSync(p), null));
   wrap("rmdir", (p: string) => (fs.rmdirSync(p), null));

@@ -1,7 +1,22 @@
-"""open() for the pyjs runtime: whole-file reads, writes on flush/close."""
+"""open() for the pyjs runtime: whole-file reads, writes on flush/close.
+
+Without reference counting a file object is not closed when the last
+reference goes (`open(f, "w").write(s)`), so files with unwritten data are
+remembered and _flush_all() writes them: after each notebook cell and when a
+program ends."""
 
 import io
 import _fs
+
+_unwritten = {}
+
+
+def _flush_all():
+    for f in list(_unwritten.values()):
+        try:
+            f.flush()
+        except Exception:
+            _unwritten.pop(id(f), None)
 
 
 class _Mixin:
@@ -20,11 +35,13 @@ class _Mixin:
             if self._append:
                 self._reset()
             self._dirty = False
+        _unwritten.pop(id(self), None)
 
     def write(self, s):
         if "r" in self.mode and "+" not in self.mode:
             raise io.UnsupportedOperation("not writable")
         self._dirty = True
+        _unwritten[id(self)] = self
         return super().write(s)
 
     def close(self):
