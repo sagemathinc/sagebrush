@@ -26,7 +26,14 @@ const ev = async (expression) => { const r = await send("Runtime.evaluate", { ex
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(200); } throw new Error("timeout: " + expr); };
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
 const open = async (path) => { await send("Page.navigate", { url: base + path }); await sleep(300); await until("document.readyState === 'complete'"); };
-const text = () => ev("document.querySelector('main').innerText");
+// the page's text with each formula as its TeX source (KaTeX's annotation);
+// a TeX command that lost its backslash (a JS string escape) fails the test
+const text = async () => {
+  const t = await ev("(() => { const m = document.querySelector('main').cloneNode(true); for (const k of m.querySelectorAll('.katex')) k.replaceWith(' $' + (k.querySelector('annotation')?.textContent ?? '?') + '$ '); return m.innerText; })()");
+  const bad = /(^|[^\\a-zA-Z])(mathbb|operatorname|Gamma|parallel|oplus|sqrt|alpha|mathrm|tfrac)\b/.exec(t.match(/\$[^$]*\$/g)?.join(" ") ?? "");
+  if (bad) ok(false, `TeX command without its backslash: ${bad[2]}`);
+  return t;
+};
 async function shot(name) {
   if (!shots) return;
   const r = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
@@ -42,6 +49,7 @@ try {
   await shot("home");
 
   await open("/atlas/mf/389.2.a");
+  ok(/Recompute in your browser \((0\.\d s|about \d+ s)\)/.test(await ev("document.querySelector('[data-verify]').textContent")), "the Recompute button shows the predicted time: " + (await ev("document.querySelector('[data-verify]').textContent")));
   t = await text();
   ok(/389\.2\.a\.e/.test(t) && /Newforms/.test(t) && /Decomposition of the old subspace/.test(t), "newspace 389.2.a: orbits, old space");
   await shot("space-389");
@@ -52,7 +60,7 @@ try {
 
   await open("/atlas/mf/389.2.a.a");
   t = await text();
-  ok(/q − 2q2 − 2q3 \+ 2q4 − 3q5/.test(t.replace(/\s+/g, " ")) && /389a1/.test(t) && /rank 2/.test(t) && /−1/.test(t), "389.2.a.a: q-expansion, curve 389a1 of rank 2");
+  ok(/q - 2q\^\{2\} - 2q\^\{3\} \+ 2q\^\{4\} - 3q\^\{5\}/.test(t) && /389a1/.test(t) && /rank 2/.test(t), "389.2.a.a: q-expansion, curve 389a1 of rank 2");
   ok(/even analytic rank/.test(t), "389.2.a.a: sign +1, even analytic rank");
   await shot("orbit-389a");
   await ev("document.querySelector('[data-st]').click()");
@@ -60,23 +68,31 @@ try {
   ok(/78,49\d primes p < 10⁶/.test(await ev("document.querySelector('#st-status').textContent")), "Sato-Tate from a_p, p < 10^6, computed in the page: " + (await ev("document.querySelector('#st-status').textContent")));
 
   await open("/atlas/mf/27.2.a.a");
-  ok(/complex multiplication by ℚ\(√−3\)/.test(await text()), "27.2.a.a: CM by Q(sqrt -3)");
+  ok(/complex multiplication by +\$\\mathbb\{Q\}\(\\sqrt\{-3\}\)\$/.test(await text()), "27.2.a.a: CM by Q(sqrt -3)");
   await open("/atlas/mf/23.2.a.a");
   t = await text();
-  ok(/x2 \+ x − 1/.test(t.replace(/\s+/g, " ")) && /ℚ\(√5\)/.test(t), "23.2.a.a: coefficient field Q(sqrt 5), x^2 + x - 1");
+  ok(/x\^\{2\} \+ x - 1/.test(t) && /\\mathbb\{Q\}\(\\sqrt\{5\}\)/.test(t), "23.2.a.a: coefficient field Q(sqrt 5), x^2 + x - 1");
   await open("/atlas/mf/1.12.a.a");
-  ok(/q − 24q2 \+ 252q3 − 1472q4/.test((await text()).replace(/\s+/g, " ")), "1.12.a.a: Ramanujan's Delta");
+  ok(/q - 24q\^\{2\} \+ 252q\^\{3\} - 1472q\^\{4\}/.test(await text()), "1.12.a.a: Ramanujan's Delta");
 
   await open("/atlas/mf/1.24.a");
   await until("/Newforms/.test(document.querySelector('main').innerText) || /Could not/.test(document.querySelector('main').innerText)", 180000);
   t = await text();
   ok(/1\.24\.a\.a/.test(t) && /computed in your browser/.test(t), "1.24.a computed in the browser: " + (t.match(/Computed in your browser[^:]*in [\d.]+ s/) ?? [""])[0]);
   await shot("space-1-24");
+  ok(/cost model predicted/.test(t), "1.24.a: the computed page shows the cost model's prediction: " + (t.match(/in [\d.]+ s \(the cost model predicted [^)]*\)/) ?? [""])[0]);
   await open("/atlas/mf/1.24.a.a");
   await until("/Trace form/.test(document.querySelector('main').innerText)", 60000);
-  t = (await text()).replace(/\s+/g, " ");
-  ok(/2q \+ 1080q2 \+ 339480q3/.test(t), "1.24.a.a from this tab's computation: trace form 2q + 1080q^2 + 339480q^3 + ...");
+  t = await text();
+  ok(/2q \+ 1080q\^\{2\} \+ 339480q\^\{3\}/.test(t), "1.24.a.a from this tab's computation: trace form 2q + 1080q^2 + 339480q^3 + ...");
 
+  await open("/atlas/about");
+  t = await text();
+  ok(/How long will it take\?/.test(t) && /Kept out of the fit: \d+ spaces: \d+% within a factor 1\.5, \d+% within 2/.test(t) && (await ev("document.querySelectorAll('#main svg circle').length")) > 1000, "About: the cost model, its accuracy and " + (await ev("document.querySelectorAll('#main svg circle').length")) + " points");
+  await ev("document.getElementById('cost').scrollIntoView()");
+  await shot("about");
+  const est = await ev("atlas.call({ fn: 'estimate_newforms', n: 5077, k: 2, bound: 1000 })");
+  ok(est.seconds > 1 && est.seconds_low < est.seconds && est.seconds < est.seconds_high && est.bytes > 1e6, `estimate for 5077.2.a: ${est.seconds.toFixed(1)} s (${est.seconds_low.toFixed(1)}-${est.seconds_high.toFixed(1)}), ${(est.bytes / 1e6).toFixed(1)} MB`);
   await open("/atlas/mf/?weight=2&level=1-100&dim=1&rank=1");
   t = await text();
   ok(/37\.2\.a\.a/.test(t) && /orbits?;/.test(t), "search: rank-1 curves of conductor <= 100: " + (t.match(/\d+ orbits?/) ?? [""])[0]);

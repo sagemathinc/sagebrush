@@ -17,7 +17,7 @@
 
 use crate::dirichlet::DirichletGroup;
 use crate::exact::is_prime;
-use crate::general::{heilbronn_merel, mul, powmod, primes_one_mod, root_of_unity, Character, GeneralSpace};
+use crate::general::{heilbronn_for, mul, powmod, primes_one_mod, root_of_unity, Character, GeneralSpace};
 use crate::general_exact::{crt, invert_mod};
 use crate::linalg;
 use crate::newspace::{deg, levels, new_poly_mod, pdivrem, pgcd, pmul, Level, NewspaceOrbits};
@@ -25,20 +25,8 @@ use crate::p1::gcd;
 use crate::par;
 use num_bigint::{BigInt, BigUint};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
 
 /// Merel's matrices for T_p, cached across spaces.
-fn merel(p: u64) -> Arc<Vec<[i64; 4]>> {
-    static CACHE: OnceLock<Mutex<HashMap<u64, Arc<Vec<[i64; 4]>>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(v) = cache.lock().unwrap().get(&p) {
-        return v.clone();
-    }
-    let v = Arc::new(heilbronn_merel(p as i64));
-    cache.lock().unwrap().insert(p, v.clone());
-    v
-}
-
 fn mulmod_poly(a: &[u64], b: &[u64], u: &[u64], p: u64) -> Vec<u64> {
     let mut r = pdivrem(&pmul(a, b, p), u, p).1;
     r.resize(deg(u).max(1), 0);
@@ -202,7 +190,9 @@ fn traces_mod(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, lv: &[Lev
     // Manin symbols x_t only.
     let primes: Vec<u64> = (2..=bound as u64).filter(|&p| is_prime(p)).collect();
     let per_prime = par::map_slice(&primes, |&p| {
-        let hs = merel(p);
+        // generated per prime, not kept: Cremona's are cheap to make, and
+        // all of them for p <= 1000 would take tens of megabytes
+        let hs = heilbronn_for(p, n);
         let mut images: HashMap<usize, Vec<(u32, u64)>> = HashMap::new();
         setups.iter().map(|st| {
             let img = images.entry(st.t).or_insert_with(|| sp.hecke_image(&hs, sp.basis_generator(st.t)));
@@ -261,6 +251,7 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
     let e_top = DirichletGroup::new(n).exponent.max(1);
     let rel_deg: Vec<usize> = res.dims.iter().map(|&dd| dd / phi).collect();
     let qs: Vec<u64> = res.ops.iter().map(|o| o.0).collect();
+    let t0 = crate::now();
     let lv = levels(n, k, &eps, &units, &qs)?;
     // |tr a_n| <= dim sigma0(n) n^((k-1)/2).
     let mut need = BigUint::from(0u32);
@@ -309,6 +300,9 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
         }
         residues.push((ell, sum.into_iter().flatten().map(|x| vec![x]).collect()));
         modulus *= ell;
+    }
+    if std::env::var("SAGEBRUSH_TIMING").is_ok() {
+        eprintln!(r#"{{"n":{},"k":{},"bound":{},"traces":{:.4},"trace_primes":{},"orbits":{}}}"#, n, k, bound, crate::elapsed_ms(t0, crate::now()) / 1e3, residues.len(), res.orbits.len());
     }
     let total = res.orbits.len() * bound;
     let flat: Vec<BigInt> = crt(&residues, total - 1, 1).into_iter().map(|c| c[0].clone()).collect();
