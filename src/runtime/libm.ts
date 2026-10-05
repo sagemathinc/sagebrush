@@ -8,7 +8,10 @@
 // so that results agree with NumPy's random distributions (which call it)
 // bit for bit.  `fma` selects the variant glibc picks on CPUs with FMA.
 import { LN2HI, LN2LO, POLY1 as B, POLY as A, TAB, TAB2 } from "./log_data";
-const gv = new DataView(new ArrayBuffer(8));
+// bit access through aliased typed arrays (little-endian: [1] is the high word)
+const gf = new Float64Array(1), gu = new Uint32Array(gf.buffer);
+const POW2L = new Float64Array(2200); // 2^(j - 1100)
+for (let j = 0; j < 2200; j++) POW2L[j] = 2 ** (j - 1100);
 export function glibcLog(x: number, fma = true): number {
   if (x >= 0.9375 && x < 1.064697265625) {
     if (x === 1) return 0;
@@ -24,23 +27,22 @@ export function glibcLog(x: number, fma = true): number {
     y += hi;
     return y;
   }
-  gv.setFloat64(0, x);
-  let hiw = gv.getUint32(0);
+  gf[0] = x;
+  let hiw = gu[1];
   const top = hiw >>> 16;
   let kAdj = 0;
   if (top - 0x0010 >= 0x7ff0 - 0x0010 || top < 0x0010) {
     if (x === 0) return -Infinity;
     if (x === Infinity) return x;
     if (!(x > 0)) return NaN;
-    gv.setFloat64(0, x * 4503599627370496); // subnormal: scale by 2^52
-    hiw = gv.getUint32(0);
+    gf[0] = x * 4503599627370496; // subnormal: scale by 2^52
+    hiw = gu[1];
     kAdj = -52;
   }
   const tmpHi = (hiw - 0x3fe60000) | 0;
   const i = (tmpHi >>> 13) & 127;
   const k = (tmpHi >> 20) + kAdj;
-  gv.setUint32(0, (hiw - (tmpHi & 0xfff00000)) >>> 0);
-  const z = gv.getFloat64(0);
+  const z = (kAdj ? x * 4503599627370496 : x) * POW2L[1100 - k + kAdj]; // x / 2^k, exactly
   const invc = TAB[2 * i], logc = TAB[2 * i + 1];
   let r: number;
   if (fma) {
@@ -76,15 +78,45 @@ import { EXP_POLY, EXP_TAB } from "./exp_data";
 const INVLN2N = 1.4426950408889634 * 128, NEGLN2HIN = -0.005415212348111709, NEGLN2LON = -1.2864023111638346e-14;
 const SHIFT = 6755399441055744; // 0x1.8p52
 const [C2, C3, C4, C5] = EXP_POLY;
-const ev = new DataView(new ArrayBuffer(8));
+const ef = new Float64Array(1), eu = new Uint32Array(ef.buffer);
 function bitsToDouble(hi: number, lo: number): number {
-  ev.setUint32(0, hi >>> 0);
-  ev.setUint32(4, lo >>> 0);
-  return ev.getFloat64(0);
+  eu[1] = hi;
+  eu[0] = lo;
+  return ef[0];
 }
+// The tables as doubles: tail[i], and base[i] = 2^(i/128), so that glibc's
+// scale = asdouble(T[2i+1] + (k << 45)) is base[i] * 2^((k - i) / 128),
+// an exact product while in the normal range (no bit manipulation needed).
+const TAIL = new Float64Array(128), BASE = new Float64Array(128);
+for (let i = 0; i < 128; i++) {
+  TAIL[i] = bitsToDouble(EXP_TAB[4 * i], EXP_TAB[4 * i + 1]);
+  BASE[i] = bitsToDouble((EXP_TAB[4 * i + 2] + (i << 13)) >>> 0, EXP_TAB[4 * i + 3]);
+}
+const POW2 = new Float64Array(2200); // 2^(j - 1100)
+for (let j = 0; j < 2200; j++) POW2[j] = 2 ** (j - 1100);
+
 export function glibcExp(x: number): number {
-  ev.setFloat64(0, x);
-  const hiw = ev.getUint32(0);
+  const ax = Math.abs(x);
+  if (!(ax >= 5.551115123125783e-17 && ax < 512)) return glibcExpSlow(x);
+  const z = INVLN2N * x;
+  const kd = z + SHIFT - SHIFT; // round to integer, as glibc
+  const r = x + kd * NEGLN2HIN + kd * NEGLN2LON;
+  const i = kd & 127;
+  const scale = BASE[i] * POW2[(kd - i) / 128 + 1100];
+  const r2 = r * r;
+  const tmp = TAIL[i] + r + r2 * (C2 + r * C3) + r2 * r2 * (C4 + r * C5);
+  // fma(scale, tmp, scale): the product exactly (Dekker), then one rounding
+  const p = scale * tmp;
+  const ca = 134217729 * scale, ah = ca - (ca - scale), al = scale - ah;
+  const cb = 134217729 * tmp, bh = cb - (cb - tmp), bl = tmp - bh;
+  const e = ah * bh - p + ah * bl + al * bh + al * bl;
+  const sum = p + scale, bb = sum - p, t = p - (sum - bb) + (scale - bb);
+  return sum + (t + e);
+}
+
+function glibcExpSlow(x: number): number {
+  ef[0] = x;
+  const hiw = eu[1];
   let abstop = (hiw >>> 20) & 0x7ff;
   if (((abstop - 0x3c9) >>> 0) >= 0x408 - 0x3c9) {
     if (((abstop - 0x3c9) | 0) < 0) return 1.0 + x; // tiny x (and 0)
@@ -105,7 +137,7 @@ export function glibcExp(x: number): number {
   // sbits = T[idx + 1] + (ki << 45): only the high word changes
   const sHi = (EXP_TAB[4 * i + 2] + (k << 13)) >>> 0, sLo = EXP_TAB[4 * i + 3];
   const r2 = r * r;
-  const tmp = fma(r2 * r2, fma(r, C5, C4), fma(r2, fma(r, C3, C2), tail + r));
+  const tmp = tail + r + r2 * (C2 + r * C3) + r2 * r2 * (C4 + r * C5);
   if (abstop === 0) {
     // specialcase: the exponent of scale may have overflowed or underflowed
     if ((k & 0x80000000) === 0 && k >= 0) {

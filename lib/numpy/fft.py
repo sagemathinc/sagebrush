@@ -32,11 +32,13 @@ def _resize(a, n, axis):
 
 
 def _raw(a, n, axis, inverse, norm):
-    a = _np.asarray(a)
-    a = _resize(_np.asarray(a, _np.complex128), n, axis)
+    a0 = _np.asarray(a)
+    a = _resize(_np.asarray(a0, _np.complex128), n, axis)
     if a.shape[axis] < 1:
         raise ValueError("Invalid number of FFT data points (%d) specified." % a.shape[axis])
-    x = _np.ascontiguousarray(_np.moveaxis(a, axis, -1)).copy()
+    x = _np.moveaxis(a, axis, -1)
+    if x is a0 or a is a0 or axis % a.ndim != a.ndim - 1:
+        x = x.copy()  # never transform the caller's array in place
     N = x.shape[-1]
     _npfft.rows(x, x.size // N if N else 0, N, inverse)
     s = _scale(norm, N, inverse)
@@ -57,6 +59,18 @@ def rfft(a, n=None, axis=-1, norm=None, out=None):
     a = _np.asarray(a)
     if a.dtype.kind == "c":
         a = a.real
+    a = _resize(_np.asarray(a, _np.float64), n, axis)
+    N = a.shape[axis]
+    if N >= 2 and N % 2 == 0:
+        x = _np.moveaxis(a, axis, -1)
+        if axis % a.ndim != a.ndim - 1:
+            x = x.copy()  # rfft_rows reads contiguous rows (and never writes them)
+        res = _np.zeros(x.shape[:-1] + (N // 2 + 1,), _np.complex128)
+        _npfft.rfft_rows(x, x.size // N, N, res)
+        s = _scale(norm, N, False)
+        if s != 1.0:
+            res = res * s
+        return _np.moveaxis(res, -1, axis)
     r = _raw(a, n, axis, False, norm)
     m = r.shape[axis] // 2 + 1
     idx = [slice(None)] * r.ndim

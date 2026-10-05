@@ -489,6 +489,14 @@ export function fromPy(x: any, dtype: any = null): NDArray {
 
 function pyScalarOf(dt: DType, data: any, p: number): any {
   const ctor = scalarCtors[dt.name];
+  // NumPy's float and int scalar types box the value like any float/int
+  // subclass instance: construct them directly (much cheaper than a call)
+  if (ctor !== undefined && !dt.cplx && ctor.$ctor !== undefined) {
+    const o = new ctor.$ctor();
+    const x = data[p];
+    o.$v = dt.kind === "f" ? O.mkfloat(x) : dt.kind === "b" ? (x !== 0 ? 1 : 0) : intOf(x);
+    return o;
+  }
   let v: any;
   if (dt.cplx) v = new PyComplex(data[2 * p], data[2 * p + 1]);
   else if (dt.kind === "b") v = data[p] !== 0;
@@ -683,8 +691,16 @@ function getitem(a: NDArray, key: any): any {
   }
   // a[mask] with a boolean mask of a's shape
   if (key instanceof NDArray && key.dt.kind === "b" && key.ndim === a.ndim && key.shape.every((v, i) => v === a.shape[i]) && !a.dt.cplx) {
-    const vals: number[] = [];
     const ad = a.data, kd = key.data;
+    if (a.isC() && key.isC()) {
+      const n = a.size, ao = a.offset, ko = key.offset;
+      let cnt = 0;
+      for (let i = 0; i < n; i++) if (kd[ko + i]) cnt++;
+      const res = empty([cnt], a.dt), rd = res.data;
+      for (let i = 0, j = 0; i < n; i++) if (kd[ko + i]) rd[j++] = ad[ao + i];
+      return res;
+    }
+    const vals: number[] = [];
     loop2(a.shape, a.strides, a.offset, key.strides, key.offset, (p, q) => {
       if (kd[q]) vals.push(ad[p]);
     });
@@ -875,6 +891,32 @@ function fastKernel(op: string, kind: string): any {
 }
 const isFlat = (a: NDArray) => a.isC();
 
+// The same operations over arbitrary strides (broadcasting, transposes):
+// an odometer over the outer axes around a tight inner loop.
+const strided = new Map<string, any>();
+function stridedKernel(op: string): any {
+  let k = strided.get(op);
+  if (k === undefined) {
+    k = new Function("ad", "ao", "as", "bd", "bo", "bs", "od", "shape", `
+      const nd = shape.length, last = nd - 1, L = shape[last], ia = as[last], ib = bs[last];
+      const idx = new Array(nd).fill(0);
+      let pa = ao, pb = bo, o = 0;
+      for (;;) {
+        let x = pa, y = pb;
+        for (let i = 0; i < L; i++, x += ia, y += ib) od[o++] = ${FAST_EXPR[op]("ad[x]", "bd[y]")};
+        let d = nd - 2;
+        for (; d >= 0; d--) {
+          pa += as[d]; pb += bs[d];
+          if (++idx[d] < shape[d]) break;
+          pa -= as[d] * shape[d]; pb -= bs[d] * shape[d]; idx[d] = 0;
+        }
+        if (d < 0) return;
+      }`);
+    strided.set(op, k);
+  }
+  return k;
+}
+
 export function binary(op: string, x: any, y: any, out: NDArray | null = null): any {
   const spec = BIN[op];
   const A = operand(x), B = operand(y);
@@ -902,6 +944,11 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null): 
       const av = aScalar ? a.data[a.offset] : 0, bv = bScalar ? b.data[b.offset] : 0;
       // operands of different storage types (int8 + float64 ...) read fine as numbers
       fastKernel(op, kind)(a.data, a.offset, av, b.data, b.offset, bv, res.data, n);
+      return res;
+    }
+    if (shape.length >= 1 && n > 0) {
+      const res = empty(shape, rt);
+      stridedKernel(op)(a.data, a.offset, bstrides(a, shape), b.data, b.offset, bstrides(b, shape), res.data, shape);
       return res;
     }
   }
@@ -989,6 +1036,39 @@ function roundHalfEven(x: number): number {
   return Math.abs(x % 1) === 0.5 && r % 2 !== 0 ? r - 1 : r;
 }
 
+// Tight loops for unary operations on real data: contiguous or strided.
+const UN_EXPR: Record<string, string> = {
+  negative: "-v", positive: "v", absolute: "Math.abs(v)", square: "v * v", sqrt: "Math.sqrt(v)", cbrt: "Math.cbrt(v)",
+  exp: "EXP(v)", exp2: "2 ** v", expm1: "Math.expm1(v)", log: "LOG(v)", log2: "Math.log2(v)", log10: "Math.log10(v)",
+  log1p: "Math.log1p(v)", sin: "Math.sin(v)", cos: "Math.cos(v)", tan: "Math.tan(v)", arcsin: "Math.asin(v)",
+  arccos: "Math.acos(v)", arctan: "Math.atan(v)", sinh: "Math.sinh(v)", cosh: "Math.cosh(v)", tanh: "Math.tanh(v)",
+  arcsinh: "Math.asinh(v)", arccosh: "Math.acosh(v)", arctanh: "Math.atanh(v)", floor: "Math.floor(v)", ceil: "Math.ceil(v)",
+  trunc: "Math.trunc(v)", isnan: "+(v !== v)", isfinite: "+(v - v === 0)", isinf: "+(v === Infinity || v === -Infinity)",
+  deg2rad: "v * (Math.PI / 180)", rad2deg: "v * (180 / Math.PI)", logical_not: "+(v === 0)",
+};
+const unKernels = new Map<string, any>();
+function unaryKernel(op: string, contiguous: boolean): any {
+  const key = op + contiguous;
+  let k = unKernels.get(key);
+  if (k === undefined) {
+    const body = contiguous
+      ? `for (let i = 0; i < n; i++) { const v = ad[ao + i]; od[i] = ${UN_EXPR[op]}; }`
+      : `const nd = shape.length, last = nd - 1, L = shape[last], s = st[last];
+         const idx = new Array(nd).fill(0);
+         let p = ao, o = 0;
+         for (;;) {
+           let x = p;
+           for (let i = 0; i < L; i++, x += s) { const v = ad[x]; od[o++] = ${UN_EXPR[op]}; }
+           let d = nd - 2;
+           for (; d >= 0; d--) { p += st[d]; if (++idx[d] < shape[d]) break; p -= st[d] * shape[d]; idx[d] = 0; }
+           if (d < 0) return;
+         }`;
+    k = new Function("EXP", "LOG", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog);
+    unKernels.set(key, k);
+  }
+  return k;
+}
+
 export function unary(op: string, x: any): any {
   const spec = UN[op];
   const a = operand(x).arr;
@@ -1023,6 +1103,10 @@ export function unary(op: string, x: any): any {
         od[2 * k + 1] = r[1];
       } else od[k] = r[0];
     });
+    return out;
+  }
+  if (UN_EXPR[op] && a.ndim > 0 && a.size > 0) {
+    unaryKernel(op, a.isC())(ad, a.offset, a.strides, a.shape, od, a.size);
     return out;
   }
   const f = op === "reciprocal" && rt.isInt ? (x: number) => (x === 0 ? 0 : Math.trunc(1 / x)) : spec.f;
@@ -1078,6 +1162,20 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   const rn = prod(rshape);
   const d = a.data;
   // pairwise only when the reduction is over the last axis (as NumPy's inner loop)
+  // reducing the leading axes of a C-contiguous array: accumulate whole rows
+  // (NumPy adds slice by slice in this case, so the order is NumPy's too)
+  if (inner && a.isC() && red.length < nd && red.every((x, i) => x === i) && !keepdims) {
+    const rows = rn, w = prod(outShape);
+    const od = out.data;
+    const acc = new Float64Array(w);
+    for (let j = 0; j < w; j++) acc[j] = d[a.offset + j];
+    for (let i = 1; i < rows; i++) {
+      const base = a.offset + i * w;
+      for (let j = 0; j < w; j++) acc[j] += d[base + j];
+    }
+    for (let j = 0; j < w; j++) od[j] = castNum(rt, init + acc[j]);
+    return out;
+  }
   const usePairwise = inner && red.length >= 1 && red[red.length - 1] === nd - 1 && (red.length === 1 || a.isC());
   loop1(outShape, kstr, a.offset, (base, k) => {
     let acc = init;
@@ -1188,6 +1286,12 @@ function moveAxisToEnd(a: NDArray, ax: number): NDArray {
 
 function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray {
   if (axis === null || axis === undefined) a = ravel(a);
+  if (a.ndim === 1 && a.isC() && (dtype === null || dtype === undefined) && a.dt.kind === "f") {
+    const out = empty(a.shape, a.dt), d = a.data, od = out.data, n = a.size;
+    let acc = isProd ? 1 : 0;
+    for (let i = 0; i < n; i++) od[i] = acc = isProd ? acc * d[a.offset + i] : acc + d[a.offset + i];
+    return out;
+  }
   const ax = axis === null || axis === undefined ? 0 : normAxis(Number(Obj.unbox(axis)), a.ndim);
   const rt = dtype !== null && dtype !== undefined ? toDtype(dtype) : sumType(a.dt);
   const out = empty(a.shape, rt);
@@ -1256,18 +1360,59 @@ function matmul(x: any, y: any): any {
   const Bb = bstrides(new NDArray(B.dt, B.data, B.shape.slice(0, -2), B.strides.slice(0, -2), B.offset), batch);
   const as0 = A.strides[A.ndim - 2], as1 = A.strides[A.ndim - 1], bs0 = B.strides[B.ndim - 2], bs1 = B.strides[B.ndim - 1];
   const ad = A.data, bd = B.data, od = out.data;
-  const row = new Float64Array(p);
+  // matrix times vector: dot products
+  if (p === 1) {
+    loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
+      for (let i = 0; i < n; i++) {
+        let sum = 0;
+        for (let k = 0, x = pa + i * as0, y = pb; k < m; k++, x += as1, y += bs0) sum += ad[x] * bd[y];
+        od[bk * n + i] = castNum(ct, sum);
+      }
+    });
+    return squeezeMatmul(out, a, b, ct);
+  }
+  // Four rows of the result at a time: each element of B is loaded once per
+  // four multiply-adds.  Each output element still sums over k in order.
+  const r0 = new Float64Array(p), r1 = new Float64Array(p), r2 = new Float64Array(p), r3 = new Float64Array(p);
+  const brow = new Float64Array(p);
+  const store = (ob: number, i: number, r: Float64Array) => {
+    for (let j = 0; j < p; j++) od[ob + i * p + j] = castNum(ct, r[j]);
+  };
   loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
     const ob = bk * n * p;
-    for (let i = 0; i < n; i++) {
-      row.fill(0);
+    let i = 0;
+    for (; i + 3 < n; i += 4) {
+      r0.fill(0);
+      r1.fill(0);
+      r2.fill(0);
+      r3.fill(0);
+      for (let k = 0; k < m; k++) {
+        const a0 = ad[pa + i * as0 + k * as1], a1 = ad[pa + (i + 1) * as0 + k * as1];
+        const a2 = ad[pa + (i + 2) * as0 + k * as1], a3 = ad[pa + (i + 3) * as0 + k * as1];
+        const bk0 = pb + k * bs0;
+        if (bs1 === 1) brow.set(bd.subarray(bk0, bk0 + p));
+        else for (let j = 0; j < p; j++) brow[j] = bd[bk0 + j * bs1];
+        for (let j = 0; j < p; j++) {
+          const b = brow[j];
+          r0[j] += a0 * b;
+          r1[j] += a1 * b;
+          r2[j] += a2 * b;
+          r3[j] += a3 * b;
+        }
+      }
+      store(ob, i, r0);
+      store(ob, i + 1, r1);
+      store(ob, i + 2, r2);
+      store(ob, i + 3, r3);
+    }
+    for (; i < n; i++) {
+      r0.fill(0);
       for (let k = 0; k < m; k++) {
         const aik = ad[pa + i * as0 + k * as1];
-        if (aik === 0) continue;
         const bk0 = pb + k * bs0;
-        for (let j = 0; j < p; j++) row[j] += aik * bd[bk0 + j * bs1];
+        for (let j = 0; j < p; j++) r0[j] += aik * bd[bk0 + j * bs1];
       }
-      for (let j = 0; j < p; j++) od[ob + i * p + j] = castNum(ct, row[j]);
+      store(ob, i, r0);
     }
   });
   return squeezeMatmul(out, a, b, ct);
@@ -1523,7 +1668,42 @@ export function arrayStr(a: NDArray): string {
 
 // ------------------------------------------------------------------ sorting
 
+// argsort of a 1-D integer array of moderate size and range: pack value and
+// index into one double (v * 2^21 + i) and use the native numeric sort; stable.
+function argsortInts(a: NDArray): NDArray | null {
+  const n = a.size;
+  if (a.ndim !== 1 || !a.dt.isInt && a.dt.kind !== "b" || n >= 1 << 21) return null;
+  const keys = new Float64Array(n), d = a.data, st = a.strides[0];
+  for (let i = 0, p = a.offset; i < n; i++, p += st) {
+    const v = d[p];
+    if (v < -(2 ** 31) || v >= 2 ** 31) return null;
+    keys[i] = v * 2097152 + i;
+  }
+  keys.sort();
+  const out = empty([n], D.int64);
+  for (let i = 0; i < n; i++) {
+    const k = keys[i];
+    out.data[i] = k - Math.floor(k / 2097152) * 2097152;
+  }
+  return out;
+}
+
 function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
+  if (arg && a.ndim === 1) {
+    const r = argsortInts(a);
+    if (r) return r;
+  }
+  if (!arg && !a.dt.cplx) {
+    // the typed array's own numeric sort (NaN last, as NumPy) on each row
+    const t = ascontig(moveAxisToEnd(a, axis));
+    const out = copy(t);
+    const n = t.shape[t.ndim - 1];
+    if (n > 1) for (let base = 0; base < out.size; base += n) out.data.subarray(base, base + n).sort();
+    const order = a.shape.map((_, i) => i).filter((i) => i !== axis);
+    const inv = new Array(a.ndim);
+    [...order, axis].forEach((src, dst) => (inv[src] = dst));
+    return ascontig(transpose(out, inv));
+  }
   const t = moveAxisToEnd(a, axis);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1];
   const out = empty(arg ? t.shape : t.shape, arg ? D.int64 : a.dt);
@@ -1782,6 +1962,24 @@ newBuiltinModule("_numpy", (m) => {
     return x instanceof NDArray ? r : r.ndim === 0 ? pyScalarOf(r.dt, r.data, 0) : r;
   });
   fn("binary", (op: string, x: any, y: any) => {
+    // two real scalars (np.float64(1.5) + 2 ...): compute directly
+    if (!(x instanceof NDArray) && !(y instanceof NDArray)) {
+      const wa = pyScalar(x), wb = pyScalar(y);
+      const spec = BIN[op];
+      if (wa && wb && wa.kind !== "c" && wb.kind !== "c" && spec && !spec.noBool) {
+        const A = { arr: { dt: wa.dt ?? scalarDtype(wa) } as NDArray, weak: wa.dt ? null : wa };
+        const B = { arr: { dt: wb.dt ?? scalarDtype(wb) } as NDArray, weak: wb.dt ? null : wb };
+        let ct = resultType(A, B);
+        if (ct.kind === "f" || (ct.isInt && ct.ctor === Float64Array && op !== "power" && op !== "multiply" && op !== "left_shift")) {
+          for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkPyInt(ct, w.v);
+          if (spec.out === "float" && ct.isInt) ct = D.float64;
+          const rt = spec.out === "bool" ? D.bool : ct;
+          const f = ct.isInt ? (spec.int ?? spec.f) : spec.f;
+          const v = castNum(rt, f(wa.v, wb.v));
+          return pyScalarOf(rt, [v], 0);
+        }
+      }
+    }
     const r = binary(op, x, y);
     return x instanceof NDArray || y instanceof NDArray || Array.isArray(x) || Array.isArray(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
@@ -1852,6 +2050,40 @@ newBuiltinModule("_numpy", (m) => {
       r = r ? promote(r, dt) : dt;
     }
     return r ?? D.float64;
+  });
+  // sorted distinct values of a real array (np.unique without extras)
+  fn("unique1d", (x: any) => {
+    const a = asarray(x);
+    const s = copy(ravel(a));
+    s.data.sort();
+    const d = s.data, n = d.length;
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const v = d[i];
+      if (m === 0 || !(v === d[m - 1] || (v !== v && d[m - 1] !== d[m - 1]))) d[m++] = v;
+    }
+    const out = empty([m], a.dt);
+    out.data.set(d.subarray(0, m));
+    return out;
+  });
+  // histogram counts with uniform bins, as NumPy (then a correction at the edges)
+  fn("hist_uniform", (x: any, lo: any, hi: any, nb: any, edges: any) => {
+    const a = ascontig(asarray(x, D.float64));
+    const L = toNum(lo), H = toNum(hi), N = Number(nb), e = ascontig(edges).data;
+    const counts = new Float64Array(N);
+    const d = a.data, norm = N / (H - L);
+    for (let i = 0; i < a.size; i++) {
+      const v = d[i];
+      if (!(v >= L && v <= H)) continue;
+      let k = Math.trunc((v - L) * norm);
+      if (k >= N) k = N - 1;
+      if (v < e[k]) k--;
+      else if (k < N - 1 && v >= e[k + 1]) k++;
+      counts[k]++;
+    }
+    const out = empty([N], D.int64);
+    out.data.set(counts);
+    return out;
   });
   fn("dtype_of_scalar", (x: any) => {
     const w = pyScalar(x);
