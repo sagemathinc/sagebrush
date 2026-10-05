@@ -616,9 +616,12 @@ pub fn factor(f: &[BigInt]) -> (BigInt, Vec<(ZPoly, u32)>) {
 /// Yun's square-free decomposition of a primitive f with positive leading
 /// coefficient: [(a_i, i)], f = prod a_i^i, the a_i square-free, coprime.
 pub fn squarefree(f: &[BigInt]) -> Vec<(ZPoly, u32)> {
-    // square-free modulo a prime not dividing lc(f) deg(f): square-free
+    // square-free modulo a prime not dividing lc(f) deg(f): square-free.
+    // Each try is O(n^2), the exact gcd below can take minutes, and a
+    // polynomial with many factors (its discriminant divisible by every
+    // small prime) can need primes past its degree: try 200.
     let lc = f.last().unwrap();
-    for p in small_primes().take(20) {
+    for p in small_primes().take(200) {
         if (lc % BigInt::from(p)).is_zero() || (deg(f) as u64) % p == 0 {
             continue;
         }
