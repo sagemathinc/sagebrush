@@ -1,16 +1,16 @@
 [package]
-name = "sagebrush-kernels"
+name = "sagebrush-kernels-relaxed"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "WebAssembly SIMD kernels (matmul, LU) for sagebrush's numpy"
+description = "sagebrush's exp and log kernels built with relaxed SIMD (hardware fused multiply-add)"
 
 [lib]
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [features]
-# set by kernels/relaxed, which includes src/libm.rs
+default = ["relaxed"]
 relaxed = []
 
 [profile.release]

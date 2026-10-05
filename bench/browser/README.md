@@ -30,15 +30,20 @@ See `last-results.md` for the latest run.
   14.5 ms), `svd` (24 vs 28 ms) and `eig` (6.7 vs 9.3 ms). `solve` is
   close (2.5 vs 1.7 ms).
 - **They are even** on `sort`.
+- **They are close** on `exp` (8.2 vs 7.1 ms; the kernel itself is faster,
+  the rest is allocating the result).
 - **sagebrush is within ~1.3–3×** on random numbers, `sin`, `cumsum`,
   `histogram`, the FFT (`fft` 2^16 3.3 vs 2.0 ms, `rfft` 10^6 25 vs 15 ms,
   from 87 ms before the kernels) and boolean masks.
 - **NumPy compiled to WebAssembly is ahead** on:
-  - `exp`, `polyfit` and broadcasting (3–6×). `lstsq` (and so `polyfit`)
+  - `polyfit` and broadcasting (3–6×). `lstsq` (and so `polyfit`)
     forms Q and U explicitly where LAPACK's `gelsd` does not.
   - elementwise arithmetic on large arrays (`a*2+1`: ~7×). Here every
     result is a fresh 8 MB typed array for the garbage collector to manage,
     where WebAssembly reuses `malloc`'d memory.
 
-**Next:** `lstsq` without explicit Q and U, elementwise loops on pooled
-memory, `exp` and friends in the kernels.
+**Next:** `lstsq` without explicit Q and U, and the cost of allocating
+results: in Chromium, writing a fresh 8 MB typed array costs ~4 ms of page
+faults the first time (0.7 ms into an existing one). `bench/browser/cell.mjs`
+runs one Python cell, or a JavaScript snippet in a worker, in headless
+Chromium.

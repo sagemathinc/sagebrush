@@ -44,20 +44,32 @@ for n in [64, 96, 250, 343, 1331, 2310, 4096, 1009]:
     if n % 2 == 0:
         r = np.fft.rfft(z.real)
         rec(r.real, r.imag)
+edge = [0.0, -0.0, 1.0, -1.0, np.inf, -np.inf, np.nan, 709.7, 709.8, -745.1, -745.2, -708.5, -720.0,
+        5e-324, 1e-310, 2.2e-308, 1.7976931348623157e308, 0.95, 1.0000001, 1.06, 0.9375, 1.064697265625]
+for x in [np.random.randn(3001) * 300, np.random.rand(3001) * 3, 1 + np.random.randn(3001) * 0.03,
+          np.exp(np.random.uniform(-744, 709, 3001)), np.array(edge * 5)]:
+    with np.errstate(all="ignore"):
+        rec(np.exp(x), np.log(x))
 `;
 
-const run = (noWasm: boolean) =>
+const run = (env: Record<string, string>) =>
   execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", program], {
     encoding: "utf8",
     maxBuffer: 1 << 28,
-    env: { ...process.env, SAGEBRUSH_NO_WASM: noWasm ? "1" : "" },
+    env: { ...process.env, SAGEBRUSH_NO_WASM: "", SAGEBRUSH_NO_RELAXED: "", ...env },
   });
 
+// three ways: the relaxed-SIMD exp/log (hardware FMA, where fused), the main
+// module only (software FMA), and no WebAssembly at all
 test("WebAssembly kernels: bit-identical to the JavaScript fallback", () => {
-  const w = run(false), j = run(true);
+  const w = run({}), s = run({ SAGEBRUSH_NO_RELAXED: "1" }), j = run({ SAGEBRUSH_NO_WASM: "1" });
   assert.match(w, /^wasm True\n/);
+  assert.match(s, /^wasm True\n/);
   assert.match(j, /^wasm False\n/);
-  const wl = w.split("\n").slice(1), jl = j.split("\n").slice(1);
+  const wl = w.split("\n").slice(1), sl = s.split("\n").slice(1), jl = j.split("\n").slice(1);
   assert.ok(wl.length > 300);
-  for (let i = 0; i < wl.length; i++) assert.equal(wl[i], jl[i], `line ${i + 2}`);
+  for (let i = 0; i < wl.length; i++) {
+    assert.equal(sl[i], jl[i], `software FMA, line ${i + 2}`);
+    assert.equal(wl[i], jl[i], `relaxed SIMD, line ${i + 2}`);
+  }
 });

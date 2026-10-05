@@ -13,19 +13,30 @@ const gf = new Float64Array(1), gu = new Uint32Array(gf.buffer);
 const POW2L = new Float64Array(2200); // 2^(j - 1100)
 for (let j = 0; j < 2200; j++) POW2L[j] = 2 ** (j - 1100);
 export function glibcLog(x: number, fma = true): number {
+  const fmaE = fmaExact;
   if (x >= 0.9375 && x < 1.064697265625) {
     if (x === 1) return 0;
     const r = x - 1.0, r2 = r * r, r3 = r * r2;
-    let y = r3 * (B[1] + r * B[2] + r2 * B[3] + r3 * (B[4] + r * B[5] + r2 * B[6] + r3 * (B[7] + r * B[8] + r2 * B[9] + r3 * B[10])));
     let w = r * 134217728;
     const rhi = r + w - w, rlo = r - rhi;
     w = rhi * rhi * B[0];
     const hi = r + w;
     let lo = r - hi + w;
-    lo += B[0] * rlo * (rhi + r);
-    y += lo;
-    y += hi;
-    return y;
+    if (!fma) {
+      let y = r3 * (B[1] + r * B[2] + r2 * B[3] + r3 * (B[4] + r * B[5] + r2 * B[6] + r3 * (B[7] + r * B[8] + r2 * B[9] + r3 * B[10])));
+      lo += B[0] * rlo * (rhi + r);
+      y += lo;
+      y += hi;
+      return y;
+    }
+    // with FMA, GCC fuses every product whose only uses are additions,
+    // across statements: the polynomial, lo += B0 rlo (rhi + r), and
+    // y = r3 P + lo (checked against glibc 2.43)
+    const p3 = fmaE(r3, B[10], fmaE(r2, B[9], fmaE(r, B[8], B[7])));
+    const p2 = fmaE(r3, p3, fmaE(r2, B[6], fmaE(r, B[5], B[4])));
+    const P = fmaE(r3, p2, fmaE(r2, B[3], fmaE(r, B[2], B[1])));
+    lo = fmaE(B[0] * rlo, rhi + r, lo);
+    return fmaE(r3, P, lo) + hi;
   }
   gf[0] = x;
   let hiw = gu[1];
@@ -64,8 +75,10 @@ export function glibcLog(x: number, fma = true): number {
 // glibc's exp (ARM optimized-routines math/exp.c, MIT OR Apache-2.0 WITH
 // LLVM-exception, Copyright (c) 2018-2023 Arm Limited), ported line by line.
 // glibc's x86-64 build for FMA CPUs contracts a*b+c into fused
-// multiply-adds; fma() below reproduces that (exactly in all but vanishingly
-// rare double-rounding cases).
+// multiply-adds (the polynomial and the final scale + scale*tmp, but not in
+// specialcase for k < 0; checked against glibc 2.43 on 10^6 inputs);
+// fma() below reproduces that (exactly in all but vanishingly rare
+// double-rounding cases).
 function fma(a: number, b: number, c: number): number {
   const p = a * b;
   const ca = 134217729 * a, ah = ca - (ca - a), al = a - ah;
@@ -74,6 +87,7 @@ function fma(a: number, b: number, c: number): number {
   const s = p + c, bb = s - p, t = p - (s - bb) + (c - bb);
   return s + (t + e);
 }
+const fmaExact = fma;
 import { EXP_POLY, EXP_TAB } from "./exp_data";
 const INVLN2N = 1.4426950408889634 * 128, NEGLN2HIN = -0.005415212348111709, NEGLN2LON = -1.2864023111638346e-14;
 const SHIFT = 6755399441055744; // 0x1.8p52
@@ -104,7 +118,7 @@ export function glibcExp(x: number): number {
   const i = kd & 127;
   const scale = BASE[i] * POW2[(kd - i) / 128 + 1100];
   const r2 = r * r;
-  const tmp = TAIL[i] + r + r2 * (C2 + r * C3) + r2 * r2 * (C4 + r * C5);
+  const tmp = fma(r2 * r2, fma(r, C5, C4), fma(r2, fma(r, C3, C2), TAIL[i] + r));
   // fma(scale, tmp, scale): the product exactly (Dekker), then one rounding
   const p = scale * tmp;
   const ca = 134217729 * scale, ah = ca - (ca - scale), al = scale - ah;
@@ -137,7 +151,7 @@ function glibcExpSlow(x: number): number {
   // sbits = T[idx + 1] + (ki << 45): only the high word changes
   const sHi = (EXP_TAB[4 * i + 2] + (k << 13)) >>> 0, sLo = EXP_TAB[4 * i + 3];
   const r2 = r * r;
-  const tmp = tail + r + r2 * (C2 + r * C3) + r2 * r2 * (C4 + r * C5);
+  const tmp = fma(r2 * r2, fma(r, C5, C4), fma(r2, fma(r, C3, C2), tail + r));
   if (abstop === 0) {
     // specialcase: the exponent of scale may have overflowed or underflowed
     if ((k & 0x80000000) === 0 && k >= 0) {
@@ -158,3 +172,11 @@ function glibcExpSlow(x: number): number {
   const scale = bitsToDouble(sHi, sLo);
   return fma(scale, tmp, scale);
 }
+
+// The tables of glibcExp and glibcLog, packed for the WebAssembly kernels
+// (kernels/src/libm.rs): exp: tail[128], base[128], c2..c5, tbits[128]
+// (doubles whose bits are glibc's T[2i+1]); log: (invc, logc)[128], A[5],
+// B[11], ln2hi, ln2lo.
+const TBITS = Float64Array.from({ length: 128 }, (_, i) => bitsToDouble(EXP_TAB[4 * i + 2], EXP_TAB[4 * i + 3]));
+export const EXP_TABLES = Float64Array.from([...TAIL, ...BASE, C2, C3, C4, C5, ...TBITS]);
+export const LOG_TABLES = Float64Array.from([...TAB, ...A, ...B, LN2HI, LN2LO]);

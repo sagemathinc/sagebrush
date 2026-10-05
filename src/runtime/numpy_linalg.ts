@@ -10,7 +10,7 @@ import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype, ascontig, copy as npcopy } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
-import { gemmBuffers, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
+import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 
 const { T, raise, tuple } = Obj;
 const F64 = () => toDtype("float64");
@@ -1036,6 +1036,7 @@ newBuiltinModule("_nplinalg", (m) => {
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
   fn("set_error", (cls: any) => ((globalThis as any).__npLinAlgError = cls, null));
   fn("wasm", () => wasmKernels());
+  fn("wasm_fma", () => wasmFusedFMA());
   fn("det", (a: NDArray) => {
     const [A, r, c] = mat(a);
     if (r !== c) linalgError("Last 2 dimensions of the array must be square");
