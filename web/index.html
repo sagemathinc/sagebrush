@@ -210,6 +210,15 @@ const EXAMPLES = {
     "# The prime counting function against the PNT prediction (press ▶)\n@interact\ndef f(N=(10, 1000, 5)):\n    show(list_plot([prime_pi(k) for k in range(3, N)], plotjoined=True, legend_label='prime_pi') +\n         plot(x/(log(x) - 1), (x, 3, N), color='red', legend_label='x/(log(x)-1)'))",
     "# animate: frames on common axes; the result is an animated SVG\na = animate([plot(sin(x - k)*exp(-x/6), (x, 0, 4*pi), fill='axis', thickness=2) for k in srange(0, 2*pi, 0.2)], figsize=(7, 3))\na.show(delay=5)",
   ],
+  "Modular forms (Sage)": [
+    "# Modular symbols, computed by Sagebrush's Rust engine in your browser:\n# exact Hecke polynomials, proven by a coefficient bound\nM = ModularSymbols(389, 2, sign=1)\nM, M.hecke_polynomial(2)",
+    "# Spaces with a character (nebentypus)\neps = DirichletGroup(13).gen()^2\nM = ModularSymbols(eps, 2, sign=1)\nprint(eps)\nM, M.hecke_polynomial(2)",
+    "# Dimensions of spaces of cusp forms and newforms\n[(N, CuspForms(N, 2).dimension(), Gamma0(N).dimension_new_cusp_forms(2)) for N in range(11, 31)]",
+    "# Elliptic curves: Cremona's curves of conductor < 1000 by label\nE = EllipticCurve('389a1')\nE, E.rank(), E.torsion_order(), E.aplist(50), E.anlist(12)",
+    "# Sato-Tate: the moments of a_p^2/p over the primes below 10^7 tend to the Catalan numbers 1, 2, 5, 14\nEllipticCurve('11a1').sato_tate_moments(10^7)",
+    "# The Sato-Tate distribution of a_p / 2 sqrt(p) against the semicircle\nimport matplotlib.pyplot as plt\nE = EllipticCurve([0, 0, 1, -7, 6])\nps = prime_range(3, 2*10^5)\nt = [a / (2 * sqrt(p)) for p, a in zip(ps, E.aplist(2*10^5)[1:])]\nplt.figure(figsize=(7, 3))\nplt.hist(t, bins=50, density=True, alpha=0.6)\nxs = [k / 100 for k in range(-100, 101)]\nplt.plot(xs, [2 / pi * sqrt(1 - u^2) for u in xs], 'r')\nplt.title('5077a: a_p / 2 sqrt(p), p < 200000')",
+    "# The engines directly: the same API as the native CPython package\nfrom sagebrush import modsym\nmodsym.rational_newforms(37, 50)",
+  ],
   "numpy": [
     "import numpy as np\na = np.arange(12).reshape(3, 4)\nprint(a)\na.sum(axis=0), a.mean(), a[a % 3 == 0], a.T @ a",
     "# Seeded streams match NumPy's exactly\nnp.random.seed(0)\nx = np.random.randn(100_000)\nx.mean(), x.std(), np.percentile(x, [5, 50, 95])",
@@ -231,7 +240,7 @@ const EXAMPLES = {
   ],
 };
 
-const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)"]);
+const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)", "Modular forms (Sage)"]);
 const $ = (s) => document.querySelector(s);
 const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
 let worker, nextId = 1, version = "", execCount = 0, generation = 0;

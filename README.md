@@ -64,6 +64,12 @@ the engines.
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
 - **Sage mode** (`--sage`): `2^3 == 8`, and `2/3` is an exact rational.
+- **Modular forms and elliptic curves:** in Sage mode, `ModularSymbols`,
+  `CuspForms`, `ModularForms`, `Gamma0`, `DirichletGroup` and `EllipticCurve`
+  run on the Sagebrush engines (a 500 KB WebAssembly build of `engine/web`,
+  loaded on first use), with Sage's printed output: `sage-tests/` checks
+  3,000 lines against Sage. `from sagebrush import modsym, ap, mf` is the API
+  of the native Python package.
 - **numpy:** the NumPy 2 API in TypeScript (ndarray, ufuncs, random,
   linalg, fft, polynomials), checked against NumPy itself. Printed output and
   seeded random numbers are byte-identical. dense linear algebra, the FFT, `exp` and

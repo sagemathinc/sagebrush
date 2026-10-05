@@ -1,0 +1,310 @@
+1 2 0 0 0 0
+1 4 0 1 1 0
+2 2 0 1 1 0
+2 4 0 2 2 0
+3 2 0 1 1 0
+3 4 0 2 2 0
+4 2 0 2 2 0
+4 4 0 3 3 0
+5 2 0 1 1 0
+5 4 1 2 3 1
+6 2 0 3 3 0
+6 4 1 4 5 1
+7 2 0 1 1 0
+7 4 1 2 3 1
+8 2 0 3 3 0
+8 4 1 4 5 1
+9 2 0 3 3 0
+9 4 1 4 5 1
+10 2 0 3 3 0
+10 4 3 4 7 1
+11 2 1 1 2 1
+11 4 2 2 4 2
+12 2 0 5 5 0
+12 4 3 6 9 1
+13 2 0 1 1 0
+13 4 3 2 5 3
+14 2 1 3 4 1
+14 4 4 4 8 2
+15 2 1 3 4 1
+15 4 4 4 8 2
+16 2 0 5 5 0
+16 4 3 6 9 1
+17 2 1 1 2 1
+17 4 4 2 6 4
+18 2 0 7 7 0
+18 4 5 8 13 1
+19 2 1 1 2 1
+19 4 4 2 6 4
+20 2 1 5 6 1
+20 4 6 6 12 1
+21 2 1 3 4 1
+21 4 6 4 10 4
+22 2 2 3 5 0
+22 4 7 4 11 3
+23 2 2 1 3 2
+23 4 5 2 7 5
+24 2 1 7 8 1
+24 4 8 8 16 1
+25 2 0 5 5 0
+25 4 5 6 11 3
+26 2 2 3 5 2
+26 4 9 4 13 3
+27 2 1 5 6 1
+27 4 6 6 12 4
+28 2 2 5 7 0
+28 4 9 6 15 2
+29 2 2 1 3 2
+29 4 7 2 9 7
+30 2 3 7 10 1
+30 4 14 8 22 2
+31 2 2 1 3 2
+31 4 7 2 9 7
+32 2 1 7 8 1
+32 4 8 8 16 3
+33 2 3 3 6 1
+33 4 10 4 14 6
+34 2 3 3 6 1
+34 4 12 4 16 4
+35 2 3 3 6 3
+35 4 10 4 14 6
+36 2 1 11 12 1
+36 4 12 12 24 1
+37 2 2 1 3 2
+37 4 9 2 11 9
+38 2 4 3 7 2
+38 4 13 4 17 5
+39 2 3 3 6 3
+39 4 12 4 16 6
+40 2 3 7 10 1
+40 4 14 8 22 3
+41 2 3 1 4 3
+41 4 10 2 12 10
+42 2 5 7 12 1
+42 4 20 8 28 2
+43 2 3 1 4 3
+43 4 10 2 12 10
+44 2 4 5 9 1
+44 4 15 6 21 3
+45 2 3 7 10 1
+45 4 14 8 22 5
+46 2 5 3 8 1
+46 4 16 4 20 6
+47 2 4 1 5 4
+47 4 11 2 13 11
+48 2 3 11 14 1
+48 4 18 12 30 3
+49 2 1 7 8 1
+49 4 10 8 18 8
+50 2 2 11 13 2
+50 4 17 12 29 5
+51 2 5 3 8 3
+51 4 16 4 20 8
+52 2 5 5 10 1
+52 4 18 6 24 3
+53 2 4 1 5 4
+53 4 13 2 15 13
+54 2 4 11 15 2
+54 4 21 12 33 4
+55 2 5 3 8 3
+55 4 16 4 20 10
+56 2 5 7 12 2
+56 4 20 8 28 4
+57 2 5 3 8 3
+57 4 18 4 22 10
+58 2 6 3 9 2
+58 4 21 4 25 7
+59 2 5 1 6 5
+59 4 14 2 16 14
+60 2 7 11 18 0
+60 4 30 12 42 2
+61 2 4 1 5 4
+61 4 15 2 17 15
+62 2 7 3 10 3
+62 4 22 4 26 8
+63 2 5 7 12 3
+63 4 20 8 28 7
+64 2 3 11 14 1
+64 4 18 12 30 5
+65 2 5 3 8 5
+65 4 20 4 24 12
+66 2 9 7 16 3
+66 4 32 8 40 4
+67 2 5 1 6 5
+67 4 16 2 18 16
+68 2 7 5 12 2
+68 4 24 6 30 4
+69 2 7 3 10 3
+69 4 22 4 26 12
+70 2 9 7 16 1
+70 4 32 8 40 6
+71 2 6 1 7 6
+71 4 17 2 19 17
+72 2 5 15 20 1
+72 4 28 16 44 4
+73 2 5 1 6 5
+73 4 18 2 20 18
+74 2 8 3 11 4
+74 4 27 4 31 9
+75 2 5 11 16 3
+75 4 24 12 36 10
+76 2 8 5 13 1
+76 4 27 6 33 5
+77 2 7 3 10 5
+77 4 22 4 26 16
+78 2 11 7 18 1
+78 4 38 8 46 6
+79 2 6 1 7 6
+79 4 19 2 21 19
+Modular Symbols space of dimension 2 for Gamma_0(11) of weight 2 with sign 1 over Rational Field
+x^2 - x - 6
+Modular Symbols space of dimension 3 for Gamma_0(11) of weight 2 with sign 0 over Rational Field
+x^3 + x^2 - 8*x - 12
+Modular Symbols space of dimension 1 for Gamma_0(11) of weight 2 with sign -1 over Rational Field
+x + 2
+t^2 - 7*t + 6
+Modular Symbols space of dimension 3 for Gamma_0(23) of weight 2 with sign 1 over Rational Field
+x^3 - 2*x^2 - 4*x + 3
+Modular Symbols space of dimension 5 for Gamma_0(23) of weight 2 with sign 0 over Rational Field
+x^5 - x^4 - 7*x^3 + x^2 + 7*x - 3
+Modular Symbols space of dimension 2 for Gamma_0(23) of weight 2 with sign -1 over Rational Field
+x^2 + x - 1
+t^3 - 4*t^2 - 16*t + 24
+Modular Symbols space of dimension 3 for Gamma_0(37) of weight 2 with sign 1 over Rational Field
+x^3 - x^2 - 6*x
+Modular Symbols space of dimension 5 for Gamma_0(37) of weight 2 with sign 0 over Rational Field
+x^5 + x^4 - 8*x^3 - 12*x^2
+Modular Symbols space of dimension 2 for Gamma_0(37) of weight 2 with sign -1 over Rational Field
+x^2 + 2*x
+t^3 - 4*t^2 - 12*t
+Modular Symbols space of dimension 4 for Gamma_0(43) of weight 2 with sign 1 over Rational Field
+x^4 - x^3 - 8*x^2 + 2*x + 12
+Modular Symbols space of dimension 7 for Gamma_0(43) of weight 2 with sign 0 over Rational Field
+x^7 + x^6 - 12*x^5 - 16*x^4 + 36*x^3 + 52*x^2 - 32*x - 48
+Modular Symbols space of dimension 3 for Gamma_0(43) of weight 2 with sign -1 over Rational Field
+x^3 + 2*x^2 - 2*x - 4
+t^4 - 6*t^3 - 14*t^2 + 92*t - 48
+Modular Symbols space of dimension 5 for Gamma_0(53) of weight 2 with sign 1 over Rational Field
+x^5 - x^4 - 8*x^3 + 2*x^2 + 11*x + 3
+Modular Symbols space of dimension 9 for Gamma_0(53) of weight 2 with sign 0 over Rational Field
+x^9 + x^8 - 12*x^7 - 16*x^6 + 34*x^5 + 54*x^4 - 16*x^3 - 52*x^2 - 23*x - 3
+Modular Symbols space of dimension 4 for Gamma_0(53) of weight 2 with sign -1 over Rational Field
+x^4 + 2*x^3 - 2*x^2 - 4*x - 1
+t^5 - 4*t^4 - 16*t^3 + 20*t^2 + 24*t
+Modular Symbols space of dimension 5 for Gamma_0(61) of weight 2 with sign 1 over Rational Field
+x^5 - 3*x^4 - 4*x^3 + 10*x^2 + 7*x - 3
+Modular Symbols space of dimension 9 for Gamma_0(61) of weight 2 with sign 0 over Rational Field
+x^9 - 3*x^8 - 8*x^7 + 20*x^6 + 30*x^5 - 38*x^4 - 52*x^3 + 8*x^2 + 13*x - 3
+Modular Symbols space of dimension 4 for Gamma_0(61) of weight 2 with sign -1 over Rational Field
+x^4 - 4*x^2 - 2*x + 1
+t^5 - 2*t^4 - 30*t^3 - 4*t^2 + 201*t + 234
+Modular Symbols space of dimension 6 for Gamma_0(67) of weight 2 with sign 1 over Rational Field
+x^6 - x^5 - 11*x^4 + 7*x^3 + 27*x^2 - 7*x - 6
+Modular Symbols space of dimension 11 for Gamma_0(67) of weight 2 with sign 0 over Rational Field
+x^11 + x^10 - 18*x^9 - 18*x^8 + 107*x^7 + 99*x^6 - 246*x^5 - 194*x^4 + 181*x^3 + 81*x^2 - 32*x - 12
+Modular Symbols space of dimension 5 for Gamma_0(67) of weight 2 with sign -1 over Rational Field
+x^5 + 2*x^4 - 5*x^3 - 8*x^2 + 3*x + 2
+t^6 - 6*t^5 - 20*t^4 + 110*t^3 + 135*t^2 - 432*t - 108
+Modular Symbols space of dimension 7 for Gamma_0(79) of weight 2 with sign 1 over Rational Field
+x^7 - 2*x^6 - 9*x^5 + 12*x^4 + 26*x^3 - 17*x^2 - 22*x + 3
+Modular Symbols space of dimension 13 for Gamma_0(79) of weight 2 with sign 0 over Rational Field
+x^13 - x^12 - 17*x^11 + 9*x^10 + 112*x^9 - 18*x^8 - 354*x^7 - 38*x^6 + 538*x^5 + 148*x^4 - 339*x^3 - 113*x^2 + 43*x - 3
+Modular Symbols space of dimension 6 for Gamma_0(79) of weight 2 with sign -1 over Rational Field
+x^6 + x^5 - 6*x^4 - 6*x^3 + 8*x^2 + 7*x - 1
+t^7 - 10*t^6 + 12*t^5 + 126*t^4 - 308*t^3 - 260*t^2 + 1077*t - 558
+Modular Symbols space of dimension 8 for Gamma_0(89) of weight 2 with sign 1 over Rational Field
+x^8 - 2*x^7 - 14*x^6 + 22*x^5 + 64*x^4 - 66*x^3 - 102*x^2 + 46*x + 51
+Modular Symbols space of dimension 15 for Gamma_0(89) of weight 2 with sign 0 over Rational Field
+x^15 - x^14 - 27*x^13 + 19*x^12 + 293*x^11 - 125*x^10 - 1623*x^9 + 295*x^8 + 4851*x^7 + 125*x^6 - 7729*x^5 - 1591*x^4 + 6087*x^3 + 2145*x^2 - 1853*x - 867
+Modular Symbols space of dimension 7 for Gamma_0(89) of weight 2 with sign -1 over Rational Field
+x^7 + x^6 - 11*x^5 - 11*x^4 + 31*x^3 + 27*x^2 - 21*x - 17
+t^8 - 2*t^7 - 33*t^6 + 283*t^4 + 318*t^3 - 335*t^2 - 556*t - 156
+Modular Symbols space of dimension 8 for Gamma_0(97) of weight 2 with sign 1 over Rational Field
+x^8 - 2*x^7 - 13*x^6 + 22*x^5 + 47*x^4 - 54*x^3 - 54*x^2 + 28*x - 3
+Modular Symbols space of dimension 15 for Gamma_0(97) of weight 2 with sign 0 over Rational Field
+x^15 - x^14 - 25*x^13 + 21*x^12 + 238*x^11 - 154*x^10 - 1092*x^9 + 468*x^8 + 2523*x^7 - 599*x^6 - 2647*x^5 + 391*x^4 + 783*x^3 - 351*x^2 + 55*x - 3
+Modular Symbols space of dimension 7 for Gamma_0(97) of weight 2 with sign -1 over Rational Field
+x^7 + x^6 - 10*x^5 - 8*x^4 + 23*x^3 + 15*x^2 - 9*x + 1
+t^8 - 4*t^7 - 23*t^6 + 60*t^5 + 56*t^4 - 122*t^3 + 5*t^2 + 44*t - 12
+Modular Symbols space of dimension 9 for Gamma_0(101) of weight 2 with sign 1 over Rational Field
+x^9 - 3*x^8 - 13*x^7 + 41*x^6 + 41*x^5 - 157*x^4 + 5*x^3 + 143*x^2 - 42*x
+Modular Symbols space of dimension 17 for Gamma_0(101) of weight 2 with sign 0 over Rational Field
+x^17 - 3*x^16 - 26*x^15 + 82*x^14 + 251*x^13 - 873*x^12 - 1052*x^11 + 4544*x^10 + 1367*x^9 - 11829*x^8 + 2390*x^7 + 13882*x^6 - 6675*x^5 - 5407*x^4 + 3808*x^3 - 588*x^2
+Modular Symbols space of dimension 8 for Gamma_0(101) of weight 2 with sign -1 over Rational Field
+x^8 - 13*x^6 + 2*x^5 + 47*x^4 - 16*x^3 - 43*x^2 + 14*x
+t^9 - 2*t^8 - 34*t^7 + 14*t^6 + 291*t^5 + 52*t^4 - 801*t^3 - 416*t^2 + 593*t + 402
+Modular Symbols space of dimension 13 for Gamma_0(125) of weight 2 with sign 1 over Rational Field
+x^13 - 3*x^12 - 29*x^11 + 87*x^10 + 315*x^9 - 945*x^8 - 1580*x^7 + 4740*x^6 + 3665*x^5 - 10995*x^4 - 3519*x^3 + 10557*x^2 + 891*x - 2673
+Modular Symbols space of dimension 25 for Gamma_0(125) of weight 2 with sign 0 over Rational Field
+x^25 - 3*x^24 - 38*x^23 + 114*x^22 + 591*x^21 - 1773*x^20 - 4830*x^19 + 14490*x^18 + 21995*x^17 - 65985*x^16 - 52908*x^15 + 158724*x^14 + 45474*x^13 - 136422*x^12 + 61492*x^11 - 184476*x^10 - 151805*x^9 + 455415*x^8 + 53970*x^7 - 161910*x^6 + 75991*x^5 - 227973*x^4 - 55638*x^3 + 166914*x^2 + 9801*x - 29403
+Modular Symbols space of dimension 12 for Gamma_0(125) of weight 2 with sign -1 over Rational Field
+x^12 - 9*x^10 + 15*x^8 + 20*x^6 - 35*x^4 - 19*x^2 + 11
+t^13 - t^12
+Modular Symbols space of dimension 18 for Gamma_0(128) of weight 2 with sign 1 over Rational Field
+x^18 - 20*x^17 + 120*x^16 + 160*x^15 - 4592*x^14 + 14016*x^13 + 30720*x^12 - 245760*x^11 + 270336*x^10 + 1015808*x^9 - 2621440*x^8 + 5242880*x^6 - 4194304*x^5
+Modular Symbols space of dimension 33 for Gamma_0(128) of weight 2 with sign 0 over Rational Field
+x^33 - 12*x^32 - 64*x^31 + 1280*x^30 + 96*x^29 - 58496*x^28 + 109824*x^27 + 1483776*x^26 - 4648704*x^25 - 22465536*x^24 + 98095104*x^23 + 198721536*x^22 - 1249050624*x^21 - 828112896*x^20 + 10075766784*x^19 - 1220542464*x^18 - 51489275904*x^17 + 31608274944*x^16 + 160792838144*x^15 - 151397597184*x^14 - 279172874240*x^13 + 326417514496*x^12 + 206158430208*x^11 - 274877906944*x^10
+Modular Symbols space of dimension 15 for Gamma_0(128) of weight 2 with sign -1 over Rational Field
+x^15 + 8*x^14 - 24*x^13 - 320*x^12 - 112*x^11 + 4224*x^10 + 5888*x^9 - 20480*x^8 - 36864*x^7 + 32768*x^6 + 65536*x^5
+t^18 - 28*t^17 + 212*t^16 + 1024*t^15 - 21696*t^14 + 60672*t^13 + 529664*t^12 - 3338240*t^11 - 1364480*t^10 + 49362944*t^9 - 57255936*t^8 - 340918272*t^7 + 638337024*t^6 + 1236860928*t^5 - 2882469888*t^4 - 2293235712*t^3 + 6163070976*t^2 + 1719926784*t - 5159780352
+Modular Symbols space of dimension 16 for Gamma_0(143) of weight 2 with sign 1 over Rational Field
+x^16 - 8*x^15 - x^14 + 152*x^13 - 236*x^12 - 1064*x^11 + 2484*x^10 + 3388*x^9 - 10640*x^8 - 4704*x^7 + 21891*x^6 + 2060*x^5 - 20775*x^4 - 648*x^3 + 7236*x^2 + 1296*x
+Modular Symbols space of dimension 29 for Gamma_0(143) of weight 2 with sign 0 over Rational Field
+x^29 - 7*x^28 - 28*x^27 + 284*x^26 + 220*x^25 - 5100*x^24 + 1396*x^23 + 53620*x^22 - 41028*x^21 - 367900*x^20 + 374322*x^19 + 1738066*x^18 - 1963036*x^17 - 5812772*x^16 + 6604020*x^15 + 13929084*x^14 - 14611924*x^13 - 23903220*x^12 + 20871268*x^11 + 28918492*x^10 - 17917635*x^9 - 23632539*x^8 + 7451128*x^7 + 11743656*x^6 - 21456*x^5 - 2613168*x^4 - 756864*x^3 - 62208*x^2
+Modular Symbols space of dimension 13 for Gamma_0(143) of weight 2 with sign -1 over Rational Field
+x^13 + x^12 - 19*x^11 - 19*x^10 + 133*x^9 + 133*x^8 - 423*x^7 - 419*x^6 + 601*x^5 + 597*x^4 - 276*x^3 - 316*x^2 - 48*x
+t^16 - 20*t^15 + 102*t^14 + 424*t^13 - 5343*t^12 + 8108*t^11 + 66952*t^10 - 254784*t^9 - 42192*t^8 + 1593088*t^7 - 2526016*t^6 - 164096*t^5 + 3529472*t^4 - 2399232*t^3 - 691200*t^2 + 1216512*t - 331776
+Modular Symbols space of dimension 15 for Gamma_0(169) of weight 2 with sign 1 over Rational Field
+x^15 - 3*x^14 - 21*x^13 + 63*x^12 + 167*x^11 - 501*x^10 - 697*x^9 + 2091*x^8 + 1752*x^7 - 5256*x^6 - 2475*x^5 + 7425*x^4 + 1404*x^3 - 4212*x^2 - 243*x + 729
+Modular Symbols space of dimension 29 for Gamma_0(169) of weight 2 with sign 0 over Rational Field
+x^29 - 3*x^28 - 42*x^27 + 126*x^26 + 775*x^25 - 2325*x^24 - 8278*x^23 + 24834*x^22 + 56767*x^21 - 170301*x^20 - 262062*x^19 + 786186*x^18 + 826865*x^17 - 2480595*x^16 - 1741742*x^15 + 5225226*x^14 + 2187626*x^13 - 6562878*x^12 - 879098*x^11 + 2637294*x^10 - 1606527*x^9 + 4819581*x^8 + 2512278*x^7 - 7536834*x^6 - 1438074*x^5 + 4314222*x^4 + 370656*x^3 - 1111968*x^2 - 35721*x + 107163
+Modular Symbols space of dimension 14 for Gamma_0(169) of weight 2 with sign -1 over Rational Field
+x^14 - 21*x^12 + 167*x^10 - 567*x^8 + 582*x^6 + 515*x^4 - 676*x^2 + 147
+t^15 - 6*t^14 - 121*t^13 + 726*t^12 + 5339*t^11 - 32034*t^10 - 102328*t^9 + 613968*t^8 + 794883*t^7 - 4769298*t^6 - 2395332*t^5 + 14371992*t^4 + 2437776*t^3 - 14626656*t^2 - 139968*t + 839808
+Modular Symbols space of dimension 56 for Gamma_0(210) of weight 2 with sign 1 over Rational Field
+x^56 - 24*x^55 + 254*x^54 - 1552*x^53 + 6007*x^52 - 15184*x^51 + 25362*x^50 - 32664*x^49 + 62839*x^48 - 173856*x^47 + 310952*x^46 - 123424*x^45 - 642594*x^44 + 1078304*x^43 + 342904*x^42 - 1454880*x^41 - 5484939*x^40 + 20467112*x^39 - 16233770*x^38 - 36651344*x^37 + 84883401*x^36 + 8716400*x^35 - 212871334*x^34 + 89029480*x^33 + 678968883*x^32 - 1081552512*x^31 - 758167552*x^30 + 3779557824*x^29 - 1985308700*x^28 - 7034684096*x^27 + 9929567424*x^26 + 9801669760*x^25 - 31904027725*x^24 + 2017432632*x^23 + 73833873546*x^22 - 72684773168*x^21 - 82237959431*x^20 + 206274144272*x^19 - 37860971546*x^18 - 276317092552*x^17 + 252503639061*x^16 + 155827368096*x^15 - 362682234792*x^14 + 65087526240*x^13 + 262540854558*x^12 - 177999739488*x^11 - 82839028536*x^10 + 134030487456*x^9 - 15497036073*x^8 - 48789118152*x^7 + 23201178786*x^6 + 6153378192*x^5 - 7572502809*x^4 + 1198930896*x^3 + 755709102*x^2 - 344373768*x + 43046721
+Modular Symbols space of dimension 97 for Gamma_0(210) of weight 2 with sign 0 over Rational Field
+x^97 - 19*x^96 + 148*x^95 - 588*x^94 + 1142*x^93 - 594*x^92 + 80*x^91 - 10160*x^90 + 37625*x^89 - 31371*x^88 - 106568*x^87 + 214488*x^86 + 332438*x^85 - 1272914*x^84 - 508012*x^83 + 7046228*x^82 - 6968920*x^81 - 19842328*x^80 + 43863700*x^79 + 39776724*x^78 - 210247346*x^77 + 55588358*x^76 + 761948376*x^75 - 1000712968*x^74 - 1722837947*x^73 + 5054273553*x^72 + 1202196688*x^71 - 18699193264*x^70 + 13860414702*x^69 + 50883155270*x^68 - 94197749228*x^67 - 76210749132*x^66 + 370005307687*x^65 - 101209924645*x^64 - 1073823945816*x^63 + 1274968390760*x^62 + 2156656400428*x^61 - 5725551334884*x^60 - 1260616572800*x^59 + 17774614605056*x^58 - 11890089926334*x^57 - 40295396324614*x^56 + 67188861788944*x^55 + 54253412725968*x^54 - 227702728933076*x^53 + 46356224171228*x^52 + 564474970494888*x^51 - 585025673635672*x^50 - 977585367236480*x^49 + 2255918130648000*x^48 + 650782503373384*x^47 - 6040218378458296*x^46 + 3081749544697932*x^45 + 12053350506362108*x^44 - 16113725971832112*x^43 - 15908000896109936*x^42 + 47248263044580930*x^41 + 2002820068775930*x^40 - 102182982855869120*x^39 + 63305384374870976*x^38 + 166848734041487948*x^37 - 228601728348836548*x^36 - 180515299215289528*x^35 + 526631442669428744*x^34 + 21260392806750167*x^33 - 909660019132372213*x^32 + 445705081902005060*x^31 + 1198694874854576228*x^30 - 1235167944376707490*x^29 - 1143534444671313354*x^28 + 2121237001777344496*x^27 + 618072313079175792*x^26 - 2701268855715634491*x^25 + 209346579316279953*x^24 + 2669602993808359032*x^23 - 944706362886621288*x^22 - 2064202341617853378*x^21 + 1258235835075086454*x^20 + 1228769066143022148*x^19 - 1115764967377796220*x^18 - 533234410980169752*x^17 + 737010258755677992*x^16 + 139820776860293028*x^15 - 373066977201909660*x^14 + 3431575422069606*x^13 + 144426385517318910*x^12 - 23960026417460328*x^11 - 41730562454609736*x^10 + 12850852339641465*x^9 + 8505411723303669*x^8 - 3966869672240976*x^7 - 1066360948834896*x^6 + 776039656992966*x^5 + 44289135461502*x^4 - 90251927435484*x^3 + 7154881590852*x^2 + 4801302120177*x - 847288609443
+Modular Symbols space of dimension 41 for Gamma_0(210) of weight 2 with sign -1 over Rational Field
+x^41 + 5*x^40 + 14*x^39 + 30*x^38 + 59*x^37 + 79*x^36 + 10*x^35 - 198*x^34 - 539*x^33 - 1095*x^32 - 1628*x^31 - 700*x^30 + 2452*x^29 + 6148*x^28 + 10572*x^27 + 14124*x^26 + 1074*x^25 - 32934*x^24 - 49168*x^23 - 45008*x^22 - 57134*x^21 + 44682*x^20 + 312784*x^19 + 258704*x^18 - 228286*x^17 - 194070*x^16 + 27452*x^15 - 1054308*x^14 - 1030732*x^13 + 2473636*x^12 + 3226388*x^11 - 2291404*x^10 - 4444275*x^9 + 797793*x^8 + 3466530*x^7 + 287442*x^6 - 1602261*x^5 - 387585*x^4 + 412614*x^3 + 144342*x^2 - 45927*x - 19683
+t^56 - 40*t^55 + 712*t^54 - 7464*t^53 + 51714*t^52 - 255096*t^51 + 963304*t^50 - 3008248*t^49 + 8122987*t^48 - 18472112*t^47 + 32983280*t^46 - 40636592*t^45 + 6120948*t^44 + 157264176*t^43 - 547592976*t^42 + 1122212912*t^41 - 1638660791*t^40 + 1156635848*t^39 + 3047135000*t^38 - 12512415800*t^37 + 21885377630*t^36 - 22740923880*t^35 - 1899666120*t^34 + 88738106520*t^33 - 203843738645*t^32 + 188932861664*t^31 - 4937802080*t^30 - 424724517152*t^29 + 1625052405464*t^28 - 2372048202464*t^27 - 1906190404704*t^26 + 9937042718496*t^25 - 6586134479877*t^24 - 14520598847512*t^23 + 24529951739512*t^22 + 3772148082920*t^21 - 36803297461858*t^20 + 19715002954552*t^19 + 28149504094424*t^18 - 35573576151624*t^17 - 5188446231207*t^16 + 30519923192016*t^15 - 11365018694288*t^14 - 13784679676720*t^13 + 12523046348020*t^12 + 1480686247600*t^11 - 6128886029200*t^10 + 1852838638000*t^9 + 1379237746875*t^8 - 1055873925000*t^7 + 25469625000*t^6 + 218286875000*t^5 - 77349218750*t^4 - 6484375000*t^3 + 10703125000*t^2 - 2734375000*t + 244140625
+Modular Symbols space of dimension 33 for Gamma_0(389) of weight 2 with sign 1 over Rational Field
+x^33 - x^32 - 52*x^31 + 46*x^30 + 1219*x^29 - 939*x^28 - 17044*x^27 + 11220*x^26 + 158471*x^25 - 87155*x^24 - 1034158*x^23 + 462016*x^22 + 4872986*x^21 - 1705222*x^20 - 16801171*x^19 + 4376327*x^18 + 42496356*x^17 - 7598744*x^16 - 78351538*x^15 + 8196260*x^14 + 103678217*x^13 - 3810733*x^12 - 95894495*x^11 - 2530565*x^10 + 59468374*x^9 + 5119626*x^8 - 23144358*x^7 - 3273560*x^6 + 5051976*x^5 + 943872*x^4 - 502432*x^3 - 103920*x^2 + 16528*x + 3552
+Modular Symbols space of dimension 65 for Gamma_0(389) of weight 2 with sign 0 over Rational Field
+x^65 + x^64 - 100*x^63 - 104*x^62 + 4738*x^61 + 5114*x^60 - 141528*x^59 - 158252*x^58 + 2991895*x^57 + 3460223*x^56 - 47633632*x^55 - 56902104*x^54 + 593428874*x^53 + 731378218*x^52 - 5934013478*x^51 - 7538455026*x^50 + 48473667705*x^49 + 63432381293*x^48 - 327535027170*x^47 - 441336197994*x^46 + 1846875043442*x^45 + 2562355247594*x^44 - 8743484136832*x^43 - 12495173191336*x^42 + 34888419355774*x^41 + 51403595775070*x^40 - 117568922954682*x^39 - 178880625190058*x^38 + 334682067009743*x^37 + 527204452893863*x^36 - 803653562592722*x^35 - 1315782218242866*x^34 + 1622402172076624*x^33 + 2776909297670752*x^32 - 2738335762889462*x^31 - 4942308937150698*x^30 + 3831310903262926*x^29 + 7387599730015582*x^28 - 4386388168103740*x^27 - 9221913776253552*x^26 + 4025613234369925*x^25 + 9541758702398221*x^24 - 2856466510589998*x^23 - 8103978575546534*x^22 + 1449764774310341*x^21 + 5579080086960973*x^20 - 403732651619044*x^19 - 3062727274898152*x^18 - 69043059514820*x^17 + 1312065495417000*x^16 + 141623242941908*x^15 - 426055616730892*x^14 - 79297449276352*x^13 + 100710210862592*x^12 + 26233253206816*x^11 - 16336075999168*x^10 - 5524731214912*x^9 + 1654147385920*x^8 + 728474334336*x^7 - 85671000832*x^6 - 57006695936*x^5 + 495249408*x^4 + 2381989120*x^3 + 141510912*x^2 - 40540160*x - 4205568
+Modular Symbols space of dimension 32 for Gamma_0(389) of weight 2 with sign -1 over Rational Field
+x^32 + 2*x^31 - 46*x^30 - 92*x^29 + 943*x^28 + 1890*x^27 - 11374*x^26 - 22902*x^25 + 89765*x^24 + 182140*x^23 - 487738*x^22 - 1001198*x^21 + 1869392*x^20 + 3902954*x^19 - 5092309*x^18 - 10900600*x^17 + 9794556*x^16 + 21784924*x^15 - 12996766*x^14 - 30794038*x^13 + 11296103*x^12 + 30077576*x^11 - 5661767*x^10 - 19515866*x^9 + 920776*x^8 + 7881954*x^7 + 501504*x^6 - 1769048*x^5 - 255168*x^4 + 178368*x^3 + 32672*x^2 - 5904*x - 1184
+t^33 - 107*t^31 - 42*t^30 + 4934*t^29 + 3136*t^28 - 130498*t^27 - 100932*t^26 + 2219663*t^25 + 1854240*t^24 - 25746525*t^23 - 21652472*t^22 + 210271856*t^21 + 169107346*t^20 - 1228605620*t^19 - 904247844*t^18 + 5159633419*t^17 + 3330993164*t^16 - 15501168593*t^15 - 8392416342*t^14 + 32872807818*t^13 + 14167103988*t^12 - 48102528317*t^11 - 15410363408*t^10 + 46922196778*t^9 + 9992861138*t^8 - 28950845465*t^7 - 3136790020*t^6 + 10335853326*t^5 + 59584434*t^4 - 1772755307*t^3 + 147174484*t^2 + 77883837*t - 4019670
+Modular Symbols space of dimension 4 for Gamma_0(11) of weight 4 with sign 1 over Rational Field
+x^4 - 4476*x^3 + 5183284*x^2 - 388254720*x + 1932481600
+x^4 - 20*x^3 + 115*x^2 - 126*x - 162
+Modular Symbols space of dimension 7 for Gamma_0(13) of weight 6 with sign 1 over Rational Field
+x^7 - 2837994*x^6 + 2011104602938*x^5 + 3477636037269776*x^4 - 4312236533807147151*x^3 - 10392231043105942819254*x^2 - 4331089249496915307218388*x + 260581287509215353796462776
+x^7 - 68*x^6 + 1104*x^5 + 5554*x^4 - 126021*x^3 - 123654*x^2 + 2176020*x + 967032
+Modular Symbols space of dimension 5 for Gamma_0(7) of weight 8 with sign 1 over Rational Field
+x^5 - 38971620*x^4 + 379643689721360*x^3 + 1035090422406123840*x^2 - 6350428261246231825920*x - 1877155557682707667648512
+x^5 - 249*x^4 + 14123*x^3 + 199053*x^2 - 2930364*x - 21367044
+Modular Symbols space of dimension 8 for Gamma_0(15) of weight 4 with sign 1 over Rational Field
+x^8 - 19748*x^7 + 146694728*x^6 - 488009878096*x^5 + 627053252454720*x^4 - 54592393854608064*x^3 + 1160294626131967872*x^2 + 7398331355673393408*x - 297995084276877501696
+x^8 - 32*x^7 + 329*x^6 - 544*x^5 - 9933*x^4 + 42984*x^3 + 54675*x^2 - 402408*x + 314928
+Modular Symbols space of dimension 7 for Gamma_0(23) of weight 4 with sign 1 over Rational Field
+x^7 - 49046*x^6 + 607798198*x^5 - 155810995724*x^4 - 30163095766875*x^3 + 9611791611948450*x^2 - 206221254877804500*x - 47424849971818725000
+x^7 - 18*x^6 + 53*x^5 + 517*x^4 - 2378*x^3 - 1175*x^2 + 9972*x + 324
+Modular Symbols space of dimension 2 for Gamma_0(1) of weight 12 with sign 1 over Rational Field
+x^2 - 2025*x - 49176
+x^2 - 2025*x - 49176
+Modular Symbols space of dimension 3 for Gamma_0(1) of weight 24 with sign 1 over Rational Field
+x^3 - 8389689*x^2 + 9039228984*x + 171704223028224
+x^3 - 8389689*x^2 + 9039228984*x + 171704223028224
+Modular Symbols space of dimension 3 for Gamma_0(2) of weight 8 with sign 1 over Rational Field
+x^3 - 4388*x^2 + 4839856*x - 57448128
+x^3 - 121*x^2 - 904*x + 1024
+Modular Symbols space of dimension 4 for Gamma_0(3) of weight 10 with sign 1 over Rational Field
+x^4 - 3903408*x^3 + 3803593801608*x^2 + 10841156925669504*x + 7669151529962947920
+x^4 - 1008*x^3 + 244053*x^2 + 5401890*x - 170533512
+Modular Symbols space of dimension 3 for Gamma_0(5) of weight 6 with sign 1 over Rational Field
+x^3 - 33808*x^2 + 288963136*x - 54241701888
+x^3 - 68*x^2 + 1221*x - 2178
+x^3 - 3*x^2 + 3*x - 1
+x^3 - x^2 - x + 1
+Cuspidal subspace of dimension 32 of Modular Forms space of dimension 33 for Congruence Subgroup Gamma0(389) of weight 2 over Rational Field Modular Forms subspace of dimension 1 of Modular Forms space of dimension 2 for Congruence Subgroup Gamma0(11) of weight 2 over Rational Field Modular Forms space of dimension 2 for Modular Group SL(2,Z) of weight 12 over Rational Field
