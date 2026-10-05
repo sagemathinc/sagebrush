@@ -21,6 +21,26 @@ pub struct FbPrime {
     /// sqrt(D) mod p (0 when p | D); for the sieve
     pub t: u64,
     pub logp: u8,
+    /// p^-1 mod 2^64 and floor((2^64 - 1) / p), for odd p: p | n iff
+    /// n * pinv <= plim (mod 2^64)
+    pub pinv: u64,
+    pub plim: u64,
+}
+
+impl FbPrime {
+    #[inline(always)]
+    fn divides(&self, n: u64) -> bool {
+        n.wrapping_mul(self.pinv) <= self.plim
+    }
+}
+
+/// p^-1 mod 2^64 for odd p (Newton: each step doubles the correct bits).
+fn inv_2_64(p: u64) -> u64 {
+    let mut x = p; // correct to 3 bits
+    for _ in 0..5 {
+        x = x.wrapping_mul(2u64.wrapping_sub(p.wrapping_mul(x)));
+    }
+    x
 }
 
 pub struct FactorBase {
@@ -60,7 +80,8 @@ impl FactorBase {
             if let Some(b) = prime_form_b(d, p) {
                 let t = if p == 2 { 0 } else { sqrt_mod(reduce(d, p), p) };
                 index.insert(p, primes.len());
-                primes.push(FbPrime { p, b, t, logp: (p as f64).log2().round() as u8 });
+                let (pinv, plim) = if p % 2 == 1 { (inv_2_64(p), u64::MAX / p) } else { (0, 0) };
+                primes.push(FbPrime { p, b, t, logp: (p as f64).log2().round() as u8, pinv, plim });
             }
         }
         FactorBase { d, primes, index }
@@ -101,6 +122,9 @@ pub struct Params {
     pub small: u64,       // primes below this are not sieved
     pub lp_mult: u64,     // large primes up to lp_mult * (largest FB prime)
     pub slack: u8,        // threshold slack (bits)
+    /// only primes up to this are sieved and trial divided; a larger
+    /// factor-base prime enters a relation as its prime cofactor
+    pub sieve_bound: u64,
 }
 
 pub struct Stats {
@@ -135,17 +159,27 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
     let mut out: Vec<Relation> = vec![];
     let mut partials: std::collections::HashMap<u64, (Relation, i32)> = std::collections::HashMap::new();
     let pmax = fb.primes.last().unwrap().p;
+    let ns = fb.primes.partition_point(|fp| fp.p <= par.sieve_bound);
     let lp_max = pmax * par.lp_mult;
     // target a ~ sqrt(|D|) / (2m); choose q's of a size so that k is small
     let target = ((absd as f64).sqrt() / (2.0 * m as f64)).max(3.0);
     // candidate q's: odd FB primes (ramified ones too: their b is 0 mod q)
     let qs: Vec<usize> = (0..n).filter(|&i| fb.primes[i].p > 2 && fb.primes[i].p >= par.small.min(pmax / 4).max(3)).collect();
-    // q's near size s: a window of about 60 around it
+    // partners of the first q: sieved primes, which occur in many other
+    // relations (partners that occur only together in the relations of
+    // their own a would satisfy a parity relation and leave the lattice a
+    // sublattice of index 2^k)
+    let partners: Vec<usize> = {
+        let sieved: Vec<usize> = qs.iter().cloned().filter(|&i| fb.primes[i].p <= par.sieve_bound).collect();
+        if sieved.len() >= 30 { sieved } else { qs.clone() }
+    };
+    let pmax_partner = fb.primes[*partners.last().unwrap()].p as f64;
+    // partners near size s: a window of about 60 around it
     let window = |s: f64| -> Vec<usize> {
-        let center = qs.partition_point(|&i| (fb.primes[i].p as f64) < s).min(qs.len().saturating_sub(1));
+        let center = partners.partition_point(|&i| (fb.primes[i].p as f64) < s).min(partners.len().saturating_sub(1));
         let lo = center.saturating_sub(30);
-        let hi = (center + 30).min(qs.len());
-        qs[lo..hi].to_vec()
+        let hi = (center + 30).min(partners.len());
+        partners[lo..hi].to_vec()
     };
     // the sieve threshold for a polynomial with leading coefficient a
     let threshold = |a: f64| -> u8 {
@@ -154,17 +188,28 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
     };
     let mut roots1 = vec![0i64; n];
     let mut roots2 = vec![0i64; n];
-    while out.len() < want {
+    let mut inv2a = vec![0u64; n];
+    let mut tries = vec![0u32; n];
+    assert!(pmax < 1 << 31);
+    // polynomials since the last new relation: give up (rather than loop)
+    // after very many, and let the caller change the parameters
+    let mut idle = 0u64;
+    while out.len() < want && idle < 50_000 {
+        let before = out.len();
         // the first q: the least covered prime (ties: random); then primes
         // making a close to the target
         let least = qs.iter().map(|&i| counts[i]).min().unwrap_or(0);
         let low: Vec<usize> = qs.iter().cloned().filter(|&i| counts[i] == least).collect();
         let q1 = low[(rng.next() % low.len() as u64) as usize];
         let mut a_idx: Vec<usize> = vec![q1];
+        tries[q1] += 1;
         let rest = target / fb.primes[q1].p as f64;
-        if rest > 1.5 * qs.first().map_or(3.0, |&i| fb.primes[i].p as f64) {
-            let j = ((rest.ln() / (pmax as f64 / 2.0).ln()).ceil() as usize).max(1);
-            let win = window(rest.powf(1.0 / j as f64));
+        let qmin = qs.first().map_or(3.0, |&i| fb.primes[i].p as f64);
+        // a q1 that was tried before gets partners even when it alone is
+        // big enough: a new polynomial each time
+        if rest > 1.5 * qmin || tries[q1] > 1 {
+            let j = ((rest.ln() / (pmax_partner / 2.0).ln()).ceil() as usize).max(1);
+            let win = window(rest.max(qmin).powf(1.0 / j as f64));
             let mut tries = 0;
             while a_idx.len() < 1 + j && tries < 1000 {
                 tries += 1;
@@ -190,6 +235,14 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                 aq * mulmod(inv, fb.primes[i].t, q) as i128
             })
             .collect();
+        let au = u64::try_from(a).expect("a < 2^64");
+        // (2a)^-1 mod p for the sieved primes; 0 marks the others (p small
+        // or dividing a), which are trial divided directly
+        for (i, fp) in fb.primes[..ns].iter().enumerate() {
+            let p = fp.p;
+            let ap = au % p;
+            inv2a[i] = if p < par.small || ap == 0 { 0 } else { invmod(2 * ap % p, p) };
+        }
         // all 2^(k-1) sign choices (the first sign fixed)
         for signs in 0..(1u64 << (k - 1)) {
             let mut b: i128 = bl[0];
@@ -203,23 +256,24 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
             debug_assert_eq!((b * b - d).rem_euclid(4 * a), 0);
             let c = (b * b - d) / (4 * a);
             stats.polys += 1;
-            // roots of a x^2 + b x + c mod p: x = (-b +- t) / 2a
-            for (i, fp) in fb.primes.iter().enumerate() {
-                let p = fp.p;
-                if p < par.small || (a % p as i128) == 0 {
+            // roots of a x^2 + b x + c mod p: x = (-b +- t) / 2a; b < 2a < 2^64
+            let bu = b as u64;
+            for (i, fp) in fb.primes[..ns].iter().enumerate() {
+                let inv = inv2a[i];
+                if inv == 0 {
                     roots1[i] = -1;
                     continue;
                 }
-                let inv2a = invmod(reduce(2 * a, p), p);
-                let mb = reduce(-b, p);
-                let r1 = mulmod((mb + fp.t) % p, inv2a, p);
-                let r2 = mulmod((mb + p - fp.t) % p, inv2a, p);
+                let p = fp.p;
+                let mb = p - bu % p;
+                let r1 = (mb + fp.t) % p * inv % p;
+                let r2 = (mb + p - fp.t) % p * inv % p;
                 // first index i = x + m with x = r mod p
-                roots1[i] = ((r1 as i64 + m) % p as i64) as i64;
-                roots2[i] = ((r2 as i64 + m) % p as i64) as i64;
+                roots1[i] = ((r1 + m as u64) % p) as i64;
+                roots2[i] = ((r2 + m as u64) % p) as i64;
             }
             sieve.iter_mut().for_each(|s| *s = 0);
-            for (i, fp) in fb.primes.iter().enumerate() {
+            for (i, fp) in fb.primes[..ns].iter().enumerate() {
                 if roots1[i] < 0 {
                     continue;
                 }
@@ -249,7 +303,15 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                 let mut v = val as u128;
                 let bb = 2 * a * xi + b;
                 let mut rel: Relation = vec![];
-                for (i, fp) in fb.primes.iter().enumerate() {
+                for (i, fp) in fb.primes[..ns].iter().enumerate() {
+                    // a sieved prime divides Q(x) iff x is one of its roots
+                    if roots1[i] >= 0 {
+                        // (sieved primes are odd)
+                        let ju = j as u64 + fp.p;
+                        if !fp.divides(ju - roots1[i] as u64) && !fp.divides(ju - roots2[i] as u64) {
+                            continue;
+                        }
+                    }
                     let p = fp.p as u128;
                     if v % p == 0 {
                         let mut e = 0;
@@ -266,6 +328,13 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                 }
                 for &i in &a_idx {
                     add_to(&mut rel, i, fb.sign(i, b) as i64);
+                }
+                if v > 1 && v <= pmax as u128 && ns < n && is_prime_u64(v as u64) {
+                    // a factor-base prime above the sieve bound
+                    if let Ok(i) = fb.primes.binary_search_by_key(&(v as u64), |fp| fp.p) {
+                        add_to(&mut rel, i, fb.sign(i, bb) as i64);
+                        v = 1;
+                    }
                 }
                 if v == 1 {
                     let rel = normalize(rel);
@@ -314,6 +383,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                 break;
             }
         }
+        idle = if out.len() > before { 0 } else { idle + (1 << (k - 1)) };
     }
     out
 }
@@ -332,7 +402,13 @@ pub fn is_prime_u64(n: u64) -> bool {
         d /= 2;
         s += 1;
     }
-    'outer: for a in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+    // deterministic bases: {2, 7, 61} below 4759123141 (Jaeschke), the
+    // first twelve primes below 3.3e24
+    let bases: &[u64] = if n < 4_759_123_141 { &[2, 7, 61] } else { &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] };
+    'outer: for &a in bases {
+        if a % n == 0 {
+            continue;
+        }
         let mut x = powmod(a, d, n);
         if x == 1 || x == n - 1 {
             continue;
@@ -354,6 +430,29 @@ mod tests {
     use crate::form::Form;
     use num_bigint::BigInt;
 
+    #[test]
+    fn primality() {
+        let small = crate::arith::primes_up_to(200_000);
+        for n in 0..200_000u64 {
+            assert_eq!(is_prime_u64(n), small.binary_search(&n).is_ok(), "{}", n);
+        }
+        // strong pseudoprimes to some of the bases
+        for n in [3215031751u64, 4759123141, 1122004669633, 3825123056546413051] {
+            assert!(!is_prime_u64(n), "{}", n);
+        }
+        assert!(is_prime_u64(4294967291) && is_prime_u64((1 << 61) - 1));
+    }
+
+    #[test]
+    fn divisibility_by_inverse() {
+        for p in [3u64, 5, 7, 101, 65521, 1000003] {
+            let fp = FbPrime { p, b: 0, t: 0, logp: 0, pinv: inv_2_64(p), plim: u64::MAX / p };
+            for n in (0..5000u64).chain([u64::MAX - 7, 1 << 40, p * 12345]) {
+                assert_eq!(fp.divides(n), n % p == 0, "{} | {}", p, n);
+            }
+        }
+    }
+
     /// Every relation composes to the identity.
     #[test]
     fn relations_are_relations() {
@@ -363,7 +462,7 @@ mod tests {
             }
             let ld = ((-d) as f64).ln();
             let fb = FactorBase::new(d, (6.0 * ld * ld) as u64);
-            let par = Params { m: 1 << 13, small: 30, lp_mult: 30, slack: 2 };
+            let par = Params { m: 1 << 13, small: 30, lp_mult: 30, slack: 2, sieve_bound: 3000 };
             let mut st = Stats { polys: 0, candidates: 0, full: 0, partial_pairs: 0 };
             let mut counts = vec![0; fb.primes.len()];
             let rels = collect(&fb, 40, &par, 1, &mut st, &mut counts);

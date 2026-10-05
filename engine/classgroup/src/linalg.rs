@@ -58,6 +58,14 @@ pub fn eliminate(n: usize, rels: &[Relation], max_weight: usize) -> Reduced {
                 col_rows[c] = list;
                 continue;
             };
+            // entries stay far below 2^63: refuse a pivot whose multiples
+            // could exceed 2^50
+            let pmax = rows[pk as usize].iter().map(|x| x.1.unsigned_abs()).max().unwrap_or(0);
+            let emax = list.iter().map(|&k| get(&rows[k as usize], cu).unsigned_abs()).max().unwrap_or(0);
+            if pmax.saturating_mul(emax) > 1 << 50 {
+                col_rows[c] = list;
+                continue;
+            }
             let pivot = std::mem::take(&mut rows[pk as usize]);
             dead[pk as usize] = true;
             let pc = get(&pivot, cu);
@@ -261,8 +269,10 @@ fn det_crt_impl(m: &[Vec<i64>], early: bool) -> BigInt {
     value
 }
 
-/// Rows of `rows` that are linearly independent (greedy, modulo a prime).
-pub fn independent_rows(rows: &[Vec<i64>], n: usize) -> Option<Vec<usize>> {
+/// n rows of `rows` that are linearly independent (greedy, modulo a
+/// prime), or if there are none, the columns without a pivot (one way to
+/// complete the rank).
+pub fn independent_rows(rows: &[Vec<i64>], n: usize) -> Result<Vec<usize>, Vec<usize>> {
     const P: u64 = 2147483647; // 2^31 - 1: products fit in u64
     let mut basis: Vec<Option<Vec<u64>>> = vec![None; n]; // by pivot column, pivot = 1
     let mut chosen = vec![];
@@ -295,11 +305,11 @@ pub fn independent_rows(rows: &[Vec<i64>], n: usize) -> Option<Vec<usize>> {
             basis[j] = Some(b);
             chosen.push(k);
             if chosen.len() == n {
-                return Some(chosen);
+                return Ok(chosen);
             }
         }
     }
-    None
+    Err((0..n).filter(|&j| basis[j].is_none()).collect())
 }
 
 /// The Hermite normal form of the lattice spanned by `rows` and d Z^n (d a
