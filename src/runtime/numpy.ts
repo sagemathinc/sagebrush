@@ -20,7 +20,7 @@ import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
 import { glibcLog, glibcExp, EXP_TABLES, LOG_TABLES } from "./libm";
-import { gemmBuffers, wasmUnary } from "./kernels";
+import { gemmBuffers, wasmUnary, wasmSort, wasmArgsort } from "./kernels";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
 
@@ -1787,6 +1787,13 @@ function argsortInts(a: NDArray): NDArray | null {
 }
 
 function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
+  if (arg && a.ndim === 1 && !a.dt.cplx && a.size >= 64) {
+    // the WebAssembly radix sort (stable, as the comparison sort below)
+    const c = ascontig(a);
+    const vals = Float64Array.from(c.data.subarray(c.offset, c.offset + a.size) as any);
+    const out = empty([a.size], D.int64);
+    if (wasmArgsort(vals, out.data as Float64Array, 0)) return out;
+  }
   if (arg && a.ndim === 1) {
     const r = argsortInts(a);
     if (r) return r;
@@ -1796,7 +1803,11 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
     const t = ascontig(moveAxisToEnd(a, axis));
     const out = copy(t);
     const n = t.shape[t.ndim - 1];
-    if (n > 1) for (let base = 0; base < out.size; base += n) out.data.subarray(base, base + n).sort();
+    const f64 = out.data instanceof Float64Array;
+    if (n > 1) for (let base = 0; base < out.size; base += n) {
+      const row = out.data.subarray(base, base + n);
+      if (!(f64 && wasmSort(row as Float64Array))) row.sort();
+    }
     const order = a.shape.map((_, i) => i).filter((i) => i !== axis);
     const inv = new Array(a.ndim);
     [...order, axis].forEach((src, dst) => (inv[src] = dst));
@@ -2172,7 +2183,7 @@ newBuiltinModule("_numpy", (m) => {
   fn("unique1d", (x: any) => {
     const a = asarray(x);
     const s = copy(ravel(a));
-    s.data.sort();
+    if (!(s.data instanceof Float64Array && wasmSort(s.data))) s.data.sort();
     const d = s.data, n = d.length;
     let m = 0;
     for (let i = 0; i < n; i++) {

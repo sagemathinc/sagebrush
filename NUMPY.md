@@ -122,10 +122,10 @@ Python arithmetic is unaffected.
 
 ### WebAssembly SIMD kernels
 
-Dense linear algebra, the FFT, `exp` and `log` run in Rust
+Dense linear algebra, the FFT, `exp`, `log` and sorting run in Rust
 ([kernels/src](kernels/src)). They are compiled for
 `wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
-to a 44 KB module:
+to a 47 KB module:
 
 - `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
 - `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
@@ -141,7 +141,16 @@ to a 44 KB module:
   Twiddle tables come from the TypeScript (`Math.cos`/`Math.sin`) and stay
   resident in WebAssembly memory between calls of the same length;
 - `vexp`/`vlog`: glibc's `exp` and `log` over arrays, two lanes at a time
-  (`np.exp`, `np.log`).
+  (`np.exp`, `np.log`);
+- `sort_f64`/`argsort_f64`: a stable LSD radix sort on 64-bit keys that
+  order like the numbers (as a typed array's sort: -0 before +0, NaN last;
+  for `argsort` -0 equals +0). There are six 11-bit passes, each skipped
+  when all keys share that digit, so small integers take one or two
+  (`sort`, `argsort`, `unique`). In Node: `sort` of 10^6 doubles 121 → 29
+  ms, `argsort` 422 → 37 ms, `unique` of 10^5 small ints 10.7 → 3.5 ms.
+  NumPy's default `argsort` is not stable, and on x86-64 its order of equal
+  elements depends on the CPU (the AVX2 and scalar builds differ), so
+  sagebrush keeps the stable order.
 
 glibc's `exp` and `log` are compiled with fused multiply-adds on x86-64 (the
 FMA build), and NumPy calls them, so matching NumPy bit for bit means
