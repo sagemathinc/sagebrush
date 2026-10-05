@@ -22,25 +22,26 @@ node bench/browser/run.mjs        # prints a markdown table; also last-results.m
 See `last-results.md` for the latest run.
 
 **Summary:**
-- **sagebrush is faster** at startup (~8×, 0.4 s vs 3.0 s), pure Python
+- **sagebrush is faster** at startup (~8×, 0.4 s vs 3.2 s), pure Python
   (up to ~11×) and converting to Python objects (`tolist`).
-- With the Rust/WebAssembly SIMD kernels ([kernels/](../../kernels)),
-  **sagebrush is faster at dense linear algebra:** matmul 300×300 (3.6 ms
-  vs 25 ms, 7×), `det` 1000×1000 (122 vs 187 ms), `inv`, `eigh` (11.7 vs
-  14.5 ms), `svd` (24 vs 28 ms) and `eig` (6.7 vs 9.3 ms). `solve` is
-  close (2.5 vs 1.7 ms).
-- **They are even** on `sort`.
-- **They are close** on `exp` (8.2 vs 7.1 ms; the kernel itself is faster,
-  the rest is allocating the result).
-- **sagebrush is within ~1.3–3×** on random numbers, `sin`, `cumsum`,
-  `histogram`, the FFT (`fft` 2^16 3.3 vs 2.0 ms, `rfft` 10^6 25 vs 15 ms,
-  from 87 ms before the kernels) and boolean masks.
+- With the Rust/WebAssembly kernels ([kernels/](../../kernels)),
+  **sagebrush is faster at:**
+  - dense linear algebra: matmul 300×300 (3.5 vs 25 ms, 7×), `det`
+    1000×1000 (123 vs 187 ms), `inv`, `eigh`, `svd` and `eig`;
+  - sorting: `sort` 10^6 (27 vs 129 ms, 4.8×) and `argsort` (2.2×);
+  - random numbers: `rand` (8.1 vs 16.7 ms) and `randn` (24 vs 39 ms).
+- **They are even** on `exp`, and close on `solve`, `mean+std`, `cumsum` and
+  `histogram`.
+- **sagebrush is within ~1.5–2.5×** on `sin`, `sqrt`, the FFT, boolean
+  masks and `unique`.
 - **NumPy compiled to WebAssembly is ahead** on:
-  - `polyfit` and broadcasting (3–6×). `lstsq` (and so `polyfit`)
-    forms Q and U explicitly where LAPACK's `gelsd` does not.
-  - elementwise arithmetic on large arrays (`a*2+1`: ~7×). Here every
-    result is a fresh 8 MB typed array for the garbage collector to manage,
-    where WebAssembly reuses `malloc`'d memory.
+  - `polyfit` (3.8×): `lstsq` forms Q and U explicitly where LAPACK's
+    `gelsd` does not;
+  - elementwise arithmetic and broadcasting on large arrays (`a*2+1`:
+    5.5×). Here each result is a fresh 8 MB typed array, and Chromium
+    spends ~4 ms in page faults on its first write. Temporaries inside an
+    expression are reused (`a*2+1` allocates once), but the result itself
+    cannot be.
 
 **Next:** `lstsq` without explicit Q and U, and the cost of allocating
 results: in Chromium, writing a fresh 8 MB typed array costs ~4 ms of page
