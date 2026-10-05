@@ -77,6 +77,41 @@ Supported:
 
 numpy is not available yet, so pass lists.
 
+## Animation
+
+Three ways, all cheap because each frame takes milliseconds to compute:
+
+- **Sage `animate`.** It takes a list of Graphics, drawn on common axes:
+
+  ```python
+  a = animate([plot(sin(x - k), (x, 0, 4*pi)) for k in srange(0, 2*pi, 0.2)])
+  a.show(delay=5)       # hundredths of a second per frame, as in Sage
+  a.save('wave.svg')
+  ```
+
+  `a + b` combines two animations frame by frame, and `a * b` plays one
+  after the other.
+- **`matplotlib.animation`.** `FuncAnimation(fig, update, frames, interval)`
+  works the way it does in matplotlib: `line.set_data(...)`,
+  `ax.set_title(...)`, or `ax.clear()` and redraw. Limits you did not set are
+  frozen from the first frame, as in matplotlib. `ArtistAnimation(fig,
+  [[artists], ...])` is supported too.
+  - The animation appears as the value of `ani`, or with `plt.show()`, or with
+    `HTML(ani.to_jshtml())`.
+  - `ani.save('a.svg')` and `ani.save('a.html')` work. GIF and video writers
+    are not available.
+- **`@interact`'s ▶ button.** Every slider has one: it steps the slider
+  through its values and reruns the function live for each step, at up to
+  30 frames a second. Nothing is precomputed, so this is the analogue of
+  ipywidgets' `Play` widget linked to a slider.
+
+The output of the first two is one **animated SVG**. It holds every frame
+and plays by itself in any web browser through CSS, so a saved `.svg` file
+is a portable animation and no GIF encoder is needed. In the notebook it
+gets a player: play/pause, a frame slider and speed. It starts paused when
+the reader prefers reduced motion. Agents get the first, middle and last
+frames as PNG images.
+
 ## Display protocol
 
 Objects show through Jupyter's protocol: `_repr_svg_`, `_repr_png_`,

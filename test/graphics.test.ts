@@ -64,3 +64,30 @@ test("interact runs once with its defaults without a notebook", () => {
   const out2 = cli("-c", "from ipywidgets import interact\n@interact(k=(0.0, 1.0))\ndef g(k=0.3, n=5):\n    print(k, n)");
   assert.equal(out2, "0.3 5\n");
 });
+
+test("animations: Sage animate and matplotlib FuncAnimation give animated SVG", () => {
+  const out = cli("--sage", "-c", `
+a = animate([plot(sin(x + k), (x, 0, 2*pi)) for k in srange(0, 2*pi, 0.5)])
+print(a, a[0], (a * a), a + point((0, 0)))
+s = a._repr_svg_()
+print(s.count('class="sb-frame"'), 'data-delay="200"' in s, '@keyframes' in s)
+print(a.description()[:40])
+`);
+  const lines = out.trim().split("\n");
+  assert.equal(lines[0], "Animation with 13 frames Graphics object consisting of 1 graphics primitive Animation with 26 frames Animation with 13 frames");
+  assert.equal(lines[1], "13 True True");
+  assert.equal(lines[2], "Animation of 13 frames, 0.2 s each; firs");
+  const mpl = cli("-c", `
+import math
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+fig, ax = plt.subplots()
+line, = ax.plot([], [])
+def update(k):
+    line.set_data([0, 1, 2], [0, k, 2 * k])
+ani = FuncAnimation(fig, update, frames=4, interval=50)
+s = ani._repr_svg_()
+print(s.count('class="sb-frame"'), 'data-delay="50"' in s)
+`);
+  assert.equal(mpl, "4 True\n");
+});

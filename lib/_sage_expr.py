@@ -44,6 +44,16 @@ class Expr:
     def __rtruediv__(self, o): return self._bin("/", o, True)
     def __pow__(self, o): return self._bin("^", o)
     def __rpow__(self, o): return self._bin("^", o, True)
+    # Constant expressions (pi, 2*pi, sqrt(2)) compare as numbers.
+    def _cmp(self, other):
+        if self._names() or (isinstance(other, Expr) and other._names()):
+            raise TypeError("cannot compare symbolic expressions with variables: %s" % self)
+        return float(self), float(other)
+
+    def __lt__(self, o): a, b = self._cmp(o); return a < b
+    def __le__(self, o): a, b = self._cmp(o); return a <= b
+    def __gt__(self, o): a, b = self._cmp(o); return a > b
+    def __ge__(self, o): a, b = self._cmp(o); return a >= b
     def __neg__(self): return Expr("neg", (self,))
     def __pos__(self): return self
     def __abs__(self): return Expr("fn", ("abs", self))
