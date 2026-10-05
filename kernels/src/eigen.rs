@@ -5,7 +5,7 @@
 //! stored transposed, so that those walks are contiguous and the
 //! elementwise ones run two lanes at a time.
 
-use crate::{abs, axpy, axpy_neg, hypot, jsmax, ld, sqrt, st};
+use crate::{abs, axpy, axpy_neg, dot4, hypot, jsmax, ld, sqrt, st};
 use core::arch::wasm32::*;
 
 /// Euclidean norm of x[0..n], scaled to avoid overflow (nrm2 in the TS).
@@ -79,17 +79,11 @@ pub unsafe extern "C" fn dgeqr(c: *mut f64, m: usize, n: usize, v: *mut f64, bet
             *vj.add(i) = *cj.add(i);
         }
         *vj.add(j) -= alpha;
-        let mut vv = 0.0;
-        for i in j..m {
-            vv += *vj.add(i) * *vj.add(i);
-        }
+        let vv = dot4(vj.add(j), vj.add(j), m - j);
         let b = if vv == 0.0 { 0.0 } else { 2.0 / vv };
         for col in j..n {
             let cc = c.add(col * m);
-            let mut sum = 0.0;
-            for i in j..m {
-                sum += *vj.add(i) * *cc.add(i);
-            }
+            let mut sum = dot4(vj.add(j), cc.add(j), m - j);
             sum *= b;
             axpy_neg(cc.add(j), vj.add(j), sum, m - j);
         }
@@ -111,10 +105,7 @@ pub unsafe extern "C" fn dgeqr(c: *mut f64, m: usize, n: usize, v: *mut f64, bet
         }
         for col in 0..qc {
             let qq = q.add(col * m);
-            let mut sum = 0.0;
-            for i in j..m {
-                sum += *vj.add(i) * *qq.add(i);
-            }
+            let mut sum = dot4(vj.add(j), qq.add(j), m - j);
             if sum == 0.0 {
                 continue;
             }

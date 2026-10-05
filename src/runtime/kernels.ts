@@ -19,6 +19,10 @@ interface Exports {
   dsyev(w: number, n: number, d: number, e: number): number;
   dgeev(h: number, n: number, w: number, d: number, e: number, ort: number, tmp: number): number;
   dgesvd(a: number, m: number, n: number, u: number, v: number, s: number, e: number, work: number): number;
+  transpose(src: number, rows: number, cols: number, dst: number): void;
+  fft_stockham(x: number, y: number, n: number, f: number, nf: number, tc: number, ts: number, consts: number, inverse: number): number;
+  rfft_rows(data: number, rows: number, n: number, out: number, z: number, y: number, f: number, nf: number,
+            tch: number, tsh: number, tcn: number, tsn: number, consts: number): void;
 }
 
 let K: Exports | null | undefined;
@@ -48,9 +52,14 @@ export function wasmKernels(): boolean {
   return kernels() !== null;
 }
 
+// Which FFT twiddle tables sit at the start of the scratch area (any other
+// use of it clears this).
+let resident = "";
+
 // Make room for `doubles` float64s at the scratch base; returns the views
 // (valid until the next reserve).
 function reserve(doubles: number): void {
+  resident = "";
   const mem = K!.memory, need = base + doubles * 8;
   if (mem.buffer.byteLength < need) mem.grow(Math.ceil((need - mem.buffer.byteLength) / 65536));
   if (f64.buffer !== mem.buffer) {
@@ -63,13 +72,15 @@ function reserve(doubles: number): void {
 const GEMM_MIN = 4096, LU_MIN = 12, EIG_MIN = 4, WORK_MIN = 2000;
 
 // Lay out arrays of the given lengths (in doubles) in the scratch area:
-// their byte addresses, each 16-byte aligned.
+// their byte addresses, each 16-byte aligned.  Arrays are 9 cache lines
+// apart beyond their lengths, so that buffers of power-of-two sizes do not
+// all map to the same cache sets.
 function layout(...lens: number[]): number[] {
   const at: number[] = [];
   let o = 0;
   for (const len of lens) {
     at.push(base + o * 8);
-    o += len + (len & 1);
+    o += len + (len & 1) + 72;
   }
   reserve(o);
   return at;
@@ -123,12 +134,13 @@ export function wasmLuSolve(L: { lu: Float64Array; piv: number[] }, n: number, B
 export function wasmQR(A: Float64Array, m: number, n: number, complete: boolean): [Float64Array, Float64Array, number] | null {
   if (m * n * Math.min(m, n) < WORK_MIN || !kernels()) return null;
   const k = Math.min(m, n), qc = complete ? m : k;
-  const [c, v, beta, q] = layout(m * n, k * m, k, qc * m);
+  const [a, c, v, beta, q, qt] = layout(m * n, m * n, k * m, k, qc * m, m * qc);
+  view(a, m * n).set(A);
+  K!.transpose(a, m, n, c);
   const C = view(c, m * n);
-  for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) C[j * m + i] = A[i * n + j];
   K!.dgeqr(c, m, n, v, beta, q, qc);
-  const Qc = view(q, qc * m), Q = new Float64Array(m * qc);
-  for (let col = 0; col < qc; col++) for (let i = 0; i < m; i++) Q[i * qc + col] = Qc[col * m + i];
+  K!.transpose(q, qc, m, qt);
+  const Q = view(qt, m * qc).slice();
   const rr = complete ? m : k, R = new Float64Array(rr * n);
   for (let i = 0; i < Math.min(rr, m); i++) for (let col = i; col < n; col++) R[i * n + col] = C[col * m + i];
   return [Q, R, qc];
@@ -159,11 +171,62 @@ export function wasmGenEig(A: Float64Array, n: number): { d: Float64Array; e: Fl
 // as gkrSVD() in numpy_linalg.ts; "noconv" if it did not converge.
 export function wasmSVD(A: Float64Array, m: number, n: number): [Float64Array[], Float64Array, Float64Array[]] | "noconv" | null {
   if (m < n || m * n * n < WORK_MIN || n < 2 || !kernels()) return null;
-  const [a, u, v, s, e, work] = layout(m * n, m * n, n * n, n + 1, n, m);
-  const Am = view(a, m * n);
-  for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) Am[j * m + i] = A[i * n + j];
+  const [a0, a, u, v, s, e, work] = layout(m * n, m * n, m * n, n * n, n + 1, n, m);
+  view(a0, m * n).set(A);
+  K!.transpose(a0, m, n, a);
   if (K!.dgesvd(a, m, n, u, v, s, e, work)) return "noconv";
   const U = Array.from({ length: n }, (_, j) => view(u + j * m * 8, m).slice());
   const V = Array.from({ length: n }, (_, j) => view(v + j * n * 8, n).slice());
   return [U, view(s, n).slice(), V];
+}
+
+// FFT twiddle tables cos/sin(2 pi k/n), k < n, and the radix-3/5 constants:
+// computed by numpy_fft.ts, which passes them in.
+export interface Twiddles {
+  c: Float64Array;
+  s: Float64Array;
+}
+const FFT_MIN = 64;
+
+// The complex FFT (interleaved, length N, in place) by Stockham passes of
+// the given radices; false if the kernels are not used.
+export function wasmFFT(x: Float64Array, N: number, factors: number[], inverse: boolean, tw: Twiddles, consts: Float64Array): boolean {
+  if (N < FFT_MIN || !kernels()) return false;
+  const key = `c${N}`, keep = resident === key;
+  const [tc, ts, cs, f, xa, ya] = layout(N, N, 8, factors.length, 2 * N, 2 * N);
+  if (!keep) {
+    view(tc, N).set(tw.c);
+    view(ts, N).set(tw.s);
+    view(cs, 8).set(consts);
+  }
+  view(f, factors.length).set(factors);
+  view(xa, 2 * N).set(x);
+  const r = K!.fft_stockham(xa, ya, N, f, factors.length, tc, ts, cs, inverse ? 1 : 0);
+  x.set(view(r ? ya : xa, 2 * N));
+  resident = key;
+  return true;
+}
+
+// rfft of `rows` contiguous real rows of even length n from data[off..]
+// into out (rows x (n/2+1) interleaved complex, from out[ooff..]); the
+// half-length transform uses `factors`.
+export function wasmRfftRows(data: Float64Array, off: number, rows: number, n: number, out: Float64Array, ooff: number,
+                             factors: number[], twh: Twiddles, twn: Twiddles, consts: Float64Array): boolean {
+  const h = n / 2;
+  if (h < FFT_MIN || !kernels()) return false;
+  const key = `r${n}`, keep = resident === key;
+  const [tch, tsh, tcn, tsn, cs, f, z, y, d, o] = layout(h, h, n, n, 8, factors.length, n, n, rows * n, rows * 2 * (h + 1));
+  if (!keep) {
+    view(tch, h).set(twh.c);
+    view(tsh, h).set(twh.s);
+    view(tcn, n).set(twn.c);
+    view(tsn, n).set(twn.s);
+    view(cs, 8).set(consts);
+  }
+  view(f, factors.length).set(factors);
+  view(d, rows * n).set(data.subarray(off, off + rows * n));
+  K!.rfft_rows(d, rows, n, o, z, y, f, factors.length, tch, tsh, tcn, tsn, cs);
+  out.set(view(o, rows * 2 * (h + 1)), ooff);
+  resident = key;
+  return true;
 }

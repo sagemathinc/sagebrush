@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-// The WebAssembly kernels (kernels/src) must give exactly the bits of the
-// JavaScript code they replace.
+// The WebAssembly kernels (kernels/src: linear algebra, FFT) must give
+// exactly the bits of the JavaScript code they replace.
 const program = `
 import numpy as np, _nplinalg
 np.random.seed(7)
@@ -37,6 +37,13 @@ for shape in [(40, 9), (9, 40), (300, 8), (17, 12)]:
     rec(np.linalg.pinv(a), np.linalg.lstsq(a, np.arange(shape[0] * 1.0), rcond=None)[0])
 x = np.linspace(0, 1, 1000)
 rec(np.polyfit(x, np.sin(x), 9), np.roots(np.arange(1.0, 15.0)))
+for n in [64, 96, 250, 343, 1331, 2310, 4096, 1009]:
+    z = np.random.randn(n) + 1j * np.random.randn(n)
+    f = np.fft.fft(z)
+    rec(f.real, f.imag, np.fft.ifft(z).real)
+    if n % 2 == 0:
+        r = np.fft.rfft(z.real)
+        rec(r.real, r.imag)
 `;
 
 const run = (noWasm: boolean) =>

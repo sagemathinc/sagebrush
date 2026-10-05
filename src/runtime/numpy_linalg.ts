@@ -46,6 +46,23 @@ function hypot(a: number, b: number): number {
   return Math.sqrt(x * x + y * y) * max;
 }
 
+// The dot product of x[xo..xo+n] and y[yo..yo+n] with four partial sums
+// (of the terms i = 0, 1, 2, 3 mod 4), combined as (s0 + s2) + (s1 + s3),
+// then the last n mod 4 terms in order; as dot4 in kernels/src/lib.rs.
+// Four independent sums run about four times faster than one.
+function dot4(x: Float64Array, xo: number, y: Float64Array, yo: number, n: number): number {
+  let s0 = 0, s1 = 0, s2 = 0, s3 = 0, i = 0;
+  for (; i + 4 <= n; i += 4) {
+    s0 += x[xo + i] * y[yo + i];
+    s1 += x[xo + i + 1] * y[yo + i + 1];
+    s2 += x[xo + i + 2] * y[yo + i + 2];
+    s3 += x[xo + i + 3] * y[yo + i + 3];
+  }
+  let r = s0 + s2 + (s1 + s3);
+  for (; i < n; i++) r += x[xo + i] * y[yo + i];
+  return r;
+}
+
 // Euclidean norm of x[off + i*stride], i < n, scaled to avoid overflow (as dnrm2).
 function nrm2(x: Float64Array, off: number, n: number, stride: number): number {
   let big = 0;
@@ -147,13 +164,11 @@ function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64A
     const alpha = cj[j] > 0 ? -norm : norm;
     for (let i = j; i < m; i++) v[i] = cj[i];
     v[j] -= alpha;
-    let vv = 0;
-    for (let i = j; i < m; i++) vv += v[i] * v[i];
+    const vv = dot4(v, j, v, j, m - j);
     const beta = vv === 0 ? 0 : 2 / vv;
     for (let c = j; c < n; c++) {
       const cc = cols[c];
-      let sum = 0;
-      for (let i = j; i < m; i++) sum += v[i] * cc[i];
+      let sum = dot4(v, j, cc, j, m - j);
       sum *= beta;
       for (let i = j; i < m; i++) cc[i] -= sum * v[i];
     }
@@ -172,8 +187,7 @@ function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64A
     if (beta === 0) continue;
     for (let c = 0; c < qc; c++) {
       const q = Qcols[c];
-      let sum = 0;
-      for (let i = j; i < m; i++) sum += v[i] * q[i];
+      let sum = dot4(v, j, q, j, m - j);
       if (sum === 0) continue;
       sum *= beta;
       for (let i = j; i < m; i++) q[i] -= sum * v[i];

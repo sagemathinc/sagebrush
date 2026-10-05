@@ -5,6 +5,13 @@
 
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
+import { wasmFFT, wasmRfftRows } from "./kernels";
+
+// cos/sin of 2 pi/3, 4 pi/3, 2 pi/5, 4 pi/5, for the WebAssembly kernels
+// (the same values stockhamI computes)
+const RADIX_CONSTS = Float64Array.from([3, 5].flatMap((R) => [
+  Math.cos((2 * Math.PI) / R), Math.sin((2 * Math.PI) / R), Math.cos((4 * Math.PI) / R), Math.sin((4 * Math.PI) / R),
+]));
 
 // Per-size tables: twiddles cos/sin(2*pi*k/n) for k < n/2 and the bit-reversal permutation.
 const tables = new Map<number, { c: Float64Array; s: Float64Array; rev: Uint32Array }>();
@@ -125,6 +132,7 @@ function twiddle(n: number) {
 }
 // x: interleaved complex (re, im, re, im ...) of length 2N; result back in x.
 function stockhamI(x: Float64Array, N: number, factors: number[], inverse: boolean) {
+  if (wasmFFT(x, N, factors, inverse, twiddle(N), RADIX_CONSTS)) return;
   const { c: TC, s: TS } = twiddle(N);
   const sg = inverse ? 1 : -1;
   let X: Float64Array<ArrayBufferLike> = x, Y: Float64Array<ArrayBufferLike> = new Float64Array(2 * N);
@@ -328,6 +336,8 @@ newBuiltinModule("_npfft", (m) => {
   m.rfft_rows = Obj.builtin((data: any, rows: any, n: any, out: any) => {
     const R = Number(rows), N = Number(n), H = N / 2 + 1;
     const d = data.data as Float64Array, od = out.data as Float64Array;
+    const f = factorize(N / 2);
+    if (f && wasmRfftRows(d, data.offset, R, N, od, 2 * out.offset, f, twiddle(N / 2), twiddle(N), RADIX_CONSTS)) return null;
     const re = new Float64Array(H), im = new Float64Array(H);
     for (let r = 0; r < R; r++) {
       rfftEven(d, data.offset + r * N, N, re, im);
