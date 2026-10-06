@@ -18,6 +18,15 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+class Vector(list):
+    """A row of a matrix, printed as Sage prints vectors: (1, 2, 3)."""
+
+    def __repr__(self):
+        return "(" + ", ".join(repr(x) for x in self) + ")"
+
+    __str__ = __repr__
+
+
 class MatrixSpace_:
     def __init__(self, base, nrows, ncols):
         self._base, self._nrows, self._ncols = base, nrows, ncols
@@ -79,7 +88,7 @@ class Matrix:
         if isinstance(ij, tuple):
             i, j = ij
             return self._rows[i][j]
-        return list(self._rows[ij])
+        return Vector(self._rows[ij])
 
     def __setitem__(self, ij, v):
         i, j = ij

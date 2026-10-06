@@ -20,7 +20,9 @@
 // whose function is running, whose output area should receive it.
 import "./shims/process";
 // the engines are a separate file, loaded (synchronously) the first time Python calls them
-(globalThis as any).__SAGEBRUSH_ENGINE_URL__ = new URL("sagebrush-engine.wasm", self.location.href).href;
+// (with its content hash, set by web/build.ts, so a new engine is never stale in a cache)
+declare const __SB_ENGINE_HASH__: string;
+(globalThis as any).__SAGEBRUSH_ENGINE_URL__ = new URL("sagebrush-engine.wasm?h=" + __SB_ENGINE_HASH__, self.location.href).href;
 import "../build/cli/lib.gen.js";
 import { __hooks, load as loadFiles, put as putFile } from "./shims/fs";
 import { initParser, R, libDir } from "../src/compile";
