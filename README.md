@@ -279,6 +279,14 @@ people actually use (Python and JavaScript), and the work went into making
 results fast, parallel and certified. The pyjs code remains here for
 reference.
 
+## Acknowledgements
+
+The a_p engine (`engine/ap`) follows the genus-1 strategy of smalljac, by
+Andrew V. Sutherland (with Kiran Kedlaya; "Computing L-series of
+hyperelliptic curves", ANTS 2008). We thank Drew Sutherland for his
+permission, given on 2026-10-02, for this port to be licensed however
+Sagebrush chooses; see `engine/ap/PROVENANCE.md`.
+
 ## License
 
 Sagebrush's code is to be MIT OR Apache-2.0 (see Principles).
