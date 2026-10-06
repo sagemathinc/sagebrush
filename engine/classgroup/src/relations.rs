@@ -8,9 +8,12 @@
 //! lies in the class of phi^-1, so
 //!     sum_{p | m} s_p v_p(m) [p] + sum_q t_q [q] = 0
 //! where s_p = +1 when B = b_p (mod 2p), else -1, and t_q likewise with b:
-//! a relation, found with u64/i128 arithmetic only.
+//! a relation, found with u64/i128 arithmetic (and one big-integer
+//! division per polynomial, for c).
 
 use crate::arith::*;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 
 /// A prime ideal of norm p, as the prime form (p, b_p, .): b_p^2 = D mod 4p,
 /// 0 <= b_p <= p.
@@ -44,28 +47,29 @@ fn inv_2_64(p: u64) -> u64 {
 }
 
 pub struct FactorBase {
-    pub d: i128,
+    pub d: BigInt,
     pub primes: Vec<FbPrime>,
     /// index of p in primes, by p (for large-prime lookups too)
     pub index: std::collections::HashMap<u64, usize>,
 }
 
 /// b with b^2 = D (mod 4p), 0 <= b <= p, b = D (mod 2); None if p is inert.
-pub fn prime_form_b(d: i128, p: u64) -> Option<i128> {
+pub fn prime_form_b(d: &BigInt, p: u64) -> Option<i128> {
+    let d8 = bigmod(d, 8);
     if p == 2 {
-        return match d.rem_euclid(8) {
+        return match d8 {
             1 => Some(1),
             0 => Some(0),
             4 => Some(2),
             _ => None,
         };
     }
-    let k = kronecker(d, p);
-    if k < 0 {
+    let dp = bigmod(d, p);
+    if kronecker_res(d8, dp, p) < 0 {
         return None;
     }
-    let mut t = sqrt_mod(reduce(d, p), p) as i128;
-    if (t - d).rem_euclid(2) != 0 {
+    let mut t = sqrt_mod(dp, p) as i128;
+    if (t - d8 as i128).rem_euclid(2) != 0 {
         t = p as i128 - t;
     }
     // b in [0, p] with b = t (mod p) and b = D (mod 2)
@@ -73,18 +77,18 @@ pub fn prime_form_b(d: i128, p: u64) -> Option<i128> {
 }
 
 impl FactorBase {
-    pub fn new(d: i128, bound: u64) -> FactorBase {
+    pub fn new(d: &BigInt, bound: u64) -> FactorBase {
         let mut primes = vec![];
         let mut index = std::collections::HashMap::new();
         for p in primes_up_to(bound) {
             if let Some(b) = prime_form_b(d, p) {
-                let t = if p == 2 { 0 } else { sqrt_mod(reduce(d, p), p) };
+                let t = if p == 2 { 0 } else { sqrt_mod(bigmod(d, p), p) };
                 index.insert(p, primes.len());
                 let (pinv, plim) = if p % 2 == 1 { (inv_2_64(p), u64::MAX / p) } else { (0, 0) };
                 primes.push(FbPrime { p, b, t, logp: (p as f64).log2().round() as u8, pinv, plim });
             }
         }
-        FactorBase { d, primes, index }
+        FactorBase { d: d.clone(), primes, index }
     }
 
     /// s = +1 if B = b_p (mod 2p), -1 if B = -b_p (mod 2p).
@@ -149,8 +153,9 @@ impl Rng {
 /// the first prime of each a is the least covered one, so that every
 /// column gets relations (each relation of a polynomial contains all of a).
 pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mut Stats, counts: &mut Vec<u32>) -> Vec<Relation> {
-    let d = fb.d;
-    let absd = (-d) as u128;
+    let d = &fb.d;
+    let d_odd = bigmod(d, 2) as i128;
+    let absd = -d.to_f64().unwrap();
     let n = fb.primes.len();
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ seed);
     let m = par.m;
@@ -162,7 +167,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
     let ns = fb.primes.partition_point(|fp| fp.p <= par.sieve_bound);
     let lp_max = pmax * par.lp_mult;
     // target a ~ sqrt(|D|) / (2m); choose q's of a size so that k is small
-    let target = ((absd as f64).sqrt() / (2.0 * m as f64)).max(3.0);
+    let target = (absd.sqrt() / (2.0 * m as f64)).max(3.0);
     // candidate q's: odd FB primes (ramified ones too: their b is 0 mod q)
     let qs: Vec<usize> = (0..n).filter(|&i| fb.primes[i].p > 2 && fb.primes[i].p >= par.small.min(pmax / 4).max(3)).collect();
     // partners of the first q: sieved primes, which occur in many other
@@ -183,7 +188,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
     };
     // the sieve threshold for a polynomial with leading coefficient a
     let threshold = |a: f64| -> u8 {
-        let vmax = (a * (m as f64) * (m as f64) + (absd as f64) / (4.0 * a)).log2();
+        let vmax = (a * (m as f64) * (m as f64) + absd / (4.0 * a)).log2();
         ((vmax - (lp_max as f64).log2()).max(1.0) as u8).saturating_sub(par.slack)
     };
     let mut roots1 = vec![0i64; n];
@@ -235,12 +240,11 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                 aq * mulmod(inv, fb.primes[i].t, q) as i128
             })
             .collect();
-        let au = u64::try_from(a).expect("a < 2^64");
         // (2a)^-1 mod p for the sieved primes; 0 marks the others (p small
         // or dividing a), which are trial divided directly
         for (i, fp) in fb.primes[..ns].iter().enumerate() {
             let p = fp.p;
-            let ap = au % p;
+            let ap = reduce(a, p);
             inv2a[i] = if p < par.small || ap == 0 { 0 } else { invmod(2 * ap % p, p) };
         }
         // all 2^(k-1) sign choices (the first sign fixed)
@@ -250,14 +254,14 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                 b += if signs >> (l - 1) & 1 == 1 { -bl[l] } else { bl[l] };
             }
             b = b.rem_euclid(a);
-            if (b - d).rem_euclid(2) != 0 {
+            if (b - d_odd).rem_euclid(2) != 0 {
                 b += a; // a is odd: b^2 = D mod 4 as well
             }
-            debug_assert_eq!((b * b - d).rem_euclid(4 * a), 0);
-            let c = (b * b - d) / (4 * a);
+            // c = (b^2 - D) / 4a, exact; |c| ~ |D| / 4a fits in i128
+            let bb0 = BigInt::from(b);
+            let c = ((&bb0 * &bb0 - d) / BigInt::from(4 * a)).to_i128().expect("c fits in i128");
             stats.polys += 1;
-            // roots of a x^2 + b x + c mod p: x = (-b +- t) / 2a; b < 2a < 2^64
-            let bu = b as u64;
+            // roots of a x^2 + b x + c mod p: x = (-b +- t) / 2a
             for (i, fp) in fb.primes[..ns].iter().enumerate() {
                 let inv = inv2a[i];
                 if inv == 0 {
@@ -265,7 +269,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                     continue;
                 }
                 let p = fp.p;
-                let mb = p - bu % p;
+                let mb = p - reduce(b, p);
                 let r1 = (mb + fp.t) % p * inv % p;
                 let r2 = (mb + p - fp.t) % p * inv % p;
                 // first index i = x + m with x = r mod p
@@ -461,7 +465,7 @@ mod tests {
                 continue;
             }
             let ld = ((-d) as f64).ln();
-            let fb = FactorBase::new(d, (6.0 * ld * ld) as u64);
+            let fb = FactorBase::new(&BigInt::from(d), (6.0 * ld * ld) as u64);
             let par = Params { m: 1 << 13, small: 30, lp_mult: 30, slack: 2, sieve_bound: 3000 };
             let mut st = Stats { polys: 0, candidates: 0, full: 0, partial_pairs: 0 };
             let mut counts = vec![0; fb.primes.len()];

@@ -83,14 +83,27 @@ pub fn reduce(a: i128, p: u64) -> u64 {
 
 /// The Kronecker symbol (D / p) for a prime p.
 pub fn kronecker(d: i128, p: u64) -> i32 {
+    kronecker_res(d.rem_euclid(8) as u64, reduce(d, p), p)
+}
+
+/// D mod m (in [0, m)) for a D of any size.
+pub fn bigmod(d: &num_bigint::BigInt, m: u64) -> u64 {
+    use num_integer::Integer;
+    use num_traits::ToPrimitive;
+    d.mod_floor(&num_bigint::BigInt::from(m)).to_u64().unwrap()
+}
+
+/// The Kronecker symbol (D / p) for a prime p, from d8 = D mod 8 and
+/// dp = D mod p.
+pub fn kronecker_res(d8: u64, dp: u64, p: u64) -> i32 {
     if p == 2 {
-        return match d.rem_euclid(8) {
+        return match d8 {
             1 | 7 => 1,
             3 | 5 => -1,
             _ => 0,
         };
     }
-    jacobi(reduce(d, p), p)
+    jacobi(dp, p)
 }
 
 /// The Jacobi symbol (a / n) for odd n, by the binary algorithm.
