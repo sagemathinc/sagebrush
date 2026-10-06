@@ -178,7 +178,22 @@ the engines.
 
 ## Try it
 
-You need Rust (stable), `uv` and Node.js.
+From Python (3.9 or later; a 1.2 MB wheel for Linux, macOS and Windows):
+
+```sh
+pip install sagebrush
+```
+
+```python
+>>> from sagebrush import nf
+>>> nf.bnf([-11, 0, 0, 1])["cyc"]      # class group of Q(cbrt 11): C2
+[2]
+```
+
+See [engine/py/README.md](engine/py/README.md). In the browser, open
+[sagebrush.space](https://sagebrush.space).
+
+To build from source you need Rust (stable), `uv` and Node.js.
 
 ```sh
 cd engine
