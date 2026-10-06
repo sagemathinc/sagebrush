@@ -374,7 +374,7 @@ pub fn hnf_mod(rows: &[Vec<i64>], n: usize, d0: &BigInt) -> Vec<Vec<BigInt>> {
     w
 }
 
-/// hnf_mod with a word-sized modulus d < 2^62 (i128 arithmetic).
+/// hnf_mod with a word-sized modulus d < 2^62.
 pub fn hnf_mod_small(rows: &[Vec<i64>], n: usize, d: i128) -> Vec<Vec<i128>> {
     hnf_mod_small_until(rows, n, d, 0.0)
 }
@@ -382,64 +382,94 @@ pub fn hnf_mod_small(rows: &[Vec<i64>], n: usize, d: i128) -> Vec<Vec<i128>> {
 /// hnf_mod_small, stopping once the determinant (the diagonal product) is
 /// at most `enough` (0: process every row).
 pub fn hnf_mod_small_until(rows: &[Vec<i64>], n: usize, d: i128, enough: f64) -> Vec<Vec<i128>> {
-    assert!(d > 0 && d < 1 << 62);
-    let md = ModD::new(d as u64);
-    let du = d as u64;
-    let mut w: Vec<Vec<u64>> = (0..n).map(|i| (0..n).map(|j| if i == j { du } else { 0 }).collect()).collect();
-    let mut v = vec![0u64; n];
+    hnf_mod_until(rows, n, ModD::new(d as u64), enough).into_iter().map(|r| r.into_iter().map(|x| x as i128).collect()).collect()
+}
+
+/// Residues modulo d, in [0, d) (d itself is allowed as an HNF diagonal).
+pub trait Modulus: Copy {
+    type E: Copy + PartialEq + Into<u128>;
+    fn d(&self) -> Self::E;
+    /// x < 2^127, reduced
+    fn from_u128(&self, x: u128) -> Self::E;
+    fn add(&self, a: Self::E, b: Self::E) -> Self::E;
+    fn mul(&self, a: Self::E, b: Self::E) -> Self::E;
+}
+
+/// The HNF of the lattice spanned by `rows` and d Z^n, by rows modulo d,
+/// stopping once the diagonal product is at most `enough` (0: never).
+pub fn hnf_mod_until<M: Modulus>(rows: &[Vec<i64>], n: usize, md: M, enough: f64) -> Vec<Vec<u128>> {
+    let du = md.d();
+    let d: u128 = du.into();
+    let di = d as i128;
+    let zero = md.from_u128(0);
+    let mut w: Vec<Vec<M::E>> = (0..n).map(|i| (0..n).map(|j| if i == j { du } else { zero }).collect()).collect();
+    let mut v = vec![zero; n];
+    let neg = |x: M::E| -> M::E { md.from_u128((d - x.into()) % d) };
     for (k, r) in rows.iter().enumerate() {
         if enough > 0.0 && k % 8 == 7 && k >= n {
-            let delta: f64 = (0..n).map(|i| w[i][i] as f64).product();
+            let delta: f64 = (0..n).map(|i| w[i][i].into() as f64).product();
             if delta <= enough {
                 break;
             }
         }
         for j in 0..n {
-            v[j] = (r[j] as i128).rem_euclid(d) as u64;
+            v[j] = md.from_u128((r[j] as i128).rem_euclid(di) as u128);
         }
         for i in 0..n {
-            if v[i] == 0 {
+            let vi: u128 = v[i].into();
+            if vi == 0 {
                 continue;
             }
-            let wii = w[i][i];
-            if v[i] % wii == 0 {
+            let wii: u128 = w[i][i].into();
+            if vi % wii == 0 {
                 // v -= (v_i / w_ii) w_i: no change to w
-                let f = du - v[i] / wii;
+                let f = neg(md.from_u128(vi / wii));
                 for j in i..n {
                     v[j] = md.add(v[j], md.mul(f, w[i][j]));
                 }
                 continue;
             }
-            let (g, x, y) = crate::arith::xgcd(wii as i128, v[i] as i128);
-            let (wi, vi) = ((wii as i128 / g) as u64, (v[i] as i128 / g) as u64);
-            let (x, y) = (x.rem_euclid(d) as u64, y.rem_euclid(d) as u64);
-            let nvi = du - vi;
+            let (g, x, y) = crate::arith::xgcd(wii as i128, vi as i128);
+            let wi = md.from_u128((wii as i128 / g) as u128);
+            let nvi = neg(md.from_u128((vi as i128 / g) as u128));
+            let (x, y) = (md.from_u128(x.rem_euclid(di) as u128), md.from_u128(y.rem_euclid(di) as u128));
             for j in i..n {
                 let (a, b) = (w[i][j], v[j]);
                 w[i][j] = md.add(md.mul(x, a), md.mul(y, b));
                 v[j] = md.add(md.mul(wi, b), md.mul(nvi, a));
             }
-            w[i][i] = g as u64;
+            w[i][i] = md.from_u128(g as u128);
         }
     }
-    w.into_iter().map(|r| r.into_iter().map(|x| x as i128).collect()).collect()
+    w.into_iter().map(|r| r.into_iter().map(|x| x.into()).collect()).collect()
 }
 
 /// Arithmetic modulo d < 2^62 (any d), by Barrett reduction: with
 /// k = bits(d) and mu = floor(2^2k / d), the quotient estimate
 /// ((x >> (k-1)) mu) >> (k+1) is at most 2 too small.
 #[derive(Clone, Copy)]
-struct ModD {
+pub struct ModD {
     d: u64,
     mu: u64,
     k: u32,
 }
 
 impl ModD {
-    fn new(d: u64) -> Self {
+    pub fn new(d: u64) -> Self {
         assert!(d > 0 && d < 1 << 62);
         let k = 64 - d.leading_zeros();
         ModD { d, mu: ((1u128 << (2 * k)) / d as u128) as u64, k }
+    }
+}
+
+impl Modulus for ModD {
+    type E = u64;
+    fn d(&self) -> u64 {
+        self.d
+    }
+    #[inline(always)]
+    fn from_u128(&self, x: u128) -> u64 {
+        x as u64
     }
     #[inline(always)]
     fn add(&self, a: u64, b: u64) -> u64 {
@@ -458,32 +488,96 @@ impl ModD {
     }
 }
 
+/// The 256-bit product of two u128, as (high, low).
+#[inline(always)]
+fn mul_wide(a: u128, b: u128) -> (u128, u128) {
+    let (a0, a1) = (a as u64 as u128, a >> 64);
+    let (b0, b1) = (b as u64 as u128, b >> 64);
+    let (p00, p01, p10, p11) = (a0 * b0, a0 * b1, a1 * b0, a1 * b1);
+    let mid = (p00 >> 64) + (p01 as u64 as u128) + (p10 as u64 as u128);
+    ((p11 + (p01 >> 64) + (p10 >> 64) + (mid >> 64)), (p00 as u64 as u128) | (mid << 64))
+}
+
+/// Arithmetic modulo d < 2^126 (any d): Barrett as in ModD, with 256-bit
+/// intermediate products.
+#[derive(Clone, Copy)]
+pub struct ModD128 {
+    d: u128,
+    mu: u128,
+    k: u32,
+}
+
+impl ModD128 {
+    pub fn new(d: u128) -> Self {
+        assert!(d > 1 && d < 1 << 126);
+        let k = 128 - d.leading_zeros();
+        let mu = ((BigInt::one() << (2 * k)) / BigInt::from(d)).to_u128().unwrap();
+        ModD128 { d, mu, k }
+    }
+}
+
+impl Modulus for ModD128 {
+    type E = u128;
+    fn d(&self) -> u128 {
+        self.d
+    }
+    #[inline(always)]
+    fn from_u128(&self, x: u128) -> u128 {
+        x
+    }
+    #[inline(always)]
+    fn add(&self, a: u128, b: u128) -> u128 {
+        let s = a + b;
+        if s >= self.d { s - self.d } else { s }
+    }
+    #[inline(always)]
+    fn mul(&self, a: u128, b: u128) -> u128 {
+        let k = self.k;
+        let (hi, lo) = mul_wide(a, b);
+        // t = x >> (k - 1) < 2^(k+1)
+        let t = if k == 1 { lo } else { (hi << (129 - k)) | (lo >> (k - 1)) };
+        let (qh, ql) = mul_wide(t, self.mu);
+        let q = (qh << (127 - k)) | (ql >> (k + 1));
+        let mut r = lo.wrapping_sub(q.wrapping_mul(self.d));
+        while r >= self.d {
+            r -= self.d;
+        }
+        r
+    }
+}
+
 /// The matrix of relations among the generators with HNF diagonal > 1,
 /// after substituting away the others (each e_i with w_ii = 1 is minus a
 /// combination of later generators).  `w` is a mod-d HNF whose lattice
 /// contains d Z^n; the result has the same cokernel and is usually 1x1 to
 /// 3x3, so Smith form is then cheap.
-pub fn cokernel_small(w: &[Vec<i128>], d: i128) -> Vec<Vec<BigInt>> {
+pub fn cokernel<M: Modulus>(w: &[Vec<u128>], md: M) -> Vec<Vec<BigInt>> {
     let n = w.len();
-    let md = ModD::new(d as u64);
-    let du = d as u64;
+    let d: u128 = md.d().into();
     let big: Vec<usize> = (0..n).filter(|&i| w[i][i] != 1).collect();
     let mut out = vec![];
     for &k in &big {
-        let mut r: Vec<u64> = w[k].iter().map(|&x| x.rem_euclid(d) as u64).collect();
-        r[k] = w[k][k] as u64; // d itself when w_kk = d
+        let mut r: Vec<M::E> = w[k].iter().map(|&x| md.from_u128(x % d)).collect();
         for i in k + 1..n {
-            if r[i] == 0 || w[i][i] != 1 {
+            let ri: u128 = r[i].into();
+            if ri == 0 || w[i][i] != 1 {
                 continue;
             }
-            let f = du - r[i];
+            let f = md.from_u128(d - ri);
             for j in i..n {
-                r[j] = md.add(r[j], md.mul(f, w[i][j].rem_euclid(d) as u64));
+                r[j] = md.add(r[j], md.mul(f, md.from_u128(w[i][j])));
             }
         }
-        out.push(big.iter().map(|&j| BigInt::from(r[j])).collect());
+        // the diagonal entry itself (d when w_kk = d)
+        out.push(big.iter().map(|&j| BigInt::from(if j == k { w[k][k] } else { r[j].into() })).collect());
     }
     out
+}
+
+/// cokernel for a word-sized modulus.
+pub fn cokernel_small(w: &[Vec<i128>], d: i128) -> Vec<Vec<BigInt>> {
+    let w: Vec<Vec<u128>> = w.iter().map(|r| r.iter().map(|&x| x as u128).collect()).collect();
+    cokernel(&w, ModD::new(d as u64))
 }
 
 /// The Smith normal form invariants (> 1) of a square nonsingular matrix,
@@ -573,6 +667,34 @@ mod tests {
 
     fn bm(v: &[&[i64]]) -> Vec<Vec<BigInt>> {
         v.iter().map(|r| r.iter().map(|&x| BigInt::from(x)).collect()).collect()
+    }
+
+    #[test]
+    fn barrett_128() {
+        let mut x = 0x9E37_79B9_7F4A_7C15_F39C_C060_5CED_C835u128;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for bits in [2u32, 3, 40, 63, 64, 65, 100, 125, 126] {
+            for _ in 0..200 {
+                let d = (next() >> (128 - bits)).max(2) | (1 << (bits - 1)) >> 1;
+                let d = d.max(2);
+                if d >= 1 << 126 {
+                    continue;
+                }
+                let md = ModD128::new(d);
+                let (a, b) = (next() % d, next() % d);
+                let want = (BigInt::from(a) * BigInt::from(b)) % BigInt::from(d);
+                assert_eq!(BigInt::from(md.mul(a, b)), want, "{} * {} mod {}", a, b, d);
+                assert_eq!(md.add(a, b), ((BigInt::from(a) + b) % d).to_u128().unwrap());
+            }
+        }
+        // the HNF through the 128-bit path: Z^2 / <(2,0),(0,4)> with d = 2^100
+        let w = hnf_mod_until(&[vec![2, 0], vec![0, 4], vec![2, 4]], 2, ModD128::new(1 << 100), 0.0);
+        assert_eq!(smith(&cokernel(&w, ModD128::new(1 << 100))), vec![BigInt::from(4), BigInt::from(2)]);
     }
 
     #[test]

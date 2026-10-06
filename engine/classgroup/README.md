@@ -10,7 +10,8 @@ read. No PARI source was read or ported.
 
 ## Status
 
-- Fundamental discriminants D < 0 with |D| < 2^118.
+- Fundamental discriminants D < 0 with |D| < 2^200. The sieve's values must
+  fit in i128; D itself is a big integer.
 - The result is `h` and the invariants `cyc`, in the same order as PARI's
   `quadclassunit(D).cyc`.
 - The result assumes GRH, like PARI's default.
@@ -43,7 +44,9 @@ cargo run --release -p sagebrush-classgroup --example qcl -- -100000000000000000
 4. **A multiple of the determinant.** Take the gcd of the determinants of two
    or three independent square subsets of the core. The determinants are
    computed by CRT over word-size primes, with lazily reduced elimination.
-5. **Hermite normal form modulo that multiple**, in u64 Barrett arithmetic. It
+5. **Hermite normal form modulo that multiple**, in Barrett arithmetic: u64
+   below 2^62, and u128 with 256-bit products below 2^126 (h > 2^62 from
+   about 10^38). It
    stops as soon as the determinant drops below √2·ĥ. Here ĥ is the analytic
    class number formula with L(1, χ) from Bach's weighted average of
    truncated Euler products.
@@ -86,3 +89,14 @@ including non-cyclic groups.
 | 31 |   770 |   76 |
 | 33 |  1850 |  116 |
 | 35 |  2299 |  213 |
+
+Beyond 10^35, one discriminant per size. All six agree with PARI:
+
+| k  | PARI (s) | ours (s) | ratio |
+|----|---------:|---------:|------:|
+| 37 |     11.1 |     0.45 |   24× |
+| 39 |     13.2 |     0.61 |   22× |
+| 41 |     48.6 |     1.11 |   44× |
+| 43 |     30.3 |     1.02 |   30× |
+| 45 |     97.1 |     2.89 |   34× |
+| 47 |    219.4 |     5.37 |   41× |
