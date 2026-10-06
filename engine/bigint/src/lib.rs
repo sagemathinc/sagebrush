@@ -16,6 +16,14 @@ pub use num_bigint::{BigInt, BigUint, Sign};
 #[cfg(not(feature = "num-backend"))]
 mod dashu_impl;
 #[cfg(not(feature = "num-backend"))]
+pub mod hgcd;
+
+/// Long loops in this crate check for Ctrl-C (engine/interrupt).
+#[allow(dead_code)]
+pub(crate) fn check_interrupt() {
+    sagebrush_interrupt::check();
+}
+#[cfg(not(feature = "num-backend"))]
 pub use dashu_impl::{BigInt, BigUint, Sign};
 
 /// Rationals over [`BigInt`].
