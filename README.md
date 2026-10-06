@@ -185,12 +185,17 @@ pip install sagebrush
 ```
 
 ```python
->>> from sagebrush import nf
->>> nf.bnf([-11, 0, 0, 1])["cyc"]      # class group of Q(cbrt 11): C2
-[2]
+>>> from sagebrush.sage import *      # Sage's names and printing
+>>> x = PolynomialRing(QQ, 'x').gen()
+>>> K = NumberField(x**3 + 17*x + 1, 'a')
+>>> K.class_group()
+Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^3 + 17*x + 1
 ```
 
-See [engine/py/README.md](engine/py/README.md). In the browser, open
+`sagebrush.sage` is plain Python (`x**3`, not `x^3`); its output is checked
+line by line against Sage's (`sage-tests/run_cpython.py`). The engines are
+also directly available (`from sagebrush import nf, mf, ap, poly`); see
+[engine/py/README.md](engine/py/README.md). In the browser, open
 [sagebrush.space](https://sagebrush.space).
 
 To build from source you need Rust (stable), `uv` and Node.js.

@@ -1,0 +1,11 @@
+# Generated from ../test_newforms.sage by Sage's preparser (run_cpython.py --regen).
+_sage_const_11 = Integer(11); _sage_const_14 = Integer(14); _sage_const_15 = Integer(15); _sage_const_26 = Integer(26); _sage_const_37 = Integer(37); _sage_const_57 = Integer(57); _sage_const_58 = Integer(58); _sage_const_66 = Integer(66); _sage_const_99 = Integer(99); _sage_const_121 = Integer(121); _sage_const_128 = Integer(128); _sage_const_162 = Integer(162); _sage_const_210 = Integer(210); _sage_const_0 = Integer(0); _sage_const_20 = Integer(20); _sage_const_50 = Integer(50); _sage_const_12 = Integer(12); _sage_const_44 = Integer(44); _sage_const_2 = Integer(2); _sage_const_10 = Integer(10); _sage_const_102 = Integer(102); _sage_const_112 = Integer(112); _sage_const_120 = Integer(120); _sage_const_294 = Integer(294); _sage_const_3 = Integer(3); _sage_const_5 = Integer(5); _sage_const_7 = Integer(7); _sage_const_30 = Integer(30); _sage_const_64 = Integer(64); _sage_const_150 = Integer(150); _sage_const_288 = Integer(288)
+for N in [_sage_const_11 , _sage_const_14 , _sage_const_15 , _sage_const_26 , _sage_const_37 , _sage_const_57 , _sage_const_58 , _sage_const_66 , _sage_const_99 , _sage_const_121 , _sage_const_128 , _sage_const_162 , _sage_const_210 ]:
+    print(N, Newforms(N, names='a'))
+f = Newforms(_sage_const_37 , names='a')[_sage_const_0 ]
+print(f.level(), f.weight(), f.coefficients(_sage_const_20 ), f[_sage_const_50 ], f.q_expansion(_sage_const_12 ))
+print(CuspForms(Gamma0(_sage_const_44 ), _sage_const_2 ).newforms('a')[_sage_const_0 ].coefficients(_sage_const_10 ))
+for N in [_sage_const_102 , _sage_const_112 , _sage_const_120 , _sage_const_294 ]:
+    print(N, [g.coefficients([_sage_const_2 , _sage_const_3 , _sage_const_5 , _sage_const_7 , _sage_const_11 ]) for g in CuspForms(N, _sage_const_2 ).newforms('a')])
+for N in [_sage_const_11 , _sage_const_30 , _sage_const_64 , _sage_const_150 , _sage_const_288 ]:
+    print(N, len(Newforms(N)), sum(g[_sage_const_2 ]*g[_sage_const_3 ] for g in Newforms(N)))

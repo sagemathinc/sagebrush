@@ -10,6 +10,8 @@ Engines are submodules:
                         groups, units, regulators), integer factoring (ECM),
                         HNF, elementary divisors, LLL, complex roots
     sagebrush.poly      factoring in Z[x] and F_p[x]
+    sagebrush.sage      a Sage-compatible namespace over all of these:
+                        from sagebrush.sage import *
 
 nf and poly are the same pure-Python files as in the browser runtime
 (lib/sagebrush), over the shared JSON dispatcher.
