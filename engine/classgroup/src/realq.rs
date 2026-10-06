@@ -123,7 +123,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
     elems.extend(neg_el);
     for round in 0..200 {
         tm.rounds = round + 1;
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         let (found, found_el) = collect(&fb, want.saturating_sub(rels.len()).max(1), &tu.sieve, round as u64 + 1, &mut stats, &mut counts);
         if found.is_empty() {
             tu.sieve.sieve_bound = u64::MAX;
@@ -131,7 +131,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
         rels.extend(found);
         elems.extend(found_el);
         tm.sieve_s += t.elapsed().as_secs_f64();
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         let mut more = (rels.len() / 5).max(10);
         let res = match eliminate_with(n, &rels, tu.pivot_weight, None) {
             (Reduced::Deficient(col), _, _) => {
@@ -225,7 +225,7 @@ fn unit_logs(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem]
 /// generate, then h* from the lattice; the answer if h* R* is small enough.
 #[allow(clippy::too_many_arguments)]
 fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], hr_est: f64, seed: u64, debug: bool) -> Option<RealQuadratic> {
-    let t = std::time::Instant::now();
+    let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     let in_sel: std::collections::HashSet<usize> = sel.iter().cloned().collect();
     let others: Vec<usize> = (0..dense.len()).filter(|k| !in_sel.contains(k)).collect();

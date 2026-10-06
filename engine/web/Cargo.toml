@@ -11,5 +11,6 @@ crate-type = ["cdylib", "rlib"]
 sagebrush-modsym = { path = "../modsym", default-features = false }
 sagebrush-ap = { path = "../ap", default-features = false }
 sagebrush-poly = { path = "../poly" }
+sagebrush-classgroup = { path = "../classgroup" }
 serde_json = "1"
 num-bigint = "0.4"

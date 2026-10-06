@@ -8,8 +8,9 @@ accepted and ignored).
     mf.dims(23, 2)                               # dimensions of S_2, E_2, ...
     mf.newforms(23, 2)["newforms"]               # LMFDB's 23.2.a.a, with trace form
     poly.factor([0, -6, -1, 1])                  # (1, [([-3, 1], 1), ([0, 1], 1), ([2, 1], 1)])
+    nf.bnf([-11, 0, 0, 1])["cyc"]                # [2]: Q(11^(1/3)), GRH
 """
 
-from . import modsym, ap, mf, poly
+from . import modsym, ap, mf, poly, nf
 
-__all__ = ["modsym", "ap", "mf", "poly"]
+__all__ = ["modsym", "ap", "mf", "poly", "nf"]

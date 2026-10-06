@@ -366,7 +366,7 @@ fn random_weights(k: usize, t: f64, rng: &mut u64) -> Vec<f64> {
 
 /// The HNF of the product of two ideals given by Z-bases.
 fn ideal_mul(o: &Order, a: &ZMat, b: &ZMat) -> ZMat {
-    let t = std::time::Instant::now();
+    let t = crate::clock::Instant::now();
     let r = ideal_mul_impl(o, a, b);
     T_MUL.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
     r
@@ -443,7 +443,7 @@ fn relations_from(fld: &Field, ib: &ZMat, budget: usize, seen: &mut HashSet<Vec<
 fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen: &mut HashSet<Vec<(usize, i64)>>, rels: &mut Vec<Relation>, elems: &mut Vec<Vec<BigInt>>, rng: &mut u64) -> usize {
     // log N(I) from the HNF diagonal
     let log_ni: f64 = (0..ib.len()).map(|i| ib[i][i].to_f64().unwrap_or(1.0).abs().max(1.0).ln()).sum();
-    let t = std::time::Instant::now();
+    let t = crate::clock::Instant::now();
     let red = if s_log.is_empty() { lll(ib, &fld.emb) } else { lll_weighted(ib, &fld.emb, s_log) };
     T_LLL.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
     let n = red.len();
@@ -477,7 +477,7 @@ fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen
         if log_n - log_ni > 5.0 * fld.log_bound {
             continue;
         }
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         let fe = factor_element_fast(&fld.o, &fld.fb, &fld.by_p, &fld.primorial, &x);
         T_FAC.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
         N_CAND.fetch_add(1, Relaxed);
@@ -495,7 +495,7 @@ fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen
 
 pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
     let debug = std::env::var("QCL_DEBUG").is_ok();
-    let t0 = std::time::Instant::now();
+    let t0 = crate::clock::Instant::now();
     let (o, _) = maximal_order(f);
     let n = o.n;
     let dk = o.disc();
@@ -543,7 +543,7 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
     let mut cache: Option<(u32, Vec<Vec<BigInt>>)> = None;
     for round in 0..60 {
         tm.rounds = round + 1;
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         // relations: in the first round the trivial ones (p) = prod P^e and
         // a sweep over every factor-base prime; then the uncovered primes
         // first, and products P_i P_j of random primes for fresh relations
@@ -607,7 +607,7 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
             relations_weighted(&fld, &ib, 2 * n + 4, &s_log, &mut seen, &mut rels, &mut elems, &mut rng);
         }
         tm.sieve_s += t.elapsed().as_secs_f64();
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         if debug {
             eprintln!("round {}: {} relations (+{}); ideal products {:.0} ms, LLL {:.0} ms, norms+factoring {:.0} ms for {} candidates", round, rels.len(), rels.len() - start,
                 T_MUL.load(Relaxed) as f64 / 1e6, T_LLL.load(Relaxed) as f64 / 1e6, T_FAC.load(Relaxed) as f64 / 1e6, N_CAND.load(Relaxed));
@@ -737,7 +737,7 @@ fn unit_logs(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
 
 #[allow(clippy::too_many_arguments)]
 fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], r: usize, hr_est: f64, seed: u64, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>, debug: bool) -> Option<(ClassGroup, f64, BigInt, u32)> {
-    let t = std::time::Instant::now();
+    let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     let group_of = |first_det: Option<BigInt>, enough: f64| -> Option<(BigInt, Vec<BigInt>)> {
         if c == 0 {

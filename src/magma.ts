@@ -331,7 +331,7 @@ class Parser {
       this.i = save;
       return null;
     }
-    let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : pyName(name), read: pyName(name) };
+    let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : pyName(name), read: pyName(name), name };
     const path: string[] = [];
     while (this.at("[") || this.at("`")) {
       if (this.eat("`")) {
@@ -356,7 +356,8 @@ class Parser {
   store(t: Target, val: string) {
     if (t.kind === "name") {
       this.declareGlobal(t.py);
-      this.emit(`${t.py} = _m._own(${val})`);
+      // the name lets structures print as Magma does (2*C.1 = 0)
+      this.emit(t.name ? `${t.py} = _m._own(${val}, ${JSON.stringify(t.name)})` : `${t.py} = _m._own(${val})`);
     } else if (t.kind === "path") {
       this.declareGlobal(t.py);
       // x[i][j] := v: rebuild along the path (sequences have value semantics)
@@ -892,6 +893,7 @@ interface Target {
   path?: string[];
   gens?: string[];
   names?: string[];
+  name?: string;
 }
 
 /** Magma source -> Python source (for lib/_magma.py). */

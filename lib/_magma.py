@@ -288,8 +288,11 @@ def _frange(a, b, c):
     return out
 
 
-def _own(v):
-    """Value semantics: an assigned (or passed) container is a copy."""
+def _own(v, name=None):
+    """Value semantics: an assigned (or passed) container is a copy.  The
+    name of the variable assigned lets some structures print it (2*C.1 = 0)."""
+    if name is not None and hasattr(v, "_magma_assigned"):
+        v._magma_assigned(name)
     if isinstance(v, MSeq):
         return MSeq((_own(x) for x in v), v.universe)
     if isinstance(v, MSet):
@@ -832,6 +835,8 @@ def _str(v, indent=0, col=None):
         pad = " " * (indent + 4)
         inner = [pad + _str(x, indent + 4) for x in raw]
         return o.strip() + "\n" + ",\n".join(inner) + "\n" + " " * indent + c.strip()
+    if getattr(v, "_magma_nowrap", False):
+        return _inline(v)
     return _wrap(_inline(v), col, indent + _extra(v), indent)
 
 
@@ -1917,10 +1922,6 @@ def jInvariant(E):
     return _m_num(E.j_invariant())
 
 
-def Rank(E):
-    return E.rank()
-
-
 def CremonaReference(E):
     return E.cremona_label()
 
@@ -1929,9 +1930,16 @@ class _AbGroup:
     _magma_block = True  # printed on a line of its own after other values
 
     def __init__(self, invs):
-        self.invs = [d for d in invs if d > 1]
+        # finite invariants > 1, and 0 for each copy of Z
+        self.invs = [d for d in invs if d > 1] + [0 for d in invs if d == 0]
+        self.name = "$"
+
+    def _magma_assigned(self, name):
+        self.name = name
 
     def _magma_card(self):
+        if 0 in self.invs:
+            return _sa.Infinity if hasattr(_sa, "Infinity") else float("inf")
         n = 1
         for d in self.invs:
             n *= d
@@ -1940,9 +1948,9 @@ class _AbGroup:
     def __repr__(self):
         if not self.invs:
             return "Abelian Group of order 1"
-        lines = ["Abelian Group isomorphic to " + " + ".join("Z/%d" % d for d in self.invs),
+        lines = ["Abelian Group isomorphic to " + " + ".join("Z/%d" % d if d else "Z" for d in self.invs),
                  "Defined on %d generator%s" % (len(self.invs), "s" if len(self.invs) > 1 else ""), "Relations:"]
-        lines += ["    %d*$.%d = 0" % (d, i + 1) for i, d in enumerate(self.invs)]
+        lines += ["    %d*%s.%d = 0" % (d, self.name, i + 1) for i, d in enumerate(self.invs) if d]
         return "\n".join(lines)
 
 
@@ -1956,6 +1964,305 @@ def TorsionSubgroup(E):
     if two == 4:
         return _AbGroup([2, n // 2])
     return _AbGroup([n])
+
+
+
+# ------------------------------------------------------------------ number fields, matrices
+# (engine/classgroup through _sage_nf and _sage_matrix, printed as Magma does)
+
+import _sage_nf as _snf
+import _sage_matrix as _smat
+
+
+class _MNFElt(_snf.NumberFieldElement):
+    __slots__ = ()
+
+    def __repr__(self):
+        # Magma: a common denominator in front, 1/2*(b^2 + b)
+        c = self._c
+        d = 1
+        for x in c:
+            d = d * x.denominator // _math.gcd(d, x.denominator)
+        if d == 1 or sum(1 for x in c if x) <= 1:
+            return _snf._repr_poly(c, self._K._name)
+        num = [x * d for x in c]
+        return "1/%d*(%s)" % (d, _snf._repr_poly(num, self._K._name))
+
+    def _magma_parent(self):
+        return self._K
+
+
+class _MNumberField(_snf.NumberField_absolute):
+    _element_class = _MNFElt
+    _magma_block = True
+
+    def __init__(self, f, quadratic=False):
+        super().__init__(f, "$.1")
+        self._quadratic = quadratic
+        self._order = None
+
+    def _magma_names(self, names):
+        self._name = names[0]
+
+    def _magma_gen(self, i):
+        return self.gen()
+
+    def _magma_degree(self):
+        return self.degree()
+
+    def _magma_discriminant(self):
+        return self.discriminant()
+
+    def _magma_coerce(self, x):
+        return self(x)
+
+    def __repr__(self):
+        kind = "Quadratic Field" if self._quadratic else "Number Field"
+        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._f, self._var))
+
+    def _maximal_order(self):
+        if self._order is None:
+            self._order = _MOrder(self)
+        return self._order
+
+
+class _MOrder:
+    _magma_block = True
+    _magma_nowrap = True  # Magma prints the description on one line
+
+    def __init__(self, K):
+        self.K = K
+
+    def __repr__(self):
+        K = self.K
+        f = _snf._repr_poly(K._f, K._var)
+        if K._nfdata()["index"] == 1:
+            return "Maximal Equation Order with defining polynomial %s over its ground order" % f
+        return "Maximal Order of Equation Order with defining polynomial %s over its ground order" % f
+
+    def _magma_degree(self):
+        return self.K.degree()
+
+    def _magma_discriminant(self):
+        return self.K.discriminant()
+
+
+def _field(x):
+    if isinstance(x, _MOrder):
+        return x.K
+    if isinstance(x, _snf.NumberField_absolute):
+        return x
+    raise MagmaError("Bad argument types: a number field or its maximal order is expected")
+
+
+def NumberField(f, Check=True):
+    if not isinstance(f, _sp.Polynomial):
+        raise MagmaError("NumberField: a polynomial is expected")
+    try:
+        return _MNumberField(f)
+    except (ValueError, NotImplementedError) as e:
+        raise MagmaError("NumberField: %s" % e)
+
+
+def QuadraticField(d):
+    d = int(d)
+    if _sa.is_square(d):
+        raise MagmaError("QuadraticField: the argument must not be a square")
+    return _MNumberField([-d, 0, 1], quadratic=True)
+
+
+def MaximalOrder(K):
+    if isinstance(K, _MOrder):
+        return K
+    return _field(K)._maximal_order()
+
+
+RingOfIntegers = IntegerRing_ = MaximalOrder
+
+
+def Signature(K):
+    r1, r2 = _field(K).signature()
+    return _multi([r1, r2])
+
+
+def IntegralBasis(K):
+    """Magma's integral basis: lower triangular over 1, a, a^2, ... (the
+    denominators at the high powers)."""
+    F = _field(K)
+    d = F._nfdata()
+    rows = d["basis"]
+    from sagebrush import nf as _nfm
+    rev = _nfm.hermite_form([list(reversed(r)) for r in rows])
+    rev = [list(reversed(r)) for r in rev]
+    rev.reverse()
+    return MSeq(F([_Fraction(c, d["den"]) for c in r]) for r in rev)
+
+
+def ClassNumber(K):
+    return _field(K).class_number()
+
+
+class _ClassGroupMap:
+    _magma_nowrap = True
+
+    def __init__(self, G, O, ideals=True):
+        self.G, self.O, self.ideals = G, O, ideals
+
+    def __repr__(self):
+        target = ("Set of ideals of %r" if self.ideals else "%r") % self.O
+        return "Mapping from: %r to %s" % (self.G, target)
+
+
+def ClassGroup(K, Bound=None, Proof=None):
+    F = _field(K)
+    G = _AbGroup(list(F.class_group().invariants()))
+    return _multi([G, _ClassGroupMap(G, F._maximal_order())])
+
+
+def UnitGroup(K):
+    F = _field(K)
+    G = _AbGroup([F.number_of_roots_of_unity()] + [0] * F.unit_rank())
+    return _multi([G, _ClassGroupMap(G, F._maximal_order(), ideals=False)])
+
+
+def Regulator(K):
+    return MReal(_sa.RR(_field(K)._bnfdata()["regulator"]), 30)
+
+
+def UnitRank(K):
+    return _field(K).unit_rank()
+
+
+class _MPrime:
+    def __init__(self, P, O):
+        self.P, self.O = P, O
+
+    def __repr__(self):
+        p, pi = self.P._p, self.P._pi
+        return "Prime Ideal of O\nTwo element generators:\n    %s\n    %s" % (
+            _vec_str([p] + [0] * (self.P._K.degree() - 1)), _vec_str(pi.list()))
+
+    def _magma_norm(self):
+        return self.P.norm()
+
+
+def _vec_str(v):
+    return "[" + ", ".join(repr(x) for x in v) + "]"
+
+
+def Decomposition(O, p):
+    F = _field(O)
+    return MSeq(MTuple([_MPrime(P, F._maximal_order()), P.ramification_index()]) for P in F.primes_above(int(p)))
+
+
+def Norm(x):
+    if hasattr(x, "_magma_norm"):
+        return x._magma_norm()
+    if isinstance(x, _snf.NumberFieldElement):
+        return _m_num(x.norm())
+    return x * x
+
+
+def Trace(x):
+    if isinstance(x, _snf.NumberFieldElement):
+        return _m_num(x.trace())
+    if hasattr(x, "trace"):
+        return x.trace()
+    raise MagmaError("Trace: bad argument")
+
+
+def MinimalPolynomial(x):
+    if isinstance(x, _snf.NumberFieldElement):
+        f = x.minpoly()
+        R = _sp.PolynomialRing_(_sp.QQ, "$.1")
+        return R(f.list())
+    raise MagmaError("MinimalPolynomial: bad argument")
+
+
+class _MMatrix(_smat.Matrix):
+    __slots__ = ()
+    _magma_block = True
+
+    def _magma_index(self, i):
+        _check_index(self.nrows(), i)
+        return _MVector(self._rows[i - 1])
+
+
+class _MVector(list):
+    def _magma_index(self, i):
+        _check_index(len(self), i)
+        return self[i - 1]
+
+    def __repr__(self):
+        cells = [repr(x) for x in self]
+        w = max(len(c) for c in cells) if cells else 0
+        return "(" + " ".join(c.rjust(w) for c in cells) + ")"
+
+
+def _mmat(M):
+    return _MMatrix(M._base, M._rows)
+
+
+def Matrix(*args):
+    R = None
+    if args and args[0] in (_ZZ, _QQ):
+        R, args = args[0], args[1:]
+    base = _sa.ZZ if R is _ZZ else _sa.QQ if R is _QQ else None
+    if len(args) == 3:
+        m, n, ent = args
+        ent = list(ent)
+        rows = [ent[i * n:(i + 1) * n] for i in range(m)]
+    elif len(args) == 1:
+        rows = [list(r) for r in args[0]]
+    else:
+        raise MagmaError("Matrix: bad arguments")
+    M = _smat.matrix(base, rows) if base is not None else _smat.matrix(rows)
+    return _mmat(M)
+
+
+def HermiteForm(M):
+    return _multi([_mmat(M.hermite_form())], show=1)
+
+
+EchelonForm = HermiteForm
+
+
+def SmithForm(M):
+    D, U, V = M.smith_form()
+    return _multi([_mmat(D), _mmat(U), _mmat(V)])
+
+
+def ElementaryDivisors(M):
+    return MSeq(d for d in M.elementary_divisors() if d)
+
+
+def LLL(M, Delta=None):
+    return _multi([_mmat(M.LLL())], show=1)
+
+
+def Determinant(M):
+    return M.det()
+
+
+def Transpose(M):
+    return _mmat(M.transpose())
+
+
+def NumberOfRows(M):
+    return M.nrows()
+
+
+def NumberOfColumns(M):
+    return M.ncols()
+
+
+Nrows, Ncols = NumberOfRows, NumberOfColumns
+
+
+def Rank(x):
+    if isinstance(x, _smat.Matrix):
+        return x.rank()
+    return x.rank()
 
 
 __all__ = [n for n, v in list(globals().items())

@@ -91,6 +91,18 @@ fn bigs(v: Option<&Value>) -> Result<Vec<BigInt>, String> {
         .collect()
 }
 
+fn big1(v: Option<&Value>) -> Result<BigInt, String> {
+    match v {
+        Some(Value::String(s)) => s.parse::<BigInt>().map_err(|e| e.to_string()),
+        Some(Value::Number(n)) => n.as_i64().map(BigInt::from).ok_or_else(|| "bad integer".to_string()),
+        _ => Err("missing integer argument".into()),
+    }
+}
+
+fn matrix(v: Option<&Value>) -> Result<Vec<Vec<BigInt>>, String> {
+    v.and_then(Value::as_array).ok_or("missing matrix (a list of rows)")?.iter().map(|r| bigs(Some(r))).collect()
+}
+
 fn big(v: &[BigInt]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
 }
@@ -193,6 +205,49 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "rational_newforms" => {
             let r = sagebrush_modsym::newforms::rational_newforms(u(v, "n")?, u(v, "bound").unwrap_or(1000), 40)?;
             Ok(json!(r.forms.into_iter().map(|f| f.ap).collect::<Vec<_>>()))
+        }
+        // ---- sagebrush.nf / arith / matrix: engine/classgroup ----
+        "factor_integer" => {
+            let n = big1(v.get("n"))?;
+            if n.sign() == num_bigint::Sign::NoSign {
+                return Err("factor of 0".into());
+            }
+            Ok(json!(sagebrush_classgroup::api::factor_integer(&n).iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
+        }
+        "is_prime" => Ok(json!(sagebrush_classgroup::api::is_prime(&big1(v.get("n"))?))),
+        "nf_data" => {
+            let d = sagebrush_classgroup::api::nf_data(&bigs(v.get("f"))?)?;
+            Ok(json!({ "degree": d.degree, "r1": d.r1, "r2": d.r2, "disc": d.disc.to_string(), "index": d.index.to_string(),
+                       "basis": d.basis.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": d.den.to_string(), "w": d.w }))
+        }
+        "primes_above" => {
+            let ps = sagebrush_classgroup::api::primes_above(&bigs(v.get("f"))?, u(v, "p")?)?;
+            Ok(json!(ps.iter().map(|q| json!({ "p": q.p, "e": q.e, "f": q.f, "pi": big(&q.pi), "pi_den": q.pi_den.to_string() })).collect::<Vec<_>>()))
+        }
+        "bnf" => {
+            let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
+            Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w }))
+        }
+        "quadratic_class_group" => {
+            let (h, cyc, reg) = sagebrush_classgroup::api::quadratic(&big1(v.get("d"))?)?;
+            Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg }))
+        }
+        "hermite_form" => Ok(json!(sagebrush_classgroup::api::hermite(&matrix(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
+        "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&matrix(v.get("m"))?)))),
+        "lll" => Ok(json!(sagebrush_classgroup::api::lll(&matrix(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
+        "complex_roots" => {
+            let digits = v.get("digits").and_then(Value::as_u64).unwrap_or(15) as usize;
+            let r = sagebrush_classgroup::api::complex_roots(&bigs(v.get("f"))?, digits)?;
+            Ok(json!(r.iter().map(|(re, im, e)| json!([re, im, e])).collect::<Vec<_>>()))
+        }
+        "factor_mod" => {
+            let f = bigs(v.get("f"))?;
+            let p = u(v, "p")?;
+            if !(2..1u64 << 32).contains(&p) {
+                return Err("factor_mod needs a prime p < 2^32".into());
+            }
+            Ok(json!(sagebrush_poly::factor_mod(&f, p).iter().map(|(g, e)| json!([g, e])).collect::<Vec<_>>()))
         }
         // ---- sagebrush.poly: factoring in Z[x] (pure Rust) ----
         "factor" => {

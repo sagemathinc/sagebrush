@@ -2,7 +2,9 @@
 //! used only as an outside oracle and benchmark).  Quadratic fields so far:
 //! imaginary (imag.rs) and real, with the regulator (realq.rs), from
 //! relations found by Jacobson's sieve (relations.rs).
+pub mod api;
 pub mod arith;
+pub mod clock;
 pub mod form;
 pub mod relations;
 pub mod linalg;
