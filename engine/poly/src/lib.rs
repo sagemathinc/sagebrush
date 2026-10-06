@@ -304,6 +304,7 @@ fn ddf(f: &[u64], p: u64) -> Vec<(FPoly, usize)> {
     let pb = BigUint::from(p);
     let mut d = 1;
     while 2 * d <= f.len() - 1 {
+        sagebrush_interrupt::check();
         h = fpowmod(&h, &pb, &f, p);
         let g = fgcd(&f, &fsub(&h, &x, p), p);
         if g.len() > 1 {
@@ -339,6 +340,7 @@ fn edf(g: &[u64], d: usize, p: u64, rng: &mut Rng, out: &mut Vec<FPoly>) {
     }
     let e = (BigUint::from(p).pow(d as u32) - 1u32) / 2u32;
     loop {
+        sagebrush_interrupt::check();
         let a: FPoly = ftrim((0..n).map(|_| rng.next() % p).collect());
         if a.len() < 2 {
             continue;
@@ -363,6 +365,7 @@ fn edf2(g: &[u64], d: usize, rng: &mut Rng, out: &mut Vec<FPoly>) {
         return;
     }
     loop {
+        sagebrush_interrupt::check();
         let a: FPoly = ftrim((0..n).map(|_| rng.next() % 2).collect());
         if a.len() < 2 {
             continue;
@@ -490,6 +493,7 @@ fn hensel_pair(f: &[BigInt], g: &[u64], h: &[u64], p: u64, k: u32) -> (ZPoly, ZP
     let mut m = BigInt::from(p);
     let mut e_now = 1u32;
     while e_now < k {
+        sagebrush_interrupt::check();
         let e_next = (2 * e_now).min(k);
         let m2 = BigInt::from(p).pow(e_next);
         let e = msub(f, &mmul(&gg, &hh, &m2), &m2);
@@ -548,6 +552,7 @@ fn factor_squarefree(f: &[BigInt]) -> Vec<ZPoly> {
     let mut possible = vec![true; n + 1];
     let mut tried = 0;
     for p in small_primes() {
+        sagebrush_interrupt::check();
         if (&lc % BigInt::from(p)).is_zero() {
             continue;
         }
@@ -618,6 +623,7 @@ fn recombine(f: &[BigInt], lifted: Vec<ZPoly>, pk: &BigInt, possible: &[bool]) -
     let mut out = vec![];
     let mut size = 1;
     while 2 * size <= rest.len() {
+        sagebrush_interrupt::check();
         let mut found = false;
         let lc = f.last().unwrap().clone();
         let f0 = f[0].clone();
@@ -625,6 +631,7 @@ fn recombine(f: &[BigInt], lifted: Vec<ZPoly>, pk: &BigInt, possible: &[bool]) -
         // subsets of `size` indices, in lexicographic order
         let mut idx: Vec<usize> = (0..size).collect();
         loop {
+            sagebrush_interrupt::check();
             let d: usize = idx.iter().map(|&i| rest[i].len() - 1).sum();
             if d < possible.len() && possible[d] {
                 // constant term test: lc prod u_i(0) must divide lc f(0)

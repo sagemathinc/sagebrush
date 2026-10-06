@@ -9,6 +9,7 @@ default = ["parallel"]
 parallel = ["dep:rayon"]
 
 [dependencies]
+sagebrush-interrupt = { path = "../interrupt" }
 rayon = { version = "1.10", optional = true }
 num-bigint = "0.4"
 num-traits = "0.2"

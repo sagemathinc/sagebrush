@@ -6,7 +6,7 @@ async function engine() {
   if (E) return E;
   const res = await fetch("/sagebrush-engine.wasm");
   if (!res.ok) throw new Error(`could not load the engine (HTTP ${res.status})`);
-  const { instance } = await WebAssembly.instantiate(await res.arrayBuffer(), {});
+  const { instance } = await WebAssembly.instantiate(await res.arrayBuffer(), { sagebrush: { interrupted: () => 0 } });
   return (E = instance.exports);
 }
 

@@ -215,6 +215,7 @@ pub fn exact_charpoly(n: u64, k: usize, eps: &Character, sign: i32, q: u64) -> R
     let mut need_sq: Option<BigUint> = dim.map(|d| need_for(d));
     let mut primes = primes_one_mod(m, 1 << 31);
     loop {
+        sagebrush_interrupt::check();
         if let Some(ns) = &need_sq {
             if &modulus * &modulus > *ns {
                 break;

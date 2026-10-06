@@ -9,6 +9,7 @@ description = "Sagebrush engines for browsers and chat artifacts: plain wasm32, 
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
 sagebrush-modsym = { path = "../modsym", default-features = false }
 sagebrush-ap = { path = "../ap", default-features = false }
 sagebrush-poly = { path = "../poly" }

@@ -182,12 +182,14 @@ pub fn exact_charpoly(n: u64, q: u64) -> Result<Exact, String> {
     let mut bits = 0.0;
     let mut next = 1u64 << 31;
     while bits < need {
+        sagebrush_interrupt::check();
         // A batch of primes, computed in parallel: no more than are still
         // needed (each prime adds 30.99 bits), and at most 8 for memory.
         let target = if refined.is_some() { need } else { guess.min(need) };
         let want = (((target - bits) / 30.99).ceil() as usize).clamp(1, 8);
         let mut batch = vec![];
         while batch.len() < want {
+            sagebrush_interrupt::check();
             next -= 1;
             if is_prime(next) {
                 batch.push(next);
@@ -367,9 +369,11 @@ pub fn exact_charpoly_combo(n: u64, ops: &[(u64, i64)]) -> Result<Vec<BigInt>, S
     let (mut bits, mut rejected) = (0.0, 0);
     let mut next = 1u64 << 31;
     while bits < need {
+        sagebrush_interrupt::check();
         let want = (((need - bits) / 30.99).ceil() as usize).clamp(1, 8);
         let mut batch = vec![];
         while batch.len() < want {
+            sagebrush_interrupt::check();
             next -= 1;
             if is_prime(next) {
                 batch.push(next);

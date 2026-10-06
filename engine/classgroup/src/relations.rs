@@ -209,6 +209,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
     // after very many, and let the caller change the parameters
     let mut idle = 0u64;
     while out.len() < want && idle < 50_000 {
+        sagebrush_interrupt::check();
         let before = out.len();
         // the first q: the least covered prime (ties: random); then primes
         // making a close to the target

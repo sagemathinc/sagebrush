@@ -204,6 +204,7 @@ pub fn newform_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Orbit>
     let attempts: Vec<Vec<(u64, i64)>> = vec![combo(&qs[..1]), combo(&qs[..2]), combo(&qs[..3]), combo(&qs[..4]), combo(&qs[1..5]), combo(&qs[2..6]), combo(&qs[3..8])];
     let mut chosen = None;
     for ops in attempts {
+        sagebrush_interrupt::check();
         let chi = exact_charpoly_combo(n, &ops)?;
         let mut t = vec![vec![0u64; d]; d];
         for &(q, r) in &ops {
@@ -240,6 +241,7 @@ pub(crate) fn krylov_dual(t: &[Vec<u64>], chi_p: &[u64], f_p: &[u64], p: u64) ->
     let k = f_p.len() - 1;
     let h = poly_div(chi_p, f_p, p);
     for seed in 1..=4u64 {
+        sagebrush_interrupt::check();
         // A pseudo-random vector (xorshift); an affine family in the seed
         // would only span two fixed vectors.
         let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ seed.wrapping_mul(0xD1B5_4A32_D192_ED03);

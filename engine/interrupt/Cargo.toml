@@ -1,0 +1,14 @@
+[package]
+name = "sagebrush-interrupt"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Cooperative interruption (Ctrl-C) for the Sagebrush engines"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+# WebAssembly: poll the host's flag through the import `sagebrush.interrupted`
+# (engine/web, whose hosts provide it)
+wasm-host = []

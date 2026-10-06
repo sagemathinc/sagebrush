@@ -87,6 +87,7 @@ impl Space {
         let images = par::map_slice(&self.basis_gen, |&g| Self::hecke_image(pres, &h, g));
         let mut t = vec![vec![0u64; d]; d];
         for j0 in (0..d).step_by(BLOCK) {
+            sagebrush_interrupt::check();
             let js: Vec<usize> = (j0..(j0 + BLOCK).min(d)).collect();
             let psis = par::map_slice(&js, |&j| {
                 let mut e = vec![0u64; d];

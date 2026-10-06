@@ -60,6 +60,7 @@ impl Presentation {
             }
         };
         for i in 0..ns {
+            sagebrush_interrupt::check();
             let (c, d) = p1.get(i);
             let (c, d) = (c as i64, d as i64);
             union(&mut parent, &mut neg, i, p1.index(d, -c), true);
@@ -69,6 +70,7 @@ impl Presentation {
         let mut rep_of = vec![None; ns];
         let mut sym_of_gen = vec![];
         for i in 0..ns {
+            sagebrush_interrupt::check();
             let (r, s) = find(&mut parent, &mut neg, i);
             if zero[r] {
                 continue;

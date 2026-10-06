@@ -9,6 +9,7 @@ name = "sagebrush_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 sagebrush-web = { path = "../web" }

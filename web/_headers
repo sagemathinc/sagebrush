@@ -1,0 +1,6 @@
+# Cross-origin isolation, so the notebook page and its worker can share an
+# interrupt flag (a SharedArrayBuffer): Stop raises KeyboardInterrupt and
+# keeps every variable.  Everything the page loads is same-origin.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

@@ -192,6 +192,7 @@ pub fn elementary_divisors(m: &ZMat) -> Vec<BigInt> {
     let mut diag = vec![];
     for t in 0..k {
         loop {
+            sagebrush_interrupt::check();
             // the smallest nonzero entry of the remaining block
             let mut best: Option<(usize, usize)> = None;
             for i in t..rows {
@@ -316,6 +317,7 @@ fn integral_lll(b: &mut ZMat) {
         }
     };
     while k < n {
+        sagebrush_interrupt::check();
         if k > kmax {
             kmax = k;
             gs(b, k, &mut d, &mut lam);
@@ -387,6 +389,7 @@ fn roots_squarefree(g: &[BigInt], prec: u32) -> Result<Vec<(BigInt, BigInt)>, St
         let (mut zr, mut zi) = (to(re), to(im));
         let mut bits = 40;
         loop {
+            sagebrush_interrupt::check();
             let (mut vr, mut vi, mut dr, mut di) = (BigInt::zero(), BigInt::zero(), BigInt::zero(), BigInt::zero());
             for c in g.iter().rev() {
                 let ndr = ((&dr * &zr - &di * &zi) >> p) + &vr;

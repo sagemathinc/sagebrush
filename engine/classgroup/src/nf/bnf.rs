@@ -102,6 +102,7 @@ pub fn short_vectors(g: &[Vec<f64>], bound: f64, limit: usize) -> Vec<Vec<i64>> 
         let r = (left / q[i][i]).max(0.0).sqrt();
         let (lo, hi) = ((c - r).ceil() as i64, (c + r).floor() as i64);
         for v in lo..=hi {
+            sagebrush_interrupt::check();
             x[i] = v;
             let t = q[i][i] * (v as f64 - c).powi(2);
             if t > left + 1e-9 {
@@ -205,6 +206,7 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
     let mut basis: ZMat = vec![];
     let mut fast_inv: Option<Vec<Vec<f64>>> = None;
     for v in vs {
+        sagebrush_interrupt::check();
         if v.iter().all(|x| x.abs() <= small) {
             continue; // a torsion unit
         }
@@ -506,6 +508,7 @@ fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen
         *rng
     };
     while tried < budget {
+        sagebrush_interrupt::check();
         tried += 1;
         // the basis vectors, then random small combinations
         let coef: Vec<i64> = if tried <= n { (0..n).map(|j| (j + 1 == tried) as i64).collect() } else { (0..n).map(|_| (next() % 5) as i64 - 2).collect() };
@@ -655,6 +658,7 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
     let mut want = (1.4 * nfb as f64) as usize + 20 + 2 * r;
     let mut cache: Option<(u32, Vec<Vec<BigInt>>)> = None;
     for round in 0..60 {
+        sagebrush_interrupt::check();
         tm.rounds = round + 1;
         let t = crate::clock::Instant::now();
         // relations: in the first round the trivial ones (p) = prod P^e and
@@ -674,6 +678,7 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
             }
             relations_from(&fld, &one, 4 * n + 40, &mut seen, &mut rels, &mut elems, &mut rng);
             for i in 0..nfb {
+                sagebrush_interrupt::check();
                 let s_log = random_weights(r1 + r2, weight_t, &mut rng);
                 relations_weighted(&fld, &fld.fb[i].basis.clone(), n + 2, &s_log, &mut seen, &mut rels, &mut elems, &mut rng);
             }
@@ -689,6 +694,7 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
         for i in (0..nfb).filter(|&i| counts[i] == 0 || forced.contains(&i)).collect::<Vec<_>>() {
             let nsmall = nfb.min(40);
             for attempt in 0..200 {
+                sagebrush_interrupt::check();
                 let before = rels.len();
                 let ib = if attempt == 0 {
                     fld.fb[i].basis.clone()
@@ -708,6 +714,7 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
         forced.clear();
         let mut passes = 0;
         while rels.len() < want && passes < 50 * nfb.max(10) {
+            sagebrush_interrupt::check();
             passes += 1;
             rng ^= rng << 13;
             rng ^= rng >> 7;
@@ -878,6 +885,7 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
     let mut lattice: Option<(BigInt, Vec<BigInt>)> = None;
     let mut last_r: Option<f64> = None;
     for _ in 0..12 {
+        sagebrush_interrupt::check();
         let extras: Vec<usize> = if c == 0 || others.is_empty() { vec![] } else { (0..n_extra.min(others.len())).map(|t| others[t * 7919 % others.len()]).collect() };
         let vs: Vec<Vec<i64>> = extras.iter().map(|&k| dense[k].clone()).collect();
         let (det, ys) = if extras.is_empty() { (BigInt::one(), vec![]) } else { kernel_crt(&a, &vs) };

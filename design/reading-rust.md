@@ -483,46 +483,46 @@ other Rust programs use directly would naturally implement `Add` and `Mul`.
 
 ## 10. Interrupting long computations (Ctrl-C)
 
-Today Sagebrush has **no cooperative interruption**. Concretely:
+Ctrl-C stops a running computation and keeps all state, in Python and in
+the browser. How (crate `engine/interrupt`, about 200 lines):
 
-- **From Python:** the engine call runs with the GIL released. Ctrl-C sets
-  Python's interrupt flag, but the `KeyboardInterrupt` is only raised when
-  the Rust call returns. State in Python is kept, but you wait.
-- **In the browser:** the Interrupt button terminates the Web Worker and
-  starts a new one (`worker.terminate()` in `web/index.html`), so every
-  variable is lost: that is the only way to stop a running WebAssembly
-  call.
-- **Native command line:** Ctrl-C kills the process.
-
-How it can be done, roughly in order of preference:
-
-1. **A cancellation flag checked in the long loops.** A shared
-   `AtomicBool` (or a counter) that the relation search, the sieve, ECM
-   and the Hecke loops check every few milliseconds; on seeing it set they
-   return `Err("interrupted")`, unwinding cleanly through `?`. Everything
-   computed so far that lives in caches (or in the caller) stays valid.
-   This is what Rust code normally does; the cost is a load per check.
-2. **Who sets the flag:**
-   - Native: a signal handler (crates `ctrlc` or `signal-hook`) that only
-     sets the flag. Setting an atomic is one of the few things safe to do
-     in a signal handler.
-   - Python: the binding's handler, or a watchdog thread that calls PyO3's
-     `Python::check_signals()` periodically and sets the flag when it
-     reports `KeyboardInterrupt`. The engine then returns and Python raises
-     the exception with the interpreter intact, as in Sage.
-   - Browser: the page and the worker share a `SharedArrayBuffer`; the
-     Interrupt button writes 1 into it and the Rust loops read it. This
-     needs cross-origin isolation headers on sagebrush.space (also needed
-     for threads), which are a site configuration change.
-3. **What not to do:** PARI and Sage interrupt by `longjmp`ing out of the
+1. **Checks in the long loops.** The engines call
+   `sagebrush_interrupt::check()` in their long-running loops: the relation
+   searches and sieves, ECM and rho, Hermite forms and LLL, root finding,
+   Round 2, the modular-symbols eliminations and Hecke operators, CRT over
+   primes, polynomial factoring (including the exponential Zassenhaus
+   search), and the a_p loops. A check is one relaxed atomic load.
+2. **Unwinding, not error codes.** When an interrupt has been requested,
+   `check()` panics with a private value `Interrupted`. The panic unwinds
+   through every frame, running destructors, so no memory leaks and no lock
+   stays held, and rayon carries it out of worker threads. The binding
+   catches exactly that value (`sagebrush_interrupt::catch`) and other panics
+   pass through. This needs no change to any function signature: a function
+   returning a plain `Vec` deep inside the engine is interruptible too.
+3. **Who sets the flag.**
+   - Python: while an engine call made from the main thread runs, a SIGINT
+     handler (on Windows, a console Ctrl handler) is installed that only sets
+     the flag; when the call ends, Python's handler is back and the binding
+     raises `KeyboardInterrupt`. Pressing Ctrl-C three times during one call
+     falls back to the default action, for a loop that never checks. The cost
+     is two system calls per engine call, about 1.4 microseconds.
+   - The browser: the page and its worker share a `SharedArrayBuffer` (the
+     site is served cross-origin isolated). The **Stop** button writes 1 into
+     it. Compiled Python loops test it once per iteration (about 1 ns), and
+     the WebAssembly engine reads it through an import every 1024 checks.
+     WebAssembly cannot unwind, so the panic traps and the page drops just
+     the engine instance; Python's state lives outside it and survives. If
+     nothing responds within 2 seconds, Stop falls back to restarting the
+     interpreter, as it always did before.
+4. **What not to do:** PARI and Sage interrupt by `longjmp`ing out of the
    signal handler (`sig_on`/`sig_off` in Sage). In Rust that would skip
    destructors and leave data structures half-updated; jumping across Rust
-   frames is undefined behavior. The flag approach is the safe equivalent,
-   and because Rust returns through every frame, nothing leaks.
+   frames is undefined behavior. The flag-and-unwind design is the safe
+   equivalent.
 
-Long computations can also resume rather than restart: the class group code
-could keep its relations so that a second call continues where the first
-stopped. That is a design decision per algorithm.
+Long computations could also resume rather than restart: the class group
+code could keep its relations so that a second call continues where the
+first stopped. That is a design decision per algorithm.
 
 ## 11. Foundations: big integers and the rest of the stack
 

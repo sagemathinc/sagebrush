@@ -520,6 +520,7 @@ impl GeneralSpace {
         let mut t = vec![vec![0u64; d]; d];
         const BLOCK: usize = 64;
         for j0 in (0..d).step_by(BLOCK) {
+            sagebrush_interrupt::check();
             let js: Vec<usize> = (j0..(j0 + BLOCK).min(d)).collect();
             let psis = par::map_slice(&js, |&j| {
                 let mut e = vec![0u64; d];
