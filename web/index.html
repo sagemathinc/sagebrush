@@ -1126,7 +1126,11 @@ function saveOutputs(box) {
     if (el.tagName === "PRE") {
       for (const n of el.childNodes) stream(n.nodeType === 1 && n.classList.contains("e") ? "stderr" : "stdout", n.textContent);
     } else if ((el.tagName === "FIGURE" || el.classList.contains("latex-out")) && el.sbBundle) {
-      outs.push({ output_type: "display_data", data: { ...el.sbBundle }, metadata: {} });
+      // a big 3D scene (a mesh of millions of triangles) is not kept with the
+      // notebook: its picture is, and running the cell again restores the view
+      const b = { ...el.sbBundle };
+      if ((b[SCENE3D]?.length ?? 0) > 8e6) delete b[SCENE3D];
+      outs.push({ output_type: "display_data", data: b, metadata: {} });
     } else if (el.tagName === "FIGURE") {
       const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
       if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }
@@ -1440,7 +1444,12 @@ async function pictures(box) {
   const out = [];
   // an animation contributes a few of its frames (first, middle, last)
   const svgs = [];
+  // a 3D view as it is on the screen (its SVG is only the bounding box)
+  for (const canvas of box.querySelectorAll("figure.plot3d canvas")) {
+    try { out.push({ type: "image", data: canvas.toDataURL("image/png").split(",")[1], mimeType: "image/png" }); } catch {}
+  }
   for (const svg of box.querySelectorAll("figure.plot svg")) {
+    if (svg.closest("figure.plot3d")?.querySelector("canvas")) continue;
     const frames = svg.querySelectorAll(":scope > g.sb-frame");
     if (!frames.length) { svgs.push(svg); continue; }
     for (const k of [...new Set([0, frames.length >> 1, frames.length - 1])]) {

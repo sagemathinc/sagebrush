@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      - name: SciPy (the reference for scipy.io's MATLAB files in test/data.test.ts)
+        run: python3 -m pip install scipy
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
