@@ -202,8 +202,9 @@ impl LogCache {
 #[allow(clippy::too_many_arguments)]
 fn unit_logs(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, core_rows: &[usize], sel: &[usize], det: &BigInt, ys: &[Vec<BigInt>], extras: &[usize], prec: u32) -> (Vec<BigInt>, usize) {
     // the logarithms of every relation, carried through the elimination
-    let mut logs = cache.logs(d, elems, prec);
+    let mut logs: Vec<Vec<BigInt>> = cache.logs(d, elems, prec).into_iter().map(|l| vec![l]).collect();
     let (_, core2, zero_rows) = eliminate_with(n, rels, pivot_weight, Some(&mut logs));
+    let logs: Vec<BigInt> = logs.into_iter().map(|mut l| l.pop().unwrap()).collect();
     assert_eq!(core2, core_rows, "elimination is deterministic");
     let mut lambdas: Vec<BigInt> = zero_rows.iter().map(|&k| logs[k].clone()).collect();
     for (y, &e) in ys.iter().zip(extras) {
