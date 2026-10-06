@@ -115,8 +115,8 @@ class PolynomialRing_:
 
     def __call__(self, x=0):
         if isinstance(x, Polynomial):
-            if x._ring._name != self._name:
-                raise TypeError("cannot convert a polynomial in %s to one in %s" % (x._ring._name, self._name))
+            # (Sage converts between univariate rings by coefficients, so
+            # QQ['y'](f) for f in ZZ['x'] maps x to y)
             return Polynomial(self, x._c)
         if isinstance(x, (list, tuple)):
             return Polynomial(self, list(x))
@@ -280,6 +280,14 @@ class Polynomial:
             return NotImplemented
         if not self._c or not o._c:
             return self._make([], o)
+        if len(self._c) * len(o._c) > 2500:
+            # long products in the engine (NTT / Kronecker substitution)
+            from sagebrush import poly
+            da, ca = self._integral()
+            db, cb = o._integral()
+            c = poly.mul(ca, cb)
+            d = da * db
+            return self._make(c if d == 1 else [_F(x, d) for x in c], o)
         r = [0] * (len(self._c) + len(o._c) - 1)
         for i, a in enumerate(self._c):
             if a:
@@ -416,6 +424,8 @@ class Polynomial:
 
     def _integral(self):
         """(d, the integer coefficients of d * self)."""
+        if all(isinstance(a, int) for a in self._c):
+            return 1, list(self._c)
         from math import lcm
         d = 1
         for a in self._c:
@@ -423,21 +433,24 @@ class Polynomial:
         return d, [int(_F(a) * d) for a in self._c]
 
     def gcd(self, other):
-        """The monic gcd over QQ (made primitive over ZZ, as Sage)."""
-        a, b = self.change_ring(QQ), other.change_ring(QQ) if isinstance(other, Polynomial) else Polynomial(PolynomialRing(QQ, self._ring._name), [other])
-        while b:
-            a, b = b, a.quo_rem(b)[1]
-        if not a:
-            return Polynomial(self._ring, [])
-        a = a.monic()
-        if self._ring._base is ZZ and (not isinstance(other, Polynomial) or other._ring._base is ZZ):
-            d, c = a._integral()
-            from math import gcd
-            g = 0
-            for x in c:
-                g = gcd(g, x)
-            return Polynomial(self._ring, [x // g for x in c])
-        return a
+        """The gcd: monic over QQ; over ZZ with positive leading coefficient
+        and the gcd of the contents (as Sage).  Modular, in the engine
+        (sagebrush.poly.gcd)."""
+        o = other if isinstance(other, Polynomial) else Polynomial(PolynomialRing(QQ, self._ring._name), [other])
+        over_zz = self._ring._base is ZZ and o._ring._base is ZZ
+        if not self._c or not o._c:
+            # Sage returns the other one unchanged (monic over QQ)
+            a = o if not self._c else self
+            if over_zz or not a._c:
+                return Polynomial(self._ring if over_zz else a._ring, a._c)
+            return a.change_ring(QQ).monic()
+        from sagebrush import poly
+        da, ca = self._integral()
+        db, cb = o._integral()
+        g = poly.gcd(ca, cb)
+        if over_zz:
+            return Polynomial(self._ring, g)
+        return Polynomial(PolynomialRing(QQ, self._ring._name), g).monic()
 
     def lcm(self, other):
         return (self * other).quo_rem(self.gcd(other))[0]

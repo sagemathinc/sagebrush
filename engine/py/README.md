@@ -9,7 +9,7 @@ This is an early release of [Sagebrush](https://github.com/sagemathinc/sagebrush
 which also runs in the browser at [sagebrush.space](https://sagebrush.space).
 
 ```python
->>> from sagebrush import nf, mf, ap, poly
+>>> from sagebrush import nf, mf, ap, poly, linalg
 
 >>> nf.bnf([-11, 0, 0, 1])              # Q[x]/(x^3 - 11): class group, regulator
 {'cyc': [2], 'degree': 3, 'disc': -3267, 'h': 2, 'r1': 1, 'r2': 1, 'regulator': '5.5872066260609077619', 'w': 2}
@@ -25,6 +25,12 @@ which also runs in the browser at [sagebrush.space](https://sagebrush.space).
 
 >>> poly.factor([5, -1, -1, 1])         # x^3 - x^2 - x + 5 over Z
 (1, [([5, -1, -1, 1], 1)])
+
+>>> linalg.det([[2, 7, 1], [8, 2, 8], [1, 8, 2]]), linalg.charpoly([[0, 1], [-1, 0]])
+(-114, [1, 0, 1])
+
+>>> linalg.solve([[2, 1], [1, 3]], [[1], [2]])   # exact, over QQ
+[[Fraction(1, 5)], [Fraction(3, 5)]]
 
 >>> d = mf.newforms(389, 2, bound=6)    # newform orbits of S_2(Gamma0(389))
 >>> d["status"], [(o["letter"], o["dim"]) for o in d["newforms"]]
@@ -79,7 +85,11 @@ their output under `sagebrush.sage` must equal Sage's.
   forms.
 - `sagebrush.modsym`: weight-2 modular symbols for Gamma0(N).
 - `sagebrush.ap`: traces of Frobenius a_p of elliptic curves over Q.
-- `sagebrush.poly`: factoring in Z[x] and F_p[x].
+- `sagebrush.poly`: factoring in Z[x] and F_p[x]; products, gcds and exact
+  division in Z[x].
+- `sagebrush.linalg`: exact matrices over ZZ and QQ: `det`, `rank`, `rref`,
+  `solve`, `inverse`, `charpoly`, `kernel` (multimodular and p-adic, every
+  answer certified).
 
 Results are checked against independent systems: PARI for class groups,
 Sage and Magma for the rest, and LMFDB for modular forms.

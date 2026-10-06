@@ -9,8 +9,9 @@ accepted and ignored).
     mf.newforms(23, 2)["newforms"]               # LMFDB's 23.2.a.a, with trace form
     poly.factor([0, -6, -1, 1])                  # (1, [([-3, 1], 1), ([0, 1], 1), ([2, 1], 1)])
     nf.bnf([-11, 0, 0, 1])["cyc"]                # [2]: Q(11^(1/3)), GRH
+    linalg.det([[1, 2], [3, 4]])                 # -2, exact (multimodular)
 """
 
-from . import modsym, ap, mf, poly, nf
+from . import modsym, ap, mf, poly, nf, linalg
 
-__all__ = ["modsym", "ap", "mf", "poly", "nf"]
+__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg"]

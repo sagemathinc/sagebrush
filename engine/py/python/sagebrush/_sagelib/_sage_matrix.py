@@ -1,7 +1,9 @@
 """Matrices over ZZ and QQ as in Sage: matrix(ZZ, rows), arithmetic,
-determinants, echelon and Hermite forms, elementary divisors, Smith form and
-LLL (the integer algorithms in the Rust engine, sagebrush.nf), printed as
-Sage prints them.  Dense; entries are Python ints or Sage Rationals."""
+determinants, echelon and Hermite forms, characteristic polynomials,
+kernels, solving, elementary divisors, Smith form and LLL, printed as Sage
+prints them.  The exact linear algebra is the Rust engine's (sagebrush.linalg:
+multimodular and p-adic, certified; sagebrush.nf for the lattice algorithms).
+Dense; entries are Python ints or Sage Rationals."""
 
 from fractions import Fraction as _F
 
@@ -12,6 +14,8 @@ def _sa():
 
 
 def _norm(c):
+    if isinstance(c, int):
+        return int(c)
     f = _F(c)
     if f.denominator == 1:
         return int(f.numerator)
@@ -142,8 +146,13 @@ class Matrix:
         if isinstance(other, Matrix):
             if self.ncols() != other.nrows():
                 raise TypeError("unsupported operand parent(s) for *: matrices of incompatible sizes")
+            if self._base is _sa().ZZ and other._base is _sa().ZZ and self.nrows() * self.ncols() * other.ncols() > 4096:
+                from sagebrush import linalg
+                return Matrix(_sa().ZZ, linalg.matmul(self._rows, other._rows))
             cols = other.columns()
             return Matrix(self._same(other), [[sum((a * b for a, b in zip(r, c)), 0) for c in cols] for r in self._rows])
+        if isinstance(other, Vector):
+            return Vector(_norm(sum((a * b for a, b in zip(r, other)), 0)) for r in self._rows)
         if isinstance(other, (list, tuple)):
             return [sum((a * b for a, b in zip(r, other)), 0) for r in self._rows]
         base = self._base if isinstance(other, int) else _sa().QQ
@@ -176,52 +185,24 @@ class Matrix:
     def __invert__(self):
         return self.inverse()
 
-    # ---- linear algebra
+    # ---- linear algebra (sagebrush.linalg)
     def determinant(self):
         if not self.is_square():
             raise ValueError("self must be a square matrix")
-        m = [[_F(x) for x in r] for r in self._rows]
-        n = len(m)
-        d = _F(1)
-        for c in range(n):
-            p = next((i for i in range(c, n) if m[i][c] != 0), None)
-            if p is None:
-                return 0
-            if p != c:
-                m[c], m[p] = m[p], m[c]
-                d = -d
-            d *= m[c][c]
-            for i in range(c + 1, n):
-                f = m[i][c] / m[c][c]
-                if f:
-                    for j in range(c, n):
-                        m[i][j] -= f * m[c][j]
-        return _norm(d)
+        from sagebrush import linalg
+        return _norm(linalg.det(self._rows))
 
     det = determinant
 
     def _rref(self):
-        m = [[_F(x) for x in r] for r in self._rows]
-        rows, cols = len(m), (len(m[0]) if m else 0)
-        r = 0
-        pivots = []
-        for c in range(cols):
-            p = next((i for i in range(r, rows) if m[i][c] != 0), None)
-            if p is None:
-                continue
-            m[r], m[p] = m[p], m[r]
-            inv = 1 / m[r][c]
-            m[r] = [x * inv for x in m[r]]
-            for i in range(rows):
-                if i != r and m[i][c] != 0:
-                    f = m[i][c]
-                    m[i] = [a - f * b for a, b in zip(m[i], m[r])]
-            pivots.append(c)
-            r += 1
-        return m, pivots
+        from sagebrush import linalg
+        return linalg.rref(self._rows)
 
     def rank(self):
-        return len(self._rref()[1])
+        if not self._rows or not self._rows[0]:
+            return 0
+        from sagebrush import linalg
+        return linalg.rank(self._rows)
 
     def pivots(self):
         return tuple(self._rref()[1])
@@ -229,12 +210,60 @@ class Matrix:
     def inverse(self):
         if not self.is_square():
             raise ArithmeticError("self must be a square matrix")
-        n = self.nrows()
-        aug = Matrix(_sa().QQ, [list(r) + [1 if i == j else 0 for j in range(n)] for i, r in enumerate(self._rows)])
-        m, piv = aug._rref()
-        if piv[:n] != list(range(n)):
-            raise ZeroDivisionError("input matrix must be nonsingular")
-        return Matrix(_sa().QQ, [r[n:] for r in m])
+        from sagebrush import linalg
+        return Matrix(_sa().QQ, linalg.inverse(self._rows))
+
+    def charpoly(self, var="x", algorithm=None):
+        """The characteristic polynomial det(x I - self)."""
+        if not self.is_square():
+            raise ValueError("matrix must be square")
+        from sagebrush import linalg
+        from _sage_poly import PolynomialRing
+        return PolynomialRing(self._base, var)(linalg.charpoly(self._rows))
+
+    characteristic_polynomial = charpoly
+
+    def left_kernel(self):
+        """{v : v self = 0}: over QQ a vector space with the echelon basis,
+        over ZZ the saturated lattice with its Hermite basis (as Sage)."""
+        if self.ncols() == 0:
+            n = self.nrows()
+            return FreeModule_(self._base, n, [[int(i == j) for j in range(n)] for i in range(n)])
+        return _kernel(self.transpose(), self._base)
+
+    kernel = left_kernel
+
+    def right_kernel(self):
+        """{v : self v = 0}."""
+        return _kernel(self, self._base)
+
+    def solve_right(self, B):
+        """X with self X = B (B a matrix or a vector); a particular solution
+        (free variables zero) when there are many."""
+        is_vec = not isinstance(B, Matrix)
+        Bm = Matrix(_sa().QQ, [[x] for x in B]) if is_vec else B
+        if Bm.nrows() != self.nrows():
+            raise ValueError("number of rows of self must equal number of rows of right-hand side")
+        from sagebrush import linalg
+        n = self.ncols()
+        if self.is_square() and n and self.rank() == n:
+            X = linalg.solve(self._rows, Bm._rows)
+        else:
+            R, piv = linalg.rref([list(r) + list(b) for r, b in zip(self._rows, Bm._rows)])
+            if any(p >= n for p in piv):
+                raise ValueError("matrix equation has no solutions")
+            X = [[0] * Bm.ncols() for _ in range(n)]
+            for i, p in enumerate(piv):
+                X[p] = R[i][n:]
+        if is_vec:
+            return Vector(_norm(r[0]) for r in X)
+        return Matrix(_sa().QQ, X)
+
+    def solve_left(self, B):
+        """X with X self = B."""
+        if isinstance(B, Matrix):
+            return self.transpose().solve_right(B.transpose()).transpose()
+        return self.transpose().solve_right(B)
 
     def echelon_form(self):
         """Over ZZ the Hermite form; over QQ the reduced row echelon form."""
@@ -277,6 +306,89 @@ class Matrix:
         if any(_F(x).denominator != 1 for r in self._rows for x in r):
             raise TypeError("the matrix must have integer entries")
         return [[int(x) for x in r] for r in self._rows]
+
+
+class FreeModule_:
+    """A kernel: a subspace of QQ^n or a saturated sublattice of ZZ^n,
+    printed as Sage prints it."""
+
+    def __init__(self, base, degree, basis):
+        self._base, self._degree, self._basis = base, degree, basis
+
+    def __repr__(self):
+        ZZ = _sa().ZZ
+        if self._base is ZZ:
+            head = "Free module of degree %d and rank %d over Integer Ring\nEchelon basis matrix:" % (self._degree, len(self._basis))
+        else:
+            head = "Vector space of degree %d and dimension %d over Rational Field\nBasis matrix:" % (self._degree, len(self._basis))
+        return head + "\n" + repr(self.basis_matrix())
+
+    def basis_matrix(self):
+        if not self._basis:
+            return Matrix(self._base, [])
+        return Matrix(self._base, self._basis)
+
+    def basis(self):
+        return [Vector(r) for r in self._basis]
+
+    gens = basis
+
+    def dimension(self):
+        return len(self._basis)
+
+    rank = dimension
+
+    def degree(self):
+        return self._degree
+
+    def base_ring(self):
+        return self._base
+
+    def __eq__(self, other):
+        return isinstance(other, FreeModule_) and (self._base, self._degree, self._basis) == (other._base, other._degree, other._basis)
+
+    def __contains__(self, v):
+        v = list(v)
+        if len(v) != self._degree:
+            return False
+        if not self._basis:
+            return all(x == 0 for x in v)
+        from sagebrush import linalg
+        if linalg.rank(self._basis + [v]) != len(self._basis):
+            return False
+        if self._base is _sa().ZZ:
+            return all(_F(x).denominator == 1 for x in v)
+        return True
+
+
+def _kernel(a, base):
+    """The right kernel of the matrix a over base."""
+    from sagebrush import linalg
+    n = a.ncols()
+    if a.nrows() == 0:
+        k = [[int(i == j) for j in range(n)] for i in range(n)]
+    else:
+        k = linalg.kernel(a._rows) if n else []
+    if not k:
+        return FreeModule_(base, n, [])
+    if base is _sa().ZZ:
+        # saturate: the rows of the Hermite form of [a^T | I] with zero
+        # first part are the kernel's Hermite basis
+        from sagebrush import nf
+        m = a.nrows()
+        rows = [[int(a._rows[i][j]) for i in range(m)] + [int(j == t) for t in range(n)] for j in range(n)]
+        h = nf.hermite_form(rows)
+        basis = [r[m:] for r in h if all(x == 0 for x in r[:m])]
+        return FreeModule_(base, n, basis)
+    R, _ = linalg.rref(k)
+    return FreeModule_(base, n, [r for r in R if any(x != 0 for x in r)])
+
+
+def vector(*args):
+    """vector([1, 2, 3]) or vector(QQ, [1/2, 1])."""
+    if len(args) == 2:
+        args = args[1:]
+    return Vector(_norm(x) for x in args[0])
 
 
 def _smith_uv(a):

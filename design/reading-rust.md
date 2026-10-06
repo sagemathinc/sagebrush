@@ -531,6 +531,7 @@ Sagebrush depends on very little (all MIT OR Apache-2.0):
 | crate | role |
 |---|---|
 | `dashu` (through `engine/bigint`), `num-integer`, `num-traits`, `num-rational` | big integers and rationals (`num-bigint` at the Python boundary and as an alternative backend) |
+| (`engine/arith`, our own) | the FLINT-like layer: word-size moduli, NTTs, polynomials and matrices over Z/p, Z, Q |
 | `rayon` | data parallelism |
 | `pyo3` | Python bindings |
 | `wasm-bindgen` | WebAssembly bindings |
@@ -562,9 +563,19 @@ pure Rust, and much slower for large numbers.
 Alternatives in the Rust world: `rug` (GMP and MPFR through C, LGPL, so not
 usable in Sagebrush's permissive core), `malachite` (pure Rust and fast, but
 LGPL-3.0, so also excluded), and `dashu`/`ibig` (pure Rust, MIT OR
-Apache-2.0, generally faster than `num-bigint` on large inputs). If big-integer speed
-becomes the bottleneck, swapping in `dashu` or writing a focused FFT
-multiplication is possible without changing licenses.
+Apache-2.0, generally faster than `num-bigint` on large inputs).
+
+**Above the integers: `engine/arith`.** Sage gets its exact linear algebra
+and polynomial arithmetic from FLINT. Sagebrush's own version is
+`engine/arith` (MIT OR Apache-2.0, clean-room):
+- arithmetic modulo a word;
+- number-theoretic transforms;
+- polynomials over Z/n and Z;
+- dense matrices over Z/p, Z and Q.
+
+Every result over Z and Q is certified. The modules and algorithms are in
+[its README](../engine/arith/README.md). It is within a few times of FLINT
+([bench/linalg](../bench/linalg/README.md)).
 
 ## 12. The Rust math ecosystem
 

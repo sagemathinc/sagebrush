@@ -80,6 +80,13 @@ fn exact_json(e: &sagebrush_modsym::exact::Exact) -> Value {
 }
 
 fn bigs(v: Option<&Value>) -> Result<Vec<BigInt>, String> {
+    // the compact wire format: "c0,c1,..." (sagebrush.linalg and poly send it)
+    if let Some(Value::String(s)) = v {
+        if s.is_empty() {
+            return Ok(vec![]);
+        }
+        return s.split(',').map(|t| t.parse::<BigInt>().map_err(|e| e.to_string())).collect();
+    }
     v.and_then(Value::as_array)
         .ok_or("missing integer list")?
         .iter()
@@ -100,7 +107,46 @@ fn big1(v: Option<&Value>) -> Result<BigInt, String> {
 }
 
 fn matrix(v: Option<&Value>) -> Result<Vec<Vec<BigInt>>, String> {
+    // compact: rows separated by ';' ("" is the matrix with no rows)
+    if let Some(Value::String(s)) = v {
+        if s.is_empty() {
+            return Ok(vec![]);
+        }
+        return s.split(';').map(|r| bigs(Some(&Value::String(r.to_string())))).collect();
+    }
     v.and_then(Value::as_array).ok_or("missing matrix (a list of rows)")?.iter().map(|r| bigs(Some(r))).collect()
+}
+
+/// A matrix argument (rows of integers) as a ZMat; every row the same length.
+fn zmat(v: Option<&Value>) -> Result<sagebrush_arith::zmat::ZMat, String> {
+    let rows = matrix(v)?;
+    let c = rows.first().map_or(0, |r| r.len());
+    if rows.iter().any(|r| r.len() != c) {
+        return Err("matrix rows of different lengths".into());
+    }
+    let r = rows.len();
+    Ok(sagebrush_arith::zmat::ZMat { rows: r, cols: c, d: rows.into_iter().flatten().collect() })
+}
+
+/// A matrix result: rows of decimal strings, or with "wire": "csv" one
+/// string "a,b;c,d".
+fn zrows(m: &sagebrush_arith::zmat::ZMat, v: &Value) -> Value {
+    if csv(v) {
+        return json!((0..m.rows).map(|i| m.row(i).iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")).collect::<Vec<_>>().join(";"));
+    }
+    json!((0..m.rows).map(|i| big(m.row(i))).collect::<Vec<_>>())
+}
+
+/// A vector result in the requested wire format.
+fn zvec(x: &[BigInt], v: &Value) -> Value {
+    if csv(v) {
+        return json!(x.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(","));
+    }
+    json!(big(x))
+}
+
+fn csv(v: &Value) -> bool {
+    v.get("wire").and_then(Value::as_str) == Some("csv")
 }
 
 fn big(v: &[BigInt]) -> Vec<String> {
@@ -257,6 +303,63 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             let (c, fs) = sagebrush_poly::factor(&f);
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
+        }
+        // ---- sagebrush.linalg: exact matrices over Z (and Q, scaled) ----
+        "mat_det" => Ok(json!(sagebrush_arith::zmat::det(&zmat(v.get("m"))?).to_string())),
+        "mat_rank" => Ok(json!(sagebrush_arith::zmat::rank(&zmat(v.get("m"))?))),
+        "mat_rref" => {
+            let (n, den, piv) = sagebrush_arith::zmat::rref(&zmat(v.get("m"))?);
+            Ok(json!({ "rows": zrows(&n, v), "den": den.to_string(), "pivots": piv }))
+        }
+        "mat_solve" => {
+            let a = zmat(v.get("a"))?;
+            let b = zmat(v.get("b"))?;
+            if a.rows != a.cols || a.rows != b.rows {
+                return Err("mat_solve needs a square matrix and a right-hand side with as many rows".into());
+            }
+            Ok(match sagebrush_arith::zmat::solve(&a, &b) {
+                None => Value::Null,
+                Some((x, den)) => json!({ "rows": zrows(&x, v), "den": den.to_string() }),
+            })
+        }
+        "mat_inverse" => {
+            let a = zmat(v.get("m"))?;
+            if a.rows != a.cols {
+                return Err("mat_inverse of a non-square matrix".into());
+            }
+            Ok(match sagebrush_arith::zmat::inverse(&a) {
+                None => Value::Null,
+                Some((x, den)) => json!({ "rows": zrows(&x, v), "den": den.to_string() }),
+            })
+        }
+        "mat_charpoly" => {
+            let a = zmat(v.get("m"))?;
+            if a.rows != a.cols {
+                return Err("mat_charpoly of a non-square matrix".into());
+            }
+            Ok(zvec(&sagebrush_arith::zmat::charpoly(&a), v))
+        }
+        "mat_kernel" => Ok(zrows(&sagebrush_arith::zmat::kernel(&zmat(v.get("m"))?), v)),
+        "mat_mul" => {
+            let (a, b) = (zmat(v.get("a"))?, zmat(v.get("b"))?);
+            if a.cols != b.rows {
+                return Err("mat_mul: matrices of incompatible sizes".into());
+            }
+            Ok(zrows(&a.mul(&b), v))
+        }
+        // ---- sagebrush.poly: products and gcds in Z[x] ----
+        "poly_mul" => Ok(zvec(
+            &sagebrush_arith::zpoly::mul(&sagebrush_arith::zpoly::trim(bigs(v.get("a"))?), &sagebrush_arith::zpoly::trim(bigs(v.get("b"))?)),
+            v,
+        )),
+        "poly_gcd" => Ok(zvec(&sagebrush_arith::zpoly::gcd(&bigs(v.get("a"))?, &bigs(v.get("b"))?), v)),
+        "poly_divexact" => {
+            let a = sagebrush_arith::zpoly::trim(bigs(v.get("a"))?);
+            let b = sagebrush_arith::zpoly::trim(bigs(v.get("b"))?);
+            if b.is_empty() {
+                return Err("division by zero polynomial".into());
+            }
+            Ok(sagebrush_arith::zpoly::divexact(&a, &b).map_or(Value::Null, |q| zvec(&q, v)))
         }
         // ---- sagebrush.mf: Galois orbits of newforms, factored here ----
         "newspace" | "newforms" => {
