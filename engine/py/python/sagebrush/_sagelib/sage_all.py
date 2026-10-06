@@ -83,7 +83,10 @@ def _lift(name):
     op = getattr(_Fraction, name)
 
     def f(a, b):
-        return _q(op(_Fraction._from_coprime_ints(a._numerator, a._denominator), b))
+        try:
+            return _q(op(_Fraction._from_coprime_ints(a._numerator, a._denominator), b))
+        except ZeroDivisionError:
+            raise ZeroDivisionError("rational division by zero") from None
     f.__name__ = name
     return f
 
@@ -166,6 +169,8 @@ def Integer(x):
 
 def _QQ(x, d=None):
     """QQ(2, 3) or QQ("2/3") or QQ(0.75): the exact rational."""
+    if d is not None and d == 0:
+        raise ZeroDivisionError("rational division by zero")
     f = _Fraction(x) if d is None else _Fraction(x, d)
     if type(f) is not _Fraction:
         f = _Fraction(f._numerator, f._denominator)
@@ -542,6 +547,11 @@ def gcd(*args):
 def lcm(*args):
     if len(args) == 1:
         args = tuple(args[0])
+    if any(isinstance(a, _Polynomial) for a in args):
+        r = args[0]
+        for a in args[1:]:
+            r = r.lcm(a) if isinstance(r, _Polynomial) else a.lcm(r)
+        return r
     return _math.lcm(*args)
 
 

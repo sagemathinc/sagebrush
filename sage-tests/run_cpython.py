@@ -3,6 +3,7 @@
     python sage-tests/run_cpython.py           # needs `pip install sagebrush` (or a dev build)
     python sage-tests/run_cpython.py -v        # with diffs
     python sage-tests/run_cpython.py --regen   # re-preparse; needs a Python with Sage
+    python sage-tests/run_cpython.py --own     # preparse with sagebrush.preparse instead
 
 Each test_*.sage is turned into plain Python by Sage's own preparser
 (sage-tests/preparsed/test_*.py, committed: Integer(...) literals, ** for
@@ -28,12 +29,18 @@ if "--regen" in sys.argv:
     sys.exit(0)
 
 files = sorted(f for f in os.listdir(PRE) if f.startswith("test_") and f.endswith(".py"))
+own = "--own" in sys.argv
 
 
 def one(f):
     # (the file is read by a short driver: Windows limits command lines)
     path = os.path.join(PRE, f)
     code = "from sagebrush.sage import *\nexec(compile(open(%r, encoding='utf-8').read(), %r, 'exec'))" % (path, path)
+    if own:
+        # the .sage file itself, through Sagebrush's own preparser
+        path = os.path.join(HERE, f[:-3] + ".sage")
+        code = ("from sagebrush.sage import *\nfrom sagebrush.preparse import preparse as _pp\n"
+                "exec(compile(_pp(open(%r, encoding='utf-8').read()), %r, 'exec'))" % (path, path))
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     p = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, timeout=900, env=env)
     out = p.stdout.decode("utf-8", errors="replace").replace("\r\n", "\n")
