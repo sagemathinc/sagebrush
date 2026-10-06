@@ -494,5 +494,45 @@
 {
 "in": "2*cos(x^2) - sin(x^2)/x^2",
 "out": "-sin(x^2)/x^2 + 2*cos(x^2)"
+},
+{
+"in": "_K1*sin(x) + _K2*cos(x)",
+"out": "_K2*cos(x) + _K1*sin(x)"
+},
+{
+"in": "_K1*e^x + _K2*e^(-x)",
+"out": "_K2*e^(-x) + _K1*e^x"
+},
+{
+"in": "_K2*x*e^x + _K1*e^x",
+"out": "_K2*x*e^x + _K1*e^x"
+},
+{
+"in": "a*sin(x) + b*cos(x)",
+"out": "b*cos(x) + a*sin(x)"
+},
+{
+"in": "b*sin(x) + a*cos(x)",
+"out": "a*cos(x) + b*sin(x)"
+},
+{
+"in": "a*x + b*sin(x)",
+"out": "a*x + b*sin(x)"
+},
+{
+"in": "_K1*sin(2*x) + _K2*cos(2*x) + 1/3*sin(x)",
+"out": "_K2*cos(2*x) + _K1*sin(2*x) + 1/3*sin(x)"
+},
+{
+"in": "a*e^x + b*e^(2*x)",
+"out": "b*e^(2*x) + a*e^x"
+},
+{
+"in": "b*x^2 + a*x^3",
+"out": "a*x^3 + b*x^2"
+},
+{
+"in": "a*sin(x)*x + b*cos(x)",
+"out": "a*x*sin(x) + b*cos(x)"
 }
 ]

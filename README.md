@@ -213,6 +213,17 @@ the engines.
     unevaluated. 151 of ours print exactly as Sage prints Maxima's answers.
   - `integrate_steps(f, x)` shows the rules used, and `numerical_integral`
     computes adaptive Gauss–Kronrod quadrature.
+- **Limits and differential equations:**
+  - `limit` works by continuity, series, comparison of growth at infinity
+    (powers, logs, exponentials) and L'Hôpital's rule. It gives Sage's
+    answer on 61 of 62 textbook limits (`engine/sym/corpus/limits.json`).
+  - `desolve` solves first-order linear, separable, exact, homogeneous and
+    Bernoulli equations, and second-order linear ones with constant
+    coefficients (undetermined coefficients, variation of parameters) or
+    of Cauchy–Euler type, with initial conditions. It solves all 37
+    equations of `corpus/odes.json`, and every explicit solution is
+    verified by substitution.
+  - `desolve_rk4` integrates numerically.
 - **Plots and `@interact`:** Sage's `plot`/`point`/... and
   `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
   rerun a function in milliseconds. `plot3d`, `parametric_plot3d`,

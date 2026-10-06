@@ -1,6 +1,6 @@
 # Print-order corpus: what Sage prints for sums and products.
 import json
-var('x y z a b n t')
+var('x y z a b n t _K1 _K2')
 cases = r'''
 x*(x+1)
 (x+1)*x
@@ -126,6 +126,16 @@ cos(x^2)/x^2 + sin(x^2)
 sin(x^2)/x^4 + cos(x^2)/x^2
 sin(y^2)/x^2 + cos(x^2)
 2*cos(x^2) - sin(x^2)/x^2
+_K1*sin(x) + _K2*cos(x)
+_K1*e^x + _K2*e^(-x)
+_K2*x*e^x + _K1*e^x
+a*sin(x) + b*cos(x)
+b*sin(x) + a*cos(x)
+a*x + b*sin(x)
+_K1*sin(2*x) + _K2*cos(2*x) + 1/3*sin(x)
+a*e^x + b*e^(2*x)
+b*x^2 + a*x^3
+a*sin(x)*x + b*cos(x)
 '''
 out = []
 for line in cases.strip().split("\n"):

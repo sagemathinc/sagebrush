@@ -224,8 +224,9 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
         }
         Kind::Pow(b, p) => {
             if depends(p, x) {
-                // b^p = e^(p log b)
-                return series(&exp(&mul2(p, &log(b))), x, prec);
+                // b^p = e^(p log b) (composed directly: e^(x log 2) is 2^x again)
+                let s = series(&mul2(p, &log(b)), x, prec + 2)?;
+                return Ok(s.compose(&|y: &Expr| exp(y), prec)?.truncate(prec));
             }
             let bs = series(b, x, prec + 2)?;
             if let Some(k) = p.as_i64() {
@@ -251,6 +252,9 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
             // a symbolic exponent: through the derivatives
             let p2 = p.clone();
             bs.compose(&move |y: &Expr| pow(y, &p2), prec)?
+        }
+        Kind::Fun(Fun::Abs | Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside, _) => {
+            return Err(SymError::NotImplemented(format!("series of {}", crate::to_string(e))));
         }
         Kind::Fun(f, a) if a.len() == 1 => {
             let s = series(&a[0], x, prec + 2)?;

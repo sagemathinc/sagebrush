@@ -18,11 +18,87 @@ pub enum Dir {
 
 /// Sage's limit(e, x=a [, dir='+'/'-']).
 pub fn limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> Expr {
+    // abs(u) and sign(u) differ on the two sides: one-sided limits, with
+    // abs(u) = +-u by the sign of u beside a
+    if has_abs(e) && !a.is_infinite() {
+        if dir == Dir::Both {
+            let (l, r) = (limit(e, x, a, Dir::Minus), limit(e, x, a, Dir::Plus));
+            return if l == r { r } else { constant(Const::Undefined) };
+        }
+        let h = if dir == Dir::Plus { 1e-9 } else { -1e-9 };
+        let e2 = resolve_abs(e, x, a, h);
+        return limit(&e2, x, a, dir);
+    }
+    if has_abs(e) {
+        let h = if a.is_const(Const::MinusInfinity) { -1e9 } else { 1e9 };
+        let e2 = resolve_abs(e, x, &zero(), h);
+        return limit(&e2, x, a, dir);
+    }
     // division by zero is an infinity here, never an error to recover from
     match soft(|| lim(e, x, a, dir, 0)) {
         Ok(r) => tidy(&r),
         Err(err) => crate::err::throw(err),
     }
+}
+
+fn has_abs(e: &Expr) -> bool {
+    matches!(&e.kind, Kind::Fun(Fun::Abs | Fun::Sign, _)) || e.children().iter().any(has_abs)
+}
+
+/// abs(u) -> u or -u, sign(u) -> +-1, by the sign of u at a + h.
+fn resolve_abs(e: &Expr, x: &str, a: &Expr, h: f64) -> Expr {
+    if e.children().is_empty() {
+        return e.clone();
+    }
+    let e = rebuild(e, e.children().iter().map(|c| resolve_abs(c, x, a, h)).collect());
+    if let Kind::Fun(g @ (Fun::Abs | Fun::Sign), args) = &e.kind {
+        let av = crate::eval::to_f64(a).unwrap_or(0.0);
+        let pt = av + h;
+        let v = crate::eval::to_c64_env(&args[0], &|s| if s == x { Some((pt, 0.0)) } else { None });
+        if let Some((re, _)) = v {
+            let neg_ = re < 0.0;
+            return match g {
+                Fun::Abs => if neg_ { neg(&args[0]) } else { args[0].clone() },
+                _ => if neg_ { int(-1) } else { one() },
+            };
+        }
+    }
+    e
+}
+
+/// Whether e is bounded whatever x does (sin, cos, arctan, tanh, ...).
+fn bounded(e: &Expr, x: &str) -> bool {
+    if !depends(e, x) {
+        return !has_infinity(e);
+    }
+    match &e.kind {
+        Kind::Fun(Fun::Sin | Fun::Cos | Fun::Atan | Fun::Tanh | Fun::Erf, _) => true,
+        Kind::Add(v) | Kind::Mul(v) => v.iter().all(|t| bounded(t, x)),
+        Kind::Pow(b, n) => n.as_i64().map_or(false, |k| k > 0) && bounded(b, x),
+        _ => false,
+    }
+}
+
+/// Continuity at a by substitution: no part of e becomes infinite there
+/// (1^(1/x) is not 1 at 0).
+fn continuous_value(e: &Expr, x: &str, a: &Expr) -> Option<Expr> {
+    fn walk(e: &Expr, x: &str, rules: &[(Expr, Expr)]) -> bool {
+        if !depends(e, x) {
+            return true;
+        }
+        let v = subs(e, rules);
+        if has_infinity(&v) {
+            return false;
+        }
+        e.children().iter().all(|c| walk(c, x, rules))
+    }
+    let rules = [(sym(x), a.clone())];
+    if !walk(e, x, &rules) {
+        return None;
+    }
+    let v = subs(e, &rules);
+    let ok = crate::eval::to_c64(&v).map_or(true, |(r, i)| r.is_finite() && i.is_finite());
+    if is_finite_value(&v) && ok { Some(v) } else { None }
 }
 
 fn fail<T>(msg: impl Into<String>) -> R<T> {
@@ -46,21 +122,24 @@ fn has_infinity(e: &Expr) -> bool {
 
 fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
     sagebrush_interrupt::check();
-    if depth > 12 {
+
+    if depth > 40 {
         return fail("limit: too deep");
     }
     if !depends(e, x) {
         return Ok(e.clone());
     }
-    let xs = sym(x);
     // 1. continuity: plug in (finite points)
     if is_finite_value(a) {
-        let v = subs(e, &[(xs.clone(), a.clone())]);
-        if is_finite_value(&v) && !v.is_const(Const::Undefined) {
-            let ok = crate::eval::to_c64(&v).map_or(true, |(r, i)| r.is_finite() && i.is_finite());
-            if ok {
-                return Ok(v);
-            }
+        if let Some(v) = continuous_value(e, x, a) {
+            return Ok(v);
+        }
+    }
+    // at +oo: products of powers, logs and exponentials by their growth,
+    // and sums by their dominant term
+    if a.is_const(Const::Infinity) {
+        if let Some(v) = growth_limit(e, x) {
+            return Ok(v);
         }
     }
     // 2. series at the point
@@ -69,6 +148,25 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
     }
     // 3. structure
     match &e.kind {
+        Kind::Pow(b, p) if !depends(p, x) => {
+            let l = lim(b, x, a, dir, depth + 1)?;
+            let pv = crate::eval::to_f64(p);
+            if l.is_const(Const::Infinity) {
+                if let Some(pv) = pv {
+                    return Ok(if pv > 0.0 { infinity() } else { zero() });
+                }
+            }
+            if l.is_zero() {
+                if let Some(pv) = pv {
+                    if pv < 0.0 {
+                        return Ok(infinity());
+                    }
+                }
+            }
+            if is_finite_value(&l) {
+                return Ok(pow(&l, p));
+            }
+        }
         Kind::Pow(b, p) if depends(p, x) => {
             // b^p = exp(p log b)
             let l = lim(&mul2(p, &log(b)), x, a, dir, depth + 1)?;
@@ -88,6 +186,15 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
             return quotient_limit(&n, &d, x, a, dir, depth + 1);
         }
         Kind::Mul(v) => {
+            // a bounded factor times something that goes to 0
+            let (bd, rest): (Vec<Expr>, Vec<Expr>) = v.iter().cloned().partition(|f| bounded(f, x) && depends(f, x));
+            if !bd.is_empty() && !rest.is_empty() {
+                if let Ok(l) = lim(&mul(rest), x, a, dir, depth + 1) {
+                    if l.is_zero() {
+                        return Ok(zero());
+                    }
+                }
+            }
             let (n, d) = together(e);
             if !d.is_one() && depends(&d, x) {
                 return quotient_limit(&n, &d, x, a, dir, depth + 1);
@@ -105,9 +212,12 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
                 // reciprocal in the denominator, and the other way
                 let f = &v[i];
                 let g = &v[j];
-                let q = match quotient_limit(f, &recip(g), x, a, dir, depth + 1) {
+                let is_exp = |e: &Expr| matches!(&e.kind, Kind::Pow(b, _) if b.is_const(Const::E));
+                // the exponential goes in the denominator: x e^(-x) = x/e^x
+                let (first, second) = if is_exp(f) { ((g, f), (f, g)) } else { ((f, g), (g, f)) };
+                let q = match quotient_limit(first.0, &recip(first.1), x, a, dir, depth + 1) {
                     Ok(q) => q,
-                    Err(_) => quotient_limit(g, &recip(f), x, a, dir, depth + 1)?,
+                    Err(_) => quotient_limit(second.0, &recip(second.1), x, a, dir, depth + 1)?,
                 };
                 return Ok(mul2(&q, &lim(&mul(rest), x, a, dir, depth + 1)?));
             }
@@ -120,6 +230,96 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
         _ => {}
     }
     fail(format!("limit of {} not found", crate::to_string(e)))
+}
+
+/// e = C x^p log(x)^q e^(r(x)) (r a polynomial without constant term):
+/// (C, [deg r, lead r], p, q) as a growth key at +oo.
+fn growth(e: &Expr, x: &str) -> Option<(Expr, (i64, f64, f64, f64))> {
+    let fs = match &e.kind {
+        Kind::Mul(v) => v.clone(),
+        _ => vec![e.clone()],
+    };
+    let (mut c, mut r, mut p, mut q) = (vec![], zero(), 0.0, 0.0);
+    for f in fs {
+        if !depends(&f, x) {
+            c.push(f);
+            continue;
+        }
+        let (b, k) = base_exp(&f);
+        if b.is_const(Const::E) {
+            r = add2(&r, &k);
+            continue;
+        }
+        let kv = crate::eval::to_f64(&k)?;
+        match &b.kind {
+            Kind::Sym(s) if &**s == x => p += kv,
+            Kind::Fun(Fun::Log, a) if a[0].as_sym() == Some(x) => q += kv,
+            _ => return None,
+        }
+    }
+    let rc = crate::poly::coeffs(&r, x)?;
+    if rc.iter().any(|t| depends(t, x)) {
+        return None;
+    }
+    let deg = rc.len() as i64 - 1;
+    let (deg, lead) = if deg >= 1 { (deg, crate::eval::to_f64(&rc[deg as usize])?) } else { (0, 0.0) };
+    // the constant part of r is a constant factor
+    c.push(exp(&rc[0]));
+    Some((mul(c), (deg, lead, p, q)))
+}
+
+fn key_cmp(a: &(i64, f64, f64, f64), b: &(i64, f64, f64, f64)) -> std::cmp::Ordering {
+    // e^(c x^k) beats x^p beats log(x)^q
+    let ea = if a.0 > 0 { (a.0 as f64) * a.1.signum() } else { 0.0 };
+    let eb = if b.0 > 0 { (b.0 as f64) * b.1.signum() } else { 0.0 };
+    ea.partial_cmp(&eb).unwrap()
+        .then_with(|| if a.0 == b.0 && a.0 > 0 { a.1.partial_cmp(&b.1).unwrap() } else { std::cmp::Ordering::Equal })
+        .then_with(|| a.2.partial_cmp(&b.2).unwrap())
+        .then_with(|| a.3.partial_cmp(&b.3).unwrap())
+}
+
+fn growth_limit(e: &Expr, x: &str) -> Option<Expr> {
+    let (n, d) = together(e);
+    let terms = |t: &Expr| -> Option<Vec<(Expr, (i64, f64, f64, f64))>> {
+        let ex = crate::expand::expand(t);
+        let v = match &ex.kind {
+            Kind::Add(v) => v.clone(),
+            _ => vec![ex.clone()],
+        };
+        v.iter().map(|u| growth(u, x)).collect()
+    };
+    // the dominant term of a sum (unique), else None
+    let dominant = |ts: Vec<(Expr, (i64, f64, f64, f64))>| -> Option<(Expr, (i64, f64, f64, f64))> {
+        let mut best: Option<(Expr, (i64, f64, f64, f64))> = None;
+        let mut tie = false;
+        for t in ts {
+            match &best {
+                None => best = Some(t),
+                Some(b) => match key_cmp(&t.1, &b.1) {
+                    std::cmp::Ordering::Greater => {
+                        best = Some(t);
+                        tie = false;
+                    }
+                    std::cmp::Ordering::Equal => tie = true,
+                    _ => {}
+                },
+            }
+        }
+        if tie { None } else { best }
+    };
+    let (cn, kn) = dominant(terms(&n)?)?;
+    let (cd, kd) = dominant(terms(&d)?)?;
+    // only when exponentials or logs are involved (polynomials: as before)
+    if kn.0 == 0 && kd.0 == 0 && kn.3 == 0.0 && kd.3 == 0.0 {
+        return None;
+    }
+    let ratio = div(&cn, &cd);
+    let sign = crate::eval::to_f64(&ratio)?.signum();
+    Some(match key_cmp(&kn, &kd) {
+        std::cmp::Ordering::Less => zero(),
+        std::cmp::Ordering::Greater => if sign > 0.0 { infinity() } else { constant(Const::MinusInfinity) },
+        std::cmp::Ordering::Equal => ratio,
+    })
 }
 
 fn exp_limit(l: &Expr) -> Expr {
@@ -154,11 +354,14 @@ fn fun_at(f: &Fun, l: &Expr) -> R<Expr> {
 
 /// lim n/d by its form: substitution, then L'Hopital for 0/0 and oo/oo.
 fn quotient_limit(n: &Expr, d: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
-    if depth > 12 {
+    if depth > 40 {
         return fail("limit: L'Hopital's rule did not converge");
     }
-    let ln = lim(n, x, a, dir, depth + 1)?;
     let ld = lim(d, x, a, dir, depth + 1)?;
+    if ld.is_infinite() && bounded(n, x) {
+        return Ok(zero());
+    }
+    let ln = lim(n, x, a, dir, depth + 1)?;
     let zero_zero = ln.is_zero() && ld.is_zero();
     let inf_inf = ln.is_infinite() && ld.is_infinite();
     if !(zero_zero || inf_inf) {

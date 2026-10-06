@@ -1,0 +1,208 @@
+[
+{
+"in": "diff(y(x), x) == y(x)",
+"ics": [],
+"maxima": "e^x*_C"
+},
+{
+"in": "diff(y(x), x) == 2*y(x)",
+"ics": [],
+"maxima": "e^(2*x)*_C"
+},
+{
+"in": "diff(y(x), x) + y(x) == x",
+"ics": [],
+"maxima": "e^-x*(e^x*(x-1)+_C)"
+},
+{
+"in": "diff(y(x), x) + 2*y(x) == exp(x)",
+"ics": [],
+"maxima": "e^-(2*x)*(_C+e^(3*x)/3)"
+},
+{
+"in": "diff(y(x), x) - y(x) == sin(x)",
+"ics": [],
+"maxima": "e^x*((e^-x*(-sin(x)-cos(x)))/2+_C)"
+},
+{
+"in": "x*diff(y(x), x) + y(x) == x^2",
+"ics": [],
+"maxima": "(x^3/3+_C)/x"
+},
+{
+"in": "diff(y(x), x) + y(x)/x == 1",
+"ics": [],
+"maxima": "(x^2/2+_C)/x"
+},
+{
+"in": "diff(y(x), x) == x*y(x)",
+"ics": [],
+"maxima": "e^(x^2/2)*_C"
+},
+{
+"in": "diff(y(x), x) == x*y(x)^2",
+"ics": [],
+"maxima": "-(1/y(x)) == x^2/2+_C"
+},
+{
+"in": "diff(y(x), x) == -x/y(x)",
+"ics": [],
+"maxima": "-(y(x)^2/2) == x^2/2+_C"
+},
+{
+"in": "diff(y(x), x) == y(x)^2",
+"ics": [],
+"maxima": "-(1/y(x)) == x+_C"
+},
+{
+"in": "diff(y(x), x) == exp(x - y(x))",
+"ics": [],
+"maxima": "e^y(x)-e^x == _C"
+},
+{
+"in": "diff(y(x), x) == (1 + y(x)^2)",
+"ics": [],
+"maxima": "atan(y(x)) == x+_C"
+},
+{
+"in": "diff(y(x), x) == y(x)*(1 - y(x))",
+"ics": [],
+"maxima": "log(y(x))-log(y(x)-1) == x+_C"
+},
+{
+"in": "diff(y(x), x) == (x + y(x))/x",
+"ics": [],
+"maxima": "x*(log(x)+_C)"
+},
+{
+"in": "2*x*y(x) + (x^2 + 1)*diff(y(x), x) == 0",
+"ics": [],
+"maxima": "_C/(x^2+1)"
+},
+{
+"in": "diff(y(x), x) + y(x) == y(x)^2",
+"ics": [],
+"maxima": "log(y(x)-1)-log(y(x)) == x+_C"
+},
+{
+"in": "diff(y(x), x, 2) + y(x) == 0",
+"ics": [],
+"maxima": "_K1*sin(x)+_K2*cos(x)"
+},
+{
+"in": "diff(y(x), x, 2) - y(x) == 0",
+"ics": [],
+"maxima": "e^-x*_K2+e^x*_K1"
+},
+{
+"in": "diff(y(x), x, 2) + 4*y(x) == 0",
+"ics": [],
+"maxima": "_K1*sin(2*x)+_K2*cos(2*x)"
+},
+{
+"in": "diff(y(x), x, 2) - 2*diff(y(x), x) + y(x) == 0",
+"ics": [],
+"maxima": "e^x*(_K2*x+_K1)"
+},
+{
+"in": "diff(y(x), x, 2) + 2*diff(y(x), x) + 5*y(x) == 0",
+"ics": [],
+"maxima": "e^-x*(_K1*sin(2*x)+_K2*cos(2*x))"
+},
+{
+"in": "diff(y(x), x, 2) - 3*diff(y(x), x) + 2*y(x) == 0",
+"ics": [],
+"maxima": "e^x*_K2+e^(2*x)*_K1"
+},
+{
+"in": "diff(y(x), x, 2) + y(x) == x",
+"ics": [],
+"maxima": "_K1*sin(x)+_K2*cos(x)+x"
+},
+{
+"in": "diff(y(x), x, 2) + 4*y(x) == sin(x)",
+"ics": [],
+"maxima": "_K1*sin(2*x)+_K2*cos(2*x)+sin(x)/3"
+},
+{
+"in": "diff(y(x), x, 2) - y(x) == exp(x)",
+"ics": [],
+"maxima": "(2*e^x*x-e^x)/4+e^-x*_K2+e^x*_K1"
+},
+{
+"in": "diff(y(x), x, 2) + y(x) == sin(x)",
+"ics": [],
+"maxima": "_K1*sin(x)-(x*cos(x))/2+_K2*cos(x)"
+},
+{
+"in": "diff(y(x), x, 2) - 3*diff(y(x), x) + 2*y(x) == x^2",
+"ics": [],
+"maxima": "(2*x^2+6*x+7)/4+e^x*_K2+e^(2*x)*_K1"
+},
+{
+"in": "diff(y(x), x, 2) + diff(y(x), x) == x",
+"ics": [],
+"maxima": "(x^2-2*x+2)/2+e^-x*_K2+_K1"
+},
+{
+"in": "x^2*diff(y(x), x, 2) - 2*y(x) == 0",
+"ics": [],
+"maxima": "_K2*x^2-_K1/(3*x)"
+},
+{
+"in": "x^2*diff(y(x), x, 2) + x*diff(y(x), x) - y(x) == 0",
+"ics": [],
+"maxima": "_K2*x-_K1/(2*x)"
+},
+{
+"in": "diff(y(x), x) == y(x)",
+"ics": [
+"0",
+"1"
+],
+"maxima": "e^x"
+},
+{
+"in": "diff(y(x), x) + y(x) == x",
+"ics": [
+"0",
+"1"
+],
+"maxima": "e^-x*(e^x*x-e^x+2)"
+},
+{
+"in": "diff(y(x), x) == x*y(x)^2",
+"ics": [
+"0",
+"1"
+],
+"maxima": "-(1/y(x)) == (x^2-2)/2"
+},
+{
+"in": "diff(y(x), x, 2) + y(x) == 0",
+"ics": [
+"0",
+"1",
+"0"
+],
+"maxima": "cos(x)"
+},
+{
+"in": "diff(y(x), x, 2) - y(x) == 0",
+"ics": [
+"0",
+"1",
+"1"
+],
+"maxima": "e^x"
+},
+{
+"in": "diff(y(x), x, 2) + 4*y(x) == sin(x)",
+"ics": [
+"0",
+"0",
+"0"
+],
+"maxima": "sin(x)/3-sin(2*x)/6"
+}
+]

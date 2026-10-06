@@ -41,6 +41,7 @@ fn expand_product(v: &[Expr]) -> Expr {
         let ts = terms(f);
         let mut next = Vec::with_capacity(acc.len() * ts.len());
         for a in &acc {
+            sagebrush_interrupt::check();
             for t in &ts {
                 next.push(mul2(a, t));
             }
@@ -58,6 +59,7 @@ fn power_of_sum(b: &Expr, n: u64) -> Expr {
     for _ in 0..n {
         let mut next = Vec::with_capacity(acc.len() * ts.len());
         for a in &acc {
+            sagebrush_interrupt::check();
             for t in &ts {
                 next.push(expand(&mul2(a, t)));
             }

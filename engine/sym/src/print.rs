@@ -96,8 +96,23 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
     if qa != qb {
         return qa.partial_cmp(&qb).unwrap_or(Ordering::Equal);
     }
-    // same degree: compare factor by factor
+    // same degree: the transcendental kernels (functions, exponentials)
+    // first, whatever the coefficients (_K2*cos(x) + _K1*sin(x)), then
+    // the polynomial factors one by one
     let (fa, fb) = (term_factors(a), term_factors(b));
+    let kernel = |f: &&Expr| -> bool {
+        let (b, _) = base_exp(f);
+        matches!(b.kind, Kind::Fun(..)) || b.is_const(Const::E)
+    };
+    let (ka, kb): (Vec<&Expr>, Vec<&Expr>) = (fa.iter().filter(kernel).collect(), fb.iter().filter(kernel).collect());
+    if !ka.is_empty() && !kb.is_empty() {
+        for (x, y) in ka.iter().zip(&kb) {
+            let c = atom_order(x, y);
+            if c != Ordering::Equal {
+                return c;
+            }
+        }
+    }
     for (x, y) in fa.iter().zip(&fb) {
         let c = atom_order(x, y);
         if c != Ordering::Equal {
@@ -165,7 +180,20 @@ fn atom_order(a: &Expr, b: &Expr) -> Ordering {
     }
     // same base: the higher power first
     let (ea, eb) = (degree_of_exp(&xa), degree_of_exp(&xb));
-    eb.partial_cmp(&ea).unwrap_or(Ordering::Equal)
+    let c = eb.partial_cmp(&ea).unwrap_or(Ordering::Equal);
+    if c != Ordering::Equal || xa == xb {
+        return c;
+    }
+    // exponents of one degree: products before a bare symbol, larger
+    // coefficients first (e^(2*x) + e^(-x) + e^x)
+    match (&xa.kind, &xb.kind) {
+        (Kind::Mul(_), Kind::Sym(_)) => Ordering::Less,
+        (Kind::Sym(_), Kind::Mul(_)) => Ordering::Greater,
+        _ => {
+            let (ca, cb) = (split_coeff(&xa).0.to_c64().0, split_coeff(&xb).0.to_c64().0);
+            cb.partial_cmp(&ca).unwrap_or(Ordering::Equal)
+        }
+    }
 }
 
 fn degree_of_exp(x: &Expr) -> f64 {
