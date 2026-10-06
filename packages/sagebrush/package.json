@@ -1,6 +1,6 @@
 {
   "name": "sagebrush",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Python 3.14 on a JavaScript runtime, for research mathematics: an interactive calculator and script runner that starts in ~80 ms (Node, Deno or Bun)",
   "keywords": ["python", "mathematics", "computer-algebra", "repl", "sagemath", "mpmath", "sandbox"],
   "bin": {
