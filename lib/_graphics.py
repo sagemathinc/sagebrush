@@ -53,13 +53,33 @@ def to_color(c, default=None):
     return str(c)
 
 
+_CMAPS = {
+    "viridis": _VIRIDIS,
+    "coolwarm": ["#3b4cc0", "#6788ee", "#9abbff", "#c9d7f0", "#edd1c2", "#f7a889", "#e26952", "#b40426"],
+    "jet": ["#00007f", "#0000ff", "#007fff", "#00ffff", "#7fff7f", "#ffff00", "#ff7f00", "#ff0000", "#7f0000"],
+    "hot": ["#0b0000", "#4c0000", "#8f0000", "#d10000", "#ff1500", "#ff5800", "#ff9b00", "#ffdd00", "#ffff3f", "#ffffff"],
+    "rainbow": ["#7f00ff", "#3f61fa", "#00b4eb", "#40ecd3", "#80feb3", "#c0eb8d", "#ffb360", "#ff6130", "#ff0000"],
+    "plasma": ["#0d0887", "#46039f", "#7201a8", "#9c179e", "#bd3786", "#d8576b", "#ed7953", "#fb9f3a", "#fdca26", "#f0f921"],
+    "Blues": ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"],
+    "Spectral": ["#9e0142", "#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#e6f598", "#abdda4", "#66c2a5", "#3288bd", "#5e4fa2"],
+    "RdBu": ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"],
+}
+
+
 def colormap(t, name="viridis"):
-    """The color at t in [0, 1] of a colormap (viridis, or gray)."""
+    """The color at t in [0, 1] of a colormap: viridis, gray, coolwarm, jet,
+    hot, rainbow, plasma, Blues, Spectral, RdBu (a "_r" suffix reverses)."""
     t = 0.0 if t != t else max(0.0, min(1.0, t))
-    if name in ("gray", "grey", "Greys_r"):
+    name = name if isinstance(name, str) else "viridis"
+    if name.endswith("_r"):
+        name, t = name[:-2], 1 - t
+    if name in ("gray", "grey", "Greys_r", "binary_r"):
         g = round(t * 255)
         return "#%02x%02x%02x" % (g, g, g)
-    stops = _VIRIDIS
+    if name in ("Greys", "binary"):
+        g = round((1 - t) * 255)
+        return "#%02x%02x%02x" % (g, g, g)
+    stops = _CMAPS.get(name, _VIRIDIS)
     x = t * (len(stops) - 1)
     i = min(int(x), len(stops) - 2)
     f = x - i
@@ -357,6 +377,95 @@ class Rects(Primitive):
         return "%d bars%s" % (len(self.rects), _label(self))
 
 
+class Patches(Primitive):
+    """Many filled polygons, each with its own color (contour and density
+    plots).  Polygons of one color are drawn as one path."""
+    kind = "patches"
+
+    def __init__(self, polys, colors, **options):
+        super().__init__(**options)
+        self.polys = polys      # [[(x, y), ...], ...] in data coordinates
+        self.colors = colors    # a CSS color per polygon
+
+    def bbox(self):
+        b = self.options.get("bbox")
+        if b is not None:
+            return b
+        pts = [q for poly in self.polys for q in poly]
+        if not pts:
+            return None
+        return (min(q[0] for q in pts), max(q[0] for q in pts), min(q[1] for q in pts), max(q[1] for q in pts))
+
+    def svg(self, P):
+        groups = {}
+        for poly, c in zip(self.polys, self.colors):
+            pts = [P.map(x, y) for x, y in poly]
+            if any(p is None for p in pts) or len(pts) < 3:
+                continue
+            groups.setdefault(c, []).append("M" + "L".join(_fmt(x) + " " + _fmt(y) for x, y in pts) + "Z")
+        a = self.options.get("alpha")
+        out = []
+        for c in sorted(groups):
+            out.append('<path d="%s" fill="%s" stroke="%s" stroke-width="0.5" stroke-linejoin="round"/>' % (
+                "".join(groups[c]), _esc(c), _esc(c)))
+        return "<g%s>%s</g>" % (' opacity="%s"' % _fmt(a) if a is not None else "", "".join(out))
+
+    def describe(self):
+        return self.options.get("what") or "%d colored regions" % len(self.polys)
+
+
+class Segments(Primitive):
+    """Many short segments (slope fields), with arrowheads (vector fields)."""
+    kind = "segments"
+
+    def __init__(self, segs, **options):
+        super().__init__(**options)
+        self.segs = segs        # [((x0, y0), (x1, y1)), ...]
+
+    def bbox(self):
+        b = self.options.get("bbox")
+        if b is not None:
+            return b
+        pts = [q for s in self.segs for q in s]
+        if not pts:
+            return None
+        return (min(q[0] for q in pts), max(q[0] for q in pts), min(q[1] for q in pts), max(q[1] for q in pts))
+
+    def svg(self, P):
+        o = self.options
+        color = to_color(o.get("color"), "#1f77b4")
+        colors = o.get("colors")
+        heads = o.get("heads", False)
+        by = {}
+        for i, (a, b) in enumerate(self.segs):
+            pa, pb = P.map(*a), P.map(*b)
+            if pa is None or pb is None:
+                continue
+            c = colors[i] if colors else color
+            d = by.setdefault(c, [[], []])
+            d[0].append("M%s %sL%s %s" % (_fmt(pa[0]), _fmt(pa[1]), _fmt(pb[0]), _fmt(pb[1])))
+            if heads:
+                dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+                L = math.hypot(dx, dy)
+                if L > 0.5:
+                    h = min(6.0, 0.4 * L)
+                    ux, uy = dx / L, dy / L
+                    bx, by_ = pb[0] - ux * h, pb[1] - uy * h
+                    d[1].append("M%s %sL%s %sL%s %sZ" % (_fmt(pb[0]), _fmt(pb[1]), _fmt(bx - uy * h * 0.45), _fmt(by_ + ux * h * 0.45),
+                                                       _fmt(bx + uy * h * 0.45), _fmt(by_ - ux * h * 0.45)))
+        out = []
+        for c in sorted(by):
+            lines, hs = by[c]
+            out.append('<path d="%s" stroke="%s" stroke-width="%s" stroke-linecap="round" fill="none"/>' % (
+                "".join(lines), _esc(c), _fmt(o.get("thickness", 1.2))))
+            if hs:
+                out.append('<path d="%s" fill="%s"/>' % ("".join(hs), _esc(c)))
+        return "<g>%s</g>" % "".join(out)
+
+    def describe(self):
+        return self.options.get("what") or "%d segments" % len(self.segs)
+
+
 class Text(Primitive):
     kind = "text"
 
@@ -620,6 +729,16 @@ class Panel:
         lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * 6.4 + 10
         left = (lw + (18 if ylabel else 0)) if show_axes else 8
         pw, ph = max(20, w - left - right), max(20, h - top - bottom)
+        ar = o.get("aspect_ratio")
+        if o.get("fit_aspect") and ar not in (None, "automatic", "auto") and None not in (
+                o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax")):
+            # keep the ranges and shrink the plot area to their shape instead
+            xr, yr = float(o["xmax"]) - float(o["xmin"]), (float(o["ymax"]) - float(o["ymin"])) * float(ar)
+            if xr > 0 and yr > 0:
+                k = min(pw / xr, ph / yr)
+                left += (pw - xr * k) / 2
+                top += (ph - yr * k) / 2
+                pw, ph = xr * k, yr * k
         xlo, xhi, ylo, yhi, xlog, ylog = self.ranges(pw, ph)
         P = _Placed(x + left, y + top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
         # Sage's axes carry more ticks than matplotlib's frame
@@ -650,6 +769,10 @@ class Panel:
         for p in self.primitives:
             out.append(p.svg(P))
         out.append("</g>")
+        if show_axes and frame and any(isinstance(p, Patches) for p in self.primitives):
+            # filled regions reach the frame: draw it again on top
+            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="none" stroke="currentColor" stroke-width="0.8"/>' % (
+                _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph)))
         if show_axes and (xlabel or ylabel):
             if xlabel:
                 out.append('<text x="%s" y="%s" text-anchor="middle" font-size="12">%s</text>' % (

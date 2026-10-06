@@ -93,7 +93,9 @@ if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn
 rmSync(join(here, "site", "public", "atlas"), { recursive: true, force: true });
 cpSync(join(here, "dist", "atlas"), join(here, "site", "public", "atlas"), { recursive: true });
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
-for (const f of ["index.html", "llms.txt", "_headers", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-engine.wasm", ...KATEX])
+// the 3D viewer, loaded by the page when a Graphics3d is shown
+copyFileSync(join(here, "viewer3d.js"), join(here, "dist", "sagebrush-viewer3d.js"));
+for (const f of ["index.html", "llms.txt", "_headers", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-engine.wasm", ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
 console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);

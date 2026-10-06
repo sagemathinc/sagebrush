@@ -48,11 +48,75 @@ g.show(gridlines=True, figsize=(7, 3)); g.save('cubic.svg')
   `aspect_ratio`, `gridlines`, `frame`, `axes`, `figsize`,
   `scale='loglog'|'semilogx'|'semilogy'`, `ticks`, `legend_loc` and
   `show_legend`.
-- Just enough symbolics for this: `var('y z')`, `x`, `pi`, `e`, `sin`,
-  `cos`, `exp`, `log`, `sqrt` and friends build expressions that print like
-  Sage (`sin(x^2)/x`), substitute (`f(x=2)`), and compile once to a fast
-  numerical function for plotting. They do not simplify, differentiate or
-  solve.
+- Expressions come from Sagebrush's own symbolic engine (Rust,
+  `engine/sym`): `var('y z')`, `x`, `pi`, `e`, `sin`, `exp`, `sqrt` and the
+  rest build expressions that print like Sage (`sin(x^2)/x`), simplify,
+  differentiate, expand in series, and solve. For plotting, an expression
+  compiles once to a fast numerical function.
+
+### Functions of two variables (2D)
+
+```python
+contour_plot(x^2 - y^2, (x, -2, 2), (y, -2, 2))                  # filled, gray (Sage's default)
+contour_plot(sin(x)*cos(y), (x, -3, 3), (y, -3, 3), cmap='coolwarm', contours=10)
+density_plot(sin(x*y), (x, -3, 3), (y, -3, 3), cmap='viridis')
+implicit_plot(y^2 == x^3 - x, (x, -2, 2), (y, -2, 2))
+region_plot([x^2 + y^2 < 1, y > x], (x, -1.5, 1.5), (y, -1.5, 1.5))
+plot_vector_field((-y, x), (x, -2, 2), (y, -2, 2))
+plot_slope_field(x - y, (x, -3, 3), (y, -3, 3))                  # for y' = x - y
+```
+
+- The grid is sampled once. Contours come from linear interpolation on
+  triangles (each grid cell split in two), so filled bands and their lines
+  agree exactly.
+- Each superlevel set $\{f \ge c\}$ is one SVG path of rings, painted in
+  order. Contour plots stay at tens of kilobytes rather than one polygon
+  per cell.
+- Options: `plot_points`, `contours` (a count or a list of levels),
+  `fill`, `cmap` (viridis, gray, coolwarm, jet, hot, rainbow, plasma, Blues,
+  Spectral and RdBu, plus `_r` for reversed), `incol`/`outcol`, `color`.
+- The plot area takes the shape of the ranges (`aspect_ratio=1`), framed,
+  as in Sage.
+
+## 3D graphics
+
+```python
+plot3d(sin(x*y), (x, -3, 3), (y, -3, 3))
+plot3d(x^2 - y^2, (x, -2, 2), (y, -2, 2), cmap='viridis', mesh=True)
+parametric_plot3d((cos(t), sin(t), t/5), (t, 0, 6*pi), color='green')           # a curve
+parametric_plot3d((u*cos(v), u*sin(v), u), (u, 0, 1), (v, 0, 2*pi))              # a surface
+implicit_plot3d(x^2 + y^2 + z^2 == 4, (x, -2, 2), (y, -2, 2), (z, -2, 2), color='red')
+sphere((0, 0, 1), 0.5, color='orange', opacity=0.6) + point3d((1, 1, 1)) + line3d([(0, 0, 0), (1, 1, 1)])
+```
+
+Also available: `spherical_plot3d`, `cylindrical_plot3d`,
+`revolution_plot3d`, `arrow3d`, `text3d`, `polygon3d` and
+`plot_vector_field3d`. Graphics3d objects add with `+`.
+
+A Graphics3d shows two ways at once:
+
+- **Interactive view (notebook, Jupyter, saved `.html`).** Our own WebGL 1
+  viewer (`web/viewer3d.js`, about 19 kB, no libraries). It uses smooth
+  shading and thick curves drawn as tubes. Drag to rotate, scroll (once the
+  view has focus) or pinch to zoom, use the arrow keys and +/- to turn and
+  zoom, and double-click or press 0 to reset. Labels follow the page's light
+  or dark theme. The notebook loads the viewer on first use. Jupyter gets
+  HTML with the viewer embedded, and the SVG still inside it for when
+  scripts don't run.
+- **SVG (files, the command line, agents, and when WebGL is missing).**
+  - It is deterministic: an orthographic view (azimuth −60°, elevation 25°,
+    or `azimuth=`/`elevation=`), flat shading, and depth-sorted polygons
+    (the painter's algorithm).
+  - It has a text description, e.g. `3D plot: surface z = sin(x*y) of 1600
+    polygons; x from -3 to 3; ...`.
+  - Meshes with more than 4000 polygons are simplified by vertex clustering
+    for the picture only.
+
+`save('f.svg')` or `save('f.html')` (standalone and interactive).
+Proportions are true unless an axis would be shorter than a third of the
+longest (`aspect_ratio=[1, 1, 1]` forces true proportions).
+`plot_points`, `color`, `opacity`, `mesh`, `cmap`, `frame` and
+`axes_labels` work as in Sage.
 
 ## matplotlib.pyplot (any mode)
 
@@ -165,9 +229,7 @@ sagejs does. That layer would load on demand.
 
 ## Not yet
 
-- 3D: planned as a Plotly renderer for `plot3d` and friends, loaded on
-  demand, following sagejs.
-- `implicit_plot`, `contour_plot`/`density_plot` and vector fields.
 - Zooming by resampling.
 - LaTeX labels (KaTeX).
 - PNG files from the command line (resvg).
+- Colorbars, contour labels (`labels=True`), streamlines.

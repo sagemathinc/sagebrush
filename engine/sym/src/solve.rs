@@ -31,11 +31,15 @@ pub fn solve1(e: &Expr, x: &str) -> Vec<Expr> {
     let mut roots = roots_of(&n, x);
     // drop roots of the denominator (they are not solutions)
     roots.retain(|r| {
-        let v = crate::err::catch(|| subs(&z, &[(xs.clone(), r.clone())]));
-        !matches!(v, Err(_))
+        let v = crate::err::soft(|| subs(&z, &[(xs.clone(), r.clone())]));
+        !contains_infinity(&v)
     });
     sort_roots(&mut roots);
     roots.into_iter().map(|r| eq(&xs, &r)).collect()
+}
+
+fn contains_infinity(e: &Expr) -> bool {
+    e.is_infinite() || e.is_const(Const::Undefined) || e.children().iter().any(contains_infinity)
 }
 
 fn sort_roots(r: &mut Vec<Expr>) {

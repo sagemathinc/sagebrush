@@ -43,6 +43,7 @@ jobs:
           python -m pip install engine/py/dist/*.whl
           python sage-tests/run_cpython.py -v
           python sage-tests/run_cpython.py --own -v
+          python sage-tests/run_calculus.py
           python engine/py/test_interrupt.py
           python engine/py/test_mcp.py
           cd engine/py && python -m doctest README.md && echo doctests ok

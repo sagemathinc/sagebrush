@@ -36,6 +36,32 @@ pub fn not_implemented(msg: impl Into<String>) -> ! {
     throw(SymError::NotImplemented(msg.into()))
 }
 
+pub type R<T> = Result<T, SymError>;
+
+thread_local! {
+    static SOFT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Run f with division by zero giving unsigned infinity instead of an
+/// error: for algorithms that inspect what a substitution gives (limits,
+/// checking solutions).  Errors must not need unwinding to be recovered,
+/// since in WebAssembly a panic aborts.
+pub fn soft<T>(f: impl FnOnce() -> T) -> T {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            SOFT.with(|s| s.set(s.get() - 1));
+        }
+    }
+    SOFT.with(|s| s.set(s.get() + 1));
+    let _g = Guard;
+    f()
+}
+
+pub fn soft_division() -> bool {
+    SOFT.with(|s| s.get() > 0)
+}
+
 /// Run f, turning a thrown SymError into Err (other panics, including
 /// Ctrl-C's, continue to unwind).
 pub fn catch<T>(f: impl FnOnce() -> T) -> Result<T, SymError> {
