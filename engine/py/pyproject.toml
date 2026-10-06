@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sagebrush"
-version = "0.2.2"
+version = "0.3.0"
 description = "Fast, certified engines for research mathematics: number fields, class groups, modular forms (Rust, MIT OR Apache-2.0)"
 readme = "README.md"
 authors = [{ name = "SageMath, Inc.", email = "wstein@sagemath.com" }]

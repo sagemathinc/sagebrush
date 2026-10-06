@@ -120,6 +120,37 @@ impl Lib for Dashu {
     }
 }
 
+/// Sagebrush's own big integers (engine/bigint): dashu plus the half-gcd.
+struct Sagebrush;
+impl Lib for Sagebrush {
+    type N = sagebrush_bigint::BigUint;
+    const NAME: &'static str = "sagebrush";
+    fn parse_hex(s: &str) -> Self::N {
+        Self::N::parse_bytes(s.as_bytes(), 16).unwrap()
+    }
+    fn hex(a: &Self::N) -> String {
+        a.to_str_radix(16)
+    }
+    fn mul(a: &Self::N, b: &Self::N) -> Self::N {
+        a * b
+    }
+    fn divrem(a: &Self::N, b: &Self::N) -> (Self::N, Self::N) {
+        num_integer::Integer::div_rem(a, b)
+    }
+    fn gcd(a: &Self::N, b: &Self::N) -> Self::N {
+        num_integer::Integer::gcd(a, b)
+    }
+    fn powmod(a: &Self::N, e: &Self::N, m: &Self::N) -> Self::N {
+        a.modpow(e, m)
+    }
+    fn to_dec(a: &Self::N) -> String {
+        a.to_string()
+    }
+    fn from_dec(s: &str) -> Self::N {
+        Self::N::parse_bytes(s.as_bytes(), 10).unwrap()
+    }
+}
+
 struct Malachite;
 impl Lib for Malachite {
     type N = malachite::Natural;
@@ -285,7 +316,7 @@ fn main() {
     let want = |n: &str| libs == "all" || libs.split(',').any(|x| n.starts_with(x));
     let mut done = std::collections::HashSet::new();
     println!("lib,op,bits,ns");
-    let mut bits = 64;
+    let mut bits: usize = arg("--min-bits").map_or(64, |v| v.parse().unwrap());
     let mut seed = 0x2545_F491_4F6C_DD1Du64;
     while bits <= max_bits {
         let mut odd_m = random_hex(bits, &mut seed);
@@ -306,6 +337,9 @@ fn main() {
         }
         if want(Dashu::NAME) {
             run::<Dashu>(&inp, &ops, budget, &mut done, &mut refs);
+        }
+        if want(Sagebrush::NAME) {
+            run::<Sagebrush>(&inp, &ops, budget, &mut done, &mut refs);
         }
         if want(Malachite::NAME) {
             run::<Malachite>(&inp, &ops, budget, &mut done, &mut refs);

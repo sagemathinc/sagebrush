@@ -571,7 +571,11 @@ impl num_integer::Integer for BigInt {
         if self.0.is_zero() && other.0.is_zero() {
             return BigInt(IBig::ZERO);
         }
-        BigInt(IBig::from((&self.0).gcd(&other.0)))
+        let (a, b) = ((&self.0).unsigned_abs(), (&other.0).unsigned_abs());
+        if a.bit_len().min(b.bit_len()) >= crate::hgcd::GCD_THRESHOLD_BITS {
+            return BigInt(IBig::from(crate::hgcd::gcd(&a, &b)));
+        }
+        BigInt(IBig::from(a.gcd(&b)))
     }
     fn lcm(&self, other: &Self) -> Self {
         if self.0.is_zero() || other.0.is_zero() {
@@ -616,6 +620,9 @@ impl num_integer::Integer for BigUint {
     fn gcd(&self, other: &Self) -> Self {
         if self.0.is_zero() && other.0.is_zero() {
             return BigUint(UBig::ZERO);
+        }
+        if self.0.bit_len().min(other.0.bit_len()) >= crate::hgcd::GCD_THRESHOLD_BITS {
+            return BigUint(crate::hgcd::gcd(&self.0, &other.0));
         }
         BigUint((&self.0).gcd(&other.0))
     }

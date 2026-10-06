@@ -88,3 +88,31 @@ General number fields gain 1.4 to 1.7 times; the quadratic, ECM and
 modular-symbol engines, which work in machine words, are unchanged. In
 WebAssembly the gain is larger: the class group of x^3 + 838398 x - 5077 in
 the browser runtime went from 0.45 s to 0.12 s.
+
+## A subquadratic gcd
+
+dashu's gcd is Lehmer's, quadratic: at GMP's speed up to 64K bits, then 4
+to 20 times slower. `engine/bigint/src/hgcd.rs` adds a half-gcd (Schonhage;
+Thull-Yap; Moller): O(M(n) log n), on dashu's arithmetic, used from a
+million bits on (below that, dashu's own gcd is faster). Any integer matrix
+of determinant +-1 preserves the gcd and the reduced pair is computed exactly
+from it, so the result never depends on how good the half-gcd's matrices are,
+only the speed does. Tested against dashu's gcd on random pairs, large common
+factors, unequal sizes and Fibonacci pairs, with the half-gcd path forced
+down to 128 bits ([results/gcd-hgcd.csv](results/gcd-hgcd.csv)):
+
+| bits | GMP | dashu | sagebrush (half-gcd) |
+|---:|---:|---:|---:|
+| 1,048,576 | 86 ms | 401 ms | 335 ms |
+| 2,097,152 | 210 ms | 1.59 s | 0.92 s |
+| 4,194,304 | 513 ms | 6.31 s | 2.37 s |
+| 8,388,608 | 1.22 s | 25.2 s | 5.87 s |
+
+Each doubling now costs about 2.5 times (dashu: 4 times). At a million bits
+the half-gcd costs about 35 of dashu's multiplications, close to GMP's ratio
+to its own; the remaining distance to GMP is dashu's multiplication, 3 to 3.5
+times slower than GMP's from 64K bits on. For the same reason a Newton
+division would not beat dashu's (3.4 multiplications for a 2n by n division
+already): faster large multiplication (a tuned number-theoretic transform)
+is the next lever for both.
+

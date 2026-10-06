@@ -6,7 +6,7 @@ at that size, since GMP is not built for wasm)."""
 import csv, sys
 from collections import defaultdict
 
-ORDER = ["gmp(rug)", "malachite-0.12", "dashu-0.6", "num-bigint-0.5", "num-bigint-0.4"]
+ORDER = ["gmp(rug)", "malachite-0.12", "dashu-0.6", "sagebrush", "num-bigint-0.5", "num-bigint-0.4"]
 
 
 def fmt_ns(ns):

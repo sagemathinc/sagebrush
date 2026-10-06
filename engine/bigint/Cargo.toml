@@ -12,6 +12,7 @@ description = "The Sagebrush engines' big integers: num-bigint's API, on dashu (
 num-backend = []
 
 [dependencies]
+sagebrush-interrupt = { path = "../interrupt" }
 num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"
