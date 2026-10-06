@@ -38,7 +38,8 @@ impl Mat {
     fn mul(&self, o: &Mat) -> Mat {
         let [a, b, c, d] = &self.m;
         let [e, f, g, h] = &o.m;
-        Mat { m: [a * e + b * g, a * f + b * h, c * e + d * g, c * f + d * h] }
+        let mm = crate::dashu_impl::mul_ibig;
+        Mat { m: [mm(a, e) + mm(b, g), mm(a, f) + mm(b, h), mm(c, e) + mm(d, g), mm(c, f) + mm(d, h)] }
     }
 
     fn det_is_one(&self) -> bool {
@@ -50,8 +51,9 @@ impl Mat {
     fn apply_inv(&self, a: &UBig, b: &UBig) -> (IBig, IBig) {
         let (a, b) = (IBig::from(a.clone()), IBig::from(b.clone()));
         let [m11, m12, m21, m22] = &self.m;
-        let x = m22 * &a - m12 * &b;
-        let y = m11 * &b - m21 * &a;
+        let mm = crate::dashu_impl::mul_ibig;
+        let x = mm(m22, &a) - mm(m12, &b);
+        let y = mm(m11, &b) - mm(m21, &a);
         if self.det_is_one() {
             (x, y)
         } else {

@@ -217,6 +217,51 @@ fn mul_small(a: &[i64], b: &[i64], bound: u64) -> ZPoly {
     trim(out)
 }
 
+/// a * b modulo enough primes p = 1 mod 2^32 (one transform each) for
+/// coefficients below 2^bound, then Chinese remaindering.
+fn mul_multimodular(a: &[BigInt], b: &[BigInt], bound: u64) -> ZPoly {
+    use crate::crt::MultiCrt;
+    let k = (bound as usize + 1).div_ceil(61);
+    let primes: Vec<u64> = Primes::ntt().take(k).collect();
+    let crt = MultiCrt::new(&primes);
+    let words = (max_bits(a).max(max_bits(b)) as usize).div_ceil(64).max(1);
+    let pw = crt.word_powers(words);
+    let res = |f: &[BigInt]| -> Vec<Vec<u64>> {
+        let mut out = vec![Vec::with_capacity(f.len()); k];
+        for c in f {
+            for (o, r) in out.iter_mut().zip(crt.residues_with(c, &pw)) {
+                o.push(r);
+            }
+        }
+        out
+    };
+    let ra = res(a);
+    let square = std::ptr::eq(a, b);
+    let rb = if square { vec![] } else { res(b) };
+    let conv: Vec<Vec<u64>> = (0..k)
+        .map(|j| {
+            sagebrush_interrupt::check();
+            let x = &ra[j];
+            if square {
+                crate::ntt::conv_ntt_prime(x, x, primes[j])
+            } else {
+                crate::ntt::conv_ntt_prime(x, &rb[j], primes[j])
+            }
+        })
+        .collect();
+    let len = a.len() + b.len() - 1;
+    let mut r = vec![0u64; k];
+    let out: ZPoly = (0..len)
+        .map(|i| {
+            for j in 0..k {
+                r[j] = conv[j][i];
+            }
+            crt.reconstruct(&r)
+        })
+        .collect();
+    trim(out)
+}
+
 /// a * b.
 pub fn mul(a: &[BigInt], b: &[BigInt]) -> ZPoly {
     if a.is_empty() || b.is_empty() {
@@ -226,6 +271,9 @@ pub fn mul(a: &[BigInt], b: &[BigInt]) -> ZPoly {
         return mul_classical(a, b);
     }
     let bound = max_bits(a) + max_bits(b) + log2_ceil(a.len().min(b.len())) + 1;
+    if bound > 184 && a.len().min(b.len()) >= 16 {
+        return mul_multimodular(a, b, bound);
+    }
     if bound <= 184 && max_bits(a) <= 62 && max_bits(b) <= 62 {
         let x: Vec<i64> = a.iter().map(|c| c.to_i64().unwrap()).collect();
         if std::ptr::eq(a, b) {

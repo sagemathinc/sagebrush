@@ -5,13 +5,16 @@
 //! - [`nmod`]: arithmetic modulo a word, primality of words, primes for
 //!   multimodular algorithms;
 //! - [`ntt`]: number-theoretic transforms and the convolutions on them;
+//! - [`crt`]: Chinese remaindering of many values over fixed primes;
 //! - [`nmod_poly`]: polynomials over Z/n;
 //! - [`nmod_mat`]: dense matrices over Z/p;
 //! - [`zmat`]: dense matrices over Z and Q (multimodular, certified);
 //! - [`zpoly`]: polynomials over Z (Kronecker products, modular gcd).
 
-pub mod nmod;
-pub mod ntt;
+// word-size moduli and the NTT live in sagebrush-bigint (its huge
+// products use them); re-exported here
+pub use sagebrush_bigint::{nmod, ntt};
+pub mod crt;
 pub mod nmod_poly;
 pub mod nmod_mat;
 pub mod zmat;
