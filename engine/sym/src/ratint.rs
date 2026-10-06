@@ -99,7 +99,10 @@ fn log_part(a: &QPoly, d: &QPoly, x: &Expr) -> Option<Expr> {
         terms.push(match dk.deg() {
             1 => mul2(&qnum(ak.coeff(0)), &log(&prim(dk, x))),
             2 => quadratic(&ak, dk, x),
-            _ => rothstein_trager(&ak, dk, x)?,
+            _ => match rothstein_trager(&ak, dk, x) {
+                Some(r) => r,
+                None => binomial(&ak, dk, x)?,
+            },
         });
     }
     Some(add(terms))
@@ -161,6 +164,61 @@ fn rothstein_trager(a: &QPoly, d: &QPoly, x: &Expr) -> Option<Expr> {
         if v.deg() > 0 {
             out.push(mul2(&qnum(c), &log(&prim(&v, x))));
         }
+    }
+    Some(add(out))
+}
+
+/// a/(x^n + c) through the roots rho = r e^(i theta) of x^n + c: the
+/// residue A = a(rho)/(n rho^(n-1)) = -a(rho) rho/(n c); a real root gives
+/// A log(x - rho), a conjugate pair with A = alpha + i beta gives
+/// alpha log(x^2 - 2 r cos(theta) x + r^2) - 2 beta arctan((x - r cos(theta))/(r sin(theta))).
+fn binomial(a: &QPoly, d: &QPoly, x: &Expr) -> Option<Expr> {
+    let n = d.deg() as i64;
+    if (1..n as usize).any(|k| !d.coeff(k).is_zero()) || n > 12 {
+        return None;
+    }
+    let c0 = d.coeff(0);
+    let r = pow(&qnum(c0.abs()), &rat(1, n));
+    let neg_c = c0.is_negative(); // x^n = |c|: angles 2 k pi/n; else (2k + 1) pi/n
+    let cq = qnum(c0.clone());
+    let mut out = vec![];
+    let res = |cos_t: &Expr, sin_t: &Expr| -> Expr {
+        // -a(rho) rho/(n c) with rho = r (cos + i sin)
+        let rho = mul2(&r, &add2(cos_t, &mul2(&i(), sin_t)));
+        let mut av = zero();
+        for (k, ck) in a.0.iter().enumerate() {
+            av = add2(&av, &mul2(&qnum(ck.clone()), &pow(&rho, &int(k as i64))));
+        }
+        crate::expand::expand(&neg(&div(&mul2(&av, &rho), &mul2(&int(n), &cq))))
+    };
+    for k in 0..n {
+        // theta / pi = (2k + [c > 0]) / n, in [0, 2)
+        let num = 2 * k + if neg_c { 0 } else { 1 };
+        if num * 2 > 2 * n {
+            continue; // the conjugate of an earlier root
+        }
+        let theta = mul2(&rat(num, n), &pi());
+        let (ct, st) = (cos(&theta), sin(&theta));
+        if num == 0 || num == n {
+            // a real root r or -r
+            let rho = if num == 0 { r.clone() } else { neg(&r) };
+            let a_ = crate::simplify::simplify_full(&res(&ct, &st));
+            if crate::eval::to_c64(&a_).map_or(true, |v| v.1.abs() > 1e-12) {
+                return None;
+            }
+            out.push(mul2(&a_, &log(&sub(x, &rho))));
+            continue;
+        }
+        let a1 = res(&ct, &st);
+        let a2 = res(&ct, &neg(&st));
+        let alpha = crate::simplify::simplify_full(&div(&add2(&a1, &a2), &int(2)));
+        let beta = crate::simplify::simplify_full(&div(&sub(&a1, &a2), &mul2(&int(2), &i())));
+        let rc = mul2(&r, &ct);
+        let q = add(vec![pow(x, &int(2)), mul(vec![int(-2), rc.clone(), x.clone()]), pow(&r, &int(2))]);
+        out.push(mul2(&alpha, &log(&q)));
+        // (2x - 2 r cos)/(2 r sin), as the quadratic formula writes it
+        let arg = div(&sub(&mul2(&int(2), x), &mul2(&int(2), &rc)), &mul(vec![int(2), r.clone(), st.clone()]));
+        out.push(mul(vec![int(-2), beta, fun1(Fun::Atan, &arg)]));
     }
     Some(add(out))
 }
