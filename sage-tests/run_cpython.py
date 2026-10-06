@@ -31,7 +31,9 @@ files = sorted(f for f in os.listdir(PRE) if f.startswith("test_") and f.endswit
 
 
 def one(f):
-    code = "from sagebrush.sage import *\n" + open(os.path.join(PRE, f), encoding="utf-8").read()
+    # (the file is read by a short driver: Windows limits command lines)
+    path = os.path.join(PRE, f)
+    code = "from sagebrush.sage import *\nexec(compile(open(%r, encoding='utf-8').read(), %r, 'exec'))" % (path, path)
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     p = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, timeout=900, env=env)
     out = p.stdout.decode("utf-8", errors="replace").replace("\r\n", "\n")
