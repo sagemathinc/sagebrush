@@ -315,13 +315,67 @@ pub fn valuation(o: &Order, pr: &PrimeIdeal, x: &[BigInt]) -> u32 {
 /// The factorization of x (in O, nonzero) over the given primes if its norm
 /// factors over them: (index, exponent) pairs.
 pub fn factor_element(o: &Order, primes: &[PrimeIdeal], by_p: &std::collections::HashMap<u64, Vec<usize>>, x: &[BigInt]) -> Option<Vec<(usize, i64)>> {
+    let mut ps: Vec<u64> = by_p.keys().cloned().collect();
+    ps.sort();
+    let primorial: BigInt = ps.iter().map(|&p| BigInt::from(p)).product();
+    factor_element_fast(o, primes, by_p, &primorial, x)
+}
+
+/// factor_element with the product of the factor base's rational primes
+/// precomputed: smoothness of the norm N by gcds with (primorial mod N)
+/// first (most candidates are not smooth), valuations only for the primes
+/// dividing N.
+pub fn factor_element_fast(o: &Order, primes: &[PrimeIdeal], by_p: &std::collections::HashMap<u64, Vec<usize>>, primorial: &BigInt, x: &[BigInt]) -> Option<Vec<(usize, i64)>> {
+    use num_integer::Integer;
     let mut nrm = o.norm(x).abs();
-    let mut out = vec![];
-    for (&p, idx) in by_p.iter() {
-        let bp = BigInt::from(p);
-        if !(&nrm % &bp).is_zero() {
-            continue;
+    if nrm.is_zero() {
+        return None;
+    }
+    let g0 = (primorial % &nrm).gcd(&nrm);
+    let mut m = nrm.clone();
+    loop {
+        let d = m.gcd(&g0);
+        if d.is_one() {
+            break;
         }
+        m /= d;
+    }
+    if !m.is_one() {
+        return None;
+    }
+    // the rational primes dividing the norm: those of g0 (squarefree)
+    let mut divs = vec![];
+    let mut g = g0;
+    if let Some(gu) = num_traits::ToPrimitive::to_u128(&g) {
+        let mut gu = gu;
+        let mut ps: Vec<&u64> = by_p.keys().collect();
+        ps.sort();
+        for &&p in &ps {
+            if gu == 1 {
+                break;
+            }
+            if gu % p as u128 == 0 {
+                gu /= p as u128;
+                divs.push(p);
+            }
+        }
+    } else {
+        let mut ps: Vec<&u64> = by_p.keys().collect();
+        ps.sort();
+        for &&p in &ps {
+            if g.is_one() {
+                break;
+            }
+            if (&g % p).is_zero() {
+                g /= p;
+                divs.push(p);
+            }
+        }
+    }
+    let mut out = vec![];
+    for p in divs {
+        let idx = &by_p[&p];
+        let bp = BigInt::from(p);
         let mut vp = 0u32;
         while (&nrm % &bp).is_zero() {
             nrm /= &bp;

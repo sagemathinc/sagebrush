@@ -15,7 +15,7 @@
 
 use super::embed::{lll, lll_weighted, Embeddings};
 use super::order::{maximal_order, Order};
-use super::prime::{decompose, factor_element, PrimeIdeal};
+use super::prime::{decompose, factor_element_fast, PrimeIdeal};
 use super::zlin::*;
 use crate::imag::{lattice_group, ClassGroup, Timing};
 use crate::linalg::{eliminate_with, independent_rows, kernel_crt, Reduced};
@@ -167,7 +167,7 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
             if independent_exact(&trial, err) {
                 basis = trial;
                 if basis.len() == r {
-                    fast_inv = Some(inverse_f64(&basis, prec));
+                    fast_inv = inverse_f64(&basis, prec);
                 }
                 continue;
             }
@@ -226,7 +226,7 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
                 if rem * 2 >= d { q + 1 } else { q }
             }).collect()
         }).collect();
-        fast_inv = if basis.len() == r { Some(inverse_f64(&basis, prec)) } else { None };
+        fast_inv = if basis.len() == r { inverse_f64(&basis, prec) } else { None };
     }
     if basis.len() < r {
         if uld { eprintln!("      UL: rank {} < {} after {} vectors", basis.len(), r, vs.len()); }
@@ -237,12 +237,13 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
     Some((basis, det))
 }
 
-/// The inverse of a square fixed-point matrix in f64.
-fn inverse_f64(m: &ZMat, prec: u32) -> Vec<Vec<f64>> {
+/// The inverse of a square fixed-point matrix in f64 (None if not finite:
+/// it is only a shortcut).
+fn inverse_f64(m: &ZMat, prec: u32) -> Option<Vec<Vec<f64>>> {
     let r = m.len();
     let mut a: Vec<Vec<f64>> = m.iter().enumerate().map(|(i, row)| row.iter().map(|x| to_f64(x, prec)).chain((0..r).map(|j| (i == j) as i32 as f64)).collect()).collect();
     for c in 0..r {
-        let piv = (c..r).max_by(|&i, &j| a[i][c].abs().partial_cmp(&a[j][c].abs()).unwrap()).unwrap();
+        let piv = (c..r).max_by(|&i, &j| a[i][c].abs().total_cmp(&a[j][c].abs())).unwrap();
         a.swap(c, piv);
         let d = a[c][c];
         for x in a[c].iter_mut() {
@@ -258,7 +259,8 @@ fn inverse_f64(m: &ZMat, prec: u32) -> Vec<Vec<f64>> {
             }
         }
     }
-    a.into_iter().map(|row| row[r..].to_vec()).collect()
+    let inv: Vec<Vec<f64>> = a.into_iter().map(|row| row[r..].to_vec()).collect();
+    inv.iter().flatten().all(|x| x.is_finite()).then_some(inv)
 }
 
 /// Whether k fixed-point rows (k <= their length), each entry within err of
@@ -371,17 +373,59 @@ fn ideal_mul(o: &Order, a: &ZMat, b: &ZMat) -> ZMat {
 }
 
 fn ideal_mul_impl(o: &Order, a: &ZMat, b: &ZMat) -> ZMat {
-    let mut gens = vec![];
+    // the product contains N(A) N(B) O: an HNF modulo that keeps entries small
+    let n = o.n;
+    let na: BigInt = (0..n).map(|i| a[i][i].clone()).product();
+    let nb: BigInt = (0..n).map(|i| b[i][i].clone()).product();
+    let m = (na * nb).abs();
+    let mut gens: ZMat = (0..n).map(|i| (0..n).map(|j| if i == j { m.clone() } else { BigInt::zero() }).collect()).collect();
     for x in a {
         for y in b {
-            gens.push(o.mul(x, y));
+            gens.push(o.mul(x, y).into_iter().map(|c| c.mod_floor(&m)).collect());
         }
     }
-    hnf(&gens)
+    hnf_mod_d(&gens, &m)
+}
+
+/// The HNF of a full-rank lattice containing d Z^n (rows include d e_i),
+/// reducing entries modulo d along the way.
+fn hnf_mod_d(rows: &ZMat, d: &BigInt) -> ZMat {
+    let n = rows[0].len();
+    let mut w: ZMat = (0..n).map(|i| (0..n).map(|j| if i == j { d.clone() } else { BigInt::zero() }).collect()).collect();
+    for r in rows {
+        let mut v: Vec<BigInt> = r.iter().map(|x| x.mod_floor(d)).collect();
+        for i in 0..n {
+            if v[i].is_zero() {
+                continue;
+            }
+            let e = w[i][i].extended_gcd(&v[i]);
+            let (g, x, y) = (e.gcd, e.x, e.y);
+            let (wi, vi) = (&w[i][i] / &g, &v[i] / &g);
+            let wrow = w[i].clone();
+            for j in i..n {
+                let nw = (&x * &wrow[j] + &y * &v[j]).mod_floor(d);
+                let nv = (&wi * &v[j] - &vi * &wrow[j]).mod_floor(d);
+                w[i][j] = nw;
+                v[j] = nv;
+            }
+            w[i][i] = g;
+        }
+    }
+    // a true HNF basis of L + d Z^n: rows with diagonal d/(product) fixed
+    // up by adding d e_i rows (diagonals divide d here), then reduce
+    let mut all = w;
+    for i in 0..n {
+        all.push((0..n).map(|j| if i == j { d.clone() } else { BigInt::zero() }).collect());
+    }
+    hnf(&all)
 }
 
 struct Field {
     o: Order,
+    /// the product of the factor base's rational primes
+    primorial: BigInt,
+    /// log of the factor-base bound
+    log_bound: f64,
     emb: Embeddings,
     fb: Vec<PrimeIdeal>,
     by_p: HashMap<u64, Vec<usize>>,
@@ -397,6 +441,8 @@ fn relations_from(fld: &Field, ib: &ZMat, budget: usize, seen: &mut HashSet<Vec<
 /// the units they combine to are not all small.
 #[allow(clippy::too_many_arguments)]
 fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen: &mut HashSet<Vec<(usize, i64)>>, rels: &mut Vec<Relation>, elems: &mut Vec<Vec<BigInt>>, rng: &mut u64) -> usize {
+    // log N(I) from the HNF diagonal
+    let log_ni: f64 = (0..ib.len()).map(|i| ib[i][i].to_f64().unwrap_or(1.0).abs().max(1.0).ln()).sum();
     let t = std::time::Instant::now();
     let red = if s_log.is_empty() { lll(ib, &fld.emb) } else { lll_weighted(ib, &fld.emb, s_log) };
     T_LLL.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
@@ -424,8 +470,15 @@ fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen
                 }
             }
         }
+        // skip norms too big to be smooth with useful probability: the
+        // cofactor N(x)/N(I) as u = log / log B, at most 5
+        let sg = fld.emb.sigma(&x);
+        let log_n: f64 = sg.iter().enumerate().map(|(j, (re, im))| if j < fld.emb.r1 { re.abs().max(1e-300).ln() } else { (re * re + im * im).max(1e-300).ln() }).sum();
+        if log_n - log_ni > 5.0 * fld.log_bound {
+            continue;
+        }
         let t = std::time::Instant::now();
-        let fe = factor_element(&fld.o, &fld.fb, &fld.by_p, &x);
+        let fe = factor_element_fast(&fld.o, &fld.fb, &fld.by_p, &fld.primorial, &x);
         T_FAC.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
         N_CAND.fetch_add(1, Relaxed);
         if let Some(rel) = fe {
@@ -472,7 +525,8 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
     let x = ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 15);
     let res = residue_estimate(&o, &dk, &index, x);
     let hr_est = res * w as f64 * dk.to_f64().unwrap().abs().sqrt() / (2f64.powi(r1 as i32) * (2.0 * std::f64::consts::PI).powi(r2 as i32));
-    let fld = Field { o, emb, fb, by_p };
+    let primorial: BigInt = by_p.keys().map(|&p| BigInt::from(p)).product();
+    let fld = Field { o, primorial, log_bound: (bound as f64).ln(), emb, fb, by_p };
     let mut tm = Timing { fb: nfb, h_est: hr_est, ..Default::default() };
     if debug {
         eprintln!("n {} r1 {} r2 {} d {} w {} fb {} (bound {}) hR est {:.6e} setup {:.1} ms", n, r1, r2, dk, w, nfb, bound, hr_est, t0.elapsed().as_secs_f64() * 1e3);
@@ -553,31 +607,6 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
             relations_weighted(&fld, &ib, 2 * n + 4, &s_log, &mut seen, &mut rels, &mut elems, &mut rng);
         }
         tm.sieve_s += t.elapsed().as_secs_f64();
-        if std::env::var("QCL_CHECKREL").is_ok() {
-            // each relation: x O equals prod P^v (HNF of both)
-            let mut bad = 0;
-            for (k, (rel, x)) in rels.iter().zip(&elems).enumerate().skip(start) {
-                let xo: ZMat = (0..n).map(|i| {
-                    let e_i: Vec<BigInt> = (0..n).map(|j| BigInt::from((i == j) as i32)).collect();
-                    fld.o.mul(x, &e_i)
-                }).collect();
-                let lhs = hnf(&xo);
-                let mut prod: ZMat = (0..n).map(|i| (0..n).map(|j| BigInt::from((i == j) as i32)).collect()).collect();
-                for &(i, v) in rel {
-                    for _ in 0..v {
-                        prod = ideal_mul(&fld.o, &prod, &fld.fb[i].basis);
-                    }
-                }
-                if lhs != prod {
-                    bad += 1;
-                    if bad <= 5 {
-                        let desc: Vec<String> = rel.iter().map(|&(i, v)| format!("{}^{} (e{} f{})", fld.fb[i].p, v, fld.fb[i].e, fld.fb[i].f)).collect();
-                        eprintln!("  BAD relation {}: {}", k, desc.join(" "));
-                    }
-                }
-            }
-            eprintln!("  checked {} relations: {} bad", rels.len() - start, bad);
-        }
         let t = std::time::Instant::now();
         if debug {
             eprintln!("round {}: {} relations (+{}); ideal products {:.0} ms, LLL {:.0} ms, norms+factoring {:.0} ms for {} candidates", round, rels.len(), rels.len() - start,
@@ -701,11 +730,6 @@ fn unit_logs(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
         // every unit's full log vector sums to 0 (norm +-1)
         let worst = |v: &[Vec<BigInt>]| v.iter().map(|l| to_f64(&l.iter().sum::<BigInt>(), prec).abs()).fold(0.0, f64::max);
         eprintln!("    check at {} bits: {} zero-row units worst |sum| {:.3e}; {} kernel units worst {:.3e}", prec, n_zero, worst(&full[..n_zero]), full.len() - n_zero, worst(&full[n_zero..]));
-        for l in &full[n_zero..] {
-            eprintln!("      kernel unit log: {:?}", l.iter().map(|x| format!("{:.6e}", to_f64(x, prec))).collect::<Vec<_>>());
-        }
-        let zl = kernel_lattice(ys, det);
-        eprintln!("      z basis: {:?}", zl.iter().map(|z| z.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>());
     }
     let out: Vec<Vec<BigInt>> = full.into_iter().map(|l| l[..r].to_vec()).collect();
     out
@@ -772,10 +796,12 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                 if v.iter().all(|x| x.abs() <= &err * 64) {
                     return true;
                 }
-                let vf: Vec<f64> = v.iter().map(|x| to_f64(x, prec)).collect();
-                let cf: Vec<f64> = (0..r).map(|j| (0..r).map(|i| vf[i] * inv[i][j]).sum()).collect();
-                if cf.iter().all(|c| c.abs() < 1e6 && (c - c.round()).abs() < 1e-6) {
-                    return true;
+                if let Some(inv) = &inv {
+                    let vf: Vec<f64> = v.iter().map(|x| to_f64(x, prec)).collect();
+                    let cf: Vec<f64> = (0..r).map(|j| (0..r).map(|i| vf[i] * inv[i][j]).sum()).collect();
+                    if cf.iter().all(|c| c.abs() < 1e6 && (c - c.round()).abs() < 1e-6) {
+                        return true;
+                    }
                 }
                 match solve_rows(basis, v) {
                     Some(cs) => cs.iter().all(|q| {

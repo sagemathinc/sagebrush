@@ -18,7 +18,9 @@ read. No PARI source was read or ported.
 - The result assumes GRH, like PARI's default.
 - Real quadratic fields (`realq.rs`): D > 10^3 up to 2^200, giving the class
   group and the regulator to any precision.
-- General number fields are next.
+- General number fields (`nf/`): class group, regulator and roots of unity
+  of Q[x]/(f), f monic (`nf::bnf::bnfinit`). This is new and slower than
+  PARI at small discriminants; see the table below.
 
 ```
 cargo run --release -p sagebrush-classgroup --example qcl -- -100000000000000000000000000319
@@ -153,3 +155,51 @@ digits.
 | 37 | 2180 |  616 |
 | 39 | 2608 |  934 |
 | 41 | 4570 | 1417 |
+
+## General number fields (`src/nf/`)
+
+`bnfinit(f)` uses Buchmann's subexponential method (Cohen, GTM 138 and 193):
+
+- **Maximal order** by Round 2. 300 random fields of degree 2–8 agree with
+  `nfdisc`.
+- **Prime ideals.** Kummer–Dedekind with a suitable generator, and a general
+  splitting of O/rad(p) for common index divisors. Valuations use an element
+  β ∈ pP⁻¹ that is not in pO.
+- **Factor base:** prime ideals of norm ≤ 4 log²|d| (Grenié–Molteni,
+  under GRH).
+- **Relations:** small elements of LLL-reduced ideals, LLL'd under randomly
+  weighted T₂ forms. The weights skew the elements, so their combinations
+  reach large units.
+  - Smoothness is tested by gcd with the product of the factor-base primes.
+  - A floating-point norm estimate skips hopeless candidates.
+- **Class group:** from the relation lattice, with the same code as the
+  quadratic case.
+- **Units** come from the full kernel lattice of the dense core,
+  {z : zY ≡ 0 mod det}. They stay in compact form: exponent vectors over
+  the relation elements, which are never multiplied out.
+- **Regulator.** The unit lattice is built by exact rational identification
+  of high-precision logarithmic embeddings. The precision comes from
+  measured errors, and independence is decided by an exact test against the
+  error bound.
+- **Acceptance:** h·R < √2 times the residue estimate (Bach-averaged Euler
+  products of ζ_K), as in the quadratic case.
+
+Random cubic and quartic fields f = xⁿ + Σ aᵢxⁱ with |aᵢ| ≤ 10^k, against
+PARI's `bnfinit(f, 1)`. All 24 agree in d, the class group and the
+regulator.
+
+| field   | \|d\|      | PARI (ms) | ours (ms) |
+|---------|------------|----------:|----------:|
+| cubic   | 4·10³      |         2 |        18 |
+| cubic   | 1·10¹⁴     |        24 |       179 |
+| cubic   | 3·10²³     |       422 |       840 |
+| cubic   | 4·10²²     |       459 |     4,109 |
+| quartic | 6·10²²     |       172 |     2,040 |
+| quartic | 1·10²⁹     |     1,247 |     8,821 |
+| quartic | 7·10³²     |     4,663 |    23,563 |
+| quartic | 2·10³⁵     |    20,659 |    24,057 |
+
+The relative gap shrinks as d grows. The remaining factor is mostly the
+factor-base bound: PARI checks a much smaller, field-specific GRH bound
+(Belabas–Diaz y Diaz–Friedman).
+
