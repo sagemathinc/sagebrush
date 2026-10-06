@@ -18,7 +18,7 @@ __all__ = [
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "PolynomialRing", "polygen", "parent",
-    "is_prime", "is_prime_power", "is_square", "next_prime", "previous_prime", "nth_prime",
+    "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
     "binomial", "factorial", "fibonacci", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
@@ -485,6 +485,14 @@ def moebius(n):
 
 def is_prime_power(n):
     return int(n) > 1 and len(factor(n)) == 1
+
+
+def is_squarefree(n):
+    """True if no square of a prime divides n (n != 0)."""
+    n = abs(int(n))
+    if n == 0:
+        return False
+    return all(e == 1 for _, e in factor(n))
 
 
 def is_square(n):

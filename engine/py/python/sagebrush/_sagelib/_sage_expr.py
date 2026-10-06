@@ -175,6 +175,53 @@ class Expr:
 
     numerical_approx = N = n
 
+    def polynomial(self, base_ring=None, ring=None):
+        """This expression as a polynomial in its variable (Sage's
+        f.polynomial(QQ)): x^3 + 17*x + 1 -> a polynomial over QQ."""
+        import sage_all as sa
+        names = self._names()
+        if len(names) > 1:
+            raise NotImplementedError("polynomials in several variables")
+        if ring is None:
+            ring = sa.PolynomialRing(base_ring if base_ring is not None else sa.QQ, names[0] if names else "x")
+        t = ring.gen()
+
+        def walk(e):
+            op, a = e.op, e.args
+            if op == "var":
+                return t
+            if op == "num":
+                if isinstance(a[0], float) or isinstance(a[0], complex):
+                    raise TypeError("%s is not a polynomial with exact coefficients" % self)
+                return ring(a[0])
+            if op == "neg":
+                return -walk(a[0])
+            if op in ("+", "-", "*"):
+                u, v = walk(a[0]), walk(a[1])
+                return u + v if op == "+" else u - v if op == "-" else u * v
+            if op == "/" and not a[1]._names():
+                return walk(a[0]) * ring(sa.QQ(1) / sa.QQ(a[1]._exact()))
+            if op == "^" and not a[1]._names():
+                k = a[1]._exact()
+                if int(k) == k and k >= 0:
+                    return walk(a[0]) ** int(k)
+            raise TypeError("%s is not a polynomial" % self)
+        return walk(self)
+
+    def _exact(self):
+        """The exact value of a constant built from numbers by + - * / ^."""
+        op, a = self.op, self.args
+        if op == "num" and not isinstance(a[0], (float, complex)):
+            return a[0]
+        if op == "neg":
+            return -a[0]._exact()
+        if op in ("+", "-", "*", "/", "^"):
+            u, v = a[0]._exact(), a[1]._exact()
+            import sage_all as sa
+            return {"+": lambda: u + v, "-": lambda: u - v, "*": lambda: u * v,
+                    "/": lambda: sa.QQ(u) / sa.QQ(v), "^": lambda: sa.QQ(u) ** v}[op]()
+        raise TypeError("%s is not an exact number" % self)
+
 
 _SRC = {"abs": "_abs", "gamma": "_gamma"}
 

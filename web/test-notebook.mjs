@@ -93,6 +93,9 @@ try {
   // number fields, class groups and LLL (engine/classgroup in WebAssembly)
   out = await runCode("x = polygen(QQ, 'x')\nK.<a> = NumberField(x^3 - 11)\nprint(K.class_group().invariants(), K.regulator(), matrix(ZZ, [[1,2,3],[4,5,6],[7,8,10]]).LLL()[0])");
   ok(out.includes("(2,) 5.58720662606091 (0, 0, 1)"), "Sage mode: class group, regulator, LLL: " + out.trim());
+  // the symbolic x, and a field on which Sage 10.8.beta0's PARI fails ("bug in small_norm")
+  out = await runCode("x = var('x')\nK.<a> = NumberField(x^3 + 838398*x - 5077)\nprint(K.class_group().invariants())");
+  ok(out.includes("(8, 2, 2)"), "Sage mode: NumberField of a symbolic polynomial: " + out.trim());
   // Magma mode: translated to Python in the page
   await ev("(() => { const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R<x> := PolynomialRing(Integers());\nFactorization(x^4 - 1);\n[ p : p in [1..30] | IsPrime(p) ];");
