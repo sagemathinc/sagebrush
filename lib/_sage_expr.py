@@ -219,9 +219,6 @@ class Expression:
     def _latex_(self):
         return _call("latex", self._s)[0]
 
-    def _repr_latex_(self):
-        return "$" + self._latex_() + "$"
-
     def __format__(self, spec):
         return format(str(self), spec)
 
@@ -408,7 +405,7 @@ class Expression:
     def _fast_callable(self, names=None):
         """A Python function of the variables (in sorted order) computing this
         expression in floating point (for plots)."""
-        names = list(names) if names is not None else self._names()
+        names = list(names) if names is not None else (self._names() or ["x"])  # a constant: f(x) = c
         if self._fast is None or self._fast[0] != names:
             src = "lambda %s: %s" % (", ".join("_v_" + n for n in names), _call("pysrc", self._s)[0])
             self._fast = (names, eval(src, _FAST_GLOBALS))
@@ -642,8 +639,7 @@ class Expression:
         return r if b is None else r / _one("fun", "log", _expr(b)._s)
 
     def show(self):
-        from sage_plot import show
-        return show(self)
+        show_typeset(self)
 
 
 def _real_imag(e, k):
@@ -657,6 +653,39 @@ def _real_imag(e, k):
         return Expression("n%s;" % r[1 + k])
     c = complex(e)
     return _expr(c.imag if k else c.real)
+
+
+class Typeset:
+    """What show(expr) displays: typeset math where the page or Jupyter
+    can render LaTeX, the text form elsewhere.  (Values print as text, as
+    in Sage.)"""
+
+    def __init__(self, obj):
+        self._obj = obj
+
+    def __repr__(self):
+        return repr(self._obj)
+
+    def _repr_latex_(self):
+        f = getattr(self._obj, "_latex_", None)
+        return "$$" + (f() if f is not None else latex(self._obj)) + "$$"
+
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        # the marker: the notebook typesets what show() asked for, and
+        # leaves other values with a LaTeX form (2/3) as text, as Sage
+        return {"text/latex": self._repr_latex_(), "text/plain": repr(self),
+                "application/vnd.sagebrush.typeset": "1"}
+
+
+def show_typeset(obj):
+    import builtins
+    d = getattr(builtins, "__pyjs_display__", None)
+    if d is not None:
+        d(Typeset(obj))  # (it prints the text form without a notebook)
+        return
+    from _graphics import host_display
+    if not host_display(Typeset(obj)):
+        print(repr(obj))
 
 
 class _SeriesExpr(Expression):
@@ -1051,11 +1080,27 @@ class IntegrationSteps:
     def _latex_(self):
         lines = []
         for depth, rule, var, f, r in self._rows:
-            lines.append("%s\\int %s \\, d%s &= %s && \\text{%s}" % ("\\quad " * depth, f._latex_(), var, r._latex_(), rule))
+            lines.append("%s\\int %s \\, d%s &= %s && %s" % ("\\quad " * depth, f._latex_(), var, r._latex_(), _rule_latex(rule)))
         return "\\begin{aligned}" + " \\\\ ".join(lines) + "\\end{aligned}"
 
-    def _repr_latex_(self):
-        return "$$" + self._latex_() + "$$"
+    def show(self):
+        show_typeset(self)
+
+
+def _rule_latex(rule):
+    """A rule's name for LaTeX: "substitute u = x^2" with its math typeset."""
+    def text(t):
+        for a, b in (("\\", "\\textbackslash{}"), ("{", "\\{"), ("}", "\\}"), ("^", "\\textasciicircum{}"),
+                     ("_", "\\_"), ("&", "\\&"), ("#", "\\#"), ("%", "\\%"), ("$", "\\$")):
+            t = t.replace(a, b)
+        return "\\text{%s}" % t
+    if rule.startswith("substitute ") and " = " in rule:
+        lhs, rhs = rule[len("substitute "):].split(" = ", 1)
+        try:
+            return text("substitute ") + lhs + " = " + _expr(rhs)._latex_()
+        except Exception:
+            pass
+    return text(rule)
 
 
 def integrate_steps(f, *args):

@@ -108,6 +108,10 @@ try {
   // interactive WebGL view over the SVG, which stays when WebGL is missing
   out = await runCode("print(solve(x^2 == 2, x), diff(x^3, x), limit(sin(x)/x, x=0))");
   ok(out.includes("x == -sqrt(2)") && out.includes("3*x^2 1"), "Sage mode: solve, diff, limit: " + JSON.stringify(out.trim()));
+  out = await runCode("show(integrate_steps(x*cos(x^2), x))");
+  await sleep(1500);
+  ok(await ev("!!document.querySelector('.latex-out .katex') && !document.querySelector('.latex-out .katex-error')"),
+     "show() typesets with KaTeX (integration steps): " + JSON.stringify(out.trim().slice(0, 60)));
   out = await runCode("y = var('y')\nplot3d(sin(x*y), (x, -3, 3), (y, -3, 3))");
   ok(await ev("!!document.querySelector('figure.plot3d svg[aria-label^=\"3D plot\"]')"), "plot3d shows a 3D figure with its SVG and description");
   await sleep(500);
