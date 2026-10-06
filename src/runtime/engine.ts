@@ -17,6 +17,8 @@ interface Engine {
   sb_alloc(len: number): number;
   sb_free(ptr: number, len: number): void;
   sb_call(ptr: number, len: number): number;
+  sb_sym_call(ptr: number, len: number): number;
+  sb_last_error(): number;
   sb_reply_len(): number;
 }
 
@@ -75,7 +77,45 @@ export function engineCall(request: string): string {
   return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
 }
 
+/** A symbolic-engine call (engine/sym/src/api.rs).  Errors come back in
+ *  band ("err\x1fKind\x1fmessage"), also when they abort the instance. */
+export function symCall(request: string): string {
+  const e = engine();
+  const req = new TextEncoder().encode(request);
+  const p = e.sb_alloc(req.length);
+  new Uint8Array(e.memory.buffer, p, req.length).set(req);
+  let r: number;
+  try {
+    r = e.sb_sym_call(p, req.length);
+  } catch (err) {
+    // an error or an interrupt trapped: read the error, then start afresh
+    let msg = "";
+    try {
+      const q = e.sb_last_error();
+      msg = new TextDecoder().decode(new Uint8Array(e.memory.buffer, q, e.sb_reply_len()));
+    } catch {
+      // the instance is gone
+    }
+    E = null;
+    if (msg) return msg;
+    throw err;
+  }
+  e.sb_free(p, req.length);
+  return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
+}
+
 newBuiltinModule("_sbengine", (m) => {
+  m.sym = Obj.builtin((req: any) => {
+    try {
+      return symCall(String(req));
+    } catch (err: any) {
+      if (INTR[0]) {
+        INTR[0] = 0;
+        return Obj.raise(Obj.T.KeyboardInterrupt);
+      }
+      return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
+    }
+  }, "sym");
   m.call = Obj.builtin((req: any) => {
     try {
       return engineCall(String(req));

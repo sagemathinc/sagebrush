@@ -542,6 +542,7 @@ dependencies = [
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-modsym",
+ "sagebrush-sym",
  "sagebrush-web",
 ]
 
@@ -578,6 +579,7 @@ dependencies = [
  "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-poly",
+ "sagebrush-sym",
  "serde_json",
 ]
 

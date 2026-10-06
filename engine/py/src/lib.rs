@@ -368,6 +368,13 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
     Ok(d)
 }
 
+/// One symbolic-engine call (engine/sym/src/api.rs): "op\x1fargs..." ->
+/// "ok\x1fresults..." or "err\x1fKind\x1fmessage".
+#[pyfunction]
+fn sym_call(py: Python<'_>, request: String) -> PyResult<String> {
+    guarded(py, || sagebrush_sym::api::call(&request))
+}
+
 /// One JSON request to the engines (the same dispatcher as the WebAssembly
 /// build, engine/web): `{"fn": name, ...}` -> `{"ok": ...}` or
 /// `{"error": ...}`.  The pure-Python modules built on it (sagebrush.nf,
@@ -405,5 +412,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mf.add_function(wrap_pyfunction!(newspace, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newforms, &mf)?)?;
     m.add_submodule(&mf)?;
+    m.add_function(wrap_pyfunction!(sym_call, m)?)?;
     m.add_function(wrap_pyfunction!(call, m)?)
 }

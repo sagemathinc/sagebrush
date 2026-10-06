@@ -48,15 +48,33 @@ pub fn catch<T>(f: impl FnOnce() -> T) -> Result<T, SymError> {
     }
 }
 
+static LAST: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+
+/// The last SymError raised (kind, message): where panics abort (in
+/// WebAssembly), the host reads it after the trap.
+pub fn take_last_error() -> Option<(String, String)> {
+    LAST.lock().ok().and_then(|mut l| l.take())
+}
+
 /// Silence the default panic message for SymError payloads (they are
-/// ordinary errors, not bugs).
+/// ordinary errors, not bugs), and remember the error.
 pub fn install_quiet_hook() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            if info.payload().downcast_ref::<SymError>().is_none() {
-                prev(info);
+            match info.payload().downcast_ref::<SymError>() {
+                Some(e) => {
+                    let kind = match e {
+                        SymError::DivisionByZero => "ZeroDivisionError",
+                        SymError::Value(_) => "ValueError",
+                        SymError::NotImplemented(_) => "NotImplementedError",
+                    };
+                    if let Ok(mut l) = LAST.try_lock() {
+                        *l = Some((kind.to_string(), e.to_string()));
+                    }
+                }
+                None => prev(info),
             }
         }));
     });

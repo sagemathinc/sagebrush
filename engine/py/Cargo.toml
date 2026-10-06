@@ -9,6 +9,7 @@ name = "sagebrush_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+sagebrush-sym = { path = "../sym" }
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-modsym = { path = "../modsym" }

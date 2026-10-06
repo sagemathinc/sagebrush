@@ -214,66 +214,84 @@ class _RealField:
 # ------------------------------------------------------------------ f(x) = ...
 
 class SymbolicFunction:
-    """f(x) = x^2: a callable expression, printed x |--> x^2."""
+    """f(x) = x^2: a callable expression, printed x |--> x^2.  Calling it
+    substitutes; its methods (diff, taylor, ...) give callable results."""
 
     def __init__(self, expr, args):
-        self._expr, self._args = expr, tuple(args)
+        from _sage_expr import _expr
+        self._expr, self._args = _expr(expr), tuple(args)
 
     def __repr__(self):
         a = self._args[0] if len(self._args) == 1 else "(" + ", ".join(map(str, self._args)) + ")"
         return "%s |--> %s" % (a, self._expr)
 
+    __str__ = __repr__
+
+    def _latex_(self):
+        a = self._args[0]._latex_() if len(self._args) == 1 else \
+            "\\left(%s\\right)" % ", ".join(v._latex_() for v in self._args)
+        return "%s \\ {\\mapsto}\\ %s" % (a, self._expr._latex_())
+
     def __call__(self, *vals, **kw):
         if len(vals) != len(self._args):
             raise ValueError("the number of arguments must be less than or equal to %d" % len(self._args))
-        subs = {str(a): v for a, v in zip(self._args, vals)}
-        return _evaluate(self._expr, subs)
+        return self._expr.subs(dict(zip(self._args, vals)))
 
     def variables(self):
         return self._args
 
     arguments = variables
 
+    def expression(self):
+        return self._expr
+
+    def _fast_callable(self, names=None):
+        return self._expr._fast_callable(names if names is not None else [str(a) for a in self._args])
+
+    def _wrap(self, r):
+        from _sage_expr import Expression
+        if isinstance(r, Expression) and not r.is_relational():
+            return SymbolicFunction(r, self._args)
+        return r
+
+    def diff(self, *args):
+        return self._wrap(self._expr.diff(*(args or self._args[:1])))
+
+    derivative = differentiate = diff
+
+    def _binop(self, other, op, rev=False):
+        o = other._expr if isinstance(other, SymbolicFunction) else other
+        return self._wrap(op(o, self._expr) if rev else op(self._expr, o))
+
+    def __add__(self, o): return self._binop(o, lambda a, b: a + b)
+    def __radd__(self, o): return self._binop(o, lambda a, b: a + b, True)
+    def __sub__(self, o): return self._binop(o, lambda a, b: a - b)
+    def __rsub__(self, o): return self._binop(o, lambda a, b: a - b, True)
+    def __mul__(self, o): return self._binop(o, lambda a, b: a * b)
+    def __rmul__(self, o): return self._binop(o, lambda a, b: a * b, True)
+    def __truediv__(self, o): return self._binop(o, lambda a, b: a / b)
+    def __rtruediv__(self, o): return self._binop(o, lambda a, b: a / b, True)
+    def __pow__(self, o): return self._binop(o, lambda a, b: a ** b)
+    def __neg__(self): return self._wrap(-self._expr)
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        m = getattr(self._expr, name)
+        if not callable(m):
+            return m
+
+        def f(*args, **kw):
+            return self._wrap(m(*args, **kw))
+        return f
+
 
 def _evaluate(e, subs):
-    """e with variables replaced, evaluated as Sage would: exactly for
-    integers and rationals, numerically for reals, symbolic otherwise."""
-    from _sage_expr import Expr, _wrap
-    import sage_all as sa
-    if not isinstance(e, Expr):
+    """e with the variables named in subs replaced (Sage evaluates)."""
+    from _sage_expr import Expression
+    if not isinstance(e, Expression):
         return e
-    op, a = e.op, e.args
-    if op == "var":
-        return subs.get(a[0], e)
-    if op == "num":
-        return a[0]
-    if op == "const":
-        return e
-    if op == "fn":
-        args = [_evaluate(x, subs) for x in a[1:]]
-        if any(isinstance(x, float) for x in args) and not any(isinstance(x, Expr) for x in args):
-            return getattr(sa, a[0])(*args)
-        if a[0] == "abs" and not any(isinstance(x, Expr) for x in args):
-            return abs(args[0])
-        return Expr("fn", (a[0],) + tuple(_wrap(x) for x in args))
-    if op == "neg":
-        return -_evaluate(a[0], subs)
-    x, y = _evaluate(a[0], subs), _evaluate(a[1], subs)
-    if op == "+":
-        return x + y
-    if op == "-":
-        return x - y
-    if op == "*":
-        return x * y
-    if op == "/":
-        if isinstance(x, int) and isinstance(y, int):
-            return sa._intdiv(x, y)
-        return x / y
-    if op == "^":
-        if isinstance(x, int) and isinstance(y, int) and y < 0:
-            return sa._intdiv(1, x ** -y)
-        return x ** y
-    raise ValueError(op)
+    return e.subs(**subs)
 
 
 class _Symbolic:

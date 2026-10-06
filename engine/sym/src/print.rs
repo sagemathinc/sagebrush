@@ -81,6 +81,12 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
     if pa != pb {
         return pb.cmp(&pa);
     }
+    // a function times powers of symbols before a lone function, whatever the
+    // degrees (Sage: sin(x)/x^2 + cos(x), cos(x^2)/x^2 + sin(x^2))
+    let (ma, mb) = (fun_times_symbols(a), fun_times_symbols(b));
+    if ma != mb && (ma && lone_fun(b) || mb && lone_fun(a)) {
+        return if ma { Ordering::Less } else { Ordering::Greater };
+    }
     let (da, db) = (degree(a), degree(b));
     if da != db {
         return db.partial_cmp(&da).unwrap_or(Ordering::Equal);
@@ -99,6 +105,26 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
         }
     }
     fb.len().cmp(&fa.len()).then_with(|| canon_cmp(a, b))
+}
+
+fn is_fun_like(e: &Expr) -> bool {
+    match &e.kind {
+        Kind::Fun(..) => true,
+        Kind::Pow(b, _) => b.is_const(Const::E),
+        _ => false,
+    }
+}
+
+fn lone_fun(e: &Expr) -> bool {
+    is_fun_like(&split_coeff(e).1)
+}
+
+fn fun_times_symbols(e: &Expr) -> bool {
+    let f = term_factors(e);
+    f.len() >= 2
+        && f.iter().any(is_fun_like)
+        && f.iter().all(|t| is_fun_like(t) || matches!(&base_exp(t).0.kind, Kind::Sym(_)))
+        && f.iter().any(|t| matches!(&base_exp(t).0.kind, Kind::Sym(_)))
 }
 
 /// Comparing two factors of terms of equal degree: symbols alphabetically,

@@ -438,5 +438,61 @@
 {
 "in": "exp(x)*cos(x) + exp(x)*sin(x)",
 "out": "cos(x)*e^x + e^x*sin(x)"
+},
+{
+"in": "sin(x^2)/x^2 + cos(x^2)",
+"out": "sin(x^2)/x^2 + cos(x^2)"
+},
+{
+"in": "sin(x)/x^2 + cos(x)",
+"out": "sin(x)/x^2 + cos(x)"
+},
+{
+"in": "sin(x)/x + cos(x)",
+"out": "sin(x)/x + cos(x)"
+},
+{
+"in": "sin(x^2)*x + cos(x^2)",
+"out": "x*sin(x^2) + cos(x^2)"
+},
+{
+"in": "sin(x)*x^2 + cos(x^3)",
+"out": "x^2*sin(x) + cos(x^3)"
+},
+{
+"in": "sin(x)/x^3 + cos(x)",
+"out": "sin(x)/x^3 + cos(x)"
+},
+{
+"in": "exp(x^2)/x^2 + cos(x^2)",
+"out": "e^(x^2)/x^2 + cos(x^2)"
+},
+{
+"in": "sin(x^2)/x^2 + exp(x^2)",
+"out": "sin(x^2)/x^2 + e^(x^2)"
+},
+{
+"in": "sin(x^2)/x^2 + x",
+"out": "x + sin(x^2)/x^2"
+},
+{
+"in": "sin(x^2)/x^2 + 1/x",
+"out": "1/x + sin(x^2)/x^2"
+},
+{
+"in": "cos(x^2)/x^2 + sin(x^2)",
+"out": "cos(x^2)/x^2 + sin(x^2)"
+},
+{
+"in": "sin(x^2)/x^4 + cos(x^2)/x^2",
+"out": "cos(x^2)/x^2 + sin(x^2)/x^4"
+},
+{
+"in": "sin(y^2)/x^2 + cos(x^2)",
+"out": "sin(y^2)/x^2 + cos(x^2)"
+},
+{
+"in": "2*cos(x^2) - sin(x^2)/x^2",
+"out": "-sin(x^2)/x^2 + 2*cos(x^2)"
 }
 ]
