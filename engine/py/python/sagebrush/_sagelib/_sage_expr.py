@@ -11,9 +11,28 @@ import math as _m
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2, "neg": 3, "^": 4}
 
 
+def _is_poly(v):
+    return hasattr(v, "_c") and hasattr(v, "variable_name") and hasattr(v, "_ring")
+
+
+def _poly_expr(p):
+    """A univariate polynomial as a symbolic expression in its variable
+    (Sage's coercion to SR: sin(x) for x in QQ['x'])."""
+    t = Expr("var", (p.variable_name(),))
+    r = None
+    for i, c in reversed(list(enumerate(p._c))):  # Sage's order: highest degree first
+        if c == 0:
+            continue
+        term = Expr("num", (c,)) if i == 0 else (t if i == 1 else t ** i) * c if c != 1 else (t if i == 1 else t ** i)
+        r = term if r is None else r + term
+    return r if r is not None else Expr("num", (0,))
+
+
 def _wrap(v):
     if isinstance(v, Expr):
         return v
+    if _is_poly(v):
+        return _poly_expr(v)
     if isinstance(v, bool):
         return Expr("num", (int(v),))
     if isinstance(v, (int, float, complex)) or hasattr(v, "numerator"):
@@ -257,7 +276,7 @@ def var(*names):
 
 def _function(name, numeric):
     def f(*args):
-        if any(isinstance(a, Expr) for a in args):
+        if any(isinstance(a, Expr) or _is_poly(a) for a in args):
             return Expr("fn", (name,) + tuple(_wrap(a) for a in args))
         r = numeric(*args)
         if type(r) is float:

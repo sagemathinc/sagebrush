@@ -15,6 +15,8 @@ import { initParser, compile, execModule, R, libDir, findModuleSource } from "./
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { needsMore, complete } from "./interactive";
 import { builtin, isType, typeName, getattr } from "./runtime/object";
+import { isMainThread, workerData } from "worker_threads";
+import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
@@ -28,6 +30,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   -q       no banner on the interactive prompt
   --emit   print the JavaScript compiled from file (with --magma: the Python)
   -V       print the version
+  --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|all]
+           register Sagebrush as a Jupyter kernel (no Python needed)
+  --uninstall-jupyter-kernel [the same options]
 `;
 
 // Run fn, reporting an uncaught exception as CPython does; returns the exit code.
@@ -238,6 +243,15 @@ function installHelp() {
 
 async function main() {
   const argv = process.argv.slice(2);
+  if (argv[0] === "--install-jupyter-kernel" || argv[0] === "--uninstall-jupyter-kernel") {
+    process.exitCode = installKernel(argv.slice(1), argv[0] === "--uninstall-jupyter-kernel");
+    return;
+  }
+  if (argv[0] === "--jupyter-kernel") {
+    const i = argv.indexOf("--mode");
+    await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode);
+    return;
+  }
   let emit = false, inspect = false, quiet = false;
   let cmd: string | null = null, mod: string | null = null, file: string | null = null;
   while (argv.length) {
@@ -355,4 +369,5 @@ function execModuleAsMain(name: string): any {
   return execModule(found[0], found[1], "__main__");
 }
 
-main();
+if (isMainThread) main();
+else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
