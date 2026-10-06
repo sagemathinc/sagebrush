@@ -201,7 +201,18 @@ the engines.
   `simplify_full`, `taylor`, `series`, `limit`, `solve`, `subs`, `n` and
   `latex` run on Sagebrush's own symbolic engine (Rust, `engine/sym`). Its
   output is printed as Sage prints it, checked by `sage-tests/test_symbolic.sage`
-  and a corpus of 300 expressions. Symbolic integration is next.
+  and a corpus of 300 expressions.
+- **Integration:** `integrate(f, x)` and `integrate(f, x, a, b)` (infinite
+  bounds too) use Sagebrush's own integrator. It works through tables,
+  substitution, parts, exact partial fractions (Hermite and
+  Rothstein–Trager), trigonometric powers, square roots of quadratics and
+  the Weierstrass substitution.
+  - Every answer is checked by differentiating it.
+  - On a corpus of 171 first-year integrals it finds 164; Maxima, what Sage
+    calls, finds 170, including two non-elementary integrals we leave
+    unevaluated. 151 of ours print exactly as Sage prints Maxima's answers.
+  - `integrate_steps(f, x)` shows the rules used, and `numerical_integral`
+    computes adaptive Gauss–Kronrod quadrature.
 - **Plots and `@interact`:** Sage's `plot`/`point`/... and
   `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
   rerun a function in milliseconds. `plot3d`, `parametric_plot3d`,

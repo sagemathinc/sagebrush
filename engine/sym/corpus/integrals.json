@@ -1,0 +1,686 @@
+[
+{
+"in": "x^5",
+"maxima": "x^6/6"
+},
+{
+"in": "3*x^2 - 2*x + 7",
+"maxima": "x^3-x^2+7*x"
+},
+{
+"in": "(x + 1)^3",
+"maxima": "x^4/4+x^3+(3*x^2)/2+x"
+},
+{
+"in": "sqrt(x)",
+"maxima": "(2*x^(3/2))/3"
+},
+{
+"in": "1/sqrt(x)",
+"maxima": "2*sqrt(x)"
+},
+{
+"in": "x^(2/3)",
+"maxima": "(3*x^(5/3))/5"
+},
+{
+"in": "1/x^3",
+"maxima": "-(1/(2*x^2))"
+},
+{
+"in": "(2*x + 1)^5",
+"maxima": "(16*x^6)/3+16*x^5+20*x^4+(40*x^3)/3+5*x^2+x"
+},
+{
+"in": "sqrt(3*x + 2)",
+"maxima": "(2*(3*x+2)^(3/2))/9"
+},
+{
+"in": "1/(2*x + 1)",
+"maxima": "log(2*x+1)/2"
+},
+{
+"in": "1/(1 - x)",
+"maxima": "-log(1-x)"
+},
+{
+"in": "x^2*(x^3 + 1)^4",
+"maxima": "(x^3+1)^5/15"
+},
+{
+"in": "x/(x^2 + 1)",
+"maxima": "log(x^2+1)/2"
+},
+{
+"in": "x*sqrt(x^2 + 1)",
+"maxima": "(x^2+1)^(3/2)/3"
+},
+{
+"in": "x/sqrt(1 - x^2)",
+"maxima": "-sqrt(1-x^2)"
+},
+{
+"in": "(x + 1)/(x^2 + 2*x + 5)",
+"maxima": "log(x^2+2*x+5)/2"
+},
+{
+"in": "exp(x)",
+"maxima": "e^x"
+},
+{
+"in": "exp(3*x)",
+"maxima": "e^(3*x)/3"
+},
+{
+"in": "exp(-x)",
+"maxima": "-e^-x"
+},
+{
+"in": "2^x",
+"maxima": "2^x/log(2)"
+},
+{
+"in": "x*exp(x^2)",
+"maxima": "e^x^2/2"
+},
+{
+"in": "exp(x)/(1 + exp(x))",
+"maxima": "log(e^x+1)"
+},
+{
+"in": "exp(sqrt(x))/sqrt(x)",
+"maxima": "2*e^sqrt(x)"
+},
+{
+"in": "log(x)",
+"maxima": "x*log(x)-x"
+},
+{
+"in": "log(x)/x",
+"maxima": "log(x)^2/2"
+},
+{
+"in": "1/(x*log(x))",
+"maxima": "log(log(x))"
+},
+{
+"in": "log(x)^2/x",
+"maxima": "log(x)^3/3"
+},
+{
+"in": "x*log(x)",
+"maxima": "(x^2*log(x))/2-x^2/4"
+},
+{
+"in": "x^2*log(x)",
+"maxima": "(x^3*log(x))/3-x^3/9"
+},
+{
+"in": "log(x)^2",
+"maxima": "x*(log(x)^2-2*log(x)+2)"
+},
+{
+"in": "log(2*x + 1)",
+"maxima": "((2*x+1)*log(2*x+1)-2*x-1)/2"
+},
+{
+"in": "sin(x)",
+"maxima": "-cos(x)"
+},
+{
+"in": "cos(x)",
+"maxima": "sin(x)"
+},
+{
+"in": "sin(3*x)",
+"maxima": "-(cos(3*x)/3)"
+},
+{
+"in": "cos(2*x + 1)",
+"maxima": "sin(2*x+1)/2"
+},
+{
+"in": "tan(x)",
+"maxima": "log(sec(x))"
+},
+{
+"in": "cot(x)",
+"maxima": "log(sin(x))"
+},
+{
+"in": "sec(x)",
+"maxima": "log(tan(x)+sec(x))"
+},
+{
+"in": "csc(x)",
+"maxima": "-log(csc(x)+cot(x))"
+},
+{
+"in": "sec(x)^2",
+"maxima": "tan(x)"
+},
+{
+"in": "csc(x)^2",
+"maxima": "-(1/tan(x))"
+},
+{
+"in": "sec(x)*tan(x)",
+"maxima": "1/cos(x)"
+},
+{
+"in": "csc(x)*cot(x)",
+"maxima": "-(1/sin(x))"
+},
+{
+"in": "sin(x)*cos(x)",
+"maxima": "-(cos(x)^2/2)"
+},
+{
+"in": "sin(x)^2",
+"maxima": "(x-sin(2*x)/2)/2"
+},
+{
+"in": "cos(x)^2",
+"maxima": "(sin(2*x)/2+x)/2"
+},
+{
+"in": "sin(x)^3",
+"maxima": "cos(x)^3/3-cos(x)"
+},
+{
+"in": "cos(x)^3",
+"maxima": "sin(x)-sin(x)^3/3"
+},
+{
+"in": "sin(x)^2*cos(x)",
+"maxima": "sin(x)^3/3"
+},
+{
+"in": "sin(x)*cos(x)^2",
+"maxima": "-(cos(x)^3/3)"
+},
+{
+"in": "sin(x)^2*cos(x)^2",
+"maxima": "(2*x-sin(4*x)/2)/16"
+},
+{
+"in": "sin(x)^4",
+"maxima": "((sin(4*x)/2+2*x)/8-sin(2*x)/2+x/2)/2"
+},
+{
+"in": "cos(x)^4",
+"maxima": "((sin(4*x)/2+2*x)/8+sin(2*x)/2+x/2)/2"
+},
+{
+"in": "sin(x)^5",
+"maxima": "-(cos(x)^5/5)+(2*cos(x)^3)/3-cos(x)"
+},
+{
+"in": "sin(x)^3*cos(x)^2",
+"maxima": "(3*cos(x)^5-5*cos(x)^3)/15"
+},
+{
+"in": "tan(x)^2",
+"maxima": "tan(x)-x"
+},
+{
+"in": "tan(x)^3",
+"maxima": "log(sin(x)^2-1)/2-1/(2*sin(x)^2-2)"
+},
+{
+"in": "sec(x)^3",
+"maxima": "log(sin(x)+1)/4-log(sin(x)-1)/4-sin(x)/(2*sin(x)^2-2)"
+},
+{
+"in": "sin(2*x)*cos(3*x)",
+"maxima": "cos(x)/2-cos(5*x)/10"
+},
+{
+"in": "sin(x)*sin(2*x)",
+"maxima": "sin(x)/2-sin(3*x)/6"
+},
+{
+"in": "cos(x)*cos(3*x)",
+"maxima": "sin(4*x)/8+sin(2*x)/4"
+},
+{
+"in": "cos(x)/sin(x)^2",
+"maxima": "-(1/sin(x))"
+},
+{
+"in": "sin(x)/cos(x)^3",
+"maxima": "1/(2*cos(x)^2)"
+},
+{
+"in": "cos(x)*exp(sin(x))",
+"maxima": "e^sin(x)"
+},
+{
+"in": "sin(x)/(1 + cos(x))",
+"maxima": "-log(cos(x)+1)"
+},
+{
+"in": "cos(x)/(1 + sin(x)^2)",
+"maxima": "arctan(sin(x))"
+},
+{
+"in": "x*sin(x)",
+"maxima": "sin(x)-x*cos(x)"
+},
+{
+"in": "x*cos(x)",
+"maxima": "x*sin(x)+cos(x)"
+},
+{
+"in": "x^2*sin(x)",
+"maxima": "2*x*sin(x)+(2-x^2)*cos(x)"
+},
+{
+"in": "x^2*cos(2*x)",
+"maxima": "((2*x^2-1)*sin(2*x)+2*x*cos(2*x))/4"
+},
+{
+"in": "x*exp(x)",
+"maxima": "e^x*(x-1)"
+},
+{
+"in": "x^2*exp(x)",
+"maxima": "e^x*(x^2-2*x+2)"
+},
+{
+"in": "x^3*exp(x)",
+"maxima": "e^x*(x^3-3*x^2+6*x-6)"
+},
+{
+"in": "x*exp(-x)",
+"maxima": "e^-x*(-x-1)"
+},
+{
+"in": "x*exp(2*x)",
+"maxima": "(e^(2*x)*(2*x-1))/4"
+},
+{
+"in": "exp(x)*sin(x)",
+"maxima": "(e^x*(sin(x)-cos(x)))/2"
+},
+{
+"in": "exp(x)*cos(x)",
+"maxima": "(e^x*(sin(x)+cos(x)))/2"
+},
+{
+"in": "exp(2*x)*sin(3*x)",
+"maxima": "(e^(2*x)*(2*sin(3*x)-3*cos(3*x)))/13"
+},
+{
+"in": "x*sinh(x)",
+"maxima": "(x^2*sinh(x))/2-(e^x*(x^2-2*x+2)+e^-x*(-x^2-2*x-2))/4"
+},
+{
+"in": "arctan(x)",
+"maxima": "x*arctan(x)-log(x^2+1)/2"
+},
+{
+"in": "arcsin(x)",
+"maxima": "x*arcsin(x)+sqrt(1-x^2)"
+},
+{
+"in": "arccos(x)",
+"maxima": "x*arccos(x)-sqrt(1-x^2)"
+},
+{
+"in": "x*arctan(x)",
+"maxima": "(x^2*arctan(x))/2-(x-arctan(x))/2"
+},
+{
+"in": "x*arcsin(x)",
+"maxima": "(x^2*arcsin(x))/2-(arcsin(x)/2-(x*sqrt(1-x^2))/2)/2"
+},
+{
+"in": "1/(1 + x^2)",
+"maxima": "arctan(x)"
+},
+{
+"in": "1/(4 + x^2)",
+"maxima": "arctan(x/2)/2"
+},
+{
+"in": "1/(1 + 4*x^2)",
+"maxima": "arctan(2*x)/2"
+},
+{
+"in": "1/sqrt(1 - x^2)",
+"maxima": "arcsin(x)"
+},
+{
+"in": "1/sqrt(4 - x^2)",
+"maxima": "arcsin(x/2)"
+},
+{
+"in": "1/sqrt(1 + x^2)",
+"maxima": "arcsinh(x)"
+},
+{
+"in": "1/sqrt(x^2 - 1)",
+"maxima": "log(2*sqrt(x^2-1)+2*x)"
+},
+{
+"in": "1/sqrt(x^2 + 4)",
+"maxima": "arcsinh(x/2)"
+},
+{
+"in": "sqrt(1 - x^2)",
+"maxima": "arcsin(x)/2+(x*sqrt(1-x^2))/2"
+},
+{
+"in": "sqrt(4 - x^2)",
+"maxima": "(x*sqrt(4-x^2))/2+2*arcsin(x/2)"
+},
+{
+"in": "sqrt(1 + x^2)",
+"maxima": "arcsinh(x)/2+(x*sqrt(x^2+1))/2"
+},
+{
+"in": "sqrt(x^2 - 1)",
+"maxima": "(x*sqrt(x^2-1))/2-log(2*sqrt(x^2-1)+2*x)/2"
+},
+{
+"in": "1/(1 - x^2)^(3/2)",
+"maxima": "x/sqrt(1-x^2)"
+},
+{
+"in": "1/(x^2 + 1)^(3/2)",
+"maxima": "x/sqrt(x^2+1)"
+},
+{
+"in": "x^2/sqrt(1 - x^2)",
+"maxima": "arcsin(x)/2-(x*sqrt(1-x^2))/2"
+},
+{
+"in": "1/(x^2 - 1)",
+"maxima": "log(x-1)/2-log(x+1)/2"
+},
+{
+"in": "1/(x^2 - 4)",
+"maxima": "log(x-2)/4-log(x+2)/4"
+},
+{
+"in": "1/(x*(x + 1))",
+"maxima": "log(x)-log(x+1)"
+},
+{
+"in": "1/((x - 1)*(x + 2))",
+"maxima": "log(x-1)/3-log(x+2)/3"
+},
+{
+"in": "(3*x + 1)/(x^2 - x - 2)",
+"maxima": "(2*log(x+1))/3+(7*log(x-2))/3"
+},
+{
+"in": "x/((x - 1)*(x - 2))",
+"maxima": "2*log(x-2)-log(x-1)"
+},
+{
+"in": "x^2/(x - 1)",
+"maxima": "(x^2+2*x)/2+log(x-1)"
+},
+{
+"in": "(x^3 + 1)/(x + 1)",
+"maxima": "(2*x^3-3*x^2+6*x)/6"
+},
+{
+"in": "x^3/(x^2 + 1)",
+"maxima": "x^2/2-log(x^2+1)/2"
+},
+{
+"in": "1/(x^2 + x + 1)",
+"maxima": "(2*arctan((2*x+1)/sqrt(3)))/sqrt(3)"
+},
+{
+"in": "1/(x^2 + 2*x + 2)",
+"maxima": "arctan((2*x+2)/2)"
+},
+{
+"in": "(2*x + 3)/(x^2 + 2*x + 2)",
+"maxima": "log(x^2+2*x+2)+arctan((2*x+2)/2)"
+},
+{
+"in": "1/(x^3 + 1)",
+"maxima": "-(log(x^2-x+1)/6)+arctan((2*x-1)/sqrt(3))/sqrt(3)+log(x+1)/3"
+},
+{
+"in": "1/(x^3 - 1)",
+"maxima": "-(log(x^2+x+1)/6)-arctan((2*x+1)/sqrt(3))/sqrt(3)+log(x-1)/3"
+},
+{
+"in": "x/(x^3 - 1)",
+"maxima": "-(log(x^2+x+1)/6)+arctan((2*x+1)/sqrt(3))/sqrt(3)+log(x-1)/3"
+},
+{
+"in": "1/(x^4 - 1)",
+"maxima": "-(log(x+1)/4)-arctan(x)/2+log(x-1)/4"
+},
+{
+"in": "1/(x^4 + 1)",
+"maxima": "log(x^2+sqrt(2)*x+1)/2^(5/2)-log(x^2-sqrt(2)*x+1)/2^(5/2)+arctan((2*x+sqrt(2))/sqrt(2))/2^(3/2)+arctan((2*x-sqrt(2))/sqrt(2))/2^(3/2)"
+},
+{
+"in": "1/(x*(x^2 + 1))",
+"maxima": "log(x)-log(x^2+1)/2"
+},
+{
+"in": "1/(x^2*(x + 1))",
+"maxima": "log(x+1)-log(x)-1/x"
+},
+{
+"in": "1/(x + 1)^2",
+"maxima": "-(1/(x+1))"
+},
+{
+"in": "x/(x + 1)^2",
+"maxima": "log(x+1)+1/(x+1)"
+},
+{
+"in": "1/(x^2 + 1)^2",
+"maxima": "arctan(x)/2+x/(2*x^2+2)"
+},
+{
+"in": "x/(x^2 + 1)^2",
+"maxima": "-(1/(2*(x^2+1)))"
+},
+{
+"in": "1/((x^2 + 1)*(x^2 + 4))",
+"maxima": "arctan(x)/3-arctan(x/2)/6"
+},
+{
+"in": "(x^2 + 1)/(x^4 + x^2)",
+"maxima": "-(1/x)"
+},
+{
+"in": "(5*x^2 + 3*x - 2)/(x^3 + 2*x^2)",
+"maxima": "3*log(x+2)+2*log(x)+1/x"
+},
+{
+"in": "1/(x^2 - 2)",
+"maxima": "log((2*x-2^(3/2))/(2*x+2^(3/2)))/2^(3/2)"
+},
+{
+"in": "1/(x^2 - 2*x - 1)",
+"maxima": "log((2*x-2^(3/2)-2)/(2*x+2^(3/2)-2))/2^(3/2)"
+},
+{
+"in": "1/(x^3 - 2)",
+"maxima": "-(log(x^2+2^(1/3)*x+2^(2/3))/(3*2^(5/3)))-arctan((2*x+2^(1/3))/(2^(1/3)*sqrt(3)))/(2^(2/3)*sqrt(3))+log(x-2^(1/3))/(3*2^(2/3))"
+},
+{
+"in": "sinh(x)",
+"maxima": "cosh(x)"
+},
+{
+"in": "cosh(x)",
+"maxima": "sinh(x)"
+},
+{
+"in": "tanh(x)",
+"maxima": "log(cosh(x))"
+},
+{
+"in": "sinh(x)^2",
+"maxima": "(-(2*x)+e^(2*x)/2-e^-(2*x)/2)/4"
+},
+{
+"in": "cosh(x)^2",
+"maxima": "(2*x+e^(2*x)/2-e^-(2*x)/2)/4"
+},
+{
+"in": "sech(x)^2",
+"maxima": "4/(2*e^-(2*x)+2)"
+},
+{
+"in": "x*cosh(x)",
+"maxima": "(x^2*cosh(x))/2-(e^x*(x^2-2*x+2)-e^-x*(-x^2-2*x-2))/4"
+},
+{
+"in": "exp(x)*sinh(x)",
+"maxima": "(e^(2*x)/2-x)/2"
+},
+{
+"in": "1/(exp(x) + 1)",
+"maxima": "x-log(e^x+1)"
+},
+{
+"in": "exp(2*x)/(exp(x) + 1)",
+"maxima": "-log(e^x+1)+e^x+1"
+},
+{
+"in": "1/(exp(x) + exp(-x))",
+"maxima": "-arctan(e^-x)"
+},
+{
+"in": "exp(x)/(exp(2*x) + 1)",
+"maxima": "arctan(e^x)"
+},
+{
+"in": "(1 + x)*exp(x)",
+"maxima": "e^x*(x-1)+e^x"
+},
+{
+"in": "(x^2 + 1)*exp(-x)",
+"maxima": "e^-x*(-x^2-2*x-2)-e^-x"
+},
+{
+"in": "sin(x)^2/cos(x)",
+"maxima": "log(sin(x)+1)/2-log(sin(x)-1)/2-sin(x)"
+},
+{
+"in": "sec(x)^4",
+"maxima": "tan(x)^3/3+tan(x)"
+},
+{
+"in": "tan(x)*sec(x)^2",
+"maxima": "tan(x)^2/2"
+},
+{
+"in": "tan(x)^2*sec(x)^2",
+"maxima": "tan(x)^3/3"
+},
+{
+"in": "sin(sqrt(x))",
+"maxima": "2*(sin(sqrt(x))-cos(sqrt(x))*sqrt(x))"
+},
+{
+"in": "x/(1 + x^4)",
+"maxima": "arctan(x^2)/2"
+},
+{
+"in": "x^3/sqrt(1 + x^2)",
+"maxima": "(x^2*sqrt(x^2+1))/3-(2*sqrt(x^2+1))/3"
+},
+{
+"in": "1/(x*sqrt(x^2 - 1))",
+"maxima": "-arcsin(1/abs(x))"
+},
+{
+"in": "1/(x^2*sqrt(1 - x^2))",
+"maxima": "-(sqrt(1-x^2)/x)"
+},
+{
+"in": "1/(1 + sqrt(x))",
+"maxima": "2*(sqrt(x)+1)-2*log(sqrt(x)+1)"
+},
+{
+"in": "sqrt(x)/(1 + x)",
+"maxima": "2*sqrt(x)-2*arctan(sqrt(x))"
+},
+{
+"in": "x*(x + 1)^10",
+"maxima": "(11*x^12+120*x^11+594*x^10+1760*x^9+3465*x^8+4752*x^7+4620*x^6+3168*x^5+1485*x^4+440*x^3+66*x^2)/132"
+},
+{
+"in": "(log(x) + 1)*x^x",
+"maxima": "e^(x*log(x))"
+},
+{
+"in": "sin(log(x))",
+"maxima": "(x*(sin(log(x))-cos(log(x))))/2"
+},
+{
+"in": "cos(x)*sin(x)^4",
+"maxima": "sin(x)^5/5"
+},
+{
+"in": "exp(x)*sqrt(1 + exp(x))",
+"maxima": "(2*(e^x+1)^(3/2))/3"
+},
+{
+"in": "arctan(x)/(1 + x^2)",
+"maxima": "arctan(x)^2/2"
+},
+{
+"in": "arcsin(x)/sqrt(1 - x^2)",
+"maxima": "arcsin(x)^2/2"
+},
+{
+"in": "sin(x)*cos(x)/(1 + sin(x)^2)",
+"maxima": "log(sin(x)^2+1)/2"
+},
+{
+"in": "x*exp(x)*sin(x)",
+"maxima": "(e^x*x*sin(x)+(e^x-e^x*x)*cos(x))/2"
+},
+{
+"in": "1/(sin(x) + cos(x))",
+"maxima": "-(log(((2*sin(x))/(cos(x)+1)-2^(3/2)-2)/((2*sin(x))/(cos(x)+1)+2^(3/2)-2))/sqrt(2))"
+},
+{
+"in": "1/(1 + cos(x))",
+"maxima": "sin(x)/(cos(x)+1)"
+},
+{
+"in": "1/(2 + cos(x))",
+"maxima": "(2*arctan(sin(x)/(sqrt(3)*(cos(x)+1))))/sqrt(3)"
+},
+{
+"in": "exp(x^2)",
+"maxima": "-((I*sqrt(pi)*erf(I*x))/2)"
+},
+{
+"in": "sin(x)/x",
+"maxima": "-((I*gamma_incomplete(0,I*x)-I*gamma_incomplete(0,-(I*x)))/2)"
+},
+{
+"in": "sin(x^2)",
+"maxima": "(sqrt(pi)*(2^(3/2)*'realpart(erf((-1)^(1/4)*x))-2^(3/2)*'imagpart(erf((-1)^(1/4)*x))+(sqrt(2)*I+sqrt(2))*erf(((sqrt(2)*I+sqrt(2))*x)/2)+(sqrt(2)-sqrt(2)*I)*erf(sqrt(-I)*x)))/16"
+},
+{
+"in": "exp(-x^2)",
+"maxima": "(sqrt(pi)*erf(x))/2"
+},
+{
+"in": "1/log(x)",
+"maxima": "-gamma_incomplete(0,-log(x))"
+},
+{
+"in": "sqrt(1 + x^3)",
+"maxima": null
+}
+]

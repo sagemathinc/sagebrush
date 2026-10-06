@@ -16,7 +16,10 @@ ROOT = os.path.dirname(HERE)
 CLI = os.path.join(ROOT, "dist", "src", "cli.js")
 cases = json.load(open(os.path.join(ROOT, "engine", "sym", "corpus", "calculus.json")))
 
+integrals = json.load(open(os.path.join(ROOT, "engine", "sym", "corpus", "integrals.json")))
 lines = ["x, y = var('x y')", "print('---')"]
+for c in integrals:
+    lines.append("try:\n    print(integrate(%s, x))\nexcept Exception as _err:\n    print('ERR', type(_err).__name__, _err)\nprint('---')" % c["in"])
 for c in cases:
     lines.append("try:\n    print(%s)\nexcept Exception as _err:\n    print('ERR', type(_err).__name__, _err)\nprint('---')" % c["in"])
 src = "\n".join(lines) + "\n"
@@ -46,9 +49,16 @@ with tempfile.TemporaryDirectory() as d:
         runs["CPython"] = [py, "-c", "from sagebrush.preparse import preparse\nfrom sagebrush.sage import *\n"
                            "exec(preparse(open(%r).read()))" % path]
     bad = 0
+    results = []
     for name, cmd in runs.items():
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         got = outputs(p.stdout)
+        ints, got = got[:len(integrals)], got[len(integrals):]
+        results.append(ints)
+        found = sum(1 for g in ints if not g.startswith("integrate(") and not g.startswith("ERR"))
+        print("%-12s integrals: %d/%d found" % (name, found, len(integrals)))
+        if found < 164:
+            bad += 1
         ok = 0
         for k, c in enumerate(cases):
             g = got[k] if k < len(got) else "(missing)" + p.stderr[-300:]
@@ -58,4 +68,8 @@ with tempfile.TemporaryDirectory() as d:
                 print("  %s: %s\n    expected %r\n    got      %r" % (name, c["in"], expected(c), g))
         print("%-12s %d/%d" % (name, ok, len(cases)))
         bad += len(cases) - ok
+    if len(results) == 2 and results[0] != results[1]:
+        diff = [(c["in"], a, b) for c, a, b in zip(integrals, *results) if a != b]
+        print("the engines disagree on %d integrals, e.g. %r" % (len(diff), diff[:3]))
+        bad += 1
     sys.exit(1 if bad or not runs else 0)

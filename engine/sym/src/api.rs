@@ -441,6 +441,30 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             }
             out
         }
+        "integrate" => {
+            // integrate f x [a b]: the antiderivative (or definite integral),
+            // unevaluated when none is found
+            let f = d(arg(0));
+            let x = arg(1);
+            if a.len() >= 4 {
+                let (lo, hi) = (d(arg(2)), d(arg(3)));
+                one_(crate::integrate::definite(&f, x, &lo, &hi).unwrap_or_else(|| fun(Fun::Integral, vec![f.clone(), sym(x), lo, hi])))
+            } else {
+                one_(crate::integrate::integrate(&f, x).unwrap_or_else(|| fun(Fun::Integral, vec![f.clone(), sym(x)])))
+            }
+        }
+        "integrate_steps" => {
+            // the steps, depth first: depth \x1e rule \x1e var \x1e integrand \x1e result
+            let f = d(arg(0));
+            match crate::integrate::integrate_steps(&f, arg(1)) {
+                Some((_, st)) => {
+                    let mut out = vec![];
+                    flatten_steps(&st, 0, &mut out);
+                    out
+                }
+                None => vec![],
+            }
+        }
         "subs" => {
             let e = d(arg(0));
             let rules: Vec<(Expr, Expr)> = a[1..].chunks(2).map(|p| (d(p[0]), d(p[1]))).collect();
@@ -460,6 +484,13 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             vec![(z as u8).to_string()]
         }
         _ => crate::err::value_error(format!("unknown operation {}", op)),
+    }
+}
+
+fn flatten_steps(s: &crate::integrate::Step, depth: usize, out: &mut Vec<String>) {
+    out.push(format!("{}\x1e{}\x1e{}\x1e{}\x1e{}", depth, s.rule, s.var, encode(&s.integrand), encode(&s.result)));
+    for t in &s.sub {
+        flatten_steps(t, depth + 1, out);
     }
 }
 

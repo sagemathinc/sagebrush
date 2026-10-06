@@ -31,7 +31,8 @@ __all__ = [
     "arccot", "arcsec", "arccsc", "atan2", "arctan2", "sinh", "cosh", "tanh", "coth", "sech", "csch",
     "arcsinh", "arccosh", "arctanh", "asinh", "acosh", "atanh", "exp", "log", "ln", "floor", "ceil",
     "ceiling", "gamma", "erf", "sgn", "sign", "heaviside",
-    "diff", "derivative", "integrate", "integral", "taylor", "limit", "lim", "solve", "expand",
+    "diff", "derivative", "integrate", "integral", "integrate_steps", "numerical_integral",
+    "taylor", "limit", "lim", "solve", "expand",
     "simplify", "find_root", "latex",
     # graphics
     "Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d", "point",
@@ -51,7 +52,8 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
                         tanh, coth, sech, csch, arcsinh, arccosh, arctanh, asinh, acosh, atanh, exp,
                         log, ln, floor, ceil, ceiling, gamma, erf, sgn, sign, heaviside, diff,
-                        derivative, integrate, integral, taylor, limit, lim, solve, expand, simplify,
+                        derivative, integrate, integral, integrate_steps, numerical_integral, taylor, limit,
+                        lim, solve, expand, simplify,
                         find_root, latex, _py_number)
 from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
