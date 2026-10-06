@@ -4,9 +4,10 @@ This package (`dist/sagebrush.cjs` and `bin/sagebrush.cjs`) bundles:
 
 1. **The pyjs compiler and runtime** (TypeScript from
    github.com/sagemathinc/sagebrush, `src/`). Copyright (c) 2026
-   SageMath, Inc. **No license has been chosen yet, so no rights are
-   granted beyond viewing and running this package as published.** A
-   license, expected to be component-by-component, is coming soon.
+   SageMath, Inc. Licensed under the MIT license or the Apache License
+   2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`). Parts derived
+   from NumPy (BSD 3-Clause), Arm Optimized Routines (MIT) and fdlibm keep
+   their notices; see `NOTICE.md` in the repository.
 
 2. **pyparse**, a Python 3.14 parser generated from CPython's
    `Grammar/python.gram`, `Grammar/Tokens` and `Parser/Python.asdl`, with

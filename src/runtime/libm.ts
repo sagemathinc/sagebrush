@@ -187,6 +187,11 @@ export const LOG_TABLES = Float64Array.from([...TAB, ...A, ...B, LN2HI, LN2LO]);
 // and k ln2 into the sums, but not s (hfsq + R) (found against glibc on
 // 10^5 inputs per path).  V8's Math.log1p is fdlibm's own, which evaluates
 // the polynomial in another order.  NumPy's ziggurats call it.
+// fdlibm's notice, preserved as it requires:
+//   Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//   Developed at SunPro, a Sun Microsystems, Inc. business.
+//   Permission to use, copy, modify, and distribute this software is freely
+//   granted, provided that this notice is preserved.
 const LP = [0.0, 6.666666666666735130e-01, 3.999999999940941908e-01, 2.857142874366239149e-01, 2.222219843214978396e-01,
   1.818357216161805012e-01, 1.531383769920937332e-01, 1.479819860511658591e-01];
 const LN2_HI = 6.93147180369123816490e-01, LN2_LO = 1.90821492927058770002e-10;

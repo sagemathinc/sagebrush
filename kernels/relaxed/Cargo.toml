@@ -2,7 +2,7 @@
 name = "sagebrush-kernels-relaxed"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "sagebrush's exp and log kernels built with relaxed SIMD (hardware fused multiply-add)"
 
 [lib]

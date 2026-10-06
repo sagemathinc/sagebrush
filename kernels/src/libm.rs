@@ -359,6 +359,13 @@ pub unsafe extern "C" fn vlog(x: *const f64, y: *mut f64, n: usize, tab: *const 
 }
 
 // ------------------------------------------------------------------ log1p
+//
+// fdlibm's log1p (via glibc's s_log1p.c); fdlibm's notice, preserved as it
+// requires:
+//   Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//   Developed at SunPro, a Sun Microsystems, Inc. business.
+//   Permission to use, copy, modify, and distribute this software is freely
+//   granted, provided that this notice is preserved.
 
 const LP: [f64; 8] = [
     0.0,
