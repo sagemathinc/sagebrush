@@ -1,0 +1,29 @@
+# Big-integer libraries compared: speed of the operations research math
+# leans on, natively and in WebAssembly.  A benchmark only: GMP (rug) and
+# malachite are LGPL and are used here as yardsticks, never shipped.
+[package]
+name = "bigint-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[workspace]
+
+[features]
+default = ["gmp"]
+gmp = ["dep:rug"]
+
+[dependencies]
+num-bigint = "0.5"
+num-bigint-04 = { package = "num-bigint", version = "0.4" }
+num-integer = "0.1"
+num-traits = "0.2"
+dashu = "0.6"
+malachite = "0.12"
+rug = { version = "1.30", default-features = false, features = ["integer"], optional = true }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
