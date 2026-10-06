@@ -1,8 +1,10 @@
 //! Class groups and units of number fields, assuming GRH, by Buchmann's
 //! subexponential method (Cohen, A Course in Computational Algebraic Number
 //! Theory, 6.5):
-//!   * the prime ideals of norm up to 4 log^2 |d_K| generate the class
-//!     group (Grenie and Molteni's uniform bound; Bach's was 12);
+//!   * the prime ideals of norm below a bound T generate the class group:
+//!     T from Belabas, Diaz y Diaz and Friedman's criterion with Grenie and
+//!     Molteni's search (nf/grh.rs), typically well below the uniform
+//!     4 log^2 |d_K| (Grenie and Molteni; Bach's was 12);
 //!   * relations are small elements x of LLL-reduced ideals (O itself and
 //!     the factor-base primes) whose norms factor over the factor base:
 //!     (x) = prod P^v_P(x);
@@ -47,6 +49,24 @@ pub struct Bnf {
     pub prec: u32,
     /// the number of roots of unity
     pub w: u32,
+}
+
+fn euler_phi(mut k: u64) -> u64 {
+    let mut r = k;
+    let mut p = 2;
+    while p * p <= k {
+        if k % p == 0 {
+            while k % p == 0 {
+                k /= p;
+            }
+            r -= r / p;
+        }
+        p += 1;
+    }
+    if k > 1 {
+        r -= r / k;
+    }
+    r
 }
 
 /// Enumerate the integer vectors x != 0 with x^T G x <= bound (Fincke-Pohst
@@ -108,18 +128,29 @@ pub fn short_vectors(g: &[Vec<f64>], bound: f64, limit: usize) -> Vec<Vec<i64>> 
 
 /// The residue of zeta_K at 1 by Bach's weighted average of truncated
 /// Euler products prod_p (1 - 1/p) / prod_{P | p} (1 - 1/N P), x <= i < 2x.
-fn residue_estimate(o: &Order, dk: &BigInt, index: &BigInt, x: u64) -> f64 {
-    let primes = crate::arith::primes_up_to(2 * x);
+/// The splitting of every prime p <= bound: (p, [(f, e)]), from the
+/// factorization of the defining polynomial mod p unless p divides the index.
+fn splitting(o: &Order, dk: &BigInt, index: &BigInt, bound: u64) -> Vec<(u64, Vec<(u32, u32)>)> {
+    crate::arith::primes_up_to(bound)
+        .into_iter()
+        .map(|p| {
+            let degs: Vec<(u32, u32)> = if (index % p).is_zero() {
+                decompose(o, dk, p).map(|v| v.iter().map(|q| (q.f, q.e)).collect()).unwrap_or_default()
+            } else {
+                sagebrush_poly::factor_mod(&o.f, p).iter().map(|(g, e)| ((g.len() - 1) as u32, *e)).collect()
+            };
+            (p, degs)
+        })
+        .collect()
+}
+
+fn residue_estimate(split: &[(u64, Vec<(u32, u32)>)], x: u64) -> f64 {
+    let primes: Vec<u64> = split.iter().map(|s| s.0).take_while(|&p| p <= 2 * x).collect();
     let mut local = vec![0.0f64; primes.len()];
-    for (k, &p) in primes.iter().enumerate() {
-        let degs: Vec<(u32, u32)> = if (index % p).is_zero() {
-            decompose(o, dk, p).map(|v| v.iter().map(|q| (q.f, q.e)).collect()).unwrap_or_default()
-        } else {
-            sagebrush_poly::factor_mod(&o.f, p).iter().map(|(g, e)| ((g.len() - 1) as u32, *e)).collect()
-        };
-        let pf = p as f64;
+    for (k, (p, degs)) in split.iter().take(primes.len()).enumerate() {
+        let pf = *p as f64;
         let mut l = (1.0 - 1.0 / pf).ln();
-        for (f, _) in degs {
+        for &(f, _) in degs {
             l -= (1.0 - pf.powi(-(f as i32))).ln();
         }
         local[k] = l;
@@ -148,6 +179,25 @@ fn residue_estimate(o: &Order, dk: &BigInt, index: &BigInt, x: u64) -> f64 {
 /// (continued fractions, with a tolerance from the error), and the basis
 /// replaced by that of the lattice they generate (HNF).  None if an
 /// identification fails (precision too low) or the rank stays below r.
+/// Is v (approximately) an integer combination of the rows of `basis`, by
+/// coordinates from the f64 inverse?  The rounded combination is checked
+/// exactly: the residual must be within the error, as the f64 coordinates
+/// are unreliable for an ill-conditioned basis.
+fn in_lattice_f64(basis: &ZMat, inv: &[Vec<f64>], v: &[BigInt], err: &BigInt, prec: u32) -> bool {
+    let r = basis.len();
+    let vf: Vec<f64> = v.iter().map(|x| to_f64(x, prec)).collect();
+    let cf: Vec<f64> = (0..r).map(|j| (0..r).map(|i| vf[i] * inv[i][j]).sum()).collect();
+    if !cf.iter().all(|c| c.abs() < 1e15 && (c - c.round()).abs() < 1e-3) {
+        return false;
+    }
+    let ci: Vec<i64> = cf.iter().map(|c| c.round() as i64).collect();
+    let tol = err * 64 * (1 + ci.iter().map(|c| c.unsigned_abs()).sum::<u64>());
+    (0..v.len()).all(|j| {
+        let comb: BigInt = ci.iter().zip(basis).map(|(&c, row)| &row[j] * c).sum();
+        (&v[j] - comb).abs() <= tol
+    })
+}
+
 fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option<(ZMat, BigInt)> {
     let p = prec as usize;
     let small = err * 64;
@@ -177,12 +227,8 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
         }
         if k == r {
             // already in the lattice? (f64 coordinates near integers)
-            if let Some(inv) = &fast_inv {
-                let vf: Vec<f64> = v.iter().map(|x| to_f64(x, prec)).collect();
-                let cf: Vec<f64> = (0..r).map(|j| (0..r).map(|i| vf[i] * inv[i][j]).sum()).collect();
-                if cf.iter().all(|c| c.abs() < 1e6 && (c - c.round()).abs() < 1e-6) {
-                    continue;
-                }
+            if fast_inv.as_ref().is_some_and(|inv| in_lattice_f64(&basis, inv, v, err, prec)) {
+                continue;
             }
         }
         let Some(c) = solve_rows(&basis, v) else {
@@ -429,6 +475,10 @@ struct Field {
     emb: Embeddings,
     fb: Vec<PrimeIdeal>,
     by_p: HashMap<u64, Vec<usize>>,
+    /// fb[..ngen], the primes of norm below the bound, are the columns;
+    /// relations with the others are dropped (they are not needed to
+    /// generate, and rarely occur)
+    ngen: usize,
 }
 
 /// Relations from small elements of the LLL-reduced ideal with basis `ib`.
@@ -482,7 +532,7 @@ fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen
         T_FAC.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
         N_CAND.fetch_add(1, Relaxed);
         if let Some(rel) = fe {
-            if rel.is_empty() || !seen.insert(rel.clone()) {
+            if rel.is_empty() || rel.iter().any(|&(i, _)| i >= fld.ngen) || !seen.insert(rel.clone()) {
                 continue;
             }
             rels.push(rel);
@@ -491,6 +541,36 @@ fn relations_weighted(fld: &Field, ib: &ZMat, budget: usize, s_log: &[f64], seen
         }
     }
     found
+}
+
+/// The norms of the prime ideals below a bound, from the splitting data.
+fn prime_norms(split: &[(u64, Vec<(u32, u32)>)], bound: f64) -> Vec<u64> {
+    split.iter().take_while(|s| (s.0 as f64) < bound).flat_map(|(p, degs)| degs.iter().filter_map(move |&(f, _)| p.checked_pow(f))).collect()
+}
+
+/// (T, the uniform 4 log^2 |d_K|): under GRH the prime ideals of norm < T
+/// generate the class group of Q[x]/(f).
+pub fn class_group_generator_bound(f: &[BigInt]) -> (f64, f64) {
+    let (o, _) = maximal_order(f);
+    let dk = o.disc();
+    let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
+    let r1 = Embeddings::new(&o).r1;
+    let ld = dk.to_f64().unwrap().abs().ln();
+    let t_unif = (4.0 * ld * ld).max(50.0);
+    let split = splitting(&o, &dk, &index, t_unif as u64);
+    (super::grh::class_group_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif), t_unif)
+}
+
+/// Belabas, Diaz y Diaz and Friedman's one-step bound, for comparison.
+pub fn one_step_generator_bound(f: &[BigInt]) -> f64 {
+    let (o, _) = maximal_order(f);
+    let dk = o.disc();
+    let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
+    let r1 = Embeddings::new(&o).r1;
+    let ld = dk.to_f64().unwrap().abs().ln();
+    let t_unif = (4.0 * ld * ld).max(50.0);
+    let split = splitting(&o, &dk, &index, t_unif as u64);
+    super::grh::one_step_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif)
 }
 
 pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
@@ -507,29 +587,62 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
     let ob: ZMat = (0..n).map(|i| (0..n).map(|j| BigInt::from((i == j) as i32)).collect()).collect();
     let red = lll(&ob, &emb);
     let g = emb.t2_gram(&red);
-    let w = short_vectors(&g, n as f64 * (1.0 + 1e-9), 1000).len() as u32;
-    // factor base: Grenie-Molteni's bound 4 log^2 |d_K|
+    // (candidates with a loose bound, then exactly: x^k = 1 for some k with
+    // phi(k) <= n; large roots of f make T2 in floating point inexact)
+    let kmax = (1..=(4 * n * n + 6) as u64).filter(|&k| euler_phi(k) <= n as u64).max().unwrap();
+    let one = o.one();
+    let w = short_vectors(&g, n as f64 * (1.0 + 1e-4), 1000)
+        .iter()
+        .filter(|c| {
+            let x: Vec<BigInt> = (0..n).map(|j| c.iter().zip(&red).map(|(&ci, b)| &b[j] * ci).sum()).collect();
+            let mut y = x.clone();
+            (1..=kmax).any(|_| {
+                let done = y == one;
+                y = o.mul(&y, &x);
+                done
+            })
+        })
+        .count()
+        .max(2) as u32;
+    // factor base: the prime ideals of norm < T, with T from Grenie and
+    // Molteni's algorithm (nf/grh.rs), at most the uniform 4 log^2 |d_K|
     let ld = dk.to_f64().unwrap().abs().ln();
-    let bound = ((4.0 * ld * ld).ceil() as u64).max(50);
+    let t_unif = (4.0 * ld * ld).max(50.0);
+    let x = ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 15);
+    let split = splitting(&o, &dk, &index, (t_unif as u64).max(2 * x));
+    let norms = prime_norms(&split, t_unif);
+    let t_grh = if std::env::var("QCL_UNIFORM").is_ok() { t_unif } else { super::grh::class_group_bound(n, r1, ld, &norms, t_unif) };
+    // the factor base itself may be larger than the proven bound needs (and
+    // relations, for the units, need some primes)
+    let fb_min: f64 = std::env::var("QCL_FBMIN").ok().and_then(|v| v.parse().ok()).unwrap_or(50.0);
+    let bound = (t_grh.max(fb_min).ceil() as u64).max(2);
+    // all primes above each p < bound (for factoring norms), those of norm
+    // < bound (which generate the class group) first: only they are columns
+    let mut above = vec![];
+    for p in crate::arith::primes_up_to(bound - 1) {
+        above.push((p, decompose(&o, &dk, p)?));
+    }
+    let small = |q: &PrimeIdeal| q.norm() < BigInt::from(bound);
     let mut fb = vec![];
     let mut by_p: HashMap<u64, Vec<usize>> = HashMap::new();
-    for p in crate::arith::primes_up_to(bound) {
-        let ps = decompose(&o, &dk, p)?;
-        // all primes above p, even the larger-norm ones (needed for norms)
-        let idx: Vec<usize> = (fb.len()..fb.len() + ps.len()).collect();
-        by_p.insert(p, idx);
-        fb.extend(ps);
+    for pass in [true, false] {
+        for (p, ps) in &above {
+            for q in ps.iter().filter(|q| small(q) == pass) {
+                by_p.entry(*p).or_default().push(fb.len());
+                fb.push(q.clone());
+            }
+        }
     }
-    let nfb = fb.len();
+    let ngen = fb.iter().filter(|q| small(q)).count();
+    let nfb = ngen;
     // h R estimate
-    let x = ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 15);
-    let res = residue_estimate(&o, &dk, &index, x);
+    let res = residue_estimate(&split, x);
     let hr_est = res * w as f64 * dk.to_f64().unwrap().abs().sqrt() / (2f64.powi(r1 as i32) * (2.0 * std::f64::consts::PI).powi(r2 as i32));
     let primorial: BigInt = by_p.keys().map(|&p| BigInt::from(p)).product();
-    let fld = Field { o, primorial, log_bound: (bound as f64).ln(), emb, fb, by_p };
+    let fld = Field { o, primorial, log_bound: (bound as f64).ln(), emb, fb, by_p, ngen };
     let mut tm = Timing { fb: nfb, h_est: hr_est, ..Default::default() };
     if debug {
-        eprintln!("n {} r1 {} r2 {} d {} w {} fb {} (bound {}) hR est {:.6e} setup {:.1} ms", n, r1, r2, dk, w, nfb, bound, hr_est, t0.elapsed().as_secs_f64() * 1e3);
+        eprintln!("n {} r1 {} r2 {} d {} w {} fb {} (bound {}, GRH {:.0}, uniform {:.0}) hR est {:.6e} setup {:.1} ms", n, r1, r2, dk, w, nfb, bound, t_grh, t_unif, hr_est, t0.elapsed().as_secs_f64() * 1e3);
     }
     let mut rels: Vec<Relation> = vec![];
     let mut elems: Vec<Vec<BigInt>> = vec![];
@@ -554,7 +667,7 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
                 let rel: Relation = idx.iter().map(|&i| (i, fld.fb[i].e as i64)).collect();
                 let mut rel = rel;
                 rel.sort();
-                if seen.insert(rel.clone()) {
+                if rel.iter().all(|&(i, _)| i < fld.ngen) && seen.insert(rel.clone()) {
                     rels.push(rel);
                     elems.push(fld.o.one().into_iter().map(|c| c * p).collect());
                 }
@@ -796,12 +909,8 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                 if v.iter().all(|x| x.abs() <= &err * 64) {
                     return true;
                 }
-                if let Some(inv) = &inv {
-                    let vf: Vec<f64> = v.iter().map(|x| to_f64(x, prec)).collect();
-                    let cf: Vec<f64> = (0..r).map(|j| (0..r).map(|i| vf[i] * inv[i][j]).sum()).collect();
-                    if cf.iter().all(|c| c.abs() < 1e6 && (c - c.round()).abs() < 1e-6) {
-                        return true;
-                    }
+                if inv.as_ref().is_some_and(|inv| in_lattice_f64(basis, inv, v, &err, prec)) {
+                    return true;
                 }
                 match solve_rows(basis, v) {
                     Some(cs) => cs.iter().all(|q| {
@@ -920,5 +1029,17 @@ mod tests {
             assert!((b.regulator - reg).abs() < 1e-9 * reg, "{:?}: {} vs {}", f, b.regulator, reg);
             assert_eq!(b.w, w);
         }
+    }
+
+    /// Grenie and Molteni's example (arXiv:1507.00602, Section 4): T(K) =
+    /// 19162 by Belabas, Diaz y Diaz and Friedman's one step, T_1(K) = 11071.
+    #[test]
+    fn generator_bound_paper_example() {
+        let f: Vec<BigInt> = [55137512477462689i64, 559752270111028720, 0, 1].iter().map(|&c| BigInt::from(c)).collect();
+        let one = one_step_generator_bound(&f);
+        let (t, unif) = class_group_generator_bound(&f);
+        eprintln!("one step {} steps {} uniform {}", one, t, unif);
+        assert!((19000.0..19400.0).contains(&one), "{}", one);
+        assert!((11000.0..11100.0).contains(&t), "{}", t);
     }
 }
