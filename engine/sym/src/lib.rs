@@ -3,6 +3,7 @@
 //! automatic simplification, Sage-compatible printing and LaTeX, and the
 //! calculus on them.
 
+pub mod api;
 pub mod diff;
 pub mod err;
 pub mod eval;

@@ -43,6 +43,29 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     r.as_ptr()
 }
 
+/// A symbolic-engine call (engine/sym/src/api.rs: "op\x1fargs..."); the
+/// reply is in the same buffer as sb_call's.
+#[no_mangle]
+pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
+    let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
+    let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    *r = sagebrush_sym::api::call(req).into_bytes();
+    r.as_ptr()
+}
+
+/// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
+/// for the last symbolic error, or "" (an interrupt or a bug).
+#[no_mangle]
+pub unsafe extern "C" fn sb_last_error() -> *const u8 {
+    let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    *r = match sagebrush_sym::err::take_last_error() {
+        Some((k, m)) => format!("err\x1f{}\x1f{}", k, m),
+        None => String::new(),
+    }
+    .into_bytes();
+    r.as_ptr()
+}
+
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 pub fn call(req: &str) -> String {
     match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {

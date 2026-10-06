@@ -112,6 +112,20 @@ x*e^(-x)
 e^(-x^2)
 (x+1)*e^x
 exp(x)*cos(x) + exp(x)*sin(x)
+sin(x^2)/x^2 + cos(x^2)
+sin(x)/x^2 + cos(x)
+sin(x)/x + cos(x)
+sin(x^2)*x + cos(x^2)
+sin(x)*x^2 + cos(x^3)
+sin(x)/x^3 + cos(x)
+exp(x^2)/x^2 + cos(x^2)
+sin(x^2)/x^2 + exp(x^2)
+sin(x^2)/x^2 + x
+sin(x^2)/x^2 + 1/x
+cos(x^2)/x^2 + sin(x^2)
+sin(x^2)/x^4 + cos(x^2)/x^2
+sin(y^2)/x^2 + cos(x^2)
+2*cos(x^2) - sin(x^2)/x^2
 '''
 out = []
 for line in cases.strip().split("\n"):

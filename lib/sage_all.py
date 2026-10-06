@@ -25,9 +25,14 @@ __all__ = [
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
     # the language: [a..b], 1.5, f(x) = ...
     "ellipsis_range", "ellipsis_iter", "RealNumber", "symbolic_expression",
-    # symbolic expressions (just enough for plotting)
-    "var", "x", "sin", "cos", "tan", "asin", "acos", "atan", "arcsin", "arccos", "arctan", "atan2",
-    "arctan2", "sinh", "cosh", "tanh", "exp", "log", "ln", "floor", "ceil", "gamma",
+    # symbolic expressions (the Rust engine, engine/sym)
+    "var", "x", "SR", "I", "oo", "infinity", "Infinity", "euler_gamma", "function",
+    "sin", "cos", "tan", "cot", "sec", "csc", "asin", "acos", "atan", "arcsin", "arccos", "arctan",
+    "arccot", "arcsec", "arccsc", "atan2", "arctan2", "sinh", "cosh", "tanh", "coth", "sech", "csch",
+    "arcsinh", "arccosh", "arctanh", "asinh", "acosh", "atanh", "exp", "log", "ln", "floor", "ceil",
+    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside",
+    "diff", "derivative", "integrate", "integral", "taylor", "limit", "lim", "solve", "expand",
+    "simplify", "find_root", "latex",
     # graphics
     "Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d", "point",
     "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk", "arrow", "arrow2d",
@@ -37,9 +42,13 @@ __all__ = [
     "text_control",
 ]
 
-from _sage_expr import (Expr as _Expr, var, x, pi, e, sin, cos, tan, asin, acos, atan, arcsin,
-                        arccos, arctan, atan2, arctan2, sinh, cosh, tanh, exp, log, ln, floor, ceil,
-                        gamma)
+from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infinity, Infinity,
+                        euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
+                        arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
+                        tanh, coth, sech, csch, arcsinh, arccosh, arctanh, asinh, acosh, atanh, exp,
+                        log, ln, floor, ceil, ceiling, gamma, erf, sgn, sign, heaviside, diff,
+                        derivative, integrate, integral, taylor, limit, lim, solve, expand, simplify,
+                        find_root, latex, _py_number)
 from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
                        bar_chart, show, graphics_array, animate, Animation)
@@ -428,7 +437,7 @@ class Factorization(list):
 def factor(n):
     """The prime factorization of a nonzero integer (or Rational), or of a
     polynomial."""
-    if isinstance(n, _Polynomial):
+    if isinstance(n, (_Polynomial, _Expr)):
         return n.factor()
     if isinstance(n, _Fraction) and n.denominator != 1:
         num, den = factor(n.numerator), factor(n.denominator)
@@ -629,20 +638,26 @@ def isqrt(n):
 
 
 def sqrt(x):
-    """Exact for perfect squares (of integers and rationals), else a float."""
-    if isinstance(x, _Expr):
-        return _Expr("fn", ("sqrt", x))
+    """Exact for perfect squares, symbolic (sqrt(2), 2*sqrt(3)) for other
+    exact numbers and expressions, numerical for reals."""
+    if isinstance(x, float):
+        if x < 0:
+            return CC(0, _math.sqrt(-x))
+        return RealNumber(_math.sqrt(x))
+    if isinstance(x, complex):
+        return CC(x ** 0.5)
     if isinstance(x, int) and x >= 0:
         r = _math.isqrt(x)
         if r * r == x:
             return r
-    elif isinstance(x, _Fraction) and x >= 0:
-        a, b = _math.isqrt(x.numerator), _math.isqrt(x.denominator)
-        if a * a == x.numerator and b * b == x.denominator:
-            return _q(_Fraction(a, b))
-    if x < 0:
-        return complex(0, _math.sqrt(-x))
-    return RealNumber(_math.sqrt(x))
+    if hasattr(x, "sqrt") and not isinstance(x, (int, _Fraction, _Expr)):
+        return x.sqrt()
+    r = _expr(x) ** _Fraction(1, 2)
+    if not isinstance(x, _Expr):
+        v = _py_number(r._s)
+        if v is not None:
+            return v
+    return r
 
 
 def srange(start, stop=None, step=1):
