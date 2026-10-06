@@ -19,6 +19,6 @@ fn corpus() {
             }
         }
     }
-    assert!(found >= 164, "found {} of {}", found, cases.len());
-    assert!(same >= 151, "{} print as Sage does", same);
+    assert!(found >= 166, "found {} of {}", found, cases.len());
+    assert!(same >= 152, "{} print as Sage does", same);
 }

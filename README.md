@@ -208,9 +208,9 @@ the engines.
   Rothstein–Trager), trigonometric powers, square roots of quadratics and
   the Weierstrass substitution.
   - Every answer is checked by differentiating it.
-  - On a corpus of 171 first-year integrals it finds 164; Maxima, what Sage
+  - On a corpus of 171 first-year integrals it finds 166; Maxima, what Sage
     calls, finds 170, including two non-elementary integrals we leave
-    unevaluated. 151 of ours print exactly as Sage prints Maxima's answers.
+    unevaluated. 152 of ours print exactly as Sage prints Maxima's answers.
   - `integrate_steps(f, x)` shows the rules used, and `numerical_integral`
     computes adaptive Gauss–Kronrod quadrature.
 - **Limits and differential equations:**
