@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory() as d:
             print("   ", [(c["in"], g) for c, g in zip(odes, des) if g.startswith("ERR")][:3])
         found = sum(1 for g in ints if not g.startswith("integrate(") and not g.startswith("ERR"))
         print("%-12s integrals: %d/%d found" % (name, found, len(integrals)))
-        if found < 166:
+        if found < 167:
             bad += 1
         ok = 0
         for k, c in enumerate(cases):

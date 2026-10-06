@@ -87,6 +87,17 @@ fn hermite(a: &QPoly, d: &QPoly) -> (Vec<(QPoly, QPoly, u32)>, QPoly, QPoly) {
 /// The integral of a/d, d monic and square-free, deg a < deg d.
 fn log_part(a: &QPoly, d: &QPoly, x: &Expr) -> Option<Expr> {
     let factors = d.factor();
+    // x^n + c with an irreducible factor beyond the quadratics (x^5 - 1):
+    // the roots of the whole binomial at once
+    if factors.iter().any(|(f, _)| f.deg() > 2) && (1..d.deg() as usize).all(|k| d.coeff(k).is_zero()) {
+        let (fs, _) = (factors.clone(), ());
+        let simple = fs.iter().all(|(f, _)| f.deg() <= 2) ;
+        if !simple {
+            if let Some(r) = binomial(a, d, x) {
+                return Some(r);
+            }
+        }
+    }
     let mut terms = vec![];
     for (dk, _) in &factors {
         // the partial fraction a_k/d_k: a_k = a (d/d_k)^-1 mod d_k

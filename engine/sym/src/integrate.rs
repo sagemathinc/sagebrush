@@ -32,6 +32,7 @@ thread_local! {
     static TRACE: RefCell<Option<Vec<Vec<Step>>>> = const { RefCell::new(None) };
     static WORK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static FAILED: RefCell<std::collections::HashSet<(Expr, String, bool, bool)>> = RefCell::new(std::collections::HashSet::new());
+    static ACTIVE: RefCell<std::collections::HashSet<(Expr, String, bool, bool)>> = RefCell::new(std::collections::HashSet::new());
 }
 
 fn step(rule: &str, f: &Expr, x: &str, run: impl FnOnce() -> Option<Expr>) -> Option<Expr> {
@@ -67,6 +68,7 @@ fn step(rule: &str, f: &Expr, x: &str, run: impl FnOnce() -> Option<Expr>) -> Op
 pub fn integrate(f: &Expr, x: &str) -> Option<Expr> {
     WORK.with(|w| w.set(0));
     FAILED.with(|m| m.borrow_mut().clear());
+    ACTIVE.with(|m| m.borrow_mut().clear());
     let r = soft(|| Ctx { x, inv: false, lin: false }.int(f, 0).map(|r| collect_kernels(&tidy(&r), x)))?;
     if has_bad(&r) || !verify(f, &r, x) {
         return None;
@@ -346,7 +348,13 @@ impl<'a> Ctx<'a> {
         if over || FAILED.with(|m| m.borrow().contains(&key)) {
             return None;
         }
+        // an integrand already being integrated up the stack: a cycle
+        // (expand <-> simplify), not progress
+        if !ACTIVE.with(|a| a.borrow_mut().insert(key.clone())) {
+            return None;
+        }
         let r = self.int_search(f, depth);
+        ACTIVE.with(|a| a.borrow_mut().remove(&key));
         if r.is_none() {
             FAILED.with(|m| m.borrow_mut().insert(key));
         }
@@ -409,6 +417,9 @@ impl<'a> Ctx<'a> {
         if let Some(r) = self.quadratic_param(f) {
             return Some(r);
         }
+        if let Some(r) = self.linear_factors(f) {
+            return Some(r);
+        }
         if let Some(r) = self.trig(f, depth) {
             return Some(r);
         }
@@ -422,6 +433,9 @@ impl<'a> Ctx<'a> {
             return Some(r);
         }
         if let Some(r) = self.sqrt_quadratic(f, depth) {
+            return Some(r);
+        }
+        if let Some(r) = self.trig_substitution(f, depth) {
             return Some(r);
         }
         if let Some(r) = self.rational_exp(f, depth) {
@@ -482,6 +496,22 @@ impl<'a> Ctx<'a> {
                     Fun::Cos => fun1(Fun::Tan, u),
                     Fun::Sin => neg(&recip(&fun1(Fun::Tan, u))),
                     Fun::Cosh => fun1(Fun::Tanh, u),
+                    _ => return None,
+                };
+                step("table", f, x, || Some(div(&r, &a)))
+            }
+            Kind::Pow(b, n) if n.is_minus_one() && matches!(b.kind, Kind::Fun(Fun::Tan | Fun::Cot | Fun::Sec | Fun::Csc | Fun::Sin | Fun::Cos, _)) => {
+                // 1/tan = cot, 1/sin = csc, ...
+                let Kind::Fun(g, args) = &b.kind else { return None };
+                let u = &args[0];
+                let (a, _) = linear(u, x)?;
+                let r = match g {
+                    Fun::Tan => log(&sin(u)),
+                    Fun::Cot => log(&fun1(Fun::Sec, u)),
+                    Fun::Sec => sin(u),
+                    Fun::Csc => neg(&cos(u)),
+                    Fun::Sin => neg(&log(&add2(&fun1(Fun::Cot, u), &fun1(Fun::Csc, u)))),
+                    Fun::Cos => log(&add2(&fun1(Fun::Sec, u), &fun1(Fun::Tan, u))),
                     _ => return None,
                 };
                 step("table", f, x, || Some(div(&r, &a)))
@@ -604,6 +634,45 @@ impl<'a> Ctx<'a> {
         step("partial fractions (quadratic)", f, x, || Some(add(out)))
     }
 
+    /// n/((p_1 x + q_1)...(p_k x + q_k)), distinct linear factors with
+    /// symbolic coefficients: the residue at each root gives a log.
+    fn linear_factors(&self, f: &Expr) -> Option<Expr> {
+        let x = self.x;
+        let xs = self.xs();
+        let (n, d) = together(f);
+        let nc = crate::poly::coeffs(&n, x)?;
+        if nc.iter().any(|c| depends(c, x)) {
+            return None;
+        }
+        let mut lins = vec![];
+        let mut konst = vec![];
+        for g in factors(&d) {
+            if !depends(&g, x) {
+                konst.push(g);
+                continue;
+            }
+            let (pi, qi) = linear(&g, x)?;
+            lins.push((pi, qi, g.clone()));
+        }
+        if lins.len() < 2 || nc.len() > lins.len() || lins.iter().any(|(_, _, g)| lins.iter().filter(|(_, _, h)| h == g).count() > 1) {
+            return None;
+        }
+        let k = mul(konst);
+        let mut out = vec![];
+        for (i, (pi, qi, gi)) in lins.iter().enumerate() {
+            let r = neg(&div(qi, pi));
+            let mut den = mul2(pi, &k);
+            for (j, (pj, qj, _)) in lins.iter().enumerate() {
+                if j != i {
+                    den = mul2(&den, &add2(&mul2(pj, &r), qj));
+                }
+            }
+            let a = cancel(&div(&subs(&n, &[(xs.clone(), r.clone())]), &den));
+            out.push(mul2(&div(&a, pi), &log(gi)));
+        }
+        step("partial fractions (linear factors)", f, x, || Some(add(out)))
+    }
+
     // ---------------------------------------------------------------- substitution
 
     /// Derivative divides: f = g(u) u' for an inner expression u.
@@ -616,6 +685,15 @@ impl<'a> Ctx<'a> {
         let xs = self.xs();
         let mut cands = vec![];
         collect_inner(f, x, &mut cands);
+        // radicals of x with different indices: u = x^(1/lcm)
+        let mut dens = vec![];
+        exponent_denominators(f, &xs, &mut dens);
+        if dens.len() >= 2 {
+            let l = dens.iter().fold(1i64, |acc, d| num_integer::lcm(acc, *d));
+            if l <= 60 {
+                cands.push(pow(&xs, &rat(1, l)));
+            }
+        }
         // a factor x^m next to powers of x: u = x^(m+1) (x/(1 + x^4): u = x^2)
         for g in factors(f) {
             let (b, e) = base_exp(&g);
@@ -683,7 +761,8 @@ impl<'a> Ctx<'a> {
         let x = self.x;
         let trans_dv = |e: &Expr| -> bool {
             match &e.kind {
-                Kind::Pow(b, n) => !depends(b, x) && linear(n, x).is_some(),
+                Kind::Pow(b, n) if !depends(b, x) => linear(n, x).is_some(),
+                Kind::Pow(b, n) if n.as_i64() == Some(2) => matches!(&b.kind, Kind::Fun(Fun::Sec | Fun::Csc, a) if linear(&a[0], x).is_some()),
                 Kind::Fun(Fun::Sin | Fun::Cos | Fun::Sinh | Fun::Cosh, a) => linear(&a[0], x).is_some(),
                 _ => false,
             }
@@ -755,13 +834,15 @@ impl<'a> Ctx<'a> {
     fn trig(&self, f: &Expr, depth: u32) -> Option<Expr> {
         let x = self.x;
         let fs = factors(f);
-        // sin(u)^m cos(u)^n, tan(u)^n, sec(u)^n, csc(u)^n, cot(u)^n
+        // sin(u)^m cos(u)^n (m, n rational), tan(u)^n, sec(u)^n, csc(u)^n,
+        // cot(u)^n; other trigonometric functions of u become sin and cos
         let mut arg: Option<Expr> = None;
-        let (mut m, mut n) = (0i64, 0i64);
+        let (mut m, mut n) = (Q::zero(), Q::zero());
         let mut single: Option<(Fun, i64)> = None;
+        let (mut tan_sec, mut cot_csc, mut other) = (false, false, false);
         for g in &fs {
             let (b, e) = base_exp(g);
-            let k = e.as_i64()?;
+            let k = e.as_rat()?.clone();
             let Kind::Fun(h, a) = &b.kind else { return None };
             if a.len() != 1 {
                 return None;
@@ -772,11 +853,46 @@ impl<'a> Ctx<'a> {
                 _ => {}
             }
             match h {
-                Fun::Sin => m += k,
-                Fun::Cos => n += k,
-                Fun::Tan | Fun::Sec | Fun::Csc | Fun::Cot if fs.len() == 1 => single = Some((h.clone(), k)),
-                Fun::Tan | Fun::Sec => return self.tan_sec(f, depth),
+                Fun::Sin => {
+                    m += &k;
+                    other = true;
+                }
+                Fun::Cos => {
+                    n += &k;
+                    other = true;
+                }
+                Fun::Tan => {
+                    m += &k;
+                    n -= &k;
+                    tan_sec = true;
+                }
+                Fun::Sec => {
+                    n -= &k;
+                    tan_sec = true;
+                }
+                Fun::Cot => {
+                    n += &k;
+                    m -= &k;
+                    cot_csc = true;
+                }
+                Fun::Csc => {
+                    m -= &k;
+                    cot_csc = true;
+                }
                 _ => return None,
+            }
+            if fs.len() == 1 && matches!(h, Fun::Tan | Fun::Sec | Fun::Csc | Fun::Cot) && k >= Q::from_integer(2.into()) {
+                single = Some((h.clone(), k.to_integer().try_into().ok().filter(|_| k.is_integer())?));
+            }
+        }
+        if tan_sec && !cot_csc && !other && single.is_none() {
+            if let Some(r) = self.tan_sec(f, depth) {
+                return Some(r);
+            }
+        }
+        if cot_csc && !tan_sec && !other && single.is_none() {
+            if let Some(r) = self.cot_csc(f, depth) {
+                return Some(r);
             }
         }
         let u = arg?;
@@ -813,40 +929,81 @@ impl<'a> Ctx<'a> {
                 Some(r)
             });
         }
-        if m + n < 2 && !(m % 2 != 0 && n != 0 || n % 2 != 0 && m != 0) {
-            return None;
-        }
-        if m.rem_euclid(2) == 1 {
+        let mi = m.is_integer().then(|| m.to_integer().try_into().ok()).flatten();
+        let ni = n.is_integer().then(|| n.to_integer().try_into().ok()).flatten();
+        let (mq, nq) = (qnum(m.clone()), qnum(n.clone()));
+        if mi.map_or(false, |v: i64| v.rem_euclid(2) == 1) {
             // w = cos u: sin^m cos^n du = -(1 - w^2)^((m-1)/2) w^n dw / a
-            let g = mul2(&pow(&sub(&one(), &pow(&w, &int(2))), &int((m - 1).div_euclid(2))), &pow(&w, &int(n)));
+            let mv = mi.unwrap();
+            let g = mul2(&pow(&sub(&one(), &pow(&w, &int(2))), &int((mv - 1).div_euclid(2))), &pow(&w, &nq));
             return step("substitute w = cos", f, x, || {
                 let h = inner.int(&expand(&g), depth + 1)?;
                 Some(neg(&div(&subs(&h, &[(w.clone(), cos(&u))]), &a)))
             });
         }
-        if n.rem_euclid(2) == 1 {
-            let g = mul2(&pow(&w, &int(m)), &pow(&sub(&one(), &pow(&w, &int(2))), &int((n - 1).div_euclid(2))));
+        if ni.map_or(false, |v: i64| v.rem_euclid(2) == 1) {
+            let nv = ni.unwrap();
+            let g = mul2(&pow(&w, &mq), &pow(&sub(&one(), &pow(&w, &int(2))), &int((nv - 1).div_euclid(2))));
             return step("substitute w = sin", f, x, || {
                 let h = inner.int(&expand(&g), depth + 1)?;
                 Some(div(&subs(&h, &[(w.clone(), sin(&u))]), &a))
             });
         }
-        if m < 0 || n < 0 {
+        let (Some(mv), Some(nv)) = (mi, ni) else { return None };
+        if nv < 0 && mv >= 0 && mv + nv <= -2 {
+            // tan^m sec^(-(m + n)): w = tan
+            let k = -(mv + nv);
+            let g = mul2(&pow(&w, &int(mv)), &pow(&add2(&one(), &pow(&w, &int(2))), &int((k - 2) / 2)));
+            return step("substitute w = tan", f, x, || {
+                let h = inner.int(&expand(&g), depth + 1)?;
+                Some(div(&subs(&h, &[(w.clone(), fun1(Fun::Tan, &u))]), &a))
+            });
+        }
+        if mv < 0 && nv >= 0 && mv + nv <= -2 {
+            // cot^n csc^(-(m + n)): w = cot
+            let k = -(mv + nv);
+            let g = mul2(&pow(&w, &int(nv)), &pow(&add2(&one(), &pow(&w, &int(2))), &int((k - 2) / 2)));
+            return step("substitute w = cot", f, x, || {
+                let h = inner.int(&expand(&g), depth + 1)?;
+                Some(neg(&div(&subs(&h, &[(w.clone(), fun1(Fun::Cot, &u))]), &a)))
+            });
+        }
+        if mv < 0 && nv > 0 {
+            // cot^2 = csc^2 - 1: cos^n = (1 - sin^2)^(n/2), term by term
+            let g = expand(&mul2(&pow(&sin(&u), &int(mv)), &pow(&sub(&one(), &pow(&sin(&u), &int(2))), &int(nv / 2))));
+            return step("Pythagorean identity", f, x, || self.int(&g, depth + 1));
+        }
+        if nv < 0 && mv > 0 {
+            let g = expand(&mul2(&pow(&cos(&u), &int(nv)), &pow(&sub(&one(), &pow(&cos(&u), &int(2))), &int(mv / 2))));
+            return step("Pythagorean identity", f, x, || self.int(&g, depth + 1));
+        }
+        if mv < 0 || nv < 0 || mv + nv < 2 {
             return None;
         }
         // both even: sin^2 = (1 - cos 2u)/2, cos^2 = (1 + cos 2u)/2
         let c2 = cos(&mul2(&int(2), &u));
         let g = mul2(
-            &pow(&div(&sub(&one(), &c2), &int(2)), &int(m / 2)),
-            &pow(&div(&add2(&one(), &c2), &int(2)), &int(n / 2)),
+            &pow(&div(&sub(&one(), &c2), &int(2)), &int(mv / 2)),
+            &pow(&div(&add2(&one(), &c2), &int(2)), &int(nv / 2)),
         );
         step("power reduction", f, x, || self.int(&expand(&g), depth + 1))
     }
 
-    /// sin(a) cos(b), sin(a) sin(b), cos(a) cos(b) with different arguments.
+    /// Products of sines and cosines of different (linear) arguments: the
+    /// first two combine by product-to-sum, the rest after expanding.
     fn product_to_sum(&self, f: &Expr, depth: u32) -> Option<Expr> {
-        let fs = factors(f);
-        if fs.len() != 2 {
+        let mut fs = vec![];
+        for g in factors(f) {
+            let (b, e) = base_exp(&g);
+            let k = e.as_i64().filter(|k| *k >= 1 && *k <= 8)?;
+            if !matches!(b.kind, Kind::Fun(Fun::Sin | Fun::Cos, _)) {
+                return None;
+            }
+            for _ in 0..k {
+                fs.push(b.clone());
+            }
+        }
+        if fs.len() < 2 {
             return None;
         }
         let (Kind::Fun(g, ga), Kind::Fun(h, ha)) = (&fs[0].kind, &fs[1].kind) else { return None };
@@ -859,7 +1016,48 @@ impl<'a> Ctx<'a> {
             (Fun::Cos, Fun::Cos) => half(add2(&cos(&sub(p, q)), &cos(&add2(p, q)))),
             _ => return None,
         };
-        step("product to sum", f, self.x, || self.int(&expand(&r), depth + 1))
+        let r = mul2(&r, &mul(fs[2..].to_vec()));
+        step("product to sum", f, self.x, || self.int(&tidy(&expand(&r)), depth + 1))
+    }
+
+    /// cot(u)^m csc(u)^n: u = cot for n even, u = csc for m odd.
+    fn cot_csc(&self, f: &Expr, depth: u32) -> Option<Expr> {
+        let x = self.x;
+        let (mut m, mut n, mut arg) = (0i64, 0i64, None::<Expr>);
+        for g in factors(f) {
+            let (b, e) = base_exp(&g);
+            let k = e.as_i64()?;
+            let Kind::Fun(h, a) = &b.kind else { return None };
+            if arg.as_ref().map_or(false, |u| u != &a[0]) {
+                return None;
+            }
+            arg = Some(a[0].clone());
+            match h {
+                Fun::Cot => m += k,
+                Fun::Csc => n += k,
+                _ => return None,
+            }
+        }
+        let u = arg?;
+        let (a, _) = linear(&u, x)?;
+        let wn = fresh(depth);
+        let w = sym(&wn);
+        let inner = Ctx { x: &wn, inv: self.inv, lin: false };
+        if n >= 2 && n % 2 == 0 && m >= 0 {
+            let g = mul2(&pow(&w, &int(m)), &pow(&add2(&one(), &pow(&w, &int(2))), &int((n - 2) / 2)));
+            return step("substitute w = cot", f, x, || {
+                let h = inner.int(&expand(&g), depth + 1)?;
+                Some(neg(&div(&subs(&h, &[(w.clone(), fun1(Fun::Cot, &u))]), &a)))
+            });
+        }
+        if m >= 1 && m % 2 == 1 && n >= 1 {
+            let g = mul2(&pow(&sub(&pow(&w, &int(2)), &one()), &int((m - 1) / 2)), &pow(&w, &int(n - 1)));
+            return step("substitute w = csc", f, x, || {
+                let h = inner.int(&expand(&g), depth + 1)?;
+                Some(neg(&div(&subs(&h, &[(w.clone(), fun1(Fun::Csc, &u))]), &a)))
+            });
+        }
+        None
     }
 
     // ---------------------------------------------------------------- square roots
@@ -995,7 +1193,9 @@ impl<'a> Ctx<'a> {
             let h = inner.int(&g, depth + 1)?;
             // sqrt(c t^2 + b t + a) = sqrt(Q)/x for x > 0
             let h = map_pow(&h, &mut |b, e| if b == &q2 { Some(mul2(&pow(qq, e), &pow(&xs, &neg(&mul2(&int(2), e))))) } else { None }, &tn);
-            Some(subs(&h, &[(t.clone(), recip(&xs))]))
+            let r = subs(&h, &[(t.clone(), recip(&xs))]);
+            // (valid for x > 0 only, the check decides)
+            verify_numeric(f, &r, x).then_some(r)
         })
     }
 
@@ -1082,9 +1282,33 @@ impl<'a> Ctx<'a> {
     fn weierstrass(&self, f: &Expr, depth: u32) -> Option<Expr> {
         let x = self.x;
         let mut arg = None;
-        if !only_sin_cos(f, x, &mut arg) {
-            return None;
-        }
+        let f0 = f;
+        let rewritten;
+        let f = if only_sin_cos(f, x, &mut arg) {
+            f
+        } else {
+            // tan, sec, ... of u, and sin(k u), cos(k u), in sin(u) and cos(u)
+            let mut args = vec![];
+            trig_args(f, x, &mut args);
+            let base = args.iter().min_by_key(|a| crate::simplify::size(a))?.clone();
+            let mut g = f.clone();
+            for a in &args {
+                let ratio = cancel(&div(a, &base));
+                if ratio.as_i64().map_or(true, |k| k < 1 || k > 6) {
+                    return None;
+                }
+            }
+            let t = sym("__w_t");
+            g = subs(&g, &[(base.clone(), t.clone())]);
+            g = to_sin_cos(&multiple_angles_all(&g, &t), &t);
+            rewritten = subs(&g, &[(t, base.clone())]);
+            arg = None;
+            if !only_sin_cos(&rewritten, x, &mut arg) {
+                return None;
+            }
+            &rewritten
+        };
+        let _ = f0;
         let u = arg?;
         let (a, _) = linear(&u, x)?;
         let tn = fresh(depth);
@@ -1099,6 +1323,100 @@ impl<'a> Ctx<'a> {
         step("Weierstrass substitution t = tan(x/2)", f, x, || {
             let h = inner.rational(&g)?;
             Some(subs(&h, &[(t.clone(), div(&sin(&u), &add2(&cos(&u), &one())))]))
+        })
+    }
+
+    /// Trigonometric substitution for R(x) (a x^2 + b x + c)^(p/2):
+    /// complete the square, then x = A sin(t), A tan(t) or A sec(t) by the
+    /// signs, integrate in t, and come back through the right triangle.
+    fn trig_substitution(&self, f: &Expr, depth: u32) -> Option<Expr> {
+        let x = self.x;
+        let xs = self.xs();
+        // the radical: one quadratic base with a half-integer power
+        let mut base: Option<(Expr, Vec<Expr>)> = None;
+        let mut found = false;
+        scan_radicals(f, x, &mut base, &mut found);
+        let (qq, c) = base?;
+        if !found {
+            return None;
+        }
+        let (a, b, cc) = (c[2].clone(), c[1].clone(), c[0].clone());
+        if !b.is_zero() {
+            // x = t - b/(2a): a t^2 + (c - b^2/(4a))
+            let tn = fresh(depth);
+            let t = sym(&tn);
+            let shift = div(&b, &mul2(&int(2), &a));
+            let g = subs(f, &[(xs.clone(), sub(&t, &shift))]);
+            let g = map_pow(&g, &mut |bb, e| {
+                if expand(bb) == expand(&subs(&qq, &[(xs.clone(), sub(&t, &shift))])) {
+                    Some(pow(&add2(&mul2(&a, &pow(&t, &int(2))), &sub(&cc, &div(&pow(&b, &int(2)), &mul2(&int(4), &a)))), e))
+                } else {
+                    None
+                }
+            }, &tn);
+            let inner = Ctx { x: &tn, inv: self.inv, lin: true };
+            return step("complete the square", f, x, || {
+                let h = inner.int(&g, depth + 1)?;
+                Some(subs(&h, &[(t.clone(), add2(&xs, &shift))]))
+            });
+        }
+        let (pa, pc) = (positive(&a), positive(&cc));
+        let (na, nc) = (positive(&neg(&a)), positive(&neg(&cc)));
+        let tn = fresh(depth);
+        let th = sym(&tn);
+        let (st, ct) = (sin(&th), cos(&th));
+        // (kind, A, x(t), sqrt(Q)(t), dx/dt)
+        let (kind, big_a) = if na && pc {
+            ("sin", sqrt_pos(&div(&cc, &neg(&a))))
+        } else if pa && pc {
+            ("tan", sqrt_pos(&div(&cc, &a)))
+        } else if pa && nc {
+            ("sec", sqrt_pos(&div(&neg(&cc), &a)))
+        } else {
+            return None;
+        };
+        let (xt, root, dx) = match kind {
+            "sin" => (mul2(&big_a, &st), mul2(&sqrt_pos(&cc), &ct), mul2(&big_a, &ct)),
+            "tan" => (mul2(&big_a, &div(&st, &ct)), div(&sqrt_pos(&cc), &ct), div(&big_a, &pow(&ct, &int(2)))),
+            _ => (div(&big_a, &ct), mul2(&sqrt_pos(&neg(&cc)), &div(&st, &ct)), mul2(&big_a, &div(&st, &pow(&ct, &int(2))))),
+        };
+        // the integrand in t: Q^(k/2) -> root^k, x -> x(t)
+        let g = map_pow(f, &mut |bb, e| {
+            let r = e.as_rat()?;
+            if bb == &qq && !r.is_integer() {
+                Some(pow(&root, &qnum(r * Q::from_integer(2.into()))))
+            } else {
+                None
+            }
+        }, x);
+        let g = subs(&g, &[(xs.clone(), xt.clone())]);
+        if depends(&g, x) {
+            return None;
+        }
+        let g = mul2(&g, &dx);
+        let inner = Ctx { x: &tn, inv: self.inv, lin: false };
+        let rule = format!("trigonometric substitution x = {}", crate::to_string(&subs(&xt, &[(th.clone(), sym("t"))])));
+        step(&rule, f, x, || {
+            let h = inner.int(&g, depth + 1)?;
+            // back through the triangle: sin t, cos t and t itself in x
+            let h = expand(&multiple_angles(&h, &th));
+            let y = div(&xs, &big_a);
+            let (s_x, c_x, t_x) = match kind {
+                "sin" => (y.clone(), div(&sqrt(&qq), &sqrt_pos(&cc)), fun1(Fun::Asin, &y)),
+                "tan" => {
+                    let sec = div(&sqrt(&qq), &sqrt_pos(&cc));
+                    (div(&y, &sec), recip(&sec), fun1(Fun::Atan, &y))
+                }
+                _ => {
+                    // t = arctan(tan t): an antiderivative for both signs of x
+                    let tan = div(&sqrt(&qq), &sqrt_pos(&neg(&cc)));
+                    (div(&tan, &y), recip(&y), fun1(Fun::Atan, &tan))
+                }
+            };
+            let h = to_sin_cos(&h, &th);
+            let h = subs(&h, &[(st.clone(), s_x), (ct.clone(), c_x)]);
+            let r = subs(&h, &[(th.clone(), t_x)]);
+            verify_numeric(f, &r, x).then_some(r)
         })
     }
 
@@ -1309,6 +1627,132 @@ fn only_sin_cos(e: &Expr, x: &str, arg: &mut Option<Expr>) -> bool {
         Kind::Add(v) | Kind::Mul(v) => v.iter().all(|t| only_sin_cos(t, x, arg)),
         _ => false,
     }
+}
+
+/// The distinct denominators (> 1) of the rational exponents of x in e.
+fn exponent_denominators(e: &Expr, x: &Expr, out: &mut Vec<i64>) {
+    if let Kind::Pow(b, n) = &e.kind {
+        if b == x {
+            if let Some(r) = n.as_rat() {
+                if let Some(d) = num_traits::ToPrimitive::to_i64(r.denom()).filter(|d| *d > 1) {
+                    if !out.contains(&d) {
+                        out.push(d);
+                    }
+                }
+            }
+        }
+    }
+    for c in e.children() {
+        exponent_denominators(&c, x, out);
+    }
+}
+
+/// The quadratic base of a half-integer power in e (all such bases must be
+/// the same); found = whether there is one.
+fn scan_radicals(e: &Expr, x: &str, base: &mut Option<(Expr, Vec<Expr>)>, found: &mut bool) {
+    if !depends(e, x) {
+        return;
+    }
+    if let Kind::Pow(b, n) = &e.kind {
+        if let Some(r) = n.as_rat() {
+            if !r.is_integer() && r.denom() == &2.into() {
+                if let Some(c) = crate::poly::coeffs(b, x).filter(|c| c.len() == 3 && c.iter().all(|t| !depends(t, x))) {
+                    match base {
+                        Some((q, _)) if q != b => {
+                            *found = false;
+                            *base = Some((zero(), vec![]));
+                            return;
+                        }
+                        _ => {
+                            *base = Some((b.clone(), c));
+                            *found = true;
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    for c in e.children() {
+        scan_radicals(&c, x, base, found);
+    }
+}
+
+/// sin(k t), cos(k t) for integer k > 1 in powers of sin(t), cos(t).
+fn multiple_angles(e: &Expr, t: &Expr) -> Expr {
+    if e.children().is_empty() {
+        return e.clone();
+    }
+    let e = rebuild(e, e.children().iter().map(|c| multiple_angles(c, t)).collect());
+    if let Kind::Fun(g @ (Fun::Sin | Fun::Cos), a) = &e.kind {
+        let (c, rest) = split_coeff(&a[0]);
+        if &rest == t {
+            if let Some(k) = num(c).as_i64().filter(|k| *k >= 2 && *k <= 12) {
+                let (s1, c1) = (sin(t), cos(t));
+                let (mut sk, mut ck) = (s1.clone(), c1.clone());
+                for _ in 1..k {
+                    let (ns, nc) = (add2(&mul2(&sk, &c1), &mul2(&ck, &s1)), sub(&mul2(&ck, &c1), &mul2(&sk, &s1)));
+                    sk = ns;
+                    ck = nc;
+                }
+                return if *g == Fun::Sin { sk } else { ck };
+            }
+        }
+    }
+    e
+}
+
+/// The arguments of the trigonometric functions in e.
+fn trig_args(e: &Expr, x: &str, out: &mut Vec<Expr>) {
+    if let Kind::Fun(Fun::Sin | Fun::Cos | Fun::Tan | Fun::Sec | Fun::Csc | Fun::Cot, a) = &e.kind {
+        if depends(&a[0], x) && !out.contains(&a[0]) {
+            out.push(a[0].clone());
+        }
+    }
+    for c in e.children() {
+        trig_args(&c, x, out);
+    }
+}
+
+/// sin(k t), cos(k t), tan(k t), ... (integer k) in sin(t), cos(t).
+fn multiple_angles_all(e: &Expr, t: &Expr) -> Expr {
+    if e.children().is_empty() {
+        return e.clone();
+    }
+    let e = rebuild(e, e.children().iter().map(|c| multiple_angles_all(c, t)).collect());
+    if let Kind::Fun(g @ (Fun::Tan | Fun::Sec | Fun::Csc | Fun::Cot), a) = &e.kind {
+        if &a[0] != t {
+            let (s_, c_) = (multiple_angles(&sin(&a[0]), t), multiple_angles(&cos(&a[0]), t));
+            return match g {
+                Fun::Tan => div(&s_, &c_),
+                Fun::Sec => recip(&c_),
+                Fun::Csc => recip(&s_),
+                _ => div(&c_, &s_),
+            };
+        }
+    }
+    multiple_angles(&e, t)
+}
+
+/// tan(t), sec(t), csc(t), cot(t) as quotients of sin(t) and cos(t).
+fn to_sin_cos(e: &Expr, t: &Expr) -> Expr {
+    if e.children().is_empty() {
+        return e.clone();
+    }
+    let e = rebuild(e, e.children().iter().map(|c| to_sin_cos(c, t)).collect());
+    if let Kind::Fun(g, a) = &e.kind {
+        if &a[0] == t {
+            let (s_, c_) = (sin(t), cos(t));
+            return match g {
+                Fun::Tan => div(&s_, &c_),
+                Fun::Sec => recip(&c_),
+                Fun::Csc => recip(&s_),
+                Fun::Cot => div(&c_, &s_),
+                _ => e.clone(),
+            };
+        }
+    }
+    e
 }
 
 /// Inner expressions u for derivative-divides: function arguments, bases
