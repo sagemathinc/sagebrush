@@ -546,6 +546,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-sym"
+version = "0.1.0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+ "sagebrush-arith",
+ "sagebrush-bigint",
+ "sagebrush-interrupt",
+ "sagebrush-poly",
+ "serde_json",
+]
+
+[[package]]
 name = "sagebrush-wasm"
 version = "0.1.0"
 dependencies = [

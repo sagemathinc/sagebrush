@@ -1,0 +1,17 @@
+[package]
+name = "sagebrush-sym"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Symbolic expressions for the Sagebrush engines: automatic simplification, Sage-compatible printing and LaTeX, calculus (clean-room)"
+
+[dependencies]
+sagebrush-bigint = { path = "../bigint" }
+sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-arith = { path = "../arith" }
+sagebrush-poly = { path = "../poly" }
+num-integer = "0.1"
+num-traits = "0.2"
+
+[dev-dependencies]
+serde_json = "1"
