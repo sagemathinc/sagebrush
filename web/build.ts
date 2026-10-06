@@ -9,7 +9,11 @@ const here = import.meta.dir;
 const shims: Record<string, string> = {
   fs: "fs.ts", vm: "vm.ts", path: "path.ts", os: "os.ts", crypto: "crypto.ts",
 };
+// the engine's content hash, in the URL the worker fetches it from: a new
+// engine is never served from a cache
+const engineHash = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"))).digest("hex").slice(0, 16);
 const result = await Bun.build({
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineHash) },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",

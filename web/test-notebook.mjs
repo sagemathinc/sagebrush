@@ -90,6 +90,9 @@ try {
   await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R.<x> = ZZ[]\nprint((x^4 - 1).factor(), Newforms(37, names='a'))");
   ok(out.includes("(x - 1) * (x + 1) * (x^2 + 1) [q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6), q + q^3 - 2*q^4 + O(q^6)]"), "Sage mode factors polynomials and finds newforms: " + out.trim());
+  // number fields, class groups and LLL (engine/classgroup in WebAssembly)
+  out = await runCode("x = polygen(QQ, 'x')\nK.<a> = NumberField(x^3 - 11)\nprint(K.class_group().invariants(), K.regulator(), matrix(ZZ, [[1,2,3],[4,5,6],[7,8,10]]).LLL()[0])");
+  ok(out.includes("(2,) 5.58720662606091 (0, 0, 1)"), "Sage mode: class group, regulator, LLL: " + out.trim());
   // Magma mode: translated to Python in the page
   await ev("(() => { const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R<x> := PolynomialRing(Integers());\nFactorization(x^4 - 1);\n[ p : p in [1..30] | IsPrime(p) ];");
