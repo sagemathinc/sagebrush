@@ -209,7 +209,9 @@
     <code>complex</code>/<code>cmath</code>, <code>re</code>, <code>json</code>, <code>collections</code>, <code>functools</code>, generators,
     <code>async</code>, classes and metaclasses. Pure-Python packages such as mpmath pass their own test suites.
     In Sage mode <code>ModularSymbols</code>, <code>CuspForms</code>, <code>Newforms</code>, <code>DirichletGroup</code>, <code>EllipticCurve</code> and
-    polynomial factoring over <code>ZZ</code> and <code>QQ</code> (<code>R.&lt;x&gt; = ZZ[]</code>) run on Sagebrush's Rust engines.
+    polynomial factoring over <code>ZZ</code> and <code>QQ</code> (<code>R.&lt;x&gt; = ZZ[]</code>) run on Sagebrush's Rust engines, and so does
+    symbolic calculus: <code>diff</code>, <code>integrate</code>, <code>limit</code>, <code>solve</code>, <code>taylor</code>, <code>desolve</code>
+    (<b>Examples</b> &gt; <i>Calculus</i>), with <code>plot3d</code> and contour, vector-field and slope-field plots.
     In <b>Magma</b> mode, Magma programs are translated to Python in this page and print what Magma prints.
     Notebooks (with their output) and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>,
     and <b>Files</b> lists the files Python's <code>open()</code> sees (drop files on the page to add them).
@@ -1467,7 +1469,7 @@ const result = async (box) => ({ content: [{ type: "text", text: outputText(box)
 const tools = [
   {
     name: "run_python",
-    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/... (sage=true); animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
+    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/contour_plot/plot3d/... (sage=true; 3D plots come back as a picture of the default view). Sage mode also has symbolic calculus (diff, integrate, limit, solve, taylor, desolve) on Sagebrush's own engine; animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
     inputSchema: {
       type: "object",
       properties: {
