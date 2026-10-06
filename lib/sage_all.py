@@ -57,6 +57,7 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         desolve_rk4, taylor, limit,
                         lim, solve, expand, simplify,
                         find_root, latex, _py_number)
+from sage_plot import Graphics as _Graphics2d, GraphicsArray as _GraphicsArray, Animation as _Animation
 from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
                        bar_chart, show as _show2d, graphics_array, animate, Animation)
@@ -68,9 +69,14 @@ from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_
 
 
 def show(obj, **options):
-    """Show a picture (2D or 3D), or anything else."""
+    """Show a picture (2D or 3D); typeset an expression or anything with a
+    LaTeX form (in the notebook and Jupyter), else print it."""
     if isinstance(obj, Graphics3d):
         return obj.show(**options)
+    if not isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)) and (
+            hasattr(obj, "_latex_") or isinstance(obj, (int, _Fraction, list, tuple))):
+        from _sage_expr import show_typeset
+        return show_typeset(obj)
     return _show2d(obj, **options)
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)

@@ -109,6 +109,7 @@
   .mdout table { border-collapse: collapse; } .mdout th, .mdout td { border: 1px solid var(--line); padding: 3px 9px; }
   .mdout img { max-width: 100%; } .mdout hr { border: 0; border-top: 1px solid var(--line); }
   .mdout .math.display { display: block; overflow-x: auto; margin: .6em 0; }
+  .latex-out { overflow-x: auto; padding: .2em 0; }
   .cell .time { font-size: 12px; color: var(--muted); padding: 0 12px 6px; }
   .cell .time:empty { display: none; }
   /* the cell menu */
@@ -284,6 +285,7 @@ const EXAMPLES = {
     "divisors(360), euler_phi(360), sigma(28), crt(2, 3, 5, 7)",
     "# The Mersenne exponents below 1000, by Lucas-Lehmer\ndef lucas_lehmer(p):\n    s, M = 4, 2^p - 1\n    for _ in range(p - 2):\n        s = (s^2 - 2) % M\n    return s == 0\n\n[p for p in prime_range(3, 1000) if lucas_lehmer(p)]",
   ],
+  "Calculus (Sage)": [{"md": "# Calculus with Sagebrush\n\nSymbolic expressions, derivatives, limits, integrals, series and differential equations, computed in this page by Sagebrush's own symbolic engine (Rust, compiled to WebAssembly) and printed the way Sage prints them. Every antiderivative is checked by differentiating it. Drag the sliders below: each change reruns the cell."}, "f = x^3 - 3*x\nf, diff(f, x), solve(diff(f, x) == 0, x)", "limit(sin(x)/x, x=0), limit((1 + 1/x)^x, x=oo), limit(x^10*exp(-x), x=oo)", "integrate(x^2*exp(x), x)", {"md": "`integrate_steps` shows how an antiderivative was found, rule by rule; `show` typesets."}, "show(integrate_steps(x*cos(x^2), x))", "integrate(1/(1 + x^2), x, 0, oo), integrate(exp(-x^2), x, -oo, oo), numerical_integral(sin(x)/x, 0, pi)", {"md": "## Tangent lines, Taylor polynomials, Riemann sums"}, "@interact\ndef tangent(a=slider(-2, 2, 0.1, 1.5)):\n    f = x^3 - 3*x\n    m = diff(f, x)(x=a)\n    t = f(x=a) + m*(x - a)\n    show(plot(f, (x, -2.5, 2.5)) + plot(t, (x, -2.5, 2.5), color='red') + point((a, f(x=a)), size=40, color='red'), ymin=-5, ymax=5)", "@interact\ndef taylor_polynomials(n=slider(1, 15, 1, 3)):\n    p = taylor(sin(x), x, 0, n)\n    show(plot(sin(x), (x, -2*pi, 2*pi), thickness=2) + plot(p, (x, -2*pi, 2*pi), color='red'), ymin=-3, ymax=3)\n    show(p)", "@interact\ndef riemann_sum(n=slider(2, 40, 1, 8)):\n    f = x^2\n    a, b = 0, 2\n    h = (b - a)/n\n    rects = sum(polygon([(a + i*h, 0), (a + (i+1)*h, 0), (a + (i+1)*h, f(x=a + i*h)), (a + i*h, f(x=a + i*h))], alpha=0.3) for i in range(n))\n    show(plot(f, (x, a, b), thickness=2) + rects)\n    print('left Riemann sum:', sum(f(x=a + i*h)*h for i in range(n)).n(), '   integral:', integrate(f, x, a, b))", {"md": "## Functions of two variables\n\nDrag the surface to turn it; scroll (after a click) to zoom."}, "y = var('y')\nplot3d(sin(x)*cos(y), (x, -pi, pi), (y, -pi, pi), cmap='viridis')", "contour_plot(x^2 - y^2, (x, -2, 2), (y, -2, 2), cmap='coolwarm') + plot_vector_field((2*x, -2*y), (x, -2, 2), (y, -2, 2), color='black')", {"md": "## Differential equations"}, "y = function('y')(x)\ndesolve(diff(y, x, 2) + 4*y == sin(x), y)", "sol = desolve(diff(y, x) == x - y, y, ics=[0, 1])\nu = var('u')\nshow(sol)\nplot_slope_field(x - u, (x, -3, 3), (u, -3, 3)) + plot(sol, (x, -3, 3), color='red', thickness=2, ymin=-3, ymax=3)", {"md": "## Series"}, "taylor(exp(x)*sin(x), x, 0, 6), sin(x).series(x, 8)"],
   "Plots (Sage)": [
     "# Hover over a plot to read coordinates\nplot(sin(x^2), (x, 0, 2*pi), color='red', legend_label='sin(x^2)', title='sin(x^2)')",
     "# Graphics add up\ng = plot(x^3 - 3*x, (x, -2.2, 2.2), thickness=2)\ng += point([(-1, 2), (1, -2)], size=60, color='red')\ng += text('local max', (-1, 2.5)) + text('local min', (1, -2.5))\ng",
@@ -355,7 +357,7 @@ const EXAMPLES = {
   ],
 };
 
-const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)", "Polynomials (Sage)", "Modular forms (Sage)", "Algebraic number theory (Sage)"]);
+const SAGE_EXAMPLES = new Set(["Sage", "Calculus (Sage)", "Plots (Sage)", "Polynomials (Sage)", "Modular forms (Sage)", "Algebraic number theory (Sage)"]);
 const MAGMA_EXAMPLES = new Set(["Magma"]);
 const $ = (s) => document.querySelector(s);
 const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
@@ -489,7 +491,22 @@ function mount3d(fig, sceneText) {
   viewer3d.then((v) => v?.mount(fig, JSON.parse(sceneText))).catch(() => {});
 }
 
+// Typeset math (show(expr), integrate_steps): text/latex through KaTeX,
+// with the text form until KaTeX has loaded (and if it cannot).
+function appendLatex(box, b) {
+  const tex = b["text/latex"].trim().replace(/^\$\$([\s\S]*)\$\$$|^\$([\s\S]*)\$$/, (_, d, i) => d ?? i);
+  const el = document.createElement("div");
+  el.className = "latex-out";
+  el.sbBundle = { "text/latex": b["text/latex"], "text/plain": b["text/plain"] ?? tex, "application/vnd.sagebrush.typeset": "1" };
+  const m = Object.assign(document.createElement("div"), { className: "math display", textContent: b["text/plain"] ?? tex });
+  m.dataset.tex = tex;
+  el.appendChild(m);
+  box.appendChild(el);
+  (mathModule ??= import(new URL("sagebrush-math.js", location.href).href)).then((mm) => mm.typeset(el)).catch(() => {});
+}
+
 function appendDisplay(box, b) {
+  if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
   const fig = document.createElement("figure");
   fig.className = "plot";
   const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
@@ -1106,7 +1123,7 @@ function saveOutputs(box) {
   for (const el of box?.children ?? []) {
     if (el.tagName === "PRE") {
       for (const n of el.childNodes) stream(n.nodeType === 1 && n.classList.contains("e") ? "stderr" : "stdout", n.textContent);
-    } else if (el.tagName === "FIGURE" && el.sbBundle) {
+    } else if ((el.tagName === "FIGURE" || el.classList.contains("latex-out")) && el.sbBundle) {
       outs.push({ output_type: "display_data", data: { ...el.sbBundle }, metadata: {} });
     } else if (el.tagName === "FIGURE") {
       const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
@@ -1128,7 +1145,7 @@ function loadOutputs(box, outs) {
     else if (o.data) {
       const b = {};
       for (const [k, v] of Object.entries(o.data)) b[k] = joinText(v);
-      if (b["text/plain"] && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"]) appendText(box, b["text/plain"] + "\n", false);
+      if (b["text/plain"] && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["application/vnd.sagebrush.typeset"]) appendText(box, b["text/plain"] + "\n", false);
       else appendDisplay(box, b);
     }
   }
@@ -1406,6 +1423,7 @@ function outputText(box) {
   for (const el of box.children) {
     if (el.tagName === "PRE") parts.push(el.textContent);
     else if (el.tagName === "FIGURE") parts.push(`[picture: ${el.querySelector("svg")?.getAttribute("aria-label") ?? el.querySelector("img")?.alt ?? ""}]\n`);
+    else if (el.classList.contains("latex-out")) parts.push((el.sbBundle?.["text/plain"] ?? "") + "\n");
     else if (el.classList.contains("interact")) {
       const it = interacts.get(el.dataset.key);
       parts.push(`[interact ${it?.name ?? ""} id=${el.dataset.key} values=${JSON.stringify(it?.values ?? {})}]\n` + outputText(el.querySelector(".iout")));
