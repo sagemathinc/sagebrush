@@ -218,7 +218,8 @@ Class group of order 3 with structure C3 of Number Field in a with defining poly
 ```
 
 `sagebrush.sage` is plain Python (`x**3`, not `x^3`); its output is checked
-line by line against Sage's (`sage-tests/run_cpython.py`). The engines are
+line by line against Sage's (`sage-tests/run_cpython.py`). For Sage syntax,
+`sagebrush.preparse.preparse` turns it into this Python. The engines are
 also directly available (`from sagebrush import nf, mf, ap, poly`); see
 [engine/py/README.md](engine/py/README.md). In the browser, open
 [sagebrush.space](https://sagebrush.space).
@@ -243,6 +244,29 @@ node/build.sh                                       # Node addon
 
 See [engine/TRY.md](engine/TRY.md) for the full function list in both
 languages.
+
+### For AI agents: the MCP server
+
+`pip install sagebrush` also installs `sagebrush-mcp`, a
+[Model Context Protocol](https://modelcontextprotocol.io) server. It needs
+nothing else.
+
+```sh
+claude mcp add sagebrush -- sagebrush-mcp            # Claude Code
+# other clients: { "mcpServers": { "sagebrush": { "command": "sagebrush-mcp" } } }
+```
+
+It provides these tools:
+- `sage`: Sage syntax in a persistent session. It returns printed output,
+  the last value and SVG plots.
+- `python`, `reset` and `guide`.
+- The shortcuts `factor`, `number_field` and `newforms`.
+
+Every call has a time limit that interrupts the computation (Ctrl-C reaches
+the Rust engines), and a stuck session is restarted. The Sage preparser is
+`sagebrush.preparse`, a Python port of the browser's; the same `sage-tests`
+pass through it. `engine/py/test_mcp.py` checks the protocol, including
+with the official MCP client.
 
 ## How "proven" is earned
 

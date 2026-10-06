@@ -4,11 +4,11 @@ build-backend = "maturin"
 
 [project]
 name = "sagebrush"
-version = "0.4.0"
-description = "Fast, certified engines for research mathematics: number fields, class groups, modular forms (Rust, MIT OR Apache-2.0)"
+version = "0.5.0"
+description = "Free computational mathematics for people and AI agents: number theory, number fields, class groups, modular forms, exact linear algebra, a Sage-compatible API and an MCP server (Rust, MIT OR Apache-2.0)"
 readme = "README.md"
 authors = [{ name = "SageMath, Inc.", email = "wstein@sagemath.com" }]
-keywords = ["number theory", "class group", "number field", "modular forms", "LLL", "mathematics"]
+keywords = ["number theory", "class group", "number field", "modular forms", "LLL", "mathematics", "computer algebra", "sage", "mcp", "ai agents", "linear algebra"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -20,6 +20,9 @@ classifiers = [
 requires-python = ">=3.9"
 license = "MIT OR Apache-2.0"
 license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+
+[project.scripts]
+sagebrush-mcp = "sagebrush.mcp_server:main"
 
 [project.urls]
 Homepage = "https://sagebrush.space"

@@ -15,6 +15,9 @@ Engines are submodules:
                         inverse, charpoly, kernel (multimodular, certified)
     sagebrush.sage      a Sage-compatible namespace over all of these:
                         from sagebrush.sage import *
+    sagebrush.preparse  Sage syntax to Python (2^10, R.<x> = QQ[], 1/3 exact)
+    sagebrush.session   a persistent, interruptible session in a subprocess
+    sagebrush.mcp_server  the MCP server for AI agents (command sagebrush-mcp)
 
 nf, poly and linalg are the same pure-Python files as in the browser runtime
 (lib/sagebrush), over the shared JSON dispatcher.

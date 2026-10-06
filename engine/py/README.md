@@ -74,6 +74,27 @@ methods. The output is checked line by line against Sage itself: Sage's
 own preparser turns Sagebrush's Sage test files into plain Python, and
 their output under `sagebrush.sage` must equal Sage's.
 
+## For AI agents: `sagebrush-mcp`
+
+This package installs `sagebrush-mcp`, a
+[Model Context Protocol](https://modelcontextprotocol.io) server with no
+other dependencies.
+
+- **Claude Code:** `claude mcp add sagebrush -- sagebrush-mcp`
+- **Other clients:** `{"mcpServers": {"sagebrush": {"command": "sagebrush-mcp"}}}`
+
+Its tools:
+- `sage`: Sage syntax in a persistent session; returns printed output, the
+  last value and SVG plots.
+- `python`: the same session, as plain Python.
+- `factor`, `number_field`, `newforms`: shortcuts.
+- `guide`: what is implemented. `reset`: clear the session.
+
+Each call has a time limit. When it expires the computation is interrupted
+and the session keeps its variables. The session also works on its own
+(`sagebrush.session.Session`), and `sagebrush.preparse.preparse` turns Sage
+syntax into Python.
+
 ## Engines
 
 - `sagebrush.nf`: number fields: maximal orders, prime ideals, class groups,

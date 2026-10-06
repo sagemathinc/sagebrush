@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sagebrush-mcp"
+version = "0.5.0"
+description = "An MCP server for computational mathematics: number theory, number fields, class groups, modular forms, elliptic curves, exact linear algebra and polynomials, with Sage syntax, for AI agents (Sagebrush; MIT OR Apache-2.0)"
+readme = "README.md"
+authors = [{ name = "SageMath, Inc.", email = "wstein@sagemath.com" }]
+keywords = ["mcp", "model context protocol", "mathematics", "number theory", "computer algebra", "sage", "ai agents", "claude", "modular forms", "class group"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Programming Language :: Python :: 3",
+]
+requires-python = ">=3.9"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+dependencies = ["sagebrush>=0.5.0"]
+
+[project.scripts]
+sagebrush-mcp = "sagebrush_mcp:main"
+
+[project.urls]
+Homepage = "https://sagebrush.space"
+Repository = "https://github.com/sagemathinc/sagebrush"
