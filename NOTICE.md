@@ -139,6 +139,9 @@ chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
   in its directory).
 - `bench/pyperformance/`: from pyperformance (MIT;
   `LICENSE.pyperformance`).
+- `bench/bigint/`: a benchmark that links GMP (through `rug`) and malachite,
+  both LGPL, as yardsticks for the permissive big-integer libraries. It is
+  not part of any package.
 - `engine/flint/`: Sagebrush's own bindings to FLINT, which is LGPL-3.0 or
   later. Only tests and examples link FLINT, as a reference; no library or
   package does.
