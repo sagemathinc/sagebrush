@@ -27,7 +27,7 @@ pub fn eliminate(n: usize, rels: &[Relation], max_weight: usize) -> Reduced {
 /// (e.g. logarithms of the elements, for real quadratic fields).  Also
 /// returns the indices of the relations giving the core rows, in order, and
 /// of those that became zero (kernel vectors: their payloads are units).
-pub fn eliminate_with(n: usize, rels: &[Relation], max_weight: usize, mut payload: Option<&mut [BigInt]>) -> (Reduced, Vec<usize>, Vec<usize>) {
+pub fn eliminate_with(n: usize, rels: &[Relation], max_weight: usize, mut payload: Option<&mut [Vec<BigInt>]>) -> (Reduced, Vec<usize>, Vec<usize>) {
     let mut rows: Vec<Vec<(u32, i64)>> = rels.iter().map(|r| r.iter().map(|&(c, e)| (c as u32, e)).collect()).collect();
     let mut dead = vec![false; rows.len()];
     let mut alive = vec![true; n];
@@ -111,8 +111,10 @@ pub fn eliminate_with(n: usize, rels: &[Relation], max_weight: usize, mut payloa
                 rows[k as usize].clear();
                 rows[k as usize].extend_from_slice(&scratch);
                 if let Some(pl) = payload.as_deref_mut() {
-                    let delta = &pl[pk as usize] * f;
-                    pl[k as usize] -= delta;
+                    let delta: Vec<BigInt> = pl[pk as usize].iter().map(|x| x * f).collect();
+                    for (y, d) in pl[k as usize].iter_mut().zip(delta) {
+                        *y -= d;
+                    }
                 }
             }
             alive[c] = false;

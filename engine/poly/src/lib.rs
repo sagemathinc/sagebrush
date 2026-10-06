@@ -354,6 +354,86 @@ fn edf(g: &[u64], d: usize, p: u64, rng: &mut Rng, out: &mut Vec<FPoly>) {
     }
 }
 
+/// Equal-degree factorization in characteristic 2 (Cantor-Zassenhaus with
+/// the trace map a + a^2 + ... + a^(2^(d-1)) instead of a^((p^d - 1)/2)).
+fn edf2(g: &[u64], d: usize, rng: &mut Rng, out: &mut Vec<FPoly>) {
+    let n = g.len() - 1;
+    if n == d {
+        out.push(g.to_vec());
+        return;
+    }
+    loop {
+        let a: FPoly = ftrim((0..n).map(|_| rng.next() % 2).collect());
+        if a.len() < 2 {
+            continue;
+        }
+        let mut t = a.clone();
+        let mut s = a.clone();
+        for _ in 1..d {
+            t = frem(&fmul(&t, &t, 2), g, 2);
+            s = fsub(&s, &fsub(&[], &t, 2), 2); // s + t
+        }
+        let h = fgcd(g, &s, 2);
+        if h.len() > 1 && h.len() < g.len() {
+            let q = fdivrem(g, &h, 2).0;
+            edf2(&h, d, rng, out);
+            edf2(&q, d, rng, out);
+            return;
+        }
+    }
+}
+
+/// Square-free decomposition of a monic f over F_p (Musser, with p-th
+/// roots in characteristic p): (g, e) with f = prod g^e, g square-free.
+fn sqf_mod(f: &[u64], p: u64) -> Vec<(FPoly, u32)> {
+    let mut out = vec![];
+    let c = fgcd(f, &fderivative(f, p), p);
+    let mut w = fdivrem(f, &c, p).0;
+    let mut c = c;
+    let mut i = 1;
+    while w.len() > 1 {
+        let y = fgcd(&w, &c, p);
+        let z = fdivrem(&w, &y, p).0;
+        if z.len() > 1 {
+            out.push((fmonic(&z, p), i));
+        }
+        i += 1;
+        w = y;
+        c = fdivrem(&c, &w, p).0;
+    }
+    if c.len() > 1 {
+        // c is a p-th power: c(x) = r(x^p)
+        let r: FPoly = c.iter().step_by(p as usize).copied().collect();
+        for (g, e) in sqf_mod(&fmonic(&r, p), p) {
+            out.push((g, e * p as u32));
+        }
+    }
+    out
+}
+
+/// The factorization of f modulo a prime p < 2^32: monic irreducible
+/// factors (coefficients constant term first) with multiplicities, sorted
+/// by degree then coefficients.  The leading coefficient must be a unit.
+pub fn factor_mod(f: &[BigInt], p: u64) -> Vec<(Vec<u64>, u32)> {
+    assert!(p >= 2 && p < 1 << 32);
+    let fp = fmonic(&reduce_p(f, p), p);
+    let mut rng = Rng(0x2545_F491_4F6C_DD1D ^ p);
+    let mut out = vec![];
+    for (g, e) in sqf_mod(&fp, p) {
+        for (h, d) in ddf(&g, p) {
+            let mut fs = vec![];
+            if p == 2 {
+                edf2(&h, d, &mut rng, &mut fs);
+            } else {
+                edf(&h, d, p, &mut rng, &mut fs);
+            }
+            out.extend(fs.into_iter().map(|q| (fmonic(&q, p), e)));
+        }
+    }
+    out.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then(a.0.cmp(&b.0)));
+    out
+}
+
 // ------------------------------------------------------------------ (Z/m)[x], Hensel lifting
 
 fn mreduce(a: &[BigInt], m: &BigInt) -> ZPoly {
@@ -659,6 +739,38 @@ pub fn is_irreducible(f: &[BigInt]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn factoring_mod_p() {
+        // products of known factors with multiplicities, in several
+        // characteristics (2 and 3 exercise the p-th root step)
+        let z = |v: &[i64]| -> Vec<BigInt> { v.iter().map(|&c| BigInt::from(c)).collect() };
+        for &p in &[2u64, 3, 5, 7, 101, 65521] {
+            let mut rng = Rng(p * 7919 + 1);
+            for _ in 0..30 {
+                let mut f: Vec<BigInt> = z(&[1]);
+                for _ in 0..1 + rng.next() % 4 {
+                    let d = 1 + (rng.next() % 4) as usize;
+                    let mut g: Vec<BigInt> = (0..d).map(|_| BigInt::from(rng.next() % p)).collect();
+                    g.push(BigInt::one());
+                    for _ in 0..1 + rng.next() % 3 {
+                        f = zmul(&f, &g);
+                    }
+                }
+                let fac = factor_mod(&f, p);
+                let mut prod: Vec<u64> = vec![1];
+                for (g, e) in &fac {
+                    // irreducible: one distinct-degree piece of full degree
+                    let dd = ddf(g, p);
+                    assert!(dd.len() == 1 && dd[0].1 == g.len() - 1, "reducible factor {:?} mod {}", g, p);
+                    for _ in 0..*e {
+                        prod = fmul(&prod, g, p);
+                    }
+                }
+                assert_eq!(prod, fmonic(&reduce_p(&f, p), p), "f = {:?} mod {}", f, p);
+            }
+        }
+    }
+
     use super::*;
 
     fn z(v: &[i64]) -> ZPoly {
