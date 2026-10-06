@@ -7,9 +7,9 @@
 use super::factor::factor;
 use super::zlin::*;
 use crate::linalg::det;
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_integer::Integer;
-use num_rational::BigRational;
+use sagebrush_bigint::BigRational;
 use num_traits::{One, Zero};
 
 #[derive(Clone, Debug)]

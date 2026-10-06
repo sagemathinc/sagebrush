@@ -2,7 +2,7 @@
 //! x / 2^prec.  Just what regulators need: square roots and logarithms,
 //! exact addition and multiplication by integers, and a gcd of reals.
 
-use num_bigint::{BigInt, Sign};
+use sagebrush_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 

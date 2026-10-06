@@ -530,11 +530,18 @@ Sagebrush depends on very little (all MIT OR Apache-2.0):
 
 | crate | role |
 |---|---|
-| `num-bigint`, `num-integer`, `num-traits`, `num-rational` | big integers and rationals |
+| `dashu` (through `engine/bigint`), `num-integer`, `num-traits`, `num-rational` | big integers and rationals (`num-bigint` at the Python boundary and as an alternative backend) |
 | `rayon` | data parallelism |
 | `pyo3` | Python bindings |
 | `wasm-bindgen` | WebAssembly bindings |
 | `serde_json` | the JSON request format of the engine dispatcher |
+
+**Which big integers?** The engines use `sagebrush_bigint::BigInt`
+(`engine/bigint`): num-bigint's API, implemented on dashu's integers. dashu
+won a benchmark of the permissive libraries against GMP
+([bench/bigint](../bench/bigint/README.md)) and makes number field
+computations 1.4 to 1.7 times faster than num-bigint did; `num-bigint`
+remains selectable (feature `num-backend`) for comparisons.
 
 **How good is `num-bigint` compared to GMP?** Honestly: correct, portable,
 pure Rust, and much slower for large numbers.
@@ -549,11 +556,8 @@ pure Rust, and much slower for large numbers.
   own Montgomery arithmetic on fixed arrays of `u64` limbs, and modular
   symbols work modulo word-size primes with CRT. `BigInt` appears in setup,
   in lattice and HNF code, and in final results.
-- In WebAssembly, big-integer code is roughly 30 times slower than native
-  here (ECM on 2^128 + 1: 0.1 s native, 2.7 s in the browser). 32-bit limbs
-  and the lack of a 64x64 -> 128-bit multiply in wasm32 account for much of
-  it. Replacing `BigInt` in the hot spots with fixed-width or specialized
-  arithmetic is a known lever.
+- In WebAssembly, these libraries run 2.5 to 4 times slower than natively
+  (32-bit limbs, no 64 x 64 -> 128-bit multiply).
 
 Alternatives in the Rust world: `rug` (GMP and MPFR through C, LGPL, so not
 usable in Sagebrush's permissive core), `malachite` (pure Rust and fast, but

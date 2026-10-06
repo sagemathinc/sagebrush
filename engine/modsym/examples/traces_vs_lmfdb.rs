@@ -2,7 +2,7 @@
 //! mf_newforms.traces; orbits sorted by (dimension, trace form) as LMFDB
 //! does, so agreement also reproduces LMFDB's labels (N.k.c.x).
 //!   cargo run --release --example traces_vs_lmfdb -- [B] [MAX_DIM] [SPACE...]
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use sagebrush_modsym::general::Character;
 use sagebrush_modsym::newspace::newspace_orbits;
 use sagebrush_modsym::traces::orbit_traces;

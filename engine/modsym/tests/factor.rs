@@ -1,5 +1,5 @@
 //! The pure-Rust factorer (sagebrush-poly) against FLINT on Hecke polynomials.
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use std::time::Instant;
 
 fn sorted(mut fs: Vec<(Vec<BigInt>, u32)>) -> Vec<(Vec<BigInt>, u32)> {

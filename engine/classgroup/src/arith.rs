@@ -87,10 +87,10 @@ pub fn kronecker(d: i128, p: u64) -> i32 {
 }
 
 /// D mod m (in [0, m)) for a D of any size.
-pub fn bigmod(d: &num_bigint::BigInt, m: u64) -> u64 {
+pub fn bigmod(d: &sagebrush_bigint::BigInt, m: u64) -> u64 {
     use num_integer::Integer;
     use num_traits::ToPrimitive;
-    d.mod_floor(&num_bigint::BigInt::from(m)).to_u64().unwrap()
+    d.mod_floor(&sagebrush_bigint::BigInt::from(m)).to_u64().unwrap()
 }
 
 /// The Kronecker symbol (D / p) for a prime p, from d8 = D mod 8 and

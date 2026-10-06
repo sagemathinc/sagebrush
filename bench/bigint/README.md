@@ -57,7 +57,34 @@ operation and size.
 3. **malachite** (LGPL, excluded anyway) matches or beats GMP below 32K bits
    but has a performance cliff at 64K bits, where it becomes 10 to 20 times
    slower than GMP.
-4. Our engine's ~30-fold WebAssembly slowdown on ECM is not explained by the
-   big-integer library, since these libraries lose only 2.5 to 4 times. The
-   likely cause, to be measured, is our own word-level arithmetic: Montgomery
-   multiplication with 64 x 64 -> 128-bit products, which wasm32 emulates.
+4. An earlier note here blamed our own word arithmetic for a "30-fold"
+   WebAssembly slowdown of ECM. That figure was wrong: native ECM on
+   2^128 + 1 took 0.90 s, not 0.1 s, so the browser was 3 times slower, in
+   line with the libraries. Specialising Montgomery multiplication per limb
+   count (2.8 times faster natively) and splitting 64 x 64-bit products into
+   32-bit halves on wasm32 brought it to 0.57 s native and 1.5 s in
+   WebAssembly.
+
+## The engines on dashu
+
+The engines now use dashu through `engine/bigint` (`sagebrush-bigint`):
+num-bigint's API on dashu's integers, with num-bigint still selectable
+(feature `num-backend`). [engines_ab.py](engines_ab.py) times the same
+workloads both ways; every output is identical.
+
+| workload | num-bigint | dashu | speedup |
+|---|---:|---:|---:|
+| class group, cubic, d ~ 10^28 | 0.98 s | 0.63 s | 1.54x |
+| class group, cubic, d ~ 10^32 | 1.14 s | 0.67 s | 1.69x |
+| class group, quartic, d ~ 10^29 | 2.95 s | 1.90 s | 1.56x |
+| class group, quintic, d ~ 10^23 | 0.26 s | 0.18 s | 1.45x |
+| class group, sextic, d ~ 10^23 | 0.31 s | 0.22 s | 1.40x |
+| imaginary quadratic, D ~ 10^40 | 1.04 s | 1.03 s | 1.01x |
+| real quadratic, D ~ 4 10^25 | 0.15 s | 0.14 s | 1.08x |
+| ECM, 2^128 + 1 | 0.58 s | 0.55 s | 1.04x |
+| exact T_2 charpoly, level 9001 | 7.82 s | 7.81 s | 1.00x |
+
+General number fields gain 1.4 to 1.7 times; the quadratic, ECM and
+modular-symbol engines, which work in machine words, are unchanged. In
+WebAssembly the gain is larger: the class group of x^3 + 838398 x - 5077 in
+the browser runtime went from 0.45 s to 0.12 s.

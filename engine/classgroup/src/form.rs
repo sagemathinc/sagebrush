@@ -3,7 +3,7 @@
 //! never composes forms; this is for checking relations and for small
 //! discriminants.
 
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, Signed, Zero};
 

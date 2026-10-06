@@ -18,7 +18,7 @@
 //!     constant-term test before each trial division.
 //! Polynomials are coefficient vectors, constant term first.
 
-use num_bigint::{BigInt, BigUint};
+use sagebrush_bigint::{BigInt, BigUint};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 

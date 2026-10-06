@@ -1,5 +1,5 @@
 //! sagebrush-poly's factor() against FLINT's on random products.
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 
 struct Rng(u64);
 impl Rng {

@@ -15,7 +15,7 @@ fn prime_level_orbits_match_sage_up_to_300() {
         tr.sort();
         sage.entry(v["level"].as_u64().unwrap()).or_default().push((v["dim"].as_u64().unwrap() as usize, tr));
     }
-    let factor = |f: &[num_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_flint::factor(f).1;
     let mut count = 0;
     for (&n, theirs) in sage.iter_mut() {
         let orbits = sagebrush_modsym::orbits::prime_level_orbits(n, 200, &factor).unwrap();
@@ -41,7 +41,7 @@ fn newform_orbits_match_sage_up_to_200() {
         tr.sort();
         sage.entry(v["level"].as_u64().unwrap()).or_default().push((v["dim"].as_u64().unwrap() as usize, tr));
     }
-    let factor = |f: &[num_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_flint::factor(f).1;
     let mut count = 0;
     for n in 1..=200u64 {
         let orbits = sagebrush_modsym::orbits::newform_orbits(n, 100, &factor).unwrap();

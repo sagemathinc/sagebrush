@@ -12,7 +12,7 @@
 //! division per polynomial, for c).
 
 use crate::arith::*;
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_traits::ToPrimitive;
 
 /// A prime ideal of norm p, as the prime form (p, b_p, .): b_p^2 = D mod 4p,
@@ -161,7 +161,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
     let d = &fb.d;
     let d_odd = bigmod(d, 2) as i128;
     let absd = d.to_f64().unwrap().abs();
-    let real = d.sign() == num_bigint::Sign::Plus;
+    let real = d.sign() == sagebrush_bigint::Sign::Plus;
     let n = fb.primes.len();
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ seed);
     let m = par.m;
@@ -456,7 +456,7 @@ pub fn is_prime_u64(n: u64) -> bool {
 mod tests {
     use super::*;
     use crate::form::Form;
-    use num_bigint::BigInt;
+    use sagebrush_bigint::BigInt;
 
     #[test]
     fn primality() {

@@ -9,10 +9,10 @@ description = "Sagebrush engines for browsers and chat artifacts: plain wasm32, 
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+sagebrush-bigint = { path = "../bigint" }
 sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
 sagebrush-modsym = { path = "../modsym", default-features = false }
 sagebrush-ap = { path = "../ap", default-features = false }
 sagebrush-poly = { path = "../poly" }
 sagebrush-classgroup = { path = "../classgroup" }
 serde_json = "1"
-num-bigint = "0.4"

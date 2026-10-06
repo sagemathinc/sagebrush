@@ -80,6 +80,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashu-base"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "861a614e79388a4c72aa66b0bdabc91e3a4f30d53e0c8d962953e207d75884d0"
+dependencies = [
+ "num-modular",
+]
+
+[[package]]
+name = "dashu-int"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64a0490b40a6a3f6427970035f17f76fd59c01d3cd9f9140809672863a0d64c8"
+dependencies = [
+ "cfg-if",
+ "dashu-base",
+ "num-modular",
+ "num-order",
+ "static_assertions",
+]
+
+[[package]]
 name = "either"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -217,6 +239,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "num-modular"
+version = "0.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26ac76200f74e658124f95fa63e1a82b2fd2181c5b2fdde80b3d89d2d3f905e7"
+
+[[package]]
+name = "num-order"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "537b596b97c40fcf8056d153049eb22f481c17ebce72a513ec9286e4986d1bb6"
+dependencies = [
+ "num-modular",
 ]
 
 [[package]]
@@ -392,17 +429,29 @@ name = "sagebrush-ap"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "sagebrush-bigint",
  "sagebrush-interrupt",
+]
+
+[[package]]
+name = "sagebrush-bigint"
+version = "0.1.0"
+dependencies = [
+ "dashu-base",
+ "dashu-int",
+ "num-bigint",
+ "num-integer",
+ "num-rational",
+ "num-traits",
 ]
 
 [[package]]
 name = "sagebrush-classgroup"
 version = "0.1.0"
 dependencies = [
- "num-bigint",
  "num-integer",
- "num-rational",
  "num-traits",
+ "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-poly",
 ]
@@ -413,6 +462,7 @@ version = "0.1.0"
 dependencies = [
  "rayon",
  "sagebrush-ap",
+ "sagebrush-bigint",
  "sagebrush-modsym",
 ]
 
@@ -420,7 +470,7 @@ dependencies = [
 name = "sagebrush-flint"
 version = "0.1.0"
 dependencies = [
- "num-bigint",
+ "sagebrush-bigint",
 ]
 
 [[package]]
@@ -434,10 +484,10 @@ dependencies = [
 name = "sagebrush-modsym"
 version = "0.1.0"
 dependencies = [
- "num-bigint",
  "num-traits",
  "rayon",
  "sagebrush-ap",
+ "sagebrush-bigint",
  "sagebrush-flint",
  "sagebrush-interrupt",
  "sagebrush-poly",
@@ -451,9 +501,9 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "num-bigint",
  "rayon",
  "sagebrush-ap",
+ "sagebrush-bigint",
  "sagebrush-modsym",
 ]
 
@@ -461,9 +511,9 @@ dependencies = [
 name = "sagebrush-poly"
 version = "0.1.0"
 dependencies = [
- "num-bigint",
  "num-integer",
  "num-traits",
+ "sagebrush-bigint",
  "sagebrush-flint",
  "sagebrush-interrupt",
 ]
@@ -476,6 +526,7 @@ dependencies = [
  "pyo3",
  "rayon",
  "sagebrush-ap",
+ "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-web",
@@ -485,6 +536,7 @@ dependencies = [
 name = "sagebrush-wasm"
 version = "0.1.0"
 dependencies = [
+ "sagebrush-bigint",
  "sagebrush-modsym",
  "wasm-bindgen",
 ]
@@ -493,8 +545,8 @@ dependencies = [
 name = "sagebrush-web"
 version = "0.1.0"
 dependencies = [
- "num-bigint",
  "sagebrush-ap",
+ "sagebrush-bigint",
  "sagebrush-classgroup",
  "sagebrush-interrupt",
  "sagebrush-modsym",
@@ -549,6 +601,12 @@ dependencies = [
  "serde_core",
  "zmij",
 ]
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "syn"

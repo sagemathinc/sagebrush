@@ -8,5 +8,6 @@ license = "MIT OR Apache-2.0"
 crate-type = ["cdylib"]
 
 [dependencies]
+sagebrush-bigint = { path = "../bigint" }
 sagebrush-modsym = { path = "../modsym", default-features = false }
 wasm-bindgen = "=0.2.104"

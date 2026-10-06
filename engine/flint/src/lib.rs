@@ -6,7 +6,7 @@
 //! ("len  c0 c1 ... c_{len-1}"), so nothing depends on FLINT's internal
 //! integer representation.
 
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_long, c_void};
 
@@ -58,7 +58,7 @@ fn parse_poly(s: &str) -> Vec<BigInt> {
 /// positive leading coefficient; returns (content, [(g_i, e_i)]).
 pub fn factor(f: &[BigInt]) -> (BigInt, Vec<(Vec<BigInt>, u32)>) {
     let mut f = f.to_vec();
-    while f.len() > 1 && f.last().map_or(false, |c| c.sign() == num_bigint::Sign::NoSign) {
+    while f.len() > 1 && f.last().map_or(false, |c| c.sign() == sagebrush_bigint::Sign::NoSign) {
         f.pop();
     }
     let text = format!("{}  {}", f.len(), f.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(" "));

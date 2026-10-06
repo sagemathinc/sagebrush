@@ -9,10 +9,10 @@ name = "sagebrush_node"
 crate-type = ["cdylib"]
 
 [dependencies]
+sagebrush-bigint = { path = "../bigint" }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 rayon = "1.10"
-num-bigint = "0.4"
 napi = { version = "2", default-features = false, features = ["napi6"] }
 napi-derive = "2"
 

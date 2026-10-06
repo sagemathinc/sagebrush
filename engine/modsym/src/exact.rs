@@ -17,7 +17,7 @@ use crate::linalg;
 use crate::par;
 use crate::presentation::Presentation;
 use crate::space::Space;
-use num_bigint::{BigInt, BigUint};
+use sagebrush_bigint::{BigInt, BigUint};
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 pub fn factor(mut n: u64) -> Vec<(u64, u32)> {

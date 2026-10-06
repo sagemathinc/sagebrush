@@ -27,7 +27,7 @@ use crate::newforms::{heilbronn_pairing, rref, ELL};
 use crate::par;
 use crate::presentation::Presentation;
 use crate::space::Space;
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_traits::ToPrimitive;
 
 /// Factors a polynomial in Z[x] (constant term first) into irreducible

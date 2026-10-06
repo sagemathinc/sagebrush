@@ -3,7 +3,7 @@
 
 use sagebrush_modsym::exact::{batch_exact, exact_charpoly};
 use sagebrush_modsym::{hecke_charpoly, hecke_commute, validate};
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 
 const P: u64 = 67108859;
 

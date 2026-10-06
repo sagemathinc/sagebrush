@@ -3,13 +3,45 @@
 //! elliptic curve method (Montgomery curves with Suyama's parametrization,
 //! x-only ladder for stage 1, baby-step giant-step stage 2).
 
-use num_bigint::{BigInt, BigUint, Sign};
+use sagebrush_bigint::{BigInt, BigUint, Sign};
 use num_integer::Integer;
 use num_traits::{One, Zero};
 
 const MAXL: usize = 16;
 
-/// Z/nZ for odd n, elements in Montgomery form a R mod n, R = 2^(64 k).
+/// t + a b + c as (low, high) words (it fits: (2^64 - 1)^2 + 2 (2^64 - 1) =
+/// 2^128 - 1).  One 64 x 64 -> 128-bit product on 64-bit targets; wasm32 has
+/// no such instruction (a u128 product calls a 128 x 128-bit library
+/// routine, which made ECM ~30 times slower than native), so there four
+/// 32 x 32 -> 64-bit products.
+#[inline(always)]
+fn mac(t: u64, a: u64, b: u64, c: u64) -> (u64, u64) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let s = t as u128 + a as u128 * b as u128 + c as u128;
+        (s as u64, (s >> 64) as u64)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        mac_split(t, a, b, c)
+    }
+}
+
+/// mac by 32-bit halves (used on wasm32; tested everywhere).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[inline(always)]
+fn mac_split(t: u64, a: u64, b: u64, c: u64) -> (u64, u64) {
+    const M: u64 = 0xffff_ffff;
+    let (a0, a1, b0, b1) = (a & M, a >> 32, b & M, b >> 32);
+    let (p00, p01, p10, p11) = (a0 * b0, a0 * b1, a1 * b0, a1 * b1);
+    let mid = (p00 >> 32) + (p01 & M) + (p10 & M); // < 3 2^32
+    let lo = (p00 & M) | (mid << 32);
+    let hi = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
+    let (lo, c1) = lo.overflowing_add(t);
+    let (lo, c2) = lo.overflowing_add(c);
+    (lo, hi + c1 as u64 + c2 as u64)
+}
+
 pub struct Mont {
     k: usize,
     n: [u64; MAXL],
@@ -70,38 +102,73 @@ impl Mont {
         self.one
     }
 
-    /// a b R^-1 mod n (CIOS).
+    /// a b R^-1 mod n (CIOS), for this modulus' number of limbs.
     #[inline]
     pub fn mul(&self, a: &E, b: &E) -> E {
-        let k = self.k;
+        // a copy of the loop for each k, which the compiler unrolls: three
+        // times faster for small moduli than one loop over k
+        match self.k {
+            1 => self.mul_k::<1>(a, b),
+            2 => self.mul_k::<2>(a, b),
+            3 => self.mul_k::<3>(a, b),
+            4 => self.mul_k::<4>(a, b),
+            5 => self.mul_k::<5>(a, b),
+            6 => self.mul_k::<6>(a, b),
+            7 => self.mul_k::<7>(a, b),
+            8 => self.mul_k::<8>(a, b),
+            9 => self.mul_k::<9>(a, b),
+            10 => self.mul_k::<10>(a, b),
+            11 => self.mul_k::<11>(a, b),
+            12 => self.mul_k::<12>(a, b),
+            13 => self.mul_k::<13>(a, b),
+            14 => self.mul_k::<14>(a, b),
+            15 => self.mul_k::<15>(a, b),
+            _ => self.mul_k::<16>(a, b),
+        }
+    }
+
+    #[inline(always)]
+    fn mul_k<const K: usize>(&self, a: &E, b: &E) -> E {
         let mut t = [0u64; MAXL + 2];
-        for i in 0..k {
-            let mut c: u128 = 0;
-            let bi = b[i] as u128;
-            for j in 0..k {
-                let s = t[j] as u128 + a[j] as u128 * bi + c;
-                t[j] = s as u64;
-                c = s >> 64;
+        for i in 0..K {
+            let mut c = 0u64;
+            let bi = b[i];
+            for j in 0..K {
+                (t[j], c) = mac(t[j], a[j], bi, c);
             }
-            let s = t[k] as u128 + c;
-            t[k] = s as u64;
-            t[k + 1] = (s >> 64) as u64;
-            let m = t[0].wrapping_mul(self.ninv) as u128;
-            let s = t[0] as u128 + m * self.n[0] as u128;
-            let mut c = s >> 64;
-            for j in 1..k {
-                let s = t[j] as u128 + m * self.n[j] as u128 + c;
-                t[j - 1] = s as u64;
-                c = s >> 64;
+            let (s, hi) = t[K].overflowing_add(c);
+            t[K] = s;
+            t[K + 1] = hi as u64;
+            let m = t[0].wrapping_mul(self.ninv);
+            let (_, mut c) = mac(t[0], m, self.n[0], 0);
+            for j in 1..K {
+                (t[j - 1], c) = mac(t[j], m, self.n[j], c);
             }
-            let s = t[k] as u128 + c;
-            t[k - 1] = s as u64;
-            t[k] = t[k + 1] + (s >> 64) as u64;
+            let (s, hi) = t[K].overflowing_add(c);
+            t[K - 1] = s;
+            t[K] = t[K + 1] + hi as u64;
         }
         let mut out = [0u64; MAXL];
-        out[..k].copy_from_slice(&t[..k]);
-        if t[k] != 0 || !self.less_than_n(&out) {
-            self.sub_n(&mut out);
+        out[..K].copy_from_slice(&t[..K]);
+        // out >= n (or a carry out): subtract n once
+        let mut ge = t[K] != 0;
+        if !ge {
+            ge = true;
+            for j in (0..K).rev() {
+                if out[j] != self.n[j] {
+                    ge = out[j] > self.n[j];
+                    break;
+                }
+            }
+        }
+        if ge {
+            let mut borrow = 0u64;
+            for j in 0..K {
+                let (d, b1) = out[j].overflowing_sub(self.n[j]);
+                let (d, b2) = d.overflowing_sub(borrow);
+                out[j] = d;
+                borrow = (b1 | b2) as u64;
+            }
         }
         out
     }
@@ -405,6 +472,23 @@ pub fn ecm(n: &BigUint, seed: u64) -> Option<BigUint> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mac_by_halves_is_exact() {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let edge = [0, 1, u32::MAX as u64, 1 << 32, u64::MAX - 1, u64::MAX];
+        for i in 0..200_000 {
+            let v: [u64; 4] = if i < 6 * 6 * 6 * 6 { [edge[i % 6], edge[i / 6 % 6], edge[i / 36 % 6], edge[i / 216 % 6]] } else { [next(), next(), next(), next()] };
+            let s = v[0] as u128 + v[1] as u128 * v[2] as u128 + v[3] as u128;
+            assert_eq!(mac_split(v[0], v[1], v[2], v[3]), (s as u64, (s >> 64) as u64), "{:?}", v);
+        }
+    }
 
     #[test]
     fn montgomery_arithmetic() {

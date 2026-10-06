@@ -2,7 +2,7 @@
 //! for factoring), with dimensions and the first traces tr(T_p | A).
 fn main() {
     let a: Vec<u64> = std::env::args().skip(1).map(|s| s.parse().unwrap()).collect();
-    let factor = |f: &[num_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_flint::factor(f).1;
     let t = std::time::Instant::now();
     let orbits = sagebrush_modsym::orbits::newform_orbits(a[0], *a.get(1).unwrap_or(&100), &factor).unwrap();
     for o in &orbits {

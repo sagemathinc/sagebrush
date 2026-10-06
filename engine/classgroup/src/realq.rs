@@ -12,7 +12,7 @@ use crate::imag::{l1_estimate, lattice_group, tuning, ClassGroup, Timing};
 use crate::linalg::{eliminate_with, independent_rows, kernel_crt, Reduced};
 use crate::real::{ln_fixed, ln_int, real_gcd, sqrt_fixed, to_f64};
 use crate::relations::{collect, Elem, FactorBase, Relation, Stats};
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 #[derive(Debug, Clone)]

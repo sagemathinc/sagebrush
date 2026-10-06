@@ -4,7 +4,7 @@
 //!   D cyc [reg R] ms fb relations core rounds sieve_ms linalg_ms polys
 //! The table of small primes is built once before timing (gp likewise
 //! starts with its prime table); its cost is printed first.
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use sagebrush_classgroup::{imag, realq};
 
 /// x / 2^prec to `digits` decimals.
@@ -22,7 +22,7 @@ fn main() {
     for a in std::env::args().skip(1) {
         let d: BigInt = a.parse().expect("an integer D");
         let t = std::time::Instant::now();
-        let res = if d.sign() == num_bigint::Sign::Plus {
+        let res = if d.sign() == sagebrush_bigint::Sign::Plus {
             realq::class_group_real(&d).map(|(r, tm)| (r.group, Some(decimal(&r.reg_fixed, r.prec, 15)), tm))
         } else {
             imag::class_group(&d).map(|(g, tm)| (g, None, tm))

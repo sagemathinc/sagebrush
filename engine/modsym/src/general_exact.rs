@@ -34,7 +34,7 @@ use crate::exact::{factor, level_data};
 use crate::general::{mul, powmod, primes_one_mod, root_of_unity, Character, GeneralSpace};
 use crate::p1::gcd;
 use crate::par;
-use num_bigint::{BigInt, BigUint};
+use sagebrush_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 
 #[derive(Debug, Clone)]

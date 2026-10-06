@@ -29,6 +29,16 @@ fn run<T: Send>(py: Python<'_>, threads: usize, f: impl FnOnce() -> T + Send) ->
     guarded(py, || rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(f))
 }
 
+// Big integers cross into Python as num-bigint's (PyO3's conversion), from
+// whichever backend sagebrush-bigint uses.
+type PyInt = num_bigint::BigInt;
+fn py1(v: &[BigInt]) -> Vec<PyInt> {
+    v.iter().map(sagebrush_bigint::to_num).collect()
+}
+fn py2(v: &[Vec<BigInt>]) -> Vec<Vec<PyInt>> {
+    v.iter().map(|w| py1(w)).collect()
+}
+
 fn err(e: String) -> PyErr {
     PyValueError::new_err(e)
 }
@@ -57,7 +67,7 @@ fn exact_dict<'py>(py: Python<'py>, e: &Exact) -> PyResult<Bound<'py, PyDict>> {
     d.set_item("cusps", e.cusps)?;
     d.set_item("eisenstein", e.eis)?;
     d.set_item("dim", e.dim)?;
-    d.set_item("charpoly", e.coeffs.clone())?;
+    d.set_item("charpoly", py1(&e.coeffs))?;
     d.set_item("primes_used", e.primes_used.len())?;
     d.set_item("bound_bits", e.bound_bits)?;
     d.set_item("status", e.status)?;
@@ -181,7 +191,7 @@ fn moments(py: Python<'_>, a: Vec<i64>, n: u64, kmax: usize, threads: usize) -> 
 
 // ---- sagebrush.mf: weight k >= 2 with a Dirichlet character ----
 
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::Character;
 
@@ -278,7 +288,7 @@ fn charpoly<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64, Ve
     let d = PyDict::new(py);
     d.set_item("m", e.m)?;
     d.set_item("dim", e.dim)?;
-    d.set_item("coeffs", e.coeffs.clone())?;
+    d.set_item("coeffs", py2(&e.coeffs))?;
     d.set_item("primes_used", e.primes_used.len())?;
     d.set_item("status", e.status)?;
     d.set_item("checks", e.checks.clone())?;
@@ -288,7 +298,11 @@ fn charpoly<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64, Ve
 fn python_factorer(factor: Py<PyAny>) -> impl Fn(&[BigInt]) -> Vec<(Vec<BigInt>, u32)> + Sync {
     move |f: &[BigInt]| {
         Python::attach(|py| {
-            factor.call1(py, (f.to_vec(),)).and_then(|r| r.extract::<Vec<(Vec<BigInt>, u32)>>(py)).unwrap_or_default()
+            factor
+                .call1(py, (py1(f),))
+                .and_then(|r| r.extract::<Vec<(Vec<PyInt>, u32)>>(py))
+                .map(|v| v.into_iter().map(|(g, e)| (g.iter().map(sagebrush_bigint::from_num).collect(), e)).collect())
+                .unwrap_or_default()
         })
     }
 }
@@ -298,7 +312,7 @@ fn newspace_dict<'py>(py: Python<'py>, r: &sagebrush_modsym::newspace::NewspaceO
     d.set_item("dim", r.dim)?;
     d.set_item("order", r.m)?;
     d.set_item("orbit_dims", r.dims.clone())?;
-    d.set_item("orbit_charpolys", r.orbits.clone())?;
+    d.set_item("orbit_charpolys", py2(&r.orbits))?;
     d.set_item("T", r.ops.clone())?;
     d.set_item("status", r.status)?;
     d.set_item("checks", r.checks.clone())?;
@@ -346,8 +360,8 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
         };
         o.set_item("letter", letter)?;
         o.set_item("dim", dim)?;
-        o.set_item("traces", t)?;
-        o.set_item("charpoly", u)?;
+        o.set_item("traces", py1(&t))?;
+        o.set_item("charpoly", py1(&u))?;
         Ok(o)
     }).collect::<PyResult<_>>()?;
     d.set_item("newforms", list)?;
