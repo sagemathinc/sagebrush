@@ -71,6 +71,7 @@ fn zsub(a: &[BigInt], b: &[BigInt]) -> ZPoly {
 }
 
 fn zmul(a: &[BigInt], b: &[BigInt]) -> ZPoly {
+    sagebrush_interrupt::check();
     if a.is_empty() || b.is_empty() {
         return vec![];
     }
@@ -124,6 +125,7 @@ fn divexact(a: &[BigInt], b: &[BigInt]) -> Option<ZPoly> {
 
 /// The pseudo-remainder of a by b.
 fn prem(a: &[BigInt], b: &[BigInt]) -> ZPoly {
+    sagebrush_interrupt::check();
     let mut r = trim(a.to_vec());
     let lb = b.last().unwrap().clone();
     while r.len() >= b.len() && !r.is_empty() {
@@ -297,6 +299,7 @@ fn fderivative(a: &[u64], p: u64) -> FPoly {
 /// Distinct-degree factorization of a monic square-free f: (product of the
 /// irreducible factors of degree d, d).
 fn ddf(f: &[u64], p: u64) -> Vec<(FPoly, usize)> {
+    sagebrush_interrupt::check();
     let mut out = vec![];
     let mut f = f.to_vec();
     let x: FPoly = vec![0, 1];
@@ -483,6 +486,7 @@ fn to_z(a: &[u64]) -> ZPoly {
 /// to monic G, H with f = u G H (mod p^k): quadratic Hensel steps
 /// (von zur Gathen-Gerhard, Algorithm 15.10).  f is given modulo p^k.
 fn hensel_pair(f: &[BigInt], g: &[u64], h: &[u64], p: u64, k: u32) -> (ZPoly, ZPoly) {
+    sagebrush_interrupt::check();
     let pk = BigInt::from(p).pow(k);
     let u = f.last().unwrap().mod_floor(&pk);
     // work with G = u g so that f = G H
