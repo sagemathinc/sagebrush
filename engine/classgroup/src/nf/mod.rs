@@ -4,6 +4,7 @@ pub mod ecm;
 pub mod embed;
 pub mod bnf;
 pub mod factor;
+pub mod grh;
 pub mod order;
 pub mod prime;
 pub mod zlin;

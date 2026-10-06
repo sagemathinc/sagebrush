@@ -2,7 +2,6 @@
 //! Pollard-Brent rho and the elliptic curve method (ecm.rs).
 
 use num_bigint::BigInt;
-use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 /// Miller-Rabin with the first 20 primes as bases (deterministic below

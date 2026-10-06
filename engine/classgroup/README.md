@@ -165,8 +165,20 @@ digits.
 - **Prime ideals.** Kummer–Dedekind with a suitable generator, and a general
   splitting of O/rad(p) for common index divisors. Valuations use an element
   β ∈ pP⁻¹ that is not in pO.
-- **Factor base:** prime ideals of norm ≤ 4 log²|d| (Grenié–Molteni,
-  under GRH).
+- **Factor base:** the prime ideals of norm below a bound T that is
+  computed for each field (`nf/grh.rs`). Under GRH they generate the class
+  group.
+  - The criterion is Belabas–Diaz y Diaz–Friedman's (Math. Comp. 77, 2008):
+    a test function makes an explicit-formula sum over prime ideals
+    negative.
+  - The search over step-function test functions is Grenié–Molteni's
+    (arXiv:1507.00602, 1607.02430). Their example field gives 11083 here
+    against 11071 in the paper; the one-step BDF bound gives 19157 against
+    19162.
+  - T is typically far below the uniform bound 4 log²|d| (Grenié–Molteni,
+    arXiv:2212.09461, Theorem 2), which is the fallback. For x³ − 11, T = 7
+    instead of 262.
+  - The witness function is checked directly, with a margin for rounding.
 - **Relations:** small elements of LLL-reduced ideals, LLL'd under randomly
   weighted T₂ forms. The weights skew the elements, so their combinations
   reach large units.
@@ -184,22 +196,27 @@ digits.
 - **Acceptance:** h·R < √2 times the residue estimate (Bach-averaged Euler
   products of ζ_K), as in the quadratic case.
 
-Random cubic and quartic fields f = xⁿ + Σ aᵢxⁱ with |aᵢ| ≤ 10^k, against
-PARI's `bnfinit(f, 1)`. All 24 agree in d, the class group and the
-regulator.
+Random fields f = xⁿ + Σ aᵢxⁱ of degree 3–6, against PARI 2.17's
+`bnfinit(f, 1)`, one core. All 30 agree with PARI in d, the class group
+and the regulator. A selection (times in ms):
 
-| field   | \|d\|      | PARI (ms) | ours (ms) |
-|---------|------------|----------:|----------:|
-| cubic   | 4·10³      |         2 |        18 |
-| cubic   | 1·10¹⁴     |        24 |       179 |
-| cubic   | 3·10²³     |       422 |       840 |
-| cubic   | 4·10²²     |       459 |     4,109 |
-| quartic | 6·10²²     |       172 |     2,040 |
-| quartic | 1·10²⁹     |     1,247 |     8,821 |
-| quartic | 7·10³²     |     4,663 |    23,563 |
-| quartic | 2·10³⁵     |    20,659 |    24,057 |
+| field   | \|d\|   | PARI   | ours    |
+|---------|---------|-------:|--------:|
+| cubic   | 10¹²    |     10 |      18 |
+| cubic   | 10²⁸    |  2,279 |     966 |
+| cubic   | 10²⁸    |  2,548 |   1,122 |
+| cubic   | 10³²    |  5,251 |   1,125 |
+| cubic   | 10³²    |  3,648 |   1,153 |
+| quartic | 10²⁶    |    347 |     835 |
+| quartic | 10³⁴    |  6,361 |   6,267 |
+| quartic | 10³⁶    |  6,448 |  28,472 |
+| quartic | 10⁴¹    | 46,644 | 176,585 |
+| quintic | 10²³    |     86 |     252 |
+| sextic  | 10²³    |     90 |     310 |
 
-The relative gap shrinks as d grows. The remaining factor is mostly the
-factor-base bound: PARI checks a much smaller, field-specific GRH bound
-(Belabas–Diaz y Diaz–Friedman).
+The field-specific GRH bound made this 3–10× faster than with the uniform
+4 log²|d| (for example, 4.7 s down to 1.0 s on the first 10²⁸ cubic).
+Cubics are now faster than PARI from about 10²⁵. For quartics, most time goes
+into ideal products P_i P_j for relations (BigInt HNF), the next thing to
+speed up.
 
