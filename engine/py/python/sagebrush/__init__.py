@@ -9,14 +9,17 @@ Engines are submodules:
     sagebrush.nf        number fields (maximal orders, prime ideals, class
                         groups, units, regulators), integer factoring (ECM),
                         HNF, elementary divisors, LLL, complex roots
-    sagebrush.poly      factoring in Z[x] and F_p[x]
+    sagebrush.poly      factoring in Z[x] and F_p[x]; products, gcds and exact
+                        division in Z[x]
+    sagebrush.linalg    exact matrices over ZZ and QQ: det, rank, rref, solve,
+                        inverse, charpoly, kernel (multimodular, certified)
     sagebrush.sage      a Sage-compatible namespace over all of these:
                         from sagebrush.sage import *
 
-nf and poly are the same pure-Python files as in the browser runtime
+nf, poly and linalg are the same pure-Python files as in the browser runtime
 (lib/sagebrush), over the shared JSON dispatcher.
 """
 
-from . import ap, mf, modsym, nf, poly
+from . import ap, linalg, mf, modsym, nf, poly
 
-__all__ = ["ap", "mf", "modsym", "nf", "poly"]
+__all__ = ["ap", "linalg", "mf", "modsym", "nf", "poly"]

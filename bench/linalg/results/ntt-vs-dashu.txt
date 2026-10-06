@@ -1,0 +1,12 @@
+     4096 bits  ntt     0.015 ms  dashu     0.003 ms  ratio 0.19
+     8192 bits  ntt     0.031 ms  dashu     0.009 ms  ratio 0.30
+    16384 bits  ntt     0.067 ms  dashu     0.028 ms  ratio 0.42
+    32768 bits  ntt     0.143 ms  dashu     0.081 ms  ratio 0.57
+    65536 bits  ntt     0.318 ms  dashu     0.241 ms  ratio 0.76
+   131072 bits  ntt     0.716 ms  dashu     0.670 ms  ratio 0.93
+   262144 bits  ntt     1.592 ms  dashu     2.256 ms  ratio 1.42
+   524288 bits  ntt     3.400 ms  dashu     4.846 ms  ratio 1.43
+  1048576 bits  ntt     7.168 ms  dashu    10.675 ms  ratio 1.49
+  2097152 bits  ntt    15.056 ms  dashu    23.599 ms  ratio 1.57
+  4194304 bits  ntt    32.101 ms  dashu    58.544 ms  ratio 1.82
+  8388608 bits  ntt    68.315 ms  dashu   127.195 ms  ratio 1.86

@@ -15,7 +15,7 @@ __all__ = [
     "Newforms", "newform_orbits",
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
-    "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC",
+    "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "PolynomialRing", "polygen", "parent",
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
@@ -47,7 +47,7 @@ from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, Diri
                            EllipticCurve, Newforms, newform_orbits)
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
-from _sage_matrix import matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC
+from _sage_matrix import matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC, vector
 Matrix = matrix
 
 

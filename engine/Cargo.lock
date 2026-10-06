@@ -434,6 +434,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-arith"
+version = "0.1.0"
+dependencies = [
+ "dashu-int",
+ "num-integer",
+ "num-traits",
+ "sagebrush-bigint",
+ "sagebrush-flint",
+ "sagebrush-interrupt",
+]
+
+[[package]]
 name = "sagebrush-bigint"
 version = "0.1.0"
 dependencies = [
@@ -547,6 +559,7 @@ name = "sagebrush-web"
 version = "0.1.0"
 dependencies = [
  "sagebrush-ap",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-classgroup",
  "sagebrush-interrupt",

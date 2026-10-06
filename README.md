@@ -37,7 +37,7 @@ These define what Sagebrush is.
    FLINT or PARI) and no build system beyond `cargo`. So every engine also
    compiles to WebAssembly and runs wherever WebAssembly runs: in the
    browser, in Node, in a chat artifact, and in CPython through the same
-   code. The whole engine is one 1.4 MB `.wasm` file.
+   code. The whole engine is one 1.7 MB `.wasm` file.
 4. **Asymptotically fast.** Performance is measured as the inputs grow,
    against the best existing system, and published as tables with every
    number. The goal is to win on the large computations that research needs,
@@ -84,6 +84,24 @@ see [its README](engine/classgroup/README.md)):
     slower at small d and close to even at 10^35.
 - **Integer algorithms:** factoring (Pollard rho and ECM), the Hermite and
   Smith normal forms, exact LLL, and complex roots to any precision.
+
+**Exact linear algebra and polynomial arithmetic** (`engine/arith`,
+MIT/Apache, clean-room; the layer FLINT provides for Sage; see
+[its README](engine/arith/README.md)):
+
+- **Matrices over Z and Q:**
+  - determinants (Abbott–Bronstein–Mulders);
+  - solving and inverses (Dixon's p-adic lifting);
+  - reduced echelon form, rank and kernels;
+  - characteristic polynomials (multimodular, with a proven bound).
+- **Polynomials:**
+  - over Z/n: NTT products, Newton division, half-gcd;
+  - over Z: products, and heuristic and modular gcds.
+- **Certified:** every answer is checked exactly or rests on a proven bound.
+- **Speed:** within 1.1–5x of FLINT on matrices and within 1–5x on
+  polynomials ([bench/linalg](bench/linalg/README.md)). In the Sage layer,
+  `det`, `rref` and `inverse` got 8–40x faster, and a polynomial gcd that
+  took 10 s takes under a millisecond.
 
 All of it runs in Sage mode (`NumberField`, `QuadraticField`,
 `class_group()`, `regulator()`, `matrix(ZZ, ...).LLL()`, ...), in Magma mode
@@ -141,8 +159,11 @@ the engines.
   `discriminant`, `signature`, `integral_basis`, `maximal_order`,
   `primes_above`, `factor`, `class_group`, `class_number`, `unit_group` and
   `regulator`. Field elements support arithmetic, `norm`, `trace` and
-  `minpoly`. `matrix(ZZ, ...)` supports `hermite_form`,
-  `elementary_divisors`, `smith_form`, `LLL`, `det` and `inverse`. Also
+  `minpoly`. `matrix(ZZ, ...)` and `matrix(QQ, ...)` support `det`, `rank`,
+  `echelon_form`, `inverse`, `charpoly`, `kernel`, `right_kernel`,
+  `solve_right` and `solve_left` (`sagebrush.linalg`; checked by
+  `sage-tests/test_linalg.sage`), and over ZZ `hermite_form`,
+  `elementary_divisors`, `smith_form` and `LLL`. Also
   `roots(RR)`, `roots(CC)`, and `factor(n)` by ECM. In Magma mode:
   `NumberField`, `QuadraticField`, `MaximalOrder`, `IntegralBasis`,
   `ClassGroup`, `ClassNumber`, `UnitGroup`, `Signature`, `Decomposition`,
@@ -153,12 +174,13 @@ the engines.
   `ModularSymbols`, `CuspForms`, `ModularForms`, `Newforms`, `Gamma0`,
   `DirichletGroup`, `EllipticCurve` and polynomial rings over `ZZ` and `QQ`
   (`R.<x> = ZZ[]`, `f.factor()`, `f.roots()`, `gcd`, `discriminant`) run on
-  the Sagebrush engines (a 1.4 MB WebAssembly build of `engine/web`, loaded
-  on first use), with Sage's printed output: `sage-tests/` checks 3,200
+  the Sagebrush engines (a 1.7 MB WebAssembly build of `engine/web`, loaded
+  on first use), with Sage's printed output: `sage-tests/` checks 3,500
   lines against Sage. `newform_orbits(N, k)` lists every Galois orbit of
   newforms with its LMFDB label, dimension, trace form and Hecke
-  characteristic polynomial. `from sagebrush import modsym, ap, mf, nf, poly`
-  is the API of the native Python package. `nf` and `poly` are the same
+  characteristic polynomial. `from sagebrush import modsym, ap, mf, nf,
+  poly, linalg` is the API of the native Python package. `nf`, `poly` and
+  `linalg` are the same
   Python files in the browser and in CPython, over one JSON dispatcher
   (`engine/web`).
 - **The Atlas** ([sagebrush.space/atlas](https://sagebrush.space/atlas/)):

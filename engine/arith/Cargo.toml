@@ -1,0 +1,17 @@
+[package]
+name = "sagebrush-arith"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Exact arithmetic for the Sagebrush engines: word-size moduli, number-theoretic transforms, polynomials over Z/n, Z and Q, and dense matrices over Z/p, Z and Q (multimodular, certified)"
+
+[dependencies]
+sagebrush-bigint = { path = "../bigint" }
+sagebrush-interrupt = { path = "../interrupt" }
+num-integer = "0.1"
+num-traits = "0.2"
+dashu-int = "0.6"
+
+[dev-dependencies]
+# LGPL; only the tests and benchmarks use it, as a reference
+sagebrush-flint = { path = "../flint" }
