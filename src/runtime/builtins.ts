@@ -6,6 +6,7 @@ import {
   isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity,
 } from "./object";
 import * as O from "./ops";
+import { INTR } from "./interrupt";
 import { repr, str, format, formatFixed } from "./format";
 import * as Ty from "./types";
 
@@ -168,14 +169,61 @@ function sum(it: any, start: any = 0): any {
       return s;
     }
   }
-  if (Array.isArray(it)) {
-    for (let i = 0; i < it.length; i++) s = O.add(s, it[i]);
-    return s;
+  if (it instanceof Ty.PyRange && typeof s === "number" && isInt(s) && Math.abs(s) <= HALF_SAFE) {
+    // A range of doubles, summed in chunks: chunk length times the largest
+    // |term| stays below 2^52, so each chunk is an exact double sum (a tight
+    // loop, ~2 ns a term), added to a BigInt once per chunk; Ctrl-C between
+    // chunks.
+    const { start, step } = it;
+    let k = it.length;
+    const last = start + (k - 1) * step;
+    const m = Math.max(Math.abs(start), Math.abs(last), 1);
+    const chunk = Math.max(1, Math.min(1 << 20, Math.floor(HALF_SAFE / m)));
+    let acc = BigInt(s), x = start;
+    while (k > 0) {
+      const c = Math.min(k, chunk);
+      let small = 0;
+      if (m < HALF_SAFE) for (let j = 0; j < c; j++, x += step) small += x;
+      else for (let j = 0; j < c; j++, x += step) acc += BigInt(x);
+      acc += BigInt(small);
+      k -= c;
+      if (INTR[0]) {
+        INTR[0] = 0;
+        raise(T.KeyboardInterrupt);
+      }
+    }
+    return O.normBig(acc);
   }
-  const iter = O.iter(it);
-  for (let v = iter.$next(); v !== DONE; v = iter.$next()) s = O.add(s, v);
+  let i = 0;
+  const next: () => any = Array.isArray(it) ? () => (i < it.length ? it[i++] : DONE) : ((iter) => () => iter.$next())(O.iter(it));
+  let v: any = DONE;
+  if (typeof s === "number" && isInt(s) && Math.abs(s) <= HALF_SAFE) {
+    // Python ints: a double accumulator kept below 2^52 in absolute value and
+    // flushed into a BigInt when it passes that, so a sum beyond 2^53 still
+    // adds doubles (sum(range(10**9)): 35 s with BigInt additions, 1.4 s
+    // this way); exact, as each step stays below 2^53.
+    let small = s, acc = 0n;
+    for (v = next(); v !== DONE; v = next()) {
+      if (typeof v === "number" && isInt(v)) {
+        if (v > HALF_SAFE || v < -HALF_SAFE) acc += BigInt(v);
+        else {
+          small += v;
+          if (small > HALF_SAFE || small < -HALF_SAFE) {
+            acc += BigInt(small);
+            small = 0;
+          }
+        }
+      } else if (typeof v === "bigint") acc += v;
+      else break; // not an int: the general loop below takes over
+    }
+    s = acc === 0n ? small : O.normBig(acc + BigInt(small));
+    if (v === DONE) return s;
+    s = O.add(s, v);
+  }
+  for (v = next(); v !== DONE; v = next()) s = O.add(s, v);
   return s;
 }
+const HALF_SAFE = 2 ** 52;
 
 function sorted(it: any, key: any = null, reverse: any = false) {
   const a = O.toArray(it);
