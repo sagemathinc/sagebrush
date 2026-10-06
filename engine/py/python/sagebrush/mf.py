@@ -23,23 +23,23 @@ charpoly = _native.charpoly
 charpoly_mod = _native.charpoly_mod
 
 
-def _flint_factor(coeffs):
-    """Factor a polynomial over Z (constant term first) with python-flint."""
-    import flint
-    _, factors = flint.fmpz_poly(coeffs).factor()
-    return [([int(c) for c in f.coeffs()], int(e)) for f, e in factors]
+def _factor(coeffs):
+    """Factor a polynomial over Z (constant term first) with Sagebrush's own
+    Zassenhaus (sagebrush.poly): [(g, e)], g primitive and irreducible."""
+    from . import poly
+    return poly.factor(coeffs)[1]
 
 
 def newspace(n, k, chi=None, factor=None, threads=0):
     """Galois orbits of newforms in S_k^new(N, [chi]): dimensions over Q and
     each orbit's charpoly over Q of the Hecke operator T (see "T")."""
-    return _native.newspace(n, k, factor or _flint_factor, chi=chi, threads=threads)
+    return _native.newspace(n, k, factor or _factor, chi=chi, threads=threads)
 
 
 def newforms(n, k, chi=None, bound=100, factor=None, threads=0):
     """newspace(...) plus "newforms": one dict per Galois orbit, in LMFDB
     order, with its letter, dimension and trace form tr a_1, ..., a_bound."""
-    return _native.newforms(n, k, factor or _flint_factor, chi=chi, bound=bound, threads=threads)
+    return _native.newforms(n, k, factor or _factor, chi=chi, bound=bound, threads=threads)
 
 
 __all__ = ["characters", "dims", "charpoly", "charpoly_mod", "newspace", "newforms"]

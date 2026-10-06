@@ -5,9 +5,27 @@ build-backend = "maturin"
 [project]
 name = "sagebrush"
 version = "0.1.0"
-description = "Fast, certified, parallel engines for research mathematics (early experiment)"
+description = "Fast, certified engines for research mathematics: number fields, class groups, modular forms (Rust, MIT OR Apache-2.0)"
+readme = "README.md"
+authors = [{ name = "SageMath, Inc.", email = "wstein@sagemath.com" }]
+keywords = ["number theory", "class group", "number field", "modular forms", "LLL", "mathematics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
 requires-python = ">=3.9"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+
+[project.urls]
+Homepage = "https://sagebrush.space"
+Repository = "https://github.com/sagemathinc/sagebrush"
 
 [tool.maturin]
 module-name = "sagebrush._native"
 python-source = "python"
+features = ["pyo3/abi3-py39"]

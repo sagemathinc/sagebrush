@@ -1,0 +1,76 @@
+name: pypi
+
+# Wheels (abi3: one per platform for every Python >= 3.9) and the sdist of
+# the `sagebrush` Python package (engine/py).  A manual run only builds and
+# tests; a `py-v*` tag also publishes to PyPI by trusted publishing (OIDC: no
+# token is stored), which needs a PyPI trusted publisher for this repository,
+# workflow `pypi.yml` and environment `pypi`.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["py-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64, manylinux: "2_28" }
+          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: "2_28" }
+          - { os: macos-latest, target: aarch64 }
+          - { os: macos-15-intel, target: x86_64 }
+          - { os: windows-latest, target: x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: engine/py
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist
+      - name: test the wheel
+        shell: bash
+        run: |
+          python -m pip install engine/py/dist/*.whl
+          cd engine/py && python -m doctest README.md && echo doctests ok
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.target }}
+          path: engine/py/dist/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: engine/py
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: engine/py/dist/*.tar.gz
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/py-v')
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
