@@ -47,6 +47,9 @@ jobs:
       - name: build the bundle and executables
         run: |
           node scripts/build-cli.mjs
+          # the Jupyter kernel, end to end with Jupyter's own client
+          python3 -m venv /tmp/jv && /tmp/jv/bin/pip install -q jupyter_client
+          /tmp/jv/bin/python test/jupyter_kernel.py build/cli/pyjs.cjs
           for t in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
             node scripts/build-cli.mjs --deno --target=$t
           done
