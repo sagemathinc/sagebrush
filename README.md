@@ -26,7 +26,8 @@ These define what Sagebrush is.
    engine. GPL systems such as PARI, Sage, Magma and FLINT are used only from
    the outside, as oracles in tests and as benchmarks. They are never
    dependencies, and never sources to port. Algorithms are implemented
-   clean-room from the literature. An independent implementation has
+   clean-room from the literature or with the copyright owner's permission.
+   An independent implementation has
    mathematical value of its own: when it agrees with PARI, that is evidence
    about both.
 3. **Portable and lightweight.** Pure Rust, with no C libraries (no GMP,
