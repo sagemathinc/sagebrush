@@ -1,6 +1,7 @@
 # sagebrush-classgroup
 
-Class groups of imaginary quadratic fields in pure Rust, MIT OR Apache-2.0.
+Class groups of quadratic fields, and regulators of real quadratic fields, in
+pure Rust, MIT OR Apache-2.0.
 
 This is a clean-room implementation from the published algorithms: Jacobson's
 self-initialising sieve for relations, Hafner–McCurley style linear algebra,
@@ -15,10 +16,13 @@ read. No PARI source was read or ported.
 - The result is `h` and the invariants `cyc`, in the same order as PARI's
   `quadclassunit(D).cyc`.
 - The result assumes GRH, like PARI's default.
-- Real quadratic fields and general number fields are next.
+- Real quadratic fields (`realq.rs`): D > 10^3 up to 2^200, giving the class
+  group and the regulator to any precision.
+- General number fields are next.
 
 ```
 cargo run --release -p sagebrush-classgroup --example qcl -- -100000000000000000000000000319
+cargo run --release -p sagebrush-classgroup --example qcl -- 1000000000000000000000000453
 ```
 
 ## How it works
@@ -60,6 +64,33 @@ error bounds for his averaged product, and the code does not check them yet.
 Measured against 400 known class numbers up to 10^35, the estimate with
 x = 256 is within 4.2%, and the code uses a much larger x (0.3% or better).
 
+## Real quadratic fields
+
+These use Buchmann's method on the same relations.
+
+- **Principal ideals.** Each relation is a principal ideal (γ), with
+  γ = Π((B + √D)/2)^c. Its logarithm log|γ/γ′| is
+  sign(B)·(2 ln(|B| + √D) − ln|B² − D|), which has no cancellation.
+- **Units.** Kernel vectors of the relation matrix give units, whose
+  logarithms are multiples of 2R:
+  - Rows that the structured elimination reduces to zero give units with
+    small coefficients.
+  - For the dense core, compute y = v·adj(A) by CRT for a square independent
+    block A and a few extra rows v, then divide (y, −det A) by its content.
+- **Precision.** The logarithms are fixed-point big integers (`real.rs`:
+  `ln` with table-driven argument reduction). The elimination carries them
+  exactly. The precision needed is measured from two cheap passes, because
+  cancellation makes the coefficients far larger than the result.
+- **Regulator.** R is half the gcd of the unit logarithms. Each step
+  identifies the exact fraction λ/g with a continued fraction, so errors never
+  compound. The result is verified: R ≥ log((1+√5)/2), and every λ lies
+  within 2⁻²⁰ of a multiple of 2R.
+- **Acceptance.** Accept when h·R < √2 · √D·L(1, χ)/2.
+- **Negative norms.** A fundamental unit of norm −1 can only appear as a
+  product of elements of negative norm. So half the polynomials keep a near
+  √(2D)/2m, which makes Q(x) change sign. For D < 10^20, γ with |B| < √D are
+  also found by trial division.
+
 ## Timing against PARI 2.17.4
 
 One core of an AMD EPYC 7B13. D = −p for primes p ≡ 3 (mod 4) above 10^k.
@@ -100,3 +131,25 @@ Beyond 10^35, one discriminant per size. All six agree with PARI:
 | 43 |     30.3 |     1.02 |   30× |
 | 45 |     97.1 |     2.89 |   34× |
 | 47 |    219.4 |     5.37 |   41× |
+
+Real quadratic fields: D = p for the first three primes p ≡ 1 (mod 4) above
+10^k, `quadclassunit(D)` against `class_group_real(D)`. The table shows the
+median of three, in ms. All 51 agree with PARI, and so do 200 random
+fundamental discriminants from 10^5 to 10^30 and all 29 sampled from 10^3 to
+10^5: the class group exactly and the regulator to at least 15 significant
+digits.
+
+| k  | PARI | ours |
+|----|-----:|-----:|
+| 9  |    1 |    9 |
+| 13 |    3 |   19 |
+| 17 |    6 |   37 |
+| 21 |   26 |   62 |
+| 25 |   85 |  102 |
+| 29 |  197 |  184 |
+| 31 |  306 |  253 |
+| 33 |  638 |  383 |
+| 35 | 1274 |  738 |
+| 37 | 2180 |  616 |
+| 39 | 2608 |  934 |
+| 41 | 4570 | 1417 |

@@ -107,6 +107,11 @@ impl FactorBase {
 /// A relation: sum of e_i [p_i] = 0 (sparse, sorted by index).
 pub type Relation = Vec<(usize, i64)>;
 
+/// The element whose principal ideal a relation describes:
+/// prod ((B + sqrt D) / 2)^c over the pairs (B, c).  Real quadratic fields
+/// need it for the regulator.
+pub type Elem = Vec<(i128, i64)>;
+
 fn add_to(rel: &mut Vec<(usize, i64)>, i: usize, e: i64) {
     if let Some(x) = rel.iter_mut().find(|x| x.0 == i) {
         x.1 += e;
@@ -152,22 +157,26 @@ impl Rng {
 /// holds how often each factor-base prime occurs in the relations so far:
 /// the first prime of each a is the least covered one, so that every
 /// column gets relations (each relation of a polynomial contains all of a).
-pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mut Stats, counts: &mut Vec<u32>) -> Vec<Relation> {
+pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mut Stats, counts: &mut Vec<u32>) -> (Vec<Relation>, Vec<Elem>) {
     let d = &fb.d;
     let d_odd = bigmod(d, 2) as i128;
-    let absd = -d.to_f64().unwrap();
+    let absd = d.to_f64().unwrap().abs();
+    let real = d.sign() == num_bigint::Sign::Plus;
     let n = fb.primes.len();
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ seed);
     let m = par.m;
     let width = (2 * m + 1) as usize;
     let mut sieve = vec![0u8; width];
     let mut out: Vec<Relation> = vec![];
-    let mut partials: std::collections::HashMap<u64, (Relation, i32)> = std::collections::HashMap::new();
+    let mut elems: Vec<Elem> = vec![];
+    let mut partials: std::collections::HashMap<u64, (Relation, i32, i128)> = std::collections::HashMap::new();
     let pmax = fb.primes.last().unwrap().p;
     let ns = fb.primes.partition_point(|fp| fp.p <= par.sieve_bound);
     let lp_max = pmax * par.lp_mult;
     // target a ~ sqrt(|D|) / (2m); choose q's of a size so that k is small
-    let target = (absd.sqrt() / (2.0 * m as f64)).max(3.0);
+    // a so that |Q(x)| is balanced over |x| <= m: for D < 0, a m^2 = |D|/4a;
+    // for D > 0 (Q changes sign), a m^2 = D/2a
+    let target = ((if real { 2.0 } else { 1.0 } * absd).sqrt() / (2.0 * m as f64)).max(3.0);
     // candidate q's: odd FB primes (ramified ones too: their b is 0 mod q)
     let qs: Vec<usize> = (0..n).filter(|&i| fb.primes[i].p > 2 && fb.primes[i].p >= par.small.min(pmax / 4).max(3)).collect();
     // partners of the first q: sieved primes, which occur in many other
@@ -203,9 +212,21 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
         let before = out.len();
         // the first q: the least covered prime (ties: random); then primes
         // making a close to the target
-        let least = qs.iter().map(|&i| counts[i]).min().unwrap_or(0);
-        let low: Vec<usize> = qs.iter().cloned().filter(|&i| counts[i] == least).collect();
-        let q1 = low[(rng.next() % low.len() as u64) as usize];
+        // for D > 0 every other polynomial is free (a near the target, so
+        // that Q(x) takes both signs): units come from products of the
+        // elements, and with positive norms only, a unit of norm -1 (and so
+        // the regulator itself) could never appear
+        let covering = qs.iter().any(|&i| counts[i] == 0);
+        let free = real && (!covering || rng.next() % 4 == 0) && rng.next() % 2 == 0;
+        let q1 = if free {
+            let j = ((target.ln() / (pmax_partner / 2.0).ln()).ceil() as usize).max(1);
+            let win = window(target.powf(1.0 / j as f64));
+            win[(rng.next() % win.len() as u64) as usize]
+        } else {
+            let least = qs.iter().map(|&i| counts[i]).min().unwrap_or(0);
+            let low: Vec<usize> = qs.iter().cloned().filter(|&i| counts[i] == least).collect();
+            low[(rng.next() % low.len() as u64) as usize]
+        };
         let mut a_idx: Vec<usize> = vec![q1];
         tries[q1] += 1;
         let rest = target / fb.primes[q1].p as f64;
@@ -303,8 +324,8 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                 let x = j as i64 - m;
                 stats.candidates += 1;
                 let xi = x as i128;
-                let val = a * xi * xi + b * xi + c; // > 0
-                let mut v = val as u128;
+                let val = a * xi * xi + b * xi + c; // > 0 when D < 0
+                let mut v = val.unsigned_abs();
                 let bb = 2 * a * xi + b;
                 let mut rel: Relation = vec![];
                 for (i, fp) in fb.primes[..ns].iter().enumerate() {
@@ -347,6 +368,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                             counts[i] += 1;
                         }
                         out.push(rel);
+                        elems.push(vec![(bb, 1)]);
                         stats.full += 1;
                     }
                 } else if v <= lp_max as u128 && is_prime_u64(v as u64) {
@@ -357,9 +379,9 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                     let sl = if (bb - bl).rem_euclid(ml) == 0 { 1 } else { -1 };
                     match partials.remove(&l) {
                         None => {
-                            partials.insert(l, (rel, sl));
+                            partials.insert(l, (rel, sl, bb));
                         }
-                        Some((r1, s1)) => {
+                        Some((r1, s1, b1)) => {
                             // s2 r1 - s1 r2 eliminates [L]
                             let mut comb: Relation = vec![];
                             for &(i, e) in &r1 {
@@ -374,6 +396,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
                                     counts[i] += 1;
                                 }
                                 out.push(comb);
+                                elems.push(vec![(b1, sl as i64), (bb, -(s1 as i64))]);
                                 stats.partial_pairs += 1;
                             }
                         }
@@ -389,7 +412,7 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
         }
         idle = if out.len() > before { 0 } else { idle + (1 << (k - 1)) };
     }
-    out
+    (out, elems)
 }
 
 pub fn is_prime_u64(n: u64) -> bool {
@@ -469,7 +492,7 @@ mod tests {
             let par = Params { m: 1 << 13, small: 30, lp_mult: 30, slack: 2, sieve_bound: 3000 };
             let mut st = Stats { polys: 0, candidates: 0, full: 0, partial_pairs: 0 };
             let mut counts = vec![0; fb.primes.len()];
-            let rels = collect(&fb, 40, &par, 1, &mut st, &mut counts);
+            let (rels, _) = collect(&fb, 40, &par, 1, &mut st, &mut counts);
             let dd = BigInt::from(d);
             for r in &rels {
                 let mut f = Form::identity(&dd);

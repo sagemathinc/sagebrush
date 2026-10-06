@@ -20,6 +20,14 @@ pub enum Reduced {
 /// expressed through the others.  Large primes first.  Rows are sorted
 /// sparse vectors; a pivot row longer than `max_weight` is not used.
 pub fn eliminate(n: usize, rels: &[Relation], max_weight: usize) -> Reduced {
+    eliminate_with(n, rels, max_weight, None).0
+}
+
+/// eliminate, applying the same row operations to a payload per relation
+/// (e.g. logarithms of the elements, for real quadratic fields).  Also
+/// returns the indices of the relations giving the core rows, in order, and
+/// of those that became zero (kernel vectors: their payloads are units).
+pub fn eliminate_with(n: usize, rels: &[Relation], max_weight: usize, mut payload: Option<&mut [BigInt]>) -> (Reduced, Vec<usize>, Vec<usize>) {
     let mut rows: Vec<Vec<(u32, i64)>> = rels.iter().map(|r| r.iter().map(|&(c, e)| (c as u32, e)).collect()).collect();
     let mut dead = vec![false; rows.len()];
     let mut alive = vec![true; n];
@@ -30,7 +38,7 @@ pub fn eliminate(n: usize, rels: &[Relation], max_weight: usize) -> Reduced {
         }
     }
     if let Some(c) = (0..n).find(|&c| col_rows[c].is_empty()) {
-        return Reduced::Deficient(c);
+        return (Reduced::Deficient(c), vec![], vec![]);
     }
     let get = |r: &Vec<(u32, i64)>, c: u32| -> i64 { r.binary_search_by_key(&c, |x| x.0).map_or(0, |i| r[i].1) };
     let mut scratch: Vec<(u32, i64)> = vec![];
@@ -102,6 +110,10 @@ pub fn eliminate(n: usize, rels: &[Relation], max_weight: usize) -> Reduced {
                 }
                 rows[k as usize].clear();
                 rows[k as usize].extend_from_slice(&scratch);
+                if let Some(pl) = payload.as_deref_mut() {
+                    let delta = &pl[pk as usize] * f;
+                    pl[k as usize] -= delta;
+                }
             }
             alive[c] = false;
             progress = true;
@@ -113,17 +125,23 @@ pub fn eliminate(n: usize, rels: &[Relation], max_weight: usize) -> Reduced {
         pos[c] = i;
     }
     let mut dense = vec![];
+    let (mut core_rows, mut zero_rows) = (vec![], vec![]);
     for (k, r) in rows.into_iter().enumerate() {
-        if dead[k] || r.is_empty() {
+        if dead[k] {
             continue;
         }
+        if r.is_empty() {
+            zero_rows.push(k);
+            continue;
+        }
+        core_rows.push(k);
         let mut v = vec![0i64; cols.len()];
         for (c, e) in r {
             v[pos[c as usize]] = e;
         }
         dense.push(v);
     }
-    Reduced::Core(cols, dense)
+    (Reduced::Core(cols, dense), core_rows, zero_rows)
 }
 
 /// The determinant of a square integer matrix (Bareiss, fraction-free).
@@ -267,6 +285,87 @@ fn det_crt_impl(m: &[Vec<i64>], early: bool) -> BigInt {
         p -= 2;
     }
     value
+}
+
+/// det(A) and y = v adj(A) (so y A = det(A) v) modulo a prime p < 2^31,
+/// for a square A and rows v: Gauss-Jordan on [A^T | V^T].
+fn solve_mod_p(a: &[Vec<i64>], vs: &[Vec<i64>], p: u64) -> (u64, Vec<Vec<u64>>) {
+    let n = a.len();
+    let k = vs.len();
+    let br = Barrett::new(p);
+    let red = |x: i64| x.rem_euclid(p as i64) as u64;
+    // m = [A^T | V^T], n x (n + k)
+    let mut m: Vec<Vec<u64>> = (0..n).map(|i| (0..n).map(|j| red(a[j][i])).chain(vs.iter().map(|v| red(v[i]))).collect()).collect();
+    let mut det = 1u64;
+    for col in 0..n {
+        let Some(piv) = (col..n).find(|&i| m[i][col] != 0) else { return (0, vec![vec![0; n]; k]) };
+        if piv != col {
+            m.swap(piv, col);
+            det = (p - det) % p;
+        }
+        det = br.mul(det, m[col][col]);
+        let inv = crate::arith::invmod(m[col][col], p);
+        for x in m[col].iter_mut() {
+            *x = br.mul(*x, inv);
+        }
+        let pr = m[col].clone();
+        for (i, row) in m.iter_mut().enumerate() {
+            if i == col || row[col] == 0 {
+                continue;
+            }
+            let f = p - row[col];
+            for (x, &y) in row.iter_mut().zip(&pr) {
+                *x = br.reduce(*x + f * y);
+            }
+        }
+    }
+    // A^T X = V^T: x_v = column n + t; y = det x
+    let ys = (0..k).map(|t| (0..n).map(|i| br.mul(det, m[i][n + t])).collect()).collect();
+    (det, ys)
+}
+
+/// det(A) and the integer vectors y_t = v_t adj(A) (y_t A = det(A) v_t),
+/// by CRT over 31-bit primes, stopping once every value has been stable
+/// for two primes (as det_crt_probable).  Each y_t with -det(A) e_v is a
+/// kernel vector of the rows [A; v_t].
+pub fn kernel_crt(a: &[Vec<i64>], vs: &[Vec<i64>]) -> (BigInt, Vec<Vec<BigInt>>) {
+    let n = a.len();
+    let k = vs.len();
+    // all values: det, then the y's
+    let mut value: Vec<BigInt> = vec![BigInt::zero(); 1 + n * k];
+    let mut modulus = BigInt::one();
+    let mut stable = 0;
+    let mut p: u64 = (1 << 31) - 1;
+    let log2_bound: f64 = a.iter().chain(vs).map(|r| 0.5 * r.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().log2().max(0.0)).sum::<f64>() + 2.0;
+    while stable < 2 && (modulus.bits() as f64) < log2_bound {
+        while !crate::relations::is_prime_u64(p) {
+            p -= 2;
+        }
+        let (det, ys) = solve_mod_p(a, vs, p);
+        let residues: Vec<u64> = std::iter::once(det).chain(ys.into_iter().flatten()).collect();
+        let bp = BigInt::from(p);
+        let mm = modulus.mod_floor(&bp).to_u64().unwrap();
+        let minv = crate::arith::invmod(mm, p);
+        let mut changed = false;
+        let new_modulus = &modulus * &bp;
+        for (v, &r) in value.iter_mut().zip(&residues) {
+            let vm = v.mod_floor(&bp).to_u64().unwrap();
+            if vm != r {
+                changed = true;
+                let t = crate::arith::mulmod((r + p - vm) % p, minv, p);
+                *v += &modulus * BigInt::from(t);
+            }
+            if &*v * 2 > new_modulus {
+                *v -= &new_modulus;
+            }
+        }
+        stable = if changed { 0 } else { stable + 1 };
+        modulus = new_modulus;
+        p -= 2;
+    }
+    let det = value[0].clone();
+    let ys = (0..k).map(|t| value[1 + t * n..1 + (t + 1) * n].to_vec()).collect();
+    (det, ys)
 }
 
 /// n rows of `rows` that are linearly independent (greedy, modulo a
@@ -695,6 +794,20 @@ mod tests {
         // the HNF through the 128-bit path: Z^2 / <(2,0),(0,4)> with d = 2^100
         let w = hnf_mod_until(&[vec![2, 0], vec![0, 4], vec![2, 4]], 2, ModD128::new(1 << 100), 0.0);
         assert_eq!(smith(&cokernel(&w, ModD128::new(1 << 100))), vec![BigInt::from(4), BigInt::from(2)]);
+    }
+
+    #[test]
+    fn kernel_vectors() {
+        let a = vec![vec![2, 1, 0], vec![1, 3, 1], vec![0, 1, 4]];
+        let vs = vec![vec![5, -2, 7], vec![1, 1, 1]];
+        let (det, ys) = kernel_crt(&a, &vs);
+        assert_eq!(det, BigInt::from(18));
+        for (y, v) in ys.iter().zip(&vs) {
+            for j in 0..3 {
+                let lhs: BigInt = (0..3).map(|i| &y[i] * a[i][j]).sum();
+                assert_eq!(lhs, &det * v[j]);
+            }
+        }
     }
 
     #[test]
