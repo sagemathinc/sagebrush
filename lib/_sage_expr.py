@@ -989,27 +989,8 @@ def solve(f, *args, **kw):
     if kw.get("solution_dict"):
         return [{s.lhs(): s.rhs() for s in sol} for sol in sols]
     if len(names) == 1 and not many:
-        return _SolList(s for sol in sols for s in sol)
-    return _SolList(_SolList(sol) for sol in sols)
-
-
-class _SolList(list):
-    """Sage prints lists of equations one per line: [\\nx == 1,\\nx == 2\\n]."""
-
-    def __repr__(self):
-        if not self:
-            return "[]"
-        if all(isinstance(s, Expression) for s in self) and len(self) > 0 and not any(isinstance(s, list) for s in self):
-            return "[\n" + ",\n".join(str(s) for s in self) + "\n]"
-        return "[\n" + ",\n".join(_inline(s) for s in self) + "\n]"
-
-    __str__ = __repr__
-
-
-def _inline(s):
-    if isinstance(s, list):
-        return "[" + ", ".join(str(t) for t in s) + "]"
-    return str(s)
+        return [s for sol in sols for s in sol]
+    return [list(sol) for sol in sols]
 
 
 def integrate(f, *args, **kw):

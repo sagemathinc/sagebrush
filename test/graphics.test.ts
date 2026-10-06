@@ -91,3 +91,50 @@ print(s.count('class="sb-frame"'), 'data-delay="50"' in s)
 `);
   assert.equal(mpl, "4 True\n");
 });
+
+test("3D graphics: SVG and a scene for the WebGL viewer; .html saves the viewer", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sbplot3d-"));
+  const out = cli("--sage", "-c", `
+y, z = var('y z')
+g = plot3d(sin(x*y), (x, -3, 3), (y, -3, 3)) + point3d((0, 0, 1), color='red')
+print(g, len(g))
+print(g.description())
+b = g._repr_mimebundle_()
+print(sorted(b))
+import json
+s = json.loads(b['application/vnd.sagebrush.scene3d+json'])
+print(s['objects'][0]['type'], len(s['objects'][0]['idx']) // 3, s['lo'], s['hi'])
+h = implicit_plot3d(x^2 + y^2 + z^2 == 1, (x, -1.2, 1.2), (y, -1.2, 1.2), (z, -1.2, 1.2), plot_points=12)
+print(h.description())
+g.save('${dir}/a.svg'); g.save('${dir}/a.html')
+print(g._svg() == g._svg())
+`);
+  const lines = out.trim().split("\n");
+  assert.equal(lines[0], "Graphics3d Object 2");
+  assert.equal(lines[1], "3D plot: surface z = sin(x*y) of 1600 polygons, 1 point; x from -3 to 3; y from -3 to 3; z from -1 to 1");
+  assert.equal(lines[2], "['application/vnd.sagebrush.scene3d+json', 'image/svg+xml', 'text/html', 'text/plain']");
+  assert.match(lines[3], /^mesh 3200 \[-3\.0, -3\.0, -0\.99\d*\] \[3\.0, 3\.0, 1\.0\]$/);
+  assert.match(lines[4], /^3D plot: implicit surface of \d+ polygons; x from -1 to 1/);
+  assert.equal(lines[5], "True");
+  assert.match(readFileSync(join(dir, "a.svg"), "utf8"), /^<svg [^>]*aria-label="3D plot: surface z = sin\(x\*y\)/);
+  const html = readFileSync(join(dir, "a.html"), "utf8");
+  assert.match(html, /^<!DOCTYPE html>/);
+  assert.match(html, /SagebrushViewer3d\.mount\(document\.getElementById\("sb3d-/);
+});
+
+test("contour, density, implicit, region, vector and slope field plots", () => {
+  const out = cli("--sage", "-c", `
+y = var('y')
+for g in [contour_plot(x^2 - y^2, (x, -2, 2), (y, -2, 2)), density_plot(sin(x*y), (x, -3, 3), (y, -3, 3)),
+          implicit_plot(x^2 + y^2 == 1, (x, -2, 2), (y, -2, 2)), region_plot(x^2 + y^2 < 1, (x, -2, 2), (y, -2, 2)),
+          plot_vector_field((-y, x), (x, -2, 2), (y, -2, 2)), plot_slope_field(x - y, (x, -3, 3), (y, -3, 3))]:
+    print(g.description())
+`);
+  const lines = out.trim().split("\n");
+  assert.match(lines[0], /^Plot: contour plot of x\^2 - y\^2 with 7 levels, .*; x from -2 to 2, y from -2 to 2$/);
+  assert.match(lines[1], /^Plot: density plot of sin\(x\*y\), from -0\.99\d+ to 0\.99\d+; x from -3 to 3, y from -3 to 3$/);
+  assert.match(lines[2], /^Plot: line through \d+ points; x from -2 to 2, y from -2 to 2$/);
+  assert.match(lines[3], /^Plot: region where x\^2 \+ y\^2 < 1; x from -2 to 2, y from -2 to 2$/);
+  assert.match(lines[4], /^Plot: vector field \(-y, x\) at 400 points; x from -2 to 2, y from -2 to 2$/);
+  assert.match(lines[5], /^Plot: slope field of y' = x - y at 400 points; x from -3 to 3, y from -3 to 3$/);
+});

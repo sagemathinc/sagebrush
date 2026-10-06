@@ -17,7 +17,7 @@ __all__ = ["Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "li
 # Options of a whole picture (the rest belong to its primitives).
 GRAPHICS_OPTIONS = {"title", "axes_labels", "xmin", "xmax", "ymin", "ymax", "aspect_ratio",
                     "gridlines", "frame", "axes", "legend_loc", "figsize", "scale", "ticks",
-                    "tick_formatter", "fontsize", "show_legend", "dpi", "transparent"}
+                    "tick_formatter", "fontsize", "show_legend", "dpi", "transparent", "fit_aspect"}
 
 
 def _split(options):
@@ -108,7 +108,7 @@ class Graphics:
             al = list(o["axes_labels"]) + [None, None]
             p["xlabel"] = _tex(al[0]) if al[0] else None
             p["ylabel"] = _tex(al[1]) if al[1] else None
-        for k in ("title", "xmin", "xmax", "ymin", "ymax", "aspect_ratio", "frame", "axes", "legend_loc"):
+        for k in ("title", "xmin", "xmax", "ymin", "ymax", "aspect_ratio", "frame", "axes", "legend_loc", "fit_aspect"):
             if o.get(k) is not None:
                 p[k] = _tex(o[k]) if k == "title" else o[k]
         if o.get("gridlines"):

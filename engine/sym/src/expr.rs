@@ -621,6 +621,9 @@ pub fn mul2(a: &Expr, b: &Expr) -> Expr {
 }
 pub fn div(a: &Expr, b: &Expr) -> Expr {
     if b.is_zero() {
+        if crate::err::soft_division() {
+            return constant(Const::UnsignedInfinity);
+        }
         throw(SymError::DivisionByZero);
     }
     mul(vec![a.clone(), pow(b, &int(-1))])
@@ -649,6 +652,9 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
     if b.is_zero() {
         if let Some(n) = x.as_num() {
             if n.is_negative() {
+                if crate::err::soft_division() {
+                    return constant(Const::UnsignedInfinity);
+                }
                 throw(SymError::DivisionByZero);
             }
             if n.is_positive() {

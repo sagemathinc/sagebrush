@@ -197,9 +197,18 @@ the engines.
   linalg, fft, polynomials), checked against NumPy itself. Printed output and
   seeded random numbers are byte-identical. dense linear algebra, the FFT, `exp` and
   `log` run in Rust WebAssembly SIMD kernels ([kernels/](kernels)). See [NUMPY.md](NUMPY.md).
+- **Symbolic calculus:** in Sage mode, `var`, `diff`, `expand`, `factor`,
+  `simplify_full`, `taylor`, `series`, `limit`, `solve`, `subs`, `n` and
+  `latex` run on Sagebrush's own symbolic engine (Rust, `engine/sym`). Its
+  output is printed as Sage prints it, checked by `sage-tests/test_symbolic.sage`
+  and a corpus of 300 expressions. Symbolic integration is next.
 - **Plots and `@interact`:** Sage's `plot`/`point`/... and
   `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
-  rerun a function in milliseconds. See [PLOTTING.md](PLOTTING.md).
+  rerun a function in milliseconds. `plot3d`, `parametric_plot3d`,
+  `implicit_plot3d`, ... show in an interactive WebGL view (with an SVG for
+  files and agents). `contour_plot`, `density_plot`, `implicit_plot`,
+  `region_plot`, `plot_vector_field` and `plot_slope_field` draw functions
+  of two variables. See [PLOTTING.md](PLOTTING.md).
 
 ## Try it
 

@@ -104,6 +104,15 @@ try {
   // the symbolic x, and a field on which Sage 10.8.beta0's PARI fails ("bug in small_norm")
   out = await runCode("x = var('x')\nK.<a> = NumberField(x^3 + 838398*x - 5077)\nprint(K.class_group().invariants())");
   ok(out.includes("(8, 2, 2)"), "Sage mode: NumberField of a symbolic polynomial: " + out.trim());
+  // symbolic calculus (the Rust engine, engine/sym) and 3D graphics: an
+  // interactive WebGL view over the SVG, which stays when WebGL is missing
+  out = await runCode("print(solve(x^2 == 2, x), diff(x^3, x), limit(sin(x)/x, x=0))");
+  ok(out.includes("x == -sqrt(2)") && out.includes("3*x^2 1"), "Sage mode: solve, diff, limit: " + JSON.stringify(out.trim()));
+  out = await runCode("y = var('y')\nplot3d(sin(x*y), (x, -3, 3), (y, -3, 3))");
+  ok(await ev("!!document.querySelector('figure.plot3d svg[aria-label^=\"3D plot\"]')"), "plot3d shows a 3D figure with its SVG and description");
+  await sleep(500);
+  const webgl = await ev("(() => { const c = document.querySelector('figure.plot3d canvas'); return c ? c.getAttribute('aria-label').slice(0, 30) : null; })()");
+  console.log("     " + (webgl ? "WebGL view mounted: " + webgl : "no WebGL in this browser: the SVG shows"));
   // Stop: KeyboardInterrupt, in Python loops and in the Rust engine, keeping variables
   ok(await ev("crossOriginIsolated"), "the page is cross-origin isolated (COOP/COEP), so Stop can interrupt");
   out = await runAndStop("keep = 41\nwhile True:\n    pass", 800);

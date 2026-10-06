@@ -37,6 +37,10 @@ __all__ = [
     "Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d", "point",
     "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk", "arrow", "arrow2d",
     "bar_chart", "show", "graphics_array", "animate", "Animation",
+    "Graphics3d", "plot3d", "parametric_plot3d", "implicit_plot3d", "spherical_plot3d",
+    "cylindrical_plot3d", "revolution_plot3d", "sphere", "point3d", "line3d", "text3d", "arrow3d",
+    "polygon3d", "plot_vector_field3d", "contour_plot", "density_plot", "implicit_plot",
+    "region_plot", "plot_vector_field", "plot_slope_field",
     # interact
     "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
     "text_control",
@@ -51,7 +55,19 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         find_root, latex, _py_number)
 from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
-                       bar_chart, show, graphics_array, animate, Animation)
+                       bar_chart, show as _show2d, graphics_array, animate, Animation)
+from sage_plot3d import (Graphics3d, plot3d, parametric_plot3d, implicit_plot3d, spherical_plot3d,
+                         cylindrical_plot3d, revolution_plot3d, sphere, point3d, line3d, text3d,
+                         arrow3d, polygon3d, plot_vector_field3d)
+from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_plot,
+                              plot_vector_field, plot_slope_field)
+
+
+def show(obj, **options):
+    """Show a picture (2D or 3D), or anything else."""
+    if isinstance(obj, Graphics3d):
+        return obj.show(**options)
+    return _show2d(obj, **options)
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial

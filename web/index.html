@@ -480,10 +480,27 @@ function appendText(box, text, isErr) {
   pre.appendChild(isErr ? Object.assign(document.createElement("span"), { className: "e", textContent: text }) : document.createTextNode(text));
 }
 
+// 3D graphics: an interactive WebGL view (web/viewer3d.js, loaded on first
+// use) over the SVG, which stays for saving, agents and when WebGL fails.
+const SCENE3D = "application/vnd.sagebrush.scene3d+json";
+let viewer3d = null;
+function mount3d(fig, sceneText) {
+  viewer3d ??= import(new URL("sagebrush-viewer3d.js", location.href).href).then(() => window.SagebrushViewer3d);
+  viewer3d.then((v) => v?.mount(fig, JSON.parse(sceneText))).catch(() => {});
+}
+
 function appendDisplay(box, b) {
   const fig = document.createElement("figure");
   fig.className = "plot";
   const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
+  if (svg && b[SCENE3D]) {
+    fig.classList.add("plot3d");
+    fig.sbBundle = { [SCENE3D]: b[SCENE3D], "image/svg+xml": b["image/svg+xml"], "text/plain": b["text/plain"] ?? "3D plot" };
+    fig.appendChild(svg);
+    box.appendChild(fig);
+    mount3d(fig, b[SCENE3D]);
+    return;
+  }
   const raster = b["image/png"] ? ["image/png", b["image/png"]] : b["image/jpeg"] ? ["image/jpeg", b["image/jpeg"]] : null;
   if (svg) {
     fig.appendChild(svg);
@@ -1089,6 +1106,8 @@ function saveOutputs(box) {
   for (const el of box?.children ?? []) {
     if (el.tagName === "PRE") {
       for (const n of el.childNodes) stream(n.nodeType === 1 && n.classList.contains("e") ? "stderr" : "stdout", n.textContent);
+    } else if (el.tagName === "FIGURE" && el.sbBundle) {
+      outs.push({ output_type: "display_data", data: { ...el.sbBundle }, metadata: {} });
     } else if (el.tagName === "FIGURE") {
       const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
       if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }

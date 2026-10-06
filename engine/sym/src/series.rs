@@ -6,7 +6,7 @@
 //! (derivatives from diff.rs), so every differentiable function works.
 
 use crate::diff::{depends, diff};
-use crate::err::{not_implemented, value_error};
+use crate::err::{SymError, R};
 use crate::expr::*;
 use crate::simplify::simplify_rational;
 
@@ -93,9 +93,9 @@ impl Series {
     }
 
     /// 1/self (the leading coefficient must not be zero).
-    pub fn inv(&self) -> Series {
+    pub fn inv(&self) -> R<Series> {
         if self.c.is_empty() {
-            value_error("division by a series that vanishes to this order");
+            return Err(SymError::Value("division by a series that vanishes to this order".into()));
         }
         let n = self.c.len();
         let a0 = &self.c[0];
@@ -108,17 +108,17 @@ impl Series {
             }
             b.push(clean(&neg(&mul2(&ia0, &add(t)))));
         }
-        Series { v: -self.v, c: b }.normalize()
+        Ok(Series { v: -self.v, c: b }.normalize())
     }
 
     /// self^r for a rational r (the valuation times r must be an integer).
-    pub fn pow_rat(&self, r: &crate::num::Q) -> Series {
+    pub fn pow_rat(&self, r: &crate::num::Q) -> R<Series> {
         if self.c.is_empty() {
-            return self.clone();
+            return Ok(self.clone());
         }
         let vr = crate::num::Q::from_integer(self.v.into()) * r;
         if !vr.is_integer() {
-            not_implemented("Puiseux series (fractional powers of the variable) are not supported");
+            return Err(SymError::NotImplemented("Puiseux series (fractional powers of the variable) are not supported".into()));
         }
         // (a0 t^v (1 + u))^r = a0^r t^(v r) (1 + u)^r
         let a0 = self.c[0].clone();
@@ -142,14 +142,14 @@ impl Series {
         }
         let mut s = acc.scale(&pow(&a0, &re));
         s.v += num_traits::ToPrimitive::to_i64(&vr.to_integer()).unwrap();
-        s
+        Ok(s)
     }
 
     /// f(self) for a function of one variable, via its Taylor expansion at
     /// the constant term.
-    pub fn compose(&self, f: &dyn Fn(&Expr) -> Expr, prec: i64) -> Series {
+    pub fn compose(&self, f: &dyn Fn(&Expr) -> Expr, prec: i64) -> R<Series> {
         if self.v < 0 {
-            not_implemented("expansion of a function at a pole of its argument");
+            return Err(SymError::NotImplemented("expansion of a function at a pole of its argument".into()));
         }
         let y = sym("__series_y");
         let a = self.coeff(0);
@@ -179,7 +179,7 @@ impl Series {
                 break;
             }
         }
-        out
+        Ok(out)
     }
 
     pub fn to_expr(&self, t: &Expr) -> Expr {
@@ -188,79 +188,81 @@ impl Series {
 }
 
 /// The series of e in the variable x at 0, with coefficients up to t^(prec-1).
-pub fn series(e: &Expr, x: &str, prec: i64) -> Series {
+pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
     sagebrush_interrupt::check();
     if !depends(e, x) {
-        return Series::constant(e, prec);
+        return Ok(Series::constant(e, prec));
     }
-    match &e.kind {
+    Ok(match &e.kind {
         Kind::Sym(_) => {
             let mut c = vec![zero(); (prec - 1).max(1) as usize];
             c[0] = one();
             Series { v: 1, c }
         }
         Kind::Add(v) => {
-            let mut s = series(&v[0], x, prec);
+            let mut s = series(&v[0], x, prec)?;
             for t in &v[1..] {
-                s = s.add(&series(t, x, prec));
+                s = s.add(&series(t, x, prec)?);
             }
             s
         }
         Kind::Mul(v) => {
             // extra precision to absorb negative valuations of the factors
-            let vals: Vec<i64> = v.iter().map(|f| series(f, x, 2).v.min(0)).collect();
-            let extra: i64 = -vals.iter().sum::<i64>();
-            let mut s = series(&v[0], x, prec + extra);
+            let mut extra = 0;
+            for f in v {
+                extra -= series(f, x, 2)?.v.min(0);
+            }
+            let mut s = series(&v[0], x, prec + extra)?;
             for f in &v[1..] {
-                s = s.mul(&series(f, x, prec + extra));
+                s = s.mul(&series(f, x, prec + extra)?);
             }
             s.truncate(prec)
         }
         Kind::Pow(b, p) if b.is_const(Const::E) => {
-            let s = series(p, x, prec + 2);
-            s.compose(&|y: &Expr| exp(y), prec).truncate(prec)
+            let s = series(p, x, prec + 2)?;
+            s.compose(&|y: &Expr| exp(y), prec)?.truncate(prec)
         }
         Kind::Pow(b, p) => {
             if depends(p, x) {
                 // b^p = e^(p log b)
                 return series(&exp(&mul2(p, &log(b))), x, prec);
             }
-            let bs = series(b, x, prec + 2);
+            let bs = series(b, x, prec + 2)?;
             if let Some(k) = p.as_i64() {
                 if k >= 0 {
                     let mut r = Series::constant(&one(), prec + 2);
                     for _ in 0..k {
                         r = r.mul(&bs);
                     }
-                    return r.truncate(prec);
+                    return Ok(r.truncate(prec));
                 }
                 let extra = -bs.v * k.abs() + 2;
-                let bs = series(b, x, prec + extra.max(2));
-                let mut r = bs.inv();
+                let bs = series(b, x, prec + extra.max(2))?;
+                let mut r = bs.inv()?;
                 let base = r.clone();
                 for _ in 1..(-k) {
                     r = r.mul(&base);
                 }
-                return r.truncate(prec);
+                return Ok(r.truncate(prec));
             }
             if let Some(r) = p.as_rat() {
-                return bs.pow_rat(r).truncate(prec);
+                return Ok(bs.pow_rat(r)?.truncate(prec));
             }
             // a symbolic exponent: through the derivatives
             let p2 = p.clone();
-            bs.compose(&move |y: &Expr| pow(y, &p2), prec)
+            bs.compose(&move |y: &Expr| pow(y, &p2), prec)?
         }
         Kind::Fun(f, a) if a.len() == 1 => {
-            let s = series(&a[0], x, prec + 2);
+            let s = series(&a[0], x, prec + 2)?;
             if *f == Fun::Log && s.v > 0 {
-                not_implemented("the expansion has a logarithmic term (log of something that vanishes)");
+                return Err(SymError::NotImplemented("the expansion has a logarithmic term (log of something that vanishes)".into()));
             }
             let f2 = f.clone();
-            s.compose(&move |y: &Expr| fun1(f2.clone(), y), prec).truncate(prec)
+            s.compose(&move |y: &Expr| fun1(f2.clone(), y), prec)?.truncate(prec)
         }
-        Kind::Fun(..) | Kind::Rel(..) => not_implemented(format!("series of {}", crate::to_string(e))),
+        Kind::Fun(..) | Kind::Rel(..) => return Err(SymError::NotImplemented(format!("series of {}", crate::to_string(e)))),
         _ => Series::constant(e, prec),
-    }
+    })
 }
 
 impl Series {
@@ -277,7 +279,7 @@ pub fn taylor(e: &Expr, x: &str, a: &Expr, n: i64) -> Expr {
     let xs = sym(x);
     let t = sym("__taylor_t");
     let shifted = subs(e, &[(xs.clone(), add2(a, &t))]);
-    let s = series(&shifted, "__taylor_t", n + 1);
+    let s = series(&shifted, "__taylor_t", n + 1).unwrap_or_else(|e| crate::err::throw(e));
     let poly = s.to_expr(&t);
     let base = if a.is_zero() { xs.clone() } else { sub(&xs, a) };
     subs(&poly, &[(t, base)])
