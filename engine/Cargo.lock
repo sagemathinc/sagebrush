@@ -466,6 +466,7 @@ dependencies = [
  "rayon",
  "sagebrush-ap",
  "sagebrush-modsym",
+ "sagebrush-web",
 ]
 
 [[package]]
@@ -482,6 +483,7 @@ version = "0.1.0"
 dependencies = [
  "num-bigint",
  "sagebrush-ap",
+ "sagebrush-classgroup",
  "sagebrush-modsym",
  "sagebrush-poly",
  "serde_json",

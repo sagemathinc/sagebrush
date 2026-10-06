@@ -54,8 +54,14 @@ pub struct Embeddings {
 
 /// The roots of f (monic, integer) in f64 by Aberth's iteration.
 fn roots_f64(f: &[BigInt]) -> Vec<(f64, f64)> {
-    let n = f.len() - 1;
     let fc: Vec<f64> = f.iter().map(|c| c.to_f64().unwrap()).collect();
+    aberth(&fc)
+}
+
+/// The roots of a monic polynomial with f64 coefficients (constant term
+/// first) by Aberth's iteration.
+pub fn aberth(fc: &[f64]) -> Vec<(f64, f64)> {
+    let n = fc.len() - 1;
     // Cauchy bound for the initial circle
     let bound = 1.0 + fc[..n].iter().map(|c| c.abs()).fold(0.0, f64::max);
     let mut z: Vec<C> = (0..n).map(|k| {

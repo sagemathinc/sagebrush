@@ -160,14 +160,35 @@ const GENS = /^(\s*)([A-Za-z_]\w*)\.<\s*([A-Za-z_][\w\s,]*)>\s*=\s*(.+?)\s*$/;
 function generators(line: string): string {
   const m = GENS.exec(line);
   if (!m) return line;
-  const [, indent, name, gens, rhs0] = m;
+  const [, indent, name, gens, all] = m;
   const names = gens.split(",").map((g) => g.trim()).filter(Boolean);
   const tuple = `(${names.map((n) => `'${n}'`).join(", ")},)`;
-  let rhs = rhs0;
+  // only the first statement: K.<a> = NumberField(f); print(K)
+  const cut = topLevelSemicolon(all);
+  const rest = cut < 0 ? "" : all.slice(cut);
+  let rhs = (cut < 0 ? all : all.slice(0, cut)).trimEnd();
   if (rhs.endsWith("[]")) rhs = rhs.slice(0, -2) + `[${tuple}]`;
   else if (rhs.endsWith("()")) rhs = rhs.slice(0, -1) + `names=${tuple})`;
   else if (rhs.endsWith(")")) rhs = rhs.slice(0, -1) + `, names=${tuple})`;
-  return `${indent}${name} = ${rhs}; (${names.join(", ")},) = ${name}._first_ngens(${names.length})`;
+  return `${indent}${name} = ${rhs}; (${names.join(", ")},) = ${name}._first_ngens(${names.length})${rest}`;
+}
+
+/** The index of the first ';' outside brackets and strings, or -1. */
+function topLevelSemicolon(s: string): number {
+  let depth = 0;
+  let quote = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === ";" && depth === 0) return i;
+    else if (c === "#") return -1;
+  }
+  return -1;
 }
 
 // f(x,y) = expr at the start of a statement (Sage's preparse_calculus).

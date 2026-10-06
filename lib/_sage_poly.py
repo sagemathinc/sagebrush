@@ -500,6 +500,11 @@ class Polynomial:
     def roots(self, ring=None, multiplicities=True):
         """The roots in the base ring (or `ring`, ZZ or QQ): [(root, m)]."""
         R = ring if ring is not None else self._ring._base
+        sa = _sa()
+        if R is sa.RR or R is getattr(sa, "CC", None):
+            from _sage_matrix import numeric_roots
+            out = numeric_roots(self.list(), R)
+            return out if multiplicities else [r for r, _ in out]
         out = []
         for g, e in self.factor():
             if isinstance(g, Polynomial) and g.degree() == 1:

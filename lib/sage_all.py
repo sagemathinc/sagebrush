@@ -13,6 +13,9 @@ __all__ = [
     # modular forms and elliptic curves (Sagebrush's engines)
     "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
     "Newforms", "newform_orbits",
+    # number fields, integer matrices (engine/classgroup)
+    "NumberField", "QuadraticField", "CyclotomicField",
+    "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "PolynomialRing", "polygen", "parent",
     "is_prime", "is_prime_power", "is_square", "next_prime", "previous_prime", "nth_prime",
@@ -43,6 +46,9 @@ from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, l
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
+from _sage_nf import NumberField, QuadraticField, CyclotomicField
+from _sage_matrix import matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC
+Matrix = matrix
 
 
 def parent(x):
@@ -433,7 +439,13 @@ def factor(n):
         while n % p == 0:
             out[p] = out.get(p, 0) + 1
             n //= p
-    _factor_into(n, out)
+    if n > 1 << 40:
+        # the Rust engine (sagebrush.nf.factor_integer)
+        from sagebrush import nf as _nfmod
+        for p, e in _nfmod.factor_integer(n):
+            out[p] = out.get(p, 0) + e
+    else:
+        _factor_into(n, out)
     return Factorization(sorted(out.items()), unit)
 
 

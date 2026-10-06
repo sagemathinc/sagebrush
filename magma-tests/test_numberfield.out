@@ -1,0 +1,74 @@
+Number Field with defining polynomial x^3 - 11 over the Rational Field
+-3267
+3
+1 1
+Maximal Equation Order with defining polynomial x^3 - 11 over its ground order
+-3267
+2
+[
+    1,
+    a,
+    a^2
+]
+[ <59649589127497217, 1>, <5704689200685129054721, 1> ]
+[ 4  6  2]
+[ 3  9 12]
+[ 1  1  1]
+[ 1  1  1]
+[ 0  2 13]
+[ 0  0 15]
+[ 1, 1, 30 ]
+[ 0  0  1]
+[-1  1  0]
+[ 2  1  0]
+[
+    1,
+    b,
+    1/2*(b^2 + b)
+]
+3
+3*a^2 + 3*a + 12
+12
+3
+$.1^3 - 3*$.1^2 + 3*$.1 - 12
+Quadratic Field with defining polynomial x^2 + 23 over the Rational Field
+Quadratic Field with defining polynomial x^2 - 10 over the Rational Field
+Maximal Order of Equation Order with defining polynomial x^3 + x^2 - 2*x + 8 over its ground order
+[
+    1,
+    b,
+    1/2*(b^2 + b)
+]
+Abelian Group isomorphic to Z/2 + Z
+Defined on 2 generators
+Relations:
+    2*U.1 = 0
+Abelian Group isomorphic to Z/2
+Defined on 1 generator
+Relations:
+    2*C.1 = 0
+Abelian Group isomorphic to Z/6
+Defined on 1 generator
+Relations:
+    6*$.1 = 0
+Mapping from: Abelian Group isomorphic to Z/6
+Defined on 1 generator
+Relations:
+    6*$.1 = 0 to Maximal Order of Equation Order with defining polynomial x^2 + 3 over its ground order
+[ 2 -4  6]
+[ 3  0 -1]
+[  1   4  -7]
+[  0  12 -20]
+2
+[ 1, 4 ]
+-2
+[ 2  3]
+[-4  0]
+[ 6 -1]
+2 3
+( 2 -4  6)
+-1
+1/2*b
+1/2*(b^2 + b)
+1/2*a^2
+4 0

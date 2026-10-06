@@ -337,6 +337,15 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
     Ok(d)
 }
 
+/// One JSON request to the engines (the same dispatcher as the WebAssembly
+/// build, engine/web): `{"fn": name, ...}` -> `{"ok": ...}` or
+/// `{"error": ...}`.  The pure-Python modules built on it (sagebrush.nf,
+/// sagebrush.poly) are shared with the browser runtime.
+#[pyfunction]
+fn call(py: Python<'_>, request: String) -> String {
+    py.detach(|| sagebrush_web::call(&request))
+}
+
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
@@ -363,5 +372,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mf.add_function(wrap_pyfunction!(charpoly, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newspace, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newforms, &mf)?)?;
-    m.add_submodule(&mf)
+    m.add_submodule(&mf)?;
+    m.add_function(wrap_pyfunction!(call, m)?)
 }

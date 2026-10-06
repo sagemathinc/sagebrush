@@ -10,9 +10,43 @@ in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: three engines (modular symbols with newforms, a_p of elliptic curves, and factoring
-in Z[x]), not
-published to any package registry, and no license chosen yet.
+Status: early, unpublished. Engines for modular symbols and newforms, a_p
+of elliptic curves, polynomials over Z, and class groups and units of number
+fields; a Python front end in the browser with Sage and Magma modes.
+
+## Principles
+
+These define what Sagebrush is.
+
+1. **Rust at the core.** The mathematics is written in Rust: fast,
+   memory-safe, and one code base from a browser tab to a 64-core server.
+   Python, JavaScript, Sage and Magma are thin interfaces over it.
+2. **Permissive licenses.** Sagebrush's own code is MIT OR Apache-2.0, so
+   anyone can use it, embed it or ship it. No GPL code is linked into an
+   engine. GPL systems such as PARI, Sage, Magma and FLINT are used only from
+   the outside, as oracles in tests and as benchmarks. They are never
+   dependencies, and never sources to port. Algorithms are implemented
+   clean-room from the literature. An independent implementation has
+   mathematical value of its own: when it agrees with PARI, that is evidence
+   about both.
+3. **Portable and lightweight.** Pure Rust, with no C libraries (no GMP,
+   FLINT or PARI) and no build system beyond `cargo`. So every engine also
+   compiles to WebAssembly and runs wherever WebAssembly runs: in the
+   browser, in Node, in a chat artifact, and in CPython through the same
+   code. The whole engine is one 1.4 MB `.wasm` file.
+4. **Asymptotically fast.** Performance is measured as the inputs grow,
+   against the best existing system, and published as tables with every
+   number. The goal is to win on the large computations that research needs,
+   not on toy sizes.
+5. **Proven, or labelled.** Every result says what it rests on: *proven*,
+   *conditional on GRH*, or *heuristic*.
+6. **Familiar, checked interfaces.** Sage's and Magma's APIs are consistent,
+   documented and known to mathematicians, so Sagebrush speaks both. The test
+   suites check printed output byte for byte against Sage and Magma
+   themselves. Every engine also has a plain-data API (lists, ints, dicts)
+   for programs and AI agents.
+7. **Small strong engines, one core.** Many focused engines sharing
+   arithmetic and linear algebra, not one monolith.
 
 ## What works today
 
@@ -29,6 +63,28 @@ range. It reproduces Cremona's tables exactly for every conductor up to
 9999 (38,042 isogeny classes) in 14 minutes on 16 cores, and agrees prime
 by prime with point counts from `ap`. See
 [results/newforms.md](results/newforms.md).
+
+**Class groups and units** (`engine/classgroup`, MIT/Apache, clean-room;
+see [its README](engine/classgroup/README.md)):
+
+- **Imaginary quadratic fields:** Jacobson's sieve. Up to 44x faster than
+  PARI's `quadclassunit` (10^47: 5.4 s against 219 s).
+- **Real quadratic fields:** class group and regulator. Faster than PARI
+  from 10^25.
+- **General number fields** (`bnfinit`):
+  - the maximal order by Round 2;
+  - prime decomposition, including common index divisors;
+  - the class group, regulator and roots of unity, by Buchmann's method with
+    units kept in compact form.
+  - Agrees with PARI on every field tested (up to |d| ~ 10^35); about 10x
+    slower at small d and close to even at 10^35.
+- **Integer algorithms:** factoring (Pollard rho and ECM), the Hermite and
+  Smith normal forms, exact LLL, and complex roots to any precision.
+
+All of it runs in Sage mode (`NumberField`, `QuadraticField`,
+`class_group()`, `regulator()`, `matrix(ZZ, ...).LLL()`, ...), in Magma mode
+(`ClassGroup`, `MaximalOrder`, `HermiteForm`, ...), and from Python as
+`from sagebrush import nf`.
 
 **`modsym`**: weight-2 modular symbols for Gamma0(N), sign +1:
 
@@ -76,16 +132,31 @@ the engines.
   integers, sequences, sets, tuples, reals to 30 digits, polynomials,
   modular symbols, newforms and elliptic curves. `magma-tests/` checks
   500 lines against Magma itself.
+- **Number fields and integer matrices:** in Sage mode, `K.<a> =
+  NumberField(x^3 - 11)`, `QuadraticField`, `CyclotomicField`, with
+  `discriminant`, `signature`, `integral_basis`, `maximal_order`,
+  `primes_above`, `factor`, `class_group`, `class_number`, `unit_group` and
+  `regulator`. Field elements support arithmetic, `norm`, `trace` and
+  `minpoly`. `matrix(ZZ, ...)` supports `hermite_form`,
+  `elementary_divisors`, `smith_form`, `LLL`, `det` and `inverse`. Also
+  `roots(RR)`, `roots(CC)`, and `factor(n)` by ECM. In Magma mode:
+  `NumberField`, `QuadraticField`, `MaximalOrder`, `IntegralBasis`,
+  `ClassGroup`, `ClassNumber`, `UnitGroup`, `Signature`, `Decomposition`,
+  `Matrix`, `HermiteForm`, `SmithForm`, `ElementaryDivisors` and `LLL`.
+  Checked against Sage (`sage-tests/test_numberfield.sage`) and Magma
+  (`magma-tests/test_numberfield.m`).
 - **Modular forms, elliptic curves and polynomials:** in Sage mode,
   `ModularSymbols`, `CuspForms`, `ModularForms`, `Newforms`, `Gamma0`,
   `DirichletGroup`, `EllipticCurve` and polynomial rings over `ZZ` and `QQ`
   (`R.<x> = ZZ[]`, `f.factor()`, `f.roots()`, `gcd`, `discriminant`) run on
-  the Sagebrush engines (a 700 KB WebAssembly build of `engine/web`, loaded
+  the Sagebrush engines (a 1.4 MB WebAssembly build of `engine/web`, loaded
   on first use), with Sage's printed output: `sage-tests/` checks 3,200
   lines against Sage. `newform_orbits(N, k)` lists every Galois orbit of
   newforms with its LMFDB label, dimension, trace form and Hecke
-  characteristic polynomial. `from sagebrush import modsym, ap, mf` is the API
-  of the native Python package.
+  characteristic polynomial. `from sagebrush import modsym, ap, mf, nf, poly`
+  is the API of the native Python package. `nf` and `poly` are the same
+  Python files in the browser and in CPython, over one JSON dispatcher
+  (`engine/web`).
 - **The Atlas** ([sagebrush.space/atlas](https://sagebrush.space/atlas/)):
   an LMFDB-style site of the 7,961 Galois orbits of newforms of weight 2
   and level ≤ 1000 (and weights 4–12 with Nk² ≤ 4000), proven by the
@@ -160,6 +231,12 @@ first build. For `ap` it checks agreement with smalljac and Sage (see
 - the charpoly kernel against determinants, the AVX2 kernels against the
   portable ones, and P^1(Z/NZ) by brute force.
 
+`cargo test -p sagebrush-classgroup` checks the class group engine against
+brute force and against values from PARI (used as an oracle), along with
+its layers (Round 2, prime decomposition, LLL, Barrett and Montgomery
+arithmetic, ECM, kernel vectors, the unit lattice). Larger comparisons
+against PARI are in [engine/classgroup/README.md](engine/classgroup/README.md).
+
 For `poly` (Zassenhaus: square-free decomposition, Cantor-Zassenhaus modulo
 several primes, quadratic Hensel lifting on a factor tree, recombination) it
 checks the factorization against FLINT on 400 random products, the
@@ -180,7 +257,7 @@ caveats: [results/engine-exact.md](results/engine-exact.md) and
 
 | path | contents |
 |---|---|
-| `engine/` | the Rust workspace: engines `modsym`, `ap` and `poly`; bindings `cli`, `py`, `node`, `wasm`, `web`; `bench` |
+| `engine/` | the Rust workspace: engines `modsym`, `ap`, `poly` and `classgroup`; bindings `cli`, `py`, `node`, `wasm`, `web`; `bench` |
 | `kernels/` | Rust WebAssembly SIMD kernels (matmul, LU, QR, eigenproblems, SVD, FFT, exp, log) for the numpy runtime |
 | `results/` | write-ups of every experiment, with numbers |
 | `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |
@@ -203,4 +280,6 @@ reference.
 
 ## License
 
-Not chosen yet.
+Sagebrush's code is to be MIT OR Apache-2.0 (see Principles).
+`engine/classgroup` already declares it. The LICENSE files will be added
+once the whole tree has been checked for anything that cannot be relicensed.

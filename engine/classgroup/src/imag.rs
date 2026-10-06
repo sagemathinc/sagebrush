@@ -121,7 +121,7 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
     let fb = FactorBase::new(d, bound.max(60));
     let n = fb.primes.len();
     tm.fb = n;
-    let t0 = std::time::Instant::now();
+    let t0 = crate::clock::Instant::now();
     // Bach's error term is O(log |D| / (sqrt x log x)): x of the order of
     // log^2 |D|.  Measured against 400 known class numbers up to 10^35,
     // even x = 256 stays within 4.2% (the acceptance window is 41%).
@@ -137,7 +137,7 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
     let mut counts = vec![0u32; n];
     for round in 0..200 {
         tm.rounds = round + 1;
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         let (found, _) = collect(&fb, want - rels.len(), &tu.sieve, round as u64 + 1, &mut stats, &mut counts);
         if found.is_empty() {
             // the small sieve base finds nothing for some forced prime
@@ -145,7 +145,7 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
         }
         rels.extend(found);
         tm.sieve_s += t.elapsed().as_secs_f64();
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         // relations to add if this round fails: a few per column lacking
         // one, else a fifth more
         let mut more = (rels.len() / 5).max(10);
@@ -259,7 +259,7 @@ fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, seed: u64, debug: bool) -
 /// stops once the order is at most `enough`; `first_det` is det of the sel
 /// rows if known.  None if no multiple of det L was found.
 pub(crate) fn lattice_group(rows: &[Vec<i64>], c: usize, sel: &[usize], first_det: Option<BigInt>, enough: f64, seed: u64, debug: bool) -> Option<(BigInt, Vec<BigInt>)> {
-    let t = std::time::Instant::now();
+    let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     // a multiple of det L: the gcd of the determinants of a few independent
     // square subsets, until it is word-sized

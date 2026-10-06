@@ -1,6 +1,5 @@
-//! Factoring integers: trial division, Miller-Rabin, Pollard-Brent rho.
-//! Enough for the discriminants of the number fields we meet (the
-//! cofactors that matter have small prime factors or are prime).
+//! Factoring integers: trial division, Miller-Rabin, perfect powers,
+//! Pollard-Brent rho and the elliptic curve method (ecm.rs).
 
 use num_bigint::BigInt;
 use num_integer::Integer;
@@ -41,51 +40,22 @@ pub fn is_probable_prime(n: &BigInt) -> bool {
     true
 }
 
-/// A nontrivial factor of a composite n (Pollard rho, Brent's variant with
-/// batched gcds), or None after many tries.
-fn rho(n: &BigInt) -> Option<BigInt> {
-    if n.is_even() {
-        return Some(BigInt::from(2));
-    }
-    for c in 1u32..50 {
-        let f = |x: &BigInt| (x * x + c) % n;
-        let (mut y, m) = (BigInt::from(2), 128usize);
-        let (mut g, mut r, mut q) = (BigInt::one(), 1usize, BigInt::one());
-        let (mut x, mut ys) = (BigInt::zero(), BigInt::zero());
-        while g.is_one() {
-            x = y.clone();
-            for _ in 0..r {
-                y = f(&y);
-            }
-            let mut k = 0;
-            while k < r && g.is_one() {
-                ys = y.clone();
-                for _ in 0..m.min(r - k) {
-                    y = f(&y);
-                    q = (q * (&x - &y).abs()) % n;
-                }
-                g = q.gcd(n);
-                k += m;
-            }
-            r *= 2;
-            if r > 1 << 26 {
-                break;
-            }
-        }
-        if &g == n {
-            loop {
-                ys = f(&ys);
-                g = (&x - &ys).abs().gcd(n);
-                if !g.is_one() {
-                    break;
-                }
-            }
-        }
-        if !g.is_one() && &g != n {
-            return Some(g);
+
+/// A nontrivial factor of a composite n (no factors below 2^16): a perfect
+/// power's root, then Pollard-Brent rho (in Montgomery arithmetic; factors
+/// up to ~10^12), then the elliptic curve method.
+fn split(n: &BigInt) -> Option<BigInt> {
+    for k in (2..=n.bits() as u32 / 16).rev() {
+        let r = num_integer::Roots::nth_root(n, k);
+        if r.pow(k) == *n {
+            return Some(r);
         }
     }
-    None
+    let nu = n.to_biguint()?;
+    if let Some(d) = super::ecm::rho(&nu, 1 << 20, 0x9E37_79B9) {
+        return Some(BigInt::from(d));
+    }
+    super::ecm::ecm(&nu, 0x2545_F491_4F6C_DD1D).map(BigInt::from)
 }
 
 /// The factorization of |n| > 0 as sorted (prime, exponent) pairs.  A
@@ -118,7 +88,7 @@ pub fn factor(n: &BigInt) -> Vec<(BigInt, u32)> {
     while let Some(m) = stack.pop() {
         if is_probable_prime(&m) {
             push(m, &mut out);
-        } else if let Some(d) = rho(&m) {
+        } else if let Some(d) = split(&m) {
             stack.push(&m / &d);
             stack.push(d);
         } else {
