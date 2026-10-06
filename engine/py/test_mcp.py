@@ -59,6 +59,18 @@ def raw():
     print("raw protocol: ok")
 
 
+def piped():
+    # requests piped in, stdin closed at once: every call is still answered
+    reqs = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "factor(2026)"}}},
+    ]
+    p = subprocess.run([sys.executable, "-m", "sagebrush.mcp_server"], input="".join(json.dumps(r) + "\n" for r in reqs), capture_output=True, text=True, timeout=120)
+    out = [json.loads(l) for l in p.stdout.splitlines() if l.strip()]
+    assert any(m.get("id") == 2 and m["result"]["content"][0]["text"] == "2 * 1013" for m in out), out
+    print("piped input: ok")
+
+
 def sdk():
     try:
         import anyio
@@ -83,4 +95,5 @@ def sdk():
 
 if __name__ == "__main__":
     raw()
+    piped()
     sdk()

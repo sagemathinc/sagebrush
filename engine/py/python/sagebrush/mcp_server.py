@@ -160,6 +160,7 @@ class Server:
         self.running = {}  # request id -> True while a tool runs
         self.work = threading.Lock()  # one computation at a time
         self.plots = 0
+        self.threads = []
 
     # ---- transport
     def send(self, msg):
@@ -283,7 +284,9 @@ class Server:
             self.reply(rid, {"tools": TOOLS})
         elif method == "tools/call":
             self.running[rid] = True
-            threading.Thread(target=self.handle_tool_call, args=(rid, params), daemon=True).start()
+            t = threading.Thread(target=self.handle_tool_call, args=(rid, params), daemon=True)
+            self.threads = [x for x in self.threads if x.is_alive()] + [t]
+            t.start()
         elif method == "resources/list":
             self.reply(rid, {"resources": [{"uri": GUIDE_URI, "name": "guide", "title": "What Sagebrush implements", "mimeType": "text/markdown"}]})
         elif method == "resources/read":
@@ -314,6 +317,9 @@ class Server:
                 except Exception as e:  # never die on one bad message
                     if isinstance(m, dict) and m.get("id") is not None:
                         self.error(m["id"], -32603, "%s: %s" % (type(e).__name__, e))
+        # end of input: answer the calls still running, then stop
+        for t in self.threads:
+            t.join()
         if self.session is not None:
             self.session.close()
 
