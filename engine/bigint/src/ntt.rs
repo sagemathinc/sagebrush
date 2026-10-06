@@ -88,6 +88,17 @@ fn primitive_root(p: u64) -> u64 {
     (2..).find(|&g| qs.iter().all(|&q| m.pow(g, (p - 1) / q) != 1)).unwrap()
 }
 
+fn root_cached(p: u64) -> u64 {
+    static ROOTS: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+    let mut r = ROOTS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(&(_, g)) = r.iter().find(|x| x.0 == p) {
+        return g;
+    }
+    let g = primitive_root(p);
+    r.push((p, g));
+    g
+}
+
 /// The table for p of length at least 2^log (cached; at most a few primes
 /// are kept, the most recently used).
 fn table_for(p: u64, log: u32) -> Arc<Table> {
@@ -98,10 +109,14 @@ fn table_for(p: u64, log: u32) -> Arc<Table> {
         cache.push(t.clone());
         return t;
     }
-    let g = PRIMES.iter().find(|x| x.0 == p).map_or_else(|| primitive_root(p), |x| x.1);
+    let g = PRIMES.iter().find(|x| x.0 == p).map_or_else(|| root_cached(p), |x| x.1);
     let t = Arc::new(Table::new(p, g, log.max(8)));
     cache.retain(|t| t.p != p);
-    if cache.len() >= 8 {
+    // at most 64 tables (multimodular products cycle through many primes)
+    // and about 256 MB of them
+    let mut total: usize = cache.iter().map(|t| t.tw.len() * 32).sum::<usize>() + t.tw.len() * 32;
+    while !cache.is_empty() && (cache.len() >= 64 || total > 1 << 28) {
+        total -= cache[0].tw.len() * 32;
         cache.remove(0);
     }
     cache.push(t.clone());

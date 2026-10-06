@@ -48,12 +48,12 @@ def _scaled_rows(m):
         return _enc(m), [1] * len(m)
     rows, ds = [], []
     for r in m:
-        r = [_num(x) for x in r]
+        r = [x if isinstance(x, int) or hasattr(x, "denominator") else _F(x) for x in r]
         d = 1
         for x in r:
             if not isinstance(x, int):
-                d = _lcm(d, x.denominator)
-        rows.append([int(x * d) for x in r])
+                d = _lcm(d, int(x.denominator))
+        rows.append([x * d if isinstance(x, int) else int(x.numerator) * (d // int(x.denominator)) for x in r])
         ds.append(d)
     return _enc(rows), ds
 

@@ -6,6 +6,48 @@
 
 use crate::nmod::{mul_shoup, Modulus};
 
+/// P A = L U modulo p: L lower triangular (the pivots on its diagonal),
+/// U unit upper triangular, stored together in `a`; row i of P A is row
+/// perm[i] of A.
+#[derive(Clone, Debug)]
+pub struct Lu {
+    a: Mat,
+    perm: Vec<usize>,
+}
+
+impl Lu {
+    /// x with A x = b.
+    pub fn solve_vec(&self, b: &[u64]) -> Vec<u64> {
+        let n = self.a.rows;
+        let m = self.a.m;
+        let batch = batch_len(&m);
+        let d = &self.a.d;
+        let dot = |row: &[u64], v: &[u64]| -> u64 {
+            let mut r = 0u64;
+            for (ca, cb) in row.chunks(batch).zip(v.chunks(batch)) {
+                let mut acc = 0u128;
+                for (&x, &y) in ca.iter().zip(cb) {
+                    acc += x as u128 * y as u128;
+                }
+                r = m.add(r, m.reduce_u128(acc));
+            }
+            r
+        };
+        let mut y = vec![0u64; n];
+        for i in 0..n {
+            let s = dot(&d[i * n..i * n + i], &y[..i]);
+            let pv = d[i * n + i];
+            y[i] = m.mul(m.sub(b[self.perm[i]], s), m.inv(pv).expect("singular"));
+        }
+        let mut x = vec![0u64; n];
+        for i in (0..n).rev() {
+            let s = dot(&d[i * n + i + 1..(i + 1) * n], &x[i + 1..]);
+            x[i] = m.sub(y[i], s);
+        }
+        x
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mat {
     pub rows: usize,
@@ -13,6 +55,59 @@ pub struct Mat {
     pub m: Modulus,
     /// Row-major entries, reduced mod p.
     pub d: Vec<u64>,
+}
+
+/// How many products of reduced residues fit in a u128 sum.
+fn batch_len(m: &Modulus) -> usize {
+    let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
+    if sq == 0 {
+        usize::MAX
+    } else {
+        (u128::MAX / sq).min(1 << 30) as usize
+    }
+}
+
+/// row[j] -= sum_t row[blk[t]] * src(t)[j] for j >= from: the products
+/// summed in u128 (`batch` at a time), one reduction per entry.
+#[inline]
+fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: &[usize], src: F, m: &Modulus, batch: usize, acc: &mut [u128]) {
+    let len = row.len() - from;
+    let acc = &mut acc[..len];
+    let mut part: Option<Vec<u64>> = None;
+    acc.iter_mut().for_each(|x| *x = 0);
+    let mut cnt = 0;
+    for (t, &ct) in blk.iter().enumerate() {
+        let f = row[ct];
+        if f == 0 {
+            continue;
+        }
+        let s = &src(t)[from..];
+        for (a, &y) in acc.iter_mut().zip(s) {
+            *a += f as u128 * y as u128;
+        }
+        cnt += 1;
+        if cnt == batch {
+            let p = part.get_or_insert_with(|| vec![0u64; len]);
+            for (q, a) in p.iter_mut().zip(acc.iter_mut()) {
+                *q = m.add(*q, m.reduce_u128(*a));
+                *a = 0;
+            }
+            cnt = 0;
+        }
+    }
+    let tail = &mut row[from..];
+    match part {
+        None => {
+            for (x, &a) in tail.iter_mut().zip(acc.iter()) {
+                *x = m.sub(*x, m.reduce_u128(a));
+            }
+        }
+        Some(p) => {
+            for ((x, &a), &q) in tail.iter_mut().zip(acc.iter()).zip(&p) {
+                *x = m.sub(*x, m.add(q, m.reduce_u128(a)));
+            }
+        }
+    }
 }
 
 /// dst += c * src (mod p), c reduced.
@@ -103,67 +198,182 @@ impl Mat {
 
     /// Reduce to reduced row echelon form in place; the pivot columns.
     pub fn rref(&mut self) -> Vec<usize> {
-        let m = self.m;
-        let mut pivots = vec![];
-        let mut r = 0;
-        for col in 0..self.cols {
-            if r == self.rows {
-                break;
-            }
-            let Some(pr) = (r..self.rows).find(|&i| self.get(i, col) != 0) else { continue };
-            self.swap_rows(r, pr);
-            let inv = m.inv(self.get(r, col)).expect("modulus not prime");
-            let c = self.cols;
-            scale(&mut self.d[r * c + col..(r + 1) * c], inv, &m);
-            for i in 0..self.rows {
-                if i != r {
-                    let f = self.get(i, col);
-                    if f != 0 {
-                        let (dst, src) = self.rows2(i, r);
-                        axpy(&mut dst[col..], &src[col..], m.neg(f), &m);
-                    }
-                }
-            }
-            pivots.push(col);
-            r += 1;
-            if r % 16 == 0 {
-                sagebrush_interrupt::check();
-            }
-        }
-        pivots
+        let (piv, _) = self.echelon(true, false);
+        piv
     }
 
     pub fn rank(&self) -> usize {
-        self.clone().rref().len()
+        self.clone().echelon(false, false).0.len()
     }
 
     pub fn det(&self) -> u64 {
         assert_eq!(self.rows, self.cols, "determinant of a non-square matrix");
-        let m = self.m;
+        let (piv, d) = self.clone().echelon(false, true);
+        if piv.len() < self.rows {
+            0
+        } else {
+            d
+        }
+    }
+
+    /// Gaussian elimination with delayed updates: pivots are collected in
+    /// blocks of up to BLOCK, and the rows below are brought up to date
+    /// one column at a time (to find the next pivot) and then all at once
+    /// when the block is full, summing the block's products in u128 with
+    /// one reduction per entry (a matrix-product shape, which also keeps
+    /// the rows in cache).  Pivot rows end normalized to 1 at the pivot.
+    /// With `reduced`, back substitution gives the reduced form, again as
+    /// products: R_i = U_i - sum_{t > i} U_i[c_t] R_t.  Returns the pivot
+    /// columns and the product of the pivots times the sign of the row
+    /// permutation (the determinant, for a square matrix of full rank;
+    /// computed only if `want_det`).
+    pub fn echelon(&mut self, reduced: bool, want_det: bool) -> (Vec<usize>, u64) {
+        self.echelon_impl(reduced, want_det, None)
+    }
+
+    /// An LU factorization of a square matrix, if it is nonsingular.
+    pub fn lu(&self) -> Option<Lu> {
+        assert_eq!(self.rows, self.cols);
         let n = self.rows;
         let mut a = self.clone();
+        let mut perm: Vec<usize> = (0..n).collect();
+        let (piv, _) = a.echelon_impl(false, false, Some((&mut perm, &mut vec![])));
+        if piv.len() < n {
+            return None;
+        }
+        Some(Lu { a, perm })
+    }
+
+    /// With `lu` = Some((perm, _)): keep the multipliers below the pivots
+    /// (L, with the pivot values on its diagonal) and record the row
+    /// permutation, for a square matrix.
+    fn echelon_impl(&mut self, reduced: bool, want_det: bool, mut lu: Option<(&mut Vec<usize>, &mut Vec<u64>)>) -> (Vec<usize>, u64) {
+        const BLOCK: usize = 16;
+        let keep = lu.is_some();
+        let m = self.m;
+        let (rows, cols) = (self.rows, self.cols);
+        let batch = batch_len(&m);
+        let mut pivots: Vec<usize> = vec![];
         let mut det = 1 % m.n;
-        for col in 0..n {
-            let Some(pr) = (col..n).find(|&i| a.get(i, col) != 0) else { return 0 };
-            if pr != col {
-                a.swap_rows(col, pr);
-                det = m.neg(det);
-            }
-            let piv = a.get(col, col);
-            det = m.mul(det, piv);
-            let inv = m.inv(piv).expect("modulus not prime");
-            for i in col + 1..n {
-                let f = a.get(i, col);
-                if f != 0 {
-                    let (dst, src) = a.rows2(i, col);
-                    axpy(&mut dst[col..], &src[col..], m.neg(m.mul(f, inv)), &m);
+        let mut r = 0;
+        let mut block_start = 0; // first pivot row of the pending block
+        let mut col = 0;
+        let mut acc = vec![0u128; cols];
+        while col < cols && r < rows {
+            let blk = &pivots[block_start..];
+            // column col of the rows below, up to date with the block
+            if !blk.is_empty() {
+                for i in r..rows {
+                    let mut s = 0u128;
+                    let mut red = 0u64;
+                    for (t, &ct) in blk.iter().enumerate() {
+                        let f = self.d[i * cols + ct];
+                        s += f as u128 * self.d[(block_start + t) * cols + col] as u128;
+                        if (t + 1) % batch == 0 {
+                            red = m.add(red, m.reduce_u128(s));
+                            s = 0;
+                        }
+                    }
+                    let red = m.add(red, m.reduce_u128(s));
+                    self.d[i * cols + col] = m.sub(self.d[i * cols + col], red);
                 }
             }
-            if col % 16 == 15 {
+            let Some(pr) = (r..rows).find(|&i| self.d[i * cols + col] != 0) else {
+                col += 1;
+                continue;
+            };
+            if pr != r {
+                self.swap_rows(r, pr);
+                det = m.neg(det);
+                if let Some((perm, _)) = lu.as_mut() {
+                    perm.swap(r, pr);
+                }
+            }
+            // the pivot row, up to date for the columns after col
+            if !blk.is_empty() {
+                let (head, tail) = self.d.split_at_mut(r * cols);
+                let row = &mut tail[..cols];
+                update_row(row, col + 1, blk, |t| &head[(block_start + t) * cols..(block_start + t + 1) * cols], &m, batch, &mut acc);
+                if !keep {
+                    for &ct in blk {
+                        row[ct] = 0;
+                    }
+                }
+            }
+            let pv = self.d[r * cols + col];
+            if want_det {
+                det = m.mul(det, pv);
+            }
+            let inv = m.inv(pv).expect("modulus not prime");
+            scale(&mut self.d[r * cols + col + 1..(r + 1) * cols], inv, &m);
+            // the pivot value stays (as L's diagonal) when keeping L
+            self.d[r * cols + col] = if keep { pv } else { 1 % m.n };
+            pivots.push(col);
+            r += 1;
+            col += 1;
+            if pivots.len() - block_start == BLOCK {
+                self.flush(block_start, &pivots[block_start..], r, col, batch, &mut acc, keep);
+                block_start = pivots.len();
                 sagebrush_interrupt::check();
             }
         }
-        det
+        if pivots.len() > block_start {
+            let blk = pivots[block_start..].to_vec();
+            self.flush(block_start, &blk, r, col, batch, &mut acc, keep);
+        }
+        // rows r.. are zero (every column was processed or no rows remain)
+        if !keep {
+            for x in self.d[r * cols..].iter_mut() {
+                *x = 0;
+            }
+        }
+        if reduced {
+            self.back_substitute(&pivots, batch, &mut acc);
+        }
+        (pivots, det)
+    }
+
+    /// The rows below the block (from row `below`) up to date with the
+    /// block's pivots in the columns from `from`, and zero in the block's
+    /// pivot columns.
+    fn flush(&mut self, start: usize, blk: &[usize], below: usize, from: usize, batch: usize, acc: &mut [u128], keep: bool) {
+        let cols = self.cols;
+        let m = self.m;
+        let (head, tail) = self.d.split_at_mut(below * cols);
+        for row in tail.chunks_exact_mut(cols) {
+            if blk.iter().all(|&ct| row[ct] == 0) {
+                continue;
+            }
+            update_row(row, from, blk, |t| &head[(start + t) * cols..(start + t + 1) * cols], &m, batch, acc);
+            if !keep {
+                for &ct in blk {
+                    row[ct] = 0;
+                }
+            }
+        }
+    }
+
+    /// From the echelon form with normalized pivot rows to the reduced
+    /// form: R_i = U_i - sum_{t > i} U_i[c_t] R_t, bottom up.
+    fn back_substitute(&mut self, piv: &[usize], batch: usize, acc: &mut [u128]) {
+        let cols = self.cols;
+        let m = self.m;
+        let k = piv.len();
+        for i in (0..k).rev() {
+            let later = &piv[i + 1..];
+            if later.is_empty() || later.iter().all(|&ct| self.d[i * cols + ct] == 0) {
+                continue;
+            }
+            let (head, tail) = self.d.split_at_mut((i + 1) * cols);
+            let row = &mut head[i * cols..];
+            update_row(row, piv[i] + 1, later, |t| &tail[t * cols..(t + 1) * cols], &m, batch, acc);
+            for &ct in later {
+                row[ct] = 0;
+            }
+            if i % 16 == 0 {
+                sagebrush_interrupt::check();
+            }
+        }
     }
 
     /// [self | other] (same number of rows).
@@ -256,8 +466,78 @@ impl Mat {
         c
     }
 
+    /// self * v for a vector v (dot products summed in u128).
+    pub fn mul_vec(&self, v: &[u64]) -> Vec<u64> {
+        let m = self.m;
+        let batch = batch_len(&m);
+        (0..self.rows)
+            .map(|i| {
+                let mut r = 0u64;
+                for (ca, cb) in self.row(i).chunks(batch).zip(v.chunks(batch)) {
+                    let mut acc = 0u128;
+                    for (&x, &y) in ca.iter().zip(cb) {
+                        acc += x as u128 * y as u128;
+                    }
+                    r = m.add(r, m.reduce_u128(acc));
+                }
+                r
+            })
+            .collect()
+    }
+
     /// The characteristic polynomial det(x I - self), constant term first.
+    /// By the Krylov sequence of a pseudo-random vector when it spans
+    /// (then the minimal polynomial of the vector has degree n and is the
+    /// characteristic polynomial: matrix-vector products and one
+    /// elimination), else by Hessenberg reduction.
     pub fn charpoly(&self) -> Vec<u64> {
+        assert_eq!(self.rows, self.cols);
+        if let Some(c) = self.charpoly_krylov() {
+            return c;
+        }
+        self.charpoly_hessenberg()
+    }
+
+    fn charpoly_krylov(&self) -> Option<Vec<u64>> {
+        let n = self.rows;
+        let m = self.m;
+        if n == 0 || m.n < 1 << 20 {
+            return None;
+        }
+        let mut seed = 0x9e3779b97f4a7c15u64 ^ m.n;
+        let mut v: Vec<u64> = (0..n)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                m.reduce(seed)
+            })
+            .collect();
+        // S has columns v, Av, ..., A^n v
+        let mut s = Mat::zero(n, n + 1, m);
+        for i in 0..=n {
+            for j in 0..n {
+                s.d[j * (n + 1) + i] = v[j];
+            }
+            if i < n {
+                v = self.mul_vec(&v);
+            }
+            if i % 32 == 31 {
+                sagebrush_interrupt::check();
+            }
+        }
+        let piv = s.rref();
+        if piv.len() != n || piv[n - 1] != n - 1 {
+            return None;
+        }
+        // A^n v = sum c_i A^i v: the charpoly is x^n - sum c_i x^i
+        let mut c: Vec<u64> = (0..n).map(|i| m.neg(s.d[i * (n + 1) + n])).collect();
+        c.push(1 % m.n);
+        Some(c)
+    }
+
+    /// The characteristic polynomial by Hessenberg reduction.
+    pub fn charpoly_hessenberg(&self) -> Vec<u64> {
         assert_eq!(self.rows, self.cols);
         let m = self.m;
         let n = self.rows;
@@ -272,15 +552,29 @@ impl Mat {
                 }
             }
             let tinv = m.inv(h.get(k, k - 1)).expect("modulus not prime");
-            for i in k + 1..n {
-                let u = m.mul(h.get(i, k - 1), tinv);
+            // H <- L^-1 H L with L = I + sum_i u_i e_i e_k^T: the elementary
+            // factors commute, so all the row operations, then column k +=
+            // sum_i u_i column_i as one dot product per row
+            let us: Vec<u64> = (k + 1..n).map(|i| m.mul(h.get(i, k - 1), tinv)).collect();
+            for (t, &u) in us.iter().enumerate() {
                 if u != 0 {
-                    let (dst, src) = h.rows2(i, k);
+                    let (dst, src) = h.rows2(k + 1 + t, k);
                     axpy(&mut dst[k - 1..], &src[k - 1..], m.neg(u), &m);
-                    for r in 0..n {
-                        let v = m.add(h.d[r * n + k], m.mul(u, h.d[r * n + i]));
-                        h.d[r * n + k] = v;
+                }
+            }
+            if us.iter().any(|&u| u != 0) {
+                let batch = batch_len(&m);
+                for r in 0..n {
+                    let row = &h.d[r * n + k + 1..(r + 1) * n];
+                    let mut add = 0u64;
+                    for (ca, cb) in row.chunks(batch).zip(us.chunks(batch)) {
+                        let mut acc = 0u128;
+                        for (&x, &y) in ca.iter().zip(cb) {
+                            acc += x as u128 * y as u128;
+                        }
+                        add = m.add(add, m.reduce_u128(acc));
                     }
+                    h.d[r * n + k] = m.add(h.d[r * n + k], add);
                 }
             }
             if k % 16 == 15 {
@@ -349,6 +643,7 @@ mod tests {
                 assert_eq!(a.mul(&b).det(), m.mul(d, b.det()));
                 // charpoly: constant term (-1)^n det, trace, and Cayley-Hamilton
                 let cp = a.charpoly();
+                assert_eq!(cp, a.charpoly_hessenberg(), "Krylov and Hessenberg agree p={p} n={n}");
                 assert_eq!(cp.len(), n + 1);
                 assert_eq!(cp[0], if n % 2 == 0 { d } else { m.neg(d) });
                 let tr = (0..n).fold(0, |t, i| m.add(t, a.get(i, i)));
@@ -363,6 +658,45 @@ mod tests {
                 assert_eq!(acc, Mat::zero(n, n, m), "Cayley-Hamilton p={p} n={n}");
             }
         }
+    }
+
+    #[test]
+    fn lu_solves() {
+        let mut s = 77u64;
+        for p in [7u64, 1_000_000_007, (1 << 62) - 57] {
+            let m = Modulus::new(p);
+            for n in [1usize, 2, 17, 40, 70] {
+                let a = rand_mat(n, n, m, &mut s);
+                let b: Vec<u64> = (0..n).map(|_| rng(&mut s) % p).collect();
+                match a.lu() {
+                    None => assert_eq!(a.det(), 0),
+                    Some(lu) => {
+                        let x = lu.solve_vec(&b);
+                        assert_eq!(a.mul_vec(&x), b, "p={p} n={n}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn charpoly_derogatory() {
+        // the identity, a diagonal matrix with repeats and a Jordan-like
+        // block: the Krylov space is too small and Hessenberg takes over
+        let m = Modulus::new((1 << 62) - 57);
+        for n in [1usize, 3, 10] {
+            let id = Mat::identity(n, m);
+            let mut want = vec![1u64];
+            for _ in 0..n {
+                want = crate::nmod_poly::mul(&want, &[m.neg(1), 1], &m);
+            }
+            assert_eq!(id.charpoly(), want);
+        }
+        let mut d = Mat::zero(6, 6, m);
+        for (i, x) in [2u64, 2, 3, 3, 3, 5].iter().enumerate() {
+            d.d[i * 6 + i] = *x;
+        }
+        assert_eq!(d.charpoly(), d.charpoly_hessenberg());
     }
 
     #[test]

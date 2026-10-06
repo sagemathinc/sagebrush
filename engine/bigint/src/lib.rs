@@ -13,6 +13,12 @@
 #[cfg(feature = "num-backend")]
 pub use num_bigint::{BigInt, BigUint, Sign};
 
+/// Arithmetic modulo a word (also used by sagebrush-arith).
+pub mod nmod;
+/// Number-theoretic transforms: products of huge integers here, and of
+/// polynomials modulo n in sagebrush-arith.
+pub mod ntt;
+
 #[cfg(not(feature = "num-backend"))]
 mod dashu_impl;
 #[cfg(not(feature = "num-backend"))]
@@ -53,6 +59,26 @@ mod tests {
 
     fn b(s: &str) -> BigInt {
         s.parse().unwrap()
+    }
+
+    /// Huge products go through the NTT (from 4096 words): they must agree
+    /// with schoolbook-verified identities and with dashu.
+    #[test]
+    fn huge_products() {
+        let mut x = BigInt::from(3u32).pow(200_000); // ~317K bits
+        x -= 12345u32;
+        let y = -(BigInt::from(7u32).pow(120_000) + 1u32); // ~337K bits
+        let z = &x * &y;
+        #[cfg(not(feature = "num-backend"))]
+        assert_eq!(z.0, &x.0 * &y.0);
+        // (x y) mod small primes
+        for p in [1_000_000_007u64, 998_244_353] {
+            let bp = BigInt::from(p);
+            let lhs = z.mod_floor(&bp);
+            let rhs = (x.mod_floor(&bp) * y.mod_floor(&bp)).mod_floor(&bp);
+            assert_eq!(lhs, rhs);
+        }
+        assert_eq!(&x * &x, x.pow(2));
     }
 
     /// The API surface the engines use, with num-bigint's semantics (these

@@ -98,10 +98,13 @@ MIT/Apache, clean-room; the layer FLINT provides for Sage; see
   - over Z/n: NTT products, Newton division, half-gcd;
   - over Z: products, and heuristic and modular gcds.
 - **Certified:** every answer is checked exactly or rests on a proven bound.
-- **Speed:** within 1.1–5x of FLINT on matrices and within 1–5x on
-  polynomials ([bench/linalg](bench/linalg/README.md)). In the Sage layer,
-  `det`, `rref` and `inverse` got 8–40x faster, and a polynomial gcd that
-  took 10 s takes under a millisecond.
+- **Speed against FLINT** ([bench/linalg](bench/linalg/README.md)):
+  - inverses 4–6x faster, rref 1.4–3x faster;
+  - charpoly, det and solve within 1.1–2.3x;
+  - polynomials within 1–5x.
+- **In the Sage layer:** `det`, `rref` and `inverse` got 15–66x faster and
+  are close to Sage itself; a polynomial gcd that took 10 s takes under a
+  millisecond.
 
 All of it runs in Sage mode (`NumberField`, `QuadraticField`,
 `class_group()`, `regulator()`, `matrix(ZZ, ...).LLL()`, ...), in Magma mode

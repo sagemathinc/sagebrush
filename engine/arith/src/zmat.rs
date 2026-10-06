@@ -18,7 +18,7 @@
 //!   norms, bounding the sums of principal minors by Hadamard).
 
 use crate::nmod::{Modulus, Primes};
-use crate::nmod_mat::Mat;
+use crate::nmod_mat::{Lu, Mat};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -210,6 +210,21 @@ impl Default for Crt {
     }
 }
 
+/// The values (in (-P/2, P/2]) with residues res[j][i] modulo primes[j].
+fn crt_all(primes: &[u64], res: &[Vec<u64>]) -> Vec<BigInt> {
+    let crt = crate::crt::MultiCrt::new(primes);
+    let n = res.first().map_or(0, |r| r.len());
+    let mut r = vec![0u64; primes.len()];
+    (0..n)
+        .map(|i| {
+            for (rj, v) in r.iter_mut().zip(res) {
+                *rj = v[i];
+            }
+            crt.reconstruct(&r)
+        })
+        .collect()
+}
+
 /// Rational reconstruction: (a, b) with a = b u mod m, |a| <= nb,
 /// 0 < b <= db and gcd(a, b) = 1, if one exists (unique when 2 nb db < m).
 pub fn ratrecon(u: &BigInt, m: &BigInt, nb: &BigInt, db: &BigInt) -> Option<(BigInt, BigInt)> {
@@ -256,12 +271,12 @@ fn ratrecon_vec(u: &[BigInt], m: &BigInt, nb: &BigInt, db: &BigInt) -> Option<(V
 }
 
 /// Choose a prime below `below` for which a is invertible mod p, trying
-/// `tries` primes.
-fn invertible_mod(a: &ZMat, below: u64, tries: usize) -> Option<(Modulus, Mat)> {
+/// `tries` primes; its LU factorization.
+fn invertible_mod(a: &ZMat, below: u64, tries: usize) -> Option<(Modulus, Lu)> {
     for p in Primes::below(below).take(tries) {
         let m = Modulus::new(p);
-        if let Some(inv) = a.reduce(&m).inverse() {
-            return Some((m, inv));
+        if let Some(lu) = a.reduce(&m).lu() {
+            return Some((m, lu));
         }
     }
     None
@@ -277,7 +292,11 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
     if n == 0 {
         return Some((ZMat::zero(0, k), BigInt::one()));
     }
-    let (m, ainv) = match invertible_mod(a, 1 << 31, 3) {
+    // a 62-bit lifting prime when a * digit sums fit in i128, else 31 bits
+    let a64 = a.as_i64().filter(|_| a.max_bits() <= 62);
+    let logn = (usize::BITS - n.leading_zeros()) as u64;
+    let below = if a64.is_some() && a.max_bits() + 62 + logn + 2 <= 126 { 1u64 << 62 } else { 1 << 31 };
+    let (m, ainv) = match invertible_mod(a, below, 3) {
         Some(x) => x,
         None => {
             if det_multimodular(a).is_zero() {
@@ -285,10 +304,10 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
             }
             // nonsingular, but every prime tried divides det a: keep looking
             let mut found = None;
-            for p in Primes::below(1 << 31).skip(3) {
+            for p in Primes::below(below).skip(3) {
                 let m = Modulus::new(p);
-                if let Some(inv) = a.reduce(&m).inverse() {
-                    found = Some((m, inv));
+                if let Some(lu) = a.reduce(&m).lu() {
+                    found = Some((m, lu));
                     break;
                 }
             }
@@ -306,32 +325,81 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
     let need_bits = ha + hn + 2.0;
     let max_iters = (need_bits / (p as f64).log2()).ceil() as usize + 2;
 
-    let a64 = a.as_i64().filter(|_| a.max_bits() <= 62);
     let mut r: Vec<BigInt> = b.d.clone();
+    // the residual as i128 once it fits (it stays below n |a| + |r| / p)
+    let mut r128: Option<Vec<i128>> = None;
+    // 1/p mod 2^128: exact division by p is a multiplication
+    let pinv = {
+        let mut x: u128 = 1;
+        for _ in 0..7 {
+            x = x.wrapping_mul(2u128.wrapping_sub((p as u128).wrapping_mul(x)));
+        }
+        x
+    };
     let mut x: Vec<BigInt> = vec![BigInt::zero(); n * k];
     let mut pk = BigInt::one();
     let mut check = 4usize.min(max_iters);
     let mut iter = 0;
     loop {
+        if r128.is_none() && a64.is_some() {
+            let lim = BigInt::from(1i128 << 120);
+            if r.iter().all(|v| v.abs() < lim) {
+                r128 = Some(r.iter().map(|v| v.to_i128().unwrap()).collect());
+            }
+        }
         // digit = ainv (r mod p)
-        let rm = Mat { rows: n, cols: k, m, d: r.iter().map(|v| mod_u64(v, &m)).collect() };
-        let digit = ainv.mul(&rm);
-        // r = (r - a digit) / p
-        for i in 0..n {
+        let rd: Vec<u64> = match &r128 {
+            Some(rv) => rv
+                .iter()
+                .map(|&v| if v >= 0 { m.reduce_u128(v as u128) } else { m.neg(m.reduce_u128(v.unsigned_abs())) })
+                .collect(),
+            None => r.iter().map(|v| mod_u64(v, &m)).collect(),
+        };
+        // digit = a^-1 (r mod p), column by column through the LU
+        let digit = if k == 1 {
+            Mat { rows: n, cols: 1, m, d: ainv.solve_vec(&rd) }
+        } else {
+            let mut d = vec![0u64; n * k];
             for j in 0..k {
-                let s: BigInt = match &a64 {
-                    Some(a64) => {
+                let col: Vec<u64> = (0..n).map(|i| rd[i * k + j]).collect();
+                for (i, v) in ainv.solve_vec(&col).into_iter().enumerate() {
+                    d[i * k + j] = v;
+                }
+            }
+            Mat { rows: n, cols: k, m, d }
+        };
+        // r = (r - a digit) / p
+        match (&mut r128, &a64) {
+            (Some(rv), Some(a64)) => {
+                for i in 0..n {
+                    for j in 0..k {
                         let mut s = 0i128;
                         for l in 0..n {
                             s += a64[i * n + l] as i128 * digit.d[l * k + j] as i128;
                         }
-                        BigInt::from(s)
+                        let v = rv[i * k + j] - s;
+                        rv[i * k + j] = (v as u128).wrapping_mul(pinv) as i128;
                     }
-                    None => (0..n).map(|l| a.get(i, l) * BigInt::from(digit.d[l * k + j])).sum(),
-                };
-                let v = &r[i * k + j] - s;
-                debug_assert!((&v % &bp).is_zero());
-                r[i * k + j] = v / &bp;
+                }
+            }
+            _ => {
+                for i in 0..n {
+                    for j in 0..k {
+                        let s: BigInt = match &a64 {
+                            Some(a64) => {
+                                let mut s = 0i128;
+                                for l in 0..n {
+                                    s += a64[i * n + l] as i128 * digit.d[l * k + j] as i128;
+                                }
+                                BigInt::from(s)
+                            }
+                            None => (0..n).map(|l| a.get(i, l) * BigInt::from(digit.d[l * k + j])).sum(),
+                        };
+                        let v = &r[i * k + j] - s;
+                        debug_assert!((&v % &bp).is_zero());
+                        r[i * k + j] = v / &bp;
+                    }
+                }
             }
         }
         for (xi, &di) in x.iter_mut().zip(&digit.d) {
@@ -445,8 +513,8 @@ pub fn det(a: &ZMat) -> BigInt {
     if h == f64::NEG_INFINITY {
         return BigInt::zero();
     }
-    // few primes suffice: plain multimodular
-    if h < 62.0 * 4.0 {
+    // few primes, or a small matrix: plain multimodular
+    if h < 62.0 * 4.0 || n < 40 {
         return det_crt(a, &BigInt::one(), h);
     }
     // a random right-hand side gives a large divisor of det a
@@ -469,44 +537,106 @@ pub fn det(a: &ZMat) -> BigInt {
     }
 }
 
+/// Is pivot list x better than y: larger rank, then lexicographically
+/// smaller (pivots modulo a prime are never better than over Q).
+fn better(x: &[usize], y: &[usize]) -> bool {
+    x.len() > y.len() || (x.len() == y.len() && x < y)
+}
+
+/// log2 of the product of the r largest row norms: a bound for every r x r
+/// minor (Hadamard).
+fn minor_bound_log2(a: &ZMat, r: usize) -> f64 {
+    let mut l: Vec<f64> = a.row_norm_log2().into_iter().filter(|x| x.is_finite()).collect();
+    l.sort_by(|x, y| y.partial_cmp(x).unwrap());
+    l.iter().take(r).map(|x| x.max(0.0)).sum()
+}
+
 /// The reduced row echelon form over Q of an integer matrix, as
 /// (N, den, pivots): the nonzero rows are N / den (rank = pivots.len()).
+///
+/// Multimodular: modulo each prime, the rref R_p and d_p = det A[S, P]
+/// for a fixed nonsingular pivot minor (rows S, pivot columns P) give
+/// N = d R modulo p, reconstructed by CRT (|N|, |d| are r x r minors, so
+/// below the Hadamard bound B).  The identity A d = A[:, P] N holds
+/// modulo every prime used, and its entries are below (r + 1) |A| B, so
+/// once the primes' product exceeds twice that it holds over Z: then the
+/// rows of A lie in the row space of N, which has rank r = rank A[S, P]
+/// <= rank A, so N / d is the reduced echelon form.  Primes whose pivots
+/// differ from the best seen are skipped (an unlucky prime only loses
+/// rank or moves pivots right).
 pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
-    for p in Primes::new().take(20) {
+    if a.d.iter().all(|x| x.is_zero()) {
+        return (ZMat::zero(0, a.cols), BigInt::one(), vec![]);
+    }
+    let cols = a.cols;
+    let amax = a.max_bits() as f64;
+    let mut best: Option<Vec<usize>> = None;
+    let mut srows: Vec<usize> = vec![];
+    let mut primes: Vec<u64> = vec![];
+    let mut res: Vec<Vec<u64>> = vec![];
+    let mut bits = 0.0f64;
+    let mut target = f64::INFINITY;
+    for p in Primes::new() {
         let m = Modulus::new(p);
-        let mut am = a.reduce(&m);
-        let piv = am.rref();
-        let r = piv.len();
-        if r == 0 {
-            if a.d.iter().all(|x| x.is_zero()) {
-                return (ZMat::zero(0, a.cols), BigInt::one(), vec![]);
+        let mut r = a.reduce(&m);
+        let piv = r.rref();
+        let reset = match &best {
+            None => true,
+            Some(b) => better(&piv, b),
+        };
+        if reset {
+            if piv.is_empty() {
+                continue;
             }
+            // rows S: independent rows of A[:, P] modulo p
+            let mut t = a.select(&(0..a.rows).collect::<Vec<_>>(), &piv).transpose().reduce(&m);
+            srows = t.rref();
+            let k = piv.len();
+            let bound = minor_bound_log2(a, k);
+            target = bound + ((k + 1) as f64).log2() + amax + 2.0;
+            primes.clear();
+            res.clear();
+            bits = 0.0;
+            best = Some(piv.clone());
+        } else if Some(&piv) != best.as_ref() {
             continue;
         }
-        // r independent rows of a[:, piv]
-        let mut t = a.select(&(0..a.rows).collect::<Vec<_>>(), &piv).transpose().reduce(&m);
-        let rows = t.rref();
-        if rows.len() < r {
+        let pv = best.as_ref().unwrap();
+        let dp = a.select(&srows, pv).reduce(&m).det();
+        if dp == 0 {
             continue;
         }
-        let c = a.select(&rows, &piv);
-        let rhs = a.select(&rows, &(0..a.cols).collect::<Vec<_>>());
-        let Some((nm, den)) = solve(&c, &rhs) else { continue };
-        // shape: identity on the pivots, zeros before each pivot
-        let shaped = (0..r).all(|i| {
-            (0..piv[i]).all(|j| nm.get(i, j).is_zero())
-                && piv.iter().enumerate().all(|(t, &pc)| if t == i { nm.get(i, pc) == &den } else { nm.get(i, pc).is_zero() })
-        });
-        if !shaped {
-            continue;
+        let k = pv.len();
+        let mut v: Vec<u64> = r.d[..k * cols].iter().map(|&x| m.mul(dp, x)).collect();
+        v.push(dp);
+        primes.push(p);
+        res.push(v);
+        bits += (p as f64).log2();
+        if bits > target {
+            break;
         }
-        // every row of a is in the row space: a den = a[:, piv] N
-        let ap = a.select(&(0..a.rows).collect::<Vec<_>>(), &piv);
-        if ap.mul(&nm) == a.scale(&den) {
-            return (nm, den, piv);
+        sagebrush_interrupt::check();
+    }
+    let piv = best.unwrap();
+    let k = piv.len();
+    let mut all = crt_all(&primes, &res);
+    let mut den = all.pop().unwrap();
+    let mut nm = ZMat { rows: k, cols, d: all };
+    // lowest terms, positive denominator
+    let g = nm.d.iter().fold(den.clone(), |g, x| g.gcd(x));
+    if den.is_negative() {
+        den = -den;
+        for x in nm.d.iter_mut() {
+            *x = -std::mem::take(x);
         }
     }
-    panic!("rref: no good prime among 20 (this should not happen)");
+    if !g.is_one() {
+        den = &den / &g;
+        for x in nm.d.iter_mut() {
+            *x = &*x / &g;
+        }
+    }
+    (nm, den, piv)
 }
 
 pub fn rank(a: &ZMat) -> usize {
@@ -528,9 +658,69 @@ pub fn kernel(a: &ZMat) -> ZMat {
     k
 }
 
-/// (N, den) with a^-1 = N / den, or None if a is singular.
+/// (N, den) with a^-1 = N / den in lowest terms, or None if a is
+/// singular.  Multimodular: modulo each prime, one elimination of [a | I]
+/// gives det a and a^-1, so the adjugate det(a) a^-1; both are (n-1)- or
+/// n-minors, below the Hadamard bound, which fixes the number of primes.
 pub fn inverse(a: &ZMat) -> Option<(ZMat, BigInt)> {
-    solve(a, &ZMat::identity(a.rows))
+    assert_eq!(a.rows, a.cols, "inverse of a non-square matrix");
+    let n = a.rows;
+    if n == 0 {
+        return Some((ZMat::zero(0, 0), BigInt::one()));
+    }
+    let h = hadamard_log2(a);
+    if h == f64::NEG_INFINITY {
+        return None;
+    }
+    let target = h.max(0.0) + 2.0;
+    let mut primes: Vec<u64> = vec![];
+    let mut res: Vec<Vec<u64>> = vec![];
+    let mut bits = 0.0f64;
+    let mut singular = 0;
+    for p in Primes::new() {
+        let m = Modulus::new(p);
+        let mut aug = a.reduce(&m).augment(&Mat::identity(n, m));
+        let (piv, det) = aug.echelon(true, true);
+        if piv.len() < n || piv[n - 1] != n - 1 {
+            singular += 1;
+            if singular == 2 && det_multimodular(a).is_zero() {
+                return None;
+            }
+            continue;
+        }
+        // [adj entries, det] modulo p
+        let mut v = Vec::with_capacity(n * n + 1);
+        for i in 0..n {
+            for j in 0..n {
+                v.push(m.mul(det, aug.d[i * 2 * n + n + j]));
+            }
+        }
+        v.push(det);
+        primes.push(p);
+        res.push(v);
+        bits += (p as f64).log2();
+        if bits > target {
+            break;
+        }
+        sagebrush_interrupt::check();
+    }
+    let mut all = crt_all(&primes, &res);
+    let mut den = all.pop().unwrap();
+    let mut adj = ZMat { rows: n, cols: n, d: all };
+    let g = adj.d.iter().fold(den.clone(), |g, x| g.gcd(x));
+    if den.is_negative() {
+        den = -den;
+        for x in adj.d.iter_mut() {
+            *x = -std::mem::take(x);
+        }
+    }
+    if !g.is_one() {
+        den = &den / &g;
+        for x in adj.d.iter_mut() {
+            *x = &*x / &g;
+        }
+    }
+    Some((adj, den))
 }
 
 /// The characteristic polynomial det(x I - a), constant term first.
@@ -560,19 +750,20 @@ pub fn charpoly(a: &ZMat) -> Vec<BigInt> {
     let er = e(a.row_norm_log2());
     let ec = e(a.col_norm_log2());
     let bound = (0..=n).map(|j| er[j].min(ec[j])).fold(0.0f64, f64::max) * (1.0 + 1e-9) + 4.0;
-    let mut crts: Vec<Crt> = (0..=n).map(|_| Crt::new()).collect();
+    let mut primes: Vec<u64> = vec![];
+    let mut res: Vec<Vec<u64>> = vec![];
+    let mut bits = 0.0f64;
     for p in Primes::new() {
         let m = Modulus::new(p);
-        let cp = a.reduce(&m).charpoly();
-        for (c, &r) in crts.iter_mut().zip(&cp) {
-            c.add(r, &m);
-        }
-        if crts[0].m.bits() as f64 > bound {
+        res.push(a.reduce(&m).charpoly());
+        primes.push(p);
+        bits += (p as f64).log2();
+        if bits > bound {
             break;
         }
         sagebrush_interrupt::check();
     }
-    crts.iter().map(|c| c.signed()).collect()
+    crt_all(&primes, &res)
 }
 
 #[cfg(test)]

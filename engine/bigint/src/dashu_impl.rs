@@ -104,6 +104,133 @@ impl From<BigUint> for BigInt {
 
 // ---- operators
 
+/// Operands with at least this many 64-bit words (on both sides) are
+/// multiplied by the 3-prime NTT (crate::ntt), 1.4-1.9x faster than
+/// dashu's from 256K bits (bench: sagebrush-arith example nttbench).
+pub const NTT_MUL_WORDS: usize = 4096;
+
+/// a * b, by the NTT for huge operands (64-bit targets).
+pub fn mul_ubig(a: &UBig, b: &UBig) -> UBig {
+    #[cfg(target_pointer_width = "64")]
+    {
+        let (x, y) = (a.as_words(), b.as_words());
+        if x.len().min(y.len()) >= NTT_MUL_WORDS {
+            // (dashu's Word is u64 on 64-bit targets)
+            let (x, y): (&[u64], &[u64]) = (x, y);
+            let z = if std::ptr::eq(a, b) { crate::ntt::mul_words(x, x) } else { crate::ntt::mul_words(x, y) };
+            return UBig::from_words(&z);
+        }
+    }
+    a * b
+}
+
+/// a * b for signed integers (see [`mul_ubig`]).
+pub fn mul_ibig(a: &IBig, b: &IBig) -> IBig {
+    #[cfg(target_pointer_width = "64")]
+    {
+        let (sa, wa) = a.as_sign_words();
+        let (sb, wb) = b.as_sign_words();
+        if wa.len().min(wb.len()) >= NTT_MUL_WORDS {
+            let mag = mul_ubig(&UBig::from_words(wa), &UBig::from_words(wb));
+            let neg = (sa == dashu_int::Sign::Negative) != (sb == dashu_int::Sign::Negative);
+            return IBig::from_parts(if neg { dashu_int::Sign::Negative } else { dashu_int::Sign::Positive }, mag);
+        }
+    }
+    a * b
+}
+
+macro_rules! binop_mul {
+    () => {
+        impl Mul<BigInt> for BigInt {
+            type Output = BigInt;
+            #[inline]
+            fn mul(self, r: BigInt) -> BigInt {
+                BigInt(mul_ibig(&self.0, &r.0))
+            }
+        }
+        impl Mul<&BigInt> for BigInt {
+            type Output = BigInt;
+            #[inline]
+            fn mul(self, r: &BigInt) -> BigInt {
+                BigInt(mul_ibig(&self.0, &r.0))
+            }
+        }
+        impl Mul<BigInt> for &BigInt {
+            type Output = BigInt;
+            #[inline]
+            fn mul(self, r: BigInt) -> BigInt {
+                BigInt(mul_ibig(&self.0, &r.0))
+            }
+        }
+        impl Mul<&BigInt> for &BigInt {
+            type Output = BigInt;
+            #[inline]
+            fn mul(self, r: &BigInt) -> BigInt {
+                BigInt(mul_ibig(&self.0, &r.0))
+            }
+        }
+        impl MulAssign<BigInt> for BigInt {
+            #[inline]
+            fn mul_assign(&mut self, r: BigInt) {
+                self.0 = mul_ibig(&self.0, &r.0);
+            }
+        }
+        impl MulAssign<&BigInt> for BigInt {
+            #[inline]
+            fn mul_assign(&mut self, r: &BigInt) {
+                self.0 = mul_ibig(&self.0, &r.0);
+            }
+        }
+        binop_prims!(Mul, mul, MulAssign, mul_assign, *, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+    };
+}
+
+macro_rules! ubinop_mul {
+    () => {
+        impl Mul<BigUint> for BigUint {
+            type Output = BigUint;
+            #[inline]
+            fn mul(self, r: BigUint) -> BigUint {
+                BigUint(mul_ubig(&self.0, &r.0))
+            }
+        }
+        impl Mul<&BigUint> for BigUint {
+            type Output = BigUint;
+            #[inline]
+            fn mul(self, r: &BigUint) -> BigUint {
+                BigUint(mul_ubig(&self.0, &r.0))
+            }
+        }
+        impl Mul<BigUint> for &BigUint {
+            type Output = BigUint;
+            #[inline]
+            fn mul(self, r: BigUint) -> BigUint {
+                BigUint(mul_ubig(&self.0, &r.0))
+            }
+        }
+        impl Mul<&BigUint> for &BigUint {
+            type Output = BigUint;
+            #[inline]
+            fn mul(self, r: &BigUint) -> BigUint {
+                BigUint(mul_ubig(&self.0, &r.0))
+            }
+        }
+        impl MulAssign<BigUint> for BigUint {
+            #[inline]
+            fn mul_assign(&mut self, r: BigUint) {
+                self.0 = mul_ubig(&self.0, &r.0);
+            }
+        }
+        impl MulAssign<&BigUint> for BigUint {
+            #[inline]
+            fn mul_assign(&mut self, r: &BigUint) {
+                self.0 = mul_ubig(&self.0, &r.0);
+            }
+        }
+        ubinop_prims!(Mul, mul, MulAssign, mul_assign, *, u8, u16, u32, u64, u128, usize);
+    };
+}
+
 
 
 macro_rules! binop {
@@ -194,7 +321,7 @@ macro_rules! binop_prims {
 }
 binop!(Add, add, AddAssign, add_assign, +);
 binop!(Sub, sub, SubAssign, sub_assign, -);
-binop!(Mul, mul, MulAssign, mul_assign, *);
+binop_mul!();
 binop!(Div, div, DivAssign, div_assign, /);
 binop!(Rem, rem, RemAssign, rem_assign, %);
 binop!(BitAnd, bitand, BitAndAssign, bitand_assign, &);
@@ -340,7 +467,7 @@ macro_rules! ubinop_prims {
 }
 ubinop!(Add, add, AddAssign, add_assign, +);
 ubinop!(Sub, sub, SubAssign, sub_assign, -);
-ubinop!(Mul, mul, MulAssign, mul_assign, *);
+ubinop_mul!();
 ubinop!(Div, div, DivAssign, div_assign, /);
 ubinop!(Rem, rem, RemAssign, rem_assign, %);
 
