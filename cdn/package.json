@@ -12,7 +12,9 @@
     "pyparse.mjs",
     "README.md",
     "NOTICE.md",
-    "LICENSE-CPython.txt"
+    "LICENSE-CPython.txt",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
   ],
   "repository": {
     "type": "git",
@@ -20,7 +22,7 @@
     "directory": "cdn"
   },
   "homepage": "https://github.com/sagemathinc/sagebrush/tree/main/cdn",
-  "license": "SEE LICENSE IN NOTICE.md",
+  "license": "(MIT OR Apache-2.0) AND PSF-2.0",
   "publishConfig": {
     "access": "public"
   }

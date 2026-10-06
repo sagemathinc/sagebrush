@@ -21,15 +21,18 @@ These define what Sagebrush is.
 1. **Rust at the core.** The mathematics is written in Rust: fast,
    memory-safe, and one code base from a browser tab to a 64-core server.
    Python, JavaScript, Sage and Magma are thin interfaces over it.
-2. **Permissive licenses.** Sagebrush's own code is MIT OR Apache-2.0, so
-   anyone can use it, embed it or ship it. No GPL code is linked into an
-   engine. GPL systems such as PARI, Sage, Magma and FLINT are used only from
-   the outside, as oracles in tests and as benchmarks. They are never
-   dependencies, and never sources to port. Algorithms are implemented
-   clean-room from the literature or with the copyright owner's permission.
-   An independent implementation has
-   mathematical value of its own: when it agrees with PARI, that is evidence
-   about both.
+2. **Permissive licenses.** Sagebrush is MIT OR Apache-2.0, so anyone,
+   and any agent, can use it, embed it or ship it, with no conditions on
+   the code it ends up in. Serious research mathematics software has so far
+   been either GPL (PARI, Sage, FLINT) or closed (Magma, Mathematica).
+   Sagebrush is deliberately neither, and deliberately not Sage: it is a
+   component meant to be usable anywhere. No GPL code is linked into an
+   engine. GPL systems are used only from the outside, as oracles in tests
+   and as benchmarks. They are never dependencies, and never sources to
+   port. Algorithms are implemented clean-room from the literature or with
+   the copyright owner's permission. An independent implementation has
+   mathematical value of its own: when it agrees with PARI, that is
+   evidence about both.
 3. **Portable and lightweight.** Pure Rust, with no C libraries (no GMP,
    FLINT or PARI) and no build system beyond `cargo`. So every engine also
    compiles to WebAssembly and runs wherever WebAssembly runs: in the
@@ -289,6 +292,16 @@ Sagebrush chooses; see `engine/ap/PROVENANCE.md`.
 
 ## License
 
-Sagebrush's code is to be MIT OR Apache-2.0 (see Principles).
-`engine/classgroup` already declares it. The LICENSE files will be added
-once the whole tree has been checked for anything that cannot be relicensed.
+Copyright (c) 2026 SageMath, Inc. Licensed under either of the
+[Apache License, Version 2.0](LICENSE-APACHE) or the [MIT license](LICENSE-MIT),
+at your option.
+
+A few parts derive from other permissively licensed projects (CPython,
+NumPy, Arm Optimized Routines, fdlibm) or were ported with the author's
+permission (smalljac); [NOTICE.md](NOTICE.md) lists them with their
+notices.
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in Sagebrush, as defined in the Apache-2.0 license,
+is dual licensed as above, without any additional terms or conditions. See
+[CONTRIBUTING.md](CONTRIBUTING.md).

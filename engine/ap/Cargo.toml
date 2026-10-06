@@ -2,6 +2,7 @@
 name = "sagebrush-ap"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 description = "Traces of Frobenius a_p of elliptic curves over Q, for all primes up to a bound"
 
 [features]

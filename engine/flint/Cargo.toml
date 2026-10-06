@@ -2,8 +2,8 @@
 name = "sagebrush-flint"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-3.0-or-later"
-description = "Minimal FLINT bindings for Sagebrush (factoring in Z[x]); LGPL like FLINT itself"
+license = "MIT OR Apache-2.0"
+description = "Minimal FLINT bindings for Sagebrush tests (factoring in Z[x]); FLINT itself is LGPL-3.0-or-later and is used only as a reference"
 
 [dependencies]
 num-bigint = "0.4"
