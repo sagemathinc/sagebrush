@@ -1,0 +1,442 @@
+[
+{
+"in": "x*(x+1)",
+"out": "(x + 1)*x"
+},
+{
+"in": "(x+1)*x",
+"out": "(x + 1)*x"
+},
+{
+"in": "(x+1)*(x-1)",
+"out": "(x + 1)*(x - 1)"
+},
+{
+"in": "x*(x-1)*(x+1)",
+"out": "(x + 1)*(x - 1)*x"
+},
+{
+"in": "(x+2)*(x+1)",
+"out": "(x + 2)*(x + 1)"
+},
+{
+"in": "(2*x+1)*(3*x+1)",
+"out": "(3*x + 1)*(2*x + 1)"
+},
+{
+"in": "(x^2+1)*(x+1)",
+"out": "(x^2 + 1)*(x + 1)"
+},
+{
+"in": "x*sin(x)*(x+1)",
+"out": "(x + 1)*x*sin(x)"
+},
+{
+"in": "sin(x)*(x+1)",
+"out": "(x + 1)*sin(x)"
+},
+{
+"in": "(x+1)*log(x)",
+"out": "(x + 1)*log(x)"
+},
+{
+"in": "x^x*(log(x)+1)",
+"out": "x^x*(log(x) + 1)"
+},
+{
+"in": "log(x)*x^x",
+"out": "x^x*log(x)"
+},
+{
+"in": "2^x*log(2)",
+"out": "2^x*log(2)"
+},
+{
+"in": "x^n*n",
+"out": "n*x^n"
+},
+{
+"in": "y*sin(x)",
+"out": "y*sin(x)"
+},
+{
+"in": "sin(x)*cos(x)",
+"out": "cos(x)*sin(x)"
+},
+{
+"in": "cos(x)*sin(x)*x",
+"out": "x*cos(x)*sin(x)"
+},
+{
+"in": "exp(x)*x",
+"out": "x*e^x"
+},
+{
+"in": "exp(x)*sin(x)",
+"out": "e^x*sin(x)"
+},
+{
+"in": "exp(x)*(x+1)",
+"out": "(x + 1)*e^x"
+},
+{
+"in": "x^2*(x+1)",
+"out": "(x + 1)*x^2"
+},
+{
+"in": "(x+1)^2*x",
+"out": "(x + 1)^2*x"
+},
+{
+"in": "(x+1)^2*(x-1)",
+"out": "(x + 1)^2*(x - 1)"
+},
+{
+"in": "sqrt(x)*(x+1)",
+"out": "(x + 1)*sqrt(x)"
+},
+{
+"in": "sqrt(x)*x",
+"out": "x^(3/2)"
+},
+{
+"in": "sqrt(x)*y",
+"out": "sqrt(x)*y"
+},
+{
+"in": "pi*x",
+"out": "pi*x"
+},
+{
+"in": "pi*x^2",
+"out": "pi*x^2"
+},
+{
+"in": "pi*sin(x)",
+"out": "pi*sin(x)"
+},
+{
+"in": "sqrt(2)*x",
+"out": "sqrt(2)*x"
+},
+{
+"in": "sqrt(2)*sqrt(3)*sqrt(5)",
+"out": "sqrt(5)*sqrt(3)*sqrt(2)"
+},
+{
+"in": "sqrt(2)*pi",
+"out": "sqrt(2)*pi"
+},
+{
+"in": "x*y^2",
+"out": "x*y^2"
+},
+{
+"in": "y*x^2",
+"out": "x^2*y"
+},
+{
+"in": "a*b*x",
+"out": "a*b*x"
+},
+{
+"in": "x*(y+1)",
+"out": "x*(y + 1)"
+},
+{
+"in": "(y+1)*(x+1)",
+"out": "(x + 1)*(y + 1)"
+},
+{
+"in": "(x+y)*(x-y)",
+"out": "(x + y)*(x - y)"
+},
+{
+"in": "x*(x+y)",
+"out": "(x + y)*x"
+},
+{
+"in": "sin(x)*sin(y)",
+"out": "sin(x)*sin(y)"
+},
+{
+"in": "x^3 + x*y + y^2",
+"out": "x^3 + x*y + y^2"
+},
+{
+"in": "x + sin(x) + cos(x) + 1",
+"out": "x + cos(x) + sin(x) + 1"
+},
+{
+"in": "x^2 + sin(x)",
+"out": "x^2 + sin(x)"
+},
+{
+"in": "sin(x) + x",
+"out": "x + sin(x)"
+},
+{
+"in": "sin(x)^2 + x",
+"out": "sin(x)^2 + x"
+},
+{
+"in": "log(x) + x",
+"out": "x + log(x)"
+},
+{
+"in": "exp(x) + x",
+"out": "x + e^x"
+},
+{
+"in": "exp(x) + x^2 + 1",
+"out": "x^2 + e^x + 1"
+},
+{
+"in": "x + pi",
+"out": "pi + x"
+},
+{
+"in": "x^2 + pi*x + pi",
+"out": "pi + pi*x + x^2"
+},
+{
+"in": "pi + 1",
+"out": "pi + 1"
+},
+{
+"in": "sqrt(2) + 1",
+"out": "sqrt(2) + 1"
+},
+{
+"in": "sqrt(2) + x",
+"out": "x + sqrt(2)"
+},
+{
+"in": "x*y + x + y",
+"out": "x*y + x + y"
+},
+{
+"in": "x*y + x^2",
+"out": "x^2 + x*y"
+},
+{
+"in": "y^2 + x",
+"out": "y^2 + x"
+},
+{
+"in": "a + x",
+"out": "a + x"
+},
+{
+"in": "x/y + y/x",
+"out": "x/y + y/x"
+},
+{
+"in": "1/x + 1/y",
+"out": "1/x + 1/y"
+},
+{
+"in": "1/x + x",
+"out": "x + 1/x"
+},
+{
+"in": "1/x^2 + 1/x + 1",
+"out": "1/x + 1/x^2 + 1"
+},
+{
+"in": "x^(1/2) + x",
+"out": "x + sqrt(x)"
+},
+{
+"in": "x^(3/2) + x",
+"out": "x^(3/2) + x"
+},
+{
+"in": "sqrt(x) + 1",
+"out": "sqrt(x) + 1"
+},
+{
+"in": "2^x + x",
+"out": "2^x + x"
+},
+{
+"in": "2^x + 3^x",
+"out": "3^x + 2^x"
+},
+{
+"in": "x^y + x",
+"out": "x + x^y"
+},
+{
+"in": "exp(-x) + 1",
+"out": "e^(-x) + 1"
+},
+{
+"in": "sin(x)/x + cos(x)",
+"out": "sin(x)/x + cos(x)"
+},
+{
+"in": "x*cos(x) - sin(x)",
+"out": "x*cos(x) - sin(x)"
+},
+{
+"in": "-x + 1",
+"out": "-x + 1"
+},
+{
+"in": "-x^2 - x",
+"out": "-x^2 - x"
+},
+{
+"in": "-sin(x) + x",
+"out": "x - sin(x)"
+},
+{
+"in": "x - sin(x)",
+"out": "x - sin(x)"
+},
+{
+"in": "cos(x)^2 - sin(x)^2",
+"out": "cos(x)^2 - sin(x)^2"
+},
+{
+"in": "-cos(x) + sin(x)",
+"out": "-cos(x) + sin(x)"
+},
+{
+"in": "-x*y + x",
+"out": "-x*y + x"
+},
+{
+"in": "3*x*y - 2*x",
+"out": "3*x*y - 2*x"
+},
+{
+"in": "x^2*y^2 + x^2 + y^2",
+"out": "x^2*y^2 + x^2 + y^2"
+},
+{
+"in": "a*x + b*y",
+"out": "a*x + b*y"
+},
+{
+"in": "b*x + a*y",
+"out": "b*x + a*y"
+},
+{
+"in": "x*z + y",
+"out": "x*z + y"
+},
+{
+"in": "(x+1)/(x+2)",
+"out": "(x + 1)/(x + 2)"
+},
+{
+"in": "x/(x^2+1)",
+"out": "x/(x^2 + 1)"
+},
+{
+"in": "2*x/(x^2+1)",
+"out": "2*x/(x^2 + 1)"
+},
+{
+"in": "-2*x/(x^2+1)^2",
+"out": "-2*x/(x^2 + 1)^2"
+},
+{
+"in": "(x+1)/x",
+"out": "(x + 1)/x"
+},
+{
+"in": "sin(x)/(x+1)",
+"out": "sin(x)/(x + 1)"
+},
+{
+"in": "(x+1)/sin(x)",
+"out": "(x + 1)/sin(x)"
+},
+{
+"in": "x/(y*z)",
+"out": "x/(y*z)"
+},
+{
+"in": "1/(x*y)",
+"out": "1/(x*y)"
+},
+{
+"in": "1/(2*x)",
+"out": "1/2/x"
+},
+{
+"in": "3/(2*x)",
+"out": "3/2/x"
+},
+{
+"in": "x^2/(2*y)",
+"out": "1/2*x^2/y"
+},
+{
+"in": "1/(x+1)^2",
+"out": "(x + 1)^(-2)"
+},
+{
+"in": "1/2/x",
+"out": "1/2/x"
+},
+{
+"in": "-1/2/x",
+"out": "-1/2/x"
+},
+{
+"in": "sqrt(x)/x",
+"out": "1/sqrt(x)"
+},
+{
+"in": "1/(x*sqrt(x))",
+"out": "x^(-3/2)"
+},
+{
+"in": "x*sqrt(y)/z",
+"out": "x*sqrt(y)/z"
+},
+{
+"in": "2*sqrt(x)",
+"out": "2*sqrt(x)"
+},
+{
+"in": "-sqrt(x)",
+"out": "-sqrt(x)"
+},
+{
+"in": "1/2*sqrt(x)",
+"out": "1/2*sqrt(x)"
+},
+{
+"in": "x^(-3/2)",
+"out": "x^(-3/2)"
+},
+{
+"in": "x^(-1)*y^(-1)",
+"out": "1/(x*y)"
+},
+{
+"in": "e^x/x",
+"out": "e^x/x"
+},
+{
+"in": "x*e^(-x)",
+"out": "x*e^(-x)"
+},
+{
+"in": "e^(-x^2)",
+"out": "e^(-x^2)"
+},
+{
+"in": "(x+1)*e^x",
+"out": "(x + 1)*e^x"
+},
+{
+"in": "exp(x)*cos(x) + exp(x)*sin(x)",
+"out": "cos(x)*e^x + e^x*sin(x)"
+}
+]

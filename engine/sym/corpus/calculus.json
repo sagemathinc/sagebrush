@@ -1,0 +1,130 @@
+[
+{
+"in": "simplify((x^2-1)/(x-1))",
+"out": "(x^2 - 1)/(x - 1)"
+},
+{
+"in": "((x^2-1)/(x-1)).simplify_rational()",
+"out": "x + 1"
+},
+{
+"in": "((x^2-1)/(x+1)).full_simplify()",
+"out": "x - 1"
+},
+{
+"in": "(sin(x)^2 + cos(x)^2).simplify_trig()",
+"out": "1"
+},
+{
+"in": "(1/x + 1/y).simplify_rational()",
+"out": "(x + y)/(x*y)"
+},
+{
+"in": "(x/(x+1) + 1/(x+1)).simplify_full()",
+"out": "1"
+},
+{
+"in": "taylor(sin(x), x, 0, 7)",
+"out": "-1/5040*x^7 + 1/120*x^5 - 1/6*x^3 + x"
+},
+{
+"in": "taylor(cos(x), x, 0, 6)",
+"out": "-1/720*x^6 + 1/24*x^4 - 1/2*x^2 + 1"
+},
+{
+"in": "taylor(exp(x), x, 0, 5)",
+"out": "1/120*x^5 + 1/24*x^4 + 1/6*x^3 + 1/2*x^2 + x + 1"
+},
+{
+"in": "taylor(log(1+x), x, 0, 5)",
+"out": "1/5*x^5 - 1/4*x^4 + 1/3*x^3 - 1/2*x^2 + x"
+},
+{
+"in": "taylor(1/(1-x), x, 0, 5)",
+"out": "x^5 + x^4 + x^3 + x^2 + x + 1"
+},
+{
+"in": "taylor(tan(x), x, 0, 7)",
+"out": "17/315*x^7 + 2/15*x^5 + 1/3*x^3 + x"
+},
+{
+"in": "taylor(sqrt(1+x), x, 0, 3)",
+"out": "1/16*x^3 - 1/8*x^2 + 1/2*x + 1"
+},
+{
+"in": "taylor(exp(x), x, 1, 3)",
+"out": "1/6*e*(x - 1)^3 + 1/2*e*(x - 1)^2 + e*(x - 1) + e"
+},
+{
+"in": "taylor(atan(x), x, 0, 7)",
+"out": "-1/7*x^7 + 1/5*x^5 - 1/3*x^3 + x"
+},
+{
+"in": "taylor(x/(exp(x)-1), x, 0, 4)",
+"out": "-1/720*x^4 + 1/12*x^2 - 1/2*x + 1"
+},
+{
+"in": "limit(sin(x)/x, x=0)",
+"out": "1"
+},
+{
+"in": "limit((1+1/x)^x, x=oo)",
+"out": "e"
+},
+{
+"in": "limit(x^2, x=3)",
+"out": "9"
+},
+{
+"in": "limit(1/x, x=oo)",
+"out": "0"
+},
+{
+"in": "limit((x^2-1)/(x-1), x=1)",
+"out": "2"
+},
+{
+"in": "limit((exp(x)-1)/x, x=0)",
+"out": "1"
+},
+{
+"in": "limit((1-cos(x))/x^2, x=0)",
+"out": "1/2"
+},
+{
+"in": "limit(x*log(x), x=0)",
+"out": "0"
+},
+{
+"in": "limit(x^x, x=0)",
+"out": "1"
+},
+{
+"in": "limit((x^3+1)/(2*x^3+x), x=oo)",
+"out": "1/2"
+},
+{
+"in": "solve(x^2 - 4 == 0, x)",
+"out": "[x == -2, x == 2]"
+},
+{
+"in": "solve(x^2 + x - 1 == 0, x)",
+"out": "[x == -1/2*sqrt(5) - 1/2, x == 1/2*sqrt(5) - 1/2]"
+},
+{
+"in": "solve(x^2 + 1 == 0, x)",
+"out": "[x == -I, x == I]"
+},
+{
+"in": "solve(2*x + 3 == 0, x)",
+"out": "[x == -3/2]"
+},
+{
+"in": "solve(x^3 - 6*x^2 + 11*x - 6 == 0, x)",
+"out": "[x == 1, x == 2, x == 3]"
+},
+{
+"in": "solve([x + y == 3, x - y == 1], x, y)",
+"out": "[[x == 2, y == 1]]"
+}
+]
