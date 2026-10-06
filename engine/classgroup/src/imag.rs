@@ -37,6 +37,12 @@ pub struct Timing {
 /// Euler products P(i) = prod_{p <= i} (1 - chi(p)/p)^-1 over x <= i < 2x,
 /// weights i log i: much more accurate than a single truncation.
 pub fn h_estimate(d: &BigInt, x: u64) -> f64 {
+    (-d.to_f64().unwrap()).sqrt() / std::f64::consts::PI * l1_estimate(d, x)
+}
+
+/// L(1, chi_D) by Bach's weighted average of truncated Euler products (see
+/// h_estimate).
+pub fn l1_estimate(d: &BigInt, x: u64) -> f64 {
     let d8 = bigmod(d, 8);
     static SMALL: std::sync::OnceLock<Vec<u64>> = std::sync::OnceLock::new();
     let cached = SMALL.get_or_init(|| primes_up_to(1 << 17));
@@ -63,18 +69,18 @@ pub fn h_estimate(d: &BigInt, x: u64) -> f64 {
             den += w;
         }
     }
-    (-d.to_f64().unwrap()).sqrt() / std::f64::consts::PI * (num / den).exp()
+    (num / den).exp()
 }
 
-struct Tuning {
-    sieve: Params,
+pub(crate) struct Tuning {
+    pub sieve: Params,
     /// relations to collect before the first linear algebra, per prime
-    excess: f64,
+    pub excess: f64,
     /// the heaviest pivot row structured elimination may use
-    pivot_weight: usize,
+    pub pivot_weight: usize,
 }
 
-fn tuning(digits: f64, bound: u64) -> Tuning {
+pub(crate) fn tuning(digits: f64, bound: u64) -> Tuning {
     let m = if digits < 16.0 { 1 << 9 } else { 1 << 11 };
     // sieving with the primes up to a fraction of the bound: the others
     // enter relations as prime cofactors (and as forced q's for coverage).
@@ -132,7 +138,7 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
     for round in 0..200 {
         tm.rounds = round + 1;
         let t = std::time::Instant::now();
-        let found = collect(&fb, want - rels.len(), &tu.sieve, round as u64 + 1, &mut stats, &mut counts);
+        let (found, _) = collect(&fb, want - rels.len(), &tu.sieve, round as u64 + 1, &mut stats, &mut counts);
         if found.is_empty() {
             // the small sieve base finds nothing for some forced prime
             tu.sieve.sieve_bound = u64::MAX;
@@ -234,21 +240,31 @@ fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, seed: u64, debug: bool) -
     if c == 0 {
         return Ok(Some(ClassGroup { h: BigInt::one(), cyc: vec![] }));
     }
+    let sel = independent_rows(rows, c).map_err(|free| {
+        if debug {
+            eprintln!("  not of full rank: {} free columns", free.len());
+        }
+        free
+    })?;
+    let Some((h, cyc)) = lattice_group(rows, c, &sel, None, h_est * std::f64::consts::SQRT_2, seed, debug) else { return Ok(None) };
+    let ratio = h.to_f64().unwrap_or(f64::INFINITY) / h_est;
+    if debug {
+        eprintln!("  det/h_est {:.3}", ratio);
+    }
+    Ok((ratio <= std::f64::consts::SQRT_2).then(|| ClassGroup { h, cyc }))
+}
+
+/// The order and invariants of Z^c / L, L spanned by `rows` (of full rank,
+/// `sel` c independent ones), by an HNF modulo a multiple of det L that
+/// stops once the order is at most `enough`; `first_det` is det of the sel
+/// rows if known.  None if no multiple of det L was found.
+pub(crate) fn lattice_group(rows: &[Vec<i64>], c: usize, sel: &[usize], first_det: Option<BigInt>, enough: f64, seed: u64, debug: bool) -> Option<(BigInt, Vec<BigInt>)> {
     let t = std::time::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
-    let sel = match independent_rows(rows, c) {
-        Ok(sel) => sel,
-        Err(free) => {
-            if debug {
-                eprintln!("  not of full rank: {} free columns", free.len());
-            }
-            return Err(free);
-        }
-    };
     // a multiple of det L: the gcd of the determinants of a few independent
     // square subsets, until it is word-sized
     let square = |sel: &[usize], from: &[Vec<i64>]| -> Vec<Vec<i64>> { sel.iter().map(|&k| from[k].clone()).collect() };
-    let mut d0: BigInt = det_crt_probable(&square(&sel, rows)).abs();
+    let mut d0: BigInt = first_det.unwrap_or_else(|| det_crt_probable(&square(sel, rows))).abs();
     if debug {
         eprintln!("  first det {} bits at {:.1} ms", d0.bits(), ms());
     }
@@ -274,9 +290,8 @@ fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, seed: u64, debug: bool) -
         eprintln!("  det multiple {} bits at {:.1} ms", d0.bits(), ms());
     }
     if d0.is_zero() {
-        return Ok(None);
+        return None;
     }
-    let enough = h_est * std::f64::consts::SQRT_2;
     // the independent rows first, so the HNF reaches full rank (and then
     // the early stop) quickly
     let mut used = vec![false; rows.len()];
@@ -294,11 +309,10 @@ fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, seed: u64, debug: bool) -
         let w = hnf_mod(&ordered, c, &d0);
         ((0..c).map(|i| w[i][i].clone()).product(), w)
     };
-    let ratio = h.to_f64().unwrap_or(f64::INFINITY) / h_est;
     if debug {
-        eprintln!("  hnf at {:.1} ms: det/h_est {:.3}", ms(), ratio);
+        eprintln!("  hnf at {:.1} ms", ms());
     }
-    Ok((ratio <= std::f64::consts::SQRT_2).then(|| ClassGroup { h, cyc: smith(&red) }))
+    Some((h, smith(&red)))
 }
 
 #[cfg(test)]
