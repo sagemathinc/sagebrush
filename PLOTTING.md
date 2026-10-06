@@ -227,6 +227,49 @@ This is a native, light implementation of the controls. Full ipywidgets
 Python over the Jupyter comm protocol, rendered by `@cocalc/widgets`, as
 sagejs does. That layer would load on demand.
 
+## k3d notebooks (meshes and volumes, in the browser)
+
+`import k3d` gives k3d's API, drawn by the same viewer, so notebooks
+written for k3d (such as the Journal of Fluid Mechanics' published
+notebooks) run unchanged in the browser:
+
+```python
+import k3d, scipy.io as sio, numpy as np
+from k3d import matplotlib_color_maps
+
+d = sio.loadmat('D-vortices-data.mat')          # MATLAB 5 files, compressed too
+plot = k3d.plot(axes=['x^+', 'z^+', 'y^+'])
+plot += k3d.mesh(d['vertices'].astype(np.float32), d['indices'].astype(np.uint32),
+                 attribute=d['colors'], color_map=matplotlib_color_maps.seismic,
+                 color_range=[-100, 100], side='double')
+plot.display()
+open('D-vortices.html', 'w').write(plot.get_snapshot())   # a standalone interactive page
+```
+
+- **Objects:**
+  - `mesh` (a per-vertex `attribute` through `color_map` and
+    `color_range`, or `colors`; `side`, `wireframe`, `flat_shading`,
+    `opacity`, `model_matrix`);
+  - `points` (`point_size` in world units, shaded as spheres);
+  - `line` and `lines`;
+  - `volume`: ray-marched in WebGL2 through a 3D texture, with
+    `color_map`, `opacity_function`, `alpha_coef`, `samples` and `bounds`;
+  - `surface`, `vectors`, `text`, `text2d` and `label`.
+- **Plot options:** `plot += obj`, `axes` (`x^+` shows as x⁺),
+  `grid`/`grid_auto_fit`, `grid_visible`; the camera fits the scene;
+  there is a colorbar for the color-mapped object.
+- **Color maps:** `matplotlib_color_maps`, `basic_color_maps` and
+  `paraview_color_maps` (names in any capitalization, `_r` for reversed).
+- **Size.** Arrays travel in binary (float32/uint32, uint8 voxels), and
+  meshes are drawn indexed with their colors per vertex. The 708,446-triangle
+  vortex mesh above goes from Run to an interactive view in about 2.5 s.
+- **Not yet:** volumes are drawn over the other objects (no depth
+  occlusion). Also missing are `voxels`, `marching_cubes`, textures,
+  time series and camera settings. Snapshots are not compressed (19 MB
+  where k3d's are 10 MB).
+- `scipy.io.loadmat`/`savemat`, `zlib`, `base64` and `numpy.frombuffer`
+  are implemented for this in the browser runtime.
+
 ## Not yet
 
 - Zooming by resampling.

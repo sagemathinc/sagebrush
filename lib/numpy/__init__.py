@@ -1953,12 +1953,18 @@ def _m_ravel(self, order="C"):
     return _np.ravel(self)
 
 
+def frombuffer(buffer, dtype=float, count=-1, offset=0):
+    """A 1-D array over a copy of the bytes (little-endian unless the dtype
+    string starts with '>')."""
+    if not isinstance(buffer, bytes):
+        buffer = bytes(buffer)
+    return _np.frombuffer(buffer, dtype, count, offset)
+
+
 def _m_tobytes(self, order="C"):
-    import struct
-    codes = {"float64": "d", "float32": "f", "int64": "q", "int32": "i", "int16": "h", "int8": "b",
-             "uint8": "B", "uint16": "H", "uint32": "I", "uint64": "Q", "bool": "?"}
-    vals = self.ravel().tolist()
-    return struct.pack("<%d%s" % (len(vals), codes[self.dtype.name]), *vals)
+    if order == "F":
+        self = self.T
+    return _np._tobytes(self)
 
 
 def _m_argpartition(self, kth, axis=-1, kind="introselect", order=None):

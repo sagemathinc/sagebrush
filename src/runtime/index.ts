@@ -10,6 +10,7 @@ import * as B from "./builtins";
 import * as M from "./modules";
 import * as Arr from "./array";
 import "./struct";
+import "./zlib";
 import "./memoryview";
 import "./re";
 import "./numpy";

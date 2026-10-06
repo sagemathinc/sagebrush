@@ -230,7 +230,10 @@ the engines.
   `implicit_plot3d`, ... show in an interactive WebGL view (with an SVG for
   files and agents). `contour_plot`, `density_plot`, `implicit_plot`,
   `region_plot`, `plot_vector_field` and `plot_slope_field` draw functions
-  of two variables. See [PLOTTING.md](PLOTTING.md).
+  of two variables. `import k3d` runs notebooks written for k3d (meshes of
+  millions of triangles, ray-marched volumes, standalone snapshots) in the
+  browser, with `scipy.io.loadmat` for their MATLAB data. See
+  [PLOTTING.md](PLOTTING.md).
 
 ## Try it
 

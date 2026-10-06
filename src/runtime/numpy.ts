@@ -2135,6 +2135,45 @@ newBuiltinModule("_numpy", (m) => {
   fn("transpose", (a: any, axes: any = null) => transpose(asarray(a), axes === null ? null : shapeArg(axes)));
   fn("ravel", (a: any) => ravel(asarray(a)));
   fn("copy", (a: any) => copy(asarray(a)));
+  // raw bytes in and out (little-endian, or '>' dtypes byte-swapped)
+  fn("frombuffer", (buffer: any, dtype: any = null, count: any = -1, offset: any = 0) => {
+    const spec = typeof dtype === "string" ? dtype : null;
+    const big = spec !== null && spec.startsWith(">");
+    const dt = toDtype(dtype, D.float64);
+    if (!(buffer instanceof Obj.PyBytes)) raise(T.TypeError, "a bytes-like object is required");
+    const raw = buffer.a.subarray(0, buffer.n);
+    const off = Number(offset);
+    const isz = dt.itemsize;
+    let n = Number(count);
+    if (n < 0) {
+      if ((raw.length - off) % isz) raise(T.ValueError, "buffer size must be a multiple of element size");
+      n = (raw.length - off) / isz;
+    }
+    if (off + n * isz > raw.length) raise(T.ValueError, "buffer is smaller than requested size");
+    const bytes = raw.slice(off, off + n * isz); // aligned copy
+    if (big) {
+      const w = dt.cplx ? isz / 2 : isz;
+      for (let i = 0; i < bytes.length; i += w) bytes.subarray(i, i + w).reverse();
+    }
+    let data: any;
+    if (dt.name === "int64") data = Float64Array.from(new BigInt64Array(bytes.buffer), Number);
+    else if (dt.name === "uint64") data = Float64Array.from(new BigUint64Array(bytes.buffer), Number);
+    else data = new dt.ctor(bytes.buffer);
+    return new NDArray(dt, data, [n], [1]);
+  });
+  fn("_tobytes", (a: any) => {
+    const c = ascontig(asarray(a));
+    const dt = c.dt;
+    const n = c.size * (dt.cplx ? 2 : 1);
+    let view: Uint8Array;
+    if (dt.name === "int64") view = new Uint8Array(BigInt64Array.from(c.data.subarray(c.offset, c.offset + n), (v: number) => BigInt(Math.trunc(v))).buffer);
+    else if (dt.name === "uint64") view = new Uint8Array(BigUint64Array.from(c.data.subarray(c.offset, c.offset + n), (v: number) => BigInt(Math.trunc(v))).buffer);
+    else {
+      const d = c.data;
+      view = new Uint8Array(d.buffer, d.byteOffset + c.offset * d.BYTES_PER_ELEMENT, n * d.BYTES_PER_ELEMENT).slice();
+    }
+    return new Obj.PyBytes(view);
+  });
   fn("astype", (a: any, dtype: any) => copy(asarray(a), toDtype(dtype)));
   fn("nonzero", (a: any) => tuple(nonzero(asarray(a))));
   fn("matmul", (a: any, b: any) => matmul(a, b));

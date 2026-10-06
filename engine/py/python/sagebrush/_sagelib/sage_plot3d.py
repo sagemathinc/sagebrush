@@ -354,20 +354,8 @@ class Graphics3d:
         return self._svg()
 
     def _html(self, standalone=False):
-        from _viewer3d import VIEWER_JS
-        svg = self._svg()
-        global _uid
-        _uid += 1
-        uid = "sb3d-%d-%d" % (_uid, abs(hash(svg)) % 100000)
-        scene = _json.dumps(self._scene(), separators=(",", ":")).replace("</", "<\\/")
-        body = ('<div id="%s" class="sb3d" style="max-width:640px">%s</div>'
-                '<script>(function(){if(!window.SagebrushViewer3d){%s}'
-                'window.SagebrushViewer3d.mount(document.getElementById("%s"),%s);})();</script>') % (
-                    uid, svg, VIEWER_JS, uid, scene)
-        if standalone:
-            return ('<!DOCTYPE html><html><head><meta charset="utf-8"><title>%s</title></head>'
-                    '<body style="font-family:system-ui,sans-serif">%s</body></html>') % (_esc(self.description()[:80]), body)
-        return body
+        scene = _json.dumps(self._scene(), separators=(",", ":"))
+        return viewer_html(scene, self._svg(), self.description(), standalone)
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         return {SCENE_MIME: _json.dumps(self._scene(), separators=(",", ":")),
@@ -395,6 +383,26 @@ class Graphics3d:
 
 
 _uid = 0
+
+
+def viewer_html(scene_json, svg, title, standalone=False, full=False):
+    """HTML showing a scene in the 3D viewer (embedded), over its SVG
+    (shown when scripts or WebGL are unavailable).  full: fill the window
+    (a standalone page like k3d's snapshots)."""
+    from _viewer3d import VIEWER_JS
+    global _uid
+    _uid += 1
+    uid = "sb3d-%d-%d" % (_uid, abs(hash(title)) % 100000)
+    style = "width:100%" if full else "max-width:640px"
+    body = ('<div id="%s" class="sb3d" style="%s">%s</div>'
+            '<script>(function(){if(!window.SagebrushViewer3d){%s}'
+            'window.SagebrushViewer3d.mount(document.getElementById("%s"),%s);})();</script>') % (
+                uid, style, svg, VIEWER_JS, uid, scene_json.replace("</", "<\\/"))
+    if standalone:
+        return ('<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+                '<title>%s</title></head><body style="font-family:system-ui,sans-serif;margin:0;padding:8px">%s</body></html>') % (
+                    _esc(title[:80]), body)
+    return body
 
 
 def _short(v):
