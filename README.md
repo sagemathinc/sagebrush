@@ -245,6 +245,25 @@ node/build.sh                                       # Node addon
 See [engine/TRY.md](engine/TRY.md) for the full function list in both
 languages.
 
+### A Jupyter kernel
+
+```sh
+npx sagebrush --install-jupyter-kernel              # "Sagebrush (Sage)"; --mode all adds Python and Magma
+```
+
+The kernel is pyjs with the engines and SVG graphics. It speaks the
+Jupyter protocol over a ZeroMQ transport written in plain JavaScript
+(`src/zmtp.ts`, `src/kernel.ts`), so it needs neither Python nor a native
+ZeroMQ library. The self-contained executable works too.
+
+The code runs in a worker thread. The kernel's main thread answers
+heartbeats and interrupts, and Stop raises KeyboardInterrupt in Python
+loops and stops the Rust engines.
+
+`test/jupyter_kernel.py` drives it with Jupyter's own client
+(`jupyter_client`) through 18 checks: execution, streams, SVG, errors,
+completion, interrupts, modes and shutdown.
+
 ### For AI agents: the MCP server
 
 `pip install sagebrush` also installs `sagebrush-mcp`, a

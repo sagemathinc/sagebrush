@@ -6,5 +6,10 @@
 // through its `sagebrush.interrupted` import.  Elsewhere (Node, a page
 // without isolation) it is a plain array that stays 0.  INTR[1] is for the
 // embedding: the notebook's worker skips queued runs up to that id.
+// (In Node, where shared memory is always available, it is shared too: the
+// Jupyter kernel interrupts its worker thread through it.)
+const g = globalThis as any;
 export const INTR: Int32Array =
-  (globalThis as any).crossOriginIsolated && typeof SharedArrayBuffer === "function" ? new Int32Array(new SharedArrayBuffer(8)) : new Int32Array(2);
+  typeof SharedArrayBuffer === "function" && (g.crossOriginIsolated || (typeof g.process === "object" && !!g.process.versions?.node && typeof g.window === "undefined" && typeof g.importScripts !== "function"))
+    ? new Int32Array(new SharedArrayBuffer(8))
+    : new Int32Array(2);
