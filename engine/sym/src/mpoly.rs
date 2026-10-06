@@ -222,6 +222,11 @@ pub fn factor(p: &MPoly) -> (Q, Vec<(MPoly, u32)>) {
     }
     // Kronecker: radix_j = 1 + deg_j (enough for every factor)
     let radix: Vec<u64> = (0..n).map(|j| p.degree_in(j) as u64 + 1).collect();
+    // an image of very high degree takes too long to factor (and recombine):
+    // leave such a polynomial whole
+    if radix.iter().try_fold(1u64, |a, &r| a.checked_mul(r)).map_or(true, |d| d > 4000) {
+        return (Q::one(), vec![(p.clone(), 1)]);
+    }
     let image = p.kronecker(&radix);
     let (_, ifac) = sagebrush_poly::factor(&image);
     // content of p (rational) from the leading coefficient

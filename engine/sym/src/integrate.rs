@@ -30,9 +30,15 @@ pub struct Step {
 
 thread_local! {
     static TRACE: RefCell<Option<Vec<Vec<Step>>>> = const { RefCell::new(None) };
+    static WORK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static FAILED: RefCell<std::collections::HashSet<(Expr, String, bool, bool)>> = RefCell::new(std::collections::HashSet::new());
 }
 
 fn step(rule: &str, f: &Expr, x: &str, run: impl FnOnce() -> Option<Expr>) -> Option<Expr> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("SAGEBRUSH_INT_TRACE").is_some() {
+        eprintln!("{} [{}] {}", rule, x, crate::to_string(f).chars().take(120).collect::<String>());
+    }
     let tracing = TRACE.with(|t| match t.borrow_mut().as_mut() {
         Some(s) => {
             s.push(vec![]);
@@ -59,7 +65,9 @@ fn step(rule: &str, f: &Expr, x: &str, run: impl FnOnce() -> Option<Expr>) -> Op
 /// An antiderivative of f in x, checked by differentiation; None if none
 /// was found.
 pub fn integrate(f: &Expr, x: &str) -> Option<Expr> {
-    let r = soft(|| Ctx { x, inv: false }.int(f, 0).map(|r| collect_kernels(&tidy(&r), x)))?;
+    WORK.with(|w| w.set(0));
+    FAILED.with(|m| m.borrow_mut().clear());
+    let r = soft(|| Ctx { x, inv: false, lin: false }.int(f, 0).map(|r| collect_kernels(&tidy(&r), x)))?;
     if has_bad(&r) || !verify(f, &r, x) {
         return None;
     }
@@ -257,6 +265,9 @@ struct Ctx<'a> {
     /// an inverse substitution (x = e^u, x = u^(1/k), ...) was made on the
     /// way here: one per chain, or log and exp substitutions alternate
     inv: bool,
+    /// the integrand came from a linear substitution: another would only
+    /// rename it again
+    lin: bool,
 }
 
 /// (a, b) with e = a x + b, a != 0 free of x.
@@ -286,6 +297,27 @@ fn is_poly(e: &Expr, x: &str) -> bool {
     crate::poly::coeffs(e, x).is_some()
 }
 
+/// e as a fraction with the factors common to the numerator and the
+/// denominator cancelled, by their bases (no factoring, no expansion).
+fn cancel(e: &Expr) -> Expr {
+    let (n, d) = together(e);
+    if d.is_one() {
+        return n;
+    }
+    let mut num: Vec<(Expr, Expr)> = factors(&n).iter().map(base_exp).collect();
+    let mut den: Vec<(Expr, Expr)> = vec![];
+    for f in factors(&d) {
+        let (b, k) = base_exp(&f);
+        match num.iter_mut().find(|(c, _)| c == &b) {
+            Some(entry) => entry.1 = sub(&entry.1, &k),
+            None => den.push((b, k)),
+        }
+    }
+    let up: Vec<Expr> = num.iter().map(|(b, k)| pow(b, k)).collect();
+    let down: Vec<Expr> = den.iter().map(|(b, k)| pow(b, k)).collect();
+    div(&mul(up), &mul(down))
+}
+
 fn is_expanded_poly(e: &Expr, x: &str) -> bool {
     expand(e) == *e && depends(e, x)
 }
@@ -304,6 +336,24 @@ impl<'a> Ctx<'a> {
         if depth > 14 {
             return None;
         }
+        // a work budget per integrate() call, and the integrands that
+        // already failed (searches revisit them by many paths)
+        let key = (f.clone(), self.x.to_string(), self.inv, self.lin);
+        let over = WORK.with(|w| {
+            w.set(w.get() + 1);
+            w.get() > 4000
+        });
+        if over || FAILED.with(|m| m.borrow().contains(&key)) {
+            return None;
+        }
+        let r = self.int_search(f, depth);
+        if r.is_none() {
+            FAILED.with(|m| m.borrow_mut().insert(key));
+        }
+        r
+    }
+
+    fn int_search(&self, f: &Expr, depth: u32) -> Option<Expr> {
         let x = self.x;
         if !depends(f, x) {
             return step("constant", f, x, || Some(mul2(f, &self.xs())));
@@ -318,6 +368,21 @@ impl<'a> Ctx<'a> {
                     }
                 }
                 return step("polynomial", f, x, || crate::ratint::integrate_rational(&p, &QPoly::one(), &self.xs()));
+            }
+        }
+        // a polynomial with symbolic coefficients: term by term, expanded
+        if let Some(cs) = crate::poly::coeffs(f, x) {
+            if cs.len() >= 2 && cs.iter().all(|c| !depends(c, x)) && !is_expanded_poly(f, x) {
+                if let Some(r) = self.substitution_where(f, depth, |u| linear(u, x).is_none()) {
+                    return Some(r);
+                }
+            }
+            if cs.len() >= 2 && cs.iter().all(|c| !depends(c, x)) {
+                return step("polynomial", f, x, || {
+                    Some(add(cs.iter().enumerate().map(|(k, c)| {
+                        mul2(&div(c, &int(k as i64 + 1)), &pow(&self.xs(), &int(k as i64 + 1)))
+                    }).collect()))
+                });
             }
         }
         if let Some(r) = self.table(f) {
@@ -560,7 +625,7 @@ impl<'a> Ctx<'a> {
                 }
             }
         }
-        cands.retain(|u| u != &xs && u != f && keep(u));
+        cands.retain(|u| u != &xs && u != f && keep(u) && !(self.lin && linear(u, x).is_some()));
         cands.sort_by_key(|u| std::cmp::Reverse(crate::simplify::size(u)));
         cands.dedup();
         for u in cands {
@@ -574,7 +639,8 @@ impl<'a> Ctx<'a> {
             let mut g = replace_u(&q, &u, &us, x);
             let mut used_inverse = false;
             if depends(&g, x) {
-                let q2 = simplify_rational(&q);
+                // common factors cancelled (structurally: factoring is expensive)
+                let q2 = cancel(&q);
                 g = replace_u(&q2, &u, &us, x);
                 if depends(&g, x) {
                     // x itself in terms of u: x = (u - b)/a, u^(1/k), e^u, ...
@@ -594,7 +660,7 @@ impl<'a> Ctx<'a> {
                 continue;
             }
             let r = step(&format!("substitute u = {}", crate::to_string(&u)), f, x, || {
-                let inner = Ctx { x: &un, inv: self.inv || used_inverse };
+                let inner = Ctx { x: &un, inv: self.inv || used_inverse, lin: linear(&u, x).is_some() };
                 let h = inner.int(&g, depth + 1)?;
                 let r = tidy(&subs(&h, &[(us.clone(), u.clone())]));
                 // inverse substitutions (x = u^(1/k), ...) can leave branch
@@ -652,7 +718,7 @@ impl<'a> Ctx<'a> {
             // u = T (log, inverse trig), dv = P: T W - int(W T')
             return step("integration by parts", f, x, || {
                 let w = self.int(&p, depth + 1)?;
-                let rest = self.int(&simplify_rational(&mul2(&w, &diff(t, x))), depth + 1)?;
+                let rest = self.int(&cancel(&mul2(&w, &diff(t, x))), depth + 1)?;
                 Some(sub(&mul2(t, &w), &rest))
             });
         }
@@ -717,7 +783,7 @@ impl<'a> Ctx<'a> {
         let (a, _) = linear(&u, x)?;
         let w = sym(&fresh(depth));
         let wn = fresh(depth);
-        let inner = Ctx { x: &wn, inv: self.inv };
+        let inner = Ctx { x: &wn, inv: self.inv, lin: false };
         if let Some((h, k)) = single {
             if k < 2 {
                 return None;
@@ -924,7 +990,7 @@ impl<'a> Ctx<'a> {
         let t = sym(&tn);
         let q2 = add(vec![mul2(&c[0], &pow(&t, &int(2))), mul2(&c[1], &t), c[2].clone()]);
         let g = neg(&div(&pow(&t, &int(m - 1)), &sqrt(&q2)));
-        let inner = Ctx { x: &tn, inv: self.inv };
+        let inner = Ctx { x: &tn, inv: self.inv, lin: false };
         step("substitute x = 1/t", f, x, || {
             let h = inner.int(&g, depth + 1)?;
             // sqrt(c t^2 + b t + a) = sqrt(Q)/x for x > 0
@@ -955,7 +1021,7 @@ impl<'a> Ctx<'a> {
         let (a, _) = linear(&u, x)?;
         let wn = fresh(depth);
         let w = sym(&wn);
-        let inner = Ctx { x: &wn, inv: self.inv };
+        let inner = Ctx { x: &wn, inv: self.inv, lin: false };
         if n >= 2 && n % 2 == 0 && m >= 0 {
             let g = mul2(&pow(&w, &int(m)), &pow(&add2(&one(), &pow(&w, &int(2))), &int((n - 2) / 2)));
             return step("substitute w = tan", f, x, || {
@@ -1029,7 +1095,7 @@ impl<'a> Ctx<'a> {
             return None;
         }
         let g = simplify_rational(&mul2(&g, &div(&int(2), &mul2(&a, &t2))));
-        let inner = Ctx { x: &tn, inv: self.inv };
+        let inner = Ctx { x: &tn, inv: self.inv, lin: false };
         step("Weierstrass substitution t = tan(x/2)", f, x, || {
             let h = inner.rational(&g)?;
             Some(subs(&h, &[(t.clone(), div(&sin(&u), &add2(&cos(&u), &one())))]))
@@ -1059,7 +1125,7 @@ impl<'a> Ctx<'a> {
             return None;
         }
         let integrand = div(&h, &mul2(&qnum(g.clone()), &w));
-        let inner = Ctx { x: &wn, inv: self.inv };
+        let inner = Ctx { x: &wn, inv: self.inv, lin: false };
         step("substitute w = e^x", f, x, || {
             let r = inner.int(&integrand, depth + 1)?;
             Some(subs(&r, &[(w.clone(), exp(&mul2(&qnum(g.clone()), &sym(x))))]))
