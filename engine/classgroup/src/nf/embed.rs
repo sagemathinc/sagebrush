@@ -134,12 +134,18 @@ impl Embeddings {
 
     /// The T2 Gram matrix of vectors given in order coordinates.
     pub fn t2_gram(&self, vs: &[Vec<BigInt>]) -> Vec<Vec<f64>> {
+        self.gram(vs, &[])
+    }
+
+    /// The Gram matrix of sum_j w_j |sigma_j(x)|^2 (complex j counted
+    /// twice), w_j = exp(2 s_j) for the log-weights s (empty: T2).
+    pub fn gram(&self, vs: &[Vec<BigInt>], s_log: &[f64]) -> Vec<Vec<f64>> {
         let s: Vec<Vec<(f64, f64)>> = vs.iter().map(|v| self.sigma(v)).collect();
         let k = vs.len();
         (0..k).map(|a| (0..k).map(|b| {
             let mut t = 0.0;
             for (j, (x, y)) in s[a].iter().zip(&s[b]).enumerate() {
-                let w = if j < self.r1 { 1.0 } else { 2.0 };
+                let w = if j < self.r1 { 1.0 } else { 2.0 } * s_log.get(j).map_or(1.0, |l| (2.0 * l).exp());
                 t += w * (x.0 * y.0 + x.1 * y.1);
             }
             t
@@ -151,7 +157,8 @@ impl Embeddings {
     pub fn roots_hp(&self, f: &[BigInt], prec: u32) -> Vec<(BigInt, BigInt)> {
         let p = prec as usize + 32;
         self.roots.iter().map(|&(re, im)| {
-            let to = |x: f64| -> BigInt { BigInt::from((x * 2f64.powi(52)) as i64) << (p - 52) };
+            // exact for any magnitude (an i64 cast would saturate)
+            let to = |x: f64| -> BigInt { num_traits::FromPrimitive::from_f64((x * 2f64.powi(52)).round()).map_or(BigInt::zero(), |b: BigInt| b << (p - 52)) };
             let (mut zr, mut zi) = (to(re), if im == 0.0 { BigInt::zero() } else { to(im) });
             let mut bits = 45;
             loop {
@@ -215,56 +222,89 @@ impl Embeddings {
 /// Gram form computed by `gram` (floating point Gram-Schmidt, exact integer
 /// transformations).
 pub fn lll(basis: &[Vec<BigInt>], emb: &Embeddings) -> Vec<Vec<BigInt>> {
+    lll_weighted(basis, emb, &[])
+}
+
+/// lll for the weighted form of Embeddings::gram: LLL (delta 0.99, size
+/// reduction only for |mu| > 0.51, so that mu near 1/2 cannot oscillate) on
+/// the real vectors (sqrt(w_j) Re, Im sigma_j(x)), exact integer
+/// transformations of the basis.
+pub fn lll_weighted(basis: &[Vec<BigInt>], emb: &Embeddings, s_log: &[f64]) -> Vec<Vec<BigInt>> {
     let mut b: Vec<Vec<BigInt>> = basis.to_vec();
     let k = b.len();
-    let delta = 0.99;
+    if k < 2 {
+        return b;
+    }
+    let vec_of = |x: &[BigInt]| -> Vec<f64> {
+        let sg = emb.sigma(x);
+        let mut out = vec![];
+        for (j, (re, im)) in sg.iter().enumerate() {
+            let w = if j < emb.r1 { 1.0 } else { 2.0 } * s_log.get(j).map_or(1.0, |l| (2.0 * l).exp());
+            let sw = w.sqrt();
+            out.push(sw * re);
+            if j >= emb.r1 {
+                out.push(sw * im);
+            }
+        }
+        out
+    };
+    let dot = |a: &[f64], c: &[f64]| -> f64 { a.iter().zip(c).map(|(x, y)| x * y).sum() };
+    let mut v: Vec<Vec<f64>> = b.iter().map(|x| vec_of(x)).collect();
+    // Gram-Schmidt data: mu[i][j] (j < i), bb[i] = |b_i*|^2
+    let mut mu = vec![vec![0.0f64; k]; k];
+    let mut bb = vec![0.0f64; k];
+    let gs = |i: usize, v: &Vec<Vec<f64>>, mu: &mut Vec<Vec<f64>>, bb: &mut Vec<f64>| {
+        for j in 0..i {
+            let mut t = dot(&v[i], &v[j]);
+            for l in 0..j {
+                t -= mu[j][l] * mu[i][l] * bb[l];
+            }
+            mu[i][j] = if bb[j] > 0.0 { t / bb[j] } else { 0.0 };
+        }
+        let mut t = dot(&v[i], &v[i]);
+        for l in 0..i {
+            t -= mu[i][l] * mu[i][l] * bb[l];
+        }
+        bb[i] = t.max(0.0);
+    };
+    gs(0, &v, &mut mu, &mut bb);
     let mut i = 1;
     let mut iters = 0;
-    while i < k && iters < 100_000 {
+    while i < k && iters < 20_000 {
         iters += 1;
-        let g = emb.t2_gram(&b);
-        // Gram-Schmidt coefficients from the Gram matrix
-        let mut mu = vec![vec![0.0f64; k]; k];
-        let mut bstar = vec![0.0f64; k];
-        for a in 0..k {
-            for c in 0..a {
-                let mut s = g[a][c];
-                for t in 0..c {
-                    s -= mu[c][t] * mu[a][t] * bstar[t];
-                }
-                mu[a][c] = s / bstar[c];
-            }
-            let mut s = g[a][a];
-            for t in 0..a {
-                s -= mu[a][t] * mu[a][t] * bstar[t];
-            }
-            bstar[a] = s;
-        }
-        // size-reduce b_i
+        gs(i, &v, &mut mu, &mut bb);
+        // size reduction of b_i
         let mut changed = false;
-        for c in (0..i).rev() {
-            let q = mu[i][c].round();
-            if q != 0.0 {
+        for j in (0..i).rev() {
+            if mu[i][j].abs() > 0.51 {
+                let q = mu[i][j].round();
                 let qb = BigInt::from(q as i64);
-                let bc = b[c].clone();
-                for (x, y) in b[i].iter_mut().zip(&bc) {
+                let bj = b[j].clone();
+                for (x, y) in b[i].iter_mut().zip(&bj) {
                     *x -= &qb * y;
                 }
-                for t in 0..=c {
-                    mu[i][t] -= q * if t == c { 1.0 } else { mu[c][t] };
+                for l in 0..j {
+                    mu[i][l] -= q * mu[j][l];
                 }
+                mu[i][j] -= q;
                 changed = true;
             }
         }
         if changed {
-            continue; // recompute (cheap for small dimensions)
+            v[i] = vec_of(&b[i]);
+            gs(i, &v, &mut mu, &mut bb);
         }
-        if bstar[i] < (delta - mu[i][i - 1] * mu[i][i - 1]) * bstar[i - 1] {
+        if bb[i] < (0.99 - mu[i][i - 1] * mu[i][i - 1]) * bb[i - 1] {
             b.swap(i, i - 1);
+            v.swap(i, i - 1);
+            gs(i - 1, &v, &mut mu, &mut bb);
             i = (i - 1).max(1);
         } else {
             i += 1;
         }
+    }
+    if std::env::var("QCL_LLLITER").is_ok() && iters > 1000 {
+        eprintln!("      lll: {} iterations (k = {})", iters, k);
     }
     b
 }

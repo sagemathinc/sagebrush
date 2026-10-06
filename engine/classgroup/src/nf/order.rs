@@ -162,11 +162,10 @@ impl Order {
         Order::new(&self.f, pow, den)
     }
 
-    /// One Round 2 step at p: the ring of multipliers of the p-radical, if
-    /// it is bigger than this order (None: the order is p-maximal).
-    pub fn enlarge_at(&self, p: &BigInt) -> Option<Order> {
+    /// The p-radical {x : x^q in pO for some q} as an HNF basis (it contains
+    /// pO): the kernel of x -> x^q on O/pO, q = p^j >= n.
+    pub fn radical(&self, p: &BigInt) -> ZMat {
         let n = self.n;
-        // the p-radical: kernel of x -> x^q on O/pO, q = p^j >= n
         let mut q = p.clone();
         while q < BigInt::from(n) {
             q *= p;
@@ -180,7 +179,14 @@ impl Order {
         for i in 0..n {
             gens.push((0..n).map(|j| if i == j { p.clone() } else { BigInt::zero() }).collect());
         }
-        let ip = hnf(&gens); // the radical, n x n
+        hnf(&gens)
+    }
+
+    /// One Round 2 step at p: the ring of multipliers of the p-radical, if
+    /// it is bigger than this order (None: the order is p-maximal).
+    pub fn enlarge_at(&self, p: &BigInt) -> Option<Order> {
+        let n = self.n;
+        let ip = self.radical(p);
         let ip_inv = inverse(&to_q(&ip));
         // {x in O : x I subset p I}: kernel of x -> (x b_k in I-coordinates) mod p
         let a: ZMat = (0..n).map(|i| {
