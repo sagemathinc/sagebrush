@@ -1,6 +1,7 @@
 //! Class groups, clean-room (from Cohen's books and the literature; PARI is
-//! used only as an outside oracle and benchmark).  First: imaginary
-//! quadratic fields, by Jacobson's sieve for relations.
+//! used only as an outside oracle and benchmark).  Quadratic fields so far:
+//! imaginary (imag.rs) and real, with the regulator (realq.rs), from
+//! relations found by Jacobson's sieve (relations.rs).
 pub mod arith;
 pub mod form;
 pub mod relations;
