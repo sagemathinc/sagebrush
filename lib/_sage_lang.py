@@ -301,8 +301,9 @@ class _CallableInt(int):
 
 
 def _install_int_methods(sa):
-    """Sage's Integer methods on Python ints, from sage_all's functions."""
-    import _sbengine
+    """Sage's Integer methods on Python ints, from sage_all's functions (in
+    pyjs); under CPython, which cannot extend int, an Integer subclass of
+    int with those methods, returned for sage_all.Integer."""
 
     def isqrt_exact(n):
         r = _m.isqrt(n)
@@ -396,6 +397,10 @@ def _install_int_methods(sa):
         "kronecker": lambda n, b: sa.kronecker(n, b) if hasattr(sa, "kronecker") else None,
         "multiplicative_order": None,
     }
+    try:
+        import _sbengine
+    except ImportError:
+        return _integer_class(sa, methods)
     _sbengine.extend_type(int, "numerator", property(lambda n: _CallableInt(n)))
     _sbengine.extend_type(int, "denominator", property(lambda n: _CallableInt(1)))
     for name, f in methods.items():
@@ -403,3 +408,62 @@ def _install_int_methods(sa):
             continue
         f.__name__ = name
         _sbengine.extend_type(int, name, f)
+
+
+def _integer_class(sa, methods):
+    """Sage's Integer for CPython: an int with Sage's methods, closed under
+    arithmetic; a / b and negative powers give Rationals, as in Sage."""
+
+    def wrap(r):
+        return Integer(r) if type(r) is int else r
+
+    class Integer(int):
+        __slots__ = ()
+
+        def __repr__(self):
+            return int.__repr__(self)
+
+        numerator = property(lambda n: _CallableInt(n))
+        denominator = property(lambda n: _CallableInt(1))
+
+        def __truediv__(self, other):
+            if isinstance(other, int):
+                return sa._QQ(int(self), int(other))
+            return NotImplemented
+
+        def __rtruediv__(self, other):
+            if isinstance(other, int):
+                return sa._QQ(int(other), int(self))
+            return NotImplemented
+
+        def __pow__(self, other, mod=None):
+            if mod is None and isinstance(other, int) and other < 0:
+                return sa._QQ(1, int(self) ** -int(other))
+            r = int.__pow__(self, other, mod)
+            return wrap(r) if r is not NotImplemented else r
+
+    for op in ("add", "sub", "mul", "floordiv", "mod", "lshift", "rshift", "and", "or", "xor"):
+        for name in ("__%s__" % op, "__r%s__" % op):
+            def f(a, b, _g=getattr(int, name)):
+                r = _g(a, b)
+                return wrap(r) if r is not NotImplemented else r
+            f.__name__ = name
+            setattr(Integer, name, f)
+    for name in ("__neg__", "__pos__", "__abs__"):
+        def g(a, _g=getattr(int, name)):
+            return Integer(_g(a))
+        g.__name__ = name
+        setattr(Integer, name, g)
+
+    def int_str(n, base=10):
+        return methods["str"](int(n), base)
+
+    for name, f in methods.items():
+        if f is None or name == "str":
+            continue
+        setattr(Integer, name, (lambda f: lambda self, *a, **k: wrap(f(int(self), *a, **k)))(f))
+    Integer.str = int_str
+    Integer.__module__ = "sagebrush.sage"
+    Integer.__qualname__ = Integer.__name__ = "Integer"
+    return Integer
+

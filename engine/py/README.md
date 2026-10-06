@@ -34,6 +34,40 @@ which also runs in the browser at [sagebrush.space](https://sagebrush.space).
 
 Polynomials are coefficient lists, constant term first.
 
+## Sage-compatible: `sagebrush.sage`
+
+For Sage users, `sagebrush.sage` is a namespace with Sage's names, behaviour
+and printing, for what Sagebrush implements: number fields, polynomials,
+matrices, modular forms and symbols, elliptic curves, Dirichlet characters,
+integers, plotting.
+
+```python
+>>> from sagebrush.sage import *
+>>> factor(2026)
+2 * 1013
+>>> x = PolynomialRing(QQ, 'x').gen()
+>>> K = NumberField(x**3 + 17*x + 1, 'a')
+>>> K.class_group()
+Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^3 + 17*x + 1
+>>> K.regulator()
+2.83341678218613
+>>> K.factor(11)
+(Fractional ideal (11, a + 3))^2 * (Fractional ideal (11, a + 5))
+>>> Integer(2026).is_prime(), Integer(2026) / 4
+(False, 1013/2)
+>>> EllipticCurve('389a1').rank()
+2
+
+```
+
+This is plain Python, without Sage's preparser: write `x**3` (`x^3` is xor
+in Python, and raises an error here as in Sage), `Integer(2)/3` for a
+rational (`2/3` is a float), and `K = NumberField(f, 'a'); a = K.gen()` for
+`K.<a> = NumberField(f)`. Integers from `Integer(n)` or `ZZ(n)` have Sage's
+methods. The output is checked line by line against Sage itself: Sage's
+own preparser turns Sagebrush's Sage test files into plain Python, and
+their output under `sagebrush.sage` must equal Sage's.
+
 ## Engines
 
 - `sagebrush.nf`: number fields: maximal orders, prime ideals, class groups,

@@ -18,7 +18,7 @@ def _norm(c):
         return int(c)
     f = _F(c)
     if f.denominator == 1:
-        return int(f.numerator)
+        return _sa().Integer(f.numerator)
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
@@ -49,7 +49,7 @@ class _Ring:
             raise TypeError("ZZ takes one argument")
         if isinstance(x, _F) and x.denominator != 1:
             raise TypeError("no conversion of this rational to integer")
-        return int(x)
+        return _sa().Integer(x)
 
     def __getitem__(self, names):
         return PolynomialRing(self, names)
@@ -288,6 +288,11 @@ class Polynomial:
         return self._make(r, o)
 
     __rmul__ = __mul__
+
+    def __xor__(self, other):
+        # plain Python (sagebrush.sage under CPython): ^ is xor, with the
+        # wrong precedence; the Sage preparser (and pyjs) make it a power
+        raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
 
     def __pow__(self, n):
         n = int(n)

@@ -72,7 +72,7 @@ def _q(x):
     # A Fraction result as Sage would show it: an int when it is integral.
     if type(x) is _Fraction:
         if x._denominator == 1:
-            return x._numerator
+            return Integer(x._numerator)
         return Rational._from_coprime_ints(x._numerator, x._denominator)
     return x
 
@@ -156,7 +156,7 @@ def _intdiv(a, b):
         a //= g
         b //= g
     if b == 1:
-        return a
+        return Integer(a)
     return Rational._from_coprime_ints(a, b)
 
 
@@ -671,6 +671,9 @@ def continued_fraction(x, nterms=20):
     return out
 
 
-# Sage's Integer methods on Python ints: (12).factor(), 13.is_prime()
+# Sage's Integer methods on Python ints: (12).factor(), 13.is_prime(); under
+# CPython instead an Integer type (sagebrush.sage)
 import sys as _sys
-_install_int_methods(_sys.modules[__name__])
+_Integer = _install_int_methods(_sys.modules[__name__])
+if _Integer is not None:
+    Integer = _Integer

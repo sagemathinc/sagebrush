@@ -43,6 +43,7 @@ class Expr:
     def __truediv__(self, o): return self._bin("/", o)
     def __rtruediv__(self, o): return self._bin("/", o, True)
     def __pow__(self, o): return self._bin("^", o)
+    def __xor__(self, o): raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
     def __rpow__(self, o): return self._bin("^", o, True)
     # Constant expressions (pi, 2*pi, sqrt(2)) compare as numbers.
     def _cmp(self, other):

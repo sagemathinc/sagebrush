@@ -383,6 +383,11 @@ class NumberFieldElement:
     def __rtruediv__(self, other):
         return self._K(other) * ~self
 
+    def __xor__(self, other):
+        # plain Python (sagebrush.sage under CPython): ^ is xor, with the
+        # wrong precedence; the Sage preparser (and pyjs) make it a power
+        raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
+
     def __pow__(self, e):
         e = int(e)
         if e < 0:

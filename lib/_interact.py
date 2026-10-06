@@ -211,10 +211,12 @@ class _Interact:
         try:
             result = self.f(**kwargs)
             if result is not None:  # as ipywidgets' interact: show what it returns
-                builtins.__pyjs_display__(result)
+                from _graphics import host_display
+                if not host_display(result):
+                    print(result)
             import sys
             pyplot = sys.modules.get("matplotlib.pyplot")
-            if pyplot is not None:
+            if pyplot is not None and hasattr(pyplot, "_flush_figures"):
                 pyplot._flush_figures()
         except Exception as err:
             import traceback
@@ -262,7 +264,10 @@ def interact(f=None, layout=None, _abbrev=None, **controls):
         s["name"] = name
         s["label"] = c.label if c.label is not None else name
         spec["controls"].append(s)
-    if builtins.__pyjs_host__("interact", json.dumps(spec)):
+    # without a host that draws controls (CPython), run once with the
+    # defaults, as Sage does on the command line
+    host = getattr(builtins, "__pyjs_host__", None)
+    if host is not None and host("interact", json.dumps(spec)):
         builtins.__pyjs_host__("target", iid)
         try:
             it.run({})

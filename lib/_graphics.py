@@ -841,11 +841,27 @@ def describe_svg(svg):
 
 # ------------------------------------------------------------------ output
 
-def show(obj, save_name="plot"):
-    """Display obj richly when the host can (the browser); else write an SVG
-    file and print its path (the command line)."""
+def host_display(obj):
+    """Display obj richly if the host can: the browser (pyjs), or under
+    CPython a Jupyter kernel (obj has _repr_svg_).  True if displayed."""
     import builtins
-    shown = builtins.__pyjs_display__(obj)
+    d = getattr(builtins, "__pyjs_display__", None)
+    if d is not None:
+        return d(obj)
+    import sys
+    ip = sys.modules.get("IPython")
+    shell = ip.get_ipython() if ip is not None and hasattr(ip, "get_ipython") else None
+    if shell is not None and getattr(shell, "kernel", None) is not None:
+        from IPython.display import display
+        display(obj)
+        return True
+    return False
+
+
+def show(obj, save_name="plot"):
+    """Display obj richly when the host can (the browser, Jupyter); else
+    write an SVG file and print its path (the command line)."""
+    shown = host_display(obj)
     if shown:
         return None
     svg = obj._repr_svg_()

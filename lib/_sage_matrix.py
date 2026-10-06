@@ -155,6 +155,11 @@ class Matrix:
         base = self._base if isinstance(other, int) else _sa().QQ
         return Matrix(base, [[other * a for a in r] for r in self._rows])
 
+    def __xor__(self, other):
+        # plain Python (sagebrush.sage under CPython): ^ is xor, with the
+        # wrong precedence; the Sage preparser (and pyjs) make it a power
+        raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
+
     def __pow__(self, e):
         e = int(e)
         if e < 0:
