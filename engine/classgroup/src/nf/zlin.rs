@@ -18,6 +18,7 @@ pub fn hnf(rows: &[Vec<BigInt>]) -> ZMat {
     let mut r = 0;
     for col in 0..m {
         loop {
+            sagebrush_interrupt::check();
             // the smallest nonzero entry of the column at or below r
             let best = (r..a.len()).filter(|&i| !a[i][col].is_zero()).min_by(|&i, &j| a[i][col].abs().cmp(&a[j][col].abs()));
             let Some(b) = best else { break };
@@ -126,6 +127,7 @@ pub fn left_kernel_mod(a: &[Vec<BigInt>], p: &BigInt) -> ZMat {
         .collect();
     let mut rank = 0;
     for col in 0..c {
+        sagebrush_interrupt::check();
         let Some(piv) = (rank..r).find(|&i| !m[i][col].is_zero()) else { continue };
         m.swap(rank, piv);
         let inv = m[rank][col].modpow(&(p - 2u32), p);

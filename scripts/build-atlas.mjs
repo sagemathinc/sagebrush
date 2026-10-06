@@ -23,7 +23,7 @@ const [spacesFile, lmfdbFile, costFile] = process.argv.slice(2);
 if (!spacesFile) throw new Error("usage: node scripts/build-atlas.mjs SPACES.jsonl [LMFDB.json [COST-MODEL.json]]");
 const out = join(root, "web", "dist", "atlas", "data");
 
-const wasm = new WebAssembly.Instance(new WebAssembly.Module(readFileSync(join(root, "wasm", "sagebrush-engine.wasm"))), {}).exports;
+const wasm = new WebAssembly.Instance(new WebAssembly.Module(readFileSync(join(root, "wasm", "sagebrush-engine.wasm"))), { sagebrush: { interrupted: () => 0 } }).exports;
 function engine(req) {
   const b = new TextEncoder().encode(JSON.stringify(req));
   const p = wasm.sb_alloc(b.length);

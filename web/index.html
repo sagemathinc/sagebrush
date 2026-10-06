@@ -182,7 +182,7 @@
     <button class="primary" id="runall" title="Run every cell in order">Run all</button>
     <button id="add" title="Add a code cell at the end">+ Code</button>
     <button id="addmd" title="Add a Markdown (text) cell at the end">+ Text</button>
-    <button class="stop" id="stop" title="Terminate the running program (forgets all variables)">Stop</button>
+    <button class="stop" id="stop" title="Interrupt the running program (KeyboardInterrupt; variables are kept)">Stop</button>
     <button id="restart" title="Fresh interpreter">Restart</button>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option></select>
     <select id="examples" aria-label="Load examples"><option value="">Examples…</option></select>
@@ -405,12 +405,14 @@ function startWorker() {
     if (m.fsChanged !== undefined) return fileChanged(m.fsChanged, m.data);
     if (m.ready) {
       version = m.version || "";
+      interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
       statusEl.textContent = `ready (sagebrush ${version}, ${Math.round(performance.now() - t0)} ms)`;
       return;
     }
     const p = pending.get(m.id);
     if (!p) return;
     if (p.reply) { pending.delete(m.id); return p.reply(m); }
+    if (m.skipped) { pending.delete(m.id); return p.skipped ? p.skipped() : p.stopped(""); }
     if (m.start) p.start();
     // output of an @interact's function goes to that interact's area
     const dest = m.target != null ? areaSink(interactBox(m.target)) : p;
@@ -438,6 +440,23 @@ function ask(msg, fallback) {
     pending.set(id, { reply: resolve, stopped: () => resolve(fallback) });
     worker.postMessage({ id, sage: isSage(), magma: isMagma(), ...msg });
   });
+}
+
+// Interrupt what is running: KeyboardInterrupt in the worker (Python loops
+// and the Rust engines check a flag shared with this page), keeping every
+// variable; queued runs are skipped.  Where that is impossible (no
+// SharedArrayBuffer), or if the program does not stop within 2 s (a loop that
+// never checks), restart the interpreter.
+let interruptFlag = null;
+function interrupt(message) {
+  if (!interruptFlag || pending.size === 0) return stop(message);
+  const waiting = [...pending.keys()];
+  Atomics.store(interruptFlag, 1, nextId - 1);
+  Atomics.store(interruptFlag, 0, 1);
+  const gen = generation;
+  setTimeout(() => {
+    if (generation === gen && waiting.some((id) => pending.has(id))) stop(message);
+  }, 2000);
 }
 
 function stop(message) {
@@ -754,9 +773,10 @@ function run(cell) {
       settle(cell);
       cell.n.textContent = "[ ]";
       cell.time.textContent = "";
-      appendText(cell.out, message, true);
+      if (message) appendText(cell.out, message, true);
       resolve();
     },
+    skipped() { settle(cell); cell.n.textContent = "[ ]"; resolve(); },
   }));
 }
 
@@ -964,10 +984,11 @@ async function toggleConsole(show = consoleEl.hidden) {
       interact(spec) { const box = consolePictures(); forgetInteracts(box); box.replaceChildren(); renderInteract(box, spec); out("[controls shown on the right]\n", false); },
       clear() {},
       stopped(message) { out("\n" + message.trim() + "\n", true); resolve(); },
+      skipped() { resolve(); },
     }, { repl: true })),
     more: (src) => ask({ check: src }, false).then((m) => !!m.more),
     complete: (line) => ask({ complete: line }, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
-    interrupt: () => stop("\nKeyboardInterrupt (interpreter restarted; variables are gone).\n"),
+    interrupt: () => interrupt("\nKeyboardInterrupt (interpreter restarted; variables are gone).\n"),
     sage: isSage,
     version: () => version,
     announce,
@@ -1019,7 +1040,7 @@ function setMode(mode) {
 $("#runall").onclick = runAll;
 $("#add").onclick = () => addCell("", null, true);
 $("#addmd").onclick = () => addCell("", null, true, "markdown");
-$("#stop").onclick = () => stop("\nStopped (interpreter restarted; variables are gone).\n");
+$("#stop").onclick = () => interrupt("\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n");
 $("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
 modeEl.onchange = () => { setMode(modeEl.value); scheduleSave(); };
 const sel = $("#examples");

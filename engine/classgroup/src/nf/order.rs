@@ -239,6 +239,7 @@ pub fn maximal_order(f: &[BigInt]) -> (Order, Vec<(BigInt, u32)>) {
             continue;
         }
         while let Some(o2) = o.enlarge_at(&p) {
+            sagebrush_interrupt::check();
             o = o2;
         }
     }

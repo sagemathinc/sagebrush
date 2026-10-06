@@ -69,6 +69,7 @@ pub fn aberth(fc: &[f64]) -> Vec<(f64, f64)> {
         C(bound * 0.5 * t.cos(), bound * 0.5 * t.sin())
     }).collect();
     for _ in 0..500 {
+        sagebrush_interrupt::check();
         let mut moved = 0.0f64;
         for k in 0..n {
             let (v, d) = horner(&fc, z[k]);
@@ -168,6 +169,7 @@ impl Embeddings {
             let (mut zr, mut zi) = (to(re), if im == 0.0 { BigInt::zero() } else { to(im) });
             let mut bits = 45;
             loop {
+                sagebrush_interrupt::check();
                 // f(z) and f'(z) by Horner in fixed point
                 let (mut vr, mut vi) = (BigInt::zero(), BigInt::zero());
                 let (mut dr, mut di) = (BigInt::zero(), BigInt::zero());
@@ -277,6 +279,7 @@ pub fn lll_weighted(basis: &[Vec<BigInt>], emb: &Embeddings, s_log: &[f64]) -> V
     let mut i = 1;
     let mut iters = 0;
     while i < k && iters < 20_000 {
+        sagebrush_interrupt::check();
         iters += 1;
         gs(i, &v, &mut mu, &mut bb);
         // size reduction of b_i

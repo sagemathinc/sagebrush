@@ -40,6 +40,7 @@ pub fn sparse_echelon(rows: &[Vec<(u32, u64)>], m: usize, p: u64) -> (Vec<(u32, 
             }
         }
         while let Some(Reverse((t, c))) = heap.pop() {
+            sagebrush_interrupt::check();
             let f = acc[c as usize];
             if f == 0 {
                 continue;
@@ -161,6 +162,7 @@ fn charpoly_u32(mut h: Vec<Vec<u32>>, p: u32) -> Vec<u64> {
     let n = h.len();
     let pp = p as u64;
     for m in 1..n.saturating_sub(1) {
+        sagebrush_interrupt::check();
         let Some(i) = (m..n).find(|&i| h[i][m - 1] != 0) else { continue };
         if i != m {
             h.swap(i, m);
@@ -194,6 +196,7 @@ fn charpoly_u32(mut h: Vec<Vec<u32>>, p: u32) -> Vec<u64> {
     // polys[m] = x polys[m-1] - sum_j coef_j polys[j].
     let mut polys: Vec<Vec<u32>> = vec![vec![1]];
     for m in 1..=n {
+        sagebrush_interrupt::check();
         let mut terms: Vec<(usize, u32)> = vec![(m - 1, h[m - 1][m - 1])];
         let mut t = 1u64;
         for i in 1..m {

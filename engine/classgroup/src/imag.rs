@@ -136,6 +136,7 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
     let mut want = (tu.excess * n as f64) as usize + 20;
     let mut counts = vec![0u32; n];
     for round in 0..200 {
+        sagebrush_interrupt::check();
         tm.rounds = round + 1;
         let t = crate::clock::Instant::now();
         let (found, _) = collect(&fb, want - rels.len(), &tu.sieve, round as u64 + 1, &mut stats, &mut counts);

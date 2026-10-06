@@ -1,6 +1,7 @@
 // The runtime object handed to compiled modules, plus function creation and
 // tracebacks.
 
+import { INTR } from "./interrupt";
 import * as Obj from "./object";
 import * as O from "./ops";
 import * as F from "./format";
@@ -498,9 +499,17 @@ const isagepow = (a: any, b: any) => (negIntPow(a, b) ? sagepow(a, b) : O.ipow(a
 
 // ------------------------------------------------------------------ the runtime object
 
+// Ctrl-C in compiled loops: KeyboardInterrupt, and the request is consumed.
+function interrupted(): never {
+  INTR[0] = 0;
+  return raise(T.KeyboardInterrupt);
+}
+
 export const R: any = {
   /** Set by an embedding (the browser worker): display(bundle) -> shown?, and other hooks. */
   host: null,
+  INTR,
+  interrupted,
   mimeBundle,
   ...O,
   ...F,

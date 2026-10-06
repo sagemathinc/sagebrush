@@ -27,6 +27,14 @@ async function runCode(code) {
   await until("(() => { const c = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent); })()");
   return ev("[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1).querySelector('.out').textContent");
 }
+// Start a cell, press Stop after `ms`, and return its output once it settles.
+async function runAndStop(code, ms) {
+  await ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
+  await sleep(ms);
+  await ev("document.querySelector('#stop').click()");
+  await until("(() => { const c = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1); return !c.classList.contains('running') && !c.classList.contains('queued'); })()");
+  return ev("[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1).querySelector('.out').textContent");
+}
 try {
   await send("Page.navigate", { url });
   await ready();
@@ -96,6 +104,16 @@ try {
   // the symbolic x, and a field on which Sage 10.8.beta0's PARI fails ("bug in small_norm")
   out = await runCode("x = var('x')\nK.<a> = NumberField(x^3 + 838398*x - 5077)\nprint(K.class_group().invariants())");
   ok(out.includes("(8, 2, 2)"), "Sage mode: NumberField of a symbolic polynomial: " + out.trim());
+  // Stop: KeyboardInterrupt, in Python loops and in the Rust engine, keeping variables
+  ok(await ev("crossOriginIsolated"), "the page is cross-origin isolated (COOP/COEP), so Stop can interrupt");
+  out = await runAndStop("keep = 41\nwhile True:\n    pass", 800);
+  ok(/KeyboardInterrupt/.test(out), "Stop interrupts a Python loop: " + JSON.stringify(out.trim().slice(-60)));
+  out = await runCode("print(keep + 1)");
+  ok(out.includes("42"), "...and the variables are kept: " + out.trim());
+  out = await runAndStop("factor(100000000000000000000000012349 * 300000000000000000000000000823)", 1500);
+  ok(/KeyboardInterrupt/.test(out), "Stop interrupts the Rust engine (ECM): " + JSON.stringify(out.trim().slice(-60)));
+  out = await runCode("print(keep, factor(2^64 + 1))");
+  ok(out.includes("41 274177 * 67280421310721"), "...the engine works after it, variables kept: " + out.trim());
   // Magma mode: translated to Python in the page
   await ev("(() => { const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R<x> := PolynomialRing(Integers());\nFactorization(x^4 - 1);\n[ p : p in [1..30] | IsPrime(p) ];");

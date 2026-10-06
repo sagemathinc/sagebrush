@@ -113,6 +113,12 @@ self.onmessage = async (ev: MessageEvent) => {
     postMessage({ id, matches, prefix });
     return;
   }
+  // Interrupt (the page wrote INTR[1]): runs queued before it are skipped
+  if (id <= R.INTR[1] && (m.code !== undefined || m.interact !== undefined)) {
+    postMessage({ id, skipped: true });
+    return;
+  }
+  R.INTR[0] = 0; // a request that came after the previous run had finished
   current = id;
   target = null;
   postMessage({ id, start: true });
@@ -146,4 +152,7 @@ self.onmessage = async (ev: MessageEvent) => {
   postMessage({ id, done: true, ms: performance.now() - t0 });
   current = null;
 };
-postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__ });
+// The interrupt flag, shared with the page when it is cross-origin isolated
+// (Stop then raises KeyboardInterrupt here instead of restarting the worker).
+const interrupt = typeof SharedArrayBuffer === "function" && R.INTR.buffer instanceof SharedArrayBuffer ? R.INTR.buffer : null;
+postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt });

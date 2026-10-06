@@ -224,6 +224,7 @@ pub(crate) fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: 
             e = pmul(&e, &[(ell - lam) % ell, 1], ell);
         }
         loop {
+            sagebrush_interrupt::check();
             let g = pgcd(&f, &e, ell);
             if deg(&g) == 0 {
                 break;
@@ -271,6 +272,7 @@ fn hecke_primes(n: u64) -> Vec<u64> {
             qs.push(q);
             // Close the subgroup under multiplication by r.
             loop {
+                sagebrush_interrupt::check();
                 let before = size;
                 for x in 0..n.max(1) {
                     if group[x as usize] {
@@ -319,6 +321,7 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     let gens = hecke_primes(n);
     let mut qs_all = gens.clone();
     for q in (2..).filter(|&q| is_prime(q) && n % q != 0) {
+        sagebrush_interrupt::check();
         if qs_all.len() >= 16 {
             break;
         }

@@ -415,7 +415,7 @@ export class Emitter {
       const head = i === 0 ? "" : `${it} = iter(${this.ex(g.iter)}); `;
       const assign = this.assignCode(g.target, v);
       const conds = g.ifs.map((c) => `if (${this.bool(c)}) { `).join("");
-      loops.push(`${head}for (let ${v} = ${it}.$next(); ${v} !== DONE; ${v} = ${it}.$next()) { ${assign} ${conds}`);
+      loops.push(`${head}for (let ${v} = ${it}.$next(); ${v} !== DONE; ${v} = ${it}.$next()) { ${INTR_CHECK} ${assign} ${conds}`);
       closes.push("}".repeat(1 + g.ifs.length));
     });
     // The element is compiled after the targets, so the comprehension
@@ -600,6 +600,7 @@ export class Emitter {
       case "While":
         return this.loop(st.orelse, () => {
           this.w(`while (${this.bool(st.test)}) {`);
+          this.w(`  ${INTR_CHECK}`);
           this.block(st.body);
           this.w("}");
         });
@@ -611,6 +612,7 @@ export class Emitter {
           this.w(`${it} = iter(${this.ex(st.iter)});`);
           this.w(`for (let ${v} = ${it}.$next(); ${v} !== DONE; ${v} = ${it}.$next()) {`);
           this.indent++;
+          this.w(INTR_CHECK);
           this.w(this.assignCode(st.target, v));
           this.indent--;
           this.block(st.body);
@@ -698,6 +700,7 @@ export class Emitter {
       if (args.length === 3) this.w(`if (${it} === null) { if (${step} > 0 ? ${i} >= ${end} : ${i} <= ${end}) break; ${v} = ${i}; ${i} += ${step}; }`);
       else this.w(`if (${it} === null) { if (${i} >= ${end}) break; ${v} = ${i}++; }`);
       this.w(`else { ${v} = ${it}.$next(); if (${v} === DONE) break; }`);
+      this.w(INTR_CHECK);
       this.w(this.assignCode(st.target, v));
       this.indent--;
       this.block(st.body);
@@ -973,6 +976,10 @@ function* allScopes(s: Scope): Generator<Scope> {
   for (const c of s.children.values()) yield* allScopes(c);
 }
 
+// Ctrl-C: every loop iteration of compiled Python tests the interrupt flag
+// (runtime/interrupt.ts), one typed-array load.
+const INTR_CHECK = "if (INTR[0]) interrupted();";
+
 // Runtime helpers referenced by generated code.
 const RUNTIME_NAMES = [
   "add", "sub", "mul", "truediv", "floordiv", "mod", "pow", "lshift", "rshift", "and", "or", "xor", "matmul",
@@ -985,5 +992,5 @@ const RUNTIME_NAMES = [
   "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr", "awaitIter", "markCoro",
   "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
   "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
-  "sortedKeys",
+  "sortedKeys", "INTR", "interrupted",
 ];

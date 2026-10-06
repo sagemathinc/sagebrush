@@ -139,6 +139,7 @@ fn traces_mod(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, lv: &[Lev
         // is used (the Krylov rows themselves are never needed).
         let mut found = None;
         for _attempt in 0..3 {
+            sagebrush_interrupt::check();
             let c: Vec<u64> = (0..d).map(|_| rand()).collect();
             let mut zs = vec![poly_apply(&cof, &tm, &c, false, ell)];
             for i in 1..w {
@@ -213,6 +214,7 @@ fn traces_mod(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, lv: &[Lev
         one[0] = 1;
         let mut pn: Vec<Vec<u64>> = vec![vec![], one];
         for nn in 2..=bound as u64 {
+            sagebrush_interrupt::check();
             let p = (2..=nn).find(|q| nn % q == 0).unwrap();
             let mut m = nn;
             while m % p == 0 {
@@ -268,6 +270,7 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
     let mut modulus = BigUint::from(1u32);
     let mut rejected = 0;
     while modulus <= need {
+        sagebrush_interrupt::check();
         let ell = primes.next().ok_or("ran out of primes")?;
         let polys: Vec<Vec<u64>> = res.orbits.iter().map(|u| u.iter().map(|c| {
             let r = c % BigInt::from(ell);

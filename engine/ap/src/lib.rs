@@ -197,6 +197,7 @@ pub fn moments(e: &EllipticCurve, n: u64, kmax: usize) -> (u64, Vec<f64>) {
         let mut sums = vec![0.0f64; kmax];
         let mut count = 0u64;
         for &p in ch.iter() {
+            sagebrush_interrupt::check();
             if let Some(a) = e.ap(p) {
                 let x2 = (a * a) as f64 / p as f64;
                 let mut x = 1.0;

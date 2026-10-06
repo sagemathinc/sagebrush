@@ -190,12 +190,14 @@ pub fn rho(n: &BigUint, iters: u64, seed: u64) -> Option<BigUint> {
     let mut done = 0u64;
     let batch = 128u64;
     loop {
+        sagebrush_interrupt::check();
         x = y;
         for _ in 0..r {
             y = f(&y);
         }
         let mut k = 0;
         while k < r {
+            sagebrush_interrupt::check();
             ys = y;
             for _ in 0..batch.min(r - k) {
                 y = f(&y);
@@ -299,6 +301,7 @@ pub fn ecm_curve(n: &BigUint, sigma: u64, b1: u64, b2: u64, primes: &[u64]) -> O
     let (mut x, mut z) = (m.to_mont(&x0.to_biguint().unwrap()), m.to_mont(&z0.to_biguint().unwrap()));
     // stage 1: multiply by every prime power <= B1
     for &p in primes.iter().take_while(|&&p| p <= b1) {
+        sagebrush_interrupt::check();
         let mut q = p;
         while q <= b1 / p {
             q *= p;
@@ -345,6 +348,7 @@ pub fn ecm_curve(n: &BigUint, sigma: u64, b1: u64, b2: u64, primes: &[u64]) -> O
     let mut k = k0;
     let mut pi = primes.partition_point(|&p| p <= b1);
     while k * d <= b2 + half {
+        sagebrush_interrupt::check();
         let lo = k * d - half;
         let hi = k * d + half;
         while pi < primes.len() && primes[pi] < lo {
@@ -388,6 +392,7 @@ pub fn ecm(n: &BigUint, seed: u64) -> Option<BigUint> {
             primes = crate::arith::primes_up_to(b2 + 2310);
         }
         for _ in 0..curves {
+            sagebrush_interrupt::check();
             let sigma = 6 + rng(&mut s) % (1 << 30);
             if let Some(g) = ecm_curve(n, sigma, b1, b2, &primes) {
                 return Some(g);

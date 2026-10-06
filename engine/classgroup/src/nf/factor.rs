@@ -85,6 +85,7 @@ pub fn factor(n: &BigInt) -> Vec<(BigInt, u32)> {
         stack.push(n);
     }
     while let Some(m) = stack.pop() {
+        sagebrush_interrupt::check();
         if is_probable_prime(&m) {
             push(m, &mut out);
         } else if let Some(d) = split(&m) {

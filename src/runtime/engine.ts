@@ -10,6 +10,7 @@
 
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
+import { INTR } from "./interrupt";
 
 interface Engine {
   memory: WebAssembly.Memory;
@@ -49,7 +50,10 @@ function engineBytes(): Uint8Array {
 }
 
 function engine(): Engine {
-  if (E === null) E = new WebAssembly.Instance(new WebAssembly.Module(engineBytes() as any), {}).exports as unknown as Engine;
+  // sagebrush.interrupted: Ctrl-C, polled by the engine's long loops
+  // (engine/interrupt); an interrupted call traps and the instance is dropped.
+  const imports = { sagebrush: { interrupted: () => INTR[0] } };
+  if (E === null) E = new WebAssembly.Instance(new WebAssembly.Module(engineBytes() as any), imports).exports as unknown as Engine;
   return E;
 }
 
@@ -76,6 +80,10 @@ newBuiltinModule("_sbengine", (m) => {
     try {
       return engineCall(String(req));
     } catch (err: any) {
+      if (INTR[0]) {
+        INTR[0] = 0;
+        return Obj.raise(Obj.T.KeyboardInterrupt);
+      }
       return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
     }
   }, "call");

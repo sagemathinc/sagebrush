@@ -14,7 +14,7 @@ const engine = `// Sagebrush engines (Rust -> wasm32), one self-contained ES mod
 // Characters: chi = [order, gens, vals] with chi(gens[i]) = zeta_order^vals[i] (LMFDB char_values); omit for trivial.
 const WASM = "${wasm.toString("base64")}";
 const bytes = Uint8Array.from(atob(WASM), (c) => c.charCodeAt(0));
-const { instance } = await WebAssembly.instantiate(bytes, {});
+const { instance } = await WebAssembly.instantiate(bytes, { sagebrush: { interrupted: () => 0 } });
 const X = instance.exports;
 const enc = new TextEncoder(), dec = new TextDecoder();
 

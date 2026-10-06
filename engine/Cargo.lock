@@ -392,6 +392,7 @@ name = "sagebrush-ap"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "sagebrush-interrupt",
 ]
 
 [[package]]
@@ -402,6 +403,7 @@ dependencies = [
  "num-integer",
  "num-rational",
  "num-traits",
+ "sagebrush-interrupt",
  "sagebrush-poly",
 ]
 
@@ -422,6 +424,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-interrupt"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "sagebrush-modsym"
 version = "0.1.0"
 dependencies = [
@@ -430,6 +439,7 @@ dependencies = [
  "rayon",
  "sagebrush-ap",
  "sagebrush-flint",
+ "sagebrush-interrupt",
  "sagebrush-poly",
  "serde_json",
 ]
@@ -455,6 +465,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "sagebrush-flint",
+ "sagebrush-interrupt",
 ]
 
 [[package]]
@@ -465,6 +476,7 @@ dependencies = [
  "pyo3",
  "rayon",
  "sagebrush-ap",
+ "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-web",
 ]
@@ -484,6 +496,7 @@ dependencies = [
  "num-bigint",
  "sagebrush-ap",
  "sagebrush-classgroup",
+ "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-poly",
  "serde_json",

@@ -50,6 +50,7 @@ fn negative_norm_relations(fb: &FactorBase, d: &BigInt, want: usize, max_b: u64)
     let parity = bigmod(d, 2);
     let mut b = parity;
     while b <= sq.min(max_b) && rels.len() < want {
+        sagebrush_interrupt::check();
         let bb = BigInt::from(b);
         let mut v = (d - &bb * &bb) >> 2usize; // > 0
         let mut rel: Relation = vec![];
@@ -122,6 +123,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
     rels.extend(neg);
     elems.extend(neg_el);
     for round in 0..200 {
+        sagebrush_interrupt::check();
         tm.rounds = round + 1;
         let t = crate::clock::Instant::now();
         let (found, found_el) = collect(&fb, want.saturating_sub(rels.len()).max(1), &tu.sieve, round as u64 + 1, &mut stats, &mut counts);

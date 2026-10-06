@@ -66,6 +66,7 @@ for (const r of [result, consoleResult, mathResult]) {
   writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + "<script>" + js + "</script>" + html.slice(m.index + m[0].length));
 }
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
+copyFileSync(join(here, "_headers"), join(here, "dist", "_headers"));
 // the engines (modular symbols, a_p ...), fetched by the worker on first use
 copyFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"), join(here, "dist", "sagebrush-engine.wasm"));
 // KaTeX's stylesheet and (woff2) fonts, for math in Markdown cells
@@ -92,7 +93,7 @@ if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn
 rmSync(join(here, "site", "public", "atlas"), { recursive: true, force: true });
 cpSync(join(here, "dist", "atlas"), join(here, "site", "public", "atlas"), { recursive: true });
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
-for (const f of ["index.html", "llms.txt", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-engine.wasm", ...KATEX])
+for (const f of ["index.html", "llms.txt", "_headers", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-engine.wasm", ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
 console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);

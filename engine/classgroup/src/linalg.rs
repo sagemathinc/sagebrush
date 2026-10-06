@@ -46,6 +46,7 @@ pub fn eliminate_with(n: usize, rels: &[Relation], max_weight: usize, mut payloa
     while progress {
         progress = false;
         for c in (0..n).rev() {
+            sagebrush_interrupt::check();
             if !alive[c] {
                 continue;
             }
@@ -156,6 +157,7 @@ pub fn det(m: &[Vec<BigInt>]) -> BigInt {
     let mut sign = BigInt::one();
     let mut prev = BigInt::one();
     for k in 0..n - 1 {
+        sagebrush_interrupt::check();
         if a[k][k].is_zero() {
             let Some(i) = (k + 1..n).find(|&i| !a[i][k].is_zero()) else { return BigInt::zero() };
             a.swap(k, i);
@@ -182,6 +184,7 @@ pub fn det_mod_p(m: &[Vec<i64>], p: u64) -> u64 {
     let mut pivot = vec![0u64; n];
     let mut det = 1u64;
     for k in 0..n {
+        sagebrush_interrupt::check();
         for i in k..n {
             a[i][k] %= p;
         }
@@ -265,6 +268,7 @@ fn det_crt_impl(m: &[Vec<i64>], early: bool) -> BigInt {
     let mut stable = 0;
     let mut p: u64 = (1 << det_prime_bits(n)) - 1;
     while (modulus.bits() as f64) < log2_bound && !(early && stable >= 2) {
+        sagebrush_interrupt::check();
         while !crate::relations::is_prime_u64(p) {
             p -= 2;
         }
@@ -300,6 +304,7 @@ fn solve_mod_p(a: &[Vec<i64>], vs: &[Vec<i64>], p: u64) -> (u64, Vec<Vec<u64>>) 
     let mut m: Vec<Vec<u64>> = (0..n).map(|i| (0..n).map(|j| red(a[j][i])).chain(vs.iter().map(|v| red(v[i]))).collect()).collect();
     let mut det = 1u64;
     for col in 0..n {
+        sagebrush_interrupt::check();
         let Some(piv) = (col..n).find(|&i| m[i][col] != 0) else { return (0, vec![vec![0; n]; k]) };
         if piv != col {
             m.swap(piv, col);
@@ -340,6 +345,7 @@ pub fn kernel_crt(a: &[Vec<i64>], vs: &[Vec<i64>]) -> (BigInt, Vec<Vec<BigInt>>)
     let mut p: u64 = (1 << 31) - 1;
     let log2_bound: f64 = a.iter().chain(vs).map(|r| 0.5 * r.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().log2().max(0.0)).sum::<f64>() + 2.0;
     while stable < 2 && (modulus.bits() as f64) < log2_bound {
+        sagebrush_interrupt::check();
         while !crate::relations::is_prime_u64(p) {
             p -= 2;
         }
@@ -379,6 +385,7 @@ pub fn independent_rows(rows: &[Vec<i64>], n: usize) -> Result<Vec<usize>, Vec<u
     let mut chosen = vec![];
     let mut v = vec![0u64; n];
     for (k, r) in rows.iter().enumerate() {
+        sagebrush_interrupt::check();
         for j in 0..n {
             v[j] = (r[j] as i128).rem_euclid(P as i128) as u64;
         }
@@ -421,6 +428,7 @@ pub fn hnf_mod(rows: &[Vec<i64>], n: usize, d0: &BigInt) -> Vec<Vec<BigInt>> {
     let mut d = d0.clone();
     let mut w: Vec<Vec<BigInt>> = (0..n).map(|i| (0..n).map(|j| if i == j { d.clone() } else { BigInt::zero() }).collect()).collect();
     for (k, r) in rows.iter().enumerate() {
+        sagebrush_interrupt::check();
         // the lattice so far has determinant prod w_ii, a multiple of the
         // final one: a smaller modulus (word-sized: finish in i128)
         if k % 16 == 15 {
@@ -507,6 +515,7 @@ pub fn hnf_mod_until<M: Modulus>(rows: &[Vec<i64>], n: usize, md: M, enough: f64
     let mut v = vec![zero; n];
     let neg = |x: M::E| -> M::E { md.from_u128((d - x.into()) % d) };
     for (k, r) in rows.iter().enumerate() {
+        sagebrush_interrupt::check();
         if enough > 0.0 && k % 8 == 7 && k >= n {
             let delta: f64 = (0..n).map(|i| w[i][i].into() as f64).product();
             if delta <= enough {

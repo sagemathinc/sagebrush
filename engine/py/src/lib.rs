@@ -1,15 +1,32 @@
 //! CPython bindings: the `sagebrush._native` extension.  Computations
 //! release the GIL, so Python threads can run several in parallel; each call
 //! also uses `threads` worker threads (0 = all cores).  Invalid arguments
-//! raise ValueError.
+//! raise ValueError; Ctrl-C raises KeyboardInterrupt (see `guarded`).
 
 use sagebrush_modsym::exact::Exact;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-fn run<T: Send>(py: Python<'_>, threads: usize, f: impl FnOnce() -> T + Send) -> T {
-    py.detach(|| rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(f))
+/// The thread that imported the module: Python's main thread, the one that
+/// receives Ctrl-C.
+static MAIN: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::new();
+
+/// An engine computation without the GIL.  Called from the main thread,
+/// Ctrl-C during it stops it at its next check (sagebrush-interrupt) and
+/// raises KeyboardInterrupt, with the interpreter's state intact; Python's
+/// own handler is back in place when this returns.
+fn guarded<T: Send>(py: Python<'_>, f: impl FnOnce() -> T + Send) -> PyResult<T> {
+    let main = MAIN.get() == Some(&std::thread::current().id());
+    py.detach(|| {
+        let _sigint = main.then(sagebrush_interrupt::SigintGuard::new);
+        sagebrush_interrupt::catch(f)
+    })
+    .map_err(|_| PyKeyboardInterrupt::new_err(()))
+}
+
+fn run<T: Send>(py: Python<'_>, threads: usize, f: impl FnOnce() -> T + Send) -> PyResult<T> {
+    guarded(py, || rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(f))
 }
 
 fn err(e: String) -> PyErr {
@@ -20,7 +37,7 @@ fn err(e: String) -> PyErr {
 #[pyfunction]
 #[pyo3(signature = (n, q, p=67108859, threads=0))]
 fn hecke_charpoly<'py>(py: Python<'py>, n: u64, q: u64, p: u64, threads: usize) -> PyResult<Bound<'py, PyDict>> {
-    let r = run(py, threads, || sagebrush_modsym::hecke_charpoly(n, q, p)).map_err(err)?;
+    let r = run(py, threads, || sagebrush_modsym::hecke_charpoly(n, q, p))?.map_err(err)?;
     let d = PyDict::new(py);
     d.set_item("symbols", r.symbols)?;
     d.set_item("gens", r.gens)?;
@@ -52,7 +69,7 @@ fn exact_dict<'py>(py: Python<'py>, e: &Exact) -> PyResult<Bound<'py, PyDict>> {
 #[pyfunction]
 #[pyo3(signature = (n, q, threads=0))]
 fn charpoly_exact<'py>(py: Python<'py>, n: u64, q: u64, threads: usize) -> PyResult<Bound<'py, PyDict>> {
-    let e = run(py, threads, || sagebrush_modsym::exact::exact_charpoly(n, q)).map_err(err)?;
+    let e = run(py, threads, || sagebrush_modsym::exact::exact_charpoly(n, q))?.map_err(err)?;
     exact_dict(py, &e)
 }
 
@@ -60,7 +77,7 @@ fn charpoly_exact<'py>(py: Python<'py>, n: u64, q: u64, threads: usize) -> PyRes
 #[pyfunction]
 #[pyo3(signature = (levels, q, threads=0))]
 fn batch_exact<'py>(py: Python<'py>, levels: Vec<u64>, q: u64, threads: usize) -> PyResult<Vec<Bound<'py, PyDict>>> {
-    let rs = run(py, threads, || sagebrush_modsym::exact::batch_exact(&levels, q));
+    let rs = run(py, threads, || sagebrush_modsym::exact::batch_exact(&levels, q))?;
     levels
         .iter()
         .zip(rs)
@@ -93,7 +110,7 @@ fn level_data<'py>(py: Python<'py>, n: u64) -> PyResult<Bound<'py, PyDict>> {
 #[pyfunction]
 #[pyo3(signature = (n, q, r, p=67108859, threads=0))]
 fn commute(py: Python<'_>, n: u64, q: u64, r: u64, p: u64, threads: usize) -> PyResult<bool> {
-    run(py, threads, || sagebrush_modsym::hecke_commute(n, q, r, p)).map_err(err)
+    run(py, threads, || sagebrush_modsym::hecke_commute(n, q, r, p))?.map_err(err)
 }
 
 /// Predicted dimension, bytes and single-thread seconds, without computing.
@@ -118,7 +135,7 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
 #[pyfunction]
 #[pyo3(signature = (n, bound=1000, threads=0))]
 fn rational_newforms(py: Python<'_>, n: u64, bound: u64, threads: usize) -> PyResult<Vec<Vec<(u64, i64)>>> {
-    let r = run(py, threads, || sagebrush_modsym::newforms::rational_newforms(n, bound, 40)).map_err(err)?;
+    let r = run(py, threads, || sagebrush_modsym::newforms::rational_newforms(n, bound, 40))?.map_err(err)?;
     Ok(r.forms.into_iter().map(|f| f.ap).collect())
 }
 
@@ -143,7 +160,7 @@ fn ap(a: Vec<i64>, p: u64) -> PyResult<Option<i64>> {
 #[pyo3(signature = (a, n, threads=0))]
 fn aplist(py: Python<'_>, a: Vec<i64>, n: u64, threads: usize) -> PyResult<Vec<(u64, Option<i64>)>> {
     let e = curve(a)?;
-    Ok(run(py, threads, || sagebrush_ap::aplist(&e, n)))
+    run(py, threads, || sagebrush_ap::aplist(&e, n))
 }
 
 /// aplist for many curves, in parallel over curves.
@@ -151,7 +168,7 @@ fn aplist(py: Python<'_>, a: Vec<i64>, n: u64, threads: usize) -> PyResult<Vec<(
 #[pyo3(signature = (curves, n, threads=0))]
 fn aplist_many(py: Python<'_>, curves: Vec<Vec<i64>>, n: u64, threads: usize) -> PyResult<Vec<Vec<(u64, Option<i64>)>>> {
     let es = curves.into_iter().map(curve).collect::<PyResult<Vec<_>>>()?;
-    Ok(run(py, threads, || sagebrush_ap::aplist_many(&es, n)))
+    run(py, threads, || sagebrush_ap::aplist_many(&es, n))
 }
 
 /// (number of good primes p <= n, [mean (a_p^2/p)^k for k = 1..kmax]): Sato-Tate moments.
@@ -159,7 +176,7 @@ fn aplist_many(py: Python<'_>, curves: Vec<Vec<i64>>, n: u64, threads: usize) ->
 #[pyo3(signature = (a, n, kmax=4, threads=0))]
 fn moments(py: Python<'_>, a: Vec<i64>, n: u64, kmax: usize, threads: usize) -> PyResult<(u64, Vec<f64>)> {
     let e = curve(a)?;
-    Ok(run(py, threads, || sagebrush_ap::moments(&e, n, kmax)))
+    run(py, threads, || sagebrush_ap::moments(&e, n, kmax))
 }
 
 // ---- sagebrush.mf: weight k >= 2 with a Dirichlet character ----
@@ -241,7 +258,7 @@ fn charpoly_mod<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64
     let (dim, ell, zeta, f) = run(py, threads, || -> Result<_, String> {
         let sp = sagebrush_modsym::general::GeneralSpace::new(n, k, &eps, sign)?;
         Ok((sp.dimension(), sp.p, sp.zeta, sp.hecke_charpoly(q)?))
-    }).map_err(err)?;
+    })?.map_err(err)?;
     let d = PyDict::new(py);
     d.set_item("dim", dim)?;
     d.set_item("ell", ell)?;
@@ -257,7 +274,7 @@ fn charpoly_mod<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64
 #[pyo3(signature = (n, k, q, chi=None, sign=0, threads=0))]
 fn charpoly<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64, Vec<u64>, Vec<u64>)>, sign: i32, threads: usize) -> PyResult<Bound<'py, PyDict>> {
     let eps = character(n, chi)?;
-    let e = run(py, threads, || sagebrush_modsym::general_exact::exact_charpoly(n, k, &eps, sign, q)).map_err(err)?;
+    let e = run(py, threads, || sagebrush_modsym::general_exact::exact_charpoly(n, k, &eps, sign, q))?.map_err(err)?;
     let d = PyDict::new(py);
     d.set_item("m", e.m)?;
     d.set_item("dim", e.dim)?;
@@ -295,7 +312,7 @@ fn newspace_dict<'py>(py: Python<'py>, r: &sagebrush_modsym::newspace::NewspaceO
 fn newspace<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Option<(u64, Vec<u64>, Vec<u64>)>, threads: usize) -> PyResult<Bound<'py, PyDict>> {
     let eps = character(n, chi)?;
     let f = python_factorer(factor);
-    let r = run(py, threads, || sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &f)).map_err(err)?;
+    let r = run(py, threads, || sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &f))?.map_err(err)?;
     newspace_dict(py, &r)
 }
 
@@ -310,7 +327,7 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
         let r = sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &f)?;
         let tr = sagebrush_modsym::traces::orbit_traces(n, k, &eps, &r, bound)?;
         Ok((r, tr))
-    }).map_err(err)?;
+    })?.map_err(err)?;
     let mut orbits: Vec<(usize, Vec<BigInt>, Vec<BigInt>)> = r.dims.iter().cloned().zip(tr).zip(r.orbits.iter().cloned()).map(|((d, t), u)| (d, t, u)).collect();
     orbits.sort();
     let d = newspace_dict(py, &r)?;
@@ -342,14 +359,15 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
 /// `{"error": ...}`.  The pure-Python modules built on it (sagebrush.nf,
 /// sagebrush.poly) are shared with the browser runtime.
 #[pyfunction]
-fn call(py: Python<'_>, request: String) -> String {
-    py.detach(|| sagebrush_web::call(&request))
+fn call(py: Python<'_>, request: String) -> PyResult<String> {
+    guarded(py, || sagebrush_web::call(&request))
 }
 
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let _ = MAIN.set(std::thread::current().id());
     let modsym = PyModule::new(m.py(), "modsym")?;
     modsym.add_function(wrap_pyfunction!(hecke_charpoly, &modsym)?)?;
     modsym.add_function(wrap_pyfunction!(charpoly_exact, &modsym)?)?;
