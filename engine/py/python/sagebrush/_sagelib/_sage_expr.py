@@ -993,11 +993,166 @@ def solve(f, *args, **kw):
     return [list(sol) for sol in sols]
 
 
+def _int_args(f, args):
+    """(f, variable name, a, b) from Sage's ways to ask: integrate(f, x),
+    integrate(f, x, a, b), integrate(f, (x, a, b)), integrate(f)."""
+    f = _expr(f)
+    a = b = None
+    if args and isinstance(args[0], (tuple, list)):
+        v, a, b = args[0]
+    elif len(args) == 3:
+        v, a, b = args
+    elif len(args) == 1:
+        v = args[0]
+    elif not args:
+        names = f._names()
+        if len(names) != 1:
+            raise ValueError("specify the variable of integration")
+        v = names[0]
+    else:
+        raise TypeError("integrate(f, x) or integrate(f, x, a, b)")
+    return f, _var_name(v), a, b
+
+
 def integrate(f, *args, **kw):
-    raise NotImplementedError("symbolic integration is coming next in Sagebrush")
+    """The antiderivative integrate(sin(x)^2, x) = 1/2*x - 1/4*sin(2*x), or
+    the definite integral integrate(f, x, a, b) (bounds may be oo).  Found
+    by Sagebrush's own integrator (tables, substitution, parts, partial
+    fractions, ...); every antiderivative is checked by differentiating
+    it.  Without one, the integral stays unevaluated, as in Sage."""
+    f, v, a, b = _int_args(f, args)
+    if a is None:
+        return _one("integrate", f._s, v)
+    return _one("integrate", f._s, v, _expr(a)._s, _expr(b)._s)
 
 
 integral = integrate
+
+
+class IntegrationSteps:
+    """How an antiderivative was found: integrate_steps(x*cos(x), x)."""
+
+    def __init__(self, rows, f, v):
+        self._rows, self._f, self._v = rows, f, v
+
+    def result(self):
+        return self._rows[0][4] if self._rows else integrate(self._f, self._v)
+
+    def __repr__(self):
+        if not self._rows:
+            return "integrate(%s, %s): no elementary antiderivative found" % (self._f, self._v)
+        out = []
+        for depth, rule, var, f, r in self._rows:
+            out.append("%sintegral of %s d%s = %s   [%s]" % ("  " * depth, f, var, r, rule))
+        return "\n".join(out)
+
+    __str__ = __repr__
+
+    def _latex_(self):
+        lines = []
+        for depth, rule, var, f, r in self._rows:
+            lines.append("%s\\int %s \\, d%s &= %s && \\text{%s}" % ("\\quad " * depth, f._latex_(), var, r._latex_(), rule))
+        return "\\begin{aligned}" + " \\\\ ".join(lines) + "\\end{aligned}"
+
+    def _repr_latex_(self):
+        return "$$" + self._latex_() + "$$"
+
+
+def integrate_steps(f, *args):
+    """The steps of an antiderivative (rule by rule, with the integrals each
+    rule needed), for teaching: integrate_steps(x*exp(x), x)."""
+    f, v, a, b = _int_args(f, args)
+    rows = []
+    rename = {}
+    nice = ["u", "w", "t", "s", "r", "p", "q"]
+    for line in _call("integrate_steps", f._s, v):
+        if not line:
+            continue
+        depth, rule, var, fi, ri = line.split("\x1e")
+        fe, re_ = Expression(fi), Expression(ri)
+        # substitution variables (_u0, ...) get short names
+        for n in set(fe._names()) | set(re_._names()) | ({var} if var.startswith("_u") else set()):
+            if n.startswith("_u") and n not in rename:
+                rename[n] = nice[len(rename) % len(nice)]
+        sub_ = {Expression(_sym_s(k)): Expression(_sym_s(w)) for k, w in rename.items()}
+        rows.append((int(depth), rule.replace("_u0", rename.get("_u0", "u")), rename.get(var, var),
+                     fe.subs(sub_) if sub_ else fe, re_.subs(sub_) if sub_ else re_))
+    return IntegrationSteps(rows, f, v)
+
+
+def numerical_integral(f, a, b, max_points=87, params=None, eps_abs=1e-6, eps_rel=1e-6, rule=6, algorithm="qag"):
+    """(value, error estimate) of the integral of f from a to b: adaptive
+    Gauss-Kronrod (7-15 points); infinite bounds through x = t/(1 - t^2)."""
+    if isinstance(f, Expression) or hasattr(f, "_fast_callable"):
+        names = f._names() if isinstance(f, Expression) else None
+        g = f._fast_callable(names[:1] if names else [])
+        if names is not None and not names:
+            c = float(f)
+            g = lambda t: c
+    else:
+        g = f
+    a, b = float(a), float(b)
+    if a == b:
+        return (0.0, 0.0)
+    sign = 1.0
+    if a > b:
+        a, b, sign = b, a, -1.0
+    if _m.isinf(a) or _m.isinf(b):
+        # x = t/(1 - t^2) on (-1, 1), or x = a + t/(1 - t) on [0, 1)
+        if _m.isinf(a) and _m.isinf(b):
+            h = lambda t: g(t / (1 - t * t)) * (1 + t * t) / (1 - t * t) ** 2
+            lo, hi = -1.0, 1.0
+        elif _m.isinf(b):
+            h = lambda t: g(a + t / (1 - t)) / (1 - t) ** 2
+            lo, hi = 0.0, 1.0
+        else:
+            h = lambda t: g(b - (1 - t) / t) / t ** 2
+            lo, hi = 0.0, 1.0
+    else:
+        h, lo, hi = g, a, b
+    v, e = _gk_adaptive(h, lo, hi, max(eps_abs, 1e-14), eps_rel)
+    return (sign * v, e)
+
+
+_GK_X = (0.991455371120812639, 0.949107912342758525, 0.864864423359769073, 0.741531185599394440,
+         0.586087235467691130, 0.405845151377397167, 0.207784955007898468, 0.0)
+_GK_WK = (0.022935322010529225, 0.063092092629978553, 0.104790010322250184, 0.140653259715525919,
+          0.169004726639267903, 0.190350578064785410, 0.204432940075298892, 0.209482141084727828)
+_GK_WG = (0.129484966168869693, 0.279705391489276668, 0.381830050505118945, 0.417959183673469388)
+
+
+def _gk15(h, a, b):
+    c, r = (a + b) / 2, (b - a) / 2
+    fc = h(c)
+    k, g = fc * _GK_WK[7], fc * _GK_WG[3]
+    for i in range(7):
+        x = r * _GK_X[i]
+        s = h(c - x) + h(c + x)
+        k += _GK_WK[i] * s
+        if i % 2 == 1:
+            g += _GK_WG[i // 2] * s
+    return k * r, abs((k - g) * r)
+
+
+def _gk_adaptive(h, a, b, eps_abs, eps_rel, limit=200):
+    v, e = _gk15(h, a, b)
+    parts = [(lo_hi_v_e) for lo_hi_v_e in [(a, b, v, e)]]
+    total, err = v, e
+    while err > max(eps_abs, eps_rel * abs(total)) and len(parts) < limit:
+        # split the interval with the largest error
+        k = max(range(len(parts)), key=lambda i: parts[i][3])
+        lo, hi, v0, e0 = parts.pop(k)
+        mid = (lo + hi) / 2
+        v1, e1 = _gk15(h, lo, mid)
+        v2, e2 = _gk15(h, mid, hi)
+        total += v1 + v2 - v0
+        err += e1 + e2 - e0
+        parts.append((lo, mid, v1, e1))
+        parts.append((mid, hi, v2, e2))
+    return float(total), float(abs(err))  # Sage returns Python floats
+
+
+integral_numerical = numerical_integral
 
 
 def find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
