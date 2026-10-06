@@ -9,7 +9,7 @@
 use crate::arith::*;
 use crate::linalg::{cokernel, det_crt_probable, eliminate, hnf_mod, hnf_mod_until, independent_rows, smith, ModD, ModD128, Reduced};
 use crate::relations::{collect, FactorBase, Params, Stats};
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 

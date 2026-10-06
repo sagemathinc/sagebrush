@@ -9,6 +9,7 @@ name = "sagebrush"
 path = "src/main.rs"
 
 [dependencies]
+sagebrush-bigint = { path = "../bigint" }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 rayon = "1.10"

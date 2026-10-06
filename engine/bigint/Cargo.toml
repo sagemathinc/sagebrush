@@ -1,0 +1,20 @@
+[package]
+name = "sagebrush-bigint"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The Sagebrush engines' big integers: num-bigint's API, on dashu (or num-bigint, feature num-backend)"
+
+[features]
+# The backend is dashu (MIT OR Apache-2.0; 1.4-1.7x faster number field
+# computations than num-bigint, bench/bigint); this feature selects
+# num-bigint instead, for comparisons
+num-backend = []
+
+[dependencies]
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+num-rational = "0.4"
+dashu-int = "0.6"
+dashu-base = "0.6"

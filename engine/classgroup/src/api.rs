@@ -6,9 +6,9 @@
 use crate::nf::embed::Embeddings;
 use crate::nf::order::{maximal_order, Order};
 use crate::nf::zlin::{hnf, vec_mat, ZMat};
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_integer::Integer;
-use num_rational::BigRational;
+use sagebrush_bigint::BigRational;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 /// The factorization of n != 0 as (prime, exponent), primes ascending (a

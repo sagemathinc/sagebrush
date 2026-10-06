@@ -6,7 +6,7 @@
 
 use super::order::Order;
 use crate::real::ln_fixed;
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 
 #[derive(Clone, Copy, Debug)]
@@ -338,7 +338,7 @@ mod tests {
         let cube = ((r * r) >> prec as usize) * r >> prec as usize;
         assert!((cube - (BigInt::from(2) << prec as usize)).abs() < BigInt::from(1u64 << 20));
         // log embedding of the unit t - 1 (norm 1): sums to 0
-        let x: Vec<BigInt> = o.from_power(&[(-1).into(), 1.into(), 0.into()].map(|c: i64| num_rational::BigRational::from_integer(c.into()))).into_iter().map(|c| c.to_integer()).collect();
+        let x: Vec<BigInt> = o.from_power(&[(-1).into(), 1.into(), 0.into()].map(|c: i64| sagebrush_bigint::BigRational::from_integer(c.into()))).into_iter().map(|c| c.to_integer()).collect();
         let l = e.log_embedding(&o, &x, &hp, prec);
         let s: BigInt = l.iter().sum();
         assert!(s.abs() < BigInt::from(1u64 << 20), "{}", s);

@@ -10,7 +10,7 @@
 //! ap, mf); newspace/newforms factor with sagebrush-poly (pure Rust) and
 //! "factor" exposes it.  Big integers are decimal strings.
 
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::{Character, GeneralSpace};
 use serde_json::{json, Value};
@@ -209,7 +209,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         // ---- sagebrush.nf / arith / matrix: engine/classgroup ----
         "factor_integer" => {
             let n = big1(v.get("n"))?;
-            if n.sign() == num_bigint::Sign::NoSign {
+            if n.sign() == sagebrush_bigint::Sign::NoSign {
                 return Err("factor of 0".into());
             }
             Ok(json!(sagebrush_classgroup::api::factor_integer(&n).iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
@@ -252,7 +252,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         // ---- sagebrush.poly: factoring in Z[x] (pure Rust) ----
         "factor" => {
             let f = bigs(v.get("f"))?;
-            if f.iter().all(|c| c.sign() == num_bigint::Sign::NoSign) {
+            if f.iter().all(|c| c.sign() == sagebrush_bigint::Sign::NoSign) {
                 return Err("factor of the zero polynomial".into());
             }
             let (c, fs) = sagebrush_poly::factor(&f);

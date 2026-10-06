@@ -1,7 +1,7 @@
 //! Compare general_exact::exact_charpoly with Sage's exact charpolys over
 //! CyclotomicField(ord eps), from examples/sage/general_exact.sage:
 //!   cargo run --release --example general_exact_vs_sage -- FILE.jsonl [--table]
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use sagebrush_modsym::general::Character;
 use sagebrush_modsym::general_exact::exact_charpoly;
 use serde_json::Value;

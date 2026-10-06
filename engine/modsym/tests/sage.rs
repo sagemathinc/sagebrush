@@ -2,7 +2,7 @@
 //! (regenerate with `sage fixtures/make_sage_charpolys.sage`).
 
 use sagebrush_modsym::exact::exact_charpoly;
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 
 #[test]
 fn exact_charpolys_match_sage() {

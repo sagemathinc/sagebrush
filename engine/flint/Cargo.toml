@@ -6,4 +6,4 @@ license = "MIT OR Apache-2.0"
 description = "Minimal FLINT bindings for Sagebrush tests (factoring in Z[x]); FLINT itself is LGPL-3.0-or-later and is used only as a reference"
 
 [dependencies]
-num-bigint = "0.4"
+sagebrush-bigint = { path = "../bigint" }

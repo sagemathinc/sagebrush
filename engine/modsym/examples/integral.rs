@@ -13,7 +13,7 @@ fn main() {
         None => args[1..].iter().map(|s| s.parse().unwrap()).collect(),
     };
     let verbose = std::env::var("VERBOSE").is_ok();
-    let factor = |f: &[num_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_flint::factor(f).1;
     let t0 = std::time::Instant::now();
     let all: Vec<(u64, Vec<IntegralOrbit>)> = levels
         .par_iter()

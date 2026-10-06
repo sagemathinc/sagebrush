@@ -1,7 +1,7 @@
 //! cargo run --release -p sagebrush-classgroup --example bnf -- c0,c1,...,1 ...
 //! Class group and regulator of Q[x]/(f), f monic (coefficients from the
 //! constant term): one line each.
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 fn main() {
     for a in std::env::args().skip(1) {
         let f: Vec<BigInt> = a.split(',').map(|c| c.trim().parse().unwrap()).collect();

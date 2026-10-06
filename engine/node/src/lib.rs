@@ -17,9 +17,9 @@ fn err(e: String) -> Error {
     Error::from_reason(e)
 }
 
-fn big(c: &num_bigint::BigInt) -> BigInt {
+fn big(c: &sagebrush_bigint::BigInt) -> BigInt {
     let (sign, words) = c.to_u64_digits();
-    BigInt { sign_bit: sign == num_bigint::Sign::Minus, words: if words.is_empty() { vec![0] } else { words } }
+    BigInt { sign_bit: sign == sagebrush_bigint::Sign::Minus, words: if words.is_empty() { vec![0] } else { words } }
 }
 
 #[napi(object)]

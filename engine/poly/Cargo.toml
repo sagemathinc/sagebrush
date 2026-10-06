@@ -6,8 +6,8 @@ license = "MIT OR Apache-2.0"
 description = "Polynomials over Z for the Sagebrush engines: factorization in pure Rust (Zassenhaus), for WebAssembly too"
 
 [dependencies]
+sagebrush-bigint = { path = "../bigint" }
 sagebrush-interrupt = { path = "../interrupt" }
-num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"
 

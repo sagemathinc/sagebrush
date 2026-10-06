@@ -5,7 +5,7 @@
 use sagebrush_modsym::estimate::estimate;
 use sagebrush_modsym::exact::exact_charpoly;
 use sagebrush_modsym::{hecke_charpoly, hecke_commute};
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 
 fn small_prime_not_dividing(n: u64) -> u64 {
     [2, 3, 5, 7, 11, 13].into_iter().find(|q| n % q != 0).unwrap()

@@ -31,7 +31,7 @@ use crate::general_exact::{crt, embedding_bounds};
 use crate::orbits::Factorer;
 use crate::p1::gcd;
 use crate::par;
-use num_bigint::{BigInt, BigUint};
+use sagebrush_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 
 #[derive(Debug, Clone)]

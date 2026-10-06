@@ -23,7 +23,7 @@ use crate::linalg;
 use crate::newspace::{deg, levels, new_poly_mod, pdivrem, pgcd, pmul, Level, NewspaceOrbits};
 use crate::p1::gcd;
 use crate::par;
-use num_bigint::{BigInt, BigUint};
+use sagebrush_bigint::{BigInt, BigUint};
 use std::collections::HashMap;
 
 /// Merel's matrices for T_p, cached across spaces.

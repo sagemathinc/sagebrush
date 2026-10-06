@@ -6,8 +6,8 @@
 
 use super::order::Order;
 use super::zlin::*;
-use num_bigint::BigInt;
-use num_rational::BigRational;
+use sagebrush_bigint::BigInt;
+use sagebrush_bigint::BigRational;
 use num_traits::{One, Signed, Zero};
 
 #[derive(Clone, Debug)]

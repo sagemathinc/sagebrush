@@ -1,7 +1,7 @@
 //! cargo run --release -p sagebrush-classgroup --example nfdisc -- c0,c1,...,1 ...
 //! The field discriminant of Q[x]/(f) for monic f (coefficients from the
 //! constant term), by Round 2, with the time.
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 fn main() {
     for a in std::env::args().skip(1) {
         let f: Vec<BigInt> = a.split(',').map(|c| c.trim().parse().unwrap()).collect();

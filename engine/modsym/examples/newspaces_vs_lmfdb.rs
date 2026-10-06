@@ -14,7 +14,7 @@ fn main() {
     let max_dim: u64 = args.first().and_then(|a| a.parse().ok()).unwrap_or(u64::MAX);
     let only: Vec<&String> = args.iter().skip(1).collect();
     let path = std::env::var("NEWSPACES").unwrap_or_else(|_| format!("{}/data/lmfdb/mf_newspaces_wt2plus_Nk2le1000.jsonl", std::env::var("HOME").unwrap()));
-    let factor = |f: &[num_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_flint::factor(f).1;
     let (mut ok, mut bad, mut skipped) = (0, 0, 0);
     let (mut orbits, mut slowest) = (0usize, (0.0f64, String::new()));
     let t0 = Instant::now();

@@ -1,9 +1,9 @@
 //! Exact linear algebra over Z, Q and F_p for small dense matrices (number
 //! field bases are n x n with n the degree).
 
-use num_bigint::BigInt;
+use sagebrush_bigint::BigInt;
 use num_integer::Integer;
-use num_rational::BigRational;
+use sagebrush_bigint::BigRational;
 use num_traits::{One, Signed, Zero};
 
 pub type ZMat = Vec<Vec<BigInt>>;

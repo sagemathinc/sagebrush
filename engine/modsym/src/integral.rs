@@ -63,7 +63,7 @@ fn gcd(a: i128, b: i128) -> i128 {
 }
 
 /// The echelon basis on the generators of each orbit's dual, mod p.
-fn duals_mod(pres: &Presentation, ops: &[(u64, i64)], chi: &[num_bigint::BigInt], orbits: &[Orbit], p: u64) -> Option<Vec<(Vec<Vec<u64>>, Vec<usize>)>> {
+fn duals_mod(pres: &Presentation, ops: &[(u64, i64)], chi: &[sagebrush_bigint::BigInt], orbits: &[Orbit], p: u64) -> Option<Vec<(Vec<Vec<u64>>, Vec<usize>)>> {
     let sp = Space::new(pres, p);
     let d = sp.dimension();
     let mut t = vec![vec![0u64; d]; d];

@@ -25,7 +25,7 @@ fn main() {
         lmfdb.entry(n).or_default().push((v["dim"].as_u64().unwrap() as usize, key));
     }
     let levels: Vec<u64> = (from..=to).filter(|&n| !only_prime || is_prime(n)).collect();
-    let factor = |f: &[num_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_flint::factor(f).1;
     let t = std::time::Instant::now();
     use rayon::prelude::*;
     let res: Vec<(u64, usize, usize, bool)> = levels
