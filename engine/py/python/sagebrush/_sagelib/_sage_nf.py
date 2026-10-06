@@ -45,11 +45,11 @@ def _int_coeffs(f):
         c = [_F(a) for a in f]
         name = "x"
     else:
-        # a symbolic expression: through a polynomial ring in its variable
+        # a symbolic expression: as a polynomial in its variable
         try:
-            p = _sa().QQ["x"](f)
+            p = f.polynomial(_sa().QQ) if hasattr(f, "polynomial") else _sa().QQ["x"](f)
             c = [_F(a) for a in p.list()]
-            name = "x"
+            name = p.variable_name()
         except Exception:
             raise TypeError("cannot make a number field from %r" % (f,))
     if any(a.denominator != 1 for a in c):
@@ -79,6 +79,9 @@ class NumberField_absolute:
 
     # ---- naming and printing
     def __repr__(self):
+        n = getattr(self, "_cyclotomic_order", None)
+        if n is not None:
+            return "Cyclotomic Field of order %d and degree %d" % (n, len(self._f) - 1)
         s = "Number Field in %s with defining polynomial %s" % (self._name, _repr_poly(self._f, self._var))
         return s + (" with %s = %s" % (self._name, self._emb) if self._emb else "")
 
@@ -714,34 +717,64 @@ def QuadraticField(D, name="a", names=None, **kwds):
     v = math.sqrt(abs(D))
     # Sage prints the double nearest sqrt|D| to 16 significant digits
     root = _interval_repr_sqrt(abs(D))
-    emb = ("%s?" % root) if D > 0 else ("%s?*I" % root)
+    emb = root if D > 0 else root + "*I"
     return NumberField_absolute([-D, 0, 1], str(name), emb)
 
 
 def _interval_repr_sqrt(n):
-    """sqrt(n) as Sage prints the embedding of QuadraticField (an interval
-    between the two doubles around it, "question style"): the lower end
-    rounded down and the upper end rounded up to 16 significant digits, the
-    printed digits their average rounded half to even."""
+    """sqrt(n) as Sage prints the embedding of QuadraticField ("question
+    style"): [lo, hi] the doubles around sqrt(n), printed with the most
+    significant digits k such that, in units of the last digit, ceil(hi) -
+    floor(lo) <= 2 (the upper candidate on a tie); scientific from 10^6.
+    Checked against Sage for n up to 2^129 (beyond, Sage's real embedding
+    interval is sometimes a digit wider)."""
     import math
-    scale = 10 ** 40
-    v = math.isqrt(n * scale * scale)  # floor(sqrt(n) 10^40)
-    exact = _F(v, scale)
-    f = float(exact)
-    ulp = 2.0 ** (math.frexp(f)[1] - 53)  # f > 0: its neighbours are f -+ ulp
-    lo, hi = (f, f + ulp) if _F(f) <= exact else (f - ulp, f)
-    nint = len(str(int(lo)))
-    k = 10 ** (16 - nint)
-    L = (_F(lo) * k).__floor__()
-    U = -((-_F(hi) * k).__floor__())
-    digits = str(round(_F(L + U, 2)))
-    return digits[:nint] + "." + digits[nint:]
+
+    def ulp(f):
+        return 2.0 ** (math.frexp(f)[1] - 53)
+
+    def down(q):  # the largest double <= q > 0
+        f = float(q)
+        if _F(f) > q:
+            f -= ulp(f) / 2 if math.frexp(f)[0] == 0.5 else ulp(f)
+        return f
+
+    def up(q):
+        f = float(q)
+        if _F(f) < q:
+            f += ulp(f)
+        return f
+
+    s = 256
+    v = math.isqrt(n * 4 ** s)  # floor(sqrt(n) 2^s)
+    lo, hi = down(_F(v, 2 ** s)), up(_F(v + 1, 2 ** s))
+    if _F(lo) ** 2 == n:
+        hi = lo
+    elif _F(hi) ** 2 == n:
+        lo = hi
+    lo, hi = _F(lo), _F(hi)
+    nint = len(str(math.floor(lo)))
+    m, t = 0, 0
+    for k in range(20, 0, -1):
+        t = k - nint
+        u = _F(10) ** t
+        L, U = math.floor(lo * u), math.ceil(hi * u)
+        if U - L <= 2:
+            m = L + 1 if U - L == 2 else U
+            break
+    d = str(m)
+    nint = len(d) - t
+    if nint >= 7:
+        return d[0] + "." + d[1:] + "?e%d" % (nint - 1)
+    return d[:nint] + "." + d[nint:] + "?"
 
 
 def CyclotomicField(n, name="zeta", names=None):
     if names is not None:
         name = names[0] if isinstance(names, (list, tuple)) else names
-    return NumberField_absolute(_cyclotomic(int(n)), str(name) + ("%d" % n if name == "zeta" else ""))
+    K = NumberField_absolute(_cyclotomic(int(n)), str(name) + ("%d" % n if name == "zeta" else ""))
+    K._cyclotomic_order = int(n)
+    return K
 
 
 def _cyclotomic(n):

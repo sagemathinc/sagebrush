@@ -310,6 +310,21 @@ const EXAMPLES = {
     "# The Swinnerton-Dyer polynomial for 2, 3, 5, 7: irreducible, but it splits modulo every prime\ng = x^16 - 136*x^14 + 6476*x^12 - 141912*x^10 + 1513334*x^8 - 7453176*x^6 + 13950764*x^4 - 5596840*x^2 + 46225\ng.is_irreducible(), factor(g.discriminant())",
     "S.<y> = QQ[]\nh = (y^2 - 1/4)*(3*y + 2)\nh.factor(), h.roots(), gcd(h, y^3 - 1/8)",
   ],
+  "Algebraic number theory (Sage)": [
+    {"md": "## Algebraic number theory\n\nNumber fields on Sagebrush's Rust engine, in your browser: maximal orders, prime decomposition, class groups, units and regulators, quadratic fields with 40-digit discriminants, integer factorization (ECM) and lattices. Class groups and regulators assume the Generalized Riemann Hypothesis, as Sage's and PARI's do, with a generator bound computed for each field; the results are checked against PARI. Everything is written from the literature (Cohen's books and papers) and is MIT OR Apache-2.0."},
+    "# A cubic field: discriminant, signature (r1, r2), integral basis\nK.<a> = NumberField(x^3 - 11)\nK, K.discriminant(), K.signature(), K.integral_basis()",
+    "K.maximal_order(), K.unit_group(), K.regulator()",
+    "# How each prime splits: (residue degree f, ramification index e) for each P^e in p O_K\nfor p in prime_range(2, 30):\n    print(p, [(P.residue_class_degree(), e) for P, e in K.factor(p)])",
+    "# Class groups and regulators. On this field, the PARI in Sage 10.8.beta0 stops with\n# \"bug in small_norm (precision too low)\"; Sagebrush answers in a fraction of a second.\nK.<a> = NumberField(x^3 + 838398*x - 5077)\nK.class_group(), K.regulator()",
+    "# Gauss's class number one problem (Heegner, Baker, Stark): the imaginary quadratic fields with h = 1\n[d for d in range(1, 200) if is_squarefree(d) and QuadraticField(-d).class_number() == 1]",
+    "# A 40-digit discriminant, by a subexponential sieve\nK = QuadraticField(-(10^40 + 3))\nK.class_group()",
+    "# Real quadratic: a huge class number and a tiny regulator, since 10^20 + 1 = (10^10)^2 + 1\nK.<s> = QuadraticField(10^20 + 1)\nK.class_number(), K.regulator()",
+    "# Units of a cyclotomic field: the roots of unity and r1 + r2 - 1 = 2 fundamental units\nK = CyclotomicField(7)\nK.unit_group(), K.regulator()",
+    "# Integer factorization by the elliptic curve method\nfactor(2^128 + 1)",
+    "# Lattices: Hermite form, elementary divisors (Smith form), LLL\nM = matrix(ZZ, [[1, 1, 1], [-1, 0, 2], [3, 5, 6]])\nM.hermite_form(), M.elementary_divisors(), M.LLL()",
+    "# The complex roots of a defining polynomial (the field's embeddings)\nR.<y> = QQ[]\n(y^5 - y - 1).roots(CC)",
+    "# The engines directly: the same API as `pip install sagebrush` in CPython\nfrom sagebrush import nf\nnf.bnf([-11, 0, 0, 1])",
+  ],
   "Magma": [
     {"md": "## Magma\n\nMagma programs, translated to Python in this page and run on Sagebrush's engines. Sequences are 1-based with value semantics, `/` is exact, and values print as Magma prints them (checked against Magma itself)."},
     "// Integers and sequences\nFactorization(2^64 - 1);\n[ p : p in [1..100] | IsPrime(p) and IsPrime(p + 2) ];\n&+[ 1/n : n in [1..10] ];",
@@ -340,7 +355,7 @@ const EXAMPLES = {
   ],
 };
 
-const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)", "Polynomials (Sage)", "Modular forms (Sage)"]);
+const SAGE_EXAMPLES = new Set(["Sage", "Plots (Sage)", "Polynomials (Sage)", "Modular forms (Sage)", "Algebraic number theory (Sage)"]);
 const MAGMA_EXAMPLES = new Set(["Magma"]);
 const $ = (s) => document.querySelector(s);
 const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
