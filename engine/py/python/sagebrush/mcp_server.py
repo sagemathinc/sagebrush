@@ -66,15 +66,28 @@ EllipticCurve('11a1'); E.conductor(), E.discriminant(), E.j_invariant(),
 E.rank(), E.torsion_order(), E.cremona_label(), E.ap(p), E.aplist(n),
 E.anlist(n), E.sato_tate_moments(...).
 
-**Plots:** x = var('x'); plot(sin(x), (x, 0, 3)), point, line,
-parametric_plot, list_plot, show(...): returned as SVG.
+**Symbolic calculus:** x, y = var('x y'); expressions print as Sage
+prints them. diff, expand, factor, simplify_full, simplify_trig, subs, n,
+latex, taylor, series, limit(f, x=a, dir='+'), solve (polynomial equations,
+linear systems), integrate(f, x) and integrate(f, x, a, b) (bounds may be
+oo; every antiderivative is verified by differentiation; unevaluated when
+not elementary), integrate_steps(f, x) (the rules used),
+numerical_integral(f, a, b), find_root; desolve(de, y, ics=...) for
+y = function('y')(x) (first-order linear, separable, exact, homogeneous,
+Bernoulli; second-order linear with constant coefficients or
+Cauchy-Euler), desolve_rk4.
+
+**Plots:** plot(sin(x), (x, 0, 3)), point, line, parametric_plot,
+list_plot, contour_plot, density_plot, implicit_plot, region_plot,
+plot_vector_field, plot_slope_field, and 3D: plot3d, parametric_plot3d,
+implicit_plot3d, sphere, point3d, line3d; show(...): returned as SVG.
 
 **Python:** the `python` tool runs plain Python (no Sage preparsing), with
 `sagebrush.nf`, `sagebrush.linalg`, `sagebrush.poly`, `sagebrush.modsym`,
 `sagebrush.mf`, `sagebrush.ap` importable.
 
 Not available (yet): multivariate polynomials and Groebner bases,
-symbolic calculus beyond the basics, general finite fields, Newforms(N, k)
+general finite fields, Newforms(N, k)
 with irrational coefficients (use newform_orbits). If something is missing
 the error says so.
 """
@@ -106,7 +119,8 @@ TOOLS = [
         "Run Sage code in a persistent Sagebrush session (variables persist between calls). "
         "Sage syntax: 2^10 is a power, 1/3 is exact, R.<x> = QQ[] defines a polynomial ring, [1..10] is a range. "
         "Number theory (factoring, number fields, class groups, units), polynomials, exact matrices over ZZ/QQ, "
-        "modular forms and newforms, elliptic curves, plots (returned as SVG). Returns the printed output and the "
+        "modular forms and newforms, elliptic curves, symbolic calculus (diff, integrate, limit, solve, desolve), "
+        "2D and 3D plots (returned as SVG). Returns the printed output and the "
         "value of the last line. Call `guide` for the list of what is implemented.",
     ),
     _code_tool(
