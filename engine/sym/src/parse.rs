@@ -179,6 +179,10 @@ pub fn call(name: &str, args: Vec<Expr>) -> Expr {
     match name {
         "exp" if args.len() == 1 => exp(&args[0]),
         "sqrt" if args.len() == 1 => sqrt(&args[0]),
+        "diff" | "derivative" if args.len() >= 2 && args[1].as_sym().is_some() => {
+            let n = args.get(2).and_then(|k| k.as_i64()).unwrap_or(1).max(0) as usize;
+            crate::diff::diff_n(&args[0], args[1].as_sym().unwrap(), n)
+        }
         _ => match Fun::from_name(name) {
             Some(f) => fun(f, args),
             None => fun(Fun::User(name.into()), args),

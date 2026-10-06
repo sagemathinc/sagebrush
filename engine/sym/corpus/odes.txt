@@ -1,0 +1,40 @@
+# First- and second-order ODEs of a first course, in y(x) (Sage syntax);
+# after ";" initial conditions x0, y0[, dy0].  make_odes.py runs Maxima's
+# ode2 (what Sage's desolve uses) on each.
+diff(y(x), x) == y(x)
+diff(y(x), x) == 2*y(x)
+diff(y(x), x) + y(x) == x
+diff(y(x), x) + 2*y(x) == exp(x)
+diff(y(x), x) - y(x) == sin(x)
+x*diff(y(x), x) + y(x) == x^2
+diff(y(x), x) + y(x)/x == 1
+diff(y(x), x) == x*y(x)
+diff(y(x), x) == x*y(x)^2
+diff(y(x), x) == -x/y(x)
+diff(y(x), x) == y(x)^2
+diff(y(x), x) == exp(x - y(x))
+diff(y(x), x) == (1 + y(x)^2)
+diff(y(x), x) == y(x)*(1 - y(x))
+diff(y(x), x) == (x + y(x))/x
+2*x*y(x) + (x^2 + 1)*diff(y(x), x) == 0
+diff(y(x), x) + y(x) == y(x)^2
+diff(y(x), x, 2) + y(x) == 0
+diff(y(x), x, 2) - y(x) == 0
+diff(y(x), x, 2) + 4*y(x) == 0
+diff(y(x), x, 2) - 2*diff(y(x), x) + y(x) == 0
+diff(y(x), x, 2) + 2*diff(y(x), x) + 5*y(x) == 0
+diff(y(x), x, 2) - 3*diff(y(x), x) + 2*y(x) == 0
+diff(y(x), x, 2) + y(x) == x
+diff(y(x), x, 2) + 4*y(x) == sin(x)
+diff(y(x), x, 2) - y(x) == exp(x)
+diff(y(x), x, 2) + y(x) == sin(x)
+diff(y(x), x, 2) - 3*diff(y(x), x) + 2*y(x) == x^2
+diff(y(x), x, 2) + diff(y(x), x) == x
+x^2*diff(y(x), x, 2) - 2*y(x) == 0
+x^2*diff(y(x), x, 2) + x*diff(y(x), x) - y(x) == 0
+diff(y(x), x) == y(x); 0, 1
+diff(y(x), x) + y(x) == x; 0, 1
+diff(y(x), x) == x*y(x)^2; 0, 1
+diff(y(x), x, 2) + y(x) == 0; 0, 1, 0
+diff(y(x), x, 2) - y(x) == 0; 0, 1, 1
+diff(y(x), x, 2) + 4*y(x) == sin(x); 0, 0, 0

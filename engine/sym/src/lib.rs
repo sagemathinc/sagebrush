@@ -13,6 +13,7 @@ pub mod func;
 pub mod integrate;
 pub mod limit;
 pub mod num;
+pub mod ode;
 pub mod ops;
 pub mod parse;
 pub mod poly;

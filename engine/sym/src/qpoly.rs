@@ -58,6 +58,7 @@ impl QPoly {
         QPoly::new(self.0.iter().map(|v| v * c).collect())
     }
     pub fn mul(&self, o: &QPoly) -> QPoly {
+        sagebrush_interrupt::check();
         if self.is_zero() || o.is_zero() {
             return QPoly::zero();
         }
@@ -84,6 +85,7 @@ impl QPoly {
     }
     /// (quotient, remainder)
     pub fn divrem(&self, d: &QPoly) -> (QPoly, QPoly) {
+        sagebrush_interrupt::check();
         assert!(!d.is_zero(), "QPoly division by zero");
         let mut r = self.0.clone();
         let dd = d.deg() as usize;

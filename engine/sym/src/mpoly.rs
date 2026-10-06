@@ -84,6 +84,7 @@ impl MPoly {
     }
 
     pub fn mul(&self, o: &MPoly) -> MPoly {
+        sagebrush_interrupt::check();
         let mut r = MPoly::zero(&self.gens);
         for (a, c) in &self.terms {
             for (b, d) in &o.terms {
@@ -117,6 +118,7 @@ impl MPoly {
 
     /// self / d if d divides self exactly.
     pub fn divexact(&self, d: &MPoly) -> Option<MPoly> {
+        sagebrush_interrupt::check();
         let (dl, dc) = d.lead()?;
         let mut r = self.clone();
         let mut q = MPoly::zero(&self.gens);

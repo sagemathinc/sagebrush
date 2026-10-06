@@ -453,6 +453,11 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
                 one_(crate::integrate::integrate(&f, x).unwrap_or_else(|| fun(Fun::Integral, vec![f.clone(), sym(x)])))
             }
         }
+        "desolve" => {
+            // desolve de y x [ics...]
+            let ics: Vec<Expr> = a[3..].iter().map(|s| d(s)).collect();
+            one_(crate::ode::desolve(&d(arg(0)), arg(1), arg(2), &ics))
+        }
         "integrate_steps" => {
             // the steps, depth first: depth \x1e rule \x1e var \x1e integrand \x1e result
             let f = d(arg(0));

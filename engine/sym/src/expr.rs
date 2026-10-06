@@ -665,6 +665,19 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
     match (&b.kind, &x.kind) {
         (Kind::Num(nb), Kind::Num(nx)) => return num_pow(nb, nx),
         (Kind::Const(Const::E), Kind::Fun(Fun::Log, a)) if a.len() == 1 => return a[0].clone(),
+        (Kind::Const(Const::E), Kind::Mul(v)) => {
+            // e^(c log u) = u^c for rational c; e^(x log 2) = 2^x (as Sage)
+            let logs: Vec<usize> = (0..v.len()).filter(|&i| matches!(&v[i].kind, Kind::Fun(Fun::Log, a) if a.len() == 1)).collect();
+            if logs.len() == 1 {
+                let Kind::Fun(_, a) = &v[logs[0]].kind else { unreachable!() };
+                let rest: Vec<Expr> = v.iter().enumerate().filter(|(i, _)| *i != logs[0]).map(|(_, t)| t.clone()).collect();
+                let c = mul(rest);
+                let positive_number = a[0].as_rat().map_or(false, |q| q > &Q::zero());
+                if c.as_rat().is_some() || positive_number {
+                    return pow(&a[0], &c);
+                }
+            }
+        }
         (Kind::Const(Const::E), Kind::Num(n)) if !n.is_exact() => {
             let (re, im) = n.to_c64();
             let m = re.exp();

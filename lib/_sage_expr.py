@@ -1155,6 +1155,91 @@ def _gk_adaptive(h, a, b, eps_abs, eps_rel, limit=200):
 integral_numerical = numerical_integral
 
 
+def _dvar(dvar, ivar=None):
+    """(function name, variable name) from y = function('y')(x)."""
+    dvar = _expr(dvar)
+    tag = dvar._op()
+    if not tag[0].startswith("fun:"):
+        raise TypeError("the dependent variable must be a function, e.g. y = function('y')(x)")
+    args = dvar.operands()
+    if ivar is None:
+        if len(args) != 1:
+            raise ValueError("specify the independent variable (ivar=...)")
+        ivar = args[0]
+    return tag[0][4:], _var_name(ivar)
+
+
+def desolve(de, dvar, ics=None, ivar=None, show_method=False, contrib_ode=False, algorithm="maxima"):
+    """Solve an ordinary differential equation for y = function('y')(x):
+    desolve(diff(y, x) + y == x, y) = (_C + (x - 1)*e^x)*e^(-x).  First
+    order: linear, separable, exact, homogeneous, Bernoulli; second order:
+    linear with constant coefficients, or Cauchy-Euler.  ics=[x0, y0] or
+    [x0, y0, dy0] for initial conditions."""
+    f, v = _dvar(dvar, ivar)
+    ics = [] if ics is None else list(ics)
+    r = _one("desolve", _expr(de)._s, f, v, *[_expr(c)._s for c in ics])
+    if show_method:
+        return [r, "sagebrush"]
+    return r
+
+
+def desolve_rk4(de, dvar, ics=None, ivar=None, end_points=None, step=0.1, output="list", **kw):
+    """Numerical solution of y' = f(x, y) (de is f, or an equation in
+    y' and y) by the classical Runge-Kutta method: [[x0, y0], [x1, y1], ...]
+    from ics=[x0, y0] to end_points (a number, or [a, b]); output='plot' or
+    'slope_field' draws it."""
+    f, v = _dvar(dvar, ivar)
+    yx = _expr(dvar)
+    ysym, dsym = Expression(_sym_s("_rk_y")), Expression(_sym_s("_rk_dy"))
+    de = _expr(de)
+    if de.is_relational():
+        g = (de.lhs() - de.rhs()).subs({yx.diff(_var_name(v)): dsym})
+        sols = solve(g == 0, dsym)
+        if not sols:
+            raise ValueError("cannot solve the equation for the derivative")
+        rhs = sols[0].rhs()
+    else:
+        rhs = de
+    rhs = rhs.subs({yx: ysym})
+    F = rhs._fast_callable([v, "_rk_y"])
+    ics = list(ics or [0, 0])
+    x0, y0 = (float(t) for t in ics)
+    if end_points is None:
+        a, b = x0, x0 + 10
+    elif isinstance(end_points, (list, tuple)):
+        a, b = (float(t) for t in end_points)
+    else:
+        a, b = x0, float(end_points)
+    h = float(step)
+
+    def march(x, y, until, h):
+        pts = []
+        n = int(round(abs(until - x) / h))
+        h = (until - x) / n if n else 0
+        for _ in range(n):
+            k1 = F(x, y)
+            k2 = F(x + h / 2, y + h * k1 / 2)
+            k3 = F(x + h / 2, y + h * k2 / 2)
+            k4 = F(x + h, y + h * k3)
+            y = y + h * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+            x = x + h
+            pts.append([x, y])
+        return pts
+    back = march(x0, y0, a, h) if a < x0 else []
+    # as Sage: Python floats, the initial point as given
+    pts = [[t, u] for t, u in reversed(back)] + [ics[:2]] + march(x0, y0, b, h)
+    if output == "plot":
+        from sage_plot import line
+        return line(pts, **kw)
+    if output == "slope_field":
+        from sage_plot import line
+        from sage_plot_fields import plot_slope_field
+        ys = [q for _, q in pts]
+        g = plot_slope_field(rhs.subs({ysym: Expression(_sym_s("_rk_y"))}), (Expression(_sym_s(v)), a, b), (Expression(_sym_s("_rk_y")), min(ys), max(ys)), **kw)
+        return g + line(pts, thickness=2, color="red")
+    return pts
+
+
 def find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
     """A root of f in [a, b] (Brent's method); f must change sign."""
     f = _expr(f)
