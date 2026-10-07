@@ -282,7 +282,7 @@ const fnCodeType = builtinTypeFor("code", FnCode, "builtins", () => raise(T.Type
     const s = sigOf(c);
     return (s.vararg ? 4 : 0) | (s.kwarg ? 8 : 0) | (c.f.$isGen ? 0x20 : 0) | 3;
   });
-  getset(fnCodeType, "co_firstlineno", () => 1);
+  getset(fnCodeType, "co_firstlineno", (c) => c.f.$line ?? 1);
 }
 getset(fnType, "__code__", (f) => (f.$code ??= new FnCode(f)));
 getset(fnType, "__defaults__", (f) => f.__defaults__ ?? null, (f, v) => void (f.__defaults__ = v));

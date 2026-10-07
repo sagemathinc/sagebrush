@@ -21,7 +21,7 @@ import { homedir } from "os";
 import { Worker, parentPort } from "worker_threads";
 import { ZSocket } from "./zmtp";
 import { initParser, R, libDir } from "./compile";
-import { needsMore, complete } from "./interactive";
+import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
@@ -493,7 +493,7 @@ export function kernelWorker(mode: Mode) {
         port.postMessage({ id: m.id, error: errorReported });
       }
       if (py !== null) run(py, main, "exec", "<cell>");
-    } else run(m.code + "\n", main, "cell", "<cell>", { sage: mode === "sage" });
+    } else run(helpSyntax(m.code) + "\n", main, "cell", "<cell>", { sage: mode === "sage" });
     run(FLUSH, host, "exec", "<figures>");
     flush();
     port.postMessage({ id: m.id, done: true, error: errorReported });

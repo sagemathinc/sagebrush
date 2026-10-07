@@ -19,7 +19,7 @@
 // `target` is null for the cell's own output, or the id of the @interact
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir } from "./compile";
-import { needsMore, complete } from "./interactive";
+import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 
 export interface Session {
@@ -167,7 +167,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         if (py !== null) run(py, main, "exec", "<cell>");
       } else {
         // "cell" mode: the value of a final expression is displayed, as in Jupyter.
-        run(m.code + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage });
+        run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }

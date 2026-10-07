@@ -13,8 +13,8 @@ import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
-import { needsMore, complete } from "./interactive";
-import { builtin, isType, typeName, getattr } from "./runtime/object";
+import { needsMore, complete, helpSyntax } from "./interactive";
+import { getattr } from "./runtime/object";
 import { isMainThread, workerData } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
@@ -189,7 +189,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
             // read-only home: no history
           }
         }
-        const code = guarded(() => R.loader.exec(src + "\n", main, "single", "<stdin>", opts()));
+        const code = guarded(() => R.loader.exec(helpSyntax(src) + "\n", main, "single", "<stdin>", opts()));
         flushFiles();
         R.stdout.flush();
         R.stderr.flush();
@@ -209,38 +209,6 @@ function repl(main: any, quiet: boolean): Promise<number> {
       finish(0);
     });
   });
-}
-
-// help(obj): signature and docstring (help() alone explains the prompt).
-function installHelp() {
-  const help = (obj: any = undefined) => {
-    if (obj === undefined) {
-      process.stdout.write("pyjs is the Python 3.14 language compiled to JavaScript.\nhelp(obj) shows an object's signature and docstring; dir(obj) lists its attributes.\n");
-      return null;
-    }
-    const name = getattr(obj, "__qualname__", null) ?? getattr(obj, "__name__", null) ?? typeName(obj);
-    const sig = typeof obj === "function" && obj.$sig ? obj.$sig : null;
-    let head = String(name);
-    if (sig) {
-      const parts = [...sig.args];
-      if (sig.vararg) parts.push("*" + sig.vararg);
-      else if (sig.kwonly.length) parts.push("*");
-      parts.push(...sig.kwonly);
-      if (sig.kwarg) parts.push("**" + sig.kwarg);
-      head += "(" + parts.join(", ") + ")";
-    }
-    const kind = isType(obj) ? "class" : typeof obj === "function" ? "function" : "object";
-    let out = `Help on ${kind} ${name}:\n\n${head}\n`;
-    const doc = getattr(obj, "__doc__", null);
-    if (typeof doc === "string") out += doc.split("\n").map((l: string) => "    " + l.trim()).join("\n") + "\n";
-    if (isType(obj)) {
-      const methods = R.toArray(R.builtins.dir(obj)).filter((n: string) => !n.startsWith("_"));
-      if (methods.length) out += "\n  Attributes and methods:\n" + methods.map((n: string) => "    " + n).join("\n") + "\n";
-    }
-    process.stdout.write(out);
-    return null;
-  };
-  R.builtins.help = builtin(help, "help");
 }
 
 // ------------------------------------------------------------------ main
@@ -294,7 +262,6 @@ async function main() {
     argv.shift();
   }
   await initParser();
-  installHelp();
   if (emit) {
     if (file === null) {
       process.stderr.write("--emit needs a file\n");
@@ -324,7 +291,7 @@ async function main() {
     if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
   } else if (cmd !== null) {
     main = mainModule("<string>");
-    code = guarded(() => R.loader.exec(cmd!, main, "exec", "<string>", opts()));
+    code = guarded(() => R.loader.exec(helpSyntax(cmd!), main, "exec", "<string>", opts()));
   } else if (mod !== null) {
     code = guarded(() => {
       main = execModuleAsMain(mod!);

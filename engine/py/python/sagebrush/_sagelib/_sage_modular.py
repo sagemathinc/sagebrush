@@ -118,7 +118,16 @@ class _Cyc:
 
     @staticmethod
     def zeta_power(m, j):
-        """zeta_m^j reduced modulo the m-th cyclotomic polynomial."""
+        """zeta_m^j reduced modulo the m-th cyclotomic polynomial.
+
+        EXAMPLES::
+
+            sage: chi = DirichletGroup(5).gen()
+            sage: chi(2)
+            zeta4
+            sage: chi(2)^4, chi(2)^-1, chi(2) * chi(3)
+            (1, -zeta4, 1)
+        """
         if m <= 2:
             return _Cyc(m, [(-1) ** (j % m) if m == 2 else 1])
         f = _cyclotomic(m)
@@ -133,7 +142,13 @@ class _Cyc:
         return _Cyc(m, c[:d])
 
     def to_field(self, n):
-        """This element (of Q(zeta_m), m | n) in the power basis of Q(zeta_n)."""
+        """This element (of Q(zeta_m), m | n) in the power basis of Q(zeta_n).
+
+        EXAMPLES::
+
+            sage: chi = DirichletGroup(15).gen(1); chi(2) + chi(4)
+            zeta4 - 1
+        """
         out = [0] * max(1, _phi(n))
         for i, ci in enumerate(self.c):
             if ci:
@@ -146,6 +161,88 @@ class _Cyc:
         if self.m <= 2:
             return repr(self.c[0] if self.c else 0)
         return _poly_repr(self.c, "zeta%d" % self.m)
+
+    # arithmetic in Q(zeta_m) (elements of different cyclotomic fields meet
+    # in Q(zeta_lcm))
+    @staticmethod
+    def _reduce(m, c):
+        if m <= 2:
+            return _Cyc(m, [sum(x * (-1) ** i if m == 2 else x for i, x in enumerate(c))])
+        f = _cyclotomic(m)
+        d = len(f) - 1
+        c = list(c) + [0] * max(0, d - len(c))
+        for i in range(len(c) - 1, d - 1, -1):
+            t = c[i]
+            if t:
+                for k in range(d + 1):
+                    c[i - d + k] -= t * f[k]
+        return _Cyc(m, c[:d])
+
+    def _common(self, other):
+        if not isinstance(other, _Cyc):
+            return self, _Cyc(self.m, [other] + [0] * (len(self.c) - 1))
+        if other.m == self.m:
+            return self, other
+        n = _lcm(max(self.m, 1), max(other.m, 1))
+        return self.to_field(n), other.to_field(n)
+
+    def __add__(self, other):
+        a, b = self._common(other)
+        n = max(len(a.c), len(b.c))
+        return _Cyc(a.m, [(a.c[i] if i < len(a.c) else 0) + (b.c[i] if i < len(b.c) else 0) for i in range(n)])
+
+    __radd__ = __add__
+
+    def __neg__(self):
+        return _Cyc(self.m, [-x for x in self.c])
+
+    def __sub__(self, other):
+        return self + (-other)
+
+    def __rsub__(self, other):
+        return (-self) + other
+
+    def __mul__(self, other):
+        if not isinstance(other, _Cyc):
+            return _Cyc(self.m, [x * other for x in self.c])
+        a, b = self._common(other)
+        r = [0] * (len(a.c) + len(b.c) - 1)
+        for i, x in enumerate(a.c):
+            if x:
+                for j, y in enumerate(b.c):
+                    r[i + j] += x * y
+        return _Cyc._reduce(a.m, r)
+
+    __rmul__ = __mul__
+
+    def __pow__(self, n):
+        if n < 0:
+            # values of characters are roots of unity: x^-1 = x^(k-1), x^k = 1
+            x, k = self, 1
+            while not (x == 1):
+                x, k = x * self, k + 1
+                if k > 2 * max(self.m, 2):
+                    raise NotImplementedError("inverse of a cyclotomic number that is not a root of unity")
+            return self ** ((k - 1) * -n)
+        r, b = _Cyc(self.m, [1] + [0] * max(0, len(self.c) - 1)), self
+        while n:
+            if n & 1:
+                r = r * b
+            b, n = b * b, n >> 1
+        return r
+
+    def __eq__(self, other):
+        if isinstance(other, _Cyc):
+            a, b = self._common(other)
+            n = max(len(a.c), len(b.c))
+            return all((a.c[i] if i < len(a.c) else 0) == (b.c[i] if i < len(b.c) else 0) for i in range(n))
+        return bool(self.c) and self.c[0] == other and all(x == 0 for x in self.c[1:]) or (not self.c and other == 0)
+
+    def __hash__(self):
+        c = list(self.c)
+        while c and c[-1] == 0:
+            c.pop()
+        return hash(c[0]) if len(c) <= 1 else hash((self.m, tuple(c)))
 
 
 def _field_order(chi):
@@ -166,7 +263,15 @@ def _ring_name(m):
 
 class Polynomial:
     """A univariate polynomial over ZZ or Z[zeta_m] (coefficients constant
-    first), as the engines return Hecke polynomials."""
+    first), as the engines return Hecke polynomials.
+
+    EXAMPLES::
+
+        sage: f = ModularSymbols(11).hecke_polynomial(2); f
+        x^3 + x^2 - 8*x - 12
+        sage: type(f).__name__  # sagebrush only
+        'Polynomial'
+    """
 
     def __init__(self, coeffs, var="x", m=1, n=None):
         self._c = coeffs
@@ -180,9 +285,23 @@ class Polynomial:
         return _poly_repr([repr(_Cyc(self._m, c).to_field(self._n)) for c in self._c], self._var, atomic=False)
 
     def degree(self):
+        """The degree.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(23).hecke_polynomial(2).degree()
+            5
+        """
         return len(self._c) - 1
 
     def list(self):
+        """The coefficients, constant term first.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(23).hecke_polynomial(2).list()
+            [-3, 7, 1, -7, -1, 1]
+        """
         if self._m <= 2:
             return [c if isinstance(c, int) else c[0] for c in self._c]
         return [_Cyc(self._m, c).to_field(self._n) for c in self._c]
@@ -198,6 +317,14 @@ class Polynomial:
         return hash(repr(self))
 
     def __call__(self, x):
+        """The value at x.
+
+        EXAMPLES::
+
+            sage: f = ModularSymbols(11).hecke_polynomial(2)
+            sage: f(2), f(-2)
+            (-16, 0)
+        """
         if self._m > 2:
             raise NotImplementedError("evaluating polynomials over cyclotomic fields")
         r = 0
@@ -206,6 +333,15 @@ class Polynomial:
         return r
 
     def factor(self):
+        """The factorization over QQ (or over the base ring of a character).
+
+        EXAMPLES::
+
+            sage: ModularSymbols(23).hecke_polynomial(2).factor()
+            (x - 3) * (x^2 + x - 1)^2
+            sage: ModularSymbols(37).hecke_polynomial(2).factor()
+            (x - 3) * x^2 * (x + 2)^2
+        """
         raise NotImplementedError("factoring polynomials over ZZ is not available in sagebrush yet")
 
 
@@ -216,10 +352,26 @@ def _group_name(N):
 
 
 class Gamma0:
+    """The congruence subgroup Gamma0(N).
+
+    EXAMPLES::
+
+        sage: G = Gamma0(11); G
+        Congruence Subgroup Gamma0(11)
+        sage: G.level()
+        11
+    """
     def __init__(self, N):
         self._N = int(N)
 
     def level(self):
+        """The level N.
+
+        EXAMPLES::
+
+            sage: Gamma0(389).level()
+            389
+        """
         return self._N
 
     def __repr__(self):
@@ -235,16 +387,60 @@ class Gamma0:
         return _mf.dims(self._N, k)
 
     def dimension_cusp_forms(self, k=2):
+        """The dimension of the space of cusp forms of weight k on Gamma0(N).
+
+        EXAMPLES::
+
+            sage: Gamma0(11).dimension_cusp_forms(2)
+            1
+            sage: Gamma0(1).dimension_cusp_forms(12)
+            1
+            sage: [Gamma0(N).dimension_cusp_forms(2) for N in range(1, 30)]
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 2, 2, 1, 0, 2, 1, 2, 2]
+        """
         return self._dims(k)["cusp"]
 
     def dimension_eis(self, k=2):
+        """The dimension of the Eisenstein subspace of weight k on Gamma0(N).
+
+        EXAMPLES::
+
+            sage: Gamma0(11).dimension_eis(2)
+            1
+            sage: Gamma0(1).dimension_eis(12)
+            1
+            sage: Gamma0(30).dimension_eis(4)
+            8
+        """
         return self._dims(k)["eisenstein"]
 
     def dimension_modular_forms(self, k=2):
+        """The dimension of the space of modular forms of weight k on Gamma0(N).
+
+        EXAMPLES::
+
+            sage: Gamma0(1).dimension_modular_forms(12)
+            2
+            sage: Gamma0(11).dimension_modular_forms(2)
+            2
+            sage: Gamma0(30).dimension_modular_forms(4)
+            22
+        """
         d = self._dims(k)
         return d["cusp"] + d["eisenstein"]
 
     def dimension_new_cusp_forms(self, k=2):
+        """The dimension of the new subspace of cusp forms of weight k on Gamma0(N).
+
+        EXAMPLES::
+
+            sage: Gamma0(22).dimension_new_cusp_forms(2)
+            0
+            sage: Gamma0(23).dimension_new_cusp_forms(2)
+            2
+            sage: Gamma0(100).dimension_new_cusp_forms(4)
+            5
+        """
         return self._dims(k)["new"]
 
 
@@ -280,22 +476,51 @@ def _unit_gens(N):
 
 class DirichletCharacter:
     """A Dirichlet character mod N, by its values zeta_lambda^e_i on Sage's
-    generators of (Z/N)^* (lambda the exponent of the group)."""
+    generators of (Z/N)^* (lambda the exponent of the group).
+
+    EXAMPLES::
+
+        sage: chi = DirichletGroup(7).gen(); chi
+        Dirichlet character modulo 7 of conductor 7 mapping 3 |--> zeta6
+        sage: chi.order(), chi.conductor(), chi.is_odd()
+        (6, 7, True)
+    """
 
     def __init__(self, group, exps):
         self._G = group
         self._e = tuple(int(x) % group._lam for x in exps)
 
     def parent(self):
+        """The Dirichlet group of the character.
+
+        EXAMPLES::
+
+            sage: DirichletGroup(7).gen().parent()
+            Group of Dirichlet characters modulo 7 with values in Cyclotomic Field of order 6 and degree 2
+        """
         return self._G
 
     def modulus(self):
+        """The modulus.
+
+        EXAMPLES::
+
+            sage: DirichletGroup(7).gen().modulus()
+            7
+        """
         return self._G._N
 
     def _sagebrush_chi(self):
         return [self._G._lam, [g for g, _ in self._G._gens], list(self._e)]
 
     def order(self):
+        """The order of the character.
+
+        EXAMPLES::
+
+            sage: [chi.order() for chi in DirichletGroup(7)]
+            [1, 6, 3, 2, 3, 6]
+        """
         lam = self._G._lam
         g = lam
         for e in self._e:
@@ -303,11 +528,25 @@ class DirichletCharacter:
         return lam // g
 
     def conductor(self):
+        """The conductor: the least modulus the character is induced from.
+
+        EXAMPLES::
+
+            sage: [chi.conductor() for chi in DirichletGroup(12)]
+            [1, 4, 3, 12]
+        """
         if self.order() == 1:
             return 1
         return _mf.dims(self._G._N, 2, self)["conductor"]
 
     def is_trivial(self):
+        """Whether the character is trivial.
+
+        EXAMPLES::
+
+            sage: [chi.is_trivial() for chi in DirichletGroup(5)]
+            [True, False, False, False]
+        """
         return self.order() == 1
 
     def _log(self, a):
@@ -337,6 +576,14 @@ class DirichletCharacter:
         return out
 
     def __call__(self, a):
+        """The value chi(a), an element of a cyclotomic field (0 if gcd(a, N) > 1).
+
+        EXAMPLES::
+
+            sage: chi = DirichletGroup(5).gen()
+            sage: [chi(a) for a in range(5)]
+            [0, 1, zeta4, -zeta4, -1]
+        """
         k = self._log(int(a))
         if k is None:
             return 0
@@ -346,10 +593,34 @@ class DirichletCharacter:
             return 1 if j == 0 else -1
         return _Cyc.zeta_power(lam, j)
 
+    def values(self):
+        """The values chi(0), ..., chi(N - 1).
+
+        EXAMPLES::
+
+            sage: DirichletGroup(5).gen().values()
+            [0, 1, zeta4, -zeta4, -1]
+        """
+        return [self(a) for a in range(self.modulus())]
+
     def is_even(self):
+        """Whether chi(-1) = 1.
+
+        EXAMPLES::
+
+            sage: [chi.is_even() for chi in DirichletGroup(5)]
+            [True, False, True, False]
+        """
         return repr(self(-1)) == "1"
 
     def is_odd(self):
+        """Whether chi(-1) = -1.
+
+        EXAMPLES::
+
+            sage: [chi.is_odd() for chi in DirichletGroup(5)]
+            [False, True, False, True]
+        """
         return not self.is_even()
 
     def __mul__(self, other):
@@ -382,7 +653,15 @@ class DirichletCharacter:
 
 
 class DirichletGroup:
-    """The Dirichlet characters mod N with values in Q(zeta_lambda)."""
+    """The Dirichlet characters mod N with values in Q(zeta_lambda).
+
+    EXAMPLES::
+
+        sage: G = DirichletGroup(12); G
+        Group of Dirichlet characters modulo 12 with values in Cyclotomic Field of order 2 and degree 1
+        sage: G.order(), G.ngens()
+        (4, 2)
+    """
 
     def __init__(self, N):
         self._N = N = int(N)
@@ -410,23 +689,60 @@ class DirichletGroup:
         return hash(("DirichletGroup", self._N))
 
     def modulus(self):
+        """The modulus N.
+
+        EXAMPLES::
+
+            sage: DirichletGroup(35).modulus()
+            35
+        """
         return self._N
 
     def order(self):
+        """The number of characters mod N.
+
+        EXAMPLES::
+
+            sage: DirichletGroup(35).order()
+            24
+        """
         return _phi(self._N)
 
     def __len__(self):
         return self.order()
 
     def ngens(self):
+        """The number of generators.
+
+        EXAMPLES::
+
+            sage: DirichletGroup(35).ngens()
+            2
+        """
         return len(self._gens)
 
     def gen(self, i=0):
+        """The i-th generator (Sage's choice: one per cyclic factor of (Z/N)^*).
+
+        EXAMPLES::
+
+            sage: DirichletGroup(35).gen(0)
+            Dirichlet character modulo 35 of conductor 5 mapping 22 |--> zeta12^3, 31 |--> 1
+            sage: DirichletGroup(35).gen(1)
+            Dirichlet character modulo 35 of conductor 7 mapping 22 |--> 1, 31 |--> zeta12^2
+        """
         e = [0] * len(self._gens)
         e[i] = self._lam // self._gens[i][1]
         return DirichletCharacter(self, e)
 
     def gens(self):
+        """The generators.
+
+        EXAMPLES::
+
+            sage: DirichletGroup(12).gens()
+            (Dirichlet character modulo 12 of conductor 4 mapping 7 |--> -1, 5 |--> 1, Dirichlet character modulo 12 of conductor 3 mapping 7 |--> 1, 5 |--> -1)
+        """
         return tuple(self.gen(i) for i in range(len(self._gens)))
 
     def __iter__(self):
@@ -446,6 +762,13 @@ class DirichletGroup:
                 return
 
     def list(self):
+        """All the characters, in Sage's order.
+
+        EXAMPLES::
+
+            sage: DirichletGroup(5).list()
+            [Dirichlet character modulo 5 of conductor 1 mapping 2 |--> 1, Dirichlet character modulo 5 of conductor 5 mapping 2 |--> zeta4, Dirichlet character modulo 5 of conductor 5 mapping 2 |--> -1, Dirichlet character modulo 5 of conductor 5 mapping 2 |--> -zeta4]
+        """
         return list(self)
 
     def __getitem__(self, i):
@@ -453,7 +776,15 @@ class DirichletGroup:
 
     def galois_orbits(self, reps_only=False):
         """Orbits under Galois conjugation (chi -> chi^a, a prime to the
-        order); the order of the orbits may differ from Sage's."""
+        order); the order of the orbits may differ from Sage's.
+
+        EXAMPLES::
+
+            sage: [len(o) for o in DirichletGroup(13).galois_orbits()]
+            [1, 4, 2, 2, 2, 1]
+            sage: sorted(len(o) for o in DirichletGroup(7).galois_orbits())
+            [1, 1, 2, 2]
+        """
         seen, out = set(), []
         for chi in self:
             if chi._e in seen:
@@ -485,7 +816,19 @@ def _char_part(chi):
 
 class ModularSymbols:
     """Modular symbols for Gamma_0(N) of weight k, possibly with a
-    character, and sign 0, 1 or -1."""
+    character, and sign 0, 1 or -1.
+
+    EXAMPLES::
+
+        sage: M = ModularSymbols(11); M
+        Modular Symbols space of dimension 3 for Gamma_0(11) of weight 2 with sign 0 over Rational Field
+        sage: M.dimension()
+        3
+        sage: ModularSymbols(Gamma0(23), 2, sign=1)
+        Modular Symbols space of dimension 3 for Gamma_0(23) of weight 2 with sign 1 over Rational Field
+        sage: ModularSymbols(DirichletGroup(13).gen()^2, 2)
+        Modular Symbols space of dimension 4 and level 13, weight 2, character [zeta6], sign 0, over Cyclotomic Field of order 6 and degree 2
+    """
 
     def __init__(self, group=1, weight=2, sign=0, base_ring=None):
         self._N, self._chi = _group_and_char(group)
@@ -499,29 +842,80 @@ class ModularSymbols:
         self._polys = {}
 
     def level(self):
+        """The level.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(37).level()
+            37
+        """
         return self._N
 
     def weight(self):
+        """The weight.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11, 4).weight()
+            4
+        """
         return self._k
 
     def sign(self):
+        """The sign: 0, 1 or -1.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11, sign=1).sign()
+            1
+        """
         return self._sign
 
     def character(self):
-        return self._chi
+        """The character (the trivial character for Gamma0(N)).
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11).character()
+            Dirichlet character modulo 11 of conductor 1 mapping 2 |--> 1
+        """
+        return self._chi if self._chi is not None else DirichletGroup(self.level())[0]
 
     def _m(self):
         return self._chi.order() if self._chi is not None else 1
 
     def base_ring(self):
+        """The base ring: QQ, or a cyclotomic field for a character.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11).base_ring()
+            Rational Field
+        """
         return _BaseRing(_field_order(self._chi))
 
     def dimension(self):
+        """The dimension of the space of modular symbols.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11).dimension()
+            3
+            sage: ModularSymbols(389, sign=1).dimension()
+            33
+        """
         if self._dim is None:
             self._dim = len(self._hecke(2)) - 1
         return self._dim
 
     def rank(self):
+        """The dimension (as Sage's rank()).
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11).rank()
+            3
+        """
         return self.dimension()
 
     def _hecke(self, q):
@@ -536,7 +930,15 @@ class ModularSymbols:
 
     def hecke_polynomial(self, n, var="x"):
         """The characteristic polynomial of T_n (U_n if n | N), n prime:
-        exact and proven."""
+        exact and proven.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11).hecke_polynomial(2)
+            x^3 + x^2 - 8*x - 12
+            sage: ModularSymbols(23, sign=1).hecke_polynomial(2)
+            x^3 - 2*x^2 - 4*x + 3
+        """
         from sage_all import is_prime
         if not is_prime(int(n)):
             raise NotImplementedError("hecke_polynomial is available for primes n")
@@ -548,6 +950,15 @@ class ModularSymbols:
         return Polynomial(c, var, m, _field_order(self._chi))
 
     def hecke_operator(self, n):
+        """The Hecke operator T_n on the space.
+
+        EXAMPLES::
+
+            sage: T = ModularSymbols(11).hecke_operator(2); T
+            Hecke operator T_2 on Modular Symbols space of dimension 3 for Gamma_0(11) of weight 2 with sign 0 over Rational Field
+            sage: T.charpoly()
+            x^3 + x^2 - 8*x - 12
+        """
         return HeckeOperator(self, int(n))
 
     T = hecke_operator
@@ -569,20 +980,70 @@ class _BaseRing:
         return _ring_name(self._m)
 
 
+class _Printed(str):
+    """A string shown without quotes (Kodaira symbols, q-expansions)."""
+
+    def __repr__(self):
+        return str(self)
+
+
+class _HeckeAlgebra:
+    """The full Hecke algebra acting on a space (Sage's repr only)."""
+
+    def __init__(self, M):
+        self._M = M
+
+    def __repr__(self):
+        return "Full Hecke algebra acting on %r" % (self._M,)
+
+    def module(self):
+        return self._M
+
+
 class HeckeOperator:
+    """A Hecke operator T_n on a space of modular symbols.
+
+    EXAMPLES::
+
+        sage: ModularSymbols(37).T(2)
+        Hecke operator T_2 on Modular Symbols space of dimension 5 for Gamma_0(37) of weight 2 with sign 0 over Rational Field
+    """
     def __init__(self, M, n):
         self._M = M
         self._n = n
 
     def charpoly(self, var="x"):
+        """The characteristic polynomial of T_n.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(37, sign=1).T(2).charpoly()
+            x^3 - x^2 - 6*x
+        """
         return self._M.hecke_polynomial(self._n, var)
 
     characteristic_polynomial = charpoly
 
     def parent(self):
-        return self._M
+        """The Hecke algebra of the space the operator acts on.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(37).T(2).parent()
+            Full Hecke algebra acting on Modular Symbols space of dimension 5 for Gamma_0(37) of weight 2 with sign 0 over Rational Field
+        """
+        return _HeckeAlgebra(self._M)
 
     def matrix(self):
+        """The matrix of T_n (on Sagebrush's basis, which need not be Sage's).
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11).T(2).matrix()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: Hecke matrices are not exposed by the engine yet; use charpoly()
+        """
         raise NotImplementedError("Hecke matrices are not exposed by the engine yet; use charpoly()")
 
     def __repr__(self):
@@ -590,7 +1051,17 @@ class HeckeOperator:
 
 
 class ModularForms:
-    """M_k(Gamma_0(N), chi); its dimension and cuspidal and new subspaces."""
+    """M_k(Gamma_0(N), chi); its dimension and cuspidal and new subspaces.
+
+    EXAMPLES::
+
+        sage: M = ModularForms(1, 12); M
+        Modular Forms space of dimension 2 for Modular Group SL(2,Z) of weight 12 over Rational Field
+        sage: M.dimension()
+        2
+        sage: ModularForms(11, 2)
+        Modular Forms space of dimension 2 for Congruence Subgroup Gamma0(11) of weight 2 over Rational Field
+    """
 
     def __init__(self, group=1, weight=2, base_ring=None):
         self._N, self._chi = _group_and_char(group)
@@ -605,31 +1076,96 @@ class ModularForms:
         return self._d
 
     def level(self):
+        """The level.
+
+        EXAMPLES::
+
+            sage: ModularForms(11, 2).level()
+            11
+        """
         return self._N
 
     def weight(self):
+        """The weight.
+
+        EXAMPLES::
+
+            sage: ModularForms(11, 2).weight()
+            2
+        """
         return self._k
 
     def character(self):
-        return self._chi
+        """The character (the trivial character for Gamma0(N)).
+
+        EXAMPLES::
+
+            sage: ModularForms(11, 2).character()
+            Dirichlet character modulo 11 of conductor 1 mapping 2 |--> 1
+        """
+        return self._chi if self._chi is not None else DirichletGroup(self.level())[0]
 
     def dimension(self):
+        """The dimension of the space.
+
+        EXAMPLES::
+
+            sage: ModularForms(1, 12).dimension()
+            2
+            sage: ModularForms(37, 2).dimension()
+            3
+        """
         d = self._dims()
         return d["cusp"] + d["eisenstein"]
 
     def cuspidal_subspace(self):
+        """The subspace of cusp forms.
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).cuspidal_subspace()
+            Cuspidal subspace of dimension 2 of Modular Forms space of dimension 3 for Congruence Subgroup Gamma0(37) of weight 2 over Rational Field
+        """
         return _Subspace(self, "Cuspidal subspace", self._dims()["cusp"])
 
     def eisenstein_subspace(self):
+        """The Eisenstein subspace.
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).eisenstein_subspace()
+            Eisenstein subspace of dimension 1 of Modular Forms space of dimension 3 for Congruence Subgroup Gamma0(37) of weight 2 over Rational Field
+        """
         return _Subspace(self, "Eisenstein subspace", self._dims()["eisenstein"])
 
     def new_subspace(self):
+        """The new subspace.
+
+        EXAMPLES::
+
+            sage: ModularForms(22, 2).new_subspace()
+            Modular Forms subspace of dimension 0 of Modular Forms space of dimension 5 for Congruence Subgroup Gamma0(22) of weight 2 over Rational Field
+        """
         return _Subspace(self, "Modular Forms subspace", self._dims()["new"])
 
     def newforms(self, names=None):
+        """The newforms with rational coefficients (the others: newform_orbits()).
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).newforms('a')
+            [q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6), q + q^3 - 2*q^4 + O(q^6)]
+        """
         return Newforms(self._chi or self._N, self._k, names=names)
 
     def newform_orbits(self, prec=100):
+        """The Galois orbits of newforms in the space (Sagebrush).
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).newform_orbits()  # sagebrush only
+            [37.2.a.a (dimension 1): q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6), 37.2.a.b (dimension 1): q + q^3 - 2*q^4 + O(q^6)]
+        """
         return newform_orbits(self._chi or self._N, self._k, prec)
 
     def _ambient_repr(self):
@@ -651,18 +1187,55 @@ class _Subspace:
         self._dim = dim
 
     def dimension(self):
+        """The dimension of the subspace.
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).cuspidal_subspace().dimension()
+            2
+        """
         return self._dim
 
     def ambient(self):
+        """The ambient space of modular forms.
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).cuspidal_subspace().ambient()  # sagebrush only
+            Modular Forms space of dimension 3 for Congruence Subgroup Gamma0(37) of weight 2 over Rational Field
+        """
         return self._A
 
     def new_subspace(self):
+        """The new subspace.
+
+        EXAMPLES::
+
+            sage: CuspForms(22, 2).new_subspace().dimension()
+            0
+        """
         return _Subspace(self._A, "Modular Forms subspace", self._A._dims()["new"])
 
     def newforms(self, names=None):
+        """The newforms with rational coefficients in the subspace.
+
+        EXAMPLES::
+
+            sage: CuspForms(23, 2).newforms('a')  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: newforms with non-rational coefficients: sagebrush describes them by newform_orbits(23, 2) (label, dimension, trace form)
+        """
         return self._A.newforms(names)
 
     def newform_orbits(self, prec=100):
+        """The Galois orbits of newforms in the subspace (Sagebrush).
+
+        EXAMPLES::
+
+            sage: CuspForms(23, 2).newform_orbits()  # sagebrush only
+            [23.2.a.a (dimension 2): 2*q - q^2 - q^4 - 2*q^5 + O(q^6)]
+        """
         return self._A.newform_orbits(prec)
 
     def __repr__(self):
@@ -670,6 +1243,17 @@ class _Subspace:
 
 
 def CuspForms(group=1, weight=2, base_ring=None):
+    """The space of cusp forms of the given weight on Gamma0(N) (or with a character).
+
+    EXAMPLES::
+
+        sage: S = CuspForms(11, 2); S
+        Cuspidal subspace of dimension 1 of Modular Forms space of dimension 2 for Congruence Subgroup Gamma0(11) of weight 2 over Rational Field
+        sage: S.dimension()
+        1
+        sage: CuspForms(1, 24).dimension()
+        2
+    """
     return ModularForms(group, weight).cuspidal_subspace()
 
 
@@ -706,18 +1290,40 @@ def _legendre(a, p):
 class EllipticCurve_rational_field:
     """y^2 + a1 xy + a3 y = x^3 + a2 x^2 + a4 x + a6 over QQ.  a_p at good
     primes comes from the engine; at bad primes a_p = p - #{affine points
-    mod p} (1, -1 or 0 on a model minimal at p, as Cremona's are)."""
+    mod p} (1, -1 or 0 on a model minimal at p, as Cremona's are).
+
+    EXAMPLES::
+
+        sage: E = EllipticCurve([1, 2, 3, 4, 5]); E
+        Elliptic Curve defined by y^2 + x*y + 3*y = x^3 + 2*x^2 + 4*x + 5 over Rational Field
+        sage: type(E).__name__  # sagebrush only
+        'EllipticCurve_rational_field'
+    """
 
     def __init__(self, ainvs, label=None):
         self._a = tuple(int(x) for x in ainvs)
         self._label = label
 
     def a_invariants(self):
+        """The a-invariants (a1, a2, a3, a4, a6).
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).a_invariants()
+            (1, 2, 3, 4, 5)
+        """
         return self._a
 
     ainvs = a_invariants
 
     def b_invariants(self):
+        """The b-invariants (b2, b4, b6, b8).
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).b_invariants()
+            (9, 11, 29, 35)
+        """
         a1, a2, a3, a4, a6 = self._a
         b2 = a1 * a1 + 4 * a2
         b4 = 2 * a4 + a1 * a3
@@ -726,14 +1332,39 @@ class EllipticCurve_rational_field:
         return (b2, b4, b6, b8)
 
     def c_invariants(self):
+        """The c-invariants (c4, c6).
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).c_invariants()
+            (-183, -3429)
+        """
         b2, b4, b6, b8 = self.b_invariants()
         return (b2 * b2 - 24 * b4, -b2 ** 3 + 36 * b2 * b4 - 216 * b6)
 
     def discriminant(self):
+        """The discriminant of this model.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).discriminant()
+            -10351
+            sage: EllipticCurve('11a1').discriminant()
+            -161051
+        """
         b2, b4, b6, b8 = self.b_invariants()
         return -b2 * b2 * b8 - 8 * b4 ** 3 - 27 * b6 * b6 + 9 * b2 * b4 * b6
 
     def j_invariant(self):
+        """The j-invariant c4^3 / Delta.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).j_invariant()
+            6128487/10351
+            sage: EllipticCurve([0, 1]).j_invariant()
+            0
+        """
         from sage_all import QQ
         c4, _ = self.c_invariants()
         return QQ(c4 ** 3, self.discriminant())
@@ -746,6 +1377,13 @@ class EllipticCurve_rational_field:
         return None
 
     def cremona_label(self):
+        """The Cremona label (for conductors below 1000).
+
+        EXAMPLES::
+
+            sage: EllipticCurve([0, 1, 1, -2, 0]).cremona_label()  # needs sage.libs.eclib
+            '389a1'
+        """
         lab = self._cremona_entry()
         if lab is None:
             raise LookupError("this curve is not in sagebrush's table (Cremona's curves of conductor < 1000)")
@@ -767,7 +1405,15 @@ class EllipticCurve_rational_field:
         return self._minimal
 
     def minimal_model(self):
-        """A global minimal model (reduced: a1, a3 in {0, 1}, a2 in {-1, 0, 1})."""
+        """A global minimal model (reduced: a1, a3 in {0, 1}, a2 in {-1, 0, 1}).
+
+        EXAMPLES::
+
+            sage: EllipticCurve([0, 0, 0, -432*16, 0]).minimal_model()
+            Elliptic Curve defined by y^2 = x^3 - 27*x over Rational Field
+            sage: EllipticCurve([1, 2, 3, 4, 5]).minimal_model()
+            Elliptic Curve defined by y^2 + x*y = x^3 - x^2 + 4*x + 3 over Rational Field
+        """
         import _sage_ec as _ec
         m = _ec.minimal_model(self._a)
         return self if m == self._a else EllipticCurve_rational_field(m)
@@ -775,10 +1421,27 @@ class EllipticCurve_rational_field:
     global_minimal_model = minimal_model
 
     def is_minimal(self):
+        """Whether this model is a global minimal model.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([0, 0, 0, 16, 64]).is_minimal()
+            False
+            sage: EllipticCurve([0, 0, 0, 16, 64]).minimal_model().is_minimal()
+            True
+        """
         return self._is_minimal()
 
     def conductor(self):
-        """The conductor, by Tate's algorithm at the primes dividing the discriminant."""
+        """The conductor, by Tate's algorithm at the primes dividing the discriminant.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).conductor()
+            10351
+            sage: EllipticCurve([0, 0, 0, -1, 0]).conductor()
+            32
+        """
         lab = self._cremona_entry()
         if lab is not None:
             return int(_re.match(r"\d+", lab).group(0))
@@ -788,31 +1451,95 @@ class EllipticCurve_rational_field:
         return N
 
     def bad_primes(self):
+        """The primes of bad reduction.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).bad_primes()  # sagebrush only
+            [11, 941]
+        """
         return sorted(p for p, (kod, f, c) in self._ld().items() if f > 0)
 
     def kodaira_symbol(self, p):
-        """The Kodaira symbol of the reduction at p ('I0', 'I5', 'I2*', 'IV*', ...)."""
-        return self._ld().get(int(p), ("I0", 0, 1))[0]
+        """The Kodaira symbol of the reduction at p ('I0', 'I5', 'I2*', 'IV*', ...).
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve([0, 0, 0, -192, 512])
+            sage: [(p, E.kodaira_symbol(p)) for p in [2, 3]]
+            [(2, I0*), (3, II)]
+            sage: EllipticCurve('11a1').kodaira_symbol(11)
+            I5
+        """
+        return _Printed(self._ld().get(int(p), ("I0", 0, 1))[0])
 
     def tamagawa_number(self, p):
+        """The Tamagawa number c_p (Tate's algorithm).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').tamagawa_number(11)
+            5
+            sage: EllipticCurve([0, 0, 0, -192, 512]).tamagawa_number(2)
+            1
+        """
         return self._ld().get(int(p), ("I0", 0, 1))[2]
 
     def tamagawa_numbers(self):
+        """The Tamagawa numbers at the bad primes.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 1, 0, -1154, -15345]).tamagawa_numbers()
+            [2, 2]
+        """
         return [self.tamagawa_number(p) for p in self.bad_primes()]
 
     def tamagawa_product(self):
+        """The product of the Tamagawa numbers.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 1, 0, -1154, -15345]).tamagawa_product()
+            4
+        """
         r = 1
         for c in self.tamagawa_numbers():
             r *= c
         return r
 
     def minimal_discriminant(self):
+        """The discriminant of a global minimal model.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([0, 0, 0, 16, 64]).minimal_discriminant()  # sagebrush only
+            -496
+        """
         return self.minimal_model().discriminant()
 
     def real_components(self):
+        """The number of components of E(R): 2 if Delta > 0, else 1.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('37a1').real_components()
+            2
+            sage: EllipticCurve('11a1').real_components()
+            1
+        """
         return 2 if self.discriminant() > 0 else 1
 
     def period_lattice(self):
+        """The period lattice (Sagebrush: its least real period, omega()).
+
+        EXAMPLES::
+
+            sage: L = EllipticCurve('37a1').period_lattice(); L
+            Period lattice associated to Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field
+            sage: L.omega()  # abs tol 1e-12
+            5.98691729246392
+        """
         return _PeriodLattice(self)
 
     def _ldata(self):
@@ -823,7 +1550,13 @@ class EllipticCurve_rational_field:
         return self._lseries_data
 
     def root_number(self):
-        """The global root number w (the sign of the functional equation), +1 or -1."""
+        """The global root number w (the sign of the functional equation), +1 or -1.
+
+        EXAMPLES::
+
+            sage: [EllipticCurve(lab).root_number() for lab in ['11a1', '37a1', '389a1']]
+            [1, -1, 1]
+        """
         import _sage_ec as _ec
         return _ec.root_number(self._ldata())
 
@@ -831,12 +1564,51 @@ class EllipticCurve_rational_field:
         """The order of vanishing of L(E,s) at s = 1: the first r of the parity
         of the root number with L^(r)(E,1) numerically nonzero (as in Sage).
 
-        With proof=True only ranks 0 and 1 are returned (then nothing has to
-        vanish: w = -1 forces L(E,1) = 0); for r >= 2 it raises, since showing
-        that L^(k)(E,1) is exactly 0 for k < r is a separate problem (possible
-        for r = 2, 3 via modular symbols and Gross-Zagier, not implemented
-        here, and open for every curve when r >= 4).
-        With leading_coefficient=True, returns (r, L^(r)(E,1)), as Sage does."""
+        INPUT:
+
+        - ``proof`` -- (default: False) if True, return only ranks that are
+          proved: 0 and 1 (nothing has to vanish then: root number -1 forces
+          L(E,1) = 0).  For r >= 2 it raises NotImplementedError, since
+          showing that L^(k)(E,1) is exactly 0 for k < r is a separate
+          problem: possible for r = 2, 3 (modular symbols, Gross-Zagier),
+          not implemented here, and open for every curve when r >= 4.
+        - ``leading_coefficient`` -- (default: False) if True, return
+          (r, L^(r)(E,1)), as Sage does.
+
+        ALGORITHM: L^(r)(E,1) = 2 r! sum_n a_n/n G_r(2 pi n / sqrt(N)) with
+        generalized exponential integrals G_r (Buhler, Gross and Zagier).
+
+        EXAMPLES::
+
+            sage: [EllipticCurve(lab).analytic_rank() for lab in ['11a1', '37a1', '389a1']]
+            [0, 1, 2]
+            sage: EllipticCurve('389a1').analytic_rank(leading_coefficient=True)  # abs tol 1e-8
+            (2, 1.51863300057685)
+            sage: EllipticCurve('37a1').analytic_rank(proof=True)  # sagebrush only
+            1
+            sage: EllipticCurve('389a1').analytic_rank(proof=True)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: analytic rank 2 is only numerical: ...
+
+        OPEN PROBLEM: prove that some elliptic curve over Q has analytic rank
+        at least 4, for instance 234446a1 = [1, -1, 0, -79, 289], the curve of
+        rank 4 with the smallest conductor.  Numerically L(E,s) vanishes to
+        order 4 at s = 1, and E(Q) has rank 4; no proof that L^(k)(E,1) = 0
+        for k < 4 is known for any curve.  (For rank 3 it was done for 5077a1
+        by Buhler, Gross and Zagier, using Gross-Zagier.)  A proof would be a
+        major advance on the Birch and Swinnerton-Dyer conjecture::
+
+            sage: E = EllipticCurve([1, -1, 0, -79, 289])
+            sage: E.conductor()
+            234446
+            sage: E.analytic_rank()    # numerical: proof=False is the default  # long time
+            4
+            sage: E.analytic_rank(proof=True)    # an open problem  # long time  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: analytic rank 4 is only numerical: ...
+        """
         import _sage_ec as _ec
         ld = self._ldata()
         r, v = _ec.analytic_rank_numerical(ld, _ec.root_number(ld))
@@ -858,14 +1630,45 @@ class EllipticCurve_rational_field:
             return None
 
     def lseries(self):
+        """The L-series of E (value at s = 1 and L_ratio()).
+
+        EXAMPLES::
+
+            sage: L = EllipticCurve('11a1').lseries(); L
+            Complex L-series of the Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+            sage: L(1)  # abs tol 1e-12
+            0.253841860855911
+            sage: L.L_ratio()
+            1/5
+        """
         return _LSeries(self)
 
     def sha(self):
+        """The Tate-Shafarevich group (its analytic order: an()).
+
+        EXAMPLES::
+
+            sage: S = EllipticCurve('571a1').sha(); S
+            Tate-Shafarevich group for the Elliptic Curve defined by y^2 + y = x^3 - x^2 - 929*x - 10595 over Rational Field
+            sage: S.an()
+            4
+        """
         return _Sha(self)
 
     # ---- rational points (lib/_sage_ec.py)
     def __call__(self, *args):
-        """E(0) is the identity; E(x, y), E([x, y]) or E([x, y, z]) a point."""
+        """E(0) is the identity; E(x, y), E([x, y]) or E([x, y, z]) a point.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('37a1')
+            sage: E(0)
+            (0 : 1 : 0)
+            sage: E([0, 0])
+            (0 : 0 : 1)
+            sage: E(0, -1)
+            (0 : -1 : 1)
+        """
         if len(args) == 1 and not isinstance(args[0], (list, tuple)) and args[0] == 0:
             return EllipticCurvePoint(self, None)
         if len(args) == 1:
@@ -890,6 +1693,16 @@ class EllipticCurve_rational_field:
     point = __call__
 
     def lift_x(self, x, all=False):
+        """A point with the given x-coordinate (all=True: all of them).
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('37a1')
+            sage: E.lift_x(1)
+            (1 : -1 : 1)
+            sage: E.lift_x(1, all=True)
+            [(1 : -1 : 1), (1 : 0 : 1)]
+        """
         import _sage_ec as _ec
         from fractions import Fraction
         try:
@@ -901,10 +1714,18 @@ class EllipticCurve_rational_field:
             return pts
         if not pts:
             raise ValueError("no point with x-coordinate %s on %r" % (x, self))
-        return pts[-1]
+        return pts[0]
 
     def torsion_points(self):
-        """The points of finite order (found by Nagell-Lutz-sized search)."""
+        """The points of finite order (found by Nagell-Lutz-sized search).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').torsion_points()
+            [(0 : 1 : 0), (5 : -6 : 1), (5 : 5 : 1), (16 : -61 : 1), (16 : 60 : 1)]
+            sage: EllipticCurve([0, 0, 0, -1, 0]).torsion_points()
+            [(0 : 1 : 0), (-1 : 0 : 1), (0 : 0 : 1), (1 : 0 : 1)]
+        """
         import _sage_ec as _ec
         out = [EllipticCurvePoint(self, None)]
         T = self.torsion_order()
@@ -920,7 +1741,13 @@ class EllipticCurve_rational_field:
         return sorted(out, key=lambda Q: (Q._P is not None, Q._P or ()))
 
     def point_search(self, height_limit, verbose=False):
-        """Points with naive height log max(|r|, s^2) <= height_limit (x = r/s^2), as Sage."""
+        """Points with naive height log max(|r|, s^2) <= height_limit (x = r/s^2), as Sage.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('37a1').point_search(2)  # sagebrush only
+            [(-1 : -1 : 1), (-1 : 0 : 1), (0 : -1 : 1), (0 : 0 : 1), (1 : -1 : 1), (1 : 0 : 1), (2 : -3 : 1), (2 : 2 : 1), (6 : -15 : 1), (6 : 14 : 1), (1/4 : -5/8 : 1), (1/4 : -3/8 : 1)]
+        """
         import _sage_ec as _ec
         return [EllipticCurvePoint(self, P) for P in _ec.point_search(self._a, float(height_limit))]
 
@@ -929,6 +1756,15 @@ class EllipticCurve_rational_field:
         return [p for p, _ in _ec._factor_int(self.minimal_model().discriminant())]
 
     def height_pairing_matrix(self, points):
+        """The matrix of canonical height pairings of the points.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('389a1')
+            sage: E.height_pairing_matrix([E(-1, 1), E(0, 0)])  # abs tol 1e-12
+            [ 0.686667083305587 -0.268478098806726]
+            [-0.268478098806726  0.327000773651605]
+        """
         import _sage_ec as _ec
         from sage_all import matrix, RR
         m = self.minimal_model()
@@ -939,6 +1775,14 @@ class EllipticCurve_rational_field:
         return _RealMatrix(M)
 
     def regulator_of_points(self, points):
+        """The determinant of the height pairing matrix of the points.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('389a1')
+            sage: E.regulator_of_points([E(-1, 1), E(0, 0)])  # abs tol 1e-12
+            0.152460177943144
+        """
         import _sage_ec as _ec
         from sage_all import RR
         m = self.minimal_model()
@@ -1006,7 +1850,17 @@ class EllipticCurve_rational_field:
         """Generators of E(Q) modulo torsion, for analytic rank 0 or 1: the
         non-torsion point of least canonical height among the points of naive
         height at most height_limit (default 9) on the minimal model, checked
-        to be saturated at the primes up to 13 where the reduction test applies."""
+        to be saturated at the primes up to 13 where the reduction test applies.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('37a1').gens()  # needs sage.libs.eclib
+            [(0 : -1 : 1)]
+            sage: EllipticCurve('11a1').gens()  # needs sage.libs.eclib
+            []
+            sage: EllipticCurve([0, 0, 0, -36, 0]).gens()  # needs sage.libs.eclib
+            [(-3 : -9 : 1)]
+        """
         import _sage_ec as _ec
         r = self._proven_analytic_rank()
         if r is None:
@@ -1024,6 +1878,15 @@ class EllipticCurve_rational_field:
         return [EllipticCurvePoint(self, P)]
 
     def regulator(self):
+        """The regulator of E(Q) (for rank at most 1: from gens()).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('37a1').regulator()  # abs tol 1e-12  # needs sage.libs.eclib
+            0.0511114082399687
+            sage: EllipticCurve('11a1').regulator()  # needs sage.libs.eclib
+            1.00000000000000
+        """
         gs = self.gens()
         from sage_all import RR
         return RR(1) if not gs else self.regulator_of_points(gs)
@@ -1034,7 +1897,17 @@ class EllipticCurve_rational_field:
         Kolyvagin), else 2-descent (via 2-isogeny, or general) when its
         bounds meet.  With
         proof=False, falls back to the numerical analytic rank (assuming the
-        Birch and Swinnerton-Dyer rank conjecture) when these do not decide."""
+        Birch and Swinnerton-Dyer rank conjecture) when these do not decide.
+
+        EXAMPLES::
+
+            sage: [EllipticCurve(lab).rank() for lab in ['11a1', '37a1', '389a1']]
+            [0, 1, 2]
+            sage: EllipticCurve([0, 0, 1, -7, 6]).rank()
+            3
+            sage: EllipticCurve([0, 0, 0, -1681, 0]).rank()
+            2
+        """
         lab = self._cremona_entry()
         if lab is not None:
             return _cremona()[0][lab][1]
@@ -1056,7 +1929,15 @@ class EllipticCurve_rational_field:
 
     def two_descent_by_two_isogeny(self, search_bound=60):
         """Descent via 2-isogeny (needs a rational 2-torsion point): (lower, upper)
-        bounds for the rank, from the images found and the Selmer groups."""
+        bounds for the rank, from the images found and the Selmer groups.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([0, 0, 0, -1681, 0]).two_descent_by_two_isogeny()  # sagebrush only
+            (2, 2)
+            sage: EllipticCurve([0, 1, 0, -21504, -1220940]).two_descent_by_two_isogeny()  # sagebrush only
+            (0, 2)
+        """
         import _sage_ec as _ec
         d = _ec.two_isogeny_descent(self.minimal_model()._a, search_bound)
         if d is None:
@@ -1066,7 +1947,15 @@ class EllipticCurve_rational_field:
 
     def rank_bounds(self):
         """(lower, upper) bounds for the rank (2-isogeny descent; lower bound
-        also from the analytic rank when it is 0 or 1)."""
+        also from the analytic rank when it is 0 or 1).
+
+        EXAMPLES::
+
+            sage: EllipticCurve([0, 0, 0, -1681, 0]).rank_bounds()  # sagebrush only
+            (2, 2)
+            sage: EllipticCurve([0, 0, 1, -7, 6]).rank_bounds()  # sagebrush only
+            (3, 3)
+        """
         r = self._proven_analytic_rank()
         if r is not None:
             return (r, r)
@@ -1087,7 +1976,18 @@ class EllipticCurve_rational_field:
         binary quartics (Birch and Swinnerton-Dyer).  Returns True if the
         rank was determined (the points found fill the 2-Selmer group).
         The quartic search grows like |Delta|^(1/2): beyond max_candidates
-        (about 1e10 per few seconds) it raises NotImplementedError."""
+        (about 1e10 per few seconds) it raises NotImplementedError.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve([0, 0, 1, -7, 6])
+            sage: E.two_descent()  # needs sage.libs.eclib
+            True
+            sage: E.selmer_rank()
+            3
+            sage: EllipticCurve('571a1').two_descent()  # needs sage.libs.eclib
+            False
+        """
         lo, hi = self._general_two_descent(max_candidates)["rank_bounds"]
         if verbose:
             print("2-Selmer rank %d; rank bounds %d <= r <= %d" % (self.selmer_rank(), lo, hi))
@@ -1095,12 +1995,28 @@ class EllipticCurve_rational_field:
 
     def selmer_rank(self):
         """The F_2-dimension of the 2-Selmer group (here for curves without
-        rational 2-torsion, by general 2-descent)."""
+        rational 2-torsion, by general 2-descent).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('389a1').selmer_rank()
+            2
+            sage: EllipticCurve('571a1').selmer_rank()
+            2
+        """
         return (self._general_two_descent()["selmer"] - 1).bit_length()
 
 
     def torsion_order(self):
-        """#E(Q)_tors (bounded by #E(F_p), then found by Nagell-Lutz)."""
+        """#E(Q)_tors (bounded by #E(F_p), then found by Nagell-Lutz).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').torsion_order()
+            5
+            sage: EllipticCurve([1, 0, 1, -19, 26]).torsion_order()
+            12
+        """
         if getattr(self, "_tors", None) is None:
             import _sage_ec as _ec
             self._tors = _ec.torsion_order(self._a, _ap.aplist(self._a, 200))
@@ -1120,19 +2036,39 @@ class EllipticCurve_rational_field:
         return p - n
 
     def ap(self, p):
+        """The trace of Frobenius a_p (for bad p: 0, 1 or -1).
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('11a1')
+            sage: [E.ap(p) for p in [2, 3, 5, 7, 11, 13]]
+            [-2, -1, 1, -2, 1, 4]
+        """
         p = int(p)
         r = _ap.ap(self._a, p)
         return self._ap_bad(p) if r is None else r
 
     def aplist(self, n, python_ints=False):
-        """[a_p for the primes p < n]."""
+        """[a_p for the primes p < n].
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').aplist(30)
+            [-2, -1, 1, -2, 1, 4, -2, 0, -1, 0]
+        """
         n = int(n)
         if n <= 2:
             return []
         return [self._ap_bad(p) if a is None else a for p, a in _ap.aplist(self._a, n - 1)]
 
     def anlist(self, n):
-        """[0, a_1, ..., a_n]."""
+        """[0, a_1, ..., a_n].
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').anlist(12)
+            [0, 1, -2, -1, 2, 1, 2, -2, 0, -2, -2, 1, -2]
+        """
         n = int(n)
         a = [0] * (n + 1)
         if n >= 1:
@@ -1167,11 +2103,24 @@ class EllipticCurve_rational_field:
         return a
 
     def an(self, n):
+        """The n-th coefficient of the L-series.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').an(25)
+            -4
+        """
         return self.anlist(int(n))[int(n)]
 
     def sato_tate_moments(self, n, kmax=4):
         """(number of good primes p <= n, [mean (a_p^2/p)^k, k = 1..kmax]);
-        a sagebrush extension (1, 2, 5, 14, ... for non-CM curves)."""
+        a sagebrush extension (1, 2, 5, 14, ... for non-CM curves).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').sato_tate_moments(10^4)  # sagebrush only
+            (1228, [0.9914529326087385, 1.9367905170996187, 4.7107981374954235, 12.841340031077893])
+        """
         return _ap.moments(self._a, int(n), int(kmax))
 
     def __eq__(self, other):
@@ -1200,7 +2149,15 @@ class _PeriodLattice:
 
     def omega(self, prec=None):
         """The real period of a global minimal model times the number of
-        components of E(R) (Cremona's Omega in the BSD formula)."""
+        components of E(R) (Cremona's Omega in the BSD formula).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').period_lattice().omega()  # abs tol 1e-12
+            1.26920930427955
+            sage: EllipticCurve('37a1').period_lattice().omega()  # abs tol 1e-12
+            5.98691729246392
+        """
         import _sage_ec as _ec
         from sage_all import RR
         return RR(_ec.real_period(self._E.minimal_model()._a))
@@ -1217,7 +2174,15 @@ class _LSeries:
         return "Complex L-series of the %r" % (self._E,)
 
     def __call__(self, s):
-        """L(E, s), at s = 1 only for now."""
+        """L(E, s), at s = 1 only for now.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').lseries()(1)  # abs tol 1e-12
+            0.253841860855911
+            sage: EllipticCurve('37a1').lseries()(1)  # abs tol 1e-12
+            0.000000000000000
+        """
         import _sage_ec as _ec
         from sage_all import RR
         if s != 1:
@@ -1229,7 +2194,17 @@ class _LSeries:
         """L(E,1)/Omega_E as an exact rational: computed to about 15 digits
         and recognized with denominator dividing 2 #E(Q)_tors^2 (Manin-Drinfeld,
         for an optimal curve with Manin constant 1 the denominator divides
-        2 #E(Q)_tors)."""
+        2 #E(Q)_tors).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').lseries().L_ratio()
+            1/5
+            sage: EllipticCurve('37a1').lseries().L_ratio()
+            0
+            sage: EllipticCurve([1, 1, 0, -1154, -15345]).lseries().L_ratio()
+            9/4
+        """
         import _sage_ec as _ec
         from sage_all import QQ
         E = self._E
@@ -1255,7 +2230,19 @@ class _Sha:
 
     def an(self):
         """The analytic order of Sha, from the Birch and Swinnerton-Dyer
-        formula: exact in analytic rank 0 (L(E,1)/Omega via L_ratio)."""
+        formula: exact in analytic rank 0 (L(E,1)/Omega via L_ratio).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').sha().an()
+            1
+            sage: EllipticCurve('571a1').sha().an()
+            4
+            sage: EllipticCurve('37a1').sha().an()  # needs sage.libs.eclib
+            1
+            sage: EllipticCurve([1, 1, 0, -1154, -15345]).sha().an()
+            9
+        """
         from sage_all import QQ, Integer
         E = self._E
         r = E.analytic_rank()
@@ -1304,9 +2291,25 @@ class _RealMatrix:
         return RR(self._rows[i][j])
 
     def nrows(self):
+        """The number of rows.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('389a1')
+            sage: E.height_pairing_matrix([E(-1, 1), E(0, 0)]).nrows()
+            2
+        """
         return len(self._rows)
 
     def det(self):
+        """The determinant.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('389a1')
+            sage: E.height_pairing_matrix([E(-1, 1), E(0, 0)]).det()  # abs tol 1e-12
+            0.152460177943144
+        """
         import _sage_ec as _ec
         from sage_all import RR
         M = [r[:] for r in self._rows]
@@ -1330,13 +2333,29 @@ class _RealMatrix:
 
 
 class EllipticCurvePoint:
-    """A rational point on an elliptic curve over QQ (None = the point at infinity)."""
+    """A rational point on an elliptic curve over QQ (None = the point at infinity).
+
+    EXAMPLES::
+
+        sage: E = EllipticCurve('37a1')
+        sage: P = E(0, 0); P
+        (0 : 0 : 1)
+        sage: P + P, 2*P, -P, P - P
+        ((1 : 0 : 1), (1 : 0 : 1), (0 : -1 : 1), (0 : 1 : 0))
+    """
 
     def __init__(self, E, P):
         self._E = E
         self._P = P
 
     def curve(self):
+        """The curve the point is on.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('37a1')(0, 0).curve()
+            Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field
+        """
         return self._E
 
     def _new(self, P):
@@ -1368,6 +2387,14 @@ class EllipticCurvePoint:
         return hash(("pt", self._E._a, self._P))
 
     def is_zero(self):
+        """Whether this is the point at infinity.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('37a1')
+            sage: E(0).is_zero(), E(0, 0).is_zero()
+            (True, False)
+        """
         return self._P is None
 
     def _coord(self, t):
@@ -1375,6 +2402,15 @@ class EllipticCurvePoint:
         return QQ(t.numerator, t.denominator)
 
     def xy(self):
+        """The affine coordinates (x, y).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('37a1')(0, 0).xy()
+            (0, 0)
+            sage: (3*EllipticCurve('37a1')(0, 0)).xy()
+            (-1, -1)
+        """
         if self._P is None:
             raise ZeroDivisionError("the point at infinity has no affine coordinates")
         return (self._coord(self._P[0]), self._coord(self._P[1]))
@@ -1391,6 +2427,15 @@ class EllipticCurvePoint:
         return "(%s : %s : 1)" % (x, y)
 
     def order(self):
+        """The order of the point (+Infinity for a point of infinite order).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1')(5, 5).order()
+            5
+            sage: EllipticCurve('37a1')(0, 0).order()
+            +Infinity
+        """
         import _sage_ec as _ec
         from sage_all import Integer
         if self._P is None:
@@ -1404,11 +2449,28 @@ class EllipticCurvePoint:
     additive_order = order
 
     def has_finite_order(self):
+        """Whether the point has finite order.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1')(5, 5).has_finite_order()
+            True
+            sage: EllipticCurve('37a1')(0, 0).has_finite_order()
+            False
+        """
         import _sage_ec as _ec
         return self._P is None or _ec.point_order(self._E._a, self._P) != 0
 
     def height(self):
-        """The canonical (Neron-Tate) height, normalized as in Sage and Cremona's tables."""
+        """The canonical (Neron-Tate) height, normalized as in Sage and Cremona's tables.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('37a1')(0, 0).height()  # abs tol 1e-12
+            0.0511114082399687
+            sage: EllipticCurve('389a1')(-1, 1).height()  # abs tol 1e-12
+            0.686667083305587
+        """
         import _sage_ec as _ec
         from sage_all import RR
         m = self._E.minimal_model()
@@ -1417,7 +2479,23 @@ class EllipticCurvePoint:
 
 def EllipticCurve(x, y=None):
     """EllipticCurve([a1, a2, a3, a4, a6]), EllipticCurve([a4, a6]) or a
-    Cremona label of conductor < 1000 ('389a1', '11a')."""
+    Cremona label of conductor < 1000 ('389a1', '11a').
+
+    EXAMPLES::
+
+        sage: EllipticCurve([0, 0, 1, -1, 0])
+        Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field
+        sage: EllipticCurve([-1, 0])
+        Elliptic Curve defined by y^2 = x^3 - x over Rational Field
+        sage: EllipticCurve('11a1')
+        Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+        sage: EllipticCurve('37a')
+        Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field
+        sage: EllipticCurve('99999a1')  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: unknown Cremona label '99999a1' (sagebrush knows conductors < 1000)
+    """
     if y is not None:
         x = [x, y]
     if isinstance(x, str):
@@ -1472,31 +2550,83 @@ class NewformOrbit:
         self._T = T
 
     def label(self):
-        """LMFDB's label N.k.a.x (for the trivial character)."""
+        """LMFDB's label N.k.a.x (for the trivial character).
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].label()  # sagebrush only
+            '23.2.a.a'
+        """
         return "%d.%d.a.%s" % (self._N, self._k, self._letter) if self._chi is None else None
 
     def level(self):
+        """The level.
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].level()  # sagebrush only
+            23
+        """
         return self._N
 
     def weight(self):
+        """The weight.
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].weight()  # sagebrush only
+            2
+        """
         return self._k
 
     def dimension(self):
+        """The dimension of the orbit (the degree of its coefficient field).
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].dimension()  # sagebrush only
+            2
+        """
         return self._dim
 
     def traces(self, n=None):
-        """[tr a_1, ..., tr a_n] (traces down to QQ of the coefficients)."""
+        """[tr a_1, ..., tr a_n] (traces down to QQ of the coefficients).
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].traces(10)  # sagebrush only
+            [2, -1, 0, -1, -2, -5, 2, 0, 4, 6]
+        """
         return self._traces[: n or len(self._traces)]
 
     def trace_form(self, prec=6):
+        """The trace form: the sum of the conjugate newforms, as a q-expansion.
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].trace_form(8)  # sagebrush only
+            '2*q - q^2 - q^4 - 2*q^5 - 5*q^6 + 2*q^7 + O(q^8)'
+        """
         return _qexp(self._traces, prec)
 
     def hecke_operator(self):
-        """T as [(q, r)]: T = sum r T_q."""
+        """T as [(q, r)]: T = sum r T_q.
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].hecke_operator()  # sagebrush only
+            [(2, 1), (3, 1)]
+        """
         return list(self._T)
 
     def charpoly(self, var="x"):
-        """The characteristic polynomial of T on this orbit (irreducible over QQ)."""
+        """The characteristic polynomial of T on this orbit (irreducible over QQ).
+
+        EXAMPLES::
+
+            sage: newform_orbits(23)[0].charpoly()  # sagebrush only
+            x^2 + x - 1
+        """
         from _sage_poly import PolynomialRing, ZZ
         return PolynomialRing(ZZ, var)(self._charpoly)
 
@@ -1508,7 +2638,15 @@ class NewformOrbit:
 def newform_orbits(group=1, weight=2, prec=100):
     """The Galois orbits of newforms in S_k^new(N, [chi]), in LMFDB order
     (dimension, then trace form), with their trace forms to q^prec:
-    computed (and proven) by the Sagebrush engine."""
+    computed (and proven) by the Sagebrush engine.
+
+    EXAMPLES::
+
+        sage: newform_orbits(23)  # sagebrush only
+        [23.2.a.a (dimension 2): 2*q - q^2 - q^4 - 2*q^5 + O(q^6)]
+        sage: [f.dimension() for f in newform_orbits(389)]  # sagebrush only
+        [1, 2, 3, 6, 20]
+    """
     N, chi = _group_and_char(group)
     if chi is not None and chi.order() == 1:
         chi = None
@@ -1523,13 +2661,33 @@ class Newform:
         self._o = orbit
 
     def level(self):
+        """The level.
+
+        EXAMPLES::
+
+            sage: Newforms(11, names='a')[0].level()
+            11
+        """
         return self._o._N
 
     def weight(self):
+        """The weight.
+
+        EXAMPLES::
+
+            sage: Newforms(11, names='a')[0].weight()
+            2
+        """
         return self._o._k
 
     def coefficients(self, n=None):
-        """[a_1, ..., a_n] (or the list for n a list of indices)."""
+        """[a_1, ..., a_n] (or the list for n a list of indices).
+
+        EXAMPLES::
+
+            sage: Newforms(11, names='a')[0].coefficients(10)
+            [1, -2, -1, 2, 1, 2, -2, 0, -2, -2]
+        """
         if isinstance(n, (list, tuple)):
             return [self[i] for i in n]
         return list(self._o._traces[: (n if n is not None else 20)])
@@ -1544,13 +2702,34 @@ class Newform:
         return o._traces[n - 1]
 
     def q_expansion(self, prec=6):
-        return _qexp(self._o._traces, prec)
+        """The q-expansion to the given precision.
+
+        EXAMPLES::
+
+            sage: Newforms(11, names='a')[0].q_expansion(8)
+            q - 2*q^2 - q^3 + 2*q^4 + q^5 + 2*q^6 - 2*q^7 + O(q^8)
+        """
+        return _Printed(_qexp(self._o._traces, prec))
 
     def hecke_eigenvalue_field(self):
+        """The field generated by the Hecke eigenvalues.
+
+        EXAMPLES::
+
+            sage: Newforms(11, names='a')[0].hecke_eigenvalue_field()
+            Rational Field
+        """
         from _sage_poly import QQ
         return QQ
 
     def label(self):
+        """The LMFDB label of the newform's Galois orbit.
+
+        EXAMPLES::
+
+            sage: Newforms(11, names='a')[0].label()  # sagebrush only
+            '11.2.a.a'
+        """
         return self._o.label()
 
     def __repr__(self):
@@ -1560,7 +2739,17 @@ class Newform:
 def Newforms(group, weight=2, base_ring=None, names=None):
     """The newforms of weight k on Gamma_0(N) (or with a character), as Sage's
     Newforms, when they all have rational coefficients; otherwise use
-    newform_orbits(N, k), which describes every Galois orbit."""
+    newform_orbits(N, k), which describes every Galois orbit.
+
+    EXAMPLES::
+
+        sage: Newforms(11, names='a')
+        [q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
+        sage: Newforms(23, names='a')  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: newforms with non-rational coefficients: sagebrush describes them by newform_orbits(23, 2) (label, dimension, trace form)
+    """
     orbits = newform_orbits(group, weight, prec=20)
     if any(o.dimension() != 1 for o in orbits):
         raise NotImplementedError("newforms with non-rational coefficients: sagebrush describes them by newform_orbits(%s, %s) (label, dimension, trace form)" % (group, weight))

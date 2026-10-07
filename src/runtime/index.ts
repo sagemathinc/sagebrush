@@ -302,6 +302,36 @@ Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
 B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
 B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw(Obj.getattr(M.importModule("_pyjs_open"), "open"), pos, names, values);
+// help(obj), and obj? / obj?? in interactive input: lib/_pyjs_help.py
+B.builtins.help = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_help"), "help"), a), "help");
+// Run interactive input (mode "single": expression values are displayed) in
+// the module ns, capturing what it prints: (output, traceback or None).
+// lib/_pyjs_doctest.py runs examples with it; sage chooses Sage syntax.
+B.builtins.__pyjs_run__ = Obj.builtin((src: any, ns: any, sage: any) => {
+  B.stdout.flush();
+  const out: string[] = [];
+  const so = B.stdout as any, se = B.stderr as any;
+  so.write = (s: string) => void out.push(s);
+  se.write = (s: string) => void out.push(s);
+  let err: string | null = null;
+  try {
+    (M.loader.exec as any)(String(src), ns, "single", "<doctest>", { sage: O.truth(sage) });
+  } catch (e) {
+    err = formatException(Obj.toPyExc(e));
+  } finally {
+    delete so.write;
+    delete se.write;
+  }
+  return tuple([out.join(""), err]);
+}, "__pyjs_run__");
+
+// The lines of a file the runtime has executed (for obj??), or None.
+B.builtins.__pyjs_source_lines__ = Obj.builtin((filename: any) => {
+  let found: string[] | null = null;
+  for (const info of scripts.values()) if (info.filename === filename) found = info.lines;
+  return found === null ? null : tuple(found);
+}, "__pyjs_source_lines__");
+B.builtins.__pyjs_help__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_help"), "inspect_object"), a), "__pyjs_help__");
 B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
   if (v !== null) {
     B.builtins._ = v;

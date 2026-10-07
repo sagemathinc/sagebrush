@@ -1,6 +1,6 @@
 // repr(), str(), format() and `str % args`.
 
-import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes } from "./object";
+import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout } from "./object";
 import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice } from "./ops";
 
 const isInt = Number.isInteger;
@@ -190,6 +190,8 @@ export function repr(x: any): string {
   const f = lookupType(t, "__repr__");
   if (f !== undefined) {
     const r = f(x);
+    // a str subclass is a string (CPython accepts it)
+    if (r instanceof StrLayout) return r.$v;
     if (typeof r !== "string") raise(T.TypeError, `__repr__ returned non-string (type ${typeOf(r).$name})`);
     return r;
   }
@@ -251,6 +253,8 @@ export function str(x: any): string {
   const f = lookupType(t, "__str__");
   if (f !== undefined) {
     const r = f(x);
+    // a str subclass is a string (CPython accepts it)
+    if (r instanceof StrLayout) return r.$v;
     if (typeof r !== "string") raise(T.TypeError, `__str__ returned non-string (type ${typeOf(r).$name})`);
     return r;
   }

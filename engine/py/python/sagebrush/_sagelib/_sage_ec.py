@@ -594,14 +594,47 @@ def _G(r, x, gt):
             if abs(add) < 1e-18 and n > x:
                 return s
             n += 1
-    # e^(-x)/(r-1)! int_0^oo e^(-s) log(1 + s/x)^(r-1) / (x + s) ds, Simpson on [0, 40]
-    m, h = 160, 40 / 160
+    # e^(-x)/(r-1)! int_0^oo e^(-s) log(1 + s/x)^(r-1) / (x + s) ds, by
+    # Gauss-Laguerre quadrature (the integrand is smooth: its only
+    # singularity is at s = -x <= -4); 48 nodes give about 1e-14
+    xs, ws = _laguerre()
     acc = 0.0
-    for i in range(m + 1):
-        s = i * h
-        v = _m.exp(-s) * _m.log1p(s / x) ** (r - 1) / (x + s)
-        acc += v * (1 if i in (0, m) else (4 if i % 2 else 2))
-    return _m.exp(-x) * acc * h / 3 / _m.factorial(r - 1)
+    for s_, w in zip(xs, ws):
+        acc += w * _m.log1p(s_ / x) ** (r - 1) / (x + s_)
+    return _m.exp(-x) * acc / _m.factorial(r - 1)
+
+
+_LAGUERRE = None
+
+
+def _laguerre(n=48):
+    """Nodes and weights of n-point Gauss-Laguerre quadrature (Newton's
+    method on the Laguerre polynomial L_n from asymptotic first guesses)."""
+    global _LAGUERRE
+    if _LAGUERRE is not None:
+        return _LAGUERRE
+    xs, ws = [], []
+    z = 0.0
+    for i in range(n):
+        if i == 0:
+            z = 3.0 / (1 + 2.4 * n)
+        elif i == 1:
+            z += 15.0 / (1 + 2.5 * n)
+        else:
+            z += (1 + 2.55 * (i - 1)) / (1.9 * (i - 1)) * (z - xs[i - 2])
+        for _ in range(100):
+            p1, p2 = 1.0, 0.0
+            for j in range(1, n + 1):
+                p3, p2 = p2, p1
+                p1 = ((2 * j - 1 - z) * p2 - (j - 1) * p3) / j
+            pp = n * (p1 - p2) / z
+            z1, z = z, z - p1 / pp
+            if abs(z - z1) <= 1e-15 * z:
+                break
+        xs.append(z)
+        ws.append(-1 / (pp * n * p2))
+    _LAGUERRE = (xs, ws)
+    return _LAGUERRE
 
 
 def L1_deriv(ld, r):
