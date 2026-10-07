@@ -17,3 +17,12 @@ test("sum(range(10**9)) stays fast past 2^53", () => {
   assert.equal(cli("-c", "print(sum(range(10**9)))"), "499999999500000000\n");
   assert.ok(Date.now() - t < 15000, `took ${Date.now() - t} ms`);
 });
+
+// weakrefs compare and hash by referent (the first two lines as CPython 3.14
+// prints them); otherwise _py_abc's WeakSet caches never hit and every
+// isinstance(x, numbers.Rational) added a ref (1000 here): Fraction arithmetic
+// with ints leaked ~2.5 KB per operation, and E.gens() over a few hundred
+// curves ran out of memory
+test("weakref equality and hashing; isinstance on an ABC hits its cache", () => {
+  assert.equal(cli("-c", "import weakref, numbers\nclass C: pass\nc, d = C(), C(); r = weakref.ref(c)\nprint(r == weakref.ref(c), r != weakref.ref(d), r == weakref.ref(d), {r: 1}[weakref.ref(c)], r == 3)\nws = weakref.WeakSet([c]); print(c in ws, d in ws, len(ws))\nfor i in range(1000): isinstance(i, numbers.Rational)\nprint(len(numbers.Rational._abc_cache), len(numbers.Integral._abc_negative_cache))\n"), "True True False 1 False\nTrue False 1\n1 0\n");
+});

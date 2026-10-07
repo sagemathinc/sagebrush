@@ -2,7 +2,7 @@
 
 import { globalsDict, hooks } from "./object";
 import { glibcLog, glibcExp, glibcLog1p } from "./libm";
-import { T, FloatBox, PyDict, PyBytes, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
+import { T, FloatBox, PyDict, PyBytes, NotImplemented, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin } from "./builtins";
@@ -591,6 +591,7 @@ newBuiltinModule("_random", (m) => {
 // i.e. some time after the referent is collected.
 export class PyWeakRef {
   w: WeakRef<any>;
+  h: number | undefined;
   constructor(o: any, public cb: any) {
     this.w = new WeakRef(o);
   }
@@ -610,7 +611,10 @@ newBuiltinModule("_weakref", (m) => {
   const ref = Ty.builtinTypeFor("weakref.ReferenceType", PyWeakRef, "weakref", (o: any, cb: any = null) => {
     if (!weakable(o)) raise(T.TypeError, `cannot create weak reference to '${typeName(o)}' object`);
     const r = new PyWeakRef(o, cb);
-    registry.register(o, r);
+    // the registry holds r until o dies: without a callback there is nothing
+    // to run, and registering would leak every temporary ref to a long-lived
+    // object (WeakSet.__contains__ makes one per isinstance check on an ABC)
+    if (cb !== null && cb !== undefined) registry.register(o, r);
     return r;
   });
   (ref as any).$name = "ReferenceType";
@@ -620,6 +624,26 @@ newBuiltinModule("_weakref", (m) => {
     return o === undefined ? `<weakref at 0x${O.id(r).toString(16)}; dead>` : `<weakref at 0x${O.id(r).toString(16)}; to '${typeName(o)}' at 0x${O.id(o).toString(16)}>`;
   });
   Ty.getset(ref, "__callback__", (r: PyWeakRef) => r.cb ?? null);
+  // as in CPython: live refs compare (and hash) by their referents, so that
+  // WeakSet/WeakKeyDictionary lookups with a fresh ref (abc's caches) hit
+  const sameRef = (r: PyWeakRef, o: any) => {
+    if (!(o instanceof PyWeakRef)) return NotImplemented;
+    const a = r.w.deref(), b = o.w.deref();
+    return a === undefined || b === undefined ? r === o : O.eqBool(a, b);
+  };
+  Ty.method(ref, "__eq__", sameRef);
+  Ty.method(ref, "__ne__", (r: PyWeakRef, o: any) => {
+    const v = sameRef(r, o);
+    return v === NotImplemented ? v : !v;
+  });
+  Ty.method(ref, "__hash__", (r: PyWeakRef) => {
+    if (r.h === undefined) {
+      const o = r.w.deref();
+      if (o === undefined) raise(T.TypeError, "weak object has gone away");
+      r.h = O.hashAny(o);
+    }
+    return r.h;
+  });
   m.ref = ref;
   m.ReferenceType = ref;
   fn(m, "getweakrefcount", (_o: any) => 0);
