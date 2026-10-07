@@ -15,7 +15,7 @@ import re as _re
 
 # the public API (the modules of test/doctest-coverage.json)
 PUBLIC = ["sage_all", "_sage_modular", "_sage_poly", "_sage_nf", "sage_permgroup", "_sage_matrix",
-          "_sage_lang", "_sage_expr", "_interact", "sage_plot", "sage_plot3d", "_graphics"]
+          "_sage_lang", "_sage_expr", "_interact", "sage_plot", "sage_plot3d"]
 
 _INDEX = None
 

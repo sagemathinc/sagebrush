@@ -1172,6 +1172,15 @@ def _side_by_side(v):
     return o + "\n" + "\n".join(r.ljust(width) for r in rows) + "\n" + c
 
 
+def _sorted_dict_repr(d):
+    """A dict shown with its keys sorted, as Sage's (IPython's) display does."""
+    try:
+        keys = sorted(d)
+    except TypeError:
+        return None
+    return "{" + ", ".join("%r: %s" % (k, _sorted_dict_repr(d[k]) if type(d[k]) is dict else repr(d[k])) for k in keys) + "}"
+
+
 def _install_displayhook():
     import builtins
     import sys
@@ -1183,6 +1192,8 @@ def _install_displayhook():
 
     def hook(v):
         s = _side_by_side(v)
+        if s is None and type(v) is dict:
+            s = _sorted_dict_repr(v)
         if s is None:
             return plain(v)
         builtins._ = v

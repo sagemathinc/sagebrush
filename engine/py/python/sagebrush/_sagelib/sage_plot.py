@@ -32,7 +32,15 @@ def _tex(s):
 
 
 class Graphics:
-    """A 2D picture: primitives plus options.  Add them with +."""
+    """A 2D picture: primitives plus options.  Add them with +.
+
+    EXAMPLES::
+
+        sage: G = plot(sin(x), (x, 0, pi)) + point((pi/2, 1)); G
+        Graphics object consisting of 2 graphics primitives
+        sage: len(G)
+        2
+    """
 
     def __init__(self, primitives=None, **options):
         self._primitives = list(primitives or [])
@@ -77,26 +85,81 @@ class Graphics:
 
     # --- options
     def set_aspect_ratio(self, ratio):
-        self._options["aspect_ratio"] = ratio
+        """Set the aspect ratio ('automatic' or a number).
+
+        EXAMPLES::
+
+            sage: G = circle((0, 0), 1); G.set_aspect_ratio(1); G.aspect_ratio()
+            1.0
+        """
+        self._options["aspect_ratio"] = ratio if isinstance(ratio, str) else float(ratio)
 
     def aspect_ratio(self):
+        """The aspect ratio.
+
+        EXAMPLES::
+
+            sage: plot(x^2, (x, 0, 1)).aspect_ratio()
+            'automatic'
+        """
         return self._options.get("aspect_ratio", "automatic")
 
     def set_axes_range(self, xmin=None, xmax=None, ymin=None, ymax=None):
+        """Set the ranges of the axes.
+
+        EXAMPLES::
+
+            sage: G = plot(x, (x, 0, 1)); G.set_axes_range(xmin=-1, ymax=2); G.get_axes_range()
+            {'xmax': 1.0, 'xmin': -1.0, 'ymax': 2.0, 'ymin': 0.0}
+        """
         for k, v in (("xmin", xmin), ("xmax", xmax), ("ymin", ymin), ("ymax", ymax)):
             if v is not None:
                 self._options[k] = v
 
-    def axes_range(self, **kw):
-        if kw:
-            self.set_axes_range(**kw)
-        return {k: self._options[k] for k in ("xmin", "xmax", "ymin", "ymax") if k in self._options}
+    def axes_range(self, xmin=None, xmax=None, ymin=None, ymax=None):
+        """Set the ranges of the axes (as set_axes_range; get_axes_range()
+        reads them).
+
+        EXAMPLES::
+
+            sage: G = plot(x, (x, 0, 1)); G.axes_range(xmin=0, xmax=2); G.get_axes_range()
+            {'xmax': 2.0, 'xmin': 0.0, 'ymax': 1.0, 'ymin': 0.0}
+        """
+        self.set_axes_range(xmin, xmax, ymin, ymax)
+
+    def get_axes_range(self):
+        """The ranges of the axes that were set.
+
+        EXAMPLES::
+
+            sage: G = plot(x, (x, 0, 1)); G.set_axes_range(xmin=-1, ymax=2); G.get_axes_range()
+            {'xmax': 1.0, 'xmin': -1.0, 'ymax': 2.0, 'ymin': 0.0}
+        """
+        r = {k: float(v) for k, v in self.get_minmax_data().items()}
+        for k in r:
+            if k in self._options:
+                r[k] = float(self._options[k])
+        return r
 
     def get_minmax_data(self):
+        """The extent of the primitives: {'xmin': ..., 'xmax': ..., 'ymin': ..., 'ymax': ...}.
+
+        EXAMPLES::
+
+            sage: line([(0, 0), (2, 3)]).get_minmax_data()
+            {'xmax': 2.0, 'xmin': 0.0, 'ymax': 3.0, 'ymin': 0.0}
+        """
         bb = Panel(self._primitives).data_bbox() or (-1.0, 1.0, -1.0, 1.0)
         return {"xmin": bb[0], "xmax": bb[1], "ymin": bb[2], "ymax": bb[3]}
 
     def options(self):
+        """The options (title, axes labels, gridlines, ...).
+
+        EXAMPLES::
+
+            sage: plot(x, (x, 0, 1), title='t').options()['title']  # sagebrush only
+            't'
+        """
         return dict(self._options)
 
     # --- rendering
@@ -140,10 +203,21 @@ class Graphics:
         return self._svg()
 
     def description(self):
-        """What the picture shows, in words (also its SVG's accessible name)."""
+        """What the picture shows, in words (also its SVG's accessible name).
+
+        EXAMPLES::
+
+            sage: print(plot(sin(x), (x, 0, 2*pi)).description())  # random
+        """
         return describe_svg(self._svg())
 
     def show(self, **options):
+        """Show the graphics (an SVG in the notebook).
+
+        EXAMPLES::
+
+            sage: plot(sin(x), (x, 0, 1)).show()  # random
+        """
         g = self
         if options:
             g = self + Graphics()
@@ -151,9 +225,22 @@ class Graphics:
         _show(g, "plot")
 
     def save(self, filename, **options):
+        """Save the graphics as SVG (or the extension's format) to a file.
+
+        EXAMPLES::
+
+            sage: plot(sin(x), (x, 0, 1)).save('/tmp/sin.svg')  # not tested
+        """
         save_svg(self._svg(**options), filename)
 
     def plot(self):
+        """The graphics itself (so that plot(G) works).
+
+        EXAMPLES::
+
+            sage: G = point((1, 1)); G.plot() is G
+            True
+        """
         return self
 
 
@@ -227,6 +314,15 @@ def plot(f, *args, **options):
 
     plot(sin(x), (x, 0, 2*pi)), plot(lambda t: t^2, -1, 1),
     plot([sin(x), cos(x)], (x, 0, 2*pi)), plot(f, 0, 1, fill='axis')
+
+    EXAMPLES::
+
+        sage: plot(sin(x), (x, 0, 2*pi))
+        Graphics object consisting of 1 graphics primitive
+        sage: plot(x^2, -1, 1, color='red', thickness=2)
+        Graphics object consisting of 1 graphics primitive
+        sage: plot([sin(x), cos(x)], (x, 0, pi))
+        Graphics object consisting of 2 graphics primitives
     """
     if isinstance(f, (list, tuple)):
         g = Graphics()
@@ -278,7 +374,15 @@ def plot(f, *args, **options):
 
 
 def parametric_plot(funcs, *args, **options):
-    """parametric_plot((cos(t), sin(2*t)), (t, 0, 2*pi))"""
+    """parametric_plot((cos(t), sin(2*t)), (t, 0, 2*pi))
+
+    EXAMPLES::
+
+        sage: var('t')
+        t
+        sage: parametric_plot((cos(t), sin(t)), (t, 0, 2*pi))
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     a, b = _range(args, p)
     fx, fy = (_callable(f) for f in funcs)
@@ -296,7 +400,13 @@ def parametric_plot(funcs, *args, **options):
 
 
 def polar_plot(r, *args, **options):
-    """polar_plot(sin(5*x), (x, 0, 2*pi))"""
+    """polar_plot(sin(5*x), (x, 0, 2*pi))
+
+    EXAMPLES::
+
+        sage: polar_plot(1 + cos(x), (x, 0, 2*pi))
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     a, b = _range(args, p)
     fr = _callable(r)
@@ -325,7 +435,15 @@ def _pairs(data):
 
 
 def list_plot(data, plotjoined=False, **options):
-    """list_plot([1, 4, 9]) or list_plot([(x1, y1), ...], plotjoined=True)"""
+    """list_plot([1, 4, 9]) or list_plot([(x1, y1), ...], plotjoined=True)
+
+    EXAMPLES::
+
+        sage: list_plot([1, 4, 9, 16])
+        Graphics object consisting of 1 graphics primitive
+        sage: list_plot([(0, 0), (1, 1), (2, 4)], plotjoined=True)
+        Graphics object consisting of 1 graphics primitive
+    """
     pts = _pairs(data)
     if plotjoined:
         return line(pts, **options)
@@ -333,6 +451,13 @@ def list_plot(data, plotjoined=False, **options):
 
 
 def line(points, **options):
+    """A line through the points.
+
+    EXAMPLES::
+
+        sage: line([(0, 0), (1, 2), (2, 0)], color='green')
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     pts = list(points)
     return Graphics([Line([q[0] for q in pts], [q[1] for q in pts], **_line_options(p))], **gopts)
@@ -342,7 +467,13 @@ line2d = line
 
 
 def point(points, **options):
-    """point((1, 2)) or point([(0, 0), (1, 1)], size=30, color='red')"""
+    """point((1, 2)) or point([(0, 0), (1, 1)], size=30, color='red')
+
+    EXAMPLES::
+
+        sage: point((1, 2)), point([(0, 0), (1, 1)], size=30)
+        (Graphics object consisting of 1 graphics primitive, Graphics object consisting of 1 graphics primitive)
+    """
     gopts, p = _split(options)
     if isinstance(points, (tuple, list)) and len(points) == 2 and not isinstance(points[0], (tuple, list)):
         points = [points]
@@ -357,6 +488,13 @@ points = point2d = point
 
 
 def text(string, xy, **options):
+    """A text label at a point.
+
+    EXAMPLES::
+
+        sage: text("hello", (1, 1))
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     o = {"fontsize": p.pop("fontsize", 11), "color": p.pop("color", p.pop("rgbcolor", None)),
          "horizontal_alignment": p.pop("horizontal_alignment", "center"),
@@ -365,6 +503,13 @@ def text(string, xy, **options):
 
 
 def polygon(points, **options):
+    """A filled polygon.
+
+    EXAMPLES::
+
+        sage: polygon([(0, 0), (1, 0), (0, 1)], color='orange')
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     pts = list(points)
     o = {"color": _color(p), "alpha": p.pop("alpha", None), "fill": p.pop("fill", True),
@@ -382,7 +527,13 @@ def _arc(center, r, a, b, n=120):
 
 
 def circle(center, radius, **options):
-    """circle((0, 0), 1, color='red', fill=False)"""
+    """circle((0, 0), 1, color='red', fill=False)
+
+    EXAMPLES::
+
+        sage: circle((0, 0), 1)
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     gopts.setdefault("aspect_ratio", 1)
     pts = _arc(center, float(radius), 0, 2 * math.pi)
@@ -395,7 +546,13 @@ def circle(center, radius, **options):
 
 
 def disk(center, radius, angle=(0, 2 * math.pi), **options):
-    """A filled sector: disk((0, 0), 1, (0, pi/2), color='orange')"""
+    """A filled sector: disk((0, 0), 1, (0, pi/2), color='orange')
+
+    EXAMPLES::
+
+        sage: disk((0, 0), 1, (0, pi/2))
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     gopts.setdefault("aspect_ratio", 1)
     a, b = float(angle[0]), float(angle[1])
@@ -407,6 +564,13 @@ def disk(center, radius, angle=(0, 2 * math.pi), **options):
 
 
 def arrow(tailpoint, headpoint, **options):
+    """An arrow from tailpoint to headpoint.
+
+    EXAMPLES::
+
+        sage: arrow((0, 0), (1, 1))
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     o = {"color": _color(p), "thickness": p.pop("thickness", p.pop("width", 2)) * 0.9}
     return Graphics([Arrow(tailpoint, headpoint, **o)], **gopts)
@@ -416,6 +580,13 @@ arrow2d = arrow
 
 
 def bar_chart(datalist, width=0.5, **options):
+    """A bar chart of a list of values.
+
+    EXAMPLES::
+
+        sage: bar_chart([1, 3, 2])
+        Graphics object consisting of 1 graphics primitive
+    """
     gopts, p = _split(options)
     rects = [(i - width / 2, 0, width, float(v)) if v >= 0 else (i - width / 2, float(v), width, -float(v))
              for i, v in enumerate(datalist)]
@@ -424,7 +595,13 @@ def bar_chart(datalist, width=0.5, **options):
 
 
 class GraphicsArray:
-    """graphics_array([[g1, g2], [g3, g4]]): several plots side by side."""
+    """graphics_array([[g1, g2], [g3, g4]]): several plots side by side.
+
+    EXAMPLES::
+
+        sage: graphics_array([plot(sin(x), (x, 0, 1)), plot(cos(x), (x, 0, 1))])
+        Graphics Array of size 1 x 2
+    """
 
     def __init__(self, rows, figsize=None):
         rows = list(rows)
@@ -450,13 +627,32 @@ class GraphicsArray:
         return self._svg()
 
     def show(self):
+        """Show the grid.
+
+        EXAMPLES::
+
+            sage: graphics_array([point((0, 0))]).show()  # random
+        """
         _show(self, "plots")
 
     def save(self, filename):
+        """Save the grid as SVG.
+
+        EXAMPLES::
+
+            sage: graphics_array([point((0, 0))]).save('/tmp/a.svg')  # not tested
+        """
         save_svg(self._svg(), filename)
 
 
 def graphics_array(array, nrows=None, ncols=None, figsize=None):
+    """A grid of graphics objects: a list, or a list of rows.
+
+    EXAMPLES::
+
+        sage: graphics_array([[plot(x, (x, 0, 1)), plot(x^2, (x, 0, 1))]])
+        Graphics Array of size 1 x 2
+    """
     arr = list(array)
     if ncols and arr and isinstance(arr[0], Graphics):
         arr = [arr[i:i + ncols] for i in range(0, len(arr), ncols)]
@@ -469,6 +665,11 @@ class Animation:
         a = animate([plot(sin(x + k), (x, 0, 2*pi)) for k in srange(0, 2*pi, 0.2)])
         a.show(delay=10)    # hundredths of a second per frame, as in Sage
         a.save('wave.svg')  # an animated SVG: it plays in any web browser
+
+    EXAMPLES::
+
+        sage: a = animate([plot(sin(k*x), (x, 0, pi)) for k in [1, 2, 3]]); a
+        Animation with 3 frames
     """
 
     def __init__(self, v=None, **kwds):
@@ -534,9 +735,21 @@ class Animation:
         return self._svg()
 
     def description(self):
+        """A text description of the animation's frames.
+
+        EXAMPLES::
+
+            sage: print(animate([point((k, k)) for k in range(3)]).description())  # random  # sagebrush only
+        """
         return describe_svg(self._svg())
 
     def show(self, delay=None, iterations=None, **kwds):
+        """Show the animation (SVG frames in the notebook).
+
+        EXAMPLES::
+
+            sage: animate([point((k, k)) for k in range(3)]).show()  # random
+        """
         a = Animation(self._frames, **dict(self._kwds, **kwds))
         if delay is not None:
             a._kwds["delay"] = delay
@@ -545,24 +758,47 @@ class Animation:
         _show(a, "animation")
 
     def save(self, filename, delay=None, iterations=None, **kwds):
-        """Save as an animated .svg (plays in web browsers)."""
+        """Save as an animated .svg (plays in web browsers).
+
+        EXAMPLES::
+
+            sage: animate([point((k, k)) for k in range(3)]).save('/tmp/a.svg')  # not tested
+        """
         name = str(filename)
         if not name.lower().endswith(".svg"):
             raise ValueError("animations save as .svg (an animated SVG that plays in any web browser); GIF and video are not available")
         save_svg(Animation(self._frames, **dict(self._kwds, **kwds))._svg(delay, iterations), filename)
 
     def graphics_array(self, ncols=3):
+        """The frames as a grid of graphics.
+
+        EXAMPLES::
+
+            sage: animate([point((k, k)) for k in range(3)]).graphics_array()
+            Graphics Array of size 1 x 3
+        """
         return graphics_array(self._frames, ncols=ncols)
 
 
 def animate(frames, **kwds):
     """An Animation of a list of Graphics; options (xmin, ymax, figsize, ...)
-    apply to every frame."""
+    apply to every frame.
+
+    EXAMPLES::
+
+        sage: animate([plot(sin(x + k), (x, 0, 2*pi)) for k in range(4)])
+        Animation with 4 frames
+    """
     return Animation(frames, **kwds)
 
 
 def show(obj, **options):
-    """Show a picture (or print anything else)."""
+    """Show a picture (or print anything else).
+
+    EXAMPLES::
+
+        sage: show(plot(x, (x, 0, 1)))  # random
+    """
     if isinstance(obj, Animation):
         return obj.show(**options)
     if isinstance(obj, (Graphics, GraphicsArray)):
