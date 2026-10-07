@@ -17,6 +17,7 @@ import { needsMore, complete } from "./interactive";
 import { builtin, isType, typeName, getattr } from "./runtime/object";
 import { isMainThread, workerData } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
+import { runNotebookServer, notebookWorker } from "./notebook";
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
@@ -33,6 +34,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|all]
            register Sagebrush as a Jupyter kernel (no Python needed)
   --uninstall-jupyter-kernel [the same options]
+  notebook [DIR] [--port N] [--no-browser]
+           the Sagebrush notebook in your browser, running Python here;
+           notebooks are the .ipynb files in DIR
 `;
 
 // Run fn, reporting an uncaught exception as CPython does; returns the exit code.
@@ -247,6 +251,10 @@ async function main() {
     process.exitCode = installKernel(argv.slice(1), argv[0] === "--uninstall-jupyter-kernel");
     return;
   }
+  if (argv[0] === "notebook" || argv[0] === "--notebook") {
+    await runNotebookServer(argv.slice(1));
+    return;
+  }
   if (argv[0] === "--jupyter-kernel") {
     const i = argv.indexOf("--mode");
     await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode);
@@ -371,3 +379,4 @@ function execModuleAsMain(name: string): any {
 
 if (isMainThread) main();
 else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
+else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNotebook);

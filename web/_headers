@@ -4,3 +4,6 @@
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
+# the service worker and the page: always revalidated (a deploy shows up at once)
+/sw.js
+  Cache-Control: no-cache

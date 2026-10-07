@@ -46,7 +46,27 @@ const version = JSON.parse(readFileSync(join(root, "packages", "sagebrush", "pac
 writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\n`);
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n`);
-writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./engine.gen.js";\nimport "../../src/cli";\n`);
+// The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
+// (`bun web/build.ts`, which needs lib.gen.js: so on a fresh checkout run this
+// script, the web build, then this script again).  Python runs natively
+// there, so the page's worker and the wasm engines are not needed.
+const web = {};
+const webDir = join(root, "web", "dist");
+for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js"]) {
+  if (existsSync(join(webDir, f))) web[f] = readFileSync(join(webDir, f)).toString("base64");
+}
+const katexDir = join(webDir, "katex");
+const walkKatex = (dir) => {
+  for (const f of existsSync(dir) ? readdirSync(dir) : []) {
+    const p = join(dir, f);
+    if (statSync(p).isDirectory()) walkKatex(p);
+    else web[relative(webDir, p)] = readFileSync(p).toString("base64");
+  }
+};
+walkKatex(katexDir);
+if (!web["index.html"]) console.log("note: no web/dist/index.html: `sagebrush notebook` will not be available in this bundle");
+writeFileSync(join(out, "web.gen.js"), web["index.html"] ? `globalThis.__SAGEBRUSH_WEB__ = ${JSON.stringify(web)};\n` : "");
+writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./engine.gen.js";\nimport "./web.gen.js";\nimport "../../src/cli";\n`);
 
 // 2. One CommonJS file for Node 22+ and Bun.
 run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace",

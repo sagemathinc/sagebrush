@@ -281,6 +281,28 @@ node/build.sh                                       # Node addon
 See [engine/TRY.md](engine/TRY.md) for the full function list in both
 languages.
 
+### The notebook on your computer
+
+```sh
+npx sagebrush notebook [DIR]        # opens the notebook in your browser
+```
+
+This is the notebook of sagebrush.space, but Python runs natively on your
+computer (a Node worker thread per notebook) with your files. Each notebook
+is an `.ipynb` file in DIR. Like Jupyter, the server listens on 127.0.0.1
+only and needs the random token in the URL it opens. It answers only for
+its own host name, and serves files under DIR only. Stop raises
+KeyboardInterrupt and keeps the variables. The page is embedded in the
+single-file CLI and executables (`src/notebook.ts`; the page and the
+browser's worker share `src/notebook-session.ts`).
+`web/test-local-notebook.mjs` tests it end to end in Chromium.
+
+sagebrush.space itself is also an app: open it once, and it works offline
+(a service worker, `web/sw.js`). Chrome and Edge offer "Install as an app"
+(also in the File menu), and Safari has Add to Dock or Home Screen. The
+installed app opens `.ipynb`, `.py` and `.sage` files from the computer.
+`web/test-pwa.mjs` loads it, stops the server, and runs Python offline.
+
 ### A Jupyter kernel
 
 ```sh
