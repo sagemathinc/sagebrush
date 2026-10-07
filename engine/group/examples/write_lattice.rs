@@ -11,7 +11,7 @@ use sagebrush_group::embed::{few_generators, maximal_transitive, Ambient};
 use sagebrush_group::{Group, Perm};
 use std::collections::BTreeMap;
 
-const LIMIT: usize = 2_000_000;
+const LIMIT: usize = 12_000_000;
 
 fn parse_gens(n: usize, s: &str) -> Vec<Perm> {
     s.split_whitespace().map(|g| Perm::from_images(g.split(',').map(|x| x.parse::<u32>().unwrap() - 1).collect()).unwrap()).filter(|p| p.degree() == n).collect()
@@ -31,19 +31,19 @@ fn partitions(n: usize, max: usize) -> Vec<Vec<usize>> {
     out
 }
 
-fn factorial(n: usize) -> u64 {
-    (1..=n as u64).product()
+fn factorial(n: usize) -> u128 {
+    (1..=n as u128).product()
 }
 
 /// n! / z_lambda, the size of the class of cycle type lambda in Sym(n).
-fn class_size(n: usize, t: &[usize]) -> u64 {
-    let mut z: u64 = 1;
-    let mut mult: BTreeMap<usize, u64> = BTreeMap::new();
+fn class_size(n: usize, t: &[usize]) -> u128 {
+    let mut z: u128 = 1;
+    let mut mult: BTreeMap<usize, u32> = BTreeMap::new();
     for &l in t {
         *mult.entry(l).or_default() += 1;
     }
     for (&l, &m) in &mult {
-        z *= (l as u64).pow(m as u32) * factorial(m as usize);
+        z *= (l as u128).pow(m) * factorial(m as usize);
     }
     factorial(n) / z
 }
@@ -67,7 +67,7 @@ fn main() {
         let is_alt = |g: &Group| n > 2 && g.order() * sagebrush_bigint::BigInt::from(2u32) == sym_order;
         let gens: Vec<Vec<Perm>> = groups.iter().map(few_generators).collect();
         // cycle type counts
-        let counts: Vec<Vec<(Vec<usize>, usize)>> = groups
+        let counts: Vec<Vec<(Vec<usize>, u128)>> = groups
             .iter()
             .map(|g| {
                 if is_sym(g) || is_alt(g) {
@@ -75,13 +75,13 @@ fn main() {
                         .into_iter()
                         .filter(|t| is_sym(g) || t.iter().filter(|&&l| l % 2 == 0).count() % 2 == 0)
                         .map(|t| {
-                            let c = class_size(n, &t) as usize;
+                            let c = class_size(n, &t);
                             (t, c)
                         })
                         .collect()
                 } else {
                     let a = Ambient::new(g, LIMIT).unwrap();
-                    let mut c = a.type_counts();
+                    let mut c: Vec<(Vec<usize>, u128)> = a.type_counts().into_iter().map(|(t, k)| (t, k as u128)).collect();
                     c.sort();
                     c.reverse();
                     c
@@ -132,7 +132,8 @@ fn main() {
                 }
             } else {
                 let a = amb(&mut ambients, &groups, k);
-                maxes = maximal_transitive(a, &groups, &gens, &counts);
+                let small: Vec<Vec<(Vec<usize>, usize)>> = counts.iter().map(|c| c.iter().map(|(t, k)| (t.clone(), (*k).min(usize::MAX as u128) as usize)).collect()).collect();
+                maxes = maximal_transitive(a, &groups, &gens, &small);
             }
             // check: each is a subgroup of the right order
             for (j, y) in &maxes {

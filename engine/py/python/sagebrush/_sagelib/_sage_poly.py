@@ -538,7 +538,7 @@ class Polynomial:
 
     def galois_group(self, pari_group=False, algorithm=None, proof=None):
         """The Galois group of this irreducible polynomial over QQ (degree at
-        most 13), as Sage's TransitiveGroup(n, k), computed by Sagebrush's
+        most 13, or 17, 19, 23), as Sage's TransitiveGroup(n, k), computed by Sagebrush's
         engine/galois (Frobenius cycle types, then Stauduhar's descent with
         p-adic roots).  G.proven says whether every step was proven; by
         default the cheap steps are, with proof=True all of them."""

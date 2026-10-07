@@ -1,0 +1,16 @@
+# Relative invariants for the maximal transitive subgroups of the transitive groups of
+# degree 19 (engine/group/tables/maximal-19.txt), found by sagebrush-galois
+# (examples/write_invariants.rs).  Per line, k:mi ; seed, where mi numbers the maximal
+# subgroups of nTk from 0 and the seed is "m p^e ..." (the orbit sum of a monomial)
+# or "p U/V ..." (the product over the orbits of these linear forms), points 1..n.
+2:0 ; m 1^2 2^1
+3:0 ; m 1^1 2^1
+4:0 ; m 1^1 2^1 9^1
+4:1 ; m 1^1 2^1
+5:0 ; m 1^1 2^1 9^1
+6:0 ; m 1^1 2^1 9^1
+6:1 ; m 1^1 2^1
+7:0 ; m 1^1 2^1 9^1
+7:1 ; m 1^1 2^1 9^1
+8:0 ; p 1/2
+8:1 ; m 1^1 2^1 9^1

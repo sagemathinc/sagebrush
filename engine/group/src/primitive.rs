@@ -175,6 +175,8 @@ pub fn projective_line(q: u32, which: &str) -> Result<Group, String> {
         "psl" => {}
         "pgl" => gens.push(diag),
         "psigmal" => gens.push(frob),
+        // PSL(2, q) extended by the square of the Frobenius (q = 16: PSL(2, 16):2)
+        "psigmal2" => gens.push(frob.mul(&frob)),
         "pgammal" => {
             gens.push(diag);
             gens.push(frob);
@@ -277,7 +279,7 @@ pub fn affine_prime(p: u32, d: u32) -> Result<Group, String> {
     Group::new(p as usize, gens)
 }
 
-/// The primitive groups of degree n, for 10 <= n <= 12 and n prime (up to conjugacy).
+/// The primitive groups of degree n, for n = 10, 12 and the primes up to 23 (up to conjugacy).
 pub fn primitive_groups(n: usize) -> Result<Vec<Group>, String> {
     let mut out = vec![];
     match n {
@@ -312,7 +314,14 @@ pub fn primitive_groups(n: usize) -> Result<Vec<Group>, String> {
                 out.push(psl32());
             } else if n == 13 {
                 out.push(psl33()?);
-            } else if n != 5 && n != 7 && n != 11 && n != 13 {
+            } else if n == 17 {
+                // PSL(2, 16) <= PSL(2, 16):2 <= PSigmaL(2, 16) on the projective line over F_16
+                for w in ["psl", "psigmal2", "psigmal"] {
+                    out.push(projective_line(16, w)?);
+                }
+            } else if n == 23 {
+                out.push(named::mathieu(23)?);
+            } else if n != 5 && n != 7 && n != 11 && n != 13 && n != 19 {
                 return Err(format!("the primitive groups of degree {} are not built in yet", n));
             }
         }
@@ -407,7 +416,7 @@ mod tests {
     #[test]
     fn primitive_counts() {
         // the numbers of primitive groups of degree n (OEIS A000019)
-        for (n, want) in [(5usize, 5usize), (7, 7), (10, 9), (11, 8), (12, 6), (13, 9)] {
+        for (n, want) in [(5usize, 5usize), (7, 7), (10, 9), (11, 8), (12, 6), (13, 9), (17, 10), (19, 8), (23, 7)] {
             let gs = primitive_groups(n).unwrap();
             assert_eq!(gs.len(), want, "degree {}", n);
             for g in &gs {

@@ -1,4 +1,4 @@
-//! Galois groups of irreducible polynomials over Q, of degree up to 13, as
+//! Galois groups of irreducible polynomials over Q, of degree 1..13, 17, 19 or 23, as
 //! transitive groups nTk in the standard numbering (clean-room, MIT OR
 //! Apache-2.0; PARI, Magma and GAP were used only as oracles for testing).
 //!
@@ -27,6 +27,12 @@
 //!    other values), Gal(f) <= s K s^-1: renumber the roots and continue
 //!    with G = K.  If no maximal subgroup takes it, Gal(f) = G.
 //!    Repeated values are separated by a Tschirnhausen transformation.
+//!    For a huge index (A23 over M23: 1.3e15) the Frobenius-fixed cosets
+//!    are found through a Sylow subgroup: if a power pi' of the Frobenius
+//!    has prime order q and q^2 does not divide |K|, the cosets s K with
+//!    s^-1 pi' s in K all come from one subgroup <k0> of order q of K.
+//!    The prime is chosen for cheap arithmetic (small unramified degree D)
+//!    in small degrees, and for a small short coset search in large ones.
 //!
 //! `proven` is true when every step is rigorous: when the cycle types alone
 //! decide, or when each descent step's value is proven to be an integer
@@ -54,7 +60,7 @@ pub struct GaloisGroup {
     pub degree: usize,
     /// k, for the transitive group nTk
     pub number: usize,
-    pub order: u64,
+    pub order: u128,
     pub name: String,
     pub proven: bool,
     /// what was done, step by step
@@ -77,6 +83,25 @@ fn comp(a: &Perm, b: &Perm) -> Perm {
 /// x^-1 o h o x
 fn conjf(h: &Perm, x: &Perm) -> Perm {
     comp(&x.inv(), &comp(h, x))
+}
+
+/// For a permutation of cycle type t: the least |C(pi^(o/q))| (q - 1) over
+/// the primes q dividing its order o, the size of the short coset search
+/// through a power of prime order.
+fn sylow_cost(t: &[usize]) -> f64 {
+    let o = t.iter().fold(1usize, |a, &b| num_integer::Integer::lcm(&a, &b));
+    let mut best = f64::INFINITY;
+    for q in (2..=o).filter(|&q| o % q == 0 && (2..q).take_while(|x| x * x <= q).all(|x| q % x != 0)) {
+        let e = o / q;
+        // a cycle of length l splits into gcd(l, e) cycles of length l / gcd(l, e)
+        let mut u: Vec<usize> = vec![];
+        for &l in t {
+            let g = num_integer::Integer::gcd(&l, &e);
+            u.extend(std::iter::repeat(l / g).take(g));
+        }
+        best = best.min(centralizer_order(&u) * (q - 1) as f64);
+    }
+    best
 }
 
 fn centralizer_order(t: &[usize]) -> f64 {
@@ -166,6 +191,7 @@ fn log2_bound(a: &BigInt) -> f64 {
 /// log2 of Fujiwara's bound on the absolute values of the roots of a monic f.
 fn root_bound_log2(f: &[BigInt]) -> f64 {
     let n = f.len() - 1;
+    // Fujiwara: 2 max |a_{n-i}|^(1/i) (with |a_0 / 2|^(1/n))
     let mut m = f64::NEG_INFINITY;
     for i in 1..=n {
         let mut l = log2_bound(&f[n - i]);
@@ -174,7 +200,26 @@ fn root_bound_log2(f: &[BigInt]) -> f64 {
         }
         m = m.max(l / i as f64);
     }
-    1.0 + m.max(0.0)
+    let fujiwara = 1.0 + m.max(0.0);
+    // Cauchy: the positive root rho of x^n = sum |a_i| x^i (every root has
+    // |z| <= rho), found by bisection on log2 x; often half of Fujiwara's.
+    let la: Vec<f64> = f[..n].iter().map(|c| if c.is_zero() { f64::NEG_INFINITY } else { num_traits::ToPrimitive::to_f64(&c.abs()).unwrap_or(f64::MAX).log2() }).collect();
+    // g(t) = sum |a_i| 2^((i - n) t) - 1, decreasing in t
+    let g = |t: f64| la.iter().enumerate().map(|(i, &l)| (l + (i as f64 - n as f64) * t).exp2()).sum::<f64>() - 1.0;
+    let (mut lo, mut hi) = (-60.0f64, fujiwara);
+    if g(hi) > 0.0 {
+        return fujiwara;
+    }
+    for _ in 0..80 {
+        let mid = (lo + hi) / 2.0;
+        if g(mid) > 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    // a margin for the rounding of the f64 evaluation
+    (hi + 1e-6).min(fujiwara).max(0.0)
 }
 
 fn primes_from(mut p: u64) -> impl Iterator<Item = u64> {
@@ -619,29 +664,29 @@ fn transversal(g: &Group, k: &Group, limit: usize) -> Option<Vec<Perm>> {
 fn fixed_cosets_sym(g: &Group, alt: bool, k: &Group, pi: &Perm) -> Result<Vec<Perm>, String> {
     let n = g.n;
     let ty = pi.cycle_type();
-    let els = k.elements(5_000_000).ok_or("the subgroup is too large for the short coset search")?;
-    // classes of K of pi's cycle type
-    let mut seen: HashSet<Perm> = HashSet::new();
-    let mut reps: Vec<Perm> = vec![];
-    for e in els.iter().filter(|e| e.cycle_type() == ty) {
-        if seen.contains(e) {
-            continue;
-        }
-        reps.push(e.clone());
-        let mut orb = vec![e.clone()];
-        seen.insert(e.clone());
-        let mut i = 0;
-        while i < orb.len() {
-            for x in &k.gens {
-                let c = conjf(&orb[i], x);
-                if seen.insert(c.clone()) {
-                    orb.push(c);
+    // enumerate with pi, or with a power of pi of prime order q when the
+    // Sylow q-subgroups of K have order q (then filter by pi itself)
+    let (piq, reps) = match sylow_reps(k, pi) {
+        Some(r) => (pi.clone(), r),
+        None => {
+            let ord: u64 = num_traits::ToPrimitive::to_u64(&pi.order()).unwrap_or(0);
+            let mut best: Option<(f64, Perm, Vec<Perm>)> = None;
+            for q in (2..=ord).filter(|&q| ord % q == 0 && (2..q).take_while(|d| d * d <= q).all(|d| q % d != 0)) {
+                let pq = pi.pow((ord / q) as i64);
+                if let Some(r) = sylow_reps(k, &pq) {
+                    let cost = centralizer_order(&pq.cycle_type()) * r.len() as f64;
+                    if best.as_ref().map_or(true, |b| cost < b.0) {
+                        best = Some((cost, pq, r));
+                    }
                 }
             }
-            i += 1;
+            match best {
+                Some((_, pq, r)) => (pq, r),
+                None => (pi.clone(), class_reps_of_type(k, &ty)?),
+            }
         }
-    }
-    let pcycles = cycles_with_fixed(pi);
+    };
+    let pcycles = cycles_with_fixed(&piq);
     let mut keys: HashSet<Perm> = HashSet::new();
     let mut out = vec![];
     for kk in reps {
@@ -673,6 +718,9 @@ fn fixed_cosets_sym(g: &Group, alt: bool, k: &Group, pi: &Perm) -> Result<Vec<Pe
             if alt && s.sign() != 1 {
                 return;
             }
+            if piq != *pi && !k.contains(&conjf(pi, s)) {
+                return;
+            }
             let c = canonical(s, k);
             if keys.insert(c.clone()) {
                 out.push(c);
@@ -680,6 +728,65 @@ fn fixed_cosets_sym(g: &Group, alt: bool, k: &Group, pi: &Perm) -> Result<Vec<Pe
         });
     }
     Ok(out)
+}
+
+/// The elements of K of pi's cycle type, one in each class of K at least.
+fn class_reps_of_type(k: &Group, ty: &[usize]) -> Result<Vec<Perm>, String> {
+    let els = k.elements(5_000_000).ok_or("the subgroup is too large for the short coset search")?;
+    let mut seen: HashSet<Perm> = HashSet::new();
+    let mut reps: Vec<Perm> = vec![];
+    for e in els.iter().filter(|e| e.cycle_type() == ty) {
+        if seen.contains(e) {
+            continue;
+        }
+        reps.push(e.clone());
+        let mut orb = vec![e.clone()];
+        seen.insert(e.clone());
+        let mut i = 0;
+        while i < orb.len() {
+            for x in &k.gens {
+                let c = conjf(&orb[i], x);
+                if seen.insert(c.clone()) {
+                    orb.push(c);
+                }
+            }
+            i += 1;
+        }
+    }
+    Ok(reps)
+}
+
+/// When pi has prime order q and q^2 does not divide |K|, the subgroups of
+/// order q of K are its Sylow q-subgroups, all conjugate in K: so the
+/// nontrivial elements of one of them, <k0> with k0 of pi's cycle type,
+/// meet every class of K that pi's conjugates can lie in.  (This avoids
+/// listing a large K, e.g. M23 in A23 with a 23-cycle.)
+fn sylow_reps(k: &Group, pi: &Perm) -> Option<Vec<Perm>> {
+    let ty = pi.cycle_type();
+    let q = ty[0];
+    if q < 2 || !ty.iter().all(|&l| l == q || l == 1) || !(2..q).take_while(|d| d * d <= q).all(|d| q % d != 0) {
+        return None;
+    }
+    let order = k.order();
+    let qb = BigInt::from(q as u64);
+    if !(&order % &qb).is_zero() || (&(&order / &qb) % &qb).is_zero() {
+        return None;
+    }
+    // an element of K of pi's cycle type: a power of a random element of order divisible by q
+    let mut rng = sagebrush_group::Rng::new(0x5171);
+    for _ in 0..200_000 {
+        let g = k.random(&mut rng);
+        let o = g.order();
+        if !(&o % &qb).is_zero() {
+            continue;
+        }
+        let e: i64 = num_traits::ToPrimitive::to_i64(&(&o / &qb))?;
+        let k0 = g.pow(e);
+        if k0.cycle_type() == ty {
+            return Some((1..q as i64).map(|j| k0.pow(j)).collect());
+        }
+    }
+    None
 }
 
 /// Cycles including fixed points, each in order x, p(x), p(p(x)), ...
@@ -739,24 +846,68 @@ impl Roots {
     /// The roots to precision k (at least), transformed.
     fn at(&mut self, k: u32) -> &Vec<Elt> {
         if self.lifted.is_empty() || self.zq.k < k {
-            self.zq = Zq::new(&self.fq, k);
-            let zq = &self.zq;
-            self.lifted = self.r0.iter().map(|r| zq.lift_root(&self.fq, &self.f, r)).collect();
-            if let Some(t) = &self.tsch {
-                self.lifted = self.lifted.iter().map(|r| zq.eval(t, r)).collect();
-            }
+            let (zq, rs) = self.lifted(k);
+            self.zq = zq;
+            self.lifted = rs;
         }
         &self.lifted
     }
 
-    /// The roots to precision k, without keeping them.
+    /// The roots to precision k, without keeping them: Newton's iteration
+    /// for one root in each cycle of the Frobenius, and the Frobenius
+    /// automorphism of Z_q (t -> phi(t), the root of M near t^p) for the
+    /// others: r_pi(i) = phi(r_i).
     fn lifted(&self, k: u32) -> (Zq, Vec<Elt>) {
         let zq = Zq::new(&self.fq, k);
-        let mut rs: Vec<Elt> = self.r0.iter().map(|r| zq.lift_root(&self.fq, &self.f, r)).collect();
-        if let Some(t) = &self.tsch {
-            rs = rs.iter().map(|r| zq.eval(t, r)).collect();
+        let n = self.r0.len();
+        let d = self.fq.degree();
+        let mut rs: Vec<Option<Elt>> = vec![None; n];
+        // phi(t) and its powers, when there are cycles to follow
+        let phi_pows: Option<Vec<Elt>> = if d > 1 {
+            let tp = self.fq.pow_u(&self.fq.t(), self.fq.p);
+            let phit = zq.lift_root(&self.fq, &zq.m, &tp);
+            let mut v = vec![zq.scalar(&BigInt::one()), phit.clone()];
+            for _ in 2..d {
+                let x = zq.mul(v.last().unwrap(), &phit);
+                v.push(x);
+            }
+            Some(v)
+        } else {
+            None
+        };
+        let apply_phi = |a: &Elt| -> Elt {
+            let v = phi_pows.as_ref().unwrap();
+            let mut out = vec![BigInt::zero(); d];
+            for (j, c) in a.iter().enumerate() {
+                if c.is_zero() {
+                    continue;
+                }
+                for (i, x) in v[j].iter().enumerate() {
+                    out[i] += c * x;
+                }
+            }
+            out.into_iter().map(|x| x.mod_floor(&zq.pk)).collect()
+        };
+        for i in 0..n {
+            if rs[i].is_some() {
+                continue;
+            }
+            let mut r = zq.lift_root(&self.fq, &self.f, &self.r0[i]);
+            if let Some(t) = &self.tsch {
+                r = zq.eval(t, &r);
+            }
+            let mut j = i;
+            loop {
+                let next = self.pi.image(j as u32) as usize;
+                rs[j] = Some(r.clone());
+                if next == i || phi_pows.is_none() {
+                    break;
+                }
+                r = apply_phi(&r);
+                j = next;
+            }
         }
-        (zq, rs)
+        (zq, rs.into_iter().map(|r| r.unwrap()).collect())
     }
 
     fn renumber(&mut self, s: &Perm) {
@@ -881,6 +1032,19 @@ fn clock() -> f64 {
     }
 }
 
+/// Cumulative time per phase (seconds * 1e9), for profiling.
+static PROFILE: [std::sync::atomic::AtomicU64; 8] = [const { std::sync::atomic::AtomicU64::new(0) }; 8];
+const PHASES: [&str; 8] = ["primes", "roots mod p", "cosets", "lifting", "values", "all values", "proofs", "other"];
+
+fn prof(i: usize, t0: f64) {
+    PROFILE[i].fetch_add(((clock() - t0) * 1e9) as u64, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The time spent in each phase so far.
+pub fn profile_report() -> String {
+    PHASES.iter().zip(&PROFILE).map(|(n, t)| format!("{} {:.2}s", n, t.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9)).collect::<Vec<_>>().join(", ")
+}
+
 fn trace(msg: impl FnOnce() -> String) {
     if std::env::var_os("SAGEBRUSH_GALOIS_TRACE").is_some() {
         eprintln!("[galois] {}", msg());
@@ -937,8 +1101,8 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
         return Err("the polynomial must have positive degree".into());
     }
     let n = f.len() - 1;
-    if n > tables::MAX_DEGREE {
-        return Err(format!("Galois groups are implemented for degrees up to {} so far, not {}", tables::MAX_DEGREE, n));
+    if !tables::supported(n) {
+        return Err(format!("Galois groups are implemented for degrees 1 to 13, 17, 19 and 23 so far, not {}", n));
     }
     if !sagebrush_poly::is_irreducible(&f) {
         return Err("the polynomial must be irreducible".into());
@@ -960,6 +1124,8 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
     // 1. Frobenius cycle types
     let mut frob: Vec<(u64, Vec<(Vec<u64>, u32)>)> = vec![];
     let mut types: HashSet<Vec<usize>> = HashSet::new();
+    let t_primes = clock();
+    let mut last_new = 0;
     for p in primes_from(2) {
         if frob.len() >= 120 {
             break;
@@ -970,9 +1136,12 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
         let fac = sagebrush_poly::factor_mod(&g, p);
         let mut t: Vec<usize> = fac.iter().map(|(h, _)| h.len() - 1).collect();
         t.sort_unstable_by(|a, b| b.cmp(a));
-        types.insert(t);
+        if types.insert(t) {
+            last_new = frob.len();
+        }
         frob.push((p, fac));
     }
+    prof(0, t_primes);
     trace(|| format!("{} primes factored at {:.3}s", frob.len(), clock()));
     let candidates: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].is_even() == even && types.iter().all(|t| groups[i].has_type(t))).collect();
     log.push(format!(
@@ -996,7 +1165,17 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
         let t: Vec<usize> = fac.iter().map(|(h, _)| h.len() - 1).collect();
         let d = t.iter().fold(1usize, |a, &b| a.lcm(&b));
         let penalty = if d > 24 { 1e12 } else { 1.0 };
-        centralizer_order(&t) * (d * d) as f64 * penalty
+        // the arithmetic costs about D^2 per operation and the number of
+        // fixed cosets grows with the centralizer: for small degrees (small
+        // indices) small D matters most, for large ones few cosets do
+        let e: i32 = if n <= 12 { 8 } else { 2 };
+        // (large degrees: the short coset search needs a power of prime order q
+        // with q^2 not dividing |K|, which q >= 5 makes likely)
+        let ord = t.iter().fold(1usize, |a, &b| a.lcm(&b));
+        let big_prime = (5..=ord).any(|q| ord % q == 0 && (2..q).take_while(|x| x * x <= q).all(|x| q % x != 0));
+        let usable = if n >= 13 && !big_prime { 1e9 } else { 1.0 };
+        let cost = if n >= 13 { sylow_cost(&t) } else { centralizer_order(&t) };
+        cost * (d as f64).powi(e) * penalty * usable
     };
     let (p, fac) = frob.iter().min_by(|a, b| score(&a.1).partial_cmp(&score(&b.1)).unwrap()).unwrap().clone();
     let degs: Vec<usize> = fac.iter().map(|(h, _)| h.len() - 1).collect();
@@ -1044,23 +1223,25 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
             // K = conjf(H_j, y^-1 o c)
             let kc = comp(&y.inv(), &c);
             let kk = Group::new(n, kt.gens.iter().map(|x| conjf(x, &kc)).collect()).unwrap();
-            let index = (h.order / kt.order) as usize;
+            let index_big: u128 = h.order / kt.order;
+            let index = index_big.min(usize::MAX as u128) as usize;
             assert!(kk.gens.iter().all(|x| gg.contains(x)), "{} is not in {}", kt.label(), h.label());
             let t_inv = clock();
             let inv = table_invariant(n, cur, mi).relabel(&c);
             trace(|| format!("{} in {}: invariant of degree {} with {} terms{} in {:.2}s", kt.label(), h.label(), inv.degree, inv.terms.len(), if inv.diffs.is_empty() { "".to_string() } else { format!(" (product of {} linear forms)", inv.diffs.len()) }, clock() - t_inv));
+            // cosets fixed by the Frobenius
+            let t_cos = clock();
+            let all = if index <= 200_000 { transversal(&gg, &kk, 200_000) } else { None };
+            let fixed: Vec<Perm> = match &all {
+                Some(t) => t.iter().filter(|s| kk.contains(&conjf(&roots.pi, s))).cloned().collect(),
+                None if is_symalt => fixed_cosets_sym(&gg, cur == groups.len() - 2, &kk, &roots.pi)?,
+                None => return Err("coset enumeration: index too large".into()),
+            };
+            prof(2, t_cos);
+            trace(|| format!("  {} Frobenius-fixed cosets in {:.2}s", fixed.len(), clock() - t_cos));
             let mut attempts = 0;
             loop {
                 attempts += 1;
-                // cosets fixed by the Frobenius
-                let t_cos = clock();
-                let all = if index <= 200_000 { transversal(&gg, &kk, 200_000) } else { None };
-                let fixed: Vec<Perm> = match &all {
-                    Some(t) => t.iter().filter(|s| kk.contains(&conjf(&roots.pi, s))).cloned().collect(),
-                    None if is_symalt => fixed_cosets_sym(&gg, cur == groups.len() - 2, &kk, &roots.pi)?,
-                    None => return Err("coset enumeration: index too large".into()),
-                };
-                trace(|| format!("  {} Frobenius-fixed cosets in {:.2}s", fixed.len(), clock() - t_cos));
                 if std::env::var_os("SAGEBRUSH_GALOIS_CHECK").is_some() {
                     if let Some(t) = &all {
                         // F o s differs for different cosets (Stab_G(F) = K)
@@ -1075,13 +1256,17 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
                 let bound = inv.log2_bound(roots.log2_bound());
                 let k = ((bound + 1.0 + SAFETY_BITS) / (p as f64).log2()).ceil() as u32;
                 let t_l = clock();
+                let t_l = clock();
                 let rts = roots.at(k).clone();
+                prof(3, t_l);
                 trace(|| format!("  roots at p^{} in {:.3}s", k, clock() - t_l));
                 let zq = roots.zq.clone();
                 let pows = powers(&zq, &rts, inv.max_exp);
+                let t_v = clock();
                 let vals: Vec<Elt> = evaluate_all(&zq, &pows, &inv, &fixed);
+                prof(4, t_v);
                 let ints: Vec<usize> = (0..vals.len()).filter(|&i| zq.small_integer(&vals[i], bound.ceil() as u64 + 1).is_some()).collect();
-                trace(|| format!("  index {}, {} fixed cosets, {} integral {:?}, precision p^{}", index, fixed.len(), ints.len(), ints.iter().map(|&i| zq.small_integer(&vals[i], 4096).unwrap().to_string()).collect::<Vec<_>>(), k));
+                trace(|| format!("  index {}, {} fixed cosets, {} integral {:?}, precision p^{}", index_big, fixed.len(), ints.len(), ints.iter().map(|&i| zq.small_integer(&vals[i], 4096).unwrap().to_string()).collect::<Vec<_>>(), k));
                 if ints.is_empty() {
                     break; // Gal(f) is in no conjugate of K
                 }
@@ -1092,24 +1277,28 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
                 let zl = Zq::new(&roots.fq, kl);
                 let low = |x: &Elt| -> Elt { x.iter().map(|c| c.mod_floor(&zl.pk)).collect() };
                 let pows_low: Vec<Vec<Elt>> = pows.iter().map(|v| v.iter().map(&low).collect()).collect();
+                let t_o = clock();
                 let others: Vec<Elt> = match &all {
                     Some(t) if index <= PROOF_INDEX || proof == Proof::Always => evaluate_all(&zl, &pows_low, &inv, t),
                     _ => vals.iter().map(&low).collect(),
                 };
                 trace(|| format!("  values at {} cosets to p^{} at {:.3}s", others.len(), kl, clock()));
+                prof(5, t_o);
                 let simple = |i: usize| {
                     let v = low(&vals[i]);
                     others.iter().filter(|w| **w == v).count() == 1
                 };
                 let good: Vec<usize> = ints.iter().copied().filter(|&i| simple(i)).collect();
                 if good.is_empty() {
-                    if attempts > 12 {
+                    if attempts > 16 {
                         return Err("could not separate the resolvent values".into());
                     }
                     // a random Tschirnhausen transformation, of degree 2, 3, ... up to
                     // n - 1 (low degrees keep the bounds small, but can keep the
                     // structure of compositions g(h(x)))
-                    let deg = (attempts as usize + 1).min(n - 1).max(2.min(n - 1));
+                    // (degrees 2, 5, 10, 17, ...: structured roots such as the a^(1/n) zeta^i
+                    // of x^n - a keep their relations under low degrees)
+                    let deg = (1 + (attempts as usize) * (attempts as usize)).min(n - 1).max(2.min(n - 1));
                     let mut t = vec![BigInt::zero()];
                     for j in 1..=deg {
                         rng_state ^= rng_state << 13;
@@ -1136,10 +1325,12 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
                     // the norm of F(r o s) - value is an integer below (2B)^index divisible by p^k1
                     let t_proof = clock();
                     let k1 = ((index as f64 * (bound + 1.0) + 2.0) / (p as f64).log2()).ceil() as u32;
+                    let t_p = clock();
                     let (zq1, rts1) = roots.lifted(k1.max(k));
                     let pows1 = powers(&zq1, &rts1, inv.max_exp);
                     let v1 = evaluate(&zq1, &pows1, &inv, &s);
                     step_proven = zq1.small_integer(&v1, bound.ceil() as u64 + 1) == Some(value.clone());
+                    prof(6, t_p);
                     trace(|| format!("  proof at precision p^{}: {} in {:.2}s", k1, step_proven, clock() - t_proof));
                 }
                 proven &= step_proven;
@@ -1147,7 +1338,7 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
                     "{} -> {} (index {}, {} of {} Frobenius-fixed cosets integral, invariant of degree {} with {} terms, value {}){}",
                     h.label(),
                     kt.label(),
-                    index,
+                    index_big,
                     ints.len(),
                     fixed.len(),
                     inv.degree,

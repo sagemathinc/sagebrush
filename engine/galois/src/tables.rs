@@ -1,4 +1,4 @@
-//! The transitive groups of degree n <= 13 (engine/group/tables): for each
+//! The transitive groups of degree n <= 13 and n = 17, 19, 23 (engine/group/tables): for each
 //! nTk its generators, order and name, the number of elements of each cycle
 //! type, and its maximal transitive subgroups up to conjugacy.  All of it
 //! was computed by sagebrush-group; only the numbering and the names were
@@ -7,17 +7,22 @@
 use sagebrush_group::Perm;
 use std::sync::OnceLock;
 
-pub const MAX_DEGREE: usize = 13;
+pub const MAX_DEGREE: usize = 23;
+
+/// The degrees with tables: 1..13 and the primes 17, 19, 23.
+pub fn supported(n: usize) -> bool {
+    (1..=13).contains(&n) || [17, 19, 23].contains(&n)
+}
 
 pub struct TGroup {
     pub n: usize,
     /// the number k in nTk
     pub k: usize,
-    pub order: u64,
+    pub order: u128,
     pub name: String,
     pub gens: Vec<Perm>,
     /// (cycle type, number of elements), types as cycle lengths largest first
-    pub types: Vec<(Vec<usize>, u64)>,
+    pub types: Vec<(Vec<usize>, u128)>,
     /// (j, y): (nTj)^y = y^-1 (nTj) y <= nTk is maximal (Perm::conj), one per class
     pub maximal: Vec<(usize, Perm)>,
 }
@@ -49,6 +54,9 @@ fn raw(n: usize) -> (&'static str, &'static str, &'static str) {
         11 => (include_str!("../../group/tables/transitive-11.txt"), include_str!("../../group/tables/cycletypes-11.txt"), include_str!("../../group/tables/maximal-11.txt")),
         12 => (include_str!("../../group/tables/transitive-12.txt"), include_str!("../../group/tables/cycletypes-12.txt"), include_str!("../../group/tables/maximal-12.txt")),
         13 => (include_str!("../../group/tables/transitive-13.txt"), include_str!("../../group/tables/cycletypes-13.txt"), include_str!("../../group/tables/maximal-13.txt")),
+        17 => (include_str!("../../group/tables/transitive-17.txt"), include_str!("../../group/tables/cycletypes-17.txt"), include_str!("../../group/tables/maximal-17.txt")),
+        19 => (include_str!("../../group/tables/transitive-19.txt"), include_str!("../../group/tables/cycletypes-19.txt"), include_str!("../../group/tables/maximal-19.txt")),
+        23 => (include_str!("../../group/tables/transitive-23.txt"), include_str!("../../group/tables/cycletypes-23.txt"), include_str!("../../group/tables/maximal-23.txt")),
         _ => ("", "", ""),
     }
 }
@@ -107,7 +115,7 @@ fn parse(n: usize) -> Vec<TGroup> {
 /// The transitive groups of degree n (1 <= n <= 12), nTk at index k - 1.
 pub fn transitive_groups(n: usize) -> &'static [TGroup] {
     static TABLES: [OnceLock<Vec<TGroup>>; MAX_DEGREE + 1] = [const { OnceLock::new() }; MAX_DEGREE + 1];
-    assert!((1..=MAX_DEGREE).contains(&n), "transitive groups are tabulated for degrees 1..{}", MAX_DEGREE);
+    assert!(supported(n), "transitive groups are tabulated for degrees 1..13, 17, 19, 23, not {}", n);
     TABLES[n].get_or_init(|| parse(n))
 }
 
@@ -144,6 +152,9 @@ fn seeds_raw(n: usize) -> &'static str {
         11 => include_str!("../tables/invariants-11.txt"),
         12 => include_str!("../tables/invariants-12.txt"),
         13 => include_str!("../tables/invariants-13.txt"),
+        17 => include_str!("../tables/invariants-17.txt"),
+        19 => include_str!("../tables/invariants-19.txt"),
+        23 => include_str!("../tables/invariants-23.txt"),
         _ => "",
     }
 }
