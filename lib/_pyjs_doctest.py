@@ -230,7 +230,12 @@ def _fresh(sage):
     ns = type(sys)("__main__")
     ns.__dict__["__name__"] = "__main__"
     if sage:
-        out, err = __pyjs_run__("from sage_all import *", ns, True)
+        saved = sys.modules.get("__main__")
+        sys.modules["__main__"] = ns
+        try:
+            out, err = __pyjs_run__("from sage_all import *", ns, True)
+        finally:
+            sys.modules["__main__"] = saved
         if err:
             raise RuntimeError(err)
     return ns
@@ -251,7 +256,13 @@ def run_docstring(name, doc, long=False, verbose=False, report=None):
             continue
         if ex.sage not in ns:
             ns[ex.sage] = _fresh(ex.sage)
-        got, err = __pyjs_run__(ex.source, ns[ex.sage], ex.sage)
+        # var() and friends define names in __main__: the example's namespace
+        saved = sys.modules.get("__main__")
+        sys.modules["__main__"] = ns[ex.sage]
+        try:
+            got, err = __pyjs_run__(ex.source, ns[ex.sage], ex.sage)
+        finally:
+            sys.modules["__main__"] = saved
         tried += 1
         bad = check(ex, got, err)
         if report is not None:

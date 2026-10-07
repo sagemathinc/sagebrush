@@ -323,6 +323,19 @@ class Expression:
         d = {Expression(_sym_s(n)): a for n, a in zip(names, args)}
         return self.subs(d, **kw)
 
+    def function(self, *args):
+        """The callable expression args |--> self (what f(x) = ... makes).
+
+        EXAMPLES::
+
+            sage: (x^2 + 1).function(x)
+            x |--> x^2 + 1
+            sage: (x^2 + 1).function(x)(3)
+            10
+        """
+        from _sage_lang import SymbolicFunction
+        return SymbolicFunction(self, args)
+
     def n(self, digits=None, prec=None):
         """The numerical value: an element of RR, or of CC if it is complex."""
         if self.is_relational():

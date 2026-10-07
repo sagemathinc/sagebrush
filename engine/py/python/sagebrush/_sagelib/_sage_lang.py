@@ -80,12 +80,24 @@ def _ellipsis(args, step, infinite):
 
 
 def ellipsis_range(*args, step=None):
-    """[a..b], [a,b..c], [a..b, step=s] as Sage computes them."""
+    """[a..b], [a,b..c], [a..b, step=s] as Sage computes them.
+
+    EXAMPLES::
+
+        sage: [1..5], [1, 3..11], [10, 8..0]
+        ([1, 2, 3, 4, 5], [1, 3, 5, 7, 9, 11], [10, 8, 6, 4, 2, 0])
+    """
     return _ellipsis(args, step, False)[0]
 
 
 def ellipsis_iter(*args, step=None):
-    """(a..b), (a,b..), (a..): an iterator, possibly infinite."""
+    """(a..b), (a,b..), (a..): an iterator, possibly infinite.
+
+    EXAMPLES::
+
+        sage: list((1..4))
+        [1, 2, 3, 4]
+    """
     out, tail = _ellipsis(args, step, True)
 
     def gen():
@@ -138,7 +150,15 @@ def _digits_real(q, digits):
     return x
 
 class RealNumber(float):
-    """A 53-bit real, printed as Sage prints elements of RR."""
+    """A 53-bit real, printed as Sage prints elements of RR.
+
+    EXAMPLES::
+
+        sage: x = RR(2); x
+        2.00000000000000
+        sage: x.sqrt(), x.exp(), x / 3
+        (1.41421356237310, 7.38905609893065, 0.666666666666667)
+    """
 
     __slots__ = ()
 
@@ -202,23 +222,67 @@ class RealNumber(float):
         return float.__hash__(self)
 
     def n(self, digits=None, prec=None):
+        """The number itself (digits: rounded to that many digits).
+
+        EXAMPLES::
+
+            sage: RR(2/3).n(), RR(2/3).numerical_approx()
+            (0.666666666666667, 0.666666666666667)
+            sage: RR(2/3).N()  # sagebrush only
+            0.666666666666667
+        """
         return self
 
     numerical_approx = N = n
 
     def sqrt(self):
+        """The square root.
+
+        EXAMPLES::
+
+            sage: RR(2).sqrt()
+            1.41421356237310
+        """
         return RealNumber(_m.sqrt(self)) if self >= 0 else complex(0, _m.sqrt(-self))
 
     def exp(self):
+        """The exponential.
+
+        EXAMPLES::
+
+            sage: RR(1).exp()
+            2.71828182845905
+        """
         return RealNumber(_m.exp(self))
 
     def log(self, base=None):
+        """The natural logarithm (or to a base).
+
+        EXAMPLES::
+
+            sage: RR(10).log(), RR(8).log(2)
+            (2.30258509299405, 3.00000000000000)
+        """
         return RealNumber(_m.log(self) if base is None else _m.log(self, base))
 
     def floor(self):
+        """The floor, an integer.
+
+        EXAMPLES::
+
+            sage: RR(2.7).floor(), RR(-2.7).floor()
+            (2, -3)
+        """
         return _m.floor(self)
 
     def ceil(self):
+        """The ceiling, an integer.
+
+        EXAMPLES::
+
+            sage: RR(2.2).ceil(), RR(-2.2).ceil()
+            (3, -2)
+        """
         return _m.ceil(self)
 
     def __round__(self, ndigits=None):
@@ -228,15 +292,43 @@ class RealNumber(float):
         return round(float(self))
 
     def round(self):
-        return int(_m.floor(self + 0.5)) if self >= 0 else -int(_m.floor(-self + 0.5))
+        """The nearest integer (halves to even, as Sage's RR).
+
+        EXAMPLES::
+
+            sage: RR(2.5).round(), RR(-2.5).round(), RR(2.4).round()
+            (2, -2, 2)
+        """
+        return round(float(self))
 
     def parent(self):
+        """The real field RR.
+
+        EXAMPLES::
+
+            sage: RR(2).parent()
+            Real Field with 53 bits of precision
+        """
         return _RealField()
 
     def is_integer(self):
+        """Whether the number is an integer.
+
+        EXAMPLES::
+
+            sage: RR(2).is_integer(), RR(2.5).is_integer()
+            (True, False)
+        """
         return float(self).is_integer()
 
     def abs(self):
+        """The absolute value.
+
+        EXAMPLES::
+
+            sage: RR(-2.5).abs()
+            2.50000000000000
+        """
         return abs(self)
 
 
@@ -255,6 +347,13 @@ class _RealField:
         return "Real Field with 53 bits of precision"
 
     def __call__(self, x):
+        """Convert x into RR.
+
+        EXAMPLES::
+
+            sage: RR(1/3), RR(2)
+            (0.333333333333333, 2.00000000000000)
+        """
         return RealNumber(float(x))
 
 
@@ -262,7 +361,15 @@ class _RealField:
 
 class SymbolicFunction:
     """f(x) = x^2: a callable expression, printed x |--> x^2.  Calling it
-    substitutes; its methods (diff, taylor, ...) give callable results."""
+    substitutes; its methods (diff, taylor, ...) give callable results.
+
+    EXAMPLES::
+
+        sage: f(x) = x^2 + 1; f
+        x |--> x^2 + 1
+        sage: f(3), f.diff(), f(x).integrate(x)
+        (10, x |--> 2*x, 1/3*x^3 + x)
+    """
 
     def __init__(self, expr, args):
         from _sage_expr import _expr
@@ -280,16 +387,40 @@ class SymbolicFunction:
         return "%s \\ {\\mapsto}\\ %s" % (a, self._expr._latex_())
 
     def __call__(self, *vals, **kw):
+        """Substitute the arguments.
+
+        EXAMPLES::
+
+            sage: f(x, y) = x^2 + y
+            sage: f(1, 2), f(x, 3)
+            (3, x^2 + 3)
+        """
         if len(vals) != len(self._args):
             raise ValueError("the number of arguments must be less than or equal to %d" % len(self._args))
         return self._expr.subs(dict(zip(self._args, vals)))
 
     def variables(self):
+        """The arguments (as Sage's variables()).
+
+        EXAMPLES::
+
+            sage: f(x, y) = x*y
+            sage: f.variables()
+            (x, y)
+        """
         return self._args
 
     arguments = variables
 
     def expression(self):
+        """The expression, as an ordinary symbolic expression.
+
+        EXAMPLES::
+
+            sage: f(x) = sin(x)^2
+            sage: f.expression()  # sagebrush only
+            sin(x)^2
+        """
         return self._expr
 
     def _fast_callable(self, names=None):
@@ -302,6 +433,14 @@ class SymbolicFunction:
         return r
 
     def diff(self, *args):
+        """The derivative, as a callable expression.
+
+        EXAMPLES::
+
+            sage: f(x) = x^3
+            sage: f.diff(), f.derivative(x, 2), f.differentiate()
+            (x |--> 3*x^2, x |--> 6*x, x |--> 3*x^2)
+        """
         return self._wrap(self._expr.diff(*(args or self._args[:1])))
 
     derivative = differentiate = diff
@@ -341,16 +480,18 @@ def _evaluate(e, subs):
     return e.subs(**subs)
 
 
-class _Symbolic:
-    def __init__(self, e):
-        self.e = e
-
-    def function(self, *args):
-        return SymbolicFunction(self.e, args)
-
-
 def symbolic_expression(e):
-    return _Symbolic(e)
+    """The symbolic expression of a number or string.
+
+    EXAMPLES::
+
+        sage: symbolic_expression(2) + x
+        x + 2
+        sage: symbolic_expression(x^2).function(x)
+        x |--> x^2
+    """
+    from _sage_expr import _expr
+    return _expr(e)
 
 
 # ------------------------------------------------------------------ Integer methods
@@ -362,6 +503,13 @@ class _CallableInt(int):
     __slots__ = ()
 
     def __call__(self):
+        """Sage's numerator() and denominator(): the int called returns itself.
+
+        EXAMPLES::
+
+            sage: (3/4).numerator(), (3/4).denominator()
+            (3, 4)
+        """
         return int(self)
 
 

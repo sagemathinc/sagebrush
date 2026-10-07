@@ -171,11 +171,20 @@ export function add(a: any, b: any): any {
   if (typeof a === "string" && typeof b === "string") return a + b;
   return addSlow(a, b);
 }
+// Does x, an instance of a Python subclass of list or tuple, define its own
+// version of the dunder `name`?
+function overrides(x: any, name: string): boolean {
+  if (x.$cls === undefined) return false;
+  const base = x.$t ? T.tuple : T.list;
+  return lookupType(typeOf(x), name) !== lookupType(base, name);
+}
 function addSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) + big(b));
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x + y);
-  if (Array.isArray(a) && Array.isArray(b) && (a as any).$t === (b as any).$t) {
+  // (instances of Python subclasses of list/tuple that define __add__ or
+  // __radd__ go through it)
+  if (Array.isArray(a) && Array.isArray(b) && (a as any).$t === (b as any).$t && !overrides(a, "__add__") && !overrides(b, "__radd__")) {
     const r = a.concat(b);
     return (a as any).$t ? tuple(r) : r;
   }
@@ -226,8 +235,8 @@ function mulSlow(a: any, b: any): any {
   if (x !== undefined && y !== undefined) return mkfloat(x * y);
   if (typeof a === "string" && repeatCount(b) !== undefined) return a.repeat(repeatCount(b)!);
   if (typeof b === "string" && repeatCount(a) !== undefined) return b.repeat(repeatCount(a)!);
-  if (Array.isArray(a) && repeatCount(b) !== undefined) return repeatArray(a, repeatCount(b)!);
-  if (Array.isArray(b) && repeatCount(a) !== undefined) return repeatArray(b, repeatCount(a)!);
+  if (Array.isArray(a) && !overrides(a, "__mul__") && repeatCount(b) !== undefined) return repeatArray(a, repeatCount(b)!);
+  if (Array.isArray(b) && !overrides(b, "__rmul__") && repeatCount(a) !== undefined) return repeatArray(b, repeatCount(a)!);
   if (a instanceof PyBytes && repeatCount(b) !== undefined) return repeatBytes(a, repeatCount(b)!);
   if (b instanceof PyBytes && repeatCount(a) !== undefined) return repeatBytes(b, repeatCount(a)!);
   return binaryDunder(a, b, "mul");
