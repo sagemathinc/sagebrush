@@ -12,6 +12,7 @@
 
 pub mod chain;
 pub mod group;
+pub mod lattice;
 pub mod named;
 pub mod perm;
 
