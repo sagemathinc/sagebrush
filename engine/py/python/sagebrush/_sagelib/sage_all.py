@@ -48,7 +48,7 @@ __all__ = [
     "dodecahedron", "icosahedron", "contour_plot", "density_plot", "implicit_plot",
     "region_plot", "plot_vector_field", "plot_slope_field",
     # interact
-    "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
+    "search_doc", "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
     "text_control",
 ]
 
@@ -117,6 +117,8 @@ def parent(x):
         return _RealField()
     raise NotImplementedError("parent of %r" % (x,))
 
+
+from _pyjs_docsearch import search_doc
 
 from _interact import (interact, slider, range_slider, selector, checkbox, input_box,
                        color_selector, text_control)
@@ -1172,7 +1174,12 @@ def _side_by_side(v):
 
 def _install_displayhook():
     import builtins
-    plain = builtins.__pyjs_displayhook__
+    import sys
+    # pyjs calls builtins.__pyjs_displayhook__; CPython's REPL sys.displayhook
+    pyjs = hasattr(builtins, "__pyjs_displayhook__")
+    plain = builtins.__pyjs_displayhook__ if pyjs else sys.displayhook
+    if getattr(plain, "_sagebrush", False):
+        return
 
     def hook(v):
         s = _side_by_side(v)
@@ -1180,7 +1187,11 @@ def _install_displayhook():
             return plain(v)
         builtins._ = v
         print(s)
-    builtins.__pyjs_displayhook__ = hook
+    hook._sagebrush = True
+    if pyjs:
+        builtins.__pyjs_displayhook__ = hook
+    else:
+        sys.displayhook = hook
 
 
 _install_displayhook()

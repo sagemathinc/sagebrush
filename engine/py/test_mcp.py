@@ -34,7 +34,7 @@ def raw():
     assert r["result"]["protocolVersion"] == "2025-06-18" and r["result"]["serverInfo"]["name"] == "sagebrush", r
     p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
     names = [t["name"] for t in rpc(p, 2, "tools/list")["result"]["tools"]]
-    assert {"sage", "python", "reset", "guide", "factor", "number_field", "newforms"} <= set(names), names
+    assert {"sage", "python", "search_docs", "reset", "guide", "factor", "number_field", "newforms"} <= set(names), names
     call = lambda rid, name, args: rpc(p, rid, "tools/call", {"name": name, "arguments": args})
     assert text(call(3, "sage", {"code": "R.<x> = QQ[]\nf = x^4 - 1\nf.factor()"})) == "(x - 1) * (x + 1) * (x^2 + 1)"
     assert text(call(4, "sage", {"code": "f.degree()"})) == "4"  # the session persists
@@ -54,6 +54,8 @@ def raw():
     assert any(c["type"] == "resource" and c["resource"]["mimeType"] == "image/svg+xml" for c in r["result"]["content"])
     assert "Number fields" in rpc(p, 13, "resources/read", {"uri": "sagebrush://guide"})["result"]["contents"][0]["text"]
     assert rpc(p, 14, "nonexistent/method")["error"]["code"] == -32601
+    t = text(rpc(p, 15, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent"}}))
+    assert t.startswith("EllipticCurve_rational_field.two_descent("), t
     p.stdin.close()
     p.wait(10)
     print("raw protocol: ok")

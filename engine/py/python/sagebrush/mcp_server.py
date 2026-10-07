@@ -93,6 +93,29 @@ the error says so.
 """
 
 
+def _docsearch():
+    """lib/_pyjs_docsearch.py as shipped in sagebrush/_sagelib (with its index)."""
+    import importlib.util
+    import os
+    path = os.path.join(os.path.dirname(__file__), "_sagelib", "_pyjs_docsearch.py")
+    spec = importlib.util.spec_from_file_location("_pyjs_docsearch", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def search_docs(query, limit=10, full=False):
+    hits = _docsearch().search(query, limit)
+    if not hits:
+        return "No function's documentation has all of the words: %s" % query
+    out = []
+    for _, e in hits:
+        head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
+        out.append(head + ("  [open problem]" if e["open_problem"] else ""))
+        out.append(("    " + e["doc"].replace("\n", "\n    ")) if full else "    " + e["summary"])
+    return "\n".join(out)
+
+
 def _text(s):
     return {"type": "text", "text": s}
 
@@ -128,6 +151,23 @@ TOOLS = [
         "Run plain Python (no Sage preparsing) in the same persistent session; the Sage names "
         "(from sagebrush.sage import *) and the engine modules (sagebrush.nf, .linalg, .poly, .mf, .modsym, .ap) are available.",
     ),
+    {
+        "name": "search_docs",
+        "description": "Search the documentation of Sagebrush's Sage library: every public function and method "
+        "with its signature, summary and docstring (tested examples; OPEN PROBLEM sections mark open problems). "
+        "Every word of the query must match; matches in the name rank first. Use it to find what Sagebrush can do; "
+        "in the sage tool, name? shows one function's full documentation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\""},
+                "limit": {"type": "number", "description": "at most this many results (default 10)"},
+                "full": {"type": "boolean", "description": "include each result's whole docstring (default false)"},
+            },
+            "required": ["query"],
+        },
+        "annotations": {"readOnlyHint": True},
+    },
     {
         "name": "reset",
         "description": "Restart the session: all variables are cleared.",
@@ -233,6 +273,8 @@ class Server:
             return [_text("The session was restarted.")], False
         if name == "guide":
             return [_text(GUIDE)], False
+        if name == "search_docs":
+            return [_text(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full"))))], False
         if name == "factor":
             n = str(args.get("n", "")).strip()
             if not n:

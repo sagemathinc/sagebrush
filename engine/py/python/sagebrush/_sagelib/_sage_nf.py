@@ -338,7 +338,7 @@ class NumberField_absolute:
         return self._bnf
 
     def class_group(self, proof=None, names="c"):
-        """The class group (assuming GRH, as Sage's default proof=False... see the engine).
+        """The class group (assuming GRH: proof=False, as in Sage).
 
         EXAMPLES::
 
