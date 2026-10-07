@@ -227,8 +227,10 @@ the engines.
 - **Plots and `@interact`:** Sage's `plot`/`point`/... and
   `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
   rerun a function in milliseconds. `plot3d`, `parametric_plot3d`,
-  `implicit_plot3d`, ... show in an interactive WebGL view (with an SVG for
-  files and agents). `contour_plot`, `density_plot`, `implicit_plot`,
+  `implicit_plot3d`, the Platonic solids, ... show in an interactive WebGL
+  view (with an SVG for files and agents). The view orbits, pans, zooms to
+  the cursor, and flies through the scene like a game (F: mouse look,
+  W A S D, gamepads). `contour_plot`, `density_plot`, `implicit_plot`,
   `region_plot`, `plot_vector_field` and `plot_slope_field` draw functions
   of two variables. `import k3d` runs notebooks written for k3d (meshes of
   millions of triangles, ray-marched volumes, standalone snapshots) in the

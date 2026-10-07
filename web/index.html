@@ -295,6 +295,10 @@ const EXAMPLES = {
     "@interact\ndef damped(a=(0.1, 3.0), w=(1, 12)):\n    show(plot(exp(-a*x)*sin(w*x), (x, 0, 6), fill='axis', gridlines=True, ymin=-1, ymax=1, figsize=(7, 3)))",
     "# The prime counting function against the PNT prediction (press ▶)\n@interact\ndef f(N=(10, 1000, 5)):\n    show(list_plot([prime_pi(k) for k in range(3, N)], plotjoined=True, legend_label='prime_pi') +\n         plot(x/(log(x) - 1), (x, 3, N), color='red', legend_label='x/(log(x)-1)'))",
     "# animate: frames on common axes; the result is an animated SVG\na = animate([plot(sin(x - k)*exp(-x/6), (x, 0, 4*pi), fill='axis', thickness=2) for k in srange(0, 2*pi, 0.2)], figsize=(7, 3))\na.show(delay=5)",
+    {"md": "## 3D\n\nDrag to turn a scene (flick it to spin), right-drag to pan, click it and scroll to zoom toward the cursor, double-click a surface to orbit that point. Press **F** (or *Fly*) to fly through it like a game: the mouse looks around, W A S D move, Space and Q go up and down, Shift is faster."},
+    "# The Platonic solids; translate, rotate and scale move any 3D graphics\nicosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()",
+    "sum(s(center=(3*k, 0, 0), color=c) for k, (s, c) in enumerate([(tetrahedron, 'red'), (cube, 'gold'), (octahedron, 'green'), (dodecahedron, 'blue'), (icosahedron, 'purple')]))",
+    "x, y, z = var('x y z')\nimplicit_plot3d(x^4 - 5*x^2 + y^4 - 5*y^2 + z^4 - 5*z^2 + 11.8, (x, -2.5, 2.5), (y, -2.5, 2.5), (z, -2.5, 2.5), color='gold')",
   ],
   "Modular forms (Sage)": [
     {"md": "## Modular forms\n\nThese run on Sagebrush's Rust engines, compiled to WebAssembly. The Hecke polynomial of $T_p$ on the modular symbols for $\\Gamma_0(N)$ is exact and *proven*, and the Sato–Tate moments of $a_p^2/p$ approach the Catalan numbers $1, 2, 5, 14, \\dots$"},

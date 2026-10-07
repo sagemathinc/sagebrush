@@ -122,6 +122,25 @@ print(g._svg() == g._svg())
   assert.match(html, /SagebrushViewer3d\.mount\(document\.getElementById\("sb3d-/);
 });
 
+test("3D: Platonic solids, translate, rotate and scale", () => {
+  const out = cli("--sage", "-c", `
+g = icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()
+print(g.description())
+print([len(s()[0].faces) for s in (tetrahedron, cube, octahedron, dodecahedron, icosahedron)])
+print(sorted(set(len(f) for f in dodecahedron()[0].faces)), [round(v, 6) for v in cube(size=2).bounding_box()[1]])
+print([round(v, 6) for v in cube().rotateZ(pi/4).scale(1, 1, 3).translate(1, 0, 0).bounding_box()[1]])
+import json
+s = json.loads(g._repr_mimebundle_()['application/vnd.sagebrush.scene3d+json'])
+print([(o['color'], o['opacity'], o.get('flat'), len(o['idx']) // 3) for o in s['objects']])
+`);
+  const lines = out.trim().split("\n");
+  assert.equal(lines[0], "3D plot: icosahedron of 20 polygons, tetrahedron of 4 polygons; x from -0.8507 to 0.9428; y from -0.8507 to 0.8507; z from -0.3333 to 1.851");
+  assert.equal(lines[1], "[4, 6, 8, 12, 20]");
+  assert.equal(lines[2], "[5] [1.0, 1.0, 1.0]");
+  assert.equal(lines[3], "[1.707107, 0.707107, 1.5]");
+  assert.equal(lines[4], "[('#ffa500', 0.5, True, 20), ('#0000ff', 1.0, True, 4)]");
+});
+
 test("contour, density, implicit, region, vector and slope field plots", () => {
   const out = cli("--sage", "-c", `
 y = var('y')
