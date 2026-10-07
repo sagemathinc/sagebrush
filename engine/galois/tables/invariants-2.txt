@@ -1,0 +1,5 @@
+# Relative invariants for the maximal transitive subgroups of the transitive groups of
+# degree 2 (engine/group/tables/maximal-2.txt), found by sagebrush-galois
+# (examples/write_invariants.rs).  Per line, k:mi ; seed, where mi numbers the maximal
+# subgroups of nTk from 0 and the seed is "m p^e ..." (the orbit sum of a monomial)
+# or "p U/V ..." (the product over the orbits of these linear forms), points 1..n.

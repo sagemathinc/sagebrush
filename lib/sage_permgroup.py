@@ -507,7 +507,7 @@ def KleinFourGroup():
 
 class TransitiveGroup(_Named):
     """The transitive group nTk: number k of degree n in the standard
-    numbering (degrees up to 12).  Sagebrush computed these groups itself
+    numbering (degrees up to 13).  Sagebrush computed these groups itself
     (engine/group); the numbering and the names were matched against GAP's
     transitive groups library."""
 
@@ -535,7 +535,7 @@ class TransitiveGroup(_Named):
 
 
 class TransitiveGroups:
-    """The transitive groups of degree n, up to conjugacy (n <= 12)."""
+    """The transitive groups of degree n, up to conjugacy (n <= 13)."""
 
     def __init__(self, n):
         self._n = int(n)
@@ -560,12 +560,15 @@ class TransitiveGroups:
         return isinstance(G, TransitiveGroup) and G._n == self._n
 
 
-def galois_group(f):
-    """The Galois group of an irreducible polynomial over QQ (degree <= 12),
-    as a TransitiveGroup.  G.proven tells whether every step was rigorous;
-    G.galois_log() says how it was found."""
+def galois_group(f, proof=None):
+    """The Galois group of an irreducible polynomial over QQ (degree <= 13),
+    given by its integer coefficients (constant term first), as a
+    TransitiveGroup.  G.proven tells whether every step was proven
+    (proof=None proves the steps that are cheap to prove, proof=True all of
+    them, however long that takes, proof=False none); G.galois_log() says
+    how the group was found."""
     c = [str(a) for a in f]
-    r = _call("galois_group", f=",".join(c))
+    r = _call("galois_group", f=",".join(c), proof=proof)
     G = TransitiveGroup(r["n"], r["k"])
     G.proven = r["proven"]
     G._log = r["log"]

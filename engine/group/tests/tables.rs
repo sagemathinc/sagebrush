@@ -13,7 +13,7 @@ fn inv(g: &Group) -> String {
 #[test]
 fn our_tables_match_magma() {
     let oracle = include_str!("data/transitive-2-15.txt");
-    for n in 2..=12usize {
+    for n in 2..=13usize {
         let table = std::fs::read_to_string(format!("{}/tables/transitive-{}.txt", env!("CARGO_MANIFEST_DIR"), n)).unwrap();
         let ours: Vec<String> = table
             .lines()

@@ -33,7 +33,7 @@ fn maximal_subgroups_match_gap() {
         }
     }
     let mut checked = 0;
-    for n in 2..=12usize {
+    for n in 2..=13usize {
         let gs = groups(n);
         let m = gs.len();
         let text = std::fs::read_to_string(format!("{}/tables/maximal-{}.txt", env!("CARGO_MANIFEST_DIR"), n)).unwrap();
@@ -62,5 +62,5 @@ fn maximal_subgroups_match_gap() {
             }
         }
     }
-    assert_eq!(checked, 473);
+    assert_eq!(checked, 482);
 }

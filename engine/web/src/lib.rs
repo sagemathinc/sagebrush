@@ -454,7 +454,12 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         // ---- Galois groups over Q and the transitive groups nTk (engine/galois) ----
         "galois_group" => {
             let f = bigs(v.get("f"))?;
-            let g = sagebrush_galois::galois_group(&f)?;
+            let proof = match v.get("proof") {
+                Some(Value::Bool(true)) => sagebrush_galois::Proof::Always,
+                Some(Value::Bool(false)) => sagebrush_galois::Proof::Never,
+                _ => sagebrush_galois::Proof::WhenCheap,
+            };
+            let g = sagebrush_galois::galois_group_with(&f, proof)?;
             let t = &sagebrush_galois::tables::transitive_groups(g.degree)[g.number - 1];
             Ok(json!({ "n": g.degree, "k": g.number, "order": g.order.to_string(), "name": g.name, "proven": g.proven,
                        "log": g.log, "gens": perm_json(&t.gens) }))

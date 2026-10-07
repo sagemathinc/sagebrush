@@ -1,4 +1,4 @@
-//! The transitive groups of degree n <= 12 (engine/group/tables): for each
+//! The transitive groups of degree n <= 13 (engine/group/tables): for each
 //! nTk its generators, order and name, the number of elements of each cycle
 //! type, and its maximal transitive subgroups up to conjugacy.  All of it
 //! was computed by sagebrush-group; only the numbering and the names were
@@ -7,7 +7,7 @@
 use sagebrush_group::Perm;
 use std::sync::OnceLock;
 
-pub const MAX_DEGREE: usize = 12;
+pub const MAX_DEGREE: usize = 13;
 
 pub struct TGroup {
     pub n: usize,
@@ -48,6 +48,7 @@ fn raw(n: usize) -> (&'static str, &'static str, &'static str) {
         10 => (include_str!("../../group/tables/transitive-10.txt"), include_str!("../../group/tables/cycletypes-10.txt"), include_str!("../../group/tables/maximal-10.txt")),
         11 => (include_str!("../../group/tables/transitive-11.txt"), include_str!("../../group/tables/cycletypes-11.txt"), include_str!("../../group/tables/maximal-11.txt")),
         12 => (include_str!("../../group/tables/transitive-12.txt"), include_str!("../../group/tables/cycletypes-12.txt"), include_str!("../../group/tables/maximal-12.txt")),
+        13 => (include_str!("../../group/tables/transitive-13.txt"), include_str!("../../group/tables/cycletypes-13.txt"), include_str!("../../group/tables/maximal-13.txt")),
         _ => ("", "", ""),
     }
 }
@@ -108,4 +109,41 @@ pub fn transitive_groups(n: usize) -> &'static [TGroup] {
     static TABLES: [OnceLock<Vec<TGroup>>; MAX_DEGREE + 1] = [const { OnceLock::new() }; MAX_DEGREE + 1];
     assert!((1..=MAX_DEGREE).contains(&n), "transitive groups are tabulated for degrees 1..{}", MAX_DEGREE);
     TABLES[n].get_or_init(|| parse(n))
+}
+
+/// The seed of the invariant (see the crate) for the maximal subgroup
+/// number mi (from 0) of nTk, from tables/invariants-<n>.txt if present.
+pub fn invariant_seed(n: usize, k: usize, mi: usize) -> Option<&'static str> {
+    static SEEDS: [OnceLock<std::collections::HashMap<(usize, usize), &'static str>>; MAX_DEGREE + 1] = [const { OnceLock::new() }; MAX_DEGREE + 1];
+    let text = seeds_raw(n);
+    SEEDS[n]
+        .get_or_init(|| {
+            body(text)
+                .filter_map(|l| {
+                    let (key, seed) = l.split_once(';')?;
+                    let (k, mi) = key.trim().split_once(':')?;
+                    Some(((k.parse().ok()?, mi.parse().ok()?), seed.trim()))
+                })
+                .collect()
+        })
+        .get(&(k, mi))
+        .copied()
+}
+
+fn seeds_raw(n: usize) -> &'static str {
+    match n {
+        2 => include_str!("../tables/invariants-2.txt"),
+        3 => include_str!("../tables/invariants-3.txt"),
+        4 => include_str!("../tables/invariants-4.txt"),
+        5 => include_str!("../tables/invariants-5.txt"),
+        6 => include_str!("../tables/invariants-6.txt"),
+        7 => include_str!("../tables/invariants-7.txt"),
+        8 => include_str!("../tables/invariants-8.txt"),
+        9 => include_str!("../tables/invariants-9.txt"),
+        10 => include_str!("../tables/invariants-10.txt"),
+        11 => include_str!("../tables/invariants-11.txt"),
+        12 => include_str!("../tables/invariants-12.txt"),
+        13 => include_str!("../tables/invariants-13.txt"),
+        _ => "",
+    }
 }
