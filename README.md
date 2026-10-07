@@ -224,6 +224,14 @@ the engines.
     equations of `corpus/odes.json`, and every explicit solution is
     verified by substitution.
   - `desolve_rk4` integrates numerically.
+- **Permutation groups** (engine/group, the start of Galois groups):
+  Sage's `PermutationGroup`, `SymmetricGroup`, `AlternatingGroup`,
+  `DihedralGroup`, `MathieuGroup`, `PSL(2, p)`, and more. They have exact
+  orders and membership, from stabilizer chains that the deterministic
+  Schreier-Sims test proves. Also: orbits, stabilizers, blocks and block
+  systems, primitivity, multiple transitivity, derived series and
+  solvability. All 2604 transitive groups of degree up to 16 agree with
+  Magma on eight properties each (`engine/group/tests`).
 - **Plots and `@interact`:** Sage's `plot`/`point`/... and
   `matplotlib.pyplot` draw deterministic, self-describing SVG, and controls
   rerun a function in milliseconds. `plot3d`, `parametric_plot3d`,

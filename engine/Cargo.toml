@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["interrupt", "bigint", "arith", "sym", "modsym", "ap", "poly", "classgroup", "flint", "cli", "py", "wasm", "node", "web"]
+members = ["interrupt", "bigint", "arith", "group", "sym", "modsym", "ap", "poly", "classgroup", "flint", "cli", "py", "wasm", "node", "web"]
 
 [profile.release]
 opt-level = 3
