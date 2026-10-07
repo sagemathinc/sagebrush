@@ -228,6 +228,8 @@
 <div id="filemenu" role="menu" aria-label="Notebook" hidden>
   <button role="menuitem" data-f="new">New notebook</button>
   <button role="menuitem" data-f="open">Open…</button>
+  <button role="menuitem" data-f="openfile" hidden>Open file…</button>
+  <button role="menuitem" data-f="saveas" hidden>Save as…</button>
   <button role="menuitem" data-f="duplicate">Duplicate</button>
   <hr>
   <button role="menuitem" data-f="ipynb">Download .ipynb</button>
@@ -411,6 +413,19 @@ function paint(cell) { cell.hl.innerHTML = cell.type === "markdown" ? esc(cell.t
 // computer, behind the local server, with its files, and the notebook is
 // that .ipynb file on disk.
 const LOCAL = window.__SAGEBRUSH_LOCAL__ || null;
+// The desktop app (app/, Tauri): this page in the system's web view, with
+// native dialogs and the computer's files (window.__TAURI__)
+const TAURI = window.__TAURI__ || null;
+// during the app's self-test, the page's console goes to the app's stderr
+if (TAURI) TAURI.core.invoke("selftest_file").then((st) => {
+  if (!st) return;
+  const log = (kind, args) => TAURI.core.invoke("app_log", { message: kind + " " + args.map((a) => (a instanceof Error ? a.stack : typeof a === "string" ? a : JSON.stringify(a))).join(" ") }).catch(() => {});
+  for (const k of ["log", "warn", "error"]) { const f = console[k]; console[k] = (...a) => { log(k, a); f.apply(console, a); }; }
+  addEventListener("error", (e) => log("error", [e.message + " at " + e.filename + ":" + e.lineno]));
+  addEventListener("unhandledrejection", (e) => log("rejection", [String(e.reason?.stack ?? e.reason)]));
+  log("start", [location.href, "isolated=" + window.crossOriginIsolated, "secure=" + window.isSecureContext]);
+  fetch(location.href).then((r) => log("headers", [[...r.headers].map((h) => h.join(": ")).join("; ")])).catch((e) => log("headers", [String(e)]));
+});
 // The local server's Python, with a Worker's interface: messages go by POST,
 // and come back as server-sent events.
 class RemoteWorker {
@@ -438,9 +453,14 @@ function startWorker() {
   const t0 = performance.now();
   worker = LOCAL ? new RemoteWorker() : new Worker("sagebrush-worker.js", { type: "module" });
   filesSent = LOCAL ? Promise.resolve() : sendFiles(worker);
+  if (diskFiles.length) worker.postMessage({ files: diskFiles });
   worker.onmessage = (ev) => {
     const m = ev.data;
-    if (m.fsChanged !== undefined) return fileChanged(m.fsChanged, m.data);
+    if (m.fsChanged !== undefined) {
+      // in the app, a file Python wrote in its top folder goes to the notebook's folder
+      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) TAURI.fs.writeFile(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data).catch((e) => console.warn(e));
+      return fileChanged(m.fsChanged, m.data);
+    }
     if (m.ready) {
       version = m.version || "";
       interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
@@ -922,7 +942,8 @@ function setType(cell, type) {
   relabel();
 }
 let mdModule = null, mathModule = null;
-const afterPaint = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+// (or 200 ms, whichever is first: a hidden page, e.g. a background tab, does not paint)
+const afterPaint = () => new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
 const loadMd = () => (mdModule ??= Promise.resolve(globalThis.__sbMarkdown)); // web/markdown.ts, bundled into this script by web/build.ts
 // Highlight fenced Python/Sage code in Markdown as in code cells.
 const mdHighlight = (code, lang) => (!lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
@@ -1214,12 +1235,61 @@ async function saveNow() {
   clearTimeout(saveTimer);
   // (only the notebook from disk saves there: examples and others stay in the browser)
   if (LOCAL && nb.id === "local:" + LOCAL.path) return saveLocal();
+  if (diskFile && nb.id === "file:" + diskFile.path) return saveDisk();
   if (loading || !nb.id || !db) return;
   try {
     await idb("notebooks", "readwrite", (st) => st.put(snapshot()));
     savedEl.textContent = "saved in this browser";
   } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
 }
+// The app: a notebook opened from the computer is its .ipynb file, and the
+// files in its folder are Python's files (read when it opens; what Python
+// writes goes back there)
+let diskFile = null, diskFiles = [], diskSaved = null;
+const splitPath = (p) => { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return { dir: p.slice(0, i), sep: p[i] || "/", name: p.slice(i + 1) }; };
+async function bindDiskFile(path) {
+  const { dir, sep, name } = splitPath(path);
+  diskFile = { path, dir, sep, name };
+  nb.id = "file:" + path;
+  nbName.value = name.replace(/\.ipynb$/i, "");
+  diskSaved = null;
+  try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
+}
+async function openDiskFile(path) {
+  try {
+    const { dir, sep, name } = splitPath(path);
+    const doc = fromFile(name, await TAURI.fs.readTextFile(path));
+    await saveNow();
+    show({ ...doc, id: newId() });
+    if (/\.ipynb$/i.test(name)) await bindDiskFile(path);
+    else { diskFile = null; nb.id = newId(); }
+    // the folder's files (not hidden; up to 64 MB each, 256 MB in all) for Python
+    diskFiles = [];
+    let total = 0;
+    for (const e of await TAURI.fs.readDir(dir)) {
+      if (!e.isFile || e.name.startsWith(".") || e.name === name) continue;
+      const p = dir + sep + e.name;
+      const size = (await TAURI.fs.stat(p)).size;
+      if (size > 64e6 || total + size > 256e6) continue;
+      total += size;
+      diskFiles.push(["/" + e.name, await TAURI.fs.readFile(p)]);
+    }
+    worker.postMessage({ files: diskFiles });
+    statusEl.textContent = `opened ${name}` + (diskFiles.length ? ` (${diskFiles.length} file${diskFiles.length === 1 ? "" : "s"} from its folder)` : "");
+    saveNow();
+  } catch (e) { statusEl.textContent = `could not open ${path}: ${e?.message ?? e}`; }
+}
+async function saveDisk() {
+  if (loading) return;
+  const text = toIpynb();
+  if (text === diskSaved) return;
+  try {
+    await TAURI.fs.writeTextFile(diskFile.path, text);
+    diskSaved = text;
+    savedEl.textContent = "saved to " + diskFile.name;
+  } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
+}
+
 // local mode: the notebook is the .ipynb file
 let localSaved = null;
 async function saveLocal() {
@@ -1365,6 +1435,16 @@ fileMenu.addEventListener("click", async (e) => {
     case "py": { const cm = isMagma() ? "//" : "#"; download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), cells().map((c) => (c.type === "markdown" ? cm + " %% [markdown]\n" + c.ta.value.split("\n").map((l) => (l ? cm + " " + l : cm)).join("\n") : cm + " %%\n" + c.ta.value)).join("\n\n") + "\n", isMagma() ? "text/plain" : "text/x-python"); } break;
     case "import": $("#importinput").click(); break;
     case "install": installPrompt?.prompt(); break;
+    case "openfile": {
+      const p = await TAURI.dialog.open({ multiple: false, filters: [{ name: "Notebooks", extensions: ["ipynb", "sage", "py", "m"] }] });
+      if (p) await openDiskFile(String(p));
+      break;
+    }
+    case "saveas": {
+      const p = await TAURI.dialog.save({ defaultPath: fileBase() + ".ipynb", filters: [{ name: "Jupyter notebook", extensions: ["ipynb"] }] });
+      if (p) { await bindDiskFile(String(p)); await saveNow(); }
+      break;
+    }
     case "share": {
       const url = await shareLink();
       history.replaceState(null, "", url);
@@ -1601,10 +1681,49 @@ try {
   console.warn("WebMCP:", e);
 }
 
+// SAGEBRUSH_APP_SELFTEST=<notebook> (app/): open the notebook, run it, check
+// its outputs and the computer's files, save, and report to the app
+async function selftest(path) {
+  const checks = [];
+  const check = (name, okv, detail = "") => { const line = (okv ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : ""); checks.push(line); console.log(line); };
+  const until = async (f, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
+  try {
+    check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
+    check("cross-origin isolated (Stop keeps variables)", window.crossOriginIsolated === true);
+    await openDiskFile(path);
+    check("opened the notebook from disk", nb.id === "file:" + path && cells().length > 0, statusEl.textContent);
+    await runAll();
+    await until(() => !cells().some((c) => /\*/.test(c.el.querySelector(".n")?.textContent ?? "")), 120000);
+    const out = cells().map((c) => c.el.querySelector(".out")?.textContent ?? "").join("\n");
+    check("ran it: Sage and the engines", out.includes("274177 * 67280421310721"), JSON.stringify(out.slice(0, 300)));
+    check("Python read a file in the notebook's folder", out.includes("from-disk 5,6"));
+    check("3D graphics", !!document.querySelector("figure.plot3d"));
+    await new Promise((r) => setTimeout(r, 1500));
+    const written = await TAURI.fs.readTextFile(diskFile.dir + diskFile.sep + "written-by-python.txt").catch(() => null);
+    check("what Python wrote is in the notebook's folder", written === "hello from Python", JSON.stringify(written));
+    // Stop: KeyboardInterrupt in a running loop, keeping the variables
+    const exec = (code) => new Promise((resolve) => {
+      let text = "";
+      submit(code, { start() {}, out(t) { text += t; }, display() {}, interact() {}, clear() {}, done() { resolve(text); }, stopped(m) { resolve(text + (m || "")); }, skipped() { resolve(text); } });
+    });
+    const looping = exec("keep = 41\nwhile True:\n    pass");
+    await new Promise((r) => setTimeout(r, 1000));
+    interrupt("\n(restarted)\n");
+    const stopped = await looping;
+    check("Stop interrupts a loop", /KeyboardInterrupt/.test(stopped) && !/restarted/.test(stopped), JSON.stringify(stopped.slice(-60)));
+    check("...and keeps the variables", (await exec("print(keep + 1)")).includes("42"));
+    await saveNow();
+    const saved = JSON.parse(await TAURI.fs.readTextFile(path));
+    check("saved the notebook with its outputs", saved.cells.some((c) => (c.outputs ?? []).some((o) => JSON.stringify(o).includes("274177"))));
+  } catch (e) { check("no exception", false, String(e?.stack ?? e)); }
+  const ok = checks.every((c) => c.startsWith("ok"));
+  await TAURI.core.invoke("selftest_report", { report: checks.join("\n") + (ok ? "\nall passed" : ""), ok });
+}
+
 // The app: offline (web/sw.js) and installable; not under `sagebrush notebook`,
 // which serves its own files
 let installPrompt = null;
-if ("serviceWorker" in navigator && !LOCAL && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1"))
+if ("serviceWorker" in navigator && !LOCAL && !TAURI && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1"))
   navigator.serviceWorker.register("sw.js").catch((e) => console.warn("service worker:", e));
 addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
@@ -1674,6 +1793,17 @@ addEventListener("appinstalled", () => { installPrompt = null; document.querySel
   await afterPaint();
   startWorker();
   if (qs.has("run")) { await filesSent; runAll(); }
+  // the app: its menu items, files the system hands it, the self-test
+  if (TAURI) {
+    for (const b of document.querySelectorAll('[data-f="openfile"], [data-f="saveas"]')) b.hidden = false;
+    const install = document.querySelector('[data-f="install"]');
+    if (install) install.remove();
+    // files the system handed the app (double-clicked, or on the command line)
+    TAURI.event.listen("open-files", (ev) => { for (const p of ev.payload ?? []) openDiskFile(p); });
+    for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p);
+    const st = await TAURI.core.invoke("selftest_file");
+    if (st) selftest(st);
+  }
 })();
 
 </script>

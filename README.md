@@ -303,6 +303,15 @@ sagebrush.space itself is also an app: open it once, and it works offline
 installed app opens `.ipynb`, `.py` and `.sage` files from the computer.
 `web/test-pwa.mjs` loads it, stops the server, and runs Python offline.
 
+### The desktop app
+
+`app/` is Sagebrush as a desktop app for macOS, Linux and Windows (Tauri 2,
+using the system's web view; the macOS app is 6 MB and its `.dmg` 4 MB).
+It opens and saves `.ipynb` files with the system's dialogs, gives Python the
+files in the notebook's folder, and opens double-clicked notebooks. CI
+builds it for all three systems and runs its self-test in each one's web
+view. See [app/README.md](app/README.md).
+
 ### A Jupyter kernel
 
 ```sh
