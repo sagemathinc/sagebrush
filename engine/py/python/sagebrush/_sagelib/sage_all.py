@@ -1138,3 +1138,49 @@ import sys as _sys
 _Integer = _install_int_methods(_sys.modules[__name__])
 if _Integer is not None:
     Integer = _Integer
+
+
+# Sage shows a tuple or list of objects printed on several lines (matrices)
+# side by side, each bottom-aligned, the brackets on lines of their own:
+#   (
+#   [1 0 0]
+#   [0 1 0]  [1 0]
+#   [0 0 1], [0 1]
+#   )
+def _side_by_side(v):
+    if type(v) not in (tuple, list) or not v:
+        return None
+    reprs = [repr(x) for x in v]
+    if not any("\n" in r for r in reprs):
+        return None
+    blocks = [r.split("\n") for r in reprs]
+    h = max(len(b) for b in blocks)
+    widths = [max(len(l) for l in b) for b in blocks]
+    rows = []
+    for i in range(h):
+        line = ""
+        for k, b in enumerate(blocks):
+            off = h - len(b)
+            line += (b[i - off] if i >= off else "").ljust(widths[k])
+            if k < len(blocks) - 1:
+                line += ", " if i == h - 1 else "  "
+        rows.append(line)
+    width = max(len(r) for r in rows)
+    o, c = ("(", ")") if type(v) is tuple else ("[", "]")
+    return o + "\n" + "\n".join(r.ljust(width) for r in rows) + "\n" + c
+
+
+def _install_displayhook():
+    import builtins
+    plain = builtins.__pyjs_displayhook__
+
+    def hook(v):
+        s = _side_by_side(v)
+        if s is None:
+            return plain(v)
+        builtins._ = v
+        print(s)
+    builtins.__pyjs_displayhook__ = hook
+
+
+_install_displayhook()

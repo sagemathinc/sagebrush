@@ -196,10 +196,14 @@ const CALC = /^(\s*)([A-Za-z_]\w*)\s*\(([^()=]+)\)\s*=(?!=)\s*(.+)$/;
 function calculus(line: string): string {
   const m = CALC.exec(line);
   if (!m) return line;
-  const [, indent, f, args, expr] = m;
+  const [, indent, f, args, rhs] = m;
   const vars = args.split(",").map((v) => v.trim());
   if (!vars.every((v) => /^[A-Za-z_]\w*$/.test(v))) return line;
-  return `${indent}__tmp__=var("${vars.join(",")}"); ${f} = symbolic_expression(${expr.trim()}).function(${vars.join(",")})`;
+  // f(x) = x^2; f: the definition ends at a top-level ';'
+  const semi = topLevelSemicolon(rhs);
+  const expr = semi < 0 ? rhs : rhs.slice(0, semi);
+  const rest = semi < 0 ? "" : rhs.slice(semi);
+  return `${indent}__tmp__=var("${vars.join(",")}"); ${f} = symbolic_expression(${expr.trim()}).function(${vars.join(",")})${rest}`;
 }
 
 function expression(code: string): string {
@@ -211,7 +215,8 @@ function expression(code: string): string {
 
 /** The whole preparser, on a module's source. */
 export function preparse(source: string): string {
-  if (!/\.\.|\d|\.</.test(source)) return source;
+  // (nothing to do without digits, .., R.<x> or f(x) = ...)
+  if (!/\.\.|\d|\.<|\)\s*=(?!=)/.test(source)) return source;
   const [code, lits] = stripLiterals(source);
   let L = expression(code);
   L = L.split("\n").map((line) => calculus(generators(line))).join("\n");

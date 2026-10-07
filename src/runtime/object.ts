@@ -435,6 +435,18 @@ function descrGet(d: any, o: any, t: PyType): any {
   return d;
 }
 
+// __getattr__(o, name); with a default (getattr(o, name, dflt)) an
+// AttributeError from it gives the default, as in CPython.
+function callGetattrHook(gf: any, o: any, name: string, dflt: any): any {
+  if (dflt === undefined) return gf(o, name);
+  try {
+    return gf(o, name);
+  } catch (e) {
+    if (!isinstance(e, T.AttributeError)) throw e;
+    return dflt;
+  }
+}
+
 export function getattr(o: any, name: string, dflt?: any): any {
   if (isType(o)) return typeGetattr(o, name, dflt);
   const t = typeOf(o);
@@ -446,7 +458,7 @@ export function getattr(o: any, name: string, dflt?: any): any {
       } catch (e) {
         if (!isinstance(e, T.AttributeError)) throw e;
         const gf = lookupType(t, "__getattr__");
-        if (gf !== undefined) return gf(o, name);
+        if (gf !== undefined) return callGetattrHook(gf, o, name, dflt);
         if (dflt !== undefined) return dflt;
         throw e;
       }
@@ -463,7 +475,7 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any
   if (typeof o === "function" && o.$attrs !== undefined && o.$attrs.has(name)) return o.$attrs.get(name);
   if (d !== undefined) return descrGetOrGetattr(d, o, t, name);
   const gf = lookupType(t, "__getattr__");
-  if (gf !== undefined) return gf(o, name);
+  if (gf !== undefined) return callGetattrHook(gf, o, name, dflt);
   if (dflt !== undefined) return dflt;
   if (t.$name === "module" && hasInstanceDict(o) && typeof o.__name__ === "string") raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'`);
   raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'`);
