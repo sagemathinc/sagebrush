@@ -984,6 +984,9 @@ def host_display(obj):
 def show(obj, save_name="plot"):
     """Display obj richly when the host can (the browser, Jupyter); else
     write an SVG file and print its path (the command line)."""
+    import builtins
+    if getattr(builtins, "__sagebrush_doctest__", False):
+        return None  # doctests show the repr only, as Sage's do
     shown = host_display(obj)
     if shown:
         return None

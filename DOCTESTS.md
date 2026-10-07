@@ -1,7 +1,8 @@
 # Doctests
 
-Every public function of Sagebrush's Sage library should have examples in its
-docstring, in Sage's format, and they are tested:
+Every public function of Sagebrush's Sage library has examples in its
+docstring, in Sage's format (749 of 749 in the modules of
+test/doctest-coverage.json, October 2026), and they are tested:
 
 ```
 sage: E = EllipticCurve('389a1')
@@ -61,7 +62,8 @@ Differences from Sage that the doctests show and that are not fixed yet:
   named simple groups, and finds proper normal closures; other perfect groups
   raise NotImplementedError.
 
-The local Sage's GAP interface crashes (segmentation fault) on permutation
+The local Sage has no Maxima (examples of solve, limit, simplify, desolve,
+... are tagged `# needs maxima`, which Sage skips) and its GAP interface crashes (segmentation fault) on permutation
 groups and Galois groups, so `sage_permgroup` and the `galois_group` examples
 are not checked by the oracle here; that code was validated against GAP
 itself (engine/group/tests) and Magma (engine/galois/tests).

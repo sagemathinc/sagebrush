@@ -314,11 +314,15 @@ B.builtins.__pyjs_run__ = Obj.builtin((src: any, ns: any, sage: any) => {
   so.write = (s: string) => void out.push(s);
   se.write = (s: string) => void out.push(s);
   let err: string | null = null;
+  // values display as their text repr, as in Sage's doctests (no rich host)
+  const host = R.host;
+  R.host = null;
   try {
     (M.loader.exec as any)(String(src), ns, "single", "<doctest>", { sage: O.truth(sage) });
   } catch (e) {
     err = formatException(Obj.toPyExc(e));
   } finally {
+    R.host = host;
     delete so.write;
     delete se.write;
   }

@@ -241,6 +241,11 @@ def _fresh(sage):
     return ns
 
 
+def _doctest_mode(on):
+    import builtins
+    builtins.__sagebrush_doctest__ = on
+
+
 def run_docstring(name, doc, long=False, verbose=False, report=None):
     """(tried, failures) for one docstring; report(name, ex, got, err, bad)
     is called for every example run."""
@@ -259,10 +264,12 @@ def run_docstring(name, doc, long=False, verbose=False, report=None):
         # var() and friends define names in __main__: the example's namespace
         saved = sys.modules.get("__main__")
         sys.modules["__main__"] = ns[ex.sage]
+        _doctest_mode(True)
         try:
             got, err = __pyjs_run__(ex.source, ns[ex.sage], ex.sage)
         finally:
             sys.modules["__main__"] = saved
+            _doctest_mode(False)
         tried += 1
         bad = check(ex, got, err)
         if report is not None:

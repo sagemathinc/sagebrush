@@ -21,20 +21,55 @@ _next = [0]
 
 
 class Control:
+    """The base class of interact controls.
+
+    EXAMPLES::
+
+        sage: from _interact import Control  # sagebrush only
+        sage: Control(3).spec()  # sagebrush only
+        {'kind': 'input', 'value': 3}
+    """
     kind = "input"
 
     def __init__(self, default=None, label=None):
         self.default, self.label = default, label
 
+    def __repr__(self):
+        return "%s(%s)" % (type(self).__name__, ", ".join("%s=%r" % kv for kv in sorted(self.spec().items()) if kv[0] != "kind"))
+
     def spec(self):
+        """The control's description sent to the page (kind, value, ...).
+
+        EXAMPLES::
+
+            sage: slider(0, 10).spec()  # sagebrush only
+            {'ints': True, 'kind': 'slider', 'max': 10.0, 'min': 0.0, 'step': 1.0, 'value': 0.0}
+        """
         return {"kind": self.kind, "value": self.default}
 
     def convert(self, v):
+        """The argument value for a value from the page.
+
+        EXAMPLES::
+
+            sage: slider(0, 10).convert(3)  # sagebrush only
+            3
+        """
         return v
 
 
 class slider(Control):
-    """slider(vmin, vmax, step_size=None, default=None, label=None) or slider(list_of_values)."""
+    """slider(vmin, vmax, step_size=None, default=None, label=None) or slider(list_of_values).
+
+    EXAMPLES::
+
+        sage: s = slider(0, 10, 1, 5); s  # sagebrush only
+        slider(ints=True, max=10.0, min=0.0, step=1.0, value=5.0)
+        sage: s.default  # sagebrush only
+        5
+        sage: slider([1, 2, 4, 8]).spec()  # sagebrush only
+        {'kind': 'slider', 'labels': ['1', '2', '4', '8'], 'max': 3, 'min': 0, 'step': 1, 'value': 0}
+    """
     kind = "slider"
 
     def __init__(self, vmin, vmax=None, step_size=None, default=None, label=None, display_value=True):
@@ -51,6 +86,13 @@ class slider(Control):
         self.default = vmin if default is None else default
 
     def spec(self):
+        """The control's description for the page.
+
+        EXAMPLES::
+
+            sage: slider(0, 10, 2).spec()  # sagebrush only
+            {'ints': True, 'kind': 'slider', 'max': 10.0, 'min': 0.0, 'step': 2.0, 'value': 0.0}
+        """
         if self.values is not None:
             return {"kind": "slider", "min": 0, "max": len(self.values) - 1, "step": 1, "value": self.default,
                     "labels": [_label(v) for v in self.values]}
@@ -58,6 +100,13 @@ class slider(Control):
                 "value": float(self.default), "ints": self.ints}
 
     def convert(self, v):
+        """The argument value for a value from the page.
+
+        EXAMPLES::
+
+            sage: slider(0, 10, 2).convert(4)  # sagebrush only
+            4
+        """
         if self.values is not None:
             return self.values[int(v)]
         if self.ints:
@@ -66,7 +115,13 @@ class slider(Control):
 
 
 class range_slider(slider):
-    """range_slider(vmin, vmax, step_size, default=(a, b)): two values."""
+    """range_slider(vmin, vmax, step_size, default=(a, b)): two values.
+
+    EXAMPLES::
+
+        sage: range_slider(0, 10, 1, (2, 5))  # sagebrush only
+        range_slider(ints=True, max=10.0, min=0.0, step=1.0, value=[2.0, 5.0])
+    """
     kind = "range"
 
     def __init__(self, vmin, vmax, step_size=None, default=None, label=None):
@@ -74,18 +129,36 @@ class range_slider(slider):
         self.default = tuple(default) if default is not None else (vmin, vmax)
 
     def spec(self):
-        s = super().spec()
-        s["kind"] = "range"
-        s["value"] = [float(v) for v in self.default]
-        return s
+        """The control's description for the page.
+
+        EXAMPLES::
+
+            sage: range_slider(0, 10, 1, (2, 5)).spec()  # sagebrush only
+            {'ints': True, 'kind': 'range', 'max': 10.0, 'min': 0.0, 'step': 1.0, 'value': [2.0, 5.0]}
+        """
+        return {"kind": "range", "min": float(self.vmin), "max": float(self.vmax), "step": float(self.step),
+                "value": [float(v) for v in self.default], "ints": self.ints}
 
     def convert(self, v):
+        """The argument value for a value from the page.
+
+        EXAMPLES::
+
+            sage: range_slider(0, 10, 1, (2, 5)).convert([2, 6])  # sagebrush only
+            (2, 6)
+        """
         conv = (lambda t: int(round(float(t)))) if self.ints else float
         return (conv(v[0]), conv(v[1]))
 
 
 class selector(Control):
-    """selector(values, label=None, default=None, buttons=False)"""
+    """selector(values, label=None, default=None, buttons=False)
+
+    EXAMPLES::
+
+        sage: selector(['red', 'green', 'blue'])  # sagebrush only
+        selector(buttons=False, options=['red', 'green', 'blue'], value=0)
+    """
     kind = "selector"
 
     def __init__(self, values, label=None, default=None, buttons=False, nrows=None, ncols=None, width=None):
@@ -94,27 +167,61 @@ class selector(Control):
         self.buttons = buttons
 
     def spec(self):
+        """The control's description for the page.
+
+        EXAMPLES::
+
+            sage: selector(['a', 'b']).spec()  # sagebrush only
+            {'buttons': False, 'kind': 'selector', 'options': ['a', 'b'], 'value': 0}
+        """
         labels = getattr(self, "spec_labels", None) or [_label(v) for v in self.values]
         return {"kind": "selector", "options": labels, "value": self.default,
                 "buttons": bool(self.buttons) if self.buttons is not None else len(self.values) <= 4}
 
     def convert(self, v):
+        """The argument value for a value from the page.
+
+        EXAMPLES::
+
+            sage: selector(['a', 'b']).convert(1)  # sagebrush only
+            'b'
+        """
         return self.values[int(v)]
 
 
 class checkbox(Control):
+    """A checkbox for a boolean argument.
+
+    EXAMPLES::
+
+        sage: checkbox(True, label='grid')  # sagebrush only
+        checkbox(value=True)
+    """
     kind = "checkbox"
 
     def __init__(self, default=True, label=None):
         super().__init__(bool(default), label)
 
     def convert(self, v):
+        """The argument value for a value from the page.
+
+        EXAMPLES::
+
+            sage: checkbox(True).convert(False)  # sagebrush only
+            False
+        """
         return bool(v)
 
 
 class input_box(Control):
     """input_box(default, label=None, type=None): the text is converted to
-    `type`, or to the default's type (numbers are evaluated as Python)."""
+    `type`, or to the default's type (numbers are evaluated as Python).
+
+    EXAMPLES::
+
+        sage: input_box(3, label='n')  # sagebrush only
+        input_box(value='3')
+    """
     kind = "input"
 
     def __init__(self, default=None, label=None, type=None, width=None, height=1):
@@ -122,9 +229,23 @@ class input_box(Control):
         self.type = type
 
     def spec(self):
+        """The control's description for the page.
+
+        EXAMPLES::
+
+            sage: input_box(3).spec()  # sagebrush only
+            {'kind': 'input', 'value': '3'}
+        """
         return {"kind": "input", "value": "" if self.default is None else str(self.default)}
 
     def convert(self, v):
+        """The argument value for a value from the page.
+
+        EXAMPLES::
+
+            sage: input_box(3).convert('2 + 3')  # sagebrush only
+            5
+        """
         if self.type is not None:
             return self.type(v)
         if isinstance(self.default, str):
@@ -137,6 +258,13 @@ class input_box(Control):
 
 
 class color_selector(Control):
+    """A color chooser.
+
+    EXAMPLES::
+
+        sage: color_selector('red')  # sagebrush only
+        color_selector(value='#1f77b4')
+    """
     kind = "color"
 
     def __init__(self, default="#1f77b4", label=None, widget=None, hide_box=False):
@@ -146,7 +274,13 @@ class color_selector(Control):
 
 
 class text_control(Control):
-    """Static text among the controls."""
+    """Static text among the controls.
+
+    EXAMPLES::
+
+        sage: text_control('Choose n')  # sagebrush only
+        text_control(value='Choose n')
+    """
     kind = "text"
 
     def __init__(self, value=""):
@@ -206,6 +340,12 @@ class _Interact:
         self.f, self.controls = f, controls
 
     def run(self, values):
+        """Run the function with the given control values.
+
+        EXAMPLES::
+
+            sage: from _interact import _interacts  # sagebrush only
+        """
         kwargs = {name: c.convert(values[name]) if name in values else c.convert(c.spec()["value"])
                   for name, c in self.controls.items() if c.kind != "text" or isinstance(c, fixed)}
         try:
@@ -224,21 +364,50 @@ class _Interact:
 
 
 class fixed:
-    """A value passed to the function as is, without a control."""
+    """A value passed to the function as is, without a control.
+
+    EXAMPLES::
+
+        sage: from _interact import fixed  # sagebrush only
+        sage: fixed(5).spec()  # sagebrush only
+        {'kind': 'text', 'value': ''}
+    """
     kind = "fixed"
 
     def __init__(self, value):
         self.value = value
 
     def spec(self):
+        """The control's description for the page.
+
+        EXAMPLES::
+
+            sage: __import__('_interact').fixed(5).spec()  # sagebrush only
+            {'kind': 'text', 'value': ''}
+        """
         return {"kind": "text", "value": ""}
 
     def convert(self, v):
+        """The argument value for a value from the page.
+
+        EXAMPLES::
+
+            sage: __import__('_interact').fixed(5).convert(0)  # sagebrush only
+            5
+        """
         return self.value
 
 
 def interact(f=None, layout=None, _abbrev=None, **controls):
-    """Decorator: @interact or @interact(n=(0, 10)) or interact(f, n=(0, 10))."""
+    """Decorator: @interact or @interact(n=(0, 10)) or interact(f, n=(0, 10)).
+
+    EXAMPLES::
+
+        sage: @interact  # sagebrush only (Sage's text mode also lists the widgets)
+        ....: def f(n=slider(1, 5, 1, 2), grid=True):
+        ....:     print(n, grid)
+        2 True
+    """
     if f is None:
         return lambda g: interact(g, layout=layout, _abbrev=_abbrev, **controls)
     make = _abbrev or _control

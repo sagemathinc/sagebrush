@@ -113,9 +113,23 @@ class _Prim:
         self.options = options
 
     def points(self):
+        """The points of the primitive.
+
+        EXAMPLES::
+
+            sage: point3d((0, 0, 0)).all()[0].points()  # sagebrush only
+            [(0.0, 0.0, 0.0)]
+        """
         return []
 
     def color(self):
+        """The color, as (r, g, b) in [0, 1].
+
+        EXAMPLES::
+
+            sage: point3d((0, 0, 0), color='red').all()[0].color()  # sagebrush only
+            (1, 0, 0)
+        """
         return _rgb(self.options.get("color"))
 
     def _map(self, T):
@@ -124,7 +138,13 @@ class _Prim:
 
 class Mesh(_Prim):
     """Polygons (triangles or quads) on shared vertices; colors per vertex
-    are optional (a colormap)."""
+    are optional (a colormap).
+
+    EXAMPLES::
+
+        sage: sphere().all()[0]  # sagebrush only
+        Mesh with 648 faces
+    """
     kind = "surface"
 
     def __init__(self, vertices, faces, colors=None, **options):
@@ -134,6 +154,13 @@ class Mesh(_Prim):
         self.colors = colors              # [(r, g, b)] per vertex, or None
 
     def points(self):
+        """The vertices.
+
+        EXAMPLES::
+
+            sage: len(cube().all()[0].points())  # sagebrush only
+            8
+        """
         used = set(i for f in self.faces for i in f)
         return [self.vertices[i] for i in used]
 
@@ -144,11 +171,24 @@ class Mesh(_Prim):
         return "Mesh with %d faces" % len(self.faces)
 
     def describe(self):
+        """A short description.
+
+        EXAMPLES::
+
+            sage: cube().all()[0].describe()  # sagebrush only
+            'cube of 6 polygons'
+        """
         return "%s of %d polygons%s" % (self.options.get("what", "surface"), len(self.faces), _label3(self))
 
 
 class Lines(_Prim):
-    """Polylines; None breaks a line."""
+    """Polylines; None breaks a line.
+
+    EXAMPLES::
+
+        sage: line3d([(0, 0, 0), (1, 1, 1)]).all()[0]  # sagebrush only
+        Line defined by 2 points
+    """
     kind = "line"
 
     def __init__(self, pts, **options):
@@ -156,6 +196,13 @@ class Lines(_Prim):
         self.pts = pts
 
     def points(self):
+        """The points of the lines.
+
+        EXAMPLES::
+
+            sage: line3d([(0, 0, 0), (1, 1, 1)]).all()[0].points()  # sagebrush only
+            [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0)]
+        """
         return [p for p in self.pts if p is not None]
 
     def _map(self, T):
@@ -165,10 +212,24 @@ class Lines(_Prim):
         return "Line defined by %d points" % len(self.points())
 
     def describe(self):
+        """A short description.
+
+        EXAMPLES::
+
+            sage: line3d([(0, 0, 0), (1, 1, 1)]).all()[0].describe()  # sagebrush only
+            'curve through 2 points'
+        """
         return "curve through %d points%s" % (len(self.points()), _label3(self))
 
 
 class Points3(_Prim):
+    """Points in space.
+
+    EXAMPLES::
+
+        sage: point3d([(0, 0, 0), (1, 1, 1)]).all()[0]  # sagebrush only
+        Point set defined by 2 points
+    """
     kind = "points"
 
     def __init__(self, pts, **options):
@@ -176,6 +237,13 @@ class Points3(_Prim):
         self.pts = pts
 
     def points(self):
+        """The points.
+
+        EXAMPLES::
+
+            sage: point3d([(0, 0, 0), (1, 1, 1)]).all()[0].points()  # sagebrush only
+            [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0)]
+        """
         return list(self.pts)
 
     def _map(self, T):
@@ -185,10 +253,24 @@ class Points3(_Prim):
         return "Point set defined by %d points" % len(self.pts)
 
     def describe(self):
+        """A short description.
+
+        EXAMPLES::
+
+            sage: point3d((0, 0, 0)).all()[0].describe()  # sagebrush only
+            '1 point'
+        """
         return "%d point%s%s" % (len(self.pts), "" if len(self.pts) == 1 else "s", _label3(self))
 
 
 class Text3(_Prim):
+    """A text label in space.
+
+    EXAMPLES::
+
+        sage: text3d("P", (1, 1, 1)).all()[0]  # sagebrush only
+        Text 'P'
+    """
     kind = "text"
 
     def __init__(self, string, pos, **options):
@@ -196,6 +278,13 @@ class Text3(_Prim):
         self.string, self.pos = str(string), pos
 
     def points(self):
+        """Its position.
+
+        EXAMPLES::
+
+            sage: text3d("P", (1, 1, 1)).all()[0].points()  # sagebrush only
+            [(1.0, 1.0, 1.0)]
+        """
         return [self.pos]
 
     def _map(self, T):
@@ -205,6 +294,13 @@ class Text3(_Prim):
         return "Text %r" % self.string
 
     def describe(self):
+        """A short description.
+
+        EXAMPLES::
+
+            sage: text3d("P", (1, 1, 1)).all()[0].describe()  # sagebrush only
+            "text 'P'"
+        """
         return "text %r" % self.string
 
 
@@ -227,7 +323,15 @@ def _split(options):
 
 
 class Graphics3d:
-    """A 3D picture: primitives plus options.  Add them with +."""
+    """A 3D picture: primitives plus options.  Add them with +.
+
+    EXAMPLES::
+
+        sage: G = sphere() + point3d((1, 1, 1)); G
+        Graphics3d Object
+        sage: len(G.all())  # sagebrush only
+        2
+    """
 
     def __init__(self, primitives=None, **options):
         self._primitives = list(primitives or [])
@@ -261,9 +365,23 @@ class Graphics3d:
         return "Graphics3d Object"
 
     def all(self):
+        """The primitives.
+
+        EXAMPLES::
+
+            sage: (sphere() + cube()).all()  # sagebrush only
+            [Mesh with 648 faces, Mesh with 6 faces]
+        """
         return list(self._primitives)
 
     def bounding_box(self):
+        """((xmin, ymin, zmin), (xmax, ymax, zmax)).
+
+        EXAMPLES::
+
+            sage: cube().bounding_box()
+            ((-0.5, -0.5, -0.5), (0.5, 0.5, 0.5))
+        """
         pts = [p for q in self._primitives for p in q.points() if p is not None]
         if not pts:
             return ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
@@ -274,13 +392,36 @@ class Graphics3d:
         hi = tuple(float(o[k]) if o.get(k) is not None else v for k, v in zip(("xmax", "ymax", "zmax"), hi))
         return lo, hi
 
-    def aspect_ratio(self):
+    def aspect_ratio(self, v=None):
+        """The aspect ratio; aspect_ratio(v) sets it, as in Sage.
+
+        EXAMPLES::
+
+            sage: G = cube(); G.aspect_ratio([1, 1, 2]); G.aspect_ratio()  # sagebrush only
+            [1, 1, 2]
+        """
+        if v is not None:
+            self.set_aspect_ratio(v)
+            return None
         return self._options.get("aspect_ratio", "automatic")
 
     def set_aspect_ratio(self, v):
+        """Set the aspect ratio ([1, 1, 1]: equal scales).
+
+        EXAMPLES::
+
+            sage: G = cube(); G.set_aspect_ratio([1, 1, 2])  # sagebrush only
+        """
         self._options["aspect_ratio"] = v
 
     def options(self):
+        """The options.
+
+        EXAMPLES::
+
+            sage: cube(color='red').options()  # sagebrush only
+            {}
+        """
         return dict(self._options)
 
     # --- rigid motions and scaling (new objects; the original is unchanged)
@@ -288,18 +429,36 @@ class Graphics3d:
         return Graphics3d([p._map(T) for p in self._primitives], **self._options)
 
     def translate(self, *x):
-        """g.translate((1, 0, 2)) or g.translate(1, 0, 2)"""
+        """g.translate((1, 0, 2)) or g.translate(1, 0, 2)
+
+        EXAMPLES::
+
+            sage: cube().translate(1, 2, 3).bounding_box()
+            ((0.5, 1.5, 2.5), (1.5, 2.5, 3.5))
+        """
         dx, dy, dz = (float(v) for v in _vec3(x))
         return self._map(lambda p: (p[0] + dx, p[1] + dy, p[2] + dz))
 
     def scale(self, *x):
-        """g.scale(2) or g.scale(1, 1, 3) (about the origin)"""
+        """g.scale(2) or g.scale(1, 1, 3) (about the origin)
+
+        EXAMPLES::
+
+            sage: cube().scale(2).bounding_box()
+            ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+        """
         x = _vec3(x) if len(x) != 1 or isinstance(x[0], (list, tuple)) else (x[0],) * 3
         sx, sy, sz = (float(v) for v in x)
         return self._map(lambda p: (p[0] * sx, p[1] * sy, p[2] * sz))
 
     def rotate(self, v, theta):
-        """Rotate by the angle theta (radians) about the axis v through the origin."""
+        """Rotate by the angle theta (radians) about the axis v through the origin.
+
+        EXAMPLES::
+
+            sage: cube().rotate((0, 0, 1), pi/4)  # sagebrush only
+            Graphics3d Object
+        """
         a = _norm(tuple(float(t) for t in v))
         c, s = math.cos(float(theta)), math.sin(float(theta))
 
@@ -310,12 +469,33 @@ class Graphics3d:
         return self._map(T)
 
     def rotateX(self, theta):
+        """The graphics rotated about the x-axis.
+
+        EXAMPLES::
+
+            sage: cube().rotateX(pi/2)  # sagebrush only
+            Graphics3d Object
+        """
         return self.rotate((1, 0, 0), theta)
 
     def rotateY(self, theta):
+        """The graphics rotated about the y-axis.
+
+        EXAMPLES::
+
+            sage: cube().rotateY(pi/2)  # sagebrush only
+            Graphics3d Object
+        """
         return self.rotate((0, 1, 0), theta)
 
     def rotateZ(self, theta):
+        """The graphics rotated about the z-axis.
+
+        EXAMPLES::
+
+            sage: cube().rotateZ(pi/2)  # sagebrush only
+            Graphics3d Object
+        """
         return self.rotate((0, 0, 1), theta)
 
     def _with(self, options):
@@ -392,6 +572,12 @@ class Graphics3d:
                 "description": self.description()}
 
     def description(self):
+        """A text description of the scene (for screen readers and AI agents).
+
+        EXAMPLES::
+
+            sage: print(sphere().description())  # random  # sagebrush only
+        """
         lo, hi = self.bounding_box()
         parts = [p.describe() for p in self._primitives]
         t = self._options.get("title")
@@ -423,9 +609,21 @@ class Graphics3d:
                 "text/plain": repr(self)}
 
     def show(self, **options):
+        """Show the scene (an interactive WebGL view in the notebook, SVG otherwise).
+
+        EXAMPLES::
+
+            sage: sphere().show()  # random
+        """
         _show(self._with(options), "plot3d")
 
     def save(self, filename, **options):
+        """Save the scene (SVG, or an HTML page with the viewer).
+
+        EXAMPLES::
+
+            sage: sphere().save('/tmp/s.svg')  # not tested
+        """
         g = self._with(options)
         name = str(filename)
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else "svg"
@@ -439,6 +637,13 @@ class Graphics3d:
             f.write(text)
 
     def plot(self):
+        """The graphics itself.
+
+        EXAMPLES::
+
+            sage: G = cube(); G.plot() is G
+            True
+        """
         return self
 
 
@@ -448,7 +653,14 @@ _uid = 0
 def viewer_html(scene_json, svg, title, standalone=False, full=False):
     """HTML showing a scene in the 3D viewer (embedded), over its SVG
     (shown when scripts or WebGL are unavailable).  full: fill the window
-    (a standalone page like k3d's snapshots)."""
+    (a standalone page like k3d's snapshots).
+
+    EXAMPLES::
+
+        sage: from sage_plot3d import viewer_html  # sagebrush only
+        sage: viewer_html('{}', '<svg/>', 'scene').startswith('<')  # sagebrush only
+        True
+    """
     from _viewer3d import VIEWER_JS
     global _uid
     _uid += 1
@@ -483,7 +695,14 @@ def _urlq(s):
 def jupyter_bundle(scene_json, svg, title, page):
     """The Jupyter mime bundle of a 3D scene: the viewer embedded in HTML, or
     for a big scene an iframe on the page page() (a standalone viewer),
-    saved as .sagebrush/plot3d-<checksum>.html in the working directory."""
+    saved as .sagebrush/plot3d-<checksum>.html in the working directory.
+
+    EXAMPLES::
+
+        sage: from sage_plot3d import jupyter_bundle  # sagebrush only
+        sage: sorted(jupyter_bundle('{}', '<svg/>', 'scene', False))  # sagebrush only
+        ['image/svg+xml', 'text/html', 'text/plain']
+    """
     import os
     import zlib
     if len(scene_json) + len(svg) <= JUPYTER_INLINE:
@@ -868,7 +1087,15 @@ def _mesh_lines(verts, faces, color):
 def plot3d(f, urange, vrange, adaptive=False, transformation=None, **options):
     """The graph z = f(x, y): plot3d(sin(x*y), (x, -3, 3), (y, -3, 3)).
     Options: color, opacity, plot_points (default 40), mesh=True,
-    cmap='viridis' (color by height), frame, aspect_ratio."""
+    cmap='viridis' (color by height), frame, aspect_ratio.
+
+    EXAMPLES::
+
+        sage: var('y')
+        y
+        sage: plot3d(x^2 - y^2, (x, -1, 1), (y, -1, 1))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     xn, xa, xb = _rng(urange, "x")
     yn, ya, yb = _rng(vrange, "y")
@@ -887,7 +1114,15 @@ def plot3d(f, urange, vrange, adaptive=False, transformation=None, **options):
 
 def parametric_plot3d(f, urange, vrange=None, **options):
     """A curve parametric_plot3d((cos(t), sin(t), t/4), (t, 0, 6*pi)) or a
-    surface parametric_plot3d((u*cos(v), u*sin(v), u), (u, 0, 1), (v, 0, 2*pi))."""
+    surface parametric_plot3d((u*cos(v), u*sin(v), u), (u, 0, 1), (v, 0, 2*pi)).
+
+    EXAMPLES::
+
+        sage: var('t')
+        t
+        sage: parametric_plot3d((cos(t), sin(t), t), (t, 0, 4*pi))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     un, ua, ub = _rng(urange, "u")
     if vrange is None:
@@ -914,7 +1149,15 @@ def parametric_plot3d(f, urange, vrange=None, **options):
 
 
 def spherical_plot3d(f, urange, vrange, **options):
-    """r = f(theta, phi): theta the azimuth, phi the angle from the z-axis."""
+    """r = f(theta, phi): theta the azimuth, phi the angle from the z-axis.
+
+    EXAMPLES::
+
+        sage: var('theta phi')
+        (theta, phi)
+        sage: spherical_plot3d(1 + 0*theta, (theta, 0, 2*pi), (phi, 0, pi))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     un, ua, ub = _rng(urange, "theta")
     vn, va, vb = _rng(vrange, "phi")
@@ -929,7 +1172,15 @@ def spherical_plot3d(f, urange, vrange, **options):
 
 
 def cylindrical_plot3d(f, urange, vrange, **options):
-    """r = f(theta, z)."""
+    """r = f(theta, z).
+
+    EXAMPLES::
+
+        sage: var('theta z')
+        (theta, z)
+        sage: cylindrical_plot3d(1 + 0*z, (theta, 0, 2*pi), (z, 0, 1))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     un, ua, ub = _rng(urange, "theta")
     vn, va, vb = _rng(vrange, "z")
@@ -945,7 +1196,13 @@ def cylindrical_plot3d(f, urange, vrange, **options):
 
 def revolution_plot3d(curve, trange, phirange=None, parallel_axis="z", **options):
     """The surface swept by the curve (x(t), z(t)) (or a function z = f(x))
-    turning around the z-axis."""
+    turning around the z-axis.
+
+    EXAMPLES::
+
+        sage: revolution_plot3d(x^2, (x, 0, 1))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     tn, ta, tb = _rng(trange, "t")
     if isinstance(curve, (list, tuple)):
@@ -976,7 +1233,15 @@ _TETS = [(0, 5, 1, 6), (0, 1, 2, 6), (0, 2, 3, 6), (0, 3, 7, 6), (0, 7, 4, 6), (
 
 def implicit_plot3d(f, xrange, yrange, zrange, contour=0, plot_points=40, **options):
     """The surface f(x, y, z) = contour: implicit_plot3d(x^2 + y^2 + z^2 == 4,
-    (x, -2, 2), (y, -2, 2), (z, -2, 2))."""
+    (x, -2, 2), (y, -2, 2), (z, -2, 2)).
+
+    EXAMPLES::
+
+        sage: var('y z')
+        (y, z)
+        sage: implicit_plot3d(x^2 + y^2 + z^2 - 1, (x, -1, 1), (y, -1, 1), (z, -1, 1))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     if hasattr(f, "is_relational") and f.is_relational():
         f = f.lhs() - f.rhs()
@@ -1062,7 +1327,13 @@ def _orient_add(faces, verts, poly, in_pt, out_pts, out_pt=None, in_pts=None):
 
 
 def sphere(center=(0, 0, 0), size=1, **options):
-    """sphere((0, 0, 0), 1, color='red', opacity=0.5)"""
+    """sphere((0, 0, 0), 1, color='red', opacity=0.5)
+
+    EXAMPLES::
+
+        sage: sphere((0, 0, 0), size=2)
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     cx, cy, cz = (float(v) for v in center)
     r = float(size)
@@ -1076,7 +1347,13 @@ def sphere(center=(0, 0, 0), size=1, **options):
 
 
 def point3d(v, size=5, **options):
-    """point3d((1, 2, 3)) or point3d([(0, 0, 0), (1, 1, 1)], size=10, color='red')"""
+    """point3d((1, 2, 3)) or point3d([(0, 0, 0), (1, 1, 1)], size=10, color='red')
+
+    EXAMPLES::
+
+        sage: point3d((1, 2, 3)), point3d([(0, 0, 0), (1, 1, 1)])
+        (Graphics3d Object, Graphics3d Object)
+    """
     gopts, p = _split(options)
     pts = list(v)
     if pts and not isinstance(pts[0], (list, tuple)):
@@ -1087,7 +1364,13 @@ def point3d(v, size=5, **options):
 
 
 def line3d(points, thickness=1, **options):
-    """line3d([(0, 0, 0), (1, 1, 1), (2, 0, 1)], color='red')"""
+    """line3d([(0, 0, 0), (1, 1, 1), (2, 0, 1)], color='red')
+
+    EXAMPLES::
+
+        sage: line3d([(0, 0, 0), (1, 1, 1), (2, 0, 1)])
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     pts = [_finite3(q) for q in points]
     o = {"color": p.pop("color", p.pop("rgbcolor", "blue")), "thickness": float(thickness) * 1.5}
@@ -1095,7 +1378,13 @@ def line3d(points, thickness=1, **options):
 
 
 def arrow3d(start, end, width=1, **options):
-    """An arrow from start to end."""
+    """An arrow from start to end.
+
+    EXAMPLES::
+
+        sage: arrow3d((0, 0, 0), (1, 1, 1))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     a, b = _finite3(start), _finite3(end)
     color = p.pop("color", p.pop("rgbcolor", "blue"))
@@ -1116,11 +1405,25 @@ def arrow3d(start, end, width=1, **options):
 
 
 def text3d(txt, pos, **options):
+    """A text label in space.
+
+    EXAMPLES::
+
+        sage: text3d("origin", (0, 0, 0))
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     return Graphics3d([Text3(txt, _finite3(pos), color=p.pop("color", None))], **gopts)
 
 
 def polygon3d(points, **options):
+    """A polygon in space.
+
+    EXAMPLES::
+
+        sage: polygon3d([(0, 0, 0), (1, 0, 0), (0, 1, 1)])
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     pts = [_finite3(q) for q in points]
     return _surface(pts, [tuple(range(len(pts)))] if len(pts) <= 4 else [(0, i, i + 1) for i in range(1, len(pts) - 1)],
@@ -1128,7 +1431,15 @@ def polygon3d(points, **options):
 
 
 def plot_vector_field3d(functions, xrange, yrange, zrange, plot_points=5, colors="jet", **options):
-    """Arrows of the field (f, g, h) on a grid."""
+    """Arrows of the field (f, g, h) on a grid.
+
+    EXAMPLES::
+
+        sage: var('y z')
+        (y, z)
+        sage: plot_vector_field3d((y, -x, z), (x, -1, 1), (y, -1, 1), (z, -1, 1), plot_points=3)
+        Graphics3d Object
+    """
     gopts, p = _split(options)
     xn, xa, xb = _rng(xrange, "x")
     yn, ya, yb = _rng(yrange, "y")
@@ -1216,26 +1527,50 @@ _PHI = (1 + math.sqrt(5)) / 2
 def tetrahedron(center=(0, 0, 0), size=1, **options):
     """A regular tetrahedron inscribed in the sphere of radius size about center.
 
-        tetrahedron(color='red', opacity=0.5)"""
+        tetrahedron(color='red', opacity=0.5)
+
+    EXAMPLES::
+
+        sage: tetrahedron()
+        Graphics3d Object
+    """
     V = [(0, 0, 1), (math.sqrt(8 / 9), 0, -1 / 3), (-math.sqrt(2 / 9), math.sqrt(2 / 3), -1 / 3),
          (-math.sqrt(2 / 9), -math.sqrt(2 / 3), -1 / 3)]
     return _solid(V, size, center, options, "tetrahedron")
 
 
 def cube(center=(0, 0, 0), size=1, **options):
-    """A cube with edges of length size, parallel to the axes."""
+    """A cube with edges of length size, parallel to the axes.
+
+    EXAMPLES::
+
+        sage: cube(), cube(size=2).bounding_box()
+        (Graphics3d Object, ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)))
+    """
     V = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
     return _solid(V, float(size) * math.sqrt(3) / 2, center, options, "cube")
 
 
 def octahedron(center=(0, 0, 0), size=1, **options):
-    """A regular octahedron with vertices at distance size from center, on the axes."""
+    """A regular octahedron with vertices at distance size from center, on the axes.
+
+    EXAMPLES::
+
+        sage: octahedron()
+        Graphics3d Object
+    """
     V = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
     return _solid(V, size, center, options, "octahedron")
 
 
 def dodecahedron(center=(0, 0, 0), size=1, **options):
-    """A regular dodecahedron inscribed in the sphere of radius size about center."""
+    """A regular dodecahedron inscribed in the sphere of radius size about center.
+
+    EXAMPLES::
+
+        sage: dodecahedron()
+        Graphics3d Object
+    """
     g, h = _PHI, 1 / _PHI
     V = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
     for a in (-h, h):
@@ -1247,7 +1582,13 @@ def dodecahedron(center=(0, 0, 0), size=1, **options):
 def icosahedron(center=(0, 0, 0), size=1, **options):
     """A regular icosahedron inscribed in the sphere of radius size about center.
 
-        icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()"""
+        icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()
+
+    EXAMPLES::
+
+        sage: icosahedron()
+        Graphics3d Object
+    """
     V = []
     for a in (-1, 1):
         for b in (-_PHI, _PHI):
