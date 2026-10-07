@@ -19,7 +19,8 @@ from _graphics import _esc, _fmt, nice_ticks, _num, show as _show, describe_svg,
 
 __all__ = ["Graphics3d", "plot3d", "parametric_plot3d", "implicit_plot3d", "spherical_plot3d",
            "cylindrical_plot3d", "revolution_plot3d", "sphere", "point3d", "line3d", "text3d",
-           "arrow3d", "polygon3d", "plot_vector_field3d"]
+           "arrow3d", "polygon3d", "plot_vector_field3d", "tetrahedron", "cube", "octahedron",
+           "dodecahedron", "icosahedron"]
 
 SCENE_MIME = "application/vnd.sagebrush.scene3d+json"
 
@@ -117,6 +118,9 @@ class _Prim:
     def color(self):
         return _rgb(self.options.get("color"))
 
+    def _map(self, T):
+        return self
+
 
 class Mesh(_Prim):
     """Polygons (triangles or quads) on shared vertices; colors per vertex
@@ -132,6 +136,9 @@ class Mesh(_Prim):
     def points(self):
         used = set(i for f in self.faces for i in f)
         return [self.vertices[i] for i in used]
+
+    def _map(self, T):
+        return Mesh([None if v is None else T(v) for v in self.vertices], self.faces, self.colors, **self.options)
 
     def __repr__(self):
         return "Mesh with %d faces" % len(self.faces)
@@ -151,6 +158,9 @@ class Lines(_Prim):
     def points(self):
         return [p for p in self.pts if p is not None]
 
+    def _map(self, T):
+        return Lines([None if v is None else T(v) for v in self.pts], **self.options)
+
     def __repr__(self):
         return "Line defined by %d points" % len(self.points())
 
@@ -168,6 +178,9 @@ class Points3(_Prim):
     def points(self):
         return list(self.pts)
 
+    def _map(self, T):
+        return Points3([T(v) for v in self.pts], **self.options)
+
     def __repr__(self):
         return "Point set defined by %d points" % len(self.pts)
 
@@ -184,6 +197,9 @@ class Text3(_Prim):
 
     def points(self):
         return [self.pos]
+
+    def _map(self, T):
+        return Text3(self.string, T(self.pos), **self.options)
 
     def __repr__(self):
         return "Text %r" % self.string
@@ -267,6 +283,41 @@ class Graphics3d:
     def options(self):
         return dict(self._options)
 
+    # --- rigid motions and scaling (new objects; the original is unchanged)
+    def _map(self, T):
+        return Graphics3d([p._map(T) for p in self._primitives], **self._options)
+
+    def translate(self, *x):
+        """g.translate((1, 0, 2)) or g.translate(1, 0, 2)"""
+        dx, dy, dz = (float(v) for v in _vec3(x))
+        return self._map(lambda p: (p[0] + dx, p[1] + dy, p[2] + dz))
+
+    def scale(self, *x):
+        """g.scale(2) or g.scale(1, 1, 3) (about the origin)"""
+        x = _vec3(x) if len(x) != 1 or isinstance(x[0], (list, tuple)) else (x[0],) * 3
+        sx, sy, sz = (float(v) for v in x)
+        return self._map(lambda p: (p[0] * sx, p[1] * sy, p[2] * sz))
+
+    def rotate(self, v, theta):
+        """Rotate by the angle theta (radians) about the axis v through the origin."""
+        a = _norm(tuple(float(t) for t in v))
+        c, s = math.cos(float(theta)), math.sin(float(theta))
+
+        def T(p):
+            d = _dot(a, p)
+            w = _cross(a, p)
+            return tuple(p[i] * c + w[i] * s + a[i] * d * (1 - c) for i in range(3))
+        return self._map(T)
+
+    def rotateX(self, theta):
+        return self.rotate((1, 0, 0), theta)
+
+    def rotateY(self, theta):
+        return self.rotate((0, 1, 0), theta)
+
+    def rotateZ(self, theta):
+        return self.rotate((0, 0, 1), theta)
+
     def _with(self, options):
         if not options:
             return self
@@ -310,11 +361,12 @@ class Graphics3d:
                             if p.colors is not None:
                                 col.extend(round(v * 255) for v in p.colors[i])
                         ids.append(remap[i])
-                    idx.extend((ids[0], ids[1], ids[2]))
-                    if len(ids) == 4:
-                        idx.extend((ids[0], ids[2], ids[3]))
+                    for k in range(1, len(ids) - 1):  # a fan
+                        idx.extend((ids[0], ids[k], ids[k + 1]))
                 o = {"type": "mesh", "pos": pos, "idx": idx, "color": _hex(p.color()),
                      "opacity": float(p.options.get("opacity", 1))}
+                if p.options.get("flat"):
+                    o["flat"] = True
                 if col:
                     o["colors"] = col
                 objs.append(o)
@@ -1053,3 +1105,99 @@ def plot_vector_field3d(functions, xrange, yrange, zrange, plot_points=5, colors
         c = _cmap_rgb(L / big, "viridis") if colors in ("jet", "viridis") else p.get("color", "blue")
         g = g + arrow3d(q, tuple(q[i] + v[i] * s for i in range(3)), color=c)
     return g
+
+
+# ------------------------------------------------------------------ platonic solids
+
+def _vec3(x):
+    if len(x) == 1:
+        x = tuple(x[0])
+    if len(x) != 3:
+        raise ValueError("expected three coordinates, got %r" % (x,))
+    return x
+
+
+def _hull_faces(V):
+    """The faces of the convex polyhedron with vertices V (all extreme), each
+    ordered counterclockwise seen from outside."""
+    n, faces, seen = len(V), [], set()
+    c0 = tuple(sum(v[i] for v in V) / n for i in range(3))
+    for i in range(n):
+        for j in range(i + 1, n):
+            for k in range(j + 1, n):
+                a, b, c = V[i], V[j], V[k]
+                nrm = _cross(tuple(b[t] - a[t] for t in range(3)), tuple(c[t] - a[t] for t in range(3)))
+                if _dot(nrm, nrm) < 1e-18:
+                    continue
+                d = [_dot(nrm, tuple(V[m][t] - a[t] for t in range(3))) for m in range(n)]
+                if max(d) > 1e-9 and min(d) < -1e-9:
+                    continue
+                face = tuple(m for m in range(n) if abs(d[m]) <= 1e-9)
+                if face in seen:
+                    continue
+                seen.add(face)
+                out = nrm if max(d) <= 1e-9 else tuple(-t for t in nrm)
+                fc = tuple(sum(V[m][t] for m in face) / len(face) for t in range(3))
+                u = _norm(tuple(V[face[0]][t] - fc[t] for t in range(3)))
+                w = _cross(_norm(out), u)
+                ang = lambda m: math.atan2(_dot(w, tuple(V[m][t] - fc[t] for t in range(3))),
+                                           _dot(u, tuple(V[m][t] - fc[t] for t in range(3))))
+                faces.append(tuple(sorted(face, key=ang)))
+    return faces
+
+
+def _solid(V, radius, center, options, what):
+    gopts, p = _split(options)
+    r = max(math.sqrt(_dot(v, v)) for v in V)
+    cx, cy, cz = (float(t) for t in center)
+    s = float(radius) / r
+    verts = [(cx + v[0] * s, cy + v[1] * s, cz + v[2] * s) for v in V]
+    color = p.pop("color", p.pop("rgbcolor", "blue"))
+    o = {"color": color, "opacity": float(p.pop("opacity", p.pop("alpha", 1))), "what": what, "flat": True,
+         "legend_label": p.pop("legend_label", None)}
+    return Graphics3d([Mesh(verts, _hull_faces(V), None, **o)], **gopts)
+
+
+_PHI = (1 + math.sqrt(5)) / 2
+
+
+def tetrahedron(center=(0, 0, 0), size=1, **options):
+    """A regular tetrahedron inscribed in the sphere of radius size about center.
+
+        tetrahedron(color='red', opacity=0.5)"""
+    V = [(0, 0, 1), (math.sqrt(8 / 9), 0, -1 / 3), (-math.sqrt(2 / 9), math.sqrt(2 / 3), -1 / 3),
+         (-math.sqrt(2 / 9), -math.sqrt(2 / 3), -1 / 3)]
+    return _solid(V, size, center, options, "tetrahedron")
+
+
+def cube(center=(0, 0, 0), size=1, **options):
+    """A cube with edges of length size, parallel to the axes."""
+    V = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
+    return _solid(V, float(size) * math.sqrt(3) / 2, center, options, "cube")
+
+
+def octahedron(center=(0, 0, 0), size=1, **options):
+    """A regular octahedron with vertices at distance size from center, on the axes."""
+    V = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    return _solid(V, size, center, options, "octahedron")
+
+
+def dodecahedron(center=(0, 0, 0), size=1, **options):
+    """A regular dodecahedron inscribed in the sphere of radius size about center."""
+    g, h = _PHI, 1 / _PHI
+    V = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
+    for a in (-h, h):
+        for b in (-g, g):
+            V += [(0, a, b), (a, b, 0), (b, 0, a)]
+    return _solid(V, size, center, options, "dodecahedron")
+
+
+def icosahedron(center=(0, 0, 0), size=1, **options):
+    """A regular icosahedron inscribed in the sphere of radius size about center.
+
+        icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()"""
+    V = []
+    for a in (-1, 1):
+        for b in (-_PHI, _PHI):
+            V += [(0, a, b), (a, b, 0), (b, 0, a)]
+    return _solid(V, size, center, options, "icosahedron")

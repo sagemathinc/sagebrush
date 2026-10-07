@@ -117,6 +117,21 @@ try {
   await sleep(500);
   const webgl = await ev("(() => { const c = document.querySelector('figure.plot3d canvas'); return c ? c.getAttribute('aria-label').slice(0, 30) : null; })()");
   console.log("     " + (webgl ? "WebGL view mounted: " + webgl : "no WebGL in this browser: the SVG shows"));
+  if (webgl) {
+    // fly mode: F, then W moves the camera forward; Home glides back
+    const moved = await ev(`(async () => {
+      const c = document.querySelector('figure.plot3d canvas'), t0 = c.sagebrush.view.t;
+      c.focus();
+      const key = (type, code) => c.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true }));
+      key('keydown', 'KeyF'); key('keydown', 'KeyW');
+      await new Promise((r) => setTimeout(r, 700));
+      key('keyup', 'KeyW');
+      const fly = c.sagebrush.fly, t1 = c.sagebrush.view.t;
+      key('keydown', 'KeyF');
+      return fly && !c.sagebrush.fly && Math.hypot(t1[0] - t0[0], t1[1] - t0[1], t1[2] - t0[2]) > 0.05;
+    })()`);
+    ok(moved, "the 3D view flies: F toggles fly mode and W moves forward");
+  }
   // Stop: KeyboardInterrupt, in Python loops and in the Rust engine, keeping variables
   ok(await ev("crossOriginIsolated"), "the page is cross-origin isolated (COOP/COEP), so Stop can interrupt");
   out = await runAndStop("keep = 41\nwhile True:\n    pass", 800);

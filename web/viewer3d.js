@@ -149,12 +149,14 @@
           const n = cross(sub(P[b], P[a]), sub(P[c], P[a]));
           for (const v of [a, b, c]) { N[v][0] += n[0]; N[v][1] += n[1]; N[v][2] += n[2]; }
         }
+        // flat (polyhedra): each triangle gets its own normal
+        const F = (t) => unit(cross(sub(P[o.idx[t - t % 3 + 1]], P[o.idx[t - t % 3]]), sub(P[o.idx[t - t % 3 + 2]], P[o.idx[t - t % 3]])));
         const base = hex(o.color);
         const C = (v) => (o.colors ? [o.colors[3 * v] / 255, o.colors[3 * v + 1] / 255, o.colors[3 * v + 2] / 255] : base);
         const pos = [], nor = [], col = [];
         for (let t = 0; t < o.idx.length; t++) {
           const v = o.idx[t];
-          pos.push(...P[v]); nor.push(...unit(N[v])); col.push(...C(v));
+          pos.push(...P[v]); nor.push(...(o.flat ? F(t) : unit(N[v]))); col.push(...C(v));
         }
         tris.push({ pos, nor, col, alpha: o.opacity ?? 1 });
       } else if (o.type === "lines") {
@@ -346,8 +348,9 @@
     canvas.style.cssText = "display:block;width:100%;outline:none;cursor:grab";
     canvas.tabIndex = 0;
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", (scene.description || "3D plot") + ". Drag to rotate, scroll or pinch to zoom, double-click to reset.");
-    canvas.title = "Drag to rotate; click, then scroll to zoom; double-click to reset";
+    canvas.setAttribute("aria-label", (scene.description || "3D plot") +
+      ". Drag to rotate, right-drag to pan, scroll or pinch to zoom, double-click to focus on a point; W A S D move; F flies.");
+    canvas.title = "Drag: rotate · right-drag: pan · click, then scroll: zoom · double-click: focus · WASD: move · F: fly";
     wrap.appendChild(canvas);
     const layer = document.createElement("div");
     layer.style.cssText = "position:absolute;inset:0;pointer-events:none;font:10px system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;overflow:hidden";
@@ -394,38 +397,50 @@
       return labels[i];
     };
 
-    const view0 = { az: scene.azimuth ?? -60, el: scene.elevation ?? 25, zoom: 1 };
-    let view = { ...view0 }, W = 0, H = 0, pending = false;
+    // The camera looks at the target t from the direction (az, el) at the
+    // distance 5.2 / zoom; z is up.  Orbiting turns about t, looking (fly
+    // mode) turns about the eye, and moving shifts both.
+    const view0 = { az: scene.azimuth ?? -60, el: scene.elevation ?? 25, zoom: 1, t: [0, 0, 0] };
+    let view = { ...view0 }, W = 0, H = 0;
     const ink = () => {
       const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(getComputedStyle(container).color || "");
       return m ? [m[1] / 255, m[2] / 255, m[3] / 255] : [0, 0, 0];
     };
-    const fov = (30 * Math.PI) / 180;
+    const fov = (30 * Math.PI) / 180, ZMIN = 0.3, ZMAX = 40;
+    const dirOf = (az, el) => {
+      const a = (az * Math.PI) / 180, e = (el * Math.PI) / 180;
+      return [Math.cos(e) * Math.cos(a), Math.cos(e) * Math.sin(a), Math.sin(e)];
+    };
+    function camera(v = view) {
+      const dist = 5.2 / v.zoom, d = dirOf(v.az, v.el);
+      const eye = [v.t[0] + dist * d[0], v.t[1] + dist * d[1], v.t[2] + dist * d[2]];
+      const f = [-d[0], -d[1], -d[2]], r = unit(cross(f, [0, 0, 1])), u = cross(r, f);
+      return { eye, dist, d, f, r, u, M: lookAt(eye, v.t, [0, 0, 1]) };
+    }
+    const projection = () => perspective(fov, W / H, 0.01, 100);
 
     // camera auto-fit: the projected box fills most of the view
     let fitted = false;
     function fit() {
       fitted = true;
       for (let it = 0; it < 3; it++) {
-        const az = (view.az * Math.PI) / 180, el = (view.el * Math.PI) / 180, dist = 5.2 / view.zoom;
-        const eye = [dist * Math.cos(el) * Math.cos(az), dist * Math.cos(el) * Math.sin(az), dist * Math.sin(el)];
-        const M = lookAt(eye, [0, 0, 0], [0, 0, 1]), P = perspective(fov, W / H, 0.05, 50);
+        const { M } = camera(), P = projection();
         let e = 0;
         for (const i of [0, 1]) for (const j of [0, 1]) for (const k of [0, 1]) {
           const q = apply(P, apply(M, C(i, j, k)));
           e = Math.max(e, Math.abs(q[0] / q[3]), Math.abs(q[1] / q[3]));
         }
         if (!(e > 0)) return;
-        view.zoom = Math.min(12, Math.max(0.3, view.zoom * 0.84 / e));
+        view.zoom = Math.min(12, Math.max(ZMIN, view.zoom * 0.84 / e));
       }
       view0.zoom = view.zoom;
     }
 
     function draw() {
-      pending = false;
       const dpr = window.devicePixelRatio || 1;
-      const w = scene.fill ? container.clientWidth || 800 : Math.min(container.clientWidth || 560, 640);
-      const h = scene.fill ? Math.max(300, Math.round(window.innerHeight - 24)) : Math.round(w * 0.82);
+      const full = document.fullscreenElement === wrap;
+      const w = full ? window.innerWidth : scene.fill ? container.clientWidth || 800 : Math.min(container.clientWidth || 560, 640);
+      const h = full ? window.innerHeight : scene.fill ? Math.max(300, Math.round(window.innerHeight - 24)) : Math.round(w * 0.82);
       if (w !== W || h !== H) {
         W = w; H = h;
         canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
@@ -436,10 +451,7 @@
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.enable(gl.DEPTH_TEST);
-      const az = (view.az * Math.PI) / 180, el = (view.el * Math.PI) / 180, dist = 5.2 / view.zoom;
-      const eye = [dist * Math.cos(el) * Math.cos(az), dist * Math.cos(el) * Math.sin(az), dist * Math.sin(el)];
-      const M = lookAt(eye, [0, 0, 0], [0, 0, 1]);
-      const P = perspective(fov, W / H, 0.05, 50);
+      const { eye, M } = camera(), P = projection();
       gl.useProgram(prog.p);
       gl.uniformMatrix4fv(prog.M, false, new Float32Array(M));
       gl.uniformMatrix4fv(prog.P, false, new Float32Array(P));
@@ -529,7 +541,8 @@
 
     function placeLabels(M, P) {
       let n = 0;
-      const put = (x, y, text, style) => {
+      const put = (x, y, text, style, z) => {
+        if (!(z > -1 && z < 1)) return; // behind the eye (flying)
         const s = label(n++);
         s.style.left = x + "px"; s.style.top = y + "px"; s.style.display = "";
         s.textContent = text;
@@ -537,7 +550,7 @@
         s.style.fontSize = style?.size ? style.size + "px" : "";
         s.style.color = style?.color || "";
       };
-      for (const t of geo.texts) { const p = screen(M, P, t.at); put(p[0], p[1], t.text, { size: t.size || 12, color: t.color }); }
+      for (const t of geo.texts) { const p = screen(M, P, t.at); put(p[0], p[1], t.text, { size: t.size || 12, color: t.color }, p[2]); }
       if (scene.frame !== false) {
         const pts = {};
         for (const i of [0, 1]) for (const j of [0, 1]) for (const k of [0, 1]) pts[[i, j, k]] = screen(M, P, C(i, j, k));
@@ -557,61 +570,310 @@
           for (const v of ticks) {
             if (v < lo - 1e-9 * (hi - lo) || v > hi + 1e-9 * (hi - lo)) continue;
             const f = hi > lo ? (v - lo) / (hi - lo) : 0.5;
-            put(a[0] + (b[0] - a[0]) * f + 14 * ox, a[1] + (b[1] - a[1]) * f + 12 * oy, tickLabel(v, step));
+            put(a[0] + (b[0] - a[0]) * f + 14 * ox, a[1] + (b[1] - a[1]) * f + 12 * oy, tickLabel(v, step), null, Math.max(a[2], b[2]));
           }
           const name = (scene.labels || [])[axis];
-          if (name) put(mx + 34 * ox, my + 30 * oy, axisLabel(name), { italic: true, size: 12 });
+          if (name) put(mx + 34 * ox, my + 30 * oy, axisLabel(name), { italic: true, size: 12 }, Math.max(a[2], b[2]));
         }
       }
       for (let i = n; i < labels.length; i++) labels[i].style.display = "none";
     }
 
-    const redraw = () => { if (!pending) { pending = true; requestAnimationFrame(() => { if (canvas.isConnected) draw(); }); } };
-    // interaction: pointers (one rotates, two pinch), wheel, keys
+    // ---- navigation: orbit (default) and fly, with smooth motion.
+    // Orbit: drag rotates about the target (with inertia), right- or
+    // shift-drag pans, the wheel zooms toward the cursor, a double-click
+    // glides to orbit the point under it.  Fly (F): mouse look (pointer
+    // lock), W A S D / arrows, Space or E up, Q or C down, Shift faster,
+    // wheel sets the speed; a gamepad flies too.  Keys work in both modes.
+    let raf = 0, lastT = 0, fly = false, spin = null, auto = false, tween = null, speed = 1;
+    let vel = [0, 0, 0];
+    const keys = new Set();
+    const clampEl = (e) => Math.max(-89, Math.min(89, e));
+    const redraw = () => { if (!raf && canvas.isConnected) raf = requestAnimationFrame(tick); };
+    // turn about the eye (fly) or about the target (orbit)
+    function look(daz, del) {
+      const { eye, dist } = camera();
+      view.az += daz; view.el = clampEl(view.el + del);
+      const d = dirOf(view.az, view.el);
+      view.t = [eye[0] - dist * d[0], eye[1] - dist * d[1], eye[2] - dist * d[2]];
+    }
+    function orbit(daz, del) { view.az += daz; view.el = clampEl(view.el + del); }
+    // the ray through the CSS pixel (x, y)
+    function ray(x, y) {
+      const c = camera(), th = Math.tan(fov / 2), px = (2 * x / W - 1) * th * (W / H), py = (1 - 2 * y / H) * th;
+      return { o: c.eye, dir: unit([0, 1, 2].map((i) => c.f[i] + px * c.r[i] + py * c.u[i])), c };
+    }
+    // the nearest surface point on a ray (Moller-Trumbore), else the
+    // middle of its run through a volume, else null
+    function pick(x, y) {
+      const { o, dir } = ray(x, y);
+      let best = Infinity;
+      const tri = (P, a, b, c) => {
+        const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2];
+        const e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
+        const px = dir[1] * e2z - dir[2] * e2y, py = dir[2] * e2x - dir[0] * e2z, pz = dir[0] * e2y - dir[1] * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (Math.abs(det) < 1e-12) return;
+        const inv = 1 / det, sx = o[0] - P[a], sy = o[1] - P[a + 1], sz = o[2] - P[a + 2];
+        const u = (sx * px + sy * py + sz * pz) * inv;
+        if (u < 0 || u > 1) return;
+        const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+        const v = (dir[0] * qx + dir[1] * qy + dir[2] * qz) * inv;
+        if (v < 0 || u + v > 1) return;
+        const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (t > 1e-4 && t < best) best = t;
+      };
+      for (const t of geo.tris) for (let i = 0; i + 8 < t.pos.length; i += 9) tri(t.pos, i, i + 3, i + 6);
+      for (const m of geo.meshes) for (let i = 0; i + 2 < m.idx.length; i += 3) tri(m.pos, 3 * m.idx[i], 3 * m.idx[i + 1], 3 * m.idx[i + 2]);
+      if (best === Infinity) {
+        for (const v of geo.volumes) {
+          let tn = 0, tf = Infinity;
+          for (let i = 0; i < 3; i++) {
+            const a = (v.bmin[i] - o[i]) / dir[i], b = (v.bmax[i] - o[i]) / dir[i];
+            tn = Math.max(tn, Math.min(a, b)); tf = Math.min(tf, Math.max(a, b));
+          }
+          if (tf > tn) best = Math.min(best, (tn + tf) / 2);
+        }
+      }
+      return best === Infinity ? null : [o[0] + best * dir[0], o[1] + best * dir[1], o[2] + best * dir[2]];
+    }
+    // glide to a view
+    const ease = (x) => x * x * (3 - 2 * x);
+    function glide(to, ms = 550) {
+      const from = { ...view, t: [...view.t] };
+      let daz = ((to.az - from.az) % 360 + 540) % 360 - 180;
+      tween = { from, to: { ...to, az: from.az + daz }, t0: performance.now(), ms };
+      vel = [0, 0, 0]; spin = null;
+      redraw();
+    }
+    // orbit about p from where the eye is, moving in a little
+    function focus(p) {
+      const { eye } = camera(), d = sub(eye, p), L = Math.hypot(...d) || 1;
+      const el = (Math.asin(Math.max(-1, Math.min(1, d[2] / L))) * 180) / Math.PI;
+      const az = (Math.atan2(d[1], d[0]) * 180) / Math.PI;
+      glide({ az, el: clampEl(el), zoom: Math.min(ZMAX, Math.max(ZMIN, 5.2 / (L * 0.7))), t: p });
+    }
+    function home() { glide(view0); }
+
+    function tick(now) {
+      raf = 0;
+      const dt = lastT ? Math.min(0.1, (now - lastT) / 1000) : 0;
+      lastT = now;
+      let busy = false;
+      if (tween) {
+        const x = Math.min(1, (now - tween.t0) / tween.ms), k = ease(x), a = tween.from, b = tween.to;
+        view.az = a.az + (b.az - a.az) * k; view.el = a.el + (b.el - a.el) * k;
+        view.zoom = Math.exp(Math.log(a.zoom) + (Math.log(b.zoom) - Math.log(a.zoom)) * k);
+        view.t = [0, 1, 2].map((i) => a.t[i] + (b.t[i] - a.t[i]) * k);
+        if (x >= 1) tween = null; else busy = true;
+      }
+      // movement input: right, up, forward
+      const inp = [0, 0, 0];
+      const k = (c) => keys.has(c) ? 1 : 0;
+      inp[0] = k("KeyD") - k("KeyA");
+      inp[1] = k("KeyE") + k("Space") - k("KeyQ") - k("KeyC");
+      inp[2] = k("KeyW") - k("KeyS");
+      let lookX = k("ArrowLeft") - k("ArrowRight"), lookY = k("ArrowUp") - k("ArrowDown");
+      const gp = fly && navigator.getGamepads ? [...navigator.getGamepads()].find((g) => g && g.connected) : null;
+      if (gp) {
+        const ax = (i) => (Math.abs(gp.axes[i] || 0) > 0.15 ? gp.axes[i] : 0), bt = (i) => gp.buttons[i]?.value || 0;
+        inp[0] += ax(0); inp[2] -= ax(1); inp[1] += bt(7) - bt(6);
+        lookX -= ax(2) * 1.5; lookY -= ax(3) * 1.5;
+        if (bt(0) > 0.5 || bt(10) > 0.5) inp.forEach((v, i) => (inp[i] = v * 3));
+        busy = true; // keep polling while flying with a gamepad
+      }
+      if (lookX || lookY) {
+        (fly ? look : orbit)(lookX * 100 * dt, lookY * 70 * dt);
+        busy = true;
+      }
+      const fast = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 4 : 1;
+      const c = camera(), v = speed * fast * (fly ? 1 : c.dist / 5.2 * 1.5);
+      const want = [0, 1, 2].map((i) => (inp[0] * c.r[i] + inp[2] * c.f[i]) * v + (i === 2 ? inp[1] * v : 0));
+      const s = 1 - Math.exp(-dt * 9);
+      vel = vel.map((x, i) => x + (want[i] - x) * s);
+      if (Math.hypot(...vel) > 1e-4 || inp.some((x) => x)) {
+        view.t = view.t.map((x, i) => Math.max(-30, Math.min(30, x + vel[i] * dt)));
+        busy = true;
+      } else vel = [0, 0, 0];
+      if (spin) {
+        orbit(spin[0] * dt, spin[1] * dt);
+        const damp = Math.exp(-dt * 2.5);
+        spin = [spin[0] * damp, spin[1] * damp];
+        if (Math.hypot(...spin) < 3) spin = null; else busy = true;
+      }
+      if (auto) { orbit(-14 * dt, 0); busy = true; }
+      draw();
+      updateHud();
+      if (busy) redraw(); else lastT = 0;
+    }
+
+    // ---- controls overlay: a small toolbar (shown on hover), the fly HUD and help
+    const btnCss = "pointer-events:auto;font:11px system-ui,sans-serif;padding:2px 7px;border-radius:4px;" +
+      "border:1px solid rgba(128,128,128,.5);background:rgba(255,255,255,.82);color:#222;cursor:pointer";
+    const bar = document.createElement("div");
+    bar.style.cssText = "position:absolute;left:6px;bottom:6px;display:flex;gap:4px;opacity:0;transition:opacity .2s;pointer-events:none";
+    const mk = (text, title, fn) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = text; b.title = title; b.style.cssText = btnCss;
+      b.addEventListener("click", (e) => { e.stopPropagation(); fn(); canvas.focus(); });
+      b.addEventListener("dblclick", (e) => e.stopPropagation());
+      b.addEventListener("pointerdown", (e) => e.stopPropagation());
+      bar.appendChild(b);
+      return b;
+    };
+    mk("Home", "Back to the starting view (0)", home);
+    const flyB = mk("Fly", "Fly through the scene like a game (F)", () => setFly(!fly));
+    const spinB = mk("Spin", "Turntable rotation (T)", () => { auto = !auto; spinB.style.fontWeight = auto ? "700" : ""; redraw(); });
+    if (wrap.requestFullscreen) mk("Full screen", "Full screen (Esc leaves)", () => {
+      if (document.fullscreenElement) document.exitFullscreen(); else wrap.requestFullscreen().catch(() => {});
+    });
+    const help = document.createElement("div");
+    help.style.cssText = "position:absolute;left:6px;bottom:34px;max-width:300px;padding:6px 9px;border-radius:6px;display:none;" +
+      "background:rgba(20,20,24,.86);color:#eee;font:11px/1.45 system-ui,sans-serif;pointer-events:none";
+    help.innerHTML = "<b>Orbit<\/b> drag: rotate (flick to spin) · right/shift-drag: pan · wheel: zoom to the cursor " +
+      "(click the view first) · double-click: orbit that point · two fingers: pan and pinch<br>" +
+      "<b>Move<\/b> W A S D, Space/E up, Q/C down, Shift faster, arrows turn<br>" +
+      "<b>Fly<\/b> (F) click to look with the mouse (Esc releases) · wheel: speed · gamepad: sticks, triggers<br>" +
+      "<b>Keys<\/b> 0 home · T turntable · +/- zoom";
+    mk("?", "Controls", () => { help.style.display = help.style.display === "none" ? "" : "none"; });
+    const hud = document.createElement("div");
+    hud.style.cssText = "position:absolute;left:0;right:0;top:6px;text-align:center;display:none;pointer-events:none;" +
+      "font:11px system-ui,sans-serif;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000";
+    const cross_ = document.createElement("div");
+    cross_.style.cssText = "position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;display:none;pointer-events:none;" +
+      "background:linear-gradient(#fff,#fff) center/2px 100% no-repeat,linear-gradient(#fff,#fff) center/100% 2px no-repeat;" +
+      "mix-blend-mode:difference;opacity:.8";
+    wrap.append(bar, help, hud, cross_);
+    const hoverNone = typeof matchMedia !== "undefined" && matchMedia("(hover: none)").matches;
+    const showBar = (on) => { bar.style.opacity = on || fly || hoverNone ? (hoverNone && !on ? "0.6" : "1") : "0"; };
+    showBar(false);
+    wrap.addEventListener("pointerenter", () => showBar(true));
+    wrap.addEventListener("pointerleave", () => showBar(false));
+    canvas.addEventListener("focus", () => showBar(true));
+    canvas.addEventListener("blur", () => { keys.clear(); showBar(false); });
+    let hudText = "";
+    function updateHud() {
+      if (!fly) return;
+      const locked = document.pointerLockElement === canvas;
+      const t = (locked ? "Esc releases the mouse" : "Click to look with the mouse") +
+        " · WASD move · Space/Q up/down · Shift faster · wheel: speed ×" + speed.toFixed(speed < 1 ? 2 : 1) + " · F: orbit";
+      if (t !== hudText) { hudText = t; hud.textContent = t; }
+    }
+    function setFly(on) {
+      fly = on;
+      flyB.style.fontWeight = fly ? "700" : "";
+      hud.style.display = cross_.style.display = fly ? "" : "none";
+      canvas.style.cursor = fly ? "crosshair" : "grab";
+      if (!fly && document.pointerLockElement === canvas) document.exitPointerLock();
+      spin = null; auto = false; spinB.style.fontWeight = "";
+      showBar(true); hudText = ""; updateHud(); redraw();
+    }
+    document.addEventListener("pointerlockchange", () => { hudText = ""; if (fly) updateHud(); });
+
+    // ---- pointers: one rotates (or looks), two pan and pinch; right/shift pans
     const ptrs = new Map();
-    let pinch = null;
+    let two = null, drag = null;
+    const pan = (dx, dy) => {
+      const c = camera(), s = (2 * c.dist * Math.tan(fov / 2)) / H;
+      view.t = view.t.map((x, i) => x - (dx * c.r[i] - dy * c.u[i]) * s);
+    };
+    const pair = () => {
+      const [p, q] = [...ptrs.values()];
+      return { d: Math.hypot(p[0] - q[0], p[1] - q[1]), m: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] };
+    };
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("pointerdown", (e) => {
+      canvas.focus({ preventScroll: true });
+      tween = null; spin = null;
+      if (fly && e.pointerType === "mouse" && document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+        try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (err) { /* not allowed here */ }
+      }
+      if (document.pointerLockElement === canvas) return;
       canvas.setPointerCapture(e.pointerId);
       ptrs.set(e.pointerId, [e.clientX, e.clientY]);
-      canvas.style.cursor = "grabbing";
-      if (ptrs.size === 2) { const [p, q] = [...ptrs.values()]; pinch = { d: Math.hypot(p[0] - q[0], p[1] - q[1]), zoom: view.zoom }; }
+      if (!fly) canvas.style.cursor = "grabbing";
+      drag = { pan: e.button === 2 || e.button === 1 || e.shiftKey, v: [0, 0], at: performance.now() };
+      if (ptrs.size === 2) two = pair();
     });
     canvas.addEventListener("pointermove", (e) => {
+      if (document.pointerLockElement === canvas) {
+        look(-e.movementX * 0.14, -e.movementY * 0.14);
+        redraw();
+        return;
+      }
       const last = ptrs.get(e.pointerId);
       if (!last) return;
-      const now = [e.clientX, e.clientY];
+      const now = [e.clientX, e.clientY], dx = now[0] - last[0], dy = now[1] - last[1];
       ptrs.set(e.pointerId, now);
-      if (ptrs.size === 2 && pinch) {
-        const [p, q] = [...ptrs.values()];
-        view.zoom = Math.min(12, Math.max(0.3, (pinch.zoom * Math.hypot(p[0] - q[0], p[1] - q[1])) / (pinch.d || 1)));
-      } else if (ptrs.size === 1) {
-        view.az -= (now[0] - last[0]) * 0.5;
-        view.el = Math.max(-89, Math.min(89, view.el + (now[1] - last[1]) * 0.5));
+      if (ptrs.size === 2 && two) {
+        const q = pair(), r = q.d / (two.d || 1);
+        pan(q.m[0] - two.m[0], q.m[1] - two.m[1]);
+        if (fly) { const c = camera(); view.t = view.t.map((x, i) => x + c.f[i] * Math.log(r) * 2 * speed); }
+        else view.zoom = Math.min(ZMAX, Math.max(ZMIN, view.zoom * r));
+        two = q;
+      } else if (ptrs.size === 1 && drag) {
+        if (drag.pan && !fly) pan(dx, dy);
+        else if (fly) look(dx * 0.25, dy * 0.25);
+        else {
+          orbit(-dx * 0.5, dy * 0.5);
+          const t = performance.now(), ms = Math.max(1, t - drag.at);
+          drag.v = [0.7 * drag.v[0] + 0.3 * (-dx * 0.5 * 1000 / ms), 0.7 * drag.v[1] + 0.3 * (dy * 0.5 * 1000 / ms)];
+          drag.at = t;
+        }
       }
       redraw();
     });
-    const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (!ptrs.size) canvas.style.cursor = "grab"; };
+    const up = (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.delete(e.pointerId);
+      if (ptrs.size < 2) two = null;
+      if (!ptrs.size) {
+        if (drag && !drag.pan && !fly && performance.now() - drag.at < 60 && Math.hypot(...drag.v) > 40) { spin = drag.v; redraw(); }
+        drag = null;
+        canvas.style.cursor = fly ? "crosshair" : "grab";
+      }
+    };
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
     canvas.addEventListener("wheel", (e) => {
-      if (document.activeElement !== canvas && !e.ctrlKey && !scene.fill) return; // let the page scroll
+      if (document.activeElement !== canvas && !e.ctrlKey && !scene.fill && document.fullscreenElement !== wrap) return; // let the page scroll
       e.preventDefault();
-      view.zoom = Math.min(12, Math.max(0.3, view.zoom * Math.exp(-e.deltaY * 0.0015)));
+      if (fly) { speed = Math.min(20, Math.max(0.05, speed * Math.exp(-e.deltaY * 0.002))); updateHud(); return; }
+      // zoom about the point under the cursor (on the plane through the target)
+      const b = canvas.getBoundingClientRect(), { o, dir, c } = ray(e.clientX - b.left, e.clientY - b.top);
+      const q = o.map((x, i) => x + dir[i] * (c.dist / Math.max(1e-6, dot(dir, c.f))));
+      const z = Math.min(ZMAX, Math.max(ZMIN, view.zoom * Math.exp(-e.deltaY * 0.0015))), s = view.zoom / z;
+      view.t = view.t.map((x, i) => q[i] + (x - q[i]) * s);
+      view.zoom = z;
+      tween = null;
       redraw();
     }, { passive: false });
-    canvas.addEventListener("dblclick", () => { view = { ...view0 }; redraw(); });
+    canvas.addEventListener("dblclick", (e) => {
+      if (fly) return;
+      const b = canvas.getBoundingClientRect(), p = pick(e.clientX - b.left, e.clientY - b.top);
+      if (p) focus(p); else home();
+    });
     canvas.addEventListener("keydown", (e) => {
-      const k = e.key;
-      if (k === "ArrowLeft") view.az += 5; else if (k === "ArrowRight") view.az -= 5;
-      else if (k === "ArrowUp") view.el = Math.min(89, view.el + 5); else if (k === "ArrowDown") view.el = Math.max(-89, view.el - 5);
-      else if (k === "+" || k === "=") view.zoom = Math.min(12, view.zoom * 1.15); else if (k === "-") view.zoom = Math.max(0.3, view.zoom / 1.15);
-      else if (k === "0") view = { ...view0 };
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const c = e.code;
+      if (c === "KeyF") setFly(!fly);
+      else if (c === "KeyT") { auto = !auto; spinB.style.fontWeight = auto ? "700" : ""; }
+      else if (c === "Digit0" || c === "Numpad0" || c === "Home") home();
+      else if (e.key === "+" || e.key === "=") view.zoom = Math.min(ZMAX, view.zoom * 1.15);
+      else if (e.key === "-") view.zoom = Math.max(ZMIN, view.zoom / 1.15);
+      else if (c === "Escape" && fly && document.pointerLockElement !== canvas) setFly(false);
+      else if (/^(Key[WASDEQC]|Space|Arrow(Left|Right|Up|Down)|Shift(Left|Right))$/.test(c)) { keys.add(c); tween = null; }
       else return;
       e.preventDefault();
       redraw();
     });
+    canvas.addEventListener("keyup", (e) => { keys.delete(e.code); });
+    window.addEventListener("gamepadconnected", () => { if (fly) redraw(); });
+    // for tests and embedding pages: the camera state and the modes
+    canvas.sagebrush = { get view() { return { ...view, t: [...view.t] }; }, get fly() { return fly; }, setFly, home, focus, pick };
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(redraw).observe(container);
     if (scene.fill) window.addEventListener("resize", redraw);
+    document.addEventListener("fullscreenchange", redraw);
     if (typeof matchMedia !== "undefined") matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", redraw);
     new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
     draw();

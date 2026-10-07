@@ -87,20 +87,38 @@ parametric_plot3d((cos(t), sin(t), t/5), (t, 0, 6*pi), color='green')           
 parametric_plot3d((u*cos(v), u*sin(v), u), (u, 0, 1), (v, 0, 2*pi))              # a surface
 implicit_plot3d(x^2 + y^2 + z^2 == 4, (x, -2, 2), (y, -2, 2), (z, -2, 2), color='red')
 sphere((0, 0, 1), 0.5, color='orange', opacity=0.6) + point3d((1, 1, 1)) + line3d([(0, 0, 0), (1, 1, 1)])
+icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()
 ```
 
 Also available: `spherical_plot3d`, `cylindrical_plot3d`,
 `revolution_plot3d`, `arrow3d`, `text3d`, `polygon3d` and
 `plot_vector_field3d`. Graphics3d objects add with `+`.
 
+The Platonic solids `tetrahedron`, `cube`, `octahedron`, `dodecahedron` and
+`icosahedron` take `center`, `size`, `color` and `opacity`, as in Sage. Their
+faces are flat-shaded. `size` is the circumradius, or the edge length for
+`cube`. Any Graphics3d moves with `translate((dx, dy, dz))`,
+`rotate(axis, angle)`, `rotateX`/`rotateY`/`rotateZ(angle)` and
+`scale(s)` or `scale(sx, sy, sz)`. Each returns a new object.
+
 A Graphics3d shows two ways at once:
 
 - **Interactive view (notebook, Jupyter, saved `.html`).** Our own WebGL 1
-  viewer (`web/viewer3d.js`, about 19 kB, no libraries). It uses smooth
-  shading and thick curves drawn as tubes. Drag to rotate, scroll (once the
-  view has focus) or pinch to zoom, use the arrow keys and +/- to turn and
-  zoom, and double-click or press 0 to reset. Labels follow the page's light
-  or dark theme. The notebook loads the viewer on first use. Jupyter gets
+  viewer (`web/viewer3d.js`, about 50 kB, no libraries). It uses smooth
+  shading and thick curves drawn as tubes. Labels follow the page's light
+  or dark theme. Navigation (the toolbar appears on hover, and **?** lists
+  the controls):
+  - **Orbit (the default).** Drag to rotate; a flick keeps it spinning.
+    Right-drag or shift-drag pans. Scroll zooms toward the cursor (once the
+    view has focus), and so does a pinch. Double-click a surface to glide
+    in and orbit that point, or double-click empty space or press 0 to go
+    home.
+  - **Moving, in either mode.** W A S D move, Space or E rises, Q or C
+    sinks, and Shift is faster. The arrow keys turn. All motion is smoothed.
+  - **Fly (F, or the Fly button).** Like a game: click to capture the mouse
+    and look around, Esc releases it, and the wheel sets the speed. A
+    gamepad flies too: the sticks move and look, the triggers rise and sink.
+  - **Spin** (T) is a turntable. **Full screen** fills the screen. The notebook loads the viewer on first use. Jupyter gets
   HTML with the viewer embedded, and the SVG still inside it for when
   scripts don't run.
 - **SVG (files, the command line, agents, and when WebGL is missing).**
