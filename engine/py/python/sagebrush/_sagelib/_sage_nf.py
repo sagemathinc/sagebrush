@@ -421,10 +421,10 @@ class NumberField_absolute:
         """
         p = int(p)
         def pi(q):
-            # the second generator with coefficients in [0, p) when it is in
-            # Z[a] (as Sage shows quadratic fields' primes: (3, a + 2))
+            # in quadratic fields Sage reduces the second generator into
+            # [0, p): (3, a + 2); in higher degree it keeps PARI's (5, a - 1)
             cs = [_F(c, q["pi_den"]) for c in q["pi"]]
-            if all(c.denominator == 1 for c in cs):
+            if self.degree() == 2 and all(c.denominator == 1 for c in cs):
                 cs = [c % q["p"] for c in cs]
             return self(cs)
         out = [PrimeIdeal(self, q["p"], q["e"], q["f"], pi(q)) for q in _primes_above(tuple(self._f), p)]
