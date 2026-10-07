@@ -122,6 +122,21 @@ for ai in [[0,1,1,-2,0], [0,0,1,-7,6], [0,-1,1,-929,-10595]]:
   assert.deepEqual(out.trim().split("\n"), ["True 2 (2, 2)", "True 3 (3, 3)", "False 2 (0, 0)"]);
 });
 
+test("elliptic curves: generators in rank >= 2 (saturation)", () => {
+  const out = cli("--sage", "-c", `
+E = EllipticCurve('389a1')
+G = E.gens()
+print(G, round(float(E.regulator_of_points(G)), 10))
+P, Q = G
+S, n, R = E.saturation([P + Q, 3*Q])
+print(n, round(float(R), 10))
+E = EllipticCurve('37a1')
+print(E.saturation([5*E(0, 0)])[:2])
+`);
+  // the regulators are Cremona's: 389a1 0.152460177943144
+  assert.deepEqual(out.trim().split("\n"), ["[(0 : -1 : 1), (1 : -1 : 1)] 0.1524601779", "3 0.1524601779", "([(0 : 0 : 1)], 5)"]);
+});
+
 test("elliptic curves: analytic rank (numerical beyond 1; proof=True only for 0 and 1)", () => {
   const out = cli("--sage", "-c", `
 for ai in [[0,0,1,-1,0], [0,1,1,-2,0], [0,0,1,-7,6]]:

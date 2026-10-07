@@ -592,6 +592,15 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let e = curve(v.get("a"))?;
             Ok(json!(sagebrush_ap::aplist(&e, u(v, "n")?).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
         }
+        "ec_point_search" => {
+            let b = bigs(v.get("b"))?;
+            let p = |x: &BigInt| x.to_string().parse::<i128>().map_err(|_| "b-invariants too large for the point search".to_string());
+            if b.len() != 3 {
+                return Err("b is [b2, b4, b6]".into());
+            }
+            let xs = sagebrush_ap::search::x_coordinates(p(&b[0])?, p(&b[1])?, p(&b[2])?, u(v, "rmax")?, u(v, "smax")?, u(v, "limit").unwrap_or(100000) as usize)?;
+            Ok(json!(xs.iter().map(|(r, s)| json!([r.to_string(), s])).collect::<Vec<_>>()))
+        }
         "quartic_search" => {
             let p = |k: &str| -> Result<i128, String> {
                 big1(v.get(k))?.to_string().parse::<i128>().map_err(|_| format!("{} is too large for the quartic search", k))

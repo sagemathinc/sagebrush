@@ -193,7 +193,7 @@ fn real_types(i: f64, j: f64) -> Vec<[f64; 5]> {
         .collect()
 }
 
-fn is_square(n: u128) -> Option<u128> {
+pub fn is_square(n: u128) -> Option<u128> {
     // quadratic residues mod 64, 63, 65, 11 reject most non-squares
     const Q64: u64 = 0x0202021202030213;
     if (Q64 >> (n % 64)) & 1 == 0 {

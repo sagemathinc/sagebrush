@@ -847,45 +847,84 @@ def _gauss_legendre(f, lo, hi, n=20):
     return h * sum(w * f(m + h * x) for x, w in nodes)
 
 
-def _integrate(f, lo, hi, depth=0):
-    """Adaptive Gauss-Legendre."""
-    whole = _gauss_legendre(f, lo, hi)
+def _integrate(f, lo, hi, tol=None, depth=0, whole=None):
+    """Adaptive Gauss-Legendre: an absolute tolerance shared by the halves,
+    never below what double precision can reach on a piece (else rounding
+    noise would split forever)."""
+    if whole is None:
+        whole = _gauss_legendre(f, lo, hi)
     mid = (lo + hi) / 2
-    halves = _gauss_legendre(f, lo, mid) + _gauss_legendre(f, mid, hi)
-    if abs(whole - halves) <= 1e-15 * max(1.0, abs(halves)) or depth > 40:
+    left, right = _gauss_legendre(f, lo, mid), _gauss_legendre(f, mid, hi)
+    halves = left + right
+    if tol is None:
+        tol = 1e-15 * max(1.0, abs(halves))
+    if abs(whole - halves) <= max(tol, 8e-16 * abs(halves)) or depth > 30:
         return halves
-    return _integrate(f, lo, mid, depth + 1) + _integrate(f, mid, hi, depth + 1)
+    return (_integrate(f, lo, mid, tol / 2, depth + 1, left) +
+            _integrate(f, mid, hi, tol / 2, depth + 1, right))
+
+
+def _carlson_rf(x, y, z):
+    """Carlson's R_F(x, y, z) = 1/2 int_0^oo dt / sqrt((t+x)(t+y)(t+z)), by
+    duplication (x, y, z real >= 0 or complex off the negative axis)."""
+    while True:
+        sx, sy, sz = _cm.sqrt(x), _cm.sqrt(y), _cm.sqrt(z)
+        lam = sx * (sy + sz) + sy * sz
+        x, y, z = (x + lam) / 4, (y + lam) / 4, (z + lam) / 4
+        ave = (x + y + z) / 3
+        dx, dy, dz = (ave - x) / ave, (ave - y) / ave, (ave - z) / ave
+        if max(abs(dx), abs(dy), abs(dz)) < 0.0025:
+            break
+    e2 = dx * dy - dz * dz
+    e3 = dx * dy * dz
+    return (1 + (e2 / 24 - 0.1 - 3 * e3 / 44) * e2 + e3 / 14) / _cm.sqrt(ave)
+
+
+_ROOTS_FIXED = {}
+
+
+def _roots_fixed(a):
+    """The roots of 4x^3 + b2 x^2 + 2 b4 x + b6 in fixed point (scale
+    2^_K): ('3', E1, E2, E3) real, or ('1', E1, U, V) with e1 real and
+    e2, e3 = u +- iv (v from the fixed-point discriminant: exact even when
+    the complex roots are nearly real)."""
+    key = tuple(a)
+    if key not in _ROOTS_FIXED:
+        b2, b4, b6, b8 = _b(a)
+        coeffs = (4, b2, 2 * b4, b6)
+        one = 1 << _K
+        if _disc(a) > 0:
+            _ROOTS_FIXED[key] = ("3",) + tuple(_real_roots_fixed(coeffs))
+        else:
+            e = _cubic_roots(4.0, float(b2), float(2 * b4), float(b6))
+            E1 = _refine_real(coeffs, min(e, key=lambda x: abs(x.imag)).real)
+            # 4 (x - e1)(x^2 + p x + q): p = b2/4 + e1, q = b4/2 + e1 p
+            P = b2 * one // 4 + E1
+            Q = b4 * one // 2 + E1 * P // one
+            disc = P * P - 4 * Q * one  # scale 2^(2K), negative
+            V = _m.isqrt(max(-disc, 0)) // 2
+            _ROOTS_FIXED[key] = ("1", E1, -P // 2, V)
+    return _ROOTS_FIXED[key]
 
 
 def elliptic_log_real(a, P, roots):
-    """z in (0, w1/2]: the integral of dt / sqrt(f(t)) from x(P) to infinity, for
-    a real point P on the identity component (x >= e1, the largest real root)."""
-    x = float(P[0])
-    if len(roots) == 3:
-        e1, e2, e3 = roots
-        al, be = e1 - e2, e1 - e3
-        g = lambda r: 1 / _m.sqrt((1 + al * r * r) * (1 + be * r * r))
+    """z in (0, w1/2]: the integral of dt / sqrt(f(t)) from x(P) to infinity,
+    f = 4x^3 + b2 x^2 + 2 b4 x + b6 = 4 (x - e1)(x - e2)(x - e3), for a real
+    point P on the identity component (x >= e1, the largest real root):
+    R_F(x - e1, x - e2, x - e3) (Carlson), with the differences x - e_i
+    computed in fixed point: robust also for nearly singular curves (close
+    roots, or complex roots nearly real)."""
+    one = 1 << _K
+    X = P[0].numerator * one // P[0].denominator
+    r = _roots_fixed(a)
+    if r[0] == "3":
+        d1, d2, d3 = (complex(_fx(max(X - E, 0))) for E in r[1:])
     else:
-        e1 = roots[0]
-        b2, b4, b6, b8 = _b(a)
-        # f(t) = 4 (t - e1)(t^2 + p t + q): the quadratic factor
-        p_ = b2 / 4 + e1
-        q_ = (b4 / 2 + e1 * p_)
-        # (t - e2)(t - e3) = t^2 + p t + q; with t = e1 + 1/r^2: r^-4 (1 + (2 e1 + p) r^2 + (e1^2 + p e1 + q) r^4)
-        c1, c2 = 2 * e1 + p_, e1 * e1 + p_ * e1 + q_
-        g = lambda r: 1 / _m.sqrt(1 + c1 * r * r + c2 * r ** 4)
-    if x - e1 <= 0:
-        r0 = 1e8
-    else:
-        r0 = 1 / _m.sqrt(x - e1)
-    # split [0, r0] geometrically for large r0
-    pts = [0.0]
-    t = min(r0, 1.0)
-    pts.append(t)
-    while t < r0:
-        t = min(t * 4, r0)
-        pts.append(t)
-    return sum(_integrate(g, lo, hi) for lo, hi in zip(pts, pts[1:]))
+        _, E1, U, V = r
+        d1 = complex(_fx(max(X - E1, 0)))
+        re, im = _fx(X - U), _fx(V)
+        d2, d3 = complex(re, -im), complex(re, im)
+    return _carlson_rf(d1, d2, d3).real
 
 
 def _on_identity_component(a, P, roots):
@@ -1471,3 +1510,439 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10):
     lower = len(span).bit_length() - 1
     return dict(selmer=s, rank_bounds=(lower, upper), points=gens, closed=closed,
                 undecided=undecided, quartics=len(qs), work=res["work"], cost=res["cost"])
+
+
+# ------------------------------------------------------------------ saturation
+# Generators of E(Q) from independent points: saturate the subgroup they
+# span at every prime p up to a bound on its index.
+#  * p-saturation (Cremona, Prickett and Siksek's method, as in mwrank): a
+#    combination sum a_i P_i in pE(Q) maps to 0 in E(F_q)/pE(F_q) for every
+#    good prime q; with p exactly dividing #E(F_q) that group is Z/p, read
+#    off as (#E(F_q)/p) P in E(F_q)[p].  Enough primes q leave no
+#    combination (p-saturated: proved), or a candidate R, which is divided
+#    by p exactly: the x-coordinates of the Q with pQ = R are the rational
+#    roots of phi_p(x) - x(R) psi_p(x)^2 (division polynomials).
+#  * the index: E(Q)/tors is a lattice for the height pairing whose nonzero
+#    vectors have height at least lambda, so its covolume is at least
+#    (lambda/gamma_r)^r (Hermite's constant) and the index n of the span of
+#    the points satisfies n^2 <= R(points) gamma_r^r / lambda^r.  lambda comes
+#    from Silverman's bound (Math. Comp. 55, 1990), in Sage's normalization
+#    (twice his): h(x(P)) - hhat(P) <= 2 (h(j)/8 + h(Delta)/12 + 0.973) (+ 2 log 2
+#    of margin), and an exhaustive search of the points of naive height <= T:
+#    every point it misses has hhat > T - that.
+
+def point_search_engine(a, H, limit=100000):
+    """The points with x = r/s^2, log max(|r|, s^2) <= H (the Rust engine's
+    search; x lifted to the points above it)."""
+    from sagebrush._engine import call
+    b2, b4, b6, _ = _b(a)
+    R = int(_m.exp(H))
+    S = _m.isqrt(R)
+    xs = call("ec_point_search", b=[str(b2), str(b4), str(b6)], rmax=R, smax=S, limit=limit)
+    out = []
+    for r, s in xs:
+        for P in lift_x(a, _F(int(r), int(s) ** 2)):
+            out.append(P)
+    return out
+
+
+def _polymul(f, g):
+    if not f or not g:
+        return []
+    out = [0] * (len(f) + len(g) - 1)
+    for i, x in enumerate(f):
+        if x:
+            for j, y in enumerate(g):
+                out[i + j] += x * y
+    return out
+
+
+def _polyadd(f, g, sign=1):
+    n = max(len(f), len(g))
+    out = [(f[i] if i < len(f) else 0) + sign * (g[i] if i < len(g) else 0) for i in range(n)]
+    while out and out[-1] == 0:
+        out.pop()
+    return out
+
+
+def _division_polys(a, n):
+    """[psi~_0, ..., psi~_n] (integer polynomials in x, constant first):
+    psi_k = psi~_k for odd k, psi_k = psi_2 psi~_k for even k, with
+    psi_2^2 = F = 4x^3 + b2 x^2 + 2 b4 x + b6."""
+    b2, b4, b6, b8 = _b(a)
+    F = [b6, 2 * b4, b2, 4]
+    F2 = _polymul(F, F)
+    psi = [[], [1], [1], [b8, 3 * b6, 3 * b4, b2, 3],
+           [b4 * b8 - b6 * b6, b2 * b8 - b4 * b6, 10 * b8, 10 * b6, 5 * b4, b2, 2]]
+    for k in range(5, n + 1):
+        m = k // 2
+        P = lambda i: psi[i]
+        if k % 2:  # k = 2m + 1
+            t1 = _polymul(P(m + 2), _polymul(P(m), _polymul(P(m), P(m))))
+            t2 = _polymul(P(m - 1), _polymul(P(m + 1), _polymul(P(m + 1), P(m + 1))))
+            if m % 2 == 0:
+                t1 = _polymul(F2, t1)
+            else:
+                t2 = _polymul(F2, t2)
+            psi.append(_polyadd(t1, t2, -1))
+        else:  # k = 2m
+            t1 = _polymul(P(m + 2), _polymul(P(m - 1), P(m - 1)))
+            t2 = _polymul(P(m - 2), _polymul(P(m + 1), P(m + 1)))
+            psi.append(_polymul(P(m), _polyadd(t1, t2, -1)))
+    return psi[: n + 1]
+
+
+def divide_point(a, R, p):
+    """A point Q with pQ = R (p prime), or None.  R is a point (x, y) of the
+    curve a (integral coefficients)."""
+    if R is None:
+        return None
+    from sagebrush._engine import call
+    psi = _division_polys(a, p + 1)
+    b2, b4, b6, _ = _b(a)
+    F = [b6, 2 * b4, b2, 4]
+    sq = lambda f: _polymul(f, f)
+    # phi_p = x psi_p^2 - psi_{p+1} psi_{p-1}
+    if p == 2:
+        phi, den = _polyadd(_polymul([0, 1], F), psi[3], -1), F
+    else:
+        phi = _polyadd(_polymul([0, 1], sq(psi[p])), _polymul(F, _polymul(psi[p + 1], psi[p - 1])), -1)
+        den = sq(psi[p])
+    xr = R[0]
+    g = _polyadd([c * xr.denominator for c in phi], [c * xr.numerator for c in den], -1)
+    if not g:
+        return None
+    while g and g[0] == 0:  # x = 0 is a root
+        g = g[1:]
+        for Q in lift_x(a, _F(0)):
+            if mul(a, p, Q) == R:
+                return Q
+    from math import gcd
+    c = 0
+    for t in g:
+        c = gcd(c, t)
+    g = [t // c for t in g]
+    fac = call("factor", f=[str(t) for t in g])["factors"]
+    for f, e in fac:
+        if len(f) == 2:
+            x = _F(-int(f[0]), int(f[1]))
+            for Q in lift_x(a, x):
+                if mul(a, p, Q) == R:
+                    return Q
+    return None
+
+
+def _combo(a, pts, coeffs):
+    R = None
+    for c, P in zip(coeffs, pts):
+        if c:
+            R = add(a, R, mul(a, c, P))
+    return R
+
+
+def _kernel_mod_p(rows, n, p):
+    """A basis of {v in F_p^n : r . v = 0 for every row r}."""
+    rows = [list(r) for r in rows]
+    piv = []
+    m = 0
+    for col in range(n):
+        k = next((i for i in range(m, len(rows)) if rows[i][col] % p), None)
+        if k is None:
+            continue
+        rows[m], rows[k] = rows[k], rows[m]
+        inv = pow(rows[m][col], -1, p)
+        rows[m] = [x * inv % p for x in rows[m]]
+        for i in range(len(rows)):
+            if i != m and rows[i][col] % p:
+                f = rows[i][col]
+                rows[i] = [(x - f * y) % p for x, y in zip(rows[i], rows[m])]
+        piv.append(col)
+        m += 1
+    free = [c for c in range(n) if c not in piv]
+    basis = []
+    for fcol in free:
+        v = [0] * n
+        v[fcol] = 1
+        for i, c in enumerate(piv):
+            v[c] = -rows[i][fcol] % p
+        basis.append(v)
+    return basis
+
+
+def _sqrt_mod(n, q):
+    """A square root of n mod the odd prime q (Tonelli-Shanks), or None."""
+    n %= q
+    if n == 0:
+        return 0
+    if pow(n, (q - 1) // 2, q) != 1:
+        return None
+    if q % 4 == 3:
+        return pow(n, (q + 1) // 4, q)
+    s, e = q - 1, 0
+    while s % 2 == 0:
+        s //= 2
+        e += 1
+    z = 2
+    while pow(z, (q - 1) // 2, q) != q - 1:
+        z += 1
+    x, b, g, r = pow(n, (s + 1) // 2, q), pow(n, s, q), pow(z, s, q), e
+    while b != 1:
+        t, m = b, 0
+        while t != 1:
+            t = t * t % q
+            m += 1
+        gs = pow(g, 1 << (r - m - 1), q)
+        x, g, b, r = x * gs % q, gs * gs % q, b * gs * gs % q, m
+    return x
+
+
+def _random_point_mod(a, q, x):
+    """A point of E(F_q) with x-coordinate x, or None."""
+    a1, a2, a3, a4, a6 = a
+    b2, b4, b6, _ = _b(a)
+    d = (4 * x ** 3 + b2 * x * x + 2 * b4 * x + b6) % q
+    r = _sqrt_mod(d, q)
+    if r is None:
+        return None
+    return (x % q, (r - a1 * x - a3) * pow(2, -1, q) % q)
+
+
+def _quotient_coords(a, q, N, p, pts, limit=3000):
+    """Rows over F_p: the coordinates of the images of the points in
+    E(F_q)/pE(F_q) ~ (Z/p)^k on a basis (k rows), or None if the p-part of
+    E(F_q) is too large to enumerate.  P -> m P maps E(F_q) onto its Sylow
+    p-subgroup S (m the prime-to-p part of N), and E(F_q)/pE(F_q) = S/pS."""
+    pv, m = 1, N
+    while m % p == 0:
+        m //= p
+        pv *= p
+    if pv > limit:
+        return None
+    # the Sylow p-subgroup, from random points
+    S = {None}
+    x = 0
+    while len(S) < pv:
+        x += 1
+        if x > 4 * q + 40:
+            return None
+        R = _random_point_mod(a, q, x)
+        if R is None:
+            continue
+        g = _mul_p(a, m, R, q)
+        if g in S:
+            continue
+        # <S, g> = S + <g> (an abelian group)
+        cyc = [None]
+        z = g
+        while z is not None:
+            cyc.append(z)
+            z = _add_p(a, z, g, q)
+        new = {_add_p(a, u, c, q) for u in S for c in cyc}
+        S = new
+    pS = {_mul_p(a, p, y, q) for y in S}
+    basis = []
+    span = set(pS)
+    for y in S:
+        if y not in span:
+            basis.append(y)
+            span = {_add_p(a, u, _mul_p(a, c, y, q), q) for u in span for c in range(p)}
+            if len(span) == len(S):
+                break
+    k = len(basis)
+    if k == 0:
+        return []
+    coords = {}
+    import itertools
+    for cs in itertools.product(range(p), repeat=k):
+        off = None
+        for c, b in zip(cs, basis):
+            off = _add_p(a, off, _mul_p(a, c, b, q), q)
+        for u in pS:
+            coords[_add_p(a, off, u, q)] = cs
+    rows = [[0] * len(pts) for _ in range(k)]
+    for i, P in enumerate(pts):
+        img = _mul_p(a, m, _red_point(a, P, q), q)
+        cs = coords[img]
+        for j in range(k):
+            rows[j][i] = cs[j]
+    return rows
+
+
+def p_saturate(a, pts, p, aps, torsion=(), max_q=400):
+    """The points with the subgroup they span (with torsion) saturated at p:
+    (points, how many times the index was divided by p)."""
+    pts = list(pts)
+    gained = 0
+    while True:
+        gens = pts + [T for T in torsion if T is not None]
+        n = len(gens)
+        rows = []
+        kernel = None
+        used = stable = 0
+        for q, aq in aps:
+            if aq is None or q < 5 or q == p:
+                continue
+            N = q + 1 - aq
+            if N % p:
+                continue
+            res = _quotient_coords(a, q, N, p, gens)
+            if res is None:
+                continue
+            used += 1
+            rows.extend(res)
+            new = _kernel_mod_p(rows, n, p) if rows else [[int(i == j) for j in range(n)] for i in range(n)]
+            stable = stable + 1 if kernel is not None and len(new) == len(kernel) else 0
+            kernel = new
+            # no combination left (saturated), or the same candidates for many q
+            if not kernel or stable >= 20 + 2 * n or used >= max_q:
+                break
+        # combinations of the torsion alone are no news
+        if kernel is not None:
+            kernel = [v for v in kernel if any(x % p for x in v[:len(pts)])]
+        if kernel == []:
+            return pts, gained
+        if kernel is None:
+            raise ArithmeticError("no good prime q with %d | #E(F_q) among those computed" % p)
+        # a candidate: divide it by p (any nonzero combination of the kernel
+        # basis may be the divisible one, e.g. P + T with T torsion)
+        import itertools
+        combos = []
+        k = len(kernel)
+        for cs in itertools.product(range(p), repeat=k):
+            if not any(cs):
+                continue
+            if len(combos) > 2000:
+                break
+            v = [sum(c * b[i] for c, b in zip(cs, kernel)) % p for i in range(n)]
+            if any(x % p for x in v[:len(pts)]):
+                combos.append(v)
+        done = False
+        for v in combos:
+            R = _combo(a, gens, v)
+            Q = divide_point(a, R, p) if R is not None else None
+            if Q is None:
+                continue
+            j = next(i for i in range(len(pts)) if v[i] % p)
+            # pQ = sum v_i P_i with v_j prime to p: with u v_j + w p = 1, the
+            # lattice spanned by the P_i and Q has the basis P_i (i != j),
+            # Q* = u Q + w P_j (P_j = pQ* - u sum_{i != j} v_i P_i, and
+            # Q = v_j Q* + w sum_{i != j} v_i P_i)
+            u = pow(v[j], -1, p)
+            w = (1 - u * v[j]) // p
+            pts[j] = add(a, mul(a, u, Q), mul(a, w, pts[j]))
+            gained += 1
+            done = True
+            break
+        if not done:
+            raise ArithmeticError("%d-saturation: a combination survives %d primes but is not divisible by %d" % (p, used, p))
+
+
+def _lll_gram(G):
+    """An integer matrix U (rows) with U G U^T LLL-reduced (G a real Gram matrix)."""
+    n = len(G)
+    U = [[int(i == j) for j in range(n)] for i in range(n)]
+    def gram(u, v):
+        return sum(u[i] * G[i][j] * v[j] for i in range(n) for j in range(n))
+    k = 1
+    while k < n:
+        # Gram-Schmidt coefficients
+        B, mu = [], [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            bi = gram(U[i], U[i])
+            for j in range(i):
+                mu[i][j] = (gram(U[i], U[j]) - sum(mu[j][l] * mu[i][l] * B[l] for l in range(j))) / B[j]
+                bi -= mu[i][j] ** 2 * B[j]
+            B.append(bi)
+        for j in range(k - 1, -1, -1):
+            q = round(mu[k][j])
+            if q:
+                U[k] = [x - q * y for x, y in zip(U[k], U[j])]
+                for l in range(j + 1):
+                    mu[k][l] -= q * (mu[j][l] if l < j else 1)
+        if B[k] >= (0.75 - mu[k][k - 1] ** 2) * B[k - 1]:
+            k += 1
+        else:
+            U[k], U[k - 1] = U[k - 1], U[k]
+            k = max(k - 1, 1)
+    return U
+
+
+_HERMITE_POW = {1: 1.0, 2: 4 / 3, 3: 2.0, 4: 4.0, 5: 8.0, 6: 64 / 3, 7: 64.0, 8: 256.0}
+
+
+def silverman_bound(a):
+    """B with h(x(P)) - hhat(P) <= B for every P on the minimal model a
+    (Sage's normalization of hhat)."""
+    c4, c6 = _c(a)
+    D = _disc(a)
+    j = _F(c4 ** 3, D)
+    hj = _m.log(max(abs(j.numerator), abs(j.denominator)))
+    return 2 * (hj / 8 + _m.log(abs(D)) / 12 + 0.973) + 2 * _m.log(2)
+
+
+def index_bound(a, pts, bad, T=None):
+    """An upper bound for the index of the subgroup spanned by the points in
+    E(Q)/tors (with the search radius T used), or None if the search needed
+    is out of reach."""
+    r = len(pts)
+    B1 = silverman_bound(a)
+    if T is None:
+        T = B1 + 0.5
+    if T > 14:
+        return None, T
+    lam0 = T - B1
+    lam = lam0
+    for P in point_search_engine(a, T):
+        if point_order(a, P) == 0:
+            lam = min(lam, canonical_height(a, P, bad))
+    R = regulator(a, pts, bad)
+    n = _m.sqrt(R * _HERMITE_POW.get(r, 2.0 ** r) / lam ** r)
+    return n, T
+
+
+def _torsion_generators(a, tors):
+    """Generators of the torsion subgroup (one point of largest order, and a
+    second one if the group is not cyclic)."""
+    if not tors:
+        return []
+    order = {i: point_order(a, T, 16) for i, T in enumerate(tors)}
+    i = max(order, key=lambda k: order[k])
+    T1 = tors[i]
+    span = set()
+    Q = None
+    for _ in range(order[i]):
+        Q = add(a, Q, T1)
+        span.add(Q)
+    if len(span) == len(tors) + 1 or len(span) >= len(tors) + 1:
+        return [T1]
+    T2 = next(T for T in tors if T not in span)
+    return [T1, T2]
+
+
+def saturated_generators(a, pts, bad, aps, torsion=(), max_prime=None):
+    """(generators, index, primes): the points LLL-reduced and saturated at
+    every prime up to the index bound (or max_prime, if given, which then
+    proves nothing about larger primes)."""
+    r = len(pts)
+    G = [[height_pairing(a, P, Q, bad) for Q in pts] for P in pts]
+    U = _lll_gram(G)
+    pts = [_combo(a, pts, u) for u in U]
+    if max_prime is None:
+        n, T = index_bound(a, pts, bad)
+        if n is None:
+            raise NotImplementedError("no index bound: the search for points of naive height %.1f is too large" % T)
+        top = int(n)
+    else:
+        top = int(max_prime)
+    index = 1
+    primes = [p for p in range(2, top + 1) if all(p % q for q in range(2, int(p ** 0.5) + 1))]
+    torsion = _torsion_generators(a, [T for T in torsion if T is not None])
+    for p in primes:
+        pts, k = p_saturate(a, pts, p, aps, torsion)
+        index *= p ** k
+    if index > 1:
+        G = [[height_pairing(a, P, Q, bad) for Q in pts] for P in pts]
+        U = _lll_gram(G)
+        pts = [_combo(a, pts, u) for u in U]
+    pts.sort(key=lambda P: canonical_height(a, P, bad))
+    return pts, index, primes

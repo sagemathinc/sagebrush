@@ -1853,11 +1853,18 @@ class EllipticCurve_rational_field:
             raise ArithmeticError("could not move the point to the other model")
         return Q
 
-    def gens(self, height_limit=None):
-        """Generators of E(Q) modulo torsion, for analytic rank 0 or 1: the
-        non-torsion point of least canonical height among the points of naive
-        height at most height_limit (default 9) on the minimal model, checked
-        to be saturated at the primes up to 13 where the reduction test applies.
+    def gens(self, height_limit=None, proof=None, max_prime=None):
+        """Generators of E(Q) modulo torsion.
+
+        Rank 1 (analytic rank 1): the non-torsion point of least canonical
+        height among the points of naive height at most height_limit (default
+        9) on the minimal model.  Rank >= 2 (the rank from Cremona's table or
+        2-descent, or with proof=False the analytic rank): independent points
+        from the 2-descent and a point search, LLL-reduced for the height
+        pairing and saturated at every prime up to a proved bound on their
+        index (Silverman's height bound and an exhaustive search; see
+        lib/_sage_ec.py), or up to max_prime if given (then generators of a
+        subgroup of index prime to the primes up to max_prime).
 
         EXAMPLES::
 
@@ -1867,13 +1874,30 @@ class EllipticCurve_rational_field:
             []
             sage: EllipticCurve([0, 0, 0, -36, 0]).gens()  # needs sage.libs.eclib
             [(-3 : -9 : 1)]
+            sage: E = EllipticCurve('389a1'); G = E.gens(); len(G)  # needs sage.libs.eclib
+            2
+            sage: E.regulator_of_points(G)  # abs tol 1e-10  # needs sage.libs.eclib
+            0.152460177943144
         """
         import _sage_ec as _ec
         r = self._proven_analytic_rank()
         if r is None:
-            raise NotImplementedError("gens() for analytic rank %d is not implemented yet" % self.analytic_rank())
+            try:
+                lo, hi = self.rank_bounds()
+            except NotImplementedError:
+                lo, hi = 0, None
+            if lo == hi:
+                r = lo
+            elif self._cremona_entry() is not None:
+                r = _cremona()[0][self._cremona_entry()][1]
+            elif proof is False:
+                r = self.analytic_rank()
+            else:
+                raise NotImplementedError("gens(): the rank is not known (rank bounds %s); proof=False uses the analytic rank" % ((lo, hi),))
         if r == 0:
             return []
+        if r >= 2:
+            return self._gens_saturated(r, height_limit, max_prime, proof)
         m = self.minimal_model()
         aps = _ap.aplist(m._a, 1000)
         g = _ec.search_generator(m._a, aps, self._bad(), float(height_limit or 9.0))
@@ -1883,6 +1907,93 @@ class EllipticCurve_rational_field:
         if m is not self and m._a != self._a:
             P = m._move_to(P, self)
         return [EllipticCurvePoint(self, P)]
+
+    def _gens_saturated(self, r, height_limit=None, max_prime=None, proof=None):
+        import _sage_ec as _ec
+        m = self.minimal_model()
+        a = m._a
+        bad = m._bad()
+        aps = _ap.aplist(a, 100000)
+        pts = self._independent_points(r, height_limit)
+        tors = [m._to_min(T) if not T.is_zero() else None for T in self.torsion_points()]
+        try:
+            gens, index, primes = _ec.saturated_generators(a, pts, bad, aps, tors, max_prime)
+        except NotImplementedError as e:
+            if proof is not False:
+                raise NotImplementedError("%s; gens(proof=False) saturates at the primes up to 100 only" % e)
+            gens, index, primes = _ec.saturated_generators(a, pts, bad, aps, tors, 100)
+        out = []
+        for P in gens:
+            if m is not self and m._a != self._a:
+                P = m._move_to(P, self)
+            out.append(EllipticCurvePoint(self, P))
+        return out
+
+    def _independent_points(self, r, height_limit=None):
+        """r independent points on the minimal model (from the 2-descent and a
+        point search), or NotImplementedError."""
+        import _sage_ec as _ec
+        m = self.minimal_model()
+        a = m._a
+        bad = m._bad()
+        cands = []
+        if self.torsion_order() % 2:
+            try:
+                cands += list(self._general_two_descent()["points"])
+            except NotImplementedError:
+                pass
+        cands += _ec.point_search_engine(a, float(height_limit or 9.0), limit=2000)
+        seen, pool = set(), []
+        for P in cands:
+            if P is None or _ec.point_order(a, P) != 0:
+                continue
+            key = P[0]
+            if key in seen:
+                continue
+            seen.add(key)
+            pool.append((_ec.canonical_height(a, P, bad), P))
+        pool.sort(key=lambda t: t[0])
+        chosen = []
+        for h, P in pool:
+            trial = chosen + [P]
+            G = [[_ec.height_pairing(a, X, Y, bad) for Y in trial] for X in trial]
+            d = _RealMatrix(G).det()
+            scale = 1.0
+            for i in range(len(trial)):
+                scale *= G[i][i]
+            if d > 1e-7 * scale:
+                chosen = trial
+                if len(chosen) == r:
+                    return chosen
+        raise NotImplementedError("found only %d independent points of %d (naive height %s); a larger height_limit may help" % (len(chosen), r, height_limit or 9.0))
+
+    def saturation(self, points, verbose=False, max_prime=-1, odd_primes_only=False):
+        """(points', index, regulator): points' generate the saturation of the
+        subgroup the (independent) points span, which has the given index over
+        it; saturated at every prime up to a proved index bound
+        (max_prime=-1), or up to max_prime.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('37a1'); P = E(0, 0)
+            sage: E.saturation([5*P])[1:]  # abs tol 1e-10  # sagebrush only
+            (5, 0.0511114082399688)
+        """
+        import _sage_ec as _ec
+        m = self.minimal_model()
+        a = m._a
+        bad = m._bad()
+        pts = [m._to_min(P if isinstance(P, EllipticCurvePoint) else self(P)) for P in points]
+        aps = _ap.aplist(a, 100000)
+        tors = [m._to_min(T) if not T.is_zero() else None for T in self.torsion_points()]
+        gens, index, primes = _ec.saturated_generators(a, pts, bad, aps, tors, None if max_prime == -1 else max_prime)
+        from sage_all import RR
+        out = []
+        for P in gens:
+            if m is not self and m._a != self._a:
+                P = m._move_to(P, self)
+            out.append(EllipticCurvePoint(self, P))
+        return out, index, RR(_ec.regulator(a, gens, bad))
 
     def regulator(self):
         """The regulator of E(Q) (for rank at most 1: from gens()).
