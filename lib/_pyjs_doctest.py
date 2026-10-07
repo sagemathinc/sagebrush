@@ -284,10 +284,25 @@ def run_json(modname, long=False):
     """One JSON line per example run (for scripts/doctest-fix.py)."""
     import json
 
+    real = {}
+
     def report(name, ex, got, err, bad):
-        print(json.dumps({"module": modname, "name": name, "line": ex.line, "source": ex.source,
+        print(json.dumps({"module": modname, "name": real.get(name, name), "line": ex.line, "source": ex.source,
                           "want": ex.want, "got": got, "err": err, "ok": bad is None}))
+    seen = set()
     for name, doc, kind in collect(modname):
+        if kind == "method":
+            # an alias (inverse = __invert__) reports its function's own name
+            cls, _, meth = name.partition(".")
+            mod = sys.modules[modname]
+            f = _unwrap(getattr(mod, cls).__dict__.get(meth))
+            q = getattr(f, "__qualname__", name)
+            if q.split(".")[-1] != meth and q.count(".") == 1:
+                real[name] = q
+        key = real.get(name, name)
+        if key in seen:
+            continue
+        seen.add(key)
         run_docstring(name, doc, long, False, report)
 
 

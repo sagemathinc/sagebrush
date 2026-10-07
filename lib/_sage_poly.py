@@ -39,6 +39,13 @@ class _Ring:
         return self._name
 
     def __call__(self, x=0, d=None):
+        """Convert x into the ring.
+
+        EXAMPLES::
+
+            sage: ZZ(7), QQ(3/6), QQ('2/3'), ZZ(4/2)
+            (7, 1/2, 2/3, 2)
+        """
         if isinstance(x, Polynomial):
             if x.degree() > 0:
                 raise TypeError("not a constant polynomial")
@@ -61,12 +68,33 @@ class _Ring:
             return False
 
     def is_field(self):
+        """Whether the ring is a field.
+
+        EXAMPLES::
+
+            sage: ZZ.is_field(), QQ.is_field()
+            (False, True)
+        """
         return self._field
 
     def fraction_field(self):
+        """The fraction field.
+
+        EXAMPLES::
+
+            sage: ZZ.fraction_field()
+            Rational Field
+        """
         return QQ
 
     def characteristic(self):
+        """The characteristic.
+
+        EXAMPLES::
+
+            sage: ZZ.characteristic(), QQ.characteristic()
+            (0, 0)
+        """
         return 0
 
 
@@ -75,7 +103,13 @@ QQ = _Ring("Rational Field", True)
 
 
 class PolynomialRing_:
-    """Univariate Polynomial Ring in x over ZZ or QQ."""
+    """Univariate Polynomial Ring in x over ZZ or QQ.
+
+    EXAMPLES::
+
+        sage: R = PolynomialRing(ZZ, 'x'); R
+        Univariate Polynomial Ring in x over Integer Ring
+    """
 
     def __init__(self, base, name):
         self._base = base
@@ -91,29 +125,79 @@ class PolynomialRing_:
         return hash((self._name, self._base._name))
 
     def base_ring(self):
+        """The base ring.
+
+        EXAMPLES::
+
+            sage: PolynomialRing(ZZ, 'x').base_ring()
+            Integer Ring
+        """
         return self._base
 
     def variable_name(self):
+        """The name of the variable.
+
+        EXAMPLES::
+
+            sage: PolynomialRing(QQ, 't').variable_name()
+            't'
+        """
         return self._name
 
     def variable_names(self):
+        """The names of the variables (a 1-tuple).
+
+        EXAMPLES::
+
+            sage: PolynomialRing(QQ, 't').variable_names()
+            ('t',)
+        """
         return (self._name,)
 
     def gen(self, i=0):
+        """The variable.
+
+        EXAMPLES::
+
+            sage: PolynomialRing(QQ, 't').gen()
+            t
+        """
         if i != 0:
             raise IndexError("generator not defined")
         return Polynomial(self, [0, 1])
 
     def gens(self):
+        """The variables (a 1-tuple).
+
+        EXAMPLES::
+
+            sage: PolynomialRing(QQ, 't').gens()
+            (t,)
+        """
         return (self.gen(),)
 
     def ngens(self):
+        """The number of variables: 1.
+
+        EXAMPLES::
+
+            sage: PolynomialRing(QQ, 't').ngens()
+            1
+        """
         return 1
 
     def _first_ngens(self, n):
         return self.gens()[:n]
 
     def __call__(self, x=0):
+        """Convert a list of coefficients (constant first), a number or a polynomial into the ring.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: R([1, 2, 3]), R(5), R(x^2 + 1)
+            (3*x^2 + 2*x + 1, 5, x^2 + 1)
+        """
         if isinstance(x, Polynomial):
             # (Sage converts between univariate rings by coefficients, so
             # QQ['y'](f) for f in ZZ['x'] maps x to y)
@@ -126,9 +210,23 @@ class PolynomialRing_:
         return Polynomial(self, [x])
 
     def is_field(self):
+        """False: a polynomial ring is not a field.
+
+        EXAMPLES::
+
+            sage: PolynomialRing(QQ, 'x').is_field()
+            False
+        """
         return False
 
     def characteristic(self):
+        """The characteristic of the base ring.
+
+        EXAMPLES::
+
+            sage: PolynomialRing(QQ, 'x').characteristic()
+            0
+        """
         return 0
 
 
@@ -136,7 +234,17 @@ _RINGS = {}
 
 
 def PolynomialRing(base, names=None, name=None, *args, **kwds):
-    """PolynomialRing(ZZ, 'x') or PolynomialRing(QQ, names=('y',))."""
+    """PolynomialRing(ZZ, 'x') or PolynomialRing(QQ, names=('y',)).
+
+    EXAMPLES::
+
+        sage: R.<x> = PolynomialRing(QQ); R
+        Univariate Polynomial Ring in x over Rational Field
+        sage: PolynomialRing(ZZ, 't')
+        Univariate Polynomial Ring in t over Integer Ring
+        sage: S.<y> = ZZ[]; S
+        Univariate Polynomial Ring in y over Integer Ring
+    """
     names = names if names is not None else name if name is not None else "x"
     if isinstance(names, (tuple, list)):
         if len(names) != 1:
@@ -154,11 +262,29 @@ def PolynomialRing(base, names=None, name=None, *args, **kwds):
 
 
 def polygen(base=None, name="x"):
+    """The variable of the polynomial ring over base (default QQ) in the given name.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ); x
+        x
+        sage: y = polygen(ZZ, 'y'); (y + 1)^3
+        y^3 + 3*y^2 + 3*y + 1
+    """
     return PolynomialRing(base or ZZ, name).gen()
 
 
 class Polynomial:
-    """An element of ZZ[x] or QQ[x]."""
+    """An element of ZZ[x] or QQ[x].
+
+    EXAMPLES::
+
+        sage: R.<x> = QQ[]
+        sage: f = x^3 - 2*x + 1/2; f
+        x^3 - 2*x + 1/2
+        sage: f.degree(), f(2), f.parent()
+        (3, 9/2, Univariate Polynomial Ring in x over Rational Field)
+    """
 
     __slots__ = ("_ring", "_c")
 
@@ -173,32 +299,105 @@ class Polynomial:
 
     # ---- basic data
     def parent(self):
+        """The polynomial ring.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (x + 1).parent()
+            Univariate Polynomial Ring in x over Integer Ring
+        """
         return self._ring
 
     def base_ring(self):
+        """The ring of coefficients.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (x + 1).base_ring()
+            Integer Ring
+        """
         return self._ring._base
 
     def variable_name(self):
+        """The name of the variable.
+
+        EXAMPLES::
+
+            sage: R.<t> = QQ[]
+            sage: (t^2).variable_name()
+            't'
+        """
         return self._ring._name
 
     def degree(self):
+        """The degree (-1 for the zero polynomial).
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^5 + 1).degree(), R(3).degree(), R(0).degree()
+            (5, 0, -1)
+        """
         return len(self._c) - 1
 
     def list(self):
+        """The coefficients, constant term first.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^3 - 2*x + 1).list()
+            [1, -2, 0, 1]
+        """
         return list(self._c) if self._c else [0]
 
     def coefficients(self, sparse=True):
+        """The nonzero coefficients (sparse=False: all of them), constant term first.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: f = x^4 - 2*x + 1
+            sage: f.coefficients(), f.coefficients(sparse=False)
+            ([1, -2, 1], [1, -2, 0, 0, 1])
+        """
         return [a for a in self._c if a != 0] if sparse else self.list()
 
     def exponents(self):
+        """The exponents of the nonzero terms.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^4 - 2*x + 1).exponents()
+            [0, 1, 4]
+        """
         return [i for i, a in enumerate(self._c) if a != 0]
 
     def leading_coefficient(self):
+        """The leading coefficient.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (3*x^2 + 1).leading_coefficient(), (3*x^2 + 1).lc()
+            (3, 3)
+        """
         return self._c[-1] if self._c else 0
 
     lc = leading_coefficient
 
     def constant_coefficient(self):
+        """The constant term.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (3*x^2 + 7).constant_coefficient()
+            7
+        """
         return self._c[0] if self._c else 0
 
     def __getitem__(self, i):
@@ -211,15 +410,39 @@ class Polynomial:
         return iter(self.list())
 
     def is_zero(self):
+        """Whether the polynomial is 0.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: R(0).is_zero(), x.is_zero()
+            (True, False)
+        """
         return not self._c
 
     def __bool__(self):
         return bool(self._c)
 
     def is_monic(self):
+        """Whether the leading coefficient is 1.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^2 + 3).is_monic(), (2*x^2).is_monic()
+            (True, False)
+        """
         return bool(self._c) and self._c[-1] == 1
 
     def is_constant(self):
+        """Whether the degree is at most 0.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: R(5).is_constant(), x.is_constant()
+            (True, False)
+        """
         return len(self._c) <= 1
 
     def __hash__(self):
@@ -350,7 +573,14 @@ class Polynomial:
 
     def quo_rem(self, other):
         """(q, r) with self = q other + r, deg r < deg other (over QQ; over ZZ
-        the result must be integral)."""
+        the result must be integral).
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^3 + 2*x + 1).quo_rem(x^2 + 1)
+            (x, x + 1)
+        """
         o = self._coerce(other)
         if o is None or not o._c:
             raise ZeroDivisionError("division by zero polynomial")
@@ -405,6 +635,15 @@ class Polynomial:
 
     # ---- evaluation and calculus
     def __call__(self, *args, **kwds):
+        """The value at a point (a number, or another polynomial).
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: f = x^2 + 1
+            sage: f(3), f(1/2), f(x + 1)
+            (10, 5/4, x^2 + 2*x + 2)
+        """
         if kwds:
             if set(kwds) != {self._ring._name}:
                 raise TypeError("unknown variable")
@@ -419,14 +658,38 @@ class Polynomial:
     subs = __call__
 
     def derivative(self, *args):
+        """The derivative.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^3 + 2*x).derivative(), (x^3).diff()
+            (3*x^2 + 2, 3*x^2)
+        """
         return Polynomial(self._ring, [i * a for i, a in enumerate(self._c)][1:])
 
     diff = differentiate = derivative
 
     def integral(self):
+        """The antiderivative with constant term 0.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (3*x^2 + 1).integral()
+            x^3 + x
+        """
         return Polynomial(PolynomialRing(QQ, self._ring._name), [0] + [_F(a) / (i + 1) for i, a in enumerate(self._c)])
 
     def change_ring(self, R):
+        """The polynomial with its coefficients converted to the ring R.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (x^2 + 3*x + 5).change_ring(QQ)
+            x^2 + 3*x + 5
+        """
         if R is QQ or R is ZZ:
             return PolynomialRing(R, self._ring._name)(self._c)
         if isinstance(R, PolynomialRing_):
@@ -434,11 +697,26 @@ class Polynomial:
         raise NotImplementedError("change_ring to %r" % (R,))
 
     def monic(self):
+        """The polynomial divided by its leading coefficient.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (2*x^2 + 3).monic()
+            x^2 + 3/2
+        """
         lc = _F(self.leading_coefficient())
         return Polynomial(PolynomialRing(QQ, self._ring._name) if lc not in (1,) else self._ring, [_F(a) / lc for a in self._c])
 
     def content(self):
-        """The gcd of the coefficients (over ZZ), as Sage's content()."""
+        """The gcd of the coefficients (over ZZ), as Sage's content().
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (6*x^2 + 4*x + 2).content()
+            2
+        """
         from math import gcd
         g = 0
         for a in self._c:
@@ -459,7 +737,14 @@ class Polynomial:
     def gcd(self, other):
         """The gcd: monic over QQ; over ZZ with positive leading coefficient
         and the gcd of the contents (as Sage).  Modular, in the engine
-        (sagebrush.poly.gcd)."""
+        (sagebrush.poly.gcd).
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^2 - 1).gcd(x^2 + 2*x + 1)
+            x + 1
+        """
         o = other if isinstance(other, Polynomial) else Polynomial(PolynomialRing(QQ, self._ring._name), [other])
         over_zz = self._ring._base is ZZ and o._ring._base is ZZ
         if not self._c or not o._c:
@@ -477,10 +762,25 @@ class Polynomial:
         return Polynomial(PolynomialRing(QQ, self._ring._name), g).monic()
 
     def lcm(self, other):
+        """The least common multiple.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^2 - 1).lcm(x^2 + 2*x + 1)
+            x^3 + x^2 - x - 1
+        """
         return (self * other).quo_rem(self.gcd(other))[0]
 
     def resultant(self, other):
-        """The resultant, by the Euclidean algorithm over QQ."""
+        """The resultant, by the Euclidean algorithm over QQ.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (x^2 - 2).resultant(x^2 - 3)
+            1
+        """
         a, b = self.change_ring(QQ), other.change_ring(QQ)
         if not a or not b:
             return 0
@@ -496,6 +796,14 @@ class Polynomial:
         return _norm(res)
 
     def discriminant(self):
+        """The discriminant.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (x^2 + x + 1).discriminant(), (x^3 - 2).discriminant()
+            (-3, -108)
+        """
         n = self.degree()
         if n < 1:
             raise ValueError("discriminant of a constant")
@@ -506,7 +814,18 @@ class Polynomial:
     def factor(self):
         """The factorization into irreducibles, as Sage: over ZZ the content's
         primes and primitive factors with positive leading coefficients; over
-        QQ a rational unit and monic factors."""
+        QQ a rational unit and monic factors.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (x^4 - 1).factor()
+            (x - 1) * (x + 1) * (x^2 + 1)
+            sage: (2*x^2 - 2).factor()
+            2 * (x - 1) * (x + 1)
+            sage: (x^6 - 1).factor()
+            (x - 1) * (x + 1) * (x^2 - x + 1) * (x^2 + x + 1)
+        """
         if not self._c:
             raise ArithmeticError("factorization of 0 is not defined")
         from sagebrush import poly
@@ -531,6 +850,14 @@ class Polynomial:
         return PolyFactorization(items, _norm(unit), field=True)
 
     def is_irreducible(self):
+        """Whether the polynomial is irreducible.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^2 + 1).is_irreducible(), (x^2 - 1).is_irreducible()
+            (True, False)
+        """
         f = self.factor()
         if self._ring._base is QQ:
             return len(f) == 1 and f[0][1] == 1
@@ -541,16 +868,44 @@ class Polynomial:
         most 13, or 17, 19, 23), as Sage's TransitiveGroup(n, k), computed by Sagebrush's
         engine/galois (Frobenius cycle types, then Stauduhar's descent with
         p-adic roots).  G.proven says whether every step was proven; by
-        default the cheap steps are, with proof=True all of them."""
+        default the cheap steps are, with proof=True all of them.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^3 - 2).galois_group()  # sagebrush only (the local Sage crashes here)
+            Transitive group number 2 of degree 3
+            sage: (x^5 - x - 1).galois_group()  # sagebrush only (the local Sage crashes here)
+            Transitive group number 5 of degree 5
+            sage: (x^4 + 1).galois_group().order()  # sagebrush only (the local Sage crashes here)
+            4
+        """
         d, c = self._integral()
         from sage_permgroup import galois_group
         return galois_group(c, proof=proof)
 
     def is_squarefree(self):
+        """Whether the polynomial has no repeated factor.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (x^2 - 1).is_squarefree(), ((x - 1)^2).is_squarefree()
+            (True, False)
+        """
         return all(e == 1 for _, e in self.factor() if isinstance(_, Polynomial))
 
     def roots(self, ring=None, multiplicities=True):
-        """The roots in the base ring (or `ring`, ZZ or QQ): [(root, m)]."""
+        """The roots in the base ring (or `ring`, ZZ or QQ): [(root, m)].
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: ((x - 1)^2 * (x + 1/2)).roots()
+            [(-1/2, 1), (1, 2)]
+            sage: (x^2 - 2).roots(), (x^2 - 2).roots(multiplicities=False)
+            ([], [])
+        """
         R = ring if ring is not None else self._ring._base
         sa = _sa()
         if R is sa.RR or R is getattr(sa, "CC", None):
@@ -569,7 +924,16 @@ class Polynomial:
 
 class PolyFactorization(list):
     """[(factor, exponent)] with a unit, printed as Sage prints the
-    factorization of a polynomial."""
+    factorization of a polynomial.
+
+    EXAMPLES::
+
+        sage: R.<x> = ZZ[]
+        sage: F = (2*x^2 - 2).factor(); F
+        2 * (x - 1) * (x + 1)
+        sage: list(F), F.unit()
+        ([(2, 1), (x - 1, 1), (x + 1, 1)], 1)
+    """
 
     def __init__(self, items, unit=1, field=False, constant=None, constant_value=None):
         # Sage's order: degree, then exponent, then the factor
@@ -585,9 +949,25 @@ class PolyFactorization(list):
         self._cv = constant_value
 
     def unit(self):
+        """The unit (constant) factor.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (-3*x^2 + 3).factor().unit()
+            -1
+        """
         return self._unit
 
     def value(self):
+        """The product of the factorization.
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (-3*x^2 + 3).factor().value()
+            -3*x^2 + 3
+        """
         v = self._unit if self._cv is None else self._unit * self._cv
         for f, e in self:
             v = f ** e * v

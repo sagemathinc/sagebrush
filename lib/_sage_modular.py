@@ -997,6 +997,13 @@ class _HeckeAlgebra:
         return "Full Hecke algebra acting on %r" % (self._M,)
 
     def module(self):
+        """The space the Hecke algebra acts on.
+
+        EXAMPLES::
+
+            sage: ModularSymbols(11).T(2).parent().module()
+            Modular Symbols space of dimension 3 for Gamma_0(11) of weight 2 with sign 0 over Rational Field
+        """
         return self._M
 
 
@@ -2539,7 +2546,15 @@ class NewformOrbit:
     """A Galois orbit of newforms (LMFDB's newform orbit): its label,
     dimension over QQ, trace form and the characteristic polynomial over QQ
     of the Hecke operator T that separates the orbits (a sagebrush
-    extension; Sage itself has no such object)."""
+    extension; Sage itself has no such object).
+
+    EXAMPLES::
+
+        sage: o = newform_orbits(23)[0]; o  # sagebrush only
+        23.2.a.a (dimension 2): 2*q - q^2 - q^4 - 2*q^5 + O(q^6)
+        sage: o.dimension(), o.charpoly()  # sagebrush only
+        (2, x^2 + x - 1)
+    """
 
     def __init__(self, N, k, chi, data, T):
         self._N, self._k, self._chi = N, k, chi
@@ -2655,7 +2670,15 @@ def newform_orbits(group=1, weight=2, prec=100):
 
 
 class Newform:
-    """A newform with rational coefficients, as Sage's Newform prints it."""
+    """A newform with rational coefficients, as Sage's Newform prints it.
+
+    EXAMPLES::
+
+        sage: f = Newforms(11, names='a')[0]; f
+        q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)
+        sage: f[2], f.coefficients(5)
+        (-2, [1, -2, -1, 2, 1])
+    """
 
     def __init__(self, orbit):
         self._o = orbit
