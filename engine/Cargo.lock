@@ -487,6 +487,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-galois"
+version = "0.1.0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+ "sagebrush-bigint",
+ "sagebrush-group",
+ "sagebrush-interrupt",
+ "sagebrush-poly",
+]
+
+[[package]]
 name = "sagebrush-group"
 version = "0.1.0"
 dependencies = [
@@ -586,6 +598,7 @@ dependencies = [
  "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-classgroup",
+ "sagebrush-galois",
  "sagebrush-group",
  "sagebrush-interrupt",
  "sagebrush-modsym",

@@ -536,6 +536,15 @@ class Polynomial:
             return len(f) == 1 and f[0][1] == 1
         return len(f) == 1 and f[0][1] == 1 and f.unit() in (1, -1)
 
+    def galois_group(self, pari_group=False, algorithm=None):
+        """The Galois group of this irreducible polynomial over QQ (degree at
+        most 12), as Sage's TransitiveGroup(n, k), computed by Sagebrush's
+        engine/galois (Frobenius cycle types, then Stauduhar's descent with
+        p-adic roots).  G.proven says whether every step was rigorous."""
+        d, c = self._integral()
+        from sage_permgroup import galois_group
+        return galois_group(c)
+
     def is_squarefree(self):
         return all(e == 1 for _, e in self.factor() if isinstance(_, Polynomial))
 

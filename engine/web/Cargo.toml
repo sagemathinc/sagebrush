@@ -18,4 +18,5 @@ sagebrush-ap = { path = "../ap", default-features = false }
 sagebrush-poly = { path = "../poly" }
 sagebrush-classgroup = { path = "../classgroup" }
 sagebrush-group = { path = "../group" }
+sagebrush-galois = { path = "../galois" }
 serde_json = "1"

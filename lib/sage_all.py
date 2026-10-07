@@ -12,7 +12,7 @@ from fractions import Fraction as _Fraction
 __all__ = [
     # permutation groups (Sagebrush's engine)
     "PermutationGroup", "PermutationGroupElement", "SymmetricGroup", "AlternatingGroup",
-    "CyclicPermutationGroup", "DihedralGroup", "MathieuGroup", "PSL", "PGL", "KleinFourGroup",
+    "CyclicPermutationGroup", "DihedralGroup", "MathieuGroup", "PSL", "PGL", "KleinFourGroup", "TransitiveGroup", "TransitiveGroups",
     # modular forms and elliptic curves (Sagebrush's engines)
     "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
     "Newforms", "newform_orbits",
@@ -66,7 +66,7 @@ from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, l
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
                        bar_chart, show as _show2d, graphics_array, animate, Animation)
 from sage_permgroup import (PermutationGroup, PermutationGroupElement, SymmetricGroup, AlternatingGroup,
-                             CyclicPermutationGroup, DihedralGroup, MathieuGroup, PSL, PGL, KleinFourGroup)
+                             CyclicPermutationGroup, DihedralGroup, MathieuGroup, PSL, PGL, KleinFourGroup, TransitiveGroup, TransitiveGroups)
 from sage_plot3d import (Graphics3d, plot3d, parametric_plot3d, implicit_plot3d, spherical_plot3d,
                          cylindrical_plot3d, revolution_plot3d, sphere, tetrahedron, cube, octahedron,
                          dodecahedron, icosahedron, point3d, line3d, text3d,

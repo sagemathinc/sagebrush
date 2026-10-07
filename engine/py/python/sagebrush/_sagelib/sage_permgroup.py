@@ -13,7 +13,7 @@ from sagebrush._engine import call as _call
 
 __all__ = ["PermutationGroup", "PermutationGroupElement", "SymmetricGroup", "AlternatingGroup",
            "CyclicPermutationGroup", "DihedralGroup", "MathieuGroup", "PSL", "PGL", "AGL1",
-           "KleinFourGroup"]
+           "KleinFourGroup", "TransitiveGroup", "TransitiveGroups"]
 
 
 def _Int(x):
@@ -502,4 +502,72 @@ def KleinFourGroup():
     G = PermutationGroup(["(1,2)(3,4)", "(1,3)(2,4)"])
     G.__class__ = _Named
     G._text = "The Klein 4 group of order 4, as a permutation group"
+    return G
+
+
+class TransitiveGroup(_Named):
+    """The transitive group nTk: number k of degree n in the standard
+    numbering (degrees up to 12).  Sagebrush computed these groups itself
+    (engine/group); the numbering and the names were matched against GAP's
+    transitive groups library."""
+
+    def __new__(cls, n, k):
+        r = _call("transitive_group", n=int(n), k=int(k))
+        G = object.__new__(cls)
+        PermutationGroup.__init__(G, [PermutationGroupElement._make(g) for g in r["gens"]], domain=range(1, int(n) + 1))
+        G._text = "Transitive group number %d of degree %d" % (int(k), int(n))
+        G._n, G._k, G._name = int(n), int(k), r["name"]
+        G._order_str = r["order"]
+        return G
+
+    def __init__(self, n, k):
+        pass
+
+    def transitive_number(self):
+        return _Int(self._k)
+
+    def transitive_label(self):
+        return "%dT%d" % (self._n, self._k)
+
+    def name(self):
+        """The name in the transitive groups library, e.g. 'F(5) = [5]4 = 5:4'."""
+        return self._name
+
+
+class TransitiveGroups:
+    """The transitive groups of degree n, up to conjugacy (n <= 12)."""
+
+    def __init__(self, n):
+        self._n = int(n)
+        self._count = _call("transitive_group", n=self._n)
+
+    def __repr__(self):
+        return "Transitive Groups of degree %d" % self._n
+
+    def cardinality(self):
+        return _Int(self._count)
+
+    def __len__(self):
+        return self._count
+
+    def __getitem__(self, k):
+        return TransitiveGroup(self._n, k)
+
+    def __iter__(self):
+        return (TransitiveGroup(self._n, k) for k in range(1, self._count + 1))
+
+    def __contains__(self, G):
+        return isinstance(G, TransitiveGroup) and G._n == self._n
+
+
+def galois_group(f):
+    """The Galois group of an irreducible polynomial over QQ (degree <= 12),
+    as a TransitiveGroup.  G.proven tells whether every step was rigorous;
+    G.galois_log() says how it was found."""
+    c = [str(a) for a in f]
+    r = _call("galois_group", f=",".join(c))
+    G = TransitiveGroup(r["n"], r["k"])
+    G.proven = r["proven"]
+    G._log = r["log"]
+    G.galois_log = lambda: print("\n".join(G._log))
     return G
