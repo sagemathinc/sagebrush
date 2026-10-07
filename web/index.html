@@ -402,12 +402,13 @@ const MODES = ["python", "sage", "magma"];
 function paint(cell) { cell.hl.innerHTML = cell.type === "markdown" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
 
 // ------------------------------------------------------------ the worker
+let filesSent = null; // the browser's files, on their way to the worker
 function startWorker() {
   statusEl.textContent = "loading…";
   generation++;
   const t0 = performance.now();
   worker = new Worker("sagebrush-worker.js", { type: "module" });
-  sendFiles(worker);
+  filesSent = sendFiles(worker);
   worker.onmessage = (ev) => {
     const m = ev.data;
     if (m.fsChanged !== undefined) return fileChanged(m.fsChanged, m.data);
@@ -1561,13 +1562,37 @@ try {
   let shared = null, last = null;
   try { shared = await fromLink(location.hash); } catch {}
   try { last = localStorage.getItem("sagebrush-current"); } catch {}
-  if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
+  // ?open=URL of a notebook (.ipynb, .py, ...) and file=URL (repeatable) of
+  // data it reads: fetched into the browser's files, then opened (&run runs it)
+  const qs = new URLSearchParams(location.search), remote = qs.get("open");
+  let opened = false;
+  if (remote) {
+    try {
+      for (const u of qs.getAll("file")) {
+        const name = decodeURIComponent(new URL(u, location.href).pathname.split("/").pop());
+        statusEl.textContent = `fetching ${name}…`;
+        const r = await fetch(u);
+        if (!r.ok) throw new Error(`${name}: ${r.status}`);
+        const data = new Uint8Array(await r.arrayBuffer());
+        await idb("files", "readwrite", (st) => st.put(data, "/" + name));
+      }
+      const name = decodeURIComponent(new URL(remote, location.href).pathname.split("/").pop()) || "notebook.ipynb";
+      statusEl.textContent = `fetching ${name}…`;
+      const r = await fetch(remote);
+      if (!r.ok) throw new Error(`${name}: ${r.status}`);
+      show({ ...fromFile(name, await r.text()), id: newId() });
+      saveNow();
+      opened = true;
+    } catch (err) { statusEl.textContent = `could not open ${remote}: ${err.message ?? err}`; }
+  }
+  if (opened) {}
+  else if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
   else if (!(last && (await openId(last)))) openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   document.body.classList.remove("opening");
   // the interpreter starts once the notebook has been drawn (it is not needed for that)
   await afterPaint();
   startWorker();
-  if (new URLSearchParams(location.search).has("run")) runAll();
+  if (qs.has("run")) { await filesSent; runAll(); }
 })();
 
 </script>
