@@ -1,7 +1,7 @@
 //! The transitive-group tables this crate computed (tables/, by
 //! examples/write_tables.rs from src/transitive.rs) against Magma's database
-//! (tests/data): for each degree 2..12 the same number of groups, and the
-//! same multiset of eight invariants.
+//! (tests/data): for each degree 2..12 the same number of groups, and
+//! group nTk has the same eight invariants as Magma's TransitiveGroup(n, k).
 
 use sagebrush_group::{Group, Perm};
 
@@ -15,11 +15,12 @@ fn our_tables_match_magma() {
     let oracle = include_str!("data/transitive-2-15.txt");
     for n in 2..=12usize {
         let table = std::fs::read_to_string(format!("{}/tables/transitive-{}.txt", env!("CARGO_MANIFEST_DIR"), n)).unwrap();
-        let mut ours: Vec<String> = table
+        let ours: Vec<String> = table
             .lines()
             .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
             .map(|l| {
-                let (ord, gens) = l.split_once(';').unwrap();
+                let f: Vec<&str> = l.split(';').collect();
+                let (ord, gens) = (f[0], f[1]);
                 let gens: Vec<Perm> = gens.split_whitespace().map(|g| Perm::from_images(g.split(',').map(|x| x.parse::<u32>().unwrap() - 1).collect()).unwrap()).collect();
                 let g = Group::new(n, gens).unwrap();
                 assert!(g.is_transitive());
@@ -27,12 +28,10 @@ fn our_tables_match_magma() {
                 inv(&g)
             })
             .collect();
-        let mut theirs: Vec<String> = oracle.lines().filter(|l| l.starts_with(&format!("{} ", n))).map(|l| {
+        let theirs: Vec<String> = oracle.lines().filter(|l| l.starts_with(&format!("{} ", n))).map(|l| {
             let f: Vec<&str> = l.split_once(';').unwrap().0.split_whitespace().collect();
             f[2..10].join(" ")
         }).collect();
-        ours.sort();
-        theirs.sort();
         assert_eq!(ours.len(), theirs.len(), "degree {}", n);
         assert_eq!(ours, theirs, "degree {}", n);
     }
