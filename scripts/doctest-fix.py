@@ -20,7 +20,7 @@ ROOT = os.path.join(HERE, "..")
 
 
 def docstring_lines(path):
-    """qualname -> first line (1-based) of its docstring literal."""
+    """qualname -> (first line (1-based) of its docstring literal, raw?)."""
     tree = ast.parse(open(path).read())
     mod = os.path.splitext(os.path.basename(path))[0]
     out = {}
@@ -66,6 +66,9 @@ def main(args):
             print("cannot locate", res["name"])
             continue
         i = starts[res["name"]] - 1 + res["line"]
+        # a backslash in an output is doubled unless the docstring is raw (r"""...)
+        first = lines[starts[res["name"]] - 1].lstrip()
+        raw = first[:1] in "rR"
         if "sage:" not in lines[i] and ">>>" not in lines[i]:
             print("example not at line %d of %s: %r" % (i + 1, path, lines[i]))
             continue
@@ -76,7 +79,10 @@ def main(args):
         k = j
         while k < len(lines) and lines[k].strip() and not lines[k].lstrip().startswith(("sage:", ">>>", '"""', "'''")):
             k += 1
-        edits.append((j, k, [" " * ind + l for l in output_text(res)]))
+        new = [" " * ind + l for l in output_text(res)]
+        if not raw:
+            new = [l.replace("\\", "\\\\") for l in new]
+        edits.append((j, k, new))
     for j, k, new in sorted(edits, reverse=True):
         lines[j:k] = new
     open(path, "w").write("\n".join(lines))

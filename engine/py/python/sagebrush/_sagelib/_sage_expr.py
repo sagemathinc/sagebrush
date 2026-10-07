@@ -117,7 +117,15 @@ def _relop(sym):
 # ------------------------------------------------------------------ Expression
 
 class Expression:
-    """An element of Sage's symbolic ring."""
+    """An element of Sage's symbolic ring.
+
+    EXAMPLES::
+
+        sage: f = x^2 + 2*x + 1; f
+        x^2 + 2*x + 1
+        sage: f.factor(), f.diff(x), f.integrate(x), f(x=3)
+        ((x + 1)^2, 2*x + 2, 1/3*x^3 + x^2 + x, 16)
+    """
 
     __slots__ = ("_s", "_repr", "_fast", "__weakref__")
 
@@ -128,6 +136,13 @@ class Expression:
         return (Expression, (self._s,))
 
     def parent(self):
+        """The symbolic ring SR.
+
+        EXAMPLES::
+
+            sage: x.parent()
+            Symbolic Ring
+        """
         return SR_parent
 
     # --- arithmetic
@@ -194,12 +209,26 @@ class Expression:
         return _call("is_zero", self._s)[0] != "1"
 
     def lhs(self):
+        """The left-hand side of an equation (also left()).
+
+        EXAMPLES::
+
+            sage: (x^2 == 4).lhs(), (x < 1).left_hand_side()
+            (x^2, x)
+        """
         op = self._op()
         if not op[0].startswith("rel:"):
             raise AttributeError("lhs: not a relation")
         return Expression(op[1])
 
     def rhs(self):
+        """The right-hand side of an equation (also right()).
+
+        EXAMPLES::
+
+            sage: (x^2 == 4).rhs(), (x < 1).right()
+            (4, 1)
+        """
         op = self._op()
         if not op[0].startswith("rel:"):
             raise AttributeError("rhs: not a relation")
@@ -227,6 +256,15 @@ class Expression:
         return _call("operator", self._s)
 
     def variables(self):
+        """The variables, sorted.
+
+        EXAMPLES::
+
+            sage: var('y z')
+            (y, z)
+            sage: (x + z*y).variables()
+            (x, y, z)
+        """
         return tuple(Expression(_sym_s(n)) for n in _call("variables", self._s) if n)
 
     arguments = args = variables
@@ -235,6 +273,13 @@ class Expression:
         return [n for n in _call("variables", self._s) if n]
 
     def operator(self):
+        """The top-level operation.
+
+        EXAMPLES::
+
+            sage: (x^2).operator(), (x + 1).operator()  # sagebrush only
+            (<function pow at 0x...>, <function add at 0x...>)
+        """
         import operator as o
         tag = self._op()[0]
         if tag == "add":
@@ -250,39 +295,121 @@ class Expression:
         return None
 
     def operands(self):
+        """The operands of the top-level operation.
+
+        EXAMPLES::
+
+            sage: (x^2 + 3*x).operands()
+            [x^2, 3*x]
+        """
         return [Expression(s) for s in self._op()[1:]]
 
     def number_of_operands(self):
+        """The number of operands (also nops()).
+
+        EXAMPLES::
+
+            sage: (x + 1).number_of_operands(), (x^2).nops()
+            (2, 2)
+        """
         return len(self._op()) - 1
 
     nops = number_of_operands
 
     def is_symbol(self):
+        """Whether the expression is a single variable.
+
+        EXAMPLES::
+
+            sage: x.is_symbol(), (x + 1).is_symbol()
+            (True, False)
+        """
         return self._s.startswith("s")
 
     def is_numeric(self):
+        """Whether the expression is a number.
+
+        EXAMPLES::
+
+            sage: SR(2/3).is_numeric(), pi.is_numeric()
+            (True, False)
+        """
         return self._s[0] in "nzfg"
 
     def is_constant(self):
+        """Whether the expression has no variables.
+
+        EXAMPLES::
+
+            sage: pi.is_constant(), x.is_constant()
+            (True, False)
+        """
         return not self._names()
 
     def is_relational(self):
+        """Whether the expression is an equation or inequality.
+
+        EXAMPLES::
+
+            sage: (x == 1).is_relational(), (x + 1).is_relational()
+            (True, False)
+        """
         return self._s.startswith("R")
 
     def is_zero(self):
+        """Whether the expression is zero (after simplification).
+
+        EXAMPLES::
+
+            sage: (x - x).is_zero(), (sin(x)^2 + cos(x)^2 - 1).is_zero()  # needs maxima
+            (True, True)
+        """
         return _call("is_zero", self._s)[0] == "1"
 
     def is_trivial_zero(self):
+        """Whether the expression is literally 0.
+
+        EXAMPLES::
+
+            sage: SR(0).is_trivial_zero(), (x - x).is_trivial_zero()
+            (True, True)
+        """
         return self._s == "n0/1;"
 
     def is_integer(self):
+        """Whether the expression is an integer.
+
+        EXAMPLES::
+
+            sage: SR(3).is_integer(), (x + 1).is_integer()
+            (True, False)
+        """
         v = _py_number(self._s)
         return isinstance(v, int) and not isinstance(v, float)
 
     def is_rational_expression(self):
-        return True
+        """Whether the expression is a rational function: a quotient of
+        polynomials in its variables.
+
+        EXAMPLES::
+
+            sage: (1/(x + 1)).is_rational_expression(), sin(x).is_rational_expression()
+            (True, False)
+        """
+        n, d = self.numerator_denominator()
+        vs = self.variables()
+        if not vs:
+            return self.is_numeric()
+        return all(n.is_polynomial(v) and d.is_polynomial(v) for v in vs)
 
     def is_polynomial(self, var):
+        """Whether the expression is a polynomial in x.
+
+        EXAMPLES::
+
+            sage: (x^2 + 1).is_polynomial(x), (1/x).is_polynomial(x)
+            (True, False)
+        """
         try:
             self.coefficients(var)
             return True
@@ -291,7 +418,14 @@ class Expression:
 
     # --- substitution and evaluation
     def subs(self, *args, **kw):
-        """subs(x=2), subs({x: 2}), subs(x == 2), subs([x == 1, y == 2])."""
+        """subs(x=2), subs({x: 2}), subs(x == 2), subs([x == 1, y == 2]).
+
+        EXAMPLES::
+
+            sage: f = x^2 + 1
+            sage: f.subs(x=2), f.subs({x: x + 1}), f.subs(x == 3)
+            (5, (x + 1)^2 + 1, 10)
+        """
         pairs = []
 
         def add(a):
@@ -316,7 +450,16 @@ class Expression:
     substitute = subs
 
     def __call__(self, *args, **kw):
-        """f(2), f(x=2): substitute (positionally, in the order of variables())."""
+        """f(2), f(x=2): substitute (positionally, in the order of variables()).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: f = x^2 + y
+            sage: f(2, 3), f(x=1), f(y=x)  # sagebrush only
+            (7, y + 1, x^2 + x)
+        """
         names = self._names()
         if len(args) > len(names):
             raise ValueError("the number of arguments must be less than or equal to %d" % len(names))
@@ -337,7 +480,13 @@ class Expression:
         return SymbolicFunction(self, args)
 
     def n(self, digits=None, prec=None):
-        """The numerical value: an element of RR, or of CC if it is complex."""
+        """The numerical value: an element of RR, or of CC if it is complex.
+
+        EXAMPLES::
+
+            sage: pi.n(), sqrt(2).n(), (1 + I).n(), exp(1).N()  # sagebrush only
+            (3.14159265358979, 1.41421356237310, 1.00000000000000 + 1.00000000000000*I, 2.71828182845905)
+        """
         if self.is_relational():
             return _one("rel", _relop(self._op()[0][4:]), _expr(self.lhs().n())._s, _expr(self.rhs().n())._s)
         if self._names():
@@ -410,6 +559,13 @@ class Expression:
         return v
 
     def pyobject(self):
+        """The Python number the (numeric) expression is.
+
+        EXAMPLES::
+
+            sage: SR(5).pyobject(), SR(2/3).pyobject()
+            (5, 2/3)
+        """
         v = _py_number(self._s)
         if v is None:
             raise TypeError("self must be a numeric expression")
@@ -427,7 +583,13 @@ class Expression:
     # --- calculus
     def diff(self, *args):
         """diff(x), diff(x, 2), diff(x, y), diff(x, 2, y, 3); with no
-        argument, in the only variable."""
+        argument, in the only variable.
+
+        EXAMPLES::
+
+            sage: (x^3).diff(x), sin(x^2).diff(x), (x^4).diff(x, 2), (x^2*x).derivative(x)
+            (3*x^2, 2*x*cos(x^2), 12*x^2, 3*x^2)
+        """
         if not args:
             names = self._names()
             if len(names) != 1:
@@ -452,17 +614,42 @@ class Expression:
     derivative = differentiate = diff
 
     def gradient(self, vars=None):
+        """The gradient (in the variables, or the given ones).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: (x^2*y).gradient()
+            (2*x*y, x^2)
+        """
         from _sage_matrix import vector
         vs = vars or self.variables()
         return vector([self.diff(v) for v in vs])
 
     def hessian(self):
+        """The Hessian matrix.
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: (x^2*y).hessian()
+            [2*y 2*x]
+            [2*x   0]
+        """
         from _sage_matrix import matrix
         vs = self.variables()
         return matrix([[self.diff(u).diff(v) for v in vs] for u in vs])
 
     def taylor(self, *args):
-        """taylor(x, a, n) or taylor((x, a), (y, b), n) (one variable here)."""
+        """taylor(x, a, n) or taylor((x, a), (y, b), n) (one variable here).
+
+        EXAMPLES::
+
+            sage: exp(x).taylor(x, 0, 4), sin(x).taylor(x, pi, 3)  # needs maxima
+            (1/24*x^4 + 1/6*x^3 + 1/2*x^2 + x + 1, 1/6*(x - pi)^3 - x + pi)
+        """
         if len(args) == 3:
             v, a, n = args
         elif len(args) == 2 and isinstance(args[0], (tuple, list)):
@@ -472,7 +659,13 @@ class Expression:
         return _one("taylor", self._s, _var_name(v), _expr(a)._s, str(int(n)))
 
     def series(self, v, n):
-        """The series to order n (in x - a for v = (x == a)), with an O-term."""
+        """The series to order n (in x - a for v = (x == a)), with an O-term.
+
+        EXAMPLES::
+
+            sage: sin(x).series(x, 6), (1/(1 - x)).series(x, 4)
+            (1*x + (-1/6)*x^3 + 1/120*x^5 + Order(x^6), 1 + 1*x + 1*x^2 + 1*x^3 + Order(x^4))
+        """
         if isinstance(v, Expression) and v.is_relational():
             var, a = v.lhs(), v.rhs()
         else:
@@ -481,7 +674,13 @@ class Expression:
         return _SeriesExpr(t, _expr(var), _expr(a), int(n))
 
     def limit(self, *args, dir=None, **kw):
-        """limit(x=a), limit(x=a, dir='+'), limit(x == a)."""
+        """limit(x=a), limit(x=a, dir='+'), limit(x == a).
+
+        EXAMPLES::
+
+            sage: (sin(x)/x).limit(x=0), (1/x).limit(x=0, dir='+'), ((1 + 1/x)^x).limit(x=oo)  # needs maxima
+            (1, +Infinity, e)
+        """
         if kw:
             if len(kw) != 1:
                 raise ValueError("call the limit function like this, e.g. limit(expr, x=2).")
@@ -501,10 +700,23 @@ class Expression:
     limit_ = limit
 
     def solve(self, v, **kw):
+        """The solutions of the equation (or of expression == 0).
+
+        EXAMPLES::
+
+            sage: (x^2 - 4).solve(x), (x^2 == 2).solve(x)  # needs maxima
+            ([x == -2, x == 2], [x == -sqrt(2), x == sqrt(2)])
+        """
         return solve(self, v, **kw)
 
     def roots(self, x=None, ring=None, multiplicities=True):
-        """The roots of a polynomial equation with multiplicities, [(root, m), ...]."""
+        """The roots of a polynomial equation with multiplicities, [(root, m), ...].
+
+        EXAMPLES::
+
+            sage: (x^2 - 1).roots(), ((x - 1)^2*(x + 2)).roots()  # needs maxima
+            ([(-1, 1), (1, 1)], [(-2, 1), (1, 2)])
+        """
         x = x if x is not None else self.variables()[0]
         f = self.lhs() - self.rhs() if self.is_relational() else self
         out = []
@@ -522,19 +734,46 @@ class Expression:
         return out
 
     def find_root(self, a, b, var=None):
+        """A numerical root in [a, b] (Brent's method).
+
+        EXAMPLES::
+
+            sage: (x^2 - 2).find_root(0, 2)
+            1.4142135623731364
+        """
         return find_root(self, a, b, var)
 
     def integrate(self, *args, **kw):
+        """The integral: integrate(x), or the definite integral integrate(x, a, b).
+
+        EXAMPLES::
+
+            sage: (x^2).integrate(x), (x^2).integrate(x, 0, 1), exp(-x^2).integral(x, -oo, oo)
+            (1/3*x^3, 1/3, sqrt(pi))
+        """
         return integrate(self, *args, **kw)
 
     integral = integrate
 
     def plot(self, *args, **kw):
+        """A plot of the expression (as plot(f, ...)).
+
+        EXAMPLES::
+
+            sage: sin(x).plot((x, 0, 2*pi))  # random
+        """
         from sage_plot import plot
         return plot(self, *args, **kw)
 
     # --- algebra
     def expand(self):
+        """The expansion of products and powers.
+
+        EXAMPLES::
+
+            sage: ((x + 1)^3).expand()
+            x^3 + 3*x^2 + 3*x + 1
+        """
         if self.is_relational():
             return self._map_rel("expand")
         return _one("expand", self._s)
@@ -544,12 +783,33 @@ class Expression:
         return _one("rel", tag, _call(op, self.lhs()._s)[0], _call(op, self.rhs()._s)[0])
 
     def factor(self):
+        """The factorization (over QQ).
+
+        EXAMPLES::
+
+            sage: (x^4 - 1).factor(), (x^2 - 2).factor()
+            ((x^2 + 1)*(x + 1)*(x - 1), x^2 - 2)
+        """
         return _one("factor", self._s)
 
     def simplify(self):
+        """Simplify.
+
+        EXAMPLES::
+
+            sage: (x + x).simplify(), (x^2/x).simplify()  # needs maxima
+            (2*x, x)
+        """
         return self  # Sage's simplify() only applies Maxima's simplification
 
     def simplify_full(self):
+        """Full simplification (also full_simplify).
+
+        EXAMPLES::
+
+            sage: (sin(x)^2 + cos(x)^2).simplify_full()  # needs maxima
+            1
+        """
         if self.is_relational():
             return self._map_rel("simplify_full")
         return _one("simplify_full", self._s)
@@ -557,42 +817,130 @@ class Expression:
     full_simplify = simplify_full
 
     def simplify_rational(self):
+        """Simplify as a rational function (also rational_simplify).
+
+        EXAMPLES::
+
+            sage: ((x^2 - 1)/(x + 1)).simplify_rational()  # needs maxima
+            x - 1
+        """
         return _one("simplify_rational", self._s)
 
     rational_simplify = simplify_rational
 
     def simplify_trig(self):
+        """Simplify trigonometric expressions (also trig_simplify).
+
+        EXAMPLES::
+
+            sage: (sin(x)^2 + cos(x)^2).simplify_trig(), (2*sin(x)*cos(x)).trig_simplify()  # needs maxima
+            (1, 2*cos(x)*sin(x))
+        """
         return _one("simplify_trig", self._s)
 
     trig_simplify = simplify_trig
 
     def combine(self):
-        return _one("together", self._s)
+        """Combine the terms of a sum that have the same denominator (Sage's
+        combine(); together() puts everything over one denominator).
+
+        EXAMPLES::
+
+            sage: (1/x + 1/(x + 1)).combine()
+            1/(x + 1) + 1/x
+        """
+        if self._op()[0] != "add":
+            return self
+        groups = {}
+        order = []
+        for t in self.operands():
+            n, d = t.numerator_denominator()
+            k = repr(d)
+            if k not in groups:
+                groups[k] = [d, []]
+                order.append(k)
+            groups[k][1].append(n)
+        out = 0
+        for k in order:
+            d, ns = groups[k]
+            num = ns[0]
+            for n in ns[1:]:
+                num = num + n
+            out = out + (num if repr(d) == "1" else num / d)
+        return out
 
     def numerator(self):
+        """The numerator.
+
+        EXAMPLES::
+
+            sage: ((x + 1)/(x - 1)).numerator()
+            x + 1
+        """
         return _one("numerator", self._s)
 
     def denominator(self):
+        """The denominator.
+
+        EXAMPLES::
+
+            sage: ((x + 1)/(x - 1)).denominator()
+            x - 1
+        """
         return _one("denominator", self._s)
 
     def numerator_denominator(self):
+        """(numerator, denominator).
+
+        EXAMPLES::
+
+            sage: ((x + 1)/(x - 1)).numerator_denominator()
+            (x + 1, x - 1)
+        """
         return self.numerator(), self.denominator()
 
     def degree(self, x):
+        """The degree in x.
+
+        EXAMPLES::
+
+            sage: (x^5 + x).degree(x)
+            5
+        """
         return int(_call("degree", self._s, _var_name(x))[0])
 
     def coefficient(self, x, n=1):
+        """The coefficient of x^n.
+
+        EXAMPLES::
+
+            sage: f = 3*x^2 + 2*x + 1
+            sage: f.coefficient(x, 2), f.coefficient(x), f.coeff(x, 0)  # sagebrush only
+            (3, 2, 1)
+        """
         return _one("coefficient", self._s, _var_name(x), str(int(n)))
 
     coeff = coefficient
 
     def list(self, x=None):
-        """The coefficients of a polynomial in x, constant term first."""
+        """The coefficients of a polynomial in x, constant term first.
+
+        EXAMPLES::
+
+            sage: (3*x^2 + 1).list(x)
+            [1, 0, 3]
+        """
         x = _var_name(x if x is not None else self._default_var())
         return [Expression(s) for s in _call("coefficients", self._s, x)]
 
     def coefficients(self, x=None, sparse=True):
-        """[[c, n], ...] for the nonzero terms c*x^n (sparse=False: list())."""
+        """[[c, n], ...] for the nonzero terms c*x^n (sparse=False: list()).
+
+        EXAMPLES::
+
+            sage: (3*x^2 + 1).coefficients()
+            [[1, 0], [3, 2]]
+        """
         cs = self.list(x)
         if not sparse:
             return cs
@@ -605,7 +953,13 @@ class Expression:
         return names[0]
 
     def polynomial(self, base_ring=None, ring=None):
-        """This expression as a polynomial (Sage's f.polynomial(QQ))."""
+        """This expression as a polynomial (Sage's f.polynomial(QQ)).
+
+        EXAMPLES::
+
+            sage: (x^2 + 3*x + 1).polynomial(QQ), (x^2 + 3*x + 1).polynomial(QQ).parent()
+            (x^2 + 3*x + 1, Univariate Polynomial Ring in x over Rational Field)
+        """
         import sage_all as sa
         names = self._names()
         if len(names) > 1:
@@ -625,33 +979,95 @@ class Expression:
         return r
 
     def power_series(self, base_ring=None):
+        """The expression as a power series (its Taylor series).
+
+        EXAMPLES::
+
+            sage: exp(x).series(x, 5)
+            1 + 1*x + 1/2*x^2 + 1/6*x^3 + 1/24*x^4 + Order(x^5)
+        """
         raise NotImplementedError("power_series")
 
     def real(self):
+        """The real part.
+
+        EXAMPLES::
+
+            sage: (3 + 4*I).real(), (3 + 4*I).real_part()
+            (3, 3)
+        """
         return _real_imag(self, 0)
 
     def imag(self):
+        """The imaginary part.
+
+        EXAMPLES::
+
+            sage: (3 + 4*I).imag(), (3 + 4*I).imag_part()
+            (4, 4)
+        """
         return _real_imag(self, 1)
 
     real_part, imag_part = real, imag
 
     def conjugate(self):
+        """The complex conjugate.
+
+        EXAMPLES::
+
+            sage: (1 + I).conjugate(), (2 - 3*I).conjugate()
+            (-I + 1, 3*I + 2)
+        """
         return self.real() - Expression(_call("const", "I")[0]) * self.imag()
 
     def abs(self):
+        """The absolute value.
+
+        EXAMPLES::
+
+            sage: abs(-x), (-3*x).abs()
+            (abs(x), 3*abs(x))
+        """
         return abs(self)
 
     def sqrt(self):
+        """The square root.
+
+        EXAMPLES::
+
+            sage: (x^2).sqrt(), SR(4).sqrt()
+            (sqrt(x^2), 2)
+        """
         return self ** _Fraction(1, 2)
 
     def exp(self):
+        """e to the expression.
+
+        EXAMPLES::
+
+            sage: x.exp(), (0*x).exp()
+            (e^x, 1)
+        """
         return _one("fun", "exp", self._s)
 
     def log(self, b=None):
+        """The natural logarithm.
+
+        EXAMPLES::
+
+            sage: x.log(), e.log()
+            (log(x), 1)
+        """
         r = _one("fun", "log", self._s)
         return r if b is None else r / _one("fun", "log", _expr(b)._s)
 
     def show(self):
+        """Show the expression typeset (LaTeX in a notebook).
+
+        EXAMPLES::
+
+            sage: (x^2/2).show()  # random
+        """
         show_typeset(self)
 
 
@@ -671,7 +1087,14 @@ def _real_imag(e, k):
 class Typeset:
     """What show(expr) displays: typeset math where the page or Jupyter
     can render LaTeX, the text form elsewhere.  (Values print as text, as
-    in Sage.)"""
+    in Sage.)
+
+    EXAMPLES::
+
+        sage: from _sage_expr import show_typeset  # sagebrush only
+        sage: show_typeset(x^2)  # random  # sagebrush only
+        x^2
+    """
 
     def __init__(self, obj):
         self._obj = obj
@@ -691,6 +1114,14 @@ class Typeset:
 
 
 def show_typeset(obj):
+    """Show obj typeset with LaTeX.
+
+    EXAMPLES::
+
+        sage: from _sage_expr import show_typeset  # sagebrush only
+        sage: show_typeset(sqrt(x)/2)  # random  # sagebrush only
+        1/2*sqrt(x)
+    """
     import builtins
     d = getattr(builtins, "__pyjs_display__", None)
     if d is not None:
@@ -745,6 +1176,13 @@ class _SeriesExpr(Expression):
         return self._terms(True)
 
     def truncate(self):
+        """The series without its O(x^n) term.
+
+        EXAMPLES::
+
+            sage: sin(x).series(x, 6).truncate()
+            1/120*x^5 - 1/6*x^3 + x
+        """
         return Expression(self._s)
 
 
@@ -753,9 +1191,23 @@ class _SymbolicRing:
         return "Symbolic Ring"
 
     def __call__(self, v):
+        """Convert v into a symbolic expression.
+
+        EXAMPLES::
+
+            sage: SR(3/4), SR(pi)
+            (3/4, pi)
+        """
         return _expr(v)
 
     def var(self, *names):
+        """Symbolic variables: SR.var('t').
+
+        EXAMPLES::
+
+            sage: t = SR.var('t'); t^2
+            t^2
+        """
         return var(*names)
 
     def _latex_(self):
@@ -763,6 +1215,7 @@ class _SymbolicRing:
 
 
 SR_parent = _SymbolicRing()
+SR = SR_parent
 
 
 def _var_name(v):
@@ -837,7 +1290,15 @@ _FAST_GLOBALS = {"_m": _M, "_gamma": _gamma, "_sgn": _sgn, "_undefined": _undefi
 # ------------------------------------------------------------------ constructors
 
 def var(*names, **kw):
-    """var('x y') or var('x', 'y'): symbolic variables, also defined in __main__."""
+    """var('x y') or var('x', 'y'): symbolic variables, also defined in __main__.
+
+    EXAMPLES::
+
+        sage: var('a b c')
+        (a, b, c)
+        sage: a + b + c
+        a + b + c
+    """
     if len(names) == 1 and isinstance(names[0], (list, tuple)):
         names = tuple(names[0])
     if len(names) == 1 and isinstance(names[0], str):
@@ -889,11 +1350,282 @@ def _function(name, numeric=None, cnumeric=None):
     return f
 
 
+# The docstrings of the elementary functions (made by one factory, so they
+# have no def to hold them); their examples are doctests like any others.
+_FUNCTION_DOCS = {
+    'sin': """The sine.
+
+    EXAMPLES::
+
+        sage: sin(pi/6)
+        1/2
+        sage: sin(x).diff(x)
+        cos(x)
+        sage: sin(1.0)
+        0.841470984807897""",
+    'cos': """The cosine.
+
+    EXAMPLES::
+
+        sage: cos(pi/3)
+        1/2
+        sage: cos(x).integrate(x)
+        sin(x)
+        sage: cos(0)
+        1""",
+    'tan': """The tangent.
+
+    EXAMPLES::
+
+        sage: tan(pi/4)
+        1
+        sage: tan(x).diff(x)
+        tan(x)^2 + 1""",
+    'cot': """The cotangent.
+
+    EXAMPLES::
+
+        sage: cot(pi/4)
+        1
+        sage: cot(x).diff(x)
+        -cot(x)^2 - 1""",
+    'sec': """The secant.
+
+    EXAMPLES::
+
+        sage: sec(pi/3)
+        2
+        sage: sec(x).diff(x)
+        sec(x)*tan(x)""",
+    'csc': """The cosecant.
+
+    EXAMPLES::
+
+        sage: csc(pi/6)
+        2
+        sage: csc(x).diff(x)
+        -cot(x)*csc(x)""",
+    'arcsin': """The inverse sine (also asin).
+
+    EXAMPLES::
+
+        sage: arcsin(1/2)
+        1/6*pi
+        sage: arcsin(x).diff(x)
+        1/sqrt(-x^2 + 1)""",
+    'arccos': """The inverse cosine (also acos).
+
+    EXAMPLES::
+
+        sage: arccos(1/2)
+        1/3*pi
+        sage: arccos(x).diff(x)
+        -1/sqrt(-x^2 + 1)""",
+    'arctan': """The inverse tangent (also atan).
+
+    EXAMPLES::
+
+        sage: arctan(1)
+        1/4*pi
+        sage: arctan(x).diff(x)
+        1/(x^2 + 1)""",
+    'arccot': """The inverse cotangent (also acot).
+
+    EXAMPLES::
+
+        sage: arccot(1)
+        1/4*pi
+        sage: arccot(x).diff(x)
+        -1/(x^2 + 1)""",
+    'arcsec': """The inverse secant (also asec).
+
+    EXAMPLES::
+
+        sage: arcsec(2)
+        arcsec(2)
+        sage: arcsec(x).diff(x)
+        1/(sqrt(x^2 - 1)*x)""",
+    'arccsc': """The inverse cosecant (also acsc).
+
+    EXAMPLES::
+
+        sage: arccsc(2)
+        arccsc(2)
+        sage: arccsc(x).diff(x)
+        -1/(sqrt(x^2 - 1)*x)""",
+    'arctan2': """arctan2(y, x): the angle of the point (x, y) (also atan2).
+
+    EXAMPLES::
+
+        sage: arctan2(1, 1)
+        1/4*pi
+        sage: arctan2(1.0, 2.0)
+        0.463647609000806""",
+    'sinh': """The hyperbolic sine.
+
+    EXAMPLES::
+
+        sage: sinh(0)
+        0
+        sage: sinh(x).diff(x)
+        cosh(x)""",
+    'cosh': """The hyperbolic cosine.
+
+    EXAMPLES::
+
+        sage: cosh(0)
+        1
+        sage: cosh(x).diff(x)
+        sinh(x)""",
+    'tanh': """The hyperbolic tangent.
+
+    EXAMPLES::
+
+        sage: tanh(0)
+        0
+        sage: tanh(x).diff(x)
+        -tanh(x)^2 + 1""",
+    'coth': """The hyperbolic cotangent.
+
+    EXAMPLES::
+
+        sage: coth(1.0)
+        1.31303528549933
+        sage: coth(x).diff(x)
+        -1/sinh(x)^2""",
+    'sech': """The hyperbolic secant.
+
+    EXAMPLES::
+
+        sage: sech(0)
+        1
+        sage: sech(x).diff(x)
+        -sech(x)*tanh(x)""",
+    'csch': """The hyperbolic cosecant.
+
+    EXAMPLES::
+
+        sage: csch(1.0)
+        0.850918128239322
+        sage: csch(x).diff(x)
+        -coth(x)*csch(x)""",
+    'arcsinh': """The inverse hyperbolic sine (also asinh).
+
+    EXAMPLES::
+
+        sage: arcsinh(0)
+        0
+        sage: arcsinh(x).diff(x)
+        1/sqrt(x^2 + 1)""",
+    'arccosh': """The inverse hyperbolic cosine (also acosh).
+
+    EXAMPLES::
+
+        sage: arccosh(1)
+        0
+        sage: arccosh(x).diff(x)
+        1/(sqrt(x + 1)*sqrt(x - 1))""",
+    'arctanh': """The inverse hyperbolic tangent (also atanh).
+
+    EXAMPLES::
+
+        sage: arctanh(0)
+        0
+        sage: arctanh(x).diff(x)
+        -1/(x^2 - 1)""",
+    'exp': """The exponential function.
+
+    EXAMPLES::
+
+        sage: exp(0)
+        1
+        sage: exp(1)
+        e
+        sage: exp(x).diff(x)
+        e^x
+        sage: exp(1.0)
+        2.71828182845905""",
+    'log': """The natural logarithm (also ln); log(x, b) = log(x)/log(b).
+
+    EXAMPLES::
+
+        sage: log(1)
+        0
+        sage: log(e)
+        1
+        sage: log(x).diff(x)
+        1/x
+        sage: log(8, 2)
+        3
+        sage: log(2.0)
+        0.693147180559945""",
+    'floor': """The floor (the largest integer at most x).
+
+    EXAMPLES::
+
+        sage: floor(7/2)
+        3
+        sage: floor(-2.5)
+        -3
+        sage: floor(pi)
+        3""",
+    'ceil': """The ceiling (the least integer at least x; also ceiling).
+
+    EXAMPLES::
+
+        sage: ceil(7/2)
+        4
+        sage: ceil(-2.5)
+        -2
+        sage: ceil(pi)
+        4""",
+    'gamma': """The gamma function.
+
+    EXAMPLES::
+
+        sage: gamma(5)
+        24
+        sage: gamma(1/2)
+        sqrt(pi)
+        sage: gamma(2.5)
+        1.32934038817914""",
+    'erf': """The error function.
+
+    EXAMPLES::
+
+        sage: erf(0)
+        0
+        sage: erf(1.0)
+        0.842700792949715
+        sage: erf(x).diff(x)
+        2*e^(-x^2)/sqrt(pi)""",
+    'sgn': """The sign: -1, 0 or 1 (also sign).
+
+    EXAMPLES::
+
+        sage: sgn(-3)
+        -1
+        sage: sgn(0)
+        0
+        sage: sgn(2.5)
+        1""",
+    'heaviside': """The Heaviside step function: 1 for x > 0, 0 for x < 0.
+
+    EXAMPLES::
+
+        sage: heaviside(2)
+        1
+        sage: heaviside(-1)
+        0""",
+}
+
+
 _functions = {}
 
 
 def _register(names, numeric=None):
     f = _function(names[0], numeric)
+    f.__doc__ = _FUNCTION_DOCS.get(names[0])
     for n in names:
         _functions[n] = f
     return f
@@ -932,7 +1664,13 @@ heaviside = _register(["heaviside"], lambda t: 1.0 if t > 0 else 0.0)
 
 
 def log(v, b=None):
-    """log(x), the natural logarithm; log(x, b) = log(x)/log(b)."""
+    """log(x), the natural logarithm; log(x, b) = log(x)/log(b).
+
+    EXAMPLES::
+
+        sage: log(1), log(e), log(8, 2), log(x).diff(x)
+        (0, 1, 3, 1/x)
+    """
     if b is None:
         return _log1(v)
     if isinstance(v, int) and isinstance(b, int) and v > 0 and b > 1:
@@ -949,7 +1687,15 @@ ln = log
 
 
 def function(name, nargs=None):
-    """function('f'): an undefined symbolic function f(x)."""
+    """function('f'): an undefined symbolic function f(x).
+
+    EXAMPLES::
+
+        sage: f = function('f'); f(x)
+        f(x)
+        sage: f(x).diff(x)
+        diff(f(x), x)
+    """
     if name in _functions:
         return _functions[name]
 
@@ -974,7 +1720,13 @@ def _poly_or(f):
 
 
 def diff(f, *args):
-    """diff(f, x), diff(f, x, 2), diff(f, x, y)."""
+    """diff(f, x), diff(f, x, 2), diff(f, x, y).
+
+    EXAMPLES::
+
+        sage: diff(x^3, x), diff(sin(x), x, 3), diff(x^2*x, x)
+        (3*x^2, -cos(x), 3*x^2)
+    """
     f = _poly_or(f)
     if not isinstance(f, Expression):
         if hasattr(f, "derivative"):
@@ -987,19 +1739,47 @@ derivative = diff
 
 
 def expand(f):
+    """The expansion of f.
+
+    EXAMPLES::
+
+        sage: expand((x + 2)^2)
+        x^2 + 4*x + 4
+    """
     f = _poly_or(f) if not hasattr(f, "expand") or isinstance(f, Expression) else f
     return f.expand() if hasattr(f, "expand") else f
 
 
 def simplify(f):
+    """Simplify f.
+
+    EXAMPLES::
+
+        sage: simplify(x + x - 1)  # needs maxima
+        2*x - 1
+    """
     return f.simplify() if hasattr(f, "simplify") else f
 
 
 def taylor(f, *args):
+    """The Taylor polynomial: taylor(f, x, a, n).
+
+    EXAMPLES::
+
+        sage: taylor(1/(1 - x), x, 0, 4), taylor(cos(x), x, 0, 6)  # needs maxima
+        (x^4 + x^3 + x^2 + x + 1, -1/720*x^6 + 1/24*x^4 - 1/2*x^2 + 1)
+    """
     return _expr(f).taylor(*args)
 
 
 def limit(f, *args, dir=None, **kw):
+    """The limit: limit(f, x=a), dir='+' or '-' for one side (also lim).
+
+    EXAMPLES::
+
+        sage: limit(sin(x)/x, x=0), limit(1/x, x=0, dir='-'), lim((x^2 - 1)/(x - 1), x=1)  # needs maxima
+        (1, -Infinity, 2)
+    """
     return _expr(f).limit(*args, dir=dir, **kw)
 
 
@@ -1008,7 +1788,17 @@ lim = limit
 
 def solve(f, *args, **kw):
     """solve(x^2 == 4, x) -> [x == -2, x == 2]; solve([eqs], x, y) ->
-    [[x == ..., y == ...], ...]; solution_dict=True for dictionaries."""
+    [[x == ..., y == ...], ...]; solution_dict=True for dictionaries.
+
+    EXAMPLES::
+
+        sage: solve(x^2 == 4, x)  # needs maxima
+        [x == -2, x == 2]
+        sage: var('y')
+        y
+        sage: solve([x + y == 3, x - y == 1], x, y)  # needs maxima
+        [[x == 2, y == 1]]
+    """
     many = isinstance(f, (list, tuple))
     eqs = [_expr(g) for g in (f if many else [f])]
     vs = []
@@ -1061,7 +1851,15 @@ def integrate(f, *args, **kw):
     the definite integral integrate(f, x, a, b) (bounds may be oo).  Found
     by Sagebrush's own integrator (tables, substitution, parts, partial
     fractions, ...); every antiderivative is checked by differentiating
-    it.  Without one, the integral stays unevaluated, as in Sage."""
+    it.  Without one, the integral stays unevaluated, as in Sage.
+
+    EXAMPLES::
+
+        sage: integrate(x^2, x), integrate(1/x, x), integrate(x*exp(x), x)
+        (1/3*x^3, log(x), (x - 1)*e^x)
+        sage: integrate(sin(x), x, 0, pi), integral(exp(-x), x, 0, oo)
+        (2, 1)
+    """
     f, v, a, b = _int_args(f, args)
     if a is None:
         return _one("integrate", f._s, v)
@@ -1072,12 +1870,26 @@ integral = integrate
 
 
 class IntegrationSteps:
-    """How an antiderivative was found: integrate_steps(x*cos(x), x)."""
+    """How an antiderivative was found: integrate_steps(x*cos(x), x).
+
+    EXAMPLES::
+
+        sage: s = integrate_steps(x*cos(x^2), x)  # sagebrush only
+        sage: s.result()  # sagebrush only
+        1/2*sin(x^2)
+    """
 
     def __init__(self, rows, f, v):
         self._rows, self._f, self._v = rows, f, v
 
     def result(self):
+        """The antiderivative.
+
+        EXAMPLES::
+
+            sage: integrate_steps(x*exp(x), x).result()  # sagebrush only
+            (x - 1)*e^x
+        """
         return self._rows[0][4] if self._rows else integrate(self._f, self._v)
 
     def __repr__(self):
@@ -1097,6 +1909,12 @@ class IntegrationSteps:
         return "\\begin{aligned}" + " \\\\ ".join(lines) + "\\end{aligned}"
 
     def show(self):
+        """Show the steps typeset.
+
+        EXAMPLES::
+
+            sage: integrate_steps(x*cos(x^2), x).show()  # random  # sagebrush only
+        """
         show_typeset(self)
 
 
@@ -1118,7 +1936,13 @@ def _rule_latex(rule):
 
 def integrate_steps(f, *args):
     """The steps of an antiderivative (rule by rule, with the integrals each
-    rule needed), for teaching: integrate_steps(x*exp(x), x)."""
+    rule needed), for teaching: integrate_steps(x*exp(x), x).
+
+    EXAMPLES::
+
+        sage: integrate_steps(x*cos(x^2), x).result()  # sagebrush only
+        1/2*sin(x^2)
+    """
     f, v, a, b = _int_args(f, args)
     rows = []
     rename = {}
@@ -1140,7 +1964,15 @@ def integrate_steps(f, *args):
 
 def numerical_integral(f, a, b, max_points=87, params=None, eps_abs=1e-6, eps_rel=1e-6, rule=6, algorithm="qag"):
     """(value, error estimate) of the integral of f from a to b: adaptive
-    Gauss-Kronrod (7-15 points); infinite bounds through x = t/(1 - t^2)."""
+    Gauss-Kronrod (7-15 points); infinite bounds through x = t/(1 - t^2).
+
+    EXAMPLES::
+
+        sage: numerical_integral(x^2, 0, 1)  # abs tol 1e-12
+        (0.3333333333333333, 0.0)
+        sage: numerical_integral(exp(-x^2), 0, 1)[0]  # abs tol 1e-12
+        0.746824132812427
+    """
     if isinstance(f, Expression) or hasattr(f, "_fast_callable"):
         names = f._names() if isinstance(f, Expression) else None
         g = f._fast_callable(names[:1] if names else [])
@@ -1232,7 +2064,16 @@ def desolve(de, dvar, ics=None, ivar=None, show_method=False, contrib_ode=False,
     desolve(diff(y, x) + y == x, y) = (_C + (x - 1)*e^x)*e^(-x).  First
     order: linear, separable, exact, homogeneous, Bernoulli; second order:
     linear with constant coefficients, or Cauchy-Euler.  ics=[x0, y0] or
-    [x0, y0, dy0] for initial conditions."""
+    [x0, y0, dy0] for initial conditions.
+
+    EXAMPLES::
+
+        sage: y = function('y')(x)
+        sage: desolve(diff(y, x) == y, y)  # needs maxima
+        _C*e^x
+        sage: desolve(diff(y, x, 2) + y == 0, y)  # needs maxima
+        _K2*cos(x) + _K1*sin(x)
+    """
     f, v = _dvar(dvar, ivar)
     ics = [] if ics is None else list(ics)
     r = _one("desolve", _expr(de)._s, f, v, *[_expr(c)._s for c in ics])
@@ -1245,20 +2086,36 @@ def desolve_rk4(de, dvar, ics=None, ivar=None, end_points=None, step=0.1, output
     """Numerical solution of y' = f(x, y) (de is f, or an equation in
     y' and y) by the classical Runge-Kutta method: [[x0, y0], [x1, y1], ...]
     from ics=[x0, y0] to end_points (a number, or [a, b]); output='plot' or
-    'slope_field' draws it."""
-    f, v = _dvar(dvar, ivar)
-    yx = _expr(dvar)
+    'slope_field' draws it.
+
+    EXAMPLES::
+
+        sage: y = var('y')
+        sage: desolve_rk4(x + y, y, ics=[0, 1], end_points=1, step=0.5)  # abs tol 1e-8  # needs maxima
+        [[0, 1], [0.5, 1.796875], [1.0, 3.4346923828125]]
+    """
     ysym, dsym = Expression(_sym_s("_rk_y")), Expression(_sym_s("_rk_dy"))
-    de = _expr(de)
-    if de.is_relational():
-        g = (de.lhs() - de.rhs()).subs({yx.diff(_var_name(v)): dsym})
-        sols = solve(g == 0, dsym)
-        if not sols:
-            raise ValueError("cannot solve the equation for the derivative")
-        rhs = sols[0].rhs()
+    if _expr(dvar).is_symbol():
+        # dvar a variable y: de is f(x, y) in y' = f(x, y), ivar the other variable
+        y = _expr(dvar)
+        if ivar is None:
+            others = [w for w in _expr(de).variables() if repr(w) != repr(y)]
+            ivar = others[0] if others else var("x")
+        v = _var_name(ivar)
+        rhs = _expr(de).subs({y: ysym})
     else:
-        rhs = de
-    rhs = rhs.subs({yx: ysym})
+        f, v = _dvar(dvar, ivar)
+        yx = _expr(dvar)
+        de = _expr(de)
+        if de.is_relational():
+            g = (de.lhs() - de.rhs()).subs({yx.diff(_var_name(v)): dsym})
+            sols = solve(g == 0, dsym)
+            if not sols:
+                raise ValueError("cannot solve the equation for the derivative")
+            rhs = sols[0].rhs()
+        else:
+            rhs = de
+        rhs = rhs.subs({yx: ysym})
     F = rhs._fast_callable([v, "_rk_y"])
     ics = list(ics or [0, 0])
     x0, y0 = (float(t) for t in ics)
@@ -1299,7 +2156,20 @@ def desolve_rk4(de, dvar, ics=None, ivar=None, end_points=None, step=0.1, output
 
 
 def find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
-    """A root of f in [a, b] (Brent's method); f must change sign."""
+    """A root of f in [a, b] (Brent's method), a Python float as in Sage; f
+    must change sign.
+
+    EXAMPLES::
+
+        sage: find_root(x^2 - 2, 0, 2)  # abs tol 1e-12
+        1.41421356237314
+        sage: find_root(cos(x) - x, 0, 1)  # abs tol 1e-12
+        0.739085133215156
+    """
+    return float(_find_root(f, a, b, var, xtol, maxiter))
+
+
+def _find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
     f = _expr(f)
     if f.is_relational():
         f = f.lhs() - f.rhs()
@@ -1359,7 +2229,13 @@ def _real(v):
 
 
 def latex(v):
-    """The LaTeX form of v (a LatexExpr string)."""
+    """The LaTeX form of v (a LatexExpr string).
+
+    EXAMPLES::
+
+        sage: latex(x^2/2), latex(sqrt(x)), latex(1/2)
+        (\\frac{1}{2} \\, x^{2}, \\sqrt{x}, \\frac{1}{2})
+    """
     if hasattr(v, "_latex_"):
         return _LatexExpr(v._latex_())
     if isinstance(v, _Fraction):
