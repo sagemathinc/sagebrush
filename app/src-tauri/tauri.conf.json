@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Sagebrush",
+  "version": "0.2.0",
+  "identifier": "space.sagebrush.notebook",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": null,
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Education",
+    "shortDescription": "Python, Sage and Magma notebooks with Sagebrush's math engines",
+    "longDescription": "Sagebrush runs Python, Sage and Magma notebooks on your computer, with fast exact and symbolic math engines and interactive 2D and 3D graphics. Notebooks are .ipynb files.",
+    "copyright": "Copyright SageMath, Inc. MIT OR Apache-2.0",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "ipynb"
+        ],
+        "name": "Jupyter Notebook",
+        "description": "Jupyter notebook",
+        "role": "Editor",
+        "mimeType": "application/x-ipynb+json"
+      },
+      {
+        "ext": [
+          "sage"
+        ],
+        "name": "Sage file",
+        "description": "Sage source",
+        "role": "Editor",
+        "mimeType": "text/x-sage"
+      }
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}
