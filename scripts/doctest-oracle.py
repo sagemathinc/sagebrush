@@ -48,6 +48,12 @@ def docstrings(path):
                 if isinstance(n, ast.ClassDef):
                     visit(n, prefix + n.name + ".")
     visit(tree, "")
+    # docstrings kept in a table (_sage_expr's elementary functions)
+    for n in tree.body:
+        if isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "_FUNCTION_DOCS" for t in n.targets) and isinstance(n.value, ast.Dict):
+            for k, v in zip(n.value.keys, n.value.values):
+                if isinstance(v, ast.Constant) and "sage:" in v.value:
+                    out.append(("function_" + k.value, v.value))
     return out
 
 

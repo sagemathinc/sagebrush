@@ -274,6 +274,11 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             Some(pi_times(atan_table(x)?))
         }
         Fun::Acot if x.is_zero() => Some(pi_times(qq(1, 2))),
+        Fun::Acot => {
+            // arccot(x) = arctan(1/x): pi/2 - arctan(x) for x > 0, -pi/2 - arctan(x) for x < 0
+            let t = atan_table(x)?;
+            Some(pi_times(if t > qq(0, 1) { qq(1, 2) - t } else { qq(-1, 2) - t }))
+        }
         Fun::Sinh | Fun::Tanh | Fun::Asinh | Fun::Atanh | Fun::Erf if x.is_zero() => Some(zero()),
         Fun::Cosh | Fun::Sech if x.is_zero() => Some(one()),
         Fun::Acosh if x.is_one() => Some(zero()),
@@ -431,7 +436,16 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             if y.is_zero() && xx.as_num().map_or(false, |n| n.is_positive()) {
                 return Some(zero());
             }
-            None
+            // exact real numbers at the table's angles: arctan(y/x), moved to the quadrant
+            let (ny, nx) = (y.as_num()?, xx.as_num()?);
+            if !ny.is_real() || !nx.is_real() {
+                return None;
+            }
+            if nx.is_zero() {
+                return if ny.is_zero() { None } else { Some(pi_times(if ny.is_negative() { qq(-1, 2) } else { qq(1, 2) })) };
+            }
+            let t = atan_table(&div(y, xx))?;
+            Some(pi_times(if nx.is_positive() { t } else if ny.is_negative() { t - qq(1, 1) } else { t + qq(1, 1) }))
         }
         _ => None,
     }

@@ -16,7 +16,10 @@ def _sa():
 def _norm(c):
     if isinstance(c, int):
         return int(c)
-    f = _F(c)
+    try:
+        f = _F(c)
+    except (TypeError, ValueError):
+        return c  # a symbolic expression or other ring element: as it is
     if f.denominator == 1:
         return int(f.numerator)
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
@@ -101,7 +104,7 @@ class MatrixSpace_:
 
     def __repr__(self):
         kind = "Full MatrixSpace" if True else ""
-        ring = "Integer Ring" if self._base is _sa().ZZ else "Rational Field"
+        ring = "Integer Ring" if self._base is _sa().ZZ else "Symbolic Ring" if self._base is _sa().SR else "Rational Field"
         return "%s of %d by %d dense matrices over %s" % (kind, self._nrows, self._ncols, ring)
 
     def __call__(self, entries=0):
@@ -848,7 +851,13 @@ def matrix(*args, **kwds):
     else:
         rows = [list(r) for r in (args[0] if args else [])]
     if base is None:
-        base = sa.ZZ if all(_F(x).denominator == 1 for r in rows for x in r) else sa.QQ
+        def kind(x):
+            try:
+                return 0 if _F(x).denominator == 1 else 1
+            except (TypeError, ValueError):
+                return 2
+        k = max([kind(x) for r in rows for x in r] or [0])
+        base = (sa.ZZ, sa.QQ, sa.SR)[k]
     return Matrix(base, rows)
 
 
