@@ -733,14 +733,17 @@ def mul(a, n, P):
 
 def point_order(a, P, bound=12):
     """The order of P if it is a torsion point (orders are at most 12 over Q), else 0."""
+    # on a model with integral a_i, torsion points have 4x integral (and so do
+    # their multiples): a multiple without it has infinite order, found before
+    # the coordinates of 12P get large
+    integral = all(isinstance(c, int) or getattr(c, "denominator", 0) == 1 for c in a)
     Q = P
     for n in range(1, bound + 1):
         if Q is None:
             return n
+        if integral and (4 * _F(Q[0])).denominator != 1:
+            return 0
         Q = add(a, Q, P)
-        if Q is not None and (Q[0].denominator > 10 ** 6 and n > 1):
-            # torsion points are nearly integral (Nagell-Lutz on any model with integral a_i: denominators divide 4)
-            pass
     return 0 if Q is not None else bound + 1
 
 
