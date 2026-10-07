@@ -6,6 +6,9 @@
 <title>Sagebrush — Python in your browser</title>
 <meta name="description" content="Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines, running entirely in your browser. No server.">
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="llms.txt">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#6b8e5a">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
 <script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
 <style>
@@ -232,6 +235,7 @@
   <button role="menuitem" data-f="import">Upload .ipynb or .py…</button>
   <hr>
   <button role="menuitem" data-f="share">Copy share link</button>
+  <button role="menuitem" data-f="install" hidden>Install as an app…</button>
   <hr>
   <button role="menuitem" data-f="delete" class="danger">Delete notebook</button>
 </div>
@@ -402,13 +406,38 @@ const MODES = ["python", "sage", "magma"];
 function paint(cell) { cell.hl.innerHTML = cell.type === "markdown" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
 
 // ------------------------------------------------------------ the worker
+// `sagebrush notebook` (src/notebook.ts) serves this page with
+// window.__SAGEBRUSH_LOCAL__ = {path, name}: Python then runs natively on the
+// computer, behind the local server, with its files, and the notebook is
+// that .ipynb file on disk.
+const LOCAL = window.__SAGEBRUSH_LOCAL__ || null;
+// The local server's Python, with a Worker's interface: messages go by POST,
+// and come back as server-sent events.
+class RemoteWorker {
+  constructor() {
+    this.sid = newId();
+    this.queue = Promise.resolve();
+    this.onmessage = null;
+    this.onerror = null;
+    this.es = new EventSource(`api/session/${this.sid}/events`);
+    this.es.onmessage = (ev) => this.onmessage?.({ data: JSON.parse(ev.data) });
+    this.es.onerror = () => { if (this.es.readyState === EventSource.CLOSED) this.onerror?.({ message: "lost the connection to the local server" }); };
+  }
+  send(path, body) {
+    // in order: each request waits for the one before it
+    this.queue = this.queue.then(() => fetch(`api/session/${this.sid}/${path}`, { method: "POST", body: JSON.stringify(body) })).catch(() => {});
+  }
+  postMessage(m) { this.send("send", m); }
+  interrupt(upTo) { this.send("interrupt", { upTo }); }
+  terminate() { this.es.close(); fetch(`api/session/${this.sid}/stop`, { method: "POST" }).catch(() => {}); }
+}
 let filesSent = null; // the browser's files, on their way to the worker
 function startWorker() {
   statusEl.textContent = "loading…";
   generation++;
   const t0 = performance.now();
-  worker = new Worker("sagebrush-worker.js", { type: "module" });
-  filesSent = sendFiles(worker);
+  worker = LOCAL ? new RemoteWorker() : new Worker("sagebrush-worker.js", { type: "module" });
+  filesSent = LOCAL ? Promise.resolve() : sendFiles(worker);
   worker.onmessage = (ev) => {
     const m = ev.data;
     if (m.fsChanged !== undefined) return fileChanged(m.fsChanged, m.data);
@@ -458,10 +487,12 @@ function ask(msg, fallback) {
 // never checks), restart the interpreter.
 let interruptFlag = null;
 function interrupt(message) {
-  if (!interruptFlag || pending.size === 0) return stop(message);
+  if ((!interruptFlag && !worker.interrupt) || pending.size === 0) return stop(message);
   const waiting = [...pending.keys()];
-  Atomics.store(interruptFlag, 1, nextId - 1);
-  Atomics.store(interruptFlag, 0, 1);
+  if (interruptFlag) {
+    Atomics.store(interruptFlag, 1, nextId - 1);
+    Atomics.store(interruptFlag, 0, 1);
+  } else worker.interrupt(nextId - 1);
   const gen = generation;
   setTimeout(() => {
     if (generation === gen && waiting.some((id) => pending.has(id))) stop(message);
@@ -1181,10 +1212,25 @@ function scheduleSave() {
 }
 async function saveNow() {
   clearTimeout(saveTimer);
+  // (only the notebook from disk saves there: examples and others stay in the browser)
+  if (LOCAL && nb.id === "local:" + LOCAL.path) return saveLocal();
   if (loading || !nb.id || !db) return;
   try {
     await idb("notebooks", "readwrite", (st) => st.put(snapshot()));
     savedEl.textContent = "saved in this browser";
+  } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
+}
+// local mode: the notebook is the .ipynb file
+let localSaved = null;
+async function saveLocal() {
+  if (loading) return;
+  const text = toIpynb();
+  if (text === localSaved) return;
+  try {
+    const r = await fetch(`api/file?path=${encodeURIComponent(LOCAL.path)}`, { method: "PUT", body: text });
+    if (!r.ok) throw new Error(await r.text());
+    localSaved = text;
+    savedEl.textContent = "saved to " + LOCAL.name;
   } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
 }
 function show(doc) {
@@ -1318,6 +1364,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "ipynb": download(fileBase() + ".ipynb", toIpynb()); break;
     case "py": { const cm = isMagma() ? "//" : "#"; download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), cells().map((c) => (c.type === "markdown" ? cm + " %% [markdown]\n" + c.ta.value.split("\n").map((l) => (l ? cm + " " + l : cm)).join("\n") : cm + " %%\n" + c.ta.value)).join("\n\n") + "\n", isMagma() ? "text/plain" : "text/x-python"); } break;
     case "import": $("#importinput").click(); break;
+    case "install": installPrompt?.prompt(); break;
     case "share": {
       const url = await shareLink();
       history.replaceState(null, "", url);
@@ -1554,6 +1601,18 @@ try {
   console.warn("WebMCP:", e);
 }
 
+// The app: offline (web/sw.js) and installable; not under `sagebrush notebook`,
+// which serves its own files
+let installPrompt = null;
+if ("serviceWorker" in navigator && !LOCAL && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1"))
+  navigator.serviceWorker.register("sw.js").catch((e) => console.warn("service worker:", e));
+addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  document.querySelector('[data-f="install"]').hidden = false;
+});
+addEventListener("appinstalled", () => { installPrompt = null; document.querySelector('[data-f="install"]').hidden = true; });
+
 (async () => {
   db = await openDb();
   let mode = "python";
@@ -1585,9 +1644,31 @@ try {
       opened = true;
     } catch (err) { statusEl.textContent = `could not open ${remote}: ${err.message ?? err}`; }
   }
-  if (opened) {}
+  if (LOCAL) {
+    let doc = null;
+    try {
+      const r = await fetch(`api/file?path=${encodeURIComponent(LOCAL.path)}`);
+      if (r.ok) doc = fromFile(LOCAL.name, await r.text());
+    } catch {}
+    show({ ...(doc ?? { name: LOCAL.name.replace(/\.ipynb$/, ""), mode: "sage", cells: [{ code: "" }] }), id: "local:" + LOCAL.path });
+    document.title = LOCAL.name + " · Sagebrush";
+    localSaved = doc ? null : "";
+    for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
+  }
+  else if (opened) {}
   else if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
   else if (!(last && (await openId(last)))) openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  // the installed app opened with files (.ipynb, .py, .sage) from the computer
+  if ("launchQueue" in window) launchQueue.setConsumer(async (params) => {
+    for (const h of params.files ?? []) {
+      try {
+        const f = await h.getFile();
+        await saveNow();
+        show({ ...fromFile(f.name, await f.text()), id: newId() });
+        saveNow();
+      } catch (e) { statusEl.textContent = "could not open the file: " + (e?.message ?? e); }
+    }
+  });
   document.body.classList.remove("opening");
   // the interpreter starts once the notebook has been drawn (it is not needed for that)
   await afterPaint();

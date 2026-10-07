@@ -95,7 +95,19 @@ cpSync(join(here, "dist", "atlas"), join(here, "site", "public", "atlas"), { rec
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
 // the 3D viewer, loaded by the page when a Graphics3d is shown
 copyFileSync(join(here, "viewer3d.js"), join(here, "dist", "sagebrush-viewer3d.js"));
-for (const f of ["index.html", "llms.txt", "_headers", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-engine.wasm", ...KATEX])
+// The app (PWA): manifest, icons, and the service worker with the files it
+// keeps for offline use, versioned by their content
+const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
+mkdirSync(join(here, "dist", "icons"), { recursive: true });
+for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
+copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
+const SHELL = ["./", "sagebrush-worker.js", `sagebrush-engine.wasm?h=${engineHash}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const shellHash = new Bun.CryptoHasher("sha256");
+for (const f of ["index.html", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
+shellHash.update(engineHash);
+writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)));
+mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
+for (const f of ["index.html", "llms.txt", "_headers", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
 console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);

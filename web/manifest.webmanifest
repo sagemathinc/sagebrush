@@ -1,0 +1,21 @@
+{
+  "name": "Sagebrush",
+  "short_name": "Sagebrush",
+  "description": "Python, Sage and Magma notebooks with Sagebrush's math engines, running entirely on your device.",
+  "id": "/",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fafaf8",
+  "theme_color": "#6b8e5a",
+  "categories": ["education", "productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "file_handlers": [
+    { "action": "./", "accept": { "application/x-ipynb+json": [".ipynb"], "text/x-python": [".py", ".sage"] } }
+  ]
+}
