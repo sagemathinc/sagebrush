@@ -451,6 +451,29 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             Ok(json!(sagebrush_poly::factor_mod(&f, p).iter().map(|(g, e)| json!([g, e])).collect::<Vec<_>>()))
         }
+        // ---- Galois groups over Q and the transitive groups nTk (engine/galois) ----
+        "galois_group" => {
+            let f = bigs(v.get("f"))?;
+            let g = sagebrush_galois::galois_group(&f)?;
+            let t = &sagebrush_galois::tables::transitive_groups(g.degree)[g.number - 1];
+            Ok(json!({ "n": g.degree, "k": g.number, "order": g.order.to_string(), "name": g.name, "proven": g.proven,
+                       "log": g.log, "gens": perm_json(&t.gens) }))
+        }
+        "transitive_group" => {
+            let n = u(v, "n")? as usize;
+            if n < 1 || n > sagebrush_galois::tables::MAX_DEGREE {
+                return Err(format!("transitive groups are available for degrees 1 to {}", sagebrush_galois::tables::MAX_DEGREE));
+            }
+            let all = sagebrush_galois::tables::transitive_groups(n);
+            match v.get("k").and_then(Value::as_u64) {
+                None => Ok(json!(all.len())),
+                Some(k) if k >= 1 && (k as usize) <= all.len() => {
+                    let t = &all[k as usize - 1];
+                    Ok(json!({ "n": n, "k": k, "order": t.order.to_string(), "name": t.name, "gens": perm_json(&t.gens) }))
+                }
+                Some(k) => Err(format!("there are {} transitive groups of degree {}, not {}", all.len(), n, k)),
+            }
+        }
         // ---- sagebrush.poly: factoring in Z[x] (pure Rust) ----
         "factor" => {
             let f = bigs(v.get("f"))?;

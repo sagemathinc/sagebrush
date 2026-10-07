@@ -155,8 +155,18 @@ class NumberField_absolute:
     def is_totally_imaginary(self):
         return self.signature()[0] == 0
 
+    def galois_group(self, type=None, algorithm=None, names=None):
+        """The Galois group of the Galois closure (degree <= 12), computed by
+        Sagebrush's engine/galois, as the transitive group nTk."""
+        if getattr(self, "_galois", None) is None:
+            from sage_permgroup import galois_group
+            G = galois_group(self._f)
+            G._text = "Galois group %s (%s) with order %s of %s" % (G.transitive_label(), G.name(), G._order_str, _repr_poly(self._f, self._var))
+            self._galois = G
+        return self._galois
+
     def is_galois(self):
-        raise NotImplementedError("is_galois is not implemented yet")
+        return int(self.galois_group()._order_str) == self._n
 
     def integral_basis(self):
         d = self._nfdata()
