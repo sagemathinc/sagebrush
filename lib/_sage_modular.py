@@ -753,11 +753,100 @@ class EllipticCurve_rational_field:
 
     label = cremona_label
 
+    # ---- local and global arithmetic (lib/_sage_ec.py)
+    def _ld(self):
+        if getattr(self, "_local", None) is None:
+            import _sage_ec as _ec
+            self._local = _ec.local_data(self.minimal_model()._a if not self._is_minimal() else self._a)
+        return self._local
+
+    def _is_minimal(self):
+        if getattr(self, "_minimal", None) is None:
+            import _sage_ec as _ec
+            self._minimal = _ec.minimal_model(self._a) == self._a
+        return self._minimal
+
+    def minimal_model(self):
+        """A global minimal model (reduced: a1, a3 in {0, 1}, a2 in {-1, 0, 1})."""
+        import _sage_ec as _ec
+        m = _ec.minimal_model(self._a)
+        return self if m == self._a else EllipticCurve_rational_field(m)
+
+    global_minimal_model = minimal_model
+
+    def is_minimal(self):
+        return self._is_minimal()
+
     def conductor(self):
+        """The conductor, by Tate's algorithm at the primes dividing the discriminant."""
         lab = self._cremona_entry()
-        if lab is None:
-            raise NotImplementedError("the conductor is known for Cremona's curves of conductor < 1000 (Tate's algorithm is not implemented yet)")
-        return int(_re.match(r"\d+", lab).group(0))
+        if lab is not None:
+            return int(_re.match(r"\d+", lab).group(0))
+        N = 1
+        for p, (kod, f, c) in self._ld().items():
+            N *= p ** f
+        return N
+
+    def bad_primes(self):
+        return sorted(p for p, (kod, f, c) in self._ld().items() if f > 0)
+
+    def kodaira_symbol(self, p):
+        """The Kodaira symbol of the reduction at p ('I0', 'I5', 'I2*', 'IV*', ...)."""
+        return self._ld().get(int(p), ("I0", 0, 1))[0]
+
+    def tamagawa_number(self, p):
+        return self._ld().get(int(p), ("I0", 0, 1))[2]
+
+    def tamagawa_numbers(self):
+        return [self.tamagawa_number(p) for p in self.bad_primes()]
+
+    def tamagawa_product(self):
+        r = 1
+        for c in self.tamagawa_numbers():
+            r *= c
+        return r
+
+    def minimal_discriminant(self):
+        return self.minimal_model().discriminant()
+
+    def real_components(self):
+        return 2 if self.discriminant() > 0 else 1
+
+    def period_lattice(self):
+        return _PeriodLattice(self)
+
+    def _ldata(self):
+        if getattr(self, "_lseries_data", None) is None:
+            import _sage_ec as _ec
+            N = self.conductor()
+            self._lseries_data = _ec._LData(self.minimal_model().anlist(_ec.terms_needed(N)), N)
+        return self._lseries_data
+
+    def root_number(self):
+        """The global root number w (the sign of the functional equation), +1 or -1."""
+        import _sage_ec as _ec
+        return _ec.root_number(self._ldata())
+
+    def analytic_rank(self):
+        """The analytic rank, when it is 0 or 1 (decided numerically: L(E,1)
+        or L'(E,1) clearly nonzero); higher ranks are not implemented."""
+        import _sage_ec as _ec
+        ld = self._ldata()
+        w = _ec.root_number(ld)
+        if w == 1:
+            v = _ec.L1(ld, w)
+            if abs(v) > 1e-6:
+                return 0
+        else:
+            if abs(_ec.L1_derivative(ld)) > 1e-6:
+                return 1
+        raise NotImplementedError("analytic rank at least 2: not implemented yet")
+
+    def lseries(self):
+        return _LSeries(self)
+
+    def sha(self):
+        return _Sha(self)
 
     def rank(self):
         lab = self._cremona_entry()
@@ -766,10 +855,11 @@ class EllipticCurve_rational_field:
         return _cremona()[0][lab][1]
 
     def torsion_order(self):
-        lab = self._cremona_entry()
-        if lab is None:
-            raise NotImplementedError("the torsion order is known for Cremona's curves of conductor < 1000")
-        return _cremona()[0][lab][2]
+        """#E(Q)_tors (bounded by #E(F_p), then found by Nagell-Lutz)."""
+        if getattr(self, "_tors", None) is None:
+            import _sage_ec as _ec
+            self._tors = _ec.torsion_order(self._a, _ap.aplist(self._a, 200))
+        return self._tors
 
     def _ap_bad(self, p):
         a1, a2, a3, a4, a6 = self._a
@@ -857,6 +947,80 @@ class EllipticCurve_rational_field:
         lhs = "y^2" + term(a1, "x*y") + term(a3, "y")
         rhs = _poly_repr([a6, a4, a2, 1], "x")
         return "Elliptic Curve defined by %s = %s over Rational Field" % (lhs, rhs)
+
+
+class _PeriodLattice:
+    def __init__(self, E):
+        self._E = E
+
+    def omega(self, prec=None):
+        """The real period of a global minimal model times the number of
+        components of E(R) (Cremona's Omega in the BSD formula)."""
+        import _sage_ec as _ec
+        from sage_all import RR
+        return RR(_ec.real_period(self._E.minimal_model()._a))
+
+    def __repr__(self):
+        return "Period lattice associated to %r" % (self._E,)
+
+
+class _LSeries:
+    def __init__(self, E):
+        self._E = E
+
+    def __repr__(self):
+        return "Complex L-series of the %r" % (self._E,)
+
+    def __call__(self, s):
+        """L(E, s), at s = 1 only for now."""
+        import _sage_ec as _ec
+        from sage_all import RR
+        if s != 1:
+            raise NotImplementedError("L(E, s) is implemented at s = 1 only")
+        ld = self._E._ldata()
+        return RR(_ec.L1(ld, _ec.root_number(ld)))
+
+    def L_ratio(self):
+        """L(E,1)/Omega_E as an exact rational: computed to about 15 digits
+        and recognized with denominator dividing 2 #E(Q)_tors^2 (Manin-Drinfeld,
+        for an optimal curve with Manin constant 1 the denominator divides
+        2 #E(Q)_tors)."""
+        import _sage_ec as _ec
+        from sage_all import QQ
+        E = self._E
+        ld = E._ldata()
+        w = _ec.root_number(ld)
+        if w == -1:
+            return QQ(0)
+        T = E.torsion_order()
+        D = 2 * T * T
+        x = _ec.L1(ld, w) / _ec.real_period(E.minimal_model()._a)
+        q = _ec.recognize(x, [d for d in range(1, D + 1) if D % d == 0])
+        if q is None:
+            raise ArithmeticError("L(E,1)/Omega = %r is not a rational with denominator dividing %d" % (x, D))
+        return QQ(q.numerator, q.denominator)
+
+
+class _Sha:
+    def __init__(self, E):
+        self._E = E
+
+    def __repr__(self):
+        return "Tate-Shafarevich group for the %r" % (self._E,)
+
+    def an(self):
+        """The analytic order of Sha, from the Birch and Swinnerton-Dyer
+        formula: exact in analytic rank 0 (L(E,1)/Omega via L_ratio)."""
+        from sage_all import QQ, Integer
+        E = self._E
+        r = E.analytic_rank()
+        if r != 0:
+            raise NotImplementedError("Sha.an() needs the regulator in rank %d: not implemented yet" % r)
+        from fractions import Fraction
+        T = E.torsion_order()
+        q = E.lseries().L_ratio()
+        s = Fraction(int(q.numerator()), int(q.denominator())) * T * T / E.tamagawa_product()
+        return Integer(s.numerator) if s.denominator == 1 else QQ(s.numerator, s.denominator)
 
 
 def EllipticCurve(x, y=None):

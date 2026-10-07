@@ -57,3 +57,24 @@ except ValueError as e:
     "the polynomial must be irreducible",
   ]);
 });
+
+test("elliptic curves (lib/_sage_ec.py): Tate's algorithm, torsion, periods, L_ratio, Sha", () => {
+  const out = cli("--sage", "-c", `
+E = EllipticCurve('11a1')
+print(E.conductor(), E.tamagawa_numbers(), E.kodaira_symbol(11), E.torsion_order(), E.root_number(), E.analytic_rank())
+print(E.lseries().L_ratio(), E.sha().an(), round(float(E.period_lattice().omega()), 10))
+F = EllipticCurve([1,1,0,-1154,-15345])
+print(F.conductor(), F.tamagawa_product(), F.torsion_order(), F.lseries().L_ratio(), F.sha().an())
+K = EllipticCurve([0,0,0,-192,512])
+print(K.is_minimal(), K.minimal_model().a_invariants(), K.conductor(), K.kodaira_symbol(2), K.kodaira_symbol(3))
+H = EllipticCurve('37a1')
+print(H.root_number(), H.analytic_rank())
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "11 [5] I5 5 1 0",
+    "1/5 1 1.2692093043",
+    "681 4 4 9/4 9",
+    "False (0, 0, 0, -12, 8) 5184 I0* II",
+    "-1 1",
+  ]);
+});
