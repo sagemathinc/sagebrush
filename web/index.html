@@ -135,6 +135,23 @@
   #files li button, #files .fhead button { padding: 1px 8px; font-size: 12px; }
   #opendlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #opendlg::backdrop { background: rgba(0,0,0,.35); }
+  /* documentation search (docs-index.json, from lib/_pyjs_docsearch.py) */
+  #docsearchbox { position: relative; margin-top: 4px; }
+  #docsearch { font: 13px system-ui, sans-serif; width: 15em; max-width: 40vw; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); color: var(--fg); }
+  #docresults { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(600px, 92vw); max-height: 70vh; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  #docresults[hidden] { display: none; }
+  #docresults li { padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+  #docresults li[aria-selected=true] { background: var(--code); }
+  #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+  #docresults .sum { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #docresults .none { color: var(--muted); font-size: 13px; cursor: default; }
+  .badge { font: 11px system-ui, sans-serif; border: 1px solid var(--accent2); color: var(--accent2); border-radius: 4px; padding: 0 4px; margin-left: 6px; white-space: nowrap; }
+  #docdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(780px, 94vw); }
+  #docdlg::backdrop { background: rgba(0,0,0,.35); }
+  #docdlg .dhead { display: flex; gap: 12px; align-items: baseline; }
+  #docdlg h2 { flex: 1; margin: 0; font: 600 15px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+  #docdlg pre { max-height: 62vh; overflow: auto; white-space: pre-wrap; font: 13px/1.45 ui-monospace, Menlo, monospace; background: var(--code); padding: 10px 12px; border-radius: 6px; }
+  #docdlg .dfoot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
   #opendlg ul { list-style: none; margin: 10px 0; padding: 0; max-height: 60vh; overflow: auto; }
   #opendlg li { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
   #opendlg li .open { flex: 1; text-align: left; display: flex; justify-content: space-between; gap: 12px; }
@@ -182,6 +199,10 @@
   <div class="title">
     <h1><span>Sagebrush</span> · Python in your browser</h1>
     <p class="tag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server. · <a href="/atlas/">The Atlas of modular forms</a></p>
+  </div>
+  <div id="docsearchbox" role="search">
+    <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
+    <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
   </div>
   <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
 </header>
@@ -247,6 +268,11 @@
   <button role="menuitem" data-f="delete" class="danger">Delete notebook</button>
 </div>
 <input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag" hidden>
+<dialog id="docdlg" aria-labelledby="doctitle">
+  <div class="dhead"><h2 id="doctitle"></h2><button id="docclose">Close</button></div>
+  <pre id="docbody"></pre>
+  <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
+</dialog>
 <dialog id="opendlg" aria-labelledby="opentitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
   <ul id="nblist"></ul>
@@ -1665,6 +1691,130 @@ addEventListener("dragover", (e) => { if (e.dataTransfer?.types.includes("Files"
 addEventListener("dragleave", (e) => { if (!e.relatedTarget) filesEl.classList.remove("drop"); });
 addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventDefault(); filesEl.classList.remove("drop"); addFiles([...e.dataTransfer.files]); } });
 
+// ------------------------------------------------------------ documentation search
+// Every public function of Sagebrush's Sage library with its signature and
+// docstring (docs-index.json, made by lib/_pyjs_docsearch.py at build time),
+// ranked as there: every word must match; the name counts most.
+let docIndex = null;
+function loadDocIndex() {
+  docIndex ??= fetch("docs-index.json").then((r) => r.json()).then((d) => d.map((e) => ({
+    ...e, _name: e.name.toLowerCase(), _words: new Set(docWords(e.name)), _sum: e.summary.toLowerCase(), _doc: e.doc.toLowerCase(),
+  })));
+  return docIndex;
+}
+const docWords = (s) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+function docScore(e, words, phrase) {
+  let total = 0;
+  for (const w of words) {
+    if (e._words.has(w)) total += 10;
+    else if (e._name.includes(w)) total += 6;
+    else if (e._sum.includes(w)) total += 3;
+    else if (e._doc.includes(w)) total += 1;
+    else return 0;
+  }
+  const last = e._name.split(".").at(-1);
+  if (phrase === last || phrase.replaceAll(" ", "_") === last) total += 20;
+  if (e.open_problem && words.includes("open")) total += 5;
+  return total;
+}
+async function searchDocs(query, limit = 20) {
+  const words = docWords(query);
+  if (!words.length) return [];
+  const phrase = query.trim().toLowerCase();
+  const idx = await loadDocIndex();
+  return idx.map((e) => [docScore(e, words, phrase), e]).filter(([s]) => s > 0)
+    .sort((a, b) => b[0] - a[0] || a[1].name.length - b[1].name.length || (a[1].name < b[1].name ? -1 : 1))
+    .slice(0, limit).map(([, e]) => e);
+}
+const docInput = $("#docsearch"), docList = $("#docresults"), docDlg = $("#docdlg");
+let docHits = [], docSel = 0, docSeq = 0;
+const docHead = (e) => e.name + (e.signature || (e.kind === "class" ? "" : "()"));
+function showDocList() {
+  docList.innerHTML = docHits.length
+    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e.examples ? `<span class="badge">${e.examples} example${e.examples > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
+    : `<li class="none">No function's documentation has all of these words.</li>`;
+  docList.hidden = false;
+  docInput.setAttribute("aria-expanded", "true");
+  if (docHits.length) docInput.setAttribute("aria-activedescendant", "doc" + docSel);
+  docList.children[docSel]?.scrollIntoView({ block: "nearest" });
+}
+function hideDocList() {
+  docList.hidden = true;
+  docInput.setAttribute("aria-expanded", "false");
+  docInput.removeAttribute("aria-activedescendant");
+}
+docInput.addEventListener("input", async () => {
+  const q = docInput.value, seq = ++docSeq;
+  if (!q.trim()) return hideDocList();
+  const hits = await searchDocs(q);
+  if (seq !== docSeq) return; // a later keystroke won
+  docHits = hits;
+  docSel = 0;
+  showDocList();
+});
+docInput.addEventListener("focus", () => { loadDocIndex(); if (docInput.value.trim() && docHits.length) showDocList(); });
+docInput.addEventListener("blur", () => setTimeout(hideDocList, 150));
+docInput.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!docHits.length) return;
+    docSel = (docSel + (e.key === "ArrowDown" ? 1 : docHits.length - 1)) % docHits.length;
+    showDocList();
+  } else if (e.key === "Enter" && docHits.length && !docList.hidden) {
+    e.preventDefault();
+    openDoc(docHits[docSel]);
+  } else if (e.key === "Escape") {
+    hideDocList();
+    docInput.blur();
+  }
+});
+docList.addEventListener("mousedown", (e) => {
+  const li = e.target.closest("li[role=option]");
+  if (!li) return;
+  e.preventDefault();
+  openDoc(docHits[[...docList.children].indexOf(li)]);
+});
+// "/" anywhere outside an editor goes to the search box
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = document.activeElement;
+  if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  e.preventDefault();
+  docInput.focus();
+  docInput.select();
+});
+let docOpen = null;
+function openDoc(e) {
+  if (!e) return;
+  hideDocList();
+  docOpen = e;
+  $("#doctitle").textContent = docHead(e);
+  $("#docbody").textContent = (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}`;
+  $("#docinsert").hidden = !e.examples;
+  docDlg.showModal();
+}
+// the sage: lines of a docstring (with their ....: continuations), as a cell
+function docExamples(doc) {
+  const out = [];
+  for (const line of doc.split("\n")) {
+    const t = line.trim();
+    if (t.startsWith("sage: ")) out.push(t.slice(6));
+    else if (t.startsWith("....: ")) out.push(t.slice(6));
+    else if (t === "....:") out.push("");
+  }
+  return out.join("\n");
+}
+$("#docclose").onclick = () => docDlg.close();
+$("#docinsert").onclick = () => {
+  const code = docExamples(docOpen?.doc ?? "");
+  docDlg.close();
+  if (!code) return;
+  setMode("sage");
+  const cell = addCell(code, null, true);
+  cell.el.scrollIntoView({ block: "center" });
+  announce(`Inserted the examples of ${docOpen.name} into a new cell`);
+};
+
 // ------------------------------------------------------------ WebMCP
 // Tools for AI agents in the browser (https://developer.chrome.com/docs/ai/webmcp).
 // A cell's output as text: pictures by their descriptions, controls by their values.
@@ -1720,6 +1870,16 @@ async function pictures(box) {
 }
 const result = async (box) => ({ content: [{ type: "text", text: outputText(box) || "(no output)" }, ...(await pictures(box))] });
 const tools = [
+  {
+    name: "search_docs",
+    description: "Search the documentation of Sagebrush's Sage library: every public function and method, its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. Use it to find what Sagebrush can do before writing code; run_python with sage=true then runs it (name? in code shows one function's full documentation).",
+    inputSchema: { type: "object", properties: { query: { type: "string", description: "Words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\"." }, limit: { type: "number", description: "At most this many results (default 10)." } }, required: ["query"] },
+    async execute({ query, limit }) {
+      const hits = await searchDocs(query, limit ?? 10);
+      const text = hits.length ? hits.map((e) => `${docHead(e)}${e.open_problem ? "  [open problem]" : ""}\n  ${e.summary}`).join("\n") : "No function's documentation has all of these words.";
+      return { content: [{ type: "text", text }] };
+    },
+  },
   {
     name: "run_python",
     description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/contour_plot/plot3d/... (sage=true; 3D plots come back as a picture of the default view). Sage mode also has symbolic calculus (diff, integrate, limit, solve, taylor, desolve) on Sagebrush's own engine; animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",

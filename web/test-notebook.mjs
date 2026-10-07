@@ -122,6 +122,18 @@ try {
   await ev("(() => { const ta = document.querySelector('#tabtest'); ta.select(); document.execCommand('insertText', false, 'if 1:\\n'); })()");
   await key("Tab");
   ok((await ev("document.querySelector('#tabtest').value")) === "if 1:\n    ", "Tab after whitespace still indents");
+  // the documentation search box: results, the documentation, its examples in a new cell
+  await ev("(() => { const i = document.querySelector('#docsearch'); i.focus(); i.value = 'two descent'; i.dispatchEvent(new Event('input')); })()");
+  await until("document.querySelectorAll('#docresults li[role=option]').length > 0");
+  const firstHit = await ev("document.querySelector('#docresults li .sig').textContent");
+  ok(firstHit.startsWith("EllipticCurve_rational_field.two_descent("), "searching 'two descent' finds two_descent: " + firstHit.slice(0, 60));
+  await ev("document.querySelector('#docsearch').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))");
+  await until("document.querySelector('#docdlg').open");
+  ok((await ev("document.querySelector('#docbody').textContent")).includes("EXAMPLES::"), "Enter opens the function's documentation");
+  const ncells = await ev("document.querySelectorAll('.cell').length");
+  await ev("document.querySelector('#docinsert').click()");
+  ok((await ev("document.querySelectorAll('.cell').length")) === ncells + 1 && (await ev("[...document.querySelectorAll('.cell textarea')].at(-1).value")).includes("E.two_descent()"), "its examples go into a new cell");
+  await ev("(() => { const t = [...document.querySelectorAll('.cell textarea')].at(-1); t.value = ''; t.dispatchEvent(new Event('input', {bubbles: true})); })()");
   out = await runCode("e.two_descent?");
   ok(out.includes("Signature: e.two_descent(") && out.includes("EXAMPLES::") && out.includes("Type:      method"), "obj? shows the signature and docstring: " + JSON.stringify(out.slice(0, 80)));
   await ev("(() => { const ta = document.querySelector('#tabtest'); ta.select(); document.execCommand('insertText', false, 'pass'); ta.removeAttribute('id'); })()");

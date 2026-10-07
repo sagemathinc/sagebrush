@@ -31,6 +31,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   -q       no banner on the interactive prompt
   --emit   print the JavaScript compiled from file (with --magma: the Python)
   -V       print the version
+  --search QUERY [--json]
+           search the documentation of every function (name, signature,
+           docstring): what Sagebrush can do; obj? in a session shows one
   --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|all]
            register Sagebrush as a Jupyter kernel (no Python needed)
   --uninstall-jupyter-kernel [the same options]
@@ -228,6 +231,8 @@ async function main() {
     await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode);
     return;
   }
+  // sagebrush --search QUERY [--json]: search the documentation (lib/_pyjs_docsearch.py)
+  if (argv[0] === "--search" || argv[0] === "search") argv.splice(0, 1, "-m", "_pyjs_docsearch");
   let emit = false, inspect = false, quiet = false;
   let cmd: string | null = null, mod: string | null = null, file: string | null = null;
   while (argv.length) {
