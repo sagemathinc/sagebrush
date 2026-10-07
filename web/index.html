@@ -1706,11 +1706,12 @@ async function selftest(path) {
       let text = "";
       submit(code, { start() {}, out(t) { text += t; }, display() {}, interact() {}, clear() {}, done() { resolve(text); }, stopped(m) { resolve(text + (m || "")); }, skipped() { resolve(text); } });
     });
+    console.log("interrupt flag shared: " + !!interruptFlag + "; worker SharedArrayBuffer: " + (await new Promise((res) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage([typeof SharedArrayBuffer, self.crossOriginIsolated])"], { type: "text/javascript" }))); w.onmessage = (e) => { res(JSON.stringify(e.data)); w.terminate(); }; setTimeout(() => res("no answer"), 3000); })));
     const looping = exec("keep = 41\nwhile True:\n    pass");
     await new Promise((r) => setTimeout(r, 1000));
     interrupt("\n(restarted)\n");
     const stopped = await looping;
-    check("Stop interrupts a loop", /KeyboardInterrupt/.test(stopped) && !/restarted/.test(stopped), JSON.stringify(stopped.slice(-60)));
+    check("Stop interrupts a loop", /KeyboardInterrupt/.test(stopped) && !/restarted/.test(stopped), JSON.stringify(stopped.slice(-60)) + (interruptFlag ? " (the worker shares its interrupt flag)" : " (no shared interrupt flag from the worker)"));
     check("...and keeps the variables", (await exec("print(keep + 1)")).includes("42"));
     await saveNow();
     const saved = JSON.parse(await TAURI.fs.readTextFile(path));
