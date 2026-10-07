@@ -1031,7 +1031,8 @@ class EllipticCurve_rational_field:
     def rank(self, only_use_mwrank=True, proof=None):
         """The rank of E(Q): from Cremona's table (conductor < 1000), else the
         analytic rank when it is 0 or 1 (equal to the rank by Gross-Zagier and
-        Kolyvagin), else 2-isogeny descent when its bounds meet.  With
+        Kolyvagin), else 2-descent (via 2-isogeny, or general) when its
+        bounds meet.  With
         proof=False, falls back to the numerical analytic rank (assuming the
         Birch and Swinnerton-Dyer rank conjecture) when these do not decide."""
         lab = self._cremona_entry()
@@ -1051,7 +1052,7 @@ class EllipticCurve_rational_field:
             if r >= lo and (hi is None or r <= hi):
                 return r
         bounds = "rank bounds %d <= r <= %d" % (lo, hi) if hi is not None else "no rank bounds"
-        raise NotImplementedError("%s: general 2-descent is not implemented yet (proof=False uses the analytic rank)" % bounds)
+        raise NotImplementedError("%s: 2-descent does not decide (Sha[2] nontrivial, or generators too large); proof=False uses the analytic rank" % bounds)
 
     def two_descent_by_two_isogeny(self, search_bound=60):
         """Descent via 2-isogeny (needs a rational 2-torsion point): (lower, upper)
@@ -1071,7 +1072,31 @@ class EllipticCurve_rational_field:
             return (r, r)
         if self.torsion_order() % 2 == 0:
             return self.two_descent_by_two_isogeny()
-        raise NotImplementedError("general 2-descent (no rational 2-torsion) is not implemented yet")
+        return self._general_two_descent()["rank_bounds"]
+
+    def _general_two_descent(self, max_candidates=1e10):
+        if getattr(self, "_two_descent", None) is None:
+            if self.torsion_order() % 2 == 0:
+                raise NotImplementedError("general 2-descent with rational 2-torsion: use two_descent_by_two_isogeny()")
+            import _sage_ec as _ec
+            self._two_descent = _ec.two_descent(self.minimal_model()._a, max_candidates=max_candidates)
+        return self._two_descent
+
+    def two_descent(self, verbose=False, selmer_only=False, max_candidates=1e10):
+        """General 2-descent (curves without rational 2-torsion), by integral
+        binary quartics (Birch and Swinnerton-Dyer).  Returns True if the
+        rank was determined (the points found fill the 2-Selmer group).
+        The quartic search grows like |Delta|^(1/2): beyond max_candidates
+        (about 1e10 per few seconds) it raises NotImplementedError."""
+        lo, hi = self._general_two_descent(max_candidates)["rank_bounds"]
+        if verbose:
+            print("2-Selmer rank %d; rank bounds %d <= r <= %d" % (self.selmer_rank(), lo, hi))
+        return lo == hi
+
+    def selmer_rank(self):
+        """The F_2-dimension of the 2-Selmer group (here for curves without
+        rational 2-torsion, by general 2-descent)."""
+        return (self._general_two_descent()["selmer"] - 1).bit_length()
 
 
     def torsion_order(self):
