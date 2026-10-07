@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JFM Notebooks, live in your browser · Sagebrush</title>
+<meta name="description" content="Interactive 3D figures from a Journal of Fluid Mechanics notebook, recomputed and rendered entirely in the reader's browser by Sagebrush.">
+<style>
+  :root { color-scheme: light dark; --ink: #1d2330; --muted: #5b6475; --card: #fff; --line: #e3e6ec; --accent: #0b5cad; --bg: #f6f7f9; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e8ebf1; --muted: #a3abba; --card: #1b1f27; --line: #2c323d; --accent: #6fb0ff; --bg: #12151b; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 6px 0 10px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; margin: 34px 0 10px; }
+  .kicker { color: var(--muted); font-size: 14px; text-transform: uppercase; letter-spacing: .08em; }
+  .lead { font-size: 18px; color: var(--muted); max-width: 820px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 22px; margin-top: 26px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .card a.pic { display: block; aspect-ratio: 16 / 9; background: #fff center / cover no-repeat; border-bottom: 1px solid var(--line); }
+  .card .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .card h3 { margin: 0; font-size: 18px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 6px; }
+  .btn { display: inline-block; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; font-size: 14px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn:hover { filter: brightness(1.08); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px 34px; }
+  ul { padding-left: 20px; margin: 6px 0; }
+  li { margin: 4px 0; }
+  kbd { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--card); }
+  code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .note { font-size: 14px; color: var(--muted); }
+  footer { margin-top: 40px; font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <div class="kicker">Journal of Fluid Mechanics · JFM Notebooks · Sagebrush</div>
+  <h1>Interactive JFM figures that run entirely in the reader's browser</h1>
+  <p class="lead">These are the vortex structures from a published JFM Notebook. The notebook itself runs here unmodified: <code>k3d</code>, <code>scipy.io.loadmat</code> and <code>numpy</code>. It runs on Sagebrush, a Python and Sage environment compiled to WebAssembly. Nothing is computed on a server. The page loads the published data, builds a mesh of half a million triangles, and you can turn it, zoom into it, and fly through it.</p>
+
+  <div class="cards">
+    <div class="card">
+      <a class="pic" href="U-vortices.html" style="background-image:url(U.jpg)" aria-label="Explore the U vortices in 3D"></a>
+      <div class="body">
+        <h3>U vortices</h3>
+        <p>495,026 triangles colored by the published attribute (color range ±50, the seismic color map).</p>
+        <div class="btns">
+          <a class="btn primary" href="U-vortices.html">Explore in 3D</a>
+          <a class="btn" href="/?open=/demo/jfm/U-vortices-plot.ipynb&amp;file=/demo/jfm/U-vortices_data.mat&amp;run">Run the notebook</a>
+          <a class="btn" href="U-vortices_data.mat" download>Data (6.5 MB)</a>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <a class="pic" href="D-vortices.html" style="background-image:url(D.jpg)" aria-label="Explore the D vortices in 3D"></a>
+      <div class="body">
+        <h3>D vortices</h3>
+        <p>708,446 triangles, color range ±100. This is the larger of the two scenes.</p>
+        <div class="btns">
+          <a class="btn primary" href="D-vortices.html">Explore in 3D</a>
+          <a class="btn" href="/?open=/demo/jfm/D-vortices-plot.ipynb&amp;file=/demo/jfm/D-vortices-data.mat&amp;run">Run the notebook</a>
+          <a class="btn" href="D-vortices-data.mat" download>Data (9.4 MB)</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Moving around</h2>
+  <div class="grid2">
+    <ul>
+      <li><b>Turn:</b> drag. A flick keeps it spinning.</li>
+      <li><b>Pan:</b> right-drag or shift-drag, or drag with two fingers.</li>
+      <li><b>Zoom toward the cursor:</b> scroll, or pinch.</li>
+      <li><b>Examine a detail:</b> double-click a vortex to glide in and orbit it. Double-click empty space to go home.</li>
+    </ul>
+    <ul>
+      <li><b>Fly through the flow:</b> press <kbd>F</kbd> or the <i>Fly</i> button. Click to look around with the mouse, and press <kbd>Esc</kbd> to release it.</li>
+      <li><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> move, <kbd>Space</kbd>/<kbd>Q</kbd> rise and sink, <kbd>Shift</kbd> is faster, and the wheel sets the speed. A gamepad works too.</li>
+      <li><b>Turntable:</b> <kbd>T</kbd>. <b>Full screen:</b> the toolbar at the bottom left.</li>
+    </ul>
+  </div>
+
+  <h2>Why this matters for publishing</h2>
+  <ul>
+    <li><b>The reader's own device does the work.</b> No kernel and no server process is started for each reader, so a figure costs the publisher a static file and nothing more. It loads quickly anywhere, and a downloaded 3D view works offline.</li>
+    <li><b>The published notebook is the figure.</b> “Run the notebook” opens the article's own <code>.ipynb</code> with its data and executes it in the page. In a few seconds the reader can change the color range, the colormap or the threshold and rerun it.</li>
+    <li><b>Archival and open.</b> The 3D view is one self-contained HTML file with the data inside. It has a static image and a text description for readers and tools that do not run scripts. Sagebrush is open source (MIT or Apache-2.0).</li>
+    <li><b>It scales to a whole collection.</b> The same runtime can serve every notebook in the series. We plan to run all of them.</li>
+  </ul>
+
+  <footer>
+    The notebooks and data are as published with the article (the D notebook mirrors the U one, with its own data file and color range).
+    Built with <a href="https://github.com/sagemathinc/sagebrush">Sagebrush</a> by <a href="https://sagemath.com">SageMath, Inc.</a>, the makers of <a href="https://cocalc.com">CoCalc</a>.
+    <span class="note">Try other mathematics on the <a href="/">Sagebrush notebook</a>.</span>
+  </footer>
+</main>
+</body>
+</html>
