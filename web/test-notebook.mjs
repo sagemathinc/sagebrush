@@ -108,6 +108,21 @@ try {
   // interactive WebGL view over the SVG, which stays when WebGL is missing
   out = await runCode("print(solve(x^2 == 2, x), diff(x^3, x), limit(sin(x)/x, x=0))");
   ok(out.includes("x == -sqrt(2)") && out.includes("3*x^2 1"), "Sage mode: solve, diff, limit: " + JSON.stringify(out.trim()));
+  // Tab completion in a code cell: `e.ra<Tab>` completes the common prefix and lists the rest
+  await runCode("e = EllipticCurve([1..5]); e");
+  const key = (k) => ev(`(() => { const ta = document.querySelector('#tabtest'); ta.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true })); })()`);
+  await ev("(() => { document.querySelector('#add').click(); const ta = [...document.querySelectorAll('.cell textarea')].at(-1); ta.id = 'tabtest'; ta.focus(); document.execCommand('insertText', false, 'r = e.ra'); })()");
+  await key("Tab");
+  await until("!document.querySelector('#completer').hidden");
+  const listed = await ev("[...document.querySelectorAll('#completer li')].map(li => li.textContent).join(' ')");
+  ok((await ev("document.querySelector('#tabtest').value")) === "r = e.rank" && /\brank_bounds\b/.test(listed), "Tab completes e.ra to e.rank and lists " + listed);
+  await key("ArrowDown");
+  await key("Enter");
+  ok((await ev("document.querySelector('#tabtest').value")) === "r = e." + listed.split(" ")[1] && (await ev("document.querySelector('#completer').hidden")), "↓ Enter accepts a listed completion");
+  await ev("(() => { const ta = document.querySelector('#tabtest'); ta.select(); document.execCommand('insertText', false, 'if 1:\\n'); })()");
+  await key("Tab");
+  ok((await ev("document.querySelector('#tabtest').value")) === "if 1:\n    ", "Tab after whitespace still indents");
+  await ev("(() => { const ta = document.querySelector('#tabtest'); ta.select(); document.execCommand('insertText', false, 'pass'); ta.removeAttribute('id'); })()");
   out = await runCode("show(integrate_steps(x*cos(x^2), x))");
   await sleep(1500);
   ok(await ev("!!document.querySelector('.latex-out .katex') && !document.querySelector('.latex-out .katex-error')"),

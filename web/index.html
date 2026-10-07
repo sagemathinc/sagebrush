@@ -149,6 +149,11 @@
   #cellmenu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; }
   #cellmenu button:hover, #cellmenu button:focus { background: var(--code); outline: none; }
   #cellmenu button kbd { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+  /* Tab completion in code cells */
+  #completer { position: absolute; z-index: 15; max-height: 16em; min-width: 12em; overflow-y: auto; margin: 0; padding: 3px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.18); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  #completer[hidden] { display: none; }
+  #completer li { padding: 1px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  #completer li[aria-selected=true] { background: var(--accent); color: var(--on-accent); }
   #cellmenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
   #cellmenu .danger { color: var(--err); }
   /* the console, docked at the bottom */
@@ -204,7 +209,7 @@
   <div class="about">
     <b>+ Text</b> adds a Markdown cell (headings, lists, tables, links, <code>$math$</code>): <b>Shift+Enter</b> shows it, double-click edits it.
     <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place; <b>Alt+↑/↓</b> moves it; the <b>⋯</b> menu inserts, moves and deletes cells.
-    In a cell, Tab indents: press <b>Esc</b> first to Tab out of it. Variables persist between cells and are shared with the <b>Console</b>.
+    In a cell, <b>Tab</b> after a name completes it (<code>e.</code><b>Tab</b> lists what <code>e</code> can do; ↑/↓ and Enter choose), and otherwise indents: press <b>Esc</b> first to Tab out of the cell. Variables persist between cells and are shared with the <b>Console</b>.
     In <b>Sage</b> mode <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational and
     <code>factor</code>, <code>is_prime</code>, <code>next_prime</code>, <code>divisors</code>, <code>euler_phi</code>, <code>crt</code> &hellip; are built in.
     <code>numpy</code> (validated against NumPy itself: same printed output, same seeded random numbers), <code>matplotlib.pyplot</code>, Sage-style <code>plot</code>, <code>@interact</code> and <code>animate</code> are built in.
@@ -246,6 +251,7 @@
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
   <ul id="nblist"></ul>
 </dialog>
+<ul id="completer" role="listbox" aria-label="Completions" hidden></ul>
 <div id="cellmenu" role="menu" aria-label="Cell actions" hidden>
   <button role="menuitem" data-m="above">Insert cell above</button>
   <button role="menuitem" data-m="below">Insert cell below</button>
@@ -892,6 +898,82 @@ function autosize(ta) {
   ta.style.height = ta.scrollHeight + "px";
 }
 
+// ------------------------------------------------------------ Tab completion
+// Tab after a name or `obj.` asks the worker (src/interactive.ts complete());
+// one match or a longer common prefix is inserted, several are listed below
+// the caret and filtered as you type: ↑/↓ choose, Tab/Enter accept, Esc closes.
+const completer = $("#completer");
+let comp = null; // { cell, start, matches, sel }
+function closeCompleter() {
+  comp = null;
+  completer.hidden = true;
+  completer.textContent = "";
+}
+function caretBox(ta) {
+  // a hidden copy of the editor text up to the caret, ending in a marker
+  const pre = document.createElement("pre");
+  pre.style.visibility = "hidden";
+  pre.textContent = ta.value.slice(0, ta.selectionStart);
+  const mark = document.createElement("span");
+  mark.textContent = "​";
+  pre.appendChild(mark);
+  ta.parentElement.appendChild(pre);
+  const r = mark.getBoundingClientRect();
+  pre.remove();
+  return r;
+}
+function showCompleter() {
+  const { cell, matches, sel, start } = comp;
+  const word = cell.ta.value.slice(start, cell.ta.selectionStart);
+  const dot = word.lastIndexOf(".") + 1; // list attribute names without `obj.`
+  completer.innerHTML = matches.slice(0, 500).map((m, i) => `<li role="option" id="comp${i}" aria-selected="${i === sel}">${esc(m.slice(dot))}</li>`).join("");
+  completer.hidden = false;
+  const r = caretBox(cell.ta);
+  completer.style.left = Math.max(0, Math.min(r.left + scrollX, scrollX + document.documentElement.clientWidth - completer.offsetWidth - 4)) + "px";
+  completer.style.top = r.bottom + scrollY + 2 + "px";
+  cell.ta.setAttribute("aria-activedescendant", "comp" + sel);
+  completer.children[sel]?.scrollIntoView({ block: "nearest" });
+}
+function acceptCompletion(i = comp.sel) {
+  const { cell, start, matches } = comp;
+  const word = cell.ta.value.slice(start, cell.ta.selectionStart);
+  closeCompleter();
+  if (matches[i]?.startsWith(word)) document.execCommand("insertText", false, matches[i].slice(word.length));
+}
+// Re-filter the list as the word under the caret changes.
+function refilter(cell) {
+  if (!comp || comp.cell !== cell) return;
+  const word = cell.ta.value.slice(comp.start, cell.ta.selectionStart);
+  if (cell.ta.selectionStart < comp.start || !/^[\w.]*$/.test(word) || word.lastIndexOf(".") !== comp.dot) return closeCompleter();
+  comp.matches = comp.all.filter((m) => m.startsWith(word));
+  if (!comp.matches.length) return closeCompleter();
+  comp.sel = Math.min(comp.sel, comp.matches.length - 1);
+  showCompleter();
+}
+async function tabComplete(cell) {
+  const ta = cell.ta, pos = ta.selectionStart, value = ta.value;
+  const before = value.slice(value.lastIndexOf("\n", pos - 1) + 1, pos);
+  if (ta.selectionEnd !== pos || !/[\w.]$/.test(before)) return false; // indent instead
+  const m = await ask({ complete: before }, {});
+  if (ta.value !== value || ta.selectionStart !== pos || document.activeElement !== ta) return true; // stale
+  const matches = m.matches ?? [], prefix = m.prefix ?? "";
+  if (!matches.length) return true;
+  let common = matches[0];
+  for (const x of matches) while (!x.startsWith(common)) common = common.slice(0, -1);
+  if (common.length > prefix.length) document.execCommand("insertText", false, common.slice(prefix.length));
+  if (matches.length > 1) {
+    comp = { cell, start: pos - prefix.length, all: matches, matches, sel: 0, dot: prefix.lastIndexOf(".") };
+    showCompleter();
+  }
+  return true;
+}
+completer.addEventListener("mousedown", (e) => {
+  const li = e.target.closest("li");
+  if (!li || !comp) return;
+  e.preventDefault(); // keep the focus in the editor
+  acceptCompletion([...completer.children].indexOf(li));
+});
+
 function addCell(code = "", where = null, focus = false, type = "code") {
   const el = document.createElement("div");
   el.className = "cell";
@@ -906,9 +988,27 @@ function addCell(code = "", where = null, focus = false, type = "code") {
   });
   cell.ta.value = code;
   let tabOut = false; // after Esc, Tab leaves the cell (no keyboard trap)
-  cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); });
-  cell.ta.addEventListener("blur", () => (tabOut = false));
+  cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); refilter(cell); });
+  cell.ta.addEventListener("blur", () => { tabOut = false; if (comp?.cell === cell) closeCompleter(); });
+  cell.ta.addEventListener("click", () => { if (comp?.cell === cell) closeCompleter(); });
   cell.ta.addEventListener("keydown", (e) => {
+    if (comp?.cell === cell) {
+      const n = comp.matches.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        comp.sel = (comp.sel + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+        return showCompleter();
+      }
+      if ((e.key === "Tab" || e.key === "Enter") && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        return acceptCompletion();
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        return closeCompleter();
+      }
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown") closeCompleter();
+    }
     if (e.key === "Enter" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       run(cell);
@@ -920,7 +1020,8 @@ function addCell(code = "", where = null, focus = false, type = "code") {
       tabOut = true;
     } else if (e.key === "Tab" && !e.shiftKey && !tabOut) {
       e.preventDefault();
-      document.execCommand("insertText", false, "    "); // keeps undo working
+      if (cell.type === "code" && /[\w.]$/.test(cell.ta.value.slice(0, cell.ta.selectionStart)) && cell.ta.selectionEnd === cell.ta.selectionStart) tabComplete(cell);
+      else document.execCommand("insertText", false, "    "); // keeps undo working
     } else if (e.key !== "Tab") {
       tabOut = false;
     }
