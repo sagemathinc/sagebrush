@@ -20,6 +20,7 @@ use crate::lattice::Lattice;
 use crate::named;
 use crate::perm::Perm;
 use crate::primitive;
+use crate::embed::tuple_conjugator;
 use std::collections::HashMap;
 
 /// The wreath product P wr A on a*b points: block i is {i b, ..., i b + b - 1}.
@@ -43,34 +44,6 @@ pub fn wreath(p: &Group, a: &Group) -> Group {
 /// The smallest size of a nontrivial block (n if the group is primitive).
 pub fn min_block_size(g: &Group) -> usize {
     g.blocks_containing(0).first().map_or(g.n, |b| b.len())
-}
-
-/// An x with g^x = h for each pair, x(0) = y0, if any (transitive <g_i>).
-fn tuple_conjugator(n: usize, gs: &[Perm], hs: &[Perm], y0: u32) -> Option<Perm> {
-    let mut x = vec![u32::MAX; n];
-    let mut used = vec![false; n];
-    x[0] = y0;
-    used[y0 as usize] = true;
-    let mut queue = vec![0u32];
-    while let Some(p) = queue.pop() {
-        for (g, h) in gs.iter().zip(hs) {
-            let (gp, hx) = (g.image(p), h.image(x[p as usize]));
-            if x[gp as usize] == u32::MAX {
-                if used[hx as usize] {
-                    return None;
-                }
-                x[gp as usize] = hx;
-                used[hx as usize] = true;
-                queue.push(gp);
-            } else if x[gp as usize] != hx {
-                return None;
-            }
-        }
-    }
-    if x.iter().any(|&v| v == u32::MAX) {
-        return None;
-    }
-    Some(Perm(x))
 }
 
 /// A group's elements by cycle type, for conjugacy tests against it.

@@ -1,3 +1,6 @@
 # The 1 transitive groups of degree 2 up to conjugacy, computed by sagebrush-group
-# (src/transitive.rs, from scratch); per line: order ; generators as image lists of 1..2
-2 ; 2,1
+# (src/transitive.rs, from scratch).  Line k is the group nTk: the standard numbering
+# and the names (last field) were matched against GAP's transitive groups library,
+# used as an oracle (examples/label_tables.rs).  Per line:
+# order ; generators as image lists of 1..2 ; name
+2 ; 2,1 ; S2

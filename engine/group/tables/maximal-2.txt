@@ -1,0 +1,5 @@
+# Maximal transitive subgroups of the transitive groups of degree 2 (tables/transitive-2.txt),
+# up to conjugacy in the group (for Alt(n) each class may be listed twice).  Per line:
+# k ; j:y ...  meaning (nTj)^y = y^-1 (nTj) y <= nTk, y as images of 1..n
+# (computed by examples/write_lattice.rs, src/embed.rs)
+1 ; 
