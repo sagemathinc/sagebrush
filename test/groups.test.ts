@@ -110,3 +110,18 @@ print(H.two_descent_by_two_isogeny(), H.rank())
 `);
   assert.deepEqual(out.trim().split("\n"), ["(0, 2) 0 4", "(1, 1) 1 1", "(2, 2) 2"]);
 });
+
+test("elliptic curves: analytic rank (numerical beyond 1; proof=True only for 0 and 1)", () => {
+  const out = cli("--sage", "-c", `
+for ai in [[0,0,1,-1,0], [0,1,1,-2,0], [0,0,1,-7,6]]:
+    E = EllipticCurve(ai)
+    r, lc = E.analytic_rank(leading_coefficient=True)
+    try:
+        p = E.analytic_rank(proof=True)
+    except NotImplementedError:
+        p = "-"
+    print(r, round(float(lc), 5), p, E.rank(proof=False))
+`);
+  // L'(37a,1), L''(389a,1), L'''(5077a,1), as Sage's analytic_rank(leading_coefficient=True)
+  assert.deepEqual(out.trim().split("\n"), ["1 0.306 1 1", "2 1.51863 - 2", "3 10.3911 - 3"]);
+});

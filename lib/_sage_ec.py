@@ -560,6 +560,76 @@ def L1_derivative(ld):
     return 2 * s
 
 
+# Higher derivatives (Buhler, Gross and Zagier; Cremona, Algorithms 2.13):
+# when L(E,s) vanishes to order >= r at s = 1 (r of the parity of the root
+# number), L^(r)(E,1) = 2 r! sum a_n / n G_r(2 pi n / sqrt N), with
+# G_r(x) = 1/(r-1)! int_1^oo e^(-x t) (log t)^(r-1) dt / t  (G_0(x) = e^(-x)).
+_ZETA = (0.0, 0.0, 1.6449340668482264, 1.2020569031595943, 1.0823232337111382,
+         1.0369277551433699, 1.0173430619844491, 1.0083492773819228, 1.0040773561979443,
+         1.0020083928260822, 1.0009945751278181, 1.0004941886041195, 1.0002460865533080)
+
+
+def _gamma_taylor(r):
+    """Taylor coefficients of Gamma(1 + z) up to z^r."""
+    lg = [0.0, -0.5772156649015329] + [(-1) ** k * _ZETA[k] / k for k in range(2, r + 1)]
+    e = [1.0] + [0.0] * r
+    for n in range(1, r + 1):
+        e[n] = sum(k * lg[k] * e[n - k] for k in range(1, n + 1)) / n
+    return e
+
+
+def _G(r, x, gt):
+    if r == 0:
+        return _m.exp(-x)
+    if x < 4:
+        # P_r(-log x) + sum_n (-1)^(n-r) x^n / (n^r n!), P_r(t) the z^r
+        # coefficient of exp(t z) Gamma(1 + z)
+        t = -_m.log(x)
+        s = sum(t ** (r - n) / _m.factorial(r - n) * gt[n] for n in range(r + 1))
+        term, n = 1.0, 1
+        while True:
+            term *= x / n
+            add = (-1) ** (n - r) * term / n ** r
+            s += add
+            if abs(add) < 1e-18 and n > x:
+                return s
+            n += 1
+    # e^(-x)/(r-1)! int_0^oo e^(-s) log(1 + s/x)^(r-1) / (x + s) ds, Simpson on [0, 40]
+    m, h = 160, 40 / 160
+    acc = 0.0
+    for i in range(m + 1):
+        s = i * h
+        v = _m.exp(-s) * _m.log1p(s / x) ** (r - 1) / (x + s)
+        acc += v * (1 if i in (0, m) else (4 if i % 2 else 2))
+    return _m.exp(-x) * acc * h / 3 / _m.factorial(r - 1)
+
+
+def L1_deriv(ld, r):
+    """L^(r)(E,1), valid when L vanishes to order >= r at 1 (and r has the
+    parity of the root number: otherwise L^(r)(E,1) is not given by this sum)."""
+    q = 2 * _m.pi / _m.sqrt(ld.N)
+    gt = _gamma_taylor(r)
+    s = 0.0
+    for n in range(1, len(ld.an)):
+        a = ld.an[n]
+        if a:
+            x = q * n
+            if x > 60:
+                break
+            s += a / n * _G(r, x, gt)
+    return 2 * _m.factorial(r) * s
+
+
+def analytic_rank_numerical(ld, w, max_rank=10, eps=1e-6):
+    """(r, L^(r)(E,1)): the first r of the parity of w with |L^(r)(E,1)| > eps.
+    Numerical: L^(k)(E,1) for k < r are only known to be small."""
+    for r in range(0 if w == 1 else 1, max_rank + 1, 2):
+        v = L1_deriv(ld, r)
+        if abs(v) > eps:
+            return r, v
+    raise ArithmeticError("L(E,s) seems to vanish to order > %d at s = 1" % max_rank)
+
+
 def recognize(x, dens, tol=1e-8):
     """The fraction m/d with d dividing an element of dens closest to x, if within tol."""
     best = None
