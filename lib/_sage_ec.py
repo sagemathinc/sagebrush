@@ -968,3 +968,237 @@ def search_generator(a, aps, bad, H=8.0):
         if best is None or h < best[1] - 1e-9:
             best = (P, h)
     return best
+
+
+# ------------------------------------------------------------------ 2-isogeny descent
+
+def _poly_eval(g, x):
+    r = 0
+    for c in reversed(g):
+        r = r * x + c
+    return r
+
+
+def _poly_deriv(g):
+    return [i * g[i] for i in range(1, len(g))]
+
+
+def _is_square_qp(c, p):
+    """Is the nonzero rational c a square in Q_p?"""
+    v = _vq(c, p)
+    if v % 2:
+        return False
+    u = c / _F(p) ** v
+    num, den = u.numerator, u.denominator
+    if p == 2:
+        return (num * den) % 8 == 1
+    return _legendre(num * den, p) == 1
+
+
+class _Budget(Exception):
+    pass
+
+
+def _compose_lin(g, t0, p):
+    """The coefficients of g(t0 + p s) (integers, constant term first)."""
+    out = [0] * len(g)
+    # Horner: g(x) = (((g_n x + g_{n-1}) x + ...) with x = t0 + p s
+    for c in reversed(g):
+        # out = out * (t0 + p s) + c
+        new = [0] * len(g)
+        for i, oc in enumerate(out):
+            if oc:
+                new[i] += oc * t0
+                if i + 1 < len(new):
+                    new[i + 1] += oc * p
+        new[0] += c
+        out = new
+    return out
+
+
+def _strip_square_content(g, p):
+    c = min(_v(x, p) for x in g if x)
+    k = (c // 2) * 2
+    return [x // p ** k for x in g]
+
+
+def _zp_poly_soluble(g, p, budget, depth=0):
+    """Is y^2 = g(s) soluble with s in Z_p (g integral, not identically 0)?"""
+    budget[0] -= 1
+    if budget[0] < 0 or depth > 80:
+        raise _Budget()
+    g = _strip_square_content(g, p)
+    need = 3 if p == 2 else 1
+    dg = _poly_deriv(g)
+    for t0 in range(p):
+        val = _poly_eval(g, t0)
+        if val == 0:
+            return True
+        v = _v(val, p)
+        h = _compose_lin(g, t0, p)  # h(s) = g(t0 + p s), h(0) = val
+        # stable: the non-constant coefficients of h are divisible by p^(v + need)
+        if all(c == 0 or _v(c, p) >= v + need for c in h[1:]):
+            if _is_square_qp(_F(val), p):
+                return True
+            continue
+        d = _poly_eval(dg, t0)
+        if d != 0 and v > 2 * _v(d, p):
+            return True  # Hensel: a root of g in t0 + p Z_p
+        if _zp_poly_soluble(h, p, budget, depth + 1):
+            return True
+    return False
+
+
+def quartic_locally_soluble(g, p, budget=200000):
+    """Is y^2 = g(x) (g a quartic with integer coefficients, constant term
+    first) soluble in Q_p, counting the points at infinity?  Returns None if
+    undecided within the budget."""
+    b = [budget]
+    try:
+        if _zp_poly_soluble(list(g), p, b):
+            return True
+        # x = 1/(p s): y'^2 = (p s)^4 g(1/(p s)) = reversed quartic at p s
+        gr = list(reversed(g))
+        return _zp_poly_soluble(_compose_lin(gr, 0, p), p, b)
+    except _Budget:
+        return None
+
+
+def quartic_real_soluble(g):
+    """Is g(x) > 0 for some real x (or a root), for a quartic g?"""
+    if g[4] > 0 or g[0] > 0:
+        return True
+    # sample generously between the real critical points
+    import cmath
+    pts = []
+    # derivative is a cubic: use its real roots
+    d = _poly_deriv(g)
+    for z in _cubic_roots(float(d[3]), float(d[2]), float(d[1]), float(d[0])) if d[3] else []:
+        if abs(z.imag) < 1e-9 * (1 + abs(z)):
+            pts.append(z.real)
+    return any(_poly_eval([float(c) for c in g], t) >= 0 for t in pts)
+
+
+def _squarefree_divisors(n, primes):
+    """The squarefree divisors (with both signs) of n built from the primes dividing it."""
+    ps = [p for p in primes if n % p == 0]
+    out = [1]
+    for p in ps:
+        out = out + [d * p for d in out]
+    return out + [-d for d in out]
+
+
+def _two_torsion_model(a):
+    """(A, B, (r, s, t, u-data)) with E isomorphic to y^2 = x^3 + A x^2 + B x
+    (integers) via a rational 2-torsion point of a, or None."""
+    a1, a2, a3, a4, a6 = a
+    b2, b4, b6, b8 = _b(a)
+    # 2-torsion: roots of 4x^3 + b2 x^2 + 2 b4 x + b6; scale x = X/4 for integer roots
+    # X^3 + b2 X^2 + 8 b4 X + 16 b6 = 0 with X = 4x
+    from sagebrush._engine import call
+    fac = call("factor", f=[str(16 * b6), str(8 * b4), str(b2), "1"])["factors"]
+    roots = [_F(-int(g[0]), 4) for g, e in fac if len(g) == 2 and int(g[1]) == 1]
+    if not roots:
+        return None
+    x0 = roots[0]
+    # (2y + a1 x + a3)^2 = 4x^3 + b2 x^2 + 2 b4 x + b6 = 4 (x - x0)(x^2 + c x + e)
+    # with Y = 4(2y + a1 x + a3)... use X = 4(x - x0): Y^2 = X^3 + A X^2 + B X with Y = 4(2y + a1 x + a3)
+    # 4 x^3 + b2 x^2 + 2 b4 x + b6 at x = x0 + X/4, times 16
+    c3, c2, c1 = _F(1, 1), (12 * x0 + b2) / 4, (12 * x0 * x0 + 2 * b2 * x0 + 2 * b4)
+    A, B = c2 * 4 / 4, c1
+    # Y^2 = 16 * (4 (X/4)^3 + ...) = X^3 + (3*4*x0 + b2) X^2 + 4(12 x0^2 + 2 b2 x0 + 2 b4) X / 4...
+    # compute directly: h(X) = 16 * F(x0 + X/4), F(x) = 4x^3 + b2 x^2 + 2 b4 x + b6
+    F = lambda x: 4 * x ** 3 + b2 * x * x + 2 * b4 * x + b6
+    # coefficients of h by interpolation (cubic, leading 1)
+    h0 = 16 * F(x0)
+    h1 = 16 * F(x0 + _F(1, 4)) - h0 - 1  # h(1) = 1 + A + B (h0 = 0)
+    hm = 16 * F(x0 - _F(1, 4)) - h0 + 1  # h(-1) = -1 + A - B
+    A = (h1 + hm) / 2
+    B = (h1 - hm) / 2
+    assert h0 == 0 and A.denominator == 1 and B.denominator == 1, "2-torsion model"
+    return int(A), int(B), x0
+
+
+def _quartic_points(d, A, e, bound):
+    """Points (M, e', N) with N^2 = d M^4 + A M^2 e'^2 + e e'^4, gcd(M, e') = 1, small."""
+    out = []
+    for E2 in range(1, bound + 1):
+        for M in range(-bound, bound + 1):
+            if M == 0 or _m.gcd(M, E2) != 1:
+                continue
+            v = d * M ** 4 + A * M * M * E2 * E2 + e * E2 ** 4
+            if v < 0:
+                continue
+            N = _m.isqrt(v)
+            if N * N == v:
+                out.append((M, E2, N))
+                return out
+    return out
+
+
+def _sqfree(n):
+    """The squarefree part of a nonzero integer (with sign)."""
+    sgn = -1 if n < 0 else 1
+    n = abs(n)
+    out = 1
+    for p, e in _factor_int(n) if n > 1 else []:
+        if e % 2:
+            out *= p
+    return sgn * out
+
+
+def _span_mod_squares(gens):
+    """The subgroup of Q*/Q*^2 generated by the squarefree integers gens."""
+    group = {1}
+    for g in gens:
+        g = _sqfree(g)
+        if g not in group:
+            group |= {_sqfree(h * g) for h in group}
+    return group
+
+
+def two_isogeny_descent(a, search_bound=60):
+    """Descent via 2-isogeny for a curve a with a rational 2-torsion point.
+    Returns a dict: rank bounds, the Selmer group sizes (#Sel^phi, #Sel^phihat)
+    and the images found, and points of E (on the model y^2 = x^3 + A x^2 + B x)."""
+    m = _two_torsion_model(a)
+    if m is None:
+        return None
+    A, B, x0 = m
+    Ap, Bp = -2 * A, A * A - 4 * B
+    out = {"model": (A, B), "isogenous": (Ap, Bp)}
+    sizes = []
+    images = []
+    pts = []
+    for (AA, BB) in ((A, B), (Ap, Bp)):
+        primes = sorted({p for p, _ in _factor_int(2 * BB * (AA * AA - 4 * BB))})
+        sel, img = [], [1, BB]  # the images of O and of the 2-torsion point (0, 0)
+        for d in _squarefree_divisors(abs(BB), [p for p, _ in _factor_int(BB)]):
+            e = BB // d
+            g = [e, 0, AA, 0, d]  # d M^4 + AA M^2 + e
+            if not quartic_real_soluble(g):
+                continue
+            loc = [quartic_locally_soluble(g, p) for p in primes]
+            if None in loc:
+                out["undecided"] = out.get("undecided", 0) + 1
+            if all(x is not False for x in loc):
+                sel.append(d)
+                if _sqfree(d) in _span_mod_squares(img):
+                    continue
+                q = _quartic_points(d, AA, e, search_bound)
+                if q:
+                    M, e2, N = q[0]
+                    img.append(d)
+                    X = _F(d * M * M, e2 * e2)
+                    Y = _F(d * M * N, e2 ** 3)
+                    pts.append(((AA, BB), (X, Y)))
+        img = sorted(_span_mod_squares(img))
+        sizes.append(len(sel))
+        images.append(len(img))
+    s1, s2 = sizes
+    i1, i2 = images
+    # 2^r = |alpha(E)| |alpha'(E')| / 4
+    lower = int(round(_m.log2(max(i1, 1) * max(i2, 1)))) - 2
+    upper = int(round(_m.log2(s1 * s2))) - 2
+    out.update(selmer=(s1, s2), images=(i1, i2), rank_bounds=(max(lower, 0), upper), points=pts)
+    return out
