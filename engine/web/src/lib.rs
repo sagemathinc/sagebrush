@@ -239,6 +239,11 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 let s = g.stabilizer(point()?);
                 json!({"gens": perm_json(&s.gens), "order": s.order().to_string()})
             }
+            "normal_closure" => {
+                let x = perms(n, v.get("sub"))?;
+                let c = g.normal_closure(&x);
+                json!({"gens": perm_json(&c.gens), "order": c.order().to_string()})
+            }
             "derived_subgroup" => {
                 let d = g.derived_subgroup();
                 json!({"gens": perm_json(&d.gens), "order": d.order().to_string()})

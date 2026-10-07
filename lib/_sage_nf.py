@@ -61,7 +61,16 @@ def _int_coeffs(f):
 
 
 class NumberField_absolute:
-    """K = Q[x]/(f), f monic with integer coefficients, irreducible."""
+    """K = Q[x]/(f), f monic with integer coefficients, irreducible.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: K = NumberField(x^2 - 2, 'a'); K
+        Number Field in a with defining polynomial x^2 - 2
+        sage: type(K).__name__  # sagebrush only
+        'NumberField_absolute'
+    """
 
     _element_class = None  # NumberFieldElement (set below; subclasses override)
 
@@ -89,17 +98,50 @@ class NumberField_absolute:
         return (self.gen(),)[:k]
 
     def gen(self, i=0):
+        """The generator (the class of x).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').gen()
+            a
+        """
         if i != 0:
             raise IndexError("only one generator")
         return self([0, 1])
 
     def gens(self):
+        """The generators (a 1-tuple).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').gens()
+            (a,)
+        """
         return (self.gen(),)
 
     def variable_name(self):
+        """The name of the generator.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').variable_name()
+            'a'
+        """
         return self._name
 
     def __call__(self, x):
+        """Convert a number, a list of coefficients or a polynomial into the field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 - 2)
+            sage: K(3), K([1, 2]), K(x^2 + x)
+            (3, 2*a + 1, a + 2)
+        """
         if isinstance(x, NumberFieldElement):
             if x._K is not self:
                 raise TypeError("no coercion between different number fields")
@@ -124,11 +166,27 @@ class NumberField_absolute:
 
     # ---- invariants
     def degree(self):
+        """The degree over QQ.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^5 - x - 1, 'a').degree()
+            5
+        """
         return self._n
 
     absolute_degree = degree
 
     def polynomial(self):
+        """The defining polynomial.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').polynomial()
+            x^3 - 2
+        """
         return _sa().QQ[self._var](self._f)
 
     defining_polynomial = polynomial
@@ -140,24 +198,63 @@ class NumberField_absolute:
         return self._data
 
     def discriminant(self):
+        """The discriminant of the field (of its maximal order).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 5, 'a').discriminant(), NumberField(x^3 - 2, 'a').discriminant()
+            (5, -108)
+        """
         return self._nfdata()["disc"]
 
     disc = discriminant
     absolute_discriminant = discriminant
 
     def signature(self):
+        """(r1, r2): the numbers of real and of pairs of complex embeddings.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').signature(), NumberField(x^4 - 2, 'a').signature()
+            ((1, 1), (2, 1))
+        """
         d = self._nfdata()
         return (d["r1"], d["r2"])
 
     def is_totally_real(self):
+        """Whether every embedding is real.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').is_totally_real(), NumberField(x^3 - 2, 'a').is_totally_real()
+            (True, False)
+        """
         return self.signature()[1] == 0
 
     def is_totally_imaginary(self):
+        """Whether no embedding is real.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 1, 'a').is_totally_imaginary(), NumberField(x^3 - 2, 'a').is_totally_imaginary()
+            (True, False)
+        """
         return self.signature()[0] == 0
 
     def galois_group(self, type=None, algorithm=None, names=None, proof=None):
         """The Galois group of the Galois closure (degree <= 13, or 17, 19, 23), computed by
-        Sagebrush's engine/galois, as the transitive group nTk."""
+        Sagebrush's engine/galois, as the transitive group nTk.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').galois_group()  # sagebrush only (the local Sage crashes here)
+            Galois group 3T2 (S3) with order 6 of x^3 - 2
+        """
         if getattr(self, "_galois", None) is None or (proof and not self._galois.proven):
             from sage_permgroup import galois_group
             G = galois_group(self._f, proof=proof)
@@ -166,21 +263,67 @@ class NumberField_absolute:
         return self._galois
 
     def is_galois(self):
+        """Whether the field is Galois over QQ.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').is_galois(), NumberField(x^3 - 3*x - 1, 'a').is_galois()  # sagebrush only (the local Sage crashes here)
+            (False, True)
+        """
         return int(self.galois_group()._order_str) == self._n
 
     def integral_basis(self):
+        """A basis of the ring of integers (Sage's HNF basis).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 5, 'a').integral_basis()
+            [1/2*a + 1/2, a]
+            sage: NumberField(x^3 - 19, 'a').integral_basis()
+            [1/3*a^2 + 1/3*a + 1/3, a, a^2]
+        """
         d = self._nfdata()
         return [self([_F(c, d["den"]) for c in row]) for row in d["basis"]]
 
     def maximal_order(self):
+        """The ring of integers.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: O = NumberField(x^2 - 5, 'a').maximal_order(); O
+            Maximal Order generated by 1/2*a + 1/2 in Number Field in a with defining polynomial x^2 - 5
+            sage: O.basis()
+            [1/2*a + 1/2, a]
+        """
         return Order(self)
 
     ring_of_integers = maximal_order
 
     def number_of_roots_of_unity(self):
+        """The number of roots of unity in the field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 3, 'a').number_of_roots_of_unity(), NumberField(x^2 + 1, 'a').number_of_roots_of_unity()
+            (6, 4)
+        """
         return self._nfdata()["w"]
 
     def unit_group(self, proof=None):
+        """The unit group (its rank and torsion; GRH for the regulator bound).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: U = NumberField(x^3 - 2, 'a').unit_group(); U
+            Unit group with structure C2 x Z of Number Field in a with defining polynomial x^3 - 2
+            sage: U.rank()
+            1
+        """
         return UnitGroup(self)
 
     def _bnfdata(self):
@@ -195,20 +338,67 @@ class NumberField_absolute:
         return self._bnf
 
     def class_group(self, proof=None, names="c"):
+        """The class group (assuming GRH, as Sage's default proof=False... see the engine).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 23, 'a').class_group()
+            Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^2 + 23
+            sage: NumberField(x^3 - 11, 'a').class_group().invariants()
+            (2,)
+        """
         return ClassGroup(self)
 
     def class_number(self, proof=None):
+        """The class number.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').class_number(), NumberField(x^2 + 163, 'a').class_number()
+            (2, 1)
+        """
         return self._bnfdata()["h"]
 
     def regulator(self, proof=None):
+        """The regulator.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').regulator()  # abs tol 1e-12
+            0.881373587019543
+            sage: NumberField(x^3 - 11, 'a').regulator()  # abs tol 1e-10
+            5.58720662606091
+        """
         return _sa().RR(self._bnfdata()["regulator"])
 
     def unit_rank(self):
+        """The rank of the unit group: r1 + r2 - 1.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^4 - 2, 'a').unit_rank()  # sagebrush only
+            2
+        """
         r1, r2 = self.signature()
         return r1 + r2 - 1
 
     # ---- ideals
     def ideal(self, *gens):
+        """The ideal generated by the given elements.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: I = K.ideal(6); I
+            Fractional ideal (6)
+            sage: I.norm()
+            36
+        """
         if len(gens) == 1 and isinstance(gens[0], (list, tuple)):
             gens = tuple(gens[0])
         if len(gens) == 1 and not isinstance(gens[0], NumberFieldElement):
@@ -220,20 +410,60 @@ class NumberField_absolute:
     fractional_ideal = ideal
 
     def primes_above(self, p, degree=None):
+        """The prime ideals above p.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: K.primes_above(2), K.primes_above(3)
+            ([Fractional ideal (2, a + 1)], [Fractional ideal (3, a + 1), Fractional ideal (3, a + 2)])
+        """
         p = int(p)
-        out = [PrimeIdeal(self, q["p"], q["e"], q["f"], self([_F(c, q["pi_den"]) for c in q["pi"]])) for q in _primes_above(tuple(self._f), p)]
+        def pi(q):
+            # the second generator with coefficients in [0, p) when it is in
+            # Z[a] (as Sage shows quadratic fields' primes: (3, a + 2))
+            cs = [_F(c, q["pi_den"]) for c in q["pi"]]
+            if all(c.denominator == 1 for c in cs):
+                cs = [c % q["p"] for c in cs]
+            return self(cs)
+        out = [PrimeIdeal(self, q["p"], q["e"], q["f"], pi(q)) for q in _primes_above(tuple(self._f), p)]
         out = _sort_primes(out)
         if degree is not None:
             out = [P for P in out if P.residue_class_degree() == degree]
         return out
 
     def prime_above(self, p, degree=None):
+        """A prime ideal above p.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_above(7)
+            Fractional ideal (7, a + 3)
+        """
         return self.primes_above(p, degree)[0]
 
     def factor(self, n):
+        """The factorization of the ideal (n).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').factor(6)
+            (Fractional ideal (2, a + 1))^2 * (Fractional ideal (3, a + 1)) * (Fractional ideal (3, a + 2))
+        """
         return self.ideal(n).factor()
 
     def prime_factors(self, n):
+        """The prime ideals dividing (n).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_factors(6)
+            [Fractional ideal (2, a + 1), Fractional ideal (3, a + 1), Fractional ideal (3, a + 2)]
+        """
         return [P for P, _ in self.factor(n)]
 
 
@@ -298,6 +528,17 @@ def _poly_divmod(a, b):
 
 
 class NumberFieldElement:
+    """An element of a number field.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: K.<a> = NumberField(x^3 - 2)
+        sage: b = 1 + a + a^2/2; b
+        1/2*a^2 + a + 1
+        sage: b.norm(), b.trace(), b.minpoly()
+        (1/2, 3, x^3 - 3*x^2 - 1/2)
+    """
     __slots__ = ("_K", "_c")
 
     def __init__(self, K, c):
@@ -305,9 +546,27 @@ class NumberFieldElement:
         self._c = [_F(x) for x in c]
 
     def parent(self):
+        """The number field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^3 - 2)
+            sage: (a + 1).parent()
+            Number Field in a with defining polynomial x^3 - 2
+        """
         return self._K
 
     def list(self):
+        """The coordinates on the power basis 1, a, a^2, ...
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^3 - 2)
+            sage: (1 + 3*a^2).list()
+            [1, 0, 3]
+        """
         return [_q(x) for x in self._c]
 
     def __repr__(self):
@@ -371,6 +630,15 @@ class NumberFieldElement:
 
     def __invert__(self):
         # extended Euclid in Q[x]: s self + t f = 1
+        """The inverse (also inverse()).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^3 - 2)
+            sage: (1 + a).inverse(), ~(1 + a) * (1 + a)
+            (1/3*a^2 - 1/3*a + 1/3, 1)
+        """
         f = [_F(a) for a in self._K._f]
         r0, r1 = f, list(self._c)
         s0, s1 = [_F(0)], [_F(1)]
@@ -418,10 +686,28 @@ class NumberFieldElement:
         return any(self._c)
 
     def is_zero(self):
+        """Whether the element is 0.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^3 - 2)
+            sage: (a - a).is_zero(), a.is_zero()
+            (True, False)
+        """
         return not any(self._c)
 
-    def matrix(self):
-        """The matrix of multiplication by self on the power basis (rows: self*a^i)."""
+    def matrix(self, public=True):
+        """The matrix of multiplication by self on the power basis (rows: self*a^i).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 - 2)
+            sage: (1 + a).matrix()
+            [1 1]
+            [2 1]
+        """
         K = self._K
         rows = []
         x = self
@@ -429,10 +715,24 @@ class NumberFieldElement:
         for _ in range(K._n):
             rows.append(list(x._c))
             x = x * g
-        return rows
+        from _sage_matrix import matrix as _matrix
+        from sage_all import QQ
+        return _matrix(QQ, rows) if public else rows
+
+    def _matrix_rows(self):
+        return self.matrix(public=False)
 
     def charpoly(self, var="x"):
-        m = self.matrix()
+        """The characteristic polynomial.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 - 2)
+            sage: (1 + a).charpoly()
+            x^2 - 2*x - 1
+        """
+        m = self._matrix_rows()
         n = len(m)
         # Faddeev-LeVerrier over Q
         import itertools
@@ -447,6 +747,15 @@ class NumberFieldElement:
         return _sa().QQ[var](c)
 
     def minpoly(self, var="x"):
+        """The minimal polynomial.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^4 - 2)
+            sage: (a^2).minpoly(), K(3).minpoly()
+            (x^2 - 2, x - 3)
+        """
         f = self.charpoly(var)
         for g, e in f.factor():
             if hasattr(g, "degree") and g.degree() > 0:
@@ -455,14 +764,41 @@ class NumberFieldElement:
         return f
 
     def norm(self):
-        m = self.matrix()
+        """The norm to QQ.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: (1 + a).norm()
+            6
+        """
+        m = self._matrix_rows()
         return _q(_det(m))
 
     def trace(self):
-        m = self.matrix()
+        """The trace to QQ.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: (1 + a).trace()
+            2
+        """
+        m = self._matrix_rows()
         return _q(sum(m[i][i] for i in range(len(m))))
 
     def is_integral(self):
+        """Whether the element is an algebraic integer.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 - 5)
+            sage: ((1 + a)/2).is_integral(), (a/2).is_integral()
+            (True, False)
+        """
         return all(_F(a).denominator == 1 for a in self.charpoly().list())
 
 
@@ -502,6 +838,14 @@ def _det(m):
 
 
 class Order:
+    """An order of a number field (Sagebrush: the maximal order).
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: NumberField(x^2 - 5, 'a').ring_of_integers()
+        Maximal Order generated by 1/2*a + 1/2 in Number Field in a with defining polynomial x^2 - 5
+    """
     def __init__(self, K):
         self._K = K
 
@@ -515,26 +859,75 @@ class Order:
             return "Eisenstein Integers generated by %s in %r" % (b[0] if f == [3, 0, 1] else K._name, K)
         if K._nfdata()["index"] == 1:
             return "Maximal Order generated by %s in %r" % (K._name, K)
-        return "Maximal Order generated by [%s] in %r" % (", ".join(repr(x) for x in b[1:]), K)
+        gens = _ring_generators(K, b)
+        return "Maximal Order generated by %s in %r" % (repr(gens[0]) if len(gens) == 1 else "[%s]" % ", ".join(repr(x) for x in gens), K)
 
     def basis(self):
+        """A Z-basis.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 5, 'a').maximal_order().basis()
+            [1/2*a + 1/2, a]
+        """
         return self._K.integral_basis()
 
     def discriminant(self):
+        """The discriminant.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 5, 'a').maximal_order().discriminant()
+            5
+        """
         return self._K.discriminant()
 
     def number_field(self):
+        """The number field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 5, 'a').maximal_order().number_field()
+            Number Field in a with defining polynomial x^2 - 5
+        """
         return self._K
 
     def degree(self):
+        """The rank over ZZ.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'a').maximal_order().degree()
+            3
+        """
         return self._K.degree()
 
     def class_number(self, proof=None):
+        """The class number of the maximal order.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').maximal_order().class_number()
+            2
+        """
         return self._K.class_number()
 
 
 class NumberFieldIdeal:
-    """The ideal generated by an integer."""
+    """The ideal generated by an integer.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: K.<a> = NumberField(x^2 + 5)
+        sage: K.ideal(6)
+        Fractional ideal (6)
+    """
 
     def __init__(self, K, n):
         self._K = K
@@ -544,19 +937,64 @@ class NumberFieldIdeal:
         return "Fractional ideal (%d)" % self._n
 
     def number_field(self):
+        """The number field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: K.ideal(3).number_field()
+            Number Field in a with defining polynomial x^2 + 5
+        """
         return self._K
 
     def norm(self):
+        """The absolute norm.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: K.ideal(3).norm(), K.ideal(7).norm()
+            (9, 49)
+        """
         return self._n ** self._K.degree()
 
     def gens(self):
+        """Generators of the ideal.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: K.ideal(3).gens()
+            (3,)
+        """
         return (self._K(self._n),)
 
     def is_prime(self):
+        """Whether the ideal is prime.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: K.ideal(2).is_prime(), K.ideal(3).is_prime(), K.ideal(7).is_prime()
+            (False, False, False)
+        """
         ps = self._K.primes_above(self._n) if self._n > 1 and _sa().is_prime(self._n) else []
         return len(ps) == 1 and ps[0]._e == 1
 
     def factor(self):
+        """The factorization into prime ideals.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 + 5)
+            sage: K.ideal(6).factor()
+            (Fractional ideal (2, a + 1))^2 * (Fractional ideal (3, a + 1)) * (Fractional ideal (3, a + 2))
+        """
         K = self._K
         if self._n == 0:
             raise ArithmeticError("factorization of 0 is not defined")
@@ -578,7 +1016,16 @@ class NumberFieldIdeal:
 
 
 class PrimeIdeal:
-    """A prime ideal P = (p, pi) of the maximal order."""
+    """A prime ideal P = (p, pi) of the maximal order.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: P = NumberField(x^2 + 5, 'a').prime_above(3); P
+        Fractional ideal (3, a + 1)
+        sage: P.norm(), P.ramification_index(), P.residue_class_degree()
+        (3, 1, 1)
+    """
 
     def __init__(self, K, p, e, f, pi):
         self._K, self._p, self._e, self._f, self._pi = K, p, e, f, pi
@@ -589,36 +1036,111 @@ class PrimeIdeal:
         return "Fractional ideal (%d, %r)" % (self._p, self._pi)
 
     def number_field(self):
+        """The number field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_above(3).number_field()
+            Number Field in a with defining polynomial x^2 + 5
+        """
         return self._K
 
     def norm(self):
+        """The absolute norm p^f.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_above(7).norm()
+            7
+        """
         return self._p ** self._f
 
     absolute_norm = norm
 
     def smallest_integer(self):
+        """The prime p below the ideal.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_above(7).smallest_integer()
+            7
+        """
         return self._p
 
     def ramification_index(self):
+        """The ramification index e.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K = NumberField(x^2 + 5, 'a')
+            sage: K.prime_above(2).ramification_index(), K.prime_above(3).ramification_index()
+            (2, 1)
+        """
         return self._e
 
     def residue_class_degree(self):
+        """The residue class degree f.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K = NumberField(x^2 + 5, 'a')
+            sage: K.prime_above(3).residue_class_degree(), K.prime_above(13).residue_class_degree()
+            (1, 2)
+        """
         return self._f
 
     def is_prime(self):
+        """True.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_above(3).is_prime()
+            True
+        """
         return True
 
     def is_principal(self, proof=None):
+        """Whether the prime ideal is principal.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K = NumberField(x^2 + 1, 'a')
+            sage: K.prime_above(5).is_principal()
+            True
+        """
         if self._K.class_number() == 1:
             return True
         raise NotImplementedError("principal ideal testing is not implemented yet")
 
     def gens_two(self):
+        """Two generators (p, pi).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_above(3).gens_two()
+            (3, a + 1)
+        """
         if self._f == self._K.degree():
             return (self._K(self._p), self._K(0))
         return (self._K(self._p), self._pi)
 
     def gens(self):
+        """Generators of the ideal.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 5, 'a').prime_above(3).gens()
+            (3, a + 1)
+        """
         return self.gens_two() if self._f != self._K.degree() else (self._K(self._p),)
 
     def __eq__(self, other):
@@ -634,6 +1156,16 @@ class PrimeIdeal:
 
 
 class IdealFactorization(list):
+    """A factorization of an ideal into prime ideals.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: F = NumberField(x^2 + 5, 'a').ideal(6).factor(); F
+        (Fractional ideal (2, a + 1))^2 * (Fractional ideal (3, a + 1)) * (Fractional ideal (3, a + 2))
+        sage: len(F)
+        3
+    """
     def __repr__(self):
         if not self:
             return "1"
@@ -647,6 +1179,16 @@ def _cyc_repr(cyc):
 
 
 class ClassGroup:
+    """The class group of a number field.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: C = NumberField(x^2 + 23, 'a').class_group(); C
+        Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^2 + 23
+        sage: C.order(), C.is_cyclic()
+        (3, True)
+    """
     def __init__(self, K):
         self._K = K
         self._cyc = tuple(K._bnfdata()["cyc"])
@@ -658,25 +1200,73 @@ class ClassGroup:
         return "Class group of order %d with structure %s of %r" % (h, _cyc_repr(self._cyc), self._K)
 
     def order(self):
+        """The class number.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 23, 'a').class_group().order()
+            3
+        """
         return self._K._bnfdata()["h"]
 
     cardinality = order
 
     def invariants(self):
+        """The orders of the cyclic factors.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 84, 'a').class_group().invariants()
+            (2, 2)
+        """
         return self._cyc
 
     elementary_divisors = invariants
 
     def ngens(self):
+        """The number of cyclic factors.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 84, 'a').class_group().ngens()
+            2
+        """
         return len(self._cyc)
 
     def is_trivial(self):
+        """Whether the class number is 1.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 163, 'a').class_group().is_trivial()
+            True
+        """
         return self.order() == 1
 
     def is_cyclic(self):
+        """Whether the class group is cyclic.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 84, 'a').class_group().is_cyclic()
+            False
+        """
         return len(self._cyc) <= 1
 
     def number_field(self):
+        """The number field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 23, 'a').class_group().number_field()
+            Number Field in a with defining polynomial x^2 + 23
+        """
         return self._K
 
     def __len__(self):
@@ -684,6 +1274,14 @@ class ClassGroup:
 
 
 class UnitGroup:
+    """The unit group of a number field.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: NumberField(x^2 - 2, 'a').unit_group()
+        Unit group with structure C2 x Z of Number Field in a with defining polynomial x^2 - 2
+    """
     def __init__(self, K):
         self._K = K
 
@@ -693,22 +1291,65 @@ class UnitGroup:
         return "Unit group with structure %s of %r" % (" x ".join(["C%d" % w] + ["Z"] * r), self._K)
 
     def rank(self):
+        """The rank (number of fundamental units).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^4 - 2, 'a').unit_group().rank()
+            2
+        """
         return self._K.unit_rank()
 
     def torsion_generator_order(self):
+        """The number of roots of unity.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 3, 'a').unit_group().torsion_generator_order()  # sagebrush only
+            6
+        """
         return self._K.number_of_roots_of_unity()
 
     def ngens(self):
+        """The number of generators: the rank plus 1 (torsion).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^4 - 2, 'a').unit_group().ngens()
+            3
+        """
         return 1 + self.rank()
 
     def number_field(self):
+        """The number field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').unit_group().number_field()
+            Number Field in a with defining polynomial x^2 - 2
+        """
         return self._K
 
 
 def NumberField(polynomial, name=None, names=None, **kwds):
     """K.<a> = NumberField(x^3 - 2): the number field defined by a monic
     integer polynomial (class groups and units by Buchmann's algorithm in the
-    Rust engine, assuming GRH)."""
+    Rust engine, assuming GRH).
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: K.<a> = NumberField(x^3 - 2); K
+        Number Field in a with defining polynomial x^3 - 2
+        sage: a^3, (a + 1)^2
+        (2, a^2 + 2*a + 1)
+        sage: NumberField(x^2 + 5, 'b')
+        Number Field in b with defining polynomial x^2 + 5
+    """
     if names is not None:
         name = names[0] if isinstance(names, (list, tuple)) else names
     if name is None:
@@ -717,7 +1358,15 @@ def NumberField(polynomial, name=None, names=None, **kwds):
 
 
 def QuadraticField(D, name="a", names=None, **kwds):
-    """K.<a> = QuadraticField(D): Q(sqrt(D)), printed with Sage's embedding."""
+    """K.<a> = QuadraticField(D): Q(sqrt(D)), printed with Sage's embedding.
+
+    EXAMPLES::
+
+        sage: K.<a> = QuadraticField(-5); K
+        Number Field in a with defining polynomial x^2 + 5 with a = 2.236067977499790?*I
+        sage: a^2, K.class_number()
+        (-5, 2)
+    """
     if names is not None:
         name = names[0] if isinstance(names, (list, tuple)) else names
     D = int(D)
@@ -780,6 +1429,15 @@ def _interval_repr_sqrt(n):
 
 
 def CyclotomicField(n, name="zeta", names=None):
+    """The cyclotomic field Q(zeta_n).
+
+    EXAMPLES::
+
+        sage: K.<z> = CyclotomicField(5); K
+        Cyclotomic Field of order 5 and degree 4
+        sage: z^5, K.degree(), K.discriminant()
+        (1, 4, 125)
+    """
     if names is not None:
         name = names[0] if isinstance(names, (list, tuple)) else names
     K = NumberField_absolute(_cyclotomic(int(n)), str(name) + ("%d" % n if name == "zeta" else ""))
@@ -794,3 +1452,71 @@ def _cyclotomic(n):
         if n % d == 0:
             f, _ = _poly_divmod(f, [_F(c) for c in _cyclotomic(d)])
     return [int(c) for c in f]
+
+
+def _hnf_rows(rows):
+    """The nonzero rows of the Hermite normal form of an integer matrix."""
+    rows = [list(r) for r in rows if any(r)]
+    out, col, n = [], 0, len(rows[0]) if rows else 0
+    while rows and col < n:
+        piv = [r for r in rows if r[col]]
+        if not piv:
+            col += 1
+            continue
+        while len([r for r in rows if r[col]]) > 1:
+            piv = sorted([r for r in rows if r[col]], key=lambda r: abs(r[col]))
+            m = piv[0]
+            for r in piv[1:]:
+                q = r[col] // m[col]
+                for j in range(n):
+                    r[j] -= q * m[j]
+            rows = [r for r in rows if any(r)]
+        m = [r for r in rows if r[col]][0]
+        if m[col] < 0:
+            m[:] = [-v for v in m]
+        rows = [r for r in rows if r is not m]
+        out.append(m)
+        col += 1
+    return out
+
+
+def _ring_generators(K, basis):
+    """Ring generators of the maximal order as Sage lists them: the integral
+    basis, without 1 and without the elements already in the ring the
+    earlier ones generate."""
+    n = K.degree()
+    den = 1
+    for b in basis:
+        for c in b._c:
+            den = den * _F(c).denominator // _gcd_int(den, _F(c).denominator)
+
+    def vec(x):
+        return [int(_F(c) * den) for c in (list(x._c) + [0] * n)[:n]]
+
+    def span(gens):
+        # the Z-module Z[gens]: products until stable
+        mods = _hnf_rows([vec(K(1))])
+        while True:
+            elts = [K([_F(c, den) for c in r]) for r in mods]
+            new = _hnf_rows(mods + [vec(e * g) for e in elts for g in gens])
+            if new == mods:
+                return mods
+            mods = new
+
+    def contains(mods, x):
+        return _hnf_rows(mods + [vec(x)]) == mods
+
+    gens = []
+    for b in basis:
+        if b == K(1):
+            continue
+        if not gens or not contains(span(gens), b):
+            gens.append(b)
+    return gens
+
+
+def _gcd_int(a, b):
+    while b:
+        a, b = b, a % b
+    return abs(a)
+
