@@ -284,7 +284,8 @@ pub fn maximal_transitive(a: &Ambient, candidates: &[Group], gens: &[Vec<Perm>],
     idx.sort_by_key(|&i| std::cmp::Reverse(candidates[i].order()));
     let mut kept: Vec<(usize, Perm, Cosets)> = vec![];
     for i in idx {
-        let hord: usize = num_traits::ToPrimitive::to_usize(&candidates[i].order()).unwrap();
+        // (groups too big for a machine word are bigger than G)
+        let Some(hord) = num_traits::ToPrimitive::to_usize(&candidates[i].order()) else { continue };
         if hord >= order || order % hord != 0 || !fits(&counts[i]) {
             continue;
         }

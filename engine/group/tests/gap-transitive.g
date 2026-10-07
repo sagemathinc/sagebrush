@@ -2,7 +2,7 @@
 # Run from engine/group: gap -q tests/gap-transitive.g
 out := OutputTextFile("tests/data/gap-transitive.txt", false);
 SetPrintFormattingStatus(out, false);
-for n in [2..13] do
+for n in Concatenation([2..13], [17, 19, 23]) do
   for k in [1..NrTransitiveGroups(n)] do
     G := TransitiveGroup(n,k);
     s := Concatenation(String(n), " ", String(k), " ", String(Size(G)), " ; ");

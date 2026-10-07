@@ -156,7 +156,7 @@ class NumberField_absolute:
         return self.signature()[0] == 0
 
     def galois_group(self, type=None, algorithm=None, names=None, proof=None):
-        """The Galois group of the Galois closure (degree <= 13), computed by
+        """The Galois group of the Galois closure (degree <= 13, or 17, 19, 23), computed by
         Sagebrush's engine/galois, as the transitive group nTk."""
         if getattr(self, "_galois", None) is None or (proof and not self._galois.proven):
             from sage_permgroup import galois_group

@@ -46,3 +46,15 @@ fn random_polynomials_match_magma() {
     }
     assert_eq!(checked, 280);
 }
+
+#[test]
+fn prime_degrees_match_magma() {
+    assert_eq!(check(include_str!("data/prime-degree-magma.txt"), 1), 51);
+}
+
+/// The M23 polynomials of arXiv:2608.08538: Gal = 23T5 = M23.  (The descent
+/// step A23 -> M23, of index 1.3e15, is not proven: see the crate docs.)
+#[test]
+fn m23_polynomials() {
+    assert_eq!(check(include_str!("data/m23.txt"), 1), 2);
+}

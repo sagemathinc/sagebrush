@@ -47,6 +47,7 @@ fn main() {
     times.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     let total: f64 = times.iter().map(|t| t.0).sum();
     println!("ok {} (proven {}), mismatches {}, errors {}; total {:.1}s", ok, proven, bad, err, total);
+    println!("profile: {}", sagebrush_galois::profile_report());
     for (t, name) in times.iter().take(8) {
         println!("  {:.2}s {}", t, name);
     }
