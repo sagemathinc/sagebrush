@@ -15,6 +15,8 @@ pub mod group;
 pub mod lattice;
 pub mod named;
 pub mod perm;
+pub mod primitive;
+pub mod transitive;
 
 pub use group::Group;
 pub use perm::{Perm, Rng};
