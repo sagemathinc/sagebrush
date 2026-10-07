@@ -176,9 +176,142 @@ fn big(v: &[BigInt]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
 }
 
+// ---------------------------------------------------------------- permutation groups
+
+fn perms(n: usize, v: Option<&Value>) -> Result<Vec<sagebrush_group::Perm>, String> {
+    let arr = match v {
+        None | Some(Value::Null) => return Ok(vec![]),
+        Some(a) => a.as_array().ok_or("permutations are lists of images")?,
+    };
+    arr.iter()
+        .map(|p| {
+            let im: Vec<u32> = p.as_array().ok_or("a permutation is a list of images")?.iter().map(|x| x.as_u64().map(|x| x as u32).ok_or("images are point numbers")).collect::<Result<_, _>>()?;
+            if im.len() != n {
+                return Err(format!("a permutation of {} points, not {}", im.len(), n));
+            }
+            sagebrush_group::Perm::from_images(im)
+        })
+        .collect()
+}
+
+fn perm_json(gs: &[sagebrush_group::Perm]) -> Value {
+    json!(gs.iter().map(|g| g.0.clone()).collect::<Vec<_>>())
+}
+
+/// {"fn": "perm_group", "n": n, "gens": [images...], "what": [...]} -> one
+/// answer per requested property (points are 0..n-1).
+fn perm_group(v: &Value) -> Result<Value, String> {
+    use sagebrush_group::{Group, Rng};
+    let n = u(v, "n")? as usize;
+    let gens = perms(n, v.get("gens"))?;
+    let g = Group::new(n, gens)?;
+    let what: Vec<String> = match v.get("what") {
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(a)) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        _ => vec!["order".into()],
+    };
+    let point = || -> Result<u32, String> { v.get("point").and_then(Value::as_u64).map(|x| x as u32).filter(|&x| (x as usize) < n).ok_or_else(|| "missing or bad point".to_string()) };
+    let mut rng = Rng::new(v.get("seed").and_then(Value::as_u64).unwrap_or(1));
+    let mut out = serde_json::Map::new();
+    for w in &what {
+        let r = match w.as_str() {
+            "order" => json!(g.order().to_string()),
+            "orbits" => json!(g.orbits()),
+            "orbit" => json!(g.orbit(point()?)),
+            "is_transitive" => json!(g.is_transitive()),
+            "is_primitive" => json!(g.is_primitive()),
+            "is_abelian" => json!(g.is_abelian()),
+            "is_solvable" => json!(g.is_solvable()),
+            "transitivity" => json!(g.transitivity()),
+            "blocks" => json!(g.blocks_containing(v.get("point").and_then(Value::as_u64).unwrap_or(0) as u32)),
+            "min_block" => {
+                let seed: Vec<u32> = v.get("block").and_then(Value::as_array).ok_or("missing block")?.iter().filter_map(|x| x.as_u64().map(|x| x as u32)).collect();
+                if seed.is_empty() || seed.iter().any(|&x| x as usize >= n) {
+                    return Err("bad block".into());
+                }
+                json!(g.min_block(&seed))
+            }
+            "block_system" => {
+                let b: Vec<u32> = v.get("block").and_then(Value::as_array).ok_or("missing block")?.iter().filter_map(|x| x.as_u64().map(|x| x as u32)).collect();
+                json!(g.block_system(&b))
+            }
+            "stabilizer" => {
+                let s = g.stabilizer(point()?);
+                json!({"gens": perm_json(&s.gens), "order": s.order().to_string()})
+            }
+            "derived_subgroup" => {
+                let d = g.derived_subgroup();
+                json!({"gens": perm_json(&d.gens), "order": d.order().to_string()})
+            }
+            "derived_series" => json!(g.derived_series().iter().map(|d| json!({"gens": perm_json(&d.gens), "order": d.order().to_string()})).collect::<Vec<_>>()),
+            "contains" => {
+                let x = perms(n, Some(&json!([v.get("g").ok_or("missing g")?])))?;
+                json!(g.contains(&x[0]))
+            }
+            "random" => {
+                let k = v.get("count").and_then(Value::as_u64).unwrap_or(1) as usize;
+                perm_json(&(0..k).map(|_| g.random(&mut rng)).collect::<Vec<_>>())
+            }
+            "elements" => {
+                let limit = v.get("limit").and_then(Value::as_u64).unwrap_or(100_000);
+                match g.elements(limit) {
+                    Some(es) => perm_json(&es),
+                    None => return Err(format!("the group has more than {} elements", limit)),
+                }
+            }
+            "cycle_type_counts" => {
+                let limit = v.get("limit").and_then(Value::as_u64).unwrap_or(200_000);
+                let samples = v.get("samples").and_then(Value::as_u64).unwrap_or(10_000) as usize;
+                let (c, exact) = g.cycle_type_counts(limit, samples, &mut rng);
+                json!({"exact": exact, "counts": c.into_iter().map(|(t, k)| json!([t, k])).collect::<Vec<_>>()})
+            }
+            "normal_closure" => {
+                let sub = perms(n, v.get("sub"))?;
+                let c = g.normal_closure(&sub);
+                json!({"gens": perm_json(&c.gens), "order": c.order().to_string()})
+            }
+            "is_normal" => {
+                let sub = Group::new(n, perms(n, v.get("sub"))?)?;
+                json!(g.contains_group(&sub) && g.is_normal(&sub))
+            }
+            "is_subgroup" => {
+                // is the group generated by "sub" a subgroup of this one?
+                let sub = Group::new(n, perms(n, v.get("sub"))?)?;
+                json!(g.contains_group(&sub))
+            }
+            "base" => json!(g.chain.base()),
+            "strong_gens" => perm_json(&g.chain.strong_gens()),
+            other => return Err(format!("unknown permutation group property {}", other)),
+        };
+        out.insert(w.clone(), r);
+    }
+    Ok(Value::Object(out))
+}
+
+/// {"fn": "perm_group_named", "name": ..., "n": n} -> {"n", "gens"}
+fn perm_group_named(v: &Value) -> Result<Value, String> {
+    use sagebrush_group::named::*;
+    let n = u(v, "n")?;
+    let name = v.get("name").and_then(Value::as_str).ok_or("missing name")?;
+    let g = match name {
+        "symmetric" => symmetric(n as usize),
+        "alternating" => alternating(n as usize),
+        "cyclic" => cyclic(n as usize),
+        "dihedral" => dihedral(n as usize),
+        "mathieu" => mathieu(n as usize)?,
+        "agl1" => agl1(n)?,
+        "psl2" => pl2(n, false)?,
+        "pgl2" => pl2(n, true)?,
+        _ => return Err(format!("unknown group {}", name)),
+    };
+    Ok(json!({"n": g.n, "gens": perm_json(&g.gens)}))
+}
+
 fn dispatch(v: &Value) -> Result<Value, String> {
     let f = v.get("fn").and_then(Value::as_str).ok_or("missing fn")?;
     match f {
+        "perm_group" => perm_group(v),
+        "perm_group_named" => perm_group_named(v),
         "characters" => {
             let n = u(v, "n")?;
             let g = DirichletGroup::new(n);

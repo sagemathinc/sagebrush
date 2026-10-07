@@ -1,0 +1,12 @@
+[package]
+name = "sagebrush-group"
+version = "0.1.0"
+edition = "2021"
+description = "Permutation groups: Schreier-Sims, blocks, derived series (clean-room, MIT/Apache-2.0)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+sagebrush-bigint = { path = "../bigint" }
+sagebrush-interrupt = { path = "../interrupt" }
+num-integer = "0.1"
+num-traits = "0.2"
