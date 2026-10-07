@@ -98,3 +98,15 @@ print([EllipticCurve(l).sha().an() for l in ['43a1', '53a1', '58a1', '61a1']])
     "[1, 1, 1, 1]",
   ]);
 });
+
+test("elliptic curves: descent via 2-isogeny and ranks", () => {
+  const out = cli("--sage", "-c", `
+E = EllipticCurve([0,1,0,-21504,-1220940])
+print(E.two_descent_by_two_isogeny(), E.rank(), E.sha().an())
+F = EllipticCurve([0,0,0,-36,0])
+print(F.two_descent_by_two_isogeny(), F.rank(), F.sha().an())
+H = EllipticCurve([0,0,0,-1681,0])
+print(H.two_descent_by_two_isogeny(), H.rank())
+`);
+  assert.deepEqual(out.trim().split("\n"), ["(0, 2) 0 4", "(1, 1) 1 1", "(2, 2) 2"]);
+});

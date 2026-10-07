@@ -1011,11 +1011,45 @@ class EllipticCurve_rational_field:
         from sage_all import RR
         return RR(1) if not gs else self.regulator_of_points(gs)
 
-    def rank(self):
+    def rank(self, only_use_mwrank=True, proof=None):
+        """The rank of E(Q): from Cremona's table (conductor < 1000), else the
+        analytic rank when it is 0 or 1 (equal to the rank by Gross-Zagier and
+        Kolyvagin), else 2-isogeny descent when its bounds meet."""
         lab = self._cremona_entry()
-        if lab is None:
-            raise NotImplementedError("the rank is known for Cremona's curves of conductor < 1000")
-        return _cremona()[0][lab][1]
+        if lab is not None:
+            return _cremona()[0][lab][1]
+        try:
+            r = self.analytic_rank()
+            return r
+        except NotImplementedError:
+            pass
+        lo, hi = self.rank_bounds()
+        if lo == hi:
+            return lo
+        raise NotImplementedError("rank bounds %d <= r <= %d: general 2-descent is not implemented yet" % (lo, hi))
+
+    def two_descent_by_two_isogeny(self, search_bound=60):
+        """Descent via 2-isogeny (needs a rational 2-torsion point): (lower, upper)
+        bounds for the rank, from the images found and the Selmer groups."""
+        import _sage_ec as _ec
+        d = _ec.two_isogeny_descent(self.minimal_model()._a, search_bound)
+        if d is None:
+            raise ValueError("descent by 2-isogeny needs a rational point of order 2")
+        self._descent = d
+        return d["rank_bounds"]
+
+    def rank_bounds(self):
+        """(lower, upper) bounds for the rank (2-isogeny descent; lower bound
+        also from the analytic rank when it is 0 or 1)."""
+        try:
+            r = self.analytic_rank()
+            return (r, r)
+        except NotImplementedError:
+            pass
+        if self.torsion_order() % 2 == 0:
+            return self.two_descent_by_two_isogeny()
+        raise NotImplementedError("general 2-descent (no rational 2-torsion) is not implemented yet")
+
 
     def torsion_order(self):
         """#E(Q)_tors (bounded by #E(F_p), then found by Nagell-Lutz)."""
