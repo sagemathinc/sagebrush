@@ -1,0 +1,3 @@
+# The 1 transitive groups of degree 2 up to conjugacy, computed by sagebrush-group
+# (src/transitive.rs, from scratch); per line: order ; generators as image lists of 1..2
+2 ; 2,1
