@@ -229,7 +229,31 @@ class Polynomial:
         return _poly_repr(self._c, self._ring._name) if self._c else "0"
 
     def _latex_(self):
-        return repr(self).replace("*", "")
+        # Sage's form: x^{20} - \frac{1}{2} x + 3
+        if not self._c:
+            return "0"
+        v = self._ring._name
+        out = []
+        for i in range(len(self._c) - 1, -1, -1):
+            c = self._c[i]
+            if c == 0:
+                continue
+            q = _F(c)
+            neg = q < 0
+            q = -q if neg else q
+            num = str(q.numerator) if q.denominator == 1 else "\\frac{%d}{%d}" % (q.numerator, q.denominator)
+            mono = "" if i == 0 else v if i == 1 else "%s^{%d}" % (v, i)
+            if not mono:
+                t = num
+            elif q == 1:
+                t = mono
+            else:
+                t = num + (" " if q.denominator != 1 else "") + mono
+            out.append(("-" if neg else "+", t))
+        s = ("-" if out[0][0] == "-" else "") + out[0][1]
+        for sign, t in out[1:]:
+            s += " %s %s" % (sign, t)
+        return s
 
     # ---- arithmetic
     def _coerce(self, other):
@@ -587,3 +611,22 @@ class PolyFactorization(list):
         return " * ".join(parts) if parts else repr(self._unit)
 
     __str__ = __repr__
+
+    def _latex_(self):
+        from _sage_expr import latex
+        if self._constant is not None or (self._cv is not None and not self):
+            return str(latex(self._constant)) if self._constant is not None else ("-1" if self._unit == -1 else "1")
+        paren = len(self) > 1 or self._unit != 1
+
+        def term(f, e):
+            s = str(latex(f))
+            if (e != 1 or paren) and any(c in repr(f) for c in "*+- "):
+                s = "\\left(%s\\right)" % s
+            return s if e == 1 else "%s^{%d}" % (s, e)
+
+        parts = [term(f, e) for f, e in self]
+        if self._unit == -1 and not self._field:
+            parts.insert(0, "-1")
+        elif self._field and self._unit != 1:
+            parts.insert(0, "\\left(%s\\right)" % latex(self._unit))
+        return " \\cdot ".join(parts) if parts else str(latex(self._unit))

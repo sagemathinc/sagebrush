@@ -447,6 +447,9 @@ export function kernelWorker(mode: Mode) {
     R.dictSet(R.sysModules, "__main__", main);
     const host = R.newModule("__sagebrush_host__");
     host.__builtins__ = R.builtins;
+    // libraries pick Jupyter's representations (e.g. a big 3D scene as an
+    // iframe on a file, under the front end's output limit)
+    R.builtins.__sagebrush_jupyter__ = true;
     // the value of a cell's last expression: an execute_result
     R.builtins.__pyjs_displayhook__ = (v: any) => {
       if (v !== null) {
