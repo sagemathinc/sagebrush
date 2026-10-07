@@ -77,7 +77,12 @@ from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_
 
 def show(obj, **options):
     """Show a picture (2D or 3D); typeset an expression or anything with a
-    LaTeX form (in the notebook and Jupyter), else print it."""
+    LaTeX form (in the notebook and Jupyter), else print it.
+
+    EXAMPLES::
+
+        sage: show(x^2 + 1)  # random
+    """
     if isinstance(obj, Graphics3d):
         return obj.show(**options)
     if not isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)) and (
@@ -94,13 +99,22 @@ Matrix = matrix
 
 
 def parent(x):
-    """The parent structure of x: ZZ, QQ, a polynomial ring, ..."""
+    """The parent structure of x: ZZ, QQ, a polynomial ring, ...
+
+    EXAMPLES::
+
+        sage: parent(2), parent(2/3), parent(1.5)
+        (Integer Ring, Rational Field, Real Field with 53 bits of precision)
+    """
     if hasattr(x, "parent"):
         return x.parent()
     if isinstance(x, bool) or isinstance(x, int):
         return ZZ
     if isinstance(x, _Fraction):
         return QQ
+    if isinstance(x, float):
+        from _sage_lang import _RealField
+        return _RealField()
     raise NotImplementedError("parent of %r" % (x,))
 
 
@@ -134,7 +148,17 @@ def _lift(name):
 
 
 class Rational(_Fraction):
-    """An exact rational number, such as ``2/3`` in Sage mode."""
+    """An exact rational number, such as ``2/3`` in Sage mode.
+
+    EXAMPLES::
+
+        sage: a = 2/3; a
+        2/3
+        sage: type(a).__name__  # sagebrush only
+        'Rational'
+        sage: a + 1/3, a * 3/4, a^2, a.numerator(), a.denominator()
+        (1, 1/2, 4/9, 2, 3)
+    """
 
     __slots__ = ()
 
@@ -170,22 +194,69 @@ class Rational(_Fraction):
 
     @property
     def numerator(self):
+        """The numerator.
+
+        EXAMPLES::
+
+            sage: (6/4).numerator()
+            3
+        """
         return _CallableInt(self._numerator)
 
     @property
     def denominator(self):
+        """The denominator.
+
+        EXAMPLES::
+
+            sage: (6/4).denominator()
+            2
+        """
         return _CallableInt(self._denominator)
 
     def n(self, digits=None):
+        """A floating-point approximation (digits: decimal digits).
+
+        EXAMPLES::
+
+            sage: (1/3).n()
+            0.333333333333333
+            sage: (1/3).n(digits=30)
+            0.333333333333333333333333333333
+        """
+        if digits is not None:
+            from _sage_lang import _digits_real
+            return _digits_real(self, digits)
         return RealNumber(float(self))
 
     def floor(self):
+        """The floor.
+
+        EXAMPLES::
+
+            sage: (7/2).floor(), (-7/2).floor()
+            (3, -4)
+        """
         return _math.floor(self)
 
     def ceil(self):
+        """The ceiling.
+
+        EXAMPLES::
+
+            sage: (7/2).ceil(), (-7/2).ceil()
+            (4, -3)
+        """
         return _math.ceil(self)
 
     def is_integer(self):
+        """Whether the rational number is an integer.
+
+        EXAMPLES::
+
+            sage: (4/2).is_integer(), (3/2).is_integer()
+            (True, False)
+        """
         return self._denominator == 1
 
 
@@ -206,6 +277,13 @@ def _intdiv(a, b):
 
 
 def Integer(x):
+    """The integer x.
+
+    EXAMPLES::
+
+        sage: Integer(7), Integer('123456789012345678901234567890')
+        (7, 123456789012345678901234567890)
+    """
     return int(x)
 
 
@@ -224,22 +302,71 @@ from _sage_lang import (RealNumber, ellipsis_range, ellipsis_iter, symbolic_expr
 
 
 def RR(x):
+    """The real number x (a Python float: 53 bits).
+
+    EXAMPLES::
+
+        sage: RR(1/3)
+        0.333333333333333
+        sage: RR(2)
+        2.00000000000000
+    """
     return RealNumber(float(x))
 
 
 def numerator(x):
+    """The numerator of x.
+
+    EXAMPLES::
+
+        sage: numerator(6/4), numerator(5)
+        (3, 5)
+    """
     return x.numerator
 
 
 def denominator(x):
+    """The denominator of x.
+
+    EXAMPLES::
+
+        sage: denominator(6/4), denominator(5)
+        (2, 1)
+    """
     return x.denominator
 
 
 def n(x, digits=None):
-    """The numerical approximation of x (an element of RR)."""
+    """The numerical approximation of x (an element of RR); digits: the
+    number of significant decimal digits (exact for integers and rationals;
+    more than 15 for other numbers is not implemented yet).
+
+    EXAMPLES::
+
+        sage: n(pi)
+        3.14159265358979
+        sage: n(1/7, digits=20), n(10^30/7, digits=20), n(2/3, digits=3)
+        (0.14285714285714285714, 1.4285714285714285714e29, 0.667)
+        sage: n(pi, digits=5)
+        3.1416
+        sage: n(pi, digits=40)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: n(..., digits=40): more than 15 digits of non-rational numbers is not implemented yet
+    """
+    from _sage_lang import _digits_real
+    if digits is not None and isinstance(x, (int, _Fraction)):
+        return _digits_real(x, digits)
     if hasattr(x, "n") and not isinstance(x, (int, float)):
-        return x.n()
-    return RealNumber(float(x))
+        v = x.n()
+    else:
+        v = RealNumber(float(x))
+    if digits is not None:
+        if digits > 15:
+            raise NotImplementedError("n(..., digits=%d): more than 15 digits of non-rational numbers is not implemented yet" % digits)
+        if isinstance(v, float):
+            return _digits_real(_Fraction(float(v)), digits)
+    return v
 
 
 N = n
@@ -320,7 +447,15 @@ def _jacobi(a, n):
 
 
 def is_prime(n):
-    """Whether n is prime (deterministic below 3.3e24, BPSW above)."""
+    """Whether n is prime (deterministic below 3.3e24, BPSW above).
+
+    EXAMPLES::
+
+        sage: is_prime(2), is_prime(91), is_prime(2^127 - 1)
+        (True, False, True)
+        sage: [p for p in range(30) if is_prime(p)]
+        [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+    """
     n = int(n)
     if n < 2:
         return False
@@ -335,7 +470,13 @@ def is_prime(n):
 
 
 def next_prime(n):
-    """The smallest prime > n."""
+    """The smallest prime > n.
+
+    EXAMPLES::
+
+        sage: next_prime(10), next_prime(2^64)
+        (11, 18446744073709551629)
+    """
     n = int(n) + 1
     if n <= 2:
         return 2
@@ -347,7 +488,13 @@ def next_prime(n):
 
 
 def previous_prime(n):
-    """The largest prime < n."""
+    """The largest prime < n.
+
+    EXAMPLES::
+
+        sage: previous_prime(10), previous_prime(2^64)
+        (7, 18446744073709551557)
+    """
     n = int(n) - 1
     if n < 2:
         raise ValueError("no prime less than 2")
@@ -357,7 +504,15 @@ def previous_prime(n):
 
 
 def prime_range(start, stop=None):
-    """The primes p with start <= p < stop (or 2 <= p < start)."""
+    """The primes p with start <= p < stop (or 2 <= p < start).
+
+    EXAMPLES::
+
+        sage: prime_range(20)
+        [2, 3, 5, 7, 11, 13, 17, 19]
+        sage: prime_range(100, 130)
+        [101, 103, 107, 109, 113, 127]
+    """
     if stop is None:
         start, stop = 2, start
     start, stop = max(int(start), 2), int(stop)
@@ -372,7 +527,13 @@ def prime_range(start, stop=None):
 
 
 def primes(start, stop=None):
-    """Iterate over the primes in [start, stop) (or [2, start))."""
+    """Iterate over the primes in [start, stop) (or [2, start)).
+
+    EXAMPLES::
+
+        sage: list(primes(10, 40))
+        [11, 13, 17, 19, 23, 29, 31, 37]
+    """
     if stop is None:
         start, stop = 2, start
     p = next_prime(int(start) - 1)
@@ -382,6 +543,13 @@ def primes(start, stop=None):
 
 
 def primes_first_n(k):
+    """The first k primes.
+
+    EXAMPLES::
+
+        sage: primes_first_n(10)
+        [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+    """
     out, p = [], 1
     while len(out) < k:
         p = next_prime(p)
@@ -390,13 +558,26 @@ def primes_first_n(k):
 
 
 def nth_prime(k):
+    """The k-th prime.
+
+    EXAMPLES::
+
+        sage: nth_prime(1), nth_prime(100), nth_prime(10000)
+        (2, 541, 104729)
+    """
     if k < 1:
         raise ValueError("n must be positive")
     return primes_first_n(k)[-1]
 
 
 def prime_pi(x):
-    """The number of primes <= x."""
+    """The number of primes <= x.
+
+    EXAMPLES::
+
+        sage: prime_pi(100), prime_pi(10^6)
+        (25, 78498)
+    """
     return len(prime_range(int(x) + 1))
 
 
@@ -443,7 +624,17 @@ def _factor_into(n, out):
 
 
 class Factorization(list):
-    """A factorization: a list of (prime, exponent) pairs that prints like Sage."""
+    """A factorization: a list of (prime, exponent) pairs that prints like Sage.
+
+    EXAMPLES::
+
+        sage: F = factor(360); F
+        2^3 * 3^2 * 5
+        sage: list(F)
+        [(2, 3), (3, 2), (5, 1)]
+        sage: F.value()
+        360
+    """
 
     def __init__(self, pairs, unit=1):
         super().__init__(pairs)
@@ -452,24 +643,51 @@ class Factorization(list):
     def __repr__(self):
         if not self:
             return str(self.unit)
-        s = " * ".join(f"{p}^{e}" if e > 1 else str(p) for p, e in self)
-        return ("-" if self.unit == -1 else "") + s
+        s = " * ".join(f"{p}^{e}" if e != 1 else str(p) for p, e in self)
+        return ("-1 * " if self.unit == -1 else "") + s
 
     __str__ = __repr__
 
     def value(self):
+        """The product of the factorization.
+
+        EXAMPLES::
+
+            sage: factor(-360).value()
+            -360
+        """
         v = self.unit
         for p, e in self:
             v *= p ** e
         return v
 
     def expand(self):
+        """The product of the factorization (as Sage's expand()).
+
+        EXAMPLES::
+
+            sage: factor(1001).expand()
+            1001
+        """
         return self.value()
 
 
 def factor(n):
     """The prime factorization of a nonzero integer (or Rational), or of a
-    polynomial."""
+    polynomial.
+
+    EXAMPLES::
+
+        sage: factor(2^64 + 1)
+        274177 * 67280421310721
+        sage: factor(-360)
+        -1 * 2^3 * 3^2 * 5
+        sage: factor(2/15)
+        2 * 3^-1 * 5^-1
+        sage: R.<x> = ZZ[]
+        sage: factor(x^4 - 1)
+        (x - 1) * (x + 1) * (x^2 + 1)
+    """
     if isinstance(n, (_Polynomial, _Expr)):
         return n.factor()
     if isinstance(n, _Fraction) and n.denominator != 1:
@@ -497,7 +715,13 @@ def factor(n):
 
 
 def divisors(n):
-    """The sorted list of positive divisors of n."""
+    """The sorted list of positive divisors of n.
+
+    EXAMPLES::
+
+        sage: divisors(28)
+        [1, 2, 4, 7, 14, 28]
+    """
     ds = [1]
     for p, e in factor(abs(int(n))):
         ds = [d * p ** k for d in ds for k in range(e + 1)]
@@ -505,15 +729,35 @@ def divisors(n):
 
 
 def number_of_divisors(n):
+    """The number of positive divisors of n.
+
+    EXAMPLES::
+
+        sage: number_of_divisors(28), number_of_divisors(2^10 * 3^5)
+        (6, 66)
+    """
     return prod(e + 1 for _, e in factor(n))
 
 
 def sigma(n, k=1):
-    """The sum of the k-th powers of the divisors of n."""
+    """The sum of the k-th powers of the divisors of n.
+
+    EXAMPLES::
+
+        sage: sigma(28), sigma(10, 2), sigma(10, 0)
+        (56, 130, 4)
+    """
     return sum(d ** k for d in divisors(n))
 
 
 def euler_phi(n):
+    """Euler's totient function.
+
+    EXAMPLES::
+
+        sage: euler_phi(36), [euler_phi(n) for n in range(1, 13)]
+        (12, [1, 1, 2, 2, 4, 2, 6, 4, 6, 4, 10, 4])
+    """
     n = int(n)
     if n < 1:
         return 0
@@ -524,6 +768,13 @@ def euler_phi(n):
 
 
 def moebius(n):
+    """The Moebius function.
+
+    EXAMPLES::
+
+        sage: [moebius(n) for n in range(1, 13)]
+        [1, -1, -1, 0, -1, 1, -1, 0, 0, 1, -1, 0]
+    """
     f = factor(n)
     if any(e > 1 for _, e in f):
         return 0
@@ -531,11 +782,24 @@ def moebius(n):
 
 
 def is_prime_power(n):
+    """Whether n is a prime power p^k with k >= 1.
+
+    EXAMPLES::
+
+        sage: is_prime_power(8), is_prime_power(12), is_prime_power(1)
+        (True, False, False)
+    """
     return int(n) > 1 and len(factor(n)) == 1
 
 
 def is_squarefree(n):
-    """True if no square of a prime divides n (n != 0)."""
+    """True if no square of a prime divides n (n != 0).
+
+    EXAMPLES::
+
+        sage: is_squarefree(30), is_squarefree(12)
+        (True, False)
+    """
     n = abs(int(n))
     if n == 0:
         return False
@@ -543,12 +807,29 @@ def is_squarefree(n):
 
 
 def is_square(n):
+    """Whether n is a perfect square.
+
+    EXAMPLES::
+
+        sage: is_square(144), is_square(145), is_square(9/4)
+        (True, False, True)
+    """
+    if isinstance(n, _Fraction) and n.denominator != 1:
+        return is_square(n.numerator) and is_square(n.denominator)
     n = int(n)
     return n >= 0 and isqrt(n) ** 2 == n
 
 
 def valuation(n, p):
-    """The exponent of the prime p in n."""
+    """The exponent of the prime p in n.
+
+    EXAMPLES::
+
+        sage: valuation(48, 2), valuation(3/8, 2), valuation(50, 5)
+        (4, -3, 2)
+    """
+    if isinstance(n, _Fraction) and n.denominator != 1:
+        return valuation(n.numerator, p) - valuation(n.denominator, p)
     n, v = int(n), 0
     if n == 0:
         raise ValueError("valuation of 0 is infinite")
@@ -559,7 +840,13 @@ def valuation(n, p):
 
 
 def digits(n, base=10):
-    """The digits of n in base, least significant first (as in Sage)."""
+    """The digits of n in base, least significant first (as in Sage).
+
+    EXAMPLES::
+
+        sage: digits(1234), digits(255, 16), digits(10, 2)  # sagebrush only
+        ([4, 3, 2, 1], [15, 15], [0, 1, 0, 1])
+    """
     n, out = abs(int(n)), []
     while n:
         n, d = divmod(n, base)
@@ -570,6 +857,13 @@ def digits(n, base=10):
 # ------------------------------------------------------------------ arithmetic
 
 def gcd(*args):
+    """The greatest common divisor.
+
+    EXAMPLES::
+
+        sage: gcd(12, 18), gcd([12, 18, 27]), gcd(2/3, 4/9)
+        (6, 3, 2/9)
+    """
     if len(args) == 1:
         args = tuple(args[0])
     if any(isinstance(a, _Polynomial) for a in args):
@@ -587,6 +881,13 @@ def gcd(*args):
 
 
 def lcm(*args):
+    """The least common multiple.
+
+    EXAMPLES::
+
+        sage: lcm(4, 6), lcm([2, 3, 4, 5])
+        (12, 60)
+    """
     if len(args) == 1:
         args = tuple(args[0])
     if any(isinstance(a, _Polynomial) for a in args):
@@ -598,7 +899,13 @@ def lcm(*args):
 
 
 def xgcd(a, b):
-    """(g, s, t) with g = gcd(a, b) = s*a + t*b."""
+    """(g, s, t) with g = gcd(a, b) = s*a + t*b.
+
+    EXAMPLES::
+
+        sage: xgcd(240, 46)
+        (2, -9, 47)
+    """
     x0, x1, y0, y1 = 1, 0, 0, 1
     while b:
         q, a, b = a // b, b, a % b
@@ -610,15 +917,37 @@ def xgcd(a, b):
 
 
 def inverse_mod(a, m):
+    """The inverse of a modulo m.
+
+    EXAMPLES::
+
+        sage: inverse_mod(3, 7), inverse_mod(17, 3120)
+        (5, 2753)
+    """
     return pow(a, -1, m)
 
 
 def power_mod(a, k, m):
+    """a^k modulo m.
+
+    EXAMPLES::
+
+        sage: power_mod(2, 100, 101), power_mod(3, -1, 7)
+        (1, 5)
+    """
     return pow(a, k, m)
 
 
 def crt(a, b, m=None, n=None):
-    """crt(a, b, m, n): x with x = a mod m and x = b mod n; or crt([a...], [m...])."""
+    """crt(a, b, m, n): x with x = a mod m and x = b mod n; or crt([a...], [m...]).
+
+    EXAMPLES::
+
+        sage: crt(2, 3, 5, 7)
+        17
+        sage: crt([2, 3, 1], [5, 7, 9])
+        262
+    """
     if m is None:
         rs, ms = list(a), list(b)
     else:
@@ -635,24 +964,49 @@ def crt(a, b, m=None, n=None):
 
 
 def binomial(n, k):
-    return _math.comb(n, k) if k >= 0 and n >= 0 else _binom_general(n, k)
+    """The binomial coefficient n choose k (n need not be an integer).
+
+    EXAMPLES::
+
+        sage: binomial(10, 3), binomial(-3, 2), binomial(1/2, 2)
+        (120, 6, -1/8)
+    """
+    if isinstance(n, int) and n >= 0 and k >= 0:
+        return _math.comb(n, k)
+    return _binom_general(n, k)
 
 
 def _binom_general(n, k):
+    k = int(k)
     if k < 0:
         return 0
     r = 1
     for i in range(k):
-        r = r * (n - i) // (i + 1)
-    return r
+        r = r * (n - i)
+    if isinstance(r, (int, _Fraction)):
+        return _q(_Fraction(r) / _math.factorial(k))
+    return r / _math.factorial(k)
 
 
 def factorial(n):
+    """n!
+
+    EXAMPLES::
+
+        sage: factorial(10), factorial(0)
+        (3628800, 1)
+    """
     return _math.factorial(n)
 
 
 def fibonacci(n):
-    """The n-th Fibonacci number (fast doubling)."""
+    """The n-th Fibonacci number (fast doubling).
+
+    EXAMPLES::
+
+        sage: [fibonacci(n) for n in range(10)], fibonacci(100)
+        ([0, 1, 1, 2, 3, 5, 8, 13, 21, 34], 354224848179261915075)
+    """
     def fib(k):
         if k == 0:
             return (0, 1)
@@ -667,12 +1021,25 @@ def fibonacci(n):
 
 
 def isqrt(n):
+    """The integer square root (floor of sqrt(n)).
+
+    EXAMPLES::
+
+        sage: isqrt(10), isqrt(10^20 + 1)
+        (3, 10000000000)
+    """
     return _math.isqrt(int(n))
 
 
 def sqrt(x):
     """Exact for perfect squares, symbolic (sqrt(2), 2*sqrt(3)) for other
-    exact numbers and expressions, numerical for reals."""
+    exact numbers and expressions, numerical for reals.
+
+    EXAMPLES::
+
+        sage: sqrt(16), sqrt(9/4), sqrt(2), sqrt(2.0)
+        (4, 3/2, sqrt(2), 1.41421356237310)
+    """
     if isinstance(x, float):
         if x < 0:
             return CC(0, _math.sqrt(-x))
@@ -694,7 +1061,13 @@ def sqrt(x):
 
 
 def srange(start, stop=None, step=1):
-    """range() that also accepts Rationals."""
+    """range() that also accepts Rationals.
+
+    EXAMPLES::
+
+        sage: srange(5), srange(1, 10, 3), srange(0, 1, 1/4)
+        ([0, 1, 2, 3, 4], [1, 4, 7], [0, 1/4, 1/2, 3/4])
+    """
     if stop is None:
         start, stop = 0, start
     out = []
@@ -706,6 +1079,13 @@ def srange(start, stop=None, step=1):
 
 
 def prod(xs, start=1):
+    """The product of the elements.
+
+    EXAMPLES::
+
+        sage: prod([1, 2, 3, 4]), prod(range(1, 11)), prod([])
+        (24, 3628800, 1)
+    """
     r = start
     for x in xs:
         r = r * x
@@ -713,6 +1093,14 @@ def prod(xs, start=1):
 
 
 def continued_fraction(x, nterms=20):
+    """The continued fraction of x (partial quotients).
+
+    EXAMPLES::
+
+        sage: continued_fraction(415/93)
+        [4; 2, 6, 7]
+        sage: continued_fraction(sqrt(2), 10)  # random
+    """
     if isinstance(x, _Expr):
         x = float(x)
     """The (simple) continued fraction partial quotients of x."""
@@ -724,7 +1112,7 @@ def continued_fraction(x, nterms=20):
             out.append(a)
             f -= a
             if f == 0:
-                return out
+                return _ContinuedFraction(out)
             f = 1 / f
     out = []
     for _ in range(nterms):
@@ -734,7 +1122,14 @@ def continued_fraction(x, nterms=20):
         if x < 1e-12:
             break
         x = 1 / x
-    return out
+    return _ContinuedFraction(out)
+
+
+class _ContinuedFraction(list):
+    """Partial quotients, printed as Sage prints a continued fraction."""
+
+    def __repr__(self):
+        return "[%s]" % (str(self[0]) + ("; " + ", ".join(str(a) for a in self[1:]) if len(self) > 1 else ""))
 
 
 # Sage's Integer methods on Python ints: (12).factor(), 13.is_prime(); under

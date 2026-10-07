@@ -1,0 +1,54 @@
+# Doctests
+
+Every public function of Sagebrush's Sage library should have examples in its
+docstring, in Sage's format, and they are tested:
+
+```
+sage: E = EllipticCurve('389a1')
+sage: E.analytic_rank()
+2
+```
+
+* `sagebrush -m _pyjs_doctest MODULE ...` runs them (`--long` includes
+  `# long time` examples, `--verbose` lists each one); `test/doctest.test.ts`
+  runs every module in `test/doctest-coverage.json` in `npm test`.
+* `sagebrush -m _pyjs_doctest --coverage --verbose MODULE` lists the functions
+  without examples.  `test/doctest-coverage.json` records how many have them:
+  the test fails if that goes down, so raise it when you add examples.
+* `python3 scripts/doctest-oracle.py lib/MODULE.py` runs the same examples in
+  real Sage, with Sage's doctester (Sage is an oracle: run, never read).  Mark
+  `# sagebrush only` the examples of Sagebrush-only functions or behaviour;
+  `# needs sage.libs.eclib` the ones the local Sage cannot run.
+  `scripts/oracle-summary.py REPORT` summarizes the disagreements.
+* `python3 scripts/add-examples.py lib/MODULE.py SPEC.py` inserts example
+  inputs from a spec, `python3 scripts/doctest-fix.py lib/MODULE.py` fills in
+  the outputs Sagebrush prints (`--all`: also replaces failing ones).  Read the
+  outputs, then check them with the oracle: a filled-in output only records
+  what Sagebrush does.
+
+Markers on an example's first line, as in Sage: `# random`, `# not tested`,
+`# long time`, `# abs tol 1e-10`, `# rel tol 1e-10`; `...` in an expected
+output matches anything, and a traceback matches by its last line.
+
+## Open problems
+
+A docstring section `OPEN PROBLEM:` describes an open problem that the examples
+after it illustrate, as tested doctests (for instance an unproved statement
+raising `NotImplementedError` with `proof=True`).
+`sagebrush -m _pyjs_doctest --open-problems MODULE ...` lists them all.
+
+## Gaps found by the oracle
+
+Differences from Sage that the doctests show and that are not fixed yet:
+
+* `ModularSymbols(...).T(n).matrix()`: Hecke matrices are not exposed by the
+  engine (characteristic polynomials are).
+* `Newforms(N)` with non-rational coefficients (`Newforms(23, names='a')`):
+  Sagebrush describes them by `newform_orbits(N)` instead.
+* `n(x, digits=d)` with d > 15 for non-rational x (pi, sqrt(2), ...): there is
+  no arbitrary-precision real field yet (rationals are exact to any digits).
+* `continued_fraction` of an irrational number uses floating point (Sage's is
+  exact and periodic for quadratic irrationals).
+* `EllipticCurve('label')` only knows conductors below 1000.
+* `DirichletGroup(N).galois_orbits()` lists the orbits in a different order
+  (Sage's comes from set iteration).

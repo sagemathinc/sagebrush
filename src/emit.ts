@@ -831,6 +831,7 @@ export class Emitter {
     this.splice(lines);
     this.line = st.line;
     this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc}, $g);`);
+    this.w(`${f}.$line = ${st.line};`);
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, f)));
   }
 

@@ -100,6 +100,43 @@ def ellipsis_iter(*args, step=None):
 
 # ------------------------------------------------------------------ RealNumber
 
+def _sage_float_layout(sign, digits, e):
+    """Sage's layout of the significant digits d1 d2 ... with exponent e."""
+    if -5 <= e <= 5:
+        if e >= 0:
+            if len(digits) <= e + 1:
+                digits = digits + "0" * (e + 2 - len(digits))
+            return sign + digits[: e + 1] + "." + digits[e + 1:]
+        return sign + "0." + "0" * (-e - 1) + digits
+    return sign + digits[0] + "." + digits[1:] + "e" + str(e)
+
+
+def _digits_real(q, digits):
+    """The rational q rounded to `digits` significant decimal digits (exact
+    arithmetic), as an element of RR printed with those digits: what
+    n(q, digits=...) gives in Sage."""
+    from fractions import Fraction
+    q = Fraction(q)
+    if q == 0:
+        return RealNumber(0.0)
+    sign = "-" if q < 0 else ""
+    a = abs(q)
+    e = len(str(a.numerator)) - len(str(a.denominator))
+    while Fraction(10) ** e > a:
+        e -= 1
+    while Fraction(10) ** (e + 1) <= a:
+        e += 1
+    scaled = a * Fraction(10) ** (digits - 1 - e)
+    m = scaled.numerator // scaled.denominator
+    if 2 * (scaled - m) >= 1:
+        m += 1
+    if m == 10 ** digits:
+        m //= 10
+        e += 1
+    x = _RealDigits(float(q))
+    x._repr = _sage_float_layout(sign, str(m), e)
+    return x
+
 class RealNumber(float):
     """A 53-bit real, printed as Sage prints elements of RR."""
 
@@ -201,6 +238,16 @@ class RealNumber(float):
 
     def abs(self):
         return abs(self)
+
+
+class _RealDigits(RealNumber):
+    """An element of RR shown to more digits than 53 bits carry (from
+    n(rational, digits=...)); arithmetic on it is in 53 bits."""
+
+    def __repr__(self):
+        return self._repr
+
+    __str__ = __repr__
 
 
 class _RealField:

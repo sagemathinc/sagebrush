@@ -122,6 +122,8 @@ try {
   await ev("(() => { const ta = document.querySelector('#tabtest'); ta.select(); document.execCommand('insertText', false, 'if 1:\\n'); })()");
   await key("Tab");
   ok((await ev("document.querySelector('#tabtest').value")) === "if 1:\n    ", "Tab after whitespace still indents");
+  out = await runCode("e.two_descent?");
+  ok(out.includes("Signature: e.two_descent(") && out.includes("EXAMPLES::") && out.includes("Type:      method"), "obj? shows the signature and docstring: " + JSON.stringify(out.slice(0, 80)));
   await ev("(() => { const ta = document.querySelector('#tabtest'); ta.select(); document.execCommand('insertText', false, 'pass'); ta.removeAttribute('id'); })()");
   out = await runCode("show(integrate_steps(x*cos(x^2), x))");
   await sleep(1500);
