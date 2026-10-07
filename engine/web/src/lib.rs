@@ -587,6 +587,15 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let e = curve(v.get("a"))?;
             Ok(json!(sagebrush_ap::aplist(&e, u(v, "n")?).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
         }
+        "quartic_search" => {
+            let p = |k: &str| -> Result<i128, String> {
+                big1(v.get(k))?.to_string().parse::<i128>().map_err(|_| format!("{} is too large for the quartic search", k))
+            };
+            let max_cost = v.get("max_cost").and_then(Value::as_f64).unwrap_or(1e10) as u64;
+            let s = sagebrush_ap::quartic::search(p("I")?, p("J")?, max_cost)?;
+            let qs: Vec<Value> = s.quartics.iter().map(|f| json!(f.iter().map(|x| x.to_string()).collect::<Vec<_>>())).collect();
+            Ok(json!({ "quartics": qs, "work": s.work, "amax": s.amax, "cost": s.cost }))
+        }
         "aplist_many" => {
             let es = v.get("curves").and_then(Value::as_array).ok_or("missing curves")?.iter().map(|c| curve(Some(c))).collect::<Result<Vec<_>, _>>()?;
             let r = sagebrush_ap::aplist_many(&es, u(v, "n")?);

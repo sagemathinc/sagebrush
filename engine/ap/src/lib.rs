@@ -13,6 +13,7 @@
 
 pub mod ec;
 pub mod fp;
+pub mod quartic;
 
 use ec::{Aff, Curve};
 use fp::{jacobi, Fp};

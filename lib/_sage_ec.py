@@ -1272,3 +1272,169 @@ def two_isogeny_descent(a, search_bound=60):
     upper = int(round(_m.log2(s1 * s2))) - 2
     out.update(selmer=(s1, s2), images=(i1, i2), rank_bounds=(max(lower, 0), upper), points=pts)
     return out
+
+
+# ------------------------------------------------------------------ general 2-descent
+# Birch and Swinnerton-Dyer's method: the elements of the 2-Selmer group are
+# the everywhere locally soluble integral quartics y^2 = g(x, z) with
+# invariants I = c4, J = 2 c6 of the minimal model (Cremona, Fisher and Stoll
+# 2010, Theorem 1.1), up to equivalence.  The search for the quartics with
+# reduced covariant is in Rust (engine/ap/src/quartic.rs).  A quartic's class
+# in A*/A*^2, A = Q[phi]/(phi^3 - 3 I phi + J), is that of (4 a phi - H)/3
+# (an invariant of the quartic); a point (X, Y) of Y^2 = X^3 - 27 I X - 27 J
+# has class X + 3 phi.  Classes are compared through characters: the
+# Legendre symbol at p of the value at a root of phi^3 - 3 I phi + J mod p,
+# for many auxiliary primes p (distinct classes of A(S,2) differ at about half
+# of all such characters, so 2^-k is the chance that k agree by accident).
+
+def _form_tr(f, p, q, r, s):
+    """f = [a, b, c, d, e] (sum f_k X^(4-k) Y^k) at X -> pX + qY, Y -> rX + sY."""
+    def pm(A, B):
+        o = [0] * (len(A) + len(B) - 1)
+        for i, x in enumerate(A):
+            for j, y in enumerate(B):
+                o[i + j] += x * y
+        return o
+    pw1, pw2 = [[1]], [[1]]
+    for _ in range(4):
+        pw1.append(pm(pw1[-1], [p, q]))
+        pw2.append(pm(pw2[-1], [r, s]))
+    out = [0] * 5
+    for k, fk in enumerate(f):
+        if fk:
+            for i, x in enumerate(pm(pw1[4 - k], pw2[k])):
+                out[i] += fk * x
+    return out
+
+
+def _descent_characters(I, J, bad, k=64):
+    out, p = [], 5
+    while len(out) < k:
+        p += 2
+        if any(p % q == 0 for q in range(3, _m.isqrt(p) + 1, 2)) or bad % p == 0:
+            continue
+        for r in _cubic_roots_mod(0, (-3 * I) % p, J % p, p):
+            out.append((p, r))
+    return out
+
+
+def _quartic_class(f, chars):
+    v = []
+    for p, r in chars:
+        g, k = f, 0
+        while True:
+            a, b, c = g[0], g[1], g[2]
+            x = _legendre((4 * a * r - (8 * a * c - 3 * b * b)) * _inv(3, p), p)
+            if x:
+                break
+            k += 1
+            g = _form_tr(f, 1, 0, k, 1)  # an equivalent quartic, the same class
+        v.append(x)
+    return tuple(v)
+
+
+def _point_class(X, chars):
+    n, d = X.numerator, X.denominator
+    return tuple(_legendre((n + 3 * r * d) * d, p) for p, r in chars)
+
+
+def _quartic_rational_point(f, B):
+    a, b, c, d, e = f
+    for z in range(0, B + 1):
+        for x in range(-B, B + 1):
+            if (z == 0 and x != 1) or _m.gcd(x, z) != 1:
+                continue
+            v = (((a * x + b * z) * x + c * z * z) * x + d * z ** 3) * x + e * z ** 4
+            if v > 0:
+                s = _m.isqrt(v)
+                if s * s == v:
+                    return x, z, s
+    return None
+
+
+def _xgcd(a, b):
+    if b == 0:
+        return (a, 1, 0) if a >= 0 else (-a, -1, 0)
+    g, x, y = _xgcd(b, a % b)
+    return g, y, x - (a // b) * y
+
+
+def _quartic_to_E(f, x0, z0, s):
+    """The image (X, Y) on Y^2 = X^3 - 27 I X - 27 J of (x0 : z0 : s) on
+    y^2 = f: move the point to (1 : 0); then X = -3H/(4a), Y = 27R/(8 s^3)."""
+    g, u, v = _xgcd(x0, z0)
+    h = _form_tr(f, x0, -v, z0, u)
+    a, b, c, d = h[:4]
+    H = 8 * a * c - 3 * b * b
+    R = b ** 3 + 8 * a * a * d - 4 * a * b * c
+    return _F(-3 * H, 4 * a), _F(27 * R, 8 * s ** 3)
+
+
+def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10):
+    """General 2-descent on a minimal model a without rational 2-torsion.
+    Returns a dict with the 2-Selmer group size, rank bounds (from it and from
+    the points found on E and on the quartics) and the points (on a).
+    The quartic search visits about |Delta|^(1/2) candidates; it raises
+    NotImplementedError beyond max_candidates (1e10 takes seconds)."""
+    from sagebrush._engine import call
+    c4, c6 = _c(a)
+    b2 = _b(a)[0]
+    a1, a3 = a[0], a[2]
+    D = _disc(a)
+    I, J = c4, 2 * c6
+    try:
+        res = call("quartic_search", I=str(I), J=str(J), max_cost=float(max_candidates))
+    except Exception as e:
+        if "too large" in str(e) or "beyond 128 bits" in str(e):
+            raise NotImplementedError("2-descent: %s" % e)
+        raise
+    qs = [[int(x) for x in f] for f in res["quartics"]]
+    primes = sorted({p for p, _ in _factor_int(abs(2 * D))})
+    chars = _descent_characters(I, J, 6 * D)
+    # points on E (naive height search): drop the characters that vanish at one
+    pts = []
+    for P in point_search(a, point_bound):
+        X = 36 * _F(P[0]) + 3 * b2
+        pts.append((P, _point_class(X, chars)))
+    keep = [i for i in range(len(chars)) if all(v[i] for _, v in pts)]
+    chars = [chars[i] for i in keep]
+    pts = [(P, tuple(v[i] for i in keep)) for P, v in pts]
+    sel, undecided = {}, 0
+    for f in qs:
+        g = list(reversed(f))
+        if not quartic_real_soluble(g):
+            continue
+        loc = [quartic_locally_soluble(g, p) for p in primes]
+        if False in loc:
+            continue
+        if None in loc:
+            undecided += 1
+        sel.setdefault(_quartic_class(f, chars), f)
+    one = tuple([1] * len(chars))
+    sel.setdefault(one, None)
+    span, gens = {one}, []
+    def add(v, P):
+        nonlocal span
+        if v not in span:
+            span |= {tuple(s * t for s, t in zip(v, w)) for w in span}
+            gens.append(P)
+    for P, v in pts:
+        add(v, P)
+    for cl, f in sel.items():
+        if f is None or cl in span:
+            continue
+        q = _quartic_rational_point(f, quartic_bound)
+        if q:
+            X, Y = _quartic_to_E(f, *q)
+            x = (X - 3 * b2) / 36
+            y = (Y / 108 - a1 * x - a3) / 2
+            assert on_curve(a, (x, y)), "2-descent: the covering map left the curve"
+            v = _point_class(X, chars)
+            if 0 not in v:
+                add(v, (x, y))
+    s = len(sel)
+    closed = all(tuple(x * y for x, y in zip(u, v)) in sel for u in sel for v in sel)
+    upper = (s - 1).bit_length() if closed else s.bit_length()  # log2 when a power of 2
+    lower = len(span).bit_length() - 1
+    return dict(selmer=s, rank_bounds=(lower, upper), points=gens, closed=closed,
+                undecided=undecided, quartics=len(qs), work=res["work"], cost=res["cost"])

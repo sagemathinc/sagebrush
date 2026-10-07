@@ -111,6 +111,17 @@ print(H.two_descent_by_two_isogeny(), H.rank())
   assert.deepEqual(out.trim().split("\n"), ["(0, 2) 0 4", "(1, 1) 1 1", "(2, 2) 2"]);
 });
 
+test("elliptic curves: general 2-descent (no rational 2-torsion)", () => {
+  const out = cli("--sage", "-c", `
+for ai in [[0,1,1,-2,0], [0,0,1,-7,6], [0,-1,1,-929,-10595]]:
+    E = EllipticCurve(ai)
+    print(E.two_descent(), E.selmer_rank(), E.rank_bounds())
+`);
+  // 389a1 rank 2, 5077a1 rank 3; 571a1 has Sha = (Z/2)^2, so descent cannot
+  // decide, but analytic rank 0 proves rank 0
+  assert.deepEqual(out.trim().split("\n"), ["True 2 (2, 2)", "True 3 (3, 3)", "False 2 (0, 0)"]);
+});
+
 test("elliptic curves: analytic rank (numerical beyond 1; proof=True only for 0 and 1)", () => {
   const out = cli("--sage", "-c", `
 for ai in [[0,0,1,-1,0], [0,1,1,-2,0], [0,0,1,-7,6]]:
