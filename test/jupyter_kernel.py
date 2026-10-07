@@ -88,6 +88,18 @@ check("state persists", of(m, "execute_result")[0]["data"]["text/plain"] == "4",
 r, m = run(kc, "x = var('x'); plot(sin(x), (x, 0, 3))")
 d = of(m, "display_data") + of(m, "execute_result")
 check("SVG display", any("image/svg+xml" in c["data"] for c in d), [list(c["data"]) for c in d])
+# a big 3D scene goes to a page in .sagebrush/, shown in an iframe: the output
+# stays far under the front ends' output limits (CoCalc's is 1 MB per cell)
+big = tempfile.mkdtemp(prefix="sagebrush-k3d-")
+r, m = run(kc, "import os, k3d, numpy as np\nos.chdir(%r)\nk3d.points(np.random.rand(150000, 3).astype(np.float32))" % big, timeout=120)
+d = of(m, "display_data") + of(m, "execute_result")
+sizes = [sum(len(v) for v in c["data"].values()) for c in d]
+check("big 3D scene: an iframe on a saved page", d and max(sizes) < 5000 and "<iframe" in d[-1]["data"]["text/html"]
+      and not any("application/vnd.sagebrush.scene3d+json" in c["data"] for c in d)
+      and len(os.listdir(os.path.join(big, ".sagebrush"))) == 1, (sizes, of(m, "error"), of(m, "stream")))
+shutil.rmtree(big, ignore_errors=True)
+r, m = run(kc, "show(factor(x^4 - 1))")
+check("show() typesets a factorization", any("\\left(x - 1\\right)" in c["data"].get("text/latex", "") for c in of(m, "display_data")), m)
 r, m = run(kc, "1/0")
 e = of(m, "error")
 check("error", r["status"] == "error" and e and e[0]["ename"] == "ZeroDivisionError", (r, e))

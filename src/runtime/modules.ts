@@ -643,6 +643,26 @@ newBuiltinModule("gc", (m) => {
   m.callbacks = [];
 });
 
+// ------------------------------------------------------------------ the working directory
+// Node's worker threads (the Jupyter kernel runs Python in one) cannot chdir,
+// so there os.chdir keeps a virtual working directory that relative paths
+// resolve against.
+let virtualCwd: string | null = null;
+const cwd = (): string => virtualCwd ?? process.cwd();
+const at = (p: any): any => (virtualCwd !== null && typeof p === "string" && !p.startsWith("/") ? (p === "." || p === "" ? virtualCwd : virtualCwd.replace(/\/$/, "") + "/" + p) : p);
+function chdir(p: string) {
+  try {
+    process.chdir(at(p));
+    if (virtualCwd !== null) virtualCwd = process.cwd();
+  } catch (e: any) {
+    if (e?.code !== "ERR_WORKER_UNSUPPORTED_OPERATION") throw e;
+    const fs = require("fs"), path = require("path");
+    const d = path.resolve(cwd(), p);
+    if (!fs.statSync(d).isDirectory()) throw Object.assign(new Error(`ENOTDIR: not a directory, chdir '${p}'`), { code: "ENOTDIR", errno: -20 });
+    virtualCwd = d;
+  }
+}
+
 // ------------------------------------------------------------------ _fs (backs open() in lib/_pyjs_open.py)
 
 newBuiltinModule("_fs", (m) => {
@@ -654,7 +674,7 @@ newBuiltinModule("_fs", (m) => {
   };
   fn(m, "read", (path: string) => {
     try {
-      return new PyBytes(new Uint8Array(fs.readFileSync(path)));
+      return new PyBytes(new Uint8Array(fs.readFileSync(at(path))));
     } catch (e: any) {
       return oserr(e, path);
     }
@@ -662,8 +682,8 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "write", (path: string, data: any, append: any) => {
     try {
       const b = O.bufferOf(data)!;
-      if (O.truth(append)) fs.appendFileSync(path, b);
-      else fs.writeFileSync(path, b);
+      if (O.truth(append)) fs.appendFileSync(at(path), b);
+      else fs.writeFileSync(at(path), b);
     } catch (e: any) {
       return oserr(e, path);
     }
@@ -677,8 +697,8 @@ newBuiltinModule("_fs", (m) => {
       return false;
     }
   };
-  fn(m, "exists", (path: string) => quiet(() => fs.existsSync(path)));
-  fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(path) && fs.statSync(path).isDirectory()));
+  fn(m, "exists", (path: string) => quiet(() => fs.existsSync(at(path))));
+  fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(at(path)) && fs.statSync(at(path)).isDirectory()));
 });
 
 // ------------------------------------------------------------------ os
@@ -717,23 +737,23 @@ newBuiltinModule("os", (m) => {
   }
   m.environ = env;
   fn(m, "getenv", (k: string, d: any = null) => dictGet(env, k) ?? d);
-  wrap("getcwd", () => process.cwd());
-  wrap("chdir", (p: string) => (process.chdir(p), null));
-  wrap("listdir", (p: string = ".") => fs.readdirSync(p));
-  wrap("mkdir", (p: string, _mode: any = 0o777) => (fs.mkdirSync(p), null));
+  wrap("getcwd", () => cwd());
+  wrap("chdir", (p: string) => (chdir(p), null));
+  wrap("listdir", (p: string = ".") => fs.readdirSync(at(p)));
+  wrap("mkdir", (p: string, _mode: any = 0o777) => (fs.mkdirSync(at(p)), null));
   wrap("makedirs", (p: string, _mode: any = 0o777, exist_ok: any = false) => {
-    if (fs.existsSync(p) && !O.truth(exist_ok)) fs.mkdirSync(p);
-    fs.mkdirSync(p, { recursive: true });
+    if (fs.existsSync(at(p)) && !O.truth(exist_ok)) fs.mkdirSync(at(p));
+    fs.mkdirSync(at(p), { recursive: true });
     return null;
   });
   m.makedirs.$sig = { args: ["name", "mode", "exist_ok"], posonly: 0, vararg: null, kwonly: [], kwarg: null };
-  wrap("remove", (p: string) => (fs.unlinkSync(p), null));
-  wrap("unlink", (p: string) => (fs.unlinkSync(p), null));
-  wrap("rmdir", (p: string) => (fs.rmdirSync(p), null));
-  wrap("rename", (a: string, b: string) => (fs.renameSync(a, b), null));
-  wrap("replace", (a: string, b: string) => (fs.renameSync(a, b), null));
+  wrap("remove", (p: string) => (fs.unlinkSync(at(p)), null));
+  wrap("unlink", (p: string) => (fs.unlinkSync(at(p)), null));
+  wrap("rmdir", (p: string) => (fs.rmdirSync(at(p)), null));
+  wrap("rename", (a: string, b: string) => (fs.renameSync(at(a), at(b)), null));
+  wrap("replace", (a: string, b: string) => (fs.renameSync(at(a), at(b)), null));
   wrap("stat", (p: string) => {
-    const s = fs.statSync(p);
+    const s = fs.statSync(at(p));
     return Ty.structseq("os.stat_result", ["st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime", "st_mtime", "st_ctime"], [s.mode, s.ino, s.dev, s.nlink, s.uid, s.gid, s.size, O.mkfloat(s.atimeMs / 1000), O.mkfloat(s.mtimeMs / 1000), O.mkfloat(s.ctimeMs / 1000)]);
   });
   fn(m, "uname", () => Ty.structseq("posix.uname_result", ["sysname", "nodename", "release", "version", "machine"], [nodeOs.type(), nodeOs.hostname(), nodeOs.release(), String(nodeOs.version?.() ?? ""), nodeOs.machine?.() ?? nodeOs.arch()]));

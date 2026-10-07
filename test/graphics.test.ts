@@ -141,6 +141,20 @@ print([(o['color'], o['opacity'], o.get('flat'), len(o['idx']) // 3) for o in s[
   assert.equal(lines[4], "[('#ffa500', 0.5, True, 20), ('#0000ff', 1.0, True, 4)]");
 });
 
+test("LaTeX of polynomials and factorizations", () => {
+  const out = cli("--sage", "-c", `
+R.<x> = QQ[]
+print(latex(x^20 - 1/2*x + 3))
+print(latex((x^4 - 1).factor()))
+print(latex(ModularSymbols(11, 2).hecke_operator(2).charpoly().factor()))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "x^{20} - \\frac{1}{2} x + 3",
+    "\\left(x - 1\\right) \\cdot \\left(x + 1\\right) \\cdot \\left(x^{2} + 1\\right)",
+    "\\left(x - 3\\right) \\cdot \\left(x + 2\\right)^{2}",
+  ]);
+});
+
 test("contour, density, implicit, region, vector and slope field plots", () => {
   const out = cli("--sage", "-c", `
 y = var('y')

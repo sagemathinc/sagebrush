@@ -410,8 +410,16 @@ class Graphics3d:
         return viewer_html(scene, self._svg(), self.description(), standalone)
 
     def _repr_mimebundle_(self, include=None, exclude=None):
-        return {SCENE_MIME: _json.dumps(self._scene(), separators=(",", ":")),
-                "image/svg+xml": self._svg(), "text/html": self._html(),
+        scene = _json.dumps(self._scene(), separators=(",", ":"))
+        if _in_jupyter():
+            def page():
+                s = self._scene()
+                s["fill"] = True
+                return viewer_html(_json.dumps(s, separators=(",", ":")), self._svg(), self.description(), standalone=True, full=True)
+            out = jupyter_bundle(scene, self._svg(), self.description(), page)
+            out["text/plain"] = repr(self)
+            return out
+        return {SCENE_MIME: scene, "image/svg+xml": self._svg(), "text/html": self._html(),
                 "text/plain": repr(self)}
 
     def show(self, **options):
@@ -455,6 +463,50 @@ def viewer_html(scene_json, svg, title, standalone=False, full=False):
                 '<title>%s</title></head><body style="font-family:system-ui,sans-serif;margin:0;padding:8px">%s</body></html>') % (
                     _esc(title[:80]), body)
     return body
+
+
+# Jupyter front ends cap a cell's output (CoCalc at 1 MB), so a bigger scene
+# is shown from a standalone page written next to the notebook.
+JUPYTER_INLINE = 600000
+
+
+def _in_jupyter():
+    import builtins
+    return bool(getattr(builtins, "__sagebrush_jupyter__", False))
+
+
+def _urlq(s):
+    safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~/"
+    return "".join(c if c in safe else "".join("%%%02X" % b for b in c.encode("utf-8")) for c in s)
+
+
+def jupyter_bundle(scene_json, svg, title, page):
+    """The Jupyter mime bundle of a 3D scene: the viewer embedded in HTML, or
+    for a big scene an iframe on the page page() (a standalone viewer),
+    saved as .sagebrush/plot3d-<checksum>.html in the working directory."""
+    import os
+    import zlib
+    if len(scene_json) + len(svg) <= JUPYTER_INLINE:
+        return {"text/html": viewer_html(scene_json, svg, title), "image/svg+xml": svg, "text/plain": title}
+    path = os.path.join(".sagebrush", "plot3d-%08x-%x.html" % (zlib.crc32(scene_json.encode()), len(scene_json)))
+    if not os.path.exists(path):
+        os.makedirs(".sagebrush", exist_ok=True)
+        with open(path, "w") as f:
+            f.write(page())
+    size = "%.1f MB" % (os.path.getsize(path) / 1e6)
+    full = os.path.abspath(path)
+    project, home = os.environ.get("COCALC_PROJECT_ID"), os.environ.get("HOME", "").rstrip("/")
+    if project:
+        # CoCalc serves project files at /<project_id>/files/<path from home>
+        rel = _urlq(full[len(home) + 1:]) if home and full.startswith(home + "/") else "%2F" + _urlq(full[1:])
+        url = "/%s/files/%s" % (project, rel)
+        html = ('<iframe src="%s" title="%s" style="width:100%%;height:560px;border:0"></iframe>'
+                '<div style="font-size:12px;opacity:.7">%s &middot; <a href="%s" target="_blank">open full size</a> (%s)</div>') % (
+                    url, _esc(title[:200]), _esc(path), url, size)
+    else:
+        html = ('<div style="font-size:13px">The interactive 3D view is in <a href="%s" target="_blank">%s</a> '
+                '(%s; open it in a browser).</div>') % (_urlq(path), _esc(path), size)
+    return {"text/html": html, "text/plain": "%s\n(interactive view: %s)" % (title, path)}
 
 
 def _short(v):

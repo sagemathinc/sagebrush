@@ -772,8 +772,14 @@ function clampRange(s: string, start: any, end: any): [number, number] {
 }
 method(S, "join", (sep: string, items: any) => {
   const parts = Array.isArray(items) ? items : O.toArray(items);
-  for (let i = 0; i < parts.length; i++) if (typeof parts[i] !== "string") raise(T.TypeError, `sequence item ${i}: expected str instance, ${typeName(parts[i])} found`);
-  return parts.join(sep);
+  let out = parts;
+  for (let i = 0; i < parts.length; i++) {
+    if (typeof parts[i] === "string") continue;
+    // an instance of a str subclass joins as its string
+    if (parts[i] instanceof PrimBox && typeof parts[i].$v === "string") { if (out === parts) out = parts.slice(); out[i] = parts[i].$v; continue; }
+    raise(T.TypeError, `sequence item ${i}: expected str instance, ${typeName(parts[i])} found`);
+  }
+  return out.join(sep);
 });
 method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
   const m = Number(maxsplit);

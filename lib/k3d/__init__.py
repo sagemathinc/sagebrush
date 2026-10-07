@@ -505,14 +505,15 @@ class Plot:
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         import sage_plot3d as p3
-        import builtins
         scene = self._scene_json()
         svg = self._svg()
-        out = {SCENE_MIME: scene, "image/svg+xml": svg, "text/plain": repr(self)}
-        if getattr(builtins, "__pyjs_display__", None) is None:
-            # Jupyter: HTML with the viewer embedded (the page has its own)
-            out["text/html"] = p3.viewer_html(scene, svg, self.description())
-        return out
+        if p3._in_jupyter():
+            # Jupyter: HTML with the viewer embedded, or for a big scene an
+            # iframe on the snapshot (the Sagebrush notebook has its own viewer)
+            out = p3.jupyter_bundle(scene, svg, self.description(), self.get_snapshot)
+            out["text/plain"] = repr(self)
+            return out
+        return {SCENE_MIME: scene, "image/svg+xml": svg, "text/plain": repr(self)}
 
     def display(self, **kwargs):
         from _graphics import host_display
