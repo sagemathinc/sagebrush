@@ -14,6 +14,7 @@
 pub mod ec;
 pub mod fp;
 pub mod quartic;
+pub mod search;
 
 use ec::{Aff, Curve};
 use fp::{jacobi, Fp};

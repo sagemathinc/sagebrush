@@ -444,6 +444,9 @@
       if (w !== W || h !== H) {
         W = w; H = h;
         canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+        // the CSS size is the size the labels are placed for (a wider
+        // container must not stretch the canvas away from them)
+        canvas.style.width = w + "px";
         canvas.style.height = h + "px";
       }
       if (!fitted && scene.fit !== false) fit();
