@@ -78,3 +78,23 @@ print(H.root_number(), H.analytic_rank())
     "-1 1",
   ]);
 });
+
+test("elliptic curves: points, canonical heights, regulators, Sha in rank 1", () => {
+  const out = cli("--sage", "-c", `
+E = EllipticCurve('37a1')
+P = E(0, 0)
+print(P, 2*P, -P, P.order(), round(float(P.height()), 12))
+print(E.gens(), round(float(E.regulator()), 12), E.sha().an())
+print(EllipticCurve('11a1').torsion_points())
+G = EllipticCurve('389a1')
+print(round(float(G.regulator_of_points([G(-1,1), G(0,0)])), 12))
+print([EllipticCurve(l).sha().an() for l in ['43a1', '53a1', '58a1', '61a1']])
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "(0 : 0 : 1) (1 : 0 : 1) (0 : -1 : 1) +Infinity 0.05111140824",
+    "[(0 : -1 : 1)] 0.05111140824 1",
+    "[(0 : 1 : 0), (5 : -6 : 1), (5 : 5 : 1), (16 : -61 : 1), (16 : 60 : 1)]",
+    "0.152460177943",
+    "[1, 1, 1, 1]",
+  ]);
+});
