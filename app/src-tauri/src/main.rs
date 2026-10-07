@@ -51,6 +51,13 @@ fn main() {
         .skip(1)
         .filter(|a| !a.starts_with('-'))
         .collect();
+    // WebKitGTK (Linux) leaves SharedArrayBuffer out of workers even in a
+    // cross-origin isolated page (Ubuntu 22.04's, at least); JavaScriptCore
+    // takes its options from JSC_* variables, which its web process inherits
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("JSC_useSharedArrayBuffer").is_none() {
+        std::env::set_var("JSC_useSharedArrayBuffer", "1");
+    }
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
