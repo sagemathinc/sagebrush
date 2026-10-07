@@ -571,3 +571,400 @@ def recognize(x, dens, tol=1e-8):
                 best = _F(m, d)
             break
     return best
+
+
+# ------------------------------------------------------------------ points
+# Affine points are (x, y) pairs of Fractions; None is the point at infinity.
+
+def on_curve(a, P):
+    if P is None:
+        return True
+    a1, a2, a3, a4, a6 = a
+    x, y = P
+    return y * y + a1 * x * y + a3 * y == x ** 3 + a2 * x * x + a4 * x + a6
+
+
+def neg(a, P):
+    if P is None:
+        return None
+    a1, a2, a3, a4, a6 = a
+    x, y = P
+    return (x, -y - a1 * x - a3)
+
+
+def add(a, P, Q):
+    """P + Q on y^2 + a1 xy + a3 y = x^3 + a2 x^2 + a4 x + a6."""
+    if P is None:
+        return Q
+    if Q is None:
+        return P
+    a1, a2, a3, a4, a6 = a
+    x1, y1 = P
+    x2, y2 = Q
+    if x1 == x2:
+        if y1 + y2 + a1 * x2 + a3 == 0:
+            return None
+        lam = (3 * x1 * x1 + 2 * a2 * x1 + a4 - a1 * y1) / (2 * y1 + a1 * x1 + a3)
+        nu = (-x1 ** 3 + a4 * x1 + 2 * a6 - a3 * y1) / (2 * y1 + a1 * x1 + a3)
+    else:
+        lam = (y2 - y1) / (x2 - x1)
+        nu = (y1 * x2 - y2 * x1) / (x2 - x1)
+    x3 = lam * lam + a1 * lam - a2 - x1 - x2
+    y3 = -(lam + a1) * x3 - nu - a3
+    return (x3, y3)
+
+
+def mul(a, n, P):
+    n = int(n)
+    if n < 0:
+        return mul(a, -n, neg(a, P))
+    R = None
+    Q = P
+    while n:
+        if n & 1:
+            R = add(a, R, Q)
+        Q = add(a, Q, Q)
+        n >>= 1
+    return R
+
+
+def point_order(a, P, bound=12):
+    """The order of P if it is a torsion point (orders are at most 12 over Q), else 0."""
+    Q = P
+    for n in range(1, bound + 1):
+        if Q is None:
+            return n
+        Q = add(a, Q, P)
+        if Q is not None and (Q[0].denominator > 10 ** 6 and n > 1):
+            # torsion points are nearly integral (Nagell-Lutz on any model with integral a_i: denominators divide 4)
+            pass
+    return 0 if Q is not None else bound + 1
+
+
+def lift_x(a, x):
+    """The points with x-coordinate x (a Fraction), as a list."""
+    a1, a2, a3, a4, a6 = a
+    x = _F(x)
+    # y^2 + (a1 x + a3) y - (x^3 + a2 x^2 + a4 x + a6) = 0
+    B = a1 * x + a3
+    C = -(x ** 3 + a2 * x * x + a4 * x + a6)
+    disc = B * B - 4 * C
+    if disc < 0:
+        return []
+    n, d = disc.numerator, disc.denominator
+    rn, rd = _m.isqrt(n), _m.isqrt(d)
+    if rn * rn != n or rd * rd != d:
+        return []
+    r = _F(rn, rd)
+    ys = sorted({(-B + r) / 2, (-B - r) / 2})
+    return [(x, y) for y in ys]
+
+
+def point_search(a, H, max_points=None):
+    """Points with x = r/s^2, |r| <= e^H... in practice |r| <= H_r and s <= H_s:
+    here H is the bound on the naive logarithmic height log max(|r|, s^2)."""
+    a1, a2, a3, a4, a6 = a
+    b2, b4, b6, b8 = _b(a)
+    R = int(_m.exp(H))
+    S = _m.isqrt(R)
+    out = []
+    for s in range(1, S + 1):
+        s2 = s * s
+        s4, s6 = s2 * s2, s2 * s2 * s2
+        for r in range(-R, R + 1):
+            if s > 1 and _m.gcd(r, s) != 1:
+                continue
+            # (2y + a1 x + a3)^2 = f(x) with x = r/s^2: s^6 f(x) = 4r^3 + b2 r^2 s^2 + 2 b4 r s^4 + b6 s^6
+            F = 4 * r * r * r + b2 * r * r * s2 + 2 * b4 * r * s4 + b6 * s6
+            if F < 0:
+                continue
+            q = _m.isqrt(F)
+            if q * q != F:
+                continue
+            x = _F(r, s2)
+            for P in lift_x(a, x):
+                out.append(P)
+            if max_points and len(out) >= max_points:
+                return out
+    return out
+
+
+# ------------------------------------------------------------------ canonical height
+
+def _periods(a):
+    """(w1, w2) with w1 > 0 the least real period of the Neron lattice and
+    tau = w2 / w1 in the upper half plane; and the real roots data."""
+    b2, b4, b6, b8 = _b(a)
+    D = _disc(a)
+    coeffs = (4, b2, 2 * b4, b6)
+    if D > 0:
+        E1, E2, E3 = _real_roots_fixed(coeffs)
+        e1, e2, e3 = _fx(E1), _fx(E2), _fx(E3)
+        w1 = _m.pi / _agm(_cm.sqrt(_fx(E1 - E3)), _cm.sqrt(_fx(E1 - E2))).real
+        w2 = 1j * _m.pi / _agm(_cm.sqrt(_fx(E1 - E3)), _cm.sqrt(_fx(E2 - E3))).real
+        return w1, w2, (e1, e2, e3)
+    e = _cubic_roots(4.0, float(b2), float(2 * b4), float(b6))
+    E1 = _refine_real(coeffs, min(e, key=lambda x: abs(x.imag)).real)
+    one = 1 << _K
+    AA = 3 * E1 + b2 * one // 4
+    BB2 = (6 * E1 * E1 + b2 * E1 * one + b4 * one * one) // 2
+    BB = _m.isqrt(max(BB2, 0))
+    bb = _fx(BB)
+    w1 = (2 * _m.pi / _agm(complex(2 * _m.sqrt(bb)), _cm.sqrt(_fx(2 * BB + AA)))).real
+    w2 = -w1 / 2 + 1j * _m.pi / _agm(complex(2 * _m.sqrt(bb)), _cm.sqrt(_fx(2 * BB - AA))).real
+    e1 = _fx(E1)
+    e23 = [z for z in e if abs(z.imag) > 0] or e
+    return w1, w2, (e1,)
+
+
+def _gauss_legendre(f, lo, hi, n=20):
+    # nodes and weights for n = 20 (computed once)
+    global _GL
+    try:
+        nodes = _GL
+    except NameError:
+        nodes = None
+    if nodes is None:
+        xs = []
+        for i in range(1, n + 1):
+            x = _m.cos(_m.pi * (i - 0.25) / (n + 0.5))
+            for _ in range(100):
+                p0, p1 = 1.0, x
+                for k in range(2, n + 1):
+                    p0, p1 = p1, ((2 * k - 1) * x * p1 - (k - 1) * p0) / k
+                dp = n * (x * p1 - p0) / (x * x - 1)
+                dx = p1 / dp
+                x -= dx
+                if abs(dx) < 1e-16:
+                    break
+            xs.append((x, 2 / ((1 - x * x) * dp * dp)))
+        _GL = xs
+        nodes = xs
+    m, h = (lo + hi) / 2, (hi - lo) / 2
+    return h * sum(w * f(m + h * x) for x, w in nodes)
+
+
+def _integrate(f, lo, hi, depth=0):
+    """Adaptive Gauss-Legendre."""
+    whole = _gauss_legendre(f, lo, hi)
+    mid = (lo + hi) / 2
+    halves = _gauss_legendre(f, lo, mid) + _gauss_legendre(f, mid, hi)
+    if abs(whole - halves) <= 1e-15 * max(1.0, abs(halves)) or depth > 40:
+        return halves
+    return _integrate(f, lo, mid, depth + 1) + _integrate(f, mid, hi, depth + 1)
+
+
+def elliptic_log_real(a, P, roots):
+    """z in (0, w1/2]: the integral of dt / sqrt(f(t)) from x(P) to infinity, for
+    a real point P on the identity component (x >= e1, the largest real root)."""
+    x = float(P[0])
+    if len(roots) == 3:
+        e1, e2, e3 = roots
+        al, be = e1 - e2, e1 - e3
+        g = lambda r: 1 / _m.sqrt((1 + al * r * r) * (1 + be * r * r))
+    else:
+        e1 = roots[0]
+        b2, b4, b6, b8 = _b(a)
+        # f(t) = 4 (t - e1)(t^2 + p t + q): the quadratic factor
+        p_ = b2 / 4 + e1
+        q_ = (b4 / 2 + e1 * p_)
+        # (t - e2)(t - e3) = t^2 + p t + q; with t = e1 + 1/r^2: r^-4 (1 + (2 e1 + p) r^2 + (e1^2 + p e1 + q) r^4)
+        c1, c2 = 2 * e1 + p_, e1 * e1 + p_ * e1 + q_
+        g = lambda r: 1 / _m.sqrt(1 + c1 * r * r + c2 * r ** 4)
+    if x - e1 <= 0:
+        r0 = 1e8
+    else:
+        r0 = 1 / _m.sqrt(x - e1)
+    # split [0, r0] geometrically for large r0
+    pts = [0.0]
+    t = min(r0, 1.0)
+    pts.append(t)
+    while t < r0:
+        t = min(t * 4, r0)
+        pts.append(t)
+    return sum(_integrate(g, lo, hi) for lo, hi in zip(pts, pts[1:]))
+
+
+def _on_identity_component(a, P, roots):
+    return len(roots) == 1 or float(P[0]) >= roots[0] - 1e-9 * max(1, abs(roots[0]))
+
+
+def _reduces_nonsingular(a, P, p):
+    """Does P (on a model integral and minimal at p) reduce to a nonsingular point mod p?"""
+    a1, a2, a3, a4, a6 = a
+    x, y = P
+    if x.denominator % p == 0:
+        return True  # reduces to O
+    def ip(t):  # t mod p for p-integral t
+        return t.numerator * pow(t.denominator, -1, p) % p
+    xp, yp = ip(x), ip(y)
+    fx = (3 * xp * xp + 2 * a2 * xp + a4 - a1 * yp) % p
+    fy = (2 * yp + a1 * xp + a3) % p
+    return fx != 0 or fy != 0
+
+
+def _vq(t, p):
+    """p-adic valuation of a nonzero Fraction (a large number for 0)."""
+    if t == 0:
+        return 10 ** 6
+    return _v(t.numerator, p) - _v(t.denominator, p)
+
+
+def _local_height_finite(a, P, p):
+    """lambda_p(P) / log p for P on a model minimal at p (Silverman, "Computing
+    heights on elliptic curves", Math. Comp. 51 (1988), Theorem 5.2), without
+    the (1/12) v(Delta) term."""
+    a1, a2, a3, a4, a6 = a
+    b2, b4, b6, b8 = _b(a)
+    x, y = P
+    A = _vq(3 * x * x + 2 * a2 * x + a4 - a1 * y, p)
+    B = _vq(2 * y + a1 * x + a3, p)
+    if A <= 0 or B <= 0:
+        return max(0, -_vq(x, p)) / 2
+    N = _v(_disc(a), p)
+    c4, c6 = _c(a)
+    if c4 % p:
+        M = min(B, N / 2)
+        return -M * (N - M) / (2 * N)
+    C = _vq(3 * x ** 4 + b2 * x ** 3 + 3 * b4 * x * x + 3 * b6 * x + b8, p)
+    if C >= 3 * B:
+        return -B / 3
+    return -C / 8
+
+
+def canonical_height(a, P, bad_primes):
+    """The Neron-Tate height of P on the minimal model a, normalized as in
+    Cremona's tables and Sage (h(P) ~ log max(|r|, s^2) for x = r/s^2)."""
+    if P is None:
+        return 0.0
+    w1, w2, roots = _periods(a)
+    Q, n = P, 1
+    if not _on_identity_component(a, Q, roots):
+        Q, n = add(a, P, P), 2
+        if Q is None:
+            return 0.0
+    # the archimedean Neron function at z = the elliptic log of Q (real)
+    z = elliptic_log_real(a, Q, roots)
+    tau = w2 / w1
+    qq = _cm.exp(2j * _m.pi * tau)
+    u = _cm.exp(2j * _m.pi * z / w1)
+    lam = -(1 / 12.0) * _m.log(abs(qq)) - _m.log(abs(1 - u))
+    qn = qq
+    for _ in range(2000):
+        lam -= _m.log(abs((1 - qn * u) * (1 - qn / u)))
+        if abs(qn) < 1e-18:
+            break
+        qn *= qq
+    # the finite places: log of the denominator away from the bad primes,
+    # and Silverman's local heights at them
+    d = _m.isqrt(Q[0].denominator)
+    fin = 0.0
+    for p in bad_primes:
+        k = _v(d, p)
+        d //= p ** k
+        fin += _local_height_finite(a, Q, p) * _m.log(p)
+    fin += _m.log(d)
+    h = lam + fin + _m.log(abs(_disc(a))) / 12
+    return 2 * h / (n * n)
+
+
+def height_pairing(a, P, Q, bad):
+    return (canonical_height(a, add(a, P, Q), bad) - canonical_height(a, P, bad) - canonical_height(a, Q, bad)) / 2
+
+
+def regulator(a, pts, bad):
+    """det of the height pairing matrix of the points."""
+    r = len(pts)
+    M = [[0.0] * r for _ in range(r)]
+    for i in range(r):
+        M[i][i] = canonical_height(a, pts[i], bad)
+        for j in range(i + 1, r):
+            M[i][j] = M[j][i] = height_pairing(a, pts[i], pts[j], bad)
+    # Gaussian elimination
+    det = 1.0
+    for i in range(r):
+        piv = max(range(i, r), key=lambda k: abs(M[k][i]))
+        if M[piv][i] == 0:
+            return 0.0
+        if piv != i:
+            M[i], M[piv] = M[piv], M[i]
+            det = -det
+        det *= M[i][i]
+        for k in range(i + 1, r):
+            f = M[k][i] / M[i][i]
+            for j in range(i, r):
+                M[k][j] -= f * M[i][j]
+    return det
+
+
+# ------------------------------------------------------------------ reduction mod p and saturation
+
+def _red_point(a, P, p):
+    """P mod p as (x, y) in F_p or None (= O), for p not dividing the denominators unless P reduces to O."""
+    if P is None:
+        return None
+    x, y = P
+    if x.denominator % p == 0:
+        return None
+    return (x.numerator * pow(x.denominator, -1, p) % p, y.numerator * pow(y.denominator, -1, p) % p)
+
+
+def _add_p(a, P, Q, p):
+    if P is None:
+        return Q
+    if Q is None:
+        return P
+    a1, a2, a3, a4, a6 = (c % p for c in a)
+    x1, y1 = P
+    x2, y2 = Q
+    if x1 == x2:
+        if (y1 + y2 + a1 * x2 + a3) % p == 0:
+            return None
+        den = (2 * y1 + a1 * x1 + a3) % p
+        lam = (3 * x1 * x1 + 2 * a2 * x1 + a4 - a1 * y1) * pow(den, -1, p) % p
+    else:
+        lam = (y2 - y1) * pow((x2 - x1) % p, -1, p) % p
+    x3 = (lam * lam + a1 * lam - a2 - x1 - x2) % p
+    y3 = (-(lam + a1) * x3 - (y1 - lam * x1) - a3) % p
+    return (x3, y3)
+
+
+def _mul_p(a, n, P, p):
+    R, Q = None, P
+    while n:
+        if n & 1:
+            R = _add_p(a, R, Q, p)
+        Q = _add_p(a, Q, Q, p)
+        n >>= 1
+    return R
+
+
+def not_divisible(a, P, ell, aps):
+    """A proof that P is not in ell E(Q) + E(Q)_tors... more precisely not
+    ell-divisible in E(Q): a good prime p with ell exactly dividing #E(F_p)
+    and (#E(F_p)/ell) P != 0 mod p.  Returns that p, or None."""
+    for p, ap in aps:
+        if ap is None or p < 3:
+            continue
+        N = p + 1 - ap
+        if N % ell or (N // ell) % ell == 0:
+            continue
+        Pp = _red_point(a, P, p)
+        if Pp is None:
+            continue
+        if _mul_p(a, N // ell, Pp, p) is not None:
+            return p
+    return None
+
+
+def search_generator(a, aps, bad, H=8.0):
+    """The non-torsion point of least canonical height among the points of
+    naive height at most H, or None."""
+    best = None
+    for P in point_search(a, H):
+        if point_order(a, P) != 0:
+            continue
+        h = canonical_height(a, P, bad)
+        if best is None or h < best[1] - 1e-9:
+            best = (P, h)
+    return best

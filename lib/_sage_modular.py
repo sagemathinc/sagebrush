@@ -848,6 +848,169 @@ class EllipticCurve_rational_field:
     def sha(self):
         return _Sha(self)
 
+    # ---- rational points (lib/_sage_ec.py)
+    def __call__(self, *args):
+        """E(0) is the identity; E(x, y), E([x, y]) or E([x, y, z]) a point."""
+        if len(args) == 1 and not isinstance(args[0], (list, tuple)) and args[0] == 0:
+            return EllipticCurvePoint(self, None)
+        if len(args) == 1:
+            args = tuple(args[0])
+        from fractions import Fraction
+        def fr(t):
+            try:
+                return Fraction(int(t.numerator()), int(t.denominator()))
+            except AttributeError:
+                return Fraction(t)
+        if len(args) == 3:
+            x, y, z = (fr(t) for t in args)
+            if z == 0:
+                return EllipticCurvePoint(self, None)
+            args = (x / z, y / z)
+        x, y = (fr(t) for t in args)
+        import _sage_ec as _ec
+        if not _ec.on_curve(self._a, (x, y)):
+            raise TypeError("coordinates %s do not define a point on %r" % ([x, y], self))
+        return EllipticCurvePoint(self, (x, y))
+
+    point = __call__
+
+    def lift_x(self, x, all=False):
+        import _sage_ec as _ec
+        from fractions import Fraction
+        try:
+            xf = Fraction(int(x.numerator()), int(x.denominator()))
+        except AttributeError:
+            xf = Fraction(x)
+        pts = [EllipticCurvePoint(self, P) for P in _ec.lift_x(self._a, xf)]
+        if all:
+            return pts
+        if not pts:
+            raise ValueError("no point with x-coordinate %s on %r" % (x, self))
+        return pts[-1]
+
+    def torsion_points(self):
+        """The points of finite order (found by Nagell-Lutz-sized search)."""
+        import _sage_ec as _ec
+        out = [EllipticCurvePoint(self, None)]
+        T = self.torsion_order()
+        if T > 1:
+            seen = set()
+            H = 2.0
+            while len(out) < T and H < 60:
+                for P in _ec.point_search(self._a, H):
+                    if P not in seen and _ec.point_order(self._a, P):
+                        seen.add(P)
+                        out.append(EllipticCurvePoint(self, P))
+                H += 2
+        return sorted(out, key=lambda Q: (Q._P is not None, Q._P or ()))
+
+    def point_search(self, height_limit, verbose=False):
+        """Points with naive height log max(|r|, s^2) <= height_limit (x = r/s^2), as Sage."""
+        import _sage_ec as _ec
+        return [EllipticCurvePoint(self, P) for P in _ec.point_search(self._a, float(height_limit))]
+
+    def _bad(self):
+        import _sage_ec as _ec
+        return [p for p, _ in _ec._factor_int(self.minimal_model().discriminant())]
+
+    def height_pairing_matrix(self, points):
+        import _sage_ec as _ec
+        from sage_all import matrix, RR
+        m = self.minimal_model()
+        ps = [m._to_min(P) for P in points]
+        bad = self._bad()
+        r = len(ps)
+        M = [[_ec.canonical_height(m._a, ps[i], bad) if i == j else _ec.height_pairing(m._a, ps[i], ps[j], bad) for j in range(r)] for i in range(r)]
+        return _RealMatrix(M)
+
+    def regulator_of_points(self, points):
+        import _sage_ec as _ec
+        from sage_all import RR
+        m = self.minimal_model()
+        return RR(_ec.regulator(m._a, [m._to_min(P) for P in points], self._bad()))
+
+    def _to_min(self, P):
+        """The point P (on self or on a curve with the same c4, c6) moved to this model."""
+        if isinstance(P, EllipticCurvePoint):
+            if P._E._a == self._a:
+                return P._P
+            return P._E._move_to(P._P, self)
+        return P
+
+    def _move_to(self, P, other):
+        """Move a point of self to the isomorphic model other: x = u^2 x' + r,
+        y = u^3 y' + s u^2 x' + t, with u from the c-invariants."""
+        if P is None:
+            return None
+        from fractions import Fraction as Fr
+        import math
+        import _sage_ec as _ec
+
+        def root(q, k):
+            """the exact positive k-th root of a positive Fraction"""
+            def iroot(n):
+                r = round(n ** (1.0 / k))
+                for c in (r - 1, r, r + 1):
+                    if c >= 0 and c ** k == n:
+                        return c
+                lo, hi = 0, 1
+                while hi ** k <= n:
+                    hi *= 2
+                while hi - lo > 1:
+                    mid = (lo + hi) // 2
+                    if mid ** k <= n:
+                        lo = mid
+                    else:
+                        hi = mid
+                if lo ** k != n:
+                    raise ArithmeticError("not an exact power")
+                return lo
+            return Fr(iroot(q.numerator), iroot(q.denominator))
+        c4, c6 = self.c_invariants()
+        d4, d6 = other.c_invariants()
+        if c4 and c6:
+            u2 = Fr(c6 * d4, c4 * d6)
+        elif c6 == 0:
+            u2 = root(Fr(c4, d4), 2)
+        else:
+            q = Fr(c6, d6)
+            u2 = root(q, 3) if q > 0 else -root(-q, 3)
+        u = root(u2, 2)
+        a1, a2, a3, a4, a6 = self._a
+        b1, b2_, b3, b4_, b6_ = other._a
+        s_ = (u * b1 - a1) / 2
+        r = (u * u * b2_ - a2 + s_ * a1 + s_ * s_) / 3
+        t = (u ** 3 * b3 - a3 - r * a1) / 2
+        x, y = P
+        Q = ((x - r) / (u * u), (y - s_ * (x - r) - t) / u ** 3)
+        if not _ec.on_curve(other._a, Q):
+            raise ArithmeticError("could not move the point to the other model")
+        return Q
+
+    def gens(self, height_limit=None):
+        """Generators of E(Q) modulo torsion, for analytic rank 0 or 1: the
+        non-torsion point of least canonical height among the points of naive
+        height at most height_limit (default 9) on the minimal model, checked
+        to be saturated at the primes up to 13 where the reduction test applies."""
+        import _sage_ec as _ec
+        r = self.analytic_rank()
+        if r == 0:
+            return []
+        m = self.minimal_model()
+        aps = _ap.aplist(m._a, 1000)
+        g = _ec.search_generator(m._a, aps, self._bad(), float(height_limit or 9.0))
+        if g is None:
+            raise NotImplementedError("no point of infinite order of naive height <= %s found; descent is needed" % (height_limit or 9.0))
+        P = g[0]
+        if m is not self and m._a != self._a:
+            P = m._move_to(P, self)
+        return [EllipticCurvePoint(self, P)]
+
+    def regulator(self):
+        gs = self.gens()
+        from sage_all import RR
+        return RR(1) if not gs else self.regulator_of_points(gs)
+
     def rank(self):
         lab = self._cremona_entry()
         if lab is None:
@@ -1014,13 +1177,160 @@ class _Sha:
         from sage_all import QQ, Integer
         E = self._E
         r = E.analytic_rank()
-        if r != 0:
-            raise NotImplementedError("Sha.an() needs the regulator in rank %d: not implemented yet" % r)
         from fractions import Fraction
         T = E.torsion_order()
+        if r == 1:
+            # L'(E,1) = Omega Reg #Sha prod c_p / #E(Q)_tors^2, with Reg the
+            # height of a generator (E.gens(), point search)
+            import _sage_ec as _ec
+            P = E.gens()[0]
+            h = float(P.height())
+            Lp = _ec.L1_derivative(E._ldata())
+            om = _ec.real_period(E.minimal_model()._a)
+            x = Lp * T * T / (om * h * E.tamagawa_product())
+            n = round(x)
+            if n < 1 or abs(x - n) > 1e-6 * max(1, n):
+                raise ArithmeticError("Sha_an = %r is not an integer: is %r a generator?" % (x, P))
+            return Integer(n)
+        if r != 0:
+            raise NotImplementedError("Sha.an() in analytic rank %d is not implemented" % r)
         q = E.lseries().L_ratio()
         s = Fraction(int(q.numerator()), int(q.denominator())) * T * T / E.tamagawa_product()
         return Integer(s.numerator) if s.denominator == 1 else QQ(s.numerator, s.denominator)
+
+
+def _m_log(x):
+    import math
+    return math.log(x)
+
+
+class _RealMatrix:
+    """A small matrix of real numbers, printed as Sage prints matrices over RR."""
+
+    def __init__(self, rows):
+        self._rows = [list(map(float, r)) for r in rows]
+
+    def __repr__(self):
+        from sage_all import RR
+        cells = [[repr(RR(x)) for x in r] for r in self._rows]
+        w = [max(len(cells[i][j]) for i in range(len(cells))) for j in range(len(cells[0]))] if cells else []
+        return "\n".join("[" + " ".join(c.rjust(w[j]) for j, c in enumerate(r)) + "]" for r in cells)
+
+    def __getitem__(self, ij):
+        from sage_all import RR
+        i, j = ij
+        return RR(self._rows[i][j])
+
+    def nrows(self):
+        return len(self._rows)
+
+    def det(self):
+        import _sage_ec as _ec
+        from sage_all import RR
+        M = [r[:] for r in self._rows]
+        n = len(M)
+        d = 1.0
+        for i in range(n):
+            piv = max(range(i, n), key=lambda k: abs(M[k][i]))
+            if M[piv][i] == 0:
+                return RR(0)
+            if piv != i:
+                M[i], M[piv] = M[piv], M[i]
+                d = -d
+            d *= M[i][i]
+            for k in range(i + 1, n):
+                f = M[k][i] / M[i][i]
+                for j in range(i, n):
+                    M[k][j] -= f * M[i][j]
+        return RR(d)
+
+    determinant = det
+
+
+class EllipticCurvePoint:
+    """A rational point on an elliptic curve over QQ (None = the point at infinity)."""
+
+    def __init__(self, E, P):
+        self._E = E
+        self._P = P
+
+    def curve(self):
+        return self._E
+
+    def _new(self, P):
+        return EllipticCurvePoint(self._E, P)
+
+    def __add__(self, other):
+        import _sage_ec as _ec
+        return self._new(_ec.add(self._E._a, self._P, other._P))
+
+    def __neg__(self):
+        import _sage_ec as _ec
+        return self._new(_ec.neg(self._E._a, self._P))
+
+    def __sub__(self, other):
+        return self + (-other)
+
+    def __mul__(self, n):
+        import _sage_ec as _ec
+        return self._new(_ec.mul(self._E._a, int(n), self._P))
+
+    __rmul__ = __mul__
+
+    def __eq__(self, other):
+        if isinstance(other, int) and other == 0:
+            return self._P is None
+        return isinstance(other, EllipticCurvePoint) and other._E == self._E and other._P == self._P
+
+    def __hash__(self):
+        return hash(("pt", self._E._a, self._P))
+
+    def is_zero(self):
+        return self._P is None
+
+    def _coord(self, t):
+        from sage_all import QQ
+        return QQ(t.numerator, t.denominator)
+
+    def xy(self):
+        if self._P is None:
+            raise ZeroDivisionError("the point at infinity has no affine coordinates")
+        return (self._coord(self._P[0]), self._coord(self._P[1]))
+
+    def __getitem__(self, i):
+        if self._P is None:
+            return [self._coord(0), self._coord(1), self._coord(0)][i]
+        return [self._coord(self._P[0]), self._coord(self._P[1]), self._coord(1)][i]
+
+    def __repr__(self):
+        if self._P is None:
+            return "(0 : 1 : 0)"
+        x, y = self.xy()
+        return "(%s : %s : 1)" % (x, y)
+
+    def order(self):
+        import _sage_ec as _ec
+        from sage_all import Integer
+        if self._P is None:
+            return Integer(1)
+        n = _ec.point_order(self._E._a, self._P)
+        if n == 0:
+            from sage_all import oo
+            return oo
+        return Integer(n)
+
+    additive_order = order
+
+    def has_finite_order(self):
+        import _sage_ec as _ec
+        return self._P is None or _ec.point_order(self._E._a, self._P) != 0
+
+    def height(self):
+        """The canonical (Neron-Tate) height, normalized as in Sage and Cremona's tables."""
+        import _sage_ec as _ec
+        from sage_all import RR
+        m = self._E.minimal_model()
+        return RR(_ec.canonical_height(m._a, m._to_min(self), self._E._bad()))
 
 
 def EllipticCurve(x, y=None):
