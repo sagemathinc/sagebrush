@@ -148,3 +148,62 @@ impl Zq {
         }
     }
 }
+
+/// The same ring when p^k < 2^62: coefficients in machine words.
+#[derive(Clone, Debug)]
+pub struct Small {
+    pub pk: u64,
+    pub m: Vec<u64>,
+}
+
+pub type SElt = Vec<u64>;
+
+impl Small {
+    /// None if p^k is too big for words.
+    pub fn new(z: &Zq) -> Option<Small> {
+        let pk = z.pk.to_u64().filter(|&x| x < 1 << 62)?;
+        Some(Small { pk, m: z.m.iter().map(|c| c.to_u64().unwrap() % pk).collect() })
+    }
+    pub fn from(&self, a: &Elt) -> SElt {
+        a.iter().map(|c| c.to_u64().unwrap()).collect()
+    }
+    pub fn add(&self, a: &SElt, b: &SElt) -> SElt {
+        a.iter().zip(b).map(|(x, y)| (x + y) % self.pk).collect()
+    }
+    pub fn sub(&self, a: &SElt, b: &SElt) -> SElt {
+        a.iter().zip(b).map(|(x, y)| (x + self.pk - y) % self.pk).collect()
+    }
+    pub fn mul(&self, a: &SElt, b: &SElt) -> SElt {
+        let d = self.m.len() - 1;
+        let pk = self.pk as u128;
+        if d == 1 {
+            return vec![((a[0] as u128 * b[0] as u128) % pk) as u64];
+        }
+        let mut c = vec![0u128; 2 * d - 1];
+        for (i, &x) in a.iter().enumerate() {
+            if x == 0 {
+                continue;
+            }
+            for (j, &y) in b.iter().enumerate() {
+                c[i + j] = (c[i + j] + x as u128 * y as u128) % pk;
+            }
+        }
+        for i in (d..2 * d - 1).rev() {
+            let q = c[i] % pk;
+            if q == 0 {
+                continue;
+            }
+            c[i] = 0;
+            for j in 0..d {
+                // subtract q m_j
+                let t = q * self.m[j] as u128 % pk;
+                c[i - d + j] = (c[i - d + j] + pk - t) % pk;
+            }
+        }
+        c.truncate(d);
+        c.into_iter().map(|x| (x % pk) as u64).collect()
+    }
+    pub fn to_big(&self, a: &SElt) -> Elt {
+        a.iter().map(|&c| BigInt::from(c)).collect()
+    }
+}

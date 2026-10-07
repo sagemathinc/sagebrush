@@ -21,7 +21,12 @@ fn main() {
             eprintln!("{} {} ...", f[0], f[2]);
         }
         let t0 = Instant::now();
-        let r = sagebrush_galois::galois_group(&coeffs);
+        let proof = match std::env::var("CHECK_PROOF").as_deref() {
+            Ok("always") => sagebrush_galois::Proof::Always,
+            Ok("never") => sagebrush_galois::Proof::Never,
+            _ => sagebrush_galois::Proof::WhenCheap,
+        };
+        let r = sagebrush_galois::galois_group_with(&coeffs, proof);
         let dt = t0.elapsed().as_secs_f64();
         times.push((dt, format!("{} {}", f[0], f[1])));
         match r {
