@@ -827,20 +827,35 @@ class EllipticCurve_rational_field:
         import _sage_ec as _ec
         return _ec.root_number(self._ldata())
 
-    def analytic_rank(self):
-        """The analytic rank, when it is 0 or 1 (decided numerically: L(E,1)
-        or L'(E,1) clearly nonzero); higher ranks are not implemented."""
+    def analytic_rank(self, proof=False, leading_coefficient=False):
+        """The order of vanishing of L(E,s) at s = 1: the first r of the parity
+        of the root number with L^(r)(E,1) numerically nonzero (as in Sage).
+
+        With proof=True only ranks 0 and 1 are returned (then nothing has to
+        vanish: w = -1 forces L(E,1) = 0); for r >= 2 it raises, since showing
+        that L^(k)(E,1) is exactly 0 for k < r is a separate problem (possible
+        for r = 2, 3 via modular symbols and Gross-Zagier, not implemented
+        here, and open for every curve when r >= 4).
+        With leading_coefficient=True, returns (r, L^(r)(E,1)), as Sage does."""
         import _sage_ec as _ec
         ld = self._ldata()
-        w = _ec.root_number(ld)
-        if w == 1:
-            v = _ec.L1(ld, w)
-            if abs(v) > 1e-6:
-                return 0
-        else:
-            if abs(_ec.L1_derivative(ld)) > 1e-6:
-                return 1
-        raise NotImplementedError("analytic rank at least 2: not implemented yet")
+        r, v = _ec.analytic_rank_numerical(ld, _ec.root_number(ld))
+        if proof and r >= 2:
+            raise NotImplementedError(
+                "analytic rank %d is only numerical: L^(k)(E,1) for k < %d are merely small "
+                "(use proof=False)" % (r, r))
+        if leading_coefficient:
+            from sage_all import RR
+            return r, RR(v)
+        return r
+
+    def _proven_analytic_rank(self):
+        """The analytic rank if it is 0 or 1 (then equal to the rank, by
+        Gross-Zagier and Kolyvagin), else None."""
+        try:
+            return self.analytic_rank(proof=True)
+        except NotImplementedError:
+            return None
 
     def lseries(self):
         return _LSeries(self)
@@ -993,7 +1008,9 @@ class EllipticCurve_rational_field:
         height at most height_limit (default 9) on the minimal model, checked
         to be saturated at the primes up to 13 where the reduction test applies."""
         import _sage_ec as _ec
-        r = self.analytic_rank()
+        r = self._proven_analytic_rank()
+        if r is None:
+            raise NotImplementedError("gens() for analytic rank %d is not implemented yet" % self.analytic_rank())
         if r == 0:
             return []
         m = self.minimal_model()
@@ -1014,19 +1031,27 @@ class EllipticCurve_rational_field:
     def rank(self, only_use_mwrank=True, proof=None):
         """The rank of E(Q): from Cremona's table (conductor < 1000), else the
         analytic rank when it is 0 or 1 (equal to the rank by Gross-Zagier and
-        Kolyvagin), else 2-isogeny descent when its bounds meet."""
+        Kolyvagin), else 2-isogeny descent when its bounds meet.  With
+        proof=False, falls back to the numerical analytic rank (assuming the
+        Birch and Swinnerton-Dyer rank conjecture) when these do not decide."""
         lab = self._cremona_entry()
         if lab is not None:
             return _cremona()[0][lab][1]
-        try:
-            r = self.analytic_rank()
+        r = self._proven_analytic_rank()
+        if r is not None:
             return r
+        try:
+            lo, hi = self.rank_bounds()
         except NotImplementedError:
-            pass
-        lo, hi = self.rank_bounds()
+            lo, hi = 0, None
         if lo == hi:
             return lo
-        raise NotImplementedError("rank bounds %d <= r <= %d: general 2-descent is not implemented yet" % (lo, hi))
+        if proof is False:
+            r = self.analytic_rank(proof=False)
+            if r >= lo and (hi is None or r <= hi):
+                return r
+        bounds = "rank bounds %d <= r <= %d" % (lo, hi) if hi is not None else "no rank bounds"
+        raise NotImplementedError("%s: general 2-descent is not implemented yet (proof=False uses the analytic rank)" % bounds)
 
     def two_descent_by_two_isogeny(self, search_bound=60):
         """Descent via 2-isogeny (needs a rational 2-torsion point): (lower, upper)
@@ -1041,11 +1066,9 @@ class EllipticCurve_rational_field:
     def rank_bounds(self):
         """(lower, upper) bounds for the rank (2-isogeny descent; lower bound
         also from the analytic rank when it is 0 or 1)."""
-        try:
-            r = self.analytic_rank()
+        r = self._proven_analytic_rank()
+        if r is not None:
             return (r, r)
-        except NotImplementedError:
-            pass
         if self.torsion_order() % 2 == 0:
             return self.two_descent_by_two_isogeny()
         raise NotImplementedError("general 2-descent (no rational 2-torsion) is not implemented yet")
