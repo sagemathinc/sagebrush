@@ -1134,6 +1134,27 @@ class Matrix:
         """
         return self._eigenmatrix("left")
 
+    def diagonal(self):
+        """The diagonal entries.
+
+        EXAMPLES::
+
+            sage: matrix(ZZ, [[1, 2], [3, 4]]).diagonal()
+            [1, 4]
+        """
+        return [self._rows[i][i] for i in range(min(self.nrows(), self.ncols()))]
+
+    def dense_matrix(self):
+        """The matrix itself (matrices are dense).
+
+        EXAMPLES::
+
+            sage: matrix(ZZ, [[1, 2], [3, 4]]).dense_matrix()
+            [1 2]
+            [3 4]
+        """
+        return self
+
     def _integer_rows(self):
         if any(_F(x).denominator != 1 for r in self._rows for x in r):
             raise TypeError("the matrix must have integer entries")
@@ -1688,7 +1709,10 @@ def matrix(*args, **kwds):
     elif len(args) == 1 and isinstance(args[0], int):
         rows = [[0] * args[0] for _ in range(args[0])]
     else:
-        rows = [list(r) for r in (args[0] if args else [])]
+        rows = list(args[0] if args else [])
+        if rows and not any(isinstance(r, (list, tuple)) or hasattr(r, "__iter__") and not isinstance(r, str) for r in rows):
+            rows = [rows]  # matrix([1, 2, 3]): one row
+        rows = [list(r) for r in rows]
     if base is None:
         def kind(x):
             try:

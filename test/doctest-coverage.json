@@ -4,11 +4,11 @@
   "_sage_poly": 62,
   "_sage_nf": 85,
   "sage_permgroup": 63,
-  "_sage_matrix": 127,
+  "_sage_matrix": 128,
   "_sage_lang": 63,
   "_sage_expr": 147,
   "_interact": 24,
-  "sage_plot": 40,
+  "sage_plot": 42,
   "sage_plot3d": 50,
   "_sage_ff": 155,
   "_sage_ffmat": 91,
@@ -17,5 +17,7 @@
   "_sage_frac": 37,
   "_sage_real": 125,
   "_sage_rdf": 65,
-  "_sage_series": 47
+  "_sage_series": 47,
+  "_sage_graph": 59,
+  "_sage_sandpile": 108
 }
