@@ -137,6 +137,35 @@ print(E.saturation([5*E(0, 0)])[:2])
   assert.deepEqual(out.trim().split("\n"), ["[(0 : -1 : 1), (1 : -1 : 1)] 0.1524601779", "3 0.1524601779", "([(0 : 0 : 1)], 5)"]);
 });
 
+test("elliptic curves: 2-descent through the cubic field", () => {
+  const out = cli("--sage", "-c", `
+for lab in ['11a1', '37a1', '389a1', '5077a1', '571a1']:
+    E = EllipticCurve([0, 0, 1, -7, 6] if lab == '5077a1' else lab)
+    E.two_descent(algorithm="cubic")
+    print(lab, E.selmer_rank(), E.rank_bounds())
+E = EllipticCurve([1,-1,0,-79,289])
+E.two_descent(algorithm="cubic")
+print(E.selmer_rank())
+# 9709b3: |j| ~ 4e20, the quartic search's floating-point bounds lose half
+# the Selmer group; the cubic field's count corrects the upper bound
+E = EllipticCurve([0,1,1,-3145717,-2148521298])
+print(E.rank_bounds(), E._descent_assumes_grh())
+# 8255g2: too many quartics; rank 2 from the cubic field, assuming GRH
+E = EllipticCurve([0,1,1,-169525,179243204])
+try:
+    E.rank()
+except NotImplementedError as e:
+    print(str(e)[:30])
+print(E.rank(proof=False), round(float(E.regulator_of_points(E.gens(proof=False))), 10))
+`);
+  // Selmer ranks: Sha(571a1)[2] = (Z/2)^2; 234446a1 has rank 4.  8255g2's
+  // regulator is Cremona's 0.182887025652959
+  assert.deepEqual(out.trim().split("\n"), [
+    "11a1 0 (0, 0)", "37a1 1 (1, 1)", "389a1 2 (2, 2)", "5077a1 3 (3, 3)", "571a1 2 (0, 0)", "4",
+    "(0, 2) True", "the rank is 2 assuming GRH (th", "2 0.1828870257",
+  ]);
+});
+
 test("elliptic curves: the CPS height bound proves generators (5510b1)", () => {
   const out = cli("--sage", "-c", `
 print(round(float(EllipticCurve('11a1').CPS_height_bound()), 4), round(float(EllipticCurve('37a1').CPS_height_bound()), 3))

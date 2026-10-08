@@ -1349,6 +1349,116 @@ class EllipticCurve_rational_field:
         b2, b4, b6, b8 = self.b_invariants()
         return (b2 * b2 - 24 * b4, -b2 ** 3 + 36 * b2 * b4 - 216 * b6)
 
+    def a1(self):
+        """The coefficient a1.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).a1()
+            1
+        """
+        return self._a[0]
+
+    def a2(self):
+        """The coefficient a2.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).a2()
+            2
+        """
+        return self._a[1]
+
+    def a3(self):
+        """The coefficient a3.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).a3()
+            3
+        """
+        return self._a[2]
+
+    def a4(self):
+        """The coefficient a4.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).a4()
+            4
+        """
+        return self._a[3]
+
+    def a6(self):
+        """The coefficient a6.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).a6()
+            5
+        """
+        return self._a[4]
+
+    def b2(self):
+        """The invariant b2 = a1^2 + 4 a2.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).b2()
+            9
+        """
+        return self.b_invariants()[0]
+
+    def b4(self):
+        """The invariant b4 = 2 a4 + a1 a3.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).b4()
+            11
+        """
+        return self.b_invariants()[1]
+
+    def b6(self):
+        """The invariant b6 = a3^2 + 4 a6.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).b6()
+            29
+        """
+        return self.b_invariants()[2]
+
+    def b8(self):
+        """The invariant b8.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).b8()
+            35
+        """
+        return self.b_invariants()[3]
+
+    def c4(self):
+        """The invariant c4 = b2^2 - 24 b4.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).c4()
+            -183
+        """
+        return self.c_invariants()[0]
+
+    def c6(self):
+        """The invariant c6.
+
+        EXAMPLES::
+
+            sage: EllipticCurve([1, 2, 3, 4, 5]).c6()
+            -3429
+        """
+        return self.c_invariants()[1]
+
     def discriminant(self):
         """The discriminant of this model.
 
@@ -1894,8 +2004,8 @@ class EllipticCurve_rational_field:
         2-descent, or with proof=False the analytic rank): independent points
         from the 2-descent and a point search, LLL-reduced for the height
         pairing and saturated at every prime up to a proved bound on their
-        index (Silverman's height bound and an exhaustive search; see
-        lib/_sage_ec.py), or up to max_prime if given (then generators of a
+        index (the Cremona-Prickett-Siksek height bound and an exhaustive
+        search; see lib/_sage_ec.py), or up to max_prime if given (then generators of a
         subgroup of index prime to the primes up to max_prime).
 
         EXAMPLES::
@@ -1918,7 +2028,7 @@ class EllipticCurve_rational_field:
                 lo, hi = self.rank_bounds()
             except NotImplementedError:
                 lo, hi = 0, None
-            if lo == hi:
+            if lo == hi and (proof is False or not self._descent_assumes_grh()):
                 r = lo
             elif self._cremona_entry() is not None:
                 r = _cremona()[0][self._cremona_entry()][1]
@@ -2045,9 +2155,12 @@ class EllipticCurve_rational_field:
         """The rank of E(Q): from Cremona's table (conductor < 1000), else the
         analytic rank when it is 0 or 1 (equal to the rank by Gross-Zagier and
         Kolyvagin), else 2-descent (via 2-isogeny, or general) when its
-        bounds meet.  With
-        proof=False, falls back to the numerical analytic rank (assuming the
-        Birch and Swinnerton-Dyer rank conjecture) when these do not decide.
+        bounds meet.  When the general 2-descent's upper bound comes from the
+        class group of a cubic field (the quartic search too large, or
+        numerically unreliable), it assumes GRH, and only proof=False
+        accepts it.  With proof=False, falls back to the numerical analytic
+        rank (assuming the Birch and Swinnerton-Dyer rank conjecture) when
+        these do not decide.
 
         EXAMPLES::
 
@@ -2069,6 +2182,8 @@ class EllipticCurve_rational_field:
         except NotImplementedError:
             lo, hi = 0, None
         if lo == hi:
+            if self._descent_assumes_grh() and proof is not False:
+                raise NotImplementedError("the rank is %d assuming GRH (the 2-Selmer group from the class group of a cubic field); proof=False accepts it" % lo)
             return lo
         if proof is False:
             r = self.analytic_rank(proof=False)
@@ -2076,6 +2191,12 @@ class EllipticCurve_rational_field:
                 return r
         bounds = "rank bounds %d <= r <= %d" % (lo, hi) if hi is not None else "no rank bounds"
         raise NotImplementedError("%s: 2-descent does not decide (Sha[2] nontrivial, or generators too large); proof=False uses the analytic rank" % bounds)
+
+    def _descent_assumes_grh(self):
+        """Whether the rank upper bound of the general 2-descent rests on the
+        cubic field's class group (GRH)."""
+        d = getattr(self, "_two_descent", None)
+        return bool(d and d.get("grh"))
 
     def two_descent_by_two_isogeny(self, search_bound=60):
         """Descent via 2-isogeny (needs a rational 2-torsion point): (lower, upper)
@@ -2113,20 +2234,28 @@ class EllipticCurve_rational_field:
             return self.two_descent_by_two_isogeny()
         return self._general_two_descent()["rank_bounds"]
 
-    def _general_two_descent(self, max_candidates=1e10):
-        if getattr(self, "_two_descent", None) is None:
+    def _general_two_descent(self, max_candidates=1e10, algorithm=None):
+        if getattr(self, "_two_descent", None) is None or (algorithm is not None and self._two_descent.get("algorithm", "quartic") != algorithm):
             if self.torsion_order() % 2 == 0:
                 raise NotImplementedError("general 2-descent with rational 2-torsion: use two_descent_by_two_isogeny()")
             import _sage_ec as _ec
-            self._two_descent = _ec.two_descent(self.minimal_model()._a, max_candidates=max_candidates)
+            self._two_descent = _ec.two_descent(self.minimal_model()._a, max_candidates=max_candidates, algorithm=algorithm)
         return self._two_descent
 
-    def two_descent(self, verbose=False, selmer_only=False, max_candidates=1e10):
-        """General 2-descent (curves without rational 2-torsion), by integral
-        binary quartics (Birch and Swinnerton-Dyer).  Returns True if the
-        rank was determined (the points found fill the 2-Selmer group).
-        The quartic search grows like |Delta|^(1/2): beyond max_candidates
-        (about 1e10 per few seconds) it raises NotImplementedError.
+    def two_descent(self, verbose=False, selmer_only=False, max_candidates=1e10, algorithm=None):
+        """General 2-descent (curves without rational 2-torsion).  Returns
+        True if the rank was determined (the points found fill the 2-Selmer
+        group).
+
+        algorithm="quartic": integral binary quartics (Birch and
+        Swinnerton-Dyer), found by a search that grows like |Delta|^(1/2)
+        (about 1e10 candidates per few seconds), whose rational points give
+        points of E of large height.  algorithm="cubic": the 2-Selmer group
+        from the S-units of the cubic field Q[x]/(x^3 - 27 c4 x - 54 c6) and
+        its local square classes, at a cost polynomial in log |Delta| (the
+        class group computation dominates), with points from a search on E.
+        By default the quartics, and the cubic field once the search would
+        exceed max_candidates.
 
         EXAMPLES::
 
@@ -2137,8 +2266,19 @@ class EllipticCurve_rational_field:
             3
             sage: EllipticCurve('571a1').two_descent()  # needs sage.libs.eclib
             False
+
+        Through the cubic field (Sha(571a1)[2] = (Z/2)^2 is in the 2-Selmer
+        group too)::
+
+            sage: E = EllipticCurve([0, 0, 1, -7, 6])
+            sage: E.two_descent(algorithm="cubic")  # sagebrush only
+            True
+            sage: EllipticCurve('571a1').two_descent(algorithm="cubic")  # sagebrush only
+            False
+            sage: EllipticCurve('571a1').selmer_rank()
+            2
         """
-        lo, hi = self._general_two_descent(max_candidates)["rank_bounds"]
+        lo, hi = self._general_two_descent(max_candidates, algorithm)["rank_bounds"]
         if verbose:
             print("2-Selmer rank %d; rank bounds %d <= r <= %d" % (self.selmer_rank(), lo, hi))
         return lo == hi
