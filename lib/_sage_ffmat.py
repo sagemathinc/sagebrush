@@ -16,11 +16,13 @@ def _sa():
 
 
 def _is_ff(base):
-    return isinstance(base, (_ff.IntegerModRing_, _ff.FiniteField_ext))
+    # finite fields, Z/nZ, and other exact fields with elements of their own
+    # (QQbar, AA: _is_generic_field) whose matrices are Gaussian elimination
+    return isinstance(base, (_ff.IntegerModRing_, _ff.FiniteField_ext)) or getattr(base, "_is_generic_field", False)
 
 
 def _field(base):
-    return isinstance(base, _ff.FiniteField_ext) or (isinstance(base, _ff.IntegerModRing_) and base.is_field())
+    return isinstance(base, _ff.FiniteField_ext) or getattr(base, "_is_generic_field", False) or (isinstance(base, _ff.IntegerModRing_) and base.is_field())
 
 
 # ------------------------------------------------------------------ vectors
@@ -322,6 +324,8 @@ class FFMatrix:
             return "%d x %d dense matrix over %r" % (0, self._ncols, self._base)
         cells = [[repr(x) for x in r] for r in self._rows]
         w = [max(len(cells[i][j]) for i in range(len(cells))) for j in range(self._ncols)]
+        if getattr(self._base, "_is_generic_field", False):
+            w = [max(w)] * len(w)  # QQbar: one width for every entry, as Sage
         return "\n".join("[" + " ".join(c.rjust(w[j]) for j, c in enumerate(r)) + "]" for r in cells)
 
     def _latex_(self):
@@ -395,6 +399,9 @@ class FFMatrix:
     def __eq__(self, o):
         if isinstance(o, FFMatrix):
             return self._rows == o._rows and self._ncols == o._ncols
+        import _sage_matrix
+        if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
+            return o.dimensions() == self.dimensions() and all(a == b for r, t in zip(self._rows, o._rows) for a, b in zip(r, t))
         return NotImplemented
 
     def __hash__(self):
@@ -434,7 +441,15 @@ class FFMatrix:
         except (TypeError, ValueError):
             return None
 
+    def _from_qq(self, o):
+        """A QQ matrix o as a matrix over this (QQbar) field."""
+        import _sage_matrix
+        if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
+            return FFMatrix(self._base, o._rows, o.ncols())
+        return o
+
     def __add__(self, o):
+        o = self._from_qq(o)
         if not isinstance(o, FFMatrix) or o.dimensions() != self.dimensions():
             return NotImplemented
         return FFMatrix(self._base, [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, o._rows)], self._ncols)
@@ -445,11 +460,13 @@ class FFMatrix:
         return FFMatrix(self._base, [[-a for a in r] for r in self._rows], self._ncols)
 
     def __sub__(self, o):
+        o = self._from_qq(o)
         if not isinstance(o, FFMatrix):
             return NotImplemented
         return self + (-o)
 
     def __mul__(self, o):
+        o = self._from_qq(o)
         if isinstance(o, FFMatrix):
             if self._ncols != o.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), o.parent()))

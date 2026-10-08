@@ -914,6 +914,21 @@ class Polynomial:
         """
         R = ring if ring is not None else self._ring._base
         sa = _sa()
+        if getattr(R, "_is_generic_field", False) and self._ring._base in (ZZ, QQ):
+            # QQbar / AA: exact roots, real ones first (increasing), then the
+            # others by real and imaginary part, as Sage lists them
+            import _sage_qqbar
+            T = _sage_qqbar.AlgebraicReal if R is _sage_qqbar.AA else _sage_qqbar.AlgebraicNumber
+            out = []
+            for g, e in self.factor():
+                if isinstance(g, Polynomial):
+                    for r in _sage_qqbar._roots_of(_sage_qqbar._primitive(g.list()), _sage_qqbar.AlgebraicNumber):
+                        if r._is_real_gen():
+                            out.append((T(r._gen, r._c, r._civ), e))
+                        elif T is _sage_qqbar.AlgebraicNumber:
+                            out.append((r, e))
+            out.sort(key=lambda t: (0, float(t[0]._approx(20)[0]), 0) if t[0]._is_real_gen() else (1, float(t[0]._approx(20)[0]), float(t[0]._approx(20)[1])))
+            return out if multiplicities else [r for r, _ in out]
         if R is sa.RR or R is getattr(sa, "CC", None):
             from _sage_matrix import numeric_roots
             out = numeric_roots(self.list(), R)
