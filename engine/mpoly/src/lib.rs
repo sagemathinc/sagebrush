@@ -440,6 +440,131 @@ impl Acc {
     }
 }
 
+/// An accumulator of products of word coefficients.
+trait Accum: Copy + Default + Send {
+    fn addmul(&mut self, a: i64, b: i64);
+    fn nonzero(&self) -> bool;
+    fn widen(self) -> Acc;
+}
+
+/// The 128-bit product of two words (by 32-bit halves in WebAssembly,
+/// which has no widening multiply: faster than the generic i128 routine).
+#[inline(always)]
+fn wmul(a: i64, b: i64) -> i128 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        a as i128 * b as i128
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let neg = (a < 0) != (b < 0);
+        let (x, y) = (a.unsigned_abs(), b.unsigned_abs());
+        let (x0, x1, y0, y1) = (x & 0xffff_ffff, x >> 32, y & 0xffff_ffff, y >> 32);
+        let p00 = x0 * y0;
+        let p01 = x0 * y1;
+        let p10 = x1 * y0;
+        let p11 = x1 * y1;
+        let mid = (p00 >> 32) + (p01 & 0xffff_ffff) + (p10 & 0xffff_ffff);
+        let lo = (p00 & 0xffff_ffff) | (mid << 32);
+        let hi = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
+        let m = ((hi as u128) << 64 | lo as u128) as i128;
+        if neg {
+            -m
+        } else {
+            m
+        }
+    }
+}
+
+impl Accum for i64 {
+    #[inline(always)]
+    fn addmul(&mut self, a: i64, b: i64) {
+        *self = self.wrapping_add(a.wrapping_mul(b));
+    }
+    fn nonzero(&self) -> bool {
+        *self != 0
+    }
+    fn widen(self) -> Acc {
+        Acc { v: self as i128, h: 0 }
+    }
+}
+
+impl Accum for i128 {
+    #[inline(always)]
+    fn addmul(&mut self, a: i64, b: i64) {
+        *self = self.wrapping_add(wmul(a, b));
+    }
+    fn nonzero(&self) -> bool {
+        *self != 0
+    }
+    fn widen(self) -> Acc {
+        Acc { v: self, h: 0 }
+    }
+}
+
+impl Accum for Acc {
+    #[inline(always)]
+    fn addmul(&mut self, a: i64, b: i64) {
+        self.add(wmul(a, b));
+    }
+    fn nonzero(&self) -> bool {
+        !self.is_zero()
+    }
+    fn widen(self) -> Acc {
+        self
+    }
+}
+
+/// A 192-bit two's complement accumulator in three words (WebAssembly).
+#[derive(Clone, Copy, Default)]
+struct W3(u64, u64, u64);
+
+impl W3 {
+    /// row[ib[j]] += (or -=) c * y[j] for the magnitudes c = c1*2^32 + c0
+    /// and y[j] = y1[j]*2^32 + y0[j].
+    #[inline(always)]
+    fn addmul(row: &mut [W3], ib: &[u32], y0: &[u64], y1: &[u64], c0: u64, c1: u64, sub: bool) {
+        for j in 0..ib.len() {
+            // SAFETY: the indices are in the box, j < the common length
+            unsafe {
+                let (a0, a1) = (*y0.get_unchecked(j), *y1.get_unchecked(j));
+                let p00 = c0 * a0;
+                let p01 = c0 * a1;
+                let p10 = c1 * a0;
+                let m = (p00 >> 32) + (p01 & 0xffff_ffff) + (p10 & 0xffff_ffff);
+                let plo = (p00 & 0xffff_ffff) | (m << 32);
+                let phi = c1 * a1 + (p01 >> 32) + (p10 >> 32) + (m >> 32);
+                let s = row.get_unchecked_mut(*ib.get_unchecked(j) as usize);
+                if sub {
+                    let (l, b1) = s.0.overflowing_sub(plo);
+                    let (h1, b2) = s.1.overflowing_sub(phi);
+                    let (h2, b3) = h1.overflowing_sub(b1 as u64);
+                    s.0 = l;
+                    s.1 = h2;
+                    s.2 = s.2.wrapping_sub((b2 | b3) as u64);
+                } else {
+                    let (l, c1_) = s.0.overflowing_add(plo);
+                    let (h1, c2) = s.1.overflowing_add(phi);
+                    let (h2, c3) = h1.overflowing_add(c1_ as u64);
+                    s.0 = l;
+                    s.1 = h2;
+                    s.2 = s.2.wrapping_add((c2 | c3) as u64);
+                }
+            }
+        }
+    }
+
+    fn to_acc(self) -> Acc {
+        let v = (self.1 as u128) << 64 | self.0 as u128;
+        Acc { v: v as i128, h: (self.2 as i64).wrapping_add((v >> 127) as i64) }
+    }
+}
+
+/// The bits of the largest coefficient.
+fn max_bits(c: &[i64]) -> u64 {
+    c.iter().map(|&x| 64 - x.unsigned_abs().leading_zeros() as u64).max().unwrap_or(0)
+}
+
 /// Output terms, word coefficients until one does not fit.
 struct Out {
     exps: Vec<u64>,
@@ -471,6 +596,28 @@ impl Out {
             self.big = Some(self.small.drain(..).map(BigInt::from).collect());
         }
         self.big.as_mut().unwrap().push(c);
+    }
+
+    fn concat(parts: Vec<Out>) -> Out {
+        let len = parts.iter().map(|o| o.exps.len()).sum();
+        let mut out = Out::new(len);
+        if parts.iter().any(|o| o.big.is_some()) {
+            let mut big = Vec::with_capacity(len);
+            for o in parts {
+                out.exps.extend_from_slice(&o.exps);
+                match o.big {
+                    Some(b) => big.extend(b),
+                    None => big.extend(o.small.into_iter().map(BigInt::from)),
+                }
+            }
+            out.big = Some(big);
+        } else {
+            for o in parts {
+                out.exps.extend_from_slice(&o.exps);
+                out.small.extend_from_slice(&o.small);
+            }
+        }
+        out
     }
 
     fn finish(self, n: usize, bits: u32) -> ZPoly {
@@ -601,41 +748,44 @@ fn mul_dense(a: &ZPoly, b: &ZPoly, dims: &[u64], k: usize, small: bool) -> Optio
         w
     };
     let mut out = Out::new(a.len() + b.len());
-    let mut i = 0;
     if small {
         let (Coeffs::Small(xa), Coeffs::Small(xb)) = (&a.coeffs, &b.coeffs) else { unreachable!() };
-        let mut acc = vec![Acc::default(); boxsize];
-        while i < pairs.len() {
-            sagebrush_interrupt::check();
-            let key = pairs[i].0;
-            let (mut lo, mut hi) = (u32::MAX, 0u32);
-            while i < pairs.len() && pairs[i].0 == key {
-                let (p, q) = (&ca[pairs[i].1 as usize], &cb[pairs[i].2 as usize]);
-                lo = lo.min(p.lo + q.lo);
-                hi = hi.max(p.hi + q.hi);
-                let bi = &ib[q.start..q.end];
-                let bc = &xb[q.start..q.end];
-                for t in p.start..p.end {
-                    let c = xa[t] as i128;
-                    let row = &mut acc[ia[t] as usize..];
-                    for (j, &x) in bi.iter().enumerate() {
-                        // SAFETY: ia[t] + ib[j] < boxsize by the choice of the strides
-                        unsafe {
-                            row.get_unchecked_mut(x as usize).add(c * *bc.get_unchecked(j) as i128);
-                        }
-                    }
-                }
-                i += 1;
+        // the groups of pairs with one output key, and their work
+        let mut groups: Vec<(usize, usize, u64)> = vec![];
+        let mut g = 0;
+        while g < pairs.len() {
+            let (key, s0) = (pairs[g].0, g);
+            let mut w = 0u64;
+            while g < pairs.len() && pairs[g].0 == key {
+                let (p, q) = (&ca[pairs[g].1 as usize], &cb[pairs[g].2 as usize]);
+                w += ((p.end - p.start) * (q.end - q.start)) as u64;
+                g += 1;
             }
-            for idx in (lo..=hi).rev() {
-                let s = &mut acc[idx as usize];
-                if !s.is_zero() {
-                    out.push(key | tail(idx as u64), *s);
-                    *s = Acc::default();
-                }
+            groups.push((s0, g, w));
+        }
+        let job = DenseJob { pairs: &pairs, ca: &ca, cb: &cb, ia: &ia, ib: &ib, xa, xb, boxsize, tail: &tail };
+        let threads = threads_for(ops);
+        if threads <= 1 {
+            return Some(job.run(&groups).finish(n, bits));
+        }
+        // contiguous ranges of groups of about equal work, one per thread
+        let total: u64 = groups.iter().map(|g| g.2).sum();
+        let parts = threads * 4;
+        let mut ranges: Vec<&[(usize, usize, u64)]> = vec![];
+        let (mut from, mut acc) = (0usize, 0u64);
+        for (j, gr) in groups.iter().enumerate() {
+            acc += gr.2;
+            if acc * parts as u64 >= total * (ranges.len() as u64 + 1) || j + 1 == groups.len() {
+                ranges.push(&groups[from..=j]);
+                from = j + 1;
             }
         }
-    } else {
+        let outs = run_parallel(threads, &ranges, |r| job.run(r));
+        sagebrush_interrupt::check();
+        return Some(Out::concat(outs).finish(n, bits));
+    }
+    let mut i = 0;
+    {
         let (xa, xb) = (a.coeffs.to_big(), b.coeffs.to_big());
         let mut acc: Vec<BigInt> = vec![BigInt::zero(); boxsize];
         while i < pairs.len() {
@@ -663,6 +813,179 @@ fn mul_dense(a: &ZPoly, b: &ZPoly, dims: &[u64], k: usize, small: bool) -> Optio
         }
     }
     Some(out.finish(n, bits))
+}
+
+/// The data of a dense product with word coefficients.
+struct DenseJob<'a, F: Fn(u64) -> u64 + Sync> {
+    pairs: &'a [(u64, u32, u32)],
+    ca: &'a [Chunk],
+    cb: &'a [Chunk],
+    ia: &'a [u32],
+    ib: &'a [u32],
+    xa: &'a [i64],
+    xb: &'a [i64],
+    boxsize: usize,
+    tail: &'a F,
+}
+
+impl<'a, F: Fn(u64) -> u64 + Sync> DenseJob<'a, F> {
+    /// The terms of the given groups of pairs (each one output key), with
+    /// accumulators wide enough for the coefficient bounds.
+    fn run(&self, groups: &[(usize, usize, u64)]) -> Out {
+        let bound = max_bits(self.xa) + max_bits(self.xb) + 64 - (self.xa.len().min(self.xb.len()) as u64).leading_zeros() as u64;
+        if bound <= 62 {
+            self.run_with::<i64>(groups)
+        } else if cfg!(target_arch = "wasm32") {
+            // no widening multiply there: 32-bit halves, explicit carries
+            self.run_split(groups)
+        } else if bound <= 126 {
+            self.run_with::<i128>(groups)
+        } else {
+            self.run_with::<Acc>(groups)
+        }
+    }
+
+    /// The kernel for WebAssembly: magnitudes by 32-bit halves, added to or
+    /// subtracted from 3-word accumulators (the terms of each chunk of b
+    /// sorted by sign, so that the inner loops do not branch).
+    fn run_split(&self, groups: &[(usize, usize, u64)]) -> Out {
+        let nb = self.xb.len();
+        let (mut ib, mut y0, mut y1) = (vec![0u32; nb], vec![0u64; nb], vec![0u64; nb]);
+        let mut mid = vec![0usize; self.cb.len()];
+        for (qi, q) in self.cb.iter().enumerate() {
+            let mut k = q.start;
+            for pass in 0..2 {
+                if pass == 1 {
+                    mid[qi] = k;
+                }
+                for j in q.start..q.end {
+                    if (self.xb[j] < 0) == (pass == 1) {
+                        let m = self.xb[j].unsigned_abs();
+                        ib[k] = self.ib[j];
+                        y0[k] = m & 0xffff_ffff;
+                        y1[k] = m >> 32;
+                        k += 1;
+                    }
+                }
+            }
+        }
+        let mut out = Out::new(groups.iter().map(|g| g.1 - g.0).sum::<usize>() * 4);
+        let mut acc = vec![W3::default(); self.boxsize];
+        for &(g0, g1, _) in groups {
+            if sagebrush_interrupt::requested() {
+                break;
+            }
+            let key = self.pairs[g0].0;
+            let (mut lo, mut hi) = (u32::MAX, 0u32);
+            for &(_, x, y) in &self.pairs[g0..g1] {
+                let (p, q) = (&self.ca[x as usize], &self.cb[y as usize]);
+                lo = lo.min(p.lo + q.lo);
+                hi = hi.max(p.hi + q.hi);
+                let m = mid[y as usize];
+                for t in p.start..p.end {
+                    let c = self.xa[t];
+                    let cm = c.unsigned_abs();
+                    let (c0, c1) = (cm & 0xffff_ffff, cm >> 32);
+                    let row = &mut acc[self.ia[t] as usize..];
+                    let (pos, neg) = (q.start..m, m..q.end);
+                    let (add, sub) = if c >= 0 { (pos, neg) } else { (neg, pos) };
+                    W3::addmul(row, &ib[add.clone()], &y0[add.clone()], &y1[add], c0, c1, false);
+                    W3::addmul(row, &ib[sub.clone()], &y0[sub.clone()], &y1[sub], c0, c1, true);
+                }
+            }
+            for idx in (lo..=hi).rev() {
+                let s = &mut acc[idx as usize];
+                if s.0 != 0 || s.1 != 0 || s.2 != 0 {
+                    out.push(key | (self.tail)(idx as u64), s.to_acc());
+                    *s = W3::default();
+                }
+            }
+        }
+        out
+    }
+
+    fn run_with<A: Accum>(&self, groups: &[(usize, usize, u64)]) -> Out {
+        let mut out = Out::new(groups.iter().map(|g| g.1 - g.0).sum::<usize>() * 4);
+        let mut acc = vec![A::default(); self.boxsize];
+        for &(g0, g1, _) in groups {
+            if sagebrush_interrupt::requested() {
+                break;
+            }
+            let key = self.pairs[g0].0;
+            let (mut lo, mut hi) = (u32::MAX, 0u32);
+            for &(_, x, y) in &self.pairs[g0..g1] {
+                let (p, q) = (&self.ca[x as usize], &self.cb[y as usize]);
+                lo = lo.min(p.lo + q.lo);
+                hi = hi.max(p.hi + q.hi);
+                let bi = &self.ib[q.start..q.end];
+                let bc = &self.xb[q.start..q.end];
+                for t in p.start..p.end {
+                    let c = self.xa[t];
+                    let row = &mut acc[self.ia[t] as usize..];
+                    for (j, &x) in bi.iter().enumerate() {
+                        // SAFETY: ia[t] + ib[j] < boxsize by the choice of the strides
+                        unsafe {
+                            row.get_unchecked_mut(x as usize).addmul(c, *bc.get_unchecked(j));
+                        }
+                    }
+                }
+            }
+            for idx in (lo..=hi).rev() {
+                let s = &mut acc[idx as usize];
+                if s.nonzero() {
+                    out.push(key | (self.tail)(idx as u64), s.widen());
+                    *s = A::default();
+                }
+            }
+        }
+        out
+    }
+}
+
+/// The number of threads for a product of `ops` term products.
+fn threads_for(ops: u64) -> usize {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = ops;
+        1
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if ops < 20_000_000 {
+            return 1;
+        }
+        let t = std::env::var("SAGEBRUSH_THREADS").ok().and_then(|v| v.parse().ok());
+        t.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)).max(1)
+    }
+}
+
+/// f on each item, on up to `threads` threads; the results in order.
+fn run_parallel<T: Sync, R: Send>(threads: usize, items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = threads;
+        items.iter().map(f).collect()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::sync::atomic::{AtomicUsize, Ordering as AO};
+        let next = AtomicUsize::new(0);
+        let mut slots: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
+        let results = std::sync::Mutex::new(&mut slots);
+        std::thread::scope(|sc| {
+            for _ in 0..threads.min(items.len()) {
+                sc.spawn(|| loop {
+                    let i = next.fetch_add(1, AO::Relaxed);
+                    if i >= items.len() {
+                        break;
+                    }
+                    let r = f(&items[i]);
+                    results.lock().unwrap()[i] = Some(r);
+                });
+            }
+        });
+        slots.into_iter().map(|r| r.unwrap()).collect()
+    }
 }
 
 /// The product by a heap merge of the rows a[i]*b (a the shorter).
@@ -720,19 +1043,110 @@ fn mul_heap(a: &ZPoly, b: &ZPoly, small: bool) -> ZPoly {
 
 // ------------------------------------------------------------- over Q
 
-/// A polynomial over Q: num / den with den > 0 and gcd(content, den) = 1.
+/// A polynomial over Q: num / den with den > 0 and gcd(content, den) = 1;
+/// or, with p > 0, over GF(p): coefficients in [0, p) and den = 1.
 #[derive(Clone, Debug)]
 pub struct QPoly {
     pub num: ZPoly,
     pub den: BigInt,
+    pub p: u64,
+}
+
+impl ZPoly {
+    /// The coefficients reduced to [0, p), zeros dropped.
+    pub fn reduce_mod(&self, p: u64) -> ZPoly {
+        let mut exps = Vec::with_capacity(self.len());
+        let mut cs = Vec::with_capacity(self.len());
+        match &self.coeffs {
+            Coeffs::Small(v) => {
+                for (w, &c) in self.exps.iter().zip(v) {
+                    let r = c.rem_euclid(p as i64);
+                    if r != 0 {
+                        exps.push(*w);
+                        cs.push(r);
+                    }
+                }
+            }
+            Coeffs::Big(v) => {
+                let bp = BigInt::from(p);
+                for (w, c) in self.exps.iter().zip(v) {
+                    let r = c.mod_floor(&bp).to_i64().unwrap();
+                    if r != 0 {
+                        exps.push(*w);
+                        cs.push(r);
+                    }
+                }
+            }
+        }
+        ZPoly { n: self.n, bits: self.bits, exps, coeffs: Coeffs::Small(cs) }
+    }
+
+    /// Over GF(p): the last variable reduced modulo the monic m (its
+    /// coefficients, constant first): GF(p^k) as GF(p)[a]/(m).
+    pub fn reduce_last(&self, m: &[u64], p: u64) -> ZPoly {
+        let k = m.len() - 1;
+        let n = self.n;
+        let Coeffs::Small(cv) = &self.coeffs else { return self.reduce_mod(p).reduce_last(m, p) };
+        let lastmask = self.mask();
+        let mut exps = Vec::with_capacity(self.len());
+        let mut cs: Vec<i64> = Vec::with_capacity(self.len());
+        let mut i = 0;
+        let mut c: Vec<u64> = vec![];
+        while i < self.len() {
+            let lead = self.exps[i] & !lastmask;
+            let top = (self.exps[i] & lastmask) as usize;
+            if top < k {
+                // already reduced: copy the group
+                while i < self.len() && self.exps[i] & !lastmask == lead {
+                    exps.push(self.exps[i]);
+                    cs.push(cv[i]);
+                    i += 1;
+                }
+                continue;
+            }
+            c.clear();
+            c.resize(top + 1, 0);
+            while i < self.len() && self.exps[i] & !lastmask == lead {
+                c[(self.exps[i] & lastmask) as usize] = cv[i].rem_euclid(p as i64) as u64;
+                i += 1;
+            }
+            for j in (k..=top).rev() {
+                let t = c[j];
+                if t == 0 {
+                    continue;
+                }
+                c[j] = 0;
+                let nt = p - t;
+                for (l, &ml) in m[..k].iter().enumerate() {
+                    let x = &mut c[j - k + l];
+                    *x = ((*x as u128 + nt as u128 * ml as u128) % p as u128) as u64;
+                }
+            }
+            for j in (0..k.min(c.len())).rev() {
+                if c[j] != 0 {
+                    exps.push(lead | j as u64);
+                    cs.push(c[j] as i64);
+                }
+            }
+        }
+        let _ = n;
+        ZPoly { n: self.n, bits: self.bits, exps, coeffs: Coeffs::Small(cs) }
+    }
 }
 
 impl QPoly {
     pub fn from_z(num: ZPoly) -> QPoly {
-        QPoly { num, den: BigInt::one() }
+        QPoly { num, den: BigInt::one(), p: 0 }
+    }
+
+    fn modp(num: ZPoly, p: u64) -> QPoly {
+        QPoly { num: num.reduce_mod(p), den: BigInt::one(), p }
     }
 
     fn normalize(mut self) -> QPoly {
+        if self.p > 0 {
+            return QPoly::modp(self.num, self.p);
+        }
         if self.den.is_negative() {
             self.num = self.num.neg();
             self.den = -self.den;
@@ -752,23 +1166,66 @@ impl QPoly {
     }
 
     pub fn add_signed(&self, o: &QPoly, sub: bool) -> QPoly {
+        if self.p > 0 {
+            return QPoly::modp(self.num.add_signed(&o.num, sub), self.p);
+        }
         if self.den == o.den {
-            return QPoly { num: self.num.add_signed(&o.num, sub), den: self.den.clone() }.normalize();
+            return QPoly { num: self.num.add_signed(&o.num, sub), den: self.den.clone(), p: 0 }.normalize();
         }
         let num = self.num.scale(&o.den).add_signed(&o.num.scale(&self.den), sub);
-        QPoly { num, den: &self.den * &o.den }.normalize()
+        QPoly { num, den: &self.den * &o.den, p: 0 }.normalize()
     }
 
     pub fn mul(&self, o: &QPoly) -> Result<QPoly, String> {
-        Ok(QPoly { num: mul(&self.num, &o.num)?, den: &self.den * &o.den }.normalize())
+        if self.p > 0 {
+            return Ok(QPoly::modp(mul(&self.num, &o.num)?, self.p));
+        }
+        Ok(QPoly { num: mul(&self.num, &o.num)?, den: &self.den * &o.den, p: 0 }.normalize())
+    }
+
+    /// The product, then the last variable reduced modulo m (over GF(p)).
+    pub fn mul_reduce(&self, o: &QPoly, m: &[u64]) -> Result<QPoly, String> {
+        let r = mul(&self.num, &o.num)?.reduce_mod(self.p).reduce_last(m, self.p);
+        Ok(QPoly { num: r, den: BigInt::one(), p: self.p })
     }
 
     pub fn pow(&self, e: u64) -> Result<QPoly, String> {
-        Ok(QPoly { num: self.num.pow(e)?, den: num_traits::Pow::pow(self.den.clone(), e as u32) })
+        if self.p > 0 {
+            // squarings reduced as they go
+            let mut r = QPoly { num: ZPoly { n: self.num.n, bits: 1, exps: vec![0], coeffs: Coeffs::Small(vec![1]) }, den: BigInt::one(), p: self.p };
+            let (mut b, mut k) = (self.clone(), e);
+            while k > 0 {
+                if k & 1 == 1 {
+                    r = r.mul(&b)?;
+                }
+                k >>= 1;
+                if k > 0 {
+                    b = b.mul(&b)?;
+                }
+            }
+            return Ok(r);
+        }
+        Ok(QPoly { num: self.num.pow(e)?, den: num_traits::Pow::pow(self.den.clone(), e as u32), p: 0 })
+    }
+
+    /// The power over GF(p)[a]/(m) (the last variable a).
+    pub fn pow_reduce(&self, e: u64, m: &[u64]) -> Result<QPoly, String> {
+        let mut r = QPoly { num: ZPoly { n: self.num.n, bits: 1, exps: vec![0], coeffs: Coeffs::Small(vec![1]) }, den: BigInt::one(), p: self.p };
+        let (mut b, mut k) = (self.clone(), e);
+        while k > 0 {
+            if k & 1 == 1 {
+                r = r.mul_reduce(&b, m)?;
+            }
+            k >>= 1;
+            if k > 0 {
+                b = b.mul_reduce(&b, m)?;
+            }
+        }
+        Ok(r)
     }
 
     pub fn equals(&self, o: &QPoly) -> bool {
-        self.den == o.den && self.num.equals(&o.num)
+        self.p == o.p && self.den == o.den && self.num.equals(&o.num)
     }
 
     // ---- the bytes the front end keeps (little endian):
@@ -779,11 +1236,14 @@ impl QPoly {
         let p = &self.num;
         let mut v = Vec::with_capacity(32 + 16 * p.len());
         v.extend_from_slice(b"MP1");
-        v.push(matches!(p.coeffs, Coeffs::Big(_)) as u8);
+        v.push(matches!(p.coeffs, Coeffs::Big(_)) as u8 | if self.p > 0 { 2 } else { 0 });
         v.extend_from_slice(&(p.n as u32).to_le_bytes());
         v.extend_from_slice(&p.bits.to_le_bytes());
         v.extend_from_slice(&(p.len() as u64).to_le_bytes());
         put_big(&mut v, &self.den);
+        if self.p > 0 {
+            v.extend_from_slice(&self.p.to_le_bytes());
+        }
         for w in &p.exps {
             v.extend_from_slice(&w.to_le_bytes());
         }
@@ -812,6 +1272,8 @@ impl QPoly {
         let bits = r.u32()?;
         let len = r.u64()? as usize;
         let den = r.big()?;
+        let pm = if kind & 2 != 0 { r.u64()? } else { 0 };
+        let kind = kind & 1;
         let mut exps = Vec::with_capacity(len);
         for _ in 0..len {
             exps.push(r.u64()?);
@@ -829,7 +1291,7 @@ impl QPoly {
             }
             Coeffs::Big(c)
         };
-        Ok(QPoly { num: ZPoly { n, bits, exps, coeffs }, den })
+        Ok(QPoly { num: ZPoly { n, bits, exps, coeffs }, den, p: pm })
     }
 
     /// The terms as text: "e0,e1,...:c;..." with c an integer or p/q
@@ -892,7 +1354,7 @@ impl QPoly {
             den = den.lcm(q);
         }
         let zt = terms.into_iter().map(|(e, p, q)| (e, p * (&den / &q))).collect();
-        Ok(QPoly { num: ZPoly::from_terms(n, zt)?, den }.normalize())
+        Ok(QPoly { num: ZPoly::from_terms(n, zt)?, den, p: 0 }.normalize())
     }
 }
 
@@ -958,12 +1420,46 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
             one(QPoly::from_text(n, text(1)?)?)
         }
         "text" => Ok(vec![poly(0)?.to_text().into_bytes()]),
+        "newp" => {
+            // over GF(p): n p text (integer coefficients)
+            let n: usize = text(0)?.parse().map_err(|_| "bad n")?;
+            let pm: u64 = text(1)?.parse().map_err(|_| "bad modulus")?;
+            if pm < 2 || pm >= 1 << 62 {
+                return Err("the modulus must be in [2, 2^62)".into());
+            }
+            let q = QPoly::from_text(n, text(2)?)?;
+            if !q.den.is_one() {
+                return Err("coefficients over GF(p) must be integers".into());
+            }
+            one(QPoly::modp(q.num, pm))
+        }
+        "mulred" | "powred" => {
+            // over GF(p)[a]/(m), a the last variable: m = "m0,m1,...,1"
+            let a = poly(0)?;
+            if a.p == 0 {
+                return Err("mulred: not over GF(p)".into());
+            }
+            let m: Vec<u64> = text(2)?.split(',').map(|x| x.parse::<u64>().map_err(|_| "bad modulus".to_string())).collect::<Result<_, _>>()?;
+            if m.len() < 2 || *m.last().unwrap() != 1 {
+                return Err("the defining polynomial must be monic".into());
+            }
+            if op == "mulred" {
+                let b = QPoly::from_bytes(arg(1)?)?;
+                one(a.mul_reduce(&b, &m)?)
+            } else {
+                let e: u64 = text(1)?.parse().map_err(|_| "bad exponent")?;
+                one(a.pow_reduce(e, &m)?)
+            }
+        }
         "add" => one(poly(0)?.add_signed(&poly(1)?, false)),
         "sub" => one(poly(0)?.add_signed(&poly(1)?, true)),
         "mul" => one(poly(0)?.mul(&poly(1)?)?),
         "neg" => {
             let p = poly(0)?;
-            one(QPoly { num: p.num.neg(), den: p.den })
+            if p.p > 0 {
+                return one(QPoly::modp(p.num.neg(), p.p));
+            }
+            one(QPoly { num: p.num.neg(), den: p.den, p: 0 })
         }
         "pow" => {
             let e: u64 = text(1)?.parse().map_err(|_| "bad exponent")?;
@@ -980,7 +1476,12 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
             if b.is_zero() {
                 return Err("division by zero".into());
             }
-            one(QPoly { num: p.num.scale(&a), den: p.den * b }.normalize())
+            if p.p > 0 {
+                let bp = BigInt::from(p.p);
+                let binv = b.mod_floor(&bp).modinv(&bp).ok_or("division by zero")?;
+                return one(QPoly::modp(p.num.scale(&(a * binv).mod_floor(&bp)), p.p));
+            }
+            one(QPoly { num: p.num.scale(&a), den: p.den * b, p: 0 }.normalize())
         }
         _ => Err(format!("unknown polynomial operation {}", op)),
     }
@@ -1079,6 +1580,47 @@ mod tests {
         assert!(mul(&a, &b).unwrap().equals(&naive(&a, &b)));
         let nb = b.neg();
         assert!(mul(&a, &nb).unwrap().equals(&naive(&a, &nb)));
+    }
+
+    #[test]
+    fn threaded_matches_heap() {
+        // 4845^2 > 2e7 products: the dense product runs on threads
+        let f = lin(4).pow(16).unwrap();
+        let one = ZPoly::from_terms(4, vec![(vec![0; 4], BigInt::one())]).unwrap();
+        let g = f.add_signed(&one, false).neg();
+        let p = mul(&f, &g).unwrap();
+        let q = mul_heap(&f.repack(p.bits), &g.repack(p.bits), true);
+        assert!(p.equals(&q));
+    }
+
+    #[test]
+    fn mod_p() {
+        let f = lin(4).pow(9).unwrap();
+        let one = ZPoly::from_terms(4, vec![(vec![0; 4], BigInt::one())]).unwrap();
+        let g = f.add_signed(&one, false);
+        let (qf, qg) = (QPoly::modp(f.clone(), 7), QPoly::modp(g.clone(), 7));
+        let r = qf.mul(&qg).unwrap();
+        assert!(r.num.equals(&naive(&f, &g).reduce_mod(7)));
+        assert!(QPoly::from_bytes(&r.to_bytes()).unwrap().equals(&r));
+        // (1 + x)^7 = 1 + x^7 over GF(7)
+        let q = QPoly::modp(lin(1), 7).pow(7).unwrap();
+        assert_eq!(q.to_text(), "7:1;0:1");
+        // a big prime: sums past 2^64
+        let pr = (1u64 << 61) - 1;
+        let h = QPoly::modp(lin(4).pow(5).unwrap().scale(&BigInt::from(pr - 3)), pr);
+        let hh = h.mul(&h).unwrap();
+        assert!(hh.num.equals(&naive(&h.num, &h.num).reduce_mod(pr)));
+    }
+
+    #[test]
+    fn gf_extension() {
+        // GF(9) = GF(3)[a]/(a^2 + 1): (x + a)*(x - a) = x^2 + 1, a^4 = 1
+        let m = [1u64, 0, 1];
+        let u = QPoly { num: ZPoly::from_terms(2, vec![(vec![1, 0], BigInt::one()), (vec![0, 1], BigInt::one())]).unwrap(), den: BigInt::one(), p: 3 };
+        let v = QPoly { num: ZPoly::from_terms(2, vec![(vec![1, 0], BigInt::one()), (vec![0, 1], BigInt::from(2))]).unwrap(), den: BigInt::one(), p: 3 };
+        assert_eq!(u.mul_reduce(&v, &m).unwrap().to_text(), "2,0:1;0,0:1");
+        let a = QPoly { num: ZPoly::from_terms(2, vec![(vec![0, 1], BigInt::one())]).unwrap(), den: BigInt::one(), p: 3 };
+        assert_eq!(a.pow_reduce(4, &m).unwrap().to_text(), "0,0:1");
     }
 
     #[test]

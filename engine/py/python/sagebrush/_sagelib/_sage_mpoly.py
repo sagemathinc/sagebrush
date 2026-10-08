@@ -166,6 +166,38 @@ class TermOrder:
 
 # ------------------------------------------------------------------ coefficient domains
 
+def _ext_repr(c):
+    """An element of GF(p^k) as Sage prints it in a multivariate polynomial:
+    balanced coefficients, in parentheses unless it is an integer or a bare
+    power of the generator ((2*a), (-a), (a + 1), a, a^2, -3)."""
+    F = c.parent()
+    p, name = F._p, F._name
+    v = [x - p if x > p // 2 else x for x in c._c]
+    terms = []
+    for j in range(len(v) - 1, -1, -1):
+        x = v[j]
+        if not x:
+            continue
+        mono = "" if j == 0 else name if j == 1 else "%s^%d" % (name, j)
+        if not mono:
+            t = str(abs(x))
+        elif abs(x) == 1:
+            t = mono
+        else:
+            t = "%d*%s" % (abs(x), mono)
+        terms.append((x < 0, t))
+    if not terms:
+        return "0"
+    s = ("-" if terms[0][0] else "") + terms[0][1]
+    for neg, t in terms[1:]:
+        s += (" - " if neg else " + ") + t
+    if not any(v[1:]):
+        return s
+    if len(terms) == 1 and not terms[0][0] and not terms[0][1][0].isdigit():
+        return s
+    return "(" + s + ")"
+
+
 def _is_prime_field(base):
     import _sage_ff
     return isinstance(base, _sage_ff.IntegerModRing_) and base.is_field()
@@ -235,14 +267,28 @@ class _Dom:
         return self._mul(a, self._inv(b))
 
     def _repr(self, c):
+        # Sage's multivariate polynomials over finite fields (Singular)
+        # print coefficients as balanced residues: 6 -> -1 over GF(7)
         if self.p is not None:
-            return str(c)
+            return str(c - self.p if c > self.p // 2 else c)
         if self.generic:
+            if self._ext():
+                return _ext_repr(c)
             return repr(c)
         return str(c.numerator) if c.denominator == 1 else "%d/%d" % (c.numerator, c.denominator)
 
     def _is_negative(self, c):
-        return self.p is None and not self.generic and c < 0
+        if self.p is not None:
+            return c > self.p // 2
+        if self.generic and self._ext():
+            # an element of the prime field prints as an integer
+            v = c._c
+            return not any(v[1:]) and v[0] > self.base._p // 2
+        return not self.generic and c < 0
+
+    def _ext(self):
+        import _sage_ff
+        return isinstance(self.base, _sage_ff.FiniteField_ext)
 
 
 # ------------------------------------------------------------------ rings
@@ -307,7 +353,18 @@ class MPolynomialRing_:
         self._flat = order.flat
         self._dom = _Dom(base)
         sa = _sa()
-        self._engine = _mp_raw is not None and self._n >= 1 and (base is sa.QQ or base is sa.ZZ)
+        # the engine's coefficients: "q" (QQ, ZZ), "p" (GF(p)), "ext"
+        # (GF(p^k) as GF(p)[a]/(m), a one more variable), or none
+        self._engine = None
+        if _mp_raw is not None and self._n >= 1:
+            import _sage_ff
+            if base is sa.QQ or base is sa.ZZ:
+                self._engine = "q"
+            elif self._dom.p is not None and self._dom.p < 1 << 62:
+                self._engine = "p"
+            elif isinstance(base, _sage_ff.FiniteField_ext) and base._p < 1 << 62:
+                self._engine = "ext"
+                self._mstr = ",".join(str(int(c) % base._p) for c in base._f)
 
     def __repr__(self):
         return "Multivariate Polynomial Ring in %s over %r" % (", ".join(self._names), self._base)
@@ -696,13 +753,22 @@ class MPolynomial:
     @property
     def _d(self):
         if self._dd is None:
-            self._dd = _dict_of(self._b)
+            self._dd = _dict_of(self._ring, self._b)
         return self._dd
 
     def _bytes(self):
         if self._b is None:
-            self._b = _mp("new", str(self._ring._n), ";".join(
-                "%s:%s" % (",".join(map(str, e)), c) for e, c in self._dd.items()))[0]
+            R = self._ring
+            if R._engine == "q":
+                self._b = _mp("new", str(R._n), ";".join(
+                    "%s:%s" % (",".join(map(str, e)), c) for e, c in self._dd.items()))[0]
+            elif R._engine == "p":
+                self._b = _mp("newp", str(R._n), str(R._dom.p), ";".join(
+                    "%s:%d" % (",".join(map(str, e)), c) for e, c in self._dd.items()))[0]
+            else:
+                es = ",".join
+                self._b = _mp("newp", str(R._n + 1), str(R._base._p), ";".join(
+                    "%s,%d:%d" % (es(map(str, e)), j, cj) for e, c in self._dd.items() for j, cj in enumerate(c._c) if cj))[0]
         return self._b
 
     def _fast(self, o, big=0):
@@ -815,9 +881,9 @@ class MPolynomial:
         return iter([(out(c), self._mono(e)) for e, c in self._terms()])
 
     def __len__(self):
-        if self._dd is None:
+        if self._dd is None and self._ring._engine != "ext":
             return int(bytes(_mp("len", self._b)[0]))
-        return len(self._dd)
+        return len(self._d)
 
     def degree(self, x=None, std_grading=False):
         """The total degree, or the degree in the variable x.
@@ -1047,7 +1113,7 @@ class MPolynomial:
             neg = dom._is_negative(c)
             a = dom._neg(c) if neg else c
             cs = dom._repr(a)
-            if dom.generic and (" + " in cs or " - " in cs[1:]):
+            if dom.generic and not dom._ext() and (" + " in cs or " - " in cs[1:]):
                 cs = "(" + cs + ")"
             if not mono:
                 t = cs
@@ -1135,7 +1201,10 @@ class MPolynomial:
         if o is None:
             return NotImplemented
         if self._fast(o, 64):
-            r = _engine_op(self._ring, "mul", self, o)
+            if self._ring._engine == "ext":
+                r = _engine_op(self._ring, "mulred", self, o, self._ring._mstr)
+            else:
+                r = _engine_op(self._ring, "mul", self, o)
             if r is not None:
                 return r
         return self._new(_mul(self._d, o._d, self._ring._dom))
@@ -1147,7 +1216,10 @@ class MPolynomial:
         if n < 0:
             return self._ring.fraction_field()(self) ** n
         if self._ring._engine and n > 1 and (self._b is not None or len(self._dd) > 1):
-            r = _engine_op(self._ring, "pow", self, str(n))
+            if self._ring._engine == "ext":
+                r = _engine_op(self._ring, "powred", self, str(n), self._ring._mstr)
+            else:
+                r = _engine_op(self._ring, "pow", self, str(n))
             if r is not None:
                 return r
         r = self._ring.one()
@@ -1572,12 +1644,25 @@ class MPolynomial:
         return 1 / self
 
 
-def _dict_of(b):
+def _dict_of(R, b):
     """The dict of a polynomial from the engine's bytes."""
     out = {}
     t = bytes(_mp("text", b)[0]).decode()
     if not t:
         return out
+    if R._engine == "p":
+        for term in t.split(";"):
+            e, c = term.split(":")
+            out[tuple(int(x) for x in e.split(","))] = int(c)
+        return out
+    if R._engine == "ext":
+        F, k = R._base, R._base._n
+        parts = {}
+        for term in t.split(";"):
+            e, c = term.split(":")
+            ex = [int(x) for x in e.split(",")]
+            parts.setdefault(tuple(ex[:-1]), [0] * k)[ex[-1]] = int(c)
+        return {e: F._make(c) for e, c in parts.items()}
     for term in t.split(";"):
         e, c = term.split(":")
         if "/" in c:

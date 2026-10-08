@@ -22,6 +22,13 @@ fn main() {
         let g = f.add_signed(&one, false);
         let t1 = Instant::now();
         let h = f.mul(&g).unwrap();
-        println!("n={} f: {} terms ({:.3} s)  f*(f+1): {} terms  {:.4} s", n, f.len(), tp.as_secs_f64(), h.len(), t1.elapsed().as_secs_f64());
+        let dt = t1.elapsed().as_secs_f64();
+        // a checksum: sum of c_i * (i + 1) * (exponent word mod m) mod m
+        let m = BigInt::from((1u64 << 61) - 1);
+        let mut ck = BigInt::from(0);
+        for i in 0..h.len() {
+            ck = (ck + h.coeffs.big(i) * BigInt::from(i as u64 + 1) * BigInt::from(h.exps[i] % ((1u64 << 61) - 1))) % &m;
+        }
+        println!("n={} f: {} terms ({:.3} s)  f*(f+1): {} terms  {:.4} s  check {}", n, f.len(), tp.as_secs_f64(), h.len(), dt, ck);
     }
 }
