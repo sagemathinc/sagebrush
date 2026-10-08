@@ -1,0 +1,12 @@
+[package]
+name = "sagebrush-mpoly"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Sparse multivariate polynomials over Z and Q for Sagebrush: packed exponents, word-size coefficients with big-integer fallback, dense-chunk and heap multiplication"
+
+[dependencies]
+sagebrush-bigint = { path = "../bigint" }
+sagebrush-interrupt = { path = "../interrupt" }
+num-traits = "0.2"
+num-integer = "0.1"

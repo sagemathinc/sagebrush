@@ -384,6 +384,14 @@ fn call(py: Python<'_>, request: String) -> PyResult<String> {
     guarded(py, || sagebrush_web::call(&request))
 }
 
+/// A multivariate polynomial call (engine/mpoly): the binary framing of
+/// sagebrush_mpoly::call, shared with the WebAssembly build (sb_mp_call).
+#[pyfunction]
+fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    let r = guarded(py, move || sagebrush_mpoly::call_framed(&request))?;
+    Ok(pyo3::types::PyBytes::new(py, &r))
+}
+
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
@@ -413,5 +421,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mf.add_function(wrap_pyfunction!(newforms, &mf)?)?;
     m.add_submodule(&mf)?;
     m.add_function(wrap_pyfunction!(sym_call, m)?)?;
+    m.add_function(wrap_pyfunction!(mpoly_call, m)?)?;
     m.add_function(wrap_pyfunction!(call, m)?)
 }

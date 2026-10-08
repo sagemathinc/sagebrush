@@ -18,6 +18,7 @@ interface Engine {
   sb_free(ptr: number, len: number): void;
   sb_call(ptr: number, len: number): number;
   sb_sym_call(ptr: number, len: number): number;
+  sb_mp_call(ptr: number, len: number): number;
   sb_last_error(): number;
   sb_reply_len(): number;
 }
@@ -104,7 +105,37 @@ export function symCall(request: string): string {
   return new TextDecoder().decode(new Uint8Array(e.memory.buffer, r, e.sb_reply_len()));
 }
 
+/** A multivariate polynomial call (engine/mpoly): binary request and reply
+ *  (sagebrush_mpoly::call_framed); errors come back in band ("er..."). */
+export function mpCall(req: Uint8Array): Uint8Array {
+  const e = engine();
+  const p = e.sb_alloc(req.length);
+  new Uint8Array(e.memory.buffer, p, req.length).set(req);
+  let r: number;
+  try {
+    r = e.sb_mp_call(p, req.length);
+  } catch (err) {
+    // an interrupt (or a bug) trapped: start afresh
+    E = null;
+    throw err;
+  }
+  e.sb_free(p, req.length);
+  return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
+}
+
 newBuiltinModule("_sbengine", (m) => {
+  m.mp = Obj.builtin((req: any) => {
+    try {
+      const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new TextEncoder().encode(String(req));
+      return new Obj.PyBytes(mpCall(a));
+    } catch (err: any) {
+      if (INTR[0]) {
+        INTR[0] = 0;
+        return Obj.raise(Obj.T.KeyboardInterrupt);
+      }
+      return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
+    }
+  }, "mp");
   m.sym = Obj.builtin((req: any) => {
     try {
       return symCall(String(req));
