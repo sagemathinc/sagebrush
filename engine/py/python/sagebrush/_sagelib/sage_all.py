@@ -20,7 +20,7 @@ __all__ = [
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
-    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
@@ -30,7 +30,7 @@ __all__ = [
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
-    "binomial", "factorial", "fibonacci", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
+    "binomial", "factorial", "fibonacci", "catalan_number", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
     # the language: [a..b], 1.5, f(x) = ...
     "ellipsis_range", "ellipsis_iter", "RealNumber", "symbolic_expression",
@@ -110,6 +110,8 @@ from _sage_series import PowerSeriesRing, LaurentSeriesRing, O
 from _sage_graph import Graph, DiGraph, graphs, digraphs
 true, false = True, False
 from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles, firing_graph, parallel_firing_graph
+from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCharacterRing, WeightRing,
+                       branching_rule, branching_rule_from_plethysm, BranchingRule)
 
 
 def RationalField():
@@ -1210,6 +1212,20 @@ def _binom_general(n, k):
     if isinstance(r, (int, _Fraction)):
         return _q(_Fraction(r) / _math.factorial(k))
     return r / _math.factorial(k)
+
+
+def catalan_number(n):
+    """The n-th Catalan number binomial(2n, n)/(n + 1).
+
+    EXAMPLES::
+
+        sage: [catalan_number(k) for k in [1..10]]
+        [1, 2, 5, 14, 42, 132, 429, 1430, 4862, 16796]
+    """
+    n = int(n)
+    if n < 0:
+        return 0
+    return _math.comb(2 * n, n) // (n + 1)
 
 
 def factorial(n):
