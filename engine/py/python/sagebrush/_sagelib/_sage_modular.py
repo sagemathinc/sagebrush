@@ -1795,6 +1795,38 @@ class EllipticCurve_rational_field:
         m = self.minimal_model()
         return RR(_ec.regulator(m._a, [m._to_min(P) for P in points], self._bad()))
 
+    def CPS_height_bound(self):
+        """The Cremona-Prickett-Siksek bound: B with h(P) <= hhat(P) + B for
+        every rational point P of the minimal model, where h(P) =
+        log max(|num x(P)|, den x(P)) and hhat is the canonical height.
+
+        The archimedean term is CPS's -log(eps_inf)/3.  At each bad prime
+        Sagebrush adds the exact largest local correction over the
+        components of the Neron model with rational points (e.g.
+        i(m-i)/m log p on component i of a split I_m), which is often
+        sharper than CPS's -log(eps_p)/3, so the bound can be smaller than
+        Sage's.  ``gens()`` uses it to bound the index of the points found.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('37a1')
+            sage: E.CPS_height_bound()  # abs tol 1e-3  # needs sage.libs.eclib
+            0.16397076103046915
+
+        A split I_5 at 11: the largest correction is 6/5 log 11 (Sage and
+        Magma give 4/3 log 11 = 3.197), attained by the torsion point
+        (16, 60), whose canonical height is 0::
+
+            sage: E = EllipticCurve('11a1')
+            sage: E.CPS_height_bound()  # abs tol 1e-3  # sagebrush only
+            2.8778
+            sage: log(16.0)  # abs tol 1e-12
+            2.77258872223978
+        """
+        import _sage_ec as _ec
+        from sage_all import RR
+        return RR(_ec.cps_bound(self.minimal_model()._a))
+
     def _to_min(self, P):
         """The point P (on self or on a curve with the same c4, c6) moved to this model."""
         if isinstance(P, EllipticCurvePoint):
