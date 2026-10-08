@@ -104,6 +104,30 @@ class Graphics:
         """
         return self._options.get("aspect_ratio", "automatic")
 
+    def axes_labels(self, l=None):
+        """Set the axes labels (a pair of strings), or get them.
+
+        EXAMPLES::
+
+            sage: G = plot(x, (x, 0, 1)); G.axes_labels(['x', 'y']); G.axes_labels()
+            ['x', 'y']
+        """
+        if l is None:
+            return self._options.get("axes_labels")
+        self._options["axes_labels"] = list(l)
+
+    def axes(self, show=None):
+        """Show the axes (or not), or say whether they are shown.
+
+        EXAMPLES::
+
+            sage: G = plot(x, (x, 0, 1)); G.axes(False); G.axes()
+            False
+        """
+        if show is None:
+            return self._options.get("axes", True)
+        self._options["axes"] = bool(show)
+
     def set_axes_range(self, xmin=None, xmax=None, ymin=None, ymax=None):
         """Set the ranges of the axes.
 
