@@ -131,7 +131,7 @@ class MatrixSpace_:
         return identity_matrix(self._base, self._nrows)
 
 
-def MatrixSpace(base, nrows, ncols=None):
+def MatrixSpace(base, nrows, ncols=None, sparse=False):
     """The space of nrows x ncols matrices over base (square if ncols is None).
 
     EXAMPLES::
@@ -139,6 +139,9 @@ def MatrixSpace(base, nrows, ncols=None):
         sage: MatrixSpace(ZZ, 2, 3)
         Full MatrixSpace of 2 by 3 dense matrices over Integer Ring
     """
+    import _sage_ffmat
+    if _sage_ffmat._is_ff(base):
+        return _sage_ffmat.MatrixSpace(base, nrows, ncols)
     return MatrixSpace_(base, nrows, nrows if ncols is None else ncols)
 
 
@@ -756,9 +759,28 @@ def vector(*args):
         sage: vector([1, 2/3]), vector(QQ, [1, 2])
         ((1, 2/3), (1, 2))
     """
+    import _sage_ffmat
+    if len(args) == 2 and _sage_ffmat._is_ff(args[0]):
+        return _sage_ffmat.vector(args[0], args[1])
     if len(args) == 2:
         args = args[1:]
+    ff = _ff_base_of(args[0])
+    if ff is not None:
+        return _sage_ffmat.vector(ff, args[0])
     return Vector(_norm(x) for x in args[0])
+
+
+def _ff_base_of(entries):
+    """The finite field of the entries, if they are finite-field elements."""
+    import _sage_ff
+    for x in entries:
+        if isinstance(x, (_sage_ff.IntegerMod, _sage_ff.FiniteFieldElement)):
+            return x.parent()
+        if isinstance(x, (list, tuple)):
+            b = _ff_base_of(x)
+            if b is not None:
+                return b
+    return None
 
 
 def _smith_uv(a):
@@ -833,6 +855,13 @@ def matrix(*args, **kwds):
     """
     sa = _sa()
     base = None
+    import _sage_ffmat
+    if args and _sage_ffmat._is_ff(args[0]):
+        return _sage_ffmat.matrix(*args, **kwds)
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        ff = _ff_base_of(args[0])
+        if ff is not None:
+            return _sage_ffmat.matrix(ff, args[0])
     if args and args[0] in (sa.ZZ, sa.QQ):
         base, args = args[0], args[1:]
     if len(args) >= 2 and isinstance(args[0], int) and isinstance(args[1], int):
@@ -878,6 +907,9 @@ def identity_matrix(base, n=None):
     """
     if n is None:
         base, n = _sa().ZZ, base
+    import _sage_ffmat
+    if _sage_ffmat._is_ff(base):
+        return _sage_ffmat.identity_matrix(base, n)
     return Matrix(base, [[int(i == j) for j in range(n)] for i in range(n)])
 
 
@@ -893,6 +925,9 @@ def zero_matrix(base, nrows=None, ncols=None):
         )
     """
     sa = _sa()
+    import _sage_ffmat
+    if _sage_ffmat._is_ff(base):
+        return _sage_ffmat.matrix(base, nrows, nrows if ncols is None else ncols, 0)
     if base not in (sa.ZZ, sa.QQ):
         # zero_matrix(n) or zero_matrix(m, n)
         base, nrows, ncols = sa.ZZ, base, nrows

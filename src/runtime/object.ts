@@ -476,8 +476,22 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any
   if (d !== undefined) return descrGetOrGetattr(d, o, t, name);
   const gf = lookupType(t, "__getattr__");
   if (gf !== undefined) return callGetattrHook(gf, o, name, dflt);
+  if (t.$name === "module" && hasInstanceDict(o) && typeof o.__name__ === "string") {
+    // PEP 562: a module-level __getattr__ answers for missing attributes
+    const g = Object.prototype.hasOwnProperty.call(o, "__getattr__") ? o.__getattr__ : undefined;
+    if (g !== undefined && name !== "__getattr__") {
+      if (dflt === undefined) return callObj(g, [name]);
+      try {
+        return callObj(g, [name]);
+      } catch (e: any) {
+        if (isinstance(e, T.AttributeError)) return dflt;
+        throw e;
+      }
+    }
+    if (dflt !== undefined) return dflt;
+    raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'`);
+  }
   if (dflt !== undefined) return dflt;
-  if (t.$name === "module" && hasInstanceDict(o) && typeof o.__name__ === "string") raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'`);
   raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'`);
 }
 

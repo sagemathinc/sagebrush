@@ -20,7 +20,8 @@ __all__ = [
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
     "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
-    "conway_polynomial",
+    "conway_polynomial", "VectorSpace", "random_matrix",
+    "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "PolynomialRing", "polygen", "parent",
@@ -99,6 +100,176 @@ from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomia
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
 from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
                       conway_polynomial)
+
+
+def RationalField():
+    """The field of rationals, QQ.
+
+    EXAMPLES::
+
+        sage: RationalField(), RationalField() is QQ
+        (Rational Field, True)
+    """
+    return QQ
+
+
+def IntegerRing():
+    """The ring of integers, ZZ.
+
+    EXAMPLES::
+
+        sage: IntegerRing()
+        Integer Ring
+    """
+    return ZZ
+
+
+_SEED = [None]
+
+
+def set_random_seed(seed=None):
+    """Seed the random number generators (Python's random); None: from the
+    system.  The streams differ from Sage's.
+
+    EXAMPLES::
+
+        sage: set_random_seed(5); a = randint(1, 10**9); set_random_seed(5); a == randint(1, 10**9)
+        True
+    """
+    import random as _r
+    if seed is None:
+        import os as _os
+        seed = int.from_bytes(_os.urandom(8), "little")
+    _SEED[0] = int(seed)
+    _r.seed(int(seed))
+
+
+def initial_seed():
+    """The last seed given to set_random_seed.
+
+    EXAMPLES::
+
+        sage: set_random_seed(17); initial_seed()
+        17
+    """
+    return _SEED[0]
+
+
+def randint(a, b):
+    """A random integer in [a, b] (Python's random.randint, as in Sage).
+
+    EXAMPLES::
+
+        sage: 1 <= randint(1, 10) <= 10
+        True
+    """
+    import random as _r
+    return _r.randint(int(a), int(b))
+
+
+def hue(h, s=1, v=1):
+    """The RGB color (floats in [0, 1]) of hue h (taken modulo 1),
+    saturation s and value v.
+
+    EXAMPLES::
+
+        sage: hue(0.3), hue(0), hue(0.5, 0.5, 0.8)
+        ((0.20000000000000018, 1.0, 0.0), (1.0, 0.0, 0.0), (0.4, 0.8, 0.8))
+    """
+    import colorsys
+    h = float(h)
+    h -= _math.floor(h)
+    return tuple(float(c) for c in colorsys.hsv_to_rgb(h, float(s), float(v)))
+
+
+def norm(x):
+    """x.norm(): the Euclidean norm of a vector, the algebraic norm of a
+    number (|z|^2 for a complex number).
+
+    EXAMPLES::
+
+        sage: norm(vector([3, 4])), norm(3 + 4*I)
+        (5, 25)
+    """
+    if hasattr(x, "norm"):
+        return x.norm()
+    if isinstance(x, complex):
+        return x.real ** 2 + x.imag ** 2
+    try:
+        from _sage_expr import Expression as _E
+        if isinstance(x, _E):
+            return (x * x.conjugate()).expand().simplify()
+    except ImportError:
+        pass
+    return x * x
+
+
+def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
+    """Time a statement and print Sage's summary line (the timings vary).
+
+    EXAMPLES::
+
+        sage: timeit("2 + 2")  # random
+        625 loops, best of 3: 41.3 ns per loop
+    """
+    import time as _t
+    import sys as _s
+    g = globals if globals is not None else _s.modules["__main__"].__dict__
+    code = compile(str(stmt), "<timeit>", "exec")
+    n = int(number) or 1
+    if not number:
+        while True:
+            t0 = _t.perf_counter()
+            for _ in range(n):
+                exec(code, g)
+            if _t.perf_counter() - t0 > 0.2 or n >= 10 ** 6:
+                break
+            n *= 5
+    best = None
+    for _ in range(int(repeat)):
+        t0 = _t.perf_counter()
+        for _ in range(n):
+            exec(code, g)
+        d = (_t.perf_counter() - t0) / n
+        best = d if best is None or d < best else best
+    for unit, scale in (("s", 1), ("ms", 1e-3), ("\u03bcs", 1e-6), ("ns", 1e-9)):
+        if best >= scale or unit == "ns":
+            print("%d loops, best of %d: %.3g %s per loop" % (n, int(repeat), best / scale, unit))
+            break
+
+
+def VectorSpace(base, n):
+    """The vector space base^n (over a finite field, so far).
+
+    EXAMPLES::
+
+        sage: VectorSpace(GF(2), 8)
+        Vector space of dimension 8 over Finite Field of size 2
+    """
+    import _sage_ffmat
+    if _sage_ffmat._is_ff(base):
+        return _sage_ffmat.VectorSpace(base, n)
+    raise NotImplementedError("VectorSpace over %r is not available in sagebrush yet" % (base,))
+
+
+def random_matrix(base, nrows, ncols=None, **kwds):
+    """A random matrix (over a finite field, ZZ or QQ).
+
+    EXAMPLES::
+
+        sage: random_matrix(GF(2), 3, 4).parent()
+        Full MatrixSpace of 3 by 4 dense matrices over Finite Field of size 2
+        sage: random_matrix(ZZ, 2).parent()
+        Full MatrixSpace of 2 by 2 dense matrices over Integer Ring
+    """
+    import _sage_ffmat
+    if _sage_ffmat._is_ff(base):
+        return _sage_ffmat.random_matrix(base, nrows, ncols)
+    import random as _r
+    n = nrows if ncols is None else ncols
+    x = kwds.get("x", -2 if "y" not in kwds else 0)
+    y = kwds.get("y", 2)
+    return matrix(base, [[_r.randint(x, y) for _ in range(n)] for _ in range(nrows)])
 from _sage_matrix import matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC, vector
 Matrix = matrix
 
@@ -124,6 +295,13 @@ def parent(x):
 
 
 from _pyjs_docsearch import search_doc
+
+# `from sage.x.y import name` for code written for Sage (pyjs only: under
+# CPython a real Sage may be installed)
+import sys as _sys0
+if _sys0.implementation.name == "pyjs":
+    import _sage_shim
+    _sage_shim.install()
 
 from _interact import (interact, slider, range_slider, selector, checkbox, input_box,
                        color_selector, text_control)

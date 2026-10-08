@@ -2,7 +2,7 @@
 
 import { globalsDict, hooks } from "./object";
 import { glibcLog, glibcExp, glibcLog1p } from "./libm";
-import { T, FloatBox, PyDict, PyBytes, NotImplemented, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
+import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin } from "./builtins";
@@ -39,6 +39,24 @@ export function importModule(name: string): any {
     // The parent's __init__ may have imported this module already.
     const now = dictGet(sysModules, name);
     if (now !== undefined) return now;
+  }
+  // sys.meta_path finders (find_spec -> loader.create_module/exec_module)
+  const mp = dictGet(sysModules, "sys")?.meta_path;
+  if (Array.isArray(mp) && mp.length) {
+    for (const finder of [...mp]) {
+      const spec = callObj(getattr(finder, "find_spec"), [name, null, null]);
+      if (spec === null || spec === undefined) continue;
+      const ld = getattr(spec, "loader");
+      let mod = callObj(getattr(ld, "create_module"), [spec]);
+      if (mod === null || mod === undefined) mod = Ty.newModule(name);
+      dictSet(sysModules, name, mod);
+      callObj(getattr(ld, "exec_module"), [mod]);
+      if (dot > 0) {
+        const parent = dictGet(sysModules, name.slice(0, dot));
+        parent[name.slice(dot + 1)] = mod;
+      }
+      return mod;
+    }
   }
   const f = factories[name];
   let m: any;
@@ -123,6 +141,15 @@ export function importFrom(m: any, name: string): any {
   }
   const v = m[name];
   if (v !== undefined && Object.prototype.hasOwnProperty.call(m, name)) return v;
+  // an attribute from the module's __getattr__ (PEP 562, or a module
+  // subclass) comes before a submodule, as in CPython
+  if (typeOf(m) !== T.module || m.__getattr__ !== undefined) {
+    try {
+      return typeOf(m) === T.module ? callObj(m.__getattr__, [name]) : getattr(m, name);
+    } catch (e: any) {
+      if (!(e?.$cls !== undefined && isinstance(e, T.AttributeError))) throw e;
+    }
+  }
   try {
     return importModule(`${m.__name__}.${name}`);
   } catch (e: any) {
@@ -176,6 +203,7 @@ newBuiltinModule("sys", (m) => {
   m.__stdin__ = stdin;
   m.modules = sysModules;
   m.path = [];
+  m.meta_path = [];
   m.flags = Ty.newModule("flags");
   m.flags.optimize = 0;
   let limit = 1000;

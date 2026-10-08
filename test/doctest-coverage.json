@@ -1,6 +1,6 @@
 {
-  "sage_all": 51,
-  "_sage_modular": 157,
+  "sage_all": 61,
+  "_sage_modular": 161,
   "_sage_poly": 53,
   "_sage_nf": 85,
   "sage_permgroup": 63,
@@ -10,5 +10,6 @@
   "_interact": 24,
   "sage_plot": 40,
   "sage_plot3d": 50,
-  "_sage_ff": 146
+  "_sage_ff": 146,
+  "_sage_ffmat": 89
 }
