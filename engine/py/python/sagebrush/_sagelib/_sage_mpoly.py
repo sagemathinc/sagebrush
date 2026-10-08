@@ -7,10 +7,41 @@ zero-dimensional ideals; printed as Sage prints them.
 
 A polynomial is a dict {exponent tuple: coefficient}; coefficients are
 Fractions over QQ and ZZ, integers mod p over GF(p), field elements over
-GF(q)."""
+GF(q).  Over QQ and ZZ the arithmetic (+, -, *, ^, ==) is done by the Rust
+engine (engine/mpoly): such a polynomial may hold only the engine's bytes,
+and its dict is made when something asks for it."""
 
 from fractions import Fraction as _F
 import math
+
+try:  # the CPython package
+    from sagebrush._native import mpoly_call as _mp_raw
+except ImportError:
+    try:  # pyjs: the engine is linked into the runtime
+        import _sbengine
+        _mp_raw = _sbengine.mp
+    except (ImportError, AttributeError):
+        _mp_raw = None
+
+
+def _mp(op, *args):
+    """One engine/mpoly call: the results, as bytes."""
+    parts = [len(op).to_bytes(4, "little"), op.encode(), len(args).to_bytes(4, "little")]
+    for a in args:
+        if isinstance(a, str):
+            a = a.encode()
+        parts.append(len(a).to_bytes(4, "little"))
+        parts.append(a)
+    r = _mp_raw(b"".join(parts))
+    if r[:2] != b"ok":
+        raise ValueError(bytes(r[2:]).decode())
+    k = int.from_bytes(r[2:6], "little")
+    out, i = [], 6
+    for _ in range(k):
+        m = int.from_bytes(r[i:i + 4], "little")
+        out.append(r[i + 4:i + 4 + m])
+        i += 4 + m
+    return out
 
 
 def _sa():
@@ -275,6 +306,8 @@ class MPolynomialRing_:
         self._key = order.key
         self._flat = order.flat
         self._dom = _Dom(base)
+        sa = _sa()
+        self._engine = _mp_raw is not None and self._n >= 1 and (base is sa.QQ or base is sa.ZZ)
 
     def __repr__(self):
         return "Multivariate Polynomial Ring in %s over %r" % (", ".join(self._names), self._base)
@@ -647,16 +680,40 @@ class MPolynomial:
         (23/2, 3, x^2*y, 3)
     """
 
-    __slots__ = ("_ring", "_d", "_lt")
+    __slots__ = ("_ring", "_dd", "_lt", "_b")
 
     def __init__(self, ring, d):
         dom = ring._dom
         if dom.generic:
-            self._d = {e: c for e, c in d.items() if c}
+            self._dd = {e: c for e, c in d.items() if c}
         else:
-            self._d = {e: c for e, c in d.items() if c != 0}
+            self._dd = {e: c for e, c in d.items() if c != 0}
         self._ring = ring
         self._lt = None
+        self._b = None
+
+    # ---- the engine (QQ and ZZ): bytes, and the dict made on demand
+    @property
+    def _d(self):
+        if self._dd is None:
+            self._dd = _dict_of(self._b)
+        return self._dd
+
+    def _bytes(self):
+        if self._b is None:
+            self._b = _mp("new", str(self._ring._n), ";".join(
+                "%s:%s" % (",".join(map(str, e)), c) for e, c in self._dd.items()))[0]
+        return self._b
+
+    def _fast(self, o, big=0):
+        """Whether to compute self op o in the engine: over QQ or ZZ, when
+        either already lives there or the work is at least big."""
+        R = self._ring
+        if not R._engine:
+            return False
+        if self._b is not None or o._b is not None:
+            return True
+        return len(self._dd) * len(o._dd) >= big if big else False
 
     # ---- data
     def parent(self):
@@ -749,7 +806,7 @@ class MPolynomial:
             sage: R.<x,y> = QQ[]; (x + y + 1).number_of_terms()
             3
         """
-        return _sa().Integer(len(self._d))
+        return _sa().Integer(len(self))
 
     hamming_weight = number_of_terms
 
@@ -758,7 +815,9 @@ class MPolynomial:
         return iter([(out(c), self._mono(e)) for e, c in self._terms()])
 
     def __len__(self):
-        return len(self._d)
+        if self._dd is None:
+            return int(bytes(_mp("len", self._b)[0]))
+        return len(self._dd)
 
     def degree(self, x=None, std_grading=False):
         """The total degree, or the degree in the variable x.
@@ -864,7 +923,7 @@ class MPolynomial:
             sage: R.<x,y> = QQ[]; R(0).is_zero()
             True
         """
-        return not self._d
+        return len(self) == 0
 
     def is_one(self):
         """Whether the polynomial is 1.
@@ -1030,6 +1089,10 @@ class MPolynomial:
         o = self._coerce(o)
         if o is None:
             return NotImplemented
+        if self._fast(o):
+            r = _engine_op(self._ring, "add", self, o)
+            if r is not None:
+                return r
         dom = self._ring._dom
         d = dict(self._d)
         for e, c in o._d.items():
@@ -1039,6 +1102,10 @@ class MPolynomial:
     __radd__ = __add__
 
     def __neg__(self):
+        if self._b is not None and self._ring._engine:
+            r = _engine_op(self._ring, "neg", self)
+            if r is not None:
+                return r
         dom = self._ring._dom
         return self._new({e: dom._neg(c) for e, c in self._d.items()})
 
@@ -1049,6 +1116,10 @@ class MPolynomial:
         o = self._coerce(o)
         if o is None:
             return NotImplemented
+        if self._fast(o):
+            r = _engine_op(self._ring, "sub", self, o)
+            if r is not None:
+                return r
         return self + (-o)
 
     def __rsub__(self, o):
@@ -1063,6 +1134,10 @@ class MPolynomial:
         o = self._coerce(o)
         if o is None:
             return NotImplemented
+        if self._fast(o, 64):
+            r = _engine_op(self._ring, "mul", self, o)
+            if r is not None:
+                return r
         return self._new(_mul(self._d, o._d, self._ring._dom))
 
     __rmul__ = __mul__
@@ -1071,6 +1146,10 @@ class MPolynomial:
         n = int(n)
         if n < 0:
             return self._ring.fraction_field()(self) ** n
+        if self._ring._engine and n > 1 and (self._b is not None or len(self._dd) > 1):
+            r = _engine_op(self._ring, "pow", self, str(n))
+            if r is not None:
+                return r
         r = self._ring.one()
         b = self
         while n:
@@ -1152,6 +1231,10 @@ class MPolynomial:
         o2 = self._coerce(o)
         if o2 is None:
             return NotImplemented if not isinstance(o, (int, _F)) else False
+        if self._fast(o2):
+            r = _engine_op(self._ring, "eq", self, o2)
+            if r is not None:
+                return r
         return self._d == o2._d
 
     def __ne__(self, o):
@@ -1164,7 +1247,7 @@ class MPolynomial:
         return hash(tuple(sorted(self._d.items(), key=lambda t: t[0])))
 
     def __bool__(self):
-        return bool(self._d)
+        return len(self) > 0
 
     def _cmp_key(self):
         k = self._ring._key
@@ -1487,6 +1570,46 @@ class MPolynomial:
 
     def __invert__(self):
         return 1 / self
+
+
+def _dict_of(b):
+    """The dict of a polynomial from the engine's bytes."""
+    out = {}
+    t = bytes(_mp("text", b)[0]).decode()
+    if not t:
+        return out
+    for term in t.split(";"):
+        e, c = term.split(":")
+        if "/" in c:
+            p, q = c.split("/")
+            c = _F(int(p), int(q))
+        else:
+            c = _F(int(c))
+        out[tuple(int(x) for x in e.split(","))] = c
+    return out
+
+
+def _engine_op(R, op, *args):
+    """op on polynomials (and text) in the engine, or None if it cannot
+    (exponents too large to pack in a word): the caller uses dicts."""
+    try:
+        r = _mp(op, *[a if isinstance(a, str) else a._bytes() for a in args])[0]
+    except ValueError as e:
+        if "too large to pack" in str(e):
+            for a in args:
+                if not isinstance(a, str):
+                    a._d  # the dict, for the fallback
+            return None
+        raise
+    if op == "eq":
+        return bytes(r) == b"1"
+    return _from_bytes(R, r)
+
+
+def _from_bytes(R, b):
+    p = MPolynomial.__new__(MPolynomial)
+    p._ring, p._dd, p._lt, p._b = R, None, None, b
+    return p
 
 
 def _var_index(R, v):

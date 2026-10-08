@@ -53,6 +53,16 @@ pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
     r.as_ptr()
 }
 
+/// A multivariate polynomial call (engine/mpoly: binary framing of
+/// sagebrush_mpoly::call); the reply is in the same buffer as sb_call's.
+#[no_mangle]
+pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
+    let req = std::slice::from_raw_parts(ptr, len);
+    let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    *r = sagebrush_mpoly::call_framed(req);
+    r.as_ptr()
+}
+
 /// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
 /// for the last symbolic error, or "" (an interrupt or a bug).
 #[no_mangle]

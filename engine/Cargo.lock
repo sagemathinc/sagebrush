@@ -530,6 +530,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-mpoly"
+version = "0.1.0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+ "sagebrush-bigint",
+ "sagebrush-interrupt",
+]
+
+[[package]]
 name = "sagebrush-node"
 version = "0.1.0"
 dependencies = [
@@ -564,6 +574,7 @@ dependencies = [
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-modsym",
+ "sagebrush-mpoly",
  "sagebrush-sym",
  "sagebrush-web",
 ]
@@ -602,6 +613,7 @@ dependencies = [
  "sagebrush-group",
  "sagebrush-interrupt",
  "sagebrush-modsym",
+ "sagebrush-mpoly",
  "sagebrush-poly",
  "sagebrush-sym",
  "serde_json",

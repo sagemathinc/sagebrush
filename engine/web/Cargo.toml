@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-arith = { path = "../arith" }
 sagebrush-sym = { path = "../sym" }
+sagebrush-mpoly = { path = "../mpoly" }
 sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
 sagebrush-modsym = { path = "../modsym", default-features = false }
 sagebrush-ap = { path = "../ap", default-features = false }
