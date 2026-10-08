@@ -321,7 +321,7 @@ class PermutationGroupElement:
         EXAMPLES::
 
             sage: G = SymmetricGroup(4)
-            sage: G('(1,2)').conjugate(G('(2,3)'))  # sagebrush only (the local Sage crashes here)
+            sage: G('(1,2)').conjugate(G('(2,3)'))
             (1,3)
         """
         h = PermutationGroupElement(h)

@@ -848,7 +848,7 @@ class Sandpile:
 
         EXAMPLES::
 
-            sage: sandpiles.Diamond().unsaturated_ideal().gens()  # sagebrush only (the local Sage lacks Singular)
+            sage: sandpiles.Diamond().unsaturated_ideal().gens()
             [x1^3 - x3*x2*x0, x2^3 - x3*x1*x0, x3^2 - x2*x1]
         """
         R = self.ring()
@@ -868,7 +868,7 @@ class Sandpile:
 
         EXAMPLES::
 
-            sage: sandpiles.Diamond().ideal().gens()  # sagebrush only (the local Sage lacks Singular)
+            sage: sandpiles.Diamond().ideal().gens()
             [x2*x1 - x0^2, x3^2 - x0^2, x1^3 - x3*x2*x0, x3*x1^2 - x2^2*x0, x2^3 - x3*x1*x0, x3*x2^2 - x1^2*x0]
         """
         if "ideal" not in self._cache:
@@ -904,7 +904,7 @@ class Sandpile:
 
         EXAMPLES::
 
-            sage: sandpiles.Diamond().groebner()  # sagebrush only (the local Sage lacks Singular)
+            sage: sandpiles.Diamond().groebner()
             [x3*x2^2 - x1^2*x0, x2^3 - x3*x1*x0, x3*x1^2 - x2^2*x0, x1^3 - x3*x2*x0, x3^2 - x0^2, x2*x1 - x0^2]
         """
         import _sage_mpoly as M

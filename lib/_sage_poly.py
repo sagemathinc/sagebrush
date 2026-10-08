@@ -939,11 +939,11 @@ class Polynomial:
         EXAMPLES::
 
             sage: R.<x> = QQ[]
-            sage: (x^3 - 2).galois_group()  # sagebrush only (the local Sage crashes here)
+            sage: (x^3 - 2).galois_group()
             Transitive group number 2 of degree 3
-            sage: (x^5 - x - 1).galois_group()  # sagebrush only (the local Sage crashes here)
+            sage: (x^5 - x - 1).galois_group()
             Transitive group number 5 of degree 5
-            sage: (x^4 + 1).galois_group().order()  # sagebrush only (the local Sage crashes here)
+            sage: (x^4 + 1).galois_group().order()
             4
         """
         d, c = self._integral()

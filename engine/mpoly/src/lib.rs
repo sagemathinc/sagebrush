@@ -24,6 +24,7 @@
 //! keeps no state, so a trapped WebAssembly instance loses nothing.
 
 pub mod divide;
+pub mod f4;
 pub mod factor;
 pub mod gcd;
 pub mod hensel;
@@ -976,8 +977,21 @@ fn threads_for(ops: u64) -> usize {
     }
 }
 
+/// The number of threads for independent jobs (1 in WebAssembly).
+pub(crate) fn threads() -> usize {
+    #[cfg(target_arch = "wasm32")]
+    {
+        1
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let t = std::env::var("SAGEBRUSH_THREADS").ok().and_then(|v| v.parse().ok());
+        t.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)).max(1)
+    }
+}
+
 /// f on each item, on up to `threads` threads; the results in order.
-fn run_parallel<T: Sync, R: Send>(threads: usize, items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+pub(crate) fn run_parallel<T: Sync, R: Send>(threads: usize, items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = threads;
@@ -1611,6 +1625,15 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
             Some(q) => one(q),
             None => Ok(vec![]),
         },
+        "groebner" => {
+            // order, f1, f2, ... -> the reduced Groebner basis (F4), by
+            // decreasing leading monomial
+            let o = order::Order::parse(text(0)?).ok_or("unsupported term order")?;
+            let fs: Vec<QPoly> = (1..args.len()).map(poly).collect::<Result<_, _>>()?;
+            let p = fs.first().map(|f| f.p).unwrap_or(0);
+            let g = if p > 0 { f4::groebner_p(&fs, o, p)? } else { f4::groebner_q(&fs, o)? };
+            Ok(g.iter().map(|f| f.to_bytes()).collect())
+        }
         "factor" => {
             // a -> unit, f1, e1, f2, e2, ... (over Q: the f_i primitive in Z)
             let a = poly(0)?;

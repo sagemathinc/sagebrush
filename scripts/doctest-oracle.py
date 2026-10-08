@@ -96,7 +96,13 @@ def main(paths):
     # system one (without Maxima or Singular: "# needs maxima" is skipped)
     sage = os.environ.get("SAGE") or next((p for p in ["/scratch/sage-oracle/sage/sage"] if os.path.exists(p)), "sage")
     sage_python = subprocess.run([sage, "-c", "import sys; print(sys.executable)"], capture_output=True, text=True).stdout.strip().split("\n")[-1]
-    r = subprocess.run([sage_python, "-m", "sage.doctest", "--long"] + files, capture_output=True, text=True)
+    # Sage's own programs first (libgap finds its GAP root from the gap on
+    # the PATH)
+    env = dict(os.environ)
+    local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(sage))), "local", "bin")
+    if os.path.isdir(local):
+        env["PATH"] = local + os.pathsep + env.get("PATH", "")
+    r = subprocess.run([sage_python, "-m", "sage.doctest", "--long"] + files, capture_output=True, text=True, env=env)
     report = r.stdout + r.stderr
     keep = []
     for line in report.split("\n"):
