@@ -14,7 +14,7 @@ in the MCP server (sagebrush/mcp_server.py), which read the JSON index.
 import re as _re
 
 # the public API (the modules of test/doctest-coverage.json)
-PUBLIC = ["sage_all", "_sage_modular", "_sage_poly", "_sage_nf", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_crystals", "sage_permgroup", "_sage_matrix",
+PUBLIC = ["sage_all", "_sage_modular", "_sage_poly", "_sage_nf", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_crystals", "_sage_polyhedra", "sage_permgroup", "_sage_matrix",
           "_sage_lang", "_sage_expr", "_interact", "sage_plot", "sage_plot3d"]
 
 _INDEX = None
