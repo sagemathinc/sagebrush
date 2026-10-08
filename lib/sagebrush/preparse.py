@@ -174,6 +174,9 @@ def _generators(line):
         rhs = rhs[:-1] + "names=%s)" % tup
     elif rhs.endswith(")"):
         rhs = rhs[:-1] + ", names=%s)" % tup
+    if rest:
+        # the following statements: R.<x> = QQ[]; S.<y> = QQ[]
+        rest = "; " + _generators(rest[1:].lstrip())
     return "%s%s = %s; (%s,) = %s._first_ngens(%d)%s" % (indent, name, rhs, ", ".join(names), name, len(names), rest)
 
 
@@ -193,10 +196,11 @@ def _calculus(line):
 
 def _expression(code):
     code = _ellipsis(code)
+    # R.0 -> R.gen(0), QQ['x'].0, C.0.ideal() (a digit after a dot is not a
+    # number literal); before the numbers, which would read .0 as a float
+    code = re.sub(r"(\b[A-Za-z_]\w*|[)\]])\.(\d+)\b(?![ \t]*[(\w])", r"\1.gen(\2)", code)
     code = _numbers(code)
     code = _powers(code)
-    # R.0 -> R.gen(0) (a digit after a dot is not a number literal)
-    code = re.sub(r"(\b[A-Za-z_]\w*|[)\]])\.(\d+)\b(?!\s*[(.\w])", r"\1.gen(\2)", code)
     return code
 
 

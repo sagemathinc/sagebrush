@@ -2074,13 +2074,13 @@ class ComplexField_:
         """
         return ComplexNumber(complex(re) + complex(im) * 1j)
 
-    def gen(self):
+    def gen(self, i=0):
         """The imaginary unit I.
 
         EXAMPLES::
 
-            sage: CC.gen()
-            1.00000000000000*I
+            sage: CC.gen(), CC.0
+            (1.00000000000000*I, 1.00000000000000*I)
         """
         return ComplexNumber(1j)
 

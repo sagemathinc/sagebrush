@@ -163,9 +163,9 @@ function generators(line: string): string {
   const [, indent, name, gens, all] = m;
   const names = gens.split(",").map((g) => g.trim()).filter(Boolean);
   const tuple = `(${names.map((n) => `'${n}'`).join(", ")},)`;
-  // only the first statement: K.<a> = NumberField(f); print(K)
   const cut = topLevelSemicolon(all);
-  const rest = cut < 0 ? "" : all.slice(cut);
+  // (and the following statements: R.<x> = QQ[]; S.<y> = QQ[])
+  const rest = cut < 0 ? "" : "; " + generators(all.slice(cut + 1).trimStart());
   let rhs = (cut < 0 ? all : all.slice(0, cut)).trimEnd();
   if (rhs.endsWith("[]")) rhs = rhs.slice(0, -2) + `[${tuple}]`;
   else if (rhs.endsWith("()")) rhs = rhs.slice(0, -1) + `names=${tuple})`;
@@ -208,9 +208,10 @@ function calculus(line: string): string {
 
 function expression(code: string): string {
   let L = parseEllipsis(code);
-  L = preparseNumbers(L);
-  // R.0 -> R.gen(0)
-  return L.replace(/(\b[A-Za-z_]\w*|[)\]])\.(\d+)\b(?!\s*[(.\w])/g, "$1.gen($2)");
+  // R.0 -> R.gen(0), QQ['x'].0, C.0.ideal(); before the numbers, which
+  // would read .0 as a float
+  L = L.replace(/(\b[A-Za-z_]\w*|[)\]])\.(\d+)\b(?![ \t]*[(\w])/g, "$1.gen($2)");
+  return preparseNumbers(L);
 }
 
 /** The whole preparser, on a module's source. */

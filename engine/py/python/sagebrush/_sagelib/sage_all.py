@@ -19,7 +19,7 @@ __all__ = [
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
-    "QQbar", "AA", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "QQbar", "AA", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
@@ -102,6 +102,7 @@ from _sage_nf import NumberField, QuadraticField, CyclotomicField
 from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
                       conway_polynomial)
 from _sage_qqbar import QQbar, AA
+from _sage_mpoly import ideal, Ideal, TermOrder
 
 
 def RationalField():
@@ -1054,10 +1055,10 @@ def gcd(*args):
     """
     if len(args) == 1:
         args = tuple(args[0])
-    if any(isinstance(a, _Polynomial) for a in args):
+    if any(isinstance(a, _Polynomial) or type(a).__name__ == "MPolynomial" for a in args):
         r = args[0]
         for a in args[1:]:
-            r = r.gcd(a) if isinstance(r, _Polynomial) else a.gcd(r)
+            r = r.gcd(a) if hasattr(r, "gcd") and not isinstance(r, int) else a.gcd(r)
         return r
     if any(isinstance(a, _Fraction) for a in args):
         r = _Fraction(0)
@@ -1078,10 +1079,10 @@ def lcm(*args):
     """
     if len(args) == 1:
         args = tuple(args[0])
-    if any(isinstance(a, _Polynomial) for a in args):
+    if any(isinstance(a, _Polynomial) or type(a).__name__ == "MPolynomial" for a in args):
         r = args[0]
         for a in args[1:]:
-            r = r.lcm(a) if isinstance(r, _Polynomial) else a.lcm(r)
+            r = r.lcm(a) if hasattr(r, "lcm") and not isinstance(r, int) else a.lcm(r)
         return r
     return _math.lcm(*args)
 
