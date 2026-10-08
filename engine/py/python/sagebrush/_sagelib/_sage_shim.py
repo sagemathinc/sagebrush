@@ -11,8 +11,12 @@ default, where a real Sage may be installed: install() is explicit.
 import sys
 import types
 
-_SOURCES = ["sage_all", "_sage_modular", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_crystals", "_sage_polyhedra", "_sage_coding", "_sage_poly", "_sage_nf",
+_SOURCES = ["sage_all", "_sage_modular", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_crystals", "_sage_polyhedra", "_sage_coding", "_sage_manifolds", "_sage_poly", "_sage_nf",
             "_sage_matrix", "_sage_expr", "_sage_lang", "sage_plot", "sage_plot3d", "sage_permgroup"]
+
+
+# modules whose `import *` gives only these names (as in Sage)
+_EXPLICIT = {"sage.manifolds.operators": ["grad", "div", "curl", "laplacian"]}
 
 
 class _SageModule(types.ModuleType):
@@ -56,6 +60,12 @@ class _Finder:
 
     def exec_module(self, module):
         # `from sage.x import *`: every public name of the Sage layer
+        if module.__name__ in _EXPLICIT:
+            module.__all__ = [n for n in _EXPLICIT[module.__name__] if hasattr(module, n)]
+            parent, _, child = module.__name__.rpartition(".")
+            if parent and parent in sys.modules:
+                setattr(sys.modules[parent], child, module)
+            return
         names = []
         seen = set()
         for src in _SOURCES:

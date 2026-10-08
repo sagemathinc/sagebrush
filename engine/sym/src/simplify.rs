@@ -10,7 +10,7 @@
 
 use crate::expand::expand;
 use crate::expr::*;
-use crate::mpoly::{factor as mfactor, generators, MPoly};
+use crate::mpoly::{factor as mfactor, generators, primitive, MPoly};
 use crate::num::Q;
 use num_traits::One;
 
@@ -138,24 +138,31 @@ pub fn simplify_rational(e: &Expr) -> Expr {
     if np.is_zero() {
         return zero();
     }
-    let (cn, fnum) = factored(&np);
-    let (cd, fden) = factored(&dp);
-    let mut num_f: Vec<Expr> = vec![];
+    // Only the denominator is factored: its factors are cancelled from the
+    // numerator by exact division (factoring a numerator in many kernels,
+    // such as u_x(x, y, z) and sin(x*y*z), is far too slow and not needed:
+    // the numerator is printed expanded anyway).
+    let (cd, fden) = mfactor(&dp);
+    let mut num = np.clone();
     let mut den_f: Vec<Expr> = vec![];
-    for (f, k) in &fnum {
-        let j = fden.iter().find(|(g, _)| g == f).map_or(0, |(_, j)| *j);
-        if *k > j {
-            num_f.push(pow(f, &int((*k - j) as i64)));
-        }
-    }
     for (f, j) in &fden {
-        let k = fnum.iter().find(|(g, _)| g == f).map_or(0, |(_, k)| *k);
-        if *j > k {
-            den_f.push(pow(f, &int((*j - k) as i64)));
+        let mut k = *j;
+        while k > 0 {
+            match num.divexact(f) {
+                Some(q) => {
+                    num = q;
+                    k -= 1;
+                }
+                None => break,
+            }
+        }
+        if k > 0 {
+            den_f.push(pow(&f.to_expr(), &int(k as i64)));
         }
     }
+    let (cn, num) = primitive(&num);
     let c = cn / cd;
-    let numer = expand(&mul2(&qnum(Q::new(c.numer().clone(), One::one())), &mul(num_f)));
+    let numer = expand(&mul2(&qnum(Q::new(c.numer().clone(), One::one())), &num.to_expr()));
     let denom = expand(&mul2(&qnum(Q::from_integer(c.denom().clone())), &mul(den_f)));
     // a negative leading coefficient moves to the numerator
     if denom.is_one() {

@@ -20,7 +20,7 @@ __all__ = [
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
-    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
@@ -114,6 +114,7 @@ from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCha
                        branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
 from _sage_crystals import crystals, Tableau, Word
 from _sage_polyhedra import Polyhedron, polytopes
+from _sage_manifolds import EuclideanSpace, FiniteRankFreeModule, rank, dim
 from _sage_coding import (codes, channels, LinearCode, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial,
                           IndexedSequence, AlphabeticStrings, SubstitutionCryptosystem, TranspositionCryptosystem)
 
@@ -529,6 +530,8 @@ def _QQ(x, d=None):
     """QQ(2, 3) or QQ("2/3") or QQ(0.75): the exact rational."""
     if d is not None and d == 0:
         raise ZeroDivisionError("rational division by zero")
+    if d is None and hasattr(x, "_rational_"):
+        x = x._rational_()
     f = _Fraction(x) if d is None else _Fraction(x, d)
     if type(f) is not _Fraction:
         f = _Fraction(f._numerator, f._denominator)
@@ -919,6 +922,8 @@ def factor(n):
         (x - 1) * (x + 1) * (x^2 + 1)
     """
     if isinstance(n, (_Polynomial, _Expr)):
+        return n.factor()
+    if not isinstance(n, (int, _Fraction)) and hasattr(n, "factor"):
         return n.factor()
     if isinstance(n, _Fraction) and n.denominator != 1:
         num, den = factor(n.numerator), factor(n.denominator)

@@ -106,8 +106,9 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
     };
     let (ka, kb): (Vec<&Expr>, Vec<&Expr>) = (fa.iter().filter(kernel).collect(), fb.iter().filter(kernel).collect());
     if !ka.is_empty() && !kb.is_empty() {
-        for (x, y) in ka.iter().zip(&kb) {
-            let c = atom_order(x, y);
+        // compared from the last kernel (Sage: -y*u_x(x, y) + sin(x*y)*u_z(x, y))
+        for (x, y) in ka.iter().rev().zip(kb.iter().rev()) {
+            let c = is_deriv(x).cmp(&is_deriv(y)).then_with(|| fun_name_key(x).cmp(&fun_name_key(y))).then_with(|| atom_order(x, y));
             if c != Ordering::Equal {
                 return c;
             }
@@ -165,9 +166,22 @@ fn atom_order(a: &Expr, b: &Expr) -> Ordering {
         (Kind::Sym(s), Kind::Sym(t)) if s != t => return s.cmp(t),
         (Kind::Num(m), Kind::Num(n)) if m != n => return n.cmp(m),
         (Kind::Fun(f, x), Kind::Fun(g, y)) => {
+            // derivatives after the other functions (sin(x)*diff(f(x), x),
+            // zz(x, y) + diff(a(x, y), x))
+            let (da, db) = (matches!(f, Fun::Deriv(..)), matches!(g, Fun::Deriv(..)));
+            if da != db {
+                return da.cmp(&db);
+            }
             let c = f.name().cmp(&g.name());
             if c != Ordering::Equal {
                 return c;
+            }
+            // derivatives of one function: by the indices (D[0](f) before D[1](f))
+            if let (Fun::Deriv(_, i), Fun::Deriv(_, j)) = (f, g) {
+                let c = i.cmp(j);
+                if c != Ordering::Equal {
+                    return c;
+                }
             }
             for (u, v) in x.iter().zip(y) {
                 let c = sum_order(u, v);
@@ -290,8 +304,12 @@ pub fn mul_order(a: &Expr, b: &Expr) -> Ordering {
             let (bb, _) = base_exp(b);
             bb.as_num().unwrap().cmp(ba.as_num().unwrap())
         }
-        _ => fun_name_key(a).cmp(&fun_name_key(b)).then_with(|| atom_order(a, b)),
+        _ => is_deriv(a).cmp(&is_deriv(b)).then_with(|| fun_name_key(a).cmp(&fun_name_key(b))).then_with(|| atom_order(a, b)),
     }
+}
+
+fn is_deriv(e: &Expr) -> bool {
+    matches!(&base_exp(e).0.kind, Kind::Fun(Fun::Deriv(..), _))
 }
 
 fn sorted_terms(e: &Expr) -> Vec<Expr> {
@@ -430,8 +448,16 @@ fn print_fun(f: &Fun, a: &[Expr]) -> String {
     let args: Vec<String> = a.iter().map(|x| sage_inner(x).0).collect();
     match f {
         Fun::Deriv(name, idx) => {
-            let ix: Vec<String> = idx.iter().map(|i| i.to_string()).collect();
-            format!("diff({}({}), {})", name, args.join(", "), ix.iter().map(|i| a.get(i.parse::<usize>().unwrap()).map(to_string).unwrap_or_default()).collect::<Vec<_>>().join(", "))
+            // diff(f(x, y), x) when the arguments are distinct symbols, else
+            // D[0](f)(r*cos(ph), r*sin(ph)), as Sage prints them
+            let distinct = a.iter().all(|x| matches!(x.kind, Kind::Sym(_)))
+                && (0..a.len()).all(|i| (0..i).all(|j| a[i] != a[j]));
+            if distinct {
+                format!("diff({}({}), {})", name, args.join(", "), idx.iter().map(|i| a.get(*i as usize).map(to_string).unwrap_or_default()).collect::<Vec<_>>().join(", "))
+            } else {
+                let ix: Vec<String> = idx.iter().map(|i| i.to_string()).collect();
+                format!("D[{}]({})({})", ix.join(", "), name, args.join(", "))
+            }
         }
         _ => format!("{}({})", f.name(), args.join(", ")),
     }

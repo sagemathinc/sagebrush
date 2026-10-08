@@ -220,6 +220,27 @@ pub fn factor(p: &MPoly) -> (Q, Vec<(MPoly, u32)>) {
     if n == 0 {
         return (p.terms.values().next().cloned().unwrap_or_else(Q::zero), vec![]);
     }
+    // the monomial content x_j^m_j first (its Kronecker image t^k would
+    // split into k linear pieces, all recombined below)
+    let mins: Vec<u32> = (0..n).map(|j| p.terms.keys().map(|e| e[j]).min().unwrap_or(0)).collect();
+    if mins.iter().any(|&m| m > 0) && p.terms.len() > 1 {
+        let mut q = MPoly::zero(&gens);
+        for (e, c) in &p.terms {
+            let e2: Vec<u32> = e.iter().zip(&mins).map(|(a, m)| a - m).collect();
+            q.terms.insert(e2, c.clone());
+        }
+        let (c, mut fs) = factor(&q);
+        for j in 0..n {
+            if mins[j] > 0 {
+                let mut e = vec![0u32; n];
+                e[j] = 1;
+                let mut x = MPoly::zero(&gens);
+                x.terms.insert(e, Q::one());
+                fs.push((x, mins[j]));
+            }
+        }
+        return (c, fs);
+    }
     // Kronecker: radix_j = 1 + deg_j (enough for every factor)
     let radix: Vec<u64> = (0..n).map(|j| p.degree_in(j) as u64 + 1).collect();
     // an image of very high degree takes too long to factor (and recombine):
@@ -241,11 +262,18 @@ pub fn factor(p: &MPoly) -> (Q, Vec<(MPoly, u32)>) {
     // try subsets of growing size, removing each factor found
     let mut avail: Vec<usize> = (0..pieces.len()).collect();
     let mut size = 1;
-    while size <= avail.len() {
+    // a budget for the recombination (exponential in the number of pieces):
+    // past it, what is left stays one factor
+    let mut budget = 20000u32;
+    'outer: while size <= avail.len() {
         let mut comb: Vec<usize> = (0..size).collect();
         let mut hit = false;
         loop {
             sagebrush_interrupt::check();
+            if budget == 0 {
+                break 'outer;
+            }
+            budget -= 1;
             let chosen: Vec<usize> = comb.iter().map(|&c| avail[c]).collect();
             let mut g = vec![BigInt::one()];
             for &c in &chosen {
