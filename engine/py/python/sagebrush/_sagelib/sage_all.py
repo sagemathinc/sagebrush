@@ -18,6 +18,9 @@ __all__ = [
     "Newforms", "newform_orbits",
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
+    # finite fields and Z/nZ
+    "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "conway_polynomial",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "PolynomialRing", "polygen", "parent",
@@ -94,6 +97,8 @@ from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, Diri
                            EllipticCurve, Newforms, newform_orbits)
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
+from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
+                      conway_polynomial)
 from _sage_matrix import matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC, vector
 Matrix = matrix
 

@@ -245,6 +245,12 @@ def PolynomialRing(base, names=None, name=None, *args, **kwds):
         sage: S.<y> = ZZ[]; S
         Univariate Polynomial Ring in y over Integer Ring
     """
+    import _sage_ff
+    if _sage_ff._is_ff_base(base):
+        n = names if names is not None else name if name is not None else "x"
+        if isinstance(n, int) or (args and isinstance(args[0], (int, str))):
+            raise NotImplementedError("multivariate polynomial rings over finite fields are not available in sagebrush yet")
+        return _sage_ff._poly_ring_from_names(base, n)
     names = names if names is not None else name if name is not None else "x"
     if isinstance(names, (tuple, list)):
         if len(names) != 1:
