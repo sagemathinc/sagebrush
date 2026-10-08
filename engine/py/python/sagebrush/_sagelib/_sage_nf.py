@@ -265,7 +265,7 @@ class NumberField_absolute:
         EXAMPLES::
 
             sage: x = polygen(QQ, 'x')
-            sage: NumberField(x^3 - 2, 'a').galois_group()  # sagebrush only (the local Sage crashes here)
+            sage: NumberField(x^3 - 2, 'a').galois_group()
             Galois group 3T2 (S3) with order 6 of x^3 - 2
         """
         if getattr(self, "_galois", None) is None or (proof and not self._galois.proven):
@@ -281,7 +281,7 @@ class NumberField_absolute:
         EXAMPLES::
 
             sage: x = polygen(QQ, 'x')
-            sage: NumberField(x^3 - 2, 'a').is_galois(), NumberField(x^3 - 3*x - 1, 'a').is_galois()  # sagebrush only (the local Sage crashes here)
+            sage: NumberField(x^3 - 2, 'a').is_galois(), NumberField(x^3 - 3*x - 1, 'a').is_galois()
             (False, True)
         """
         return int(self.galois_group()._order_str) == self._n

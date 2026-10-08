@@ -1030,7 +1030,7 @@ class MPolynomial:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R(1).is_one(), x.is_one()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R(1).is_one(), x.is_one()
             (True, False)
         """
         return self == 1
@@ -1426,7 +1426,7 @@ class MPolynomial:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; (x^3*y + y^2).derivative(x), (x^3*y + y^2).diff(y, 2)  # sagebrush only (the local Sage fails here)
+            sage: R.<x,y> = QQ[]; (x^3*y + y^2).derivative(x), (x^3*y + y^2).derivative(y, 2)
             (3*x^2*y, 2)
         """
         f = self
@@ -1554,7 +1554,7 @@ class MPolynomial:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; (x^2 + y).is_irreducible(), (x^2 - y^2).is_irreducible()  # sagebrush only (the local Sage fails here)
+            sage: R.<x,y> = QQ[]; (x^2 + y).is_irreducible(), (x^2 - y^2).is_irreducible()  # sagebrush only (Sage's libsingular polynomials have no is_irreducible)
             (True, False)
         """
         F = self.factor()
@@ -1590,7 +1590,7 @@ class MPolynomial:
         EXAMPLES::
 
             sage: R.<x,y> = QQ[]; I = R.ideal(x^2 - y, y^2 - 1)
-            sage: (x^4 + x).reduce(I)  # sagebrush only (the local Sage lacks Singular)
+            sage: (x^4 + x).reduce(I)
             x + 1
         """
         if isinstance(I, MPolynomialIdeal):
@@ -2941,8 +2941,15 @@ def groebner_basis(F, R):
         sage: R.<x,y> = QQ[]; groebner_basis([x^2 - y, x*y - 1], R)  # sagebrush only
         [x^2 - y, x*y - 1, y^2 - x]
     """
+    F = [R(f) if not isinstance(f, MPolynomial) else f for f in F]
+    F = [f for f in F if f._d]
+    if not F:
+        return []
+    r = _engine_try(R, "groebner", R._order._name, *F)
+    if r is not None:
+        return r
     if R._dom.p is None and not R._dom.generic:
-        return _groebner_int([R(f) if not isinstance(f, MPolynomial) else f for f in F], R)
+        return _groebner_int(F, R)
     key = R._key
     G = []
     P = []  # pairs (sugar, lcm, i, j)
@@ -3039,9 +3046,9 @@ class PolynomialSequence(list):
 
     EXAMPLES::
 
-        sage: R.<x,y> = QQ[]; B = R.ideal(x^2 - y, x*y).groebner_basis(); B  # sagebrush only (the local Sage lacks Singular)
+        sage: R.<x,y> = QQ[]; B = R.ideal(x^2 - y, x*y).groebner_basis(); B
         [x^2 - y, x*y, y^2]
-        sage: B.universe()  # sagebrush only (the local Sage lacks Singular)
+        sage: B.universe()
         Multivariate Polynomial Ring in x, y over Rational Field
     """
 
@@ -3054,7 +3061,7 @@ class PolynomialSequence(list):
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x).groebner_basis().universe()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R.ideal(x).groebner_basis().universe()
             Multivariate Polynomial Ring in x, y over Rational Field
         """
         return self._ring
@@ -3069,7 +3076,7 @@ class PolynomialSequence(list):
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x, y).groebner_basis().ideal()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R.ideal(x, y).groebner_basis().ideal()
             Ideal (x, y) of Multivariate Polynomial Ring in x, y over Rational Field
         """
         return MPolynomialIdeal(self._ring, list(self))
@@ -3079,7 +3086,7 @@ class PolynomialSequence(list):
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x^2, x*y).groebner_basis().is_groebner()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R.ideal(x^2, x*y).groebner_basis().is_groebner()
             True
         """
         return True
@@ -3096,7 +3103,7 @@ class MPolynomialIdeal:
         sage: f = (x^3 + 2*y^2*x)^2; g = x^2*y^2
         sage: I = (f, g)*R; I
         Ideal (x^6 + 4*x^4*y^2 + 4*x^2*y^4, x^2*y^2) of Multivariate Polynomial Ring in x, y over Rational Field
-        sage: I.groebner_basis(), x^2 in I  # sagebrush only (the local Sage lacks Singular)
+        sage: I.groebner_basis(), x^2 in I
         ([x^6, x^2*y^2], False)
     """
 
@@ -3165,8 +3172,20 @@ class MPolynomialIdeal:
 
             sage: R = PolynomialRing(QQ, 2, 'ab', order='lp'); a, b = R.gens()
             sage: I = (a^2 - b^2 - 3, a - 2*b)*R
-            sage: I.groebner_basis()  # sagebrush only (the local Sage lacks Singular)
+            sage: I.groebner_basis()
             [a - 2*b, b^2 - 1]
+
+        The engine computes it (F4; over QQ from images modulo primes,
+        checked exactly), e.g. cyclic-4 and a lex basis::
+
+            sage: R.<a,b,c,d> = QQ[]
+            sage: I = R.ideal(a+b+c+d, a*b+b*c+c*d+d*a, a*b*c+b*c*d+c*d*a+d*a*b, a*b*c*d-1)
+            sage: B = I.groebner_basis(); len(B), B[0]
+            (7, c^2*d^4 + b*c - b*d + c*d - 2*d^2)
+            sage: S.<x,y,z> = PolynomialRing(QQ, order='lex')
+            sage: J = S.ideal(x^2 + y*z - 2, y^2 - x*z + 1, z^2 - x*y - 3)
+            sage: J.groebner_basis()[-1]
+            z^8 - 15/2*z^6 + 83/4*z^4 - 113/4*z^2 + 121/8
         """
         if self._gb is None:
             S = self._field_ring()
@@ -3181,7 +3200,7 @@ class MPolynomialIdeal:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x, y).basis_is_groebner()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R.ideal(x, y).basis_is_groebner()
             True
         """
         G = self.groebner_basis()
@@ -3196,7 +3215,7 @@ class MPolynomialIdeal:
         EXAMPLES::
 
             sage: R.<x,y> = QQ[]; I = R.ideal(x^2 - y)
-            sage: I.reduce(x^3 + x)  # sagebrush only (the local Sage lacks Singular)
+            sage: I.reduce(x^3 + x)
             x*y + x
         """
         R = self._ring
@@ -3258,7 +3277,7 @@ class MPolynomialIdeal:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x, x + 1).is_one()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R.ideal(x, x + 1).is_one()
             True
         """
         return 1 in self
@@ -3270,7 +3289,7 @@ class MPolynomialIdeal:
         EXAMPLES::
 
             sage: R.<x,y,z> = QQ[]
-            sage: R.ideal(x*y, z).dimension(), R.ideal(x - 1, y - 2, z).dimension()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.ideal(x*y, z).dimension(), R.ideal(x - 1, y - 2, z).dimension()
             (1, 0)
         """
         G = self.groebner_basis()
@@ -3295,7 +3314,7 @@ class MPolynomialIdeal:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x^2 - 1, y^3 - x).vector_space_dimension()  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R.ideal(x^2 - 1, y^3 - x).vector_space_dimension()
             6
         """
         return _sa().Integer(len(self.normal_basis()))
@@ -3306,8 +3325,10 @@ class MPolynomialIdeal:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x^2, y^2).normal_basis()  # sagebrush only (the local Sage lacks Singular)
-            [x*y, x, y, 1]
+            sage: R.<x,y> = QQ[]; R.ideal(x^2, y^2).normal_basis()
+            [x*y, y, x, 1]
+            sage: R.<x,y,z> = QQ[]; R.ideal(x^2, y^2, z^2, x*y*z).normal_basis()
+            [y*z, x*z, z, x*y, y, x, 1]
         """
         G = self.groebner_basis()
         R = self._ring
@@ -3330,7 +3351,8 @@ class MPolynomialIdeal:
             for k in range(bounds[i]):
                 rec(i + 1, e + [k])
         rec(0, [])
-        out.sort(key=R._key, reverse=True)
+        # as Singular's kbase: the last variable most significant, decreasing
+        out.sort(key=lambda e: tuple(reversed(e)), reverse=True)
         return [MPolynomial(R, {e: R._dom.one}) for e in out]
 
     def elimination_ideal(self, variables):
@@ -3340,7 +3362,7 @@ class MPolynomialIdeal:
         EXAMPLES::
 
             sage: R.<x,y,z> = QQ[]; I = R.ideal(x - y^2, y - z)
-            sage: I.elimination_ideal([y])  # sagebrush only (the local Sage lacks Singular)
+            sage: I.elimination_ideal([y])
             Ideal (z^2 - x) of Multivariate Polynomial Ring in x, y, z over Rational Field
         """
         R = self._ring
@@ -3370,7 +3392,7 @@ class MPolynomialIdeal:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x).intersection(R.ideal(y))  # sagebrush only (the local Sage lacks Singular)
+            sage: R.<x,y> = QQ[]; R.ideal(x).intersection(R.ideal(y))
             Ideal (x*y) of Multivariate Polynomial Ring in x, y over Rational Field
         """
         R = self._ring
@@ -3389,8 +3411,10 @@ class MPolynomialIdeal:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x*y, x^2).quotient(R.ideal(x))  # sagebrush only (the local Sage lacks Singular)
-            Ideal (x, y) of Multivariate Polynomial Ring in x, y over Rational Field
+            sage: R.<x,y> = QQ[]; R.ideal(x*y, x^2).quotient(R.ideal(x))
+            Ideal (y, x) of Multivariate Polynomial Ring in x, y over Rational Field
+            sage: R.<x,y,z> = QQ[]; R.ideal(x^2*y, x*z^2).quotient(R.ideal(x))
+            Ideal (z^2, x*y) of Multivariate Polynomial Ring in x, y, z over Rational Field
         """
         R = self._ring
         res = None
@@ -3402,7 +3426,8 @@ class MPolynomialIdeal:
             res = Q if res is None else res.intersection(Q)
         if res is None:
             return MPolynomialIdeal(R, [R.one()])
-        return MPolynomialIdeal(R, list(res.groebner_basis()))
+        # Singular's order: increasing leading monomials
+        return MPolynomialIdeal(R, list(reversed(res.groebner_basis())))
 
     def radical(self):
         """The radical, for a zero-dimensional ideal (adding the squarefree
@@ -3410,8 +3435,10 @@ class MPolynomialIdeal:
 
         EXAMPLES::
 
-            sage: R.<x,y> = QQ[]; R.ideal(x^2, y^2).radical()  # sagebrush only (the local Sage lacks Singular)
-            Ideal (x, y) of Multivariate Polynomial Ring in x, y over Rational Field
+            sage: R.<x,y> = QQ[]; R.ideal(x^2, y^2).radical()
+            Ideal (y, x) of Multivariate Polynomial Ring in x, y over Rational Field
+            sage: R.<x,y,z> = QQ[]; R.ideal(x^2, y^3, z).radical()
+            Ideal (z, y, x) of Multivariate Polynomial Ring in x, y, z over Rational Field
         """
         R = self._ring
         if self.dimension() != 0:
@@ -3424,7 +3451,7 @@ class MPolynomialIdeal:
                 if g._d and not g.is_constant():
                     sq = _exact_div(g, _gcd(g, g.derivative(R.gen(i))))
                     gens.append(sq)
-        return MPolynomialIdeal(R, list(MPolynomialIdeal(R, gens).groebner_basis()))
+        return MPolynomialIdeal(R, list(reversed(MPolynomialIdeal(R, gens).groebner_basis())))
 
     def variety(self, ring=None):
         """The points of a zero-dimensional ideal over the base field (or
@@ -3433,8 +3460,10 @@ class MPolynomialIdeal:
         EXAMPLES::
 
             sage: R.<x,y> = QQ[]; I = R.ideal(x^2 - 1, y - x)
-            sage: I.variety()  # sagebrush only (the local Sage lacks Singular)
-            [{y: -1, x: -1}, {y: 1, x: 1}]
+            sage: I.variety()
+            [{y: 1, x: 1}, {y: -1, x: -1}]
+            sage: T.<a,b> = QQ[]; T.ideal((a-2)*(a+3)*(a-5), b*(b-1)).variety()
+            [{b: 1, a: 5}, {b: 1, a: 2}, {b: 1, a: -3}, {b: 0, a: 5}, {b: 0, a: 2}, {b: 0, a: -3}]
         """
         R = self._ring
         if self.dimension() != 0:
@@ -3476,7 +3505,8 @@ class MPolynomialIdeal:
         out = []
         for s in sols:
             out.append({gens[i]: s[i] for i in range(n - 1, -1, -1)})
-        out.sort(key=lambda d: [_sortkey(d[g]) for g in reversed(gens)])
+        # decreasing, the last variable most significant (as Sage lists them)
+        out.sort(key=lambda d: [_sortkey(d[g]) for g in reversed(gens)], reverse=True)
         return out
 
 
