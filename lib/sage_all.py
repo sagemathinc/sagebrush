@@ -20,7 +20,7 @@ __all__ = [
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
-    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
@@ -114,6 +114,8 @@ from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCha
                        branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
 from _sage_crystals import crystals, Tableau, Word
 from _sage_polyhedra import Polyhedron, polytopes
+from _sage_coding import (codes, channels, LinearCode, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial,
+                          IndexedSequence, AlphabeticStrings, SubstitutionCryptosystem, TranspositionCryptosystem)
 
 
 def RationalField():
@@ -1214,6 +1216,22 @@ def _binom_general(n, k):
     if isinstance(r, (int, _Fraction)):
         return _q(_Fraction(r) / _math.factorial(k))
     return r / _math.factorial(k)
+
+
+def random_vector(ring, degree=None, *args, **kwds):
+    """A random vector of the given length over a ring.
+
+    EXAMPLES::
+
+        sage: v = random_vector(GF(13), 5); v.parent()
+        Vector space of dimension 5 over Finite Field of size 13
+    """
+    if degree is None:
+        ring, degree = ZZ, ring
+    if repr(ring) == "Integer Ring":
+        import random as _r
+        return vector(ZZ, [_r.randint(-2, 2) for _ in range(int(degree))])
+    return VectorSpace(ring, int(degree)).random_element()
 
 
 def tmp_filename(name="tmp_", ext=""):

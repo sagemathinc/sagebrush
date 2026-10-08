@@ -201,6 +201,16 @@ class FFVector:
         """
         return _sa().Integer(sum(1 for a in self._e if a))
 
+    def nonzero_positions(self):
+        """The positions of the nonzero entries.
+
+        EXAMPLES::
+
+            sage: vector(GF(2), [1, 0, 1, 1]).nonzero_positions()
+            [0, 2, 3]
+        """
+        return [i for i, a in enumerate(self._e) if a]
+
     def support(self):
         """The positions of the nonzero entries.
 
@@ -674,6 +684,18 @@ class FFMatrix:
             [0 1 4]
         """
         return FFSubspace(self._base, self._ncols, self._kernel_basis())
+
+    def right_kernel_matrix(self, basis="echelon"):
+        """A matrix whose rows are an (echelon) basis of the right kernel.
+
+        EXAMPLES::
+
+            sage: matrix(GF(7), [[1, 2, 3], [2, 4, 6]]).right_kernel_matrix()
+            [1 0 2]
+            [0 1 4]
+        """
+        B = self._kernel_basis()
+        return FFMatrix(self._base, B, self._ncols)
 
     def left_kernel(self):
         """{x : x self = 0} (Sage's kernel()).
