@@ -1546,6 +1546,17 @@ class MPolynomial:
             (-x + y) * (-x^2*y + z^3 - 3*x) * (2*x*y*z - 7*y^2 + 1)^2
             sage: gcd(g, (x - y)^3*(x^2*y + 3*x - z^3))
             x^3*y - x^2*y^2 - x*z^3 + y*z^3 + 3*x^2 - 3*x*y
+
+        Over prime fields (bivariate lifting with recombination, then
+        Hensel lifting)::
+
+            sage: R.<x,y,z> = GF(7)[]
+            sage: g = (x^2*y - z + 3)*(y*z^2 + x + 1)
+            sage: (g^2*(x + y)).factor()
+            (x + y) * (-x^2*y + z - 3)^2 * (y*z^2 + x + 1)^2
+            sage: S.<a,b> = GF(2)[]
+            sage: ((a + b + 1)^2*(a^2 + a*b + 1)).factor()
+            (a + b + 1)^2 * (a^2 + a*b + 1)
         """
         return _factor(self)
 
@@ -2499,6 +2510,90 @@ def _factor_ff(f):
     R = f._ring
     vs = [i for i in range(R._n) if any(e[i] for e in f._d)]
     dom = R._dom
+    if len(vs) >= 1 and R._engine == "p":
+        try:
+            r = _mp("factor", f._bytes())
+        except ValueError as e:
+            if "not in the engine" not in str(e) and "too large to pack" not in str(e):
+                raise
+            r = None
+        if r is not None:
+            unit = _from_bytes(R, r[0])._d.get((0,) * R._n, dom.one)
+            items = []
+            # (in two variables, homogeneous polynomials whose monomial part
+            # has the first variable to a power at most the last's: monic
+            # for lex, as over QQ; fitted on random factorizations)
+            pw = [0] * R._n
+            for i in range(1, len(r), 2):
+                h = _from_bytes(R, r[i])
+                if h.is_monomial():
+                    pw = [a + int(r[i + 1]) * b for a, b in zip(pw, h._leading()[0])]
+            homog = R._n == 2 and f.is_homogeneous() and pw[0] <= pw[-1]
+            # (in more variables, homogeneous polynomials not divisible by
+            # the last variable: monic after setting it to 1)
+            dehom = R._n > 2 and f.is_homogeneous() and pw[-1] == 0
+            for i in range(1, len(r), 2):
+                h = _from_bytes(R, r[i])
+                # monic for the inverse lexicographic order (the last
+                # variable most significant), as Singular returns them
+                if homog:
+                    lead = max(h._d)
+                elif dehom:
+                    lead = max(h._d, key=lambda e: tuple(reversed(e[:-1])))
+                else:
+                    lead = max(h._d, key=lambda e: tuple(reversed(e)))
+                c = h._d[lead]
+                ci = dom._inv(c)
+                h = MPolynomial(R, {e: dom._mul(v, ci) for e, v in h._d.items()})
+                e = int(r[i + 1])
+                for _ in range(e):
+                    unit = dom._mul(unit, c)
+                items.append((h, e))
+
+            # by degree, exponent, then Sage's comparison of polynomials over
+            # GF(p) (observed: term by term in the ring's order; equal
+            # monomials compare their coefficients in 0..p-1; otherwise the
+            # larger monomial (or the term against a missing one) decides by
+            # its coefficient's sign, positive up to p/2)
+            import functools
+            p = dom.p
+            key = R._key
+
+            def pcmp(f, g):
+                ft = sorted(f._d.items(), key=lambda t: key(t[0]), reverse=True)
+                gt = sorted(g._d.items(), key=lambda t: key(t[0]), reverse=True)
+                for i in range(max(len(ft), len(gt))):
+                    if i >= len(ft):
+                        return -1 if int(gt[i][1]) % p <= p // 2 else 1
+                    if i >= len(gt):
+                        return 1 if int(ft[i][1]) % p <= p // 2 else -1
+                    (a, c), (b, d) = ft[i], gt[i]
+                    if a != b:
+                        if key(a) > key(b):
+                            return 1 if int(c) % p <= p // 2 else -1
+                        return -1 if int(d) % p <= p // 2 else 1
+                    c, d = int(c) % p, int(d) % p
+                    if c != d:
+                        return 1 if c > d else -1
+                return 0
+
+            def cmp(s, t):
+                ks, kt = (s[0].degree(), s[1]), (t[0].degree(), t[1])
+                if ks != kt:
+                    return -1 if ks < kt else 1
+                return pcmp(s[0], t[0])
+            # the comparison is not transitive, so the starting order matters:
+            # as Singular lists them, by the last variable present
+            # (decreasing), the variable itself after the other factors
+            def start(t):
+                h = t[0]
+                k = max(i for i in range(R._n) if any(e[i] for e in h._d))
+                cs = [int(c) % p for _, c in sorted(h._d.items(), key=lambda u: key(u[0]), reverse=True)]
+                return (-k, h.is_monomial(), cs)
+            items.sort(key=start)
+            items.sort(key=functools.cmp_to_key(cmp))
+            # the unit as a constant of the ring (printed as Singular does)
+            return MPolyFactorization(items, MPolynomial(R, {(0,) * R._n: unit}), R)
     if len(vs) > 1:
         raise NotImplementedError("multivariate factorization over finite fields is not available in sagebrush yet")
     if not vs:
