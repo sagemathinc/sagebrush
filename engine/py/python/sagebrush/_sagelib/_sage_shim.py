@@ -11,7 +11,7 @@ default, where a real Sage may be installed: install() is explicit.
 import sys
 import types
 
-_SOURCES = ["sage_all", "_sage_modular", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_poly", "_sage_nf",
+_SOURCES = ["sage_all", "_sage_modular", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_crystals", "_sage_poly", "_sage_nf",
             "_sage_matrix", "_sage_expr", "_sage_lang", "sage_plot", "sage_plot3d", "sage_permgroup"]
 
 

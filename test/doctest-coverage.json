@@ -1,5 +1,5 @@
 {
-  "sage_all": 64,
+  "sage_all": 66,
   "_sage_modular": 161,
   "_sage_poly": 62,
   "_sage_nf": 85,
@@ -18,7 +18,8 @@
   "_sage_real": 125,
   "_sage_rdf": 65,
   "_sage_series": 47,
-  "_sage_graph": 59,
+  "_sage_graph": 62,
   "_sage_sandpile": 108,
-  "_sage_lie": 218
+  "_sage_lie": 226,
+  "_sage_crystals": 104
 }

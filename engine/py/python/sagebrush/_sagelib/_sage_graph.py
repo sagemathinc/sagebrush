@@ -603,8 +603,56 @@ class GenericGraph:
         g += sa.points([pos[v] for v in vs], size=200, color="#fec7b8", zorder=2)
         for v in vs:
             g += sa.text(str(v), pos[v], color="black", zorder=3)
+        if kwds.get("edge_labels"):
+            for u, v, l in self.edges(sort=True):
+                g += sa.text(str(l), ((pos[u][0] + pos[v][0]) / 2, (pos[u][1] + pos[v][1]) / 2), color="black", zorder=3)
         g.axes(False)
         return g
+
+    def set_latex_options(self, **kwds):
+        """Options for LaTeX output (ignored here).
+
+        EXAMPLES::
+
+            sage: G = digraphs.Circuit(3); G.set_latex_options(color_by_label={1: "red"})
+        """
+        self._latex_options = kwds
+
+    def set_edge_label(self, u, v, label):
+        """Set the label of the edge (u, v).
+
+        EXAMPLES::
+
+            sage: G = Graph([(1, 2)]); G.set_edge_label(1, 2, "a"); G.edges(sort=True)
+            [(1, 2, 'a')]
+        """
+        if v not in self._adj.get(u, {}):
+            if not self._directed and u in self._adj.get(v, {}):
+                u, v = v, u
+            else:
+                raise ValueError("%r is not an edge" % ((u, v),))
+        self._adj[u][v] = label
+        if self._directed:
+            self._in[v][u] = label
+        else:
+            self._adj[v][u] = label
+
+    def is_isomorphic(self, other, certificate=False, edge_labels=False):
+        """Whether the graphs are isomorphic (respecting edge labels if
+        asked), with an isomorphism as certificate.
+
+        EXAMPLES::
+
+            sage: graphs.CycleGraph(5).is_isomorphic(graphs.PetersenGraph())
+            False
+            sage: G = digraphs.Circuit(3); H = DiGraph([(1, 2), (2, 0), (0, 1)])
+            sage: G.is_isomorphic(H, certificate=True)
+            (True, {0: 0, 1: 1, 2: 2})
+        """
+        r = _isomorphism(self, other, edge_labels)
+        if certificate:
+            return (r is not None, r)
+        return r is not None
 
     def __eq__(self, o):
         return isinstance(o, GenericGraph) and o._directed == self._directed and set(self._adj) == set(o._adj) and \
@@ -636,6 +684,89 @@ class GenericGraph:
             self._adj, self._in = H._adj, H._in
             return None
         return H
+
+
+def _isomorphism(G, H, labels):
+    """An isomorphism G -> H (a dict) or None: colour refinement, then
+    backtracking."""
+    if G._directed != H._directed:
+        return None
+    VG, VH = G.vertices(sort=False), H.vertices(sort=False)
+    if len(VG) != len(VH):
+        return None
+    EG, EH = G.edges(sort=False), H.edges(sort=False)
+    if len(EG) != len(EH):
+        return None
+
+    def adj(X):
+        out = {v: {} for v in X.vertices(sort=False)}
+        inn = {v: {} for v in X.vertices(sort=False)}
+        for u, v, l in X.edges(sort=False):
+            l = l if labels else None
+            out[u][v] = l
+            inn[v][u] = l
+            if not X._directed:
+                out[v][u] = l
+                inn[u][v] = l
+        return out, inn
+
+    oG, iG = adj(G)
+    oH, iH = adj(H)
+
+    # refine both in lockstep, with a shared palette
+    cg = {v: () for v in VG}
+    ch = {v: () for v in VH}
+    for _ in range(len(VG) + 1):
+        sg = {v: (cg[v], tuple(sorted((repr(l), cg[w]) for w, l in oG[v].items())), tuple(sorted((repr(l), cg[w]) for w, l in iG[v].items()))) for v in VG}
+        sh = {v: (ch[v], tuple(sorted((repr(l), ch[w]) for w, l in oH[v].items())), tuple(sorted((repr(l), ch[w]) for w, l in iH[v].items()))) for v in VH}
+        if sorted(map(repr, sg.values())) != sorted(map(repr, sh.values())):
+            return None
+        pal = sorted(set(map(repr, sg.values())))
+        ng = {v: pal.index(repr(sg[v])) for v in VG}
+        nh = {v: pal.index(repr(sh[v])) for v in VH}
+        done = len(set(ng.values())) == len(set(cg.values())) if cg and isinstance(next(iter(cg.values())), int) else False
+        cg, ch = ng, nh
+        if done:
+            break
+    byc = {}
+    try:
+        VH = sorted(VH)
+    except TypeError:
+        pass
+    for v in VH:
+        byc.setdefault(ch[v], []).append(v)
+    order = sorted(VG, key=lambda v: (len(byc.get(cg[v], [])), cg[v]))
+    m, used = {}, set()
+
+    def ok(v, w):
+        for x, l in oG[v].items():
+            if x in m and oH[w].get(m[x], "__no__") != l:
+                return False
+        for x, l in iG[v].items():
+            if x in m and iH[w].get(m[x], "__no__") != l:
+                return False
+        return True
+
+    def bt(k):
+        if k == len(order):
+            return True
+        v = order[k]
+        for w in byc.get(cg[v], []):
+            if w not in used and ok(v, w):
+                m[v] = w
+                used.add(w)
+                if bt(k + 1):
+                    return True
+                del m[v]
+                used.discard(w)
+        return False
+
+    if not bt(0):
+        return None
+    try:
+        return {v: m[v] for v in sorted(m)}
+    except TypeError:
+        return dict(m)
 
 
 class Graph(GenericGraph):

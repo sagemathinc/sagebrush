@@ -510,6 +510,104 @@ def _gcd(a, b):
     return abs(a)
 
 
+class CartanMatrixType(CartanType_):
+    """A Cartan type given by a (generalized) Cartan matrix, with index set
+    0, ..., n-1; printed as the matrix.
+
+    EXAMPLES::
+
+        sage: ct = CartanType(CartanMatrix([[2, -3], [-3, 2]])); ct
+        [ 2 -3]
+        [-3  2]
+        sage: ct.index_set()
+        (0, 1)
+    """
+
+    def __init__(self, rows):
+        CartanType_.__init__(self, None, len(rows))
+        self._mat = [[_F(int(x)) for x in r] for r in rows]
+
+    def __repr__(self):
+        return repr(self.cartan_matrix())
+
+    def _short(self):
+        return repr(self)
+
+    def _key(self):
+        return ("matrix", tuple(tuple(r) for r in self._mat))
+
+    def index_set(self):
+        """The index set 0, ..., n-1.
+
+        EXAMPLES::
+
+            sage: CartanType(CartanMatrix([[2, -1, 0], [-1, 2, -1], [0, -1, 2]])).index_set()
+            (0, 1, 2)
+        """
+        return tuple(range(len(self._mat)))
+
+    def is_finite(self):
+        """Whether the type is finite (not recognized here).
+
+        EXAMPLES::
+
+            sage: CartanType(CartanMatrix([[2, -3], [-3, 2]])).is_finite()
+            False
+        """
+        return False
+
+    def is_affine(self):
+        """Whether the type is affine (not recognized here).
+
+        EXAMPLES::
+
+            sage: CartanType(CartanMatrix([[2, -3], [-3, 2]])).is_affine()
+            False
+        """
+        return False
+
+    def cartan_matrix(self):
+        """The Cartan matrix.
+
+        EXAMPLES::
+
+            sage: CartanType(CartanMatrix([[2, -3], [-3, 2]])).cartan_matrix()
+            [ 2 -3]
+            [-3  2]
+        """
+        return _sa().matrix(_sa().ZZ, [[int(x) for x in r] for r in self._mat])
+
+    def component_types(self):
+        """The components (itself).
+
+        EXAMPLES::
+
+            sage: len(CartanType(CartanMatrix([[2, -3], [-3, 2]])).component_types())
+            1
+        """
+        return [self]
+
+
+def CartanMatrix(data):
+    """A generalized Cartan matrix (also usable as a Cartan type).
+
+    EXAMPLES::
+
+        sage: A = CartanMatrix([[2, -4], [-4, 2]]); A
+        [ 2 -4]
+        [-4  2]
+        sage: RootSystem(A).weight_lattice().fundamental_weights()
+        Finite family {0: Lambda[0], 1: Lambda[1]}
+        sage: CartanMatrix("B2")
+        [ 2 -1]
+        [-2  2]
+    """
+    if isinstance(data, str) or isinstance(data, CartanType_) or (isinstance(data, (list, tuple)) and data and isinstance(data[0], str)):
+        return CartanType(data).cartan_matrix()
+    rows = [list(r) for r in data]
+    return CartanMatrixType(rows)
+
+
 def CartanType(*args):
     """A Cartan type from ['A', 3], "A3", "A1xB2", ['A', 2, 1], "A2~", ...
 
@@ -528,6 +626,8 @@ def CartanType(*args):
         t = list(args)
     if isinstance(t, CartanType_):
         return t
+    if hasattr(t, "nrows") and hasattr(t, "ncols"):
+        return CartanMatrixType([[t[i, j] for j in range(t.ncols())] for i in range(t.nrows())])
     if isinstance(t, str):
         s = t.strip()
         if "x" in s:
@@ -574,6 +674,9 @@ def CartanType(*args):
 
 def _cartan(ct):
     """The Cartan matrix as a dict of dicts of Fractions over index_set."""
+    if getattr(ct, "_mat", None) is not None:
+        n = len(ct._mat)
+        return {i: {j: ct._mat[i][j] for j in range(n)} for i in range(n)}
     if ct._components:
         A, off = {}, 0
         allI = ct.index_set()
@@ -2720,6 +2823,16 @@ class WeightLattice:
             [delta]
         """
         return [self.null_root()]
+
+    def simple_coroots(self):
+        """The simple coroots.
+
+        EXAMPLES::
+
+            sage: RootSystem("C2").weight_lattice().simple_coroots()
+            Finite family {1: alphacheck[1], 2: alphacheck[2]}
+        """
+        return Family(self._I, [_Named("alphacheck[%s]" % i) for i in self._I])
 
     def simple_roots(self):
         """The simple roots.
