@@ -132,6 +132,21 @@ pub fn eval(f: Fun, args: Vec<Expr>) -> Expr {
     if let Some(v) = exact(&f, &args) {
         return v;
     }
+    // a negative rational argument: odd functions change sign, even ones
+    // do not (as Sage: sin(-6) = -sin(6), cos(-6) = cos(6))
+    if args.len() == 1 {
+        if let Some(r) = args[0].as_rat() {
+            if r.is_negative() {
+                let pos = qnum(-r.clone());
+                match f {
+                    Fun::Sin | Fun::Tan | Fun::Csc | Fun::Cot | Fun::Asin | Fun::Atan | Fun::Acsc | Fun::Acot | Fun::Sinh | Fun::Tanh
+                    | Fun::Csch | Fun::Coth | Fun::Asinh | Fun::Atanh | Fun::Acsch | Fun::Acoth | Fun::Erf => return neg(&eval(f, vec![pos])),
+                    Fun::Cos | Fun::Sec | Fun::Cosh | Fun::Sech => return eval(f, vec![pos]),
+                    _ => {}
+                }
+            }
+        }
+    }
     raw(Kind::Fun(f, args))
 }
 
@@ -435,6 +450,18 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             let (y, xx) = (&a[0], &a[1]);
             if y.is_zero() && xx.as_num().map_or(false, |n| n.is_positive()) {
                 return Some(zero());
+            }
+            // on an axis, with a real constant (sqrt(2), pi) as the other argument
+            let konst = |e: &Expr| free_symbols(e).is_empty() && !e.is_num();
+            if xx.is_zero() && konst(y) {
+                if let Some(v) = crate::eval::to_f64(y).filter(|v| *v != 0.0) {
+                    return Some(pi_times(if v < 0.0 { qq(-1, 2) } else { qq(1, 2) }));
+                }
+            }
+            if y.is_zero() && konst(xx) {
+                if let Some(v) = crate::eval::to_f64(xx).filter(|v| *v != 0.0) {
+                    return Some(if v > 0.0 { zero() } else { pi_times(qq(1, 1)) });
+                }
             }
             // exact real numbers at the table's angles: arctan(y/x), moved to the quadrant
             let (ny, nx) = (y.as_num()?, xx.as_num()?);

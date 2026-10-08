@@ -246,7 +246,12 @@ class Expression:
     __str__ = __repr__
 
     def _latex_(self):
-        return _call("latex", self._s)[0]
+        t = _call("latex", self._s)[0]
+        for n, l in _LATEX_NAMES.items():
+            if t == n:
+                return l
+            t = t.replace("\\mathit{%s}" % n, l)
+        return t
 
     def __format__(self, spec):
         return format(str(self), spec)
@@ -1076,6 +1081,10 @@ class Expression:
         show_typeset(self)
 
 
+
+Expression.__module__ = "sage.symbolic.expression"
+Expression._defined_in = "_sage_expr"
+
 def _real_imag(e, k):
     # exact for numbers; otherwise numerical when the expression is constant
     if e._names():
@@ -1205,15 +1214,23 @@ class _SymbolicRing:
         """
         return _expr(v)
 
-    def var(self, *names):
-        """Symbolic variables: SR.var('t').
+    def var(self, *names, **kw):
+        """Symbolic variables: SR.var('t') (not injected into the globals).
 
         EXAMPLES::
 
             sage: t = SR.var('t'); t^2
             t^2
         """
-        return var(*names)
+        if len(names) == 1 and isinstance(names[0], (list, tuple)):
+            names = tuple(names[0])
+        if len(names) == 1 and isinstance(names[0], str):
+            names = names[0].replace(",", " ").split()
+        vs = tuple(Expression(_sym_s(n)) for n in names)
+        if kw.get("latex_name") is not None:
+            for n in names:
+                _LATEX_NAMES[n] = str(kw["latex_name"])
+        return vs[0] if len(vs) == 1 else vs
 
     def _latex_(self):
         return "\\text{SR}"
@@ -1294,6 +1311,9 @@ _FAST_GLOBALS = {"_m": _M, "_gamma": _gamma, "_sgn": _sgn, "_undefined": _undefi
 
 # ------------------------------------------------------------------ constructors
 
+_LATEX_NAMES = {}   # symbol name -> LaTeX (var('th', latex_name=r'\theta'))
+
+
 def var(*names, **kw):
     """var('x y') or var('x', 'y'): symbolic variables, also defined in __main__.
 
@@ -1312,6 +1332,9 @@ def var(*names, **kw):
         if not n.isidentifier():
             raise ValueError("The name \"%s\" is not a valid Python identifier." % n)
     vs = tuple(Expression(_sym_s(n)) for n in names)
+    if kw.get("latex_name") is not None:
+        for n in names:
+            _LATEX_NAMES[n] = str(kw["latex_name"])
     import sys
     main = sys.modules.get("__main__")
     if main is not None:
@@ -1691,7 +1714,7 @@ def log(v, b=None):
 ln = log
 
 
-def function(name, nargs=None):
+def function(name, nargs=None, latex_name=None, **kwds):
     """function('f'): an undefined symbolic function f(x).
 
     EXAMPLES::

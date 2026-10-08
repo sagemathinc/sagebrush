@@ -58,7 +58,12 @@ def collect(modname):
         mod = getattr(mod, part)
     out = [(modname, getattr(mod, "__doc__", None), "module")]
     for name, v in sorted(mod.__dict__.items()):
-        if getattr(v, "__module__", None) != modname:
+        # (a class may show Sage's module name in its repr, and say where it
+        # is defined in _defined_in)
+        where = getattr(v, "__module__", None)
+        if isinstance(v, type) and "_defined_in" in v.__dict__:
+            where = v.__dict__["_defined_in"]
+        if where != modname:
             continue
         if isinstance(v, type):
             if not name.startswith("_"):
