@@ -19,10 +19,11 @@ __all__ = [
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
-    "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "QQbar", "AA", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
+    "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "PolynomialRing", "polygen", "parent",
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
@@ -100,6 +101,7 @@ from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomia
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
 from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
                       conway_polynomial)
+from _sage_qqbar import QQbar, AA
 
 
 def RationalField():
@@ -249,6 +251,9 @@ def VectorSpace(base, n):
     import _sage_ffmat
     if _sage_ffmat._is_ff(base):
         return _sage_ffmat.VectorSpace(base, n)
+    if base is QQ:
+        import _sage_matrix
+        return _sage_matrix.VectorSpace_QQ(int(n))
     raise NotImplementedError("VectorSpace over %r is not available in sagebrush yet" % (base,))
 
 
@@ -265,12 +270,10 @@ def random_matrix(base, nrows, ncols=None, **kwds):
     import _sage_ffmat
     if _sage_ffmat._is_ff(base):
         return _sage_ffmat.random_matrix(base, nrows, ncols)
-    import random as _r
-    n = nrows if ncols is None else ncols
-    x = kwds.get("x", -2 if "y" not in kwds else 0)
-    y = kwds.get("y", 2)
-    return matrix(base, [[_r.randint(x, y) for _ in range(n)] for _ in range(nrows)])
-from _sage_matrix import matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC, vector
+    import _sage_matrix
+    return _sage_matrix.random_matrix(base, nrows, ncols, **kwds)
+from _sage_matrix import (matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC, vector,
+                          block_matrix, block_diagonal_matrix, column_matrix, kernel)
 Matrix = matrix
 
 

@@ -4,12 +4,13 @@
   "_sage_poly": 53,
   "_sage_nf": 85,
   "sage_permgroup": 63,
-  "_sage_matrix": 66,
+  "_sage_matrix": 123,
   "_sage_lang": 26,
   "_sage_expr": 147,
   "_interact": 24,
   "sage_plot": 40,
   "sage_plot3d": 50,
   "_sage_ff": 146,
-  "_sage_ffmat": 89
+  "_sage_ffmat": 89,
+  "_sage_qqbar": 32
 }

@@ -28,7 +28,8 @@ def examples(text):
             l = lines[i]
             want.append(l[len(ind):] if l.startswith(ind) else l.strip())
             i += 1
-        out.append(("\n".join(code), "\n".join(want)))
+        # as Sage's doctest framework: <BLANKLINE> is an empty line
+        out.append(("\n".join(code), "\n".join(want).replace("<BLANKLINE>", "")))
     return out
 
 def norm(s):
