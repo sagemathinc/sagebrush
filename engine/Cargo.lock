@@ -535,8 +535,10 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-poly",
 ]
 
 [[package]]

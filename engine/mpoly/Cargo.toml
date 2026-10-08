@@ -7,6 +7,8 @@ description = "Sparse multivariate polynomials over Z and Q for Sagebrush: packe
 
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
+sagebrush-arith = { path = "../arith" }
+sagebrush-poly = { path = "../poly" }
 sagebrush-interrupt = { path = "../interrupt" }
 num-traits = "0.2"
 num-integer = "0.1"
