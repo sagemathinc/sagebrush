@@ -1827,6 +1827,12 @@ def _divide(f, G, quotients=True):
     largest remaining term from a heap)."""
     import heapq
     R = f._ring
+    G = [g for g in G]
+    if G and all(isinstance(g, MPolynomial) and g._ring is R and g._d for g in G):
+        # the engine (the same rule: the first divisor dividing the term)
+        e = _engine_try(R, "divrem", R._order._name, f, *G)
+        if e is not None:
+            return (e[:-1] if quotients else None), e[-1]
     dom = R._dom
     flat = R._flat
     neg = lambda e: tuple(-x for x in flat(e))
