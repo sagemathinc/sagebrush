@@ -1445,13 +1445,18 @@ def _quartic_to_E(f, x0, z0, s):
     return _F(-3 * H, 4 * a), _F(27 * R, 8 * s ** 3)
 
 
-def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10):
+def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10, algorithm=None):
     """General 2-descent on a minimal model a without rational 2-torsion.
     Returns a dict with the 2-Selmer group size, rank bounds (from it and from
     the points found on E and on the quartics) and the points (on a).
-    The quartic search visits about |Delta|^(1/2) candidates; it raises
-    NotImplementedError beyond max_candidates (1e10 takes seconds)."""
+    algorithm "quartic": the BSD quartics, found by a search that visits
+    about |Delta|^(1/2) candidates (1e10 takes seconds); "cubic": the
+    2-Selmer group from S-units of the cubic field Q[x]/(f)
+    (_sage_ec_cubic.py), with points from a search on E only.  By default
+    the quartics, and the cubic field beyond max_candidates."""
     from sagebrush._engine import call
+    if algorithm == "cubic":
+        return two_descent_cubic(a)
     c4, c6 = _c(a)
     b2 = _b(a)[0]
     a1, a3 = a[0], a[2]
@@ -1461,7 +1466,9 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10):
         res = call("quartic_search", I=str(I), J=str(J), max_cost=float(max_candidates))
     except Exception as e:
         if "too large" in str(e) or "beyond 128 bits" in str(e):
-            raise NotImplementedError("2-descent: %s" % e)
+            if algorithm == "quartic":
+                raise NotImplementedError("2-descent: %s" % e)
+            return two_descent_cubic(a)
         raise
     qs = [[int(x) for x in f] for f in res["quartics"]]
     primes = sorted({p for p, _ in _factor_int(abs(2 * D))})
@@ -1511,8 +1518,85 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10):
     closed = all(tuple(x * y for x, y in zip(u, v)) in sel for u in sel for v in sel)
     upper = (s - 1).bit_length() if closed else s.bit_length()  # log2 when a power of 2
     lower = len(span).bit_length() - 1
-    return dict(selmer=s, rank_bounds=(lower, upper), points=gens, closed=closed,
-                undecided=undecided, quartics=len(qs), work=res["work"], cost=res["cost"])
+    out = dict(selmer=s, rank_bounds=(lower, upper), points=gens, closed=closed,
+               undecided=undecided, quartics=len(qs), work=res["work"], cost=res["cost"],
+               algorithm="quartic", grh=False)
+    if algorithm == "quartic":
+        return out
+    # Cross-check with the cubic field.  The points from the quartics are
+    # checked on E, but the search region and the classes come from floating
+    # point (covariants, the resolvent's roots), which lose their digits when
+    # |j| is huge: 9709b3 (|j| ~ 4e20) misses half the Selmer group, 1342c3
+    # (|j| ~ 1e26) splits the trivial class in two.  The cubic field's count
+    # is exact assuming GRH (its class group), and decides when they differ.
+    try:
+        import _sage_ec_cubic as cd
+        sc = cd.selmer(a)["dim"]
+    except (ArithmeticError, NotImplementedError, ValueError, RuntimeError):
+        return out
+    sq = (s - 1).bit_length() if closed and s & (s - 1) == 0 else None
+    if sq != sc:
+        bad = [p for p, _ in _factor_int(D)]
+        pts = independent_points(a, list(gens) + point_search_engine(a, 10.0, limit=20000), bad, sc)
+        out.update(selmer=2 ** sc, rank_bounds=(max(lower, len(pts)), sc), points=pts, grh=True, quartic_selmer=s)
+    return out
+
+
+def independent_points(a, cands, bad, rmax):
+    """Independent points of infinite order among cands (smallest heights
+    first, at most rmax): each is kept if the height Gram determinant stays
+    clearly positive."""
+    pool, seen = [], set()
+    for P in cands:
+        if P is None or P[0] in seen or point_order(a, P) != 0:
+            continue
+        seen.add(P[0])
+        pool.append((canonical_height(a, P, bad), P))
+    pool.sort(key=lambda t: t[0])
+    chosen = []
+    for h, P in pool:
+        if len(chosen) == rmax:
+            break
+        trial = chosen + [P]
+        G = [[height_pairing(a, X, Y, bad) for Y in trial] for X in trial]
+        if _det_float(G) > 1e-7 * _m.prod(G[i][i] for i in range(len(trial))):
+            chosen = trial
+    return chosen
+
+
+def _det_float(G):
+    n = len(G)
+    M = [list(map(float, row)) for row in G]
+    d = 1.0
+    for c in range(n):
+        piv = max(range(c, n), key=lambda i: abs(M[i][c]))
+        if M[piv][c] == 0:
+            return 0.0
+        if piv != c:
+            M[c], M[piv] = M[piv], M[c]
+            d = -d
+        d *= M[c][c]
+        for i in range(c + 1, n):
+            f = M[i][c] / M[c][c]
+            for j in range(c, n):
+                M[i][j] -= f * M[c][j]
+    return d
+
+
+def two_descent_cubic(a, heights=(8.0, 10.0, 12.0)):
+    """two_descent by the cubic field: the 2-Selmer group exactly (the rank
+    is at most its dimension), and independent points from searches on E
+    up to the given naive heights, until there are as many."""
+    import _sage_ec_cubic as cd
+    s = cd.selmer(a)["dim"]
+    bad = [p for p, _ in _factor_int(_disc(a))]
+    pts = []
+    for H in heights:
+        if len(pts) >= s:
+            break
+        pts = independent_points(a, point_search_engine(a, H, limit=20000), bad, s)
+    return dict(selmer=2 ** s, rank_bounds=(len(pts), s), points=pts, closed=True,
+                undecided=0, quartics=None, work=None, cost=None, algorithm="cubic", grh=True)
 
 
 # ------------------------------------------------------------------ saturation
@@ -1529,10 +1613,10 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10):
 #    vectors have height at least lambda, so its covolume is at least
 #    (lambda/gamma_r)^r (Hermite's constant) and the index n of the span of
 #    the points satisfies n^2 <= R(points) gamma_r^r / lambda^r.  lambda comes
-#    from Silverman's bound (Math. Comp. 55, 1990), in Sage's normalization
-#    (twice his): h(x(P)) - hhat(P) <= 2 (h(j)/8 + h(Delta)/12 + 0.973) (+ 2 log 2
-#    of margin), and an exhaustive search of the points of naive height <= T:
-#    every point it misses has hhat > T - that.
+#    from a bound B for h(x(P)) - hhat(P) (the smaller of Silverman's, Math.
+#    Comp. 55, 1990, in Sage's normalization, and Cremona-Prickett-Siksek's,
+#    cps_bound) and an exhaustive search of the points of naive height <= T:
+#    every point it misses has hhat > T - B.
 
 def point_search_engine(a, H, limit=100000):
     """The points with x = r/s^2, log max(|r|, s^2) <= H (the Rust engine's
