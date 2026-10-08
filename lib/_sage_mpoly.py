@@ -1315,8 +1315,11 @@ class MPolynomial:
             (x, x + 1)
         """
         g = self._coerce(g)
-        if not g._d:
+        if not g:
             raise ZeroDivisionError("division by zero")
+        e = _engine_try(self._ring, "divrem", self._ring._order._name, self, g)
+        if e is not None:
+            return e[0], e[1]
         qs, r = _divide(self, [g])
         return qs[0], r
 
@@ -1530,6 +1533,19 @@ class MPolynomial:
             sage: f = 9*y^6 - 9*x^2*y^5 - 18*x^3*y^4 - 9*x^5*y^4 + 9*x^6*y^2 + 9*x^7*y^3 + 18*x^8*y^2 - 9*x^11
             sage: f.factor()
             (9) * (-x^5 + y^2) * (x^6 - 2*x^3*y^2 - x^2*y^3 + y^4)
+
+        Over QQ the engine factors (Wang's EEZ: leading coefficients
+        distributed, Hensel lifting modulo a large prime)::
+
+            sage: R.<x,y,z> = QQ[]
+            sage: f = (1 + x + y + z)^10
+            sage: F = (f*(f + 1)).factor(); sorted((g.degree(), e) for g, e in F)
+            [(1, 10), (2, 1), (8, 1)]
+            sage: g = (x^2*y + 3*x - z^3)*(2*x*y*z - 7*y^2 + 1)^2*(x - y)
+            sage: g.factor()
+            (-x + y) * (-x^2*y + z^3 - 3*x) * (2*x*y*z - 7*y^2 + 1)^2
+            sage: gcd(g, (x - y)^3*(x^2*y + 3*x - z^3))
+            x^3*y - x^2*y^2 - x*z^3 + y*z^3 + 3*x^2 - 3*x*y
         """
         return _factor(self)
 
@@ -1854,8 +1870,11 @@ def _divide(f, G, quotients=True):
 
 def _exact_div(f, g):
     """f / g when g divides f, else None."""
-    if not g._d:
+    if not g:
         return None
+    r = _engine_try(f._ring, "divexact", f, g)
+    if r is not None:
+        return r[0] if r else None
     if not f._d:
         return f._ring.zero()
     (q,), r = _divide(f, [g])
@@ -1876,8 +1895,27 @@ def _content_split(f, i):
     return {k: MPolynomial(R, d) for k, d in out.items()}
 
 
+def _engine_try(R, op, *args):
+    """An engine call for polynomials over QQ, ZZ or GF(p): the result
+    polynomials, or None when the engine cannot do it (the caller uses the
+    dict code)."""
+    if R._engine not in ("q", "p"):
+        return None
+    try:
+        r = _mp(op, *[a if isinstance(a, str) else a._bytes() for a in args])
+    except ValueError as e:
+        m = str(e)
+        if "too large to pack" in m or "not in the engine" in m or "unsupported term order" in m or "no lucky" in m:
+            return None
+        raise
+    return [_from_bytes(R, b) for b in r]
+
+
 def _gcd(f, g):
     R = f._ring
+    r = _engine_try(R, "gcd", f, g)
+    if r is not None:
+        return _normalize_unit(r[0])
     if not f._d:
         return _normalize_unit(g)
     if not g._d:
@@ -2198,9 +2236,9 @@ def _factor(f):
         cont = math.gcd(cont, c)
     prim = MPolynomial(S, {e: _F(c // cont) for e, c in ints.items()})
     unit = _F(cont, den)
-    items = []
-    for h, e in _factor_primitive(prim):
-        items.append((h, e))
+    items = _factor_engine(prim)
+    if items is None:
+        items = list(_factor_primitive(prim))
     # Sage's normalization (Singular's, fitted on 213 factors): the
     # coefficient of the leading monomial for the inverse lexicographic
     # order (last variable most significant) is positive; the unit takes
@@ -2257,6 +2295,22 @@ def _cmp_key_rev(self):
 
 
 MPolynomial._cmp_key_rev = _cmp_key_rev
+
+
+def _factor_engine(f):
+    """The engine's factorization (Wang's EEZ) of a primitive integral f
+    over QQ: [(h, e)], or None when the engine cannot do it."""
+    if f._ring._engine != "q":
+        return None
+    try:
+        r = _mp("factor", f._bytes())
+    except ValueError as e:
+        m = str(e)
+        if "too large to pack" in m or "not in the engine" in m or "no good evaluation" in m:
+            return None
+        raise
+    R = f._ring
+    return [(_from_bytes(R, r[i]), int(r[i + 1])) for i in range(1, len(r), 2)]
 
 
 def _factor_primitive(f):

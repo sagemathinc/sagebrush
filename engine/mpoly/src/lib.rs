@@ -23,6 +23,13 @@
 //! [`QPoly::to_bytes`] and calls [`call`] for each operation: the engine
 //! keeps no state, so a trapped WebAssembly instance loses nothing.
 
+pub mod divide;
+pub mod factor;
+pub mod gcd;
+pub mod hensel;
+pub mod order;
+pub mod sparse;
+
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -53,6 +60,10 @@ impl Coeffs {
             Coeffs::Small(v) => BigInt::from(v[i]),
             Coeffs::Big(v) => v[i].clone(),
         }
+    }
+
+    pub fn to_big_vec(&self) -> Vec<BigInt> {
+        self.to_big()
     }
 
     fn to_big(&self) -> Vec<BigInt> {
@@ -213,6 +224,12 @@ impl ZPoly {
         }
         self.exps = exps;
         self.coeffs = Coeffs::shrink(out);
+    }
+
+    /// Word coefficients where they fit.
+    pub fn shrunk(self) -> ZPoly {
+        let c = Coeffs::shrink(self.coeffs.to_big());
+        ZPoly { n: self.n, bits: self.bits, exps: self.exps, coeffs: c }
     }
 
     pub fn neg(&self) -> ZPoly {
@@ -1193,6 +1210,10 @@ impl QPoly {
         QPoly { num: num.reduce_mod(p), den: BigInt::one(), p }
     }
 
+    pub fn normalized(self) -> QPoly {
+        self.normalize()
+    }
+
     fn normalize(mut self) -> QPoly {
         if self.p > 0 {
             return QPoly::modp(self.num, self.p);
@@ -1565,8 +1586,104 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
             }
             one(QPoly { num: p.num.scale(&a), den: p.den * b, p: 0 }.normalize())
         }
+        "divrem" => {
+            // order a g1 g2 ... -> q1 q2 ... r
+            let o = order::Order::parse(text(0)?).ok_or("unsupported term order")?;
+            let a = poly(1)?;
+            let gs: Vec<QPoly> = (2..args.len()).map(poly).collect::<Result<_, _>>()?;
+            if gs.iter().any(|g| g.num.is_zero()) {
+                return Err("division by zero".into());
+            }
+            let (qs, r) = divrem_q(&a, &gs, o)?;
+            let mut out: Vec<Vec<u8>> = qs.iter().map(|q| q.to_bytes()).collect();
+            out.push(r.to_bytes());
+            Ok(out)
+        }
+        "gcd" => {
+            let (a, b) = (poly(0)?, poly(1)?);
+            if a.p > 0 {
+                one(QPoly { num: gcd::gcd_p(&a.num, &b.num, a.p)?, den: BigInt::one(), p: a.p })
+            } else {
+                one(QPoly::from_z(gcd::gcd_z(&a.num, &b.num)?))
+            }
+        }
+        "divexact" => match divexact_q(&poly(0)?, &poly(1)?)? {
+            Some(q) => one(q),
+            None => Ok(vec![]),
+        },
+        "factor" => {
+            // a -> unit, f1, e1, f2, e2, ... (over Q: the f_i primitive in Z)
+            let a = poly(0)?;
+            if a.p > 0 {
+                return Err("factorization over GF(p) is not in the engine".into());
+            }
+            let (c, fs) = factor::factor_z(&a.num)?;
+            let n = a.num.n;
+            let unit = QPoly { num: ZPoly::from_terms(n, vec![(vec![0; n], c)])?, den: a.den.clone(), p: 0 }.normalized();
+            let mut out = vec![unit.to_bytes()];
+            for (f, e) in fs {
+                out.push(QPoly::from_z(f).to_bytes());
+                out.push(e.to_string().into_bytes());
+            }
+            Ok(out)
+        }
         _ => Err(format!("unknown polynomial operation {}", op)),
     }
+}
+
+/// The largest exponent in the given polynomials.
+fn max_exp(ps: &[&QPoly]) -> u64 {
+    ps.iter().map(|p| p.num.degrees().into_iter().max().unwrap_or(0)).max().unwrap_or(0)
+}
+
+/// Division with remainder in the order o, over Q or GF(p), with packings
+/// widened until no exponent overflows.
+pub fn divrem_q(a: &QPoly, gs: &[QPoly], o: order::Order) -> Result<(Vec<QPoly>, QPoly), String> {
+    use sparse::*;
+    let n = a.num.n;
+    let all: Vec<&QPoly> = std::iter::once(a).chain(gs.iter()).collect();
+    let mut bits = (bits_for(max_exp(&all)) + 2).max(8);
+    loop {
+        if (n as u64) * (bits as u64) > 64 {
+            return Err("exponents too large to pack".into());
+        }
+        let res = if a.p > 0 {
+            let f = to_p(a, o).repack(bits);
+            let g: Vec<Poly<Fp>> = gs.iter().map(|g| to_p(g, o).repack(bits)).collect();
+            let gr: Vec<&Poly<Fp>> = g.iter().collect();
+            f.divrem(&Fp { p: a.p }, &gr, true, true).map(|(q, r)| (q.iter().map(|x| from_p(x, n, a.p)).collect(), from_p(&r, n, a.p)))
+        } else {
+            let f = to_q(a, o).repack(bits);
+            let g: Vec<Poly<QQ>> = gs.iter().map(|g| to_q(g, o).repack(bits)).collect();
+            let gr: Vec<&Poly<QQ>> = g.iter().collect();
+            f.divrem(&QQ, &gr, true, true).map(|(q, r)| (q.iter().map(|x| from_q(x, n)).collect(), from_q(&r, n)))
+        };
+        match res {
+            Ok(v) => return Ok(v),
+            Err(_) => bits *= 2,
+        }
+    }
+}
+
+/// a / b if b divides a (over Q: by Gauss's lemma on the primitive parts;
+/// over GF(p): the remainder of the lex division is zero).
+pub fn divexact_q(a: &QPoly, b: &QPoly) -> Result<Option<QPoly>, String> {
+    if b.num.is_zero() {
+        return Err("division by zero".into());
+    }
+    if a.p > 0 {
+        let (q, r) = divrem_q(a, std::slice::from_ref(b), order::Order::Lex)?;
+        return Ok(if r.num.is_zero() { Some(q.into_iter().next().unwrap()) } else { None });
+    }
+    let (ca, cb) = (a.num.content(), b.num.content());
+    if a.num.is_zero() {
+        return Ok(Some(a.clone()));
+    }
+    let (pa, pb) = (a.num.divexact_scalar(&ca), b.num.divexact_scalar(&cb));
+    Ok(divide::divexact(&pa, &pb).map(|q| {
+        // a/b = (ca/den_a) / (cb/den_b) * q
+        QPoly { num: q.scale(&(&ca * &b.den)), den: &cb * &a.den, p: 0 }.normalized()
+    }))
 }
 
 /// The framing of [`call`] over one byte buffer (the WebAssembly and Python

@@ -92,7 +92,10 @@ def main(paths):
         f = os.path.join(OUT, mod + ".py")
         open(f, "w").write("\n".join(lines))
         files.append(f)
-    sage_python = subprocess.run(["sage", "-c", "import sys; print(sys.executable)"], capture_output=True, text=True).stdout.strip().split("\n")[-1]
+    # the full Sage built from source (scripts/sage-oracle.sh), else the
+    # system one (without Maxima or Singular: "# needs maxima" is skipped)
+    sage = os.environ.get("SAGE") or next((p for p in ["/scratch/sage-oracle/sage/sage"] if os.path.exists(p)), "sage")
+    sage_python = subprocess.run([sage, "-c", "import sys; print(sys.executable)"], capture_output=True, text=True).stdout.strip().split("\n")[-1]
     r = subprocess.run([sage_python, "-m", "sage.doctest", "--long"] + files, capture_output=True, text=True)
     report = r.stdout + r.stderr
     keep = []
