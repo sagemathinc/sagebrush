@@ -479,8 +479,9 @@ class Expression:
         from _sage_lang import SymbolicFunction
         return SymbolicFunction(self, args)
 
-    def n(self, digits=None, prec=None):
-        """The numerical value: an element of RR, or of CC if it is complex.
+    def n(self, prec=None, digits=None):
+        """The numerical value: an element of RR, or of CC if it is complex
+        (or of RealField(prec), ComplexField(prec)).
 
         EXAMPLES::
 
@@ -491,6 +492,10 @@ class Expression:
             return _one("rel", _relop(self._op()[0][4:]), _expr(self.lhs().n())._s, _expr(self.rhs().n())._s)
         if self._names():
             return self._n_partial()
+        if digits is not None or (prec is not None and int(prec) != 53):
+            # any precision: _sage_real evaluates the expression tree
+            import _sage_real
+            return _sage_real.N(self, prec, digits)
         re, im = _call("n", self._s)
         re, im = float(re), float(im)
         if im == 0:

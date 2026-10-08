@@ -59,6 +59,10 @@ class _Ring:
         return _sa().Integer(x)
 
     def __getitem__(self, names):
+        if isinstance(names, list):
+            # QQ[['x']]: power series
+            import _sage_series
+            return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
         return PolynomialRing(self, names)
 
     def __contains__(self, x):
@@ -934,7 +938,8 @@ class Polynomial:
         """
         R = ring if ring is not None else self._ring._base
         sa = _sa()
-        if getattr(R, "_is_generic_field", False) and self._ring._base in (ZZ, QQ):
+        import _sage_qqbar
+        if (R is _sage_qqbar.QQbar or R is _sage_qqbar.AA) and self._ring._base in (ZZ, QQ):
             # QQbar / AA: exact roots, real ones first (increasing), then the
             # others by real and imaginary part, as Sage lists them
             import _sage_qqbar

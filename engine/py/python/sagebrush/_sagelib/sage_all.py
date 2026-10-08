@@ -19,7 +19,7 @@ __all__ = [
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
-    "QQbar", "AA", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "numerical_approx", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
@@ -103,6 +103,9 @@ from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod,
                       conway_polynomial)
 from _sage_qqbar import QQbar, AA
 from _sage_mpoly import ideal, Ideal, TermOrder
+from _sage_real import RealField, ComplexField, RealIntervalField, RIF
+from _sage_rdf import RDF, CDF
+from _sage_series import PowerSeriesRing, LaurentSeriesRing, O
 
 
 def RationalField():
@@ -336,6 +339,29 @@ def _lift(name):
     return f
 
 
+def _rational_power(b, e):
+    """b^e for rationals b and e = p/q: exact when b is a q-th power (as
+    (4/9)^(1/2) = 2/3), else symbolic (2^(1/3))."""
+    p, q = e.numerator, e.denominator
+    b = _Fraction(b)
+    if b >= 0:  # (Sage: (-8)^(1/3) = 2*(-1)^(1/3))
+        def root(n):
+            neg = n < 0
+            n = abs(n)
+            r = round(n ** (1.0 / q)) if n < 2 ** 1000 else int(_math.isqrt(n)) if q == 2 else None
+            if r is None:
+                return None
+            for c in (r - 1, r, r + 1):
+                if c >= 0 and c ** q == n:
+                    return -c if neg else c
+            return None
+        a, d = root(b.numerator), root(b.denominator)
+        if a is not None and d is not None:
+            r = _Fraction(a, d) ** p
+            return Integer(r.numerator) if r.denominator == 1 else Rational._from_coprime_ints(r.numerator, r.denominator)
+    return SR(Integer(b.numerator) if b.denominator == 1 else Rational._from_coprime_ints(b.numerator, b.denominator)) ** SR(Rational._from_coprime_ints(p, q))
+
+
 class Rational(_Fraction):
     """An exact rational number, such as ``2/3`` in Sage mode.
 
@@ -369,8 +395,18 @@ class Rational(_Fraction):
     __rtruediv__ = _lift("__rtruediv__")
     __mod__ = _lift("__mod__")
     __rmod__ = _lift("__rmod__")
-    __pow__ = _lift("__pow__")
-    __rpow__ = _lift("__rpow__")
+    _pow = _lift("__pow__")
+    _rpow = _lift("__rpow__")
+
+    def __pow__(self, e, mod=None):
+        if isinstance(e, _Fraction) and e.denominator != 1:
+            return _rational_power(self, e)
+        return Rational._pow(self, e)
+
+    def __rpow__(self, b):
+        if isinstance(b, (int, _Fraction)) and not isinstance(b, bool) and self._denominator != 1:
+            return _rational_power(_Fraction(b), self)
+        return Rational._rpow(self, b)
 
     def __neg__(self):
         return Rational._from_coprime_ints(-self._numerator, self._denominator)
@@ -403,20 +439,23 @@ class Rational(_Fraction):
         """
         return _CallableInt(self._denominator)
 
-    def n(self, digits=None):
-        """A floating-point approximation (digits: decimal digits).
+    def n(self, prec=None, digits=None):
+        """A floating-point approximation (prec bits or digits decimal
+        digits).
 
         EXAMPLES::
 
             sage: (1/3).n()
             0.333333333333333
-            sage: (1/3).n(digits=30)
-            0.333333333333333333333333333333
+            sage: (1/3).n(digits=30), (1/3).n(20)
+            (0.333333333333333333333333333333, 0.33333)
         """
-        if digits is not None:
-            from _sage_lang import _digits_real
-            return _digits_real(self, digits)
+        if digits is not None or prec is not None:
+            import _sage_real
+            return _sage_real.N(self, prec, digits)
         return RealNumber(float(self))
+
+    numerical_approx = N = n
 
     def floor(self):
         """The floor.
@@ -490,17 +529,8 @@ from _sage_lang import (RealNumber, ellipsis_range, ellipsis_iter, symbolic_expr
                         SymbolicFunction, _install_int_methods, _CallableInt)
 
 
-def RR(x):
-    """The real number x (a Python float: 53 bits).
-
-    EXAMPLES::
-
-        sage: RR(1/3)
-        0.333333333333333
-        sage: RR(2)
-        2.00000000000000
-    """
-    return RealNumber(float(x))
+from _sage_lang import _RealField
+RR = _RealField()
 
 
 def numerator(x):
@@ -525,10 +555,10 @@ def denominator(x):
     return x.denominator
 
 
-def n(x, digits=None):
-    """The numerical approximation of x (an element of RR); digits: the
-    number of significant decimal digits (exact for integers and rationals;
-    more than 15 for other numbers is not implemented yet).
+def n(x, prec=None, digits=None, algorithm=None):
+    """The numerical approximation of x: an element of RR, or of
+    RealField(prec) / ComplexField(prec) for prec bits or digits decimal
+    digits.
 
     EXAMPLES::
 
@@ -536,28 +566,29 @@ def n(x, digits=None):
         3.14159265358979
         sage: n(1/7, digits=20), n(10^30/7, digits=20), n(2/3, digits=3)
         (0.14285714285714285714, 1.4285714285714285714e29, 0.667)
-        sage: n(pi, digits=5)
-        3.1416
-        sage: n(pi, digits=40)  # sagebrush only
-        Traceback (most recent call last):
-        ...
-        NotImplementedError: n(..., digits=40): more than 15 digits of non-rational numbers is not implemented yet
+        sage: n(pi, digits=5), N(pi, prec=100)
+        (3.1416, 3.1415926535897932384626433833)
+        sage: N(pi, digits=50)
+        3.1415926535897932384626433832795028841971693993751
+        sage: N(exp(I), 100)
+        0.54030230586813971740093660744 + 0.84147098480789650665250232163*I
     """
-    from _sage_lang import _digits_real
-    if digits is not None and isinstance(x, (int, _Fraction)):
-        return _digits_real(x, digits)
+    if prec is not None or digits is not None:
+        import _sage_real
+        p = _sage_real.digits_to_prec(digits) if digits is not None else int(prec)
+        if p != 53 or getattr(x, "_s", None) is None:
+            if hasattr(x, "n") and not isinstance(x, (int, float, _Fraction)) and getattr(x, "_s", None) is None and not isinstance(x, (_sage_real.RealNumberMP, _sage_real.ComplexNumberMP)):
+                try:
+                    return x.n(prec=p)
+                except TypeError:
+                    pass
+            return _sage_real.N(x, p)
     if hasattr(x, "n") and not isinstance(x, (int, float)):
-        v = x.n()
-    else:
-        v = RealNumber(float(x))
-    if digits is not None:
-        if digits > 15:
-            raise NotImplementedError("n(..., digits=%d): more than 15 digits of non-rational numbers is not implemented yet" % digits)
-        if isinstance(v, float):
-            return _digits_real(_Fraction(float(v)), digits)
-    return v
+        return x.n()
+    return RealNumber(float(x))
 
 
+numerical_approx = n
 N = n
 
 

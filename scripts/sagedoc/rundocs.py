@@ -35,6 +35,32 @@ def examples(text):
 def norm(s):
     return " ".join(s.split())
 
+_FLOAT = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
+
+
+def match_tol(want, got, flags):
+    """Sage's doctest tolerances: '# abs tol 1e-10', '# rel tol 1e-10' and
+    '# tol 1e-10' (relative, absolute for an expected 0) compare every
+    number of the output; the rest must match exactly."""
+    m = re.search(r"(abs|rel)?\s*tol(?:erance)?\s+([0-9.eE+-]+)", flags)
+    if not m:
+        return False
+    kind, tol = m.group(1) or "tol", float(m.group(2))
+    wn, gn = _FLOAT.findall(want), _FLOAT.findall(got)
+    if len(wn) != len(gn) or norm(_FLOAT.sub("#", want)) != norm(_FLOAT.sub("#", got)):
+        return False
+    for a, b in zip(wn, gn):
+        a, b = float(a), float(b)
+        d = abs(a - b)
+        if kind == "abs" and d > tol:
+            return False
+        if kind == "rel" and d > tol * abs(a):
+            return False
+        if kind == "tol" and d > (tol * abs(a) if a else tol):
+            return False
+    return True
+
+
 def match(want, got):
     w, g = norm(want), norm(got)
     if w == g:
@@ -103,7 +129,7 @@ for code, want in examples(text):
         if "random" in flags or not want.strip():
             rec["status"] = "ok" if not want.strip() or "random" not in flags else "random-ok"
         else:
-            rec["status"] = "ok" if match(want, got) else "wrong"
+            rec["status"] = "ok" if match(want, got) or ("tol" in flags and match_tol(want, got, flags)) else "wrong"
             if rec["status"] == "wrong":
                 rec["got"] = got[:300]
     except Timeout:

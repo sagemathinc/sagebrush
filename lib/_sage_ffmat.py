@@ -161,6 +161,23 @@ class FFVector:
             s = s + a * b
         return s
 
+    def norm(self, p=2):
+        """The p-norm (over a numerical field).
+
+        EXAMPLES::
+
+            sage: vector(RDF, [3, 4]).norm()
+            5.0
+        """
+        import math as _math
+        vals = [abs(complex(x)) for x in self._e]
+        if p == float("inf"):
+            v = max(vals)
+        else:
+            v = sum(t ** p for t in vals) ** (1.0 / p) if p != 2 else _math.sqrt(sum(t * t for t in vals))
+        import _sage_rdf
+        return _sage_rdf.RealDoubleElement(v) if self._base is _sage_rdf.RDF or self._base is _sage_rdf.CDF else _sa().RR(v)
+
     def is_zero(self):
         """Whether all entries are 0.
 
@@ -551,7 +568,30 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 2, 3], [2, 4, 6]]).rank()
             1
         """
+        if getattr(self._base, "_numeric", False):
+            import _sage_rdf
+            return _sage_rdf._rank(self)
         return _sa().Integer(len(_echelon(self._rows, self._base, self._ncols)[1]))
+
+    def __getattr__(self, name):
+        # numerical matrices (RDF, CDF, RR, CC): eigenvalues, SVD, ... by numpy
+        base = object.__getattribute__(self, "_base")
+        if getattr(base, "_numeric", False):
+            import _sage_rdf
+            f = _sage_rdf.NUMERIC.get(name)
+            if f is not None:
+                return lambda *a, **k: f(self, *a, **k)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def diagonal(self):
+        """The diagonal entries.
+
+        EXAMPLES::
+
+            sage: matrix(GF(7), [[1, 2], [3, 4]]).diagonal()
+            [1, 4]
+        """
+        return [self._rows[i][i] for i in range(min(len(self._rows), self._ncols))]
 
     def det(self):
         """The determinant.
@@ -561,6 +601,9 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 2], [3, 4]]).det()
             5
         """
+        if getattr(self._base, "_numeric", False):
+            import _sage_rdf
+            return _sage_rdf._det(self)
         if not self.is_square():
             raise ValueError("self must be a square matrix")
         m, piv, d = _echelon(self._rows, self._base, self._ncols)
@@ -592,6 +635,9 @@ class FFMatrix:
         n = self.nrows()
         if not self.is_square():
             raise ArithmeticError("self must be a square matrix")
+        if getattr(self._base, "_numeric", False):
+            import _sage_rdf
+            return _sage_rdf._inverse(self)
         one, zero = self._base.one(), self._base.zero()
         aug = [r + [one if i == j else zero for j in range(n)] for i, r in enumerate(self._rows)]
         m, piv, d = _echelon(aug, self._base, 2 * n)
@@ -675,6 +721,9 @@ class FFMatrix:
             sage: A = matrix(GF(7), [[1, 2, 3], [2, 4, 6]]); A.solve_right(vector(GF(7), [1, 2]))
             (1, 0, 0)
         """
+        if getattr(self._base, "_numeric", False) and self.is_square():
+            import _sage_rdf
+            return _sage_rdf._solve_right(self, b)
         if isinstance(b, FFMatrix):
             cols = [self.solve_right(c) for c in b.columns()]
             return FFMatrix(self._base, [[c[i] for c in cols] for i in range(self._ncols)], len(cols))
