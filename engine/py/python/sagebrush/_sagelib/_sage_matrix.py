@@ -598,7 +598,12 @@ class Matrix:
 
             sage: matrix(ZZ, [[1, 2], [3, 4]]).change_ring(QQ).parent()
             Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+            sage: matrix(QQ, [[1, 1/2], [1/3, 1/4]]).change_ring(RDF)
+            [               1.0                0.5]
+            [0.3333333333333333               0.25]
         """
+        if getattr(R, "_is_generic_field", False) or _sa_ff_base(R):
+            return matrix(R, [list(r) for r in self._rows])
         return Matrix(R, self._rows)
 
     # ---- arithmetic
@@ -1933,6 +1938,11 @@ def diagonal_matrix(*args):
     return m if base is None else m.change_ring(base)
 
 
+def _sa_ff_base(R):
+    import _sage_ffmat
+    return _sage_ffmat._is_ff(R)
+
+
 def _CallableReal(x):
     from _sage_lang import RealNumber
 
@@ -2061,8 +2071,49 @@ class ComplexField_:
         sage: CC(2), CC.gen()
         (2.00000000000000, 1.00000000000000*I)
     """
+    _is_generic_field = True
+    _numeric = True
+
     def __repr__(self):
         return "Complex Field with 53 bits of precision"
+
+    def zero(self):
+        """0.
+
+        EXAMPLES::
+
+            sage: CC.zero()
+            0.000000000000000
+        """
+        return ComplexNumber(0j)
+
+    def one(self):
+        """1.
+
+        EXAMPLES::
+
+            sage: CC.one()
+            1.00000000000000
+        """
+        return ComplexNumber(1 + 0j)
+
+    def __eq__(self, o):
+        return isinstance(o, ComplexField_)
+
+    def __hash__(self):
+        return hash(("ComplexField", 53))
+
+    def precision(self):
+        """53.
+
+        EXAMPLES::
+
+            sage: CC.precision()
+            53
+        """
+        return 53
+
+    prec = precision
 
     def __call__(self, re=0, im=0):
         """A complex number from a number or real and imaginary parts.

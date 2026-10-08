@@ -163,6 +163,12 @@ class RealNumber(float):
     __slots__ = ()
 
     def __new__(cls, x=0.0):
+        if isinstance(x, str) and cls is RealNumber:
+            # a literal keeps its decimal digits, for exact conversion into
+            # higher precision: RealField(100)(0.1) = 0.1000...0
+            r = _RealLiteral(float(x))
+            r._lit = x
+            return r
         if isinstance(x, str):
             x = float(x)
         return float.__new__(cls, x)
@@ -221,17 +227,20 @@ class RealNumber(float):
     def __hash__(self):
         return float.__hash__(self)
 
-    def n(self, digits=None, prec=None):
-        """The number itself (digits: rounded to that many digits).
+    def n(self, prec=None, digits=None):
+        """The number itself, or in another precision.
 
         EXAMPLES::
 
-            sage: RR(2/3).n(), RR(2/3).numerical_approx()
-            (0.666666666666667, 0.666666666666667)
+            sage: RR(2/3).n(), RR(2/3).numerical_approx(), RR(2/3).n(20)
+            (0.666666666666667, 0.666666666666667, 0.66667)
             sage: RR(2/3).N()  # sagebrush only
             0.666666666666667
         """
-        return self
+        if prec is None and digits is None:
+            return self
+        import _sage_real
+        return _sage_real.RealField(_sage_real.digits_to_prec(digits) if digits is not None else prec)(float(self))
 
     numerical_approx = N = n
 
@@ -331,6 +340,214 @@ class RealNumber(float):
         """
         return abs(self)
 
+    def _f(name, doc):
+        def g(self):
+            return RealNumber(getattr(_m, name)(float(self)))
+        g.__name__ = name
+        g.__doc__ = doc
+        return g
+
+    sin = _f("sin", """The sine.
+
+        EXAMPLES::
+
+            sage: RR(1).sin(), RR(1).cos(), RR(1).tan()
+            (0.841470984807897, 0.540302305868140, 1.55740772465490)
+        """)
+    cos = _f("cos", """The cosine.
+
+        EXAMPLES::
+
+            sage: RR(pi).cos()
+            -1.00000000000000
+        """)
+    tan = _f("tan", """The tangent.
+
+        EXAMPLES::
+
+            sage: RR(1).tan()
+            1.55740772465490
+        """)
+    arctan = atan = _f("atan", """The arctangent.
+
+        EXAMPLES::
+
+            sage: RR(1).arctan()
+            0.785398163397448
+        """)
+    arcsin = asin = _f("asin", """The arcsine.
+
+        EXAMPLES::
+
+            sage: RR(1/2).arcsin()
+            0.523598775598299
+        """)
+    arccos = acos = _f("acos", """The arccosine.
+
+        EXAMPLES::
+
+            sage: RR(1/2).arccos()
+            1.04719755119660
+        """)
+    sinh = _f("sinh", """The hyperbolic sine.
+
+        EXAMPLES::
+
+            sage: RR(1).sinh(), RR(1).cosh(), RR(1).tanh()
+            (1.17520119364380, 1.54308063481524, 0.761594155955765)
+        """)
+    cosh = _f("cosh", """The hyperbolic cosine.
+
+        EXAMPLES::
+
+            sage: RR(0).cosh()
+            1.00000000000000
+        """)
+    tanh = _f("tanh", """The hyperbolic tangent.
+
+        EXAMPLES::
+
+            sage: RR(0).tanh()
+            0.000000000000000
+        """)
+    arcsinh = _f("asinh", """The inverse hyperbolic sine.
+
+        EXAMPLES::
+
+            sage: RR(1).arcsinh()
+            0.881373587019543
+        """)
+    arccosh = _f("acosh", """The inverse hyperbolic cosine.
+
+        EXAMPLES::
+
+            sage: RR(2).arccosh()
+            1.31695789692482
+        """)
+    arctanh = _f("atanh", """The inverse hyperbolic tangent.
+
+        EXAMPLES::
+
+            sage: RR(1/2).arctanh()
+            0.549306144334055
+        """)
+    del _f
+
+    def log2(self):
+        """The logarithm to base 2.
+
+        EXAMPLES::
+
+            sage: RR(8).log2(), RR(1000).log10()
+            (3.00000000000000, 3.00000000000000)
+        """
+        return RealNumber(_m.log2(float(self)))
+
+    def log10(self):
+        """The logarithm to base 10.
+
+        EXAMPLES::
+
+            sage: RR(100).log10()
+            2.00000000000000
+        """
+        return RealNumber(_m.log10(float(self)))
+
+    def gamma(self):
+        """The gamma function.
+
+        EXAMPLES::
+
+            sage: RR(5).gamma(), RR(1/2).gamma()
+            (24.0000000000000, 1.77245385090552)
+        """
+        g = getattr(_m, "gamma", None)
+        if g is not None:
+            return RealNumber(g(float(self)))
+        import _sage_real
+        from fractions import Fraction
+        return RealNumber(float(_sage_real.RealField(60)(_sage_real._gamma(Fraction(float(self)), 60))))
+
+    def nth_root(self, n):
+        """The real n-th root.
+
+        EXAMPLES::
+
+            sage: RR(8).nth_root(3), RR(-8).nth_root(3)
+            (2.00000000000000, -2.00000000000000)
+        """
+        x = float(self)
+        n = int(n)
+        r = abs(x) ** (1.0 / n)
+        rr = round(r)
+        if rr ** n == abs(x):
+            r = float(rr)
+        return RealNumber(-r if x < 0 and n % 2 else r)
+
+    def sign(self):
+        """-1, 0 or 1.
+
+        EXAMPLES::
+
+            sage: RR(-2).sign(), RR(0).sign()
+            (-1, 0)
+        """
+        x = float(self)
+        return (x > 0) - (x < 0)
+
+    def exact_rational(self):
+        """The rational number this double is exactly.
+
+        EXAMPLES::
+
+            sage: RR(0.5).exact_rational(), RR(1/3).exact_rational()
+            (1/2, 6004799503160661/18014398509481984)
+        """
+        from fractions import Fraction
+        from _sage_poly import _norm
+        return _norm(Fraction(float(self)))
+
+    def prec(self):
+        """53.
+
+        EXAMPLES::
+
+            sage: RR(1).prec()
+            53
+        """
+        return 53
+
+    precision = prec
+
+    def is_zero(self):
+        """Whether 0.
+
+        EXAMPLES::
+
+            sage: RR(0).is_zero()
+            True
+        """
+        return float(self) == 0
+
+    def str(self, digits=0, **kwds):
+        """The decimal string (with digits significant digits).
+
+        EXAMPLES::
+
+            sage: RR(1/3).str(), RR(1/3).str(digits=5)
+            ('0.33333333333333331', '0.33333')
+        """
+        import _sage_real
+        from fractions import Fraction
+        return _sage_real._format(Fraction(float(self)), int(digits) if digits else 17)
+
+
+class _RealLiteral(RealNumber):
+    """A decimal literal of RR: a 53-bit real that remembers its digits."""
+
+    def __reduce__(self):
+        return (RealNumber, (float(self),))
+
 
 class _RealDigits(RealNumber):
     """An element of RR shown to more digits than 53 bits carry (from
@@ -343,18 +560,173 @@ class _RealDigits(RealNumber):
 
 
 class _RealField:
+    """RR, the real field with 53 bits of precision (Python floats).
+
+    EXAMPLES::
+
+        sage: RR, RR is RealField(53)
+        (Real Field with 53 bits of precision, True)
+    """
+
+    _instance = None
+    _is_generic_field = True
+    _numeric = True
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = object.__new__(cls)
+        return cls._instance
+
     def __repr__(self):
         return "Real Field with 53 bits of precision"
 
-    def __call__(self, x):
+    def _latex_(self):
+        return "\\Bold{R}"
+
+    def __call__(self, x=0):
         """Convert x into RR.
 
         EXAMPLES::
 
-            sage: RR(1/3), RR(2)
-            (0.333333333333333, 2.00000000000000)
+            sage: RR(1/3), RR(2), RR('1.5')
+            (0.333333333333333, 2.00000000000000, 1.50000000000000)
         """
+        if isinstance(x, str):
+            return RealNumber(float(x))
+        if type(x).__name__ == "RealNumberMP":
+            return RealNumber(float(x))
         return RealNumber(float(x))
+
+    def __eq__(self, o):
+        return isinstance(o, _RealField)
+
+    def __hash__(self):
+        return hash(("RealField", 53, "RNDN"))
+
+    def precision(self):
+        """53.
+
+        EXAMPLES::
+
+            sage: RR.precision(), RR.prec()
+            (53, 53)
+        """
+        return 53
+
+    prec = precision
+
+    def is_exact(self):
+        """False.
+
+        EXAMPLES::
+
+            sage: RR.is_exact()
+            False
+        """
+        return False
+
+    def is_field(self, proof=True):
+        """True.
+
+        EXAMPLES::
+
+            sage: RR.is_field()
+            True
+        """
+        return True
+
+    def characteristic(self):
+        """0.
+
+        EXAMPLES::
+
+            sage: RR.characteristic()
+            0
+        """
+        return 0
+
+    def rounding_mode(self):
+        """'RNDN'.
+
+        EXAMPLES::
+
+            sage: RR.rounding_mode()
+            'RNDN'
+        """
+        return "RNDN"
+
+    def pi(self):
+        """pi.
+
+        EXAMPLES::
+
+            sage: RR.pi()
+            3.14159265358979
+        """
+        return RealNumber(_m.pi)
+
+    def to_prec(self, prec):
+        """The real field with another precision.
+
+        EXAMPLES::
+
+            sage: RR.to_prec(100)
+            Real Field with 100 bits of precision
+        """
+        import _sage_real
+        return _sage_real.RealField(prec)
+
+    def complex_field(self):
+        """CC.
+
+        EXAMPLES::
+
+            sage: RR.complex_field()
+            Complex Field with 53 bits of precision
+        """
+        import sage_all
+        return sage_all.CC
+
+    def zero(self):
+        """0.
+
+        EXAMPLES::
+
+            sage: RR.zero()
+            0.000000000000000
+        """
+        return RealNumber(0.0)
+
+    def one(self):
+        """1.
+
+        EXAMPLES::
+
+            sage: RR.one()
+            1.00000000000000
+        """
+        return RealNumber(1.0)
+
+    def random_element(self, min=-1, max=1):
+        """A random element of [min, max].
+
+        EXAMPLES::
+
+            sage: RR.random_element().parent()
+            Real Field with 53 bits of precision
+        """
+        import random as _r
+        return RealNumber(_r.uniform(float(min), float(max)))
+
+    def __contains__(self, x):
+        try:
+            float(x)
+            return True
+        except (TypeError, ValueError):
+            return False
+
+    def _name(self):
+        return "RealField53_RNDN"
 
 
 # ------------------------------------------------------------------ f(x) = ...

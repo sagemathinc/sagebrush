@@ -1952,6 +1952,10 @@ _POLY_RINGS = {}
 
 
 def _poly_ring_from_names(base, names):
+    if isinstance(names, list):
+        # GF(7)[['T']]: power series
+        import _sage_series
+        return _sage_series.PowerSeriesRing(base, names[0] if names else "x")
     if (isinstance(names, (tuple, list)) and len(names) != 1) or (isinstance(names, str) and "," in names):
         import _sage_mpoly
         return _sage_mpoly.MPolynomialRing(base, None, names)

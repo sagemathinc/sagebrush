@@ -130,13 +130,15 @@ def _civ_rational(q):
 
 # ------------------------------------------------------------------ printing
 
-def _str_interval(lo, hi):
-    """An interval printed as Sage's RealIntervalField (53 bits) prints it:
-    the most digits (at most 17) such that, in units of the last digit, the
-    interval lies within the printed value plus or minus 1."""
-    lo, hi = _rnd(lo, False, 53), _rnd(hi, True, 53)
+def _str_interval(lo, hi, bits=53):
+    """An interval printed as Sage's RealIntervalField(bits) prints it: the
+    most digits (at most ceil(bits log10 2) + 1, 17 for 53 bits) such that,
+    in units of the last digit, the interval lies within the printed value
+    plus or minus 1."""
+    lo, hi = _rnd(lo, False, bits), _rnd(hi, True, bits)
+    cap = int(math.ceil(bits * 0.30102999566398119521 - 1e-12)) + 1
     if lo == hi:
-        if lo.denominator == 1 and abs(lo) < 2 ** 53:
+        if lo.denominator == 1 and abs(lo) < 2 ** bits:
             return str(lo.numerator)
     if lo < 0 < hi or (lo == 0) != (hi == 0):
         # contains 0: 0.?e<k> with the least k such that [-10^k, 10^k] covers it
@@ -155,7 +157,7 @@ def _str_interval(lo, hi):
     elif _F(10) ** (E + 1) <= a2:
         E += 1
     best = None
-    for d in range(1, 18):
+    for d in range(1, cap + 1):
         k = E - d + 1
         u = _F(10) ** k
         L, H = math.floor(a1 / u), math.ceil(a2 / u)

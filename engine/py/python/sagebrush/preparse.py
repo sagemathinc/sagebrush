@@ -168,7 +168,10 @@ def _generators(line):
     cut = _top_semicolon(rhs_all)
     rest = "" if cut < 0 else rhs_all[cut:]
     rhs = (rhs_all if cut < 0 else rhs_all[:cut]).rstrip()
-    if rhs.endswith("[]"):
+    if rhs.endswith("[[]]"):
+        # R.<t> = QQ[[]]: power series
+        rhs = rhs[:-4] + "[[%s]]" % ", ".join("'%s'" % g for g in names)
+    elif rhs.endswith("[]"):
         rhs = rhs[:-2] + "[%s]" % tup
     elif rhs.endswith("()"):
         rhs = rhs[:-1] + "names=%s)" % tup

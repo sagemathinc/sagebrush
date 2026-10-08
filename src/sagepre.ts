@@ -167,7 +167,8 @@ function generators(line: string): string {
   // (and the following statements: R.<x> = QQ[]; S.<y> = QQ[])
   const rest = cut < 0 ? "" : "; " + generators(all.slice(cut + 1).trimStart());
   let rhs = (cut < 0 ? all : all.slice(0, cut)).trimEnd();
-  if (rhs.endsWith("[]")) rhs = rhs.slice(0, -2) + `[${tuple}]`;
+  if (rhs.endsWith("[[]]")) rhs = rhs.slice(0, -4) + `[[${names.map((n) => `'${n}'`).join(", ")}]]`;
+  else if (rhs.endsWith("[]")) rhs = rhs.slice(0, -2) + `[${tuple}]`;
   else if (rhs.endsWith("()")) rhs = rhs.slice(0, -1) + `names=${tuple})`;
   else if (rhs.endsWith(")")) rhs = rhs.slice(0, -1) + `, names=${tuple})`;
   return `${indent}${name} = ${rhs}; (${names.join(", ")},) = ${name}._first_ngens(${names.length})${rest}`;
