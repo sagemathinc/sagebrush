@@ -233,8 +233,10 @@ class PolynomialRing_:
 _RINGS = {}
 
 
-def PolynomialRing(base, names=None, name=None, *args, **kwds):
-    """PolynomialRing(ZZ, 'x') or PolynomialRing(QQ, names=('y',)).
+def PolynomialRing(base, *args, **kwds):
+    """PolynomialRing(ZZ, 'x'), PolynomialRing(QQ, names=('y',)); several
+    variables: PolynomialRing(QQ, 'x,y'), PolynomialRing(QQ, 3, 'x'),
+    PolynomialRing(QQ, 2, 'xy', order='lex') (see _sage_mpoly).
 
     EXAMPLES::
 
@@ -244,21 +246,29 @@ def PolynomialRing(base, names=None, name=None, *args, **kwds):
         Univariate Polynomial Ring in t over Integer Ring
         sage: S.<y> = ZZ[]; S
         Univariate Polynomial Ring in y over Integer Ring
+        sage: PolynomialRing(QQ, 3, 'x'), PolynomialRing(QQ, 'a,b')
+        (Multivariate Polynomial Ring in x0, x1, x2 over Rational Field, Multivariate Polynomial Ring in a, b over Rational Field)
     """
     import _sage_ff
-    if _sage_ff._is_ff_base(base):
-        n = names if names is not None else name if name is not None else "x"
-        if isinstance(n, int) or (args and isinstance(args[0], (int, str))):
-            raise NotImplementedError("multivariate polynomial rings over finite fields are not available in sagebrush yet")
-        return _sage_ff._poly_ring_from_names(base, n)
-    names = names if names is not None else name if name is not None else "x"
+    n = None
+    names = kwds.get("names", kwds.get("name"))
+    for a in args:
+        if isinstance(a, int) and not isinstance(a, bool):
+            n = int(a)
+        elif a is not None and names is None:
+            names = a
+    order = kwds.get("order")
+    if names is None:
+        names = "x"
+    multi = n is not None or (isinstance(names, (list, tuple)) and len(names) != 1) or (isinstance(names, str) and "," in names)
+    if multi:
+        import _sage_mpoly
+        return _sage_mpoly.MPolynomialRing(base, n, names, order or "degrevlex")
     if isinstance(names, (tuple, list)):
-        if len(names) != 1:
-            raise NotImplementedError("multivariate polynomial rings are not available in sagebrush yet")
         names = names[0]
-    names = str(names)
-    if "," in names:
-        raise NotImplementedError("multivariate polynomial rings are not available in sagebrush yet")
+    names = str(names).strip()
+    if _sage_ff._is_ff_base(base):
+        return _sage_ff._poly_ring_from_names(base, names)
     if base is not ZZ and base is not QQ:
         raise NotImplementedError("polynomial rings over %r are not available in sagebrush yet" % (base,))
     key = (base._name, names)
@@ -568,7 +578,11 @@ class Polynomial:
         return r
 
     def __eq__(self, other):
-        o = self._coerce(other)
+        try:
+            o = self._coerce(other)
+        except TypeError:
+            # polynomials in different variables are different
+            return False
         if o is None:
             return NotImplemented
         return self._c == o._c
@@ -630,14 +644,20 @@ class Polynomial:
             c = _F(o._c[0])
             return Polynomial(PolynomialRing(QQ, self._ring._name), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
         q, r = self.quo_rem(o)
-        if r:
-            raise NotImplementedError("rational functions are not available in sagebrush yet")
-        return q
+        if not r:
+            # (Sage returns an element of the fraction field equal to q)
+            return q
+        import _sage_frac
+        a = self if self._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), self._c)
+        b = o if o._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), o._c)
+        return _sage_frac.FractionFieldElement(a, b)
 
     def __rtruediv__(self, other):
         if self.degree() == 0:
             return _F(other) / _F(self._c[0])
-        raise NotImplementedError("rational functions are not available in sagebrush yet")
+        import _sage_frac
+        R = self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name)
+        return _sage_frac.FractionFieldElement(R(other), Polynomial(R, self._c))
 
     # ---- evaluation and calculus
     def __call__(self, *args, **kwds):
@@ -1041,3 +1061,7 @@ class PolyFactorization(list):
         elif self._field and self._unit != 1:
             parts.insert(0, "\\left(%s\\right)" % latex(self._unit))
         return " \\cdot ".join(parts) if parts else str(latex(self._unit))
+
+
+import _sage_frac as _frac
+_frac._install_ring_extras(PolynomialRing_)

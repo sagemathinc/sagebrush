@@ -1,7 +1,7 @@
 {
   "sage_all": 61,
   "_sage_modular": 161,
-  "_sage_poly": 53,
+  "_sage_poly": 62,
   "_sage_nf": 85,
   "sage_permgroup": 63,
   "_sage_matrix": 123,
@@ -10,7 +10,9 @@
   "_interact": 24,
   "sage_plot": 40,
   "sage_plot3d": 50,
-  "_sage_ff": 146,
+  "_sage_ff": 155,
   "_sage_ffmat": 89,
-  "_sage_qqbar": 32
+  "_sage_qqbar": 32,
+  "_sage_mpoly": 127,
+  "_sage_frac": 37
 }

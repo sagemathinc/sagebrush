@@ -1952,14 +1952,12 @@ _POLY_RINGS = {}
 
 
 def _poly_ring_from_names(base, names):
+    if (isinstance(names, (tuple, list)) and len(names) != 1) or (isinstance(names, str) and "," in names):
+        import _sage_mpoly
+        return _sage_mpoly.MPolynomialRing(base, None, names)
     if isinstance(names, (tuple, list)):
-        if len(names) != 1:
-            raise NotImplementedError("multivariate polynomial rings over finite fields are not available in sagebrush yet")
         names = names[0]
-    names = str(names)
-    if "," in names:
-        raise NotImplementedError("multivariate polynomial rings over finite fields are not available in sagebrush yet")
-    return PolynomialRing_ff(base, names.strip())
+    return PolynomialRing_ff(base, str(names).strip())
 
 
 class PolynomialRing_ff_:
@@ -2421,8 +2419,13 @@ class Polynomial_ff:
             return self * (1 / b2._c[0])
         q, r = self.quo_rem(b2)
         if r:
-            raise NotImplementedError("rational functions over finite fields are not available yet")
+            import _sage_frac
+            return _sage_frac.FractionFieldElement(self, b2)
         return q
+
+    def __rtruediv__(self, b):
+        import _sage_frac
+        return _sage_frac.FractionFieldElement(self._ring(b), self)
 
     def __eq__(self, b):
         b = self._coerce(b) if not isinstance(b, Polynomial_ff) else b
@@ -2816,3 +2819,7 @@ def _edf(f, d, q):
         g = f.gcd(b)
         if 0 < g.degree() < n:
             return _edf(g, d, q) + _edf(f // g, d, q)
+
+
+import _sage_frac as _frac
+_frac._install_ring_extras(PolynomialRing_ff_)
