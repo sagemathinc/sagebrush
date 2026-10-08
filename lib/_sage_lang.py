@@ -734,6 +734,7 @@ class _RealField:
 class SymbolicFunction:
     """f(x) = x^2: a callable expression, printed x |--> x^2.  Calling it
     substitutes; its methods (diff, taylor, ...) give callable results.
+    A callable may also be vector-valued: r(t) = (cos(t), sin(t)).
 
     EXAMPLES::
 
@@ -741,22 +742,35 @@ class SymbolicFunction:
         x |--> x^2 + 1
         sage: f(3), f.diff(), f(x).integrate(x)
         (10, x |--> 2*x, 1/3*x^3 + x)
+        sage: var('t')
+        t
+        sage: r(t) = (cos(t), sin(t)); r, r.diff(t)
+        (t |--> (cos(t), sin(t)), t |--> (-sin(t), cos(t)))
     """
 
     def __init__(self, expr, args):
         from _sage_expr import _expr
-        self._expr, self._args = _expr(expr), tuple(args)
+        if isinstance(expr, (list, tuple)):
+            from _sage_matrix import Vector
+            self._expr = Vector(_expr(e) for e in expr)
+            self._vec = True
+        else:
+            self._expr, self._vec = _expr(expr), False
+        self._args = tuple(args)
+
+    def _argstr(self):
+        return str(self._args[0]) if len(self._args) == 1 else "(" + ", ".join(map(str, self._args)) + ")"
 
     def __repr__(self):
-        a = self._args[0] if len(self._args) == 1 else "(" + ", ".join(map(str, self._args)) + ")"
-        return "%s |--> %s" % (a, self._expr)
+        return "%s |--> %s" % (self._argstr(), self._expr)
 
     __str__ = __repr__
 
     def _latex_(self):
         a = self._args[0]._latex_() if len(self._args) == 1 else \
             "\\left(%s\\right)" % ", ".join(v._latex_() for v in self._args)
-        return "%s \\ {\\mapsto}\\ %s" % (a, self._expr._latex_())
+        e = self._expr._latex_() if not self._vec else "\\left(%s\\right)" % ", ".join(x._latex_() for x in self._expr)
+        return "%s \\ {\\mapsto}\\ %s" % (a, e)
 
     def __call__(self, *vals, **kw):
         """Substitute the arguments.
@@ -767,9 +781,16 @@ class SymbolicFunction:
             sage: f(1, 2), f(x, 3)
             (3, x^2 + 3)
         """
-        if len(vals) != len(self._args):
-            raise ValueError("the number of arguments must be less than or equal to %d" % len(self._args))
-        return self._expr.subs(dict(zip(self._args, vals)))
+        if kw and not vals:
+            sub = {a: kw[str(a)] for a in self._args if str(a) in kw}
+        else:
+            if len(vals) != len(self._args):
+                raise ValueError("the number of arguments must be less than or equal to %d" % len(self._args))
+            sub = dict(zip(self._args, vals))
+        if self._vec:
+            from _sage_matrix import Vector
+            return Vector(e.subs(sub) for e in self._expr)
+        return self._expr.subs(sub)
 
     def variables(self):
         """The arguments (as Sage's variables()).
@@ -795,27 +816,124 @@ class SymbolicFunction:
         """
         return self._expr
 
+    def parent(self):
+        """The callable function ring (or the vector space over it).
+
+        EXAMPLES::
+
+            sage: f(x, y) = x*y; f.parent()
+            Callable function ring with arguments (x, y)
+        """
+        ring = "Callable function ring with argument%s %s" % ("" if len(self._args) == 1 else "s", self._argstr())
+        if self._vec:
+            return _Text("Vector space of dimension %d over %s" % (len(self._expr), ring))
+        return _Text(ring)
+
     def _fast_callable(self, names=None):
         return self._expr._fast_callable(names if names is not None else [str(a) for a in self._args])
 
     def _wrap(self, r):
         from _sage_expr import Expression
+        from _sage_matrix import Vector
         if isinstance(r, Expression) and not r.is_relational():
+            return SymbolicFunction(r, self._args)
+        if isinstance(r, Vector) and all(isinstance(e, Expression) for e in r):
             return SymbolicFunction(r, self._args)
         return r
 
+    def _each(self, f):
+        from _sage_matrix import Vector
+        return self._wrap(Vector(f(e) for e in self._expr) if self._vec else f(self._expr))
+
     def diff(self, *args):
-        """The derivative, as a callable expression.
+        """The derivative, as a callable expression; without a variable, the
+        gradient of a function of several variables (the Jacobian of a
+        vector), diff(2) the Hessian.
 
         EXAMPLES::
 
             sage: f(x) = x^3
             sage: f.diff(), f.derivative(x, 2), f.differentiate()
             (x |--> 3*x^2, x |--> 6*x, x |--> 3*x^2)
+            sage: f.derivative(2)
+            x |--> 6*x
+            sage: var('y')
+            y
+            sage: g(x, y) = x^2*y
+            sage: g.diff()
+            (x, y) |--> (2*x*y, x^2)
         """
-        return self._wrap(self._expr.diff(*(args or self._args[:1])))
+        import sage_all as _sa
+        n = None
+        if len(args) == 1 and isinstance(args[0], int) and not isinstance(args[0], bool):
+            n, args = int(args[0]), ()
+        if self._vec:
+            if args:
+                return self._each(lambda e: e.diff(*args))
+            from _sage_matrix import Matrix
+            return Matrix(_sa.SR, [[SymbolicFunction(e.diff(v), self._args) for v in self._args] for e in self._expr])
+        if args:
+            return self._wrap(self._expr.diff(*args))
+        if len(self._args) == 1:
+            return self._wrap(self._expr.diff(self._args[0], n or 1))
+        if n is None or n == 1:
+            return self.gradient()
+        if n == 2:
+            return self.hessian()
+        raise ValueError("diff(%d) of a function of several variables" % n)
 
     derivative = differentiate = diff
+
+    def gradient(self, vars=None):
+        """The gradient, as a callable vector.
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: f(x, y) = x^2 + x*y
+            sage: f.gradient()
+            (x, y) |--> (2*x + y, x)
+        """
+        from _sage_matrix import Vector
+        return SymbolicFunction(Vector(self._expr.diff(v) for v in (vars or self._args)), self._args)
+
+    def hessian(self):
+        """The Hessian, a matrix of callable expressions.
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: f(x, y) = x^2*y
+            sage: f.hessian()
+            [(x, y) |--> 2*y (x, y) |--> 2*x]
+            [(x, y) |--> 2*x   (x, y) |--> 0]
+        """
+        import sage_all as _sa
+        from _sage_matrix import Matrix
+        return Matrix(_sa.SR, [[SymbolicFunction(self._expr.diff(a).diff(b), self._args) for b in self._args] for a in self._args])
+
+    def integral(self, *args, **kw):
+        """The integral: callable for an antiderivative, a number for a
+        definite integral.
+
+        EXAMPLES::
+
+            sage: f(x) = x^2
+            sage: f.integral(x), f.integral(x, 0, 3)
+            (x |--> 1/3*x^3, 9)
+        """
+        from _sage_expr import integrate
+        definite = len(args) >= 3 or (args and isinstance(args[0], (tuple, list)))
+        if self._vec:
+            from _sage_matrix import Vector
+            r = Vector(integrate(e, *args, **kw) for e in self._expr)
+            return r if definite else self._wrap(r)
+        r = integrate(self._expr, *args, **kw)
+        return r if definite else self._wrap(r)
+
+    integrate = integral
 
     def _binop(self, other, op, rev=False):
         o = other._expr if isinstance(other, SymbolicFunction) else other
@@ -832,9 +950,57 @@ class SymbolicFunction:
     def __pow__(self, o): return self._binop(o, lambda a, b: a ** b)
     def __neg__(self): return self._wrap(-self._expr)
 
+    def _rel(self, o, op):
+        o = o._expr if isinstance(o, SymbolicFunction) else o
+        return op(self._expr, o)
+
+    def __eq__(self, o):
+        return self._rel(o, lambda a, b: a == b)
+
+    def __ne__(self, o):
+        return self._rel(o, lambda a, b: a != b)
+
+    def __lt__(self, o):
+        return self._rel(o, lambda a, b: a < b)
+
+    def __le__(self, o):
+        return self._rel(o, lambda a, b: a <= b)
+
+    def __gt__(self, o):
+        return self._rel(o, lambda a, b: a > b)
+
+    def __ge__(self, o):
+        return self._rel(o, lambda a, b: a >= b)
+
+    def __hash__(self):
+        return hash((repr(self),))
+
+    def __iter__(self):
+        if self._vec:
+            return iter([SymbolicFunction(e, self._args) for e in self._expr])
+        raise TypeError("a callable symbolic expression is not iterable")
+
+    def __len__(self):
+        if self._vec:
+            return len(self._expr)
+        raise TypeError("a callable symbolic expression has no length")
+
+    def __getitem__(self, i):
+        if self._vec:
+            return SymbolicFunction(self._expr[i], self._args)
+        raise TypeError("a callable symbolic expression is not subscriptable")
+
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
+        if self._vec:
+            m = getattr(self._expr, name)
+            if not callable(m):
+                return m
+
+            def fv(*args, **kw):
+                return self._wrap(m(*args, **kw))
+            return fv
         m = getattr(self._expr, name)
         if not callable(m):
             return m
@@ -842,6 +1008,20 @@ class SymbolicFunction:
         def f(*args, **kw):
             return self._wrap(m(*args, **kw))
         return f
+
+
+class _Text:
+    def __init__(self, s):
+        self._s = s
+
+    def __repr__(self):
+        return self._s
+
+    def __eq__(self, o):
+        return isinstance(o, _Text) and o._s == self._s
+
+    def __hash__(self):
+        return hash(self._s)
 
 
 def _evaluate(e, subs):
@@ -853,7 +1033,8 @@ def _evaluate(e, subs):
 
 
 def symbolic_expression(e):
-    """The symbolic expression of a number or string.
+    """The symbolic expression of a number or string (a vector of them for
+    a list or tuple).
 
     EXAMPLES::
 
@@ -861,8 +1042,15 @@ def symbolic_expression(e):
         x + 2
         sage: symbolic_expression(x^2).function(x)
         x |--> x^2
+        sage: symbolic_expression((x, x^2))
+        (x, x^2)
     """
     from _sage_expr import _expr
+    if isinstance(e, (list, tuple)):
+        from _sage_matrix import Vector
+        return Vector(_expr(x) for x in e)
+    if isinstance(e, SymbolicFunction):
+        return e._expr
     return _expr(e)
 
 
@@ -1034,6 +1222,16 @@ def _integer_class(sa, methods):
                 return wrap(r) if r is not NotImplemented else r
             f.__name__ = name
             setattr(Integer, name, f)
+    # 0 < x is the relation 0 < x (not x > 0), as in Sage
+    for name in ("__lt__", "__le__", "__gt__", "__ge__"):
+        def c(a, b, _g=getattr(int, name), _n=name):
+            r = _g(a, b)
+            if r is NotImplemented and type(b).__name__ == "Expression":
+                from _sage_expr import _expr
+                return getattr(_expr(int(a)), _n)(b)
+            return r
+        c.__name__ = name
+        setattr(Integer, name, c)
     for name in ("__neg__", "__pos__", "__abs__"):
         def g(a, _g=getattr(int, name)):
             return Integer(_g(a))

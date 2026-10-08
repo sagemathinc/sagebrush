@@ -334,6 +334,12 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             if x.is_const(Const::Pi) || x.is_const(Const::E) {
                 return Some(x.clone());
             }
+            // abs(y^n) = abs(y)^n for integers n (Sage: abs(t^2) = abs(t)^2)
+            if let Kind::Pow(b, k) = &x.kind {
+                if k.as_i64().is_some() {
+                    return Some(pow(&fun1(Fun::Abs, b), k));
+                }
+            }
             // abs(c*y) = |c| abs(y) for real numbers c
             if let Kind::Mul(v) = &x.kind {
                 if let Some(c) = v[0].as_num() {

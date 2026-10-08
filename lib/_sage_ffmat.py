@@ -62,6 +62,19 @@ class FFVector:
     def __setitem__(self, i, v):
         self._e[i] = self._base(v)
 
+    def cross_product(self, other):
+        """The cross product of vectors of length 3.
+
+        EXAMPLES::
+
+            sage: vector(GF(7), [1, 2, 3]).cross_product(vector(GF(7), [4, 5, 6]))
+            (4, 6, 4)
+        """
+        a, b = list(self), list(other)
+        if len(a) != 3 or len(b) != 3:
+            raise TypeError("the cross product is defined for vectors of length 3")
+        return FFVector(self._base, [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]])
+
     def list(self):
         """The entries.
 

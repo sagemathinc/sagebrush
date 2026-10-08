@@ -22,7 +22,7 @@ __all__ = [
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
     "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "MixedIntegerLinearProgram", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
-    "RationalField", "IntegerRing", "randint", "random", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
+    "RationalField", "IntegerRing", "randint", "random", "bernoulli", "zeta", "symbolic_sum", "sum", "assume", "forget", "assumptions", "assuming", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
@@ -58,7 +58,7 @@ __all__ = [
     "text_control",
 ]
 
-from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infinity, Infinity,
+from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infinity, Infinity, symbolic_sum, assume, forget, assumptions, assuming,
                         euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
                         tanh, coth, sech, csch, arcsinh, arccosh, arctanh, asinh, acosh, atanh, exp,
@@ -1220,9 +1220,22 @@ def binomial(n, k):
         sage: binomial(10, 3), binomial(-3, 2), binomial(1/2, 2)
         (120, 6, -1/8)
     """
+    if _symbolic(n) or _symbolic(k):
+        return _symbolic_fun("binomial", n, k)
     if isinstance(n, int) and n >= 0 and k >= 0:
         return _math.comb(n, k)
     return _binom_general(n, k)
+
+
+def _symbolic(a):
+    """Whether a is a symbolic expression with variables."""
+    from _sage_expr import Expression
+    return isinstance(a, Expression) and bool(a._names())
+
+
+def _symbolic_fun(name, *args):
+    from _sage_expr import Expression, _expr, _call
+    return Expression(_call("fun", name, *[_expr(a)._s for a in args])[0])
 
 
 def _binom_general(n, k):
@@ -1302,6 +1315,100 @@ def catalan_number(n):
     return _math.comb(2 * n, n) // (n + 1)
 
 
+def sum(*args, **kw):
+    """Python's sum of an iterable, or Sage's symbolic sum: sum(f, k, a, b).
+
+    EXAMPLES::
+
+        sage: sum([1, 2, 3]), sum(i^2 for i in range(4))
+        (6, 14)
+        sage: var('k n'); sum(k, k, 1, n)  # needs maxima
+        (k, n)
+        1/2*n^2 + 1/2*n
+    """
+    import builtins
+    if len(args) >= 4:
+        return symbolic_sum(*args, **kw)
+    return builtins.sum(*args, **kw)
+
+
+def bernoulli(n):
+    """The Bernoulli number B_n (B_1 = -1/2).
+
+    EXAMPLES::
+
+        sage: [bernoulli(n) for n in range(7)]
+        [1, -1/2, 1/6, 0, -1/30, 0, 1/42]
+    """
+    n = int(n)
+    if n < 0:
+        raise ValueError("n must be nonnegative")
+    if n == 1:
+        return _q(_Fraction(-1, 2))
+    if n % 2:
+        return Integer(0)
+    # Akiyama-Tanigawa (gives B_1 = +1/2; only even n reach here)
+    a = [_Fraction(1, m + 1) for m in range(n + 1)]
+    for m in range(n + 1):
+        for j in range(m, 0, -1):
+            a[j - 1] = j * (a[j - 1] - a[j])
+        if m == n:
+            break
+        a = a[:]
+    return _q(a[0])
+
+
+def zeta(s):
+    """The Riemann zeta function: exact at even and nonpositive integers,
+    numerical for real numbers, symbolic otherwise.
+
+    EXAMPLES::
+
+        sage: zeta(2), zeta(4), zeta(0), zeta(-1)
+        (1/6*pi^2, 1/90*pi^4, -1/2, -1/12)
+        sage: zeta(3.0)
+        1.20205690315959
+        sage: zeta(3)
+        zeta(3)
+    """
+    from _sage_expr import Expression, _expr
+    if isinstance(s, float):
+        from _sage_lang import RealNumber
+        return RealNumber(_zeta_float(float(s)))
+    try:
+        k = int(s) if (isinstance(s, int) or (isinstance(s, Expression) and s.is_integer())) else None
+    except Exception:
+        k = None
+    if k is not None:
+        if k == 1:
+            raise ValueError("zeta has a pole at 1")
+        if k == 0:
+            return _q(_Fraction(-1, 2))
+        if k < 0:
+            return -bernoulli(1 - k) / (1 - k)
+        if k % 2 == 0:
+            c = (-1) ** (k // 2 + 1) * _Fraction(bernoulli(k)) * 2 ** k / (2 * _math.factorial(k))
+            return _q(c) * pi ** k
+    from _sage_expr import function as _fn
+    return _fn("zeta")(_expr(s))
+
+
+def _zeta_float(s, n=40):
+    """zeta(s) for real s != 1 (Borwein's alternating series; the
+    functional equation for s < 1/2)."""
+    if s < 0.5:
+        return 2 ** s * _math.pi ** (s - 1) * _math.sin(_math.pi * s / 2) * _math.gamma(1 - s) * _zeta_float(1 - s, n)
+    d = [0.0] * (n + 1)
+    tot = 0.0
+    for i in range(n + 1):
+        tot += _math.factorial(n + i - 1) * 4 ** i / (_math.factorial(n - i) * _math.factorial(2 * i)) if i else 1.0 / n
+        d[i] = n * tot
+    acc = 0.0
+    for k in range(n):
+        acc += (-1) ** k * (d[k] - d[n]) / (k + 1) ** s
+    return -acc / (d[n] * (1 - 2 ** (1 - s)))
+
+
 def factorial(n):
     """n!
 
@@ -1309,7 +1416,12 @@ def factorial(n):
 
         sage: factorial(10), factorial(0)
         (3628800, 1)
+        sage: var('n'); factorial(n)
+        n
+        factorial(n)
     """
+    if _symbolic(n):
+        return _symbolic_fun("factorial", n)
     return _math.factorial(n)
 
 
