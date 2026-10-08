@@ -289,6 +289,17 @@ node/build.sh                                       # Node addon
 See [engine/TRY.md](engine/TRY.md) for the full function list in both
 languages.
 
+The CLI, the notebook and sagebrush.space are built with pnpm (the lock file
+is `pnpm-lock.yaml`; `npm ci` does not apply) and bun:
+
+```sh
+pnpm install --frozen-lockfile        # about 1 s
+node scripts/build-engine.mjs         # the Rust engine as WebAssembly (about 20 s cold)
+pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (about 1 s)
+bun web/build.ts                      # the site in web/dist (about 1 s)
+pnpm test                             # about 30 s
+```
+
 ### The notebook on your computer
 
 ```sh
