@@ -90,6 +90,17 @@ class IntegerModRing_:
         self._is_gf = field_repr
         self._prime = None
 
+    def __pow__(self, n):
+        """The vector space F^n (for a field).
+
+        EXAMPLES::
+
+            sage: GF(7)^3
+            Vector space of dimension 3 over Finite Field of size 7
+        """
+        import _sage_ffmat
+        return _sage_ffmat.VectorSpace(self, int(n))
+
     def __repr__(self):
         if self._is_gf:
             return "Finite Field of size %d" % self._n
@@ -1210,6 +1221,17 @@ class FiniteField_ext:
         self._prime_field = GF(p)
         self._primitive = None
 
+    def __pow__(self, n):
+        """The vector space F^n (for a field).
+
+        EXAMPLES::
+
+            sage: GF(7)^3
+            Vector space of dimension 3 over Finite Field of size 7
+        """
+        import _sage_ffmat
+        return _sage_ffmat.VectorSpace(self, int(n))
+
     def __repr__(self):
         return "Finite Field in %s of size %d^%d" % (self._name, self._p, self._n)
 
@@ -1978,7 +2000,8 @@ class PolynomialRing_ff_:
         self._name = name
 
     def __repr__(self):
-        return "Univariate Polynomial Ring in %s over %r" % (self._name, self._base)
+        gf2 = " (using GF2X)" if getattr(self._base, "is_field", lambda: False)() and int(self._base.order()) == 2 else ""
+        return "Univariate Polynomial Ring in %s over %r%s" % (self._name, self._base, gf2)
 
     def base_ring(self):
         """The coefficient field.
