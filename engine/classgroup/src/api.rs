@@ -57,8 +57,9 @@ pub fn nf_data(f: &[BigInt]) -> Result<NfData, String> {
     let (r1, r2, w) = if o.n == 1 {
         (1, 0, 2)
     } else {
-        let emb = Embeddings::new(&o);
-        let w = roots_of_unity(&o, &emb);
+        let ro = crate::nf::embed::reduce_order(&o);
+        let emb = Embeddings::new(&ro);
+        let w = roots_of_unity(&ro, &emb);
         (emb.r1, emb.r2, w)
     };
     // the HNF of the numerators: upper triangular over 1, a, a^2, ...,
@@ -162,6 +163,34 @@ pub fn bnf(f: &[BigInt]) -> Result<BnfData, String> {
     let (b, _) = crate::nf::bnf::bnfinit(f)?;
     let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, 20) };
     Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w })
+}
+
+/// The factor-base relations of a certified class group computation, with
+/// all prime ideals above the rational primes `extra` in the factor base:
+/// (bnf data, factor base (p, e, f), relations (column, exponent), and the
+/// relation elements over the power basis (numerators, common denominator)).
+pub struct RelationData {
+    pub bnf: BnfData,
+    pub fb: Vec<(u64, u32, u32)>,
+    pub rels: Vec<Vec<(usize, i64)>>,
+    pub elems: Vec<(Vec<BigInt>, BigInt)>,
+}
+
+pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String> {
+    monic(f)?;
+    if f.len() < 3 {
+        return Err("the degree must be at least 2".into());
+    }
+    let (b, _, r) = crate::nf::bnf::bnfinit_with(f, extra)?;
+    let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, 20) };
+    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w };
+    let elems = r.elems.iter().map(|x| {
+        // power-basis coordinates: x B / den
+        let n = r.order.n;
+        let num: Vec<BigInt> = (0..n).map(|j| (0..n).map(|i| &x[i] * &r.order.basis[i][j]).sum()).collect();
+        (num, r.order.den.clone())
+    }).collect();
+    Ok(RelationData { bnf, fb: r.fb.iter().map(|q| (q.p, q.e, q.f)).collect(), rels: r.rels, elems })
 }
 
 /// Class group of the quadratic field of fundamental discriminant d (and

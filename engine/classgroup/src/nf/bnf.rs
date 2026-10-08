@@ -577,9 +577,30 @@ pub fn one_step_generator_bound(f: &[BigInt]) -> f64 {
 }
 
 pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
+    bnfinit_with(f, &[]).map(|(b, t, _)| (b, t))
+}
+
+/// The relations behind a class group computation: valuation vectors over
+/// the factor base and the elements (order coordinates) with those
+/// factorizations.  Once the computation is certified (h R against the
+/// analytic estimate) they generate the group of factor-base units.
+#[derive(Clone, Debug)]
+pub struct Relations {
+    pub fb: Vec<PrimeIdeal>,
+    pub rels: Vec<Relation>,
+    pub elems: Vec<Vec<BigInt>>,
+    pub order: Order,
+}
+
+/// bnfinit, with every prime ideal above the rational primes `extra` also
+/// in the factor base (as columns), and the relations returned: so that the
+/// S-units for S containing those primes can be read off.
+pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relations), String> {
     let debug = std::env::var("QCL_DEBUG").is_ok();
     let t0 = crate::clock::Instant::now();
     let (o, _) = maximal_order(f);
+    // a T2-reduced basis: the f64 work below needs a well-scaled one
+    let o = super::embed::reduce_order(&o);
     let n = o.n;
     let dk = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
@@ -625,7 +646,15 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
     for p in crate::arith::primes_up_to(bound - 1) {
         above.push((p, decompose(&o, &dk, p)?));
     }
-    let small = |q: &PrimeIdeal| q.norm() < BigInt::from(bound);
+    // every prime above an extra p is a column (also those of norm >= bound
+    // above a small p)
+    let mut extra: Vec<u64> = extra.to_vec();
+    extra.sort();
+    extra.dedup();
+    for &p in extra.iter().filter(|&&p| p >= bound) {
+        above.push((p, decompose(&o, &dk, p)?));
+    }
+    let small = |q: &PrimeIdeal| q.norm() < BigInt::from(bound) || extra.binary_search(&q.p).is_ok();
     let mut fb = vec![];
     let mut by_p: HashMap<u64, Vec<usize>> = HashMap::new();
     for pass in [true, false] {
@@ -744,6 +773,9 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
             (Reduced::Core(cols, dense), core_rows, _) => {
                 let c = cols.len();
                 tm.core = c;
+                if debug {
+                    eprintln!("  core: {} columns, {} rows", c, dense.len());
+                }
                 let sel_res = if c == 0 { Ok(vec![]) } else { independent_rows(&dense, c) };
                 match sel_res {
                     Err(free) => {
@@ -764,7 +796,8 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
         tm.linalg_s += t.elapsed().as_secs_f64();
         if let Some((group, reg, reg_fixed, prec)) = res {
             tm.relations = rels.len();
-            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w }, tm));
+            let relations = Relations { fb: fld.fb[..fld.ngen].to_vec(), rels, elems, order: fld.o };
+            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w }, tm, relations));
         }
         want = rels.len() + more;
     }
@@ -888,7 +921,9 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
         sagebrush_interrupt::check();
         let extras: Vec<usize> = if c == 0 || others.is_empty() { vec![] } else { (0..n_extra.min(others.len())).map(|t| others[t * 7919 % others.len()]).collect() };
         let vs: Vec<Vec<i64>> = extras.iter().map(|&k| dense[k].clone()).collect();
-        let (det, ys) = if extras.is_empty() { (BigInt::one(), vec![]) } else { kernel_crt(&a, &vs) };
+        // (det A also when there are no extra rows: it bounds the group,
+        // and 1 there would make the HNF modulo 1 and h* = 1)
+        let (det, ys) = if extras.is_empty() { (if c == 0 { BigInt::one() } else { crate::linalg::det_crt(&a).abs() }, vec![]) } else { kernel_crt(&a, &vs) };
         if prec == 0 {
             // The lambdas are exact integer combinations of the relations'
             // logarithms, so their errors are the rounding of those times
@@ -998,6 +1033,20 @@ mod tests {
         let want = 1013.25 * 911.0625 + 7.5 * 3.125;
         let got = to_f64(&(cov >> prec as usize), prec);
         assert!((got - want).abs() < 1e-6 * want, "{} vs {}", got, want);
+    }
+
+    #[test]
+    fn square_core_uses_its_determinant() {
+        // x^3 - 688422267 x - 6952331593386 (from the elliptic curve 1990d2),
+        // with the primes above 199 in the factor base: (199) = P Q^2, and
+        // the core after elimination was Q alone with the row [2].  Taking
+        // det 1 there (no extra rows) gave h* = 1 from an index-2 lattice;
+        // now the relations found must include Q to an odd power.
+        let f: Vec<BigInt> = ["-6952331593386", "-688422267", "0", "1"].iter().map(|c| c.parse().unwrap()).collect();
+        let (b, _, r) = bnfinit_with(&f, &[2, 3, 5, 199]).unwrap();
+        assert_eq!(b.group.h, BigInt::one());
+        let q = r.fb.iter().position(|q| q.p == 199 && q.e == 2).unwrap();
+        assert!(r.rels.iter().any(|rel| rel.iter().any(|&(i, e)| i == q && e % 2 != 0)));
     }
 
     #[test]

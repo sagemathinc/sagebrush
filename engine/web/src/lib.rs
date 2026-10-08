@@ -436,6 +436,16 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w }))
         }
+        "bnf_relations" => {
+            let extra: Vec<u64> = v.get("extra").and_then(|e| e.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).collect()).unwrap_or_default();
+            let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
+            let b = &d.bnf;
+            Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w,
+                       "fb": d.fb.iter().map(|&(p, e, f)| json!([p, e, f])).collect::<Vec<_>>(),
+                       "rels": d.rels.iter().map(|r| r.iter().map(|&(i, k)| json!([i, k])).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                       "elems": d.elems.iter().map(|(num, den)| json!([big(num), den.to_string()])).collect::<Vec<_>>() }))
+        }
         "quadratic_class_group" => {
             let (h, cyc, reg) = sagebrush_classgroup::api::quadratic(&big1(v.get("d"))?)?;
             Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg }))
