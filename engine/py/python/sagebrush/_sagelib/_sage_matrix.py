@@ -70,7 +70,132 @@ class Vector(list):
         return Vector(_norm(other * a) for a in self)
 
     def __truediv__(self, other):
-        return Vector(_norm(_F(a) / _F(other)) for a in self)
+        try:
+            return Vector(_norm(_F(a) / _F(other)) for a in self)
+        except (TypeError, ValueError):
+            if type(other).__name__ == "SymbolicFunction":
+                return NotImplemented
+            return Vector(_norm(a / other) for a in self)
+
+    def __rtruediv__(self, other):
+        return NotImplemented
+
+    # ---- symbolic entries
+    def _is_symbolic(self):
+        from _sage_expr import Expression
+        return any(isinstance(a, Expression) for a in self)
+
+    def __call__(self, *args, **kw):
+        """Substitute in the (symbolic) entries.
+
+        EXAMPLES::
+
+            sage: var('t'); r = vector((2*t, t^2, t^3/4)); r(t=5)
+            t
+            (10, 25, 125/4)
+        """
+        from _sage_expr import _expr
+        if args and not kw and len(args) == 1 and isinstance(args[0], dict):
+            kw = {str(k): v for k, v in args[0].items()}
+            args = ()
+        if args:
+            names = sorted({n for a in self for n in _expr(a)._names()})
+            if len(args) != len(names):
+                raise ValueError("the number of arguments must be %d" % len(names))
+            kw = dict(zip(names, args))
+        return Vector(_norm(_expr(a).subs(**kw)) for a in self)
+
+    subs = substitute = __call__
+
+    def diff(self, *args):
+        """The derivative of the entries.
+
+        EXAMPLES::
+
+            sage: var('t'); vector((2*t, t^2, t^3/4)).diff(t)
+            t
+            (2, 2*t, 3/4*t^2)
+        """
+        from _sage_expr import _expr
+        return Vector(_norm(_expr(a).diff(*args)) for a in self)
+
+    derivative = differentiate = diff
+
+    def integral(self, *args, **kw):
+        """The integral of the entries.
+
+        EXAMPLES::
+
+            sage: var('t'); vector((1, 2*t)).integral(t)
+            t
+            (t, t^2)
+        """
+        from _sage_expr import integrate
+        return Vector(_norm(integrate(a, *args, **kw)) for a in self)
+
+    integrate = integral
+
+    def n(self, prec=None, digits=None):
+        """The numerical values of the entries.
+
+        EXAMPLES::
+
+            sage: vector((1/3, sqrt(2))).n()
+            (0.333333333333333, 1.41421356237310)
+        """
+        sa = _sa()
+        return Vector(sa.n(a, prec=prec, digits=digits) for a in self)
+
+    numerical_approx = N = n
+
+    def simplify_full(self):
+        """Simplify the entries.
+
+        EXAMPLES::
+
+            sage: vector((sin(x)^2 + cos(x)^2, x)).simplify_full()  # needs maxima
+            (1, x)
+        """
+        from _sage_expr import _expr
+        return Vector(_norm(_expr(a).simplify_full()) for a in self)
+
+    simplify = simplify_full
+
+    def expand(self):
+        """Expand the entries.
+
+        EXAMPLES::
+
+            sage: vector(((x + 1)^2, x)).expand()  # sagebrush only
+            (x^2 + 2*x + 1, x)
+        """
+        from _sage_expr import _expr
+        return Vector(_norm(_expr(a).expand()) for a in self)
+
+    def function(self, *args):
+        """The callable vector of the entries.
+
+        EXAMPLES::
+
+            sage: var('t'); vector((cos(t), sin(t))).function(t)
+            t
+            t |--> (cos(t), sin(t))
+        """
+        from _sage_lang import SymbolicFunction
+        return SymbolicFunction(self, args)
+
+    def cross_product(self, other):
+        """The cross product of vectors of length 3.
+
+        EXAMPLES::
+
+            sage: vector([1, 0, 0]).cross_product(vector([0, 1, 0]))
+            (0, 0, 1)
+        """
+        a, b = list(self), list(other)
+        if len(a) != 3 or len(b) != 3:
+            raise TypeError("the cross product is defined for vectors of length 3")
+        return Vector(_norm(x) for x in (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]))
 
     def base_ring(self):
         """ZZ, QQ or QQbar, from the entries.
@@ -151,7 +276,48 @@ class Vector(list):
             sage: vector([3, 4]).norm()
             5
         """
+        if self._is_symbolic():
+            # Sage's norm over SR: sqrt(sum |a|^2)
+            sa = _sa()
+            from _sage_expr import _expr
+            return sa.sqrt(sum(_norm(abs(_expr(a))) ** 2 for a in self)).simplify_rational() if False else \
+                _sqrt_content(sum(abs(_expr(a)) ** 2 for a in self))
         return _sa().sqrt(sum(a * a for a in self))
+
+
+def _sqrt_content(e):
+    """sqrt(e) with the rational content of the sum e taken out
+    (sqrt(9/16*a + 4) = 1/4*sqrt(9*a + 64))."""
+    sa = _sa()
+    from _sage_expr import _expr
+    e = _expr(e).expand()
+    try:
+        ops = e.operands() if e._op()[0] == "add" else [e]
+        dens, nums = [], []
+        for t in ops:
+            c = t
+            for f in (t.operands() if t._op()[0] == "mul" else [t]):
+                if f.is_numeric():
+                    c = f
+                    break
+            else:
+                c = 1
+            q = _F(c._rational_() if hasattr(c, "_rational_") else c)
+            dens.append(q.denominator)
+            nums.append(q.numerator)
+        import math
+        d = 1
+        for x in dens:
+            d = d * x // math.gcd(d, x)
+        g = 0
+        for x, y in zip(nums, dens):
+            g = math.gcd(g, abs(x * d // y))
+        # sqrt(g/d * (d/g e)): take out the square part of g/d
+        c = _F(g, d)
+        sq = sa.sqrt(_expr(c))
+        return sq * sa.sqrt((e / c).expand())
+    except Exception:
+        return sa.sqrt(e)
 
 
 class MatrixSpace_:
@@ -359,6 +525,39 @@ class Matrix:
             raise TypeError("matrix entries are not all integers")
         self._base = base
         self._subdiv = None
+
+    def __call__(self, *args, **kw):
+        """Evaluate the (callable or symbolic) entries.
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: f(x, y) = x^2*y
+            sage: H = f.hessian(); H(1, 2)
+            [4 2]
+            [2 0]
+        """
+        from _sage_expr import _expr
+        rows = []
+        for r in self._rows:
+            row = []
+            for e in r:
+                if type(e).__name__ == "SymbolicFunction":
+                    row.append(e(*args, **kw))
+                else:
+                    ex = _expr(e)
+                    if args:
+                        names = sorted(ex._names())
+                        row.append(ex.subs(**dict(zip(names, args))) if names else ex)
+                    else:
+                        row.append(ex.subs(**kw))
+            rows.append(row)
+        sa = _sa()
+        try:
+            return Matrix(sa.QQ, rows) if all(_F(x) is not None for r in rows for x in r) else Matrix(sa.SR, rows)
+        except (TypeError, ValueError):
+            return Matrix(sa.SR, rows)
 
     # ---- data
     def base_ring(self):

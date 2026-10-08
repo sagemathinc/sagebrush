@@ -88,6 +88,8 @@ def _expr(v):
         return v
     if isinstance(v, str):
         return Expression(_call("parse", v)[0])
+    if type(v).__name__ == "SymbolicFunction" and not v._vec:
+        return v._expr
     s = _to_s(v)
     if s is None:
         raise TypeError("cannot convert %r to a symbolic expression" % (v,))
@@ -166,7 +168,13 @@ class Expression:
     __rxor__ = __xor__
     def __neg__(self): return _one("neg", self._s)
     def __pos__(self): return self
-    def __abs__(self): return _one("fun", "abs", self._s)
+    def __abs__(self):
+        r = _one("fun", "abs", self._s)
+        if _ASSUMPTIONS and r._op()[0] == "fun:abs":
+            sg = _sign_of(self)
+            if sg is not None:
+                return self if sg >= 0 else -self
+        return r
 
     # --- relations: x == 2 is an equation; bool() decides it
     def _rel(self, op, other):
@@ -198,8 +206,14 @@ class Expression:
                         z = abs(complex(a - b)) == 0
                     except (TypeError, ValueError):
                         pass
+                if not z and _ASSUMPTIONS and (a - b).variables():
+                    z = bool(_assume_rewrite(a - b).expand() == 0)
                 return z if kind == "==" else not z
             if (a - b).variables():
+                if _ASSUMPTIONS:
+                    for r in _ASSUMPTIONS:
+                        if isinstance(r, Expression) and str(r) == str(self):
+                            return True
                 return False
             try:
                 u, v = float(a), float(b)
@@ -622,6 +636,17 @@ class Expression:
         return r
 
     derivative = differentiate = diff
+
+    def sum(self, *args, **kw):
+        """The symbolic sum over a variable: f.sum(k, a, b).
+
+        EXAMPLES::
+
+            sage: var('k n'); (k^2).sum(k, 1, n)  # needs maxima
+            (k, n)
+            1/3*n^3 + 1/2*n^2 + 1/6*n
+        """
+        return symbolic_sum(self, *args, **kw)
 
     def gradient(self, vars=None):
         """The gradient (in the variables, or the given ones).
@@ -1314,6 +1339,293 @@ _FAST_GLOBALS = {"_m": _M, "_gamma": _gamma, "_sgn": _sgn, "_undefined": _undefi
 _LATEX_NAMES = {}   # symbol name -> LaTeX (var('th', latex_name=r'\theta'))
 
 
+# ---------------------------------------------------------------- assumptions
+
+_ASSUMPTIONS = []   # relations (x > 0) and _Feature(n, 'integer')
+
+
+class _Feature:
+    """An assumption 'n is integer' made by assume(n, 'integer')."""
+
+    def __init__(self, v, kind):
+        self._v, self._kind = v, kind
+
+    def __repr__(self):
+        return "%s is %s" % (self._v, self._kind)
+
+    def __eq__(self, o):
+        return isinstance(o, _Feature) and str(o._v) == str(self._v) and o._kind == self._kind
+
+    def __hash__(self):
+        return hash((str(self._v), self._kind))
+
+
+def assume(*args):
+    """Assume relations (x > 0) or properties (assume(n, 'integer');
+    'integer', 'real', 'positive', 'even', 'odd', ...); used by abs,
+    sqrt simplification, bool of relations, sin(n*pi) and solve.
+
+    EXAMPLES::
+
+        sage: assume(x > 0); bool(sqrt(x^2) == x), abs(x)  # needs maxima
+        (True, x)
+        sage: assumptions()  # needs maxima
+        [x > 0]
+        sage: forget()  # needs maxima
+    """
+    args = list(args)
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if isinstance(a, (list, tuple)):
+            assume(*a)
+        elif i + 1 < len(args) and isinstance(args[i + 1], str):
+            f = _Feature(a, args[i + 1])
+            if f not in _ASSUMPTIONS:
+                _ASSUMPTIONS.append(f)
+            i += 1
+        elif isinstance(a, Expression) and a.is_relational():
+            if not any(isinstance(r, Expression) and str(r) == str(a) for r in _ASSUMPTIONS):
+                _ASSUMPTIONS.append(a)
+        elif a is True or a is False:
+            pass
+        else:
+            raise TypeError("assume(relation) or assume(variable, property)")
+        i += 1
+
+
+def forget(*args):
+    """Forget the given assumptions, or all of them.
+
+    EXAMPLES::
+
+        sage: assume(x > 0); forget(x > 0); assumptions()  # needs maxima
+        []
+    """
+    if not args:
+        del _ASSUMPTIONS[:]
+        return
+    args = list(args)
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if i + 1 < len(args) and isinstance(args[i + 1], str):
+            f = _Feature(a, args[i + 1])
+            if f in _ASSUMPTIONS:
+                _ASSUMPTIONS.remove(f)
+            i += 1
+        else:
+            for r in list(_ASSUMPTIONS):
+                if isinstance(r, Expression) and str(r) == str(a):
+                    _ASSUMPTIONS.remove(r)
+        i += 1
+
+
+def assumptions(*args):
+    """The current assumptions (about the given variables).
+
+    EXAMPLES::
+
+        sage: assume(x > 0, x < 1); assumptions()  # needs maxima
+        [x > 0, x < 1]
+        sage: forget()  # needs maxima
+    """
+    if not args:
+        return list(_ASSUMPTIONS)
+    names = {str(a) for a in args}
+    out = []
+    for r in _ASSUMPTIONS:
+        vs = {str(r._v)} if isinstance(r, _Feature) else set(r._names())
+        if vs & names:
+            out.append(r)
+    return out
+
+
+class assuming:
+    """A context in which some assumptions hold: with assuming(x > 0): ...
+
+    EXAMPLES::
+
+        sage: with assuming(x > 0):  # needs maxima
+        ....:     abs(x)
+        x
+        sage: assumptions()  # needs maxima
+        []
+    """
+
+    def __init__(self, *args, **kw):
+        self._args = args
+        self._replace = kw.get("replace", False)
+
+    def __enter__(self):
+        self._saved = list(_ASSUMPTIONS)
+        if self._replace:
+            del _ASSUMPTIONS[:]
+        assume(*self._args)
+
+    def __exit__(self, *exc):
+        _ASSUMPTIONS[:] = self._saved
+        return False
+
+
+def _satisfies(sol):
+    """Whether a solution [x == a, ...] is compatible with the assumptions
+    (the relations that become numerical after substituting it)."""
+    sub = {}
+    for eq in sol:
+        try:
+            sub[eq.lhs()] = eq.rhs()
+        except Exception:
+            return True
+    for r in _ASSUMPTIONS:
+        if not isinstance(r, Expression):
+            continue
+        rr = r.subs(sub)
+        if rr.variables():
+            continue
+        try:
+            if not bool(rr):
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def _integer_multiple_of_pi(arg):
+    """k when arg = k*pi with k an integer combination of products of
+    integer-assumed symbols, else None."""
+    q = (arg / pi).expand()
+    names = q._names()
+    ints = {n for n in names if _features(n) & {"integer", "even", "odd"}}
+    if not names or set(names) != ints:
+        return None
+    for t in (q.operands() if q._op()[0] == "add" else [q]):
+        for f in (t.operands() if t._op()[0] == "mul" else [t]):
+            tag = f._op()[0]
+            if tag == "symbol":
+                continue
+            if tag == "pow" and f.operands()[0]._op()[0] == "symbol":
+                try:
+                    if int(f.operands()[1]) > 0:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+                return None
+            v = _py_number(f._s)
+            if v is None or isinstance(v, float) or getattr(v, "denominator", 1) != 1:
+                return None
+    return q
+
+
+def _features(v):
+    return {r._kind for r in _ASSUMPTIONS if isinstance(r, _Feature) and str(r._v) == str(v)}
+
+
+def _sign_of(e):
+    """+1 (or 0 allowed) / -1 when the assumptions make e positive /
+    negative (e a symbol, or a product/power of such), else None."""
+    if not _ASSUMPTIONS:
+        return None
+    t = e._op()[0]
+    if t == "symbol":
+        name = str(e)
+        if "positive" in _features(name):
+            return 1
+        for r in _ASSUMPTIONS:
+            if not isinstance(r, Expression):
+                continue
+            k = r._op()[0][4:]
+            a, b = r.lhs(), r.rhs()
+            sym_a, sym_b = str(a) == name, str(b) == name
+            try:
+                if sym_a and b.is_numeric():
+                    c = float(b)
+                    if k in ("Gt", "Ge") and c >= 0:
+                        return 1
+                    if k in ("Lt", "Le") and c <= 0:
+                        return -1
+                if sym_b and a.is_numeric():
+                    c = float(a)
+                    if k in ("Lt", "Le") and c >= 0:
+                        return 1
+                    if k in ("Gt", "Ge") and c <= 0:
+                        return -1
+            except (TypeError, ValueError):
+                pass
+        return None
+    if t == "mul":
+        sg = 1
+        for f in e.operands():
+            if f.is_numeric():
+                try:
+                    sg *= 1 if float(f) > 0 else -1
+                    continue
+                except (TypeError, ValueError):
+                    return None
+            s1 = _sign_of(f)
+            if s1 is None:
+                return None
+            sg *= s1
+        return sg
+    if t == "pow":
+        b, x = e.operands()
+        sb = _sign_of(b)
+        if sb is None:
+            return None
+        if sb > 0:
+            return 1
+        try:
+            k = int(x)
+            return 1 if k % 2 == 0 else -1
+        except (TypeError, ValueError):
+            return None
+    try:
+        if e.is_numeric():
+            return 1 if float(e) >= 0 else -1
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _assume_rewrite(e):
+    """e simplified with the assumptions: sqrt(x^2) = x and abs(x) = x for
+    x > 0 (products and powers of such too)."""
+    t = e._op()[0]
+    if t in ("symbol", "rational", "integer", "constant") or not e.operands():
+        return e
+    ops = [_assume_rewrite(a) for a in e.operands()]
+    if t == "add":
+        return sum(ops, Expression(_call("parse", "0")[0]))
+    if t == "mul":
+        r = _expr(1)
+        for a in ops:
+            r = r * a
+        return r
+    if t == "pow":
+        b, x = ops
+        try:
+            k = _py_number(x._s)
+        except Exception:
+            k = None
+        if k is not None and not isinstance(k, float) and getattr(k, "denominator", 1) == 2:
+            # (b)^(m/2): b = c^2 with c of known sign
+            bt = b._op()[0]
+            if bt == "pow":
+                c, y = b.operands()
+                try:
+                    yk = int(y)
+                except (TypeError, ValueError):
+                    yk = None
+                if yk is not None and yk % 2 == 0 and _sign_of(c) == 1:
+                    return c ** (yk // 2 * 2 * k)
+        return b ** x
+    if t == "fun:abs":
+        sg = _sign_of(ops[0])
+        if sg is not None:
+            return ops[0] if sg >= 0 else -ops[0]
+    return e
+
+
 def var(*names, **kw):
     """var('x y') or var('x', 'y'): symbolic variables, also defined in __main__.
 
@@ -1335,6 +1647,9 @@ def var(*names, **kw):
     if kw.get("latex_name") is not None:
         for n in names:
             _LATEX_NAMES[n] = str(kw["latex_name"])
+    if kw.get("domain") in ("positive", "integer", "real", "complex"):
+        for v in vs:
+            assume(v, kw["domain"])
     import sys
     main = sys.modules.get("__main__")
     if main is not None:
@@ -1369,6 +1684,10 @@ def _function(name, numeric=None, cnumeric=None):
                 return h()
             raise
         r = Expression(_call("fun", name, *ss)[0])
+        if _ASSUMPTIONS and name in ("sin", "cos", "tan") and len(args) == 1 and r._op()[0] == "fun:" + name:
+            k = _integer_multiple_of_pi(_expr(args[0]))
+            if k is not None:
+                return _expr(0) if name != "cos" else (-1) ** k
         if all(not isinstance(a, Expression) and not _is_poly(a) for a in args):
             v = _py_number(r._s)
             if v is not None:
@@ -1743,6 +2062,159 @@ x = Expression(_sym_s("x"))
 
 # ------------------------------------------------------------------ top-level calculus
 
+def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
+    """The sum of f for v from a to b (b may be oo): closed forms for
+    polynomials (Faulhaber), geometric terms, binomial coefficients,
+    1/k^s (zeta), x^k/k! (exponential); a direct sum for small numeric
+    ranges; otherwise the sum stays unevaluated.
+
+    EXAMPLES::
+
+        sage: var('k n')
+        (k, n)
+        sage: symbolic_sum(k, k, 1, n), symbolic_sum(k^2, k, 1, n)  # needs maxima
+        (1/2*n^2 + 1/2*n, 1/3*n^3 + 1/2*n^2 + 1/6*n)
+        sage: symbolic_sum((1/3)^k, k, 0, oo), symbolic_sum(binomial(n, k), k, 0, n)  # needs maxima
+        (3/2, 2^n)
+        sage: symbolic_sum(1/k^2, k, 1, oo), symbolic_sum(x^k/factorial(k), k, 0, oo)  # needs maxima
+        (1/6*pi^2, e^x)
+    """
+    import sage_all as _sa
+    f, v = _expr(f), _expr(v)
+    a, b = _expr(a), _expr(b)
+    vn = _var_name(v)
+    inf = str(b) == "+Infinity"
+    if vn not in f._names():
+        if inf:
+            if bool(f == 0):
+                return _expr(0)
+            raise ValueError("Sum is divergent.")
+        return (f * (b - a + 1)).expand() if f._names() or not f.is_numeric() else f * (b - a + 1)
+    # small numeric ranges: add the terms
+    if a.is_numeric() and b.is_numeric() and not inf:
+        lo, hi = int(a), int(b)
+        if hi - lo <= 2000:
+            r = _expr(0)
+            for i in range(lo, hi + 1):
+                r = r + f.subs({v: i})
+            return r
+    # binomial coefficients: sum binomial(n, k) x^k = (x + 1)^n
+    r = _sum_binomial(f, v, a, b)
+    if r is not None:
+        return r
+    # polynomials in v: Faulhaber
+    if f.is_polynomial(v) and not inf:
+        cs = f.list(v)
+        tot = _expr(0)
+        for j, c in enumerate(cs):
+            if not c.is_trivial_zero():
+                tot = tot + c * (_faulhaber(j, b) - _faulhaber(j, a - 1))
+        return tot.expand()
+    # geometric terms: f(v+1)/f(v) free of v
+    q = _geom_ratio(f, v)
+    if q is not None:
+        fa = f.subs({v: a})
+        if inf:
+            try:
+                ok = abs(complex(q.n())) < 1
+            except Exception:
+                ok = True   # symbolic ratio: as Sage under assume(abs(q) < 1)
+            if not ok:
+                raise ValueError("Sum is divergent.")
+            return (fa / (1 - q)).simplify_rational() if q._names() else fa / (1 - q)
+        return ((fa * (q ** (b - a + 1) - 1)) / (q - 1)).simplify_rational()
+    if inf and str(a) in ("0", "1"):
+        r = _sum_special(f, v, a)
+        if r is not None:
+            return r
+    from _sage_expr import function as _fn
+    return _fn("sum")(f, v, a, b)
+
+
+def _geom_ratio(f, v, allow_factorial=False):
+    """r when f = c*prod(b_i^(e_i)) with the b_i free of v and the e_i of
+    degree 1 in v, so f(v+1) = r*f(v); with allow_factorial, a factor
+    1/factorial(v) contributes 1/(v + 1).  None otherwise."""
+    vn = _var_name(v)
+    fs = f.operands() if f._op()[0] == "mul" else [f]
+    r = _expr(1)
+    for t in fs:
+        if vn not in t._names():
+            continue
+        tag = t._op()[0]
+        if tag == "pow":
+            b, ex = t.operands()
+            if allow_factorial and str(b) == "factorial(%s)" % vn and str(ex) == "-1":
+                r = r / (v + 1)
+                continue
+            if vn in b._names() or not ex.is_polynomial(v) or ex.degree(v) != 1:
+                return None
+            r = r * b ** ex.coefficient(v, 1)
+            continue
+        return None
+    return r
+
+
+def _faulhaber(j, n):
+    """sum_{k=1}^{n} k^j as a polynomial in n (Bernoulli numbers, B_1 = 1/2)."""
+    import sage_all as _sa
+    n = _expr(n)
+    if j == 0:
+        return n
+    tot = _expr(0)
+    for i in range(j + 1):
+        B = _sa.bernoulli(i)
+        if i == 1:
+            B = -B
+        tot = tot + _sa.binomial(j + 1, i) * B * n ** (j + 1 - i)
+    return tot / (j + 1)
+
+
+def _sum_binomial(f, v, a, b):
+    """sum_{k=0}^{n} binomial(n, k) x^k (and its k-free multiples)."""
+    t = f._op()
+    s = str(f)
+    if "binomial(" not in s or str(a) != "0":
+        return None
+    n = b
+    from _sage_expr import _call
+    import sage_all as _sa
+    bk = _sa.binomial(n, v)
+    q = (f / bk).simplify_rational()
+    vn = _var_name(v)
+    if vn not in q._names():
+        return (q * 2 ** n)
+    # q = c * x^k
+    r = (q.subs({v: v + 1}) / q).simplify_rational()
+    if vn not in r._names():
+        c = q.subs({v: 0})
+        return c * (r + 1) ** n
+    return None
+
+
+def _sum_special(f, v, a):
+    """1/k^s (k >= 1) and x^k/k! (k >= 0)."""
+    import sage_all as _sa
+    vn = _var_name(v)
+    # 1/k^s
+    if str(a) == "1":
+        lg = (f.subs({v: _sa.e}) if False else None)
+        try:
+            s_ = -(f.log().diff(v) * v).simplify_rational()
+            if vn not in s_._names() and bool((f * v ** s_ - 1).simplify_rational() == 0):
+                return _sa.zeta(s_)
+        except Exception:
+            pass
+    # c*x^k/k!: the ratio is x/(k+1)
+    if str(a) == "0" and "factorial(" in str(f):
+        q = _geom_ratio(f, v, allow_factorial=True)
+        if q is not None:
+            xk = (q * (v + 1)).simplify_rational()
+            if vn not in xk._names():
+                return f.subs({v: 0}) * _sa.exp(xk)
+    return None
+
+
 def _poly_or(f):
     return _expr(f) if _is_poly(f) else f
 
@@ -1755,12 +2227,19 @@ def diff(f, *args):
         sage: diff(x^3, x), diff(sin(x), x, 3), diff(x^2*x, x)
         (3*x^2, -cos(x), 3*x^2)
     """
+    if _callable(f):
+        return f.diff(*args)
     f = _poly_or(f)
     if not isinstance(f, Expression):
         if hasattr(f, "derivative"):
             return f.derivative(*args)
         return 0
     return f.diff(*args)
+
+
+def _callable(f):
+    """Whether f is a callable symbolic expression (f(x) = ...)."""
+    return type(f).__name__ == "SymbolicFunction"
 
 
 derivative = diff
@@ -1797,6 +2276,8 @@ def taylor(f, *args):
         sage: taylor(1/(1 - x), x, 0, 4), taylor(cos(x), x, 0, 6)  # needs maxima
         (x^4 + x^3 + x^2 + x + 1, -1/720*x^6 + 1/24*x^4 - 1/2*x^2 + 1)
     """
+    if _callable(f):
+        return f.taylor(*args)
     return _expr(f).taylor(*args)
 
 
@@ -1808,6 +2289,8 @@ def limit(f, *args, dir=None, **kw):
         sage: limit(sin(x)/x, x=0), limit(1/x, x=0, dir='-'), lim((x^2 - 1)/(x - 1), x=1)  # needs maxima
         (1, -Infinity, 2)
     """
+    if _callable(f):
+        return f.limit(*args, dir=dir, **kw)
     return _expr(f).limit(*args, dir=dir, **kw)
 
 
@@ -1846,6 +2329,8 @@ def solve(f, *args, **kw):
         m = int(r[i])
         sols.append([Expression(s) for s in r[i + 1:i + 1 + m]])
         i += 1 + m
+    if _ASSUMPTIONS:
+        sols = [sol for sol in sols if _satisfies(sol)]
     if kw.get("solution_dict"):
         return [{s.lhs(): s.rhs() for s in sol} for sol in sols]
     if len(names) == 1 and not many:
@@ -1888,6 +2373,11 @@ def integrate(f, *args, **kw):
         sage: integrate(sin(x), x, 0, pi), integral(exp(-x), x, 0, oo)
         (2, 1)
     """
+    if _callable(f):
+        return f.integral(*args, **kw)
+    from _sage_matrix import Vector
+    if isinstance(f, Vector):
+        return Vector(integrate(e, *args, **kw) for e in f)
     f, v, a, b = _int_args(f, args)
     if a is None:
         return _one("integrate", f._s, v)
@@ -2003,7 +2493,7 @@ def numerical_integral(f, a, b, max_points=87, params=None, eps_abs=1e-6, eps_re
     """
     if isinstance(f, Expression) or hasattr(f, "_fast_callable"):
         names = f._names() if isinstance(f, Expression) else None
-        g = f._fast_callable(names[:1] if names else [])
+        g = f._fast_callable(names[:1] if names else ([] if names is not None else None))
         if names is not None and not names:
             c = float(f)
             g = lambda t: c
