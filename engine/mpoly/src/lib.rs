@@ -26,9 +26,11 @@
 pub mod divide;
 pub mod f4;
 pub mod factor;
+pub mod factor_p;
 pub mod gcd;
 pub mod hensel;
 pub mod order;
+pub mod rdense;
 pub mod sparse;
 
 use num_integer::Integer;
@@ -1638,7 +1640,15 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
             // a -> unit, f1, e1, f2, e2, ... (over Q: the f_i primitive in Z)
             let a = poly(0)?;
             if a.p > 0 {
-                return Err("factorization over GF(p) is not in the engine".into());
+                let (u, fs) = factor_p::factor_p(&a.num, a.p)?;
+                let n = a.num.n;
+                let unit = QPoly { num: ZPoly::from_terms(n, vec![(vec![0; n], BigInt::from(u))])?, den: BigInt::one(), p: a.p };
+                let mut out = vec![unit.to_bytes()];
+                for (f, e) in fs {
+                    out.push(QPoly { num: f, den: BigInt::one(), p: a.p }.to_bytes());
+                    out.push(e.to_string().into_bytes());
+                }
+                return Ok(out);
             }
             let (c, fs) = factor::factor_z(&a.num)?;
             let n = a.num.n;

@@ -48,7 +48,7 @@ pub(crate) fn sub(a: &SP, b: &SP, md: &Modulus) -> SP {
 }
 
 /// Sorts (decreasing) and merges equal words.
-fn normalize(mut v: SP, md: &Modulus) -> SP {
+pub(crate) fn normalize(mut v: SP, md: &Modulus) -> SP {
     v.sort_unstable_by(|x, y| y.0.cmp(&x.0));
     let mut out: SP = Vec::with_capacity(v.len());
     for (w, c) in v {
@@ -167,12 +167,12 @@ fn join_y(pk: &Packing, parts: &[SP], y: usize, md: &Modulus) -> SP {
     normalize(v, md)
 }
 
-fn deg(pk: &Packing, f: &SP, y: usize) -> u64 {
+pub(crate) fn deg(pk: &Packing, f: &SP, y: usize) -> u64 {
     f.iter().map(|&(w, _)| pk.exp(w, y)).max().unwrap_or(0)
 }
 
 /// f, univariate in v, as a dense vector.
-fn univ(pk: &Packing, f: &SP, v: usize) -> Vec<u64> {
+pub(crate) fn univ(pk: &Packing, f: &SP, v: usize) -> Vec<u64> {
     let mut out = vec![0u64; deg(pk, f, v) as usize + 1];
     for &(w, c) in f {
         out[pk.exp(w, v) as usize] = c;
