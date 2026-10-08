@@ -1134,6 +1134,56 @@ impl ZPoly {
     }
 }
 
+impl ZPoly {
+    /// Over Z: the last variable reduced modulo the monic integer m
+    /// (constant first): K[x...] as Q[x..., a]/(m(a)) for a number field.
+    pub fn reduce_last_z(&self, m: &[BigInt]) -> ZPoly {
+        let k = m.len() - 1;
+        let lastmask = self.mask();
+        let cv = self.coeffs.to_big();
+        let mut exps = Vec::with_capacity(self.len());
+        let mut cs: Vec<BigInt> = Vec::with_capacity(self.len());
+        let mut i = 0;
+        let mut c: Vec<BigInt> = vec![];
+        while i < self.len() {
+            let lead = self.exps[i] & !lastmask;
+            let top = (self.exps[i] & lastmask) as usize;
+            if top < k {
+                while i < self.len() && self.exps[i] & !lastmask == lead {
+                    exps.push(self.exps[i]);
+                    cs.push(cv[i].clone());
+                    i += 1;
+                }
+                continue;
+            }
+            c.clear();
+            c.resize(top + 1, BigInt::zero());
+            while i < self.len() && self.exps[i] & !lastmask == lead {
+                c[(self.exps[i] & lastmask) as usize] = cv[i].clone();
+                i += 1;
+            }
+            for j in (k..=top).rev() {
+                if c[j].is_zero() {
+                    continue;
+                }
+                let t = std::mem::take(&mut c[j]);
+                for (l, ml) in m[..k].iter().enumerate() {
+                    if !ml.is_zero() {
+                        c[j - k + l] -= &t * ml;
+                    }
+                }
+            }
+            for j in (0..k.min(c.len())).rev() {
+                if !c[j].is_zero() {
+                    exps.push(lead | j as u64);
+                    cs.push(std::mem::take(&mut c[j]));
+                }
+            }
+        }
+        ZPoly { n: self.n, bits: self.bits, exps, coeffs: Coeffs::shrink(cs) }
+    }
+}
+
 impl QPoly {
     pub fn from_z(num: ZPoly) -> QPoly {
         QPoly { num, den: BigInt::one(), p: 0 }
@@ -1187,6 +1237,28 @@ impl QPoly {
     pub fn mul_reduce(&self, o: &QPoly, m: &[u64]) -> Result<QPoly, String> {
         let r = mul(&self.num, &o.num)?.reduce_mod(self.p).reduce_last(m, self.p);
         Ok(QPoly { num: r, den: BigInt::one(), p: self.p })
+    }
+
+    /// The product, then the last variable reduced modulo the monic
+    /// integer m (over Q: a number field).
+    pub fn mul_reduce_z(&self, o: &QPoly, m: &[BigInt]) -> Result<QPoly, String> {
+        let r = mul(&self.num, &o.num)?.reduce_last_z(m);
+        Ok(QPoly { num: r, den: &self.den * &o.den, p: 0 }.normalize())
+    }
+
+    pub fn pow_reduce_z(&self, e: u64, m: &[BigInt]) -> Result<QPoly, String> {
+        let mut r = QPoly { num: ZPoly { n: self.num.n, bits: 1, exps: vec![0], coeffs: Coeffs::Small(vec![1]) }, den: BigInt::one(), p: 0 };
+        let (mut b, mut k) = (self.clone(), e);
+        while k > 0 {
+            if k & 1 == 1 {
+                r = r.mul_reduce_z(&b, m)?;
+            }
+            k >>= 1;
+            if k > 0 {
+                b = b.mul_reduce_z(&b, m)?;
+            }
+        }
+        Ok(r)
     }
 
     pub fn pow(&self, e: u64) -> Result<QPoly, String> {
@@ -1437,7 +1509,17 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
             // over GF(p)[a]/(m), a the last variable: m = "m0,m1,...,1"
             let a = poly(0)?;
             if a.p == 0 {
-                return Err("mulred: not over GF(p)".into());
+                // over Q: m monic with integer coefficients
+                let m: Vec<BigInt> = text(2)?.split(',').map(|x| x.parse::<BigInt>().map_err(|_| "bad modulus".to_string())).collect::<Result<_, _>>()?;
+                if m.len() < 2 || !m.last().unwrap().is_one() {
+                    return Err("the defining polynomial must be monic".into());
+                }
+                return if op == "mulred" {
+                    one(a.mul_reduce_z(&QPoly::from_bytes(arg(1)?)?, &m)?)
+                } else {
+                    let e: u64 = text(1)?.parse().map_err(|_| "bad exponent")?;
+                    one(a.pow_reduce_z(e, &m)?)
+                };
             }
             let m: Vec<u64> = text(2)?.split(',').map(|x| x.parse::<u64>().map_err(|_| "bad modulus".to_string())).collect::<Result<_, _>>()?;
             if m.len() < 2 || *m.last().unwrap() != 1 {
@@ -1621,6 +1703,17 @@ mod tests {
         assert_eq!(u.mul_reduce(&v, &m).unwrap().to_text(), "2,0:1;0,0:1");
         let a = QPoly { num: ZPoly::from_terms(2, vec![(vec![0, 1], BigInt::one())]).unwrap(), den: BigInt::one(), p: 3 };
         assert_eq!(a.pow_reduce(4, &m).unwrap().to_text(), "0,0:1");
+    }
+
+    #[test]
+    fn number_field() {
+        // Q(i): (x + i)*(x - i) = x^2 + 1, i^2 = -1
+        let m = [BigInt::one(), BigInt::zero(), BigInt::one()];
+        let u = QPoly::from_text(2, "1,0:1;0,1:1").unwrap();
+        let v = QPoly::from_text(2, "1,0:1;0,1:-1").unwrap();
+        assert_eq!(u.mul_reduce_z(&v, &m).unwrap().to_text(), "2,0:1;0,0:1");
+        let i = QPoly::from_text(2, "0,1:1/2").unwrap();
+        assert_eq!(i.pow_reduce_z(2, &m).unwrap().to_text(), "0,0:-1/4");
     }
 
     #[test]
