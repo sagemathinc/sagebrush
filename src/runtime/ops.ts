@@ -448,7 +448,16 @@ function floatPow(x: number, y: number): any {
   return mkfloat(r);
 }
 function powMod(a: any, b: any, m: any): any {
-  if (!(isPyInt(a) && isPyInt(b) && isPyInt(m))) raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
+  if (!(isPyInt(a) && isPyInt(b) && isPyInt(m))) {
+    // ternary pow calls the base's __pow__(exp, mod), as CPython does (only
+    // ints are refused outright)
+    const f = isPyInt(a) || typeof a === "number" ? undefined : special(a, "__pow__");
+    if (f !== undefined) {
+      const r = settle(f, f(a, b, m));
+      if (r !== NotImplemented) return r;
+    }
+    raise(T.TypeError, isPyInt(a) || typeof a === "number" ? "pow() 3rd argument not allowed unless all arguments are integers" : `unsupported operand type(s) for ** or pow(): '${typeName(a)}', '${typeName(b)}', '${typeName(m)}'`);
+  }
   let base = big(a), e = big(b), n = big(m);
   if (n === 0n) raise(T.ValueError, "pow() 3rd argument cannot be 0");
   const neg = n < 0n;
