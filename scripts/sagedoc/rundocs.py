@@ -64,6 +64,10 @@ t0 = time.time()
 try:
     import sagebrush.sage as S
     from sagebrush.preparse import preparse
+    # sage.* imports go to Sagebrush's names, as on sagebrush.space (the
+    # shim's finder comes before the block above, so real Sage stays out)
+    import _sage_shim
+    _sage_shim.install()
     import types
     main = types.ModuleType("__main__")
     sys.modules["__main__"] = main

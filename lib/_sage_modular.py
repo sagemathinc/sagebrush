@@ -351,6 +351,64 @@ def _group_name(N):
     return "Modular Group SL(2,Z)" if N == 1 else "Congruence Subgroup Gamma0(%d)" % N
 
 
+def _gamma0(G):
+    if isinstance(G, Gamma0):
+        return G
+    if isinstance(G, int) or hasattr(G, "__index__"):
+        return Gamma0(int(G))
+    raise NotImplementedError("dimension formulas for %r are not available in sagebrush yet (Gamma0 only)" % (G,))
+
+
+def dimension_cusp_forms(X, k=2):
+    """The dimension of S_k(X), X = Gamma0(N) or N (as sage.modular.dims).
+
+    EXAMPLES::
+
+        sage: from sage.modular.dims import dimension_cusp_forms  # sagebrush only
+        sage: dimension_cusp_forms(Gamma0(11), 2), dimension_cusp_forms(Gamma0(1), 12), dimension_cusp_forms(11, 2)  # sagebrush only
+        (1, 1, 1)
+    """
+    return _gamma0(X).dimension_cusp_forms(k)
+
+
+def dimension_modular_forms(X, k=2):
+    """The dimension of M_k(X), X = Gamma0(N) or N.
+
+    EXAMPLES::
+
+        sage: from sage.modular.dims import dimension_modular_forms  # sagebrush only
+        sage: dimension_modular_forms(Gamma0(11), 2)  # sagebrush only
+        2
+    """
+    return _gamma0(X).dimension_modular_forms(k)
+
+
+def dimension_eis(X, k=2):
+    """The dimension of the Eisenstein subspace of M_k(X).
+
+    EXAMPLES::
+
+        sage: from sage.modular.dims import dimension_eis  # sagebrush only
+        sage: dimension_eis(Gamma0(11), 2)  # sagebrush only
+        1
+    """
+    return _gamma0(X).dimension_eis(k)
+
+
+def dimension_new_cusp_forms(X, k=2, p=0):
+    """The dimension of the new subspace of S_k(X).
+
+    EXAMPLES::
+
+        sage: from sage.modular.dims import dimension_new_cusp_forms  # sagebrush only
+        sage: dimension_new_cusp_forms(Gamma0(33), 2)  # sagebrush only
+        1
+    """
+    if p:
+        raise NotImplementedError("p-new subspaces")
+    return _gamma0(X).dimension_new_cusp_forms(k)
+
+
 class Gamma0:
     """The congruence subgroup Gamma0(N).
 
