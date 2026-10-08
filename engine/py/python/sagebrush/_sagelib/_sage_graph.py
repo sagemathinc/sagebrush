@@ -731,7 +731,7 @@ def _isomorphism(G, H, labels):
     byc = {}
     try:
         VH = sorted(VH)
-    except TypeError:
+    except Exception:
         pass
     for v in VH:
         byc.setdefault(ch[v], []).append(v)
@@ -765,7 +765,7 @@ def _isomorphism(G, H, labels):
         return None
     try:
         return {v: m[v] for v in sorted(m)}
-    except TypeError:
+    except Exception:
         return dict(m)
 
 

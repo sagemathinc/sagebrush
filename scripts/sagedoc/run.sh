@@ -5,8 +5,8 @@
 # output compared as in Sage's doctests.  Sage's .rst sources are only read
 # as a test corpus (sparse clone under /scratch, nothing copied here).
 #   sh scripts/sagedoc/run.sh            # about 5 minutes on 14 processes
-# Measured 2026-10-08: 3621 of 6652 examples right (54.4%); first run (4287a57): 1845 of 6615 (27.9%):
-# tutorial 61%, PREP 59%, constructions 46%, thematic tutorials 53%.
+# Measured 2026-10-08: 3688 of 6652 examples right (55.4%); first run (4287a57): 1845 of 6615 (27.9%):
+# tutorial 61%, PREP 59%, constructions 46%, thematic tutorials 55%.
 set -e
 W=${SAGEDOC:-/scratch/sagedoc}
 HERE=$(cd "$(dirname "$0")" && pwd)

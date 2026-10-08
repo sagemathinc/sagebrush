@@ -255,7 +255,10 @@ class CrystalElement:
         return hash(self._key())
 
     def __lt__(self, other):
-        return self._P._index(self) < self._P._index(other)
+        try:
+            return self._P._index(self) < self._P._index(other)
+        except (NotImplementedError, KeyError):
+            return repr(self) < repr(other)
 
     def weight(self):
         """The weight (in the weight lattice realization).
@@ -685,6 +688,18 @@ class Crystal:
             depth += 1
         return out
 
+    def crystal_morphism(self, on_gens, **kwds):
+        """The crystal morphism with the given images of the highest weight
+        elements (a dict).
+
+        EXAMPLES::
+
+            sage: C = crystals.Letters('A2'); B = crystals.Tableaux('A2', shape=[1])
+            sage: Psi = C.crystal_morphism({C(1): B[0]}); [Psi(x) for x in C]
+            [[[1]], [[2]], [[3]]]
+        """
+        return crystal_morphism(self, on_gens)
+
     def connected_components_generators(self):
         """The highest weight vectors of the components.
 
@@ -1045,13 +1060,8 @@ def _signature_general(factors, i, eps, phs):
             else:
                 return j
         return c[0]
-    fj = where(True)
-    ej = where(False)
-    if phs[fj] == 0 or isinstance(phs[fj], float) and phs[fj] < 0:
-        fj = None
-    if eps[ej] == 0 or isinstance(eps[ej], float) and eps[ej] < 0:
-        ej = None
-    return fj, ej, E[N - 1], Ph[N - 1]
+    # the chosen factor's own e_i / f_i decide (they may be undefined)
+    return where(True), where(False), E[N - 1], Ph[N - 1]
 
 
 class TensorProductElement(CrystalElement):
@@ -2251,15 +2261,28 @@ class _Elementary:
 # ------------------------------------------------------ Nakajima monomials
 
 class _MonomialElement(CrystalElement):
-    __slots__ = ("_P", "_y")
+    """A (modified) Nakajima monomial: the highest weight monomial times a
+    product of A_{i,k}^{-1} (their multiplicities are kept)."""
 
-    def __init__(self, P, y):
-        self._P, self._y = P, {k: v for k, v in y.items() if v}
+    __slots__ = ("_P", "_c", "_y")
+
+    def __init__(self, P, c):
+        self._P, self._c = P, {k: v for k, v in c.items() if v}
+        y = dict(P._y0)
+        for (i, k), m in self._c.items():
+            for key, e in P._Avec(i, k):
+                y[key] = y.get(key, 0) - m * e
+        self._y = {k: v for k, v in y.items() if v}
 
     def _key(self):
         return tuple(sorted(self._y.items()))
 
     def __repr__(self):
+        P = self._P
+        if P._vars == "A":
+            if not self._c:
+                return "1"
+            return " ".join("A(%s,%s)^-%s" % (i, k, m) if m != 1 else "A(%s,%s)^-1" % (i, k) for (i, k), m in sorted(self._c.items()))
         if not self._y:
             return "1"
         out = []
@@ -2267,9 +2290,22 @@ class _MonomialElement(CrystalElement):
             out.append("Y(%s,%s)" % (i, k) + ("" if e == 1 else "^%s" % e))
         return " ".join(out)
 
-    def _sums(self, i):
+    def _intervals(self, i):
+        """[(k_start, k_end or None, prefix sum)] over the allowed range of k."""
         ks = sorted(k for (j, k) in self._y if j == i)
-        return ks
+        out = []
+        lo = 0 if self._P._inf else None
+        s = 0
+        start = lo
+        for k in ks:
+            if start is None or k > start:
+                out.append((start, k - 1, s))
+            s += self._y[(i, k)]
+            start = k
+        out.append((start, None, s))
+        if self._P._inf and (not ks or ks[0] > 0):
+            pass
+        return out
 
     def phi(self, i):
         """phi_i.
@@ -2279,11 +2315,10 @@ class _MonomialElement(CrystalElement):
             sage: La = RootSystem(["B",4]).weight_lattice().fundamental_weights(); M = crystals.NakajimaMonomials(["B",4], La[1]); M.list()[0].phi(1)
             1
         """
-        s, best = 0, 0
-        for k in self._sums(i):
-            s += self._y[(i, k)]
-            best = max(best, s)
-        return _sa().Integer(best)
+        return _sa().Integer(max(v for _, _, v in self._intervals(i)))
+
+    def _total(self, i):
+        return sum(e for (j, k), e in self._y.items() if j == i)
 
     def epsilon(self, i):
         """epsilon_i.
@@ -2293,59 +2328,44 @@ class _MonomialElement(CrystalElement):
             sage: La = RootSystem(["B",4]).weight_lattice().fundamental_weights(); M = crystals.NakajimaMonomials(["B",4], La[1]); M.list()[1].epsilon(1)
             1
         """
-        tot = sum(self._y[(i, k)] for k in self._sums(i))
-        s, best = 0, 0
-        # -sum_{s>k} y = -(tot - prefix)
-        best = max(0, -tot)
-        for k in self._sums(i):
-            s += self._y[(i, k)]
-            best = max(best, -(tot - s))
-        return _sa().Integer(best)
+        return _sa().Integer(int(self.phi(i)) - self._total(i))
 
-    def _A(self, i, k, sign):
-        P = self._P
-        y = dict(self._y)
-        y[(i, k)] = y.get((i, k), 0) + sign
-        y[(i, k + 1)] = y.get((i, k + 1), 0) + sign
-        for j in P._I:
-            if j != i and P._A[j][i]:
-                kk = k + (1 if j < i else 0)
-                y[(j, kk)] = y.get((j, kk), 0) + sign * int(P._A[j][i])
-        return _MonomialElement(P, y)
+    def _shift(self, i, k, d):
+        c = dict(self._c)
+        c[(i, k)] = c.get((i, k), 0) + d
+        if c[(i, k)] < 0:
+            return None
+        return _MonomialElement(self._P, c)
 
     def _f(self, i):
-        ph = int(self.phi(i))
-        if ph == 0:
+        iv = self._intervals(i)
+        ph = max(v for _, _, v in iv)
+        if ph == 0 and not self._P._inf:
             return None
-        s = 0
-        for k in self._sums(i):
-            s += self._y[(i, k)]
-            if s == ph:
-                return self._A(i, k, -1)
+        for a, b, v in iv:
+            if v == ph:
+                return self._shift(i, a if a is not None else b, 1)
         return None
 
     def _e(self, i):
-        ep = int(self.epsilon(i))
-        if ep == 0:
+        if int(self.epsilon(i)) == 0:
             return None
-        ks = self._sums(i)
-        tot = sum(self._y[(i, k)] for k in ks)
-        # -sum_{s>k} y is constant on [k_j, k_{j+1} - 1]; take the largest k
-        cand, s = None, 0
-        if -tot == ep:
-            cand = ks[0] - 1
-        for t, k in enumerate(ks[:-1]):
-            s += self._y[(i, k)]
-            if -(tot - s) == ep:
-                cand = ks[t + 1] - 1
-        return self._A(i, cand, 1)
+        iv = self._intervals(i)
+        ph = max(v for _, _, v in iv)
+        k = None
+        for a, b, v in iv:
+            if v == ph:
+                k = b
+        return self._shift(i, k, -1)
+
+    def _counts(self):
+        n = {}
+        for (i, k), m in self._c.items():
+            n[i] = n.get(i, 0) + m
+        return n
 
     def _wt(self):
-        P = self._P
-        v = [_F(0)] * len(P._la._v)
-        for (i, k), e in self._y.items():
-            v[P._I.index(i)] += e
-        return tuple(v)
+        return self.weight()._v
 
     def weight(self):
         """The weight.
@@ -2355,32 +2375,73 @@ class _MonomialElement(CrystalElement):
             sage: La = RootSystem(["B",4]).weight_lattice().fundamental_weights(); M = crystals.NakajimaMonomials(["B",4], La[1]); M.list()[1].weight()
             -Lambda[1] + Lambda[2]
         """
-        return _lie.AffineWeight(self._P._space, self._wt())
+        P = self._P
+        w = P._la
+        al = P._space.simple_roots()
+        for i, m in self._counts().items():
+            w = w - m * al[i]
+        return w
+
+    def weight_in_root_lattice(self):
+        """The weight minus the highest weight, in the root lattice.
+
+        EXAMPLES::
+
+            sage: Minf = crystals.infinity.NakajimaMonomials(['C',3,1])
+            sage: Minf.highest_weight_vector().f_string([0,1,2,3,2,1,0]).weight_in_root_lattice()
+            -2*alpha[0] - 2*alpha[1] - 2*alpha[2] - alpha[3]
+        """
+        n = self._counts()
+        return _Named(_lie._lincomb([(_F(-n[i]), "alpha[%s]" % i) for i in self._P._I if n.get(i)]) or "0")
 
 
 class NakajimaMonomials(Crystal):
-    """The highest weight crystal of modified Nakajima monomials.
+    """The crystal of modified Nakajima monomials: B(lambda), or B(infinity)
+    (lambda = None).
 
     EXAMPLES::
 
-        sage: La = RootSystem(["B",4]).weight_lattice().fundamental_weights(); M = crystals.NakajimaMonomials(["B",4], La[1]); M
-        Highest weight crystal of modified Nakajima monomials of Cartan type ['B', 4] and highest weight Lambda[1]
+        sage: La = RootSystem(['A',2]).weight_lattice().fundamental_weights(); M = crystals.NakajimaMonomials(['A',2], La[1]); M
+        Highest weight crystal of modified Nakajima monomials of Cartan type ['A', 2] and highest weight Lambda[1]
         sage: M.list()
-        [Y(1,0), Y(1,1)^-1 Y(2,0), Y(2,1)^-1 Y(3,0), Y(3,1)^-1 Y(4,0)^2, Y(4,0) Y(4,1)^-1, Y(3,1) Y(4,1)^-2, Y(2,2) Y(3,2)^-1, Y(1,3) Y(2,3)^-1, Y(1,4)^-1]
+        [Y(1,0), Y(1,1)^-1 Y(2,0), Y(2,1)^-1]
     """
 
-    def __init__(self, ct, la):
+    def __init__(self, ct, la, c=None, inf=False):
         self._ct = ct
-        self._la = la
-        self._space = la._P
         self._I = list(ct.index_set())
         self._A = _lie._cartan(ct)
-        self._repr = "Highest weight crystal of modified Nakajima monomials of Cartan type %r and highest weight %r" % (ct, la)
+        self._inf = inf
+        self._vars = "Y"
+        n = len(self._I)
+        if c is None:
+            self._cm = [[1 if a < b else 0 for b in range(n)] for a in range(n)]
+        else:
+            self._cm = [[int(c[a, b]) for b in range(n)] for a in range(n)]
+        if inf:
+            self._space = _lie.WeightLattice(RootSystem_(ct), not ct.is_finite() and getattr(ct, "_mat", None) is None)
+            self._la = self._space.zero()
+            self._repr = "Infinity Crystal of modified Nakajima monomials of type %r" % (ct,)
+        else:
+            self._space = la._P
+            self._la = la
+            self._repr = "Highest weight crystal of modified Nakajima monomials of Cartan type %r and highest weight %r" % (ct, la)
         y = {}
-        for k, i in enumerate(self._I):
-            if la._v[k]:
-                y[(i, 0)] = int(la._v[k])
-        self.module_generators = (_MonomialElement(self, y),)
+        if not inf:
+            for k, i in enumerate(self._I):
+                if la._v[k]:
+                    y[(i, 0)] = int(la._v[k])
+        self._y0 = y
+        self.module_generators = (_MonomialElement(self, {}),)
+
+    def _Avec(self, i, k):
+        """The exponents of A_{i,k}."""
+        a = self._I.index(i)
+        out = [((i, k), 1), ((i, k + 1), 1)]
+        for b, j in enumerate(self._I):
+            if j != i and self._A[j][i]:
+                out.append(((j, k + self._cm[b][a]), int(self._A[j][i])))
+        return out
 
     def _realize(self, v):
         return _lie.AffineWeight(self._space, v)
@@ -2388,8 +2449,39 @@ class NakajimaMonomials(Crystal):
     def _Lambda(self):
         return self._space.fundamental_weights()
 
+    def c(self):
+        """The matrix (c_ij) used in A_{i,k}.
 
-def _nakajima(ct, la, c=None):
+        EXAMPLES::
+
+            sage: La = RootSystem(['C',3]).weight_lattice().fundamental_weights()
+            sage: crystals.NakajimaMonomials(['C',3], 2*La[1]).c()
+            [0 1 1]
+            [0 0 1]
+            [0 0 0]
+        """
+        return _sa().matrix(_sa().ZZ, self._cm)
+
+    def set_variables(self, v):
+        """Print monomials in the Y (default) or A variables.
+
+        EXAMPLES::
+
+            sage: Minf = crystals.infinity.NakajimaMonomials(['A',2]); m = Minf.highest_weight_vector().f(1)
+            sage: Minf.set_variables('A'); m
+            A(1,0)^-1
+            sage: Minf.set_variables('Y'); m
+            Y(1,0)^-1 Y(1,1)^-1 Y(2,0)
+        """
+        self._vars = v
+
+    def _elements(self):
+        if self._inf or not self._ct.is_finite():
+            raise NotImplementedError("the crystal is infinite")
+        return Crystal._elements(self)
+
+
+def _nakajima(ct, la=None, c=None):
     """crystals.NakajimaMonomials(cartan_type, la): B(la) by monomials.
 
     EXAMPLES::
@@ -2397,8 +2489,437 @@ def _nakajima(ct, la, c=None):
         sage: La = RootSystem(['B',4]).weight_lattice().fundamental_weights()
         sage: M = crystals.NakajimaMonomials(['B',4], La[1]+La[2]); M.list()[:3], M.cardinality()
         ([Y(1,0) Y(2,0), Y(1,1)^-1 Y(2,0)^2, Y(2,0) Y(2,1)^-1 Y(3,0)], 231)
+        sage: c = Matrix([[0,0,1],[1,0,0],[0,1,0]]); La = RootSystem(['C',3]).weight_lattice().fundamental_weights()
+        sage: M = crystals.NakajimaMonomials(2*La[1], c=c); M.list()[:3]
+        [Y(1,0)^2, Y(1,0) Y(1,1)^-1 Y(2,1), Y(1,1)^-2 Y(2,1)^2]
     """
-    return NakajimaMonomials(CartanType(ct), la)
+    if la is None and isinstance(ct, _lie.AffineWeight):
+        ct, la = ct._P._ct, ct
+    return NakajimaMonomials(CartanType(ct), la, c)
+
+
+# ------------------------------------------------ B(infinity): tableaux (type A)
+
+class _InfTableauElement(CrystalElement):
+    """A marginally large tableau (an element of B(infinity) of type A_n)."""
+
+    __slots__ = ("_P", "_rows")
+
+    def __init__(self, P, rows):
+        self._P, self._rows = P, tuple(tuple(r) for r in rows)
+
+    def _key(self):
+        return self._rows
+
+    def __repr__(self):
+        return repr([list(r) for r in self._rows])
+
+    def pp(self):
+        """Print the tableau.
+
+        EXAMPLES::
+
+            sage: B = crystals.infinity.Tableaux(['A',2]); B.highest_weight_vector().f(2).pp()
+              1  1  1
+              2  3
+        """
+        print("\n".join("".join("%3s" % x for x in r) for r in self._rows if r))
+
+    def to_tableau(self):
+        """The tableau.
+
+        EXAMPLES::
+
+            sage: B = crystals.infinity.Tableaux(['A',2]); B.highest_weight_vector().f(2).to_tableau()
+            [[1, 1, 1], [2, 3]]
+        """
+        return Tableau([list(r) for r in self._rows if r])
+
+    def _word(self):
+        L = self._P._letters
+        rows = [r for r in self._rows]
+        w = []
+        for j in range(len(rows[0]) if rows else 0):
+            col = [rows[r][j] for r in range(len(rows)) if j < len(rows[r])]
+            w += [L(x) for x in reversed(col)]
+        return w
+
+    def _from_word(self, w):
+        shape = [len(r) for r in self._rows]
+        cols = _col_lengths(shape)
+        rows = [[] for _ in shape]
+        k = 0
+        for c in cols:
+            col = [w[k + t]._v for t in range(c)]
+            k += c
+            for r, x in enumerate(reversed(col)):
+                rows[r].append(x)
+        return self._P._normalize(rows)
+
+    def _op(self, i, lower):
+        w = self._word()
+        f, e, _, _ = _signature(w, i)
+        j = f if lower else e
+        if j is None:
+            if lower:
+                # act on a new trivial column (1, ..., i) added first
+                rows = [[r + 1] + list(row) if r < i else list(row) for r, row in enumerate(self._rows)]
+                el = _InfTableauElement(self._P, rows)
+                return el._op(i, True)
+            return None
+        w[j] = w[j].f(i) if lower else w[j].e(i)
+        return self._from_word(w)
+
+    def _f(self, i):
+        return self._op(i, True)
+
+    def _e(self, i):
+        if int(self.epsilon(i)) == 0:
+            return None
+        return self._op(i, False)
+
+    def epsilon(self, i):
+        """epsilon_i.
+
+        EXAMPLES::
+
+            sage: B = crystals.infinity.Tableaux(['A',2]); b = B.highest_weight_vector().f(1); b.epsilon(1), b.phi(1)
+            (1, -1)
+        """
+        return _sa().Integer(_signature(self._word(), i)[2])
+
+    def phi(self, i):
+        """phi_i = epsilon_i + <wt, h_i>.
+
+        EXAMPLES::
+
+            sage: B = crystals.infinity.Tableaux(['A',2]); b = B.highest_weight_vector(); b.phi(1), b.f(1).phi(1)
+            (0, -1)
+        """
+        w = self._wt()
+        return self.epsilon(i) + _sa().Integer(int(w[i - 1] - w[i]))
+
+    def _wt(self):
+        d = self._P._ct._n + 1
+        v = [_F(0)] * d
+        for r, row in enumerate(self._rows):
+            v[r] -= len(row)
+            for x in row:
+                v[x - 1] += 1
+        return tuple(v)
+
+
+class InfinityCrystalOfTableaux(Crystal):
+    """B(infinity) of type A_n by marginally large tableaux.
+
+    EXAMPLES::
+
+        sage: B = crystals.infinity.Tableaux(['A',2]); B
+        The infinity crystal of tableaux of type ['A', 2]
+        sage: B.highest_weight_vector().f_string([1, 2])
+        [[1, 1, 3], [2]]
+    """
+
+    def __init__(self, ct):
+        if ct._letter != "A" or not ct.is_finite():
+            raise NotImplementedError("infinity crystals of tableaux of type %r are not available in sagebrush yet" % (ct,))
+        self._ct = ct
+        self._space = RootSystem_(ct).ambient_space()
+        self._letters = CrystalOfLetters(ct)
+        self._repr = "The infinity crystal of tableaux of type %r" % (ct,)
+        n = ct._n
+        self.module_generators = (self._normalize([[] for _ in range(n)]),)
+
+    def _normalize(self, rows):
+        """Add or remove trivial columns (1, ..., r) so that row r has exactly
+        one more r than row r+1 has boxes."""
+        n = self._ct._n
+        rows = [list(r) for r in rows] + [[] for _ in range(n - len(rows))]
+        for r in range(n - 1, -1, -1):
+            need = (len(rows[r + 1]) if r + 1 < n else 0) + 1
+            have = sum(1 for x in rows[r] if x == r + 1)
+            while have < need:
+                for s in range(r + 1):
+                    rows[s].insert(0, s + 1)
+                have += 1
+            while have > need:
+                for s in range(r + 1):
+                    rows[s].pop(0)
+                have -= 1
+        return _InfTableauElement(self, rows)
+
+    def _elements(self):
+        raise NotImplementedError("the crystal is infinite")
+
+    def cardinality(self):
+        """Infinity.
+
+        EXAMPLES::
+
+            sage: B = crystals.infinity.Tableaux(['A',2]); B.cardinality()
+            +Infinity
+        """
+        return _sa().oo
+
+    def highest_weight_vector(self):
+        """The highest weight element.
+
+        EXAMPLES::
+
+            sage: B = crystals.infinity.Tableaux(['A',2]); B.highest_weight_vector()
+            [[1, 1], [2]]
+        """
+        return self.module_generators[0]
+
+
+def crystal_morphism(source, on_gens):
+    """The crystal morphism sending the highest weight elements of source as
+    given (a dict), commuting with the f_i.
+
+    EXAMPLES::
+
+        sage: Brho = crystals.Tableaux(['A',2], shape=[2,1]); brho = Brho.highest_weight_vector()
+        sage: B = crystals.infinity.Tableaux(['A',2]); T = crystals.elementary.T(['A',2], brho.weight())
+        sage: TB = crystals.TensorProduct(T, B); Psi = Brho.crystal_morphism({brho: TB(T[0], B.highest_weight_vector())})
+        sage: [Psi(x) for x in Brho][:3]
+        [[(2, 1, 0), [[1, 1], [2]]], [(2, 1, 0), [[1, 1, 2], [2]]], [(2, 1, 0), [[1, 1, 3], [2]]]]
+    """
+    def Psi(x):
+        hw, path = x.to_highest_weight()
+        y = on_gens[hw]
+        for i in reversed(path):
+            if y is None:
+                return None
+            y = y.f(i)
+        return y
+    return Psi
+
+
+class _Infinity:
+    """crystals.infinity: Tableaux (type A), NakajimaMonomials."""
+
+    def Tableaux(self, ct):
+        """B(infinity) by marginally large tableaux (type A).
+
+        EXAMPLES::
+
+            sage: B = crystals.infinity.Tableaux(['A',2]); b = B.highest_weight_vector(); b
+            [[1, 1], [2]]
+            sage: b.f_string([1,2,2,1,2,1,2,2,2,2,2]).pp()
+              1  1  1  1  1  1  1  1  1  2  2  3
+              2  3  3  3  3  3  3  3
+        """
+        return InfinityCrystalOfTableaux(CartanType(ct))
+
+    def NakajimaMonomials(self, ct, c=None):
+        """B(infinity) by modified Nakajima monomials.
+
+        EXAMPLES::
+
+            sage: Minf = crystals.infinity.NakajimaMonomials(['C',3,1]); minf = Minf.highest_weight_vector()
+            sage: m = minf.f_string([0,1,2,3,2,1,0]); m, m.weight()
+            (Y(0,0)^-1 Y(0,4)^-1 Y(1,0) Y(1,3), -2*Lambda[0] + 2*Lambda[1] - 2*delta)
+        """
+        M = NakajimaMonomials(CartanType(ct), None, c, inf=True)
+        M.highest_weight_vector = lambda: M.module_generators[0]
+        return M
+
+    def __repr__(self):
+        return "The catalog of infinity crystals"
+
+
+# ------------------------------------------------------------- LS paths
+
+class _LSPath(CrystalElement):
+    """A Lakshmibai-Seshadri (Littelmann) path: a tuple of straight segments
+    (their displacement vectors, in the weight space)."""
+
+    __slots__ = ("_P", "_s")
+
+    def __init__(self, P, segs):
+        self._P, self._s = P, _merge(segs)
+
+    def _key(self):
+        return self._s
+
+    def __repr__(self):
+        W = self._P._space
+        return "(" + ", ".join(repr(_lie.AffineWeight(W, v)) for v in self._s) + ("," if len(self._s) == 1 else "") + ")"
+
+    def value(self):
+        """The segments (as weights).
+
+        EXAMPLES::
+
+            sage: C = crystals.LSPaths(['A',2], [1,0]); C.list()[1].value()
+            (-Lambda[1] + Lambda[2],)
+        """
+        W = self._P._space
+        return tuple(_lie.AffineWeight(W, v) for v in self._s)
+
+    def _h(self, i):
+        k = self._P._ipos[i]
+        hs = [_F(0)]
+        for v in self._s:
+            hs.append(hs[-1] + v[k])
+        return hs
+
+    def epsilon(self, i):
+        """epsilon_i: minus the minimum of <pi(t), alpha_i^vee>.
+
+        EXAMPLES::
+
+            sage: C = crystals.LSPaths(['A',2], [2,0]); C.list()[1].epsilon(1), C.list()[1].phi(1)
+            (1, 1)
+        """
+        return _sa().Integer(int(-min(self._h(i))))
+
+    def phi(self, i):
+        """phi_i: the endpoint minus the minimum of <pi(t), alpha_i^vee>.
+
+        EXAMPLES::
+
+            sage: C = crystals.LSPaths(['A',2], [1,0]); C.list()[0].phi(1), C.list()[1].phi(2)
+            (1, 1)
+        """
+        hs = self._h(i)
+        return _sa().Integer(int(hs[-1] - min(hs)))
+
+    def _reflect(self, i, v):
+        k = self._P._ipos[i]
+        a = self._P._alpha[i]
+        c = v[k]
+        return tuple(x - c * y for x, y in zip(v, a))
+
+    def _f(self, i):
+        hs = self._h(i)
+        m = min(hs)
+        if hs[-1] - m < 1:
+            return None
+        t0 = max(k for k, h in enumerate(hs) if h == m)
+        segs = list(self._s)
+        # the first crossing of m + 1 after t0
+        for k in range(t0 + 1, len(hs)):
+            if hs[k] >= m + 1:
+                break
+        p = (m + 1 - hs[k - 1]) / (hs[k] - hs[k - 1])
+        v = segs[k - 1]
+        first, rest = _smul(p, v), _smul(1 - p, v)
+        new = segs[:t0] + [self._reflect(i, w) for w in segs[t0:k - 1]] + [self._reflect(i, first)]
+        if p != 1:
+            new.append(rest)
+        new += segs[k:]
+        return _LSPath(self._P, new)
+
+    def _e(self, i):
+        hs = self._h(i)
+        m = min(hs)
+        if m > -1:
+            return None
+        t1 = min(k for k, h in enumerate(hs) if h == m)
+        segs = list(self._s)
+        j = max(k for k in range(t1) if hs[k] >= m + 1)
+        # crossing of m + 1 in segment j (between breakpoints j and j + 1)
+        p = (hs[j] - (m + 1)) / (hs[j] - hs[j + 1])
+        v = segs[j]
+        first, rest = _smul(p, v), _smul(1 - p, v)
+        new = segs[:j]
+        if p != 0:
+            new.append(first)
+        new += [self._reflect(i, rest)] + [self._reflect(i, w) for w in segs[j + 1:t1]] + segs[t1:]
+        return _LSPath(self._P, new)
+
+    def _wt(self):
+        d = len(self._s[0])
+        w = tuple([_F(0)] * d)
+        for v in self._s:
+            w = _addv(w, v)
+        return w
+
+    def weight(self):
+        """The endpoint.
+
+        EXAMPLES::
+
+            sage: C = crystals.LSPaths(['A',2], [2,0]); C.list()[1].weight()
+            Lambda[2]
+        """
+        return _lie.AffineWeight(self._P._space, self._wt())
+
+
+def _merge(segs):
+    out = []
+    for v in segs:
+        v = tuple(_F(x) for x in v)
+        if all(x == 0 for x in v):
+            continue
+        if out:
+            u = out[-1]
+            k = next(t for t, x in enumerate(u) if x != 0)
+            c = v[k] / u[k]
+            if c > 0 and all(b == c * a for a, b in zip(u, v)):
+                out[-1] = _addv(u, v)
+                continue
+        out.append(v)
+    return tuple(out)
+
+
+class LSPaths(Crystal):
+    """The crystal of Lakshmibai-Seshadri paths of a weight.
+
+    EXAMPLES::
+
+        sage: C = crystals.LSPaths(['A',2], [1,0]); C, C.list()
+        (The crystal of LS paths of type ['A', 2] and weight Lambda[1], [(Lambda[1],), (-Lambda[1] + Lambda[2],), (-Lambda[2],)])
+    """
+
+    def __init__(self, la):
+        W = la._P
+        self._space = W
+        self._ct = W._ct
+        self._la = la
+        I = list(W._I)
+        self._ipos = {i: k for k, i in enumerate(I)}
+        al = W.simple_roots()
+        self._alpha = {i: al[i]._v for i in I}
+        self._repr = "The crystal of LS paths of type %r and weight %r" % (self._ct, la)
+        self.module_generators = (_LSPath(self, [la._v]),)
+
+    def _realize(self, v):
+        return _lie.AffineWeight(self._space, v)
+
+    def _Lambda(self):
+        return self._space.fundamental_weights()
+
+    def _elements(self):
+        if not self._ct.is_finite():
+            raise NotImplementedError("the crystal is infinite")
+        return Crystal._elements(self)
+
+
+def _lspaths(starting_weight, weight=None):
+    """crystals.LSPaths(weight) or crystals.LSPaths(cartan_type, [coefficients]).
+
+    EXAMPLES::
+
+        sage: C = crystals.LSPaths(['A',2], [1,1]); C
+        The crystal of LS paths of type ['A', 2] and weight Lambda[1] + Lambda[2]
+        sage: C.list()[:3]
+        [(Lambda[1] + Lambda[2],), (-Lambda[1] + 2*Lambda[2],), (1/2*Lambda[1] - Lambda[2], -1/2*Lambda[1] + Lambda[2])]
+        sage: R = RootSystem(['A',2,1]); La = R.weight_space(extended=True).basis()
+        sage: LS = crystals.LSPaths(La[1] - La[0]); sorted(LS.subcrystal(max_depth=2, direction='both'), key=str)
+        [(-Lambda[0] + Lambda[1],), (-Lambda[1] + Lambda[2] + delta,), (-Lambda[1] + Lambda[2],), (Lambda[0] - Lambda[2] + delta,), (Lambda[0] - Lambda[2],)]
+    """
+    if weight is not None:
+        ct = CartanType(starting_weight)
+        W = _lie.WeightLattice(RootSystem_(ct), False)
+        W._space_name = True
+        La = W.fundamental_weights()
+        la = W.zero()
+        for i, c in zip(ct.index_set(), weight):
+            la = la + int(c) * La[i]
+        return LSPaths(la)
+    return LSPaths(starting_weight)
 
 
 class _Crystals:
@@ -2416,6 +2937,8 @@ class _Crystals:
         self.KirillovReshetikhin = KirillovReshetikhin
         self.elementary = _Elementary()
         self.NakajimaMonomials = _nakajima
+        self.infinity = _Infinity()
+        self.LSPaths = _lspaths
 
     def __repr__(self):
         return "The catalog of crystals"
