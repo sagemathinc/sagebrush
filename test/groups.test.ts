@@ -137,6 +137,18 @@ print(E.saturation([5*E(0, 0)])[:2])
   assert.deepEqual(out.trim().split("\n"), ["[(0 : -1 : 1), (1 : -1 : 1)] 0.1524601779", "3 0.1524601779", "([(0 : 0 : 1)], 5)"]);
 });
 
+test("elliptic curves: the CPS height bound proves generators (5510b1)", () => {
+  const out = cli("--sage", "-c", `
+print(round(float(EllipticCurve('11a1').CPS_height_bound()), 4), round(float(EllipticCurve('37a1').CPS_height_bound()), 3))
+E = EllipticCurve([1,1,0,-6308,170512])
+print(round(float(E.regulator_of_points(E.gens())), 10))
+`);
+  // 11a1: 6/5 log 11 (split I5 at 11), sharper than Sage/Magma's 4/3 log 11;
+  // 37a1 as Magma's SiksekBound.  5510b1 needed a search to naive height
+  // 18.1 with Silverman's bound: Cremona's regulator 0.394907586803796
+  assert.deepEqual(out.trim().split("\n"), ["2.8778 0.164", "0.3949075868"]);
+});
+
 test("elliptic curves: analytic rank (numerical beyond 1; proof=True only for 0 and 1)", () => {
   const out = cli("--sage", "-c", `
 for ai in [[0,0,1,-1,0], [0,1,1,-2,0], [0,0,1,-7,6]]:

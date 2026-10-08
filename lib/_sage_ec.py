@@ -1883,19 +1883,127 @@ def silverman_bound(a):
     return 2 * (hj / 8 + _m.log(abs(D)) / 12 + 0.973) + 2 * _m.log(2)
 
 
+def _real_roots_in(c, lo, hi):
+    """The real roots in [lo, hi] of the polynomial c[0] + c[1] z + ... (floats;
+    roots of the derivative split it into monotone pieces, then bisection)."""
+    while len(c) > 1 and c[-1] == 0:
+        c = c[:-1]
+    if len(c) <= 1:
+        return []
+    ev = lambda z: sum(ci * z ** i for i, ci in enumerate(c))
+    crit = _real_roots_in([i * c[i] for i in range(1, len(c))], lo, hi)
+    pts = [lo] + sorted(crit) + [hi]
+    out = []
+    for u, v in zip(pts, pts[1:]):
+        fu, fv = ev(u), ev(v)
+        if fu == 0:
+            out.append(u)
+            continue
+        if fu * fv > 0:
+            continue
+        for _ in range(200):
+            m = (u + v) / 2
+            if m == u or m == v:
+                break
+            fm = ev(m)
+            if (fm < 0) == (fu < 0):
+                u, fu = m, fm
+            else:
+                v = m
+        out.append((u + v) / 2)
+    if ev(hi) == 0:
+        out.append(hi)
+    return out
+
+
+def _cps_eps_inf(a):
+    """A lower bound for eps_infinity: the minimum over x(E(R)) of
+    max(|F(X,Z)|, |G(X,Z)|) / max(|X|, |Z|)^4, with F = 4X^3 Z + ... and
+    G = X^4 - b4 X^2 Z^2 - ... the denominator and numerator of x(2P)."""
+    b2, b4, b6, b8 = _b(a)
+    f = [b6, 2 * b4, b2, 4]                    # F(x, 1)
+    g = [-b8, -2 * b6, -b4, 0, 1]              # G(x, 1)
+    ft = [0, 4, b2, 2 * b4, b6]                # F(1, t)
+    gt = [1, 0, -b4, -2 * b6, -b8]             # G(1, t)
+    best = None
+    for P, Q in ((f, g), (ft, gt)):
+        # z in [-1, 1] with P(z) >= 0 (x = z, resp. x = 1/z, on E(R)): the
+        # minimum of max(|P|, |Q|) is at an end, a critical point of P or Q,
+        # or where |P| = |Q|
+        n = max(len(P), len(Q))
+        P2 = P + [0] * (n - len(P))
+        Q2 = Q + [0] * (n - len(Q))
+        fl = lambda c: [float(x) for x in c]
+        cands = [-1.0, 1.0]
+        for c in (P, Q, [i * P[i] for i in range(1, len(P))], [i * Q[i] for i in range(1, len(Q))],
+                  [p - q for p, q in zip(P2, Q2)], [p + q for p, q in zip(P2, Q2)]):
+            cands += _real_roots_in(fl(c), -1.0, 1.0)
+        for z in cands:
+            for zz in (z, z * (1 + 1e-12) + 1e-12, z * (1 - 1e-12) - 1e-12):
+                if not -1 <= zz <= 1:
+                    continue
+                q = _F(zz)
+                pv = sum(ci * q ** i for i, ci in enumerate(P))
+                if pv < 0:
+                    # not on E(R) (a root of P is tried on both sides)
+                    continue
+                v = max(abs(pv), abs(sum(ci * q ** i for i, ci in enumerate(Q))))
+                if best is None or v < best:
+                    best = v
+    return float(best) * 0.999
+
+
+# sup over the rational components of the minimal model's Neron model of
+# the local height-difference correction (in units of log p, Sage's
+# normalization of hhat): 0 on the identity component
+def _cps_alpha(kod, c):
+    if c == 1:
+        return 0.0
+    if kod.endswith("*") and kod[1:-1].isdigit():
+        m = int(kod[1:-1])
+        if m == 0:
+            return 1.0
+        # Galois fixes the near component (the one of order 2 next to the
+        # identity), so with c = 2 it is the rational one
+        return 1.0 if c == 2 else 1.0 + m / 4.0
+    if kod[1:].isdigit():
+        m = int(kod[1:])
+        if c == m:
+            return (m // 2) * (m - m // 2) / m
+        return m / 4.0
+    return {"III": 0.5, "IV": 2 / 3, "IV*": 4 / 3, "III*": 1.5}.get(kod, 0.0)
+
+
+def cps_bound(a):
+    """The Cremona-Prickett-Siksek bound: B with h(x(P)) - hhat(P) <= B for
+    every P on the minimal model a (Sage's normalization of hhat; h(x) =
+    log max(|num|, den)).  -1/3 log eps_inf, plus at each bad prime the
+    largest local correction over the components with rational points."""
+    B = -_m.log(_cps_eps_inf(a)) / 3
+    for p, (kod, f, c) in local_data(a).items():
+        B += _cps_alpha(kod, c) * _m.log(p)
+    return B
+
+
 def index_bound(a, pts, bad, T=None):
     """An upper bound for the index of the subgroup spanned by the points in
     E(Q)/tors (with the search radius T used), or None if the search needed
     is out of reach."""
     r = len(pts)
-    B1 = silverman_bound(a)
+    B1 = min(silverman_bound(a), cps_bound(a))
     if T is None:
-        T = B1 + 0.5
+        # every point of hhat < T - B1 has naive height < T: a search to
+        # T = 10 is cheap, and a larger lam0 lowers the index bound
+        T = max(B1 + 0.5, min(B1 + 2, 10.0))
     if T > 14:
         return None, T
     lam0 = T - B1
     lam = lam0
-    for P in point_search_engine(a, T):
+    limit = 10 ** 6
+    found = point_search_engine(a, T, limit=limit)
+    if len(found) >= limit:
+        return None, T
+    for P in found:
         if point_order(a, P) == 0:
             lam = min(lam, canonical_height(a, P, bad))
     R = regulator(a, pts, bad)
