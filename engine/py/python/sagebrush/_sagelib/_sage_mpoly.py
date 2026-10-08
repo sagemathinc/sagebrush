@@ -166,6 +166,28 @@ class TermOrder:
 
 # ------------------------------------------------------------------ coefficient domains
 
+def _is_number_field(K):
+    try:
+        import _sage_nf
+    except ImportError:
+        return False
+    return isinstance(K, _sage_nf.NumberField_absolute)
+
+
+def _nf_repr(c):
+    """A number field element as Sage prints it in a multivariate
+    polynomial: rationals bare, the generator bare, else in parentheses
+    ((a^2), (-a), (1/3*a), (a - 1))."""
+    v = c._c
+    if not any(v[1:]):
+        x = v[0] if v else _F(0)
+        return str(x.numerator) if x.denominator == 1 else "%d/%d" % (x.numerator, x.denominator)
+    s = repr(c)
+    if s == c.parent()._name:
+        return s
+    return "(" + s + ")"
+
+
 def _ext_repr(c):
     """An element of GF(p^k) as Sage prints it in a multivariate polynomial:
     balanced coefficients, in parentheses unless it is an integer or a bare
@@ -274,6 +296,8 @@ class _Dom:
         if self.generic:
             if self._ext():
                 return _ext_repr(c)
+            if _is_number_field(self.base):
+                return _nf_repr(c)
             return repr(c)
         return str(c.numerator) if c.denominator == 1 else "%d/%d" % (c.numerator, c.denominator)
 
@@ -284,6 +308,9 @@ class _Dom:
             # an element of the prime field prints as an integer
             v = c._c
             return not any(v[1:]) and v[0] > self.base._p // 2
+        if self.generic and _is_number_field(self.base):
+            v = c._c
+            return not any(v[1:]) and v[0] < 0
         return not self.generic and c < 0
 
     def _ext(self):
@@ -365,6 +392,9 @@ class MPolynomialRing_:
             elif isinstance(base, _sage_ff.FiniteField_ext) and base._p < 1 << 62:
                 self._engine = "ext"
                 self._mstr = ",".join(str(int(c) % base._p) for c in base._f)
+            elif _is_number_field(base):
+                self._engine = "nf"
+                self._mstr = ",".join(str(int(c)) for c in base._f)
 
     def __repr__(self):
         return "Multivariate Polynomial Ring in %s over %r" % (", ".join(self._names), self._base)
@@ -765,6 +795,10 @@ class MPolynomial:
             elif R._engine == "p":
                 self._b = _mp("newp", str(R._n), str(R._dom.p), ";".join(
                     "%s:%d" % (",".join(map(str, e)), c) for e, c in self._dd.items()))[0]
+            elif R._engine == "nf":
+                es = ",".join
+                self._b = _mp("new", str(R._n + 1), ";".join(
+                    "%s,%d:%s" % (es(map(str, e)), j, cj) for e, c in self._dd.items() for j, cj in enumerate(c._c) if cj))[0]
             else:
                 es = ",".join
                 self._b = _mp("newp", str(R._n + 1), str(R._base._p), ";".join(
@@ -881,7 +915,7 @@ class MPolynomial:
         return iter([(out(c), self._mono(e)) for e, c in self._terms()])
 
     def __len__(self):
-        if self._dd is None and self._ring._engine != "ext":
+        if self._dd is None and self._ring._engine not in ("ext", "nf"):
             return int(bytes(_mp("len", self._b)[0]))
         return len(self._d)
 
@@ -1113,7 +1147,7 @@ class MPolynomial:
             neg = dom._is_negative(c)
             a = dom._neg(c) if neg else c
             cs = dom._repr(a)
-            if dom.generic and not dom._ext() and (" + " in cs or " - " in cs[1:]):
+            if dom.generic and not dom._ext() and not _is_number_field(dom.base) and (" + " in cs or " - " in cs[1:]):
                 cs = "(" + cs + ")"
             if not mono:
                 t = cs
@@ -1201,7 +1235,7 @@ class MPolynomial:
         if o is None:
             return NotImplemented
         if self._fast(o, 64):
-            if self._ring._engine == "ext":
+            if self._ring._engine in ("ext", "nf"):
                 r = _engine_op(self._ring, "mulred", self, o, self._ring._mstr)
             else:
                 r = _engine_op(self._ring, "mul", self, o)
@@ -1216,7 +1250,7 @@ class MPolynomial:
         if n < 0:
             return self._ring.fraction_field()(self) ** n
         if self._ring._engine and n > 1 and (self._b is not None or len(self._dd) > 1):
-            if self._ring._engine == "ext":
+            if self._ring._engine in ("ext", "nf"):
                 r = _engine_op(self._ring, "powred", self, str(n), self._ring._mstr)
             else:
                 r = _engine_op(self._ring, "pow", self, str(n))
@@ -1655,6 +1689,20 @@ def _dict_of(R, b):
             e, c = term.split(":")
             out[tuple(int(x) for x in e.split(","))] = int(c)
         return out
+    if R._engine == "nf":
+        K = R._base
+        k = len(K._f) - 1
+        parts = {}
+        for term in t.split(";"):
+            e, c = term.split(":")
+            ex = [int(x) for x in e.split(",")]
+            if "/" in c:
+                u, v = c.split("/")
+                c = _F(int(u), int(v))
+            else:
+                c = _F(int(c))
+            parts.setdefault(tuple(ex[:-1]), [_F(0)] * k)[ex[-1]] = c
+        return {e: K._element_class(K, c) for e, c in parts.items()}
     if R._engine == "ext":
         F, k = R._base, R._base._n
         parts = {}

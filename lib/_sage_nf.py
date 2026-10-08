@@ -97,6 +97,19 @@ class NumberField_absolute:
     def _first_ngens(self, k):
         return (self.gen(),)[:k]
 
+    def __getitem__(self, names):
+        """A polynomial ring over the number field: K['x,y'], K.<...>[].
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 - 2)
+            sage: R.<u,v> = K[]; (u + a*v)^2
+            u^2 + (2*a)*u*v + 2*v^2
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def gen(self, i=0):
         """The generator (the class of x).
 
