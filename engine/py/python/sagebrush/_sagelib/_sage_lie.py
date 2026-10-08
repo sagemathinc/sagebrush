@@ -1298,7 +1298,9 @@ class RootSystem_:
             sage: RootSystem("B3").weight_space()
             Weight space over the Rational Field of the Root system of type ['B', 3]
         """
-        return _RootLatticeRealization(self, "Weight space over the Rational Field")
+        W = WeightLattice(self, extended)
+        W._space_name = True
+        return W
 
     def coroot_lattice(self):
         """The coroot lattice.
@@ -2729,8 +2731,25 @@ class WeightLattice:
         self._R, self._ct, self._extended = R, R._ct, extended
         self._I = list(self._ct.index_set())
 
+    _space_name = False
+
     def __repr__(self):
+        if self._space_name:
+            return "%seight space over the Rational Field of the %r" % ("Extended w" if self._extended else "W", self._R)
         return "%seight lattice of the %r" % ("Extended w" if self._extended else "W", self._R)
+
+    def basis(self):
+        """The basis: the fundamental weights (and delta, if extended).
+
+        EXAMPLES::
+
+            sage: RootSystem(['A',2,1]).weight_space(extended=True).basis()
+            Finite family {0: Lambda[0], 1: Lambda[1], 2: Lambda[2], 'delta': delta}
+        """
+        F = self.fundamental_weights()
+        if self._extended:
+            return Family(list(F.keys()) + ["delta"], list(F.values()) + [self.null_root()])
+        return F
 
     def __eq__(self, other):
         return isinstance(other, WeightLattice) and (self._ct, self._extended) == (other._ct, other._extended)
