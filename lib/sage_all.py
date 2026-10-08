@@ -20,7 +20,7 @@ __all__ = [
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
-    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
+    "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
@@ -113,6 +113,7 @@ from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles,
 from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCharacterRing, WeightRing,
                        branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
 from _sage_crystals import crystals, Tableau, Word
+from _sage_polyhedra import Polyhedron, polytopes
 
 
 def RationalField():
