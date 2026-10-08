@@ -101,6 +101,42 @@ class _Ring:
         """
         return 0
 
+    def __pow__(self, n):
+        """QQ^n: the vector space of dimension n.
+
+        EXAMPLES::
+
+            sage: QQ^3
+            Vector space of dimension 3 over Rational Field
+        """
+        return _sa().VectorSpace(self, n)
+
+    def random_element(self, x=None, y=None, distribution=None):
+        """A random element: ZZ.random_element(n) is uniform in [0, n),
+        ZZ.random_element(a, b) uniform in [a, b); QQ.random_element(): a
+        quotient of small random integers.
+
+        EXAMPLES::
+
+            sage: 0 <= ZZ.random_element(10) < 10
+            True
+            sage: -5 <= ZZ.random_element(-5, 5) < 5
+            True
+        """
+        import random as _r
+        if self._field:
+            n = x if x is not None else 2
+            num = _r.randint(-int(n), int(n))
+            den = _r.randint(1, int(n))
+            return _sa()._QQ(num, den)
+        if x is None:
+            # Sage's default: most often small, |n| with probability ~ 1/|n|
+            k = _r.choice([-2, -1, 0, 1, 2]) if _r.random() < 0.5 else int(_r.expovariate(0.1)) * _r.choice([-1, 1])
+            return _sa().Integer(k)
+        if y is None:
+            x, y = 0, x
+        return _sa().Integer(_r.randrange(int(x), int(y)))
+
 
 ZZ = _Ring("Integer Ring", False)
 QQ = _Ring("Rational Field", True)

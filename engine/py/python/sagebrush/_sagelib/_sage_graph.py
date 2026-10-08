@@ -323,6 +323,34 @@ class GenericGraph:
         """
         return self._adj[u][v]
 
+    def edges_incident(self, vertices=None, labels=True, sort=False):
+        """The edges at the given vertex (or vertices): those of edges() that
+        contain it (out-edges for a digraph).
+
+        EXAMPLES::
+
+            sage: graphs.PetersenGraph().edges_incident(5, labels=False)
+            [(0, 5), (5, 7), (5, 8)]
+            sage: DiGraph({0: [1, 2], 2: [0]}).edges_incident(2)
+            [(2, 0, None)]
+        """
+        if vertices is None:
+            vs = self.vertices(sort=False)
+        elif isinstance(vertices, (list, set, frozenset)) or (isinstance(vertices, tuple) and vertices not in self._adj):
+            vs = list(vertices)
+        else:
+            vs = [vertices]
+        out, seen = [], set()
+        all_e = self.edges(sort=True)
+        for v in vs:
+            for e in all_e:
+                if (e[0] == v or (not self._directed and e[1] == v)) and (e[0], e[1]) not in seen:
+                    seen.add((e[0], e[1]))
+                    out.append(e)
+        if sort:
+            out.sort(key=lambda e: (e[0], e[1]))
+        return out if labels else [(a, b) for a, b, _ in out]
+
     def neighbors(self, v, closed=False):
         """The neighbours of v (out- and in-neighbours of a digraph).
 
@@ -782,6 +810,57 @@ class Graph(GenericGraph):
 
     _directed = False
 
+    def minimum_outdegree_orientation(self, use_edge_labels=False, solver=None, verbose=0, **kwds):
+        """An orientation whose largest out-degree is as small as possible
+        (by reversing paths from a vertex of largest out-degree to one of
+        out-degree at least 2 smaller).
+
+        EXAMPLES::
+
+            sage: o = graphs.ChvatalGraph().minimum_outdegree_orientation(); o
+            Orientation of Chvatal graph: Digraph on 12 vertices
+            sage: max(o.out_degree())
+            2
+        """
+        out = {v: set() for v in self.vertices(sort=False)}
+        lab = {}
+        for u, v, l in self.edges(sort=True):
+            out[u].add(v)
+            lab[(u, v)] = lab[(v, u)] = l
+        while True:
+            hi = max(len(out[v]) for v in out) if out else 0
+            done = True
+            for s in _sorted([v for v in out if len(out[v]) == hi]):
+                # a directed path s -> ... -> t with outdeg(t) <= hi - 2
+                prev, queue, t = {s: None}, [s], None
+                while queue and t is None:
+                    u = queue.pop(0)
+                    for w in _sorted(out[u]):
+                        if w not in prev:
+                            prev[w] = u
+                            if len(out[w]) <= hi - 2:
+                                t = w
+                                break
+                            queue.append(w)
+                if t is not None:
+                    w = t
+                    while prev[w] is not None:
+                        u = prev[w]
+                        out[u].discard(w)
+                        out[w].add(u)
+                        w = u
+                    done = False
+                    break
+            if done:
+                break
+        D = DiGraph(name="Orientation of %s" % self._name if self._name else "")
+        for v in self.vertices(sort=False):
+            D.add_vertex(v)
+        for u in out:
+            for w in _sorted(out[u]):
+                D.add_edge(u, w, lab.get((u, w)))
+        return D
+
     def to_directed(self):
         """The digraph with both orientations of every edge.
 
@@ -1088,6 +1167,17 @@ class _GraphGenerators:
         p, q = int(p), int(q)
         G = self._make("Complete bipartite graph of order %d+%d" % (p, q), p + q, [(i, p + j) for i in range(p) for j in range(q)])
         return G
+
+    def ChvatalGraph(self):
+        """The Chvatal graph: 4-regular, triangle-free, chromatic number 4.
+
+        EXAMPLES::
+
+            sage: g = graphs.ChvatalGraph(); g.order(), g.size(), g.degree()[0]
+            (12, 24, 4)
+        """
+        e = [(0, 1), (0, 4), (0, 6), (0, 9), (1, 2), (1, 5), (1, 7), (2, 3), (2, 6), (2, 8), (3, 4), (3, 7), (3, 9), (4, 5), (4, 8), (5, 10), (5, 11), (6, 10), (6, 11), (7, 8), (7, 11), (8, 10), (9, 10), (9, 11)]
+        return self._make("Chvatal graph", 12, e)
 
     def PetersenGraph(self):
         """The Petersen graph.

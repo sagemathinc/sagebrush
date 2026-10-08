@@ -174,6 +174,20 @@ function generators(line: string): string {
   return `${indent}${name} = ${rhs}; (${names.join(", ")},) = ${name}._first_ngens(${names.length})${rest}`;
 }
 
+/** The index of a '#' starting a comment (outside strings), or -1. */
+function commentStart(s: string): number {
+  let quote = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === "#") return i;
+  }
+  return -1;
+}
+
 /** The index of the first ';' outside brackets and strings, or -1. */
 function topLevelSemicolon(s: string): number {
   let depth = 0;
@@ -200,11 +214,14 @@ function calculus(line: string): string {
   const [, indent, f, args, rhs] = m;
   const vars = args.split(",").map((v) => v.trim());
   if (!vars.every((v) => /^[A-Za-z_]\w*$/.test(v))) return line;
-  // f(x) = x^2; f: the definition ends at a top-level ';'
-  const semi = topLevelSemicolon(rhs);
-  const expr = semi < 0 ? rhs : rhs.slice(0, semi);
-  const rest = semi < 0 ? "" : rhs.slice(semi);
-  return `${indent}__tmp__=var("${vars.join(",")}"); ${f} = symbolic_expression(${expr.trim()}).function(${vars.join(",")})${rest}`;
+  // f(x) = x^2; f: the definition ends at a top-level ';' or a comment
+  const hash = commentStart(rhs);
+  const body = hash < 0 ? rhs : rhs.slice(0, hash);
+  const comment = hash < 0 ? "" : "  " + rhs.slice(hash);
+  const semi = topLevelSemicolon(body);
+  const expr = semi < 0 ? body : body.slice(0, semi);
+  const rest = semi < 0 ? "" : body.slice(semi);
+  return `${indent}__tmp__=var("${vars.join(",")}"); ${f} = symbolic_expression(${expr.trim()}).function(${vars.join(",")})${rest}${comment}`;
 }
 
 function expression(code: string): string {

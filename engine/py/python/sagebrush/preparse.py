@@ -186,7 +186,7 @@ def _generators(line):
 _CALC = re.compile(r"^(\s*)([A-Za-z_]\w*)\s*\(([^()=]+)\)\s*=(?!=)\s*(.+)$")
 
 
-def _calculus(line):
+def _calculus(line, lits=()):
     m = _CALC.match(line)
     if not m:
         return line
@@ -194,7 +194,16 @@ def _calculus(line):
     vs = [v.strip() for v in args.split(",")]
     if not all(re.match(r"^[A-Za-z_]\w*$", v) for v in vs):
         return line
-    return '%s__tmp__=var("%s"); %s = symbolic_expression(%s).function(%s)' % (indent, ",".join(vs), f, expr.strip(), ",".join(vs))
+    # f(x) = x^2  # a comment: the comment stays after the definition
+    comment = ""
+    c = re.search(r"\s*(\0(\d+)\0)\s*$", expr)
+    if c and lits and lits[int(c.group(2))].startswith("#"):
+        expr, comment = expr[:c.start()], "  " + c.group(1)
+    # f(x) = x^2; f: the definition ends at a top-level ';'
+    cut = _top_semicolon(expr)
+    rest = "" if cut < 0 else expr[cut:]
+    expr = expr if cut < 0 else expr[:cut]
+    return '%s__tmp__=var("%s"); %s = symbolic_expression(%s).function(%s)%s%s' % (indent, ",".join(vs), f, expr.strip(), ",".join(vs), rest, comment)
 
 
 def _expression(code):
@@ -243,7 +252,7 @@ def preparse(source):
     """Sage source to Python source (for `from sagebrush.sage import *`)."""
     code, lits = _strip(source)
     code = _expression(code)
-    code = "\n".join(_calculus(_generators(line)) for line in code.split("\n"))
+    code = "\n".join(_calculus(_generators(line), lits) for line in code.split("\n"))
 
     def lit(m):
         prefix, k = m.group(1), int(m.group(2))
