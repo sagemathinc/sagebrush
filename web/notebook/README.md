@@ -76,3 +76,15 @@ With both adapters the same component is all of these:
 - a light `.ipynb` editor;
 - an editable notebook next to an agent's chat;
 - a kernel picker choice between "in this browser" (`WorkerKernel`) and "in the project".
+
+## TimeTravel
+
+[history.js](history.js) (built as `sagebrush-history.js`, with [patchflow](https://github.com/sagemathinc/patchflow)) records a notebook's edit history.
+- **What a version is:** a patch on records in the format of CoCalc's Jupyter documents:
+  - `{type: "settings", kernel}`
+  - `{type: "cell", id, pos, input, cell_type}`
+- **Outputs are not kept.** Text changes are stored as diff-match-patch diffs.
+- **Recording:** `new NotebookHistory(patchStore)`, then `.init()`, then `.record(doc)` on each `change` event.
+- **Reading:** `.versions()` lists them, and `.docAt(time)` rebuilds the document at a version. `.patches()` returns the patches for sending elsewhere, such as CoCalc.
+- **Storage:** `IdbPatchStore(db, id)` ([stores.js](stores.js)) keeps the patches in IndexedDB and passes them to other tabs.
+- **Reverting:** the full page's TimeTravel panel shows any version read-only and reverts with `notebook.replace(doc)`.
