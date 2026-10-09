@@ -44,7 +44,9 @@ const consoleResult = await Bun.build({
 const mathResult = await Bun.build({ entrypoints: [join(here, "math.ts")], outdir: join(here, "dist"), naming: "sagebrush-math.js", target: "browser", format: "esm", minify: true });
 // The notebook as a component (web/notebook), for other pages: web/embed.
 const notebookResult = await Bun.build({ entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true });
-for (const r of [result, consoleResult, mathResult, notebookResult]) {
+// TimeTravel's history (web/notebook/history.js, with patchflow), loaded after the notebook
+const historyResult = await Bun.build({ entrypoints: [join(here, "notebook", "history.js")], outdir: join(here, "dist"), naming: "sagebrush-history.js", target: "browser", format: "esm", minify: true });
+for (const r of [result, consoleResult, mathResult, notebookResult, historyResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -113,9 +115,9 @@ const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
-const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine.wasm?h=${engineHash}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine.wasm?h=${engineHash}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "manifest.webmanifest", ...ICONS, ...KATEX];
 const shellHash = new Bun.CryptoHasher("sha256");
-for (const f of ["index.html", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
+for (const f of ["index.html", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash);
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)));
 mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
@@ -123,7 +125,7 @@ mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
 mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
-for (const f of ["index.html", "llms.txt", "_headers", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+for (const f of ["index.html", "llms.txt", "_headers", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");

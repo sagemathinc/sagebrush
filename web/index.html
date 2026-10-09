@@ -68,6 +68,16 @@
   #files li .nm { flex: 1; overflow-wrap: anywhere; }
   #files li .sz { color: var(--muted); }
   #files li button, #files .fhead button { padding: 1px 8px; font-size: 12px; }
+  #tabs { color: var(--muted); font-size: 12px; }
+  #timetravel { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+  #timetravel[hidden], #cells[hidden] { display: none; }
+  #timetravel .tthead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+  #timetravel .tthead .sp { flex: 1; }
+  #timetravel .tthead button { padding: 2px 10px; font-size: 13px; }
+  #timetravel .tthead .danger { color: var(--err); }
+  #ttslider { flex: 1 1 200px; min-width: 120px; accent-color: var(--accent); }
+  #ttinfo { color: var(--muted); font-size: 13px; }
+  #timetravel .ttnote { color: var(--muted); font-size: 12px; margin: 6px 0 8px; }
   #opendlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #opendlg::backdrop { background: rgba(0,0,0,.35); }
   /* documentation search (docs-index.json, from lib/_pyjs_docsearch.py) */
@@ -169,7 +179,7 @@
   </div>
 </header>
 <main>
-  <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span></div>
+  <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span><span id="tabs" aria-live="polite"></span></div>
   <div class="bar" role="toolbar" aria-label="Notebook">
     <button class="primary" id="runall" title="Run every cell in order">Run all</button>
     <button id="add" title="Add a code cell at the end">+ Code</button>
@@ -181,6 +191,7 @@
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, download, upload and share notebooks">File ▾</button>
     <button id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
     <button id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt that shares the notebook's variables">Console</button>
+    <button id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
     <button id="keysbtn" title="Keyboard shortcuts (H in command mode)" aria-label="Keyboard shortcuts">⌨</button>
     <span id="status" role="status">loading…</span>
   </div>
@@ -188,6 +199,21 @@
     <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
     <ul id="filelist"></ul>
     <input id="uploadinput" type="file" multiple hidden>
+  </section>
+  <section id="timetravel" aria-label="TimeTravel" hidden>
+    <div class="tthead">
+      <b>TimeTravel</b>
+      <button id="ttprev" aria-label="Older version" title="Older version">◀</button>
+      <input id="ttslider" type="range" min="0" max="0" value="0" step="1" aria-label="Version">
+      <button id="ttnext" aria-label="Newer version" title="Newer version">▶</button>
+      <span id="ttinfo" aria-live="polite"></span>
+      <span class="sp"></span>
+      <button id="ttrevert" class="primary" title="Make this version the notebook (as a new version: nothing is lost)">Revert to this version</button>
+      <button id="ttclear" class="danger" title="Forget every past version of this notebook">Clear history…</button>
+      <button id="ttclose" aria-label="Close TimeTravel" title="Back to the notebook">✕</button>
+    </div>
+    <p class="ttnote">The cells as they were, version by version, kept in this browser (outputs are not kept). Reverting adds a new version, so it can be undone here too.</p>
+    <div id="ttview"></div>
   </section>
   <div id="printhead"><h1 id="printname"></h1><p id="printinfo"></p></div>
   <div id="cells"></div>
@@ -273,7 +299,7 @@
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
-import { IdbStore, openDb, idb } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, idb } from "./notebook/stores.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 const EXAMPLES = {
   "Welcome": [
@@ -495,6 +521,103 @@ addEventListener("beforeprint", () => {
 });
 addEventListener("afterprint", () => { if (titleBeforePrint) document.title = titleBeforePrint; });
 
+// ------------------------------------------------------------ TimeTravel
+// Every change to the cells is recorded (web/notebook/history.js: patchflow
+// patches on records in the format of CoCalc's Jupyter documents, kept in
+// IndexedDB; no outputs).  The panel shows any past version, read-only, and
+// can revert to it or forget the history.  (sagebrush-history.js, with
+// patchflow, loads after the notebook has been drawn.)
+let nbHistory = null, ttView = null, historyModule = null;
+const loadHistory = () => (historyModule ??= import(new URL("sagebrush-history.js", location.href).href));
+const ttEl = $("#timetravel"), ttBtn = $("#ttbtn"), ttSlider = $("#ttslider");
+async function startHistory(id) {
+  nbHistory?.close();
+  nbHistory = null;
+  db ??= await dbReady;
+  if (!db) return;
+  let NotebookHistory;
+  try { ({ NotebookHistory } = await loadHistory()); } catch (e) { return console.warn("history:", e); }
+  if (current.id !== id) return;
+  const h = new NotebookHistory(new IdbPatchStore(db, id));
+  await h.init();
+  if (current.id !== id) return h.close(); // another notebook opened meanwhile
+  nbHistory = h;
+  h.record(nb.snapshot()); // the notebook as it opened (nothing if it is the last version)
+  h.on(() => { if (!ttEl.hidden) ttRefresh(false); });
+}
+nb.on("change", (doc) => nbHistory?.record(doc));
+function ttShow(open) {
+  ttEl.hidden = !open;
+  $("#cells").hidden = open;
+  ttBtn.setAttribute("aria-pressed", String(open));
+  if (open) return ttRefresh(true);
+  ttView?.destroy();
+  ttView = null;
+}
+function ttRefresh(toEnd) {
+  const n = nbHistory?.versions().length ?? 0, atEnd = +ttSlider.value === +ttSlider.max;
+  ttSlider.max = Math.max(0, n - 1);
+  if (toEnd || atEnd) ttSlider.value = ttSlider.max;
+  ttShowVersion();
+}
+function ttShowVersion() {
+  const vs = nbHistory?.versions() ?? [], v = vs[+ttSlider.value];
+  $("#ttrevert").disabled = !v || v.index === vs.length - 1;
+  $("#ttprev").disabled = !v || v.index === 0;
+  $("#ttnext").disabled = !v || v.index === vs.length - 1;
+  if (!v) { $("#ttinfo").textContent = "No versions yet."; ttView?.load({ mode: nb.mode, cells: [] }); return; }
+  $("#ttinfo").textContent = `Version ${v.index + 1} of ${vs.length} · ${new Date(v.ms).toLocaleString()}`;
+  const doc = nbHistory.docAt(v.time);
+  ttView ??= createNotebook($("#ttview"), { readOnly: true, mode: doc.mode });
+  ttView.load(doc);
+}
+ttBtn.onclick = () => { if (ttEl.hidden) nb.flush(); ttShow(ttEl.hidden); };
+$("#ttclose").onclick = () => ttShow(false);
+ttSlider.oninput = ttShowVersion;
+$("#ttprev").onclick = () => { ttSlider.value = +ttSlider.value - 1; ttShowVersion(); };
+$("#ttnext").onclick = () => { ttSlider.value = +ttSlider.value + 1; ttShowVersion(); };
+$("#ttrevert").onclick = () => {
+  const vs = nbHistory.versions(), v = vs[+ttSlider.value];
+  const old = nbHistory.docAt(v.time);
+  // a cell whose code is unchanged keeps its output
+  const now = new Map(nb.snapshot().cells.map((c) => [c.id, c]));
+  const cells = old.cells.map((c) => { const k = now.get(c.id); return k && c.type !== "markdown" && !k.type && k.code === c.code ? { ...c, outputs: k.outputs, n: k.n } : c; });
+  ttShow(false);
+  nb.replace({ mode: old.mode, cells });
+  modeEl.value = nb.mode;
+  announce(`Reverted to version ${v.index + 1}`);
+  statusEl.textContent = `reverted to version ${v.index + 1} of ${vs.length}`;
+};
+$("#ttclear").onclick = async () => {
+  if (!nbHistory || !confirm(`Forget every past version of "${docName()}"? The notebook itself stays as it is.`)) return;
+  await nbHistory.clear(nb.snapshot());
+  ttRefresh(true);
+  announce("History cleared");
+};
+
+// The same notebook open in another tab: both show the same cells, but each
+// tab runs its own Python (its own variables), so say so.
+const presence = (() => {
+  const tab = Math.random().toString(36).slice(2), others = new Map(); // tab -> [notebook id, last heard]
+  const ch = typeof BroadcastChannel === "function" ? new BroadcastChannel("sagebrush-presence") : null;
+  let id = null;
+  const render = () => {
+    const now = Date.now(), n = [...others.values()].filter(([nid, t]) => nid === id && now - t < 25000).length;
+    $("#tabs").textContent = n ? `· also open in ${n === 1 ? "another tab" : n + " other tabs"} (each tab runs its own Python)` : "";
+  };
+  if (ch) {
+    ch.onmessage = (ev) => {
+      const m = ev.data;
+      if (m.kind === "bye") others.delete(m.tab); else others.set(m.tab, [m.id, Date.now()]);
+      if (m.kind === "hello" && m.id === id) ch.postMessage({ kind: "here", tab, id });
+      render();
+    };
+    setInterval(() => { if (id) ch.postMessage({ kind: "here", tab, id }); render(); }, 10000);
+    addEventListener("pagehide", () => ch.postMessage({ kind: "bye", tab }));
+  }
+  return { open(nid) { id = nid; ch?.postMessage({ kind: "hello", tab, id }); render(); } };
+})();
+
 // ------------------------------------------------------------ the console
 let consoleUi = null;
 const consoleEl = $("#console"), consoleBtn = $("#consolebtn");
@@ -613,11 +736,14 @@ class TextFileStore {
 let current = { id: null, kind: "browser" };
 async function open(store, id, kind = "browser") {
   nb.detach();
+  ttShow(false);
   current = { id, kind };
   const doc = await nb.attach(store);
   showName(doc.name);
   modeEl.value = nb.mode;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
+  startHistory(id);
+  presence.open(id);
   return doc;
 }
 // cells: code strings, or {md: text} for Markdown (examples, share links)
@@ -747,6 +873,7 @@ fileMenu.addEventListener("click", async (e) => {
       if (current.kind !== "browser" || !confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       nb.detach();
       await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      await new IdbPatchStore(db, current.id).drop();
       const rest = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
       if (rest.length) await openId(rest[0].id); else await openNew("Untitled", nb.mode, [""]);
       announce("Notebook deleted");
@@ -785,6 +912,7 @@ async function showOpen() {
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
       await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
+      await new IdbPatchStore(db, d.id).drop();
       li.remove();
     };
   }

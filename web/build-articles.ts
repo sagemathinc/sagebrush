@@ -14,7 +14,7 @@ import { execFileSync } from "node:child_process";
 const here = dirname(new URL(import.meta.url).pathname);
 const root = join(here, "..");
 const SITE = "https://sagebrush.space";
-const REPO = "https://github.com/sagemathinc/sagebrush/blob/main";
+const REPO = "https://github.com/sagemathinc/sagebrush/blob/master";
 const out = join(here, "site", "public");
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -87,7 +87,7 @@ function gitDate(file: string): string {
 
 // What Sagebrush shares with other systems (on /articles/)
 const INDEPENDENT = `<h2 id="independent">Independent code: what Sagebrush shares with other systems</h2>
-<p><b>No code.</b> Sagebrush contains and links no code from Magma, PARI, Sage, Singular, GAP, FLINT, GMP, NTL, msolve, eclib or smalljac. Every engine was written from papers and books. Those systems were used only from the outside: as oracles to compare answers with, and as benchmarks. The engines link only general-purpose Rust libraries. Big integers come from dashu, not from GMP, the library almost every other system builds on. FLINT is linked only by some tests, as a reference, and by no shipped package. The details are in <a href="https://github.com/sagemathinc/sagebrush/blob/main/NOTICE.md">NOTICE.md</a>.</p>
+<p><b>No code.</b> Sagebrush contains and links no code from Magma, PARI, Sage, Singular, GAP, FLINT, GMP, NTL, msolve, eclib or smalljac. Every engine was written from papers and books. Those systems were used only from the outside: as oracles to compare answers with, and as benchmarks. The engines link only general-purpose Rust libraries. Big integers come from dashu, not from GMP, the library almost every other system builds on. FLINT is linked only by some tests, as a reference, and by no shipped package. The details are in <a href="https://github.com/sagemathinc/sagebrush/blob/master/NOTICE.md">NOTICE.md</a>.</p>
 <p><b>Why it matters.</b> When Sagebrush and Magma, PARI, Sage or Hecke compute the same class group, Galois group or newform and agree, the two answers come from independent implementations. No shared bug, in a common library or in borrowed code, can make both wrong in the same way. So adding Sagebrush to a computation adds real certainty.</p>
 <p><b>What is shared</b> is the mathematics: the published algorithms, and hypotheses such as GRH where both systems assume them. Small exceptions are data, not code: Cremona's table of elliptic curves of conductor below 1000 is bundled for curve labels. Code also comes from CPython (its standard library, for the Python runtime) and NumPy (array printing and random-number streams); neither is mathematical research code.</p>
 `;

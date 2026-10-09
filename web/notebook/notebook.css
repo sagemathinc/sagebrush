@@ -32,6 +32,11 @@
 .sbnb .cell .runb { position: absolute; top: 4px; right: 8px; width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 11px; line-height: 1; visibility: hidden; }
 .sbnb .cell:hover .runb, .sbnb .cell.active .runb, .sbnb .cell.running .runb, .sbnb .cell.queued .runb { visibility: visible; }
 .sbnb .cell:hover .n, .sbnb .cell.active .n, .sbnb .cell.running .n, .sbnb .cell.queued .n { visibility: hidden; }
+/* one cell's controls at a time: while the mouse is over another cell, the
+   active cell's toolbar and run button give way (a running cell keeps its ring) */
+.sbnb .cells:hover .cell.active:not(:hover) .head { visibility: hidden; }
+.sbnb .cells:hover .cell.active:not(:hover):not(.running):not(.queued) .runb { visibility: hidden; }
+.sbnb .cells:hover .cell.active:not(:hover):not(.running):not(.queued) .n { visibility: visible; }
 .sbnb .cell.markdown.rendered .runb { display: none; }
 .sbnb .cell.running .runb::before, .sbnb .cell.queued .runb::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); }
 .sbnb .cell.running .runb::before { animation: sbnb-spin .9s linear infinite; }
@@ -51,9 +56,9 @@
 .sbnb .cell:hover > .adder { visibility: visible; }
 @media (hover: none) { .sbnb .cell.active > .adder { visibility: visible; } }
 .sbnb .cell.dragging { opacity: .4; }
-.sbnb .addend { display: flex; justify-content: center; gap: 8px; margin: 10px 0 0; }
+.sbnb .addend { display: flex; justify-content: center; gap: 8px; margin: 26px 0 0; }
 .sbnb .addend button { font-size: 13px; padding: 3px 14px; border-radius: 14px; color: var(--muted); }
-.sbnb.readonly .addend, .sbnb.readonly .cell .adder, .sbnb.readonly .cell .head { display: none; }
+.sbnb.readonly .addend, .sbnb.readonly .cell .adder, .sbnb.readonly .cell .head, .sbnb.readonly .cell .runb, .sbnb.readonly .cell .n { display: none; }
 
 /* the editor: a transparent textarea over its syntax-highlighted copy */
 .sbnb .ed { position: relative; background: var(--edbg); border: 1px solid var(--line); border-radius: 4px; }
