@@ -33,12 +33,15 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header, main, footer { max-width: 920px; margin: 0 auto; padding: 0 20px; }
-  header { padding-top: 28px; display: flex; align-items: flex-start; gap: 12px; }
-  header .title { flex: 1; }
+  header { padding-top: 28px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; }
+  header .title { flex: 1 1 560px; min-width: 0; }
+  header .tools { display: flex; gap: 8px; align-items: center; }
+  nav.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 14px; font-size: 14px; }
+  nav.links a { font-weight: 600; text-decoration: none; }
+  nav.links a:hover { text-decoration: underline; }
   h1 { margin: 0; font-size: 28px; letter-spacing: -0.01em; }
   h1 span { color: var(--accent); }
-  .tag { color: var(--muted); margin: 4px 0 14px; }
-  .tag a.artlink { font-weight: 600; white-space: nowrap; }
+  .tag { color: var(--muted); margin: 4px 0 8px; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 16px; }
   button, select { font: inherit; border: 1px solid var(--line); background: var(--cell); color: var(--fg); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   button:hover, select:hover { border-color: var(--accent2); }
@@ -188,24 +191,45 @@
   #term { flex: 1; min-width: 0; min-height: 0; padding: 0 0 4px 12px; }
   #cplot { width: 45%; overflow: auto; border-left: 1px solid var(--line); background: var(--cell); }
   #cplot[hidden] { display: none; }
-  .about { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); margin-top: 26px; padding-top: 14px; }
+  .about { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); margin-top: 30px; padding-top: 18px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--cell); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; color: var(--fg); }
+  .card p { margin: 0 0 6px; }
+  .card ul { margin: 0; padding-left: 18px; }
+  .card li { margin: 2px 0; }
+  details.tips { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 16px; background: var(--cell); }
+  details.tips summary { cursor: pointer; color: var(--fg); font-weight: 600; }
+  details.tips ul { margin: 8px 0 4px; padding-left: 18px; }
+  details.tips li { margin: 4px 0; }
   .about code, .tag code, footer code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   a { color: var(--accent); }
-  footer { color: var(--muted); font-size: 13px; padding-bottom: 40px; }
-  #theme { font-size: 13px; padding: 3px 8px; margin-top: 6px; }
+  footer { color: var(--muted); font-size: 13px; padding-top: 6px; padding-bottom: 40px; text-align: center; }
+  #theme { font-size: 13px; padding: 3px 8px; }
+  @media (max-width: 640px) {
+    header { padding-top: 16px; }
+    h1 { font-size: 23px; }
+    header .tools { flex: 1 1 100%; }
+    header .tools #docsearchbox { flex: 1; margin-top: 0; }
+    #docsearch { width: 100%; max-width: none; }
+    header, main, footer { padding-left: 14px; padding-right: 14px; }
+  }
 </style>
 </head>
 <body class="opening">
 <header>
   <div class="title">
     <h1><span>Sagebrush</span> · Python in your browser</h1>
-    <p class="tag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server. · <a href="/atlas/">The Atlas of modular forms</a> · <a href="/articles/" class="artlink">How it is built: articles</a></p>
+    <p class="tag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server.</p>
+    <nav class="links" aria-label="Site"><a href="/articles/">How it is built</a><a href="/atlas/">Atlas of modular forms</a><a href="https://github.com/sagemathinc/sagebrush">Source on GitHub</a></nav>
   </div>
-  <div id="docsearchbox" role="search">
-    <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
-    <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
+  <div class="tools">
+    <div id="docsearchbox" role="search">
+      <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
+      <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
+    </div>
+    <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
   </div>
-  <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
 </header>
 <main>
   <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span></div>
@@ -228,33 +252,47 @@
     <input id="uploadinput" type="file" multiple hidden>
   </section>
   <div id="cells"></div>
-  <div class="about">
-    <p><b>How it is built</b>, algorithm by algorithm (what worked, what did not, and why):
-    <a href="/articles/groebner/">Gröbner bases and multivariate polynomials</a> (F4, proofs over Q, FGLM, factoring),
-    <a href="/articles/number-theory/">number theory engines</a> (modular symbols, traces of Frobenius, Galois groups, class groups) and
-    <a href="/articles/foundations/">foundations</a> (big integers, exact linear algebra, factoring in Z[x]). All the engines are open source under the permissive MIT and Apache-2.0 licenses.</p>
-    <b>+ Text</b> adds a Markdown cell (headings, lists, tables, links, <code>$math$</code>): <b>Shift+Enter</b> shows it, double-click edits it.
-    <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place; <b>Alt+↑/↓</b> moves it; the <b>⋯</b> menu inserts, moves and deletes cells.
-    In a cell, <b>Tab</b> after a name completes it (<code>e.</code><b>Tab</b> lists what <code>e</code> can do; ↑/↓ and Enter choose), and otherwise indents: press <b>Esc</b> first to Tab out of the cell. Variables persist between cells and are shared with the <b>Console</b>.
-    In <b>Sage</b> mode <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational and
-    <code>factor</code>, <code>is_prime</code>, <code>next_prime</code>, <code>divisors</code>, <code>euler_phi</code>, <code>crt</code> &hellip; are built in.
-    <code>numpy</code> (validated against NumPy itself: same printed output, same seeded random numbers), <code>matplotlib.pyplot</code>, Sage-style <code>plot</code>, <code>@interact</code> and <code>animate</code> are built in.
-    The language is CPython 3.14's own grammar (syntax errors match CPython), with big integers, <code>fractions</code>,
-    <code>complex</code>/<code>cmath</code>, <code>re</code>, <code>json</code>, <code>collections</code>, <code>functools</code>, generators,
-    <code>async</code>, classes and metaclasses. Pure-Python packages such as mpmath pass their own test suites.
-    In Sage mode <code>ModularSymbols</code>, <code>CuspForms</code>, <code>Newforms</code>, <code>DirichletGroup</code>, <code>EllipticCurve</code> and
-    polynomial factoring over <code>ZZ</code> and <code>QQ</code> (<code>R.&lt;x&gt; = ZZ[]</code>) run on Sagebrush's Rust engines, and so does
-    symbolic calculus: <code>diff</code>, <code>integrate</code>, <code>limit</code>, <code>solve</code>, <code>taylor</code>, <code>desolve</code>
-    (<b>Examples</b> &gt; <i>Calculus</i>), with <code>plot3d</code> and contour, vector-field and slope-field plots.
-    In <b>Magma</b> mode, Magma programs are translated to Python in this page and print what Magma prints.
-    Notebooks (with their output) and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>,
-    and <b>Files</b> lists the files Python's <code>open()</code> sees (drop files on the page to add them).
-    Your code runs in a Web Worker on this page; nothing is sent anywhere.
-  </div>
+  <section class="about" aria-label="About Sagebrush">
+    <div class="cards">
+      <div class="card">
+        <h3>How it is built</h3>
+        <p>Articles, algorithm by algorithm: what worked, what did not, and why.</p>
+        <ul>
+          <li><a href="/articles/groebner/">Gröbner bases and polynomials</a></li>
+          <li><a href="/articles/number-theory/">Number theory engines</a></li>
+          <li><a href="/articles/foundations/">Foundations</a></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Independent and open</h3>
+        <p>MIT or Apache-2.0, written from papers and books. No code from Magma, PARI, Sage, Singular, FLINT or GMP, so when Sagebrush agrees with them, that is <a href="/articles/#independent">independent confirmation</a>.</p>
+      </div>
+      <div class="card">
+        <h3>Use it anywhere</h3>
+        <ul>
+          <li>Here, in your browser</li>
+          <li>Python: <code>pip install sagebrush</code></li>
+          <li>Command line: <code>npx sagebrush</code></li>
+          <li>Agents: <a href="/llms.txt">llms.txt</a> and an MCP server</li>
+        </ul>
+      </div>
+    </div>
+    <details class="tips">
+      <summary>Notebook tips</summary>
+      <ul>
+        <li><b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place; <b>Alt+↑/↓</b> moves it; the <b>⋯</b> menu inserts, moves and deletes cells.</li>
+        <li><b>+ Text</b> adds a Markdown cell (headings, lists, tables, links, <code>$math$</code>): <b>Shift+Enter</b> shows it, double-click edits it.</li>
+        <li><b>Tab</b> after a name completes it (<code>e.</code><b>Tab</b> lists what <code>e</code> can do); otherwise it indents: press <b>Esc</b> first to Tab out of the cell. Variables persist between cells and are shared with the <b>Console</b>.</li>
+        <li><b>Sage</b> mode: <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational; <code>factor</code>, <code>is_prime</code>, <code>ModularSymbols</code>, <code>EllipticCurve</code>, polynomial rings, Gröbner bases and symbolic calculus (<code>diff</code>, <code>integrate</code>, <code>solve</code>, <code>desolve</code>) run on Sagebrush's Rust engines.</li>
+        <li><b>Magma</b> mode: Magma programs are translated to Python in this page and print what Magma prints.</li>
+        <li><b>Python</b>: CPython 3.14's own grammar, with <code>numpy</code> (checked against NumPy itself), <code>matplotlib.pyplot</code>, Sage-style <code>plot</code>, <code>@interact</code> and <code>animate</code>; pure-Python packages such as mpmath pass their own test suites.</li>
+        <li>Notebooks and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>; <b>Files</b> lists what Python's <code>open()</code> sees. Your code runs in a Web Worker on this page; nothing is sent anywhere.</li>
+      </ul>
+    </details>
+  </section>
 </main>
 <footer>
-  <p>Command line: <code>curl -fsSL https://get.sagebrush.space/install.sh | sh</code> or <code>npx sagebrush</code>.
-  Source: <a href="https://github.com/sagemathinc/sagebrush">github.com/sagemathinc/sagebrush</a> · <a href="/articles/">Articles</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a></p>
+  <p>Developed on <a href="https://cocalc.ai">CoCalc.ai</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a> · <a href="https://github.com/sagemathinc/sagebrush">GitHub</a> · <a href="/articles/">Articles</a> · <a href="/llms.txt">llms.txt</a></p>
 </footer>
 <div id="filemenu" role="menu" aria-label="Notebook" hidden>
   <button role="menuitem" data-f="new">New notebook</button>
@@ -945,6 +983,16 @@ function autosize(ta) {
   ta.style.height = "auto";
   ta.style.height = ta.scrollHeight + "px";
 }
+
+// Wrapped lines change with the width (phone rotation) and the font (web
+// fonts load after the first layout), so size every editor again then.
+let resizing = 0;
+const resizeAll = () => {
+  cancelAnimationFrame(resizing);
+  resizing = requestAnimationFrame(() => cellsEl.querySelectorAll(".ed textarea").forEach(autosize));
+};
+addEventListener("resize", resizeAll);
+document.fonts?.ready.then(resizeAll);
 
 // ------------------------------------------------------------ Tab completion
 // Tab after a name or `obj.` asks the worker (src/interactive.ts complete());
