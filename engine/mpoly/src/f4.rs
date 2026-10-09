@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 
 /// A polynomial over GF(p): (word, coefficient) by decreasing key, monic
 /// in the basis.
-type P = Vec<(u64, u64)>;
+pub(crate) type P = Vec<(u64, u64)>;
 
 thread_local! {
     static LASTCOLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -48,37 +48,37 @@ fn phase_add(i: usize, t: Option<std::time::Instant>) {
     }
 }
 
-struct Pair {
+pub(crate) struct Pair {
     i: usize,
     j: usize,
     lcm: u64,
     deg: u64,
 }
 
-struct F4<'a> {
-    pk: Packing,
-    o: Order,
-    md: &'a Modulus,
-    guard: u64,
-    g: Vec<P>,
-    lead: Vec<u64>,
-    active: Vec<bool>,
+pub(crate) struct F4<'a> {
+    pub(crate) pk: Packing,
+    pub(crate) o: Order,
+    pub(crate) md: &'a Modulus,
+    pub(crate) guard: u64,
+    pub(crate) g: Vec<P>,
+    pub(crate) lead: Vec<u64>,
+    pub(crate) active: Vec<bool>,
     // the sugar degree of each element (the selection strategy)
-    sugar: Vec<u64>,
-    pairs: Vec<Pair>,
+    pub(crate) sugar: Vec<u64>,
+    pub(crate) pairs: Vec<Pair>,
     // probabilistic linear algebra (random combinations of row blocks):
     // for the modular images of a computation checked at the end
-    prob: bool,
+    pub(crate) prob: bool,
 }
 
 impl<'a> F4<'a> {
     #[inline]
-    fn divides(&self, a: u64, b: u64) -> bool {
+    pub(crate) fn divides(&self, a: u64, b: u64) -> bool {
         // fieldwise a <= b: no borrow into the guard bits
         ((b | self.guard) - a) & self.guard == self.guard
     }
 
-    fn key(&self, w: u64) -> u128 {
+    pub(crate) fn key(&self, w: u64) -> u128 {
         self.pk.key(self.o, w)
     }
 
@@ -133,7 +133,7 @@ impl<'a> F4<'a> {
         }
     }
 
-    fn add(&mut self, f: P, sugar: u64) {
+    pub(crate) fn add(&mut self, f: P, sugar: u64) {
         let s = f.iter().map(|x| self.pk.degree(x.0)).max().unwrap().max(sugar);
         self.sugar.push(s);
         self.lead.push(f[0].0);
@@ -147,11 +147,11 @@ impl<'a> F4<'a> {
     /// for some monomials: symbolic preprocessing, then the reduction.
     /// Returns the reduced rows with new leading monomials (monic, as
     /// polynomials) when `echelon`, else every reduced row in order.
-    fn reduce_rows(&self, mut pivots: HashMap<u64, (u64, usize)>, todo: Vec<P>, echelon: bool) -> Result<Vec<P>, Overflow> {
-        let md = self.md;
-        let tdbg = std::env::var("SB_F4_DEBUG").is_ok();
-        let tp = tdbg.then(std::time::Instant::now);
-        // the monomials of all rows
+    /// Symbolic preprocessing: a pivot (multiplier, element) for every
+    /// monomial of the rows (given by their words), and of the pivots'
+    /// rows recursively, that a leading monomial divides; the monomials of
+    /// all rows, decreasing, as the columns.
+    pub(crate) fn preprocess(&self, pivots: &mut HashMap<u64, (u64, usize)>, words: &mut dyn Iterator<Item = u64>) -> Result<Vec<(u128, u64)>, Overflow> {
         let mut monos: HashSet<u64> = HashSet::new();
         let mut queue: Vec<u64> = vec![];
         let see = |m: u64, monos: &mut HashSet<u64>, queue: &mut Vec<u64>| {
@@ -159,12 +159,10 @@ impl<'a> F4<'a> {
                 queue.push(m);
             }
         };
-        for r in &todo {
-            for &(w, _) in r {
-                see(w, &mut monos, &mut queue);
-            }
+        for w in words {
+            see(w, &mut monos, &mut queue);
         }
-        for (&lm, &(m, i)) in &pivots {
+        for &(m, i) in pivots.values() {
             for &(w, _) in &self.g[i] {
                 let x = w + m;
                 if x & self.guard != 0 {
@@ -172,9 +170,7 @@ impl<'a> F4<'a> {
                 }
                 see(x, &mut monos, &mut queue);
             }
-            let _ = lm;
         }
-        let dbg = std::env::var("SB_F4_DEBUG").is_ok();
         while let Some(m) = queue.pop() {
             if pivots.contains_key(&m) {
                 continue;
@@ -191,14 +187,26 @@ impl<'a> F4<'a> {
                 }
             }
         }
-        if dbg {
-            eprintln!("f4: preprocessed {} monomials {} reducers {} rows t {:.3}", monos.len(), pivots.len(), todo.len(), T0.with(|t| t.elapsed().as_secs_f64()));
+        if std::env::var("SB_F4_DEBUG").is_ok() {
+            eprintln!("f4: preprocessed {} monomials {} reducers t {:.3}", monos.len(), pivots.len(), T0.with(|t| t.elapsed().as_secs_f64()));
         }
-        phase_add(0, tp);
-        let tp = tdbg.then(std::time::Instant::now);
         // columns: the monomials, decreasing
         let mut cols: Vec<(u128, u64)> = monos.iter().map(|&w| (self.key(w), w)).collect();
         cols.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        Ok(cols)
+    }
+
+    /// The rows (multiplier, element) to reduce, with the pivot rows given
+    /// for some monomials: symbolic preprocessing, then the reduction.
+    /// Returns the reduced rows with new leading monomials (monic, as
+    /// polynomials) when `echelon`, else every reduced row in order.
+    fn reduce_rows(&self, mut pivots: HashMap<u64, (u64, usize)>, todo: Vec<P>, echelon: bool) -> Result<Vec<P>, Overflow> {
+        let md = self.md;
+        let tdbg = std::env::var("SB_F4_DEBUG").is_ok();
+        let tp = tdbg.then(std::time::Instant::now);
+        let cols = self.preprocess(&mut pivots, &mut todo.iter().flat_map(|r| r.iter().map(|x| x.0)))?;
+        phase_add(0, tp);
+        let tp = tdbg.then(std::time::Instant::now);
         let col: HashMap<u64, u32> = cols.iter().enumerate().map(|(i, &(_, w))| (w, i as u32)).collect();
         let nc = cols.len();
         LASTCOLS.with(|c| c.set(nc));
@@ -316,8 +324,10 @@ impl<'a> F4<'a> {
         red.into_iter().map(|r| r.cols.iter().zip(&r.vals).map(|(&j, &c)| (cols[j as usize].1, c as u64)).collect()).collect()
     }
 
-    /// One F4 step on the pairs of minimal degree.
-    fn step(&mut self) -> Result<(), Overflow> {
+    /// The pairs of minimal degree taken off the queue: their degree, the
+    /// pivots (one half of each pair, by lcm) and the rows to reduce (the
+    /// other halves), as (multiplier, element).
+    pub(crate) fn select(&mut self) -> Result<(u64, HashMap<u64, (u64, usize)>, Vec<(u64, usize)>), Overflow> {
         let dmin = self.pairs.iter().map(|q| q.deg).min().unwrap();
         // degree orders: every pair of the least sugar; otherwise (lex
         // orders, where the reductions of one sugar degree can blow up)
@@ -330,7 +340,7 @@ impl<'a> F4<'a> {
         self.pairs = rest;
         let mut pivots: HashMap<u64, (u64, usize)> = HashMap::new();
         let mut seen: HashSet<(u64, usize)> = HashSet::new();
-        let mut todo: Vec<P> = vec![];
+        let mut todo: Vec<(u64, usize)> = vec![];
         for q in &sel {
             for (idx, other) in [(q.i, false), (q.j, true)] {
                 let m = q.lcm - self.lead[idx];
@@ -340,22 +350,25 @@ impl<'a> F4<'a> {
                 if !other && !pivots.contains_key(&q.lcm) {
                     pivots.insert(q.lcm, (m, idx));
                 } else {
-                    let mut r = Vec::with_capacity(self.g[idx].len());
-                    for &(w, c) in &self.g[idx] {
-                        let x = w + m;
-                        if x & self.guard != 0 {
-                            return Err(Overflow);
-                        }
-                        r.push((x, c));
+                    if self.g[idx].iter().any(|&(w, _)| (w + m) & self.guard != 0) {
+                        return Err(Overflow);
                     }
-                    todo.push(r);
+                    todo.push((m, idx));
                 }
             }
         }
+        Ok((dmin, pivots, todo))
+    }
+
+    /// One F4 step on the pairs of minimal degree.
+    fn step(&mut self) -> Result<(), Overflow> {
+        let (dmin, pivots, sel) = self.select()?;
+        let todo: Vec<P> = sel.iter().map(|&(m, idx)| self.g[idx].iter().map(|&(w, c)| (w + m, c)).collect()).collect();
+        let npairs = sel.len();
         let ntodo = todo.len();
         let new = self.reduce_rows(pivots, todo, true)?;
         if std::env::var("SB_F4_DEBUG").is_ok() {
-            eprintln!("f4: deg {} pairs {} rows {} new {} basis {} left {} cols {} t {:.3}", dmin, sel.len(), ntodo, new.len(), self.g.len(), self.pairs.len(), LASTCOLS.with(|c| c.get()), T0.with(|t| t.elapsed().as_secs_f64()));
+            eprintln!("f4: deg {} pairs {} rows {} new {} basis {} left {} cols {} t {:.3}", dmin, npairs, ntodo, new.len(), self.g.len(), self.pairs.len(), LASTCOLS.with(|c| c.get()), T0.with(|t| t.elapsed().as_secs_f64()));
         }
         if std::env::var("SB_F4_DEBUG").is_ok() {
             for f in &new {
@@ -372,7 +385,7 @@ impl<'a> F4<'a> {
 
     /// The reduced basis: minimal, tails reduced, by decreasing leading
     /// monomial.
-    fn reduced(&self) -> Result<Vec<P>, Overflow> {
+    pub(crate) fn reduced(&self) -> Result<Vec<P>, Overflow> {
         let mut idx: Vec<usize> = (0..self.g.len()).filter(|&i| self.active[i]).collect();
         // minimal: no leading monomial divisible by another's
         idx.sort_by_key(|&i| self.key(self.lead[i]));
@@ -631,7 +644,7 @@ fn f4_direct(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], prob: 
 /// The bits per variable to start with (room for the generators' degrees
 /// and the guard bit, 8 if the words allow) and the most the words allow
 /// (lex orders compute with one more variable).
-fn bits_range(fs: &[QPoly], o: Order) -> (u32, u32) {
+pub(crate) fn bits_range(fs: &[QPoly], o: Order) -> (u32, u32) {
     let n = fs.first().map(|f| f.num.n).unwrap_or(1) as u32;
     let d = fs.iter().map(|f| f.num.degrees().into_iter().max().unwrap_or(0)).max().unwrap_or(0);
     let extra = matches!(o, Order::Lex | Order::InvLex) as u32;
@@ -679,7 +692,7 @@ fn groebner_p_opt(fs: &[QPoly], o: Order, p: u64, prob: bool) -> Result<Vec<QPol
 }
 
 /// a / b with |a|, |b| <= sqrt(m / 2) and a = b c mod m, if any.
-fn ratrecon(c: &BigInt, m: &BigInt) -> Option<BigRational> {
+pub(crate) fn ratrecon(c: &BigInt, m: &BigInt) -> Option<BigRational> {
     let bound = (m / BigInt::from(2)).sqrt();
     let (mut r0, mut r1) = (m.clone(), c.mod_floor(m));
     let (mut t0, mut t1) = (BigInt::zero(), BigInt::one());
@@ -697,9 +710,24 @@ fn ratrecon(c: &BigInt, m: &BigInt) -> Option<BigRational> {
 /// The reduced Groebner basis over Q (monic, by decreasing leading
 /// monomial).
 pub fn groebner_q(fs: &[QPoly], o: Order) -> Result<Vec<QPoly>, String> {
+    groebner_q_opt(fs, o, true)
+}
+
+/// groebner_q; without proof, in degree orders, the basis of one F4 over Q
+/// (f4q.rs), which could only be wrong if a reconstruction there was
+/// accepted too early (each with two primes to spare).
+pub fn groebner_q_opt(fs: &[QPoly], o: Order, proof: bool) -> Result<Vec<QPoly>, String> {
     let fs: Vec<QPoly> = fs.iter().filter(|f| !f.num.is_zero()).cloned().collect();
     if fs.is_empty() {
         return Ok(vec![]);
+    }
+    if matches!(o, Order::DegRevLex | Order::DegLex) && std::env::var("SB_F4Q").as_deref() != Ok("0") {
+        if let Some(g) = crate::f4q::groebner_q_f4(&fs, o, proof)? {
+            return Ok(g);
+        }
+        if std::env::var("SB_F4_DEBUG").is_ok() {
+            eprintln!("groebner_q: the F4 over Q failed its check; multi-modular");
+        }
     }
     let n = fs[0].num.n;
     let bits = bits_range(&fs, o).0;
@@ -941,7 +969,7 @@ fn gm_pairs(pk: &Packing, o: Order, lead: &[u64]) -> Vec<(usize, usize, u64)> {
 /// Whether G is a Groebner basis containing the generators fs in its ideal
 /// (each reduces to 0): Buchberger's criterion with the product and chain
 /// criteria, in integer arithmetic.
-fn verify_q(fs: &[QPoly], g: &[Poly<QQ>], o: Order, pk: Packing) -> Result<bool, String> {
+pub(crate) fn verify_q(fs: &[QPoly], g: &[Poly<QQ>], o: Order, pk: Packing) -> Result<bool, String> {
     let gz: Vec<ZT> = g.iter().map(to_zt).collect();
     let red = |f: ZT| -> Result<bool, String> { reduces_to_zero_z(f, &gz, &pk, o).map_err(|_| "exponents too large to pack".to_string()) };
     for f in fs {
@@ -1041,6 +1069,31 @@ mod tests {
             let a = f4_direct(pk, Order::DegRevLex, &md, &words, false).unwrap();
             let b = sig_path(pk, Order::DegRevLex, &md, &words).unwrap().unwrap();
             assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn f4_over_q() {
+        // katsura-3 (inhomogeneous: homogenized) and cyclic-4 over Q: the
+        // F4 over Q without the check, the checked one and the multi-modular
+        // reconstruction agree
+        let systems = [
+            vec!["1,0,0,0:1;0,1,0,0:2;0,0,1,0:2;0,0,0,1:2;0,0,0,0:-1", "2,0,0,0:1;0,2,0,0:2;0,0,2,0:2;0,0,0,2:2;1,0,0,0:-1", "1,1,0,0:2;0,1,1,0:2;0,0,1,1:2;0,1,0,0:-1", "0,2,0,0:1;1,0,1,0:2;0,1,0,1:2;0,0,1,0:-1"],
+            vec!["1,0,0,0:1;0,1,0,0:1;0,0,1,0:1;0,0,0,1:1", "1,1,0,0:1;0,1,1,0:1;0,0,1,1:1;1,0,0,1:1", "1,1,1,0:1;0,1,1,1:1;1,0,1,1:1;1,1,0,1:1", "1,1,1,1:1;0,0,0,0:-1"],
+        ];
+        for fs in systems {
+            let fs: Vec<QPoly> = fs.iter().map(|s| q(4, s)).collect();
+            let text = |g: Vec<QPoly>| g.iter().map(|f| f.to_text()).collect::<Vec<_>>();
+            let a = text(groebner_q_opt(&fs, Order::DegRevLex, false).unwrap());
+            let b = text(groebner_q_opt(&fs, Order::DegRevLex, true).unwrap());
+            let c = text(crate::f4q::groebner_q_f4(&fs, Order::DegLex, false).unwrap().unwrap());
+            std::env::set_var("SB_F4Q", "0");
+            let d = text(groebner_q(&fs, Order::DegRevLex).unwrap());
+            let e = text(groebner_q(&fs, Order::DegLex).unwrap());
+            std::env::remove_var("SB_F4Q");
+            assert_eq!(a, b);
+            assert_eq!(a, d);
+            assert_eq!(c, e);
         }
     }
 

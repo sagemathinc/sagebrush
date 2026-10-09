@@ -564,6 +564,9 @@ from _sage_lang import (RealNumber, ellipsis_range, ellipsis_iter, symbolic_expr
 from _sage_lang import _RealField
 RR = _RealField()
 
+from _sage_lang import proof
+__all__.append("proof")
+
 
 def numerator(x):
     """The numerator of x.

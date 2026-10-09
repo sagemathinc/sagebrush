@@ -1250,3 +1250,73 @@ def _integer_class(sa, methods):
     Integer.__qualname__ = Integer.__name__ = "Integer"
     return Integer
 
+
+
+# ---------------------------------------------------------------- proof flags
+
+def _make_proof():
+    """Sage's global proof flags (sage.structure.proof.all): whether
+    results must be proven or may rely on unproven (if overwhelmingly
+    likely) steps.  sagebrush consults proof.polynomial() for Groebner
+    bases over QQ: without it, the basis of one F4 run over QQ whose
+    matrices are reconstructed from their images modulo primes, skipping
+    the final exact check.
+
+        sage: proof.polynomial()
+        True
+        sage: sorted(proof.all().items())
+        [('arithmetic', True), ('elliptic_curve', True), ('linear_algebra', True), ('number_field', True), ('other', True), ('polynomial', True)]
+        sage: proof.polynomial(False)
+        sage: proof.polynomial(), proof.arithmetic()
+        (False, True)
+        sage: proof.polynomial(True)
+        sage: with proof.WithProof('polynomial', False):
+        ....:     proof.polynomial()
+        False
+        sage: proof.polynomial()
+        True
+    """
+    import types as _types
+    m = _types.ModuleType("sage.structure.proof.all")
+    flags = {k: True for k in ("arithmetic", "elliptic_curve", "linear_algebra", "number_field", "polynomial", "other")}
+
+    def flag(name):
+        def f(t=None):
+            if t is None:
+                return flags[name]
+            flags[name] = bool(t)
+        f.__name__ = f.__qualname__ = name
+        f.__doc__ = "Whether %s results must be proven (default True); with an argument, set it." % name.replace("_", " ")
+        return f
+
+    for k in flags:
+        if k != "other":
+            setattr(m, k, flag(k))
+
+    def all(t=None):
+        if t is None:
+            return dict(flags)
+        for k in flags:
+            flags[k] = bool(t)
+    m.all = all
+
+    class WithProof:
+        """A context in which the proof flag `subsystem` is `t`."""
+
+        def __init__(self, subsystem, t):
+            self._s, self._t = subsystem, bool(t)
+
+        def __enter__(self):
+            self._old = flags[self._s]
+            flags[self._s] = self._t
+
+        def __exit__(self, *exc):
+            flags[self._s] = self._old
+    m.WithProof = WithProof
+    m._flags = flags
+    import sys as _sys
+    _sys.modules.setdefault("sage.structure.proof.all", m)
+    return m
+
+
+proof = _make_proof()
