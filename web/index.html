@@ -51,100 +51,6 @@
   button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
   #status { color: var(--muted); font-size: 13px; flex-basis: 100%; text-align: right; min-height: 1.5em; } /* its own line: its length changes */
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  /* cells, laid out as in Jupyter: the prompt [n]: in a gutter, the editor, the
-     output under it.  The active cell has a bar on the left; in command mode
-     (Esc) the whole cell is tinted, in edit mode the editor is outlined. */
-  #cells { --gutter: 64px; position: relative; }
-  .cell { position: relative; display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); padding: 8px 8px 8px 0; border-left: 3px solid transparent; outline: none; }
-  .cell.active { border-left-color: var(--accent2); }
-  .cell.active:focus, .cell.active:has(.mdout:focus) { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .cell.active:has(textarea:focus) { border-left-color: var(--accent); }
-  .cell .gutter { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 8px 10px 0 0; cursor: grab; user-select: none; -webkit-user-select: none; }
-  .cell .n { font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--muted); white-space: nowrap; }
-  .cell:not(.markdown) .n::after { content: ":"; }
-  .cell.markdown .n { display: none; }
-  .cell.queued .n, .cell.running .n { color: var(--accent); font-weight: 600; }
-  /* the run button: shown on the active or hovered cell; a spinning ring (and Stop) while it runs */
-  .cell .runb { position: relative; width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 11px; line-height: 1; visibility: hidden; }
-  .cell:hover .runb, .cell.active .runb, .cell.running .runb, .cell.queued .runb { visibility: visible; }
-  .cell.markdown.rendered .runb { display: none; }
-  .cell.running .runb::before, .cell.queued .runb::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); }
-  .cell.running .runb::before { animation: spin .9s linear infinite; }
-  .cell.queued .runb::before { border: 2px dashed var(--accent2); }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .cell.running .runb::before { animation: none; border-color: var(--accent); } }
-  .cell .body { min-width: 0; }
-  /* the cell toolbar, at the top right of the active or hovered cell (as in JupyterLab) */
-  .cell .head { position: absolute; top: -9px; right: 10px; z-index: 3; display: flex; align-items: center; gap: 1px; padding: 2px; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.1); visibility: hidden; font-size: 12px; }
-  .cell:hover .head, .cell.active .head { visibility: visible; }
-  .cell .head button, .cell .head select { border: 0; background: none; padding: 1px 7px; font-size: 12px; border-radius: 4px; color: var(--muted); }
-  .cell .head button:hover, .cell .head select:hover { background: var(--code); color: var(--fg); }
-  .cell .head .drag { cursor: grab; padding: 0 5px; color: var(--muted); font-size: 14px; }
-  /* + Code / + Text between cells, on hover (as in Colab) */
-  .cell .adder { position: absolute; left: 50%; bottom: -12px; transform: translateX(-50%); z-index: 2; display: flex; gap: 6px; visibility: hidden; }
-  .cell .adder button { padding: 1px 10px; font-size: 12px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
-  .cell:hover > .adder { visibility: visible; }
-  @media (hover: none) { .cell.active > .adder { visibility: visible; } }
-  .cell.dragging { opacity: .4; }
-  #dropline { position: absolute; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 6; }
-  #dropline[hidden] { display: none; }
-  #addend { display: flex; justify-content: center; gap: 8px; margin: 10px 0 0; }
-  #addend button { font-size: 13px; padding: 3px 14px; border-radius: 14px; color: var(--muted); }
-  /* editor: a transparent textarea over its syntax-highlighted copy */
-  .ed { position: relative; background: var(--edbg); border: 1px solid var(--line); border-radius: 4px; }
-  .cell:has(textarea:focus) .ed { border-color: var(--accent); }
-  .cell.queued .ed { border-style: dashed; }
-  .ed textarea, .ed pre { margin: 0; border: 0; padding: 7px 10px; font: 14px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .ed pre { position: absolute; inset: 0; pointer-events: none; color: var(--fg); overflow: hidden; }
-  .ed textarea { position: relative; display: block; width: 100%; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--fg); min-height: 2.6em; }
-  .ed textarea::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: transparent; }
-  .hk { color: var(--hk); } .hb { color: var(--hb); } .hs { color: var(--hs); } .hn { color: var(--hn); }
-  .hc { color: var(--hc); font-style: italic; } .hd { color: var(--hd); } .hf { color: var(--hf); }
-  /* output: text runs, pictures and interact controls */
-  .out:empty { display: none; }
-  pre.txt { margin: 0; padding: 3px 11px; white-space: pre-wrap; word-break: break-word; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-  pre.txt .e { color: var(--err); }
-  figure.plot { margin: 6px 12px; color: var(--fg); --sb-legend-bg: var(--cell); }
-  figure.plot svg, figure.plot img { display: block; max-width: 100%; height: auto; }
-  .interact { margin: 8px 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-  .interact .controls { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; align-items: center; font-size: 14px; }
-  .interact .controls label { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
-  .interact .v { display: flex; gap: 10px; align-items: center; min-width: 0; }
-  .interact input[type=range] { flex: 1; min-width: 80px; accent-color: var(--accent); }
-  .interact input[type=text] { font: 13px ui-monospace, Menlo, monospace; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--code); color: var(--fg); width: 100%; }
-  .interact output { font: 13px ui-monospace, Menlo, monospace; min-width: 3.5em; }
-  .interact .seg { display: flex; flex-wrap: wrap; gap: 4px; }
-  .interact .seg button { padding: 2px 10px; font-size: 13px; }
-  .interact .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  .interact .note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
-  .interact .iout pre.txt { padding: 6px 0 0; }
-  .interact .iout figure.plot { margin: 6px 0 0; }
-  .player { display: flex; gap: 10px; align-items: center; margin-top: 4px; max-width: 640px; font-size: 13px; }
-  .player button { padding: 1px 10px; min-width: 2.6em; }
-  .player input[type=range] { flex: 1; accent-color: var(--accent); }
-  .player output, .player select { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
-  .interact button.play { padding: 0 8px; font-size: 12px; min-width: 2.2em; }
-  #plottip { position: fixed; z-index: 20; pointer-events: none; background: var(--cell); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; font: 12px ui-monospace, Menlo, monospace; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-  /* Markdown cells: the text, rendered; double-click (or Enter) to edit */
-  .cell .mdout { display: none; padding: 0 10px; overflow-wrap: anywhere; outline: none; }
-  .cell.markdown.rendered .mdout { display: block; }
-  .cell.markdown.rendered .ed { display: none; }
-  .mdout > :first-child { margin-top: .2em; }
-  .mdout :is(h1, h2, h3, h4) { margin: .6em 0 .3em; line-height: 1.25; }
-  .mdout h1 { font-size: 1.7em; } .mdout h2 { font-size: 1.4em; } .mdout h3 { font-size: 1.2em; }
-  .mdout p, .mdout ul, .mdout ol, .mdout blockquote, .mdout table, .mdout pre { margin: .5em 0; }
-  .mdout code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: .92em ui-monospace, Menlo, monospace; }
-  .mdout pre.code { background: var(--code); padding: 8px 12px; border-radius: 6px; overflow: auto; }
-  .mdout pre.code code { background: none; padding: 0; font-size: 13.5px; }
-  .mdout blockquote { border-left: 3px solid var(--line); margin-left: 0; padding-left: 12px; color: var(--muted); }
-  .mdout table { border-collapse: collapse; } .mdout th, .mdout td { border: 1px solid var(--line); padding: 3px 9px; }
-  .mdout img { max-width: 100%; } .mdout hr { border: 0; border-top: 1px solid var(--line); }
-  .mdout .math.display { display: block; overflow-x: auto; margin: .6em 0; }
-  .latex-out { overflow-x: auto; padding: .2em 0; }
-  .cell .out { padding-top: 4px; }
-  .cell .time { font-size: 12px; color: var(--muted); padding: 2px 11px 0; }
-  .cell .time:empty { display: none; }
-  /* the cell menu */
   /* until the notebook is read from IndexedDB, nothing below it shows (no layout shift) */
   body.opening .about, body.opening footer { display: none; }
   #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
@@ -186,22 +92,12 @@
   #opendlg li .open { flex: 1; text-align: left; display: flex; justify-content: space-between; gap: 12px; }
   #opendlg li .when { color: var(--muted); font-size: 12px; }
   #opendlg li.current .open { border-color: var(--accent); }
-  #cellmenu, #filemenu { position: absolute; z-index: 10; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  #filemenu { position: absolute; z-index: 10; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
   #filemenu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; }
   #filemenu button:hover, #filemenu button:focus { background: var(--code); outline: none; }
   #filemenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
   #filemenu .danger { color: var(--err); }
-  #filemenu[hidden], #cellmenu[hidden] { display: none; }
-  #cellmenu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; }
-  #cellmenu button:hover, #cellmenu button:focus { background: var(--code); outline: none; }
-  #cellmenu button kbd { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
-  /* Tab completion in code cells */
-  #completer { position: absolute; z-index: 15; max-height: 16em; min-width: 12em; overflow-y: auto; margin: 0; padding: 3px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.18); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-  #completer[hidden] { display: none; }
-  #completer li { padding: 1px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
-  #completer li[aria-selected=true] { background: var(--accent); color: var(--on-accent); }
-  #cellmenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
-  #cellmenu .danger { color: var(--err); }
+  #filemenu[hidden] { display: none; }
   /* the console, docked at the bottom */
   #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
   #console[hidden] { display: none; }
@@ -238,24 +134,7 @@
     header .tools #docsearchbox { flex: 1; margin-top: 0; }
     #docsearch { width: 100%; max-width: none; }
     header, main, footer { padding-left: 14px; padding-right: 14px; }
-    #cells { --gutter: 44px; }
-    .cell .gutter { padding-right: 6px; }
-    .cell .n { font-size: 11.5px; }
-    .cell .runb { width: 26px; height: 26px; }
-    .cell .adder { left: var(--gutter); transform: none; }
-    .cell .head .drag { display: none; }
-    .cell .head { right: 6px; }
-    .cell .head button, .cell .head select { padding: 1px 5px; }
-    .cell .adder button { padding: 1px 8px; }
   }
-  /* keyboard shortcuts */
-  #keysdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 18px; width: min(760px, 94vw); }
-  #keysdlg::backdrop { background: rgba(0,0,0,.35); }
-  #keysdlg .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 4px 28px; }
-  #keysdlg h3 { font-size: 14px; margin: 10px 0 4px; }
-  #keysdlg table { border-collapse: collapse; font-size: 13.5px; width: 100%; }
-  #keysdlg td { padding: 2px 0; vertical-align: top; }
-  #keysdlg td:first-child { white-space: nowrap; padding-right: 14px; width: 1%; }
   kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--code); }
   #printhead { display: none; }
   /* File > Print: the notebook alone, light, with its prompts; code without the editor's textarea */
@@ -265,23 +144,11 @@
     @page { margin: 14mm 12mm; }
     body { background: #fff; font-size: 13px; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    header, footer, .bar, #nbline, #files, .about, #console, #addend, #dropline, .cell .head, .cell .adder, .cell .runb, #completer, #cellmenu, #filemenu, #announce { display: none !important; }
+    header, footer, .bar, #nbline, #files, .about, #console, #filemenu, #announce { display: none !important; }
     main { max-width: none; padding: 0; }
     #printhead { display: block; margin: 0 0 10px; border-bottom: 1px solid var(--line); }
     #printhead h1 { font-size: 20px; margin: 0; }
     #printhead p { margin: 2px 0 8px; color: var(--muted); font-size: 11px; }
-    #cells { --gutter: 52px; }
-    .cell { border-left: 0 !important; background: none !important; padding: 4px 0; }
-    .cell .gutter { padding-top: 6px; }
-    .cell .n { font-size: 11px; }
-    .ed { break-inside: avoid; border-color: var(--line) !important; }
-    .ed textarea, .cell .time { display: none; }
-    .ed pre { position: static; font-size: 12.5px; }
-    pre.txt { font-size: 12px; }
-    figure.plot, .interact, .latex-out { break-inside: avoid; }
-    figure.plot3d canvas { display: none !important; }
-    .print3d { display: block !important; }
-    .sb3d-buttons, .player { display: none !important; }
     a { color: inherit; }
   }
 </style>
@@ -324,7 +191,6 @@
   </section>
   <div id="printhead"><h1 id="printname"></h1><p id="printinfo"></p></div>
   <div id="cells"></div>
-  <div id="addend"><button id="addend-code" title="Add a code cell at the end">+ Code</button><button id="addend-md" title="Add a Markdown (text) cell at the end">+ Text</button></div>
   <section class="about" aria-label="About Sagebrush">
     <div class="cards">
       <div class="card">
@@ -390,68 +256,25 @@
   <pre id="docbody"></pre>
   <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
 </dialog>
-<dialog id="keysdlg" aria-labelledby="keystitle">
-  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="keystitle">Keyboard shortcuts</b><button aria-label="Close">✕</button></form>
-  <p style="margin:6px 0 0;color:var(--muted);font-size:13px">As in Jupyter: <kbd>Esc</kbd> leaves the editor for <b>command mode</b>, where single keys act on cells; <kbd>Enter</kbd> goes back to editing.</p>
-  <div class="cols">
-    <div><h3>Both modes</h3><table>
-      <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>run the cell, go to the next</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>run the cell</td></tr>
-      <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>run, insert a cell below</td></tr>
-      <tr><td><kbd>Alt</kbd>+<kbd>↑</kbd> <kbd>↓</kbd></td><td>move the cell up or down</td></tr>
-    </table>
-    <h3>Edit mode</h3><table>
-      <tr><td><kbd>Esc</kbd> or <kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>command mode</td></tr>
-      <tr><td><kbd>↑</kbd> <kbd>↓</kbd> at the first or last line</td><td>previous or next cell</td></tr>
-      <tr><td><kbd>Tab</kbd></td><td>complete a name, or indent</td></tr>
-      <tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>dedent</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>]</kbd> <kbd>[</kbd></td><td>indent, dedent</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>comment or uncomment lines</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>-</kbd> or <kbd>Ctrl</kbd>+<kbd>;</kbd></td><td>split the cell at the cursor</td></tr>
-    </table></div>
-    <div><h3>Command mode</h3><table>
-      <tr><td><kbd>Enter</kbd></td><td>edit the cell</td></tr>
-      <tr><td><kbd>↑</kbd> <kbd>↓</kbd> or <kbd>K</kbd> <kbd>J</kbd></td><td>select the cell above or below</td></tr>
-      <tr><td><kbd>A</kbd> <kbd>B</kbd></td><td>insert a cell above, below</td></tr>
-      <tr><td><kbd>D</kbd> <kbd>D</kbd></td><td>delete the cell</td></tr>
-      <tr><td><kbd>Z</kbd></td><td>undo the cell deletion</td></tr>
-      <tr><td><kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd></td><td>cut, copy, paste below (<kbd>Shift</kbd>+<kbd>V</kbd>: above)</td></tr>
-      <tr><td><kbd>M</kbd> <kbd>Y</kbd></td><td>to Markdown, to code</td></tr>
-      <tr><td><kbd>Shift</kbd>+<kbd>M</kbd></td><td>merge with the cell below</td></tr>
-      <tr><td><kbd>I</kbd> <kbd>I</kbd></td><td>interrupt</td></tr>
-      <tr><td><kbd>0</kbd> <kbd>0</kbd></td><td>restart the interpreter</td></tr>
-      <tr><td><kbd>H</kbd></td><td>this list</td></tr>
-      <tr><td><kbd>/</kbd></td><td>search the functions</td></tr>
-    </table></div>
-  </div>
-  <p style="margin:12px 0 0;color:var(--muted);font-size:13px">Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, <kbd>Cmd</kbd> works where <kbd>Ctrl</kbd> is shown. <b>File → Print</b> makes a PDF of the notebook with its outputs.</p>
-</dialog>
 <dialog id="opendlg" aria-labelledby="opentitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
   <ul id="nblist"></ul>
 </dialog>
-<ul id="completer" role="listbox" aria-label="Completions" hidden></ul>
-<div id="cellmenu" role="menu" aria-label="Cell actions" hidden>
-  <button role="menuitem" data-m="above">Insert cell above</button>
-  <button role="menuitem" data-m="below">Insert cell below</button>
-  <hr>
-  <button role="menuitem" data-m="up">Move up <kbd>Alt+↑</kbd></button>
-  <button role="menuitem" data-m="down">Move down <kbd>Alt+↓</kbd></button>
-  <hr>
-  <button role="menuitem" data-m="type">Change to Markdown</button>
-  <button role="menuitem" data-m="clear">Clear output</button>
-  <button role="menuitem" data-m="delete" class="danger">Delete cell</button>
-</div>
 <section id="console" aria-label="Python console" hidden>
   <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize console" tabindex="0"></div>
   <div class="chead"><b>Console</b><span>shares variables with the notebook</span><span class="sp"></span><button id="closeconsole" aria-label="Close console">✕</button></div>
   <div class="cbody"><div id="term"></div><aside id="cplot" aria-label="Console output pictures" hidden></aside></div>
 </section>
 <div id="announce" class="sr" aria-live="polite"></div>
-<div id="dropline" hidden></div>
-<div id="plottip" hidden></div>
 <script id="app">
-// A classic script (not a module) so the cells exist before the first paint.
+// The page: Sagebrush's notebook (web/notebook) with the in-browser kernel,
+// notebooks and files kept in this browser, the console, documentation search
+// and tools for agents.  web/build.ts bundles it, with web/notebook, into one
+// classic script, so the cells exist before the first paint.
+import { createNotebook, esc } from "./notebook/notebook.js";
+import { WorkerKernel } from "./notebook/worker-kernel.js";
+import { IdbStore, openDb, idb } from "./notebook/stores.js";
+import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -583,42 +406,10 @@ const EXAMPLES = {
 const SAGE_EXAMPLES = new Set(["Sage", "Calculus (Sage)", "Group theory (Sage)", "Galois groups (Sage)", "Plots (Sage)", "Polynomials (Sage)", "Gröbner bases (Sage)", "Modular forms (Sage)", "Algebraic number theory (Sage)"]);
 const MAGMA_EXAMPLES = new Set(["Magma"]);
 const $ = (s) => document.querySelector(s);
-const cellsEl = $("#cells"), statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme"), menu = $("#cellmenu");
-let worker, nextId = 1, version = "", execCount = 0, generation = 0;
-// id -> a sink {start(), out(text, isErr), done(ms), stopped(message)} for
-// running code, or {reply(message)} for a console question.
-const pending = new Map();
+const statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme");
 const announce = (text) => ($("#announce").textContent = text);
+const newId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2));
 
-// ------------------------------------------------------------ highlighting
-// A small regex tokenizer for Python (and Sage's ^ and ^^): good enough for
-// a notebook, and no dependency.
-const KW = new Set("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield match case type self cls".split(" "));
-const BI = new Set("abs all any ascii bin bool breakpoint bytearray bytes callable chr classmethod compile complex delattr dict dir divmod enumerate eval exec filter float format frozenset getattr globals hasattr hash help hex id input int isinstance issubclass iter len list locals map max memoryview min next object oct open ord pow print property range repr reversed round set setattr slice sorted staticmethod str sum super tuple type vars zip __import__ Exception ValueError TypeError KeyError IndexError StopIteration ZeroDivisionError ArithmeticError RuntimeError NotImplementedError AttributeError NameError".split(" "));
-const SAGE_BI = new Set("factor is_prime is_prime_power is_square next_prime previous_prime nth_prime prime_range primes primes_first_n prime_pi divisors number_of_divisors sigma euler_phi moebius gcd lcm xgcd inverse_mod power_mod crt binomial factorial fibonacci isqrt sqrt srange prod continued_fraction numerator denominator valuation digits Rational Integer ZZ QQ RR n N".split(" "));
-const TOKEN = /(#.*)|((?:\b[rRbBuUfFtT]{1,2})?(?:"""[\s\S]*?(?:"""|$(?![\s\S]))|'''[\s\S]*?(?:'''|$(?![\s\S]))|"(?:\\.|[^"\\\n])*(?:"|$)|'(?:\\.|[^'\\\n])*(?:'|$)))|(^[ \t]*@[\w.]+)|(\b(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?[jJ]?)\b)|([A-Za-z_]\w*)/gm;
-const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-function highlight(src, sage) {
-  let out = "", last = 0, prev = "";
-  for (const m of src.matchAll(TOKEN)) {
-    out += esc(src.slice(last, m.index));
-    last = m.index + m[0].length;
-    let cls = m[1] ? "hc" : m[2] ? "hs" : m[3] ? "hd" : m[4] ? "hn" : "";
-    if (m[5]) {
-      const w = m[5];
-      cls = prev === "def" || prev === "class" ? "hf" : KW.has(w) ? "hk" : BI.has(w) || (sage && SAGE_BI.has(w)) ? "hb" : "";
-      prev = w;
-    }
-    out += cls ? `<span class="${cls}">${esc(m[0])}</span>` : esc(m[0]);
-  }
-  return out + esc(src.slice(last)) + "\n"; // a final newline keeps the last line's height
-}
-const isSage = () => modeEl.value === "sage";
-const isMagma = () => modeEl.value === "magma";
-const MODES = ["python", "sage", "magma"];
-function paint(cell) { cell.hl.innerHTML = cell.type === "markdown" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
-
-// ------------------------------------------------------------ the worker
 // `sagebrush notebook` (src/notebook.ts) serves this page with
 // window.__SAGEBRUSH_LOCAL__ = {path, name}: Python then runs natively on the
 // computer, behind the local server, with its files, and the notebook is
@@ -657,854 +448,44 @@ class RemoteWorker {
   interrupt(upTo) { this.send("interrupt", { upTo }); }
   terminate() { this.es.close(); fetch(`api/session/${this.sid}/stop`, { method: "POST" }).catch(() => {}); }
 }
-let filesSent = null; // the browser's files, on their way to the worker
-function startWorker() {
-  statusEl.textContent = "loading…";
-  generation++;
-  const t0 = performance.now();
-  worker = LOCAL ? new RemoteWorker() : new Worker("sagebrush-worker.js", { type: "module" });
-  filesSent = LOCAL ? Promise.resolve() : sendFiles(worker);
-  if (diskFiles.length) worker.postMessage({ files: diskFiles });
-  worker.onmessage = (ev) => {
-    const m = ev.data;
-    if (m.fsChanged !== undefined) {
-      // in the app, a file Python wrote in its top folder goes to the notebook's folder
-      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) TAURI.fs.writeFile(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data).catch((e) => console.warn(e));
-      return fileChanged(m.fsChanged, m.data);
-    }
-    if (m.ready) {
-      version = m.version || "";
-      interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
-      statusEl.textContent = `ready (sagebrush ${version}, ${Math.round(performance.now() - t0)} ms)`;
-      return;
-    }
-    const p = pending.get(m.id);
-    if (!p) return;
-    if (p.reply) { pending.delete(m.id); return p.reply(m); }
-    if (m.skipped) { pending.delete(m.id); return p.skipped ? p.skipped() : p.stopped(""); }
-    if (m.start) p.start();
-    // output of an @interact's function goes to that interact's area
-    const dest = m.target != null ? areaSink(interactBox(m.target)) : p;
-    if (dest) {
-      if (m.stream) dest.out(m.text, m.stream === "stderr");
-      if (m.display) dest.display(m.display);
-      if (m.interact) dest.interact(m.interact);
-      if (m.clear) dest.clear();
-    }
-    if (m.done) { pending.delete(m.id); p.done(m.ms); }
-  };
-  worker.onerror = (e) => { statusEl.textContent = "error: " + (e.message || e); };
-}
 
-// Send code to the worker; `sink` receives what happens to it.
-function submit(code, sink, extra = {}) {
-  const id = nextId++;
-  pending.set(id, sink);
-  worker.postMessage({ id, code, sage: isSage(), magma: isMagma(), ...extra });
-}
-// Ask the worker a question (the console's "is this complete?" and Tab).
-function ask(msg, fallback) {
-  return new Promise((resolve) => {
-    const id = nextId++;
-    pending.set(id, { reply: resolve, stopped: () => resolve(fallback) });
-    worker.postMessage({ id, sage: isSage(), magma: isMagma(), ...msg });
-  });
-}
-
-// Interrupt what is running: KeyboardInterrupt in the worker (Python loops
-// and the Rust engines check a flag shared with this page), keeping every
-// variable; queued runs are skipped.  Where that is impossible (no
-// SharedArrayBuffer), or if the program does not stop within 2 s (a loop that
-// never checks), restart the interpreter.
-let interruptFlag = null;
-function interrupt(message) {
-  if ((!interruptFlag && !worker.interrupt) || pending.size === 0) return stop(message);
-  const waiting = [...pending.keys()];
-  if (interruptFlag) {
-    Atomics.store(interruptFlag, 1, nextId - 1);
-    Atomics.store(interruptFlag, 0, 1);
-  } else worker.interrupt(nextId - 1);
-  const gen = generation;
-  setTimeout(() => {
-    if (generation === gen && waiting.some((id) => pending.has(id))) stop(message);
-  }, 2000);
-}
-
-function stop(message) {
-  worker.terminate();
-  for (const p of pending.values()) p.stopped(message);
-  pending.clear();
-  execCount = 0;
-  startWorker();
-}
-
-// ------------------------------------------------------------ cells
-function cells() {
-  return [...cellsEl.querySelectorAll(".cell")].map((el) => el.cell);
-}
-
-// ------------------------------------------------------------ output areas
-// Text goes into <pre> runs; pictures (Jupyter MIME bundles) into <figure>s.
-function appendText(box, text, isErr) {
-  let pre = box.lastElementChild;
-  if (!pre || pre.tagName !== "PRE") pre = box.appendChild(Object.assign(document.createElement("pre"), { className: "txt" }));
-  pre.appendChild(isErr ? Object.assign(document.createElement("span"), { className: "e", textContent: text }) : document.createTextNode(text));
-}
-
-// 3D graphics: an interactive WebGL view (web/viewer3d.js, loaded on first
-// use) over the SVG, which stays for saving, agents and when WebGL fails.
-const SCENE3D = "application/vnd.sagebrush.scene3d+json";
-let viewer3d = null;
-function mount3d(fig, sceneText) {
-  viewer3d ??= import(new URL("sagebrush-viewer3d.js", location.href).href).then(() => window.SagebrushViewer3d);
-  viewer3d.then((v) => v?.mount(fig, JSON.parse(sceneText))).catch(() => {});
-}
-
-// Typeset math (show(expr), integrate_steps): text/latex through KaTeX,
-// with the text form until KaTeX has loaded (and if it cannot).
-function appendLatex(box, b) {
-  const tex = b["text/latex"].trim().replace(/^\$\$([\s\S]*)\$\$$|^\$([\s\S]*)\$$/, (_, d, i) => d ?? i);
-  const el = document.createElement("div");
-  el.className = "latex-out";
-  el.sbBundle = { "text/latex": b["text/latex"], "text/plain": b["text/plain"] ?? tex, "application/vnd.sagebrush.typeset": "1" };
-  const m = Object.assign(document.createElement("div"), { className: "math display", textContent: b["text/plain"] ?? tex });
-  m.dataset.tex = tex;
-  el.appendChild(m);
-  box.appendChild(el);
-  (mathModule ??= import(new URL("sagebrush-math.js", location.href).href)).then((mm) => mm.typeset(el)).catch(() => {});
-}
-
-function appendDisplay(box, b) {
-  if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
-  const fig = document.createElement("figure");
-  fig.className = "plot";
-  const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
-  if (svg && b[SCENE3D]) {
-    fig.classList.add("plot3d");
-    fig.sbBundle = { [SCENE3D]: b[SCENE3D], "image/svg+xml": b["image/svg+xml"], "text/plain": b["text/plain"] ?? "3D plot" };
-    fig.appendChild(svg);
-    box.appendChild(fig);
-    mount3d(fig, b[SCENE3D]);
-    return;
-  }
-  const raster = b["image/png"] ? ["image/png", b["image/png"]] : b["image/jpeg"] ? ["image/jpeg", b["image/jpeg"]] : null;
-  if (svg) {
-    fig.appendChild(svg);
-    if (svg.classList.contains("sb-anim")) player(fig, svg);
-  }
-  else if (raster) fig.appendChild(Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }));
-  else return appendText(box, (b["text/plain"] ?? "") + "\n", false);
-  box.appendChild(fig);
-}
-
-// SVG from Python code is put in the page only after removing anything
-// active (scripts, event handlers, external links), with its ids made
-// unique so that several plots' clip paths cannot collide.
-const SVG_TAGS = new Set("svg g path line polyline polygon circle ellipse rect text tspan title desc defs clipPath linearGradient radialGradient stop use marker symbol mask pattern".split(" "));
-let svgCount = 0;
-function safeSvg(text) {
-  const root = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
-  if (root.localName !== "svg") return null;
-  const pre = `s${++svgCount}-`;
-  const clean = (el) => {
-    for (const child of [...el.children]) {
-      if (SVG_TAGS.has(child.localName)) clean(child); else child.remove();
-    }
-    for (const { name, value } of [...el.attributes]) {
-      const n = name.toLowerCase();
-      if (n.startsWith("on") || /javascript:|data:|@import|expression\(/i.test(value)) el.removeAttribute(name);
-      else if (n === "href" || n === "xlink:href") value.startsWith("#") ? el.setAttribute(name, "#" + pre + value.slice(1)) : el.removeAttribute(name);
-      else if (n === "id") el.setAttribute(name, pre + value);
-      else if (/url\(/i.test(value)) /url\(\s*#/i.test(value) ? el.setAttribute(name, value.replace(/url\(\s*#/gi, "url(#" + pre)) : el.removeAttribute(name);
-    }
-  };
-  clean(root);
-  return document.importNode(root, true);
-}
-
-// An animation (an SVG with one <g class="sb-frame"> per frame): play/pause,
-// a frame slider and speed.  Without this page the SVG plays itself by CSS.
-function player(fig, svg) {
-  const frames = [...svg.querySelectorAll(":scope > g.sb-frame")];
-  if (!frames.length) return;
-  const delay = +svg.dataset.delay || 200, iterations = +svg.dataset.iterations || 0;
-  const bar = fig.appendChild(Object.assign(document.createElement("div"), { className: "player" }));
-  bar.setAttribute("role", "group");
-  bar.setAttribute("aria-label", "Animation controls");
-  const btn = bar.appendChild(document.createElement("button"));
-  const range = bar.appendChild(Object.assign(document.createElement("input"), { type: "range", min: 0, max: frames.length - 1, step: 1, value: 0 }));
-  range.setAttribute("aria-label", "Frame");
-  const label = bar.appendChild(document.createElement("output"));
-  const speed = bar.appendChild(document.createElement("select"));
-  speed.setAttribute("aria-label", "Speed");
-  for (const v of [0.25, 0.5, 1, 2, 4]) speed.add(new Option(v + "×", v, false, v === 1));
-  let i = 0, timer = null, loops = 0;
-  const show = (k) => {
-    i = k;
-    frames.forEach((f, j) => { f.style.animation = "none"; f.style.visibility = j === k ? "visible" : "hidden"; });
-    range.value = k;
-    label.textContent = `${k + 1} / ${frames.length}`;
-  };
-  const stopPlay = () => { clearInterval(timer); timer = null; btn.textContent = "▶"; btn.setAttribute("aria-label", "Play"); };
-  const play = () => {
-    stopPlay();
-    btn.textContent = "❚❚";
-    btn.setAttribute("aria-label", "Pause");
-    loops = 0;
-    timer = setInterval(() => {
-      if (!fig.isConnected) return stopPlay();
-      if (i + 1 < frames.length) return show(i + 1);
-      if (iterations && ++loops >= iterations) return stopPlay();
-      show(0);
-    }, delay / +speed.value);
-  };
-  btn.onclick = () => (timer ? stopPlay() : play());
-  range.oninput = () => { stopPlay(); show(+range.value); };
-  speed.onchange = () => { if (timer) play(); };
-  show(0);
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) stopPlay(); else play();
-}
-
-// Where output goes: {out, display, interact, clear} for a box.
-function areaSink(box) {
-  if (!box) return null;
-  return {
-    out: (text, isErr) => appendText(box, text, isErr),
-    display: (b) => appendDisplay(box, b),
-    interact: (spec) => renderInteract(box, spec),
-    clear: () => box.replaceChildren(),
-  };
-}
-
-// ------------------------------------------------------------ @interact
-// Controls drawn from the worker's spec; each change reruns the function
-// (one update in flight at a time, always with the latest values), and its
-// new output replaces the old in one step, so dragging a slider does not flicker.
-const interacts = new Map(); // "generation:id" -> state
-let controlCount = 0;
-function interactBox(iid) {
-  const it = interacts.get(generation + ":" + iid);
-  return it ? (it.buffer ?? it.out) : null;
-}
-
-function renderInteract(box, spec) {
-  const it = { iid: spec.id, gen: generation, name: spec.name, values: {}, setters: {}, busy: false, dirty: false, buffer: null, waiters: [] };
-  const el = document.createElement("div");
-  el.className = "interact";
-  el.setAttribute("role", "group");
-  el.setAttribute("aria-label", `Controls of ${spec.name}`);
-  const form = el.appendChild(document.createElement("div"));
-  form.className = "controls";
-  for (const c of spec.controls) control(form, c, it);
-  it.out = el.appendChild(document.createElement("div"));
-  it.out.className = "iout";
-  it.out.setAttribute("aria-live", "polite");
-  box.appendChild(el);
-  el.dataset.key = it.gen + ":" + it.iid;
-  interacts.set(el.dataset.key, it);
-}
-
-function control(form, c, it) {
-  const id = `ctl${++controlCount}`;
-  const set = (v) => { it.values[c.name] = v; changed(it); };
-  it.values[c.name] = c.value;
-  if (c.kind === "text") return form.appendChild(Object.assign(document.createElement("div"), { className: "note", textContent: c.value }));
-  form.appendChild(Object.assign(document.createElement("label"), { htmlFor: id, textContent: c.label }));
-  const v = form.appendChild(Object.assign(document.createElement("div"), { className: "v" }));
-  if (c.kind === "slider" || c.kind === "range") {
-    const fmt = (x) => (c.labels ? c.labels[x] : c.ints ? String(Math.round(x)) : String(+(+x).toPrecision(6)));
-    const one = (val, suffix) => {
-      const inp = Object.assign(document.createElement("input"), { type: "range", id: id + suffix, min: c.min, max: c.max, step: c.step, value: val });
-      inp.setAttribute("aria-valuetext", fmt(val));
-      return inp;
-    };
-    const show = document.createElement("output");
-    if (c.kind === "slider") {
-      // ▶ steps the slider through its values, rerunning the function for
-      // each one as fast as it computes (at most 30 frames a second)
-      const playBtn = v.appendChild(Object.assign(document.createElement("button"), { className: "play", textContent: "▶" }));
-      playBtn.setAttribute("aria-label", `Play ${c.label}`);
-      const inp = v.appendChild(one(c.value, ""));
-      v.appendChild(show).textContent = fmt(c.value);
-      const update = (x) => { inp.value = x; show.textContent = fmt(x); inp.setAttribute("aria-valuetext", fmt(x)); };
-      let playing = false;
-      const halt = () => { playing = false; playBtn.textContent = "▶"; playBtn.setAttribute("aria-label", `Play ${c.label}`); };
-      const step = () => {
-        if (!playing || !inp.isConnected || it.gen !== generation) return halt();
-        let x = +inp.value + +c.step;
-        if (x > +c.max + 1e-9 * Math.abs(+c.step)) x = +c.min;
-        update(x);
-        const t0 = performance.now();
-        it.waiters.push(() => setTimeout(step, Math.max(0, 33 - (performance.now() - t0))));
-        set(+x);
-      };
-      playBtn.onclick = () => { if (playing) return halt(); playing = true; playBtn.textContent = "❚❚"; playBtn.setAttribute("aria-label", `Pause ${c.label}`); step(); };
-      inp.oninput = () => { halt(); update(inp.value); set(+inp.value); };
-      it.setters[c.name] = (x) => { update(x); it.values[c.name] = +x; };
-    } else {
-      const lo = v.appendChild(one(c.value[0], "")), hi = v.appendChild(one(c.value[1], "b"));
-      hi.setAttribute("aria-label", c.label + " upper");
-      v.appendChild(show).textContent = `${fmt(c.value[0])} – ${fmt(c.value[1])}`;
-      const read = () => { const a = Math.min(+lo.value, +hi.value), b = Math.max(+lo.value, +hi.value); show.textContent = `${fmt(a)} – ${fmt(b)}`; return [a, b]; };
-      lo.oninput = hi.oninput = () => set(read());
-      it.setters[c.name] = (x) => { lo.value = x[0]; hi.value = x[1]; it.values[c.name] = read(); };
-    }
-  } else if (c.kind === "selector" && c.buttons) {
-    const seg = v.appendChild(Object.assign(document.createElement("div"), { className: "seg", id }));
-    seg.setAttribute("role", "group");
-    seg.setAttribute("aria-label", c.label);
-    const buttons = c.options.map((o, i) => {
-      const b = seg.appendChild(Object.assign(document.createElement("button"), { textContent: o }));
-      b.setAttribute("aria-pressed", String(i === c.value));
-      b.onclick = () => { press(i); set(i); };
-      return b;
-    });
-    const press = (i) => buttons.forEach((b, j) => b.setAttribute("aria-pressed", String(i === j)));
-    it.setters[c.name] = (i) => { press(+i); it.values[c.name] = +i; };
-  } else if (c.kind === "selector") {
-    const sel = v.appendChild(Object.assign(document.createElement("select"), { id }));
-    c.options.forEach((o, i) => sel.add(new Option(o, i, false, i === c.value)));
-    sel.onchange = () => set(+sel.value);
-    it.setters[c.name] = (i) => { sel.value = i; it.values[c.name] = +i; };
-  } else if (c.kind === "checkbox") {
-    const box = v.appendChild(Object.assign(document.createElement("input"), { type: "checkbox", id, checked: !!c.value }));
-    box.onchange = () => set(box.checked);
-    it.setters[c.name] = (x) => { box.checked = !!x; it.values[c.name] = !!x; };
-  } else if (c.kind === "color") {
-    const inp = v.appendChild(Object.assign(document.createElement("input"), { type: "color", id, value: c.value }));
-    inp.oninput = () => set(inp.value);
-    it.setters[c.name] = (x) => { inp.value = x; it.values[c.name] = x; };
-  } else {
-    const inp = v.appendChild(Object.assign(document.createElement("input"), { type: "text", id, value: c.value, spellcheck: false }));
-    inp.onchange = () => set(inp.value);
-    it.setters[c.name] = (x) => { inp.value = x; it.values[c.name] = String(x); };
-  }
-}
-
-function changed(it) {
-  if (it.gen !== generation) {
-    it.out.replaceChildren();
-    appendText(it.out, "The interpreter restarted: run this cell again.\n", true);
-    for (const w of it.waiters.splice(0)) w();
-    return;
-  }
-  if (it.busy) { it.dirty = true; return; }
-  it.busy = true;
-  it.buffer = document.createElement("div");
-  const id = nextId++;
-  const finish = () => {
-    it.busy = false;
-    if (it.dirty) { it.dirty = false; return changed(it); }
-    for (const w of it.waiters.splice(0)) w();
-  };
-  pending.set(id, {
-    start() {},
-    ...areaSink(it.buffer),
-    done() { it.out.replaceChildren(...it.buffer.childNodes); it.buffer = null; finish(); },
-    stopped(message) { it.buffer = null; appendText(it.out, message, true); it.dirty = false; finish(); },
-  });
-  worker.postMessage({ id, interact: it.iid, values: it.values });
-}
-
-// Coordinates under the mouse, for plots made by _graphics (each panel
-// carries its data ranges and pixel box).
-{
-  const tip = $("#plottip");
-  let cross = null;
-  const hide = () => { tip.hidden = true; cross?.remove(); cross = null; };
-  const fmt = (v) => String(+v.toPrecision(5));
-  document.addEventListener("pointermove", (e) => {
-    const svg = e.target.closest?.("svg.sb-plot");
-    const ctm = svg?.getScreenCTM();
-    if (!ctm) return hide();
-    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
-    for (const g of svg.querySelectorAll("g.sb-panel")) {
-      const [bx, by, bw, bh] = g.dataset.box.split(" ").map(Number);
-      if (pt.x < bx || pt.x > bx + bw || pt.y < by || pt.y > by + bh) continue;
-      const [x0, x1] = g.dataset.xr.split(" ").map(Number), [y0, y1] = g.dataset.yr.split(" ").map(Number);
-      const at = (a, b, f, log) => (log ? 10 ** (Math.log10(a) + f * (Math.log10(b) - Math.log10(a))) : a + f * (b - a));
-      const x = at(x0, x1, (pt.x - bx) / bw, g.dataset.xlog), y = at(y0, y1, 1 - (pt.y - by) / bh, g.dataset.ylog);
-      tip.textContent = `x = ${fmt(x)}, y = ${fmt(y)}`;
-      tip.hidden = false;
-      tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 4) + "px";
-      tip.style.top = e.clientY + 16 + "px";
-      if (!cross || cross.ownerSVGElement !== svg) {
-        cross?.remove();
-        cross = svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path"));
-        cross.setAttribute("stroke", "currentColor");
-        cross.setAttribute("stroke-opacity", "0.35");
-        cross.setAttribute("stroke-dasharray", "3,3");
-        cross.setAttribute("pointer-events", "none");
-      }
-      cross.setAttribute("d", `M${pt.x} ${by}V${by + bh}M${bx} ${pt.y}H${bx + bw}`);
-      return;
-    }
-    hide();
-  });
-}
-
-function settle(cell) {
-  clearInterval(cell.timer);
-  cell.runb.textContent = "▶";
-  cell.el.classList.remove("queued", "running");
-}
-
-function run(cell) {
-  if (cell.type === "markdown") return renderMd(cell);
-  if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
-  forgetInteracts(cell.out);
-  cell.out.textContent = "";
-  cell.time.textContent = "";
-  cell.el.classList.add("queued");
-  cell.n.textContent = "[*]";
-  cell.runb.textContent = "■";
-  let failed = false;
-  return new Promise((resolve) => submit(cell.ta.value, {
-    start() {
-      cell.el.classList.replace("queued", "running");
-      const t0 = performance.now();
-      cell.timer = setInterval(() => { cell.time.textContent = `running… ${((performance.now() - t0) / 1000).toFixed(1)} s`; }, 250);
-    },
-    ...areaSink(cell.out),
-    out(text, isErr) { failed ||= isErr; appendText(cell.out, text, isErr); },
-    done(ms) {
-      settle(cell);
-      cell.n.textContent = `[${++execCount}]`;
-      cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
-      announce(`Cell ${index(cell) + 1} ${failed ? "raised an error" : "finished"}`);
-      resolve();
-    },
-    stopped(message) {
-      settle(cell);
-      cell.n.textContent = "[ ]";
-      cell.time.textContent = "";
-      if (message) appendText(cell.out, message, true);
-      resolve();
-    },
-    skipped() { settle(cell); cell.n.textContent = "[ ]"; resolve(); },
-  }));
-}
-
-async function runAll() {
-  await Promise.all(cells().map(run)); // the worker runs them in order
-}
-
-const index = (cell) => cells().indexOf(cell);
-const forgetInteracts = (box) => box.querySelectorAll(".interact").forEach((el) => interacts.delete(el.dataset.key));
-
-function autosize(ta) {
-  ta.style.height = "auto";
-  ta.style.height = ta.scrollHeight + "px";
-}
-
-// Wrapped lines change with the width (phone rotation) and the font (web
-// fonts load after the first layout), so size every editor again then.
-let resizing = 0;
-const resizeAll = () => {
-  cancelAnimationFrame(resizing);
-  resizing = requestAnimationFrame(() => cellsEl.querySelectorAll(".ed textarea").forEach(autosize));
-};
-addEventListener("resize", resizeAll);
-document.fonts?.ready.then(resizeAll);
-
-// ------------------------------------------------------------ Tab completion
-// Tab after a name or `obj.` asks the worker (src/interactive.ts complete());
-// one match or a longer common prefix is inserted, several are listed below
-// the caret and filtered as you type: ↑/↓ choose, Tab/Enter accept, Esc closes.
-const completer = $("#completer");
-let comp = null; // { cell, start, matches, sel }
-function closeCompleter() {
-  comp = null;
-  completer.hidden = true;
-  completer.textContent = "";
-}
-function caretBox(ta) {
-  // a hidden copy of the editor text up to the caret, ending in a marker
-  const pre = document.createElement("pre");
-  pre.style.visibility = "hidden";
-  pre.textContent = ta.value.slice(0, ta.selectionStart);
-  const mark = document.createElement("span");
-  mark.textContent = "​";
-  pre.appendChild(mark);
-  ta.parentElement.appendChild(pre);
-  const r = mark.getBoundingClientRect();
-  pre.remove();
-  return r;
-}
-function showCompleter() {
-  const { cell, matches, sel, start } = comp;
-  const word = cell.ta.value.slice(start, cell.ta.selectionStart);
-  const dot = word.lastIndexOf(".") + 1; // list attribute names without `obj.`
-  completer.innerHTML = matches.slice(0, 500).map((m, i) => `<li role="option" id="comp${i}" aria-selected="${i === sel}">${esc(m.slice(dot))}</li>`).join("");
-  completer.hidden = false;
-  const r = caretBox(cell.ta);
-  completer.style.left = Math.max(0, Math.min(r.left + scrollX, scrollX + document.documentElement.clientWidth - completer.offsetWidth - 4)) + "px";
-  completer.style.top = r.bottom + scrollY + 2 + "px";
-  cell.ta.setAttribute("aria-activedescendant", "comp" + sel);
-  completer.children[sel]?.scrollIntoView({ block: "nearest" });
-}
-function acceptCompletion(i = comp.sel) {
-  const { cell, start, matches } = comp;
-  const word = cell.ta.value.slice(start, cell.ta.selectionStart);
-  closeCompleter();
-  if (matches[i]?.startsWith(word)) document.execCommand("insertText", false, matches[i].slice(word.length));
-}
-// Re-filter the list as the word under the caret changes.
-function refilter(cell) {
-  if (!comp || comp.cell !== cell) return;
-  const word = cell.ta.value.slice(comp.start, cell.ta.selectionStart);
-  if (cell.ta.selectionStart < comp.start || !/^[\w.]*$/.test(word) || word.lastIndexOf(".") !== comp.dot) return closeCompleter();
-  comp.matches = comp.all.filter((m) => m.startsWith(word));
-  if (!comp.matches.length) return closeCompleter();
-  comp.sel = Math.min(comp.sel, comp.matches.length - 1);
-  showCompleter();
-}
-async function tabComplete(cell) {
-  const ta = cell.ta, pos = ta.selectionStart, value = ta.value;
-  const before = value.slice(value.lastIndexOf("\n", pos - 1) + 1, pos);
-  if (ta.selectionEnd !== pos || !/[\w.]$/.test(before)) return false; // indent instead
-  const m = await ask({ complete: before }, {});
-  if (ta.value !== value || ta.selectionStart !== pos || document.activeElement !== ta) return true; // stale
-  const matches = m.matches ?? [], prefix = m.prefix ?? "";
-  if (!matches.length) return true;
-  let common = matches[0];
-  for (const x of matches) while (!x.startsWith(common)) common = common.slice(0, -1);
-  if (common.length > prefix.length) document.execCommand("insertText", false, common.slice(prefix.length));
-  if (matches.length > 1) {
-    comp = { cell, start: pos - prefix.length, all: matches, matches, sel: 0, dot: prefix.lastIndexOf(".") };
-    showCompleter();
-  }
-  return true;
-}
-completer.addEventListener("mousedown", (e) => {
-  const li = e.target.closest("li");
-  if (!li || !comp) return;
-  e.preventDefault(); // keep the focus in the editor
-  acceptCompletion([...completer.children].indexOf(li));
+// ------------------------------------------------------------ the kernel and the notebook
+// The kernel is Sagebrush in a Web Worker (or, under `sagebrush notebook`,
+// native Python behind the local server); the notebook is web/notebook.
+let db = null;
+const kernel = new WorkerKernel({
+  createWorker: () => (LOCAL ? new RemoteWorker() : new Worker("sagebrush-worker.js", { type: "module" })),
+  // the browser's files (and, in the app, the notebook's folder) for Python's open()
+  onStart: async (w) => {
+    if (diskFiles.length) w.postMessage({ files: diskFiles });
+    if (!LOCAL) await sendFiles(w);
+  },
+  onMessage: (m) => {
+    if (m.fsChanged === undefined) return false;
+    // in the app, a file Python wrote in its top folder goes to the notebook's folder
+    if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) TAURI.fs.writeFile(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data).catch((e) => console.warn(e));
+    fileChanged(m.fsChanged, m.data);
+    return true;
+  },
 });
-
-// ------------------------------------------------------------ cells, as in Jupyter
-// A cell is a gutter (the prompt [n]:, a run button, the drag handle), the
-// editor or its rendered Markdown, and the output; a toolbar shows at the top
-// right of the active or hovered cell, + Code / + Text below it.  Edit mode is
-// the focus in the editor; command mode (Esc) is the focus on the cell, where
-// single keys act on cells as in Jupyter (A, B, D D, M, Y, ...).
-const TRASH_SVG = '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M2.5 4h11M6 4V2.5h4V4M4 4l.8 9.5h6.4L12 4M6.8 6.5v5M9.2 6.5v5"/></svg>';
-function addCell(code = "", where = null, focus = false, type = "code") {
-  const el = document.createElement("div");
-  el.className = "cell";
-  el.tabIndex = -1;
-  el.setAttribute("role", "group");
-  el.innerHTML = `<div class="gutter" draggable="true" title="Drag to move the cell"><span class="n">[ ]</span><button class="runb" data-a="run" draggable="false">▶</button></div>`
-    + `<div class="body"><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><div class="mdout" tabindex="0" title="Double-click or press Enter to edit"></div><div class="out"></div><div class="time"></div></div>`
-    + `<div class="head" role="toolbar"><span class="drag" draggable="true" title="Drag to move the cell" aria-hidden="true">⠿</span><select data-a="type" aria-label="Cell type" title="Cell type (M: Markdown, Y: code)"><option value="code">Code</option><option value="markdown">Markdown</option></select><button data-a="up" title="Move up (Alt+↑)" aria-label="Move up">↑</button><button data-a="down" title="Move down (Alt+↓)" aria-label="Move down">↓</button><button data-a="del" title="Delete (D D; Z undoes)" aria-label="Delete">${TRASH_SVG}</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" aria-controls="cellmenu" title="Cell actions">⋯</button></div>`
-    + `<div class="adder"><button data-a="addcode" title="Insert a code cell below">+ Code</button><button data-a="addmd" title="Insert a Markdown (text) cell below">+ Text</button></div>`;
-  const cell = { el, type: "code", ta: el.querySelector("textarea"), hl: el.querySelector(".ed pre"), out: el.querySelector(".out"), md: el.querySelector(".mdout"), time: el.querySelector(".time"), n: el.querySelector(".n"), runb: el.querySelector(".runb"), typeSel: el.querySelector('[data-a="type"]'), menuBtn: el.querySelector('[data-a="menu"]') };
-  el.cell = cell;
-  cell.md.addEventListener("dblclick", () => editMd(cell));
-  cell.ta.value = code;
-  cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); refilter(cell); });
-  cell.ta.addEventListener("blur", () => { if (comp?.cell === cell) closeCompleter(); });
-  cell.ta.addEventListener("click", () => { if (comp?.cell === cell) closeCompleter(); });
-  cell.ta.addEventListener("keydown", (e) => editKey(cell, e));
-  cell.runb.onclick = () => (el.classList.contains("running") || el.classList.contains("queued") ? $("#stop").click() : run(cell));
-  cell.menuBtn.onclick = () => openMenu(cell);
-  cell.typeSel.onchange = () => { setType(cell, cell.typeSel.value); scheduleSave(); edit(cell); };
-  el.querySelector('[data-a="up"]').onclick = () => move(cell, -1);
-  el.querySelector('[data-a="down"]').onclick = () => move(cell, 1);
-  el.querySelector('[data-a="del"]').onclick = () => remove(cell, true);
-  el.querySelector('[data-a="addcode"]').onclick = () => addCell("", { after: el }, true);
-  el.querySelector('[data-a="addmd"]').onclick = () => addCell("", { after: el }, true, "markdown");
-  // a click on the gutter or the cell's margin selects it (command mode)
-  el.addEventListener("click", (e) => { if (e.target === el || (e.target.closest(".gutter") && !e.target.closest("button"))) select(cell); });
-  if (where?.before) where.before.before(el);
-  else if (where?.after) where.after.after(el);
-  else cellsEl.appendChild(el);
-  setType(cell, type);
-  autosize(cell.ta);
-  paint(cell);
-  relabel();
-  if (focus) cell.ta.focus();
-  return cell;
-}
-
-// The active cell (the bar on the left): the last one focused or clicked.
-let active = null;
-function activate(cell) {
-  if (active === cell) return;
-  active?.el.classList.remove("active");
-  active = cell ?? null;
-  active?.el.classList.add("active");
-}
-cellsEl.addEventListener("focusin", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
-cellsEl.addEventListener("pointerdown", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
-// command mode on a cell, or edit mode in it
-function select(cell) {
-  if (!cell) return;
-  activate(cell);
-  (cell.el.classList.contains("rendered") ? cell.md : cell.el).focus({ preventScroll: true });
-  cell.el.scrollIntoView({ block: "nearest" });
-}
-function edit(cell, where) {
-  if (!cell) return;
-  if (cell.el.classList.contains("rendered")) return select(cell); // rendered Markdown: Enter edits it
-  cell.ta.focus({ preventScroll: true });
-  if (where === "start") cell.ta.setSelectionRange(0, 0);
-  else if (where === "end") cell.ta.setSelectionRange(cell.ta.value.length, cell.ta.value.length);
-  cell.el.scrollIntoView({ block: "nearest" });
-}
-const prevCell = (cell) => cell.el.previousElementSibling?.cell;
-const nextCell = (cell) => cell.el.nextElementSibling?.cell;
-
-// The caret is on the first (last) visual row of the editor: ↑ (↓) leaves the cell.
-function atEdge(ta, up) {
-  if (ta.selectionStart !== ta.selectionEnd) return false;
-  const p = ta.selectionStart, v = ta.value;
-  if (up ? v.lastIndexOf("\n", p - 1) >= 0 : v.indexOf("\n", p) >= 0) return false;
-  const r = caretBox(ta), t = ta.getBoundingClientRect(), cs = getComputedStyle(ta), lh = parseFloat(cs.lineHeight) || 20;
-  return up ? r.top - t.top < parseFloat(cs.paddingTop) + lh / 2 : t.bottom - r.bottom < parseFloat(cs.paddingBottom) + lh / 2 + 4;
-}
-
-// Line edits (indent, dedent, comment) on the lines the selection touches, undoably.
-function editLines(ta, f) {
-  const v = ta.value, s0 = ta.selectionStart, s1 = ta.selectionEnd;
-  const a = v.lastIndexOf("\n", s0 - 1) + 1;
-  let b = v.indexOf("\n", s1 > s0 && v[s1 - 1] === "\n" ? s1 - 1 : s1);
-  if (b < 0) b = v.length;
-  const old = v.slice(a, b), next = f(old.split("\n")).join("\n");
-  if (next === old) return;
-  ta.setSelectionRange(a, b);
-  document.execCommand(next ? "insertText" : "delete", false, next);
-  if (s0 === s1 || !old.includes("\n")) { const p = Math.max(a, s0 + next.length - old.length); ta.setSelectionRange(p, p); }
-  else ta.setSelectionRange(a, a + next.length);
-}
-const indentLines = (ls) => ls.map((l) => (l.trim() ? "    " + l : l));
-const dedentLines = (ls) => ls.map((l) => l.replace(/^( {1,4}|\t)/, ""));
-function commentLines(ls) {
-  const cm = isMagma() ? "//" : "#", full = ls.filter((l) => l.trim());
-  if (!full.length) return ls;
-  if (full.every((l) => l.trimStart().startsWith(cm))) return ls.map((l) => l.replace(new RegExp(`^(\\s*)${cm} ?`), "$1"));
-  const ind = Math.min(...full.map((l) => /^\s*/.exec(l)[0].length));
-  return ls.map((l) => (l.trim() ? l.slice(0, ind) + cm + " " + l.slice(ind) : l));
-}
-
-// Split a cell at the caret (or around the selection): Ctrl+Shift+- as in Jupyter, Ctrl+; as in CoCalc.
-function split(cell) {
-  const v = cell.ta.value, s0 = cell.ta.selectionStart, s1 = cell.ta.selectionEnd;
-  const parts = (s1 > s0 ? [v.slice(0, s0), v.slice(s0, s1), v.slice(s1)] : [v.slice(0, s0), v.slice(s0)]).map((p) => p.replace(/^\n/, "").replace(/\n$/, ""));
-  cell.ta.value = parts[0];
-  autosize(cell.ta); paint(cell);
-  let last = cell, lastNew = null;
-  for (const p of parts.slice(1)) lastNew = last = addCell(p, { after: last.el }, false, cell.type);
-  edit(parts.length === 3 ? nextCell(cell) : lastNew, "start");
-  announce("Cell split");
-}
-// Merge with the cell below (Shift+M in command mode).
-function merge(cell) {
-  const below = nextCell(cell);
-  if (!below) return;
-  cell.ta.value = [cell.ta.value, below.ta.value].filter((s) => s.trim()).join("\n");
-  below.el.remove();
-  forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = "";
-  autosize(cell.ta); paint(cell); relabel();
-  if (cell.el.classList.contains("rendered")) renderMd(cell);
-  select(cell);
-  announce("Cells merged");
-}
-
-// Edit mode keys: run, leave, move between cells, indent, comment, split.
-function editKey(cell, e) {
-  const ta = cell.ta, mod = e.ctrlKey || e.metaKey;
-  if (comp?.cell === cell) {
-    const n = comp.matches.length;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      comp.sel = (comp.sel + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
-      return showCompleter();
-    }
-    if ((e.key === "Tab" || e.key === "Enter") && !e.shiftKey && !mod) {
-      e.preventDefault();
-      return acceptCompletion();
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      return closeCompleter();
-    }
-    if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown") closeCompleter();
-  }
-  const done = () => e.preventDefault();
-  if (e.key === "Enter" && (e.shiftKey || mod || e.altKey)) {
-    done();
-    run(cell);
-    if (e.shiftKey) advance(cell);
-    else if (e.altKey) addCell("", { after: cell.el }, true);
-  } else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-    done();
-    move(cell, e.key === "ArrowUp" ? -1 : 1);
-  } else if (e.key === "Escape" || (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "m")) {
-    done();
-    select(cell); // command mode; Tab from there leaves the cell (no keyboard trap)
-  } else if (mod && (e.key === ";" || (e.shiftKey && (e.key === "-" || e.key === "_" || e.code === "Minus")))) {
-    done();
-    split(cell);
-  } else if (mod && !e.shiftKey && e.key === "/") {
-    done();
-    editLines(ta, commentLines);
-  } else if (mod && (e.key === "]" || e.key === "[")) {
-    done();
-    editLines(ta, e.key === "]" ? indentLines : dedentLines);
-  } else if (e.key === "Tab" && e.shiftKey && !mod) {
-    done();
-    editLines(ta, dedentLines);
-  } else if (e.key === "Tab" && !mod && !e.altKey) {
-    done();
-    const v = ta.value, s0 = ta.selectionStart, s1 = ta.selectionEnd;
-    if (v.slice(s0, s1).includes("\n")) editLines(ta, indentLines);
-    else if (cell.type === "code" && /[\w.]$/.test(v.slice(0, s0)) && s0 === s1) tabComplete(cell);
-    else document.execCommand("insertText", false, "    "); // keeps undo working
-  } else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !mod && !e.shiftKey && !e.altKey) {
-    const up = e.key === "ArrowUp", to = up ? prevCell(cell) : nextCell(cell);
-    if (to && atEdge(ta, up)) { done(); edit(to, up ? "end" : "start"); }
-  } else if (e.key === "Enter" && cell.type === "code" && !e.isComposing) {
-    // keep the indentation; one more level after a colon, one less after return/pass/...
-    done();
-    const v = ta.value, p = ta.selectionStart, line = v.slice(v.lastIndexOf("\n", p - 1) + 1, p);
-    let ind = /^[ \t]*/.exec(line)[0];
-    const atEol = ta.selectionEnd === (v.indexOf("\n", p) < 0 ? v.length : v.indexOf("\n", p));
-    if (!isMagma() && /:\s*(#.*)?$/.test(line)) ind += "    ";
-    else if (atEol && /^\s*(return|pass|break|continue|raise)\b/.test(line)) ind = ind.slice(0, Math.max(0, ind.length - 4));
-    document.execCommand("insertText", false, "\n" + ind);
-  } else if (e.key === "Backspace" && !mod && !e.altKey && ta.selectionStart === ta.selectionEnd) {
-    // in the leading spaces, back to the previous multiple of four
-    const v = ta.value, p = ta.selectionStart, before = v.slice(v.lastIndexOf("\n", p - 1) + 1, p);
-    if (before.length && /^ +$/.test(before)) {
-      done();
-      ta.setSelectionRange(p - (before.length % 4 || 4), p);
-      document.execCommand("delete");
-    }
-  }
-}
-
-// Command mode keys, on the selected cell (or its rendered Markdown).
-let lastKey = "", lastKeyAt = 0, clip = null;
-const trash = [];
-const twice = (k) => { const t = performance.now(), hit = lastKey === k && t - lastKeyAt < 800; lastKey = hit ? "" : k; lastKeyAt = t; return hit; };
-function remove(cell, command = false) {
-  const next = nextCell(cell) ?? prevCell(cell);
-  trash.push({ el: cell.el, next: cell.el.nextElementSibling, prev: cell.el.previousElementSibling });
-  if (trash.length > 50) trash.shift();
-  if (comp?.cell === cell) closeCompleter();
-  cell.el.remove();
-  if (active === cell) activate(null);
-  if (!cells().length) addCell("", null, true);
-  else if (command) select(next);
-  else edit(next);
-  relabel();
-  announce("Cell deleted" + (command ? "; Z undoes" : ""));
-}
-function undelete() {
-  const t = trash.pop();
-  if (!t) return;
-  if (t.next?.isConnected) t.next.before(t.el);
-  else if (t.prev?.isConnected) t.prev.after(t.el);
-  else cellsEl.appendChild(t.el);
-  relabel();
-  select(t.el.cell);
-  announce("Cell restored");
-}
-function paste(cell, above) {
-  if (!clip) return;
-  let at = cell, first = null;
-  for (const c of above ? [...clip].reverse() : clip) {
-    const n = addCell(c.code, above ? { before: (first ?? at).el } : { after: at.el }, false, c.type);
-    if (n.type === "markdown") renderMd(n);
-    if (above) first = n; else at = n;
-  }
-  select(above ? first : at);
-}
-cellsEl.addEventListener("keydown", (e) => {
-  const cell = e.target.closest?.(".cell")?.cell;
-  if (!cell || (e.target !== cell.el && e.target !== cell.md)) return;
-  const mod = e.ctrlKey || e.metaKey;
-  if (e.key === "Enter" && (e.shiftKey || mod || e.altKey)) {
-    e.preventDefault();
-    run(cell);
-    if (e.shiftKey) advance(cell);
-    else if (e.altKey) addCell("", { after: cell.el }, true);
-    return;
-  }
-  if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) { e.preventDefault(); return move(cell, e.key === "ArrowUp" ? -1 : 1); }
-  if (mod || e.altKey) return;
-  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  switch (k) {
-    case "Enter": if (cell.el.classList.contains("rendered")) editMd(cell); else edit(cell); break;
-    case "ArrowUp": case "k": select(prevCell(cell) ?? cell); break;
-    case "ArrowDown": case "j": select(nextCell(cell) ?? cell); break;
-    case "a": select(addCell("", { before: cell.el })); break;
-    case "b": select(addCell("", { after: cell.el })); break;
-    case "d": if (twice("d")) remove(cell, true); break;
-    case "z": undelete(); break;
-    case "c": clip = [{ type: cell.type, code: cell.ta.value }]; announce("Cell copied"); break;
-    case "x": clip = [{ type: cell.type, code: cell.ta.value }]; remove(cell, true); break;
-    case "v": paste(cell, e.shiftKey); break;
-    case "m": if (e.shiftKey) merge(cell); else if (cell.type !== "markdown") { setType(cell, "markdown"); scheduleSave(); select(cell); } break;
-    case "y": if (cell.type !== "code") { setType(cell, "code"); scheduleSave(); select(cell); } break;
-    case "i": if (twice("i")) $("#stop").click(); break;
-    case "0": if (twice("0")) $("#restart").click(); break;
-    case "h": $("#keysdlg").showModal(); break;
-    default: return;
-  }
-  e.preventDefault();
+kernel.on("status", (text) => (statusEl.textContent = text));
+const nb = createNotebook($("#cells"), { kernel });
+nb.on("dirty", () => (savedEl.textContent = ""));
+nb.on("saved", (text) => (savedEl.textContent = text));
+// a change made in another tab: its name and language too
+nb.on("remote", (d) => {
+  if (typeof d.name === "string" && d.name !== nbName.value && document.activeElement !== nbName) showName(d.name);
+  modeEl.value = nb.mode;
 });
-
-// Drag a cell by its prompt (or the ⠿ in its toolbar) to move it.
-let dragCell = null;
-const dropline = $("#dropline");
-function dropBefore(y) {
-  for (const c of cells()) { const r = c.el.getBoundingClientRect(); if (y < r.top + r.height / 2) return c.el; }
-  return null;
-}
-function endDrag() {
-  dragCell?.el.classList.remove("dragging");
-  dragCell = null;
-  dropline.hidden = true;
-}
-cellsEl.addEventListener("dragstart", (e) => {
-  const cell = e.target.closest?.(".gutter, .drag") && e.target.closest(".cell")?.cell;
-  if (!cell) return; // e.g. text dragged out of an editor
-  dragCell = cell;
-  e.dataTransfer.effectAllowed = "move";
-  e.dataTransfer.setData("text/plain", cell.ta.value);
-  e.dataTransfer.setDragImage(cell.el, 30, 16);
-  requestAnimationFrame(() => cell.el.classList.add("dragging"));
-});
-cellsEl.addEventListener("dragover", (e) => {
-  if (!dragCell) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-  const before = dropBefore(e.clientY), box = cellsEl.getBoundingClientRect();
-  const y = before ? before.getBoundingClientRect().top : cellsEl.lastElementChild.getBoundingClientRect().bottom;
-  Object.assign(dropline.style, { top: `${y + scrollY - 2}px`, left: `${box.left + scrollX}px`, width: `${box.width}px` });
-  dropline.hidden = false;
-});
-cellsEl.addEventListener("drop", (e) => {
-  if (!dragCell) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const cell = dragCell, before = dropBefore(e.clientY);
-  endDrag();
-  if (before === cell.el || before === cell.el.nextElementSibling) return;
-  if (before) before.before(cell.el); else cellsEl.appendChild(cell.el);
-  relabel();
-  select(cell);
-  announce(`Moved to position ${index(cell) + 1}`);
-});
-cellsEl.addEventListener("dragend", endDrag);
-
+nb.on("mode", (m) => { modeEl.value = m; try { localStorage.setItem("sagebrush-mode", m); } catch {} });
+const cells = () => nb.cells();
+// for tests and in-page agents: the notebook and its kernel
+window.sagebrush = { notebook: nb, kernel };
+const isSage = () => nb.mode === "sage";
+const isMagma = () => nb.mode === "magma";
 // Printing (File > Print, or Ctrl+P) gives the notebook alone (the print CSS
-// above): its name on top, 3D views as pictures of how they are turned now
-// (web/viewer3d.js keeps one, img.print3d, beside each canvas),
-// and the notebook's name as the PDF's file name.
+// above and web/notebook/notebook.css): its name on top, and the notebook's
+// name as the PDF's file name.
 let titleBeforePrint = null;
 addEventListener("beforeprint", () => {
   $("#printname").textContent = nbName.value.trim() || "Untitled";
@@ -1512,130 +493,7 @@ addEventListener("beforeprint", () => {
   titleBeforePrint = document.title;
   document.title = fileBase();
 });
-addEventListener("afterprint", () => {
-  if (titleBeforePrint) document.title = titleBeforePrint;
-});
-
-// ------------------------------------------------------------ Markdown cells
-function setType(cell, type) {
-  cell.type = type === "markdown" ? "markdown" : "code";
-  cell.el.classList.toggle("markdown", cell.type === "markdown");
-  cell.el.classList.remove("rendered");
-  cell.n.textContent = cell.type === "markdown" ? "" : "[ ]";
-  cell.runb.title = cell.type === "markdown" ? "Show the text (Shift+Enter)" : "Run (Shift+Enter)";
-  cell.typeSel.value = cell.type;
-  if (cell.type === "markdown") { forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; }
-  paint(cell);
-  relabel();
-}
-let mdModule = null, mathModule = null;
-// (or 200 ms, whichever is first: a hidden page, e.g. a background tab, does not paint)
-const afterPaint = () => new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
-const loadMd = () => (mdModule ??= Promise.resolve(globalThis.__sbMarkdown)); // web/markdown.ts, bundled into this script by web/build.ts
-// Highlight fenced Python/Sage code in Markdown as in code cells.
-const mdHighlight = (code, lang) => (!lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
-async function renderMd(cell) {
-  const { render } = await loadMd();
-  cell.md.innerHTML = cell.ta.value.trim() ? render(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
-  cell.el.classList.add("rendered");
-  if (cell.md.querySelector(".math")) {
-    await afterPaint(); // the text shows first; KaTeX (275 KB) typesets the math after
-    try { (await (mathModule ??= import(new URL("sagebrush-math.js", location.href).href))).typeset(cell.md); } catch {}
-  }
-  scheduleSave();
-}
-function editMd(cell) {
-  cell.el.classList.remove("rendered");
-  autosize(cell.ta);
-  cell.ta.focus();
-}
-
-// Accessible names: "Cell 3", "Cell 3 code", ...
-function relabel() {
-  cells().forEach((c, i) => {
-    c.el.setAttribute("aria-label", `Cell ${i + 1}${c.type === "markdown" ? " (Markdown)" : ""}`);
-    c.md.setAttribute("aria-label", `Cell ${i + 1} text`);
-    c.ta.setAttribute("aria-label", `Cell ${i + 1} code`);
-    c.el.querySelector('[data-a="run"]').setAttribute("aria-label", `Run cell ${i + 1}`);
-    c.menuBtn.setAttribute("aria-label", `Cell ${i + 1} actions`);
-  });
-}
-
-// Move to the next cell, making one at the end.
-function advance(cell) {
-  const next = cell.el.nextElementSibling?.cell ?? addCell("", { after: cell.el });
-  (next.el.classList.contains("rendered") ? next.md : next.ta).focus();
-  next.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-}
-
-function move(cell, d) {
-  const sib = d < 0 ? cell.el.previousElementSibling : cell.el.nextElementSibling;
-  if (!sib) return;
-  const hadFocus = cell.el.contains(document.activeElement) ? document.activeElement : null;
-  if (d < 0) sib.before(cell.el); else sib.after(cell.el);
-  hadFocus?.focus();
-  cell.el.scrollIntoView({ block: "nearest" });
-  relabel();
-  announce(`Moved to position ${index(cell) + 1}`);
-}
-
-
-// ------------------------------------------------------------ the cell menu
-let menuCell = null;
-function openMenu(cell) {
-  if (menuCell === cell) return closeMenu(true);
-  closeMenu(false);
-  menuCell = cell;
-  const r = cell.menuBtn.getBoundingClientRect();
-  menu.hidden = false;
-  menu.style.top = `${r.bottom + scrollY + 4}px`;
-  menu.style.left = `${Math.max(8, r.right + scrollX - menu.offsetWidth)}px`;
-  cell.menuBtn.setAttribute("aria-expanded", "true");
-  menu.querySelector('[data-m="type"]').textContent = cell.type === "markdown" ? "Change to Code" : "Change to Markdown";
-  menu.querySelector("button").focus();
-}
-function closeMenu(refocus) {
-  if (!menuCell) return;
-  menuCell.menuBtn.setAttribute("aria-expanded", "false");
-  if (refocus) menuCell.menuBtn.focus();
-  menu.hidden = true;
-  menuCell = null;
-}
-menu.addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (!b || !menuCell) return;
-  const cell = menuCell;
-  closeMenu(false);
-  switch (b.dataset.m) {
-    case "above": return void addCell("", { before: cell.el }, true);
-    case "below": return void addCell("", { after: cell.el }, true);
-    case "up": move(cell, -1); return cell.menuBtn.focus();
-    case "down": move(cell, 1); return cell.menuBtn.focus();
-    case "type": setType(cell, cell.type === "markdown" ? "code" : "markdown"); scheduleSave(); return cell.ta.focus();
-    case "clear": if (cell.type === "markdown") return cell.ta.focus(); forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
-    case "delete": return remove(cell);
-  }
-});
-menu.addEventListener("keydown", (e) => {
-  const items = [...menu.querySelectorAll("button")];
-  const i = items.indexOf(document.activeElement);
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    e.preventDefault();
-    items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
-  } else if (e.key === "Home" || e.key === "End") {
-    e.preventDefault();
-    items[e.key === "Home" ? 0 : items.length - 1].focus();
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    closeMenu(true);
-  } else if (e.key === "Tab") {
-    closeMenu(true);
-    e.preventDefault();
-  }
-});
-document.addEventListener("pointerdown", (e) => {
-  if (menuCell && !menu.contains(e.target) && e.target !== menuCell.menuBtn) closeMenu(false);
-});
+addEventListener("afterprint", () => { if (titleBeforePrint) document.title = titleBeforePrint; });
 
 // ------------------------------------------------------------ the console
 let consoleUi = null;
@@ -1650,22 +508,22 @@ async function toggleConsole(show = consoleEl.hidden) {
   const { openConsole } = await import(new URL("sagebrush-console.js", location.href).href); // loaded on demand, never bundled
   consoleUi = openConsole($("#term"), {
     // Pictures (and @interact controls) from the console go to the panel beside it.
-    run: (src, out) => new Promise((resolve) => submit(src, {
+    run: (src, out) => new Promise((resolve) => kernel.execute(src, { mode: nb.mode, repl: true }, {
       start() {}, out, done: () => resolve(),
-      display(b) { const box = consolePictures(); box.replaceChildren(); appendDisplay(box, b); out(`[${b["text/plain"] ?? "picture"}: shown on the right]\n`, false); },
-      interact(spec) { const box = consolePictures(); forgetInteracts(box); box.replaceChildren(); renderInteract(box, spec); out("[controls shown on the right]\n", false); },
+      display(b) { const box = consolePictures(); box.replaceChildren(); nb.output.display(box, b); out(`[${b["text/plain"] ?? "picture"}: shown on the right]\n`, false); },
+      interact(spec) { const box = consolePictures(); nb.output.forget(box); box.replaceChildren(); nb.output.interact(box, spec); out("[controls shown on the right]\n", false); },
       clear() {},
       stopped(message) { out("\n" + message.trim() + "\n", true); resolve(); },
       skipped() { resolve(); },
-    }, { repl: true })),
-    more: (src) => ask({ check: src }, false).then((m) => !!m.more),
-    complete: (line) => ask({ complete: line }, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
-    interrupt: () => interrupt("\nKeyboardInterrupt (interpreter restarted; variables are gone).\n"),
+    })),
+    more: (src) => kernel.ask({ check: src }, nb.mode, false).then((m) => !!m.more),
+    complete: (line) => kernel.ask({ complete: line }, nb.mode, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
+    interrupt: () => kernel.interrupt("\nKeyboardInterrupt (interpreter restarted; variables are gone).\n"),
     sage: isSage,
-    version: () => version,
+    version: () => kernel.version,
     announce,
   });
-  statusEl.textContent = `ready (sagebrush ${version})`;
+  statusEl.textContent = `ready (sagebrush ${kernel.version})`;
 }
 function consolePictures() {
   const box = $("#cplot");
@@ -1690,7 +548,7 @@ $("#closeconsole").onclick = () => toggleConsole(false);
   });
 }
 
-// ------------------------------------------------------------ theme, mode, loading
+// ------------------------------------------------------------ theme, mode, toolbar
 function setTheme(t) {
   themeEl.value = t;
   if (t === "system") delete document.documentElement.dataset.theme;
@@ -1701,23 +559,15 @@ function setTheme(t) {
 themeEl.onchange = () => setTheme(themeEl.value);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => consoleUi?.setTheme());
 themeEl.value = document.documentElement.dataset.theme || "system";
+const setMode = (mode) => nb.setMode(mode);
 
-function setMode(mode) {
-  modeEl.value = mode;
-  try { localStorage.setItem("sagebrush-mode", mode); } catch {}
-  for (const c of cells()) paint(c);
-}
-
-
-$("#runall").onclick = runAll;
-$("#add").onclick = () => addCell("", null, true);
-$("#addmd").onclick = () => addCell("", null, true, "markdown");
-$("#addend-code").onclick = () => addCell("", null, true);
-$("#addend-md").onclick = () => addCell("", null, true, "markdown");
-$("#keysbtn").onclick = () => $("#keysdlg").showModal();
-$("#stop").onclick = () => interrupt("\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n");
-$("#restart").onclick = () => { stop("\nInterpreter restarted.\n"); for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; } };
-modeEl.onchange = () => { setMode(modeEl.value); scheduleSave(); };
+$("#runall").onclick = () => nb.runAll();
+$("#add").onclick = () => nb.addCell("", null, true);
+$("#addmd").onclick = () => nb.addCell("", null, true, "markdown");
+$("#keysbtn").onclick = () => nb.showKeys();
+$("#stop").onclick = () => nb.interrupt();
+$("#restart").onclick = () => nb.restart();
+modeEl.onchange = () => setMode(modeEl.value);
 const sel = $("#examples");
 for (const k of Object.keys(EXAMPLES)) sel.add(new Option(k, k));
 sel.onchange = () => {
@@ -1730,121 +580,81 @@ sel.onchange = () => {
 };
 
 // ------------------------------------------------------------ notebooks and files
-// Notebooks (cells, outputs, mode) and files live in this browser's IndexedDB.
-// The notebook is saved as you work; File > Open lists the others.
-let db = null;
-function openDb() {
-  return new Promise((resolve) => {
-    try {
-      const r = indexedDB.open("sagebrush", 1);
-      r.onupgradeneeded = () => { r.result.createObjectStore("notebooks", { keyPath: "id" }); r.result.createObjectStore("files"); };
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => resolve(null);
-    } catch { resolve(null); }
-  });
-}
-function idb(store, mode, f) {
-  return new Promise((resolve, reject) => {
-    if (!db) return resolve(undefined);
-    const tx = db.transaction(store, mode);
-    const r = f(tx.objectStore(store));
-    tx.oncomplete = () => resolve(r?.result);
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-// A cell's output as Jupyter outputs (stream and display_data).
-function saveOutputs(box) {
-  const outs = [];
-  const stream = (name, text) => {
-    const last = outs.at(-1);
-    if (last?.output_type === "stream" && last.name === name) last.text += text;
-    else outs.push({ output_type: "stream", name, text });
-  };
-  for (const el of box?.children ?? []) {
-    if (el.tagName === "PRE") {
-      for (const n of el.childNodes) stream(n.nodeType === 1 && n.classList.contains("e") ? "stderr" : "stdout", n.textContent);
-    } else if ((el.tagName === "FIGURE" || el.classList.contains("latex-out")) && el.sbBundle) {
-      // a big 3D scene (a mesh of millions of triangles) is not kept with the
-      // notebook: its picture is, and running the cell again restores the view
-      const b = { ...el.sbBundle };
-      if ((b[SCENE3D]?.length ?? 0) > 8e6) delete b[SCENE3D];
-      outs.push({ output_type: "display_data", data: b, metadata: {} });
-    } else if (el.tagName === "FIGURE") {
-      const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
-      if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }
-      else if (img) { const [head, b64] = img.src.split(","); data[head.slice(5, head.indexOf(";"))] = b64; data["text/plain"] = img.alt; }
-      outs.push({ output_type: "display_data", data, metadata: {} });
-    } else if (el.classList.contains("interact")) {
-      stream("stdout", "[interactive controls: run the cell to use them]\n");
-      outs.push(...saveOutputs(el.querySelector(".iout")));
-    }
-  }
-  return outs;
-}
-const joinText = (t) => (Array.isArray(t) ? t.join("") : t ?? "");
-function loadOutputs(box, outs) {
-  for (const o of outs ?? []) {
-    if (o.output_type === "stream") appendText(box, joinText(o.text), o.name === "stderr");
-    else if (o.output_type === "error") appendText(box, (o.traceback ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "") + "\n", true);
-    else if (o.data) {
-      const b = {};
-      for (const [k, v] of Object.entries(o.data)) b[k] = joinText(v);
-      if (b["text/plain"] && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["application/vnd.sagebrush.typeset"]) appendText(box, b["text/plain"] + "\n", false);
-      else appendDisplay(box, b);
-    }
-  }
-}
-
-let nb = { id: null, name: "Untitled" }, loading = false, saveTimer = null;
+// Notebooks (cells, outputs, mode) and files live in this browser's IndexedDB
+// (web/notebook/stores.js IdbStore: the same notebook open in two tabs stays
+// in step).  Under `sagebrush notebook` the notebook is the .ipynb file on
+// disk; in the app, a file opened from the computer is.
 const nbName = $("#nbname"), savedEl = $("#saved");
-const newId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2));
-function snapshot() {
-  return {
-    id: nb.id, name: nbName.value.trim() || "Untitled", mode: modeEl.value, updated: Date.now(),
-    cells: cells().map((c) => (c.type === "markdown"
-      ? { type: "markdown", code: c.ta.value, ...(c.attachments ? { attachments: c.attachments } : {}) }
-      : { code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null })),
-  };
+const docName = () => nbName.value.trim() || "Untitled";
+function showName(name) {
+  nbName.value = name || "Untitled";
+  document.title = `${nbName.value} — Sagebrush`;
 }
-function scheduleSave() {
-  if (loading || !nb.id) return;
-  clearTimeout(saveTimer);
-  savedEl.textContent = "";
-  saveTimer = setTimeout(saveNow, 500);
+nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); });
+
+// A store for a file saved as .ipynb text: the local server's file, or the app's.
+class TextFileStore {
+  constructor(name, read, write, label) { this.name = name; this.read = read; this.write = write; this.label = label; this.last = null; }
+  async load() {
+    let doc = null;
+    try { const text = await this.read(); if (text != null) { doc = fromFile(this.name, text, "sage"); this.last = text; } } catch {}
+    return doc ?? { name: this.name.replace(/\.ipynb$/i, ""), mode: "sage", cells: [{ id: cellId(), code: "" }] };
+  }
+  async save(doc) {
+    const text = toIpynb(doc);
+    if (text === this.last) return "saved to " + this.label;
+    await this.write(text);
+    this.last = text;
+    return "saved to " + this.label;
+  }
 }
-async function saveNow() {
-  clearTimeout(saveTimer);
-  // (only the notebook from disk saves there: examples and others stay in the browser)
-  if (LOCAL && nb.id === "local:" + LOCAL.path) return saveLocal();
-  if (diskFile && nb.id === "file:" + diskFile.path) return saveDisk();
-  if (loading || !nb.id || !db) return;
-  try {
-    await idb("notebooks", "readwrite", (st) => st.put(snapshot()));
-    savedEl.textContent = "saved in this browser";
-  } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
+
+// Open a document in the notebook, from a store (and remember it for next time).
+let current = { id: null, kind: "browser" };
+async function open(store, id, kind = "browser") {
+  nb.detach();
+  current = { id, kind };
+  const doc = await nb.attach(store);
+  showName(doc.name);
+  modeEl.value = nb.mode;
+  if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
+  return doc;
 }
+// cells: code strings, or {md: text} for Markdown (examples, share links)
+const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } : c.md !== undefined ? { type: "markdown", code: c.md } : c) });
+async function openDocument(doc) {
+  const id = newId();
+  return open(new IdbStore(db, id, { ...doc, id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id);
+}
+const openNew = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) });
+async function openId(id) {
+  const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
+  if (!doc) return false;
+  await open(new IdbStore(db, id), id);
+  savedEl.textContent = "opened";
+  return true;
+}
+const saveNow = () => nb.flush();
+
 // The app: a notebook opened from the computer is its .ipynb file, and the
 // files in its folder are Python's files (read when it opens; what Python
 // writes goes back there)
-let diskFile = null, diskFiles = [], diskSaved = null;
+let diskFile = null, diskFiles = [];
 const splitPath = (p) => { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return { dir: p.slice(0, i), sep: p[i] || "/", name: p.slice(i + 1) }; };
-async function bindDiskFile(path) {
+async function bindDiskFile(path, doc = null) {
   const { dir, sep, name } = splitPath(path);
   diskFile = { path, dir, sep, name };
-  nb.id = "file:" + path;
-  nbName.value = name.replace(/\.ipynb$/i, "");
-  diskSaved = null;
+  const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
+  if (doc) { nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
+  await open(store, "file:" + path, "file");
   try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
 }
 async function openDiskFile(path) {
   try {
     const { dir, sep, name } = splitPath(path);
-    const doc = fromFile(name, await TAURI.fs.readTextFile(path));
-    await saveNow();
-    show({ ...doc, id: newId() });
+    nb.flush();
     if (/\.ipynb$/i.test(name)) await bindDiskFile(path);
-    else { diskFile = null; nb.id = newId(); }
+    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode)); }
     // the folder's files (not hidden; up to 64 MB each, 256 MB in all) for Python
     diskFiles = [];
     let total = 0;
@@ -1856,72 +666,10 @@ async function openDiskFile(path) {
       total += size;
       diskFiles.push(["/" + e.name, await TAURI.fs.readFile(p)]);
     }
-    worker.postMessage({ files: diskFiles });
+    kernel.post({ files: diskFiles });
     statusEl.textContent = `opened ${name}` + (diskFiles.length ? ` (${diskFiles.length} file${diskFiles.length === 1 ? "" : "s"} from its folder)` : "");
-    saveNow();
   } catch (e) { statusEl.textContent = `could not open ${path}: ${e?.message ?? e}`; }
 }
-async function saveDisk() {
-  if (loading) return;
-  const text = toIpynb();
-  if (text === diskSaved) return;
-  try {
-    await TAURI.fs.writeTextFile(diskFile.path, text);
-    diskSaved = text;
-    savedEl.textContent = "saved to " + diskFile.name;
-  } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
-}
-
-// local mode: the notebook is the .ipynb file
-let localSaved = null;
-async function saveLocal() {
-  if (loading) return;
-  const text = toIpynb();
-  if (text === localSaved) return;
-  try {
-    const r = await fetch(`api/file?path=${encodeURIComponent(LOCAL.path)}`, { method: "PUT", body: text });
-    if (!r.ok) throw new Error(await r.text());
-    localSaved = text;
-    savedEl.textContent = "saved to " + LOCAL.name;
-  } catch (e) { savedEl.textContent = "not saved: " + (e?.message ?? e); }
-}
-function show(doc) {
-  loading = true;
-  nb = { id: doc.id };
-  nbName.value = doc.name || "Untitled";
-  setMode(MODES.includes(doc.mode) ? doc.mode : "python");
-  cellsEl.textContent = "";
-  execCount = 0;
-  for (const c of doc.cells?.length ? doc.cells : [{ code: "" }]) {
-    const cell = addCell(c.code ?? "", null, false, c.type);
-    if (cell.type === "markdown") {
-      cell.attachments = c.attachments ?? null;
-      renderMd(cell);
-    } else {
-      loadOutputs(cell.out, c.outputs);
-      if (c.n != null) cell.n.textContent = `[${c.n}]`;
-    }
-  }
-  document.title = `${nbName.value} — Sagebrush`;
-  try { localStorage.setItem("sagebrush-current", doc.id); } catch {}
-  loading = false;
-}
-// cells: code strings, or {md: text} for Markdown (examples, share links)
-const asCell = (c) => (typeof c === "string" ? { code: c } : c.md !== undefined ? { type: "markdown", code: c.md } : c);
-function openNew(name, mode, codes) {
-  show({ id: newId(), name, mode, cells: codes.map(asCell) });
-  saveNow();
-}
-async function openId(id) {
-  const doc = await idb("notebooks", "readonly", (st) => st.get(id));
-  if (doc) { await saveNow(); show(doc); savedEl.textContent = "opened"; }
-  return !!doc;
-}
-// Autosave: edits, cells added, moved or removed, and new output.
-cellsEl.addEventListener("input", scheduleSave);
-new MutationObserver(scheduleSave).observe(cellsEl, { childList: true, subtree: true, characterData: true });
-nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; scheduleSave(); });
-addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveNow(); });
 
 // .ipynb and .py, in and out
 function download(name, text, type = "application/json") {
@@ -1931,55 +679,13 @@ function download(name, text, type = "application/json") {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 const fileBase = () => (nbName.value.trim() || "notebook").replace(/[\\/:*?"<>|]+/g, "_");
-const lines = (t) => t.split(/(?<=\n)/);
-function toIpynb() {
-  const sage = isSage(), magma = isMagma();
-  return JSON.stringify({
-    cells: snapshot().cells.map((c) => (c.type === "markdown"
-      ? { cell_type: "markdown", metadata: {}, source: lines(c.code), ...(c.attachments ? { attachments: c.attachments } : {}) }
-      : { cell_type: "code", execution_count: c.n === null ? null : +c.n, metadata: {}, source: lines(c.code), outputs: c.outputs.map((o) => (o.output_type === "stream" ? { ...o, text: lines(o.text) } : o)) })),
-    metadata: { kernelspec: magma ? { name: "magma", display_name: "Magma", language: "magma" } : sage ? { name: "sagemath", display_name: "SageMath", language: "sage" } : { name: "python3", display_name: "Python 3", language: "python" }, language_info: { name: magma ? "magma" : sage ? "sage" : "python" } },
-    nbformat: 4, nbformat_minor: 5,
-  }, null, 1);
-}
-function fromFile(name, text) {
-  const base = name.replace(/\.[^.]*$/, "");
-  if (/\.ipynb$/i.test(name)) {
-    const j = JSON.parse(text);
-    const k = j.metadata?.kernelspec ?? {};
-    const sage = /sage/i.test(`${k.name ?? ""} ${k.language ?? ""} ${j.metadata?.language_info?.name ?? ""}`);
-    const magma = /magma/i.test(`${k.name ?? ""} ${k.language ?? ""} ${j.metadata?.language_info?.name ?? ""}`);
-    const cells = (j.cells ?? j.worksheets?.[0]?.cells ?? []).map((c) => {
-      const src = joinText(c.source ?? c.input);
-      if (c.cell_type === "code") return { code: src, outputs: c.outputs ?? [], n: c.execution_count ?? null };
-      if (c.cell_type === "markdown") return { type: "markdown", code: src, attachments: c.attachments ?? null };
-      // raw cells become comments
-      return { code: src.split("\n").map((l) => (l ? "# " + l : "#")).join("\n") };
-    });
-    return { name: base, mode: magma ? "magma" : sage ? "sage" : "python", cells };
-  }
-  // "# %%" starts a cell, "# %% [markdown]" a Markdown cell whose lines are comments (jupytext);
-  // in Magma (.m), "// %%" and "//" comments
-  const cells = [];
-  let cur = { code: "" };
-  for (const line of text.split("\n")) {
-    const m = /^(?:#|\/\/) ?%%(.*)$/.exec(line);
-    if (m) {
-      if (cur.code.trim() || cells.length) cells.push(cur);
-      cur = /\[markdown\]|\[md\]/.test(m[1]) ? { type: "markdown", code: "" } : { code: "" };
-    } else cur.code += (cur.type === "markdown" ? line.replace(/^(?:#|\/\/) ?/, "") : line) + "\n";
-  }
-  cells.push(cur);
-  for (const c of cells) c.code = c.code.replace(/\n+$/, "").replace(/^\n+/, "");
-  return { name: base, mode: /\.sage$/i.test(name) ? "sage" : /\.(m|mag)$/i.test(name) ? "magma" : modeEl.value, cells: cells.filter((c, i) => c.code || i === 0) };
-}
 
 // Share links: the cells, deflated, in the URL fragment (never sent to a server).
 const enc64 = (u8) => { let b = ""; for (let i = 0; i < u8.length; i += 0x8000) b += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
 const dec64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 async function pipe(u8, stream) { return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(stream)).arrayBuffer()); }
 async function shareLink() {
-  const json = new TextEncoder().encode(JSON.stringify(cells().map((c) => (c.type === "markdown" ? { md: c.ta.value } : c.ta.value))));
+  const json = new TextEncoder().encode(JSON.stringify(nb.snapshot().cells.map((c) => (c.type === "markdown" ? { md: c.code } : c.code))));
   const frag = typeof CompressionStream === "function" ? "z=" + enc64(await pipe(json, new CompressionStream("deflate-raw"))) : "c=" + enc64(json);
   return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : isMagma() ? "m=magma&" : "") + frag;
 }
@@ -2013,11 +719,11 @@ fileMenu.addEventListener("click", async (e) => {
   if (!b) return;
   toggleFileMenu(false);
   switch (b.dataset.f) {
-    case "new": await saveNow(); openNew("Untitled", modeEl.value, [""]); cells()[0].ta.focus(); break;
+    case "new": saveNow(); await openNew("Untitled", nb.mode, [""]); cells()[0].ta.focus(); break;
     case "open": await showOpen(); break;
-    case "duplicate": await saveNow(); { const d = snapshot(); show({ ...d, id: newId(), name: d.name + " (copy)" }); saveNow(); } break;
-    case "ipynb": download(fileBase() + ".ipynb", toIpynb()); break;
-    case "py": { const cm = isMagma() ? "//" : "#"; download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), cells().map((c) => (c.type === "markdown" ? cm + " %% [markdown]\n" + c.ta.value.split("\n").map((l) => (l ? cm + " " + l : cm)).join("\n") : cm + " %%\n" + c.ta.value)).join("\n\n") + "\n", isMagma() ? "text/plain" : "text/x-python"); } break;
+    case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
+    case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
+    case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() ? "text/plain" : "text/x-python"); break;
     case "import": $("#importinput").click(); break;
     case "install": installPrompt?.prompt(); break;
     case "openfile": {
@@ -2027,7 +733,7 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "saveas": {
       const p = await TAURI.dialog.save({ defaultPath: fileBase() + ".ipynb", filters: [{ name: "Jupyter notebook", extensions: ["ipynb"] }] });
-      if (p) { await bindDiskFile(String(p)); await saveNow(); }
+      if (p) await bindDiskFile(String(p), true);
       break;
     }
     case "print": window.print(); break;
@@ -2038,11 +744,11 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "delete": {
-      if (!confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
-      await idb("notebooks", "readwrite", (st) => st.delete(nb.id));
-      const rest = ((await idb("notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
-      nb.id = null;
-      if (rest.length) show(rest[0]); else openNew("Untitled", modeEl.value, [""]);
+      if (current.kind !== "browser" || !confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
+      nb.detach();
+      await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      const rest = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
+      if (rest.length) await openId(rest[0].id); else await openNew("Untitled", nb.mode, [""]);
       announce("Notebook deleted");
       break;
     }
@@ -2053,10 +759,9 @@ $("#importinput").onchange = async (e) => {
   e.target.value = "";
   if (!f) return;
   try {
-    const doc = fromFile(f.name, await f.text());
-    await saveNow();
-    show({ ...doc, id: newId() });
+    const doc = fromFile(f.name, await f.text(), nb.mode);
     saveNow();
+    await openDocument(doc);
     statusEl.textContent = `opened ${f.name}`;
   } catch (err) { statusEl.textContent = `could not read ${f.name}: ${err.message ?? err}`; }
 };
@@ -2064,13 +769,13 @@ $("#importinput").onchange = async (e) => {
 // File > Open
 const openDlg = $("#opendlg");
 async function showOpen() {
-  await saveNow();
-  const all = ((await idb("notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
+  saveNow();
+  const all = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
   const list = $("#nblist");
   list.textContent = "";
   for (const d of all) {
     const li = list.appendChild(document.createElement("li"));
-    if (d.id === nb.id) li.className = "current";
+    if (d.id === current.id) li.className = "current";
     const open = li.appendChild(Object.assign(document.createElement("button"), { className: "open" }));
     open.append(Object.assign(document.createElement("span"), { textContent: d.name || "Untitled" }),
       Object.assign(document.createElement("span"), { className: "when", textContent: `${d.mode === "sage" ? "Sage · " : ""}${d.cells?.length ?? 0} cells · ${new Date(d.updated).toLocaleString()}` }));
@@ -2078,8 +783,8 @@ async function showOpen() {
     const del = li.appendChild(Object.assign(document.createElement("button"), { textContent: "✕", title: "Delete" }));
     del.setAttribute("aria-label", `Delete ${d.name || "Untitled"}`);
     del.onclick = async () => {
-      if (d.id === nb.id || !confirm(`Delete "${d.name}"?`)) return;
-      await idb("notebooks", "readwrite", (st) => st.delete(d.id));
+      if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
+      await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
       li.remove();
     };
   }
@@ -2089,15 +794,16 @@ async function showOpen() {
 
 // Files: Python's open() works on them; the panel uploads, downloads, deletes.
 const filesEl = $("#files"), filesBtn = $("#filesbtn");
-async function allFiles() { return (await idb("files", "readonly", (st) => st.getAll())) ?? []; }
-async function allPaths() { return (await idb("files", "readonly", (st) => st.getAllKeys())) ?? []; }
+async function allFiles() { return (await idb(db, "files", "readonly", (st) => st.getAll())) ?? []; }
+async function allPaths() { return (await idb(db, "files", "readonly", (st) => st.getAllKeys())) ?? []; }
 async function sendFiles(w) {
+  db ??= await dbReady;
   if (!db) return;
   const keys = await allPaths(), vals = await allFiles();
   w.postMessage({ files: keys.map((k, i) => [k, vals[i]]) });
 }
 async function fileChanged(path, data) {
-  await idb("files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+  await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
   if (!filesEl.hidden) renderFiles();
 }
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -2114,15 +820,15 @@ async function renderFiles() {
     dl.onclick = () => download(k.split("/").pop(), vals[i], "application/octet-stream");
     const rm = li.appendChild(Object.assign(document.createElement("button"), { textContent: "✕" }));
     rm.setAttribute("aria-label", `Delete ${k}`);
-    rm.onclick = async () => { await idb("files", "readwrite", (st) => st.delete(k)); worker.postMessage({ fsPut: k, data: null }); renderFiles(); };
+    rm.onclick = async () => { await idb(db, "files", "readwrite", (st) => st.delete(k)); kernel.post({ fsPut: k, data: null }); renderFiles(); };
   });
   if (!keys.length) ul.textContent = "No files yet.";
 }
 async function addFiles(list) {
   for (const f of list) {
     const data = new Uint8Array(await f.arrayBuffer()), path = "/" + f.name;
-    await idb("files", "readwrite", (st) => st.put(data, path));
-    worker.postMessage({ fsPut: path, data });
+    await idb(db, "files", "readwrite", (st) => st.put(data, path));
+    kernel.post({ fsPut: path, data });
   }
   renderFiles();
   announce(`${list.length} file${list.length === 1 ? "" : "s"} added`);
@@ -2258,65 +964,14 @@ $("#docinsert").onclick = () => {
   docDlg.close();
   if (!code) return;
   setMode("sage");
-  const cell = addCell(code, null, true);
+  const cell = nb.addCell(code, null, true);
   cell.el.scrollIntoView({ block: "center" });
   announce(`Inserted the examples of ${docOpen.name} into a new cell`);
 };
 
 // ------------------------------------------------------------ WebMCP
 // Tools for AI agents in the browser (https://developer.chrome.com/docs/ai/webmcp).
-// A cell's output as text: pictures by their descriptions, controls by their values.
-function outputText(box) {
-  const parts = [];
-  for (const el of box.children) {
-    if (el.tagName === "PRE") parts.push(el.textContent);
-    else if (el.tagName === "FIGURE") parts.push(`[picture: ${el.querySelector("svg")?.getAttribute("aria-label") ?? el.querySelector("img")?.alt ?? ""}]\n`);
-    else if (el.classList.contains("latex-out")) parts.push((el.sbBundle?.["text/plain"] ?? "") + "\n");
-    else if (el.classList.contains("interact")) {
-      const it = interacts.get(el.dataset.key);
-      parts.push(`[interact ${it?.name ?? ""} id=${el.dataset.key} values=${JSON.stringify(it?.values ?? {})}]\n` + outputText(el.querySelector(".iout")));
-    }
-  }
-  return parts.join("");
-}
-function cellText(c) { return outputText(c.out); }
-
-// Pictures in an output as PNG (what multimodal agents take), drawn from the SVG.
-async function pictures(box) {
-  const out = [];
-  // an animation contributes a few of its frames (first, middle, last)
-  const svgs = [];
-  // a 3D view as it is on the screen (its SVG is only the bounding box)
-  for (const canvas of box.querySelectorAll("figure.plot3d canvas")) {
-    try { out.push({ type: "image", data: canvas.toDataURL("image/png").split(",")[1], mimeType: "image/png" }); } catch {}
-  }
-  for (const svg of box.querySelectorAll("figure.plot svg")) {
-    if (svg.closest("figure.plot3d")?.querySelector("canvas")) continue;
-    const frames = svg.querySelectorAll(":scope > g.sb-frame");
-    if (!frames.length) { svgs.push(svg); continue; }
-    for (const k of [...new Set([0, frames.length >> 1, frames.length - 1])]) {
-      const copy = svg.cloneNode(true);
-      copy.querySelectorAll(":scope > g.sb-frame").forEach((f, j) => (j === k ? f.setAttribute("style", "") : f.remove()));
-      svgs.push(copy);
-    }
-  }
-  for (const svg of svgs.slice(0, 6)) {
-    const w = svg.viewBox.baseVal?.width || 640, h = svg.viewBox.baseVal?.height || 480;
-    const img = new Image();
-    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(svg));
-    try {
-      await img.decode();
-      const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0, w, h);
-      out.push({ type: "image", data: canvas.toDataURL("image/png").split(",")[1], mimeType: "image/png" });
-    } catch {}
-  }
-  return out;
-}
-const result = async (box) => ({ content: [{ type: "text", text: outputText(box) || "(no output)" }, ...(await pictures(box))] });
+const result = async (box) => ({ content: [{ type: "text", text: nb.outputText(box) || "(no output)" }, ...(await nb.pictures(box))] });
 const tools = [
   {
     name: "search_docs",
@@ -2344,11 +999,9 @@ const tools = [
       if (magma) setMode("magma");
       else if (sage !== undefined) setMode(sage ? "sage" : "python");
       const last = cells().at(-1);
-      const cell = last && last.type === "code" && last.ta.value.trim() === "" ? last : addCell("");
-      cell.ta.value = code;
-      autosize(cell.ta);
-      paint(cell);
-      await run(cell);
+      const cell = last && last.type === "code" && last.ta.value.trim() === "" ? last : nb.addCell("");
+      nb.setInput(cell, code);
+      await nb.run(cell);
       return result(cell.out);
     },
   },
@@ -2357,7 +1010,7 @@ const tools = [
     description: "Return the notebook's cells as JSON: code cells with their output, and Markdown (text) cells.",
     inputSchema: { type: "object", properties: {} },
     async execute() {
-      return { content: [{ type: "text", text: JSON.stringify({ mode: modeEl.value, cells: cells().map((c) => (c.type === "markdown" ? { type: "markdown", text: c.ta.value } : { code: c.ta.value, output: cellText(c) })) }) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ mode: nb.mode, cells: cells().map((c) => (c.type === "markdown" ? { type: "markdown", text: c.ta.value } : { code: c.ta.value, output: nb.outputText(c.out) })) }) }] };
     },
   },
   {
@@ -2366,10 +1019,10 @@ const tools = [
     inputSchema: { type: "object", properties: { text: { type: "string", description: "The Markdown source." } }, required: ["text"] },
     async execute({ text }) {
       const last = cells().at(-1);
-      const cell = last && last.ta.value.trim() === "" ? last : addCell("");
-      setType(cell, "markdown");
-      cell.ta.value = text;
-      await renderMd(cell);
+      const cell = last && last.ta.value.trim() === "" ? last : nb.addCell("");
+      nb.setType(cell, "markdown");
+      nb.setInput(cell, text);
+      await nb.renderMd(cell);
       return { content: [{ type: "text", text: cell.md.textContent.slice(0, 2000) }] };
     },
   },
@@ -2385,11 +1038,9 @@ const tools = [
       required: ["id", "values"],
     },
     async execute({ id, values }) {
-      const it = interacts.get(id);
-      if (!it) return { content: [{ type: "text", text: `No interact ${id}; run_python or read_notebook lists them.` }] };
-      for (const [k, v] of Object.entries(values ?? {})) if (it.setters[k]) it.setters[k](v);
-      await new Promise((resolve) => { it.waiters.push(resolve); changed(it); });
-      return result(it.out);
+      const box = await nb.setInteract(id, values);
+      if (!box) return { content: [{ type: "text", text: `No interact ${id}; run_python or read_notebook lists them.` }] };
+      return result(box);
     },
   },
 ];
@@ -2411,10 +1062,10 @@ async function selftest(path) {
     check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
     check("cross-origin isolated (Stop keeps variables)", window.crossOriginIsolated === true);
     await openDiskFile(path);
-    check("opened the notebook from disk", nb.id === "file:" + path && cells().length > 0, statusEl.textContent);
-    await runAll();
-    await until(() => !cells().some((c) => /\*/.test(c.el.querySelector(".n")?.textContent ?? "")), 120000);
-    const out = cells().map((c) => c.el.querySelector(".out")?.textContent ?? "").join("\n");
+    check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
+    await nb.runAll();
+    await until(() => !cells().some((c) => /\*/.test(c.n.textContent)), 120000);
+    const out = cells().map((c) => c.out.textContent).join("\n");
     check("ran it: Sage and the engines", out.includes("274177 * 67280421310721"), JSON.stringify(out.slice(0, 300)));
     check("Python read a file in the notebook's folder", out.includes("from-disk 5,6"));
     check("3D graphics", !!document.querySelector("figure.plot3d"));
@@ -2424,16 +1075,17 @@ async function selftest(path) {
     // Stop: KeyboardInterrupt in a running loop, keeping the variables
     const exec = (code) => new Promise((resolve) => {
       let text = "";
-      submit(code, { start() {}, out(t) { text += t; }, display() {}, interact() {}, clear() {}, done() { resolve(text); }, stopped(m) { resolve(text + (m || "")); }, skipped() { resolve(text); } });
+      kernel.execute(code, { mode: nb.mode }, { start() {}, out(t) { text += t; }, display() {}, interact() {}, clear() {}, done() { resolve(text); }, stopped(m) { resolve(text + (m || "")); }, skipped() { resolve(text); } });
     });
-    console.log("interrupt flag shared: " + !!interruptFlag + "; worker SharedArrayBuffer: " + (await new Promise((res) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage([typeof SharedArrayBuffer, self.crossOriginIsolated])"], { type: "text/javascript" }))); w.onmessage = (e) => { res(JSON.stringify(e.data)); w.terminate(); }; setTimeout(() => res("no answer"), 3000); })));
+    console.log("interrupt flag shared: " + !!kernel.interruptFlag + "; worker SharedArrayBuffer: " + (await new Promise((res) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage([typeof SharedArrayBuffer, self.crossOriginIsolated])"], { type: "text/javascript" }))); w.onmessage = (e) => { res(JSON.stringify(e.data)); w.terminate(); }; setTimeout(() => res("no answer"), 3000); })));
     const looping = exec("keep = 41\nwhile True:\n    pass");
     await new Promise((r) => setTimeout(r, 1000));
-    interrupt("\n(restarted)\n");
+    kernel.interrupt("\n(restarted)\n");
     const stopped = await looping;
-    check("Stop interrupts a loop", /KeyboardInterrupt/.test(stopped) && !/restarted/.test(stopped), JSON.stringify(stopped.slice(-60)) + (interruptFlag ? " (the worker shares its interrupt flag)" : " (no shared interrupt flag from the worker)"));
+    check("Stop interrupts a loop", /KeyboardInterrupt/.test(stopped) && !/restarted/.test(stopped), JSON.stringify(stopped.slice(-60)) + (kernel.interruptFlag ? " (the worker shares its interrupt flag)" : " (no shared interrupt flag from the worker)"));
     check("...and keeps the variables", (await exec("print(keep + 1)")).includes("42"));
-    await saveNow();
+    nb.flush();
+    await new Promise((r) => setTimeout(r, 500));
     const saved = JSON.parse(await TAURI.fs.readTextFile(path));
     check("saved the notebook with its outputs", saved.cells.some((c) => (c.outputs ?? []).some((o) => JSON.stringify(o).includes("274177"))));
   } catch (e) { check("no exception", false, String(e?.stack ?? e)); }
@@ -2453,8 +1105,9 @@ addEventListener("beforeinstallprompt", (e) => {
 });
 addEventListener("appinstalled", () => { installPrompt = null; document.querySelector('[data-f="install"]').hidden = true; });
 
+const dbReady = openDb();
 (async () => {
-  db = await openDb();
+  db = await dbReady;
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome
@@ -2473,47 +1126,44 @@ addEventListener("appinstalled", () => { installPrompt = null; document.querySel
         const r = await fetch(u);
         if (!r.ok) throw new Error(`${name}: ${r.status}`);
         const data = new Uint8Array(await r.arrayBuffer());
-        await idb("files", "readwrite", (st) => st.put(data, "/" + name));
+        await idb(db, "files", "readwrite", (st) => st.put(data, "/" + name));
       }
       const name = decodeURIComponent(new URL(remote, location.href).pathname.split("/").pop()) || "notebook.ipynb";
       statusEl.textContent = `fetching ${name}…`;
       const r = await fetch(remote);
       if (!r.ok) throw new Error(`${name}: ${r.status}`);
-      show({ ...fromFile(name, await r.text()), id: newId() });
-      saveNow();
+      await openDocument(fromFile(name, await r.text(), mode));
       opened = true;
     } catch (err) { statusEl.textContent = `could not open ${remote}: ${err.message ?? err}`; }
   }
   if (LOCAL) {
-    let doc = null;
-    try {
-      const r = await fetch(`api/file?path=${encodeURIComponent(LOCAL.path)}`);
-      if (r.ok) doc = fromFile(LOCAL.name, await r.text());
-    } catch {}
-    show({ ...(doc ?? { name: LOCAL.name.replace(/\.ipynb$/, ""), mode: "sage", cells: [{ code: "" }] }), id: "local:" + LOCAL.path });
+    const url = `api/file?path=${encodeURIComponent(LOCAL.path)}`;
+    const store = new TextFileStore(LOCAL.name,
+      async () => { const r = await fetch(url); return r.ok ? r.text() : null; },
+      async (text) => { const r = await fetch(url, { method: "PUT", body: text }); if (!r.ok) throw new Error(await r.text()); },
+      LOCAL.name);
+    await open(store, "local:" + LOCAL.path, "local");
     document.title = LOCAL.name + " · Sagebrush";
-    localSaved = doc ? null : "";
     for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
   }
   else if (opened) {}
-  else if (shared) openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
-  else if (!(last && (await openId(last)))) openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
+  else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   // the installed app opened with files (.ipynb, .py, .sage) from the computer
   if ("launchQueue" in window) launchQueue.setConsumer(async (params) => {
     for (const h of params.files ?? []) {
       try {
         const f = await h.getFile();
-        await saveNow();
-        show({ ...fromFile(f.name, await f.text()), id: newId() });
         saveNow();
+        await openDocument(fromFile(f.name, await f.text(), nb.mode));
       } catch (e) { statusEl.textContent = "could not open the file: " + (e?.message ?? e); }
     }
   });
   document.body.classList.remove("opening");
   // the interpreter starts once the notebook has been drawn (it is not needed for that)
-  await afterPaint();
-  startWorker();
-  if (qs.has("run")) { await filesSent; runAll(); }
+  await new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
+  kernel.start();
+  if (qs.has("run")) { await kernel.started; nb.runAll(); }
   // the app: its menu items, files the system hands it, the self-test
   if (TAURI) {
     for (const b of document.querySelectorAll('[data-f="openfile"], [data-f="saveas"]')) b.hidden = false;

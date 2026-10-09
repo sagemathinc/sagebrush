@@ -42,20 +42,22 @@ const consoleResult = await Bun.build({
 // Math in Markdown cells (KaTeX), loaded on first use.  (Markdown itself,
 // small and usually in the first cell, is part of the page script.)
 const mathResult = await Bun.build({ entrypoints: [join(here, "math.ts")], outdir: join(here, "dist"), naming: "sagebrush-math.js", target: "browser", format: "esm", minify: true });
-for (const r of [result, consoleResult, mathResult]) {
+// The notebook as a component (web/notebook), for other pages: web/embed.
+const notebookResult = await Bun.build({ entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true });
+for (const r of [result, consoleResult, mathResult, notebookResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
   }
 }
-// index.html with its page script minified (wrapped in a function, so its
-// names stay out of the global scope).
+// index.html with its page script bundled (with web/notebook, the notebook
+// component, and web/markdown.ts) and minified, wrapped in a function so its
+// names stay out of the global scope.
 {
   const html = readFileSync(join(here, "index.html"), "utf8");
   const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
-  const tmp = join(here, "dist", "app.tmp.js");
-  // web/markdown.ts is bundled in, as globalThis.__sbMarkdown
-  writeFileSync(tmp, `import * as __md from "../markdown.ts";\nglobalThis.__sbMarkdown = __md;\n` + m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
+  const tmp = join(here, "app.tmp.js"); // beside index.html: its imports are relative to web/
+  writeFileSync(tmp, m[1] + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
   const app = await Bun.build({ entrypoints: [tmp], target: "browser", format: "iife", minify: true });
   if (!app.success) {
     for (const l of app.logs) console.error(l);
@@ -117,7 +119,11 @@ for (const f of ["index.html", "docs-index.json", "sagebrush-worker.js", "sagebr
 shellHash.update(engineHash);
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)));
 mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
-for (const f of ["index.html", "llms.txt", "_headers", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+// the notebook component's demo page (web/embed)
+mkdirSync(join(here, "dist", "embed"), { recursive: true });
+copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
+mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
+for (const f of ["index.html", "llms.txt", "_headers", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");

@@ -1,0 +1,166 @@
+/* Sagebrush's notebook (web/notebook): cells laid out as in Jupyter, the
+   prompt [n]: in a gutter, the editor, the output under it.  Everything is
+   scoped to .sbnb (the notebook) and .sbnb-pop (its menus and dialogs, which
+   live in <body>).  Colors are CSS variables a page may set on :root; these
+   are the defaults when it does not. */
+:where(:root) {
+  --bg: #fbfaf7; --fg: #1f2421; --muted: #5d645f; --line: #d4d4cb; --cell: #ffffff; --edbg: #ffffff; --code: #f3f2ec;
+  --accent: #4a6b49; --accent2: #8aa37b; --on-accent: #ffffff; --err: #b3261e;
+  --hk: #8a3b8f; --hb: #2a6fb0; --hs: #975200; --hn: #0b7a52; --hc: #5f665f; --hd: #7f5800; --hf: #2350a8;
+}
+.sbnb, .sbnb-pop { color: var(--fg); }
+.sbnb, .sbnb *, .sbnb-pop, .sbnb-pop * { box-sizing: border-box; }
+.sbnb button, .sbnb select, .sbnb-pop button { font: inherit; border: 1px solid var(--line); background: var(--cell); color: var(--fg); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+.sbnb button:hover, .sbnb select:hover, .sbnb-pop button:hover { border-color: var(--accent2); }
+.sbnb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The active cell has a bar on the left; in command mode (Esc) the whole cell
+   is tinted, in edit mode the editor is outlined. */
+.sbnb { --gutter: 64px; position: relative; }
+.sbnb .cells { position: relative; }
+.sbnb .cell { position: relative; display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); padding: 8px 8px 8px 0; border-left: 3px solid transparent; outline: none; }
+.sbnb .cell.active { border-left-color: var(--accent2); }
+.sbnb .cell.active:focus, .sbnb .cell.active:has(.mdout:focus) { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.sbnb .cell.active:has(textarea:focus) { border-left-color: var(--accent); }
+.sbnb .cell .gutter { position: relative; display: flex; flex-direction: column; align-items: flex-end; padding: 8px 10px 0 0; cursor: grab; user-select: none; -webkit-user-select: none; }
+.sbnb .cell .n { font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--muted); white-space: nowrap; }
+.sbnb .cell:not(.markdown) .n::after { content: ":"; }
+.sbnb .cell.markdown .n { display: none; }
+.sbnb .cell.queued .n, .sbnb .cell.running .n { color: var(--accent); font-weight: 600; }
+/* the run button: in place of the prompt on the active or hovered cell (as in
+   Colab); a spinning ring (and Stop) while it runs */
+.sbnb .cell .runb { position: absolute; top: 4px; right: 8px; width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 11px; line-height: 1; visibility: hidden; }
+.sbnb .cell:hover .runb, .sbnb .cell.active .runb, .sbnb .cell.running .runb, .sbnb .cell.queued .runb { visibility: visible; }
+.sbnb .cell:hover .n, .sbnb .cell.active .n, .sbnb .cell.running .n, .sbnb .cell.queued .n { visibility: hidden; }
+.sbnb .cell.markdown.rendered .runb { display: none; }
+.sbnb .cell.running .runb::before, .sbnb .cell.queued .runb::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); }
+.sbnb .cell.running .runb::before { animation: sbnb-spin .9s linear infinite; }
+.sbnb .cell.queued .runb::before { border: 2px dashed var(--accent2); }
+@keyframes sbnb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sbnb .cell.running .runb::before { animation: none; border-color: var(--accent); } }
+.sbnb .cell .body { min-width: 0; }
+/* the cell toolbar, at the top right of the active or hovered cell (as in JupyterLab) */
+.sbnb .cell .head { position: absolute; top: -9px; right: 10px; z-index: 3; display: flex; align-items: center; gap: 1px; padding: 2px; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.1); visibility: hidden; font-size: 12px; }
+.sbnb .cell:hover .head, .sbnb .cell.active .head { visibility: visible; }
+.sbnb .cell .head button, .sbnb .cell .head select { border: 0; background: none; padding: 1px 7px; font-size: 12px; border-radius: 4px; color: var(--muted); }
+.sbnb .cell .head button:hover, .sbnb .cell .head select:hover { background: var(--code); color: var(--fg); }
+.sbnb .cell .head .drag { cursor: grab; padding: 0 5px; color: var(--muted); font-size: 14px; }
+/* + Code / + Text between cells, on hover (as in Colab) */
+.sbnb .cell .adder { position: absolute; left: 50%; bottom: -12px; transform: translateX(-50%); z-index: 2; display: flex; gap: 6px; visibility: hidden; }
+.sbnb .cell .adder button { padding: 1px 10px; font-size: 12px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.sbnb .cell:hover > .adder { visibility: visible; }
+@media (hover: none) { .sbnb .cell.active > .adder { visibility: visible; } }
+.sbnb .cell.dragging { opacity: .4; }
+.sbnb .addend { display: flex; justify-content: center; gap: 8px; margin: 10px 0 0; }
+.sbnb .addend button { font-size: 13px; padding: 3px 14px; border-radius: 14px; color: var(--muted); }
+.sbnb.readonly .addend, .sbnb.readonly .cell .adder, .sbnb.readonly .cell .head { display: none; }
+
+/* the editor: a transparent textarea over its syntax-highlighted copy */
+.sbnb .ed { position: relative; background: var(--edbg); border: 1px solid var(--line); border-radius: 4px; }
+.sbnb .cell:has(textarea:focus) .ed { border-color: var(--accent); }
+.sbnb .cell.queued .ed { border-style: dashed; }
+.sbnb .ed textarea, .sbnb .ed pre { margin: 0; border: 0; padding: 7px 10px; font: 14px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sbnb .ed pre { position: absolute; inset: 0; pointer-events: none; color: var(--fg); overflow: hidden; }
+.sbnb .ed textarea { position: relative; display: block; width: 100%; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--fg); min-height: 2.6em; }
+.sbnb .ed textarea::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: transparent; }
+.sbnb .hk { color: var(--hk); } .sbnb .hb { color: var(--hb); } .sbnb .hs { color: var(--hs); } .sbnb .hn { color: var(--hn); }
+.sbnb .hc { color: var(--hc); font-style: italic; } .sbnb .hd { color: var(--hd); } .sbnb .hf { color: var(--hf); }
+
+/* output: text runs, pictures and interact controls */
+.sbnb .out:empty { display: none; }
+.sbnb .cell .out { padding-top: 4px; }
+.sbnb pre.txt { margin: 0; padding: 3px 11px; white-space: pre-wrap; word-break: break-word; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.sbnb pre.txt .e { color: var(--err); }
+.sbnb figure.plot { margin: 6px 12px; color: var(--fg); --sb-legend-bg: var(--cell); }
+.sbnb figure.plot svg, .sbnb figure.plot img { display: block; max-width: 100%; height: auto; }
+.sbnb .interact { margin: 8px 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.sbnb .interact .controls { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; align-items: center; font-size: 14px; }
+.sbnb .interact .controls label { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+.sbnb .interact .v { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.sbnb .interact input[type=range] { flex: 1; min-width: 80px; accent-color: var(--accent); }
+.sbnb .interact input[type=text] { font: 13px ui-monospace, Menlo, monospace; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--code); color: var(--fg); width: 100%; }
+.sbnb .interact output { font: 13px ui-monospace, Menlo, monospace; min-width: 3.5em; }
+.sbnb .interact .seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.sbnb .interact .seg button { padding: 2px 10px; font-size: 13px; }
+.sbnb .interact .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.sbnb .interact .note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
+.sbnb .interact .iout pre.txt { padding: 6px 0 0; }
+.sbnb .interact .iout figure.plot { margin: 6px 0 0; }
+.sbnb .interact button.play { padding: 0 8px; font-size: 12px; min-width: 2.2em; }
+.sbnb .player { display: flex; gap: 10px; align-items: center; margin-top: 4px; max-width: 640px; font-size: 13px; }
+.sbnb .player button { padding: 1px 10px; min-width: 2.6em; }
+.sbnb .player input[type=range] { flex: 1; accent-color: var(--accent); }
+.sbnb .player output, .sbnb .player select { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+.sbnb .latex-out { overflow-x: auto; padding: .2em 0; }
+.sbnb .cell .time { font-size: 12px; color: var(--muted); padding: 2px 11px 0; }
+.sbnb .cell .time:empty { display: none; }
+
+/* Markdown cells: the text, rendered; double-click (or Enter) to edit */
+.sbnb .cell .mdout { display: none; padding: 0 10px; overflow-wrap: anywhere; outline: none; }
+.sbnb .cell.markdown.rendered .mdout { display: block; }
+.sbnb .cell.markdown.rendered .ed { display: none; }
+.sbnb .mdout > :first-child { margin-top: .2em; }
+.sbnb .mdout :is(h1, h2, h3, h4) { margin: .6em 0 .3em; line-height: 1.25; }
+.sbnb .mdout h1 { font-size: 1.7em; } .sbnb .mdout h2 { font-size: 1.4em; } .sbnb .mdout h3 { font-size: 1.2em; }
+.sbnb .mdout p, .sbnb .mdout ul, .sbnb .mdout ol, .sbnb .mdout blockquote, .sbnb .mdout table, .sbnb .mdout pre { margin: .5em 0; }
+.sbnb .mdout code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: .92em ui-monospace, Menlo, monospace; }
+.sbnb .mdout pre.code { background: var(--code); padding: 8px 12px; border-radius: 6px; overflow: auto; }
+.sbnb .mdout pre.code code { background: none; padding: 0; font-size: 13.5px; }
+.sbnb .mdout blockquote { border-left: 3px solid var(--line); margin-left: 0; padding-left: 12px; color: var(--muted); }
+.sbnb .mdout table { border-collapse: collapse; } .sbnb .mdout th, .sbnb .mdout td { border: 1px solid var(--line); padding: 3px 9px; }
+.sbnb .mdout img { max-width: 100%; } .sbnb .mdout hr { border: 0; border-top: 1px solid var(--line); }
+.sbnb .mdout .math.display { display: block; overflow-x: auto; margin: .6em 0; }
+
+/* menus, completions, the drop line, the plot tooltip, the shortcuts dialog */
+.sbnb-pop[hidden] { display: none; }
+.sbnb-menu { position: absolute; z-index: 10; min-width: 210px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+.sbnb-menu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; border: 0; border-radius: 5px; background: none; padding: 5px 10px; text-align: left; font-size: 14px; }
+.sbnb-menu button:hover, .sbnb-menu button:focus { background: var(--code); outline: none; }
+.sbnb-menu button kbd { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); border: 0; background: none; }
+.sbnb-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.sbnb-menu .danger { color: var(--err); }
+.sbnb-completer { position: absolute; z-index: 15; max-height: 16em; min-width: 12em; overflow-y: auto; margin: 0; padding: 3px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.18); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.sbnb-completer li { padding: 1px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.sbnb-completer li[aria-selected=true] { background: var(--accent); color: var(--on-accent); }
+.sbnb-dropline { position: absolute; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 6; }
+.sbnb-tip { position: fixed; z-index: 20; pointer-events: none; background: var(--cell); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; font: 12px ui-monospace, Menlo, monospace; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.sbnb-keys { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 18px; width: min(760px, 94vw); }
+.sbnb-keys::backdrop { background: rgba(0,0,0,.35); }
+.sbnb-keys .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 4px 28px; }
+.sbnb-keys h3 { font-size: 14px; margin: 10px 0 4px; }
+.sbnb-keys table { border-collapse: collapse; font-size: 13.5px; width: 100%; }
+.sbnb-keys td { padding: 2px 0; vertical-align: top; }
+.sbnb-keys td:first-child { white-space: nowrap; padding-right: 14px; width: 1%; }
+.sbnb-keys kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--code); }
+.sbnb-keys p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.sbnb-keys form { display: flex; justify-content: space-between; align-items: center; }
+
+@media (max-width: 640px) {
+  .sbnb { --gutter: 44px; }
+  .sbnb .cell .gutter { padding-right: 6px; }
+  .sbnb .cell .n { font-size: 11.5px; }
+  .sbnb .cell .runb { width: 26px; height: 26px; top: 5px; right: 5px; }
+  .sbnb .cell .adder { left: var(--gutter); transform: none; }
+  .sbnb .cell .head .drag { display: none; }
+  .sbnb .cell .head { right: 6px; }
+  .sbnb .cell .head button, .sbnb .cell .head select { padding: 1px 5px; }
+  .sbnb .cell .adder button { padding: 1px 8px; }
+}
+
+/* Printing: prompts, code without the editor's textarea, outputs; 3D views as
+   the picture web/viewer3d.js keeps of their current view */
+@media print {
+  .sbnb { --gutter: 52px; }
+  .sbnb .addend, .sbnb .cell .head, .sbnb .cell .adder, .sbnb .cell .runb, .sbnb-pop { display: none !important; }
+  .sbnb .cell { border-left: 0 !important; background: none !important; padding: 4px 0; }
+  .sbnb .cell .gutter { padding-top: 6px; }
+  .sbnb .cell .n { font-size: 11px; visibility: visible !important; }
+  .sbnb .ed { break-inside: avoid; border-color: var(--line) !important; }
+  .sbnb .ed textarea, .sbnb .cell .time { display: none; }
+  .sbnb .ed pre { position: static; font-size: 12.5px; }
+  .sbnb pre.txt { font-size: 12px; }
+  .sbnb figure.plot, .sbnb .interact, .sbnb .latex-out { break-inside: avoid; }
+  .sbnb figure.plot3d canvas { display: none !important; }
+  .sbnb .print3d { display: block !important; }
+  .sbnb .sb3d-buttons, .sbnb .player { display: none !important; }
+}
