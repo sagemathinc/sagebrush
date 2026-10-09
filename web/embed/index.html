@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sagebrush notebook component</title>
+<meta name="description" content="Sagebrush's notebook as a component: a few lines put a notebook, with Python and Sage running in the browser, in any page.">
+<style>
+  body { margin: 0 auto; max-width: 860px; padding: 20px; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: #fbfaf7; color: #1f2421; }
+  pre.src { background: #f3f2ec; padding: 10px 12px; border-radius: 6px; overflow: auto; font-size: 13px; }
+  a { color: #4a6b49; }
+</style>
+</head>
+<body>
+<h1>The notebook as a component</h1>
+<p>This page is a notebook in a few lines: Sagebrush's notebook component (<code>sagebrush-notebook.js</code>, MIT or Apache-2.0) with its in-browser kernel, keeping its document in memory. A page chooses the <b>kernel</b> (what runs code) and the <b>store</b> (where the document lives, and how changes made elsewhere arrive). See <a href="https://github.com/sagemathinc/sagebrush/blob/main/web/notebook/README.md">web/notebook/README.md</a>, or <a href="/">the full notebook</a>.</p>
+<div id="nb"></div>
+<pre class="src">import { createNotebook, WorkerKernel, MemoryStore } from "/sagebrush-notebook.js";
+
+const kernel = new WorkerKernel({ createWorker: () => new Worker("/sagebrush-worker.js", { type: "module" }) });
+kernel.start();
+const nb = createNotebook(document.querySelector("#nb"), { kernel, mode: "sage", assetBase: "/" });
+await nb.attach(new MemoryStore({ mode: "sage", cells: [...] }));</pre>
+<script type="module">
+import { createNotebook, WorkerKernel, MemoryStore, cellId } from "/sagebrush-notebook.js";
+
+const kernel = new WorkerKernel({ createWorker: () => new Worker("/sagebrush-worker.js", { type: "module" }) });
+kernel.start();
+const nb = createNotebook(document.querySelector("#nb"), { kernel, mode: "sage", assetBase: "/" });
+const store = new MemoryStore({
+  mode: "sage",
+  cells: [
+    { id: cellId(), type: "markdown", code: "A **Markdown** cell, with math: $\\zeta(2) = \\pi^2/6$." },
+    { id: cellId(), code: "factor(2^64 + 1)" },
+    { id: cellId(), code: "plot(sin(x)/x, (x, -20, 20))" },
+  ],
+});
+await nb.attach(store);
+// for tests: the notebook, its store and kernel
+window.demo = { nb, store, kernel };
+</script>
+</body>
+</html>

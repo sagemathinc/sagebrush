@@ -83,7 +83,7 @@ try {
   await press("y");
   ok(await ev("!document.querySelectorAll('.cell')[1].classList.contains('markdown')"), "Y makes it code again");
   await press("h");
-  ok(await ev("document.querySelector('#keysdlg').open"), "H lists the keyboard shortcuts");
+  ok(await ev("document.querySelector('.sbnb-keys').open"), "H lists the keyboard shortcuts");
   await press("Escape");
 
   // edit mode: Enter edits; ↑ on the first line goes to the cell above, at its end
@@ -117,7 +117,7 @@ try {
     cs[0].dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: y }));
     g.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
   })()`);
-  ok((await values())[0] === "third" && (await ev("document.querySelector('#dropline').hidden")), "dragging a cell by its prompt moves it: " + JSON.stringify(await values()));
+  ok((await values())[0] === "third" && (await ev("document.querySelector('.sbnb-dropline').hidden")), "dragging a cell by its prompt moves it: " + JSON.stringify(await values()));
 
   // + Code under a cell inserts below it
   await ev("document.querySelectorAll('.cell')[0].querySelector('[data-a=addcode]').click()");

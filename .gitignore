@@ -4,3 +4,4 @@ dist/
 pyparse/dist/
 build/
 packages/sagebrush/dist/
+web/app.tmp.js

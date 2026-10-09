@@ -113,12 +113,12 @@ try {
   const key = (k) => ev(`(() => { const ta = document.querySelector('#tabtest'); ta.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true })); })()`);
   await ev("(() => { document.querySelector('#add').click(); const ta = [...document.querySelectorAll('.cell textarea')].at(-1); ta.id = 'tabtest'; ta.focus(); document.execCommand('insertText', false, 'r = e.ra'); })()");
   await key("Tab");
-  await until("!document.querySelector('#completer').hidden");
-  const listed = await ev("[...document.querySelectorAll('#completer li')].map(li => li.textContent).join(' ')");
+  await until("!document.querySelector('.sbnb-completer').hidden");
+  const listed = await ev("[...document.querySelectorAll('.sbnb-completer li')].map(li => li.textContent).join(' ')");
   ok((await ev("document.querySelector('#tabtest').value")) === "r = e.rank" && /\brank_bounds\b/.test(listed), "Tab completes e.ra to e.rank and lists " + listed);
   await key("ArrowDown");
   await key("Enter");
-  ok((await ev("document.querySelector('#tabtest').value")) === "r = e." + listed.split(" ")[1] && (await ev("document.querySelector('#completer').hidden")), "↓ Enter accepts a listed completion");
+  ok((await ev("document.querySelector('#tabtest').value")) === "r = e." + listed.split(" ")[1] && (await ev("document.querySelector('.sbnb-completer').hidden")), "↓ Enter accepts a listed completion");
   await ev("(() => { const ta = document.querySelector('#tabtest'); ta.select(); document.execCommand('insertText', false, 'if 1:\\n'); })()");
   await key("Tab");
   ok((await ev("document.querySelector('#tabtest').value")) === "if 1:\n    ", "Tab after whitespace still indents");
