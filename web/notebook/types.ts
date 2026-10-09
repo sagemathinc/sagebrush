@@ -89,5 +89,7 @@ export interface Notebook {
   /** change: the document changed here (a snapshot); remote: a change from elsewhere was applied; saved: the store's status; dirty: an edit, not yet saved; mode: the language changed. */
   on(event: "change" | "remote" | "saved" | "dirty" | "mode", f: (...args: any[]) => void): () => void;
   setReadOnly(readOnly: boolean): void;
+  /** Measure every editor again (after the notebook was hidden). */
+  resize(): void;
   destroy(): void;
 }

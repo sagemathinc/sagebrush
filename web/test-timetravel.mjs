@@ -12,7 +12,7 @@ import { join } from "node:path";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-timetravel-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9340", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9340", "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;
 for (let i = 0; i < 100; i++) { try { targets = await (await fetch("http://127.0.0.1:9340/json")).json(); break; } catch { await sleep(100); } }
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
@@ -32,6 +32,55 @@ const versions = `(+(/of (\\d+)/.exec(${info}) ?? [0, 0])[1])`;
 
 try {
   const a = await tab(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  // ---- an older page (another tab, the installed app) holds the database
+  // open at version 1: the page must not wait for it
+  const tx = await (await fetch("http://127.0.0.1:9340/json/new?" + encodeURIComponent(new URL("articles/", base).href), { method: "PUT" })).json();
+  const x = await tab(tx.webSocketDebuggerUrl);
+  await x.until(`location.origin === ${JSON.stringify(new URL(base).origin)} && document.readyState === 'complete'`);
+  await x.ev(`new Promise((res) => { const r = indexedDB.open("sagebrush", 1); r.onupgradeneeded = () => { r.result.createObjectStore("notebooks", { keyPath: "id" }); r.result.createObjectStore("files"); }; r.onsuccess = () => { window.held = r.result; res(true); }; })`);
+  await a.send("Page.navigate", { url: base });
+  await a.until("window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && document.querySelector('#status').textContent.startsWith('ready')", 15000);
+  ok(true, "with the database held open by a page of an older version, the notebook still opens and runs");
+  await sleep(1000);
+  await a.ev("(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[1], '# Big integers are exact!\\n2**200'); })()");
+  await sleep(900);
+  await a.ev("document.querySelector('#ttbtn').click()");
+  await a.until(`${versions} >= 2`, 5000);
+  ok(true, "...and TimeTravel works (its own database): " + (await a.ev(info)));
+  await a.ev("document.querySelector('#ttclose').click()");
+  await x.ev("window.held.close()");
+  x.ws.close();
+  // close it, and bring this tab back to the front: a background tab's timers
+  // run at most once a second, which would merge edits made 800 ms apart
+  await fetch("http://127.0.0.1:9340/json/close/" + tx.id);
+  await a.send("Page.bringToFront");
+  await a.send("Page.reload");
+  await a.until("window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && document.querySelector('#status').textContent.startsWith('ready')");
+  // ---- keeping your place: the Welcome notebook, a version or two, the middle cell stays put
+  await sleep(1200);
+  for (const code of ["def primes(n):\n    return [p for p in range(2, n) if all(p % q for q in range(2, p))]\n\nprimes(50)", "def primes(n):\n    return [p for p in range(2, n + 1) if all(p % q for q in range(2, p))]\n\nprimes(50)"]) {
+    await a.ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[3], ${JSON.stringify(code)}); })()`);
+    await sleep(800);
+  }
+  const topOf = (sel) => `(() => { const c = [...document.querySelectorAll('${sel} .cell')][3]; return Math.round(c.getBoundingClientRect().top); })()`;
+  await a.ev("(() => { const c = sagebrush.notebook.cells()[3].el; scrollTo(0, scrollY + c.getBoundingClientRect().top - innerHeight / 2 + 20); })()");
+  const t0 = await a.ev(topOf("#cells"));
+  await a.ev("document.querySelector('#ttbtn').click()");
+  await a.until(`${versions} >= 2 && document.querySelectorAll('#ttview .cell').length > 3`);
+  await sleep(1000); // (math is typeset after a paint)
+  const t1 = await a.ev(topOf("#ttview"));
+  await a.ev("(() => { const s = document.querySelector('#ttslider'); s.value = 0; s.dispatchEvent(new Event('input')); })()");
+  await sleep(1000);
+  const t2 = await a.ev(topOf("#ttview"));
+  ok(Math.abs(t1 - t0) <= 2 && Math.abs(t2 - t0) <= 2, `the cell in the middle stays put: in the notebook ${t0}, opening TimeTravel ${t1}, another version ${t2}`);
+  const bar = await a.ev("Math.round(document.querySelector('#timetravel .tthead').getBoundingClientRect().top)");
+  ok(bar === 0 && (await a.ev("scrollY")) > 100, "the TimeTravel bar sticks to the top of the window: " + bar);
+  await a.ev("document.querySelector('#ttclose').click()");
+  await sleep(1000);
+  const t3 = await a.ev(topOf("#cells"));
+  ok(Math.abs(t3 - t0) <= 2, `...and coming back, the notebook is where it was: ${t3}`);
+  ok(await a.ev("[...document.querySelectorAll('#cells .cell:not(.rendered) textarea')].every((t) => Math.abs(t.offsetHeight - t.scrollHeight) <= 1)"), "the editors have their full heights after TimeTravel");
+
   await a.send("Page.navigate", { url: base });
   await a.until("window.sagebrush && document.querySelector('#status').textContent.startsWith('ready')");
   await a.ev("document.querySelector('[data-f=new]').click()");
@@ -65,7 +114,7 @@ try {
   await a.ev("document.querySelector('#ttclose').click()");
 
   // the stored patches: CoCalc's Jupyter records
-  const rec = await a.ev(`new Promise((res) => { const r = indexedDB.open("sagebrush", 2); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => res({ n: q.result.length, first: JSON.stringify(q.result[0].env.patch), size: JSON.stringify(q.result.map((x) => x.env)).length }); }; })`);
+  const rec = await a.ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-history"); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => res({ n: q.result.length, first: JSON.stringify(q.result[0].env.patch), size: JSON.stringify(q.result.map((x) => x.env)).length }); }; })`);
   ok(/"type":"settings","kernel":"python3"/.test(rec.first) && /"type":"cell"/.test(rec.first) && /"cell_type":"code"/.test(rec.first) && /"pos":0/.test(rec.first), `kept in IndexedDB as CoCalc Jupyter records (${rec.n} patches, ${rec.size} bytes): ${rec.first.slice(0, 120)}`);
 
   // a reload keeps the history
@@ -83,8 +132,8 @@ try {
   ok((await a.ev(mainCells)) === "a = 1", "Clear history forgets the versions, not the notebook");
 
   // the same notebook in another tab: the page says so
-  const t2 = await (await fetch("http://127.0.0.1:9340/json/new?" + encodeURIComponent(base), { method: "PUT" })).json();
-  const b = await tab(t2.webSocketDebuggerUrl);
+  const tb = await (await fetch("http://127.0.0.1:9340/json/new?" + encodeURIComponent(base), { method: "PUT" })).json();
+  const b = await tab(tb.webSocketDebuggerUrl);
   await b.until("window.sagebrush && document.querySelector('#nbname').value === 'Untitled'");
   await a.until("document.querySelector('#tabs').textContent.includes('another tab')", 5000);
   ok((await b.ev("document.querySelector('#tabs').textContent")).includes("each tab runs its own Python"), "both tabs say the notebook is open in another tab: " + (await a.ev("document.querySelector('#tabs').textContent")));

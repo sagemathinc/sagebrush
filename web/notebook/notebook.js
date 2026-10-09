@@ -524,6 +524,7 @@ export function createNotebook(root, opts = {}) {
   kernel?.on("restart", () => { execCount = 0; });
 
   function autosize(ta) {
+    if (!ta.offsetParent) return; // hidden: measured when it shows (the ResizeObserver below)
     ta.style.height = "auto";
     ta.style.height = ta.scrollHeight + "px";
   }
@@ -536,6 +537,13 @@ export function createNotebook(root, opts = {}) {
   };
   addEventListener("resize", resizeAll);
   document.fonts?.ready.then(resizeAll);
+  // ...and when the notebook itself changes width, or shows after being hidden
+  let lastWidth = -1;
+  const sizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(([e]) => {
+    const w = Math.round(e.contentRect.width);
+    if (w !== lastWidth) { lastWidth = w; if (w > 0) resizeAll(); }
+  }) : null;
+  sizeObserver?.observe(root);
 
   // ---------------------------------------------------------- Tab completion
   // Tab after a name or `obj.` asks the kernel (src/interactive.ts complete());
@@ -1241,6 +1249,8 @@ export function createNotebook(root, opts = {}) {
     /** A fresh interpreter and no outputs (Jupyter's Restart and clear). */
     restart() { kernel?.restart(); clearOutputs(); },
     setMode, setType, setInput, renderMd, select, edit,
+    /** Measure every editor again now (after the notebook was hidden). */
+    resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
     load, snapshot, applyRemote, replace, flush,
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */
@@ -1266,6 +1276,7 @@ export function createNotebook(root, opts = {}) {
     destroy() {
       api.detach();
       observer.disconnect();
+      sizeObserver?.disconnect();
       removeEventListener("resize", resizeAll);
       removeEventListener("visibilitychange", onHidden);
       document.removeEventListener("pointerdown", onPointerDown);
