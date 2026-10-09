@@ -26,6 +26,7 @@
 pub mod divide;
 pub mod f4;
 pub mod f4q;
+pub(crate) mod certify;
 pub mod factor;
 pub mod factor_p;
 pub mod gcd;

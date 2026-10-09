@@ -51,11 +51,73 @@ pub fn from_num(x: &num_bigint::BigInt) -> BigInt {
 #[cfg(not(feature = "num-backend"))]
 pub use dashu_impl::{from_num, to_num};
 
+/// x mod m in [0, m) (m > 0), without allocating.
+#[cfg(not(feature = "num-backend"))]
+pub fn rem_u64(x: &BigInt, m: u64) -> u64 {
+    let (s, w) = x.0.as_sign_words();
+    let mut r: u128 = 0;
+    for &d in w.iter().rev() {
+        let bits = 8 * std::mem::size_of_val(&d) as u32;
+        r = ((r << bits) | d as u128) % m as u128;
+    }
+    let r = r as u64;
+    if s == dashu_int::Sign::Negative && r != 0 {
+        m - r
+    } else {
+        r
+    }
+}
+
+/// x mod m in [0, m) (m > 0).
+#[cfg(feature = "num-backend")]
+pub fn rem_u64(x: &BigInt, m: u64) -> u64 {
+    let mut r: u128 = 0;
+    for d in x.magnitude().iter_u64_digits().rev() {
+        r = ((r << 64) | d as u128) % m as u128;
+    }
+    let r = r as u64;
+    if x.sign() == Sign::Minus && r != 0 {
+        m - r
+    } else {
+        r
+    }
+}
+
+/// The integer with these 64-bit limbs (little-endian), negated if neg.
+#[cfg(not(feature = "num-backend"))]
+pub fn from_limbs(neg: bool, limbs: &[u64]) -> BigInt {
+    #[cfg(target_pointer_width = "64")]
+    let m = BigUint(dashu_int::UBig::from_words(limbs));
+    #[cfg(not(target_pointer_width = "64"))]
+    let m = BigUint::from_slice_u64(limbs);
+    BigInt::from_biguint(if neg { Sign::Minus } else { Sign::Plus }, m)
+}
+
+/// The integer with these 64-bit limbs (little-endian), negated if neg.
+#[cfg(feature = "num-backend")]
+pub fn from_limbs(neg: bool, limbs: &[u64]) -> BigInt {
+    let mut m = BigUint::default();
+    for &d in limbs.iter().rev() {
+        m = (m << 64usize) + BigUint::from(d);
+    }
+    BigInt::from_biguint(if neg { Sign::Minus } else { Sign::Plus }, m)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use num_integer::Integer;
     use num_traits::{FromPrimitive, Num, One, Signed, ToPrimitive, Zero};
+
+    #[test]
+    fn rem_and_limbs() {
+        let x = b("-123456789012345678901234567890123456789");
+        for m in [3u64, 1000003, (1 << 31) - 1, u64::MAX - 58] {
+            let want = (&x % &BigInt::from(m) + BigInt::from(m)) % BigInt::from(m);
+            assert_eq!(BigInt::from(rem_u64(&x, m)), want);
+        }
+        assert_eq!(from_limbs(true, &[5, 1]), -(BigInt::from(1u64 << 63) * BigInt::from(2) + BigInt::from(5)));
+    }
 
     fn b(s: &str) -> BigInt {
         s.parse().unwrap()

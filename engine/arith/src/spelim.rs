@@ -532,6 +532,120 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
     }
 }
 
+/// The parts of reduce_fl, returned: the non-pivot columns; the pivots
+/// needed (reachable from the rows), by increasing column, each with its
+/// row reduced by the other pivots, densely over the non-pivot columns (a
+/// row of B' = A^-1 B; None if zero); and the rows reduced, as reduce_fl.
+/// One thread (a caller with several primes runs them in parallel).
+pub struct FlParts {
+    pub bcols: Vec<u32>,
+    pub needed: Vec<u32>,
+    pub bp: Vec<Option<Vec<u32>>>,
+    pub rows: Vec<Row>,
+}
+
+pub fn fl_parts(piv: &Pivots, rows: &[Row], ncols: usize) -> FlParts {
+    let p = piv.p;
+    let pp = p as i64;
+    let p2 = pp * pp;
+    let red = Red::new(p);
+    let mut bidx: Vec<u32> = vec![u32::MAX; ncols];
+    let mut bcols: Vec<u32> = vec![];
+    for j in 0..ncols {
+        if piv.rows[j].is_none() {
+            bidx[j] = bcols.len() as u32;
+            bcols.push(j as u32);
+        }
+    }
+    let nb = bcols.len();
+    let mut need = vec![false; ncols];
+    let mut stack: Vec<usize> = vec![];
+    for r in rows {
+        for &c in &r.cols {
+            let k = c as usize;
+            if piv.rows[k].is_some() && !need[k] {
+                need[k] = true;
+                stack.push(k);
+            }
+        }
+    }
+    while let Some(k) = stack.pop() {
+        for &c in &piv.rows[k].unwrap().cols[1..] {
+            let m = c as usize;
+            if piv.rows[m].is_some() && !need[m] {
+                need[m] = true;
+                stack.push(m);
+            }
+        }
+    }
+    let mut bp: Vec<Option<Vec<u32>>> = vec![None; ncols];
+    let mut acc: Vec<i64> = vec![0; nb];
+    for j in (0..ncols).rev() {
+        if !need[j] {
+            continue;
+        }
+        let r = piv.rows[j].unwrap();
+        sagebrush_interrupt::check();
+        for x in acc.iter_mut() {
+            *x = 0;
+        }
+        for (&c, &v) in r.cols[1..].iter().zip(&r.vals[1..]) {
+            let b = bidx[c as usize];
+            if b != u32::MAX {
+                acc[b as usize] = v as i64;
+            }
+        }
+        for (&c, &v) in r.cols[1..].iter().zip(&r.vals[1..]) {
+            let k = c as usize;
+            if bidx[k] == u32::MAX {
+                if let Some(b) = &bp[k] {
+                    dense_axpy(&mut acc, (pp - v as i64) % pp, p2, b);
+                }
+            }
+        }
+        if acc.iter().any(|&x| x != 0) {
+            let v: Vec<u32> = acc.iter().map(|&x| red.rem(x as u64) as u32).collect();
+            if v.iter().any(|&x| x != 0) {
+                bp[j] = Some(v);
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        for x in acc.iter_mut() {
+            *x = 0;
+        }
+        for (&c, &v) in row.cols.iter().zip(&row.vals) {
+            let b = bidx[c as usize];
+            if b != u32::MAX {
+                acc[b as usize] = v as i64;
+            }
+        }
+        for (&c, &v) in row.cols.iter().zip(&row.vals) {
+            let k = c as usize;
+            if bidx[k] == u32::MAX {
+                if let Some(b) = &bp[k] {
+                    dense_axpy(&mut acc, (pp - v as i64) % pp, p2, b);
+                }
+            }
+        }
+        let mut r = Row::default();
+        for (i, &x) in acc.iter().enumerate() {
+            if x != 0 {
+                let c = red.rem(x as u64);
+                if c != 0 {
+                    r.cols.push(bcols[i]);
+                    r.vals.push(c as u32);
+                }
+            }
+        }
+        out.push(r);
+    }
+    let needed: Vec<u32> = (0..ncols as u32).filter(|&j| need[j as usize]).collect();
+    let bpn = needed.iter().map(|&j| bp[j as usize].take()).collect();
+    FlParts { bcols, needed, bp: bpn, rows: out }
+}
+
 /// acc += c * b (entries kept in [0, p^2); c in [0, p)), densely: an
 /// unsigned 32 x 32 -> 64 bit product per entry, which vectorizes (AVX2
 /// chosen at run time where available).
@@ -689,6 +803,54 @@ mod tests {
 
     fn row(e: &[(u32, u32)]) -> Row {
         Row { cols: e.iter().map(|x| x.0).collect(), vals: e.iter().map(|x| x.1).collect() }
+    }
+
+    #[test]
+    fn fl_parts_matches() {
+        // random pivots and rows: the rows as reduce_fl reduces them, and
+        // each needed pivot row reduced is its own row minus B' combinations
+        let p = 101u32;
+        let n = 40;
+        let mut s = 12345u64;
+        let mut rnd = |m: u32| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s % m as u64) as u32
+        };
+        let mut store = vec![];
+        for j in 0..n {
+            if rnd(3) == 0 {
+                continue;
+            }
+            let mut r = Row { cols: vec![j as u32], vals: vec![1] };
+            for c in j + 1..n {
+                if rnd(4) == 0 {
+                    r.cols.push(c as u32);
+                    r.vals.push(1 + rnd(p - 1));
+                }
+            }
+            store.push(r);
+        }
+        let mut at: Vec<Option<&Row>> = vec![None; n];
+        for r in &store {
+            at[r.cols[0] as usize] = Some(r);
+        }
+        let piv = Pivots { p, rows: at };
+        let rows: Vec<Row> = (0..10).map(|_| {
+            let mut r = Row::default();
+            for c in 0..n {
+                if rnd(3) == 0 {
+                    r.cols.push(c as u32);
+                    r.vals.push(rnd(p));
+                }
+            }
+            r
+        }).collect();
+        let a = reduce_fl(&piv, &rows, n, 1);
+        let f = fl_parts(&piv, &rows, n);
+        assert_eq!(a, f.rows);
+        assert!(f.needed.iter().all(|&j| piv.rows[j as usize].is_some()));
     }
 
     #[test]

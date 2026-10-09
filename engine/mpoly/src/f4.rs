@@ -851,7 +851,7 @@ pub fn groebner_q_opt(fs: &[QPoly], o: Order, proof: bool) -> Result<Vec<QPoly>,
 
 /// An integer polynomial in the order: (key, word, coefficient), keys
 /// decreasing.
-type ZT = Vec<(u128, u64, BigInt)>;
+pub(crate) type ZT = Vec<(u128, u64, BigInt)>;
 
 /// The primitive integer multiple of f (positive leading coefficient).
 fn to_zt(f: &Poly<QQ>) -> ZT {
@@ -985,6 +985,16 @@ pub(crate) fn verify_q(fs: &[QPoly], g: &[Poly<QQ>], o: Order, pk: Packing) -> R
     if std::env::var("SB_F4_DEBUG").is_ok() {
         eprintln!("verify_q: {} elements, {} pairs to check", lead.len(), pairs.len());
     }
+    // a certificate from eliminations modulo primes (certify.rs), else the
+    // reductions over Z
+    if std::env::var("SB_VQ_CERT").as_deref() != Ok("0") {
+        if let Some(b) = crate::certify::certify_spairs(&gz, &pairs, pk, o).map_err(|_| "exponents too large to pack".to_string())? {
+            return Ok(b);
+        }
+    }
+    if std::env::var("SB_VQ_OLD").is_err() {
+        return spairs_reduce_to_zero(&gz, &pairs, pk, o).map_err(|_| "exponents too large to pack".to_string());
+    }
     let check = |&(i, j, l): &(usize, usize, u64)| -> Result<bool, String> {
         {
             // S = (c_j / d) (l / l_i) g_i - (c_i / d) (l / l_j) g_j
@@ -1026,6 +1036,142 @@ pub(crate) fn verify_q(fs: &[QPoly], g: &[Poly<QQ>], o: Order, pk: Packing) -> R
         }
     }
     Ok(true)
+}
+
+thread_local! {
+    // the dense accumulators of spairs_reduce_to_zero, zero between uses
+    static ACC: std::cell::RefCell<Vec<BigInt>> = const { std::cell::RefCell::new(vec![]) };
+}
+
+/// Whether the S-polynomials of these pairs of g (primitive integer
+/// polynomials) reduce to 0 by g.  The reducers are chosen once for all of
+/// them by F4's symbolic preprocessing, so each S-polynomial is reduced
+/// fraction-free in a dense accumulator over the columns (the monomials,
+/// decreasing), without ordered maps or hashing, stopping at the first
+/// entry no leading monomial divides.  Natively the pairs are spread over
+/// threads.
+fn spairs_reduce_to_zero(g: &[ZT], pairs: &[(usize, usize, u64)], pk: Packing, o: Order) -> Result<bool, Overflow> {
+    let md = Modulus::new(3);
+    let guard = pk.guard();
+    let sym = F4 {
+        pk,
+        o,
+        md: &md,
+        guard,
+        lead: g.iter().map(|f| f[0].1).collect(),
+        active: vec![true; g.len()],
+        sugar: vec![0; g.len()],
+        g: g.iter().map(|f| f.iter().map(|x| (x.1, 0)).collect()).collect(),
+        pairs: vec![],
+        prob: false,
+    };
+    let lead = &sym.lead;
+    for &(i, j, l) in pairs {
+        for k in [i, j] {
+            let m = l - lead[k];
+            if g[k].iter().any(|x| (x.1 + m) & guard != 0) {
+                return Err(Overflow);
+            }
+        }
+    }
+    let mut pivots = HashMap::new();
+    let cols = sym.preprocess(&mut pivots, &mut pairs.iter().flat_map(|&(i, j, l)| {
+        let (mi, mj) = (l - lead[i], l - lead[j]);
+        g[i][1..].iter().map(move |x| x.1 + mi).chain(g[j][1..].iter().map(move |x| x.1 + mj))
+    }))?;
+    let col: HashMap<u64, u32> = cols.iter().enumerate().map(|(i, &(_, w))| (w, i as u32)).collect();
+    let nc = cols.len();
+    // the reducer of each column: its columns and element
+    let mut prow: Vec<Option<(Vec<u32>, usize)>> = vec![None; nc];
+    for (&lm, &(m, k)) in &pivots {
+        prow[col[&lm] as usize] = Some((g[k].iter().map(|x| col[&(x.1 + m)]).collect(), k));
+    }
+    if std::env::var("SB_F4_DEBUG").is_ok() {
+        eprintln!("verify_q: {} columns, {} reducers", nc, pivots.len());
+    }
+    let check = |&(i, j, l): &(usize, usize, u64)| -> bool {
+        ACC.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            if acc.len() < nc {
+                acc.resize(nc, BigInt::zero());
+            }
+            // S = (c_j / d) (l / l_i) g_i - (c_i / d) (l / l_j) g_j
+            let (ci, cj) = (&g[i][0].2, &g[j][0].2);
+            let d = ci.gcd(cj);
+            let (a, b) = (cj / &d, ci / &d);
+            let (mut first, mut last) = (nc, 0usize);
+            for (k, s, neg) in [(i, &a, false), (j, &b, true)] {
+                let m = l - lead[k];
+                for x in &g[k][1..] {
+                    let t = col[&(x.1 + m)] as usize;
+                    let v = s * &x.2;
+                    if neg {
+                        acc[t] -= v;
+                    } else {
+                        acc[t] += v;
+                    }
+                    first = first.min(t);
+                    last = last.max(t);
+                }
+            }
+            let mut steps = 0u32;
+            let mut j = first;
+            while j <= last && j < nc {
+                if acc[j].is_zero() {
+                    j += 1;
+                    continue;
+                }
+                let Some((pc, k)) = &prow[j] else {
+                    // a monomial no leading monomial divides: not 0
+                    for x in acc[j..=last].iter_mut() {
+                        *x = BigInt::zero();
+                    }
+                    return false;
+                };
+                steps += 1;
+                if steps & 63 == 0 {
+                    sagebrush_interrupt::check();
+                }
+                let c = std::mem::take(&mut acc[j]);
+                let lg = &g[*k][0].2;
+                let h = c.gcd(lg);
+                let (sa, sb) = (lg / &h, c / &h);
+                if !sa.is_one() {
+                    for x in acc[j + 1..=last].iter_mut() {
+                        if !x.is_zero() {
+                            *x *= &sa;
+                        }
+                    }
+                }
+                for (&t, x) in pc[1..].iter().zip(&g[*k][1..]) {
+                    acc[t as usize] -= &sb * &x.2;
+                }
+                last = last.max(*pc.last().unwrap() as usize);
+                if steps % 8 == 0 {
+                    // the content of the rest, removed
+                    let mut ct = BigInt::zero();
+                    for x in acc[j + 1..=last].iter() {
+                        if !x.is_zero() {
+                            ct = ct.gcd(x);
+                            if ct.is_one() {
+                                break;
+                            }
+                        }
+                    }
+                    if !ct.is_zero() && !ct.is_one() {
+                        for x in acc[j + 1..=last].iter_mut() {
+                            if !x.is_zero() {
+                                *x = &*x / &ct;
+                            }
+                        }
+                    }
+                }
+                j += 1;
+            }
+            true
+        })
+    };
+    Ok(crate::run_parallel(crate::threads(), pairs, check).into_iter().all(|ok| ok))
 }
 
 #[cfg(test)]
@@ -1095,6 +1241,40 @@ mod tests {
             assert_eq!(a, d);
             assert_eq!(c, e);
         }
+    }
+
+    #[test]
+    fn verify_rejects() {
+        // the check over Q (the certificate, then the reductions over Z)
+        // accepts the reduced basis of katsura-3 and rejects it perturbed,
+        // short of an element, and the generators (not a basis)
+        let fs: Vec<QPoly> = ["1,0,0,0:1;0,1,0,0:2;0,0,1,0:2;0,0,0,1:2;0,0,0,0:-1", "2,0,0,0:1;0,2,0,0:2;0,0,2,0:2;0,0,0,2:2;1,0,0,0:-1", "1,1,0,0:2;0,1,1,0:2;0,0,1,1:2;0,1,0,0:-1", "0,2,0,0:1;1,0,1,0:2;0,1,0,1:2;0,0,1,0:-1"].iter().map(|s| q(4, s)).collect();
+        let o = Order::DegRevLex;
+        let g = groebner_q(&fs, o).unwrap();
+        let pk = Packing { n: 4, bits: 8 };
+        let polys = |v: &[QPoly]| -> Vec<Poly<QQ>> { v.iter().map(|f| crate::sparse::to_q(f, o).repack(8)).collect() };
+        for cert in ["1", "0"] {
+            std::env::set_var("SB_VQ_CERT", cert);
+            assert!(verify_q(&fs, &polys(&g), o, pk).unwrap());
+            // a coefficient changed (the last term of the longest element)
+            let mut bad = polys(&g);
+            let k = (0..bad.len()).max_by_key(|&i| bad[i].t.len()).unwrap();
+            let last = bad[k].t.len() - 1;
+            bad[k].t[last].c = &bad[k].t[last].c + BigRational::one();
+            assert!(!verify_q(&fs, &bad, o, pk).unwrap());
+            // the certificate alone on its S-pairs
+            let gz: Vec<ZT> = bad.iter().map(to_zt).collect();
+            let pairs = gm_pairs(&pk, o, &gz.iter().map(|f| f[0].1).collect::<Vec<_>>());
+            assert_eq!(crate::certify::certify_spairs(&gz, &pairs, pk, o).unwrap(), Some(false));
+            let gz: Vec<ZT> = polys(&g).iter().map(to_zt).collect();
+            assert_eq!(crate::certify::certify_spairs(&gz, &pairs, pk, o).unwrap(), Some(true));
+            let mut short = polys(&g);
+            short.remove(1);
+            assert!(!verify_q(&fs, &short, o, pk).unwrap());
+            let gens: Vec<Poly<QQ>> = polys(&fs).into_iter().map(|f| f.monic(&QQ)).collect();
+            assert!(!verify_q(&fs, &gens, o, pk).unwrap());
+        }
+        std::env::remove_var("SB_VQ_CERT");
     }
 
     #[test]
