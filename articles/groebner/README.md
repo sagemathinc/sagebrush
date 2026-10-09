@@ -1,9 +1,21 @@
-<!-- description: How Sagebrush's free multivariate polynomial engine was built from the literature: F4, Gröbner bases over Q, proofs, FGLM, gcd and factoring, with benchmarks against Magma, msolve and Singular. -->
-# Free multivariate polynomial algebra: how it was built
+<!-- description: How Sagebrush's permissively licensed (MIT/Apache) multivariate polynomial engine was built from the literature: F4, Gröbner bases over Q, proofs, FGLM, gcd and factoring, with benchmarks against Magma, msolve and Singular. -->
+# Gröbner bases and multivariate polynomials, MIT-licensed: how they were built
 
 Sagebrush's multivariate polynomial engine (`engine/mpoly`, with the
-linear algebra in `engine/arith`) is written from the literature, MIT OR
-Apache-2.0 licensed. These articles describe it algorithm by algorithm:
+linear algebra in `engine/arith`) is written from the literature and
+licensed MIT OR Apache-2.0.
+
+As far as we know, it is the only permissively licensed implementation of
+Faugère's F4 algorithm in the class of Magma and msolve:
+
+- every open-source system of comparable strength is under the GPL:
+  Singular, Macaulay2, CoCoA, Giac, msolve and Groebner.jl;
+- the fastest ones, Magma, Maple and FGb, are closed.
+
+A permissive license means anyone can build on this code: companies,
+other open-source projects under any license, and AI tools.
+
+These articles describe the engine algorithm by algorithm:
 
 - how each one is implemented, top to bottom;
 - what worked and what did not, and why;
@@ -77,7 +89,7 @@ Lex bases, in seconds:
 2. **Measure the sizes of the numbers you will reconstruct before choosing
    a certificate.** Normal forms were 1.7× the basis's size; quotients
    were 3.6×. That one measurement decided the design of the proof.
-3. **The oracle's verbose output is a free design document.** Magma's
+3. **The oracle's verbose output is a design document you get for nothing.** Magma's
    `SetVerbose("Groebner", 1)` showed, step by step, the moduli and matrix
    sizes of a computation over $\mathbb{Q}$. That one printout redirected
    a day of work.

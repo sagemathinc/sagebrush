@@ -38,6 +38,7 @@
   h1 { margin: 0; font-size: 28px; letter-spacing: -0.01em; }
   h1 span { color: var(--accent); }
   .tag { color: var(--muted); margin: 4px 0 14px; }
+  .tag a.artlink { font-weight: 600; white-space: nowrap; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 16px; }
   button, select { font: inherit; border: 1px solid var(--line); background: var(--cell); color: var(--fg); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   button:hover, select:hover { border-color: var(--accent2); }
@@ -198,7 +199,7 @@
 <header>
   <div class="title">
     <h1><span>Sagebrush</span> · Python in your browser</h1>
-    <p class="tag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server. · <a href="/atlas/">The Atlas of modular forms</a> · <a href="/articles/">Articles</a></p>
+    <p class="tag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server. · <a href="/atlas/">The Atlas of modular forms</a> · <a href="/articles/" class="artlink">How it is built: articles</a></p>
   </div>
   <div id="docsearchbox" role="search">
     <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
@@ -228,6 +229,10 @@
   </section>
   <div id="cells"></div>
   <div class="about">
+    <p><b>How it is built</b>, algorithm by algorithm (what worked, what did not, and why):
+    <a href="/articles/groebner/">Gröbner bases and multivariate polynomials</a> (F4, proofs over Q, FGLM, factoring),
+    <a href="/articles/number-theory/">number theory engines</a> (modular symbols, traces of Frobenius, Galois groups, class groups) and
+    <a href="/articles/foundations/">foundations</a> (big integers, exact linear algebra, factoring in Z[x]). All the engines are open source under the permissive MIT and Apache-2.0 licenses.</p>
     <b>+ Text</b> adds a Markdown cell (headings, lists, tables, links, <code>$math$</code>): <b>Shift+Enter</b> shows it, double-click edits it.
     <b>Shift+Enter</b> runs a cell and moves on; <b>Ctrl/Cmd+Enter</b> runs it in place; <b>Alt+↑/↓</b> moves it; the <b>⋯</b> menu inserts, moves and deletes cells.
     In a cell, <b>Tab</b> after a name completes it (<code>e.</code><b>Tab</b> lists what <code>e</code> can do; ↑/↓ and Enter choose), and otherwise indents: press <b>Esc</b> first to Tab out of the cell. Variables persist between cells and are shared with the <b>Console</b>.
@@ -249,7 +254,7 @@
 </main>
 <footer>
   <p>Command line: <code>curl -fsSL https://get.sagebrush.space/install.sh | sh</code> or <code>npx sagebrush</code>.
-  Source: <a href="https://github.com/sagemathinc/sagebrush">github.com/sagemathinc/sagebrush</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a></p>
+  Source: <a href="https://github.com/sagemathinc/sagebrush">github.com/sagemathinc/sagebrush</a> · <a href="/articles/">Articles</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a></p>
 </footer>
 <div id="filemenu" role="menu" aria-label="Notebook" hidden>
   <button role="menuitem" data-f="new">New notebook</button>
@@ -300,7 +305,7 @@
 // A classic script (not a module) so the cells exist before the first paint.
 const EXAMPLES = {
   "Welcome": [
-    {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$"},
+    {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
     "# Big integers are exact\n2**200",
     "from fractions import Fraction\nH = sum(Fraction(1, n) for n in range(1, 31))\nH, float(H)",
     "def primes(n):\n    sieve = bytearray([1]) * (n + 1)\n    sieve[:2] = b'\\x00\\x00'\n    for p in range(2, int(n**0.5) + 1):\n        if sieve[p]:\n            sieve[p*p::p] = bytes(len(range(p*p, n + 1, p)))\n    return [i for i, ok in enumerate(sieve) if ok]\n\nps = primes(10**5)\nprint(len(ps), ps[-5:])",
