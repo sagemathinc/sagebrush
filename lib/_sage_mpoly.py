@@ -3650,3 +3650,110 @@ def ideal(*gens):
 
 
 Ideal = ideal
+
+
+# ------------------------------------------- benchmark families (sage.rings.ideal)
+
+def _homog_last(f, k):
+    """f homogenized with the variable k (each term times x_k to the
+    missing degree)."""
+    R = f._ring
+    if not f._d:
+        return f
+    D = max(sum(e) for e in f._d)
+    dom = R._dom
+    out = {}
+    for e, c in f._d.items():
+        t = list(e)
+        t[k] += D - sum(e)
+        t = tuple(t)
+        out[t] = dom._add(out[t], c) if t in out else c
+    return MPolynomial(R, {e: c for e, c in out.items() if c})
+
+
+def Cyclic(R, n=None, homog=False, singular=None):
+    """The cyclic n-roots ideal in the first n variables of R: the
+    elementary-like cyclic sums sum_i x_i x_(i+1) ... x_(i+k-1), k < n, and
+    x_0 ... x_(n-1) - 1 (homogenized with the n-th variable if homog).
+
+    EXAMPLES::
+
+        sage: P.<a,b,c> = PolynomialRing(QQ, 3, order='lex')
+        sage: sage.rings.ideal.Cyclic(P)
+        Ideal (a + b + c, a*b + a*c + b*c, a*b*c - 1) of Multivariate Polynomial Ring in a, b, c over Rational Field
+        sage: S.<x,y,z,h> = QQ[]
+        sage: sage.rings.ideal.Cyclic(S, 3, homog=True)
+        Ideal (x + y + z, x*y + x*z + y*z, x*y*z - z^3) of Multivariate Polynomial Ring in x, y, z, h over Rational Field
+        sage: T = PolynomialRing(GF(32003), 'x', 6)
+        sage: len(sage.rings.ideal.Cyclic(T).groebner_basis())
+        45
+    """
+    n = R.ngens() if n is None else int(n)
+    if n > R.ngens():
+        raise ArithmeticError("n must be <= R.ngens()")
+    v = R.gens()[:n]
+    F = []
+    for k in range(1, n):
+        s = R.zero()
+        for i in range(n):
+            m = R.one()
+            for j in range(k):
+                m = m * v[(i + j) % n]
+            s = s + m
+        F.append(s)
+    m = R.one()
+    for x in v:
+        m = m * x
+    F.append(m - 1)
+    if homog:
+        F = [_homog_last(f, n - 1) for f in F]
+    return R.ideal(F)
+
+
+def Katsura(R, n=None, homog=False, singular=None):
+    """The Katsura ideal in the first n variables u_0 ... u_(n-1) of R:
+    u_0 + 2 (u_1 + ... + u_(n-1)) - 1 and sum_l u_|l| u_|m-l| - u_m for
+    m < n - 1 (u_k = 0 for k >= n), homogenized with the n-th variable if
+    homog.
+
+    EXAMPLES::
+
+        sage: R.<x,y,z,w> = QQ[]
+        sage: sage.rings.ideal.Katsura(R)
+        Ideal (x + 2*y + 2*z + 2*w - 1, x^2 + 2*y^2 + 2*z^2 + 2*w^2 - x, 2*x*y + 2*y*z + 2*z*w - y, y^2 + 2*x*z + 2*y*w - z) of Multivariate Polynomial Ring in x, y, z, w over Rational Field
+        sage: sage.rings.ideal.Katsura(R, 3, homog=True)
+        Ideal (x + 2*y + z, x^2 + 2*y^2 - x*z + 2*z^2, 2*x*y + y*z) of Multivariate Polynomial Ring in x, y, z, w over Rational Field
+        sage: K = PolynomialRing(GF(32003), 'x', 8)
+        sage: len(sage.rings.ideal.Katsura(K).groebner_basis())
+        74
+    """
+    n = R.ngens() if n is None else int(n)
+    if n > R.ngens():
+        raise ArithmeticError("n must be <= R.ngens()")
+    v = R.gens()[:n]
+
+    def u(i):
+        i = abs(i)
+        return v[i] if i < n else R.zero()
+    F = [v[0] + 2 * sum((v[i] for i in range(1, n)), R.zero()) - 1]
+    for m in range(n - 1):
+        s = R.zero()
+        for l in range(-(n - 1), n):
+            s = s + u(l) * u(m - l)
+        F.append(s - u(m))
+    if homog:
+        F = [_homog_last(f, n - 1) for f in F]
+    return R.ideal(F)
+
+
+def FieldIdeal(R):
+    """The ideal (x^q - x for x in the variables) of R over GF(q), whose
+    variety is every point.
+
+    EXAMPLES::
+
+        sage: sage.rings.ideal.FieldIdeal(PolynomialRing(GF(3), 'u,v'))
+        Ideal (u^3 - u, v^3 - v) of Multivariate Polynomial Ring in u, v over Finite Field of size 3
+    """
+    q = R.base_ring().order()
+    return R.ideal([x ** q - x for x in R.gens()])

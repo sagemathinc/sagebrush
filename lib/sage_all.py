@@ -334,6 +334,11 @@ import sys as _sys0
 if _sys0.implementation.name == "pyjs":
     import _sage_shim
     _sage_shim.install()
+# the name sage, as in a Sage session (sage.rings.ideal.Katsura(R), ...),
+# when the shim serves it
+if "_sage_shim" in _sys0.modules and _sys0.modules["_sage_shim"]._INSTALLED:
+    import sage
+    __all__.append("sage")
 
 from _interact import (interact, slider, range_slider, selector, checkbox, input_box,
                        color_selector, text_control)
