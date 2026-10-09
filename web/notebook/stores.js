@@ -18,23 +18,33 @@ export class MemoryStore {
   subscribe(f) { this.subs.add(f); return () => this.subs.delete(f); }
 }
 
-// IndexedDB "sagebrush": object stores "notebooks" (by id), "files" (by
-// path) and "history" (TimeTravel's patches, by [notebook id, patch id])
-export function openDb(name = "sagebrush") {
+// IndexedDB "sagebrush": object stores "notebooks" (by id) and "files" (by
+// path); "sagebrush-history": "history" (TimeTravel's patches, by [notebook
+// id, patch id]).  They are opened at whatever version they have, never
+// upgraded: an upgrade waits until every page holding the database closes,
+// and a page of an older version of the site (another tab, the installed
+// app) would hold it.  New stores go in new databases.  A page lets go of a
+// database when a newer page needs it (onVersionChange, e.g. to ask for a
+// reload).
+function open(name, stores, onVersionChange) {
   return new Promise((resolve) => {
     try {
-      const r = indexedDB.open(name, 2);
-      r.onupgradeneeded = () => {
-        const db = r.result;
-        if (!db.objectStoreNames.contains("notebooks")) db.createObjectStore("notebooks", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("files")) db.createObjectStore("files");
-        if (!db.objectStoreNames.contains("history")) db.createObjectStore("history", { keyPath: ["nb", "time"] });
+      const r = indexedDB.open(name);
+      r.onupgradeneeded = () => { // only when it is created
+        for (const [store, opts] of Object.entries(stores)) if (!r.result.objectStoreNames.contains(store)) r.result.createObjectStore(store, opts ?? undefined);
       };
-      r.onsuccess = () => resolve(r.result);
+      r.onsuccess = () => {
+        const db = r.result;
+        db.onversionchange = () => { db.close(); onVersionChange?.(); };
+        resolve(db);
+      };
       r.onerror = () => resolve(null);
+      r.onblocked = () => resolve(null);
     } catch { resolve(null); }
   });
 }
+export const openDb = (name = "sagebrush", { onVersionChange } = {}) => open(name, { notebooks: { keyPath: "id" }, files: null }, onVersionChange);
+export const openHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-history", { history: { keyPath: ["nb", "time"] } }, onVersionChange);
 export function idb(db, store, mode, f) {
   return new Promise((resolve, reject) => {
     if (!db) return resolve(undefined);

@@ -71,7 +71,8 @@
   #tabs { color: var(--muted); font-size: 12px; }
   #timetravel { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
   #timetravel[hidden], #cells[hidden] { display: none; }
-  #timetravel .tthead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+  /* the controls stay at the top of the window while the version scrolls under them */
+  #timetravel .tthead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; position: sticky; top: 0; z-index: 4; background: var(--cell); padding: 8px 0; margin-top: -8px; border-bottom: 1px solid var(--line); }
   #timetravel .tthead .sp { flex: 1; }
   #timetravel .tthead button { padding: 2px 10px; font-size: 13px; }
   #timetravel .tthead .danger { color: var(--err); }
@@ -299,7 +300,7 @@
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
-import { IdbStore, IdbPatchStore, openDb, idb } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, idb } from "./notebook/stores.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 const EXAMPLES = {
   "Welcome": [
@@ -506,7 +507,7 @@ nb.on("remote", (d) => {
 nb.on("mode", (m) => { modeEl.value = m; try { localStorage.setItem("sagebrush-mode", m); } catch {} });
 const cells = () => nb.cells();
 // for tests and in-page agents: the notebook and its kernel
-window.sagebrush = { notebook: nb, kernel };
+window.sagebrush = { notebook: nb, kernel, get history() { return nbHistory; } };
 const isSage = () => nb.mode === "sage";
 const isMagma = () => nb.mode === "magma";
 // Printing (File > Print, or Ctrl+P) gives the notebook alone (the print CSS
@@ -527,32 +528,46 @@ addEventListener("afterprint", () => { if (titleBeforePrint) document.title = ti
 // IndexedDB; no outputs).  The panel shows any past version, read-only, and
 // can revert to it or forget the history.  (sagebrush-history.js, with
 // patchflow, loads after the notebook has been drawn.)
-let nbHistory = null, ttView = null, historyModule = null;
+let nbHistory = null, ttView = null, historyModule = null, ttUnavailable = "";
 const loadHistory = () => (historyModule ??= import(new URL("sagebrush-history.js", location.href).href));
 const ttEl = $("#timetravel"), ttBtn = $("#ttbtn"), ttSlider = $("#ttslider");
+// Changes made before the history is ready (its module and database load
+// after the notebook) wait here, and are recorded in order once it is.
+let historyQueue = [];
 async function startHistory(id) {
   nbHistory?.close();
   nbHistory = null;
-  db ??= await dbReady;
-  if (!db) return;
+  historyQueue = [nb.snapshot()]; // the notebook as it opened
+  const hdb = await historyDbReady;
+  if (!hdb) {
+    ttUnavailable = "TimeTravel needs this browser's storage, which is not available here (a private window of some browsers?).";
+    if (!ttEl.hidden) ttRefresh(true);
+    return;
+  }
   let NotebookHistory;
   try { ({ NotebookHistory } = await loadHistory()); } catch (e) { return console.warn("history:", e); }
   if (current.id !== id) return;
-  const h = new NotebookHistory(new IdbPatchStore(db, id));
+  const h = new NotebookHistory(new IdbPatchStore(hdb, id));
   await h.init();
   if (current.id !== id) return h.close(); // another notebook opened meanwhile
   nbHistory = h;
-  h.record(nb.snapshot()); // the notebook as it opened (nothing if it is the last version)
+  for (const doc of historyQueue.splice(0)) h.record(doc); // (nothing for one that is the last version)
   h.on(() => { if (!ttEl.hidden) ttRefresh(false); });
+  if (!ttEl.hidden) ttRefresh(true); // opened while the history was loading
 }
-nb.on("change", (doc) => nbHistory?.record(doc));
+nb.on("change", (doc) => (nbHistory ? nbHistory.record(doc) : historyQueue.push(doc)));
 function ttShow(open) {
+  if (open === !ttEl.hidden) return;
+  // the same place in the notebook, going in and coming back
+  const at = open ? anchorOf(nb) : anchorOf(ttView);
   ttEl.hidden = !open;
   $("#cells").hidden = open;
   ttBtn.setAttribute("aria-pressed", String(open));
-  if (open) return ttRefresh(true);
+  if (open) { ttAnchor = at; ttRefresh(true); ttAnchor = null; return; }
   ttView?.destroy();
   ttView = null;
+  nb.resize(); // its editors were measured while it was hidden
+  restoreAnchor(nb, at);
 }
 function ttRefresh(toEnd) {
   const n = nbHistory?.versions().length ?? 0, atEnd = +ttSlider.value === +ttSlider.max;
@@ -565,12 +580,50 @@ function ttShowVersion() {
   $("#ttrevert").disabled = !v || v.index === vs.length - 1;
   $("#ttprev").disabled = !v || v.index === 0;
   $("#ttnext").disabled = !v || v.index === vs.length - 1;
-  if (!v) { $("#ttinfo").textContent = "No versions yet."; ttView?.load({ mode: nb.mode, cells: [] }); return; }
+  if (!v) { $("#ttinfo").textContent = ttUnavailable || (nbHistory ? "No versions yet." : "Loading the history…"); ttView?.load({ mode: nb.mode, cells: [] }); return; }
   $("#ttinfo").textContent = `Version ${v.index + 1} of ${vs.length} · ${new Date(v.ms).toLocaleString()}`;
   const doc = nbHistory.docAt(v.time);
+  const firstView = !ttView;
   ttView ??= createNotebook($("#ttview"), { readOnly: true, mode: doc.mode });
+  // keep your place: the cell nearest the middle of the window stays where it is
+  const at = firstView ? ttAnchor : anchorOf(ttView);
   ttView.load(doc);
+  restoreAnchor(ttView, at);
 }
+// The cell nearest the middle of the window, and where it is on the screen.
+function anchorOf(notebook) {
+  if (!notebook) return null;
+  const mid = innerHeight / 2;
+  let best = null;
+  notebook.cells().forEach((c, index) => {
+    const r = c.el.getBoundingClientRect();
+    if (!r.height || r.bottom < 0 || r.top > innerHeight) return;
+    const d = r.top <= mid && r.bottom >= mid ? 0 : Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid));
+    if (!best || d < best.d) best = { id: c.id, index, top: r.top, d };
+  });
+  return best;
+}
+// Scroll so that the anchor's cell (or the one at its place) is where it was,
+// and keep it there while the page settles (math is typeset after a paint,
+// pictures load), unless you scroll.
+let unanchor = null;
+function restoreAnchor(notebook, at) {
+  unanchor?.();
+  if (!at) return;
+  const fix = () => {
+    const cs = notebook.cells(), c = cs.find((x) => x.id === at.id) ?? cs[Math.min(at.index, cs.length - 1)];
+    if (c) scrollBy(0, c.el.getBoundingClientRect().top - at.top);
+  };
+  fix();
+  if (typeof ResizeObserver !== "function") return;
+  const ro = new ResizeObserver(fix);
+  ro.observe(notebook.root);
+  const stop = () => { ro.disconnect(); clearTimeout(timer); for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) removeEventListener(e, stop, true); if (unanchor === stop) unanchor = null; };
+  const timer = setTimeout(stop, 2000);
+  for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) addEventListener(e, stop, true);
+  unanchor = stop;
+}
+let ttAnchor = null;
 ttBtn.onclick = () => { if (ttEl.hidden) nb.flush(); ttShow(ttEl.hidden); };
 $("#ttclose").onclick = () => ttShow(false);
 ttSlider.oninput = ttShowVersion;
@@ -873,7 +926,8 @@ fileMenu.addEventListener("click", async (e) => {
       if (current.kind !== "browser" || !confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       nb.detach();
       await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
-      await new IdbPatchStore(db, current.id).drop();
+      const hdb = await historyDbReady;
+      if (hdb) await new IdbPatchStore(hdb, current.id).drop();
       const rest = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
       if (rest.length) await openId(rest[0].id); else await openNew("Untitled", nb.mode, [""]);
       announce("Notebook deleted");
@@ -912,7 +966,8 @@ async function showOpen() {
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
       await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
-      await new IdbPatchStore(db, d.id).drop();
+      const hdb = await historyDbReady;
+      if (hdb) await new IdbPatchStore(hdb, d.id).drop();
       li.remove();
     };
   }
@@ -1233,7 +1288,10 @@ addEventListener("beforeinstallprompt", (e) => {
 });
 addEventListener("appinstalled", () => { installPrompt = null; document.querySelector('[data-f="install"]').hidden = true; });
 
-const dbReady = openDb();
+// (a newer version of the page, in another tab, needs the database: let it go)
+const updated = () => { statusEl.textContent = "Sagebrush was updated in another tab: reload this page to keep saving here"; };
+const dbReady = openDb("sagebrush", { onVersionChange: () => { db = null; updated(); } });
+const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close(); nbHistory = null; updated(); } });
 (async () => {
   db = await dbReady;
   let mode = "python";
