@@ -66,6 +66,9 @@ struct F4<'a> {
     // the sugar degree of each element (the selection strategy)
     sugar: Vec<u64>,
     pairs: Vec<Pair>,
+    // probabilistic linear algebra (random combinations of row blocks):
+    // for the modular images of a computation checked at the end
+    prob: bool,
 }
 
 impl<'a> F4<'a> {
@@ -291,8 +294,13 @@ impl<'a> F4<'a> {
         let tp = tdbg.then(std::time::Instant::now);
         let piv = Pivots { p, rows: at.iter().map(|&k| (k != u32::MAX).then(|| &store[k as usize])).collect() };
         let threads = if rows.len() >= 32 { crate::threads() } else { 1 };
-        let red = piv.reduce(&rows, nc, threads);
-        let red = if echelon { back_reduce(echelonize(red, nc, p), nc, p) } else { red };
+        let red = if echelon && self.prob {
+            let seed = 0x2545F4914F6CDD1D ^ (self.g.len() as u64) << 20 ^ nc as u64;
+            back_reduce(echelonize(piv.reduce_random(&rows, nc, threads, 16, seed), nc, p), nc, p)
+        } else {
+            let red = piv.reduce(&rows, nc, threads);
+            if echelon { back_reduce(echelonize(red, nc, p), nc, p) } else { red }
+        };
         phase_add(2, tp);
         red.into_iter().map(|r| r.cols.iter().zip(&r.vals).map(|(&j, &c)| (cols[j as usize].1, c as u64)).collect()).collect()
     }
@@ -373,6 +381,7 @@ impl<'a> F4<'a> {
             active: vec![true; minimal.len()],
             sugar: vec![0; minimal.len()],
             pairs: vec![],
+            prob: self.prob,
         };
         if matches!(self.o, Order::Lex | Order::InvLex) {
             return self.interreduce_seq(sub.g);
@@ -426,8 +435,14 @@ impl F4<'_> {
 /// dehomogenizes to a basis in the order (degree by degree, without the
 /// swell of lex reductions), which is then reduced.
 pub fn f4_p(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Result<(Packing, Vec<P>), Overflow> {
+    f4_p_opt(pk, o, md, fs, false)
+}
+
+/// f4_p, with probabilistic linear algebra if prob (correct but for a
+/// probability about the number of row blocks over p).
+pub fn f4_p_opt(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], prob: bool) -> Result<(Packing, Vec<P>), Overflow> {
     match o {
-        Order::DegRevLex | Order::DegLex => Ok((pk, f4_direct(pk, o, md, fs)?)),
+        Order::DegRevLex | Order::DegLex => Ok((pk, f4_direct(pk, o, md, fs, prob)?)),
         Order::Lex | Order::InvLex => {
             let n = pk.n;
             if (n as u32 + 1) * pk.bits > 64 {
@@ -449,7 +464,7 @@ pub fn f4_p(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Resu
             if hs.iter().flatten().any(|x| x.0 & ph.guard() != 0) {
                 return Err(Overflow);
             }
-            let gh = f4_direct(ph, Order::DegLex, md, &hs)?;
+            let gh = f4_direct(ph, Order::DegLex, md, &hs, prob)?;
             if std::env::var("SB_F4_DEBUG").is_ok() {
                 eprintln!("f4: homogenized basis {} elements, t {:.3}", gh.len(), T0.with(|t| t.elapsed().as_secs_f64()));
             }
@@ -481,14 +496,15 @@ pub fn f4_p(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Resu
                 sugar: vec![0; g.len()],
                 g,
                 pairs: vec![],
+                prob,
             };
             Ok((pk, st.reduced()?))
         }
     }
 }
 
-fn f4_direct(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Result<Vec<P>, Overflow> {
-    let mut st = F4 { pk, o, md, guard: pk.guard(), g: vec![], lead: vec![], active: vec![], sugar: vec![], pairs: vec![] };
+fn f4_direct(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], prob: bool) -> Result<Vec<P>, Overflow> {
+    let mut st = F4 { pk, o, md, guard: pk.guard(), g: vec![], lead: vec![], active: vec![], sugar: vec![], pairs: vec![], prob };
     // the generators: sorted, merged, then echelonized together
     let mut rows: Vec<P> = vec![];
     for f in fs {
@@ -545,6 +561,10 @@ fn bits_range(fs: &[QPoly], o: Order) -> (u32, u32) {
 /// reduced mod p), by decreasing leading monomial, widening the packing on
 /// overflow.
 pub fn groebner_p(fs: &[QPoly], o: Order, p: u64) -> Result<Vec<QPoly>, String> {
+    groebner_p_opt(fs, o, p, false)
+}
+
+fn groebner_p_opt(fs: &[QPoly], o: Order, p: u64, prob: bool) -> Result<Vec<QPoly>, String> {
     let n = fs.first().map(|f| f.num.n).unwrap_or(1);
     let md = Modulus::new(p);
     let (mut bits, maxb) = bits_range(fs, o);
@@ -554,7 +574,7 @@ pub fn groebner_p(fs: &[QPoly], o: Order, p: u64) -> Result<Vec<QPoly>, String> 
         }
         let pk = Packing { n, bits };
         let input: Vec<Vec<(u64, u64)>> = fs.iter().map(|f| crate::gcd::reduce(&f.num.repack(bits), p)).collect();
-        match f4_p(pk, o, &md, &input) {
+        match f4_p_opt(pk, o, &md, &input, prob) {
             Ok((pko, g)) => {
                 return Ok(g.into_iter().map(|f| {
                     let mut t: Vec<(u64, i64)> = f.iter().map(|&(w, c)| (w, c as i64)).collect();
@@ -634,7 +654,10 @@ pub fn groebner_q(fs: &[QPoly], o: Order) -> Result<Vec<QPoly>, String> {
                     let dinv = BigInt::from(Modulus::new(p).inv(f.den.mod_floor(&bp).to_u64().unwrap()).unwrap());
                     QPoly { num: f.num.scale(&dinv).reduce_mod(p), den: BigInt::one(), p }
                 }).collect();
-                groebner_p(&modp, o, p)
+                // (probabilistic linear algebra, random combinations of row
+                // blocks, saves nothing here: a combination of sparse rows
+                // cascades through the pivots of all of them)
+                groebner_p_opt(&modp, o, p, false)
             };
             pending.extend(ps.iter().copied().zip(crate::run_parallel(ps.len(), &ps, image)));
         }
@@ -709,7 +732,8 @@ pub fn groebner_q(fs: &[QPoly], o: Order) -> Result<Vec<QPoly>, String> {
         if ok {
             return Ok(cand.iter().map(|g| crate::sparse::from_q(g, n)).collect());
         }
-        // not a basis yet (or of a different ideal): go on with more primes
+        // not a basis: an unlucky or wrong image is in the CRT; start over
+        cur = None;
         last = None;
     }
     Err("groebner: too many primes".into())
