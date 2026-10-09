@@ -85,6 +85,11 @@ function gitDate(file: string): string {
   }
 }
 
+// Honest disclosure on every page; a file may replace it with a comment
+// "<!-- disclosure: ... -->" among its first lines (e.g. an article written
+// from code that this model did not write)
+const DISCLOSURE = "Written by Claude Opus 5.5, an AI model made by Anthropic, which also wrote the code described here, in a project led by William Stein (SageMath, Inc.). Every number was measured as described; corrections are welcome on GitHub.";
+
 const CSS = `
 :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #666; --rule: #ddd; --link: #2a6f2f; --code: #f4f4f2; }
 @media (prefers-color-scheme: dark) { :root { --fg: #e8e8e6; --bg: #161616; --muted: #9a9a9a; --rule: #333; --link: #8fd18f; --code: #222; } }
@@ -109,9 +114,10 @@ blockquote { margin: 1rem 0; padding-left: 1rem; border-left: 3px solid var(--ru
 nav.series { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 0.95rem; }
 nav.series a { text-decoration: none; }
 p.meta { color: var(--muted); font-size: 0.9rem; margin-top: -0.5rem; }
+p.ai { color: var(--muted); font-size: 0.88rem; border-left: 3px solid var(--rule); padding: 0.2rem 0 0.2rem 0.8rem; margin: 0 0 1.5rem; }
 `;
 
-interface Page { url: string; title: string; description: string; date: string; html: string; source: string; prev?: Page; next?: Page; series: string; seriesTitle: string; index: boolean }
+interface Page { url: string; title: string; description: string; date: string; html: string; source: string; prev?: Page; next?: Page; series: string; seriesTitle: string; index: boolean; disclosure?: string }
 
 function page(p: Page): string {
   const canonical = SITE + p.url;
@@ -123,6 +129,7 @@ function page(p: Page): string {
     dateModified: p.date,
     url: canonical,
     author: { "@type": "Organization", name: "Sagebrush (SageMath, Inc.)", url: SITE },
+    contributor: { "@type": "SoftwareApplication", name: "Claude Opus 5.5", applicationCategory: "AI model", creator: { "@type": "Organization", name: "Anthropic" } },
     publisher: { "@type": "Organization", name: "SageMath, Inc.", url: "https://sagemath.com" },
     isPartOf: p.index ? undefined : { "@type": "CreativeWorkSeries", name: p.seriesTitle, url: `${SITE}/articles/${p.series}/` },
   };
@@ -150,11 +157,11 @@ function page(p: Page): string {
 <body>
 <header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>
 <main>
-${p.html}
+${p.html.replace("</h1>", `</h1>\n<p class="ai">${esc(p.disclosure ?? DISCLOSURE)}</p>`)}
 ${p.index ? "" : `<p class="meta">Updated ${p.date} · <a href="${REPO}/${p.source}">source on GitHub</a></p>`}
 ${nav}
 </main>
-<footer class="site">Sagebrush: free (MIT or Apache-2.0) computational mathematics, in the browser and natively · <a href="https://github.com/sagemathinc/sagebrush">github.com/sagemathinc/sagebrush</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a></footer>
+<footer class="site">Sagebrush: open-source computational mathematics under the permissive MIT and Apache-2.0 licenses, in the browser and natively · <a href="https://github.com/sagemathinc/sagebrush">github.com/sagemathinc/sagebrush</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a></footer>
 </body>
 </html>
 `;
@@ -165,7 +172,10 @@ const urls: { url: string; date: string }[] = [{ url: "/", date: new Date().toIS
 const seriesList: { slug: string; title: string; description: string; count: number }[] = [];
 rmSync(join(out, "articles"), { recursive: true, force: true });
 const adir = join(root, "articles");
-for (const series of existsSync(adir) ? readdirSync(adir).sort() : []) {
+// the series in this order, then any others alphabetically
+const ORDER = ["groebner", "number-theory", "foundations"];
+const rank = (s: string) => (ORDER.indexOf(s) < 0 ? ORDER.length : ORDER.indexOf(s));
+for (const series of existsSync(adir) ? readdirSync(adir).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) : []) {
   const sdir = join(adir, series);
   const files = readdirSync(sdir).filter((f) => f.endsWith(".md")).sort();
   if (!files.includes("README.md")) continue;
@@ -173,7 +183,8 @@ for (const series of existsSync(adir) ? readdirSync(adir).sort() : []) {
   const seriesTitle = (readme.match(/^# (.+)$/m)?.[1] ?? series).trim();
   const pages: Page[] = files.map((f) => {
     const full = readFileSync(join(sdir, f), "utf8");
-    const src = full.replace(/^<!--[\s\S]*?-->\n?/, "");
+    const src = full.replace(/^(?:<!--[\s\S]*?-->\n?)+/, "");
+    const extra = full.match(/<!--\s*disclosure:\s*([\s\S]*?)-->/)?.[1].replace(/\s+/g, " ").trim();
     const index = f === "README.md";
     const name = f.replace(/\.md$/, "");
     return {
@@ -186,6 +197,7 @@ for (const series of existsSync(adir) ? readdirSync(adir).sort() : []) {
       series,
       seriesTitle,
       index,
+      disclosure: extra,
     };
   });
   const arts = pages.filter((p) => !p.index);
@@ -207,7 +219,7 @@ const list = seriesList.map((s) => `<h2><a href="/articles/${s.slug}/">${esc(s.t
 writeFileSync(join(out, "articles", "index.html"), page({
   url: "/articles/", title: "Articles", description: "How Sagebrush's mathematics engines are implemented, algorithm by algorithm: what worked, what did not, and why.",
   date: new Date().toISOString().slice(0, 10), source: "articles", series: "", seriesTitle: "Articles", index: true,
-  html: `<h1>Articles</h1>\n<p>How Sagebrush's free mathematics engines are implemented, algorithm by algorithm, top to bottom: what worked, what did not and why, and what would have saved time. Written from the literature, with the measurements.</p>\n${list}`,
+  html: `<h1>Articles</h1>\n<p>How Sagebrush's mathematics engines are implemented, algorithm by algorithm, top to bottom: what worked, what did not and why, and what would have saved time. The engines are written from the literature and are open source under the permissive MIT and Apache-2.0 licenses, unlike the GPL or closed systems they are measured against.</p>\n${list}`,
 }));
 urls.push({ url: "/articles/", date: new Date().toISOString().slice(0, 10) });
 writeFileSync(join(out, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}${u.url}</loc><lastmod>${u.date}</lastmod></url>`).join("\n")}\n</urlset>\n`);
