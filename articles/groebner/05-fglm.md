@@ -1,3 +1,4 @@
+<!-- description: FGLM in Sagebrush: lex bases of zero-dimensional ideals from degrevlex, exponents beyond a machine word, huge rational coefficients, and beating Magma on katsura. -->
 # FGLM: changing the order of a zero-dimensional ideal
 
 *Code: `engine/mpoly/src/fglm.rs`, the `groebner` op in `lib.rs`,

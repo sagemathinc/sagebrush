@@ -1,3 +1,4 @@
+<!-- description: How Sagebrush's free multivariate polynomial engine was built from the literature: F4, Gröbner bases over Q, proofs, FGLM, gcd and factoring, with benchmarks against Magma, msolve and Singular. -->
 # Free multivariate polynomial algebra: how it was built
 
 Sagebrush's multivariate polynomial engine (`engine/mpoly`, with the

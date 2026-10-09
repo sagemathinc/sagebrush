@@ -1,3 +1,4 @@
+<!-- description: The sparse modular elimination under F4: a one-pass accumulator, Faugère–Lachartre's layout with AVX2 dense updates, and why Steel's random combinations did not help. -->
 # Sparse elimination modulo p for F4
 
 *Code: `engine/arith/src/spelim.rs`. Papers: Faugère 1999 (F4); Faugère and

@@ -21,6 +21,7 @@
 
 - [Sagebrush Atlas](https://sagebrush.space/atlas/): Galois orbits of newforms (weight 2, level <= 1000; weights 4-12 with N k^2 <= 4000) proven by the Sagebrush engines, LMFDB labels, every page also JSON, other spaces computed in the browser; formats in [atlas/llms.txt](https://sagebrush.space/atlas/llms.txt).
 
+- [Articles](https://sagebrush.space/articles/): how the engines are implemented, algorithm by algorithm (what worked, what did not, why), starting with [Gröbner bases and multivariate polynomials](https://sagebrush.space/articles/groebner/): sparse elimination mod p, F4, Gröbner bases over Q and their proofs, FGLM, gcd and factorization; sources in articles/ of the repository.
 - [Source code](https://github.com/sagemathinc/sagebrush): the pyjs compiler and runtime, and the Sagebrush Rust engines for research mathematics.
 - [Command line](https://get.sagebrush.space/install.sh): `curl -fsSL https://get.sagebrush.space/install.sh | sh` or `npx sagebrush` (`--sage` for Sage syntax).
 - [npm: sagebrush-web](https://www.npmjs.com/package/sagebrush-web): the browser build.

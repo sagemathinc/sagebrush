@@ -1,3 +1,4 @@
+<!-- description: Multivariate gcd and factorization in Sagebrush: Brown's modular gcd with cofactors, Wang's EEZ, and finite fields where Hilbert irreducibility fails. -->
 # Multivariate gcd and factorization
 
 *Code: `engine/mpoly/src/gcd.rs`, `factor.rs`, `hensel.rs`, `factor_p.rs`,
