@@ -441,6 +441,14 @@ pub fn f4_p(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Resu
 /// f4_p, with probabilistic linear algebra if prob (correct but for a
 /// probability about the number of row blocks over p).
 pub fn f4_p_opt(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], prob: bool) -> Result<(Packing, Vec<P>), Overflow> {
+    // the signature-based F4 (sigf4.rs): correct, almost no reductions to
+    // zero, but slower than F4 so far (a larger, unreduced basis and many
+    // more pairs); experimental, on with SB_SIGF4
+    if matches!(o, Order::DegRevLex | Order::DegLex) && md.n < 1 << 31 && std::env::var("SB_SIGF4").is_ok() {
+        if let Ok(Some(r)) = sig_path(pk, o, md, fs) {
+            return Ok((pk, r));
+        }
+    }
     match o {
         Order::DegRevLex | Order::DegLex => Ok((pk, f4_direct(pk, o, md, fs, prob)?)),
         Order::Lex | Order::InvLex => {
@@ -501,6 +509,69 @@ pub fn f4_p_opt(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], pro
             Ok((pk, st.reduced()?))
         }
     }
+}
+
+/// The reduced basis by the signature-based F4 (sigf4.rs), homogenizing
+/// (degrevlex with h last: its leading monomials survive dehomogenization)
+/// when the input is not homogeneous; None when that is not possible.
+fn sig_path(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Result<Option<Vec<P>>, Overflow> {
+    let n = pk.n;
+    let t0 = std::env::var("SB_F4_DEBUG").is_ok().then(std::time::Instant::now);
+    let homog = fs.iter().all(|f| f.iter().all(|&(w, _)| pk.degree(w) == pk.degree(f[0].0)));
+    let polys: Vec<P> = if homog {
+        crate::sigf4::sig_basis(pk, o, md, fs)?
+    } else {
+        // (deglex on (x, h) does not restrict to deglex on x: a homogenized
+        // deglex needs h's degree before the lex comparison, an order not
+        // here yet; degrevlex with h last restricts to degrevlex)
+        if (n as u32 + 1) * pk.bits > 64 || o != Order::DegRevLex {
+            return Ok(None);
+        }
+        let ph = Packing { n: n + 1, bits: pk.bits };
+        let hs: Vec<P> = fs.iter().filter(|f| !f.is_empty()).map(|f| {
+            let d = f.iter().map(|&(w, _)| pk.degree(w)).max().unwrap();
+            f.iter().map(|&(w, c)| {
+                let mut e = pk.unpack(w);
+                e.push(d - pk.degree(w));
+                (ph.pack(&e), c)
+            }).collect()
+        }).collect();
+        if hs.iter().flatten().any(|x| x.0 & ph.guard() != 0) {
+            return Err(Overflow);
+        }
+        let gh = crate::sigf4::sig_basis(ph, o, md, &hs)?;
+        gh.iter().map(|f| {
+            let mut t: Vec<(u128, u64, u64)> = vec![];
+            for &(w, c) in f {
+                let e = ph.unpack(w);
+                let w2 = pk.pack(&e[..n]);
+                t.push((pk.key(o, w2), w2, c));
+            }
+            t.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            let inv = md.inv(t[0].2).unwrap();
+            t.into_iter().map(|(_, w, c)| (w, md.mul(c, inv))).collect()
+        }).collect()
+    };
+    if std::env::var("SB_F4_DEBUG").is_ok() {
+        eprintln!("sig_path: signature basis of {} elements in {:.3}s", polys.len(), t0.map_or(0.0, |t| t.elapsed().as_secs_f64()));
+    }
+    let st = F4 {
+        pk,
+        o,
+        md,
+        guard: pk.guard(),
+        lead: polys.iter().map(|f| f[0].0).collect(),
+        active: vec![true; polys.len()],
+        sugar: vec![0; polys.len()],
+        g: polys,
+        pairs: vec![],
+        prob: false,
+    };
+    let r = st.reduced()?;
+    if let Some(t) = t0 {
+        eprintln!("sig_path: reduced in total {:.3}s", t.elapsed().as_secs_f64());
+    }
+    Ok(Some(r))
 }
 
 fn f4_direct(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], prob: bool) -> Result<Vec<P>, Overflow> {
@@ -941,6 +1012,25 @@ mod tests {
         assert_eq!(g.len(), 2);
         assert_eq!(g[0].to_text(), q(2, "1,0:1;0,1:-2").to_text());
         assert_eq!(g[1].to_text(), q(2, "0,2:1;0,0:-1").to_text());
+    }
+
+    #[test]
+    fn signature_path_matches() {
+        // cyclic-4 and katsura-3 (homogeneous and not) mod 32003: the
+        // signature-based F4 against F4
+        let systems = [
+            vec!["1,0,0,0:1;0,1,0,0:1;0,0,1,0:1;0,0,0,1:1", "1,1,0,0:1;0,1,1,0:1;0,0,1,1:1;1,0,0,1:1", "1,1,1,0:1;0,1,1,1:1;1,0,1,1:1;1,1,0,1:1", "1,1,1,1:1;0,0,0,0:-1"],
+            vec!["1,0,0,0:1;0,1,0,0:2;0,0,1,0:2;0,0,0,1:2;0,0,0,0:-1", "2,0,0,0:1;0,2,0,0:2;0,0,2,0:2;0,0,0,2:2;1,0,0,0:-1", "1,1,0,0:2;0,1,1,0:2;0,0,1,1:2;0,1,0,0:-1", "0,2,0,0:1;1,0,1,0:2;0,1,0,1:2;0,0,1,0:-1"],
+        ];
+        for fs in systems {
+            let input: Vec<QPoly> = fs.iter().map(|s| { let f = q(4, s); QPoly { num: f.num.reduce_mod(32003), den: BigInt::one(), p: 32003 } }).collect();
+            let md = Modulus::new(32003);
+            let pk = Packing { n: 4, bits: 8 };
+            let words: Vec<Vec<(u64, u64)>> = input.iter().map(|f| crate::gcd::reduce(&f.num.repack(8), 32003)).collect();
+            let a = f4_direct(pk, Order::DegRevLex, &md, &words, false).unwrap();
+            let b = sig_path(pk, Order::DegRevLex, &md, &words).unwrap().unwrap();
+            assert_eq!(a, b);
+        }
     }
 
     #[test]

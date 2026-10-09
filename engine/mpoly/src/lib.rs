@@ -31,6 +31,7 @@ pub mod gcd;
 pub mod hensel;
 pub mod order;
 pub mod rdense;
+pub mod sigf4;
 pub mod sparse;
 
 use num_integer::Integer;
