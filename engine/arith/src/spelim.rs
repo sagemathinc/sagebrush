@@ -294,6 +294,280 @@ impl Pivots<'_> {
     }
 }
 
+impl Pivots<'_> {
+    /// The element updates reducing this row would take (the cascade).
+    fn cost_one(&self, row: &Row, acc: &mut Acc) -> u64 {
+        let Some(&first) = row.cols.first() else { return 0 };
+        let d = &mut acc.d;
+        let p = self.p as i64;
+        let mut last = 0usize;
+        for &c in &row.cols {
+            d[c as usize] = 1;
+            last = last.max(c as usize);
+        }
+        // symbolic: which pivots are applied (assuming no cancellation)
+        let mut ops = 0u64;
+        let mut j = first as usize;
+        loop {
+            if d[j] != 0 {
+                d[j] = 0;
+                if let Some(pr) = self.rows[j] {
+                    ops += pr.len() as u64;
+                    for &c in &pr.cols[1..] {
+                        d[c as usize] = 1;
+                    }
+                    last = last.max(*pr.cols.last().unwrap() as usize);
+                }
+            }
+            if j >= last {
+                break;
+            }
+            j += 1;
+        }
+        let _ = p;
+        ops
+    }
+}
+
+/// Reduce the rows by the pivots the cheaper way: the cascades of
+/// Pivots::reduce, or reduce_fl, estimated from a sample of rows.
+pub fn reduce_auto(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Vec<Row> {
+    if rows.len() < 32 {
+        return piv.reduce(rows, ncols, threads);
+    }
+    let mut acc = Acc { d: vec![0; ncols] };
+    let step = rows.len() / 8;
+    let sample: u64 = (0..8).map(|k| piv.cost_one(&rows[k * step], &mut acc)).sum();
+    let cascade = sample as f64 / 8.0 * rows.len() as f64;
+    // reduce_fl: the needed pivots' entries at pivot columns plus the rows',
+    // each a dense update over the non-pivot columns
+    let nb = piv.rows.iter().filter(|r| r.is_none()).count();
+    let mut need = vec![false; ncols];
+    let mut stack: Vec<usize> = vec![];
+    let mut work = 0u64;
+    for r in rows {
+        for &c in &r.cols {
+            let k = c as usize;
+            if piv.rows[k].is_some() {
+                work += 1;
+                if !need[k] {
+                    need[k] = true;
+                    stack.push(k);
+                }
+            }
+        }
+    }
+    while let Some(k) = stack.pop() {
+        for &c in &piv.rows[k].unwrap().cols[1..] {
+            let m = c as usize;
+            if piv.rows[m].is_some() {
+                work += 1;
+                if !need[m] {
+                    need[m] = true;
+                    stack.push(m);
+                }
+            }
+        }
+    }
+    // a dense update costs about a quarter of a scattered one with AVX2,
+    // more without (WebAssembly, older x86)
+    #[cfg(target_arch = "x86_64")]
+    let w = if std::is_x86_feature_detected!("avx2") { 0.25 } else { 0.6 };
+    #[cfg(not(target_arch = "x86_64"))]
+    let w = 0.6;
+    let fl = work as f64 * nb as f64 * w;
+    if std::env::var("SB_F4_DEBUG").is_ok() {
+        eprintln!("spelim: cascade {:.2e} vs fl {:.2e} -> {}", cascade, fl, if fl < cascade { "fl" } else { "cascade" });
+    }
+    if fl < cascade {
+        reduce_fl(piv, rows, ncols, threads)
+    } else {
+        piv.reduce(rows, ncols, threads)
+    }
+}
+
+/// Faugère and Lachartre's order of operations: the pivot rows reduced by
+/// one another first (B' = A^-1 B, right to left, dense on the non-pivot
+/// columns), then each row reduced by one dense update per entry of its own
+/// at a pivot column (no cascade: the reduced pivot rows have nothing left
+/// at pivot columns).  The same result as Pivots::reduce; worth it when the
+/// non-pivot columns are few and the cascades long.  Returns the rows
+/// reduced (entries at non-pivot columns only), natively on threads.
+pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Vec<Row> {
+    let p = piv.p;
+    let pp = p as i64;
+    let p2 = pp * pp;
+    let red = Red::new(p);
+    // the non-pivot columns, numbered in order
+    let mut bidx: Vec<u32> = vec![u32::MAX; ncols];
+    let mut bcols: Vec<u32> = vec![];
+    for j in 0..ncols {
+        if piv.rows[j].is_none() {
+            bidx[j] = bcols.len() as u32;
+            bcols.push(j as u32);
+        }
+    }
+    let nb = bcols.len();
+    // the pivots needed: reachable from the rows' entries at pivot columns
+    // through the pivots' own
+    let mut need = vec![false; ncols];
+    let mut stack: Vec<usize> = vec![];
+    for r in rows {
+        for &c in &r.cols {
+            let k = c as usize;
+            if piv.rows[k].is_some() && !need[k] {
+                need[k] = true;
+                stack.push(k);
+            }
+        }
+    }
+    while let Some(k) = stack.pop() {
+        for &c in &piv.rows[k].unwrap().cols[1..] {
+            let m = c as usize;
+            if piv.rows[m].is_some() && !need[m] {
+                need[m] = true;
+                stack.push(m);
+            }
+        }
+    }
+    // the non-pivot columns in slices (Faugère and Lachartre's column
+    // blocks): B' = A^-1 B and the rows' updates separate by columns, so
+    // each thread does all of it on its own slice
+    let t = threads.max(1).min(nb / 128).max(1);
+    let bounds: Vec<(usize, usize)> = (0..t).map(|k| (k * nb / t, (k + 1) * nb / t)).collect();
+    let slice = |lo: usize, hi: usize| -> Vec<Row> {
+        let w = hi - lo;
+        let mut bp: Vec<Option<Vec<u32>>> = vec![None; ncols];
+        let mut acc: Vec<i64> = vec![0; w];
+        let inb = |k: usize| -> Option<usize> {
+            let b = bidx[k];
+            (b != u32::MAX && (b as usize) >= lo && (b as usize) < hi).then(|| b as usize - lo)
+        };
+        for j in (0..ncols).rev() {
+            if !need[j] {
+                continue;
+            }
+            let Some(r) = piv.rows[j] else { continue };
+            sagebrush_interrupt::check();
+            for x in acc.iter_mut() {
+                *x = 0;
+            }
+            let mut any = false;
+            for (&c, &v) in r.cols[1..].iter().zip(&r.vals[1..]) {
+                if let Some(i) = inb(c as usize) {
+                    acc[i] = v as i64;
+                    any = true;
+                }
+            }
+            for (&c, &v) in r.cols[1..].iter().zip(&r.vals[1..]) {
+                let k = c as usize;
+                if bidx[k] == u32::MAX {
+                    if let Some(b) = &bp[k] {
+                        dense_axpy(&mut acc, (pp - v as i64) % pp, p2, b);
+                        any = true;
+                    }
+                }
+            }
+            if any && acc.iter().any(|&x| x != 0) {
+                bp[j] = Some(acc.iter().map(|&x| red.rem(x as u64) as u32).collect());
+            }
+        }
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            for x in acc.iter_mut() {
+                *x = 0;
+            }
+            for (&c, &v) in row.cols.iter().zip(&row.vals) {
+                if let Some(i) = inb(c as usize) {
+                    acc[i] = v as i64;
+                }
+            }
+            for (&c, &v) in row.cols.iter().zip(&row.vals) {
+                let k = c as usize;
+                if bidx[k] == u32::MAX {
+                    if let Some(b) = &bp[k] {
+                        dense_axpy(&mut acc, (pp - v as i64) % pp, p2, b);
+                    }
+                }
+            }
+            let mut r = Row::default();
+            for (i, &x) in acc.iter().enumerate() {
+                if x != 0 {
+                    let c = red.rem(x as u64);
+                    if c != 0 {
+                        r.cols.push(bcols[lo + i]);
+                        r.vals.push(c as u32);
+                    }
+                }
+            }
+            out.push(r);
+        }
+        out
+    };
+    if t == 1 {
+        return slice(0, nb);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        unreachable!()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let parts: Vec<Vec<Row>> = std::thread::scope(|sc| {
+            let hs: Vec<_> = bounds.iter().map(|&(lo, hi)| {
+                let f = &slice;
+                sc.spawn(move || f(lo, hi))
+            }).collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        // each row: its slices in order (increasing columns)
+        (0..rows.len()).map(|k| {
+            let mut r = Row::default();
+            for part in &parts {
+                r.cols.extend_from_slice(&part[k].cols);
+                r.vals.extend_from_slice(&part[k].vals);
+            }
+            r
+        }).collect()
+    }
+}
+
+/// acc += c * b (entries kept in [0, p^2); c in [0, p)), densely: an
+/// unsigned 32 x 32 -> 64 bit product per entry, which vectorizes (AVX2
+/// chosen at run time where available).
+#[inline]
+fn dense_axpy(acc: &mut [i64], c: i64, p2: i64, b: &[u32]) {
+    if c == 0 {
+        return;
+    }
+    // the accumulator holds values in [0, p^2): the same bits as u64
+    let acc: &mut [u64] = unsafe { std::slice::from_raw_parts_mut(acc.as_mut_ptr() as *mut u64, acc.len()) };
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::is_x86_feature_detected!("avx2") {
+            unsafe { dense_axpy_avx2(acc, c as u64, p2 as u64, b) };
+            return;
+        }
+    }
+    dense_axpy_u64(acc, c as u64, p2 as u64, b);
+}
+
+#[inline(always)]
+fn dense_axpy_u64(acc: &mut [u64], c: u64, p2: u64, b: &[u32]) {
+    let n = acc.len().min(b.len());
+    let (acc, b) = (&mut acc[..n], &b[..n]);
+    for i in 0..n {
+        let y = acc[i] + c * b[i] as u64;
+        acc[i] = if y >= p2 { y - p2 } else { y };
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn dense_axpy_avx2(acc: &mut [u64], c: u64, p2: u64, b: &[u32]) {
+    dense_axpy_u64(acc, c, p2, b)
+}
+
 /// The rows (already reduced by any earlier pivots) echelonized among
 /// themselves: monic rows with distinct leading columns, each reduced by
 /// the ones found before it, in the order found.
@@ -423,6 +697,70 @@ mod tests {
         let ech = echelonize(vec![out[0].clone(), row(&[(1, 2), (3, 1)]), row(&[(3, 5)])], 4, p);
         // x1 + 4 x3, then 2x1 + x3 - 2(x1 + 4 x3) = -7 x3 = 0, then x3
         assert_eq!(ech, vec![row(&[(1, 1), (3, 4)]), row(&[(3, 1)])]);
+    }
+
+    #[test]
+    fn fl_matches() {
+        let p: u32 = 2147483629;
+        let n = 80usize;
+        let mut s = 777u64;
+        let mut rnd = |m: u64| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s % m
+        };
+        let mut pivs: Vec<Option<Row>> = vec![None; n];
+        for j in 0..n {
+            if rnd(4) != 0 {
+                let mut e = vec![(j as u32, 1u32)];
+                for k in j + 1..n {
+                    if rnd(5) == 0 {
+                        e.push((k as u32, rnd(p as u64) as u32));
+                    }
+                }
+                pivs[j] = Some(row(&e));
+            }
+        }
+        let mut rows = vec![];
+        for _ in 0..30 {
+            let mut e = vec![];
+            for k in 0..n as u32 {
+                if rnd(3) == 0 {
+                    e.push((k, 1 + rnd(p as u64 - 1) as u32));
+                }
+            }
+            rows.push(row(&e));
+        }
+        let piv = Pivots { p, rows: pivs.iter().map(|r| r.as_ref()).collect() };
+        assert_eq!(reduce_fl(&piv, &rows, n, 1), piv.reduce(&rows, n, 1));
+        assert_eq!(reduce_fl(&piv, &rows, n, 4), piv.reduce(&rows, n, 1));
+        // wide enough for column slices on several threads
+        let n = 1500usize;
+        let mut pivs: Vec<Option<Row>> = vec![None; n];
+        for j in 0..n {
+            if rnd(3) == 0 {
+                let mut e = vec![(j as u32, 1u32)];
+                for k in j + 1..n {
+                    if rnd(60) == 0 {
+                        e.push((k as u32, rnd(p as u64) as u32));
+                    }
+                }
+                pivs[j] = Some(row(&e));
+            }
+        }
+        let mut rows = vec![];
+        for _ in 0..20 {
+            let mut e = vec![];
+            for k in 0..n as u32 {
+                if rnd(40) == 0 {
+                    e.push((k, 1 + rnd(p as u64 - 1) as u32));
+                }
+            }
+            rows.push(row(&e));
+        }
+        let piv = Pivots { p, rows: pivs.iter().map(|r| r.as_ref()).collect() };
+        assert_eq!(reduce_fl(&piv, &rows, n, 6), piv.reduce(&rows, n, 1));
     }
 
     #[test]

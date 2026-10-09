@@ -293,12 +293,23 @@ impl<'a> F4<'a> {
         phase_add(1, tp);
         let tp = tdbg.then(std::time::Instant::now);
         let piv = Pivots { p, rows: at.iter().map(|&k| (k != u32::MAX).then(|| &store[k as usize])).collect() };
+        if std::env::var("SB_F4_SHAPE").is_ok() {
+            let npiv = store.len();
+            let plen: usize = store.iter().map(|r| r.len()).sum();
+            let pa: usize = store.iter().map(|r| r.cols[1..].iter().filter(|&&c| at[c as usize] != u32::MAX).count()).sum();
+            let ca: usize = rows.iter().map(|r| r.cols.iter().filter(|&&c| at[c as usize] != u32::MAX).count()).sum();
+            eprintln!("shape: deg? cols {} pivots {} B-cols {} rows {} | pivot len {:.1} (A part {:.1}) | row A-entries {:.1}", nc, npiv, nc - npiv, rows.len(), plen as f64 / npiv.max(1) as f64, pa as f64 / npiv.max(1) as f64, ca as f64 / rows.len().max(1) as f64);
+        }
         let threads = if rows.len() >= 32 { crate::threads() } else { 1 };
         let red = if echelon && self.prob {
             let seed = 0x2545F4914F6CDD1D ^ (self.g.len() as u64) << 20 ^ nc as u64;
             back_reduce(echelonize(piv.reduce_random(&rows, nc, threads, 16, seed), nc, p), nc, p)
         } else {
-            let red = piv.reduce(&rows, nc, threads);
+            let red = match std::env::var("SB_F4_FL").as_deref() {
+                Ok("1") => sagebrush_arith::spelim::reduce_fl(&piv, &rows, nc, threads),
+                Ok("0") => piv.reduce(&rows, nc, threads),
+                _ => sagebrush_arith::spelim::reduce_auto(&piv, &rows, nc, threads),
+            };
             if echelon { back_reduce(echelonize(red, nc, p), nc, p) } else { red }
         };
         phase_add(2, tp);
