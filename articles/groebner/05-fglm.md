@@ -1,4 +1,4 @@
-<!-- description: FGLM in Sagebrush: lex bases of zero-dimensional ideals from degrevlex, exponents beyond a machine word, huge rational coefficients, and beating Magma on katsura. -->
+<!-- description: FGLM in Sagebrush: lex bases of zero-dimensional ideals from degrevlex, exponents beyond a machine word, huge rational coefficients, and how close it comes to the fastest implementations. -->
 # FGLM: changing the order of a zero-dimensional ideal
 
 *Code: `engine/mpoly/src/fglm.rs`, the `groebner` op in `lib.rs`,
@@ -75,8 +75,8 @@ At that size, reconstruction was everything: 37 of 41 s. Two fixes:
 - **CRT by a product tree from 64 primes**, $O(M(k)\log k)$ per value
   instead of Garner's $O(k^2)$.
 
-Katsura-7 went from 41 s to 7.6 s (16 threads; 31 s on one), against
-Magma's 27.4 s.
+Katsura-7 went from 41 s to 7.6 s on 16 threads, and 31 s on one. On one
+core, the fastest implementation we measured takes 17–22 s.
 
 One experiment failed. **Per-entry rational reconstruction**, instead of a
 running common denominator per row, was 3–4× slower. In these bases,
@@ -108,13 +108,18 @@ f(t)$:
 
 ## Results
 
-| | Sagebrush, 16 / 1 thread | Magma 2.18 | Singular |
+| | Sagebrush, 16 / 1 thread | Magma 2.29 (normalized) / 2.18 | Singular |
 |---|---|---|---|
-| katsura-8 lex mod 32003 | 0.14 s | 0.21 s | |
-| katsura-9 lex mod 32003 | 0.63 / 0.79 s | 1.49 s | |
-| cyclic-7 lex mod 32003 | 0.27 / 0.29 s | 0.40 s | |
-| katsura-6 lex over $\mathbb{Q}$ | 0.36 s, proof 1.2 s | 0.84 s | 1.7 s (`std` + `fglm`) |
-| katsura-7 lex over $\mathbb{Q}$ | 7.6 / 31 s, proof 64 s | 27.4 s | 109 s |
+| katsura-8 lex mod 32003 | 0.14 s | 0.05–0.06 / 0.21 s | |
+| katsura-9 lex mod 32003 | 0.63 / 0.79 s | 0.27–0.35 / 1.49 s | |
+| cyclic-7 lex mod 32003 | 0.27 / 0.29 s | 0.92–1.23 / 0.40 s | |
+| katsura-6 lex over $\mathbb{Q}$ | 0.36 s, proof 1.2 s | 0.61–0.80 / 0.84 s | 1.7 s (`std` + `fglm`) |
+| katsura-7 lex over $\mathbb{Q}$ | 7.6 / 31 s, proof 64 s | 17–22 / 27.4 s | 109 s |
+
+So on one core Sagebrush takes 1.4–3× the time of the fastest
+implementation measured, except on cyclic-7, where it takes less. With all
+cores it is ahead over $\mathbb{Q}$. How Magma 2.29 was measured and
+normalized is explained in the series index.
 
 The output is identical to Sage 10.10 on 11 cases (lex and invlex; over
 $\mathbb{Q}$, $\mathbb{F}_{32003}$ and $\mathbb{F}_7$).

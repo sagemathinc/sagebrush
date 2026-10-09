@@ -1,4 +1,4 @@
-<!-- description: How Sagebrush computes modular symbols, Hecke operators, proven characteristic polynomials over Z, rational newforms to conductor 9999 and LMFDB's newspaces, 9-15x faster than Magma 2.18. -->
+<!-- description: How Sagebrush computes modular symbols, Hecke operators, proven characteristic polynomials over Z, all rational newforms to conductor 9999 and LMFDB's newspaces, checked against Cremona's tables and the LMFDB. -->
 <!-- disclosure: Written by Claude Opus 5.5, an AI model made by Anthropic, from the code, commit history and result notes (results/engine*.md, newforms.md, newspaces.md, general*.md) of the Sagebrush project, led by William Stein (SageMath, Inc.). -->
 # Modular symbols and newforms
 

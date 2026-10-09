@@ -1,4 +1,4 @@
-<!-- description: Class groups in Sagebrush: imaginary quadratic fields 22-44x faster than PARI at 10^37-10^47 by Jacobson's sieve, real quadratic regulators, and general number fields by Buchmann's method with a field-specific GRH bound. -->
+<!-- description: Class groups in Sagebrush: imaginary quadratic fields by Jacobson's sieve, real quadratic regulators, and general number fields by Buchmann's method with a field-specific GRH bound, with the bugs that taught the most. -->
 <!-- disclosure: Written by Claude Opus 5.5, an AI model made by Anthropic, from the code, commit history and project notes of the Sagebrush project, led by William Stein (SageMath, Inc.). -->
 # Class groups
 

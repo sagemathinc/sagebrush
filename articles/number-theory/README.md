@@ -1,4 +1,4 @@
-<!-- description: How Sagebrush's MIT-licensed number theory engines were built: modular symbols and newforms, traces of Frobenius, Galois groups of polynomials, and class groups, measured against Magma, Sage, PARI and smalljac. -->
+<!-- description: How Sagebrush's MIT-licensed number theory engines were built: modular symbols and newforms, traces of Frobenius, Galois groups of polynomials, and class groups, checked against Cremona's tables, the LMFDB and established systems. -->
 <!-- disclosure: Written by Claude Opus 5.5, an AI model made by Anthropic, from the code, commit history and result notes of the Sagebrush project, led by William Stein (SageMath, Inc.). Every number below comes from those notes and commits; corrections are welcome on GitHub. -->
 # Number theory engines, MIT-licensed: how they were built
 
@@ -23,6 +23,27 @@ what was checked against what, and what went wrong on the way.
 4. [Class groups](04-class-groups.md): imaginary and real quadratic fields
    by Jacobson's sieve, and general number fields by Buchmann's method with
    a field-specific GRH bound.
+
+## Is it fast enough to choose?
+
+**Short answer:** yes. On one core, every engine here is within about 2× of
+the reference we measured it against, or faster, with two exceptions that
+are small in absolute terms.
+
+| engine | reference (one core) | Sagebrush, one core |
+|---|---|---|
+| modular symbols: proven $T_q$ charpolys | Sage 10, default path and LinBox | 1.1–7.8× faster |
+| rational newforms, all levels to 2000 | Magma 2.18 | faster (13.5×); a current Magma is surely faster than 2.18 |
+| traces of Frobenius to $10^7$–$10^8$ | smalljac 4.1.3 | 1.2–1.6× slower; on 16 threads, from 1.3× faster to 1.4× slower |
+| Galois groups, degree 12 | Magma 2.18 | faster (2.2×) |
+| imaginary quadratic class groups | PARI 2.17 | 2.3× slower at $\lvert D \rvert \approx 10^9$ (milliseconds); equal at $10^{17}$; faster beyond |
+| class groups of cubic and quartic fields | PARI 2.17 | cubics faster from $\lvert d \rvert \approx 10^{25}$; quartics 1–4× slower |
+
+Most engines also run in parallel, and all of them run in the browser as
+WebAssembly, at roughly 1.3–4× the native single-core time. The articles
+give the full measurements: versions, machines and caveats. Where the only
+reference available was an old version (Magma 2.18, from 2012), the
+article says so.
 
 ## Ground rules
 

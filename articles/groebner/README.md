@@ -1,4 +1,4 @@
-<!-- description: How Sagebrush's permissively licensed (MIT/Apache) multivariate polynomial engine was built from the literature: F4, Gröbner bases over Q, proofs, FGLM, gcd and factoring, with benchmarks against Magma, msolve and Singular. -->
+<!-- description: How Sagebrush's permissively licensed (MIT/Apache) multivariate polynomial engine was built from the literature: F4, Gröbner bases over Q, proofs, FGLM, gcd and factoring, and how close it comes to the fastest implementations. -->
 # Gröbner bases and multivariate polynomials, MIT-licensed: how they were built
 
 Sagebrush's multivariate polynomial engine (`engine/mpoly`, with the
@@ -53,32 +53,74 @@ were still fresh. The dead ends are what papers usually leave out.
 - **Measured.** Every claim of speed below was measured on one machine:
   16 cores, x86-64 with AVX2. "1 thread" means `SAGEBRUSH_THREADS=1`.
 
-## Where things stand (October 2026)
+## Is it fast enough to choose?
 
-Reduced degrevlex bases modulo 32003, in seconds:
+**Short answer:** yes for most uses.
 
-| ideal | Sagebrush, 1 thread / 16 threads | Magma 2.18 (1 thread) | msolve 0.9.4, 1 / 16 | Singular `std` |
-|---|---|---|---|---|
-| katsura-10 | 3.1 / 1.5 | 2.8 | 2.4 / 0.9 | 44 |
-| katsura-11 | 24 / 8.5 | 21 | 18 / 4.6 | 601 |
-| cyclic-8 | 4.8 / 2.8 | 2.2 | 1.9 / 1.2 | 23.5 |
+- **One core, over $\mathbb{Q}$ and for lex bases:** Sagebrush takes about
+  1.4–2.3× the time of the fastest implementation we could measure.
+- **One core, modulo a prime:** about 2–5×. That gap is known (symbolic
+  preprocessing and matrix building) and is the next piece of work.
+- **All cores:** Sagebrush threads natively, and over $\mathbb{Q}$ it then
+  finishes before that single-core reference.
+- **Proven results over $\mathbb{Q}$ by default**, as Sage expects.
 
-Over $\mathbb{Q}$, in seconds. The proven result is Sage's default; it is
-Magma's semantics that we cannot tell (see article 4).
+So choosing Sagebrush does not mean waiting 10× longer than with the best
+commercial system. On many problems it means waiting less.
 
-| ideal | without proof, 16 / 1 | with proof, 16 / 1 | Magma | Singular |
-|---|---|---|---|---|
-| katsura-8 | 0.39 / 0.55 | 0.66 / 4.0 | 0.37 | 4.9 |
-| katsura-9 | 2.4 / 3.9 | 4.1 / 43 | 2.4 | 89 |
-| cyclic-7 | 0.61 / 0.80 | 0.72 / 2.8 | 0.57 | over 30 min |
+Each row compares Sagebrush with the fastest time we measured for that
+problem, from any system:
 
-Lex bases, in seconds:
+| problem | Sagebrush, 1 core | Sagebrush, 16 cores | best measured, 1 core | ratio, 1 core | ratio, 16 cores |
+|---|---|---|---|---|---|
+| katsura-10 mod p | 3.19 s | 1.60 s | 0.6–0.9 s | 3.7–5.0× | 1.9–2.5× |
+| cyclic-8 mod p | 4.76 s | 2.84 s | 0.9–1.2 s | 3.9–5.2× | 2.3–3.1× |
+| katsura-8 over $\mathbb{Q}$ | 0.71 s | 0.28 s | 0.37 s | 1.9× | 0.8× |
+| cyclic-7 over $\mathbb{Q}$ | 0.75 s | 0.38 s | 0.4–0.5 s | 1.6–2.1× | 0.8–1.1× |
+| katsura-9 over $\mathbb{Q}$ | 5.77 s | 1.54 s | 2.5 s | 2.3× | 0.6× |
+| katsura-9 lex mod p | 0.74 s | 0.58 s | 0.3–0.4 s | 2.1–2.8× | 1.6–2.2× |
+| cyclic-7 lex mod p | 0.26 s | 0.25 s | 0.39 s | 0.7× | 0.6× |
+| katsura-6 lex over $\mathbb{Q}$ | 1.17 s | 0.34 s | 0.6–0.8 s | 1.5–1.9× | 0.4–0.6× |
+| katsura-7 lex over $\mathbb{Q}$ | 31.4 s | 7.1 s | 17–22 s | 1.4–1.9× | 0.3–0.4× |
 
-| ideal | Sagebrush, 16 / 1 | Magma | Singular |
-|---|---|---|---|
-| katsura-9 mod 32003 | 0.63 / 0.79 | 1.49 | |
-| katsura-7 over $\mathbb{Q}$, without proof | 7.6 / 31 | 27.4 | |
-| katsura-7 over $\mathbb{Q}$, with proof | 64 (16 threads) | | over 600 (`std` in lex), 109 (`std` + `fglm`) |
+The Sagebrush times over $\mathbb{Q}$ here skip the final proof
+(`proof.polynomial(False)`), as the reference appears to. With the proof
+(the default), the 16-core times are 0.63 s for katsura-8, 0.68 s for
+cyclic-7 and 4.19 s for katsura-9; see article 4.
+
+### How we measure
+
+- **"Best measured"** is the fastest single-core time among Magma 2.29,
+  Magma 2.18, msolve 0.9.4 and Singular. In every row it was Magma, 2.29 or
+  2.18. Over $\mathbb{Q}$, Magma 2.18 was the faster of the two Magmas on
+  katsura-8 and katsura-9.
+- **Magma 2.29 ran on its online calculator**, not on our machine. Its
+  times are scaled to our machine by a calibration block in the same
+  script: big-integer arithmetic and an interpreter loop, which disagree
+  slightly (factors 1.6 and 2.1). Hence the ranges.
+- **Everything else ran on one machine:** 16 cores, x86-64 with AVX2.
+  Repeated runs vary by up to about 1.5×.
+- **Reproduce:** the Magma scripts are `bench/groebner/magma_online_1.m`
+  and `_2.m`; the Sagebrush script is `bench/groebner/sagebrush_bench.sage`.
+
+### Direct measurements
+
+These are the raw, named numbers that the ratios above come from, for
+anyone who needs a direct comparison. In seconds:
+
+| problem | Sagebrush 1 / 16 cores | Magma 2.29 (normalized) | Magma 2.18 | msolve 0.9.4, 1 / 16 | Singular `std` |
+|---|---|---|---|---|---|
+| katsura-10 mod p | 3.19 / 1.60 | 0.64–0.85 | 2.81 | 2.40 / 0.90 | 44 |
+| cyclic-8 mod p | 4.76 / 2.84 | 0.92–1.22 | 2.22 | 1.9 / 1.2 | 23.5 |
+| katsura-8 over $\mathbb{Q}$ | 0.71 / 0.28 | 0.49–0.65 | 0.37 | | 4.9 |
+| katsura-9 over $\mathbb{Q}$ | 5.77 / 1.54 | 3.2–4.2 | 2.53 | | 89 |
+| cyclic-7 over $\mathbb{Q}$ | 0.75 / 0.38 | 0.35–0.46 | 0.55 | | over 30 min |
+| katsura-9 lex mod p | 0.74 / 0.58 | 0.27–0.35 | 1.49 | | |
+| cyclic-7 lex mod p | 0.26 / 0.25 | 0.92–1.23 | 0.39 | | |
+| katsura-7 lex over $\mathbb{Q}$ | 31.4 / 7.1 | 17–22 | 27.8 | | 109 (`std` + `fglm`) |
+
+Singular's times are for exact (proven) computations; msolve's are modulo
+$p$ only.
 
 ## The lessons that recur
 
