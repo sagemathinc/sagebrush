@@ -289,6 +289,15 @@ node/build.sh                                       # Node addon
 See [engine/TRY.md](engine/TRY.md) for the full function list in both
 languages.
 
+Sage code then runs natively (the engines compiled for your machine, the
+Gröbner bases over QQ on every core):
+
+```sh
+.venv/bin/python -m sagebrush FILE.sage        # or -c "CODE"
+.venv/bin/python -m sagebrush -c 'R = PolynomialRing(QQ, "x", 8)
+print(len(sage.rings.ideal.Katsura(R).groebner_basis()))'
+```
+
 The CLI, the notebook and sagebrush.space are built with pnpm (the lock file
 is `pnpm-lock.yaml`; `npm ci` does not apply) and bun:
 

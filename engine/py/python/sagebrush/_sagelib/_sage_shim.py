@@ -15,6 +15,16 @@ _SOURCES = ["sage_all", "_sage_modular", "_sage_ff", "_sage_ffmat", "_sage_qqbar
             "_sage_matrix", "_sage_expr", "_sage_lang", "sage_plot", "sage_plot3d", "sage_permgroup"]
 
 
+# Sage's packages: their lowercase attributes are subpackages and modules
+# (sage.rings.ideal), not functions of the same name
+_PACKAGES = {"sage"} | {"sage." + p for p in (
+    "rings", "rings.polynomial", "rings.finite_rings", "rings.number_field", "rings.padics",
+    "modular", "matrix", "combinat", "groups", "schemes", "misc", "graphs", "geometry",
+    "calculus", "symbolic", "functions", "plot", "structure", "categories", "arith", "libs",
+    "interfaces", "manifolds", "numerical", "coding", "crypto", "sandpiles", "algebras",
+    "quadratic_forms", "sets", "homology", "topology", "modules", "databases", "lfunctions",
+    "dynamics", "probability", "stats", "tensor", "typeset", "repl", "parallel")}
+
 # modules whose `import *` gives only these names (as in Sage)
 _EXPLICIT = {"sage.manifolds.operators": ["grad", "div", "curl", "laplacian"]}
 
@@ -25,6 +35,9 @@ class _SageModule(types.ModuleType):
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
+        if name.islower() and self.__name__ in _PACKAGES and name != "all":
+            # sage.rings.ideal is a module, not the function ideal
+            return self._submodule(name)
         if not name.startswith("_"):
             for src in _SOURCES:
                 try:
@@ -33,7 +46,17 @@ class _SageModule(types.ModuleType):
                     continue
                 if hasattr(m, name):
                     return getattr(m, name)
+            # a submodule by attribute (sage.rings.ideal.Katsura without an
+            # import, as in a Sage session)
+            if name.islower():
+                return self._submodule(name)
         raise AttributeError("module %r has no attribute %r" % (self.__name__, name))
+
+    def _submodule(self, name):
+        full = self.__name__ + "." + name
+        if full not in sys.modules:
+            __import__(full)
+        return sys.modules[full]
 
     def __call__(self, *args, **kwds):
         # `from sage.x import f` for an f Sagebrush lacks gives this module
