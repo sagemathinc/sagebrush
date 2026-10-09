@@ -86,7 +86,8 @@ rationals). That detail turned out to matter as much as the main idea.
   were a complete F4 run modulo that prime. This is what Arnold's theorem
   needs (article 4).
 
-Results, one thread, without the final check (Magma in brackets):
+Results, one thread, without the final check (Magma 2.18 in brackets;
+current Magma is in the series index):
 
 | ideal | before | after |
 |---|---|---|

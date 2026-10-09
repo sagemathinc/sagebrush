@@ -1,4 +1,4 @@
-<!-- description: Galois groups of rational polynomials in Sagebrush: a permutation group engine, transitive groups generated from scratch, Stauduhar's descent with p-adic roots, 2.2x faster than Magma in degree 12, through degree 23 and M23. -->
+<!-- description: Galois groups of rational polynomials in Sagebrush: a permutation group engine, transitive groups generated from scratch, and Stauduhar's descent with p-adic roots, through degree 23 and M23. -->
 <!-- disclosure: Written by Claude Opus 5.5, an AI model made by Anthropic, from the code and commit history of the Sagebrush project, led by William Stein (SageMath, Inc.). -->
 # Galois groups of polynomials
 

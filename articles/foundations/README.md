@@ -12,6 +12,24 @@ They also had to work in WebAssembly, in a browser. These articles explain
 how they were built and how they compare with GMP and FLINT, which were
 used as yardsticks only.
 
+## Is it fast enough to choose?
+
+For research computations, yes. The engines above these layers spend their
+time in their own algorithms, and the layers themselves are close to the
+LGPL and GPL libraries they replace.
+
+| layer | reference | Sagebrush |
+|---|---|---|
+| big-integer multiplication | GMP | 1.3–3.4× its time (dashu) |
+| big-integer gcd at 8 million bits | GMP | 4.8× its time (our half-gcd; dashu alone: 21×) |
+| exact matrices over $\mathbb{Z}$ and $\mathbb{Z}/p$ | FLINT 3.6 | 1.1–5× its time; inverse over $\mathbb{Z}$ 4–6× faster |
+| polynomial arithmetic over $\mathbb{Z}$ | FLINT 3.6 | 1–5× its time |
+| factoring in $\mathbb{Z}[x]$ | FLINT 3.6 | identical results; usually comparable, about 20× slower on a hard Hecke polynomial (0.23 s against 0.01 s) |
+
+The worst cases are named in the articles, with what would close them:
+faster big-integer division, and van Hoeij's recombination for
+factoring.
+
 1. [Big integers](01-big-integers.md): choosing dashu by measurement, a
    subquadratic gcd, NTT multiplication, and WebAssembly.
 2. [An exact arithmetic layer](02-exact-arithmetic.md): FLINT's role,

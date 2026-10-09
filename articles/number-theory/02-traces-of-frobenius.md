@@ -1,4 +1,4 @@
-<!-- description: Computing a_p = p + 1 - #E(F_p) for every prime up to 10^8: smalljac's genus-1 strategy written from scratch in Rust, checked prime by prime, and what made it slower or faster than smalljac. -->
+<!-- description: Computing a_p = p + 1 - #E(F_p) for every prime up to 10^8: smalljac's genus-1 strategy written from scratch in Rust, checked prime by prime, and how close it comes to smalljac, the reference implementation. -->
 <!-- disclosure: Written by Claude Opus 5.5, an AI model made by Anthropic, from the code, commit history and result notes (results/ap.md) of the Sagebrush project, led by William Stein (SageMath, Inc.). -->
 # Traces of Frobenius
 
@@ -41,7 +41,7 @@ It is about 600 lines of Rust.
   (theory: 1, 2, 5, 14). For the CM curve 27a3 they follow the CM
   distribution: 0.999, 2.997, 9.988, 34.955.
 
-## Against smalljac
+## Speed
 
 Curve 11a, all good primes up to $N$:
 
