@@ -30,7 +30,7 @@ use num_integer::Integer;
 use num_traits::{One, Signed, Zero};
 use sagebrush_arith::spelim::{self, Pivots, Row};
 use sagebrush_bigint::nmod::Modulus;
-use sagebrush_bigint::{BigInt, BigRational, Sign};
+use sagebrush_bigint::{BigInt, BigRational};
 use std::collections::HashMap;
 
 /// Bits to spare in a reconstruction (two primes).
@@ -46,18 +46,8 @@ struct Elem {
 }
 
 /// x mod p, in [0, p).
-fn modp(x: &BigInt, p: u64) -> u64 {
-    let (s, d) = x.to_u64_digits();
-    let mut r: u128 = 0;
-    for &w in d.iter().rev() {
-        r = ((r << 64) | w as u128) % p as u128;
-    }
-    let r = r as u64;
-    if s == Sign::Minus && r != 0 {
-        p - r
-    } else {
-        r
-    }
+pub(crate) fn modp(x: &BigInt, p: u64) -> u64 {
+    sagebrush_bigint::rem_u64(x, p)
 }
 
 /// One matrix: the pivot rows (columns, element; monic, leading at the
@@ -116,10 +106,21 @@ impl Crt {
             }
             v[i] = md.mul(md.sub(r[i], t), self.inv[i]);
         }
-        let mut x = BigInt::from(v[k - 1]);
+        // x = v[0] + p_0 (v[1] + p_1 (v[2] + ...)), in limbs
+        let mut limbs: Vec<u64> = Vec::with_capacity(k);
+        limbs.push(v[k - 1]);
         for i in (0..k - 1).rev() {
-            x = x * BigInt::from(self.ps[i]) + BigInt::from(v[i]);
+            let (p, mut carry) = (self.ps[i] as u128, v[i] as u128);
+            for l in limbs.iter_mut() {
+                let t = *l as u128 * p + carry;
+                *l = t as u64;
+                carry = t >> 64;
+            }
+            if carry != 0 {
+                limbs.push(carry as u64);
+            }
         }
+        let x = sagebrush_bigint::from_limbs(false, &limbs);
         if x > self.half {
             x - &self.m
         } else {
@@ -130,7 +131,7 @@ impl Crt {
 
 /// A reconstructed row: a common denominator (positive) and the numerators
 /// by column, the zeros left out.
-type QRow = (BigInt, Vec<(u32, BigInt)>);
+pub(crate) type QRow = (BigInt, Vec<(u32, BigInt)>);
 
 struct Ctx {
     primes: Vec<u64>,
@@ -237,125 +238,9 @@ impl Ctx {
         (ord.iter().map(|&i| out[i].take().unwrap()).collect(), from)
     }
 
-    /// Rows over Q from their images modulo the primes (rows aligned; with
-    /// lead, each has a 1 at its first column, left out), or None if more
-    /// primes are needed.  hard: the (row, entry) that failed last, tried
-    /// first.
     fn reconstruct(&self, imgs: &[(usize, Vec<Row>)], lead: bool, hard: &mut (usize, usize), done: &mut Vec<Option<(QRow, usize)>>) -> Option<Vec<QRow>> {
-        let ps: Vec<u64> = imgs.iter().map(|x| self.primes[x.0]).collect();
-        let crt = Crt::new(&ps);
-        let k = ps.len();
-        let nrows = imgs[0].1.len();
-        let skip = lead as usize;
-        // the union of the rows' supports
-        let support = |t: usize| -> Vec<u32> {
-            let mut c: Vec<u32> = imgs.iter().flat_map(|x| x.1[t].cols[skip..].iter().copied()).collect();
-            c.sort_unstable();
-            c.dedup();
-            c
-        };
-        let residues = |t: usize, col: u32, out: &mut Vec<u64>| {
-            out.clear();
-            for x in imgs {
-                let r = &x.1[t];
-                out.push(match r.cols.binary_search(&col) {
-                    Ok(i) => r.vals[i] as u64,
-                    Err(_) => 0,
-                });
-            }
-        };
-        let mut r = Vec::with_capacity(k);
-        // the entry that failed last: if it still does, so would the rest
-        if hard.0 < nrows && done.get(hard.0).is_none_or(|d| d.is_none()) {
-            let sup = support(hard.0);
-            if let Some(&c) = sup.get(hard.1) {
-                residues(hard.0, c, &mut r);
-                let x = crt.lift(&r);
-                match ratrecon(&x, &crt.m) {
-                    Some(q) if q.numer().bits() + q.denom().bits() + MARGIN <= crt.bits => {}
-                    _ => return None,
-                }
-            }
-        }
-        done.resize(nrows, None);
-        for t in 0..nrows {
-            // a row found before: checked against the images since
-            if let Some(((den, ents), from)) = &done[t] {
-                let ok = imgs[*from..].iter().all(|(j, rows)| {
-                    let p = self.primes[*j];
-                    let md = Modulus::new(p);
-                    let dinv = match md.inv(modp(den, p)) {
-                        Some(x) => x,
-                        None => return false,
-                    };
-                    let r = &rows[t];
-                    let mut k = skip;
-                    for (c, x) in ents {
-                        let v = md.mul(modp(x, p), dinv);
-                        while k < r.cols.len() && r.cols[k] < *c {
-                            if r.vals[k] != 0 {
-                                return false;
-                            }
-                            k += 1;
-                        }
-                        let w = if k < r.cols.len() && r.cols[k] == *c {
-                            k += 1;
-                            r.vals[k - 1] as u64
-                        } else {
-                            0
-                        };
-                        if v != w {
-                            return false;
-                        }
-                    }
-                    r.vals[k..].iter().all(|&v| v == 0)
-                });
-                if ok {
-                    done[t].as_mut().unwrap().1 = k;
-                    continue;
-                }
-                done[t] = None;
-            }
-            let sup = support(t);
-            let mut den = BigInt::one();
-            let mut dmod: Vec<u64> = vec![1; k];
-            let mut ents: Vec<(u32, BigInt)> = Vec::with_capacity(sup.len());
-            for (ci, &c) in sup.iter().enumerate() {
-                residues(t, c, &mut r);
-                // the entry times the denominator so far
-                for i in 0..k {
-                    r[i] = crt.mds[i].mul(r[i], dmod[i]);
-                }
-                let y = crt.lift(&r);
-                if y.is_zero() {
-                    continue;
-                }
-                if y.bits() + den.bits() + MARGIN <= crt.bits {
-                    ents.push((c, y));
-                    continue;
-                }
-                let ok = match ratrecon(&y, &crt.m) {
-                    Some(q) if q.numer().bits() + q.denom().bits() + den.bits() + MARGIN <= crt.bits => Some(q),
-                    _ => None,
-                };
-                let Some(q) = ok else {
-                    *hard = (t, ci);
-                    return None;
-                };
-                // a new factor of the denominator
-                let d = q.denom().clone();
-                for e in ents.iter_mut() {
-                    e.1 = &e.1 * &d;
-                }
-                den = den * &d;
-                for i in 0..k {
-                    dmod[i] = modp(&den, ps[i]);
-                }
-                ents.push((c, q.numer().clone()));
-            }
-            done[t] = Some(((den, ents), k));
-        }
-        Some(std::mem::take(done).into_iter().map(|x| x.unwrap().0).collect())
+        let v: Vec<(u64, &[Row])> = imgs.iter().map(|(j, r)| (self.primes[*j], r.as_slice())).collect();
+        reconstruct_rows(&v, MARGIN, lead, hard, done)
     }
 
     /// F4's use of a matrix over Q: the rows reconstructed (see elim) and
@@ -731,4 +616,141 @@ fn run(fs: &[QPoly], o: Order, bits: u32, gb_input: bool, reduce: bool) -> Resul
     out.sort_by_key(|f| std::cmp::Reverse(f.t[0].key));
     let _ = nin;
     Ok((out, cx.witness))
+}
+
+/// Rows over Q from their images modulo the primes (rows aligned; with
+/// lead, each has a 1 at its first column, left out), or None if more
+/// primes are needed.  hard: the (row, entry) that failed last, tried
+/// first; done: the rows found so far, and the images they agree with;
+/// margin: the bits to spare.
+pub(crate) fn reconstruct_rows(imgs: &[(u64, &[Row])], margin: u64, lead: bool, hard: &mut (usize, usize), done: &mut Vec<Option<(QRow, usize)>>) -> Option<Vec<QRow>> {
+    let ps: Vec<u64> = imgs.iter().map(|x| x.0).collect();
+    let crt = Crt::new(&ps);
+    let k = ps.len();
+    let nrows = imgs[0].1.len();
+    let skip = lead as usize;
+    // the union of the rows' supports
+    let support = |t: usize| -> Vec<u32> {
+        let mut c: Vec<u32> = imgs.iter().flat_map(|x| x.1[t].cols[skip..].iter().copied()).collect();
+        c.sort_unstable();
+        c.dedup();
+        c
+    };
+    let residues = |t: usize, col: u32, out: &mut Vec<u64>| {
+        out.clear();
+        for x in imgs {
+            let r = &x.1[t];
+            out.push(match r.cols.binary_search(&col) {
+                Ok(i) => r.vals[i] as u64,
+                Err(_) => 0,
+            });
+        }
+    };
+    let mut r = Vec::with_capacity(k);
+    // the entry that failed last: if it still does, so would the rest (a
+    // cheap test before the whole pass)
+    if hard.0 < nrows && done.get(hard.0).is_none_or(|d| d.is_none()) {
+        let sup = support(hard.0);
+        if let Some(&c) = sup.get(hard.1) {
+            residues(hard.0, c, &mut r);
+            let x = crt.lift(&r);
+            match ratrecon(&x, &crt.m) {
+                Some(q) if q.numer().bits() + q.denom().bits() + margin <= crt.bits => {}
+                _ => return None,
+            }
+        }
+    }
+    done.resize(nrows, None);
+    let prev: Vec<Option<(QRow, usize)>> = std::mem::take(done);
+    // each row on its own (natively on threads): Ok(the row, the images it
+    // agrees with) or Err(the entry that failed)
+    let row = |&t: &usize| -> Result<(QRow, usize), usize> {
+        // a row found before: checked against the images since
+        if let Some(((den, ents), from)) = &prev[t] {
+            let ok = imgs[*from..].iter().all(|(j, rows)| {
+                let p = *j;
+                let md = Modulus::new(p);
+                let dinv = match md.inv(modp(den, p)) {
+                    Some(x) => x,
+                    None => return false,
+                };
+                let r = &rows[t];
+                let mut k = skip;
+                for (c, x) in ents {
+                    let v = md.mul(modp(x, p), dinv);
+                    while k < r.cols.len() && r.cols[k] < *c {
+                        if r.vals[k] != 0 {
+                            return false;
+                        }
+                        k += 1;
+                    }
+                    let w = if k < r.cols.len() && r.cols[k] == *c {
+                        k += 1;
+                        r.vals[k - 1] as u64
+                    } else {
+                        0
+                    };
+                    if v != w {
+                        return false;
+                    }
+                }
+                r.vals[k..].iter().all(|&v| v == 0)
+            });
+            if ok {
+                return Ok(((den.clone(), ents.clone()), k));
+            }
+        }
+        let mut r = Vec::with_capacity(k);
+        let sup = support(t);
+        let mut den = BigInt::one();
+        let mut dmod: Vec<u64> = vec![1; k];
+        let mut ents: Vec<(u32, BigInt)> = Vec::with_capacity(sup.len());
+        for (ci, &c) in sup.iter().enumerate() {
+            residues(t, c, &mut r);
+            // the entry times the denominator so far
+            for i in 0..k {
+                r[i] = crt.mds[i].mul(r[i], dmod[i]);
+            }
+            let y = crt.lift(&r);
+            if y.is_zero() {
+                continue;
+            }
+            if y.bits() + den.bits() + margin <= crt.bits {
+                ents.push((c, y));
+                continue;
+            }
+            let ok = match ratrecon(&y, &crt.m) {
+                Some(q) if q.numer().bits() + q.denom().bits() + den.bits() + margin <= crt.bits => Some(q),
+                _ => None,
+            };
+            let Some(q) = ok else { return Err(ci) };
+            // a new factor of the denominator
+            let d = q.denom().clone();
+            for e in ents.iter_mut() {
+                e.1 = &e.1 * &d;
+            }
+            den = den * &d;
+            for i in 0..k {
+                dmod[i] = modp(&den, ps[i]);
+            }
+            ents.push((c, q.numer().clone()));
+        }
+        Ok(((den, ents), k))
+    };
+    let idx: Vec<usize> = (0..nrows).collect();
+    let threads = if nrows >= 32 { crate::threads() } else { 1 };
+    let res = crate::run_parallel(threads, &idx, row);
+    let mut failed = None;
+    *done = res.into_iter().enumerate().map(|(t, r)| match r {
+        Ok(x) => Some(x),
+        Err(ci) => {
+            failed.get_or_insert((t, ci));
+            None
+        }
+    }).collect();
+    if let Some(h) = failed {
+        *hard = h;
+        return None;
+    }
+    Some(std::mem::take(done).into_iter().map(|x| x.unwrap().0).collect())
 }
