@@ -109,26 +109,33 @@ impl Pivots<'_> {
     /// row reduced by the pivots: the remaining entries (at columns
     /// without a pivot), in increasing order.
     fn reduce_one(&self, row: &Row, acc: &mut Acc) -> Row {
+        let Some(&first) = row.cols.first() else { return Row::default() };
+        let mut last = 0usize;
+        for (&c, &v) in row.cols.iter().zip(&row.vals) {
+            acc.d[c as usize] = v as i64;
+            last = last.max(c as usize);
+        }
+        self.reduce_loaded(acc, first as usize, last, None)
+    }
+
+    /// The accumulator (entries in [0, p^2) between first and last)
+    /// reduced by the pivots and the local ones (by leading column), left
+    /// zero; the remaining entries as a row.
+    fn reduce_loaded(&self, acc: &mut Acc, first: usize, mut last: usize, local: Option<&std::collections::HashMap<u32, Row>>) -> Row {
         let p = self.p as i64;
         let p2 = p * p;
         let red = Red::new(self.p);
         let d = &mut acc.d;
-        let Some(&first) = row.cols.first() else { return Row::default() };
-        let mut last = 0usize;
-        for (&c, &v) in row.cols.iter().zip(&row.vals) {
-            d[c as usize] = v as i64;
-            last = last.max(c as usize);
-        }
         let mut out = Row::default();
         let n = d.len();
-        let mut j = first as usize;
+        let mut j = first;
         while j < n {
             let x = d[j];
             if x != 0 {
                 d[j] = 0;
                 let c = red.rem(x as u64) as i64;
                 if c != 0 {
-                    match self.rows[j] {
+                    match self.rows[j].or_else(|| local.and_then(|l| l.get(&(j as u32)))) {
                         Some(pr) => {
                             // d -= c * pr (its leading 1 at j is cancelled)
                             last = last.max(axpy(d, c, p2, pr));
@@ -146,6 +153,96 @@ impl Pivots<'_> {
             j += 1;
         }
         out
+    }
+
+    /// A block of rows to their row space modulo the pivots, by random
+    /// linear combinations (Steel's idea, as described by Monagan and
+    /// Pearce): each combination is reduced by the pivots and the rows found
+    /// so far, until one reduces to 0, which then (but for a probability
+    /// about 1/p) the rest would too.  Monic rows with distinct leading
+    /// columns, not reduced by one another.
+    fn reduce_block(&self, rows: &[Row], acc: &mut Acc, seed: u64) -> Vec<Row> {
+        let p = self.p as u64;
+        let p2 = (p * p) as i64;
+        let mut s = seed | 1;
+        let mut rnd = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            1 + s % (p - 1)
+        };
+        let mut local: std::collections::HashMap<u32, Row> = std::collections::HashMap::new();
+        let mut out = vec![];
+        for _ in 0..rows.len() {
+            // the combination, loaded into the accumulator
+            let (mut first, mut last) = (usize::MAX, 0usize);
+            for r in rows {
+                if r.is_empty() {
+                    continue;
+                }
+                let l = rnd() as i64;
+                for (&c, &v) in r.cols.iter().zip(&r.vals) {
+                    let y = acc.d[c as usize] - l * v as i64;
+                    acc.d[c as usize] = y + ((y >> 63) & p2);
+                }
+                first = first.min(r.cols[0] as usize);
+                last = last.max(*r.cols.last().unwrap() as usize);
+            }
+            if first == usize::MAX {
+                break;
+            }
+            let r = self.reduce_loaded(acc, first, last, Some(&local));
+            if r.is_empty() {
+                break;
+            }
+            let r = r.monic(self.p);
+            local.insert(r.cols[0], r.clone());
+            out.push(r);
+        }
+        out
+    }
+
+    /// The rows' span modulo the pivots by random combinations of blocks
+    /// (see reduce_block): rows with new leading columns, to be echelonized
+    /// together.  Correct but for a probability about (number of blocks)/p.
+    pub fn reduce_random(&self, rows: &[Row], ncols: usize, threads: usize, block: usize, seed: u64) -> Vec<Row> {
+        let blocks: Vec<&[Row]> = rows.chunks(block.max(1)).collect();
+        let threads = threads.max(1).min(blocks.len().max(1));
+        if threads == 1 {
+            let mut acc = Acc { d: vec![0; ncols] };
+            let mut out = vec![];
+            for (k, b) in blocks.iter().enumerate() {
+                sagebrush_interrupt::check();
+                out.extend(self.reduce_block(b, &mut acc, seed ^ (k as u64).wrapping_mul(0x9E3779B97F4A7C15)));
+            }
+            return out;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            unreachable!()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            let next = AtomicUsize::new(0);
+            let out: Vec<std::sync::Mutex<Vec<Row>>> = (0..blocks.len()).map(|_| std::sync::Mutex::new(vec![])).collect();
+            std::thread::scope(|sc| {
+                for _ in 0..threads {
+                    sc.spawn(|| {
+                        let mut acc = Acc { d: vec![0; ncols] };
+                        loop {
+                            let k = next.fetch_add(1, Ordering::Relaxed);
+                            if k >= blocks.len() {
+                                break;
+                            }
+                            let r = self.reduce_block(blocks[k], &mut acc, seed ^ (k as u64).wrapping_mul(0x9E3779B97F4A7C15));
+                            *out[k].lock().unwrap() = r;
+                        }
+                    });
+                }
+            });
+            out.into_iter().flat_map(|m| m.into_inner().unwrap()).collect()
+        }
     }
 
     /// Every row reduced by the pivots (in order; empty rows reduced to 0),
@@ -326,6 +423,22 @@ mod tests {
         let ech = echelonize(vec![out[0].clone(), row(&[(1, 2), (3, 1)]), row(&[(3, 5)])], 4, p);
         // x1 + 4 x3, then 2x1 + x3 - 2(x1 + 4 x3) = -7 x3 = 0, then x3
         assert_eq!(ech, vec![row(&[(1, 1), (3, 4)]), row(&[(3, 1)])]);
+    }
+
+    #[test]
+    fn random_combinations() {
+        // three rows modulo the pivot at column 0, in one block, against the
+        // exact reduction
+        let p = 1000003;
+        let a = row(&[(0, 1), (2, 5)]);
+        let piv = Pivots { p, rows: vec![Some(&a), None, None, None] };
+        let r1 = row(&[(0, 3), (1, 1), (3, 2)]);
+        let r2 = row(&[(1, 2), (3, 4)]);
+        let r3 = row(&[(2, 7), (3, 1)]);
+        let out = piv.reduce_random(&[r1.clone(), r2.clone(), r3.clone(), r1.clone()], 4, 1, 8, 42);
+        let ex = back_reduce(echelonize(piv.reduce(&[r1, r2, r3], 4, 1), 4, p), 4, p);
+        let got = back_reduce(echelonize(out, 4, p), 4, p);
+        assert_eq!(got, ex);
     }
 
     #[test]
