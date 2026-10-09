@@ -58,37 +58,72 @@ struct Mat {
     rows: Vec<(Vec<u32>, usize, usize)>,
 }
 
-/// Chinese remaindering for a set of primes (Garner's mixed radix), to the
-/// symmetric residue.
+/// Chinese remaindering for a set of primes, to the symmetric residue:
+/// Garner's mixed radix for a few primes, a product tree for many (each
+/// node combines its halves: O(M(k) log k) per value instead of O(k^2)).
 struct Crt {
     ps: Vec<u64>,
     mds: Vec<Modulus>,
-    // ps[j] mod ps[i], and 1 / (ps[0] ... ps[i-1]) mod ps[i]
+    // Garner: ps[j] mod ps[i], and 1 / (ps[0] ... ps[i-1]) mod ps[i]
     pm: Vec<Vec<u64>>,
     inv: Vec<u64>,
+    // the tree: the products by level, and at each pair the inverse of the
+    // left product modulo the right
+    tree: Vec<Vec<BigInt>>,
+    tinv: Vec<Vec<BigInt>>,
     m: BigInt,
     half: BigInt,
     bits: u64,
 }
 
+/// Garner below this many primes, the product tree from it.
+const CRT_TREE: usize = 64;
+
 impl Crt {
     fn new(ps: &[u64]) -> Crt {
         let mds: Vec<Modulus> = ps.iter().map(|&p| Modulus::new(p)).collect();
-        let pm: Vec<Vec<u64>> = ps.iter().map(|&p| ps.iter().map(|&q| q % p).collect()).collect();
-        let inv = (0..ps.len()).map(|i| {
-            let mut t = 1u64;
-            for j in 0..i {
-                t = mds[i].mul(t, pm[i][j]);
+        let k = ps.len();
+        let (mut pm, mut inv, mut tree, mut tinv): (Vec<Vec<u64>>, Vec<u64>, Vec<Vec<BigInt>>, Vec<Vec<BigInt>>) = (vec![], vec![], vec![], vec![]);
+        if k < CRT_TREE {
+            pm = ps.iter().map(|&p| ps.iter().map(|&q| q % p).collect()).collect();
+            inv = (0..k).map(|i| {
+                let mut t = 1u64;
+                for j in 0..i {
+                    t = mds[i].mul(t, pm[i][j]);
+                }
+                mds[i].inv(t).unwrap()
+            }).collect();
+        } else {
+            let mut lv: Vec<BigInt> = ps.iter().map(|&p| BigInt::from(p)).collect();
+            while lv.len() > 1 {
+                let mut next = Vec::with_capacity(lv.len().div_ceil(2));
+                let mut iv = Vec::with_capacity(lv.len() / 2);
+                for c in lv.chunks(2) {
+                    if c.len() == 2 {
+                        iv.push(c[0].mod_floor(&c[1]).modinv(&c[1]).unwrap());
+                        next.push(&c[0] * &c[1]);
+                    } else {
+                        next.push(c[0].clone());
+                    }
+                }
+                tree.push(lv);
+                tinv.push(iv);
+                lv = next;
             }
-            mds[i].inv(t).unwrap()
-        }).collect();
-        let mut m = BigInt::one();
-        for &p in ps {
-            m = m * BigInt::from(p);
+            tree.push(lv);
         }
+        let m = if k < CRT_TREE {
+            let mut m = BigInt::one();
+            for &p in ps {
+                m = m * BigInt::from(p);
+            }
+            m
+        } else {
+            tree.last().unwrap()[0].clone()
+        };
         let half = &m / BigInt::from(2);
         let bits = m.bits();
-        Crt { ps: ps.to_vec(), mds, pm, inv, m, half, bits }
+        Crt { ps: ps.to_vec(), mds, pm, inv, tree, tinv, m, half, bits }
     }
 
     /// The x with |x| <= m/2 and x = r[i] mod ps[i].
@@ -96,6 +131,26 @@ impl Crt {
         let k = r.len();
         if r.iter().all(|&x| x == 0) {
             return BigInt::zero();
+        }
+        if k >= CRT_TREE {
+            let mut cur: Vec<BigInt> = r.iter().map(|&x| BigInt::from(x)).collect();
+            for (l, iv) in self.tinv.iter().enumerate() {
+                let ms = &self.tree[l];
+                let mut next = Vec::with_capacity(cur.len().div_ceil(2));
+                for j in 0..cur.len().div_ceil(2) {
+                    if 2 * j + 1 < cur.len() {
+                        let (xl, xr) = (&cur[2 * j], &cur[2 * j + 1]);
+                        let (ml, mr) = (&ms[2 * j], &ms[2 * j + 1]);
+                        let t = ((xr - xl).mod_floor(mr) * &iv[j]).mod_floor(mr);
+                        next.push(xl + ml * t);
+                    } else {
+                        next.push(cur[2 * j].clone());
+                    }
+                }
+                cur = next;
+            }
+            let x = cur.pop().unwrap();
+            return if x > self.half { x - &self.m } else { x };
         }
         let mut v = vec![0u64; k];
         for i in 0..k {
@@ -624,6 +679,14 @@ fn run(fs: &[QPoly], o: Order, bits: u32, gb_input: bool, reduce: bool) -> Resul
 /// first; done: the rows found so far, and the images they agree with;
 /// margin: the bits to spare.
 pub(crate) fn reconstruct_rows(imgs: &[(u64, &[Row])], margin: u64, lead: bool, hard: &mut (usize, usize), done: &mut Vec<Option<(QRow, usize)>>) -> Option<Vec<QRow>> {
+    reconstruct_rows_opt(imgs, margin, lead, true, hard, done)
+}
+
+/// reconstruct_rows; with common, each row over a common denominator found
+/// as it goes (cheap when a row's entries share one, as a monic polynomial's
+/// often do), else each entry by itself (entries with unrelated
+/// denominators: the common one would be their product).
+pub(crate) fn reconstruct_rows_opt(imgs: &[(u64, &[Row])], margin: u64, lead: bool, common: bool, hard: &mut (usize, usize), done: &mut Vec<Option<(QRow, usize)>>) -> Option<Vec<QRow>> {
     let ps: Vec<u64> = imgs.iter().map(|x| x.0).collect();
     let crt = Crt::new(&ps);
     let k = ps.len();
@@ -702,6 +765,26 @@ pub(crate) fn reconstruct_rows(imgs: &[(u64, &[Row])], margin: u64, lead: bool, 
         }
         let mut r = Vec::with_capacity(k);
         let sup = support(t);
+        if !common {
+            let mut qs: Vec<(u32, BigRational)> = Vec::with_capacity(sup.len());
+            let mut den = BigInt::one();
+            for (ci, &c) in sup.iter().enumerate() {
+                residues(t, c, &mut r);
+                let x = crt.lift(&r);
+                if x.is_zero() {
+                    continue;
+                }
+                match ratrecon(&x, &crt.m) {
+                    Some(q) if q.numer().bits() + q.denom().bits() + margin <= crt.bits => {
+                        den = den.lcm(q.denom());
+                        qs.push((c, q));
+                    }
+                    _ => return Err(ci),
+                }
+            }
+            let ents = qs.into_iter().map(|(c, q)| (c, q.numer() * (&den / q.denom()))).collect();
+            return Ok(((den, ents), k));
+        }
         let mut den = BigInt::one();
         let mut dmod: Vec<u64> = vec![1; k];
         let mut ents: Vec<(u32, BigInt)> = Vec::with_capacity(sup.len());
