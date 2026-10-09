@@ -85,6 +85,13 @@ function gitDate(file: string): string {
   }
 }
 
+// What Sagebrush shares with other systems (on /articles/)
+const INDEPENDENT = `<h2 id="independent">Independent code: what Sagebrush shares with other systems</h2>
+<p><b>No code.</b> Sagebrush contains and links no code from Magma, PARI, Sage, Singular, GAP, FLINT, GMP, NTL, msolve, eclib or smalljac. Every engine was written from papers and books. Those systems were used only from the outside: as oracles to compare answers with, and as benchmarks. The engines link only general-purpose Rust libraries. Big integers come from dashu, not from GMP, the library almost every other system builds on. FLINT is linked only by some tests, as a reference, and by no shipped package. The details are in <a href="https://github.com/sagemathinc/sagebrush/blob/main/NOTICE.md">NOTICE.md</a>.</p>
+<p><b>Why it matters.</b> When Sagebrush and Magma, PARI, Sage or Hecke compute the same class group, Galois group or newform and agree, the two answers come from independent implementations. No shared bug, in a common library or in borrowed code, can make both wrong in the same way. So adding Sagebrush to a computation adds real certainty.</p>
+<p><b>What is shared</b> is the mathematics: the published algorithms, and hypotheses such as GRH where both systems assume them. Small exceptions are data, not code: Cremona's table of elliptic curves of conductor below 1000 is bundled for curve labels. Code also comes from CPython (its standard library, for the Python runtime) and NumPy (array printing and random-number streams); neither is mathematical research code.</p>
+`;
+
 // Honest disclosure on every page; a file may replace it with a comment
 // "<!-- disclosure: ... -->" among its first lines (e.g. an article written
 // from code that this model did not write)
@@ -219,7 +226,7 @@ const list = seriesList.map((s) => `<h2><a href="/articles/${s.slug}/">${esc(s.t
 writeFileSync(join(out, "articles", "index.html"), page({
   url: "/articles/", title: "Articles", description: "How Sagebrush's mathematics engines are implemented, algorithm by algorithm: what worked, what did not, and why.",
   date: new Date().toISOString().slice(0, 10), source: "articles", series: "", seriesTitle: "Articles", index: true,
-  html: `<h1>Articles</h1>\n<p>How Sagebrush's mathematics engines are implemented, algorithm by algorithm, top to bottom: what worked, what did not and why, and what would have saved time. The engines are written from the literature and are open source under the permissive MIT and Apache-2.0 licenses, unlike the GPL or closed systems they are measured against.</p>\n${list}`,
+  html: `<h1>Articles</h1>\n<p>How Sagebrush's mathematics engines are implemented, algorithm by algorithm, top to bottom: what worked, what did not and why, and what would have saved time. The engines are written from the literature and are open source under the permissive MIT and Apache-2.0 licenses, unlike the GPL or closed systems they are measured against.</p>\n${list}\n${INDEPENDENT}`,
 }));
 urls.push({ url: "/articles/", date: new Date().toISOString().slice(0, 10) });
 writeFileSync(join(out, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}${u.url}</loc><lastmod>${u.date}</lastmod></url>`).join("\n")}\n</urlset>\n`);

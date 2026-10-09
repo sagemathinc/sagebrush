@@ -43,6 +43,10 @@ were still fresh. The dead ends are what papers usually leave out.
 
 ## Ground rules
 
+- **Independent code.** Sagebrush shares no code with the systems it is
+  compared with, not even GMP or FLINT, so agreement with them is evidence
+  from two independent implementations. See
+  [what is shared](/articles/#independent).
 - **Clean-room.** Every algorithm comes from papers. Singular, Sage 10.10,
   Magma 2.18 and msolve 0.9.4 were used only as binary oracles: to compare
   answers and timings, and in Magma's case to read its verbose output. No

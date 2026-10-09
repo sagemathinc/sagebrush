@@ -47,6 +47,10 @@ article says so.
 
 ## Ground rules
 
+- **Independent code.** Sagebrush shares no code with the systems it is
+  compared with, not even GMP or FLINT, so agreement with them is evidence
+  from two independent implementations. See
+  [what is shared](/articles/#independent).
 - **Clean-room.** Papers and books only. PARI, Sage, Magma, GAP and
   smalljac were used as binary oracles and benchmarks; their sources were
   not read.

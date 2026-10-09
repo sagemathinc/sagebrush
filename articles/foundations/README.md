@@ -12,6 +12,13 @@ They also had to work in WebAssembly, in a browser. These articles explain
 how they were built and how they compare with GMP and FLINT, which were
 used as yardsticks only.
 
+## Independent code
+
+These layers are why Sagebrush shares no code with other systems, not even
+GMP or FLINT, which almost every other system builds on. When Sagebrush
+agrees with Magma, PARI or Sage on a computation, that is agreement between
+independent implementations. See [what is shared](/articles/#independent).
+
 ## Is it fast enough to choose?
 
 For research computations, yes. The engines above these layers spend their
