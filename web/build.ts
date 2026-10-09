@@ -119,5 +119,7 @@ writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "ut
 mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 for (const f of ["index.html", "llms.txt", "_headers", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
+// the articles (articles/ in the repository) as static pages, sitemap.xml
+await import("./build-articles.ts");
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
 console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);

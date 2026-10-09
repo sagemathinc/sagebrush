@@ -1,3 +1,4 @@
+<!-- description: Proving a Gröbner basis over Q: Arnold's theorem, Sage's proof flags, why reductions over Z and quotient certificates lost, and a certificate from normal forms modulo primes. -->
 # Proving a Gröbner basis over the rationals
 
 *Code: `engine/mpoly/src/certify.rs`, `f4.rs` (`verify_q`), `f4q.rs`

@@ -1,3 +1,4 @@
+<!-- description: From one F4 per prime to one F4 run over the rationals whose matrices are reduced modulo primes, with a tracer and homogenization, as Magma's verbose output suggested. -->
 # Gröbner bases over the rationals
 
 *Code: `engine/mpoly/src/f4q.rs`, `f4.rs` (`groebner_q`). Papers: Arnold,
