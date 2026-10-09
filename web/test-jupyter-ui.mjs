@@ -11,7 +11,7 @@ import { join } from "node:path";
 const url = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-jupyter-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9338", `--user-data-dir=${profile}`, "--window-size=1200,1600", "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--remote-debugging-port=9338", `--user-data-dir=${profile}`, "--window-size=1200,1600", "about:blank"], { stdio: "ignore" });
 let targets;
 for (let i = 0; i < 100; i++) { try { targets = await (await fetch("http://127.0.0.1:9338/json")).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
@@ -126,9 +126,18 @@ try {
   // printing: the notebook alone, light, its code without the editors
   await ev("(() => { const t = document.querySelectorAll('.cell textarea')[1]; t.value = 'import math\\nprint(math.pi)'; t.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.cell .runb')[1].click(); })()");
   await until("document.querySelectorAll('.cell')[1].querySelector('.out').textContent.includes('3.14159')");
+  // a 3D plot prints as a picture of its current view (a WebGL canvas would print blank)
+  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
+  await ev("(() => { document.querySelector('#add').click(); const t = [...document.querySelectorAll('.cell textarea')].at(-1); t.value = \"x, y = var('x y')\\nplot3d(sin(x*y), (x, -2, 2), (y, -2, 2))\"; t.dispatchEvent(new Event('input', { bubbles: true })); [...document.querySelectorAll('.cell .runb')].at(-1).click(); })()");
+  await until("document.querySelector('figure.plot3d svg')", 60000);
+  const gl = await until("document.querySelector('figure.plot3d canvas')", 8000).catch(() => false);
+  if (gl) await until("document.querySelector('figure.plot3d img.print3d')?.complete && document.querySelector('figure.plot3d img.print3d').naturalWidth > 0", 8000);
   await ev("document.querySelector('#nbname').value = 'Homework 3'; dispatchEvent(new Event('beforeprint'))");
   await send("Emulation.setEmulatedMedia", { media: "print" });
   const st = await ev(`(() => { const d = (s) => getComputedStyle(document.querySelector(s)).display; return { header: d('header'), bar: d('.bar'), about: d('.about'), ta: d('.cell textarea'), head: d('.cell .head'), printhead: d('#printhead'), name: document.querySelector('#printname').textContent, title: document.title, bg: getComputedStyle(document.body).backgroundColor }; })()`);
+  const p3 = await ev(`(() => { const f = document.querySelector('figure.plot3d'), c = f.querySelector('canvas'), i = f.querySelector('img.print3d'), r = i?.getBoundingClientRect(); return { canvas: c ? getComputedStyle(c).display : null, img: i ? getComputedStyle(i).display : null, w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), svg: getComputedStyle(f.querySelector('svg')).display }; })()`);
+  if (gl) ok(p3.canvas === "none" && p3.img === "block" && p3.w > 200 && p3.h > 150, "a 3D view prints as a picture of its current view: " + JSON.stringify(p3));
+  else ok(p3.svg !== "none", "without WebGL the 3D plot prints its SVG: " + JSON.stringify(p3));
   ok(st.header === "none" && st.bar === "none" && st.about === "none" && st.ta === "none" && st.head === "none" && st.printhead === "block" && st.name === "Homework 3" && st.title === "Homework 3" && st.bg === "rgb(255, 255, 255)",
      "print shows only the notebook, titled by its name: " + JSON.stringify(st));
   const pdf = await send("Page.printToPDF", { printBackground: true });

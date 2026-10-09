@@ -141,6 +141,10 @@ class Parser {
   eat(v: string) { if (this.at(v)) { this.i++; return true; } return false; }
   expect(v: string) {
     const t = this.peek();
+    // A statement's ';' may be left off at the end of the input or of a line
+    // (a notebook cell `a := 10`), as long as what follows cannot continue
+    // the statement: the parse has already stopped before it.
+    if (v === ";" && !this.at(v) && (t.t === "eof" || (this.i > 0 && t.line > this.toks[this.i - 1].line))) return t;
     if (!this.at(v)) this.fail(`expected '${v}' but found ${t.t === "eof" ? "end of input" : `'${t.v}'`}`);
     this.i++;
     return t;
