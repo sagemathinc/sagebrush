@@ -18,12 +18,18 @@ export class MemoryStore {
   subscribe(f) { this.subs.add(f); return () => this.subs.delete(f); }
 }
 
-// IndexedDB "sagebrush": object stores "notebooks" (by id) and "files" (by path)
+// IndexedDB "sagebrush": object stores "notebooks" (by id), "files" (by
+// path) and "history" (TimeTravel's patches, by [notebook id, patch id])
 export function openDb(name = "sagebrush") {
   return new Promise((resolve) => {
     try {
-      const r = indexedDB.open(name, 1);
-      r.onupgradeneeded = () => { r.result.createObjectStore("notebooks", { keyPath: "id" }); r.result.createObjectStore("files"); };
+      const r = indexedDB.open(name, 2);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains("notebooks")) db.createObjectStore("notebooks", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("files")) db.createObjectStore("files");
+        if (!db.objectStoreNames.contains("history")) db.createObjectStore("history", { keyPath: ["nb", "time"] });
+      };
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => resolve(null);
     } catch { resolve(null); }
@@ -73,4 +79,47 @@ export class IdbStore {
     channelSubs.add(g);
     return () => channelSubs.delete(g);
   }
+}
+
+// TimeTravel's patches for one notebook (a patchflow PatchStore): kept in
+// IndexedDB, and passed to the other tabs that have the notebook open.
+let historyChannel = null;
+const historySubs = new Set();
+function getHistoryChannel() {
+  if (!historyChannel && typeof BroadcastChannel === "function") {
+    historyChannel = new BroadcastChannel("sagebrush-history");
+    historyChannel.onmessage = (ev) => { if (ev.data?.from !== tabId) for (const f of historySubs) f(ev.data); };
+  }
+  return historyChannel;
+}
+export class IdbPatchStore {
+  constructor(db, id) { this.db = db; this.id = id; }
+  range() { return IDBKeyRange.bound([this.id, ""], [this.id, "\uffff"]); }
+  async loadInitial() {
+    const rows = (await idb(this.db, "history", "readonly", (st) => st.getAll(this.range()))) ?? [];
+    return { patches: rows.map((r) => r.env), hasMore: false };
+  }
+  append(env) {
+    idb(this.db, "history", "readwrite", (st) => st.put({ nb: this.id, time: env.time, env })).catch((e) => console.warn("history:", e));
+    getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
+  }
+  subscribe(f) {
+    const g = (m) => { if (m.id === this.id && m.env) f(m.env); };
+    getHistoryChannel();
+    historySubs.add(g);
+    return () => historySubs.delete(g);
+  }
+  /** Called when another tab clears this notebook's history. */
+  onClear(f) {
+    const g = (m) => { if (m.id === this.id && m.clear) f(); };
+    getHistoryChannel();
+    historySubs.add(g);
+    return () => historySubs.delete(g);
+  }
+  async clear() {
+    await idb(this.db, "history", "readwrite", (st) => st.delete(this.range()));
+    getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
+  }
+  /** Forget this notebook's history without telling anyone (the notebook was deleted). */
+  async drop() { await idb(this.db, "history", "readwrite", (st) => st.delete(this.range())); }
 }

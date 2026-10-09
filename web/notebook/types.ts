@@ -81,6 +81,8 @@ export interface Notebook {
   load(doc: NotebookDoc): void;
   snapshot(): NotebookDoc;
   applyRemote(doc: NotebookDoc): void;
+  /** Like applyRemote, but a change made here: saved and recorded (reverting to an old version). */
+  replace(doc: NotebookDoc): void;
   attach(store: Store): Promise<NotebookDoc>;
   detach(): void;
   setMeta(patch: object): void;

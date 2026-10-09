@@ -1150,6 +1150,14 @@ export function createNotebook(root, opts = {}) {
     Promise.resolve().then(() => { loading = false; });
     emit("remote", doc);
   }
+  // Replace the cells with a document's (TimeTravel's revert): matched by id
+  // and updated in place as for a change made elsewhere, but this one is a
+  // change made here, so it is saved (and recorded).
+  function replace(doc) {
+    applyRemote(doc);
+    lastJson = null;
+    Promise.resolve().then(flush); // after applyRemote's own microtask
+  }
   // Set a cell's text, keeping the caret where it was if it is being edited.
   function setInput(cell, text) {
     const focused = document.activeElement === cell.ta, s0 = cell.ta.selectionStart, s1 = cell.ta.selectionEnd;
@@ -1233,7 +1241,7 @@ export function createNotebook(root, opts = {}) {
     /** A fresh interpreter and no outputs (Jupyter's Restart and clear). */
     restart() { kernel?.restart(); clearOutputs(); },
     setMode, setType, setInput, renderMd, select, edit,
-    load, snapshot, applyRemote, flush,
+    load, snapshot, applyRemote, replace, flush,
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */
     async attach(s) {
