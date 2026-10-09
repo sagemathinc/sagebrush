@@ -26,6 +26,7 @@
 pub mod divide;
 pub mod f4;
 pub mod f4q;
+pub mod fglm;
 pub(crate) mod certify;
 pub mod factor;
 pub mod factor_p;
@@ -1643,6 +1644,14 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
             let o = order::Order::parse(name).ok_or("unsupported term order")?;
             let fs: Vec<QPoly> = (1..args.len()).map(poly).collect::<Result<_, _>>()?;
             let p = fs.first().map(|f| f.p).unwrap_or(0);
+            // lex orders, zero-dimensional ideals: FGLM from degrevlex; the
+            // elements whose exponents do not pack in a word as text
+            if matches!(o, order::Order::Lex | order::Order::InvLex) && std::env::var("SB_FGLM").as_deref() != Ok("0") && fs.iter().any(|f| !f.num.is_zero()) {
+                let nz: Vec<QPoly> = fs.iter().filter(|f| !f.num.is_zero()).cloned().collect();
+                if let Some(b) = fglm::groebner_fglm(&nz, o, p, proof)? {
+                    return Ok(b.iter().map(|f| fglm_out(f, nz[0].num.n, p)).collect());
+                }
+            }
             let g = if p > 0 { f4::groebner_p(&fs, o, p)? } else { f4::groebner_q_opt(&fs, o, proof)? };
             Ok(g.iter().map(|f| f.to_bytes()).collect())
         }
@@ -1884,5 +1893,34 @@ mod tests {
         assert_eq!(r.to_text(), "1,0,2:3/4;0,1,0:1/2;0,0,0:-5");
         let s = r.mul(&r).unwrap();
         assert_eq!(s.den, BigInt::from(16));
+    }
+}
+
+/// An element of a basis from FGLM as the engine's bytes, or as text
+/// (b"TXT" and the terms "e1,...,en:c;...") when its exponents do not pack.
+fn fglm_out(f: &fglm::QEP, n: usize, p: u64) -> Vec<u8> {
+    let mut den = BigInt::one();
+    for (_, c) in f {
+        den = den.lcm(c.denom());
+    }
+    let terms: Vec<(Vec<u64>, BigInt)> = f.iter().map(|(e, c)| (e.iter().map(|&x| x as u64).collect(), c.numer() * (&den / c.denom()))).collect();
+    match ZPoly::from_terms(n, terms) {
+        Ok(num) => QPoly { num, den: if p > 0 { BigInt::one() } else { den }, p }.normalized().to_bytes(),
+        Err(_) => {
+            let mut s = String::from("TXT");
+            for (k, (e, c)) in f.iter().enumerate() {
+                if k > 0 {
+                    s.push(';');
+                }
+                s.push_str(&e.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","));
+                s.push(':');
+                s.push_str(&c.numer().to_string());
+                if !c.denom().is_one() {
+                    s.push('/');
+                    s.push_str(&c.denom().to_string());
+                }
+            }
+            s.into_bytes()
+        }
     }
 }

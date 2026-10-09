@@ -1707,8 +1707,12 @@ class MPolynomial:
 
 def _dict_of(R, b):
     """The dict of a polynomial from the engine's bytes."""
+    return _dict_of_text(R, bytes(_mp("text", b)[0]).decode())
+
+
+def _dict_of_text(R, t):
+    """The dict of a polynomial from the engine's text ("e1,...,en:c;...")."""
     out = {}
-    t = bytes(_mp("text", b)[0]).decode()
     if not t:
         return out
     if R._engine == "p":
@@ -1925,7 +1929,8 @@ def _engine_try(R, op, *args):
         if "too large to pack" in m or "not in the engine" in m or "unsupported term order" in m or "no lucky" in m:
             return None
         raise
-    return [_from_bytes(R, b) for b in r]
+    # (polynomials whose exponents do not pack in a word come as text)
+    return [MPolynomial(R, _dict_of_text(R, bytes(b[3:]).decode())) if bytes(b[:3]) == b"TXT" else _from_bytes(R, b) for b in r]
 
 
 def _gcd(f, g):
@@ -3302,6 +3307,15 @@ class MPolynomialIdeal:
             sage: J = S.ideal(x^2 + y*z - 2, y^2 - x*z + 1, z^2 - x*y - 3)
             sage: J.groebner_basis()[-1]
             z^8 - 15/2*z^6 + 83/4*z^4 - 113/4*z^2 + 121/8
+
+        Lex bases of zero-dimensional ideals come from the degrevlex basis by
+        FGLM (over QQ modulo primes, then reconstructed and checked); their
+        degrees can far exceed the generators'::
+
+            sage: P = PolynomialRing(GF(32003), 'x', 7, order='lex')
+            sage: B = sage.rings.ideal.Katsura(P).groebner_basis()
+            sage: len(B), B[-1].degree(), B[0].lm()
+            (7, 64, x0)
         """
         if self._gb is None:
             S = self._field_ring()
