@@ -34,6 +34,18 @@ type P = Vec<(u64, u64)>;
 thread_local! {
     static LASTCOLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static T0: std::time::Instant = std::time::Instant::now();
+    // seconds in symbolic preprocessing, matrix building, reduction (debug)
+    static PHASES: std::cell::Cell<[f64; 3]> = const { std::cell::Cell::new([0.0; 3]) };
+}
+
+fn phase_add(i: usize, t: Option<std::time::Instant>) {
+    if let Some(t) = t {
+        PHASES.with(|p| {
+            let mut a = p.get();
+            a[i] += t.elapsed().as_secs_f64();
+            p.set(a);
+        });
+    }
 }
 
 struct Pair {
@@ -134,6 +146,8 @@ impl<'a> F4<'a> {
     /// polynomials) when `echelon`, else every reduced row in order.
     fn reduce_rows(&self, mut pivots: HashMap<u64, (u64, usize)>, todo: Vec<P>, echelon: bool) -> Result<Vec<P>, Overflow> {
         let md = self.md;
+        let tdbg = std::env::var("SB_F4_DEBUG").is_ok();
+        let tp = tdbg.then(std::time::Instant::now);
         // the monomials of all rows
         let mut monos: HashSet<u64> = HashSet::new();
         let mut queue: Vec<u64> = vec![];
@@ -177,12 +191,17 @@ impl<'a> F4<'a> {
         if dbg {
             eprintln!("f4: preprocessed {} monomials {} reducers {} rows t {:.3}", monos.len(), pivots.len(), todo.len(), T0.with(|t| t.elapsed().as_secs_f64()));
         }
+        phase_add(0, tp);
+        let tp = tdbg.then(std::time::Instant::now);
         // columns: the monomials, decreasing
         let mut cols: Vec<(u128, u64)> = monos.iter().map(|&w| (self.key(w), w)).collect();
         cols.sort_unstable_by(|a, b| b.0.cmp(&a.0));
         let col: HashMap<u64, u32> = cols.iter().enumerate().map(|(i, &(_, w))| (w, i as u32)).collect();
         let nc = cols.len();
         LASTCOLS.with(|c| c.set(nc));
+        if md.n < 1 << 31 {
+            return Ok(self.eliminate31(&pivots, &todo, &cols, &col, echelon, tdbg, tp));
+        }
         // pivot rows by their leading column
         let mut prow: Vec<Option<Vec<(u32, u64)>>> = vec![None; nc];
         for (&lm, &(m, i)) in &pivots {
@@ -190,6 +209,8 @@ impl<'a> F4<'a> {
             debug_assert_eq!(r[0].0, col[&lm]);
             prow[col[&lm] as usize] = Some(r);
         }
+        phase_add(1, tp);
+        let tp = tdbg.then(std::time::Instant::now);
         let mut out = vec![];
         let mut dense = vec![0u64; nc];
         for (k, r) in todo.iter().enumerate() {
@@ -238,7 +259,42 @@ impl<'a> F4<'a> {
                 out.push(row.iter().map(|&(j, c)| (cols[j as usize].1, c)).collect());
             }
         }
+        phase_add(2, tp);
         Ok(out)
+    }
+
+    /// The reduction for p < 2^31 by the structured sparse elimination of
+    /// sagebrush_arith::spelim: the rows reduced by the known pivots (in
+    /// parallel natively), then echelonized among themselves.
+    #[allow(clippy::too_many_arguments)]
+    fn eliminate31(&self, pivots: &HashMap<u64, (u64, usize)>, todo: &[P], cols: &[(u128, u64)], col: &HashMap<u64, u32>, echelon: bool, tdbg: bool, tp: Option<std::time::Instant>) -> Vec<P> {
+        use sagebrush_arith::spelim::{back_reduce, echelonize, Pivots, Row};
+        let p = self.md.n as u32;
+        let nc = cols.len();
+        let to_row = |r: &mut dyn Iterator<Item = (u32, u64)>| -> Row {
+            let mut row = Row::default();
+            for (c, v) in r {
+                row.cols.push(c);
+                row.vals.push(v as u32);
+            }
+            row
+        };
+        let mut store: Vec<Row> = Vec::with_capacity(pivots.len());
+        let mut at: Vec<u32> = vec![u32::MAX; nc];
+        for (&lm, &(m, i)) in pivots {
+            let r = to_row(&mut self.g[i].iter().map(|&(w, c)| (col[&(w + m)], c)));
+            at[col[&lm] as usize] = store.len() as u32;
+            store.push(r);
+        }
+        let rows: Vec<Row> = todo.iter().map(|r| to_row(&mut r.iter().map(|&(w, c)| (col[&w], c)))).collect();
+        phase_add(1, tp);
+        let tp = tdbg.then(std::time::Instant::now);
+        let piv = Pivots { p, rows: at.iter().map(|&k| (k != u32::MAX).then(|| &store[k as usize])).collect() };
+        let threads = if rows.len() >= 32 { crate::threads() } else { 1 };
+        let red = piv.reduce(&rows, nc, threads);
+        let red = if echelon { back_reduce(echelonize(red, nc, p), nc, p) } else { red };
+        phase_add(2, tp);
+        red.into_iter().map(|r| r.cols.iter().zip(&r.vals).map(|(&j, &c)| (cols[j as usize].1, c as u64)).collect()).collect()
     }
 
     /// One F4 step on the pairs of minimal degree.
@@ -465,6 +521,10 @@ fn f4_direct(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Res
         steps += 1;
         let _ = steps;
     }
+    if std::env::var("SB_F4_DEBUG").is_ok() {
+        let a = PHASES.with(|p| p.get());
+        eprintln!("f4: phases: preprocessing {:.3}s, matrix {:.3}s, reduction {:.3}s, total {:.3}s", a[0], a[1], a[2], T0.with(|t| t.elapsed().as_secs_f64()));
+    }
     st.reduced()
 }
 
@@ -554,7 +614,8 @@ pub fn groebner_q(fs: &[QPoly], o: Order) -> Result<Vec<QPoly>, String> {
     let mut last: Option<Vec<Vec<(u64, BigRational)>>> = None;
     let mut rejected = 0usize;
     // the images modulo good primes, computed in parallel batches
-    let mut primes = crate::gcd::Primes::new().filter(|&p| !(&bad % BigInt::from(p)).is_zero());
+    // primes below 2^31: the fast elimination (more of them, each cheaper)
+    let mut primes = crate::gcd::Primes::below(1 << 31).filter(|&p| !(&bad % BigInt::from(p)).is_zero());
     let mut pending: std::collections::VecDeque<(u64, Result<Vec<QPoly>, String>)> = Default::default();
     let mut batch = 1usize;
     let mut used = 0usize;

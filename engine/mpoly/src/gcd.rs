@@ -77,6 +77,11 @@ impl Primes {
     pub fn new() -> Primes {
         Primes { next: (1u64 << 62) - 57 }
     }
+
+    /// The primes below n (odd n), decreasing.
+    pub fn below(n: u64) -> Primes {
+        Primes { next: if n % 2 == 0 { n - 1 } else { n - 2 } }
+    }
 }
 
 impl Iterator for Primes {
