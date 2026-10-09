@@ -3046,7 +3046,11 @@ def groebner_basis(F, R):
     F = [f for f in F if f._d]
     if not F:
         return []
-    r = _engine_try(R, "groebner", R._order._name, *F)
+    # over QQ the engine checks its basis exactly unless proof.polynomial()
+    # is off (Sage's proof flags)
+    from _sage_lang import proof
+    spec = R._order._name if proof.polynomial() else R._order._name + "/noproof"
+    r = _engine_try(R, "groebner", spec, *F)
     if r is not None:
         return r
     if R._dom.p is None and not R._dom.generic:
@@ -3276,13 +3280,24 @@ class MPolynomialIdeal:
             sage: I.groebner_basis()
             [a - 2*b, b^2 - 1]
 
-        The engine computes it (F4; over QQ from images modulo primes,
+        The engine computes it (F4; over QQ in degree orders one F4 run over
+        QQ whose matrices are reduced modulo primes and reconstructed, then
         checked exactly), e.g. cyclic-4 and a lex basis::
 
             sage: R.<a,b,c,d> = QQ[]
             sage: I = R.ideal(a+b+c+d, a*b+b*c+c*d+d*a, a*b*c+b*c*d+c*d*a+d*a*b, a*b*c*d-1)
             sage: B = I.groebner_basis(); len(B), B[0]
             (7, c^2*d^4 + b*c - b*d + c*d - 2*d^2)
+
+        With ``proof.polynomial(False)`` (Sage's proof flags) the exact check
+        is skipped, often most of the time over QQ; the basis is then wrong
+        only if some reconstruction was accepted too early (each is accepted
+        with two primes to spare)::
+
+            sage: with proof.WithProof('polynomial', False):
+            ....:     J = R.ideal(a+b+c+d, a*b+b*c+c*d+d*a, a*b*c+b*c*d+c*d*a+d*a*b, a*b*c*d-1)
+            ....:     print(J.groebner_basis() == B)
+            True
             sage: S.<x,y,z> = PolynomialRing(QQ, order='lex')
             sage: J = S.ideal(x^2 + y*z - 2, y^2 - x*z + 1, z^2 - x*y - 3)
             sage: J.groebner_basis()[-1]

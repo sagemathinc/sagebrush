@@ -25,6 +25,7 @@
 
 pub mod divide;
 pub mod f4;
+pub mod f4q;
 pub mod factor;
 pub mod factor_p;
 pub mod gcd;
@@ -1631,10 +1632,17 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
         "groebner" => {
             // order, f1, f2, ... -> the reduced Groebner basis (F4), by
             // decreasing leading monomial
-            let o = order::Order::parse(text(0)?).ok_or("unsupported term order")?;
+            // ("order/noproof": over Q, without the final check, as with
+            // Sage's proof.polynomial(False))
+            let spec = text(0)?;
+            let (name, proof) = match spec.strip_suffix("/noproof") {
+                Some(s) => (s, false),
+                None => (spec, true),
+            };
+            let o = order::Order::parse(name).ok_or("unsupported term order")?;
             let fs: Vec<QPoly> = (1..args.len()).map(poly).collect::<Result<_, _>>()?;
             let p = fs.first().map(|f| f.p).unwrap_or(0);
-            let g = if p > 0 { f4::groebner_p(&fs, o, p)? } else { f4::groebner_q(&fs, o)? };
+            let g = if p > 0 { f4::groebner_p(&fs, o, p)? } else { f4::groebner_q_opt(&fs, o, proof)? };
             Ok(g.iter().map(|f| f.to_bytes()).collect())
         }
         "factor" => {

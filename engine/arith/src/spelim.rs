@@ -572,11 +572,18 @@ unsafe fn dense_axpy_avx2(acc: &mut [u64], c: u64, p2: u64, b: &[u32]) {
 /// themselves: monic rows with distinct leading columns, each reduced by
 /// the ones found before it, in the order found.
 pub fn echelonize(rows: Vec<Row>, ncols: usize, p: u32) -> Vec<Row> {
+    echelonize_idx(rows, ncols, p).0
+}
+
+/// echelonize, also returning the index (among `rows`) each row found came
+/// from: the rows that span the rest (a tracer for other primes).
+pub fn echelonize_idx(rows: Vec<Row>, ncols: usize, p: u32) -> (Vec<Row>, Vec<usize>) {
     let mut found: Vec<Row> = vec![];
+    let mut from: Vec<usize> = vec![];
     // the leading column of each found row, as an index into `found`
     let mut at: Vec<u32> = vec![u32::MAX; ncols];
     let mut acc = Acc { d: vec![0; ncols] };
-    for r in rows {
+    for (ri, r) in rows.into_iter().enumerate() {
         if r.is_empty() {
             continue;
         }
@@ -619,9 +626,10 @@ pub fn echelonize(rows: Vec<Row>, ncols: usize, p: u32) -> Vec<Row> {
             let red = red.monic(p);
             at[red.cols[0] as usize] = found.len() as u32;
             found.push(red);
+            from.push(ri);
         }
     }
-    found
+    (found, from)
 }
 
 /// Rows with distinct leading columns (each monic and reduced by the ones
