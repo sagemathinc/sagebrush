@@ -752,8 +752,9 @@ fn reduces_to_zero_z(f: ZT, g: &[ZT], pk: &Packing, o: Order) -> Result<bool, Ov
         if steps & 63 == 0 {
             sagebrush_interrupt::check();
         }
-        // the shortest reducer
-        let Some(r) = g.iter().filter(|h| pk.divides(h[0].1, w)).min_by_key(|h| h.len()) else { return Ok(false) };
+        // the reducer with the smallest leading coefficient (the remainder
+        // is multiplied by it), then the shortest
+        let Some(r) = g.iter().filter(|h| pk.divides(h[0].1, w)).min_by_key(|h| (h[0].2.bits(), h.len())) else { return Ok(false) };
         let m = w - r[0].1;
         let lg = &r[0].2;
         let d = c.gcd(lg);
@@ -800,6 +801,37 @@ fn reduces_to_zero_z(f: ZT, g: &[ZT], pk: &Packing, o: Order) -> Result<bool, Ov
     Ok(true)
 }
 
+/// The S-pairs of a basis with these leading monomials that survive the
+/// Gebauer-Moeller installation (the elements inserted by increasing
+/// leading monomial; pairs with coprime leads dropped, chains and equal
+/// lcms pruned): (i, j, lcm).
+fn gm_pairs(pk: &Packing, o: Order, lead: &[u64]) -> Vec<(usize, usize, u64)> {
+    let mut idx: Vec<usize> = (0..lead.len()).collect();
+    idx.sort_by_key(|&i| pk.key(o, lead[i]));
+    let mut pairs: Vec<(usize, usize, u64)> = vec![];
+    let mut done: Vec<usize> = vec![];
+    for &h in &idx {
+        let lh = lead[h];
+        let mut c: Vec<usize> = done.clone();
+        let mut d: Vec<usize> = vec![];
+        while !c.is_empty() {
+            let i = c.remove(0);
+            let li = pk.lcm(lead[i], lh);
+            if pk.coprime(lead[i], lh) || !c.iter().chain(d.iter()).any(|&j| pk.divides(pk.lcm(lead[j], lh), li)) {
+                d.push(i);
+            }
+        }
+        pairs.retain(|&(a, b, l)| !(pk.divides(lh, l) && pk.lcm(lead[a], lh) != l && pk.lcm(lead[b], lh) != l));
+        for i in d {
+            if !pk.coprime(lead[i], lh) {
+                pairs.push((i, h, pk.lcm(lead[i], lh)));
+            }
+        }
+        done.push(h);
+    }
+    pairs
+}
+
 /// Whether G is a Groebner basis containing the generators fs in its ideal
 /// (each reduces to 0): Buchberger's criterion with the product and chain
 /// criteria, in integer arithmetic.
@@ -812,22 +844,12 @@ fn verify_q(fs: &[QPoly], g: &[Poly<QQ>], o: Order, pk: Packing) -> Result<bool,
             return Ok(false);
         }
     }
-    let k = g.len();
     let lead: Vec<u64> = gz.iter().map(|f| f[0].1).collect();
-    let mut pairs = vec![];
-    for i in 0..k {
-        for j in i + 1..k {
-            if pk.coprime(lead[i], lead[j]) {
-                continue;
-            }
-            let l = pk.lcm(lead[i], lead[j]);
-            // chain: some g_m with lead dividing l, whose pairs with i and j
-            // have strictly smaller lcms (an induction on the lcm)
-            let chain = (0..k).any(|m| m != i && m != j && pk.divides(lead[m], l) && pk.lcm(lead[i], lead[m]) != l && pk.lcm(lead[j], lead[m]) != l);
-            if !chain {
-                pairs.push((i, j, l));
-            }
-        }
+    // the pairs left by the Gebauer-Moeller criteria (as in F4): G is a
+    // Groebner basis if these reduce to 0
+    let pairs = gm_pairs(&pk, o, &lead);
+    if std::env::var("SB_F4_DEBUG").is_ok() {
+        eprintln!("verify_q: {} elements, {} pairs to check", lead.len(), pairs.len());
     }
     let check = |&(i, j, l): &(usize, usize, u64)| -> Result<bool, String> {
         {
