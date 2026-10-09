@@ -257,7 +257,7 @@
   #keysdlg td { padding: 2px 0; vertical-align: top; }
   #keysdlg td:first-child { white-space: nowrap; padding-right: 14px; width: 1%; }
   kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--code); }
-  #printhead, .print3d { display: none; }
+  #printhead { display: none; }
   /* File > Print: the notebook alone, light, with its prompts; code without the editor's textarea */
   @media print {
     html:root:root { --bg: #fff; --fg: #111; --muted: #555; --line: #ccc; --cell: #fff; --code: #f4f4f1; --edbg: #f8f8f6; --accent: #4a6b49; --accent2: #8aa37b; --err: #b3261e;
@@ -280,7 +280,8 @@
     pre.txt { font-size: 12px; }
     figure.plot, .interact, .latex-out { break-inside: avoid; }
     figure.plot3d canvas { display: none !important; }
-    .print3d { display: block; width: 100%; height: auto; }
+    .print3d { display: block !important; }
+    .sb3d-buttons, .player { display: none !important; }
     a { color: inherit; }
   }
 </style>
@@ -1501,20 +1502,17 @@ cellsEl.addEventListener("drop", (e) => {
 cellsEl.addEventListener("dragend", endDrag);
 
 // Printing (File > Print, or Ctrl+P) gives the notebook alone (the print CSS
-// above): its name on top, 3D views as pictures of how they are turned now,
+// above): its name on top, 3D views as pictures of how they are turned now
+// (web/viewer3d.js keeps one, img.print3d, beside each canvas),
 // and the notebook's name as the PDF's file name.
 let titleBeforePrint = null;
 addEventListener("beforeprint", () => {
   $("#printname").textContent = nbName.value.trim() || "Untitled";
   $("#printinfo").textContent = `${modeEl.selectedOptions[0]?.text ?? "Python"} notebook · Sagebrush (sagebrush.space) · ${new Date().toLocaleString()}`;
-  for (const c of cellsEl.querySelectorAll("figure.plot3d canvas")) {
-    try { c.after(Object.assign(new Image(), { className: "print3d", src: c.toDataURL("image/png"), alt: c.getAttribute("aria-label") ?? "3D plot" })); } catch {}
-  }
   titleBeforePrint = document.title;
   document.title = fileBase();
 });
 addEventListener("afterprint", () => {
-  cellsEl.querySelectorAll(".print3d").forEach((i) => i.remove());
   if (titleBeforePrint) document.title = titleBeforePrint;
 });
 

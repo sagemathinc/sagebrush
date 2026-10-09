@@ -352,6 +352,29 @@
       ". Drag to rotate, right-drag to pan, scroll or pinch to zoom, double-click to focus on a point; W A S D move; F flies.");
     canvas.title = "Drag: rotate · right-drag: pan · click, then scroll: zoom · double-click: focus · WASD: move · F: fly";
     wrap.appendChild(canvas);
+    // A picture of the current view, for printing (browsers print a WebGL
+    // canvas blank or not at all): kept up to date at most once a second, so
+    // it is already decoded when the browser lays out a printout.  Pages show
+    // it, instead of the canvas, with print CSS (img.print3d).
+    const still = document.createElement("img");
+    still.className = "print3d";
+    still.alt = scene.description || "3D plot";
+    still.style.cssText = "display:none;max-width:100%;height:auto";
+    wrap.appendChild(still);
+    let stillTimer = 0, stillUrl = null;
+    const snapshot = () => {
+      if (stillTimer) return;
+      stillTimer = setTimeout(() => {
+        stillTimer = 0;
+        if (!canvas.isConnected) return;
+        canvas.toBlob((b) => {
+          if (!b) return;
+          if (stillUrl) URL.revokeObjectURL(stillUrl);
+          still.src = stillUrl = URL.createObjectURL(b);
+          still.style.width = canvas.style.width;
+        });
+      }, 1000);
+    };
     const layer = document.createElement("div");
     layer.style.cssText = "position:absolute;inset:0;pointer-events:none;font:10px system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;overflow:hidden";
     wrap.appendChild(layer);
@@ -534,6 +557,7 @@
       }
       gl.depthMask(true);
       placeLabels(M, P);
+      snapshot();
     }
 
     // screen position (CSS pixels) of a display point
@@ -714,6 +738,7 @@
     const btnCss = "pointer-events:auto;font:11px system-ui,sans-serif;padding:2px 7px;border-radius:4px;" +
       "border:1px solid rgba(128,128,128,.5);background:rgba(255,255,255,.82);color:#222;cursor:pointer";
     const bar = document.createElement("div");
+    bar.className = "sb3d-buttons";
     bar.style.cssText = "position:absolute;left:6px;bottom:6px;display:flex;gap:4px;opacity:0;transition:opacity .2s;pointer-events:none";
     const mk = (text, title, fn) => {
       const b = document.createElement("button");
