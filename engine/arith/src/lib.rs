@@ -17,5 +17,6 @@ pub use sagebrush_bigint::{nmod, ntt};
 pub mod crt;
 pub mod nmod_poly;
 pub mod nmod_mat;
+pub mod spelim;
 pub mod zmat;
 pub mod zpoly;
