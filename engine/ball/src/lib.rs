@@ -8,7 +8,7 @@ mod funcs;
 mod mag;
 mod special;
 
-pub use ball::{cmp_dyadic, Ball};
+pub use ball::{cmp_dyadic, Ball, EXP_MAX, GAP};
 pub use funcs::{catalan, euler_gamma, ln2, pi};
 pub use complex::CBall;
 pub use mag::Mag;

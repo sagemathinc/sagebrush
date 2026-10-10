@@ -437,13 +437,19 @@ impl Ball {
 
     /// x^n for an integer n (None for n < 0 when x may be 0).
     pub fn pow_i64(&self, n: i64, prec: u64) -> Option<Ball> {
+        // (|n| as u64: -i64::MIN overflowed and recursed forever, BALL-F3)
+        let k0 = n.unsigned_abs();
+        let wp = prec + 2 * (64 - k0.leading_zeros() as u64) + 8;
         if n < 0 {
-            return self.pow_i64(-n, prec + 8)?.recip(prec);
+            return self.pow_u64(k0, wp).recip(prec);
         }
-        let wp = prec + 2 * (64 - (n as u64).leading_zeros() as u64) + 8;
+        Some(self.pow_u64(k0, wp).rounded(prec))
+    }
+
+    fn pow_u64(&self, k0: u64, wp: u64) -> Ball {
         let mut r = Ball::one();
         let mut b = self.clone();
-        let mut k = n as u64;
+        let mut k = k0;
         while k > 0 {
             if k & 1 == 1 {
                 r = r.mul(&b, wp);
@@ -453,6 +459,6 @@ impl Ball {
                 b = b.sqr(wp);
             }
         }
-        Some(r.rounded(prec))
+        r
     }
 }

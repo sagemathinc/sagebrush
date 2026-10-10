@@ -246,9 +246,18 @@ impl Mag {
         }
     }
 
-    /// Whether self <= 2^k.
+    /// Whether self <= 2^k, exactly (not against pow2(k), which rounds up
+    /// beyond the exponent range: the review's BALL-F2).
     pub fn le_pow2(self, k: i64) -> bool {
-        self.cmp(&Mag::pow2(k)) != Ordering::Greater
+        if self.is_zero() {
+            return true;
+        }
+        if self.is_inf() {
+            return false;
+        }
+        // m in [2^31, 2^32): m 2^e <= 2^k iff e + 31 < k, or e + 31 = k and m = 2^31
+        let lo = self.e + (MBITS as i64 - 1);
+        lo < k || (lo == k && self.m == 1 << (MBITS - 1))
     }
 }
 

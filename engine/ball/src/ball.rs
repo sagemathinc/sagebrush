@@ -6,6 +6,16 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
 use std::cmp::Ordering;
 
+/// Midpoint exponents and top bits stay within +-2^40; beyond, a result is
+/// the ball of everything (midpoint 0, infinite radius), still a valid
+/// enclosure (the review's BALL-F1: i64 exponents wrapped around).
+pub const EXP_MAX: i64 = 1 << 40;
+/// A radius stays within 2^20 bits of the midpoint: a smaller one is
+/// rounded up to 2^(top - 2^20), a midpoint that much below the radius goes
+/// into it.  So exact endpoints never exceed about 2^20 bits plus the
+/// midpoint's (BALL-F4: 1 +- 2^-(2^40) built a trillion-bit endpoint).
+pub const GAP: i64 = 1 << 20;
+
 #[derive(Clone, Debug)]
 pub struct Ball {
     pub(crate) m: BigInt,
@@ -15,7 +25,7 @@ pub struct Ball {
 
 /// The position of the top bit of |m| 2^e (m nonzero): floor(log2 |x|) + 1.
 pub(crate) fn top(m: &BigInt, e: i64) -> i64 {
-    e + m.bits() as i64
+    e.saturating_add(m.bits() as i64)
 }
 
 /// The order of the exact dyadics a 2^ae and b 2^be.
@@ -90,9 +100,47 @@ pub(crate) fn round(m: BigInt, e: i64, prec: u64) -> (BigInt, i64, Mag) {
 }
 
 impl Ball {
-    /// The exact value m 2^e.
+    /// The ball of every real number.
+    pub fn indeterminate() -> Ball {
+        Ball { m: BigInt::zero(), e: 0, r: Mag::INF }
+    }
+
+    /// The invariants (EXP_MAX, GAP), applied after every operation.
+    fn normalize(mut self) -> Ball {
+        if self.r.is_inf() {
+            return Ball::indeterminate();
+        }
+        if !self.m.is_zero() {
+            let t = top(&self.m, self.e);
+            if self.e.unsigned_abs() > EXP_MAX as u64 || t.unsigned_abs() > EXP_MAX as u64 {
+                return Ball::indeterminate();
+            }
+            if !self.r.is_zero() {
+                let tr = self.r.top();
+                if tr > EXP_MAX {
+                    return Ball::indeterminate();
+                }
+                if tr < t - GAP {
+                    self.r = Mag::pow2(t - GAP);
+                } else if t < tr - GAP {
+                    self.r = self.r.add(Mag::from_bigint_up(&self.m, self.e));
+                    self.m = BigInt::zero();
+                    self.e = 0;
+                }
+            }
+        } else {
+            self.e = 0;
+            if !self.r.is_zero() && self.r.top() > EXP_MAX {
+                return Ball::indeterminate();
+            }
+        }
+        self
+    }
+
+    /// The exact value m 2^e (the ball of everything if the exponent is
+    /// beyond +-EXP_MAX).
     pub fn exact(m: BigInt, e: i64) -> Ball {
-        Ball { m, e, r: Mag::ZERO }
+        Ball { m, e, r: Mag::ZERO }.normalize()
     }
 
     pub fn zero() -> Ball {
@@ -134,7 +182,7 @@ impl Ball {
 
     /// A ball with an explicit midpoint and radius.
     pub fn with_radius(m: BigInt, e: i64, r: Mag) -> Ball {
-        Ball { m, e, r }
+        Ball { m, e, r }.normalize()
     }
 
     pub fn mid(&self) -> (BigInt, i64) {
@@ -156,11 +204,11 @@ impl Ball {
     /// The midpoint rounded to prec bits, its error added to the radius.
     pub fn rounded(&self, prec: u64) -> Ball {
         let (m, e, err) = round(self.m.clone(), self.e, prec);
-        Ball { m, e, r: self.r.add(err) }
+        Ball { m, e, r: self.r.add(err) }.normalize()
     }
 
     pub fn add_error(&self, err: Mag) -> Ball {
-        Ball { m: self.m.clone(), e: self.e, r: self.r.add(err) }
+        Ball { m: self.m.clone(), e: self.e, r: self.r.add(err) }.normalize()
     }
 
     /// |mid| + rad, rounded up.
@@ -279,7 +327,7 @@ impl Ball {
         // mid = (lo + hi)/2 exactly, rad = (hi - lo)/2 rounded up
         let (s, se) = add_dyadic(&lo, loe, &hi, hie);
         let (d, de) = add_dyadic(&hi, hie, &-lo, loe);
-        Ball { m: s, e: se - 1, r: Mag::from_bigint_up(&d, de - 1) }
+        Ball { m: s, e: se - 1, r: Mag::from_bigint_up(&d, de - 1) }.normalize()
     }
 
     pub fn neg(&self) -> Ball {
@@ -292,7 +340,10 @@ impl Ball {
 
     /// self 2^k, exactly.
     pub fn mul_2exp(&self, k: i64) -> Ball {
-        Ball { m: self.m.clone(), e: self.e + k, r: self.r.mul_2exp(k) }
+        match self.e.checked_add(k) {
+            Some(e) if k.unsigned_abs() <= 4 * EXP_MAX as u64 => Ball { m: self.m.clone(), e, r: self.r.mul_2exp(k) }.normalize(),
+            _ => Ball::indeterminate(),
+        }
     }
 
     pub fn add(&self, o: &Ball, prec: u64) -> Ball {
@@ -326,6 +377,8 @@ impl Ball {
         let ma = Mag::from_bigint_up(&self.m, self.e);
         let mb = Mag::from_bigint_up(&o.m, o.e);
         let r = ma.mul(o.r).add(mb.mul(self.r)).add(self.r.mul(o.r));
+        // (exponents within +-2^40: their sum cannot overflow; normalize
+        // catches one beyond the range)
         Ball { m: &self.m * &o.m, e: self.e + o.e, r }.rounded(prec)
     }
 
@@ -379,7 +432,7 @@ impl Ball {
             // lies in [0, sqrt(upper)], enclosed by [0 +- sqrt(upper)])
             let (um, ue) = self.upper();
             let up = Mag::from_bigint_up(&um, ue).sqrt();
-            return Some(Ball { m: BigInt::zero(), e: 0, r: up });
+            return Some(Ball { m: BigInt::zero(), e: 0, r: up }.normalize());
         }
         // the midpoint: s = isqrt(m 2^(k)) 2^((e - k)/2), error < 1 unit
         let k0 = (2 * prec as i64 + 8 - self.m.bits() as i64).max(0);
@@ -400,14 +453,14 @@ impl Ball {
         let b = self.m.bits() as i64;
         let s = (b - 60).max(0);
         let m = (&self.m >> s as u64).to_f64().unwrap_or(0.0);
-        m * 2f64.powf((self.e + s) as f64)
+        ldexp(m, self.e + s)
     }
 
     /// The radius as a double, for display only.
     pub fn rad_f64_approx(&self) -> f64 {
         match self.r.to_dyadic() {
             None => f64::INFINITY,
-            Some((m, e)) => m.to_f64().unwrap() * 2f64.powf(e as f64),
+            Some((m, e)) => ldexp(m.to_f64().unwrap(), e),
         }
     }
 
@@ -422,6 +475,20 @@ impl Ball {
         }
         top(&self.m, self.e) - self.r.top()
     }
+}
+
+/// x 2^k for display, in steps (2^k alone underflows before x 2^k does:
+/// 2^-1060 displayed as 0, the review's BALL-F5).
+fn ldexp(mut x: f64, mut k: i64) -> f64 {
+    while k > 1000 && x.is_finite() {
+        x *= 2f64.powi(1000);
+        k -= 1000;
+    }
+    while k < -1000 && x != 0.0 {
+        x *= 2f64.powi(-1000);
+        k += 1000;
+    }
+    x * 2f64.powi(k as i32)
 }
 
 impl std::fmt::Display for Ball {
