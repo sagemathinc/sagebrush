@@ -13,7 +13,7 @@ py.parse("x = [1, 2 3]\n");                     // throws CPython's SyntaxError
 
 | File | Raw | Gzipped (as served) | What |
 |---|---|---|---|
-| `sagebrush-engine.mjs` | 6.7 MB | 2.2 MB | the Rust engines (`engine/web`, wasm32) inlined as base64: the same `wasm/sagebrush-engine.wasm` as the notebook and CLI |
+| `sagebrush-engine.mjs` | 2.0 MB | 1.5 MB | the Rust engines (`engine/web`, wasm32), gzipped and inlined as base64 (decompressed with `DecompressionStream`): the same `wasm/sagebrush-engine.wasm` as the notebook and CLI |
 | `pyparse.mjs` | 217 KB | 33 KB | CPython 3.14's parser (`pyparse/`) |
 
 Why this shape: in the October 2026 smoke test, Claude's artifact sandbox
