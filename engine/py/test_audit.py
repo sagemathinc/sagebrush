@@ -559,3 +559,12 @@ print("cartan ok")
 _R, _S = PolynomialRing(QQ, "x,y"), PolynomialRing(QQ, "y,x"); _a = _R.gen(0) * _R.gen(1); _b = _S.gen(1) * _S.gen(0)
 assert _a == _b and hash(_a) == hash(_b) == hash(SR("x*y")) and len({_a, _b}) == 1  # R2-API-F1 (variable order)
 print("hash order ok")
+
+# Astra's review of the queued batches (6b1c710): equal number fields, exponent strings, Cartan symmetrizability, derivative counts
+_z = polygen(QQ, "z"); _K1 = NumberField(_z * _z - 2, "a"); _K2 = NumberField(_z * _z - 2, "a")
+assert _K1 is _K2 and _K1.ideal(2) == _K2.ideal(2) and _K1(_K2.gen()) == _K1.gen()
+_F9 = GF(9, "a"); _g9 = _F9.gen(); assert _F9("a^(3)") == _F9("a^(2+1)") == _g9**3 and _F9("a^-1") == _F9("a^(-1)") == 1 / _g9
+raises(ValueError, CartanType(CartanMatrix([[2, -1, -1], [-1, 2, -1], [-2, -1, 2]])).symmetrizer)
+_R2 = PolynomialRing(QQ, "x,y"); _X, _Y = _R2.gens(); _f2 = _X**4 * _Y**3
+assert _f2.derivative(_X, 2, 0) == 12 * _X**2 * _Y**3; raises(ValueError, _f2.derivative, _X, 2, 3)
+print("queued batches follow-up ok")

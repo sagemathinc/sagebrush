@@ -1495,7 +1495,22 @@ def NumberField(polynomial, name=None, names=None, **kwds):
         name = names[0] if isinstance(names, (list, tuple)) else names
     if name is None:
         raise TypeError("you must specify the name of the generator")
-    return NumberField_absolute(polynomial, str(name))
+    return _unique(NumberField_absolute(polynomial, str(name)))
+
+
+# one field per (defining polynomial, name, embedding), as in Sage: two calls
+# with the same data give the same object, so their ideals, elements and
+# coercions agree (equal but distinct fields refused K(L.gen()): R2-NFD-F3)
+_FIELDS = {}
+
+
+def _unique(K):
+    key = (type(K).__name__, tuple(K._f), K._name, repr(getattr(K, "_emb", None)))
+    old = _FIELDS.get(key)
+    if old is not None:
+        return old
+    _FIELDS[key] = K
+    return K
 
 
 def QuadraticField(D, name="a", names=None, **kwds):
@@ -1518,7 +1533,7 @@ def QuadraticField(D, name="a", names=None, **kwds):
     # Sage prints the double nearest sqrt|D| to 16 significant digits
     root = _interval_repr_sqrt(abs(D))
     emb = root if D > 0 else root + "*I"
-    return NumberField_absolute([-D, 0, 1], str(name), emb)
+    return _unique(NumberField_absolute([-D, 0, 1], str(name), emb))
 
 
 def _interval_repr_sqrt(n):

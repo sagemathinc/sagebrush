@@ -543,6 +543,13 @@ class CartanType_:
                 G = _gcd(G, int(v * L))
             for k, v in comp.items():
                 d[k] = v * L / G
+        # propagation along a spanning tree: every edge must agree, else the
+        # matrix is not symmetrizable ([[2,-1,-1],[-1,2,-1],[-2,-1,2]] got
+        # [2, 2, 1]: Astra's review; Sage refuses)
+        for i in I:
+            for j in I:
+                if d[i] * A[i][j] != d[j] * A[j][i]:
+                    raise ValueError("the Cartan matrix is not symmetrizable")
         return Family(I, [_out(d[i]) for i in I])
 
 

@@ -150,11 +150,17 @@ def _derivative_count(args, gen, name):
         return 1
     k = 0
     seen = False
-    for a in args:
+    for idx, a in enumerate(args):
         if isinstance(a, int) and not isinstance(a, bool):
             if a < 0:
                 raise ValueError("derivative counts must be nonnegative")
-            k += a - 1 if seen else a
+            if seen:
+                k += a - 1
+            elif idx == 0:
+                k += a  # derivative(2): the generator twice
+            elif a:
+                # a count with no variable just before it (x, 2, 3), as Sage
+                raise ValueError("a derivative count must follow a variable")
             seen = False
         elif a is None or (isinstance(a, str) and a == name) or (not isinstance(a, str) and (a == gen or repr(a) == name)):
             k += 1
