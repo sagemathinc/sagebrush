@@ -112,4 +112,18 @@ raises(ValueError, nf.factor_mod, [-1, 0, 1], 4)
 # F11: checked newforms say so
 r = modsym.rational_newforms(11, 20, details=True)
 assert r["status"] == "checked" and len(r["checks"]) == 2 and r["forms"][0][:2] == [(2, -2), (3, -1)]
+# third review: T2, T3 (no finite value), T5 (limits), T6 (small roots), bnf's w
+from sagebrush.sage import cosh, I, limit, exp as sexp
+for f, a, b in [(1 / cosh(I * x) ** 2, 0, pi), (1 / (10**12 * cos(x + 10**20) ** 2), 0, pi)]:
+    try:
+        r = integrate(f, x, a, b)
+        assert "integrate" in str(r), r
+    except ValueError as e:
+        assert "divergent" in str(e)
+assert str(limit(abs(x - 10**20), x=oo)) in ("+Infinity", "Infinity")
+assert limit(sexp(-abs(x - 10**20)), x=oo) == 0
+assert limit(abs(x), x=QQ(1) / 10**20, dir="-") > 0
+assert nf.complex_roots([-1, 10**100], 30)[0][0] == "1.00000000000000000000000000000e-100"
+b = nf.bnf([1, 0, 1])
+assert b["w"] == 4 and b["w_proven"] and b["assumes"] == ["GRH"]
 print("audit regressions: ok")

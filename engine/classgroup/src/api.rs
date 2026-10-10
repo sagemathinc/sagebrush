@@ -86,7 +86,7 @@ pub fn nf_data(f: &[BigInt]) -> Result<NfData, String> {
 /// Q(zeta_20) no prime below 41 splits completely, and the 2-part needs one
 /// that does).  With a real embedding (the signature is certified), U = 2.
 /// L = U proves w.
-fn roots_of_unity(o: &Order, emb: &Embeddings) -> (u32, bool) {
+pub(crate) fn roots_of_unity(o: &Order, emb: &Embeddings) -> (u32, bool) {
     let n = o.n;
     let one: ZMat = (0..n).map(|i| (0..n).map(|j| BigInt::from((i == j) as i32)).collect()).collect();
     let red = crate::nf::embed::lll(&one, emb);
@@ -207,41 +207,74 @@ pub struct BnfData {
     pub cyc: Vec<BigInt>,
     /// the regulator to `digits` significant decimal digits (1 for unit rank 0)
     pub regulator: String,
+    /// the number of roots of unity, and whether that is proven
     pub w: u32,
+    pub w_proven: bool,
 }
 
 /// A decimal string of x / 2^prec with `digits` significant digits.
 pub fn fixed_to_decimal(x: &BigInt, prec: u32, digits: usize) -> String {
+    // `digits` significant digits of x / 2^prec: fixed notation from 10^-4
+    // up, scientific below (10^-100 printed as 0.000... to 30 decimals was
+    // 0: the third review's T6)
     if x.is_zero() {
         return "0".into();
     }
+    let digits = digits.max(1);
     let neg = x.is_negative();
     let x = x.abs();
-    // integer part digits
-    let ip = &x >> prec as usize;
-    let int_digits = if ip.is_zero() { 0 } else { ip.to_string().len() };
-    let round = |frac_digits: usize| (&x * BigInt::from(10).pow(frac_digits as u32) + (BigInt::one() << (prec as usize - 1).max(0))) >> prec as usize;
-    let mut frac_digits = digits.saturating_sub(int_digits).max(1);
-    let mut scaled = round(frac_digits);
-    // rounding up into a new integer digit (0.999... to 1.000...): one
-    // fractional digit fewer, for the same number of significant digits
-    if frac_digits > 1 && digits > int_digits && scaled.to_string().len() > frac_digits.max(digits) {
-        frac_digits -= 1;
-        scaled = round(frac_digits);
+    let sign = if neg { "-" } else { "" };
+    let one = BigInt::one() << prec as usize;
+    let half = BigInt::one() << (prec as usize).saturating_sub(1);
+    let ten = BigInt::from(10);
+    // round(x 10^k / 2^prec)
+    let round = |k: usize| (&x * ten.pow(k as u32) + &half) >> prec as usize;
+    if x >= one {
+        let int_digits = (&x >> prec as usize).to_string().len();
+        let mut frac_digits = digits.saturating_sub(int_digits).max(1);
+        let mut scaled = round(frac_digits);
+        // rounding up into a new integer digit (9.99... to 10.00...): one
+        // fractional digit fewer, for the same number of significant digits
+        if frac_digits > 1 && digits > int_digits && scaled.to_string().len() > frac_digits.max(digits) {
+            frac_digits -= 1;
+            scaled = round(frac_digits);
+        }
+        let s = format!("{:0>width$}", scaled.to_string(), width = frac_digits + 1);
+        let (a, b) = s.split_at(s.len() - frac_digits);
+        return format!("{}{}.{}", sign, a, b);
     }
-    let s = format!("{:0>width$}", scaled.to_string(), width = frac_digits + 1);
-    let (a, b) = s.split_at(s.len() - frac_digits);
-    format!("{}{}.{}", if neg { "-" } else { "" }, a, b)
+    // x < 1: z zeros after the point, then the first significant digit
+    let mut z = 0usize;
+    let mut t = &x * &ten;
+    while t < one {
+        t *= &ten;
+        z += 1;
+    }
+    let mut m = round(z + digits);
+    if m.to_string().len() > digits {
+        // rounded up to the next power of 10
+        if z == 0 {
+            return format!("{}1.{}", sign, "0".repeat(digits - 1).max("0".into()));
+        }
+        z -= 1;
+        m = round(z + digits);
+    }
+    let ms = format!("{:0>width$}", m.to_string(), width = digits);
+    if z < 4 {
+        return format!("{}0.{}{}", sign, "0".repeat(z), ms);
+    }
+    let (a, b) = ms.split_at(1);
+    format!("{}{}.{}e-{}", sign, a, if b.is_empty() { "0" } else { b }, z + 1)
 }
 
 pub fn bnf(f: &[BigInt]) -> Result<BnfData, String> {
     monic(f)?;
     if f.len() == 2 {
-        return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2 });
+        return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2, w_proven: true });
     }
     let (b, _) = crate::nf::bnf::bnfinit(f)?;
     let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, 20) };
-    Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w })
+    Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven })
 }
 
 /// The factor-base relations of a certified class group computation, with
@@ -262,7 +295,7 @@ pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String
     }
     let (b, _, r) = crate::nf::bnf::bnfinit_with(f, extra)?;
     let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, 20) };
-    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w };
+    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven };
     let elems = r.elems.iter().map(|x| {
         // power-basis coordinates: x B / den
         let n = r.order.n;
@@ -500,9 +533,8 @@ pub fn complex_roots(f: &[BigInt], digits: usize) -> Result<Vec<(String, String,
 /// roots have im = 0 exactly.
 fn roots_squarefree(g: &[BigInt], prec: u32) -> Result<Vec<(BigInt, BigInt)>, String> {
     let iso = crate::nf::roots::isolate(g, prec)?;
-    let sh = (iso.prec - prec) as usize;
     let _ = vec_mat::<BigInt>;
-    Ok(iso.roots.into_iter().map(|r| (r.re >> sh, r.im >> sh)).collect())
+    Ok(iso.centers(prec))
 }
 
 #[cfg(test)]
@@ -539,6 +571,12 @@ mod decimal_tests {
         assert_eq!(fixed_to_decimal(&almost_one, p, 30), "1.00000000000000000000000000000");
         assert_eq!(fixed_to_decimal(&(BigInt::one() << 200usize), p, 30), "1.00000000000000000000000000000");
         assert_eq!(fixed_to_decimal(&((BigInt::one() << 200usize) - (BigInt::one() << 100usize)), p, 30), "0.999999999999999999999999999999");
+        // small values: significant digits, scientific below 10^-4
+        let tenth = ((BigInt::one() << 200usize) + 5u32) / 10u32;
+        assert_eq!(fixed_to_decimal(&tenth, p, 5), "0.10000");
+        let tiny = (BigInt::one() << 700usize) / num_traits::pow(BigInt::from(10), 100);
+        assert_eq!(fixed_to_decimal(&tiny, 700, 30), "1.00000000000000000000000000000e-100");
+        assert_eq!(fixed_to_decimal(&-(BigInt::from(3) << 190usize), p, 4), "-0.002930");
         assert_eq!(fixed_to_decimal(&-(BigInt::from(3) << 199usize), p, 5), "-1.5000");
     }
 }

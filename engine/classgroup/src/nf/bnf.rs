@@ -47,10 +47,13 @@ pub struct Bnf {
     pub regulator: f64,
     pub reg_fixed: BigInt,
     pub prec: u32,
-    /// the number of roots of unity
+    /// the number of roots of unity, and whether that is proven (else a
+    /// lower bound)
     pub w: u32,
+    pub w_proven: bool,
 }
 
+#[allow(dead_code)]
 fn euler_phi(mut k: u64) -> u64 {
     let mut r = k;
     let mut p = 2;
@@ -607,27 +610,10 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
     let emb = Embeddings::new(&o)?;
     let (r1, r2) = (emb.r1, emb.r2);
     let r = r1 + r2 - 1;
-    // roots of unity: the x with T2(x) = n
-    let ob: ZMat = (0..n).map(|i| (0..n).map(|j| BigInt::from((i == j) as i32)).collect()).collect();
-    let red = lll(&ob, &emb);
-    let g = emb.t2_gram(&red);
-    // (candidates with a loose bound, then exactly: x^k = 1 for some k with
-    // phi(k) <= n; large roots of f make T2 in floating point inexact)
-    let kmax = (1..=(4 * n * n + 6) as u64).filter(|&k| euler_phi(k) <= n as u64).max().unwrap();
-    let one = o.one();
-    let w = short_vectors(&g, n as f64 * (1.0 + 1e-4), 1000)
-        .iter()
-        .filter(|c| {
-            let x: Vec<BigInt> = (0..n).map(|j| c.iter().zip(&red).map(|(&ci, b)| &b[j] * ci).sum()).collect();
-            let mut y = x.clone();
-            (1..=kmax).any(|_| {
-                let done = y == one;
-                y = o.mul(&y, &x);
-                done
-            })
-        })
-        .count()
-        .max(2) as u32;
+    // roots of unity: certified (api::roots_of_unity: candidates verified
+    // exactly, completeness from residue fields), else a lower bound, and
+    // the result says so (the third review: the analytic formula needs w)
+    let (w, w_proven) = crate::api::roots_of_unity(&o, &emb);
     // factor base: the prime ideals of norm < T, with T from Grenie and
     // Molteni's algorithm (nf/grh.rs), at most the uniform 4 log^2 |d_K|
     let ld = dk.to_f64().unwrap().abs().ln();
@@ -797,7 +783,7 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
         if let Some((group, reg, reg_fixed, prec)) = res {
             tm.relations = rels.len();
             let relations = Relations { fb: fld.fb[..fld.ngen].to_vec(), rels, elems, order: fld.o };
-            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w }, tm, relations));
+            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w, w_proven }, tm, relations));
         }
         want = rels.len() + more;
     }

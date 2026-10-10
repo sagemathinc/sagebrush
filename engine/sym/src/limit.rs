@@ -29,18 +29,12 @@ pub fn limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> Expr {
 pub fn try_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Expr> {
     // abs(u) and sign(u) differ on the two sides: one-sided limits, with
     // abs(u) = +-u by the sign of u beside a
-    if has_abs(e) && !a.is_infinite() {
-        if dir == Dir::Both {
-            let (l, r) = (try_limit(e, x, a, Dir::Minus)?, try_limit(e, x, a, Dir::Plus)?);
-            return Ok(if l == r { r } else { constant(Const::Undefined) });
-        }
-        let h = if dir == Dir::Plus { 1e-9 } else { -1e-9 };
-        let e2 = resolve_abs(e, x, a, h);
-        return try_limit(&e2, x, a, dir);
+    if has_abs(e) && !a.is_infinite() && dir == Dir::Both {
+        let (l, r) = (try_limit(e, x, a, Dir::Minus)?, try_limit(e, x, a, Dir::Plus)?);
+        return Ok(if l == r { r } else { constant(Const::Undefined) });
     }
     if has_abs(e) {
-        let h = if a.is_const(Const::MinusInfinity) { -1e9 } else { 1e9 };
-        let e2 = resolve_abs(e, x, &zero(), h);
+        let e2 = resolve_abs(e, x, a, dir)?;
         return try_limit(&e2, x, a, dir);
     }
     // division by zero is an infinity here, never an error to recover from
@@ -51,25 +45,71 @@ fn has_abs(e: &Expr) -> bool {
     matches!(&e.kind, Kind::Fun(Fun::Abs | Fun::Sign, _)) || e.children().iter().any(has_abs)
 }
 
-/// abs(u) -> u or -u, sign(u) -> +-1, by the sign of u at a + h.
-fn resolve_abs(e: &Expr, x: &str, a: &Expr, h: f64) -> Expr {
+/// abs(u) -> u or -u, sign(u) -> +-1, by the sign u has near a (on the side
+/// dir; eventually, at +-oo), established by eventual_sign: not sampled (the
+/// third review's T5: a sample at a +- 10^-9 or at +-10^9 need not be on the
+/// right side of u's zeros, and |x - 10^20| had limit -oo at +oo).
+fn resolve_abs(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Expr> {
     if e.children().is_empty() {
-        return e.clone();
+        return Ok(e.clone());
     }
-    let e = rebuild(e, e.children().iter().map(|c| resolve_abs(c, x, a, h)).collect());
+    let e = rebuild(e, e.children().iter().map(|c| resolve_abs(c, x, a, dir)).collect::<R<Vec<_>>>()?);
     if let Kind::Fun(g @ (Fun::Abs | Fun::Sign), args) = &e.kind {
-        let av = crate::eval::to_f64(a).unwrap_or(0.0);
-        let pt = av + h;
-        let v = crate::eval::to_c64_env(&args[0], &|s| if s == x { Some((pt, 0.0)) } else { None });
-        if let Some((re, _)) = v {
-            let neg_ = re < 0.0;
-            return match g {
-                Fun::Abs => if neg_ { neg(&args[0]) } else { args[0].clone() },
-                _ => if neg_ { int(-1) } else { one() },
-            };
+        if !depends(&args[0], x) {
+            return Ok(e.clone());
+        }
+        let Some(sg) = eventual_sign(&args[0], x, a, dir, 0) else {
+            return fail(format!("limit: the sign of {} near the point is not established", crate::to_string(&args[0])));
+        };
+        return Ok(match (g, sg) {
+            (Fun::Abs, s) => if s < 0 { neg(&args[0]) } else { args[0].clone() },
+            (_, s) => int(s as i64),
+        });
+    }
+    Ok(e)
+}
+
+/// The sign of a real constant, when it is clear (exactly for rationals).
+fn const_sign(c: &Expr) -> Option<i32> {
+    if let Some(q) = c.as_rat() {
+        return Some(if num_traits::Zero::is_zero(q) { 0 } else if num_traits::Signed::is_positive(q) { 1 } else { -1 });
+    }
+    let (re, im) = crate::eval::to_c64(c)?;
+    (im == 0.0 && re.abs() > 1e-9).then(|| if re > 0.0 { 1 } else { -1 })
+}
+
+/// The sign u keeps near a on the side dir (eventually, at +-oo), or None:
+/// that of its limit when the limit is not 0; when it is 0, by the mean
+/// value theorem from u' (u(a + h) = h u'(xi), u(a - h) = -h u'(xi); at +oo,
+/// u = -(integral of u' to oo); at -oo, the integral from -oo).
+fn eventual_sign(u: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> Option<i32> {
+    if !depends(u, x) {
+        return const_sign(u).filter(|&s| s != 0);
+    }
+    if depth > 6 {
+        return None;
+    }
+    let l = try_limit(u, x, a, dir).ok()?;
+    if l.is_const(Const::Infinity) {
+        return Some(1);
+    }
+    if l.is_const(Const::MinusInfinity) {
+        return Some(-1);
+    }
+    if l.is_infinite() || l.is_const(Const::Undefined) || has_infinity(&l) {
+        return None;
+    }
+    match const_sign(&l) {
+        Some(0) => {}
+        Some(s) => return Some(s),
+        None => {
+            if !crate::simplify::simplify_full(&l).is_zero() {
+                return None;
+            }
         }
     }
-    e
+    let factor = if a.is_const(Const::Infinity) { -1 } else if a.is_const(Const::MinusInfinity) { 1 } else if dir == Dir::Minus { -1 } else { 1 };
+    eventual_sign(&diff(u, x), x, a, dir, depth + 1).map(|s| factor * s)
 }
 
 /// Whether e is bounded whatever x does (sin, cos, arctan, tanh, ...).
@@ -476,4 +516,28 @@ fn series_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Option<Expr>> {
             }
         }
     }))
+}
+
+#[cfg(test)]
+mod sign_tests {
+    use super::*;
+    use crate::parse::parse;
+    fn lim(e: &str, a: &str, dir: Dir) -> String {
+        match try_limit(&parse(e), "x", &parse(a), dir) {
+            Ok(v) => crate::to_string(&v),
+            Err(_) => "not found".into(),
+        }
+    }
+    #[test]
+    fn signs_are_established_not_sampled() {
+        // the third review's T5
+        assert_eq!(lim("abs(x)", "1/10^20", Dir::Minus), "1/100000000000000000000");
+        assert_eq!(lim("abs(x - 10^20)", "+Infinity", Dir::Both), "+Infinity");
+        assert_eq!(lim("exp(-abs(x - 10^20))", "+Infinity", Dir::Both), "0");
+        assert_eq!(lim("abs(x)/x", "0", Dir::Minus), "-1");
+        assert_eq!(lim("abs(x)/x", "0", Dir::Plus), "1");
+        assert_eq!(lim("abs(sin(x))/x", "0", Dir::Minus), "-1");
+        assert_eq!(lim("abs(x^3 - x^2)/x^2", "0", Dir::Plus), "1");
+        assert_eq!(lim("abs(1 - x)", "-Infinity", Dir::Both), "+Infinity");
+    }
 }

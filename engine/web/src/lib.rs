@@ -113,6 +113,12 @@ fn sign(v: &Value) -> Result<i32, String> {
     }
 }
 
+/// What a class group result assumes: GRH, and the number of roots of
+/// unity when it is not proven (it enters the analytic class number formula).
+fn assumes(w_proven: bool) -> Value {
+    if w_proven { json!(["GRH"]) } else { json!(["GRH", "the roots of unity found are all"]) }
+}
+
 /// The level n >= 1.
 fn level(v: &Value) -> Result<u64, String> {
     let n = u(v, "n")?;
@@ -511,7 +517,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "bnf" => {
             let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "assumes": ["GRH"] }))
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "assumes": assumes(b.w_proven) }))
         }
         "bnf_relations" => {
             let bad = || "extra must be a list of primes".to_string();
@@ -524,7 +530,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "assumes": ["GRH"],
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "assumes": assumes(b.w_proven),
                        "fb": d.fb.iter().map(|&(p, e, f)| json!([p, e, f])).collect::<Vec<_>>(),
                        "rels": d.rels.iter().map(|r| r.iter().map(|&(i, k)| json!([i, k])).collect::<Vec<_>>()).collect::<Vec<_>>(),
                        "elems": d.elems.iter().map(|(num, den)| json!([big(num), den.to_string()])).collect::<Vec<_>>() }))
