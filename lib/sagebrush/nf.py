@@ -17,7 +17,16 @@ from ._engine import call
 
 
 def _ints(f):
-    return [str(int(c)) for c in f]
+    # integers exactly (a coefficient -5/2 became -2: the systematic
+    # review's NFD-F3)
+    from fractions import Fraction
+    out = []
+    for c in f:
+        q = Fraction(c)
+        if q.denominator != 1:
+            raise TypeError("coefficients must be integers, not %s" % (c,))
+        out.append(str(q.numerator))
+    return out
 
 
 def _mat(m):
@@ -54,7 +63,7 @@ def primes_above(f, p):
     """The prime ideals above p as dicts (p, e, f, pi, pi_den): P = (p, pi),
     pi = (pi numerators over the power basis) / pi_den."""
     out = []
-    for q in call("primes_above", f=_ints(f), p=int(p)):
+    for q in call("primes_above", f=_ints(f), p=int(_ints([p])[0])):
         q["pi"] = [int(c) for c in q["pi"]]
         q["pi_den"] = int(q["pi_den"])
         out.append(q)

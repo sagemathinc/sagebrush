@@ -118,12 +118,21 @@ fn sign(v: &Value) -> Result<i32, String> {
 /// (h* R* below twice a proven lower bound for h R) did not go through,
 /// the stopping rule's estimate of h R, which has no proven error bound.
 fn assumes(w_proven: bool, certified: bool) -> Value {
-    let mut a = vec!["GRH"];
+    assumes_with(w_proven, certified, &[])
+}
+
+/// assumes, and the probable primes the maximal order's maximality assumes
+/// prime (BPSW, above 2^64; the systematic review's NFD-F4).
+fn assumes_with(w_proven: bool, certified: bool, primes: &[sagebrush_bigint::BigInt]) -> Value {
+    let mut a: Vec<String> = vec!["GRH".into()];
     if !w_proven {
-        a.push("the roots of unity found are all");
+        a.push("the roots of unity found are all".into());
     }
     if !certified {
-        a.push("h R is near its estimate (uncertified stopping rule)");
+        a.push("h R is near its estimate (uncertified stopping rule)".into());
+    }
+    for p in primes {
+        a.push(format!("{} is prime (Baillie-PSW)", p));
     }
     json!(a)
 }
@@ -517,7 +526,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "nf_data" => {
             let d = sagebrush_classgroup::api::nf_data(&bigs(v.get("f"))?)?;
             Ok(json!({ "degree": d.degree, "r1": d.r1, "r2": d.r2, "disc": d.disc.to_string(), "index": d.index.to_string(),
-                       "basis": d.basis.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": d.den.to_string(), "w": d.w, "w_proven": d.w_proven }))
+                       "basis": d.basis.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": d.den.to_string(), "w": d.w, "w_proven": d.w_proven,
+                       "assumes": d.assumed_primes.iter().map(|p| format!("{} is prime (Baillie-PSW)", p)).collect::<Vec<_>>() }))
         }
         "primes_above" => {
             let ps = sagebrush_classgroup::api::primes_above(&bigs(v.get("f"))?, u(v, "p")?)?;
@@ -526,7 +536,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "bnf" => {
             let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes(b.w_proven, b.certified) }))
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes) }))
         }
         "bnf_relations" => {
             let bad = || "extra must be a list of primes".to_string();
@@ -539,7 +549,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes(b.w_proven, b.certified),
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes),
                        "fb": d.fb.iter().map(|&(p, e, f)| json!([p, e, f])).collect::<Vec<_>>(),
                        "rels": d.rels.iter().map(|r| r.iter().map(|&(i, k)| json!([i, k])).collect::<Vec<_>>()).collect::<Vec<_>>(),
                        "elems": d.elems.iter().map(|(num, den)| json!([big(num), den.to_string()])).collect::<Vec<_>>() }))
