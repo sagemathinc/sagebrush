@@ -257,7 +257,7 @@ mod tests {
         for p in [10u32, 1023, 1024, 1100, 2000] {
             assert_eq!(to_f64(&(BigInt::from(3) << (p as usize - 1)), p), 1.5);
         }
-        assert_eq!(to_f64(&BigInt::one(), 1050), 2f64.powi(-1050));
+        assert_eq!(to_f64(&BigInt::one(), 1050), f64::from_bits(1u64 << 24)); // 2^-1050 exactly (powi underflows at opt-level 0)
         assert_eq!(to_f64(&(BigInt::one() << 2100usize), 1050), f64::INFINITY);
         assert_eq!(to_f64(&-(BigInt::from(5) << 1200usize), 1200), -5.0);
     }
