@@ -2909,6 +2909,27 @@ def _keep_conditions(name):
         l, r = Expression.lhs(self), Expression.rhs(self)
         conds = list(object.__getattribute__(self, "_conds"))
         params = list(object.__getattribute__(self, "_params"))
+        if args and isinstance(args[0], Expression) and not args[0].is_relational() and params:
+            # a scalar operand's free names are not the family's parameters
+            # (s + n1 bound the free n1: CSOL-F7): rename the family's apart
+            theirs = set(args[0]._names())
+            if theirs & set(params):
+                used = theirs | set(self._names()) | set(params)
+                for c in conds:
+                    used |= set(c._names())
+                ren = {}
+                for p in params:
+                    if p in theirs:
+                        i = 1
+                        while "n%d" % i in used:
+                            i += 1
+                        used.add("n%d" % i)
+                        ren[p] = "n%d" % i
+                sub = {Expression(_sym_s(p)): Expression(_sym_s(q)) for p, q in ren.items()}
+                rel = Expression.subs(self, sub)
+                l, r = Expression.lhs(rel), Expression.rhs(rel)
+                conds = [Expression.subs(c, sub) for c in conds]
+                params = [ren.get(p, p) for p in params]
         if args and isinstance(args[0], Expression) and args[0].is_relational():
             o = args[0]
             if not isinstance(o, Solution):

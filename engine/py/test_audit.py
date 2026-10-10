@@ -508,6 +508,10 @@ assert str(solve(sin(_y) / _y == _pa, _y)) == "[0 == -a + sin(x)/x]"
 _u = solve(var("y") == var("n1"), var("y"))[0]; _s = solve(sin(_y) == 0, _y)[0]; assert str((_u + _s).subs(n1=QQ(1) / 2)) == "x + y == pi*n2 + 1/2 for integer n2"
 _c = SR("sqrt(2*I)") - 1 - I; assert solve(log(_c) * (_y - 1) == 0, _y)[0].conditions() != []
 assert str(solve(_pa * exp(_y**var("b")) == 0, _y)[-1]) == "0 == a*e^(x^b)"
+# the 274a7a1 follow-up: scalar operands, zero bases under symbolic or complex exponents
+_s = solve(sin(_y) == 0, _y)[0]; assert str((_s + var("n1")).subs(n1=QQ(1) / 2)) == "x + 1/2 == pi*n2 + 1/2 for integer n2"
+assert str(solve(var("c") * _pa**_y == 0, _y)) == "[x == r1 if c == 0 and a != 0, x == r2 if a == 0 and real_part(r2) > 0, 0 == a^x*c]"
+assert str(solve(_pa * exp(_y**I) == 0, _y)) == "[x == r1 if a == 0 and r1 != 0]" and len(solve(_y**var("b") + _y**(var("b") + 1) == (_y + 1) * _y**var("b"), _y)) == 2
 assume(_y < 0); assert abs(sqrt(_y)).subs(x=-1) == 1; forget()  # R2-SYMALG-F2
 assume(_y > -SR("1/10^400")); assert abs(_y).subs(x=-SR("1/10^401")) == SR("1/10^401"); forget()
 assume(_y, "odd"); assert solve(_y**2 - 4, _y) == []; forget()
