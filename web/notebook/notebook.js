@@ -250,7 +250,7 @@ export function createNotebook(root, opts = {}) {
   // Text goes into <pre> runs; pictures (Jupyter MIME bundles) into <figure>s.
   function appendText(box, text, isErr) {
     let pre = box.lastElementChild;
-    if (!pre || pre.tagName !== "PRE") pre = box.appendChild(h("pre", "txt"));
+    if (!pre || pre.tagName !== "PRE" || pre.sbBundle) pre = box.appendChild(h("pre", "txt"));
     pre.appendChild(isErr ? h("span", "e", { textContent: text }) : document.createTextNode(text));
   }
   // 3D graphics: an interactive WebGL view (web/viewer3d.js, loaded on first
@@ -292,9 +292,26 @@ export function createNotebook(root, opts = {}) {
       if (svg.classList.contains("sb-anim")) player(fig, svg);
     }
     else if (raster) fig.appendChild(Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }));
-    else return appendText(box, (b["text/plain"] ?? "") + "\n", false);
+    else {
+      // nothing to draw: shown as text (JSON pretty-printed), and the whole
+      // bundle kept for saving (an application/json result was saved as its
+      // text repr only: the systematic review's R2-DOC-F2)
+      const json = b["application/json"];
+      let text = b["text/plain"] ?? "";
+      if (json !== undefined) {
+        try {
+          text = JSON.stringify(typeof json === "string" ? JSON.parse(json) : json, null, 2);
+        } catch {}
+      }
+      const el = h("pre", "txt rich-out", { textContent: text + "\n" });
+      el.sbBundle = { ...b };
+      box.appendChild(el);
+      return;
+    }
     box.appendChild(fig);
   }
+  // nbformat keeps JSON MIME types (application/json, */*+json) as JSON
+  const isJsonMime = (k) => k === "application/json" || k.endsWith("+json");
   // Where output goes: {out, display, interact, clear} for a box.
   function areaSink(box) {
     if (!box) return null;
@@ -322,7 +339,18 @@ export function createNotebook(root, opts = {}) {
       else outs.push({ output_type: "stream", name, text });
     };
     for (const el of box?.children ?? []) {
-      if (el.tagName === "PRE") {
+      if (el.tagName === "PRE" && el.sbBundle) {
+        const data = {};
+        for (const [k, v] of Object.entries(el.sbBundle)) {
+          data[k] = v;
+          if (isJsonMime(k) && typeof v === "string") {
+            try {
+              data[k] = JSON.parse(v);
+            } catch {}
+          }
+        }
+        outs.push({ output_type: "display_data", data, metadata: {} });
+      } else if (el.tagName === "PRE") {
         for (const n of el.childNodes) stream(n.nodeType === 1 && n.classList.contains("e") ? "stderr" : "stdout", n.textContent);
       } else if ((el.tagName === "FIGURE" || el.classList.contains("latex-out")) && el.sbBundle) {
         // a big 3D scene (a mesh of millions of triangles) is not kept with the
@@ -354,7 +382,7 @@ export function createNotebook(root, opts = {}) {
       else if (o.data) {
         const b = {};
         for (const [key, v] of Object.entries(o.data)) b[key] = joinText(v);
-        if (b["text/plain"] && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["application/vnd.sagebrush.typeset"]) appendText(box, b["text/plain"] + "\n", false);
+        if (Object.keys(b).every((k) => k === "text/plain")) appendText(box, (b["text/plain"] ?? "") + "\n", false);
         else appendDisplay(box, b);
       }
     }

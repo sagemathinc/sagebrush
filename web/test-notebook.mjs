@@ -65,11 +65,17 @@ try {
   ok((await ev("document.querySelectorAll('.cell.markdown.rendered').length")) === 2, "Markdown cells survive a reload, rendered");
   out = await runCode("print(open('data.txt').read(), open('sub/dir/x.csv').read().split())");
   ok(out.includes("hello from python ['a,b', '1,2']"), "files survive a reload: " + out.trim());
+  out = await runCode("from IPython.display import display, JSON\ndisplay(JSON({'exact': '9007199254740993/7', 'precision': 150}))\nprint('after json')");
+  ok(out.includes("9007199254740993/7") && out.includes("after json"), "a JSON display result is shown: " + out.trim().slice(0, 80));
   // export .ipynb
   await ev("window.__blobs = []; URL.createObjectURL = (b) => { window.__blobs.push(b); return 'blob:x'; }; document.querySelector('[data-f=ipynb]').click()");
   const ipynb = await ev("window.__blobs[0].text()");
   const j = JSON.parse(ipynb);
   ok(j.cells.filter((c) => c.cell_type === "markdown").length === 2, "ipynb export has the Markdown cells");
+  const jouts = j.cells.flatMap((c) => c.outputs ?? []);
+  const jd = jouts.find((o) => o.output_type === "display_data" && o.data?.["application/json"]);
+  ok(jd?.data["application/json"].exact === "9007199254740993/7" && jouts.some((o) => o.output_type === "stream" && [o.text].flat().join("").includes("after json")),
+    "ipynb export keeps application/json as JSON (R2-DOC-F2): " + JSON.stringify(jd?.data ?? null).slice(0, 120));
   ok(j.nbformat === 4 && j.cells.length >= 2 && j.cells.some(c => c.outputs?.length), `ipynb export: ${j.cells.length} cells, kernel ${j.metadata.kernelspec.name}, outputs ${j.cells.map(c => c.outputs?.length ?? "md")}`);
   // new notebook, then import the ipynb
   await ev("document.querySelector('[data-f=new]').click()");
