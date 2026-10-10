@@ -489,6 +489,9 @@ pub fn definite(f: &Expr, big_f: &Expr, x: &str, a: &Expr, b: &Expr, has_bad: &d
         Some(Ordering::Less) => {}
     }
     if continuous {
+        if !derivative_holds_on(f, big_f, x, ba.v, bb.v, &[]) {
+            return Outcome::Unknown;
+        }
         return checked_real(f, endpoints(big_f, x, a, b, has_bad));
     }
     let (lo, hi) = (ba.v, bb.v);
@@ -532,6 +535,13 @@ pub fn definite(f: &Expr, big_f: &Expr, x: &str, a: &Expr, b: &Expr, has_bad: &d
     let mut pts: Vec<Expr> = vec![a.clone()];
     pts.extend(cuts.into_iter().map(|p| p.e));
     pts.push(b.clone());
+    // F' = f on the interval itself, not only where integrate() checked it
+    // (fixed points off the real axis and on it: across a branch cut the
+    // identity can hold in one place and not another): exactly, or at
+    // points inside each piece
+    if !derivative_holds_on(f, big_f, x, lo, hi, &qcuts) {
+        return Outcome::Unknown;
+    }
     // F on each piece, by one-sided limits (infinite: divergent)
     let mut terms = vec![];
     for w in pts.windows(2) {
@@ -608,6 +618,34 @@ fn positive_on(u: &Expr, x: &str, bd: &Bounds) -> bool {
         };
         crate::interval::ival(u, x, Iv(t, t)).map_or(false, |i| i.0 > 0.0)
     })
+}
+
+/// F' = f on (lo, hi): exactly (simplification), or numerically at three
+/// points inside each piece between the cut points (real values; not a
+/// proof, but on the interval in question).
+fn derivative_holds_on(f: &Expr, big_f: &Expr, x: &str, lo: f64, hi: f64, cuts: &[f64]) -> bool {
+    let z = sub(&crate::diff::diff(big_f, x), f);
+    if z.is_zero() || crate::simplify::simplify_full(&z).is_zero() {
+        return true;
+    }
+    let mut ends = vec![lo];
+    ends.extend(cuts.iter().copied().filter(|&c| c > lo && c < hi));
+    ends.push(hi);
+    for w in ends.windows(2) {
+        let ts: Vec<f64> = match (w[0].is_finite(), w[1].is_finite()) {
+            (true, true) => [0.27, 0.5, 0.71].iter().map(|s| w[0] + (w[1] - w[0]) * s).collect(),
+            (true, false) => [0.5, 3.0, 17.0].iter().map(|s| w[0] + s).collect(),
+            (false, true) => [0.5, 3.0, 17.0].iter().map(|s| w[1] - s).collect(),
+            (false, false) => vec![-2.3, 0.37, 4.1],
+        };
+        for t in ts {
+            let (Some(zv), Some(fv)) = (at(&z, x, t), at(f, x, t)) else { return false };
+            if zv.0.hypot(zv.1) > 1e-7 * (1.0 + fv.0.hypot(fv.1)) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// Whether the polynomial has a real root strictly inside the interval
