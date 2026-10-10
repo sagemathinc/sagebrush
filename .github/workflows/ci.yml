@@ -103,6 +103,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: the TypeScript tests and the Sage, calculus and Magma suites on it
         run: |
+          python3 -m pip install scipy
           pnpm run build
           node scripts/build-cli.mjs
           node --test 'dist/test/*.test.js'
