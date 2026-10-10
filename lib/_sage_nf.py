@@ -394,8 +394,11 @@ class NumberField_absolute:
                 # the quadratic algorithms are much faster (their
                 # certificate status kept: the systematic review's ASR-F2)
                 d = _nf().quadratic_class_group_data(self.discriminant())
+                # (and what the discriminant itself assumes: probable primes
+                # in the maximal order, the systematic review's R2-NFD-F1)
                 self._bnf = {"h": d["h"], "cyc": d["cyc"], "regulator": d["regulator"] if d["regulator"] is not None else "1",
-                             "certified": d.get("certified", False), "assumes": d.get("assumes", ["GRH"])}
+                             "certified": d.get("certified", False),
+                             "assumes": list(d.get("assumes", ["GRH"])) + list(self._nfdata().get("assumes", []))}
             else:
                 self._bnf = _nf().bnf(self._f)
         return self._bnf
@@ -441,6 +444,9 @@ class NumberField_absolute:
         return ClassGroup(self)
 
     def _proven_class_number(self, what):
+        if self._nfdata().get("assumes"):
+            # the discriminant (the maximal order) rests on probable primes
+            raise NotImplementedError("%s with proof=True: the maximal order assumes %s" % (what, "; ".join(self._nfdata()["assumes"])))
         D = self.discriminant()
         if self._n == 2 and D < 0 and -D <= _FORMS_BOUND:
             h = _count_reduced_forms(D)

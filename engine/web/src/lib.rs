@@ -531,7 +531,13 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "primes_above" => {
             let ps = sagebrush_classgroup::api::primes_above(&bigs(v.get("f"))?, u(v, "p")?)?;
-            Ok(json!(ps.iter().map(|q| json!({ "p": q.p, "e": q.e, "f": q.f, "pi": big(&q.pi), "pi_den": q.pi_den.to_string() })).collect::<Vec<_>>()))
+            Ok(json!(ps.iter().map(|q| {
+                let mut o = json!({ "p": q.p, "e": q.e, "f": q.f, "pi": big(&q.pi), "pi_den": q.pi_den.to_string() });
+                if !q.assumed_primes.is_empty() {
+                    o["assumes"] = json!(q.assumed_primes.iter().map(|p| format!("{} is prime (Baillie-PSW)", p)).collect::<Vec<_>>());
+                }
+                o
+            }).collect::<Vec<_>>()))
         }
         "bnf" => {
             let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
