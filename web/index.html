@@ -796,13 +796,20 @@ class TextFileStore {
       return { name, mode: "sage", cells: [{ id: cellId(), type: "markdown", code: `**${this.failed.replace(/[*_`\\[\]<>]/g, "\\$&")}**\n\nThe file is left as it is: nothing here is saved to it.` }] };
     }
   }
-  async save(doc) {
-    if (this.failed) throw new Error(this.failed + " (not saved, so as not to overwrite it)");
-    const text = toIpynb(doc);
-    if (text === this.last) return "saved to " + this.label;
-    await this.write(text);
-    this.last = text;
-    return "saved to " + this.label;
+  save(doc) {
+    // one write at a time, in order: a slow earlier write never lands after
+    // (and over) a later one
+    const run = async () => {
+      if (this.failed) throw new Error(this.failed + " (not saved, so as not to overwrite it)");
+      const text = toIpynb(doc);
+      if (text === this.last) return "saved to " + this.label;
+      await this.write(text);
+      this.last = text;
+      return "saved to " + this.label;
+    };
+    const p = (this.queue ?? Promise.resolve()).then(run, run);
+    this.queue = p.catch(() => {});
+    return p;
   }
 }
 

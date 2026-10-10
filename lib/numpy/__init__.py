@@ -2003,30 +2003,58 @@ _np.install("__round__", _round_dunder)
 
 # ------------------------------------------------------------------ text files
 
-def savetxt(fname, X, fmt="%.18e", delimiter=" ", newline="\n", header="", footer="", comments="# "):
+def _gz_bytes(data):
+    """data (bytes) as a gzip file (RFC 1952), from zlib's deflate stream."""
+    import zlib
+    import struct
+    z = zlib.compress(data)
+    raw = z[2:-4]  # without the zlib header and Adler-32 trailer
+    return b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff" + raw + struct.pack("<II", zlib.crc32(data) & 0xFFFFFFFF, len(data) & 0xFFFFFFFF)
+
+
+def _read_text(fname):
+    if hasattr(fname, "read"):
+        t = fname.read()
+        return t.decode() if isinstance(t, bytes) else t
+    if str(fname).endswith(".gz"):
+        import zlib
+        with open(fname, "rb") as f:
+            return zlib.decompress(f.read(), 31).decode()
+    with open(fname) as f:
+        return f.read()
+
+
+def savetxt(fname, X, fmt="%.18e", delimiter=" ", newline="\n", header="", footer="", comments="# ", encoding=None):
     X = asarray(X)
     X = X.reshape(-1, 1) if X.ndim == 1 else X
     lines = []
+    # every line of a multiline header/footer is a comment (never data)
     if header:
-        lines.append(comments + header)
+        lines.append(comments + header.replace("\n", "\n" + comments))
     for row in X.tolist():
         lines.append(delimiter.join(fmt % v for v in row))
     if footer:
-        lines.append(comments + footer)
+        lines.append(comments + footer.replace("\n", "\n" + comments))
     text = newline.join(lines) + newline
     if hasattr(fname, "write"):
         fname.write(text)
+    elif str(fname).endswith(".gz"):
+        # NumPy's convention: a .gz name is written gzip-compressed
+        with open(fname, "wb") as f:
+            f.write(_gz_bytes(text.encode()))
     else:
         with open(fname, "w") as f:
             f.write(text)
 
 
 def loadtxt(fname, dtype=float, comments="#", delimiter=None, skiprows=0, usecols=None, unpack=False, ndmin=0):
-    if hasattr(fname, "read"):
-        text = fname.read()
-    else:
-        with open(fname) as f:
-            text = f.read()
+    if ndmin not in (0, 1, 2):
+        raise ValueError("Illegal value of ndmin keyword: %s" % (ndmin,))
+    text = _read_text(fname)
+    if isinstance(usecols, int):
+        usecols = [usecols]
+    import numpy as _self
+    conv = (lambda t: complex(t)) if _self.dtype(dtype).kind == "c" else float
     rows = []
     for i, line in enumerate(text.splitlines()):
         if i < skiprows:
@@ -2037,10 +2065,13 @@ def loadtxt(fname, dtype=float, comments="#", delimiter=None, skiprows=0, usecol
         parts = line.split(delimiter)
         if usecols is not None:
             parts = [parts[c] for c in usecols]
-        rows.append([float(p) for p in parts])
+        rows.append([conv(p) for p in parts])
     a = array(rows, dtype=dtype)
-    if a.ndim == 2 and a.shape[1] == 1 and ndmin < 2:
-        a = a.ravel()
+    # NumPy: squeeze extra dimensions, then at least ndmin of them
+    if a.ndim > ndmin:
+        a = squeeze(a)
+    if a.ndim < ndmin:
+        a = atleast_1d(a) if ndmin == 1 else atleast_2d(a).T
     return a.T if unpack else a
 
 

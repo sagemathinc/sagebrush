@@ -46,7 +46,8 @@ export function fromFile(name, text, mode = "python") {
   if (/\.ipynb$/i.test(name)) {
     const j = JSON.parse(text);
     if (!j || typeof j !== "object" || !(Array.isArray(j.cells) || Array.isArray(j.worksheets))) throw new Error(`${name} is not a Jupyter notebook`);
-    const cells = (j.cells ?? j.worksheets?.[0]?.cells ?? []).map((c) => {
+    // nbformat 3: the cells of every worksheet, in order (not only the first)
+    const cells = (j.cells ?? (j.worksheets ?? []).flatMap((w) => w?.cells ?? [])).map((c) => {
       const src = joinText(c.source ?? c.input), id = validId(c.id) ? c.id : cellId();
       const metadata = c.metadata && Object.keys(c.metadata).length ? { metadata: c.metadata } : {};
       if (c.cell_type === "code") return { id, code: src, outputs: c.outputs ?? [], n: c.execution_count ?? c.prompt_number ?? null, ...metadata };

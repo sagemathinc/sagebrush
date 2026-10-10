@@ -95,8 +95,12 @@ def _matrix(payload, e, little, mat_dtype=False):
             re_ = re_.astype(_NP[_CLASS[cls]])
         if is_complex:
             t, raw = r.element()
-            im = _numbers(t, raw, e).astype("float64")
-            re_ = re_.astype("float64") + 1j * im  # (complex128 either way)
+            part = "float32" if cls == 7 else "float64"  # single: complex64
+            im = _numbers(t, raw, e).astype(part)
+            z = np.empty(re_.shape, dtype="complex64" if cls == 7 else "complex128")
+            z.real = re_.astype(part)
+            z.imag = im
+            re_ = z
         if is_logical:
             re_ = re_.astype(bool)
         return name, _shape(re_, dims)
@@ -171,6 +175,10 @@ def _read(f, appendmat):
 def loadmat(file_name, mdict=None, appendmat=True, variable_names=None, squeeze_me=False, mat_dtype=False, **kwargs):
     """The variables of a .mat file: {name: value}, with scipy's
     __header__, __version__ and __globals__ entries."""
+    if kwargs.get("chars_as_strings", True) is False or kwargs.get("simplify_cells", False):
+        raise NotImplementedError("loadmat: chars_as_strings=False and simplify_cells=True are not supported")
+    if isinstance(variable_names, str):
+        variable_names = [variable_names]  # one exact name, not substrings
     data, little = _read(file_name, appendmat)
     e = "<" if little else ">"
     out = {"__header__": data[:116].rstrip(b" \0"), "__version__": "1.0", "__globals__": []}
@@ -196,11 +204,20 @@ def loadmat(file_name, mdict=None, appendmat=True, variable_names=None, squeeze_
 def whosmat(file_name, **kwargs):
     """[(name, shape, class)] of the variables."""
     out = []
+    cls = {"float64": "double", "float32": "single", "complex128": "double", "complex64": "single", "bool": "logical"}
     for k, v in loadmat(file_name).items():
         if k.startswith("__"):
             continue
         if isinstance(v, np.ndarray):
-            out.append((k, tuple(v.shape), {"float64": "double", "float32": "single"}.get(v.dtype.name, v.dtype.name)))
+            out.append((k, tuple(v.shape), cls.get(v.dtype.name, v.dtype.name)))
+        elif isinstance(v, dict):
+            out.append((k, (1, 1), "struct"))
+        elif isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
+            out.append((k, (1, len(v)), "struct"))
+        elif isinstance(v, list) and all(isinstance(x, str) for x in v):
+            out.append((k, (len(v),), "char"))  # (as SciPy reports a char array)
+        elif isinstance(v, list):
+            out.append((k, (len(v), len(v[0]) if v else 0), "cell"))
         else:
             out.append((k, (1, 1), type(v).__name__))
     return out
@@ -212,7 +229,14 @@ def _elem(t, payload):
 
 
 def savemat(file_name, mdict, appendmat=True, format="5", do_compression=False, oned_as="row", **kwargs):
-    """Write numeric arrays (and strings) as a MATLAB 5 file."""
+    """Write numeric arrays (real or complex) and strings as a MATLAB 5 file."""
+    if str(format) != "5":
+        raise ValueError("format must be '5' (MATLAB 4 files are not supported)" if str(format) == "4" else "format must be '4' or '5'")
+    if oned_as not in ("row", "column"):
+        raise ValueError("oned_as must be 'row' or 'column'")
+    unknown = set(kwargs) - {"long_field_names"}
+    if unknown:
+        raise TypeError("savemat() got unexpected keyword arguments %s" % ", ".join(sorted(unknown)))
     head = b"MATLAB 5.0 MAT-file, Platform: sagebrush, Created by: sagebrush scipy.io".ljust(116)
     parts = [head + b"\0" * 8 + struct.pack("<H", 0x0100) + b"IM"]
     codes = {"float64": (6, 9), "float32": (7, 7), "int8": (8, 1), "uint8": (9, 2), "int16": (10, 3),
@@ -220,6 +244,7 @@ def savemat(file_name, mdict, appendmat=True, format="5", do_compression=False, 
              "bool": (9, 2)}
     for name, v in mdict.items():
         logical = False
+        imag = None
         if isinstance(v, str):
             arr = np.array([ord(c) for c in v], dtype="uint16").reshape((1, len(v)))
             cls, mi = 4, 4
@@ -232,13 +257,22 @@ def savemat(file_name, mdict, appendmat=True, format="5", do_compression=False, 
             logical = arr.dtype.name == "bool"
             if logical:
                 arr = arr.astype("uint8")
+            if arr.dtype.kind == "c":
+                # a complex array: the complex flag, then real and imaginary parts
+                part = "float32" if arr.dtype.name == "complex64" else "float64"
+                imag = np.ascontiguousarray(arr.imag).astype(part)
+                arr = np.ascontiguousarray(arr.real).astype(part)
             if arr.dtype.name not in codes:
+                if arr.dtype.kind not in "fiu":
+                    raise TypeError("savemat: cannot save an array of dtype %s" % arr.dtype)
                 arr = arr.astype("float64")
             cls, mi = codes[arr.dtype.name]
-        flags = struct.pack("<II", cls | (0x0200 if logical else 0), 0)
+        flags = struct.pack("<II", cls | (0x0200 if logical else 0) | (0x0800 if imag is not None else 0), 0)
         dims = struct.pack("<%di" % arr.ndim, *arr.shape)
         body = (_elem(6, flags) + _elem(5, dims) + _elem(1, name.encode("latin1"))
                 + _elem(mi, arr.tobytes(order="F")))
+        if imag is not None:
+            body += _elem(mi, imag.tobytes(order="F"))
         el = _elem(miMATRIX, body)
         if do_compression:
             z = zlib.compress(el)

@@ -26,7 +26,8 @@ try {
   if (!/<html/i.test(page)) throw new Error("no notebook page: " + page.slice(0, 200));
   // every sagebrush-*.js the page names, KaTeX's stylesheet, the notices
   const names = [...new Set(page.match(/sagebrush-[a-z0-9]+\.js/g) ?? [])].filter((n) => !["sagebrush-worker.js", "sagebrush-notebook.js"].includes(n));
-  for (const f of [...names, "katex/katex.min.css", "THIRD-PARTY-NOTICES.txt"]) {
+  // (and the files it fetches: the documentation search index)
+  for (const f of [...names, "katex/katex.min.css", "THIRD-PARTY-NOTICES.txt", ...new Set(page.match(/fetch\("([\w.-]+\.json)"\)/g)?.map((m) => /"(.+)"/.exec(m)[1]) ?? [])]) {
     for (const p of [`/${f}`, `/nb/probe.ipynb/${f}`]) {
       const r = await get(p);
       const ok = r.status === 200;
@@ -34,6 +35,13 @@ try {
       console.log((ok ? "ok   " : "FAIL ") + p + " " + r.status);
     }
   }
+  // a directory named like a notebook gets an answer (not a pending request)
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(join(dir, "folder.ipynb"));
+  const r = await Promise.race([get("/api/file?path=folder.ipynb"), sleep(5000).then(() => null)]);
+  const okDir = r !== null && r.status >= 400;
+  if (!okDir) fail++;
+  console.log((okDir ? "ok   " : "FAIL ") + "a directory named folder.ipynb " + (r ? r.status : "no response"));
 } catch (e) {
   console.log("FAIL " + e.message);
   fail++;

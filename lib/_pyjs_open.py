@@ -94,6 +94,14 @@ def open(file, mode="r", buffering=-1, encoding=None, errors=None, newline=None,
     if not isinstance(mode, str) or not set(mode) <= set("rwxabt+"):
         raise ValueError("invalid mode: %r" % (mode,))
     binary = "b" in mode
+    # unwritten data of an unclosed file object of the same path is written
+    # first, so open(f, "w").write(s) followed by a read sees s (as in CPython)
+    for f in list(_unwritten.values()):
+        if getattr(f, "name", None) == file:
+            try:
+                f.flush()
+            except Exception:
+                pass
     if "x" in mode and _fs.exists(file):
         raise FileExistsError(17, "File exists", file)
     if "r" in mode:

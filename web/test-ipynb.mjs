@@ -57,6 +57,10 @@ ok("nbformat 3 notebooks: headings become Markdown, prompt numbers kept", () => 
   const d = fromFile("old.ipynb", JSON.stringify(v3));
   assert.deepEqual(d.cells.map((c) => [c.type ?? "code", c.code, c.n ?? null]), [["markdown", "## Title", null], ["code", "1+1", 4]]);
 });
+ok("nbformat 3 notebooks: every worksheet's cells (systematic review DOC-F7)", () => {
+  const v3 = { nbformat: 3, metadata: {}, worksheets: [{ cells: [{ cell_type: "code", input: "proof_one=1", outputs: [] }] }, { cells: [{ cell_type: "code", input: "proof_two=2", outputs: [] }] }] };
+  assert.deepEqual(fromFile("old.ipynb", JSON.stringify(v3)).cells.map((c) => c.code), ["proof_one=1", "proof_two=2"]);
+});
 ok("a file that is not a notebook is an error, not an empty notebook", () => {
   assert.throws(() => fromFile("x.ipynb", "{}"), /not a Jupyter notebook/);
   assert.throws(() => fromFile("x.ipynb", "{\"cells\": [ "), SyntaxError);

@@ -308,6 +308,13 @@ export function createNotebook(root, opts = {}) {
 
   // A cell's output as Jupyter outputs (stream and display_data).
   function saveOutputs(box) {
+    // outputs loaded from a file and not changed since are saved as they
+    // were: every MIME type, metadata, errors and execution counts (the
+    // page shows only some of them)
+    const L = box?.sbLoaded;
+    if (L && box.children.length === L.els.length && L.els.every((e, i) => box.children[i] === e) && box.textContent === L.text) {
+      return JSON.parse(L.json);
+    }
     const outs = [];
     const stream = (name, text) => {
       const last = outs.at(-1);
@@ -337,6 +344,10 @@ export function createNotebook(root, opts = {}) {
   }
   const joinText = (t) => (Array.isArray(t) ? t.join("") : t ?? "");
   function loadOutputs(box, outs) {
+    loadOutputsInto(box, outs);
+    if (box) box.sbLoaded = { json: JSON.stringify(outs ?? []), els: [...box.children], text: box.textContent };
+  }
+  function loadOutputsInto(box, outs) {
     for (const o of outs ?? []) {
       if (o.output_type === "stream") appendText(box, joinText(o.text), o.name === "stderr");
       else if (o.output_type === "error") appendText(box, (o.traceback ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "") + "\n", true);
@@ -1066,7 +1077,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0;
   function snapshot() {
     return {
       ...meta, mode,
@@ -1096,7 +1107,19 @@ export function createNotebook(root, opts = {}) {
     if (json === lastJson) return;
     lastJson = json;
     emit("change", doc);
-    if (store) Promise.resolve(store.save(doc)).then((t) => emit("saved", t ?? "saved"), (e) => emit("saved", "not saved: " + (e?.message ?? e)));
+    if (store) {
+      // saves run one after another (a slow earlier write cannot land after
+      // a later one), and a failed save is retried by the next flush
+      const st = store;
+      const start = () => { try { return Promise.resolve(st.save(doc)); } catch (e) { return Promise.reject(e); } };
+      // (started at once when no earlier save is pending)
+      const p = savesPending ? saveChain.then(start) : start();
+      savesPending++;
+      saveChain = p.then((t) => emit("saved", t ?? "saved"), (e) => {
+        if (lastJson === json) lastJson = null;
+        emit("saved", "not saved: " + (e?.message ?? e));
+      }).finally(() => { savesPending--; });
+    }
   }
   cellsEl.addEventListener("input", schedule);
   const observer = new MutationObserver(schedule);
@@ -1131,8 +1154,13 @@ export function createNotebook(root, opts = {}) {
   // Apply a document changed elsewhere (another tab, a collaborator, an agent):
   // cells are matched by id; what changed is updated in place, so the cell
   // being edited keeps its caret and a running cell its output.
-  function applyRemote(doc) {
+  function applyRemote(doc, keepLocal = true) {
     loading = true;
+    // the last saved document: a cell edited here since then, and not
+    // changed in the incoming document, keeps the local (unsaved) text
+    let base = null;
+    try { base = keepLocal && lastJson ? new Map(JSON.parse(lastJson).cells.map((c) => [c.id, c.code ?? ""])) : null; } catch { base = null; }
+    let keptLocal = false;
     const { cells: list, mode: m, ...rest } = doc;
     meta = { ...meta, ...rest };
     if (m && m !== mode) setMode(m, false);
@@ -1147,7 +1175,11 @@ export function createNotebook(root, opts = {}) {
         mine.delete(rc.id);
         if ((rc.type === "markdown" || rc.type === "raw" ? rc.type : "code") !== c.type) setType(c, rc.type);
         if ("metadata" in rc) c.metadata = rc.metadata ?? null; // (TimeTravel's versions have none)
-        const textChanged = c.ta.value !== (rc.code ?? "");
+        let textChanged = c.ta.value !== (rc.code ?? "");
+        if (textChanged && base && base.has(rc.id) && base.get(rc.id) !== c.ta.value && base.get(rc.id) === (rc.code ?? "")) {
+          textChanged = false; // an unsaved local edit the other side did not touch
+          keptLocal = true;
+        }
         if (textChanged) setInput(c, rc.code ?? "");
         if (c.type === "markdown") {
           c.attachments = rc.attachments ?? null;
@@ -1168,14 +1200,15 @@ export function createNotebook(root, opts = {}) {
     if (!cells().length) addCell("");
     relabel();
     lastJson = JSON.stringify(snapshot());
-    Promise.resolve().then(() => { loading = false; });
+    if (keptLocal) lastJson = null; // the kept local edit still has to be saved
+    Promise.resolve().then(() => { loading = false; if (keptLocal) schedule(); });
     emit("remote", doc);
   }
   // Replace the cells with a document's (TimeTravel's revert): matched by id
   // and updated in place as for a change made elsewhere, but this one is a
   // change made here, so it is saved (and recorded).
   function replace(doc) {
-    applyRemote(doc);
+    applyRemote(doc, false); // a revert replaces the local text too
     lastJson = null;
     Promise.resolve().then(flush); // after applyRemote's own microtask
   }
