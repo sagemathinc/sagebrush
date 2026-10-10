@@ -89,6 +89,30 @@ fn u(v: &Value, k: &str) -> Result<u64, String> {
     v.get(k).and_then(Value::as_u64).ok_or_else(|| format!("missing integer argument '{}'", k))
 }
 
+/// A size argument (a count, a bound, a weight, a number of points) at most
+/// `max`, so that it means the same on every target: usize is 32 bits in
+/// WebAssembly, and an unchecked cast changed 2^32 to 0 there.
+fn size(v: &Value, k: &str, default: Option<u64>, max: u64) -> Result<usize, String> {
+    let x = match (v.get(k), default) {
+        (None | Some(Value::Null), Some(d)) => d,
+        (Some(x), _) => x.as_u64().ok_or_else(|| format!("'{}' must be a nonnegative integer", k))?,
+        (None | Some(Value::Null), None) => return Err(format!("missing integer argument '{}'", k)),
+    };
+    if x > max {
+        return Err(format!("'{}' = {} is too large (at most {})", k, x, max));
+    }
+    usize::try_from(x).map_err(|_| format!("'{}' = {} is too large here", k, x))
+}
+
+/// The sign of a modular symbols space: -1, 0 or +1.
+fn sign(v: &Value) -> Result<i32, String> {
+    match v.get("sign").map(Value::as_i64) {
+        None => Ok(0),
+        Some(Some(s)) if (-1..=1).contains(&s) => Ok(s as i32),
+        _ => Err("sign must be -1, 0 or 1".into()),
+    }
+}
+
 /// The level n >= 1.
 fn level(v: &Value) -> Result<u64, String> {
     let n = u(v, "n")?;
@@ -98,13 +122,11 @@ fn level(v: &Value) -> Result<u64, String> {
 
 /// The weight k >= 2 (default 2).
 fn weight(v: &Value) -> Result<usize, String> {
-    match v.get("k") {
-        None => Ok(2),
-        Some(k) => match k.as_u64() {
-            Some(k) if k >= 2 => Ok(k as usize),
-            _ => Err("the weight must be an integer k >= 2".into()),
-        },
+    let k = size(v, "k", Some(2), (1 << 31) - 1).map_err(|_| "the weight must be an integer 2 <= k < 2^31".to_string())?;
+    if k < 2 {
+        return Err("the weight must be an integer 2 <= k < 2^31".into());
     }
+    Ok(k)
 }
 
 /// A list of unsigned integers, every element checked.
@@ -253,7 +275,7 @@ fn perm_json(gs: &[sagebrush_group::Perm]) -> Value {
 /// answer per requested property (points are 0..n-1).
 fn perm_group(v: &Value) -> Result<Value, String> {
     use sagebrush_group::{Group, Rng};
-    let n = u(v, "n")? as usize;
+    let n = size(v, "n", None, 1 << 20)?;
     let gens = perms(n, v.get("gens"))?;
     let g = Group::new(n, gens)?;
     let what: Vec<String> = match v.get("what") {
@@ -261,7 +283,7 @@ fn perm_group(v: &Value) -> Result<Value, String> {
         Some(Value::Array(a)) => a.iter().map(|x| x.as_str().map(String::from).ok_or("what must be names")).collect::<Result<_, _>>()?,
         _ => vec!["order".into()],
     };
-    let point = || -> Result<u32, String> { v.get("point").and_then(Value::as_u64).map(|x| x as u32).filter(|&x| (x as usize) < n).ok_or_else(|| "missing or bad point".to_string()) };
+    let point = || -> Result<u32, String> { v.get("point").and_then(Value::as_u64).filter(|&x| x < n as u64).map(|x| x as u32).ok_or_else(|| "missing or bad point".to_string()) };
     let mut rng = Rng::new(v.get("seed").and_then(Value::as_u64).unwrap_or(1));
     let mut out = serde_json::Map::new();
     for w in &what {
@@ -274,9 +296,9 @@ fn perm_group(v: &Value) -> Result<Value, String> {
             "is_abelian" => json!(g.is_abelian()),
             "is_solvable" => json!(g.is_solvable()),
             "transitivity" => json!(g.transitivity()),
-            "blocks" => json!(g.blocks_containing(v.get("point").and_then(Value::as_u64).unwrap_or(0) as u32)),
+            "blocks" => json!(g.blocks_containing(v.get("point").and_then(Value::as_u64).filter(|&x| x < n as u64).ok_or("bad point")? as u32)),
             "min_block" => {
-                let seed: Vec<u32> = v.get("block").and_then(Value::as_array).ok_or("missing block")?.iter().filter_map(|x| x.as_u64().map(|x| x as u32)).collect();
+                let seed: Vec<u32> = u64s(v.get("block").ok_or("missing block")?, "block")?.into_iter().map(|x| if x < n as u64 { Ok(x as u32) } else { Err("a block is a list of points") }).collect::<Result<_, _>>()?;
                 if seed.is_empty() || seed.iter().any(|&x| x as usize >= n) {
                     return Err("bad block".into());
                 }
@@ -305,7 +327,7 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 json!(g.contains(&x[0]))
             }
             "random" => {
-                let k = v.get("count").and_then(Value::as_u64).unwrap_or(1) as usize;
+                let k = size(v, "count", Some(1), 1 << 20)?;
                 perm_json(&(0..k).map(|_| g.random(&mut rng)).collect::<Vec<_>>())
             }
             "elements" => {
@@ -317,7 +339,7 @@ fn perm_group(v: &Value) -> Result<Value, String> {
             }
             "cycle_type_counts" => {
                 let limit = v.get("limit").and_then(Value::as_u64).unwrap_or(200_000);
-                let samples = v.get("samples").and_then(Value::as_u64).unwrap_or(10_000) as usize;
+                let samples = size(v, "samples", Some(10_000), 1 << 26)?;
                 let (c, exact) = g.cycle_type_counts(limit, samples, &mut rng);
                 json!({"exact": exact, "counts": c.into_iter().map(|(t, k)| json!([t, k])).collect::<Vec<_>>()})
             }
@@ -342,7 +364,7 @@ fn perm_group(v: &Value) -> Result<Value, String> {
 /// {"fn": "perm_group_named", "name": ..., "n": n} -> {"n", "gens"}
 fn perm_group_named(v: &Value) -> Result<Value, String> {
     use sagebrush_group::named::*;
-    let n = u(v, "n")?;
+    let n = size(v, "n", None, 1 << 20)? as u64;
     let name = v.get("name").and_then(Value::as_str).ok_or("missing name")?;
     let g = match name {
         "symmetric" => symmetric(n as usize),
@@ -365,6 +387,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "perm_group_named" => perm_group_named(v),
         "characters" => {
             let n = level(v)?;
+            if n > 10_000_000 {
+                return Err("characters: the modulus must be at most 10^7".into());
+            }
             let g = DirichletGroup::new(n);
             let mut seen = vec![false; g.order() as usize];
             let mut out = vec![];
@@ -401,7 +426,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "charpoly" => {
             let (n, k, q) = (level(v)?, weight(v)?, u(v, "q")?);
-            let sign = v.get("sign").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let sign = sign(v)?;
             let eps = character(n, v)?;
             let e = sagebrush_modsym::general_exact::exact_charpoly(n, k, &eps, sign, q)?;
             let coeffs: Vec<Vec<String>> = e.coeffs.iter().map(|c| big(c)).collect();
@@ -409,7 +434,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "charpoly_mod" => {
             let (n, k, q) = (level(v)?, weight(v)?, u(v, "q")?);
-            let sign = v.get("sign").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let sign = sign(v)?;
             let eps = character(n, v)?.minimal();
             let sp = GeneralSpace::new(n, k, &eps, sign)?;
             Ok(json!({ "dim": sp.dimension(), "ell": sp.p, "zeta": sp.zeta, "charpoly": sp.hecke_charpoly(q)? }))
@@ -450,14 +475,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                        "seconds_exact": e.seconds_exact }))
         }
         "estimate_newforms" => {
-            let e = sagebrush_modsym::estimate::newforms(level(v)?, weight(v)?, u(v, "bound").unwrap_or(100) as usize);
+            let e = sagebrush_modsym::estimate::newforms(level(v)?, weight(v)?, size(v, "bound", Some(100), 1 << 24)?);
             Ok(json!({ "n": e.n, "k": e.k, "bound": e.bound, "dim_new": e.dim_new, "dim_top": e.dim_top, "levels": e.levels, "symbols": e.symbols,
                        "primes": e.primes, "trace_primes": e.trace_primes, "terms": e.terms, "term_names": sagebrush_modsym::estimate::NEWFORMS_TERMS,
                        "seconds": e.seconds, "seconds_low": e.seconds_low, "seconds_high": e.seconds_high, "bytes": e.bytes }))
         }
         "rational_newforms" => {
             let r = sagebrush_modsym::newforms::rational_newforms(level(v)?, u(v, "bound").unwrap_or(1000), 40)?;
-            Ok(json!(r.forms.into_iter().map(|f| f.ap).collect::<Vec<_>>()))
+            let forms = json!(r.forms.into_iter().map(|f| f.ap).collect::<Vec<_>>());
+            // "details": what the forms come with (checked, not proven)
+            Ok(if v.get("details").and_then(Value::as_bool) == Some(true) {
+                json!({ "forms": forms, "status": r.status, "checks": r.checks })
+            } else {
+                forms
+            })
         }
         // ---- sagebrush.nf / arith / matrix: engine/classgroup ----
         "factor_integer" => {
@@ -506,18 +537,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&rect(v.get("m"))?)))),
         "lll" => Ok(json!(sagebrush_classgroup::api::lll(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
         "complex_roots" => {
-            let digits = v.get("digits").and_then(Value::as_u64).unwrap_or(15) as usize;
+            let digits = size(v, "digits", Some(15), 100_000)?;
             let r = sagebrush_classgroup::api::complex_roots(&bigs(v.get("f"))?, digits)?;
             Ok(json!(r.iter().map(|(re, im, e)| json!([re, im, e])).collect::<Vec<_>>()))
         }
         "factor_mod" => {
             let f = bigs(v.get("f"))?;
-            if f.iter().all(|c| c.sign() == sagebrush_bigint::Sign::NoSign) {
-                return Err("factor of the zero polynomial".into());
-            }
             let p = u(v, "p")?;
-            if !(2..1u64 << 32).contains(&p) {
-                return Err("factor_mod needs a prime p < 2^32".into());
+            if !(2..1u64 << 32).contains(&p) || !sagebrush_modsym::exact::is_prime(p) {
+                return Err(format!("factor_mod needs a prime p < 2^32, not {}", p));
+            }
+            // (zero modulo p, not only over Z: [4, 8, 4] mod 2 trapped)
+            let bp = BigInt::from(p);
+            if f.iter().all(|c| (c % &bp).sign() == sagebrush_bigint::Sign::NoSign) {
+                return Err("factor of the zero polynomial (modulo p)".into());
             }
             Ok(json!(sagebrush_poly::factor_mod(&f, p).iter().map(|(g, e)| json!([g, e])).collect::<Vec<_>>()))
         }
@@ -535,14 +568,14 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                        "log": g.log, "gens": perm_json(&t.gens) }))
         }
         "transitive_group" => {
-            let n = u(v, "n")? as usize;
+            let n = size(v, "n", None, 1 << 20)?;
             if n < 1 || n > sagebrush_galois::tables::MAX_DEGREE {
                 return Err(format!("transitive groups are available for degrees 1 to {}", sagebrush_galois::tables::MAX_DEGREE));
             }
             let all = sagebrush_galois::tables::transitive_groups(n);
             match v.get("k").and_then(Value::as_u64) {
                 None => Ok(json!(all.len())),
-                Some(k) if k >= 1 && (k as usize) <= all.len() => {
+                Some(k) if k >= 1 && k <= all.len() as u64 => {
                     let t = &all[k as usize - 1];
                     Ok(json!({ "n": n, "k": k, "order": t.order.to_string(), "name": t.name, "gens": perm_json(&t.gens) }))
                 }
@@ -630,7 +663,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let mut out = json!({ "dim": r.dim, "order": r.m, "orbit_dims": r.dims, "orbit_charpolys": r.orbits.iter().map(|o| big(o)).collect::<Vec<_>>(),
                                   "T": r.ops, "status": r.status, "checks": r.checks });
             if f == "newforms" {
-                let bound = u(v, "bound").unwrap_or(100) as usize;
+                let bound = size(v, "bound", Some(100), 1 << 24)?;
                 if bound < 1 {
                     return Err("bound must be at least 1".into());
                 }
@@ -672,7 +705,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if b.len() != 3 {
                 return Err("b is [b2, b4, b6]".into());
             }
-            let xs = sagebrush_ap::search::x_coordinates(p(&b[0])?, p(&b[1])?, p(&b[2])?, u(v, "rmax")?, u(v, "smax")?, u(v, "limit").unwrap_or(100000) as usize)?;
+            let xs = sagebrush_ap::search::x_coordinates(p(&b[0])?, p(&b[1])?, p(&b[2])?, u(v, "rmax")?, u(v, "smax")?, size(v, "limit", Some(100000), 1 << 28)?)?;
             Ok(json!(xs.iter().map(|(r, s)| json!([r.to_string(), s])).collect::<Vec<_>>()))
         }
         "quartic_search" => {
@@ -691,7 +724,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "moments" => {
             let e = curve(v.get("a"))?;
-            let (count, m) = sagebrush_ap::moments(&e, u(v, "n")?, u(v, "kmax").unwrap_or(4) as usize);
+            let (count, m) = sagebrush_ap::moments(&e, u(v, "n")?, size(v, "kmax", Some(4), 64)?);
             Ok(json!([count, m]))
         }
         _ => Err(format!("unknown fn '{}'", f)),

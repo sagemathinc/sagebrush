@@ -99,6 +99,7 @@ jobs:
       - name: a fresh WebAssembly engine
         run: |
           node scripts/build-engine.mjs
+          node engine/web/tests/wasm_designated.mjs
           git diff --quiet wasm/ || echo "::warning::wasm/sagebrush-engine.wasm differs from a fresh build of engine/ (node scripts/build-engine.mjs; a different Rust can also change the bytes)"
       - run: pnpm install --frozen-lockfile
       - name: the TypeScript tests and the Sage, calculus and Magma suites on it

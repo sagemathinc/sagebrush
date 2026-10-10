@@ -154,12 +154,21 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
 
 /// The rational newforms of level N: a list of [(p, a_p)] for primes p <= bound not dividing N.
 /// Checked, not proven: the Hasse bound, and the same newforms modulo a second prime.
+/// With details=True, a dict: forms, status ("checked") and checks (what was checked).
 #[pyfunction]
-#[pyo3(signature = (n, bound=1000, threads=0))]
-fn rational_newforms(py: Python<'_>, n: u64, bound: u64, threads: usize) -> PyResult<Vec<Vec<(u64, i64)>>> {
+#[pyo3(signature = (n, bound=1000, threads=0, details=false))]
+fn rational_newforms<'py>(py: Python<'py>, n: u64, bound: u64, threads: usize, details: bool) -> PyResult<Bound<'py, PyAny>> {
     lk(n, None)?;
     let r = run(py, threads, || sagebrush_modsym::newforms::rational_newforms(n, bound, 40))?.map_err(err)?;
-    Ok(r.forms.into_iter().map(|f| f.ap).collect())
+    let forms: Vec<Vec<(u64, i64)>> = r.forms.into_iter().map(|f| f.ap).collect();
+    if !details {
+        return Ok(forms.into_pyobject(py)?.into_any());
+    }
+    let d = PyDict::new(py);
+    d.set_item("forms", forms)?;
+    d.set_item("status", r.status)?;
+    d.set_item("checks", r.checks)?;
+    Ok(d.into_any())
 }
 
 // ---- sagebrush.ap: traces of Frobenius of elliptic curves ----
@@ -222,6 +231,9 @@ fn character(n: u64, chi: Option<(u64, Vec<u64>, Vec<u64>)>) -> PyResult<Charact
 #[pyfunction]
 fn characters<'py>(py: Python<'py>, n: u64) -> PyResult<Vec<Bound<'py, PyDict>>> {
     lk(n, None)?;
+    if n > 10_000_000 {
+        return Err(err("characters: the modulus must be at most 10^7".into()));
+    }
     let g = DirichletGroup::new(n);
     let total = g.order();
     let mut seen = vec![false; total as usize];
