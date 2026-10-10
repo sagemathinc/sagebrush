@@ -13,14 +13,18 @@
 //!     relation elements (a compact representation: no unit is ever
 //!     expanded), whose logarithmic embeddings span a multiple of the unit
 //!     lattice: covolume R*;
-//!   * h* R* below sqrt 2 times the analytic estimate of h R proves both.
+//!   * h* R* below sqrt 2 times Bach's estimate of h R stops the search;
+//!     then the certificate (nf/certify.rs) proves h and R under GRH alone:
+//!     h* R* below twice Belabas and Friedman's proven lower bound for h R,
+//!     with R* bounded from genuine units with certified logarithms and h*
+//!     from exact determinants.  Bnf.certified says whether it held.
 
 use super::embed::{lll, lll_weighted, Embeddings};
 use super::order::{maximal_order, Order};
 use super::prime::{decompose, factor_element_fast, PrimeIdeal};
 use super::zlin::*;
-use crate::imag::{lattice_group, ClassGroup, Timing};
-use crate::linalg::{eliminate_with, independent_rows, kernel_crt, Reduced};
+use crate::imag::{lattice_group, lattice_group_exact, ClassGroup, Timing};
+use crate::linalg::{eliminate_tracked, eliminate_with, independent_rows, kernel_crt, Reduced};
 use crate::real::to_f64;
 use crate::relations::Relation;
 use sagebrush_bigint::BigInt;
@@ -51,6 +55,11 @@ pub struct Bnf {
     /// lower bound)
     pub w: u32,
     pub w_proven: bool,
+    /// h and R proven under GRH alone (nf/certify.rs); otherwise they rest
+    /// on the stopping rule's estimate of h R too
+    pub certified: bool,
+    /// the regulator's correct significant digits (when certified; else 20)
+    pub reg_digits: usize,
 }
 
 #[allow(dead_code)]
@@ -290,7 +299,7 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
 
 /// The inverse of a square fixed-point matrix in f64 (None if not finite:
 /// it is only a shortcut).
-fn inverse_f64(m: &ZMat, prec: u32) -> Option<Vec<Vec<f64>>> {
+pub(super) fn inverse_f64(m: &ZMat, prec: u32) -> Option<Vec<Vec<f64>>> {
     let r = m.len();
     let mut a: Vec<Vec<f64>> = m.iter().enumerate().map(|(i, row)| row.iter().map(|x| to_f64(x, prec)).chain((0..r).map(|j| (i == j) as i32 as f64)).collect()).collect();
     for c in 0..r {
@@ -350,7 +359,7 @@ fn independent_exact(rows: &ZMat, err: &BigInt) -> bool {
 
 /// c with c B = v over Q (B: k rows of length r, rank k; uses k independent
 /// columns).
-fn solve_rows(b: &ZMat, v: &[BigInt]) -> Option<Vec<BigRational>> {
+pub(super) fn solve_rows(b: &ZMat, v: &[BigInt]) -> Option<Vec<BigRational>> {
     let k = b.len();
     let r = v.len();
     // choose k independent columns greedily
@@ -656,6 +665,17 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
     // h R estimate
     let res = residue_estimate(&split, x);
     let hr_est = res * w as f64 * dk.to_f64().unwrap().abs().sqrt() / (2f64.powi(r1 as i32) * (2.0 * std::f64::consts::PI).powi(r2 as i32));
+    // the certificate's proven lower bound for log h R (GRH; nf/certify.rs)
+    let log_hr_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else {
+        super::certify::choose_x(n, ld).map(|bx| {
+            let more;
+            let sp: &[(u64, Vec<(u32, u32)>)] = if bx <= (t_unif as u64).max(2 * x) { &split } else { more = splitting(&o, &dk, &index, bx); &more };
+            super::certify::log_hr_lower(sp, bx, n, r1, r2, w, ld)
+        })
+    };
+    if debug {
+        eprintln!("  log hR >= {:?} (estimate {:.6}) at {:.1} ms", log_hr_lo, hr_est.ln(), t0.elapsed().as_secs_f64() * 1e3);
+    }
     let primorial: BigInt = by_p.keys().map(|&p| BigInt::from(p)).product();
     let fld = Field { o, primorial, log_bound: (bound as f64).ln(), emb, fb, by_p, ngen };
     let mut tm = Timing { fb: nfb, h_est: hr_est, ..Default::default() };
@@ -775,15 +795,15 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
                         }
                         None
                     }
-                    Ok(sel) => try_units(&fld, &rels, &elems, nfb, &dense, &core_rows, c, &sel, r, hr_est, round as u64, &mut cache, debug),
+                    Ok(sel) => try_units(&fld, &rels, &elems, nfb, &dense, &core_rows, c, &sel, r, hr_est, log_hr_lo, round as u64, &mut cache, debug),
                 }
             }
         };
         tm.linalg_s += t.elapsed().as_secs_f64();
-        if let Some((group, reg, reg_fixed, prec)) = res {
+        if let Some(Found { group, reg, reg_fixed, prec, certified, reg_digits }) = res {
             tm.relations = rels.len();
             let relations = Relations { fb: fld.fb[..fld.ngen].to_vec(), rels, elems, order: fld.o };
-            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w, w_proven }, tm, relations));
+            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w, w_proven, certified, reg_digits }, tm, relations));
         }
         want = rels.len() + more;
     }
@@ -875,8 +895,83 @@ fn unit_logs(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
     Some(out)
 }
 
+/// unit_logs with certified error bounds (units of 2^-prec, one per
+/// vector): logarithms from embed.rs log_embedding_err, the bounds carried
+/// through the elimination, and each kernel combination checked to vanish
+/// exactly on the core (so every vector is the logarithm of a unit).
 #[allow(clippy::too_many_arguments)]
-fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], r: usize, hr_est: f64, seed: u64, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>, debug: bool) -> Option<(ClassGroup, f64, BigInt, u32)> {
+fn unit_logs_bounded(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], sel: &[usize], det: &BigInt, ys: &[Vec<BigInt>], extras: &[usize], r: usize, prec: u32) -> Option<(Vec<Vec<BigInt>>, Vec<f64>)> {
+    let (roots, rho) = fld.emb.roots_hp_rad(&fld.o.f, prec).ok()?;
+    let mut logs = Vec::with_capacity(elems.len());
+    let mut errs = Vec::with_capacity(elems.len());
+    for x in elems {
+        sagebrush_interrupt::check();
+        let (l, e) = fld.emb.log_embedding_err(&fld.o, x, &roots, &rho, prec)?;
+        logs.push(l);
+        errs.push(e);
+    }
+    let (_, core2, zero_rows) = eliminate_tracked(nfb, rels, 80, Some(&mut logs), Some(&mut errs));
+    if core2 != core_rows {
+        return None;
+    }
+    let mut out: Vec<Vec<BigInt>> = zero_rows.iter().map(|&k| logs[k][..r].to_vec()).collect();
+    let mut out_err: Vec<f64> = zero_rows.iter().map(|&k| errs[k]).collect();
+    let ncol = dense.first().map_or(0, |d| d.len());
+    'z: for z in kernel_lattice(ys, det) {
+        let mut a = Vec::with_capacity(sel.len());
+        for i in 0..sel.len() {
+            let s: BigInt = z.iter().zip(ys).map(|(zt, y)| zt * &y[i]).sum();
+            let (q, rem) = s.div_rem(det);
+            if !rem.is_zero() {
+                if std::env::var("QCL_CERTDBG").is_ok() { eprintln!("    kernel vector skipped: not divisible"); }
+                continue 'z;
+            }
+            a.push(q);
+        }
+        // sum a_i A_i - sum z_t v_t = 0 exactly
+        for col in 0..ncol {
+            let v: BigInt = a.iter().zip(sel).map(|(ai, &k)| ai * dense[k][col]).sum::<BigInt>() - z.iter().zip(extras).map(|(zt, &k)| zt * dense[k][col]).sum::<BigInt>();
+            if !v.is_zero() {
+                if std::env::var("QCL_CERTDBG").is_ok() { eprintln!("    kernel vector skipped: not zero on the core"); }
+                continue 'z;
+            }
+        }
+        // the unit: a_i on the A rows, -z_t on the extra rows
+        let terms = a.iter().zip(sel).map(|(c, &k)| (c.clone(), k)).chain(z.iter().zip(extras).map(|(c, &k)| (-c, k)));
+        let mut l = vec![BigInt::zero(); r];
+        let mut e = 0.0f64;
+        for (c, k) in terms {
+            if c.is_zero() {
+                continue;
+            }
+            for (x, b) in l.iter_mut().zip(&logs[core_rows[k]]) {
+                *x += &c * b;
+            }
+            e += to_f64(&c.abs(), 0) * (1.0 + 1e-15) * errs[core_rows[k]];
+        }
+        out.push(l);
+        out_err.push(e * (1.0 + 1e-12));
+    }
+    Some((out, out_err))
+}
+
+/// An accepted class group and regulator.
+struct Found {
+    group: ClassGroup,
+    reg: f64,
+    reg_fixed: BigInt,
+    prec: u32,
+    certified: bool,
+    reg_digits: usize,
+}
+
+/// The certificate's condition h* R*_hi < 2 h R_lo in logarithms.
+fn below_twice(log_h: f64, log_r_hi: f64, log_hr_lo: f64) -> bool {
+    log_h + log_r_hi < std::f64::consts::LN_2 + log_hr_lo - 1e-12
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], r: usize, hr_est: f64, log_hr_lo: Option<f64>, seed: u64, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>, debug: bool) -> Option<Found> {
     let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     let group_of = |first_det: Option<BigInt>, enough: f64| -> Option<(BigInt, Vec<BigInt>)> {
@@ -892,7 +987,17 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
         if debug {
             eprintln!("  h* / est {:.4}", ratio);
         }
-        return (ratio <= std::f64::consts::SQRT_2).then(|| (ClassGroup { h, cyc }, 1.0, BigInt::one(), 0));
+        if ratio > std::f64::consts::SQRT_2 {
+            return None;
+        }
+        // certified: h* (exact determinants) < 2 h, R = 1
+        let cert = log_hr_lo.and_then(|lo| {
+            let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lo.exp(), seed, debug)? };
+            below_twice(super::certify::ln_big(&h2), 0.0, lo).then_some((h2, cyc2))
+        });
+        let certified = cert.is_some();
+        let (h, cyc) = cert.unwrap_or((h, cyc));
+        return Some(Found { group: ClassGroup { h, cyc }, reg: 1.0, reg_fixed: BigInt::one(), prec: 0, certified, reg_digits: 20 });
     }
     let in_sel: HashSet<usize> = sel.iter().cloned().collect();
     let others: Vec<usize> = (0..dense.len()).filter(|k| !in_sel.contains(k)).collect();
@@ -904,6 +1009,7 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
     let mut err_bits = 0u32;
     let mut lattice: Option<(BigInt, Vec<BigInt>)> = None;
     let mut last_r: Option<f64> = None;
+    let mut cert_tries = 0;
     for _ in 0..12 {
         sagebrush_interrupt::check();
         let extras: Vec<usize> = if c == 0 || others.is_empty() { vec![] } else { (0..n_extra.min(others.len())).map(|t| others[t * 7919 % others.len()]).collect() };
@@ -973,7 +1079,7 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                 continue;
             }
         };
-        let (_, cov) = res.unwrap();
+        let (basis, cov) = res.unwrap();
         if lattice.is_none() {
             lattice = Some(group_of(Some(det.clone()), std::f64::consts::SQRT_2 * hr_est / reg)?);
         }
@@ -983,8 +1089,50 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
             eprintln!("  h* R* / est {:.4} at {:.1} ms", ratio, ms());
         }
         if ratio <= std::f64::consts::SQRT_2 {
-            let reg_fixed = &cov >> (prec as usize * (r - 1));
-            return Some((ClassGroup { h, cyc }, reg, reg_fixed, prec));
+            let Some(lo) = log_hr_lo else {
+                let reg_fixed = &cov >> (prec as usize * (r - 1));
+                return Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 });
+            };
+            // the certificate (nf/certify.rs): genuine units with proven
+            // error bounds, an exact multiple of h, h* R*_hi < 2 h R_lo
+            let tc = crate::clock::Instant::now();
+            // (imprecise: the error bounds were too large, worth a retry)
+            let mut imprecise = false;
+            let cert = (|| {
+                let Some((lams, errs)) = unit_logs_bounded(fld, rels, elems, nfb, dense, core_rows, sel, &det, &ys, &extras, r, prec) else {
+                    imprecise = true;
+                    return None;
+                };
+                let (rlo, rhi, d) = super::certify::regulator_bounds(&lams, &errs, &basis, prec).map_err(|e| imprecise = e).ok()?;
+                let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lo.exp() / rhi, seed, debug)? };
+                if debug {
+                    eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}), log h* R*_hi {:.6} vs log 2 hR >= {:.6}", rlo, rhi, h2, h, super::certify::ln_big(&h2) + rhi.ln(), std::f64::consts::LN_2 + lo);
+                }
+                below_twice(super::certify::ln_big(&h2), rhi.ln(), lo).then_some((h2, cyc2, rlo, rhi, d))
+            })();
+            if debug {
+                eprintln!("  certificate {} at {:.1} ms ({:.1} ms)", if cert.is_some() { "holds" } else { "failed" }, ms(), tc.elapsed().as_secs_f64() * 1e3);
+            }
+            match cert {
+                Some((h2, cyc2, rlo, rhi, d)) => {
+                    // R = |det b|: its digits as far as [rlo, rhi] fixes them
+                    let rel = (rhi - rlo) / rlo;
+                    let reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;
+                    let reg_fixed = &d >> (prec as usize * (r - 1));
+                    let reg = to_f64(&reg_fixed, prec);
+                    return Some(Found { group: ClassGroup { h: h2, cyc: cyc2 }, reg, reg_fixed, prec, certified: true, reg_digits });
+                }
+                None if imprecise && cert_tries < 2 => {
+                    // perhaps too imprecise for the error bounds
+                    cert_tries += 1;
+                    prec *= 2;
+                    continue;
+                }
+                None => {
+                    let reg_fixed = &cov >> (prec as usize * (r - 1));
+                    return Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 });
+                }
+            }
         }
         // more units help only while R* is too big; once more leave it
         // unchanged, h* is (more relations needed)
@@ -1072,7 +1220,86 @@ mod tests {
             assert_eq!(b.group.cyc, cyc.iter().map(|&c| BigInt::from(c)).collect::<Vec<_>>(), "{:?}", f);
             assert!((b.regulator - reg).abs() < 1e-9 * reg, "{:?}: {} vs {}", f, b.regulator, reg);
             assert_eq!(b.w, w);
+            assert!(b.certified, "{:?} not certified", f);
         }
+    }
+
+    /// The certificate's pieces against PARI's h R (oracle only): the
+    /// Belabas-Friedman lower bound is below log h R and within about
+    /// E(X); a sublattice of index 2 (R* = 2R) or h* = 2h fails the test.
+    #[test]
+    fn certificate_bounds() {
+        // (f, h, R)
+        let cases: &[(&[i64], u64, f64)] = &[
+            (&[-11, 0, 0, 1], 2, 5.5872066260609078),
+            (&[-10, 0, 1], 2, 1.8184464592320668),
+            (&[23, 0, 1], 3, 1.0),
+            (&[1, 0, -10, 0, 1], 1, 2.6608985801903705),
+        ];
+        for &(f, h, reg) in cases {
+            let f: Vec<BigInt> = f.iter().map(|&c| BigInt::from(c)).collect();
+            let (o, _) = maximal_order(&f).unwrap();
+            let dk = o.disc();
+            let index = num_integer::Roots::sqrt(&(Order::equation_order(&f).disc() / &dk).abs());
+            let emb = Embeddings::new(&o).unwrap();
+            let (w, _) = crate::api::roots_of_unity(&o, &emb);
+            let ld = dk.to_f64().unwrap().abs().ln();
+            let x = super::super::certify::choose_x(o.n, ld).unwrap();
+            let split = splitting(&o, &dk, &index, x);
+            let lo = super::super::certify::log_hr_lower(&split, x, o.n, emb.r1, emb.r2, w, ld);
+            let truth = (h as f64 * reg).ln();
+            assert!(lo < truth && truth - lo < 0.25, "{:?}: {} vs {}", f, lo, truth);
+            assert!(below_twice((h as f64).ln(), reg.ln() * (1.0 + 1e-12), lo));
+            assert!(!below_twice((2.0 * h as f64).ln(), reg.ln(), lo));
+            assert!(!below_twice((h as f64).ln(), (2.0 * reg).ln(), lo));
+        }
+    }
+
+    /// log_embedding_err's bounds hold: at 80 bits against 400 bits.
+    #[test]
+    fn log_embedding_error_bounds_hold() {
+        let f: Vec<BigInt> = [-95282, 82258, 87473, 1].iter().map(|&c| BigInt::from(c)).collect();
+        let (o, _) = maximal_order(&f).unwrap();
+        let e = Embeddings::new(&o).unwrap();
+        let (lo_roots, rho) = e.roots_hp_rad(&o.f, 80).unwrap();
+        let hi_roots = e.roots_hp(&o.f, 400).unwrap();
+        let mut rng = 7u64;
+        for _ in 0..50 {
+            let x: Vec<BigInt> = (0..o.n).map(|_| {
+                rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                BigInt::from((rng % 2001) as i64 - 1000)
+            }).collect();
+            if x.iter().all(|c| c.is_zero()) {
+                continue;
+            }
+            let (l, err) = e.log_embedding_err(&o, &x, &lo_roots, &rho, 80).unwrap();
+            let h = e.log_embedding(&o, &x, &hi_roots, 400);
+            for (a, b) in l.iter().zip(&h) {
+                let d = to_f64(&((a << 320usize) - b).abs(), 400) * 2f64.powi(80);
+                assert!(d <= err, "error {} units, bound {}", d, err);
+            }
+        }
+    }
+
+    /// regulator_bounds on a lattice of known covolume, and on the units of
+    /// an index-2 sublattice (its covolume doubles: the certificate fails).
+    #[test]
+    fn regulator_bounds_from_integer_combinations() {
+        let prec = 200u32;
+        let fx = |x: f64| BigInt::from((x * 2f64.powi(50)) as i64) << (prec as usize - 50);
+        let b1 = vec![fx(1013.25), fx(-7.5)];
+        let b2 = vec![fx(3.125), fx(911.0625)];
+        let want = 1013.25 * 911.0625 + 7.5 * 3.125;
+        let comb = |a: i64, b: i64| vec![&b1[0] * a + &b2[0] * b, &b1[1] * a + &b2[1] * b];
+        let lams = vec![comb(3, 1), comb(2, 1), comb(5, -7)];
+        let errs = vec![16.0; 3];
+        let basis = vec![b1.clone(), b2.clone()];
+        let (lo, hi, _) = super::super::certify::regulator_bounds(&lams, &errs, &basis, prec).unwrap();
+        assert!(lo <= want && want <= hi && hi - lo < 1e-12 * want, "{} {} {}", lo, hi, want);
+        // only even first coordinates: index 2, whatever basis is claimed
+        let lams2 = vec![comb(2, 1), comb(4, 3), comb(2, -1)];
+        let (lo2, _, _) = super::super::certify::regulator_bounds(&lams2, &errs, &basis, prec).unwrap();
+        assert!(lo2 > 1.99 * want, "{}", lo2);
     }
 
     /// Grenie and Molteni's example (arXiv:1507.00602, Section 4): T(K) =

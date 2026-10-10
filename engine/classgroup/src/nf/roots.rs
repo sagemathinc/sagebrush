@@ -292,11 +292,16 @@ pub fn isolate(f: &[BigInt], prec: u32) -> Result<Isolated, String> {
 /// lies in the old one, both sets isolating, which proves the
 /// correspondence.  (Already that precise: the same disks.)
 pub fn refine(f: &[BigInt], old: &Isolated, prec: u32) -> Result<Isolated, String> {
+    // (stored at prec bits or more is not enough: the radii must be below
+    // 2^-prec too, or the centers are not that accurate)
     if prec <= old.prec {
-        return Ok(old.clone());
+        let small = BigInt::one() << (old.prec - prec) as usize;
+        if old.roots.iter().all(|r| r.rad < small) {
+            return Ok(old.clone());
+        }
     }
     let cbits = f.iter().map(|c| c.bits()).max().unwrap_or(1) as usize;
-    let p = prec as usize + 64 + cbits;
+    let p = (prec as usize + 64 + cbits).max(old.prec as usize);
     let sh = p - old.prec as usize;
     let z: Vec<Cx> = old.roots.iter().map(|r| (&r.re << sh, &r.im << sh)).collect();
     let (roots, p) = drive(f, z, p, prec, 40)?;

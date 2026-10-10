@@ -141,3 +141,11 @@ try:
 except ValueError as e:
     assert "divergent" in str(e)
 print("audit regressions: ok")
+# the analytic class-group certificate (Belabas-Friedman, GRH): certified
+for f in ([-11, 0, 0, 1], [2588, -581, 593, -422, 1], [1, 0, -10, 0, 1]):
+    b = nf.bnf(f)
+    assert b["certified"] and b["assumes"] == ["GRH"], (f, b)
+for d in (-1016021983508, 710573243720556):
+    q = nf.quadratic_class_group_data(d)
+    assert q["certified"] and q["assumes"] == ["GRH"], (d, q)
+print("certificate ok")
