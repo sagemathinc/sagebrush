@@ -5,7 +5,7 @@
 
 use crate::expr::*;
 use crate::num::Q;
-use num_traits::{One, Zero};
+use num_traits::{Signed, One, Zero};
 use sagebrush_bigint::BigInt;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -222,6 +222,46 @@ impl QPoly {
     /// A polynomial in x with rational coefficients, if e is one.
     pub fn from_expr(e: &Expr, x: &str) -> Option<QPoly> {
         crate::poly::rational_coeffs(e, x).map(QPoly::new)
+    }
+}
+
+impl QPoly {
+    /// The number of distinct real roots in the open interval (lo, hi),
+    /// lo < hi, exactly (Sturm's theorem on the square-free part).
+    pub fn count_real_roots(&self, lo: &Q, hi: &Q) -> usize {
+        if self.deg() < 1 {
+            return 0;
+        }
+        let p = self.div_exact(&self.gcd(&self.derivative()));
+        let mut seq = vec![p.clone(), p.derivative()];
+        while seq.last().map_or(false, |s| s.deg() > 0) {
+            let n = seq.len();
+            let r = seq[n - 2].rem(&seq[n - 1]).neg();
+            if r.is_zero() {
+                break;
+            }
+            seq.push(r);
+        }
+        let changes = |x: &Q| {
+            let signs: Vec<i32> = seq.iter().map(|s| s.eval(x)).filter(|v| !v.is_zero()).map(|v| if v > Q::zero() { 1 } else { -1 }).collect();
+            signs.windows(2).filter(|w| w[0] != w[1]).count()
+        };
+        // roots in (lo, hi]: V(lo) - V(hi); hi itself is not in the open interval
+        let n = changes(lo).saturating_sub(changes(hi));
+        n - usize::from(n > 0 && p.eval(hi).is_zero())
+    }
+
+    /// A bound B with every real root in (-B, B) (Cauchy's).
+    pub fn root_bound(&self) -> Q {
+        let lc = self.lc();
+        let mut m = Q::zero();
+        for c in &self.0[..self.0.len().saturating_sub(1)] {
+            let v = (c / &lc).abs();
+            if v > m {
+                m = v;
+            }
+        }
+        m + Q::one()
     }
 }
 

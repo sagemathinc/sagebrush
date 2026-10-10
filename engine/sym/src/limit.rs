@@ -18,27 +18,33 @@ pub enum Dir {
 
 /// Sage's limit(e, x=a [, dir='+'/'-']).
 pub fn limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> Expr {
+    match try_limit(e, x, a, dir) {
+        Ok(r) => r,
+        Err(err) => crate::err::throw(err),
+    }
+}
+
+/// [`limit`], with a limit that cannot be found an Err rather than a
+/// thrown error (which, in WebAssembly, cannot be caught).
+pub fn try_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Expr> {
     // abs(u) and sign(u) differ on the two sides: one-sided limits, with
     // abs(u) = +-u by the sign of u beside a
     if has_abs(e) && !a.is_infinite() {
         if dir == Dir::Both {
-            let (l, r) = (limit(e, x, a, Dir::Minus), limit(e, x, a, Dir::Plus));
-            return if l == r { r } else { constant(Const::Undefined) };
+            let (l, r) = (try_limit(e, x, a, Dir::Minus)?, try_limit(e, x, a, Dir::Plus)?);
+            return Ok(if l == r { r } else { constant(Const::Undefined) });
         }
         let h = if dir == Dir::Plus { 1e-9 } else { -1e-9 };
         let e2 = resolve_abs(e, x, a, h);
-        return limit(&e2, x, a, dir);
+        return try_limit(&e2, x, a, dir);
     }
     if has_abs(e) {
         let h = if a.is_const(Const::MinusInfinity) { -1e9 } else { 1e9 };
         let e2 = resolve_abs(e, x, &zero(), h);
-        return limit(&e2, x, a, dir);
+        return try_limit(&e2, x, a, dir);
     }
     // division by zero is an infinity here, never an error to recover from
-    match soft(|| lim(e, x, a, dir, 0)) {
-        Ok(r) => tidy(&r),
-        Err(err) => crate::err::throw(err),
-    }
+    soft(|| lim(e, x, a, dir, 0)).map(|r| tidy(&r))
 }
 
 fn has_abs(e: &Expr) -> bool {
