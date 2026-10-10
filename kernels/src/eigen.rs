@@ -20,13 +20,33 @@ unsafe fn nrm2(x: *const f64, n: usize) -> f64 {
     if big == 0.0 || !big.is_finite() {
         return big;
     }
+    // scaled by a power of two near 1/big (1/big overflows for a subnormal
+    // big), in two steps past 2^1023, as in the TS (bit-identical)
+    let k = -ilogb(big);
+    let k1 = k / 2;
+    let (s1, s2) = (pow2(k1), pow2(k - k1));
     let mut sum = 0.0;
-    let inv = 1.0 / big;
     for i in 0..n {
-        let a = *x.add(i) * inv;
+        let a = *x.add(i) * s1 * s2;
         sum += a * a;
     }
-    big * sqrt(sum)
+    (sqrt(sum) / s1) / s2
+}
+
+/// floor(log2 x) for finite x > 0, subnormals included.
+fn ilogb(x: f64) -> i32 {
+    let b = x.to_bits();
+    let ex = ((b >> 52) & 0x7ff) as i32;
+    if ex != 0 {
+        return ex - 1023;
+    }
+    let m = b & ((1u64 << 52) - 1);
+    -1075 + (64 - m.leading_zeros() as i32)
+}
+
+/// 2^n for -1022 <= n <= 1023.
+fn pow2(n: i32) -> f64 {
+    f64::from_bits(((n + 1023) as u64) << 52)
 }
 
 /// x' = cs x + sn y, y' = -sn x + cs y
@@ -77,9 +97,10 @@ pub unsafe extern "C" fn dgeqr(c: *mut f64, m: usize, n: usize, v: *mut f64, bet
         let alpha = if *cj.add(j) > 0.0 { -norm } else { norm };
         // v = (x - alpha e_j) / (x_j - alpha) (entries at most 1: v.v does
         // not underflow or overflow at extreme scales), as in the TS
-        let d = *cj.add(j) - alpha;
+        // (from x / |x|: x_j - alpha itself overflows near 1e308)
+        let d = *cj.add(j) / norm - alpha / norm;
         for i in j..m {
-            *vj.add(i) = *cj.add(i) / d;
+            *vj.add(i) = *cj.add(i) / norm / d;
         }
         *vj.add(j) = 1.0;
         let vv = dot4(vj.add(j), vj.add(j), m - j);

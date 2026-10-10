@@ -26,6 +26,27 @@ def _float(a):
     return a if a.dtype == _np.float64 else a.astype(_np.float64)
 
 
+def _ldexp(x, k):
+    """x * 2^k for any integer k (2.0**k alone overflows past 1023)."""
+    while k > 1000:
+        x, k = x * 2.0 ** 1000, k - 1000
+    while k < -1000:
+        x, k = x * 2.0 ** -1000, k + 1000
+    return x * 2.0 ** k
+
+
+def _scaled(m):
+    """(m * 2^k, k), the largest entry brought near 1 when it is outside
+    [2^-500, 2^500] (as LAPACK scales): exact, and QR, SVD and least squares
+    neither underflow nor overflow (at 1e-320 least squares was NaN, at
+    1e308 the singular value inf: the systematic review's R2-NUM-F4)."""
+    big = float(_np.max(_np.abs(m))) if m.size else 0.0
+    if big == 0.0 or big != big or big == float("inf") or 2.0 ** -500 < big < 2.0 ** 500:
+        return m, 0
+    k = -_math.frexp(big)[1]
+    return _ldexp(m, k), k
+
+
 def _stacked(f, a, *rest):
     """Apply f to each matrix of a stack (..., M, N); results are stacked back."""
     a = _float(a)
@@ -181,11 +202,19 @@ def eigvalsh(a, UPLO="L"):
     return eigh(a, UPLO)[0]
 
 
+def _svd1(m, full, uv):
+    m, k = _scaled(m)
+    if not uv:
+        return _ldexp(_L.svd(m, False, False), -k)
+    u, s, vh = _L.svd(m, full, True)
+    return u, _ldexp(s, -k), vh
+
+
 def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
     a = _float(a)
     if not compute_uv:
-        return _stacked(lambda m: _L.svd(m, False, False), a)
-    u, s, vh = _stacked(lambda m: _L.svd(m, full_matrices, True), a)
+        return _stacked(lambda m: _svd1(m, False, False), a)
+    u, s, vh = _stacked(lambda m: _svd1(m, full_matrices, True), a)
     return SVDResult(u, s, vh)
 
 
@@ -195,7 +224,12 @@ def svdvals(x):
 
 def qr(a, mode="reduced"):
     a = _float(a)
-    q, r = _stacked(lambda m: _L.qr(m, mode == "complete"), a)
+
+    def qr1(m):
+        m, k = _scaled(m)
+        q, r = _L.qr(m, mode == "complete")
+        return q, _ldexp(r, -k)
+    q, r = _stacked(qr1, a)
     if mode == "r":
         return r
     return QRResult(q, r)
@@ -228,6 +262,10 @@ def lstsq(a, b, rcond=None):
     m, n = a.shape
     vec = b.ndim == 1
     B = b.reshape(-1, 1) if vec else b
+    # a and b scaled alike leave x unchanged (and 1/s representable)
+    a0, B0 = a, B
+    a, k = _scaled(a)
+    B = _ldexp(B, k)
     u, s, vh = svd(a, full_matrices=False)
     if rcond is None:
         rcond = _np.finfo(_np.float64).eps * max(m, n)
@@ -237,13 +275,13 @@ def lstsq(a, b, rcond=None):
     sinv = _np.where(keep, 1.0 / _np.where(keep, s, 1.0), 0.0)
     x = vh.T @ (sinv[:, None] * (u.T @ B))
     if rank == n and m > n:
-        r = B - a @ x
+        r = B0 - a0 @ x
         resid = _np.sum(r * r, axis=0)
     else:
         resid = _np.zeros(0)
     if vec:
         x = x.ravel()
-    return x, resid, _np.int32(rank) if False else rank, s
+    return x, resid, rank, _ldexp(s, -k)
 
 
 def norm(x, ord=None, axis=None, keepdims=False):

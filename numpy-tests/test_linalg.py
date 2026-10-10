@@ -49,3 +49,11 @@ try:
     np.linalg.cholesky(-np.eye(2))
 except np.linalg.LinAlgError as err:
     print("LinAlgError:", err)
+
+# R2-NUM-F4: QR, SVD and least squares at subnormal and near-overflow scales
+for _s in [1e-320, 1e308]:
+    _a = np.array([[_s], [_s]])
+    _r = np.linalg.qr(_a)[1]
+    _x = np.linalg.lstsq(_a, np.array([0.0, _s]), rcond=None)
+    print(round(float(abs(_r[0, 0]) / _s), 3), round(float(np.linalg.svd(_a, compute_uv=False)[0] / _s), 3), round(float(_x[0][0]), 12), _x[2], int(np.linalg.matrix_rank(_a)), round(float(np.linalg.cond(_a)), 12))
+print(np.round(np.abs(np.linalg.qr(np.array([[1e-320], [1e-320]]))[0]), 6).tolist())
