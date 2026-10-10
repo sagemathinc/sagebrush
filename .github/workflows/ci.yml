@@ -54,7 +54,7 @@ jobs:
       - name: symbolic calculus (limits, solve, taylor) in the WebAssembly engine
         run: python3 sage-tests/run_calculus.py
       - name: the Python package's copies of lib/ (and the 3D viewer's) are up to date
-        run: scripts/sync-python-package.sh --check && node scripts/gen-viewer3d.mjs --check
+        run: scripts/sync-python-package.sh --check && node scripts/gen-viewer3d.mjs --check && node cdn/build.mjs --check
       - name: Magma mode (modular forms, elliptic curves), checked against Magma's output
         run: python3 magma-tests/run.py -v
       - name: numpy, checked against NumPy itself

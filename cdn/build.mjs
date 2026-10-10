@@ -2,12 +2,23 @@
 //   sagebrush-engine.mjs  the Rust engines (wasm32, base64-inlined: chat sandboxes forbid fetch())
 //   pyparse.mjs           CPython 3.14's parser in TypeScript
 // Run from ~/sagebrush:  node cdn/build.mjs
+// The engine is the committed wasm/sagebrush-engine.wasm (node scripts/build-engine.mjs),
+// so this module always carries the same engine as the notebook and the CLI.
+//   node cdn/build.mjs --check   fail unless cdn/sagebrush-engine.mjs embeds exactly that wasm
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const sh = (cmd) => execSync(cmd, { stdio: "inherit", shell: "/bin/bash" });
-sh("cd engine && PATH=$HOME/.cargo/bin:$PATH CARGO_TARGET_DIR=/tmp/webtarget cargo build -q --release -p sagebrush-web --target wasm32-unknown-unknown");
-const wasm = readFileSync("/tmp/webtarget/wasm32-unknown-unknown/release/sagebrush_web.wasm");
+const wasm = readFileSync("wasm/sagebrush-engine.wasm");
+if (process.argv.includes("--check")) {
+  const m = readFileSync("cdn/sagebrush-engine.mjs", "utf8").match(/const WASM = "([^"]*)"/);
+  if (!m || !Buffer.from(m[1], "base64").equals(wasm)) {
+    console.error("cdn/sagebrush-engine.mjs does not embed wasm/sagebrush-engine.wasm: run node cdn/build.mjs");
+    process.exit(1);
+  }
+  console.log("cdn/sagebrush-engine.mjs embeds wasm/sagebrush-engine.wasm");
+  process.exit(0);
+}
 const engine = `// Sagebrush engines (Rust -> wasm32), one self-contained ES module.
 // Usage: const sb = await import("https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@REF/cdn/sagebrush-engine.mjs");
 //        sb.dims({n: 13, k: 2, chi: [6, [2], [1]]})
@@ -44,5 +55,5 @@ export const aplist = (a, n) => call("aplist", { a, n });
 export const wasmBytes = bytes.length;
 `;
 writeFileSync("cdn/sagebrush-engine.mjs", engine);
-sh("cd pyparse && ../node_modules/.bin/tsc -p . && ~/sagejs/node_modules/.bin/esbuild src/index.ts --bundle --minify --format=esm --platform=neutral --external:./unames.gen --outfile=../cdn/pyparse.mjs --log-level=warning");
+sh("cd pyparse && ../node_modules/.bin/tsc -p . && bun build src/index.ts --minify --format=esm --target=browser --external '*/unames.gen' --outfile ../cdn/pyparse.mjs");
 sh("ls -la cdn/*.mjs | awk '{print $5, $9}'; for f in cdn/*.mjs; do echo \"$f gzip: $(gzip -9c $f | wc -c)\"; done");

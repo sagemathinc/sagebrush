@@ -678,6 +678,9 @@ fn derivative_holds_on(f: &Expr, big_f: &Expr, x: &str, lo: f64, hi: f64, cuts: 
         };
         for t in ts {
             let (Some(zv), Some(fv)) = (at(&z, x, t), at(f, x, t)) else { return false };
+            if fv.0.hypot(fv.1) < 1e-280 {
+                return false; // (an underflowed value decides nothing)
+            }
             // relative (a scaled problem must not pass under an absolute floor)
             let scale = fv.0.hypot(fv.1) + 1e-9 * at(big_f, x, t).map_or(0.0, |v| v.0.hypot(v.1));
             if zv.0.hypot(zv.1) > 1e-7 * scale {

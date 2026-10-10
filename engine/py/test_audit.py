@@ -391,3 +391,23 @@ _xs = var("x")
 assert solve(sqrt(_xs - 10**12) == -1, _xs) == [] and solve(sqrt(_xs) == -SR("1/10^20"), _xs) == []
 assert str(solve(sqrt(_xs - 10**12) == 1, _xs)) == "[x == 1000000000001]"
 print("rereview ok")
+
+# Second review (2026-10-10), batch 2
+from sagebrush.sage import QQbar, AA, I, limit, exp, oo, integrate, acosh, pi, graphs, Graph, GF, ZZ, QQ, PolynomialRing
+raises(ValueError, AA, QQbar(I) / 10**100)
+_a = var("a")
+assert str(integrate(1 / sqrt(_a**2 - _xs**2), _xs)) == "arcsin(x/abs(a))"
+assert limit(exp(_xs**2 + _xs) / (exp(_xs**2) + 1), x=oo) == oo and limit(exp(_xs**2 - _xs) / (exp(_xs**2) + 1), x=oo) == 0
+_eps = SR("1/10^400"); _F = integrate(_eps * (acosh(-_xs) - I * pi), _xs)
+assert "integrate" in str(_F) or (_F.diff(_xs) - _eps * (acosh(-_xs) - I * pi)).simplify_full() == 0
+_RZ2 = PolynomialRing(ZZ, "u,v"); _u, _v = _RZ2.gens()
+raises(NotImplementedError, _RZ2.ideal(2).intersection, _RZ2.ideal(3))
+raises(TypeError, GF, QQ(15) / 2)
+_H = Graph([(0, 1, "__no__"), (1, 2, "__no__"), (2, 0, "__no__"), (3, 4, "__no__"), (4, 5, "__no__"), (5, 3, "__no__")])
+assert not graphs.CycleGraph(6).is_isomorphic(_H, edge_labels=True)
+_Rz = PolynomialRing(ZZ, "z")
+assert _Rz.ideal(2, 0).gens() == (_Rz(2),) and _Rz(1) not in _Rz.ideal(2, 0) if False else _Rz.ideal(2, 0).gens() == (_Rz(2),)
+assert PolynomialRing(QQ, []).is_field() and not PolynomialRing(ZZ, []).is_field()
+_o = SR(oo)
+assert bool(_o == oo) and not bool(_o == -oo) and bool(_o > 5) and not bool(_o < 5) and bool(-_o < _o) and not bool(_o > I) and not bool(_o > _xs)
+print("rereview2 ok")

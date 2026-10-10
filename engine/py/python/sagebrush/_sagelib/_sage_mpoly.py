@@ -526,14 +526,19 @@ class MPolynomialRing_:
         return _sa().Integer(self._dom.p or 0) if not self._dom.generic else self._base.characteristic()
 
     def is_field(self, proof=True):
-        """False.
+        """False, unless there are no variables (then the ring is its base).
 
         EXAMPLES::
 
-            sage: QQ['x,y'].is_field()
-            False
+            sage: QQ['x,y'].is_field(), PolynomialRing(QQ, []).is_field()
+            (False, True)
         """
-        return False
+        if self._n:
+            return False
+        try:
+            return self._base.is_field(proof=proof)
+        except TypeError:
+            return self._base.is_field()
 
     def is_integral_domain(self, proof=None):
         """Whether the coefficient ring is an integral domain.
@@ -3550,6 +3555,7 @@ class MPolynomialIdeal:
             sage: R.<x,y> = QQ[]; R.ideal(x, x + 1).is_one()
             True
         """
+        self._over_field("is_one")
         return 1 in self
 
     def dimension(self, singular=None):
@@ -3562,6 +3568,7 @@ class MPolynomialIdeal:
             sage: R.ideal(x*y, z).dimension(), R.ideal(x - 1, y - 2, z).dimension()
             (1, 0)
         """
+        self._over_field("dimension")
         G = self.groebner_basis()
         R = self._ring
         if any(g.is_constant() and g._d for g in G):
@@ -3587,6 +3594,7 @@ class MPolynomialIdeal:
             sage: R.<x,y> = QQ[]; R.ideal(x^2 - 1, y^3 - x).vector_space_dimension()
             6
         """
+        self._over_field("vector_space_dimension")
         return _sa().Integer(len(self.normal_basis()))
 
     def normal_basis(self):
@@ -3600,6 +3608,7 @@ class MPolynomialIdeal:
             sage: R.<x,y,z> = QQ[]; R.ideal(x^2, y^2, z^2, x*y*z).normal_basis()
             [y*z, x*z, z, x*y, y, x, 1]
         """
+        self._over_field("normal_basis")
         G = self.groebner_basis()
         R = self._ring
         if self.dimension() != 0:
@@ -3666,6 +3675,7 @@ class MPolynomialIdeal:
             sage: R.<x,y> = QQ[]; R.ideal(x).intersection(R.ideal(y))
             Ideal (x*y) of Multivariate Polynomial Ring in x, y over Rational Field
         """
+        self._over_field("intersection")
         R = self._ring
         cur = self
         for J in others:
@@ -3687,6 +3697,7 @@ class MPolynomialIdeal:
             sage: R.<x,y,z> = QQ[]; R.ideal(x^2*y, x*z^2).quotient(R.ideal(x))
             Ideal (z^2, x*y) of Multivariate Polynomial Ring in x, y, z over Rational Field
         """
+        self._over_field("quotient")
         R = self._ring
         res = None
         for g in J._gens:
@@ -3711,6 +3722,7 @@ class MPolynomialIdeal:
             sage: R.<x,y,z> = QQ[]; R.ideal(x^2, y^3, z).radical()
             Ideal (z, y, x) of Multivariate Polynomial Ring in x, y, z over Rational Field
         """
+        self._over_field("radical")
         R = self._ring
         if self.dimension() != 0:
             raise NotImplementedError("radical of a positive-dimensional ideal is not available in sagebrush yet")

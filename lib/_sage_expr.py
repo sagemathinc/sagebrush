@@ -113,6 +113,37 @@ def _py_number(s):
     return None
 
 
+_INFINITIES = {"+Infinity": 1, "-Infinity": -1, "Infinity": 0}
+
+
+def _infinite_relation(kind, a, b):
+    """bool(a <kind> b) when a or b is an infinity (a - b is then an
+    infinity or NaN, which decides nothing); None otherwise.  A signed
+    infinity is ordered against a constant only when the constant has a
+    certified real sign; anything else undecided is False, as in Sage."""
+    ra, rb = repr(a), repr(b)
+    ia, ib = _INFINITIES.get(ra), _INFINITIES.get(rb)
+    if ia is None and ib is None:
+        return None
+    if ia is not None and ib is not None:
+        if kind in ("==", "!="):
+            return (ra == rb) == (kind == "==")
+        if ia == 0 or ib == 0:
+            return False
+        return {"<": ia < ib, "<=": ia <= ib, ">": ia > ib, ">=": ia >= ib}[kind]
+    c = b if ia is not None else a
+    if c.variables() or repr(c) == "NaN":
+        return None if kind in ("==", "!=") else False
+    if kind in ("==", "!="):
+        return kind == "!="
+    s = ia if ia is not None else ib
+    if s == 0 or _call("const_sign", c._s)[0] == "":
+        return False
+    # a finite real constant lies strictly between -oo and +oo
+    sa, sb = (s, 0) if ia is not None else (0, s)
+    return {"<": sa < sb, "<=": sa < sb, ">": sa > sb, ">=": sa > sb}[kind]
+
+
 def _numerically_equal(a, b):
     """Heuristic equality of two constants that the engine could neither
     simplify to equal nor separate: their difference, evaluated at 400 bits,
@@ -222,6 +253,9 @@ class Expression:
         if op[0].startswith("rel:"):
             kind = _relop(op[0][4:])
             a, b = Expression(op[1]), Expression(op[2])
+            inf = _infinite_relation(kind, a, b)
+            if inf is not None:
+                return inf
             if kind in ("==", "!="):
                 z = _call("is_zero", (a - b)._s)[0] == "1"
                 if not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
