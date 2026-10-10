@@ -471,7 +471,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "nf_data" => {
             let d = sagebrush_classgroup::api::nf_data(&bigs(v.get("f"))?)?;
             Ok(json!({ "degree": d.degree, "r1": d.r1, "r2": d.r2, "disc": d.disc.to_string(), "index": d.index.to_string(),
-                       "basis": d.basis.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": d.den.to_string(), "w": d.w }))
+                       "basis": d.basis.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": d.den.to_string(), "w": d.w, "w_proven": d.w_proven }))
         }
         "primes_above" => {
             let ps = sagebrush_classgroup::api::primes_above(&bigs(v.get("f"))?, u(v, "p")?)?;

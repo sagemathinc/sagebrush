@@ -7,4 +7,5 @@ pub mod factor;
 pub mod grh;
 pub mod order;
 pub mod prime;
+pub mod roots;
 pub mod zlin;

@@ -9,7 +9,7 @@ use crate::nf::zlin::{hnf, vec_mat, ZMat};
 use sagebrush_bigint::BigInt;
 use num_integer::Integer;
 use sagebrush_bigint::BigRational;
-use num_traits::{One, Signed, ToPrimitive, Zero};
+use num_traits::{One, Signed, Zero};
 
 /// The factorization of n != 0 as (prime, exponent), primes ascending
 /// (probable primes beyond 3.3e24).  A composite that cannot be split
@@ -40,6 +40,9 @@ pub struct NfData {
     pub den: BigInt,
     /// the number of roots of unity
     pub w: u32,
+    /// w is proven (the roots of unity found, verified exactly, are all
+    /// there can be by the residue fields); else w is a lower bound
+    pub w_proven: bool,
 }
 
 fn monic(f: &[BigInt]) -> Result<(), String> {
@@ -57,27 +60,93 @@ pub fn nf_data(f: &[BigInt]) -> Result<NfData, String> {
     let (o, _) = maximal_order(f)?;
     let disc = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &disc).abs());
-    let (r1, r2, w) = if o.n == 1 {
-        (1, 0, 2)
+    let (r1, r2, w, w_proven) = if o.n == 1 {
+        (1, 0, 2, true)
     } else {
-        let ro = crate::nf::embed::reduce_order(&o);
-        let emb = Embeddings::new(&ro);
-        let w = roots_of_unity(&ro, &emb);
-        (emb.r1, emb.r2, w)
+        let ro = crate::nf::embed::reduce_order(&o)?;
+        let emb = Embeddings::new(&ro)?;
+        let (w, proven) = roots_of_unity(&ro, &emb);
+        (emb.r1, emb.r2, w, proven)
     };
     // the HNF of the numerators: upper triangular over 1, a, a^2, ...,
     // entries above each pivot reduced (the same basis as PARI's nfbasis,
     // so as Sage's integral_basis)
     let b = hnf(&o.basis);
-    Ok(NfData { degree: o.n, r1, r2, disc, index, basis: b, den: o.den.clone(), w })
+    Ok(NfData { degree: o.n, r1, r2, disc, index, basis: b, den: o.den.clone(), w, w_proven })
 }
 
-fn roots_of_unity(o: &Order, emb: &Embeddings) -> u32 {
+/// The number of roots of unity in K, and whether it is proven.  The x with
+/// T2(x) = n are exactly the roots of unity (Kronecker); those the
+/// enumeration finds numerically are each verified exactly (x^m = 1), so
+/// their number L is a lower bound.  An upper bound U: for a prime p not
+/// dividing disc(f), the roots of unity of order prime to p inject into each
+/// residue field, so their number divides p^d - 1 for every residue degree d
+/// (the degrees of the factors of f mod p); for each prime l, take the
+/// least power of l allowed by the primes p != l (up to 40 of them: in
+/// Q(zeta_20) no prime below 41 splits completely, and the 2-part needs one
+/// that does).  With a real embedding (the signature is certified), U = 2.
+/// L = U proves w.
+fn roots_of_unity(o: &Order, emb: &Embeddings) -> (u32, bool) {
     let n = o.n;
     let one: ZMat = (0..n).map(|i| (0..n).map(|j| BigInt::from((i == j) as i32)).collect()).collect();
     let red = crate::nf::embed::lll(&one, emb);
     let g = emb.t2_gram(&red);
-    crate::nf::bnf::short_vectors(&g, n as f64 * (1.0 + 1e-9), 1000).len() as u32
+    let unit = o.one();
+    // phi(m) <= n implies m <= 2 n^2
+    let mmax = 2 * n * n + 2;
+    let is_root_of_unity = |x: &[BigInt]| {
+        let mut pw = x.to_vec();
+        for _ in 0..mmax {
+            if pw == unit {
+                return true;
+            }
+            pw = o.mul(&pw, x);
+        }
+        false
+    };
+    let found = crate::nf::bnf::short_vectors(&g, n as f64 * (1.0 + 1e-9), 1000);
+    let lower = found.iter().filter(|c| {
+        let x: Vec<BigInt> = (0..n).map(|k| c.iter().zip(&red).map(|(ci, r)| BigInt::from(*ci) * &r[k]).sum()).collect();
+        is_root_of_unity(&x)
+    }).count() as u64;
+    // the upper bound from residue fields
+    let disc = Order::equation_order(&o.f).disc();
+    let small: Vec<u64> = (2..=(n as u64 + 1)).filter(|&l| crate::relations::is_prime_u64(l)).collect();
+    let mut gs: Vec<(u64, BigInt)> = vec![];
+    let mut p = 2u64;
+    while emb.r1 == 0 && gs.len() < 40 && p < 5000 {
+        p += 1;
+        if !crate::relations::is_prime_u64(p) || (&disc % BigInt::from(p)).is_zero() {
+            continue;
+        }
+        let gp = sagebrush_poly::factor_mod(&o.f, p).iter().fold(BigInt::zero(), |acc, (fac, e)| {
+            let _ = e;
+            num_integer::Integer::gcd(&acc, &(num_traits::pow(BigInt::from(p), fac.len() - 1) - 1u32))
+        });
+        gs.push((p, gp));
+    }
+    let mut upper = 1u64;
+    if emb.r1 > 0 {
+        return (lower as u32, lower == 2);
+    }
+    for &l in &small {
+        let lb = BigInt::from(l);
+        let e = gs.iter().filter(|(p, _)| *p != l).map(|(_, gp)| {
+            let (mut v, mut t) = (0u32, gp.clone());
+            while !t.is_zero() && (&t % &lb).is_zero() && v < 64 {
+                t /= &lb;
+                v += 1;
+            }
+            v
+        }).min().unwrap_or(64);
+        // phi(l^e) <= n
+        let mut k = 0;
+        while k < e && (l - 1) * l.pow(k) <= n as u64 {
+            k += 1;
+        }
+        upper = upper.saturating_mul(l.pow(k));
+    }
+    (lower as u32, lower == upper && gs.len() >= 2)
 }
 
 /// A prime ideal above p: P = p O + pi O, pi on the power basis.
@@ -392,7 +461,10 @@ pub fn complex_roots(f: &[BigInt], digits: usize) -> Result<Vec<(String, String,
     if f.len() < 2 {
         return Ok(vec![]);
     }
-    let prec = (digits as f64 * 3.33) as u32 + 40;
+    // (a nonzero root is at least 2^-(coefficient bits) in size: enough
+    // bits for its significant digits)
+    let cbits = f.iter().map(|c| c.bits()).max().unwrap_or(1) as u32;
+    let prec = (digits as f64 * 3.33) as u32 + 40 + cbits;
     let mut out = vec![];
     for (g, e) in sagebrush_poly::squarefree(f) {
         if g.len() < 2 {
@@ -408,50 +480,14 @@ pub fn complex_roots(f: &[BigInt], digits: usize) -> Result<Vec<(String, String,
     Ok(out.iter().map(|(re, im, e)| (fmt(re), fmt(im), *e)).collect())
 }
 
-/// All n roots of a square-free integer polynomial, fixed point (re, im).
+/// All n roots of a square-free integer polynomial, fixed point (re, im),
+/// isolated in certified disks of radius below 2^-prec (nf/roots.rs); real
+/// roots have im = 0 exactly.
 fn roots_squarefree(g: &[BigInt], prec: u32) -> Result<Vec<(BigInt, BigInt)>, String> {
-    let n = g.len() - 1;
-    let lead = g[n].to_f64().unwrap();
-    let fc: Vec<f64> = g.iter().map(|c| c.to_f64().unwrap() / lead).collect();
-    let z0 = crate::nf::embed::aberth(&fc);
-    let p = prec as usize + 32;
-    let mut out = vec![];
-    for (re, im) in z0 {
-        let to = |x: f64| -> BigInt { num_traits::FromPrimitive::from_f64((x * 2f64.powi(52)).round()).map_or(BigInt::zero(), |b: BigInt| b << (p - 52)) };
-        let (mut zr, mut zi) = (to(re), to(im));
-        let mut bits = 40;
-        loop {
-            sagebrush_interrupt::check();
-            let (mut vr, mut vi, mut dr, mut di) = (BigInt::zero(), BigInt::zero(), BigInt::zero(), BigInt::zero());
-            for c in g.iter().rev() {
-                let ndr = ((&dr * &zr - &di * &zi) >> p) + &vr;
-                let ndi = ((&dr * &zi + &di * &zr) >> p) + &vi;
-                dr = ndr;
-                di = ndi;
-                let nvr = ((&vr * &zr - &vi * &zi) >> p) + (c << p);
-                let nvi = (&vr * &zi + &vi * &zr) >> p;
-                vr = nvr;
-                vi = nvi;
-            }
-            let dd = (&dr * &dr + &di * &di) >> p;
-            if dd.is_zero() {
-                break;
-            }
-            zr -= ((&vr * &dr + &vi * &di) >> p << p) / &dd;
-            zi -= ((&vi * &dr - &vr * &di) >> p << p) / &dd;
-            if bits > p + 20 {
-                break;
-            }
-            bits *= 2;
-        }
-        // a real root: imaginary part within the error
-        if im.abs() < 1e-9 * (1.0 + re.abs()) && (&zi.abs() >> (p / 2)).is_zero() {
-            zi = BigInt::zero();
-        }
-        out.push((zr >> 32usize, zi >> 32usize));
-    }
+    let iso = crate::nf::roots::isolate(g, prec)?;
+    let sh = (iso.prec - prec) as usize;
     let _ = vec_mat::<BigInt>;
-    Ok(out)
+    Ok(iso.roots.into_iter().map(|r| (r.re >> sh, r.im >> sh)).collect())
 }
 
 #[cfg(test)]

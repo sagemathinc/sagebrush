@@ -40,7 +40,8 @@ def is_prime(n):
 def nf_data(f):
     """The maximal order of Q[x]/(f): dict with degree, r1, r2, disc,
     index [O_K : Z[x]], basis (rows over the power basis) and den (the
-    basis is rows/den), and w (the number of roots of unity)."""
+    basis is rows/den), w (the number of roots of unity) and w_proven
+    (whether w is proven, else a lower bound)."""
     r = call("nf_data", f=_ints(f))
     r["disc"] = int(r["disc"])
     r["index"] = int(r["index"])

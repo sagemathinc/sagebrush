@@ -360,8 +360,11 @@ class NumberField_absolute:
         return self._nfdata()["w"]
 
     def unit_group(self, proof=None):
-        """The unit group: its rank (Dirichlet) and its roots of unity, which
-        are proven (no fundamental units yet).
+        """The unit group: its rank (Dirichlet, from the signature, which is
+        proven: certified root isolation) and its roots of unity.  With
+        proof=True, NotImplementedError unless the number of roots of unity
+        is proven too (the ones found, verified exactly, are all the residue
+        fields allow).  No fundamental units yet.
 
         EXAMPLES::
 
@@ -371,6 +374,8 @@ class NumberField_absolute:
             sage: U.rank()
             1
         """
+        if proof and not self._nfdata().get("w_proven"):
+            raise NotImplementedError("unit_group with proof=True: the number of roots of unity found is not proven complete")
         return UnitGroup(self)
 
     def _bnfdata(self):
