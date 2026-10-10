@@ -813,8 +813,16 @@ class Expression:
         """
         x = x if x is not None else self.variables()[0]
         f = self.lhs() - self.rhs() if self.is_relational() else self
+        if _call("is_zero", f._s)[0] == "1":
+            # (the multiplicity loop differentiated 0 forever: CSOL-F12)
+            raise ValueError("every value is a root of 0")
         out = []
-        for s in solve(f == 0, x):
+        sols = solve(f == 0, x)
+        # roots are values: a family or a solution valid only under range
+        # conditions is not one (sin(x).roots() gave []: CSOL-F11)
+        if any(isinstance(s, Solution) and (s._params or any(c._op()[0] not in ("rel:Ne", "rel:Eq") for c in s._conds)) for s in sols):
+            raise NotImplementedError("roots: the solutions of %s == 0 are families or conditional (see solve())" % f)
+        for s in sols:
             # an unresolved 0 == f is no root (x^5 + x + 3 gave (x^5 + x + 3,
             # 1): the systematic review's R2-SYMALG-F3)
             if str(s.lhs()) != str(x):
@@ -1712,6 +1720,49 @@ class assuming:
     def __exit__(self, *exc):
         _ASSUMPTIONS[:] = self._saved
         return False
+
+
+def _assume_on(sol, names):
+    """A family (or a solution with conditions) under the assumptions on
+    the solved variable: each becomes a condition on the solution's value
+    (assume(x > 0); sin(x) == 0: x == pi*n1 if pi*n1 > 0); 'integer' and
+    the like on such a solution are refused (the review of solve's
+    CSOL-F9: the whole family came back).  None if a condition fails."""
+    if len(sol) != 1 or not isinstance(sol[0], Solution) or not (sol[0]._params or sol[0]._conds):
+        return sol
+    s = sol[0]
+    try:
+        if s.lhs()._op()[0] != "symbol":
+            return sol
+    except Exception:
+        return sol
+    x, v = str(s.lhs()), s.rhs()
+    extra = []
+    for r in _ASSUMPTIONS:
+        if isinstance(r, _Feature):
+            if str(r._v) != x:
+                continue
+            if r._kind == "real":
+                extra.append(Expression(_call("parse", "imag_part(%s)" % v)[0]) == 0)
+            elif r._kind == "positive":
+                extra.append(v > 0)
+            elif r._kind == "negative":
+                extra.append(v < 0)
+            else:
+                raise NotImplementedError("solve: the assumption that %s is %s on %s" % (x, r._kind, s))
+        elif isinstance(r, Expression) and x in r._names():
+            extra.append(r.subs({s.lhs(): v}))
+    if not extra:
+        return sol
+    keep = list(s._conds)
+    for c in extra:
+        if not c.variables():
+            if bool(c):
+                continue
+            if bool(_negate(c)):
+                return None
+        keep.append(c)
+    return [Solution(s._s, keep, s._params)]
 
 
 def _satisfies(sol):
@@ -2618,6 +2669,14 @@ def limit(f, *args, dir=None, **kw):
 lim = limit
 
 
+def _negate(c):
+    """The negation of a relation (a < b: a >= b)."""
+    op = c._op()[0]
+    l, r = c.lhs(), c.rhs()
+    return {"rel:Eq": lambda: l != r, "rel:Ne": lambda: l == r, "rel:Lt": lambda: l >= r,
+            "rel:Le": lambda: l > r, "rel:Gt": lambda: l <= r, "rel:Ge": lambda: l < r}[op]()
+
+
 class _SolutionDict(dict):
     """{x: value} with the conditions and integer parameters of its Solution."""
 
@@ -2658,10 +2717,77 @@ class Solution(Expression):
 
     __slots__ = ("_conds", "_params")
 
+    # transformations keep the conditions (simplify_full() of the relation
+    # is the same solution); subs() also substitutes in them and decides
+    # them.  (Both returned plain relations, so the conditions were lost:
+    # the review of solve's CSOL-F7.)
+    _PLAIN = frozenset(("lhs", "rhs", "conditions", "parameters", "subs", "substitute", "is_relational", "variables", "operator"))
+
     def __init__(self, s, conds=(), params=()):
         Expression.__init__(self, s)
-        self._conds = list(conds)
+        # (conditions as Expressions also when rebuilt from __reduce__'s
+        # strings: CSOL-F8)
+        self._conds = [Expression(c) if isinstance(c, str) else c for c in conds]
         self._params = list(params)
+
+    def __getattribute__(self, name):
+        attr = object.__getattribute__(self, name)
+        if name.startswith("_") or name in Solution._PLAIN or not callable(attr):
+            return attr
+
+        def keep(*args, **kw):
+            r = attr(*args, **kw)
+            if isinstance(r, Expression) and not isinstance(r, Solution) and r.is_relational():
+                return Solution(r._s, object.__getattribute__(self, "_conds"), object.__getattribute__(self, "_params"))
+            return r
+        return keep
+
+    def subs(self, *args, **kw):
+        """The substitution in the solution and its conditions.  Conditions
+        that become decided are dropped when true; one that becomes false
+        raises ValueError (it is no solution there), and so does a value of
+        an integer parameter that is not an integer.
+
+        EXAMPLES::
+
+            sage: a = var('a')
+            sage: s = solve(sqrt(x) == a, x)[0]
+            sage: s.subs(a=2)  # sagebrush only
+            x == 4
+            sage: s.subs(a=-1)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            ValueError: not a solution there: -1/2*pi < pi <= 1/2*pi fails
+        """
+        names = {}
+        for a in args:
+            for k, v in (a.items() if isinstance(a, dict) else ([(a.lhs(), a.rhs())] if isinstance(a, Expression) else [(r.lhs(), r.rhs()) for r in a])):
+                names[str(k)] = v
+        for k, v in kw.items():
+            names[k] = v
+        params = list(self._params)
+        for p in self._params:
+            if p in names:
+                v = _expr(names[p])
+                if not (v.is_numeric() if hasattr(v, "is_numeric") else False) or _call("is_zero", (v - floor(v))._s)[0] != "1":
+                    raise ValueError("%s is an integer parameter of the family, not %s" % (p, v))
+                params.remove(p)
+        rel = Expression.subs(self, *args, **kw)
+        keep = []
+        for c in self._conds:
+            c2 = Expression.subs(c, *args, **kw)
+            if c2.variables():
+                keep.append(c2)
+                continue
+            if bool(c2):
+                continue
+            if bool(_negate(c2)):
+                shown = Solution(rel._s, [Expression.subs(d, *args, **kw) for d in self._conds])._cond_text(str)
+                raise ValueError("not a solution there: %s fails" % " and ".join(shown))
+            keep.append(c2)
+        return Solution(rel._s, keep, params)
+
+    substitute = subs
 
     def __reduce__(self):
         return (Solution, (self._s, [c._s for c in self._conds], list(self._params)))
@@ -2717,15 +2843,23 @@ def solve(f, *args, **kw):
     """solve(x^2 == 4, x) -> [x == -2, x == 2]; solve([eqs], x, y) ->
     [[x == ..., y == ...], ...]; solution_dict=True for dictionaries.
 
-    For one equation in one variable the answer is complete, which is where
-    Sagebrush differs from Sage (Sage gives generic and principal solutions
-    only): each solution is a Solution, with the conditions on the
+    For one equation in one variable Sagebrush differs from Sage, which
+    gives generic and principal solutions only: each solution is a
+    Solution, with the conditions on the
     parameters under which it is one (sqrt(x) == a has x == a^2 only for
     -pi/2 < arg(a) <= pi/2, the principal square roots), the cases where a
     leading coefficient vanishes are solved too (a*x^2 + x - 1 == 0 also
     has x == 1 when a == 0), and periodic equations give whole families in
-    new integer parameters n1, n2, ... (sin(x) == 0: x == pi*n1).  A factor
-    whose roots are not found stays as 0 == f.
+    new integer parameters n1, n2, ... (sin(x) == 0: x == pi*n1; a family
+    comes from the functions' periods, and is checked at a few integers).
+    The answer is meant to be read literally: [] means there is no
+    solution, and 0 == f remains whenever not every solution was found or
+    a candidate could not be decided (a factor of unknown roots, an
+    irrational exponent's other branches).  Assumptions on x become
+    conditions on a family (assume(x > 0): x == pi*n1 if pi*n1 > 0);
+    'integer' and the like on a family are refused.  Not yet complete:
+    systems of equations (their pivots are assumed nonzero) and exponents
+    that are not rational numbers (the principal branch only).
 
     EXAMPLES::
 
@@ -2771,7 +2905,7 @@ def solve(f, *args, **kw):
             sols.append([Expression(t) for t in part])
         i += 1 + m
     if _ASSUMPTIONS:
-        sols = [sol for sol in sols if _satisfies(sol)]
+        sols = [sol for sol in (_assume_on(sol, names) for sol in sols) if sol is not None and _satisfies(sol)]
     if kw.get("multiplicities"):
         if many or len(names) != 1 or kw.get("solution_dict"):
             raise NotImplementedError("solve: multiplicities=True for one equation in one variable")

@@ -147,7 +147,8 @@ pub fn cut_of(e: &Expr) -> Option<(Cut, &Expr)> {
         Kind::Pow(b, n) if !b.is_const(Const::E) && !n.as_rat().map_or(false, |q| q.is_integer()) => Some((Cut::NonPositive, b)),
         Kind::Fun(f, a) if a.len() == 1 => {
             let c = match f {
-                Fun::Log => Cut::NonPositive,
+                // arg jumps by 2 pi across the negative real axis, like log
+                Fun::Log | Fun::Arg => Cut::NonPositive,
                 Fun::Asin | Fun::Acos | Fun::Atanh => Cut::RealOutsideUnit,
                 Fun::Atan | Fun::Asinh => Cut::ImagOutsideUnit,
                 Fun::Acosh => Cut::BelowOne,
@@ -157,7 +158,7 @@ pub fn cut_of(e: &Expr) -> Option<(Cut, &Expr)> {
                 Fun::Sign | Fun::Heaviside => Cut::JumpAtZero,
                 Fun::Floor | Fun::Ceil => Cut::JumpAtIntegers,
                 Fun::Sin | Fun::Cos | Fun::Tan | Fun::Cot | Fun::Sec | Fun::Csc | Fun::Sinh | Fun::Cosh | Fun::Tanh | Fun::Coth | Fun::Sech | Fun::Csch
-                | Fun::Erf | Fun::Gamma | Fun::Factorial | Fun::Abs | Fun::Conjugate | Fun::RealPart | Fun::ImagPart | Fun::Arg | Fun::User(_) => return None,
+                | Fun::Erf | Fun::Gamma | Fun::Factorial | Fun::Abs | Fun::Conjugate | Fun::RealPart | Fun::ImagPart | Fun::User(_) => return None,
                 _ => Cut::Unknown,
             };
             Some((c, &a[0]))

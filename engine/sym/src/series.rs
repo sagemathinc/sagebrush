@@ -289,7 +289,8 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
             let p2 = p.clone();
             bs.compose(&move |y: &Expr| pow(y, &p2), prec)?
         }
-        Kind::Fun(Fun::Abs | Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside, _) => {
+        // (arg is not holomorphic: no power series in a complex variable)
+        Kind::Fun(Fun::Abs | Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside | Fun::Arg, _) => {
             return Err(SymError::NotImplemented(format!("series of {}", crate::to_string(e))));
         }
         Kind::Fun(f, a) if a.len() == 1 => {
