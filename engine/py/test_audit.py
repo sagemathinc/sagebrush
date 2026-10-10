@@ -574,3 +574,8 @@ print("nf parents ok")
 _R, _S = PolynomialRing(QQ, "x,y"), PolynomialRing(QQ, "y,x"); _x, _y = _R.gens(); _sy, _sx = _S.gens(); _f = 2 * _x * _x * _y + 3 * _x * _x + _x * _y
 assert _f.coefficient(_sx**2) == 2 * _y + 3 and _f.monomial_coefficient(_sx**2 * _sy) == 2  # R2-MUL-F6
 print("mpoly coefficient ok")
+from sagebrush.sage import CyclotomicField
+for _n in (3, 4, 5):
+    _C1, _C2 = CyclotomicField(_n, "z"), CyclotomicField(_n, "z"); assert _C1 is _C2 and _C1.ideal(2) == _C2.ideal(2) and _C1(_C2.gen()) == _C1.gen()  # R2-NFD-F3
+_px = polygen(QQ, "x"); assert CyclotomicField(3, "z") != NumberField(_px**2 + _px + 1, "z")
+print("cyclotomic unique ok")

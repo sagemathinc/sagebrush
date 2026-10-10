@@ -214,11 +214,14 @@ class NumberField_absolute:
         # the embedding is part of the field, as in Sage (QuadraticField(2)
         # differs from NumberField(x^2 - 2)), so that equal fields are the
         # same object (_unique) and their elements, ideals and coercions agree
+        # (a cyclotomic field, with its canonical embedding, is likewise not
+        # NumberField of the cyclotomic polynomial)
         return (isinstance(other, NumberField_absolute) and other._f == self._f and other._name == self._name
-                and getattr(other, "_emb", None) == getattr(self, "_emb", None))
+                and getattr(other, "_emb", None) == getattr(self, "_emb", None)
+                and getattr(other, "_cyclotomic_order", None) == getattr(self, "_cyclotomic_order", None))
 
     def __hash__(self):
-        return hash((tuple(self._f), self._name, getattr(self, "_emb", None)))
+        return hash((tuple(self._f), self._name, getattr(self, "_emb", None), getattr(self, "_cyclotomic_order", None)))
 
     def __contains__(self, x):
         return isinstance(x, NumberFieldElement) and x._K is self
@@ -1515,7 +1518,7 @@ _FIELDS = {}
 
 
 def _unique(K):
-    key = (type(K).__name__, tuple(K._f), K._name, repr(getattr(K, "_emb", None)))
+    key = (type(K).__name__, tuple(K._f), K._name, repr(getattr(K, "_emb", None)), getattr(K, "_cyclotomic_order", None))
     old = _FIELDS.get(key)
     if old is not None:
         return old
@@ -1608,7 +1611,7 @@ def CyclotomicField(n, name="zeta", names=None):
         name = names[0] if isinstance(names, (list, tuple)) else names
     K = NumberField_absolute(_cyclotomic(int(n)), str(name) + ("%d" % n if name == "zeta" else ""))
     K._cyclotomic_order = int(n)
-    return K
+    return _unique(K)
 
 
 def _cyclotomic(n):
