@@ -440,6 +440,19 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             let ne = int_arg(arg(0)) as usize;
             let eqs: Vec<Expr> = a[1..1 + ne].iter().map(|s| d(s)).collect();
             let vars: Vec<String> = a[1 + ne..].iter().map(|s| s.to_string()).collect();
+            if ne == 1 && vars.len() == 1 {
+                // one equation: each solution x == v, its conditions, and
+                // "@int:n" for each integer parameter (crate::solve::Sol)
+                let sols = crate::solve::solve1_full(&eqs[0], &vars[0]);
+                let mut out = vec![sols.len().to_string()];
+                for (rel, cond, params) in sols {
+                    out.push((1 + cond.len() + params.len()).to_string());
+                    out.push(encode(&rel));
+                    out.extend(cond.iter().map(encode));
+                    out.extend(params.iter().map(|p| format!("@int:{}", p)));
+                }
+                return out;
+            }
             let sols = crate::solve::solve(&eqs, &vars);
             let mut out = vec![sols.len().to_string()];
             for s in sols {

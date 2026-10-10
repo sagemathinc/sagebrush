@@ -458,7 +458,7 @@ assert _E5077.descent_assumptions() and _E5077.rank(proof=False) == 3; raises(No
 _E389 = EllipticCurve("389a1"); _P, _Q = _E389(0, 0), _E389(1, 0)  # R2-EC-F3
 assert abs(_E389.regulator_of_points([_P, 300 * _P + _Q]) - _E389.regulator_of_points([_P, _Q])) < 1e-15
 import _sage_ec as _ecm
-assert _ecm._hermite_pow(10) >= 4096 / 3  # R2-EC-F6
+assert _ecm._hermite_pow_upper(10) >= Fraction(4096, 3)  # R2-EC-F6
 from sagebrush.sage import tanh, coth, cosh, sin, cos, diff
 _y = _xs
 assert str(limit(1 / sqrt(_y), x=0, dir="-")) == "Infinity" and str(limit(1 / sqrt(_y), x=0, dir="+")) == "+Infinity"  # R2-SYMCALC-F2
@@ -469,7 +469,13 @@ assert limit((sin(SR(1))**2 + cos(SR(1))**2 - 1) / _y**2, x=0) == 0; raises(Valu
 assert str(limit(tanh(_y + I * pi / 2), x=0, dir="+")) == "+Infinity" and str(limit(tanh(_y + I * pi / 2), x=0, dir="-")) == "-Infinity"  # R2-SYMCALC-F8
 assert str(limit(coth(_y), x=0, dir="+")) == "+Infinity" and cosh(I * pi / 2) == 0
 from sagebrush.sage import taylor, desolve, function, solve, assume, forget, exp as _exp2
-assert solve(sqrt(_y) == -_exp2(_pa), _y) == [] and str(solve(sqrt(_y) == -_pa, _y)) == "[x == a^2]"  # R2-SYMALG-F1
+# R2-SYMALG-F1/F3: conditions on the parameters, the a = 0 branch, whole
+# periodic families (unlike Sage's generic, principal answers)
+_s = solve(sqrt(_y) == -_exp2(_pa), _y); assert len(_s) == 1 and len(_s[0].conditions()) == 2
+assert str(solve(sqrt(_y) == -_pa, _y)) == "[x == a^2 if -1/2*pi < arg(-a) <= 1/2*pi]"
+assert str(solve(_pa * _y**2 + _y - 1 == 0, _y)[-1]) == "x == 1 if a == 0" and str(solve(_pa * _y == 1, _y)) == "[x == 1/a if a != 0]"
+assert str(solve(sin(_y) == 0, _y)) == "[x == pi*n1 for integer n1]" and str(solve(_y / (_y - _pa) == 0, _y)) == "[x == 0 if a != 0]"
+assert [str(r) for r in (_pa * _y**2 + _y - 1).roots(_y, multiplicities=False)] == ["-1/2*sqrt(4*a + 1)/a - 1/2/a", "1/2*sqrt(4*a + 1)/a - 1/2/a"]
 assume(_y < 0); assert abs(sqrt(_y)).subs(x=-1) == 1; forget()  # R2-SYMALG-F2
 assume(_y > -SR("1/10^400")); assert abs(_y).subs(x=-SR("1/10^401")) == SR("1/10^401"); forget()
 assume(_y, "odd"); assert solve(_y**2 - 4, _y) == []; forget()

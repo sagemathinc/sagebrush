@@ -157,7 +157,7 @@ pub fn cut_of(e: &Expr) -> Option<(Cut, &Expr)> {
                 Fun::Sign | Fun::Heaviside => Cut::JumpAtZero,
                 Fun::Floor | Fun::Ceil => Cut::JumpAtIntegers,
                 Fun::Sin | Fun::Cos | Fun::Tan | Fun::Cot | Fun::Sec | Fun::Csc | Fun::Sinh | Fun::Cosh | Fun::Tanh | Fun::Coth | Fun::Sech | Fun::Csch
-                | Fun::Erf | Fun::Gamma | Fun::Factorial | Fun::Abs | Fun::Conjugate | Fun::RealPart | Fun::ImagPart | Fun::User(_) => return None,
+                | Fun::Erf | Fun::Gamma | Fun::Factorial | Fun::Abs | Fun::Conjugate | Fun::RealPart | Fun::ImagPart | Fun::Arg | Fun::User(_) => return None,
                 _ => Cut::Unknown,
             };
             Some((c, &a[0]))

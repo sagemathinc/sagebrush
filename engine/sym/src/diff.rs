@@ -167,7 +167,7 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
         Fun::Erf => mul(vec![int(2), exp(&neg(&u2)), pow(&pi(), &rat(-1, 2))]),
         Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside => zero(),
         Fun::Factorial | Fun::Gamma => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
-        Fun::Conjugate | Fun::RealPart | Fun::ImagPart => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
+        Fun::Conjugate | Fun::RealPart | Fun::ImagPart | Fun::Arg => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
         _ => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
     };
     mul2(&d, &du)

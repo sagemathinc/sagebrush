@@ -121,7 +121,7 @@ label, minimal a-invariants, rank and torsion order, unchanged.
 
 == Rust crates compiled into the engines (28) ==
 
-Sagebrush's own crates: sagebrush-ap, sagebrush-arith, sagebrush-bigint, sagebrush-classgroup, sagebrush-galois, sagebrush-group, sagebrush-interrupt, sagebrush-modsym, sagebrush-mpoly, sagebrush-poly, sagebrush-sym, sagebrush-web. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
+Sagebrush's own crates: sagebrush-ap, sagebrush-arith, sagebrush-ball, sagebrush-bigint, sagebrush-classgroup, sagebrush-galois, sagebrush-group, sagebrush-interrupt, sagebrush-modsym, sagebrush-mpoly, sagebrush-poly, sagebrush-sym, sagebrush-web. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
 
 cfg-if 1.0.5: MIT OR Apache-2.0
 crossbeam-deque 0.8.8: MIT OR Apache-2.0
