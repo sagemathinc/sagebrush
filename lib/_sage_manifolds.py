@@ -300,13 +300,30 @@ class _ChartAssumption:
         self._n[name] = self._n.get(name, 0) + 1
 
     def __contains__(self, name):
-        return self._n.get(name, 0) > 0 and self._n[name] >= _COORD_USES.get(name, 0)
+        return self._n.get(name, 0) > 0 and self._n[name] >= _COORD_USES.get(name, 0) and name not in _FREE
 
     def __iter__(self):
         return (n for n in list(self._n) if n in self)
 
     def __bool__(self):
         return any(True for _ in self)
+
+
+# names used as free parameters in a field's expressions (not coordinates
+# of its chart): never assumed positive, even if a chart later uses the name
+# (sqrt(r^2) became r for a parameter r once a polar chart named r existed:
+# the systematic review's R2-EXT-F5)
+_FREE = set()
+
+
+def _note_free(exprs, chart):
+    coords = {str(c) for c in getattr(chart, "_coords", ())}
+    for e in exprs:
+        try:
+            names = {str(v) for v in _SR(e).variables()}
+        except Exception:
+            continue
+        _FREE.update(names - coords)
 
 
 _POSITIVE = _ChartAssumption()      # coordinates assumed positive (r, rh)
@@ -1313,8 +1330,10 @@ class EuclideanSpace_:
         if isinstance(coord_expression, dict):
             for c, e in coord_expression.items():
                 f._expr[c] = _SR(e)
+                _note_free([e], c)
         elif coord_expression is not None:
             f._expr[chart or self._default_chart] = _SR(coord_expression)
+            _note_free([coord_expression], chart or self._default_chart)
         return f
 
     def vector_field(self, *comps, **kwds):
@@ -1332,6 +1351,7 @@ class EuclideanSpace_:
         if len(comps) == 1 and isinstance(comps[0], (list, tuple)):
             comps = comps[0]
         if comps:
+            _note_free(comps, chart)
             v._set(frame, chart, [_SR(c) for c in comps])
         else:
             v._set(frame, chart, [_SR(0)] * self._n)
@@ -1879,6 +1899,7 @@ class VectorField:
             comps = [_SR(x) for x in value]
         else:
             comps[int(i) - M._start] = _SR(value)
+        _note_free(comps, M._default_chart)
         self._comp = {key: comps}
 
     def display(self, frame=None, chart=None):

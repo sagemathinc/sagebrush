@@ -1240,10 +1240,12 @@ class GeneralizedReedSolomonCode(AbstractLinearCode):
         F = pts[0].parent() if hasattr(pts[0], "parent") else None
         F = F if F is not None and hasattr(F, "order") else _sa().GF(2)
         n = len(pts)
-        if len(set(pts)) != n:
+        # distinct in F, after conversion (0 and 5 are one point of GF(5):
+        # the systematic review's R2-EXT-F3)
+        self._pts = [F(a) for a in pts]
+        if len(set(self._pts)) != n:
             raise ValueError("there must be n distinct evaluation points")
         AbstractLinearCode.__init__(self, F, n, "EvaluationVector", "Gao")
-        self._pts = [F(a) for a in pts]
         self._mult = [F(v) for v in column_multipliers] if column_multipliers is not None else [F(1)] * n
         # the GRS distance n - k + 1 needs nonzero multipliers and 0 < k <= n
         if len(self._mult) != n:
@@ -1668,8 +1670,15 @@ class LinearRankMetricCode(AbstractLinearCode):
         G = generator
         F = G.base_ring()
         AbstractLinearCode.__init__(self, F, G.ncols(), "GeneratorMatrix", "NearestNeighbor", metric="rank")
+        r = G.rank()
+        if r < G.nrows():
+            # dependent rows: a basis of the row space, so that the encoder
+            # is a bijection onto the code (the zero row of [[0, 0], [1, 0]]
+            # encoded every message as 0: the systematic review's R2-EXT-F8)
+            E = G.echelon_form()
+            G = _matrix(F, [list(E.row(i)) for i in range(r)]) if r else _sa().matrix(F, 0, G.ncols())
         self._generator_matrix = G
-        self._dimension = G.rank()
+        self._dimension = r
         p = int(F.characteristic())
         self._sub = sub_field or _sa().GF(p)
         q = int(self._sub.order())

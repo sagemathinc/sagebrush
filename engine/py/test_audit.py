@@ -430,4 +430,13 @@ raises(TypeError, _Zr, _qx / 2); raises(TypeError, _Zr, PolynomialRing(QQ, "x").
 _fz = _zx + _qx / 2
 assert _fz.parent() is _Qr and (_zx + QQ(1) / 2).parent() is _Qr and (_zx * (_qx / 2)).parent() is _Qr
 _qq, _rr = _fz.quo_rem(_Qr(_zx)); assert _qq * _Qr(_zx) + _rr == _fz
+from sagebrush.sage import codes, vector, matrix, EuclideanSpace
+_F5 = GF(5); raises(ValueError, codes.GeneralizedReedSolomonCode, [_F5(0), 5, _F5(1)], 2)  # R2-EXT-F3
+_F4 = GF(4, "a"); _Cr = codes.LinearRankMetricCode(matrix(_F4, [[0, 0], [1, 0]]))  # R2-EXT-F8
+assert _Cr.dimension() == 1 and len({tuple(_Cr.encode(vector(_F4, [_c]))) for _c in _F4}) == 4 and len(_Cr.list()) == 4
+_Kq = PolynomialRing(QQ, "t").fraction_field(); _Lq = PolynomialRing(GF(5), "t").fraction_field()
+raises(ZeroDivisionError, _Lq, _Kq(1, 5))  # R2-EXT-F9
+_fr = var("free_radius"); _Ef = EuclideanSpace(2, names=("x_ext", "y_ext")); _vf = _Ef.vector_field(_fr, 0)  # R2-EXT-F5
+_Ef.polar_coordinates(names=("free_radius", "phi_ext"))
+assert _vf.norm().expr().subs({_fr: -2}) == 2
 print("rereview2 ok")
