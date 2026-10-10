@@ -51,12 +51,21 @@ const PARTS = {
 const PACKAGES = [
   { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["smalljac", "cremona"], artistic: "engine/py" },
   { file: "cdn/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush-web`", crates: ["sagebrush-web"], parts: ["smalljac", "cpython"] },
+  // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
+  // plugins, the platforms' bindings); its page carries the notebook's notices
+  { file: "app/THIRD-PARTY-NOTICES-native.txt", what: "the desktop app's native code (app/src-tauri)", manifest: "app/src-tauri", crates: ["sagebrush-app"], parts: [], mpl: true, native: true },
   { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web"], parts: ["cpython", "numpy", "arm", "fdlibm", "smalljac", "cremona"], artistic: "packages/sagebrush", web: true },
 ];
 
-const meta = JSON.parse(execFileSync("cargo", ["metadata", "--format-version", "1", "--locked"], { cwd: join(root, "engine"), maxBuffer: 1 << 28 }).toString());
-const byId = new Map(meta.packages.map((p) => [p.id, p]));
-const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
+const metas = new Map();
+function metadata(dir) {
+  if (!metas.has(dir)) {
+    const meta = JSON.parse(execFileSync("cargo", ["metadata", "--format-version", "1", "--locked"], { cwd: join(root, dir), maxBuffer: 1 << 28 }).toString());
+    metas.set(dir, { meta, byId: new Map(meta.packages.map((p) => [p.id, p])), nodes: new Map(meta.resolve.nodes.map((n) => [n.id, n])) });
+  }
+  return metas.get(dir);
+}
+let meta, byId, nodes;
 
 // the normal (linked) dependencies of the root crates, transitively
 function closure(names) {
@@ -73,11 +82,27 @@ function closure(names) {
 
 const LICENSE_FILE = /^(licen[cs]e|copying|copyright|notice|unlicense)/i;
 // license identifiers accepted (SPDX), in Rust license expressions and npm packages
-const OK_LICENSES = new Set(["MIT", "Apache-2.0", "LLVM-exception", "Unlicense", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "BSL-1.0", "CC0-1.0", "0BSD", "BlueOak-1.0.0"]);
-function checkLicense(what, expr) {
-  const ids = (expr ?? "").split(/[\s()\/]+/).filter((t) => t && !["OR", "AND", "WITH"].includes(t));
-  const bad = ids.filter((t) => !OK_LICENSES.has(t));
-  if (!ids.length || bad.length) throw new Error(`${what}: license ${JSON.stringify(expr)} is not on the accepted list (scripts/third-party-notices.mjs)`);
+const OK_LICENSES = new Set(["MIT", "MIT-0", "Apache-2.0", "LLVM-exception", "Unlicense", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "BSL-1.0", "CC0-1.0", "0BSD", "BlueOak-1.0.0"]);
+/// The alternative of a license expression ("A OR B", old "A/B") under which
+/// the component is used: the first whose licenses are all accepted (MPL-2.0
+/// too where `mpl`: the desktop app's Tauri stack); an error if none is.
+function checkLicense(what, expr, mpl = false) {
+  const ok = new Set([...OK_LICENSES, ...(mpl ? ["MPL-2.0"] : [])]);
+  const top = (expr ?? "").replace(/\s*\/\s*/g, " OR ");
+  // split at top-level ORs (parenthesized groups stay whole)
+  const alts = [];
+  let depth = 0, cur = "";
+  for (const tok of top.split(/(\(|\)|\s+OR\s+)/)) {
+    if (tok === "(") depth++;
+    if (tok === ")") depth--;
+    if (depth === 0 && /^\s+OR\s+$/.test(tok)) { alts.push(cur); cur = ""; } else cur += tok;
+  }
+  alts.push(cur);
+  for (const alt of alts) {
+    const ids = alt.split(/[\s()]+/).filter((t) => t && !["OR", "AND", "WITH"].includes(t));
+    if (ids.length && ids.every((t) => ok.has(t))) return alt.trim();
+  }
+  throw new Error(`${what}: license ${JSON.stringify(expr)} is not on the accepted list (scripts/third-party-notices.mjs)`);
 }
 const MIT_TEXT = readFileSync(join(root, "LICENSE-MIT"), "utf8").replace(/^Copyright.*$/m, "Copyright (c) %AUTHORS%").trim();
 const APACHE_TEXT = readFileSync(join(root, "LICENSE-APACHE"), "utf8").trim();
@@ -89,11 +114,13 @@ function licenseTexts(p) {
 // what must never be linked into a package: the FLINT bindings and the
 // oracle crate (LGPL, references for tests only), or any (L)GPL crate
 function gate(pkg, all) {
-  const bad = all.filter((p) => ["sagebrush-flint", "sagebrush-oracle"].includes(p.name) || /\b(L?GPL|AGPL)/.test(p.license ?? ""));
+  // (the alternative used: "MIT OR Apache-2.0 OR LGPL-2.1-or-later" is MIT)
+  const bad = all.filter((p) => ["sagebrush-flint", "sagebrush-oracle"].includes(p.name) || (p.source && /\b(L?GPL|AGPL)/.test(checkLicense(p.name, p.license, pkg.mpl))));
   if (bad.length) throw new Error(`${pkg.file}: ${bad.map((p) => `${p.name} (${p.license})`).join(", ")} would be linked into ${pkg.what}`);
 }
 
 function render(pkg) {
+  ({ meta, byId, nodes } = metadata(pkg.manifest ?? "engine"));
   const all = closure(pkg.crates);
   gate(pkg, all);
   const own = all.filter((p) => !p.source);
@@ -101,31 +128,37 @@ function render(pkg) {
   const texts = new Map(); // hash -> {text, users: [name version (file)]}
   let standard = false;
   const rows = ext.map((p) => {
-    checkLicense(`${p.name} ${p.version}`, p.license);
+    const used = checkLicense(`${p.name} ${p.version}`, p.license, pkg.mpl);
     let files = licenseTexts(p);
     if (!files.length) {
-      // the license's standard text, with the crate's authors
-      if (!/\bMIT\b/.test(p.license ?? "") && !/Apache-2\.0/.test(p.license ?? "")) throw new Error(`${p.name} ${p.version}: no license file, and its license ${p.license} has no standard text here`);
-      standard = true;
-      files = /\bMIT\b/.test(p.license) ? [["MIT (standard text)", MIT_TEXT.replace("%AUTHORS%", (p.authors?.length ? p.authors.join(", ") : `the ${p.name} authors`))]] : [];
+      // the standard texts of the licenses it is used under, with its authors
+      const owner = p.authors?.length ? p.authors.join(", ") : `the ${p.name} authors`;
+      for (const id of used.split(/[\s()]+/).filter((t) => t && !["AND", "WITH", "OR"].includes(t))) {
+        if (id === "Apache-2.0") standard = true;
+        else if (id === "MIT") files.push(["MIT (standard text)", MIT_TEXT.replace("%AUTHORS%", owner)]);
+        else if (id === "LLVM-exception") {}
+        else if (existsSync(join(root, "LICENSES", id + ".txt"))) files.push([`${id} (standard text)`, readFileSync(join(root, "LICENSES", id + ".txt"), "utf8").replace(/<year> <owner>/g, owner).trim()]);
+        else throw new Error(`${p.name} ${p.version}: no license file, and no standard text of ${id} (LICENSES/)`);
+      }
     }
     for (const [f, t] of files) {
       const h = createHash("sha256").update(t).digest("hex");
       if (!texts.has(h)) texts.set(h, { text: t, users: [] });
       texts.get(h).users.push(`${p.name} ${p.version} (${f})`);
     }
-    return `${p.name} ${p.version}: ${p.license}${licenseTexts(p).length ? "" : " [no license file in the crate: the standard text]"}`;
+    return `${p.name} ${p.version}: ${p.license}${used !== (p.license ?? "").trim() && /GPL|MPL/.test(p.license) ? ` (used under ${used})` : ""}${licenseTexts(p).length ? "" : " [no license file in the crate: the standard text]"}${/MPL-2\.0/.test(used) ? ` [MPL-2.0: unmodified; its source is at https://crates.io/crates/${p.name}/${p.version}]` : ""}`;
   });
   const out = [
     `Third-party notices for ${pkg.what}`,
     `(generated by scripts/third-party-notices.mjs; do not edit)`,
     "",
     `Sagebrush itself (Copyright (c) 2026 SageMath, Inc.) is licensed under the MIT license or the Apache License 2.0, at your option. This package also contains the following, under their own terms.`,
+    ...(pkg.native ? ["", "The app's page (the notebook) has its own notices, THIRD-PARTY-NOTICES.txt beside this file in the app. The app uses the platform's web view (WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux), which is not part of it; the Linux AppImage also bundles shared libraries of the system it was built on (GTK, WebKitGTK and others, LGPL), which are not listed here."] : []),
     "",
     "== Derived code and data ==",
     "",
     ...pkg.parts.flatMap((k) => [PARTS[k](), ""]),
-    `== Rust crates compiled into the engines (${ext.length}) ==`,
+    `== Rust crates compiled into ${pkg.native ? "the app" : "the engines"} (${ext.length}) ==`,
     "",
     `Sagebrush's own crates: ${own.map((p) => p.name).sort().join(", ")}. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.`,
     "",
