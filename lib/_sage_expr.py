@@ -175,10 +175,10 @@ class Expression:
         ((x + 1)^2, 2*x + 2, 1/3*x^3 + x^2 + x, 16)
     """
 
-    __slots__ = ("_s", "_repr", "_fast", "__weakref__")
+    __slots__ = ("_s", "_repr", "_fast", "_h", "__weakref__")
 
     def __init__(self, s):
-        self._s, self._repr, self._fast = s, None, None
+        self._s, self._repr, self._fast, self._h = s, None, None, None
 
     def __reduce__(self):
         return (Expression, (self._s,))
@@ -238,15 +238,29 @@ class Expression:
 
     def __hash__(self):
         # an exact number hashes as that number (SR(1) == 1 with different
-        # hashes broke dictionaries and sets: the systematic review's API-F2)
+        # hashes broke dictionaries and sets: the systematic review's API-F2),
+        # and a polynomial with rational coefficients as the polynomial does
+        # (t == SR(t): R2-API-F1); cached
+        h = self._h
+        if h is not None:
+            return h
         s = self._s
+        h = None
         if s.startswith("n") and s.endswith(";") and "/" in s:
             try:
                 num, den = s[1:-1].split("/")
-                return hash(_Fraction(int(num), int(den)))
+                h = hash(_Fraction(int(num), int(den)))
             except ValueError:
                 pass
-        return hash(s)
+        if h is None and not self.is_relational():
+            terms = _sr_poly_terms(self, sorted(self._names()))
+            if terms is not None:
+                from _sage_poly import poly_hash
+                h = poly_hash(terms)
+        if h is None:
+            h = hash(s)
+        self._h = h
+        return h
 
     def __bool__(self):
         op = self._op()
@@ -2681,6 +2695,31 @@ def _decide(c):
     """True or False when the engine proves the constant relation c, else None."""
     r = _call("decide", c._s)[0]
     return True if r == "1" else False if r == "0" else None
+
+
+def _sr_poly_terms(e, names):
+    """{monomial: rational coefficient} if e is a polynomial in names with
+    exact rational coefficients, else None."""
+    if not names:
+        v = _py_number(e._s)
+        if v is None or isinstance(v, (float, complex)):
+            return None
+        return {(): v}
+    x = names[0]
+    if x not in e._names():
+        return _sr_poly_terms(e, names[1:])
+    try:
+        cs = e.list(x)
+    except Exception:
+        return None
+    out = {}
+    for i, c in enumerate(cs):
+        sub = _sr_poly_terms(c, names[1:])
+        if sub is None:
+            return None
+        for m, v in sub.items():
+            out[tuple(sorted(m + (((x, i),) if i else ())))] = v
+    return out
 
 
 def _negate(c):

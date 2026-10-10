@@ -664,7 +664,15 @@ class Series:
         return not self == o
 
     def __hash__(self):
-        return hash((self._v, tuple(self._c)))
+        # equality is at the common precision, so u + O(u^2) equals u + u^2
+        # and u + u^3 alike: no hash of a finite-precision series can agree
+        # with it (the second review's R2-EXT-F16); an exact series hashes as
+        # the polynomial it equals
+        if self._prec is not None:
+            raise TypeError("unhashable: a power series of finite precision (%s)" % (self,))
+        from _sage_poly import poly_hash
+        n = self._R._name
+        return poly_hash({((n, self._v + i),) if self._v + i else (): c for i, c in enumerate(self._c)})
 
     # ---- precision
     def add_bigoh(self, prec):

@@ -703,11 +703,25 @@ class NumberFieldElement:
         return hash(tuple(self._c))
 
     def __eq__(self, other):
+        # elements of equal fields compare by coordinates; a nonconstant
+        # polynomial is not a field element (x^2 == K(2) was True through the
+        # conversion K(x^2), with different hashes: the second review's
+        # R2-NFD-F3; K(x^2) converts explicitly)
+        if isinstance(other, NumberFieldElement):
+            return (other._K is self._K or other._K == self._K) and other._c == self._c
+        from _sage_poly import Polynomial
+        if isinstance(other, Polynomial):
+            if other.degree() > 0:
+                return False
+            other = other[0]
         try:
             o = self._coerce(other)
         except TypeError:
             return False
         return o._c == self._c
+
+    def __ne__(self, other):
+        return not self == other
 
     def _coerce(self, other):
         if isinstance(other, NumberFieldElement):

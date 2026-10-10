@@ -2422,9 +2422,11 @@ class Polynomial_ff:
         return repr(self).replace("*", "")
 
     def __hash__(self):
-        if len(self._c) <= 1:
-            return hash(self._c[0]) if self._c else 0
-        return hash(tuple(self._c))
+        # the canonical polynomial hash, as for a multivariate polynomial it
+        # equals (R2-API-F1)
+        from _sage_poly import poly_hash
+        n = self._ring._name
+        return poly_hash({((n, i),) if i else (): c for i, c in enumerate(self._c)})
 
     # ---- arithmetic
     def _coerce(self, b):

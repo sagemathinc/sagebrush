@@ -352,6 +352,20 @@ def polygen(base=None, name="x"):
     return PolynomialRing(base or ZZ, name).gen()
 
 
+def poly_hash(terms):
+    """The hash of the polynomial sum c * prod(v^e) over terms {monomial: c},
+    a monomial a sorted tuple of (variable name, exponent > 0): a constant
+    hashes as itself; else the set of (monomial, c) pairs.  Shared by
+    univariate, multivariate and symbolic polynomials, which compare equal
+    across these representations."""
+    t = {m: c for m, c in terms.items() if c != 0}
+    if not t:
+        return hash(0)
+    if list(t) == [()]:
+        return hash(t[()])
+    return hash(frozenset((m, hash(c)) for m, c in t.items()))
+
+
 class Polynomial:
     """An element of ZZ[x] or QQ[x].
 
@@ -524,7 +538,11 @@ class Polynomial:
         return len(self._c) <= 1
 
     def __hash__(self):
-        return hash(tuple(self._c)) if len(self._c) > 1 else hash(self[0])
+        # the canonical polynomial hash shared with multivariate and symbolic
+        # polynomials, which compare equal (t == SR(t) with different hashes:
+        # the second review's R2-API-F1)
+        n = self._ring._name
+        return poly_hash({((n, i),) if i else (): c for i, c in enumerate(self._c)})
 
     def __repr__(self):
         return _poly_repr(self._c, self._ring._name) if self._c else "0"
