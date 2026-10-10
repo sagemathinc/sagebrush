@@ -1054,16 +1054,37 @@ def _eval_str(x, name, gen, const):
     import io
     import tokenize
     toks = []
-    prev = None
+    # an exponent (the operand after **: a number, a parenthesized group, with
+    # unary signs) keeps its integers: a^(3), a^-1, a^(2+1) (Astra's review)
+    expo = False   # just after **, before the operand is complete
+    depth = 0      # inside an exponent's parentheses
     for t in tokenize.generate_tokens(io.StringIO(x.replace("^", "**")).readline):
-        if t.type == tokenize.NUMBER and not (prev is not None and prev.string == "**"):
+        sig = t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER)
+        in_exponent = expo or depth > 0
+        if t.type == tokenize.NUMBER and not in_exponent:
             if not t.string.isdigit():
                 raise TypeError("unable to convert %r: %r is not an integer" % (x, t.string))
             toks.extend([(tokenize.NAME, "__c"), (tokenize.OP, "("), (tokenize.NUMBER, t.string), (tokenize.OP, ")")])
         else:
             toks.append((t.type, t.string))
-        if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER):
-            prev = t
+        if not sig:
+            continue
+        if t.string == "**":
+            if depth == 0:
+                expo = True
+        elif expo and depth == 0:
+            if t.string == "(":
+                depth = 1
+                expo = False
+            elif t.string in ("-", "+"):
+                pass  # a sign: the operand follows
+            else:
+                expo = False  # a number or a name: the operand is complete
+        elif depth > 0:
+            if t.string == "(":
+                depth += 1
+            elif t.string == ")":
+                depth -= 1
     src = tokenize.untokenize(toks)
     return eval(src, {name: gen, "__c": const, "__builtins__": {}})
 
@@ -1076,11 +1097,17 @@ def _derivative_count(args, gen, name):
         return 1
     k = 0
     seen = False
-    for a in args:
+    for idx, a in enumerate(args):
         if isinstance(a, int) and not isinstance(a, bool):
             if a < 0:
                 raise ValueError("derivative counts must be nonnegative")
-            k += a - 1 if seen else a
+            if seen:
+                k += a - 1
+            elif idx == 0:
+                k += a  # derivative(2): the generator twice
+            elif a:
+                # a count with no variable just before it (x, 2, 3), as Sage
+                raise ValueError("a derivative count must follow a variable")
             seen = False
         elif a is None or (isinstance(a, str) and a == name) or (not isinstance(a, str) and (a == gen or repr(a) == name)):
             k += 1

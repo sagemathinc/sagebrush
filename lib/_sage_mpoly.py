@@ -1518,23 +1518,32 @@ class MPolynomial:
         f = self
         R = self._ring
         seq = []
+        pending = False  # a variable just given, its count not yet
         for a in args:
             if isinstance(a, int) and not isinstance(a, bool):
-                # an order: the variable before it that many times in all
-                # (order 0 undoes it; a negative order is refused: the
-                # second review's R2-MUL-F7 ran one derivative for both)
+                # an order for the variable just before it, which is then
+                # taken that many times in all (order 0 undoes it; a
+                # negative order is refused: R2-MUL-F7); an order with no
+                # variable before it is refused (x, 2, 3), as in Sage, and a
+                # trailing 0 then changes nothing (x, 2, 0 is x, 2)
                 k = int(a)
                 if k < 0:
                     raise ValueError("derivative counts must be nonnegative")
                 if not seq:
                     if R._n != 1:
                         raise ValueError("must specify which variable to differentiate with respect to")
-                    seq = [R.gen()]
+                    seq, pending = [R.gen()], True
+                if not pending:
+                    if k == 0:
+                        continue
+                    raise ValueError("a derivative count must follow a variable")
                 seq += [seq[-1]] * (k - 1) if k else []
                 if k == 0:
                     seq.pop()
+                pending = False
             else:
                 seq.append(a)
+                pending = True
         if not seq:
             if not args and R._n == 1:
                 seq = [R.gen()]
