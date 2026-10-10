@@ -141,6 +141,7 @@ fn dilogarithm_boundaries() {
     assert!(li2(&Ball::with_radius(BigInt::from(1), 0, Mag::pow2(-3)), p).is_none());
     assert!(li2(&Ball::with_radius(BigInt::from(-1), 0, Mag::pow2(-3)), p).is_none());
     assert!(ti2(&Ball::with_radius(BigInt::from(1), 0, Mag::pow2(-3)), p).is_none());
+    assert!(li2(&Ball::indeterminate(), p).is_none() && ti2(&Ball::indeterminate(), p).is_none());
     // BALL-F8: to_fixed's exponent and size limits
     assert!(Ball::exact(BigInt::from(1), 1).to_fixed(i64::MAX).is_none());
     assert!(Ball::one().to_fixed(1 << 40).is_none());

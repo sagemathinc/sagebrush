@@ -79,9 +79,12 @@ pub fn li2(x: &Ball, prec: u64) -> Option<Ball> {
     let one = Ball::one();
     // the whole ball in [-1, 1] (a ball reaching beyond is refused, not
     // clipped: Li2 is complex above 1, the review's BALL-F9)
+    if !x.is_finite() {
+        return None; // (before the endpoints: an infinite radius has none)
+    }
     let (um, ue) = x.upper();
     let (lm0, le0) = x.lower();
-    if !x.is_finite() || crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) == Greater || crate::ball::cmp_dyadic(&lm0, le0, &-BigInt::one(), 0) == Less {
+    if crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) == Greater || crate::ball::cmp_dyadic(&lm0, le0, &-BigInt::one(), 0) == Less {
         return None;
     }
     if crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), -1) != Greater {
@@ -116,9 +119,12 @@ pub fn ti2(y: &Ball, prec: u64) -> Option<Ball> {
     let wp = prec + 32;
     let one = Ball::one();
     // the whole ball in [-1, 1] (BALL-F9; Ti2 is odd)
+    if !y.is_finite() {
+        return None;
+    }
     let (um, ue) = y.upper();
     let (lm, le) = y.lower();
-    if !y.is_finite() || crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) == std::cmp::Ordering::Greater || crate::ball::cmp_dyadic(&lm, le, &-BigInt::one(), 0) == std::cmp::Ordering::Less {
+    if crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) == std::cmp::Ordering::Greater || crate::ball::cmp_dyadic(&lm, le, &-BigInt::one(), 0) == std::cmp::Ordering::Less {
         return None;
     }
     let re = one.add(&y.sqr(wp), wp).log(wp)?.mul_2exp(-1).neg();
