@@ -1517,8 +1517,14 @@ class FiniteField_ext:
 
             sage: k.<a> = GF(9); k(5), k([1, 2]), k(1/2)
             (2, 2*a + 1, 2)
-            sage: k('5'), k('1/2'), k('a^(-1)'), k('a^(2+1)')
-            (2, 2, a + 2, 2*a + 1)
+            sage: k('5'), k('a^(-1)'), k('a^(2+1)')
+            (2, a + 2, 2*a + 1)
+
+        Unlike Sage, which gives 0 here, a quotient in a string is the
+        field's quotient (1/2 = 2 in characteristic 3)::
+
+            sage: k('1/2')  # sagebrush only
+            2
         """
         if isinstance(x, FiniteFieldElement):
             if x._parent is self:
