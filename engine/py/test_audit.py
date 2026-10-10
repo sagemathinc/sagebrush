@@ -529,3 +529,13 @@ for _l in open(_os.path.join(_os.path.dirname(__file__), "..", "modsym", "exampl
     assert (_M.eisenstein_subspace().new_subspace().dimension(), _M.new_subspace().dimension()) == (_en, _mn), (_N, _k)
     assert _M.eisenstein_subspace().new_subspace().dimension() <= _M.eisenstein_subspace().dimension()
 print("modforms new ok")
+
+# R2-NFD-F3, R2-API-F1, R2-EXT-F16: equality and hashing agree
+from sagebrush.sage import NumberField, PowerSeriesRing, O, SR, GF, PolynomialRing
+_x = polygen(QQ, "x"); _K = NumberField(_x**2 - 2, "a"); _L = NumberField(_x**2 - 2, "a")
+assert not (_K(2) == _x**2) and not (_x**2 == _K(2)) and not (_K.gen() == _x) and _K.gen() == _L.gen() and hash(_K.gen()) == hash(_L.gen())
+_t = PolynomialRing(QQ, "t").gen(); _T = PolynomialRing(QQ, "t,u").gen(0)
+assert hash(_t) == hash(SR(_t)) == hash(_T) and len({_t, SR(_t), _T}) == 1 and hash(_t**2 + 3 * _t + QQ(1) / 2) == hash(SR(_t)**2 + 3 * SR(_t) + QQ(1) / 2)
+_w, _W = PolynomialRing(GF(7), "w").gen(), PolynomialRing(GF(7), "w,z").gen(0); assert hash(_w**2 + 3) == hash(_W**2 + 3)
+_u = PowerSeriesRing(QQ, "u").gen(); raises(TypeError, hash, _u + O(_u**2)); assert hash(_u + _u**2) == hash(PolynomialRing(QQ, "u").gen() * (1 + PolynomialRing(QQ, "u").gen()))
+print("hash ok")

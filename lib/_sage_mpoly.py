@@ -1433,9 +1433,11 @@ class MPolynomial:
         return r if r is NotImplemented else not r
 
     def __hash__(self):
-        if self.is_constant():
-            return hash(self._ring._dom._out(self._d.get((0,) * self._ring._n, self._ring._dom.zero)))
-        return hash(tuple(sorted(self._d.items(), key=lambda t: t[0])))
+        # the canonical polynomial hash (R2-API-F1: equal to a univariate or
+        # symbolic polynomial, with a different hash)
+        from _sage_poly import poly_hash
+        names, out = self._ring._names, self._ring._dom._out
+        return poly_hash({tuple((names[i], e) for i, e in enumerate(m) if e): out(c) for m, c in self._d.items()})
 
     def __bool__(self):
         return len(self) > 0
