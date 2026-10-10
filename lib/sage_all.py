@@ -968,8 +968,8 @@ def factor(n, proof=None, **kwds):
         if proof:
             # the integer factors (a polynomial's content, ...) proven prime
             for p, _ in F:
-                if isinstance(p, int):
-                    is_prime(p, proof=True)
+                if isinstance(p, int) and not is_prime(p, proof=True):
+                    raise RuntimeError("factor: %d was reported prime but is composite" % p)
         return F
     if isinstance(n, _Fraction) and n.denominator != 1:
         num, den = factor(n.numerator, proof=proof), factor(n.denominator, proof=proof)
@@ -992,9 +992,13 @@ def factor(n, proof=None, **kwds):
             out[p] = out.get(p, 0) + e
     else:
         _factor_into(n, out)
-    if proof:
-        for p in out:
-            is_prime(p, proof=True)
+    # every factor prime (BPSW; proven with proof=True, else
+    # NotImplementedError): a composite is never reported as a prime
+    # factor, whatever produced it (a factor proven composite here would be
+    # an engine bug: Arnault's strong pseudoprime to fixed bases)
+    for p in out:
+        if not is_prime(p, proof=proof):
+            raise RuntimeError("factor: %d was reported prime but is composite" % p)
     return Factorization(sorted(out.items()), unit)
 
 

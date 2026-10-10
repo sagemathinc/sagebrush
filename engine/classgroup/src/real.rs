@@ -128,15 +128,25 @@ pub fn ln_int(n: &BigInt, prec: u32) -> BigInt {
     ln_fixed(&(n << prec as usize), prec)
 }
 
-/// The value as an f64.
+/// The value x / 2^prec as an f64 (correctly scaled for any size and any
+/// precision: dividing by 2^prec as a double overflowed to infinity at
+/// prec >= 1024, and every value below 2^1000 became 0, which made a
+/// certified error bound use |t| = 0 for a small root).
 pub fn to_f64(x: &BigInt, prec: u32) -> f64 {
     let b = x.bits() as i64;
-    if b <= 1000 {
-        x.to_f64().unwrap() / 2f64.powi(prec as i32)
-    } else {
-        let s = (b - 60) as usize;
-        (x >> s).to_f64().unwrap() * 2f64.powi(s as i32 - prec as i32)
+    // x = m 2^s with |m| < 2^60 (exact below 2^53, else rounded)
+    let s = (b - 60).max(0);
+    let m = (x >> s as usize).to_f64().unwrap();
+    let e = s - prec as i64;
+    if e > 1100 {
+        return if m == 0.0 { 0.0 } else { m.signum() * f64::INFINITY };
     }
+    if e < -1200 {
+        return 0.0 * m.signum();
+    }
+    // (two steps: 2^e itself may be subnormal or overflow where m 2^e is not)
+    let h = e / 2;
+    m * 2f64.powi(h as i32) * 2f64.powi((e - h) as i32)
 }
 
 /// The gcd of reals that are integer multiples of an unknown u, given as
@@ -239,5 +249,16 @@ mod tests {
         let xs: Vec<BigInt> = ms.iter().map(|m| m.parse::<BigInt>().unwrap() * &two_r).collect();
         let g = real_gcd(&xs, &BigInt::from(16)).unwrap();
         assert_eq!(g, two_r, "{}", to_f64(&g, prec));
+    }
+
+    #[test]
+    fn to_f64_any_precision() {
+        // 3/2 at 1100 and 2000 bits; 2^-1050 and 2^1050
+        for p in [10u32, 1023, 1024, 1100, 2000] {
+            assert_eq!(to_f64(&(BigInt::from(3) << (p as usize - 1)), p), 1.5);
+        }
+        assert_eq!(to_f64(&BigInt::one(), 1050), 2f64.powi(-1050));
+        assert_eq!(to_f64(&(BigInt::one() << 2100usize), 1050), f64::INFINITY);
+        assert_eq!(to_f64(&-(BigInt::from(5) << 1200usize), 1200), -5.0);
     }
 }

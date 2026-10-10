@@ -169,3 +169,9 @@ for e in [log(-s5 + I * x), sqrt(-s5 + I * x), atan(2 * I + x), asin(2 + I * x),
         assert r == "error", ("V4/V5", e, d, r)
 assert str(limit(log(-1 + I * x), x=0, dir="-")) == "-I*pi" and str(limit(sqrt(-1 + I * x), x=0, dir="-")) == "-I"
 print("fifth review ok")
+# systematic review: Arnault's strong pseudoprime to the first 20 prime bases
+_p = 29674495668685510550154174642905332730771991799853043350995075531276838753171770199594238596428121188033664754218345562493168782883
+_N = _p * (313 * (_p - 1) + 1) * (353 * (_p - 1) + 1)
+assert not nf.is_prime(_N)
+assert nf.factor_integer(2**64 + 1) == [(274177, 1), (67280421310721, 1)]
+print("arith ok")

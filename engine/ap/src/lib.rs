@@ -154,7 +154,7 @@ pub fn primes_up_to(n: u64) -> Vec<u64> {
     let half = (n as usize - 1) / 2; // index i is 2 i + 3
     let mut composite = vec![false; half];
     let mut i = 0;
-    while (2 * i + 3) * (2 * i + 3) <= n as usize {
+    while ((2 * i + 3) as u64) * ((2 * i + 3) as u64) <= n {
         if !composite[i] {
             let q = 2 * i + 3;
             let mut j = (q * q - 3) / 2;

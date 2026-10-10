@@ -153,10 +153,8 @@ impl Embeddings {
     /// (nf/roots.rs): the signature is proven (and checked against Sturm).
     pub fn new(o: &Order) -> Result<Embeddings, String> {
         let iso = super::roots::isolate(&o.f, 64)?;
-        let to_f = |x: &BigInt| -> f64 {
-            let sh = x.bits().saturating_sub(60) as usize;
-            (x >> sh).to_f64().unwrap() * 2f64.powi(sh as i32 - iso.prec as i32)
-        };
+        let iprec = iso.prec;
+        let to_f = |x: &BigInt| -> f64 { crate::real::to_f64(x, iprec) };
         let mut real: Vec<usize> = (0..o.n).filter(|&i| iso.roots[i].real).collect();
         let mut cplx: Vec<usize> = (0..o.n).filter(|&i| !iso.roots[i].real && iso.roots[i].im.is_positive()).collect();
         real.sort_by(|&a, &b| iso.roots[a].re.cmp(&iso.roots[b].re));
@@ -176,10 +174,7 @@ impl Embeddings {
         let prec = 96 + cbits + (o.n as u32) * rbits;
         let hp = emb.roots_hp(&o.f, prec)?;
         let p = prec as usize;
-        let to_f = |x: &BigInt| -> f64 {
-            let sh = x.bits().saturating_sub(60) as usize;
-            (x >> sh).to_f64().unwrap() * 2f64.powi(sh as i32 - p as i32)
-        };
+        let to_f = |x: &BigInt| -> f64 { crate::real::to_f64(x, prec) };
         let den = o.den.to_f64().unwrap();
         emb.conj = (0..o.n).map(|i| {
             hp.iter().map(|(zr, zi)| {

@@ -168,6 +168,11 @@ pub fn primes_up_to(n: u64) -> Vec<u64> {
     for i in 2..=n {
         if s[i] {
             out.push(i as u64);
+            // (i i in u64: on wasm32 usize wrapped past 65535 and struck out
+            // primes such as 203897, the systematic review's ARITH finding)
+            if (i as u64) * (i as u64) > n as u64 {
+                continue;
+            }
             let mut j = i * i;
             while j <= n {
                 s[j] = false;
