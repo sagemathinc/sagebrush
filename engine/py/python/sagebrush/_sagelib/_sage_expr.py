@@ -2911,23 +2911,38 @@ def _keep_conditions(name):
         params = list(object.__getattribute__(self, "_params"))
         if args and isinstance(args[0], Expression) and args[0].is_relational():
             o = args[0]
-            if isinstance(o, Solution):
-                oc, op_ = list(o._conds), list(o._params)
+            if not isinstance(o, Solution):
+                o = Solution(o._s)
+            # rename bound integer parameters apart from every name on the
+            # other side, free or bound, conditions included (u + s captured
+            # u's free n1 in s's family: CSOL-F7)
+            def names(sol):
+                out = set(sol._names()) | set(sol._params)
+                for c in sol._conds:
+                    out |= set(c._names())
+                return out
+            me = Solution(self._s, conds, params)
+            used = names(me) | names(o)
+
+            def apart(sol, other_names):
                 ren = {}
-                used = set(params) | set(op_) | set(self._names()) | set(o._names())
-                for p in op_:
-                    if p in params:
+                for p in sol._params:
+                    if p in other_names:
                         i = 1
                         while "n%d" % i in used:
                             i += 1
                         used.add("n%d" % i)
                         ren[p] = "n%d" % i
-                if ren:
-                    sub = {Expression(_sym_s(p)): Expression(_sym_s(q)) for p, q in ren.items()}
-                    o = Solution(Expression.subs(o, sub)._s, [Expression.subs(c, sub) for c in oc], [ren.get(p, p) for p in op_])
-                    oc, op_ = list(o._conds), list(o._params)
-                conds += [c for c in oc if str(c) not in {str(d) for d in conds}]
-                params += [p for p in op_ if p not in params]
+                if not ren:
+                    return sol
+                sub = {Expression(_sym_s(p)): Expression(_sym_s(q)) for p, q in ren.items()}
+                return Solution(Expression.subs(sol, sub)._s, [Expression.subs(c, sub) for c in sol._conds], [ren.get(p, p) for p in sol._params])
+            me = apart(me, names(o))
+            o = apart(o, names(me))
+            l, r = Expression.lhs(me), Expression.rhs(me)
+            conds, params = list(me._conds), list(me._params)
+            conds += [c for c in o._conds if str(c) not in {str(d) for d in conds}]
+            params += [p for p in o._params if p not in params]
             nl, nr = base(l, o.lhs()), base(r, o.rhs())
         else:
             nl, nr = base(l, *args), base(r, *args)

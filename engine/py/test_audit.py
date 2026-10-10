@@ -504,6 +504,10 @@ _u, _v = solve(var("y") == var("b"), var("y"))[0], solve(sin(_y) == 0, _y)[0]; r
 assert str(solve(log(_pa) * (_y - 1) == 0, _y)[0]) == "x == 1 if a != 0" and str(solve(_pa * exp(1 / _y) == 0, _y)) == "[x == r1 if a == 0 and r1 != 0]"
 assert str(solve(_pa**(_y / (_y + 1)) == 1, _y)[0]) == "x == r1 if a == 1 and r1 != -1" and str(solve(exp(_y / (_y + 1)) == 1, _y)) == "[0 == e^(x/(x + 1)) - 1]"
 assert str(solve(sin(_y) / _y == _pa, _y)) == "[0 == -a + sin(x)/x]"
+# the bf5e31a follow-up: renaming apart from free names, constant and symbolic-exponent domains
+_u = solve(var("y") == var("n1"), var("y"))[0]; _s = solve(sin(_y) == 0, _y)[0]; assert str((_u + _s).subs(n1=QQ(1) / 2)) == "x + y == pi*n2 + 1/2 for integer n2"
+_c = SR("sqrt(2*I)") - 1 - I; assert solve(log(_c) * (_y - 1) == 0, _y)[0].conditions() != []
+assert str(solve(_pa * exp(_y**var("b")) == 0, _y)[-1]) == "0 == a*e^(x^b)"
 assume(_y < 0); assert abs(sqrt(_y)).subs(x=-1) == 1; forget()  # R2-SYMALG-F2
 assume(_y > -SR("1/10^400")); assert abs(_y).subs(x=-SR("1/10^401")) == SR("1/10^401"); forget()
 assume(_y, "odd"); assert solve(_y**2 - 4, _y) == []; forget()
