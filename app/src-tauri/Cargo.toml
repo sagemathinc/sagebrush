@@ -1,6 +1,6 @@
 [package]
 name = "sagebrush-app"
-version = "0.3.0"
+version = "0.3.1"
 description = "Sagebrush: Python, Sage and Magma notebooks with Sagebrush's math engines"
 authors = ["SageMath, Inc."]
 license = "MIT OR Apache-2.0"
