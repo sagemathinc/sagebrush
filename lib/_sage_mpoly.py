@@ -1437,7 +1437,9 @@ class MPolynomial:
         # symbolic polynomial, with a different hash)
         from _sage_poly import poly_hash
         names, out = self._ring._names, self._ring._dom._out
-        return poly_hash({tuple((names[i], e) for i, e in enumerate(m) if e): out(c) for m, c in self._d.items()})
+        # (each monomial's variables sorted by name: QQ['x,y'] and QQ['y,x']
+        # list them in different orders, R2-API-F1)
+        return poly_hash({tuple(sorted((names[i], e) for i, e in enumerate(m) if e)): out(c) for m, c in self._d.items()})
 
     def __bool__(self):
         return len(self) > 0
