@@ -18,9 +18,43 @@ the generators $F$. If
 3. the leading monomials of $\tilde G$ are those of a Gröbner basis of
    $\langle F \bmod p \rangle$ for some prime $p$,
 
-then $\langle\tilde G\rangle = I$ and $\tilde G$ is its reduced basis.
-Condition 3 is what removes the need to show $\tilde G \subseteq I$. It
-works because Hilbert functions can only go up modulo $p$.
+then $\langle\tilde G\rangle = I$ and $\tilde G$ is its reduced basis,
+**provided $I$ is homogeneous**. Condition 3 is what removes the need to
+show $\tilde G \subseteq I$. It works because Hilbert functions can only
+go up modulo $p$: in each degree $d$, $(I \bmod p)_d$ is spanned by the
+reductions of the integer vectors spanning $I_d$, so its dimension is at
+most $\dim I_d$. Then
+$\mathrm{HF}_{R/I} \le \mathrm{HF}_{R/(I \bmod p)} = \mathrm{HF}_{R/\langle\tilde G\rangle} \le \mathrm{HF}_{R/I}$,
+the last because $I \subseteq \langle\tilde G\rangle$, and the two
+homogeneous ideals agree degree by degree.
+
+**Not for inhomogeneous ideals.** There the pieces of degree at most $d$
+are not spanned by products of the generators of degree at most $d$
+(degrees can drop), and the theorem fails. Take $N = pq$ and
+$I = \langle x - y,\; x^2 + (N - 1)xy - x\rangle$. Modulo $p$ the
+second generator becomes $x^2 - xy - x \equiv -x$ given $x = y$, so
+$\langle F \bmod p\rangle = \langle x, y\rangle$. The candidate
+$\{x, y\}$ is a reduced Gröbner basis, both generators reduce to zero
+by it, and its leading monomials are those modulo $p$. Yet $I$ has the
+point $(1/N, 1/N)$: the right basis is $\{x - y,\; y^2 - y/N\}$. Astra's
+systematic review found this. With $N = 2147483647 \cdot 2147483629$,
+the product of the first two primes below $2^{31}$ that our F4 uses,
+Sagebrush returned $\{x, y\}$ with proof on. Steidel (arXiv:1201.5792,
+Remark 4.1) records the same qualification of the theorem, due to Noro
+and Yokoyama.
+
+**What Sagebrush proves now** (`f4q::in_ideal`). For inhomogeneous
+generators $F$, homogenize them to $F^h$ with a new last variable $h$.
+Prove a degrevlex basis $H$ of $\langle F^h\rangle$ by the criterion above,
+which is valid there. Then $H(x, 1)$ lies in $I$, since
+$\langle F^h\rangle$ dehomogenizes to $I$. Each $g \in \tilde G$ that
+reduces to zero modulo $H(x, 1)$ is in $I$. Together with conditions 1
+and 2 this gives $\langle \tilde G\rangle = I$. When F4's own run fails
+the check (its first prime was unlucky, as both factors of the $N$ above
+are), $H$ comes from the multimodular algorithm, which drops primes whose
+leading monomials differ. FGLM's lex bases are proven the same way. The
+extra cost is small: katsura-7 and cyclic-6 still take under 0.1 s in
+total.
 
 - **Condition 3 is free** when the first prime took part in every step of
   the F4 run over $\mathbb{Q}$ (article 3). Otherwise one F4 modulo a

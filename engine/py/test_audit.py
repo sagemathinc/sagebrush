@@ -175,3 +175,22 @@ _N = _p * (313 * (_p - 1) + 1) * (353 * (_p - 1) + 1)
 assert not nf.is_prime(_N)
 assert nf.factor_integer(2**64 + 1) == [(274177, 1), (67280421310721, 1)]
 print("arith ok")
+# systematic review G1/G2/ASR: inhomogeneous Groebner bases proven through
+# the homogenized ideal; the cache keeps its proof status; bases immutable
+from sagebrush.sage import PolynomialRing, QQ
+from _sage_lang import proof as _proof
+_N = 2147483647 * 2147483629
+for _o in ("degrevlex", "deglex", "lex"):
+    _R = PolynomialRing(QQ, ["x", "y"], order=_o); _x, _y = _R.gens()
+    assert sorted(map(str, _R.ideal([_x - _y, _x**2 + (_N - 1) * _x * _y - _x]).groebner_basis())) == sorted(["x - y", "y^2 - 1/4611685975477714963*y"])
+_R = PolynomialRing(QQ, ["x", "y"]); _x, _y = _R.gens()
+_J = _R.ideal([_x - _y, _x**2 + (_N - 1) * _x * _y - _x])
+with _proof.WithProof('polynomial', False):
+    _J.groebner_basis()
+assert len(_J.groebner_basis()) == 2 and _J._gb_proven
+_B = _R.ideal([_x]).groebner_basis()
+try:
+    _B.append(1); assert False
+except ValueError:
+    pass
+print("groebner ok")

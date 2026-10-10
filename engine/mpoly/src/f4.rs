@@ -729,6 +729,13 @@ pub fn groebner_q_opt(fs: &[QPoly], o: Order, proof: bool) -> Result<Vec<QPoly>,
             eprintln!("groebner_q: the F4 over Q failed its check; multi-modular");
         }
     }
+    groebner_q_multimodular(&fs, o, proof)
+}
+
+/// The basis from bases modulo many primes (unlucky ones dropped by their
+/// leading monomials), rationally reconstructed and verified (fs nonzero).
+pub(crate) fn groebner_q_multimodular(fs: &[QPoly], o: Order, proof: bool) -> Result<Vec<QPoly>, String> {
+    let fs: Vec<QPoly> = fs.to_vec();
     let n = fs[0].num.n;
     let bits = bits_range(&fs, o).0;
     // leading coefficients and denominators: primes dividing them are skipped
@@ -835,7 +842,10 @@ pub fn groebner_q_opt(fs: &[QPoly], o: Order, proof: bool) -> Result<Vec<QPoly>,
         let t0 = dbg.then(std::time::Instant::now);
         let pk = Packing { n, bits: wb };
         let cand: Vec<Poly<QQ>> = rec.iter().map(|f| Poly::from_terms(&QQ, pk, o, f.clone())).collect();
-        let ok = verify_q(&fs, &cand, o, pk)?;
+        // (leading monomials from the images make it the basis only for a
+        // homogeneous ideal: otherwise the candidate must be proven to lie
+        // in the ideal, f4q::in_ideal, the systematic review's G1)
+        let ok = verify_q(&fs, &cand, o, pk)? && (!proof || crate::f4q::homogeneous(&fs) || crate::f4q::in_ideal(&fs, &cand, None)?);
         if dbg {
             eprintln!("groebner_q: verified {} in {:.3}s", ok, t0.map_or(0.0, |t| t.elapsed().as_secs_f64()));
         }
@@ -854,7 +864,7 @@ pub fn groebner_q_opt(fs: &[QPoly], o: Order, proof: bool) -> Result<Vec<QPoly>,
 pub(crate) type ZT = Vec<(u128, u64, BigInt)>;
 
 /// The primitive integer multiple of f (positive leading coefficient).
-fn to_zt(f: &Poly<QQ>) -> ZT {
+pub(crate) fn to_zt(f: &Poly<QQ>) -> ZT {
     let mut den = BigInt::one();
     for x in &f.t {
         den = den.lcm(x.c.denom());
@@ -876,7 +886,7 @@ fn to_zt(f: &Poly<QQ>) -> ZT {
 /// Whether f reduces to 0 modulo g (fraction-free top reductions: f is
 /// replaced by a f - b m g with the leading terms cancelling, the content
 /// removed now and then).
-fn reduces_to_zero_z(f: ZT, g: &[ZT], pk: &Packing, o: Order) -> Result<bool, Overflow> {
+pub(crate) fn reduces_to_zero_z(f: ZT, g: &[ZT], pk: &Packing, o: Order) -> Result<bool, Overflow> {
     use std::collections::BTreeMap;
     let guard = pk.guard();
     let mut cur: BTreeMap<u128, (u64, BigInt)> = f.into_iter().map(|(k, w, c)| (k, (w, c))).collect();
