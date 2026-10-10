@@ -25,6 +25,8 @@ def FractionField_(R):
     """
     k = id(R)
     if k not in _FIELDS:
+        if not _base_is_domain(R.base_ring()):
+            raise TypeError("the fraction field of %r is not defined: its coefficients are not an integral domain" % (R,))
         _FIELDS[k] = _FractionField(R)
     return _FIELDS[k]
 
@@ -535,15 +537,31 @@ def _fraction_field(self):
     return FractionField_(self)
 
 
-def _is_integral_domain(self, proof=True):
-    """True (over a field or ZZ).
+def _is_integral_domain(self, proof=None):
+    """Whether the coefficient ring is an integral domain (then so is the
+    polynomial ring; Integers(4)['x'] is not: 2^2 = 0, the systematic
+    review's ASR-F3).
 
     EXAMPLES::
 
-        sage: QQ['x'].is_integral_domain()
-        True
+        sage: QQ['x'].is_integral_domain(), Integers(4)['x'].is_integral_domain()
+        (True, False)
     """
-    return True
+    return _base_is_domain(self.base_ring(), proof)
+
+
+def _base_is_domain(B, proof=None):
+    """Whether the ring B is an integral domain (ZZ, QQ, fields, ...)."""
+    sa = _sa()
+    if B is sa.ZZ or B is sa.QQ:
+        return True
+    f = getattr(B, "is_integral_domain", None) or getattr(B, "is_field", None)
+    if f is None:
+        raise NotImplementedError("whether %r is an integral domain" % (B,))
+    try:
+        return bool(f(proof=proof))
+    except TypeError:
+        return bool(f())
 
 
 def _install_ring_extras(cls):

@@ -67,7 +67,7 @@ pub fn eliminate_tracked(n: usize, rels: &[Relation], max_weight: usize, mut pay
             let mut best: Option<(usize, u32)> = None;
             for &k in &list {
                 let r = &rows[k as usize];
-                if get(r, cu).abs() == 1 && best.map_or(true, |(bw, _)| r.len() < bw) {
+                if get(r, cu).unsigned_abs() == 1 && best.map_or(true, |(bw, _)| r.len() < bw) {
                     best = Some((r.len(), k));
                 }
             }

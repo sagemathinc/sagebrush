@@ -135,8 +135,8 @@ class IntegerModRing_:
         """
         return _Integer(self._n)
 
-    def is_field(self, proof=True):
-        """Whether n is prime.
+    def is_field(self, proof=None):
+        """Whether n is prime (proven with proof=True: see is_prime).
 
         EXAMPLES::
 
@@ -145,6 +145,8 @@ class IntegerModRing_:
         """
         if self._prime is None:
             self._prime = _is_prime(self._n)
+        if proof and self._prime:
+            _sa().is_prime(self._n, proof=True)
         return self._prime
 
     is_integral_domain = is_field
@@ -1946,7 +1948,7 @@ def _gf_name(q, names):
     return str(names)
 
 
-def GF(order, name=None, modulus=None, names=None, impl=None, proof=True, **kwds):
+def GF(order, name=None, modulus=None, names=None, impl=None, proof=None, **kwds):
     """The finite field with order elements.
 
     EXAMPLES::
@@ -1976,6 +1978,10 @@ def GF(order, name=None, modulus=None, names=None, impl=None, proof=True, **kwds
     if pn is None:
         raise ValueError("the order of a finite field must be a prime power")
     p, n = pn
+    if proof:
+        # an explicit proof request: p proven prime, or NotImplementedError
+        # (the systematic review's ASR-F1)
+        _sa().is_prime(p, proof=True)
     if n == 1:
         key = ("GF", p)
         if key not in _RINGS:
@@ -2496,6 +2502,13 @@ class Polynomial_ff:
         b = self._coerce(b) if not isinstance(b, Polynomial_ff) else b
         if b is None:
             return NotImplemented
+        if b._ring is not self._ring:
+            # in different rings, equal only as equal constants (x in
+            # GF(7)['x'] was y in GF(7)['y']: the systematic review's API-F3)
+            if len(self._c) > 1 or len(b._c) > 1:
+                return False
+            if self._ring.base_ring() is not b._ring.base_ring():
+                return NotImplemented
         return self._c == b._c
 
     def __ne__(self, b):

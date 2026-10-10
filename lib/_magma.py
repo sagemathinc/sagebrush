@@ -1160,19 +1160,24 @@ Factorization = Factorisation = _factorization
 
 # ------------------------------------------------------------------ integers
 
-def IsPrime(n, Proof=True):
+# (Proof is forwarded when given: true means proven or an error, as in
+# Sage mode; by default a prime above 3.3e24 is a BPSW probable prime,
+# not proven as Magma's default would promise: the systematic review's
+# ASR-F1)
+def IsPrime(n, Proof=None):
+    return _sa.is_prime(n, proof=Proof)
+
+
+def IsProbablePrime(n, Bases=None):
     return _sa.is_prime(n)
 
 
-IsProbablePrime = IsPrime
+def NextPrime(n, Proof=None):
+    return _sa.next_prime(n, proof=Proof)
 
 
-def NextPrime(n, Proof=True):
-    return _sa.next_prime(n)
-
-
-def PreviousPrime(n, Proof=True):
-    return _sa.previous_prime(n)
+def PreviousPrime(n, Proof=None):
+    return _sa.previous_prime(n, proof=Proof)
 
 
 def PrimesUpTo(n):
@@ -2115,7 +2120,10 @@ class _ClassGroupMap:
 
 def ClassGroup(K, Bound=None, Proof=None):
     F = _field(K)
-    G = _AbGroup(list(F.class_group().invariants()))
+    # Proof (true or "Full") is forwarded: proven or an error ("GRH",
+    # "Subgroup" or none: the GRH result)
+    proof = True if Proof is True or (isinstance(Proof, str) and Proof.lower() in ("full", "bound")) else None
+    G = _AbGroup(list(F.class_group(proof=proof).invariants()))
     return _multi([G, _ClassGroupMap(G, F._maximal_order())])
 
 

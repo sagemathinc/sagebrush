@@ -347,10 +347,10 @@ from _interact import (interact, slider, range_slider, selector, checkbox, input
 # ------------------------------------------------------------------ Rational
 
 def _q(x):
-    # A Fraction result as Sage would show it: an int when it is integral.
+    # A Fraction result as a Rational, also when it is integral: as in Sage,
+    # QQ(1/3)*3 is 1 in QQ (an int there made (q*3)/3 a float in ordinary
+    # Python under pyjs: the systematic review's API-F7).
     if type(x) is _Fraction:
-        if x._denominator == 1:
-            return Integer(x._numerator)
         return Rational._from_coprime_ints(x._numerator, x._denominator)
     return x
 
@@ -408,11 +408,15 @@ class Rational(_Fraction):
     __slots__ = ()
 
     def __repr__(self):
+        if self._denominator == 1:
+            return str(self._numerator)
         return f"{self._numerator}/{self._denominator}"
 
     __str__ = __repr__
 
     def _repr_latex_(self):
+        if self._denominator == 1:
+            return f"${self._numerator}$"
         return f"$\\frac{{{self._numerator}}}{{{self._denominator}}}$"
 
     __add__ = _lift("__add__")
@@ -742,8 +746,8 @@ def is_prime(n, proof=None):
     return True
 
 
-def next_prime(n):
-    """The smallest prime > n.
+def next_prime(n, proof=None):
+    """The smallest prime > n (proven with proof=True: see is_prime).
 
     EXAMPLES::
 
@@ -757,11 +761,15 @@ def next_prime(n):
         n += 1
     while not is_prime(n):
         n += 2
+    # (the numbers skipped are proven composite; the answer is proven too
+    # when asked, or NotImplementedError: the systematic review's ASR-F1)
+    if proof:
+        is_prime(n, proof=True)
     return n
 
 
-def previous_prime(n):
-    """The largest prime < n.
+def previous_prime(n, proof=None):
+    """The largest prime < n (proven with proof=True: see is_prime).
 
     EXAMPLES::
 
@@ -773,6 +781,8 @@ def previous_prime(n):
         raise ValueError("no prime less than 2")
     while not is_prime(n):
         n -= 1
+    if proof:
+        is_prime(n, proof=True)
     return n
 
 

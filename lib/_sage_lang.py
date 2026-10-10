@@ -1073,6 +1073,16 @@ class _CallableInt(int):
         return int(self)
 
 
+def _int_n(n, prec=None, digits=None):
+    """An integer as a real number: 53 bits, or at the precision asked
+    (from the exact integer, not a double)."""
+    if prec is None and digits is None:
+        return RealNumber(n)
+    import _sage_real
+    p = _sage_real.digits_to_prec(digits) if digits is not None else prec
+    return _sage_real.RealField(p)(int(n))
+
+
 def _install_int_methods(sa):
     """Sage's Integer methods on Python ints, from sage_all's functions (in
     pyjs); under CPython, which cannot extend int, an Integer subclass of
@@ -1138,8 +1148,8 @@ def _install_int_methods(sa):
         "number_of_divisors": lambda n: sa.number_of_divisors(n),
         "prime_divisors": prime_divisors,
         "prime_factors": prime_divisors,
-        "next_prime": lambda n, proof=None: sa.next_prime(n),
-        "previous_prime": lambda n, proof=None: sa.previous_prime(n),
+        "next_prime": lambda n, proof=None: sa.next_prime(n, proof=proof),
+        "previous_prime": lambda n, proof=None: sa.previous_prime(n, proof=proof),
         "next_probable_prime": lambda n: sa.next_prime(n),
         "binomial": lambda n, k: sa.binomial(n, k),
         "factorial": lambda n: sa.factorial(n),
@@ -1159,9 +1169,11 @@ def _install_int_methods(sa):
         "euler_phi": lambda n: sa.euler_phi(n),
         "sigma": lambda n, k=1: sa.sigma(n, k),
         "moebius": lambda n: sa.moebius(n),
-        "n": lambda n, digits=None, prec=None: RealNumber(n),
-        "N": lambda n, digits=None, prec=None: RealNumber(n),
-        "numerical_approx": lambda n, digits=None, prec=None: RealNumber(n),
+        # (at the precision asked: it was ignored, the systematic review's
+        # API-F5)
+        "n": lambda n, prec=None, digits=None: _int_n(n, prec, digits),
+        "N": lambda n, prec=None, digits=None: _int_n(n, prec, digits),
+        "numerical_approx": lambda n, prec=None, digits=None: _int_n(n, prec, digits),
         "parent": lambda n: sa.ZZ,
         "floor": lambda n: n,
         "ceil": lambda n: n,
