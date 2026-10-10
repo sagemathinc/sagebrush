@@ -171,6 +171,8 @@ plugins and platform bindings, 400-odd crates) has its own,
 Five of those crates (cssparser, cssparser-macros, dtoa-short, option-ext and
 selectors, through Tauri) are under the Mozilla Public License 2.0, a file-level
 copyleft: they are used unmodified, and their source is on crates.io. The
-generator accepts MPL-2.0 for the app only. The app uses the platform's web
+generator accepts MPL-2.0 for the app only (decided: fine for the app, as are
+the AppImage's LGPL system libraries; README.md's table says which
+distribution contains what). The app uses the platform's web
 view; the Linux AppImage also bundles the build system's shared libraries
 (GTK, WebKitGTK, ..., LGPL), which that file does not list.
