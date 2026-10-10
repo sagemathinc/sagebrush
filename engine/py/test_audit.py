@@ -425,4 +425,9 @@ assert AA(QQ(2) / 10**330).sqrt() > 0  # R2-ROOT-F5
 assert len({AA(2).sqrt(), AA(8).sqrt() / 2}) == 1 and (10**400 * AA(2).sqrt()).floor() // 10**399 == 14
 _R1 = PolynomialRing(QQ, 1, "x"); _f63 = _R1({(2**63,): 1}); _f63.quo_rem(_R1.one())
 assert (_f63 * _f63).degree() == 2**64  # R2-MUL-F3: no exponent wraparound after caching
+_Zr = PolynomialRing(ZZ, names=("x", "y")); _Qr = PolynomialRing(QQ, names=("x", "y")); _zx, _qx = _Zr.gen(), _Qr.gen()
+raises(TypeError, _Zr, _qx / 2); raises(TypeError, _Zr, PolynomialRing(QQ, "x").gen() / 2)  # R2-MUL-F1
+_fz = _zx + _qx / 2
+assert _fz.parent() is _Qr and (_zx + QQ(1) / 2).parent() is _Qr and (_zx * (_qx / 2)).parent() is _Qr
+_qq, _rr = _fz.quo_rem(_Qr(_zx)); assert _qq * _Qr(_zx) + _rr == _fz
 print("rereview2 ok")

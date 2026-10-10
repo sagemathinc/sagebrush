@@ -723,7 +723,7 @@ class MPolynomialRing_:
                         e = [0] * self._n
                         e[i] = k
                         d[tuple(e)] = dom._conv(c)
-                return MPolynomial(self, d)
+                return MPolynomial(self, _integral(self, d))
             if x.degree() <= 0:
                 return self(x[0] if x._c else 0)
             raise TypeError("cannot convert %r into %r" % (x, self))
@@ -741,7 +741,7 @@ class MPolynomialRing_:
                         e = [0] * self._n
                         e[i] = k
                         d[tuple(e)] = c
-                return MPolynomial(self, d)
+                return MPolynomial(self, _integral(self, d))
             if len(cs) <= 1:
                 return self(cs[0] if cs else 0)
             raise TypeError("cannot convert %r into %r" % (x, self))
@@ -758,6 +758,15 @@ class MPolynomialRing_:
         if self._base is _sa().ZZ and _F(c).denominator != 1:
             raise TypeError("no conversion of this rational to integer")
         return MPolynomial(self, {(0,) * self._n: c})
+
+
+def _integral(R, d):
+    """d, refused if R is over ZZ and a coefficient is not an integer (every
+    conversion path checks: Z(Q.gen()/2) had parent ZZ[x, y] and coefficient
+    1/2, the systematic review's R2-MUL-F1)."""
+    if R._base is _sa().ZZ and any(_F(c).denominator != 1 for c in d.values()):
+        raise TypeError("no conversion of this rational to integer")
+    return d
 
 
 def _map_vars(f, R):
@@ -778,7 +787,7 @@ def _map_vars(f, R):
             if v:
                 t[idx[k]] += v
         d[tuple(t)] = R._dom._add(d.get(tuple(t), R._dom.zero), R._dom._conv(S._dom._out(c)))
-    return MPolynomial(R, d)
+    return MPolynomial(R, _integral(R, d))
 
 
 def _eval_string(R, s):
@@ -1218,6 +1227,10 @@ class MPolynomial:
                 return o
             if o._ring == R:
                 return MPolynomial(R, o._d)
+            if R._base is _sa().ZZ and o._ring._base is not _sa().ZZ:
+                # the other ring is larger: computed there (_over_qq; x + qx/2
+                # was 3/2*x in ZZ[x, y])
+                return None
             try:
                 return _map_vars(o, R)
             except TypeError:
@@ -1227,10 +1240,28 @@ class MPolynomial:
         except (TypeError, ValueError, ZeroDivisionError, ArithmeticError):
             return None
 
+    def _over_qq(self, o):
+        """(self, o) in a common ring over a larger base, for a ZZ polynomial
+        and a rational scalar (x + 1/2 is in QQ[x, y], as in Sage) or a
+        polynomial over a larger base; None otherwise."""
+        R = self._ring
+        if R._base is not _sa().ZZ:
+            return None
+        try:
+            if isinstance(o, MPolynomial):
+                # a polynomial over a larger base: compute in its ring (both
+                # are MPolynomial, so Python does not reflect the operation)
+                return (o._ring(self), o) if o._ring._base is not _sa().ZZ else None
+            Q = R.change_ring(_sa().QQ)
+            return Q(self), Q(o)
+        except (TypeError, ValueError, AttributeError):
+            return None
+
     def __add__(self, o):
-        o = self._coerce(o)
+        o0, o = o, self._coerce(o)
         if o is None:
-            return NotImplemented
+            p = self._over_qq(o0)
+            return p[0] + p[1] if p is not None else NotImplemented
         if self._fast(o):
             r = _engine_op(self._ring, "add", self, o)
             if r is not None:
@@ -1255,9 +1286,10 @@ class MPolynomial:
         return self
 
     def __sub__(self, o):
-        o = self._coerce(o)
+        o0, o = o, self._coerce(o)
         if o is None:
-            return NotImplemented
+            p = self._over_qq(o0)
+            return p[0] - p[1] if p is not None else NotImplemented
         if self._fast(o):
             r = _engine_op(self._ring, "sub", self, o)
             if r is not None:
@@ -1265,17 +1297,19 @@ class MPolynomial:
         return self + (-o)
 
     def __rsub__(self, o):
-        o = self._coerce(o)
+        o0, o = o, self._coerce(o)
         if o is None:
-            return NotImplemented
+            p = self._over_qq(o0)
+            return p[1] - p[0] if p is not None else NotImplemented
         return o + (-self)
 
     def __mul__(self, o):
         if isinstance(o, MPolynomialIdeal):
             return NotImplemented
-        o = self._coerce(o)
+        o0, o = o, self._coerce(o)
         if o is None:
-            return NotImplemented
+            p = self._over_qq(o0)
+            return p[0] * p[1] if p is not None else NotImplemented
         if self._fast(o, 64):
             if self._ring._engine in ("ext", "nf"):
                 r = _engine_op(self._ring, "mulred", self, o, self._ring._mstr)
