@@ -728,6 +728,45 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let e = curve(v.get("a"))?;
             Ok(json!(sagebrush_ap::aplist(&e, u(v, "n")?).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
         }
+        "ec_height" => {
+            // the canonical height on balls (ap/src/height.rs): exact endpoints
+            let a = bigs(v.get("a"))?;
+            let x = bigs(v.get("x"))?;
+            if x.len() != 2 {
+                return Err("x is [numerator, denominator]".into());
+            }
+            let n = u(v, "n")? as u32;
+            let local: Vec<(BigInt, BigInt, BigInt)> = v.get("local").and_then(|l| l.as_array()).ok_or("local: [[p, num, den], ...]")?
+                .iter().map(|t| {
+                    let t = bigs(Some(t))?;
+                    if t.len() != 3 { return Err("local: [[p, num, den], ...]".to_string()); }
+                    Ok((t[0].clone(), t[1].clone(), t[2].clone()))
+                }).collect::<Result<_, String>>()?;
+            let d = big1(v.get("d"))?;
+            let roots: Vec<(BigInt, u64)> = v.get("roots").and_then(|l| l.as_array()).ok_or("roots: [[num, k], ...]")?
+                .iter().map(|t| {
+                    let t = bigs(Some(t))?;
+                    if t.len() != 2 { return Err("roots: [[num, k], ...]".to_string()); }
+                    Ok((t[0].clone(), t[1].to_string().parse::<u64>().map_err(|e| e.to_string())?))
+                }).collect::<Result<_, String>>()?;
+            let prec = size(v, "prec", Some(128), 4096)? as u64;
+            let h = sagebrush_ap::height::canonical_height(&a, &x[0], &x[1], n, &local, &d, &roots, prec)?;
+            let (lm, le) = h.lower();
+            let (um, ue) = h.upper();
+            Ok(json!({ "lo": [lm.to_string(), le], "hi": [um.to_string(), ue] }))
+        }
+        "ball_log" => {
+            // log of a positive rational on balls: exact dyadic endpoints
+            let x = bigs(v.get("x"))?;
+            if x.len() != 2 {
+                return Err("x is [numerator, denominator]".into());
+            }
+            let prec = size(v, "prec", Some(128), 4096)? as u64;
+            let h = sagebrush_ap::height::log_rational(&x[0], &x[1], prec)?;
+            let (lm, le) = h.lower();
+            let (um, ue) = h.upper();
+            Ok(json!({ "lo": [lm.to_string(), le], "hi": [um.to_string(), ue] }))
+        }
         "ec_low_rank" => {
             // the analytic rank if 0 or 1, decided on balls (ap/src/lcert.rs)
             let an: Vec<i64> = v.get("an").and_then(|a| a.as_array()).ok_or("an: a list of integers")?

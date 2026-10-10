@@ -1021,23 +1021,23 @@ def _vq(t, p):
 def _local_height_finite(a, P, p):
     """lambda_p(P) / log p for P on a model minimal at p (Silverman, "Computing
     heights on elliptic curves", Math. Comp. 51 (1988), Theorem 5.2), without
-    the (1/12) v(Delta) term."""
+    the (1/12) v(Delta) term; an exact Fraction."""
     a1, a2, a3, a4, a6 = a
     b2, b4, b6, b8 = _b(a)
     x, y = P
     A = _vq(3 * x * x + 2 * a2 * x + a4 - a1 * y, p)
     B = _vq(2 * y + a1 * x + a3, p)
     if A <= 0 or B <= 0:
-        return max(0, -_vq(x, p)) / 2
+        return _F(max(0, -_vq(x, p)), 2)
     N = _v(_disc(a), p)
     c4, c6 = _c(a)
     if c4 % p:
-        M = min(B, N / 2)
+        M = min(_F(B), _F(N, 2))
         return -M * (N - M) / (2 * N)
     C = _vq(3 * x ** 4 + b2 * x ** 3 + 3 * b4 * x * x + 3 * b6 * x + b8, p)
     if C >= 3 * B:
-        return -B / 3
-    return -C / 8
+        return _F(-B, 3)
+    return _F(-C, 8)
 
 
 def canonical_height(a, P, bad_primes):
@@ -1076,8 +1076,121 @@ def canonical_height(a, P, bad_primes):
     return 2 * h / (n * n)
 
 
+def canonical_height_ball(a, P, bad_primes, prec=128):
+    """(lo, hi): exact Fractions with lo <= hhat(P) <= hi, from the engine's
+    ball arithmetic (engine/ap/src/height.rs: the periods, the elliptic
+    logarithm and the theta product with enclosures, the systematic review's
+    R2-EC-F3); the finite local terms are exact here."""
+    from sagebrush._engine import call
+    if P is None:
+        return _F(0), _F(0)
+    r = _roots_fixed(a)
+    roots = [[str(E), _K] for E in r[1:]] if r[0] == "3" else [[str(r[1]), _K]]
+    for Q, n in ((P, 1), (add(a, P, P), 2)):
+        if Q is None:
+            return _F(0), _F(0)
+        d = _m.isqrt(Q[0].denominator)
+        local = []
+        for p in bad_primes:
+            d //= p ** _v(d, p)
+            nu = _local_height_finite(a, Q, p)
+            local.append([str(p), str(nu.numerator), str(nu.denominator)])
+        try:
+            h = call("ec_height", a=[str(int(c)) for c in a], x=[str(Q[0].numerator), str(Q[0].denominator)],
+                     n=n, local=local, d=str(d), roots=roots, prec=int(prec))
+        except ValueError as e:
+            # 2P is on the identity component
+            if n == 1 and "identity component" in str(e):
+                continue
+            raise
+        (lm, le), (um, ue) = ((int(m), int(e)) for m, e in (h["lo"], h["hi"]))
+        return _dyadic(lm, le), _dyadic(um, ue)
+
+
+def _dyadic(m, e):
+    return _F(m * 2 ** e) if e >= 0 else _F(m, 2 ** -e)
+
+
+def log_ball(x, prec=128):
+    """(lo, hi): exact Fractions enclosing log(x) for a positive rational x
+    (the engine's ball logarithm)."""
+    from sagebrush._engine import call
+    x = _F(x)
+    h = call("ball_log", x=[str(x.numerator), str(x.denominator)], prec=int(prec))
+    return _dyadic(int(h["lo"][0]), int(h["lo"][1])), _dyadic(int(h["hi"][0]), int(h["hi"][1]))
+
+
+def height_pairing_ball(a, P, Q, bad, prec=128):
+    """(lo, hi) enclosing <P, Q> = (hhat(P + Q) - hhat(P) - hhat(Q)) / 2."""
+    s = canonical_height_ball(a, add(a, P, Q), bad, prec)
+    p = canonical_height_ball(a, P, bad, prec)
+    q = canonical_height_ball(a, Q, bad, prec)
+    return (s[0] - p[1] - q[1]) / 2, (s[1] - p[0] - q[0]) / 2
+
+
 def height_pairing(a, P, Q, bad):
     return (canonical_height(a, add(a, P, Q), bad) - canonical_height(a, P, bad) - canonical_height(a, Q, bad)) / 2
+
+
+def _lll_points(a, pts, bad):
+    """An LLL-reduced basis of the lattice the points span (independent points)."""
+    r = len(pts)
+    if r >= 2:
+        G = [[height_pairing(a, P, Q, bad) for Q in pts] for P in pts]
+        U = _lll_gram(G)
+        if any(U[i][j] != (i == j) for i in range(r) for j in range(r)):
+            pts = [_combo(a, pts, u) for u in U]
+    return pts
+
+
+def _iv_mul(x, y):
+    p = (x[0] * y[0], x[0] * y[1], x[1] * y[0], x[1] * y[1])
+    return min(p), max(p)
+
+
+def _iv_out(x, k):
+    """[lo, hi] widened to the grid 2^-k (bounds the sizes of the Fractions)."""
+    one = 1 << k
+    return _F(_m.floor(x[0] * one), one), _F(-_m.floor(-x[1] * one), one)
+
+
+def regulator_ball(a, pts, bad, prec=128):
+    """(lo, hi): exact Fractions enclosing the regulator of the points
+    (independent, of infinite order), from canonical_height_ball: the Gram
+    matrix of an LLL-reduced basis as intervals, eliminated without pivoting
+    (the matrix is positive definite, so its pivots are positive) with the
+    intervals widened outward; also hi <= the product of the heights
+    (Hadamard's inequality for a Gram matrix), the bound used if a pivot's
+    interval reaches 0."""
+    r = len(pts)
+    if r == 0:
+        return _F(1), _F(1)
+    pts = _lll_points(a, pts, bad)
+    h = [canonical_height_ball(a, P, bad, prec) for P in pts]
+    M = [[None] * r for _ in range(r)]
+    for i in range(r):
+        M[i][i] = h[i]
+        for j in range(i + 1, r):
+            s = canonical_height_ball(a, add(a, pts[i], pts[j]), bad, prec)
+            M[i][j] = M[j][i] = ((s[0] - h[i][1] - h[j][1]) / 2, (s[1] - h[i][0] - h[j][0]) / 2)
+    hadamard = _F(1)
+    for lo, hi in h:
+        hadamard *= hi
+    k = prec + 64
+    det = (_F(1), _F(1))
+    for i in range(r):
+        piv = M[i][i]
+        if piv[0] <= 0:
+            return _F(0), hadamard
+        det = _iv_out(_iv_mul(det, piv), k)
+        for i2 in range(i + 1, r):
+            c = M[i2][i]
+            q = (c[0] / piv[0], c[0] / piv[1], c[1] / piv[0], c[1] / piv[1])
+            f = (min(q), max(q))
+            for j in range(i + 1, r):
+                fm = _iv_mul(f, M[i][j])
+                M[i2][j] = _iv_out((M[i2][j][0] - fm[1], M[i2][j][1] - fm[0]), k)
+    return max(det[0], _F(0)), min(det[1], hadamard)
 
 
 def regulator(a, pts, bad):
@@ -1087,11 +1200,7 @@ def regulator(a, pts, bad):
     389a1 the pairing matrix lost about 1e-9 of its determinant: the
     systematic review's R2-EC-F3)."""
     r = len(pts)
-    if r >= 2:
-        G = [[height_pairing(a, P, Q, bad) for Q in pts] for P in pts]
-        U = _lll_gram(G)
-        if any(U[i][j] != (i == j) for i in range(r) for j in range(r)):
-            pts = [_combo(a, pts, u) for u in U]
+    pts = _lll_points(a, pts, bad)
     M = [[0.0] * r for _ in range(r)]
     for i in range(r):
         M[i][i] = canonical_height(a, pts[i], bad)
@@ -1741,12 +1850,14 @@ def two_descent_cubic(a, heights=(8.0, 10.0, 12.0)):
 #    cps_bound) and an exhaustive search of the points of naive height <= T:
 #    every point it misses has hhat > T - B.
 
-def point_search_engine(a, H, limit=100000):
+def point_search_engine(a, H, limit=100000, R=None):
     """The points with x = r/s^2, log max(|r|, s^2) <= H (the Rust engine's
-    search; x lifted to the points above it)."""
+    search; x lifted to the points above it).  Exactly: max(|r|, s^2) <= R
+    with R = int(exp(H)) (a double), or the R given."""
     from sagebrush._engine import call
     b2, b4, b6, _ = _b(a)
-    R = int(_m.exp(H))
+    if R is None:
+        R = int(_m.exp(H))
     S = _m.isqrt(R)
     xs = call("ec_point_search", b=[str(b2), str(b4), str(b6)], rmax=R, smax=S, limit=limit)
     out = []
@@ -2077,30 +2188,32 @@ def _lll_gram(G):
     return U
 
 
-_HERMITE_POW = {1: 1.0, 2: 4 / 3, 3: 2.0, 4: 4.0, 5: 8.0, 6: 64 / 3, 7: 64.0, 8: 256.0}
+# gamma_r^r exactly for r <= 8 (Korkine-Zolotarev, Blichfeldt); Hermite's
+# (4/3)^(r(r-1)/2) beyond (2^r was once used for r > 8, which is not a bound:
+# a 10-dimensional lattice has gamma^10 >= 4096/3, the systematic review's
+# R2-EC-F6)
+_HERMITE_POW_Q = {1: _F(1), 2: _F(4, 3), 3: _F(2), 4: _F(4), 5: _F(8), 6: _F(64, 3), 7: _F(64), 8: _F(256)}
 
 
-def _hermite_pow(r):
-    """An upper bound for gamma_r^r (Hermite's constant): exact for r <= 8,
-    else Blichfeldt's (2/pi)^r Gamma(2 + r/2)^2 or Hermite's (4/3)^(r(r-1)/2),
-    whichever is smaller, rounded up.  (2^r was used for r > 8, which is not
-    a bound: a 10-dimensional lattice has gamma^10 >= 4096/3, the systematic
-    review's R2-EC-F6.)"""
-    if r in _HERMITE_POW:
-        return _HERMITE_POW[r]
-    blichfeldt = (2 / _m.pi) ** r * _m.gamma(2 + r / 2) ** 2
-    hermite = (4 / 3) ** (r * (r - 1) / 2)
-    return min(blichfeldt, hermite) * (1 + 1e-9)
+def _hermite_pow_upper(r):
+    """An exact rational upper bound for gamma_r^r."""
+    return _HERMITE_POW_Q.get(r) or _F(4, 3) ** (r * (r - 1) // 2)
 
 
 def silverman_bound(a):
     """B with h(x(P)) - hhat(P) <= B for every P on the minimal model a
     (Sage's normalization of hhat)."""
+    return float(silverman_bound_upper(a))
+
+
+def silverman_bound_upper(a):
+    """silverman_bound as an exact Fraction rounded up (the logarithms on
+    balls): 2 (h(j)/8 + log|Delta|/12 + 0.973) + 2 log 2."""
     c4, c6 = _c(a)
     D = _disc(a)
     j = _F(c4 ** 3, D)
-    hj = _m.log(max(abs(j.numerator), abs(j.denominator)))
-    return 2 * (hj / 8 + _m.log(abs(D)) / 12 + 0.973) + 2 * _m.log(2)
+    hj = log_ball(max(abs(j.numerator), abs(j.denominator)))[1]
+    return 2 * (hj / 8 + log_ball(abs(D))[1] / 12 + _F(973, 1000)) + 2 * log_ball(2)[1]
 
 
 def _real_roots_in(c, lo, hi):
@@ -2147,7 +2260,7 @@ def _horner_iv(c, u, v):
 
 
 def _cps_eps_inf(a):
-    """A certified lower bound for eps_infinity: the minimum over x(E(R)) of
+    """A certified lower bound for eps_infinity (an exact Fraction, 0 if none): the minimum over x(E(R)) of
     max(|F(X,Z)|, |G(X,Z)|) / max(|X|, |Z|)^4, with F = 4X^3 Z + ... and
     G = X^4 - b4 X^2 Z^2 - ... the denominator and numerator of x(2P).
     Branch and bound over z in [-1, 1] (x = z, and x = 1/z) with exact
@@ -2196,29 +2309,30 @@ def _cps_eps_inf(a):
             v = heap[0][0]
             best = v if best is None else min(best, v)
     if not best:
-        return 0.0
-    return float(best) * (1 - 1e-12)
+        return _F(0)
+    return best
 
 
 # sup over the rational components of the minimal model's Neron model of
 # the local height-difference correction (in units of log p, Sage's
 # normalization of hhat): 0 on the identity component
 def _cps_alpha(kod, c):
+    """(an exact Fraction)"""
     if c == 1:
-        return 0.0
+        return _F(0)
     if kod.endswith("*") and kod[1:-1].isdigit():
         m = int(kod[1:-1])
         if m == 0:
-            return 1.0
+            return _F(1)
         # Galois fixes the near component (the one of order 2 next to the
         # identity), so with c = 2 it is the rational one
-        return 1.0 if c == 2 else 1.0 + m / 4.0
+        return _F(1) if c == 2 else _F(4 + m, 4)
     if kod[1:].isdigit():
         m = int(kod[1:])
         if c == m:
-            return (m // 2) * (m - m // 2) / m
-        return m / 4.0
-    return {"III": 0.5, "IV": 2 / 3, "IV*": 4 / 3, "III*": 1.5}.get(kod, 0.0)
+            return _F((m // 2) * (m - m // 2), m)
+        return _F(m, 4)
+    return {"III": _F(1, 2), "IV": _F(2, 3), "IV*": _F(4, 3), "III*": _F(3, 2)}.get(kod, _F(0))
 
 
 def cps_bound(a):
@@ -2226,41 +2340,61 @@ def cps_bound(a):
     every P on the minimal model a (Sage's normalization of hhat; h(x) =
     log max(|num|, den)).  -1/3 log eps_inf, plus at each bad prime the
     largest local correction over the components with rational points."""
+    B = cps_bound_upper(a)
+    return _m.inf if B is None else float(B)
+
+
+def cps_bound_upper(a):
+    """cps_bound as an exact Fraction rounded up (the logarithms on balls),
+    or None without a certified positive lower bound for eps_inf."""
     eps = _cps_eps_inf(a)
     if eps <= 0:
-        return _m.inf  # no certified positive lower bound: no CPS bound
-    B = -_m.log(eps) / 3
+        return None
+    B = -log_ball(eps)[0] / 3
     for p, (kod, f, c) in local_data(a).items():
-        B += _cps_alpha(kod, c) * _m.log(p)
+        B += _cps_alpha(kod, c) * log_ball(p)[1]
     return B
 
 
 def index_bound(a, pts, bad, T=None):
-    """An upper bound for the index of the subgroup spanned by the points in
-    E(Q)/tors (with the search radius T used), or None if the search needed
-    is out of reach."""
+    """(n, T): an integer n at least the index of the subgroup spanned by
+    the points in E(Q)/tors, and the search radius T used; n is None if the
+    search needed is out of reach.  Every quantity is an exact rational
+    bound in the right direction (the systematic review's R2-EC-F3, where
+    doubles with margins of 1e-6 stood in for the heights and the
+    regulator): B1 >= min(Silverman, CPS) with the logarithms on balls; the
+    search covers max(|r|, s^2) <= R exactly, so a point it misses has
+    hhat > log R - B1, with log R from below; the heights of the points
+    found and the regulator are enclosures; gamma_r^r is exact or Hermite's
+    bound; and n = floor(sqrt(R gamma_r^r / lambda^r)) exactly."""
     r = len(pts)
-    B1 = min(silverman_bound(a), cps_bound(a)) * (1 + 1e-9) + 1e-9
+    B1 = silverman_bound_upper(a)
+    cps = cps_bound_upper(a)
+    if cps is not None:
+        B1 = min(B1, cps)
     if T is None:
         # every point of hhat < T - B1 has naive height < T: a search to
         # T = 10 is cheap, and a larger lam0 lowers the index bound
-        T = max(B1 + 0.5, min(B1 + 2, 10.0))
+        b = float(B1)
+        T = max(b + 0.5, min(b + 2, 10.0))
     if T > 14:
         return None, T
-    lam0 = T - B1
-    lam = lam0
     limit = 10 ** 6
-    found = point_search_engine(a, T, limit=limit)
+    R = int(_m.exp(T))
+    found = point_search_engine(a, T, limit=limit, R=R)
     if len(found) >= limit:
         return None, T
+    lam = log_ball(R)[0] - B1
     for P in found:
         if point_order(a, P) == 0:
-            lam = min(lam, canonical_height(a, P, bad) * (1 - 1e-6))
-    # (margins of 1e-6 relative for the heights and the regulator, which are
-    # doubles without an enclosure: the bound assumes their errors are less)
-    R = regulator(a, pts, bad) * (1 + 1e-6)
-    n = _m.sqrt(R * _hermite_pow(r) / lam ** r)
-    return n, T
+            lam = min(lam, canonical_height_ball(a, P, bad)[0])
+    if lam <= 0:
+        return None, T
+    if r == 0:
+        return 1, T
+    Rhi = regulator_ball(a, pts, bad)[1]
+    n2 = Rhi * _hermite_pow_upper(r) / lam ** r
+    return _m.isqrt(_m.floor(n2)), T
 
 
 def _torsion_generators(a, tors):
@@ -2294,10 +2428,10 @@ def saturated_generators(a, pts, bad, aps, torsion=(), max_prime=None, odd_only=
         n, T = index_bound(a, pts, bad)
         if n is None:
             raise NotImplementedError("no index bound: the search for points of naive height %.1f is too large" % T)
-        # (the bound is a float: 1.99999999999997 for an index bound 2 took
-        # top = 1 and left 2 P unsaturated, the systematic review's EC-F13;
-        # a margin, then the integers up to it)
-        top = int(n * (1 + 1e-6) + 1e-6)
+        # (an exact integer bound: a float 1.99999999999997 for an index
+        # bound 2 once took top = 1 and left 2 P unsaturated, the systematic
+        # review's EC-F13)
+        top = n
     else:
         top = int(max_prime)
     index = 1
