@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sagebrush"
-version = "0.6.0"
+version = "0.7.0"
 description = "Free computational mathematics for people and AI agents: number theory, number fields, class groups, modular forms, exact linear algebra, a Sage-compatible API and an MCP server (Rust, MIT OR Apache-2.0)"
 readme = "README.md"
 authors = [{ name = "SageMath, Inc.", email = "wstein@sagemath.com" }]
