@@ -459,7 +459,7 @@ _E389 = EllipticCurve("389a1"); _P, _Q = _E389(0, 0), _E389(1, 0)  # R2-EC-F3
 assert abs(_E389.regulator_of_points([_P, 300 * _P + _Q]) - _E389.regulator_of_points([_P, _Q])) < 1e-15
 import _sage_ec as _ecm
 assert _ecm._hermite_pow_upper(10) >= Fraction(4096, 3)  # R2-EC-F6
-from sagebrush.sage import tanh, coth, cosh, sin, cos, diff
+from sagebrush.sage import tanh, coth, cosh, sin, cos, diff, arcsin
 _y = _xs
 assert str(limit(1 / sqrt(_y), x=0, dir="-")) == "Infinity" and str(limit(1 / sqrt(_y), x=0, dir="+")) == "+Infinity"  # R2-SYMCALC-F2
 _pa = var("a"); _da = diff(abs(1 + _pa * _y), _y)  # R2-SYMCALC-F3
@@ -486,6 +486,18 @@ raises(ValueError, solve(sin(_y) == 0, _y)[0].subs, n1=QQ(1) / 2); assert str(ty
 raises(ValueError, limit, SR("arg(-1 + I*x)"), x=0, dir="-"); raises(NotImplementedError, sin(_y).roots, _y); raises(ValueError, SR(0).roots, _y)
 assume(_y > 0); assert str(solve(sin(_y) == 0, _y)) == "[x == pi*n1 for integer n1 if pi*n1 > 0]"; forget()
 assume(_y, "integer"); raises(NotImplementedError, solve, sin(_y) == 0, _y); forget()
+# the e55727d follow-up: exact branch ranges, composite exponents, operators,
+# symbolic solutions under assumptions, roots of inverse functions, undecided constants
+_Q = 10**20
+assert len(solve(_y**((_Q + 1) / QQ(_Q)) == -1, _y)) == 2 and solve(_y**((_Q - 1) / QQ(_Q)) == -1, _y) == []
+assert str(solve(_pa**(2 * _y) == 0, _y)) == "[x == r1 if a == 0 and real_part(2*r1) > 0]" and str(solve(_pa**(2 * _y) == 1, _y)[-1]) == "x == r1 if a == 1"
+_s = solve(sqrt(_y) == _pa, _y)[0]; assert all(e.conditions() == _s.conditions() for e in (_s + 0, _s * 1, -(-_s), (_s + 1) - 1)); raises(ValueError, (_s * 1).subs, a=-1)
+_s = solve(arcsin(_y) == _pa, _y)[0]; assert str(_s.subs(a=pi / 2 - SR("1/10^10"))) == "x == sin(1/2*pi - 1/10000000000)"; raises(ValueError, _s.subs, a=2)
+assume(_y > 0); assert str(solve(_y == _pa, _y)) == "[x == a if a > 0]"; forget()
+raises(NotImplementedError, (arcsin(_y) - _pa).roots, _y)
+_c = SR("sqrt(2*I)") - 1 - I; assert len(solve(_c * _y - 1 == 0, _y)[0].conditions()) == 1 and len(solve(_c * _y == 0, _y)) == 2
+assert [str(c) for c in solve(_c * _pa * _y == 1, _y)[0].conditions()] != ["a != 0"] and str(solve(sin(_y) * log(_y) == 0, _y)) == "[x == 1, x == pi*n1 for integer n1 if n1 != 0]"
+assert str(solve(1 / _y + 1 / (_y * (_y + 1)) == (_y + 2) / (_y * (_y + 1)), _y)) == "[x == r1 if r1 != 0 and r1 != -1]"
 assume(_y < 0); assert abs(sqrt(_y)).subs(x=-1) == 1; forget()  # R2-SYMALG-F2
 assume(_y > -SR("1/10^400")); assert abs(_y).subs(x=-SR("1/10^401")) == SR("1/10^401"); forget()
 assume(_y, "odd"); assert solve(_y**2 - 4, _y) == []; forget()
