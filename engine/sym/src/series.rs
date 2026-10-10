@@ -293,6 +293,17 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
                     return Err(SymError::NotImplemented(format!("expansion of {} on its branch cut", crate::to_string(e))));
                 }
             }
+            // at a pole (coth at 0, tanh at pi I/2): num(u)/den(u), a Laurent
+            // series, not the Taylor series of a value that is infinite
+            // (coth(0) came back as a finite coefficient: R2-SYMCALC-F8)
+            if let Some((num_f, den_f)) = crate::domain::pole_parts(f) {
+                let a0 = if s.v > 0 { zero() } else { s.coeff(0) };
+                if s.v >= 0 && free_symbols(&a0).is_empty() && !crate::domain::certified_nonzero(&crate::simplify::simplify_full(&fun1(den_f.clone(), &a0))) {
+                    let u = &a[0];
+                    let n = num_f.map_or_else(one, |g| fun1(g, u));
+                    return series(&mul2(&n, &pow(&fun1(den_f, u), &int(-1))), x, prec);
+                }
+            }
             let f2 = f.clone();
             s.compose(&move |y: &Expr| fun1(f2.clone(), y), prec)?.truncate(prec)
         }

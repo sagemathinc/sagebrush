@@ -147,13 +147,17 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
         Fun::Asinh => pow(&add2(&u2, &one()), &rat(-1, 2)),
         Fun::Acosh => recip(&mul2(&sqrt(&add2(u, &one())), &sqrt(&sub(u, &one())))),
         Fun::Atanh | Fun::Acoth => neg(&recip(&sub(&u2, &one()))),
-        Fun::Asech => neg(&recip(&mul2(u, &sqrt(&sub(&one(), &u2))))),
+        // asech(u) = acosh(1/u): -1/(u^2 sqrt(1/u + 1) sqrt(1/u - 1)); the
+        // usual -1/(u sqrt(1 - u^2)) has the wrong sign for u < -1 (the
+        // systematic review's R2-SYMCALC-F4)
+        Fun::Asech => neg(&recip(&mul(vec![u2.clone(), sqrt(&add2(&recip(u), &one())), sqrt(&sub(&recip(u), &one()))]))),
         Fun::Acsch => neg(&recip(&mul2(&u2, &sqrt(&add2(&one(), &recip(&u2)))))),
         Fun::Log => recip(u),
         // along real x: Re(conj(u) u') / |u|; when u' is real for real x
-        // that is Re(u) u' / |u|
+        // that is Re(u) u' / |u| (only x is real: a parameter may not be,
+        // abs(1 + a x)' at a = I was I, the systematic review's R2-SYMCALC-F3)
         Fun::Abs => {
-            if real_for_real(&du) {
+            if real_for_real(&du, x) {
                 mul(vec![half(), add2(u, &fun1(Fun::Conjugate, u)), recip(e)])
             } else {
                 let cj = |t: &Expr| fun1(Fun::Conjugate, t);
@@ -169,20 +173,20 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
     mul2(&d, &du)
 }
 
-/// Certainly real wherever defined, for real values of the symbols: real
-/// numbers and symbols under +, *, integer powers and real-valued
+/// Certainly real wherever defined, for real x: real numbers and x (other
+/// symbols may be complex) under +, *, integer powers and real-valued
 /// functions of such arguments.
-fn real_for_real(t: &Expr) -> bool {
+fn real_for_real(t: &Expr, x: &str) -> bool {
     match &t.kind {
         Kind::Num(n) => n.is_real(),
-        Kind::Sym(_) => true,
+        Kind::Sym(s) => &**s == x,
         Kind::Const(c) => matches!(c, Const::Pi | Const::E),
-        Kind::Add(v) | Kind::Mul(v) => v.iter().all(real_for_real),
-        Kind::Pow(b, k) => k.as_int().is_some() && real_for_real(b) || b.is_const(Const::E) && real_for_real(k),
+        Kind::Add(v) | Kind::Mul(v) => v.iter().all(|t| real_for_real(t, x)),
+        Kind::Pow(b, k) => k.as_int().is_some() && real_for_real(b, x) || b.is_const(Const::E) && real_for_real(k, x),
         Kind::Fun(f, a) => {
             matches!(f, Fun::Sin | Fun::Cos | Fun::Tan | Fun::Cot | Fun::Sec | Fun::Csc | Fun::Sinh | Fun::Cosh | Fun::Tanh | Fun::Coth | Fun::Sech | Fun::Csch
                 | Fun::Atan | Fun::Acot | Fun::Asinh | Fun::Abs | Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside | Fun::Erf)
-                && a.iter().all(real_for_real)
+                && a.iter().all(|t| real_for_real(t, x))
         }
         _ => false,
     }

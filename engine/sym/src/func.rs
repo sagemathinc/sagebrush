@@ -166,6 +166,20 @@ pub fn pi_multiple(e: &Expr) -> Option<Q> {
     None
 }
 
+/// e as k*pi*I for a rational k, if it is one (sinh(I pi/2) = I).
+pub fn ipi_multiple(e: &Expr) -> Option<Q> {
+    if let Kind::Mul(v) = &e.kind {
+        if v.len() == 2 && v[1].is_const(Const::Pi) {
+            if let Some(Num::Exact(re, im)) = v[0].as_num() {
+                if re.is_zero() && !im.is_zero() {
+                    return Some(im.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn qq(n: i64, d: i64) -> Q {
     crate::num::qr(n, d)
 }
@@ -293,6 +307,21 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             // arccot(x) = arctan(1/x): pi/2 - arctan(x) for x > 0, -pi/2 - arctan(x) for x < 0
             let t = atan_table(x)?;
             Some(pi_times(if t > qq(0, 1) { qq(1, 2) - t } else { qq(-1, 2) - t }))
+        }
+        // at k pi I: cosh(k pi I) = cos(k pi), sinh(k pi I) = I sin(k pi), ...
+        // (cosh(pi I/2) was not 0: the systematic review's R2-SYMCALC-F8)
+        Fun::Sinh | Fun::Cosh | Fun::Tanh | Fun::Coth | Fun::Sech | Fun::Csch if ipi_multiple(x).is_some() => {
+            let kpi = mul2(&qnum(ipi_multiple(x)?), &pi());
+            let (g, c) = match f {
+                Fun::Cosh => (Fun::Cos, one()),
+                Fun::Sech => (Fun::Sec, one()),
+                Fun::Sinh => (Fun::Sin, i()),
+                Fun::Tanh => (Fun::Tan, i()),
+                Fun::Coth => (Fun::Cot, neg(&i())),
+                _ => (Fun::Csc, neg(&i())),
+            };
+            let v = exact(&g, &[kpi])?;
+            Some(if v.is_const(Const::UnsignedInfinity) { v } else { mul2(&c, &v) })
         }
         Fun::Sinh | Fun::Tanh | Fun::Asinh | Fun::Atanh | Fun::Erf if x.is_zero() => Some(zero()),
         Fun::Cosh | Fun::Sech if x.is_zero() => Some(one()),
