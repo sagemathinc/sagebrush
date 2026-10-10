@@ -572,10 +572,9 @@ pub fn class_group_generator_bound(f: &[BigInt]) -> Result<(f64, f64), String> {
     let dk = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
     let r1 = Embeddings::new(&o)?.r1;
-    let ld = dk.to_f64().unwrap().abs().ln();
-    let t_unif = (4.0 * ld * ld).max(50.0);
+    let t_unif = super::grh::uniform_bound(&dk);
     let split = splitting(&o, &dk, &index, t_unif as u64);
-    Ok((super::grh::class_group_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif), t_unif))
+    Ok((super::grh::class_group_bound_certified(o.n, r1, &dk, &prime_norms(&split, t_unif), t_unif), t_unif))
 }
 
 /// Belabas, Diaz y Diaz and Friedman's one-step bound, for comparison.
@@ -585,7 +584,7 @@ pub fn one_step_generator_bound(f: &[BigInt]) -> Result<f64, String> {
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
     let r1 = Embeddings::new(&o)?.r1;
     let ld = dk.to_f64().unwrap().abs().ln();
-    let t_unif = (4.0 * ld * ld).max(50.0);
+    let t_unif = super::grh::uniform_bound(&dk);
     let split = splitting(&o, &dk, &index, t_unif as u64);
     Ok(super::grh::one_step_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif))
 }
@@ -628,11 +627,12 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
     // factor base: the prime ideals of norm < T, with T from Grenie and
     // Molteni's algorithm (nf/grh.rs), at most the uniform 4 log^2 |d_K|
     let ld = dk.to_f64().unwrap().abs().ln();
-    let t_unif = (4.0 * ld * ld).max(50.0);
+    // (rounded up: the uniform theorem holds at or above its value)
+    let t_unif = super::grh::uniform_bound(&dk);
     let x = ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 15);
     let split = splitting(&o, &dk, &index, (t_unif as u64).max(2 * x));
     let norms = prime_norms(&split, t_unif);
-    let t_grh = if std::env::var("QCL_UNIFORM").is_ok() { t_unif } else { super::grh::class_group_bound(n, r1, ld, &norms, t_unif) };
+    let t_grh = if std::env::var("QCL_UNIFORM").is_ok() { t_unif } else { super::grh::class_group_bound_certified(n, r1, &dk, &norms, t_unif) };
     // the factor base itself may be larger than the proven bound needs (and
     // relations, for the units, need some primes)
     let fb_min: f64 = std::env::var("QCL_FBMIN").ok().and_then(|v| v.parse().ok()).unwrap_or(50.0);

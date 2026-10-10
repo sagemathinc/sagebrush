@@ -198,6 +198,12 @@ impl Explicit {
 /// most `t0` (a proven uniform bound): the prime ideals of norm < T generate.
 /// `norms` are the norms of all prime ideals of norm below t0.
 pub fn class_group_bound(n: usize, r1: usize, log_d: f64, norms: &[u64], t0: f64) -> f64 {
+    search(n, r1, log_d, norms, t0).map_or(t0, |(t, _)| t)
+}
+
+/// The search behind class_group_bound: (T, the number of steps of the
+/// witness that gives it), or None for t0 (no witness below it).
+fn search(n: usize, r1: usize, log_d: f64, norms: &[u64], t0: f64) -> Option<(f64, usize)> {
     let ex = Explicit::new(n, r1, log_d, norms, t0);
     // T only matters up to the norms below it: candidates are the distinct
     // norms (T = q means the primes of norm < q)
@@ -214,11 +220,12 @@ pub fn class_group_bound(n: usize, r1: usize, log_d: f64, norms: &[u64], t0: f64
     while !ex.good((2.0 * nsteps as f64 * delta).exp(), nsteps) {
         delta += step;
         if (2.0 * nsteps as f64 * delta).exp() >= t0 {
-            return t0;
+            return None;
         }
     }
     let hi = (2.0 * nsteps as f64 * delta).exp();
     let mut th = ex.optimal(&between((2.0 * nsteps as f64 * (delta - step)).exp(), hi), nsteps);
+    let mut th_steps = nsteps;
     // more and finer steps while the bound improves
     loop {
         nsteps *= 2;
@@ -230,8 +237,125 @@ pub fn class_group_bound(n: usize, r1: usize, log_d: f64, norms: &[u64], t0: f64
             break;
         }
         th = t;
+        th_steps = nsteps;
     }
-    th.min(t0)
+    (th < t0).then_some((th, th_steps))
+}
+
+/// class_group_bound, proven: the float search's witness is checked again
+/// on balls (sagebrush-ball: every constant, dilogarithm and prime term
+/// enclosed, no floating-point margin), and T is used only if v^T A v < 0
+/// is certain; otherwise the uniform t0 (which the caller must have
+/// rounded up).  (The search alone checked v^T A v < -1e-9 |...| in f64:
+/// the systematic review's R2-CLG-F2.)
+pub fn class_group_bound_certified(n: usize, r1: usize, disc: &sagebrush_bigint::BigInt, norms: &[u64], t0: f64) -> f64 {
+    let log_d = crate::nf::certify::ln_big(&num_traits::Signed::abs(disc));
+    let Some((t, steps)) = search(n, r1, log_d, norms, t0) else { return t0 };
+    let ex = Explicit::new(n, r1, log_d, norms, t0);
+    let Some(v) = ex.witness(t.ln() / (2 * steps) as f64, steps) else { return t0 };
+    for prec in [128u64, 256] {
+        if let Some(true) = balls::witness_holds(n, r1, disc, norms, t, &v, prec) {
+            return t;
+        }
+    }
+    t0
+}
+
+/// The uniform bound 4 log^2 |d| (at least 50), rounded up to an integer
+/// with ball arithmetic (Grenie and Molteni's theorem applies at or above
+/// its value; an f64 computation could fall just below it).
+pub fn uniform_bound(disc: &sagebrush_bigint::BigInt) -> f64 {
+    use sagebrush_ball::Ball;
+    let ld = Ball::from_int(&num_traits::Signed::abs(disc)).log(128).expect("|d| >= 1");
+    let t = ld.sqr(128).mul_i64(4, 128);
+    let (um, ue) = t.upper();
+    // ceil(upper) as an integer, then as f64 (exact below 2^53, else rounded up)
+    // (um > 0: ceil(um / 2^s) = (um + 2^s - 1) >> s)
+    let c = if ue >= 0 { um << ue as u64 } else { (um + ((sagebrush_bigint::BigInt::from(1) << (-ue) as u64) - 1)) >> (-ue) as u64 };
+    let c = num_traits::ToPrimitive::to_f64(&c).unwrap();
+    (c.next_up().ceil()).max(50.0)
+}
+
+pub(crate) mod balls {
+    //! l(F_L) and the quadratic form v^T A v on balls.
+    use sagebrush_ball::{catalan, euler_gamma, li2, pi, ti2, Ball};
+    use sagebrush_bigint::BigInt;
+    use std::cmp::Ordering;
+
+    /// Whether v^T A v < 0 for T (an exact double) and the witness v (exact
+    /// doubles), N = v.len() steps of width log(T)/(2N): Some(true) if
+    /// certain, Some(false) if certainly not, None if undecided.
+    pub fn witness_holds(n: usize, r1: usize, disc: &BigInt, norms: &[u64], t: f64, v: &[f64], prec: u64) -> Option<bool> {
+        let tb = Ball::from_f64_exact(t)?;
+        let ll = tb.log(prec)?; // L = log T
+        let steps = v.len();
+        let delta = ll.div_i64(2 * steps as i64, prec);
+        let log_d = Ball::from_int(&num_traits::Signed::abs(disc)).log(prec)?;
+        // the prime ideal powers with m log NP < L (a term at or beyond L
+        // contributes nothing for l <= L; one that may be below is kept)
+        let mut terms: Vec<(Ball, Ball)> = vec![];
+        for &q in norms {
+            let lq = Ball::from_i64(q as i64).log(prec)?;
+            let mut m: i64 = 1;
+            loop {
+                let u = lq.mul_i64(m, prec);
+                if u.cmp(&ll) == Some(Ordering::Greater) {
+                    break;
+                }
+                // w = log NP / NP^(m/2)
+                let w = lq.mul(&u.mul_2exp(-1).neg().exp(prec)?, prec);
+                terms.push((u, w));
+                m += 1;
+            }
+        }
+        let c_n = euler_gamma(prec).add(&pi(prec).mul_i64(8, prec).log(prec)?, prec);
+        let (pi_b, g) = (pi(prec), catalan(prec));
+        let ell = |l: &Ball| -> Option<Ball> {
+            // -2 sum w max(0, l - u)
+            let mut primes = Ball::zero();
+            for (u, w) in &terms {
+                let d = l.sub(u, prec);
+                let pos = if d.is_positive() {
+                    d
+                } else if d.is_negative() {
+                    continue;
+                } else {
+                    let (dm, de) = d.upper();
+                    Ball::hull(&Ball::zero(), &Ball::exact(dm, de))
+                };
+                primes = primes.add(&w.mul(&pos, prec), prec);
+            }
+            let x = l.mul_2exp(-1).neg().exp(prec)?;
+            let i = pi_b.sqr(prec).mul_2exp(-1).sub(&li2(&x, prec)?.mul_2exp(2), prec).add(&li2(&x.sqr(prec), prec)?, prec);
+            let j = pi_b.mul(l, prec).mul_2exp(-1).sub(&g.mul_2exp(2), prec).add(&ti2(&x, prec)?.mul_2exp(2), prec);
+            Some(
+                primes.mul_2exp(1).neg()
+                    .add(&l.mul(&log_d.sub(&c_n.mul_i64(n as i64, prec), prec), prec), prec)
+                    .add(&i.mul_i64(n as i64, prec), prec)
+                    .sub(&j.mul_i64(r1 as i64, prec), prec),
+            )
+        };
+        // tab[k] = l(F_(k delta)), l(F_0) = 0
+        let mut tab = vec![Ball::zero()];
+        for k in 1..=2 * steps {
+            tab.push(ell(&delta.mul_i64(k as i64, prec))?);
+        }
+        let a = |i: usize, j: usize| tab[i + j + 2].sub(&tab[i.abs_diff(j)], prec);
+        let vb: Vec<Ball> = v.iter().map(|&x| Ball::from_f64_exact(x)).collect::<Option<_>>()?;
+        let mut q = Ball::zero();
+        for i in 0..steps {
+            for j in 0..steps {
+                q = q.add(&vb[i].mul(&vb[j], prec).mul(&a(i, j), prec), prec);
+            }
+        }
+        if q.is_negative() {
+            Some(true)
+        } else if q.is_positive() {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 /// Belabas, Diaz y Diaz and Friedman's own bound (one step): the smallest
@@ -271,5 +395,42 @@ mod tests {
         let x = (-l / 2.0).exp();
         assert!((i - (PI * PI / 2.0 - 4.0 * li2(x) + li2(x * x))).abs() < 1e-9, "{}", i);
         assert!((j - (PI * l / 2.0 - 4.0 * CATALAN + 4.0 * ti2(x))).abs() < 1e-9, "{}", j);
+    }
+}
+
+#[cfg(test)]
+mod certified_tests {
+    use crate::nf::bnf::class_group_generator_bound;
+    use sagebrush_bigint::BigInt;
+
+    /// The ball check accepts the f64 search's witnesses on ordinary fields
+    /// (the bound is unchanged), and the uniform bound is rounded up.
+    #[test]
+    fn certified_bound_matches_search() {
+        let fields: &[&[i64]] = &[&[-11, 0, 0, 1], &[1, -1, 0, 0, 0, 1], &[-2, 0, 0, 0, 0, 1], &[23, 0, 1], &[-10, 0, 1], &[1, 0, 0, 1, 0, 0, 1], &[-3, -1, 0, 1, 0, 1], &[17, 0, 0, 0, 1]];
+        for f in fields {
+            let f: Vec<BigInt> = f.iter().map(|&c| BigInt::from(c)).collect();
+            let t = std::time::Instant::now();
+            let (bound, unif) = class_group_generator_bound(&f).unwrap();
+            eprintln!("{:?}: certified {} (uniform {}) in {:.1} ms", f, bound, unif, t.elapsed().as_secs_f64() * 1e3);
+            assert!(bound <= unif);
+        }
+    }
+
+    /// The ball check refuses what is not a witness: at a T far too small
+    /// the form is positive (Q(sqrt(-23)): primes of norm < 2 generate
+    /// nothing), and a witness for one T is not one for a smaller T.
+    #[test]
+    fn ball_check_refuses_non_witnesses() {
+        let d = BigInt::from(-23);
+        let norms = [2u64, 2, 3, 3, 13, 13, 29, 29, 31, 31, 41, 41, 47, 47];
+        assert_ne!(super::balls::witness_holds(2, 0, &d, &norms, 1.5, &[1.0], 128), Some(true));
+        assert_ne!(super::balls::witness_holds(2, 0, &d, &norms, 1.5, &[1.0, -0.5, 0.25], 128), Some(true));
+        // the f64 search's own witness for 23's T holds
+        let (t, steps) = super::search(2, 0, d.to_string().parse::<f64>().unwrap().abs().ln(), &norms, 50.0).unwrap();
+        let ex = super::Explicit::new(2, 0, 23f64.ln(), &norms, 50.0);
+        let v = ex.witness(t.ln() / (2 * steps) as f64, steps).unwrap();
+        assert_eq!(super::balls::witness_holds(2, 0, &d, &norms, t, &v, 128), Some(true));
+        assert_ne!(super::balls::witness_holds(2, 0, &d, &norms, t / 4.0, &v, 128), Some(true));
     }
 }
