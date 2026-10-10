@@ -423,4 +423,6 @@ assert str((AA(2).sqrt() / 10**100).n(prec=100)) == "1.4142135623730950488016887
 assert str(RIF(QQ(1) / 10**400)) == "1.000000000000000?e-400" and str(AA(2).sqrt() * 10**400) == "1.414213562373095?e400"  # R2-ROOT-F4
 assert AA(QQ(2) / 10**330).sqrt() > 0  # R2-ROOT-F5
 assert len({AA(2).sqrt(), AA(8).sqrt() / 2}) == 1 and (10**400 * AA(2).sqrt()).floor() // 10**399 == 14
+_R1 = PolynomialRing(QQ, 1, "x"); _f63 = _R1({(2**63,): 1}); _f63.quo_rem(_R1.one())
+assert (_f63 * _f63).degree() == 2**64  # R2-MUL-F3: no exponent wraparound after caching
 print("rereview2 ok")
