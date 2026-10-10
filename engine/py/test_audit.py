@@ -201,3 +201,19 @@ _K = NumberField(_t**3 + _t**2 - 2*_t + 8, "a")
 _Ps = _K.primes_above(2)
 assert len(_Ps) == 3 and all(P.norm() == 2 for P in _Ps) and len(set(map(str, _Ps))) == 3
 print("nf ok")
+# systematic review MUL-F1..F7
+from sagebrush.sage import ZZ, GF, TermOrder
+_R = PolynomialRing(ZZ, names=("x", "y")); _x, _y = _R.gens()
+assert not (2*_x).divides(_x) and str(_x.quo_rem(2*_x)) == "(0, x)"
+for _bad in [lambda: _R({(1, 0): QQ(1)/2}), lambda: _R({(-1, 0): 1})]:
+    try:
+        _bad(); assert False
+    except (TypeError, ValueError):
+        pass
+_S = PolynomialRing(QQ, names=("x", "y")); _X, _Y = _S.gens()
+_h = _X + (_Y - 1)*(_Y - 2)
+assert (_h*(_X + 3)).gcd(_h*(_X + 4)) == _h
+_M = PolynomialRing(GF(4, "a"), names=("x", "y")); _mx = _M.gen(0)
+_Fa = (_mx*(_mx + 1)).factor()
+assert _Fa.value() == _mx*(_mx + 1)
+print("mpoly ok")
