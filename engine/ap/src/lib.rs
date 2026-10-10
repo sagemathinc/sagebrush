@@ -13,6 +13,7 @@
 
 pub mod ec;
 pub mod fp;
+pub mod lcert;
 pub mod quartic;
 pub mod search;
 

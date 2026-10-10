@@ -564,6 +564,16 @@ def _f_bound(ld, t):
 
 
 def certified_low_rank(ld):
+    """The analytic rank if it is 0 or 1, decided on balls by the engine
+    (engine/ap/src/lcert.rs: every exp, E_1 and sum enclosed, tails
+    bounded; the systematic review's R2-EC-F2), else None.  The f64
+    version below is kept for comparison only."""
+    from sagebrush import ap as _apm
+    r = _apm.low_rank(ld.an, ld.N)
+    return None if r is None else r["rank"]
+
+
+def certified_low_rank_f64(ld):
     """The analytic rank if it is 0 or 1, decided with error bounds (None
     otherwise, or if the bounds do not decide).  The root number w = +-1
     satisfies f(1) - f(t) = w (f(1/t) - f(1)): of A - B and A + B one is 0,

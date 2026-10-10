@@ -429,6 +429,7 @@ name = "sagebrush-ap"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",
 ]
