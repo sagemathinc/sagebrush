@@ -1782,7 +1782,11 @@ class EllipticCurve_rational_field:
 
         - ``proof`` -- (default: False) if True, return only ranks that are
           proved: 0 and 1 (nothing has to vanish then: root number -1 forces
-          L(E,1) = 0).  For r >= 2 it raises NotImplementedError, since
+          L(E,1) = 0).  The sums' truncation and rounding are bounded; the
+          bound assumes exp and E_1, evaluated in doubles, are accurate to
+          10^-13 and 10^-12 relatively (not enclosed: libm is faithful to
+          about 10^-16, and E_1's continued fraction is not given a proved
+          remainder).  For r >= 2 it raises NotImplementedError, since
           showing that L^(k)(E,1) is exactly 0 for k < r is a separate
           problem: possible for r = 2, 3 (modular symbols, Gross-Zagier),
           not implemented here, and open for every curve when r >= 4.
@@ -2098,10 +2102,12 @@ class EllipticCurve_rational_field:
         9) on the minimal model.  Rank >= 2 (the rank from Cremona's table or
         2-descent, or with proof=False the analytic rank): independent points
         from the 2-descent and a point search, LLL-reduced for the height
-        pairing and saturated at every prime up to a proved bound on their
-        index (the Cremona-Prickett-Siksek height bound and an exhaustive
-        search; see lib/_sage_ec.py), or up to max_prime if given (then generators of a
-        subgroup of index prime to the primes up to max_prime).
+        pairing and saturated at every prime up to a bound on their index
+        (the Cremona-Prickett-Siksek height bound and an exhaustive search;
+        see lib/_sage_ec.py), or up to max_prime if given (then generators of a
+        subgroup of index prime to the primes up to max_prime).  The bound's
+        canonical heights and regulator are doubles, not enclosures: it
+        assumes their relative errors are below 10^-6.
 
         EXAMPLES::
 
@@ -2262,10 +2268,10 @@ class EllipticCurve_rational_field:
         """The rank of E(Q): from Cremona's table (conductor < 1000), else the
         analytic rank when it is 0 or 1 (equal to the rank by Gross-Zagier and
         Kolyvagin), else 2-descent (via 2-isogeny, or general) when its
-        bounds meet.  When the general 2-descent's upper bound comes from the
-        class group of a cubic field (the quartic search too large, or
-        numerically unreliable), it assumes GRH, and only proof=False
-        accepts it.  With proof=False, falls back to the numerical analytic
+        bounds meet.  The general 2-descent's upper bound comes from the
+        class group of a cubic field (the quartic search's classes are
+        numerical, and agreeing with it does not certify them), so it
+        assumes GRH, and only proof=False accepts it.  With proof=False, falls back to the numerical analytic
         rank (assuming the Birch and Swinnerton-Dyer rank conjecture) when
         these do not decide.
 
@@ -2273,7 +2279,7 @@ class EllipticCurve_rational_field:
 
             sage: [EllipticCurve(lab).rank() for lab in ['11a1', '37a1', '389a1']]
             [0, 1, 2]
-            sage: EllipticCurve([0, 0, 1, -7, 6]).rank()
+            sage: EllipticCurve([0, 0, 1, -7, 6]).rank(proof=False)
             3
             sage: EllipticCurve([0, 0, 0, -1681, 0]).rank()
             2
@@ -2290,7 +2296,7 @@ class EllipticCurve_rational_field:
             lo, hi = 0, None
         if lo == hi:
             if self._descent_assumes_grh() and proof is not False:
-                raise NotImplementedError("the rank is %d assuming GRH (the 2-Selmer group from the class group of a cubic field); proof=False accepts it" % lo)
+                raise NotImplementedError("the rank is %d assuming %s (the 2-Selmer group); proof=False accepts it" % (lo, "; ".join(self.descent_assumptions())))
             return lo
         if proof is False:
             r = self.analytic_rank(proof=False)

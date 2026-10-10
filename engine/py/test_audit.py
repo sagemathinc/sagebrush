@@ -452,4 +452,11 @@ assert all(abs(_v / _t - 1) < _R100(_Fr(1, 2**90)) for _v in (_t.sinh(), _t.tanh
 assert str(_R100(-2**300).arcsinh()) == "-208.63730134854353813458686856"
 _U = RealField(100, rnd="RNDU")  # R2-NUM-F10
 assert _U(_Fr(1, 2**300)).exp() > 1 and (_U(1) + _U(_Fr(1, 2**98))).log() > _U(_Fr(1, 2**98)) - _U(_Fr(1, 2**197))
+from sagebrush.sage import EllipticCurve
+_E5077 = EllipticCurve([0, 0, 1, -7, 6]); _E5077.rank_bounds()  # R2-EC-F1
+assert _E5077.descent_assumptions() and _E5077.rank(proof=False) == 3; raises(NotImplementedError, _E5077.rank, proof=True)
+_E389 = EllipticCurve("389a1"); _P, _Q = _E389(0, 0), _E389(1, 0)  # R2-EC-F3
+assert abs(_E389.regulator_of_points([_P, 300 * _P + _Q]) - _E389.regulator_of_points([_P, _Q])) < 1e-15
+import _sage_ec as _ecm
+assert _ecm._hermite_pow(10) >= 4096 / 3  # R2-EC-F6
 print("rereview2 ok")

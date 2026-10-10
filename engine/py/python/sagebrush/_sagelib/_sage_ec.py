@@ -570,7 +570,9 @@ def certified_low_rank(ld):
     so the other exceeding the errors decides w.  Rank 0: w = 1 and |L(E,1)|
     = |2 f(1)| beyond its error; rank 1: w = -1 and |L'(E,1)| beyond its
     error (E_1 allowed 1e-12 relatively).  (The floating root number and the
-    threshold 1e-6 were taken as proofs: the systematic review's EC-F8.)"""
+    threshold 1e-6 were taken as proofs: the systematic review's EC-F8.)
+    The allowances for exp (1e-13) and E_1 (1e-12) are assumptions, not
+    enclosures (R2-EC-F2): the decision is proved given them."""
     t = 1.2
     f1, e1 = _f_bound(ld, 1.0)
     ft, et = _f_bound(ld, t)
@@ -1069,8 +1071,17 @@ def height_pairing(a, P, Q, bad):
 
 
 def regulator(a, pts, bad):
-    """det of the height pairing matrix of the points."""
+    """det of the height pairing matrix of the points: of an LLL-reduced
+    basis of the same lattice (the determinant is unchanged), whose heights
+    are computed from the reduced points themselves (from [P, 300 P + Q] on
+    389a1 the pairing matrix lost about 1e-9 of its determinant: the
+    systematic review's R2-EC-F3)."""
     r = len(pts)
+    if r >= 2:
+        G = [[height_pairing(a, P, Q, bad) for Q in pts] for P in pts]
+        U = _lll_gram(G)
+        if any(U[i][j] != (i == j) for i in range(r) for j in range(r)):
+            pts = [_combo(a, pts, u) for u in U]
     M = [[0.0] * r for _ in range(r)]
     for i in range(r):
         M[i][i] = canonical_height(a, pts[i], bad)
@@ -1620,12 +1631,19 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10, algor
     # |j| is huge: 9709b3 (|j| ~ 4e20) misses half the Selmer group, 1342c3
     # (|j| ~ 1e26) splits the trivial class in two.  The cubic field's count
     # is exact assuming GRH (its class group), and decides when they differ.
+    # The quartic count alone is not certified (floating-point classes), and
+    # agreeing with the cubic count does not certify it: the upper bound then
+    # rests on the cubic field's class group, with what that assumes; without
+    # a cubic count the bound is marked unverified (5077a1 had assumes=[]:
+    # the systematic review's R2-EC-F1)
     try:
         import _sage_ec_cubic as cd
         sel_c = cd.selmer(a)
         sc = sel_c["dim"]
     except (ArithmeticError, NotImplementedError, ValueError, RuntimeError):
+        out.update(grh=True, certified=False, assumes=["the quartic descent's Selmer classes (floating point, without the cubic field's cross-check)"])
         return out
+    out.update(grh=True, assumes=sel_c.get("assumes", ["GRH"]), certified=sel_c.get("certified", False))
     sq = (s - 1).bit_length() if closed and s & (s - 1) == 0 else None
     if sq != sc:
         bad = [p for p, _ in _factor_int(D)]
@@ -2052,6 +2070,19 @@ def _lll_gram(G):
 _HERMITE_POW = {1: 1.0, 2: 4 / 3, 3: 2.0, 4: 4.0, 5: 8.0, 6: 64 / 3, 7: 64.0, 8: 256.0}
 
 
+def _hermite_pow(r):
+    """An upper bound for gamma_r^r (Hermite's constant): exact for r <= 8,
+    else Blichfeldt's (2/pi)^r Gamma(2 + r/2)^2 or Hermite's (4/3)^(r(r-1)/2),
+    whichever is smaller, rounded up.  (2^r was used for r > 8, which is not
+    a bound: a 10-dimensional lattice has gamma^10 >= 4096/3, the systematic
+    review's R2-EC-F6.)"""
+    if r in _HERMITE_POW:
+        return _HERMITE_POW[r]
+    blichfeldt = (2 / _m.pi) ** r * _m.gamma(2 + r / 2) ** 2
+    hermite = (4 / 3) ** (r * (r - 1) / 2)
+    return min(blichfeldt, hermite) * (1 + 1e-9)
+
+
 def silverman_bound(a):
     """B with h(x(P)) - hhat(P) <= B for every P on the minimal model a
     (Sage's normalization of hhat)."""
@@ -2214,9 +2245,11 @@ def index_bound(a, pts, bad, T=None):
         return None, T
     for P in found:
         if point_order(a, P) == 0:
-            lam = min(lam, canonical_height(a, P, bad) * (1 - 1e-9))
-    R = regulator(a, pts, bad) * (1 + 1e-9)
-    n = _m.sqrt(R * _HERMITE_POW.get(r, 2.0 ** r) / lam ** r)
+            lam = min(lam, canonical_height(a, P, bad) * (1 - 1e-6))
+    # (margins of 1e-6 relative for the heights and the regulator, which are
+    # doubles without an enclosure: the bound assumes their errors are less)
+    R = regulator(a, pts, bad) * (1 + 1e-6)
+    n = _m.sqrt(R * _hermite_pow(r) / lam ** r)
     return n, T
 
 
