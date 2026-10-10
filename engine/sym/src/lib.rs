@@ -4,6 +4,7 @@
 //! calculus on them.
 
 pub mod api;
+pub mod definite;
 pub mod diff;
 pub mod err;
 pub mod eval;

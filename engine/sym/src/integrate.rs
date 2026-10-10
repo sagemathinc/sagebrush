@@ -1855,35 +1855,11 @@ fn gcd_q(a: &Q, b: &Q) -> Q {
 /// was found; an error if the integral diverges.
 pub fn definite(f: &Expr, x: &str, a: &Expr, b: &Expr) -> Option<Expr> {
     let big_f = integrate(f, x)?;
-    if let Some(p) = interior_pole(f, x, a, b) {
-        let _ = p;
-        crate::err::value_error("Integral is divergent.");
+    match crate::definite::definite(f, &big_f, x, a, b, &has_bad) {
+        crate::definite::Outcome::Value(v) => Some(v),
+        crate::definite::Outcome::Divergent => crate::err::value_error("Integral is divergent."),
+        crate::definite::Outcome::Unknown => None,
     }
-    let fb = crate::limit::limit(&big_f, x, b, crate::limit::Dir::Minus);
-    let fa = crate::limit::limit(&big_f, x, a, crate::limit::Dir::Plus);
-    if fb.is_infinite() || fa.is_infinite() || has_bad(&fb) || has_bad(&fa) {
-        crate::err::value_error("Integral is divergent.");
-    }
-    let r = sub(&fb, &fa);
-    let s = simplify_rational(&r);
-    Some(if crate::simplify::size(&s) <= crate::simplify::size(&r) { s } else { r })
-}
-
-/// A real zero of f's denominator strictly between a and b.
-fn interior_pole(f: &Expr, x: &str, a: &Expr, b: &Expr) -> Option<f64> {
-    let (av, bv) = (crate::eval::to_f64(a).unwrap_or(f64::NEG_INFINITY), crate::eval::to_f64(b).unwrap_or(f64::INFINITY));
-    let (_, d) = together(f);
-    let qd = QPoly::from_expr(&d, x)?;
-    for (p, _) in qd.factor() {
-        if p.deg() == 1 {
-            let r = -p.coeff(0) / p.coeff(1);
-            let rv = crate::eval::to_f64(&qnum(r))?;
-            if av < rv && rv < bv {
-                return Some(rv);
-            }
-        }
-    }
-    None
 }
 
 // ------------------------------------------------------------------ tests
