@@ -462,9 +462,21 @@ impl Ball {
         let s = x.sqrt();
         let se = (self.e - k) / 2;
         let mut err = if &s * &s == x { Mag::ZERO } else { Mag::pow2(se) };
-        // |sqrt(y) - sqrt(m)| <= r / sqrt(m) <= r / s
+        // |sqrt(y) - sqrt(m)| = |y - m| / (sqrt(y) + sqrt(m)) <= r / (sqrt(m - r)
+        // + sqrt(m)), at most r / (s (2 - 2^-16)) once r <= m 2^-16 (then
+        // sqrt(m - r) >= sqrt(m) (1 - 2^-16)), else r / s (s <= sqrt(m)):
+        // the bound r / s alone doubled the radius at each square root, and
+        // Carlson's duplication (about prec/2 steps of three) lost a third of
+        // the bits to it
         if !self.r.is_zero() {
-            err = err.add(self.r.div(Mag::from_bigint_down(&s, se)));
+            let (lm, le) = self.lower();
+            // (lower = m - r > 0 here, rounded down: r <= lower 2^-16 suffices)
+            let den = if self.r <= Mag::from_bigint_down(&lm, le - 16) {
+                Mag::from_bigint_down(&((&s << 17u32) - &s), se - 16)
+            } else {
+                Mag::from_bigint_down(&s, se)
+            };
+            err = err.add(self.r.div(den));
         }
         Some(Ball { m: s, e: se, r: err }.rounded(prec))
     }

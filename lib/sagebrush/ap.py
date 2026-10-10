@@ -25,6 +25,15 @@ def low_rank(an, n):
     return call("ec_low_rank", an=[int(x) for x in an], n=int(n))
 
 
+def height(a, x, n, local, d, roots, prec=128):
+    """The canonical height on balls (engine/ap/src/height.rs): [(m, e), (m, e)]
+    exact dyadic endpoints m 2^e enclosing hhat."""
+    r = call("ec_height", a=[str(int(c)) for c in a], x=[str(x[0]), str(x[1])], n=int(n),
+             local=[[str(p), str(u), str(w)] for p, u, w in local], d=str(int(d)),
+             roots=[[str(m), str(k)] for m, k in roots], prec=int(prec))
+    return (int(r["lo"][0]), int(r["lo"][1])), (int(r["hi"][0]), int(r["hi"][1]))
+
+
 def aplist_many(curves, n, threads=0):
     return [[tuple(t) for t in l] for l in call("aplist_many", curves=[_a(a) for a in curves], n=int(n))]
 
