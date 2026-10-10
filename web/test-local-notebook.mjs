@@ -90,6 +90,8 @@ await ready();
 ok((await ev("document.querySelectorAll('.cell').length")) >= 4 && (await ev("document.body.textContent")).includes("factor(2^64 + 1)"), "reopening shows the saved notebook");
 const outside = await ev(`fetch('api/file?path=' + encodeURIComponent('../../etc/passwd')).then((r) => r.status)`);
 ok(outside === 400, "files outside the directory are refused: " + outside);
+const lic = await ev(`fetch('/THIRD-PARTY-NOTICES.txt').then((r) => r.text())`);
+ok(/KaTeX's fonts/.test(lic ?? ""), "the page's Licenses link works here too");
 // a file that is not a notebook is shown as an error and never saved over (audit F8)
 const broken = join(dir, "broken.ipynb"), junk = '{"cells": [ truncated';
 writeFileSync(broken, junk);

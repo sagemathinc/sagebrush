@@ -10,6 +10,6 @@ const out = join(here, "dist");
 if (!existsSync(join(src, "index.html"))) throw new Error("no web/dist: run `bun web/build.ts` first");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const f of ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "katex", "icons"])
+for (const f of ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "THIRD-PARTY-NOTICES.txt", "katex", "icons"])
   cpSync(join(src, f), join(out, f), { recursive: true });
 console.log("app/dist: the notebook page for the app");

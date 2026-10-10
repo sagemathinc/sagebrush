@@ -31,6 +31,7 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   -q       no banner on the interactive prompt
   --emit   print the JavaScript compiled from file (with --magma: the Python)
   -V       print the version
+  --licenses  the licenses of Sagebrush and of what it contains
   --search QUERY [--json]
            search the documentation of every function (name, signature,
            docstring): what Sagebrush can do; obj? in a session shows one
@@ -244,6 +245,12 @@ async function main() {
     else if (a === "--magma") magma = true;
     else if (a === "-V" || a === "--version") {
       process.stdout.write(VERSION + "\n");
+      return;
+    } else if (a === "--licenses") {
+      const files: [string, string][] = (globalThis as any).__SAGEBRUSH_NOTICES__ ?? [];
+      process.stdout.write("Sagebrush is licensed under the MIT license or the Apache License 2.0, at your option; it also contains\nthe components below, each under its own license.\n\n");
+      for (const [name, text] of files) process.stdout.write(`==== ${name} ====\n\n${text.trim()}\n\n`);
+      if (!files.length) process.stdout.write("(see LICENSE-MIT, LICENSE-APACHE and packages/sagebrush/THIRD-PARTY-NOTICES.txt in the repository)\n");
       return;
     } else if (a === "-h" || a === "--help") {
       process.stdout.write(USAGE);

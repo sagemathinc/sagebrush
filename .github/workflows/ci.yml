@@ -34,6 +34,11 @@ jobs:
       - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
       - name: single-file bundle
         run: node scripts/build-cli.mjs
+      - name: the web page builds, and the npm packages in it are those in its notices
+        run: |
+          bun web/build.ts
+          git diff --exit-code web/js-dependencies.json
+          node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
       - name: conformance (Node)
         run: python3 conformance/run.py --runtime node --show 20
       - name: conformance (Deno)
@@ -94,14 +99,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - name: each package's third-party notices are up to date, and nothing (L)GPL is linked
-        run: node scripts/third-party-notices.mjs --check
       - name: a fresh WebAssembly engine
         run: |
           node scripts/build-engine.mjs
           node engine/web/tests/wasm_designated.mjs
           git diff --quiet wasm/ || echo "::warning::wasm/sagebrush-engine.wasm differs from a fresh build of engine/ (node scripts/build-engine.mjs; a different Rust can also change the bytes)"
       - run: pnpm install --frozen-lockfile
+      - name: each package's third-party notices are up to date, and nothing (L)GPL is linked
+        run: node scripts/third-party-notices.mjs --check
       - name: the TypeScript tests and the Sage, calculus and Magma suites on it
         run: |
           python3 -m pip install scipy
