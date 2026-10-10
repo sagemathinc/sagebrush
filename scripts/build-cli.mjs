@@ -11,6 +11,7 @@
 // The bundle is made by Bun (fast TypeScript bundler); the Python files in
 // lib/ become globalThis.__PYJS_LIB__ (see libDir() in src/compile.ts).
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
@@ -46,7 +47,20 @@ const version = JSON.parse(readFileSync(join(root, "packages", "sagebrush", "pac
 // The licenses and third-party notices, for `sagebrush --licenses` (the
 // standalone executables are one file, with no room for a NOTICE beside it)
 const notices = ["LICENSE-MIT", "LICENSE-APACHE", "cdn/LICENSE-CPython.txt", "LICENSE-Artistic-2.0.txt", "packages/sagebrush/THIRD-PARTY-NOTICES.txt"].map((f) => [f.split("/").pop(), readFileSync(join(root, f), "utf8")]);
-writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
+// The build id names this compiler and library for the per-user compile
+// cache (src/compile.ts): a hash of src/ and lib/.
+const hash = createHash("sha256");
+const walkSrc = (dir) => {
+  for (const f of readdirSync(dir).sort()) {
+    const p = join(dir, f);
+    if (statSync(p).isDirectory()) walkSrc(p);
+    else if (f.endsWith(".ts")) hash.update(relative(root, p) + "\0" + readFileSync(p, "utf8") + "\0");
+  }
+};
+walkSrc(join(root, "src"));
+for (const k of Object.keys(lib).sort()) hash.update(k + "\0" + lib[k] + "\0");
+const buildId = hash.digest("hex").slice(0, 16);
+writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n`);
 // The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
