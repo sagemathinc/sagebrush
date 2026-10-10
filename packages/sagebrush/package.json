@@ -13,7 +13,9 @@
     "NOTICE.md",
     "LICENSE-CPython.txt",
     "LICENSE-MIT",
-    "LICENSE-APACHE"
+    "LICENSE-APACHE",
+    "THIRD-PARTY-NOTICES.txt",
+    "LICENSE-Artistic-2.0.txt"
   ],
   "engines": {
     "node": ">=22"
@@ -26,7 +28,7 @@
   "homepage": "https://github.com/sagemathinc/sagebrush#readme",
   "bugs": "https://github.com/sagemathinc/sagebrush/issues",
   "author": "William Stein <wstein@sagemath.com>",
-  "license": "(MIT OR Apache-2.0) AND PSF-2.0",
+  "license": "(MIT OR Apache-2.0) AND PSF-2.0 AND Artistic-2.0",
   "publishConfig": {
     "access": "public"
   }

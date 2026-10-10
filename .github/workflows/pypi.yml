@@ -41,6 +41,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install engine/py/dist/*.whl
+          python -c "import glob, zipfile; names = zipfile.ZipFile(glob.glob('engine/py/dist/*.whl')[0]).namelist(); need = ['LICENSE-MIT', 'LICENSE-APACHE', 'LICENSE-Artistic-2.0.txt', 'THIRD-PARTY-NOTICES.txt']; missing = [n for n in need if not any(x.endswith('/' + n) for x in names)]; assert not missing, missing; print('license files in the wheel: ok')"
           python sage-tests/run_cpython.py -v
           python sage-tests/run_cpython.py --own -v
           python sage-tests/run_calculus.py
