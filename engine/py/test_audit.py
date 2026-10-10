@@ -517,3 +517,15 @@ _s3 = _exp2(_y).series(_y, 3)  # R2-SYMALG-F8
 assert str(_s3**(SR(3) / 2)) == "1 + 3/2*x + 9/8*x^2 + Order(x^3)" and "Order(x^3)" in str(1 / _s3) and "Order(x^2)" in str(diff(_s3, _y))
 assert str(_exp2(_y).series(_y, 5) / (1 + _y**2).series(_y, 1)) == "1 + Order(x)"
 print("rereview2 ok")
+
+# R2-MOD-F2: new subspaces against Sage (N < 61, k = 2, 4, 6, 8; Gamma0(N))
+import json as _json, os as _os
+from sagebrush.sage import ModularForms, CuspForms
+for _l in open(_os.path.join(_os.path.dirname(__file__), "..", "modsym", "examples", "sage", "eisenstein_new_dims.jsonl")):
+    _N, _k, _en, _mn, _cn, _ed = _json.loads(_l)
+    if "ERR" in (_en, _mn):
+        continue
+    _M = ModularForms(_N, _k)
+    assert (_M.eisenstein_subspace().new_subspace().dimension(), _M.new_subspace().dimension()) == (_en, _mn), (_N, _k)
+    assert _M.eisenstein_subspace().new_subspace().dimension() <= _M.eisenstein_subspace().dimension()
+print("modforms new ok")
