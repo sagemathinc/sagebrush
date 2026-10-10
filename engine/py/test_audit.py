@@ -543,3 +543,9 @@ assert hash(_t) == hash(SR(_t)) == hash(_T) and len({_t, SR(_t), _T}) == 1 and h
 _w, _W = PolynomialRing(GF(7), "w").gen(), PolynomialRing(GF(7), "w,z").gen(0); assert hash(_w**2 + 3) == hash(_W**2 + 3)
 _u = PowerSeriesRing(QQ, "u").gen(); raises(TypeError, hash, _u + O(_u**2)); assert hash(_u + _u**2) == hash(PolynomialRing(QQ, "u").gen() * (1 + PolynomialRing(QQ, "u").gen()))
 print("hash ok")
+
+# R2-EXT-F13: matrix Cartan types
+from sagebrush.sage import CartanType, CartanMatrix
+_C = CartanType(CartanMatrix([[2, 0], [0, 2]])); assert not _C.is_irreducible() and _C.is_reducible() and dict(_C.symmetrizer()) == {0: 1, 1: 1}
+raises(TypeError, CartanMatrix, [[2, Fraction(-3, 2)], [Fraction(-3, 2), 2]]); raises(ValueError, CartanMatrix, [[2, -1], [0, 2]])
+print("cartan ok")
