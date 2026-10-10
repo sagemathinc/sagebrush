@@ -335,9 +335,6 @@ pub struct Sol {
 }
 
 thread_local! {
-    /// Whether a domain condition was conservative (a base under a symbolic
-    /// exponent): then the equation is also reported unresolved.
-    static CONSERVATIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The names in use (the equation's symbols and the new ones so far).
     static USED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(vec![]) };
 }
@@ -425,20 +422,21 @@ fn ne_conds(e: &Expr) -> Vec<Expr> {
 /// (Also those in the parameters only, log(a) (x - 1) == 0 needs a != 0,
 /// and the bases of negative powers anywhere, e^(1/x) needs x != 0: the
 /// review's CSOL-F14, F16.)
-/// A base raised to a symbolic exponent (x^b) is collected too, its
-/// condition b != 0 being conservative (0^b is defined for Re(b) > 0): the
-/// caller then also reports the equation unresolved (CSOL-F16).  Constants
-/// are not skipped: log(c) with an undecided c = 0 needs c != 0 (F14).
+/// A numeric exponent with real part <= 0 (x^-1, x^I) needs its base
+/// nonzero; a symbolic one goes to zero_powers.  Constants are not skipped:
+/// log(c) with an undecided c = 0 needs c != 0 (F14).
 fn singular_args(z: &Expr, x: &str, out: &mut Vec<Expr>) {
     if let Kind::Pow(b, k) = &z.kind {
-        let negative = k.as_num().map_or(false, |k| k.is_negative());
-        // (not a^x with a free of x: its inversion handles a == 0 exactly)
-        let symbolic = k.as_num().is_none() && !b.is_const(Const::E) && (depends(b, x) || !depends(k, x)) && maybe_zero(b);
-        if (negative || symbolic) && !out.contains(b) {
-            out.push(b.clone());
-            if symbolic {
-                CONSERVATIVE.with(|c| c.set(true));
+        let nonpositive = k.as_num().map_or(false, |k| {
+            use num_traits::Signed;
+            let (re, _) = k.to_c64();
+            match k.as_rat() {
+                Some(q) => !q.is_positive(),
+                None => re <= 0.0 || matches!(k, crate::num::Num::Exact(a, _) if !a.is_positive()),
             }
+        });
+        if nonpositive && !b.is_const(Const::E) && !out.contains(b) {
+            out.push(b.clone());
         }
     }
     if let Kind::Fun(f, a) = &z.kind {
@@ -459,6 +457,20 @@ fn singular_args(z: &Expr, x: &str, out: &mut Vec<Expr>) {
     }
     for c in z.children() {
         singular_args(&c, x, out);
+    }
+}
+
+/// The powers b^e with a symbolic exponent and a base that may vanish: 0^e
+/// is defined only for Re(e) > 0, which is a condition per candidate (the
+/// review's CSOL-F16): see solve1_full.
+fn zero_powers(z: &Expr, out: &mut Vec<(Expr, Expr)>) {
+    if let Kind::Pow(b, k) = &z.kind {
+        if k.as_num().is_none() && !b.is_const(Const::E) && maybe_zero(b) && !out.contains(&(b.clone(), k.clone())) {
+            out.push((b.clone(), k.clone()));
+        }
+    }
+    for c in z.children() {
+        zero_powers(&c, out);
     }
 }
 
@@ -1042,12 +1054,16 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
     let (n, d) = together(&z);
     let n = crate::expand::expand(&n);
     let mut sing = vec![];
-    CONSERVATIVE.with(|c| c.set(false));
     singular_args(&z, x, &mut sing);
-    let conservative = CONSERVATIVE.with(|c| c.get());
-    // the conditions for z to be defined at x = v: its denominator and its
-    // singular arguments nonzero there
-    let defined = |v: &Expr| -> Option<Vec<Expr>> {
+    let mut zpow = vec![];
+    zero_powers(&z, &mut zpow);
+    let conservative = std::cell::Cell::new(false);
+    // the conditions for z to be defined at x = v, given the candidate's own
+    // conditions: its denominator and singular arguments nonzero there; for
+    // b^e with a symbolic e, Re(e) > 0 where the conditions make b = 0,
+    // nothing where they make b nonzero, else b != 0 conservatively (0^e is
+    // fine for Re(e) > 0), and then the equation is also reported unresolved
+    let defined = |v: &Expr, have: &[Expr]| -> Option<Vec<Expr>> {
         let mut cond = vec![];
         for g in std::iter::once(&d).chain(sing.iter()) {
             let gv = crate::simplify::simplify_rational(&subs(g, &[(xs.clone(), v.clone())]));
@@ -1060,16 +1076,47 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
                 }
             }
         }
+        for (b, e) in &zpow {
+            let bv = crate::simplify::simplify_rational(&subs(b, &[(xs.clone(), v.clone())]));
+            if !maybe_zero(&bv) {
+                continue;
+            }
+            let ev = subs(e, &[(xs.clone(), v.clone())]);
+            let is_zero = bv.is_zero() || have.contains(&zero_rel(Rel::Eq, &bv));
+            let nonzero = have.contains(&zero_rel(Rel::Ne, &bv))
+                || have.iter().any(|c| matches!(&c.kind, Kind::Rel(Rel::Eq, l, r) if l == &bv && !maybe_zero(r)))
+                || ne_conds(&bv).iter().all(|c| have.contains(c));
+            if is_zero {
+                let c = relation(Rel::Gt, &fun1(Fun::RealPart, &ev), &zero());
+                if decide(&c) == Some(false) {
+                    return None;
+                }
+                if !cond.contains(&c) && !have.contains(&c) {
+                    cond.push(c);
+                }
+            } else if !nonzero {
+                for c in ne_conds(&bv) {
+                    if !cond.contains(&c) {
+                        cond.push(c);
+                    }
+                }
+                conservative.set(true);
+            }
+        }
         Some(cond)
     };
     if n.is_zero() || crate::simplify::simplify_full(&n).is_zero() {
         // every x where the equation is defined (the review: the
         // denominators x (x + 1) of an identity were lost)
         let r = sym(&fresh("r"));
-        return match defined(&r) {
+        let mut out = match defined(&r, &[]) {
             Some(cond) => vec![(eq(&xs, &r), cond, vec![])],
             None => vec![],
         };
+        if conservative.get() {
+            out.push((relation(Rel::Eq, &zero(), &z), vec![], vec![]));
+        }
+        return out;
     }
     UNSOLVED.with(|u| u.borrow_mut().clear());
     let mut sols = roots_c(&n, x);
@@ -1079,7 +1126,7 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
     for mut s in sols.drain(..) {
         // the denominator must not vanish there: a condition, also on the
         // integer parameters (sin(x)/(x - 2 pi) == 0: n1 != 2; CSOL-F1)
-        match defined(&s.val) {
+        match defined(&s.val, &s.cond) {
             Some(cond) => s.cond.extend(cond),
             None => continue,
         }
@@ -1157,7 +1204,7 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
     // with a denominator in x (or singular arguments), a remainder is the
     // equation itself: its numerator's factor would drop x != 0 from
     // sin(x)/x == a (the review)
-    if conservative && rest.is_empty() {
+    if conservative.get() && rest.is_empty() {
         rest = vec![z.clone()];
     }
     if !rest.is_empty() && (depends(&d, x) || !sing.is_empty()) {
