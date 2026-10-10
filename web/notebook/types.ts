@@ -64,8 +64,9 @@ export interface Kernel {
 
 export interface Store {
   load(): Promise<NotebookDoc>;
-  /** Called half a second after the last change, only if the document changed; resolves to a status ("saved in this browser"). */
-  save(doc: NotebookDoc): Promise<string | void> | string | void;
+  /** Called half a second after the last change, only if the document changed; resolves to a status ("saved in this browser"),
+   *  or, for a store with revisions (stores.js), {saved, rev} or {conflict: the stored document} when doc.baseRev is not the stored revision. */
+  save(doc: NotebookDoc): Promise<string | void | { saved?: string; rev?: number; conflict?: NotebookDoc }> | string | void;
   /** Changes made elsewhere; returns an unsubscribe function. */
   subscribe?(f: (doc: NotebookDoc) => void): () => void;
 }
@@ -89,8 +90,8 @@ export interface Notebook {
   attach(store: Store): Promise<NotebookDoc>;
   detach(): void;
   setMeta(patch: object): void;
-  /** change: the document changed here (a snapshot); remote: a change from elsewhere was applied; saved: the store's status; dirty: an edit, not yet saved; mode: the language changed. */
-  on(event: "change" | "remote" | "saved" | "dirty" | "mode", f: (...args: any[]) => void): () => void;
+  /** change: the document changed here (a snapshot); remote: a change from elsewhere was applied; saved: the store's status; dirty: an edit, not yet saved; mode: the language changed; conflict: a cell changed here and elsewhere ({id, copy}: this side's text is in the new cell copy). */
+  on(event: "change" | "remote" | "saved" | "dirty" | "mode" | "conflict", f: (...args: any[]) => void): () => void;
   setReadOnly(readOnly: boolean): void;
   /** Measure every editor again (after the notebook was hidden). */
   resize(): void;

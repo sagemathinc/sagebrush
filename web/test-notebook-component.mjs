@@ -106,6 +106,45 @@ try {
     return { kept, retried, calls, merged };
   })()`);
   ok(rev.kept && rev.retried && rev.merged, "loaded outputs are saved as they were; a failed save is retried; an unsaved edit survives a remote change: " + JSON.stringify(rev));
+  // three-way merges from the synced revision (R2-DOC-F1)
+  const m3 = await a.ev(`(async () => {
+    const nb = demo.nb, st = demo.store, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    st.push({ ...structuredClone(st.doc), cells: [{ id: "a", code: "x = 1" }, { id: "b", code: "y = 1" }, { id: "c", code: "z = 1" }] });
+    await wait(50);
+    const codes = () => nb.cells().map((c) => c.ta.value);
+    // an unsaved edit survives two unrelated changes from elsewhere
+    nb.setInput(nb.cells()[0], "x = 9007199254740993");
+    let r = structuredClone(st.doc); r.cells[1].code = "y = 2"; st.push(r);
+    r = structuredClone(st.doc); r.cells[2].code = "z = 2"; st.push(r);
+    await wait(20);
+    const two = codes().join("|") === "x = 9007199254740993|y = 2|z = 2";
+    // a cell inserted here survives an unrelated change from elsewhere
+    nb.addCell("proof = 1");
+    r = structuredClone(st.doc); r.cells[1].code = "y = 3"; st.push(r);
+    await wait(20);
+    const insert = codes().includes("proof = 1") && codes().includes("y = 3");
+    await wait(900);
+    const saved = st.doc.cells.map((c) => c.code).join("|");
+    // the same cell changed on both sides: theirs, and ours in a copy tagged conflict
+    let conflict = null;
+    const off = nb.on("conflict", (e) => (conflict = e));
+    nb.setInput(nb.cells()[1], "y = 4  # here");
+    r = structuredClone(st.doc); r.cells[1].code = "y = 4  # there"; st.push(r);
+    await wait(20);
+    off();
+    const cs = nb.cells();
+    const both = cs[1].ta.value === "y = 4  # there" && cs[2].ta.value === "y = 4  # here" && (cs[2].metadata?.tags ?? []).includes("conflict") && !!conflict;
+    // a save from a stale revision is refused by the store, merged and saved again
+    await wait(900);
+    nb.setInput(nb.cells()[0], "x = 5");
+    const stale = structuredClone(st.doc); stale.cells.at(-1).code = "last = 1";
+    st.doc = { ...stale, rev: st.doc.rev + 1 }; // written elsewhere, not yet heard of here
+    nb.flush();
+    await wait(900);
+    const cas = st.doc.cells[0].code === "x = 5" && st.doc.cells.at(-1).code === "last = 1" && codes()[0] === "x = 5" && codes().at(-1) === "last = 1";
+    return { two, insert, saved, both, cas };
+  })()`);
+  ok(m3.two && m3.insert && m3.saved.includes("proof = 1") && m3.both && m3.cas, "changes from elsewhere merge three ways: local edits and inserts kept, a conflict kept as a copy, a stale save merged and retried: " + JSON.stringify(m3));
 
   // ---- the full page, in two tabs: the same notebook stays in step
   await a.send("Page.navigate", { url: base });
@@ -125,6 +164,13 @@ try {
   await b.ev("document.querySelector('#nbname').value = 'Shared work'; document.querySelector('#nbname').dispatchEvent(new Event('input'))");
   await sleep(900);
   ok(await a.ev("sagebrush.notebook.meta.name === 'Shared work' && document.querySelector('#nbname').value === 'Shared work'"), "the notebook's name travels with it");
+  // edits to different cells at the same time, in both tabs: both kept, everywhere (R2-DOC-F1)
+  await a.ev("(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], 'x = 9007199254740993'); nb.flush(); })()");
+  await b.ev("(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[1], 'print(x + 2)'); nb.flush(); })()");
+  await sleep(2500);
+  const va = await a.ev("[...document.querySelectorAll('.cell textarea')].map(t => t.value).join('|')");
+  const vb = await b.ev("[...document.querySelectorAll('.cell textarea')].map(t => t.value).join('|')");
+  ok(va === "x = 9007199254740993|print(x + 2)" && vb === va, "concurrent edits in two tabs are both kept, in both: " + JSON.stringify([va, vb]));
   b.ws.close();
   a.ws.close();
 } catch (e) {

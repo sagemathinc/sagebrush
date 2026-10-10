@@ -8,13 +8,37 @@
 // A CoCalc store (the Jupyter syncdb of a .ipynb in a project) has the same
 // shape: load() reads the cells, save(doc) writes the changed records,
 // subscribe() reports remote changes.
+//
+// Revisions: a stored document has a revision `rev`, one more at each write.
+// A save carries `baseRev`, the revision it was made from, and is written
+// only if that is still the stored one (compare and swap): {saved, rev};
+// otherwise nothing is written and the result is {conflict: the stored
+// document}, which the notebook merges (three ways, from the revision both
+// started at) and saves again.  So two tabs editing different cells keep both
+// edits, and no write is lost to a stale one (the systematic review's
+// R2-DOC-F1).  A save without baseRev is written as it is.
+
+// The record to write for doc over cur (the stored one), or null on a conflict.
+function revise(cur, doc) {
+  const { baseRev, ...rec } = doc;
+  if (baseRev !== undefined && cur && (cur.rev ?? 0) !== baseRev) return null;
+  return { ...rec, rev: (cur?.rev ?? 0) + 1 };
+}
 
 export class MemoryStore {
   constructor(doc = { mode: "python", cells: [] }) { this.doc = doc; this.subs = new Set(); }
   async load() { return structuredClone(this.doc); }
-  async save(doc) { this.doc = structuredClone(doc); return "saved"; }
-  /** Simulate a change made elsewhere. */
-  push(doc) { this.doc = structuredClone(doc); for (const f of this.subs) f(structuredClone(doc)); }
+  async save(doc) {
+    const rec = revise(this.doc, doc);
+    if (!rec) return { conflict: structuredClone(this.doc) };
+    this.doc = structuredClone(rec);
+    return { saved: "saved", rev: rec.rev };
+  }
+  /** Simulate a change made elsewhere (a new revision). */
+  push(doc) {
+    this.doc = { ...structuredClone(doc), rev: (this.doc?.rev ?? 0) + 1 };
+    for (const f of this.subs) f(structuredClone(this.doc));
+  }
   subscribe(f) { this.subs.add(f); return () => this.subs.delete(f); }
 }
 
@@ -78,10 +102,25 @@ export class IdbStore {
   }
   async save(doc) {
     if (!this.db) return "not saved: this browser has no storage";
-    const rec = { ...doc, id: this.id, updated: Date.now() };
-    await idb(this.db, "notebooks", "readwrite", (st) => st.put(rec));
-    getChannel()?.postMessage({ from: tabId, id: this.id, doc: rec });
-    return "saved in this browser";
+    // read and write in one transaction: the compare and swap is atomic
+    const out = await new Promise((resolve, reject) => {
+      const tx = this.db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks");
+      let result = null;
+      const get = st.get(this.id);
+      get.onsuccess = () => {
+        const rec = revise(get.result, { ...doc, id: this.id, updated: Date.now() });
+        if (!rec) result = { conflict: get.result };
+        else {
+          st.put(rec);
+          result = { rec };
+        }
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = () => reject(tx.error);
+    });
+    if (out.conflict) return { conflict: out.conflict };
+    getChannel()?.postMessage({ from: tabId, id: this.id, doc: out.rec });
+    return { saved: "saved in this browser", rev: out.rec.rev };
   }
   subscribe(f) {
     if (!getChannel()) return () => {};
