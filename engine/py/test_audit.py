@@ -393,7 +393,7 @@ assert str(solve(sqrt(_xs - 10**12) == 1, _xs)) == "[x == 1000000000001]"
 print("rereview ok")
 
 # Second review (2026-10-10), batch 2
-from sagebrush.sage import QQbar, AA, I, limit, exp, oo, integrate, acosh, pi, graphs, Graph, GF, ZZ, QQ, PolynomialRing
+from sagebrush.sage import RIF, QQbar, AA, I, limit, exp, oo, integrate, acosh, pi, graphs, Graph, GF, ZZ, QQ, PolynomialRing
 raises(ValueError, AA, QQbar(I) / 10**100)
 _a = var("a")
 assert str(integrate(1 / sqrt(_a**2 - _xs**2), _xs)) == "arcsin(x/abs(a))"
@@ -416,4 +416,11 @@ for _d in ("+", "-", None):  # R2-SYMCALC-F10: asech's cut is (-oo, 0] and [1, o
     _k = {"dir": _d} if _d else {}
     raises(ValueError, limit, SR("asech(2+I*x)"), x=0, **_k)
 assert str(limit(SR("asech(3+x^2)"), x=0)) == "arcsech(3)" and str(limit(SR("asech(x)"), x=SR(1) / 2)) == "arcsech(1/2)"
+import math as _math
+_m = _math.isqrt(2 * 10**100); _a = 10**50 * AA(2).sqrt() - _m  # R2-ROOT-F2: 0 < a < 1 exactly
+assert _a > 0 and _a < 1 and _a.floor() == 0 and str(_a.n(prec=100)) == "0.80731766797379907324784621070"
+assert str((AA(2).sqrt() / 10**100).n(prec=100)) == "1.4142135623730950488016887242e-100"  # R2-ROOT-F3
+assert str(RIF(QQ(1) / 10**400)) == "1.000000000000000?e-400" and str(AA(2).sqrt() * 10**400) == "1.414213562373095?e400"  # R2-ROOT-F4
+assert AA(QQ(2) / 10**330).sqrt() > 0  # R2-ROOT-F5
+assert len({AA(2).sqrt(), AA(8).sqrt() / 2}) == 1 and (10**400 * AA(2).sqrt()).floor() // 10**399 == 14
 print("rereview2 ok")
