@@ -363,9 +363,13 @@ impl ZPoly {
         }
         if self.len() == 1 {
             // a monomial: directly
+            // (exponents checked, not narrowed or wrapped: x^(2^31) to the
+            // 2^33 was 1, (1/2)^(2^32) too, the systematic review's MUL-F6)
             let d = self.degrees();
-            let c = num_traits::Pow::pow(self.coeffs.big(0), e as u32);
-            return ZPoly::from_terms(self.n, vec![(d.iter().map(|x| x * e).collect(), c)]);
+            let ee = u32::try_from(e).map_err(|_| "exponent too large".to_string())?;
+            let degs: Vec<u64> = d.iter().map(|x| x.checked_mul(e).ok_or_else(|| "exponent too large".to_string())).collect::<Result<_, _>>()?;
+            let c = num_traits::Pow::pow(self.coeffs.big(0), ee);
+            return ZPoly::from_terms(self.n, vec![(degs, c)]);
         }
         let mut b = self.clone();
         let mut k = e;
@@ -1318,7 +1322,8 @@ impl QPoly {
             }
             return Ok(r);
         }
-        Ok(QPoly { num: self.num.pow(e)?, den: num_traits::Pow::pow(self.den.clone(), e as u32), p: 0 })
+        let ee = u32::try_from(e).map_err(|_| "exponent too large".to_string())?;
+        Ok(QPoly { num: self.num.pow(e)?, den: num_traits::Pow::pow(self.den.clone(), ee), p: 0 })
     }
 
     /// The power over GF(p)[a]/(m) (the last variable a).

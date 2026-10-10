@@ -129,6 +129,12 @@ class TermOrder:
         name = str(name)
         if name not in _ORDER_NAMES:
             raise ValueError("unknown term order %r" % name)
+        if name == "wdegrevlex":
+            # weights are not implemented: refused, not dropped (x^2 + y with
+            # weights (1, 10) led with x^2: the systematic review's MUL-F5)
+            w = list(n) if isinstance(n, (list, tuple)) else None
+            if w is None or any(int(t) != 1 for t in w):
+                raise NotImplementedError("weighted term orders are not implemented")
         self._given = name
         self._name = _ORDER_NAMES[name]
         self.key = _order_key(self._name)
@@ -685,7 +691,19 @@ class MPolynomialRing_:
                 return x
             return _map_vars(x, self)
         if isinstance(x, dict):
-            return MPolynomial(self, {tuple(int(t) for t in e): dom._conv(c) for e, c in x.items()})
+            # exponents nonnegative integers, coefficients in the base (an
+            # exponent -1 printed as x, 3/2 became 1, 1/2 entered ZZ[x, y]:
+            # the systematic review's MUL-F1, F2)
+            d = {}
+            for e, c in x.items():
+                e = tuple(e) if isinstance(e, (tuple, list)) else (e,)
+                if len(e) != self._n or any(_F(t).denominator != 1 or t < 0 for t in e):
+                    raise ValueError("exponents must be %d nonnegative integers: %r" % (self._n, e))
+                c = dom._conv(c)
+                if self._base is _sa().ZZ and _F(c).denominator != 1:
+                    raise TypeError("no conversion of this rational to integer")
+                d[tuple(int(t) for t in e)] = c
+            return MPolynomial(self, d)
         if isinstance(x, str):
             return _eval_string(self, x)
         import _sage_poly
@@ -702,6 +720,24 @@ class MPolynomialRing_:
                 return MPolynomial(self, d)
             if x.degree() <= 0:
                 return self(x[0] if x._c else 0)
+            raise TypeError("cannot convert %r into %r" % (x, self))
+        if callable(getattr(x, "variable_name", None)) and callable(getattr(x, "list", None)) and not isinstance(x, MPolynomial):
+            # another univariate polynomial class (over GF(q): its
+            # coefficient list was read as an element of the field)
+            name = str(x.variable_name())
+            cs = list(x.list())
+            if name in self._names:
+                i = self._names.index(name)
+                d = {}
+                for k, c in enumerate(cs):
+                    c = dom._conv(c)
+                    if (c if dom.generic else c != 0):
+                        e = [0] * self._n
+                        e[i] = k
+                        d[tuple(e)] = c
+                return MPolynomial(self, d)
+            if len(cs) <= 1:
+                return self(cs[0] if cs else 0)
             raise TypeError("cannot convert %r into %r" % (x, self))
         if hasattr(x, "_s") and hasattr(x, "_op"):
             # a symbolic expression in the variables
@@ -1317,9 +1353,11 @@ class MPolynomial:
         g = self._coerce(g)
         if not g:
             raise ZeroDivisionError("division by zero")
-        e = _engine_try(self._ring, "divrem", self._ring._order._name, self, g)
-        if e is not None:
-            return e[0], e[1]
+        # (over ZZ by integer division, below: the engine divides over QQ)
+        if self._ring._base is not _sa().ZZ:
+            e = _engine_try(self._ring, "divrem", self._ring._order._name, self, g)
+            if e is not None:
+                return e[0], e[1]
         qs, r = _divide(self, [g])
         return qs[0], r
 
@@ -1558,7 +1596,16 @@ class MPolynomial:
             sage: ((a + b + 1)^2*(a^2 + a*b + 1)).factor()
             (a + b + 1)^2 * (a^2 + a*b + 1)
         """
-        return _factor(self)
+        F = _factor(self)
+        # the product is the polynomial (a factorization of another one came
+        # back over GF(4): the systematic review's MUL-F7)
+        try:
+            ok = F.value() == self
+        except (TypeError, ValueError, ArithmeticError):
+            ok = True  # (no exact product available to compare)
+        if not ok:
+            raise RuntimeError("factor: the factors do not multiply back to the polynomial")
+        return F
 
     def is_irreducible(self):
         """Whether the polynomial is irreducible.
@@ -1843,7 +1890,15 @@ def _divide(f, G, quotients=True):
     import heapq
     R = f._ring
     G = [g for g in G]
-    if G and all(isinstance(g, MPolynomial) and g._ring is R and g._d for g in G):
+    if not R._order.is_global():
+        # (1 is the leading monomial of 1 - x in neglex: the reduction of 1
+        # never ends; the systematic review's MUL-F4)
+        raise NotImplementedError("division in a local term order is not implemented")
+    # over ZZ a term is divided only when the leading coefficient divides
+    # it, else it goes to the remainder ((2 x).divides(x) was True with the
+    # quotient 1/2 in ZZ[x, y]: the systematic review's MUL-F1)
+    zz = R._base is _sa().ZZ
+    if not zz and G and all(isinstance(g, MPolynomial) and g._ring is R and g._d for g in G):
         # the engine (the same rule: the first divisor dividing the term)
         e = _engine_try(R, "divrem", R._order._name, f, *G)
         if e is not None:
@@ -1852,7 +1907,7 @@ def _divide(f, G, quotients=True):
     flat = R._flat
     neg = lambda e: tuple(-x for x in flat(e))
     lead = [g._leading() for g in G]
-    inv = [dom._inv(c) for _, c in lead]
+    inv = [None if zz else dom._inv(c) for _, c in lead]
     gterms = [list(g._d.items()) for g in G]
     qs = [dict() for _ in G] if quotients else None
     p = dict(f._d)
@@ -1867,9 +1922,9 @@ def _divide(f, G, quotients=True):
         if c is None:
             continue
         for j, (le, lc) in enumerate(lead):
-            if all(x >= y for x, y in zip(e, le)):
+            if all(x >= y for x, y in zip(e, le)) and (not zz or int(c) % int(lc) == 0):
                 m = tuple(x - y for x, y in zip(e, le))
-                q = dom._mul(c, inv[j])
+                q = (int(c) // int(lc)) if zz else dom._mul(c, inv[j])
                 if quotients:
                     qs[j][m] = dom._add(qs[j].get(m, zero), q)
                 for ge, gc in gterms[j]:
@@ -1895,7 +1950,12 @@ def _exact_div(f, g):
         return None
     r = _engine_try(f._ring, "divexact", f, g)
     if r is not None:
-        return r[0] if r else None
+        q = r[0] if r else None
+        # over ZZ only an integral quotient divides (the engine divides
+        # over QQ)
+        if q is not None and f._ring._base is _sa().ZZ and any(_F(c).denominator != 1 for c in q._d.values()):
+            return None
+        return q
     if not f._d:
         return f._ring.zero()
     (q,), r = _divide(f, [g])

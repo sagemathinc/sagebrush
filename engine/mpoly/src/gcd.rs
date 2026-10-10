@@ -255,13 +255,24 @@ fn pgcd(pk: &Packing, a: &SP, b: &SP, k: usize, md: &Modulus) -> Option<(SP, SP,
     let mut q: Vec<u64> = vec![1];
     let mut lead: Option<u64> = None;
     let mut npts = 0usize;
-    let mut x = 0u64;
     let mut tries = 0usize;
+    // distinct pseudo-random points, different for each modulus and level:
+    // 1, 2, 3, ... for every prime stopped early at the same wrong
+    // interpolant when two of them were special (h = x + (y - 1)(y - 2):
+    // the systematic review's MUL-F3)
+    let mut used = std::collections::HashSet::new();
+    let mut seed = md.n ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x2545_F491_4F6C_DD1D;
     loop {
-        x += 1;
         tries += 1;
-        if x >= md.n || tries > 4 * bound + 64 {
+        if tries > 4 * bound + 64 || used.len() as u64 + 1 >= md.n {
             return None;
+        }
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        let x = 1 + seed % (md.n - 1);
+        if !used.insert(x) {
+            continue;
         }
         let gx = eval_poly(&gam, x, md);
         if gx == 0 || eval_poly(&la, x, md) == 0 || eval_poly(&lb, x, md) == 0 {
