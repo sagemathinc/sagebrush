@@ -284,8 +284,33 @@ def _maxima_form(e):
         return e
 
 
-_POSITIVE = set()      # names of the coordinates assumed positive (r, rh)
-_SIN_POSITIVE = set()  # names of the angles in (0, pi) (th)
+_COORD_USES = {}  # coordinate name -> number of charts using it
+
+
+class _ChartAssumption:
+    """Names of chart coordinates with a range assumption (r > 0, th in
+    (0, pi)).  A name counts only while every chart using it carries the
+    assumption: an unrelated chart's unrestricted coordinate of the same
+    name must not be simplified as if it were positive."""
+
+    def __init__(self):
+        self._n = {}
+
+    def add(self, name):
+        self._n[name] = self._n.get(name, 0) + 1
+
+    def __contains__(self, name):
+        return self._n.get(name, 0) > 0 and self._n[name] >= _COORD_USES.get(name, 0)
+
+    def __iter__(self):
+        return (n for n in list(self._n) if n in self)
+
+    def __bool__(self):
+        return any(True for _ in self)
+
+
+_POSITIVE = _ChartAssumption()      # coordinates assumed positive (r, rh)
+_SIN_POSITIVE = _ChartAssumption()  # angles in (0, pi) (th)
 
 
 def _tag(e):
@@ -721,6 +746,8 @@ class Chart:
 
     def __init__(self, M, coords, ranges, periodic=()):
         self._M, self._coords = M, list(coords)
+        for c in self._coords:
+            _COORD_USES[str(c)] = _COORD_USES.get(str(c), 0) + 1
         self._ranges = ranges
         self._periodic = periodic
         self._frame = None
@@ -1449,6 +1476,28 @@ class _CoordChange:
 
 # ------------------------------------------------------------------ points
 
+def _in_domain(chart, vals):
+    """The coordinates checked against the chart's ranges: a numeric value
+    outside an open range ((0, +oo), (0, pi)) is refused (the origin is not
+    in the polar chart), and a periodic angle is brought into [0, 2 pi)."""
+    sa = _sa()
+    out = []
+    for v, rng in zip(vals, chart._ranges):
+        if v.variables():
+            out.append(v)
+            continue
+        if "periodic" in rng:
+            k = sa.floor(v / (2 * sa.pi))
+            if k.is_numeric() and not k.is_trivial_zero():
+                v = _simplify(v - 2 * sa.pi * k)
+        elif rng == "(0, +oo)" and not bool(v > 0):
+            raise ValueError("the coordinate value %s is not in %s: the point is not in the domain of %r" % (v, rng, chart))
+        elif rng == "(0, pi)" and not (bool(v > 0) and bool(v < sa.pi)):
+            raise ValueError("the coordinate value %s is not in %s: the point is not in the domain of %r" % (v, rng, chart))
+        out.append(v)
+    return tuple(out)
+
+
 class Point:
     """A point of a Euclidean space.
 
@@ -1460,7 +1509,7 @@ class Point:
     """
     def __init__(self, M, coords, chart, name):
         self._M, self._name = M, name
-        self._coords = {chart: tuple(_SR(c) for c in coords)}
+        self._coords = {chart: _in_domain(chart, tuple(_SR(c) for c in coords))}
 
     def __repr__(self):
         return "Point %s on the %r" % (self._name, self._M) if self._name else "Point on the %r" % (self._M,)
@@ -1487,7 +1536,7 @@ class Point:
         if chart not in self._coords:
             c0, v0 = next(iter(self._coords.items()))
             sub = dict(zip(c0._coords, v0))
-            self._coords[chart] = tuple(_simplify(_SR(t).subs(sub)) for t in self._M._coords_in(c0, chart))
+            self._coords[chart] = _in_domain(chart, tuple(_simplify(_SR(t).subs(sub)) for t in self._M._coords_in(c0, chart)))
         return self._coords[chart]
 
     coordinates = coord

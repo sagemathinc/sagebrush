@@ -34,6 +34,9 @@ class GenericGraph:
     _directed = False
 
     def __init__(self, data=None, name=None, loops=None, multiedges=None, weighted=None, format=None, **kwds):
+        if multiedges:
+            # one label per vertex pair is stored: refuse rather than merge
+            raise NotImplementedError("multigraphs (multiedges=True) are not supported yet")
         self._adj = {}      # v -> {w: label} (out-neighbours)
         self._in = {}       # v -> {u: label} (in-neighbours, directed only)
         self._name = name or ""
@@ -494,14 +497,41 @@ class GenericGraph:
                 out[v] = _sorted(self._adj[v])
         return out
 
+    def _dijkstra(self, u):
+        """(distance, predecessor) from u with the edge labels as weights."""
+        import heapq
+        dist, prev, done = {u: 0}, {u: None}, set()
+        heap, k = [(0, 0, u)], 0
+        while heap:
+            d, _, x = heapq.heappop(heap)
+            if x in done:
+                continue
+            done.add(x)
+            for y, w in self._adj[x].items():
+                if w is None:
+                    w = 1
+                if w < 0:
+                    raise ValueError("by_weight: edge weights must be nonnegative")
+                if y not in dist or d + w < dist[y]:
+                    dist[y], prev[y] = d + w, x
+                    k += 1
+                    heapq.heappush(heap, (d + w, k, y))
+        return dist, prev
+
     def distance(self, u, v, by_weight=False):
-        """The length of a shortest path from u to v (+Infinity if none).
+        """The length of a shortest path from u to v (+Infinity if none);
+        with by_weight, the least total of the edge labels.
 
         EXAMPLES::
 
             sage: graphs.CycleGraph(6).distance(0, 3)
             3
+            sage: Graph([(0, 1, 10), (0, 2, 1), (2, 1, 1)]).distance(0, 1, by_weight=True)
+            2
         """
+        if by_weight:
+            dist, _ = self._dijkstra(u)
+            return dist[v] if v in dist else _sa().infinity
         if u == v:
             return _sa().Integer(0)
         seen = {u: 0}
@@ -525,7 +555,17 @@ class GenericGraph:
 
             sage: graphs.CycleGraph(6).shortest_path(0, 2)
             [0, 1, 2]
+            sage: Graph([(0, 1, 10), (0, 2, 1), (2, 1, 1)]).shortest_path(0, 1, by_weight=True)
+            [0, 2, 1]
         """
+        if by_weight:
+            dist, prev = self._dijkstra(u)
+            if v not in prev:
+                return []
+            path = [v]
+            while prev[path[-1]] is not None:
+                path.append(prev[path[-1]])
+            return list(reversed(path))
         prev = {u: None}
         frontier = [u]
         while frontier and v not in prev:
@@ -767,12 +807,15 @@ def _isomorphism(G, H, labels):
     m, used = {}, set()
 
     def ok(v, w):
+        # (a loop at v must map to a loop at w: v itself is not in m yet)
         for x, l in oG[v].items():
-            if x in m and oH[w].get(m[x], "__no__") != l:
+            if (x == v or x in m) and oH[w].get(w if x == v else m[x], "__no__") != l:
                 return False
         for x, l in iG[v].items():
-            if x in m and iH[w].get(m[x], "__no__") != l:
+            if (x == v or x in m) and iH[w].get(w if x == v else m[x], "__no__") != l:
                 return False
+        if v not in oG[v] and w in oH[w]:
+            return False
         return True
 
     def bt(k):
@@ -791,6 +834,9 @@ def _isomorphism(G, H, labels):
 
     if not bt(0):
         return None
+    # the certificate is checked: every edge maps to an edge with its label
+    if any(oH[m[a]].get(m[b], "__no__") != l for a in oG for b, l in oG[a].items()):
+        raise RuntimeError("is_isomorphic: internal error, the map found is not an isomorphism")
     try:
         return {v: m[v] for v in sorted(m)}
     except Exception:
@@ -912,44 +958,48 @@ class Graph(GenericGraph):
             sage: graphs.CycleGraph(3).tutte_polynomial()
             x^2 + x + y
         """
-        R = _sa().PolynomialRing(_sa().ZZ, "x,y")
-        x, y = R.gens()
-        edges = [(u, v) for u, v, _ in self.edges(sort=True)]
-        verts = self.vertices(sort=True)
-        memo = {}
+        return _tutte(self.vertices(sort=True), [(u, v) for u, v, _ in self.edges(sort=True)])
 
-        def comps(vs, es):
-            parent = {v: v for v in vs}
 
-            def f(a):
-                while parent[a] != a:
-                    parent[a] = parent[parent[a]]
-                    a = parent[a]
-                return a
-            for a, b in es:
-                ra, rb = f(a), f(b)
-                if ra != rb:
-                    parent[ra] = rb
-            return len({f(v) for v in vs})
+def _tutte(verts, edges):
+    """The Tutte polynomial of the multigraph (verts, edges) (an edge list
+    with repetitions for parallel edges), by deletion-contraction."""
+    R = _sa().PolynomialRing(_sa().ZZ, "x,y")
+    x, y = R.gens()
+    memo = {}
 
-        def T(vs, es):
-            key = (tuple(sorted(map(repr, vs))), tuple(sorted(repr(tuple(sorted(map(repr, e)))) for e in es)))
-            if key in memo:
-                return memo[key]
-            if not es:
-                r = R(1)
+    def comps(vs, es):
+        parent = {v: v for v in vs}
+
+        def f(a):
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
+        for a, b in es:
+            ra, rb = f(a), f(b)
+            if ra != rb:
+                parent[ra] = rb
+        return len({f(v) for v in vs})
+
+    def T(vs, es):
+        key = (tuple(sorted(map(repr, vs))), tuple(sorted(repr(tuple(sorted(map(repr, e)))) for e in es)))
+        if key in memo:
+            return memo[key]
+        if not es:
+            r = R(1)
+        else:
+            (a, b), rest = es[0], es[1:]
+            if a == b:
+                r = y * T(vs, rest)
+            elif comps(vs, rest) > comps(vs, es):
+                # a bridge: contract
+                r = x * T(*_contract(vs, rest, a, b))
             else:
-                (a, b), rest = es[0], es[1:]
-                if a == b:
-                    r = y * T(vs, rest)
-                elif comps(vs, rest) > comps(vs, es):
-                    # a bridge: contract
-                    r = x * T(*_contract(vs, rest, a, b))
-                else:
-                    r = T(vs, rest) + T(*_contract(vs, rest, a, b))
-            memo[key] = r
-            return r
-        return T(verts, edges)
+                r = T(vs, rest) + T(*_contract(vs, rest, a, b))
+        memo[key] = r
+        return r
+    return T(verts, edges)
 
 
 def _contract(vs, es, a, b):

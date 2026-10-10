@@ -1269,6 +1269,8 @@ class Polyhedron_:
             sage: polytopes.hypercube(3).volume()
             8
         """
+        if measure != "ambient" and not (measure == "induced" and self.dim() == self._n):
+            raise NotImplementedError("volume: only measure='ambient' (or 'induced' for full-dimensional polyhedra) is implemented")
         if not self.is_compact():
             return _sa().oo
         if self.dim() < self._n:
@@ -1509,6 +1511,9 @@ class Polyhedron_:
             (A vertex at (0, 0), A vertex at (0, 2), A vertex at (2, 0))
         """
         c = _q(c)
+        if c == 0:
+            # every point (lines and rays too) goes to the origin
+            return _make_V([[0] * self._n] if not self.is_empty() else [], [], [], self._n, self._ring)
         vs = [[c * x for x in v._v] for v in self.vertices()]
         rs = [[c * x for x in r._v] for r in self.rays()]
         ring = _join(self._ring, _ring_name([c]))
@@ -2106,7 +2111,14 @@ def Polyhedron(vertices=None, rays=None, lines=None, ieqs=None, eqns=None, ambie
         return _set_class(P, backend)
     ie = [[_coerce_number(x) for x in r] for r in (ieqs or [])]
     eq = [[_coerce_number(x) for x in r] for r in (eqns or [])]
-    n = len((ie + eq)[0]) - 1
+    if not ie and not eq:
+        if ambient_dim is None:
+            raise ValueError("give the ambient dimension (ambient_dim) of a polyhedron without inequalities")
+        n = int(ambient_dim)
+    else:
+        n = len((ie + eq)[0]) - 1
+        if ambient_dim is not None and int(ambient_dim) != n:
+            raise ValueError("the inequalities do not have ambient dimension %d" % int(ambient_dim))
     allv = [x for r in ie + eq for x in r]
     ring = rname or ("RDF" if any(isinstance(x, float) for x in allv) else "QQ")
     if ring == "ZZ":

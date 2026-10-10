@@ -836,7 +836,8 @@ def _branch_and_bound(c, rows, lo, hi, ints, limit=200000):
     while stack:
         nodes += 1
         if nodes > limit:
-            break
+            # an unfinished search proves neither optimality nor infeasibility
+            raise MIPSolverException("branch and bound stopped after %d nodes without finishing the search" % limit)
         l, h = stack.pop()
         r = _lp(c, rows, l, h)
         if r is None:
