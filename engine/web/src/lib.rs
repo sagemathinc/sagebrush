@@ -480,7 +480,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "bnf" => {
             let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w }))
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "assumes": ["GRH"] }))
         }
         "bnf_relations" => {
             let bad = || "extra must be a list of primes".to_string();
@@ -493,14 +493,14 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w,
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "assumes": ["GRH"],
                        "fb": d.fb.iter().map(|&(p, e, f)| json!([p, e, f])).collect::<Vec<_>>(),
                        "rels": d.rels.iter().map(|r| r.iter().map(|&(i, k)| json!([i, k])).collect::<Vec<_>>()).collect::<Vec<_>>(),
                        "elems": d.elems.iter().map(|(num, den)| json!([big(num), den.to_string()])).collect::<Vec<_>>() }))
         }
         "quadratic_class_group" => {
             let (h, cyc, reg) = sagebrush_classgroup::api::quadratic(&big1(v.get("d"))?)?;
-            Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg }))
+            Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg, "assumes": ["GRH"] }))
         }
         "hermite_form" => Ok(json!(sagebrush_classgroup::api::hermite(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
         "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&rect(v.get("m"))?)))),

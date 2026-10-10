@@ -1117,8 +1117,8 @@ def _install_int_methods(sa):
         return len(sa.digits(abs(n), base)) if n else 0
 
     methods = {
-        "factor": lambda n: sa.factor(n),
-        "is_prime": lambda n, proof=None: sa.is_prime(n),
+        "factor": lambda n, proof=None, **k: sa.factor(n, proof=proof),
+        "is_prime": lambda n, proof=None: sa.is_prime(n, proof=proof),
         "is_pseudoprime": lambda n: sa.is_prime(n),
         "is_prime_power": lambda n: sa.is_prime_power(n),
         "is_square": lambda n: sa.is_square(n),

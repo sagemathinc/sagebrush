@@ -2,7 +2,9 @@
 prime ideals, class groups, unit groups, regulators and integral bases,
 computed by the Rust engine (sagebrush.nf: engine/classgroup, clean-room,
 MIT/Apache).  Printed as Sage prints them.  Class groups and regulators
-assume GRH (as Sage's default proof=False results and PARI's do)."""
+assume GRH (as PARI's do, and Sage's with proof=False).  proof=True asks
+for a proven result: given where Sagebrush has one, otherwise
+NotImplementedError rather than the GRH value."""
 
 from fractions import Fraction as _F
 import functools as _ft
@@ -16,6 +18,37 @@ def _sa():
 def _nf():
     from sagebrush import nf
     return nf
+
+
+# proof=True asks for a proven result: given where one is available, else
+# NotImplementedError, never the GRH-conditional value.  (proof=None and
+# proof=False give the engine's result, which assumes GRH.)
+def _unproven(what):
+    raise NotImplementedError(
+        "%s with proof=True is not implemented: Sagebrush's class groups and "
+        "regulators assume GRH (call it with proof=False)" % what)
+
+
+# Below this |D|, the class number of an imaginary quadratic field is proven
+# by counting reduced forms (about |D|/6 steps).
+_FORMS_BOUND = 4 * 10**6
+
+
+def _count_reduced_forms(D):
+    """h(D) for a fundamental discriminant D < 0: the number of reduced forms
+    (a, b, c), b^2 - 4ac = D, |b| <= a <= c, b >= 0 if |b| = a or a = c
+    (all primitive, D being fundamental)."""
+    h = 0
+    a = 1
+    while 3 * a * a <= -D:
+        for b in range(-a + 1, a + 1):
+            if (b - D) % 2 or (b * b - D) % (4 * a):
+                continue
+            c = (b * b - D) // (4 * a)
+            if c >= a and not (a == c and b < 0):
+                h += 1
+        a += 1
+    return h
 
 
 def _q(c):
@@ -327,7 +360,8 @@ class NumberField_absolute:
         return self._nfdata()["w"]
 
     def unit_group(self, proof=None):
-        """The unit group (its rank and torsion; GRH for the regulator bound).
+        """The unit group: its rank (Dirichlet) and its roots of unity, which
+        are proven (no fundamental units yet).
 
         EXAMPLES::
 
@@ -351,7 +385,9 @@ class NumberField_absolute:
         return self._bnf
 
     def class_group(self, proof=None, names="c"):
-        """The class group (assuming GRH: proof=False, as in Sage).
+        """The class group, assuming GRH.  With proof=True: proven for
+        imaginary quadratic fields of small discriminant whose class number
+        is squarefree (so the group is cyclic), else NotImplementedError.
 
         EXAMPLES::
 
@@ -360,22 +396,54 @@ class NumberField_absolute:
             Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^2 + 23
             sage: NumberField(x^3 - 11, 'a').class_group().invariants()
             (2,)
+            sage: NumberField(x^2 + 23, 'a').class_group(proof=True)  # sagebrush only
+            Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^2 + 23
+            sage: NumberField(x^3 - 11, 'a').class_group(proof=True)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: class_group with proof=True is not implemented: Sagebrush's class groups and regulators assume GRH (call it with proof=False)
         """
+        if proof:
+            h = self._proven_class_number("class_group")
+            if any(h % (p * p) == 0 for p in range(2, int(h**0.5) + 1)):
+                _unproven("class_group (its structure)")
+            if [int(c) for c in self._bnfdata()["cyc"]] != ([h] if h > 1 else []):
+                raise RuntimeError("the class group disagrees with the proven class number %d" % h)
         return ClassGroup(self)
 
+    def _proven_class_number(self, what):
+        D = self.discriminant()
+        if self._n == 2 and D < 0 and -D <= _FORMS_BOUND:
+            h = _count_reduced_forms(D)
+            if h != int(self._bnfdata()["h"]):
+                raise RuntimeError("the class number assuming GRH, %s, is not the proven %d" % (self._bnfdata()["h"], h))
+            return h
+        _unproven(what)
+
     def class_number(self, proof=None):
-        """The class number.
+        """The class number, assuming GRH.  With proof=True: proven (by
+        counting reduced forms) for imaginary quadratic fields with
+        |disc| <= 4*10^6, else NotImplementedError.
 
         EXAMPLES::
 
             sage: x = polygen(QQ, 'x')
             sage: NumberField(x^2 + 5, 'a').class_number(), NumberField(x^2 + 163, 'a').class_number()
             (2, 1)
+            sage: NumberField(x^2 + 5, 'a').class_number(proof=True)
+            2
+            sage: NumberField(x^2 - 10, 'a').class_number(proof=True)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: class_number with proof=True is not implemented: Sagebrush's class groups and regulators assume GRH (call it with proof=False)
         """
+        if proof:
+            return self._proven_class_number("class_number")
         return self._bnfdata()["h"]
 
     def regulator(self, proof=None):
-        """The regulator.
+        """The regulator, assuming GRH.  With proof=True: only for fields with
+        unit rank 0 (regulator 1), else NotImplementedError.
 
         EXAMPLES::
 
@@ -384,7 +452,13 @@ class NumberField_absolute:
             0.881373587019543
             sage: NumberField(x^3 - 11, 'a').regulator()  # abs tol 1e-10
             5.58720662606091
+            sage: NumberField(x^2 + 1, 'a').regulator(proof=True)
+            1.00000000000000
         """
+        if proof:
+            if self.unit_rank() == 0:
+                return _sa().RR(1)
+            _unproven("regulator")
         return _sa().RR(self._bnfdata()["regulator"])
 
     def unit_rank(self):
@@ -928,7 +1002,7 @@ class Order:
             sage: NumberField(x^2 + 5, 'a').maximal_order().class_number()
             2
         """
-        return self._K.class_number()
+        return self._K.class_number(proof=proof)
 
 
 class NumberFieldIdeal:
@@ -1128,7 +1202,7 @@ class PrimeIdeal:
             sage: K.prime_above(5).is_principal()
             True
         """
-        if self._K.class_number() == 1:
+        if self._K.class_number(proof=proof) == 1:
             return True
         raise NotImplementedError("principal ideal testing is not implemented yet")
 
