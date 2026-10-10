@@ -508,7 +508,9 @@ class CartanType_:
         return 0
 
     def symmetrizer(self):
-        """The symmetrizer d (d_i a_ij = d_j a_ji, integral and coprime).
+        """The symmetrizer d (d_i a_ij = d_j a_ji, integral and coprime on
+        each connected component of the Dynkin diagram; for a disconnected
+        matrix Sage may scale the components differently, also validly).
 
         EXAMPLES::
 
@@ -517,20 +519,31 @@ class CartanType_:
         """
         A = _cartan(self)
         I = self.index_set()
-        # d_i a_ij = d_j a_ji
-        d = {I[0]: _F(1)}
-        changed = True
-        while changed:
-            changed = False
-            for i in I:
-                for j in I:
-                    if i in d and j not in d and A[i][j] != 0:
-                        d[j] = d[i] * A[i][j] / A[j][i]
-                        changed = True
-        L = 1
-        for v in d.values():
-            L = L * v.denominator // _gcd(L, v.denominator)
-        return Family(I, [_out(d[i] * L) for i in I])
+        # d_i a_ij = d_j a_ji, on each connected component (a reducible
+        # type's other components were never reached: KeyError, the second
+        # review's R2-EXT-F13), each made integral and coprime
+        d = {}
+        for start in I:
+            if start in d:
+                continue
+            comp = {start: _F(1)}
+            changed = True
+            while changed:
+                changed = False
+                for i in I:
+                    for j in I:
+                        if i in comp and j not in comp and A[i][j] != 0:
+                            comp[j] = comp[i] * A[i][j] / A[j][i]
+                            changed = True
+            L = 1
+            for v in comp.values():
+                L = L * v.denominator // _gcd(L, v.denominator)
+            G = 0
+            for v in comp.values():
+                G = _gcd(G, int(v * L))
+            for k, v in comp.items():
+                d[k] = v * L / G
+        return Family(I, [_out(d[i]) for i in I])
 
 
 def _gcd(a, b):
@@ -554,7 +567,22 @@ class CartanMatrixType(CartanType_):
 
     def __init__(self, rows):
         CartanType_.__init__(self, None, len(rows))
-        self._mat = [[_F(int(x)) for x in r] for r in rows]
+        # a generalized Cartan matrix: integers (int() truncated -3/2 to -1:
+        # R2-EXT-F13), 2 on the diagonal, a_ij <= 0 off it, a_ij = 0 iff a_ji = 0
+        mat = [[_F(x) for x in r] for r in rows]
+        n = len(mat)
+        if any(len(r) != n for r in mat):
+            raise ValueError("a Cartan matrix is square")
+        for i in range(n):
+            for j in range(n):
+                a = mat[i][j]
+                if a.denominator != 1:
+                    raise TypeError("the entries of a Cartan matrix are integers, not %s" % a)
+                if i == j and a != 2:
+                    raise ValueError("the diagonal entries of a Cartan matrix are 2")
+                if i != j and (a > 0 or (a == 0) != (mat[j][i] == 0)):
+                    raise ValueError("not a generalized Cartan matrix: entries (%d, %d), (%d, %d)" % (i, j, j, i))
+        self._mat = mat
 
     def __repr__(self):
         return repr(self.cartan_matrix())
@@ -564,6 +592,37 @@ class CartanMatrixType(CartanType_):
 
     def _key(self):
         return ("matrix", tuple(tuple(r) for r in self._mat))
+
+    def is_irreducible(self):
+        """Whether the Dynkin diagram is connected (a diagonal matrix of
+        rank 2 is A1 x A1: R2-EXT-F13).
+
+        EXAMPLES::
+
+            sage: CartanType(CartanMatrix([[2, 0], [0, 2]])).is_irreducible()
+            False
+            sage: CartanType(CartanMatrix([[2, -1], [-1, 2]])).is_irreducible()
+            True
+        """
+        n = len(self._mat)
+        seen, todo = {0}, [0]
+        while todo:
+            i = todo.pop()
+            for j in range(n):
+                if j not in seen and self._mat[i][j] != 0:
+                    seen.add(j)
+                    todo.append(j)
+        return len(seen) == n
+
+    def is_reducible(self):
+        """Whether the Dynkin diagram is disconnected.
+
+        EXAMPLES::
+
+            sage: CartanType(CartanMatrix([[2, 0], [0, 2]])).is_reducible()
+            True
+        """
+        return not self.is_irreducible()
 
     def index_set(self):
         """The index set 0, ..., n-1.
