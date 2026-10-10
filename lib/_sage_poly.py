@@ -142,6 +142,28 @@ ZZ = _Ring("Integer Ring", False)
 QQ = _Ring("Rational Field", True)
 
 
+def _derivative_count(args, gen, name):
+    """How many derivatives f.derivative(*args) asks for, in the generator
+    gen named name: x, 2 is two, x, 0 none, 2 alone two (the second review's
+    R2-POL-F2: the variable and the orders were discarded)."""
+    if not args:
+        return 1
+    k = 0
+    seen = False
+    for a in args:
+        if isinstance(a, int) and not isinstance(a, bool):
+            if a < 0:
+                raise ValueError("derivative counts must be nonnegative")
+            k += a - 1 if seen else a
+            seen = False
+        elif a is None or (isinstance(a, str) and a == name) or (not isinstance(a, str) and (a == gen or repr(a) == name)):
+            k += 1
+            seen = True
+        else:
+            raise ValueError("cannot differentiate with respect to %r" % (a,))
+    return k
+
+
 class PolynomialRing_:
     """Univariate Polynomial Ring in x over ZZ or QQ.
 
@@ -731,8 +753,16 @@ class Polynomial:
             sage: R.<x> = QQ[]
             sage: (x^3 + 2*x).derivative(), (x^3).diff()
             (3*x^2 + 2, 3*x^2)
+            sage: (x^3).derivative(2), (x^3).derivative(x, 0), (x^3).derivative(x, 2, x)
+            (6*x, x^3, 6)
         """
-        return Polynomial(self._ring, [i * a for i, a in enumerate(self._c)][1:])
+        k = _derivative_count(args, self._ring.gen(), self._ring._name)
+        c = list(self._c)
+        for _ in range(k):
+            if not c:
+                break
+            c = [i * a for i, a in enumerate(c)][1:]
+        return Polynomial(self._ring, c)
 
     diff = differentiate = derivative
 
