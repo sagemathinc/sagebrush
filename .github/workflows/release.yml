@@ -53,19 +53,24 @@ jobs:
           for t in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
             node scripts/build-cli.mjs --deno --target=$t
           done
+          # every executable prints its licenses and notices
+          build/cli/pyjs-deno-x86_64-unknown-linux-gnu --licenses | grep -q "Third-party notices for the npm package"
           mkdir -p release
           for f in build/cli/pyjs-deno-*; do
             name="sagebrush-${f#build/cli/pyjs-deno-}"
             case "$name" in *windows*.exe) ;; *windows*) name="$name.exe" ;; esac
             cp "$f" "release/$name"
           done
-          # Windows users get a .zip; everything else .xz
+          # Windows users get a .zip (with the licenses and notices); everything
+          # else .xz, the same files beside them (and `sagebrush --licenses`)
+          NOTICES="LICENSE-MIT LICENSE-APACHE cdn/LICENSE-CPython.txt LICENSE-Artistic-2.0.txt packages/sagebrush/THIRD-PARTY-NOTICES.txt"
           (cd release && for f in *; do
              case "$f" in
-               *.exe) zip -q -j "${f%.exe}.zip" "$f" && rm "$f" ;;
+               *.exe) (cd .. && zip -q -j "release/${f%.exe}.zip" "release/$f" $NOTICES) && rm "$f"
+                      unzip -l "${f%.exe}.zip" | grep -q THIRD-PARTY-NOTICES.txt ;;
                *) xz -T0 -6 "$f" ;;
              esac
-           done && sha256sum * > SHA256SUMS)
+           done && for n in $NOTICES; do cp "../$n" .; done && sha256sum * > SHA256SUMS)
           ls -la release
       # Upload to R2 (served at https://get.sagebrush.space): a tag goes to
       # releases/<tag>/ and becomes "latest"; a manual run goes to dev/<sha>/

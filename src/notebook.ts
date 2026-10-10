@@ -17,7 +17,7 @@ import { spawn } from "child_process";
 
 // ---- the page's files: embedded in the bundle (scripts/build-cli.mjs), or
 // web/dist when running from a checkout
-const ASSETS = ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js"];
+const ASSETS = ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "THIRD-PARTY-NOTICES.txt"];
 function asset(name: string): Buffer | null {
   const embedded = (globalThis as any).__SAGEBRUSH_WEB__;
   if (embedded) return embedded[name] !== undefined ? Buffer.from(embedded[name], "base64") : null;
@@ -29,7 +29,7 @@ function asset(name: string): Buffer | null {
 }
 const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8",
-  woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", json: "application/json", svg: "image/svg+xml", png: "image/png",
+  woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", json: "application/json", svg: "image/svg+xml", png: "image/png", txt: "text/plain; charset=utf-8",
 };
 const typeOf = (name: string) => TYPES[name.split(".").pop()!.toLowerCase()] ?? "application/octet-stream";
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

@@ -5,7 +5,17 @@
 //   - the Rust crates statically linked into its engines: the normal
 //     dependencies of its root crates in engine/ (Cargo metadata, on every
 //     platform), each with its license and the license files of its source;
-//   - derived code and data, from the sections of NOTICE.md.
+//   - derived code and data, from the sections of NOTICE.md;
+//   - for the packages that carry the notebook page (the sagebrush npm
+//     package, and so the web site, the desktop app and the standalone
+//     executables), the npm packages its bundles contain
+//     (web/js-dependencies.json, written by web/build.ts from the bundler's
+//     metafiles) with their license files, and KaTeX's fonts (SIL Open Font
+//     License, read from the fonts themselves).
+//
+// Licenses must be on the lists below and come with their texts: anything
+// else is an error, not an assumed standard text (a crate without a license
+// file gets the standard MIT or Apache-2.0 text, with its authors).
 //
 //   node scripts/third-party-notices.mjs           write the files
 //   node scripts/third-party-notices.mjs --check   fail if one is out of date
@@ -41,7 +51,7 @@ const PARTS = {
 const PACKAGES = [
   { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["smalljac", "cremona"], artistic: "engine/py" },
   { file: "cdn/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush-web`", crates: ["sagebrush-web"], parts: ["smalljac", "cpython"] },
-  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`", crates: ["sagebrush-web"], parts: ["cpython", "numpy", "arm", "fdlibm", "smalljac", "cremona"], artistic: "packages/sagebrush" },
+  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web"], parts: ["cpython", "numpy", "arm", "fdlibm", "smalljac", "cremona"], artistic: "packages/sagebrush", web: true },
 ];
 
 const meta = JSON.parse(execFileSync("cargo", ["metadata", "--format-version", "1", "--locked"], { cwd: join(root, "engine"), maxBuffer: 1 << 28 }).toString());
@@ -62,6 +72,15 @@ function closure(names) {
 }
 
 const LICENSE_FILE = /^(licen[cs]e|copying|copyright|notice|unlicense)/i;
+// license identifiers accepted (SPDX), in Rust license expressions and npm packages
+const OK_LICENSES = new Set(["MIT", "Apache-2.0", "LLVM-exception", "Unlicense", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "BSL-1.0", "CC0-1.0", "0BSD", "BlueOak-1.0.0"]);
+function checkLicense(what, expr) {
+  const ids = (expr ?? "").split(/[\s()\/]+/).filter((t) => t && !["OR", "AND", "WITH"].includes(t));
+  const bad = ids.filter((t) => !OK_LICENSES.has(t));
+  if (!ids.length || bad.length) throw new Error(`${what}: license ${JSON.stringify(expr)} is not on the accepted list (scripts/third-party-notices.mjs)`);
+}
+const MIT_TEXT = readFileSync(join(root, "LICENSE-MIT"), "utf8").replace(/^Copyright.*$/m, "Copyright (c) %AUTHORS%").trim();
+const APACHE_TEXT = readFileSync(join(root, "LICENSE-APACHE"), "utf8").trim();
 function licenseTexts(p) {
   const dir = dirname(p.manifest_path);
   return readdirSync(dir).filter((f) => LICENSE_FILE.test(f) && !/\.(rs|toml|json)$/.test(f)).sort().map((f) => [f, readFileSync(join(dir, f), "utf8").replace(/\r\n/g, "\n").trim()]);
@@ -80,14 +99,22 @@ function render(pkg) {
   const own = all.filter((p) => !p.source);
   const ext = all.filter((p) => p.source).sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   const texts = new Map(); // hash -> {text, users: [name version (file)]}
+  let standard = false;
   const rows = ext.map((p) => {
-    const files = licenseTexts(p);
+    checkLicense(`${p.name} ${p.version}`, p.license);
+    let files = licenseTexts(p);
+    if (!files.length) {
+      // the license's standard text, with the crate's authors
+      if (!/\bMIT\b/.test(p.license ?? "") && !/Apache-2\.0/.test(p.license ?? "")) throw new Error(`${p.name} ${p.version}: no license file, and its license ${p.license} has no standard text here`);
+      standard = true;
+      files = /\bMIT\b/.test(p.license) ? [["MIT (standard text)", MIT_TEXT.replace("%AUTHORS%", (p.authors?.length ? p.authors.join(", ") : `the ${p.name} authors`))]] : [];
+    }
     for (const [f, t] of files) {
       const h = createHash("sha256").update(t).digest("hex");
       if (!texts.has(h)) texts.set(h, { text: t, users: [] });
       texts.get(h).users.push(`${p.name} ${p.version} (${f})`);
     }
-    return `${p.name} ${p.version}: ${p.license ?? p.license_file ?? "see its license files"}${files.length ? "" : " [no license file in the crate; its license's standard text applies]"}`;
+    return `${p.name} ${p.version}: ${p.license}${licenseTexts(p).length ? "" : " [no license file in the crate: the standard text]"}`;
   });
   const out = [
     `Third-party notices for ${pkg.what}`,
@@ -107,8 +134,66 @@ function render(pkg) {
     "== License texts of those crates ==",
     "",
     ...[...texts.values()].sort((a, b) => a.users[0].localeCompare(b.users[0])).flatMap(({ text, users }) => ["-".repeat(72), "Used by: " + users.join(", "), "-".repeat(72), "", text, ""]),
+    ...(standard ? ["-".repeat(72), "The Apache License 2.0 (standard text, for the crates above without license files)", "-".repeat(72), "", APACHE_TEXT, ""] : []),
+    ...(pkg.web ? webSection() : []),
   ];
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+// The npm packages in the notebook page's bundles, and KaTeX's fonts.
+function webSection() {
+  const depsText = readFileSync(join(root, "web", "js-dependencies.json"), "utf8");
+  const hash = createHash("sha256").update(depsText).digest("hex").slice(0, 16);
+  const deps = JSON.parse(depsText).packages;
+  const out = ["== JavaScript packages in the notebook page's bundles (" + deps.length + ") ==", "", `(from web/js-dependencies.json ${hash})`, ""];
+  const texts = [];
+  for (const d of deps) {
+    checkLicense(`${d.name} ${d.version}`, d.license);
+    const dir = join(root, d.path);
+    const files = readdirSync(dir).filter((f) => LICENSE_FILE.test(f)).sort();
+    if (!files.length) throw new Error(`${d.name} ${d.version}: no license file in ${d.path}`);
+    out.push(`${d.name} ${d.version}: ${d.license} (in ${d.in.join(", ")})${d.license_from_version ? ` [vendored by another package; license text from ${d.license_from_version}]` : ""}`);
+    for (const f of files) texts.push(["-".repeat(72), `${d.name} ${d.version} (${f})`, "-".repeat(72), "", readFileSync(join(dir, f), "utf8").replace(/\r\n/g, "\n").trim(), ""]);
+  }
+  // KaTeX's fonts carry their own license (not KaTeX's MIT): from their name tables
+  const katex = deps.find((d) => d.name === "katex");
+  const fonts = new Map();
+  if (katex) {
+    const fdir = join(root, katex.path, "dist", "fonts");
+    for (const f of readdirSync(fdir).filter((f) => f.endsWith(".ttf")).sort()) {
+      const key = fontNotice(readFileSync(join(fdir, f)));
+      if (!/SIL Open Font License, Version 1\.1/.test(key)) throw new Error(`KaTeX font ${f}: not under the SIL Open Font License 1.1: ${key}`);
+      (fonts.get(key) ?? fonts.set(key, []).get(key)).push(f.replace(/\.ttf$/, ""));
+    }
+  }
+  out.push("", ...texts.flat());
+  if (fonts.size) {
+    out.push("== KaTeX's fonts (SIL Open Font License 1.1) ==", "");
+    for (const [notice, names] of fonts) out.push("Fonts: " + names.join(", "), "", notice, "");
+    out.push("-".repeat(72), "SIL Open Font License, Version 1.1", "-".repeat(72), "", readFileSync(join(root, "LICENSES", "OFL-1.1.txt"), "utf8").trim(), "");
+  }
+  return out;
+}
+
+/// A TrueType font's copyright and license strings (name IDs 0 and 13).
+function fontNotice(buf) {
+  const u16 = (o) => buf.readUInt16BE(o), u32 = (o) => buf.readUInt32BE(o);
+  const tables = u16(4);
+  for (let i = 0; i < tables; i++) {
+    const r = 12 + 16 * i;
+    if (buf.toString("latin1", r, r + 4) !== "name") continue;
+    const off = u32(r + 8), count = u16(off + 2), strings = off + u16(off + 4);
+    const got = {};
+    for (let j = 0; j < count; j++) {
+      const e = off + 6 + 12 * j;
+      const [pid, nid, len, o] = [u16(e), u16(e + 6), u16(e + 8), u16(e + 10)];
+      if (pid !== 3 || (nid !== 0 && nid !== 13)) continue;
+      const b = buf.subarray(strings + o, strings + o + len);
+      got[nid] = Buffer.from(b).swap16().toString("utf16le");
+    }
+    return [got[0], got[13]].filter(Boolean).join("\n").replace(/\r/g, "");
+  }
+  throw new Error("a font without a name table");
 }
 
 let stale = [];
