@@ -80,7 +80,19 @@ pub fn sparse_echelon(rows: &[Vec<(u32, u64)>], m: usize, p: u64) -> (Vec<(u32, 
     (pivots, pivot_of)
 }
 
+/// Hecke primes are below 2^30: Heilbronn entries are at most q, so with
+/// N <= 2^31 the products c a + d c' in the symbol action fit in an i64.
+pub const MAX_HECKE_PRIME: u64 = 1 << 30;
+
+pub fn check_hecke_prime(q: u64) -> Result<(), String> {
+    if q >= MAX_HECKE_PRIME || !crate::exact::is_prime(q) {
+        return Err(format!("q = {} must be a prime below 2^30", q));
+    }
+    Ok(())
+}
+
 pub fn heilbronn(q: i64) -> Vec<(i64, i64, i64, i64)> {
+    assert!((2..MAX_HECKE_PRIME as i64).contains(&q), "Hecke prime {} out of range", q);
     if q == 2 {
         return vec![(1, 0, 0, 2), (2, 0, 0, 1), (2, 1, 0, 1), (1, 0, 1, 2)];
     }

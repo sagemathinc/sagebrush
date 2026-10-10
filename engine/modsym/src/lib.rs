@@ -99,8 +99,8 @@ pub fn validate(n: u64, q: u64, p: Option<u64>) -> Result<(), String> {
     if n == 0 || n > 1 << 31 {
         return Err(format!("level N = {} out of range", n));
     }
-    if !exact::is_prime(q) || n % q == 0 {
-        return Err(format!("q = {} must be a prime not dividing N = {}", q, n));
+    if q >= linalg::MAX_HECKE_PRIME || !exact::is_prime(q) || n % q == 0 {
+        return Err(format!("q = {} must be a prime below 2^30 not dividing N = {}", q, n));
     }
     if let Some(p) = p {
         if p < 3 || p >= 1 << 31 || !exact::is_prime(p) {

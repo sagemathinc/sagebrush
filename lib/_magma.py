@@ -1766,19 +1766,28 @@ def NewSubspace(M):
 
 
 def _cusp_poly(M, p):
-    # the charpoly of T_p on the full space, without the Eisenstein part
-    f = M._sage().hecke_polynomial(p)
-    d = M._dims()
-    eis = d["eisenstein"]
-    if M.sign == -1:
-        eis = 0
-    lam = 1 + p ** (M.k - 1) if M.N % p else None
-    if lam is None:
+    # The charpoly of T_p on the cuspidal part of the full space.  For the
+    # trivial character and p not dividing N, cuspidal eigenvalues are real
+    # of absolute value at most 2 p^((k-1)/2) (T_p is self-adjoint; Deligne),
+    # while Eisenstein ones chi(p) + chi^-1(p) p^(k-1) are non-real or
+    # +-(1 + p^(k-1)).  So the irreducible factors with only real roots, all
+    # inside that bound, are exactly the cuspidal ones.
+    from fractions import Fraction
+    from _sage_ec import _sturm_real_roots
+    if M.N % p == 0:
         raise MagmaError("HeckePolynomial: p must not divide the level for a cuspidal space")
-    x = _sp.PolynomialRing(_sp.ZZ, "x").gen()
-    g = f
-    for _ in range(eis):
-        g = g // (x - lam)
+    f = M._sage().hecke_polynomial(p)
+    x = f.parent().gen()
+    g = f.parent()(1)
+    lam = 1 + p ** (M.k - 1)
+    for h, e in f.factor():
+        c = [Fraction(int(a)) for a in h.list()]
+        real = _sturm_real_roots(c) == len(c) - 1
+        if real and not (len(c) == 2 and abs(c[0] / c[1]) == lam):
+            g *= h ** e
+    d = M._dims()["cusp"] * (2 if M.sign == 0 else 1)
+    if g.degree() != d:
+        raise ArithmeticError("HeckePolynomial: cuspidal part of degree %d, expected %d" % (g.degree(), d))
     return g
 
 
@@ -1854,11 +1863,18 @@ def ModularForms(N, k=2):
 
 
 class MNewform:
-    def __init__(self, N, k, traces, parent):
-        self.N, self.k, self.traces, self._parent = N, k, traces, parent
+    def __init__(self, N, k, traces, parent, letter="a"):
+        self.N, self.k, self.traces, self._parent, self._letter = N, k, traces, parent, letter
+
+    def _known(self, n):
+        # a_1..a_n, computing more when needed (unknown coefficients are not zero)
+        if n > len(self.traces):
+            nf = _mf.newforms(self.N, self.k, bound=max(2 * n, 100))["newforms"]
+            self.traces = [o for o in nf if o["letter"] == self._letter][0]["traces"]
+        return self.traces
 
     def __repr__(self):
-        return _qexp(self.traces, 12)
+        return _qexp(self._known(11), 12)
 
     def _magma_parent(self):
         return self._parent
@@ -1885,16 +1901,14 @@ def Newforms(S):
         parent = MModForms(S.N, S.k, True, "Rational Field", o["dim"])
         if o["dim"] != 1:
             raise MagmaError("Newforms with non-rational coefficients are not supported yet (use DimensionNewCuspFormsGamma0, NewformDecomposition)")
-        out.append(MList([MNewform(S.N, S.k, o["traces"], parent)]))
+        out.append(MList([MNewform(S.N, S.k, o["traces"], parent, o["letter"])]))
     return out
 
 
 def qExpansion(f, prec=12):
     if not isinstance(f, MNewform):
         raise MagmaError("qExpansion: a newform")
-    if prec > len(f.traces) + 1:
-        f.traces = _mf.newforms(f.N, f.k, bound=prec)["newforms"][0]["traces"] if False else f.traces
-    return _PowerSeries(_qexp(f.traces, prec))
+    return _PowerSeries(_qexp(f._known(prec - 1), prec))
 
 
 class _PowerSeries(str):

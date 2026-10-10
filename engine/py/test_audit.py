@@ -253,3 +253,16 @@ assert _E9.rank_bounds()[1] >= 2
 assert EllipticCurve("37a1").ap(2) == EllipticCurve([0, 0, 8, -16, 0]).ap(2) == -2
 assert EllipticCurve([1, 2, 3, 4, 5]).is_minimal()
 print("elliptic ok")
+
+# Systematic review, modular forms (MOD-F1..F6, F11)
+from sagebrush.sage import ModularSymbols, ModularForms, Newforms, newform_orbits, GF
+assert "2^30" in raises(ValueError, mf.charpoly, 2, 2, 18446744073709551557, sign=1, threads=1)
+assert [o.charpoly() for o in newform_orbits(37, prec=1)] == [o.charpoly() for o in newform_orbits(37, prec=12)]
+raises(ValueError, mf.newspace, 37, 2, factor=lambda f: [([0, 0, 1], 1)], threads=1)
+raises(NotImplementedError, ModularSymbols, 11, 2, sign=1, base_ring=GF(5))
+assert newform_orbits(11, prec=1)[0].trace_form(6) == "q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)"
+assert "+ 2*q^21 " in str(Newforms(11)[0].q_expansion(30))
+assert ModularForms(11, 2).eisenstein_subspace().newforms() == []
+_c = mf.charpoly(3, 3, 2, chi=(2**33, [2], [2**32]), sign=0, threads=1)
+assert _c["status"] == "proven" and _c["dim"] == 2, _c
+print("modular ok")

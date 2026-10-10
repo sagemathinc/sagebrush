@@ -280,6 +280,16 @@ def _ring_name(m):
     return "Rational Field" if m <= 2 else "Cyclotomic Field of order %d and degree %d" % (m, _phi(m))
 
 
+def _check_base_ring(base_ring, chi):
+    """Only the default coefficient field is supported: refuse any other
+    base ring rather than compute over QQ and ignore it."""
+    if base_ring is None:
+        return
+    names = {"Rational Field", _ring_name(_field_order(chi))}
+    if repr(base_ring) not in names:
+        raise NotImplementedError("base_ring %r is not supported (the spaces are over %s)" % (base_ring, _ring_name(_field_order(chi))))
+
+
 class Polynomial:
     """A univariate polynomial over ZZ or Z[zeta_m] (coefficients constant
     first), as the engines return Hecke polynomials.
@@ -915,6 +925,7 @@ class ModularSymbols:
             raise ValueError("sign must be -1, 0 or 1")
         if self._chi is not None and self._chi.order() == 1:
             self._chi = None
+        _check_base_ring(base_ring, self._chi)
         self._dim = None
         self._polys = {}
 
@@ -1152,6 +1163,7 @@ class ModularForms:
         self._k = int(weight)
         if self._chi is not None and self._chi.order() == 1:
             self._chi = None
+        _check_base_ring(base_ring, self._chi)
         self._d = None
 
     def _dims(self):
@@ -1310,6 +1322,8 @@ class _Subspace:
             ...
             NotImplementedError: newforms with non-rational coefficients: sagebrush describes them by newform_orbits(23, 2) (label, dimension, trace form)
         """
+        if self._kind == "Eisenstein subspace":
+            return []
         return self._A.newforms(names)
 
     def newform_orbits(self, prec=100):
@@ -1320,6 +1334,9 @@ class _Subspace:
             sage: CuspForms(23, 2).newform_orbits()  # sagebrush only
             [23.2.a.a (dimension 2): 2*q - q^2 - q^4 - 2*q^5 + O(q^6)]
         """
+        if self._kind == "Eisenstein subspace":
+            # newforms are cusp forms: S_k and E_k meet in 0
+            return []
         return self._A.newform_orbits(prec)
 
     def __repr__(self):
@@ -1338,7 +1355,7 @@ def CuspForms(group=1, weight=2, base_ring=None):
         sage: CuspForms(1, 24).dimension()
         2
     """
-    return ModularForms(group, weight).cuspidal_subspace()
+    return ModularForms(group, weight, base_ring).cuspidal_subspace()
 
 
 # ------------------------------------------------------------------ elliptic curves
@@ -2932,8 +2949,10 @@ def EllipticCurve(x, y=None):
 def _qexp(coeffs, prec):
     """sum coeffs[n-1] q^n + O(q^prec), as Sage prints a power series."""
     terms = []
+    if prec - 1 > len(coeffs):
+        raise ValueError("only %d coefficients are known" % len(coeffs))
     for n in range(1, prec):
-        a = coeffs[n - 1] if n - 1 < len(coeffs) else 0
+        a = coeffs[n - 1]
         if a == 0:
             continue
         mono = "q" if n == 1 else "q^%d" % n
@@ -2966,6 +2985,15 @@ class NewformOrbit:
         self._traces = data["traces"]
         self._charpoly = data["charpoly"]
         self._T = T
+
+    def _known(self, n):
+        """The traces through a_n, computing more when needed (an unknown
+        coefficient is never treated as zero)."""
+        if n > len(self._traces):
+            more = newform_orbits(self._chi or self._N, self._k, prec=max(2 * n, 100))
+            o = [m for m in more if m._letter == self._letter][0]
+            self._traces = o._traces
+        return self._traces
 
     def label(self):
         """LMFDB's label N.k.a.x (for the trivial character).
@@ -3015,7 +3043,7 @@ class NewformOrbit:
             sage: newform_orbits(23)[0].traces(10)  # sagebrush only
             [2, -1, 0, -1, -2, -5, 2, 0, 4, 6]
         """
-        return self._traces[: n or len(self._traces)]
+        return self._known(n or 0)[: n or len(self._traces)]
 
     def trace_form(self, prec=6):
         """The trace form: the sum of the conjugate newforms, as a q-expansion.
@@ -3025,7 +3053,7 @@ class NewformOrbit:
             sage: newform_orbits(23)[0].trace_form(8)  # sagebrush only
             '2*q - q^2 - q^4 - 2*q^5 - 5*q^6 + 2*q^7 + O(q^8)'
         """
-        return _qexp(self._traces, prec)
+        return _qexp(self._known(prec - 1), prec)
 
     def hecke_operator(self):
         """T as [(q, r)]: T = sum r T_q.
@@ -3116,16 +3144,13 @@ class Newform:
         """
         if isinstance(n, (list, tuple)):
             return [self[i] for i in n]
-        return list(self._o._traces[: (n if n is not None else 20)])
+        n = n if n is not None else 20
+        return list(self._o._known(n)[:n])
 
     def __getitem__(self, n):
         if n == 0:
             return 0
-        o = self._o
-        if n > len(o._traces):
-            more = newform_orbits(o._chi or o._N, o._k, prec=max(2 * n, 100))
-            self._o = o = [m for m in more if m._letter == o._letter][0]
-        return o._traces[n - 1]
+        return self._o._known(n)[n - 1]
 
     def q_expansion(self, prec=6):
         """The q-expansion to the given precision.
@@ -3135,7 +3160,7 @@ class Newform:
             sage: Newforms(11, names='a')[0].q_expansion(8)
             q - 2*q^2 - q^3 + 2*q^4 + q^5 + 2*q^6 - 2*q^7 + O(q^8)
         """
-        return _Printed(_qexp(self._o._traces, prec))
+        return _Printed(_qexp(self._o._known(prec - 1), prec))
 
     def hecke_eigenvalue_field(self):
         """The field generated by the Hecke eigenvalues.
@@ -3176,6 +3201,8 @@ def Newforms(group, weight=2, base_ring=None, names=None):
         ...
         NotImplementedError: newforms with non-rational coefficients: sagebrush describes them by newform_orbits(23, 2) (label, dimension, trace form)
     """
+    if base_ring is not None and repr(base_ring) != "Rational Field":
+        raise NotImplementedError("Newforms: base_ring %r is not supported" % (base_ring,))
     orbits = newform_orbits(group, weight, prec=20)
     if any(o.dimension() != 1 for o in orbits):
         raise NotImplementedError("newforms with non-rational coefficients: sagebrush describes them by newform_orbits(%s, %s) (label, dimension, trace form)" % (group, weight))

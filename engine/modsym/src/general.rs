@@ -198,6 +198,7 @@ pub fn heilbronn_for(p: u64, n: u64) -> Vec<[i64; 4]> {
 }
 
 pub fn heilbronn_merel(p: i64) -> Vec<[i64; 4]> {
+    assert!((2..crate::linalg::MAX_HECKE_PRIME as i64).contains(&p), "Hecke prime {} out of range", p);
     // As in Sage's HeilbronnMerel: for each a, either ad = p (b = 0 or
     // c = 0), or ad > p and bc = ad - p with b = bc / c < a, i.e.
     // c > bc / a, and c < d.  O(p^2 log p) in all.
@@ -271,7 +272,8 @@ impl GeneralSpace {
     }
 
     pub fn new_mod(n: u64, k: usize, eps: &Character, sign: i32, p: u64, zeta: u64) -> Result<Self, String> {
-        if p >= 1 << 31 || (p - 1) % eps.order != 0 || powmod(zeta, eps.order, p) != 1 {
+        let exact_order = |z: u64| powmod(z, eps.order, p) == 1 && crate::exact::factor(eps.order).iter().all(|&(q, _)| powmod(z, eps.order / q, p) != 1);
+        if p < 3 || p >= 1 << 31 || !is_prime(p) || (p - 1) % eps.order != 0 || !exact_order(zeta % p) {
             return Err("need a prime ell < 2^31 and zeta of order ord(eps) in F_ell".into());
         }
         if k < 2 || eps.n != n || ![-1, 0, 1].contains(&sign) {
@@ -510,9 +512,7 @@ impl GeneralSpace {
 
     /// Matrix of T_q (U_q when q | N) for a prime q; row i is T_q(basis_i).
     pub fn hecke_matrix(&self, q: u64) -> Result<Vec<Vec<u64>>, String> {
-        if !is_prime(q) {
-            return Err(format!("q = {} must be prime", q));
-        }
+        crate::linalg::check_hecke_prime(q)?;
         let p = self.p;
         let d = self.dimension();
         let hs = heilbronn_for(q, self.n);
@@ -584,6 +584,17 @@ mod tests {
             x = x * 2 % 13;
         }
         Character::from_exponents(13, 3, exps).unwrap()
+    }
+
+    #[test]
+    fn new_mod_validates_field() {
+        // MOD-F8: ell must be prime and zeta of exact order ord(eps).
+        let triv = Character::trivial(11);
+        assert!(GeneralSpace::new_mod(11, 2, &triv, 1, 9, 1).is_err());
+        let exps: Vec<u32> = (0..13u64).map(|x| if x == 0 { u32::MAX } else { (1..13).find(|&e| powmod(2, e, 13) == x).unwrap() as u32 % 6 }).collect();
+        let eps = Character::from_exponents(13, 6, exps).unwrap();
+        assert!(GeneralSpace::new_mod(13, 2, &eps, 1, 7, 1).is_err());
+        assert!(GeneralSpace::new_mod(13, 2, &eps, 1, 7, 3).is_ok());
     }
 
     #[test]

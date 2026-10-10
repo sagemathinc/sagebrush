@@ -34,6 +34,35 @@ use num_traits::ToPrimitive;
 /// factors with multiplicities.
 pub type Factorer<'a> = &'a (dyn Fn(&[BigInt]) -> Vec<(Vec<BigInt>, u32)> + Sync);
 
+/// Calls the factorer on monic f and checks its answer: the factors are
+/// irreducible and their product with multiplicities is f.
+pub(crate) fn checked_factor(factor: Factorer, f: &[BigInt]) -> Result<Vec<(Vec<BigInt>, u32)>, String> {
+    let fs = factor(f);
+    let mut prod = vec![BigInt::from(1)];
+    for (g, e) in &fs {
+        if g.len() < 2 {
+            return Err("the factor callback returned a constant factor".into());
+        }
+        for _ in 0..*e {
+            prod = poly_mul_z(&prod, g);
+        }
+    }
+    if prod != f || fs.iter().any(|(g, _)| g.len() > 2 && !sagebrush_poly::is_irreducible(g)) {
+        return Err("the factor callback did not return an irreducible factorization".into());
+    }
+    Ok(fs)
+}
+
+fn poly_mul_z(a: &[BigInt], b: &[BigInt]) -> Vec<BigInt> {
+    let mut out = vec![BigInt::from(0); a.len() + b.len() - 1];
+    for (i, x) in a.iter().enumerate() {
+        for (j, y) in b.iter().enumerate() {
+            out[i + j] += x * y;
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct Orbit {
     pub dim: usize,
@@ -179,6 +208,9 @@ pub fn prime_level_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Or
 /// The Galois orbits of newforms of level N, with tr(T_p | A) and the
 /// coordinates c_p of a_p for primes p <= bound not dividing N.
 pub fn newform_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Orbit>, String> {
+    if bound >= crate::linalg::MAX_HECKE_PRIME {
+        return Err(format!("bound {} must be below 2^30", bound));
+    }
     let p = ELL;
     let new_dim = new_dimension(n);
     if new_dim <= 0 {
@@ -216,7 +248,7 @@ pub fn newform_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Orbit>
             }
         }
         let chi_e = eisenstein_charpoly(&sp, &pres, &t, p);
-        let fs = factor(&chi);
+        let fs = checked_factor(factor, &chi)?;
         if std::env::var("SAGEBRUSH_DEBUG").is_ok() {
             let (_, _, _, eis, _) = level_data(n);
             let desc: Vec<String> = fs.iter().map(|(f, e)| format!("{}^{}{}", f.len() - 1, e, if divides(&reduce(f, p), &chi_e, p) { "E" } else { "" })).collect();

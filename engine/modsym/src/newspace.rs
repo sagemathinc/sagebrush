@@ -454,7 +454,7 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
     }
     let t3 = crate::now();
     let h: Vec<BigInt> = crt(&residues, d, 1).into_iter().map(|c| c[0].clone()).collect();
-    let factors = factor_fn(&h);
+    let factors = crate::orbits::checked_factor(factor_fn, &h)?;
     if std::env::var("SAGEBRUSH_TIMING").is_ok() {
         // stage seconds, for the cost model (estimate::newforms)
         let t4 = crate::now();

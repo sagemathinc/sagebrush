@@ -692,10 +692,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 if bound < 1 {
                     return Err("bound must be at least 1".into());
                 }
-                let tr = sagebrush_modsym::traces::orbit_traces(n, k, &eps, &r, bound)?;
                 // LMFDB order: by dimension, then trace form
-                let mut orbits: Vec<(usize, Vec<BigInt>, Vec<BigInt>)> = r.dims.iter().cloned().zip(tr).zip(r.orbits.iter().cloned()).map(|((d, t), u)| (d, t, u)).collect();
-                orbits.sort();
+                let orbits = sagebrush_modsym::traces::labelled_orbits(n, k, &eps, &r, bound)?;
                 out["newforms"] = json!(orbits.iter().enumerate().map(|(i, (dim, t, u))| {
                     let mut x = i;
                     let mut s = vec![];
