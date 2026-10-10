@@ -86,8 +86,11 @@ $S_6 \wr S_2$ has 31 factors, instead of an orbit sum of 518,400 terms.
 **Proof status.** The result is marked proven when every step is
 rigorous: a norm bound shows that the value is an integer, and it differs
 from the values at all other cosets. For huge indices the result is what
-the numerical evidence says, with an error probability far below $2^{-40}$
-per step. That is how Magma's `GaloisGroup` works before `GaloisProof`.
+the numerical evidence says (48 bits of $p$-adic precision beyond the
+bound), and it is marked unproven; no error probability is claimed. That
+is how Magma's `GaloisGroup` works before `GaloisProof`. With
+`proof=True` every step is proven, or the computation stops with an
+error.
 
 ## Results
 

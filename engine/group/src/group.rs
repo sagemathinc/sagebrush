@@ -207,8 +207,12 @@ impl Group {
     /// The block system containing the block b: the images of b.
     pub fn block_system(&self, b: &[u32]) -> Vec<Vec<u32>> {
         let mut sys: BTreeSet<Vec<u32>> = BTreeSet::new();
-        sys.insert(b.to_vec());
-        let mut queue = vec![b.to_vec()];
+        // blocks are sets: the same sorted representation as the images
+        let mut b = b.to_vec();
+        b.sort_unstable();
+        b.dedup();
+        sys.insert(b.clone());
+        let mut queue = vec![b];
         while let Some(c) = queue.pop() {
             for g in &self.gens {
                 let mut d: Vec<u32> = c.iter().map(|&p| g.image(p)).collect();
@@ -353,8 +357,8 @@ impl Group {
     }
 
     /// The number of elements of each cycle type: exact (by listing the
-    /// elements) when the order is at most `limit`, else from `samples`
-    /// uniformly random elements, scaled to the order.
+    /// elements) when the order is at most `limit` (then true), else the
+    /// counts among `samples` uniformly random elements (then false).
     pub fn cycle_type_counts(&self, limit: u64, samples: usize, rng: &mut Rng) -> (BTreeMap<Vec<usize>, u64>, bool) {
         let mut counts: BTreeMap<Vec<usize>, u64> = BTreeMap::new();
         if let Some(els) = self.elements(limit) {

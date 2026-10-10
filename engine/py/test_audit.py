@@ -266,3 +266,18 @@ assert ModularForms(11, 2).eisenstein_subspace().newforms() == []
 _c = mf.charpoly(3, 3, 2, chi=(2**33, [2], [2**32]), sign=0, threads=1)
 assert _c["status"] == "proven" and _c["dim"] == 2, _c
 print("modular ok")
+
+# Systematic review, Galois and permutation groups (GAL-F1, F4, GRP-F1..F6)
+from sagebrush.sage import PermutationGroup, PermutationGroupElement, SymmetricGroup, CyclicPermutationGroup, polygen
+from sagebrush.sage import TransitiveGroups
+_x = polygen(QQ, "x")
+assert str((2 * _x**2 + 2).galois_group()) == "Transitive group number 1 of degree 2"
+_G = PermutationGroup(["(1,2,3)"], domain=range(1, 5))
+assert _G.is_primitive(domain=[1, 2, 3]) and not _G.is_primitive()
+assert sum(SymmetricGroup(4).cycle_type_counts(limit=1, samples=7).values()) == 7
+assert SymmetricGroup(4).cycle_type_counts(limit=1, samples=7).exact is False
+_g = CyclicPermutationGroup(3).gen() * PermutationGroupElement("(1,2)")
+assert _g in _g.parent()
+raises(ValueError, PermutationGroupElement, [2.9, 1.1])
+raises(ValueError, TransitiveGroups, 14)
+print("groups ok")

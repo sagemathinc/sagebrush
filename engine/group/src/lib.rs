@@ -83,6 +83,8 @@ mod tests {
         let bs = d.blocks_containing(0);
         assert_eq!(bs, vec![vec![0, 3], vec![0, 2, 4]]);
         assert_eq!(d.block_system(&[0, 3]).len(), 3);
+        // GRP-F6: an unsorted block is the same set as its sorted images
+        assert_eq!(cyclic(4).block_system(&[2, 0]), vec![vec![0, 2], vec![1, 3]]);
         assert!(symmetric(7).is_primitive());
         assert!(dihedral(7).is_primitive());
         assert!(!cyclic(8).is_primitive());

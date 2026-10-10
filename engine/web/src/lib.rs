@@ -594,8 +594,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "transitive_group" => {
             let n = size(v, "n", None, 1 << 20)?;
-            if n < 1 || n > sagebrush_galois::tables::MAX_DEGREE {
-                return Err(format!("transitive groups are available for degrees 1 to {}", sagebrush_galois::tables::MAX_DEGREE));
+            if !sagebrush_galois::tables::supported(n) {
+                return Err(format!("transitive groups are available for degrees 1 to 13, 17, 19 and 23, not {}", n));
             }
             let all = sagebrush_galois::tables::transitive_groups(n);
             match v.get("k").and_then(Value::as_u64) {

@@ -58,3 +58,22 @@ fn prime_degrees_match_magma() {
 fn m23_polynomials() {
     assert_eq!(check(include_str!("data/m23.txt"), 1), 2);
 }
+
+/// GAL-F1: proof=True (Proof::Always) refuses rather than return the
+/// unproven A23 -> M23 step.
+#[test]
+fn m23_proof_always_refuses() {
+    let line = include_str!("data/m23.txt").lines().find(|l| !l.starts_with('#')).unwrap();
+    let coeffs: Vec<BigInt> = line.split_whitespace().nth(2).unwrap().split(',').map(|c| c.parse().unwrap()).collect();
+    let e = sagebrush_galois::galois_group_with(&coeffs, sagebrush_galois::Proof::Always).unwrap_err();
+    assert!(e.contains("proof=True"), "{}", e);
+}
+
+/// GAL-F4: a constant multiple has the same Galois group.
+#[test]
+fn content_is_removed() {
+    let z = |v: &[i64]| v.iter().map(|&c| BigInt::from(c)).collect::<Vec<_>>();
+    for f in [z(&[1, 0, 1]), z(&[2, 0, 2]), z(&[-6, 0, 0, 3])] {
+        assert!(sagebrush_galois::galois_group(&f).is_ok(), "{:?}", f);
+    }
+}
