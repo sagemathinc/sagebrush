@@ -442,11 +442,18 @@ fn check_q(fs: &[crate::QPoly], g: &[QEP], o: Order) -> Result<bool, String> {
         let dinv = BigInt::from(md.inv(sagebrush_bigint::rem_u64(&f.den, q)).unwrap());
         crate::QPoly { num: f.num.scale(&dinv).reduce_mod(q), den: BigInt::one(), p: q }
     }).collect();
-    let gq = crate::f4::groebner_p(&fq, Order::DegRevLex, q)?;
-    let Some(lq) = fglm_from(&gq, n, o, &md)? else { return Ok(false) };
-    if lq.len() != g.len() || lq.iter().zip(g).any(|(a, b)| a[0].0 != b[0].0) {
-        return Ok(false);
+    // (the leading-monomial criterion holds for homogeneous ideals only:
+    // otherwise G is proven to lie in the ideal by f4q::in_ideal, below,
+    // the systematic review's G1)
+    let homog = crate::f4q::homogeneous(fs);
+    if homog {
+        let gq = crate::f4::groebner_p(&fq, Order::DegRevLex, q)?;
+        let Some(lq) = fglm_from(&gq, n, o, &md)? else { return Ok(false) };
+        if lq.len() != g.len() || lq.iter().zip(g).any(|(a, b)| a[0].0 != b[0].0) {
+            return Ok(false);
+        }
     }
+    let _ = &fq;
     let maxe = g.iter().flat_map(|f| f.iter().flat_map(|t| t.0.iter().copied())).max().unwrap_or(0) as u64;
     let bits = crate::bits_for(2 * maxe + 2) + 1;
     let ok = if (n as u32) * bits <= 64 {
@@ -454,9 +461,10 @@ fn check_q(fs: &[crate::QPoly], g: &[QEP], o: Order) -> Result<bool, String> {
         let cand: Vec<crate::sparse::Poly<crate::sparse::QQ>> = g.iter().map(|f| {
             crate::sparse::Poly::from_terms(&crate::sparse::QQ, pk, o, f.iter().map(|(e, c)| (pk.pack(&e.iter().map(|&x| x as u64).collect::<Vec<_>>()), c.clone())).collect())
         }).collect();
-        crate::f4::verify_q(fs, &cand, o, pk)?
+        crate::f4::verify_q(fs, &cand, o, pk)? && (homog || crate::f4q::in_ideal(fs, &cand, None)?)
     } else {
-        check_ev(fs, g, o)
+        // (no membership proof on exponent vectors yet: not certified)
+        homog && check_ev(fs, g, o)
     };
     if dbg {
         eprintln!("fglm: lex basis checked ({}) in {:.3}s", ok, t0.map_or(0.0, |t| t.elapsed().as_secs_f64()));

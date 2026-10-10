@@ -426,24 +426,95 @@ impl Ctx {
 /// by sugar), as Magma's verbose output shows it does over Q too.
 pub fn groebner_q_f4(fs: &[QPoly], o: Order, proof: bool) -> Result<Option<Vec<QPoly>>, String> {
     let n = fs[0].num.n;
-    let homog = fs.iter().all(|f| {
-        let pk = Packing { n, bits: f.num.bits };
-        let d = f.num.exps.iter().map(|&w| pk.degree(w));
-        d.clone().min() == d.max()
-    });
+    let homog = homogeneous(fs);
+    let mut hom: Option<(Vec<Poly<QQ>>, bool)> = None;
     let (out, witness) = if !homog && o == Order::DegRevLex && std::env::var("SB_F4Q_HOMOG").as_deref() != Ok("0") {
         let fh: Vec<QPoly> = fs.iter().map(|f| homogenize(f)).collect::<Result<_, _>>()?;
         let (gh, w1) = with_bits(&fh, o, false, false)?;
         let dh: Vec<QPoly> = gh.iter().map(|g| dehomogenize(&crate::sparse::from_q(g, n + 1))).collect::<Result<_, _>>()?;
         let (g, w2) = with_bits(&dh, o, true, true)?;
+        hom = Some((gh, w1));
         (g, w1 && w2)
     } else {
         with_bits(fs, o, false, true)?
     };
-    if proof && !check(fs, &out, o, witness)? {
-        return Ok(None);
+    if proof {
+        let ok = if homog {
+            check(fs, &out, o, witness)?
+        } else {
+            // the leading-monomial criterion holds for homogeneous ideals
+            // only (G1, below): the basis is proven through the homogenized
+            // ideal's
+            let known = hom.as_ref().map(|(gh, w)| (gh.as_slice(), *w));
+            verify_q(fs, &out, o, out[0].pk)? && in_ideal(fs, &out, known)?
+        };
+        if !ok {
+            return Ok(None);
+        }
     }
     Ok(Some(out.iter().map(|g| crate::sparse::from_q(g, n)).collect()))
+}
+
+/// Whether every f is homogeneous.
+pub(crate) fn homogeneous(fs: &[QPoly]) -> bool {
+    fs.iter().all(|f| {
+        let pk = Packing { n: f.num.n, bits: f.num.bits };
+        let d = f.num.exps.iter().map(|&w| pk.degree(w));
+        d.clone().min() == d.max()
+    })
+}
+
+/// Whether every element of gs lies in the ideal of the inhomogeneous fs,
+/// proven (the systematic review's G1).  Arnold's criterion (leading
+/// monomials those of a basis of the ideal of fs mod p, fs in <G>, G a
+/// Groebner basis) rests on dim (I mod p)_d <= dim I_d degree by degree,
+/// which holds for homogeneous ideals only: <x - y, x^2 + (p - 1) x y - x>
+/// mod p is <x, y>, and {x, y} passed for an ideal with the point (1/p,
+/// 1/p).  So: gh, a degrevlex basis of the homogenized generators fh (h
+/// last), is proven by that criterion (homogeneous, so valid: <gh> = <fh>);
+/// <fh> dehomogenizes to <fs>, so gh(x, 1) lies in it, and each g that
+/// reduces to 0 modulo gh(x, 1) (degrevlex) is in <fs>.  With fs in <G>
+/// and G a Groebner basis (verify_q), G is the basis of <fs>.  `known`:
+/// gh and its witness flag, when already computed.
+pub(crate) fn in_ideal(fs: &[QPoly], gs: &[Poly<QQ>], known: Option<(&[Poly<QQ>], bool)>) -> Result<bool, String> {
+    let n = fs[0].num.n;
+    let fh: Vec<QPoly> = fs.iter().map(|f| homogenize(f)).collect::<Result<_, _>>()?;
+    let owned;
+    let (gh, w) = match known {
+        Some(k) => k,
+        None => {
+            owned = with_bits(&fh, Order::DegRevLex, false, false)?;
+            (owned.0.as_slice(), owned.1)
+        }
+    };
+    // (if F4's basis fails the check, its first prime was unlucky, as both
+    // factors of N = 2147483647 * 2147483629 are: the multimodular basis,
+    // which drops such primes, proven by the same criterion)
+    let gh: Vec<QPoly> = if check(&fh, gh, Order::DegRevLex, w)? {
+        gh.iter().map(|g| crate::sparse::from_q(g, n + 1)).collect()
+    } else {
+        crate::f4::groebner_q_multimodular(&fh, Order::DegRevLex, true)?
+    };
+    // gh(x, 1) and gs in one packing, degrevlex
+    let dh: Vec<QPoly> = gh.iter().map(dehomogenize).collect::<Result<_, _>>()?;
+    let gq: Vec<QPoly> = gs.iter().map(|g| crate::sparse::from_q(g, n)).collect();
+    let maxdeg = dh.iter().chain(&gq).map(|f| {
+        let pk = Packing { n, bits: f.num.bits };
+        f.num.exps.iter().map(|&w| pk.degree(w)).max().unwrap_or(0)
+    }).max().unwrap_or(0);
+    let bits = crate::bits_for(2 * maxdeg + 2) + 1;
+    if (n as u32) * bits > 64 {
+        return Ok(false); // (not certified: exponents too large to pack)
+    }
+    let to = |f: &QPoly| crate::f4::to_zt(&crate::sparse::to_q(f, Order::DegRevLex).repack(bits));
+    let dz: Vec<crate::f4::ZT> = dh.iter().map(to).collect();
+    let pk = Packing { n, bits };
+    for g in &gq {
+        if !crate::f4::reduces_to_zero_z(to(g), &dz, &pk, Order::DegRevLex).map_err(|_| "exponents too large to pack".to_string())? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// f(x, h) homogeneous with f(x, 1) = f.
@@ -514,7 +585,10 @@ fn check(fs: &[QPoly], out: &[Poly<QQ>], o: Order, witness: bool) -> Result<bool
             let q = Packing { n: pk.n, bits: f.num.bits };
             q.unpack(*f.num.exps.iter().max_by_key(|&&w| q.key(o, w)).unwrap())
         }).collect();
-        let lq: Vec<Vec<u64>> = out.iter().map(|f| pk.unpack(f.t[0].w)).collect();
+        let mut lq: Vec<Vec<u64>> = out.iter().map(|f| pk.unpack(f.t[0].w)).collect();
+        let mut lp = lp;
+        lp.sort();
+        lq.sort();
         if lp != lq {
             return Ok(false);
         }

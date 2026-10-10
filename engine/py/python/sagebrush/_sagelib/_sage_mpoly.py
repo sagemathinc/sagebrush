@@ -3178,8 +3178,13 @@ class PolynomialSequence(list):
 
     ring = universe
 
-    def __setitem__(self, i, v):
+    def _immutable(self, *args, **kwds):
         raise ValueError("object is immutable; please change a copy instead.")
+
+    # every list mutator (a cached Groebner basis changed by B.append(1)
+    # made 1 a member of <x>: the systematic review's ASR finding)
+    __setitem__ = __delitem__ = __iadd__ = __imul__ = _immutable
+    append = extend = insert = remove = pop = clear = sort = reverse = _immutable
 
     def ideal(self):
         """The ideal they generate.
@@ -3221,6 +3226,7 @@ class MPolynomialIdeal:
         self._ring = ring
         self._gens = [g for g in gens]
         self._gb = None
+        self._gb_proven = False
 
     def __repr__(self):
         return "Ideal (%s) of %r" % (", ".join(repr(g) for g in self._gens), self._ring)
@@ -3317,12 +3323,17 @@ class MPolynomialIdeal:
             sage: len(B), B[-1].degree(), B[0].lm()
             (7, 64, x0)
         """
-        if self._gb is None:
+        # (cached with the proof flag it was computed under: one computed
+        # without proof is not returned when proof is on, the systematic
+        # review's G2; a proven one serves both)
+        from _sage_lang import proof
+        if self._gb is None or (proof.polynomial() and not self._gb_proven):
             S = self._field_ring()
             G = groebner_basis([MPolynomial(S, g._d) for g in self._gens], S)
             if S is not self._ring:
                 G = [MPolynomial(self._ring, _primitive_int(g)._d) for g in G]
             self._gb = PolynomialSequence(self._ring, G)
+            self._gb_proven = bool(proof.polynomial())
         return self._gb
 
     def basis_is_groebner(self):
