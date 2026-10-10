@@ -41,7 +41,9 @@ function renderer(): Marked {
         tokenizer(src: string) {
           const d = /^\$\$([\s\S]+?)\$\$/.exec(src);
           if (d) return { type: "mathInline", raw: d[0], text: d[1], display: true };
-          const r = /^\$((?:\\.|[^\\$\n])+?)\$/.exec(src);
+          // (a single line break may fall inside: source lines are wrapped;
+          // without it "$\prod\ng_i$, each $g_i$" paired the wrong dollars)
+          const r = /^\$((?:\\.|[^\\$\n]|\n(?![ \t]*\n))+?)\$/.exec(src);
           if (r) return { type: "mathInline", raw: r[0], text: r[1], display: false };
         },
         renderer: (t: any) => tex(t.text.trim(), t.display),
