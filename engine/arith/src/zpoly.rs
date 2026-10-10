@@ -82,8 +82,14 @@ fn from_words(w: &[u64]) -> BigInt {
     BigInt::from_biguint(Sign::Plus, BigUint::from_bytes_le(&bytes))
 }
 
-/// sum a_i 2^(i b), for |a_i| < 2^(b-1).
+/// sum a_i 2^(i b), exactly, for any a_i: OR-ing the digits into their
+/// slots is only that when every |a_i| < 2^b, else (gcd_heuristic packs the
+/// taller polynomial at the shorter one's width: x(x-1)(x+17) at 2^4 lost
+/// its 16 and -17, and gcd(x(x-1)(x+17), x(x-1)) came out x) by Horner.
 fn pack(a: &[BigInt], b: usize) -> BigInt {
+    if a.iter().any(|c| c.bits() as usize >= b) {
+        return a.iter().rev().fold(BigInt::zero(), |z, c| (z << b) + c);
+    }
     let words = (a.len() * b) / 64 + 2;
     let mut pos = vec![0u64; words];
     let mut neg = vec![0u64; words];
@@ -578,6 +584,36 @@ mod tests {
         for k in [1u32, 61, 62, 63, 64, 120, 130] {
             let a: ZPoly = (0..30).map(|i| if i % 3 == 0 { -(BigInt::one() << k) } else { (BigInt::one() << k) - 1 }).collect();
             assert_eq!(mul(&a, &a), mul_classical(&a, &a), "k={k}");
+        }
+    }
+
+    /// The systematic review's POL: GCDHEU evaluates at 2^k with k from
+    /// the smaller height; the taller polynomial must still be evaluated
+    /// exactly.
+    #[test]
+    fn gcd_heuristic_with_taller_coefficients() {
+        let z = |v: &[i64]| -> ZPoly { v.iter().map(|&c| BigInt::from(c)).collect() };
+        // x (x - 1) (x + 17) = x^3 + 16 x^2 - 17 x, x (x - 1) = x^2 - x
+        assert_eq!(gcd(&z(&[0, -17, 16, 1]), &z(&[0, -1, 1])), z(&[0, -1, 1]));
+        // and against products of random factors with very different heights
+        let mut s = 99u64;
+        for _ in 0..300 {
+            let g = rand_poly(1 + (rng(&mut s) % 4) as usize, 1 + (rng(&mut s) % 3) as u32, &mut s);
+            let a = rand_poly(1 + (rng(&mut s) % 5) as usize, 1 + (rng(&mut s) % 40) as u32, &mut s);
+            let b = rand_poly(1 + (rng(&mut s) % 5) as usize, 1 + (rng(&mut s) % 2) as u32, &mut s);
+            if g.is_empty() || a.is_empty() || b.is_empty() {
+                continue;
+            }
+            let (ga, gb) = (mul(&g, &a), mul(&g, &b));
+            let h = gcd(&ga, &gb);
+            // h is a common divisor, and the cofactors are coprime: their
+            // gcd modulo some prime is constant (independent of gcd())
+            let (qa, qb) = (divexact(&ga, &h).unwrap(), divexact(&gb, &h).unwrap());
+            let coprime = Primes::ntt().take(4).any(|p| {
+                let m = Modulus::new(p);
+                nmod_poly::gcd(&reduce(&qa, &m), &reduce(&qb, &m), &m).len() == 1
+            });
+            assert!(coprime, "{:?} {:?} -> {:?}", ga, gb, h);
         }
     }
 
