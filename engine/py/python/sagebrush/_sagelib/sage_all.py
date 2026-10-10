@@ -43,7 +43,7 @@ __all__ = [
     "diff", "derivative", "integrate", "integral", "integrate_steps", "numerical_integral",
     "desolve", "desolve_rk4",
     "taylor", "limit", "lim", "solve", "expand",
-    "simplify", "find_root", "latex",
+    "simplify", "find_root", "find_local_minimum", "find_local_maximum", "latex",
     # graphics
     "Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d", "point",
     "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk", "arrow", "arrow2d",
@@ -66,7 +66,7 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         derivative, integrate, integral, integrate_steps, numerical_integral, desolve,
                         desolve_rk4, taylor, limit,
                         lim, solve, expand, simplify,
-                        find_root, latex, _py_number)
+                        find_root, find_local_minimum, find_local_maximum, latex, _py_number)
 from sage_plot import Graphics as _Graphics2d, GraphicsArray as _GraphicsArray, Animation as _Animation
 from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
                        points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,

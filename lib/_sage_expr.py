@@ -3443,8 +3443,10 @@ def desolve_rk4(de, dvar, ics=None, ivar=None, end_points=None, step=0.1, output
 
 
 def find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
-    """A root of f in [a, b] (Brent's method), a Python float as in Sage; f
-    must change sign.
+    """A root of f in [a, b] (Brent's method), a Python float as in Sage.
+    If f has the same sign at both ends, as in Sage a local minimum (both
+    positive) or maximum (both negative) in [a, b] is found first, and the
+    root is sought between it and b.
 
     EXAMPLES::
 
@@ -3452,8 +3454,121 @@ def find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
         1.41421356237314
         sage: find_root(cos(x) - x, 0, 1)  # abs tol 1e-12
         0.739085133215156
+        sage: find_root(x^2 - 16*sin(x), -5, 5)  # abs tol 1e-12
+        2.677132750957597
     """
     return float(_find_root(f, a, b, var, xtol, maxiter))
+
+
+def _fminbound(g, a, b, xtol=1.48e-8, maxfun=500):
+    """(fmin, xmin): a local minimum of g on [a, b] by Brent's bounded method
+    (golden section with parabolic steps, as scipy's fminbound)."""
+    sqrt_eps = 1.4901161193847656e-08
+    golden = 0.5 * (3.0 - 5.0 ** 0.5)
+    fulc = a + golden * (b - a)
+    nfc, xf = fulc, fulc
+    rat = e = 0.0
+    x = xf
+    fx = g(x)
+    fu = fx
+    fnfc = ffulc = fx
+    xm = 0.5 * (a + b)
+    tol1 = sqrt_eps * abs(xf) + xtol / 3.0
+    tol2 = 2.0 * tol1
+    num = 1
+    while abs(xf - xm) > (tol2 - 0.5 * (b - a)) and num < maxfun:
+        golden_step = True
+        if abs(e) > tol1:
+            golden_step = False
+            r = (xf - nfc) * (fx - ffulc)
+            q = (xf - fulc) * (fx - fnfc)
+            p = (xf - fulc) * q - (xf - nfc) * r
+            q = 2.0 * (q - r)
+            if q > 0.0:
+                p = -p
+            q = abs(q)
+            r = e
+            e = rat
+            if abs(p) < abs(0.5 * q * r) and p > q * (a - xf) and p < q * (b - xf):
+                rat = (p + 0.0) / q
+                x = xf + rat
+                if (x - a) < tol2 or (b - x) < tol2:
+                    si = 1.0 if xm - xf >= 0 else -1.0
+                    rat = tol1 * si
+            else:
+                golden_step = True
+        if golden_step:
+            e = (a - xf) if xf >= xm else (b - xf)
+            rat = golden * e
+        si = 1.0 if rat >= 0 else -1.0
+        x = xf + si * max(abs(rat), tol1)
+        fu = g(x)
+        num += 1
+        if fu <= fx:
+            if x >= xf:
+                a = xf
+            else:
+                b = xf
+            fulc, ffulc = nfc, fnfc
+            nfc, fnfc = xf, fx
+            xf, fx = x, fu
+        else:
+            if x < xf:
+                a = x
+            else:
+                b = x
+            if fu <= fnfc or nfc == xf:
+                fulc, ffulc = nfc, fnfc
+                nfc, fnfc = x, fu
+            elif fu <= ffulc or fulc == xf or fulc == nfc:
+                fulc, ffulc = x, fu
+        xm = 0.5 * (a + b)
+        tol1 = sqrt_eps * abs(xf) + xtol / 3.0
+        tol2 = 2.0 * tol1
+    return fx, xf
+
+
+def _callable_1(f, var=None):
+    f = _expr(f)
+    if f.is_relational():
+        f = f.lhs() - f.rhs()
+    names = [_var_name(var)] if var is not None else f._names()
+    if len(names) != 1:
+        raise ValueError("give exactly one variable")
+    return f._fast_callable(names)
+
+
+def find_local_minimum(f, a, b, tol=1.48e-08, maxfun=500):
+    """(f(x), x) at a local minimum x of f on [a, b] (Brent's method, as
+    Sage's, which uses scipy's fminbound).
+
+    EXAMPLES::
+
+        sage: find_local_minimum((x - 1)^2 + 3, -5, 5)  # abs tol 1e-8
+        (3.0, 1.0)
+    """
+    g = _callable_1(f)
+    a, b = float(a), float(b)
+    if a > b:
+        a, b = b, a
+    v, s = _fminbound(g, a, b, tol, maxfun)
+    return float(v), float(s)
+
+
+def find_local_maximum(f, a, b, tol=1.48e-08, maxfun=500):
+    """(f(x), x) at a local maximum x of f on [a, b].
+
+    EXAMPLES::
+
+        sage: find_local_maximum(-(x - 2)^2 + 1, 0, 5)  # abs tol 1e-8
+        (1.0, 2.0)
+    """
+    g = _callable_1(f)
+    a, b = float(a), float(b)
+    if a > b:
+        a, b = b, a
+    v, s = _fminbound(lambda t: -g(t), a, b, tol, maxfun)
+    return -float(v), float(s)
 
 
 def _find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
@@ -3471,7 +3586,31 @@ def _find_root(f, a, b, var=None, xtol=1e-12, maxiter=100):
     if fb == 0:
         return _real(b)
     if fa * fb > 0:
-        raise RuntimeError("f appears to have no zero on the interval")
+        # as Sage: a point in [a, b] where f has the other sign, at a local
+        # minimum (maximum), then the root between it and b (find_root on
+        # [-5, 5] of x^2 - 16 sin(x) gave up although f < 0 near 1.3)
+        lo, hi = (a, b) if a <= b else (b, a)
+        if fa > 0:
+            v, s = _fminbound(g, lo, hi)
+            if v > 0:
+                if v < 1e-15:
+                    return _real(s)
+                raise RuntimeError("f appears to have no zero on the interval")
+        else:
+            v, s = _fminbound(lambda t: -g(t), lo, hi)
+            v = -v
+            if v < 0:
+                if abs(v) < 1e-15:
+                    return _real(s)
+                raise RuntimeError("f appears to have no zero on the interval")
+        a, b = s, hi
+        fa, fb = g(a), g(b)
+        if fa == 0:
+            return _real(a)
+        if fb == 0:
+            return _real(b)
+        if fa * fb > 0:
+            raise RuntimeError("f appears to have no zero on the interval")
     c, fc, d = a, fa, b - a
     e_ = d
     for _ in range(maxiter):
