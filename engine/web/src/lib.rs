@@ -728,6 +728,16 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let e = curve(v.get("a"))?;
             Ok(json!(sagebrush_ap::aplist(&e, u(v, "n")?).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
         }
+        "ec_low_rank" => {
+            // the analytic rank if 0 or 1, decided on balls (ap/src/lcert.rs)
+            let an: Vec<i64> = v.get("an").and_then(|a| a.as_array()).ok_or("an: a list of integers")?
+                .iter().map(|x| x.as_i64().ok_or_else(|| "an: a list of integers".to_string())).collect::<Result<_, _>>()?;
+            let n = u(v, "n")?;
+            Ok(match sagebrush_ap::lcert::low_rank(&an, n, 96) {
+                Some(r) => json!({ "w": r.w, "rank": r.rank, "value": r.value.to_f64_approx(), "radius": r.value.rad_f64_approx() }),
+                None => Value::Null,
+            })
+        }
         "ec_point_search" => {
             let b = bigs(v.get("b"))?;
             let p = |x: &BigInt| x.to_string().parse::<i128>().map_err(|_| "b-invariants too large for the point search".to_string());

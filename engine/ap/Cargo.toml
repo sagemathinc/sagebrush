@@ -11,5 +11,6 @@ parallel = ["dep:rayon"]
 
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
+sagebrush-ball = { path = "../ball" }
 sagebrush-interrupt = { path = "../interrupt" }
 rayon = { version = "1.10", optional = true }

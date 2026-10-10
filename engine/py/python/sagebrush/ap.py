@@ -14,4 +14,14 @@ aplist = _native.aplist
 aplist_many = _native.aplist_many
 moments = _native.moments
 
-__all__ = ["ap", "aplist", "aplist_many", "moments"]
+
+
+def low_rank(an, n):
+    """The analytic rank of the curve with L-series coefficients
+    an = [0, a_1, ..., a_M] and conductor n, if it is 0 or 1 and certified
+    on balls: {w, rank, value, radius} (value L(E,1) or L'(E,1)), else None."""
+    from ._engine import call
+    return call("ec_low_rank", an=[int(x) for x in an], n=int(n))
+
+
+__all__ = ["ap", "aplist", "aplist_many", "moments", "low_rank"]

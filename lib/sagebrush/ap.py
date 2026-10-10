@@ -18,6 +18,13 @@ def aplist(a, n, threads=0):
     return [tuple(t) for t in call("aplist", a=_a(a), n=int(n))]
 
 
+def low_rank(an, n):
+    """The analytic rank of the curve with L-series coefficients
+    an = [0, a_1, ..., a_M] and conductor n, if it is 0 or 1 and certified
+    on balls: {w, rank, value, radius} (value L(E,1) or L'(E,1)), else None."""
+    return call("ec_low_rank", an=[int(x) for x in an], n=int(n))
+
+
 def aplist_many(curves, n, threads=0):
     return [[tuple(t) for t in l] for l in call("aplist_many", curves=[_a(a) for a in curves], n=int(n))]
 
