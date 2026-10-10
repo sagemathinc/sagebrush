@@ -901,7 +901,11 @@ class Polynomial:
             items = [(Polynomial(self._ring, g), e) for g, e in fs]
             unit = 1 if content > 0 else -1
             if self.degree() == 0:
-                return PolyFactorization([], unit, constant=sa.factor(abs(content)) if abs(content) > 1 else None, constant_value=abs(content))
+                # the prime factors of a constant are part of the factorization
+                # (list(F) and the product of F agree with what it prints)
+                # (printed as Sage prints the integer factorization: 2^2 * 3)
+                cf = sa.factor(abs(content)) if abs(content) > 1 else None
+                return PolyFactorization([(p, e) for p, e in (cf or [])], unit, constant=cf, constant_value=1)
             for p, e in (sa.factor(abs(content)) if abs(content) > 1 else []):
                 items.append((p, e))
             return PolyFactorization(items, unit)

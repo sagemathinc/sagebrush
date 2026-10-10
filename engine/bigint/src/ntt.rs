@@ -172,6 +172,7 @@ fn dif(a: &mut [u64], t: &Table) {
     }
     if n > BLOCK {
         let m = n / 2;
+        crate::check_interrupt(); // (once per large block: Ctrl-C in long products)
         let (lo, hi) = a.split_at_mut(m);
         dif_layer(lo, hi, &t.tw[m..2 * m], &t.twp[m..2 * m], t.p);
         dif(lo, t);
@@ -197,6 +198,7 @@ fn dit(a: &mut [u64], t: &Table) {
     }
     if n > BLOCK {
         let m = n / 2;
+        crate::check_interrupt();
         let (lo, hi) = a.split_at_mut(m);
         dit(lo, t);
         dit(hi, t);

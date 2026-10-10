@@ -377,3 +377,15 @@ _d = _tf.mkdtemp(); _p = _os.path.join(_d, "a.txt")
 _np2.savetxt(_p, _np2.array([[1, 2], [3, 4]]), fmt="%d", header="units\n99 100", footer="end\n777 888")
 assert _np2.loadtxt(_p).shape == (2, 2)
 print("io ok")
+
+# Systematic review, arithmetic and polynomials (ARI-F4..F8, POL-F2..F6)
+from sagebrush.sage import crt, PolynomialRing
+raises(ValueError, crt, [1, 2], [3])
+assert factor(QQ(1) / 10**400).value() == QQ(1) / 10**400 and factor(QQ(2) / 15).value() == QQ(2) / 15
+assert str(PolynomialRing(GF(5), "x")(2).factor()) == "2"
+_RZ = PolynomialRing(ZZ, "x"); _xz = _RZ.gen()
+assert sorted(_RZ(12).factor()) == [(2, 2), (3, 1)] and _RZ(12).factor().value() == 12
+_K9 = GF(9, "a"); _a9 = _K9.gen()
+assert _a9.frobenius(-1).frobenius() == _a9
+raises(ValueError, GF, 9, "b", modulus=[QQ(3) / 2, 0, 1])
+print("arith2 ok")

@@ -939,9 +939,10 @@ class Factorization(list):
             sage: factor(-360).value()
             -360
         """
+        # exact (rationally for negative exponents): never a float
         v = self.unit
         for p, e in self:
-            v *= p ** e
+            v *= (QQ(p) ** e) if e < 0 else p ** e
         return v
 
     def expand(self):
@@ -1248,6 +1249,8 @@ def crt(a, b, m=None, n=None):
     """
     if m is None:
         rs, ms = list(a), list(b)
+        if len(rs) != len(ms):
+            raise ValueError("arguments to CRT must be lists of the same length")
     else:
         rs, ms = [a, b], [m, n]
     x, M = 0, 1
