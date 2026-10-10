@@ -773,7 +773,14 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 .iter().map(|x| x.as_i64().ok_or_else(|| "an: a list of integers".to_string())).collect::<Result<_, _>>()?;
             let n = u(v, "n")?;
             Ok(match sagebrush_ap::lcert::low_rank(&an, n, 96) {
-                Some(r) => json!({ "w": r.w, "rank": r.rank, "value": r.value.to_f64_approx(), "radius": r.value.rad_f64_approx() }),
+                // exact dyadic endpoints [m, e] (m 2^e) of the enclosure;
+                // value is a double for display only (a midpoint and a radius
+                // rounded separately did not enclose L: the review's ECBALL-F3)
+                Some(r) => {
+                    let (lm, le) = r.value.lower();
+                    let (um, ue) = r.value.upper();
+                    json!({ "w": r.w, "rank": r.rank, "value": r.value.to_f64_approx(), "lo": [lm.to_string(), le], "hi": [um.to_string(), ue] })
+                }
                 None => Value::Null,
             })
         }

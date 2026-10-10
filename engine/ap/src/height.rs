@@ -154,7 +154,10 @@ fn carlson_rf(x: &Ball, y: &Ball, z: &Ball, prec: u64, goal: i64) -> Option<Ball
         let a = umax.sqrt(prec)?.recip(prec)?;
         let b = lmin.sqrt(prec)?.recip(prec)?;
         let h = Ball::hull(&a, &b);
-        if h.rel_accuracy_bits() >= goal || stalled(&mut best, h) {
+        if h.rel_accuracy_bits() >= goal {
+            return Some(h);
+        }
+        if stalled(&mut best, h) {
             return best.map(|b| b.1);
         }
     }
@@ -207,7 +210,12 @@ fn carlson_rf_conj(a: &Ball, b: &Ball, c: &Ball, prec: u64, goal: i64) -> Option
             continue;
         }
         let h = Ball::hull(&umax.sqrt(prec)?.recip(prec)?, &lmin.sqrt(prec)?.recip(prec)?);
-        if h.rel_accuracy_bits() >= goal || stalled(&mut best, h) {
+        // (an enclosure good enough at once is returned itself: best was
+        // still None there, the review's ECBALL-F2)
+        if h.rel_accuracy_bits() >= goal {
+            return Some(h);
+        }
+        if stalled(&mut best, h) {
             return best.map(|b| b.1);
         }
     }
@@ -292,8 +300,10 @@ pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &
     // theta = 2 pi z / w1, lambda
     let theta = pib.mul_2exp(1).mul(&z, wp).div(&w1, wp).ok_or("theta")?;
     let ct = theta.cos(wp).ok_or("cos")?;
-    let two = Ball::from_i64(2);
-    let mut lam = logq_neg.div_i64(12, wp).sub(&two.sub(&ct.mul_2exp(1), wp).log(wp).ok_or("log(2 - 2 cos theta)")?.mul_2exp(-1), wp);
+    // log(2 - 2 cos theta)/2 = log|2 sin(theta/2)|: no cancellation for the
+    // small theta of points near O (x = 2^200 lost every bit to 1 - cos)
+    let s2 = theta.mul_2exp(-1).sin(wp).ok_or("sin")?.mul_2exp(1).abs();
+    let mut lam = logq_neg.div_i64(12, wp).sub(&s2.log(wp).ok_or("log |2 sin(theta/2)|")?, wp);
     let qa = q.upper_abs();
     if !qa.le_pow2(0) || qa == Mag::from_u64(1) {
         return Err("|q| not below 1".into());
@@ -382,6 +392,31 @@ mod tests {
         // Delta < 0: (0, 0) on 43a1, the real root near -1.148
         check([0, 1, 1, 0, 0], (0, 1), 1, &[(-294, 8)],
               "0.062816507087487649265708791466968686318992037272510316529977909805136586214606513409377967749397813648320089583183955140533404202950116015455755375568264261400844892027743539093306809816348637207962096338235627897701158077256074947928946050229490526054092786828251007958855261472361928985632918022952988323840552127094117");
+    }
+
+    #[test]
+    fn accurate_at_once() {
+        // ECBALL-F2: P = (2^200, 2^300) on y^2 = x^3 - x + 2^200: x - e_i are
+        // nearly equal, so the first R_F bound already meets the goal
+        let t = BigInt::one() << 200u32;
+        let a = [b(0), b(0), b(0), b(-1), t.clone()];
+        // the real root near -2^(200/3) of f = 4x^3 - 4x + 4 2^200, to an
+        // integer by bisection
+        let c = [&t * 4, b(-4), b(0), b(4)];
+        let (mut lo, mut hi) = (-(BigInt::one() << 68u32), b(0));
+        while &hi - &lo > b(1) {
+            let mid: BigInt = (&lo + &hi) / 2;
+            if sign_at(&c, &mid, 0) < 0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let roots = [(lo, 0)];
+        for prec in [32u64, 64, 128] {
+            let h = canonical_height(&a, &t, &b(1), 1, &[], &b(1), &roots, prec);
+            assert!(h.is_ok(), "prec {}: {:?}", prec, h);
+        }
     }
 
     #[test]

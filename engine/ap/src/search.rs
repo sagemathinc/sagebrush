@@ -16,8 +16,12 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
 /// [(r, s)] with x = r/s^2 the x-coordinate of a point (sorted by s, then r),
 /// at most `limit` of them; Err if the numbers could leave i128.
 pub fn x_coordinates(b2: i128, b4: i128, b6: i128, rmax: u64, smax: u64, limit: usize) -> Result<Vec<(i128, u64)>, String> {
+    // every exact evaluation: |F(r, s)| and its Horner partial sums are at
+    // most the sum of the absolute terms over |r| <= rmax, s <= smax; s^6
+    // itself is formed too (1e37 < 2^127 / 17 leaves room for the rounding
+    // of this estimate)
     let (r, s) = (rmax as f64, smax as f64);
-    let size = 4.0 * r.powi(3) + (b2 as f64).abs() * r * r * s * s + 2.0 * (b4 as f64).abs() * r * s.powi(4) + (b6 as f64).abs() * s.powi(6);
+    let size = 4.0 * r.powi(3) + (b2 as f64).abs() * r * r * s * s + 2.0 * (b4 as f64).abs() * r * s.powi(4) + (b6 as f64).abs() * s.powi(6) + s.powi(6);
     if size > 1e37 {
         return Err("the point search needs numbers beyond 128 bits".into());
     }
@@ -43,8 +47,15 @@ pub fn x_coordinates(b2: i128, b4: i128, b6: i128, rmax: u64, smax: u64, limit: 
         let (s2, s4, s6) = (s * s, s * s * s * s, s * s * s * s * s * s);
         let (c2, c1, c0) = (b2 * s2, 2 * b4 * s4, b6 * s6);
         let f = |r: i128| ((4 * r + c2) * r + c1) * r + c0;
-        let wok: Vec<Vec<bool>> = WHEEL.iter().zip(&wsq).map(|(&m, t)| (0..m).map(|r| t[f(r).rem_euclid(m) as usize]).collect()).collect();
-        let eok: Vec<Vec<bool>> = EXTRA.iter().zip(&esq).map(|(&m, t)| (0..m).map(|r| t[f(r).rem_euclid(m) as usize]).collect()).collect();
+        // F(r, s) mod m for the residues r < m, from the coefficients
+        // reduced mod m: the unreduced F at r up to 46 left i128 (the review
+        // of the ball index bound, ECBALL-F1: points were missed in release)
+        let fm = |r: i128, m: i128| -> usize {
+            let (d2, d1, d0) = (c2.rem_euclid(m), c1.rem_euclid(m), c0.rem_euclid(m));
+            ((((4 * r + d2) % m * r + d1) % m * r + d0) % m) as usize
+        };
+        let wok: Vec<Vec<bool>> = WHEEL.iter().zip(&wsq).map(|(&m, t)| (0..m).map(|r| t[fm(r, m)]).collect()).collect();
+        let eok: Vec<Vec<bool>> = EXTRA.iter().zip(&esq).map(|(&m, t)| (0..m).map(|r| t[fm(r, m)]).collect()).collect();
         let lo = -(rmax as i128);
         let hi = rmax as i128;
         let offsets: Vec<(i128, [u8; 9])> = (0..W)
@@ -106,6 +117,18 @@ mod tests {
         let xs = x_coordinates(0, -2, 1, 10, 3, 1000).unwrap();
         for x in [(0, 1), (1, 1), (-1, 1), (2, 1), (6, 1), (1, 2)] {
             assert!(xs.contains(&x), "{:?}", x);
+        }
+    }
+
+    #[test]
+    fn large_coefficients() {
+        // ECBALL-F1: y^2 = x^3 - (t^2 + 1) x, t = 10^18 + k, has (-1, t):
+        // 4x^3 + 2 b4 x with b4 = 2 a4; the sieve must not overflow
+        for k in 0..16i128 {
+            let t = 1_000_000_000_000_000_000i128 + k;
+            let b4 = -2 * (t * t + 1);
+            let xs = x_coordinates(0, b4, 0, 1, 1, 1000).unwrap();
+            assert!(xs.contains(&(-1, 1)) && xs.contains(&(0, 1)), "{} {:?}", k, xs);
         }
     }
 }
