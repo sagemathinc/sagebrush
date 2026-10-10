@@ -138,3 +138,32 @@ fn dilogarithm_boundaries() {
     assert!(li2(&Ball::exact(BigInt::from(3), -1), p).is_none());
     assert_eq!(li2(&half, p).unwrap().cmp(&pi2_6), Some(Ordering::Less));
 }
+
+/// The review's boundary counterexamples (BALL-F1..F5).
+#[test]
+fn review_boundaries() {
+    use sagebrush_ball::EXP_MAX;
+    use std::cmp::Ordering;
+    let one = Ball::one();
+    // F1: out-of-range exponents give the ball of everything, never a false exact ball
+    let huge = Ball::exact(BigInt::from(1), i64::MAX);
+    assert!(!huge.is_finite() && huge.cmp(&one).is_none());
+    assert!(!huge.mul_i64(2, 64).is_exact());
+    let tiny = Ball::exact(BigInt::from(1), i64::MIN);
+    assert!(tiny.div(&one, 64).map_or(true, |q| !q.is_finite()));
+    assert!(Ball::exact(BigInt::from(1), EXP_MAX - 1).mul(&Ball::exact(BigInt::from(1), EXP_MAX - 1), 64).cmp(&one).is_none());
+    assert!(one.mul_2exp(i64::MAX).cmp(&one).is_none());
+    // F2: le_pow2 at the bottom of the exponent range
+    assert!(!Mag::pow2(-(1 << 60)).le_pow2(-(1 << 60) - 40));
+    assert!(Mag::pow2(-5).le_pow2(-5) && !Mag::pow2(-5).le_pow2(-6));
+    // F3: pow by i64::MIN, without recursion
+    assert!(one.pow_i64(i64::MIN, 64).unwrap().contains(&one));
+    // F4: 1 + 2^-(2^40): no trillion-bit endpoint, and certainly positive
+    let x = one.add(&Ball::exact(BigInt::from(1), -(1 << 40)), 64);
+    assert!(x.is_positive() && x.cmp(&Ball::zero()) == Some(Ordering::Greater));
+    let wide = Ball::with_radius(BigInt::from(1), 0, Mag::pow2(-(1 << 39)));
+    assert!(wide.is_positive() && wide.contains(&one));
+    // F5: display of 2^-1060
+    let t = Ball::from_rational(&BigInt::from(1), &(BigInt::from(1) << 1060u32), 100);
+    assert!(t.to_f64_approx() > 0.0 && Ball::with_radius(BigInt::from(0), 0, Mag::pow2(-1060)).rad_f64_approx() > 0.0);
+}
