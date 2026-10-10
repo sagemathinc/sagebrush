@@ -71,7 +71,7 @@
 .sbnb .ed textarea { position: relative; display: block; width: 100%; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--fg); min-height: 2.6em; }
 .sbnb .ed textarea::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: transparent; }
 .sbnb .hk { color: var(--hk); } .sbnb .hb { color: var(--hb); } .sbnb .hs { color: var(--hs); } .sbnb .hn { color: var(--hn); }
-.sbnb .hc { color: var(--hc); font-style: italic; } .sbnb .hd { color: var(--hd); } .sbnb .hf { color: var(--hf); }
+.sbnb .hc { color: var(--hc); font-style: italic; } .sbnb .hp { color: var(--hc); } .sbnb .hd { color: var(--hd); } .sbnb .hf { color: var(--hf); }
 
 /* output: text runs, pictures and interact controls */
 .sbnb .out:empty { display: none; }

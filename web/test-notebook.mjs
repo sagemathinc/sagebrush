@@ -51,6 +51,7 @@ try {
   ok(md.strong && md.table && md.good && !md.img && !md.js, "Shift+Enter renders Markdown, safely: " + JSON.stringify(md));
   await ev("(() => { const m = [...document.querySelectorAll('.cell.markdown.rendered .mdout')].at(-1); m.dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); })()");
   ok(await ev("![...document.querySelectorAll('.cell.markdown')].at(-1).classList.contains('rendered')"), "double-click edits a Markdown cell");
+  ok(await ev("(() => { const c = document.querySelector('.cell.markdown:not(.rendered)') ?? [...document.querySelectorAll('.cell.markdown')].at(-1); const hl = c.querySelector('.ed pre'); return !!hl.querySelector('.hp') || !!hl.querySelector('.hk'); })()"), "the Markdown being edited is highlighted");
   await ev("(() => { const ta = [...document.querySelectorAll('.cell.markdown textarea')].at(-1); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', ctrlKey: true, bubbles: true})); })()");
   await until("[...document.querySelectorAll('.cell.markdown')].at(-1).classList.contains('rendered')");
   let out = await runCode("import os\nwith open('data.txt', 'w') as f:\n    f.write('hello from python')\nos.makedirs('sub/dir', exist_ok=True)\nopen('sub/dir/x.csv', 'w').write('a,b\\n1,2\\n')\nprint(sorted(os.listdir('.')), os.path.exists('sub/dir/x.csv'), os.path.getsize('data.txt'))");

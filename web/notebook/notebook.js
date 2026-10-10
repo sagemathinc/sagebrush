@@ -45,6 +45,53 @@ export function highlight(src, sage) {
   return out + esc(src.slice(last)) + "\n"; // a final newline keeps the last line's height
 }
 
+// Markdown source, for the editor of a Markdown cell: headings, emphasis,
+// code (fenced Python or Sage highlighted as code), links, HTML, and math
+// ($...$, $$...$$, \(...\), \[...\]) with its TeX: delimiters, \commands,
+// digits, letters and the {}^_& structure.  Colours only, so the text keeps
+// the textarea's widths.
+const MD = new RegExp([
+  /^(```|~~~)([^\n]*)\n([\s\S]*?)(?:^(\1[ \t]*)$|$(?![\s\S]))/.source, // 1-4 fenced code
+  /(\$\$[\s\S]*?(?:\$\$|$(?![\s\S]))|\\\[[\s\S]*?(?:\\\]|$(?![\s\S])))/.source, // 5 display math
+  /(`+)([\s\S]*?)\6/.source, // 6-7 inline code
+  /((?<![\\$])\$(?![\s$])(?:\\.|[^$\\\n])*?(?<!\s)\$|\\\((?:[^\n]|\n(?!\n))*?\\\))/.source, // 8 inline math
+  /(^#{1,6}[ \t].*$)/.source, // 9 heading
+  /(^[ \t]*(?:[-*+]|\d+[.)])(?=[ \t])|^[ \t]*>)/.source, // 10 list item, quote
+  /(\*\*(?=\S)[^*\n]*?\S\*\*|__(?=\S)[^_\n]*?\S__|(?<![*\w])\*(?=\S)[^*\n]*?\S\*(?!\*)|(?<![_\w])_(?=\S)[^_\n]*?\S_(?![_\w]))/.source, // 11 emphasis
+  /(!?\[)([^\]\n]*)(\]\()([^)\n]*)(\))/.source, // 12-16 link, image
+  /(<\/?[A-Za-z][^>\n]*>|\\[\\`*_{}\[\]()#+\-.!$|])/.source, // 17 HTML, escape
+].join("|"), "gm");
+const span = (cls, text) => (text ? `<span class="${cls}">${esc(text)}</span>` : "");
+function highlightTex(t) {
+  // delimiters, then \commands, digits, letters and structure
+  const m = /^(\$\$|\$|\\\[|\\\()([\s\S]*?)(\$\$|\$|\\\]|\\\))?$/.exec(t);
+  const [open, body, close] = m ? [m[1], m[2], m[3] ?? ""] : ["", t, ""];
+  const inner = body.replace(/(\\(?:[A-Za-z]+|.))|(\d+(?:\.\d+)?)|([A-Za-z]+)|([{}^_&])|([^\\\dA-Za-z{}^_&]+)/g,
+    (_, c, d, l, st, o) => (c ? span("hk", c) : d ? span("hn", d) : l ? span("hb", l) : st ? span("hp", st) : esc(o)));
+  return span("hd", open) + inner + span("hd", close);
+}
+export function highlightMarkdown(src, sage) {
+  let out = "", last = 0;
+  for (const m of src.matchAll(MD)) {
+    out += esc(src.slice(last, m.index));
+    last = m.index + m[0].length;
+    if (m[1]) {
+      const lang = m[2].trim().toLowerCase(), code = m[3];
+      const body = /^(py|python|python3|sage|ipython|)$/.test(lang) ? highlight(code, sage || lang === "sage").slice(0, -1) : span("hs", code);
+      out += span("hp", m[1] + m[2] + "\n") + body + span("hp", m[4] ?? "");
+    } else if (m[5]) out += highlightTex(m[5]);
+    else if (m[6]) out += span("hp", m[6]) + span("hs", m[7]) + span("hp", m[6]);
+    else if (m[8]) out += highlightTex(m[8]);
+    else if (m[9]) out += span("hf", m[9]);
+    else if (m[10]) out += span("hk", m[10]);
+    else if (m[11]) out += span("hk", m[11]);
+    else if (m[12]) out += span("hp", m[12]) + span("hb", m[13]) + span("hp", m[14]) + span("hd", m[15]) + span("hp", m[16]);
+    else if (m[17]) out += span("hd", m[17]);
+    else out += esc(m[0]);
+  }
+  return out + esc(src.slice(last)) + "\n";
+}
+
 // ------------------------------------------------------------ page-wide pieces
 let styled = false;
 function addStyle() {
@@ -244,7 +291,9 @@ export function createNotebook(root, opts = {}) {
 
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
-  function paint(cell) { cell.hl.innerHTML = cell.type !== "code" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
+  function paint(cell) {
+    cell.hl.innerHTML = cell.type === "code" ? highlight(cell.ta.value, isSage()) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+  }
 
   // ---------------------------------------------------------- output areas
   // Text goes into <pre> runs; pictures (Jupyter MIME bundles) into <figure>s.
