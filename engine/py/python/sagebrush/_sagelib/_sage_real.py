@@ -530,6 +530,24 @@ class RealField_:
         m, e = _round_q(X, 1, self._prec, self._rnd, -W) if X else (0, 0)
         return RealNumberMP(self, m, e)
 
+    def _ziv(self, f, W):
+        """f(W) rounded in this field's direction (Ziv): f(W) approximates
+        a value at scale W within 2^8 units (30 guard bits inside); both ends
+        of that interval must round alike, else W grows.  The value must not
+        be a binary number (exp, log, sin, cos, atan at nonzero rationals,
+        other than log 1 and cos 0, are transcendental), so this ends.  (The
+        rounded approximation alone went the wrong way: exp(2^-300) rounded
+        up was 1, the systematic review's R2-NUM-F10.)"""
+        E = 1 << 8
+        for k in range(10):
+            X = f(W)
+            lo = _round_q(X - E, 1, self._prec, self._rnd, -W) if X - E else None
+            hi = _round_q(X + E, 1, self._prec, self._rnd, -W) if X + E else None
+            if lo is not None and lo == hi:
+                return RealNumberMP(self, *lo)
+            W += 64 << k
+        return self._fixed(X, W)
+
     def __call__(self, x=0, base=10):
         """Convert a number, a string or an exact expression.
 
@@ -1094,8 +1112,7 @@ class RealNumberMP:
             raise OverflowError("exponent too large")
         # the result has about |x|/ln 2 integer bits: enough fraction bits
         W = R._prec + 30 + max(0, int(abs(float(self)) * 1.4427) + 2)
-        X = self._fix(W)
-        return R._fixed(_exp_fx(X, W), W)
+        return R._ziv(lambda W: _exp_fx(self._fix(W), W), W)
 
     def log(self, base=None):
         """The natural logarithm (or to the given base).
@@ -1115,9 +1132,11 @@ class RealNumberMP:
         # log(1 + d) is about d: fixed point needs -log2|d| more bits for the
         # relative precision (log(1 + 2^-75) to 100 bits)
         d = self._q() - 1
-        extra = 0 if d == 0 else max(0, d.denominator.bit_length() - abs(d.numerator).bit_length() + 1)
+        if d == 0:
+            return R(0) if base is None else R(0)
+        extra = max(0, d.denominator.bit_length() - abs(d.numerator).bit_length() + 1)
         W = R._prec + 30 + extra
-        v = R._fixed(_log_fx(self._m, self._e, W), W)
+        v = R._ziv(lambda W: _log_fx(self._m, self._e, W), W)
         if base is not None:
             return v / R(base).log()
         return v
@@ -1144,11 +1163,13 @@ class RealNumberMP:
         """
         return self.log(10)
 
-    def _trig(self):
-        R = self._R
+    def _trig_W(self):
         # tiny arguments: sin x is about x, so -log2|x| more fixed-point
         # bits keep the relative precision (sin(2^-300) is not 0)
-        W = R._prec + 30 + (max(0, -self._mag()) if self._m else 0)
+        return self._R._prec + 30 + (max(0, -self._mag()) if self._m else 0)
+
+    def _trig(self):
+        W = self._trig_W()
         return _sincos_fx(self._fix(W), W), W
 
     def sin(self):
@@ -1163,8 +1184,8 @@ class RealNumberMP:
             return self._nan()
         if self._m == 0:
             return self
-        (s, c), W = self._trig()
-        return self._R._fixed(s, W)
+        W = self._trig_W()
+        return self._R._ziv(lambda W: _sincos_fx(self._fix(W), W)[0], W)
 
     def cos(self):
         """The cosine.
@@ -1176,8 +1197,10 @@ class RealNumberMP:
         """
         if self._special:
             return self._nan()
-        (s, c), W = self._trig()
-        return self._R._fixed(c, W)
+        if self._m == 0:
+            return self._R(1)
+        W = self._trig_W()
+        return self._R._ziv(lambda W: _sincos_fx(self._fix(W), W)[1], W)
 
     def tan(self):
         """The tangent.
@@ -1241,7 +1264,7 @@ class RealNumberMP:
         if self._m == 0:
             return self
         W = R._prec + 30 + max(0, -(self._e + abs(self._m).bit_length()))
-        return R._fixed(_atan_fx(self._fix(W), W), W)
+        return R._ziv(lambda W: _atan_fx(self._fix(W), W), W)
 
     atan = arctan
 
@@ -1301,7 +1324,9 @@ class RealNumberMP:
             sage: RealField(100)(1).sinh()
             1.1752011936438014568823818506
         """
-        H = RealField(self._R._prec + 30)
+        if self._special or self._m == 0:
+            return self  # (sinh of +-oo and nan is itself)
+        H = self._hyp()
         t = H(self).exp()
         return self._R((t - 1 / t) / 2)
 
@@ -1325,7 +1350,16 @@ class RealNumberMP:
             sage: RealField(100)(1).tanh()
             0.76159415595576488811945828260
         """
-        H = RealField(self._R._prec + 30)
+        if self._m == 0 and not self._special:
+            return self
+        if self._special:
+            return {"+inf": self._R(1), "-inf": self._R(-1)}.get(self._special, self._nan())
+        if self._mag() > 40:
+            # 1 - 2 e^(-2|x|): between 1 - 2^-(p+12) and 1, rounded as that is
+            p = self._R._prec
+            v = RealField(p + 20)(1) - RealField(p + 20)(_F(1, 1 << (p + 12)))
+            return self._R(v if self._m > 0 else -v)
+        H = self._hyp()
         t = H(2 * H(self)).exp()
         return self._R((t - 1) / (t + 1))
 
@@ -1337,7 +1371,12 @@ class RealNumberMP:
             sage: RealField(100)(1).arcsinh()
             0.88137358701954302523260932498
         """
-        H = RealField(self._R._prec + 30)
+        if self._special or self._m == 0:
+            return self
+        if self._m < 0:
+            # odd: x + sqrt(x^2 + 1) cancels for x < 0 (asinh(-2^300) was -oo)
+            return self._R(-(RealField(self._R._prec + 30)(-self).arcsinh()))
+        H = self._hyp()
         x = H(self)
         return self._R((x + (x * x + 1).sqrt()).log())
 
@@ -1351,7 +1390,8 @@ class RealNumberMP:
         """
         H = RealField(self._R._prec + 30)
         x = H(self)
-        return self._R((x + (x * x - 1).sqrt()).log())
+        # (x - 1)(x + 1): x^2 - 1 cancels near 1
+        return self._R((x + ((x - 1) * (x + 1)).sqrt()).log())
 
     def arctanh(self):
         """The inverse hyperbolic tangent.
@@ -1361,9 +1401,17 @@ class RealNumberMP:
             sage: RealField(100)(1/2).arctanh()
             0.54930614433405484569762261846
         """
-        H = RealField(self._R._prec + 30)
+        if self._m == 0 and not self._special:
+            return self
+        H = self._hyp()
         x = H(self)
         return self._R(((1 + x) / (1 - x)).log() / 2)
+
+    def _hyp(self):
+        """The working field for a hyperbolic function: -log2|x| more bits for
+        tiny x, whose 1 + x or e^x - e^-x cancels (sinh(2^-300) was 0, the
+        systematic review's R2-NUM-F9)."""
+        return RealField(self._R._prec + 30 + (max(0, -self._mag()) if self._m else 0))
 
     def nth_root(self, n):
         """The real n-th root.

@@ -445,4 +445,11 @@ _q89 = 2**89 - 1
 assert all(_d.get("assumes") for _d in _nfm.primes_above([-2 * _q89**2, 0, 1], 7))
 _K89 = NumberField(PolynomialRing(QQ, "x").gen()**2 + 1009 * _q89**2, "a")
 assert len(_K89._bnfdata()["assumes"]) == 2; raises(NotImplementedError, _K89.class_number, proof=True)
+from fractions import Fraction as _Fr
+from sagebrush.sage import RealField
+_R100 = RealField(100); _t = _R100(_Fr(1, 2**300))  # R2-NUM-F9
+assert all(abs(_v / _t - 1) < _R100(_Fr(1, 2**90)) for _v in (_t.sinh(), _t.tanh(), _t.arcsinh(), _t.arctanh()))
+assert str(_R100(-2**300).arcsinh()) == "-208.63730134854353813458686856"
+_U = RealField(100, rnd="RNDU")  # R2-NUM-F10
+assert _U(_Fr(1, 2**300)).exp() > 1 and (_U(1) + _U(_Fr(1, 2**98))).log() > _U(_Fr(1, 2**98)) - _U(_Fr(1, 2**197))
 print("rereview2 ok")
