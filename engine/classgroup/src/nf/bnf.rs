@@ -557,7 +557,7 @@ pub fn class_group_generator_bound(f: &[BigInt]) -> Result<(f64, f64), String> {
     let (o, _) = maximal_order(f)?;
     let dk = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
-    let r1 = Embeddings::new(&o).r1;
+    let r1 = Embeddings::new(&o)?.r1;
     let ld = dk.to_f64().unwrap().abs().ln();
     let t_unif = (4.0 * ld * ld).max(50.0);
     let split = splitting(&o, &dk, &index, t_unif as u64);
@@ -569,7 +569,7 @@ pub fn one_step_generator_bound(f: &[BigInt]) -> Result<f64, String> {
     let (o, _) = maximal_order(f)?;
     let dk = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
-    let r1 = Embeddings::new(&o).r1;
+    let r1 = Embeddings::new(&o)?.r1;
     let ld = dk.to_f64().unwrap().abs().ln();
     let t_unif = (4.0 * ld * ld).max(50.0);
     let split = splitting(&o, &dk, &index, t_unif as u64);
@@ -600,11 +600,11 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
     let t0 = crate::clock::Instant::now();
     let (o, _) = maximal_order(f)?;
     // a T2-reduced basis: the f64 work below needs a well-scaled one
-    let o = super::embed::reduce_order(&o);
+    let o = super::embed::reduce_order(&o)?;
     let n = o.n;
     let dk = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
-    let emb = Embeddings::new(&o);
+    let emb = Embeddings::new(&o)?;
     let (r1, r2) = (emb.r1, emb.r2);
     let r = r1 + r2 - 1;
     // roots of unity: the x with T2(x) = n
@@ -806,24 +806,24 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
 
 /// Log embeddings (first r coordinates... all r1 + r2) of the relation
 /// elements at `prec` bits, cached at the highest precision so far.
-fn element_logs(fld: &Field, elems: &[Vec<BigInt>], prec: u32, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>) -> Vec<Vec<BigInt>> {
+fn element_logs(fld: &Field, elems: &[Vec<BigInt>], prec: u32, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>) -> Result<Vec<Vec<BigInt>>, String> {
     let need_new = cache.as_ref().map_or(true, |(p, _)| *p < prec);
     if need_new {
         let p = prec + prec / 4 + 16;
-        let roots = fld.emb.roots_hp(&fld.o.f, p);
+        let roots = fld.emb.roots_hp(&fld.o.f, p)?;
         let logs = elems.iter().map(|x| fld.emb.log_embedding(&fld.o, x, &roots, p)).collect();
         *cache = Some((p, logs));
     } else {
         let (p, logs) = cache.as_mut().unwrap();
         if logs.len() < elems.len() {
-            let roots = fld.emb.roots_hp(&fld.o.f, *p);
+            let roots = fld.emb.roots_hp(&fld.o.f, *p)?;
             let pp = *p;
             logs.extend(elems[logs.len()..].iter().map(|x| fld.emb.log_embedding(&fld.o, x, &roots, pp)));
         }
     }
     let (p, logs) = cache.as_ref().unwrap();
     let shift = (*p - prec) as usize;
-    logs[..elems.len()].iter().map(|l| l.iter().map(|x| x >> shift).collect()).collect()
+    Ok(logs[..elems.len()].iter().map(|l| l.iter().map(|x| x >> shift).collect()).collect())
 }
 
 /// A basis of {z in Z^k : z Y = 0 mod d} (Y: k rows y_t): the HNF of
@@ -845,8 +845,9 @@ fn kernel_lattice(ys: &[Vec<BigInt>], d: &BigInt) -> Vec<Vec<BigInt>> {
 
 /// Unit log vectors (first r coordinates) from zero rows and kernel vectors.
 #[allow(clippy::too_many_arguments)]
-fn unit_logs(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, core_rows: &[usize], sel: &[usize], det: &BigInt, ys: &[Vec<BigInt>], extras: &[usize], r: usize, prec: u32, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>) -> Vec<Vec<BigInt>> {
-    let mut logs = element_logs(fld, elems, prec, cache);
+fn unit_logs(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, core_rows: &[usize], sel: &[usize], det: &BigInt, ys: &[Vec<BigInt>], extras: &[usize], r: usize, prec: u32, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>) -> Option<Vec<Vec<BigInt>>> {
+    // (None: the roots could not be refined to this precision)
+    let mut logs = element_logs(fld, elems, prec, cache).ok()?;
     let (_, core2, zero_rows) = eliminate_with(nfb, rels, 80, Some(&mut logs));
     assert_eq!(core2, core_rows);
     let m = logs.first().map_or(r + 1, |l| l.len());
@@ -885,7 +886,7 @@ fn unit_logs(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
         eprintln!("    check at {} bits: {} zero-row units worst |sum| {:.3e}; {} kernel units worst {:.3e}", prec, n_zero, worst(&full[..n_zero]), full.len() - n_zero, worst(&full[n_zero..]));
     }
     let out: Vec<Vec<BigInt>> = full.into_iter().map(|l| l[..r].to_vec()).collect();
-    out
+    Some(out)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -932,8 +933,8 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
             // identification of the unit lattice needs about the size of
             // the multipliers plus twice that of the denominators (both up
             // to |lambda|) beyond the error: 3 log2 |lambda| bits.
-            let low = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, 48, cache);
-            let mid = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, 112, cache);
+            let low = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, 48, cache)?;
+            let mid = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, 112, cache)?;
             let lbits = mid.iter().flatten().map(|l| l.bits() as i64 - 112).max().unwrap_or(0).max(0) as u32;
             let ebits = low.iter().flatten().zip(mid.iter().flatten()).map(|(l, m)| ((l << 64usize) - m).bits() as i64 - 112).max().unwrap_or(0).max(0) as u32;
             err_bits = ebits + 48 + 16;
@@ -942,7 +943,7 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                 eprintln!("  kernel: det {} bits; |lambda| ~ 2^{}, error at 48 bits ~ 2^{}: precision {} at {:.1} ms", det.bits(), lbits, ebits, prec, ms());
             }
         }
-        let lambdas = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, prec, cache);
+        let lambdas = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, prec, cache)?;
         let err = BigInt::one() << err_bits as usize;
         let res = unit_lattice(&lambdas, r, &err, prec);
         let verified = res.as_ref().map(|(basis, cov)| {
@@ -1054,9 +1055,9 @@ mod tests {
         // a root near -87473: its fixed-point start used to overflow
         let f: Vec<BigInt> = [-95282, 82258, 87473, 1].iter().map(|&c| BigInt::from(c)).collect();
         let (o, _) = maximal_order(&f).unwrap();
-        let e = Embeddings::new(&o);
+        let e = Embeddings::new(&o).unwrap();
         let prec = 200;
-        let hp = e.roots_hp(&o.f, prec);
+        let hp = e.roots_hp(&o.f, prec).unwrap();
         for (z, _) in &hp {
             // f(z) ~ 0 relative to the size of the terms
             let fz: BigInt = f.iter().rev().fold(BigInt::zero(), |acc, c| ((acc * z) >> prec as usize) + (c << prec as usize));

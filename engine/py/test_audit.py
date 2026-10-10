@@ -90,4 +90,15 @@ assert "BPSW" in raises(NotImplementedError, ZZ(2**127 - 1).is_prime, proof=True
 assert ZZ(2**127 - 1).is_prime() and ZZ(2**127 - 1).is_prime(proof=False)
 raises(NotImplementedError, factor, (2**127 - 1) * 3, proof=True)
 assert nf.bnf([5, 0, 1])["assumes"] == ["GRH"]
+# second review R3: a translated model of Q(i), certified roots and signature
+zz = polygen(QQ, "z")
+K = NumberField((zz - 10**8) ** 2 + 1, "a")
+assert K.signature() == (0, 1)
+U = K.unit_group(proof=True)
+assert (U.rank(), U.torsion_generator_order()) == (0, 4)
+assert nf.complex_roots([10**16 + 1, -2 * 10**8, 1], 30) == [
+    ("100000000.000000000000000000000", "-1.00000000000000000000000000000", 1),
+    ("100000000.000000000000000000000", "1.00000000000000000000000000000", 1)]
+d = nf.nf_data([-89677, 9416, -531841, 2, 72857, 1])
+assert (d["r1"], d["r2"], d["w"], d["w_proven"]) == (3, 1, 2, True)
 print("audit regressions: ok")

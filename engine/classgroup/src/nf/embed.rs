@@ -1,6 +1,6 @@
-//! The embeddings of K = Q[x]/(f): the complex roots of f (Aberth's method
-//! in f64, refined by Newton's method in fixed point to any precision), the
-//! real r1 first, then one of each complex pair (positive imaginary part).
+//! The embeddings of K = Q[x]/(f): the complex roots of f, isolated in
+//! certified disks and refined to any precision (nf/roots.rs), the real r1
+//! first, then one of each complex pair (positive imaginary part).
 //! T2(x) = sum |sigma(x)|^2 over all n embeddings, and the logarithmic
 //! embedding used for units.
 
@@ -51,12 +51,9 @@ pub struct Embeddings {
     pub roots: Vec<(f64, f64)>,
     /// sigma_j(w_i) for the r1 + r2 embeddings: conj[i][j]
     pub conj: Vec<Vec<(f64, f64)>>,
-}
-
-/// The roots of f (monic, integer) in f64 by Aberth's iteration.
-fn roots_f64(f: &[BigInt]) -> Vec<(f64, f64)> {
-    let fc: Vec<f64> = f.iter().map(|c| c.to_f64().unwrap()).collect();
-    aberth(&fc)
+    /// the roots of f, certified (nf/roots.rs), and which of them `roots` are
+    iso: super::roots::Isolated,
+    order: Vec<usize>,
 }
 
 /// The roots of a monic polynomial with f64 coefficients (constant term
@@ -114,7 +111,7 @@ fn rem_q(p: &[BigRational], q: &[BigRational]) -> Vec<BigRational> {
 }
 
 /// The Sturm sequence of a squarefree integer polynomial.
-fn sturm(f: &[BigInt]) -> Vec<Vec<BigRational>> {
+pub(crate) fn sturm(f: &[BigInt]) -> Vec<Vec<BigRational>> {
     let p0: Vec<BigRational> = f.iter().map(|c| BigRational::from_integer(c.clone())).collect();
     let p1: Vec<BigRational> = (1..f.len()).map(|i| BigRational::from_integer(&f[i] * BigInt::from(i as u64))).collect();
     let mut seq = vec![p0, p1];
@@ -132,7 +129,7 @@ fn sturm(f: &[BigInt]) -> Vec<Vec<BigRational>> {
     seq
 }
 
-fn sign_changes(seq: &[Vec<BigRational>], x: &BigRational) -> usize {
+pub(crate) fn sign_changes(seq: &[Vec<BigRational>], x: &BigRational) -> usize {
     let mut last = 0i32;
     let mut n = 0;
     for p in seq {
@@ -151,64 +148,33 @@ fn sign_changes(seq: &[Vec<BigRational>], x: &BigRational) -> usize {
     n
 }
 
-/// The real roots of a squarefree integer polynomial to f64 accuracy, by
-/// Sturm sequences and exact bisection (for roots too close together for
-/// Aberth's iteration in f64).
-fn real_roots_exact(f: &[BigInt]) -> Vec<f64> {
-    let seq = sturm(f);
-    let lead = f.last().unwrap().abs();
-    let bound = BigRational::new(f.iter().map(|c| c.abs()).max().unwrap() + &lead, lead);
-    let mut out = vec![];
-    let mut stack = vec![(-bound.clone(), bound, 0usize)];
-    while let Some((lo, hi, depth)) = stack.pop() {
-        let k = sign_changes(&seq, &lo) - sign_changes(&seq, &hi);
-        if k == 0 {
-            continue;
-        }
-        let mid = (&lo + &hi) / BigRational::from_integer(BigInt::from(2));
-        let width = (&hi - &lo).to_f64().unwrap_or(f64::INFINITY);
-        let size = mid.to_f64().unwrap_or(0.0).abs().max(1e-300);
-        if k == 1 && (width <= size * 1e-17 || depth > 2000) {
-            out.push(mid.to_f64().unwrap());
-            continue;
-        }
-        stack.push((lo, mid.clone(), depth + 1));
-        stack.push((mid, hi, depth + 1));
-    }
-    out.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    out
-}
-
 impl Embeddings {
-    pub fn new(o: &Order) -> Embeddings {
-        let roots = roots_f64(&o.f);
-        // real roots: |im| tiny relative to the size
-        let scale = roots.iter().map(|r| r.0.hypot(r.1)).fold(1.0, f64::max);
-        let mut real: Vec<(f64, f64)> = roots.iter().filter(|r| r.1.abs() <= 1e-9 * scale).map(|r| (r.0, 0.0)).collect();
-        let mut cplx: Vec<(f64, f64)> = roots.iter().filter(|r| r.1 > 1e-9 * scale).cloned().collect();
-        if real.len() + 2 * cplx.len() != o.n {
-            // nearly coincident real roots look complex in f64: the real
-            // roots exactly (Sturm), the others the most complex of Aberth's
-            let rr = real_roots_exact(&o.f);
-            let mut by_im: Vec<(f64, f64)> = roots.iter().filter(|r| r.1 > 0.0).cloned().collect();
-            by_im.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            by_im.truncate((o.n - rr.len()) / 2);
-            real = rr.into_iter().map(|x| (x, 0.0)).collect();
-            cplx = by_im;
-        }
-        real.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        cplx.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap().then(a.1.partial_cmp(&b.1).unwrap()));
+    /// The embeddings, from the roots of f isolated with certified disks
+    /// (nf/roots.rs): the signature is proven (and checked against Sturm).
+    pub fn new(o: &Order) -> Result<Embeddings, String> {
+        let iso = super::roots::isolate(&o.f, 64)?;
+        let to_f = |x: &BigInt| -> f64 {
+            let sh = x.bits().saturating_sub(60) as usize;
+            (x >> sh).to_f64().unwrap() * 2f64.powi(sh as i32 - iso.prec as i32)
+        };
+        let mut real: Vec<usize> = (0..o.n).filter(|&i| iso.roots[i].real).collect();
+        let mut cplx: Vec<usize> = (0..o.n).filter(|&i| !iso.roots[i].real && iso.roots[i].im.is_positive()).collect();
+        real.sort_by(|&a, &b| iso.roots[a].re.cmp(&iso.roots[b].re));
+        cplx.sort_by(|&a, &b| iso.roots[a].re.cmp(&iso.roots[b].re).then(iso.roots[a].im.cmp(&iso.roots[b].im)));
         let (r1, r2) = (real.len(), cplx.len());
-        assert_eq!(r1 + 2 * r2, o.n, "root separation failed");
-        let roots: Vec<(f64, f64)> = real.into_iter().chain(cplx).collect();
+        if r1 + 2 * r2 != o.n {
+            return Err(format!("the roots of the defining polynomial: {} real and {} complex pairs, degree {}", r1, r2, o.n));
+        }
+        let order: Vec<usize> = real.into_iter().chain(cplx).collect();
+        let roots: Vec<(f64, f64)> = order.iter().map(|&i| (to_f(&iso.roots[i].re), to_f(&iso.roots[i].im))).collect();
         // sigma_j(w_i) = sum_k b_ik t_j^k / den, in fixed point from roots
         // refined to enough bits: the b_ik can be huge and cancel (f64
         // alone gave a singular T2 form for x^3 - 1386489987 x - ...)
-        let mut emb = Embeddings { r1, r2, roots, conj: vec![] };
+        let mut emb = Embeddings { r1, r2, roots, conj: vec![], iso, order };
         let cbits = o.basis.iter().flatten().map(|c| c.bits()).max().unwrap_or(1) as u32;
         let rbits = emb.roots.iter().map(|r| r.0.abs().max(r.1.abs()).max(1.0).log2().ceil() as u32).max().unwrap_or(1);
         let prec = 96 + cbits + (o.n as u32) * rbits;
-        let hp = emb.roots_hp(&o.f, prec);
+        let hp = emb.roots_hp(&o.f, prec)?;
         let p = prec as usize;
         let to_f = |x: &BigInt| -> f64 {
             let sh = x.bits().saturating_sub(60) as usize;
@@ -226,7 +192,7 @@ impl Embeddings {
                 (to_f(&vr) / den, to_f(&vi) / den)
             }).collect()
         }).collect();
-        emb
+        Ok(emb)
     }
 
     /// sigma_j(x) for x in order coordinates (f64).
@@ -266,46 +232,11 @@ impl Embeddings {
         }).collect()).collect()
     }
 
-    /// The roots to `prec` bits (fixed point re, im), by Newton's method
-    /// from the f64 values.
-    pub fn roots_hp(&self, f: &[BigInt], prec: u32) -> Vec<(BigInt, BigInt)> {
-        let p = prec as usize + 32;
-        self.roots.iter().map(|&(re, im)| {
-            // exact for any magnitude (an i64 cast would saturate)
-            let to = |x: f64| -> BigInt { num_traits::FromPrimitive::from_f64((x * 2f64.powi(52)).round()).map_or(BigInt::zero(), |b: BigInt| b << (p - 52)) };
-            let (mut zr, mut zi) = (to(re), if im == 0.0 { BigInt::zero() } else { to(im) });
-            let mut bits = 45;
-            loop {
-                sagebrush_interrupt::check();
-                // f(z) and f'(z) by Horner in fixed point
-                let (mut vr, mut vi) = (BigInt::zero(), BigInt::zero());
-                let (mut dr, mut di) = (BigInt::zero(), BigInt::zero());
-                for c in f.iter().rev() {
-                    let (ndr, ndi) = (((&dr * &zr - &di * &zi) >> p) + &vr, ((&dr * &zi + &di * &zr) >> p) + &vi);
-                    dr = ndr;
-                    di = ndi;
-                    let (nvr, nvi) = (((&vr * &zr - &vi * &zi) >> p) + (c << p), (&vr * &zi + &vi * &zr) >> p);
-                    vr = nvr;
-                    vi = nvi;
-                }
-                // z -= v / d
-                let dd = (&dr * &dr + &di * &di) >> p;
-                if dd.is_zero() {
-                    break;
-                }
-                let qr = ((&vr * &dr + &vi * &di) >> p << p) / &dd;
-                let qi = ((&vi * &dr - &vr * &di) >> p << p) / &dd;
-                zr -= qr;
-                if im != 0.0 {
-                    zi -= qi;
-                }
-                if bits > p + 10 {
-                    break;
-                }
-                bits *= 2;
-            }
-            (zr >> 32usize, zi >> 32usize)
-        }).collect()
+    /// The roots to `prec` bits (fixed point re, im), in the order of
+    /// `roots`: refined within their certified disks (nf/roots.rs).
+    pub fn roots_hp(&self, f: &[BigInt], prec: u32) -> Result<Vec<(BigInt, BigInt)>, String> {
+        let iso = super::roots::refine(f, &self.iso, prec)?;
+        Ok(self.order.iter().map(|&i| (iso.roots[i].re.clone(), iso.roots[i].im.clone())).collect())
     }
 
     /// The logarithmic embedding of x (order coordinates) to `prec` bits:
@@ -340,21 +271,27 @@ impl Embeddings {
 /// basis of huge numerators over a huge denominator, in which even 1 has
 /// coordinates near 10^10: every f64 computation with order coordinates
 /// (T2 forms, embeddings of elements) then cancels catastrophically.
-pub fn reduce_order(o: &Order) -> Order {
+pub fn reduce_order(o: &Order) -> Result<Order, String> {
     let n = o.n;
     if n == 1 {
-        return o.clone();
+        return Ok(o.clone());
     }
-    let emb = Embeddings::new(o);
+    let emb = Embeddings::new(o)?;
     let cbits = o.basis.iter().flatten().map(|c| c.bits()).max().unwrap_or(1) as u32;
     let rbits = emb.roots.iter().map(|r| r.0.abs().max(r.1.abs()).max(1.0).log2().ceil() as u32).max().unwrap_or(1);
-    let prec = 128 + cbits + (n as u32) * rbits;
+    // The embeddings of the basis are up to about 2^(cbits + n rbits); the
+    // short vectors are combinations cancelling all but O(1) of that, so
+    // the lattice keeps 80 bits below 1 beyond that size (with 80 bits only,
+    // a power basis of a generator near 5 10^7 needed two passes, and the
+    // roots of unity were then counted in a badly scaled basis).
+    let size = cbits + (n as u32) * rbits;
+    let prec = 160 + 2 * size;
     let p = prec as usize;
-    let hp = emb.roots_hp(&o.f, prec);
+    let hp = emb.roots_hp(&o.f, prec)?;
     // sigma_j(w_i) den 2^p; complex embeddings as sqrt(2) (re, im)
     let s2 = BigInt::from(1518500249u64); // round(sqrt(2) 2^30)
-    // keep about 80 bits below 1 (sigma(1) den 2^p): shift by p + bits(den) - 80
-    let shift = (p + o.den.bits() as usize).saturating_sub(80);
+    // keep 80 + size bits below 1 (sigma(1) den 2^p)
+    let shift = (p + o.den.bits() as usize).saturating_sub(80 + size as usize);
     let rows: ZMat = (0..n).map(|i| {
         let mut row = vec![];
         for (j, (zr, zi)) in hp.iter().enumerate() {
@@ -377,10 +314,10 @@ pub fn reduce_order(o: &Order) -> Order {
     let red = crate::api::lll(&rows);
     let u: ZMat = red.iter().map(|r| r[n..].to_vec()).collect();
     if u.len() != n || !crate::linalg::det(&u).abs().is_one() {
-        return o.clone();
+        return Ok(o.clone());
     }
     let basis: ZMat = u.iter().map(|ur| (0..n).map(|k| (0..n).map(|i| &ur[i] * &o.basis[i][k]).sum()).collect()).collect();
-    Order::new(&o.f, basis, o.den.clone())
+    Ok(Order::new(&o.f, basis, o.den.clone()))
 }
 
 /// LLL reduction (delta = 0.99) of a basis (order coordinates) for the
@@ -485,8 +422,8 @@ mod tests {
         for f in [vec![-2i64, 0, 0, 1], vec![-47400624380034, -1386489987, 0, 1], vec![5, 1, -3, 1]] {
             let f: Vec<BigInt> = f.iter().map(|&c| BigInt::from(c)).collect();
             let (o, _) = maximal_order(&f).unwrap();
-            let o = reduce_order(&o);
-            let e = Embeddings::new(&o);
+            let o = reduce_order(&o).unwrap();
+            let e = Embeddings::new(&o).unwrap();
             let one = o.from_power(&[1i64, 0, 0].map(|c| sagebrush_bigint::BigRational::from_integer(c.into()))).into_iter().map(|c| c.to_integer()).collect::<Vec<_>>();
             let g = e.t2_gram(&[one.clone()]);
             assert!((g[0][0] - 3.0).abs() < 1e-9, "{:?}: T2(1) = {}", f, g[0][0]);
@@ -499,12 +436,10 @@ mod tests {
         // +-6e4, two of them 0.004 apart (f64's Aberth saw a complex pair)
         let f: Vec<BigInt> = ["-100192487473584", "-4076849664", "0", "1"].iter().map(|c| c.parse().unwrap()).collect();
         let (o, _) = maximal_order(&f).unwrap();
-        let e = Embeddings::new(&o);
+        let e = Embeddings::new(&o).unwrap();
         assert_eq!((e.r1, e.r2), (3, 0));
-        let r = real_roots_exact(&f);
-        assert_eq!(r.len(), 3);
+        let r: Vec<f64> = e.roots.iter().map(|z| z.0).collect();
         assert!(r[1] - r[0] > 1e-3 || r[2] - r[1] > 1e-3);
-        assert_eq!(real_roots_exact(&[-2, 0, 0, 1].iter().map(|&c| BigInt::from(c)).collect::<Vec<_>>()).len(), 1);
     }
 
     #[test]
@@ -512,11 +447,11 @@ mod tests {
         // x^3 - 2: one real root 2^(1/3), one complex pair
         let f: Vec<BigInt> = [-2, 0, 0, 1].iter().map(|&c| BigInt::from(c)).collect();
         let (o, _) = maximal_order(&f).unwrap();
-        let e = Embeddings::new(&o);
+        let e = Embeddings::new(&o).unwrap();
         assert_eq!((e.r1, e.r2), (1, 1));
         assert!((e.roots[0].0 - 2f64.powf(1.0 / 3.0)).abs() < 1e-14);
         let prec = 200;
-        let hp = e.roots_hp(&o.f, prec);
+        let hp = e.roots_hp(&o.f, prec).unwrap();
         // the real root cubed is 2 to the precision
         let r = &hp[0].0;
         let cube = ((r * r) >> prec as usize) * r >> prec as usize;
