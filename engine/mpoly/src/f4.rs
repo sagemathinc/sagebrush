@@ -309,7 +309,10 @@ impl<'a> F4<'a> {
             eprintln!("shape: deg? cols {} pivots {} B-cols {} rows {} | pivot len {:.1} (A part {:.1}) | row A-entries {:.1}", nc, npiv, nc - npiv, rows.len(), plen as f64 / npiv.max(1) as f64, pa as f64 / npiv.max(1) as f64, ca as f64 / rows.len().max(1) as f64);
         }
         let threads = if rows.len() >= 32 { crate::threads() } else { 1 };
-        let red = if echelon && self.prob {
+        // (random combinations fail with probability about (blocks)/p: not
+        // for small p, where they are deterministic at p = 2, every
+        // coefficient being 1: the systematic review's GB-F5)
+        let red = if echelon && self.prob && p > 1 << 20 {
             let seed = 0x2545F4914F6CDD1D ^ (self.g.len() as u64) << 20 ^ nc as u64;
             back_reduce(echelonize(piv.reduce_random(&rows, nc, threads, 16, seed), nc, p), nc, p)
         } else {

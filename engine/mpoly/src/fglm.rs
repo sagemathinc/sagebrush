@@ -352,8 +352,12 @@ pub fn groebner_fglm(fs: &[crate::QPoly], o: Order, p: u64, proof: bool) -> Resu
     // the monomials of the images, numbered (columns of the rows)
     let mut mono: HashMap<Vec<u32>, u32> = HashMap::new();
     let mut monos: Vec<Vec<u32>> = vec![];
-    let mut shape: Option<Vec<Vec<u32>>> = None;
-    let mut imgs: Vec<(u64, Vec<Row>)> = vec![];
+    // images grouped by their leading monomials: unlucky primes have other
+    // ones, and the largest group is used (keeping the first shape forever
+    // never finished when the first prime was the unlucky one: the
+    // systematic review's GB-F2, x^2 - y, x y - 2147483647)
+    let mut groups: HashMap<Vec<Vec<u32>>, Vec<(u64, Vec<Row>)>> = HashMap::new();
+    let mut current: Option<Vec<Vec<u32>>> = None;
     let (mut hard, mut done) = ((0usize, 0usize), vec![]);
     let threads = crate::threads();
     let mut want = 2usize;
@@ -367,14 +371,7 @@ pub fn groebner_fglm(fs: &[crate::QPoly], o: Order, p: u64, proof: bool) -> Resu
         timg += ti.map_or(0.0, |t| t.elapsed().as_secs_f64());
         for (q, r) in ps.iter().zip(res) {
             let Some(b) = r? else { return Ok(None) };
-            // unlucky primes give other leading monomials: keep the most
-            // common shape (the first, unless two later ones disagree)
             let leads: Vec<Vec<u32>> = b.iter().map(|f| f[0].0.clone()).collect();
-            match &shape {
-                None => shape = Some(leads),
-                Some(s) if *s != leads => continue,
-                _ => {}
-            }
             let rows: Vec<Row> = b.iter().map(|f| {
                 let mut t: Vec<(u32, u32)> = f.iter().map(|(e, c)| {
                     let id = *mono.entry(e.clone()).or_insert_with(|| {
@@ -386,12 +383,19 @@ pub fn groebner_fglm(fs: &[crate::QPoly], o: Order, p: u64, proof: bool) -> Resu
                 t.sort_unstable();
                 Row { cols: t.iter().map(|x| x.0).collect(), vals: t.iter().map(|x| x.1).collect() }
             }).collect();
-            imgs.push((*q, rows));
+            groups.entry(leads).or_default().push((*q, rows));
         }
+        // the largest group (ties: the current one)
+        let best = groups.iter().max_by_key(|(k, v)| (v.len(), current.as_ref() == Some(*k))).map(|(k, _)| k.clone());
+        let Some(best) = best else { continue };
+        if current.as_ref() != Some(&best) {
+            current = Some(best.clone());
+            hard = (0, 0);
+            done = vec![];
+            last_try = 0;
+        }
+        let imgs = &groups[&best];
         want = imgs.len().max(2);
-        if imgs.is_empty() {
-            continue;
-        }
         // (an attempt each time the primes grew by a quarter: each costs a
         // reconstruction of numbers as large as the modulus)
         if imgs.len() * 4 < last_try * 5 {

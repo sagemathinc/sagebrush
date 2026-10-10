@@ -217,3 +217,14 @@ _M = PolynomialRing(GF(4, "a"), names=("x", "y")); _mx = _M.gen(0)
 _Fa = (_mx*(_mx + 1)).factor()
 assert _Fa.value() == _mx*(_mx + 1)
 print("mpoly ok")
+# systematic review GB-F2..F4
+_R = PolynomialRing(QQ, "x,y", order="lex"); _x, _y = _R.gens()
+assert str(_R.ideal(_x*_x - _y, _x*_y - 2147483647).groebner_basis()) == "[x - 1/2147483647*y^2, y^3 - 4611686014132420609]"
+_R = PolynomialRing(GF(2), "x,y"); _x, _y = _R.gens()
+assert str(_R.ideal(_x*_x, _y).radical().gens()) in ("[y, x]", "(y, x)")
+_R = PolynomialRing(ZZ, "x,y"); _x, _y = _R.gens()
+try:
+    _x in _R.ideal(2*_x); assert False
+except NotImplementedError:
+    pass
+print("groebner2 ok")

@@ -204,7 +204,11 @@ impl Pivots<'_> {
 
     /// The rows' span modulo the pivots by random combinations of blocks
     /// (see reduce_block): rows with new leading columns, to be echelonized
-    /// together.  Correct but for a probability about (number of blocks)/p.
+    /// together.  Correct but for a probability about (number of blocks)/p
+    /// for random coefficients; the coefficients come from a fixed seed
+    /// (pseudo-random, not an independent trial), and the bound is useless
+    /// for small p (at p = 2 every coefficient is 1): callers use it only
+    /// for large p.
     pub fn reduce_random(&self, rows: &[Row], ncols: usize, threads: usize, block: usize, seed: u64) -> Vec<Row> {
         let blocks: Vec<&[Row]> = rows.chunks(block.max(1)).collect();
         let threads = threads.max(1).min(blocks.len().max(1));
