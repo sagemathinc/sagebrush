@@ -819,6 +819,12 @@ class Expression:
             # 1): the systematic review's R2-SYMALG-F3)
             if str(s.lhs()) != str(x):
                 raise RuntimeError("no explicit roots found")
+            # the roots of the polynomial over the field of its parameters,
+            # where a nonzero coefficient is nonzero: those valid while the
+            # leading coefficient is nonzero, not the special cases a == 0
+            conds = s.conditions() if isinstance(s, Solution) else []
+            if any(c._op()[0] != "rel:Ne" for c in conds) or (isinstance(s, Solution) and s._params):
+                continue
             r, m = s.rhs(), 0
             g = f
             while True:
@@ -2612,9 +2618,114 @@ def limit(f, *args, dir=None, **kw):
 lim = limit
 
 
+class _SolutionDict(dict):
+    """{x: value} with the conditions and integer parameters of its Solution."""
+
+    def __init__(self, d, conds=(), params=()):
+        dict.__init__(self, d)
+        self._conds, self._params = list(conds), list(params)
+
+    def conditions(self):
+        return list(self._conds)
+
+    def parameters(self):
+        return [Expression(_sym_s(n)) for n in self._params]
+
+    def __repr__(self):
+        t = dict.__repr__(self)
+        if self._params:
+            t += " for integer " + ", ".join(self._params)
+        if self._conds:
+            t += " if " + " and ".join(str(c) for c in self._conds)
+        return t
+
+
+class Solution(Expression):
+    """A solution x == value of one equation, with the conditions on the
+    parameters under which it is one (conditions(), a list of relations
+    that must all hold) and the integer parameters of a family of solutions
+    (parameters()).  It is the relation itself: lhs(), rhs(), subs() work
+    as on any relation.
+
+    EXAMPLES::
+
+        sage: a = var('a')
+        sage: s = solve(sqrt(x) == a, x)[0]; s  # sagebrush only
+        x == a^2 if -1/2*pi < arg(a) <= 1/2*pi
+        sage: s.rhs(), s.conditions()  # sagebrush only
+        (a^2, [arg(a) > -1/2*pi, arg(a) <= 1/2*pi])
+    """
+
+    __slots__ = ("_conds", "_params")
+
+    def __init__(self, s, conds=(), params=()):
+        Expression.__init__(self, s)
+        self._conds = list(conds)
+        self._params = list(params)
+
+    def __reduce__(self):
+        return (Solution, (self._s, [c._s for c in self._conds], list(self._params)))
+
+    def conditions(self):
+        """The relations on the parameters under which this is a solution
+        (all must hold; [] if it always is)."""
+        return list(self._conds)
+
+    def parameters(self):
+        """The integer parameters n1, n2, ... of a family of solutions (each
+        integer value gives one)."""
+        return [Expression(_sym_s(n)) for n in self._params]
+
+    def _cond_text(self, show, latex=False):
+        cs = self._conds
+        out = []
+        i = 0
+        while i < len(cs):
+            c = cs[i]
+            # lo < X and X <= hi, shown as lo < X <= hi
+            if i + 1 < len(cs):
+                o1, o2 = c._op()[0], cs[i + 1]._op()[0]
+                if o1 == "rel:Gt" and o2 == "rel:Le" and str(c.lhs()) == str(cs[i + 1].lhs()):
+                    lt, le = ("<", "\\leq") if latex else ("<", "<=")
+                    out.append("%s %s %s %s %s" % (show(c.rhs()), lt, show(c.lhs()), le, show(cs[i + 1].rhs())))
+                    i += 2
+                    continue
+            out.append(show(c))
+            i += 1
+        return out
+
+    def __repr__(self):
+        t = Expression.__repr__(self)
+        if self._params:
+            t += " for integer " + ", ".join(self._params)
+        if self._conds:
+            t += " if " + " and ".join(self._cond_text(str))
+        return t
+
+    __str__ = __repr__
+
+    def _latex_(self):
+        t = Expression._latex_(self)
+        if self._params:
+            t += r" \quad (%s \in \mathbb{Z})" % ", ".join(self._params)
+        if self._conds:
+            t += r" \quad \text{if } " + r" \text{ and } ".join(self._cond_text(lambda e: e._latex_(), True))
+        return t
+
+
 def solve(f, *args, **kw):
     """solve(x^2 == 4, x) -> [x == -2, x == 2]; solve([eqs], x, y) ->
     [[x == ..., y == ...], ...]; solution_dict=True for dictionaries.
+
+    For one equation in one variable the answer is complete, which is where
+    Sagebrush differs from Sage (Sage gives generic and principal solutions
+    only): each solution is a Solution, with the conditions on the
+    parameters under which it is one (sqrt(x) == a has x == a^2 only for
+    -pi/2 < arg(a) <= pi/2, the principal square roots), the cases where a
+    leading coefficient vanishes are solved too (a*x^2 + x - 1 == 0 also
+    has x == 1 when a == 0), and periodic equations give whole families in
+    new integer parameters n1, n2, ... (sin(x) == 0: x == pi*n1).  A factor
+    whose roots are not found stays as 0 == f.
 
     EXAMPLES::
 
@@ -2624,6 +2735,13 @@ def solve(f, *args, **kw):
         y
         sage: solve([x + y == 3, x - y == 1], x, y)  # needs maxima
         [[x == 2, y == 1]]
+        sage: a = var('a')
+        sage: solve(sin(x) == 0, x)  # sagebrush only
+        [x == pi*n1 for integer n1]
+        sage: solve(a*x^2 + x - 1 == 0, x)  # sagebrush only
+        [x == -1/2*sqrt(4*a + 1)/a - 1/2/a if a != 0, x == 1/2*sqrt(4*a + 1)/a - 1/2/a if a != 0, x == 1 if a == 0]
+        sage: solve(sqrt(x) == -1, x), solve(a*x == 1, x)  # sagebrush only
+        ([], [x == 1/a if a != 0])
     """
     many = isinstance(f, (list, tuple))
     eqs = [_expr(g) for g in (f if many else [f])]
@@ -2640,9 +2758,17 @@ def solve(f, *args, **kw):
     eqs = [g if g.is_relational() else g == 0 for g in eqs]
     r = _call("solve", str(len(eqs)), *[g._s for g in eqs], *names)
     k, i, sols = int(r[0]), 1, []
+    one = len(eqs) == 1 and len(names) == 1
     for _ in range(k):
         m = int(r[i])
-        sols.append([Expression(s) for s in r[i + 1:i + 1 + m]])
+        part = r[i + 1:i + 1 + m]
+        if one:
+            # x == v, its conditions, "@int:n" for its integer parameters
+            params = [t[5:] for t in part[1:] if t.startswith("@int:")]
+            conds = [Expression(t) for t in part[1:] if not t.startswith("@int:")]
+            sols.append([Solution(part[0], conds, params)])
+        else:
+            sols.append([Expression(t) for t in part])
         i += 1 + m
     if _ASSUMPTIONS:
         sols = [sol for sol in sols if _satisfies(sol)]
@@ -2675,7 +2801,8 @@ def solve(f, *args, **kw):
         # read as a root: R2-SYMALG-F3)
         if any(s.lhs()._op()[0] != "symbol" for sol in sols for s in sol):
             raise NotImplementedError("solve: no explicit solution for %s (solution_dict needs one)" % ", ".join(str(s) for sol in sols for s in sol if s.lhs()._op()[0] != "symbol"))
-        return [{s.lhs(): s.rhs() for s in sol} for sol in sols]
+        return [_SolutionDict({s.lhs(): s.rhs() for s in sol}, [c for s in sol if isinstance(s, Solution) for c in s.conditions()],
+                              [p for s in sol if isinstance(s, Solution) for p in s._params]) for sol in sols]
     if len(names) == 1 and not many:
         return [s for sol in sols for s in sol]
     return [list(sol) for sol in sols]

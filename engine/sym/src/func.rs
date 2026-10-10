@@ -50,6 +50,7 @@ impl Fun {
             Fun::Conjugate => "conjugate",
             Fun::RealPart => "real_part",
             Fun::ImagPart => "imag_part",
+            Fun::Arg => "arg",
             Fun::Heaviside => "heaviside",
             Fun::User(n) => return n.to_string(),
             Fun::Deriv(n, _) => return n.to_string(),
@@ -99,6 +100,7 @@ impl Fun {
             "conjugate" => Fun::Conjugate,
             "real_part" | "real" => Fun::RealPart,
             "imag_part" | "imag" => Fun::ImagPart,
+            "arg" => Fun::Arg,
             "heaviside" | "unit_step" => Fun::Heaviside,
             _ => return None,
         })
@@ -478,6 +480,14 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                 Num::Float(_, b) => Num::float(*b),
             }))
         }
+        Fun::Arg => {
+            // exact on the real axis: arg(q) = 0 for q >= 0, pi for q < 0
+            let n = x.as_num()?;
+            if !n.is_real() || matches!(n, Num::Float(..)) {
+                return None;
+            }
+            Some(if n.is_negative() { pi() } else { int(0) })
+        }
         Fun::Heaviside => {
             let n = x.as_num()?;
             if !n.is_real() || n.is_zero() {
@@ -620,6 +630,7 @@ pub fn float_eval(f: &Fun, v: &[C]) -> Option<C> {
         Fun::Conjugate => Some((z.0, -z.1)),
         Fun::RealPart => r(z.0),
         Fun::ImagPart => r(z.1),
+        Fun::Arg => r(z.1.atan2(z.0)),
         Fun::Heaviside => if real && x != 0.0 { r(if x > 0.0 { 1.0 } else { 0.0 }) } else { None },
         Fun::Binomial => {
             if real && v[1].1 == 0.0 {

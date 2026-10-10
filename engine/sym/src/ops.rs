@@ -104,10 +104,23 @@ pub fn call_text(name: &str, args: &[String]) -> Option<String> {
                 vec![p(first)]
             };
             let vars: Vec<String> = args[1..].iter().map(|a| var_name(&p(a))).collect();
-            let sol = crate::solve::solve(&eqs, &vars);
             if eqs.len() == 1 && vars.len() == 1 {
-                list_str(&sol.into_iter().flatten().collect::<Vec<_>>())
-            } else {
+                // x == v, with " if c1 and c2" and " for integer n1" when needed
+                let sols = crate::solve::solve1_full(&eqs[0], &vars[0]);
+                let shown: Vec<String> = sols.iter().map(|(rel, cond, params)| {
+                    let mut t = to_string(rel);
+                    if !params.is_empty() {
+                        t += &format!(" for integer {}", params.join(", "));
+                    }
+                    if !cond.is_empty() {
+                        t += &format!(" if {}", cond.iter().map(to_string).collect::<Vec<_>>().join(" and "));
+                    }
+                    t
+                }).collect();
+                return Some(format!("[{}]", shown.join(", ")));
+            }
+            let sol = crate::solve::solve(&eqs, &vars);
+            {
                 format!("[{}]", sol.iter().map(|s| list_str(s)).collect::<Vec<_>>().join(", "))
             }
         }

@@ -96,6 +96,8 @@ pub enum Fun {
     Conjugate,
     RealPart,
     ImagPart,
+    /// the principal argument, in (-pi, pi]
+    Arg,
     Heaviside,
     /// a symbolic function f(x, ...)
     User(Arc<str>),
