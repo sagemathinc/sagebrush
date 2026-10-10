@@ -1374,7 +1374,7 @@ def sum(*args, **kw):
 
         sage: sum([1, 2, 3]), sum(i^2 for i in range(4))
         (6, 14)
-        sage: var('k n'); sum(k, k, 1, n)  # needs maxima
+        sage: var('k n'); sum(k, k, 1, n)
         (k, n)
         1/2*n^2 + 1/2*n
     """

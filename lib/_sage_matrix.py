@@ -153,7 +153,7 @@ class Vector(list):
 
         EXAMPLES::
 
-            sage: vector((sin(x)^2 + cos(x)^2, x)).simplify_full()  # needs maxima
+            sage: vector((sin(x)^2 + cos(x)^2, x)).simplify_full()
             (1, x)
         """
         from _sage_expr import _expr
