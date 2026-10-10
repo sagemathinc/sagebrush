@@ -445,6 +445,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-ball"
+version = "0.1.0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+ "sagebrush-bigint",
+]
+
+[[package]]
 name = "sagebrush-bigint"
 version = "0.1.0"
 dependencies = [
