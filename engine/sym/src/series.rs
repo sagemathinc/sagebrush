@@ -261,8 +261,13 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
                     }
                     return Ok(r.truncate(prec));
                 }
-                let extra = -bs.v * k.abs() + 2;
-                let bs = series(b, x, prec + extra.max(2))?;
+                // b = t^v (c0 + ...) known through t^(P-1) has P - v known
+                // terms; b^k (k < 0) starts at t^(v k) with as many: through
+                // t^(prec-1) needs P >= prec + v (|k| + 1) (2 - v |k| was used:
+                // 1/(x^2 - x^3) lost x^2 + x^3, the systematic review's
+                // R2-SYMALG-F7)
+                let extra = bs.v.max(0) * (k.abs() + 1) + 2;
+                let bs = series(b, x, prec + extra)?;
                 let mut r = bs.inv()?;
                 let base = r.clone();
                 for _ in 1..(-k) {
@@ -273,7 +278,14 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
             if let Some(r) = p.as_rat() {
                 return Ok(bs.pow_rat(r)?.truncate(prec));
             }
-            // a symbolic exponent: through the derivatives
+            // a symbolic or irrational exponent: through the derivatives, only
+            // at a base value certified off (-oo, 0] (no two-sided expansion
+            // on the cut: (-1 + I x)^sqrt(2) took the upper side's
+            // (-1)^sqrt(2), the systematic review's R2-SYMALG-F6)
+            let a0 = if bs.v == 0 { bs.coeff(0) } else { zero() };
+            if bs.v != 0 || (free_symbols(&a0).is_empty() && !crate::domain::off_cut(crate::domain::Cut::NonPositive, &a0)) {
+                return Err(SymError::NotImplemented(format!("expansion of {} at a point where its base is on the cut (-oo, 0]", crate::to_string(e))));
+            }
             let p2 = p.clone();
             bs.compose(&move |y: &Expr| pow(y, &p2), prec)?
         }

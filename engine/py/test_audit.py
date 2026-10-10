@@ -468,4 +468,18 @@ assert diff(SR("asech(x)"), _y).subs(x=-2) == I * sqrt(3) / 6  # R2-SYMCALC-F4
 assert limit((sin(SR(1))**2 + cos(SR(1))**2 - 1) / _y**2, x=0) == 0; raises(ValueError, limit, _pa / _y, x=0, dir="+")  # R2-SYMCALC-F7
 assert str(limit(tanh(_y + I * pi / 2), x=0, dir="+")) == "+Infinity" and str(limit(tanh(_y + I * pi / 2), x=0, dir="-")) == "-Infinity"  # R2-SYMCALC-F8
 assert str(limit(coth(_y), x=0, dir="+")) == "+Infinity" and cosh(I * pi / 2) == 0
+from sagebrush.sage import taylor, desolve, function, solve, assume, forget, exp as _exp2
+assert solve(sqrt(_y) == -_exp2(_pa), _y) == [] and str(solve(sqrt(_y) == -_pa, _y)) == "[x == a^2]"  # R2-SYMALG-F1
+assume(_y < 0); assert abs(sqrt(_y)).subs(x=-1) == 1; forget()  # R2-SYMALG-F2
+assume(_y > -SR("1/10^400")); assert abs(_y).subs(x=-SR("1/10^401")) == SR("1/10^401"); forget()
+assume(_y, "odd"); assert solve(_y**2 - 4, _y) == []; forget()
+raises(RuntimeError, (_y**5 + _y + 3).roots, _y); assert solve(_y == _y, _y, multiplicities=True)[1] == [1]  # R2-SYMALG-F3
+_f = function("f")(_y); _p0 = var("__uc_a0")  # R2-SYMALG-F4
+_ys = desolve(diff(_f, _y, 2) + _f == 2 * _p0 - SR(1) / 2, _f, ics=[0, 0, 0])
+assert (diff(_ys, _y, 2) + _ys - 2 * _p0 + SR(1) / 2).simplify_full() == 0
+raises(NotImplementedError, taylor, (-1 + I * _y)**sqrt(2), _y, 0, 2)  # R2-SYMALG-F6
+assert str(taylor(1 / (_y**2 - _y**3), _y, 0, 3)) == "x^3 + x^2 + x + 1/x + 1/x^2 + 1"  # R2-SYMALG-F7
+_s3 = _exp2(_y).series(_y, 3)  # R2-SYMALG-F8
+assert str(_s3**(SR(3) / 2)) == "1 + 3/2*x + 9/8*x^2 + Order(x^3)" and "Order(x^3)" in str(1 / _s3) and "Order(x^2)" in str(diff(_s3, _y))
+assert str(_exp2(_y).series(_y, 5) / (1 + _y**2).series(_y, 1)) == "1 + Order(x)"
 print("rereview2 ok")

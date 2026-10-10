@@ -114,25 +114,40 @@ fn solves(g: &Expr, sol: &Expr, x: &str) -> bool {
         return true;
     }
     let mut checked = 0;
-    let g0 = subs(g, &[(sym(Y0), zero()), (sym(Y1), zero()), (sym(Y2), zero())]);
-    for p in [0.37, 1.13, 2.71, 0.61] {
+    // the equation's terms, each with the solution substituted: the residual
+    // is measured against their sizes (a residual scaled by 1e-30 with the
+    // whole equation passed against the solution's size), and every other
+    // symbol gets its own value, from its name, in two assignments (all at
+    // 0.5 accepted a solution that holds only there: R2-SYMALG-F4)
+    let ge = crate::expand::expand(g);
+    let terms: Vec<Expr> = match &ge.kind {
+        Kind::Add(v) => v.clone(),
+        _ => vec![ge.clone()],
+    };
+    let rules = [(sym(Y0), sol.clone()), (sym(Y1), d1.clone()), (sym(Y2), d2.clone())];
+    let terms: Vec<Expr> = terms.iter().map(|t| subs(t, &rules)).collect();
+    let value_of = |s: &str, shift: f64| -> f64 {
+        let h = s.bytes().fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619));
+        0.31 + ((h as f64 / 4294967296.0) * 1.618033988749895 + shift).fract() * 1.9
+    };
+    for (k, p) in [0.37, 1.13, 2.71, 0.61].into_iter().enumerate() {
+        let shift = if k % 2 == 0 { 0.0 } else { 0.4142135623730951 };
         let env = |s: &str| -> Option<(f64, f64)> {
             match s {
                 _ if s == x => Some((p, 0.0)),
-                "_C" | "_K1" => Some((0.7, 0.0)),
-                "_K2" => Some((-1.3, 0.0)),
-                _ => Some((0.5, 0.0)),
+                _ => Some((value_of(s, shift), 0.0)),
             }
         };
         let Some(v) = crate::eval::to_c64_env(&r, &env) else { continue };
         if !v.0.is_finite() || !v.1.is_finite() {
             continue;
         }
-        // relative to the solution and its derivatives (and the equation's
-        // other terms through g(x, 0, 0, 0)): scaling must not hide a residual
-        let size = |e: &Expr| crate::eval::to_c64_env(e, &env).map_or(0.0, |w| w.0.hypot(w.1));
-        let scale = size(sol) + size(&d1) + size(&d2) + size(&g0);
-        if v.0.hypot(v.1) > 1e-8 * scale.min(1.0) {
+        let size = |e: &Expr| crate::eval::to_c64_env(e, &env).map_or(f64::NAN, |w| w.0.hypot(w.1));
+        let scale: f64 = terms.iter().map(size).sum();
+        if !scale.is_finite() {
+            continue;
+        }
+        if v.0.hypot(v.1) > 1e-9 * scale {
             return false;
         }
         checked += 1;
@@ -364,6 +379,16 @@ fn second_order(g: &Expr, x: &str) -> Option<Expr> {
 /// coefficients, for r a sum of P(x) e^(alpha x) cos(beta x) and sin(beta x).
 fn undetermined(a: &Expr, b: &Expr, c: &Expr, r: &Expr, x: &str) -> Option<Expr> {
     let xs = sym(x);
+    // the trial's unknowns are fresh: a parameter named __uc_a0 in the
+    // forcing was captured and solved for (y'' + y = 2 __uc_a0 - 1/2 gave
+    // (1 - cos x)/2, the systematic review's R2-SYMALG-F4)
+    let mut avoid: Vec<String> = [a, b, c, r].iter().flat_map(|e| free_symbols(e)).collect();
+    avoid.push(x.to_string());
+    let mut new_name = |base: String| -> String {
+        let n = fresh(&base, &avoid);
+        avoid.push(n.clone());
+        n
+    };
     let terms = match &expand(r).kind {
         Kind::Add(v) => v.clone(),
         _ => vec![expand(r)],
@@ -429,11 +454,11 @@ fn undetermined(a: &Expr, b: &Expr, c: &Expr, r: &Expr, x: &str) -> Option<Expr>
         // trial: x^s e^(alpha x) (A(x) cos(beta x) + B(x) sin(beta x))
         let (mut names, mut pa, mut pb) = (vec![], vec![], vec![]);
         for k in 0..=d {
-            let an = format!("__uc_a{}", k);
+            let an = new_name(format!("__uc_a{}", k));
             pa.push(mul2(&sym(&an), &pow(&xs, &int(k))));
             names.push(an);
             if !beta.is_zero() {
-                let bn = format!("__uc_b{}", k);
+                let bn = new_name(format!("__uc_b{}", k));
                 pb.push(mul2(&sym(&bn), &pow(&xs, &int(k))));
                 names.push(bn);
             }
@@ -444,11 +469,12 @@ fn undetermined(a: &Expr, b: &Expr, c: &Expr, r: &Expr, x: &str) -> Option<Expr>
         let lhs = add(vec![mul2(a, &diff(&diff(&trial, x), x)), mul2(b, &diff(&trial, x)), mul2(c, &trial)]);
         let resid = expand(&mul2(&sub(&lhs, &rg), &exp(&neg(&mul2(&alpha, &xs)))));
         // the coefficients of x^k cos, x^k sin vanish
-        let (cs_, ss_) = (sym("__uc_C"), sym("__uc_S"));
+        let (cn, sn) = (new_name("__uc_C".into()), new_name("__uc_S".into()));
+        let (cs_, ss_) = (sym(&cn), sym(&sn));
         let resid = expand(&subs(&resid, &[(bc.clone(), cs_.clone()), (bsn.clone(), ss_.clone())]));
         let mut eqs = vec![];
-        for part in crate::poly::coeffs(&resid, "__uc_C")? {
-            for q in crate::poly::coeffs(&part, "__uc_S")? {
+        for part in crate::poly::coeffs(&resid, &cn)? {
+            for q in crate::poly::coeffs(&part, &sn)? {
                 for e in crate::poly::coeffs(&q, x)? {
                     if !e.is_zero() {
                         eqs.push(relation(Rel::Eq, &e, &zero()));

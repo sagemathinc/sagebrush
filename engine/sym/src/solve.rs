@@ -57,8 +57,41 @@ pub fn solve1(e: &Expr, x: &str) -> Vec<Expr> {
         if contains_infinity(&v) {
             return false;
         }
-        if !free_symbols(&v).is_empty() || v.is_zero() {
+        if v.is_zero() {
             return true;
+        }
+        if !free_symbols(&v).is_empty() {
+            // with parameters: dropped only if the residual is clearly
+            // nonzero at every sample (parameters of both signs), i.e. the
+            // candidate fails for every real value tried (sqrt(x) = -e^a gave
+            // x = e^(2 a), whose residual 2 e^a never vanishes: the
+            // systematic review's R2-SYMALG-F1); conditional ones stay
+            let sv = crate::simplify::simplify_full(&v);
+            if sv.is_zero() {
+                return true;
+            }
+            let terms = match &z.kind {
+                Kind::Add(t) => t.clone(),
+                _ => vec![z.clone()],
+            };
+            let mut nonzero_everywhere = true;
+            let mut sampled = 0;
+            for vals in [[0.7, 1.3], [-0.7, 1.9], [1.6, -0.45], [-1.15, -2.3]] {
+                let env = |name: &str| -> Option<(f64, f64)> {
+                    let h = name.bytes().fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
+                    Some((vals[h % 2] * (1.0 + (h % 7) as f64 * 0.03), 0.0))
+                };
+                let Some((re, im)) = crate::eval::to_c64_env(&sv, &env) else { continue };
+                if !re.is_finite() || !im.is_finite() {
+                    continue;
+                }
+                let size = terms.iter().filter_map(|t| crate::eval::to_c64_env(&crate::err::soft(|| subs(t, &[(xs.clone(), r.clone())])), &env).map(|w| w.0.hypot(w.1))).fold(0.0f64, f64::max);
+                sampled += 1;
+                if re.hypot(im) <= 1e-9 * size.max(1e-300) {
+                    nonzero_everywhere = false;
+                }
+            }
+            return !(sampled >= 3 && nonzero_everywhere);
         }
         let sv = crate::simplify::simplify_full(&v);
         if sv.is_zero() {
