@@ -160,6 +160,9 @@ pub struct PrimeData {
     pub f: u32,
     pub pi: Vec<BigInt>,
     pub pi_den: BigInt,
+    /// the probable primes (BPSW, above 2^64) that the maximal order, and so
+    /// this decomposition, assumes prime (the systematic review's R2-NFD-F1)
+    pub assumed_primes: Vec<BigInt>,
 }
 
 /// x (order coordinates) on the power basis as (numerators, denominator),
@@ -197,12 +200,12 @@ pub fn primes_above(f: &[BigInt], p: u64) -> Result<Vec<PrimeData>, String> {
     if p >= 1 << 32 {
         return Err(format!("primes above p >= 2^32 are not supported (p = {})", p));
     }
-    let (o, _) = maximal_order(f)?;
+    let (o, _, assumed_primes) = crate::nf::order::maximal_order_assuming(f)?;
     let dk = o.disc();
     let ps = crate::nf::prime::decompose(&o, &dk, p)?;
     Ok(ps.into_iter().map(|q| {
         let (pi, pi_den) = if q.f as usize == o.n { (vec![BigInt::from(p)], BigInt::one()) } else { small_generator(&o, &q.pi, p) };
-        PrimeData { p, e: q.e, f: q.f, pi, pi_den }
+        PrimeData { p, e: q.e, f: q.f, pi, pi_den, assumed_primes: assumed_primes.clone() }
     }).collect())
 }
 
