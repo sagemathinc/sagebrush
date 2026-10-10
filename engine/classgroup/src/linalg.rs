@@ -351,21 +351,47 @@ fn solve_mod_p(a: &[Vec<i64>], vs: &[Vec<i64>], p: u64) -> (u64, Vec<Vec<u64>>) 
     (det, ys)
 }
 
-/// (d, y_t) with y_t A = d v_t exactly and d != 0 (A nonsingular): each
-/// y_t with -d e_v is then a kernel vector of the rows [A; v_t].  By CRT
-/// over 31-bit primes of det(A) and v_t adj(A), stopping once every value
-/// has been stable for two primes and the identity holds exactly, else
-/// continued to the Hadamard bound (then d = det(A)).  d need NOT be
-/// det(A) after an early stop: a scalar multiple (d, y)/c can satisfy the
-/// identity too (the second review: det ~ 2^93 reconstructed as 1), so use
-/// det_crt for the determinant.  Primes dividing det(A) are skipped:
-/// modulo them the solve gives no adjugate (the review's LIN-F1).
+/// (d, y_t) with y_t A = d v_t exactly, d > 0 and gcd(d, all y_t) = 1:
+/// the primitive integer solution of the system (unique), so each y_t with
+/// -d e_v is a kernel vector of the rows [A; v_t]; or d = 0 when A is
+/// singular (then the y_t are 0).  By CRT over 31-bit primes of det(A) and
+/// v_t adj(A), stopping once every value has been stable for two primes
+/// and the identity holds exactly, else continued to the Hadamard bound;
+/// either way divided by the content.  d is NOT det(A) in general (use
+/// det_crt for that): an early stop can reconstruct a scalar multiple of
+/// (det A, v adj A)/c, which satisfies the identity too (the second review's
+/// R2-LIN-F1: det ~ 2^93 came out as 1), so the result is defined
+/// as the primitive solution, which does not depend on where the CRT
+/// stopped.  Primes dividing det(A) are skipped: modulo them the solve
+/// gives no adjugate (the review's LIN-F1).
 pub fn kernel_crt(a: &[Vec<i64>], vs: &[Vec<i64>]) -> (BigInt, Vec<Vec<BigInt>>) {
     let r = kernel_crt_impl(a, vs, true);
-    if !r.0.is_zero() && kernel_identity_holds(a, vs, &r) {
-        return r;
+    let r = if !r.0.is_zero() && kernel_identity_holds(a, vs, &r) { r } else { kernel_crt_impl(a, vs, false) };
+    primitive(r)
+}
+
+/// (d, y) divided by gcd(d, y), with d > 0 (unchanged if d = 0).
+fn primitive((mut d, mut ys): (BigInt, Vec<Vec<BigInt>>)) -> (BigInt, Vec<Vec<BigInt>>) {
+    if d.is_zero() {
+        return (d, ys);
     }
-    kernel_crt_impl(a, vs, false)
+    let mut g = d.abs();
+    for x in ys.iter().flatten() {
+        if g.is_one() {
+            break;
+        }
+        g = g.gcd(x);
+    }
+    if d.is_negative() {
+        g = -g;
+    }
+    if !g.is_one() {
+        d = &d / &g;
+        for x in ys.iter_mut().flatten() {
+            *x = &*x / &g;
+        }
+    }
+    (d, ys)
 }
 
 /// y_t A = det v_t for every t, exactly.
@@ -835,19 +861,24 @@ mod tests {
         assert_eq!(d, BigInt::from(2147483647i64 * 2147483629));
         assert_eq!(ys, vec![vec![BigInt::from(3)]]);
         // the second review: det = 9903519940736477367306812282 reconstructs
-        // as 1 from the first primes; (d, y) still satisfies y A = d v with
-        // d != 0 (a kernel vector), and det_crt gives the determinant
+        // as 1 from the first primes; the result is the primitive solution
+        // whatever the CRT stopped at, and det_crt gives the determinant
         let a = vec![vec![2147483647i64, 0, 1], vec![1, 2147483629, 0], vec![0, 1, 2147483587]];
         for vs in [vec![a[0].clone()], vec![vec![1, 0, 0]], a.clone()] {
-            let (d, ys) = kernel_crt(&a, &vs);
-            assert!(!d.is_zero());
-            for (y, v) in ys.iter().zip(&vs) {
-                for j in 0..3 {
-                    assert_eq!((0..3).map(|i| &y[i] * a[i][j]).sum::<BigInt>(), &d * v[j]);
-                }
-            }
+            let r = kernel_crt(&a, &vs);
+            check_primitive(&a, &vs, &r);
+            // the full CRT to the Hadamard bound (d = det A), made primitive
+            assert_eq!(primitive(kernel_crt_impl(&a, &vs, false)), r);
         }
+        assert_eq!(kernel_crt(&a, &[a[0].clone()]), (BigInt::one(), vec![vec![BigInt::one(), BigInt::zero(), BigInt::zero()]]));
         assert_eq!(det_crt(&a).to_string(), "9903519940736477367306812282");
+        // R2-LIN-F1's two-by-two: D = p1 p2 p3 + 1, v = row 0: (1, e1)
+        let a2 = vec![vec![4611685975477714963i64, 1], vec![-1, 2147483587]];
+        assert_eq!(kernel_crt(&a2, &[a2[0].clone()]), (BigInt::one(), vec![vec![BigInt::one(), BigInt::zero()]]));
+        assert_eq!(primitive(kernel_crt_impl(&a2, &[a2[0].clone()], false)), kernel_crt(&a2, &[a2[0].clone()]));
+        // singular: d = 0
+        assert!(kernel_crt(&[vec![0]], &[vec![1]]).0.is_zero());
+        assert!(kernel_crt(&[vec![1, 2], vec![2, 4]], &[vec![1, 0]]).0.is_zero());
         // LIN-F2: the first two primes of det_crt_probable for a 1 x 1
         let x = 1073741789i64 * 1073741783;
         assert_eq!(det_crt(&[vec![x]]), BigInt::from(x));
@@ -896,14 +927,43 @@ mod tests {
     fn kernel_vectors() {
         let a = vec![vec![2, 1, 0], vec![1, 3, 1], vec![0, 1, 4]];
         let vs = vec![vec![5, -2, 7], vec![1, 1, 1]];
-        let (det, ys) = kernel_crt(&a, &vs);
-        assert_eq!(det, BigInt::from(18));
-        for (y, v) in ys.iter().zip(&vs) {
-            for j in 0..3 {
-                let lhs: BigInt = (0..3).map(|i| &y[i] * a[i][j]).sum();
-                assert_eq!(lhs, &det * v[j]);
+        let r = kernel_crt(&a, &vs);
+        check_primitive(&a, &vs, &r);
+        // d divides det A = 18 (the solution y = d v A^-1 is integral for d = det A)
+        assert_eq!(det_crt(&a), BigInt::from(18));
+        assert!((BigInt::from(18) % &r.0).is_zero());
+        // random nonsingular matrices: early and full CRT agree once primitive
+        let mut seed = 12345u64;
+        let mut rnd = |m: i64| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as i64 % (2 * m + 1)) - m
+        };
+        for n in 1..7 {
+            for _ in 0..20 {
+                let a: Vec<Vec<i64>> = (0..n).map(|_| (0..n).map(|_| rnd(1 << 40)).collect()).collect();
+                let vs: Vec<Vec<i64>> = (0..3).map(|_| (0..n).map(|_| rnd(1000)).collect()).collect();
+                let r = kernel_crt(&a, &vs);
+                if r.0.is_zero() {
+                    assert!(det_crt(&a).is_zero());
+                    continue;
+                }
+                check_primitive(&a, &vs, &r);
+                assert_eq!(primitive(kernel_crt_impl(&a, &vs, false)), r);
             }
         }
+    }
+
+    /// y A = d v for each pair, d > 0, gcd(d, y) = 1
+    fn check_primitive(a: &[Vec<i64>], vs: &[Vec<i64>], (d, ys): &(BigInt, Vec<Vec<BigInt>>)) {
+        use super::*;
+        assert!(d.is_positive());
+        let n = a.len();
+        for (y, v) in ys.iter().zip(vs) {
+            for j in 0..v.len() {
+                assert_eq!((0..n).map(|i| &y[i] * a[i][j]).sum::<BigInt>(), d * v[j]);
+            }
+        }
+        assert!(ys.iter().flatten().fold(d.clone(), |g, x| g.gcd(x)).is_one());
     }
 
     #[test]

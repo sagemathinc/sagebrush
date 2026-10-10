@@ -1036,7 +1036,7 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
             err_bits = ebits + 48 + 16;
             prec = err_bits + 3 * lbits + 64;
             if debug {
-                eprintln!("  kernel: det {} bits; |lambda| ~ 2^{}, error at 48 bits ~ 2^{}: precision {} at {:.1} ms", det.bits(), lbits, ebits, prec, ms());
+                eprintln!("  kernel: d {} bits; |lambda| ~ 2^{}, error at 48 bits ~ 2^{}: precision {} at {:.1} ms", det.bits(), lbits, ebits, prec, ms());
             }
         }
         let lambdas = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, prec, cache)?;
