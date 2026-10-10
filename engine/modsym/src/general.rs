@@ -67,6 +67,10 @@ impl Character {
                 }
             }
         }
+        // exponents reduced mod the order: [_, 2, 2, ...] with order 2 is the
+        // trivial character, which minimal() and is_trivial() must see (the
+        // second review's R2-MOD-F4: it got cusp dimension 0 at level 11)
+        let exps = exps.into_iter().map(|e| if e == u32::MAX { e } else { (e as u64 % order) as u32 }).collect();
         Ok(Character { n, order, exps })
     }
 
@@ -102,7 +106,7 @@ impl Character {
     }
 
     pub fn is_trivial(&self) -> bool {
-        self.exps.iter().all(|&e| e == 0 || e == u32::MAX)
+        self.exps.iter().all(|&e| e == u32::MAX || e as u64 % self.order == 0)
     }
 }
 
@@ -574,6 +578,20 @@ mod tests {
     use super::*;
     use crate::linalg::matmul;
     use num_traits::ToPrimitive;
+
+    #[test]
+    fn noncanonical_trivial_exponents() {
+        // R2-MOD-F4: every unit has exponent 2 with order 2: trivial
+        let mut exps = vec![2u32; 11];
+        exps[0] = u32::MAX;
+        let e = Character::from_exponents(11, 2, exps).unwrap();
+        assert!(e.is_trivial());
+        assert_eq!(e.minimal().order, 1);
+        for k in [2usize, 4, 12] {
+            assert_eq!(crate::dims::dim_cusp_forms(&e, k), crate::dims::dim_cusp_forms(&Character::trivial(11), k));
+        }
+        assert_eq!(crate::dims::dim_cusp_forms(&e, 2), 1);
+    }
 
     fn conductor_13_order_3() -> Character {
         // 2 generates (Z/13)^*; eps(2) = zeta_3.

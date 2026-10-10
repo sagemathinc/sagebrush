@@ -1114,7 +1114,9 @@ def l_value_ball(ld):
 
 
 def _iv_quotient(lo, hi, dlo, dhi):
-    """[lo, hi] / [dlo, dhi] for 0 < dlo <= dhi."""
+    """[lo, hi] / [dlo, dhi] for 0 < dlo <= dhi (refused otherwise)."""
+    if not 0 < dlo <= dhi:
+        raise ArithmeticError("the divisor's enclosure [%r, %r] is not positive" % (float(dlo), float(dhi)))
     q = (lo / dlo, lo / dhi, hi / dlo, hi / dhi)
     return min(q), max(q)
 
