@@ -34,8 +34,12 @@
 //! proof); the limits are the limit engine's, whose signs near a point are
 //! established, not sampled; interval enclosures assume LIBM below.
 //!
-//! Bounds are compared exactly when rational; distinct bounds that are equal
-//! as floats are never taken to be equal.  The interval arithmetic rounds
+//! Bounds and singular points are placed by certified enclosures (or
+//! exactly, when rational): ordered when their enclosures are disjoint,
+//! equal when their difference simplifies to zero, otherwise undecided
+//! (Unknown).  Floats only propose candidates (the fifth review: merging
+//! points within 1e-12 of each other lost a pole at pi/2 + 10^-14, V2; the
+//! double of sin(10^20 + 1) has the wrong sign, V3).  The interval arithmetic rounds
 //! outward by a few units in the last place beyond the platform's exp, log,
 //! sin and cos, which are assumed correct to within that.
 
@@ -44,7 +48,7 @@ use crate::eval::to_c64_env;
 use crate::expr::*;
 use crate::num::Q;
 use crate::qpoly::QPoly;
-use crate::interval::{certified_nonzero, Iv};
+use crate::interval::{certified_nonzero, encl, tight, Iv};
 use num_traits::{Signed, Zero};
 use sagebrush_bigint::BigInt;
 use std::cmp::Ordering;
@@ -56,43 +60,50 @@ pub enum Outcome {
     Unknown,
 }
 
-/// A bound: its value (+-inf allowed) and, if rational, exactly.
+/// A bound: a value (+-inf allowed) inside a certified enclosure, and, if
+/// rational, exactly.
 struct Bound {
     v: f64,
+    iv: Iv,
     q: Option<Q>,
 }
 
+/// None if the bound cannot be placed (no narrow certified enclosure).
 fn bound(e: &Expr) -> Option<Bound> {
     if e.is_const(Const::Infinity) {
-        return Some(Bound { v: f64::INFINITY, q: None });
+        return Some(Bound { v: f64::INFINITY, iv: Iv(f64::INFINITY, f64::INFINITY), q: None });
     }
     if e.is_const(Const::MinusInfinity) {
-        return Some(Bound { v: f64::NEG_INFINITY, q: None });
+        return Some(Bound { v: f64::NEG_INFINITY, iv: Iv(f64::NEG_INFINITY, f64::NEG_INFINITY), q: None });
     }
-    let v = crate::eval::to_f64(e)?;
-    if !v.is_finite() {
-        return None;
-    }
-    Some(Bound { v, q: e.as_rat().cloned() })
+    let v = tight(e)?;
+    Some(Bound { v, iv: encl(e)?, q: e.as_rat().cloned() })
 }
 
-/// The order of two bounds, when it is established: exactly for rationals
-/// and infinities, by floats only when they are far apart, else by
-/// simplifying b - a to zero.
-fn order(a: &Expr, ba: &Bound, b: &Expr, bb: &Bound) -> Option<Ordering> {
-    if let (Some(p), Some(q)) = (&ba.q, &bb.q) {
+/// The order of two exact real values with enclosures: exactly for
+/// rationals, by disjoint enclosures, or equal when b - a simplifies to 0.
+fn cmp_exact(a: &Expr, ia: Iv, qa: Option<&Q>, b: &Expr, ib: Iv, qb: Option<&Q>) -> Option<Ordering> {
+    if let (Some(p), Some(q)) = (qa, qb) {
         return Some(p.cmp(q));
     }
-    if ba.v.is_infinite() || bb.v.is_infinite() {
-        return ba.v.partial_cmp(&bb.v).filter(|_| ba.v != bb.v || a == b);
+    if ia.1 < ib.0 {
+        return Some(Ordering::Less);
     }
-    if (ba.v - bb.v).abs() > 1e-9 * (1.0 + ba.v.abs() + bb.v.abs()) {
-        return ba.v.partial_cmp(&bb.v);
+    if ia.0 > ib.1 {
+        return Some(Ordering::Greater);
     }
-    if crate::simplify::simplify_full(&sub(b, a)).is_zero() {
+    if a == b || crate::simplify::simplify_full(&sub(b, a)).is_zero() {
         return Some(Ordering::Equal);
     }
     None
+}
+
+/// The order of two bounds, when it is established.
+fn order(a: &Expr, ba: &Bound, b: &Expr, bb: &Bound) -> Option<Ordering> {
+    if ba.v.is_infinite() || bb.v.is_infinite() {
+        return ba.v.partial_cmp(&bb.v).filter(|_| ba.v != bb.v || a == b);
+    }
+    cmp_exact(a, ba.iv, ba.q.as_ref(), b, bb.iv, bb.q.as_ref())
 }
 
 fn q_from_f64(x: f64) -> Q {
@@ -124,6 +135,7 @@ fn at(f: &Expr, x: &str, t: f64) -> Option<(f64, f64)> {
 /// not be used).
 struct Pt {
     v: f64,
+    iv: Iv,
     e: Expr,
 }
 
@@ -141,25 +153,37 @@ fn linear(u: &Expr, x: &str) -> Option<(Expr, Expr)> {
     if c.len() != 2 || depends(&c[0], x) || depends(&c[1], x) {
         return None;
     }
-    let av = crate::eval::to_f64(&c[1])?;
-    (av != 0.0 && crate::eval::to_f64(&c[0]).is_some()).then(|| (c[1].clone(), c[0].clone()))
+    // (placed by certified enclosures: a candidate zero is only proposed
+    // by these doubles, but none may be missed)
+    let av = tight(&c[1])?;
+    (av != 0.0 && encl(&c[1]).is_some_and(|i| !i.contains_zero()) && tight(&c[0]).is_some()).then(|| (c[1].clone(), c[0].clone()))
 }
 
-/// A candidate point t (exactly e) of [lo, hi] (bounds la, lb): kept if
-/// inside, dropped if outside or at a bound, unknown if that cannot be told.
-fn keep(t: f64, e: Expr, b: &Bounds, out: &mut Scan) {
-    let near = |v: f64| (t - v).abs() <= 1e-9 * (1.0 + t.abs());
-    for (bv, be) in [(b.lo, &b.a), (b.hi, &b.b)] {
-        if bv.is_finite() && near(bv) {
-            // at the bound, or just inside or outside it?
-            if !crate::simplify::simplify_full(&sub(&e, be)).is_zero() {
+/// A candidate point e of (lo, hi): kept if inside, dropped if outside or
+/// at a bound, unknown if that cannot be told (by its certified enclosure
+/// against the bounds', or exact equality with a bound).
+fn keep(e: Expr, b: &Bounds, out: &mut Scan) {
+    let (Some(t), Some(iv)) = (tight(&e), encl(&e)) else {
+        out.unknown = true;
+        return;
+    };
+    let q = e.as_rat().cloned();
+    let mut inside = true;
+    for (k, (bv, biv, be, bq)) in [(b.lo, b.la, &b.a, &b.qa), (b.hi, b.lb, &b.b, &b.qb)].into_iter().enumerate() {
+        if !bv.is_finite() {
+            continue;
+        }
+        match cmp_exact(&e, iv, q.as_ref(), be, biv, bq.as_ref()) {
+            Some(Ordering::Equal) => return, // at a bound
+            Some(o) => inside &= o == if k == 0 { Ordering::Greater } else { Ordering::Less },
+            None => {
                 out.unknown = true;
+                return;
             }
-            return;
         }
     }
-    if t > b.lo && t < b.hi {
-        out.points.push(Pt { v: t, e });
+    if inside {
+        out.points.push(Pt { v: t, iv, e });
     }
 }
 
@@ -167,6 +191,9 @@ fn keep(t: f64, e: Expr, b: &Bounds, out: &mut Scan) {
 struct Bounds {
     lo: f64,
     hi: f64,
+    /// certified enclosures of a and b
+    la: Iv,
+    lb: Iv,
     a: Expr,
     b: Expr,
     qa: Option<Q>,
@@ -176,7 +203,7 @@ struct Bounds {
 /// The x in (lo, hi) with a x + b = c + 2 k pi for one of the given c.
 fn periodic(u: &Expr, x: &str, cs: &[Expr], bd: &Bounds, out: &mut Scan) -> bool {
     let Some((a, b)) = linear(u, x) else { return false };
-    let (av, bv) = (crate::eval::to_f64(&a).unwrap(), crate::eval::to_f64(&b).unwrap());
+    let (av, bv) = (tight(&a).unwrap(), tight(&b).unwrap());
     if !bd.lo.is_finite() || !bd.hi.is_finite() {
         out.unknown = true; // infinitely many
         return true;
@@ -191,16 +218,15 @@ fn periodic(u: &Expr, x: &str, cs: &[Expr], bd: &Bounds, out: &mut Scan) -> bool
         return true;
     }
     for c in cs {
-        let Some(cv) = crate::eval::to_f64(c).filter(|v| v.abs() < 1e9) else {
+        let Some(cv) = tight(c).filter(|v| v.abs() < 1e9) else {
             out.unknown = true;
             return true;
         };
         // (|k| < 10^9: no overflow in k or 2 k)
         let (k0, k1) = (((u1 - cv) / tau).floor() as i64 - 1, ((u2 - cv) / tau).ceil() as i64 + 1);
         for k in k0..=k1 {
-            let t = (cv + k as f64 * tau - bv) / av;
             let e = div(&sub(&add(vec![c.clone(), mul(vec![int(2 * k), pi()])]), &b), &a);
-            keep(t, e, bd, out);
+            keep(e, bd, out);
         }
     }
     true
@@ -208,7 +234,7 @@ fn periodic(u: &Expr, x: &str, cs: &[Expr], bd: &Bounds, out: &mut Scan) -> bool
 
 /// The zeros of cos(u) - t (or sin(u) - t), t a real constant, u linear.
 fn trig_eq(sine: bool, u: &Expr, t: &Expr, x: &str, bd: &Bounds, out: &mut Scan) -> bool {
-    let Some(tv) = crate::eval::to_f64(t) else { return false };
+    let Some(tv) = tight(t) else { return false };
     if tv.abs() > 1.0 + 1e-12 {
         return linear(u, x).is_some();
     }
@@ -229,14 +255,16 @@ fn trig_eq(sine: bool, u: &Expr, t: &Expr, x: &str, bd: &Bounds, out: &mut Scan)
 /// exact for factors of degree at most 2; others make the scan unknown.
 fn poly_roots(p: &QPoly, bd: &Bounds, out: &mut Scan) {
     let rb = p.root_bound();
-    let margin = |v: f64| 1e-9 * (1.0 + v.abs());
-    let inner = |q: &Option<Q>, v: f64, s: f64, inf: &Q| match (q, v.is_finite()) {
+    // an irrational bound by the ends of its enclosure: the count between
+    // the inner ends and between the outer ends agree, or a root may lie
+    // between the bound and its approximations
+    let end = |q: &Option<Q>, v: f64, iv: f64, inf: &Q| match (q, v.is_finite()) {
         (Some(q), _) => q.clone(),
-        (None, true) => q_from_f64(v + s * margin(v)),
+        (None, true) => q_from_f64(iv),
         _ => inf.clone(),
     };
-    let (lq, hq) = (inner(&bd.qa, bd.lo, 1.0, &-rb.clone()), inner(&bd.qb, bd.hi, -1.0, &rb));
-    let (lo2, hi2) = (inner(&bd.qa, bd.lo, -1.0, &-rb.clone()), inner(&bd.qb, bd.hi, 1.0, &rb));
+    let (lq, hq) = (end(&bd.qa, bd.lo, bd.la.1, &-rb.clone()), end(&bd.qb, bd.hi, bd.lb.0, &rb));
+    let (lo2, hi2) = (end(&bd.qa, bd.lo, bd.la.0, &-rb.clone()), end(&bd.qb, bd.hi, bd.lb.1, &rb));
     if lq >= hq {
         out.unknown = true;
         return;
@@ -266,9 +294,7 @@ fn poly_roots(p: &QPoly, bd: &Bounds, out: &mut Scan) {
         };
         let before = out.points.len();
         for e in roots {
-            if let Some(v) = crate::eval::to_f64(&e) {
-                keep(v, e, bd, out);
-            }
+            keep(e, bd, out);
         }
         if out.points.len() - before != n {
             out.unknown = true;
@@ -292,7 +318,7 @@ fn scan(e: &Expr, x: &str, bd: &Bounds, out: &mut Scan) {
             // a negative or fractional power: the zeros of its base
             zeros(b, x, bd, out);
         }
-        Kind::Pow(b, _) if !depends(b, x) && !b.is_const(Const::E) && !crate::eval::to_f64(b).map_or(false, |v| v > 0.0) => {
+        Kind::Pow(b, _) if !depends(b, x) && !b.is_const(Const::E) && !encl(b).is_some_and(|i| i.0 > 0.0) => {
             out.unknown = true; // c^u, c not positive
         }
         Kind::Fun(f, a) => match f {
@@ -353,9 +379,9 @@ fn zeros(b: &Expr, x: &str, bd: &Bounds, out: &mut Scan) {
                 match &t.kind {
                     Kind::Fun(g @ (Fun::Cos | Fun::Sin), a) if trig_eq(*g == Fun::Sin, &a[0], &target, x, bd, out) => return,
                     Kind::Pow(e, u) if e.is_const(Const::E) => {
-                        match crate::eval::to_f64(&target) {
-                            Some(tv) if tv <= 0.0 && (tv < 0.0 || target.is_zero()) => return, // e^u > 0
-                            Some(tv) if tv > 0.0 => return zeros(&sub(u, &log(&target)), x, bd, out),
+                        match encl(&target) {
+                            Some(tv) if tv.1 < 0.0 || target.is_zero() => return, // e^u > 0
+                            Some(tv) if tv.0 > 0.0 => return zeros(&sub(u, &log(&target)), x, bd, out),
                             _ => {}
                         }
                     }
@@ -498,7 +524,7 @@ pub fn definite(f: &Expr, big_f: &Expr, x: &str, a: &Expr, b: &Expr, has_bad: &d
     if !(lo < hi) {
         return Outcome::Unknown; // distinct, but not as floats
     }
-    let bd = Bounds { lo, hi, a: a.clone(), b: b.clone(), qa: ba.q.clone(), qb: bb.q.clone() };
+    let bd = Bounds { lo, hi, la: ba.iv, lb: bb.iv, a: a.clone(), b: b.clone(), qa: ba.q.clone(), qb: bb.q.clone() };
     // a rational f with a real pole inside diverges (in lowest terms, f is
     // c (x - r)^-m near a root r of its denominator, m >= 1)
     let (nu, de) = crate::simplify::together(f);
@@ -528,9 +554,21 @@ pub fn definite(f: &Expr, big_f: &Expr, x: &str, a: &Expr, b: &Expr, has_bad: &d
     if s.unknown {
         return Outcome::Unknown;
     }
+    // ordered by disjoint enclosures, merged only when equal exactly
     let mut cuts = s.points;
     cuts.sort_by(|p, q| p.v.partial_cmp(&q.v).unwrap());
-    cuts.dedup_by(|p, q| (p.v - q.v).abs() <= 1e-12 * (1.0 + p.v.abs()));
+    let mut merged: Vec<Pt> = vec![];
+    for p in cuts {
+        if let Some(last) = merged.last() {
+            match cmp_exact(&last.e, last.iv, last.e.as_rat(), &p.e, p.iv, p.e.as_rat()) {
+                Some(Ordering::Equal) => continue,
+                Some(Ordering::Less) => {}
+                _ => return Outcome::Unknown,
+            }
+        }
+        merged.push(p);
+    }
+    let cuts = merged;
     let qcuts: Vec<f64> = cuts.iter().map(|p| p.v).collect();
     let mut pts: Vec<Expr> = vec![a.clone()];
     pts.extend(cuts.into_iter().map(|p| p.e));
@@ -652,12 +690,12 @@ fn derivative_holds_on(f: &Expr, big_f: &Expr, x: &str, lo: f64, hi: f64, cuts: 
 /// (a Sturm count with the bounds' exact values or inner margins).
 fn real_root_inside(p: &QPoly, bd: &Bounds) -> bool {
     let rb = p.root_bound();
-    let inner = |q: &Option<Q>, v: f64, s: f64, inf: Q| match (q, v.is_finite()) {
+    let inner = |q: &Option<Q>, v: f64, iv: f64, inf: Q| match (q, v.is_finite()) {
         (Some(q), _) => q.clone(),
-        (None, true) => q_from_f64(v + s * 1e-9 * (1.0 + v.abs())),
+        (None, true) => q_from_f64(iv),
         _ => inf,
     };
-    let (l, h) = (inner(&bd.qa, bd.lo, 1.0, -rb.clone()), inner(&bd.qb, bd.hi, -1.0, rb));
+    let (l, h) = (inner(&bd.qa, bd.lo, bd.la.1, -rb.clone()), inner(&bd.qb, bd.hi, bd.lb.0, rb));
     l < h && p.count_real_roots(&l, &h) > 0
 }
 
@@ -689,7 +727,7 @@ fn has_singular_parts(e: &Expr, x: &str) -> bool {
     let own = match &e.kind {
         Kind::Sym(_) | Kind::Num(_) | Kind::Add(_) | Kind::Mul(_) => false,
         Kind::Pow(b, n) if depends(b, x) => !n.as_rat().map_or(false, |r| r.is_integer() && !r.is_negative()),
-        Kind::Pow(b, _) => !(b.is_const(Const::E) || crate::eval::to_f64(b).map_or(false, |v| v > 0.0)),
+        Kind::Pow(b, _) => !(b.is_const(Const::E) || encl(b).is_some_and(|i| i.0 > 0.0)),
         Kind::Fun(Fun::Sin | Fun::Cos | Fun::Atan | Fun::Sinh | Fun::Cosh | Fun::Tanh | Fun::Asinh | Fun::Erf | Fun::Abs, _) => false,
         _ => true,
     };
@@ -861,5 +899,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The fifth review's V2 and V3: points placed by certified
+    /// enclosures, merged only when equal exactly; never a wrong
+    /// conclusion from a double.
+    #[test]
+    fn points_and_bounds_by_enclosures() {
+        // a removable point at pi/2 and a double pole at pi/2 + 10^-14
+        let r = run("1/(1 + tan(x)^2) + 10^-30/cos(x - 10^-14)^2", "0", "pi");
+        assert!(r == "divergent" || r == "unevaluated", "V2: {}", r);
+        assert_eq!(run("10^-30/cos(x - 10^-14)^2", "0", "pi"), "divergent");
+        // sin(10^20 + 1) > 0, but its double is negative: never a value
+        // with the pole at 0 inside, never divergent without it
+        for (a, wrong) in [("sin(10^20 + 1)", "divergent"), ("-sin(10^20 + 1)", "")] {
+            let r = run("1/x^2", a, "1");
+            assert!(r == "unevaluated" || (r != wrong && r == "divergent"), "V3 from {}: {}", a, r);
+        }
+        // still decided where enclosures are narrow
+        assert_eq!(run("1/x^2", "-sin(1)", "1"), "divergent");
+        approx("1/x^2", "sin(1)", "1", 1.0 / 1f64.sin() - 1.0);
+        approx("1/(1 + tan(x)^2)", "0", "pi", std::f64::consts::FRAC_PI_2);
     }
 }

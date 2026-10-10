@@ -79,6 +79,12 @@ impl Iv {
 pub fn ival(e: &Expr, x: &str, r: Iv) -> Option<Iv> {
     match &e.kind {
         Kind::Sym(s) if &**s == x => Some(r),
+        // an integer a double holds exactly is a point (so that acos(1) or a
+        // bound at 1 is not widened past 1)
+        Kind::Num(_) if e.as_rat().is_some_and(|q| q.is_integer() && num_traits::ToPrimitive::to_i64(q.numer()).is_some_and(|n| n.unsigned_abs() <= 1 << 53)) => {
+            let n = num_traits::ToPrimitive::to_i64(e.as_rat().unwrap().numer()).unwrap() as f64;
+            Some(Iv(n, n))
+        }
         Kind::Num(_) | Kind::Const(Const::Pi | Const::E | Const::EulerGamma) => {
             let v = crate::eval::to_c64(e)?;
             if v.1 != 0.0 || !v.0.is_finite() {
@@ -109,6 +115,9 @@ pub fn ival(e: &Expr, x: &str, r: Iv) -> Option<Iv> {
                 Fun::Sinh => u.mono(f64::sinh, true),
                 Fun::Tanh => u.mono(f64::tanh, true),
                 Fun::Asinh => u.mono(f64::asinh, true),
+                // real only on [-1, 1]
+                Fun::Asin if u.0 >= -1.0 && u.1 <= 1.0 => u.mono(f64::asin, true),
+                Fun::Acos if u.0 >= -1.0 && u.1 <= 1.0 => u.mono(f64::acos, false),
                 Fun::Cosh => {
                     let m = u.0.abs().max(u.1.abs()).cosh();
                     let l = if u.contains_zero() { 1.0 } else { u.0.abs().min(u.1.abs()).cosh() };
@@ -130,6 +139,21 @@ pub fn ival(e: &Expr, x: &str, r: Iv) -> Option<Iv> {
         }
         _ => None,
     }
+}
+
+/// An enclosure of a real constant expression (no free symbols), or None.
+pub fn encl(e: &Expr) -> Option<Iv> {
+    ival(e, "\u{0}", Iv(0.0, 0.0))
+}
+
+/// A real constant as a double whose certified enclosure is narrow
+/// (relative width 1e-9): the value to place it by, and None when it cannot
+/// be placed (sin(10^20 + 1): the double of 10^20 + 1 is 10^20, and the
+/// sine of that has the other sign; the fifth review's V3).
+pub fn tight(e: &Expr) -> Option<f64> {
+    let i = encl(e)?;
+    let m = i.0 + (i.1 - i.0) / 2.0;
+    (i.0.is_finite() && i.1.is_finite() && i.1 - i.0 <= 1e-9 * (1.0 + m.abs())).then_some(m)
 }
 
 /// sin(u) (or cos(u)) over u: the values at the ends, computed directly

@@ -193,22 +193,12 @@ fn continuous_value(e: &Expr, x: &str, a: &Expr) -> Option<Expr> {
         if has_infinity(&v) {
             return false;
         }
-        // on a branch cut (a logarithm's argument, a fractional power's base
-        // at a negative real or 0) substitution gives one side's value: the
-        // fourth review's U6, log(-1 + I x) from below.  Fine when the
-        // argument stays real (it moves along the cut, not across it).
-        let cut = match &e.kind {
-            Kind::Fun(Fun::Log, a) => Some(&a[0]),
-            Kind::Pow(b, n) if !n.as_rat().map_or(false, |q| q.is_integer()) && !b.is_const(Const::E) => Some(b),
-            _ => None,
-        };
-        if let Some(u) = cut {
-            if depends(u, x) && !crate::domain::real_everywhere(u, x) {
-                let uv = subs(u, rules);
-                if crate::eval::to_c64(&uv).map_or(true, |(r, i)| i == 0.0 && r <= 0.0) {
-                    return false;
-                }
-            }
+        // on a branch cut or a jump substitution gives one side's value (the
+        // fourth review's U6, log(-1 + I x) from below; the fifth's V5,
+        // atan(2 I + x)): the argument's value must be certified off it
+        // (domain::off_cut), or move along it as a real argument
+        if !cut_ok(e, x, rules) {
+            return false;
         }
         e.children().iter().all(|c| walk(c, x, rules))
     }
@@ -310,7 +300,14 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
             }
             if is_finite_value(&l) {
                 // a fractional power at its branch cut: only along it
-                if !p.as_rat().map_or(false, |q| q.is_integer()) && on_cut(&l) && !l.is_zero() && !real_near(b, x, a, dir) {
+                if !p.as_rat().map_or(false, |q| q.is_integer()) && !l.is_zero() && !crate::domain::off_cut(crate::domain::Cut::NonPositive, &l) && !real_near(b, x, a, dir) {
+                    // b^p = |l|^p e^(+-i pi p) from one side of the axis
+                    if let Some(s) = side_of_cut(b, x, a, dir, &l) {
+                        // e^(i pi p) as cos + i sin (exact at rational multiples of pi)
+                        let t = mul(vec![int(s as i64), pi(), p.clone()]);
+                        let phase = add2(&fun1(Fun::Cos, &t), &mul2(&num(crate::num::Num::i()), &fun1(Fun::Sin, &t)));
+                        return Ok(mul2(&pow(&neg(&l), p), &phase));
+                    }
                     return fail("limit: a fractional power's base tends to its branch cut");
                 }
                 return Ok(pow(&l, p));
@@ -374,17 +371,24 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
         }
         Kind::Fun(f, args) if args.len() == 1 => {
             let l = lim(&args[0], x, a, dir, depth + 1)?;
-            // log at a point of its branch cut (a real l <= 0) is continuous
-            // only along the cut, for a real argument; and log(0+) = -oo only
-            // from the positive side (the fourth review's U6)
-            if *f == Fun::Log && on_cut(&l) {
-                if l.is_zero() {
-                    // |log u| >= -log |u|: -oo from above, complex infinity
-                    // otherwise (log|u| + i arg u)
-                    return Ok(if eventual_sign(&args[0], x, a, dir, 0) == Some(1) { constant(Const::MinusInfinity) } else { constant(Const::UnsignedInfinity) });
-                }
-                if !real_near(&args[0], x, a, dir) {
-                    return fail("limit: a logarithm's argument tends to its branch cut");
+            // log(0+) = -oo only from the positive side (the fourth review's
+            // U6): |log u| >= -log |u|, complex infinity otherwise
+            if *f == Fun::Log && l.is_zero() {
+                return Ok(if eventual_sign(&args[0], x, a, dir, 0) == Some(1) { constant(Const::MinusInfinity) } else { constant(Const::UnsignedInfinity) });
+            }
+            // at a point of a branch cut or jump the function is continuous
+            // only along the cut, for a real argument (and never at a jump):
+            // the limit is certified off it or not given (the fifth
+            // review's V4, V5)
+            if let Some((cut, _)) = crate::domain::cut_of(e) {
+                if is_finite_value(&l) && !crate::domain::off_cut(cut, &l) && !(crate::domain::along_cut_ok(e, cut, &l) && real_near(&args[0], x, a, dir)) {
+                    // log from one side of the negative axis
+                    if *f == Fun::Log {
+                        if let Some(s) = side_of_cut(&args[0], x, a, dir, &l) {
+                            return Ok(add2(&log(&neg(&l)), &mul(vec![int(s as i64), num(crate::num::Num::i()), pi()])));
+                        }
+                    }
+                    return fail(format!("limit: the argument of {} tends to its branch cut or jump", crate::to_string(e)));
                 }
             }
             return fun_at(f, &l);
@@ -494,28 +498,46 @@ fn exp_limit(l: &Expr) -> Expr {
     }
 }
 
-/// Whether e has a logarithm or fractional power whose argument, not real by
-/// its form, is on the branch cut at a.
+/// u -> l, a certified negative real, from the side of the negative real
+/// axis given by the established sign of Im u near a (the same on both sides
+/// for a two-sided limit): +-1, or None.
+fn side_of_cut(u: &Expr, x: &str, a: &Expr, dir: Dir, l: &Expr) -> Option<i32> {
+    let (re, im) = crate::domain::complex_encl(l)?;
+    if !(im.0 == 0.0 && im.1 == 0.0 && re.1 < 0.0) {
+        return None;
+    }
+    let side = |d: Dir| -> Option<i32> {
+        let (_, q) = re_im(u, x, a, d)?;
+        eventual_sign(&q, x, a, d, 0)
+    };
+    match dir {
+        Dir::Both => {
+            let (m, p) = (side(Dir::Minus)?, side(Dir::Plus)?);
+            (m == p).then_some(p)
+        }
+        d => side(d),
+    }
+}
+
+/// Whether e's own cut or jump (domain::cut_of) is no obstacle at the
+/// point: its argument free of x, real for real x with a cut met only along
+/// the real axis, or its value there certified off the cut.
+fn cut_ok(e: &Expr, x: &str, rules: &[(Expr, Expr)]) -> bool {
+    let Some((cut, u)) = crate::domain::cut_of(e) else { return true };
+    if !depends(u, x) {
+        return true;
+    }
+    let v = subs(u, rules);
+    crate::domain::off_cut(cut, &v) || crate::domain::real_everywhere(u, x) && crate::domain::along_cut_ok(e, cut, &v)
+}
+
+/// Whether some part of e meets its branch cut or jump at a (cut_ok fails):
+/// a series there is one side's.
 fn crosses_cut(e: &Expr, x: &str, a: &Expr) -> bool {
     if !depends(e, x) {
         return false;
     }
-    let u = match &e.kind {
-        Kind::Fun(Fun::Log, v) => Some(&v[0]),
-        Kind::Pow(b, n) if !n.as_rat().map_or(false, |q| q.is_integer()) && !b.is_const(Const::E) => Some(b),
-        _ => None,
-    };
-    if let Some(u) = u {
-        if depends(u, x) && !crate::domain::real_everywhere(u, x) && on_cut(&subs(u, &[(sym(x), a.clone())])) {
-            return true;
-        }
-    }
-    e.children().iter().any(|c| crosses_cut(c, x, a))
-}
-
-/// A real number <= 0: on the branch cut of log and of fractional powers.
-fn on_cut(l: &Expr) -> bool {
-    !has_infinity(l) && crate::eval::to_c64(l).map_or(false, |(r, i)| i == 0.0 && r <= 0.0)
+    !cut_ok(e, x, &[(sym(x), a.clone())]) || e.children().iter().any(|c| crosses_cut(c, x, a))
 }
 
 /// A function at a limit point (continuous functions; values at infinity).
@@ -569,30 +591,21 @@ fn quotient_limit(n: &Expr, d: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -
     lim(&q, x, a, dir, depth + 1)
 }
 
-fn signed_infinity(n: &Expr, d: &Expr, x: &str, a: &Expr, dir: Dir, ln: &Expr) -> Expr {
-    // the sign of n/d just beside a
-    let xs = sym(x);
-    let sample = |h: f64| -> Option<f64> {
-        let pt = if a.is_infinite() {
-            if a.is_const(Const::MinusInfinity) { -1.0 / h } else { 1.0 / h }
-        } else {
-            crate::eval::to_f64(a)? + h
-        };
-        let q = div(n, d);
-        crate::eval::to_c64_env(&q, &|s| if s == x { Some((pt, 0.0)) } else { None }).map(|v| v.0)
+fn signed_infinity(n: &Expr, d: &Expr, x: &str, a: &Expr, dir: Dir, _ln: &Expr) -> Expr {
+    // the sign of n/d just beside a, established (eventual_sign), not
+    // sampled: otherwise complex infinity, which is still true
+    let side = |s: Dir| -> Option<i32> { Some(eventual_sign(n, x, a, s, 0)? * eventual_sign(d, x, a, s, 0)?) };
+    let signed = |s: Option<i32>| match s {
+        Some(1) => infinity(),
+        Some(-1) => constant(Const::MinusInfinity),
+        _ => constant(Const::UnsignedInfinity),
     };
-    let _ = (&xs, ln);
-    let r = sample(1e-7);
-    let l = sample(-1e-7);
-    let sgn = |v: Option<f64>| v.map(|v| if v > 0.0 { 1 } else { -1 });
     match dir {
-        Dir::Plus => if sgn(r) == Some(1) { infinity() } else { constant(Const::MinusInfinity) },
-        Dir::Minus => if sgn(l) == Some(1) { infinity() } else { constant(Const::MinusInfinity) },
-        Dir::Both => match (sgn(l), sgn(r)) {
-            (Some(1), Some(1)) => infinity(),
-            (Some(-1), Some(-1)) => constant(Const::MinusInfinity),
+        Dir::Both => match (side(Dir::Minus), side(Dir::Plus)) {
+            (Some(l), Some(r)) if l == r => signed(Some(r)),
             _ => constant(Const::UnsignedInfinity),
         },
+        d => signed(side(d)),
     }
 }
 
@@ -621,8 +634,11 @@ fn series_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Option<Expr>> {
     if s.v == 0 {
         return Ok(Some(c0));
     }
-    // a pole of order -v
-    let Some(c) = crate::eval::to_f64(&c0) else { return Ok(None) };
+    // a pole of order -v: signed by the leading coefficient's certified
+    // sign (a double's sign decides nothing), else complex infinity (|f|
+    // grows without bound: still true)
+    let Some(c) = const_sign(&c0).filter(|&c| c != 0) else { return Ok(Some(constant(Const::UnsignedInfinity))) };
+    let c = c as f64;
     let odd = s.v % 2 != 0;
     Ok(Some(match dir {
         Dir::Plus => if c > 0.0 { infinity() } else { constant(Const::MinusInfinity) },
@@ -685,5 +701,29 @@ mod sign_tests {
         assert_eq!(lim("I*x", "+Infinity", Dir::Both), "Infinity");
         let r = lim("log(-1 + I*x)", "0", Dir::Plus);
         assert!(r == "I*pi" || r == "not found", "{}", r);
+    }
+
+    /// The fifth review's V4 and V5: branch cuts and jumps by certified
+    /// enclosures, for every function with one; the side's value or no
+    /// limit, never the other side's.
+    #[test]
+    fn branch_cuts_by_enclosures() {
+        let s = "sin(10^20 + 1)";
+        for d in [Dir::Minus, Dir::Plus, Dir::Both] {
+            for e in [format!("log(-{} + I*x)", s), format!("sqrt(-{} + I*x)", s), "atan(2*I + x)".into(), "asin(2 + I*x)".into(), "asinh(2*I + x)".into(), "atanh(2 + I*x)".into(), "floor(x)".into(), "acot(x)".into(), "atanh(1 + x)".into()] {
+                assert_eq!(lim(&e, "0", d), "not found", "{} {:?}", e, d);
+            }
+        }
+        assert_eq!(lim("log(-1 + I*x)", "0", Dir::Minus), "-I*pi");
+        assert_eq!(lim("log(-2 + I*x)", "0", Dir::Plus), "log(2) + I*pi");
+        assert_eq!(lim("log(-1 + I*x)", "0", Dir::Both), "not found");
+        // off the cuts, or along them for a real argument: values
+        assert_eq!(lim("atan(x + 1)", "0", Dir::Both), "1/4*pi");
+        assert_eq!(lim("asin(x + 1)", "0", Dir::Both), "1/2*pi");
+        assert_eq!(lim("floor(x + 1/2)", "0", Dir::Both), "0");
+        assert_eq!(lim("atan(x + I/2)", "0", Dir::Both), crate::to_string(&parse("atan(I/2)")));
+        // a pole's sign from the certified sign of its coefficient
+        let r = lim(&format!("{}/x^2", s), "0", Dir::Both);
+        assert!(r == "Infinity" || r == "not found", "{}", r);
     }
 }

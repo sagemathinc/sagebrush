@@ -149,3 +149,23 @@ for d in (-1016021983508, 710573243720556):
     q = nf.quadratic_class_group_data(d)
     assert q["certified"] and q["assumes"] == ["GRH"], (d, q)
 print("certificate ok")
+# fifth review: V2-V5 (never a wrong value; the side's value where certified)
+from sagebrush.sage import limit, log, sqrt, sin, cos, tan, atan, asin, asinh, atanh, I, SR
+x = var("x")
+s5 = sin(10**20 + 1)
+def outcome(f):
+    try:
+        return str(f())
+    except Exception as e:
+        return "error"
+r = outcome(lambda: integrate(1 / (1 + tan(x)**2) + SR("1/10^30") / cos(x - SR("1/10^14"))**2, x, 0, pi))
+assert r == "error" or "integrate" in r, ("V2", r)
+for a, ok in [(s5, ("error",)), (-s5, ("error",))]:
+    r = outcome(lambda: integrate(1 / x**2, x, a, 1))
+    assert r in ok or "integrate" in r, ("V3", a, r)
+for e in [log(-s5 + I * x), sqrt(-s5 + I * x), atan(2 * I + x), asin(2 + I * x), asinh(2 * I + x), atanh(2 + I * x)]:
+    for d in ("-", "+", None):
+        r = outcome(lambda: limit(e, x=0, dir=d) if d else limit(e, x=0))
+        assert r == "error", ("V4/V5", e, d, r)
+assert str(limit(log(-1 + I * x), x=0, dir="-")) == "-I*pi" and str(limit(sqrt(-1 + I * x), x=0, dir="-")) == "-I"
+print("fifth review ok")
