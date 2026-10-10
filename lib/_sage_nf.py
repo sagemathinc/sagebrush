@@ -93,6 +93,15 @@ def _int_coeffs(f):
     return c, name
 
 
+
+def _exact_int(x, what):
+    """x as an int, refusing a non-integer (QQ(7)/2 became 3, a^(3/2) became
+    a: the systematic review's NFD-F3)."""
+    q = _F(x)
+    if q.denominator != 1:
+        raise TypeError("%s must be an integer, not %s" % (what, x))
+    return int(q.numerator)
+
 class NumberField_absolute:
     """K = Q[x]/(f), f monic with integer coefficients, irreducible.
 
@@ -526,7 +535,7 @@ class NumberField_absolute:
             sage: K.primes_above(2), K.primes_above(3)
             ([Fractional ideal (2, a + 1)], [Fractional ideal (3, a + 1), Fractional ideal (3, a + 2)])
         """
-        p = int(p)
+        p = _exact_int(p, "p")
         def pi(q):
             # in quadratic fields Sage reduces the second generator into
             # [0, p): (3, a + 2); in higher degree it keeps PARI's (5, a - 1)
@@ -777,7 +786,7 @@ class NumberFieldElement:
         raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
 
     def __pow__(self, e):
-        e = int(e)
+        e = _exact_int(e, "an exponent")
         if e < 0:
             return (~self) ** (-e)
         r = self._K(1)
@@ -1251,15 +1260,20 @@ class PrimeIdeal:
         return self.gens_two() if self._f != self._K.degree() else (self._K(self._p),)
 
     def __eq__(self, other):
+        # (in the same field: P == L.ideal(3) for another field L was True;
+        # an inert prime hashes as the integer ideal it equals: the
+        # systematic review's NFD-F2)
         if isinstance(other, NumberFieldIdeal):
-            return self._f == self._K.degree() and self._e == 1 and other._n == self._p
+            return other._K is self._K and self._f == self._K.degree() and self._e == 1 and other._n == self._p
         return isinstance(other, PrimeIdeal) and other._K is self._K and (other._p, other._e, other._f, other._pi) == (self._p, self._e, self._f, self._pi)
 
     def __hash__(self):
+        if self._f == self._K.degree() and self._e == 1:
+            return hash(("ideal", self._p))
         return hash((self._p, self._e, self._f, tuple(self._pi._c)))
 
     def __pow__(self, e):
-        return IdealFactorization([(self, int(e))])
+        return IdealFactorization([(self, _exact_int(e, "an exponent"))])
 
 
 class IdealFactorization(list):

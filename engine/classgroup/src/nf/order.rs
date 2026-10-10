@@ -234,11 +234,23 @@ impl Order {
 /// discriminant cannot be factored completely (Round 2 needs every prime
 /// whose square divides it).
 pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), String> {
+    maximal_order_assuming(f).map(|(o, fac, _)| (o, fac))
+}
+
+/// maximal_order, and the primes it relied on that are only probable
+/// primes (Baillie-PSW, above 2^64) among those whose square divides the
+/// discriminant: maximality at them assumes they are prime (the systematic
+/// review's NFD-F4).
+pub fn maximal_order_assuming(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>, Vec<BigInt>), String> {
     let mut o = Order::equation_order(f);
     let d = o.disc();
+    let mut assumed = vec![];
     for (p, e) in factor(&d)? {
         if e < 2 {
             continue;
+        }
+        if p.bits() > 64 {
+            assumed.push(p.clone());
         }
         while let Some(o2) = o.enlarge_at(&p) {
             sagebrush_interrupt::check();
@@ -247,7 +259,7 @@ pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), String
     }
     let dk = o.disc();
     let fac = factor(&dk)?;
-    Ok((o, fac))
+    Ok((o, fac, assumed))
 }
 
 #[cfg(test)]

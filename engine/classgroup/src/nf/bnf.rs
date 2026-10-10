@@ -60,6 +60,8 @@ pub struct Bnf {
     pub certified: bool,
     /// the regulator's correct significant digits (when certified; else 20)
     pub reg_digits: usize,
+    /// probable primes the maximal order's maximality assumes prime
+    pub assumed_primes: Vec<BigInt>,
 }
 
 #[allow(dead_code)]
@@ -610,7 +612,7 @@ pub struct Relations {
 pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relations), String> {
     let debug = std::env::var("QCL_DEBUG").is_ok();
     let t0 = crate::clock::Instant::now();
-    let (o, _) = maximal_order(f)?;
+    let (o, _, assumed_primes) = super::order::maximal_order_assuming(f)?;
     // a T2-reduced basis: the f64 work below needs a well-scaled one
     let o = super::embed::reduce_order(&o)?;
     let n = o.n;
@@ -803,7 +805,7 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
         if let Some(Found { group, reg, reg_fixed, prec, certified, reg_digits }) = res {
             tm.relations = rels.len();
             let relations = Relations { fb: fld.fb[..fld.ngen].to_vec(), rels, elems, order: fld.o };
-            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w, w_proven, certified, reg_digits }, tm, relations));
+            return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w, w_proven, certified, reg_digits, assumed_primes }, tm, relations));
         }
         want = rels.len() + more;
     }

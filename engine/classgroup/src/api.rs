@@ -44,6 +44,9 @@ pub struct NfData {
     /// w is proven (the roots of unity found, verified exactly, are all
     /// there can be by the residue fields); else w is a lower bound
     pub w_proven: bool,
+    /// probable primes (BPSW, above 2^64) whose squares divide disc(f):
+    /// the order's maximality assumes they are prime
+    pub assumed_primes: Vec<BigInt>,
 }
 
 fn monic(f: &[BigInt]) -> Result<(), String> {
@@ -58,7 +61,7 @@ fn monic(f: &[BigInt]) -> Result<(), String> {
 
 pub fn nf_data(f: &[BigInt]) -> Result<NfData, String> {
     monic(f)?;
-    let (o, _) = maximal_order(f)?;
+    let (o, _, assumed_primes) = crate::nf::order::maximal_order_assuming(f)?;
     let disc = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &disc).abs());
     let (r1, r2, w, w_proven) = if o.n == 1 {
@@ -73,7 +76,7 @@ pub fn nf_data(f: &[BigInt]) -> Result<NfData, String> {
     // entries above each pivot reduced (the same basis as PARI's nfbasis,
     // so as Sage's integral_basis)
     let b = hnf(&o.basis);
-    Ok(NfData { degree: o.n, r1, r2, disc, index, basis: b, den: o.den.clone(), w, w_proven })
+    Ok(NfData { degree: o.n, r1, r2, disc, index, basis: b, den: o.den.clone(), w, w_proven, assumed_primes })
 }
 
 /// The number of roots of unity in K, and whether it is proven.  The x with
@@ -189,6 +192,11 @@ pub fn primes_above(f: &[BigInt], p: u64) -> Result<Vec<PrimeData>, String> {
     if !crate::relations::is_prime_u64(p) {
         return Err(format!("{} is not prime", p));
     }
+    // (the factorization modulo p needs p < 2^32: a larger prime reached an
+    // assertion, the systematic review's NFD-F5)
+    if p >= 1 << 32 {
+        return Err(format!("primes above p >= 2^32 are not supported (p = {})", p));
+    }
     let (o, _) = maximal_order(f)?;
     let dk = o.disc();
     let ps = crate::nf::prime::decompose(&o, &dk, p)?;
@@ -214,6 +222,8 @@ pub struct BnfData {
     /// h and the regulator proven under GRH alone (the analytic
     /// certificate, nf/certify.rs)
     pub certified: bool,
+    /// probable primes the maximal order's maximality assumes prime
+    pub assumed_primes: Vec<BigInt>,
 }
 
 /// A decimal string of x / 2^prec with `digits` significant digits.
@@ -274,11 +284,11 @@ pub fn fixed_to_decimal(x: &BigInt, prec: u32, digits: usize) -> String {
 pub fn bnf(f: &[BigInt]) -> Result<BnfData, String> {
     monic(f)?;
     if f.len() == 2 {
-        return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2, w_proven: true, certified: true });
+        return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2, w_proven: true, certified: true, assumed_primes: vec![] });
     }
     let (b, _) = crate::nf::bnf::bnfinit(f)?;
     let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };
-    Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified })
+    Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified, assumed_primes: b.assumed_primes })
 }
 
 /// The factor-base relations of a certified class group computation, with
@@ -299,7 +309,7 @@ pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String
     }
     let (b, _, r) = crate::nf::bnf::bnfinit_with(f, extra)?;
     let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };
-    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified };
+    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified, assumed_primes: b.assumed_primes.clone() };
     let elems = r.elems.iter().map(|x| {
         // power-basis coordinates: x B / den
         let n = r.order.n;
