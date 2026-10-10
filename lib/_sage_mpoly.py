@@ -1323,6 +1323,10 @@ class MPolynomial:
 
     def __pow__(self, n, mod=None):
         n = int(n)
+        if mod is not None:
+            # (it was silently ignored: pow(x, 3, x + 1) gave x^3, the second
+            # review's R2-MUL-F5; Sage refuses it too)
+            raise NotImplementedError("pow() with a modulus is not implemented for this ring")
         if n < 0:
             return self._ring.fraction_field()(self) ** n
         if self._ring._engine and n > 1 and (self._b is not None or len(self._dd) > 1):
@@ -1511,15 +1515,29 @@ class MPolynomial:
         R = self._ring
         seq = []
         for a in args:
-            if isinstance(a, int) and seq:
-                seq += [seq[-1]] * (int(a) - 1)
+            if isinstance(a, int) and not isinstance(a, bool):
+                # an order: the variable before it that many times in all
+                # (order 0 undoes it; a negative order is refused: the
+                # second review's R2-MUL-F7 ran one derivative for both)
+                k = int(a)
+                if k < 0:
+                    raise ValueError("derivative counts must be nonnegative")
+                if not seq:
+                    if R._n != 1:
+                        raise ValueError("must specify which variable to differentiate with respect to")
+                    seq = [R.gen()]
+                seq += [seq[-1]] * (k - 1) if k else []
+                if k == 0:
+                    seq.pop()
             else:
                 seq.append(a)
         if not seq:
-            if R._n == 1:
+            if not args and R._n == 1:
                 seq = [R.gen()]
-            else:
+            elif not args:
                 raise ValueError("must specify which variable to differentiate with respect to")
+            else:
+                return self
         dom = R._dom
         for v in seq:
             i = R._var_index(v)
@@ -1868,7 +1886,15 @@ def _var_index(R, v):
         if len(v._d) == 1:
             e = next(iter(v._d))
             if sum(e) == 1:
-                return e.index(1)
+                i = e.index(1)
+                if v._ring is R or v._ring._names == R._names:
+                    return i
+                # a variable of another parent: by its name (the second
+                # review's R2-MUL-F6: y, x's x read as R's coordinate 1)
+                name = v._ring._names[i]
+                if name in R._names:
+                    return R._names.index(name)
+                raise ValueError("%r is not a variable of %r" % (v, R))
         raise ValueError("%r is not a variable" % (v,))
     if isinstance(v, str):
         return R._names.index(v)

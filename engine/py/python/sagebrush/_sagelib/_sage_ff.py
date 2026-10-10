@@ -1068,6 +1068,28 @@ def _eval_str(x, name, gen, const):
     return eval(src, {name: gen, "__c": const, "__builtins__": {}})
 
 
+def _derivative_count(args, gen, name):
+    """How many derivatives f.derivative(*args) asks for, in the generator
+    gen named name: x, 2 is two, x, 0 none, 2 alone two (the second review's
+    R2-POL-F2: the variable and the orders were discarded)."""
+    if not args:
+        return 1
+    k = 0
+    seen = False
+    for a in args:
+        if isinstance(a, int) and not isinstance(a, bool):
+            if a < 0:
+                raise ValueError("derivative counts must be nonnegative")
+            k += a - 1 if seen else a
+            seen = False
+        elif a is None or (isinstance(a, str) and a == name) or (not isinstance(a, str) and (a == gen or repr(a) == name)):
+            k += 1
+            seen = True
+        else:
+            raise ValueError("cannot differentiate with respect to %r" % (a,))
+    return k
+
+
 def _ptrim(a):
     while a and a[-1] == 0:
         a.pop()
@@ -2574,15 +2596,20 @@ class Polynomial_ff:
             return self
         return self * (1 / self._c[-1])
 
-    def derivative(self, var=None):
+    def derivative(self, *args):
         """The derivative.
 
         EXAMPLES::
 
-            sage: R.<x> = GF(7)[]; (x^7 + 3*x^2).derivative()
-            6*x
+            sage: R.<x> = GF(7)[]; (x^7 + 3*x^2).derivative(), (x^3).derivative(x, 2)
+            (6*x, 6*x)
         """
-        return Polynomial_ff(self._ring, [c * i for i, c in enumerate(self._c)][1:])
+        c = list(self._c)
+        for _ in range(_derivative_count(args, self._ring.gen(), self._ring._name)):
+            if not c:
+                break
+            c = [x * i for i, x in enumerate(c)][1:]
+        return Polynomial_ff(self._ring, c)
 
     diff = derivative
     differentiate = derivative
