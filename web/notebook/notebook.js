@@ -1106,6 +1106,13 @@ export function createNotebook(root, opts = {}) {
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
   let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0;
+  // the document last known to be the store's (loaded, received, or saved
+  // here): its revision and cells by id, the base of three-way merges with
+  // changes from elsewhere (stores.js: revisions)
+  let synced = null;
+  const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
+  const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null) });
+  const setSynced = (rev, list) => { synced = { rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) }; };
   function snapshot() {
     return {
       ...meta, mode,
@@ -1137,13 +1144,27 @@ export function createNotebook(root, opts = {}) {
     emit("change", doc);
     if (store) {
       // saves run one after another (a slow earlier write cannot land after
-      // a later one), and a failed save is retried by the next flush
+      // a later one), and a failed save is retried by the next flush; each
+      // is made from the synced revision when it starts (stores.js)
       const st = store;
-      const start = () => { try { return Promise.resolve(st.save(doc)); } catch (e) { return Promise.reject(e); } };
+      const start = () => {
+        try { return Promise.resolve(st.save(synced?.rev !== undefined ? { ...doc, baseRev: synced.rev } : doc)); } catch (e) { return Promise.reject(e); }
+      };
       // (started at once when no earlier save is pending)
       const p = savesPending ? saveChain.then(start) : start();
       savesPending++;
-      saveChain = p.then((t) => emit("saved", t ?? "saved"), (e) => {
+      saveChain = p.then((t) => {
+        if (store !== st) return;
+        if (t && typeof t === "object" && t.conflict) {
+          // written elsewhere first: merge that, then save the merge
+          if (lastJson === json) lastJson = null;
+          applyRemote(t.conflict, true, true);
+          return;
+        }
+        const r = t && typeof t === "object" ? t.rev : undefined;
+        if (r === undefined || synced?.rev === undefined || r > synced.rev) setSynced(r, doc.cells);
+        emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
+      }, (e) => {
         if (lastJson === json) lastJson = null;
         emit("saved", "not saved: " + (e?.message ?? e));
       }).finally(() => { savesPending--; });
@@ -1169,67 +1190,123 @@ export function createNotebook(root, opts = {}) {
   // Show a document, replacing what is there.
   function load(doc) {
     loading = true;
-    const { cells: list, mode: m, ...rest } = doc;
+    const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     meta = rest;
     setMode(m ?? mode, false);
     closeCompleter(); closeMenu(false); activate(null);
     cellsEl.textContent = "";
     execCount = 0;
     for (const c of list?.length ? list : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
-    lastJson = JSON.stringify(snapshot());
+    const snap = snapshot();
+    lastJson = JSON.stringify(snap);
+    setSynced(rev, snap.cells);
     Promise.resolve().then(() => { loading = false; }); // after the observer's records for this
   }
   // Apply a document changed elsewhere (another tab, a collaborator, an agent):
   // cells are matched by id; what changed is updated in place, so the cell
-  // being edited keeps its caret and a running cell its output.
-  function applyRemote(doc, keepLocal = true) {
+  // being edited keeps its caret and a running cell its output.  With
+  // keepLocal, a three-way merge from the synced document (the one both
+  // sides started from): a cell changed on one side only takes that change;
+  // changed on both, the other side's text is taken and this side's kept in
+  // a new cell after it, tagged "conflict"; cells inserted here stay, and a
+  // cell edited on one side and deleted on the other stays (the systematic
+  // review's R2-DOC-F1: a second unrelated change restored an old value, an
+  // unrelated change deleted a new cell).  Without keepLocal (a revert), the
+  // incoming document replaces this one.
+  function applyRemote(doc, keepLocal = true, fromConflict = false) {
+    const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
+    // an older revision than the synced one (a late message) changes nothing
+    if (keepLocal && rev !== undefined && synced?.rev !== undefined && rev <= synced.rev && !fromConflict) return;
     loading = true;
-    // the last saved document: a cell edited here since then, and not
-    // changed in the incoming document, keeps the local (unsaved) text
-    let base = null;
-    try { base = keepLocal && lastJson ? new Map(JSON.parse(lastJson).cells.map((c) => [c.id, c.code ?? ""])) : null; } catch { base = null; }
-    let keptLocal = false;
-    const { cells: list, mode: m, ...rest } = doc;
+    const base = keepLocal ? synced?.cells ?? null : null;
+    let dirty = false;
     meta = { ...meta, ...rest };
     if (m && m !== mode) setMode(m, false);
+    const order = cells().map((c) => c.id);
     const mine = new Map(cells().map((c) => [c.id, c]));
     let prev = null;
     for (const rc of list ?? []) {
+      const b = base?.get(rc.id);
       let c = mine.get(rc.id);
       if (!c) {
+        // deleted here and unchanged there: stays deleted
+        if (b && b.code === (rc.code ?? "") && b.outputs === JSON.stringify(rc.outputs ?? [])) { dirty = true; continue; }
         c = addCell(rc.code ?? "", prev ? { after: prev } : { first: true }, false, rc.type, rc.id);
         fill(c, rc);
-      } else {
-        mine.delete(rc.id);
-        if ((rc.type === "markdown" || rc.type === "raw" ? rc.type : "code") !== c.type) setType(c, rc.type);
-        if ("metadata" in rc) c.metadata = rc.metadata ?? null; // (TimeTravel's versions have none)
-        let textChanged = c.ta.value !== (rc.code ?? "");
-        if (textChanged && base && base.has(rc.id) && base.get(rc.id) !== c.ta.value && base.get(rc.id) === (rc.code ?? "")) {
-          textChanged = false; // an unsaved local edit the other side did not touch
-          keptLocal = true;
+        prev = c.el;
+        continue;
+      }
+      mine.delete(rc.id);
+      // type and metadata: a change here only is kept
+      if (cellType(rc) !== c.type) {
+        if (b && b.type === cellType(rc)) dirty = true;
+        else setType(c, rc.type);
+      }
+      if ("metadata" in rc) { // (TimeTravel's versions have none)
+        const lm = JSON.stringify(c.metadata ?? null), rm = JSON.stringify(rc.metadata ?? null);
+        if (lm !== rm) {
+          if (b && b.metadata === rm) dirty = true;
+          else c.metadata = rc.metadata ?? null;
         }
-        if (textChanged) setInput(c, rc.code ?? "");
-        if (c.type === "markdown") {
-          c.attachments = rc.attachments ?? null;
-          if (textChanged && c.el.classList.contains("rendered")) renderMd(c);
-        } else if (c.type === "code" && !c.el.classList.contains("running") && !c.el.classList.contains("queued")) {
-          if (JSON.stringify(saveOutputs(c.out)) !== JSON.stringify(rc.outputs ?? [])) {
+      }
+      const L = c.ta.value, Rt = rc.code ?? "";
+      let textChanged = false, conflictText = null;
+      if (L !== Rt) {
+        if (b && b.code === Rt) dirty = true; // changed here only: kept
+        else if (b && b.code !== L) { textChanged = true; conflictText = L; dirty = true; } // changed on both sides
+        else textChanged = true; // changed there only
+      }
+      if (textChanged) setInput(c, Rt);
+      if (c.type === "markdown") {
+        c.attachments = rc.attachments ?? null;
+        if (textChanged && c.el.classList.contains("rendered")) renderMd(c);
+      } else if (c.type === "code" && !c.el.classList.contains("running") && !c.el.classList.contains("queued")) {
+        const lo = JSON.stringify(saveOutputs(c.out)), ro = JSON.stringify(rc.outputs ?? []);
+        if (lo !== ro) {
+          if (b && b.outputs === ro) dirty = true; // new output here only: kept
+          else {
             forgetInteracts(c.out);
             c.out.replaceChildren();
             loadOutputs(c.out, rc.outputs);
+            c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
           }
-          c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
-        }
-        if (c.el.previousElementSibling !== prev) prev ? prev.after(c.el) : cellsEl.prepend(c.el);
+        } else c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
       }
+      if (c.el.previousElementSibling !== prev) prev ? prev.after(c.el) : cellsEl.prepend(c.el);
       prev = c.el;
+      if (conflictText !== null) {
+        const k = addCell(conflictText, { after: c.el }, false, c.type);
+        k.metadata = { ...(c.metadata ?? {}), tags: [...(c.metadata?.tags ?? []), "conflict"] };
+        emit("conflict", { id: c.id, copy: k.id });
+        prev = k.el;
+      }
     }
-    for (const c of mine.values()) { if (active === c) activate(null); c.el.remove(); }
+    // cells here that the incoming document does not have
+    for (const c of mine.values()) {
+      const b = base?.get(c.id);
+      const keep = base && (!b || b.code !== c.ta.value); // inserted here, or edited here and deleted there
+      if (keep) { dirty = true; continue; }
+      if (active === c) activate(null);
+      c.el.remove();
+    }
+    // kept cells go back after the cell they followed here
+    for (const c of mine.values()) {
+      if (!c.el.isConnected) continue;
+      const i = order.indexOf(c.id);
+      let after = null;
+      for (let j = i - 1; j >= 0 && !after; j--) {
+        const p = cells().find((x) => x.id === order[j]);
+        if (p && p.el.isConnected && p !== c) after = p.el;
+      }
+      if (after) after.after(c.el);
+      else cellsEl.prepend(c.el);
+    }
     if (!cells().length) addCell("");
     relabel();
-    lastJson = JSON.stringify(snapshot());
-    if (keptLocal) lastJson = null; // the kept local edit still has to be saved
-    Promise.resolve().then(() => { loading = false; if (keptLocal) schedule(); });
+    // (a revert is not the store's document: the base stays until it is saved)
+    if (keepLocal) setSynced(rev, list);
+    lastJson = dirty ? null : JSON.stringify(snapshot()); // a merged change still has to be saved
+    Promise.resolve().then(() => { loading = false; if (dirty) schedule(); });
     emit("remote", doc);
   }
   // Replace the cells with a document's (TimeTravel's revert): matched by id
