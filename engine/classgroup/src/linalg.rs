@@ -350,16 +350,18 @@ fn solve_mod_p(a: &[Vec<i64>], vs: &[Vec<i64>], p: u64) -> (u64, Vec<Vec<u64>>) 
     (det, ys)
 }
 
-/// det(A) and the integer vectors y_t = v_t adj(A) (y_t A = det(A) v_t),
-/// by CRT over 31-bit primes, stopping once every value has been stable
-/// for two primes, then checked exactly (y_t A = det v_t), else continued
-/// to the Hadamard bound.  Primes dividing det(A) are skipped: modulo them
-/// the solve gives no adjugate (the systematic review's LIN-F1: [[p]] with
-/// p the second prime got a wrong y).  Each y_t with -det(A) e_v is a
-/// kernel vector of the rows [A; v_t].
+/// (d, y_t) with y_t A = d v_t exactly and d != 0 (A nonsingular): each
+/// y_t with -d e_v is then a kernel vector of the rows [A; v_t].  By CRT
+/// over 31-bit primes of det(A) and v_t adj(A), stopping once every value
+/// has been stable for two primes and the identity holds exactly, else
+/// continued to the Hadamard bound (then d = det(A)).  d need NOT be
+/// det(A) after an early stop: a scalar multiple (d, y)/c can satisfy the
+/// identity too (the second review: det ~ 2^93 reconstructed as 1), so use
+/// det_crt for the determinant.  Primes dividing det(A) are skipped:
+/// modulo them the solve gives no adjugate (the review's LIN-F1).
 pub fn kernel_crt(a: &[Vec<i64>], vs: &[Vec<i64>]) -> (BigInt, Vec<Vec<BigInt>>) {
     let r = kernel_crt_impl(a, vs, true);
-    if kernel_identity_holds(a, vs, &r) {
+    if !r.0.is_zero() && kernel_identity_holds(a, vs, &r) {
         return r;
     }
     kernel_crt_impl(a, vs, false)
@@ -831,6 +833,20 @@ mod tests {
         let (d, ys) = kernel_crt(&[vec![2147483647i64 * 2147483629]], &[vec![3]]);
         assert_eq!(d, BigInt::from(2147483647i64 * 2147483629));
         assert_eq!(ys, vec![vec![BigInt::from(3)]]);
+        // the second review: det = 9903519940736477367306812282 reconstructs
+        // as 1 from the first primes; (d, y) still satisfies y A = d v with
+        // d != 0 (a kernel vector), and det_crt gives the determinant
+        let a = vec![vec![2147483647i64, 0, 1], vec![1, 2147483629, 0], vec![0, 1, 2147483587]];
+        for vs in [vec![a[0].clone()], vec![vec![1, 0, 0]], a.clone()] {
+            let (d, ys) = kernel_crt(&a, &vs);
+            assert!(!d.is_zero());
+            for (y, v) in ys.iter().zip(&vs) {
+                for j in 0..3 {
+                    assert_eq!((0..3).map(|i| &y[i] * a[i][j]).sum::<BigInt>(), &d * v[j]);
+                }
+            }
+        }
+        assert_eq!(det_crt(&a).to_string(), "9903519940736477367306812282");
         // LIN-F2: the first two primes of det_crt_probable for a 1 x 1
         let x = 1073741789i64 * 1073741783;
         assert_eq!(det_crt(&[vec![x]]), BigInt::from(x));
