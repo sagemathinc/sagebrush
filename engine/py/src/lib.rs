@@ -153,6 +153,7 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
 }
 
 /// The rational newforms of level N: a list of [(p, a_p)] for primes p <= bound not dividing N.
+/// Checked, not proven: the Hasse bound, and the same newforms modulo a second prime.
 #[pyfunction]
 #[pyo3(signature = (n, bound=1000, threads=0))]
 fn rational_newforms(py: Python<'_>, n: u64, bound: u64, threads: usize) -> PyResult<Vec<Vec<(u64, i64)>>> {

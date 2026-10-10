@@ -35,6 +35,9 @@ fn a_p_satisfy_hasse_and_known_values() {
     assert_eq!(f11.forms.len(), 1);
     assert_eq!(&f11.forms[0].ap[..4], &[(2, -2), (3, -1), (5, 1), (7, -2)]);
     assert!(f11.forms[0].hasse_ok());
+    // checked (Hasse; the same modulo a second prime), and saying so
+    assert_eq!(f11.status, "checked");
+    assert_eq!(f11.checks.len(), 2);
     // Level 37 has two rational newforms: 37a (a_2 = -2, a_3 = -3) and 37b (a_2 = 0, a_3 = 1).
     let f37 = rational_newforms(37, 100, 40).unwrap();
     let firsts: Vec<_> = f37.forms.iter().map(|f| (f.ap[0], f.ap[1])).collect();
