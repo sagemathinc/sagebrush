@@ -402,7 +402,8 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
                     eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}): {}", rlo, rhi, h2, h, if ok { "holds" } else { "failed" });
                 }
                 ok.then(|| {
-                    let rel = (rhi - rlo) / rlo;
+                    // the relative error of |b|: its error bound over it
+                    let rel = to_f64(&(&bhi - &blo), 0) / to_f64(&(&blo + &bhi), 0) * (1.0 + 1e-9) + 2f64.powf(-(prec as f64) * 0.9);
                     let digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;
                     (h2, cyc2, b.abs() >> 1usize, digits)
                 })

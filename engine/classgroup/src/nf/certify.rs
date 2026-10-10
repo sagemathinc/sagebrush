@@ -126,9 +126,10 @@ pub fn log_hr_lower(split: &[(u64, Vec<(u32, u32)>)], x: u64, n: usize, r1: usiz
 /// of [C | I] gives integer T with T C of full rank, and b = T lambda (true
 /// units, whatever C was).  Then |det b| is within Hadamard's bound of the
 /// exact determinant of the fixed-point b.  Returns (lower, upper, |det|
-/// of the fixed-point b scaled by 2^(prec r)) or None (rank deficient or
-/// too imprecise: Err(true), which more precision may cure).
-pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[f64], basis: &ZMat, prec: u32) -> Result<(f64, f64, BigInt), bool> {
+/// of the fixed-point b scaled by 2^(prec r), a bound on its relative
+/// error) or None (rank deficient, or too imprecise: Err(true), which more
+/// precision may cure).
+pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[f64], basis: &ZMat, prec: u32) -> Result<(f64, f64, BigInt, f64), bool> {
     let r = basis.len();
     let m = lams.len();
     if r == 0 || m < r {
@@ -196,7 +197,9 @@ pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[f64], basis: &ZMat, prec: 
         // rank deficient, or the perturbation swamps the determinant
         return Err(pert >= df * 1e-3);
     }
-    Ok((lo, hi, d))
+    // the relative error: the perturbation over |det|, and the last unit
+    let rel = (pert / df.max(f64::MIN_POSITIVE)) * (1.0 + 1e-9) + 2f64.powf(-(prec as f64) * 0.9);
+    Ok((lo, hi, d, rel))
 }
 
 /// The splitting of the primes below x in the quadratic field of
