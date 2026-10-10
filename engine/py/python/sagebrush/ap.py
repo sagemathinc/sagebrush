@@ -32,7 +32,10 @@ def low_rank(an, n):
 
 def height(a, x, n, local, d, roots, prec=128):
     """The canonical height on balls (engine/ap/src/height.rs): [(m, e), (m, e)]
-    exact dyadic endpoints m 2^e enclosing hhat."""
+    exact dyadic endpoints m 2^e enclosing hhat.  x = (num, den) is x(Q) for
+    Q = nP on the identity component, n = 1 or 2."""
+    if n not in (1, 2) or isinstance(n, bool) or int(n) != n:
+        raise ValueError("n must be 1 or 2, not %r" % (n,))
     from ._engine import call
     r = call("ec_height", a=[str(int(c)) for c in a], x=[str(x[0]), str(x[1])], n=int(n),
              local=[[str(p), str(u), str(w)] for p, u, w in local], d=str(int(d)),

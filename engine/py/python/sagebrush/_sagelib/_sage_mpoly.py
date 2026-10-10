@@ -3581,19 +3581,38 @@ class MPolynomialIdeal:
     def __le__(self, o):
         return all(g in o for g in self._gens)
 
+    def _here(self, J):
+        """The generators of the ideal J as elements of this ring (converted
+        by variable name, as R(f) does: the exponent tuples of another
+        parent were copied positionally, so QQ['y,x']'s x acted as y, the
+        second review's R2-GB-F2)."""
+        if J._ring is self._ring:
+            return list(J._gens)
+        return [self._ring(g) for g in J._gens]
+
     def __add__(self, o):
         if isinstance(o, MPolynomialIdeal):
-            return MPolynomialIdeal(self._ring, self._gens + o._gens)
+            return MPolynomialIdeal(self._ring, self._gens + self._here(o))
         return NotImplemented
 
     def __mul__(self, o):
         if isinstance(o, MPolynomialIdeal):
-            return MPolynomialIdeal(self._ring, [a * b for a in self._gens for b in o._gens])
+            return MPolynomialIdeal(self._ring, [a * b for a in self._gens for b in self._here(o)])
         return NotImplemented
 
     def __pow__(self, n):
+        # ordinary powers only: I^-1 and I^(1/2) were the unit ideal (the
+        # second review's R2-GB-F3); Sage refuses them too
+        if isinstance(n, bool) or not isinstance(n, int):
+            if isinstance(n, _F) and n.denominator == 1:
+                n = int(n)
+            else:
+                raise TypeError("unsupported operand type(s) for ** or pow(): an ideal and %r" % (n,))
+        n = int(n)
+        if n < 0:
+            raise TypeError("unsupported operand type(s) for ** or pow(): an ideal and a negative integer")
         r = MPolynomialIdeal(self._ring, [self._ring.one()])
-        for _ in range(int(n)):
+        for _ in range(n):
             r = r * self
         return r
 
@@ -3742,7 +3761,7 @@ class MPolynomialIdeal:
             T = MPolynomialRing(self._field_ring()._base, None, ("_t",) + R._names, R._order)
             t = T.gen(0)
             lift = lambda f: MPolynomial(T, {(0,) + e: c for e, c in f._d.items()})
-            gens = [t * lift(f) for f in cur._gens] + [(1 - t) * lift(g) for g in J._gens]
+            gens = [t * lift(f) for f in cur._gens] + [(1 - t) * lift(g) for g in self._here(J)]
             E = MPolynomialIdeal(T, gens).elimination_ideal([t])
             cur = MPolynomialIdeal(R, [MPolynomial(R, {e[1:]: c for e, c in g._d.items()}) for g in E._gens])
         return cur
@@ -3760,7 +3779,7 @@ class MPolynomialIdeal:
         self._over_field("quotient")
         R = self._ring
         res = None
-        for g in J._gens:
+        for g in self._here(J):
             if not g._d:
                 continue
             K = self.intersection(MPolynomialIdeal(R, [g]))

@@ -366,56 +366,29 @@ def _agm(a, b):
     return a
 
 
-def _cubic_roots(c3, c2, c1, c0):
-    """The complex roots of c3 x^3 + c2 x^2 + c1 x + c0 (Durand-Kerner, then Newton)."""
-    c2, c1, c0 = c2 / c3, c1 / c3, c0 / c3
-    f = lambda z: ((z + c2) * z + c1) * z + c0
-    df = lambda z: (3 * z + 2 * c2) * z + c1
-    R = 1 + max(abs(c2), abs(c1), abs(c0))
-    z = [R * _cm.exp(2j * _m.pi * k / 3 + 0.4j) for k in range(3)]
-    for _ in range(500):
-        new = []
-        for i in range(3):
-            den = 1
-            for j in range(3):
-                if j != i:
-                    den *= z[i] - z[j]
-            new.append(z[i] - f(z[i]) / den)
-        if max(abs(x - y) for x, y in zip(new, z)) < 1e-15 * R:
-            z = new
-            break
-        z = new
-    out = []
-    for r in z:
-        for _ in range(3):
-            d = df(r)
-            if d != 0:
-                r = r - f(r) / d
-        out.append(r)
-    return out
-
-
 _K = 200  # fixed point: x is X / 2^K
 
 
-def _refine_real(coeffs, x0):
-    """Newton's iteration in fixed point (X / 2^K, exact integers) for a
-    real root of the integer cubic coeffs (highest degree first)."""
+def _real_root_fixed(coeffs):
+    """The real root, as X / 2^K, of the integer cubic coeffs (positive
+    leading coefficient, negative discriminant: exactly one real root), by
+    exact bisection between the Cauchy bounds.  (A double seed overflowed
+    for coefficients near 2^1000, the review of the ball heights' ECBALL-F4.)"""
     c0, c1, c2, c3 = (int(v) for v in coeffs)
     one = 1 << _K
-    m, e = _m.frexp(float(x0))
-    X = int(m * (1 << 53)) << max(0, _K + e - 53) if _K + e - 53 >= 0 else int(m * (1 << 53)) >> (53 - _K - e)
-    for _ in range(400):
-        # f(x) 2^(3K) and f'(x) 2^(2K)
-        f = ((c0 * X + c1 * one) * X + c2 * one * one) * X + c3 * one ** 3
-        df = (3 * c0 * X + 2 * c1 * one) * X + c2 * one * one
-        if df == 0:
-            break
-        step = f // df  # (f / 2^(3K)) / (df / 2^(2K)) * 2^K
-        X -= step
-        if abs(step) <= 1:
-            break
-    return X
+    g = lambda X: ((c0 * X + c1 * one) * X + c2 * one * one) * X + c3 * one ** 3
+    R = (1 + max(abs(c1), abs(c2), abs(c3)) // c0 + 1) * one
+    lo, hi = -R, R  # g(lo) < 0 < g(hi)
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        gm = g(mid)
+        if gm == 0:
+            return mid
+        if gm < 0:
+            lo = mid
+        else:
+            hi = mid
+    return lo
 
 
 def _real_roots_fixed(coeffs):
@@ -463,7 +436,6 @@ def real_period(a):
     b2, b4, b6, b8 = _b(a)
     D = _disc(a)
     coeffs = (4, b2, 2 * b4, b6)
-    e = _cubic_roots(4.0, float(b2), float(2 * b4), float(b6))
     if D > 0:
         # three real roots: bracket each between the critical points
         # (-b2 +- sqrt(c4)) / 12 and bisect in fixed point, so that close
@@ -472,7 +444,7 @@ def real_period(a):
         w1 = _m.pi / _agm(_cm.sqrt(_fx(E1 - E3)), _cm.sqrt(_fx(E1 - E2))).real
         return 2 * w1
     # one real root e1
-    E1 = _refine_real(coeffs, min(e, key=lambda x: abs(x.imag)).real)
+    E1 = _real_root_fixed(coeffs)
     one = 1 << _K
     # a = 3 e1 + b2/4 and b = sqrt(3 e1^2 + (b2/2) e1 + b4/2), in fixed point:
     # 2b + a can cancel almost completely when the complex roots are nearly real
@@ -872,8 +844,7 @@ def _periods(a):
         w1 = _m.pi / _agm(_cm.sqrt(_fx(E1 - E3)), _cm.sqrt(_fx(E1 - E2))).real
         w2 = 1j * _m.pi / _agm(_cm.sqrt(_fx(E1 - E3)), _cm.sqrt(_fx(E2 - E3))).real
         return w1, w2, (e1, e2, e3)
-    e = _cubic_roots(4.0, float(b2), float(2 * b4), float(b6))
-    E1 = _refine_real(coeffs, min(e, key=lambda x: abs(x.imag)).real)
+    E1 = _real_root_fixed(coeffs)
     one = 1 << _K
     AA = 3 * E1 + b2 * one // 4
     BB2 = (6 * E1 * E1 + b2 * E1 * one + b4 * one * one) // 2
@@ -882,7 +853,6 @@ def _periods(a):
     w1 = (2 * _m.pi / _agm(complex(2 * _m.sqrt(bb)), _cm.sqrt(_fx(2 * BB + AA)))).real
     w2 = -w1 / 2 + 1j * _m.pi / _agm(complex(2 * _m.sqrt(bb)), _cm.sqrt(_fx(2 * BB - AA))).real
     e1 = _fx(E1)
-    e23 = [z for z in e if abs(z.imag) > 0] or e
     return w1, w2, (e1,)
 
 
@@ -962,8 +932,7 @@ def _roots_fixed(a):
         if _disc(a) > 0:
             _ROOTS_FIXED[key] = ("3",) + tuple(_real_roots_fixed(coeffs))
         else:
-            e = _cubic_roots(4.0, float(b2), float(2 * b4), float(b6))
-            E1 = _refine_real(coeffs, min(e, key=lambda x: abs(x.imag)).real)
+            E1 = _real_root_fixed(coeffs)
             # 4 (x - e1)(x^2 + p x + q): p = b2/4 + e1, q = b4/2 + e1 p
             P = b2 * one // 4 + E1
             Q = b4 * one // 2 + E1 * P // one
