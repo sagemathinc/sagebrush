@@ -34,6 +34,8 @@ jobs:
       - name: npm with trusted publishing (needs npm >= 11.5)
         run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
+      - name: SciPy (the reference for scipy.io's MATLAB files in test/data.test.ts)
+        run: python3 -m pip install scipy
       - run: pnpm run build
       - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
       - name: versions match the tag
