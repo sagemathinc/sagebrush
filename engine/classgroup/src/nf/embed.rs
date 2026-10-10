@@ -484,7 +484,7 @@ mod tests {
     fn t2_of_one_is_n() {
         for f in [vec![-2i64, 0, 0, 1], vec![-47400624380034, -1386489987, 0, 1], vec![5, 1, -3, 1]] {
             let f: Vec<BigInt> = f.iter().map(|&c| BigInt::from(c)).collect();
-            let (o, _) = maximal_order(&f);
+            let (o, _) = maximal_order(&f).unwrap();
             let o = reduce_order(&o);
             let e = Embeddings::new(&o);
             let one = o.from_power(&[1i64, 0, 0].map(|c| sagebrush_bigint::BigRational::from_integer(c.into()))).into_iter().map(|c| c.to_integer()).collect::<Vec<_>>();
@@ -498,7 +498,7 @@ mod tests {
         // x^3 - 27 c4 x - 54 c6 for the elliptic curve 9709b3: roots near
         // +-6e4, two of them 0.004 apart (f64's Aberth saw a complex pair)
         let f: Vec<BigInt> = ["-100192487473584", "-4076849664", "0", "1"].iter().map(|c| c.parse().unwrap()).collect();
-        let (o, _) = maximal_order(&f);
+        let (o, _) = maximal_order(&f).unwrap();
         let e = Embeddings::new(&o);
         assert_eq!((e.r1, e.r2), (3, 0));
         let r = real_roots_exact(&f);
@@ -511,7 +511,7 @@ mod tests {
     fn roots_and_logs() {
         // x^3 - 2: one real root 2^(1/3), one complex pair
         let f: Vec<BigInt> = [-2, 0, 0, 1].iter().map(|&c| BigInt::from(c)).collect();
-        let (o, _) = maximal_order(&f);
+        let (o, _) = maximal_order(&f).unwrap();
         let e = Embeddings::new(&o);
         assert_eq!((e.r1, e.r2), (1, 1));
         assert!((e.roots[0].0 - 2f64.powf(1.0 / 3.0)).abs() < 1e-14);

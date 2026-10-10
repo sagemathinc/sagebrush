@@ -11,17 +11,20 @@ use num_integer::Integer;
 use sagebrush_bigint::BigRational;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
-/// The factorization of n != 0 as (prime, exponent), primes ascending (a
-/// cofactor that Pollard rho cannot split is reported as if prime).
-pub fn factor_integer(n: &BigInt) -> Vec<(BigInt, u32)> {
+/// The factorization of n != 0 as (prime, exponent), primes ascending
+/// (probable primes beyond 3.3e24).  A composite that cannot be split
+/// (beyond 1024 bits) is an error, never reported as a prime.
+pub fn factor_integer(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
     if n.abs() <= BigInt::one() {
-        return vec![];
+        return Ok(vec![]);
     }
     crate::nf::factor::factor(n)
 }
 
+/// Whether n is (probably: Miller-Rabin to 20 bases, proven below 3.3e24)
+/// prime; false for n < 2 (Astra's audit, F7: -7 was "prime").
 pub fn is_prime(n: &BigInt) -> bool {
-    crate::nf::factor::is_probable_prime(n)
+    *n >= BigInt::from(2) && crate::nf::factor::is_probable_prime(n)
 }
 
 /// A number field and its maximal order.
@@ -51,7 +54,7 @@ fn monic(f: &[BigInt]) -> Result<(), String> {
 
 pub fn nf_data(f: &[BigInt]) -> Result<NfData, String> {
     monic(f)?;
-    let (o, _) = maximal_order(f);
+    let (o, _) = maximal_order(f)?;
     let disc = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &disc).abs());
     let (r1, r2, w) = if o.n == 1 {
@@ -116,7 +119,7 @@ pub fn primes_above(f: &[BigInt], p: u64) -> Result<Vec<PrimeData>, String> {
     if !crate::relations::is_prime_u64(p) {
         return Err(format!("{} is not prime", p));
     }
-    let (o, _) = maximal_order(f);
+    let (o, _) = maximal_order(f)?;
     let dk = o.disc();
     let ps = crate::nf::prime::decompose(&o, &dk, p)?;
     Ok(ps.into_iter().map(|q| {
@@ -471,6 +474,6 @@ mod tests {
         assert_eq!(r[0].1, "0");
         let d = nf_data(&[BigInt::from(-11), BigInt::zero(), BigInt::zero(), BigInt::one()]).unwrap();
         assert_eq!((d.disc.clone(), d.r1, d.r2, d.w), (BigInt::from(-3267), 1, 1, 2));
-        assert_eq!(factor_integer(&((BigInt::one() << 128usize) + 1)), vec![("59649589127497217".parse().unwrap(), 1), ("5704689200685129054721".parse().unwrap(), 1)]);
+        assert_eq!(factor_integer(&((BigInt::one() << 128usize) + 1)).unwrap(), vec![("59649589127497217".parse().unwrap(), 1), ("5704689200685129054721".parse().unwrap(), 1)]);
     }
 }
