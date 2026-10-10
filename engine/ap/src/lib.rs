@@ -40,15 +40,19 @@ impl EllipticCurve {
     /// overflow 128 bits.
     pub fn new(a: [i64; 5]) -> Result<Self, String> {
         let [a1, a2, a3, a4, a6] = a.map(|x| x as i128);
+        // every operation checked: a release build would wrap silently
+        // (Astra's audit, F2: -54 c6 wrapped, and a_p came out wrong)
         let ovf = || format!("coefficients of {:?} are too large", a);
         let m = |x: i128, y: i128| x.checked_mul(y).ok_or_else(ovf);
-        let b2 = a1 * a1 + 4 * a2;
-        let b4 = 2 * a4 + a1 * a3;
-        let b6 = a3 * a3 + 4 * a6;
-        let b8 = m(m(a1, a1)?, a6)? + m(4 * a2, a6)? - m(m(a1, a3)?, a4)? + m(a2, m(a3, a3)?)? - m(a4, a4)?;
-        let c4 = m(b2, b2)? - 24 * b4;
-        let c6 = -m(m(b2, b2)?, b2)? + m(36 * b2, b4)? - 216 * b6;
-        let disc = -m(m(b2, b2)?, b8)? - m(8 * m(b4, b4)?, b4)? - m(27 * b6, b6)? + m(m(9 * b2, b4)?, b6)?;
+        let s = |x: i128, y: i128| x.checked_add(y).ok_or_else(ovf);
+        let d = |x: i128, y: i128| x.checked_sub(y).ok_or_else(ovf);
+        let b2 = s(m(a1, a1)?, m(4, a2)?)?;
+        let b4 = s(m(2, a4)?, m(a1, a3)?)?;
+        let b6 = s(m(a3, a3)?, m(4, a6)?)?;
+        let b8 = d(s(d(s(m(m(a1, a1)?, a6)?, m(m(4, a2)?, a6)?)?, m(m(a1, a3)?, a4)?)?, m(a2, m(a3, a3)?)?)?, m(a4, a4)?)?;
+        let c4 = d(m(b2, b2)?, m(24, b4)?)?;
+        let c6 = d(s(m(-1, m(m(b2, b2)?, b2)?)?, m(m(36, b2)?, b4)?)?, m(216, b6)?)?;
+        let disc = s(d(d(m(-1, m(m(b2, b2)?, b8)?)?, m(m(8, m(b4, b4)?)?, b4)?)?, m(m(27, b6)?, b6)?)?, m(m(m(9, b2)?, b4)?, b6)?)?;
         if disc == 0 {
             return Err(format!("{:?} is singular", a));
         }
@@ -89,8 +93,9 @@ impl EllipticCurve {
     /// a_p for p >= 5 of good reduction, on y^2 = x^3 - 27 c4 x - 54 c6.
     fn ap_bsgs(&self, p: u64) -> i64 {
         let f = Fp::new(p);
-        let a = f.from_i128(-27 * self.c4);
-        let b = f.from_i128(-54 * self.c6);
+        // reduce first: -27 c4 and -54 c6 need not fit 128 bits
+        let a = f.mul(f.from_i128(-27), f.from_i128(self.c4));
+        let b = f.mul(f.from_i128(-54), f.from_i128(self.c6));
         let w = isqrt(4 * p) as i64; // |a_p| <= 2 sqrt(p)
         // If the cubic's discriminant -(4a^3 + 27b^2) is not a square, the
         // cubic has exactly one root: one point of order 2 on E and on its
@@ -215,4 +220,53 @@ pub fn moments(e: &EllipticCurve, n: u64, kmax: usize) -> (u64, Vec<f64>) {
     let count: u64 = parts.iter().map(|p| p.0).sum();
     let sums = (0..kmax).map(|k| parts.iter().map(|p| p.1[k]).sum::<f64>() / count.max(1) as f64).collect();
     (count, sums)
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    // Astra's audit, F2: on y^2 + 2000000 xy = x^3 + x, -54 c6 overflowed
+    // before reduction mod p, so a_p at p >= 1000 (the BSGS path) was that of
+    // another curve.  The expected values are direct point counts.
+    #[test]
+    fn large_coefficients_agree_with_point_counting() {
+        let e = EllipticCurve::new([2_000_000, 0, 0, 1, 0]).unwrap();
+        for (p, want) in [(991u64, -48i64), (997, -26), (1009, -46), (1013, -10), (1019, -12), (1031, -52), (10007, -176)] {
+            assert_eq!(e.ap(p), Some(want), "p = {}", p);
+            assert_eq!(e.ap_naive(p), want, "p = {}", p);
+        }
+    }
+
+    // a_p does not depend on the model: x -> x + r, y -> y + s x + t with
+    // large r, s, t, across the naive/BSGS threshold.
+    #[test]
+    fn isomorphic_models_have_the_same_traces() {
+        let base = [1i64, -1, 1, -29, 53]; // a curve with small coefficients
+        for &(r, s, t) in &[(1000i64, 7i64, 12345i64), (-99_999, 3, 77), (31_337, -2, -500_000)] {
+            let [a1, a2, a3, a4, a6] = base.map(|x| x as i128);
+            let (r, s, t) = (r as i128, s as i128, t as i128);
+            // Silverman, Table 3.1 (u = 1)
+            let b1 = a1 + 2 * s;
+            let b2 = a2 - s * a1 + 3 * r - s * s;
+            let b3 = a3 + r * a1 + 2 * t;
+            let b4 = a4 - s * a3 + 2 * r * a2 - (t + r * s) * a1 + 3 * r * r - 2 * s * t;
+            let b6 = a6 + r * a4 + r * r * a2 + r * r * r - t * a3 - t * t - r * t * a1;
+            let m: [i64; 5] = [b1, b2, b3, b4, b6].map(|x| i64::try_from(x).unwrap());
+            let (e, f) = (EllipticCurve::new(base).unwrap(), EllipticCurve::new(m).unwrap());
+            for p in [997u64, 1009, 1013, 4999, 10007, 65537] {
+                if e.bad(p) || f.bad(p) {
+                    continue;
+                }
+                assert_eq!(e.ap(p), f.ap(p), "p = {} model {:?}", p, m);
+                assert_eq!(f.ap(p), Some(f.ap_naive(p)), "p = {} model {:?}", p, m);
+            }
+        }
+    }
+
+    // Invariants beyond 128 bits are an error, not a wrapped value.
+    #[test]
+    fn huge_coefficients_are_an_error() {
+        assert!(EllipticCurve::new([i64::MAX, i64::MAX, i64::MAX, i64::MAX, i64::MAX]).is_err());
+    }
 }
