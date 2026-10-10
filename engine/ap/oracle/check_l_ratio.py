@@ -1,7 +1,9 @@
 """L(E,1)/Omega_E (lseries().L_ratio()) from the ball enclosures against
-Sage's modular-symbol value on 60 random curves of conductor <= 3000
-(make_l_ratio.sage), 32 of them 0; and Sha.an() must be a positive
-integer where L_ratio != 0 or the root number is -1.
+Sage's lseries().L_ratio() on 60 random curves of conductor <= 3000
+(make_l_ratio.sage), 32 of them 0.  Sage's value is itself a numerical
+reconstruction under its own denominator hypothesis, not an exact
+modular-symbol value: this is a consistency check, not an independent
+proof.  Sha.an() must be a positive integer where L_ratio != 0.
 
     engine/.venv/bin/python engine/ap/oracle/check_l_ratio.py
 """

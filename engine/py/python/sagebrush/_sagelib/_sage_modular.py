@@ -2619,13 +2619,47 @@ class _LSeries:
         ld = self._E._ldata()
         return RR(_ec.L1(ld, _ec.root_number(ld)))
 
-    def L_ratio(self):
-        """L(E,1)/Omega_E as an exact rational: L(E,1) and Omega_E enclosed on
-        balls (engine/ap), and the quotient's interval holding exactly one
-        multiple of 1/D, D = 2 #E(Q)_tors^2 (the denominator divides D: Manin-
-        Drinfeld, for an optimal curve with Manin constant 1 it divides
-        2 #E(Q)_tors).  Given that, the answer is proved, 0 included: no
-        floating-point recognition (the systematic review's R2-EC-F2).
+    def L_ratio_interval(self):
+        """(lo, hi): exact Fractions with lo <= L(E,1)/Omega_E <= hi, proved
+        (L(E,1) and Omega_E enclosed on balls, engine/ap); (0, 0) when the
+        root number is -1.
+
+        EXAMPLES::
+
+            sage: lo, hi = EllipticCurve('11a1').lseries().L_ratio_interval()  # sagebrush only
+            sage: lo <= 1/5 <= hi, float(hi - lo) < 1e-15  # sagebrush only
+            (True, True)
+        """
+        import _sage_ec as _ec
+        from fractions import Fraction
+        E = self._E
+        lv = _ec.l_value_ball(E._ldata())
+        if lv is None:
+            raise ArithmeticError("the root number of %r is not decided by the enclosures" % (E,))
+        w, lo, hi = lv
+        if w == -1:
+            return Fraction(0), Fraction(0)  # the functional equation
+        om = _ec.real_period_ball(E.minimal_model()._a)
+        return _ec._iv_quotient(lo, hi, *om)
+
+    def L_ratio(self, proof=False):
+        """L(E,1)/Omega_E as an exact rational: the one multiple of 1/D,
+        D = 2 #E(Q)_tors^2, in the proved interval L_ratio_interval() (no
+        floating-point recognition, the systematic review's R2-EC-F2).
+
+        PREMISE: the denominator divides D.  Classically this is not known
+        for every curve: Manin-Drinfeld gives only rationality; for an
+        optimal curve with Manin constant c the denominator divides
+        2 c #E(Q)_tors (c is conjectured to be 1, proved in many cases), and
+        another curve in the isogeny class can need a factor of an isogeny
+        degree.  It follows for every E with L(E,1) != 0 from the full BSD
+        formula in analytic rank 0 (L(E,1)/Omega = #Sha prod c_p / #T^2, so
+        the denominator divides #T^2), which is claimed for analytic rank
+        <= 1 in "Exact Birch-Swinnerton-Dyer Formula from Low Selmer
+        Corank" (OpenAI, October 2026: unrefereed, not yet formalized;
+        _BSD_RANK_LE_1).  Given the premise the answer is proved, 0 included.  With
+        ``proof=True`` only premise-free answers are returned (0 when the
+        root number is -1); others raise NotImplementedError.
 
         EXAMPLES::
 
@@ -2637,19 +2671,16 @@ class _LSeries:
             9/4
         """
         import math
-        import _sage_ec as _ec
         from sage_all import QQ
         E = self._E
-        lv = _ec.l_value_ball(E._ldata())
-        if lv is None:
-            raise ArithmeticError("the root number of %r is not decided by the enclosures" % (E,))
-        w, lo, hi = lv
-        if w == -1:
-            return QQ(0)  # the functional equation
+        xlo, xhi = self.L_ratio_interval()
+        if xlo == xhi == 0:
+            return QQ(0)
+        if proof:
+            raise NotImplementedError("L_ratio(proof=True): the denominator bound 2 #E(Q)_tors^2 is a premise for this "
+                                      "curve (it follows from %s); L_ratio_interval() is proved" % _BSD_RANK_LE_1)
         T = int(E.torsion_order())
         D = 2 * T * T
-        om = _ec.real_period_ball(E.minimal_model()._a)
-        xlo, xhi = _ec._iv_quotient(lo, hi, *om)
         ks = range(math.ceil(xlo * D), math.floor(xhi * D) + 1)
         if len(ks) == 0:
             raise ArithmeticError("L(E,1)/Omega in [%r, %r] is not a rational with denominator dividing %d" % (float(xlo), float(xhi), D))
@@ -2667,7 +2698,18 @@ class _Sha:
 
     def an(self):
         """The analytic order of Sha, from the Birch and Swinnerton-Dyer
-        formula: exact in analytic rank 0 (L(E,1)/Omega via L_ratio).
+        formula, in analytic rank 0 or 1.
+
+        What is proved and what is assumed: the BSD quotient's interval is
+        proved (an_interval(); L(E,1) or L'(E,1), Omega_E and the height on
+        balls).  Reading an integer off it assumes, in rank 0, the
+        denominator premise of L_ratio(), and in rank 1 that E.gens()[0]
+        generates E(Q)/tors and that the quotient is an integer; that it is
+        the order of Sha is the BSD formula.  All of these except the
+        generator follow from the full BSD formula in analytic rank <= 1
+        claimed in "Exact Birch-Swinnerton-Dyer Formula from Low Selmer
+        Corank" (OpenAI, October 2026: unrefereed, not yet formalized;
+        _BSD_RANK_LE_1).
 
         EXAMPLES::
 
@@ -2681,11 +2723,41 @@ class _Sha:
             9
         """
         import math
-        import _sage_ec as _ec
         from sage_all import QQ, Integer
-        E = self._E
         from fractions import Fraction
+        E = self._E
         T = int(E.torsion_order())
+        w, xlo, xhi = self._quotient()
+        if w == -1:
+            ks = range(max(1, math.ceil(xlo)), math.floor(xhi) + 1)
+            if len(ks) != 1:
+                raise ArithmeticError("Sha_an in [%r, %r] is not a unique positive integer: is E.gens()[0] a generator?" % (float(xlo), float(xhi)))
+            return Integer(ks[0])
+        q = E.lseries().L_ratio()
+        if q == 0:
+            raise NotImplementedError("Sha.an() in analytic rank >= 2 is not implemented")
+        s = Fraction(int(q.numerator()), int(q.denominator())) * T * T / E.tamagawa_product()
+        return Integer(s.numerator) if s.denominator == 1 else QQ(s.numerator, s.denominator)
+
+    def an_interval(self):
+        """(lo, hi): exact Fractions enclosing the BSD quotient
+        L^(r)(E,1) #E(Q)_tors^2 / (r! Omega_E Reg prod c_p) for analytic rank
+        r = 0 or 1 (Reg from E.gens()[0] in rank 1), proved given those
+        points.
+
+        EXAMPLES::
+
+            sage: lo, hi = EllipticCurve('11a1').sha().an_interval()  # sagebrush only
+            sage: lo <= 1 <= hi  # sagebrush only
+            True
+        """
+        return self._quotient()[1:]
+
+    def _quotient(self):
+        import _sage_ec as _ec
+        E = self._E
+        T = int(E.torsion_order())
+        c = int(E.tamagawa_product())
         lv = _ec.l_value_ball(E._ldata())
         if lv is None:
             raise ArithmeticError("the root number of %r is not decided by the enclosures" % (E,))
@@ -2693,25 +2765,17 @@ class _Sha:
         if w == -1:
             if lo <= 0 <= hi:
                 raise NotImplementedError("Sha.an(): L'(E,1) is not shown nonzero (analytic rank >= 3?)")
-            # L'(E,1) = Omega Reg #Sha prod c_p / #E(Q)_tors^2, with Reg the
-            # height of a generator (E.gens()), everything on balls; the
-            # value is an integer, the unique one in the interval
+            # L'(E,1) = Omega Reg #Sha prod c_p / #E(Q)_tors^2, Reg the
+            # height of E.gens()[0], everything on balls
             P = E.gens()[0]
             m = E.minimal_model()
             hlo, hhi = _ec.canonical_height_ball(m._a, m._to_min(P), E._bad())
             om = _ec.real_period_ball(m._a)
-            c = int(E.tamagawa_product())
-            dlo, dhi = om[0] * hlo * c, om[1] * hhi * c
-            xlo, xhi = _ec._iv_quotient(lo * T * T, hi * T * T, dlo, dhi)
-            ks = range(max(1, math.ceil(xlo)), math.floor(xhi) + 1)
-            if len(ks) != 1:
-                raise ArithmeticError("Sha_an in [%r, %r] is not a unique positive integer: is %r a generator?" % (float(xlo), float(xhi), P))
-            return Integer(ks[0])
-        if lo <= 0 <= hi and E.lseries().L_ratio() == 0:
-            raise NotImplementedError("Sha.an() in analytic rank >= 2 is not implemented")
-        q = E.lseries().L_ratio()
-        s = Fraction(int(q.numerator()), int(q.denominator())) * T * T / E.tamagawa_product()
-        return Integer(s.numerator) if s.denominator == 1 else QQ(s.numerator, s.denominator)
+            return (-1,) + _ec._iv_quotient(lo * T * T, hi * T * T, om[0] * hlo * c, om[1] * hhi * c)
+        xlo, xhi = E.lseries().L_ratio_interval()
+        if xlo <= 0 <= xhi:
+            raise NotImplementedError("Sha.an(): L(E,1) is not shown nonzero (analytic rank >= 2?)")
+        return (1, xlo * T * T / c, xhi * T * T / c)
 
 
 def _m_log(x):
@@ -2969,6 +3033,24 @@ def EllipticCurve(x, y=None):
 
 # ------------------------------------------------------------------ newforms
 
+# The theorem behind the default (conditional) answers of L_ratio() and
+# Sha.an() in analytic rank <= 1; its status is stated in their docstrings
+# and errors.  Change it here (and there) once the result is refereed or
+# formalized.
+_BSD_RANK_LE_1 = ('the full BSD formula in analytic rank <= 1, claimed in "Exact Birch-Swinnerton-Dyer '
+                  'Formula from Low Selmer Corank" (OpenAI, October 2026: unrefereed, not yet formalized)')
+
+
+def _nonneg(n):
+    """n as a nonnegative int index (IndexError otherwise, as in Sage)."""
+    if isinstance(n, bool) or int(n) != n:
+        raise TypeError("index must be an integer, not %r" % (n,))
+    n = int(n)
+    if n < 0:
+        raise IndexError("coefficient index %d must be nonnegative" % n)
+    return n
+
+
 def _qexp(coeffs, prec):
     """sum coeffs[n-1] q^n + O(q^prec), as Sage prints a power series."""
     terms = []
@@ -3066,7 +3148,10 @@ class NewformOrbit:
             sage: newform_orbits(23)[0].traces(10)  # sagebrush only
             [2, -1, 0, -1, -2, -5, 2, 0, 4, 6]
         """
-        return self._known(n or 0)[: n or len(self._traces)]
+        if n is None:
+            return self._known(0)[: len(self._traces)]
+        n = _nonneg(n)
+        return self._known(n)[:n]
 
     def trace_form(self, prec=6):
         """The trace form: the sum of the conjugate newforms, as a q-expansion.
@@ -3168,9 +3253,12 @@ class Newform:
         if isinstance(n, (list, tuple)):
             return [self[i] for i in n]
         n = n if n is not None else 20
-        return list(self._o._known(n)[:n])
+        return list(self._o._known(_nonneg(n))[:n])
 
     def __getitem__(self, n):
+        # (a negative n read the cached list from its end, so f[-2] depended
+        # on the precision computed so far: the second review's R2-MOD-F5)
+        n = _nonneg(n)
         if n == 0:
             return 0
         return self._o._known(n)[n - 1]

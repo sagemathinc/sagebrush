@@ -148,10 +148,15 @@ pub fn integral_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Integ
             return Err(format!("N = {}: the reconstructed functionals are not exactly the orbit's dual", n));
         }
         let x = piv1[0] as u32;
-        let c: Vec<(u64, Vec<i64>)> = crate::par::map_slice(&primes, |&l| {
+        // (checked: entries of w fitting i64 do not make their Hecke pairings
+        // fit, the second review's R2-MOD-F7)
+        let c: Vec<(u64, Option<Vec<i64>>)> = crate::par::map_slice(&primes, |&l| {
             let img = Space::hecke_image(&pres, &linalg::heilbronn(l as i64), x);
-            (l, (0..k).map(|r| img.iter().fold(0i128, |acc, &(g2, s)| acc + s as i128 * w[r][g2 as usize] as i128) as i64).collect())
+            (l, (0..k).map(|r| {
+                img.iter().try_fold(0i128, |acc, &(g2, s)| acc.checked_add((s as i128).checked_mul(w[r][g2 as usize] as i128)?)).and_then(|v| i64::try_from(v).ok())
+            }).collect())
         });
+        let c: Vec<(u64, Vec<i64>)> = c.into_iter().map(|(l, v)| v.map(|v| (l, v)).ok_or_else(|| format!("N = {}: a Hecke coordinate at {} exceeds 64 bits", n, l))).collect::<Result<_, _>>()?;
         let traces_check = check_traces(&orbit.traces, &c, crate::newforms::ELL);
         out.push(IntegralOrbit { orbit, w, x, c, traces_check });
     }
