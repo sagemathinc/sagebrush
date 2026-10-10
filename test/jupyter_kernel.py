@@ -94,7 +94,9 @@ big = tempfile.mkdtemp(prefix="sagebrush-k3d-")
 r, m = run(kc, "import os, k3d, numpy as np\nos.chdir(%r)\nk3d.points(np.random.rand(150000, 3).astype(np.float32))" % big, timeout=120)
 d = of(m, "display_data") + of(m, "execute_result")
 sizes = [sum(len(v) for v in c["data"].values()) for c in d]
-check("big 3D scene: an iframe on a saved page", d and max(sizes) < 5000 and "<iframe" in d[-1]["data"]["text/html"]
+# (in CoCalc an iframe of the page; elsewhere a link to it)
+shown = "<iframe" if os.environ.get("COCALC_PROJECT_ID") else ".sagebrush/plot3d-"
+check("big 3D scene: an iframe on a saved page", d and max(sizes) < 5000 and shown in d[-1]["data"]["text/html"]
       and not any("application/vnd.sagebrush.scene3d+json" in c["data"] for c in d)
       and len(os.listdir(os.path.join(big, ".sagebrush"))) == 1, (sizes, of(m, "error"), of(m, "stream")))
 shutil.rmtree(big, ignore_errors=True)

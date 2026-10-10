@@ -1083,7 +1083,8 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
         };
         let (basis, cov) = res.unwrap();
         if lattice.is_none() {
-            lattice = Some(group_of(Some(det.clone()), std::f64::consts::SQRT_2 * hr_est / reg)?);
+            // (not the kernel's d: it need not be det of the sel rows)
+            lattice = Some(group_of(None, std::f64::consts::SQRT_2 * hr_est / reg)?);
         }
         let (h, cyc) = lattice.clone().unwrap();
         let ratio = h.to_f64().unwrap_or(f64::INFINITY) * reg / hr_est;

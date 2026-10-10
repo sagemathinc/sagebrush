@@ -57,14 +57,31 @@ pub fn solve1(e: &Expr, x: &str) -> Vec<Expr> {
         if contains_infinity(&v) {
             return false;
         }
-        if !free_symbols(&v).is_empty() || v.is_zero() || crate::simplify::simplify_full(&v).is_zero() {
+        if !free_symbols(&v).is_empty() || v.is_zero() {
             return true;
         }
-        match crate::eval::to_c64(&v) {
-            Some((re, im)) if re.is_finite() && im.is_finite() => {
-                let scale = 1.0 + crate::eval::to_c64(r).map_or(0.0, |w| w.0.hypot(w.1));
-                re.hypot(im) <= 1e-9 * scale
+        let sv = crate::simplify::simplify_full(&v);
+        if sv.is_zero() {
+            return true;
+        }
+        // a certified nonzero residual drops the candidate (sqrt(1) + 1 = 2,
+        // also beside a root of size 10^12; 2 10^-20 is not 0 either)
+        // (an equation with floating-point numbers: its roots are rounded, so
+        // only the relative test below applies)
+        if !has_float(&z) {
+            if let Some((re, im)) = crate::domain::complex_encl(&sv) {
+                return re.contains_zero() && im.contains_zero();
             }
+        }
+        // no enclosure: numerically, relative to the size of the equation's
+        // terms at the candidate (not to the size of the candidate)
+        let terms = match &z.kind {
+            Kind::Add(t) => t.clone(),
+            _ => vec![z.clone()],
+        };
+        let size = terms.iter().filter_map(|t| crate::eval::to_c64(&crate::err::soft(|| subs(t, &[(xs.clone(), r.clone())]))).map(|w| w.0.hypot(w.1))).fold(0.0f64, f64::max);
+        match crate::eval::to_c64(&sv) {
+            Some((re, im)) if re.is_finite() && im.is_finite() => re.hypot(im) <= 1e-12 * size,
             _ => true,
         }
     });
@@ -72,6 +89,10 @@ pub fn solve1(e: &Expr, x: &str) -> Vec<Expr> {
     let mut out: Vec<Expr> = roots.into_iter().map(|r| eq(&xs, &r)).collect();
     out.extend(rest.iter().map(|f| relation(Rel::Eq, &zero(), f)));
     out
+}
+
+fn has_float(e: &Expr) -> bool {
+    matches!(&e.kind, Kind::Num(crate::num::Num::Float(..))) || e.children().iter().any(has_float)
 }
 
 fn contains_infinity(e: &Expr) -> bool {

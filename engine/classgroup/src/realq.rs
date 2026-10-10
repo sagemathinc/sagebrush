@@ -372,7 +372,8 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
         // h* (once: a smaller R* only loosens the HNF's early stop)
         if lattice.is_none() {
             let enough = std::f64::consts::SQRT_2 * hr_est / r;
-            lattice = Some(lattice_group(dense, c, sel, Some(det), enough, seed, debug)?);
+            // (not the kernel's d: it need not be det of the sel rows)
+            lattice = Some(lattice_group(dense, c, sel, None, enough, seed, debug)?);
         }
         let (h, cyc) = lattice.clone().unwrap();
         let ratio = h.to_f64().unwrap_or(f64::INFINITY) * r / hr_est;

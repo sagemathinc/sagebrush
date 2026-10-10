@@ -371,12 +371,7 @@ _Sa = AlphabeticStrings()
 raises(ValueError, _Sa, [26]); raises(ValueError, SubstitutionCryptosystem(_Sa), _Sa("A" * 26)); raises(ValueError, TranspositionCryptosystem, _Sa, -1)
 print("extended ok")
 
-# Systematic review, documents and I/O (DOC-F4, F8..F12)
-import numpy as _np2, os as _os, tempfile as _tf
-_d = _tf.mkdtemp(); _p = _os.path.join(_d, "a.txt")
-_np2.savetxt(_p, _np2.array([[1, 2], [3, 4]]), fmt="%d", header="units\n99 100", footer="end\n777 888")
-assert _np2.loadtxt(_p).shape == (2, 2)
-print("io ok")
+# (DOC-F10..F12, text I/O: numpy-tests/test_textio.py, against NumPy)
 
 # Systematic review, arithmetic and polynomials (ARI-F4..F8, POL-F2..F6)
 from sagebrush.sage import crt, PolynomialRing
@@ -389,3 +384,10 @@ _K9 = GF(9, "a"); _a9 = _K9.gen()
 assert _a9.frobenius(-1).frobenius() == _a9
 raises(ValueError, GF, 9, "b", modulus=[QQ(3) / 2, 0, 1])
 print("arith2 ok")
+
+# Second review (2026-10-10): solve keeps no certified non-solution
+from sagebrush.sage import solve, sqrt, SR, var
+_xs = var("x")
+assert solve(sqrt(_xs - 10**12) == -1, _xs) == [] and solve(sqrt(_xs) == -SR("1/10^20"), _xs) == []
+assert str(solve(sqrt(_xs - 10**12) == 1, _xs)) == "[x == 1000000000001]"
+print("rereview ok")
