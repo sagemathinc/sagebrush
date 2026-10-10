@@ -155,8 +155,9 @@ export interface Derived {
   al: [number, number | null][]; // Atkin-Lehner sign w_p for p | N (null when p^2 | N)
   fricke: number | null;
   sign: number | null; // sign of the functional equation, (-1)^(k/2) w_N
-  cm: number | null; // a negative fundamental discriminant D: tr a_p = 0 for every inert p < BOUND
-  cmInert: number; // how many inert primes that rests on
+  cm: number | null; // a negative fundamental discriminant D (evidence, below)
+  cmInert: number; // inert primes p < BOUND with tr a_p = 0 (all of them)
+  cmExact: number; // inert primes p with p^2 <= BOUND where every conjugate a_p = 0
 }
 
 /** Invariants that follow from the stored traces.  For p || N every form in
@@ -172,14 +173,25 @@ export function derive(sp: Space, f: Orbit): Derived {
   }
   const fricke = al.every(([, w]) => w !== null) ? al.reduce((s, [, w]) => s * (w as number), 1) : null;
   const sign = fricke === null ? null : (k % 4 === 0 ? 1 : -1) * fricke;
-  let cm: number | null = null, cmInert = 0;
+  // CM by Q(sqrt(-d)): a_p = 0 for every inert good p.  A vanishing trace
+  // is not that: an inner twist by the character of Q(sqrt(-d)) pairs a_p
+  // with -a_p (63.2.a.b: tr a_2 = 0, a_2 = +-sqrt 3; the systematic review's
+  // MOD-F7).  For good p, a_(p^2) = a_p^2 - p^(k-1) (trivial character, real
+  // a_p), so tr a_(p^2) + dim p^(k-1) is the sum of the squares of the
+  // conjugates of a_p: zero exactly when every one vanishes.  Required at
+  // every inert p with p^2 <= BOUND (and at least one), and tr a_p = 0 at
+  // every inert p < BOUND.
+  let cm: number | null = null, cmInert = 0, cmExact = 0;
   const ps = primesUpTo(Math.min(BOUND, f.traces.length));
   for (const d of divisors(N)) {
     if (d < 3 || !fundamental(-d)) continue;
     const inert = ps.filter((p) => N % p !== 0 && kronecker(-d, p) === -1);
-    if (inert.length >= 20 && inert.every((p) => tr(p) === 0n)) { cm = -d; cmInert = inert.length; break; }
+    if (inert.length < 20 || !inert.every((p) => tr(p) === 0n)) continue;
+    const small = inert.filter((p) => p * p <= f.traces.length);
+    const exact = small.every((p) => tr(p * p) === -BigInt(f.dim) * BigInt(p) ** BigInt(k - 1));
+    if (small.length > 0 && exact) { cm = -d; cmInert = inert.length; cmExact = small.length; break; }
   }
-  return { al, fricke, sign, cm, cmInert };
+  return { al, fricke, sign, cm, cmInert, cmExact };
 }
 
 // ------------------------------------------------------------------ from the engine
@@ -219,7 +231,9 @@ export function sameMath(a: Space, b: Space): string | null {
     const x = a.newforms[i], y = b.newforms[i];
     if (x.label !== y.label || x.dim !== y.dim) return `orbit ${i + 1}: ${x.label} (dimension ${x.dim}), stored ${y.label} (dimension ${y.dim})`;
     if (x.charpoly.join() !== y.charpoly.join()) return `${x.label}: the characteristic polynomial differs`;
-    const n = Math.min(x.traces.length, y.traces.length);
+    // (every stored trace: an empty recomputed list matched before)
+    if (x.traces.length !== y.traces.length) return `${x.label}: ${x.traces.length} traces, stored ${y.traces.length}`;
+    const n = x.traces.length;
     for (let j = 0; j < n; j++) if (x.traces[j] !== y.traces[j]) return `${x.label}: tr a_${j + 1} = ${x.traces[j]}, stored ${y.traces[j]}`;
   }
   return null;
