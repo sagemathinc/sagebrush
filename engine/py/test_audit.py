@@ -228,3 +228,15 @@ try:
 except NotImplementedError:
     pass
 print("groebner2 ok")
+# systematic review ROOT-F1..F3
+from sagebrush.sage import QQbar, AA, RIF, exp, sin, polygen as _pg
+_t = _pg(QQ, "t")
+_rs = (10**120*(_t - 1)**2 - 2).roots(QQbar)
+_a, _b = _rs[0][0], _rs[1][0]
+assert (_a < 1) != (_b < 1) and _a != _b
+_s = AA(QQ(2)/10**330).sqrt()
+assert _s > 0
+assert str(QQbar(I).n(prec=100)).endswith("*I")
+_e = RIF(10**100*(exp(QQ(1)/10**100) - 1))
+assert _e.lower() <= 1 <= _e.upper()
+print("roots ok")

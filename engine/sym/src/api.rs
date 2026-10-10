@@ -403,6 +403,13 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             vec![format!("{:e}", x), format!("{:e}", y)]
         }
         "pysrc" => vec![pysrc(&d(arg(0)))],
+        // a certified enclosure of a real constant (interval.rs: outward
+        // rounding, LIBM's allowance), ends as round-tripping doubles; empty
+        // when there is none
+        "enclose" => match crate::interval::encl(&d(arg(0))) {
+            Some(i) if i.0.is_finite() && i.1.is_finite() => vec![format!("{:e}", i.0), format!("{:e}", i.1)],
+            _ => vec![],
+        },
         "eval_many" => {
             let e = d(arg(0));
             let xs: Vec<f64> = arg(2).split(',').filter(|t| !t.is_empty()).map(|t| t.parse().unwrap_or(f64::NAN)).collect();

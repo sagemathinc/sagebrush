@@ -2283,14 +2283,30 @@ class RealIntervalField_:
             q = _F(x)
             return self._mk(q, q)
         if getattr(x, "_s", None) is not None:
-            v = evaluate(x, self._prec + 40)
-            if isinstance(v, ComplexNumberMP):
-                if not v._im.is_zero():
-                    raise TypeError("unable to convert %r to a real interval" % (x,))
-                v = v._re
-            q = v._q()
-            err = abs(q) / (_F(2) ** (self._prec + 30)) + _F(1, 2 ** (self._prec + 60))
-            return self._mk(q - err, q + err)
+            # an exact number is a point; anything else gets the engine's
+            # certified enclosure (outward rounding, in doubles), or none: a
+            # radius guessed around an approximation enclosed 0 for
+            # 10^100 (exp(10^-100) - 1), which is above 1 (the systematic
+            # review's ROOT-F3)
+            s = x._s
+            if s.startswith("n") and s.endswith(";") and "/" in s:
+                try:
+                    q = _F(*map(int, s[1:-1].split("/")))
+                    return self._mk(q, q)
+                except ValueError:
+                    pass
+            if str(x) in ("pi", "e"):
+                # a constant alone: its high-precision value has no
+                # cancellation, so a tight interval around it is sound
+                v = evaluate(x, self._prec + 40)
+                q = v._q()
+                err = abs(q) / (_F(2) ** (self._prec + 30))
+                return self._mk(q - err, q + err)
+            import _sage_expr
+            r = _sage_expr._call("enclose", s)
+            if len(r) == 2:
+                return self._mk(_F(float(r[0])), _F(float(r[1])))
+            raise NotImplementedError("no certified enclosure of %r" % (x,))
         q = _F(x)
         return self._mk(q, q)
 
