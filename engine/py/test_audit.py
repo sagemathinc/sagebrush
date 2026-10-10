@@ -410,4 +410,10 @@ assert _Rz.ideal(2, 0).gens() == (_Rz(2),) and _Rz(1) not in _Rz.ideal(2, 0) if 
 assert PolynomialRing(QQ, []).is_field() and not PolynomialRing(ZZ, []).is_field()
 _o = SR(oo)
 assert bool(_o == oo) and not bool(_o == -oo) and bool(_o > 5) and not bool(_o < 5) and bool(-_o < _o) and not bool(_o > I) and not bool(_o > _xs)
+_l2 = limit(1 / _xs**2, x=0)
+assert len({oo, _l2}) == 1 and _l2 in {oo} and _l2 in [oo] and {_l2: 1}.get(oo) == 1  # R2-SYMCALC-F9
+for _d in ("+", "-", None):  # R2-SYMCALC-F10: asech's cut is (-oo, 0] and [1, oo)
+    _k = {"dir": _d} if _d else {}
+    raises(ValueError, limit, SR("asech(2+I*x)"), x=0, **_k)
+assert str(limit(SR("asech(3+x^2)"), x=0)) == "arcsech(3)" and str(limit(SR("asech(x)"), x=SR(1) / 2)) == "arcsech(1/2)"
 print("rereview2 ok")

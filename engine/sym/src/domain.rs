@@ -111,8 +111,10 @@ pub enum Cut {
     RealOutsideUnit,
     /// imaginary, |t| >= 1: atan, asinh
     ImagOutsideUnit,
-    /// (-oo, 1]: acosh, asech (a superset of asech's)
+    /// (-oo, 1]: acosh
     BelowOne,
+    /// (-oo, 0] and [1, oo): asech (acosh(1/t))
+    RealOutsideZeroOne,
     /// real, |t| <= 1: asec, acsc, acoth (1/t on their cuts)
     RealUnit,
     /// imaginary, |t| <= 1: acot, acsch
@@ -131,7 +133,7 @@ impl Cut {
     /// infinite (so substitution for a real argument is sound): log(x) for
     /// x < 0 takes the values from above all along.
     pub fn along_real_axis(self) -> bool {
-        matches!(self, Cut::NonPositive | Cut::RealOutsideUnit | Cut::BelowOne)
+        matches!(self, Cut::NonPositive | Cut::RealOutsideUnit | Cut::BelowOne | Cut::RealOutsideZeroOne)
     }
 }
 
@@ -148,7 +150,8 @@ pub fn cut_of(e: &Expr) -> Option<(Cut, &Expr)> {
                 Fun::Log => Cut::NonPositive,
                 Fun::Asin | Fun::Acos | Fun::Atanh => Cut::RealOutsideUnit,
                 Fun::Atan | Fun::Asinh => Cut::ImagOutsideUnit,
-                Fun::Acosh | Fun::Asech => Cut::BelowOne,
+                Fun::Acosh => Cut::BelowOne,
+                Fun::Asech => Cut::RealOutsideZeroOne,
                 Fun::Asec | Fun::Acsc | Fun::Acoth => Cut::RealUnit,
                 Fun::Acot | Fun::Acsch => Cut::ImagUnit,
                 Fun::Sign | Fun::Heaviside => Cut::JumpAtZero,
@@ -202,6 +205,7 @@ pub fn off_cut(cut: Cut, v: &Expr) -> bool {
         Cut::RealOutsideUnit => im_nonzero || (re.0 > -1.0 && re.1 < 1.0),
         Cut::ImagOutsideUnit => re_nonzero || (im.0 > -1.0 && im.1 < 1.0),
         Cut::BelowOne => im_nonzero || re.0 > 1.0,
+        Cut::RealOutsideZeroOne => im_nonzero || (re.0 > 0.0 && re.1 < 1.0),
         Cut::RealUnit => im_nonzero || re.0 > 1.0 || re.1 < -1.0,
         Cut::ImagUnit => re_nonzero || im.0 > 1.0 || im.1 < -1.0,
         // real arguments away from the jumps
@@ -221,6 +225,10 @@ pub fn along_cut_ok(e: &Expr, cut: Cut, v: &Expr) -> bool {
     }
     if matches!(&e.kind, Kind::Fun(Fun::Atanh, _)) {
         return complex_encl(v).is_some_and(|(re, im)| !im.contains_zero() || re.1 < -1.0 || (re.0 > -1.0 && re.1 < 1.0) || re.0 > 1.0);
+    }
+    // asech is infinite at 0
+    if matches!(&e.kind, Kind::Fun(Fun::Asech, _)) {
+        return complex_encl(v).is_some_and(|(re, im)| !im.contains_zero() || !re.contains_zero());
     }
     true
 }
