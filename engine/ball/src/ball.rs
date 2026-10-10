@@ -203,6 +203,7 @@ impl Ball {
 
     /// The midpoint rounded to prec bits, its error added to the radius.
     pub fn rounded(&self, prec: u64) -> Ball {
+        let prec = prec.min(crate::funcs::PREC_MAX);
         let (m, e, err) = round(self.m.clone(), self.e, prec);
         Ball { m, e, r: self.r.add(err) }.normalize()
     }
@@ -316,8 +317,25 @@ impl Ball {
         cmp_dyadic(&sl, sle, &ou, oue) != Ordering::Greater && cmp_dyadic(&ol, ole, &su, sue) != Ordering::Greater
     }
 
-    /// The smallest ball (to the radius's rounding) containing a and b.
+    /// A ball containing a and b: the smallest (to the radius's rounding)
+    /// when their endpoints are within 2^22 bits of each other; else one
+    /// centered at a's midpoint (BALL-F6: no unbounded alignment, and an
+    /// infinite ball gives the ball of everything).
     pub fn hull(a: &Ball, b: &Ball) -> Ball {
+        if !a.is_finite() || !b.is_finite() {
+            return Ball::indeterminate();
+        }
+        let span = |x: &Ball| {
+            let lo = if x.m.is_zero() { x.r.top() } else { x.e.min(x.r.top() - 34) };
+            let hi = if x.m.is_zero() { x.r.top() } else { top(&x.m, x.e).max(x.r.top()) };
+            (lo, hi)
+        };
+        let ((alo, ahi), (blo, bhi)) = (span(a), span(b));
+        if ahi.max(bhi) - alo.min(blo) > 1 << 22 {
+            // radius max(a.r, |b - mid(a)| + b.r), from a ball difference
+            let d = b.sub(&Ball::exact(a.m.clone(), a.e), 64);
+            return Ball { m: a.m.clone(), e: a.e, r: a.r.max(d.upper_abs()) }.normalize();
+        }
         let (al, ale) = a.lower();
         let (bl, ble) = b.lower();
         let (au, aue) = a.upper();
@@ -347,6 +365,7 @@ impl Ball {
     }
 
     pub fn add(&self, o: &Ball, prec: u64) -> Ball {
+        let prec = prec.min(crate::funcs::PREC_MAX);
         let r = self.r.add(o.r);
         if o.m.is_zero() {
             return Ball { m: self.m.clone(), e: self.e, r }.rounded(prec);
@@ -396,6 +415,7 @@ impl Ball {
 
     /// self / o, or None if o contains 0.
     pub fn div(&self, o: &Ball, prec: u64) -> Option<Ball> {
+        let prec = prec.min(crate::funcs::PREC_MAX);
         if o.contains_zero() {
             return None;
         }
@@ -424,6 +444,7 @@ impl Ball {
     /// sqrt over the ball's nonnegative part; None for a negative midpoint.
     /// A ball containing 0 gives [0 +- sqrt(upper)].
     pub fn sqrt(&self, prec: u64) -> Option<Ball> {
+        let prec = prec.min(crate::funcs::PREC_MAX);
         if self.m.is_negative() || !self.is_finite() {
             return None;
         }
@@ -480,13 +501,21 @@ impl Ball {
 /// x 2^k for display, in steps (2^k alone underflows before x 2^k does:
 /// 2^-1060 displayed as 0, the review's BALL-F5).
 fn ldexp(mut x: f64, mut k: i64) -> f64 {
-    while k > 1000 && x.is_finite() {
+    // (stops as soon as x overflows or underflows: inf * 2^-k with the
+    // rest of a huge k was NaN, the review's BALL-F5)
+    while k > 1000 {
         x *= 2f64.powi(1000);
         k -= 1000;
+        if !x.is_finite() {
+            return x;
+        }
     }
-    while k < -1000 && x != 0.0 {
+    while k < -1000 {
         x *= 2f64.powi(-1000);
         k += 1000;
+        if x == 0.0 {
+            return x;
+        }
     }
     x * 2f64.powi(k as i32)
 }
