@@ -1,8 +1,10 @@
 // Compile and run Python modules.
 
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync } from "fs";
 import { join, resolve as resolvePath, dirname } from "path";
-import { runInThisContext } from "vm";
+import { runInThisContext, Script } from "vm";
+import { createHash } from "crypto";
+import { homedir } from "os";
 import { initParser, parse, PySyntaxError } from "./parse";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
@@ -56,6 +58,82 @@ function syntaxError(e: PySyntaxError): any {
   return err;
 }
 
+// A per-user cache of compiled library modules (and V8's code cache for
+// them), for bundled builds: their build id names the compiler, so a new
+// build never reads an older build's output.  --sage imports most of the
+// library, and compiling its 2.9 MB of Python took about 1.5 s at every start.
+// Best effort: an unwritable or sandboxed home just compiles as before.
+const BUILD_ID: string | undefined = (globalThis as any).__SAGEBRUSH_BUILD_ID__;
+let cacheRoot: string | null | undefined;
+function compileCacheDir(): string | null {
+  if (cacheRoot !== undefined) return cacheRoot;
+  cacheRoot = null;
+  if (!BUILD_ID || process.env.SAGEBRUSH_NO_COMPILE_CACHE) return null;
+  try {
+    const base = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
+    const parent = join(base, "sagebrush");
+    const dir = join(parent, "pyjs-" + BUILD_ID);
+    if (!existsSync(dir)) {
+      // one level at a time: Node's recursive mkdir never returns under
+      // some paths (/proc), and a cache must not hang the program
+      for (const d of [base, parent, dir]) {
+        if (!existsSync(d)) mkdirSync(d);
+      }
+      // older builds' caches (about 15 MB each) are not read again
+      for (const f of readdirSync(parent)) {
+        if (f.startsWith("pyjs-") && f !== "pyjs-" + BUILD_ID) {
+          try {
+            rmSync(join(parent, f), { recursive: true, force: true });
+          } catch {}
+        }
+      }
+    }
+    cacheRoot = dir;
+  } catch {
+    cacheRoot = null;
+  }
+  return cacheRoot;
+}
+
+function writeAtomic(path: string, data: string | Uint8Array): void {
+  try {
+    const tmp = path + "." + process.pid + ".tmp";
+    writeFileSync(tmp, data);
+    renameSync(tmp, path);
+  } catch {}
+}
+
+// The compiled module, from the cache when there.
+function compileCached(source: string, filename: string, name: string, sage: boolean, jsName: string): { compiled: Compiled; script: Script } {
+  const dir = filename.startsWith(libDir()) ? compileCacheDir() : null;
+  if (dir !== null) {
+    const key = createHash("sha256").update(name + "\0" + (sage ? "1" : "0") + "\0" + source).digest("hex").slice(0, 32);
+    const jsonPath = join(dir, key + ".json");
+    const v8Path = join(dir, key + ".v8");
+    let compiled: Compiled | null = null;
+    try {
+      compiled = JSON.parse(readFileSync(jsonPath, "utf8"));
+    } catch {}
+    if (compiled === null) {
+      compiled = compile(source, filename, name, false, false, { sage });
+      writeAtomic(jsonPath, JSON.stringify(compiled));
+    }
+    let cachedData: Buffer | undefined;
+    try {
+      cachedData = readFileSync(v8Path);
+    } catch {}
+    const script = new Script(compiled.code, { filename: jsName, cachedData });
+    if (cachedData === undefined || (script as any).cachedDataRejected) {
+      try {
+        writeAtomic(v8Path, script.createCachedData());
+      } catch {}
+    }
+    return { compiled, script };
+  }
+  const compiled = compile(source, filename, name, false, false, { sage });
+  return { compiled, script: new Script(compiled.code, { filename: jsName }) };
+}
+
 // Execute `source` as module `name`, registering it in sys.modules first.
 export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage")): any {
   const m = R.newModule(name);
@@ -64,16 +142,17 @@ export function execModule(source: string, filename: string, name: string, isPac
   if (isPackage) m.__path__ = [dirname(filename)];
   m.__builtins__ = R.builtins;
   R.dictSet(R.sysModules, name, m);
+  const jsName = "py:" + resolvePath(filename);
   let compiled: Compiled;
+  let script: Script;
   try {
-    compiled = compile(source, filename, name, false, false, { sage });
+    ({ compiled, script } = compileCached(source, filename, name, sage, jsName));
   } catch (e) {
     if (e instanceof PySyntaxError) throw syntaxError(e);
     throw e;
   }
-  const jsName = "py:" + resolvePath(filename);
   R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap });
-  const fn = runInThisContext(compiled.code, { filename: jsName });
+  const fn = script.runInThisContext();
   try {
     if (sage) R.loader.exec("from sage_all import *\n", m, "exec", "<sage>");
     fn(m, R);
