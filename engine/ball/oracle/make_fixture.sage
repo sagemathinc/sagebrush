@@ -48,3 +48,7 @@ for prec in [53, 100, 256]:
         x = x_of(m, e)
         out("li2", prec, m, e, C(x).polylog(2).real())
         out("ti2", prec, m, e, C(0, x).polylog(2).imag())
+for prec in [53, 100, 256]:
+    for (m, e) in [(2, 0), (1, -30), (45, 0), (1, -1), (10, 0), (100, 0), (3, -2), (7, 1), (12345, -10), (1, -300)]:
+        x = x_of(m, e)
+        out("e1", prec, m, e, C(x).exp_integral_e(1).real())

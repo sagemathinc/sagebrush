@@ -38,6 +38,7 @@ fn contains_arb() {
             "catalan" => Some(catalan(prec)),
             "li2" => li2(&x, prec),
             "ti2" => ti2(&x, prec),
+            "e1" => sagebrush_ball::e1(&x, prec),
             _ => panic!("{}", f),
         };
         let ours = ours.unwrap_or_else(|| panic!("{} returned None", line));
@@ -132,9 +133,18 @@ fn dilogarithm_boundaries() {
     let want = pi(p).sqr(p).div_i64(12, p).sub(&ln2(p).sqr(p).mul_2exp(-1), p);
     assert!(li2(&half, p).unwrap().overlaps(&want));
     // a ball reaching 1 encloses Li2 up to pi^2/6; and Li2 refuses beyond 1
-    let near1 = Ball::with_radius(BigInt::from(1), 0, Mag::pow2(-20));
-    let l = li2(&near1, p).unwrap();
+    // a ball whose upper end is 1 encloses Li2 up to pi^2/6; one reaching
+    // beyond 1 (or below -1) is refused, not clipped (BALL-F9)
+    let to1 = Ball::with_radius(BigInt::from((1 << 21) - 1), -21, Mag::pow2(-21));
+    let l = li2(&to1, p).unwrap();
     assert!(l.contains(&pi2_6) && l.contains(&li2(&Ball::exact(BigInt::from((1 << 20) - 1), -20), p).unwrap()));
+    assert!(li2(&Ball::with_radius(BigInt::from(1), 0, Mag::pow2(-3)), p).is_none());
+    assert!(li2(&Ball::with_radius(BigInt::from(-1), 0, Mag::pow2(-3)), p).is_none());
+    assert!(ti2(&Ball::with_radius(BigInt::from(1), 0, Mag::pow2(-3)), p).is_none());
+    // BALL-F8: to_fixed's exponent and size limits
+    assert!(Ball::exact(BigInt::from(1), 1).to_fixed(i64::MAX).is_none());
+    assert!(Ball::one().to_fixed(1 << 40).is_none());
+    assert_eq!(Ball::exact(BigInt::from(3), -1).to_fixed(4).unwrap().0, BigInt::from(24));
     assert!(li2(&Ball::exact(BigInt::from(3), -1), p).is_none());
     assert_eq!(li2(&half, p).unwrap().cmp(&pi2_6), Some(Ordering::Less));
 }
