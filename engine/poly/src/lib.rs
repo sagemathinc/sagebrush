@@ -742,14 +742,28 @@ pub fn squarefree(f: &[BigInt]) -> Vec<(ZPoly, u32)> {
     out
 }
 
-/// Whether f is irreducible over Q (constants are not).
+/// Whether f is irreducible over Q (constants are not; the content is a
+/// unit over Q: 2x + 2 is irreducible, the second review's R2-POL-F5).
 pub fn is_irreducible(f: &[BigInt]) -> bool {
-    let (c, fs) = factor(f);
-    fs.len() == 1 && fs[0].1 == 1 && c.abs().is_one()
+    let (_, fs) = factor(f);
+    fs.len() == 1 && fs[0].1 == 1
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn irreducible_over_q_ignores_content() {
+        use super::*;
+        let z = |v: &[i64]| -> Vec<BigInt> { v.iter().map(|&c| BigInt::from(c)).collect() };
+        for c in [-15i64, -2, -1, 1, 2, 3, 12] {
+            assert!(is_irreducible(&z(&[c, c])), "{} (x + 1)", c);
+            assert!(is_irreducible(&z(&[c, 0, c])), "{} (x^2 + 1)", c);
+            assert!(!is_irreducible(&z(&[-c, 0, c])), "{} (x^2 - 1)", c);
+            assert!(!is_irreducible(&z(&[c])), "{}", c);
+            assert!(!is_irreducible(&z(&[c, 2 * c, c])), "{} (x + 1)^2", c);
+        }
+    }
+
     #[test]
     fn factoring_mod_p() {
         // products of known factors with multiplicities, in several
