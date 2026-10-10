@@ -18,8 +18,10 @@ sage: E.analytic_rank()
   the test fails if that goes down, so raise it when you add examples.
 * `python3 scripts/doctest-oracle.py lib/MODULE.py` runs the same examples in
   real Sage, with Sage's doctester (Sage is an oracle: run, never read).  Mark
-  `# sagebrush only` the examples of Sagebrush-only functions or behaviour;
-  `# needs sage.libs.eclib` the ones the local Sage cannot run.
+  `# sagebrush only` the examples of Sagebrush-only functions or behaviour.
+  The ones the local Sage cannot run (no Maxima, no eclib) are listed in
+  `NEEDS` in the oracle script, which tags them in its scratch copy: the
+  docstrings carry no oracle markers.
   `scripts/oracle-summary.py REPORT` summarizes the disagreements.
 * `python3 scripts/add-examples.py lib/MODULE.py SPEC.py` inserts example
   inputs from a spec, `python3 scripts/doctest-fix.py lib/MODULE.py` fills in
@@ -63,7 +65,7 @@ Differences from Sage that the doctests show and that are not fixed yet:
   raise NotImplementedError.
 
 The local Sage has no Maxima (examples of solve, limit, simplify, desolve,
-... are tagged `# needs maxima`, which Sage skips) and its GAP interface crashes (segmentation fault) on permutation
+... are listed in the oracle script's `NEEDS`, which Sage then skips) and its GAP interface crashes (segmentation fault) on permutation
 groups and Galois groups, so `sage_permgroup` and the `galois_group` examples
 are not checked by the oracle here; that code was validated against GAP
 itself (engine/group/tests) and Magma (engine/galois/tests).

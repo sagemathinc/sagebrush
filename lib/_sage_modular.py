@@ -1639,7 +1639,7 @@ class EllipticCurve_rational_field:
 
         EXAMPLES::
 
-            sage: EllipticCurve([0, 1, 1, -2, 0]).cremona_label()  # needs sage.libs.eclib
+            sage: EllipticCurve([0, 1, 1, -2, 0]).cremona_label()
             '389a1'
         """
         lab = self._cremona_entry()
@@ -2066,7 +2066,7 @@ class EllipticCurve_rational_field:
         EXAMPLES::
 
             sage: E = EllipticCurve('37a1')
-            sage: E.CPS_height_bound()  # abs tol 1e-3  # needs sage.libs.eclib
+            sage: E.CPS_height_bound()  # abs tol 1e-3
             0.16397076103046915
 
         A split I_5 at 11: the largest correction is 6/5 log 11 (Sage and
@@ -2158,15 +2158,15 @@ class EllipticCurve_rational_field:
 
         EXAMPLES::
 
-            sage: EllipticCurve('37a1').gens()  # needs sage.libs.eclib
+            sage: EllipticCurve('37a1').gens()
             [(0 : -1 : 1)]
-            sage: EllipticCurve('11a1').gens()  # needs sage.libs.eclib
+            sage: EllipticCurve('11a1').gens()
             []
-            sage: EllipticCurve([0, 0, 0, -36, 0]).gens()  # needs sage.libs.eclib
+            sage: EllipticCurve([0, 0, 0, -36, 0]).gens()
             [(-3 : -9 : 1)]
-            sage: E = EllipticCurve('389a1'); G = E.gens(); len(G)  # needs sage.libs.eclib
+            sage: E = EllipticCurve('389a1'); G = E.gens(); len(G)
             2
-            sage: E.regulator_of_points(G)  # abs tol 1e-10  # needs sage.libs.eclib
+            sage: E.regulator_of_points(G)  # abs tol 1e-10
             0.152460177943144
         """
         import _sage_ec as _ec
@@ -2302,9 +2302,9 @@ class EllipticCurve_rational_field:
 
         EXAMPLES::
 
-            sage: EllipticCurve('37a1').regulator()  # abs tol 1e-12  # needs sage.libs.eclib
+            sage: EllipticCurve('37a1').regulator()  # abs tol 1e-12
             0.0511114082399687
-            sage: EllipticCurve('11a1').regulator()  # needs sage.libs.eclib
+            sage: EllipticCurve('11a1').regulator()
             1.00000000000000
         """
         gs = self.gens()
@@ -2437,11 +2437,11 @@ class EllipticCurve_rational_field:
         EXAMPLES::
 
             sage: E = EllipticCurve([0, 0, 1, -7, 6])
-            sage: E.two_descent()  # needs sage.libs.eclib
+            sage: E.two_descent()
             True
             sage: E.selmer_rank()
             3
-            sage: EllipticCurve('571a1').two_descent()  # needs sage.libs.eclib
+            sage: EllipticCurve('571a1').two_descent()
             False
 
         Through the cubic field (Sha(571a1)[2] = (Z/2)^2 is in the 2-Selmer
@@ -2764,7 +2764,7 @@ class _Sha:
             1
             sage: EllipticCurve('571a1').sha().an()
             4
-            sage: EllipticCurve('37a1').sha().an()  # needs sage.libs.eclib
+            sage: EllipticCurve('37a1').sha().an()
             1
             sage: EllipticCurve([1, 1, 0, -1154, -15345]).sha().an()
             9

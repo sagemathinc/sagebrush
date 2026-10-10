@@ -453,7 +453,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: (x - x).is_zero(), (sin(x)^2 + cos(x)^2 - 1).is_zero()  # needs maxima
+            sage: (x - x).is_zero(), (sin(x)^2 + cos(x)^2 - 1).is_zero()
             (True, True)
         """
         return _call("is_zero", self._s)[0] == "1"
@@ -715,7 +715,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: var('k n'); (k^2).sum(k, 1, n)  # needs maxima
+            sage: var('k n'); (k^2).sum(k, 1, n)
             (k, n)
             1/3*n^3 + 1/2*n^2 + 1/6*n
         """
@@ -755,7 +755,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: exp(x).taylor(x, 0, 4), sin(x).taylor(x, pi, 3)  # needs maxima
+            sage: exp(x).taylor(x, 0, 4), sin(x).taylor(x, pi, 3)
             (1/24*x^4 + 1/6*x^3 + 1/2*x^2 + x + 1, 1/6*(x - pi)^3 - x + pi)
         """
         if len(args) == 3:
@@ -786,7 +786,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: (sin(x)/x).limit(x=0), (1/x).limit(x=0, dir='+'), ((1 + 1/x)^x).limit(x=oo)  # needs maxima
+            sage: (sin(x)/x).limit(x=0), (1/x).limit(x=0, dir='+'), ((1 + 1/x)^x).limit(x=oo)
             (1, +Infinity, e)
         """
         if kw:
@@ -812,7 +812,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: (x^2 - 4).solve(x), (x^2 == 2).solve(x)  # needs maxima
+            sage: (x^2 - 4).solve(x), (x^2 == 2).solve(x)
             ([x == -2, x == 2], [x == -sqrt(2), x == sqrt(2)])
         """
         return solve(self, v, **kw)
@@ -822,7 +822,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: (x^2 - 1).roots(), ((x - 1)^2*(x + 2)).roots()  # needs maxima
+            sage: (x^2 - 1).roots(), ((x - 1)^2*(x + 2)).roots()
             ([(-1, 1), (1, 1)], [(-2, 1), (1, 2)])
         """
         x = x if x is not None else self.variables()[0]
@@ -926,7 +926,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: (x + x).simplify(), (x^2/x).simplify()  # needs maxima
+            sage: (x + x).simplify(), (x^2/x).simplify()
             (2*x, x)
         """
         return self  # Sage's simplify() only applies Maxima's simplification
@@ -936,7 +936,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: (sin(x)^2 + cos(x)^2).simplify_full()  # needs maxima
+            sage: (sin(x)^2 + cos(x)^2).simplify_full()
             1
         """
         if self.is_relational():
@@ -950,7 +950,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: ((x^2 - 1)/(x + 1)).simplify_rational()  # needs maxima
+            sage: ((x^2 - 1)/(x + 1)).simplify_rational()
             x - 1
         """
         return _one("simplify_rational", self._s)
@@ -962,7 +962,7 @@ class Expression:
 
         EXAMPLES::
 
-            sage: (sin(x)^2 + cos(x)^2).simplify_trig(), (2*sin(x)*cos(x)).trig_simplify()  # needs maxima
+            sage: (sin(x)^2 + cos(x)^2).simplify_trig(), (2*sin(x)*cos(x)).trig_simplify()
             (1, 2*cos(x)*sin(x))
         """
         return _one("simplify_trig", self._s)
@@ -1638,11 +1638,11 @@ def assume(*args):
 
     EXAMPLES::
 
-        sage: assume(x > 0); bool(sqrt(x^2) == x), abs(x)  # needs maxima
+        sage: assume(x > 0); bool(sqrt(x^2) == x), abs(x)
         (True, x)
-        sage: assumptions()  # needs maxima
+        sage: assumptions()
         [x > 0]
-        sage: forget()  # needs maxima
+        sage: forget()
     """
     args = list(args)
     i = 0
@@ -1670,7 +1670,7 @@ def forget(*args):
 
     EXAMPLES::
 
-        sage: assume(x > 0); forget(x > 0); assumptions()  # needs maxima
+        sage: assume(x > 0); forget(x > 0); assumptions()
         []
     """
     if not args:
@@ -1697,9 +1697,9 @@ def assumptions(*args):
 
     EXAMPLES::
 
-        sage: assume(x > 0, x < 1); assumptions()  # needs maxima
+        sage: assume(x > 0, x < 1); assumptions()
         [x > 0, x < 1]
-        sage: forget()  # needs maxima
+        sage: forget()
     """
     if not args:
         return list(_ASSUMPTIONS)
@@ -1717,10 +1717,10 @@ class assuming:
 
     EXAMPLES::
 
-        sage: with assuming(x > 0):  # needs maxima
+        sage: with assuming(x > 0):
         ....:     abs(x)
         x
-        sage: assumptions()  # needs maxima
+        sage: assumptions()
         []
     """
 
@@ -2466,11 +2466,11 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
 
         sage: var('k n')
         (k, n)
-        sage: symbolic_sum(k, k, 1, n), symbolic_sum(k^2, k, 1, n)  # needs maxima
+        sage: symbolic_sum(k, k, 1, n), symbolic_sum(k^2, k, 1, n)
         (1/2*n^2 + 1/2*n, 1/3*n^3 + 1/2*n^2 + 1/6*n)
-        sage: symbolic_sum((1/3)^k, k, 0, oo), symbolic_sum(binomial(n, k), k, 0, n)  # needs maxima
+        sage: symbolic_sum((1/3)^k, k, 0, oo), symbolic_sum(binomial(n, k), k, 0, n)
         (3/2, 2^n)
-        sage: symbolic_sum(1/k^2, k, 1, oo), symbolic_sum(x^k/factorial(k), k, 0, oo)  # needs maxima
+        sage: symbolic_sum(1/k^2, k, 1, oo), symbolic_sum(x^k/factorial(k), k, 0, oo)
         (1/6*pi^2, e^x)
     """
     import sage_all as _sa
@@ -2656,7 +2656,7 @@ def simplify(f):
 
     EXAMPLES::
 
-        sage: simplify(x + x - 1)  # needs maxima
+        sage: simplify(x + x - 1)
         2*x - 1
     """
     return f.simplify() if hasattr(f, "simplify") else f
@@ -2667,7 +2667,7 @@ def taylor(f, *args):
 
     EXAMPLES::
 
-        sage: taylor(1/(1 - x), x, 0, 4), taylor(cos(x), x, 0, 6)  # needs maxima
+        sage: taylor(1/(1 - x), x, 0, 4), taylor(cos(x), x, 0, 6)
         (x^4 + x^3 + x^2 + x + 1, -1/720*x^6 + 1/24*x^4 - 1/2*x^2 + 1)
     """
     if _callable(f):
@@ -2680,7 +2680,7 @@ def limit(f, *args, dir=None, **kw):
 
     EXAMPLES::
 
-        sage: limit(sin(x)/x, x=0), limit(1/x, x=0, dir='-'), lim((x^2 - 1)/(x - 1), x=1)  # needs maxima
+        sage: limit(sin(x)/x, x=0), limit(1/x, x=0, dir='-'), lim((x^2 - 1)/(x - 1), x=1)
         (1, -Infinity, 2)
     """
     if _callable(f):
@@ -3013,11 +3013,11 @@ def solve(f, *args, **kw):
 
     EXAMPLES::
 
-        sage: solve(x^2 == 4, x)  # needs maxima
+        sage: solve(x^2 == 4, x)
         [x == -2, x == 2]
         sage: var('y')
         y
-        sage: solve([x + y == 3, x - y == 1], x, y)  # needs maxima
+        sage: solve([x + y == 3, x - y == 1], x, y)
         [[x == 2, y == 1]]
         sage: a = var('a')
         sage: solve(sin(x) == 0, x)  # sagebrush only
@@ -3356,9 +3356,9 @@ def desolve(de, dvar, ics=None, ivar=None, show_method=False, contrib_ode=False,
     EXAMPLES::
 
         sage: y = function('y')(x)
-        sage: desolve(diff(y, x) == y, y)  # needs maxima
+        sage: desolve(diff(y, x) == y, y)
         _C*e^x
-        sage: desolve(diff(y, x, 2) + y == 0, y)  # needs maxima
+        sage: desolve(diff(y, x, 2) + y == 0, y)
         _K2*cos(x) + _K1*sin(x)
     """
     f, v = _dvar(dvar, ivar)
@@ -3378,7 +3378,7 @@ def desolve_rk4(de, dvar, ics=None, ivar=None, end_points=None, step=0.1, output
     EXAMPLES::
 
         sage: y = var('y')
-        sage: desolve_rk4(x + y, y, ics=[0, 1], end_points=1, step=0.5)  # abs tol 1e-8  # needs maxima
+        sage: desolve_rk4(x + y, y, ics=[0, 1], end_points=1, step=0.5)  # abs tol 1e-8
         [[0, 1], [0.5, 1.796875], [1.0, 3.4346923828125]]
     """
     ysym, dsym = Expression(_sym_s("_rk_y")), Expression(_sym_s("_rk_dy"))
