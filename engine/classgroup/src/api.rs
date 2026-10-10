@@ -12,7 +12,7 @@ use sagebrush_bigint::BigRational;
 use num_traits::{One, Signed, Zero};
 
 /// The factorization of n != 0 as (prime, exponent), primes ascending
-/// (probable primes beyond 3.3e24).  A composite that cannot be split
+/// (Baillie-PSW probable primes beyond 2^64).  A composite that cannot be split
 /// (beyond 1024 bits) is an error, never reported as a prime.
 pub fn factor_integer(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
     if n.abs() <= BigInt::one() {
@@ -21,8 +21,9 @@ pub fn factor_integer(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
     crate::nf::factor::factor(n)
 }
 
-/// Whether n is (probably: Miller-Rabin to 20 bases, proven below 3.3e24)
-/// prime; false for n < 2 (Astra's audit, F7: -7 was "prime").
+/// Whether n is prime: proven below 2^64, Baillie-PSW beyond (no known
+/// counterexample, not a proof; "composite" is proven); false for n < 2
+/// (Astra's audit, F7: -7 was "prime").
 pub fn is_prime(n: &BigInt) -> bool {
     *n >= BigInt::from(2) && crate::nf::factor::is_probable_prime(n)
 }

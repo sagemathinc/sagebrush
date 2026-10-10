@@ -1254,14 +1254,24 @@ mod tests {
         }
     }
 
-    /// log_embedding_err's bounds hold: at 80 bits against 400 bits.
+    /// log_embedding_err's bounds hold: at 80 bits against 400 bits, and at
+    /// 1100 bits (beyond a double's 2^1024: to_f64 made every value below
+    /// 2^1000 zero there, the systematic review's finding) against 2000,
+    /// with a root near 10^-40.
     #[test]
     fn log_embedding_error_bounds_hold() {
-        let f: Vec<BigInt> = [-95282, 82258, 87473, 1].iter().map(|&c| BigInt::from(c)).collect();
+        // (x^2 + 10^40 x - 1 has a root near 10^-40, below 2^-100)
+        for (f, lo_p, hi_p) in [(vec!["-95282", "82258", "87473", "1"], 80u32, 400u32), (vec!["-1", "10000000000000000000000000000000000000000", "1"], 1100, 2000)] {
+            check_log_embedding_bounds(&f, lo_p, hi_p);
+        }
+    }
+
+    fn check_log_embedding_bounds(f: &[&str], lo_p: u32, hi_p: u32) {
+        let f: Vec<BigInt> = f.iter().map(|c| c.parse().unwrap()).collect();
         let (o, _) = maximal_order(&f).unwrap();
         let e = Embeddings::new(&o).unwrap();
-        let (lo_roots, rho) = e.roots_hp_rad(&o.f, 80).unwrap();
-        let hi_roots = e.roots_hp(&o.f, 400).unwrap();
+        let (lo_roots, rho) = e.roots_hp_rad(&o.f, lo_p).unwrap();
+        let hi_roots = e.roots_hp(&o.f, hi_p).unwrap();
         let mut rng = 7u64;
         for _ in 0..50 {
             let x: Vec<BigInt> = (0..o.n).map(|_| {
@@ -1271,10 +1281,11 @@ mod tests {
             if x.iter().all(|c| c.is_zero()) {
                 continue;
             }
-            let (l, err) = e.log_embedding_err(&o, &x, &lo_roots, &rho, 80).unwrap();
-            let h = e.log_embedding(&o, &x, &hi_roots, 400);
+            let (l, err) = e.log_embedding_err(&o, &x, &lo_roots, &rho, lo_p).unwrap();
+            let h = e.log_embedding(&o, &x, &hi_roots, hi_p);
             for (a, b) in l.iter().zip(&h) {
-                let d = to_f64(&((a << 320usize) - b).abs(), 400) * 2f64.powi(80);
+                // the difference in units of 2^-lo_p
+                let d = to_f64(&((a << (hi_p - lo_p) as usize) - b).abs(), hi_p - lo_p);
                 assert!(d <= err, "error {} units, bound {}", d, err);
             }
         }

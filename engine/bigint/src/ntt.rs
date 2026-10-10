@@ -38,6 +38,8 @@ struct Table {
 
 impl Table {
     fn new(p: u64, g: u64, log: u32) -> Table {
+        // a root of unity of order 2^log exists only when 2^log | p - 1
+        assert!(log <= (p - 1).trailing_zeros(), "no 2^{} root of unity modulo {}", log, p);
         let n = 1usize << log;
         let m = Modulus::new(p);
         let root = m.pow(g, (p - 1) >> log);
@@ -110,7 +112,10 @@ fn table_for(p: u64, log: u32) -> Arc<Table> {
         return t;
     }
     let g = PRIMES.iter().find(|x| x.0 == p).map_or_else(|| root_cached(p), |x| x.1);
-    let t = Arc::new(Table::new(p, g, log.max(8)));
+    // (at least 2^8 entries, to be reused, but never beyond the 2-power of
+    // p - 1: a table of 2^8 for p with v2(p - 1) = 7 squared 64 ones to a
+    // wrong constant, the systematic review's ARITH finding)
+    let t = Arc::new(Table::new(p, g, log.max(8).min((p - 1).trailing_zeros()).max(log)));
     cache.retain(|t| t.p != p);
     // at most 64 tables (multimodular products cycle through many primes)
     // and about 256 MB of them
@@ -417,6 +422,19 @@ mod tests {
             }
         }
         c
+    }
+
+    #[test]
+    fn short_transforms_modulo_primes_with_few_twos() {
+        // primes with v2(p - 1) = 1..8, each at the longest transform it has
+        for (p, v) in [(4294967311u64, 1u32), (4294967357, 2), (4294967497, 3), (4294967377, 4), (4294967969, 5), (4294968001, 6), (4294967681, 7), (4294977793, 8)] {
+            assert_eq!((p - 1).trailing_zeros(), v);
+            let len = (1usize << v) / 2;
+            let a = vec![1u64; len];
+            let m = Modulus::new(p);
+            let want = naive_mod(&a, &a, &m);
+            assert_eq!(conv_ntt_prime(&a, &a, p), want, "p = {}", p);
+        }
     }
 
     #[test]
