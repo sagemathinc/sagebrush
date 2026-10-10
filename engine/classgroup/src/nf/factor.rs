@@ -36,6 +36,7 @@ fn strong_prp(n: &BigInt, a: &BigInt) -> bool {
         return true;
     }
     for _ in 1..s {
+        sagebrush_interrupt::check();
         x = (&x * &x) % n;
         if x == nm1 {
             return true;
@@ -97,6 +98,9 @@ fn strong_lucas_prp(n: &BigInt) -> bool {
     let (mut u, mut v, mut qk) = (BigInt::one(), p.clone(), q.mod_floor(n));
     let bits = k.bits();
     for i in (0..bits - 1).rev() {
+        if i % 16 == 0 {
+            sagebrush_interrupt::check();
+        }
         // double: U_2k = U_k V_k, V_2k = V_k^2 - 2 Q^k
         u = (&u * &v).mod_floor(n);
         v = (&v * &v - &qk * BigInt::from(2)).mod_floor(n);
@@ -113,6 +117,7 @@ fn strong_lucas_prp(n: &BigInt) -> bool {
         return true;
     }
     for _ in 1..s {
+        sagebrush_interrupt::check();
         v = (&v * &v - &qk * BigInt::from(2)).mod_floor(n);
         if v.is_zero() {
             return true;

@@ -921,15 +921,38 @@ impl BigInt {
             !((&self.0).unsigned_abs() - UBig::ONE).bit(n as usize)
         }
     }
-    /// self^e mod m, in [0, |m|) (num-bigint panics for m = 0 or e < 0).
+    /// self^e mod m, in [0, m) for m > 0 and (m, 0] for m < 0 (num-bigint's
+    /// semantics; it panics for m = 0 or e < 0).
     pub fn modpow(&self, e: &BigInt, m: &BigInt) -> BigInt {
         assert!(e.0 >= IBig::ZERO, "negative exponent");
         assert!(!m.0.is_zero(), "zero modulus");
         let mm = (&m.0).unsigned_abs();
-        let ring = dashu_int::fast_div::ConstDivisor::new(mm);
+        let ring = dashu_int::fast_div::ConstDivisor::new(mm.clone());
         let base = self.0.clone();
-        let r = ring.reduce(base).pow(&(&e.0).unsigned_abs()).residue();
-        BigInt(IBig::from(r))
+        let eb = (&e.0).unsigned_abs();
+        let r = if eb.bit_len() > 1024 && mm.bit_len() > 4096 {
+            // a long exponentiation, bit by bit, so that Ctrl-C is observed
+            let b = ring.reduce(base);
+            let mut acc = ring.reduce(IBig::ONE);
+            for i in (0..eb.bit_len()).rev() {
+                // (sqr, and never mul with equal operands: dashu 0.6's
+                // mul_in_place under-allocates when they are equal)
+                acc = acc.sqr();
+                if eb.bit(i) {
+                    acc = if acc == b { acc.sqr() } else { &acc * &b };
+                }
+                if i % 16 == 0 {
+                    crate::check_interrupt();
+                }
+            }
+            IBig::from(acc.residue())
+        } else {
+            IBig::from(ring.reduce(base).pow(&eb).residue())
+        };
+        if m.0 < IBig::ZERO && !r.is_zero() {
+            return BigInt(r - IBig::from(mm));
+        }
+        BigInt(r)
     }
     /// The inverse of self mod m, in [0, m) for m > 0 and (m, 0] for m < 0
     /// (num-bigint's semantics), or None.

@@ -187,11 +187,12 @@ pub fn isqrt_u128(n: u128) -> u128 {
     if n < 2 {
         return n;
     }
-    let mut x = (n as f64).sqrt() as u128;
-    while x * x > n {
+    // the float guess, corrected without overflow (u128::MAX: 2^64 - 1)
+    let mut x = ((n as f64).sqrt() as u128).min((1u128 << 64) - 1);
+    while x.checked_mul(x).map_or(true, |y| y > n) {
         x -= 1;
     }
-    while (x + 1) * (x + 1) <= n {
+    while (x + 1).checked_mul(x + 1).map_or(false, |y| y <= n) {
         x += 1;
     }
     x
@@ -199,6 +200,16 @@ pub fn isqrt_u128(n: u128) -> u128 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn isqrt_u128_top() {
+        // ARI-F5: no overflow at the top of the type
+        assert_eq!(super::isqrt_u128(u128::MAX), (1u128 << 64) - 1);
+        for n in [0u128, 1, 2, 3, 4, 15, 16, 17, 1 << 100] {
+            let r = super::isqrt_u128(n);
+            assert!(r * r <= n && (r + 1) * (r + 1) > n, "{}", n);
+        }
+    }
+
     use super::*;
 
     #[test]

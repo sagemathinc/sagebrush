@@ -1767,7 +1767,12 @@ class FiniteFieldElement:
             sage: k.<a> = GF(9); a.frobenius(), a^3
             (2*a + 1, 2*a + 1)
         """
-        return self ** (self._parent._p ** int(k))
+        k = int(k)
+        if k < 0:
+            # x -> x^(p^k) is an automorphism of GF(p^n) of order n: a negative
+            # k is k mod n (the inverse Frobenius for k = -1)
+            k %= self._parent.degree()
+        return self ** (self._parent._p ** k)
 
     def _conjugates(self):
         out = [self]
@@ -1992,7 +1997,10 @@ def GF(order, name=None, modulus=None, names=None, impl=None, proof=None, **kwds
     if modulus is not None:
         if isinstance(modulus, str):
             raise NotImplementedError("named moduli (%r)" % modulus)
-        f = _ptrim([int(c) % p for c in (modulus.list() if hasattr(modulus, "list") else modulus)])
+        # exact reduction of each coefficient mod p (3/2 -> 0 in characteristic
+        # 3; a denominator divisible by p is an error), never int() truncation
+        f = _ptrim([int(_sa().GF(p)(c)) if not isinstance(c, int) else c % p
+                    for c in (modulus.list() if hasattr(modulus, "list") else modulus)])
         if len(f) - 1 != n:
             raise ValueError("the degree of the modulus does not equal the degree of the field")
         inv = pow(f[-1], -1, p)
@@ -2684,7 +2692,9 @@ class Polynomial_ff:
             raise ValueError("factorization of 0 not defined")
         lc = self._c[-1]
         f = self.monic()
-        if isinstance(B, IntegerModRing_) and B._n < 2 ** 32 and f.degree() > 0:
+        if f.degree() == 0:
+            items = []  # a nonzero constant: a unit, no irreducible factors
+        elif isinstance(B, IntegerModRing_) and B._n < 2 ** 32:
             from sagebrush._engine import call
             p = B._n
             res = call("factor_mod", f=[str(int(c)) for c in f._c], p=p)
