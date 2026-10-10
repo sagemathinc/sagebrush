@@ -118,7 +118,9 @@ pub fn verify(f: &Expr, big_f: &Expr, x: &str) -> bool {
             continue;
         }
         let err = zv.0.hypot(zv.1);
-        let scale = 1.0 + fv.0.hypot(fv.1);
+        // relative to f (and F): scaling the problem by 10^-30 must not
+        // hide a wrong antiderivative under an absolute floor
+        let scale = fv.0.hypot(fv.1) + 1e-9 * crate::eval::to_c64_env(big_f, &env).map_or(0.0, |v| v.0.hypot(v.1));
         if err > 1e-7 * scale {
             return simplify_full(&z).is_zero() || verify_real(&z, f, x, &syms);
         }
@@ -147,7 +149,8 @@ fn verify_numeric(f: &Expr, big_f: &Expr, x: &str) -> bool {
         if !zv.0.is_finite() || !zv.1.is_finite() || !fv.0.is_finite() || !fv.1.is_finite() {
             continue;
         }
-        if zv.0.hypot(zv.1) > 1e-7 * (1.0 + fv.0.hypot(fv.1)) {
+        let scale = fv.0.hypot(fv.1) + 1e-9 * crate::eval::to_c64_env(big_f, &env).map_or(0.0, |v| v.0.hypot(v.1));
+        if zv.0.hypot(zv.1) > 1e-7 * scale {
             return verify_real(&z, f, x, &syms);
         }
         checked += 1;
@@ -172,7 +175,7 @@ fn verify_real(z: &Expr, f: &Expr, x: &str, syms: &[String]) -> bool {
         if !fv.0.is_finite() || fv.1.abs() > 1e-12 * (1.0 + fv.0.abs()) || !zv.0.is_finite() || !zv.1.is_finite() {
             continue;
         }
-        if zv.0.hypot(zv.1) > 1e-7 * (1.0 + fv.0.abs()) {
+        if zv.0.hypot(zv.1) > 1e-7 * fv.0.abs() {
             return false;
         }
         checked += 1;

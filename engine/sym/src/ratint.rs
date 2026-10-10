@@ -41,7 +41,10 @@ pub fn integrate_rational(num: &QPoly, den: &QPoly, x: &Expr) -> Option<Expr> {
 /// a primitive numerator over the expanded denominator times the content.
 fn rational_term(b: &QPoly, v: &QPoly, j: u32, x: &Expr) -> Expr {
     if v.deg() == 1 {
-        return div(&b.to_expr(x), &pow(&prim(v, x), &int(j as i64)));
+        // v = cv * prim(v) (v monic: cv = 1/lc(prim(v))), so b / v^j =
+        // (b / cv^j) / prim(v)^j
+        let (cv, _) = crate::poly::to_zpoly(&v.0);
+        return div(&b.scale(&pow_q(&cv, j).recip()).to_expr(x), &pow(&prim(v, x), &int(j as i64)));
     }
     let (c, nb) = crate::poly::to_zpoly(&b.0);
     let (cv, _) = crate::poly::to_zpoly(&v.0);

@@ -281,3 +281,20 @@ assert _g in _g.parent()
 raises(ValueError, PermutationGroupElement, [2.9, 1.1])
 raises(ValueError, TransitiveGroups, 14)
 print("groups ok")
+
+# Systematic review, symbolic (SYM-F5, F6, F10, F18)
+from sagebrush.sage import SR, floor, ceil, arcsec, arccos, diff, integrate, I, oo, exp, log
+_t = SR("1/10^400")
+assert (bool(_t == 0), bool(_t != 0), bool(_t > 0)) == (False, True, True)
+assert bool(SR(10**20 + 1) > SR(10**20))
+_s = sin(SR(10**20 + 1))
+assert str(floor(_s)).startswith("floor(")  # undecided, not a wrong integer
+raises(ValueError, limit, exp(_s * var("x")), x=oo)
+_x = var("x")
+assert diff(abs(1 + I * _x), _x).subs(x=0) == 0
+assert diff(arcsec(_x), _x).subs(x=-2) == diff(arccos(1 / _x), _x).subs(x=-2)
+_eps = SR("1/10^30"); _f = 1 / ((2 * _x + 1)**2 * (3 * _x + 1))
+_F = integrate(_eps * _f, _x)
+assert ((diff(_F, _x) - _eps * _f) / _eps).simplify_full() == 0
+assert bool(integrate(_eps * _f, _x, 0, 1) / _eps == 3 * log(4) - 3 * log(3) - SR(2) / 3)
+print("symbolic ok")

@@ -113,6 +113,20 @@ def _py_number(s):
     return None
 
 
+def _numerically_equal(a, b):
+    """Heuristic equality of two constants that the engine could neither
+    simplify to equal nor separate: their difference, evaluated at 400 bits,
+    is below 2^-300 relative to them.  (A double, which underflows or
+    cancels, is never used.)"""
+    import _sage_real
+    try:
+        d = abs(_sage_real.N(a - b, 400))
+        m = max(abs(_sage_real.N(a, 400)), abs(_sage_real.N(b, 400)), 1)
+        return bool(d <= m * _sage_real.N(Expression("2") ** -300, 400))
+    except Exception:
+        return False
+
+
 def _relop(sym):
     return {"Eq": "==", "Ne": "!=", "Lt": "<", "Le": "<=", "Gt": ">", "Ge": ">="}[sym]
 
@@ -210,12 +224,11 @@ class Expression:
             a, b = Expression(op[1]), Expression(op[2])
             if kind in ("==", "!="):
                 z = _call("is_zero", (a - b)._s)[0] == "1"
-                if not z and kind == "==" and not (a - b).variables():
-                    # different constants are different unless numerically equal
-                    try:
-                        z = abs(complex(a - b)) == 0
-                    except (TypeError, ValueError):
-                        pass
+                if not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
+                    # constants of undecided sign: equal if they agree to
+                    # far more than double precision (never from an
+                    # underflowed or cancelled double)
+                    z = _numerically_equal(a, b)
                 if not z and _ASSUMPTIONS and (a - b).variables():
                     z = bool(_assume_rewrite(a - b).expand() == 0)
                 return z if kind == "==" else not z
@@ -225,11 +238,13 @@ class Expression:
                         if isinstance(r, Expression) and str(r) == str(self):
                             return True
                 return False
-            try:
-                u, v = float(a), float(b)
-            except (TypeError, ValueError):
+            # constants: only a certified sign of a - b decides (exact for
+            # rationals); undecided is False, as in Sage
+            sg = _call("const_sign", (a - b)._s)[0]
+            if sg == "":
                 return False
-            return {"<": u < v, "<=": u <= v, ">": u > v, ">=": u >= v}[kind]
+            sg = int(sg)
+            return {"<": sg < 0, "<=": sg <= 0, ">": sg > 0, ">=": sg >= 0}[kind]
         return _call("is_zero", self._s)[0] != "1"
 
     def lhs(self):
@@ -1800,16 +1815,16 @@ _FUNCTION_DOCS = {
 
         sage: arcsec(2)
         arcsec(2)
-        sage: arcsec(x).diff(x)
-        1/(sqrt(x^2 - 1)*x)""",
+        sage: arcsec(x).diff(x)  # sagebrush only (Sage's 1/(sqrt(x^2 - 1)*x) has the wrong sign for x < -1)
+        1/(sqrt(-1/x^2 + 1)*x^2)""",
     'arccsc': """The inverse cosecant (also acsc).
 
     EXAMPLES::
 
         sage: arccsc(2)
         arccsc(2)
-        sage: arccsc(x).diff(x)
-        -1/(sqrt(x^2 - 1)*x)""",
+        sage: arccsc(x).diff(x)  # sagebrush only (Sage's -1/(sqrt(x^2 - 1)*x) has the wrong sign for x < -1)
+        -1/(sqrt(-1/x^2 + 1)*x^2)""",
     'arctan2': """arctan2(y, x): the angle of the point (x, y) (also atan2).
 
     EXAMPLES::

@@ -490,6 +490,12 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
         },
         "numerator" => one_(numer_denom(&d(arg(0))).0),
         "denominator" => one_(numer_denom(&d(arg(0))).1),
+        // the certified sign of a real constant: "1", "-1", "0", or "" if not established
+        "const_sign" => {
+            let e = d(arg(0));
+            let s = crate::domain::const_sign(&e).or_else(|| crate::domain::const_sign(&crate::simplify::simplify_full(&e)));
+            vec![s.map_or(String::new(), |s| s.to_string())]
+        }
         "is_zero" => {
             let e = d(arg(0));
             let z = e.is_zero() || crate::simplify::simplify_full(&e).is_zero();
