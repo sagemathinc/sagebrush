@@ -637,7 +637,14 @@ fn series_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Option<Expr>> {
     // a pole of order -v: signed by the leading coefficient's certified
     // sign (a double's sign decides nothing), else complex infinity (|f|
     // grows without bound: still true)
-    let Some(c) = const_sign(&c0).filter(|&c| c != 0) else { return Ok(Some(constant(Const::UnsignedInfinity))) };
+    // (a coefficient that is 0 after all, unrecognized by the expansion,
+    // means the order is wrong: no conclusion)
+    let Some(c) = const_sign(&c0).filter(|&c| c != 0) else {
+        if crate::simplify::simplify_full(&c0).is_zero() {
+            return Ok(None);
+        }
+        return Ok(Some(constant(Const::UnsignedInfinity)));
+    };
     let c = c as f64;
     let odd = s.v % 2 != 0;
     Ok(Some(match dir {

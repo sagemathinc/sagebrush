@@ -1266,6 +1266,27 @@ mod tests {
         }
     }
 
+    /// The systematic review's ROOT-F4 (Astra, proven with integer
+    /// brackets): f = x^3 + (2^25 + 1) x - 1, x = 1 + a^2 t^2; at 1024 bits
+    /// the bound was 308 units against an actual error of 2 10^7.
+    #[test]
+    fn log_embedding_bound_beyond_1024_bits() {
+        let a = (BigInt::one() << 25usize) + 1u32;
+        let f = vec![BigInt::from(-1), a.clone(), BigInt::zero(), BigInt::one()];
+        let o = Order::equation_order(&f);
+        let e = Embeddings::new(&o).unwrap();
+        let x = vec![BigInt::one(), BigInt::zero(), &a * &a];
+        for p in [1023u32, 1024, 1025, 1100] {
+            let (roots, rho) = e.roots_hp_rad(&f, p).unwrap();
+            let (v, err) = e.log_embedding_err(&o, &x, &roots, &rho, p).unwrap();
+            let hi = e.log_embedding(&o, &x, &e.roots_hp(&f, p + 800).unwrap(), p + 800);
+            for (a, b) in v.iter().zip(&hi) {
+                let d = to_f64(&((a << 800usize) - b).abs(), 800);
+                assert!(d <= err, "at {} bits: error {} units, bound {}", p, d, err);
+            }
+        }
+    }
+
     fn check_log_embedding_bounds(f: &[&str], lo_p: u32, hi_p: u32) {
         let f: Vec<BigInt> = f.iter().map(|c| c.parse().unwrap()).collect();
         let (o, _) = maximal_order(&f).unwrap();
