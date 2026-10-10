@@ -27,7 +27,7 @@ fn isqrt_u64(n: u64) -> u64 {
 /// still rigorous, precision; the review's BALL-F7: u64::MAX overflowed).
 pub const PREC_MAX: u64 = 1 << 24;
 
-fn cap(prec: u64) -> u64 {
+pub(crate) fn cap(prec: u64) -> u64 {
     prec.min(PREC_MAX)
 }
 

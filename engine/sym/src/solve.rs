@@ -429,10 +429,11 @@ fn singular_args(z: &Expr, x: &str, out: &mut Vec<Expr>) {
     if let Kind::Pow(b, k) = &z.kind {
         let nonpositive = k.as_num().map_or(false, |k| {
             use num_traits::Signed;
-            let (re, _) = k.to_c64();
-            match k.as_rat() {
-                Some(q) => !q.is_positive(),
-                None => re <= 0.0 || matches!(k, crate::num::Num::Exact(a, _) if !a.is_positive()),
+            // the real part's sign exactly for an exact number (I + 10^-400
+            // has a positive real part, which a double rounds to 0: CSOL-F16)
+            match k {
+                crate::num::Num::Exact(a, _) => !a.is_positive(),
+                crate::num::Num::Float(re, _) => *re <= 0.0,
             }
         });
         if nonpositive && !b.is_const(Const::E) && !out.contains(b) {

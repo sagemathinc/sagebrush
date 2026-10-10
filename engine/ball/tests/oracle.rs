@@ -196,3 +196,14 @@ fn review_boundaries_2() {
     assert!(Mag::pow2(i64::MIN).le_pow2(-1));
     assert!(one.add(&one, u64::MAX).contains(&Ball::from_i64(2)));
 }
+
+#[test]
+fn precision_cap_before_guard_bits() {
+    // BALL-F10: u64::MAX + guard bits overflowed (a panic in debug)
+    use sagebrush_ball::{li2, ti2, CBall};
+    assert!(li2(&Ball::zero(), u64::MAX).is_some());
+    assert!(ti2(&Ball::zero(), u64::MAX).is_some());
+    let one = CBall::real(Ball::one());
+    assert!(one.recip(u64::MAX).is_some());
+    assert!(one.div(&one, u64::MAX).is_some());
+}

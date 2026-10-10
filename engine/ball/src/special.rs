@@ -75,6 +75,11 @@ fn li2_from_w(w: &CBall, wp: u64) -> CBall {
 /// Li2(x) = pi^2/6 - log(x) log(1 - x) - Li2(1 - x)).
 pub fn li2(x: &Ball, prec: u64) -> Option<Ball> {
     use std::cmp::Ordering::*;
+    // (capped first: u64::MAX + 32 overflowed, the review's BALL-F10)
+    let prec = crate::funcs::cap(prec);
+    if x.is_exact() && num_traits::Zero::is_zero(&x.mid().0) {
+        return Some(Ball::zero()); // Li2(0) = 0 exactly
+    }
     let wp = prec + 32;
     let one = Ball::one();
     // the whole ball in [-1, 1] (a ball reaching beyond is refused, not
@@ -116,6 +121,11 @@ pub fn li2(x: &Ball, prec: u64) -> Option<Ball> {
 /// Ti2(y) = Im Li2(i y) = sum (-1)^k y^(2k+1) / (2k+1)^2, for y in [-1, 1]:
 /// w = -log(1 - i y) = -log(1 + y^2)/2 + i atan(y), |w| <= 0.87.
 pub fn ti2(y: &Ball, prec: u64) -> Option<Ball> {
+    // (capped first: u64::MAX + 32 overflowed, the review's BALL-F10)
+    let prec = crate::funcs::cap(prec);
+    if y.is_exact() && num_traits::Zero::is_zero(&y.mid().0) {
+        return Some(Ball::zero()); // Ti2(0) = 0 exactly
+    }
     let wp = prec + 32;
     let one = Ball::one();
     // the whole ball in [-1, 1] (BALL-F9; Ti2 is odd)

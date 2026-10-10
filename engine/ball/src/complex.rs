@@ -71,12 +71,15 @@ impl CBall {
 
     /// 1/z (None if the rectangle may contain 0): conj(z) / |z|^2.
     pub fn recip(&self, prec: u64) -> Option<CBall> {
+        // (capped first: BALL-F10)
+        let prec = crate::funcs::cap(prec);
         let wp = prec + 8;
         let n = self.re.sqr(wp).add(&self.im.sqr(wp), wp);
         Some(CBall { re: self.re.div(&n, prec)?, im: self.im.neg().div(&n, prec)? })
     }
 
     pub fn div(&self, o: &CBall, prec: u64) -> Option<CBall> {
+        let prec = crate::funcs::cap(prec);
         Some(self.mul(&o.recip(prec + 8)?, prec))
     }
 
