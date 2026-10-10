@@ -815,6 +815,10 @@ class Expression:
         f = self.lhs() - self.rhs() if self.is_relational() else self
         out = []
         for s in solve(f == 0, x):
+            # an unresolved 0 == f is no root (x^5 + x + 3 gave (x^5 + x + 3,
+            # 1): the systematic review's R2-SYMALG-F3)
+            if str(s.lhs()) != str(x):
+                raise RuntimeError("no explicit roots found")
             r, m = s.rhs(), 0
             g = f
             while True:
@@ -1324,20 +1328,91 @@ class _SeriesExpr(Expression):
         """The series itself (expanded, with its O-term)."""
         return self
 
+    # (the systematic review's R2-SYMALG-F8: s^(3/2) was s, 1/s, diff(s),
+    # s.subs(...), s.simplify_full() dropped the O-term, and dividing by
+    # 1 + O(x) kept O(x^5))
     def __pow__(self, k):
-        k = int(k)
-        if k < 1:
-            raise NotImplementedError("series: only positive integer powers")
-        r = self
-        for _ in range(k - 1):
-            r = r * self
-        return r
+        from fractions import Fraction
+        kq = _py_number(_expr(k)._s)
+        if kq is None or isinstance(kq, (float, complex)):
+            raise NotImplementedError("series: only rational powers")
+        kq = Fraction(kq)
+        if kq.denominator == 1 and kq >= 1:
+            r = self
+            for _ in range(int(kq) - 1):
+                r = r * self
+            return r
+        if kq == 0:
+            return _expr(1)
+        if self._order is None:
+            return _expr(Expression(self._s) ** _expr(k))
+        # (t^v u)^k with u known to t^(n - v): t^(v k) u^k, known to as many
+        # terms; v k must be an integer, and u's constant term not 0
+        v = self._valuation()
+        if v >= self._order:
+            raise ZeroDivisionError("series: a power of a series that is O(x^%d)" % self._order) if kq < 0 else NotImplementedError("series: a power of O(x^n)")
+        vk = v * kq
+        if vk.denominator != 1:
+            raise NotImplementedError("series: the power is not a Laurent series (Puiseux)")
+        order = int(vk) + (self._order - v)
+        body = Expression(self._s) ** _expr(k)
+        at = self._at
+        s2 = body.series(self._var == at if not at.is_trivial_zero() else self._var, order)
+        return _SeriesExpr(s2, self._var, at, order) if not isinstance(s2, _SeriesExpr) else _SeriesExpr(Expression(s2._s), self._var, at, order)
 
     def __truediv__(self, o):
+        if isinstance(o, _SeriesExpr):
+            return self * (self._same(o) ** -1)
         o = _expr(o)
         if str(self._var) in o._names():
-            raise NotImplementedError("series: division by a series")
+            t = self._same(o)
+            return self * (t ** -1) if isinstance(t, _SeriesExpr) else self._make(Expression(self._s) / o, self._order)
         return self._make(Expression(self._s) / o, self._order)
+
+    def __rtruediv__(self, o):
+        return _expr(o) * (self ** -1) if not isinstance(o, _SeriesExpr) else o * (self ** -1)
+
+    def diff(self, *args):
+        """The derivative: one order less in the series variable."""
+        v = args[0] if args else self._var
+        n = int(args[1]) if len(args) > 1 else 1
+        body = Expression(self._s).diff(v, n) if len(args) > 1 else Expression(self._s).diff(v)
+        if str(v) == str(self._var):
+            order = None if self._order is None else self._order - n
+            return self._make(body, order)
+        return self._make(body, self._order)
+
+    derivative = diff
+
+    def subs(self, *args, **kw):
+        """Substitution in the coefficients; the series variable only by
+        another symbol (else the O-term has no meaning: truncate() first)."""
+        d = dict(args[0]) if args and isinstance(args[0], dict) else {}
+        for a in args:
+            if not isinstance(a, dict) and isinstance(a, Expression) and a.is_relational():
+                d[a.lhs()] = a.rhs()
+        for k, val in kw.items():
+            d[_expr(SR.var(k))] = val
+        newvar = self._var
+        for k, val in list(d.items()):
+            if str(k) == str(self._var):
+                val = _expr(val)
+                if val._op()[0] != "symbol":
+                    raise NotImplementedError("subs: substituting %s for the series variable loses the O-term; use truncate() first" % val)
+                newvar = val
+        body = Expression(self._s).subs(d)
+        return _SeriesExpr(body, newvar, _expr(self._at).subs(d), self._order)
+
+    substitute = subs
+
+    def simplify(self):
+        return _SeriesExpr(Expression(self._s).simplify(), self._var, self._at, self._order)
+
+    def simplify_full(self):
+        return _SeriesExpr(Expression(self._s).simplify_full(), self._var, self._at, self._order)
+
+    def simplify_rational(self):
+        return _SeriesExpr(Expression(self._s).simplify_rational(), self._var, self._at, self._order)
 
     def _terms(self, latex):
         # Sage's form: ascending powers of (x - a), numeric coefficients
@@ -1657,6 +1732,17 @@ def _satisfies(sol):
                 fl = floor(v)
                 if fl.is_numeric() and _const_sign(v - fl) == 1:
                     return False  # certainly not an integer
+                q = _py_number(v._s)
+                if r._kind in ("even", "odd") and isinstance(q, int):
+                    if (q % 2 == 0) != (r._kind == "even"):
+                        return False  # the wrong parity (the systematic review's R2-SYMALG-F2)
+            if r._kind in ("positive", "negative"):
+                sg = _const_sign(v)
+                if sg is not None and sg != (1 if r._kind == "positive" else -1):
+                    return False
+            if r._kind in ("rational", "integer", "even", "odd") and not _is_rational_number(v):
+                if _certainly_irrational(v):
+                    return False
             continue
         if not isinstance(r, Expression):
             continue
@@ -1669,6 +1755,22 @@ def _satisfies(sol):
         except Exception:
             pass
     return True
+
+
+def _is_rational_number(v):
+    q = _py_number(v._s)
+    return q is not None and not isinstance(q, float) and not isinstance(q, complex)
+
+
+def _certainly_irrational(v):
+    """Whether the constant v is an algebraic number of degree > 1 (sqrt(2)):
+    exactly, through QQbar; False when that is not established."""
+    try:
+        import _sage_qqbar
+        a = _sage_qqbar._from_expr(v)
+        return a is not None and a._gen is not None and a.degree() > 1
+    except Exception:
+        return False
 
 
 def _integer_multiple_of_pi(arg):
@@ -1717,18 +1819,21 @@ def _sign_of(e):
             k = r._op()[0][4:]
             a, b = r.lhs(), r.rhs()
             sym_a, sym_b = str(a) == name, str(b) == name
+            # the bound's certified sign (float(-10^-400) is -0.0, which is
+            # >= 0: x > -10^-400 made x positive, the systematic review's
+            # R2-SYMALG-F2)
             try:
                 if sym_a and b.is_numeric():
-                    c = float(b)
-                    if k in ("Gt", "Ge") and c >= 0:
+                    c = _const_sign(b)
+                    if k in ("Gt", "Ge") and c in (0, 1):
                         return 1
-                    if k in ("Lt", "Le") and c <= 0:
+                    if k in ("Lt", "Le") and c in (0, -1):
                         return -1
                 if sym_b and a.is_numeric():
-                    c = float(a)
-                    if k in ("Lt", "Le") and c >= 0:
+                    c = _const_sign(a)
+                    if k in ("Lt", "Le") and c in (0, 1):
                         return 1
-                    if k in ("Gt", "Ge") and c <= 0:
+                    if k in ("Gt", "Ge") and c in (0, -1):
                         return -1
             except (TypeError, ValueError):
                 pass
@@ -1755,11 +1860,12 @@ def _sign_of(e):
         if sb > 0:
             # b^x > 0 needs a real exponent (x^I has modulus 1, not x^I)
             return 1 if _is_real(x) else None
-        try:
-            k = int(x)
-            return 1 if k % 2 == 0 else -1
-        except (TypeError, ValueError):
-            return None
+        # a negative base: only an integer exponent has a sign (int(1/2) is
+        # 0: sqrt(x) for x < 0 counted as positive, abs(sqrt(-1)) was I)
+        k = _py_number(x._s)
+        if isinstance(k, int) or (getattr(k, "denominator", None) == 1 and not isinstance(k, float)):
+            return 1 if int(k) % 2 == 0 else -1
+        return None
     if e.is_numeric():
         c = _const_sign(e)
         if c is not None:
@@ -1785,7 +1891,14 @@ def _is_real(e):
         name = str(e)
         if _features(name) & {"real", "integer", "rational", "even", "odd", "positive", "negative"}:
             return True
-        return any(isinstance(r, Expression) and name in r._names() and r._op()[0][4:] in ("Lt", "Le", "Gt", "Ge") for r in _ASSUMPTIONS)
+        # a relation makes real its two sides, not each symbol in them (a + b
+        # > 0 says nothing of a alone)
+        def real_side(r):
+            if not (isinstance(r, Expression) and r._op()[0][4:] in ("Lt", "Le", "Gt", "Ge")):
+                return False
+            lhs, rhs = r.lhs(), r.rhs()
+            return (str(lhs) == name and not rhs.variables() and _is_real(rhs)) or (str(rhs) == name and not lhs.variables() and _is_real(lhs))
+        return any(real_side(r) for r in _ASSUMPTIONS)
     return False
 
 
@@ -2540,19 +2653,28 @@ def solve(f, *args, **kw):
         z = eqs[0].lhs() - eqs[0].rhs()
         v = Expression(_call("parse", names[0])[0])
         mults = []
+        # an identity (x == x: every x, the solution x == r1) has multiplicity
+        # 1, as in Sage, not the loop's cap 1001 (R2-SYMALG-F3)
+        identity = _call("is_zero", z._s)[0] == "1" or bool(z.simplify_full() == 0)
         for s in out:
-            if s.lhs()._op()[0] != "symbol":
+            if s.lhs()._op()[0] != "symbol" or identity:
                 mults.append(1)
                 continue
             m, d = 0, z
             while True:
                 d = d.diff(v)
                 m += 1
-                if _call("is_zero", d.subs({v: s.rhs()})._s)[0] != "1" or m > 1000:
+                if _call("is_zero", d.subs({v: s.rhs()})._s)[0] != "1":
                     break
+                if m > 1000:
+                    raise NotImplementedError("solve: the multiplicity of %s is not determined" % s)
             mults.append(m)
         return out, mults
     if kw.get("solution_dict"):
+        # an unresolved 0 == f is no solution to put in a dictionary ({0: f}
+        # read as a root: R2-SYMALG-F3)
+        if any(s.lhs()._op()[0] != "symbol" for sol in sols for s in sol):
+            raise NotImplementedError("solve: no explicit solution for %s (solution_dict needs one)" % ", ".join(str(s) for sol in sols for s in sol if s.lhs()._op()[0] != "symbol"))
         return [{s.lhs(): s.rhs() for s in sol} for sol in sols]
     if len(names) == 1 and not many:
         return [s for sol in sols for s in sol]
