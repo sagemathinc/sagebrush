@@ -441,7 +441,6 @@ dependencies = [
  "num-integer",
  "num-traits",
  "sagebrush-bigint",
- "sagebrush-flint",
  "sagebrush-interrupt",
 ]
 
@@ -523,7 +522,6 @@ dependencies = [
  "rayon",
  "sagebrush-ap",
  "sagebrush-bigint",
- "sagebrush-flint",
  "sagebrush-interrupt",
  "sagebrush-poly",
  "serde_json",
@@ -555,13 +553,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-oracle"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "sagebrush-arith",
+ "sagebrush-bigint",
+ "sagebrush-flint",
+ "sagebrush-modsym",
+ "sagebrush-poly",
+ "serde_json",
+]
+
+[[package]]
 name = "sagebrush-poly"
 version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
  "sagebrush-bigint",
- "sagebrush-flint",
  "sagebrush-interrupt",
 ]
 

@@ -1,7 +1,7 @@
 //! Trace forms tr a_n (n <= B) of every newform orbit, against LMFDB's
 //! mf_newforms.traces; orbits sorted by (dimension, trace form) as LMFDB
 //! does, so agreement also reproduces LMFDB's labels (N.k.c.x).
-//!   cargo run --release --example traces_vs_lmfdb -- [B] [MAX_DIM] [SPACE...]
+//!   cargo run --release -p sagebrush-oracle --example traces_vs_lmfdb -- [B] [MAX_DIM] [SPACE...]
 use sagebrush_bigint::BigInt;
 use sagebrush_modsym::general::Character;
 use sagebrush_modsym::newspace::newspace_orbits;

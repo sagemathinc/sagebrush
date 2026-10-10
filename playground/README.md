@@ -72,8 +72,8 @@ The full validation runs are also examples:
 | `general_vs_sage` | dimensions and $T_q$ charpolys mod $\ell$ vs Sage (1452 spaces) |
 | `general_exact_vs_sage -- ~/data/sage/general_exact_big.jsonl --table` | exact charpolys vs Sage, with timings |
 | `dims_vs_sage -- ~/data/sage/dims_ref.jsonl` | Cohen–Oesterlé and Eisenstein dimension formulas |
-| `newspaces_vs_lmfdb -- 200 63.2.e 238.2.b` | orbit dimensions vs LMFDB; omit the labels to run all |
-| `traces_vs_lmfdb -- 1000 200 28.2.e 210.2.a` | trace forms and labels vs LMFDB |
+| `newspaces_vs_lmfdb -- 200 63.2.e 238.2.b` (with `-p sagebrush-oracle`: it factors with FLINT) | orbit dimensions vs LMFDB; omit the labels to run all |
+| `traces_vs_lmfdb -- 1000 200 28.2.e 210.2.a` (`-p sagebrush-oracle`) | trace forms and labels vs LMFDB |
 
 Environment variables `NEWSPACE_DEBUG=1` and `TRACES_DEBUG=1` print the choice of Hecke operator and the reason a prime $\ell$ was rejected.
 

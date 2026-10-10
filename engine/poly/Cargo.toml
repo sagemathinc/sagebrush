@@ -11,6 +11,3 @@ sagebrush-interrupt = { path = "../interrupt" }
 num-integer = "0.1"
 num-traits = "0.2"
 
-[dev-dependencies]
-# LGPL; only the tests use it, as a reference
-sagebrush-flint = { path = "../flint" }

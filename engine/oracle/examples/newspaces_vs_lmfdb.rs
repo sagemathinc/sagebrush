@@ -2,7 +2,7 @@
 //! S_k, E_k and the newspace, and the dimensions of the Galois orbits of
 //! newforms, from ~/data/lmfdb/mf_newspaces_wt2plus_Nk2le1000.jsonl
 //! (fetch_newspaces.py; another file via NEWSPACES=path).
-//!   cargo run --release --example newspaces_vs_lmfdb -- [MAX_DIM] [LABEL...]
+//!   cargo run --release -p sagebrush-oracle --example newspaces_vs_lmfdb -- [MAX_DIM] [LABEL...]
 use sagebrush_modsym::dims::{dim_cusp_forms, dim_eisenstein};
 use sagebrush_modsym::general::Character;
 use sagebrush_modsym::newspace::newspace_orbits;

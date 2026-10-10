@@ -236,7 +236,7 @@ fn perms(n: usize, v: Option<&Value>) -> Result<Vec<sagebrush_group::Perm>, Stri
     };
     arr.iter()
         .map(|p| {
-            let im: Vec<u32> = p.as_array().ok_or("a permutation is a list of images")?.iter().map(|x| x.as_u64().map(|x| x as u32).ok_or("images are point numbers")).collect::<Result<_, _>>()?;
+            let im: Vec<u32> = p.as_array().ok_or("a permutation is a list of images")?.iter().map(|x| x.as_u64().and_then(|x| u32::try_from(x).ok()).ok_or("images are point numbers")).collect::<Result<_, _>>()?;
             if im.len() != n {
                 return Err(format!("a permutation of {} points, not {}", im.len(), n));
             }
@@ -283,7 +283,7 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 json!(g.min_block(&seed))
             }
             "block_system" => {
-                let b: Vec<u32> = v.get("block").and_then(Value::as_array).ok_or("missing block")?.iter().filter_map(|x| x.as_u64().map(|x| x as u32)).collect();
+                let b: Vec<u32> = u64s(v.get("block").ok_or("missing block")?, "block")?.into_iter().map(|x| u32::try_from(x).ok().filter(|&x| (x as usize) < n).ok_or("a block is a list of points")).collect::<Result<_, _>>()?;
                 json!(g.block_system(&b))
             }
             "stabilizer" => {
@@ -320,11 +320,6 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 let samples = v.get("samples").and_then(Value::as_u64).unwrap_or(10_000) as usize;
                 let (c, exact) = g.cycle_type_counts(limit, samples, &mut rng);
                 json!({"exact": exact, "counts": c.into_iter().map(|(t, k)| json!([t, k])).collect::<Vec<_>>()})
-            }
-            "normal_closure" => {
-                let sub = perms(n, v.get("sub"))?;
-                let c = g.normal_closure(&sub);
-                json!({"gens": perm_json(&c.gens), "order": c.order().to_string()})
             }
             "is_normal" => {
                 let sub = Group::new(n, perms(n, v.get("sub"))?)?;

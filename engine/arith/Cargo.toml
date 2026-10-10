@@ -12,6 +12,3 @@ num-integer = "0.1"
 num-traits = "0.2"
 dashu-int = "0.6"
 
-[dev-dependencies]
-# LGPL; only the tests and benchmarks use it, as a reference
-sagebrush-flint = { path = "../flint" }

@@ -9,7 +9,7 @@ also checks that the answers agree. One core of an AMD EPYC 7B13;
 
 The inputs are random square matrices with entries of the given size. rref
 is an n by n+5 matrix of rank n/2. Rerun with
-`cargo run --release -p sagebrush-arith --example matbench -- 10 30 100`.
+`cargo run --release -p sagebrush-oracle --example matbench -- 10 30 100`.
 The ratio is Sagebrush's time divided by FLINT's: below 1 means Sagebrush
 is faster.
 
@@ -63,7 +63,7 @@ was 3–4x slower once the matrix no longer fit in L1.
 ## Polynomials over Z
 
 The gcd inputs are g·a and g·b, with g of half the length. Rerun with
-`cargo run --release -p sagebrush-arith --example polybench`.
+`cargo run --release -p sagebrush-oracle --example polybench`.
 
 | op | length | coefficient bits | Sagebrush | FLINT 3.6 | ratio |
 |---|---:|---:|---:|---:|---:|
