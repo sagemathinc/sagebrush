@@ -63,8 +63,11 @@ def primes_above(f, p):
 
 def bnf(f):
     """Class group and regulator of Q[x]/(f), assuming GRH: dict with h,
-    cyc (invariants, largest first), regulator (a decimal string), w, r1,
-    r2, disc, and assumes (["GRH"]: what the result depends on)."""
+    cyc (invariants, largest first), regulator (a decimal string, its
+    digits correct), w, r1, r2, disc, certified and assumes (what the
+    result depends on: ["GRH"] when certified, i.e. h* R* is below twice a
+    proven lower bound for h R (Belabas and Friedman); otherwise also the
+    uncertified estimate)."""
     r = call("bnf", f=_ints(f))
     r["h"] = int(r["h"])
     r["disc"] = int(r["disc"])
@@ -75,9 +78,19 @@ def bnf(f):
 def quadratic_class_group(d):
     """(h, cyc, regulator) for the quadratic field of fundamental
     discriminant d (regulator a decimal string for d > 0, else None);
-    assumes GRH."""
+    assumes GRH.  quadratic_class_group_data(d) also says whether the
+    result is certified (see bnf)."""
     r = call("quadratic_class_group", d=str(int(d)))
     return int(r["h"]), [int(c) for c in r["cyc"]], r["regulator"]
+
+
+def quadratic_class_group_data(d):
+    """quadratic_class_group as a dict: h, cyc, regulator, certified and
+    assumes."""
+    r = call("quadratic_class_group", d=str(int(d)))
+    r["h"] = int(r["h"])
+    r["cyc"] = [int(c) for c in r["cyc"]]
+    return r
 
 
 def hermite_form(m):

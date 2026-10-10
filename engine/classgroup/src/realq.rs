@@ -3,13 +3,15 @@
 //! the relations of imag.rs's sieve also describe principal ideals (gamma),
 //! gamma = prod ((B + sqrt D) / 2)^c; kernel vectors of the relation matrix
 //! give units, whose logarithms are multiples of 2 R; and the analytic class
-//! number formula h R = sqrt(D) L(1, chi) / 2 bounds h R from below, so a
-//! multiple h* of h and a multiple R* of R with h* R* < sqrt 2 times the
-//! estimate are h and R themselves.
+//! number formula h R = sqrt(D) L(1, chi) / 2 estimates h R: the search
+//! stops at h* R* < sqrt 2 times the estimate, and the certificate
+//! (nf/certify.rs) then proves h* = h and R* = R under GRH alone from
+//! h* R*_hi < 2 h R_lo (a genuine unit with a proven error bound, h* from
+//! exact determinants, Belabas and Friedman's lower bound for h R).
 
 use crate::arith::*;
-use crate::imag::{l1_estimate, lattice_group, tuning, ClassGroup, Timing};
-use crate::linalg::{eliminate_with, independent_rows, kernel_crt, Reduced};
+use crate::imag::{l1_estimate, lattice_group, lattice_group_exact, tuning, ClassGroup, Timing};
+use crate::linalg::{eliminate_tracked, eliminate_with, independent_rows, kernel_crt, Reduced};
 use crate::real::{ln_fixed, ln_int, real_gcd, sqrt_fixed, to_f64};
 use crate::relations::{collect, Elem, FactorBase, Relation, Stats};
 use sagebrush_bigint::BigInt;
@@ -22,6 +24,10 @@ pub struct RealQuadratic {
     pub regulator: f64,
     pub reg_fixed: BigInt,
     pub prec: u32,
+    /// h and R proven under GRH alone (nf/certify.rs), and the regulator's
+    /// correct significant digits then (else 20)
+    pub certified: bool,
+    pub reg_digits: usize,
 }
 
 /// log |gamma / gamma'| 2^prec for gamma = prod ((B + sqrt D)/2)^c:
@@ -36,6 +42,63 @@ fn elem_log(el: &Elem, d: &BigInt, sqrt_d: &BigInt, prec: u32) -> BigInt {
         total += if b < 0 { -l } else { l } * c;
     }
     total
+}
+
+/// elem_log with a bound on its error (units of 2^-prec): sqrt_d is a floor
+/// (< 1 unit, < 1 unit relatively in ln(|B| + sqrt D) too, as that is >= 1),
+/// and ln_fixed is allowed 8 + 2 |e| units (e its binary exponent), as in
+/// embed.rs log_embedding_err.
+fn elem_log_err(el: &Elem, d: &BigInt, sqrt_d: &BigInt, prec: u32) -> (BigInt, f64) {
+    let mut err = 0.0f64;
+    for &(b, c) in el {
+        let ab = BigInt::from(b.unsigned_abs());
+        let x = (&ab << prec as usize) + sqrt_d;
+        let ex = (x.bits() as f64 - 1.0 - prec as f64).abs();
+        let ei = ((&ab * &ab - d).abs().bits() as f64 - 1.0).abs();
+        err += (c.unsigned_abs() as f64) * (2.0 * (9.0 + 2.0 * ex) + 8.0 + 2.0 * ei);
+    }
+    (elem_log(el, d, sqrt_d, prec), err * (1.0 + 1e-12))
+}
+
+/// A batch of kernel vectors: det A, the y_t, the extra rows.
+type Batch = (BigInt, Vec<Vec<BigInt>>, Vec<usize>);
+
+/// unit_logs with certified error bounds, each kernel vector checked to
+/// vanish exactly on the core (so every value is the logarithm of a unit).
+#[allow(clippy::too_many_arguments)]
+fn unit_logs_bounded(d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], sel: &[usize], batches: &[Batch], prec: u32) -> Option<(Vec<BigInt>, Vec<f64>)> {
+    let sqrt_d = sqrt_fixed(d, prec);
+    let (mut logs, mut errs): (Vec<Vec<BigInt>>, Vec<f64>) = elems.iter().map(|el| {
+        let (l, e) = elem_log_err(el, d, &sqrt_d, prec);
+        (vec![l], e)
+    }).unzip();
+    let (_, core2, zero_rows) = eliminate_tracked(n, rels, pivot_weight, Some(&mut logs), Some(&mut errs));
+    if core2 != core_rows {
+        return None;
+    }
+    let mut lams: Vec<BigInt> = zero_rows.iter().map(|&k| logs[k][0].clone()).collect();
+    let mut lerr: Vec<f64> = zero_rows.iter().map(|&k| errs[k]).collect();
+    let ncol = dense.first().map_or(0, |r| r.len());
+    for (det, ys, extras) in batches {
+    for (y, &e) in ys.iter().zip(extras) {
+        let g = y.iter().fold(det.clone(), |g, yi| num_integer::Integer::gcd(&g, yi));
+        if g.is_zero() {
+            continue;
+        }
+        let coef: Vec<BigInt> = y.iter().map(|yi| yi / &g).collect();
+        let de = det / &g;
+        // sum coef_i A_i - de v = 0 exactly
+        if (0..ncol).any(|col| !(coef.iter().zip(sel).map(|(ci, &k)| ci * dense[k][col]).sum::<BigInt>() - &de * dense[e][col]).is_zero()) {
+            continue;
+        }
+        let mut l: BigInt = sel.iter().zip(&coef).map(|(&k, ci)| ci * &logs[core_rows[k]][0]).sum();
+        l -= &de * &logs[core_rows[e]][0];
+        let er: f64 = sel.iter().zip(&coef).map(|(&k, ci)| to_f64(&ci.abs(), 0) * (1.0 + 1e-15) * errs[core_rows[k]]).sum::<f64>() + to_f64(&de.abs(), 0) * (1.0 + 1e-15) * errs[core_rows[e]];
+        lams.push(l);
+        lerr.push(er * (1.0 + 1e-12));
+    }
+    }
+    Some((lams, lerr))
 }
 
 /// Relations of negative norm directly: gamma = (B + sqrt D)/2 with
@@ -106,6 +169,8 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
     // h R = sqrt(D) L(1, chi) / 2
     let hr_est = absd.sqrt() * l1_estimate(d, ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 16)) / 2.0;
     tm.h_est = hr_est;
+    // the certificate's proven lower bound for log h R (GRH; nf/certify.rs)
+    let log_hr_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower(d) };
     let mut tu = tuning(absd.log10(), bound);
     let mut rels: Vec<Relation> = vec![];
     let mut elems: Vec<Elem> = vec![];
@@ -157,7 +222,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
                         }
                         None
                     }
-                    Ok(sel) => try_lattice(&mut cache, d, &rels, &elems, n, tu.pivot_weight, &dense, &core_rows, c, &sel, hr_est, round as u64, debug),
+                    Ok(sel) => try_lattice(&mut cache, d, &rels, &elems, n, tu.pivot_weight, &dense, &core_rows, c, &sel, hr_est, log_hr_lo, round as u64, debug),
                 }
             }
         };
@@ -226,7 +291,7 @@ fn unit_logs(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem]
 /// Units from kernel vectors of the core, the regulator multiple R* they
 /// generate, then h* from the lattice; the answer if h* R* is small enough.
 #[allow(clippy::too_many_arguments)]
-fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], hr_est: f64, seed: u64, debug: bool) -> Option<RealQuadratic> {
+fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], hr_est: f64, log_hr_lo: Option<f64>, seed: u64, debug: bool) -> Option<RealQuadratic> {
     let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     let in_sel: std::collections::HashSet<usize> = sel.iter().cloned().collect();
@@ -242,6 +307,7 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
     let mut lattice: Option<(BigInt, Vec<BigInt>)> = None;
     let mut used = 0;
     let mut last_r: Option<f64> = None;
+    let mut batches: Vec<Batch> = vec![];
     for batch in [6usize, 12, 24] {
         let extras: Vec<usize> = (0..batch).map(|t| others[(used + t) * 7919 % others.len().max(1)]).collect();
         used += batch;
@@ -250,6 +316,7 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
         }
         let vs: Vec<Vec<i64>> = extras.iter().map(|&k| dense[k].clone()).collect();
         let (det, ys) = kernel_crt(&a, &vs);
+        batches.push((det.clone(), ys.clone(), extras.clone()));
         if prec == 0 {
             // The lambdas are exact integer combinations of the relations'
             // logarithms, so their errors are the rounding of those times
@@ -313,7 +380,37 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
             eprintln!("  h* R* / est {:.4} at {:.1} ms", ratio, ms());
         }
         if ratio <= std::f64::consts::SQRT_2 {
-            return Some(RealQuadratic { group: ClassGroup { h, cyc }, regulator: r, reg_fixed: r_fixed, prec });
+            // the certificate: a genuine unit with a proven error bound, an
+            // exact multiple of h, h* R*_hi < 2 h R_lo
+            let cert = log_hr_lo.and_then(|lo| {
+                let Some((lams, errs)) = unit_logs_bounded(d, rels, elems, n, pivot_weight, dense, core_rows, sel, &batches, prec) else {
+                    if debug { eprintln!("  certificate: no bounded unit logarithms"); }
+                    return None;
+                };
+                let (blo, bhi, b) = match crate::nf::certify::rank_one_bounds(&lams, &errs, &two_r) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        if debug { eprintln!("  certificate: no unit with a proven bound ({} units, worst error 2^{:.0} units{})", lams.len(), errs.iter().cloned().fold(0.0, f64::max).log2(), if e { ", imprecise" } else { "" }); }
+                        return None;
+                    }
+                };
+                // R = |b| / 2 (b is twice the log of the unit)
+                let (rlo, rhi) = (to_f64(&blo, prec) / 2.0, to_f64(&bhi, prec) / 2.0 * (1.0 + 1e-14));
+                let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lo.exp() / rhi, seed, debug)? };
+                let ok = crate::nf::certify::ln_big(&h2) + rhi.ln() < std::f64::consts::LN_2 + lo - 1e-12;
+                if debug {
+                    eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}): {}", rlo, rhi, h2, h, if ok { "holds" } else { "failed" });
+                }
+                ok.then(|| {
+                    let rel = (rhi - rlo) / rlo;
+                    let digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;
+                    (h2, cyc2, b.abs() >> 1usize, digits)
+                })
+            });
+            return Some(match cert {
+                Some((h2, cyc2, rf, digits)) => RealQuadratic { group: ClassGroup { h: h2, cyc: cyc2 }, regulator: to_f64(&rf, prec), reg_fixed: rf, prec, certified: true, reg_digits: digits },
+                None => RealQuadratic { group: ClassGroup { h, cyc }, regulator: r, reg_fixed: r_fixed, prec, certified: false, reg_digits: 20 },
+            });
         }
         // more units help only while R* is too big; once a new batch leaves
         // it unchanged, h* is (the lattice needs more relations)
@@ -347,6 +444,7 @@ mod tests {
             let (r, _) = class_group_real(&d.parse().unwrap()).unwrap();
             let want: Vec<BigInt> = cyc.iter().map(|&c| BigInt::from(c)).collect();
             assert_eq!(r.group.cyc, want, "cyc({})", d);
+            assert!(r.certified, "{} not certified", d);
             // the regulator to 15 significant digits
             let got = to_f64(&r.reg_fixed, r.prec);
             let reg: f64 = reg.parse().unwrap();

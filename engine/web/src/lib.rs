@@ -113,10 +113,19 @@ fn sign(v: &Value) -> Result<i32, String> {
     }
 }
 
-/// What a class group result assumes: GRH, and the number of roots of
-/// unity when it is not proven (it enters the analytic class number formula).
-fn assumes(w_proven: bool) -> Value {
-    if w_proven { json!(["GRH"]) } else { json!(["GRH", "the roots of unity found are all"]) }
+/// What a class group result assumes: GRH; that the roots of unity found
+/// are all, when that is not proven; and, when the analytic certificate
+/// (h* R* below twice a proven lower bound for h R) did not go through,
+/// the stopping rule's estimate of h R, which has no proven error bound.
+fn assumes(w_proven: bool, certified: bool) -> Value {
+    let mut a = vec!["GRH"];
+    if !w_proven {
+        a.push("the roots of unity found are all");
+    }
+    if !certified {
+        a.push("h R is near its estimate (uncertified stopping rule)");
+    }
+    json!(a)
 }
 
 /// The level n >= 1.
@@ -517,7 +526,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "bnf" => {
             let b = sagebrush_classgroup::api::bnf(&bigs(v.get("f"))?)?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "assumes": assumes(b.w_proven) }))
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes(b.w_proven, b.certified) }))
         }
         "bnf_relations" => {
             let bad = || "extra must be a list of primes".to_string();
@@ -530,14 +539,14 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
-                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "assumes": assumes(b.w_proven),
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes(b.w_proven, b.certified),
                        "fb": d.fb.iter().map(|&(p, e, f)| json!([p, e, f])).collect::<Vec<_>>(),
                        "rels": d.rels.iter().map(|r| r.iter().map(|&(i, k)| json!([i, k])).collect::<Vec<_>>()).collect::<Vec<_>>(),
                        "elems": d.elems.iter().map(|(num, den)| json!([big(num), den.to_string()])).collect::<Vec<_>>() }))
         }
         "quadratic_class_group" => {
-            let (h, cyc, reg) = sagebrush_classgroup::api::quadratic(&big1(v.get("d"))?)?;
-            Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg, "assumes": ["GRH"] }))
+            let (h, cyc, reg, certified) = sagebrush_classgroup::api::quadratic(&big1(v.get("d"))?)?;
+            Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg, "certified": certified, "assumes": assumes(true, certified) }))
         }
         "hermite_form" => Ok(json!(sagebrush_classgroup::api::hermite(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
         "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&rect(v.get("m"))?)))),

@@ -210,6 +210,9 @@ pub struct BnfData {
     /// the number of roots of unity, and whether that is proven
     pub w: u32,
     pub w_proven: bool,
+    /// h and the regulator proven under GRH alone (the analytic
+    /// certificate, nf/certify.rs)
+    pub certified: bool,
 }
 
 /// A decimal string of x / 2^prec with `digits` significant digits.
@@ -270,11 +273,11 @@ pub fn fixed_to_decimal(x: &BigInt, prec: u32, digits: usize) -> String {
 pub fn bnf(f: &[BigInt]) -> Result<BnfData, String> {
     monic(f)?;
     if f.len() == 2 {
-        return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2, w_proven: true });
+        return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2, w_proven: true, certified: true });
     }
     let (b, _) = crate::nf::bnf::bnfinit(f)?;
-    let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, 20) };
-    Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven })
+    let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };
+    Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified })
 }
 
 /// The factor-base relations of a certified class group computation, with
@@ -294,8 +297,8 @@ pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String
         return Err("the degree must be at least 2".into());
     }
     let (b, _, r) = crate::nf::bnf::bnfinit_with(f, extra)?;
-    let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, 20) };
-    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven };
+    let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };
+    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified };
     let elems = r.elems.iter().map(|x| {
         // power-basis coordinates: x B / den
         let n = r.order.n;
@@ -307,13 +310,13 @@ pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String
 
 /// Class group of the quadratic field of fundamental discriminant d (and
 /// the regulator, d > 0), by the quadratic algorithms.
-pub fn quadratic(d: &BigInt) -> Result<(BigInt, Vec<BigInt>, Option<String>), String> {
+pub fn quadratic(d: &BigInt) -> Result<(BigInt, Vec<BigInt>, Option<String>, bool), String> {
     if d.is_negative() {
-        let (g, _) = crate::imag::class_group(d)?;
-        Ok((g.h, g.cyc, None))
+        let (g, _, certified) = crate::imag::class_group_certified(d)?;
+        Ok((g.h, g.cyc, None, certified))
     } else {
         let (r, _) = crate::realq::class_group_real(d)?;
-        Ok((r.group.h, r.group.cyc, Some(fixed_to_decimal(&r.reg_fixed, r.prec, 20))))
+        Ok((r.group.h, r.group.cyc, Some(fixed_to_decimal(&r.reg_fixed, r.prec, r.reg_digits)), r.certified))
     }
 }
 

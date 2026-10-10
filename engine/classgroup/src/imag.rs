@@ -7,7 +7,7 @@
 //! 1/sqrt 2 times it, and det L is a multiple of h).
 
 use crate::arith::*;
-use crate::linalg::{cokernel, det_crt_probable, eliminate, hnf_mod, hnf_mod_until, independent_rows, smith, ModD, ModD128, Reduced};
+use crate::linalg::{cokernel, det_crt, det_crt_probable, eliminate, hnf_mod, hnf_mod_until, independent_rows, smith, ModD, ModD128, Reduced};
 use crate::relations::{collect, FactorBase, Params, Stats};
 use sagebrush_bigint::BigInt;
 use num_integer::Integer;
@@ -95,6 +95,14 @@ pub(crate) fn tuning(digits: f64, bound: u64) -> Tuning {
 /// The class group of the imaginary quadratic order of discriminant d (a
 /// fundamental discriminant d < 0), assuming GRH.
 pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
+    class_group_certified(d).map(|(g, t, _)| (g, t))
+}
+
+/// class_group, and whether h is proven under GRH alone: for |D| below
+/// SMALL_D unconditionally (small_group is exhaustive), else when the
+/// analytic certificate holds (h* from exact determinants below twice
+/// Belabas and Friedman's lower bound for h; nf/certify.rs).
+pub fn class_group_certified(d: &BigInt) -> Result<(ClassGroup, Timing, bool), String> {
     let d4 = bigmod(d, 4);
     if !d.is_negative() || !(d4 == 0 || d4 == 1) {
         return Err(format!("{} is not a negative discriminant", d));
@@ -105,11 +113,11 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
     let absd = -d.to_f64().unwrap();
     let ld = absd.ln();
     if absd < 5.0 {
-        return Ok((ClassGroup { h: BigInt::one(), cyc: vec![] }, Timing::default()));
+        return Ok((ClassGroup { h: BigInt::one(), cyc: vec![] }, Timing::default(), true));
     }
     if absd < SMALL_D {
         let fb = FactorBase::new(d, ((23.0 / 6.0 * ld * ld).ceil() as u64).max(10));
-        return Ok((small_group(d, &fb), Timing::default()));
+        return Ok((small_group(d, &fb), Timing::default(), true));
     }
     let debug = std::env::var("QCL_DEBUG").is_ok();
     let mut tm = Timing::default();
@@ -127,6 +135,7 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
     // even x = 256 stays within 4.2% (the acceptance window is 41%).
     let h_est = h_estimate(d, ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 16));
     tm.h_est = h_est;
+    let log_h_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower(d) };
     let mut tu = tuning(absd.log10(), bound);
     if debug {
         eprintln!("setup (fb {} primes, h_est) {:.1} ms", n, t0.elapsed().as_secs_f64() * 1e3);
@@ -163,7 +172,7 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
                 if debug {
                     eprintln!("round {} rels {}: core {} x {} after {:.1} ms", round, rels.len(), dense.len(), cols.len(), t.elapsed().as_secs_f64() * 1e3);
                 }
-                match core_group(&dense, cols.len(), h_est, round as u64, debug) {
+                match core_group(&dense, cols.len(), h_est, log_h_lo, round as u64, debug) {
                     Ok(g) => g,
                     Err(free) => {
                         // these primes lack independent relations: the
@@ -178,10 +187,10 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
             }
         };
         tm.linalg_s += t.elapsed().as_secs_f64();
-        if let Some(g) = found {
+        if let Some((g, certified)) = found {
             tm.relations = rels.len();
             tm.polys = stats.polys;
-            return Ok((g, tm));
+            return Ok((g, tm, certified));
         }
         want = rels.len() + more;
     }
@@ -237,9 +246,10 @@ fn small_group(dd: &BigInt, fb: &FactorBase) -> ClassGroup {
 /// Z^c / L for the lattice L spanned by `rows`, if its order is below
 /// sqrt 2 h_est (so is h); None if L is not yet the full relation lattice;
 /// the columns lacking a relation if L does not have full rank.
-fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, seed: u64, debug: bool) -> Result<Option<ClassGroup>, Vec<usize>> {
+fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, log_h_lo: Option<f64>, seed: u64, debug: bool) -> Result<Option<(ClassGroup, bool)>, Vec<usize>> {
     if c == 0 {
-        return Ok(Some(ClassGroup { h: BigInt::one(), cyc: vec![] }));
+        // h* = 1 is h
+        return Ok(Some((ClassGroup { h: BigInt::one(), cyc: vec![] }, true)));
     }
     let sel = independent_rows(rows, c).map_err(|free| {
         if debug {
@@ -252,7 +262,23 @@ fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, seed: u64, debug: bool) -
     if debug {
         eprintln!("  det/h_est {:.3}", ratio);
     }
-    Ok((ratio <= std::f64::consts::SQRT_2).then(|| ClassGroup { h, cyc }))
+    if ratio > std::f64::consts::SQRT_2 {
+        return Ok(None);
+    }
+    // the certificate: h* from exact determinants (a proven multiple of h)
+    // below twice the proven lower bound for h (R = 1)
+    let cert = log_h_lo.and_then(|lo| {
+        let (h2, cyc2) = lattice_group_exact(rows, c, &sel, 2.0 * lo.exp(), seed, debug)?;
+        let ok = crate::nf::certify::ln_big(&h2) < std::f64::consts::LN_2 + lo - 1e-12;
+        if debug {
+            eprintln!("  certificate: h* {} (heuristic {}), log h >= {:.6}: {}", h2, h, lo, if ok { "holds" } else { "failed" });
+        }
+        ok.then_some((h2, cyc2))
+    });
+    Ok(Some(match cert {
+        Some((h2, cyc2)) => (ClassGroup { h: h2, cyc: cyc2 }, true),
+        None => (ClassGroup { h, cyc }, false),
+    }))
 }
 
 /// The order and invariants of Z^c / L, L spanned by `rows` (of full rank,
@@ -260,12 +286,27 @@ fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, seed: u64, debug: bool) -
 /// stops once the order is at most `enough`; `first_det` is det of the sel
 /// rows if known.  None if no multiple of det L was found.
 pub(crate) fn lattice_group(rows: &[Vec<i64>], c: usize, sel: &[usize], first_det: Option<BigInt>, enough: f64, seed: u64, debug: bool) -> Option<(BigInt, Vec<BigInt>)> {
+    lattice_group_impl(rows, c, sel, first_det, enough, seed, debug, false)
+}
+
+/// lattice_group with every determinant computed exactly (CRT to the
+/// Hadamard bound), not stopped once stable: the modulus is then a proven
+/// multiple of det L, so the order found is a proven multiple of the order
+/// of the group the relations present (the class group's, when the factor
+/// base generates it).
+pub(crate) fn lattice_group_exact(rows: &[Vec<i64>], c: usize, sel: &[usize], enough: f64, seed: u64, debug: bool) -> Option<(BigInt, Vec<BigInt>)> {
+    lattice_group_impl(rows, c, sel, None, enough, seed, debug, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lattice_group_impl(rows: &[Vec<i64>], c: usize, sel: &[usize], first_det: Option<BigInt>, enough: f64, seed: u64, debug: bool, exact: bool) -> Option<(BigInt, Vec<BigInt>)> {
+    let det_of = |m: &[Vec<i64>]| if exact { det_crt(m) } else { det_crt_probable(m) };
     let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     // a multiple of det L: the gcd of the determinants of a few independent
     // square subsets, until it is word-sized
     let square = |sel: &[usize], from: &[Vec<i64>]| -> Vec<Vec<i64>> { sel.iter().map(|&k| from[k].clone()).collect() };
-    let mut d0: BigInt = first_det.unwrap_or_else(|| det_crt_probable(&square(sel, rows))).abs();
+    let mut d0: BigInt = first_det.unwrap_or_else(|| det_of(&square(sel, rows))).abs();
     if debug {
         eprintln!("  first det {} bits at {:.1} ms", d0.bits(), ms());
     }
@@ -284,7 +325,7 @@ pub(crate) fn lattice_group(rows: &[Vec<i64>], c: usize, sel: &[usize], first_de
         }
         let shuffled = square(&order, rows);
         if let Ok(sel2) = independent_rows(&shuffled, c) {
-            d0 = d0.gcd(&det_crt_probable(&square(&sel2, &shuffled)).abs());
+            d0 = d0.gcd(&det_of(&square(&sel2, &shuffled)).abs());
         }
     }
     if debug {
@@ -366,7 +407,8 @@ mod tests {
             ("-1000000000000000000000000000000000000003", &[5044956409536984867]),
         ];
         for &(d, cyc) in known {
-            let (g, _) = class_group(&d.parse().unwrap()).unwrap();
+            let (g, _, certified) = class_group_certified(&d.parse().unwrap()).unwrap();
+            assert!(certified, "{} not certified", d);
             let want: Vec<BigInt> = cyc.iter().map(|&c| BigInt::from(c)).collect();
             assert_eq!(g.cyc, want, "cyc({})", d);
         }

@@ -240,6 +240,83 @@ impl Embeddings {
         Ok(self.order.iter().map(|&i| c[i].clone()).collect())
     }
 
+    /// roots_hp, with for each root a bound (units of 2^-prec) on its
+    /// distance from the center: the certified radius plus the truncation.
+    pub fn roots_hp_rad(&self, f: &[BigInt], prec: u32) -> Result<(Vec<(BigInt, BigInt)>, Vec<f64>), String> {
+        let iso = super::roots::refine(f, &self.iso, prec)?;
+        let c = iso.centers(prec);
+        let sh = (iso.prec - prec.min(iso.prec)) as usize;
+        // the radius shifted down (+1), each coordinate of the center
+        // truncated (< 1 each, so < 2 together)
+        let rad = |i: usize| crate::real::to_f64(&(&iso.roots[i].rad >> sh), 0) * (1.0 + 1e-15) + 3.0;
+        Ok((self.order.iter().map(|&i| c[i].clone()).collect(), self.order.iter().map(|&i| rad(i)).collect()))
+    }
+
+    /// log_embedding with a certified bound on the error of every
+    /// coordinate (units of 2^-prec), from the roots' radii `rho` (as
+    /// roots_hp_rad gives them).  With t~ the root used and t the root,
+    /// v = sum c_k t^k: |v(t) - v(t~)| <= rho sum k |c_k| R^(k-1) (R = |t~| +
+    /// rho), Horner's truncations add < 2 sum R^k units; then |log |v|^2 -
+    /// log |v~|^2| <= 4 u for u = error / |v~| <= 1/2, the two truncations
+    /// of |v|^2 / den^2 (to s units) at most 2 / s relatively, and ln_fixed
+    /// is allowed 8 + 2 |e| units (e the binary exponent it splits off: ln 2
+    /// times e).  None if the bound is not finite or u > 1/2.
+    pub fn log_embedding_err(&self, o: &Order, x: &[BigInt], roots: &[(BigInt, BigInt)], rho: &[f64], prec: u32) -> Option<(Vec<BigInt>, f64)> {
+        let p = prec as usize;
+        let num = super::zlin::vec_mat(x, &o.basis);
+        let cf: Vec<f64> = num.iter().map(|c| crate::real::to_f64(&c.abs(), 0) * (1.0 + 1e-15)).collect();
+        let den2 = &o.den * &o.den;
+        let mut out = Vec::with_capacity(roots.len());
+        let mut worst = 0.0f64;
+        for (j, ((zr, zi), &rho)) in roots.iter().zip(rho).enumerate() {
+            let (mut vr, mut vi) = (BigInt::zero(), BigInt::zero());
+            for c in num.iter().rev() {
+                let (nvr, nvi) = (((&vr * zr - &vi * zi) >> p) + (c << p), (&vr * zi + &vi * zr) >> p);
+                vr = nvr;
+                vi = nvi;
+            }
+            // R = |t~| + rho 2^-prec, rho 2^-prec <= 2^-60
+            if !(rho.is_finite() && rho.log2() < prec as f64 - 60.0) {
+                return None;
+            }
+            let (fr, fi) = (crate::real::to_f64(zr, prec), crate::real::to_f64(zi, prec));
+            let big_r = (fr * fr + fi * fi).sqrt() * (1.0 + 1e-14) + 2f64.powi(-60);
+            let (mut dsum, mut rsum, mut rk) = (0.0f64, 0.0f64, 1.0f64);
+            for (k, c) in cf.iter().enumerate() {
+                // here rk = R^k
+                if k >= 1 {
+                    dsum += k as f64 * c * (rk / big_r);
+                }
+                rsum += rk;
+                rk *= big_r;
+            }
+            let e_units = (rho * dsum + 2.0 * rsum) * (1.0 + 1e-12);
+            let (gr, gi) = (crate::real::to_f64(&vr, prec), crate::real::to_f64(&vi, prec));
+            let vabs = (gr * gr + gi * gi).sqrt() * (1.0 - 1e-14);
+            // u 2^prec, u = e_units 2^-prec / |v~|
+            let u_scaled = e_units / vabs;
+            if !(vabs.is_finite() && vabs > 0.0 && u_scaled.is_finite()) || u_scaled.log2() >= prec as f64 - 1.0 {
+                return None;
+            }
+            let abs2 = (&vr * &vr + &vi * &vi) >> p;
+            let s = abs2 / &den2;
+            if s.bits() <= 3 {
+                return None;
+            }
+            let ex = (s.bits() as i64 - 1 - prec as i64).unsigned_abs() as f64;
+            let l = ln_fixed(&s, prec);
+            let mut err = (4.0 * u_scaled + 4.0 / crate::real::to_f64(&s, prec) + 8.0 + 2.0 * ex) * (1.0 + 1e-12);
+            if j < self.r1 {
+                err = err / 2.0 + 1.0;
+                out.push(l >> 1usize);
+            } else {
+                out.push(l);
+            }
+            worst = worst.max(err);
+        }
+        Some((out, worst))
+    }
+
     /// The logarithmic embedding of x (order coordinates) to `prec` bits:
     /// log |sigma_j(x)| for real j, 2 log |sigma_j(x)| for complex j
     /// (fixed point), from the roots at that precision.
