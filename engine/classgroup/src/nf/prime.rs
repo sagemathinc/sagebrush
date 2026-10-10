@@ -278,12 +278,53 @@ pub fn decompose_general(o: &Order, p: u64) -> Result<Vec<PrimeIdeal>, String> {
         }).collect();
         let ker = left_kernel_mod(&rows, &bp);
         let beta = ker.into_iter().next().unwrap_or_else(|| o.one());
-        let mut pr = PrimeIdeal { p, e: 0, f, pi: basis[0].clone(), beta, basis };
+        let pi = two_element_generator(o, p, &basis)?;
+        let mut pr = PrimeIdeal { p, e: 0, f, pi, beta, basis };
         let pv: Vec<BigInt> = o.one().into_iter().map(|c| c * p).collect();
         pr.e = valuation(o, &pr, &pv);
         out.push(pr);
     }
     Ok(out)
+}
+
+/// pi in P with P = p O + pi O exactly (the HNFs agree): the first basis
+/// row is no such element in general (p e_1 gave "(2, 0)", the ideal 2 O,
+/// for x^3 + x^2 - 2 x + 8 at its common index divisor 2: the systematic
+/// review's NFD); random small combinations of the basis are tried.
+fn two_element_generator(o: &Order, p: u64, basis: &ZMat) -> Result<Vec<BigInt>, String> {
+    let n = o.n;
+    let bp = BigInt::from(p);
+    let target = hnf(basis);
+    let generated = |pi: &[BigInt]| -> ZMat {
+        let mut gens: ZMat = (0..n).map(|i| (0..n).map(|j| if i == j { bp.clone() } else { BigInt::zero() }).collect()).collect();
+        for i in 0..n {
+            let e_i: Vec<BigInt> = (0..n).map(|j| BigInt::from((i == j) as i32)).collect();
+            gens.push(o.mul(pi, &e_i));
+        }
+        hnf(&gens)
+    };
+    let mut rng = 0x5851_F42D_4C95_7F2Du64 ^ p;
+    for attempt in 0..2000 {
+        let pi: Vec<BigInt> = if attempt < basis.len() {
+            basis[attempt].clone()
+        } else {
+            let mut v = vec![BigInt::zero(); n];
+            for row in basis {
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
+                let c = BigInt::from((rng % 7) as i64 - 3);
+                for (x, y) in v.iter_mut().zip(row) {
+                    *x += &c * y;
+                }
+            }
+            v
+        };
+        if generated(&pi) == target {
+            return Ok(pi);
+        }
+    }
+    Err(format!("no two-element generator found for a prime above {}", p))
 }
 
 fn mul_mod_p(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
@@ -429,6 +470,33 @@ mod tests {
             let mut got: Vec<(u32, u32)> = decompose(&o, &dk, p).unwrap().iter().map(|q| (q.e, q.f)).collect();
             got.sort();
             assert_eq!(got, want, "{:?} at {}", f, p);
+        }
+    }
+
+    /// P = p O + pi O for every prime, both paths (the systematic review's
+    /// NFD: pi was the first HNF row, 2 e_1, at x^3 + x^2 - 2 x + 8's
+    /// common index divisor 2).
+    #[test]
+    fn two_element_generators() {
+        let polys: &[&[i64]] = &[&[8, -2, 1, 1], &[-5, 0, 0, 0, 1], &[1, 1, 2, -1, 1], &[-2, 0, 0, 0, 0, 1], &[3, 1, 0, 2, 0, 1], &[-1, 3, 0, 0, 0, 0, 1]];
+        for f in polys {
+            let (o, _) = maximal_order(&poly(f)).unwrap();
+            let dk = o.disc();
+            let n = o.n;
+            for p in [2u64, 3, 5, 7] {
+                let mut all = decompose(&o, &dk, p).unwrap();
+                if p < 5 {
+                    all.extend(decompose_general(&o, p).unwrap());
+                }
+                for q in all {
+                    let mut gens: ZMat = (0..n).map(|i| (0..n).map(|j| if i == j { BigInt::from(p) } else { BigInt::zero() }).collect()).collect();
+                    for i in 0..n {
+                        let e_i: Vec<BigInt> = (0..n).map(|j| BigInt::from((i == j) as i32)).collect();
+                        gens.push(o.mul(&q.pi, &e_i));
+                    }
+                    assert_eq!(hnf(&gens), hnf(&q.basis), "{:?} at {}: pi {:?}", f, p, q.pi);
+                }
+            }
         }
     }
 

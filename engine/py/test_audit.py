@@ -194,3 +194,10 @@ try:
 except ValueError:
     pass
 print("groebner ok")
+# systematic review NFD: two-element generators at a common index divisor
+from sagebrush.sage import NumberField, polygen
+_t = polygen(QQ, "t")
+_K = NumberField(_t**3 + _t**2 - 2*_t + 8, "a")
+_Ps = _K.primes_above(2)
+assert len(_Ps) == 3 and all(P.norm() == 2 for P in _Ps) and len(set(map(str, _Ps))) == 3
+print("nf ok")
