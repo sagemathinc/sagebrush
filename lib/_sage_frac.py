@@ -456,15 +456,17 @@ def _ideal(self, *gens):
     if not field and len(nonzero) > 1:
         # (2, z) in ZZ[z] is not principal: a gcd would give the unit ideal
         raise NotImplementedError("ideals with several generators of a polynomial ring over %r (not a field) are not supported" % (self.base_ring(),))
+    if not field:
+        # (2, 0) in ZZ[z] is (2): no gcd, and no monic normalisation (2 is not a unit)
+        return PrincipalIdeal(self, nonzero[0] if nonzero else self(0))
     g = gens[0]
     for h in gens[1:]:
         g = g.gcd(h)
-    if len(gens) > 1 or True:
-        try:
-            if g and g.leading_coefficient() != 1 and len(gens) > 1:
-                g = g.monic()
-        except (AttributeError, ZeroDivisionError):
-            pass
+    try:
+        if g and g.leading_coefficient() != 1 and len(gens) > 1:
+            g = g.monic()
+    except (AttributeError, ZeroDivisionError):
+        pass
     return PrincipalIdeal(self, g)
 
 

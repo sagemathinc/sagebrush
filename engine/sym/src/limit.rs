@@ -398,8 +398,9 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
 }
 
 /// e = C x^p log(x)^q e^(r(x)) (r a polynomial without constant term):
-/// (C, (deg r, lead r, p, q)) as a growth key at +oo, exactly.
-type Key = (i64, Expr, Expr, Expr);
+/// (C, (deg r, the coefficients of r from x^deg down to x, p, q)) as a
+/// growth key at +oo, exactly.  (All of r: e^(x^2 + x) beats e^(x^2).)
+type Key = (i64, Vec<Expr>, Expr, Expr);
 
 fn growth(e: &Expr, x: &str) -> Option<(Expr, Key)> {
     let fs = match &e.kind {
@@ -431,7 +432,7 @@ fn growth(e: &Expr, x: &str) -> Option<(Expr, Key)> {
         return None;
     }
     let deg = rc.len() as i64 - 1;
-    let (deg, lead) = if deg >= 1 { (deg, rc[deg as usize].clone()) } else { (0, zero()) };
+    let (deg, lead) = if deg >= 1 { (deg, (1..=deg as usize).rev().map(|i| rc[i].clone()).collect()) } else { (0, vec![]) };
     // the constant part of r is a constant factor
     c.push(exp(&rc[0]));
     Some((mul(c), (deg, lead, p, q)))
@@ -445,16 +446,19 @@ fn cmp_const(a: &Expr, b: &Expr) -> Option<std::cmp::Ordering> {
 fn key_cmp(a: &Key, b: &Key) -> Option<std::cmp::Ordering> {
     use std::cmp::Ordering::Equal;
     // e^(c x^k) beats x^p beats log(x)^q
-    let ea = if a.0 > 0 { a.0 * const_sign(&a.1)? as i64 } else { 0 };
-    let eb = if b.0 > 0 { b.0 * const_sign(&b.1)? as i64 } else { 0 };
+    let ea = if a.0 > 0 { a.0 * const_sign(&a.1[0])? as i64 } else { 0 };
+    let eb = if b.0 > 0 { b.0 * const_sign(&b.1[0])? as i64 } else { 0 };
     let o = ea.cmp(&eb);
     if o != Equal {
         return Some(o);
     }
     if a.0 == b.0 && a.0 > 0 {
-        let o = cmp_const(&a.1, &b.1)?;
-        if o != Equal {
-            return Some(o);
+        // the exponents' difference: its first nonzero coefficient decides
+        for (x, y) in a.1.iter().zip(&b.1) {
+            let o = cmp_const(x, y)?;
+            if o != Equal {
+                return Some(o);
+            }
         }
     }
     let o = cmp_const(&a.2, &b.2)?;

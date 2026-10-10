@@ -114,7 +114,9 @@ pub fn verify(f: &Expr, big_f: &Expr, x: &str) -> bool {
             Some((0.7 + 0.31 * i + 0.05 * k as f64, 0.0))
         };
         let (Some(zv), Some(fv)) = (crate::eval::to_c64_env(&z, &env), crate::eval::to_c64_env(f, &env)) else { continue };
-        if !zv.0.is_finite() || !zv.1.is_finite() || !fv.0.is_finite() || !fv.1.is_finite() {
+        // (an integrand value that underflows a double, as for a factor
+        // 10^-400, decides nothing: such a point is not counted)
+        if !zv.0.is_finite() || !zv.1.is_finite() || !fv.0.is_finite() || !fv.1.is_finite() || fv.0.hypot(fv.1) < 1e-280 {
             continue;
         }
         let err = zv.0.hypot(zv.1);
@@ -146,7 +148,9 @@ fn verify_numeric(f: &Expr, big_f: &Expr, x: &str) -> bool {
             Some((0.7 + 0.31 * i + 0.05 * k as f64, 0.0))
         };
         let (Some(zv), Some(fv)) = (crate::eval::to_c64_env(&z, &env), crate::eval::to_c64_env(f, &env)) else { continue };
-        if !zv.0.is_finite() || !zv.1.is_finite() || !fv.0.is_finite() || !fv.1.is_finite() {
+        // (an integrand value that underflows a double, as for a factor
+        // 10^-400, decides nothing: such a point is not counted)
+        if !zv.0.is_finite() || !zv.1.is_finite() || !fv.0.is_finite() || !fv.1.is_finite() || fv.0.hypot(fv.1) < 1e-280 {
             continue;
         }
         let scale = fv.0.hypot(fv.1) + 1e-9 * crate::eval::to_c64_env(big_f, &env).map_or(0.0, |v| v.0.hypot(v.1));
@@ -172,7 +176,7 @@ fn verify_real(z: &Expr, f: &Expr, x: &str, syms: &[String]) -> bool {
             Some((0.7 + 0.31 * i, 0.0))
         };
         let (Some(zv), Some(fv)) = (crate::eval::to_c64_env(z, &env), crate::eval::to_c64_env(f, &env)) else { continue };
-        if !fv.0.is_finite() || fv.1.abs() > 1e-12 * (1.0 + fv.0.abs()) || !zv.0.is_finite() || !zv.1.is_finite() {
+        if !fv.0.is_finite() || fv.1.abs() > 1e-12 * (1.0 + fv.0.abs()) || !zv.0.is_finite() || !zv.1.is_finite() || fv.0.abs() < 1e-280 {
             continue;
         }
         if zv.0.hypot(zv.1) > 1e-7 * fv.0.abs() {
@@ -1484,7 +1488,10 @@ fn sqrt_pos(e: &Expr) -> Expr {
     for f in factors(&rest) {
         let (b, k) = base_exp(&f);
         match k.as_i64() {
-            Some(k) if k % 2 == 0 => out.push(pow(&b, &int(k / 2))),
+            // sqrt(b^(2j)) = |b|^j: b itself only for even j or b > 0
+            // (asin(x/a) is not an antiderivative of 1/sqrt(a^2 - x^2) for a < 0)
+            Some(k) if k % 2 == 0 && ((k / 2) % 2 == 0 || crate::domain::positive_const(&b)) => out.push(pow(&b, &int(k / 2))),
+            Some(k) if k % 2 == 0 => out.push(pow(&fun1(Fun::Abs, &b), &int(k / 2))),
             _ => out.push(sqrt(&f)),
         }
     }

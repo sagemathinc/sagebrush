@@ -680,7 +680,9 @@ class AlgebraicNumber:
     def _is_real(self):
         if self._gen is None or self._gen.real:
             return True
-        return self._approx(40)[1] == 0 or (abs(self._approx(60)[1]) < _F(1, 10 ** 50) and self._exact_is_real())
+        # exactly (equal to its conjugate): an imaginary part that rounds to
+        # 0 at a fixed precision (I / 10^100) is not 0
+        return self._exact_is_real()
 
     def _exact_is_real(self):
         return self == self.conjugate()

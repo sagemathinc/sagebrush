@@ -754,6 +754,9 @@ class GenericGraph:
         return H
 
 
+_NO_EDGE = object()  # "no such edge" (never equal to a user's label)
+
+
 def _isomorphism(G, H, labels):
     """An isomorphism G -> H (a dict) or None: colour refinement, then
     backtracking."""
@@ -809,10 +812,10 @@ def _isomorphism(G, H, labels):
     def ok(v, w):
         # (a loop at v must map to a loop at w: v itself is not in m yet)
         for x, l in oG[v].items():
-            if (x == v or x in m) and oH[w].get(w if x == v else m[x], "__no__") != l:
+            if (x == v or x in m) and oH[w].get(w if x == v else m[x], _NO_EDGE) != l:
                 return False
         for x, l in iG[v].items():
-            if (x == v or x in m) and iH[w].get(w if x == v else m[x], "__no__") != l:
+            if (x == v or x in m) and iH[w].get(w if x == v else m[x], _NO_EDGE) != l:
                 return False
         if v not in oG[v] and w in oH[w]:
             return False
@@ -835,7 +838,7 @@ def _isomorphism(G, H, labels):
     if not bt(0):
         return None
     # the certificate is checked: every edge maps to an edge with its label
-    if any(oH[m[a]].get(m[b], "__no__") != l for a in oG for b, l in oG[a].items()):
+    if any(oH[m[a]].get(m[b], _NO_EDGE) != l for a in oG for b, l in oG[a].items()):
         raise RuntimeError("is_isomorphic: internal error, the map found is not an isomorphism")
     try:
         return {v: m[v] for v in sorted(m)}

@@ -1979,6 +1979,8 @@ def GF(order, name=None, modulus=None, names=None, impl=None, proof=None, **kwds
         ValueError: the degree of the modulus does not equal the degree of the field
     """
     q = int(order)
+    if q != order:
+        raise TypeError("the order of a finite field must be an integer, not %s" % (order,))
     pn = _is_prime_power(q)
     if pn is None:
         raise ValueError("the order of a finite field must be a prime power")
