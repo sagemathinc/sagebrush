@@ -1050,43 +1050,63 @@ def _eval_str(x, name, gen, const):
     """Evaluate a string in the generator `name`, with its integer literals
     made constants of the target ring by `const` (exponents excepted): plain
     eval returned Python ints and floats for '5' and '1/2' (the second
-    review's R2-POL-F4)."""
-    import io
-    import tokenize
-    toks = []
+    review's R2-POL-F4).  A small tokenizer of its own: the browser runtime
+    has no tokenize module (Astra's review)."""
+    src = x.replace("^", "**")
+    toks = []  # (kind, text): "num", "name", "op", "sp"
+    k = 0
+    while k < len(src):
+        ch = src[k]
+        if ch.isspace():
+            toks.append(("sp", ch))
+            k += 1
+        elif ch.isdigit() or (ch == "." and k + 1 < len(src) and src[k + 1].isdigit()):
+            m = k
+            while m < len(src) and (src[m].isalnum() or src[m] in "._"):
+                m += 1
+            toks.append(("num", src[k:m]))
+            k = m
+        elif ch.isalpha() or ch == "_":
+            m = k
+            while m < len(src) and (src[m].isalnum() or src[m] == "_"):
+                m += 1
+            toks.append(("name", src[k:m]))
+            k = m
+        elif src.startswith("**", k):
+            toks.append(("op", "**"))
+            k += 2
+        else:
+            toks.append(("op", ch))
+            k += 1
+    out = []
     # an exponent (the operand after **: a number, a parenthesized group, with
     # unary signs) keeps its integers: a^(3), a^-1, a^(2+1) (Astra's review)
-    expo = False   # just after **, before the operand is complete
-    depth = 0      # inside an exponent's parentheses
-    for t in tokenize.generate_tokens(io.StringIO(x.replace("^", "**")).readline):
-        sig = t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER)
+    expo = False
+    depth = 0
+    for kind, t in toks:
         in_exponent = expo or depth > 0
-        if t.type == tokenize.NUMBER and not in_exponent:
-            if not t.string.isdigit():
-                raise TypeError("unable to convert %r: %r is not an integer" % (x, t.string))
-            toks.extend([(tokenize.NAME, "__c"), (tokenize.OP, "("), (tokenize.NUMBER, t.string), (tokenize.OP, ")")])
+        if kind == "num" and not in_exponent:
+            if not t.isdigit():
+                raise TypeError("unable to convert %r: %r is not an integer" % (x, t))
+            out.append("__c(%s)" % t)
         else:
-            toks.append((t.type, t.string))
-        if not sig:
+            out.append(t)
+        if kind == "sp":
             continue
-        if t.string == "**":
+        if t == "**":
             if depth == 0:
                 expo = True
         elif expo and depth == 0:
-            if t.string == "(":
-                depth = 1
+            if t == "(":
+                depth, expo = 1, False
+            elif t not in ("-", "+"):
                 expo = False
-            elif t.string in ("-", "+"):
-                pass  # a sign: the operand follows
-            else:
-                expo = False  # a number or a name: the operand is complete
         elif depth > 0:
-            if t.string == "(":
+            if t == "(":
                 depth += 1
-            elif t.string == ")":
+            elif t == ")":
                 depth -= 1
-    src = tokenize.untokenize(toks)
-    return eval(src, {name: gen, "__c": const, "__builtins__": {}})
+    return eval("".join(out), {name: gen, "__c": const, "__builtins__": {}})
 
 
 def _derivative_count(args, gen, name):
@@ -1497,6 +1517,8 @@ class FiniteField_ext:
 
             sage: k.<a> = GF(9); k(5), k([1, 2]), k(1/2)
             (2, 2*a + 1, 2)
+            sage: k('5'), k('1/2'), k('a^(-1)'), k('a^(2+1)')
+            (2, 2, a + 2, 2*a + 1)
         """
         if isinstance(x, FiniteFieldElement):
             if x._parent is self:
