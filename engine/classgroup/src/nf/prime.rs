@@ -424,7 +424,7 @@ mod tests {
             (&[-5, 0, 0, 0, 1], 5, &[(4, 1)]),
         ];
         for &(f, p, want) in cases {
-            let (o, _) = maximal_order(&poly(f));
+            let (o, _) = maximal_order(&poly(f)).unwrap();
             let dk = o.disc();
             let mut got: Vec<(u32, u32)> = decompose(&o, &dk, p).unwrap().iter().map(|q| (q.e, q.f)).collect();
             got.sort();
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn valuations_match_norms() {
-        let (o, _) = maximal_order(&poly(&[-5, 0, 0, 0, 1]));
+        let (o, _) = maximal_order(&poly(&[-5, 0, 0, 0, 1])).unwrap();
         let dk = o.disc();
         for p in [2u64, 3, 5, 7, 11, 29] {
             let ps = decompose(&o, &dk, p).unwrap();
@@ -457,7 +457,7 @@ mod tests {
     fn general_matches_dedekind() {
         let polys: &[&[i64]] = &[&[-5, 0, 0, 0, 1], &[1, 1, 2, -1, 1], &[-2, 0, 0, 0, 0, 1], &[3, 1, 0, 2, 0, 1], &[8, -2, 1, 1], &[-1, 3, 0, 0, 0, 0, 1]];
         for f in polys {
-            let (o, _) = maximal_order(&poly(f));
+            let (o, _) = maximal_order(&poly(f)).unwrap();
             let dk = o.disc();
             for p in [2u64, 3, 5, 7, 11, 13] {
                 let a = decompose(&o, &dk, p).unwrap();

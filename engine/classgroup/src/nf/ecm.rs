@@ -445,6 +445,31 @@ pub fn ecm_curve(n: &BigUint, sigma: u64, b1: u64, b2: u64, primes: &[u64]) -> O
     None
 }
 
+/// A nontrivial factor of a composite odd n (not a perfect power): ECM's
+/// schedule, then B1 doubling (B2 = 50 B1, at most 10^9) with 2000 curves
+/// at each until a factor is found; Stop interrupts.  None only if n is
+/// beyond the Montgomery arithmetic (1024 bits) or even.
+pub fn ecm_until_found(n: &BigUint, seed: u64) -> Option<BigUint> {
+    Mont::new(n)?;
+    if let Some(g) = ecm(n, seed) {
+        return Some(g);
+    }
+    let mut s = seed.rotate_left(17) | 1;
+    let mut b1: u64 = 2_000_000;
+    loop {
+        let b2 = (50 * b1).min(1_000_000_000);
+        let primes = crate::arith::primes_up_to(b2.min(100_000_000) + 2310);
+        for _ in 0..2000 {
+            sagebrush_interrupt::check();
+            let sigma = 6 + rng(&mut s) % (1 << 30);
+            if let Some(g) = ecm_curve(n, sigma, b1, b2.min(100_000_000), &primes) {
+                return Some(g);
+            }
+        }
+        b1 = b1.saturating_mul(2);
+    }
+}
+
 /// A nontrivial factor of a composite odd n by ECM with growing bounds
 /// (B1 = 2000, 11000, 50000, 250000, 1000000; B2 = 50 B1 up to 10^7),
 /// or None.

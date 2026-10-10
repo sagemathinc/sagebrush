@@ -429,7 +429,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if n.sign() == sagebrush_bigint::Sign::NoSign {
                 return Err("factor of 0".into());
             }
-            Ok(json!(sagebrush_classgroup::api::factor_integer(&n).iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
+            Ok(json!(sagebrush_classgroup::api::factor_integer(&n)?.iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
         }
         "is_prime" => Ok(json!(sagebrush_classgroup::api::is_prime(&big1(v.get("n"))?))),
         "nf_data" => {

@@ -42,7 +42,9 @@ pub fn is_probable_prime(n: &BigInt) -> bool {
 
 /// A nontrivial factor of a composite n (no factors below 2^16): a perfect
 /// power's root, then Pollard-Brent rho (in Montgomery arithmetic; factors
-/// up to ~10^12), then the elliptic curve method.
+/// up to ~10^12), then the elliptic curve method with bounds that keep
+/// growing until it succeeds (Stop interrupts).  None only when no method
+/// applies: rho and ECM work on at most 1024 bits.
 fn split(n: &BigInt) -> Option<BigInt> {
     for k in (2..=n.bits() as u32 / 16).rev() {
         let r = num_integer::Roots::nth_root(n, k);
@@ -54,13 +56,14 @@ fn split(n: &BigInt) -> Option<BigInt> {
     if let Some(d) = super::ecm::rho(&nu, 1 << 20, 0x9E37_79B9) {
         return Some(BigInt::from(d));
     }
-    super::ecm::ecm(&nu, 0x2545_F491_4F6C_DD1D).map(BigInt::from)
+    super::ecm::ecm_until_found(&nu, 0x2545_F491_4F6C_DD1D).map(BigInt::from)
 }
 
-/// The factorization of |n| > 0 as sorted (prime, exponent) pairs.  A
-/// cofactor rho cannot split is returned as if prime (`is_probable_prime`
-/// tells the caller).
-pub fn factor(n: &BigInt) -> Vec<(BigInt, u32)> {
+/// The factorization of |n| > 0 as sorted (prime, exponent) pairs; the
+/// primes are probable primes (Miller-Rabin to 20 bases: proven below
+/// 3.3e24).  A composite is never reported as a prime: one that cannot be
+/// split (beyond 1024 bits, where rho and ECM do not apply) is an error.
+pub fn factor(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
     let mut n = n.abs();
     let mut out: Vec<(BigInt, u32)> = vec![];
     let push = |p: BigInt, out: &mut Vec<(BigInt, u32)>| {
@@ -92,11 +95,11 @@ pub fn factor(n: &BigInt) -> Vec<(BigInt, u32)> {
             stack.push(&m / &d);
             stack.push(d);
         } else {
-            push(m, &mut out);
+            return Err(format!("cannot factor a composite of {} bits: rho and ECM work on at most 1024 bits", m.bits()));
         }
     }
     out.sort();
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -106,11 +109,37 @@ mod tests {
     #[test]
     fn factors() {
         let n: BigInt = "1000000000000000000000000000000000000321".parse().unwrap();
-        assert_eq!(factor(&n), vec![(n.clone(), 1)]);
+        assert_eq!(factor(&n).unwrap(), vec![(n.clone(), 1)]);
         let p: BigInt = "1000000007".parse().unwrap();
         let q: BigInt = "998244353".parse().unwrap();
         let m = &p * &q * &q * BigInt::from(12);
-        assert_eq!(factor(&m), vec![(BigInt::from(2), 2), (BigInt::from(3), 1), (q, 2), (p, 1)]);
+        assert_eq!(factor(&m).unwrap(), vec![(BigInt::from(2), 2), (BigInt::from(3), 1), (q, 2), (p, 1)]);
         assert!(!is_probable_prime(&"3825123056546413051".parse().unwrap()));
+    }
+
+    // A composite that cannot be split is an error, never a "prime" (Astra's
+    // audit, F1: (2^521 - 1)(2^607 - 1) came back as one prime factor).
+    #[test]
+    fn unsplittable_composite_is_an_error() {
+        let one = BigInt::one();
+        let n = ((&one << 521usize) - &one) * ((&one << 607usize) - &one);
+        assert!(!is_probable_prime(&n));
+        let e = factor(&n).unwrap_err();
+        assert!(e.contains("1128 bits"), "{}", e);
+    }
+
+    // Every factor reported is a probable prime and the product is n.
+    #[test]
+    fn factors_are_prime_and_multiply_back() {
+        for s in ["340282366920938463463374607431768211457", "1000000016000000063", "18446744073709551617", "99999999999999999999999999999999"] {
+            let n: BigInt = s.parse().unwrap();
+            let f = factor(&n).unwrap();
+            let mut prod = BigInt::one();
+            for (p, e) in &f {
+                assert!(is_probable_prime(p), "{} in {}", p, s);
+                prod *= p.pow(*e);
+            }
+            assert_eq!(prod, n);
+        }
     }
 }

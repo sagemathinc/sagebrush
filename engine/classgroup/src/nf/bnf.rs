@@ -553,27 +553,27 @@ fn prime_norms(split: &[(u64, Vec<(u32, u32)>)], bound: f64) -> Vec<u64> {
 
 /// (T, the uniform 4 log^2 |d_K|): under GRH the prime ideals of norm < T
 /// generate the class group of Q[x]/(f).
-pub fn class_group_generator_bound(f: &[BigInt]) -> (f64, f64) {
-    let (o, _) = maximal_order(f);
+pub fn class_group_generator_bound(f: &[BigInt]) -> Result<(f64, f64), String> {
+    let (o, _) = maximal_order(f)?;
     let dk = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
     let r1 = Embeddings::new(&o).r1;
     let ld = dk.to_f64().unwrap().abs().ln();
     let t_unif = (4.0 * ld * ld).max(50.0);
     let split = splitting(&o, &dk, &index, t_unif as u64);
-    (super::grh::class_group_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif), t_unif)
+    Ok((super::grh::class_group_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif), t_unif))
 }
 
 /// Belabas, Diaz y Diaz and Friedman's one-step bound, for comparison.
-pub fn one_step_generator_bound(f: &[BigInt]) -> f64 {
-    let (o, _) = maximal_order(f);
+pub fn one_step_generator_bound(f: &[BigInt]) -> Result<f64, String> {
+    let (o, _) = maximal_order(f)?;
     let dk = o.disc();
     let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &dk).abs());
     let r1 = Embeddings::new(&o).r1;
     let ld = dk.to_f64().unwrap().abs().ln();
     let t_unif = (4.0 * ld * ld).max(50.0);
     let split = splitting(&o, &dk, &index, t_unif as u64);
-    super::grh::one_step_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif)
+    Ok(super::grh::one_step_bound(o.n, r1, ld, &prime_norms(&split, t_unif), t_unif))
 }
 
 pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
@@ -598,7 +598,7 @@ pub struct Relations {
 pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relations), String> {
     let debug = std::env::var("QCL_DEBUG").is_ok();
     let t0 = crate::clock::Instant::now();
-    let (o, _) = maximal_order(f);
+    let (o, _) = maximal_order(f)?;
     // a T2-reduced basis: the f64 work below needs a well-scaled one
     let o = super::embed::reduce_order(&o);
     let n = o.n;
@@ -1053,7 +1053,7 @@ mod tests {
     fn large_roots() {
         // a root near -87473: its fixed-point start used to overflow
         let f: Vec<BigInt> = [-95282, 82258, 87473, 1].iter().map(|&c| BigInt::from(c)).collect();
-        let (o, _) = maximal_order(&f);
+        let (o, _) = maximal_order(&f).unwrap();
         let e = Embeddings::new(&o);
         let prec = 200;
         let hp = e.roots_hp(&o.f, prec);
@@ -1093,8 +1093,8 @@ mod tests {
     #[test]
     fn generator_bound_paper_example() {
         let f: Vec<BigInt> = [55137512477462689i64, 559752270111028720, 0, 1].iter().map(|&c| BigInt::from(c)).collect();
-        let one = one_step_generator_bound(&f);
-        let (t, unif) = class_group_generator_bound(&f);
+        let one = one_step_generator_bound(&f).unwrap();
+        let (t, unif) = class_group_generator_bound(&f).unwrap();
         eprintln!("one step {} steps {} uniform {}", one, t, unif);
         assert!((19000.0..19400.0).contains(&one), "{}", one);
         assert!((11000.0..11100.0).contains(&t), "{}", t);

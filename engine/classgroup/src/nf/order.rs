@@ -230,11 +230,13 @@ impl Order {
 }
 
 /// The maximal order of Q[x]/(f), f monic irreducible, by Round 2; also
-/// returns the factorization of the field discriminant.
-pub fn maximal_order(f: &[BigInt]) -> (Order, Vec<(BigInt, u32)>) {
+/// returns the factorization of the field discriminant.  An error if the
+/// discriminant cannot be factored completely (Round 2 needs every prime
+/// whose square divides it).
+pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), String> {
     let mut o = Order::equation_order(f);
     let d = o.disc();
-    for (p, e) in factor(&d) {
+    for (p, e) in factor(&d)? {
         if e < 2 {
             continue;
         }
@@ -244,8 +246,8 @@ pub fn maximal_order(f: &[BigInt]) -> (Order, Vec<(BigInt, u32)>) {
         }
     }
     let dk = o.disc();
-    let fac = factor(&dk);
-    (o, fac)
+    let fac = factor(&dk)?;
+    Ok((o, fac))
 }
 
 #[cfg(test)]
@@ -269,7 +271,7 @@ mod tests {
             (&[-5, 0, 0, 0, 1], -2000),     // x^4 - 5
         ];
         for &(f, dk) in cases {
-            let (o, _) = maximal_order(&poly(f));
+            let (o, _) = maximal_order(&poly(f)).unwrap();
             assert_eq!(o.disc(), BigInt::from(dk), "{:?}", f);
         }
     }

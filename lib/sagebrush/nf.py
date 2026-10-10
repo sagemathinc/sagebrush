@@ -25,12 +25,15 @@ def _mat(m):
 
 
 def factor_integer(n):
-    """The factorization of n != 0 as [(p, e)], primes ascending."""
+    """The factorization of n != 0 as [(p, e)], primes ascending (probable
+    primes beyond 3.3e24).  A composite is never reported as a prime: one
+    that cannot be split (beyond 1024 bits) raises ValueError."""
     return [(int(p), e) for p, e in call("factor_integer", n=str(int(n)))]
 
 
 def is_prime(n):
-    """Whether n is prime (Miller-Rabin; deterministic below 3.3e24)."""
+    """Whether n is prime (Miller-Rabin; deterministic below 3.3e24); False
+    for n < 2."""
     return call("is_prime", n=str(int(n)))
 
 
