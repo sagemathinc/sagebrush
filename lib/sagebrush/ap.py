@@ -21,8 +21,14 @@ def aplist(a, n, threads=0):
 def low_rank(an, n):
     """The analytic rank of the curve with L-series coefficients
     an = [0, a_1, ..., a_M] and conductor n, if it is 0 or 1 and certified
-    on balls: {w, rank, value, radius} (value L(E,1) or L'(E,1)), else None."""
-    return call("ec_low_rank", an=[int(x) for x in an], n=int(n))
+    on balls: {w, rank, value, lo, hi} with lo <= L^(rank)(E,1) <= hi exact
+    Fractions (value a double near it, for display), else None."""
+    from fractions import Fraction
+    r = call("ec_low_rank", an=[int(x) for x in an], n=int(n))
+    if r is not None:
+        dy = lambda m, e: Fraction(int(m) * 2 ** int(e)) if int(e) >= 0 else Fraction(int(m), 2 ** -int(e))
+        r["lo"], r["hi"] = dy(*r["lo"]), dy(*r["hi"])
+    return r
 
 
 def height(a, x, n, local, d, roots, prec=128):
