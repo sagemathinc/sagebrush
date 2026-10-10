@@ -1782,11 +1782,11 @@ class EllipticCurve_rational_field:
 
         - ``proof`` -- (default: False) if True, return only ranks that are
           proved: 0 and 1 (nothing has to vanish then: root number -1 forces
-          L(E,1) = 0).  The sums' truncation and rounding are bounded; the
-          bound assumes exp and E_1, evaluated in doubles, are accurate to
-          10^-13 and 10^-12 relatively (not enclosed: libm is faithful to
-          about 10^-16, and E_1's continued fraction is not given a proved
-          remainder).  For r >= 2 it raises NotImplementedError, since
+          L(E,1) = 0).  The root number and L(E,1) or L'(E,1) are enclosed
+          on balls (engine/ap/src/lcert.rs: every exponential and E_1
+          enclosed, the tails bounded with |a_n| <= 2n), so a nonzero
+          enclosure proves rank 0 (Kolyvagin) or 1 (Gross-Zagier, Kolyvagin)
+          with no floating-point assumption.  For r >= 2 it raises NotImplementedError, since
           showing that L^(k)(E,1) is exactly 0 for k < r is a separate
           problem: possible for r = 2, 3 (modular symbols, Gross-Zagier),
           not implemented here, and open for every curve when r >= 4.
@@ -2620,10 +2620,12 @@ class _LSeries:
         return RR(_ec.L1(ld, _ec.root_number(ld)))
 
     def L_ratio(self):
-        """L(E,1)/Omega_E as an exact rational: computed to about 15 digits
-        and recognized with denominator dividing 2 #E(Q)_tors^2 (Manin-Drinfeld,
-        for an optimal curve with Manin constant 1 the denominator divides
-        2 #E(Q)_tors).
+        """L(E,1)/Omega_E as an exact rational: L(E,1) and Omega_E enclosed on
+        balls (engine/ap), and the quotient's interval holding exactly one
+        multiple of 1/D, D = 2 #E(Q)_tors^2 (the denominator divides D: Manin-
+        Drinfeld, for an optimal curve with Manin constant 1 it divides
+        2 #E(Q)_tors).  Given that, the answer is proved, 0 included: no
+        floating-point recognition (the systematic review's R2-EC-F2).
 
         EXAMPLES::
 
@@ -2634,20 +2636,26 @@ class _LSeries:
             sage: EllipticCurve([1, 1, 0, -1154, -15345]).lseries().L_ratio()
             9/4
         """
+        import math
         import _sage_ec as _ec
         from sage_all import QQ
         E = self._E
-        ld = E._ldata()
-        w = _ec.root_number(ld)
+        lv = _ec.l_value_ball(E._ldata())
+        if lv is None:
+            raise ArithmeticError("the root number of %r is not decided by the enclosures" % (E,))
+        w, lo, hi = lv
         if w == -1:
-            return QQ(0)
-        T = E.torsion_order()
+            return QQ(0)  # the functional equation
+        T = int(E.torsion_order())
         D = 2 * T * T
-        x = _ec.L1(ld, w) / _ec.real_period(E.minimal_model()._a)
-        q = _ec.recognize(x, [d for d in range(1, D + 1) if D % d == 0])
-        if q is None:
-            raise ArithmeticError("L(E,1)/Omega = %r is not a rational with denominator dividing %d" % (x, D))
-        return QQ(q.numerator, q.denominator)
+        om = _ec.real_period_ball(E.minimal_model()._a)
+        xlo, xhi = _ec._iv_quotient(lo, hi, *om)
+        ks = range(math.ceil(xlo * D), math.floor(xhi * D) + 1)
+        if len(ks) == 0:
+            raise ArithmeticError("L(E,1)/Omega in [%r, %r] is not a rational with denominator dividing %d" % (float(xlo), float(xhi), D))
+        if len(ks) > 1:
+            raise ArithmeticError("L(E,1)/Omega in [%r, %r]: the enclosure is too wide to identify it" % (float(xlo), float(xhi)))
+        return QQ(ks[0], D)
 
 
 class _Sha:
@@ -2672,26 +2680,35 @@ class _Sha:
             sage: EllipticCurve([1, 1, 0, -1154, -15345]).sha().an()
             9
         """
+        import math
+        import _sage_ec as _ec
         from sage_all import QQ, Integer
         E = self._E
-        r = E.analytic_rank()
         from fractions import Fraction
-        T = E.torsion_order()
-        if r == 1:
+        T = int(E.torsion_order())
+        lv = _ec.l_value_ball(E._ldata())
+        if lv is None:
+            raise ArithmeticError("the root number of %r is not decided by the enclosures" % (E,))
+        w, lo, hi = lv
+        if w == -1:
+            if lo <= 0 <= hi:
+                raise NotImplementedError("Sha.an(): L'(E,1) is not shown nonzero (analytic rank >= 3?)")
             # L'(E,1) = Omega Reg #Sha prod c_p / #E(Q)_tors^2, with Reg the
-            # height of a generator (E.gens(), point search)
-            import _sage_ec as _ec
+            # height of a generator (E.gens()), everything on balls; the
+            # value is an integer, the unique one in the interval
             P = E.gens()[0]
-            h = float(P.height())
-            Lp = _ec.L1_derivative(E._ldata())
-            om = _ec.real_period(E.minimal_model()._a)
-            x = Lp * T * T / (om * h * E.tamagawa_product())
-            n = round(x)
-            if n < 1 or abs(x - n) > 1e-6 * max(1, n):
-                raise ArithmeticError("Sha_an = %r is not an integer: is %r a generator?" % (x, P))
-            return Integer(n)
-        if r != 0:
-            raise NotImplementedError("Sha.an() in analytic rank %d is not implemented" % r)
+            m = E.minimal_model()
+            hlo, hhi = _ec.canonical_height_ball(m._a, m._to_min(P), E._bad())
+            om = _ec.real_period_ball(m._a)
+            c = int(E.tamagawa_product())
+            dlo, dhi = om[0] * hlo * c, om[1] * hhi * c
+            xlo, xhi = _ec._iv_quotient(lo * T * T, hi * T * T, dlo, dhi)
+            ks = range(max(1, math.ceil(xlo)), math.floor(xhi) + 1)
+            if len(ks) != 1:
+                raise ArithmeticError("Sha_an in [%r, %r] is not a unique positive integer: is %r a generator?" % (float(xlo), float(xhi), P))
+            return Integer(ks[0])
+        if lo <= 0 <= hi and E.lseries().L_ratio() == 0:
+            raise NotImplementedError("Sha.an() in analytic rank >= 2 is not implemented")
         q = E.lseries().L_ratio()
         s = Fraction(int(q.numerator()), int(q.denominator())) * T * T / E.tamagawa_product()
         return Integer(s.numerator) if s.denominator == 1 else QQ(s.numerator, s.denominator)

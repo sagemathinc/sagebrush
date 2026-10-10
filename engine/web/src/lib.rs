@@ -788,6 +788,35 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 None => Value::Null,
             })
         }
+        "ec_l_value" => {
+            // (w, L(E,1) or L'(E,1)) on balls, the ball possibly holding 0
+            let an: Vec<i64> = v.get("an").and_then(|a| a.as_array()).ok_or("an: a list of integers")?
+                .iter().map(|x| x.as_i64().ok_or_else(|| "an: a list of integers".to_string())).collect::<Result<_, _>>()?;
+            let n = u(v, "n")?;
+            Ok(match sagebrush_ap::lcert::l_value(&an, n, 96) {
+                Some((w, b)) => {
+                    let (lm, le) = b.lower();
+                    let (um, ue) = b.upper();
+                    json!({ "w": w, "lo": [lm.to_string(), le], "hi": [um.to_string(), ue] })
+                }
+                None => Value::Null,
+            })
+        }
+        "ec_real_period" => {
+            // Omega_E on balls: exact dyadic endpoints
+            let a = bigs(v.get("a"))?;
+            let roots: Vec<(BigInt, u64)> = v.get("roots").and_then(|l| l.as_array()).ok_or("roots: [[num, k], ...]")?
+                .iter().map(|t| {
+                    let t = bigs(Some(t))?;
+                    if t.len() != 2 { return Err("roots: [[num, k], ...]".to_string()); }
+                    Ok((t[0].clone(), t[1].to_string().parse::<u64>().map_err(|e| e.to_string())?))
+                }).collect::<Result<_, String>>()?;
+            let prec = size(v, "prec", Some(128), 4096)? as u64;
+            let h = sagebrush_ap::height::real_period(&a, &roots, prec)?;
+            let (lm, le) = h.lower();
+            let (um, ue) = h.upper();
+            Ok(json!({ "lo": [lm.to_string(), le], "hi": [um.to_string(), ue] }))
+        }
         "ec_point_search" => {
             let b = bigs(v.get("b"))?;
             let p = |x: &BigInt| x.to_string().parse::<i128>().map_err(|_| "b-invariants too large for the point search".to_string());
