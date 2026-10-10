@@ -20,6 +20,7 @@ use crate::newforms::inv;
 use crate::orbits::{krylov_dual, mulmod, newform_orbits, reduce, Factorer, Orbit};
 use crate::presentation::Presentation;
 use crate::space::Space;
+use sagebrush_bigint::BigInt;
 
 /// Primes near 2^31 (ell_1, ell_2 for CRT, ell_3 to check).
 const ELLS: [u64; 3] = [2147483629, 2147483587, 2147483579];
@@ -143,6 +144,9 @@ pub fn integral_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Integ
             }
             w.push(row.into_iter().map(|x| i64::try_from(x).map_err(|_| format!("N = {}: functional entries exceed 64 bits", n))).collect::<Result<_, _>>()?);
         }
+        if !dual_exact(&pres, &ops, &orbit.f, &w) {
+            return Err(format!("N = {}: the reconstructed functionals are not exactly the orbit's dual", n));
+        }
         let x = piv1[0] as u32;
         let c: Vec<(u64, Vec<i64>)> = crate::par::map_slice(&primes, |&l| {
             let img = Space::hecke_image(&pres, &linalg::heilbronn(l as i64), x);
@@ -152,6 +156,39 @@ pub fn integral_orbits(n: u64, bound: u64, factor: Factorer) -> Result<Vec<Integ
         out.push(IntegralOrbit { orbit, w, x, c, traces_check });
     }
     Ok(out)
+}
+
+/// Whether the integer functionals w (rank k = deg f mod ell_1) span the
+/// dual of A = ker f(T) over Q, checked exactly: each w_r kills every
+/// 3-term relation, so is a functional on the space, and w_r o f(T) = 0.
+/// As f is irreducible of exponent one in the charpoly of T, ker f(T^*)
+/// has dimension k, so it is the span of the w_r.
+fn dual_exact(pres: &Presentation, ops: &[(u64, i64)], f: &[BigInt], w: &[Vec<i64>]) -> bool {
+    let kills_relations = w.iter().all(|row| pres.rows.iter().all(|rel| rel.iter().fold(0i128, |acc, &(g, c)| acc + c as i128 * row[g as usize] as i128) == 0));
+    if !kills_relations {
+        return false;
+    }
+    let hs: Vec<(Vec<(i64, i64, i64, i64)>, i64)> = ops.iter().map(|&(q, r)| (linalg::heilbronn(q as i64), r)).collect();
+    // T x_g for every generator, as a sparse integer combination.
+    let images: Vec<Vec<(u32, i64)>> = crate::par::map_slice(&(0..pres.m as u32).collect::<Vec<_>>(), |&g| {
+        let mut acc: Vec<(u32, i64)> = vec![];
+        for (h, r) in &hs {
+            acc.extend(Space::hecke_image(pres, h, g).into_iter().map(|(g2, c)| (g2, c * r)));
+        }
+        acc
+    });
+    w.iter().all(|row| {
+        let mut u: Vec<BigInt> = row.iter().map(|&x| BigInt::from(x)).collect();
+        let mut res: Vec<BigInt> = u.iter().map(|x| x * &f[0]).collect();
+        for fi in &f[1..] {
+            sagebrush_interrupt::check();
+            u = images.iter().map(|img| img.iter().fold(BigInt::from(0), |acc, &(g2, c)| acc + &u[g2 as usize] * c)).collect();
+            for (r, x) in res.iter_mut().zip(&u) {
+                *r += x * fi;
+            }
+        }
+        res.iter().all(|x| x == &BigInt::from(0))
+    })
 }
 
 /// Solve tau from the first primes where the c_p are independent, then
@@ -182,4 +219,28 @@ fn check_traces(traces: &[(u64, i64)], c: &[(u64, Vec<i64>)], p: u64) -> bool {
     }
     let tau: Vec<u64> = rows.iter().map(|r| r[k]).collect();
     c.iter().zip(traces).all(|((_, cp), &(_, tr))| cp.iter().zip(&tau).fold(0u64, |acc, (&x, &t)| (acc + mulmod(md(x), t, p)) % p) == md(tr))
+}
+
+#[cfg(test)]
+mod exact_tests {
+    use super::*;
+
+    #[test]
+    fn integral_duals_are_certified() {
+        // MOD-F9: the reconstructed functionals pass the exact relation and
+        // f(T) residual checks (and a corrupted one does not).
+        let factor = |f: &[BigInt]| sagebrush_poly::factor(f).1;
+        for n in [11u64, 23, 37, 67, 113] {
+            let os = integral_orbits(n, 50, &factor).unwrap();
+            assert!(os.iter().all(|o| o.traces_check), "N = {}", n);
+        }
+        let os = integral_orbits(23, 20, &factor).unwrap();
+        let pres = Presentation::new(23);
+        let o = &os[0];
+        assert!(dual_exact(&pres, &o.orbit.ops, &o.orbit.f, &o.w));
+        let mut w = o.w.clone();
+        let g = w[0].iter().position(|&x| x != 0).unwrap();
+        w[0][g] += 2147483629 * 2147483587;
+        assert!(!dual_exact(&pres, &o.orbit.ops, &o.orbit.f, &w));
+    }
 }

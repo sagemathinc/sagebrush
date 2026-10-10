@@ -47,3 +47,30 @@ fn trace_forms_match_lmfdb() {
         assert_eq!(got, want, "N = {}", n);
     }
 }
+
+#[test]
+fn labels_do_not_depend_on_bound() {
+    // MOD-F2: at 37.2.a both orbits have a_1 = 1, so bound = 1 must not
+    // break the tie by the unrelated charpoly.
+    use sagebrush_modsym::traces::labelled_orbits;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_poly::factor(f).1;
+    let eps = Character::trivial(37);
+    let res = newspace_orbits(37, 2, &eps, &factor).unwrap();
+    let a = labelled_orbits(37, 2, &eps, &res, 1).unwrap();
+    let b = labelled_orbits(37, 2, &eps, &res, 12).unwrap();
+    assert_eq!(a.iter().map(|o| &o.2).collect::<Vec<_>>(), b.iter().map(|o| &o.2).collect::<Vec<_>>());
+    assert_eq!(a[0].1.len(), 1);
+    // 37a: a_2 = -2.
+    assert_eq!(i64::try_from(b[0].1[1].clone()).unwrap(), -2);
+}
+
+#[test]
+fn factor_callback_is_checked() {
+    // MOD-F3: a callback returning x^2 (or the reducible h itself) is refused.
+    let eps = Character::trivial(37);
+    let z = |v: &[i64]| v.iter().map(|&c| sagebrush_bigint::BigInt::from(c)).collect::<Vec<_>>();
+    let bad = move |_: &[sagebrush_bigint::BigInt]| vec![(z(&[0, 0, 1]), 1)];
+    assert!(newspace_orbits(37, 2, &eps, &bad).is_err());
+    let whole = |f: &[sagebrush_bigint::BigInt]| vec![(f.to_vec(), 1)];
+    assert!(newspace_orbits(37, 2, &eps, &whole).is_err());
+}

@@ -183,9 +183,7 @@ pub(crate) fn embedding_bounds(d: usize, n_e: usize, b_e: &BigUint, b_s: &BigUin
 }
 
 pub fn exact_charpoly(n: u64, k: usize, eps: &Character, sign: i32, q: u64) -> Result<ExactGeneral, String> {
-    if !crate::exact::is_prime(q) {
-        return Err(format!("q = {} must be prime", q));
-    }
+    crate::linalg::check_hecke_prime(q)?;
     let eps = eps.minimal();
     let m = eps.order;
     let units: Vec<u64> = (0..m.max(1)).filter(|&j| gcd(j, m) == 1).collect();
@@ -348,6 +346,15 @@ mod tests {
         for m in [1, 2, 3, 4, 8, 9, 25, 27] {
             assert_eq!(powerful_to_power_norm(m), 1, "m = {}", m);
         }
+    }
+
+    #[test]
+    fn large_hecke_prime_refused() {
+        // MOD-F1: q = 2^64 - 59 is prime; it used to wrap to -59 in i64.
+        let eps = Character::trivial(2);
+        assert!(exact_charpoly(2, 2, &eps, 1, 18446744073709551557).is_err());
+        assert!(exact_charpoly(2, 2, &eps, 1, (1 << 30) + 3).is_err());
+        assert!(crate::exact::exact_charpoly(11, 18446744073709551557).is_err());
     }
 
     #[test]

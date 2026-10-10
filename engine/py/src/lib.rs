@@ -373,11 +373,10 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
     let f = python_factorer(factor);
     let (r, tr) = run(py, threads, || -> Result<_, String> {
         let r = sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &f)?;
-        let tr = sagebrush_modsym::traces::orbit_traces(n, k, &eps, &r, bound)?;
+        let tr = sagebrush_modsym::traces::labelled_orbits(n, k, &eps, &r, bound)?;
         Ok((r, tr))
     })?.map_err(err)?;
-    let mut orbits: Vec<(usize, Vec<BigInt>, Vec<BigInt>)> = r.dims.iter().cloned().zip(tr).zip(r.orbits.iter().cloned()).map(|((d, t), u)| (d, t, u)).collect();
-    orbits.sort();
+    let orbits = tr;
     let d = newspace_dict(py, &r)?;
     let list: Vec<Bound<'py, PyDict>> = orbits.into_iter().enumerate().map(|(i, (dim, t, u))| {
         let o = PyDict::new(py);

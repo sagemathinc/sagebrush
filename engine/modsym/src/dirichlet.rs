@@ -188,6 +188,21 @@ impl Character {
         if order == 0 || gens.len() != vals.len() {
             return Err("a character is (order >= 1, gens, vals) with as many vals as gens".into());
         }
+        // Every value is a phi(N)-th root of unity, so zeta_order^v lies in
+        // mu_r, r = gcd(order, phi(N)) < 2^31: rewrite it as zeta_r^(v/(order/r)).
+        // (Reducing mod a huge order and truncating to u32 would change chi.)
+        let phi = crate::exact::factor(n.max(1)).iter().fold(1u64, |acc, &(p, e)| acc * (p - 1) * p.pow(e as u32 - 1));
+        let r = gcd(order, phi);
+        let step = order / r;
+        let mut red = Vec::with_capacity(vals.len());
+        for &v in vals {
+            let v = v % order;
+            if v % step != 0 {
+                return Err(format!("zeta_{}^{} is not a value of a character mod {}", order, v, n));
+            }
+            red.push(v / step);
+        }
+        let (order, vals) = (r, &red[..]);
         let mut exps = vec![u32::MAX; n.max(1) as usize];
         exps[(1 % n.max(1)) as usize] = 0;
         // Breadth-first closure of {1} under multiplication by the generators.
@@ -234,6 +249,16 @@ mod tests {
                 assert_eq!(g.conductor_of(&v), g.character(&v).conductor(), "N = {} chi = {:?}", n, v);
             }
         }
+    }
+
+    #[test]
+    fn huge_order_presentation() {
+        // MOD-F11: chi(2) = -1 mod 3, presented with order 2^33.
+        for (order, v) in [(2u64, 1u64), (4, 2), (1 << 33, 1 << 32)] {
+            let c = Character::from_generators(3, order, &[2], &[v]).unwrap();
+            assert_eq!((c.order, c.conductor()), (2, 3), "order {}", order);
+        }
+        assert!(Character::from_generators(3, 1 << 33, &[2], &[1]).is_err());
     }
 
     #[test]

@@ -16,7 +16,7 @@
 //! Summing over j gives tr a_n mod ell; CRT up to Deligne's bound.
 
 use crate::dirichlet::DirichletGroup;
-use crate::exact::is_prime;
+use crate::exact::{factor, is_prime};
 use crate::general::{heilbronn_for, mul, powmod, primes_one_mod, root_of_unity, Character, GeneralSpace};
 use crate::general_exact::{crt, invert_mod};
 use crate::linalg;
@@ -241,8 +241,38 @@ fn traces_mod(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, lv: &[Lev
     Ok(Some(out))
 }
 
+/// The orbits of `res` in LMFDB order (dimension, then trace form) with
+/// their traces for n <= bound and charpolys.  Ties in the first `bound`
+/// traces are broken by computing more traces: lexicographic order is
+/// decided by the first difference, so labels do not depend on `bound`.
+/// Distinct orbits have distinct trace forms, which differ below the
+/// Sturm bound for Gamma1(N).
+pub fn labelled_orbits(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bound: usize) -> Result<Vec<(usize, Vec<BigInt>, Vec<BigInt>)>, String> {
+    let index = factor(n).iter().fold(n as f64 * n as f64, |acc, &(p, _)| acc * (1.0 - 1.0 / (p as f64 * p as f64)));
+    let sturm = (k as f64 * index / 12.0).ceil() as usize + 1;
+    let mut b = bound;
+    loop {
+        let tr = orbit_traces(n, k, eps, res, b)?;
+        let mut orbits: Vec<(usize, Vec<BigInt>, Vec<BigInt>)> = res.dims.iter().cloned().zip(tr).zip(res.orbits.iter().cloned()).map(|((d, t), u)| (d, t, u)).collect();
+        orbits.sort();
+        if orbits.windows(2).all(|w| (w[0].0, &w[0].1) != (w[1].0, &w[1].1)) {
+            for o in &mut orbits {
+                o.1.truncate(bound);
+            }
+            return Ok(orbits);
+        }
+        if b > sturm {
+            return Err(format!("N = {}: two orbits have the same traces up to the Sturm bound {}", n, sturm));
+        }
+        b = (2 * b).min(sturm + 1).max(b + 1);
+    }
+}
+
 /// tr a_n for n = 1..=bound for each orbit of `res` (same order).
 pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bound: usize) -> Result<Vec<Vec<BigInt>>, String> {
+    if bound as u64 >= crate::linalg::MAX_HECKE_PRIME {
+        return Err(format!("trace bound {} must be below 2^30", bound));
+    }
     if res.orbits.is_empty() {
         return Ok(vec![]);
     }

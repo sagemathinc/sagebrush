@@ -240,6 +240,9 @@ pub fn rational_newforms(n: u64, bound: u64, max_split: usize) -> Result<Newform
     if n == 0 {
         return Err("level N = 0".into());
     }
+    if max_split == 0 {
+        return Err("max_split must be at least 1".into());
+    }
     let mut nf = newforms_mod(n, bound, max_split, ELL)?;
     for f in &nf.forms {
         if !f.hasse_ok() {
