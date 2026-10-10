@@ -112,10 +112,32 @@ fn fail<T>(msg: impl Into<String>) -> R<T> {
 }
 
 fn tidy(e: &Expr) -> Expr {
+    let e = &at_infinity(e);
     if e.is_infinite() || e.is_const(Const::Undefined) {
         return e.clone();
     }
     simplify_rational(e)
+}
+
+/// Monotone functions at +-oo, applied where a limit was passed through
+/// them: log(+oo) = +oo, log(oo) = oo, e^(+-oo) = +oo, 0, atan(+-oo) = +-pi/2, ...
+fn at_infinity(e: &Expr) -> Expr {
+    let e = map(e, &mut |c| at_infinity(c));
+    let (plus, minus) = (|x: &Expr| x.is_const(Const::Infinity), |x: &Expr| x.is_const(Const::MinusInfinity));
+    match &e.kind {
+        Kind::Fun(Fun::Log, a) if plus(&a[0]) => infinity(),
+        // |log z| >= log |z|
+        Kind::Fun(Fun::Log, a) if a[0].is_const(Const::UnsignedInfinity) => constant(Const::UnsignedInfinity),
+        Kind::Fun(Fun::Atan, a) if plus(&a[0]) => div(&pi(), &int(2)),
+        Kind::Fun(Fun::Atan, a) if minus(&a[0]) => neg(&div(&pi(), &int(2))),
+        Kind::Fun(Fun::Sinh, a) if plus(&a[0]) || minus(&a[0]) => a[0].clone(),
+        Kind::Fun(Fun::Cosh, a) if plus(&a[0]) || minus(&a[0]) => infinity(),
+        Kind::Fun(Fun::Tanh, a) if plus(&a[0]) => int(1),
+        Kind::Fun(Fun::Tanh, a) if minus(&a[0]) => int(-1),
+        Kind::Pow(b, n) if b.is_const(Const::E) && plus(n) => infinity(),
+        Kind::Pow(b, n) if b.is_const(Const::E) && minus(n) => int(0),
+        _ => e,
+    }
 }
 
 fn is_finite_value(e: &Expr) -> bool {
