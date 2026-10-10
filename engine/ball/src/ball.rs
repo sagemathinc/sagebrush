@@ -469,6 +469,30 @@ impl Ball {
         Some(Ball { m: s, e: se, r: err }.rounded(prec))
     }
 
+    /// (n, err): the integer n nearest self * 2^k's midpoint and an upper
+    /// bound for |x 2^k - n| over the ball (fixed point at k bits).
+    pub fn to_fixed(&self, k: i64) -> Option<(BigInt, Mag)> {
+        if !self.is_finite() {
+            return None;
+        }
+        let e = self.e + k;
+        let r = self.r.mul_2exp(k);
+        if e >= 0 {
+            return Some((&self.m << e as u64, r));
+        }
+        let s = (-e) as u64;
+        let neg = self.m.is_negative();
+        let a = self.m.abs();
+        let mut q = &a >> s;
+        if a.bit(s - 1) {
+            q += 1u32;
+        }
+        let exact = a.trailing_zeros().unwrap_or(0) >= s;
+        let q = if neg { -q } else { q };
+        // |mid 2^k - q| <= 1/2
+        Some((q, if exact { r } else { r.add(Mag::pow2(-1)) }))
+    }
+
     /// An approximation for display only (not part of any computation).
     pub fn to_f64_approx(&self) -> f64 {
         let b = self.m.bits() as i64;

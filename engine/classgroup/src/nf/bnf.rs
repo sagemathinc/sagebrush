@@ -902,7 +902,7 @@ fn unit_logs(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
 /// through the elimination, and each kernel combination checked to vanish
 /// exactly on the core (so every vector is the logarithm of a unit).
 #[allow(clippy::too_many_arguments)]
-fn unit_logs_bounded(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], sel: &[usize], det: &BigInt, ys: &[Vec<BigInt>], extras: &[usize], r: usize, prec: u32) -> Option<(Vec<Vec<BigInt>>, Vec<f64>)> {
+fn unit_logs_bounded(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], sel: &[usize], det: &BigInt, ys: &[Vec<BigInt>], extras: &[usize], r: usize, prec: u32) -> Option<(Vec<Vec<BigInt>>, Vec<sagebrush_ball::Mag>)> {
     let (roots, rho) = fld.emb.roots_hp_rad(&fld.o.f, prec).ok()?;
     let mut logs = Vec::with_capacity(elems.len());
     let mut errs = Vec::with_capacity(elems.len());
@@ -917,7 +917,7 @@ fn unit_logs_bounded(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb:
         return None;
     }
     let mut out: Vec<Vec<BigInt>> = zero_rows.iter().map(|&k| logs[k][..r].to_vec()).collect();
-    let mut out_err: Vec<f64> = zero_rows.iter().map(|&k| errs[k]).collect();
+    let mut out_err: Vec<sagebrush_ball::Mag> = zero_rows.iter().map(|&k| errs[k]).collect();
     let ncol = dense.first().map_or(0, |d| d.len());
     'z: for z in kernel_lattice(ys, det) {
         let mut a = Vec::with_capacity(sel.len());
@@ -941,7 +941,7 @@ fn unit_logs_bounded(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb:
         // the unit: a_i on the A rows, -z_t on the extra rows
         let terms = a.iter().zip(sel).map(|(c, &k)| (c.clone(), k)).chain(z.iter().zip(extras).map(|(c, &k)| (-c, k)));
         let mut l = vec![BigInt::zero(); r];
-        let mut e = 0.0f64;
+        let mut e = sagebrush_ball::Mag::ZERO;
         for (c, k) in terms {
             if c.is_zero() {
                 continue;
@@ -949,10 +949,10 @@ fn unit_logs_bounded(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb:
             for (x, b) in l.iter_mut().zip(&logs[core_rows[k]]) {
                 *x += &c * b;
             }
-            e += to_f64(&c.abs(), 0) * (1.0 + 1e-15) * errs[core_rows[k]];
+            e = e.add(sagebrush_ball::Mag::from_bigint_up(&c, 0).mul(errs[core_rows[k]]));
         }
         out.push(l);
-        out_err.push(e * (1.0 + 1e-12));
+        out_err.push(e);
     }
     Some((out, out_err))
 }
@@ -1108,13 +1108,14 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                     imprecise = true;
                     return None;
                 };
-                let (rlo, rhi, d, rel) = super::certify::regulator_bounds(&lams, &errs, &basis, prec).map_err(|e| imprecise = e).ok()?;
+                let (rlo_b, rhi_b, d, rel) = super::certify::regulator_bounds(&lams, &errs, &basis, prec).map_err(|e| imprecise = e).ok()?;
+                let (rlo, rhi) = (rlo_b.to_f64_approx(), rhi_b.to_f64_approx());
                 let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lower_f64(lo).exp() / rhi, seed, debug)? };
                 if debug {
                     eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}), log h* R*_hi {:.6} vs log 2 hR >= {:.6}", rlo, rhi, h2, h, super::certify::ln_big(&h2) + rhi.ln(), std::f64::consts::LN_2 + lower_f64(lo));
                 }
                 // (rhi: regulator_bounds' upper end, a double)
-                super::certify::below_twice_ball(&h2, &sagebrush_ball::Ball::from_f64_exact(rhi)?, lo, 96).then_some((h2, cyc2, rel, d))
+                super::certify::below_twice_ball(&h2, &rhi_b, lo, 96).then_some((h2, cyc2, rel, d))
             })();
             if debug {
                 eprintln!("  certificate {} at {:.1} ms ({:.1} ms)", if cert.is_some() { "holds" } else { "failed" }, ms(), tc.elapsed().as_secs_f64() * 1e3);
@@ -1290,8 +1291,9 @@ mod tests {
             let (v, err) = e.log_embedding_err(&o, &x, &roots, &rho, p).unwrap();
             let hi = e.log_embedding(&o, &x, &e.roots_hp(&f, p + 800).unwrap(), p + 800);
             for (a, b) in v.iter().zip(&hi) {
-                let d = to_f64(&((a << 800usize) - b).abs(), 800);
-                assert!(d <= err, "at {} bits: error {} units, bound {}", p, d, err);
+                // the actual error (rounded up) against the bound
+                let d = sagebrush_ball::Mag::from_bigint_up(&((a << 800usize) - b), -800);
+                assert!(d <= err, "at {} bits: error {:?} units, bound {:?}", p, d, err);
             }
         }
     }
@@ -1314,9 +1316,9 @@ mod tests {
             let (l, err) = e.log_embedding_err(&o, &x, &lo_roots, &rho, lo_p).unwrap();
             let h = e.log_embedding(&o, &x, &hi_roots, hi_p);
             for (a, b) in l.iter().zip(&h) {
-                // the difference in units of 2^-lo_p
-                let d = to_f64(&((a << (hi_p - lo_p) as usize) - b).abs(), hi_p - lo_p);
-                assert!(d <= err, "error {} units, bound {}", d, err);
+                // the difference in units of 2^-lo_p (rounded up)
+                let d = sagebrush_ball::Mag::from_bigint_up(&((a << (hi_p - lo_p) as usize) - b), -((hi_p - lo_p) as i64));
+                assert!(d <= err, "error {:?} units, bound {:?}", d, err);
             }
         }
     }
@@ -1332,14 +1334,16 @@ mod tests {
         let want = 1013.25 * 911.0625 + 7.5 * 3.125;
         let comb = |a: i64, b: i64| vec![&b1[0] * a + &b2[0] * b, &b1[1] * a + &b2[1] * b];
         let lams = vec![comb(3, 1), comb(2, 1), comb(5, -7)];
-        let errs = vec![16.0; 3];
+        let errs = vec![sagebrush_ball::Mag::from_u64(16); 3];
         let basis = vec![b1.clone(), b2.clone()];
         let (lo, hi, _, _) = super::super::certify::regulator_bounds(&lams, &errs, &basis, prec).unwrap();
-        assert!(lo <= want && want <= hi && hi - lo < 1e-12 * want, "{} {} {}", lo, hi, want);
+        let w = sagebrush_ball::Ball::from_f64_exact(want).unwrap();
+        assert!(lo.cmp(&w) == Some(std::cmp::Ordering::Less) && hi.cmp(&w) == Some(std::cmp::Ordering::Greater), "{} {} {}", lo, hi, want);
+        assert!(hi.to_f64_approx() - lo.to_f64_approx() < 1e-12 * want);
         // only even first coordinates: index 2, whatever basis is claimed
         let lams2 = vec![comb(2, 1), comb(4, 3), comb(2, -1)];
         let (lo2, _, _, _) = super::super::certify::regulator_bounds(&lams2, &errs, &basis, prec).unwrap();
-        assert!(lo2 > 1.99 * want, "{}", lo2);
+        assert!(lo2.to_f64_approx() > 1.99 * want, "{}", lo2);
     }
 
     /// Grenie and Molteni's example (arXiv:1507.00602, Section 4): T(K) =

@@ -24,6 +24,7 @@ use sagebrush_bigint::BigRational;
 use crate::real::to_f64;
 use sagebrush_bigint::BigInt;
 use num_traits::{One, Signed, Zero};
+use sagebrush_ball::{Ball, Mag};
 
 /// log x for a positive integer of any size.
 pub fn ln_big(x: &BigInt) -> f64 {
@@ -129,7 +130,7 @@ pub fn log_hr_lower(split: &[(u64, Vec<(u32, u32)>)], x: u64, n: usize, r1: usiz
 /// of the fixed-point b scaled by 2^(prec r), a bound on its relative
 /// error) or None (rank deficient, or too imprecise: Err(true), which more
 /// precision may cure).
-pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[f64], basis: &ZMat, prec: u32) -> Result<(f64, f64, BigInt, f64), bool> {
+pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: u32) -> Result<(Ball, Ball, BigInt, f64), bool> {
     let r = basis.len();
     let m = lams.len();
     if r == 0 || m < r {
@@ -164,41 +165,48 @@ pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[f64], basis: &ZMat, prec: 
     if t.len() != r {
         return Err(false);
     }
-    // b = T lambda and the error bounds of its rows
+    // b = T lambda and the error bounds of its rows (units of 2^-prec,
+    // rounded up exactly)
     let b: ZMat = t.iter().map(|ti| (0..r).map(|j| ti.iter().zip(lams).filter(|(c, _)| !c.is_zero()).map(|(c, l)| c * &l[j]).sum()).collect()).collect();
-    let e: Vec<f64> = t.iter().map(|ti| ti.iter().zip(errs).filter(|(c, _)| !c.is_zero()).map(|(c, &er)| to_f64(&c.abs(), 0) * (1.0 + 1e-15) * er).sum::<f64>() * (1.0 + 1e-12)).collect();
+    let e: Vec<Mag> = t.iter().map(|ti| ti.iter().zip(errs).filter(|(c, _)| !c.is_zero()).fold(Mag::ZERO, |acc, (c, &er)| acc.add(Mag::from_bigint_up(c, 0).mul(er)))).collect();
     let d = crate::linalg::det(&b).abs();
     // |det(b + E) - det b| <= prod (|b_i| + |E_i|) - prod |b_i|
     //                     <= prod |b_i| (exp(S) - 1) <= prod |b_i| S exp(S),
-    // S = sum |E_i| / |b_i|, |E_i| <= sqrt(r) e_i 2^-prec
-    let norms: Vec<f64> = b.iter().map(|row| row.iter().map(|x| to_f64(x, prec).powi(2)).sum::<f64>().sqrt() * (1.0 + 1e-14)).collect();
-    if !norms.iter().all(|x| x.is_finite() && *x > 0.0) {
-        return Err(false);
+    // S = sum |E_i| / |b_i|, |E_i| <= sqrt(r) e_i: all on balls
+    // (sagebrush-ball; before, doubles with margins: R2-CLG-F2), in units
+    // of 2^-prec for |b_i| and E_i
+    let wp = 128u64;
+    let mut norms = Vec::with_capacity(r);
+    for row in &b {
+        let n2: BigInt = row.iter().map(|x| x * x).sum();
+        if n2.is_zero() {
+            return Err(false);
+        }
+        norms.push(Ball::from_int(&n2).sqrt(wp).ok_or(false)?);
     }
-    if !e.iter().all(|x| x.is_finite()) {
+    let sr = Ball::from_i64(r as i64).sqrt(wp).ok_or(false)?;
+    let mut sum_s = Ball::zero();
+    for (ei, ni) in e.iter().zip(&norms) {
+        let Some((em, ee)) = ei.to_dyadic() else { return Err(true) };
+        sum_s = sum_s.add(&sr.mul(&Ball::exact(em, ee), wp).div(ni, wp).ok_or(false)?, wp);
+    }
+    if !sum_s.upper_abs().le_pow2(-10) {
         return Err(true);
     }
-    let s: f64 = e.iter().zip(&norms).map(|(&ei, &ni)| {
-        let l = ((r as f64).sqrt() * ei.max(1.0)).log2() - prec as f64 - ni.log2();
-        2f64.powf(l.max(-1000.0)) * (1.0 + 1e-12)
-    }).sum();
-    if s > 1e-3 {
-        return Err(true);
-    }
-    let log_prod: f64 = norms.iter().map(|x| x.ln()).sum::<f64>();
-    let log_prod = log_prod + 1e-14 * (1.0 + log_prod.abs());
-    let pert = s * s.exp() * log_prod.exp() * (1.0 + 1e-12);
-    let df = to_f64(&d, prec * r as u32);
-    let (lo, hi) = (df * (1.0 - 1e-14) - pert, df * (1.0 + 1e-14) + pert);
-    if !hi.is_finite() {
-        return Err(false);
-    }
-    if lo <= 0.0 {
+    let prod = norms.iter().fold(Ball::one(), |acc, n| acc.mul(n, wp));
+    let pert = prod.mul(&sum_s, wp).mul(&sum_s.exp(wp).ok_or(true)?, wp).upper_abs();
+    let Some((pm, pe)) = pert.to_dyadic() else { return Err(true) };
+    // R in [d - pert, d + pert] 2^-(prec r), exactly
+    let scale = -((prec as i64) * r as i64);
+    let lo = Ball::from_int(&d).sub(&Ball::exact(pm.clone(), pe), u64::MAX);
+    let hi = Ball::from_int(&d).add(&Ball::exact(pm, pe), u64::MAX);
+    if !lo.is_positive() {
         // rank deficient, or the perturbation swamps the determinant
-        return Err(pert >= df * 1e-3);
+        return Err(!d.is_zero());
     }
-    // the relative error: the perturbation over |det|, and the last unit
-    let rel = (pert / df.max(f64::MIN_POSITIVE)) * (1.0 + 1e-9) + 2f64.powf(-(prec as f64) * 0.9);
+    let (lo, hi) = (lo.mul_2exp(scale), hi.mul_2exp(scale));
+    // the relative error (for the digits shown only): pert / d
+    let rel = hi.sub(&lo, 64).div(&lo.add(&hi, 64), 64).map_or(1.0, |q| q.to_f64_approx().abs()) + 2f64.powf(-(prec as f64) * 0.9);
     Ok((lo, hi, d, rel))
 }
 
@@ -222,7 +230,7 @@ pub fn quadratic_split(d: &BigInt, x: u64) -> Vec<(u64, Vec<(u32, u32)>)> {
 // sums enclosed, Theorem 1's E(X) evaluated as a ball (no floating-point
 // margins: the systematic review's R2-CLG-F2).
 
-use sagebrush_ball::{pi, Ball};
+use sagebrush_ball::pi;
 
 /// B_K(Y) on balls.
 fn b_k_ball(split: &[(u64, Vec<(u32, u32)>)], y: u64, prec: u64) -> Option<Ball> {
@@ -346,7 +354,7 @@ pub fn quadratic_log_hr_lower(d: &BigInt) -> Option<f64> {
 /// gcd, and b = sum t_k lam_k is the logarithm of a genuine unit (not a
 /// root of unity: |b| exceeds its error).  Returns (|b| - e, |b| + e, b)
 /// in units of 2^-prec, as for regulator_bounds (Err(true): imprecise).
-pub fn rank_one_bounds(lams: &[BigInt], errs: &[f64], g: &BigInt) -> Result<(BigInt, BigInt, BigInt), bool> {
+pub fn rank_one_bounds(lams: &[BigInt], errs: &[sagebrush_ball::Mag], g: &BigInt) -> Result<(BigInt, BigInt, BigInt), bool> {
     use num_integer::Integer;
     if g.is_zero() {
         return Err(false);
@@ -375,13 +383,11 @@ pub fn rank_one_bounds(lams: &[BigInt], errs: &[f64], g: &BigInt) -> Result<(Big
         return Err(false);
     }
     let b: BigInt = t.iter().zip(lams).filter(|(c, _)| !c.is_zero()).map(|(c, l)| c * l).sum();
-    let e: f64 = t.iter().zip(errs).filter(|(c, _)| !c.is_zero()).map(|(c, &er)| to_f64(&c.abs(), 0) * (1.0 + 1e-15) * er).sum::<f64>() * (1.0 + 1e-12);
-    if !e.is_finite() {
-        return Err(true);
-    }
-    // ceil(e) + 1 as an integer, for any size: e < (m + 1) 2^k
-    let k = (e.max(1.0).log2().ceil() as i32 - 52).max(0);
-    let eb = (BigInt::from((e / 2f64.powi(k)).ceil() as u64 + 1) << k as usize) + 1u32;
+    // sum |t_k| err_k, rounded up exactly (Mag)
+    let e = t.iter().zip(errs).filter(|(c, _)| !c.is_zero()).fold(sagebrush_ball::Mag::ZERO, |acc, (c, &er)| acc.add(sagebrush_ball::Mag::from_bigint_up(c, 0).mul(er)));
+    let Some((em, ee)) = e.to_dyadic() else { return Err(true) };
+    // ceil(e) + 1 as an integer
+    let eb = if ee >= 0 { (em << ee as u64) + 1u32 } else { ((em + ((BigInt::one() << (-ee) as u64) - 1u32)) >> (-ee) as u64) + 1u32 };
     let ab = b.abs();
     if ab <= &eb * 2 {
         return Err(true);

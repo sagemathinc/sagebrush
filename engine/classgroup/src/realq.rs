@@ -48,16 +48,21 @@ fn elem_log(el: &Elem, d: &BigInt, sqrt_d: &BigInt, prec: u32) -> BigInt {
 /// (< 1 unit, < 1 unit relatively in ln(|B| + sqrt D) too, as that is >= 1),
 /// and ln_fixed is allowed 8 + 2 |e| units (e its binary exponent), as in
 /// embed.rs log_embedding_err.
-fn elem_log_err(el: &Elem, d: &BigInt, sqrt_d: &BigInt, prec: u32) -> (BigInt, f64) {
-    let mut err = 0.0f64;
+fn elem_log_err(el: &Elem, d: &BigInt, _sqrt_d: &BigInt, prec: u32) -> Option<(BigInt, sagebrush_ball::Mag)> {
+    // on balls (sagebrush-ball): sum c (2 log(|B| + sqrt D) - log |B^2 - D|),
+    // signed by B, then fixed point with its rounding (before: ln_fixed's
+    // assumed accuracy and margins in doubles, R2-CLG-F2)
+    use sagebrush_ball::Ball;
+    let wp = prec as u64 + 64 + 2 * d.bits();
+    let sd = Ball::from_int(d).sqrt(wp)?;
+    let mut total = Ball::zero();
     for &(b, c) in el {
         let ab = BigInt::from(b.unsigned_abs());
-        let x = (&ab << prec as usize) + sqrt_d;
-        let ex = (x.bits() as f64 - 1.0 - prec as f64).abs();
-        let ei = ((&ab * &ab - d).abs().bits() as f64 - 1.0).abs();
-        err += (c.unsigned_abs() as f64) * (2.0 * (9.0 + 2.0 * ex) + 8.0 + 2.0 * ei);
+        let l = Ball::from_int(&ab).add(&sd, wp).log(wp)?.mul_2exp(1).sub(&Ball::from_int(&(&ab * &ab - d).abs()).log(wp)?, wp);
+        let l = if b < 0 { l.neg() } else { l };
+        total = total.add(&l.mul_i64(c, wp), wp);
     }
-    (elem_log(el, d, sqrt_d, prec), err * (1.0 + 1e-12))
+    total.to_fixed(prec as i64)
 }
 
 /// A batch of kernel vectors: det A, the y_t, the extra rows.
@@ -66,18 +71,21 @@ type Batch = (BigInt, Vec<Vec<BigInt>>, Vec<usize>);
 /// unit_logs with certified error bounds, each kernel vector checked to
 /// vanish exactly on the core (so every value is the logarithm of a unit).
 #[allow(clippy::too_many_arguments)]
-fn unit_logs_bounded(d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], sel: &[usize], batches: &[Batch], prec: u32) -> Option<(Vec<BigInt>, Vec<f64>)> {
+fn unit_logs_bounded(d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], sel: &[usize], batches: &[Batch], prec: u32) -> Option<(Vec<BigInt>, Vec<sagebrush_ball::Mag>)> {
     let sqrt_d = sqrt_fixed(d, prec);
-    let (mut logs, mut errs): (Vec<Vec<BigInt>>, Vec<f64>) = elems.iter().map(|el| {
-        let (l, e) = elem_log_err(el, d, &sqrt_d, prec);
-        (vec![l], e)
-    }).unzip();
+    let mut logs: Vec<Vec<BigInt>> = Vec::with_capacity(elems.len());
+    let mut errs: Vec<sagebrush_ball::Mag> = Vec::with_capacity(elems.len());
+    for el in elems {
+        let (l, e) = elem_log_err(el, d, &sqrt_d, prec)?;
+        logs.push(vec![l]);
+        errs.push(e);
+    }
     let (_, core2, zero_rows) = eliminate_tracked(n, rels, pivot_weight, Some(&mut logs), Some(&mut errs));
     if core2 != core_rows {
         return None;
     }
     let mut lams: Vec<BigInt> = zero_rows.iter().map(|&k| logs[k][0].clone()).collect();
-    let mut lerr: Vec<f64> = zero_rows.iter().map(|&k| errs[k]).collect();
+    let mut lerr: Vec<sagebrush_ball::Mag> = zero_rows.iter().map(|&k| errs[k]).collect();
     let ncol = dense.first().map_or(0, |r| r.len());
     for (det, ys, extras) in batches {
     for (y, &e) in ys.iter().zip(extras) {
@@ -93,9 +101,9 @@ fn unit_logs_bounded(d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pi
         }
         let mut l: BigInt = sel.iter().zip(&coef).map(|(&k, ci)| ci * &logs[core_rows[k]][0]).sum();
         l -= &de * &logs[core_rows[e]][0];
-        let er: f64 = sel.iter().zip(&coef).map(|(&k, ci)| to_f64(&ci.abs(), 0) * (1.0 + 1e-15) * errs[core_rows[k]]).sum::<f64>() + to_f64(&de.abs(), 0) * (1.0 + 1e-15) * errs[core_rows[e]];
+        let er = sel.iter().zip(&coef).fold(sagebrush_ball::Mag::from_bigint_up(&de, 0).mul(errs[core_rows[e]]), |acc, (&k, ci)| acc.add(sagebrush_ball::Mag::from_bigint_up(ci, 0).mul(errs[core_rows[k]])));
         lams.push(l);
-        lerr.push(er * (1.0 + 1e-12));
+        lerr.push(er);
     }
     }
     Some((lams, lerr))
@@ -392,16 +400,18 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
                 let (blo, bhi, b) = match crate::nf::certify::rank_one_bounds(&lams, &errs, &two_r) {
                     Ok(v) => v,
                     Err(e) => {
-                        if debug { eprintln!("  certificate: no unit with a proven bound ({} units, worst error 2^{:.0} units{})", lams.len(), errs.iter().cloned().fold(0.0, f64::max).log2(), if e { ", imprecise" } else { "" }); }
+                        if debug { eprintln!("  certificate: no unit with a proven bound ({} units, worst error 2^{:.0} units{})", lams.len(), errs.iter().cloned().fold(sagebrush_ball::Mag::ZERO, sagebrush_ball::Mag::max).top(), if e { ", imprecise" } else { "" }); }
                         imprecise = e;
                         return None;
                     }
                 };
                 // R = |b| / 2 (b is twice the log of the unit)
-                let (rlo, rhi) = (to_f64(&blo, prec) / 2.0, to_f64(&bhi, prec) / 2.0 * (1.0 + 1e-14));
+                // R = |b| / 2: in [blo, bhi] 2^-(prec + 1) exactly
+                let (rlo, rhi) = (to_f64(&blo, prec) / 2.0, to_f64(&bhi, prec) / 2.0);
+                let rhi_ball = sagebrush_ball::Ball::exact(bhi.clone(), -(prec as i64) - 1);
                 let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * crate::nf::bnf::lower_f64(lo).exp() / rhi, seed, debug)? };
                 // (rhi: from |b| + e, a double rounded up; on balls next)
-                let ok = crate::nf::certify::below_twice_ball(&h2, &sagebrush_ball::Ball::from_f64_exact(rhi)?, lo, 96);
+                let ok = crate::nf::certify::below_twice_ball(&h2, &rhi_ball, lo, 96);
                 if debug {
                     eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}): {}", rlo, rhi, h2, h, if ok { "holds" } else { "failed" });
                 }

@@ -35,7 +35,7 @@ pub fn eliminate_with(n: usize, rels: &[Relation], max_weight: usize, payload: O
 /// when a row becomes r - f pivot, its bound becomes err(r) + |f| err(pivot)
 /// (rounded up), so that the payloads of the result, exact integer
 /// combinations of the inputs, have certified error bounds.
-pub fn eliminate_tracked(n: usize, rels: &[Relation], max_weight: usize, mut payload: Option<&mut [Vec<BigInt>]>, mut errs: Option<&mut [f64]>) -> (Reduced, Vec<usize>, Vec<usize>) {
+pub fn eliminate_tracked(n: usize, rels: &[Relation], max_weight: usize, mut payload: Option<&mut [Vec<BigInt>]>, mut errs: Option<&mut [sagebrush_ball::Mag]>) -> (Reduced, Vec<usize>, Vec<usize>) {
     let mut rows: Vec<Vec<(u32, i64)>> = rels.iter().map(|r| r.iter().map(|&(c, e)| (c as u32, e)).collect()).collect();
     let mut dead = vec![false; rows.len()];
     let mut alive = vec![true; n];
@@ -130,7 +130,8 @@ pub fn eliminate_tracked(n: usize, rels: &[Relation], max_weight: usize, mut pay
                     }
                 }
                 if let Some(er) = errs.as_deref_mut() {
-                    er[k as usize] = (er[k as usize] + (f.unsigned_abs() as f64) * er[pk as usize]) * (1.0 + 1e-15);
+                    // (rounded up exactly: Mag, no floating-point margin)
+                    er[k as usize] = er[k as usize].add(sagebrush_ball::Mag::from_u64(f.unsigned_abs()).mul(er[pk as usize]));
                 }
             }
             alive[c] = false;
