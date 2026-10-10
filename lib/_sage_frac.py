@@ -60,9 +60,18 @@ class _FractionField:
             sage: R.<x> = QQ[]; F = R.fraction_field(); F(x, x^2)
             1/x
         """
-        if isinstance(num, FractionFieldElement) and den is None:
-            return num
         R = self._R
+        if isinstance(num, FractionFieldElement) and den is None:
+            if num._num.parent() == R:
+                return num
+            # from another fraction field: numerator and denominator
+            # converted, and a denominator that vanishes refused (QQ(t)'s
+            # 1/5 was returned unchanged by GF(5)(t), the systematic
+            # review's R2-EXT-F9)
+            n, d = R(num._num), R(num._den)
+            if not d:
+                raise ZeroDivisionError("the denominator of %r is zero in %r" % (num, self))
+            return FractionFieldElement(n, d)
         num = R(num) if not _is_poly(num, R) else num
         den = R(1) if den is None else (R(den) if not _is_poly(den, R) else den)
         return FractionFieldElement(num, den)
