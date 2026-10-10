@@ -24,6 +24,10 @@ fn main() {
         }
     }
     let bound: u64 = args[2].parse().unwrap();
+    // the producer's identity, in every record (the builder keeps it apart
+    // from its own revision: systematic review DAT-F4)
+    let git = |a: &[&str]| std::process::Command::new("git").args(a).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let producer = format!(r#"{{"commit":"{}","dirty":{},"spec":"{}","bound":{}}}"#, git(&["rev-parse", "HEAD"]), !git(&["status", "--porcelain", "--untracked-files=no"]).is_empty(), args[1], bound);
     let threads: usize = args.get(3).map(|t| t.parse().unwrap()).unwrap_or(8);
     // largest levels first, so that the slowest spaces do not finish last
     spaces.sort_by_key(|&(n, k)| std::cmp::Reverse(n * k * k));
@@ -47,7 +51,7 @@ fn main() {
                 let t = Instant::now();
                 let dims = sagebrush_web::call(&format!(r#"{{"fn":"dims","n":{},"k":{}}}"#, n, k));
                 let nf = sagebrush_web::call(&format!(r#"{{"fn":"newforms","n":{},"k":{},"bound":{}}}"#, n, k, bound));
-                let line = format!(r#"{{"n":{},"k":{},"dims":{},"newforms":{},"seconds":{:.3}}}"#, n, k, dims, nf, t.elapsed().as_secs_f64());
+                let line = format!(r#"{{"n":{},"k":{},"dims":{},"newforms":{},"seconds":{:.3},"producer":{}}}"#, n, k, dims, nf, t.elapsed().as_secs_f64(), producer);
                 use std::io::Write;
                 let mut o = out.lock().unwrap();
                 writeln!(o, "{}", line).unwrap();

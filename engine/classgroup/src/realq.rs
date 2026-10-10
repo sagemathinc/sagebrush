@@ -162,7 +162,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
     let debug = std::env::var("QCL_DEBUG").is_ok();
     let mut tm = Timing::default();
     let ld = absd.ln();
-    let bound = (15.0 / 4.0 * ld * ld).ceil() as u64;
+    let bound = (crate::imag::GRH_C * ld * ld).ceil() as u64;
     let fb = FactorBase::new(d, bound.max(60));
     let n = fb.primes.len();
     tm.fb = n;
@@ -382,6 +382,7 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
         if ratio <= std::f64::consts::SQRT_2 {
             // the certificate: a genuine unit with a proven error bound, an
             // exact multiple of h, h* R*_hi < 2 h R_lo
+            let mut imprecise = false;
             let cert = log_hr_lo.and_then(|lo| {
                 let Some((lams, errs)) = unit_logs_bounded(d, rels, elems, n, pivot_weight, dense, core_rows, sel, &batches, prec) else {
                     if debug { eprintln!("  certificate: no bounded unit logarithms"); }
@@ -391,6 +392,7 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
                     Ok(v) => v,
                     Err(e) => {
                         if debug { eprintln!("  certificate: no unit with a proven bound ({} units, worst error 2^{:.0} units{})", lams.len(), errs.iter().cloned().fold(0.0, f64::max).log2(), if e { ", imprecise" } else { "" }); }
+                        imprecise = e;
                         return None;
                     }
                 };
@@ -408,6 +410,13 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
                     (h2, cyc2, b.abs() >> 1usize, digits)
                 })
             });
+            if cert.is_none() && imprecise && prec < 1 << 16 {
+                // the unit logarithms' error bounds were too wide: again
+                // with twice the precision
+                prec *= 2;
+                lambdas.clear();
+                continue;
+            }
             return Some(match cert {
                 Some((h2, cyc2, rf, digits)) => RealQuadratic { group: ClassGroup { h: h2, cyc: cyc2 }, regulator: to_f64(&rf, prec), reg_fixed: rf, prec, certified: true, reg_digits: digits },
                 None => RealQuadratic { group: ClassGroup { h, cyc }, regulator: r, reg_fixed: r_fixed, prec, certified: false, reg_digits: 20 },

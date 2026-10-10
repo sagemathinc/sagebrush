@@ -74,7 +74,7 @@ see [its README](engine/classgroup/README.md)):
 - **Imaginary quadratic fields:** Jacobson's sieve. Up to 44x faster than
   PARI's `quadclassunit` (10^47: 5.4 s against 219 s).
 - **Real quadratic fields:** class group and regulator. Faster than PARI
-  from 10^25.
+  from about 10^29 in the benchmark table (slower below; equal near 10^27).
 - **General number fields** (`bnfinit`):
   - the maximal order by Round 2;
   - prime decomposition, including common index divisors;
@@ -98,10 +98,15 @@ MIT/Apache, clean-room; the layer FLINT provides for Sage; see
   - over Z/n: NTT products, Newton division, half-gcd;
   - over Z: products, and heuristic and modular gcds.
 - **Certified:** every answer is checked exactly or rests on a proven bound.
-- **Speed against FLINT** ([bench/linalg](bench/linalg/README.md)):
-  - inverses 4–6x faster, rref 1.4–3x faster;
-  - charpoly, det and solve within 1.1–2.3x;
-  - polynomials within 1–5x.
+- **Speed against FLINT** ([bench/linalg](bench/linalg/README.md); random
+  dense matrices with 7- and 41-bit entries, n = 10, 30, 100; one core;
+  minimum times, and sub-millisecond ones are imprecise):
+  - inverses 4–6x faster for n = 30 and 100 (1.2–1.5x at n = 10);
+  - rref 1.3–3x faster for n = 30 and 100, but 2–5x slower at n = 10;
+  - charpoly, det and solve within 1.1–2.3x for n = 30 and 100, up to 5.5x
+    slower at n = 10;
+  - polynomial products and gcds within 1–5x for lengths 100 to 100,000
+    (up to 8x slower at length 10, where both take about a microsecond).
 - **In the Sage layer:** `det`, `rref` and `inverse` got 15–66x faster and
   are close to Sage itself; a polynomial gcd that took 10 s takes under a
   millisecond.

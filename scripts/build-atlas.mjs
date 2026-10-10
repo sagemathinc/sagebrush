@@ -16,10 +16,16 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { spaceFromEngine, derive, primesUpTo, BOUND, RANGES } from "../web/atlas/model.ts";
 
 const root = join(dirname(new URL(import.meta.url).pathname), "..");
-const [spacesFile, lmfdbFile, costFile] = process.argv.slice(2);
+// --ranges SPEC: the spaces that must all be present, once each (the
+// producer's argument; default the published atlas's)
+const argv = process.argv.slice(2);
+const ri = argv.indexOf("--ranges");
+const rangeSpec = ri >= 0 ? argv.splice(ri, 2)[1] : "1-1000:2,1-250:4,1-111:6,1-62:8,1-40:10,1-27:12";
+const [spacesFile, lmfdbFile, costFile] = argv;
 if (!spacesFile) throw new Error("usage: node scripts/build-atlas.mjs SPACES.jsonl [LMFDB.json [COST-MODEL.json]]");
 const out = join(root, "web", "dist", "atlas", "data");
 
@@ -35,9 +41,32 @@ function engine(req) {
   return reply.ok;
 }
 
-const raw = readFileSync(spacesFile, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const rawText = readFileSync(spacesFile, "utf8");
+const raw = rawText.trim().split("\n").map((l) => JSON.parse(l));
+// the input is exactly the requested set: a truncated or partial producer
+// run is refused, not published (systematic review DAT-F3)
+const expected = new Set();
+for (const part of rangeSpec.split(",")) {
+  const [r, k = "2"] = part.split(":");
+  const [a, b = a] = r.split("-");
+  for (let n = +a; n <= +b; n++) expected.add(`${n}:${k}`);
+}
+const seen = new Set();
+for (const x of raw) {
+  const key = `${x.n}:${x.k}`;
+  if (seen.has(key)) throw new Error(`${x.n}.${x.k} appears twice in ${spacesFile}`);
+  if (!expected.has(key)) throw new Error(`${x.n}.${x.k} is not in the requested ranges ${rangeSpec}`);
+  seen.add(key);
+}
+const missing = [...expected].filter((k) => !seen.has(k));
+if (missing.length) throw new Error(`${missing.length} requested spaces are missing from ${spacesFile}, e.g. ${missing.slice(0, 5).join(", ")} (weight after the colon)`);
 const newDims = new Map(raw.map((x) => [`${x.n}:${x.k}`, x.dims.ok.new]));
-const commit = execSync("git rev-parse HEAD", { cwd: root }).toString().trim();
+// provenance: who computed the data, and who packaged it, kept apart (DAT-F4)
+const builder = execSync("git rev-parse HEAD", { cwd: root }).toString().trim();
+const producers = [...new Set(raw.map((x) => (x.producer ? JSON.stringify(x.producer) : "unrecorded")))];
+const producer = producers.length === 1 && producers[0] !== "unrecorded" ? JSON.parse(producers[0]) : { commit: null, note: producers.length === 1 ? "unrecorded" : `${producers.length} different producers` };
+const inputSha256 = createHash("sha256").update(rawText).digest("hex");
+const commit = producer.commit ?? builder;
 const spaces = [];
 for (const x of raw) {
   if (x.newforms.error || x.dims.error) throw new Error(`${x.n}.${x.k}: ${x.newforms.error ?? x.dims.error}`);
@@ -97,7 +126,7 @@ if (unmatched.length) throw new Error("unmatched: " + unmatched.slice(0, 10).joi
 // ---- write
 rmSync(out, { recursive: true, force: true });
 const index = [];
-const stats = { commit, bound: BOUND, built: new Date().toISOString().slice(0, 10), weights: {}, orbits: 0, spaces: spaces.length, lmfdb: { agree, differ: differ.length } };
+const stats = { commit, producer, builder, input_sha256: inputSha256, ranges: rangeSpec, bound: BOUND, built: new Date().toISOString().slice(0, 10), weights: {}, orbits: 0, spaces: spaces.length, lmfdb: { agree, differ: differ.length } };
 for (const sp of spaces) {
   const dir = join(out, "mf", String(sp.weight));
   mkdirSync(dir, { recursive: true });

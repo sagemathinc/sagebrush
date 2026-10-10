@@ -11,6 +11,12 @@ Belabas, Diaz y Diaz and Friedman; Grenié and Molteni (arXiv:1507.00602,
 Like PARI's `quadclassunit` and `bnfinit`, everything here assumes GRH,
 which makes the bound on the generators small.
 
+The certificates combine exact integer arithmetic with floating-point
+estimates, such as the analytic lower bound for $hR$ and the regulator's
+perturbation bound. The floating-point steps use explicit safety margins.
+A complete forward-error analysis of those margins, or a fully interval
+implementation, has not been written yet.
+
 ## Imaginary quadratic fields
 
 **Relations by Jacobson's sieve**, in the self-initializing style of SIQS:
@@ -33,8 +39,11 @@ so $\det L$ is $h$ once it falls below $\sqrt 2$ times the estimate.
 
 **What made it fast:**
 
-- **Grenié–Molteni's generator bound** $\frac{15}{4} \log^2 |D|$ instead of
-  Bach's $6 \log^2|D|$.
+- **Grenié–Molteni's generator bound** $\frac{31}{8} \log^2 |D|$ instead of
+  Bach's $6 \log^2|D|$. This is their uniform theorem
+  $(4 - \frac{1}{2n} + \frac{1}{2n^2}) \log^2 \Delta$ for $n = 2$
+  (arXiv:2212.09461, Theorem 2). An earlier version used $\frac{15}{4}$,
+  for which we could not locate a proof over the whole range.
 - **Sieve only the small primes** of the factor base: larger ones enter
   as prime cofactors. One mistake here: rare "coverage partners" caused
   index-$2^k$ sublattices.

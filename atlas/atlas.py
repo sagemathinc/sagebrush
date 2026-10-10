@@ -84,8 +84,14 @@ def write_table(root, kind, table, rows, schema, key, shard_size, description):
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     }
     sha = _put_json(root, os.path.join("manifests", kind, table), manifest)
-    with open(os.path.join(root, "manifests", kind, table, "current.json"), "w") as f:
+    # the pointer is replaced atomically (an interrupted write never leaves
+    # an unreadable current.json)
+    cur = os.path.join(root, "manifests", kind, table, "current.json")
+    with open(cur + ".tmp", "w") as f:
         json.dump({"manifest": sha}, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(cur + ".tmp", cur)
     return manifest
 
 
