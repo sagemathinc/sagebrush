@@ -7,12 +7,13 @@
 //   node cdn/build.mjs --check   fail unless cdn/sagebrush-engine.mjs embeds exactly that wasm
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { gzipSync, gunzipSync } from "node:zlib";
 
 const sh = (cmd) => execSync(cmd, { stdio: "inherit", shell: "/bin/bash" });
 const wasm = readFileSync("wasm/sagebrush-engine.wasm");
 if (process.argv.includes("--check")) {
   const m = readFileSync("cdn/sagebrush-engine.mjs", "utf8").match(/const WASM = "([^"]*)"/);
-  if (!m || !Buffer.from(m[1], "base64").equals(wasm)) {
+  if (!m || !gunzipSync(Buffer.from(m[1], "base64")).equals(wasm)) {
     console.error("cdn/sagebrush-engine.mjs does not embed wasm/sagebrush-engine.wasm: run node cdn/build.mjs");
     process.exit(1);
   }
@@ -23,8 +24,11 @@ const engine = `// Sagebrush engines (Rust -> wasm32), one self-contained ES mod
 // Usage: const sb = await import("https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@REF/cdn/sagebrush-engine.mjs");
 //        sb.dims({n: 13, k: 2, chi: [6, [2], [1]]})
 // Characters: chi = [order, gens, vals] with chi(gens[i]) = zeta_order^vals[i] (LMFDB char_values); omit for trivial.
-const WASM = "${wasm.toString("base64")}";
-const bytes = Uint8Array.from(atob(WASM), (c) => c.charCodeAt(0));
+// (gzipped: a third of the size; DecompressionStream is in every current
+// browser and in Node 18+)
+const WASM = "${gzipSync(wasm, { level: 9 }).toString("base64")}";
+const gz = Uint8Array.from(atob(WASM), (c) => c.charCodeAt(0));
+const bytes = new Uint8Array(await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
 const { instance } = await WebAssembly.instantiate(bytes, { sagebrush: { interrupted: () => 0 } });
 const X = instance.exports;
 const enc = new TextEncoder(), dec = new TextDecoder();
