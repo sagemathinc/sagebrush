@@ -481,12 +481,27 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             }))
         }
         Fun::Arg => {
-            // exact on the real axis: arg(q) = 0 for q >= 0, pi for q < 0
+            // exact for Gaussian rationals a + b i: 0 or pi on the real
+            // axis, +-pi/2 on the imaginary one, else atan(b/a) (+- pi)
             let n = x.as_num()?;
-            if !n.is_real() || matches!(n, Num::Float(..)) {
-                return None;
-            }
-            Some(if n.is_negative() { pi() } else { int(0) })
+            let Num::Exact(a, b) = n else { return None };
+            use num_traits::Signed;
+            let q = |r: &crate::num::Q| num(Num::rat(r.clone()));
+            Some(if b.is_zero() {
+                if a.is_negative() { pi() } else { int(0) }
+            } else if a.is_zero() {
+                let h = div(&pi(), &int(2));
+                if b.is_negative() { neg(&h) } else { h }
+            } else {
+                let t = fun1(Fun::Atan, &q(&(b / a)));
+                if a.is_positive() {
+                    t
+                } else if b.is_positive() {
+                    add2(&t, &pi())
+                } else {
+                    sub(&t, &pi())
+                }
+            })
         }
         Fun::Heaviside => {
             let n = x.as_num()?;

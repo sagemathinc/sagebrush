@@ -406,16 +406,25 @@ fn with_cond(mut s: Sol, c: &[Expr]) -> Sol {
     s
 }
 
-/// The roots of n = 0 in x, with conditions.
+/// The roots of n = 0 in x, with conditions.  An n free of x that can
+/// vanish (a, or the factor a of a x) gives every x where it does (the
+/// review of solve's CSOL-F2: a x == 0 had only x == 0).
 fn roots_c(n: &Expr, x: &str) -> Vec<Sol> {
     if !depends(n, x) {
+        if maybe_zero(n) {
+            return vec![Sol { val: sym(&fresh("r")), cond: vec![zero_rel(Rel::Eq, n)], params: vec![] }];
+        }
         return vec![];
     }
     let f = crate::simplify::factor(n);
     if let Kind::Mul(v) = &f.kind {
         let mut out = vec![];
         for g in v {
-            let (b, _) = base_exp(g);
+            let (b, e) = base_exp(g);
+            // (a negative power is a denominator: no roots)
+            if e.as_num().map_or(false, |k| k.is_negative()) {
+                continue;
+            }
             out.extend(roots_c(&b, x));
         }
         return out;
@@ -492,7 +501,6 @@ fn invert_c(e: &Expr, x: &str) -> Vec<Sol> {
     };
     let (k, g) = split_coeff(&rest);
     let t = crate::simplify::simplify_rational(&div(&c, &num(k)));
-    let symbolic = !free_symbols(&t).is_empty();
     let i = num(crate::num::Num::i());
     // (inner, values): inner = each value
     let (inner, vals): (Expr, Vec<Sol>) = match &g.kind {
@@ -527,8 +535,20 @@ fn invert_c(e: &Expr, x: &str) -> Vec<Sol> {
             (a[0].clone(), vs.into_iter().map(|v| Sol { val: v, cond: vec![], params: p.clone() }).collect())
         }
         Kind::Fun(Fun::Tan, a) => {
+            // tan omits exactly +-i (the review's CSOL-F6)
+            let (pi_, mi_) = (sub(&t, &i), add2(&t, &i));
+            if simplify_rational(&pi_).is_zero() || simplify_rational(&mi_).is_zero() {
+                return vec![];
+            }
             let n = fresh("n");
-            (a[0].clone(), vec![Sol { val: add2(&fun1(Fun::Atan, &t), &two_pi_n(&n, 1)), cond: vec![], params: vec![n] }])
+            let mut cond = vec![];
+            if maybe_zero(&pi_) {
+                cond.push(relation(Rel::Ne, &t, &i));
+            }
+            if maybe_zero(&mi_) {
+                cond.push(relation(Rel::Ne, &t, &neg(&i)));
+            }
+            (a[0].clone(), vec![Sol { val: add2(&fun1(Fun::Atan, &t), &two_pi_n(&n, 1)), cond, params: vec![n] }])
         }
         Kind::Fun(Fun::Sinh, a) => {
             // sinh(u) = sinh(i pi - u), period 2 pi i
@@ -545,55 +565,119 @@ fn invert_c(e: &Expr, x: &str) -> Vec<Sol> {
             }
             let n = fresh("n");
             let mut s = Sol { val: add2(&log(&t), &mul(vec![int(2), pi(), i.clone(), sym(&n)])), cond: vec![], params: vec![n] };
-            if symbolic && maybe_zero(&t) {
+            if maybe_zero(&t) {
                 s.cond.push(zero_rel(Rel::Ne, &t));
             }
             (p.clone(), vec![s])
         }
         Kind::Pow(b, p) if !depends(b, x) => {
-            // b^u = t: u = (log(t) + 2 pi i n)/log(b)
-            if t.is_zero() {
+            // b^u = t: u = (log(t) + 2 pi i n)/log(b) for b != 0, 1, t != 0;
+            // with a symbolic base also b = 1 (every u if t = 1) and b = 0
+            // (0^u = 0 for Re(u) > 0): the review's CSOL-F4
+            let mut vs = vec![];
+            if !t.is_zero() {
+                let n = fresh("n");
+                let per = div(&mul(vec![int(2), pi(), i.clone(), sym(&n)]), &log(b));
+                let v = match exact_log(b, &t) {
+                    Some(m) => add2(&m, &per),
+                    None => div(&add2(&log(&t), &mul(vec![int(2), pi(), i.clone(), sym(&n)])), &log(b)),
+                };
+                let mut s = Sol { val: v, cond: vec![], params: vec![n] };
+                if maybe_zero(&t) {
+                    s.cond.push(zero_rel(Rel::Ne, &t));
+                }
+                if maybe_zero(b) {
+                    s.cond.push(zero_rel(Rel::Ne, b));
+                }
+                if maybe_zero(&sub(b, &int(1))) {
+                    s.cond.push(zero_rel(Rel::Ne, &sub(b, &int(1))));
+                }
+                vs.push(s);
+            }
+            if p.as_sym() == Some(x) {
+                if maybe_zero(&sub(b, &int(1))) && (maybe_zero(&sub(&t, &int(1))) || t == int(1)) {
+                    let mut cond = vec![zero_rel(Rel::Eq, &sub(b, &int(1)))];
+                    if t != int(1) {
+                        cond.push(zero_rel(Rel::Eq, &sub(&t, &int(1))));
+                    }
+                    vs.push(Sol { val: sym(&fresh("r")), cond, params: vec![] });
+                }
+                if maybe_zero(b) && (t.is_zero() || maybe_zero(&t)) {
+                    let r = sym(&fresh("r"));
+                    let mut cond = vec![zero_rel(Rel::Eq, b)];
+                    if !t.is_zero() {
+                        cond.push(zero_rel(Rel::Eq, &t));
+                    }
+                    cond.push(relation(Rel::Gt, &fun1(Fun::RealPart, &r), &zero()));
+                    vs.push(Sol { val: r, cond, params: vec![] });
+                }
+            }
+            if vs.is_empty() {
                 return vec![];
             }
-            let n = fresh("n");
-            let per = div(&mul(vec![int(2), pi(), i.clone(), sym(&n)]), &log(b));
-            let v = match exact_log(b, &t) {
-                Some(m) => add2(&m, &per),
-                None => div(&add2(&log(&t), &mul(vec![int(2), pi(), i.clone(), sym(&n)])), &log(b)),
-            };
-            let mut s = Sol { val: v, cond: vec![], params: vec![n] };
-            if symbolic && maybe_zero(&t) {
-                s.cond.push(zero_rel(Rel::Ne, &t));
-            }
-            (p.clone(), vec![s])
+            (p.clone(), vs)
         }
         Kind::Fun(Fun::Log, a) => {
             // log(u) = t: u = e^t, when t is a value of the principal log:
             // -pi < Im(t) <= pi
-            let mut s = plain(exp(&t));
-            if symbolic {
-                let im = fun1(Fun::ImagPart, &t);
-                s.cond = vec![relation(Rel::Gt, &im, &neg(&pi())), relation(Rel::Le, &im, &pi())];
-            }
+            let im = fun1(Fun::ImagPart, &t);
+            let s = Sol { val: exp(&t), cond: vec![relation(Rel::Gt, &im, &neg(&pi())), relation(Rel::Le, &im, &pi())], params: vec![] };
             (a[0].clone(), vec![s])
         }
         Kind::Pow(b, p) if !depends(p, x) => {
-            // u^p = t: u = t^(1/p); for p = 1/m, when t is a value of the
-            // principal m-th root: -pi/m < arg(t) <= pi/m
-            let v = pow(&t, &recip(p));
-            let mut s = plain(v.clone());
-            if symbolic {
-                let m = p.as_num().and_then(|q| q.as_rat()).filter(|q| q.numer().is_one() && !q.denom().is_one()).map(|q| q.denom().clone());
-                match m {
-                    Some(m) => {
-                        let ar = fun1(Fun::Arg, &t);
-                        let bound = div(&pi(), &big(m));
-                        s.cond = vec![relation(Rel::Gt, &ar, &neg(&bound)), relation(Rel::Le, &ar, &bound)];
+            // u^p = e^(p log u) = t, p = m/q rational: p log u = log t + 2 pi i k,
+            // u = t^(1/p) e^(2 pi i k/p), for each k with Im(log u) in (-pi, pi],
+            // i.e. -pi p < arg(t) + 2 pi k <= pi p (p > 0; u^p = 1/t^-1 for
+            // p < 0): every branch (the review's CSOL-F3 missed all but one),
+            // each with its condition on arg(t) (decided for a number: F5)
+            match p.as_num().and_then(|q| q.as_rat()).cloned() {
+                Some(q) if !q.denom().is_one() => {
+                    use num_traits::{Signed, ToPrimitive};
+                    let (pq, tt) = if q.is_negative() { (-q.clone(), recip(&t)) } else { (q.clone(), t.clone()) };
+                    if q.is_negative() && t.is_zero() {
+                        return vec![];
                     }
-                    _ => s.cond = vec![relation(Rel::Eq, &pow(&v, p), &t)],
+                    let pf = pq.to_f64().unwrap_or(1.0);
+                    let kmax = (pf / 2.0 + 1.0).ceil() as i64;
+                    let pe = num(crate::num::Num::rat(pq.clone()));
+                    let ar = fun1(Fun::Arg, &tt);
+                    let mut vs = vec![];
+                    for kk in -kmax..=kmax {
+                        // -pi p - 2 pi k < arg(t) <= pi p - 2 pi k, within (-pi, pi]
+                        let lo = sub(&neg(&mul2(&pi(), &pe)), &mul(vec![int(2 * kk), pi()]));
+                        let hi = sub(&mul2(&pi(), &pe), &mul(vec![int(2 * kk), pi()]));
+                        let (lof, hif) = (-std::f64::consts::PI * pf - 2.0 * std::f64::consts::PI * kk as f64, std::f64::consts::PI * pf - 2.0 * std::f64::consts::PI * kk as f64);
+                        if hif <= -std::f64::consts::PI || lof >= std::f64::consts::PI {
+                            continue; // empty with arg in (-pi, pi]
+                        }
+                        let v = if kk == 0 {
+                            pow(&tt, &recip(&pe))
+                        } else {
+                            mul2(&pow(&tt, &recip(&pe)), &exp(&div(&mul(vec![int(2 * kk), pi(), i.clone()]), &pe)))
+                        };
+                        let mut cond = vec![];
+                        if lof > -std::f64::consts::PI {
+                            cond.push(relation(Rel::Gt, &ar, &lo));
+                        }
+                        if hif < std::f64::consts::PI {
+                            cond.push(relation(Rel::Le, &ar, &hi));
+                        }
+                        if t.is_zero() && kk != 0 {
+                            continue;
+                        }
+                        vs.push(Sol { val: v, cond, params: vec![] });
+                    }
+                    (b.clone(), vs)
+                }
+                _ => {
+                    // an irrational or symbolic exponent: the principal branch,
+                    // when it is one; the others are not searched, so the
+                    // equation is also reported unresolved
+                    unsolved(e);
+                    let v = pow(&t, &recip(p));
+                    (b.clone(), vec![Sol { val: v.clone(), cond: vec![relation(Rel::Eq, &pow(&v, p), &t)], params: vec![] }])
                 }
             }
-            (b.clone(), vec![s])
         }
         Kind::Fun(f @ (Fun::Asin | Fun::Acos | Fun::Atan), a) => {
             // asin(u) = t: u = sin(t), when asin(sin(t)) = t
@@ -602,11 +686,20 @@ fn invert_c(e: &Expr, x: &str) -> Vec<Sol> {
                 Fun::Acos => (Fun::Acos, fun1(Fun::Cos, &t)),
                 _ => (Fun::Atan, fun1(Fun::Tan, &t)),
             };
-            let mut s = plain(v.clone());
-            if symbolic {
-                s.cond = vec![relation(Rel::Eq, &fun1(fwd, &v), &t)];
-            }
-            (a[0].clone(), vec![s])
+            // for a real number t the principal range: asin [-pi/2, pi/2],
+            // acos [0, pi], atan (-pi/2, pi/2); else the identity itself
+            let real_number = free_symbols(&t).is_empty() && crate::domain::complex_encl(&t).map_or(false, |(_, im)| im.0 == 0.0 && im.1 == 0.0);
+            let h = div(&pi(), &int(2));
+            let cond = if real_number {
+                match fwd {
+                    Fun::Asin => vec![relation(Rel::Ge, &t, &neg(&h)), relation(Rel::Le, &t, &h)],
+                    Fun::Acos => vec![relation(Rel::Ge, &t, &zero()), relation(Rel::Le, &t, &pi())],
+                    _ => vec![relation(Rel::Gt, &t, &neg(&h)), relation(Rel::Lt, &t, &h)],
+                }
+            } else {
+                vec![relation(Rel::Eq, &fun1(fwd, &v), &t)]
+            };
+            (a[0].clone(), vec![Sol { val: v, cond, params: vec![] }])
         }
         _ => {
             unsolved(e);
@@ -664,37 +757,76 @@ fn decide(c: &Expr) -> Option<bool> {
     }
 }
 
-/// Is the candidate a solution where its conditions hold?  Exact residuals
-/// at integer parameter values; with free parameters a candidate without
-/// conditions must not fail at every sample.
-fn holds(z: &Expr, xs: &Expr, s: &Sol) -> bool {
+/// Is the candidate a solution where its conditions hold?  Some(true) or
+/// Some(false) when the residual decides it (exactly, or by an enclosure,
+/// or relative to the terms for an equation with floating-point numbers),
+/// None when it cannot be decided: then the equation is reported
+/// unresolved, so that [] means no solution (the review's recommendation).
+/// A family's values at a few integers check its formula; the family itself
+/// comes from the functions' periods.
+fn holds(z: &Expr, xs: &Expr, s: &Sol) -> Option<bool> {
+    // a family: the integer values where its conditions do not fail (n1 = 2
+    // is excluded by n1 != 2), checked exactly; the family itself comes from
+    // the functions' periods, and these values check its formula
     let samples: Vec<Vec<(Expr, Expr)>> = if s.params.is_empty() {
         vec![vec![]]
     } else {
-        [0i64, 1, -1].iter().map(|&k| s.params.iter().map(|p| (sym(p), int(k))).collect()).collect()
+        let all: Vec<Vec<(Expr, Expr)>> = [0i64, 1, -1, 2, -2, 3, -3].iter().map(|&k| s.params.iter().map(|p| (sym(p), int(k))).collect()).collect();
+        let ok: Vec<Vec<(Expr, Expr)>> = all.into_iter().filter(|sub0| s.cond.iter().all(|c| decide(&subs(c, sub0)) != Some(false))).take(3).collect();
+        if ok.is_empty() {
+            return None;
+        }
+        ok
     };
-    samples.iter().all(|sub0| {
+    let mut verdict = Some(true);
+    for sub0 in &samples {
+        let v = holds_at(z, xs, s, sub0);
+        match v {
+            Some(false) => return Some(false),
+            None => verdict = None,
+            _ => {}
+        }
+    }
+    verdict
+}
+
+fn holds_at(z: &Expr, xs: &Expr, s: &Sol, sub0: &[(Expr, Expr)]) -> Option<bool> {
+    {
         let r = subs(&s.val, sub0);
         let v = crate::err::soft(|| subs(z, &[(xs.clone(), r.clone())]));
         if contains_infinity(&v) {
-            return false;
+            return Some(false);
         }
         let v = subs(&v, sub0);
         if v.is_zero() {
-            return true;
+            return Some(true);
         }
         let sv = crate::simplify::simplify_full(&v);
         if sv.is_zero() {
-            return true;
+            return Some(true);
+        }
+        // an exact number: zero or not, exactly (2 10^-400 is not 0, though
+        // an enclosure in doubles underflows to contain 0: CSOL-F5)
+        if let Some(q) = sv.as_num() {
+            if q.is_exact() {
+                return Some(q.is_zero());
+            }
         }
         if !free_symbols(&sv).is_empty() {
             // the conditions say when; without any, the candidate claims
-            // every parameter value
-            return !s.cond.is_empty() || !nonzero_at_samples(&sv, z, xs, &r);
+            // every parameter value: false when it fails at every sample
+            // (then it is no solution for those values), else undecided
+            if !s.cond.is_empty() {
+                return Some(true);
+            }
+            return if nonzero_at_samples(&sv, z, xs, &r) { Some(false) } else { None };
         }
         if !has_float(z) {
             if let Some((re, im)) = crate::domain::complex_encl(&sv) {
-                return re.contains_zero() && im.contains_zero();
+                // an enclosure excluding 0 proves the residual nonzero; one
+                // holding 0 is numerical agreement only (the residual is a
+                // constant the simplifier did not reduce)
+                return Some(re.contains_zero() && im.contains_zero());
             }
         }
         let terms = match &z.kind {
@@ -702,11 +834,15 @@ fn holds(z: &Expr, xs: &Expr, s: &Sol) -> bool {
             _ => vec![z.clone()],
         };
         let size = terms.iter().filter_map(|t| crate::eval::to_c64(&crate::err::soft(|| subs(t, &[(xs.clone(), r.clone())]))).map(|w| w.0.hypot(w.1))).fold(0.0f64, f64::max);
+        // numerically, relative to the size of the equation's terms (an
+        // unreduced constant residual such as sqrt(2 I) - 1 - I); a residual
+        // that cannot be evaluated is not decided: neither accepted nor
+        // dropped (CSOL-F6)
         match crate::eval::to_c64(&sv) {
-            Some((re, im)) if re.is_finite() && im.is_finite() => re.hypot(im) <= 1e-12 * size,
-            _ => true,
+            Some((re, im)) if re.is_finite() && im.is_finite() && size.is_finite() && size > 0.0 => Some(re.hypot(im) <= 1e-12 * size),
+            _ => None,
         }
-    })
+    }
 }
 
 /// The residual is clearly nonzero at every (real) sample of the parameters.
@@ -752,14 +888,24 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
     let mut sols = roots_c(&n, x);
     let rest: Vec<Expr> = UNSOLVED.with(|u| std::mem::take(&mut *u.borrow_mut()));
     let mut out = vec![];
+    let mut undecided = false;
     for mut s in sols.drain(..) {
-        if !holds(&z, &xs, &s) {
+        // the denominator must not vanish there: a condition, also on the
+        // integer parameters (sin(x)/(x - 2 pi) == 0: n1 != 2; CSOL-F1)
+        let dv = crate::simplify::simplify_rational(&subs(&d, &[(xs.clone(), s.val.clone())]));
+        if maybe_zero(&dv) {
+            s.cond.push(zero_rel(Rel::Ne, &dv));
+        } else if dv.is_zero() {
             continue;
         }
-        // the denominator must not vanish there
-        let dv = crate::simplify::simplify_rational(&subs(&d, &[(xs.clone(), s.val.clone())]));
-        if !free_symbols(&dv).iter().all(|v| s.params.contains(v)) && maybe_zero(&dv) {
-            s.cond.push(zero_rel(Rel::Ne, &dv));
+        // the numerator vanishes there (the denominator is the condition)
+        match holds(&n, &xs, &s) {
+            Some(true) => {}
+            Some(false) => continue,
+            None => {
+                undecided = true;
+                continue;
+            }
         }
         // decided conditions: dropped if true, the solution if one is false
         let mut ok = true;
@@ -798,6 +944,10 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
             }
         })
     });
+    let mut rest = rest;
+    if undecided && !rest.contains(&n) {
+        rest.push(n.clone());
+    }
     out.extend(rest.iter().map(|f| (relation(Rel::Eq, &zero(), f), vec![], vec![])));
     out
 }

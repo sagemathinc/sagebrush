@@ -676,6 +676,12 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
     match (&b.kind, &x.kind) {
         (Kind::Num(nb), Kind::Num(nx)) => return num_pow(nb, nx),
         (Kind::Const(Const::E), Kind::Fun(Fun::Log, a)) if a.len() == 1 => return a[0].clone(),
+        (Kind::Const(Const::E), Kind::Add(v)) if v.iter().any(is_two_pi_i_multiple) => {
+            // e^(u + 2 k pi i) = e^u for integers k (a family's value
+            // e^(log(pi) + 2 pi i) is pi)
+            let rest: Vec<Expr> = v.iter().filter(|t| !is_two_pi_i_multiple(t)).cloned().collect();
+            return pow(b, &add(rest));
+        }
         (Kind::Const(Const::E), Kind::Mul(v)) => {
             // e^(c log u) = u^c for rational c; e^(x log 2) = 2^x (as Sage)
             let logs: Vec<usize> = (0..v.len()).filter(|&i| matches!(&v[i].kind, Kind::Fun(Fun::Log, a) if a.len() == 1)).collect();
@@ -876,6 +882,18 @@ pub fn relation(r: Rel, a: &Expr, b: &Expr) -> Expr {
 // ------------------------------------------------------------------ traversal helpers
 
 /// The symbols in e, sorted by name.
+/// t = 2 k pi i for a nonzero integer k (exactly: c pi with c = 2 k i).
+fn is_two_pi_i_multiple(t: &Expr) -> bool {
+    let Kind::Mul(f) = &t.kind else { return false };
+    if f.len() != 2 || !f[1].is_const(Const::Pi) {
+        return false;
+    }
+    match f[0].as_num() {
+        Some(Num::Exact(re, im)) => re.is_zero() && im.is_integer() && !im.is_zero() && im.to_integer().is_even(),
+        _ => false,
+    }
+}
+
 pub fn free_symbols(e: &Expr) -> Vec<String> {
     let mut out = std::collections::BTreeSet::new();
     fn walk(e: &Expr, out: &mut std::collections::BTreeSet<String>) {

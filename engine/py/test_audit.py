@@ -476,6 +476,16 @@ assert str(solve(sqrt(_y) == -_pa, _y)) == "[x == a^2 if -1/2*pi < arg(-a) <= 1/
 assert str(solve(_pa * _y**2 + _y - 1 == 0, _y)[-1]) == "x == 1 if a == 0" and str(solve(_pa * _y == 1, _y)) == "[x == 1/a if a != 0]"
 assert str(solve(sin(_y) == 0, _y)) == "[x == pi*n1 for integer n1]" and str(solve(_y / (_y - _pa) == 0, _y)) == "[x == 0 if a != 0]"
 assert [str(r) for r in (_pa * _y**2 + _y - 1).roots(_y, multiplicities=False)] == ["-1/2*sqrt(4*a + 1)/a - 1/2/a", "1/2*sqrt(4*a + 1)/a - 1/2/a"]
+# the complete-solve review (CSOL-F1..F12)
+assert str(solve(sin(_y) / (_y - 2 * pi) == 0, _y)) == "[x == pi*n1 for integer n1 if n1 != 2]" and str(solve(sin(_y) / _y == 0, _y)) == "[x == pi*n1 for integer n1 if n1 != 0]"
+assert len(solve(sin(exp(_y)) == 0, _y)) == 1 and str(solve(_pa * _y == 0, _y)) == "[x == 0, x == r1 if a == 0]" and str(solve(SR(0) * _y + _pa == 0, _y)) == "[x == r1 if a == 0]"
+assert len(solve(_y**(SR(3) / 2) == -1, _y)) == 2 and len(solve(_y**(SR(5) / 2) == 1, _y)) == 3
+assert len(solve(_pa**_y == var("b"), _y)) == 3 and solve(sqrt(_y) == -SR("1/10^400"), _y) == [] and solve(tan(_y) == I, _y) == []
+_s = solve(sqrt(_y) == _pa, _y)[0]; assert str(_s.subs(a=2)) == "x == 4" and _s.simplify_full().conditions() == _s.conditions(); raises(ValueError, _s.subs, a=-1)
+raises(ValueError, solve(sin(_y) == 0, _y)[0].subs, n1=QQ(1) / 2); assert str(type(_s).__reduce__(_s)[0](*_s.__reduce__()[1])) == str(_s)
+raises(ValueError, limit, SR("arg(-1 + I*x)"), x=0, dir="-"); raises(NotImplementedError, sin(_y).roots, _y); raises(ValueError, SR(0).roots, _y)
+assume(_y > 0); assert str(solve(sin(_y) == 0, _y)) == "[x == pi*n1 for integer n1 if pi*n1 > 0]"; forget()
+assume(_y, "integer"); raises(NotImplementedError, solve, sin(_y) == 0, _y); forget()
 assume(_y < 0); assert abs(sqrt(_y)).subs(x=-1) == 1; forget()  # R2-SYMALG-F2
 assume(_y > -SR("1/10^400")); assert abs(_y).subs(x=-SR("1/10^401")) == SR("1/10^401"); forget()
 assume(_y, "odd"); assert solve(_y**2 - 4, _y) == []; forget()
