@@ -672,11 +672,11 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
         super::certify::choose_x(n, ld).map(|bx| {
             let more;
             let sp: &[(u64, Vec<(u32, u32)>)] = if bx <= (t_unif as u64).max(2 * x) { &split } else { more = splitting(&o, &dk, &index, bx); &more };
-            super::certify::log_hr_lower(sp, bx, n, r1, r2, w, ld)
-        })
+            super::certify::log_hr_lower_ball(sp, bx, n, r1, r2, w, &dk, 96)
+        }).flatten()
     };
     if debug {
-        eprintln!("  log hR >= {:?} (estimate {:.6}) at {:.1} ms", log_hr_lo, hr_est.ln(), t0.elapsed().as_secs_f64() * 1e3);
+        eprintln!("  log hR >= {:?} (estimate {:.6}) at {:.1} ms", log_hr_lo.as_ref().map(lower_f64), hr_est.ln(), t0.elapsed().as_secs_f64() * 1e3);
     }
     let primorial: BigInt = by_p.keys().map(|&p| BigInt::from(p)).product();
     let fld = Field { o, primorial, log_bound: (bound as f64).ln(), emb, fb, by_p, ngen };
@@ -797,7 +797,7 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
                         }
                         None
                     }
-                    Ok(sel) => try_units(&fld, &rels, &elems, nfb, &dense, &core_rows, c, &sel, r, hr_est, log_hr_lo, round as u64, &mut cache, debug),
+                    Ok(sel) => try_units(&fld, &rels, &elems, nfb, &dense, &core_rows, c, &sel, r, hr_est, log_hr_lo.clone(), round as u64, &mut cache, debug),
                 }
             }
         };
@@ -968,12 +968,14 @@ struct Found {
 }
 
 /// The certificate's condition h* R*_hi < 2 h R_lo in logarithms.
-fn below_twice(log_h: f64, log_r_hi: f64, log_hr_lo: f64) -> bool {
-    log_h + log_r_hi < std::f64::consts::LN_2 + log_hr_lo - 1e-12
+/// The lower end of a ball as a double (for the search's heuristics only).
+pub(crate) fn lower_f64(b: &sagebrush_ball::Ball) -> f64 {
+    let (m, e) = b.lower();
+    sagebrush_ball::Ball::exact(m, e).to_f64_approx()
 }
 
 #[allow(clippy::too_many_arguments)]
-fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], r: usize, hr_est: f64, log_hr_lo: Option<f64>, seed: u64, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>, debug: bool) -> Option<Found> {
+fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], r: usize, hr_est: f64, log_hr_lo: Option<sagebrush_ball::Ball>, seed: u64, cache: &mut Option<(u32, Vec<Vec<BigInt>>)>, debug: bool) -> Option<Found> {
     let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     let group_of = |first_det: Option<BigInt>, enough: f64| -> Option<(BigInt, Vec<BigInt>)> {
@@ -993,9 +995,9 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
             return None;
         }
         // certified: h* (exact determinants) < 2 h, R = 1
-        let cert = log_hr_lo.and_then(|lo| {
-            let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lo.exp(), seed, debug)? };
-            below_twice(super::certify::ln_big(&h2), 0.0, lo).then_some((h2, cyc2))
+        let cert = log_hr_lo.as_ref().and_then(|lo| {
+            let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lower_f64(lo).exp(), seed, debug)? };
+            super::certify::below_twice_ball(&h2, &sagebrush_ball::Ball::one(), lo, 96).then_some((h2, cyc2))
         });
         let certified = cert.is_some();
         let (h, cyc) = cert.unwrap_or((h, cyc));
@@ -1092,7 +1094,7 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
             eprintln!("  h* R* / est {:.4} at {:.1} ms", ratio, ms());
         }
         if ratio <= std::f64::consts::SQRT_2 {
-            let Some(lo) = log_hr_lo else {
+            let Some(lo) = log_hr_lo.as_ref() else {
                 let reg_fixed = &cov >> (prec as usize * (r - 1));
                 return Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 });
             };
@@ -1107,11 +1109,12 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                     return None;
                 };
                 let (rlo, rhi, d, rel) = super::certify::regulator_bounds(&lams, &errs, &basis, prec).map_err(|e| imprecise = e).ok()?;
-                let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lo.exp() / rhi, seed, debug)? };
+                let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lower_f64(lo).exp() / rhi, seed, debug)? };
                 if debug {
-                    eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}), log h* R*_hi {:.6} vs log 2 hR >= {:.6}", rlo, rhi, h2, h, super::certify::ln_big(&h2) + rhi.ln(), std::f64::consts::LN_2 + lo);
+                    eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}), log h* R*_hi {:.6} vs log 2 hR >= {:.6}", rlo, rhi, h2, h, super::certify::ln_big(&h2) + rhi.ln(), std::f64::consts::LN_2 + lower_f64(lo));
                 }
-                below_twice(super::certify::ln_big(&h2), rhi.ln(), lo).then_some((h2, cyc2, rel, d))
+                // (rhi: regulator_bounds' upper end, a double)
+                super::certify::below_twice_ball(&h2, &sagebrush_ball::Ball::from_f64_exact(rhi)?, lo, 96).then_some((h2, cyc2, rel, d))
             })();
             if debug {
                 eprintln!("  certificate {} at {:.1} ms ({:.1} ms)", if cert.is_some() { "holds" } else { "failed" }, ms(), tc.elapsed().as_secs_f64() * 1e3);
@@ -1248,12 +1251,15 @@ mod tests {
             let ld = dk.to_f64().unwrap().abs().ln();
             let x = super::super::certify::choose_x(o.n, ld).unwrap();
             let split = splitting(&o, &dk, &index, x);
-            let lo = super::super::certify::log_hr_lower(&split, x, o.n, emb.r1, emb.r2, w, ld);
+            let lo = super::super::certify::log_hr_lower_ball(&split, x, o.n, emb.r1, emb.r2, w, &dk, 96).unwrap();
+            let lof = lower_f64(&lo);
             let truth = (h as f64 * reg).ln();
-            assert!(lo < truth && truth - lo < 0.25, "{:?}: {} vs {}", f, lo, truth);
-            assert!(below_twice((h as f64).ln(), reg.ln() * (1.0 + 1e-12), lo));
-            assert!(!below_twice((2.0 * h as f64).ln(), reg.ln(), lo));
-            assert!(!below_twice((h as f64).ln(), (2.0 * reg).ln(), lo));
+            assert!(lof < truth && truth - lof < 0.25, "{:?}: {} vs {}", f, lof, truth);
+            let rb = |x: f64| sagebrush_ball::Ball::from_f64_exact(x).unwrap();
+            let bh = |k: u64| BigInt::from(k);
+            assert!(super::super::certify::below_twice_ball(&bh(h), &rb(reg * (1.0 + 1e-12)), &lo, 96));
+            assert!(!super::super::certify::below_twice_ball(&bh(2 * h), &rb(reg), &lo, 96));
+            assert!(!super::super::certify::below_twice_ball(&bh(h), &rb(2.0 * reg), &lo, 96));
         }
     }
 
