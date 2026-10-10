@@ -12,7 +12,7 @@ which also runs in the browser at [sagebrush.space](https://sagebrush.space).
 >>> from sagebrush import nf, mf, ap, poly, linalg
 
 >>> nf.bnf([-11, 0, 0, 1])              # Q[x]/(x^3 - 11): class group, regulator
-{'cyc': [2], 'degree': 3, 'disc': -3267, 'h': 2, 'r1': 1, 'r2': 1, 'regulator': '5.5872066260609077619', 'w': 2}
+{'assumes': ['GRH'], 'certified': True, 'cyc': [2], 'degree': 3, 'disc': -3267, 'h': 2, 'r1': 1, 'r2': 1, 'regulator': '5.5872066260609077619', 'w': 2, 'w_proven': True}
 
 >>> nf.factor_integer(2**128 + 1)       # ECM
 [(59649589127497217, 1), (5704689200685129054721, 1)]
