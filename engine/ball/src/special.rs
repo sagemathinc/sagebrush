@@ -3,7 +3,7 @@
 
 use crate::ball::Ball;
 use crate::complex::CBall;
-use crate::funcs::pi;
+use crate::funcs::{euler_gamma, pi};
 use crate::mag::Mag;
 use num_traits::{One, Zero};
 use sagebrush_bigint::{BigInt, BigRational};
@@ -77,10 +77,13 @@ pub fn li2(x: &Ball, prec: u64) -> Option<Ball> {
     use std::cmp::Ordering::*;
     let wp = prec + 32;
     let one = Ball::one();
-    if x.cmp(&one) == Some(Greater) || x.cmp(&one.neg()) == Some(Less) {
+    // the whole ball in [-1, 1] (a ball reaching beyond is refused, not
+    // clipped: Li2 is complex above 1, the review's BALL-F9)
+    let (um, ue) = x.upper();
+    let (lm0, le0) = x.lower();
+    if !x.is_finite() || crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) == Greater || crate::ball::cmp_dyadic(&lm0, le0, &-BigInt::one(), 0) == Less {
         return None;
     }
-    let (um, ue) = x.upper();
     if crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), -1) != Greater {
         // |w| = |log(1 - x)| <= log 2 on [-1, 1/2]
         let w = one.sub(x, wp).log(wp)?.neg();
@@ -91,9 +94,9 @@ pub fn li2(x: &Ball, prec: u64) -> Option<Ball> {
         return None; // (a ball from below 1/4 to above 1/2)
     }
     let p2 = pi(wp).sqr(wp).div_i64(6, wp);
-    if crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) != Less {
-        // the ball reaches 1: Li2 increases to pi^2/6 there (Li2(1) itself,
-        // for a lower end at 1)
+    if crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) == Equal {
+        // the ball's upper end is 1: Li2 increases to pi^2/6 there (Li2(1)
+        // itself, for a lower end at 1)
         if crate::ball::cmp_dyadic(&lm, le, &BigInt::one(), 0) != Less {
             return Some(p2.rounded(prec));
         }
@@ -107,17 +110,70 @@ pub fn li2(x: &Ball, prec: u64) -> Option<Ball> {
     Some(p2.sub(&prod, wp).sub(&l2y, wp).rounded(prec))
 }
 
-/// Ti2(y) = Im Li2(i y) = sum (-1)^k y^(2k+1) / (2k+1)^2, for y in [0, 1]:
+/// Ti2(y) = Im Li2(i y) = sum (-1)^k y^(2k+1) / (2k+1)^2, for y in [-1, 1]:
 /// w = -log(1 - i y) = -log(1 + y^2)/2 + i atan(y), |w| <= 0.87.
 pub fn ti2(y: &Ball, prec: u64) -> Option<Ball> {
     let wp = prec + 32;
     let one = Ball::one();
-    if y.is_negative() || y.cmp(&one) == Some(std::cmp::Ordering::Greater) {
+    // the whole ball in [-1, 1] (BALL-F9; Ti2 is odd)
+    let (um, ue) = y.upper();
+    let (lm, le) = y.lower();
+    if !y.is_finite() || crate::ball::cmp_dyadic(&um, ue, &BigInt::one(), 0) == std::cmp::Ordering::Greater || crate::ball::cmp_dyadic(&lm, le, &-BigInt::one(), 0) == std::cmp::Ordering::Less {
         return None;
     }
     let re = one.add(&y.sqr(wp), wp).log(wp)?.mul_2exp(-1).neg();
     let im = y.atan(wp);
     Some(li2_from_w(&CBall { re, im }, wp).im.rounded(prec))
+}
+
+/// The exponential integral E_1(x) = int_x^oo e^-t / t dt for a ball x > 0
+/// (None unless certainly positive, or for x > 2^20):
+///   E_1(x) = -gamma - log x + sum_(k>=1) (-1)^(k+1) x^k / (k k!).
+/// Tail: with t_k = x^k / (k k!), t_(k+1)/t_k = x k/(k+1)^2 <= X/(k+1) <= 1/2
+/// for k >= 2X (X >= x), so the terms after t_K (K >= 2X) sum to at most
+/// 2 t_(K+1) <= t_K.  The terms reach about e^x while E_1(x) is about
+/// e^-x / x: 3X + 64 more bits keep it relative.  The input radius adds
+/// r sup |E_1'| = r e^-L / L, L the ball's lower end.
+pub fn e1(x: &Ball, prec: u64) -> Option<Ball> {
+    let prec = prec.min(crate::funcs::PREC_MAX);
+    if !x.is_positive() {
+        return None;
+    }
+    let xu = x.upper_abs();
+    if !xu.le_pow2(20) {
+        return None;
+    }
+    // X: an integer >= x
+    let (um, ue) = x.upper();
+    let xint: u64 = if ue >= 0 { num_traits::ToPrimitive::to_u64(&(um << ue as u64)).unwrap() } else { num_traits::ToPrimitive::to_u64(&((um >> (-ue) as u64) + 1u32)).unwrap() };
+    let wp = prec + 3 * xint + 64;
+    let (m, e) = x.mid();
+    let mx = Ball::exact(m, e);
+    let mut p = Ball::one(); // m^k / k!
+    let mut s = Ball::zero();
+    let goal = Mag::pow2(-(wp as i64));
+    let mut k: u64 = 0;
+    loop {
+        k += 1;
+        p = p.mul(&mx, wp).div_i64(k as i64, wp);
+        let t = p.div_i64(k as i64, wp);
+        s = if k % 2 == 1 { s.add(&t, wp) } else { s.sub(&t, wp) };
+        if k >= 2 * xint {
+            let tb = t.upper_abs();
+            if tb <= goal {
+                s = s.add_error(tb);
+                break;
+            }
+        }
+    }
+    let v = euler_gamma(wp).neg().sub(&mx.log(wp)?, wp).add(&s, wp);
+    if x.is_exact() {
+        return Some(v.rounded(prec));
+    }
+    let (lm, le) = x.lower();
+    let l = Ball::exact(lm, le);
+    let d = l.neg().exp(64)?.div(&l, 64)?.upper_abs();
+    Some(v.add_error(x.rad().mul(d)).rounded(prec))
 }
 
 #[cfg(test)]

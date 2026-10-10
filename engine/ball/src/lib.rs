@@ -12,4 +12,4 @@ pub use ball::{cmp_dyadic, Ball, EXP_MAX, GAP};
 pub use funcs::{catalan, euler_gamma, ln2, pi, PREC_MAX};
 pub use complex::CBall;
 pub use mag::Mag;
-pub use special::{bernoulli, li2, ti2};
+pub use special::{bernoulli, e1, li2, ti2};

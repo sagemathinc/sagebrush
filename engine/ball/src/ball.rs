@@ -471,11 +471,19 @@ impl Ball {
 
     /// (n, err): the integer n nearest self * 2^k's midpoint and an upper
     /// bound for |x 2^k - n| over the ball (fixed point at k bits).
+    /// None for an infinite ball, |k| > EXP_MAX, or a result of more than
+    /// PREC_MAX bits (the review's BALL-F8: e + k overflowed, and a
+    /// trillion-bit shift was attempted).
     pub fn to_fixed(&self, k: i64) -> Option<(BigInt, Mag)> {
-        if !self.is_finite() {
+        if !self.is_finite() || k.unsigned_abs() > EXP_MAX as u64 {
             return None;
         }
-        let e = self.e + k;
+        let e = self.e + k; // (both within +-2^40)
+        let out_bits = if self.m.is_zero() { 0 } else { top(&self.m, e) };
+        let rad_bits = if self.r.is_zero() { 0 } else { self.r.top() + k };
+        if out_bits.max(rad_bits) > crate::funcs::PREC_MAX as i64 {
+            return None;
+        }
         let r = self.r.mul_2exp(k);
         if e >= 0 {
             return Some((&self.m << e as u64, r));
