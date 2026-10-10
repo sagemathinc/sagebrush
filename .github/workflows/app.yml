@@ -72,6 +72,20 @@ jobs:
       - name: self-test (Linux, in a virtual display)
         if: runner.os == 'Linux'
         run: xvfb-run -a node app/selftest/run.mjs ${{ matrix.exe }}
+      # GTK's TIFF loader brings libtiff and libjbig (GPL-2+): removed, and
+      # the stripped AppImage itself self-tested (DIST-F1)
+      - name: strip the TIFF loader from the AppImage
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o /tmp/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          APPIMAGETOOL=/tmp/appimagetool sh app/strip-appimage.sh app/src-tauri/target/release/bundle/appimage/*.AppImage
+      - name: self-test the stripped AppImage
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: xvfb-run -a node app/selftest/run.mjs $(ls app/src-tauri/target/release/bundle/appimage/*.AppImage)
       - name: self-test
         if: runner.os != 'Linux'
         run: node app/selftest/run.mjs ${{ matrix.exe }}
