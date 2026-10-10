@@ -39,6 +39,7 @@ fn cap(prec: u64) -> u64 {
 /// sum_{k>=N} T^(2k+1)/(2k+1) <= T^(2N+1)/((2N+1)(1 - T^2)) <= 2 T^(2N+1)/(2N+1).
 fn odd_series(z: &Ball, wp: u64, alternating: bool) -> Ball {
     let t = z.upper_abs();
+    // (callers reduce first; a wider ball here is a bug, not an input)
     assert!(t.le_pow2(-1), "odd_series: |z| > 1/2");
     if z.m.is_zero() && z.r.is_zero() {
         return Ball::zero();
@@ -186,7 +187,11 @@ fn exp_point(m: &BigInt, e: i64, wp: u64) -> Option<Ball> {
     let r = x.sub(&ln2(wp2).mul_i64(n, wp2), wp2);
     let t = r.mul_2exp(-s);
     let tt = t.upper_abs();
-    // sum_(k<=K) t^k/k!; tail <= 2 T^(K+1)/(K+1)! for T <= 1/2
+    // sum_(k<=K) t^k/k!; tail <= 2 T^(K+1)/(K+1)! for T <= 1/2, checked
+    // here on the reduced ball itself (not inferred from the reduction)
+    if !tt.le_pow2(-1) {
+        return None;
+    }
     let mut sum = Ball::one();
     let mut term = Ball::one();
     let mut tb = Mag::from_u64(1);
@@ -278,10 +283,14 @@ fn log_point(m: &BigInt, e: i64, wp: u64) -> Ball {
 
 // ------------------------------------------------------------------ sin, cos, atan
 
-/// sin r and cos r by their series, |r| <= 1 on the ball; both tails are
-/// at most sum_(j>J) T^j/j! <= 2 T^(J+1)/(J+1)!.
-fn sincos_series(r: &Ball, wp: u64) -> (Ball, Ball) {
+/// sin r and cos r by their series, |r| <= 1 on the ball (checked here:
+/// None otherwise); both tails are at most sum_(j>J) T^j/j! <=
+/// 2 T^(J+1)/(J+1)! (T/(J+2) <= 1/2).
+fn sincos_series(r: &Ball, wp: u64) -> Option<(Ball, Ball)> {
     let tt = r.upper_abs();
+    if !tt.le_pow2(0) {
+        return None;
+    }
     let mut s = r.clone();
     let mut c = Ball::one();
     let mut term = r.clone();
@@ -297,7 +306,7 @@ fn sincos_series(r: &Ball, wp: u64) -> (Ball, Ball) {
         *target = if neg { target.sub(&term, wp) } else { target.add(&term, wp) };
         let tail = tb.mul(tt).div_u64(j + 1).mul_2exp(1);
         if tail <= goal {
-            return (s.add_error(tail), c.add_error(tail));
+            return Some((s.add_error(tail), c.add_error(tail)));
         }
     }
 }
@@ -321,7 +330,7 @@ fn sincos_point(m: &BigInt, e: i64, wp: u64, want: usize) -> Option<(Ball, Ball)
         let q = x.div(&pi(nb + 64).mul_2exp(-1), nb + 64)?;
         let n = round_to_bigint(&q);
         let r = x.sub(&hp.mul(&Ball::from_int(&n), wp2), wp2);
-        let (s, c) = sincos_series(&r, wp2);
+        let (s, c) = sincos_series(&r, wp2)?;
         let quad = n.mod_floor_4();
         let (sx, cx) = match quad {
             0 => (s, c),

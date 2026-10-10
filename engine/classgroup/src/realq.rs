@@ -170,7 +170,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
     let hr_est = absd.sqrt() * l1_estimate(d, ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 16)) / 2.0;
     tm.h_est = hr_est;
     // the certificate's proven lower bound for log h R (GRH; nf/certify.rs)
-    let log_hr_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower(d) };
+    let log_hr_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower_ball(d, 96) };
     let mut tu = tuning(absd.log10(), bound);
     let mut rels: Vec<Relation> = vec![];
     let mut elems: Vec<Elem> = vec![];
@@ -222,7 +222,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
                         }
                         None
                     }
-                    Ok(sel) => try_lattice(&mut cache, d, &rels, &elems, n, tu.pivot_weight, &dense, &core_rows, c, &sel, hr_est, log_hr_lo, round as u64, debug),
+                    Ok(sel) => try_lattice(&mut cache, d, &rels, &elems, n, tu.pivot_weight, &dense, &core_rows, c, &sel, hr_est, log_hr_lo.clone(), round as u64, debug),
                 }
             }
         };
@@ -291,7 +291,7 @@ fn unit_logs(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem]
 /// Units from kernel vectors of the core, the regulator multiple R* they
 /// generate, then h* from the lattice; the answer if h* R* is small enough.
 #[allow(clippy::too_many_arguments)]
-fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], hr_est: f64, log_hr_lo: Option<f64>, seed: u64, debug: bool) -> Option<RealQuadratic> {
+fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Elem], n: usize, pivot_weight: usize, dense: &[Vec<i64>], core_rows: &[usize], c: usize, sel: &[usize], hr_est: f64, log_hr_lo: Option<sagebrush_ball::Ball>, seed: u64, debug: bool) -> Option<RealQuadratic> {
     let t = crate::clock::Instant::now();
     let ms = || t.elapsed().as_secs_f64() * 1e3;
     let in_sel: std::collections::HashSet<usize> = sel.iter().cloned().collect();
@@ -384,7 +384,7 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
             // the certificate: a genuine unit with a proven error bound, an
             // exact multiple of h, h* R*_hi < 2 h R_lo
             let mut imprecise = false;
-            let cert = log_hr_lo.and_then(|lo| {
+            let cert = log_hr_lo.as_ref().and_then(|lo| {
                 let Some((lams, errs)) = unit_logs_bounded(d, rels, elems, n, pivot_weight, dense, core_rows, sel, &batches, prec) else {
                     if debug { eprintln!("  certificate: no bounded unit logarithms"); }
                     return None;
@@ -399,8 +399,9 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
                 };
                 // R = |b| / 2 (b is twice the log of the unit)
                 let (rlo, rhi) = (to_f64(&blo, prec) / 2.0, to_f64(&bhi, prec) / 2.0 * (1.0 + 1e-14));
-                let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lo.exp() / rhi, seed, debug)? };
-                let ok = crate::nf::certify::ln_big(&h2) + rhi.ln() < std::f64::consts::LN_2 + lo - 1e-12;
+                let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * crate::nf::bnf::lower_f64(lo).exp() / rhi, seed, debug)? };
+                // (rhi: from |b| + e, a double rounded up; on balls next)
+                let ok = crate::nf::certify::below_twice_ball(&h2, &sagebrush_ball::Ball::from_f64_exact(rhi)?, lo, 96);
                 if debug {
                     eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}): {}", rlo, rhi, h2, h, if ok { "holds" } else { "failed" });
                 }

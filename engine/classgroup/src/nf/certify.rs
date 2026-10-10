@@ -216,6 +216,120 @@ pub fn quadratic_split(d: &BigInt, x: u64) -> Vec<(u64, Vec<(u32, u32)>)> {
     }).collect()
 }
 
+// ------------------------------------------------------------------ on balls
+//
+// The same bound with sagebrush-ball: every logarithm, square root and the
+// sums enclosed, Theorem 1's E(X) evaluated as a ball (no floating-point
+// margins: the systematic review's R2-CLG-F2).
+
+use sagebrush_ball::{pi, Ball};
+
+/// B_K(Y) on balls.
+fn b_k_ball(split: &[(u64, Vec<(u32, u32)>)], y: u64, prec: u64) -> Option<Ball> {
+    let yb = Ball::from_i64(y as i64);
+    let sy = yb.sqrt(prec)?.mul(&yb.log(prec)?, prec);
+    let mut sum = Ball::zero();
+    let mut sq_cache: std::collections::HashMap<u128, Ball> = std::collections::HashMap::new();
+    for (p, degs) in split {
+        if *p >= y {
+            break;
+        }
+        let lp = Ball::from_i64(*p as i64).log(prec)?;
+        let powers = |f: u32| -> Vec<(u128, u32)> {
+            let mut out = vec![];
+            let mut m = 1u32;
+            while let Some(q) = (*p as u128).checked_pow(f * m) {
+                if q >= y as u128 {
+                    break;
+                }
+                out.push((q, m));
+                m += 1;
+            }
+            out
+        };
+        let mut add = |q: u128, ln_n: &Ball, m: u32, sign: i64| -> Option<()> {
+            let sq = match sq_cache.get(&q) {
+                Some(b) => b.clone(),
+                None => {
+                    let b = Ball::from_int(&BigInt::from(q)).sqrt(prec)?;
+                    sq_cache.insert(q, b.clone());
+                    b
+                }
+            };
+            // ln_n / sqrt(q) (sy / (sqrt(q) m ln_n) - 1)
+            let inner = sy.div(&sq.mul(ln_n, prec).mul_i64(m as i64, prec), prec)?.sub(&Ball::one(), prec);
+            let t = ln_n.div(&sq, prec)?.mul(&inner, prec);
+            sum = sum.add(&t.mul_i64(sign, prec), prec);
+            Some(())
+        };
+        for &(f, _) in degs {
+            let ln_n = lp.mul_i64(f as i64, prec);
+            for (q, m) in powers(f) {
+                add(q, &ln_n, m, 1)?;
+            }
+        }
+        for (q, m) in powers(1) {
+            add(q, &lp, m, -1)?;
+        }
+    }
+    Some(sum)
+}
+
+/// E(X) of Theorem 1 as a ball (its constants are the paper's, exact
+/// decimals here).
+fn bf_error_ball(x: u64, n: usize, ld: &Ball, prec: u64) -> Option<Ball> {
+    let q = |a: i64, b: i64| Ball::from_rational(&BigInt::from(a), &BigInt::from(b), prec);
+    let xb = Ball::from_i64(x as i64);
+    let sx = xb.sqrt(prec)?;
+    let one = Ball::one();
+    let a = one.add(&q(388, 100).div(&q(x as i64, 9).log(prec)?, prec)?, prec)
+        .mul(&one.add(&Ball::from_i64(2).div(&ld.sqrt(prec)?, prec)?, prec).sqr(prec), prec);
+    let b = q(426, 100).mul_i64(n as i64 - 1, prec).div(&sx.mul(ld, prec), prec)?;
+    let lead = q(2324, 1000).mul(ld, prec).div(&sx.mul(&xb.mul_i64(3, prec).log(prec)?, prec), prec)?;
+    Some(lead.mul(&a.add(&b, prec), prec))
+}
+
+/// A ball whose lower end is a proven lower bound for log h R under GRH
+/// (Theorem 1 at X, as log_hr_lower), for the field of discriminant disc.
+pub fn log_hr_lower_ball(split: &[(u64, Vec<(u32, u32)>)], x: u64, n: usize, r1: usize, r2: usize, w: u32, disc: &BigInt, prec: u64) -> Option<Ball> {
+    assert!(n > 1 && x >= 69 && x % 9 == 0);
+    let ld = Ball::from_int(&disc.abs()).log(prec)?;
+    let b1 = b_k_ball(split, x, prec)?;
+    let b2 = b_k_ball(split, x / 9, prec)?;
+    let xb = Ball::from_i64(x as i64);
+    let scale = Ball::from_i64(3).div(&xb.sqrt(prec)?.mul(&xb.mul_i64(3, prec).log(prec)?, prec).mul_2exp(1), prec)?;
+    let f = scale.mul(&b1.sub(&b2, prec), prec);
+    let e = bf_error_ball(x, n, &ld, prec)?;
+    // h R = kappa w sqrt(Delta) / (2^r1 (2 pi)^r2)
+    let two_pi_log = pi(prec).mul_2exp(1).log(prec)?;
+    let rest = Ball::from_i64(w as i64).log(prec)?
+        .add(&ld.mul_2exp(-1), prec)
+        .sub(&sagebrush_ball::ln2(prec).mul_i64(r1 as i64, prec), prec)
+        .sub(&two_pi_log.mul_i64(r2 as i64, prec), prec);
+    // log kappa >= f - E: the ball f - E + rest has a lower end below it
+    Some(f.sub(&e, prec).add(&rest, prec))
+}
+
+/// Whether h R_hi < 2 h R_lo is certain: log h + log R_hi < log 2 + log hR_lo,
+/// h an integer, r_hi a ball whose upper end bounds the regulator, lo a ball
+/// whose lower end bounds log h R.
+pub fn below_twice_ball(h: &BigInt, r_hi: &Ball, lo: &Ball, prec: u64) -> bool {
+    let (Some(lh), Some(lr)) = (Ball::from_int(h).log(prec), r_hi.log(prec)) else { return false };
+    // the worst case of each: lo at its lower end, R and h at their upper
+    let (lom, loe) = lo.lower();
+    let (lru, lrue) = lr.upper();
+    let d = sagebrush_ball::ln2(prec).add(&Ball::exact(lom, loe), prec).sub(&lh, prec).sub(&Ball::exact(lru, lrue), prec);
+    d.is_positive()
+}
+
+/// quadratic_log_hr_lower on balls.
+pub fn quadratic_log_hr_lower_ball(d: &BigInt, prec: u64) -> Option<Ball> {
+    let ld = to_f64(&d.abs(), 0).ln();
+    let x = choose_x(2, ld)?;
+    let (r1, r2) = if d.is_positive() { (2, 0) } else { (0, 1) };
+    log_hr_lower_ball(&quadratic_split(d, x), x, 2, r1, r2, 2, d, prec)
+}
+
 /// The lower bound for log h R of the quadratic field of discriminant d
 /// (w = 2 is a lower bound for the number of roots of unity), or None if
 /// Theorem 1 cannot make the error small enough.
@@ -286,5 +400,27 @@ mod tests {
         let e2 = bf_error(9.0 * 4096.0, 4, 23.0);
         assert!(e1 > e2 && e2 < 0.2, "{} {}", e1, e2);
         assert!(choose_x(4, 23.0).is_some());
+    }
+}
+
+#[cfg(test)]
+mod ball_tests {
+    use super::*;
+
+    /// The ball bound agrees with the f64 one (which carried margins) to
+    /// about 1e-9, and costs little; timing printed.
+    #[test]
+    fn log_hr_lower_ball_matches() {
+        for d in [-23i64, -4027, 5, 1009, -1000003, 10007 * 4] {
+            let db = BigInt::from(d);
+            let t = std::time::Instant::now();
+            let b = quadratic_log_hr_lower_ball(&db, 96).unwrap();
+            let el = t.elapsed().as_secs_f64() * 1e3;
+            let f = quadratic_log_hr_lower(&db).unwrap();
+            let (lm, le) = b.lower();
+            let lo = Ball::exact(lm, le).to_f64_approx();
+            eprintln!("d {}: ball lower {:.12} f64 {:.12} (radius {:.2e}) in {:.1} ms", d, lo, f, b.rad_f64_approx(), el);
+            assert!((lo - f).abs() < 1e-6 * (1.0 + f.abs()), "{} vs {}", lo, f);
+        }
     }
 }
