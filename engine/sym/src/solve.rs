@@ -22,20 +22,56 @@ fn eq(x: &Expr, v: &Expr) -> Expr {
     relation(Rel::Eq, x, v)
 }
 
-/// Solutions of one equation in x, as x == value relations.
+thread_local! {
+    /// The factors whose roots were not found (returned as 0 == f, as Sage does).
+    static UNSOLVED: std::cell::RefCell<Vec<Expr>> = const { std::cell::RefCell::new(vec![]) };
+}
+
+fn unsolved(f: &Expr) {
+    UNSOLVED.with(|u| u.borrow_mut().push(f.clone()));
+}
+
+/// Solutions of one equation in x, as x == value relations, followed by
+/// 0 == f for each factor f whose roots were not found (so a partial
+/// answer is never mistaken for the whole solution set).  An identity
+/// gives x == r1 with a new symbol r1.
 pub fn solve1(e: &Expr, x: &str) -> Vec<Expr> {
     let xs = sym(x);
     let z = as_zero(e);
     let (n, _d) = together(&z);
     let n = crate::expand::expand(&n);
+    if n.is_zero() || crate::simplify::simplify_full(&n).is_zero() {
+        let used = free_symbols(&z);
+        let r = (1..).map(|i| format!("r{}", i)).find(|r| r != x && !used.contains(r)).unwrap();
+        return vec![eq(&xs, &sym(&r))];
+    }
+    UNSOLVED.with(|u| u.borrow_mut().clear());
     let mut roots = roots_of(&n, x);
-    // drop roots of the denominator (they are not solutions)
+    let rest: Vec<Expr> = UNSOLVED.with(|u| std::mem::take(&mut *u.borrow_mut()));
+    // drop roots of the denominator, and candidates (principal values of
+    // inverse functions) that do not satisfy the equation: a constant
+    // residual that is not zero (sqrt(1) = 1 != -1, asin(0) = 0 != pi,
+    // log(e^(4 I)) = (4 - 2 pi) I)
     roots.retain(|r| {
         let v = crate::err::soft(|| subs(&z, &[(xs.clone(), r.clone())]));
-        !contains_infinity(&v)
+        if contains_infinity(&v) {
+            return false;
+        }
+        if !free_symbols(&v).is_empty() || v.is_zero() || crate::simplify::simplify_full(&v).is_zero() {
+            return true;
+        }
+        match crate::eval::to_c64(&v) {
+            Some((re, im)) if re.is_finite() && im.is_finite() => {
+                let scale = 1.0 + crate::eval::to_c64(r).map_or(0.0, |w| w.0.hypot(w.1));
+                re.hypot(im) <= 1e-9 * scale
+            }
+            _ => true,
+        }
     });
     sort_roots(&mut roots);
-    roots.into_iter().map(|r| eq(&xs, &r)).collect()
+    let mut out: Vec<Expr> = roots.into_iter().map(|r| eq(&xs, &r)).collect();
+    out.extend(rest.iter().map(|f| relation(Rel::Eq, &zero(), f)));
+    out
 }
 
 fn contains_infinity(e: &Expr) -> bool {
@@ -76,7 +112,11 @@ fn roots_of(n: &Expr, x: &str) -> Vec<Expr> {
     let f = if matches!(f.kind, Kind::Mul(_) | Kind::Pow(..)) { n.clone() } else { f };
     if let Some(c) = coeffs(&f, x) {
         if c.iter().all(|a| !depends(a, x)) {
-            return poly_roots(&c);
+            let r = poly_roots(&c);
+            if r.is_empty() && c.len() > 2 {
+                unsolved(&f);
+            }
+            return r;
         }
     }
     invert(&f, x)
@@ -97,13 +137,14 @@ fn poly_roots(c: &[Expr]) -> Vec<Expr> {
             ]
         }
         _ => {
-            // x^n = c (binomial)
+            // x^n = r (binomial): r^(1/n) e^(2 pi i k/n), k = 0, ..., n - 1
             let n = c.len() - 1;
-            if c[1..n].iter().all(|t| t.is_zero()) {
+            if c[1..n].iter().all(|t| t.is_zero()) && !c[0].is_zero() {
                 let r = neg(&div(&c[0], &c[n]));
-                if n % 2 == 1 {
-                    return vec![pow(&r, &rat(1, n as i64))];
-                }
+                let root = pow(&r, &rat(1, n as i64));
+                return (0..n as i64)
+                    .map(|k| if k == 0 { root.clone() } else { mul2(&root, &exp(&mul(vec![rat(2 * k, n as i64), pi(), num(crate::num::Num::i())]))) })
+                    .collect();
             }
             not_solved()
         }
@@ -139,7 +180,10 @@ fn invert(e: &Expr, x: &str) -> Vec<Expr> {
         Kind::Pow(b, p) if b.is_const(Const::E) => (p.clone(), log(&target)),
         Kind::Pow(b, p) if !depends(b, x) => (p.clone(), div(&log(&target), &log(b))),
         Kind::Pow(b, p) if !depends(p, x) => (b.clone(), pow(&target, &recip(p))),
-        _ => return vec![],
+        _ => {
+            unsolved(e);
+            return vec![];
+        }
     };
     if inner.as_sym() == Some(x) {
         return vec![val];
@@ -154,6 +198,8 @@ pub fn solve(eqs: &[Expr], vars: &[String]) -> Vec<Vec<Expr>> {
         return solve1(&eqs[0], &vars[0]).into_iter().map(|r| vec![r]).collect();
     }
     match linear_system(eqs, vars) {
+        // an inconsistent system has no solutions (not one empty solution)
+        Some(sol) if sol.is_empty() => vec![],
         Some(sol) => vec![sol],
         None => value_error("solve: only linear systems are supported for several equations"),
     }

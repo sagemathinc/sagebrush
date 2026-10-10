@@ -207,7 +207,10 @@ the engines.
   substitution, parts, exact partial fractions (Hermite and
   Rothstein–Trager), trigonometric powers, square roots of quadratics and
   the Weierstrass substitution.
-  - Every answer is checked by differentiating it.
+  - Every answer is checked by differentiating it: exactly when the
+    difference simplifies to 0, otherwise numerically at sample points
+    (relative tolerance). The numerical check is strong evidence, not a
+    proof.
   - On a corpus of 171 first-year integrals it finds 166; Maxima, what Sage
     calls, finds 170, including two non-elementary integrals we leave
     unevaluated. 152 of ours print exactly as Sage prints Maxima's answers.
@@ -222,7 +225,10 @@ the engines.
     coefficients (undetermined coefficients, variation of parameters) or
     of Cauchy–Euler type, with initial conditions. It solves all 37
     equations of `corpus/odes.json`, and every explicit solution is
-    verified by substitution.
+    verified by substitution (exactly, or numerically at sample points with
+    the constants given values: evidence, not a proof). Separation of
+    variables does not list equilibrium solutions, except when an initial
+    condition is one.
   - `desolve_rk4` integrates numerically.
 - **Permutation groups** (engine/group, the start of Galois groups):
   Sage's `PermutationGroup`, `SymmetricGroup`, `AlternatingGroup`,

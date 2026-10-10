@@ -1301,7 +1301,7 @@ impl<'a> Ctx<'a> {
                     return None;
                 }
             }
-            let t = sym("__w_t");
+            let t = sym(&crate::expr::fresh("__w_t", &free_symbols(&g)));
             g = subs(&g, &[(base.clone(), t.clone())]);
             g = to_sin_cos(&multiple_angles_all(&g, &t), &t);
             rewritten = subs(&g, &[(t, base.clone())]);

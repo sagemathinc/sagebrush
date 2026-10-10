@@ -881,6 +881,16 @@ pub fn free_symbols(e: &Expr) -> Vec<String> {
             Kind::Sym(s) => {
                 out.insert(s.to_string());
             }
+            // integrate(f, t, a, b) binds t in f
+            Kind::Fun(Fun::Integral, a) if a.len() == 4 && a[1].as_sym().is_some() => {
+                let t = a[1].as_sym().unwrap();
+                let mut inner = std::collections::BTreeSet::new();
+                walk(&a[0], &mut inner);
+                inner.remove(t);
+                out.extend(inner);
+                walk(&a[2], out);
+                walk(&a[3], out);
+            }
             _ => {
                 for c in e.children() {
                     walk(&c, out);
@@ -908,7 +918,37 @@ pub fn subs(e: &Expr, rules: &[(Expr, Expr)]) -> Expr {
             return v.clone();
         }
     }
+    // integrate(f, t, a, b): t is bound in f; rename it when a replacement
+    // mentions it (no capture), and never substitute for it
+    if let Kind::Fun(Fun::Integral, a) = &e.kind {
+        if a.len() == 4 {
+            if let Some(t) = a[1].as_sym() {
+                let inner: Vec<(Expr, Expr)> = rules.iter().filter(|(k, _)| k.as_sym() != Some(t)).cloned().collect();
+                let (f, tv) = if inner.iter().any(|(_, v)| free_symbols(v).iter().any(|s| s == t)) {
+                    let mut avoid = free_symbols(&a[0]);
+                    for (k, v) in &inner {
+                        avoid.extend(free_symbols(k));
+                        avoid.extend(free_symbols(v));
+                    }
+                    let u = sym(&fresh(t, &avoid));
+                    (subs(&a[0], &[(a[1].clone(), u.clone())]), u)
+                } else {
+                    (a[0].clone(), a[1].clone())
+                };
+                return fun(Fun::Integral, vec![subs(&f, &inner), tv, subs(&a[2], rules), subs(&a[3], rules)]);
+            }
+        }
+    }
     map(e, &mut |c| subs(c, rules))
+}
+
+/// A symbol name based on `base` that is not in `avoid` (for temporaries
+/// and renamed bound variables: never capture a user's symbol).
+pub fn fresh(base: &str, avoid: &[String]) -> String {
+    if !avoid.iter().any(|s| s == base) {
+        return base.to_string();
+    }
+    (1..).map(|i| format!("{}{}", base, i)).find(|n| !avoid.iter().any(|s| s == n)).unwrap()
 }
 
 /// The numerator and denominator (negative powers), as Sage's

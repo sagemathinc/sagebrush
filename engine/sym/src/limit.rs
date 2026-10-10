@@ -644,7 +644,10 @@ fn signed_infinity(n: &Expr, d: &Expr, x: &str, a: &Expr, dir: Dir, _ln: &Expr) 
 /// The limit from the leading term of the expansion at a.
 fn series_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Option<Expr>> {
     let xs = sym(x);
-    let t = sym("__limit_t");
+    let mut avoid = free_symbols(e);
+    avoid.extend(free_symbols(a));
+    let tn = fresh("__limit_t", &avoid);
+    let t = sym(&tn);
     let (shifted, dir) = if a.is_const(Const::Infinity) {
         (subs(e, &[(xs.clone(), recip(&t))]), Dir::Plus)
     } else if a.is_const(Const::MinusInfinity) {
@@ -652,12 +655,12 @@ fn series_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Option<Expr>> {
     } else {
         (subs(e, &[(xs.clone(), add2(a, &t))]), dir)
     };
-    let s = series(&shifted, "__limit_t", 4)?;
+    let s = if dir == Dir::Plus { crate::series::series_right(&shifted, &tn, 4)? } else { series(&shifted, &tn, 4)? };
     if s.c.is_empty() {
         return Ok(Some(zero()));
     }
     let c0 = s.c[0].clone();
-    if depends(&c0, "__limit_t") || has_infinity(&c0) {
+    if depends(&c0, &tn) || has_infinity(&c0) {
         return Ok(None);
     }
     if s.v > 0 {

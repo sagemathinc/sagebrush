@@ -19,7 +19,46 @@ const Y2: &str = "__ode_y2";
 
 /// Solve de (an equation or an expression = 0) for the function y of x.
 /// ics: [x0, y0] or [x0, y0, y'(x0)].
+///
+/// A user's symbol that is also an internal name (__ode_y, _C, ...) is
+/// renamed for the computation, and a generated constant that would
+/// coincide with it gets another name (_C1, ...): no capture.
 pub fn desolve(de: &Expr, y: &str, x: &str, ics: &[Expr]) -> Expr {
+    let reserved = |s: &str| s.starts_with("__ode") || s == "_C" || s == "_K1" || s == "_K2";
+    let mut names = free_symbols(de);
+    for e in ics {
+        names.extend(free_symbols(e));
+    }
+    names.push(x.to_string());
+    let clashes: Vec<String> = names.iter().filter(|s| reserved(s)).cloned().collect();
+    if clashes.is_empty() {
+        return desolve_inner(de, y, x, ics);
+    }
+    let mut avoid = names.clone();
+    let mut fwd = vec![];
+    let mut back = vec![];
+    for c in &clashes {
+        let t = fresh("u", &avoid);
+        avoid.push(t.clone());
+        fwd.push((sym(c), sym(&t)));
+        back.push((sym(&t), sym(c)));
+    }
+    let de2 = subs(de, &fwd);
+    let ics2: Vec<Expr> = ics.iter().map(|e| subs(e, &fwd)).collect();
+    let sol = desolve_inner(&de2, y, x, &ics2);
+    // generated constants that coincide with a user's symbol: rename them
+    let mut gen = vec![];
+    for k in ["_C", "_K1", "_K2"] {
+        if clashes.iter().any(|c| c == k) {
+            let t = fresh(k, &avoid);
+            avoid.push(t.clone());
+            gen.push((sym(k), sym(&t)));
+        }
+    }
+    subs(&subs(&sol, &gen), &back)
+}
+
+fn desolve_inner(de: &Expr, y: &str, x: &str, ics: &[Expr]) -> Expr {
     let f = match &de.kind {
         Kind::Rel(Rel::Eq, a, b) => sub(a, b),
         Kind::Rel(..) => value_error("desolve: an equation (==) is needed"),
@@ -30,6 +69,22 @@ pub fn desolve(de: &Expr, y: &str, x: &str, ics: &[Expr]) -> Expr {
         not_implemented("desolve: the function appears with other arguments");
     }
     let yx = fun(Fun::User(y.into()), vec![sym(x)]);
+    if order >= 1 && !ics.is_empty() && ics.len() != order + 1 {
+        value_error(if order == 1 { "desolve: ics must be [x0, y0]" } else { "desolve: ics must be [x0, y0, y'(x0)]" });
+    }
+    // y(x0) = y0 at an equilibrium (y' = G(x, y) with G(x, y0) = 0 for all
+    // x): the constant y0, which separation (dividing by G's factor in y)
+    // would lose
+    if order == 1 && ics.len() == 2 && free_symbols(&ics[1]).is_empty() {
+        if let Some(cs) = crate::poly::coeffs(&g, Y1) {
+            if cs.len() == 2 {
+                let at = |t: &Expr| simplify_full(&subs(t, &[(sym(Y0), ics[1].clone())]));
+                if at(&cs[0]).is_zero() && !at(&cs[1]).is_zero() && solves(&g, &ics[1], x) {
+                    return subs(&ics[1], &[(sym(Y0), yx)]);
+                }
+            }
+        }
+    }
     let sol = match order {
         1 => first_order(&g, x),
         2 => second_order(&g, x),

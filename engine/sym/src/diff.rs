@@ -89,6 +89,24 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
             let num = sub(&mul2(u, &diff(y, x)), &mul2(y, &diff(u, x)));
             return div(&num, &add2(&pow(u, &int(2)), &pow(y, &int(2))));
         }
+        // d/dx integrate(f, t, a, b) (t bound): Leibniz's rule
+        Fun::Integral if a.len() == 4 && a[1].as_sym().is_some() => {
+            let t = a[1].as_sym().unwrap();
+            let inner = if t == x { zero() } else { diff(&a[0], x) };
+            let at = |v: &Expr| subs(&a[0], &[(a[1].clone(), v.clone())]);
+            let (da, db) = (diff(&a[2], x), diff(&a[3], x));
+            let mut terms = vec![];
+            if !inner.is_zero() {
+                terms.push(fun(Fun::Integral, vec![inner, a[1].clone(), a[2].clone(), a[3].clone()]));
+            }
+            if !db.is_zero() {
+                terms.push(mul2(&at(&a[3]), &db));
+            }
+            if !da.is_zero() {
+                terms.push(neg(&mul2(&at(&a[2]), &da)));
+            }
+            return add(terms);
+        }
         Fun::Binomial | Fun::Integral | Fun::Limit => {
             if !a.iter().any(|t| depends(t, x)) {
                 return zero();
