@@ -555,3 +555,7 @@ from sagebrush.sage import CartanType, CartanMatrix
 _C = CartanType(CartanMatrix([[2, 0], [0, 2]])); assert not _C.is_irreducible() and _C.is_reducible() and dict(_C.symmetrizer()) == {0: 1, 1: 1}
 raises(TypeError, CartanMatrix, [[2, Fraction(-3, 2)], [Fraction(-3, 2), 2]]); raises(ValueError, CartanMatrix, [[2, -1], [0, 2]])
 print("cartan ok")
+
+_R, _S = PolynomialRing(QQ, "x,y"), PolynomialRing(QQ, "y,x"); _a = _R.gen(0) * _R.gen(1); _b = _S.gen(1) * _S.gen(0)
+assert _a == _b and hash(_a) == hash(_b) == hash(SR("x*y")) and len({_a, _b}) == 1  # R2-API-F1 (variable order)
+print("hash order ok")
