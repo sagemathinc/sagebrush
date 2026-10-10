@@ -240,3 +240,16 @@ assert str(QQbar(I).n(prec=100)).endswith("*I")
 _e = RIF(10**100*(exp(QQ(1)/10**100) - 1))
 assert _e.lower() <= 1 <= _e.upper()
 print("roots ok")
+# systematic review EC-F1..F13
+from sagebrush.sage import EllipticCurve
+_E = EllipticCurve("988b1")
+assert str(_E.gens(proof=True)) in ("[(18309 : -2476099 : 1)]", "[(18309 : 2476099 : 1)]")
+_E = EllipticCurve("43a1"); _P = _E(QQ(0), QQ(0))
+assert _E.saturation([2*_P])[1] == 2
+_r = 467203
+assert EllipticCurve([0, 0, 0, -3*_r*_r + 1, 2*_r**3 - _r]).CPS_height_bound() >= 13.0545
+_E9 = EllipticCurve([0, 1, 1, -3145717, -2148521298]); _E9.two_descent(algorithm="quartic")
+assert _E9.rank_bounds()[1] >= 2
+assert EllipticCurve("37a1").ap(2) == EllipticCurve([0, 0, 8, -16, 0]).ap(2) == -2
+assert EllipticCurve([1, 2, 3, 4, 5]).is_minimal()
+print("elliptic ok")

@@ -991,7 +991,11 @@ def selmer(a, verbose=False):
     def in_A(b):
         """Is b (with even valuations off S) in the span found (characters)?"""
         return _reduce(char_vec(b), cbasis) == 0
-    return {"dim": len(sel_e), "elements": sel_e, "gens": gens, "dim_A": dim_A, "S": S,
+    # (the class group's own status: certified under GRH, or assuming also
+    # the stopping rule's estimate; dropped before, the systematic review's
+    # EC-F11)
+    return {"assumes": list(d.get("assumes", ["GRH"])), "certified": bool(d.get("certified", False)),
+            "dim": len(sel_e), "elements": sel_e, "gens": gens, "dim_A": dim_A, "S": S,
             "class_group": d["cyc"], "A": A, "B": B, "in_A": in_A, "fb": fb, "rels": rels,
             "char_vec": char_vec, "chosen": chosen, "places": places, "rows": rows}
 
