@@ -1265,8 +1265,9 @@ async function selftest(path) {
     check("ran it: Sage and the engines", out.includes("274177 * 67280421310721"), JSON.stringify(out.slice(0, 300)));
     check("Python read a file in the notebook's folder", out.includes("from-disk 5,6"));
     check("3D graphics", !!document.querySelector("figure.plot3d"));
-    await new Promise((r) => setTimeout(r, 1500));
-    const written = await TAURI.fs.readTextFile(diskFile.dir + diskFile.sep + "written-by-python.txt").catch(() => null);
+    // (written back asynchronously: slower machines take more than a second)
+    let written = null;
+    await until(async () => (written = await TAURI.fs.readTextFile(diskFile.dir + diskFile.sep + "written-by-python.txt").catch(() => null)) === "hello from Python", 20000);
     check("what Python wrote is in the notebook's folder", written === "hello from Python", JSON.stringify(written));
     // Stop: KeyboardInterrupt in a running loop, keeping the variables
     const exec = (code) => new Promise((resolve) => {
