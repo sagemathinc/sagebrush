@@ -360,12 +360,16 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             if let Some(r) = x.as_rat() {
                 return Some(big(if *f == Fun::Floor { r.floor().to_integer() } else { r.ceil().to_integer() }));
             }
-            // a real constant (pi, sqrt(2)): numerically, with a safety margin
-            if crate::expr::free_symbols(x).is_empty() {
-                let v = crate::eval::to_f64(x)?;
-                let r = if *f == Fun::Floor { v.floor() } else { v.ceil() };
-                if (v - v.round()).abs() > 1e-9 {
-                    return Some(big(BigInt::from(r as i64)));
+            // a real constant (pi, sqrt(2)): from a certified enclosure
+            // whose ends have the same floor (ceiling)
+            if crate::expr::free_symbols(x).is_empty() && crate::domain::real_const(x) {
+                let i = crate::interval::encl(x)?;
+                if !(i.0.is_finite() && i.1.is_finite() && i.0.abs() < 4.0e15 && i.1.abs() < 4.0e15) {
+                    return None;
+                }
+                let (a, b) = if *f == Fun::Floor { (i.0.floor(), i.1.floor()) } else { (i.0.ceil(), i.1.ceil()) };
+                if a == b {
+                    return Some(big(BigInt::from(a as i64)));
                 }
             }
             None

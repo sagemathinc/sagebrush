@@ -54,11 +54,12 @@ pub fn desolve(de: &Expr, y: &str, x: &str, ics: &[Expr]) -> Expr {
 fn solves(g: &Expr, sol: &Expr, x: &str) -> bool {
     let d1 = diff(sol, x);
     let d2 = diff(&d1, x);
-    let r = subs(g, &[(sym(Y0), sol.clone()), (sym(Y1), d1), (sym(Y2), d2)]);
+    let r = subs(g, &[(sym(Y0), sol.clone()), (sym(Y1), d1.clone()), (sym(Y2), d2.clone())]);
     if r.is_zero() || simplify_full(&r).is_zero() {
         return true;
     }
     let mut checked = 0;
+    let g0 = subs(g, &[(sym(Y0), zero()), (sym(Y1), zero()), (sym(Y2), zero())]);
     for p in [0.37, 1.13, 2.71, 0.61] {
         let env = |s: &str| -> Option<(f64, f64)> {
             match s {
@@ -72,7 +73,11 @@ fn solves(g: &Expr, sol: &Expr, x: &str) -> bool {
         if !v.0.is_finite() || !v.1.is_finite() {
             continue;
         }
-        if v.0.hypot(v.1) > 1e-8 {
+        // relative to the solution and its derivatives (and the equation's
+        // other terms through g(x, 0, 0, 0)): scaling must not hide a residual
+        let size = |e: &Expr| crate::eval::to_c64_env(e, &env).map_or(0.0, |w| w.0.hypot(w.1));
+        let scale = size(sol) + size(&d1) + size(&d2) + size(&g0);
+        if v.0.hypot(v.1) > 1e-8 * scale.min(1.0) {
             return false;
         }
         checked += 1;

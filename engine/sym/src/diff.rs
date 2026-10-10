@@ -115,9 +115,11 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
         Fun::Acos => neg(&pow(&sub(&one(), &u2), &rat(-1, 2))),
         Fun::Atan => recip(&add2(&u2, &one())),
         Fun::Acot => neg(&recip(&add2(&u2, &one()))),
-        // as Sage (pynac) writes them: 1/(sqrt(x^2 - 1)*x), -1/(sqrt(x^2 - 1)*x)
-        Fun::Asec => recip(&mul2(&sqrt(&sub(&u2, &one())), u)),
-        Fun::Acsc => neg(&recip(&mul2(&sqrt(&sub(&u2, &one())), u))),
+        // asec(u) = acos(1/u), acsc(u) = asin(1/u): 1/(u^2 sqrt(1 - 1/u^2)),
+        // which is 1/(|u| sqrt(u^2 - 1)) for real |u| > 1 (Sage's
+        // 1/(sqrt(u^2 - 1) u) has the wrong sign for u < -1)
+        Fun::Asec => recip(&mul2(&sqrt(&sub(&one(), &recip(&u2))), &u2)),
+        Fun::Acsc => neg(&recip(&mul2(&sqrt(&sub(&one(), &recip(&u2))), &u2))),
         Fun::Sinh => fun1(Fun::Cosh, u),
         Fun::Cosh => fun1(Fun::Sinh, u),
         Fun::Tanh => sub(&one(), &pow(e, &two)),
@@ -130,7 +132,16 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
         Fun::Asech => neg(&recip(&mul2(u, &sqrt(&sub(&one(), &u2))))),
         Fun::Acsch => neg(&recip(&mul2(&u2, &sqrt(&add2(&one(), &recip(&u2)))))),
         Fun::Log => recip(u),
-        Fun::Abs => mul(vec![half(), add2(u, &fun1(Fun::Conjugate, u)), recip(e)]),
+        // along real x: Re(conj(u) u') / |u|; when u' is real for real x
+        // that is Re(u) u' / |u|
+        Fun::Abs => {
+            if real_for_real(&du) {
+                mul(vec![half(), add2(u, &fun1(Fun::Conjugate, u)), recip(e)])
+            } else {
+                let cj = |t: &Expr| fun1(Fun::Conjugate, t);
+                return mul(vec![half(), add2(&mul2(&cj(u), &du), &mul2(u, &cj(&du))), recip(e)]);
+            }
+        }
         Fun::Erf => mul(vec![int(2), exp(&neg(&u2)), pow(&pi(), &rat(-1, 2))]),
         Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside => zero(),
         Fun::Factorial | Fun::Gamma => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
@@ -138,6 +149,25 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
         _ => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
     };
     mul2(&d, &du)
+}
+
+/// Certainly real wherever defined, for real values of the symbols: real
+/// numbers and symbols under +, *, integer powers and real-valued
+/// functions of such arguments.
+fn real_for_real(t: &Expr) -> bool {
+    match &t.kind {
+        Kind::Num(n) => n.is_real(),
+        Kind::Sym(_) => true,
+        Kind::Const(c) => matches!(c, Const::Pi | Const::E),
+        Kind::Add(v) | Kind::Mul(v) => v.iter().all(real_for_real),
+        Kind::Pow(b, k) => k.as_int().is_some() && real_for_real(b) || b.is_const(Const::E) && real_for_real(k),
+        Kind::Fun(f, a) => {
+            matches!(f, Fun::Sin | Fun::Cos | Fun::Tan | Fun::Cot | Fun::Sec | Fun::Csc | Fun::Sinh | Fun::Cosh | Fun::Tanh | Fun::Coth | Fun::Sech | Fun::Csch
+                | Fun::Atan | Fun::Acot | Fun::Asinh | Fun::Abs | Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside | Fun::Erf)
+                && a.iter().all(real_for_real)
+        }
+        _ => false,
+    }
 }
 
 /// The n-th derivative.

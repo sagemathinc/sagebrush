@@ -285,18 +285,17 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
     match &e.kind {
         Kind::Pow(b, p) if !depends(p, x) => {
             let l = lim(b, x, a, dir, depth + 1)?;
-            let pv = crate::eval::to_f64(p);
+            // the exponent's certified sign (a double's decides nothing)
+            let pv = const_sign(p);
             if l.is_const(Const::Infinity) {
-                if let Some(pv) = pv {
-                    return Ok(if pv > 0.0 { infinity() } else { zero() });
+                match pv {
+                    Some(1) => return Ok(infinity()),
+                    Some(-1) => return Ok(zero()),
+                    _ => {}
                 }
             }
-            if l.is_zero() {
-                if let Some(pv) = pv {
-                    if pv < 0.0 {
-                        return Ok(infinity());
-                    }
-                }
+            if l.is_zero() && pv == Some(-1) {
+                return Ok(infinity());
             }
             if is_finite_value(&l) {
                 // a fractional power at its branch cut: only along it
@@ -316,7 +315,7 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
         Kind::Pow(b, p) if depends(p, x) => {
             // b^p = exp(p log b)
             let l = lim(&mul2(p, &log(b)), x, a, dir, depth + 1)?;
-            return Ok(exp_limit(&l));
+            return exp_limit_checked(&l);
         }
         Kind::Add(v) => {
             let mut ls = vec![];
@@ -399,13 +398,15 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
 }
 
 /// e = C x^p log(x)^q e^(r(x)) (r a polynomial without constant term):
-/// (C, [deg r, lead r], p, q) as a growth key at +oo.
-fn growth(e: &Expr, x: &str) -> Option<(Expr, (i64, f64, f64, f64))> {
+/// (C, (deg r, lead r, p, q)) as a growth key at +oo, exactly.
+type Key = (i64, Expr, Expr, Expr);
+
+fn growth(e: &Expr, x: &str) -> Option<(Expr, Key)> {
     let fs = match &e.kind {
         Kind::Mul(v) => v.clone(),
         _ => vec![e.clone()],
     };
-    let (mut c, mut r, mut p, mut q) = (vec![], zero(), 0.0, 0.0);
+    let (mut c, mut r, mut p, mut q) = (vec![], zero(), zero(), zero());
     for f in fs {
         if !depends(&f, x) {
             c.push(f);
@@ -416,10 +417,12 @@ fn growth(e: &Expr, x: &str) -> Option<(Expr, (i64, f64, f64, f64))> {
             r = add2(&r, &k);
             continue;
         }
-        let kv = crate::eval::to_f64(&k)?;
+        if depends(&k, x) || !crate::domain::real_const(&k) {
+            return None;
+        }
         match &b.kind {
-            Kind::Sym(s) if &**s == x => p += kv,
-            Kind::Fun(Fun::Log, a) if a[0].as_sym() == Some(x) => q += kv,
+            Kind::Sym(s) if &**s == x => p = add2(&p, &k),
+            Kind::Fun(Fun::Log, a) if a[0].as_sym() == Some(x) => q = add2(&q, &k),
             _ => return None,
         }
     }
@@ -428,25 +431,42 @@ fn growth(e: &Expr, x: &str) -> Option<(Expr, (i64, f64, f64, f64))> {
         return None;
     }
     let deg = rc.len() as i64 - 1;
-    let (deg, lead) = if deg >= 1 { (deg, crate::eval::to_f64(&rc[deg as usize])?) } else { (0, 0.0) };
+    let (deg, lead) = if deg >= 1 { (deg, rc[deg as usize].clone()) } else { (0, zero()) };
     // the constant part of r is a constant factor
     c.push(exp(&rc[0]));
     Some((mul(c), (deg, lead, p, q)))
 }
 
-fn key_cmp(a: &(i64, f64, f64, f64), b: &(i64, f64, f64, f64)) -> std::cmp::Ordering {
+/// The certified order of real constants a, b; None if not established.
+fn cmp_const(a: &Expr, b: &Expr) -> Option<std::cmp::Ordering> {
+    Some(const_sign(&sub(a, b))?.cmp(&0))
+}
+
+fn key_cmp(a: &Key, b: &Key) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering::Equal;
     // e^(c x^k) beats x^p beats log(x)^q
-    let ea = if a.0 > 0 { (a.0 as f64) * a.1.signum() } else { 0.0 };
-    let eb = if b.0 > 0 { (b.0 as f64) * b.1.signum() } else { 0.0 };
-    ea.partial_cmp(&eb).unwrap()
-        .then_with(|| if a.0 == b.0 && a.0 > 0 { a.1.partial_cmp(&b.1).unwrap() } else { std::cmp::Ordering::Equal })
-        .then_with(|| a.2.partial_cmp(&b.2).unwrap())
-        .then_with(|| a.3.partial_cmp(&b.3).unwrap())
+    let ea = if a.0 > 0 { a.0 * const_sign(&a.1)? as i64 } else { 0 };
+    let eb = if b.0 > 0 { b.0 * const_sign(&b.1)? as i64 } else { 0 };
+    let o = ea.cmp(&eb);
+    if o != Equal {
+        return Some(o);
+    }
+    if a.0 == b.0 && a.0 > 0 {
+        let o = cmp_const(&a.1, &b.1)?;
+        if o != Equal {
+            return Some(o);
+        }
+    }
+    let o = cmp_const(&a.2, &b.2)?;
+    if o != Equal {
+        return Some(o);
+    }
+    cmp_const(&a.3, &b.3)
 }
 
 fn growth_limit(e: &Expr, x: &str) -> Option<Expr> {
     let (n, d) = together(e);
-    let terms = |t: &Expr| -> Option<Vec<(Expr, (i64, f64, f64, f64))>> {
+    let terms = |t: &Expr| -> Option<Vec<(Expr, Key)>> {
         let ex = crate::expand::expand(t);
         let v = match &ex.kind {
             Kind::Add(v) => v.clone(),
@@ -454,14 +474,14 @@ fn growth_limit(e: &Expr, x: &str) -> Option<Expr> {
         };
         v.iter().map(|u| growth(u, x)).collect()
     };
-    // the dominant term of a sum (unique), else None
-    let dominant = |ts: Vec<(Expr, (i64, f64, f64, f64))>| -> Option<(Expr, (i64, f64, f64, f64))> {
-        let mut best: Option<(Expr, (i64, f64, f64, f64))> = None;
+    // the dominant term of a sum (unique and certified), else None
+    let dominant = |ts: Vec<(Expr, Key)>| -> Option<(Expr, Key)> {
+        let mut best: Option<(Expr, Key)> = None;
         let mut tie = false;
         for t in ts {
             match &best {
                 None => best = Some(t),
-                Some(b) => match key_cmp(&t.1, &b.1) {
+                Some(b) => match key_cmp(&t.1, &b.1)? {
                     std::cmp::Ordering::Greater => {
                         best = Some(t);
                         tie = false;
@@ -476,14 +496,17 @@ fn growth_limit(e: &Expr, x: &str) -> Option<Expr> {
     let (cn, kn) = dominant(terms(&n)?)?;
     let (cd, kd) = dominant(terms(&d)?)?;
     // only when exponentials or logs are involved (polynomials: as before)
-    if kn.0 == 0 && kd.0 == 0 && kn.3 == 0.0 && kd.3 == 0.0 {
+    if kn.0 == 0 && kd.0 == 0 && kn.3.is_zero() && kd.3.is_zero() {
         return None;
     }
     let ratio = div(&cn, &cd);
-    let sign = crate::eval::to_f64(&ratio)?.signum();
-    Some(match key_cmp(&kn, &kd) {
+    Some(match key_cmp(&kn, &kd)? {
         std::cmp::Ordering::Less => zero(),
-        std::cmp::Ordering::Greater => if sign > 0.0 { infinity() } else { constant(Const::MinusInfinity) },
+        std::cmp::Ordering::Greater => match const_sign(&ratio)? {
+            1 => infinity(),
+            -1 => constant(Const::MinusInfinity),
+            _ => return None,
+        },
         std::cmp::Ordering::Equal => ratio,
     })
 }
@@ -496,6 +519,15 @@ fn exp_limit(l: &Expr) -> Expr {
     } else {
         exp(l)
     }
+}
+
+/// exp_limit, refusing an infinity of unknown direction (e^(c oo) with the
+/// sign of c not established is not a value).
+fn exp_limit_checked(l: &Expr) -> R<Expr> {
+    if has_infinity(l) && !l.is_const(Const::Infinity) && !l.is_const(Const::MinusInfinity) {
+        return fail(format!("limit: the exponent tends to {}", crate::to_string(l)));
+    }
+    Ok(exp_limit(l))
 }
 
 /// u -> l, a certified negative real, from the side of the negative real
