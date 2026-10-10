@@ -517,10 +517,15 @@ class Matrix:
         [ 3/2 -1/2], -2, [15 22]
         )
     """
-    __slots__ = ("_base", "_rows", "_subdiv", "_nc")
+    __slots__ = ("_base", "_rows", "_subdiv", "_nc", "_immutable")
 
     def __init__(self, base, rows, ncols=None):
         self._rows = [[_norm(x) for x in r] for r in rows]
+        # rows of one length (a ragged [[1, 2], [3]] lost the 2 on
+        # transposing: the systematic review's API-F6)
+        if any(len(r) != len(self._rows[0]) for r in self._rows):
+            raise ValueError("the rows of a matrix must have the same length")
+        self._immutable = False
         # the number of columns, kept when there are no rows (a 0 x 3
         # matrix was 0 x 0: the systematic review's LIN-F4)
         self._nc = len(self._rows[0]) if self._rows else (ncols or 0)
@@ -660,13 +665,49 @@ class Matrix:
         return Vector(self._rows[ij])
 
     def __setitem__(self, ij, v):
+        if getattr(self, "_immutable", False):
+            raise ValueError("matrix is immutable; please change a copy instead (i.e., use copy(M) to change a copy of M).")
         i, j = ij
         self._rows[i][j] = _norm(v)
 
     def __eq__(self, other):
         return isinstance(other, Matrix) and other._rows == self._rows
 
+    def set_immutable(self):
+        """Make the matrix immutable (then it is hashable).
+
+        EXAMPLES::
+
+            sage: M = matrix(ZZ, [[1, 2], [3, 4]]); M.set_immutable(); hash(M) == hash(M)
+            True
+        """
+        self._immutable = True
+
+    def is_immutable(self):
+        """Whether the matrix is immutable.
+
+        EXAMPLES::
+
+            sage: matrix(ZZ, [[1]]).is_immutable()
+            False
+        """
+        return getattr(self, "_immutable", False)
+
+    def is_mutable(self):
+        """Whether the matrix can be changed.
+
+        EXAMPLES::
+
+            sage: matrix(ZZ, [[1]]).is_mutable()
+            True
+        """
+        return not self.is_immutable()
+
     def __hash__(self):
+        # (a mutable matrix's hash would change under it, as in Sage: the
+        # systematic review's API-F4)
+        if not getattr(self, "_immutable", False):
+            raise TypeError("mutable matrices are unhashable")
         return hash(tuple(tuple(r) for r in self._rows))
 
     def __repr__(self):

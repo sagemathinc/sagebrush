@@ -535,15 +535,16 @@ class MPolynomialRing_:
         """
         return False
 
-    def is_integral_domain(self, proof=True):
-        """True.
+    def is_integral_domain(self, proof=None):
+        """Whether the coefficient ring is an integral domain.
 
         EXAMPLES::
 
-            sage: QQ['x,y'].is_integral_domain()
-            True
+            sage: QQ['x,y'].is_integral_domain(), PolynomialRing(Integers(4), 2, 'x,y').is_integral_domain()
+            (True, False)
         """
-        return True
+        import _sage_frac
+        return _sage_frac._base_is_domain(self._base, proof)
 
     def is_commutative(self):
         """True.

@@ -192,7 +192,16 @@ class Expression:
     def __ge__(self, o): return self._rel(">=", o)
 
     def __hash__(self):
-        return hash(self._s)
+        # an exact number hashes as that number (SR(1) == 1 with different
+        # hashes broke dictionaries and sets: the systematic review's API-F2)
+        s = self._s
+        if s.startswith("n") and s.endswith(";") and "/" in s:
+            try:
+                num, den = s[1:-1].split("/")
+                return hash(_Fraction(int(num), int(den)))
+            except ValueError:
+                pass
+        return hash(s)
 
     def __bool__(self):
         op = self._op()

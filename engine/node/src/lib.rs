@@ -13,6 +13,31 @@ fn run<T: Send>(threads: Option<u32>, f: impl FnOnce() -> T + Send) -> T {
     rayon::ThreadPoolBuilder::new().num_threads(threads.unwrap_or(0) as usize).build().unwrap().install(f)
 }
 
+// JavaScript numbers are doubles: every integer argument is taken as one and
+// checked to be an integer in range before use (N-API's own u32/i64
+// conversion truncated 11.5 to 11 and wrapped 2^32 + 11 to 11, so a
+// certificate was returned for a different problem: the systematic review's
+// API-F8).
+fn int_arg(name: &str, x: f64, lo: f64, hi: f64) -> Result<f64> {
+    if !(x.is_finite() && x.fract() == 0.0 && x >= lo && x <= hi) {
+        return Err(err(format!("{} = {} must be an integer in [{}, {}]", name, x, lo, hi)));
+    }
+    Ok(x)
+}
+
+fn u32_arg(name: &str, x: f64) -> Result<u32> {
+    int_arg(name, x, 0.0, u32::MAX as f64).map(|v| v as u32)
+}
+
+fn opt_u32(name: &str, x: Option<f64>) -> Result<Option<u32>> {
+    x.map(|v| u32_arg(name, v)).transpose()
+}
+
+/// An integer of magnitude below 2^53 (exactly a double).
+fn i64_arg(name: &str, x: f64) -> Result<i64> {
+    int_arg(name, x, -9007199254740991.0, 9007199254740991.0).map(|v| v as i64)
+}
+
 fn err(e: String) -> Error {
     Error::from_reason(e)
 }
@@ -36,7 +61,8 @@ pub struct ModP {
 
 /// T_q's characteristic polynomial mod p (constant term first).
 #[napi(namespace = "modsym")]
-pub fn hecke_charpoly(n: u32, q: u32, p: Option<u32>, threads: Option<u32>) -> Result<ModP> {
+pub fn hecke_charpoly(n: f64, q: f64, p: Option<f64>, threads: Option<f64>) -> Result<ModP> {
+    let (n, q, p, threads) = (u32_arg("n", n)?, u32_arg("q", q)?, opt_u32("p", p)?, opt_u32("threads", threads)?);
     let p = p.unwrap_or(67108859) as u64;
     let r = run(threads, || sagebrush_modsym::hecke_charpoly(n as u64, q as u64, p)).map_err(err)?;
     Ok(ModP {
@@ -87,17 +113,20 @@ fn exact_obj(e: &Exact) -> ExactResult {
 
 /// T_q's characteristic polynomial over Z, proven by CRT with a coefficient bound.
 #[napi(namespace = "modsym")]
-pub fn charpoly_exact(n: u32, q: u32, threads: Option<u32>) -> Result<ExactResult> {
+pub fn charpoly_exact(n: f64, q: f64, threads: Option<f64>) -> Result<ExactResult> {
+    let (n, q, threads) = (u32_arg("n", n)?, u32_arg("q", q)?, opt_u32("threads", threads)?);
     let e = run(threads, || sagebrush_modsym::exact::exact_charpoly(n as u64, q as u64)).map_err(err)?;
     Ok(exact_obj(&e))
 }
 
 /// charpolyExact for many levels in parallel; a failed level has `error` set.
 #[napi(namespace = "modsym")]
-pub fn batch_exact(levels: Vec<u32>, q: u32, threads: Option<u32>) -> Vec<ExactResult> {
-    let ls: Vec<u64> = levels.iter().map(|&n| n as u64).collect();
+pub fn batch_exact(levels: Vec<f64>, q: f64, threads: Option<f64>) -> Result<Vec<ExactResult>> {
+    let (q, threads) = (u32_arg("q", q)?, opt_u32("threads", threads)?);
+    let ls: Vec<u64> = levels.iter().map(|&n| u32_arg("level", n).map(|v| v as u64)).collect::<Result<_>>()?;
     let rs = run(threads, || sagebrush_modsym::exact::batch_exact(&ls, q as u64));
-    ls.iter()
+    Ok(ls
+        .iter()
         .zip(rs)
         .map(|(&n, r)| match r {
             Ok(e) => exact_obj(&e),
@@ -116,7 +145,7 @@ pub fn batch_exact(levels: Vec<u32>, q: u32, threads: Option<u32>) -> Vec<ExactR
                 error: Some(e),
             },
         })
-        .collect()
+        .collect())
 }
 
 #[napi(object)]
@@ -130,14 +159,16 @@ pub struct LevelData {
 
 /// Psi(N), genus, cusps, Eisenstein dimension and dimension of the sign +1 space.
 #[napi(namespace = "modsym")]
-pub fn level_data(n: u32) -> LevelData {
+pub fn level_data(n: f64) -> Result<LevelData> {
+    let n = u32_arg("n", n)?;
     let (psi, genus, cusps, eis, dim) = sagebrush_modsym::exact::level_data(n as u64);
-    LevelData { psi: psi as f64, genus: genus as f64, cusps: cusps as f64, eisenstein: eis as f64, dim: dim as f64 }
+    Ok(LevelData { psi: psi as f64, genus: genus as f64, cusps: cusps as f64, eisenstein: eis as f64, dim: dim as f64 })
 }
 
 /// Whether T_q and T_r commute mod p.
 #[napi(namespace = "modsym")]
-pub fn commute(n: u32, q: u32, r: u32, p: Option<u32>, threads: Option<u32>) -> Result<bool> {
+pub fn commute(n: f64, q: f64, r: f64, p: Option<f64>, threads: Option<f64>) -> Result<bool> {
+    let (n, q, r, p, threads) = (u32_arg("n", n)?, u32_arg("q", q)?, u32_arg("r", r)?, opt_u32("p", p)?, opt_u32("threads", threads)?);
     let p = p.unwrap_or(67108859) as u64;
     run(threads, || sagebrush_modsym::hecke_commute(n as u64, q as u64, r as u64, p)).map_err(err)
 }
@@ -157,7 +188,8 @@ pub struct Estimate {
 
 /// Predicted dimension, bytes and single-thread seconds, without computing.
 #[napi(namespace = "modsym")]
-pub fn estimate(n: u32, q: u32) -> Result<Estimate> {
+pub fn estimate(n: f64, q: f64) -> Result<Estimate> {
+    let (n, q) = (u32_arg("n", n)?, u32_arg("q", q)?);
     sagebrush_modsym::validate(n as u64, q as u64, None).map_err(err)?;
     let e = sagebrush_modsym::estimate::estimate(n as u64, q as u64);
     Ok(Estimate {
@@ -175,14 +207,16 @@ pub fn estimate(n: u32, q: u32) -> Result<Estimate> {
 
 // ---- ap: traces of Frobenius of elliptic curves ----
 
-fn curve(a: Vec<i64>) -> Result<sagebrush_ap::EllipticCurve> {
+fn curve(a: Vec<f64>) -> Result<sagebrush_ap::EllipticCurve> {
+    let a: Vec<i64> = a.iter().map(|&c| i64_arg("a coefficient", c)).collect::<Result<_>>()?;
     let a: [i64; 5] = a.try_into().map_err(|_| err("a curve is [a1, a2, a3, a4, a6]".into()))?;
     sagebrush_ap::EllipticCurve::new(a).map_err(err)
 }
 
 /// a_p of y^2 + a1 xy + a3 y = x^3 + a2 x^2 + a4 x + a6, or null if p divides the discriminant.
 #[napi(namespace = "ap")]
-pub fn ap(a: Vec<i64>, p: i64) -> Result<Option<i64>> {
+pub fn ap(a: Vec<f64>, p: f64) -> Result<Option<i64>> {
+    let p = i64_arg("p", p)?;
     if p < 2 || !sagebrush_modsym::exact::is_prime(p as u64) {
         return Err(err(format!("p = {} must be a prime", p)));
     }
@@ -198,9 +232,10 @@ pub struct ApList {
 
 /// a_p for all primes p <= n, in parallel.
 #[napi(namespace = "ap")]
-pub fn aplist(a: Vec<i64>, n: i64, threads: Option<u32>) -> Result<ApList> {
+pub fn aplist(a: Vec<f64>, n: f64, threads: Option<f64>) -> Result<ApList> {
+    let (n, threads) = (int_arg("n", n, 0.0, 9007199254740991.0)? as u64, opt_u32("threads", threads)?);
     let e = curve(a)?;
-    let r = run(threads, || sagebrush_ap::aplist(&e, n as u64));
+    let r = run(threads, || sagebrush_ap::aplist(&e, n));
     Ok(ApList { primes: r.iter().map(|x| x.0 as i64).collect(), ap: r.iter().map(|x| x.1).collect() })
 }
 
@@ -213,8 +248,9 @@ pub struct Moments {
 
 /// Sato-Tate moments over the good primes p <= n.
 #[napi(namespace = "ap")]
-pub fn moments(a: Vec<i64>, n: i64, kmax: Option<u32>, threads: Option<u32>) -> Result<Moments> {
+pub fn moments(a: Vec<f64>, n: f64, kmax: Option<f64>, threads: Option<f64>) -> Result<Moments> {
+    let (n, kmax, threads) = (int_arg("n", n, 0.0, 9007199254740991.0)? as u64, opt_u32("kmax", kmax)?, opt_u32("threads", threads)?);
     let e = curve(a)?;
-    let (count, moments) = run(threads, || sagebrush_ap::moments(&e, n as u64, kmax.unwrap_or(4) as usize));
+    let (count, moments) = run(threads, || sagebrush_ap::moments(&e, n, kmax.unwrap_or(4) as usize));
     Ok(Moments { count: count as f64, moments })
 }

@@ -382,12 +382,26 @@ class NumberField_absolute:
         if self._bnf is None:
             self._bnf = None
             if self._n == 2 and abs(self.discriminant()) >= 1000:
-                # the quadratic algorithms are much faster
-                h, cyc, reg = _nf().quadratic_class_group(self.discriminant())
-                self._bnf = {"h": h, "cyc": cyc, "regulator": reg if reg is not None else "1"}
+                # the quadratic algorithms are much faster (their
+                # certificate status kept: the systematic review's ASR-F2)
+                d = _nf().quadratic_class_group_data(self.discriminant())
+                self._bnf = {"h": d["h"], "cyc": d["cyc"], "regulator": d["regulator"] if d["regulator"] is not None else "1",
+                             "certified": d.get("certified", False), "assumes": d.get("assumes", ["GRH"])}
             else:
                 self._bnf = _nf().bnf(self._f)
         return self._bnf
+
+    def _bnf_checked(self, proof):
+        """_bnfdata, refusing (unless proof=False) a class group or regulator
+        that assumes more than GRH: the stopping rule's estimate, when the
+        analytic certificate did not hold.  (Roots of unity not proven
+        complete concern w only: the certificate needs just the ones
+        found.)"""
+        d = self._bnfdata()
+        extra = [a for a in d.get("assumes", ["GRH"]) if "estimate" in a]
+        if extra and proof is not False:
+            raise NotImplementedError("this class group assumes, besides GRH: %s (call with proof=False to accept it)" % "; ".join(extra))
+        return d
 
     def class_group(self, proof=None, names="c"):
         """The class group, assuming GRH.  With proof=True: proven for
@@ -414,6 +428,7 @@ class NumberField_absolute:
                 _unproven("class_group (its structure)")
             if [int(c) for c in self._bnfdata()["cyc"]] != ([h] if h > 1 else []):
                 raise RuntimeError("the class group disagrees with the proven class number %d" % h)
+        self._bnf_checked(proof)
         return ClassGroup(self)
 
     def _proven_class_number(self, what):
@@ -444,7 +459,7 @@ class NumberField_absolute:
         """
         if proof:
             return self._proven_class_number("class_number")
-        return self._bnfdata()["h"]
+        return self._bnf_checked(proof)["h"]
 
     def regulator(self, proof=None):
         """The regulator, assuming GRH.  With proof=True: only for fields with
@@ -464,7 +479,7 @@ class NumberField_absolute:
             if self.unit_rank() == 0:
                 return _sa().RR(1)
             _unproven("regulator")
-        return _sa().RR(self._bnfdata()["regulator"])
+        return _sa().RR(self._bnf_checked(proof)["regulator"])
 
     def unit_rank(self):
         """The rank of the unit group: r1 + r2 - 1.
