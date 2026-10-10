@@ -21,8 +21,12 @@
 //! psi o T_p = a_p psi, so a_p = psi(T_p x) / psi(x) for a fixed generator
 //! x: one sum over Heilbronn matrices per prime, no matrices.  Everything is
 //! computed modulo a prime ell ~ 2^31; |a_p| <= 2 sqrt(p) < ell / 2 makes
-//! the lift exact, and the Hasse bound at every computed p, together with a
-//! second ell, guards against accidental congruences mod ell.
+//! the lift exact.  Two checks guard against accidental congruences mod ell
+//! (a newform of higher degree, or two eigen-systems, that look rational and
+//! distinct only modulo ell): the Hasse bound at every computed a_p, and the
+//! whole computation again modulo a second prime, which must give the same
+//! newforms.  Neither is a proof in characteristic zero; the result says so
+//! (`status`, `checks`).
 
 use crate::exact::is_prime;
 use crate::linalg;
@@ -31,6 +35,8 @@ use crate::presentation::Presentation;
 use crate::space::Space;
 
 pub const ELL: u64 = 2147483629;
+/// The second prime, for the check.
+pub const ELL2: u64 = 2147483587;
 
 /// A rational newform: a_p for every prime p <= bound not dividing N.
 #[derive(Debug, Clone)]
@@ -48,6 +54,9 @@ pub struct Newforms {
     pub old: Vec<(usize, Vec<(u64, i64)>)>,
     /// Primes used for splitting.
     pub split_primes: Vec<u64>,
+    /// "checked": the checks below passed (not a proof).
+    pub status: &'static str,
+    pub checks: Vec<String>,
 }
 
 pub(crate) fn isqrt(n: u64) -> i64 {
@@ -225,12 +234,33 @@ fn settle(subs: Vec<Sub>, old_sys: &[(std::sync::Arc<Vec<Vec<(u64, i64)>>>, usiz
 }
 
 /// Rational newforms of level N, with a_p for primes p <= bound not dividing N.
-/// At most `max_split` primes are used to separate eigen-systems.
+/// At most `max_split` primes are used to separate eigen-systems.  Checked
+/// (the Hasse bound; the same newforms modulo a second prime), or an error.
 pub fn rational_newforms(n: u64, bound: u64, max_split: usize) -> Result<Newforms, String> {
     if n == 0 {
         return Err("level N = 0".into());
     }
-    let p = ELL;
+    let mut nf = newforms_mod(n, bound, max_split, ELL)?;
+    for f in &nf.forms {
+        if !f.hasse_ok() {
+            return Err(format!("N = {}: a_p outside the Hasse bound modulo {} (an accidental congruence): {:?}", n, ELL, f.ap.iter().find(|&&(p, a)| a * a > 4 * p as i64)));
+        }
+    }
+    let again = newforms_mod(n, bound, max_split, ELL2)?;
+    let dims = |x: &Newforms| { let mut d: Vec<usize> = x.old.iter().map(|o| o.0).collect(); d.sort(); d };
+    if again.forms.iter().map(|f| &f.ap).ne(nf.forms.iter().map(|f| &f.ap)) || dims(&again) != dims(&nf) {
+        return Err(format!("N = {}: the rational newforms differ modulo {} and {} (an accidental congruence)", n, ELL, ELL2));
+    }
+    nf.status = "checked";
+    nf.checks = vec![
+        format!("every a_p (p <= {}) within the Hasse bound", bound),
+        format!("the same newforms and old part modulo {} and {}", ELL, ELL2),
+    ];
+    Ok(nf)
+}
+
+/// The computation modulo one prime p.
+fn newforms_mod(n: u64, bound: u64, max_split: usize, p: u64) -> Result<Newforms, String> {
     let debug = std::env::var("SAGEBRUSH_DEBUG").is_ok();
     let t0 = crate::now();
     let lap = |what: &str| {
@@ -337,7 +367,7 @@ pub fn rational_newforms(n: u64, bound: u64, max_split: usize) -> Result<Newform
         forms.push(Newform { ap });
     }
     forms.sort_by(|a, b| a.ap.cmp(&b.ap));
-    Ok(Newforms { n, dim: d, forms, old, split_primes })
+    Ok(Newforms { n, dim: d, forms, old, split_primes, status: "unchecked", checks: vec![] })
 }
 
 impl Newform {
