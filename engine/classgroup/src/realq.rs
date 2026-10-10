@@ -346,7 +346,7 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
             let m_bits = (lbits as f64 - (hr_est / 1024.0).max(0.5).log2()).max(1.0) as u32;
             prec = err_bits + 2 * m_bits + log_c + 32;
             if debug {
-                eprintln!("  kernel: det {} bits; |lambda| ~ 2^{}, error at 48 bits ~ 2^{}: precision {} at {:.1} ms", det.bits(), lbits, ebits, prec, ms());
+                eprintln!("  kernel: d {} bits; |lambda| ~ 2^{}, error at 48 bits ~ 2^{}: precision {} at {:.1} ms", det.bits(), lbits, ebits, prec, ms());
             }
         }
         let (more, n_zero) = unit_logs(cache, d, rels, elems, n, pivot_weight, core_rows, sel, &det, &ys, &extras, prec);
