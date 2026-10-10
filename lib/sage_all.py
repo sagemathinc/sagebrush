@@ -716,6 +716,10 @@ def is_prime(n, proof=None):
         [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
         sage: ZZ(2^61 - 1).is_prime(proof=True), ZZ(2^127 - 3).is_prime(proof=True)
         (True, False)
+        sage: factor(QQ(2^127 - 1)/2, proof=True)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: a primality proof above 3.3e24 is not implemented: n passes BPSW, which is not a proof (call is_prime with proof=False)
         sage: ZZ(2^127 - 1).is_prime(proof=True)  # sagebrush only
         Traceback (most recent call last):
         ...
@@ -959,12 +963,16 @@ def factor(n, proof=None, **kwds):
         sage: factor(x^4 - 1)
         (x - 1) * (x + 1) * (x^2 + 1)
     """
-    if isinstance(n, (_Polynomial, _Expr)):
-        return n.factor()
-    if not isinstance(n, (int, _Fraction)) and hasattr(n, "factor"):
-        return n.factor()
+    if isinstance(n, (_Polynomial, _Expr)) or (not isinstance(n, (int, _Fraction)) and hasattr(n, "factor")):
+        F = n.factor()
+        if proof:
+            # the integer factors (a polynomial's content, ...) proven prime
+            for p, _ in F:
+                if isinstance(p, int):
+                    is_prime(p, proof=True)
+        return F
     if isinstance(n, _Fraction) and n.denominator != 1:
-        num, den = factor(n.numerator), factor(n.denominator)
+        num, den = factor(n.numerator, proof=proof), factor(n.denominator, proof=proof)
         pairs = sorted(list(num) + [(p, -e) for p, e in den])
         return Factorization(pairs, num.unit)
     n = int(n)

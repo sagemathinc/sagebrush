@@ -42,9 +42,14 @@ def estimate(n, q):
     return call("estimate", n=int(n), q=int(q))
 
 
-def rational_newforms(n, bound=1000, threads=0):
+def rational_newforms(n, bound=1000, threads=0, details=False):
     """The rational newforms of level N: a list of [(p, a_p)] for primes
     p <= bound not dividing N.  Computed modulo a prime and checked, not
     proven: every a_p is within the Hasse bound and the computation modulo a
-    second prime gives the same newforms (otherwise ValueError)."""
-    return [[tuple(t) for t in f] for f in call("rational_newforms", n=int(n), bound=int(bound))]
+    second prime gives the same newforms (otherwise ValueError).  With
+    details=True, a dict: forms, status ("checked") and checks."""
+    r = call("rational_newforms", n=int(n), bound=int(bound), details=bool(details))
+    if details:
+        r["forms"] = [[tuple(t) for t in f] for f in r["forms"]]
+        return r
+    return [[tuple(t) for t in f] for f in r]

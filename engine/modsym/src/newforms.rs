@@ -247,14 +247,15 @@ pub fn rational_newforms(n: u64, bound: u64, max_split: usize) -> Result<Newform
         }
     }
     let again = newforms_mod(n, bound, max_split, ELL2)?;
-    let dims = |x: &Newforms| { let mut d: Vec<usize> = x.old.iter().map(|o| o.0).collect(); d.sort(); d };
-    if again.forms.iter().map(|f| &f.ap).ne(nf.forms.iter().map(|f| &f.ap)) || dims(&again) != dims(&nf) {
+    // the old part: each component's dimension and eigenvalues
+    let old = |x: &Newforms| { let mut d = x.old.clone(); d.sort(); d };
+    if again.forms.iter().map(|f| &f.ap).ne(nf.forms.iter().map(|f| &f.ap)) || old(&again) != old(&nf) {
         return Err(format!("N = {}: the rational newforms differ modulo {} and {} (an accidental congruence)", n, ELL, ELL2));
     }
     nf.status = "checked";
     nf.checks = vec![
         format!("every a_p (p <= {}) within the Hasse bound", bound),
-        format!("the same newforms and old part modulo {} and {}", ELL, ELL2),
+        format!("the same newform coefficients and old components (dimensions and eigenvalues) modulo {} and {}; the lower levels' newforms, shared by both, were checked the same way", ELL, ELL2),
     ];
     Ok(nf)
 }

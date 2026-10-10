@@ -465,6 +465,14 @@ fn integral_lll(b: &mut ZMat) {
 /// `digits` significant digits, as decimal (re, im) strings: real roots
 /// first (ascending), then complex ones by real then imaginary part.
 pub fn complex_roots(f: &[BigInt], digits: usize) -> Result<Vec<(String, String, u32)>, String> {
+    let mut f = f.to_vec();
+    while f.last().is_some_and(|c| c.is_zero()) {
+        f.pop();
+    }
+    if f.is_empty() {
+        return Err("the roots of the zero polynomial".into());
+    }
+    let f = &f[..];
     if f.len() < 2 {
         return Ok(vec![]);
     }

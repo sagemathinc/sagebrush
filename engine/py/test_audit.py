@@ -101,4 +101,15 @@ assert nf.complex_roots([10**16 + 1, -2 * 10**8, 1], 30) == [
     ("100000000.000000000000000000000", "1.00000000000000000000000000000", 1)]
 d = nf.nf_data([-89677, 9416, -531841, 2, 72857, 1])
 assert (d["r1"], d["r2"], d["w"], d["w_proven"]) == (3, 1, 2, True)
+# second review R4: proof=True through rationals (numerator and denominator)
+from sagebrush.sage import QQ
+raises(NotImplementedError, factor, QQ(2**127 - 1) / 2, proof=True)
+raises(NotImplementedError, factor, QQ(2) / (2**127 - 1), proof=True)
+assert str(factor(QQ(2**61 - 1) / 6, proof=True)) == "2^-1 * 3^-1 * 2305843009213693951"
+# R5: zero after reduction, composite moduli
+raises(ValueError, nf.factor_mod, [4, 8, 4], 2)
+raises(ValueError, nf.factor_mod, [-1, 0, 1], 4)
+# F11: checked newforms say so
+r = modsym.rational_newforms(11, 20, details=True)
+assert r["status"] == "checked" and len(r["checks"]) == 2 and r["forms"][0][:2] == [(2, -2), (3, -1)]
 print("audit regressions: ok")

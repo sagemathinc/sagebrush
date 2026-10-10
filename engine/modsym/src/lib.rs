@@ -86,10 +86,11 @@ pub fn check_level(n: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// A weight k >= 2 (modular symbols).
+/// A weight 2 <= k < 2^31 (modular symbols; the bound keeps a weight the
+/// same on 32-bit targets).
 pub fn check_weight(k: usize) -> Result<(), String> {
-    if k < 2 {
-        return Err("the weight must be an integer k >= 2".into());
+    if !(2..1 << 31).contains(&k) {
+        return Err("the weight must be an integer 2 <= k < 2^31".into());
     }
     Ok(())
 }

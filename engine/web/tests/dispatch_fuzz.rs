@@ -65,6 +65,8 @@ fn bad_values() -> Vec<Value> {
         json!(1),
         json!(-1),
         json!(3),
+        json!(4),
+        json!(9),
         json!(1.5),
         json!(""),
         json!("x"),
@@ -139,4 +141,21 @@ fn malformed_requests_are_errors_not_panics() {
     }
     let _ = std::panic::take_hook();
     assert!(panics.is_empty() && slow.is_empty(), "{} requests panicked:\n{}\n{} took over 20 s:\n{}", panics.len(), panics.join("\n"), slow.len(), slow.join("\n"));
+}
+
+/// Requests that must be errors (not panics, not answers): structure the
+/// one-argument mutations above cannot reach (the second review's R5), and
+/// sizes that a cast to a 32-bit usize would change.  The same fixtures run
+/// against the WebAssembly engine (tests/wasm_designated.mjs).
+#[test]
+fn designated_invalid_requests_are_errors() {
+    for line in include_str!("designated_errors.jsonl").lines().filter(|l| !l.trim().is_empty()) {
+        let r = sagebrush_web::call(line);
+        assert!(r.starts_with("{\"error\""), "{} -> {}", line, r);
+    }
+    // and at the boundary, valid ones still work
+    for line in include_str!("designated_ok.jsonl").lines().filter(|l| !l.trim().is_empty()) {
+        let r = sagebrush_web::call(line);
+        assert!(r.starts_with("{\"ok\""), "{} -> {}", line, r);
+    }
 }
