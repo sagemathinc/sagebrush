@@ -1,5 +1,5 @@
-//! Definite integrals: F(b) - F(a) for an antiderivative F (verified:
-//! F' = f) is the integral only if f has no nonintegrable singularity in
+//! Definite integrals: F(b) - F(a) for an antiderivative F is the
+//! integral only if f has no nonintegrable singularity in
 //! (a, b) and F is continuous there; a locally correct antiderivative
 //! establishes neither (Astra's audits: 1/cos(x)^2 on [0, pi] gave 0;
 //! 1/(2 + cos(x)) on [0, 2 pi] gave 0, F jumping at pi; the derivative of
@@ -26,6 +26,12 @@
 //! - The value must be real for a real f and agree with adaptive
 //!   Gauss-Kronrod quadrature, which must succeed when there are singular
 //!   points: a check that rejects answers (it proves nothing).
+//!
+//! What the conclusions rest on: F' = f is checked by integrate(), exactly
+//! when simplification shows it, otherwise at random points off the real
+//! axis (overwhelming evidence for an identity of analytic functions, not a
+//! proof); the limits are the limit engine's, whose signs near a point are
+//! established, not sampled; interval enclosures assume LIBM below.
 //!
 //! Bounds are compared exactly when rational; distinct bounds that are equal
 //! as floats are never taken to be equal.  The interval arithmetic rounds
@@ -116,6 +122,12 @@ fn at(f: &Expr, x: &str, t: f64) -> Option<(f64, f64)> {
 #[derive(Clone, Copy, Debug)]
 struct Iv(f64, f64);
 
+/// The error allowed the platform's exp, ln, sin, cos, ... (relative, and
+/// absolute near zeros of sin and cos): Rust does not specify their accuracy;
+/// glibc's, musl's and the libm crate's (WebAssembly) are within an ulp or
+/// two, and this is several hundred.  The certificates below assume it.
+const LIBM: f64 = 1e-14;
+
 /// Outward rounding: a few ulps beyond the computed ends.
 fn out(lo: f64, hi: f64) -> Option<Iv> {
     if lo.is_nan() || hi.is_nan() || lo > hi {
@@ -166,10 +178,12 @@ impl Iv {
         let s = (n as f64) * 4.0 * f64::EPSILON;
         out(lo - lo.abs() * s, hi + hi.abs() * s)
     }
-    /// A monotone function, increasing or decreasing.
+    /// A monotone library function (exp, ln, atan, ...), increasing or
+    /// decreasing, with LIBM's allowance for its error.
     fn mono(self, f: impl Fn(f64) -> f64, increasing: bool) -> Option<Iv> {
         let (a, b) = (f(self.0), f(self.1));
-        if increasing { out(a, b) } else { out(b, a) }
+        let (a, b) = if increasing { (a, b) } else { (b, a) };
+        out(a - LIBM * a.abs(), b + LIBM * b.abs())
     }
 }
 
@@ -209,14 +223,15 @@ fn ival(e: &Expr, x: &str, r: Iv) -> Option<Iv> {
                 Fun::Asinh => u.mono(f64::asinh, true),
                 Fun::Cosh => {
                     let m = u.0.abs().max(u.1.abs()).cosh();
-                    out(if u.contains_zero() { 1.0 } else { u.0.abs().min(u.1.abs()).cosh() }, m)
+                    let l = if u.contains_zero() { 1.0 } else { u.0.abs().min(u.1.abs()).cosh() };
+                    out(l - LIBM * l, m + LIBM * m)
                 }
                 Fun::Abs => {
                     let m = u.0.abs().max(u.1.abs());
                     out(if u.contains_zero() { 0.0 } else { u.0.abs().min(u.1.abs()) }, m)
                 }
-                Fun::Sin => trig(u, 0.0),
-                Fun::Cos => trig(u, std::f64::consts::FRAC_PI_2),
+                Fun::Sin => trig(u, false),
+                Fun::Cos => trig(u, true),
                 _ => None,
             }
         }
@@ -224,25 +239,33 @@ fn ival(e: &Expr, x: &str, r: Iv) -> Option<Iv> {
     }
 }
 
-/// sin(u + shift) over u: the values at the ends, and +-1 if a maximum or
-/// minimum may lie inside (decided with a margin).
-fn trig(u: Iv, shift: f64) -> Option<Iv> {
-    let (a, b) = (u.0 + shift, u.1 + shift);
-    if !a.is_finite() || !b.is_finite() || b - a >= 2.0 * std::f64::consts::PI {
+/// sin(u) (or cos(u)) over u: the values at the ends, computed directly
+/// (cos(u) is not sin(u + pi/2): rounding that sum loses a zero of cos, the
+/// third review's T1), widened by LIBM absolutely and relatively, and +-1
+/// where a maximum or minimum may lie inside (decided with a margin wider
+/// than the error in the extrema's positions).  Large arguments get [-1, 1].
+fn trig(u: Iv, cosine: bool) -> Option<Iv> {
+    let (a, b) = (u.0, u.1);
+    if !a.is_finite() || !b.is_finite() || a.abs().max(b.abs()) > 1e6 || b - a >= 2.0 * std::f64::consts::PI {
         return Some(Iv(-1.0, 1.0));
     }
-    let (fa, fb) = (a.sin(), b.sin());
+    let f = |t: f64| if cosine { t.cos() } else { t.sin() };
+    let (fa, fb) = (f(a), f(b));
+    let w = |v: f64| LIBM * (1.0 + v.abs());
     let (mut lo, mut hi) = (fa.min(fb), fa.max(fb));
+    lo -= w(lo);
+    hi += w(hi);
     let tau = 2.0 * std::f64::consts::PI;
     let has = |c: f64| {
         // c + 2 k pi in [a - margin, b + margin] for some k
-        let m = 1e-9 * (1.0 + a.abs());
+        let m = 1e-9 * (1.0 + a.abs().max(b.abs()));
         ((a - m - c) / tau).ceil() <= ((b + m - c) / tau).floor()
     };
-    if has(std::f64::consts::FRAC_PI_2) {
+    let (max_at, min_at) = if cosine { (0.0, std::f64::consts::PI) } else { (std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2) };
+    if has(max_at) {
         hi = 1.0;
     }
-    if has(-std::f64::consts::FRAC_PI_2) {
+    if has(min_at) {
         lo = -1.0;
     }
     out(lo.max(-1.0), hi.min(1.0)).map(|i| Iv(i.0.max(-1.0), i.1.min(1.0)))
@@ -341,16 +364,21 @@ fn periodic(u: &Expr, x: &str, cs: &[Expr], bd: &Bounds, out: &mut Scan) -> bool
     }
     let tau = 2.0 * std::f64::consts::PI;
     let (u1, u2) = { let (p, q) = (av * bd.lo + bv, av * bd.hi + bv); (p.min(q), p.max(q)) };
-    if (u2 - u1) / tau > 10_000.0 {
+    // a phase too large for floats to tell its zeros apart (cos(x + 10^20),
+    // the third review's T3: the index cast saturated and the range came out
+    // empty) is not analysed
+    if !(u1.abs().max(u2.abs()) < 1e9) || (u2 - u1) / tau > 10_000.0 {
         out.unknown = true;
         return true;
     }
     for c in cs {
-        let Some(cv) = crate::eval::to_f64(c) else {
+        let Some(cv) = crate::eval::to_f64(c).filter(|v| v.abs() < 1e9) else {
             out.unknown = true;
             return true;
         };
-        for k in ((u1 - cv) / tau).floor() as i64 - 1..=((u2 - cv) / tau).ceil() as i64 + 1 {
+        // (|k| < 10^9: no overflow in k or 2 k)
+        let (k0, k1) = (((u1 - cv) / tau).floor() as i64 - 1, ((u2 - cv) / tau).ceil() as i64 + 1);
+        for k in k0..=k1 {
             let t = (cv + k as f64 * tau - bv) / av;
             let e = div(&sub(&add(vec![c.clone(), mul(vec![int(2 * k), pi()])]), &b), &a);
             keep(t, e, bd, out);
@@ -434,6 +462,12 @@ fn scan(e: &Expr, x: &str, bd: &Bounds, out: &mut Scan) {
     if !depends(e, x) {
         return;
     }
+    // the facts below are about real arguments: a function of a complex one
+    // (cosh(I x) = cos(x) vanishes) is not analysed (the third review's T2)
+    if complex_argument(e, x) {
+        out.unknown = true;
+        return;
+    }
     match &e.kind {
         Kind::Pow(b, n) if depends(b, x) && !n.as_rat().map_or(false, |r| r.is_integer() && !r.is_negative()) => {
             // a negative or fractional power: the zeros of its base
@@ -464,6 +498,10 @@ fn scan(e: &Expr, x: &str, bd: &Bounds, out: &mut Scan) {
 /// The zeros of b on (lo, hi), exactly, or b certified nonzero there.
 fn zeros(b: &Expr, x: &str, bd: &Bounds, out: &mut Scan) {
     if !depends(b, x) {
+        return;
+    }
+    if contains_i(b) {
+        out.unknown = true; // complex-valued: the zero sets below are real ones
         return;
     }
     if let Some(p) = QPoly::from_expr(b, x) {
@@ -593,6 +631,15 @@ fn numeric(f: &Expr, x: &str, lo: f64, hi: f64, cuts: &[f64]) -> Option<(f64, f6
     Some((v, err))
 }
 
+/// A function or power of an argument that depends on x and is complex.
+fn complex_argument(e: &Expr, x: &str) -> bool {
+    match &e.kind {
+        Kind::Fun(_, a) => a.iter().any(|t| depends(t, x) && contains_i(t)),
+        Kind::Pow(b, n) => (depends(b, x) || depends(n, x)) && (contains_i(b) || contains_i(n)),
+        _ => false,
+    }
+}
+
 fn contains_i(e: &Expr) -> bool {
     let complex = match &e.kind {
         Kind::Num(crate::num::Num::Exact(_, im)) => !im.is_zero(),
@@ -719,6 +766,9 @@ fn checked_real(f: &Expr, o: Outcome) -> Outcome {
 fn has_singular_parts(e: &Expr, x: &str) -> bool {
     if !depends(e, x) {
         return false;
+    }
+    if complex_argument(e, x) {
+        return true;
     }
     let own = match &e.kind {
         Kind::Sym(_) | Kind::Num(_) | Kind::Add(_) | Kind::Mul(_) => false,
@@ -853,6 +903,30 @@ mod tests {
         approx("exp(x)/(exp(x) + 1)", "0", "1", ((1f64.exp() + 1.0) / 2.0).ln());
         // x + e^x certified nonzero on [0, 1] by interval arithmetic
         approx("(1 + exp(x))/(x + exp(x))", "0", "1", (1.0 + 1f64.exp()).ln());
+    }
+
+    #[test]
+    fn third_review_cases() {
+        // T2: cosh(I x) = cos(x); T3: a phase too large for floats
+        for (f, a, b) in [("1/cosh(I*x)^2", "0", "pi"), ("1/cosh(I*x)^2", "0", "2"), ("1/(10^12*cos(x + 10^20)^2)", "0", "pi"), ("1/(10^12*cos(x + 10^30)^2)", "0", "pi")] {
+            let r = run(f, a, b);
+            assert!(r == "divergent" || r == "unevaluated", "integral of {} on [{}, {}]: {}", f, a, b, r);
+        }
+        // T1: cos over an interval straddling pi/2 contains 0
+        let (a, b) = (std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2.next_up());
+        let i = super::trig(super::Iv(a, b), true).unwrap();
+        assert!(i.contains_zero(), "{:?}", i);
+        for k in 0..2000 {
+            let t = -50.0 + k as f64 * 0.0517;
+            let (l, h) = (t, t + 1e-3 * (k % 7) as f64);
+            for (cosine, f) in [(true, f64::cos as fn(f64) -> f64), (false, f64::sin)] {
+                let i = super::trig(super::Iv(l, h), cosine).unwrap();
+                for j in 0..=4 {
+                    let v = f(l + (h - l) * j as f64 / 4.0);
+                    assert!(i.0 <= v && v <= i.1);
+                }
+            }
+        }
     }
 
     #[test]

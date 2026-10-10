@@ -21,8 +21,8 @@
 use sagebrush_bigint::{BigInt, BigRational};
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
-/// A root to `prec` bits: the center (re, im) and a radius, all fixed point
-/// (scaled by 2^prec); `real`: the root is real (im = 0 then).
+/// A root: the center (re, im) and a radius, all fixed point (scaled by
+/// 2^prec of its Isolated); `real`: the root is real (im = 0 then).
 #[derive(Clone, Debug)]
 pub struct Root {
     pub re: BigInt,
@@ -31,10 +31,22 @@ pub struct Root {
     pub real: bool,
 }
 
+/// Certified disks, kept at the precision they were certified at (at least
+/// the precision asked for): rounding them to fewer bits could make two
+/// disks one (the third review's T4), so callers shift the centers to the
+/// precision they need instead.
 #[derive(Clone, Debug)]
 pub struct Isolated {
     pub prec: u32,
     pub roots: Vec<Root>,
+}
+
+impl Isolated {
+    /// The centers to `prec` bits (prec <= self.prec).
+    pub fn centers(&self, prec: u32) -> Vec<(BigInt, BigInt)> {
+        let sh = (self.prec - prec.min(self.prec)) as usize;
+        self.roots.iter().map(|r| (&r.re >> sh, &r.im >> sh)).collect()
+    }
 }
 
 type Cx = (BigInt, BigInt);
@@ -226,11 +238,6 @@ pub fn real_root_count(f: &[BigInt]) -> usize {
     super::embed::sign_changes(&seq, &-bound.clone()) - super::embed::sign_changes(&seq, &bound)
 }
 
-fn to_prec(roots: &[Root], p: usize, prec: u32) -> Vec<Root> {
-    let sh = p - prec as usize;
-    roots.iter().map(|r| Root { re: &r.re >> sh, im: &r.im >> sh, rad: (&r.rad >> sh) + 2u32, real: r.real }).collect()
-}
-
 /// Run Aberth from z at increasing precision until the roots certify with
 /// radii below 2^-prec.
 fn drive(f: &[BigInt], mut z: Vec<Cx>, mut p: usize, prec: u32, mut iters: usize) -> Result<(Vec<Root>, usize), String> {
@@ -278,15 +285,15 @@ pub fn isolate(f: &[BigInt], prec: u32) -> Result<Isolated, String> {
     if real != exact {
         return Err(format!("root isolation found {} real roots, Sturm {}", real, exact));
     }
-    Ok(Isolated { prec: prec.max(32), roots: to_prec(&roots, p, prec.max(32)) })
+    Ok(Isolated { prec: p as u32, roots })
 }
 
-/// The same roots to more bits, in the same order: each new disk lies in the
-/// old one, which proves the correspondence.
+/// The same roots to at least `prec` bits, in the same order: each new disk
+/// lies in the old one, both sets isolating, which proves the
+/// correspondence.  (Already that precise: the same disks.)
 pub fn refine(f: &[BigInt], old: &Isolated, prec: u32) -> Result<Isolated, String> {
     if prec <= old.prec {
-        let sh = (old.prec - prec) as usize;
-        return Ok(Isolated { prec, roots: old.roots.iter().map(|r| Root { re: &r.re >> sh, im: &r.im >> sh, rad: (&r.rad >> sh) + 2u32, real: r.real }).collect() });
+        return Ok(old.clone());
     }
     let cbits = f.iter().map(|c| c.bits()).max().unwrap_or(1) as usize;
     let p = prec as usize + 64 + cbits;
@@ -301,7 +308,7 @@ pub fn refine(f: &[BigInt], old: &Isolated, prec: u32) -> Result<Isolated, Strin
             return Err("root refinement left its isolating disk".into());
         }
     }
-    Ok(Isolated { prec, roots: to_prec(&roots, p, prec) })
+    Ok(Isolated { prec: p as u32, roots })
 }
 
 #[cfg(test)]
@@ -318,9 +325,10 @@ mod tests {
         let f = vec![BigInt::from(10u64.pow(16) + 1), BigInt::from(-2 * 10i64.pow(8)), BigInt::from(1)];
         let iso = isolate(&f, 80).unwrap();
         assert!(iso.roots.iter().all(|r| !r.real));
-        let one = BigInt::one() << 80usize;
+        let p = iso.prec as usize;
+        let one = BigInt::one() << p;
         for r in &iso.roots {
-            assert!((&r.re - (BigInt::from(10u64.pow(8)) << 80usize)).abs() <= r.rad);
+            assert!((&r.re - (BigInt::from(10u64.pow(8)) << p)).abs() <= r.rad);
             assert!((r.im.abs() - &one).abs() <= r.rad);
         }
         let f = vec![num_traits::pow(BigInt::from(10), 20) + 1u32, BigInt::from(-2 * 10i64.pow(10)), BigInt::from(1)];
@@ -340,9 +348,36 @@ mod tests {
         assert_eq!(iso.roots.iter().filter(|r| r.real).count(), 8);
         // refinement keeps the order
         let fine = refine(&w, &iso, 300).unwrap();
+        let sh = (fine.prec - iso.prec) as usize;
         for (a, c) in iso.roots.iter().zip(&fine.roots) {
-            assert!(((&c.re >> 240usize) - &a.re).abs() <= &a.rad + 2u32);
+            assert!(((&c.re >> sh) - &a.re).abs() <= &a.rad + 2u32);
         }
     }
 }
 
+
+#[cfg(test)]
+mod t4 {
+    use super::*;
+    /// Two roots 1/(3N) apart (the third review's T4): the disks stay
+    /// disjoint whatever precision is asked for, and refinement keeps order.
+    #[test]
+    fn close_roots_keep_their_disks_and_order() {
+        let n = num_traits::pow(BigInt::from(10), 25);
+        // (3 N x + N)(3 N x + N - 1)
+        let a = &n * 3u32;
+        let (b1, b2) = (n.clone(), &n - 1u32);
+        let f = vec![&b1 * &b2, &a * (&b1 + &b2), &a * &a];
+        for prec in [32u32, 64, 256] {
+            let iso = isolate(&f, prec).unwrap();
+            let r = &iso.roots;
+            assert!((&r[0].re - &r[1].re).abs() > &r[0].rad + &r[1].rad, "prec {}", prec);
+            let coarse = refine(&f, &iso, 16).unwrap();
+            let again = refine(&f, &coarse, 512).unwrap();
+            let sh = (again.prec - iso.prec) as usize;
+            for (o, nr) in iso.roots.iter().zip(&again.roots) {
+                assert!(((&nr.re >> sh) - &o.re).abs() <= &o.rad + 2u32);
+            }
+        }
+    }
+}

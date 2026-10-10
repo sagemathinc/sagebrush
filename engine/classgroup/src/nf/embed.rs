@@ -236,7 +236,8 @@ impl Embeddings {
     /// `roots`: refined within their certified disks (nf/roots.rs).
     pub fn roots_hp(&self, f: &[BigInt], prec: u32) -> Result<Vec<(BigInt, BigInt)>, String> {
         let iso = super::roots::refine(f, &self.iso, prec)?;
-        Ok(self.order.iter().map(|&i| (iso.roots[i].re.clone(), iso.roots[i].im.clone())).collect())
+        let c = iso.centers(prec);
+        Ok(self.order.iter().map(|&i| c[i].clone()).collect())
     }
 
     /// The logarithmic embedding of x (order coordinates) to `prec` bits:
