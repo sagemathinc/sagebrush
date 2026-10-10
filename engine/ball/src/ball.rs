@@ -268,6 +268,20 @@ impl Ball {
         cmp_dyadic(&sl, sle, &ou, oue) != Ordering::Greater && cmp_dyadic(&ol, ole, &su, sue) != Ordering::Greater
     }
 
+    /// The smallest ball (to the radius's rounding) containing a and b.
+    pub fn hull(a: &Ball, b: &Ball) -> Ball {
+        let (al, ale) = a.lower();
+        let (bl, ble) = b.lower();
+        let (au, aue) = a.upper();
+        let (bu, bue) = b.upper();
+        let (lo, loe) = if cmp_dyadic(&al, ale, &bl, ble) == Ordering::Less { (al, ale) } else { (bl, ble) };
+        let (hi, hie) = if cmp_dyadic(&au, aue, &bu, bue) == Ordering::Greater { (au, aue) } else { (bu, bue) };
+        // mid = (lo + hi)/2 exactly, rad = (hi - lo)/2 rounded up
+        let (s, se) = add_dyadic(&lo, loe, &hi, hie);
+        let (d, de) = add_dyadic(&hi, hie, &-lo, loe);
+        Ball { m: s, e: se - 1, r: Mag::from_bigint_up(&d, de - 1) }
+    }
+
     pub fn neg(&self) -> Ball {
         Ball { m: -&self.m, e: self.e, r: self.r }
     }
