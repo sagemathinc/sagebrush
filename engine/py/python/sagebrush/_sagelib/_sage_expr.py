@@ -54,9 +54,10 @@ def _to_s(v):
     if isinstance(v, bool):
         return "n%d/1;" % int(v)
     if isinstance(v, int):
-        return "n%d/1;" % v
+        return "n%d/1;" % int(v)
     if isinstance(v, _Fraction):
-        return "n%d/%d;" % (v.numerator, v.denominator)
+        # exact ints first: formatting an int subclass must not round it
+        return "n%d/%d;" % (int(v.numerator), int(v.denominator))
     if isinstance(v, float):
         return _float_s(v)
     if isinstance(v, complex):

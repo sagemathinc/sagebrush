@@ -1,6 +1,6 @@
 // repr(), str(), format() and `str % args`.
 
-import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout } from "./object";
+import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout, PrimBox } from "./object";
 import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice } from "./ops";
 
 const isInt = Number.isInteger;
@@ -477,6 +477,9 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
   const intOf = (v: any, type: string, needIndex: boolean): bigint => {
     if (typeof v === "boolean") return BigInt(+v);
     if (isPyInt(v)) return BigInt(v);
+    // an int subclass: its exact value (fv would round it through a double,
+    // changing 2^53 + 1: the fifth review's V1)
+    if (v instanceof PrimBox && isPyInt(v.$v)) return BigInt(v.$v);
     if (!needIndex && fv(v) !== undefined) return BigInt(Math.trunc(fv(v)!));
     for (const name of needIndex ? ["__index__"] : ["__index__", "__int__"]) {
       const f = lookupType(typeOf(v), name);

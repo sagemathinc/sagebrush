@@ -26,3 +26,10 @@ test("sum(range(10**9)) stays fast past 2^53", () => {
 test("weakref equality and hashing; isinstance on an ABC hits its cache", () => {
   assert.equal(cli("-c", "import weakref, numbers\nclass C: pass\nc, d = C(), C(); r = weakref.ref(c)\nprint(r == weakref.ref(c), r != weakref.ref(d), r == weakref.ref(d), {r: 1}[weakref.ref(c)], r == 3)\nws = weakref.WeakSet([c]); print(c in ws, d in ws, len(ws))\nfor i in range(1000): isinstance(i, numbers.Rational)\nprint(len(numbers.Rational._abc_cache), len(numbers.Integral._abc_negative_cache))\n"), "True True False 1 False\nTrue False 1\n1 0\n");
 });
+
+// %-formatting an int subclass uses its exact value (it went through a
+// double: QQ(1)/(2**53+1) became 1/9007199254740992 in SR, the fifth
+// review's V1); floats still truncate
+test("%d and %x of int subclasses are exact", () => {
+  assert.equal(cli("-c", "class I(int): pass\nn = I(2**53 + 1)\nprint('%d %x %i' % (n, n, I(2**70 + 1)), '%d' % 2.75, '%d' % I(-5))\n"), "9007199254740993 20000000000001 1180591620717411303425 2 -5\n");
+});
