@@ -60,6 +60,20 @@ try {
   // the component's own state after it: no echo back to the store
   await sleep(800);
   ok(await a.ev("demo.store.doc.cells[0].id === 'remote1' && demo.store.doc.cells.length === 3"), "the store and the notebook agree after the change");
+  // raw cells and cell metadata (tags, ...) are kept through edits (audit F8)
+  const raw = await a.ev(`(async () => {
+    const nb = demo.nb, doc = nb.snapshot();
+    doc.cells = [{ id: "raw1", type: "raw", code: "\\\\section{Results}", metadata: { raw_mimetype: "text/latex" } },
+                 { ...doc.cells[0], metadata: { tags: ["parameters"] } }];
+    demo.store.push(doc);
+    const [r, c] = nb.cells();
+    await nb.run(r);
+    nb.setInput(c, "2 + 2");
+    nb.flush();
+    const s = demo.store.doc.cells;
+    return { cls: r.el.classList.contains("raw"), out: r.out.textContent, sel: r.typeSel.value, type: s[0].type, rawMeta: s[0].metadata?.raw_mimetype, tags: s[1].metadata?.tags?.join(), code: s[1].code };
+  })()`);
+  ok(raw.cls && raw.out === "" && raw.sel === "raw" && raw.type === "raw" && raw.rawMeta === "text/latex" && raw.tags === "parameters" && raw.code === "2 + 2", "raw cells stay raw and are not run; cell metadata survives an edit: " + JSON.stringify(raw));
 
   // ---- the full page, in two tabs: the same notebook stays in step
   await a.send("Page.navigate", { url: base });

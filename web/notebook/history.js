@@ -3,7 +3,7 @@
 // primary keys type and id, string column input):
 //
 //   {type: "settings", kernel: "python3" | "sagemath" | "magma"}
-//   {type: "cell", id, pos, input, cell_type: "code" | "markdown"}
+//   {type: "cell", id, pos, input, cell_type: "code" | "markdown" | "raw"}
 //
 // Outputs are not kept: only what was typed.  Each change is a patch with its
 // parents (diff-match-patch for the text of a cell), so the history is
@@ -22,7 +22,7 @@ export function toRecords(doc) {
   let d = codec.fromString("");
   d = d.set({ type: "settings", kernel: KERNEL[doc.mode] ?? "python3" });
   (doc.cells ?? []).forEach((c, i) => {
-    d = d.set({ type: "cell", id: c.id, pos: i, input: c.code ?? "", cell_type: c.type === "markdown" ? "markdown" : "code" });
+    d = d.set({ type: "cell", id: c.id, pos: i, input: c.code ?? "", cell_type: c.type === "markdown" || c.type === "raw" ? c.type : "code" });
   });
   return d;
 }
@@ -30,7 +30,7 @@ export function toRecords(doc) {
 export function fromRecords(d) {
   const kernel = d.getOne({ type: "settings" })?.kernel;
   const cells = d.get({ type: "cell" }).slice().sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0))
-    .map((r) => (r.cell_type === "markdown" ? { id: r.id, type: "markdown", code: r.input ?? "" } : { id: r.id, code: r.input ?? "" }));
+    .map((r) => (r.cell_type === "markdown" || r.cell_type === "raw" ? { id: r.id, type: r.cell_type, code: r.input ?? "" } : { id: r.id, code: r.input ?? "" }));
   return { mode: MODE[kernel] ?? "python", cells };
 }
 
