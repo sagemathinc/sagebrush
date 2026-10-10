@@ -12,6 +12,8 @@ pub mod expand;
 pub mod expr;
 pub mod func;
 pub mod integrate;
+pub mod interval;
+pub mod domain;
 pub mod limit;
 pub mod num;
 pub mod ode;
