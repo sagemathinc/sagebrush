@@ -79,7 +79,11 @@ pub fn eliminate_tracked(n: usize, rels: &[Relation], max_weight: usize, mut pay
             // could exceed 2^50
             let pmax = rows[pk as usize].iter().map(|x| x.1.unsigned_abs()).max().unwrap_or(0);
             let emax = list.iter().map(|&k| get(&rows[k as usize], cu).unsigned_abs()).max().unwrap_or(0);
-            if pmax.saturating_mul(emax) > 1 << 50 {
+            // and the entries they are subtracted from: r - f pivot stays
+            // below 2^61 (the systematic review's LIN-F6: an entry near
+            // i64::MIN wrapped around)
+            let rmax = list.iter().flat_map(|&k| rows[k as usize].iter().map(|x| x.1.unsigned_abs())).max().unwrap_or(0);
+            if pmax.saturating_mul(emax) > 1 << 50 || rmax > 1 << 60 {
                 col_rows[c] = list;
                 continue;
             }
@@ -260,10 +264,12 @@ pub fn det_crt(m: &[Vec<i64>]) -> BigInt {
 }
 
 /// The determinant by CRT, stopping early once the symmetric residue has
-/// not changed for two more primes: wrong with probability about 2^-50
-/// (a determinant that happens to agree with a smaller one mod two random
-/// primes of 25 or more bits).  Actual determinants are usually far below the Hadamard
-/// bound, so this is much cheaper.
+/// not changed for two more primes (actual determinants are usually far
+/// below the Hadamard bound, so this is much cheaper).  A heuristic, not a
+/// probability bound: the primes are a fixed sequence, so a determinant
+/// divisible by the first ones fools it (the systematic review's LIN-F2:
+/// the product of the first two primes came out 0).  Callers that need the
+/// exact value use det_crt or check what they derive from it.
 pub fn det_crt_probable(m: &[Vec<i64>]) -> BigInt {
     det_crt_impl(m, true)
 }
@@ -286,7 +292,9 @@ fn det_crt_impl(m: &[Vec<i64>], early: bool) -> BigInt {
         let r = det_mod_p(m, p);
         let bp = BigInt::from(p);
         let vm = value.mod_floor(&bp).to_u64().unwrap();
-        if vm == r {
+        // (the first prime never counts as stable: the initial 0 agrees with
+        // a residue 0 by accident)
+        if vm == r && !modulus.is_one() {
             stable += 1;
         } else {
             stable = 0;
@@ -344,9 +352,27 @@ fn solve_mod_p(a: &[Vec<i64>], vs: &[Vec<i64>], p: u64) -> (u64, Vec<Vec<u64>>) 
 
 /// det(A) and the integer vectors y_t = v_t adj(A) (y_t A = det(A) v_t),
 /// by CRT over 31-bit primes, stopping once every value has been stable
-/// for two primes (as det_crt_probable).  Each y_t with -det(A) e_v is a
+/// for two primes, then checked exactly (y_t A = det v_t), else continued
+/// to the Hadamard bound.  Primes dividing det(A) are skipped: modulo them
+/// the solve gives no adjugate (the systematic review's LIN-F1: [[p]] with
+/// p the second prime got a wrong y).  Each y_t with -det(A) e_v is a
 /// kernel vector of the rows [A; v_t].
 pub fn kernel_crt(a: &[Vec<i64>], vs: &[Vec<i64>]) -> (BigInt, Vec<Vec<BigInt>>) {
+    let r = kernel_crt_impl(a, vs, true);
+    if kernel_identity_holds(a, vs, &r) {
+        return r;
+    }
+    kernel_crt_impl(a, vs, false)
+}
+
+/// y_t A = det v_t for every t, exactly.
+fn kernel_identity_holds(a: &[Vec<i64>], vs: &[Vec<i64>], (det, ys): &(BigInt, Vec<Vec<BigInt>>)) -> bool {
+    let n = a.len();
+    let m = a.first().map_or(0, |r| r.len());
+    ys.iter().zip(vs).all(|(y, v)| (0..m).all(|j| (0..n).map(|i| &y[i] * a[i][j]).sum::<BigInt>() == det * v[j]))
+}
+
+fn kernel_crt_impl(a: &[Vec<i64>], vs: &[Vec<i64>], early: bool) -> (BigInt, Vec<Vec<BigInt>>) {
     let n = a.len();
     let k = vs.len();
     // all values: det, then the y's
@@ -355,17 +381,28 @@ pub fn kernel_crt(a: &[Vec<i64>], vs: &[Vec<i64>]) -> (BigInt, Vec<Vec<BigInt>>)
     let mut stable = 0;
     let mut p: u64 = (1 << 31) - 1;
     let log2_bound: f64 = a.iter().chain(vs).map(|r| 0.5 * r.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().log2().max(0.0)).sum::<f64>() + 2.0;
-    while stable < 2 && (modulus.bits() as f64) < log2_bound {
+    let mut skipped_bits = 0.0f64;
+    while !(early && stable >= 2) && (modulus.bits() as f64) < log2_bound {
         sagebrush_interrupt::check();
         while !crate::relations::is_prime_u64(p) {
             p -= 2;
         }
         let (det, ys) = solve_mod_p(a, vs, p);
+        if det == 0 {
+            // p | det(A): no adjugate from this prime.  When the skipped
+            // primes alone exceed the bound, det(A) = 0.
+            skipped_bits += (p as f64).log2();
+            if skipped_bits >= log2_bound {
+                return (BigInt::zero(), vec![vec![BigInt::zero(); n]; k]);
+            }
+            p -= 2;
+            continue;
+        }
         let residues: Vec<u64> = std::iter::once(det).chain(ys.into_iter().flatten()).collect();
         let bp = BigInt::from(p);
         let mm = modulus.mod_floor(&bp).to_u64().unwrap();
         let minv = crate::arith::invmod(mm, p);
-        let mut changed = false;
+        let mut changed = modulus.is_one();
         let new_modulus = &modulus * &bp;
         for (v, &r) in value.iter_mut().zip(&residues) {
             let vm = v.mod_floor(&bp).to_u64().unwrap();
@@ -784,6 +821,26 @@ pub fn smith(m: &[Vec<BigInt>]) -> Vec<BigInt> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn crt_review_counterexamples() {
+        use super::*;
+        // LIN-F1: the second prime divides det [[p]]: y = adj = [1]
+        let (d, ys) = kernel_crt(&[vec![2147483629]], &[vec![1]]);
+        assert_eq!((d, ys), (BigInt::from(2147483629i64), vec![vec![BigInt::one()]]));
+        // the product of the first two primes as a 1 x 1 determinant
+        let (d, ys) = kernel_crt(&[vec![2147483647i64 * 2147483629]], &[vec![3]]);
+        assert_eq!(d, BigInt::from(2147483647i64 * 2147483629));
+        assert_eq!(ys, vec![vec![BigInt::from(3)]]);
+        // LIN-F2: the first two primes of det_crt_probable for a 1 x 1
+        let x = 1073741789i64 * 1073741783;
+        assert_eq!(det_crt(&[vec![x]]), BigInt::from(x));
+        assert_ne!(det_crt_probable(&[vec![x]]), BigInt::zero());
+        // LIN-F6: no wrapped entries
+        if let Reduced::Core(_, dense) = eliminate(2, &[vec![(0, 1), (1, 2)], vec![(0, 1), (1, i64::MIN)]], 2) {
+            assert!(dense.iter().flatten().all(|&v| v != 9223372036854775806), "{:?}", dense);
+        }
+    }
+
     use super::*;
 
     fn bm(v: &[&[i64]]) -> Vec<Vec<BigInt>> {

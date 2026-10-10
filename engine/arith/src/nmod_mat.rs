@@ -403,7 +403,8 @@ impl Mat {
         let n = self.rows;
         let mut a = self.augment(b);
         let piv = a.rref();
-        if piv.len() < n || piv[n - 1] != n - 1 {
+        // (n = 0: the empty solution; piv[n - 1] would panic)
+        if n > 0 && (piv.len() < n || piv[n - 1] != n - 1) {
             return None;
         }
         Some(a.columns(n, a.cols))

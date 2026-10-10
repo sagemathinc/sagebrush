@@ -517,10 +517,13 @@ class Matrix:
         [ 3/2 -1/2], -2, [15 22]
         )
     """
-    __slots__ = ("_base", "_rows", "_subdiv")
+    __slots__ = ("_base", "_rows", "_subdiv", "_nc")
 
-    def __init__(self, base, rows):
+    def __init__(self, base, rows, ncols=None):
         self._rows = [[_norm(x) for x in r] for r in rows]
+        # the number of columns, kept when there are no rows (a 0 x 3
+        # matrix was 0 x 0: the systematic review's LIN-F4)
+        self._nc = len(self._rows[0]) if self._rows else (ncols or 0)
         if base is _sa().ZZ and any(not isinstance(x, int) for r in self._rows for x in r):
             raise TypeError("matrix entries are not all integers")
         self._base = base
@@ -598,7 +601,7 @@ class Matrix:
             sage: matrix(ZZ, [[1, 2, 3], [4, 5, 6]]).ncols()
             3
         """
-        return len(self._rows[0]) if self._rows else 0
+        return len(self._rows[0]) if self._rows else getattr(self, "_nc", 0)
 
     def dimensions(self):
         """(nrows, ncols).
@@ -628,7 +631,7 @@ class Matrix:
             sage: matrix(ZZ, [[1, 2], [3, 4]]).columns()
             [(1, 3), (2, 4)]
         """
-        return [Vector(c) for c in zip(*self._rows)] if self._rows else []
+        return [Vector(c) for c in zip(*self._rows)] if self._rows else [Vector([]) for _ in range(self.ncols())]
 
     def list(self):
         """The entries, row by row.
@@ -786,7 +789,7 @@ class Matrix:
             [3 6], True
             )
         """
-        return Matrix(self._base, self.columns())
+        return Matrix(self._base, self.columns(), self.nrows())
 
     T = property(transpose)
 
@@ -1089,7 +1092,10 @@ class Matrix:
         return _smith_uv(self._integer_rows())
 
     def LLL(self, delta=None, **kwds):
-        """The LLL-reduced basis of the lattice spanned by the rows.
+        """The LLL-reduced basis of the lattice spanned by the rows, with
+        delta = 99/100 (so also reduced for any smaller delta); a delta
+        above 99/100 is NotImplementedError, one outside (1/4, 1] a
+        ValueError (it was ignored: the systematic review's LIN-F3).
 
         EXAMPLES::
 
@@ -1097,8 +1103,19 @@ class Matrix:
             [ 0  0  1]
             [-1  1  0]
             [ 2  1  0]
+            sage: matrix(ZZ, [[10, 1], [0, 10]]).LLL(delta=0.999)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: LLL with delta > 99/100 is not implemented
         """
+        from fractions import Fraction
         from sagebrush import nf
+        if delta is not None:
+            d = Fraction(str(delta)) if isinstance(delta, float) else Fraction(delta)
+            if not (Fraction(1, 4) < d <= 1):
+                raise ValueError("delta must be in (1/4, 1]")
+            if d > Fraction(99, 100):
+                raise NotImplementedError("LLL with delta > 99/100 is not implemented")
         return Matrix(_sa().ZZ, nf.lll(self._integer_rows()))
 
     def kernel_dimension(self):
@@ -1872,6 +1889,7 @@ def matrix(*args, **kwds):
         [1 2 3]
         [4 5 6]
     """
+    ncols = None  # (kept for a matrix with no rows)
     sa = _sa()
     base = None
     import _sage_ffmat
@@ -1886,6 +1904,7 @@ def matrix(*args, **kwds):
     if len(args) >= 2 and isinstance(args[0], int) and isinstance(args[1], int):
         r, c = args[0], args[1]
         ent = args[2] if len(args) > 2 else 0
+        ncols = c
         if isinstance(ent, (int, _F)) or type(ent).__name__ == "Rational":
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
         else:
@@ -1920,7 +1939,7 @@ def matrix(*args, **kwds):
                 return 2
         k = max([kind(x) for r in rows for x in r] or [0])
         base = (sa.ZZ, sa.QQ, sa.SR)[k]
-    return Matrix(base, rows)
+    return Matrix(base, rows, ncols)
 
 
 Matrix_ = matrix
