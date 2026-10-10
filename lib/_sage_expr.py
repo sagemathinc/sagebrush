@@ -2667,9 +2667,13 @@ def integrate_steps(f, *args):
     return IntegrationSteps(rows, f, v)
 
 
-def numerical_integral(f, a, b, max_points=87, params=None, eps_abs=1e-6, eps_rel=1e-6, rule=6, algorithm="qag"):
+def numerical_integral(f, a, b, max_points=None, params=None, eps_abs=1e-6, eps_rel=1e-6, rule=6, algorithm="qag"):
     """(value, error estimate) of the integral of f from a to b: adaptive
-    Gauss-Kronrod (7-15 points); infinite bounds through x = t/(1 - t^2).
+    Gauss-Kronrod (7-15 points, whatever `rule`); infinite bounds through
+    x = t/(1 - t^2).  At most max_points subintervals (200 by default); params are passed to
+    a Python function f(x, *params).  When the tolerance is not met (or the
+    values are not finite) a warning says so: the estimate is then not
+    reliable.
 
     EXAMPLES::
 
@@ -2678,12 +2682,16 @@ def numerical_integral(f, a, b, max_points=87, params=None, eps_abs=1e-6, eps_re
         sage: numerical_integral(exp(-x^2), 0, 1)[0]  # abs tol 1e-12
         0.746824132812427
     """
+    if algorithm not in ("qag", "qng"):
+        raise ValueError("algorithm must be 'qag' or 'qng'")
     if isinstance(f, Expression) or hasattr(f, "_fast_callable"):
         names = f._names() if isinstance(f, Expression) else None
         g = f._fast_callable(names[:1] if names else ([] if names is not None else None))
         if names is not None and not names:
             c = float(f)
             g = lambda t: c
+    elif params:
+        g = lambda t, _f=f, _p=tuple(params): _f(t, *_p)
     else:
         g = f
     a, b = float(a), float(b)
@@ -2705,7 +2713,14 @@ def numerical_integral(f, a, b, max_points=87, params=None, eps_abs=1e-6, eps_re
             lo, hi = 0.0, 1.0
     else:
         h, lo, hi = g, a, b
-    v, e = _gk_adaptive(h, lo, hi, max(eps_abs, 1e-14), eps_rel)
+    limit = 1 if algorithm == "qng" else 200 if max_points is None else max(1, int(max_points))
+    v, e = _gk_adaptive(h, lo, hi, max(eps_abs, 1e-14), eps_rel, limit)
+    if not (_m.isfinite(v) and _m.isfinite(e)):
+        import warnings
+        warnings.warn("numerical_integral: the integrand is not finite on the interval")
+    elif e > max(eps_abs, eps_rel * abs(v)):
+        import warnings
+        warnings.warn("numerical_integral: the requested tolerance was not met (error estimate %g after %d subintervals); the result is not reliable" % (e, limit))
     return (sign * v, e)
 
 

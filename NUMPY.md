@@ -81,7 +81,11 @@ be **byte-identical**. All 13 pass, and CI runs them.
 - `np.save`/`np.load` (`savetxt`/`loadtxt` exist);
 - complex `linalg`;
 - int64 and uint64 are exact only up to 2^53, since they are stored as
-  doubles.
+  doubles;
+- float16 (half) is stored as float32 (so values and rounding differ from
+  NumPy's float16), and longdouble is float64;
+- `.flat` of a noncontiguous array is a read-only copy (writing through it
+  raises instead of reaching the array).
 
 ## Speed
 

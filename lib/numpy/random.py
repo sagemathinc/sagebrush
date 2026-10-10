@@ -70,6 +70,7 @@ class RandomState:
         return _r.legacy_gauss(self._g, _size(size))
 
     def normal(self, loc=0.0, scale=1.0, size=None):
+        _nonneg(scale, "scale")
         if size is None and (isinstance(loc, _np.ndarray) or isinstance(scale, _np.ndarray)):
             size = _np.broadcast_shapes(_np.shape(loc), _np.shape(scale))
         z = _r.legacy_gauss(self._g, _size(size))
@@ -85,6 +86,7 @@ class RandomState:
         return _r.legacy_exponential(self._g, _size(size))
 
     def exponential(self, scale=1.0, size=None):
+        _nonneg(scale, "scale")
         return scale * _r.legacy_exponential(self._g, _size(size))
 
     def poisson(self, lam=1.0, size=None):
@@ -130,7 +132,8 @@ class RandomState:
         shape = size
         if replace:
             if p is not None:
-                cdf = _np.cumsum(_np.asarray(p, float))
+                p = _check_p(p, n)
+                cdf = _np.cumsum(p)
                 cdf /= cdf[-1]
                 u = self.random_sample(shape)
                 idx = _np.searchsorted(cdf, u, side="right")
@@ -174,6 +177,44 @@ permutation = _global.permutation
 choice = _global.choice
 
 
+def _osize(size, out):
+    """The size of the draw: out's shape when an output array is given."""
+    if out is None:
+        return size
+    if size is not None and tuple(_np.atleast_1d(size)) != out.shape:
+        raise ValueError("size must match out.shape when used together")
+    return out.shape
+
+
+def _fill(r, dtype, out):
+    # only float64 streams are implemented: a float32 stream draws
+    # differently in NumPy, so another dtype is refused, not converted
+    if _np.dtype(dtype) != _np.float64:
+        raise NotImplementedError("only dtype=float64 is implemented for this distribution")
+    if out is None:
+        return r
+    if out.dtype != _np.float64:
+        raise TypeError("Supplied output array has the wrong type. Expected float64, got %s" % out.dtype)
+    out[...] = r
+    return out
+
+
+def _nonneg(x, name):
+    if _np.any(_np.asarray(x) < 0):
+        raise ValueError("%s < 0" % name)
+
+
+def _check_p(p, n):
+    p = _np.asarray(p, float)
+    if p.ndim != 1 or len(p) != n:
+        raise ValueError("'a' and 'p' must have same size")
+    if _np.any(p < 0) or not _np.all(_np.isfinite(p)):
+        raise ValueError("probabilities are not non-negative")
+    if abs(float(p.sum()) - 1.0) > _math.sqrt(_np.finfo(_np.float64).eps):
+        raise ValueError("probabilities do not sum to 1")
+    return p
+
+
 class Generator:
     """numpy.random.Generator over PCG64 (see the module docstring for which
     methods reproduce NumPy's stream)."""
@@ -188,7 +229,7 @@ class Generator:
         return "Generator(PCG64)"
 
     def random(self, size=None, dtype=_np.float64, out=None):
-        return _r.doubles(self._g, _size(size))
+        return _fill(_r.doubles(self._g, _size(_osize(size, out))), dtype, out)
 
     def integers(self, low, high=None, size=None, dtype=_np.int64, endpoint=False):
         if high is None:
@@ -206,15 +247,19 @@ class Generator:
         return low + (high - low) * u
 
     def standard_normal(self, size=None, dtype=_np.float64, out=None):
-        return _r.zig_normal(self._g, _size(size))
+        return _fill(_r.zig_normal(self._g, _size(_osize(size, out))), dtype, out)
 
     def normal(self, loc=0.0, scale=1.0, size=None):
+        _nonneg(scale, "scale")
         return loc + scale * _r.zig_normal(self._g, _size(size))
 
     def standard_exponential(self, size=None, dtype=_np.float64, method="zig", out=None):
-        return _r.zig_exponential(self._g, _size(size))
+        if method != "zig":
+            raise NotImplementedError("standard_exponential: only method='zig' is implemented")
+        return _fill(_r.zig_exponential(self._g, _size(_osize(size, out))), dtype, out)
 
     def exponential(self, scale=1.0, size=None):
+        _nonneg(scale, "scale")
         return scale * _r.zig_exponential(self._g, _size(size))
 
     def poisson(self, lam=1.0, size=None):
@@ -246,7 +291,8 @@ class Generator:
         n = len(pop)
         if replace:
             if p is not None:
-                cdf = _np.cumsum(_np.asarray(p, float))
+                p = _check_p(p, n)
+                cdf = _np.cumsum(p)
                 cdf /= cdf[-1]
                 idx = _np.searchsorted(cdf, self.random(size), side="right")
             else:

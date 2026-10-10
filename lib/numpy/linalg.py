@@ -56,8 +56,11 @@ def det(a):
 def slogdet(a):
     a = _float(a)
     _square(a)
-    s, l = _L.slogdet(a)
-    return _SlogdetResult(_np.float64(s), _np.float64(l))
+    if a.ndim == 2:
+        s, l = _L.slogdet(a)
+        return _SlogdetResult(_np.float64(s), _np.float64(l))
+    s, l = _stacked(lambda m: tuple(_L.slogdet(m)), a)
+    return _SlogdetResult(_np.asarray(s, _np.float64), _np.asarray(l, _np.float64))
 
 
 class _SlogdetResult(tuple):
@@ -78,11 +81,19 @@ class _SlogdetResult(tuple):
 
 
 def solve(a, b):
+    """NumPy 2: b of shape (M,) is one vector for every matrix of the stack;
+    otherwise b is (..., M, K), its stack dimensions broadcast with a's."""
     a, b = _float(a), _float(b)
     _square(a)
     if a.ndim == 2:
         return _L.solve(a, b)
-    return _np.array([_L.solve(a[i], b[i]) for i in range(a.shape[0])])
+    if b.ndim == 1:
+        flat = a.reshape((-1,) + a.shape[-2:])
+        return _np.array([_L.solve(flat[i], b) for i in range(flat.shape[0])]).reshape(a.shape[:-1])
+    lead = _np.broadcast_shapes(a.shape[:-2], b.shape[:-2])
+    A = _np.broadcast_to(a, lead + a.shape[-2:]).reshape((-1,) + a.shape[-2:])
+    B = _np.broadcast_to(b, lead + b.shape[-2:]).reshape((-1,) + b.shape[-2:])
+    return _np.array([_L.solve(A[i], B[i]) for i in range(A.shape[0])]).reshape(lead + b.shape[-2:])
 
 
 def inv(a):
@@ -206,7 +217,9 @@ def matrix_rank(A, tol=None, hermitian=False, *, rtol=None):
         return int(not _np.all(A == 0))
     S = svd(A, compute_uv=False)
     if tol is None:
-        tol = S.max(axis=-1, keepdims=True) * max(A.shape[-2:]) * _np.finfo(_np.float64).eps
+        if rtol is None:
+            rtol = max(A.shape[-2:]) * _np.finfo(_np.float64).eps
+        tol = S.max(axis=-1, keepdims=True) * rtol
     return _np.count_nonzero(S > tol, axis=-1)
 
 

@@ -20,6 +20,8 @@ def _scale(norm, n, inverse):
 
 def _resize(a, n, axis):
     m = a.shape[axis]
+    if n is not None and int(n) < 1:
+        raise ValueError("Invalid number of FFT data points (%d) specified." % n)
     if n is None or n == m:
         return a
     if n < m:
@@ -36,9 +38,10 @@ def _raw(a, n, axis, inverse, norm):
     a = _resize(_np.asarray(a0, _np.complex128), n, axis)
     if a.shape[axis] < 1:
         raise ValueError("Invalid number of FFT data points (%d) specified." % a.shape[axis])
-    x = _np.moveaxis(a, axis, -1)
-    if x is a0 or a is a0 or axis % a.ndim != a.ndim - 1:
-        x = x.copy()  # never transform the caller's array in place
+    # always a fresh contiguous array: the kernel transforms rows of
+    # contiguous memory in place, and a slice (n < len) or a strided view
+    # must neither be mutated nor read as if contiguous
+    x = _np.moveaxis(a, axis, -1).copy()
     N = x.shape[-1]
     _npfft.rows(x, x.size // N if N else 0, N, inverse)
     s = _scale(norm, N, inverse)
@@ -47,24 +50,37 @@ def _raw(a, n, axis, inverse, norm):
     return _np.moveaxis(x, -1, axis)
 
 
+def _out(r, out):
+    """Store the result in a supplied output array (NumPy's out=)."""
+    if out is None:
+        return r
+    if out.shape != r.shape:
+        raise ValueError("out has shape %s, expected %s" % (out.shape, r.shape))
+    out[...] = r
+    return out
+
+
 def fft(a, n=None, axis=-1, norm=None, out=None):
-    return _raw(a, n, axis, False, norm)
+    return _out(_raw(a, n, axis, False, norm), out)
 
 
 def ifft(a, n=None, axis=-1, norm=None, out=None):
-    return _raw(a, n, axis, True, norm)
+    return _out(_raw(a, n, axis, True, norm), out)
 
 
 def rfft(a, n=None, axis=-1, norm=None, out=None):
+    return _out(_rfft(a, n, axis, norm), out)
+
+
+def _rfft(a, n, axis, norm):
     a = _np.asarray(a)
     if a.dtype.kind == "c":
         a = a.real
     a = _resize(_np.asarray(a, _np.float64), n, axis)
     N = a.shape[axis]
     if N >= 2 and N % 2 == 0:
-        x = _np.moveaxis(a, axis, -1)
-        if axis % a.ndim != a.ndim - 1:
-            x = x.copy()  # rfft_rows reads contiguous rows (and never writes them)
+        # rfft_rows reads contiguous rows: a strided input (a[::2]) is copied
+        x = _np.moveaxis(a, axis, -1).copy()
         res = _np.zeros(x.shape[:-1] + (N // 2 + 1,), _np.complex128)
         _npfft.rfft_rows(x, x.size // N, N, res)
         s = _scale(norm, N, False)
@@ -79,6 +95,10 @@ def rfft(a, n=None, axis=-1, norm=None, out=None):
 
 
 def irfft(a, n=None, axis=-1, norm=None, out=None):
+    return _out(_irfft(a, n, axis, norm), out)
+
+
+def _irfft(a, n, axis, norm):
     a = _np.asarray(a, _np.complex128)
     m = a.shape[axis]
     if n is None:
@@ -129,7 +149,7 @@ def fftn(a, s=None, axes=None, norm=None, out=None):
     s, axes = _axes(a, s, axes)
     for n, ax in zip(s, axes):
         a = fft(a, n, ax, norm)
-    return a
+    return _out(a, out)
 
 
 def ifftn(a, s=None, axes=None, norm=None, out=None):
@@ -137,15 +157,15 @@ def ifftn(a, s=None, axes=None, norm=None, out=None):
     s, axes = _axes(a, s, axes)
     for n, ax in zip(s, axes):
         a = ifft(a, n, ax, norm)
-    return a
+    return _out(a, out)
 
 
 def fft2(a, s=None, axes=(-2, -1), norm=None, out=None):
-    return fftn(a, s, axes, norm)
+    return fftn(a, s, axes, norm, out)
 
 
 def ifft2(a, s=None, axes=(-2, -1), norm=None, out=None):
-    return ifftn(a, s, axes, norm)
+    return ifftn(a, s, axes, norm, out)
 
 
 def rfftn(a, s=None, axes=None, norm=None, out=None):
@@ -154,7 +174,7 @@ def rfftn(a, s=None, axes=None, norm=None, out=None):
     a = rfft(a, s[-1], axes[-1], norm)
     for n, ax in zip(s[:-1], axes[:-1]):
         a = fft(a, n, ax, norm)
-    return a
+    return _out(a, out)
 
 
 def irfftn(a, s=None, axes=None, norm=None, out=None):
@@ -165,15 +185,15 @@ def irfftn(a, s=None, axes=None, norm=None, out=None):
         s = [a.shape[ax] for ax in axes[:-1]] + [2 * (a.shape[axes[-1]] - 1)]
     for n, ax in zip(s[:-1], axes[:-1]):
         a = ifft(a, n, ax, norm)
-    return irfft(a, s[-1], axes[-1], norm)
+    return irfft(a, s[-1], axes[-1], norm, out)
 
 
 def rfft2(a, s=None, axes=(-2, -1), norm=None, out=None):
-    return rfftn(a, s, axes, norm)
+    return rfftn(a, s, axes, norm, out)
 
 
 def irfft2(a, s=None, axes=(-2, -1), norm=None, out=None):
-    return irfftn(a, s, axes, norm)
+    return irfftn(a, s, axes, norm, out)
 
 
 def fftfreq(n, d=1.0, device=None):

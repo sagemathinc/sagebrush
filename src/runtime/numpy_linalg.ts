@@ -162,8 +162,12 @@ function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64A
       continue;
     }
     const alpha = cj[j] > 0 ? -norm : norm;
-    for (let i = j; i < m; i++) v[i] = cj[i];
-    v[j] -= alpha;
+    // v = (x - alpha e_j) / (x_j - alpha): entries at most 1 in size, so
+    // v.v neither underflows (x ~ 1e-200) nor overflows (x ~ 1e200); the
+    // reflection I - beta v v^T is unchanged by the scaling
+    const d = cj[j] - alpha;
+    for (let i = j; i < m; i++) v[i] = cj[i] / d;
+    v[j] = 1;
     const vv = dot4(v, j, v, j, m - j);
     const beta = vv === 0 ? 0 : 2 / vv;
     for (let c = j; c < n; c++) {
