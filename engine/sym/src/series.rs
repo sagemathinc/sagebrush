@@ -120,8 +120,26 @@ impl Series {
         if !vr.is_integer() {
             return Err(SymError::NotImplemented("Puiseux series (fractional powers of the variable) are not supported".into()));
         }
-        // (a0 t^v (1 + u))^r = a0^r t^(v r) (1 + u)^r
+        // (a0 t^v (1 + u))^r = a0^r t^(v r) (1 + u)^r holds for real t of
+        // both signs only when no branch is crossed: a0 off (-oo, 0] when
+        // v = 0; a0 > 0 and (t^v)^r = t^(v r) for t < 0 otherwise (v and
+        // v r even, or v odd and r (v - 1) an even integer).  sqrt(x^2) is
+        // |x|, not x.
         let a0 = self.c[0].clone();
+        if !r.is_integer() {
+            let ok = if self.v == 0 {
+                !free_symbols(&a0).is_empty() || crate::domain::off_cut(crate::domain::Cut::NonPositive, &a0)
+            } else {
+                let q = crate::num::Q::from_integer((self.v - 1).into()) * r;
+                let even = |z: &crate::num::Q| z.is_integer() && (z.to_integer() % 2) == 0.into();
+                // (for t > 0 only, as in a limit from the right or at
+                // infinity, t^v > 0 and a0 > 0 suffice)
+                crate::domain::const_sign(&a0) == Some(1) && (positive_side() || (self.v % 2 == 0 && even(&vr)) || (self.v % 2 != 0 && even(&q)))
+            };
+            if !ok {
+                return Err(SymError::NotImplemented(format!("expansion of a fractional power at a branch point or cut of its base ({})", crate::to_string(&a0))));
+            }
+        }
         let u = Series { v: 0, c: self.c.iter().map(|x| div(x, &a0)).collect() };
         let mut one_u = u.clone();
         one_u.c[0] = zero();
@@ -151,8 +169,12 @@ impl Series {
         if self.v < 0 {
             return Err(SymError::NotImplemented("expansion of a function at a pole of its argument".into()));
         }
-        let y = sym("__series_y");
         let a = self.coeff(0);
+        // a placeholder that captures none of the symbols in f or a
+        let mut avoid = free_symbols(&f(&sym("\u{1}")));
+        avoid.extend(free_symbols(&a));
+        let yn = fresh("__series_y", &avoid);
+        let y = sym(&yn);
         let mut w = self.clone();
         if w.v == 0 {
             w.c[0] = zero();
@@ -170,13 +192,15 @@ impl Series {
             if wk.c.is_empty() || wk.v >= prec {
                 break;
             }
-            deriv = diff(&deriv, "__series_y");
+            deriv = diff(&deriv, &yn);
             fact = mul2(&fact, &int(k));
             let ck = clean(&div(&subs(&deriv, &[(y.clone(), a.clone())]), &fact));
             out = out.add(&wk.scale(&ck));
             k += 1;
-            if k > 200 {
-                break;
+            // (w has valuation >= 1, so w^k leaves the precision by k = prec;
+            // a guard, never a silent truncation)
+            if k as i64 > prec.max(200) + 1 {
+                return Err(SymError::NotImplemented("series: the composition did not terminate".into()));
             }
         }
         Ok(out)
@@ -261,12 +285,37 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
             if *f == Fun::Log && s.v > 0 {
                 return Err(SymError::NotImplemented("the expansion has a logarithmic term (log of something that vanishes)".into()));
             }
+            // a constant argument value on the function's branch cut: the
+            // two sides differ (log(-1 + I x)), so no two-sided expansion
+            if let Some((cut, _)) = crate::domain::cut_of(e) {
+                let a0 = if s.v > 0 { zero() } else { s.coeff(0) };
+                if cut != crate::domain::Cut::Unknown && s.v >= 0 && free_symbols(&a0).is_empty() && !crate::domain::off_cut(cut, &a0) {
+                    return Err(SymError::NotImplemented(format!("expansion of {} on its branch cut", crate::to_string(e))));
+                }
+            }
             let f2 = f.clone();
             s.compose(&move |y: &Expr| fun1(f2.clone(), y), prec)?.truncate(prec)
         }
         Kind::Fun(..) | Kind::Rel(..) => return Err(SymError::NotImplemented(format!("series of {}", crate::to_string(e)))),
         _ => Series::constant(e, prec),
     })
+}
+
+thread_local! {
+    static POSITIVE_SIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn positive_side() -> bool {
+    POSITIVE_SIDE.with(|c| c.get())
+}
+
+/// The series of e in x for x > 0 only (a one-sided expansion, which may
+/// take the branch of a fractional power that holds there).
+pub fn series_right(e: &Expr, x: &str, prec: i64) -> R<Series> {
+    let old = POSITIVE_SIDE.with(|c| c.replace(true));
+    let r = series(e, x, prec);
+    POSITIVE_SIDE.with(|c| c.set(old));
+    r
 }
 
 impl Series {
@@ -281,9 +330,12 @@ impl Series {
 /// x = a, up to (x - a)^n.
 pub fn taylor(e: &Expr, x: &str, a: &Expr, n: i64) -> Expr {
     let xs = sym(x);
-    let t = sym("__taylor_t");
+    let mut avoid = free_symbols(e);
+    avoid.extend(free_symbols(a));
+    let tn = fresh("__taylor_t", &avoid);
+    let t = sym(&tn);
     let shifted = subs(e, &[(xs.clone(), add2(a, &t))]);
-    let s = series(&shifted, "__taylor_t", n + 1).unwrap_or_else(|e| crate::err::throw(e));
+    let s = series(&shifted, &tn, n + 1).unwrap_or_else(|e| crate::err::throw(e));
     let poly = s.to_expr(&t);
     let base = if a.is_zero() { xs.clone() } else { sub(&xs, a) };
     subs(&poly, &[(t, base)])

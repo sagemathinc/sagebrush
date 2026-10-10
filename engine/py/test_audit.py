@@ -298,3 +298,27 @@ _F = integrate(_eps * _f, _x)
 assert ((diff(_F, _x) - _eps * _f) / _eps).simplify_full() == 0
 assert bool(integrate(_eps * _f, _x, 0, 1) / _eps == 3 * log(4) - 3 * log(3) - SR(2) / 3)
 print("symbolic ok")
+
+# Systematic review, symbolic (SYM-F9, F11..F16)
+from sagebrush.sage import solve, assume, forget, taylor, desolve, function, sqrt, asin, pi, sin, cos
+_x, _a = var("x a")
+assume(_x, "real"); assert solve(_x**2 + 1, _x) == []; forget()
+assume(_x, "integer"); assert solve(_x**2 - 2, _x) == []; forget()
+assert solve(sqrt(_x) == -1, _x) == [] and solve(asin(_x) == pi, _x) == [] and solve(log(_x) == 4 * I, _x) == []
+assert str(solve(_x**5 + _x + 3, _x)) == "[0 == x^5 + x + 3]"
+assert len(solve(_x**3 == 2, _x)) == 3 and solve([_x == 0, _x == 1], _x) == []
+assert str(solve((_x - 1)**3, _x, multiplicities=True)) == "([x == 1], [3])"
+assert str(taylor(var("__taylor_t") + _x, _x, 0, 2)) == "__taylor_t + x"
+_y = function("y")(_x)
+assert str(desolve(diff(_y, _x) == var("__ode_y"), _y, ics=[0, 1])) == "__ode_y*x + 1"
+_J = integrate(function("f")(_x, _a), _x, 0, 1)
+assert str(_J.variables()) == "(a,)" and diff(_J, _x) == 0
+assert desolve(diff(_y, _x) == _y**2, _y, ics=[0, 0]) == 0
+raises(ValueError, desolve, diff(_y, _x) == _y, _y, ics=[0, 1, 99])
+raises(NotImplementedError, taylor, sqrt(_x**2), _x, 0, 3)
+raises(NotImplementedError, taylor, log(-1 + I * _x), _x, 0, 2)
+_s = exp(_x).series(_x, 3)
+assert str(_s * _s) == "1 + 2*x + 2*x^2 + Order(x^3)" and str(_s - _s) == "Order(x^3)"
+assert taylor(exp(_x), _x, 0, 201).coefficient(_x, 201) != 0
+assert "x^(-2)" in str((exp(_x) / _x**2).series(_x, 3))
+print("symbolic2 ok")

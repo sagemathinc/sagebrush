@@ -1196,6 +1196,11 @@ def show_typeset(obj):
         print(repr(obj))
 
 
+def _min_order(a, b):
+    """The smaller of two series orders, None meaning exact."""
+    return b if a is None else a if b is None else min(a, b)
+
+
 class _SeriesExpr(Expression):
     """A truncated series: prints the polynomial part plus O(x^n)."""
 
@@ -1205,14 +1210,110 @@ class _SeriesExpr(Expression):
         Expression.__init__(self, t._s)
         self._var, self._at, self._order = var, at, order
 
+    def _laurent(self):
+        """(N, [c_0, c_1, ...]): the body is sum c_i (x - a)^(i - N)."""
+        v, a = self._var, self._at
+        body = Expression(self._s).subs({v: v + a}).expand()
+        for N in range(0, 2000):
+            try:
+                return N, (body * v ** N).expand().list(v) if N else body.list(v)
+            except ValueError:
+                continue
+        raise ValueError("not a Laurent polynomial")
+
+    def _valuation(self):
+        N, cs = self._laurent()
+        for i, c in enumerate(cs):
+            if not c.is_trivial_zero():
+                return i - N
+        return self._order if self._order is not None else 10**9
+
+    def _same(self, o):
+        if isinstance(o, _SeriesExpr):
+            if str(o._var) != str(self._var) or str(o._at) != str(self._at):
+                raise ValueError("series in different variables or at different points")
+            return o
+        o = _expr(o)
+        if str(self._var) not in o._names():
+            return None  # a constant: exact
+        a = self._at
+        try:
+            # a polynomial in (x - a): exact, with no O-term of its own
+            o.subs({self._var: self._var + a}).expand().list(self._var)
+            return _SeriesExpr(o, self._var, a, None)
+        except ValueError:
+            return o.series(self._var == a if not a.is_trivial_zero() else self._var, self._order)
+
+    def _make(self, body, order):
+        v, a = self._var, self._at
+        # keep only the terms below the order
+        t = _SeriesExpr(_expr(body), v, a, order)
+        N, cs = t._laurent()
+        if order is None:
+            return _expr(body)
+        keep = sum((c * (v - a) ** (i - N) for i, c in enumerate(cs) if i - N < order and not c.is_trivial_zero()), _expr(0))
+        return _SeriesExpr(keep, v, a, order)
+
+    # arithmetic keeps the O-term (a truncated series determines its
+    # products only to the lower precision)
+    def __add__(self, o):
+        t = self._same(o)
+        if t is None:
+            return self._make(Expression(self._s) + _expr(o), self._order)
+        return self._make(Expression(self._s) + Expression(t._s), _min_order(self._order, t._order))
+
+    __radd__ = __add__
+
+    def __neg__(self):
+        return _SeriesExpr(-Expression(self._s), self._var, self._at, self._order)
+
+    def __sub__(self, o):
+        return self + (-(self._same(o) if self._same(o) is not None else _expr(o)))
+
+    def __rsub__(self, o):
+        return (-self) + o
+
+    def __mul__(self, o):
+        t = self._same(o)
+        if t is None:
+            c = _expr(o)
+            if c.is_trivial_zero():
+                return c
+            return self._make(Expression(self._s) * c, self._order)
+        order = _min_order(None if self._order is None else self._order + t._valuation(),
+                           None if t._order is None else t._order + self._valuation())
+        return self._make((Expression(self._s) * Expression(t._s)).expand(), order)
+
+    __rmul__ = __mul__
+
+    def expand(self):
+        """The series itself (expanded, with its O-term)."""
+        return self
+
+    def __pow__(self, k):
+        k = int(k)
+        if k < 1:
+            raise NotImplementedError("series: only positive integer powers")
+        r = self
+        for _ in range(k - 1):
+            r = r * self
+        return r
+
+    def __truediv__(self, o):
+        o = _expr(o)
+        if str(self._var) in o._names():
+            raise NotImplementedError("series: division by a series")
+        return self._make(Expression(self._s) / o, self._order)
+
     def _terms(self, latex):
         # Sage's form: ascending powers of (x - a), numeric coefficients
         # written out (1*x) and parenthesized unless positive: (-1/6)*x^3
         v, a = self._var, self._at
         base = v - a
-        body = Expression(self._s).subs({v: v + a}).expand()
+        N, coeffs = self._laurent()
         out = []
-        for i, c in enumerate(body.list(v)):
+        for i, c in enumerate(coeffs):
+            i -= N
             if c.is_trivial_zero():
                 continue
             cs = c._latex_() if latex else str(c)
@@ -1223,6 +1324,11 @@ class _SeriesExpr(Expression):
                 continue
             p = base if i == 1 else base ** i
             ps = p._latex_() if latex else str(p)
+            if i < 0:
+                b = base._latex_() if latex else str(base)
+                if not base.is_symbol():
+                    b = "(%s)" % b
+                ps = ("%s^{%d}" if latex else "%s^(%d)") % (b, i)
             if i == 1 and not base.is_symbol():
                 ps = ("\\left(%s\\right)" if latex else "(%s)") % ps
             out.append(cs + (" " if latex else "*") + ps)
@@ -1499,10 +1605,25 @@ def _satisfies(sol):
     sub = {}
     for eq in sol:
         try:
+            if eq.lhs()._op()[0] != "symbol":
+                continue  # 0 == f: a factor whose roots were not found
             sub[eq.lhs()] = eq.rhs()
         except Exception:
             return True
     for r in _ASSUMPTIONS:
+        if isinstance(r, _Feature):
+            v = next((w for k, w in sub.items() if str(k) == str(r._v)), None)
+            if v is None or v.variables():
+                continue
+            if r._kind in ("real", "integer", "rational", "even", "odd", "positive", "negative"):
+                im = v.imag()
+                if _call("is_zero", im._s)[0] != "1" and _const_sign(im) not in (None, 0):
+                    return False  # certainly not real
+            if r._kind in ("integer", "even", "odd"):
+                fl = floor(v)
+                if fl.is_numeric() and _const_sign(v - fl) == 1:
+                    return False  # certainly not an integer
+            continue
         if not isinstance(r, Expression):
             continue
         rr = r.subs(sub)
@@ -1582,11 +1703,11 @@ def _sign_of(e):
         sg = 1
         for f in e.operands():
             if f.is_numeric():
-                try:
-                    sg *= 1 if float(f) > 0 else -1
-                    continue
-                except (TypeError, ValueError):
+                c = _const_sign(f)
+                if c is None or c == 0:
                     return None
+                sg *= c
+                continue
             s1 = _sign_of(f)
             if s1 is None:
                 return None
@@ -1598,18 +1719,40 @@ def _sign_of(e):
         if sb is None:
             return None
         if sb > 0:
-            return 1
+            # b^x > 0 needs a real exponent (x^I has modulus 1, not x^I)
+            return 1 if _is_real(x) else None
         try:
             k = int(x)
             return 1 if k % 2 == 0 else -1
         except (TypeError, ValueError):
             return None
-    try:
-        if e.is_numeric():
-            return 1 if float(e) >= 0 else -1
-    except (TypeError, ValueError):
-        pass
+    if e.is_numeric():
+        c = _const_sign(e)
+        if c is not None:
+            return 1 if c >= 0 else -1
     return None
+
+
+def _const_sign(e):
+    """The certified sign of a real constant (1, 0, -1), or None."""
+    r = _call("const_sign", e._s)[0]
+    return int(r) if r else None
+
+
+def _is_real(e):
+    """Whether e is certainly real: a real constant, or a symbol assumed
+    real (or integer, positive, ..., or bounded by a relation)."""
+    if e.is_numeric():
+        try:
+            return _call("is_zero", e.imag()._s)[0] == "1"
+        except Exception:
+            return False
+    if e._op()[0] == "symbol":
+        name = str(e)
+        if _features(name) & {"real", "integer", "rational", "even", "odd", "positive", "negative"}:
+            return True
+        return any(isinstance(r, Expression) and name in r._names() and r._op()[0][4:] in ("Lt", "Le", "Gt", "Ge") for r in _ASSUMPTIONS)
+    return False
 
 
 def _assume_rewrite(e):
@@ -2356,6 +2499,25 @@ def solve(f, *args, **kw):
         i += 1 + m
     if _ASSUMPTIONS:
         sols = [sol for sol in sols if _satisfies(sol)]
+    if kw.get("multiplicities"):
+        if many or len(names) != 1 or kw.get("solution_dict"):
+            raise NotImplementedError("solve: multiplicities=True for one equation in one variable")
+        out = [s for sol in sols for s in sol]
+        z = eqs[0].lhs() - eqs[0].rhs()
+        v = Expression(_call("parse", names[0])[0])
+        mults = []
+        for s in out:
+            if s.lhs()._op()[0] != "symbol":
+                mults.append(1)
+                continue
+            m, d = 0, z
+            while True:
+                d = d.diff(v)
+                m += 1
+                if _call("is_zero", d.subs({v: s.rhs()})._s)[0] != "1" or m > 1000:
+                    break
+            mults.append(m)
+        return out, mults
     if kw.get("solution_dict"):
         return [{s.lhs(): s.rhs() for s in sol} for sol in sols]
     if len(names) == 1 and not many:
