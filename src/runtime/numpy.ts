@@ -1016,15 +1016,15 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   sqrt: { f: Math.sqrt, c: csqrt, float: true },
   cbrt: { f: Math.cbrt, float: true },
   // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
-  exp: { f: glibcExp, c: (a, b) => (b === 0 ? [glibcExp(a), b] : [glibcExp(a) * Math.cos(b), glibcExp(a) * Math.sin(b)]), float: true },
+  exp: { f: glibcExp, c: cexp, float: true },
   exp2: { f: (x) => 2 ** x, float: true },
   expm1: { f: Math.expm1, float: true },
-  log: { f: glibcLog, c: (a, b) => [glibcLog(Math.hypot(a, b)), Math.atan2(b, a)], float: true },
+  log: { f: glibcLog, c: clog, float: true },
   log2: { f: Math.log2, float: true },
   log10: { f: Math.log10, float: true },
   log1p: { f: glibcLog1p, float: true },
-  sin: { f: Math.sin, c: (a, b) => (b === 0 ? [Math.sin(a), Number.isFinite(a) ? Math.cos(a) * b : b] : [Math.sin(a) * Math.cosh(b), Math.cos(a) * Math.sinh(b)]), float: true },
-  cos: { f: Math.cos, c: (a, b) => (b === 0 ? [Math.cos(a), Number.isFinite(a) ? -Math.sin(a) * b : -b] : [Math.cos(a) * Math.cosh(b), -Math.sin(a) * Math.sinh(b)]), float: true },
+  sin: { f: Math.sin, c: (a, b) => (b === 0 ? [Math.sin(a), Number.isFinite(a) ? Math.cos(a) * b : b] : [hmul(Math.sin(a), b, "cosh"), hmul(Math.cos(a), b, "sinh")]), float: true },
+  cos: { f: Math.cos, c: (a, b) => (b === 0 ? [Math.cos(a), Number.isFinite(a) ? -Math.sin(a) * b : -b] : [hmul(Math.cos(a), b, "cosh"), -hmul(Math.sin(a), b, "sinh")]), float: true },
   tan: { f: Math.tan, float: true },
   arcsin: { f: Math.asin, float: true },
   arccos: { f: Math.acos, float: true },
@@ -1049,6 +1049,58 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   logical_not: { f: (x) => +(x === 0), out: "bool", c: (a, b) => [+(a === 0 && b === 0), 0] },
   invert: { f: (x) => -x - 1, keepInt: true },
 };
+// Complex exp, log, sin and cos without spurious overflow, cancellation or
+// NaN (the systematic review's R2-NUM-F3: log(1.3e308+1.3e308j) and
+// exp(710+pi/4 j) were inf, log(1+1e-8j).real 0, sin(711j) NaN+inf j).
+// c * cosh(y) or c * sinh(y): through e^(|y|/2) when cosh(y) would overflow,
+// and an exact zero c stays zero (signed) instead of 0 * inf = NaN.
+function hmul(c: number, y: number, f: "cosh" | "sinh"): number {
+  if (c === 0 && Number.isFinite(y)) return f === "sinh" && y < 0 ? -c : c;
+  const ay = Math.abs(y);
+  if (ay < 709 || !Number.isFinite(ay)) return c * (f === "cosh" ? Math.cosh(y) : Math.sinh(y));
+  const e = Math.exp(ay / 2);
+  const v = c * (e / 2) * e;
+  return f === "sinh" && y < 0 ? -v : v;
+}
+// a * b = p + e exactly (Veltkamp split; no fma in JavaScript)
+function twoProd(a: number, b: number): [number, number] {
+  const p = a * b;
+  const sp = (v: number) => { const c = 134217729 * v, hi = c - (c - v); return [hi, v - hi]; };
+  const [ah, al] = sp(a), [bh, bl] = sp(b);
+  return [p, ((ah * bh - p) + ah * bl + al * bh) + al * bl];
+}
+function cexp(a: number, b: number): [number, number] {
+  // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
+  if (b === 0) return [glibcExp(a), b];
+  if (a > 709 && a < 1420) {
+    const e = Math.exp(a / 2);
+    return [Math.cos(b) * e * e, Math.sin(b) * e * e];
+  }
+  const e = glibcExp(a);
+  return [e * Math.cos(b), e * Math.sin(b)];
+}
+function clog(a: number, b: number): [number, number] {
+  const im = Math.atan2(b, a);
+  let x = Math.abs(a), y = Math.abs(b);
+  if (x < y) [x, y] = [y, x];
+  if (!Number.isFinite(x) || x !== x || y !== y) return [glibcLog(Math.hypot(a, b)), im];
+  if (x === 0) return [-Infinity, im];
+  if (x > 2 ** 1000) return [glibcLog(Math.hypot(x / 4, y / 4)) + 2 * Math.LN2, im];
+  if (x < 2 ** -1000) return [glibcLog(Math.hypot(x * 2 ** 600, y * 2 ** 600)) - 600 * Math.LN2, im];
+  // near the unit circle log|z| = log1p(|z|^2 - 1) / 2, with x^2 + y^2 - 1
+  // from error-free products (Dekker): it cancels (0.6+0.8j)
+  if (x > 0.5 && x < 2 && y < 1) {
+    const h = Math.hypot(x, y);
+    if (h > 0.7 && h < 1.4) {
+      const [xh, xl] = twoProd(x, x), [yh, yl] = twoProd(y, y);
+      const t = xh - 1; // exact (Sterbenz)
+      const s = t + yh, bb = s - t, err = (t - (s - bb)) + (yh - bb);
+      return [glibcLog1p(s + (err + xl + yl)) / 2, im];
+    }
+  }
+  return [glibcLog(Math.hypot(x, y)), im];
+}
+
 // The principal square root as C99 csqrt: the sign of the imaginary part
 // follows b's sign bit (sqrt(-1-0j) = -1j), special values as C99, and
 // scaling so that huge or tiny arguments neither overflow nor underflow.

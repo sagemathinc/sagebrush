@@ -16,3 +16,10 @@ print(repr(np.add(np.arange(3), 1, out=np.zeros(3))), np.add, np.sin)
 print(repr(np.logical_and(np.array([1, 0, 1]), np.array([1, 1, 0]))), repr(np.logical_not(np.array([True, False]))), repr(np.logical_xor(True, False)))
 print(repr(np.sqrt(-1.0)), repr(np.sqrt(np.array([-1 + 0j]))), repr(np.exp(np.array([1j * np.pi]))))
 print(repr(np.copysign(1, -0.0)), repr(np.fmax(np.array([1, np.nan]), np.array([np.nan, 2]))), repr(np.maximum(np.array([1, np.nan]), 0)))
+
+# R2-NUM-F3: complex exp, log, sin, cos at extremes and near |z| = 1
+import math as _m
+print(repr(np.log(np.array([1.3e308+1.3e308j, 1+1e-8j, 5e-324+5e-324j, 0.6+0.8j, 0.99+0.141067359796659j, 1-1e-12j]))))
+print(repr(np.exp(np.array([complex(710, _m.pi/4), -800+1j]))))
+with np.errstate(over="ignore"):
+    print(repr(np.sin(np.array([711j, -711j, 3+800j]))), repr(np.cos(np.array([711j, 1+2j]))))
