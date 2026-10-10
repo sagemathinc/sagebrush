@@ -17,13 +17,21 @@ bun web/build.ts
 node bench/browser/run.mjs        # prints a markdown table; also last-results.md
 ```
 
-## Results (2026-10-05, Chromium 149, x86-64)
+## Results (2026-10-10, Chromium 149, x86-64)
 
-See `last-results.md` for the latest run.
+See `last-results.md` for the latest run: best and median of the repeats,
+and whether the two runtimes' answers agree (a digest of each result,
+computed outside the timers: all 31 agree). Startup is measured on both
+sides from the start of the navigation to the end of `import numpy`, with
+a fresh browser profile and the HTTP cache disabled; Pyodide is loaded from
+the jsDelivr CDN, sagebrush from a local server, so network latency is part
+of the difference. Times have about 0.1 ms resolution: sub-millisecond rows
+are imprecise. (Before 2026-10-10 the startup row compared different
+intervals, and the answers were not checked.)
 
 **Summary:**
-- **sagebrush is faster** at startup (~8×, 0.4 s vs 3.2 s), pure Python
-  (up to ~11×) and converting to Python objects (`tolist`).
+- **sagebrush is faster** at startup (5×, 0.64 s vs 3.2 s), pure Python
+  (up to ~10×) and converting to Python objects (`tolist`).
 - With the Rust/WebAssembly kernels ([kernels/](../../kernels)),
   **sagebrush is faster at:**
   - dense linear algebra: matmul 300×300 (3.5 vs 25 ms, 7×), `det`
@@ -35,10 +43,10 @@ See `last-results.md` for the latest run.
 - **sagebrush is within ~1.5–2.5×** on `sin`, `sqrt`, the FFT, boolean
   masks and `unique`.
 - **NumPy compiled to WebAssembly is ahead** on:
-  - `polyfit` (3.8×): `lstsq` forms Q and U explicitly where LAPACK's
+  - `polyfit` (4.6×): `lstsq` forms Q and U explicitly where LAPACK's
     `gelsd` does not;
   - elementwise arithmetic and broadcasting on large arrays (`a*2+1`:
-    5.5×). Here each result is a fresh 8 MB typed array, and Chromium
+    5.7×). Here each result is a fresh 8 MB typed array, and Chromium
     spends ~4 ms in page faults on its first write. Temporaries inside an
     expression are reused (`a*2+1` allocates once), but the result itself
     cannot be.

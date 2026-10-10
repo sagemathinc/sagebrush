@@ -21,6 +21,26 @@ COMMIT = atlas.git_commit(SB)
 PRIMES = [p for p in range(2, 1000) if all(p % d for d in range(2, int(p**0.5) + 1))]
 TODAY = time.strftime("%Y-%m-%d")
 
+
+def sha256(path):
+    """The SHA-256 of an input file: the immutable identity of what was packaged."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(os.path.expanduser(path), "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+# Precomputed inputs record their own producer (or not); this script's
+# checkout is only the packaging revision (systematic review DAT-F4).
+INPUTS = {name: sha256(path) for name, path in [
+    ("rational_newforms", "~/data/atlas-src/rational_newforms_le9999.jsonl"),
+    ("orbits", "~/data/atlas-src/orbits_le1000.jsonl"),
+    ("lmfdb_newforms", "~/data/lmfdb/mf_newforms_wt2_triv_le9999_tracep.jsonl"),
+    ("lmfdb_curves", "~/data/lmfdb/ec_curvedata_le9999.jsonl"),
+    ("cremona_aplist", "~/data/ecdata/aplist.00000-09999")]}
+
 def jsonl(path):
     with open(os.path.expanduser(path)) as f:
         for line in f:
@@ -73,29 +93,37 @@ cert_rational = atlas.put_certificate(ROOT,
            "(sagebrush-modsym newforms.rs).",
     checks=["equal to Cremona's ecdata aplist (p < 100) for all isogeny classes", "equal to LMFDB mf_newforms traces (p < 1000)",
             "equal to point counts by sagebrush-ap on an LMFDB curve of the class (p < 1000)", "Hasse bound at every p"],
-    recipe={"repository": "https://github.com/sagemathinc/sagebrush", "commit": COMMIT,
+    recipe={"repository": "https://github.com/sagemathinc/sagebrush", "packaging_commit": COMMIT, "producer_commit": "unrecorded",
+            "input_sha256": INPUTS["rational_newforms"],
             "command": "cd engine && cargo run --release -p sagebrush-modsym --example rational_table -- OUT.jsonl 11 9999"})
 cert_orbits = atlas.put_certificate(ROOT,
     claim="Galois orbits of weight-2 newforms on Gamma0(N), 1 <= N <= 1000: dimension, tr(a_p) (p < 1000, p not dividing N), "
           "and exact integer coordinates of a_p",
     method="Factor chi(T) for T = sum r_i T_{q_i} with super-increasing r_i (FLINT); new orbits are the non-Eisenstein factors of exponent one "
            "(Eisenstein factors divide the charpoly of T on the boundary image); dual bases by Krylov iteration; exact rational echelon "
-           "basis by CRT of two primes and rational reconstruction, checked mod a third; c_{p,r} = w_r(T_p x) by integer Heilbronn sums; "
+           "basis by CRT of two primes and rational reconstruction, checked mod a third and then exactly (every 3-term relation and "
+           "w o f(T) = 0 over Z, from integral.rs since the systematic review's MOD-F9; earlier inputs had only the modular checks); "
+           "c_{p,r} = w_r(T_p x) by integer Heilbronn sums; "
            "coordinates reduced by HNF of the c_p lattice and LLL (python-flint).",
     checks=["sum of orbit dimensions equals dim S_2^new(N) at every level", "tr(a_p) = sum_r c_{p,r} tr(beta_r) at every prime (mod ell)",
             "dimensions and tr(a_p) equal to LMFDB mf_newforms for every orbit"],
-    recipe={"repository": "https://github.com/sagemathinc/sagebrush", "commit": COMMIT,
+    recipe={"repository": "https://github.com/sagemathinc/sagebrush", "packaging_commit": COMMIT, "producer_commit": "unrecorded",
+            "input_sha256": INPUTS["orbits"],
             "command": "cd engine && cargo run --release -p sagebrush-modsym --example integral -- OUT.jsonl 1-1000"})
 cert_curves = atlas.put_certificate(ROOT,
     claim="for each LMFDB elliptic curve of conductor <= 9999, a_p (p < 1000, good) by point counting equals a_p of the rational newform of the same level",
     method="sagebrush-ap: baby-step giant-step in the Hasse interval on E or its quadratic twist, unique match (a Rust port of smalljac's genus-1 strategy)",
     checks=["equality with the rational newform's a_p from modular symbols, and with LMFDB's traces"],
-    recipe={"repository": "https://github.com/sagemathinc/sagebrush", "commit": COMMIT,
+    recipe={"repository": "https://github.com/sagemathinc/sagebrush", "commit": COMMIT,  # computed here: the producer
+            "input_sha256": INPUTS["lmfdb_curves"],
             "command": "python -c 'from sagebrush import ap; ap.aplist([a1,a2,a3,a4,a6], 999)'"})
 cert_import = atlas.put_certificate(ROOT,
     claim="rows copied from the LMFDB (tables mf_newforms, ec_curvedata) for weight 2, trivial character, level <= 9999",
     method="read-only LMFDB Postgres mirror devmirror.lmfdb.xyz, queried in level-range chunks",
-    checks=[], recipe={"date": TODAY, "script": "data/lmfdb/fetch_m0.py (atlas-src)", "source": "https://www.lmfdb.org"})
+    checks=[], recipe={"date": TODAY, "script": "data/lmfdb/fetch_m0.py (atlas-src)", "source": "https://www.lmfdb.org",
+                       "input_sha256": {k: INPUTS[k] for k in ("lmfdb_newforms", "lmfdb_curves")},
+                       # (DAT-F5: the source's data reuse terms are still to be confirmed and recorded)
+                       "reuse_terms": "not recorded: to be confirmed with the LMFDB"})
 
 ours_src = f"sagebrush-modsym@{COMMIT[:12] if COMMIT else 'unknown'}"
 

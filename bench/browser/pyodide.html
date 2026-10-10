@@ -7,9 +7,11 @@ window.bench = async (code) => {
   await py.loadPackage("numpy");
   py.runPython("import numpy");
   const ready = performance.now() - t0;
+  // (and from the navigation's start, the same interval as sagebrush's)
+  const readyNav = performance.now();
   let out = "";
   py.setStdout({ batched: (s) => (out += s + "\n") });
   py.runPython(code);
-  return JSON.stringify({ ready, out, version: py.version, npver: py.runPython("numpy.__version__") });
+  return JSON.stringify({ ready, readyNav, out, version: py.version, npver: py.runPython("numpy.__version__") });
 };
 </script>
