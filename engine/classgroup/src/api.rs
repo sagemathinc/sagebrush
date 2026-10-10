@@ -4,7 +4,7 @@
 //! on the power basis 1, a, ..., a^(n-1) as numerators with one denominator.
 
 use crate::nf::embed::Embeddings;
-use crate::nf::order::{maximal_order, Order};
+use crate::nf::order::Order;
 use crate::nf::zlin::{hnf, vec_mat, ZMat};
 use sagebrush_bigint::BigInt;
 use num_integer::Integer;
