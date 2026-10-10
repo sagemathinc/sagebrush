@@ -417,7 +417,7 @@ mod ball_tests {
     /// about 1e-9, and costs little; timing printed.
     #[test]
     fn log_hr_lower_ball_matches() {
-        for d in [-23i64, -4027, 5, 1009, -1000003, 10007 * 4] {
+        for d in [-23i64, -4027, 5, 1009, -1000003, 10007 * 4, -(10i64.pow(15) + 37), -4 * (10i64.pow(17) + 3)] {
             let db = BigInt::from(d);
             let t = std::time::Instant::now();
             let b = quadratic_log_hr_lower_ball(&db, 96).unwrap();

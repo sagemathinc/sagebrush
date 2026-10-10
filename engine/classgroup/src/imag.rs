@@ -18,8 +18,17 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 /// most c log^2 |D| with c = 4 - 1/(2n) + 1/(2n^2) = 31/8 for n = 2:
 /// Grenie and Molteni, arXiv:2212.09461, Theorem 2, valid for every |D|.
 /// (Bach proved c = 6; the 15/4 used before has no located proof over the
-/// whole range: systematic review CLG-F1.)
-pub(crate) const GRH_C: f64 = 31.0 / 8.0;
+/// whole range: systematic review CLG-F1.)  This is ceil((31/8) log^2 |D|),
+/// rounded up with balls (an f64 log could put the
+/// bound just below the theorem's: R2-CLG-F2).
+pub(crate) fn grh_bound(d: &BigInt) -> u64 {
+    use sagebrush_ball::Ball;
+    let ld = Ball::from_int(&d.abs()).log(128).expect("|D| >= 1");
+    let t = ld.sqr(128).mul_i64(31, 128).mul_2exp(-3);
+    let (um, ue) = t.upper();
+    let c = if ue >= 0 { um << ue as u64 } else { (um + ((BigInt::one() << (-ue) as u64) - 1u32)) >> (-ue) as u64 };
+    num_traits::ToPrimitive::to_u64(&c).expect("bound below 2^64")
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassGroup {
@@ -124,12 +133,12 @@ pub fn class_group_certified(d: &BigInt) -> Result<(ClassGroup, Timing, bool), S
         return Ok((ClassGroup { h: BigInt::one(), cyc: vec![] }, Timing::default(), true));
     }
     if absd < SMALL_D {
-        let fb = FactorBase::new(d, ((GRH_C * ld * ld).ceil() as u64).max(10));
+        let fb = FactorBase::new(d, grh_bound(d).max(10));
         return Ok((small_group(d, &fb), Timing::default(), true));
     }
     let debug = std::env::var("QCL_DEBUG").is_ok();
     let mut tm = Timing::default();
-    let bound = (GRH_C * ld * ld).ceil() as u64;
+    let bound = grh_bound(d);
     let fb = FactorBase::new(d, bound.max(60));
     let n = fb.primes.len();
     tm.fb = n;
@@ -139,7 +148,7 @@ pub fn class_group_certified(d: &BigInt) -> Result<(ClassGroup, Timing, bool), S
     // even x = 256 stays within 4.2% (the acceptance window is 41%).
     let h_est = h_estimate(d, ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 16));
     tm.h_est = h_est;
-    let log_h_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower(d) };
+    let log_h_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower_ball(d, 96) };
     let mut tu = tuning(absd.log10(), bound);
     if debug {
         eprintln!("setup (fb {} primes, h_est) {:.1} ms", n, t0.elapsed().as_secs_f64() * 1e3);
@@ -176,7 +185,7 @@ pub fn class_group_certified(d: &BigInt) -> Result<(ClassGroup, Timing, bool), S
                 if debug {
                     eprintln!("round {} rels {}: core {} x {} after {:.1} ms", round, rels.len(), dense.len(), cols.len(), t.elapsed().as_secs_f64() * 1e3);
                 }
-                match core_group(&dense, cols.len(), h_est, log_h_lo, round as u64, debug) {
+                match core_group(&dense, cols.len(), h_est, log_h_lo.clone(), round as u64, debug) {
                     Ok(g) => g,
                     Err(free) => {
                         // these primes lack independent relations: the
@@ -250,7 +259,7 @@ fn small_group(dd: &BigInt, fb: &FactorBase) -> ClassGroup {
 /// Z^c / L for the lattice L spanned by `rows`, if its order is below
 /// sqrt 2 h_est (so is h); None if L is not yet the full relation lattice;
 /// the columns lacking a relation if L does not have full rank.
-fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, log_h_lo: Option<f64>, seed: u64, debug: bool) -> Result<Option<(ClassGroup, bool)>, Vec<usize>> {
+fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, log_h_lo: Option<sagebrush_ball::Ball>, seed: u64, debug: bool) -> Result<Option<(ClassGroup, bool)>, Vec<usize>> {
     if c == 0 {
         // h* = 1 is h
         return Ok(Some((ClassGroup { h: BigInt::one(), cyc: vec![] }, true)));
@@ -271,11 +280,13 @@ fn core_group(rows: &[Vec<i64>], c: usize, h_est: f64, log_h_lo: Option<f64>, se
     }
     // the certificate: h* from exact determinants (a proven multiple of h)
     // below twice the proven lower bound for h (R = 1)
-    let cert = log_h_lo.and_then(|lo| {
-        let (h2, cyc2) = lattice_group_exact(rows, c, &sel, 2.0 * lo.exp(), seed, debug)?;
-        let ok = crate::nf::certify::ln_big(&h2) < std::f64::consts::LN_2 + lo - 1e-12;
+    let cert = log_h_lo.as_ref().and_then(|lo| {
+        let lof = crate::nf::bnf::lower_f64(lo);
+        let (h2, cyc2) = lattice_group_exact(rows, c, &sel, 2.0 * lof.exp(), seed, debug)?;
+        // (on balls: log h* < log 2 + log h_lo certainly, R = 1)
+        let ok = crate::nf::certify::below_twice_ball(&h2, &sagebrush_ball::Ball::one(), lo, 96);
         if debug {
-            eprintln!("  certificate: h* {} (heuristic {}), log h >= {:.6}: {}", h2, h, lo, if ok { "holds" } else { "failed" });
+            eprintln!("  certificate: h* {} (heuristic {}), log h >= {:.6}: {}", h2, h, lof, if ok { "holds" } else { "failed" });
         }
         ok.then_some((h2, cyc2))
     });

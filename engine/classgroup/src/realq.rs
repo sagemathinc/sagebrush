@@ -170,7 +170,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
     let debug = std::env::var("QCL_DEBUG").is_ok();
     let mut tm = Timing::default();
     let ld = absd.ln();
-    let bound = (crate::imag::GRH_C * ld * ld).ceil() as u64;
+    let bound = crate::imag::grh_bound(d);
     let fb = FactorBase::new(d, bound.max(60));
     let n = fb.primes.len();
     tm.fb = n;
