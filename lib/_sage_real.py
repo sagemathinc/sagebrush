@@ -1069,6 +1069,13 @@ class RealNumberMP:
     def _W(self, extra=30):
         return self._R._prec + extra + max(0, self._e + abs(self._m).bit_length())
 
+    def _nan(self):
+        return RealNumberMP(self._R, 0, 0, "nan")
+
+    def _mag(self):
+        """floor(log2 |self|) + 1 (self nonzero and finite)."""
+        return self._e + abs(self._m).bit_length()
+
     def exp(self):
         """e^self.
 
@@ -1078,6 +1085,8 @@ class RealNumberMP:
             2.7182818284590452353602874714
         """
         R = self._R
+        if self._special:
+            return {"+inf": self, "-inf": R(0)}.get(self._special, self._nan())
         if self._m == 0:
             return R(1)
         mag = self._e + abs(self._m).bit_length()
@@ -1097,11 +1106,17 @@ class RealNumberMP:
             (0.69314718055994530941723212146, 3.0000000)
         """
         R = self._R
+        if self._special:
+            return self if self._special == "+inf" else self._nan()
         if self._m <= 0:
             if self._m == 0:
                 return RealNumberMP(R, 0, 0, "-inf")
             return ComplexField(R._prec)(self).log() if base is None else ComplexField(R._prec)(self).log() / R(base).log()
-        W = R._prec + 30
+        # log(1 + d) is about d: fixed point needs -log2|d| more bits for the
+        # relative precision (log(1 + 2^-75) to 100 bits)
+        d = self._q() - 1
+        extra = 0 if d == 0 else max(0, d.denominator.bit_length() - abs(d.numerator).bit_length() + 1)
+        W = R._prec + 30 + extra
         v = R._fixed(_log_fx(self._m, self._e, W), W)
         if base is not None:
             return v / R(base).log()
@@ -1131,7 +1146,9 @@ class RealNumberMP:
 
     def _trig(self):
         R = self._R
-        W = R._prec + 30
+        # tiny arguments: sin x is about x, so -log2|x| more fixed-point
+        # bits keep the relative precision (sin(2^-300) is not 0)
+        W = R._prec + 30 + (max(0, -self._mag()) if self._m else 0)
         return _sincos_fx(self._fix(W), W), W
 
     def sin(self):
@@ -1142,6 +1159,8 @@ class RealNumberMP:
             sage: RealField(100)(1).sin()
             0.84147098480789650665250232163
         """
+        if self._special:
+            return self._nan()
         if self._m == 0:
             return self
         (s, c), W = self._trig()
@@ -1155,6 +1174,8 @@ class RealNumberMP:
             sage: RealField(100)(1).cos()
             0.54030230586813971740093660744
         """
+        if self._special:
+            return self._nan()
         (s, c), W = self._trig()
         return self._R._fixed(c, W)
 
@@ -1166,6 +1187,10 @@ class RealNumberMP:
             sage: RealField(100)(1).tan()
             1.5574077246549022305069748075
         """
+        if self._special:
+            return self._nan()
+        if self._m == 0:
+            return self
         (s, c), W = self._trig()
         return self._R(_F(s, c))
 
@@ -1197,6 +1222,8 @@ class RealNumberMP:
             sage: RealField(100)(1).cot()
             0.64209261593433070300641998659
         """
+        if self._special:
+            return self._nan()
         (s, c), W = self._trig()
         return self._R(_F(c, s))
 
@@ -1209,6 +1236,10 @@ class RealNumberMP:
             0.78539816339744830961566084582
         """
         R = self._R
+        if self._special:
+            return {"+inf": R.pi() / 2, "-inf": -R.pi() / 2}.get(self._special, self._nan())
+        if self._m == 0:
+            return self
         W = R._prec + 30 + max(0, -(self._e + abs(self._m).bit_length()))
         return R._fixed(_atan_fx(self._fix(W), W), W)
 

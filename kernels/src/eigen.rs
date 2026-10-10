@@ -75,10 +75,13 @@ pub unsafe extern "C" fn dgeqr(c: *mut f64, m: usize, n: usize, v: *mut f64, bet
             continue;
         }
         let alpha = if *cj.add(j) > 0.0 { -norm } else { norm };
+        // v = (x - alpha e_j) / (x_j - alpha) (entries at most 1: v.v does
+        // not underflow or overflow at extreme scales), as in the TS
+        let d = *cj.add(j) - alpha;
         for i in j..m {
-            *vj.add(i) = *cj.add(i);
+            *vj.add(i) = *cj.add(i) / d;
         }
-        *vj.add(j) -= alpha;
+        *vj.add(j) = 1.0;
         let vv = dot4(vj.add(j), vj.add(j), m - j);
         let b = if vv == 0.0 { 0.0 } else { 2.0 / vv };
         for col in j..n {

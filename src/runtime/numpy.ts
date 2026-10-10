@@ -177,6 +177,8 @@ export class NDArray {
     public offset = 0,
     public base: NDArray | null = null,
   ) {}
+  // read-only (broadcast_to's views, and views of them): writes raise
+  ro = false;
   get size(): number {
     let n = 1;
     for (const s of this.shape) n *= s;
@@ -342,8 +344,17 @@ export function copy(a: NDArray, dt: DType = a.dt): NDArray {
   return out;
 }
 
+// A view of a keeps a's read-only flag.
+const viewOf = (v: NDArray, a: NDArray): NDArray => ((v.ro = a.ro), v);
+function writable(a: NDArray) {
+  if (a.ro) raise(T.ValueError, "assignment destination is read-only");
+}
+
 // out[...] = src (an array, broadcast to out's shape), casting as needed.
 function assign(out: NDArray, src: NDArray) {
+  writable(out);
+  // overlapping storage (a[1:] = a[:-1], a[:] = a[::-1]): read from a copy
+  if (src.data.buffer === out.data.buffer) src = copy(src);
   const sb = bstrides(src, out.shape);
   const od = out.data, sd = src.data;
   if (out.dt.cplx) {
@@ -582,7 +593,7 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
       shape.push(a.shape[d]);
       strides.push(a.strides[d]);
     }
-    return { view: new NDArray(a.dt, a.data, shape, strides, off, a.base ?? a) };
+    return { view: viewOf(new NDArray(a.dt, a.data, shape, strides, off, a.base ?? a), a) };
   }
   // Advanced indexing: integer scalars count as advanced too.  The
   // broadcast index shape goes where the advanced indices are, if they are
@@ -724,6 +735,7 @@ function getitem(a: NDArray, key: any): any {
 }
 
 function setitem(a: NDArray, key: any, value: any) {
+  writable(a);
   const r = resolveIndex(a, key);
   const src = value instanceof NDArray ? value : operand(value).arr;
   if ("view" in r) return assign(r.view, src);
@@ -747,13 +759,14 @@ function reshape(a: NDArray, shape: number[]): NDArray {
   }
   if (prod(shape) !== n) raise(T.ValueError, `cannot reshape array of size ${n} into shape ${shapeStr(shape)}`);
   const c = a.isC() ? a : copy(a);
-  return new NDArray(c.dt, c.data, shape, cStrides(shape), c.offset, c === a ? (a.base ?? a) : null);
+  return viewOf(new NDArray(c.dt, c.data, shape, cStrides(shape), c.offset, c === a ? (a.base ?? a) : null), c);
 }
 function transpose(a: NDArray, axes: number[] | null): NDArray {
   const ax = axes ?? a.shape.map((_, i) => a.ndim - 1 - i);
   if (ax.length !== a.ndim) raise(T.ValueError, "axes don't match array");
   const norm = ax.map((x) => normAxis(x, a.ndim));
-  return new NDArray(a.dt, a.data, norm.map((i) => a.shape[i]), norm.map((i) => a.strides[i]), a.offset, a.base ?? a);
+  if (new Set(norm).size !== norm.length) raise(T.ValueError, "repeated axis in transpose");
+  return viewOf(new NDArray(a.dt, a.data, norm.map((i) => a.shape[i]), norm.map((i) => a.strides[i]), a.offset, a.base ?? a), a);
 }
 
 // ------------------------------------------------------------------ elementwise operations
@@ -926,6 +939,7 @@ function stridedKernel(op: string): any {
 // anything is computed.
 export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false): any {
   const spec = BIN[op];
+  if (out) writable(out);
   const A = operand(x), B = operand(y);
   let ct = resultType(A, B); // type the computation runs in
   if (spec.noBool && ct.kind === "b") raise(T.TypeError, `numpy boolean ${op}, the \`-\` operator, is not supported, use the bitwise_xor, the \`^\` operator, or the logical_xor function instead.`);
@@ -1001,15 +1015,16 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   square: { f: (x) => x * x, c: (a, b) => [a * a - b * b, 2 * a * b], keepInt: true },
   sqrt: { f: Math.sqrt, c: csqrt, float: true },
   cbrt: { f: Math.cbrt, float: true },
-  exp: { f: glibcExp, c: (a, b) => [glibcExp(a) * Math.cos(b), glibcExp(a) * Math.sin(b)], float: true },
+  // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
+  exp: { f: glibcExp, c: (a, b) => (b === 0 ? [glibcExp(a), b] : [glibcExp(a) * Math.cos(b), glibcExp(a) * Math.sin(b)]), float: true },
   exp2: { f: (x) => 2 ** x, float: true },
   expm1: { f: Math.expm1, float: true },
   log: { f: glibcLog, c: (a, b) => [glibcLog(Math.hypot(a, b)), Math.atan2(b, a)], float: true },
   log2: { f: Math.log2, float: true },
   log10: { f: Math.log10, float: true },
   log1p: { f: glibcLog1p, float: true },
-  sin: { f: Math.sin, c: (a, b) => [Math.sin(a) * Math.cosh(b), Math.cos(a) * Math.sinh(b)], float: true },
-  cos: { f: Math.cos, c: (a, b) => [Math.cos(a) * Math.cosh(b), -Math.sin(a) * Math.sinh(b)], float: true },
+  sin: { f: Math.sin, c: (a, b) => (b === 0 ? [Math.sin(a), Number.isFinite(a) ? Math.cos(a) * b : b] : [Math.sin(a) * Math.cosh(b), Math.cos(a) * Math.sinh(b)]), float: true },
+  cos: { f: Math.cos, c: (a, b) => (b === 0 ? [Math.cos(a), Number.isFinite(a) ? -Math.sin(a) * b : -b] : [Math.cos(a) * Math.cosh(b), -Math.sin(a) * Math.sinh(b)]), float: true },
   tan: { f: Math.tan, float: true },
   arcsin: { f: Math.asin, float: true },
   arccos: { f: Math.acos, float: true },
@@ -1034,10 +1049,24 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   logical_not: { f: (x) => +(x === 0), out: "bool", c: (a, b) => [+(a === 0 && b === 0), 0] },
   invert: { f: (x) => -x - 1, keepInt: true },
 };
+// The principal square root as C99 csqrt: the sign of the imaginary part
+// follows b's sign bit (sqrt(-1-0j) = -1j), special values as C99, and
+// scaling so that huge or tiny arguments neither overflow nor underflow.
 function csqrt(a: number, b: number): [number, number] {
+  if (b === Infinity || b === -Infinity) return [Infinity, b];
+  if (a !== a) return [NaN, NaN];
+  if (a === Infinity) return [Infinity, b !== b ? NaN : Object.is(b, -0) || b < 0 ? -0 : 0];
+  if (a === -Infinity) return [b !== b ? NaN : 0, Object.is(b, -0) || b < 0 ? -Infinity : Infinity];
+  if (b !== b) return [NaN, NaN];
   if (a === 0 && b === 0) return [0, b];
+  const m = Math.max(Math.abs(a), Math.abs(b));
+  // sqrt(z) = sqrt(z / 4^k) 2^k
+  let s = 1;
+  if (m > 1e300) (a *= 0.25), (b *= 0.25), (s = 2);
+  else if (m < 1e-300) (a *= 2 ** 600), (b *= 2 ** 600), (s = 2 ** -300);
   const t = Math.sqrt((Math.abs(a) + Math.hypot(a, b)) / 2);
-  return a >= 0 ? [t, b / (2 * t)] : [Math.abs(b) / (2 * t), b >= 0 ? t : -t];
+  const neg = b < 0 || Object.is(b, -0);
+  return a >= 0 ? [s * t, s * (b / (2 * t))] : [(s * Math.abs(b)) / (2 * t), neg ? -s * t : s * t];
 }
 function roundHalfEven(x: number): number {
   const r = Math.round(x);
@@ -1312,9 +1341,17 @@ function imagPart(a: NDArray): NDArray {
   const dt = a.dt === D.complex64 ? D.float32 : D.float64;
   return new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset + 1, a);
 }
+// A real scalar as a JS number: through a NumPy scalar's box and an
+// integral float's FloatBox.
+function realNum(x: any): number {
+  let v = Obj.unbox(x);
+  if (v instanceof Obj.FloatBox) v = v.v;
+  return typeof v === "bigint" ? Number(v) : (v as number);
+}
+
 function combineComplex(r: any, i: any, dt: DType): any {
   if (!(r instanceof NDArray)) {
-    const v = new PyComplex(Obj.unbox(r) as number, Obj.unbox(i) as number);
+    const v = new PyComplex(realNum(r), realNum(i));
     const ctor = scalarCtors[dt.name];
     return ctor ? Obj.callObj(ctor, [v]) : v;
   }
@@ -1894,7 +1931,14 @@ newBuiltinModule("_numpy", (m) => {
   Ty.getset(A, "base", (a: NDArray) => a.base);
   Ty.getset(A, "real", (a: NDArray) => realPart(a), (a: NDArray, v: any) => assign(realPart(a), asarray(v)));
   Ty.getset(A, "imag", (a: NDArray) => imagPart(a), (a: NDArray, v: any) => assign(imagPart(a), asarray(v)));
-  Ty.getset(A, "flat", (a: NDArray) => ravel(a.isC() ? a : copy(a)));
+  // (a noncontiguous array's .flat is a copy: read-only, so that a write
+  // raises instead of being silently lost)
+  Ty.getset(A, "flat", (a: NDArray) => {
+    if (a.isC()) return ravel(a);
+    const c = ravel(copy(a));
+    c.ro = true;
+    return c;
+  });
   Ty.getset(A, "__array_priority__", () => 0);
   M("__len__", (a: NDArray) => (a.ndim === 0 ? raise(T.TypeError, "len() of unsized object") : a.shape[0]));
   M("__getitem__", (a: NDArray, k: any) => getitem(a, k));
@@ -1999,7 +2043,7 @@ newBuiltinModule("_numpy", (m) => {
   M("fill", (a: NDArray, v: any) => (assign(a, operand(v).arr), null));
   M("conj", (a: NDArray) => conj(a));
   M("conjugate", (a: NDArray) => conj(a));
-  M("view", (a: NDArray) => new NDArray(a.dt, a.data, a.shape.slice(), a.strides.slice(), a.offset, a.base ?? a));
+  M("view", (a: NDArray) => viewOf(new NDArray(a.dt, a.data, a.shape.slice(), a.strides.slice(), a.offset, a.base ?? a), a));
   m.ndarray = A;
 
   const shapeArg = (s: any): number[] => {
@@ -2184,7 +2228,10 @@ newBuiltinModule("_numpy", (m) => {
   });
   fn("broadcast_to", (a: any, shape: any) => {
     const x = asarray(a), sh = shapeArg(shape);
-    return new NDArray(x.dt, x.data, sh, bstrides(x, sh), x.offset, x.base ?? x);
+    // read-only, as in NumPy: a write would change every repeated element
+    const v = new NDArray(x.dt, x.data, sh, bstrides(x, sh), x.offset, x.base ?? x);
+    v.ro = true;
+    return v;
   });
   fn("broadcast_shapes", (...shapes: any[]) => tuple(broadcastShapes(...shapes.map(shapeArg))));
   fn("where3", (c: any, x: any, y: any) => {

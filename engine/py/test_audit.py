@@ -322,3 +322,19 @@ assert str(_s * _s) == "1 + 2*x + 2*x^2 + Order(x^3)" and str(_s - _s) == "Order
 assert taylor(exp(_x), _x, 0, 201).coefficient(_x, 201) != 0
 assert "x^(-2)" in str((exp(_x) / _x**2).series(_x, 3))
 print("symbolic2 ok")
+
+# Systematic review, numerics (NUM-F11, F12)
+from sagebrush.sage import RealField, numerical_integral
+_R = RealField(100)
+assert _R(Fraction(1, 2**300)).sin() != 0 and abs(_R(Fraction(1, 2**300)).sin() * 2**300 - 1) < _R(2)**-90
+_v = (_R(1) + _R(Fraction(1, 2**75))).log() * 2**75
+assert abs(_v - (1 - _R(2)**-76)) < _R(2)**-95
+assert str(_R("+inf").exp()) == "+infinity" and str(_R("+inf").log()) == "+infinity"
+assert _R("-inf").exp() == 0 and _R("nan").exp().is_NaN() and _R("+inf").sin().is_NaN() and _R("nan").cos().is_NaN()
+import warnings as _w
+with _w.catch_warnings(record=True) as _ws:
+    _w.simplefilter("always")
+    numerical_integral(sin(100000 * var("x")), 0, 1, eps_abs=1e-10, eps_rel=1e-10)
+    assert any("tolerance was not met" in str(w.message) for w in _ws)
+assert numerical_integral(lambda t, c: c * t, 0, 1, params=[3])[0] == 1.5
+print("numerics ok")
