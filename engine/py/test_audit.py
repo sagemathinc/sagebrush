@@ -338,3 +338,35 @@ with _w.catch_warnings(record=True) as _ws:
     assert any("tolerance was not met" in str(w.message) for w in _ws)
 assert numerical_integral(lambda t, c: c * t, 0, 1, params=[3])[0] == 1.5
 print("numerics ok")
+
+# Systematic review, extended areas (EXT-F1..F22)
+from sagebrush.sage import DiGraph, digraphs, Graph, Sandpile, codes, matrix, vector, crystals, WeylCharacterRing, CartanType, CartanMatrix, AlphabeticStrings, SubstitutionCryptosystem, TranspositionCryptosystem, Polyhedron, PowerSeriesRing, LaurentSeriesRing, EuclideanSpace
+assert DiGraph([(0, 0), (1, 1), (2, 2)], loops=True).is_isomorphic(digraphs.Circuit(3)) is False
+assert Graph([(0, 1, 10), (0, 2, 1), (2, 1, 1)]).distance(0, 1, by_weight=True) == 2
+_S = Sandpile({0: {}, 1: {0: 1, 1: 1}}, 0); _x0, _x1 = _S.ring().gens()
+assert (_x1 - _x0) in _S.ideal()
+assert str(Sandpile({0: {1: 2}, 1: {0: 2}}, 0).tutte_polynomial()) == "x + y"
+raises(ValueError, Sandpile, {0: {}, 1: {1: 1}}, 0)
+raises(ValueError, codes.GeneralizedReedSolomonCode, [GF(5)(i) for i in range(3)], 2, [0, 1, 1])
+_F4 = GF(4, "a"); _a = _F4.gen(); _C = codes.LinearRankMetricCode(matrix(_F4, [[1, _a, _a + 1]])); _r = vector(_F4, [1, 1, 1])
+assert _C.rank_distance_between_vectors(_r, _C.decode_to_code(_r)) == 1
+assert not (crystals.Letters("A2")(1) == crystals.Letters("B2")(1))
+assert CartanType(CartanMatrix([[2, -1], [-1, 2]])).is_finite() and CartanType(CartanMatrix([[2, -2], [-2, 2]])).is_affine()
+assert not CartanType("A1~xA1").is_finite()
+assert (0 * Polyhedron(lines=[[1]])).dim() == 0 and Polyhedron(ieqs=[], ambient_dim=2).dim() == 2
+_R = PolynomialRing(ZZ, "z"); _z = _R.gen()
+raises(NotImplementedError, _R.ideal, 2, _z)
+assert _R(0) in _R.ideal(0)
+_T = PolynomialRing(QQ, "t"); _t = _T.gen(); _A = _T.quotient(_t**3, "a3"); _B = _T.quotient(_t**2, "b2")
+assert _B(_A.gen()**2) == _B(0)
+_L = LaurentSeriesRing(QQ, "x"); _lx = _L.gen()
+assert _lx.is_unit() and not PowerSeriesRing(ZZ, "z")(2).is_unit() and not LaurentSeriesRing(ZZ, "z").is_field()
+_P = PowerSeriesRing(QQ, "x", default_prec=8); _px = _P.gen()
+assert str((_px**9)(_px)) == "x^9"
+raises(ValueError, (_lx**-1).exp)
+_E1 = EuclideanSpace(2, names=("bad_r", "s")); _rr, _ss = list(_E1.cartesian_coordinates()); _v = _E1.vector_field(_rr, 0)
+EuclideanSpace(2, names=("a", "b")).polar_coordinates(names=("bad_r", "theta"))
+assert _v.norm()(_E1((-2, 0))) == 2
+_Sa = AlphabeticStrings()
+raises(ValueError, _Sa, [26]); raises(ValueError, SubstitutionCryptosystem(_Sa), _Sa("A" * 26)); raises(ValueError, TranspositionCryptosystem, _Sa, -1)
+print("extended ok")

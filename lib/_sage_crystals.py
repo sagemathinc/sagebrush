@@ -246,7 +246,9 @@ class CrystalElement:
         return self._f(i)
 
     def __eq__(self, other):
-        return type(self) is type(other) and self._key() == other._key()
+        # elements of different crystals (Letters A2 and B2) differ
+        return type(self) is type(other) and self._key() == other._key() and \
+            (self._P is other._P or repr(self._P) == repr(other._P))
 
     def __ne__(self, other):
         return not self == other
@@ -671,6 +673,11 @@ class Crystal:
         """
         I = index_set if index_set is not None else self.index_set()
         gens = list(generators) if generators is not None else list(self.module_generators)
+        if contained is not None:
+            inside = contained if callable(contained) else (lambda b, S=contained: b in S)
+        else:
+            inside = lambda b: True
+        gens = [b for b in gens if inside(b)]
         seen = set(gens)
         out = list(gens)
         level = list(gens)
@@ -680,7 +687,7 @@ class Crystal:
             for b in level:
                 for i in I:
                     for c in ([b.f(i)] if direction in ("both", "lower") else []) + ([b.e(i)] if direction in ("both", "upper") else []):
-                        if c is not None and c not in seen:
+                        if c is not None and c not in seen and inside(c):
                             seen.add(c)
                             out.append(c)
                             nxt.append(c)

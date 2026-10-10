@@ -1037,8 +1037,10 @@ class LinearCodeNearestNeighborDecoder(Decoder):
         F = self._code.base_field()
         r = _vector(F, list(r))
         best = None
+        rank = self._code.metric() == "rank"
         for c in self._code:
-            d = (c - r).hamming_weight()
+            # the code's own metric (rank metric codes: rank distance)
+            d = self._code.rank_distance_between_vectors(c, r) if rank else (c - r).hamming_weight()
             if best is None or d < best[0]:
                 best = (d, c)
         return best[1]
@@ -1243,6 +1245,13 @@ class GeneralizedReedSolomonCode(AbstractLinearCode):
         AbstractLinearCode.__init__(self, F, n, "EvaluationVector", "Gao")
         self._pts = [F(a) for a in pts]
         self._mult = [F(v) for v in column_multipliers] if column_multipliers is not None else [F(1)] * n
+        # the GRS distance n - k + 1 needs nonzero multipliers and 0 < k <= n
+        if len(self._mult) != n:
+            raise ValueError("there must be exactly %d column multipliers" % n)
+        if any(v == 0 for v in self._mult):
+            raise ValueError("all column multipliers must be nonzero")
+        if dimension != int(dimension) or not 0 < int(dimension) <= n:
+            raise ValueError("the dimension must be an integer with 0 < k <= n")
         self._dimension = int(dimension)
 
     def _repr_(self):
@@ -1596,7 +1605,14 @@ class GRSGuruswamiSudanDecoder(GRSGaoDecoder):
 
     def __init__(self, code, tau=None, parameters=None, interpolation_alg=None, root_finder=None):
         GRSGaoDecoder.__init__(self, code)
-        self._tau = int(tau) if tau is not None else (code._length - code._dimension) // 2
+        unique = (code._length - code._dimension) // 2
+        # only unique decoding is implemented: a larger list-decoding radius
+        # (or interpolation/root-finder choices) would be a false claim
+        if tau is not None and int(tau) > unique:
+            raise NotImplementedError("Guruswami-Sudan list decoding beyond %d errors is not implemented (unique decoding only)" % unique)
+        if parameters is not None or interpolation_alg is not None or root_finder is not None:
+            raise NotImplementedError("Guruswami-Sudan parameters, interpolation_alg and root_finder are not implemented")
+        self._tau = int(tau) if tau is not None else unique
 
     def _repr_(self):
         return "Guruswami-Sudan decoder for %s decoding %d errors" % (self._code, self._tau)
@@ -1776,6 +1792,8 @@ class _Codes:
             [6, 3, 4] Reed-Solomon Code over GF(7)
         """
         F = base_field
+        if int(length) > int(F.order()):
+            raise ValueError("the length must be at most the size of the field (%d)" % F.order())
         return GeneralizedReedSolomonCode(_elements(F)[:int(length)], dimension)
 
     def __repr__(self):
@@ -1960,8 +1978,20 @@ class AlphabeticStringMonoid:
         if isinstance(x, AlphabeticString):
             return x
         if isinstance(x, str):
-            return AlphabeticString(self, "".join(c for c in x.upper() if c.isalpha()))
-        return AlphabeticString(self, "".join(chr(65 + int(i)) for i in x))
+            # the letters A-Z only (other characters, including non-ASCII
+            # letters, are dropped)
+            return AlphabeticString(self, "".join(c for c in x.upper() if "A" <= c <= "Z"))
+        import operator
+        out = []
+        for i in x:
+            try:
+                k = operator.index(i)
+            except TypeError:
+                raise TypeError("letter indices must be integers, not %r" % (i,))
+            if not 0 <= k < 26:
+                raise ValueError("letter indices must be in 0..25, not %d" % k)
+            out.append(chr(65 + k))
+        return AlphabeticString(self, "".join(out))
 
     def ngens(self):
         """The number of letters.
@@ -2069,6 +2099,8 @@ class SubstitutionCryptosystem:
             sage: S = AlphabeticStrings(); E = SubstitutionCryptosystem(S); E(S([25 - i for i in range(26)]))
             Substitution cipher on Free alphabetic string monoid on A-Z
         """
+        if sorted(K._s) != [chr(65 + i) for i in range(26)]:
+            raise ValueError("a substitution key must be a permutation of the 26 letters")
         return _Cipher(self, lambda m: AlphabeticString(self._S, "".join(K._s[ord(c) - 65] for c in m._s)), "Substitution cipher on %s" % (self._S,))
 
     def key_space(self):
@@ -2114,7 +2146,14 @@ class TranspositionCryptosystem:
     """
 
     def __init__(self, S, n):
-        self._S, self._n = S, int(n)
+        import operator
+        try:
+            n = operator.index(n)
+        except TypeError:
+            raise TypeError("the block length must be an integer, not %r" % (n,))
+        if n < 1:
+            raise ValueError("the block length must be positive")
+        self._S, self._n = S, n
 
     def __repr__(self):
         return "Transposition cryptosystem on %s of block length %d" % (self._S, self._n)
@@ -2148,13 +2187,18 @@ class TranspositionCryptosystem:
             Cipher on Free alphabetic string monoid on A-Z
         """
         n = self._n
+        img = [int(g(i + 1)) for i in range(n)]
+        if sorted(img) != list(range(1, n + 1)):
+            raise ValueError("a transposition key must be a permutation of 1..%d" % n)
 
         def f(m):
             s = m._s
+            if len(s) % n:
+                raise ValueError("the message length must be a multiple of the block length %d" % n)
             out = []
             for b in range(0, len(s), n):
                 blk = s[b:b + n]
-                out.append("".join(blk[int(g(i + 1)) - 1] for i in range(len(blk))))
+                out.append("".join(blk[img[i] - 1] for i in range(n)))
             return AlphabeticString(self._S, "".join(out))
         return _Cipher(self, f, "Cipher on %s" % (self._S,))
 

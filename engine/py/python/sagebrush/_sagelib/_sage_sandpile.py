@@ -85,6 +85,20 @@ class Sandpile:
         if self._sink not in w:
             raise ValueError("the sink is not a vertex")
         self._nonsink = [v for v in self._verts if v != self._sink]
+        # every vertex must reach the sink (else stabilization never ends)
+        reach, todo = {self._sink}, [self._sink]
+        rev = {}
+        for u, d in w.items():
+            for v, c in d.items():
+                if c and u != v:
+                    rev.setdefault(v, []).append(u)
+        while todo:
+            for u in rev.get(todo.pop(), []):
+                if u not in reach:
+                    reach.add(u)
+                    todo.append(u)
+        if len(reach) != len(w):
+            raise ValueError("every vertex must have a directed path to the sink")
         self._idx = {v: i for i, v in enumerate(self._nonsink)}
         self._outdeg = {v: sum(w[v].values()) for v in self._verts}
         self._cache = {}
@@ -854,7 +868,8 @@ class Sandpile:
         R = self.ring()
         gens = []
         for v in self._nonsink:
-            pos = self._var(v) ** self._outdeg[v]
+            # firing v keeps its own loop's chips: exponent outdeg - w(v, v)
+            pos = self._var(v) ** (self._outdeg[v] - self._w[v].get(v, 0))
             neg = R(1)
             for u, c in self._w[v].items():
                 if u != v:
@@ -950,13 +965,15 @@ class Sandpile:
             x^2 + x + y
         """
         import _sage_graph as G
-        g = G.Graph()
-        for v in self._verts:
-            g.add_vertex(v)
-        for u in self._verts:
-            for v in self._w[u]:
-                g.add_edge(u, v)
-        return g.tutte_polynomial()
+        if not self.is_undirected():
+            raise NotImplementedError("tutte_polynomial: only for undirected sandpile graphs")
+        # each undirected edge with its multiplicity (parallel edges count)
+        edges = []
+        for i, u in enumerate(self._verts):
+            for v, c in self._w[u].items():
+                if v == u or self._verts.index(v) > i:
+                    edges.extend([(u, v)] * int(c))
+        return G._tutte(list(self._verts), edges)
 
     def reorder_vertices(self):
         """The same sandpile with vertices relabelled 0..n-1 by increasing

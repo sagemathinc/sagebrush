@@ -38,6 +38,31 @@ def _fs(f):
     return str(f.numerator) if f.denominator == 1 else "%d/%d" % (f.numerator, f.denominator)
 
 
+
+def _det(M):
+    """The determinant of a square matrix of Fractions (Gaussian elimination)."""
+    M = [list(r) for r in M]
+    n, d = len(M), _F(1)
+    for c in range(n):
+        p = next((r for r in range(c, n) if M[r][c] != 0), None)
+        if p is None:
+            return _F(0)
+        if p != c:
+            M[c], M[p] = M[p], M[c]
+            d = -d
+        d *= M[c][c]
+        for r in range(c + 1, n):
+            f = M[r][c] / M[c][c]
+            if f:
+                M[r] = [a - f * b for a, b in zip(M[r], M[c])]
+    return d
+
+
+def _positive_definite(B):
+    """Whether the symmetric rational matrix B is positive definite (all
+    leading principal minors positive)."""
+    return all(_det([r[:k] for r in B[:k]]) > 0 for k in range(1, len(B) + 1))
+
 class Family:
     """A finite family (an ordered dict), as Sage's Finite family {...}.
 
@@ -265,6 +290,8 @@ class CartanType_:
             sage: CartanType("G2").is_finite(), CartanType("G2~").is_finite()
             (True, False)
         """
+        if self._components:
+            return all(c.is_finite() for c in self._components)
         return not (self._affine or self._letter == "BC")
 
     def is_affine(self):
@@ -275,6 +302,8 @@ class CartanType_:
             sage: CartanType("A2").is_affine(), CartanType("A2~").is_affine()
             (False, True)
         """
+        if self._components:
+            return False  # (irreducible affine types only)
         return not self.is_finite()
 
     def is_irreducible(self):
@@ -546,25 +575,72 @@ class CartanMatrixType(CartanType_):
         """
         return tuple(range(len(self._mat)))
 
+    def _symmetrized(self):
+        """D A with D diagonal positive making it symmetric, or None if A is
+        not symmetrizable (finite and affine types always are)."""
+        A, n = self._mat, len(self._mat)
+        d = [None] * n
+        for s0 in range(n):
+            if d[s0] is not None:
+                continue
+            d[s0] = _F(1)
+            todo = [s0]
+            while todo:
+                i = todo.pop()
+                for j in range(n):
+                    if A[i][j] != 0 or A[j][i] != 0:
+                        if A[i][j] == 0 or A[j][i] == 0:
+                            return None
+                        dj = d[i] * A[i][j] / A[j][i]  # d_i a_ij = d_j a_ji
+                        if d[j] is None:
+                            d[j] = dj
+                            todo.append(j)
+                        elif d[j] != dj:
+                            return None
+        if any(x <= 0 for x in d):
+            return None
+        return [[d[i] * A[i][j] for j in range(n)] for i in range(n)]
+
     def is_finite(self):
-        """Whether the type is finite (not recognized here).
+        """Whether the type is finite: symmetrizable with a positive definite
+        symmetrization (exact leading principal minors).
 
         EXAMPLES::
 
             sage: CartanType(CartanMatrix([[2, -3], [-3, 2]])).is_finite()
             False
+            sage: CartanType(CartanMatrix([[2, -1], [-1, 2]])).is_finite()  # sagebrush only
+            True
         """
-        return False
+        B = self._symmetrized()
+        return B is not None and _positive_definite(B)
 
     def is_affine(self):
-        """Whether the type is affine (not recognized here).
+        """Whether the type is (indecomposable) affine: symmetrizable, singular,
+        and every proper principal submatrix of finite type.
 
         EXAMPLES::
 
             sage: CartanType(CartanMatrix([[2, -3], [-3, 2]])).is_affine()
             False
+            sage: CartanType(CartanMatrix([[2, -2], [-2, 2]])).is_affine()  # sagebrush only
+            True
         """
-        return False
+        B = self._symmetrized()
+        n = len(self._mat)
+        if B is None or n < 2 or _det(B) != 0:
+            return False
+        # indecomposable, and removing any one node leaves a finite type
+        seen, todo = {0}, [0]
+        while todo:
+            i = todo.pop()
+            for j in range(n):
+                if self._mat[i][j] != 0 and j not in seen:
+                    seen.add(j)
+                    todo.append(j)
+        if len(seen) != n:
+            return False
+        return all(_positive_definite([[B[i][j] for j in range(n) if j != k] for i in range(n) if i != k]) for k in range(n))
 
     def cartan_matrix(self):
         """The Cartan matrix.
@@ -3445,6 +3521,10 @@ def WeylCharacterRing(ct, base_ring=None, prefix=None, style="lattice", k=None, 
     """
     if k is not None:
         raise NotImplementedError("fusion rings are not available in sagebrush yet")
+    if base_ring is not None and repr(base_ring) != "Integer Ring":
+        # the characters have integer coefficients only: another ring would
+        # be ignored, so it is refused
+        raise NotImplementedError("WeylCharacterRing: only base_ring=ZZ is supported")
     ct = CartanType(ct)
     key = (ct, prefix, style)
     if key not in _WCR:

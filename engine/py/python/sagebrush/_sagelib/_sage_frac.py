@@ -417,6 +417,10 @@ class PrincipalIdeal:
             f = self._R(f)
         except (TypeError, ValueError):
             return False
+        if not self._g:
+            return not f  # the zero ideal
+        if not self._R.base_ring().is_field() and abs(int(self._g.leading_coefficient())) != 1:
+            raise NotImplementedError("membership in (%s) over %r: the generator is not monic" % (self._g, self._R.base_ring()))
         return not (f % self._g)
 
     def reduce(self, f):
@@ -447,6 +451,11 @@ def _ideal(self, *gens):
     if len(gens) == 1 and isinstance(gens[0], (list, tuple)):
         gens = gens[0]
     gens = [self(g) for g in gens]
+    nonzero = [h for h in gens if h]
+    field = self.base_ring().is_field()
+    if not field and len(nonzero) > 1:
+        # (2, z) in ZZ[z] is not principal: a gcd would give the unit ideal
+        raise NotImplementedError("ideals with several generators of a polynomial ring over %r (not a field) are not supported" % (self.base_ring(),))
     g = gens[0]
     for h in gens[1:]:
         g = g.gcd(h)
@@ -606,7 +615,13 @@ class QuotientRing_:
             -i
         """
         if isinstance(x, QuotientElement):
-            return QuotientElement(self, x._p)
+            if x._S is self or x._S == self:
+                return QuotientElement(self, x._p)
+            # the natural map R/(g) -> R/(f) exists when f divides g; the
+            # representative is then reduced modulo f
+            if x._S._R == self._R and not (x._S._f % self._f):
+                return QuotientElement(self, x._p % self._f)
+            raise TypeError("no natural map from %r to %r" % (x._S, self))
         return QuotientElement(self, self._R(x) % self._f)
 
     def gen(self, i=0):

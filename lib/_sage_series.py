@@ -78,10 +78,14 @@ class SeriesRing_:
         self._exact = base is sa.QQ or base is sa.ZZ
 
     def _div(self, a, b):
-        """a / b in the base field (exactly for rationals)."""
+        """a / b in the base ring (exactly for rationals; over ZZ only an
+        exact quotient: 1/2 is not a coefficient of ZZ[[x]])."""
         if self._exact:
             from _sage_poly import _norm
-            return _norm(_F(a) / _F(b))
+            q = _F(a) / _F(b)
+            if self._base is _sa().ZZ and q.denominator != 1:
+                raise ArithmeticError("%s/%s is not in Integer Ring (use a series ring over QQ)" % (a, b))
+            return _norm(q)
         return a / b
 
     def __repr__(self):
@@ -177,7 +181,7 @@ class SeriesRing_:
             sage: QQ[['x']].is_field(), LaurentSeriesRing(QQ, 'x').is_field()
             (False, True)
         """
-        return self._laurent
+        return self._laurent and self._base.is_field()
 
     def laurent_series_ring(self):
         """The Laurent series ring with the same variable.
@@ -465,7 +469,13 @@ class Series:
             sage: R.<t> = QQ[[]]; (1 + t).is_unit(), t.is_unit()
             (True, False)
         """
-        return bool(self._c) and self._v == 0
+        # the leading coefficient must be a unit of the base ring (2 is not
+        # one in ZZ[[z]]); a Laurent series may have any valuation
+        if not self._c or (self._v != 0 and not self._R._laurent):
+            return False
+        c = self._c[0]
+        B = self._R._base
+        return bool(c) if B.is_field() else (B(c).is_unit() if hasattr(B(c), "is_unit") else abs(int(c)) == 1)
 
     # ---- printing
     def __repr__(self):
@@ -681,7 +691,11 @@ class Series:
         from _sage_poly import PolynomialRing
         P = PolynomialRing(self._R._base, self._R._name)
         n = prec if prec is not None else (self._prec if self._prec is not None else self._v + len(self._c))
-        L = self.list()[:max(0, int(n))] if self._v >= 0 else self.list()
+        if self._R._laurent:
+            # a Laurent series: the exact Laurent series of the terms below n
+            k = max(0, int(n) - self._v)
+            return Series(self._R, self._v, list(self._c[:k]), None)
+        L = self.list()[:max(0, int(n))]
         return P(L)
 
     polynomial = truncate
@@ -722,7 +736,7 @@ class Series:
         R = self._R
         if any(self._v + i == -1 and not _is_zero(c) for i, c in enumerate(self._c)):
             raise ArithmeticError("the integral of a series with a 1/x term")
-        c = [R._div(self._c[i], self._v + i + 1) for i in range(len(self._c))]
+        c = [R._zero() if self._v + i + 1 == 0 else R._div(self._c[i], self._v + i + 1) for i in range(len(self._c))]
         return Series(R, self._v + 1, c, self._prec + 1 if self._prec is not None else None)
 
     def exp(self, prec=None):
@@ -734,9 +748,10 @@ class Series:
             1 + q + 1/2*q^2 + 1/6*q^3 + 1/24*q^4 + O(q^5)
         """
         R = self._R
-        if self._c and self._v < 1:
-            if self._v == 0 and not _is_zero(self._c[0]):
-                raise ValueError("can only take the exponential of a series with constant term 0")
+        # exp needs positive valuation: a constant term, or negative powers
+        # (exp(1/x) is not a Laurent series), are refused
+        if any(self._v + i <= 0 and not _is_zero(c) for i, c in enumerate(self._c)):
+            raise ValueError("can only take the exponential of a series with constant term 0 and no negative powers")
         p = self._prec if self._prec is not None else (prec or R._dp)
         # f' = g' f, f(0) = 1
         g = [self[i] for i in range(p)]
@@ -837,18 +852,21 @@ class Series:
             p = None
             if self._prec is not None:
                 p = self._prec * x._v
-            if x._prec is not None:
+            if x._prec is not None and self._v >= 0:
                 q = x._prec + (self._v - 1) * x._v if self._c else x._prec
                 p = q if p is None else min(p, q)
-            pp = p if p is not None else self._R._dp
-            res = Series(x._R, 0, [], p)
-            pw = Series(x._R, 0, [x._R._one()], None)
-            for k in range(0, self._v + len(self._c)):
+            # (exact inputs give an exact result: no cutoff at the default
+            # precision; negative powers use 1/x)
+            first = self._v if self._v < 0 else 0
+            pw = x.inverse() ** (-first) if first < 0 else Series(x._R, 0, [x._R._one()], None)
+            res = Series(pw._R, 0, [], p)
+            for k in range(first, self._v + len(self._c)):
                 c = self[k]
                 if not _is_zero(c):
                     res = res + pw * x._R._base(c)
-                pw = pw * x
-                if pw._v >= pp:
+                if k + 1 < self._v + len(self._c):
+                    pw = pw * x
+                if p is not None and pw._v >= p:
                     break
             return res.add_bigoh(p) if p is not None else res
         if self._prec is not None:
