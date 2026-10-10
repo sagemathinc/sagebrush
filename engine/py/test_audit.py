@@ -498,6 +498,12 @@ raises(NotImplementedError, (arcsin(_y) - _pa).roots, _y)
 _c = SR("sqrt(2*I)") - 1 - I; assert len(solve(_c * _y - 1 == 0, _y)[0].conditions()) == 1 and len(solve(_c * _y == 0, _y)) == 2
 assert [str(c) for c in solve(_c * _pa * _y == 1, _y)[0].conditions()] != ["a != 0"] and str(solve(sin(_y) * log(_y) == 0, _y)) == "[x == 1, x == pi*n1 for integer n1 if n1 != 0]"
 assert str(solve(1 / _y + 1 / (_y * (_y + 1)) == (_y + 2) / (_y * (_y + 1)), _y)) == "[x == r1 if r1 != 0 and r1 != -1]"
+# the 2f5afbe follow-up: both operands' conditions, parameter-only and nested singularities, nested remainders
+_s, _t = solve(sqrt(_y) == _pa, _y)[0], solve(sqrt(var("y")) == var("b"), var("y"))[0]; raises(ValueError, (_s + _t).subs, a=1, b=-1)
+_u, _v = solve(var("y") == var("b"), var("y"))[0], solve(sin(_y) == 0, _y)[0]; raises(ValueError, (_u + _v).subs, n1=QQ(1) / 2)
+assert str(solve(log(_pa) * (_y - 1) == 0, _y)[0]) == "x == 1 if a != 0" and str(solve(_pa * exp(1 / _y) == 0, _y)) == "[x == r1 if a == 0 and r1 != 0]"
+assert str(solve(_pa**(_y / (_y + 1)) == 1, _y)[0]) == "x == r1 if a == 1 and r1 != -1" and str(solve(exp(_y / (_y + 1)) == 1, _y)) == "[0 == e^(x/(x + 1)) - 1]"
+assert str(solve(sin(_y) / _y == _pa, _y)) == "[0 == -a + sin(x)/x]"
 assume(_y < 0); assert abs(sqrt(_y)).subs(x=-1) == 1; forget()  # R2-SYMALG-F2
 assume(_y > -SR("1/10^400")); assert abs(_y).subs(x=-SR("1/10^401")) == SR("1/10^401"); forget()
 assume(_y, "odd"); assert solve(_y**2 - 4, _y) == []; forget()

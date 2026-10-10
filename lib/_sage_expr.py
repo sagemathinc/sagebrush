@@ -2864,15 +2864,36 @@ def _keep_conditions(name):
 
     def op(self, *args):
         # applied to both sides, as Sage does for a relation (the engine's
-        # -(x == a) was not a relation at all)
+        # -(x == a) was not a relation at all); with another relation, both
+        # operands' conditions and integer parameters (renamed apart when
+        # the names collide): CSOL-F7
         l, r = Expression.lhs(self), Expression.rhs(self)
+        conds = list(object.__getattribute__(self, "_conds"))
+        params = list(object.__getattribute__(self, "_params"))
         if args and isinstance(args[0], Expression) and args[0].is_relational():
             o = args[0]
+            if isinstance(o, Solution):
+                oc, op_ = list(o._conds), list(o._params)
+                ren = {}
+                used = set(params) | set(op_) | set(self._names()) | set(o._names())
+                for p in op_:
+                    if p in params:
+                        i = 1
+                        while "n%d" % i in used:
+                            i += 1
+                        used.add("n%d" % i)
+                        ren[p] = "n%d" % i
+                if ren:
+                    sub = {Expression(_sym_s(p)): Expression(_sym_s(q)) for p, q in ren.items()}
+                    o = Solution(Expression.subs(o, sub)._s, [Expression.subs(c, sub) for c in oc], [ren.get(p, p) for p in op_])
+                    oc, op_ = list(o._conds), list(o._params)
+                conds += [c for c in oc if str(c) not in {str(d) for d in conds}]
+                params += [p for p in op_ if p not in params]
             nl, nr = base(l, o.lhs()), base(r, o.rhs())
         else:
             nl, nr = base(l, *args), base(r, *args)
         rel = nl == nr
-        return Solution(rel._s, object.__getattribute__(self, "_conds"), object.__getattribute__(self, "_params"))
+        return Solution(rel._s, conds, params)
     op.__name__ = name
     return op
 

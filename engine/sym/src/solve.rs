@@ -419,12 +419,21 @@ fn ne_conds(e: &Expr) -> Vec<Expr> {
 /// its denominator: u for log(u), cos(u) for tan(u) and sec(u), sin(u) for
 /// cot(u) and csc(u) (a family meeting such a point there: sin(x) log(x) ==
 /// 0 needs n1 != 0, the review's follow-up to CSOL-F1).
+/// (Also those in the parameters only, log(a) (x - 1) == 0 needs a != 0,
+/// and the bases of negative powers anywhere, e^(1/x) needs x != 0: the
+/// review's CSOL-F14, F16.)
 fn singular_args(z: &Expr, x: &str, out: &mut Vec<Expr>) {
-    if !depends(z, x) {
+    let _ = x;
+    if free_symbols(z).is_empty() {
         return;
     }
+    if let Kind::Pow(b, k) = &z.kind {
+        if k.as_num().map_or(false, |k| k.is_negative()) && !out.contains(b) {
+            out.push(b.clone());
+        }
+    }
     if let Kind::Fun(f, a) = &z.kind {
-        if a.len() == 1 && depends(&a[0], x) {
+        if a.len() == 1 {
             let u = &a[0];
             let g = match f {
                 Fun::Log => Some(u.clone()),
@@ -1116,9 +1125,29 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
             }
         })
     });
-    let mut rest = rest;
-    if undecided && !rest.contains(&n) {
-        rest.push(n.clone());
+    // an unresolved piece that is a factor of the numerator stands for
+    // itself; one met inside an inversion (exp(x/(x+1)) == 1: x/(x+1) ==
+    // 2 pi i n1) would lose that inversion's conditions and integer
+    // parameters, so the whole equation is reported instead (the review's
+    // CSOL-F17)
+    let factors: Vec<Expr> = match &crate::simplify::factor(&n).kind {
+        Kind::Mul(v) => v.iter().map(|g| base_exp(g).0).collect(),
+        Kind::Pow(b, _) => vec![b.clone()],
+        _ => vec![n.clone()],
+    };
+    let mut rest: Vec<Expr> = rest;
+    let nested = rest.iter().any(|u| !factors.contains(u) && u != &n);
+    if nested || undecided {
+        rest.retain(|u| factors.contains(u) || u == &n);
+        if !rest.contains(&n) && !(rest.len() == factors.len() && !factors.is_empty() && factors.iter().all(|f| rest.contains(f))) {
+            rest.push(n.clone());
+        }
+    }
+    // with a denominator in x (or singular arguments), a remainder is the
+    // equation itself: its numerator's factor would drop x != 0 from
+    // sin(x)/x == a (the review)
+    if !rest.is_empty() && (depends(&d, x) || !sing.is_empty()) {
+        rest = vec![z.clone()];
     }
     out.extend(rest.iter().map(|f| (relation(Rel::Eq, &zero(), f), vec![], vec![])));
     out
