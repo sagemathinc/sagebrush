@@ -1,7 +1,10 @@
 //! Factoring in Z[x] with FLINT (`fmpz_poly_factor`, van Hoeij's
 //! algorithm), and integer matrices and polynomials ([`FMat`], [`FPoly`])
-//! as references for the Sagebrush tests and benchmarks.  This crate is LGPL-3.0-or-later, like FLINT; the rest of
-//! Sagebrush does not depend on it unless a component needs factoring.
+//! as references for the Sagebrush tests and benchmarks.  This crate's own
+//! code is MIT OR Apache-2.0 (its Cargo.toml), but it links FLINT, which is
+//! LGPL-3.0-or-later, so whatever links it is bound by the LGPL: only
+//! sagebrush-oracle (tests and benchmarks) does, never a distributed
+//! package (scripts/third-party-notices.mjs fails if one would).
 //!
 //! Polynomials cross the boundary as FLINT's string format
 //! ("len  c0 c1 ... c_{len-1}"), so nothing depends on FLINT's internal

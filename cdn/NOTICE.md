@@ -6,8 +6,8 @@ This package bundles three components.
    github.com/sagemathinc/sagebrush compiled to WebAssembly).
    Copyright (c) 2026 SageMath, Inc. Licensed under the MIT license or the
    Apache License 2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`).
-   Parts derived from NumPy (BSD 3-Clause), Arm Optimized Routines (MIT)
-   and fdlibm keep their notices; see `NOTICE.md` in the repository.
+   The Rust crates it links are listed, with their licenses and license
+   texts, in `THIRD-PARTY-NOTICES.txt`.
 
    The a_p engine is a port of the genus-1 strategy of Andrew V. Sutherland's
    smalljac, used with his permission (see `engine/ap/PROVENANCE.md` in the

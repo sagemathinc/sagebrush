@@ -18,8 +18,8 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 requires-python = ">=3.9"
-license = "MIT OR Apache-2.0"
-license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+license = "(MIT OR Apache-2.0) AND Artistic-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE", "LICENSE-Artistic-2.0.txt", "THIRD-PARTY-NOTICES.txt"]
 
 [project.scripts]
 sagebrush-mcp = "sagebrush.mcp_server:main"

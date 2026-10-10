@@ -118,4 +118,7 @@ Sage and Magma for the rest, and LMFDB for modular forms.
 ## License
 
 Copyright (c) 2026 SageMath, Inc. Licensed under either of the Apache
-License, Version 2.0 or the MIT license, at your option.
+License, Version 2.0 or the MIT license, at your option. The package also
+contains John Cremona's elliptic curves of conductor below 1000 (from
+ecdata, under the Artistic License 2.0) and the Rust crates its engine is
+built from, each under its own license: see `THIRD-PARTY-NOTICES.txt`.

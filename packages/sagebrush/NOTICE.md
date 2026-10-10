@@ -7,7 +7,7 @@ This package (`dist/sagebrush.cjs` and `bin/sagebrush.cjs`) bundles:
    SageMath, Inc. Licensed under the MIT license or the Apache License
    2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`). Parts derived
    from NumPy (BSD 3-Clause), Arm Optimized Routines (MIT) and fdlibm keep
-   their notices; see `NOTICE.md` in the repository.
+   their notices, in `THIRD-PARTY-NOTICES.txt`.
 
 2. **pyparse**, a Python 3.14 parser generated from CPython's
    `Grammar/python.gram`, `Grammar/Tokens` and `Parser/Python.asdl`, with
@@ -26,3 +26,13 @@ This package (`dist/sagebrush.cjs` and `bin/sagebrush.cjs`) bundles:
 4. Other embedded Python modules (`collections`, `io`, `unittest`,
    `warnings`, `posixpath`, …) written for this project: the same terms as
    (1).
+
+5. **Sagebrush's engines** (Rust compiled to WebAssembly, embedded), with
+   the Rust crates they link: the same terms as (1) for Sagebrush's code;
+   each crate's license and license text are in `THIRD-PARTY-NOTICES.txt`.
+   The a_p engine ports the genus-1 strategy of Andrew V. Sutherland's
+   smalljac, with his permission.
+
+6. **John Cremona's elliptic curves** of conductor below 1000 (embedded as
+   `_cremona_small.py`), from ecdata, under the Artistic License 2.0
+   (`LICENSE-Artistic-2.0.txt`).

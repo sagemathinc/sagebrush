@@ -93,6 +93,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      - name: each package's third-party notices are up to date, and nothing (L)GPL is linked
+        run: node scripts/third-party-notices.mjs --check
       - name: a fresh WebAssembly engine
         run: |
           node scripts/build-engine.mjs

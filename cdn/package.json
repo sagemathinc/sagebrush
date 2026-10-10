@@ -14,7 +14,8 @@
     "NOTICE.md",
     "LICENSE-CPython.txt",
     "LICENSE-MIT",
-    "LICENSE-APACHE"
+    "LICENSE-APACHE",
+    "THIRD-PARTY-NOTICES.txt"
   ],
   "repository": {
     "type": "git",
