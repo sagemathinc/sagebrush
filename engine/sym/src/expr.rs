@@ -533,6 +533,15 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
             }
             return raw(Kind::Mul(v));
         }
+        // a non-real coefficient: no sign (I*oo was +oo, so the limit of
+        // sin(I x)/e^x went wrong: the fourth review's U5)
+        let complex = match &coeff {
+            Num::Exact(_, im) => !num_traits::Zero::is_zero(im),
+            Num::Float(_, im) => *im != 0.0,
+        };
+        if complex && c != Const::UnsignedInfinity {
+            return constant(Const::UnsignedInfinity);
+        }
         return match (c, coeff.is_negative()) {
             (Const::Infinity, true) => constant(Const::MinusInfinity),
             (Const::MinusInfinity, true) => constant(Const::Infinity),

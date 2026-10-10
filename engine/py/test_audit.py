@@ -113,7 +113,7 @@ raises(ValueError, nf.factor_mod, [-1, 0, 1], 4)
 r = modsym.rational_newforms(11, 20, details=True)
 assert r["status"] == "checked" and len(r["checks"]) == 2 and r["forms"][0][:2] == [(2, -2), (3, -1)]
 # third review: T2, T3 (no finite value), T5 (limits), T6 (small roots), bnf's w
-from sagebrush.sage import cosh, I, limit, exp as sexp
+from sagebrush.sage import cosh, I, limit, exp as sexp, sin, sqrt, log, var
 for f, a, b in [(1 / cosh(I * x) ** 2, 0, pi), (1 / (10**12 * cos(x + 10**20) ** 2), 0, pi)]:
     try:
         r = integrate(f, x, a, b)
@@ -126,4 +126,18 @@ assert limit(abs(x), x=QQ(1) / 10**20, dir="-") > 0
 assert nf.complex_roots([-1, 10**100], 30)[0][0] == "1.00000000000000000000000000000e-100"
 b = nf.bnf([1, 0, 1])
 assert b["w"] == 4 and b["w_proven"] and b["assumes"] == ["GRH"]
+# fourth review: U1 (terminates), U2-U6 (never a wrong value)
+y = var("y")
+assert str(limit(abs(y) + x, x=0)) == "abs(y)" and str(integrate(abs(y), x, 0, 1)) == "abs(y)"
+for e, a, d in [((abs(1 + I * x) - 1) / x, 0, None), (sexp(-x) * sin(I * x), oo, None), (log(-1 + I * x), 0, "-"), (sqrt(-1 + I * x), 0, "-"), (abs(x + sin(10**20 + 1)), 0, None)]:
+    try:
+        r = limit(e, x=a, dir=d) if d else limit(e, x=a)
+        assert str(r) in ("0", "-I*pi", "-I", "abs(sin(100000000000000000001))"), (e, r)
+    except ValueError:
+        pass
+try:
+    r = integrate(1 / (x * cosh(log(-x) / 2) ** 2), x, QQ(1) / 2, 2)
+    assert "integrate" in str(r), r
+except ValueError as e:
+    assert "divergent" in str(e)
 print("audit regressions: ok")

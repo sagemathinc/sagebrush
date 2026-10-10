@@ -27,9 +27,10 @@
 //!   Gauss-Kronrod quadrature, which must succeed when there are singular
 //!   points: a check that rejects answers (it proves nothing).
 //!
-//! What the conclusions rest on: F' = f is checked by integrate(), exactly
-//! when simplification shows it, otherwise at random points off the real
-//! axis (overwhelming evidence for an identity of analytic functions, not a
+//! What the conclusions rest on: f and F real on (a, b), established
+//! (crate::domain); F' = f is checked by integrate(), exactly when
+//! simplification shows it, otherwise at fixed points off the real axis and
+//! on it (strong evidence for an identity of analytic functions, not a
 //! proof); the limits are the limit engine's, whose signs near a point are
 //! established, not sampled; interval enclosures assume LIBM below.
 //!
@@ -43,6 +44,7 @@ use crate::eval::to_c64_env;
 use crate::expr::*;
 use crate::num::Q;
 use crate::qpoly::QPoly;
+use crate::interval::{certified_nonzero, Iv};
 use num_traits::{Signed, Zero};
 use sagebrush_bigint::BigInt;
 use std::cmp::Ordering;
@@ -114,189 +116,6 @@ fn q_from_f64(x: f64) -> Q {
 fn at(f: &Expr, x: &str, t: f64) -> Option<(f64, f64)> {
     let v = to_c64_env(f, &|s| if s == x { Some((t, 0.0)) } else { None })?;
     (v.0.is_finite() && v.1.is_finite()).then_some(v)
-}
-
-// ------------------------------------------------------------------ interval arithmetic
-
-/// A closed interval [lo, hi] of reals.
-#[derive(Clone, Copy, Debug)]
-struct Iv(f64, f64);
-
-/// The error allowed the platform's exp, ln, sin, cos, ... (relative, and
-/// absolute near zeros of sin and cos): Rust does not specify their accuracy;
-/// glibc's, musl's and the libm crate's (WebAssembly) are within an ulp or
-/// two, and this is several hundred.  The certificates below assume it.
-const LIBM: f64 = 1e-14;
-
-/// Outward rounding: a few ulps beyond the computed ends.
-fn out(lo: f64, hi: f64) -> Option<Iv> {
-    if lo.is_nan() || hi.is_nan() || lo > hi {
-        return None;
-    }
-    let down = |v: f64| if v.is_finite() { (v - 4.0 * f64::EPSILON * v.abs()).next_down() } else { v };
-    let up = |v: f64| if v.is_finite() { (v + 4.0 * f64::EPSILON * v.abs()).next_up() } else { v };
-    Some(Iv(down(lo), up(hi)))
-}
-
-impl Iv {
-    fn contains_zero(self) -> bool {
-        self.0 <= 0.0 && self.1 >= 0.0
-    }
-    fn add(self, o: Iv) -> Option<Iv> {
-        out(self.0 + o.0, self.1 + o.1)
-    }
-    fn mul(self, o: Iv) -> Option<Iv> {
-        let p = [self.0 * o.0, self.0 * o.1, self.1 * o.0, self.1 * o.1];
-        if p.iter().any(|v| v.is_nan()) {
-            return None;
-        }
-        out(p.iter().cloned().fold(f64::INFINITY, f64::min), p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
-    }
-    fn recip(self) -> Option<Iv> {
-        if self.contains_zero() {
-            return None;
-        }
-        out(1.0 / self.1, 1.0 / self.0)
-    }
-    fn powi(self, n: i64) -> Option<Iv> {
-        if n < 0 {
-            return self.powi(-n)?.recip();
-        }
-        if n == 0 {
-            return Some(Iv(1.0, 1.0));
-        }
-        if n > 1 << 20 {
-            return None;
-        }
-        let (a, b) = (self.0.abs(), self.1.abs());
-        let (lo, hi) = if n % 2 == 1 {
-            (self.0.signum() * a.powi(n as i32), self.1.signum() * b.powi(n as i32))
-        } else {
-            (if self.contains_zero() { 0.0 } else { a.min(b).powi(n as i32) }, a.max(b).powi(n as i32))
-        };
-        // (powi's own error: a few ulps per multiplication)
-        let s = (n as f64) * 4.0 * f64::EPSILON;
-        out(lo - lo.abs() * s, hi + hi.abs() * s)
-    }
-    /// A monotone library function (exp, ln, atan, ...), increasing or
-    /// decreasing, with LIBM's allowance for its error.
-    fn mono(self, f: impl Fn(f64) -> f64, increasing: bool) -> Option<Iv> {
-        let (a, b) = (f(self.0), f(self.1));
-        let (a, b) = if increasing { (a, b) } else { (b, a) };
-        out(a - LIBM * a.abs(), b + LIBM * b.abs())
-    }
-}
-
-/// An enclosure of e over x in [lo, hi], or None.
-fn ival(e: &Expr, x: &str, r: Iv) -> Option<Iv> {
-    match &e.kind {
-        Kind::Sym(s) if &**s == x => Some(r),
-        Kind::Num(_) | Kind::Const(Const::Pi | Const::E | Const::EulerGamma) => {
-            let v = crate::eval::to_c64(e)?;
-            if v.1 != 0.0 || !v.0.is_finite() {
-                return None;
-            }
-            out(v.0, v.0)
-        }
-        Kind::Add(v) => v.iter().try_fold(Iv(0.0, 0.0), |acc, t| acc.add(ival(t, x, r)?)),
-        Kind::Mul(v) => v.iter().try_fold(Iv(1.0, 1.0), |acc, t| acc.mul(ival(t, x, r)?)),
-        Kind::Pow(b, n) if b.is_const(Const::E) => ival(n, x, r)?.mono(f64::exp, true),
-        Kind::Pow(b, n) => {
-            if let Some(k) = n.as_rat().filter(|q| q.is_integer()).and_then(|q| num_traits::ToPrimitive::to_i64(q.numer())) {
-                return ival(b, x, r)?.powi(k);
-            }
-            // b^n = exp(n log b) for b > 0
-            let bi = ival(b, x, r)?;
-            if bi.0 <= 0.0 {
-                return None;
-            }
-            let li = bi.mono(f64::ln, true)?;
-            li.mul(ival(n, x, r)?)?.mono(f64::exp, true)
-        }
-        Kind::Fun(f, a) if a.len() == 1 => {
-            let u = ival(&a[0], x, r)?;
-            match f {
-                Fun::Log if u.0 > 0.0 => u.mono(f64::ln, true),
-                Fun::Atan => u.mono(f64::atan, true),
-                Fun::Sinh => u.mono(f64::sinh, true),
-                Fun::Tanh => u.mono(f64::tanh, true),
-                Fun::Asinh => u.mono(f64::asinh, true),
-                Fun::Cosh => {
-                    let m = u.0.abs().max(u.1.abs()).cosh();
-                    let l = if u.contains_zero() { 1.0 } else { u.0.abs().min(u.1.abs()).cosh() };
-                    out(l - LIBM * l, m + LIBM * m)
-                }
-                Fun::Abs => {
-                    let m = u.0.abs().max(u.1.abs());
-                    out(if u.contains_zero() { 0.0 } else { u.0.abs().min(u.1.abs()) }, m)
-                }
-                Fun::Sin => trig(u, false),
-                Fun::Cos => trig(u, true),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-/// sin(u) (or cos(u)) over u: the values at the ends, computed directly
-/// (cos(u) is not sin(u + pi/2): rounding that sum loses a zero of cos, the
-/// third review's T1), widened by LIBM absolutely and relatively, and +-1
-/// where a maximum or minimum may lie inside (decided with a margin wider
-/// than the error in the extrema's positions).  Large arguments get [-1, 1].
-fn trig(u: Iv, cosine: bool) -> Option<Iv> {
-    let (a, b) = (u.0, u.1);
-    if !a.is_finite() || !b.is_finite() || a.abs().max(b.abs()) > 1e6 || b - a >= 2.0 * std::f64::consts::PI {
-        return Some(Iv(-1.0, 1.0));
-    }
-    let f = |t: f64| if cosine { t.cos() } else { t.sin() };
-    let (fa, fb) = (f(a), f(b));
-    let w = |v: f64| LIBM * (1.0 + v.abs());
-    let (mut lo, mut hi) = (fa.min(fb), fa.max(fb));
-    lo -= w(lo);
-    hi += w(hi);
-    let tau = 2.0 * std::f64::consts::PI;
-    let has = |c: f64| {
-        // c + 2 k pi in [a - margin, b + margin] for some k
-        let m = 1e-9 * (1.0 + a.abs().max(b.abs()));
-        ((a - m - c) / tau).ceil() <= ((b + m - c) / tau).floor()
-    };
-    let (max_at, min_at) = if cosine { (0.0, std::f64::consts::PI) } else { (std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2) };
-    if has(max_at) {
-        hi = 1.0;
-    }
-    if has(min_at) {
-        lo = -1.0;
-    }
-    out(lo.max(-1.0), hi.min(1.0)).map(|i| Iv(i.0.max(-1.0), i.1.min(1.0)))
-}
-
-/// Whether b is certainly nonzero on [lo, hi] (bisection on interval
-/// enclosures, a bounded number of steps).
-fn certified_nonzero(b: &Expr, x: &str, lo: f64, hi: f64) -> bool {
-    let (lo, hi) = (lo.next_down(), hi.next_up());
-    if lo.is_infinite() || hi.is_infinite() {
-        return ival(b, x, Iv(lo, hi)).map_or(false, |i| !i.contains_zero());
-    }
-    let mut todo = vec![(lo, hi)];
-    let mut steps = 0;
-    while let Some((l, h)) = todo.pop() {
-        steps += 1;
-        if steps > 20_000 {
-            return false;
-        }
-        match ival(b, x, Iv(l, h)) {
-            Some(i) if !i.contains_zero() => continue,
-            _ => {}
-        }
-        if h - l < 1e-10 * (1.0 + l.abs()) {
-            return false;
-        }
-        let m = l + (h - l) / 2.0;
-        todo.push((l, m));
-        todo.push((m, h));
-    }
-    true
 }
 
 // ------------------------------------------------------------------ singular points
@@ -690,6 +509,15 @@ pub fn definite(f: &Expr, big_f: &Expr, x: &str, a: &Expr, b: &Expr, has_bad: &d
             }
         }
     }
+    // the real-only facts below need f real on (a, b), and F real but for
+    // logarithms and fractional powers of real arguments (log(x - sqrt(2))
+    // on [-1, 1] is complex but continuous, crossing its cut only at its
+    // argument's zeros, which are cut points), established: 1/(x
+    // cosh(log(-x)/2)^2) is complex there with no I in sight (the fourth
+    // review's U3)
+    if !real_on(f, x, &bd) || !real_args(big_f, x, &bd) {
+        return Outcome::Unknown;
+    }
     // the singular points of f and F, all known exactly
     let mut s = Scan::default();
     scan(f, x, &bd, &mut s);
@@ -730,6 +558,56 @@ pub fn definite(f: &Expr, big_f: &Expr, x: &str, a: &Expr, b: &Expr, has_bad: &d
         _ => {}
     }
     Outcome::Value(r)
+}
+
+/// Whether e is real on (a, b): by its form, with the arguments of logarithms
+/// and fractional powers positive there (positive_on).
+fn real_on(e: &Expr, x: &str, bd: &Bounds) -> bool {
+    crate::domain::real_with(e, x, &|u| positive_on(u, x, bd))
+}
+
+/// Sums and products of real expressions and of logarithms and fractional
+/// powers of real arguments (any sign): continuous on (a, b) except where
+/// those arguments vanish or have poles.
+fn real_args(e: &Expr, x: &str, bd: &Bounds) -> bool {
+    if !depends(e, x) {
+        return true;
+    }
+    match &e.kind {
+        Kind::Add(v) | Kind::Mul(v) => v.iter().all(|t| real_args(t, x, bd)),
+        Kind::Fun(Fun::Log, a) => real_on(&a[0], x, bd),
+        Kind::Pow(b, n) if !depends(n, x) && !b.is_const(Const::E) && crate::domain::real_const(n) => real_on(b, x, bd),
+        _ => real_on(e, x, bd),
+    }
+}
+
+/// u > 0 on (a, b) except at finitely many points known exactly (its zeros
+/// and poles there, which are cut points anyway): u real there, and positive
+/// at an inner point (an enclosure) of each piece between those points.
+fn positive_on(u: &Expr, x: &str, bd: &Bounds) -> bool {
+    if !real_on(u, x, bd) {
+        return false;
+    }
+    let mut s = Scan::default();
+    zeros(u, x, bd, &mut s);
+    scan(u, x, bd, &mut s);
+    if s.unknown {
+        return false;
+    }
+    let mut pts: Vec<f64> = s.points.iter().map(|p| p.v).collect();
+    pts.sort_by(|p, q| p.partial_cmp(q).unwrap());
+    let mut ends = vec![bd.lo];
+    ends.extend(pts);
+    ends.push(bd.hi);
+    ends.windows(2).all(|w| {
+        let t = match (w[0].is_finite(), w[1].is_finite()) {
+            (true, true) => w[0] + (w[1] - w[0]) / 2.0,
+            (true, false) => w[0] + 1.0,
+            (false, true) => w[1] - 1.0,
+            (false, false) => 0.0,
+        };
+        crate::interval::ival(u, x, Iv(t, t)).map_or(false, |i| i.0 > 0.0)
+    })
 }
 
 /// Whether the polynomial has a real root strictly inside the interval
@@ -907,20 +785,21 @@ mod tests {
 
     #[test]
     fn third_review_cases() {
-        // T2: cosh(I x) = cos(x); T3: a phase too large for floats
-        for (f, a, b) in [("1/cosh(I*x)^2", "0", "pi"), ("1/cosh(I*x)^2", "0", "2"), ("1/(10^12*cos(x + 10^20)^2)", "0", "pi"), ("1/(10^12*cos(x + 10^30)^2)", "0", "pi")] {
+        // T2: cosh(I x) = cos(x); T3: a phase too large for floats; and the
+        // fourth review's U3: log(-x) is complex for x > 0
+        for (f, a, b) in [("1/(x*cosh(log(-x)/2)^2)", "1/2", "2"), ("1/cosh(I*x)^2", "0", "pi"), ("1/cosh(I*x)^2", "0", "2"), ("1/(10^12*cos(x + 10^20)^2)", "0", "pi"), ("1/(10^12*cos(x + 10^30)^2)", "0", "pi")] {
             let r = run(f, a, b);
             assert!(r == "divergent" || r == "unevaluated", "integral of {} on [{}, {}]: {}", f, a, b, r);
         }
         // T1: cos over an interval straddling pi/2 contains 0
         let (a, b) = (std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2.next_up());
-        let i = super::trig(super::Iv(a, b), true).unwrap();
+        let i = crate::interval::trig(crate::interval::Iv(a, b), true).unwrap();
         assert!(i.contains_zero(), "{:?}", i);
         for k in 0..2000 {
             let t = -50.0 + k as f64 * 0.0517;
             let (l, h) = (t, t + 1e-3 * (k % 7) as f64);
             for (cosine, f) in [(true, f64::cos as fn(f64) -> f64), (false, f64::sin)] {
-                let i = super::trig(super::Iv(l, h), cosine).unwrap();
+                let i = crate::interval::trig(crate::interval::Iv(l, h), cosine).unwrap();
                 for j in 0..=4 {
                     let v = f(l + (h - l) * j as f64 / 4.0);
                     assert!(i.0 <= v && v <= i.1);
@@ -931,7 +810,7 @@ mod tests {
 
     #[test]
     fn interval_enclosures_contain_the_values() {
-        use super::{ival, Iv};
+        use crate::interval::{ival, Iv};
         for e in ["exp(x)*sin(3*x) + x^3 - 2", "log(x + 2)/(1 + x^2)", "cos(x)^2 - sinh(x)", "atan(x)*cosh(x) - abs(x - 1/2)", "x^(1/3) + 2^x"] {
             let ex = parse(e);
             for k in 0..50 {

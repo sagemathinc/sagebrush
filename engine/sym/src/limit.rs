@@ -27,22 +27,71 @@ pub fn limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> Expr {
 /// [`limit`], with a limit that cannot be found an Err rather than a
 /// thrown error (which, in WebAssembly, cannot be caught).
 pub fn try_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Expr> {
-    // abs(u) and sign(u) differ on the two sides: one-sided limits, with
-    // abs(u) = +-u by the sign of u beside a
-    if has_abs(e) && !a.is_infinite() && dir == Dir::Both {
+    // one budget for the whole recursion (limits of abs arguments, of their
+    // derivatives, ...): an expression that cycled crashed the process (the
+    // fourth review's U1)
+    thread_local! {
+        static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            DEPTH.with(|d| d.set(d.get() - 1));
+        }
+    }
+    if DEPTH.with(|d| d.get()) > 60 {
+        return fail("limit: too deep");
+    }
+    DEPTH.with(|d| d.set(d.get() + 1));
+    let _guard = Guard;
+    // abs(u) and sign(u) of u in x differ on the two sides: one-sided limits,
+    // with abs(u) = +-u by the sign of u beside a
+    if has_abs(e, x) && !a.is_infinite() && dir == Dir::Both {
         let (l, r) = (try_limit(e, x, a, Dir::Minus)?, try_limit(e, x, a, Dir::Plus)?);
         return Ok(if l == r { r } else { constant(Const::Undefined) });
     }
-    if has_abs(e) {
+    if has_abs(e, x) {
         let e2 = resolve_abs(e, x, a, dir)?;
-        return try_limit(&e2, x, a, dir);
+        if e2 != *e {
+            return try_limit(&e2, x, a, dir);
+        }
     }
     // division by zero is an infinity here, never an error to recover from
     soft(|| lim(e, x, a, dir, 0)).map(|r| tidy(&r))
 }
 
-fn has_abs(e: &Expr) -> bool {
-    matches!(&e.kind, Kind::Fun(Fun::Abs | Fun::Sign, _)) || e.children().iter().any(has_abs)
+/// abs or sign of something that depends on x (abs(y) is a constant here).
+fn has_abs(e: &Expr, x: &str) -> bool {
+    matches!(&e.kind, Kind::Fun(Fun::Abs | Fun::Sign, a) if depends(&a[0], x)) || e.children().iter().any(|c| has_abs(c, x))
+}
+
+/// u is real near a (on the side dir; eventually, at +-oo): by its form,
+/// with logarithms and fractional powers of positive arguments only.
+fn real_near(u: &Expr, x: &str, a: &Expr, dir: Dir) -> bool {
+    crate::domain::real_with(u, x, &|w| eventual_sign(w, x, a, dir, 0) == Some(1))
+}
+
+/// u = P + I Q with P, Q real near a, for |u| = sqrt(P^2 + Q^2).
+fn re_im(u: &Expr, x: &str, a: &Expr, dir: Dir) -> Option<(Expr, Expr)> {
+    let ex = crate::expand::expand(u);
+    let terms = match &ex.kind {
+        Kind::Add(v) => v.clone(),
+        _ => vec![ex.clone()],
+    };
+    let (mut p, mut q) = (vec![], vec![]);
+    for t in terms {
+        let (c, r) = split_coeff(&t);
+        if !real_near(&r, x, a, dir) {
+            return None;
+        }
+        let (re, im) = match c {
+            crate::num::Num::Exact(re, im) => (qnum(re), qnum(im)),
+            crate::num::Num::Float(re, im) => (float(re), float(im)),
+        };
+        p.push(mul(vec![re, r.clone()]));
+        q.push(mul(vec![im, r]));
+    }
+    Some((add(p), add(q)))
 }
 
 /// abs(u) -> u or -u, sign(u) -> +-1, by the sign u has near a (on the side
@@ -58,6 +107,14 @@ fn resolve_abs(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Expr> {
         if !depends(&args[0], x) {
             return Ok(e.clone());
         }
+        // a complex argument (1 + I x: its limit's sign says nothing): the
+        // modulus of its real and imaginary parts, or no rewrite
+        if !real_near(&args[0], x, a, dir) {
+            if let (Fun::Abs, Some((p, q))) = (g, re_im(&args[0], x, a, dir)) {
+                return Ok(sqrt(&add(vec![pow(&p, &int(2)), pow(&q, &int(2))])));
+            }
+            return fail(format!("limit: {} is not established to be real near the point", crate::to_string(&args[0])));
+        }
         let Some(sg) = eventual_sign(&args[0], x, a, dir, 0) else {
             return fail(format!("limit: the sign of {} near the point is not established", crate::to_string(&args[0])));
         };
@@ -69,13 +126,12 @@ fn resolve_abs(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Expr> {
     Ok(e)
 }
 
-/// The sign of a real constant, when it is clear (exactly for rationals).
+/// The sign of a real constant, certified (domain::const_sign: exact, or an
+/// enclosure excluding 0; a float with a large margin is not enough:
+/// sin(10^20 + 1) evaluated as sin(1e20) has the wrong sign, the fourth
+/// review's U4).
 fn const_sign(c: &Expr) -> Option<i32> {
-    if let Some(q) = c.as_rat() {
-        return Some(if num_traits::Zero::is_zero(q) { 0 } else if num_traits::Signed::is_positive(q) { 1 } else { -1 });
-    }
-    let (re, im) = crate::eval::to_c64(c)?;
-    (im == 0.0 && re.abs() > 1e-9).then(|| if re > 0.0 { 1 } else { -1 })
+    crate::domain::const_sign(c)
 }
 
 /// The sign u keeps near a on the side dir (eventually, at +-oo), or None:
@@ -86,8 +142,8 @@ fn eventual_sign(u: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> Option<i3
     if !depends(u, x) {
         return const_sign(u).filter(|&s| s != 0);
     }
-    if depth > 6 {
-        return None;
+    if depth > 6 || !real_near(u, x, a, dir) {
+        return None; // (the mean value theorem below is about real functions)
     }
     let l = try_limit(u, x, a, dir).ok()?;
     if l.is_const(Const::Infinity) {
@@ -112,13 +168,14 @@ fn eventual_sign(u: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> Option<i3
     eventual_sign(&diff(u, x), x, a, dir, depth + 1).map(|s| factor * s)
 }
 
-/// Whether e is bounded whatever x does (sin, cos, arctan, tanh, ...).
+/// Whether e is bounded whatever x does (sin, cos, arctan, tanh, ... of
+/// real arguments: sin(I x) = I sinh(x) is not, the fourth review's U5).
 fn bounded(e: &Expr, x: &str) -> bool {
     if !depends(e, x) {
         return !has_infinity(e);
     }
     match &e.kind {
-        Kind::Fun(Fun::Sin | Fun::Cos | Fun::Atan | Fun::Tanh | Fun::Erf, _) => true,
+        Kind::Fun(Fun::Sin | Fun::Cos | Fun::Atan | Fun::Tanh | Fun::Erf, a) => crate::domain::real_everywhere(&a[0], x),
         Kind::Add(v) | Kind::Mul(v) => v.iter().all(|t| bounded(t, x)),
         Kind::Pow(b, n) => n.as_i64().map_or(false, |k| k > 0) && bounded(b, x),
         _ => false,
@@ -135,6 +192,23 @@ fn continuous_value(e: &Expr, x: &str, a: &Expr) -> Option<Expr> {
         let v = subs(e, rules);
         if has_infinity(&v) {
             return false;
+        }
+        // on a branch cut (a logarithm's argument, a fractional power's base
+        // at a negative real or 0) substitution gives one side's value: the
+        // fourth review's U6, log(-1 + I x) from below.  Fine when the
+        // argument stays real (it moves along the cut, not across it).
+        let cut = match &e.kind {
+            Kind::Fun(Fun::Log, a) => Some(&a[0]),
+            Kind::Pow(b, n) if !n.as_rat().map_or(false, |q| q.is_integer()) && !b.is_const(Const::E) => Some(b),
+            _ => None,
+        };
+        if let Some(u) = cut {
+            if depends(u, x) && !crate::domain::real_everywhere(u, x) {
+                let uv = subs(u, rules);
+                if crate::eval::to_c64(&uv).map_or(true, |(r, i)| i == 0.0 && r <= 0.0) {
+                    return false;
+                }
+            }
         }
         e.children().iter().all(|c| walk(c, x, rules))
     }
@@ -210,9 +284,12 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
             return Ok(v);
         }
     }
-    // 2. series at the point
-    if let Ok(Some(v)) = series_limit(e, x, a, dir) {
-        return Ok(v);
+    // 2. series at the point (not across a branch cut: the expansion is
+    // that of one side)
+    if !(is_finite_value(a) && crosses_cut(e, x, a)) {
+        if let Ok(Some(v)) = series_limit(e, x, a, dir) {
+            return Ok(v);
+        }
     }
     // 3. structure
     match &e.kind {
@@ -232,6 +309,10 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
                 }
             }
             if is_finite_value(&l) {
+                // a fractional power at its branch cut: only along it
+                if !p.as_rat().map_or(false, |q| q.is_integer()) && on_cut(&l) && !l.is_zero() && !real_near(b, x, a, dir) {
+                    return fail("limit: a fractional power's base tends to its branch cut");
+                }
                 return Ok(pow(&l, p));
             }
         }
@@ -293,6 +374,19 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
         }
         Kind::Fun(f, args) if args.len() == 1 => {
             let l = lim(&args[0], x, a, dir, depth + 1)?;
+            // log at a point of its branch cut (a real l <= 0) is continuous
+            // only along the cut, for a real argument; and log(0+) = -oo only
+            // from the positive side (the fourth review's U6)
+            if *f == Fun::Log && on_cut(&l) {
+                if l.is_zero() {
+                    // |log u| >= -log |u|: -oo from above, complex infinity
+                    // otherwise (log|u| + i arg u)
+                    return Ok(if eventual_sign(&args[0], x, a, dir, 0) == Some(1) { constant(Const::MinusInfinity) } else { constant(Const::UnsignedInfinity) });
+                }
+                if !real_near(&args[0], x, a, dir) {
+                    return fail("limit: a logarithm's argument tends to its branch cut");
+                }
+            }
             return fun_at(f, &l);
         }
         _ => {}
@@ -400,6 +494,30 @@ fn exp_limit(l: &Expr) -> Expr {
     }
 }
 
+/// Whether e has a logarithm or fractional power whose argument, not real by
+/// its form, is on the branch cut at a.
+fn crosses_cut(e: &Expr, x: &str, a: &Expr) -> bool {
+    if !depends(e, x) {
+        return false;
+    }
+    let u = match &e.kind {
+        Kind::Fun(Fun::Log, v) => Some(&v[0]),
+        Kind::Pow(b, n) if !n.as_rat().map_or(false, |q| q.is_integer()) && !b.is_const(Const::E) => Some(b),
+        _ => None,
+    };
+    if let Some(u) = u {
+        if depends(u, x) && !crate::domain::real_everywhere(u, x) && on_cut(&subs(u, &[(sym(x), a.clone())])) {
+            return true;
+        }
+    }
+    e.children().iter().any(|c| crosses_cut(c, x, a))
+}
+
+/// A real number <= 0: on the branch cut of log and of fractional powers.
+fn on_cut(l: &Expr) -> bool {
+    !has_infinity(l) && crate::eval::to_c64(l).map_or(false, |(r, i)| i == 0.0 && r <= 0.0)
+}
+
 /// A function at a limit point (continuous functions; values at infinity).
 fn fun_at(f: &Fun, l: &Expr) -> R<Expr> {
     let pinf = l.is_const(Const::Infinity);
@@ -416,6 +534,9 @@ fn fun_at(f: &Fun, l: &Expr) -> R<Expr> {
         Fun::Erf if pinf => one(),
         Fun::Erf if minf => int(-1),
         Fun::Sin | Fun::Cos if pinf || minf => return fail("limit does not exist (the function oscillates)"),
+        // a function at an infinity no rule above covers (sin of complex
+        // infinity, ...): not a value to compute with (0 sin(oo) became 0)
+        _ if has_infinity(l) => return fail(format!("limit of {:?} at {} not found", f, crate::to_string(l))),
         _ => fun1(f.clone(), l),
     })
 }
@@ -539,5 +660,30 @@ mod sign_tests {
         assert_eq!(lim("abs(sin(x))/x", "0", Dir::Minus), "-1");
         assert_eq!(lim("abs(x^3 - x^2)/x^2", "0", Dir::Plus), "1");
         assert_eq!(lim("abs(1 - x)", "-Infinity", Dir::Both), "+Infinity");
+    }
+
+    #[test]
+    fn fourth_review_cases() {
+        // U1: abs of a constant terminates (and stays)
+        assert_eq!(lim("abs(y)", "0", Dir::Both), "abs(y)");
+        assert_eq!(lim("abs(y) + x", "0", Dir::Both), "abs(y)");
+        assert_eq!(lim("abs(y)", "+Infinity", Dir::Both), "abs(y)");
+        // U2: |1 + I x| is not 1 + I x
+        for d in [Dir::Both, Dir::Plus, Dir::Minus] {
+            let r = lim("(abs(1 + I*x) - 1)/x", "0", d);
+            assert!(r == "0" || r == "not found", "{}", r);
+        }
+        // U4: the sign of sin(10^20 + 1) is not that of sin(1e20)
+        let r = lim("abs(x + sin(10^20 + 1))", "0", Dir::Both);
+        assert!(r == "abs(sin(100000000000000000001))" || r == "sin(100000000000000000001)" || r == "not found", "{}", r);
+        // U5: sin(I x), cos(I x) are not bounded
+        assert_ne!(lim("sin(I*x)/exp(x)", "+Infinity", Dir::Both), "0");
+        assert_ne!(lim("cos(I*x)/exp(x)", "+Infinity", Dir::Both), "0");
+        // U6: from below the branch cut
+        assert_ne!(lim("log(-1 + I*x)", "0", Dir::Minus), "I*pi");
+        assert_ne!(lim("sqrt(-1 + I*x)", "0", Dir::Minus), "I");
+        assert_eq!(lim("I*x", "+Infinity", Dir::Both), "Infinity");
+        let r = lim("log(-1 + I*x)", "0", Dir::Plus);
+        assert!(r == "I*pi" || r == "not found", "{}", r);
     }
 }
