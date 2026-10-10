@@ -184,7 +184,10 @@ impl Character {
     /// LMFDB's description: chi(gens[i]) = zeta_order^vals[i], where the
     /// gens generate (Z/N)^* (LMFDB's `char_values` = [N, order, gens, vals]).
     pub fn from_generators(n: u64, order: u64, gens: &[u64], vals: &[u64]) -> Result<Character, String> {
-        let order = order.max(1);
+        crate::check_level(n)?;
+        if order == 0 || gens.len() != vals.len() {
+            return Err("a character is (order >= 1, gens, vals) with as many vals as gens".into());
+        }
         let mut exps = vec![u32::MAX; n.max(1) as usize];
         exps[(1 % n.max(1)) as usize] = 0;
         // Breadth-first closure of {1} under multiplication by the generators.

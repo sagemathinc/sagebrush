@@ -43,10 +43,17 @@ fn err(e: String) -> PyErr {
     PyValueError::new_err(e)
 }
 
+/// A level N >= 1 and, if given, a weight k >= 2.
+fn lk(n: u64, k: Option<usize>) -> PyResult<()> {
+    sagebrush_modsym::check_level(n).map_err(err)?;
+    k.map_or(Ok(()), sagebrush_modsym::check_weight).map_err(err)
+}
+
 /// T_q's characteristic polynomial mod p (constant term first).
 #[pyfunction]
 #[pyo3(signature = (n, q, p=67108859, threads=0))]
 fn hecke_charpoly<'py>(py: Python<'py>, n: u64, q: u64, p: u64, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, None)?;
     let r = run(py, threads, || sagebrush_modsym::hecke_charpoly(n, q, p))?.map_err(err)?;
     let d = PyDict::new(py);
     d.set_item("symbols", r.symbols)?;
@@ -79,6 +86,7 @@ fn exact_dict<'py>(py: Python<'py>, e: &Exact) -> PyResult<Bound<'py, PyDict>> {
 #[pyfunction]
 #[pyo3(signature = (n, q, threads=0))]
 fn charpoly_exact<'py>(py: Python<'py>, n: u64, q: u64, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, None)?;
     let e = run(py, threads, || sagebrush_modsym::exact::exact_charpoly(n, q))?.map_err(err)?;
     exact_dict(py, &e)
 }
@@ -87,6 +95,7 @@ fn charpoly_exact<'py>(py: Python<'py>, n: u64, q: u64, threads: usize) -> PyRes
 #[pyfunction]
 #[pyo3(signature = (levels, q, threads=0))]
 fn batch_exact<'py>(py: Python<'py>, levels: Vec<u64>, q: u64, threads: usize) -> PyResult<Vec<Bound<'py, PyDict>>> {
+    levels.iter().try_for_each(|&n| lk(n, None))?;
     let rs = run(py, threads, || sagebrush_modsym::exact::batch_exact(&levels, q))?;
     levels
         .iter()
@@ -106,6 +115,7 @@ fn batch_exact<'py>(py: Python<'py>, levels: Vec<u64>, q: u64, threads: usize) -
 /// Psi(N), genus, cusps, Eisenstein dimension and dimension of the sign +1 space.
 #[pyfunction]
 fn level_data<'py>(py: Python<'py>, n: u64) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, None)?;
     let (psi, g, c, e, dim) = sagebrush_modsym::exact::level_data(n);
     let d = PyDict::new(py);
     d.set_item("psi", psi)?;
@@ -120,6 +130,7 @@ fn level_data<'py>(py: Python<'py>, n: u64) -> PyResult<Bound<'py, PyDict>> {
 #[pyfunction]
 #[pyo3(signature = (n, q, r, p=67108859, threads=0))]
 fn commute(py: Python<'_>, n: u64, q: u64, r: u64, p: u64, threads: usize) -> PyResult<bool> {
+    lk(n, None)?;
     run(py, threads, || sagebrush_modsym::hecke_commute(n, q, r, p))?.map_err(err)
 }
 
@@ -145,6 +156,7 @@ fn estimate<'py>(py: Python<'py>, n: u64, q: u64) -> PyResult<Bound<'py, PyDict>
 #[pyfunction]
 #[pyo3(signature = (n, bound=1000, threads=0))]
 fn rational_newforms(py: Python<'_>, n: u64, bound: u64, threads: usize) -> PyResult<Vec<Vec<(u64, i64)>>> {
+    lk(n, None)?;
     let r = run(py, threads, || sagebrush_modsym::newforms::rational_newforms(n, bound, 40))?.map_err(err)?;
     Ok(r.forms.into_iter().map(|f| f.ap).collect())
 }
@@ -208,6 +220,7 @@ fn character(n: u64, chi: Option<(u64, Vec<u64>, Vec<u64>)>) -> PyResult<Charact
 /// dicts with order, conductor, parity and (gens, vals) for `chi=`.
 #[pyfunction]
 fn characters<'py>(py: Python<'py>, n: u64) -> PyResult<Vec<Bound<'py, PyDict>>> {
+    lk(n, None)?;
     let g = DirichletGroup::new(n);
     let total = g.order();
     let mut seen = vec![false; total as usize];
@@ -243,6 +256,7 @@ fn characters<'py>(py: Python<'py>, n: u64) -> PyResult<Vec<Bound<'py, PyDict>>>
 #[pyo3(signature = (n, k, chi=None))]
 fn dims<'py>(py: Python<'py>, n: u64, k: usize, chi: Option<(u64, Vec<u64>, Vec<u64>)>) -> PyResult<Bound<'py, PyDict>> {
     use sagebrush_modsym::dims::*;
+    lk(n, Some(k))?;
     let eps = character(n, chi)?.minimal();
     // dim S^new(N) = sum over M (cond | M | N) of beta(N/M) dim S(M), beta = mu * mu.
     let f = eps.conductor();
@@ -264,6 +278,7 @@ fn dims<'py>(py: Python<'py>, n: u64, k: usize, chi: Option<(u64, Vec<u64>, Vec<
 #[pyfunction]
 #[pyo3(signature = (n, k, q, chi=None, sign=0, threads=0))]
 fn charpoly_mod<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64, Vec<u64>, Vec<u64>)>, sign: i32, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, Some(k))?;
     let eps = character(n, chi)?.minimal();
     let (dim, ell, zeta, f) = run(py, threads, || -> Result<_, String> {
         let sp = sagebrush_modsym::general::GeneralSpace::new(n, k, &eps, sign)?;
@@ -283,6 +298,7 @@ fn charpoly_mod<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64
 #[pyfunction]
 #[pyo3(signature = (n, k, q, chi=None, sign=0, threads=0))]
 fn charpoly<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64, Vec<u64>, Vec<u64>)>, sign: i32, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, Some(k))?;
     let eps = character(n, chi)?;
     let e = run(py, threads, || sagebrush_modsym::general_exact::exact_charpoly(n, k, &eps, sign, q))?.map_err(err)?;
     let d = PyDict::new(py);
@@ -324,6 +340,7 @@ fn newspace_dict<'py>(py: Python<'py>, r: &sagebrush_modsym::newspace::NewspaceO
 #[pyfunction]
 #[pyo3(signature = (n, k, factor, chi=None, threads=0))]
 fn newspace<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Option<(u64, Vec<u64>, Vec<u64>)>, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, Some(k))?;
     let eps = character(n, chi)?;
     let f = python_factorer(factor);
     let r = run(py, threads, || sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &f))?.map_err(err)?;
@@ -335,6 +352,10 @@ fn newspace<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
 #[pyfunction]
 #[pyo3(signature = (n, k, factor, chi=None, bound=100, threads=0))]
 fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Option<(u64, Vec<u64>, Vec<u64>)>, bound: usize, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, Some(k))?;
+    if bound < 1 {
+        return Err(err("bound must be at least 1".into()));
+    }
     let eps = character(n, chi)?;
     let f = python_factorer(factor);
     let (r, tr) = run(py, threads, || -> Result<_, String> {

@@ -89,19 +89,51 @@ fn u(v: &Value, k: &str) -> Result<u64, String> {
     v.get(k).and_then(Value::as_u64).ok_or_else(|| format!("missing integer argument '{}'", k))
 }
 
+/// The level n >= 1.
+fn level(v: &Value) -> Result<u64, String> {
+    let n = u(v, "n")?;
+    sagebrush_modsym::check_level(n)?;
+    Ok(n)
+}
+
+/// The weight k >= 2 (default 2).
+fn weight(v: &Value) -> Result<usize, String> {
+    match v.get("k") {
+        None => Ok(2),
+        Some(k) => match k.as_u64() {
+            Some(k) if k >= 2 => Ok(k as usize),
+            _ => Err("the weight must be an integer k >= 2".into()),
+        },
+    }
+}
+
+/// A list of unsigned integers, every element checked.
+fn u64s(v: &Value, what: &str) -> Result<Vec<u64>, String> {
+    v.as_array().ok_or_else(|| format!("{} must be a list of nonnegative integers", what))?.iter()
+        .map(|x| x.as_u64().ok_or_else(|| format!("{} must be a list of nonnegative integers", what)))
+        .collect()
+}
+
 fn character(n: u64, v: &Value) -> Result<Character, String> {
     match v.get("chi") {
         None | Some(Value::Null) => Ok(Character::trivial(n)),
         Some(c) => {
-            let a = c.as_array().ok_or("chi must be [order, gens, vals]")?;
-            let ints = |x: &Value| -> Vec<u64> { x.as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default() };
-            Character::from_generators(n, a[0].as_u64().unwrap_or(1), &ints(&a[1]), &ints(&a[2]))
+            let bad = || "chi must be [order, gens, vals], gens and vals lists of the same length".to_string();
+            let a = c.as_array().filter(|a| a.len() == 3).ok_or_else(bad)?;
+            let order = a[0].as_u64().filter(|&o| o >= 1).ok_or_else(bad)?;
+            let (gens, vals) = (u64s(&a[1], "gens")?, u64s(&a[2], "vals")?);
+            if gens.len() != vals.len() {
+                return Err(bad());
+            }
+            Character::from_generators(n, order, &gens, &vals)
         }
     }
 }
 
 fn curve(a: Option<&Value>) -> Result<sagebrush_ap::EllipticCurve, String> {
-    let a: Vec<i64> = a.and_then(Value::as_array).ok_or("missing a")?.iter().filter_map(Value::as_i64).collect();
+    let a: Vec<i64> = a.and_then(Value::as_array).ok_or("missing a")?.iter()
+        .map(|x| x.as_i64().ok_or("a curve is [a1, a2, a3, a4, a6], integers"))
+        .collect::<Result<_, _>>()?;
     let a: [i64; 5] = a.try_into().map_err(|_| "a curve is [a1, a2, a3, a4, a6]")?;
     sagebrush_ap::EllipticCurve::new(a)
 }
@@ -137,6 +169,15 @@ fn big1(v: Option<&Value>) -> Result<BigInt, String> {
         Some(Value::Number(n)) => n.as_i64().map(BigInt::from).ok_or_else(|| "bad integer".to_string()),
         _ => Err("missing integer argument".into()),
     }
+}
+
+/// A matrix as rows, every row the same length.
+fn rect(v: Option<&Value>) -> Result<Vec<Vec<BigInt>>, String> {
+    let rows = matrix(v)?;
+    if rows.iter().any(|r| r.len() != rows[0].len()) {
+        return Err("matrix rows of different lengths".into());
+    }
+    Ok(rows)
 }
 
 fn matrix(v: Option<&Value>) -> Result<Vec<Vec<BigInt>>, String> {
@@ -217,7 +258,7 @@ fn perm_group(v: &Value) -> Result<Value, String> {
     let g = Group::new(n, gens)?;
     let what: Vec<String> = match v.get("what") {
         Some(Value::String(s)) => vec![s.clone()],
-        Some(Value::Array(a)) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        Some(Value::Array(a)) => a.iter().map(|x| x.as_str().map(String::from).ok_or("what must be names")).collect::<Result<_, _>>()?,
         _ => vec!["order".into()],
     };
     let point = || -> Result<u32, String> { v.get("point").and_then(Value::as_u64).map(|x| x as u32).filter(|&x| (x as usize) < n).ok_or_else(|| "missing or bad point".to_string()) };
@@ -328,7 +369,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "perm_group" => perm_group(v),
         "perm_group_named" => perm_group_named(v),
         "characters" => {
-            let n = u(v, "n")?;
+            let n = level(v)?;
             let g = DirichletGroup::new(n);
             let mut seen = vec![false; g.order() as usize];
             let mut out = vec![];
@@ -352,8 +393,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "dims" => {
             use sagebrush_modsym::dims::*;
-            let n = u(v, "n")?;
-            let k = u(v, "k")? as usize;
+            let (n, k) = (level(v)?, weight(v)?);
             let eps = character(n, v)?.minimal();
             // dim S^new(N) = sum over M (cond | M | N) of beta(N/M) dim S(M), beta = mu * mu.
             let f = eps.conductor();
@@ -365,7 +405,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                        "eisenstein": dim_eisenstein(&eps, k), "modsym": dim_modsym(&eps, k), "new": new }))
         }
         "charpoly" => {
-            let (n, k, q) = (u(v, "n")?, u(v, "k").unwrap_or(2) as usize, u(v, "q")?);
+            let (n, k, q) = (level(v)?, weight(v)?, u(v, "q")?);
             let sign = v.get("sign").and_then(Value::as_i64).unwrap_or(0) as i32;
             let eps = character(n, v)?;
             let e = sagebrush_modsym::general_exact::exact_charpoly(n, k, &eps, sign, q)?;
@@ -373,7 +413,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!({ "m": e.m, "dim": e.dim, "coeffs": coeffs, "primes_used": e.primes_used.len(), "status": e.status, "checks": e.checks }))
         }
         "charpoly_mod" => {
-            let (n, k, q) = (u(v, "n")?, u(v, "k").unwrap_or(2) as usize, u(v, "q")?);
+            let (n, k, q) = (level(v)?, weight(v)?, u(v, "q")?);
             let sign = v.get("sign").and_then(Value::as_i64).unwrap_or(0) as i32;
             let eps = character(n, v)?.minimal();
             let sp = GeneralSpace::new(n, k, &eps, sign)?;
@@ -381,15 +421,16 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         // ---- sagebrush.modsym: weight 2, trivial character, sign +1 ----
         "hecke_charpoly" => {
-            let (n, q) = (u(v, "n")?, u(v, "q")?);
+            let (n, q) = (level(v)?, u(v, "q")?);
             let p = u(v, "p").unwrap_or(67108859);
             let r = sagebrush_modsym::hecke_charpoly(n, q, p)?;
             Ok(json!({ "symbols": r.symbols, "gens": r.gens, "dim": r.dim, "charpoly": r.charpoly, "hash": r.hash(),
                        "eisenstein_root": r.eisenstein_root(), "ms": r.ms.to_vec() }))
         }
-        "weight2" | "charpoly_exact" => Ok(exact_json(&sagebrush_modsym::exact::exact_charpoly(u(v, "n")?, u(v, "q")?)?)),
+        "weight2" | "charpoly_exact" => Ok(exact_json(&sagebrush_modsym::exact::exact_charpoly(level(v)?, u(v, "q")?)?)),
         "batch_exact" => {
-            let levels: Vec<u64> = v.get("levels").and_then(Value::as_array).ok_or("missing levels")?.iter().filter_map(Value::as_u64).collect();
+            let levels = u64s(v.get("levels").ok_or("missing levels")?, "levels")?;
+            levels.iter().try_for_each(|&n| sagebrush_modsym::check_level(n))?;
             let q = u(v, "q")?;
             let rs = sagebrush_modsym::exact::batch_exact(&levels, q);
             Ok(json!(levels.iter().zip(rs).map(|(&n, r)| match r {
@@ -398,15 +439,15 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }).collect::<Vec<_>>()))
         }
         "level_data" => {
-            let (psi, g, c, e, dim) = sagebrush_modsym::exact::level_data(u(v, "n")?);
+            let (psi, g, c, e, dim) = sagebrush_modsym::exact::level_data(level(v)?);
             Ok(json!({ "psi": psi, "genus": g, "cusps": c, "eisenstein": e, "dim": dim }))
         }
         "commute" => {
             let p = u(v, "p").unwrap_or(67108859);
-            Ok(json!(sagebrush_modsym::hecke_commute(u(v, "n")?, u(v, "q")?, u(v, "r")?, p)?))
+            Ok(json!(sagebrush_modsym::hecke_commute(level(v)?, u(v, "q")?, u(v, "r")?, p)?))
         }
         "estimate" => {
-            let (n, q) = (u(v, "n")?, u(v, "q")?);
+            let (n, q) = (level(v)?, u(v, "q")?);
             sagebrush_modsym::validate(n, q, None)?;
             let e = sagebrush_modsym::estimate::estimate(n, q);
             Ok(json!({ "symbols": e.symbols, "dim": e.dim, "genus": e.genus, "primes": e.primes, "primes_max": e.primes_max,
@@ -414,13 +455,13 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                        "seconds_exact": e.seconds_exact }))
         }
         "estimate_newforms" => {
-            let e = sagebrush_modsym::estimate::newforms(u(v, "n")?, u(v, "k").unwrap_or(2) as usize, u(v, "bound").unwrap_or(100) as usize);
+            let e = sagebrush_modsym::estimate::newforms(level(v)?, weight(v)?, u(v, "bound").unwrap_or(100) as usize);
             Ok(json!({ "n": e.n, "k": e.k, "bound": e.bound, "dim_new": e.dim_new, "dim_top": e.dim_top, "levels": e.levels, "symbols": e.symbols,
                        "primes": e.primes, "trace_primes": e.trace_primes, "terms": e.terms, "term_names": sagebrush_modsym::estimate::NEWFORMS_TERMS,
                        "seconds": e.seconds, "seconds_low": e.seconds_low, "seconds_high": e.seconds_high, "bytes": e.bytes }))
         }
         "rational_newforms" => {
-            let r = sagebrush_modsym::newforms::rational_newforms(u(v, "n")?, u(v, "bound").unwrap_or(1000), 40)?;
+            let r = sagebrush_modsym::newforms::rational_newforms(level(v)?, u(v, "bound").unwrap_or(1000), 40)?;
             Ok(json!(r.forms.into_iter().map(|f| f.ap).collect::<Vec<_>>()))
         }
         // ---- sagebrush.nf / arith / matrix: engine/classgroup ----
@@ -447,7 +488,13 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w }))
         }
         "bnf_relations" => {
-            let extra: Vec<u64> = v.get("extra").and_then(|e| e.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).collect()).unwrap_or_default();
+            let bad = || "extra must be a list of primes".to_string();
+            let extra: Vec<u64> = match v.get("extra") {
+                None | Some(Value::Null) => vec![],
+                Some(e) => e.as_array().ok_or_else(bad)?.iter()
+                    .map(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())).ok_or_else(bad))
+                    .collect::<Result<_, _>>()?,
+            };
             let d = sagebrush_classgroup::api::bnf_relations(&bigs(v.get("f"))?, &extra)?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
@@ -460,9 +507,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let (h, cyc, reg) = sagebrush_classgroup::api::quadratic(&big1(v.get("d"))?)?;
             Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg }))
         }
-        "hermite_form" => Ok(json!(sagebrush_classgroup::api::hermite(&matrix(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
-        "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&matrix(v.get("m"))?)))),
-        "lll" => Ok(json!(sagebrush_classgroup::api::lll(&matrix(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
+        "hermite_form" => Ok(json!(sagebrush_classgroup::api::hermite(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
+        "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&rect(v.get("m"))?)))),
+        "lll" => Ok(json!(sagebrush_classgroup::api::lll(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
         "complex_roots" => {
             let digits = v.get("digits").and_then(Value::as_u64).unwrap_or(15) as usize;
             let r = sagebrush_classgroup::api::complex_roots(&bigs(v.get("f"))?, digits)?;
@@ -470,6 +517,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "factor_mod" => {
             let f = bigs(v.get("f"))?;
+            if f.iter().all(|c| c.sign() == sagebrush_bigint::Sign::NoSign) {
+                return Err("factor of the zero polynomial".into());
+            }
             let p = u(v, "p")?;
             if !(2..1u64 << 32).contains(&p) {
                 return Err("factor_mod needs a prime p < 2^32".into());
@@ -514,7 +564,13 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
         }
         // ---- sagebrush.linalg: exact matrices over Z (and Q, scaled) ----
-        "mat_det" => Ok(json!(sagebrush_arith::zmat::det(&zmat(v.get("m"))?).to_string())),
+        "mat_det" => {
+            let a = zmat(v.get("m"))?;
+            if a.rows != a.cols {
+                return Err("mat_det of a non-square matrix".into());
+            }
+            Ok(json!(sagebrush_arith::zmat::det(&a).to_string()))
+        }
         "mat_rank" => Ok(json!(sagebrush_arith::zmat::rank(&zmat(v.get("m"))?))),
         "mat_rref" => {
             let (n, den, piv) = sagebrush_arith::zmat::rref(&zmat(v.get("m"))?);
@@ -572,7 +628,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         // ---- sagebrush.mf: Galois orbits of newforms, factored here ----
         "newspace" | "newforms" => {
-            let (n, k) = (u(v, "n")?, u(v, "k").unwrap_or(2) as usize);
+            let (n, k) = (level(v)?, weight(v)?);
             let eps = character(n, v)?;
             let fac = |f: &[BigInt]| sagebrush_poly::factor(f).1;
             let r = sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &fac)?;
@@ -580,6 +636,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                                   "T": r.ops, "status": r.status, "checks": r.checks });
             if f == "newforms" {
                 let bound = u(v, "bound").unwrap_or(100) as usize;
+                if bound < 1 {
+                    return Err("bound must be at least 1".into());
+                }
                 let tr = sagebrush_modsym::traces::orbit_traces(n, k, &eps, &r, bound)?;
                 // LMFDB order: by dimension, then trace form
                 let mut orbits: Vec<(usize, Vec<BigInt>, Vec<BigInt>)> = r.dims.iter().cloned().zip(tr).zip(r.orbits.iter().cloned()).map(|((d, t), u)| (d, t, u)).collect();

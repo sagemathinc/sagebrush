@@ -78,6 +78,22 @@ impl ModP {
 }
 
 /// Checks the arguments shared by every entry point.
+/// A level N >= 1.
+pub fn check_level(n: u64) -> Result<(), String> {
+    if n == 0 {
+        return Err("the level must be a positive integer".into());
+    }
+    Ok(())
+}
+
+/// A weight k >= 2 (modular symbols).
+pub fn check_weight(k: usize) -> Result<(), String> {
+    if k < 2 {
+        return Err("the weight must be an integer k >= 2".into());
+    }
+    Ok(())
+}
+
 pub fn validate(n: u64, q: u64, p: Option<u64>) -> Result<(), String> {
     if n == 0 || n > 1 << 31 {
         return Err(format!("level N = {} out of range", n));
