@@ -1125,6 +1125,23 @@ def _is_primitive_poly(f, p, n, primes):
     return all(_ppowmod([0, 1], q1 // r, f, p) != [1] for r in primes)
 
 
+def _is_irreducible_poly(f, p, n):
+    """Whether f (monic, degree n >= 1) is irreducible over F_p (Rabin: f
+    divides x^(p^n) - x, and gcd(x^(p^(n/r)) - x, f) = 1 for each prime r
+    dividing n)."""
+    def frob(k):
+        # x^(p^k) mod f, minus x
+        t = [0, 1]
+        for _ in range(k):
+            t = _ppowmod(t, p, f, p)
+        t = t + [0] * max(0, 2 - len(t))
+        t[1] = (t[1] - 1) % p
+        return _ptrim(t)
+    if frob(n):
+        return False
+    return all(_pgcd(f, frob(n // r), p) == [1] for r, _ in _factor_int(n))
+
+
 _CONWAY = {}
 
 
@@ -1938,6 +1955,21 @@ def GF(order, name=None, modulus=None, names=None, impl=None, proof=True, **kwds
         (Finite Field of size 7, Finite Field in z2 of size 2^2, Finite Field in a of size 2^8)
         sage: F.<z> = GF(3^4); z^80
         1
+
+    A given modulus must be irreducible of the right degree (it is made
+    monic)::
+
+        sage: R.<x> = GF(3)[]
+        sage: GF(9, 'b', modulus=2*x^2 + 2).modulus()
+        x^2 + 1
+        sage: GF(4, 'a', modulus=[0, 0, 1])
+        Traceback (most recent call last):
+        ...
+        ValueError: finite field modulus must be irreducible but it is not
+        sage: GF(4, 'a', modulus=[1, 1, 0, 1])
+        Traceback (most recent call last):
+        ...
+        ValueError: the degree of the modulus does not equal the degree of the field
     """
     q = int(order)
     pn = _is_prime_power(q)
@@ -1954,7 +1986,13 @@ def GF(order, name=None, modulus=None, names=None, impl=None, proof=True, **kwds
     if modulus is not None:
         if isinstance(modulus, str):
             raise NotImplementedError("named moduli (%r)" % modulus)
-        f = [int(c) % p for c in (modulus.list() if hasattr(modulus, "list") else modulus)]
+        f = _ptrim([int(c) % p for c in (modulus.list() if hasattr(modulus, "list") else modulus)])
+        if len(f) - 1 != n:
+            raise ValueError("the degree of the modulus does not equal the degree of the field")
+        inv = pow(f[-1], -1, p)
+        f = [c * inv % p for c in f]
+        if not _is_irreducible_poly(f, p, n):
+            raise ValueError("finite field modulus must be irreducible but it is not")
         mod_key = tuple(f)
     else:
         f = _conway(p, n)
