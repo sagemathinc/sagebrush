@@ -220,8 +220,15 @@ pub fn fixed_to_decimal(x: &BigInt, prec: u32, digits: usize) -> String {
     // integer part digits
     let ip = &x >> prec as usize;
     let int_digits = if ip.is_zero() { 0 } else { ip.to_string().len() };
-    let frac_digits = digits.saturating_sub(int_digits).max(1);
-    let scaled = (&x * BigInt::from(10).pow(frac_digits as u32) + (BigInt::one() << (prec as usize - 1).max(0))) >> prec as usize;
+    let round = |frac_digits: usize| (&x * BigInt::from(10).pow(frac_digits as u32) + (BigInt::one() << (prec as usize - 1).max(0))) >> prec as usize;
+    let mut frac_digits = digits.saturating_sub(int_digits).max(1);
+    let mut scaled = round(frac_digits);
+    // rounding up into a new integer digit (0.999... to 1.000...): one
+    // fractional digit fewer, for the same number of significant digits
+    if frac_digits > 1 && digits > int_digits && scaled.to_string().len() > frac_digits.max(digits) {
+        frac_digits -= 1;
+        scaled = round(frac_digits);
+    }
     let s = format!("{:0>width$}", scaled.to_string(), width = frac_digits + 1);
     let (a, b) = s.split_at(s.len() - frac_digits);
     format!("{}{}.{}", if neg { "-" } else { "" }, a, b)
@@ -511,5 +518,19 @@ mod tests {
         let d = nf_data(&[BigInt::from(-11), BigInt::zero(), BigInt::zero(), BigInt::one()]).unwrap();
         assert_eq!((d.disc.clone(), d.r1, d.r2, d.w), (BigInt::from(-3267), 1, 1, 2));
         assert_eq!(factor_integer(&((BigInt::one() << 128usize) + 1)).unwrap(), vec![("59649589127497217".parse().unwrap(), 1), ("5704689200685129054721".parse().unwrap(), 1)]);
+    }
+}
+#[cfg(test)]
+mod decimal_tests {
+    use super::*;
+    #[test]
+    fn rounding_up_keeps_the_digit_count() {
+        let p = 200u32;
+        // 1 - 2^-110 rounds up at 30 digits
+        let almost_one = (BigInt::one() << 200usize) - (BigInt::one() << 90usize);
+        assert_eq!(fixed_to_decimal(&almost_one, p, 30), "1.00000000000000000000000000000");
+        assert_eq!(fixed_to_decimal(&(BigInt::one() << 200usize), p, 30), "1.00000000000000000000000000000");
+        assert_eq!(fixed_to_decimal(&((BigInt::one() << 200usize) - (BigInt::one() << 100usize)), p, 30), "0.999999999999999999999999999999");
+        assert_eq!(fixed_to_decimal(&-(BigInt::from(3) << 199usize), p, 5), "-1.5000");
     }
 }
