@@ -65,3 +65,35 @@ fn new_dimension_formula() {
     assert_eq!(new_dimension(37), 2);
     assert_eq!(new_dimension(389), 32);
 }
+
+/// A factor callback may return factors with leading coefficient -1 (in
+/// pairs, so the product is still f): they are made monic before the monic
+/// divisions (R2-MOD-F3: a_2 = 788130959 at level 11).
+#[test]
+fn negative_leading_factors_are_normalised() {
+    use sagebrush_bigint::BigInt;
+    let factor = |f: &[BigInt]| {
+        let mut fs = sagebrush_poly::factor(f).1;
+        let mut flipped = 0;
+        for (g, e) in fs.iter_mut() {
+            if *e == 1 && flipped < 2 {
+                for c in g.iter_mut() {
+                    *c = -c.clone();
+                }
+                flipped += 1;
+            }
+        }
+        if flipped == 1 {
+            let (g, _) = fs.iter_mut().find(|(g, _)| g.last().unwrap() < &BigInt::from(0)).unwrap();
+            for c in g.iter_mut() {
+                *c = -c.clone();
+            }
+        }
+        fs
+    };
+    for (n, want) in [(11u64, vec![(2u64, -2i64), (3, -1), (5, 1), (7, -2)]), (23, vec![(2, -1), (3, 0), (5, -2), (7, 2)])] {
+        let orbits = sagebrush_modsym::orbits::newform_orbits(n, 7, &factor).unwrap();
+        let traces: Vec<Vec<(u64, i64)>> = orbits.into_iter().map(|o| o.traces).collect();
+        assert!(traces.contains(&want), "N={}: {:?}", n, traces);
+    }
+}
