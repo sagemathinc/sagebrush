@@ -701,8 +701,12 @@ def _jacobi(a, n):
     return result if n == 1 else 0
 
 
-def is_prime(n):
-    """Whether n is prime (deterministic below 3.3e24, BPSW above).
+def is_prime(n, proof=None):
+    """Whether n is prime: proven below 3.3e24 (Miller-Rabin to the first 13
+    prime bases is deterministic there), by BPSW above (no counterexample is
+    known, but it is not a proof).  "Composite" is always proven.  With
+    proof=True, a prime above 3.3e24 is NotImplementedError: no primality
+    proof (ECPP, APR-CL) is implemented yet.
 
     EXAMPLES::
 
@@ -710,6 +714,12 @@ def is_prime(n):
         (True, False, True)
         sage: [p for p in range(30) if is_prime(p)]
         [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+        sage: ZZ(2^61 - 1).is_prime(proof=True), ZZ(2^127 - 3).is_prime(proof=True)
+        (True, False)
+        sage: ZZ(2^127 - 1).is_prime(proof=True)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: a primality proof above 3.3e24 is not implemented: n passes BPSW, which is not a proof (call is_prime with proof=False)
     """
     n = int(n)
     if n < 2:
@@ -721,7 +731,11 @@ def is_prime(n):
         return True
     if n < 3317044064679887385961981:
         return all(_sprp(n, a) for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41) if a < n)
-    return _sprp(n, 2) and _lucas_prp(n)
+    if not (_sprp(n, 2) and _lucas_prp(n)):
+        return False
+    if proof:
+        raise NotImplementedError("a primality proof above 3.3e24 is not implemented: n passes BPSW, which is not a proof (call is_prime with proof=False)")
+    return True
 
 
 def next_prime(n):
@@ -927,9 +941,11 @@ class Factorization(list):
         return self.value()
 
 
-def factor(n):
+def factor(n, proof=None, **kwds):
     """The prime factorization of a nonzero integer (or Rational), or of a
-    polynomial.
+    polynomial.  Prime factors above 3.3e24 are primes by BPSW, not proven;
+    with proof=True each must be proven (see is_prime), else
+    NotImplementedError.
 
     EXAMPLES::
 
@@ -968,6 +984,9 @@ def factor(n):
             out[p] = out.get(p, 0) + e
     else:
         _factor_into(n, out)
+    if proof:
+        for p in out:
+            is_prime(p, proof=True)
     return Factorization(sorted(out.items()), unit)
 
 

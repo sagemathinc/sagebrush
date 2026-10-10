@@ -76,4 +76,18 @@ for f, args, kw in [(mf.dims, (11, 0), {}), (mf.dims, (11, 1), {}), (mf.characte
     raises(ValueError, f, *args, **kw)
 assert mf.dims(11, 2)["cusp"] == 1
 assert nf.hermite_form([[1, 2], [3, 4]]) == [[1, 0], [0, 2]]
+# F6: proof=True is honored (a proven answer, or NotImplementedError), and
+# results say what they assume
+from sagebrush.sage import QuadraticField, NumberField, polygen, QQ, ZZ, factor
+xx = polygen(QQ, "x")
+assert QuadraticField(-5, "a").class_number(proof=True) == 2
+assert NumberField(xx**2 + 23, "a").class_group(proof=True).order() == 3
+assert "GRH" in raises(NotImplementedError, NumberField(xx**3 - 11, "a").class_number, proof=True)
+assert "GRH" in raises(NotImplementedError, QuadraticField(10, "a").regulator, proof=True)
+assert QuadraticField(-5, "a").class_number() == 2
+assert ZZ(2**61 - 1).is_prime(proof=True) and not ZZ(2**127 - 3).is_prime(proof=True)
+assert "BPSW" in raises(NotImplementedError, ZZ(2**127 - 1).is_prime, proof=True)
+assert ZZ(2**127 - 1).is_prime() and ZZ(2**127 - 1).is_prime(proof=False)
+raises(NotImplementedError, factor, (2**127 - 1) * 3, proof=True)
+assert nf.bnf([5, 0, 1])["assumes"] == ["GRH"]
 print("audit regressions: ok")

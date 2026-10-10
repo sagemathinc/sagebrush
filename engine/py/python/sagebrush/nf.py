@@ -63,7 +63,7 @@ def primes_above(f, p):
 def bnf(f):
     """Class group and regulator of Q[x]/(f), assuming GRH: dict with h,
     cyc (invariants, largest first), regulator (a decimal string), w, r1,
-    r2, disc."""
+    r2, disc, and assumes (["GRH"]: what the result depends on)."""
     r = call("bnf", f=_ints(f))
     r["h"] = int(r["h"])
     r["disc"] = int(r["disc"])
