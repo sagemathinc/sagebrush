@@ -1103,20 +1103,19 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                     imprecise = true;
                     return None;
                 };
-                let (rlo, rhi, d) = super::certify::regulator_bounds(&lams, &errs, &basis, prec).map_err(|e| imprecise = e).ok()?;
+                let (rlo, rhi, d, rel) = super::certify::regulator_bounds(&lams, &errs, &basis, prec).map_err(|e| imprecise = e).ok()?;
                 let (h2, cyc2) = if c == 0 { (BigInt::one(), vec![]) } else { lattice_group_exact(dense, c, sel, 2.0 * lo.exp() / rhi, seed, debug)? };
                 if debug {
                     eprintln!("  certificate: R in [{:.12e}, {:.12e}], h* {} (heuristic {}), log h* R*_hi {:.6} vs log 2 hR >= {:.6}", rlo, rhi, h2, h, super::certify::ln_big(&h2) + rhi.ln(), std::f64::consts::LN_2 + lo);
                 }
-                below_twice(super::certify::ln_big(&h2), rhi.ln(), lo).then_some((h2, cyc2, rlo, rhi, d))
+                below_twice(super::certify::ln_big(&h2), rhi.ln(), lo).then_some((h2, cyc2, rel, d))
             })();
             if debug {
                 eprintln!("  certificate {} at {:.1} ms ({:.1} ms)", if cert.is_some() { "holds" } else { "failed" }, ms(), tc.elapsed().as_secs_f64() * 1e3);
             }
             match cert {
-                Some((h2, cyc2, rlo, rhi, d)) => {
-                    // R = |det b|: its digits as far as [rlo, rhi] fixes them
-                    let rel = (rhi - rlo) / rlo;
+                Some((h2, cyc2, rel, d)) => {
+                    // R = |det b|: the digits its error bound fixes
                     let reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;
                     let reg_fixed = &d >> (prec as usize * (r - 1));
                     let reg = to_f64(&reg_fixed, prec);
@@ -1294,11 +1293,11 @@ mod tests {
         let lams = vec![comb(3, 1), comb(2, 1), comb(5, -7)];
         let errs = vec![16.0; 3];
         let basis = vec![b1.clone(), b2.clone()];
-        let (lo, hi, _) = super::super::certify::regulator_bounds(&lams, &errs, &basis, prec).unwrap();
+        let (lo, hi, _, _) = super::super::certify::regulator_bounds(&lams, &errs, &basis, prec).unwrap();
         assert!(lo <= want && want <= hi && hi - lo < 1e-12 * want, "{} {} {}", lo, hi, want);
         // only even first coordinates: index 2, whatever basis is claimed
         let lams2 = vec![comb(2, 1), comb(4, 3), comb(2, -1)];
-        let (lo2, _, _) = super::super::certify::regulator_bounds(&lams2, &errs, &basis, prec).unwrap();
+        let (lo2, _, _, _) = super::super::certify::regulator_bounds(&lams2, &errs, &basis, prec).unwrap();
         assert!(lo2 > 1.99 * want, "{}", lo2);
     }
 
