@@ -735,7 +735,11 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if x.len() != 2 {
                 return Err("x is [numerator, denominator]".into());
             }
-            let n = u(v, "n")? as u32;
+            let n = match u(v, "n")? {
+                1 => 1u32,
+                2 => 2,
+                _ => return Err("n must be 1 or 2 (Q = P or 2P)".into()),
+            };
             let local: Vec<(BigInt, BigInt, BigInt)> = v.get("local").and_then(|l| l.as_array()).ok_or("local: [[p, num, den], ...]")?
                 .iter().map(|t| {
                     let t = bigs(Some(t))?;

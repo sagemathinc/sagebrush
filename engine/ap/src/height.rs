@@ -228,8 +228,13 @@ fn carlson_rf_conj(a: &Ball, b: &Ball, c: &Ball, prec: u64, goal: i64) -> Option
 /// of f (num 2^-k: three if Delta > 0, the real one if Delta < 0).
 #[allow(clippy::too_many_arguments)]
 pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &[(BigInt, BigInt, BigInt)], d: &BigInt, roots: &[(BigInt, u64)], prec: u64) -> R {
-    if a.len() != 5 || xd.is_zero() || d.is_zero() || n == 0 {
+    if a.len() != 5 || xd.is_zero() || d.is_zero() {
         return Err("canonical_height: bad arguments".into());
+    }
+    // (Q = P or 2P; another n was cast and squared in u32, the review's
+    // ECBALL-F5)
+    if n != 1 && n != 2 {
+        return Err("canonical_height: n must be 1 or 2".into());
     }
     let wp = prec + 64;
     let goal = prec as i64 + 32;
@@ -422,6 +427,10 @@ mod tests {
     #[test]
     fn bad_input() {
         let a = [b(0), b(0), b(1), b(-1), b(0)];
+        // n other than 1 and 2
+        for n in [0u32, 3, 65537] {
+            assert!(canonical_height(&a, &b(1), &b(1), n, &[], &b(1), &[(b(214), 8), (b(69), 8), (b(-283), 8)], 64).is_err());
+        }
         // the wrong number of roots, a root approximation with no root near it
         assert!(canonical_height(&a, &b(1), &b(1), 2, &[], &b(1), &[(b(214), 8)], 64).is_err());
         assert!(canonical_height(&a, &b(1), &b(1), 2, &[], &b(1), &[(b(214), 8), (b(69), 8), (b(-200), 8)], 64).is_err());

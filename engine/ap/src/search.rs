@@ -18,9 +18,15 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
 pub fn x_coordinates(b2: i128, b4: i128, b6: i128, rmax: u64, smax: u64, limit: usize) -> Result<Vec<(i128, u64)>, String> {
     // every exact evaluation: |F(r, s)| and its Horner partial sums are at
     // most the sum of the absolute terms over |r| <= rmax, s <= smax; s^6
-    // itself is formed too (1e37 < 2^127 / 17 leaves room for the rounding
-    // of this estimate)
-    let (r, s) = (rmax as f64, smax as f64);
+    // itself is formed too, and so are the coefficients b2 s^2, 2 b4 s^4
+    // even when rmax = 0 (hence r >= 1 here; 1e37 < 2^127 / 17 leaves room
+    // for the rounding of this estimate)
+    let (r, s) = (rmax.max(1) as f64, smax as f64);
+    if limit == 0 {
+        // (at most `limit`: the first point was pushed before the check, the
+        // review's ECBALL-F6)
+        return Ok(Vec::new());
+    }
     let size = 4.0 * r.powi(3) + (b2 as f64).abs() * r * r * s * s + 2.0 * (b4 as f64).abs() * r * s.powi(4) + (b6 as f64).abs() * s.powi(6) + s.powi(6);
     if size > 1e37 {
         return Err("the point search needs numbers beyond 128 bits".into());
@@ -118,6 +124,19 @@ mod tests {
         for x in [(0, 1), (1, 1), (-1, 1), (2, 1), (6, 1), (1, 2)] {
             assert!(xs.contains(&x), "{:?}", x);
         }
+    }
+
+    #[test]
+    fn limit_zero() {
+        assert!(x_coordinates(0, -2, 1, 1, 1, 0).unwrap().is_empty());
+        assert_eq!(x_coordinates(0, -2, 1, 10, 3, 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn large_coefficients_refused() {
+        // y^2 = x^3 + 2^125 x + 1 at rmax = 0: 2 b4 s^4 alone leaves i128
+        assert!(x_coordinates(0, 1i128 << 126, 4, 0, 1, 100).is_err());
+        assert_eq!(x_coordinates(0, 1i128 << 100, 4, 0, 1, 100).unwrap(), vec![(0, 1)]);
     }
 
     #[test]
