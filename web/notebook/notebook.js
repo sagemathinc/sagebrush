@@ -244,7 +244,7 @@ export function createNotebook(root, opts = {}) {
 
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
-  function paint(cell) { cell.hl.innerHTML = cell.type === "markdown" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
+  function paint(cell) { cell.hl.innerHTML = cell.type !== "code" ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage()); }
 
   // ---------------------------------------------------------- output areas
   // Text goes into <pre> runs; pictures (Jupyter MIME bundles) into <figure>s.
@@ -482,6 +482,7 @@ export function createNotebook(root, opts = {}) {
   }
   function run(cell) {
     if (cell.type === "markdown") return renderMd(cell);
+    if (cell.type === "raw") return Promise.resolve(); // raw text is not run
     if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
     forgetInteracts(cell.out);
     cell.out.textContent = "";
@@ -630,10 +631,10 @@ export function createNotebook(root, opts = {}) {
     el.setAttribute("role", "group");
     el.innerHTML = `<div class="gutter" draggable="true" title="Drag to move the cell"><span class="n">[ ]</span><button class="runb" data-a="run" draggable="false">▶</button></div>`
       + `<div class="body"><div class="ed"><pre aria-hidden="true"></pre><textarea rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div><div class="mdout" tabindex="0" title="Double-click or press Enter to edit"></div><div class="out"></div><div class="time"></div></div>`
-      + `<div class="head" role="toolbar"><span class="drag" draggable="true" title="Drag to move the cell" aria-hidden="true">⠿</span><select data-a="type" aria-label="Cell type" title="Cell type (M: Markdown, Y: code)"><option value="code">Code</option><option value="markdown">Markdown</option></select><button data-a="up" title="Move up (Alt+↑)" aria-label="Move up">↑</button><button data-a="down" title="Move down (Alt+↓)" aria-label="Move down">↓</button><button data-a="del" title="Delete (D D; Z undoes)" aria-label="Delete">${TRASH_SVG}</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" title="Cell actions">⋯</button></div>`
+      + `<div class="head" role="toolbar"><span class="drag" draggable="true" title="Drag to move the cell" aria-hidden="true">⠿</span><select data-a="type" aria-label="Cell type" title="Cell type (M: Markdown, Y: code, R: raw)"><option value="code">Code</option><option value="markdown">Markdown</option><option value="raw">Raw</option></select><button data-a="up" title="Move up (Alt+↑)" aria-label="Move up">↑</button><button data-a="down" title="Move down (Alt+↓)" aria-label="Move down">↓</button><button data-a="del" title="Delete (D D; Z undoes)" aria-label="Delete">${TRASH_SVG}</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" title="Cell actions">⋯</button></div>`
       + `<div class="adder"><button data-a="addcode" title="Insert a code cell below">+ Code</button><button data-a="addmd" title="Insert a Markdown (text) cell below">+ Text</button></div>`;
     const q = (s) => el.querySelector(s);
-    const cell = { id: id ?? cellId(), el, type: "code", ta: q("textarea"), hl: q(".ed pre"), out: q(".out"), md: q(".mdout"), time: q(".time"), n: q(".n"), runb: q(".runb"), typeSel: q('[data-a="type"]'), menuBtn: q('[data-a="menu"]'), attachments: null };
+    const cell = { id: id ?? cellId(), el, type: "code", ta: q("textarea"), hl: q(".ed pre"), out: q(".out"), md: q(".mdout"), time: q(".time"), n: q(".n"), runb: q(".runb"), typeSel: q('[data-a="type"]'), menuBtn: q('[data-a="menu"]'), attachments: null, metadata: null };
     el.cell = cell;
     cell.md.addEventListener("dblclick", () => { if (!opts.readOnly) editMd(cell); });
     cell.ta.value = code;
@@ -897,6 +898,7 @@ export function createNotebook(root, opts = {}) {
           case "v": paste(cell, e.shiftKey); break;
           case "m": if (e.shiftKey) merge(cell); else if (cell.type !== "markdown") { setType(cell, "markdown"); schedule(); select(cell); } break;
           case "y": if (cell.type !== "code") { setType(cell, "code"); schedule(); select(cell); } break;
+          case "r": if (cell.type !== "raw") { setType(cell, "raw"); schedule(); select(cell); } break;
           default: return;
         }
     }
@@ -948,13 +950,15 @@ export function createNotebook(root, opts = {}) {
 
   // ---------------------------------------------------------- Markdown cells
   function setType(cell, type) {
-    cell.type = type === "markdown" ? "markdown" : "code";
+    // raw cells (nbformat's): text kept as it is, never run
+    cell.type = type === "markdown" || type === "raw" ? type : "code";
     cell.el.classList.toggle("markdown", cell.type === "markdown");
+    cell.el.classList.toggle("raw", cell.type === "raw");
     cell.el.classList.remove("rendered");
-    cell.n.textContent = cell.type === "markdown" ? "" : "[ ]";
-    cell.runb.title = cell.type === "markdown" ? "Show the text (Shift+Enter)" : "Run (Shift+Enter)";
+    cell.n.textContent = cell.type !== "code" ? "" : "[ ]";
+    cell.runb.title = cell.type === "markdown" ? "Show the text (Shift+Enter)" : cell.type === "raw" ? "Raw text: not run" : "Run (Shift+Enter)";
     cell.typeSel.value = cell.type;
-    if (cell.type === "markdown") { forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; }
+    if (cell.type !== "code") { forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; }
     paint(cell);
     relabel();
   }
@@ -1060,14 +1064,20 @@ export function createNotebook(root, opts = {}) {
   document.addEventListener("pointerdown", onPointerDown);
 
   // ---------------------------------------------------------- the document
-  // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?}], ...meta}.
+  // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
+  // A cell's metadata (nbformat's: tags, ...) is kept as it is.
   let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null;
   function snapshot() {
     return {
       ...meta, mode,
-      cells: cells().map((c) => (c.type === "markdown"
-        ? { id: c.id, type: "markdown", code: c.ta.value, ...(c.attachments ? { attachments: c.attachments } : {}) }
-        : { id: c.id, code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null })),
+      cells: cells().map((c) => ({
+        ...(c.type === "markdown"
+          ? { id: c.id, type: "markdown", code: c.ta.value, ...(c.attachments ? { attachments: c.attachments } : {}) }
+          : c.type === "raw"
+            ? { id: c.id, type: "raw", code: c.ta.value }
+            : { id: c.id, code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null }),
+        ...(c.metadata ? { metadata: c.metadata } : {}),
+      })),
     };
   }
   // Changes (edits, cells added, moved or removed, new output) are reported
@@ -1095,6 +1105,8 @@ export function createNotebook(root, opts = {}) {
   addEventListener("visibilitychange", onHidden);
 
   function fill(cell, c) {
+    cell.metadata = c.metadata ?? null;
+    if (cell.type === "raw") return;
     if (cell.type === "markdown") {
       cell.attachments = c.attachments ?? null;
       renderMd(cell);
@@ -1133,13 +1145,14 @@ export function createNotebook(root, opts = {}) {
         fill(c, rc);
       } else {
         mine.delete(rc.id);
-        if ((rc.type === "markdown" ? "markdown" : "code") !== c.type) setType(c, rc.type);
+        if ((rc.type === "markdown" || rc.type === "raw" ? rc.type : "code") !== c.type) setType(c, rc.type);
+        if ("metadata" in rc) c.metadata = rc.metadata ?? null; // (TimeTravel's versions have none)
         const textChanged = c.ta.value !== (rc.code ?? "");
         if (textChanged) setInput(c, rc.code ?? "");
         if (c.type === "markdown") {
           c.attachments = rc.attachments ?? null;
           if (textChanged && c.el.classList.contains("rendered")) renderMd(c);
-        } else if (!c.el.classList.contains("running") && !c.el.classList.contains("queued")) {
+        } else if (c.type === "code" && !c.el.classList.contains("running") && !c.el.classList.contains("queued")) {
           if (JSON.stringify(saveOutputs(c.out)) !== JSON.stringify(rc.outputs ?? [])) {
             forgetInteracts(c.out);
             c.out.replaceChildren();

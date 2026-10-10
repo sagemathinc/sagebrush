@@ -90,6 +90,15 @@ await ready();
 ok((await ev("document.querySelectorAll('.cell').length")) >= 4 && (await ev("document.body.textContent")).includes("factor(2^64 + 1)"), "reopening shows the saved notebook");
 const outside = await ev(`fetch('api/file?path=' + encodeURIComponent('../../etc/passwd')).then((r) => r.status)`);
 ok(outside === 400, "files outside the directory are refused: " + outside);
+// a file that is not a notebook is shown as an error and never saved over (audit F8)
+const broken = join(dir, "broken.ipynb"), junk = '{"cells": [ truncated';
+writeFileSync(broken, junk);
+await go(`${base}/nb/broken.ipynb/`);
+await ready();
+ok(/could not read/.test(await ev("document.querySelector('.cell .mdout')?.textContent ?? ''")), "an unreadable .ipynb shows why");
+await ev("(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], 'edited'); nb.flush(); })()");
+await sleep(1500);
+ok(readFileSync(broken, "utf8") === junk && /not saved/.test(await ev("document.querySelector('#saved').textContent")), "...and editing it does not overwrite the file: " + (await ev("document.querySelector('#saved').textContent")));
 
 cleanup();
 console.log(failures ? `${failures} failures` : "all passed");

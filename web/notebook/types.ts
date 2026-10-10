@@ -13,12 +13,15 @@ export type Output =
 export interface Cell {
   /** Stable across sessions and devices: matching remote changes uses it (nbformat 4.5 cell id). */
   id: string;
-  type?: "code" | "markdown";
+  /** "raw": nbformat's raw cell, text kept as it is and never run. */
+  type?: "code" | "markdown" | "raw";
   code: string;
   outputs?: Output[];
   /** The execution count, the n of the prompt [n]:. */
   n?: number | string | null;
   attachments?: Record<string, Record<string, string>> | null;
+  /** nbformat's cell metadata (tags, ...), kept as it is. */
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface NotebookDoc {
@@ -71,7 +74,7 @@ export interface Notebook {
   readonly root: HTMLElement;
   readonly mode: NotebookDoc["mode"];
   cells(): any[];
-  addCell(code?: string, where?: { before?: Element; after?: Element; first?: boolean } | null, focus?: boolean, type?: "code" | "markdown"): any;
+  addCell(code?: string, where?: { before?: Element; after?: Element; first?: boolean } | null, focus?: boolean, type?: "code" | "markdown" | "raw"): any;
   run(cell: any): Promise<void>;
   runAll(): Promise<unknown>;
   interrupt(): void;

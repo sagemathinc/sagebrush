@@ -24,8 +24,10 @@
 .sbnb .cell.active:has(textarea:focus) { border-left-color: var(--accent); }
 .sbnb .cell .gutter { position: relative; display: flex; flex-direction: column; align-items: flex-end; padding: 8px 10px 0 0; cursor: grab; user-select: none; -webkit-user-select: none; }
 .sbnb .cell .n { font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--muted); white-space: nowrap; }
-.sbnb .cell:not(.markdown) .n::after { content: ":"; }
-.sbnb .cell.markdown .n { display: none; }
+.sbnb .cell:not(.markdown):not(.raw) .n::after { content: ":"; }
+.sbnb .cell.markdown .n, .sbnb .cell.raw .n { display: none; }
+.sbnb .cell.raw .runb { display: none; }
+.sbnb .cell.raw .ed { background: repeating-linear-gradient(-45deg, transparent 0 6px, color-mix(in srgb, var(--muted) 6%, transparent) 6px 7px); }
 .sbnb .cell.queued .n, .sbnb .cell.running .n { color: var(--accent); font-weight: 600; }
 /* the run button: in place of the prompt on the active or hovered cell (as in
    Colab); a spinning ring (and Stop) while it runs */

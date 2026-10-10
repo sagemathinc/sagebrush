@@ -769,14 +769,27 @@ function showName(name) {
 nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); });
 
 // A store for a file saved as .ipynb text: the local server's file, or the app's.
+// read() gives null for a file that does not exist yet (a new notebook); a file
+// that cannot be read or is not a notebook is shown as an error and never
+// saved over.
 class TextFileStore {
-  constructor(name, read, write, label) { this.name = name; this.read = read; this.write = write; this.label = label; this.last = null; }
+  constructor(name, read, write, label) { this.name = name; this.read = read; this.write = write; this.label = label; this.last = null; this.failed = null; }
   async load() {
-    let doc = null;
-    try { const text = await this.read(); if (text != null) { doc = fromFile(this.name, text, "sage"); this.last = text; } } catch {}
-    return doc ?? { name: this.name.replace(/\.ipynb$/i, ""), mode: "sage", cells: [{ id: cellId(), code: "" }] };
+    const name = this.name.replace(/\.ipynb$/i, "");
+    try {
+      const text = await this.read();
+      this.failed = null;
+      if (text == null) return { name, mode: "sage", cells: [{ id: cellId(), code: "" }] };
+      const doc = fromFile(this.name, text, "sage");
+      this.last = text;
+      return doc;
+    } catch (e) {
+      this.failed = `could not read ${this.label}: ${e?.message ?? e}`;
+      return { name, mode: "sage", cells: [{ id: cellId(), type: "markdown", code: `**${this.failed.replace(/[*_`\\[\]<>]/g, "\\$&")}**\n\nThe file is left as it is: nothing here is saved to it.` }] };
+    }
   }
   async save(doc) {
+    if (this.failed) throw new Error(this.failed + " (not saved, so as not to overwrite it)");
     const text = toIpynb(doc);
     if (text === this.last) return "saved to " + this.label;
     await this.write(text);
@@ -1325,7 +1338,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   if (LOCAL) {
     const url = `api/file?path=${encodeURIComponent(LOCAL.path)}`;
     const store = new TextFileStore(LOCAL.name,
-      async () => { const r = await fetch(url); return r.ok ? r.text() : null; },
+      async () => { const r = await fetch(url); if (r.status === 404) return null; if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.text(); },
       async (text) => { const r = await fetch(url, { method: "PUT", body: text }); if (!r.ok) throw new Error(await r.text()); },
       LOCAL.name);
     await open(store, "local:" + LOCAL.path, "local");
