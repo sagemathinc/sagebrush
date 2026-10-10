@@ -509,6 +509,16 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             let s = crate::domain::const_sign(&e).or_else(|| crate::domain::const_sign(&crate::simplify::simplify_full(&e)));
             vec![s.map_or(String::new(), |s| s.to_string())]
         }
+        "decide" => {
+            // a relation between constants: "1" proved true, "0" proved
+            // false, "" not decided
+            let e = d(arg(0));
+            vec![match crate::solve::decide(&e) {
+                Some(true) => "1".to_string(),
+                Some(false) => "0".to_string(),
+                None => String::new(),
+            }]
+        }
         "is_zero" => {
             let e = d(arg(0));
             let z = e.is_zero() || crate::simplify::simplify_full(&e).is_zero();

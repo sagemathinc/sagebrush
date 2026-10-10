@@ -818,9 +818,12 @@ class Expression:
             raise ValueError("every value is a root of 0")
         out = []
         sols = solve(f == 0, x)
-        # roots are values: a family or a solution valid only under range
-        # conditions is not one (sin(x).roots() gave []: CSOL-F11)
-        if any(isinstance(s, Solution) and (s._params or any(c._op()[0] not in ("rel:Ne", "rel:Eq") for c in s._conds)) for s in sols):
+        # roots are values: a family or a solution valid only under
+        # conditions is not one (sin(x).roots() gave []: CSOL-F11); for a
+        # polynomial in x, the roots over the field of its parameters (the
+        # coefficient-nonzero ones; its a == 0 branches are other polynomials)
+        poly = f.is_polynomial(x)
+        if any(isinstance(s, Solution) and (s._params or (s._conds and not poly)) for s in sols):
             raise NotImplementedError("roots: the solutions of %s == 0 are families or conditional (see solve())" % f)
         for s in sols:
             # an unresolved 0 == f is no root (x^5 + x + 3 gave (x^5 + x + 3,
@@ -1728,7 +1731,7 @@ def _assume_on(sol, names):
     (assume(x > 0); sin(x) == 0: x == pi*n1 if pi*n1 > 0); 'integer' and
     the like on such a solution are refused (the review of solve's
     CSOL-F9: the whole family came back).  None if a condition fails."""
-    if len(sol) != 1 or not isinstance(sol[0], Solution) or not (sol[0]._params or sol[0]._conds):
+    if len(sol) != 1 or not isinstance(sol[0], Solution):
         return sol
     s = sol[0]
     try:
@@ -1737,6 +1740,10 @@ def _assume_on(sol, names):
     except Exception:
         return sol
     x, v = str(s.lhs()), s.rhs()
+    # a numerical value is checked by _satisfies; a symbolic one (x == a,
+    # x == r1, a family) gets the assumptions as conditions (CSOL-F9)
+    if not v.variables():
+        return sol
     extra = []
     for r in _ASSUMPTIONS:
         if isinstance(r, _Feature):
@@ -1749,7 +1756,7 @@ def _assume_on(sol, names):
             elif r._kind == "negative":
                 extra.append(v < 0)
             else:
-                raise NotImplementedError("solve: the assumption that %s is %s on %s" % (x, r._kind, s))
+                raise NotImplementedError("solve: the assumption that %s is %s on the symbolic solution %s" % (x, r._kind, s))
         elif isinstance(r, Expression) and x in r._names():
             extra.append(r.subs({s.lhs(): v}))
     if not extra:
@@ -1757,9 +1764,10 @@ def _assume_on(sol, names):
     keep = list(s._conds)
     for c in extra:
         if not c.variables():
-            if bool(c):
+            verdict = _decide(c)
+            if verdict is True:
                 continue
-            if bool(_negate(c)):
+            if verdict is False:
                 return None
         keep.append(c)
     return [Solution(s._s, keep, s._params)]
@@ -2669,6 +2677,12 @@ def limit(f, *args, dir=None, **kw):
 lim = limit
 
 
+def _decide(c):
+    """True or False when the engine proves the constant relation c, else None."""
+    r = _call("decide", c._s)[0]
+    return True if r == "1" else False if r == "0" else None
+
+
 def _negate(c):
     """The negation of a relation (a < b: a >= b)."""
     op = c._op()[0]
@@ -2779,9 +2793,13 @@ class Solution(Expression):
             if c2.variables():
                 keep.append(c2)
                 continue
-            if bool(c2):
+            # decided by the engine (exactly or by enclosures), else kept:
+            # bool() of a relation is no proof (asin's range at pi/2 - 10^-10
+            # was rejected: CSOL-F7)
+            verdict = _decide(c2)
+            if verdict is True:
                 continue
-            if bool(_negate(c2)):
+            if verdict is False:
                 shown = Solution(rel._s, [Expression.subs(d, *args, **kw) for d in self._conds])._cond_text(str)
                 raise ValueError("not a solution there: %s fails" % " and ".join(shown))
             keep.append(c2)
@@ -2839,6 +2857,32 @@ class Solution(Expression):
         return t
 
 
+def _keep_conditions(name):
+    """Solution's version of an operator: the result, if still a relation,
+    keeps the conditions (s + 0, -(-s), s*1 dropped them: CSOL-F7)."""
+    base = getattr(Expression, name)
+
+    def op(self, *args):
+        # applied to both sides, as Sage does for a relation (the engine's
+        # -(x == a) was not a relation at all)
+        l, r = Expression.lhs(self), Expression.rhs(self)
+        if args and isinstance(args[0], Expression) and args[0].is_relational():
+            o = args[0]
+            nl, nr = base(l, o.lhs()), base(r, o.rhs())
+        else:
+            nl, nr = base(l, *args), base(r, *args)
+        rel = nl == nr
+        return Solution(rel._s, object.__getattribute__(self, "_conds"), object.__getattribute__(self, "_params"))
+    op.__name__ = name
+    return op
+
+
+for _name in ("__add__", "__radd__", "__sub__", "__rsub__", "__mul__", "__rmul__", "__truediv__", "__rtruediv__",
+              "__neg__", "__pos__", "__pow__", "__rpow__"):
+    if hasattr(Expression, _name):
+        setattr(Solution, _name, _keep_conditions(_name))
+
+
 def solve(f, *args, **kw):
     """solve(x^2 == 4, x) -> [x == -2, x == 2]; solve([eqs], x, y) ->
     [[x == ..., y == ...], ...]; solution_dict=True for dictionaries.
@@ -2855,7 +2899,10 @@ def solve(f, *args, **kw):
     The answer is meant to be read literally: [] means there is no
     solution, and 0 == f remains whenever not every solution was found or
     a candidate could not be decided (a factor of unknown roots, an
-    irrational exponent's other branches).  Assumptions on x become
+    irrational exponent's other branches).  Each solution comes from an
+    exact inversion valid under its conditions, which are decided exactly
+    (or by separating enclosures) or left attached; a constant that cannot
+    be shown nonzero is never divided by unconditionally.  Assumptions on x become
     conditions on a family (assume(x > 0): x == pi*n1 if pi*n1 > 0);
     'integer' and the like on a family are refused.  Not yet complete:
     systems of equations (their pivots are assumed nonzero) and exponents
