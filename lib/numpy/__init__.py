@@ -2017,9 +2017,19 @@ def _read_text(fname):
         t = fname.read()
         return t.decode() if isinstance(t, bytes) else t
     if str(fname).endswith(".gz"):
+        # every member of the file, as gzip.open reads it (zlib.decompress
+        # stops after the first: rows were dropped, the systematic review's
+        # R2-DOC-F5); each member's CRC and length are checked
         import zlib
         with open(fname, "rb") as f:
-            return zlib.decompress(f.read(), 31).decode()
+            data = f.read()
+        parts, pos = [], 0
+        while pos < len(data):
+            if data[pos:].strip(b"\x00") == b"":
+                break  # trailing zero padding, which gzip allows
+            out, pos = zlib._gzip_member(data, pos)
+            parts.append(out)
+        return b"".join(parts).decode()
     with open(fname) as f:
         return f.read()
 

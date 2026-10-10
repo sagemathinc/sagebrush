@@ -3,7 +3,7 @@
 // no compression), crc32 and adler32; base64 and hex for binascii.  Enough
 // for scipy.io.loadmat's compressed MATLAB arrays and for base64 data.
 
-import { T, PyBytes, raise, objectType } from "./object";
+import { T, PyBytes, raise, objectType, tuple } from "./object";
 import { newBuiltinModule } from "./modules";
 
 let ZlibError: any;
@@ -168,7 +168,9 @@ function inflateRaw(src: Uint8Array, pos: number): [Uint8Array, number] {
       }
     }
   }
-  return [out.subarray(0, op), pos];
+  // (decode reads ahead: whole unread bytes in the bit buffer are not the
+  // stream's)
+  return [out.subarray(0, op), pos - (bitcnt >> 3)];
 }
 
 function adler32(a: Uint8Array, start = 1): number {
@@ -200,23 +202,40 @@ function crc32(a: Uint8Array, start = 0): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** zlib (wbits 9..15), raw deflate (wbits < 0) or gzip (wbits >= 16 + 9). */
+const TRUNCATED = "Error -5 while decompressing data: incomplete or truncated stream";
+
+/** One gzip member at `start`: its data, checked against the trailer's
+ *  CRC-32 and length (as zlib checks them: corrupt or truncated files were
+ *  accepted, the systematic review's R2-DOC-F6), and the position after it. */
+export function gunzipMember(data: Uint8Array, start: number): [Uint8Array, number] {
+  if (data[start] !== 0x1f || data[start + 1] !== 0x8b || data[start + 2] !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  if (start + 10 > data.length) raise(ZlibError, TRUNCATED);
+  const flg = data[start + 3];
+  let p = start + 10;
+  if (flg & 4) p += 2 + (data[p] | (data[p + 1] << 8));
+  if (flg & 8) while (p < data.length && data[p++]) {}
+  if (flg & 16) while (p < data.length && data[p++]) {}
+  if (flg & 2) p += 2;
+  const [out, end] = inflateRaw(data, p);
+  if (end + 8 > data.length) raise(ZlibError, TRUNCATED);
+  const le = (i: number) => (data[i] | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24)) >>> 0;
+  if (le(end) !== crc32(out)) raise(ZlibError, "Error -3 while decompressing data: incorrect data check");
+  if (le(end + 4) !== out.length >>> 0) raise(ZlibError, "Error -3 while decompressing data: incorrect length check");
+  return [out, end + 8];
+}
+
+/** zlib (wbits 9..15), raw deflate (wbits < 0) or gzip (wbits >= 16 + 9):
+ *  the first stream, as CPython's zlib.decompress. */
 export function decompress(data: Uint8Array, wbits = 15): Uint8Array {
   if (wbits < 0) return inflateRaw(data, 0)[0];
   const magic = data[0] === 0x1f && data[1] === 0x8b;
-  if ((wbits >= 24 && wbits < 32) || (wbits >= 40 && magic)) {
-    // gzip: skip the header
-    if (data[0] !== 0x1f || data[1] !== 0x8b) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
-    const flg = data[3];
-    let p = 10;
-    if (flg & 4) p += 2 + (data[p] | (data[p + 1] << 8));
-    if (flg & 8) while (data[p++]) {}
-    if (flg & 16) while (data[p++]) {}
-    if (flg & 2) p += 2;
-    return inflateRaw(data, p)[0];
-  }
+  if ((wbits >= 24 && wbits < 32) || (wbits >= 40 && magic)) return gunzipMember(data, 0)[0];
   if (data.length < 2 || ((data[0] << 8) | data[1]) % 31 !== 0 || (data[0] & 15) !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
-  const [out] = inflateRaw(data, 2);
+  const [out, end] = inflateRaw(data, 2);
+  // the Adler-32 trailer (a corrupted one was accepted: R2-DOC-F6)
+  if (end + 4 > data.length) raise(ZlibError, TRUNCATED);
+  const a = ((data[end] << 24) | (data[end + 1] << 16) | (data[end + 2] << 8) | data[end + 3]) >>> 0;
+  if (a !== adler32(out)) raise(ZlibError, "Error -3 while decompressing data: incorrect data check");
   return out;
 }
 
@@ -258,6 +277,12 @@ newBuiltinModule("zlib", (m) => {
   };
   fn("decompress", (data: any, wbits: any = 15, _bufsize: any = 16384) => new PyBytes(decompress(bytesOf(data), Number(wbits))));
   fn("compress", (data: any, _level: any = -1, _wbits: any = 15) => new PyBytes(compress(bytesOf(data))));
+  // (Sagebrush's: one gzip member and the offset after it, for readers of
+  // multi-member files, which zlib.decompress stops after the first of)
+  fn("_gzip_member", (data: any, start: any = 0) => {
+    const [out, end] = gunzipMember(bytesOf(data), Number(start));
+    return tuple([new PyBytes(out), end]);
+  });
   fn("crc32", (data: any, start: any = 0) => crc32(bytesOf(data), Number(start)));
   fn("adler32", (data: any, start: any = 1) => adler32(bytesOf(data), Number(start)));
 });
