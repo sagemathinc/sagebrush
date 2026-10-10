@@ -568,3 +568,6 @@ raises(ValueError, CartanType(CartanMatrix([[2, -1, -1], [-1, 2, -1], [-2, -1, 2
 _R2 = PolynomialRing(QQ, "x,y"); _X, _Y = _R2.gens(); _f2 = _X**4 * _Y**3
 assert _f2.derivative(_X, 2, 0) == 12 * _X**2 * _Y**3; raises(ValueError, _f2.derivative, _X, 2, 3)
 print("queued batches follow-up ok")
+_x = polygen(QQ, "x"); _K = NumberField(_x**2 - 2, "a"); _M = QuadraticField(2, "a"); _L = NumberField(_x**3 - 2, "b")
+assert _K != _M and not (_K.gen() == _M.gen()) and _K(1) == _L(1) and _K(QQ(2) / 3) == _L(QQ(2) / 3) and len({_K(1), _L(1), 1}) == 1  # R2-NFD-F3
+print("nf parents ok")

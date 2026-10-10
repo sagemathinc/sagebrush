@@ -211,10 +211,14 @@ class NumberField_absolute:
         return self._element_class(self, [_F(x)] + [_F(0)] * (self._n - 1))
 
     def __eq__(self, other):
-        return isinstance(other, NumberField_absolute) and other._f == self._f and other._name == self._name
+        # the embedding is part of the field, as in Sage (QuadraticField(2)
+        # differs from NumberField(x^2 - 2)), so that equal fields are the
+        # same object (_unique) and their elements, ideals and coercions agree
+        return (isinstance(other, NumberField_absolute) and other._f == self._f and other._name == self._name
+                and getattr(other, "_emb", None) == getattr(self, "_emb", None))
 
     def __hash__(self):
-        return hash((tuple(self._f), self._name))
+        return hash((tuple(self._f), self._name, getattr(self, "_emb", None)))
 
     def __contains__(self, x):
         return isinstance(x, NumberFieldElement) and x._K is self
@@ -708,7 +712,13 @@ class NumberFieldElement:
         # conversion K(x^2), with different hashes: the second review's
         # R2-NFD-F3; K(x^2) converts explicitly)
         if isinstance(other, NumberFieldElement):
-            return (other._K is self._K or other._K == self._K) and other._c == self._c
+            if other._K is self._K or other._K == self._K:
+                return other._c == self._c
+            # in different fields only rational numbers compare, as the
+            # rationals they are (K(1) == 1 == L(1); hashes agree)
+            if all(c == 0 for c in self._c[1:]) and all(c == 0 for c in other._c[1:]):
+                return self._c[0] == other._c[0]
+            return False
         from _sage_poly import Polynomial
         if isinstance(other, Polynomial):
             if other.degree() > 0:
