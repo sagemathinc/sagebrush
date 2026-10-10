@@ -1,6 +1,6 @@
 {
   "name": "sagebrush-web",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Sagebrush engines (Rust -> WebAssembly, single-file ES modules) and CPython's parser in TypeScript, for browsers and chat artifacts",
   "type": "module",
   "exports": {
