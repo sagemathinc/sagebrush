@@ -803,7 +803,8 @@ class Polynomial:
     def gcd(self, other):
         """The gcd: monic over QQ; over ZZ with positive leading coefficient
         and the gcd of the contents (as Sage).  Modular, in the engine
-        (sagebrush.poly.gcd).
+        (sagebrush.poly.gcd).  Exception, as in Sage: over ZZ, gcd(0, f) and
+        gcd(f, 0) are f itself, whatever the sign of its leading coefficient.
 
         EXAMPLES::
 
