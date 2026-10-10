@@ -666,7 +666,10 @@ pub fn mul(a: &ZPoly, b: &ZPoly) -> Result<ZPoly, String> {
         return ZPoly::from_terms(0, vec![(vec![], a.coeffs.big(0) * b.coeffs.big(0))]);
     }
     let (da, db) = (a.degrees(), b.degrees());
-    let dims: Vec<u64> = (0..n).map(|i| da[i] + db[i] + 1).collect();
+    // (checked: x^(2^63) squared wrapped to x^0 = 1, the systematic review's R2-MUL-F3)
+    let dims: Vec<u64> = (0..n)
+        .map(|i| da[i].checked_add(db[i]).and_then(|d| d.checked_add(1)).ok_or_else(|| "exponents too large to pack".to_string()))
+        .collect::<Result<_, _>>()?;
     let bits = bits_for(*dims.iter().max().unwrap() - 1);
     if (n as u64) * (bits as u64) > 64 {
         return Err(format!("exponents too large to pack ({} variables of {} bits)", n, bits));
@@ -677,7 +680,7 @@ pub fn mul(a: &ZPoly, b: &ZPoly) -> Result<ZPoly, String> {
     // the trailing variables of the dense box
     let mut k = 0;
     let mut boxsize = 1u64;
-    while k < n && boxsize * dims[n - 1 - k] <= BOX {
+    while k < n && boxsize.checked_mul(dims[n - 1 - k]).is_some_and(|s| s <= BOX) {
         boxsize *= dims[n - 1 - k];
         k += 1;
     }
