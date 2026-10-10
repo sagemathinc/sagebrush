@@ -97,3 +97,7 @@ for r in results:
         shown += 1
         err = r["got"]["err"].strip().splitlines()
         print(f"-- {r['id']}: code {r['got']['code']} (cpython {r['ref']['code']}); {err[-1][:200] if err else 'stdout differs'}")
+# a failure fails the run (CI ran green with one: the systematic review's
+# DIST-F4); reviewed differences and oracle failures do not
+if total["fail"]:
+    sys.exit(1)

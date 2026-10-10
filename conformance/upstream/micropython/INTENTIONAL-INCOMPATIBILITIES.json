@@ -129,6 +129,17 @@
           "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       }
+    },
+    "fun_code.py": {
+      "expectedStatus": "error",
+      "reason": "types.FunctionType(code, globals) rebinds a compiled function to new globals. pyjs compiles a function to a JavaScript closure over its module's namespace, so a code object cannot be re-bound; f.__code__ exists with the signature fields (co_varnames, co_argcount, ...). Documented in conformance/README.md.",
+      "reference": {
+        "implementation": "CPython",
+        "version": "3.14.4"
+      },
+      "reviewedAt": "2026-10-10",
+      "documentation": "conformance/README.md",
+      "reconsiderWhen": "Functions can be re-bound to a new globals mapping."
     }
   }
 }
