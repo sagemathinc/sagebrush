@@ -232,3 +232,31 @@ pub fn along_cut_ok(e: &Expr, cut: Cut, v: &Expr) -> bool {
     }
     true
 }
+
+/// f = num/den for the functions with poles: (num, den), num None for 1.
+pub fn pole_parts(f: &Fun) -> Option<(Option<Fun>, Fun)> {
+    Some(match f {
+        Fun::Tan => (Some(Fun::Sin), Fun::Cos),
+        Fun::Sec => (None, Fun::Cos),
+        Fun::Cot => (Some(Fun::Cos), Fun::Sin),
+        Fun::Csc => (None, Fun::Sin),
+        Fun::Tanh => (Some(Fun::Sinh), Fun::Cosh),
+        Fun::Sech => (None, Fun::Cosh),
+        Fun::Coth => (Some(Fun::Cosh), Fun::Sinh),
+        Fun::Csch => (None, Fun::Sinh),
+        _ => return None,
+    })
+}
+
+/// A constant certified nonzero (an enclosure of its real or imaginary part
+/// excludes 0); a symbolic parameter never is.
+pub fn certified_nonzero(c: &Expr) -> bool {
+    if !free_symbols(c).is_empty() {
+        return false;
+    }
+    if const_sign(c).is_some_and(|s| s != 0) {
+        return true;
+    }
+    complex_encl(c).is_some_and(|(re, im)| !re.contains_zero() || !im.contains_zero())
+}
+

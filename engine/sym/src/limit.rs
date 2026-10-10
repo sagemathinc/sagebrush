@@ -200,6 +200,19 @@ fn continuous_value(e: &Expr, x: &str, a: &Expr) -> Option<Expr> {
         if !cut_ok(e, x, rules) {
             return false;
         }
+        // not at a pole: tan, sec, tanh, ... need their denominator (cos, sin,
+        // cosh, sinh) certified nonzero at the point (tanh(x + I pi/2) at 0
+        // gave tanh(I pi/2), finite in doubles: the systematic review's
+        // R2-SYMCALC-F8)
+        if let Kind::Fun(f, args) = &e.kind {
+            if let Some((_, g)) = crate::domain::pole_parts(f) {
+                let v = subs(&args[0], rules);
+                let dv = crate::simplify::simplify_full(&fun1(g, &v));
+                if !crate::domain::certified_nonzero(&dv) {
+                    return false;
+                }
+            }
+        }
         e.children().iter().all(|c| walk(c, x, rules))
     }
     let rules = [(sym(x), a.clone())];
@@ -295,7 +308,16 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
                 }
             }
             if l.is_zero() && pv == Some(-1) {
-                return Ok(infinity());
+                // +oo only for a base certified positive beside the point; an
+                // integer power of a negative base by its parity; else complex
+                // infinity (1/sqrt(x) from the left was +oo, the systematic
+                // review's R2-SYMCALC-F2)
+                let sb = eventual_sign(b, x, a, dir, 0);
+                return Ok(match (sb, p.as_i64()) {
+                    (Some(1), _) => infinity(),
+                    (Some(-1), Some(k)) => if k % 2 == 0 { infinity() } else { constant(Const::MinusInfinity) },
+                    _ => constant(Const::UnsignedInfinity),
+                });
             }
             if is_finite_value(&l) {
                 // a fractional power at its branch cut: only along it
@@ -388,6 +410,19 @@ fn lim(e: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -> R<Expr> {
                         }
                     }
                     return fail(format!("limit: the argument of {} tends to its branch cut or jump", crate::to_string(e)));
+                }
+            }
+            // at a pole (tan, sec, tanh, ... with their denominator not
+            // certified nonzero there): as a quotient, signed by the side
+            // (tanh(x + I pi/2) at 0 was tanh(I pi/2), R2-SYMCALC-F8)
+            if is_finite_value(&l) {
+                if let Some((num_f, den_f)) = crate::domain::pole_parts(f) {
+                    let dv = crate::simplify::simplify_full(&fun1(den_f.clone(), &l));
+                    if !crate::domain::certified_nonzero(&dv) {
+                        let u = &args[0];
+                        let n = num_f.map_or_else(one, |g| fun1(g, u));
+                        return quotient_limit(&n, &fun1(den_f, u), x, a, dir, depth + 1);
+                    }
                 }
             }
             return fun_at(f, &l);
@@ -611,6 +646,15 @@ fn quotient_limit(n: &Expr, d: &Expr, x: &str, a: &Expr, dir: Dir, depth: u32) -
     let ln = lim(n, x, a, dir, depth + 1)?;
     let zero_zero = ln.is_zero() && ld.is_zero();
     let inf_inf = ln.is_infinite() && ld.is_infinite();
+    // a limit that is 0 without being written 0 (sin(1)^2 + cos(1)^2 - 1) is
+    // 0/0; c/0 is an infinity only for c certified nonzero (a/x for a
+    // parameter a: the systematic review's R2-SYMCALC-F7)
+    if ld.is_zero() && !ln.is_zero() && !ln.is_infinite() && !crate::domain::certified_nonzero(&ln) {
+        if free_symbols(&ln).is_empty() && crate::simplify::simplify_full(&ln).is_zero() {
+            return quotient_limit(&crate::expand::expand(&sub(n, &ln)), d, x, a, dir, depth + 1);
+        }
+        return fail(format!("limit: the numerator's limit {} is not established to be nonzero", crate::to_string(&ln)));
+    }
     if !(zero_zero || inf_inf) {
         if ld.is_zero() {
             // c/0: an infinity, signed by the side
@@ -678,8 +722,10 @@ fn series_limit(e: &Expr, x: &str, a: &Expr, dir: Dir) -> R<Option<Expr>> {
     // grows without bound: still true)
     // (a coefficient that is 0 after all, unrecognized by the expansion,
     // means the order is wrong: no conclusion)
+    // (a parameter's coefficient may be 0: a/x is no infinity at a = 0, the
+    // systematic review's R2-SYMCALC-F7)
     let Some(c) = const_sign(&c0).filter(|&c| c != 0) else {
-        if crate::simplify::simplify_full(&c0).is_zero() {
+        if !crate::domain::certified_nonzero(&c0) {
             return Ok(None);
         }
         return Ok(Some(constant(Const::UnsignedInfinity)));
