@@ -50,7 +50,7 @@ det A det B, remainder sequences).
 
 ## Speed against FLINT 3.6
 
-`cargo run --release -p sagebrush-arith --example matbench` (and
+`cargo run --release -p sagebrush-oracle --example matbench` (and
 `polybench`, `nttbench`) time each operation against FLINT on the same
 inputs and check that the answers agree. See
 [bench/linalg](../../bench/linalg/README.md) for the tables and for the Sage

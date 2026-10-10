@@ -12,7 +12,7 @@ Here $[\chi]$ is the Galois orbit of $\chi$, and `factor` is a callback (FLINT i
 
 ## Result
 
-`examples/newspaces_vs_lmfdb.rs` checks against LMFDB's `mf_newspaces`, taken from the Postgres mirror by `~/data/lmfdb/fetch_newspaces.py`. **Every newspace with $k\ge2$ and $Nk^2\le1000$ agrees: 5533 of 5533 spaces and 4843 of 4843 Galois orbits.** For each space this covers:
+`engine/oracle/examples/newspaces_vs_lmfdb.rs` checks against LMFDB's `mf_newspaces`, taken from the Postgres mirror by `~/data/lmfdb/fetch_newspaces.py`. **Every newspace with $k\ge2$ and $Nk^2\le1000$ agrees: 5533 of 5533 spaces and 4843 of 4843 Galois orbits.** For each space this covers:
 
 - the character's conductor and order;
 - $\dim S_k$ and $\dim E_k$ over $\mathbb{Q}$ (from `dims.rs`);

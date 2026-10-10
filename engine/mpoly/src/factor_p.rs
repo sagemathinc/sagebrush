@@ -77,7 +77,7 @@ impl Ctx<'_> {
         let t: SP = f.iter().filter_map(|&(w, c)| {
             let e = self.pk.exp(w, v);
             let c2 = self.md.mul(c, e % self.md.n);
-            (e > 0 && c2 != 0).then_some((w - (1 << s), c2))
+            (e > 0 && c2 != 0).then(|| (w - (1 << s), c2))
         }).collect();
         hensel::normalize(t, self.md)
     }

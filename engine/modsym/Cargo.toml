@@ -17,6 +17,4 @@ sagebrush-poly = { path = "../poly" }
 
 [dev-dependencies]
 sagebrush-ap = { path = "../ap" }
-# LGPL; used only by the orbit tests and examples, never by the library.
-sagebrush-flint = { path = "../flint" }
 serde_json = "1"

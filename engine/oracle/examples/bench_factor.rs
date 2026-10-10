@@ -1,6 +1,6 @@
 //! Factor a polynomial (coefficients from x^0 up, whitespace-separated, in a
 //! file) with sagebrush-poly and with FLINT, and time both:
-//!     cargo run --release -p sagebrush-poly --example bench_factor -- FILE
+//!     cargo run --release -p sagebrush-oracle --example bench_factor -- FILE
 use sagebrush_bigint::BigInt;
 use std::time::Instant;
 

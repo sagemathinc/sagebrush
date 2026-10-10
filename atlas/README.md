@@ -28,7 +28,7 @@ certificate under `certs/`, with claim, method, checks and recipe).
 
 ```sh
 # Sagebrush computations (engine/, release build)
-cargo run --release -p sagebrush-modsym --example integral -- ~/data/atlas-src/orbits_le1000.jsonl 1-1000
+cargo run --release -p sagebrush-oracle --example integral -- ~/data/atlas-src/orbits_le1000.jsonl 1-1000
 cargo run --release -p sagebrush-modsym --example rational_table -- ~/data/atlas-src/rational_newforms_le9999.jsonl 11 9999
 # LMFDB slice from the read-only mirror (needs psycopg)
 python ~/data/lmfdb/fetch_m0.py

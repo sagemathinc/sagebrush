@@ -22,7 +22,7 @@ fn main() -> Result<(), String> {
     println!("exact: {:?} ({})", e.coeffs, e.status);
 
     // Newform orbits and trace forms (FLINT factors over Z).
-    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_flint::factor(f).1;
+    let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_poly::factor(f).1;
     let r = newspace_orbits(13, 2, &chi, &factor)?;
     let tr = orbit_traces(13, 2, &chi, &r, 10)?;
     println!("orbits {:?}, trace forms {:?}", r.dims, tr);

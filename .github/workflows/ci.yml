@@ -40,6 +40,8 @@ jobs:
         run: python3 conformance/run.py --runtime deno --show 20
       - name: conformance (Bun)
         run: python3 conformance/run.py --runtime bun --show 20
+      - name: .ipynb round trips keep metadata and raw cells
+        run: node web/test-ipynb.mjs
       - name: Sage mode (modular forms, elliptic curves), checked against Sage's output
         run: python3 sage-tests/run.py -v
       - name: symbolic calculus (limits, solve, taylor) in the WebAssembly engine
@@ -60,3 +62,54 @@ jobs:
         run: |
           python3 -m pip install mpmath==1.3.0
           python3 bench/mpmath/compare.py -j 4
+
+  # The math engine from source (audit F10): the jobs above use the committed
+  # wasm/sagebrush-engine.wasm, so a change to engine/ is tested here, by its
+  # own tests (optimized, with overflow checks) and by the same suites run on
+  # a WebAssembly engine and a CPython extension freshly built from it.
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      # (the comparisons with FLINT, an LGPL reference, are sagebrush-oracle's:
+      # they need FLINT installed and do not run here)
+      - name: engine tests
+        working-directory: engine
+        run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: a fresh WebAssembly engine
+        run: |
+          node scripts/build-engine.mjs
+          git diff --quiet wasm/ || echo "::warning::wasm/sagebrush-engine.wasm differs from a fresh build of engine/ (node scripts/build-engine.mjs; a different Rust can also change the bytes)"
+      - run: pnpm install --frozen-lockfile
+      - name: the TypeScript tests and the Sage, calculus and Magma suites on it
+        run: |
+          pnpm run build
+          node scripts/build-cli.mjs
+          node --test 'dist/test/*.test.js'
+          python3 sage-tests/run.py -v
+          python3 sage-tests/run_calculus.py
+          python3 magma-tests/run.py -v
+      - name: a fresh CPython extension, with the audit's regressions and Sage's tests
+        run: |
+          python3 -m pip install maturin
+          (cd engine/py && maturin build --release --out dist)
+          python3 -m pip install engine/py/dist/*.whl
+          python3 engine/py/test_audit.py
+          python3 sage-tests/run_cpython.py -v

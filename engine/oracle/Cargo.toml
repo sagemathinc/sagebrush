@@ -1,0 +1,16 @@
+[package]
+name = "sagebrush-oracle"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Sagebrush's engine checked and timed against FLINT (LGPL-3.0-or-later, used only as a reference): tests and benchmarks, never a dependency of what ships"
+
+[dependencies]
+sagebrush-bigint = { path = "../bigint" }
+sagebrush-arith = { path = "../arith" }
+sagebrush-modsym = { path = "../modsym" }
+sagebrush-poly = { path = "../poly" }
+sagebrush-flint = { path = "../flint" }
+rayon = "1.10"
+serde_json = "1"
