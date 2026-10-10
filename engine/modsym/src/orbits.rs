@@ -35,8 +35,30 @@ use num_traits::ToPrimitive;
 pub type Factorer<'a> = &'a (dyn Fn(&[BigInt]) -> Vec<(Vec<BigInt>, u32)> + Sync);
 
 /// Calls the factorer on monic f and checks its answer: the factors are
-/// irreducible and their product with multiplicities is f.
+/// irreducible and their product with multiplicities is f.  The factors
+/// are returned monic (their leading coefficients are +-1 since f is
+/// monic): later divisions assume it, and (3 - x)(-2 - x) = x^2 - x - 6
+/// gave a_2 = 788130959 at level 11 (the systematic review's R2-MOD-F3).
 pub(crate) fn checked_factor(factor: Factorer, f: &[BigInt]) -> Result<Vec<(Vec<BigInt>, u32)>, String> {
+    let mut fs = checked_factor_signed(factor, f)?;
+    let one = BigInt::from(1);
+    for (g, _) in fs.iter_mut() {
+        let lead = g.last().unwrap().clone();
+        if lead == -one.clone() {
+            for c in g.iter_mut() {
+                *c = -c.clone();
+            }
+        } else if lead != one {
+            return Err("the factor callback returned a factor that is not monic up to sign".into());
+        }
+    }
+    Ok(fs)
+}
+
+fn checked_factor_signed(factor: Factorer, f: &[BigInt]) -> Result<Vec<(Vec<BigInt>, u32)>, String> {
+    if f.last().map_or(true, |c| *c != BigInt::from(1)) {
+        return Err("checked_factor: the polynomial is not monic".into());
+    }
     let fs = factor(f);
     let mut prod = vec![BigInt::from(1)];
     for (g, e) in &fs {
