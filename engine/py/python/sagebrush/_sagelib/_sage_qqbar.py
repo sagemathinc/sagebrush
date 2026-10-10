@@ -130,6 +130,26 @@ def _civ_rational(q):
 
 # ------------------------------------------------------------------ printing
 
+def _floor_log10(q):
+    """floor(log10 q) for a positive rational, exactly (a float logarithm
+    fails at 10^-400 and overflows at 10^400: the systematic review's ROOT-F4)."""
+    q = _F(q)
+    e = len(str(q.numerator)) - len(str(q.denominator))
+    while _F(10) ** e > q:
+        e -= 1
+    while _F(10) ** (e + 1) <= q:
+        e += 1
+    return e
+
+
+def _ilog(n):
+    """The natural logarithm of a positive integer of any size."""
+    b = n.bit_length()
+    if b <= 1000:
+        return math.log(n)
+    return math.log(n >> (b - 64)) + (b - 64) * math.log(2)
+
+
 def _str_interval(lo, hi, bits=53):
     """An interval printed as Sage's RealIntervalField(bits) prints it: the
     most digits (at most ceil(bits log10 2) + 1, 17 for 53 bits) such that,
@@ -143,19 +163,15 @@ def _str_interval(lo, hi, bits=53):
     if lo < 0 < hi or (lo == 0) != (hi == 0):
         # contains 0: 0.?e<k> with the least k such that [-10^k, 10^k] covers it
         a = max(-lo, hi)
-        k = math.floor(math.log10(a)) if a else 0
+        k = _floor_log10(a)
         while math.floor(lo / _F(10) ** k) < -1 or math.ceil(hi / _F(10) ** k) > 1:
             k += 1
-        while k > -400 and math.floor(lo / _F(10) ** (k - 1)) >= -1 and math.ceil(hi / _F(10) ** (k - 1)) <= 1:
+        while math.floor(lo / _F(10) ** (k - 1)) >= -1 and math.ceil(hi / _F(10) ** (k - 1)) <= 1:
             k -= 1
         return "0.?e%d" % k
     neg = hi < 0
     a1, a2 = (-hi, -lo) if neg else (lo, hi)
-    E = math.floor(math.log10(a2))
-    if _F(10) ** E > a2:
-        E -= 1
-    elif _F(10) ** (E + 1) <= a2:
-        E += 1
+    E = _floor_log10(a2)
     best = None
     for d in range(1, cap + 1):
         k = E - d + 1
@@ -706,6 +722,29 @@ class AlgebraicNumber:
         bits = int((digits + 10) * 3.33)
         return _cpow_eval(self._c, z, bits)
 
+    def _ball(self, digits):
+        """(re, im, err): c(z) evaluated exactly at an approximation z of the
+        generator good to 10^-digits max(1, |z|) (complex_roots gives that
+        many significant digits), and err >= |c(z*) - c(z)| for the true
+        root z*: sum k |c_k| delta (|z| + delta)^(k-1).  Decisions read from
+        a ball are certified; a fixed number of digits is not (10^50 sqrt(2)
+        - isqrt(2 10^100) compared not < 1: the systematic review's ROOT-F2)."""
+        if self._gen is None:
+            return (self._q(), _F(0), _F(0))
+        z = self._gen._approx(digits)
+        zr, zi = _F(z[0]), _F(z[1])
+        re, im = _F(0), _F(0)
+        for c in reversed(self._c):
+            re, im = re * zr - im * zi + c, re * zi + im * zr
+        m = abs(zr) + abs(zi)
+        delta = max(_F(1), m) / _F(10) ** digits
+        r = m + delta
+        err, rk = _F(0), _F(1)
+        for k in range(1, len(self._c)):
+            err += k * abs(self._c[k]) * delta * rk
+            rk *= r
+        return (re, im, err)
+
     def _complex(self):
         re, im = self._approx(20)
         return complex(float(re), float(im))
@@ -860,9 +899,9 @@ class AlgebraicNumber:
     def __hash__(self):
         if self._gen is None:
             return hash(self._q())
-        f = self._minpoly_coeffs()
-        z = self._approx(30)
-        return hash((tuple(f), round(float(z[0]), 6), round(float(z[1]), 6)))
+        # the minimal polynomial alone: equal numbers hash equal (rounded
+        # approximations need not, and overflow at 10^400); conjugates collide
+        return hash(tuple(self._minpoly_coeffs()))
 
     def _cmp(self, o):
         """-1, 0, 1: by real part, then imaginary part (as Sage orders QQbar)."""
@@ -871,23 +910,22 @@ class AlgebraicNumber:
             raise TypeError("cannot compare")
         if self == o:
             return 0
-        for digits in (20, 50, 120, 300, 800):
-            a, b = self._approx(digits), o._approx(digits)
-            eps = _F(1, 10 ** (digits - 5))
-            for i in (0, 1):
-                if abs(a[i] - b[i]) > eps:
-                    return 1 if a[i] > b[i] else -1
-                if self._is_real() and o._is_real():
-                    break
-            if digits >= 120:
-                # equal real parts: decide them exactly
-                if (self.real() == o.real()):
-                    if self.imag() == o.imag():
-                        return 0
-                    for d2 in (50, 200, 800):
-                        x, y = self._approx(d2)[1], o._approx(d2)[1]
-                        if abs(x - y) > _F(1, 10 ** (d2 - 5)):
-                            return 1 if x > y else -1
+        # self != o exactly, so certified balls separate a differing part
+        # eventually; equal real parts are recognised exactly
+        both_real = self._is_real() and o._is_real()
+        same_re = None
+        digits = 30
+        while digits <= 40000:
+            a, b = self._ball(digits), o._ball(digits)
+            e = a[2] + b[2]
+            if abs(a[0] - b[0]) > e:
+                return 1 if a[0] > b[0] else -1
+            if not both_real and digits >= 120:
+                if same_re is None:
+                    same_re = self.real() == o.real()
+                if same_re and abs(a[1] - b[1]) > e:
+                    return 1 if a[1] > b[1] else -1
+            digits *= 2
         raise ArithmeticError("comparison did not converge")
 
     def __lt__(self, o): return self._cmp(o) < 0
@@ -928,10 +966,34 @@ class AlgebraicNumber:
             # and 10 more digits (the real part of a 60-digit approximation
             # was returned: QQbar(I).n(prec=100) was 0, the systematic
             # review's ROOT-F2)
+            # each nonzero part to p significant bits, from a certified ball
+            # (a fixed number of digits lost them after scaling or
+            # cancellation: (sqrt(2)/10^100).n(prec=100) was 0, the
+            # systematic review's ROOT-F3); a part is 0 only exactly
             import _sage_real
             p = _sage_real.digits_to_prec(digits) if digits is not None else int(prec)
-            re, im = self._approx(int(p * 0.30103) + 10)
-            if self._is_real() or im == 0:
+            real = self._is_real()
+            d0 = d = int(p * 0.30103) + 10
+            zero = [None, True if real else None]
+            while True:
+                re, im, err = self._ball(d)
+                ok = True
+                for i, v in ((0, re), (1, im)):
+                    if zero[i] or err * 2 ** (p + 2) <= abs(v):
+                        continue
+                    if d >= 4 * d0 and zero[i] is None:
+                        zero[i] = (self.real() if i == 0 else self.imag()) == 0
+                        if zero[i]:
+                            continue
+                    ok = False
+                if ok:
+                    break
+                if d > 200000:
+                    raise ArithmeticError("n(): the approximation did not converge")
+                d *= 2
+            if zero[0]:
+                re = _F(0)
+            if real or zero[1]:
                 return sa.RealField(p)(re)
             return sa.ComplexField(p)(re, im)
         if self._is_real():
@@ -1128,7 +1190,11 @@ class AlgebraicNumber:
         return True
 
     def __round__(self, n=None):
-        return round(float(self), n) if n is not None else _sa().Integer(round(float(self)))
+        if n is not None:
+            return round(float(self), n)
+        # the nearest integer, halves away from 0 (as Sage), exactly
+        h = AlgebraicReal(None, [_F(1, 2)], None)
+        return (self + h).floor() if self >= 0 else -((-self + h).floor())
 
     def floor(self):
         """The greatest integer at most self (real).
@@ -1138,8 +1204,15 @@ class AlgebraicNumber:
             sage: AA(2).sqrt().floor(), (-AA(2).sqrt()).floor()
             (1, -2)
         """
-        x = float(self)
-        f = math.floor(x)
+        # from a certified ball (a float start overflowed at 10^400 and
+        # stepped 10^34 times at 10^50), corrected exactly
+        d = 20
+        while True:
+            re, _, err = self._ball(d)
+            if err < _F(1, 2):
+                break
+            d *= 2
+        f = math.floor(re)
         while AlgebraicReal(None, [f + 1], None) <= self:
             f += 1
         while AlgebraicReal(None, [f], None) > self:
@@ -1297,7 +1370,7 @@ def _log_arg(z):
     if s == 0:
         return (-math.inf, 0.0)
     a, b = float(re / s), float(im / s)
-    ls = math.log(s.numerator) - math.log(s.denominator)
+    ls = _ilog(s.numerator) - _ilog(s.denominator)
     return (ls + 0.5 * math.log(a * a + b * b), math.atan2(b, a))
 
 
