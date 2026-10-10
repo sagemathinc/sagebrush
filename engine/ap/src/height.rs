@@ -294,6 +294,7 @@ fn lattice(a: &[BigInt], roots: &[(BigInt, u64)], wp: u64, goal: i64) -> Result<
 /// components of E(R) (2 if Delta > 0), for the model a (Sage's
 /// real_period of the minimal model).
 pub fn real_period(a: &[BigInt], roots: &[(BigInt, u64)], prec: u64) -> R {
+    let prec = prec.min(sagebrush_ball::PREC_MAX); // (BALL-F10: guard bits must not overflow)
     let wp = prec + 64;
     let l = lattice(a, roots, wp, prec as i64 + 32)?;
     let om = if l.disc.is_positive() { l.w1.mul_2exp(1) } else { l.w1 };
@@ -306,6 +307,7 @@ pub fn real_period(a: &[BigInt], roots: &[(BigInt, u64)], prec: u64) -> R {
 /// of f (num 2^-k: three if Delta > 0, the real one if Delta < 0).
 #[allow(clippy::too_many_arguments)]
 pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &[(BigInt, BigInt, BigInt)], d: &BigInt, roots: &[(BigInt, u64)], prec: u64) -> R {
+    let prec = prec.min(sagebrush_ball::PREC_MAX); // (BALL-F10: guard bits must not overflow)
     if a.len() != 5 || xd.is_zero() || d.is_zero() {
         return Err("canonical_height: bad arguments".into());
     }
@@ -389,6 +391,7 @@ pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &
 
 /// log(num/den) on balls (num, den > 0), for the bounds that use the heights.
 pub fn log_rational(num: &BigInt, den: &BigInt, prec: u64) -> R {
+    let prec = prec.min(sagebrush_ball::PREC_MAX); // (BALL-F10: guard bits must not overflow)
     if !num.is_positive() || !den.is_positive() {
         return Err("log of a nonpositive number".into());
     }

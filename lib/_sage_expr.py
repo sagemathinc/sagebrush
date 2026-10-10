@@ -2909,6 +2909,13 @@ def _keep_conditions(name):
         l, r = Expression.lhs(self), Expression.rhs(self)
         conds = list(object.__getattribute__(self, "_conds"))
         params = list(object.__getattribute__(self, "_params"))
+        if args and not isinstance(args[0], Expression):
+            # (a polynomial or another coercible operand: its symbolic form,
+            # so that its names are reserved too: CSOL-F7)
+            try:
+                args = (_expr(args[0]),) + tuple(args[1:])
+            except Exception:
+                pass
         if args and isinstance(args[0], Expression) and not args[0].is_relational() and params:
             # a scalar operand's free names are not the family's parameters
             # (s + n1 bound the free n1: CSOL-F7): rename the family's apart

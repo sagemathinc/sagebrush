@@ -57,6 +57,7 @@ pub fn low_rank(an: &[i64], n: u64, prec: u64) -> Option<LowRank> {
 /// (w, L(E,1)) if the root number w = 1 is decided, (w, L'(E,1)) if w = -1,
 /// each enclosed (the ball may contain 0); None if w is not decided.
 pub fn l_value(an: &[i64], n: u64, prec: u64) -> Option<(i32, Ball)> {
+    let prec = prec.min(sagebrush_ball::PREC_MAX);
     if an.len() < 2 || n == 0 {
         return None;
     }
