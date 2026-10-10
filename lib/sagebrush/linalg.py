@@ -104,6 +104,9 @@ def solve(a, b):
     """X with a X = b, for a square nonsingular (b a matrix: list of rows);
     raises ZeroDivisionError if a is singular."""
     a, b = _check(a), _check(b)
+    if any(len(r) != len(a) for r in a):
+        # a rectangular a was silently cut down to a square one (audit F5)
+        raise ValueError("a must be a square matrix")
     if len(a) != len(b):
         raise ValueError("number of rows of a and b differ")
     # scale row i of [a | b] by one integer
