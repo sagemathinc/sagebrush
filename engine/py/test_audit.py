@@ -370,3 +370,10 @@ assert _v.norm()(_E1((-2, 0))) == 2
 _Sa = AlphabeticStrings()
 raises(ValueError, _Sa, [26]); raises(ValueError, SubstitutionCryptosystem(_Sa), _Sa("A" * 26)); raises(ValueError, TranspositionCryptosystem, _Sa, -1)
 print("extended ok")
+
+# Systematic review, documents and I/O (DOC-F4, F8..F12)
+import numpy as _np2, os as _os, tempfile as _tf
+_d = _tf.mkdtemp(); _p = _os.path.join(_d, "a.txt")
+_np2.savetxt(_p, _np2.array([[1, 2], [3, 4]]), fmt="%d", header="units\n99 100", footer="end\n777 888")
+assert _np2.loadtxt(_p).shape == (2, 2)
+print("io ok")

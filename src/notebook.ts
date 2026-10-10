@@ -19,7 +19,7 @@ import { spawn } from "child_process";
 // web/dist when running from a checkout
 // (every script the page loads: web/test-cli-assets.mjs checks the list
 // against the page)
-const ASSETS = ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "THIRD-PARTY-NOTICES.txt"];
+const ASSETS = ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"];
 function asset(name: string): Buffer | null {
   const embedded = (globalThis as any).__SAGEBRUSH_WEB__;
   if (embedded) return embedded[name] !== undefined ? Buffer.from(embedded[name], "base64") : null;
@@ -159,7 +159,10 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
         if (!p) { res.writeHead(400).end("bad path"); return; }
         if (method === "GET") {
           if (!existsSync(p)) { res.writeHead(404).end("no such file"); return; }
-          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(readFileSync(p));
+          if (!statSync(p).isFile()) { res.writeHead(400).end("not a file"); return; }
+          // read before the headers: a read error still gets a response
+          const data = readFileSync(p);
+          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(data);
         } else if (method === "PUT") {
           const data = await body(req);
           mkdirSync(dirname(p), { recursive: true });

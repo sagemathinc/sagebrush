@@ -367,8 +367,33 @@ def plot(f, *args, **options):
     fn = _callable(f)
     xs, ys = adaptive_sample(fn, a, b, p.pop("plot_points", 200), p.pop("adaptive_tolerance", 0.01),
                              p.pop("adaptive_recursion", 5))
-    for k in ("randomize", "detect_poles", "exclude"):
-        p.pop(k, None)
+    p.pop("randomize", None)
+    exclude = p.pop("exclude", None)
+    if exclude is not None:
+        # break the curve at each excluded point
+        ex = sorted(float(e) for e in (exclude if isinstance(exclude, (list, tuple)) else [exclude]))
+        nx, ny = [], []
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            for e in ex:
+                if i and xs[i - 1] < e < x:
+                    nx.append(e)
+                    ny.append(None)
+            nx.append(x)
+            ny.append(None if x in ex else y)
+        xs, ys = nx, ny
+    if p.pop("detect_poles", False):
+        # a sign change with a jump of more than half the y range is taken
+        # as a vertical asymptote: no segment across it
+        fin = [y for y in ys if y is not None]
+        span = (max(fin) - min(fin)) if fin else 0
+        nx, ny = [], []
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            if i and y is not None and ny and ny[-1] is not None and (y > 0) != (ny[-1] > 0) and abs(y - ny[-1]) > span / 2:
+                nx.append((x + nx[-1]) / 2)
+                ny.append(None)
+            nx.append(x)
+            ny.append(y)
+        xs, ys = nx, ny
     fill = p.pop("fill", None)
     fillcolor = p.pop("fillcolor", None)
     fillalpha = p.pop("fillalpha", 0.5)

@@ -75,6 +75,38 @@ try {
   })()`);
   ok(raw.cls && raw.out === "" && raw.sel === "raw" && raw.type === "raw" && raw.rawMeta === "text/latex" && raw.tags === "parameters" && raw.code === "2 + 2", "raw cells stay raw and are not run; cell metadata survives an edit: " + JSON.stringify(raw));
 
+  // systematic review DOC-F1..F3: loaded outputs survive a save as they were,
+  // a failed save is retried, an unsaved local edit survives a remote change
+  const rev = await a.ev(`(async () => {
+    const nb = demo.nb, st = demo.store, doc = nb.snapshot();
+    const outs = [{ output_type: "execute_result", execution_count: 3, data: { "text/plain": "1/7", "application/json": { exact: "1/7" } }, metadata: { precision: "exact" } },
+                  { output_type: "error", ename: "ValueError", evalue: "undefined", traceback: ["ValueError: undefined"] }];
+    doc.cells = [{ id: "o1", code: "1/7", outputs: outs, n: 3 }, { id: "o2", code: "x = 1" }];
+    st.push(doc);
+    nb.setMeta({ name: "renamed" });
+    nb.flush();
+    await new Promise((r) => setTimeout(r, 50));
+    const kept = JSON.stringify(st.doc.cells[0].outputs) === JSON.stringify(outs);
+    const orig = st.save.bind(st);
+    let calls = 0;
+    st.save = (d) => (++calls === 1 ? Promise.reject(new Error("disk full")) : orig(d));
+    nb.setInput(nb.cells()[1], "x = 2");
+    nb.flush();
+    await new Promise((r) => setTimeout(r, 50));
+    nb.flush();
+    await new Promise((r) => setTimeout(r, 50));
+    st.save = orig;
+    const retried = calls === 2 && st.doc.cells[1].code === "x = 2";
+    nb.setInput(nb.cells()[1], "x = 9007199254740993");
+    const remote = structuredClone(st.doc);
+    remote.cells[0].code = "1/9";
+    st.push(remote);
+    await new Promise((r) => setTimeout(r, 900));
+    const merged = nb.cells()[0].ta.value === "1/9" && nb.cells()[1].ta.value === "x = 9007199254740993" && st.doc.cells[1].code === "x = 9007199254740993";
+    return { kept, retried, calls, merged };
+  })()`);
+  ok(rev.kept && rev.retried && rev.merged, "loaded outputs are saved as they were; a failed save is retried; an unsaved edit survives a remote change: " + JSON.stringify(rev));
+
   // ---- the full page, in two tabs: the same notebook stays in step
   await a.send("Page.navigate", { url: base });
   await a.until("window.sagebrush && document.querySelectorAll('.cell').length > 0 && document.querySelector('#status').textContent.startsWith('ready')");

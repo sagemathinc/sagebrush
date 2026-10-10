@@ -1046,7 +1046,7 @@ def adaptive_sample(f, a, b, plot_points=200, adaptive_tolerance=0.01, adaptive_
         x = (p[0] + q[0]) / 2
         y = ev(x)
         if y is None:
-            return []
+            return [(x, None)]  # undefined here (a pole): break the line
         if abs((p[1] + q[1]) / 2 - y) > tol:
             m = (x, y)
             return refine(p, m, level + 1) + [m] + refine(m, q, level + 1)
