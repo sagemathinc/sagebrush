@@ -490,12 +490,20 @@ const kernel = new WorkerKernel({
   onMessage: (m) => {
     if (m.fsChanged === undefined) return false;
     // in the app, a file Python wrote in its top folder goes to the notebook's folder
-    if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) TAURI.fs.writeFile(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data).catch((e) => console.warn(e));
+    if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data);
     fileChanged(m.fsChanged, m.data);
     return true;
   },
 });
 kernel.on("status", (text) => (statusEl.textContent = text));
+// Writes to the computer's files, in order for each file: they are
+// asynchronous, and the empty file Python creates must not land after what
+// it then writes (it did on Windows).
+const diskWrites = new Map();
+function writeDisk(path, data) {
+  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => TAURI.fs.writeFile(path, data)).catch((e) => console.warn(e));
+  diskWrites.set(path, next);
+}
 const nb = createNotebook($("#cells"), { kernel });
 nb.on("dirty", () => (savedEl.textContent = ""));
 nb.on("saved", (text) => (savedEl.textContent = text));
