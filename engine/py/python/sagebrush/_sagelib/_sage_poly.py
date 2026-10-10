@@ -963,7 +963,16 @@ class Polynomial:
             sage: R.<x> = QQ[]
             sage: (x^2 - 1).is_squarefree(), ((x - 1)^2).is_squarefree()
             (True, False)
+            sage: S.<y> = ZZ[]
+            sage: (4*y).is_squarefree(), S(4).is_squarefree(), (6*y).is_squarefree(), (4*x).is_squarefree()
+            (False, False, True, True)
         """
+        if self == 0:
+            return False
+        if self._ring._base is ZZ:
+            # over ZZ the content counts: 4x = 2^2 x is not squarefree (the
+            # second review's R2-POL-F3); over a field it is a unit
+            return all(e == 1 for _, e in self.factor())
         return all(e == 1 for _, e in self.factor() if isinstance(_, Polynomial))
 
     def roots(self, ring=None, multiplicities=True):

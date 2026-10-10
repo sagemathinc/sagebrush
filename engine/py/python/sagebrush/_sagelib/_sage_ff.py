@@ -1046,6 +1046,28 @@ def primitive_root(n, check=True):
 
 # ------------------------------------------------------------------ polynomials over F_p (ints)
 
+def _eval_str(x, name, gen, const):
+    """Evaluate a string in the generator `name`, with its integer literals
+    made constants of the target ring by `const` (exponents excepted): plain
+    eval returned Python ints and floats for '5' and '1/2' (the second
+    review's R2-POL-F4)."""
+    import io
+    import tokenize
+    toks = []
+    prev = None
+    for t in tokenize.generate_tokens(io.StringIO(x.replace("^", "**")).readline):
+        if t.type == tokenize.NUMBER and not (prev is not None and prev.string == "**"):
+            if not t.string.isdigit():
+                raise TypeError("unable to convert %r: %r is not an integer" % (x, t.string))
+            toks.extend([(tokenize.NAME, "__c"), (tokenize.OP, "("), (tokenize.NUMBER, t.string), (tokenize.OP, ")")])
+        else:
+            toks.append((t.type, t.string))
+        if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER):
+            prev = t
+    src = tokenize.untokenize(toks)
+    return eval(src, {name: gen, "__c": const, "__builtins__": {}})
+
+
 def _ptrim(a):
     while a and a[-1] == 0:
         a.pop()
@@ -1446,7 +1468,8 @@ class FiniteField_ext:
         if isinstance(x, Polynomial_ff) or (hasattr(x, "list") and hasattr(x, "degree") and not isinstance(x, str)):
             return self._reduce([int(GF(self._p)(c)) for c in x.list()])
         if isinstance(x, str):
-            return eval(x.replace("^", "**"), {self._name: self.gen(), "__builtins__": {}})
+            r = _eval_str(x, self._name, self.gen(), lambda n: self._make([n]))
+            return r if isinstance(r, FiniteFieldElement) and r._parent is self else self(r)
         raise TypeError("unable to convert %r to %r" % (x, self))
 
     def _reduce(self, coeffs):
@@ -2146,7 +2169,8 @@ class PolynomialRing_ff_:
         if isinstance(x, (list, tuple)):
             return Polynomial_ff(self, [B(c) for c in x])
         if isinstance(x, str):
-            return eval(x.replace("^", "**"), {self._name: self.gen(), "__builtins__": {}})
+            r = _eval_str(x, self._name, self.gen(), lambda n: Polynomial_ff(self, [B(n)]))
+            return r if isinstance(r, Polynomial_ff) and r._ring is self else self(r)
         if hasattr(x, "list") and hasattr(x, "degree") and not isinstance(x, (FiniteFieldElement, IntegerMod)):
             return Polynomial_ff(self, [B(c) for c in x.list()])
         return Polynomial_ff(self, [B(x)])
@@ -2650,6 +2674,11 @@ class Polynomial_ff:
             sage: R.<x> = GF(7)[]; (x^2 + 1).is_irreducible(), (x^2 - 1).is_irreducible()
             (True, False)
         """
+        B = self._ring._base
+        if not B.is_field():
+            # (2x + 2 = 2 (x + 1) over Z/4: the criterion is for fields, the
+            # second review's R2-POL-F7; factor() refuses these rings too)
+            raise NotImplementedError("irreducibility over %r, which is not a field" % B)
         n = self.degree()
         if n <= 0:
             return False
