@@ -462,10 +462,10 @@ assert _ecm._hermite_pow(10) >= 4096 / 3  # R2-EC-F6
 from sagebrush.sage import tanh, coth, cosh, sin, cos, diff
 _y = _xs
 assert str(limit(1 / sqrt(_y), x=0, dir="-")) == "Infinity" and str(limit(1 / sqrt(_y), x=0, dir="+")) == "+Infinity"  # R2-SYMCALC-F2
-_da = diff(abs(1 + _a * _y), _y)  # R2-SYMCALC-F3
+_pa = var("a"); _da = diff(abs(1 + _pa * _y), _y)  # R2-SYMCALC-F3
 assert _da.subs(a=I).subs(x=0) == 0 and _da.subs(a=1 + I).subs(x=0) == 1
 assert diff(SR("asech(x)"), _y).subs(x=-2) == I * sqrt(3) / 6  # R2-SYMCALC-F4
-assert limit((sin(SR(1))**2 + cos(SR(1))**2 - 1) / _y**2, x=0) == 0; raises(ValueError, limit, _a / _y, x=0, dir="+")  # R2-SYMCALC-F7
+assert limit((sin(SR(1))**2 + cos(SR(1))**2 - 1) / _y**2, x=0) == 0; raises(ValueError, limit, _pa / _y, x=0, dir="+")  # R2-SYMCALC-F7
 assert str(limit(tanh(_y + I * pi / 2), x=0, dir="+")) == "+Infinity" and str(limit(tanh(_y + I * pi / 2), x=0, dir="-")) == "-Infinity"  # R2-SYMCALC-F8
 assert str(limit(coth(_y), x=0, dir="+")) == "+Infinity" and cosh(I * pi / 2) == 0
 print("rereview2 ok")
