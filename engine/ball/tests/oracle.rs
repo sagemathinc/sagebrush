@@ -2,7 +2,7 @@
 //! every result must contain Arb's ball (rigor), and be within a few bits of
 //! the requested precision (tightness, so that certificates decide).
 
-use sagebrush_ball::{catalan, euler_gamma, ln2, pi, Ball, Mag};
+use sagebrush_ball::{catalan, euler_gamma, li2, ln2, pi, ti2, Ball, Mag};
 use sagebrush_bigint::BigInt;
 
 fn big(s: &str) -> BigInt {
@@ -36,6 +36,8 @@ fn contains_arb() {
             "ln2" => Some(ln2(prec)),
             "gamma" => Some(euler_gamma(prec)),
             "catalan" => Some(catalan(prec)),
+            "li2" => li2(&x, prec),
+            "ti2" => ti2(&x, prec),
             _ => panic!("{}", f),
         };
         let ours = ours.unwrap_or_else(|| panic!("{} returned None", line));
@@ -116,4 +118,23 @@ fn propagation_over_wide_balls() {
     }
     // log refuses a ball that is not certainly positive
     assert!(Ball::with_radius(BigInt::from(1), -10, Mag::pow2(-9)).log(64).is_none());
+}
+
+#[test]
+fn dilogarithm_boundaries() {
+    use std::cmp::Ordering;
+    let p = 120;
+    let pi2_6 = pi(p).sqr(p).div_i64(6, p);
+    // Li2(1) = pi^2/6, Ti2(1) = Catalan's G, Li2(1/2) = pi^2/12 - log(2)^2/2
+    assert!(li2(&Ball::one(), p).unwrap().overlaps(&pi2_6));
+    assert!(ti2(&Ball::one(), p).unwrap().overlaps(&catalan(p)));
+    let half = Ball::exact(BigInt::from(1), -1);
+    let want = pi(p).sqr(p).div_i64(12, p).sub(&ln2(p).sqr(p).mul_2exp(-1), p);
+    assert!(li2(&half, p).unwrap().overlaps(&want));
+    // a ball reaching 1 encloses Li2 up to pi^2/6; and Li2 refuses beyond 1
+    let near1 = Ball::with_radius(BigInt::from(1), 0, Mag::pow2(-20));
+    let l = li2(&near1, p).unwrap();
+    assert!(l.contains(&pi2_6) && l.contains(&li2(&Ball::exact(BigInt::from((1 << 20) - 1), -20), p).unwrap()));
+    assert!(li2(&Ball::exact(BigInt::from(3), -1), p).is_none());
+    assert_eq!(li2(&half, p).unwrap().cmp(&pi2_6), Some(Ordering::Less));
 }

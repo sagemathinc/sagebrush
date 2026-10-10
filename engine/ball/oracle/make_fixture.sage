@@ -42,3 +42,9 @@ for prec in PRECS + [2000]:
     out("ln2", prec, 0, 0, R(2).log())
     out("gamma", prec, 0, 0, R.euler_constant())
     out("catalan", prec, 0, 0, R.catalan_constant())
+C = ComplexBallField(4000)
+for prec in [53, 100, 256]:
+    for (m, e) in [(1, -1), (1, -2), (3, -2), (1, 0), (2**60 - 1, -60), (1, -40), (12345, -14), (99, -7), (7, -3), (1, -1000), (2**100 - 2**40, -100)]:
+        x = x_of(m, e)
+        out("li2", prec, m, e, C(x).polylog(2).real())
+        out("ti2", prec, m, e, C(0, x).polylog(2).imag())
