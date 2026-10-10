@@ -108,6 +108,25 @@ def _cyclotomic(m):
     return f
 
 
+
+def _qfrac(t):
+    """t as an exact Fraction (Sage's numerator() methods, or Python's
+    numerator attributes: plain ints failed, the systematic review's
+    EC-F4)."""
+    from fractions import Fraction
+    n = getattr(t, "numerator", None)
+    if callable(n):
+        return Fraction(int(n()), int(t.denominator()))
+    return Fraction(t)
+
+
+def _exact_int(x, what):
+    """x as an int, refusing a non-integer instead of truncating it."""
+    q = _qfrac(x)
+    if q.denominator != 1:
+        raise TypeError("%s must be an integer, not %s" % (what, x))
+    return int(q.numerator)
+
 class _Cyc:
     """An element of Q(zeta_m) in the power basis 1, zeta_m, ...,
     zeta_m^(phi(m)-1), printed as Sage prints it (zeta_m named 'zetam')."""
@@ -1574,9 +1593,12 @@ class EllipticCurve_rational_field:
         return self._local
 
     def _is_minimal(self):
+        # minimal: the discriminant is the minimal discriminant (up to sign);
+        # a model that is not the reduced representative can still be minimal
+        # ([1, 2, 3, 4, 5]: the systematic review's EC-F5)
         if getattr(self, "_minimal", None) is None:
             import _sage_ec as _ec
-            self._minimal = _ec.minimal_model(self._a) == self._a
+            self._minimal = abs(_ec._disc(_ec.minimal_model(self._a))) == abs(_ec._disc(self._a))
         return self._minimal
 
     def minimal_model(self):
@@ -1791,6 +1813,8 @@ class EllipticCurve_rational_field:
             raise NotImplementedError(
                 "analytic rank %d is only numerical: L^(k)(E,1) for k < %d are merely small "
                 "(use proof=False)" % (r, r))
+        if proof and _ec.certified_low_rank(ld) != r:
+            raise NotImplementedError("analytic rank %d: the error bounds do not decide it (use proof=False)" % r)
         if leading_coefficient:
             from sage_all import RR
             return r, RR(v)
@@ -1848,15 +1872,15 @@ class EllipticCurve_rational_field:
             return EllipticCurvePoint(self, None)
         if len(args) == 1:
             args = tuple(args[0])
-        from fractions import Fraction
-        def fr(t):
-            try:
-                return Fraction(int(t.numerator()), int(t.denominator()))
-            except AttributeError:
-                return Fraction(t)
+        fr = _qfrac
         if len(args) == 3:
             x, y, z = (fr(t) for t in args)
             if z == 0:
+                # (x : y : 0) is the identity only as (0 : y : 0), y != 0
+                # ((1 : 1 : 0) and (0 : 0 : 0) were accepted: the systematic
+                # review's EC-F3)
+                if x != 0 or y == 0:
+                    raise TypeError("coordinates %s do not define a point on %r" % ([x, y, z], self))
                 return EllipticCurvePoint(self, None)
             args = (x / z, y / z)
         x, y = (fr(t) for t in args)
@@ -1879,11 +1903,7 @@ class EllipticCurve_rational_field:
             [(1 : -1 : 1), (1 : 0 : 1)]
         """
         import _sage_ec as _ec
-        from fractions import Fraction
-        try:
-            xf = Fraction(int(x.numerator()), int(x.denominator()))
-        except AttributeError:
-            xf = Fraction(x)
+        xf = _qfrac(x)
         pts = [EllipticCurvePoint(self, P) for P in _ec.lift_x(self._a, xf)]
         if all:
             return pts
@@ -2103,7 +2123,19 @@ class EllipticCurve_rational_field:
         g = _ec.search_generator(m._a, aps, self._bad(), float(height_limit or 9.0))
         if g is None:
             raise NotImplementedError("no point of infinite order of naive height <= %s found; descent is needed" % (height_limit or 9.0))
-        P = g[0]
+        # saturated: the point of least height found may be a multiple of a
+        # generator outside the search (988b1: -2 P, a regulator 4 times
+        # too large; the systematic review's EC-F7)
+        bad = m._bad()
+        tors = [m._to_min(T) if not T.is_zero() else None for T in self.torsion_points()]
+        aps = _ap.aplist(m._a, 100000)
+        try:
+            gens, index, primes = _ec.saturated_generators(m._a, [g[0]], bad, aps, tors, max_prime)
+        except NotImplementedError as e:
+            if proof is not False:
+                raise NotImplementedError("%s; gens(proof=False) saturates at the primes up to 100 only" % e)
+            gens, index, primes = _ec.saturated_generators(m._a, [g[0]], bad, aps, tors, 100)
+        P = gens[0]
         if m is not self and m._a != self._a:
             P = m._move_to(P, self)
         return [EllipticCurvePoint(self, P)]
@@ -2186,7 +2218,7 @@ class EllipticCurve_rational_field:
         pts = [m._to_min(P if isinstance(P, EllipticCurvePoint) else self(P)) for P in points]
         aps = _ap.aplist(a, 100000)
         tors = [m._to_min(T) if not T.is_zero() else None for T in self.torsion_points()]
-        gens, index, primes = _ec.saturated_generators(a, pts, bad, aps, tors, None if max_prime == -1 else max_prime)
+        gens, index, primes = _ec.saturated_generators(a, pts, bad, aps, tors, None if max_prime == -1 else max_prime, odd_only=odd_primes_only)
         from sage_all import RR
         out = []
         for P in gens:
@@ -2252,9 +2284,26 @@ class EllipticCurve_rational_field:
 
     def _descent_assumes_grh(self):
         """Whether the rank upper bound of the general 2-descent rests on the
-        cubic field's class group (GRH)."""
+        cubic field's class group (GRH, or more: descent_assumptions)."""
         d = getattr(self, "_two_descent", None)
         return bool(d and d.get("grh"))
+
+    def descent_assumptions(self):
+        """What the last general 2-descent's rank bounds assume: [] (proven),
+        ['GRH'] for the cubic field's certified class group, and anything
+        more the class group needed (its uncertified stopping rule); a
+        sagebrush extension.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('37a1'); E.rank_bounds(); E.descent_assumptions()  # sagebrush only
+            (1, 1)
+            []
+        """
+        d = getattr(self, "_two_descent", None)
+        if not d or not d.get("grh"):
+            return []
+        return list(d.get("assumes", ["GRH"]))
 
     def two_descent_by_two_isogeny(self, search_bound=60):
         """Descent via 2-isogeny (needs a rational 2-torsion point): (lower, upper)
@@ -2392,7 +2441,12 @@ class EllipticCurve_rational_field:
             sage: [E.ap(p) for p in [2, 3, 5, 7, 11, 13]]
             [-2, -1, 1, -2, 1, 4]
         """
-        p = int(p)
+        p = _exact_int(p, "p")
+        # (from a minimal model: a model's own bad primes need not be the
+        # curve's; 0 at 2 for a model of 37a1 scaled by 2: the systematic
+        # review's EC-F2)
+        if not self._is_minimal():
+            return self.minimal_model().ap(p)
         r = _ap.ap(self._a, p)
         return self._ap_bad(p) if r is None else r
 
@@ -2404,7 +2458,9 @@ class EllipticCurve_rational_field:
             sage: EllipticCurve('11a1').aplist(30)
             [-2, -1, 1, -2, 1, 4, -2, 0, -1, 0]
         """
-        n = int(n)
+        n = _exact_int(n, "n")
+        if not self._is_minimal():
+            return self.minimal_model().aplist(n, python_ints)
         if n <= 2:
             return []
         return [self._ap_bad(p) if a is None else a for p, a in _ap.aplist(self._a, n - 1)]
@@ -2417,7 +2473,9 @@ class EllipticCurve_rational_field:
             sage: EllipticCurve('11a1').anlist(12)
             [0, 1, -2, -1, 2, 1, 2, -2, 0, -2, -2, 1, -2]
         """
-        n = int(n)
+        n = _exact_int(n, "n")
+        if not self._is_minimal():
+            return self.minimal_model().anlist(n)
         a = [0] * (n + 1)
         if n >= 1:
             a[1] = 1
@@ -2711,6 +2769,8 @@ class EllipticCurvePoint:
 
     def __add__(self, other):
         import _sage_ec as _ec
+        if not isinstance(other, EllipticCurvePoint) or other._E._a != self._E._a:
+            raise TypeError("points on different curves cannot be added")
         return self._new(_ec.add(self._E._a, self._P, other._P))
 
     def __neg__(self):
@@ -2722,7 +2782,7 @@ class EllipticCurvePoint:
 
     def __mul__(self, n):
         import _sage_ec as _ec
-        return self._new(_ec.mul(self._E._a, int(n), self._P))
+        return self._new(_ec.mul(self._E._a, _exact_int(n, "a multiplier"), self._P))
 
     __rmul__ = __mul__
 
@@ -2854,7 +2914,9 @@ def EllipticCurve(x, y=None):
         if lab not in by_label:
             raise ValueError("unknown Cremona label %r (sagebrush knows conductors < 1000)" % x)
         return EllipticCurve_rational_field(by_label[lab][0], lab)
-    a = [int(t) for t in x]
+    # integral models only: a coefficient 1/2 became 0 (the systematic
+    # review's EC-F1)
+    a = [_exact_int(t, "a coefficient (rational coefficients are not supported yet)") for t in x]
     if len(a) == 2:
         a = [0, 0, 0, a[0], a[1]]
     if len(a) != 5:

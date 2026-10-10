@@ -545,6 +545,57 @@ def root_number(ld):
     return 1 if w > 0 else -1
 
 
+def _f_bound(ld, t):
+    """(f(t), err): f(t) = sum a_n/n e^(-q n), q = 2 pi t / sqrt(N), and a
+    bound on its error: the tail beyond the stored a_n (|a_n| <= d(n) sqrt(n)
+    <= 2 n, so at most 2 sum e^(-q n)), the rounding of the sum, and an
+    allowance for exp."""
+    q = 2 * _m.pi * t / _m.sqrt(ld.N)
+    M = len(ld.an) - 1
+    s = sabs = 0.0
+    for n in range(1, M + 1):
+        a = ld.an[n]
+        if a:
+            term = a / n * _m.exp(-q * n)
+            s += term
+            sabs += abs(term)
+    tail = 2 * _m.exp(-q * (M + 1)) / (1 - _m.exp(-q))
+    return s, tail * 1.01 + ((M + 10) * 2.3e-16 + 1e-13) * sabs + 1e-300
+
+
+def certified_low_rank(ld):
+    """The analytic rank if it is 0 or 1, decided with error bounds (None
+    otherwise, or if the bounds do not decide).  The root number w = +-1
+    satisfies f(1) - f(t) = w (f(1/t) - f(1)): of A - B and A + B one is 0,
+    so the other exceeding the errors decides w.  Rank 0: w = 1 and |L(E,1)|
+    = |2 f(1)| beyond its error; rank 1: w = -1 and |L'(E,1)| beyond its
+    error (E_1 allowed 1e-12 relatively).  (The floating root number and the
+    threshold 1e-6 were taken as proofs: the systematic review's EC-F8.)"""
+    t = 1.2
+    f1, e1 = _f_bound(ld, 1.0)
+    ft, et = _f_bound(ld, t)
+    fi, ei = _f_bound(ld, 1 / t)
+    A, B = f1 - ft, fi - f1
+    E = 2 * e1 + et + ei + 1e-15 * (abs(A) + abs(B))
+    plus, minus = abs(A + B) > E, abs(A - B) > E
+    if plus == minus:
+        return None
+    if plus:  # w = +1
+        return 0 if abs(2 * f1) > 2 * e1 else None
+    q = 2 * _m.pi / _m.sqrt(ld.N)
+    M = len(ld.an) - 1
+    s = sabs = 0.0
+    for n in range(1, M + 1):
+        a = ld.an[n]
+        if a:
+            term = a / n * _e1(q * n)
+            s += term
+            sabs += abs(term)
+    tail = 2 * _m.exp(-q * (M + 1)) / ((1 - _m.exp(-q)) * q * (M + 1))
+    err = 2 * (tail * 1.01 + ((M + 10) * 2.3e-16 + 1e-12) * sabs) + 1e-300
+    return 1 if abs(2 * s) > err else None
+
+
 def L1(ld, w):
     return (1 + w) * ld.f(1.0)
 
@@ -1210,18 +1261,57 @@ def quartic_locally_soluble(g, p, budget=200000):
 
 
 def quartic_real_soluble(g):
-    """Is g(x) > 0 for some real x (or a root), for a quartic g?"""
-    if g[4] > 0 or g[0] > 0:
+    """Is g(x) >= 0 for some real x, for a quartic g (constant term first)?
+    Exactly: yes if the leading or constant coefficient is positive, or the
+    degree is odd; otherwise g tends to -infinity both ways, and it is >= 0
+    somewhere exactly when it has a real root (a Sturm count over Q; a
+    double-precision check said yes for -(x^2 - 10^8)^2 - 1: the systematic
+    review's EC-F9)."""
+    from fractions import Fraction as Fr
+    c = [Fr(x) for x in g]
+    while len(c) > 1 and c[-1] == 0:
+        c.pop()
+    if len(c) == 1:
+        return c[0] >= 0
+    if c[-1] > 0 or c[0] > 0 or (len(c) - 1) % 2 == 1:
         return True
-    # sample generously between the real critical points
-    import cmath
-    pts = []
-    # derivative is a cubic: use its real roots
-    d = _poly_deriv(g)
-    for z in _cubic_roots(float(d[3]), float(d[2]), float(d[1]), float(d[0])) if d[3] else []:
-        if abs(z.imag) < 1e-9 * (1 + abs(z)):
-            pts.append(z.real)
-    return any(_poly_eval([float(c) for c in g], t) >= 0 for t in pts)
+    return _sturm_real_roots(c) > 0
+
+
+def _sturm_real_roots(c):
+    """The number of distinct real roots of the polynomial c (Fractions,
+    constant term first, nonzero)."""
+    def deriv(p):
+        return [i * p[i] for i in range(1, len(p))]
+
+    def rem(a, b):
+        a = list(a)
+        while len(a) >= len(b) and any(a):
+            if a[-1] == 0:
+                a.pop()
+                continue
+            q = a[-1] / b[-1]
+            k = len(a) - len(b)
+            for i in range(len(b)):
+                a[i + k] -= q * b[i]
+            a.pop()
+        while a and a[-1] == 0:
+            a.pop()
+        return a
+    seq = [c, deriv(c)]
+    while seq[-1] and len(seq[-1]) > 1:
+        r = rem(seq[-2], seq[-1])
+        if not r:
+            break
+        seq.append([-x for x in r])
+
+    def changes(signs):
+        signs = [s for s in signs if s != 0]
+        return sum(1 for u, v in zip(signs, signs[1:]) if u != v)
+    # signs at -infinity and +infinity: from the leading coefficients
+    at_pinf = [(p[-1] > 0) - (p[-1] < 0) for p in seq if p]
+    at_minf = [((p[-1] > 0) - (p[-1] < 0)) * (1 if (len(p) - 1) % 2 == 0 else -1) for p in seq if p]
+    return changes(at_minf) - changes(at_pinf)
 
 
 def _squarefree_divisors(n, primes):
@@ -1521,8 +1611,9 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10, algor
     out = dict(selmer=s, rank_bounds=(lower, upper), points=gens, closed=closed,
                undecided=undecided, quartics=len(qs), work=res["work"], cost=res["cost"],
                algorithm="quartic", grh=False)
-    if algorithm == "quartic":
-        return out
+    # (also when the quartic algorithm was asked for: its classes come from
+    # floating point, and it returned Selmer order 2 for 9709b3, whose rank
+    # is 2, with closed=True: the systematic review's EC-F9)
     # Cross-check with the cubic field.  The points from the quartics are
     # checked on E, but the search region and the classes come from floating
     # point (covariants, the resolvent's roots), which lose their digits when
@@ -1531,14 +1622,16 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10, algor
     # is exact assuming GRH (its class group), and decides when they differ.
     try:
         import _sage_ec_cubic as cd
-        sc = cd.selmer(a)["dim"]
+        sel_c = cd.selmer(a)
+        sc = sel_c["dim"]
     except (ArithmeticError, NotImplementedError, ValueError, RuntimeError):
         return out
     sq = (s - 1).bit_length() if closed and s & (s - 1) == 0 else None
     if sq != sc:
         bad = [p for p, _ in _factor_int(D)]
         pts = independent_points(a, list(gens) + point_search_engine(a, 10.0, limit=20000), bad, sc)
-        out.update(selmer=2 ** sc, rank_bounds=(max(lower, len(pts)), sc), points=pts, grh=True, quartic_selmer=s)
+        out.update(selmer=2 ** sc, rank_bounds=(max(lower, len(pts)), sc), points=pts, grh=True, quartic_selmer=s,
+                   assumes=sel_c.get("assumes", ["GRH"]), certified=sel_c.get("certified", False))
     return out
 
 
@@ -1588,7 +1681,8 @@ def two_descent_cubic(a, heights=(8.0, 10.0, 12.0)):
     is at most its dimension), and independent points from searches on E
     up to the given naive heights, until there are as many."""
     import _sage_ec_cubic as cd
-    s = cd.selmer(a)["dim"]
+    sel = cd.selmer(a)
+    s = sel["dim"]
     bad = [p for p, _ in _factor_int(_disc(a))]
     pts = []
     for H in heights:
@@ -1596,7 +1690,8 @@ def two_descent_cubic(a, heights=(8.0, 10.0, 12.0)):
             break
         pts = independent_points(a, point_search_engine(a, H, limit=20000), bad, s)
     return dict(selmer=2 ** s, rank_bounds=(len(pts), s), points=pts, closed=True,
-                undecided=0, quartics=None, work=None, cost=None, algorithm="cubic", grh=True)
+                undecided=0, quartics=None, work=None, cost=None, algorithm="cubic", grh=True,
+                assumes=sel.get("assumes", ["GRH"]), certified=sel.get("certified", False))
 
 
 # ------------------------------------------------------------------ saturation
@@ -2000,10 +2095,26 @@ def _real_roots_in(c, lo, hi):
     return out
 
 
+def _horner_iv(c, u, v):
+    """An enclosure [lo, hi] of c[0] + c[1] z + ... over z in [u, v]
+    (Fractions, exact interval arithmetic)."""
+    lo = hi = _F(0)
+    for ci in reversed(c):
+        ps = (lo * u, lo * v, hi * u, hi * v)
+        lo, hi = min(ps) + ci, max(ps) + ci
+    return lo, hi
+
+
 def _cps_eps_inf(a):
-    """A lower bound for eps_infinity: the minimum over x(E(R)) of
+    """A certified lower bound for eps_infinity: the minimum over x(E(R)) of
     max(|F(X,Z)|, |G(X,Z)|) / max(|X|, |Z|)^4, with F = 4X^3 Z + ... and
-    G = X^4 - b4 X^2 Z^2 - ... the denominator and numerator of x(2P)."""
+    G = X^4 - b4 X^2 Z^2 - ... the denominator and numerator of x(2P).
+    Branch and bound over z in [-1, 1] (x = z, and x = 1/z) with exact
+    interval evaluation: pieces where F < 0 hold no real point; each other
+    piece's lower bound is certified, and the least over the final pieces
+    bounds the minimum.  (Sampling near critical points bounded it from
+    above: 8.9 for a curve with a 2-torsion point of naive height 13.05,
+    where the infimum is at most 1/r^4: the systematic review's EC-F10.)"""
     b2, b4, b6, b8 = _b(a)
     f = [b6, 2 * b4, b2, 4]                    # F(x, 1)
     g = [-b8, -2 * b6, -b4, 0, 1]              # G(x, 1)
@@ -2011,30 +2122,41 @@ def _cps_eps_inf(a):
     gt = [1, 0, -b4, -2 * b6, -b8]             # G(1, t)
     best = None
     for P, Q in ((f, g), (ft, gt)):
-        # z in [-1, 1] with P(z) >= 0 (x = z, resp. x = 1/z, on E(R)): the
-        # minimum of max(|P|, |Q|) is at an end, a critical point of P or Q,
-        # or where |P| = |Q|
-        n = max(len(P), len(Q))
-        P2 = P + [0] * (n - len(P))
-        Q2 = Q + [0] * (n - len(Q))
-        fl = lambda c: [float(x) for x in c]
-        cands = [-1.0, 1.0]
-        for c in (P, Q, [i * P[i] for i in range(1, len(P))], [i * Q[i] for i in range(1, len(Q))],
-                  [p - q for p, q in zip(P2, Q2)], [p + q for p, q in zip(P2, Q2)]):
-            cands += _real_roots_in(fl(c), -1.0, 1.0)
-        for z in cands:
-            for zz in (z, z * (1 + 1e-12) + 1e-12, z * (1 - 1e-12) - 1e-12):
-                if not -1 <= zz <= 1:
-                    continue
-                q = _F(zz)
-                pv = sum(ci * q ** i for i, ci in enumerate(P))
-                if pv < 0:
-                    # not on E(R) (a root of P is tried on both sides)
-                    continue
-                v = max(abs(pv), abs(sum(ci * q ** i for i, ci in enumerate(Q))))
-                if best is None or v < best:
-                    best = v
-    return float(best) * 0.999
+        P = [_F(c) for c in P]
+        Q = [_F(c) for c in Q]
+        def lower(u, v):
+            plo, phi = _horner_iv(P, u, v)
+            if phi < 0:
+                return None  # no point of E(R) here
+            qlo, qhi = _horner_iv(Q, u, v)
+            lp = _F(0) if plo <= 0 <= phi else min(abs(plo), abs(phi))
+            lq = _F(0) if qlo <= 0 <= qhi else min(abs(qlo), abs(qhi))
+            return max(lp, lq)
+        import heapq
+        heap = []
+        lb = lower(_F(-1), _F(1))
+        if lb is not None:
+            heap.append((lb, _F(-1), _F(1)))
+        steps = 0
+        # split the piece with the least bound, until it is small or the
+        # work is spent; the least bound left is the certified one
+        while heap and steps < 3000:
+            lb, u, v = heapq.heappop(heap)
+            if v - u < _F(1, 2 ** 40):
+                heapq.heappush(heap, (lb, u, v))
+                break
+            steps += 1
+            m = (u + v) / 2
+            for uu, vv in ((u, m), (m, v)):
+                l2 = lower(uu, vv)
+                if l2 is not None:
+                    heapq.heappush(heap, (max(l2, _F(0)), uu, vv))
+        if heap:
+            v = heap[0][0]
+            best = v if best is None else min(best, v)
+    if not best:
+        return 0.0
+    return float(best) * (1 - 1e-12)
 
 
 # sup over the rational components of the minimal model's Neron model of
@@ -2063,7 +2185,10 @@ def cps_bound(a):
     every P on the minimal model a (Sage's normalization of hhat; h(x) =
     log max(|num|, den)).  -1/3 log eps_inf, plus at each bad prime the
     largest local correction over the components with rational points."""
-    B = -_m.log(_cps_eps_inf(a)) / 3
+    eps = _cps_eps_inf(a)
+    if eps <= 0:
+        return _m.inf  # no certified positive lower bound: no CPS bound
+    B = -_m.log(eps) / 3
     for p, (kod, f, c) in local_data(a).items():
         B += _cps_alpha(kod, c) * _m.log(p)
     return B
@@ -2074,7 +2199,7 @@ def index_bound(a, pts, bad, T=None):
     E(Q)/tors (with the search radius T used), or None if the search needed
     is out of reach."""
     r = len(pts)
-    B1 = min(silverman_bound(a), cps_bound(a))
+    B1 = min(silverman_bound(a), cps_bound(a)) * (1 + 1e-9) + 1e-9
     if T is None:
         # every point of hhat < T - B1 has naive height < T: a search to
         # T = 10 is cheap, and a larger lam0 lowers the index bound
@@ -2089,8 +2214,8 @@ def index_bound(a, pts, bad, T=None):
         return None, T
     for P in found:
         if point_order(a, P) == 0:
-            lam = min(lam, canonical_height(a, P, bad))
-    R = regulator(a, pts, bad)
+            lam = min(lam, canonical_height(a, P, bad) * (1 - 1e-9))
+    R = regulator(a, pts, bad) * (1 + 1e-9)
     n = _m.sqrt(R * _HERMITE_POW.get(r, 2.0 ** r) / lam ** r)
     return n, T
 
@@ -2114,7 +2239,7 @@ def _torsion_generators(a, tors):
     return [T1, T2]
 
 
-def saturated_generators(a, pts, bad, aps, torsion=(), max_prime=None):
+def saturated_generators(a, pts, bad, aps, torsion=(), max_prime=None, odd_only=False):
     """(generators, index, primes): the points LLL-reduced and saturated at
     every prime up to the index bound (or max_prime, if given, which then
     proves nothing about larger primes)."""
@@ -2126,11 +2251,14 @@ def saturated_generators(a, pts, bad, aps, torsion=(), max_prime=None):
         n, T = index_bound(a, pts, bad)
         if n is None:
             raise NotImplementedError("no index bound: the search for points of naive height %.1f is too large" % T)
-        top = int(n)
+        # (the bound is a float: 1.99999999999997 for an index bound 2 took
+        # top = 1 and left 2 P unsaturated, the systematic review's EC-F13;
+        # a margin, then the integers up to it)
+        top = int(n * (1 + 1e-6) + 1e-6)
     else:
         top = int(max_prime)
     index = 1
-    primes = [p for p in range(2, top + 1) if all(p % q for q in range(2, int(p ** 0.5) + 1))]
+    primes = [p for p in range(2, top + 1) if all(p % q for q in range(2, int(p ** 0.5) + 1)) and not (odd_only and p == 2)]
     torsion = _torsion_generators(a, [T for T in torsion if T is not None])
     for p in primes:
         pts, k = p_saturate(a, pts, p, aps, torsion)

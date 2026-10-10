@@ -136,14 +136,17 @@ impl EllipticCurve {
 }
 
 pub fn isqrt(n: u64) -> u64 {
-    let mut r = (n as f64).sqrt() as u64;
+    // (squares in u128: near 2^64 the double's root squared overflowed u64,
+    // for 4p with p just below 2^62: the systematic review's EC-F6)
+    let mut r = (n as f64).sqrt() as u128;
+    let n = n as u128;
     while r * r > n {
         r -= 1;
     }
     while (r + 1) * (r + 1) <= n {
         r += 1;
     }
-    r
+    r as u64
 }
 
 /// The primes up to n (sieve of Eratosthenes on odd numbers).
