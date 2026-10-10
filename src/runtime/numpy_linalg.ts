@@ -63,6 +63,16 @@ function dot4(x: Float64Array, xo: number, y: Float64Array, yo: number, n: numbe
   return r;
 }
 
+// floor(log2 x) for finite x > 0, subnormals included, from the bits.
+const F64B = new Float64Array(1), U32B = new Uint32Array(F64B.buffer);
+function ilogb(x: number): number {
+  F64B[0] = x;
+  const hi = U32B[1], lo = U32B[0], ex = (hi >>> 20) & 0x7ff;
+  if (ex) return ex - 1023;
+  const mhi = hi & 0xfffff;
+  return -1075 + (mhi ? 64 - Math.clz32(mhi) : 32 - Math.clz32(lo));
+}
+
 // Euclidean norm of x[off + i*stride], i < n, scaled to avoid overflow (as dnrm2).
 function nrm2(x: Float64Array, off: number, n: number, stride: number): number {
   let big = 0;
@@ -71,13 +81,17 @@ function nrm2(x: Float64Array, off: number, n: number, stride: number): number {
     if (a > big) big = a;
   }
   if (big === 0 || !Number.isFinite(big)) return big;
+  // scaled by a power of two near 1/big (1/big overflows for a subnormal big:
+  // the systematic review's R2-NUM-F4), in two steps past 2^1023; the
+  // exponent from the bits, as kernels/src/eigen.rs (bit-identical)
+  const k = -ilogb(big);
+  const k1 = Math.trunc(k / 2), s1 = 2 ** k1, s2 = 2 ** (k - k1);
   let sum = 0;
-  const inv = 1 / big;
   for (let i = 0, p = off; i < n; i++, p += stride) {
-    const a = x[p] * inv;
+    const a = x[p] * s1 * s2;
     sum += a * a;
   }
-  return big * Math.sqrt(sum);
+  return (Math.sqrt(sum) / s1) / s2;
 }
 
 // ------------------------------------------------------------------ LU
@@ -165,8 +179,9 @@ function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64A
     // v = (x - alpha e_j) / (x_j - alpha): entries at most 1 in size, so
     // v.v neither underflows (x ~ 1e-200) nor overflows (x ~ 1e200); the
     // reflection I - beta v v^T is unchanged by the scaling
-    const d = cj[j] - alpha;
-    for (let i = j; i < m; i++) v[i] = cj[i] / d;
+    // (from x / |x|: x_j - alpha itself overflows near 1e308)
+    const d = cj[j] / norm - alpha / norm;
+    for (let i = j; i < m; i++) v[i] = cj[i] / norm / d;
     v[j] = 1;
     const vv = dot4(v, j, v, j, m - j);
     const beta = vv === 0 ? 0 : 2 / vv;
