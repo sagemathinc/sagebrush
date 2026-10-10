@@ -31,6 +31,27 @@ def _scalar_or(x):
     return x
 
 
+def _bsize(size, *params):
+    """The draw size for array parameters: one draw per element of their
+    broadcast shape when size is None; otherwise they must broadcast to size."""
+    shapes = [_np.shape(q) for q in params]
+    if size is None:
+        return _np.broadcast_shapes(*shapes) if any(shapes) else None
+    shape = tuple(_size(size))
+    if any(shapes) and _np.broadcast_shapes(shape, *shapes) != shape:
+        raise ValueError("shape mismatch: objects cannot be broadcast to a single shape")
+    return size
+
+
+def _poisson(g, lam, size):
+    _nonneg(lam, "lam")
+    size = _bsize(size, lam)
+    if not _np.shape(lam):
+        return _r.poisson(g, lam, _size(size))
+    lam = _np.broadcast_to(_np.asarray(lam, float), tuple(_size(size)))
+    return _np.array([_r.poisson(g, float(v), None) for v in lam.ravel().tolist()], dtype=_np.int64).reshape(lam.shape)
+
+
 class RandomState:
     def __init__(self, seed=None):
         self.seed(seed)
@@ -71,26 +92,25 @@ class RandomState:
 
     def normal(self, loc=0.0, scale=1.0, size=None):
         _nonneg(scale, "scale")
-        if size is None and (isinstance(loc, _np.ndarray) or isinstance(scale, _np.ndarray)):
-            size = _np.broadcast_shapes(_np.shape(loc), _np.shape(scale))
+        size = _bsize(size, loc, scale)
         z = _r.legacy_gauss(self._g, _size(size))
-        return loc + scale * z if _size(size) is not None or not isinstance(z, float) else float(loc + scale * z)
+        return _np.asarray(loc) + _np.asarray(scale) * z if _size(size) is not None or not isinstance(z, float) else float(loc + scale * z)
 
     def uniform(self, low=0.0, high=1.0, size=None):
-        if size is None and (isinstance(low, _np.ndarray) or isinstance(high, _np.ndarray)):
-            size = _np.broadcast_shapes(_np.shape(low), _np.shape(high))
+        size = _bsize(size, low, high)
         u = _r.doubles(self._g, _size(size))
-        return low + (high - low) * u
+        return _np.asarray(low) + (_np.asarray(high) - _np.asarray(low)) * u if size is not None else low + (high - low) * u
 
     def standard_exponential(self, size=None):
         return _r.legacy_exponential(self._g, _size(size))
 
     def exponential(self, scale=1.0, size=None):
         _nonneg(scale, "scale")
-        return scale * _r.legacy_exponential(self._g, _size(size))
+        size = _bsize(size, scale)
+        return (_np.asarray(scale) if size is not None else scale) * _r.legacy_exponential(self._g, _size(size))
 
     def poisson(self, lam=1.0, size=None):
-        return _r.poisson(self._g, lam, _size(size))
+        return _poisson(self._g, lam, size)
 
     def randint(self, low, high=None, size=None, dtype=int):
         if high is None:
@@ -243,15 +263,18 @@ class Generator:
         return _np.int64(r)
 
     def uniform(self, low=0.0, high=1.0, size=None):
+        size = _bsize(size, low, high)
         u = _r.doubles(self._g, _size(size))
-        return low + (high - low) * u
+        return _np.asarray(low) + (_np.asarray(high) - _np.asarray(low)) * u if size is not None else low + (high - low) * u
 
     def standard_normal(self, size=None, dtype=_np.float64, out=None):
         return _fill(_r.zig_normal(self._g, _size(_osize(size, out))), dtype, out)
 
     def normal(self, loc=0.0, scale=1.0, size=None):
         _nonneg(scale, "scale")
-        return loc + scale * _r.zig_normal(self._g, _size(size))
+        size = _bsize(size, loc, scale)
+        z = _r.zig_normal(self._g, _size(size))
+        return _np.asarray(loc) + _np.asarray(scale) * z if size is not None else loc + scale * z
 
     def standard_exponential(self, size=None, dtype=_np.float64, method="zig", out=None):
         if method != "zig":
@@ -260,10 +283,11 @@ class Generator:
 
     def exponential(self, scale=1.0, size=None):
         _nonneg(scale, "scale")
-        return scale * _r.zig_exponential(self._g, _size(size))
+        size = _bsize(size, scale)
+        return (_np.asarray(scale) if size is not None else scale) * _r.zig_exponential(self._g, _size(size))
 
     def poisson(self, lam=1.0, size=None):
-        return _r.poisson(self._g, lam, _size(size))
+        return _poisson(self._g, lam, size)
 
     def shuffle(self, x, axis=0):
         n = len(x)

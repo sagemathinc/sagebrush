@@ -32,3 +32,18 @@ for seed in (0, 7, 2024):
     print(repr(float(c.sum())), repr(g.standard_exponential(4)), repr(g.standard_normal()), repr(g.random(2)))
 x = np.random.default_rng(1).random(10**5) * 2 - 0.999
 print(repr(float(np.log1p(x).sum())), repr(np.log1p(np.array([1e-300, 0.25, -0.5, 3.0, 1e6, 2.0**52]))))
+
+# R2-NUM-F7: array parameters give one draw per broadcast element
+g = np.random.default_rng(73)
+a = g.normal(scale=np.ones(2)); print(a[0] != a[1], a.shape)
+print(g.uniform(high=np.ones(3)).shape, g.exponential(scale=[1.0, 2.0]).shape, g.poisson(lam=[1.0, 50.0]).shape)
+print(g.normal(loc=[0.0, 10.0], size=(3, 2)).shape)
+try:
+    g.normal(loc=[0.0, 1.0, 2.0], size=2)
+except ValueError as e:
+    print("ValueError")
+r = np.random.RandomState(5)
+print(r.normal([0.0, 1.0], 1.0).round(6).tolist(), r.uniform(0, [1.0, 2.0, 3.0]).round(6).tolist())
+print(r.exponential([1.0, 2.0]).round(6).tolist(), r.poisson([1.0, 3.0, 100.0]).tolist(), r.poisson(4.0, size=3).tolist())
+print(type(r.normal()).__name__, type(g.normal()).__name__, r.normal(size=2).round(6).tolist())
+print(r.exponential(np.array([[1.0], [2.0]]), size=(2, 3)).round(6).tolist())
