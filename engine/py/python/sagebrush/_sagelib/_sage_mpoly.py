@@ -1159,6 +1159,10 @@ class MPolynomial:
         """
         R = self._ring
         if isinstance(degrees, MPolynomial):
+            # a monomial of another parent is read by variable name (its
+            # exponents were taken positionally: MUL-F6)
+            if degrees._ring is not self._ring:
+                degrees = self._ring(degrees)
             e = degrees._leading()[0]
             fixed = {i: e[i] for i in range(R._n) if e[i]}
         elif isinstance(degrees, dict):
@@ -1183,6 +1187,8 @@ class MPolynomial:
             3
         """
         dom = self._ring._dom
+        if isinstance(mon, MPolynomial) and mon._ring is not self._ring:
+            mon = self._ring(mon)  # by variable name (MUL-F6)
         return dom._out(self._d.get(mon._leading()[0], dom.zero))
 
     # ---- printing
