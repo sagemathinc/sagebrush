@@ -222,22 +222,23 @@ fn carlson_rf_conj(a: &Ball, b: &Ball, c: &Ball, prec: u64, goal: i64) -> Option
     best.map(|b| b.1)
 }
 
-/// The canonical height (Sage's normalization) of P, given Q = nP (n = 1
-/// or 2) on the identity component as x(Q) = xn/xd, the finite local terms
-/// [(p, nu_p as num/den)] and d of Q, and approximations to the real roots
-/// of f (num 2^-k: three if Delta > 0, the real one if Delta < 0).
-#[allow(clippy::too_many_arguments)]
-pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &[(BigInt, BigInt, BigInt)], d: &BigInt, roots: &[(BigInt, u64)], prec: u64) -> R {
-    if a.len() != 5 || xd.is_zero() || d.is_zero() {
-        return Err("canonical_height: bad arguments".into());
+/// The lattice data of the model a on balls: w1 (the least positive real
+/// period), -log|q| and q (real), Delta, b2, b4, and the real roots of f
+/// (e1 > e2 > e3, or e1 alone for Delta < 0).
+struct Lattice {
+    w1: Ball,
+    logq_neg: Ball,
+    q: Ball,
+    disc: BigInt,
+    b2: BigInt,
+    b4: BigInt,
+    roots: Vec<Ball>,
+}
+
+fn lattice(a: &[BigInt], roots: &[(BigInt, u64)], wp: u64, goal: i64) -> Result<Lattice, String> {
+    if a.len() != 5 {
+        return Err("a is [a1, a2, a3, a4, a6]".into());
     }
-    // (Q = P or 2P; another n was cast and squared in u32, the review's
-    // ECBALL-F5)
-    if n != 1 && n != 2 {
-        return Err("canonical_height: n must be 1 or 2".into());
-    }
-    let wp = prec + 64;
-    let goal = prec as i64 + 32;
     let (a1, a2, a3, a4, a6) = (&a[0], &a[1], &a[2], &a[3], &a[4]);
     let b2 = a1 * a1 + a2 * bi(4);
     let b4 = a4 * bi(2) + a1 * a3;
@@ -248,10 +249,9 @@ pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &
         return Err("singular curve".into());
     }
     let c = [b6.clone(), &b4 * bi(2), b2.clone(), bi(4)];
-    let x = Ball::from_rational(xn, xd, wp);
     let pib = pi(wp);
     let b = |v: &BigInt| Ball::from_int(v);
-    let (w1, logq_neg, q, z) = if disc.is_positive() {
+    if disc.is_positive() {
         if roots.len() != 3 {
             return Err("three real roots expected".into());
         }
@@ -268,12 +268,7 @@ pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &
         // tau = i M1/M2: -log|q| = 2 pi M1/M2
         let t = pib.mul_2exp(1).mul(&m1, wp).div(&m2, wp).ok_or("tau")?;
         let q = t.neg().exp(wp).ok_or("q")?;
-        let (d1, d2, d3) = (x.sub(e1, wp), x.sub(e2, wp), x.sub(e3, wp));
-        if !d1.is_positive() {
-            return Err("the point is not on the identity component".into());
-        }
-        let z = carlson_rf(&d1, &d2, &d3, wp, goal).ok_or("R_F")?;
-        (w1, t, q, z)
+        Ok(Lattice { w1, logq_neg: t, q, disc, b2, b4, roots: r })
     } else {
         if roots.is_empty() {
             return Err("the real root expected".into());
@@ -291,6 +286,49 @@ pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &
         let im = pib.div(&w1.mul(&m2, wp), wp).ok_or("tau")?;
         let t = pib.mul_2exp(1).mul(&im, wp);
         let q = t.neg().exp(wp).ok_or("q")?.neg();
+        Ok(Lattice { w1, logq_neg: t, q, disc, b2, b4, roots: r })
+    }
+}
+
+/// Omega_E on balls: the least positive real period times the number of
+/// components of E(R) (2 if Delta > 0), for the model a (Sage's
+/// real_period of the minimal model).
+pub fn real_period(a: &[BigInt], roots: &[(BigInt, u64)], prec: u64) -> R {
+    let wp = prec + 64;
+    let l = lattice(a, roots, wp, prec as i64 + 32)?;
+    let om = if l.disc.is_positive() { l.w1.mul_2exp(1) } else { l.w1 };
+    Ok(om.rounded(prec))
+}
+
+/// The canonical height (Sage's normalization) of P, given Q = nP (n = 1
+/// or 2) on the identity component as x(Q) = xn/xd, the finite local terms
+/// [(p, nu_p as num/den)] and d of Q, and approximations to the real roots
+/// of f (num 2^-k: three if Delta > 0, the real one if Delta < 0).
+#[allow(clippy::too_many_arguments)]
+pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &[(BigInt, BigInt, BigInt)], d: &BigInt, roots: &[(BigInt, u64)], prec: u64) -> R {
+    if a.len() != 5 || xd.is_zero() || d.is_zero() {
+        return Err("canonical_height: bad arguments".into());
+    }
+    // (Q = P or 2P; another n was cast and squared in u32, the review's
+    // ECBALL-F5)
+    if n != 1 && n != 2 {
+        return Err("canonical_height: n must be 1 or 2".into());
+    }
+    let wp = prec + 64;
+    let goal = prec as i64 + 32;
+    let Lattice { w1, logq_neg, q, disc, b2, b4, roots: r } = lattice(a, roots, wp, goal)?;
+    let x = Ball::from_rational(xn, xd, wp);
+    let pib = pi(wp);
+    let b = |v: &BigInt| Ball::from_int(v);
+    let z = if disc.is_positive() {
+        let (e1, e2, e3) = (&r[0], &r[1], &r[2]);
+        let (d1, d2, d3) = (x.sub(e1, wp), x.sub(e2, wp), x.sub(e3, wp));
+        if !d1.is_positive() {
+            return Err("the point is not on the identity component".into());
+        }
+        carlson_rf(&d1, &d2, &d3, wp, goal).ok_or("R_F")?
+    } else {
+        let e1 = &r[0];
         // the conjugate pair U +- iV: U = -(b2/4 + e1)/2, U^2 + V^2 = b4/2 - 2 U e1
         let u = b(&b2).mul_2exp(-2).add(e1, wp).mul_2exp(-1).neg();
         let v2 = b(&b4).mul_2exp(-1).sub(&u.mul(e1, wp).mul_2exp(1), wp).sub(&u.sqr(wp), wp);
@@ -299,8 +337,7 @@ pub fn canonical_height(a: &[BigInt], xn: &BigInt, xd: &BigInt, n: u32, local: &
         if !d1.is_positive() {
             return Err("the point is not on the identity component".into());
         }
-        let z = carlson_rf_conj(&d1, &x.sub(&u, wp), &v, wp, goal).ok_or("R_F")?;
-        (w1, t, q, z)
+        carlson_rf_conj(&d1, &x.sub(&u, wp), &v, wp, goal).ok_or("R_F")?
     };
     // theta = 2 pi z / w1, lambda
     let theta = pib.mul_2exp(1).mul(&z, wp).div(&w1, wp).ok_or("theta")?;

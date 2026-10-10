@@ -1089,6 +1089,36 @@ def log_ball(x, prec=128):
     return _dyadic(int(h["lo"][0]), int(h["lo"][1])), _dyadic(int(h["hi"][0]), int(h["hi"][1]))
 
 
+def _root_seeds(a):
+    r = _roots_fixed(a)
+    return [[str(E), _K] for E in r[1:]] if r[0] == "3" else [[str(r[1]), _K]]
+
+
+def real_period_ball(a, prec=128):
+    """(lo, hi): exact Fractions enclosing Omega_E of the model a (the
+    engine's AGM on balls; as real_period)."""
+    from sagebrush._engine import call
+    h = call("ec_real_period", a=[str(int(c)) for c in a], roots=_root_seeds(a), prec=int(prec))
+    return _dyadic(int(h["lo"][0]), int(h["lo"][1])), _dyadic(int(h["hi"][0]), int(h["hi"][1]))
+
+
+def l_value_ball(ld):
+    """(w, lo, hi): the root number and exact Fractions enclosing L(E,1)
+    (w = 1) or L'(E,1) (w = -1), from the engine's balls
+    (engine/ap/src/lcert.rs); None if the balls do not decide w."""
+    from sagebrush._engine import call
+    r = call("ec_l_value", an=[int(x) for x in ld.an], n=int(ld.N))
+    if r is None:
+        return None
+    return r["w"], _dyadic(int(r["lo"][0]), int(r["lo"][1])), _dyadic(int(r["hi"][0]), int(r["hi"][1]))
+
+
+def _iv_quotient(lo, hi, dlo, dhi):
+    """[lo, hi] / [dlo, dhi] for 0 < dlo <= dhi."""
+    q = (lo / dlo, lo / dhi, hi / dlo, hi / dhi)
+    return min(q), max(q)
+
+
 def height_pairing_ball(a, P, Q, bad, prec=128):
     """(lo, hi) enclosing <P, Q> = (hhat(P + Q) - hhat(P) - hhat(Q)) / 2."""
     s = canonical_height_ball(a, add(a, P, Q), bad, prec)

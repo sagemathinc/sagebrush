@@ -50,6 +50,13 @@ fn f_ball(an: &[i64], q: &Ball, m: usize, prec: u64) -> Option<Ball> {
 /// The certified analytic rank, if it is 0 or 1 and the balls decide it.
 /// `an` = [0, a_1, ..., a_M] (exact), `n` the conductor.
 pub fn low_rank(an: &[i64], n: u64, prec: u64) -> Option<LowRank> {
+    let (w, value) = l_value(an, n, prec)?;
+    value.is_nonzero().then_some(LowRank { w, rank: if w == 1 { 0 } else { 1 }, value })
+}
+
+/// (w, L(E,1)) if the root number w = 1 is decided, (w, L'(E,1)) if w = -1,
+/// each enclosed (the ball may contain 0); None if w is not decided.
+pub fn l_value(an: &[i64], n: u64, prec: u64) -> Option<(i32, Ball)> {
     if an.len() < 2 || n == 0 {
         return None;
     }
@@ -70,8 +77,7 @@ pub fn low_rank(an: &[i64], n: u64, prec: u64) -> Option<LowRank> {
         return None;
     }
     if plus {
-        let l = f1.mul_2exp(1);
-        return l.is_nonzero().then_some(LowRank { w: 1, rank: 0, value: l });
+        return Some((1, f1.mul_2exp(1)));
     }
     // w = -1: L'(E,1) = 2 sum a_n/n E_1(q n)
     let m1 = terms_for(qf, 60.0).min(an.len() - 1);
@@ -87,8 +93,7 @@ pub fn low_rank(an: &[i64], n: u64, prec: u64) -> Option<LowRank> {
     let z = q1.neg().exp(prec)?;
     let zm = q1.mul_i64(m1 as i64 + 1, prec).neg().exp(prec)?;
     let tail = zm.mul_2exp(1).div(&Ball::one().sub(&z, prec).mul(&q1, prec).mul_i64(m1 as i64 + 1, prec), prec)?;
-    let l1 = s.add_error(tail.upper_abs()).mul_2exp(1);
-    l1.is_nonzero().then_some(LowRank { w: -1, rank: 1, value: l1 })
+    Some((-1, s.add_error(tail.upper_abs()).mul_2exp(1)))
 }
 
 #[cfg(test)]
