@@ -393,6 +393,54 @@ the Rust engines), and a stuck session is restarted. The Sage preparser is
 pass through it. `engine/py/test_mcp.py` checks the protocol, including
 with the official MCP client.
 
+### From Rust
+
+The engines are ordinary Rust crates (MIT OR Apache-2.0, no C libraries),
+usable from any Rust program. They are not on crates.io yet; depend on them
+from git:
+
+```toml
+[dependencies]
+sagebrush-bigint = { git = "https://github.com/sagemathinc/sagebrush" }
+sagebrush-classgroup = { git = "https://github.com/sagemathinc/sagebrush" }  # number fields, class groups, factoring
+sagebrush-ap = { git = "https://github.com/sagemathinc/sagebrush" }          # a_p of elliptic curves
+sagebrush-galois = { git = "https://github.com/sagemathinc/sagebrush" }      # Galois groups over Q
+sagebrush-sym = { git = "https://github.com/sagemathinc/sagebrush" }         # symbolic calculus
+```
+
+```rust
+use sagebrush_bigint::BigInt;
+
+fn main() -> Result<(), String> {
+    let z = |v: &[i64]| v.iter().map(|&c| BigInt::from(c)).collect::<Vec<_>>();
+    // 2^128 + 1 = 59649589127497217 * 5704689200685129054721 (ECM)
+    let n: BigInt = (BigInt::from(1) << 128u32) + 1;
+    println!("{:?}", sagebrush_classgroup::api::factor_integer(&n)?);
+    // Q[x]/(x^3 - 11): h = 2, R = 5.5872066260609077619 (assuming GRH: see k.certified)
+    let k = sagebrush_classgroup::api::bnf(&z(&[-11, 0, 0, 1]))?;
+    println!("h = {}, cyc = {:?}, R = {}", k.h, k.cyc, k.regulator);
+    // a_p of 11a1 for p <= 30 (None at the bad prime 11)
+    let e = sagebrush_ap::EllipticCurve::new([0, -1, 1, -10, -20])?;
+    println!("{:?}", sagebrush_ap::aplist(&e, 30));
+    // Gal(x^5 - x - 1) = S5, proven
+    let g = sagebrush_galois::galois_group(&z(&[-1, -1, 0, 0, 0, 1]))?;
+    println!("{} (order {}, proven {})", g.name, g.order, g.proven);
+    // an antiderivative and a limit
+    let f = sagebrush_sym::parse("x*exp(x)*sin(x)");
+    println!("{}", sagebrush_sym::to_string(&sagebrush_sym::integrate::integrate(&f, "x").ok_or("none")?));
+    let l = sagebrush_sym::limit::limit(&sagebrush_sym::parse("sin(x)/x"), "x", &sagebrush_sym::parse("0"), sagebrush_sym::limit::Dir::Both);
+    println!("{}", sagebrush_sym::to_string(&l));
+    Ok(())
+}
+```
+
+The other crates: `sagebrush-modsym` (modular symbols, newforms),
+`sagebrush-mpoly` (multivariate polynomials, Gröbner bases), `sagebrush-poly`
+(univariate factoring), `sagebrush-arith` and `sagebrush-group` (permutation
+groups). `sagebrush_web::call(json)` (`engine/web`) is the JSON interface
+that the notebook, the CLI and the Python package share: one entry point to
+all of them, e.g. `call(r#"{"fn": "factor_integer", "n": "1001"}"#)`.
+
 ## How "proven" is earned
 
 Exact characteristic polynomials are reconstructed by CRT from computations
