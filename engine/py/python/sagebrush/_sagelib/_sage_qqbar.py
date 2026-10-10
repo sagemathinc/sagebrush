@@ -328,7 +328,11 @@ class _Gen:
 
     def __init__(self, g, z, digits=40):
         self.g = g
-        self.z = z  # (re, im) Fractions, accurate to about 10^-digits
+        # (re, im) Fractions, accurate to about 10^-digits, digits enough to
+        # identify the root (_identify)
+        if len(g) > 2:
+            z, digits = _identify(g, z, digits)
+        self.z = z
         self.digits = digits
         self.real = z[1] == 0
         self._cache = {}
@@ -371,7 +375,7 @@ class _Gen:
                 iim = -iim
             return _CIv(ire, iim)
         z = self._approx(60)
-        if _is_pure_imaginary(g, z):
+        if _is_pure_imaginary(g, self):
             ire = _ZERO
         else:
             ire = _Iv._around(z[0], _F(1, 10 ** 55))
@@ -388,12 +392,19 @@ def _rational_sqrt(q):
     return None
 
 
-def _is_pure_imaginary(g, z):
-    """Whether the root z of the irreducible g has real part exactly 0: then
-    -conj(z) = z is a root of g(-x), so g(-x) = +-g(x)."""
+def _is_pure_imaginary(g, gen):
+    """Whether the root of the irreducible g that gen holds has real part
+    exactly 0: then g(-x) = +-g(x), so -conj(z) is a root too, and it is the
+    same root (identified exactly: a real part of 10^-41 is not 0, the
+    systematic review's ROOT-F1)."""
     if any(g[i] for i in range(len(g)) if (i % 2) != ((len(g) - 1) % 2)):
         return False
-    return abs(z[0]) < _F(1, 10 ** 30)
+    neg = lambda e: (lambda u: (-u[0], u[1]))(gen._approx(e))
+    z, d = _identify(g, gen._approx, gen.digits)
+    w, d2 = _identify(g, neg, d)
+    if d2 != d:
+        z, _ = _identify(g, gen._approx, d2)
+    return z == w
 
 
 def _roots(g, digits):
@@ -407,17 +418,70 @@ def _roots(g, digits):
 
 
 def _nearest_root(g, z, digits):
+    # (z identifies its root: _Gen keeps z at a precision where the roots are
+    # separated, _identify; the nearest root at a higher precision is then
+    # that root, and it is checked to be unique)
     rs = _roots(g, digits)
-    return min(rs, key=lambda r: (r[0] - z[0]) ** 2 + (r[1] - z[1]) ** 2)
+    ds = sorted(((r[0] - z[0]) ** 2 + (r[1] - z[1]) ** 2, k) for k, r in enumerate(rs))
+    if len(ds) > 1 and ds[1][0] <= 4 * ds[0][0]:
+        raise ArithmeticError("a root of %r is not identified by its approximation" % (g,))
+    return rs[ds[0][1]]
+
+
+def _identify(f, approx, start=40):
+    """(z, d): the root of the irreducible integer polynomial f that approx
+    (an approximation (re, im), or a function of a number of digits d giving
+    one to about d digits) approaches, to d digits, with d large enough that
+    no other root is near: z is within 2 tol of the approximation and every
+    other root farther than 6 tol, tol = 10^-d max(1, |z|), all compared
+    exactly (roots told apart by 40-digit floats or by an underflowing
+    double were confused: 1 +- sqrt(2) 10^-60 compared equal, the square
+    root of 2/10^330 came out negative; the systematic review's ROOT-F1).
+    Refused if they cannot be told apart."""
+    d = start
+    while d <= 6000:
+        z = approx(d) if callable(approx) else approx
+        z = (_F(z[0]), _F(z[1]))
+        rs = _roots(f, d)
+        if len(rs) == 1:
+            return rs[0], d
+        mag2 = max(_F(1), z[0] ** 2 + z[1] ** 2)
+        tol2 = mag2 / _F(10) ** (2 * d)
+        ds = sorted(((r[0] - z[0]) ** 2 + (r[1] - z[1]) ** 2, k) for k, r in enumerate(rs))
+        if ds[0][0] <= 4 * tol2 and ds[1][0] > 36 * tol2:
+            return rs[ds[0][1]], d
+        if not callable(approx):
+            break
+        d *= 2
+    raise ArithmeticError("the root of %r near the approximation cannot be identified" % (f,))
+
+
+def _separated_roots(g, digits=40):
+    """(roots, d): the roots of g to d digits, d large enough that every one
+    identifies its root (_identify: pairwise farther apart than 8 tol)."""
+    d = digits
+    while True:
+        rs = _roots(g, d)
+        ok = True
+        for i, r in enumerate(rs):
+            mag2 = max(_F(1), r[0] ** 2 + r[1] ** 2)
+            tol2 = mag2 / _F(10) ** (2 * d)
+            if any((r[0] - s[0]) ** 2 + (r[1] - s[1]) ** 2 <= 64 * tol2 for s in rs[i + 1:]):
+                ok = False
+                break
+        if ok or d > 6000:
+            return rs, d
+        d *= 2
 
 
 def _sorted_roots(g, digits=40):
-    """The roots of g as Sage orders them: the real roots increasing, then
-    the others by real part, then imaginary part."""
-    rs = _roots(g, digits)
+    """(roots, d): the roots of g as Sage orders them (the real roots
+    increasing, then the others by real part, then imaginary part), to d
+    digits, separated (_separated_roots)."""
+    rs, d = _separated_roots(g, digits)
     real = sorted([r for r in rs if r[1] == 0])
     cx = sorted([r for r in rs if r[1] != 0])
-    return real + cx
+    return real + cx, d
 
 
 # ------------------------------------------------------------------ the fields
@@ -858,7 +922,16 @@ class AlgebraicNumber:
             lo, hi = _rnd(iv.lo, False, 53), _rnd(iv.hi, True, 53)
             return float((lo + hi) / 2)
         if prec is not None or digits is not None:
-            return sa.N(self._sym(), prec=prec, digits=digits)
+            # both parts, from an approximation with the precision asked for
+            # and 10 more digits (the real part of a 60-digit approximation
+            # was returned: QQbar(I).n(prec=100) was 0, the systematic
+            # review's ROOT-F2)
+            import _sage_real
+            p = _sage_real.digits_to_prec(digits) if digits is not None else int(prec)
+            re, im = self._approx(int(p * 0.30103) + 10)
+            if self._is_real() or im == 0:
+                return sa.RealField(p)(re)
+            return sa.ComplexField(p)(re, im)
         if self._is_real():
             return sa.RealNumber(mid(self._civ.re))
         import _sage_matrix
@@ -917,12 +990,11 @@ class AlgebraicNumber:
         """
         if self._is_real_gen():
             return self
-        z = self._approx(40)
         f = self._minpoly_coeffs()
         civ = _CIv(self._civ.re, -self._civ.im)
         if self._gauss:
             return self._new(self._gen, [self._c[0] if self._c else 0, -(self._c[1] if len(self._c) > 1 else 0)], civ, True)
-        return _from_root(f, (z[0], -z[1]), type(self), civ)
+        return _from_root(f, lambda d: (lambda z: (z[0], -z[1]))(self._approx(d)), type(self), civ)
 
     def _is_real_gen(self):
         return self._gen is None or self._gen.real
@@ -1023,14 +1095,13 @@ class AlgebraicNumber:
         h = []
         for i, c in enumerate(f):
             h += [c] + [0] * (n - 1) if i < len(f) - 1 else [c]
-        z = self._complex()
-        if type(self) is AlgebraicReal and z.real < 0 and n % 2 == 1:
-            w = -((-z.real) ** (1.0 / n))
-            target = (w, 0.0)
+        # the principal root's (log |w|, arg w): log |z| / n, arg z / n
+        lz, az = _log_arg(self._approx(40))
+        if type(self) is AlgebraicReal and abs(az) > 3.0 and n % 2 == 1:
+            target = (lz / n, math.pi)  # the real n-th root of a negative real
         else:
-            w = cmath.exp(cmath.log(z) / n) if z != 0 else 0
-            target = (w.real, w.imag)
-        T = AlgebraicReal if type(self) is AlgebraicReal and (target[1] == 0) else AlgebraicNumber
+            target = (lz / n, az / n)
+        T = AlgebraicReal if type(self) is AlgebraicReal and (target[1] == 0 or target[1] == math.pi) else AlgebraicNumber
         fs = _factor(h)
         return _root_near(fs, target, T, lambda r: _close_power(r, self, n))
 
@@ -1205,28 +1276,50 @@ def _select(fs, a, values=None):
 
 
 def _from_root(f, z, T=AlgebraicNumber, civ=None):
-    """The element of type T which is the root of the irreducible f nearest z."""
+    """The element of type T which is the root of the irreducible f that z
+    (an approximation, or a function of a number of digits giving one)
+    identifies (_identify)."""
     if len(f) == 2:
         q = _F(-f[0], f[1])
         return T(None, [q], civ if civ is not None else _civ_rational(q))
-    zz = _nearest_root(f, (_F(z[0]), _F(z[1])), 40)
-    gen = _Gen(f, zz)
+    zz, d = _identify(f, z, 40)
+    gen = _Gen(f, zz, d)
     return T(gen, [0, 1], civ if civ is not None else gen.civ)
 
 
+def _log_arg(z):
+    """(log |z|, arg z) for z = (re, im) Fractions, without underflow (the
+    logarithm from the integers; the angle from z scaled to size 1)."""
+    re, im = _F(z[0]), _F(z[1])
+    s = max(abs(re), abs(im))
+    if s == 0:
+        return (-math.inf, 0.0)
+    a, b = float(re / s), float(im / s)
+    ls = math.log(s.numerator) - math.log(s.denominator)
+    return (ls + 0.5 * math.log(a * a + b * b), math.atan2(b, a))
+
+
 def _root_near(fs, target, T, check):
-    """Among the roots of the factors fs, the one nearest the float target."""
-    best = None
+    """Among the roots of the factors fs, the one nearest the target (log |w|,
+    arg w), compared in logarithm and angle (a double target for the square
+    root of 2/10^330 was 0, and the negative root was taken: the systematic
+    review's ROOT-F1); the nearest must be unique."""
+    cands = []
     for f, _ in fs:
-        for r in _roots(f, 40):
-            d = (float(r[0]) - target[0]) ** 2 + (float(r[1]) - target[1]) ** 2
-            if best is None or d < best[0]:
-                best = (d, f, r)
-    _, f, r = best
+        rs, d = _separated_roots(f, 40)
+        for r in rs:
+            lr, ar = _log_arg(r)
+            da = abs(ar - target[1])
+            da = min(da, 2 * math.pi - da)
+            cands.append(((lr - target[0]) ** 2 + da * da, f, r, d))
+    cands.sort(key=lambda c: c[0])
+    if len(cands) > 1 and cands[1][0] <= 4 * cands[0][0] + 1e-18:
+        raise ArithmeticError("the principal root cannot be told apart from another")
+    _, f, r, d = cands[0]
     if len(f) == 2:
         q = _F(-f[0], f[1])
         return T(None, [q], _civ_rational(q))
-    gen = _Gen(f, r)
+    gen = _Gen(f, r, d)
     return T(gen, [0, 1], gen.civ)
 
 
@@ -1263,28 +1356,26 @@ def _combine(a, b, op, T, civ):
 
     p = _Probe()
     f = fs[0][0] if len(fs) == 1 else _select(fs, p)
-    z = p._approx(50)
-    if T is AlgebraicReal or (a._is_real_gen() and b._is_real_gen()):
-        z = (z[0], _F(0))
-    return _from_root(f, z, T, civ)
+    real = T is AlgebraicReal or (a._is_real_gen() and b._is_real_gen())
+    return _from_root(f, lambda d: (lambda z: (z[0], _F(0)) if real else z)(p._approx(d)), T, civ)
 
 
 def _same_root(f, a, b):
-    """Whether a and b, both roots of the irreducible f, are the same root."""
-    rs = _roots(f, 40)
-    if len(rs) == 1:
+    """Whether a and b, both roots of the irreducible f, are the same root:
+    each identified exactly (_identify), at one precision."""
+    if len(f) <= 2:
         return True
-    sep = min(abs(complex(float(r[0] - s[0]), float(r[1] - s[1]))) for i, r in enumerate(rs) for s in rs[i + 1:])
-    x, y = a._approx(40), b._approx(40)
-    d = abs(complex(float(x[0] - y[0]), float(x[1] - y[1])))
-    return d < sep / 4
+    za, da = _identify(f, a._approx, 40)
+    zb, db = _identify(f, b._approx, da)
+    if db != da:
+        za, _ = _identify(f, a._approx, db)
+    return za == zb
 
 
 def _as_real(r, civ):
     """r (known to be real) as an element of AA."""
     f = r._minpoly_coeffs()
-    z = r._approx(50)
-    return _from_root(f, (z[0], _F(0)), AlgebraicReal, civ)
+    return _from_root(f, lambda d: (r._approx(d)[0], _F(0)), AlgebraicReal, civ)
 
 
 def _same_gen_elements(rows):
@@ -1419,8 +1510,9 @@ def _roots_of(f_int, T=AlgebraicNumber):
         q = _F(-f_int[0], f_int[1])
         return [T(None, [q], None)]
     out = []
-    for z in _sorted_roots(f_int):
-        gen = _Gen(list(f_int), z)
+    rs, d = _sorted_roots(f_int)
+    for z in rs:
+        gen = _Gen(list(f_int), z, d)
         out.append(T(gen, [0, 1], gen.civ))
     return out
 

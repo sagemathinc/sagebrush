@@ -21,6 +21,11 @@ pub fn out(lo: f64, hi: f64) -> Option<Iv> {
     if lo.is_nan() || hi.is_nan() || lo > hi {
         return None;
     }
+    // an end that overflowed: the value is beyond the largest double, so
+    // that double is still an end ([+inf, +inf] enclosed nothing: the
+    // systematic review's ROOT-F5)
+    let lo = if lo == f64::INFINITY { f64::MAX } else { lo };
+    let hi = if hi == f64::NEG_INFINITY { f64::MIN } else { hi };
     let down = |v: f64| if v.is_finite() { (v - 4.0 * f64::EPSILON * v.abs()).next_down() } else { v };
     let up = |v: f64| if v.is_finite() { (v + 4.0 * f64::EPSILON * v.abs()).next_up() } else { v };
     Some(Iv(down(lo), up(hi)))
@@ -47,6 +52,11 @@ impl Iv {
         out(1.0 / self.1, 1.0 / self.0)
     }
     fn powi(self, n: i64) -> Option<Iv> {
+        // (the size limit before negating: -i64::MIN recursed forever, the
+        // systematic review's ROOT-F6)
+        if n.unsigned_abs() > 1 << 20 {
+            return None;
+        }
         if n < 0 {
             return self.powi(-n)?.recip();
         }
