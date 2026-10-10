@@ -33,7 +33,7 @@ impl Mag {
 
     /// 2^k exactly.
     pub fn pow2(k: i64) -> Mag {
-        Mag::make_up(1 << (MBITS - 1), k - (MBITS as i64 - 1))
+        Mag::make_up(1 << (MBITS - 1), k.saturating_sub(MBITS as i64 - 1))
     }
 
     fn make_up(m: u64, e: i64) -> Mag {

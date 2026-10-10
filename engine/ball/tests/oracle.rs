@@ -167,3 +167,21 @@ fn review_boundaries() {
     let t = Ball::from_rational(&BigInt::from(1), &(BigInt::from(1) << 1060u32), 100);
     assert!(t.to_f64_approx() > 0.0 && Ball::with_radius(BigInt::from(0), 0, Mag::pow2(-1060)).rad_f64_approx() > 0.0);
 }
+
+/// The review's second round (BALL-F5 rest, F6, F7).
+#[test]
+fn review_boundaries_2() {
+    let one = Ball::one();
+    // F5: display at the ends of the exponent range: inf and 0, never NaN
+    let big = Ball::exact(BigInt::from(1), (1 << 40) - 1).to_f64_approx();
+    let small = Ball::exact(BigInt::from(1), -(1 << 40) + 1).to_f64_approx();
+    assert!(big == f64::INFINITY && small == 0.0, "{} {}", big, small);
+    // F6: hull with the ball of everything, and across a huge gap
+    assert!(!Ball::hull(&Ball::indeterminate(), &one).is_finite());
+    let far = Ball::exact(BigInt::from(1), (1 << 40) - 1);
+    let h = Ball::hull(&far, &one);
+    assert!(h.contains(&far) && h.contains(&one));
+    // F7: absurd precisions are capped, not overflowed or looped on
+    assert!(Mag::pow2(i64::MIN).le_pow2(-1));
+    assert!(one.add(&one, u64::MAX).contains(&Ball::from_i64(2)));
+}

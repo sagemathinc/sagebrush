@@ -12,14 +12,23 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 
 fn isqrt_u64(n: u64) -> u64 {
-    let mut r = (n as f64).sqrt() as u64;
-    while r * r > n {
+    // (squares checked: a seed of 2^32 overflowed, BALL-F7)
+    let mut r = ((n as f64).sqrt() as u64).min(u32::MAX as u64);
+    while r.checked_mul(r).is_none_or(|q| q > n) {
         r -= 1;
     }
-    while (r + 1) * (r + 1) <= n {
+    while (r + 1).checked_mul(r + 1).is_some_and(|q| q <= n) {
         r += 1;
     }
     r
+}
+
+/// Precisions are capped at PREC_MAX bits (a larger request is a lower,
+/// still rigorous, precision; the review's BALL-F7: u64::MAX overflowed).
+pub const PREC_MAX: u64 = 1 << 24;
+
+fn cap(prec: u64) -> u64 {
+    prec.min(PREC_MAX)
 }
 
 // ------------------------------------------------------------------ series
@@ -62,6 +71,7 @@ thread_local! {
 }
 
 fn cached(name: &'static str, prec: u64, f: fn(u64) -> Ball) -> Ball {
+    let prec = cap(prec);
     let hit = CACHE.with(|c| c.borrow().iter().find(|(n, p, _)| *n == name && *p >= prec).map(|(_, _, b)| b.clone()));
     if let Some(b) = hit {
         return b.rounded(prec);
@@ -375,6 +385,7 @@ fn atan_point(m: &BigInt, e: i64, wp: u64) -> Ball {
 impl Ball {
     /// e^x (None if the ball reaches |x| >= 2^40).
     pub fn exp(&self, prec: u64) -> Option<Ball> {
+        let prec = cap(prec);
         let wp = prec + 24;
         let v = exp_point(&self.m, self.e, wp)?;
         if self.r.is_zero() {
@@ -391,6 +402,7 @@ impl Ball {
 
     /// log x (None unless the ball is certainly positive).
     pub fn log(&self, prec: u64) -> Option<Ball> {
+        let prec = cap(prec);
         if !self.is_positive() {
             return None;
         }
@@ -406,24 +418,28 @@ impl Ball {
 
     /// sin x (None for |x| >= 2^65536).
     pub fn sin(&self, prec: u64) -> Option<Ball> {
+        let prec = cap(prec);
         let (s, _) = sincos_point(&self.m, self.e, prec + 24, 0)?;
         Some(s.add_error(self.r).rounded(prec))
     }
 
     /// cos x (None for |x| >= 2^65536).
     pub fn cos(&self, prec: u64) -> Option<Ball> {
+        let prec = cap(prec);
         let (_, c) = sincos_point(&self.m, self.e, prec + 24, 1)?;
         Some(c.add_error(self.r).rounded(prec))
     }
 
     /// tan x (None near a pole, where cos x is not certainly nonzero).
     pub fn tan(&self, prec: u64) -> Option<Ball> {
+        let prec = cap(prec);
         let wp = prec + 24;
         self.sin(wp)?.div(&self.cos(wp)?, prec)
     }
 
     /// atan x.
     pub fn atan(&self, prec: u64) -> Ball {
+        let prec = cap(prec);
         let v = atan_point(&self.m, self.e, prec + 24);
         if self.r.is_zero() {
             return v.rounded(prec);
@@ -437,6 +453,7 @@ impl Ball {
 
     /// x^n for an integer n (None for n < 0 when x may be 0).
     pub fn pow_i64(&self, n: i64, prec: u64) -> Option<Ball> {
+        let prec = cap(prec);
         // (|n| as u64: -i64::MIN overflowed and recursed forever, BALL-F3)
         let k0 = n.unsigned_abs();
         let wp = prec + 2 * (64 - k0.leading_zeros() as u64) + 8;
@@ -460,5 +477,17 @@ impl Ball {
             }
         }
         r
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn isqrt_at_the_top() {
+        assert_eq!(super::isqrt_u64(u64::MAX), u32::MAX as u64);
+        assert_eq!(super::isqrt_u64(1 << 62), 1 << 31);
+        assert_eq!(super::isqrt_u64(0), 0);
+        assert_eq!(super::isqrt_u64(99), 9);
+        assert_eq!(super::cap(u64::MAX), super::PREC_MAX);
     }
 }

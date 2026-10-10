@@ -9,7 +9,7 @@ mod mag;
 mod special;
 
 pub use ball::{cmp_dyadic, Ball, EXP_MAX, GAP};
-pub use funcs::{catalan, euler_gamma, ln2, pi};
+pub use funcs::{catalan, euler_gamma, ln2, pi, PREC_MAX};
 pub use complex::CBall;
 pub use mag::Mag;
 pub use special::{bernoulli, li2, ti2};
