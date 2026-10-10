@@ -164,3 +164,13 @@ from the bundler) with their license files, and KaTeX's fonts, which are
 under the SIL Open Font License 1.1 ([LICENSES/OFL-1.1.txt](LICENSES/OFL-1.1.txt)),
 not KaTeX's MIT license.  The standalone executables print all of it with
 `sagebrush --licenses`, and the release archives hold the same files.
+
+The desktop app's native code (`app/src-tauri`: Tauri, Wry, Tao, their
+plugins and platform bindings, 400-odd crates) has its own,
+`app/THIRD-PARTY-NOTICES-native.txt`, shipped beside the page's in the app.
+Five of those crates (cssparser, cssparser-macros, dtoa-short, option-ext and
+selectors, through Tauri) are under the Mozilla Public License 2.0, a file-level
+copyleft: they are used unmodified, and their source is on crates.io. The
+generator accepts MPL-2.0 for the app only. The app uses the platform's web
+view; the Linux AppImage also bundles the build system's shared libraries
+(GTK, WebKitGTK, ..., LGPL), which that file does not list.

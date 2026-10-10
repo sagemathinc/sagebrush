@@ -55,7 +55,7 @@ writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${J
 // there, so the page's worker and the wasm engines are not needed.
 const web = {};
 const webDir = join(root, "web", "dist");
-for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "THIRD-PARTY-NOTICES.txt"]) {
+for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "THIRD-PARTY-NOTICES.txt"]) {
   if (existsSync(join(webDir, f))) web[f] = readFileSync(join(webDir, f)).toString("base64");
 }
 const katexDir = join(webDir, "katex");

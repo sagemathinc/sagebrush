@@ -38,7 +38,9 @@ jobs:
         run: |
           bun web/build.ts
           git diff --exit-code web/js-dependencies.json
+          node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
+          node web/test-cli-assets.mjs build/cli/pyjs.cjs
       - name: conformance (Node)
         run: python3 conformance/run.py --runtime node --show 20
       - name: conformance (Deno)

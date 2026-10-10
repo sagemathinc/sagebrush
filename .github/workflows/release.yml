@@ -46,7 +46,12 @@ jobs:
           done
       - name: build the bundle and executables
         run: |
+          # the bundle, the notebook page (which needs the bundle), then the
+          # bundle again with the page in it; its notebook serves every asset
           node scripts/build-cli.mjs
+          bun web/build.ts
+          node scripts/build-cli.mjs
+          node web/test-cli-assets.mjs build/cli/pyjs.cjs
           # the Jupyter kernel, end to end with Jupyter's own client
           python3 -m venv /tmp/jv && /tmp/jv/bin/pip install -q jupyter_client
           /tmp/jv/bin/python test/jupyter_kernel.py build/cli/pyjs.cjs

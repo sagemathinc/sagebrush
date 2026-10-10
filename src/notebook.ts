@@ -17,7 +17,9 @@ import { spawn } from "child_process";
 
 // ---- the page's files: embedded in the bundle (scripts/build-cli.mjs), or
 // web/dist when running from a checkout
-const ASSETS = ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "THIRD-PARTY-NOTICES.txt"];
+// (every script the page loads: web/test-cli-assets.mjs checks the list
+// against the page)
+const ASSETS = ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "THIRD-PARTY-NOTICES.txt"];
 function asset(name: string): Buffer | null {
   const embedded = (globalThis as any).__SAGEBRUSH_WEB__;
   if (embedded) return embedded[name] !== undefined ? Buffer.from(embedded[name], "base64") : null;
