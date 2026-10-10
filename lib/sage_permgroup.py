@@ -9,6 +9,8 @@ as in Sage and GAP.  Orders and membership are exact: the engine's
 stabilizer chains are completed by the deterministic Schreier-Sims test.
 """
 
+import operator
+
 from sagebrush._engine import call as _call
 
 __all__ = ["PermutationGroup", "PermutationGroupElement", "SymmetricGroup", "AlternatingGroup",
@@ -22,6 +24,21 @@ def _Int(x):
         return Integer(x)
     except ImportError:
         return int(x)
+
+
+def _pt(x):
+    """A point as an int: integers only (2.9 is not a point)."""
+    try:
+        return operator.index(x)
+    except TypeError:
+        pass
+    try:
+        i = int(x)
+    except (TypeError, ValueError):
+        raise TypeError("a point must be an integer, not %r" % (x,))
+    if i != x:
+        raise ValueError("a point must be an integer, not %r" % (x,))
+    return i
 
 
 def _parse_cycles(s):
@@ -40,10 +57,10 @@ def _cycles_of(g):
     if isinstance(g, str):
         return _parse_cycles(g)
     if isinstance(g, tuple):
-        return [tuple(int(x) for x in g)] if g and not isinstance(g[0], (tuple, list)) else [tuple(int(x) for x in c) for c in g]
+        return [tuple(_pt(x) for x in g)] if g and not isinstance(g[0], (tuple, list)) else [tuple(_pt(x) for x in c) for c in g]
     if isinstance(g, list):
         if g and all(isinstance(x, (tuple, list)) for x in g):
-            return [tuple(int(x) for x in c) for c in g]
+            return [tuple(_pt(x) for x in c) for c in g]
         return None  # one-line notation: images
     raise TypeError("cannot make a permutation from %r" % (g,))
 
@@ -55,7 +72,7 @@ def _images(g, n=None):
     else:
         cyc = _cycles_of(g)
         if cyc is None:
-            im = [int(x) - 1 for x in g]
+            im = [_pt(x) - 1 for x in g]
             if sorted(im) != list(range(len(im))):
                 raise ValueError("%r is not a permutation of 1..%d" % (g, len(im)))
         else:
@@ -128,7 +145,17 @@ class PermutationGroupElement:
         if not isinstance(other, (PermutationGroupElement, str, tuple, list)):
             return NotImplemented
         a, b = self._common(other)
-        return PermutationGroupElement._make([b[x] for x in a], self._parent)
+        im = [b[x] for x in a]
+        # keep the parent only when the product is in it
+        P = self._parent
+        if P is not None and getattr(other, "_parent", None) is not P:
+            n = P.degree()
+            if any(im[i] != i for i in range(n, len(im))) or not P._contains_images(im[:n]):
+                # a common ambient group
+                P = SymmetricGroup(len(im))
+        if P is not None:
+            im = im[:P.degree()]
+        return PermutationGroupElement._make(im, P)
 
     def __rmul__(self, other):
         return PermutationGroupElement(other) * self
@@ -595,6 +622,15 @@ class PermutationGroup:
             sage: SymmetricGroup(4).is_primitive(), DihedralGroup(4).is_primitive()
             (True, False)
         """
+        if domain is not None:
+            dom = sorted(set(_pt(x) for x in domain))
+            if dom != list(range(1, self._n + 1)):
+                # the action on an invariant subset, relabelled 1..m
+                pos = {x: i for i, x in enumerate(dom)}
+                if any(x < 1 or x > self._n for x in dom) or any(g[x - 1] + 1 not in pos for g in self._gens for x in dom):
+                    raise ValueError("the domain %s is not invariant under the group" % dom)
+                gens = [PermutationGroupElement._make([pos[g[x - 1] + 1] for x in dom]) for g in self._gens]
+                return PermutationGroup(gens, domain=range(1, len(dom) + 1)).is_primitive()
         return self._cached("is_primitive", "is_primitive")
 
     def transitivity(self):
@@ -744,16 +780,38 @@ class PermutationGroup:
         raise NotImplementedError("is_simple: undecided for this perfect group (every normal closure tried is the whole group)")
 
     def cycle_type_counts(self, limit=200000, samples=10000):
-        """{cycle type: number of elements} (exact when the order is at most
-        limit, else estimated from random elements; Sagebrush)
+        """{cycle type: number of elements}, exact when the order is at most
+        limit.  Otherwise a CycleTypeSample: {cycle type: number among
+        `samples` uniformly random elements}, with .samples and .exact =
+        False (Sagebrush).
 
         EXAMPLES::
 
             sage: SymmetricGroup(4).cycle_type_counts()  # sagebrush only
             {(1, 1, 1, 1): 1, (2, 1, 1): 6, (2, 2): 3, (3, 1): 8, (4,): 6}
+            sage: c = SymmetricGroup(4).cycle_type_counts(limit=1, samples=7)  # sagebrush only
+            sage: c.exact, c.samples, sum(c.values())  # sagebrush only
+            (False, 7, 7)
         """
         r = self._q("cycle_type_counts", limit=limit, samples=samples)
-        return {tuple(_Int(x) for x in t): _Int(k) for t, k in r["counts"]}
+        d = {tuple(_Int(x) for x in t): _Int(k) for t, k in r["counts"]}
+        if r.get("exact", True):
+            return d
+        return CycleTypeSample(d, int(samples))
+
+
+class CycleTypeSample(dict):
+    """Cycle types among random group elements: {cycle type: count in the
+    sample}; not numbers of group elements (Sagebrush)."""
+
+    exact = False
+
+    def __init__(self, counts, samples):
+        dict.__init__(self, counts)
+        self.samples = samples
+
+    def __repr__(self):
+        return "CycleTypeSample(%d random elements: %s)" % (self.samples, dict.__repr__(self))
 
 
 def _named(name, n, cls, text):
@@ -1013,7 +1071,8 @@ def galois_group(f, proof=None):
     given by its integer coefficients (constant term first), as a
     TransitiveGroup.  G.proven tells whether every step was proven
     (proof=None proves the steps that are cheap to prove, proof=True all of
-    them, however long that takes, proof=False none); G.galois_log() says
+    them, however long that takes, raising an error when a step cannot be
+    proven, proof=False none); G.galois_log() says
     how the group was found.
 
     EXAMPLES::

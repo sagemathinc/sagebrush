@@ -38,9 +38,10 @@
 //! decide, or when each descent step's value is proven to be an integer
 //! (a norm bound with the p-adic precision raised accordingly) and to
 //! differ from the values at all other cosets.  Otherwise (large indices)
-//! the result is what the numerical evidence says, with an error
-//! probability far below 2^-40 per step, like Magma's GaloisGroup before
-//! GaloisProof.
+//! the result is what the numerical evidence says (48 bits of p-adic
+//! precision beyond the bound; no probability bound is claimed), like
+//! Magma's GaloisGroup before GaloisProof.  Proof::Always proves every step
+//! or returns an error.
 
 pub mod fq;
 pub mod tables;
@@ -1079,9 +1080,9 @@ fn poly_string(t: &[BigInt]) -> String {
 pub enum Proof {
     /// prove a step when that is cheap (the default)
     WhenCheap,
-    /// prove every step, however long it takes
+    /// prove every step, however long it takes, or return an error
     Always,
-    /// never (the answer is the same, with an error probability below 2^-40 per step)
+    /// never (the answer is the same heuristic one, not proven)
     Never,
 }
 
@@ -1104,6 +1105,9 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
     if !tables::supported(n) {
         return Err(format!("Galois groups are implemented for degrees 1 to 13, 17, 19 and 23 so far, not {}", n));
     }
+    // over Q: a nonzero constant multiple has the same roots
+    let content = f.iter().fold(BigInt::zero(), |acc, c| acc.gcd(c));
+    let f: Vec<BigInt> = f.iter().map(|c| c / &content).collect();
     if !sagebrush_poly::is_irreducible(&f) {
         return Err("the polynomial must be irreducible".into());
     }
@@ -1256,7 +1260,6 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
                 let bound = inv.log2_bound(roots.log2_bound());
                 let k = ((bound + 1.0 + SAFETY_BITS) / (p as f64).log2()).ceil() as u32;
                 let t_l = clock();
-                let t_l = clock();
                 let rts = roots.at(k).clone();
                 prof(3, t_l);
                 trace(|| format!("  roots at p^{} in {:.3}s", k, clock() - t_l));
@@ -1321,10 +1324,18 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
                 // (proofs need the values at all cosets, compared above)
                 let all_compared = all.is_some() && (index <= PROOF_INDEX || proof == Proof::Always);
                 let cheap = index as f64 * (bound + 1.0) * dd.powf(1.5) < PROOF_BITS;
+                if proof == Proof::Always && !all_compared {
+                    return Err(format!("proof=True: the step {} -> {} has index {}, too large to compare the values at all cosets; use proof=None for the unproven answer", h.label(), kt.label(), index_big));
+                }
                 if all_compared && (proof == Proof::Always || (proof == Proof::WhenCheap && cheap)) {
-                    // the norm of F(r o s) - value is an integer below (2B)^index divisible by p^k1
+                    // The resolvent R has integral coefficients and roots of
+                    // absolute value at most B, so if theta = value is not a
+                    // root, 0 < |R(theta)| <= (B + |theta|)^index, while p^k1
+                    // divides R(theta): k1 bits beyond that prove R(theta) = 0.
+                    // (|theta| may exceed B: recognition allows a few more bits.)
                     let t_proof = clock();
-                    let k1 = ((index as f64 * (bound + 1.0) + 2.0) / (p as f64).log2()).ceil() as u32;
+                    let per = bound.max(value.abs().bits() as f64) + 1.0;
+                    let k1 = ((index as f64 * per + 2.0) / (p as f64).log2()).ceil() as u32;
                     let t_p = clock();
                     let (zq1, rts1) = roots.lifted(k1.max(k));
                     let pows1 = powers(&zq1, &rts1, inv.max_exp);
@@ -1332,6 +1343,9 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
                     step_proven = zq1.small_integer(&v1, bound.ceil() as u64 + 1) == Some(value.clone());
                     prof(6, t_p);
                     trace(|| format!("  proof at precision p^{}: {} in {:.2}s", k1, step_proven, clock() - t_proof));
+                }
+                if proof == Proof::Always && !step_proven {
+                    return Err(format!("proof=True: the step {} -> {} (index {}) could not be proven", h.label(), kt.label(), index_big));
                 }
                 proven &= step_proven;
                 log.push(format!(
