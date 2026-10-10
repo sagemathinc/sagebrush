@@ -1241,8 +1241,44 @@ class ModularForms:
 
             sage: ModularForms(22, 2).new_subspace()
             Modular Forms subspace of dimension 0 of Modular Forms space of dimension 5 for Congruence Subgroup Gamma0(22) of weight 2 over Rational Field
+            sage: ModularForms(11, 2).new_subspace().dimension(), ModularForms(25, 4).new_subspace().dimension()
+            (2, 6)
         """
-        return _Subspace(self, "Modular Forms subspace", self._dims()["new"])
+        # the new cusp forms and the new Eisenstein series (the cusp forms'
+        # dimension alone was used: ModularForms(11, 2) gave 1, the second
+        # review's R2-MOD-F2)
+        return _Subspace(self, "Modular Forms subspace", self._dims()["new"] + self._new_eisenstein_dim())
+
+    def _new_eisenstein_dim(self):
+        """The dimension of the new Eisenstein subspace, for Gamma0(N): the
+        series E_k^(chi, chi^-1) with chi primitive of conductor M, N = M^2,
+        and in weight 2 also E_2(q) - N E_2(q^N) for N prime (as Sage counts
+        them; checked against Sage for N < 61, k = 2, 4, 6, 8).  Refused for
+        a nontrivial character, as in Sage."""
+        if self._chi is not None and not (hasattr(self._chi, "is_trivial") and self._chi.is_trivial()):
+            raise NotImplementedError("the new Eisenstein subspace with a nontrivial character")
+        import math
+        N, k = int(self._N), int(self._k)
+        if k % 2:
+            return 0
+        M = math.isqrt(N)
+        c = 0
+        if M * M == N:
+            c, m, p = 1, M, 2
+            while m > 1:
+                if m % p == 0:
+                    e = 0
+                    while m % p == 0:
+                        m //= p
+                        e += 1
+                    c *= (p - 2) if e == 1 else p ** (e - 2) * (p - 1) ** 2
+                p += 1
+        if k == 2:
+            if N == 1:
+                c = 0  # E_2 is not modular
+            if N > 1 and all(N % q for q in range(2, math.isqrt(N) + 1)):
+                c += 1
+        return c
 
     def newforms(self, names=None):
         """The newforms with rational coefficients (the others: newform_orbits()).
@@ -1277,10 +1313,12 @@ class ModularForms:
 
 
 class _Subspace:
-    def __init__(self, ambient, kind, dim):
+    def __init__(self, ambient, kind, dim, part=None):
         self._A = ambient
         self._kind = kind
         self._dim = dim
+        # which part a new subspace lies in (printed as Sage prints it)
+        self._part = part or kind
 
     def dimension(self):
         """The dimension of the subspace.
@@ -1309,8 +1347,17 @@ class _Subspace:
 
             sage: CuspForms(22, 2).new_subspace().dimension()
             0
+            sage: ModularForms(37, 2).eisenstein_subspace().new_subspace().dimension()
+            1
         """
-        return _Subspace(self._A, "Modular Forms subspace", self._A._dims()["new"])
+        # within this subspace: an Eisenstein subspace's new part is
+        # Eisenstein (it had the cusp forms' dimension, larger than its own:
+        # the second review's R2-MOD-F2)
+        if self._part == "Eisenstein subspace":
+            return _Subspace(self._A, "Modular Forms subspace", self._A._new_eisenstein_dim(), "Eisenstein subspace")
+        if self._part == "Cuspidal subspace":
+            return _Subspace(self._A, "Modular Forms subspace", self._A._dims()["new"], "Cuspidal subspace")
+        return _Subspace(self._A, "Modular Forms subspace", self._A._dims()["new"] + self._A._new_eisenstein_dim())
 
     def newforms(self, names=None):
         """The newforms with rational coefficients in the subspace.
@@ -1322,7 +1369,7 @@ class _Subspace:
             ...
             NotImplementedError: newforms with non-rational coefficients: sagebrush describes them by newform_orbits(23, 2) (label, dimension, trace form)
         """
-        if self._kind == "Eisenstein subspace":
+        if self._part == "Eisenstein subspace":
             return []
         return self._A.newforms(names)
 
@@ -1334,7 +1381,7 @@ class _Subspace:
             sage: CuspForms(23, 2).newform_orbits()  # sagebrush only
             [23.2.a.a (dimension 2): 2*q - q^2 - q^4 - 2*q^5 + O(q^6)]
         """
-        if self._kind == "Eisenstein subspace":
+        if self._part == "Eisenstein subspace":
             # newforms are cusp forms: S_k and E_k meet in 0
             return []
         return self._A.newform_orbits(prec)
