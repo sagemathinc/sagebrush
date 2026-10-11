@@ -247,6 +247,36 @@ try {
   await ev("sagebrush.kernel.restart(); true");
   await until("sagebrush.kernel.ready", 15000);
 
+  // F9: the same numbers on a cell's first run and its rerun (numpy imported before random); os.urandom stays random
+  await fileNew();
+  await set(["import numpy as np\nimport random\nprint(np.random.random(), random.random(), np.random.default_rng().random())", "import os\nprint(os.urandom(8).hex())"]);
+  await run([0, 1]);
+  const f9a = [await out(0), await out(1)];
+  await run(0);
+  await run(1);
+  const f9b = [await out(0), await out(1)];
+  ok(f9a[0] === f9b[0] && f9a[1] !== f9b[1], `F9: a cell's random, numpy.random and default_rng() numbers are the same on its first run and its rerun; os.urandom is not (${f9a[0]} | ${f9a[1]} vs ${f9b[1]})`);
+  // F8: a reader that ran before the writer (the file edge discovered by running) is rerun
+  await fileNew();
+  await ev("sagebrush.kernel.post({ fsPut: '/react_f8', data: new TextEncoder().encode('old') }); true");
+  await set(["print(open('/react_f8').read())", "open('/react_f8', 'w').write('new')"]);
+  r = await run([0, 1]);
+  ok((await out(0)) === "new", `F8: a cell that read a file before another cell wrote it reruns (${await out(0)}; ran ${r.ran.length})`);
+  // F5: switching notebooks during a run: the old run does not write into the new notebook's cells
+  await fileNew();
+  const idA = await ev("localStorage.getItem('sagebrush-current')");
+  await set(["import time\ntime.sleep(1.2)\nx = 1", "print('FROM A', x)"]);
+  const cellIds = await ev("sagebrush.notebook.cells().map((c) => c.id)");
+  await ev("window.__runA = sagebrush.notebook.runAll(); true");
+  await sleep(300);
+  await fileNew();
+  // a notebook with the same cell ids (as a copy has)
+  await ev(`(() => { sagebrush.notebook.replace({ mode: "python", cells: [{ id: ${JSON.stringify(cellIds[0])}, code: "x = 987" }, { id: ${JSON.stringify(cellIds[1])}, code: "print('FROM B', x)" }] }); return true; })()`);
+  await sleep(300);
+  await run([0, 1]);
+  await sleep(2000);
+  ok((await out(1)) === "FROM B 987", `F5: a run of a notebook switched away from does not write into the one shown (${await out(1)})`);
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);

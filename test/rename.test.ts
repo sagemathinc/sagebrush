@@ -39,7 +39,7 @@ test("page-order scoping's names (x\u02b92), and Sage chains", () => {
   const cells = codes.map((code, i) => { const a = analyzeCell(code); return { id: `c${i}`, code, defines: a.defs.has("x"), reads: a.refs.has("x") }; });
   assert.deepEqual(Object.fromEntries(renameRedefinitions(cells, "x", new Set(["x"]), "python", "\u02b9")!), { c1: "x\u02b92 = x + 1", c2: "x\u02b93 = x\u02b92 * 10", c3: "print(x\u02b93)" });
   const sage = ["R.<x> = QQ[]", "x = var('x')", "f = x^2 + 1/2\nx = 3"].map((code, i) => { const a = analyzeCell(code, "c", { mode: "sage" }); return { id: `c${i}`, code, defines: a.defs.has("x"), reads: a.refs.has("x") }; });
-  assert.deepEqual(Object.fromEntries(renameRedefinitions(sage, "x", new Set(["x"]), "sage", "\u02b9")!), { c1: "x\u02b92 = var('x')", c2: "f = x\u02b92^2 + 1/2\nx\u02b93 = 3" });
+  assert.deepEqual(Object.fromEntries(renameRedefinitions(sage, "x", new Set(["x"]), "sage", "\u02b9")!), { c1: "x\u02b92 = SR.var('x')", c2: "f = x\u02b92^2 + 1/2\nx\u02b93 = 3" });
 });
 
 test("a Sage cell defining x by var('x') alone", () => {
@@ -59,4 +59,26 @@ test("Sage's K.<a> = ... (the preparser adds an occurrence of K)", () => {
   });
   // a keyword argument is not the name
   assert.equal(renameInCell("K = 1\nf(K=K)", "K", "K2", { mode: "sage" }), "K2 = 1\nf(K=K2)");
+});
+
+test("review cases: compound statements, class attributes, x += 1, Sage var (REACT-F6, F7)", () => {
+  const q = (codes: string[], name: string, mode: "python" | "sage" = "python") => {
+    const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode }); return { id: `c${i}`, code, defines: a.defs.has(name), reads: a.refs.has(name) }; });
+    const r = renameRedefinitions(cells, name, new Set([name]), mode, "\u02b9");
+    return r && Object.fromEntries(r);
+  };
+  // the loop's body reads the loop's x; the iterable reads the old one
+  assert.deepEqual(q(["x = 10", "for x in [2, 3]:\n    print(x)", "print(x)"], "x"), { c1: "for x\u02b92 in [2, 3]:\n    print(x\u02b92)", c2: "print(x\u02b92)" });
+  assert.deepEqual(q(["x = 10", "for x in [x, 3]:\n    print(x)"], "x"), { c1: "for x\u02b92 in [x, 3]:\n    print(x\u02b92)" });
+  assert.deepEqual(q(["x = 10", "if True:\n    x = 2\n    print(x)"], "x"), { c1: "if True:\n    x\u02b92 = 2\n    print(x\u02b92)" });
+  // a use in a loop before the definition in that loop: no one name fits
+  assert.equal(q(["x = 10", "while x < 20:\n    x = x + 1"], "x"), null);
+  // methods do not see class attributes
+  assert.deepEqual(q(["x = 1", "x = 2\nclass C:\n    x = 100\n    def f(self):\n        return x", "print(C().f(), x)"], "x"), {
+    c1: "x\u02b92 = 2\nclass C:\n    x = 100\n    def f(self):\n        return x\u02b92", c2: "print(C().f(), x\u02b92)",
+  });
+  // x += 1: the new x starts from the old one
+  assert.deepEqual(q(["x = 1", "x += 1", "print(x)"], "x"), { c1: "x\u02b92 = x; x\u02b92 += 1", c2: "print(x\u02b92)" });
+  // Sage: x = var('x') redefining x does not set the first x
+  assert.deepEqual(q(["x = 123", "print(x)", "x = var('x')", "print(x)"], "x", "sage"), { c2: "x\u02b92 = SR.var('x')", c3: "print(x\u02b92)" });
 });

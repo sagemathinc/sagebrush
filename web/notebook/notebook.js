@@ -671,9 +671,9 @@ export function createNotebook(root, opts = {}) {
   // The reactive notebook's per-cell seed: SHA-256 of the notebook's seed (made
   // once, kept in the document) and the cell's id, so a cell draws the same
   // random numbers however often and in whatever order it runs, and verify()
-  // recomputes them exactly.  (Off with the document's reproducible: false.)
+  // recomputes them exactly.  (Python's random, numpy.random, Sage's: not os.urandom.)
   async function cellSeed(cell) {
-    if (!reactive() || meta.reproducible === false || !crypto.subtle) return null;
+    if (!reactive() || !crypto.subtle) return null;
     if (!/^[0-9a-f]{64}$/.test(meta.seed ?? "")) {
       meta = { ...meta, seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("") };
       schedule();
@@ -696,8 +696,14 @@ export function createNotebook(root, opts = {}) {
   function engine() {
     if (kernel.reactive) kernel.reactive.budget = budget; // (the notebook's, when interpreters are switched)
     if (!kernel.reactive) {
+      // (the notebook shown may change: this scheduler acts only while its
+      // interpreter is the one shown; otherwise its runs stop, it sees the
+      // cells it last saw, and it touches no other notebook's cells)
+      const k = kernel;
+      const shown = () => kernel === k;
+      let lastCells = [];
       const r = (kernel.reactive = new Reactive({
-        cells: () => cells().filter((c) => c.type === "code").map((c) => ({ id: c.id, code: c.ta.value, manual: !!c.metadata?.sagebrush?.manual })),
+        cells: () => (shown() ? (lastCells = cells().filter((c) => c.type === "code").map((c) => ({ id: c.id, code: c.ta.value, manual: !!c.metadata?.sagebrush?.manual }))) : lastCells),
         analyze(code) {
           const key = mode + "\0" + code;
           if (!analyses.has(key)) {
@@ -707,13 +713,15 @@ export function createNotebook(root, opts = {}) {
           return analyses.get(key);
         },
         execute(id, code, forget) {
+          if (!shown()) return Promise.resolve({ ok: false, ms: 0, stopped: true });
           const cell = cellById(id);
           return cell ? execCell(cell, code, forget).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
         },
-        forget: (names) => new Promise((resolve) => kernel.execute("", { mode, forget: names }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
+        forget: (names) => new Promise((resolve) => k.execute("", { mode, forget: names }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
         // page-order scoping (src/rename.ts in the analyzer's worker)
         ...(opts.analyzer?.rename ? { rename: (q) => opts.analyzer.rename({ ...q, mode, sep: SCOPE_SEP }) } : {}),
         status(id, st) {
+          if (!shown()) return;
           const cell = cellById(id);
           if (cell) { showStatus(cell, st); markEdited(cell); }
           emit("status", id, st);

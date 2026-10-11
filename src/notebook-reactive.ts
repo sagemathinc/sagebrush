@@ -148,14 +148,17 @@ export class Reactive {
    * another session).  Nothing runs.
    */
   load(opts: { stale?: boolean; fresh?: Set<string> } = {}): Promise<RunReport> {
-    return this.serial(async () => {
+    return this.serial(() => this.loadNow(opts));
+  }
+  private async loadNow(opts: { stale?: boolean; fresh?: Set<string> }): Promise<RunReport> {
+    {
       const cells = this.host.cells();
       await this.registerAll(new Map(cells.map((c) => [c.id, c.code])), cells);
       this.errors = new Map(this.graph.errors);
       for (const [id, errors] of this.errors) this.host.status(id, { state: "error", errors });
       if (opts.stale ?? true) for (const c of cells) if (!this.errors.has(c.id) && !opts.fresh?.has(c.id)) this.markStale(c.id, "loaded");
       return this.report([], [], [], []);
-    });
+    }
   }
 
   /**
@@ -163,13 +166,16 @@ export class Reactive {
    * and stale.
    */
   reset(): Promise<RunReport> {
-    this.registered.clear();
-    this.errors.clear();
-    this.stale.clear();
-    this.outcome.clear();
-    this.files.clear();
-    this.graph = new NotebookGraph();
-    return this.load({ stale: true });
+    // (after what is running: a run in progress keeps its registrations)
+    return this.serial(async () => {
+      this.registered.clear();
+      this.errors.clear();
+      this.stale.clear();
+      this.outcome.clear();
+      this.files.clear();
+      this.graph = new NotebookGraph();
+      return this.loadNow({ stale: true });
+    });
   }
 
   /** The interpreter restarted: every cell is stale. */
@@ -502,8 +508,10 @@ export class Reactive {
         this.host.status(id, { state: "cancelled", ...block });
         continue;
       }
+      const reg = this.registered.get(id);
+      if (!reg) continue; // (gone meanwhile)
       this.host.status(id, { state: "running" });
-      const r = await this.host.execute(id, this.registered.get(id)!.code, this.defsOf(id));
+      const r = await this.host.execute(id, reg.code, this.defsOf(id));
       ran.push(id);
       this.stale.delete(id);
       // files: what it read and wrote this time; a file it wrote, read by
@@ -514,8 +522,9 @@ export class Reactive {
         if (io.reads.length || io.writes.length) this.files.set(id, io);
         else this.files.delete(id);
         this.graph.setFiles(this.files);
+        // (a reader that ran before this write, in this run, read the old file: it reruns too)
         for (const f of io.writes) for (const reader of this.graph.readersOf(f)) {
-          if (reader !== id && !order.includes(reader) && !this.errors.has(reader)) followUp.add(reader);
+          if (reader !== id && (!order.includes(reader) || ran.includes(reader)) && !this.errors.has(reader)) followUp.add(reader);
         }
       }
       this.times.set(id, r.ms);
@@ -536,7 +545,8 @@ export class Reactive {
     if (forgetLater.length) await this.host.forget(forgetLater);
     // readers of files written in this run (once: a writer they lead back to is not rerun)
     if (followUp.size && !stopped && !followAgain) {
-      const more = [...this.graph.closure(followUp)].filter((id) => !ran.includes(id) && !this.errors.has(id));
+      // (one round: what it writes in turn is not followed again)
+      const more = [...this.graph.closure(followUp)].filter((id) => !this.errors.has(id));
       const r2 = await this.execute(new Set(), more, all ? Infinity : Math.max(0, budget - autoMs), all, true);
       return this.report([...ran, ...r2.ran], [...new Set([...stale, ...r2.stale])], [...failed, ...r2.failed], [...cancelled, ...r2.cancelled]);
     }

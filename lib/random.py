@@ -112,7 +112,15 @@ class Random:
         return mu + z * sigma
 
 
-_inst = Random()
+def _cell_seed():
+    # (the reactive notebook's per-cell seed, when a cell imports random:
+    # src/notebook-session.ts)
+    import builtins
+    s = getattr(builtins, "__pyjs_seed__", None)
+    return s[0] if s else None
+
+
+_inst = Random(_cell_seed())
 seed = _inst.seed
 random = _inst.random
 getrandbits = _inst.getrandbits

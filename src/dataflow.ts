@@ -75,8 +75,10 @@ class Visitor {
   refs = new Map<string, RefData[]>();
   constructor(public id: string) {}
 
+  // names never renamed as private (a Sage cell's var('_x'), which sets the global _x)
+  keep = new Set<string>();
   mangle(name: string, ignoreScope = false): string {
-    return isLocal(name) && (this.blocks.length === 1 || ignoreScope) ? `_${this.id}${name}` : name;
+    return isLocal(name) && !this.keep.has(name) && (this.blocks.length === 1 || ignoreScope) ? `_${this.id}${name}` : name;
   }
   isDefined(name: string): boolean {
     return this.blocks.some((b) => b.defs.has(name));
@@ -431,7 +433,9 @@ function mutated(tree: Node): Set<string> {
  */
 export function mangleLocals(tree: any, id: string): void {
   try {
-    new Visitor("cell_" + id).visit(tree);
+    const v = new Visitor("cell_" + id);
+    for (const n of sageInjected(tree)) v.keep.add(n);
+    v.visit(tree);
   } catch (e) {
     if (!(e instanceof ImportStarError)) throw e;
   }

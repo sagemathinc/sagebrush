@@ -31,7 +31,7 @@ const session = notebookSession((m) => postMessage(m), {
     begin: (m) => {
       reads = new Set();
       writes = new Set();
-      replayEnv.begin(m.clock, m.seed);
+      replayEnv.begin(m.clock);
     },
     end: () => ({ ...(replayEnv.end() as any), ...(reads.size || writes.size ? { files: { reads: [...reads], writes: [...writes] } } : {}) }),
   },

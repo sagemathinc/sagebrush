@@ -220,7 +220,7 @@
       <button id="ttclose" aria-label="Close TimeTravel" title="Back to the notebook">✕</button>
     </div>
     <div id="ttmarks" aria-hidden="true"></div>
-    <p class="ttnote">The cells as they were, version by version, kept in this browser (outputs are not kept). Reverting adds a new version, so it can be undone here too. The marks are the versions where code ran: <b>Resume from here</b> recreates the session as it was then, in a new tab. <label title="Random numbers (random, numpy, os.urandom) come from a seed kept in the history, so that a session can be recreated exactly; anyone with the history can then reproduce them. Takes effect when the interpreter restarts."><input type="checkbox" id="ttrepro" checked> Reproducible randomness</label></p>
+    <p class="ttnote">The cells as they were, version by version, kept in this browser (outputs are not kept). Reverting adds a new version, so it can be undone here too. The marks are the versions where code ran. <label id="ttreprolabel" title="Random numbers (random, numpy, os.urandom) come from a seed kept in the history, so that a session can be recreated exactly; anyone with the history can then reproduce them. Takes effect when the interpreter restarts."><input type="checkbox" id="ttrepro" checked> Reproducible randomness</label></p>
     <div id="ttview"></div>
   </section>
   <div id="printhead"><h1 id="printname"></h1><p id="printinfo"></p></div>
@@ -535,7 +535,10 @@ function makeKernel(owner) {
       notebookId: () => owner,
       textHash: () => textHashFn,
       blobs: () => blobDbReady,
-      reproducible: () => current.id !== owner || nb.meta.reproducible !== false,
+      // (the session's entropy seeded for the journal's replay: only without the
+      // reactive notebook, whose cells have their own seeds and whose os.urandom
+      // stays truly random)
+      reproducible: () => !REACTIVE && (current.id !== owner || nb.meta.reproducible !== false),
     });
   }
   return { kernel: k, journal: j, used: 0, started: false };
@@ -1084,6 +1087,8 @@ async function open(store, id, kind = "browser") {
   showName(doc.name);
   modeEl.value = nb.mode;
   $("#ttrepro").checked = nb.meta.reproducible !== false;
+  // (the reactive notebook: random numbers are reproducible per cell, always)
+  $("#ttreprolabel").hidden = REACTIVE;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
   startHistory(id);
   presence.open(id);
