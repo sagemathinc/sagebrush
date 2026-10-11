@@ -86,6 +86,7 @@ test("the budget: a slow descendant waits, with what is below it", async () => {
   assert.deepEqual(rep.ran, ["c0", "c3"]);
   assert.deepEqual(rep.stale.sort(), ["c1", "c2"]);
   assert.equal(nb.r.staleSummary().ms, 3001);
+  assert.equal(nb.r.staleSummary().untimed, 0);
   assert.deepEqual(nb.states.get("c1"), { state: "stale", why: "budget" });
   assert.deepEqual(nb.states.get("c2"), { state: "stale", why: "ancestor" });
   // an explicit run of what is stale

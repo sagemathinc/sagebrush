@@ -1015,7 +1015,13 @@ function showReactiveBar() {
   }
   const s = r?.staleSummary();
   runStaleEl.hidden = !s?.cells.length;
-  if (s?.cells.length) runStaleEl.textContent = `Run stale (${s.cells.length}${s.ms >= 1000 ? `, about ${Math.round(s.ms / 1000)} s` : ""})`;
+  if (s?.cells.length) {
+    // (an estimate from the cells' last run times: "+" when some were never timed)
+    const t = s.ms < 1000 ? "under 1 s" : s.ms < 90000 ? `${Math.round(s.ms / 1000)} s` : `${Math.round(s.ms / 60000)} min`;
+    const est = s.untimed === s.cells.length ? "" : `, ~${t}${s.untimed ? "+" : ""}`;
+    runStaleEl.textContent = `Run stale (${s.cells.length}${est})`;
+    runStaleEl.title = `Run the ${s.cells.length} stale cell${s.cells.length > 1 ? "s" : ""}` + (est ? `: about ${t} by their last runs${s.untimed ? ` (${s.untimed} not timed yet)` : ""}` : " (not timed yet)");
+  }
 }
 nb.on("status", () => { cancelAnimationFrame(staleShown); staleShown = requestAnimationFrame(showReactiveBar); });
 nb.on("budget", showReactiveBar);

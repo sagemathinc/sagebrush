@@ -503,6 +503,9 @@ try {
   await until(ready);
   await until(`sagebrush.notebook.cells().length >= 3 && sagebrush.notebook.cells()[2].el.classList.contains('stale')`, 10000);
   ok((await out(2)) === "6", "after a reload, the outputs are shown, stale");
+  // the last run times are kept in the document: a stale cell and the Run stale button give estimates
+  const est = await ev("[sagebrush.notebook.cells()[1].time.textContent, document.querySelector('#runstale').textContent]");
+  ok(/^stale \(~\d+ ms\)$/.test(est[0]) && /^Run stale \(3, ~under 1 s\)$/.test(est[1]), `after a reload, time estimates from the last runs (${JSON.stringify(est)})`);
   const before = JSON.stringify(await ev("sagebrush.notebook.graph().map((c) => [c.state, c.reads, c.defines])"));
   r = await run(2);
   ok(JSON.stringify(r?.ran) === "[0,1,2]" && (await out(2)) === "6", `running the last cell first runs its stale ancestors (${JSON.stringify(r?.ran)}; before: ${before}; ${await out(2)})`);

@@ -620,6 +620,19 @@ export function createNotebook(root, opts = {}) {
     cell.runb.textContent = "▶";
     cell.el.classList.remove("queued", "running");
   }
+  // A code cell's last run time, kept in the document (for the estimates of
+  // stale cells, and the time limit's choices, after a reload): two
+  // significant digits, changed only when it changes noticeably (a rerun
+  // taking about as long leaves the document as it was).
+  function rememberTime(cell, ms) {
+    const r = ms < 10 ? Math.round(ms) : Number(ms.toPrecision(2));
+    if (cell.ms == null || Math.abs(r - cell.ms) > Math.max(50, cell.ms / 4)) cell.ms = r;
+  }
+  // (the scheduler learns the times kept in the document, where it has none)
+  function seedTimes() {
+    const r = kernel?.reactive;
+    if (r) for (const c of cells()) if (c.type === "code" && c.ms != null && !r.times.has(c.id)) r.times.set(c.id, c.ms);
+  }
   function run(cell) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
@@ -668,6 +681,7 @@ export function createNotebook(root, opts = {}) {
         }
         cell.n.textContent = `[${kernel ? ++kernel.execCount : ++execCount}]`;
         kernel?.ran?.add(cell.id);
+        if (!info?.interrupted) rememberTime(cell, ms);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
         resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
@@ -785,7 +799,9 @@ export function createNotebook(root, opts = {}) {
       const ms = kernel?.reactive?.times.get(cell.id);
       const why = { budget: `not rerun automatically${ms ? ` (it takes about ${secs(ms)})` : ""}`, manual: "a manual cell: run it yourself", ancestor: "a cell it depends on is stale", interrupted: "interrupted", loaded: "not computed in this session", restart: "the interpreter restarted" }[st.why] ?? "";
       cls.add("stale");
-      cell.time.textContent = "stale" + (st.why === "budget" || st.why === "manual" ? ": " + why : "");
+      // (with how long it took last time, if known)
+      const est = ms != null && st.why !== "budget" ? ` (~${secs(ms)})` : "";
+      cell.time.textContent = "stale" + (st.why === "budget" || st.why === "manual" ? ": " + why : "") + est;
       cell.time.title = `Stale: ${why}. Run the cell to update it.`;
       if (cell.n.textContent === "[*]") cell.n.textContent = "[ ]";
       return;
@@ -1451,7 +1467,7 @@ export function createNotebook(root, opts = {}) {
           ? { id: c.id, type: "markdown", code: c.ta.value, ...(c.attachments ? { attachments: c.attachments } : {}) }
           : c.type === "raw"
             ? { id: c.id, type: "raw", code: c.ta.value }
-            : { id: c.id, code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null }),
+            : { id: c.id, code: c.ta.value, outputs: saveOutputs(c.out), n: (/\[(\d+)\]/.exec(c.n.textContent) || [])[1] ?? null, ...(c.ms != null ? { ms: c.ms } : {}) }),
         ...(c.metadata ? { metadata: c.metadata } : {}),
       })),
     };
@@ -1515,6 +1531,7 @@ export function createNotebook(root, opts = {}) {
     } else {
       loadOutputs(cell.out, c.outputs);
       if (c.n != null) cell.n.textContent = `[${c.n}]`;
+      cell.ms = typeof c.ms === "number" && c.ms >= 0 ? c.ms : null;
       if (opts.staleOnLoad && !kernel?.ran?.has(cell.id)) markStale(cell);
     }
   }
@@ -1543,6 +1560,7 @@ export function createNotebook(root, opts = {}) {
     for (const c of cells()) if (c.type === "code") showManual(c);
     if (kernel.reactive) reactiveSync();
     else engine().load({ fresh: kernel.ran ?? new Set() });
+    seedTimes();
     emit("budget", budget); // (after: a listener may ask for the engine)
   }
   // Apply a document changed elsewhere (another tab, a collaborator, an agent):
