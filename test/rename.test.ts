@@ -124,3 +124,34 @@ test("third review: class bodies in execution order, nested classes, multi-line 
     c2: 'x\u02b92 = 2\nprint("""hello\nvar(\'x\')\nbye""")', c3: "print(x\u02b92)",
   });
 });
+
+test("fourth review: class bodies through compound statements and nested scopes, Sage var keywords", () => {
+  const q = (codes: string[], name: string, mode: "python" | "sage" = "python") => {
+    const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode }); return { id: `c${i}`, code, defines: a.defs.has(name), reads: a.refs.has(name) }; });
+    const r = renameRedefinitions(cells, name, new Set([name]), mode, "\u02b9");
+    return r && Object.fromEntries(r);
+  };
+  const S = "x\u02b92";
+  // after `del x` the class body reads the module's x again
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x=100\n    del x\n    y=x", "print(C.y,x)"], "x"), { c2: `${S}=2\nclass C:\n    x=100\n    del x\n    y=${S}`, c3: `print(C.y,${S})` });
+  // a binding inside an if is seen after it in its branch
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    if True:\n        x=100\n        y=x", "print(C.y,x)"], "x"), { c2: `${S}=2\nclass C:\n    if True:\n        x=100\n        y=x`, c3: `print(C.y,${S})` });
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    if True:\n        x=100\n    y=x", "print(C.y,x)"], "x"), { c2: `${S}=2\nclass C:\n    if True:\n        x=100\n    y=x`, c3: `print(C.y,${S})` });
+  // ... and before it, the module's
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    for i in range(2):\n        y=1\n    z=x\n    with open('f') as x:\n        pass", "print(C.z,x)"], "x"), { c2: `${S}=2\nclass C:\n    for i in range(2):\n        y=1\n    z=${S}\n    with open('f') as x:\n        pass`, c3: `print(C.z,${S})` });
+  // lambdas, comprehensions and functions under a compound statement do not see the class's x
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x=100\n    f=lambda self: x", "print(C().f(),x)"], "x"), { c2: `${S}=2\nclass C:\n    x=100\n    f=lambda self: ${S}`, c3: `print(C().f(),${S})` });
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x=100\n    ys=[x for _i in range(1)]", "print(C.ys,x)"], "x"), { c2: `${S}=2\nclass C:\n    x=100\n    ys=[${S} for _i in range(1)]`, c3: `print(C.ys,${S})` });
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x=100\n    if True:\n        def f(self): return x", "print(C().f(),x)"], "x"), { c2: `${S}=2\nclass C:\n    x=100\n    if True:\n        def f(self): return ${S}`, c3: `print(C().f(),${S})` });
+  // the first iterable of a comprehension is evaluated in the class body
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x=[100]\n    ys=[i for i in x]", "print(C.ys,x)"], "x"), { c2: `${S}=2\nclass C:\n    x=[100]\n    ys=[i for i in x]`, c3: `print(C.ys,${S})` });
+  // a load that reads the class's x or the module's depending on the run cannot be renamed
+  assert.equal(q(["x=1", "print(x)", "x=2\nclass C:\n    if c:\n        x=100\n    y=x", "print(C.y,x)"], "x"), null);
+  assert.equal(q(["x=1", "print(x)", "x=2\nclass C:\n    for i in range(2):\n        y=x\n        x=i", "print(C.y,x)"], "x"), null);
+  assert.equal(q(["x=1", "print(x)", "x=2\nclass C:\n    x+=1", "print(C.x,x)"], "x"), null);
+  // `except E as x` deletes x at its end; `global x` in a class body makes it the module's
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x=100\n    try:\n        pass\n    except E as x:\n        pass\n    y=x", "print(C.y,x)"], "x"), null);
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    global x\n    x=3\n    y=x", "print(C.y,x)"], "x"), { c2: `${S}=2\nclass C:\n    global ${S}\n    ${S}=3\n    y=${S}`, c3: `print(C.y,${S})` });
+  // var('x') after an escaped triple quote in a string is text
+  assert.deepEqual(q(["x=1", "print(x)", 'x=2\nprint("""hello\\"""\nvar(\'x\')\nbye""")', "print(x)"], "x", "sage"), { c2: `${S}=2\nprint("""hello\\"""\nvar('x')\nbye""")`, c3: `print(${S})` });
+});

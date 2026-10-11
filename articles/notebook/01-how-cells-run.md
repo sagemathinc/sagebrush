@@ -93,7 +93,9 @@ If a name is defined by several cells and **no cell reads it** (a loop
 variable `i`, a scratch figure `fig`), nothing is renamed: each cell simply
 sets it. The same `import` in several cells is one definition.
 
-When renaming is not possible (Magma cells), marimo's rule applies: a name
+When renaming is not possible (Magma cells; a class body where a read of
+`x` gets either the class's own `x` or the notebook's depending on how the
+body runs, as after `if c: x = 1`), marimo's rule applies: a name
 read by other cells may be defined by only one cell, and the cells
 involved show an error with a button that renames the later definitions in
 the code itself.

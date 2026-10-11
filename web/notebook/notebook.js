@@ -1754,12 +1754,25 @@ export function createNotebook(root, opts = {}) {
     // (with the ids that pictures number from counters made the same, in
     // their SVG only: the plot's sbclip7, and safeSvg's per-picture prefix s12-)
     // (one to one, in order of first use, so that each reference keeps pointing at its own)
+    // (in the parsed SVG's id attributes and references only, not its text)
     const ids = (svg) => {
+      const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+      if (doc.querySelector("parsererror")) return svg;
       const names = new Map();
-      return svg.replace(/(\bid="|url\(#|href="#)(?:s\d+-)?(sbclip\d+)/g, (_, pre, id) => {
+      const norm = (id) => {
+        id = id.replace(/^s\d+-/, "");
+        if (!/^sbclip\d+$/.test(id)) return id;
         if (!names.has(id)) names.set(id, `sbclip#${names.size}`);
-        return pre + names.get(id);
-      }).replace(/(\bid="|url\(#|href="#)s\d+-/g, "$1");
+        return names.get(id);
+      };
+      for (const el of doc.querySelectorAll("*")) {
+        for (const { name, value } of [...el.attributes]) {
+          if (name === "id") el.setAttribute(name, norm(value));
+          else if (/(^|:)href$/.test(name) && value.startsWith("#")) el.setAttribute(name, "#" + norm(value.slice(1)));
+          else if (/url\(\s*#/i.test(value)) el.setAttribute(name, value.replace(/url\(\s*#([^)\s]*)/gi, (_, id) => "url(#" + norm(id)));
+        }
+      }
+      return new XMLSerializer().serializeToString(doc);
     };
     const whole = (c) => JSON.stringify(saveOutputs(c.out).map((o) => (typeof o.data?.["image/svg+xml"] === "string" ? { ...o, data: { ...o.data, "image/svg+xml": ids(o.data["image/svg+xml"]) } } : o)));
     const before = new Map(cells().filter((c) => c.type === "code").map((c) => [c.id, [outputText(c.out), whole(c)]]));

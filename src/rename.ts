@@ -29,13 +29,19 @@ interface Occurrence {
   alias?: string | null;
   // `global x` in a function: the same name as that function's assignments
   global?: true;
+  // in a class body, a load that may read the class's attribute or the
+  // global, depending on the run: it can only keep its name
+  maybe?: true;
 }
 
 const BINDING_TYPES = new Set(["FunctionDef", "AsyncFunctionDef", "ClassDef"]);
 // whether the name, where the walk is, is a local (true), the global (false),
 // or, in a class body before the class binds it: the global for loads, an
-// attribute for stores ("store")
-type Shadow = boolean | "store";
+// attribute for stores ("store"), or either for loads, depending on the run
+// ("maybe")
+type Shadow = boolean | "store" | "maybe";
+// the scopes a class body's names are not visible in
+const SCOPES = new Set(["FunctionDef", "AsyncFunctionDef", "ClassDef", "Lambda", "ListComp", "SetComp", "DictComp", "GeneratorExp"]);
 // CPython's columns are UTF-8 byte offsets
 const enc = new TextEncoder(), dec = new TextDecoder();
 const bytesLen = (s: string) => enc.encode(s).length;
@@ -58,6 +64,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         case "alias": bound.add((n.asname ?? n.name).split(".")[0]); return;
         case "ExceptHandler": if (n.name) bound.add(n.name); break;
         case "MatchAs": case "MatchStar": if (n.name) bound.add(n.name); break;
+        case "MatchMapping": if (n.rest) bound.add(n.rest); break;
       }
       for (const k of Object.keys(n)) if (k !== "_type") scan(n[k]);
     };
@@ -74,77 +81,199 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
     const start = bytesLen(text.slice(0, m.index + m[0].length - name.length));
     return [start, start + bytesLen(name)];
   };
+  // whether a class body declares `global name` (for the whole body)
+  const declaresGlobal = (body: any[]): boolean => {
+    let found = false;
+    const scan = (n: any): void => {
+      if (found || !n || typeof n !== "object") return;
+      if (Array.isArray(n)) return n.forEach(scan);
+      if (n._type === "Global" && n.names.includes(name)) { found = true; return; }
+      if (SCOPES.has(n._type)) return;
+      for (const k of Object.keys(n)) if (k !== "_type") scan(n[k]);
+    };
+    scan(body);
+    return found;
+  };
   // A class: its decorators and bases are evaluated where it is (`here`); its
-  // body in order: a load of the name reads the class's attribute once the
-  // body has bound it, before that the scope around (`outer`, which is also
-  // what its methods' bodies and nested classes' bodies see); the body's own
-  // bindings are attributes, never the global ("store": loads visible,
-  // stores not).
-  const walkClass = (n: any, here: Shadow, outer: Shadow, stmt: number, path: [any, string][], record: boolean): void => {
+  // body in execution order: a load of the name reads the class's attribute
+  // once the body has bound it, before that the scope around (`outer`, which
+  // is also what the functions, lambdas, comprehensions and classes nested in
+  // it see); the body's own bindings are attributes, never the global
+  // ("store": loads visible, stores not).  Where it depends on the run (bound
+  // in one branch of an if, or in a loop) a load may read either ("maybe").
+  const walkClass = (n: any, here: Shadow, outer: boolean, stmt: number, path: [any, string][]): void => {
     const p = (key: string): [any, string][] => [...path, [n, key]];
-    walk(n.decorator_list, here, stmt, p("decorator_list"));
-    walk(n.bases, here, stmt, p("bases"));
-    walk(n.keywords, here, stmt, p("keywords"));
-    if (record && n.name === name && !here) {
+    walk(n.decorator_list, here, stmt, p("decorator_list"), outer);
+    walk(n.bases, here, stmt, p("bases"), outer);
+    walk(n.keywords, here, stmt, p("keywords"), outer);
+    if (n.name === name && !here) {
       const d = defName(n);
       if (d) out.push({ line: n.lineno, col: d[0], end: d[1], store: true, stmt, path });
     }
-    let bound = false;
-    for (const st of n.body) {
-      const now: Shadow = outer === true || bound ? true : "store";
-      const at: [any, string][] = [...p("body"), [st, "body"]];
-      if (st._type === "FunctionDef" || st._type === "AsyncFunctionDef") {
-        walk(st.decorator_list, now, stmt, at);
-        walk(st.args?.defaults, now, stmt, at);
-        walk(st.args?.kw_defaults, now, stmt, at);
-        walk(st.returns, now, stmt, at);
-        walk(st.body, outer === true || localsOf(st.body, params(st.args)).has(name) ? true : outer, stmt, at);
-        if (st.name === name) bound = true;
-      } else if (st._type === "ClassDef") {
-        walkClass(st, now, outer, stmt, [...p("body")], false);
-        if (st.name === name) bound = true;
-      } else {
-        walk(st, now, stmt, at);
-        if (localsOf([st], []).has(name)) bound = true;
+    if (declaresGlobal(n.body)) return walk(n.body, false, stmt, p("body"), outer);
+    type State = boolean | "maybe";
+    const join = (a: State, b: State): State => (a === b ? a : "maybe");
+    let bound: State = false;
+    // (the states anywhere in try bodies being walked, for their handlers)
+    const tries: { s: State }[] = [];
+    const note = () => { for (const t of tries) t.s = join(t.s, bound); };
+    const now = (): Shadow => (outer || bound === true ? true : bound ? "maybe" : "store");
+    const expr = (x: any, at: [any, string][]) => walk(x, now(), stmt, at, outer);
+    const binds = (x: any) => localsOf([x], []).has(name);
+    const block = (list: any[], at: [any, string][]) => { for (const st of list) one(st, at); };
+    const one = (st: any, at: [any, string][]): void => {
+      note();
+      const u = (key: string, ...more: [any, string][]): [any, string][] => [...at, [st, key], ...more];
+      switch (st._type) {
+        case "If": {
+          expr(st.test, u("test"));
+          const b0 = bound;
+          block(st.body, u("body"));
+          const b1 = bound;
+          bound = b0;
+          block(st.orelse, u("orelse"));
+          // (`if True:` takes its branch)
+          const k = st.test._type === "Constant" && typeof st.test.value === "boolean" ? st.test.value : null;
+          bound = k === null ? join(b1, bound) : k ? b1 : bound;
+          break;
+        }
+        case "For": case "AsyncFor": case "While": {
+          if (st._type !== "While") expr(st.iter, u("iter"));
+          const pass = () => {
+            if (st._type === "While") expr(st.test, u("test"));
+            else {
+              expr(st.target, u("target"));
+              if (binds(st.target)) bound = true;
+            }
+            block(st.body, u("body"));
+          };
+          // the state at the top of the loop (before any pass or after one):
+          // found by passes that record nothing
+          let head = bound;
+          for (;;) {
+            const mark = out.length;
+            bound = head;
+            pass();
+            out.length = mark;
+            const h = join(head, bound);
+            if (h === head) break;
+            head = h;
+          }
+          bound = head;
+          pass();
+          bound = head;
+          block(st.orelse, u("orelse"));
+          break;
+        }
+        case "With": case "AsyncWith":
+          for (const it of st.items) {
+            expr(it.context_expr, u("items", [it, "context_expr"]));
+            if (it.optional_vars) {
+              expr(it.optional_vars, u("items", [it, "optional_vars"]));
+              if (binds(it.optional_vars)) bound = true;
+            }
+          }
+          block(st.body, u("body"));
+          break;
+        case "Try": case "TryStar": {
+          const t = { s: bound };
+          tries.push(t);
+          block(st.body, u("body"));
+          tries.pop();
+          note();
+          block(st.orelse, u("orelse"));
+          let end = bound;
+          for (const h of st.handlers) {
+            bound = t.s;
+            expr(h.type, u("handlers", [h, "type"]));
+            if (h.name === name) bound = true;
+            block(h.body, u("handlers", [h, "body"]));
+            // (`except E as x` deletes x at its end)
+            if (h.name === name) bound = false;
+            end = join(end, bound);
+          }
+          if (st.finalbody.length) {
+            // (also run while an exception propagates)
+            bound = join(end, t.s);
+            block(st.finalbody, u("finalbody"));
+          } else bound = end;
+          break;
+        }
+        case "Match": {
+          expr(st.subject, u("subject"));
+          const b0 = bound;
+          let end = b0; // (no case matched)
+          for (const c of st.cases) {
+            bound = b0;
+            expr(c.pattern, u("cases", [c, "pattern"]));
+            if (binds(c.pattern)) bound = "maybe"; // (a pattern may bind some of its names and fail)
+            expr(c.guard, u("cases", [c, "guard"]));
+            block(c.body, u("cases", [c, "body"]));
+            end = join(end, bound);
+          }
+          bound = end;
+          break;
+        }
+        case "Delete":
+          expr(st, at);
+          if (st.targets.some((x: any) => x._type === "Name" && x.id === name)) bound = false;
+          break;
+        default:
+          expr(st, at);
+          if (binds(st)) bound = true;
       }
-    }
+      note();
+    };
+    block(n.body, p("body"));
   };
-  const walk = (n: any, shadowed: Shadow, stmt: number, path: [any, string][] = []): void => {
+  // `shadowed`: what the name is here; `fn`: what it is in the scopes nested
+  // here (functions, lambdas, comprehensions and class bodies), which do not
+  // see a class's attributes
+  const walk = (n: any, shadowed: Shadow, stmt: number, path: [any, string][], fn: boolean): void => {
     if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) return n.forEach((x) => walk(x, shadowed, stmt, path));
+    if (Array.isArray(n)) return n.forEach((x) => walk(x, shadowed, stmt, path, fn));
     if (typeof n._type !== "string") return;
     const under = (key: string): [any, string][] => [...path, [n, key]];
     switch (n._type) {
-      case "Name":
-        if (n.id === name && shadowed === "store" && n.ctx?._type === "Load") out.push({ line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: false, stmt, path });
-        else if (n.id === name && !shadowed) out.push({ line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type !== "Load", stmt, path });
+      case "Name": {
+        if (n.id !== name) return;
+        const o: Occurrence = { line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type !== "Load", stmt, path };
+        if (!shadowed) out.push(o);
+        else if (shadowed !== true) {
+          // (a class body's `x += 1` reads the global and binds the attribute:
+          // not renamable)
+          const aug = path.at(-1)?.[0]._type === "AugAssign" && path.at(-1)?.[1] === "target";
+          if (!o.store || aug) out.push({ ...o, store: false, ...(shadowed === "maybe" || aug ? { maybe: true as const } : {}) });
+        }
         return;
+      }
       case "FunctionDef": case "AsyncFunctionDef": case "Lambda": {
         // decorators, defaults and annotations are evaluated outside
-        walk(n.decorator_list, shadowed, stmt, under("decorator_list"));
-        walk(n.args?.defaults, shadowed, stmt, under("args"));
-        walk(n.args?.kw_defaults, shadowed, stmt, under("args"));
-        walk(n.returns, shadowed, stmt, under("returns"));
+        walk(n.decorator_list, shadowed, stmt, under("decorator_list"), fn);
+        walk(n.args?.defaults, shadowed, stmt, under("args"), fn);
+        walk(n.args?.kw_defaults, shadowed, stmt, under("args"), fn);
+        walk(n.returns, shadowed, stmt, under("returns"), fn);
         if (n._type !== "Lambda" && n.name === name && !shadowed) {
           const p = defName(n);
           if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path });
         }
         const body = n._type === "Lambda" ? [n.body] : n.body;
-        walk(body, shadowed || localsOf(body, params(n.args)).has(name), stmt, under("body"));
+        const inner = fn || localsOf(body, params(n.args)).has(name);
+        walk(body, inner, stmt, under("body"), inner);
         return;
       }
       case "ClassDef":
-        walkClass(n, shadowed, shadowed, stmt, path, true);
+        walkClass(n, shadowed, fn, stmt, path);
         return;
       case "ListComp": case "SetComp": case "GeneratorExp": case "DictComp": {
         const gens = n.generators;
         // the first iterable is evaluated outside
-        walk(gens[0]?.iter, shadowed, stmt, under("generators"));
+        walk(gens[0]?.iter, shadowed, stmt, under("generators"), fn);
         const targets = new Set<string>();
         for (const g of gens) localsOf([g.target], []).forEach((t) => targets.add(t));
-        const inner = shadowed || targets.has(name);
-        gens.forEach((g: any, i: number) => { walk(g.target, inner, stmt, under("generators")); if (i) walk(g.iter, inner, stmt, under("generators")); walk(g.ifs, inner, stmt, under("generators")); });
-        walk(n._type === "DictComp" ? [n.key, n.value] : [n.elt], inner, stmt, under("elt"));
+        const inner = fn || targets.has(name);
+        gens.forEach((g: any, i: number) => { walk(g.target, inner, stmt, under("generators"), inner); if (i) walk(g.iter, inner, stmt, under("generators"), inner); walk(g.ifs, inner, stmt, under("generators"), inner); });
+        walk(n._type === "DictComp" ? [n.key, n.value] : [n.elt], inner, stmt, under("elt"), inner);
         return;
       }
       case "alias": {
@@ -170,12 +299,12 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         }
         return;
       }
-      case "Attribute": walk(n.value, shadowed, stmt, under("value")); return; // (not the attribute's name)
-      case "keyword": walk(n.value, shadowed, stmt, under("value")); return; // (not the argument's name)
+      case "Attribute": walk(n.value, shadowed, stmt, under("value"), fn); return; // (not the attribute's name)
+      case "keyword": walk(n.value, shadowed, stmt, under("value"), fn); return; // (not the argument's name)
     }
-    for (const k of Object.keys(n)) if (k !== "_type") walk(n[k], shadowed, stmt, under(k));
+    for (const k of Object.keys(n)) if (k !== "_type") walk(n[k], shadowed, stmt, under(k), fn);
   };
-  tree.body.forEach((st: any, i: number) => walk(st, false, i, []));
+  tree.body.forEach((st: any, i: number) => walk(st, false, i, [], false));
   return out;
 }
 
@@ -254,8 +383,9 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
       if (first.path.length !== 1 || st.col_offset !== 0) return null;
       prefix = { line: st.lineno, text: `${to} = ${old}; ` };
     }
-    occ = occ.filter((o) => target.get(o) !== name);
   } else for (const o of occ) target.set(o, to);
+  if (occ.some((o) => o.maybe && target.get(o) !== name)) return null;
+  occ = occ.filter((o) => target.get(o) !== name);
   if (!occ.length && !prefix) return source;
   if (occ.some((o) => o.alias === null && target.get(o) !== name)) return null;
   const lines = source.split("\n");
@@ -391,7 +521,7 @@ function renameVar(source: string, name: string, to: string, before: string): st
 // SR.var(...), which binds without setting the global.
 function srVar(code: string, name: string): string {
   // (the whole cell at once: a triple-quoted string may span lines)
-  const re = /(#[^\n]*)|((?:\b[rRbBuUfF]{1,2})?(?:"""[\s\S]*?(?:"""|$)|'''[\s\S]*?(?:'''|$)|"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?))|([\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_]*)/gu;
+  const re = /(#[^\n]*)|((?:\b[rRbBuUfF]{1,2})?(?:"""(?:\\[\s\S]|(?!""")[^\\])*(?:"""|$)|'''(?:\\[\s\S]|(?!''')[^\\])*(?:'''|$)|"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?))|([\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_]*)/gu;
   const at: number[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(code))) {

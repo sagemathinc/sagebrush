@@ -98,7 +98,7 @@ try {
   await set([null, null, null, null, null, "import time\ntime.sleep(0.6)\nq = p\nprint('slow', q)"]);
   await run(5);
   r = await run(4);
-  ok(JSON.stringify(r?.ran) === "[4]" && JSON.stringify(r?.stale) === "[5]", `with a 300 ms budget, a 600 ms dependent is left stale (${JSON.stringify(r)})`);
+  ok(JSON.stringify(r?.ran) === "[4]" && JSON.stringify(r?.stale) === "[5]", `with a 300 ms budget, a 600 ms dependent is left stale (${JSON.stringify(r)}; ${await out(5)})`);
   ok((await has(5, "stale")) && /stale: not rerun automatically \(it takes about \d+ ms\)/.test(await ev("sagebrush.notebook.cells()[5].time.textContent")), "...and says so");
   ok((await out(5)) === "slow 1", "...showing its last output");
   await ev("sagebrush.notebook.setBudget(Infinity); true");
@@ -376,6 +376,39 @@ try {
   await set(["var('_\u03b1')\nprint(_\u03b1)", "var('_x', '_y')\nprint(_x, _y)"]);
   await run([0, 1]);
   ok((await out(0)) === "_\u03b1" && (await out(1)) === "_x _y", `Sage var() of private names of any script, and of several (${await out(0)} | ${await out(1)})`);
+
+  // fourth review: var() with keywords; a public name of any script; an escaped triple quote
+  await set(["var('_x', domain='real')\nprint(_x^2)", "var('_x', latex_name='t')\n_x = _x + 1\nprint(_x)", "print(_x)"]);
+  await run([0, 1, 2]);
+  ok((await out(0)) === "_x^2" && (await out(1)) === "_x + 1" && /NameError/.test(await out(2)), `Sage private var() with domain= and latex_name= are each cell's own (${await out(0)} | ${await out(1)} | ${(await out(2)).split("\n").pop()})`);
+  await set(["print(α^2)", "var('α')"]);
+  await run([0, 1]);
+  ok((await out(0)) === "α^2", `Sage var('α') defines α for the cell above (${await out(0)})`);
+  await set(["x = 1", "print(x)", "x = 2\nprint(\"\"\"hello\\\"\"\"\nvar('x')\nbye\"\"\")", "print(x)"]);
+  await run([0, 1, 2, 3]);
+  ok((await out(2)) === "hello\"\"\"\nvar('x')\nbye" && (await out(3)) === "2", `an escaped triple quote does not end the string (${JSON.stringify([await out(2), await out(3)])})`);
+  await ev("sagebrush.notebook.setMode('python'); true");
+
+  // fourth review: class bodies through compound statements and nested scopes
+  for (const [code, show, want] of [
+    ["x = 2\nclass C:\n    x = 100\n    del x\n    y = x", "C.y", "2 2"],
+    ["x = 2\nclass C:\n    if True:\n        x = 100\n        y = x", "C.y", "100 2"],
+    ["x = 2\nclass C:\n    x = 100\n    f = lambda self: x", "C().f()", "2 2"],
+    ["x = 2\nclass C:\n    x = 100\n    ys = [x for _i in range(1)]", "C.ys", "[2] 2"],
+    ["x = 2\nclass C:\n    x = 100\n    if True:\n        def f(self): return x", "C().f()", "2 2"],
+  ]) {
+    await set(["x = 1", "print(x)", code, `print(${show}, x)`]);
+    await run([0, 1, 2, 3]);
+    ok((await out(3)) === want, `class body: ${JSON.stringify(code)} (${await out(3)})`);
+  }
+
+  // fourth review, F16: verify compares an SVG's text as text
+  await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"80\"><text x=\"0\" y=\"30\">id=\"sbclip'+str(v[0])+'\"</text></svg>'))"]);
+  await run([0, 1, 2]);
+  await run(1);
+  await run(2);
+  const v16c = await ev("sagebrush.notebook.verify().then((r) => r.changed.length)");
+  ok(v16c === 1, `F16: verify sees SVG text that differs, though it looks like an id (${v16c} changed)`);
   await ev("sagebrush.notebook.setMode('python'); true");
 
   // second review: generators made or reseeded without a seed draw from the cell's seed too
