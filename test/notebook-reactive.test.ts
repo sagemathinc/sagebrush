@@ -250,3 +250,13 @@ test("page-order scoping: moving a definition changes what the cells below read"
   assert.equal(nb.r.effective("c2"), "print(x)");
   assert.ok(rep.ran.includes("c2"));
 });
+
+test("an updater rerun automatically runs with its family (no change applied twice)", async () => {
+  const nb = notebook(["v = []", "x = 1", "v.append(x)", "print(v)"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.runAll();
+  nb.set(1, "x = 2");
+  // x's change reaches the updater automatically: the definer of v reruns first
+  assert.deepEqual((await nb.r.run(["c1"])).ran, ["c0", "c1", "c2", "c3"]);
+});

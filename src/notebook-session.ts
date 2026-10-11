@@ -197,7 +197,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       run(`import sys as _s\n_g = _s.modules.get('random')\nif _g is not None: _g.seed(${a})\n_g = _s.modules.get('numpy.random')\nif _g is not None: _g.seed(${b})\ndel _s, _g\n`, host, "exec", "<seed>");
     }
     if (Array.isArray(m.forget) && m.forget.length) {
-      const names = m.forget.filter((n: unknown) => typeof n === "string" && /^[A-Za-z_]\w*$/.test(n));
+      // (names of any script: α, and page-order scoping's xʹ2)
+      const names = m.forget.filter((n: unknown) => typeof n === "string" && /^[\p{L}\p{Nl}_][\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}]*$/u.test(n));
       // (comprehensions: no name is left bound, even when there is nothing to delete)
       run(`import __main__ as _m\n[_m.__dict__.pop(_k, None) for _k in ${JSON.stringify(names)}]\ndel _m\n`, host, "exec", "<forget>");
     }

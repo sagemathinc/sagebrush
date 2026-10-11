@@ -217,6 +217,36 @@ try {
   const kf = [await out(1), await out(2), await out(3), await out(4)];
   ok(JSON.stringify(r?.errors) === "[]" && JSON.stringify(kf) === JSON.stringify(["3", "(7, 11)", "Number Field in a with defining polynomial x^7 - 11", "a^2"]), `K.<a> defined twice: the cells below read the second, named a as written: ${JSON.stringify(kf)}`);
 
+  // review findings (sagebrush-codex, REACT-F1..F3)
+  await fileNew();
+  await set(["v = []", "x = 1", "v.append(x)", "print(v)", "α = 7", "print(α)"]);
+  await run([0, 1, 2, 3, 4, 5]);
+  await set([null, "x = 2"]);
+  await run(1);
+  ok((await out(3)) === "[2]", `F2: an updater reached automatically runs with its definer: v is [2], not [1, 2] (${await out(3)})`);
+  await set([null, null, null, null, "pass"]);
+  await run(4);
+  ok(/NameError: name 'α' is not defined/.test(await out(5)), `F3: a removed definition with a non-ASCII name is gone (${(await out(5)).split("\n").pop()})`);
+  // F1: a run whose worker fails, or whose kernel is closed, settles; the next action runs
+  await set([null, null, null, null, null, "while True:\n    pass"]);
+  const settled = await ev(`(async () => {
+    const nb = sagebrush.notebook, k = sagebrush.kernel, ids = nb.cells().map((c) => c.id);
+    const p = nb.runCells([ids[5]], { budget: Infinity });
+    for (let i = 0; i < 100 && !nb.cells()[5].el.classList.contains("running"); i++) await new Promise((r) => setTimeout(r, 50));
+    k.worker.onerror({ message: "injected" });
+    const a = await Promise.race([p.then(() => "settled"), new Promise((r) => setTimeout(() => r("hung"), 10000))]);
+    for (let i = 0; i < 100 && !k.ready; i++) await new Promise((r) => setTimeout(r, 100));
+    const b = await Promise.race([nb.runCells([ids[1]]).then(() => "ran"), new Promise((r) => setTimeout(() => r("hung"), 10000))]);
+    const p2 = nb.runCells([ids[5]], { budget: Infinity });
+    for (let i = 0; i < 100 && !nb.cells()[5].el.classList.contains("running"); i++) await new Promise((r) => setTimeout(r, 50));
+    k.close();
+    const c = await Promise.race([p2.then(() => "settled"), new Promise((r) => setTimeout(() => r("hung"), 10000))]);
+    return [a, b, c];
+  })()`);
+  ok(JSON.stringify(settled) === '["settled","ran","settled"]', `F1: a worker error or a closed kernel settles the run, and the next action runs (${JSON.stringify(settled)})`);
+  await ev("sagebrush.kernel.restart(); true");
+  await until("sagebrush.kernel.ready", 15000);
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);

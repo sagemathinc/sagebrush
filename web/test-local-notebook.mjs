@@ -79,7 +79,8 @@ ok(existsSync(saved) && JSON.parse(readFileSync(saved, "utf8")).cells.some((c) =
 // Stop: KeyboardInterrupt, keeping variables
 out = await runAndStop("keep = 41\nwhile True:\n    pass", 1500);
 ok(out.includes("KeyboardInterrupt"), "Stop interrupts a loop: " + JSON.stringify(out.slice(-80)));
-out = await runCode("print(keep + 1)");
+// (the reactive notebook: a cell reading the interrupted cell's variables waits for it; the interpreter kept them)
+out = await runCode("print(globals()['keep'] + 1)");
 ok(out.includes("42"), "...and the variables are kept: " + JSON.stringify(out));
 await runCode("icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()");
 ok(await ev("!!document.querySelector('figure.plot3d svg')"), "3D graphics show");

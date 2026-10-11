@@ -118,7 +118,12 @@ export class WorkerKernel {
         p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}) });
       }
     };
-    w.onerror = (e) => this.emit("status", "error: " + (e.message || e));
+    // (a worker that failed may never answer: what waits on it is told, and a
+    // new one starts, rather than waiting forever)
+    w.onerror = (e) => {
+      this.emit("status", "error: " + (e.message || e));
+      if (w === this.worker && this.pending.size) this.restart(`\nThe interpreter failed (${e.message || "an error in its worker"}) and was restarted; variables are gone.\n`);
+    };
   }
 
   /**
@@ -133,6 +138,7 @@ export class WorkerKernel {
    * which files it read and wrote ({reads, writes}: paths).
    */
   execute(code, opts, sink) {
+    if (!this.worker) return sink.stopped?.("\nThe interpreter was stopped.\n");
     const id = this.nextId++;
     this.pending.set(id, sink);
     const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}) };
@@ -164,6 +170,7 @@ export class WorkerKernel {
   /** Ask the interpreter a question ({complete: text} or {check: source}); resolves to its reply, or `fallback` if it restarts. */
   ask(msg, mode, fallback) {
     return new Promise((resolve) => {
+      if (!this.worker) return resolve(fallback);
       const id = this.nextId++;
       this.pending.set(id, { reply: resolve, stopped: () => resolve(fallback) });
       this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", ...msg });
@@ -172,6 +179,7 @@ export class WorkerKernel {
 
   /** Rerun an @interact's function with new values (opts.clock: TimeTravel replay). */
   interact(iid, values, sink, opts = {}) {
+    if (!this.worker) return sink.stopped?.("\nThe interpreter was stopped.\n");
     const id = this.nextId++;
     this.pending.set(id, sink);
     // (a copy: the journal's document freezes what it is given, and the
@@ -214,8 +222,14 @@ export class WorkerKernel {
     this.emit("restart");
   }
 
-  close() {
+  /** Stop for good: what was running or queued is told `message`. */
+  close(message = "\nThe interpreter was stopped.\n") {
     this.worker?.terminate();
+    this.worker = null;
+    const pending = [...this.pending.values()];
     this.pending.clear();
+    this.runs.clear();
+    this.interrupted.clear();
+    for (const p of pending) (p.stopped ?? p.reply)?.(message);
   }
 }
