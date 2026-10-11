@@ -187,6 +187,18 @@ try {
   await until(`sagebrush.notebook.cells()[1].out.textContent.trim() === '49'`, 10000);
   ok((await ev("sagebrush.notebook.cells()[0].out.querySelectorAll('.interact input[type=range]').length")) === 1, "moving the slider reruns the cell reading it (49), not the one showing it");
 
+  // a Jupyter-style notebook (x redefined): the fix renames the later definitions, in page order
+  await fileNew();
+  await set(["x = 1", "print(x)", "x = x + 1", "print(x * 100)"]);
+  r = await run([0, 1, 2, 3]);
+  ok(JSON.stringify(r?.errors) === "[0,1,2,3]", `x defined by two cells and read: errors (${JSON.stringify(r?.errors)})`);
+  ok(await ev("!!sagebrush.notebook.cells()[2].out.querySelector('.fixes button')"), "the error offers a fix");
+  await ev("sagebrush.notebook.cells()[2].out.querySelector('.fixes button').click(); true");
+  await until("sagebrush.notebook.cells()[3].out.textContent.trim() === '200'", 15000);
+  const codes = await ev("sagebrush.notebook.cells().map((c) => c.ta.value)");
+  ok(JSON.stringify(codes) === JSON.stringify(["x = 1", "print(x)", "x_2 = x + 1", "print(x_2 * 100)"]) && (await out(1)) === "1", `the fix keeps the notebook's meaning in page order (${JSON.stringify(codes)})`);
+  ok(JSON.stringify(await ev("sagebrush.notebook.graph().map((c) => c.state)")) === '["ok","ok","ok","ok"]', "...and every cell runs");
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);

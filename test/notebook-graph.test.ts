@@ -96,3 +96,12 @@ test("updaters: cells mutating another cell's object run between its definer and
   const h = build(["print(v)", "v = [1]", "v.append(2)"], true);
   assert.deepEqual(h.order(h.ids), ["c1", "c0", "c2"]);
 });
+
+test("the same import in several cells is not a multiple definition", () => {
+  const g = build(["import numpy as np", "import numpy as np\nx = np.zeros(3)", "print(np.pi)"], false);
+  assert.equal(g.errors.size, 0);
+  const h = build(["import numpy as np", "import math as np", "print(np.pi)"], false);
+  assert.deepEqual([...h.errors.keys()].sort(), ["c0", "c1", "c2"]);
+  const k = build(["from math import pi", "from math import pi\npi = 3", "print(pi)"], false);
+  assert.deepEqual([...k.errors.keys()].sort(), ["c0", "c1", "c2"]);
+});
