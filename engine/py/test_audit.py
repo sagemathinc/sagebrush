@@ -642,6 +642,9 @@ forget()
 for _a in (_xs*_xs < 0, I*_xs > 0, (_xs - 1)**2 < 0):
     assume(_a); assert str(solve(abs(_xs) == 1, _xs)) == "[0 == abs(x) - 1]", _a; forget()
 assume(-_xs >= 1); assert str(solve(abs(_xs) == 1, _xs)) == "[x == -1]"; forget()
+# ... with c proved nonzero (log(2) + log(3) - log(6) is 0)
+assume((log(2) + log(3) - log(6))*_xs > -1); assert str(solve(abs(_xs) == 1, _xs)) == "[0 == abs(x) - 1]"; forget()
+assume(_xs, "real"); assert str(solve([abs(_xs) == 1], _xs)) == "[[x == 1], [x == -1]]" and str(solve((abs(_xs) == 1,), _xs)) == "[[x == 1], [x == -1]]"; forget()  # ABS-F3
 # a candidate from both a radical and exponentiating logs keeps the log
 # equation as its condition (only the radical's arg range admitted
 # x = (3 - sqrt(5))/2 for a = 2 pi I: LOG-F1)

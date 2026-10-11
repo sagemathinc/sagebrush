@@ -3165,7 +3165,11 @@ def solve(f, *args, **kw):
         u = _find_abs(eqs[0], names[0])
         if u is not None and _real_given(u, names[0]):
             out = _solve_abs(eqs[0], u, names[0])
-            return _solution_dicts([[t] for t in out], 1) if kw.get("solution_dict") else out
+            if kw.get("solution_dict"):
+                return _solution_dicts([[t] for t in out], 1)
+            # a list of equations gives one list per solution, as below
+            # (solve([abs(x) == 1], x) was flat: ABS-F3)
+            return [[t] for t in out] if many else out
     if not one:
         try:
             r = _call("solve", str(len(eqs)), *[g._s for g in eqs], *names)
@@ -3273,7 +3277,9 @@ def _assumed_real(x):
                 d = side - c * v
                 if x in d._names() or c.variables() or d.variables():
                     continue
-                if _call("is_zero", c._s)[0] != "1" and _call("is_zero", c.imag_part()._s)[0] == "1" and _call("is_zero", d.imag_part()._s)[0] == "1":
+                # (c proved nonzero, not merely not shown zero: log(2) +
+                # log(3) - log(6) is 0, and c*x > -1 no restriction on x)
+                if _decide(c != 0) is True and _call("is_zero", c.imag_part()._s)[0] == "1" and _call("is_zero", d.imag_part()._s)[0] == "1":
                     return True
     return False
 
