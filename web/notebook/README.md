@@ -62,7 +62,7 @@ cell runs again. On the full page each notebook has its own interpreter (the
 four most recently used stay alive). The console is a scratchpad with its
 own interpreter, apart from every notebook (design/reactive-notebook.md).
 
-## The reactive notebook (being built)
+## The reactive notebook
 
 With the options `reactive: true` and `analyzer` (`{analyze(code, mode)}`
 resolving to the names a cell defines and reads: web/analyze-worker.ts,
@@ -87,8 +87,8 @@ src/dataflow.ts), cells form a dependency graph, as in marimo
   `runCells(ids, {remove, budget})` runs cells as one action. The scheduler
   is src/notebook-reactive.ts (`notebook.reactive`).
 
-The full page turns it on with `?reactive` in its address (or localStorage
-`sagebrush-reactive` = "1"); web/test-reactive.mjs tests it.
+The full page is reactive (`?reactive=0` in its address turns that off in
+the browser, for now); web/test-reactive.mjs tests it.
 
 ## Embedding notes
 

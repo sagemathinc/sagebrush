@@ -60,7 +60,7 @@ try {
   await until("sagebrush.kernel.ready", 15000);
   ok((await ev(out(0))) === "42" && (await ev(stale(0))) && (await ev(stale(1))), "Restart keeps the outputs, marked stale");
   await setRun(0, "a = 41\nprint(a + 1)");
-  ok(!(await ev(stale(0))) && (await ev(stale(1))), "running a cell makes its output current again (the other stays stale)");
+  ok(!(await ev(stale(0))) && !(await ev(stale(1))), "running a cell makes its output current again, and its dependent's (the reactive notebook reruns it)");
   // the console: a scratchpad with its own interpreter
   await ev("document.querySelector('#consolebtn').click(); true");
   await until("/console ready/.test(document.querySelector('#status').textContent)", 20000);

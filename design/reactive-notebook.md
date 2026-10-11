@@ -395,8 +395,16 @@ compromises are unnecessary.
 
 ## Progress (October 11, 2026)
 
-On with `?reactive` in the address, which keeps it on in that browser
-(`?reactive=0` turns it off); the default page is unchanged. Tests: test/dataflow, notebook-graph
+**The default since October 11** (William: "this reactive mode should be
+**the** mode"). `?reactive=0` in the address turns it off in that browser,
+a temporary way out while the model is new (`?reactive` turns it back on).
+TimeTravel has one button, Revert to this version, which makes the version
+the notebook and computes it again (fresh interpreter, the files as they
+were, per-cell seeds); Resume from here is gone (its old links still work).
+Changing the notebook's language analyzes every cell again, stale. A cell
+just run with a syntax error is run anyway, so that the interpreter shows
+where (it defines nothing). A cell reading what an interrupted cell defines
+waits for it, as in marimo. Tests: test/dataflow, notebook-graph
 (marimo oracles), notebook-reactive, rename (npm test), and
 web/test-reactive.mjs (60 browser checks).
 
@@ -417,7 +425,9 @@ web/test-reactive.mjs (60 browser checks).
 | marimo's format | web/notebook/marimo.js | File > Open reads marimo .py notebooks (identical to marimo's parser on its 198 example notebooks, 1,805 cells); File > Download as marimo writes them (marimo reads all 198 back identically). lib/marimo: mo.md (rendered Markdown output), mo.ui controls (as widgets: moving one reruns its readers), hstack/vstack, stop, state, so imported notebooks run. |
 | TimeTravel | index.html replayResumed | a reactive notebook resumes a version by recomputing it, with its files as they were: no "Cannot resume here". |
 
-**Before it becomes the default (the one model):**
+**Done for the default (October 11):** the tests written for Jupyter's
+order were updated (test-replay runs the journal's replay behind
+?reactive=0); `sagebrush notebook` runs the same session. Was listed:
 
 1. Tests written for Jupyter's order: test-kernels (1 check: running a cell
    now reruns its dependents), test-notebook (stops at a cell that does not

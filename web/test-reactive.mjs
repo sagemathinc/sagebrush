@@ -244,10 +244,19 @@ try {
   await sleep(1200);
   const target = await ev(`(() => { const h = sagebrush.history; const vs = h.versions(); const v = [...vs].reverse().find((v) => /random\.random/.test(h.docAt(v.time).cells[0]?.code ?? "")); return v ? { time: v.time, id: localStorage.getItem('sagebrush-current') } : null; })()`);
   ok(!!target, "TimeTravel has the version before the edit");
-  await send("Page.navigate", { url: base.replace("?reactive", "") + `?reactive&resume=${encodeURIComponent(target.id)}&at=${encodeURIComponent(target.time)}` });
+  // Revert to this version: the cells as they were, computed again (the same random number, through the file)
+  await ev("document.querySelector('#ttbtn').click(); true");
+  await until("!document.querySelector('#timetravel').hidden && sagebrush.history?.versions().length > 1", 10000);
+  await ev(`(() => { const s = document.querySelector('#ttslider'), vs = sagebrush.history.versions(); s.value = vs.findIndex((v) => v.time === ${JSON.stringify(target.time)}); s.dispatchEvent(new Event('input')); return true; })()`);
+  ok(!(await ev("!!document.querySelector('#ttresume')")), "TimeTravel has one button: Revert to this version");
+  await ev("window.sagebrush.replayReport = null; document.querySelector('#ttrevert').click(); true");
   await until("window.sagebrush?.replayReport", 30000);
   const rep = await ev("sagebrush.replayReport");
-  ok(rep.recomputed && rep.ran.length === 3 && (await out(2)) === x0, `resuming recomputes the version: the same random number through the file (${await out(2)} = ${x0}; ${await ev("document.querySelector('#status').textContent")})`);
+  ok(rep.recomputed && rep.ran.length === 3 && (await out(2)) === x0 && /random\.random/.test(await ev("sagebrush.notebook.cells()[0].ta.value")), `reverting computes the version again: the same random number through the file (${await out(2)} = ${x0}; ${await ev("document.querySelector('#status').textContent")})`);
+  // an old Resume link still works
+  await send("Page.navigate", { url: base.replace("?reactive", "") + `?resume=${encodeURIComponent(target.id)}&at=${encodeURIComponent(target.time)}` });
+  await until("window.sagebrush?.replayReport", 30000);
+  ok((await out(2)) === x0, "an old Resume from here link computes the version in a new notebook");
   await until(ready);
 
   // Sage mode
@@ -267,7 +276,6 @@ try {
   ok((await out(2)) === "6", "u, v, print(v)");
   await ev("sagebrush.notebook.flush(); true");
   await sleep(500);
-  ok(await ev("location.search === '?reactive'"), "after resuming, the address keeps ?reactive");
   await send("Page.reload");
   await until(ready);
   await until(`sagebrush.notebook.cells().length >= 3 && sagebrush.notebook.cells()[2].el.classList.contains('stale')`, 10000);

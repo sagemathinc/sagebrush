@@ -24,7 +24,8 @@ const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) pro
 const ready = () => until("document.querySelector('#status')?.textContent.startsWith('ready')");
 async function runCode(code) {
   await ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
-  await until("(() => { const c = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent); })()");
+  // (done: a prompt number; or, in the reactive notebook, not run: waiting for a cell, or an error in the graph)
+  await until("(() => { const c = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent) || c.classList.contains('cancelled') || c.classList.contains('error'); })()");
   return ev("[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1).querySelector('.out').textContent");
 }
 // Start a cell, press Stop after `ms`, and return its output once it settles.
@@ -172,11 +173,14 @@ try {
   ok(await ev("crossOriginIsolated"), "the page is cross-origin isolated (COOP/COEP), so Stop can interrupt");
   out = await runAndStop("keep = 41\nwhile True:\n    pass", 800);
   ok(/KeyboardInterrupt/.test(out), "Stop interrupts a Python loop: " + JSON.stringify(out.trim().slice(-60)));
+  // (the reactive notebook: a cell reading what the interrupted cell defines waits for it; the others run)
   out = await runCode("print(keep + 1)");
-  ok(out.includes("42"), "...and the variables are kept: " + out.trim());
+  ok(/Not run: cell \d+, which this cell depends on, was interrupted/.test(out), "...a cell reading its variables waits for it: " + out.trim());
+  out = await runCode("print(globals()['keep'] + 1)");
+  ok(out.includes("42"), "...and the interpreter kept them: " + out.trim());
   out = await runAndStop("factor(100000000000000000000000012349 * 300000000000000000000000000823)", 1500);
   ok(/KeyboardInterrupt/.test(out), "Stop interrupts the Rust engine (ECM): " + JSON.stringify(out.trim().slice(-60)));
-  out = await runCode("print(keep, factor(2^64 + 1))");
+  out = await runCode("print(globals()['keep'], factor(2^64 + 1))");
   ok(out.includes("41 274177 * 67280421310721"), "...the engine works after it, variables kept: " + out.trim());
   // Magma mode: translated to Python in the page
   await ev("(() => { const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
