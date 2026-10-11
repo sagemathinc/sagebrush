@@ -22,7 +22,7 @@ import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 
 const session = notebookSession((m) => postMessage(m), {
-  runs: { begin: (m) => replayEnv.begin(m.clock), end: () => replayEnv.end() as any },
+  runs: { begin: (m) => replayEnv.begin(m.clock, m.seed), end: () => replayEnv.end() as any },
 });
 __hooks.write = (fd, text) => session.write(fd, text);
 __hooks.changed = (path, data) => postMessage({ fsChanged: path, data });

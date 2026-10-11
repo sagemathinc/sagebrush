@@ -623,7 +623,8 @@ export function createNotebook(root, opts = {}) {
     cell.n.textContent = "[*]";
     cell.runb.textContent = "■";
     let failed = false;
-    return new Promise((resolve) => kernel.execute(code, { mode, cell: cell.id, forget, mangle: reactive() }, {
+    const k = kernel;
+    return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}) }, {
       start() {
         cell.el.classList.replace("queued", "running");
         const t0 = performance.now();
@@ -647,7 +648,20 @@ export function createNotebook(root, opts = {}) {
         resolve({ ok: false, ms: 0, stopped: true });
       },
       skipped() { settle(cell); cell.n.textContent = "[ ]"; resolve({ ok: false, ms: 0, stopped: true }); },
-    }));
+    })));
+  }
+  // The reactive notebook's per-cell seed: SHA-256 of the notebook's seed (made
+  // once, kept in the document) and the cell's id, so a cell draws the same
+  // random numbers however often and in whatever order it runs, and verify()
+  // recomputes them exactly.  (Off with the document's reproducible: false.)
+  async function cellSeed(cell) {
+    if (!reactive() || meta.reproducible === false || !crypto.subtle) return null;
+    if (!/^[0-9a-f]{64}$/.test(meta.seed ?? "")) {
+      meta = { ...meta, seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("") };
+      schedule();
+    }
+    const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${meta.seed}:${cell.id}`));
+    return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
   // (the kernel runs them in order; the reactive notebook in graph order)
   const runAll = () => (reactive() ? engine().runAll() : Promise.all(cells().map(run)));
