@@ -1753,7 +1753,14 @@ export function createNotebook(root, opts = {}) {
     // (compared whole: pictures by their data, not only their descriptions)
     // (with the ids that pictures number from counters made the same, in
     // their SVG only: the plot's sbclip7, and safeSvg's per-picture prefix s12-)
-    const ids = (svg) => svg.replace(/(\bid="|url\(#|href="#)s\d+-/g, "$1").replace(/(\bid="|url\(#|href="#)sbclip\d+/g, "$1sbclip");
+    // (one to one, in order of first use, so that each reference keeps pointing at its own)
+    const ids = (svg) => {
+      const names = new Map();
+      return svg.replace(/(\bid="|url\(#|href="#)(?:s\d+-)?(sbclip\d+)/g, (_, pre, id) => {
+        if (!names.has(id)) names.set(id, `sbclip#${names.size}`);
+        return pre + names.get(id);
+      }).replace(/(\bid="|url\(#|href="#)s\d+-/g, "$1");
+    };
     const whole = (c) => JSON.stringify(saveOutputs(c.out).map((o) => (typeof o.data?.["image/svg+xml"] === "string" ? { ...o, data: { ...o.data, "image/svg+xml": ids(o.data["image/svg+xml"]) } } : o)));
     const before = new Map(cells().filter((c) => c.type === "code").map((c) => [c.id, [outputText(c.out), whole(c)]]));
     const ready = new Promise((resolve) => { const off = kernel.on("ready", () => { off(); resolve(); }); });

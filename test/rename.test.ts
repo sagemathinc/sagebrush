@@ -104,3 +104,23 @@ test("second review: method defaults, global in a function, var in strings", () 
   // var in a string is a string
   assert.deepEqual(q(["x = 1", "print(x)", "x = 2\nprint(\"var('x')\")", "print(x)"], "x", "sage"), { c2: "x\u02b92 = 2\nprint(\"var('x')\")", c3: "print(x\u02b92)" });
 });
+
+test("third review: class bodies in execution order, nested classes, multi-line strings", () => {
+  const q = (codes: string[], name: string, mode: "python" | "sage" = "python") => {
+    const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode }); return { id: `c${i}`, code, defines: a.defs.has(name), reads: a.refs.has(name) }; });
+    const r = renameRedefinitions(cells, name, new Set([name]), mode, "\u02b9");
+    return r && Object.fromEntries(r);
+  };
+  // a default evaluated before the class assigns x reads the module's x
+  assert.deepEqual(q(["x = 1", "print(x)", "x = 2\nclass C:\n    def f(self, a=x):\n        return a\n    x = 100", "print(C().f(), x)"], "x"), {
+    c2: "x\u02b92 = 2\nclass C:\n    def f(self, a=x\u02b92):\n        return a\n    x = 100", c3: "print(C().f(), x\u02b92)",
+  });
+  // a nested class's method sees the module's x, not the nested class's attribute
+  assert.deepEqual(q(["x = 1", "print(x)", "x = 2\nclass C:\n    class D:\n        x = 100\n        def f(self):\n            return x", "print(C.D().f(), x)"], "x"), {
+    c2: "x\u02b92 = 2\nclass C:\n    class D:\n        x = 100\n        def f(self):\n            return x\u02b92", c3: "print(C.D().f(), x\u02b92)",
+  });
+  // var('x') inside a triple-quoted string spanning lines is text
+  assert.deepEqual(q(["x = 1", "print(x)", 'x = 2\nprint("""hello\nvar(\'x\')\nbye""")', "print(x)"], "x", "sage"), {
+    c2: 'x\u02b92 = 2\nprint("""hello\nvar(\'x\')\nbye""")', c3: "print(x\u02b92)",
+  });
+});
