@@ -627,6 +627,16 @@ for _f in (_xs**3 - _xs - 1, _xs**3 + _xs + 1, 2 * _xs**3 + 3 * _xs**2 - QQ(1) /
 assert str(solve(log(_xs) + log(_xs - 1) == log(2), _xs)) == "[x == 2]" and str(solve(2 * log(_xs) == log(_xs + 6), _xs)) == "[x == 3]"
 assert str(solve(abs(_xs) == 2, _xs)) == "[0 == abs(x) - 2]"  # a circle in the complex plane
 assume(_xs, "real"); assert str(solve(abs(_xs) == 2, _xs)) == "[x == 2, x == -2]" and str(solve(abs(_xs) + abs(_xs - 2) == 4, _xs)) == "[x == 3, x == -1]"; forget()
+# abs(u) is split only for u shown real (ABS-F1: x + I, I*x, sqrt(x), a*x
+# with a free); a branch's unresolved equation keeps its sign condition
+# (ABS-F2: the leftover held at x = 1, no solution)
+assume(_xs, "real")
+for _f in (abs(_xs + I) == 1, abs(I*_xs) == 1, abs(sqrt(_xs)) == 1, abs(var("a")*_xs) == 1):
+    assert str(solve(_f, _xs)) == "[0 == %s]" % (_f.lhs() - _f.rhs()), _f
+_ss = solve(abs(_xs) == _xs + exp(_xs) - exp(1) - 2, _xs)
+assert str(_ss[-1]) == "0 == -2*x - e^x + e + 2 if x < 0", _ss
+assert str(solve(abs(_xs**2 - 2) == _xs, _xs)) == "[x == 2, x == 1]"
+forget()
 assume(_xs > _r1); assert str(solve([_xs * _Y == 0], _xs, _Y)) == "[[x == 0, y == r3, 0 > r1], [x == r2, y == 0, r2 > r1]]"; forget()
 _n1 = SR.var("n1"); assume(_xs > _n1); assert "n1 for" not in str(solve(sin(_xs) == 0, _xs)); forget()
 assert "0 ==" in str(solve(sin(-(2**63) * _xs + 1) + sin(_xs) + 2 * cos(_xs) == 0, _xs))  # TRIG-F1: no i64 overflow
