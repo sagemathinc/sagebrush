@@ -277,6 +277,54 @@ try {
   await sleep(2000);
   ok((await out(1)) === "FROM B 987", `F5: a run of a notebook switched away from does not write into the one shown (${await out(1)})`);
 
+  // F14: graph() says how a cell's run ended; F15: a name of the user's own with U+02B9 is shown as written
+  await fileNew();
+  await set(["raise ValueError('bad')", "x\u02b92 = 7", "print(x\u02b92)"]);
+  await run([0, 1, 2]);
+  const g14 = await ev("sagebrush.notebook.graph()");
+  ok(g14[0].state === "failed" && JSON.stringify(g14[1].defines) === '["x\u02b92"]' && (await out(2)) === "7", `F14/F15: a cell that raised is "failed" in the graph; the user's own xʹ2 is not renamed (${g14[0].state}, ${JSON.stringify(g14[1].defines)})`);
+  // F10: the analyzer failing: what waited settles with an error, and the next run analyzes again
+  await set(["print('analyzed again')"]);
+  const f10 = await ev(`(async () => {
+    const nb = sagebrush.notebook, id = nb.cells()[0].id;
+    await sagebrush.analyzer.analyze("1", "python");
+    const p = nb.runCells([id]);
+    sagebrush.analyzeWorker.onerror({ message: "injected" });
+    const a = await Promise.race([p.then(() => "settled"), new Promise((r) => setTimeout(() => r("hung"), 8000))]);
+    const b = await Promise.race([nb.runCells([id]).then(() => "ran"), new Promise((r) => setTimeout(() => r("hung"), 8000))]);
+    return [a, b, nb.cells()[0].out.textContent.trim()];
+  })()`);
+  ok(f10[0] === "settled" && f10[1] === "ran" && f10[2] === "analyzed again", `F10: an analyzer failure settles the run, and the next run analyzes again (${JSON.stringify(f10)})`);
+
+  // F11: Restart while a cell runs: it stays stale, and Run stale recovers both cells
+  await fileNew();
+  await set(["import time\ntime.sleep(0.6)\nx = 1", "print(x)"]);
+  await run([0, 1]);
+  const f11 = await ev(`(async () => {
+    const nb = sagebrush.notebook, k = sagebrush.kernel;
+    const p = nb.runAll();
+    for (let i = 0; i < 100 && !nb.cells()[0].el.classList.contains("running"); i++) await new Promise((r) => setTimeout(r, 30));
+    k.restart();
+    await p;
+    for (let i = 0; i < 100 && !k.ready; i++) await new Promise((r) => setTimeout(r, 100));
+    const stale = nb.reactive.staleSummary().cells.length;
+    const r = await nb.runCells(nb.reactive.staleSummary().cells, { budget: Infinity });
+    return [stale, r.ran.length, nb.cells()[1].out.textContent.trim()];
+  })()`);
+  ok(JSON.stringify(f11) === '[2,2,"1"]', `F11: after Restart during a run, both cells are stale and Run stale recovers them (${JSON.stringify(f11)})`);
+
+  // F16: verify compares pictures by their data (a point moved inside fixed axes)
+  await fileNew();
+  await ev("sagebrush.notebook.setMode('sage'); true");
+  await set(["v = [1]", "w = v\nw[0] += 1", "list_plot(v, xmin=-1, xmax=1, ymin=0, ymax=5)"]);
+  await run([0, 1, 2]);
+  await run(1);
+  await run(2);
+  let v16 = await ev("sagebrush.notebook.verify().then((r) => ({ same: r.same.length, changed: r.changed.map((c) => !!c.pictures) }))");
+  ok(JSON.stringify(v16.changed) === "[true]" && v16.same === 2, `F16: verify finds a picture that differs though its description does not (${JSON.stringify(v16)})`);
+  v16 = await ev("sagebrush.notebook.verify().then((r) => r.changed.length)");
+  ok(v16 === 0, `...and finds nothing when nothing differs (${v16})`);
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);

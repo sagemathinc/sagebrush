@@ -611,6 +611,14 @@ const analyzer = {
     if (!analyzeWorker) {
       analyzeWorker = new Worker(new URL("sagebrush-analyze.js", location.href), { type: "module" });
       analyzeWorker.onmessage = (ev) => { const f = analyzeWaiting.get(ev.data.id); analyzeWaiting.delete(ev.data.id); f?.(ev.data); };
+      // (a failed analyzer: what waits gets an error, never nothing, and the next request starts a new one)
+      analyzeWorker.onerror = (e) => {
+        analyzeWorker?.terminate();
+        analyzeWorker = null;
+        const waiting = [...analyzeWaiting.values()];
+        analyzeWaiting.clear();
+        for (const f of waiting) f({ error: { kind: "analyzer", message: e?.message || "the analyzer failed" }, sources: null });
+      };
     }
     return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, ...msg }); });
   },
@@ -631,6 +639,8 @@ const cells = () => nb.cells();
 window.sagebrush = {
   notebook: nb, kernels, get kernel() { return kernel; }, get history() { return nbHistory; },
   get consoleKernel() { return consoleKernel; },
+  // (tests: the reactive notebook's analyzer and its worker)
+  analyzer, get analyzeWorker() { return analyzeWorker; },
   /** Open a notebook of this browser by id (switching to its interpreter). */
   open: (id) => openId(id),
 };

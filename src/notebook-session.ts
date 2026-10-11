@@ -11,7 +11,9 @@
 //                                 first, the reactive notebook's invalidation;
 //                                 `mangle`: the cell's id (alphanumeric): its `_`
 //                                 names are its own, as in marimo, and are
-//                                 deleted before it runs; `seed`: 64 hex digits,
+//                                 deleted before it runs; `scoped`: {name: name
+//                                 as written}, page-order scoping's names in
+//                                 its code, shown as written in errors; `seed`: 64 hex digits,
 //                                 the run's entropy (RunHooks), and Python's
 //                                 random and numpy.random are reseeded from it)
 //      {id, interact, values}     an @interact control changed: rerun it
@@ -116,6 +118,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   };
   let changedNames = new Set<string>();
   let seededBefore = false;
+  // page-order scoping's names in the running cell, and as written (xʹ2 -> x)
+  let scopedNames: [string, string][] = [];
 
   const ready = (async () => {
     await initParser();
@@ -150,8 +154,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       // exit() can't leave a notebook: it just ends the cell.
       if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return true;
       // (a cell's renamed `_` names are shown as written)
-      // (and page-order scoping's xʹ2: src/notebook-reactive.ts)
-      R.stderr.write(R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, "").replace(/\u02b9\d+/g, ""));
+      // (and page-order scoping's names, as written: the run's `scoped`)
+      let text = R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, "");
+      for (const [n, w] of scopedNames) text = text.split(n).join(w);
+      R.stderr.write(text);
       return false;
     }
   }
@@ -186,6 +192,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     opts.runs?.begin(m);
     let ok = true;
     changedNames = new Set();
+    scopedNames = m.scoped && typeof m.scoped === "object" ? Object.entries(m.scoped).filter((e): e is [string, string] => typeof e[1] === "string") : [];
     // A seeded run (the reactive notebook's per-cell seeds): Python's random
     // and numpy.random start from seeds derived from the cell's, whether they
     // are imported already or in the cell (lib/random.py, lib/numpy/random.py
