@@ -680,7 +680,7 @@ export function createNotebook(root, opts = {}) {
         forget: (names) => new Promise((resolve) => kernel.execute("", { mode, forget: names }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
         status(id, st) {
           const cell = cellById(id);
-          if (cell) showStatus(cell, st);
+          if (cell) { showStatus(cell, st); markEdited(cell); }
           emit("status", id, st);
         },
       }));

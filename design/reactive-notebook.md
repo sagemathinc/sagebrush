@@ -294,14 +294,15 @@ Examples:
 An action is running a cell, moving a slider, or an agent's batch of edits.
 After an action, the cells downstream need to run.
 
-- **The budget caps the wall time spent running them automatically.** Cells
-  are started in graph order while the time used is under the budget. When
-  it is exceeded, no new cell is started (the one running finishes), and the
-  rest are marked stale with "run 3 stale cells (about 12 s)".
-- **Prediction only drives the estimate and the order of the decision.** If
-  the recorded times say the whole set fits, it simply runs; if they say it
-  cannot, nothing downstream starts, rather than half of it. A cell never
-  run has no time yet, so it counts as 0 and the cap protects us.
+- **The budget caps the wall time spent running them automatically.** In
+  graph order, each cell runs if its last run time still fits in what is
+  left of the budget. One that does not fit waits, marked stale with its
+  time ("not rerun automatically (it takes about 12 s)"), and so do the cells
+  below it. The others go on: cheap cells beside a slow one stay current.
+  (Implemented this way after trying "all or nothing": one slow cell then
+  left every cheap cell stale too.)
+- A cell never run has no time yet, so it counts as 0, and the actual time
+  used is what is subtracted.
 - **The two extremes are marimo's modes:** budget $\infty$ = autorun, budget
   0 = lazy.
 - **A typical Sage cell takes milliseconds,** so a budget of 2 s means

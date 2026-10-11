@@ -23,8 +23,9 @@
 // Ours besides (each in design/reactive-notebook.md):
 //
 //   - The budget: cells run automatically (descendants, not the cells asked
-//     for) only while their predicted and actual time stays under it.  The
-//     rest are marked stale.  Infinity is marimo's autorun, 0 its lazy mode.
+//     for) only while their time fits in it: in graph order, a cell runs if
+//     its last run time fits in what is left, and otherwise waits, stale,
+//     with the cells below it.  Infinity is marimo's autorun, 0 its lazy mode.
 //   - Manual cells never run automatically.
 //   - #1477: a name several cells define, while no cell reads it, is not an
 //     error (src/notebook-graph.ts); when its definers drop to one, that
@@ -297,30 +298,32 @@ export class Reactive {
     // optional cells not run: manual ones, and everything downstream of them
     const held = new Set<string>();
     for (const id of optional) if (manual.has(id) && !all) for (const d of this.graph.closure([id])) if (!required.has(d)) held.add(d);
-    let auto = optional.filter((id) => !held.has(id));
-    const predicted = auto.reduce((s, id) => s + (this.times.get(id) ?? 0), 0);
-    // (budget 0, lazy: nothing runs automatically)
-    if (!all && (budget <= 0 || predicted > budget)) {
-      for (const id of auto) held.add(id);
-      auto = [];
-    }
+    const auto = optional.filter((id) => !held.has(id));
     const order = this.graph.order([...required, ...auto]);
     const ran: string[] = [], failed: string[] = [], cancelled: string[] = [];
     const stale = new Set<string>();
     for (const id of held) {
       stale.add(id);
-      this.markStale(id, manual.has(id) ? "manual" : budget <= 0 || predicted > budget ? "budget" : "ancestor");
+      this.markStale(id, manual.has(id) ? "manual" : "ancestor");
     }
     for (const id of order) this.host.status(id, { state: "queued" });
     const blockedBy = new Map<string, { by: string; why: "exception" | "error" | "interrupted" }>();
+    // the budget: in graph order, each automatic cell runs if its last time
+    // still fits in what is left (a cell never run counts as 0); one that does
+    // not waits, stale, with the cells below it (budget 0, lazy: none run)
     let autoMs = 0;
     let stopped = false;
     const forgetLater: string[] = [];
     for (const id of order) {
       const isAuto = !required.has(id);
-      if (stopped || (isAuto && !all && autoMs > budget)) {
+      if (stopped) {
         stale.add(id);
-        this.markStale(id, stopped ? "interrupted" : "budget");
+        this.markStale(id, "interrupted");
+        continue;
+      }
+      if (isAuto && !all && (budget <= 0 || autoMs + (this.times.get(id) ?? 0) > budget) && ![...this.graph.parents(id)].some((p) => stale.has(p))) {
+        stale.add(id);
+        this.markStale(id, "budget");
         continue;
       }
       // waiting for an ancestor: one that raised in this run (or before, and not rerun), or has an error
