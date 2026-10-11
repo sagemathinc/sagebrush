@@ -443,6 +443,7 @@ export class Reactive {
   }
 
   private async execute(required: Set<string>, optional: string[], budget: number, all: boolean, followAgain = false): Promise<RunReport> {
+    optional = this.withFamilies(required, optional);
     const manual = new Set(this.host.cells().filter((c) => c.manual).map((c) => c.id));
     // optional cells not run: manual ones, and everything downstream of them
     const held = new Set<string>();
@@ -540,6 +541,30 @@ export class Reactive {
       return this.report([...ran, ...r2.ran], [...new Set([...stale, ...r2.stale])], [...failed, ...r2.failed], [...cancelled, ...r2.cancelled]);
     }
     return this.report(ran, [...stale], failed, cancelled);
+  }
+
+  // Mutation tracking: an updater in a run runs with its family, however it
+  // got there (run, rerun automatically, a file, a widget): the definer of
+  // what it changes, every updater of it, and what depends on them, so that
+  // no change is applied twice.  Added cells are automatic ones.
+  private withFamilies(required: Set<string>, optional: string[]): string[] {
+    const inRun = new Set([...required, ...optional]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const id of [...inRun]) {
+        for (const n of this.registered.get(id)?.analysis?.mutations ?? []) {
+          const ds = (this.graph.definers.get(n) ?? []).filter((d) => !this.errors.has(d));
+          if (ds.length !== 1) continue;
+          for (const f of this.graph.closure([ds[0], ...(this.graph.updatersOf.get(n) ?? [])])) {
+            if (!inRun.has(f) && !this.errors.has(f)) {
+              inRun.add(f);
+              grew = true;
+            }
+          }
+        }
+      }
+    }
+    return [...inRun].filter((id) => !required.has(id) && !this.errors.has(id));
   }
 
   // Whether a cell with an error is the only definer of a name `id` reads
