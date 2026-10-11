@@ -340,7 +340,10 @@ class Expression:
     def _latex_(self):
         t = _call("latex", self._s)[0]
         for n, l in _LATEX_NAMES.items():
-            if t == n:
+            # (the symbol alone, as written or as rendered: _y is _{y})
+            if n not in _LATEX_SYM:
+                _LATEX_SYM[n] = _call("latex", _sym_s(n))[0]
+            if t == n or t == _LATEX_SYM[n]:
                 return l
             t = t.replace("\\mathit{%s}" % n, l)
         return t
@@ -1522,6 +1525,9 @@ class _SymbolicRing:
 
             sage: t = SR.var('t'); t^2
             t^2
+            sage: u = SR.var('u', domain='real'); assumptions()
+            [u is real]
+            sage: forget()
         """
         if len(names) == 1 and isinstance(names[0], (list, tuple)):
             names = tuple(names[0])
@@ -1531,6 +1537,9 @@ class _SymbolicRing:
         if kw.get("latex_name") is not None:
             for n in names:
                 _LATEX_NAMES[n] = str(kw["latex_name"])
+        if kw.get("domain") in ("positive", "integer", "real", "complex"):
+            for v in vs:
+                assume(v, kw["domain"])
         return vs[0] if len(vs) == 1 else vs
 
     def _latex_(self):
@@ -1613,6 +1622,7 @@ _FAST_GLOBALS = {"_m": _M, "_gamma": _gamma, "_sgn": _sgn, "_undefined": _undefi
 # ------------------------------------------------------------------ constructors
 
 _LATEX_NAMES = {}   # symbol name -> LaTeX (var('th', latex_name=r'\theta'))
+_LATEX_SYM = {}     # symbol name -> its LaTeX without a latex_name
 
 
 # ---------------------------------------------------------------- assumptions
