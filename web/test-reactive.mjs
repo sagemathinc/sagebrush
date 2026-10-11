@@ -212,6 +212,26 @@ try {
   ok(vs === 0, `...and in a fresh interpreter: verify finds no difference (${vs})`);
   ok(/^[0-9a-f]{64}$/.test(await ev("sagebrush.notebook.meta.seed")), "the notebook's seed is in its document");
 
+  // TimeTravel: resuming a version recomputes it (the same random numbers: per-cell seeds)
+  await fileNew();
+  await set(["import random\nr = random.random()", "with open('f.txt', 'w') as f:\n    f.write(str(r))", "print(open('f.txt').read()[:8])"]);
+  await run([0, 1, 2]);
+  const x0 = await out(2);
+  await ev("sagebrush.notebook.flush(); true");
+  await sleep(1200);
+  await set(["r = 5"]);
+  await run(0);
+  ok((await out(2)) === "5", "after the edit, the file holds 5");
+  await ev("sagebrush.notebook.flush(); true");
+  await sleep(1200);
+  const target = await ev(`(() => { const h = sagebrush.history; const vs = h.versions(); const v = [...vs].reverse().find((v) => /random\.random/.test(h.docAt(v.time).cells[0]?.code ?? "")); return v ? { time: v.time, id: localStorage.getItem('sagebrush-current') } : null; })()`);
+  ok(!!target, "TimeTravel has the version before the edit");
+  await send("Page.navigate", { url: base.replace("?reactive", "") + `?reactive&resume=${encodeURIComponent(target.id)}&at=${encodeURIComponent(target.time)}` });
+  await until("window.sagebrush?.replayReport", 30000);
+  const rep = await ev("sagebrush.replayReport");
+  ok(rep.recomputed && rep.ran.length === 3 && (await out(2)) === x0, `resuming recomputes the version: the same random number through the file (${await out(2)} = ${x0}; ${await ev("document.querySelector('#status').textContent")})`);
+  await until(ready);
+
   // Sage mode
   await fileNew();
   await ev("sagebrush.notebook.setMode('sage'); true");
@@ -229,6 +249,7 @@ try {
   ok((await out(2)) === "6", "u, v, print(v)");
   await ev("sagebrush.notebook.flush(); true");
   await sleep(500);
+  ok(await ev("location.search === '?reactive'"), "after resuming, the address keeps ?reactive");
   await send("Page.reload");
   await until(ready);
   await until(`sagebrush.notebook.cells().length >= 3 && sagebrush.notebook.cells()[2].el.classList.contains('stale')`, 10000);

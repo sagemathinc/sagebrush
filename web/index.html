@@ -580,6 +580,8 @@ function writeDisk(path, data) {
 // The reactive notebook (design/reactive-notebook.md), while it is being
 // built: on with ?reactive in the address, or localStorage sagebrush-reactive = "1".
 const REACTIVE = (() => { try { return new URLSearchParams(location.search).has("reactive") || localStorage.getItem("sagebrush-reactive") === "1"; } catch { return false; } })();
+// (the address keeps ?reactive when the page rewrites it)
+const flagQuery = new URLSearchParams(location.search).has("reactive") ? "?reactive" : "";
 // Its analyzer (web/analyze-worker.ts): a worker of its own, started on first use.
 let analyzeWorker = null, analyzeId = 0;
 const analyzeWaiting = new Map();
@@ -708,6 +710,13 @@ function ttShowVersion() {
 // version (after the code run while it was the newest), in a new tab.
 function ttShowResume(v) {
   const b = $("#ttresume");
+  // (the reactive notebook resumes any version by recomputing it)
+  if (nb.reactiveOn) {
+    b.disabled = false;
+    b.textContent = "Resume from here";
+    b.title = "Open this version in a new tab and compute its cells (with the same random numbers), with the files as they were then.";
+    return;
+  }
   let plan;
   try { plan = nbHistory.replayPlan(v.time); } catch (e) { console.warn("replay plan:", e); b.disabled = true; return; }
   b.disabled = plan.blocking.length > 0;
@@ -734,7 +743,7 @@ $("#ttresume").onclick = () => {
   const v = nbHistory?.versions()[+ttSlider.value];
   if (!v) return;
   nb.flush();
-  open_(`${location.pathname}?resume=${encodeURIComponent(current.id)}&at=${encodeURIComponent(v.time)}`);
+  open_(`${location.pathname}?resume=${encodeURIComponent(current.id)}&at=${encodeURIComponent(v.time)}${flagQuery ? "&reactive" : ""}`);
 };
 const open_ = (url) => window.open(url, "_blank");
 $("#ttrepro").onchange = (e) => {
@@ -772,6 +781,31 @@ async function resumeFrom(srcId, at) {
   return { plan, version: v.index + 1 };
 }
 async function replayResumed({ plan, version }) {
+  // The reactive notebook: the session is a function of the document, so a
+  // version is resumed by recomputing its cells (with their per-cell seeds),
+  // after putting back the files as they were then: no journal of runs needed.
+  if (nb.reactiveOn) {
+    if (!kernel.ready) await new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
+    replaying = true;
+    nb.setReadOnly(true);
+    let report, files;
+    try {
+      files = plan.events?.some((e) => e.file) ? await journal.replay({ ...plan, events: plan.events.filter((e) => e.file) }) : { diverged: [] };
+      statusEl.textContent = `recomputing version ${version}…`;
+      report = await nb.runAll();
+    } finally {
+      replaying = false;
+      nb.setReadOnly(false);
+      if (journal.session) journal.session.replay = false;
+    }
+    nb.flush();
+    const missing = files.diverged.map((d) => d.reason);
+    statusEl.textContent = `Recomputed version ${version}: ${report.ran.length} cell${report.ran.length === 1 ? "" : "s"} ran` +
+      (report.failed.length ? `, ${report.failed.length} raised an error` : "") + (missing.length ? ` (${missing.join("; ")})` : "");
+    announce(statusEl.textContent);
+    window.sagebrush.replayReport = { recomputed: true, ...report, missing };
+    return;
+  }
   if (plan.blocking.length) {
     statusEl.textContent = `The session at version ${version} cannot be recreated (${plan.blocking.join("; ")}): its cells are here, with a fresh interpreter.`;
     return;
@@ -989,7 +1023,7 @@ sel.onchange = () => {
   if (sel.value) {
     // examples open as a new notebook: yours stays saved
     openNew(sel.value, SAGE_EXAMPLES.has(sel.value) ? "sage" : MAGMA_EXAMPLES.has(sel.value) ? "magma" : "python", EXAMPLES[sel.value]);
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(null, "", location.pathname + flagQuery);
   }
   sel.value = "";
 };
@@ -1657,7 +1691,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
       resumed = await resumeFrom(qs.get("resume"), qs.get("at"));
       opened = true;
     } catch (err) { statusEl.textContent = `could not resume: ${err.message ?? err}`; }
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(null, "", location.pathname + flagQuery);
   }
   if (remote && !opened) {
     try {

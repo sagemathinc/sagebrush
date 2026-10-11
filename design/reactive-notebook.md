@@ -7,6 +7,12 @@ separate scratchpad (web/test-kernels.mjs). So is step 2's analysis:
 marimo 0.25.1 on all 3,924 cells of `test/dataflow-oracle.json` (marimo's
 tests and example notebooks) and on all 13,032 top-level statements of
 CPython 3.14's standard library.
+
+**Implemented on October 11 (behind `?reactive`, see "Progress" below):**
+the graph, the scheduler, the budget, errors, the agent API, `_` names,
+per-cell seeds, static mutation tracking, file tracking, widgets as inputs,
+the fix for redefinitions, and Resume by recompute.
+
 William's decisions are recorded under "Decisions" at the end. It follows
 William's "there's no rule that this has to be exactly a Jupyter notebook",
 and Astra's repeated review suggestion: reactive like marimo, with bounds on
@@ -391,3 +397,38 @@ compromises are unnecessary.
 8. **Mutation tracking: adopted** (version counters in the runtime; a cell
    that mutates another cell's object becomes its updater). See "What owning
    the parser and the runtime buys", 3.
+
+## Progress (October 11, 2026)
+
+On with `?reactive` in the address (or localStorage `sagebrush-reactive` =
+"1"); the default page is unchanged. Tests: test/dataflow, notebook-graph
+(marimo oracles), notebook-reactive, rename (npm test), and
+web/test-reactive.mjs (60 browser checks).
+
+| Piece | Where | Notes |
+|---|---|---|
+| Definitions and references | src/dataflow.ts | marimo's ScopedVisitor ported; identical on 3,924 oracle cells and 13,032 stdlib statements. Sage after preparsing (and `var('x y')`), Magma after translation. |
+| The graph | src/notebook-graph.ts | marimo's edges and order, identical on 3,198 notebooks; #1477; cycles as strongly connected components (marimo misses some cells); identical imports allowed; updater and file edges. |
+| The scheduler | src/notebook-reactive.ts | marimo's mutate_graph (no action at a distance) and runner; stale ancestors; the budget per cell; manual cells; batch edits. |
+| The analyzer | web/analyze-worker.ts (sagebrush-analyze.js, 247 kB) | its own worker, so the page stays small and analysis never waits for a running cell. |
+| `_` names | src/dataflow.ts mangleLocals, src/notebook-session.ts | marimo's renaming applied to the parsed tree before compiling; deleted before the cell reruns. |
+| Per-cell seeds | web/replay-env.ts, notebook.js cellSeed | SHA-256 of the notebook's seed (in the document) and the cell id; Python's random and numpy.random reseeded. numpy.random's global generator now starts from entropy, as NumPy's. |
+| Mutation tracking | src/dataflow.ts `mutations` | static (visible top-level mutations); aliases and mutation inside functions are left to verify(). Runtime counters later. |
+| Files | web/shims/fs.ts, web/worker.ts | each run's reads and writes; uploads rerun readers. |
+| Widgets | lib/ipywidgets `_report` | the cells reading a moved widget's names rerun. anywidget not yet. |
+| Fix for redefinitions | src/rename.ts | "Rename the later definitions of x (x_2, …)", keeping a Jupyter notebook's meaning; scope-aware; Sage through the preparser. |
+| Agents | notebook.js applyEdits/graph/verify; WebMCP edit_notebook, notebook_graph, verify_notebook | |
+| UI | index.html | Auto-run (2 s, 10 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
+| TimeTravel | index.html replayResumed | a reactive notebook resumes a version by recomputing it, with its files as they were: no "Cannot resume here". |
+
+**Before it becomes the default (the one model):**
+
+1. Tests written for Jupyter's order: test-kernels (1 check: running a cell
+   now reruns its dependents), test-notebook (stops at a cell that does not
+   run in graph order), test-replay (resume now recomputes; the journal's
+   replay stays for notebooks opened before). Measured by building with
+   reactive on: everything else passes.
+2. `sagebrush notebook` (native CPython): its kernel does not yet handle the
+   run options (`forget`, `mangle`, `seed`); until it does, reactive should
+   stay off there.
+3. anywidget; runtime mutation counters; marimo `.py` import and export.
