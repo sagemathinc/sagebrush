@@ -190,7 +190,23 @@ for ties; an ancestor's error stops descendants.
    and in whatever order, it reruns. The clock is real.
    (`design/timetravel-replay.md`'s deterministic math library is what makes
    recompute bit-exact across browsers.)
-7. **Widgets are inputs.** A widget defined in one cell and read (`n.value`)
+7. **Widgets (as marimo):**
+   - **Built-in UI elements** (sliders, dropdowns, ...) are reactive values.
+     A widget defined in one cell and read in another is an edge, and moving
+     it reruns the reading cells.
+   - **Third-party widgets** use the **anywidget** protocol
+     ([manzt/anywidget](https://github.com/manzt/anywidget), MIT), which
+     marimo supports in place of ipywidgets:
+     - the front end is an ES module (`render({model, el})`) running in the
+       page;
+     - the model's state (get/set/`change:` events) is synced with the
+       Python object in the worker;
+     - Python gets a light `anywidget.AnyWidget` with traitlets-style synced
+       attributes.
+     This opens the existing anywidget ecosystem.
+   - Our light `ipywidgets` stays for compatibility (its controls become
+     reactive values too).
+   - In more detail: **widgets are inputs.** A widget defined in one cell and read (`n.value`)
    in another is an edge. Moving it reruns the reading cells within the
    budget: marimo's UI model, which subsumes `@interact`. `@interact` keeps
    working as today.
