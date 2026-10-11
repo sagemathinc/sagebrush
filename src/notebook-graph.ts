@@ -1,0 +1,260 @@
+// The reactive notebook's dependency graph (design/reactive-notebook.md):
+// which cells read what others define, the errors that make the graph
+// ill-defined, and the order in which cells run.
+//
+// The semantics are marimo's (marimo/_runtime/dataflow and
+// marimo/_lint/validate_graph.py, Apache-2.0, see NOTICE.md), checked
+// against marimo itself by test/notebook-graph.test.ts:
+//
+//   - B is a child of A when B references a name A defines;
+//   - a cell that deletes a name (`del x`) runs after every other cell that
+//     references it;
+//   - a name defined by several cells is a MultipleDefinitionError on each;
+//   - the cells on a cycle get a CycleError;
+//   - cells run in topological order, ties going to the page order.
+//
+// Two differences, each deliberate:
+//
+//   - #1477's relaxation (unless `strict`): several cells may define a name
+//     that no cell reads.  Such a name has no edges, so the graph is exact.
+//   - A cycle error goes to every cell in a strongly connected component:
+//     every cell on a cycle.  marimo records, for each edge added, one path
+//     closing a cycle, and so misses some cells (in 70 of the oracle's 3,198
+//     notebooks; never a whole cycle).
+import { analyzeCell, ImportStarError, type CellAnalysis } from "./dataflow";
+
+export type CellError =
+  | { kind: "syntax"; message: string }
+  | { kind: "import-star"; message: string }
+  | { kind: "multiple-definition"; name: string; cells: string[] }
+  | { kind: "cycle"; cells: string[] };
+
+interface Node {
+  id: string;
+  code: string;
+  // undefined when the cell could not be analyzed (its error says why)
+  analysis?: CellAnalysis;
+  error?: CellError;
+}
+
+export interface GraphOptions {
+  /** marimo's one-definition rule exactly, without #1477's relaxation */
+  strict?: boolean;
+  /** the cell id given to the analyzer (affects only `_`-name mangling) */
+}
+
+export class NotebookGraph {
+  private nodes = new Map<string, Node>();
+  private parentsOf = new Map<string, Set<string>>();
+  private childrenOf = new Map<string, Set<string>>();
+  private errorsOf = new Map<string, CellError[]>();
+  /** each name's defining cells, in page order */
+  readonly definers = new Map<string, string[]>();
+  private readonly strict: boolean;
+
+  constructor(cells: { id: string; code: string }[] = [], options: GraphOptions = {}) {
+    this.strict = !!options.strict;
+    this.set(cells);
+  }
+
+  /** Replace the notebook's cells (in page order); unchanged code is not analyzed again. */
+  set(cells: { id: string; code: string }[]): void {
+    const old = this.nodes;
+    this.nodes = new Map();
+    for (const { id, code } of cells) {
+      const prev = old.get(id);
+      this.nodes.set(id, prev && prev.code === code ? prev : analyze(id, code));
+    }
+    this.build();
+  }
+
+  get ids(): string[] {
+    return [...this.nodes.keys()];
+  }
+  analysis(id: string): CellAnalysis | undefined {
+    return this.nodes.get(id)?.analysis;
+  }
+  parents(id: string): Set<string> {
+    return this.parentsOf.get(id) ?? new Set();
+  }
+  children(id: string): Set<string> {
+    return this.childrenOf.get(id) ?? new Set();
+  }
+  /** each cell's errors (cells without errors are absent) */
+  get errors(): Map<string, CellError[]> {
+    return this.errorsOf;
+  }
+
+  private build(): void {
+    const ids = this.ids;
+    this.parentsOf = new Map(ids.map((id) => [id, new Set()]));
+    this.childrenOf = new Map(ids.map((id) => [id, new Set()]));
+    this.errorsOf = new Map();
+    this.definers.clear();
+    const readers = new Map<string, string[]>();
+    const deleters = new Map<string, string[]>();
+    const push = (m: Map<string, string[]>, k: string, v: string) => {
+      const l = m.get(k);
+      if (l) l.push(v);
+      else m.set(k, [v]);
+    };
+    for (const [id, node] of this.nodes) {
+      if (node.error) this.errorsOf.set(id, [node.error]);
+      const a = node.analysis;
+      if (!a) continue;
+      for (const n of a.defs) push(this.definers, n, id);
+      for (const n of a.refs) push(readers, n, id);
+      for (const n of a.deleted) push(deleters, n, id);
+    }
+    const edge = (p: string, c: string) => {
+      if (p === c) return;
+      this.childrenOf.get(p)!.add(c);
+      this.parentsOf.get(c)!.add(p);
+    };
+    for (const [name, ds] of this.definers) {
+      const rs = readers.get(name);
+      if (ds.length > 1 && (this.strict || rs)) {
+        for (const d of ds) this.addError(d, { kind: "multiple-definition", name, cells: ds.filter((x) => x !== d) });
+      }
+      for (const r of rs ?? []) for (const d of ds) edge(d, r);
+    }
+    // a cell deleting a name runs after the others reading it
+    for (const [name, xs] of deleters) for (const r of readers.get(name) ?? []) for (const x of xs) edge(r, x);
+    for (const scc of this.components()) {
+      if (scc.length > 1) for (const id of scc) this.addError(id, { kind: "cycle", cells: scc });
+    }
+  }
+
+  private addError(id: string, e: CellError): void {
+    const l = this.errorsOf.get(id);
+    if (l) l.push(e);
+    else this.errorsOf.set(id, [e]);
+  }
+
+  /** the strongly connected components (Tarjan), each in page order */
+  private components(): string[][] {
+    const index = new Map<string, number>(), low = new Map<string, number>();
+    const stack: string[] = [], on = new Set<string>(), out: string[][] = [];
+    const page = new Map(this.ids.map((id, i) => [id, i]));
+    let n = 0;
+    // iterative, so that a long chain of cells cannot overflow the stack
+    for (const start of this.ids) {
+      if (index.has(start)) continue;
+      const work: [string, Iterator<string>][] = [];
+      const open = (v: string) => {
+        index.set(v, n);
+        low.set(v, n++);
+        stack.push(v);
+        on.add(v);
+        work.push([v, this.children(v)[Symbol.iterator]()]);
+      };
+      open(start);
+      while (work.length) {
+        const [v, it] = work[work.length - 1];
+        const next = it.next();
+        if (!next.done) {
+          const w = next.value;
+          if (!index.has(w)) open(w);
+          else if (on.has(w)) low.set(v, Math.min(low.get(v)!, index.get(w)!));
+          continue;
+        }
+        work.pop();
+        if (work.length) {
+          const u = work[work.length - 1][0];
+          low.set(u, Math.min(low.get(u)!, low.get(v)!));
+        }
+        if (low.get(v) === index.get(v)) {
+          const scc: string[] = [];
+          let w: string;
+          do {
+            w = stack.pop()!;
+            on.delete(w);
+            scc.push(w);
+          } while (w !== v);
+          out.push(scc.sort((x, y) => page.get(x)! - page.get(y)!));
+        }
+      }
+    }
+    return out;
+  }
+
+  /** The given cells and their descendants (or ancestors). */
+  closure(ids: Iterable<string>, { children = true, inclusive = true } = {}): Set<string> {
+    const start = [...ids];
+    const seen = new Set(start), out = new Set(inclusive ? start : []);
+    const queue = [...start];
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const r of children ? this.children(id) : this.parents(id)) {
+        if (seen.has(r)) continue;
+        seen.add(r);
+        out.add(r);
+        queue.push(r);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The given cells in topological order, ties going to the page order
+   * (marimo's topological_sort).  Cells on a cycle among them are left out.
+   */
+  order(ids: Iterable<string>): string[] {
+    const set = new Set(ids);
+    const page = new Map(this.ids.map((id, i) => [id, i]));
+    const degree = new Map<string, number>();
+    for (const id of set) degree.set(id, [...this.parents(id)].filter((p) => set.has(p)).length);
+    // a binary heap on page position
+    const heap: string[] = [];
+    const less = (a: string, b: string) => page.get(a)! < page.get(b)!;
+    const pushHeap = (x: string) => {
+      heap.push(x);
+      let i = heap.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (!less(heap[i], heap[p])) break;
+        [heap[i], heap[p]] = [heap[p], heap[i]];
+        i = p;
+      }
+    };
+    const popHeap = (): string => {
+      const top = heap[0], last = heap.pop()!;
+      if (heap.length) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < heap.length && less(heap[l], heap[m])) m = l;
+          if (r < heap.length && less(heap[r], heap[m])) m = r;
+          if (m === i) break;
+          [heap[i], heap[m]] = [heap[m], heap[i]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    for (const id of set) if (degree.get(id) === 0) pushHeap(id);
+    const out: string[] = [];
+    while (heap.length) {
+      const id = popHeap();
+      out.push(id);
+      for (const c of this.children(id)) {
+        if (!set.has(c)) continue;
+        const d = degree.get(c)! - 1;
+        degree.set(c, d);
+        if (d === 0) pushHeap(c);
+      }
+    }
+    return out;
+  }
+}
+
+function analyze(id: string, code: string): Node {
+  try {
+    return { id, code, analysis: analyzeCell(code, id) };
+  } catch (e: any) {
+    if (e instanceof ImportStarError) return { id, code, error: { kind: "import-star", message: e.message } };
+    return { id, code, error: { kind: "syntax", message: String(e?.message ?? e) } };
+  }
+}
