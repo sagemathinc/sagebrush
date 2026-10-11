@@ -19,6 +19,12 @@ EXAMPLES::
     >>> d = mo.ui.dropdown({"one": 1, "two": 2}, value="two")
     >>> d.value
     2
+
+A control in an f-string is shown below the text, labeled by the words before it::
+
+    >>> z = mo.ui.slider(1, 10)
+    >>> mo.md(f"- _Zoom_: {z}").text, z.description
+    ('- _Zoom_: \u25be', 'Zoom')
 """
 
 import ipywidgets as _w
@@ -27,16 +33,42 @@ __version__ = "0.0 (Sagebrush's subset)"
 
 
 class Html:
-    """Markdown output (what mo.md returns)."""
+    """Markdown output (what mo.md returns), with the controls an f-string
+    put in it shown below it (marked where they were)."""
 
-    def __init__(self, text):
-        self.text = text
+    def __init__(self, text, widgets=()):
+        self.text, self.widgets = text, list(widgets)
 
     def _repr_markdown_(self):
         return self.text
 
+    def _ipython_display_(self):
+        from IPython.display import display, Markdown
+        display(Markdown(self.text))
+        if self.widgets:
+            _w._show(self.widgets)
+
     def __repr__(self):
         return self.text
+
+
+def _embedded(text):
+    import re
+    widgets = []
+
+    def put(m):
+        w = _w._embedded.get(int(m.group(1)))
+        if w is None:
+            return m.group(0)
+        if w not in widgets:
+            widgets.append(w)
+            # (an unlabeled control takes the words before it: "- _Zoom_: {zoom}")
+            if not w.description:
+                before = m.string[m.string.rfind("\n", 0, m.start()) + 1:m.start()]
+                w.description = re.sub(r"[-*_`#>:(\[\]]+", " ", before).strip()[-40:]
+        return "\u25be"
+
+    return re.sub("\u27e6w(\\d+)\u27e7", put, text), widgets
 
 
 def _dedent(text):
@@ -46,8 +78,10 @@ def _dedent(text):
 
 
 def md(text):
-    """Markdown, shown rendered (with LaTeX math)."""
-    return Html(_dedent(str(text)).strip())
+    """Markdown, shown rendered (with LaTeX math); controls in it (an
+    f-string's {slider}) are shown below it."""
+    text, widgets = _embedded(_dedent(str(text)).strip())
+    return Html(text, widgets)
 
 
 class _Ui:
