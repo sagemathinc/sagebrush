@@ -428,7 +428,7 @@ web/test-reactive.mjs (60 browser checks).
    run in graph order), test-replay (resume now recomputes; the journal's
    replay stays for notebooks opened before). Measured by building with
    reactive on: everything else passes.
-2. `sagebrush notebook` (native CPython): its kernel does not yet handle the
-   run options (`forget`, `mangle`, `seed`); until it does, reactive should
-   stay off there.
+2. `sagebrush notebook` (the same session in a Node worker thread) handles
+   `forget`, `mangle` and `seed` (Python's random and numpy.random), but not
+   yet file tracking or seeding os.urandom; it needs its own reactive test.
 3. anywidget; runtime mutation counters; marimo `.py` import and export.

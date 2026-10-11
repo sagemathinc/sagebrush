@@ -184,10 +184,16 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     opts.runs?.begin(m);
     let ok = true;
     changedNames = new Set();
-    // a seeded run (the reactive notebook's per-cell seeds): the generators
-    // already made draw again from the run's entropy (os.urandom)
-    if (typeof m.seed === "string" && opts.runs) {
-      run("import sys as _s\nfor _k in ('random', 'numpy.random'):\n    _g = _s.modules.get(_k)\n    if _g is not None: _g.seed()\ndel _s, _k, _g\n", host, "exec", "<seed>");
+    // a seeded run (the reactive notebook's per-cell seeds): Python's random
+    // and numpy.random, if imported, start again.  In the browser's worker
+    // the run's entropy (os.urandom) is a stream from the seed (RunHooks), so
+    // they reseed from it, as a first import in the cell does; elsewhere
+    // (sagebrush notebook) from the seed itself (a first import there is not
+    // reproducible).
+    if (typeof m.seed === "string" && /^[0-9a-f]{64}$/i.test(m.seed)) {
+      const words = Array.from({ length: 8 }, (_, i) => parseInt(m.seed.slice(8 * i, 8 * i + 8), 16));
+      const [a, b] = opts.runs ? ["", ""] : [`0x${m.seed}`, JSON.stringify(words)];
+      run(`import sys as _s\n_g = _s.modules.get('random')\nif _g is not None: _g.seed(${a})\n_g = _s.modules.get('numpy.random')\nif _g is not None: _g.seed(${b})\ndel _s, _g\n`, host, "exec", "<seed>");
     }
     if (Array.isArray(m.forget) && m.forget.length) {
       const names = m.forget.filter((n: unknown) => typeof n === "string" && /^[A-Za-z_]\w*$/.test(n));
