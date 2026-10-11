@@ -22,6 +22,8 @@
 //   - Mutation tracking (unless `strict`): a cell visibly mutating another
 //     cell's object (src/dataflow.ts `mutations`) is its updater, run after
 //     the definer and other updaters above it, and before the readers.
+//   - Files (setFiles): a cell that wrote a file in its last run runs before
+//     the cells that read it.
 //   - A cycle error goes to every cell in a strongly connected component:
 //     every cell on a cycle.  marimo records, for each edge added, one path
 //     closing a cycle, and so misses some cells (in 70 of the oracle's 3,198
@@ -69,6 +71,7 @@ export class NotebookGraph {
   readonly definers = new Map<string, string[]>();
   /** each name's updaters: the cells mutating its object, in page order (not when strict) */
   readonly updatersOf = new Map<string, string[]>();
+  private files = new Map<string, { reads: string[]; writes: string[] }>();
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
 
@@ -171,6 +174,27 @@ export class NotebookGraph {
     for (const scc of this.components()) {
       if (scc.length > 1) for (const id of scc) this.addError(id, { kind: "cycle", cells: scc });
     }
+    // Files (ours): a cell that wrote a file in its last run, before one that
+    // read it.  Edges found by running, so never made into cycles: one that
+    // would close a cycle is left out.
+    const fileReaders = new Map<string, string[]>();
+    for (const [id, io] of this.files) if (this.nodes.has(id)) for (const f of io.reads) push(fileReaders, f, id);
+    for (const [id, io] of this.files) {
+      if (!this.nodes.has(id)) continue;
+      for (const f of io.writes) for (const r of fileReaders.get(f) ?? []) {
+        if (r !== id && !this.childrenOf.get(id)!.has(r) && !this.closure([r]).has(id)) edge(id, r);
+      }
+    }
+  }
+
+  /** The files each cell read and wrote in its last run (a page's writer-to-reader edges). */
+  setFiles(files: Map<string, { reads: string[]; writes: string[] }>): void {
+    this.files = files;
+    this.build();
+  }
+  /** The cells that read a file in their last run. */
+  readersOf(path: string): string[] {
+    return this.ids.filter((id) => this.files.get(id)?.reads.includes(path));
   }
 
   private addError(id: string, e: CellError): void {

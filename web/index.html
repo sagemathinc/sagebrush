@@ -1265,6 +1265,7 @@ async function sendFiles(w) {
 function filePut(path, data) {
   for (const k of liveKernels()) k.post({ fsPut: path, data });
   for (const e of kernels.values()) e.journal?.fileEvent(path, data);
+  nb.filesChanged([path]); // (the reactive notebook: the cells reading it rerun)
 }
 async function fileChanged(path, data) {
   await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));

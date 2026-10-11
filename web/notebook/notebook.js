@@ -638,7 +638,7 @@ export function createNotebook(root, opts = {}) {
         kernel?.ran?.add(cell.id);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
-        resolve({ ok: !info?.error, ms });
+        resolve({ ok: !info?.error, ms, ...(info?.files ? { files: info.files } : {}) });
       },
       stopped(message) {
         settle(cell);
@@ -1715,6 +1715,8 @@ export function createNotebook(root, opts = {}) {
     get reactive() { return reactive() ? engine() : null; },
     get budget() { return budget; },
     setBudget(ms) { budget = ms; if (kernel?.reactive) kernel.reactive.budget = ms; },
+    /** Files changed outside the notebook's cells (uploaded, deleted): the cells that read them rerun (the reactive notebook). */
+    filesChanged(paths) { return reactive() && kernel.reactive ? kernel.reactive.filesChanged(paths) : Promise.resolve(null); },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
     runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },
     applyEdits, graph, verify,

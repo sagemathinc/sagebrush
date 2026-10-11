@@ -3,10 +3,13 @@
 // the files with load() when a worker starts, and hooks.changed() tells it
 // about every change Python makes.  Paths are absolute from "/", which is
 // also the initial working directory.  Output streams go to hooks.write.
+// (read: a file's contents were read, for the reactive notebook's file
+// tracking)
 const hooks: {
   write: (fd: number, s: string) => void;
   changed: (path: string, data: Uint8Array | null) => void;
-} = { write: () => {}, changed: () => {} };
+  read: (path: string) => void;
+} = { write: () => {}, changed: () => {}, read: () => {} };
 export const __hooks = hooks;
 
 interface Entry {
@@ -92,6 +95,7 @@ export function readFileSync(p: string, enc?: any): any {
   const r = resolve(p);
   const f = files.get(r);
   if (!f) dirs.has(r) ? fail("EISDIR", -21, "read", p) : fail("ENOENT", -2, "open", p);
+  hooks.read(r);
   const encoding = typeof enc === "string" ? enc : enc?.encoding;
   return encoding ? new TextDecoder().decode(f!.data) : f!.data.slice();
 }

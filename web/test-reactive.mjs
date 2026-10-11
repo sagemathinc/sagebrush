@@ -141,6 +141,22 @@ try {
   e = await ev(`(async () => { const nb = sagebrush.notebook; const ids = nb.cells().map((c) => c.id); const r = await nb.applyEdits({ remove: [ids[1]] }); return r.report; })()`);
   ok((await out(1)) === "3", `edit: removing the append (an updater) reruns v's definer and the reader (len(v) = ${await out(1)})`);
 
+  // files: a cell writing a file runs before the cells reading it, which rerun when it changes
+  await fileNew();
+  await set(["k = 3", "with open('data.txt', 'w') as f:\n    f.write('x' * k)", "print(len(open('data.txt').read()))"]);
+  await run([0, 1, 2]);
+  ok((await out(2)) === "3", "a cell reads the file another wrote");
+  r = await run(0);
+  ok(JSON.stringify(r?.ran) === "[0,1,2]" && (await out(2)) === "3", `the reader depends on the writer through the file (${JSON.stringify(r?.ran)})`);
+  await set(["k = 5"]);
+  await run(0);
+  ok((await out(2)) === "5", `changing what is written reruns the reader (${await out(2)})`);
+  const g2 = await ev("sagebrush.notebook.graph()");
+  ok(g2[2].parents.includes(g2[1].id), "the graph has the file edge");
+  await ev("sagebrush.kernel.post({ fsPut: '/data.txt', data: new TextEncoder().encode('abcdefg') }); true");
+  r = await ev("sagebrush.notebook.filesChanged(['/data.txt']).then((r) => r.ran.length)");
+  ok(r === 1 && (await out(2)) === "7", `a file changed outside (an upload) reruns its readers (${await out(2)})`);
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);
