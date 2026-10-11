@@ -64,8 +64,12 @@ def _reduce_ex(self, proto):
     for base in cls.__mro__:
         if hasattr(base, '__flags__') and not base.__flags__ & _HEAPTYPE:
             break
+        # (pyjs: a built-in type has no __flags__, and its __new__ no
+        # __self__; a float subclass was pickled as a bare object)
+        if base.__module__ == 'builtins' and base is not object:
+            break
         new = base.__new__
-        if isinstance(new, _new_type) and new.__self__ is base:
+        if isinstance(new, _new_type) and getattr(new, '__self__', None) is base:
             break
     else:
         base = object # not really reachable

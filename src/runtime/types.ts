@@ -582,6 +582,9 @@ method(int, "bit_length", (x: any) => (O.truth(x) ? absBig(x).toString(2).length
 method(int, "bit_count", (x: any) => [...absBig(x).toString(2)].filter((c) => c === "1").length);
 method(int, "conjugate", (x: any) => +x);
 method(int, "__index__", (x: any) => (typeof x === "boolean" ? +x : x));
+// (pickling a subclass instance keeps its value: an int/float/str/bytes/tuple
+// subclass, a Sage RealNumber among them, was pickled without it)
+method(int, "__getnewargs__", (x: any) => tuple([unbox(x)]));
 method(int, "__int__", (x: any) => (typeof x === "boolean" ? +x : x));
 method(int, "__float__", (x: any) => O.mkfloat(O.fv(x)!));
 method(int, "__repr__", (x: any) => repr(unbox(x)));
@@ -640,6 +643,7 @@ bindClass(FloatBox, float);
 method(float, "is_integer", (x: any) => isInt(O.fv(x)!));
 method(float, "conjugate", (x: any) => x);
 method(float, "__float__", (x: any) => x);
+method(float, "__getnewargs__", (x: any) => tuple([O.mkfloat(O.fv(unbox(x))!)]));
 method(float, "__int__", (x: any) => intCall(x));
 method(float, "__trunc__", (x: any) => intCall(x));
 method(float, "__floor__", (x: any) => intCall(Math.floor(O.fv(x)!)));
@@ -954,6 +958,7 @@ method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s < x : NotImplemented));
 method(S, "__hash__", (s: any) => O.hashAny(unbox(s)));
 method(S, "__str__", (s: string) => s);
+method(S, "__getnewargs__", (s: any) => tuple([unbox(s)]));
 method(S, "__repr__", (s: string) => repr(s));
 method(S, "__format__", (s: string, spec: string) => format(s, spec));
 method(S, "__iter__", (s: string) => O.iter(s));
@@ -1157,6 +1162,7 @@ list.$dict.set("__hash__", null);
 method(tupleType, "index", (a: any[], x: any, start: any = undefined, end: any = undefined) => seqIndexOf(a, x, start, end, "tuple"));
 method(tupleType, "count", (a: any[], x: any) => a.filter((v) => O.eqBool(v, x)).length);
 method(tupleType, "__hash__", (a: any[]) => O.hashTupleOf(a));
+method(tupleType, "__getnewargs__", (a: any[]) => tuple([tuple([...a])]));
 method(tupleType, "__add__", (a: any[], b: any) => (Array.isArray(b) && (b as any).$t ? tuple([...a, ...b]) : NotImplemented));
 
 // ------------------------------------------------------------------ dict
@@ -1555,6 +1561,7 @@ for (const bt of [bytesType, bytearray]) {
   method(bt, "join", (b: PyBytes, items: any) => new (bt === bytesType ? PyBytes : PyByteArray)(encode(O.toArray(items).map((x: PyBytes) => decode(x, "latin1")).join(decode(b, "latin1")), "latin1").a));
 }
 method(bytesType, "__hash__", (b: PyBytes) => O.hashAny(decode(b, "latin1")) ^ 0x5bd1e995);
+method(bytesType, "__getnewargs__", (b: PyBytes) => tuple([new PyBytes(b.a.slice(0, b.n))]));
 bytearray.$dict.set("__hash__", null);
 method(bytearray, "__setitem__", (b: PyByteArray, k: any, v: any) => (O.setitem(b, k, v), null));
 const grow = (b: PyByteArray, extra: number) => {
@@ -2197,7 +2204,10 @@ export const unionType = builtinTypeFor("UnionType", PyUnion, "types", () => rai
   const getstate = method(object, "__getstate__", (self: any) => {
     if (!hasInstanceDict(self)) return null;
     const d = new PyDict();
-    for (const k of Object.keys(self)) if (k[0] !== "$" && !(Array.isArray(self) && /^\d+$/.test(k))) dictSet(d, k, self[k]);
+    // (not a bytes subclass instance's storage, a and n: its pickle restored
+    // them as attributes and broke it)
+    const own = self instanceof PyBytes ? (k: string) => k !== "a" && k !== "n" : () => true;
+    for (const k of Object.keys(self)) if (k[0] !== "$" && !(Array.isArray(self) && /^\d+$/.test(k)) && own(k)) dictSet(d, k, self[k]);
     return d.$m.size ? d : null;
   });
   const reduceNewobj = (self: any) => {
