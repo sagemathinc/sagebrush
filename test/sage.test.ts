@@ -33,3 +33,13 @@ test("hash of a float, int or str subclass calling the base __hash__", () => {
   const src = "class F(float):\n def __hash__(self): return float.__hash__(self)\nclass I(int):\n def __hash__(self): return int.__hash__(self)\nclass S(str):\n def __hash__(self): return str.__hash__(self)\nprint(hash(F(1.5)) == hash(1.5), hash(I(7)) == hash(7), hash(S('ab')) == hash('ab'))";
   assert.equal(cli("-c", src), "True True True\n");
 });
+
+test("pickling an int/float/str/bytes/tuple subclass instance keeps its value", () => {
+  // (RR(pi) came back as 0.000000000000000: no __getnewargs__, so only the class was pickled)
+  assert.equal(cli("--sage", "-c", "import pickle\nprint(pickle.loads(pickle.dumps(RR(pi))), pickle.loads(pickle.dumps(RealField(100)(2).sqrt())))"),
+    "3.14159265358979 1.4142135623730950488016887242\n");
+  const src = "import pickle\nclass F(float): pass\nclass I(int): pass\nclass S(str): pass\nclass B(bytes): pass\nclass T(tuple): pass\n" +
+    "b = B(b'xy'); b.tag = 1\nfor p in (2, 5):\n for v in (F(1.5), I(7), S('ab'), b, T((1, 2))):\n  w = pickle.loads(pickle.dumps(v, p)); assert w == v and type(w) is type(v), (p, v)\n" +
+    "print(pickle.loads(pickle.dumps(b)).tag)";
+  assert.equal(cli("-c", src), "1\n");
+});
