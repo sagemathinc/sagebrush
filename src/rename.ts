@@ -47,11 +47,52 @@ const enc = new TextEncoder(), dec = new TextDecoder();
 const bytesLen = (s: string) => enc.encode(s).length;
 const byteSlice = (s: string, a: number, b?: number) => dec.decode(enc.encode(s).subarray(a, b));
 
+// The names `:=` binds in a comprehension (in the scope around it).
+function walrusTargets(n: any): string[] {
+  const out: string[] = [];
+  const scan = (m: any): void => {
+    if (!m || typeof m !== "object") return;
+    if (Array.isArray(m)) return m.forEach(scan);
+    if (m._type === "NamedExpr" && m.target?._type === "Name") out.push(m.target.id);
+    if (m._type === "Lambda" || m._type === "FunctionDef" || m._type === "AsyncFunctionDef" || m._type === "ClassDef") return;
+    for (const k of Object.keys(m)) if (k !== "_type") scan(m[k]);
+  };
+  scan(n);
+  return out;
+}
+
+// Whether evaluating expression (or simple statement) `n` binds `name` by
+// `:=` here: "no", "yes", or "maybe" (under `and`/`or` after the first
+// operand, a conditional expression's branches, a comprehension's body).
+function walrusBinds(n: any, name: string): "no" | "yes" | "maybe" {
+  let res: "no" | "yes" | "maybe" = "no";
+  const scan = (m: any, cond: boolean): void => {
+    if (!m || typeof m !== "object") return;
+    if (Array.isArray(m)) return m.forEach((x) => scan(x, cond));
+    switch (m._type) {
+      case "NamedExpr":
+        if (m.target?._type === "Name" && m.target.id === name) res = cond || res === "maybe" ? "maybe" : "yes";
+        scan(m.value, cond);
+        return;
+      case "BoolOp": m.values.forEach((v: any, i: number) => scan(v, cond || i > 0)); return;
+      case "IfExp": scan(m.test, cond); scan([m.body, m.orelse], true); return;
+      case "ListComp": case "SetComp": case "DictComp": case "GeneratorExp": scan(m.generators?.[0]?.iter, cond); scan([m.elt, m.key, m.value, m.generators?.map((g: any) => [g.ifs, g.iter])], true); return;
+      case "FunctionDef": case "AsyncFunctionDef": scan([m.decorator_list, m.args?.defaults, m.args?.kw_defaults], cond); return;
+      case "ClassDef": scan([m.decorator_list, m.bases, m.keywords], cond); return;
+      case "Lambda": scan([m.args?.defaults, m.args?.kw_defaults], cond); return;
+    }
+    for (const k of Object.keys(m)) if (k !== "_type") scan(m[k], cond);
+  };
+  scan(n, false);
+  return res;
+}
+
 /** The occurrences of global `name` in a module's AST. */
 function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
   const out: Occurrence[] = [];
-  // the names a function (or lambda, comprehension) body binds, minus its `global`s
-  const localsOf = (body: any[], params: string[]): Set<string> => {
+  // the names a function (or lambda, comprehension) body binds, minus its
+  // `global`s (with `walrus` false: not counting `:=`)
+  const localsOf = (body: any[], params: string[], walrus = true): Set<string> => {
     const bound = new Set(params), glob = new Set<string>();
     const scan = (n: any): void => {
       if (!n || typeof n !== "object") return;
@@ -59,8 +100,13 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
       switch (n._type) {
         case "Global": case "Nonlocal": for (const g of n.names) glob.add(g); return;
         case "Name": if (n.ctx?._type !== "Load") bound.add(n.id); return;
-        case "FunctionDef": case "AsyncFunctionDef": case "ClassDef": bound.add(n.name); scan(n.decorator_list); return;
-        case "Lambda": case "ListComp": case "SetComp": case "DictComp": case "GeneratorExp": return; // (their own scopes)
+        case "NamedExpr": if (walrus) scan(n.target); scan(n.value); return;
+        // (a def's decorators, defaults, a class's bases are evaluated here)
+        case "FunctionDef": case "AsyncFunctionDef": bound.add(n.name); scan([n.decorator_list, n.args?.defaults, n.args?.kw_defaults]); return;
+        case "ClassDef": bound.add(n.name); scan([n.decorator_list, n.bases, n.keywords]); return;
+        case "Lambda": scan([n.args?.defaults, n.args?.kw_defaults]); return;
+        // (a comprehension's own scope, but its `:=` binds here)
+        case "ListComp": case "SetComp": case "DictComp": case "GeneratorExp": if (walrus) for (const t of walrusTargets(n)) bound.add(t); return;
         case "alias": bound.add((n.asname ?? n.name).split(".")[0]); return;
         case "ExceptHandler": if (n.name) bound.add(n.name); break;
         case "MatchAs": case "MatchStar": if (n.name) bound.add(n.name); break;
@@ -118,15 +164,17 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
     const tries: { s: State }[] = [];
     const note = () => { for (const t of tries) t.s = join(t.s, bound); };
     const now = (): Shadow => (outer || bound === true ? true : bound ? "maybe" : "store");
-    // (an expression's loads see the state before it, but one binding the
-    // name, `(x := 1)`, has loads on both sides: they may read either)
+    // (an expression's loads see the state before it; with a `:=` binding the
+    // name, loads on both sides of it, which may read either; after it, bound
+    // if the `:=` surely ran)
     const expr = (x: any, at: [any, string][]) => {
       if (!x) return;
-      if (binds(x)) {
-        bound = join(bound, true);
-        walk(x, now(), stmt, at, outer);
-        bound = true;
-      } else walk(x, now(), stmt, at, outer);
+      const w = walrusBinds(x, name);
+      if (w === "no") return walk(x, now(), stmt, at, outer);
+      const before = bound;
+      bound = join(bound, true);
+      walk(x, now(), stmt, at, outer);
+      bound = w === "yes" ? true : join(before, true);
     };
     const binds = (x: any) => localsOf([x], []).has(name);
     // whether it deletes the name: `del x`, `del (x, y)`, the end of `except E as x`
@@ -247,7 +295,8 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
           break;
         default:
           expr(st, at);
-          if (binds(st)) bound = true;
+          // (`:=` done by expr)
+          if (localsOf([st], [], false).has(name)) bound = true;
       }
       note();
     };
@@ -327,14 +376,16 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         return;
       }
       case "ExceptHandler":
-        // `except E as x` binds x (found after `as` on its line; else not renamable)
+        // `except E as x` binds x: just after E (else not renamable)
         if (n.name === name && !shadowed) {
-          const text = lines[n.lineno - 1] ?? "";
-          const after = byteSlice(text, n.col_offset);
-          const m = new RegExp(`(\\bas\\s+)(${name})\\s*:`).exec(after);
-          if (m) {
-            const start = n.col_offset + bytesLen(after.slice(0, m.index + m[1].length));
-            out.push({ line: n.lineno, col: start, end: start + bytesLen(name), store: true, stmt, path });
+          const ln = n.type?.end_lineno ?? n.lineno;
+          const text = lines[ln - 1] ?? "";
+          const from = n.type ? n.type.end_col_offset : n.col_offset;
+          const after = byteSlice(text, from);
+          const m = new RegExp(`^([\\s)]*as\\s+)(${name})\\s*:`).exec(after);
+          if (m && n.type) {
+            const start = from + bytesLen(m[1]);
+            out.push({ line: ln, col: start, end: start + bytesLen(name), store: true, stmt, path });
           } else out.push({ line: n.lineno, col: 0, end: 0, store: true, stmt, path, alias: null });
         }
         break;

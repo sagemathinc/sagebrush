@@ -419,6 +419,11 @@ try {
   await run([0, 1, 2, 3]);
   ok(/x is defined by cell 1 and cell 3/.test(await out(3)) && /x is also defined by/.test(await out(2)), `a class-body read that depends on a loop is not renamed: the several-definitions error (${(await out(2)).slice(0, 120)} | ${(await out(3)).slice(0, 120)})`);
 
+  // sixth review: the target of except ... as x is the one after the type, not text in a string
+  await set(["x = 1", "print(x)", "x = 2\ntry:\n    1/0\nexcept (ZeroDivisionError if 'as x:' else Exception) as x:\n    result = str(x)", "print(result)"]);
+  await run([0, 1, 2, 3]);
+  ok((await out(3)) === "division by zero", `except ... as x after a string containing "as x:" (${await out(3)})`);
+
   // fourth review, F16: verify compares an SVG's text as text
   await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"80\"><text x=\"0\" y=\"30\">id=\"sbclip'+str(v[0])+'\"</text></svg>'))"]);
   await run([0, 1, 2]);
