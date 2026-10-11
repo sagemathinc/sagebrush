@@ -278,7 +278,7 @@ export function openConsole(el: HTMLElement, host: Host) {
     if (data >= " " && !data.startsWith("\x1b")) insert(data.replace(/[\x00-\x1f\x7f]/g, ""));
   });
 
-  term.write(`sagebrush ${host.version()} — Python 3.14${host.sage() ? " (Sage mode)" : ""}. Shares variables with the notebook.\r\n`);
+  term.write(`sagebrush ${host.version()} — Python 3.14${host.sage() ? " (Sage mode)" : ""}. A fresh, ephemeral session: the notebook's variables are not here.\r\n`);
   term.write("Tab completes, ↑/↓ recall history, Ctrl+C stops running code.\r\n");
   newPrompt(ps1());
   term.focus();
