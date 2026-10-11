@@ -166,7 +166,7 @@ try {
   await run([0, 1]);
   await set(["m = 3"]);
   await run(0);
-  await sleep(100);
+  await until("!document.querySelector('#runstale').hidden", 5000).catch(() => {});
   ok((await has(1, "stale")) && /Run stale \(1/.test(await ev("document.querySelector('#runstale').textContent")) && !(await ev("document.querySelector('#runstale').hidden")), `with auto-run off, the dependent is stale and Run stale offers it (${await ev("document.querySelector('#runstale').textContent")})`);
   await ev("document.querySelector('#runstale').click(); true");
   // (the button updates on the next frame)
