@@ -433,3 +433,36 @@ web/test-reactive.mjs (60 browser checks).
    `forget`, `mangle` and `seed` (Python's random and numpy.random), but not
    yet file tracking or seeding os.urandom; it needs its own reactive test.
 3. anywidget; runtime mutation counters.
+
+## Open question: Sage's redefined `x` (found October 11, for William)
+
+Building with reactive on by default, test-notebook stops at a sequence
+every Sage user writes:
+
+```
+R.<x> = ZZ[]                       # cell 5
+x = polygen(QQ, 'x'); K.<a> = …    # cell 6
+x = var('x'); K.<a> = …            # cell 7
+print(solve(x^2 == 2, x), …)       # cell 8
+```
+
+`x` (and `K`, `a`) are defined by several cells and read by others: under
+marimo's rule, errors on all of them. The one-click fix (x_2, x_3) is right
+for Python variables but unnatural for a polynomial variable. Options:
+
+1. **Keep marimo's rule** (as built). Sage notebooks need distinct names or
+   the fix; the error message could suggest `_x` for a cell-local generator.
+2. **Page order for redefinitions** (Jupyter's reading, made reactive): a
+   cell reads the nearest definition above it. The run-time code is renamed
+   invisibly (`x` on the page, `xʹ2` in the interpreter: U+02B9 is a valid
+   identifier character, removed from messages), exactly as the fix does in
+   src/rename.ts, so the graph stays exact and nothing is an error. Each
+   definition is its own variable; editing cell 6 reruns only the cells
+   between it and cell 7 that read x. A deviation from marimo with a reason
+   (Sage's idioms), and a moderate change: the scheduler would register the
+   renamed code.
+3. **Only for Sage mode** (2 in Sage, 1 in Python).
+
+Not built: it changes the semantics William asked to match, so it is his
+decision. Everything else needed for the flip is listed under "Before it
+becomes the default".
