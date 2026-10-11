@@ -427,10 +427,20 @@ function whichReads(occ: Occurrence[], first: Occurrence): Map<Occurrence, "old"
     if (o === first || o.stmt > first.stmt || (o.stmt === first.stmt && o.store && !before(o, first))) { out.set(o, "new"); continue; }
     if (o.stmt < first.stmt) { out.set(o, "old"); continue; }
     // the same statement
-    const evaluatedFirst = o.path.some(([n, key]) =>
-      // (a class's decorators, bases and body, a def's decorators, defaults
-      // and annotations run before the name is bound; a def's body later)
-      (n === first.def && (n._type === "ClassDef" || key !== "body")) ||
+    // (a class's decorators, bases and body, a def's decorators, defaults
+    // and annotations run before the name is bound; a def's body, and the
+    // bodies of the functions and lambdas in a class body, later, except a
+    // lambda called where it is written: `(lambda: C.a)()`)
+    const defIdx = first.def ? o.path.findIndex(([n]) => n === first.def) : -1;
+    const later = (j: number) => {
+      const [n, key] = o.path[j];
+      if (key !== "body") return false;
+      if (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") return true;
+      return n._type === "Lambda" && !(o.path[j - 1]?.[0]._type === "Call" && o.path[j - 1]?.[1] === "func");
+    };
+    const header = defIdx >= 0 && (first.def._type === "ClassDef" || o.path[defIdx][1] !== "body") &&
+      !o.path.some((_, j) => j > defIdx && later(j));
+    const evaluatedFirst = header || o.path.some(([n, key]) =>
       ((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value" && inside(first, n)) ||
       ((n._type === "For" || n._type === "AsyncFor") && key === "iter" && inside(first, n)) ||
       (n._type === "NamedExpr" && key === "value" && inside(first, n)) ||

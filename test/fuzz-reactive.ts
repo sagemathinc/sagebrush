@@ -28,7 +28,7 @@ async function main() {
   const out = (() => { const i = process.argv.indexOf("--out"); return i >= 0 ? process.argv[i + 1] : null; })();
   const seed0 = arg("--seed", 1), cases = arg("--cases", 200), steps = arg("--steps", 6), maxFail = arg("--max-failures", 5);
   const k = new Kernel();
-  const stats: Stats = { compared: 0, refused: 0, unclean: 0, steps: 0 };
+  const stats: Stats = { compared: 0, refused: 0, unclean: 0, steps: 0, uncovered: 0 };
   const found: string[] = [];
   const t0 = Date.now();
   for (let s = seed0; s < seed0 + cases && found.length < maxFail; s++) {
@@ -39,14 +39,23 @@ async function main() {
     } catch (e: any) {
       f = { step: -1, cell: "", why: "the harness threw", detail: String(e?.stack ?? e) };
     }
+    if (k.dead) {
+      // (the interpreter is gone: nothing more can be checked; not a pass)
+      console.log(`FATAL (seed ${s}): ${k.dead}`);
+      process.exit(2);
+    }
     if (!f) continue;
     const [small, sf] = await shrink(k, c, f);
+    if (k.dead) {
+      console.log(`FATAL (seed ${s}, shrinking): ${k.dead}\n${f.why}\n${show(c)}`);
+      process.exit(2);
+    }
     const report = `FAIL (seed ${s}): ${sf.why}, cell ${sf.cell} after step ${sf.step}\n${show(small)}\n${sf.detail}\n`;
     found.push(report);
     console.log(report);
   }
   k.close();
-  const summary = `${cases} cases from seed ${seed0}, ${stats.steps} checks, ${stats.compared} cell outputs compared, ${stats.refused} cells shown with an error (refused), ${stats.unclean} checks where plain Python raised; ${found.length} failures; ${((Date.now() - t0) / 1000).toFixed(1)} s`;
+  const summary = `${cases} cases from seed ${seed0}, ${stats.steps} checks, ${stats.compared} cell outputs compared, ${stats.refused} cells shown with an error (refused), ${stats.unclean} checks where plain Python raised (${stats.uncovered} cells depending on what raised, not compared); ${found.length} failures; ${((Date.now() - t0) / 1000).toFixed(1)} s`;
   console.log(summary);
   if (out) writeFileSync(out, found.join("\n") + summary + "\n");
   process.exit(found.length ? 1 : 0);

@@ -301,7 +301,15 @@ class Visitor {
   visit_Name(node: Node): void {
     if (this.obscured.includes(node.id)) return;
     const ctx = node.ctx?._type;
-    if (ctx === "Store") {
+    // (ours: a `:=` in what is evaluated outside a block, a default or a
+    // base, binds in the scope around it)
+    let at = this.blocks.length - 1;
+    while (!this.strict && ctx === "Store" && at > 0 && this.blocks[at].outside) at--;
+    if (ctx === "Store" && at < this.blocks.length - 1) {
+      node.id = this.mangle(node.id, at === 0);
+      if (at === 0) this.imported.set(node.id, null);
+      this.defineIn(node.id, "variable", at);
+    } else if (ctx === "Store") {
       node.id = this.mangle(node.id);
       this.define(node.id, "variable");
     } else if (ctx === "Load" && !this.isDefined(node.id) && !isLocal(node.id)) {

@@ -628,7 +628,10 @@ export class Reactive {
         for (const n of [...(a?.mutations ?? []), ...deleted]) {
           const ds = (this.graph.definers.get(n) ?? []).filter((d) => !this.errors.has(d));
           if (ds.length !== 1) continue;
-          for (const f of this.graph.closure([ds[0], ...(this.graph.updatersOf.get(n) ?? [])])) {
+          const family = [ds[0], ...(this.graph.updatersOf.get(n) ?? [])];
+          // (a cell that must run needs its family, whatever the budget)
+          if (required.has(id)) for (const f of family) if (!required.has(f) && !this.errors.has(f)) { required.add(f); inRun.add(f); grew = true; }
+          for (const f of this.graph.closure(family)) {
             if (!inRun.has(f) && !this.errors.has(f)) {
               inRun.add(f);
               grew = true;
