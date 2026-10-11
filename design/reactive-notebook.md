@@ -88,6 +88,68 @@ are for the rest of Sagebrush.
 marimo's `.py` notebook format (one function per cell) is a natural import
 and export format: then marimo notebooks open in Sagebrush and the reverse.
 
+## What marimo's users and maintainers find suboptimal
+
+From marimo's issue tracker (October 2026), what matters for our design:
+
+1. **The one-definition rule is the top friction.** The cases are
+   `for i in ...` in two cells, `fig, ax = plt.subplots()` in two cells, and
+   `df = clean(df)` chains.
+   - [#1477](https://github.com/marimo-team/marimo/issues/1477) "Relax
+     uniqueness constraint for write-only variables": allow several
+     definitions when no cell reads the name. The maintainers found no
+     correctness problem, but closed it as not planned. Their reason was the
+     runtime bookkeeping: when cells are edited or deleted, which definition
+     is current? They improved `marimo convert` instead.
+   - Users keep hitting it: "used Marimo for about two hours and already
+     tripped over this problem so many times".
+   - See also [#2347](https://github.com/marimo-team/marimo/issues/2347),
+     [#6489](https://github.com/marimo-team/marimo/issues/6489) (shadowing
+     behind a setting), and the open
+     [#7815](https://github.com/marimo-team/marimo/issues/7815) (consecutive
+     redefining cells run as one unit).
+2. **Mutations stay untracked** by design. "Strict mode", which copied
+   values so that mutation could not leak, was too slow and is effectively
+   dead ([#4199](https://github.com/marimo-team/marimo/issues/4199)).
+3. **Too many overlapping execution concepts**
+   ([#2100](https://github.com/marimo-team/marimo/issues/2100)): notebook
+   lazy or autorun, per-cell "disabled", and requests for a per-cell
+   "manual" mode for expensive or dangerous cells (writes to a production
+   database).
+4. **Coarse invalidation.** Editing one line of a config cell reruns
+   everything that reads any of its names
+   ([#9959](https://github.com/marimo-team/marimo/issues/9959)). marimo's
+   direction is content-addressed caching (`mo.persistent_cache`, "cached
+   execution"): rerun only what reads a value that actually changed.
+5. **Files are not dependencies**
+   ([#3258](https://github.com/marimo-team/marimo/issues/3258)): the fix is
+   an explicit `mo.watch.file`.
+6. **`del` and conditional definitions** cannot be honored by static
+   analysis ([#9347](https://github.com/marimo-team/marimo/issues/9347)).
+   marimo keeps the rule and does no runtime tracing.
+7. **Agents:** marimo is adding agent tooling
+   ([#8172](https://github.com/marimo-team/marimo/issues/8172) MCP cell
+   editing and execution control,
+   [#9444](https://github.com/marimo-team/marimo/issues/9444)). One reported
+   problem: with autorun, an agent's coordinated edits to several cells run
+   after each edit. Agents need to batch edits and run once.
+
+**What we can do differently (proposals):**
+
+| # | Proposal | Why |
+|---|---|---|
+| 1 | Allow a name to be defined by several cells **as long as no other cell reads it** (#1477). It is an error the moment a cell reads it. When a name's definers drop to one, that cell is rerun (stale, in lazy mode). | This is #1477's rule. Rerunning the remaining definer is the bookkeeping that resolves marimo's ambiguity. The graph stays exact: a name with no readers has no edges. `df = clean(df)` chains stay an error; different names (`df1`, `df2`) also make each step addressable. |
+| 2 | Errors offer one-click fixes: rename to `_i`, rename the later definition, merge cells. | — |
+| 3 | Two concepts only: the notebook's budget (autorun = infinite, lazy = 0) and a per-cell **manual** flag (never runs automatically, shows stale). | #2100. A separate "disabled" is not needed. |
+| 4 | After a cell reruns, its dependents rerun only if a value they read changed (a hash of the value, where it can be computed cheaply; otherwise assume it changed). | marimo's own direction (#9959); fewer reruns when people and agents edit. |
+| 5 | **Files are tracked automatically.** Every `open()` goes through our filesystem shim, so the runtime knows which files each cell read and wrote: a writer-to-reader edge, with no `mo.watch`. | Possible because we own the runtime; marimo would need tracing it chose not to do. Dynamic edges are recorded per run and shown in the graph. |
+| 6 | **Agent transactions:** `edit([...cells])` applies several edits, then the graph runs once. | #8172's batching problem. |
+| 7 | A **mutation warning**, plus `verify()`. | Recomputing from scratch shows an output that depended on an untracked mutation (William's `z.x` example would be flagged). |
+
+Kept exactly as marimo: one definer for any name that is read; `_`-names
+local; no `del` or `import *` in the graph; topological order, page order
+for ties; an ancestor's error stops descendants.
+
 ## The model
 
 1. **Each notebook has its own interpreter** (a Web Worker: about 120 ms to
