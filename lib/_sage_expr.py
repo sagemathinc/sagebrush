@@ -3258,14 +3258,23 @@ def _solution_dicts(sols, nvars):
 
 
 def _assumed_real(x):
-    """Whether the assumptions make x real (a feature such as 'real' or
-    'positive', or an inequality involving x)."""
+    """Whether the assumptions make x real: a feature such as 'real' or
+    'positive', or an inequality with a side c*x + d, c != 0 and d real
+    constants (an inequality relates real sides; one mentioning x, as
+    x*x < 0 or I*x > 0, does not make x real: the review's ABS-F1)."""
+    v = Expression(_sym_s(x))
     for r in _ASSUMPTIONS:
         if isinstance(r, _Feature):
             if str(r._v) == x and r._kind in ("real", "positive", "negative", "integer", "rational", "even", "odd"):
                 return True
         elif isinstance(r, Expression) and r._op()[0] in ("rel:Lt", "rel:Le", "rel:Gt", "rel:Ge") and x in r._names():
-            return True
+            for side in (r.lhs(), r.rhs()):
+                c = side.diff(v)
+                d = side - c * v
+                if x in d._names() or c.variables() or d.variables():
+                    continue
+                if _call("is_zero", c._s)[0] != "1" and _call("is_zero", c.imag_part()._s)[0] == "1" and _call("is_zero", d.imag_part()._s)[0] == "1":
+                    return True
     return False
 
 

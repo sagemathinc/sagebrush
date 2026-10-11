@@ -2098,7 +2098,18 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
                 // a candidate from squaring, accepted by numerical agreement
                 // only: exact under its residual vanishing, kept as a
                 // condition
-                let squared = VERIFY.with(|v| v.borrow().iter().find(|(c, _)| c == &s.val).map(|(_, b)| b.clone()));
+                // (every transformation that produced it: the radical
+                // branch alone is the condition only when squaring was the
+                // one; the radical solver inside log_roots registered the
+                // candidate first, and its branch condition alone admitted
+                // x = (3 - sqrt(5))/2 for log(sqrt(x)) + log(sqrt(x) + 1) ==
+                // 2 pi I, where the logs sum to 0: the review's LOG-F1)
+                let found: Vec<Option<(Expr, Expr)>> = VERIFY.with(|v| v.borrow().iter().filter(|(c, _)| c == &s.val).map(|(_, b)| b.clone()).collect());
+                let squared = match found.len() {
+                    0 => None,
+                    1 => Some(found[0].clone()),
+                    _ => Some(None),
+                };
                 if let (true, Some(branch)) = (NUMERIC.with(|n| n.get()), squared) {
                     let at = |u: &Expr| crate::simplify::simplify_rational(&subs(u, &[(xs.clone(), s.val.clone())]));
                     match branch {

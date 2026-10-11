@@ -637,6 +637,18 @@ _ss = solve(abs(_xs) == _xs + exp(_xs) - exp(1) - 2, _xs)
 assert str(_ss[-1]) == "0 == -2*x - e^x + e + 2 if x < 0", _ss
 assert str(solve(abs(_xs**2 - 2) == _xs, _xs)) == "[x == 2, x == 1]"
 forget()
+# an inequality mentioning x makes x real only through a side c*x + d
+# (assume(x*x < 0) left [] for abs(x) == 1, with x = I a solution: ABS-F1)
+for _a in (_xs*_xs < 0, I*_xs > 0, (_xs - 1)**2 < 0):
+    assume(_a); assert str(solve(abs(_xs) == 1, _xs)) == "[0 == abs(x) - 1]", _a; forget()
+assume(-_xs >= 1); assert str(solve(abs(_xs) == 1, _xs)) == "[x == -1]"; forget()
+# a candidate from both a radical and exponentiating logs keeps the log
+# equation as its condition (only the radical's arg range admitted
+# x = (3 - sqrt(5))/2 for a = 2 pi I: LOG-F1)
+_a = var("a"); _ss = solve(log(sqrt(_xs)) + log(sqrt(_xs) + 1) == _a, _xs)
+assert len(_ss) == 2 and all(any("log(" in str(c) and str(c).endswith("== a") for c in _t.conditions()) for _t in _ss), _ss
+assert solve(log(sqrt(_xs)) + log(sqrt(_xs) + 1) == 2*pi*I, _xs) == []
+assert str(solve(log(sqrt(_xs)) + log(sqrt(_xs) + 1) == log(6), _xs)) == "[x == 4]"
 assume(_xs > _r1); assert str(solve([_xs * _Y == 0], _xs, _Y)) == "[[x == 0, y == r3, 0 > r1], [x == r2, y == 0, r2 > r1]]"; forget()
 _n1 = SR.var("n1"); assume(_xs > _n1); assert "n1 for" not in str(solve(sin(_xs) == 0, _xs)); forget()
 assert "0 ==" in str(solve(sin(-(2**63) * _xs + 1) + sin(_xs) + 2 * cos(_xs) == 0, _xs))  # TRIG-F1: no i64 overflow
