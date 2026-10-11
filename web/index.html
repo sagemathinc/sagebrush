@@ -192,6 +192,7 @@
     <button id="restart" title="Fresh interpreter">Restart</button>
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
+    <a id="howruns" href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener" title="How the notebook runs cells: what reruns when, and why" aria-label="How the notebook runs cells">?</a>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option></select>
     <select id="examples" aria-label="Load examples"><option value="">Examples…</option></select>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, download, upload and share notebooks">File ▾</button>
@@ -230,6 +231,7 @@
         <h3>How it is built</h3>
         <p>Articles, algorithm by algorithm: what worked, what did not, and why.</p>
         <ul>
+          <li><a href="/articles/notebook/01-how-cells-run">How the notebook runs cells</a></li>
           <li><a href="/articles/groebner/">Gröbner bases and polynomials</a></li>
           <li><a href="/articles/number-theory/">Number theory engines</a></li>
           <li><a href="/articles/foundations/">Foundations</a></li>
@@ -992,6 +994,7 @@ let staleShown = 0;
 function showReactiveBar() {
   const r = nb.reactive;
   autorunEl.hidden = !nb.reactiveOn;
+  $("#howruns").hidden = !nb.reactiveOn;
   if (nb.reactiveOn) {
     const b = nb.budget, v = b === Infinity ? "always" : b === 0 ? "never" : String(b);
     if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`Auto-run: ${b / 1000} s`, v));
