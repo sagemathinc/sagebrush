@@ -189,4 +189,12 @@ export function renameSync(a: string, b: string) {
     }
   }
 }
-export default { writeSync, readSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, renameSync };
+export function rmSync(p: string, opts?: { recursive?: boolean; force?: boolean }) {
+  const r = resolve(p);
+  if (files.has(r)) return unlinkSync(r);
+  if (!dirs.has(r)) return opts?.force ? undefined : fail("ENOENT", -2, "rm", p);
+  if (!opts?.recursive) fail("EISDIR", -21, "rm", p);
+  for (const f of readdirSync(r)) rmSync(r + "/" + f, opts);
+  rmdirSync(r);
+}
+export default { writeSync, readSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync };
