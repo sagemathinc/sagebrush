@@ -325,8 +325,17 @@ export function createNotebook(root, opts = {}) {
     box.appendChild(el);
     loadMath().then((mm) => mm.typeset(el)).catch(() => {});
   }
+  // Markdown output (mo.md, IPython.display.Markdown): drawn as Markdown cells are
+  function appendMarkdown(box, b) {
+    const el = h("div", "md-out");
+    el.sbBundle = { "text/markdown": b["text/markdown"], "text/plain": b["text/plain"] ?? b["text/markdown"] };
+    el.innerHTML = renderMarkdown(b["text/markdown"], { highlight: mdHighlight });
+    box.appendChild(el);
+    if (el.querySelector(".math")) loadMath().then((mm) => mm.typeset(el)).catch(() => {});
+  }
   function appendDisplay(box, b) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
+    if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
     const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
     if (svg && b[SCENE3D]) {
@@ -403,7 +412,7 @@ export function createNotebook(root, opts = {}) {
         outs.push({ output_type: "display_data", data, metadata: {} });
       } else if (el.tagName === "PRE") {
         for (const n of el.childNodes) stream(n.nodeType === 1 && n.classList.contains("e") ? "stderr" : "stdout", n.textContent);
-      } else if ((el.tagName === "FIGURE" || el.classList.contains("latex-out")) && el.sbBundle) {
+      } else if ((el.tagName === "FIGURE" || el.classList.contains("latex-out") || el.classList.contains("md-out")) && el.sbBundle) {
         // a big 3D scene (a mesh of millions of triangles) is not kept with the
         // notebook: its picture is, and running the cell again restores the view
         const b = { ...el.sbBundle };
@@ -1715,7 +1724,7 @@ export function createNotebook(root, opts = {}) {
     for (const el of box.children) {
       if (el.tagName === "PRE") parts.push(el.textContent);
       else if (el.tagName === "FIGURE") parts.push(`[picture: ${el.querySelector("svg")?.getAttribute("aria-label") ?? el.querySelector("img")?.alt ?? ""}]\n`);
-      else if (el.classList.contains("latex-out")) parts.push((el.sbBundle?.["text/plain"] ?? "") + "\n");
+      else if (el.classList.contains("latex-out") || el.classList.contains("md-out")) parts.push((el.sbBundle?.["text/plain"] ?? "") + "\n");
       else if (el.classList.contains("interact")) {
         const it = interacts.get(el.dataset.key);
         parts.push(`[interact ${it?.name ?? ""} id=${el.dataset.key} values=${JSON.stringify(it?.values ?? {})}]\n` + outputText(el.querySelector(".iout")));

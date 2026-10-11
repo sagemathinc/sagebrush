@@ -199,6 +199,15 @@ try {
   ok(JSON.stringify(codes) === JSON.stringify(["x = 1", "print(x)", "x_2 = x + 1", "print(x_2 * 100)"]) && (await out(1)) === "1", `the fix keeps the notebook's meaning in page order (${JSON.stringify(codes)})`);
   ok(JSON.stringify(await ev("sagebrush.notebook.graph().map((c) => c.state)")) === '["ok","ok","ok","ok"]', "...and every cell runs");
 
+  // marimo's API (lib/marimo): mo.ui controls are widgets; mo.md is rendered Markdown
+  await fileNew();
+  await set(["import marimo as mo", "n = mo.ui.slider(1, 10, value=2, label='n')\nn", "mo.md(f'The square of **{n.value}** is $ {n.value ** 2} $')"]);
+  await run([0, 1, 2]);
+  ok(/The square of 2 is/.test(await ev("sagebrush.notebook.cells()[2].out.querySelector('.md-out')?.textContent ?? ''")) && (await ev("!!sagebrush.notebook.cells()[2].out.querySelector('.md-out strong')")), `mo.md shows rendered Markdown: ${await ev("sagebrush.notebook.cells()[2].out.innerHTML.slice(0, 160)")}`);
+  await ev(`(async () => { const nb = sagebrush.notebook; const key = nb.cells()[1].out.querySelector('.interact').dataset.key; await nb.setInteract(key, { _w0: 8 }); return true; })()`);
+  await until(`/The square of 8 is/.test(sagebrush.notebook.cells()[2].out.textContent)`, 10000);
+  ok(true, "moving mo.ui.slider reruns the mo.md cell reading it");
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);

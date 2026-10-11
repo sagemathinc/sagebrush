@@ -419,7 +419,7 @@ web/test-reactive.mjs (60 browser checks).
 | Fix for redefinitions | src/rename.ts | "Rename the later definitions of x (x_2, …)", keeping a Jupyter notebook's meaning; scope-aware; Sage through the preparser. |
 | Agents | notebook.js applyEdits/graph/verify; WebMCP edit_notebook, notebook_graph, verify_notebook | |
 | UI | index.html | Auto-run (2 s, 10 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
-| marimo's format | web/notebook/marimo.js | File > Open reads marimo .py notebooks (identical to marimo's parser on its 198 example notebooks, 1,805 cells); File > Download as marimo writes them (marimo reads all 198 back identically). |
+| marimo's format | web/notebook/marimo.js | File > Open reads marimo .py notebooks (identical to marimo's parser on its 198 example notebooks, 1,805 cells); File > Download as marimo writes them (marimo reads all 198 back identically). lib/marimo: mo.md (rendered Markdown output), mo.ui controls (as widgets: moving one reruns its readers), hstack/vstack, stop, state, so imported notebooks run. |
 | TimeTravel | index.html replayResumed | a reactive notebook resumes a version by recomputing it, with its files as they were: no "Cannot resume here". |
 
 **Before it becomes the default (the one model):**
