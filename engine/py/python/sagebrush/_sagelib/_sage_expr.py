@@ -3007,9 +3007,19 @@ def solve(f, *args, **kw):
     (or by separating enclosures) or left attached; a constant that cannot
     be shown nonzero is never divided by unconditionally.  Assumptions on x become
     conditions on a family (assume(x > 0): x == pi*n1 if pi*n1 > 0);
-    'integer' and the like on a family are refused.  Not yet complete:
-    systems of equations (their pivots are assumed nonzero) and exponents
-    that are not rational numbers (the principal branch only).
+    'integer' and the like on a family are refused.  Equations with square
+    roots are solved by squaring them away, each candidate checked in the
+    original equation (sqrt(x) == x - 2: x == 4 only).
+
+    Systems: linear ones by elimination; polynomial ones over QQ with
+    finitely many solutions through a lex Groebner basis; others by
+    substitution (an equation solved for one variable, recursively), with
+    variables left free as new symbols r1, r2, ...  (x*y == 0 in x, y has
+    both x == 0 and y == 0).  Inequalities given with the equations are
+    conditions on their solutions: false ones remove a solution, undecided
+    ones are kept beside it.  Not yet complete: exponents that are not
+    rational numbers (the principal branch only), and linear systems with
+    parameters (their pivots are assumed nonzero).
 
     EXAMPLES::
 
@@ -3026,6 +3036,14 @@ def solve(f, *args, **kw):
         [x == -1/2*sqrt(4*a + 1)/a - 1/2/a if a != 0, x == 1/2*sqrt(4*a + 1)/a - 1/2/a if a != 0, x == 1 if a == 0]
         sage: solve(sqrt(x) == -1, x), solve(a*x == 1, x)  # sagebrush only
         ([], [x == 1/a if a != 0])
+        sage: solve(sqrt(x) == x - 2, x)  # sagebrush only
+        [x == 4]
+        sage: solve([x^2 + y^2 == 1, y == x], x, y)  # sagebrush only
+        [[x == -1/2*sqrt(2), y == -1/2*sqrt(2)], [x == 1/2*sqrt(2), y == 1/2*sqrt(2)]]
+        sage: solve(x*y == 0, [x, y])  # sagebrush only
+        [[x == 0, y == r2], [x == r1, y == 0]]
+        sage: solve([x^2 == 4, x > 0], x)  # sagebrush only
+        [[x == 2]]
     """
     many = isinstance(f, (list, tuple))
     eqs = [_expr(g) for g in (f if many else [f])]
@@ -3040,9 +3058,28 @@ def solve(f, *args, **kw):
         vs = names
     names = [_var_name(v) for v in vs]
     eqs = [g if g.is_relational() else g == 0 for g in eqs]
-    r = _call("solve", str(len(eqs)), *[g._s for g in eqs], *names)
-    k, i, sols = int(r[0]), 1, []
+    # inequalities are conditions on the solutions of the equations (Sage's
+    # solve returned [x == 1, -2 > 0]: a false condition kept as a solution)
+    ineqs = [g for g in eqs if g._op()[0] != "rel:Eq"]
+    eqs = [g for g in eqs if g._op()[0] == "rel:Eq"]
+    if not eqs:
+        raise NotImplementedError("solve: inequalities without an equation")
     one = len(eqs) == 1 and len(names) == 1
+    if not one:
+        try:
+            r = _call("solve", str(len(eqs)), *[g._s for g in eqs], *names)
+        except ValueError as e:
+            if "only linear systems" not in str(e) and "underdetermined" not in str(e):
+                raise
+            sols = _solve_system([g.lhs() - g.rhs() for g in eqs], names)
+            if sols is None:
+                raise NotImplementedError("solve: this system (%s) is not solved; it is not polynomial over QQ, or no equation can be solved for one of its variables" % ", ".join(str(g) for g in eqs))
+            if ineqs:
+                sols = _with_inequalities(sols, ineqs)
+            return _system_out(sols, names, kw)
+    else:
+        r = _call("solve", str(len(eqs)), *[g._s for g in eqs], *names)
+    k, i, sols = int(r[0]), 1, []
     for _ in range(k):
         m = int(r[i])
         part = r[i + 1:i + 1 + m]
@@ -3054,6 +3091,8 @@ def solve(f, *args, **kw):
         else:
             sols.append([Expression(t) for t in part])
         i += 1 + m
+    if ineqs:
+        sols = _with_inequalities(sols, ineqs)
     if _ASSUMPTIONS:
         sols = [sol for sol in (_assume_on(sol, names) for sol in sols) if sol is not None and _satisfies(sol)]
     if kw.get("multiplicities"):
@@ -3090,6 +3129,236 @@ def solve(f, *args, **kw):
     if len(names) == 1 and not many:
         return [s for sol in sols for s in sol]
     return [list(sol) for sol in sols]
+
+
+def _with_inequalities(sols, ineqs):
+    """Each solution with the inequalities substituted: dropped if one is
+    false, the true ones omitted, the undecided ones kept (as conditions of a
+    Solution, or as relations beside a system's solution)."""
+    out = []
+    for sol in sols:
+        sub = {}
+        for s in sol:
+            try:
+                if s.lhs()._op()[0] == "symbol":
+                    sub[s.lhs()] = s.rhs()
+            except Exception:
+                pass
+        keep, ok = [], True
+        for q in ineqs:
+            c = q.subs(sub)
+            if not c.variables():
+                v = _decide(c)
+                if v is True:
+                    continue
+                if v is False:
+                    ok = False
+                    break
+            keep.append(c)
+        if not ok:
+            continue
+        if len(sol) == 1 and isinstance(sol[0], Solution):
+            s0 = sol[0]
+            out.append([Solution(s0._s, s0._conds + keep, s0._params)])
+        else:
+            out.append(list(sol) + keep)
+    return out
+
+
+def _system_out(sols, names, kw):
+    if kw.get("multiplicities"):
+        raise NotImplementedError("solve: multiplicities=True for one equation in one variable")
+    if kw.get("solution_dict"):
+        return [{s.lhs(): s.rhs() for s in sol if s._op()[0] == "rel:Eq" and s.lhs()._op()[0] == "symbol"} for sol in sols]
+    return [list(sol) for sol in sols]
+
+
+def _solve_system(zs, names):
+    """The solutions of the equations zs == 0 (several equations, or one in
+    several variables) that are not linear, as lists [x == ..., y == ...,
+    (undecided conditions)], or None.  Polynomial systems over QQ with
+    finitely many solutions: a lex Groebner basis and back substitution.
+    Otherwise substitution: an equation solved for one variable, substituted
+    into the others, recursively; equality conditions of those solutions
+    become equations, and variables left free become new symbols r1, r2, ...
+    (recurring complaints about Sage's solve: [sqrt(x) == 1, x == y] gave
+    [], x*y == 0 in x, y lost the solution y == 0, nonlinear systems)."""
+    used = set(names)
+    for z in zs:
+        used |= set(z._names())
+    counter = [0]
+
+    def fresh():
+        while True:
+            counter[0] += 1
+            n = "r%d" % counter[0]
+            if n not in used:
+                used.add(n)
+                return n
+
+    res = _solve_poly_system(zs, names)
+    if res is None:
+        res = _solve_subst(zs, names, fresh)
+    if res is None:
+        return None
+    out = []
+    for d, conds in res:
+        d = dict(d)
+        for v in names:
+            if v not in d:
+                d[v] = Expression(_sym_s(fresh()))
+        # values in terms of later-solved variables: substitute until fixed
+        for _ in range(len(names)):
+            subs = {Expression(_sym_s(k)): w for k, w in d.items()}
+            d = {k: w.subs(subs) for k, w in d.items()}
+        keep, ok = [], True
+        subs = {Expression(_sym_s(k)): w for k, w in d.items()}
+        for c in conds:
+            c = c.subs(subs)
+            if not c.variables():
+                v = _decide(c)
+                if v is True:
+                    continue
+                if v is False:
+                    ok = False
+                    break
+            keep.append(c)
+        if ok:
+            sol = [Expression(_sym_s(v)) == d[v] for v in names] + keep
+            if sol not in out:
+                out.append(sol)
+    return out
+
+
+def _is_zero_expr(z):
+    return _call("is_zero", z._s)[0] == "1"
+
+
+def _solve_subst(zs, names, fresh, depth=0):
+    """[(assignment dict name -> value, conditions)] or None (see _solve_system)."""
+    if depth > 12:
+        return None
+    rest = []
+    for z in zs:
+        if _is_zero_expr(z):
+            continue
+        if not set(z._names()) & set(names):
+            c = (z == 0)
+            if not z.variables():
+                v = _decide(c)
+                if v is False:
+                    return []
+                if v is True:
+                    continue
+            return None  # a condition on parameters alone: not decided here
+        rest.append(z)
+    if not rest:
+        return [({}, [])]
+    order = sorted(rest, key=lambda z: (len(set(z._names()) & set(names)), len(str(z))))
+    for z in order:
+        for v in [n for n in names if n in z._names()]:
+            try:
+                sols = solve(z == 0, Expression(_sym_s(v)))
+            except Exception:
+                continue
+            if not sols or any(not isinstance(t, Solution) or t.lhs()._op()[0] != "symbol" for t in sols):
+                continue
+            others = [n for n in names if n != v]
+            out = []
+            fail = False
+            for t in sols:
+                val = t.rhs()
+                # the solve's own new symbols (r1, n1) renamed apart
+                ren = {}
+                for nm in set(val._names()) | {nm for c in t.conditions() for nm in c._names()}:
+                    if nm not in set(z._names()) and nm not in names and (nm in t._params or nm[0] == "r"):
+                        ren[Expression(_sym_s(nm))] = Expression(_sym_s(fresh()))
+                if ren:
+                    val = val.subs(ren)
+                conds = [c.subs(ren) for c in t.conditions()]
+                eqc = [c for c in conds if c._op()[0] == "rel:Eq" and set(c._names()) & set(others)]
+                other = [c for c in conds if c not in eqc]
+                sub = {Expression(_sym_s(v)): val}
+                nxt = [w.subs(sub) for w in rest if w is not z] + [c.lhs() - c.rhs() for c in eqc]
+                r = _solve_subst(nxt, others, fresh, depth + 1)
+                if r is None:
+                    fail = True
+                    break
+                for d, cs in r:
+                    d2 = dict(d)
+                    d2[v] = val
+                    out.append((d2, other + cs))
+            if not fail:
+                return out
+    return None
+
+
+def _solve_poly_system(zs, names):
+    """For polynomials over QQ in names with finitely many common zeros: the
+    zeros through a lex Groebner basis (triangular: the last variable's
+    polynomial alone, then the others in turn); None otherwise."""
+    try:
+        import sage_all as _sa
+        R = _sa.PolynomialRing(_sa.QQ, names, order="lex")
+        polys = [R(z) for z in zs]
+    except Exception:
+        return None
+    if any(set(z._names()) - set(names) for z in zs):
+        return None
+    try:
+        I = R.ideal(polys)
+        dim = I.dimension()
+    except Exception:
+        return None
+    if dim == -1:
+        return []
+    if dim != 0:
+        return None
+    G = [Expression(_expr(str(g))._s) for g in I.groebner_basis()]
+    partial = [({}, [])]
+    for k in range(len(names) - 1, -1, -1):
+        v = names[k]
+        later = set(names[k:])
+        ps = [g for g in G if v in g._names() and set(g._names()) <= later]
+        nxt = []
+        for d, conds in partial:
+            sub = {Expression(_sym_s(n)): w for n, w in d.items()}
+            es = [g.subs(sub) for g in ps]
+            es = [e for e in es if not _is_zero_expr(e)]
+            if not es:
+                return None
+            e0 = min(es, key=lambda e: (len(str(e))))
+            try:
+                sols = solve(e0 == 0, Expression(_sym_s(v)))
+            except Exception:
+                return None
+            for t in sols:
+                if not isinstance(t, Solution) or t.lhs()._op()[0] != "symbol" or t._conds or t._params:
+                    return None  # not explicit: not this way
+                w = t.rhs()
+                # the other polynomials must vanish there too
+                good = True
+                for e in es:
+                    if e is e0:
+                        continue
+                    c = e.subs({Expression(_sym_s(v)): w}) == 0
+                    dv = _decide(c)
+                    if dv is False:
+                        good = False
+                        break
+                    if dv is None:
+                        try:
+                            if abs(complex(e.subs({Expression(_sym_s(v)): w}))) > 1e-9:
+                                good = False
+                                break
+                        except Exception:
+                            return None
+                if good:
+                    d2 = dict(d)
+                    d2[v] = w
+                    nxt.append((d2, conds))
+        partial = nxt
+    return partial
 
 
 def _int_args(f, args):

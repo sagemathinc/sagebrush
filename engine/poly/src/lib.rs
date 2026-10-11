@@ -745,6 +745,10 @@ pub fn squarefree(f: &[BigInt]) -> Vec<(ZPoly, u32)> {
 /// Whether f is irreducible over Q (constants are not; the content is a
 /// unit over Q: 2x + 2 is irreducible, the second review's R2-POL-F5).
 pub fn is_irreducible(f: &[BigInt]) -> bool {
+    // (a constant or zero is not irreducible; factor(0) panicked: Astra's review)
+    if f.len() < 2 || f.iter().all(|c| c.is_zero()) {
+        return false;
+    }
     let (_, fs) = factor(f);
     fs.len() == 1 && fs[0].1 == 1
 }
@@ -760,6 +764,7 @@ mod tests {
             assert!(is_irreducible(&z(&[c, 0, c])), "{} (x^2 + 1)", c);
             assert!(!is_irreducible(&z(&[-c, 0, c])), "{} (x^2 - 1)", c);
             assert!(!is_irreducible(&z(&[c])), "{}", c);
+            assert!(!is_irreducible(&[]) && !is_irreducible(&z(&[0, 0])));
             assert!(!is_irreducible(&z(&[c, 2 * c, c])), "{} (x + 1)^2", c);
         }
     }
