@@ -4,12 +4,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { Kernel, makeCase, runCase, show, type Case, type Op, type Stats } from "./fuzz-lib";
+import { Kernel, makeCase, runCase, shrink, show, type Case, type Op, type Stats } from "./fuzz-lib";
 
 const hasPython = spawnSync("python3", ["--version"]).status === 0;
 const cells = (codes: string[]) => codes.map((code, i) => ({ id: `c${i}`, stmts: [code] }));
 const regression = (codes: string[], ops: Op[] = []): Case => ({ seed: 0, cells: cells(codes), ops });
-const stats = (): Stats => ({ compared: 0, refused: 0, unclean: 0, steps: 0 });
+const stats = (): Stats => ({ compared: 0, refused: 0, unclean: 0, steps: 0, uncovered: 0 });
 
 export const REGRESSIONS: [string, Case][] = [
   ["`y += 4` redefines y from the definition above", regression(["K = 7", "y = K", "y += 4\nprint(y)"])],
@@ -41,6 +41,19 @@ export const REGRESSIONS: [string, Case][] = [
   ["a comprehension reads x before the cell redefines x", regression([
     "x = 9", "z = 6", "class D:\n    for x in range(1):\n        pass\n    z = x * (lambda q: q + 5)(6)\n    for x in range(1):\n        pass\nif True:\n    x = sum([x for i in range(3)])",
   ], [{ kind: "edit", id: "c1", stmts: ["y, x = 0, 5 - sum([sum([2 for i in range(3)]) for i in range(3)])"] }])],
+  // (sagebrush-codex's review of the fuzzer's fixes)
+  ["a redefined class's method and lambda read the class by name when called (REACT-F17)", regression([
+    "class C:\n    a = 1", "class C:\n    a = 2\n    def m(self):\n        return C.a\n    f = lambda: C.a\nprint(C().m(), C.f())", "print(C.a)",
+  ])],
+  ["a lambda called where it is written, in a class body, reads the class's previous definition", regression([
+    "class D:\n    a = 1", "class D:\n    a = (lambda: D.a)() + 1\n    def m(self):\n        return D.a\nprint(D.a, D().m())", "print(D.a)",
+  ])],
+  ["a `:=` in a default binds the notebook's x (REACT-F18)", regression(["x = 1", "def f(a=(x := 2)):\n    return a\nprint(x)", "print(x)"], [
+    { kind: "edit", id: "c1", stmts: ["def f(a=(x := 3)):\n    return a\nprint(x)"] },
+  ])],
+  ["cells after one that raises in plain Python, not depending on it, are compared (FUZZ-F3)", regression([
+    "1 // 0", "class C:\n    a = 1", "class C:\n    a = 2\n    def m(self):\n        return C.a\nprint(C().m())", "print(C.a)",
+  ])],
 ];
 
 test("the reactive notebook computes what plain Python does: the fuzzer's cases", { skip: !hasPython && "no python3" }, async () => {
@@ -70,4 +83,15 @@ test("the reactive notebook computes what plain Python does: 150 random notebook
     k.close();
   }
   assert.ok(s.compared > 1000, `${s.compared} outputs compared`);
+});
+
+test("the fuzzer fails loudly when its interpreter dies, and shrinking ends (FUZZ-F1, F2)", { skip: !hasPython && "no python3" }, async () => {
+  const k = new Kernel();
+  await k.call({ op: "reset" });
+  (k as any).p.kill();
+  await assert.rejects(k.call({ op: "reset" }), /python exited/);
+  assert.match(k.dead ?? "", /python exited/);
+  const c = makeCase(1, 6);
+  const [small] = await shrink(k, c, { step: -1, cell: "", why: "the harness threw", detail: "" });
+  assert.equal(small, c);
 });

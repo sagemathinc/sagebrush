@@ -14,7 +14,9 @@ export interface RunOut { out: string; err: string | null; ms: number }
 export class Kernel {
   private p: ChildProcessWithoutNullStreams;
   private buf = "";
-  private waiting: ((x: any) => void)[] = [];
+  private waiting: { resolve: (x: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }[] = [];
+  /** why the interpreter is gone (then every call fails) */
+  dead: string | null = null;
   constructor() {
     this.p = spawn("python3", [join(__dirname, "../../test/fuzz_kernel.py")], { stdio: ["pipe", "pipe", "pipe"] });
     this.p.stdout.setEncoding("utf8");
@@ -24,14 +26,26 @@ export class Kernel {
       while ((i = this.buf.indexOf("\n")) >= 0) {
         const line = this.buf.slice(0, i);
         this.buf = this.buf.slice(i + 1);
-        this.waiting.shift()?.(JSON.parse(line));
+        const w = this.waiting.shift();
+        if (w) { clearTimeout(w.timer); w.resolve(JSON.parse(line)); }
       }
     });
     this.p.stderr.on("data", (d) => process.stderr.write(d));
+    const die = (why: string) => {
+      if (this.dead) return;
+      this.dead = why;
+      for (const w of this.waiting.splice(0)) { clearTimeout(w.timer); w.reject(new Error(why)); }
+    };
+    this.p.on("exit", (code, signal) => die(`python exited (${signal ?? code})`));
+    this.p.on("error", (e) => die(`python: ${e.message}`));
+    this.p.stdin.on("error", (e) => die(`python's stdin: ${e.message}`));
   }
+  // (a cell has 2 s in the interpreter; a call taking 30 s means it is stuck)
   call(m: object): Promise<any> {
-    return new Promise((resolve) => {
-      this.waiting.push(resolve);
+    if (this.dead) return Promise.reject(new Error(this.dead));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.p.kill(); }, 30000);
+      this.waiting.push({ resolve, reject, timer });
       this.p.stdin.write(JSON.stringify(m) + "\n");
     });
   }
@@ -123,7 +137,10 @@ export class Gen {
     if (r < 0.58) {
       const f = this.pick(FUNCS);
       const body = this.chance(0.5) ? "a * K + b" : "a - b";
-      const s = `def ${f}(a, b=${this.expr(1)}):\n    return ${body}`;
+      // (sometimes a `:=` in the default: it binds the notebook's name)
+      let dflt = this.expr(1);
+      if (this.chance(0.2)) { dflt = `(${v} := ${dflt})`; def(v); }
+      const s = `def ${f}(a, b=${dflt}):\n    return ${body}`;
       this.funcs.add(f);
       return s;
     }
@@ -132,6 +149,12 @@ export class Gen {
       const c = this.pick(CLASSES);
       const { lines, attrs } = this.classBody();
       this.classes.set(c, attrs);
+      // (sometimes a method and a lambda reading the class by its name, run
+      // later: called in this cell, after the class)
+      if (this.chance(0.3)) {
+        const a = this.pick([...attrs]);
+        return [`class ${c}:`, ...lines, `    def mm(self):`, `        return ${c}.${a}`, `    ff = lambda: ${c}.${a}`, `print(${c}().mm(), ${c}.ff())`].join("\n");
+      }
       return [`class ${c}:`, ...lines].join("\n");
     }
     if (r < 0.76) { const e = this.expr(); def(v); return `print((${v} := ${e}))`; }
@@ -200,7 +223,12 @@ export function makeCase(seed: number, steps: number): Case {
   const now = cells.map((c) => ({ ...c }));
   for (let s = 0; s < steps; s++) {
     const r = rand();
-    if (r < 0.4 && now.length > 1) {
+    if (r < 0.07) {
+      // (K, read by the functions' bodies, defined once: a new value)
+      const stmts = [`K = ${Math.floor(rand() * 10)}`];
+      ops.push({ kind: "edit", id: "c0", stmts });
+      now[0] = { ...now[0], stmts };
+    } else if (r < 0.4 && now.length > 1) {
       const i = 1 + Math.floor(rand() * (now.length - 1));
       const stmts = genAfter(rand, now.slice(0, i)).cell();
       ops.push({ kind: "edit", id: now[i].id, stmts });
@@ -228,7 +256,7 @@ export function makeCase(seed: number, steps: number): Case {
 // ------------------------------------------------------------ running a case
 
 export interface Failure { step: number; cell: string; why: string; detail: string }
-export interface Stats { compared: number; refused: number; unclean: number; steps: number }
+export interface Stats { compared: number; refused: number; unclean: number; steps: number; uncovered: number }
 
 export async function runCase(k: Kernel, c: Case, stats: Stats): Promise<Failure | null> {
   await k.call({ op: "reset" });
@@ -266,9 +294,13 @@ export async function runCase(k: Kernel, c: Case, stats: Stats): Promise<Failure
     const ref: { cells: RunOut[] } = await k.call({ op: "ref", cells: shown.map(code) });
     const want = new Map(shown.map((x, i) => [x.id, ref.cells[i]]));
     if (ref.cells.some((o) => o.err)) stats.unclean++;
+    // (a cell that raised in plain Python says nothing about the cells
+    // depending on it; the others are compared)
+    const raised = shown.filter((x) => want.get(x.id)!.err).map((x) => x.id);
+    const unknown = r.graph.closure(raised);
     for (const x of shown) {
       const w = want.get(x.id)!;
-      if (w.err) break; // (after an exception, the reference says nothing more)
+      if (unknown.has(x.id)) { stats.uncovered++; continue; }
       const s = states.get(x.id);
       if (s?.state === "cancelled") continue; // (waiting for an error elsewhere)
       const got = outs.get(x.id);
@@ -319,7 +351,7 @@ export async function runCase(k: Kernel, c: Case, stats: Stats): Promise<Failure
 
 export async function fails(k: Kernel, c: Case): Promise<Failure | null> {
   try {
-    return await runCase(k, c, { compared: 0, refused: 0, unclean: 0, steps: 0 });
+    return await runCase(k, c, { compared: 0, refused: 0, unclean: 0, steps: 0, uncovered: 0 });
   } catch (e: any) {
     return { step: -1, cell: "", why: "the harness threw", detail: String(e?.stack ?? e) };
   }
@@ -327,7 +359,10 @@ export async function fails(k: Kernel, c: Case): Promise<Failure | null> {
 
 export async function shrink(k: Kernel, c: Case, f: Failure): Promise<[Case, Failure]> {
   let best = c, bf = f;
+  const size = (x: Case) => x.ops.length + x.cells.length + [...x.cells, ...x.ops].reduce((n, y: any) => n + (y.stmts?.length ?? 0), 0);
   const tryCase = async (cand: Case) => {
+    // (only smaller cases: shrinking ends)
+    if (size(cand) >= size(best) || k.dead) return false;
     const g = await fails(k, cand);
     if (g && g.why === bf.why) { best = cand; bf = g; return true; }
     return false;

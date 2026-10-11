@@ -535,3 +535,20 @@ outputs compared) and 15,000 from seed 50,001 with 12 steps (192,377
 checks, 840,451 outputs). About 3% of the cells checked are shown with an
 error instead: a refused rename, mostly in class bodies whose reads depend
 on how the body runs, or a cycle made by a move.
+
+**sagebrush-codex's review of the fuzzer (October 11).** Fixed: a method's
+or stored lambda's body reads the redefined class by name when called (the
+new class), a lambda called where it is written (`(lambda: C.a)()`) reads
+the previous one; a `:=` in a default or a base binds the notebook's name;
+a cell run by hand needs its definer's family whatever the budget (a
+deleted name, an updater); the shrinker only tries smaller cases (it looped
+on a harness error); the interpreter's death fails the run (exit 2) instead
+of passing silently; and the cells after one that raises in plain Python
+are compared unless they depend on it. The generator now also edits K (read
+by the functions' bodies), puts methods and lambdas reading their class by
+name, called in the same cell, and `:=` in defaults. Then, with no
+difference from plain Python: 15,000 notebooks from seed 1 with 6 steps
+(516,839 outputs compared) and 15,000 from seed 100,001 with 10 steps
+(816,547). Not covered yet: budgets, manual cells, Stop, restarts and
+concurrent edits (each needs its own invariant), Sage and Magma cells, and
+pyjs as the interpreter (the fuzzer runs CPython).

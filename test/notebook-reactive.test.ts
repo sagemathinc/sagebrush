@@ -34,6 +34,7 @@ function notebook(codes: string[], manual: number[] = [], scoped = false) {
       for (const ref of a.refs) if (!BUILTINS.has(ref) && !globals.has(ref)) return { ok: false, ms };
       if (/\braise\b/.test(code)) return { ok: false, ms };
       for (const d of a.defs) globals.set(d, `${id}@${++n}`);
+      for (const d of a.deleted) globals.delete(d);
       return { ok: true, ms };
     },
     forget: async (names) => {
@@ -285,4 +286,24 @@ test("a cell's cancellation is inherited: run alone, a descendant still waits fo
   const alone = await nb.r.run(["c2"]);
   assert.deepEqual(alone.cancelled, ["c2"]);
   assert.deepEqual(nb.states.get("c2"), { state: "cancelled", by: "c0", why: "exception" });
+});
+
+test("a cell run by hand that reads a deleted name runs its definer first, whatever the budget (REACT-F19)", async () => {
+  const nb = notebook(["x = 5", "print(x)", "del x"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.runAll();
+  assert.equal(nb.globals.has("x"), false);
+  nb.r.budget = 0;
+  const rep = await nb.r.run(["c1"]);
+  assert.deepEqual(rep.ran.slice(0, 2), ["c0", "c1"]);
+  assert.deepEqual(rep.failed, []);
+  // an updater run by hand runs with its definer, whatever the budget
+  const nb2 = notebook(["v = []", "v.append(1)", "print(v)"]);
+  nb2.r.budget = Infinity;
+  await nb2.r.load();
+  await nb2.r.runAll();
+  nb2.r.budget = 0;
+  const rep2 = await nb2.r.run(["c1"]);
+  assert.deepEqual(rep2.ran.slice(0, 2), ["c0", "c1"]);
 });
