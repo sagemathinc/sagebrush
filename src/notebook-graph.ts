@@ -36,6 +36,8 @@ import type { CellAnalysis } from "./dataflow";
 
 export type CellError =
   | { kind: "syntax"; message: string }
+  // (the analyzer failed: not the code's fault; analyzed again on the next run)
+  | { kind: "analyzer"; message: string }
   | { kind: "import-star"; message: string }
   // (reading: the cell reads a name several cells define, under #1477's relaxation)
   | { kind: "multiple-definition"; name: string; cells: string[]; reading?: true }

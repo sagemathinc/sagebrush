@@ -17,7 +17,7 @@
 import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
 import { cellId } from "./ipynb.js";
-import { Reactive, SCOPE_SEP, written } from "../../src/notebook-reactive.ts";
+import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
 const STOP_MESSAGE = "\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n";
@@ -630,7 +630,7 @@ export function createNotebook(root, opts = {}) {
   }
   // Run a cell's code (`forget`: global names to delete first); resolves to
   // {ok, ms, stopped} when it is done.
-  function execCell(cell, code, forget = []) {
+  function execCell(cell, code, forget = [], scoped = null) {
     forgetInteracts(cell.out);
     cell.out.textContent = "";
     cell.time.textContent = "";
@@ -642,7 +642,7 @@ export function createNotebook(root, opts = {}) {
     cell.runb.textContent = "■";
     let failed = false;
     const k = kernel;
-    return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}) }, {
       start() {
         cell.el.classList.replace("queued", "running");
         const t0 = performance.now();
@@ -656,7 +656,7 @@ export function createNotebook(root, opts = {}) {
         kernel?.ran?.add(cell.id);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
-        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
       },
       stopped(message) {
         settle(cell);
@@ -708,14 +708,18 @@ export function createNotebook(root, opts = {}) {
           const key = mode + "\0" + code;
           if (!analyses.has(key)) {
             if (analyses.size > 2000) analyses.clear();
-            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => (a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) })));
+            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => {
+              // (the analyzer failed, not the code: not kept, so that the next run asks again)
+              if (a.error?.kind === "analyzer") analyses.delete(key);
+              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) };
+            }));
           }
           return analyses.get(key);
         },
-        execute(id, code, forget) {
+        execute(id, code, forget, scoped) {
           if (!shown()) return Promise.resolve({ ok: false, ms: 0, stopped: true });
           const cell = cellById(id);
-          return cell ? execCell(cell, code, forget).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
+          return cell ? execCell(cell, code, forget, scoped).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
         },
         forget: (names) => new Promise((resolve) => k.execute("", { mode, forget: names }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
         // page-order scoping (src/rename.ts in the analyzer's worker)
@@ -735,8 +739,10 @@ export function createNotebook(root, opts = {}) {
   const labels = (ids) => ids.map(label).join(", ").replace(/, ([^,]*)$/, " and $1");
   const secs = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`);
   function errorText(e) {
-    if (e.name) e = { ...e, name: written(e.name) };
+    if (e.name) e = { ...e, name: kernel?.reactive ? kernel.reactive.written(e.name) : e.name };
     switch (e.kind) {
+      case "analyzer":
+        return `This cell could not be analyzed (${e.message}). Run it again.`;
       case "multiple-definition":
         return e.reading
           ? `${e.name} is defined by ${labels(e.cells)}, so this cell cannot tell which one it reads. Rename it in all but one of them.`
@@ -1591,7 +1597,7 @@ export function createNotebook(root, opts = {}) {
             forgetInteracts(c.out);
             c.out.replaceChildren();
             loadOutputs(c.out, rc.outputs);
-            if (opts.staleOnLoad) markStale(c);
+            if (opts.staleOnLoad) { markStale(c); kernel?.reactive?.staleFromElsewhere(c.id); }
             c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
           }
         } else c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
@@ -1708,7 +1714,10 @@ export function createNotebook(root, opts = {}) {
     return cells().filter((c) => c.type === "code").map((c, i) => {
       const a = r?.graph.analysis(c.id);
       const cls = c.el.classList;
-      const state = cls.contains("running") ? "running" : cls.contains("queued") ? "queued" : cls.contains("error") ? "error" : cls.contains("cancelled") ? "cancelled" : cls.contains("stale") ? "stale" : r && r.submitted(c.id) === undefined ? "not run" : "ok";
+      // (how its last run ended, from the scheduler: raised, interrupted, waiting)
+      const end = r?.outcome.get(c.id);
+      const state = cls.contains("running") ? "running" : cls.contains("queued") ? "queued" : cls.contains("error") ? "error" : end === "cancelled" || cls.contains("cancelled") ? "cancelled" : cls.contains("stale") ? "stale" : end === "exception" ? "failed" : end === "stopped" ? "interrupted" : r && r.submitted(c.id) === undefined ? "not run" : "ok";
+      const written = (n) => (r ? r.written(n) : n);
       return {
         id: c.id, index: index(c), state, edited: cls.contains("edited"),
         // (names as written: page-order scoping's xʹ2 is x)
@@ -1727,7 +1736,11 @@ export function createNotebook(root, opts = {}) {
   // a mutation the graph does not see, the clock, an unseeded random number.)
   async function verify() {
     if (!kernel) throw new Error("no kernel");
-    const before = new Map(cells().filter((c) => c.type === "code").map((c) => [c.id, outputText(c.out)]));
+    // (compared whole: pictures by their data, not only their descriptions)
+    // (with the ids that pictures number from counters made the same: the
+    // plot's sbclip7, and safeSvg's per-picture prefix s12-)
+    const whole = (c) => JSON.stringify(saveOutputs(c.out)).replace(/\bs\d+-(?=[A-Za-z])/g, "").replace(/\bsbclip\d+/g, "sbclip");
+    const before = new Map(cells().filter((c) => c.type === "code").map((c) => [c.id, [outputText(c.out), whole(c)]]));
     const ready = new Promise((resolve) => { const off = kernel.on("ready", () => { off(); resolve(); }); });
     kernel.restart();
     await ready;
@@ -1735,9 +1748,9 @@ export function createNotebook(root, opts = {}) {
     const same = [], changed = [];
     for (const c of cells()) {
       if (c.type !== "code") continue;
-      const after = outputText(c.out);
-      if (after === before.get(c.id)) same.push(c.id);
-      else changed.push({ id: c.id, before: before.get(c.id) ?? "", after });
+      const after = outputText(c.out), [beforeText, beforeWhole] = before.get(c.id) ?? ["", ""];
+      if (whole(c) === beforeWhole) same.push(c.id);
+      else changed.push({ id: c.id, before: beforeText, after, ...(after === beforeText ? { pictures: true } : {}) });
     }
     return { same, changed, report };
   }

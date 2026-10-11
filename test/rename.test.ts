@@ -82,3 +82,9 @@ test("review cases: compound statements, class attributes, x += 1, Sage var (REA
   // Sage: x = var('x') redefining x does not set the first x
   assert.deepEqual(q(["x = 123", "print(x)", "x = var('x')", "print(x)"], "x", "sage"), { c2: "x\u02b92 = SR.var('x')", c3: "print(x\u02b92)" });
 });
+
+test("Sage cells with names of other scripts are renamed", () => {
+  const codes = ["\u03b1 = 1", "\u03b1 = \u03b1 + 1", "print(\u03b1^2)"];
+  const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode: "sage" }); return { id: `c${i}`, code, defines: a.defs.has("\u03b1"), reads: a.refs.has("\u03b1") }; });
+  assert.deepEqual(Object.fromEntries(renameRedefinitions(cells, "\u03b1", new Set(["\u03b1"]), "sage", "\u02b9")!), { c1: "\u03b1\u02b92 = \u03b1 + 1", c2: "print(\u03b1\u02b92^2)" });
+});

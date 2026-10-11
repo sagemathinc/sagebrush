@@ -74,7 +74,7 @@ export interface ReactiveHost {
    * if it raised, `stopped` if it was interrupted or the interpreter
    * restarted.
    */
-  execute(id: string, code: string, forget: string[]): Promise<{ ok: boolean; ms: number; stopped?: boolean; files?: { reads: string[]; writes: string[] } }>;
+  execute(id: string, code: string, forget: string[], scoped?: Record<string, string>): Promise<{ ok: boolean; ms: number; stopped?: boolean; interrupted?: boolean; files?: { reads: string[]; writes: string[] } }>;
   /** delete global names now (a cell deleted or broken) */
   forget(names: string[]): Promise<void>;
   /** a cell's state changed */
@@ -124,7 +124,11 @@ export class Reactive {
   /** each cell's last run time (ms), for the budget's prediction */
   times = new Map<string, number>();
   /** how each cell's last run ended */
-  outcome = new Map<string, "ok" | "exception" | "stopped">();
+  outcome = new Map<string, "ok" | "exception" | "stopped" | "cancelled">();
+  /** why each cancelled cell did not run: the cell it waits for (inherited by its descendants) */
+  private cancelledBy = new Map<string, { by: string; why: "exception" | "error" | "interrupted" }>();
+  /** page-order scoping's names in the code that runs, and the names as written (xʹ2 -> x) */
+  private scoped = new Map<string, string>();
   /** the files each cell read and wrote in its last run */
   files = new Map<string, { reads: string[]; writes: string[] }>();
   /** ms of automatic runs allowed after an action; Infinity = autorun, 0 = lazy */
@@ -178,9 +182,20 @@ export class Reactive {
     });
   }
 
+  /** A name as written (page-order scoping's xʹ2 is x; anything else as it is). */
+  written(name: string): string {
+    return this.scoped.get(name) ?? name;
+  }
+
+  /** A cell's output came from elsewhere (another tab): it is stale here. */
+  staleFromElsewhere(id: string): void {
+    if (this.registered.has(id) && !this.errors.has(id)) this.markStale(id, "loaded");
+  }
+
   /** The interpreter restarted: every cell is stale. */
   restarted(): void {
     this.outcome.clear();
+    this.cancelledBy.clear();
     for (const id of this.graph.ids) if (!this.errors.has(id)) this.markStale(id, "restart");
   }
 
@@ -269,7 +284,7 @@ export class Reactive {
     for (const [id, source] of sources) {
       const code = eff.get(id) ?? source;
       const prev = this.registered.get(id);
-      if (prev && prev.code === code) {
+      if (prev && prev.code === code && prev.error?.kind !== "analyzer") {
         prev.source = source;
         continue;
       }
@@ -302,6 +317,7 @@ export class Reactive {
       const what = ds.map((d) => an.get(d)!.imports?.get(n));
       return !(what[0] !== undefined && what.every((w) => w === what[0]));
     }).map(([n]) => n).sort();
+    const scoped = new Map<string, string>();
     for (const name of conflicts) {
       const cells = [...sources.keys()].map((id) => ({ id, code: eff.get(id)!, defines: !!an.get(id)?.defs.has(name), reads: !!an.get(id)?.refs.has(name) }));
       const r = await this.host.rename({ name, cells, taken: [...taken] });
@@ -309,8 +325,13 @@ export class Reactive {
       for (const [id, code] of r) {
         eff.set(id, code);
       }
-      for (let k = 2; k <= cells.length + 1; k++) taken.add(name + SCOPE_SEP + k);
+      // (the names it can have made: none is a name of the notebook's, `taken`)
+      for (let k = 2; k <= cells.length + 1; k++) {
+        if (!taken.has(name + SCOPE_SEP + k)) scoped.set(name + SCOPE_SEP + k, name);
+        taken.add(name + SCOPE_SEP + k);
+      }
     }
+    this.scoped = scoped;
     return eff;
   }
 
@@ -490,6 +511,8 @@ export class Reactive {
           if (this.errors.has(p) && this.suppliesOnly(p, id)) block = { by: p, why: "error" };
           else if (!order.includes(p) && this.outcome.get(p) === "exception") block = { by: p, why: "exception" };
           else if (!order.includes(p) && this.outcome.get(p) === "stopped") block = { by: p, why: "interrupted" };
+          // (a parent that did not run because of another: that one)
+          else if (!order.includes(p) && this.outcome.get(p) === "cancelled" && this.cancelledBy.has(p)) block = this.cancelledBy.get(p);
           else if (stale.has(p)) {
             stale.add(id);
             this.markStale(id, "ancestor");
@@ -503,7 +526,8 @@ export class Reactive {
       if (block) {
         cancelled.push(id);
         this.cancelDescendants(id, block, blockedBy, order);
-        this.outcome.delete(id);
+        this.outcome.set(id, "cancelled");
+        this.cancelledBy.set(id, block);
         forgetLater.push(...this.defsOf(id));
         this.host.status(id, { state: "cancelled", ...block });
         continue;
@@ -511,7 +535,8 @@ export class Reactive {
       const reg = this.registered.get(id);
       if (!reg) continue; // (gone meanwhile)
       this.host.status(id, { state: "running" });
-      const r = await this.host.execute(id, reg.code, this.defsOf(id));
+      const names = [...this.scoped].filter(([n]) => reg.code.includes(n));
+      const r = await this.host.execute(id, reg.code, this.defsOf(id), Object.fromEntries(names));
       ran.push(id);
       this.stale.delete(id);
       // files: what it read and wrote this time; a file it wrote, read by
@@ -530,9 +555,16 @@ export class Reactive {
       this.times.set(id, r.ms);
       if (isAuto) autoMs += r.ms;
       if (r.stopped) {
+        // Stop (interrupted): the cells reading it wait for it to run again, and
+        // it is not rerun for them.  The interpreter restarted or lost: stale,
+        // like every cell then, so that Run stale computes it again.
         this.outcome.set(id, "stopped");
         stopped = true;
         this.host.status(id, { state: "done", ok: false, ms: r.ms });
+        if (!r.interrupted) {
+          stale.add(id);
+          this.markStale(id, "interrupted");
+        }
         continue;
       }
       this.outcome.set(id, r.ok ? "ok" : "exception");

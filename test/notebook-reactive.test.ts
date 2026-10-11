@@ -272,3 +272,16 @@ test("a language change during a run waits for it (no crash)", async () => {
   await reset;
   assert.deepEqual([...nb.r.stale].sort(), ["c0", "c1"]);
 });
+
+test("a cell's cancellation is inherited: run alone, a descendant still waits for the cell that raised (REACT-F12)", async () => {
+  const nb = notebook(["x = 1", "y = x + 1", "print(y)"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.runAll();
+  nb.set(0, "x = 1\nraise");
+  const rep = await nb.r.run(["c0"]);
+  assert.deepEqual(rep.cancelled, ["c1", "c2"]);
+  const alone = await nb.r.run(["c2"]);
+  assert.deepEqual(alone.cancelled, ["c2"]);
+  assert.deepEqual(nb.states.get("c2"), { state: "cancelled", by: "c0", why: "exception" });
+});

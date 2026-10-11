@@ -141,7 +141,7 @@ export class WorkerKernel {
     if (!this.worker) return sink.stopped?.("\nThe interpreter was stopped.\n");
     const id = this.nextId++;
     this.pending.set(id, sink);
-    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}) };
+    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
     const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
     this.track(id, run);
     this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget });

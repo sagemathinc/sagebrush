@@ -266,7 +266,8 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
 // and not as an attribute (`.name`).
 function wordSpans(line: string, name: string): [number, number][] {
   const out: [number, number][] = [];
-  const re = /(#.*)|((?:\b[rRbBuUfF]{1,2})?(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?))|([A-Za-z_]\w*)/g;
+  // (names of any script)
+  const re = /(#.*)|((?:\b[rRbBuUfF]{1,2})?(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?))|([\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_]*)/gu;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line))) {
     if (m[3] !== name || line[m.index - 1] === ".") continue;
