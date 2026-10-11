@@ -9,6 +9,7 @@ and gives the results Sage's methods and printing.
 """
 
 import math as _m
+import re as _re
 from fractions import Fraction as _Fraction
 
 try:  # the CPython package
@@ -3162,7 +3163,7 @@ def solve(f, *args, **kw):
     one = len(eqs) == 1 and len(names) == 1
     if one and not raw and not ineqs and not kw.get("multiplicities") and _assumed_real(names[0]):
         u = _find_abs(eqs[0], names[0])
-        if u is not None:
+        if u is not None and _real_given(u, names[0]):
             out = _solve_abs(eqs[0], u, names[0])
             return _solution_dicts([[t] for t in out], 1) if kw.get("solution_dict") else out
     if not one:
@@ -3282,18 +3283,53 @@ def _find_abs(e, x):
     return None
 
 
+_REAL_FUNS = frozenset(("fun:" + f for f in ("abs", "sin", "cos", "tan", "sinh", "cosh", "tanh", "arctan", "exp")))
+
+
+def _real_given(u, x):
+    """Whether u is shown real for real x (and the other symbols assumed
+    real): built from them and real constants by +, *, integer powers, powers
+    of a positive constant, and functions real on the reals.  False when not
+    shown (abs(x + I) and abs(sqrt(x)) were split as if real: ABS-F1)."""
+    op = u._op()
+    k = op[0]
+    if not u.variables():
+        return _call("is_zero", u.imag_part()._s)[0] == "1"
+    if k == "symbol":
+        n = u._names()
+        return len(n) == 1 and (n[0] == x or _assumed_real(n[0]))
+    if k in ("add", "mul"):
+        return all(_real_given(Expression(c), x) for c in op[1:])
+    if k == "pow":
+        b, e = Expression(op[1]), Expression(op[2])
+        if e.variables():
+            # b^e with b a positive constant (2^x, e^x)
+            return not b.variables() and _decide(b > 0) is True and _real_given(e, x)
+        return _re.match(r"^n-?[0-9]+/1;$", op[2]) is not None and _real_given(b, x)
+    if k == "fun:abs":
+        return True
+    if k in _REAL_FUNS and len(op) == 2:
+        return _real_given(Expression(op[1]), x)
+    return False
+
+
 def _solve_abs(eq, u, x):
-    """eq in a real x with abs(u): the solutions of eq with abs(u) = u where
-    u >= 0 and with abs(u) = -u where u < 0 (Sage's solve(abs(x) == 2, x) is
-    [x == -2, x == 2] for every x, though |x| = 2 is a circle in the complex
-    plane; Sagebrush gives that answer where x is assumed real)."""
+    """eq in a real x with abs(u), u real for real x: the solutions of eq
+    with abs(u) = u where u >= 0 and with abs(u) = -u where u < 0 (Sage's
+    solve(abs(x) == 2, x) is [x == -2, x == 2] for every x, though |x| = 2 is
+    a circle in the complex plane; Sagebrush gives that answer where x is
+    assumed real).  A branch's unresolved equation keeps the branch's
+    condition (0 == -2*x - e^x + e + 2 came from abs(x) = -x and holds at
+    x = 1, no solution: ABS-F2)."""
     v = Expression(_sym_s(x))
     a = Expression(_call("parse", "abs(%s)" % u)[0])
     out = []
     for rep, cond in ((u, u >= 0), (-u, u < 0)):
         for t in solve(eq.subs({a: rep}), v):
             if not isinstance(t, Solution) or t.lhs()._op()[0] != "symbol":
-                out.append(t)  # unresolved: 0 == f stays
+                conds = list(t._conds) if isinstance(t, Solution) else []
+                params = list(t._params) if isinstance(t, Solution) else []
+                out.append(Solution(t._s, conds + [cond], params))
                 continue
             c = cond.subs({v: t.rhs()})
             keep = list(t._conds)
