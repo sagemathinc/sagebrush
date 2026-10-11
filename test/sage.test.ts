@@ -25,3 +25,11 @@ test("sage mode: exact rationals and sage_all", () => {
   // Python mode is unchanged.
   assert.equal(cli("-c", "print(2^3, 2/4)"), "1 0.5\n");
 });
+
+test("hash of a float, int or str subclass calling the base __hash__", () => {
+  // (a Sage real literal is a float subclass whose __hash__ calls
+  // float.__hash__(self), which dispatched back to it: RecursionError)
+  assert.equal(cli("--sage", "-c", "print(hash(1.5) == hash(float(1.5)), {1.5: 1}[1.5])"), "True 1\n");
+  const src = "class F(float):\n def __hash__(self): return float.__hash__(self)\nclass I(int):\n def __hash__(self): return int.__hash__(self)\nclass S(str):\n def __hash__(self): return str.__hash__(self)\nprint(hash(F(1.5)) == hash(1.5), hash(I(7)) == hash(7), hash(S('ab')) == hash('ab'))";
+  assert.equal(cli("-c", src), "True True True\n");
+});

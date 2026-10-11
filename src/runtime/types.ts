@@ -585,7 +585,7 @@ method(int, "__index__", (x: any) => (typeof x === "boolean" ? +x : x));
 method(int, "__int__", (x: any) => (typeof x === "boolean" ? +x : x));
 method(int, "__float__", (x: any) => O.mkfloat(O.fv(x)!));
 method(int, "__repr__", (x: any) => repr(unbox(x)));
-method(int, "__hash__", (x: any) => O.hashExact(x));
+method(int, "__hash__", (x: any) => O.hashExact(unbox(x)));
 method(int, "__format__", (x: any, spec: string) => format(x, spec));
 method(int, "is_integer", () => true);
 method(int, "as_integer_ratio", (x: any) => tuple([x, 1]));
@@ -645,7 +645,7 @@ method(float, "__trunc__", (x: any) => intCall(x));
 method(float, "__floor__", (x: any) => intCall(Math.floor(O.fv(x)!)));
 method(float, "__ceil__", (x: any) => intCall(Math.ceil(O.fv(x)!)));
 method(float, "__repr__", (x: any) => floatRepr(O.fv(x)!));
-method(float, "__hash__", (x: any) => O.hashExact(x));
+method(float, "__hash__", (x: any) => O.hashExact(unbox(x))); // (a subclass's __hash__ calling float.__hash__(self) recursed)
 method(float, "__format__", (x: any, spec: string) => format(x, spec));
 method(float, "as_integer_ratio", (x: any) => {
   let v = O.fv(x)!;
@@ -952,7 +952,7 @@ method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? s.repeat(Math.max(0,
 method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s < x : NotImplemented));
-method(S, "__hash__", (s: string) => O.hashAny(s));
+method(S, "__hash__", (s: any) => O.hashAny(unbox(s)));
 method(S, "__str__", (s: string) => s);
 method(S, "__repr__", (s: string) => repr(s));
 method(S, "__format__", (s: string, spec: string) => format(s, spec));
