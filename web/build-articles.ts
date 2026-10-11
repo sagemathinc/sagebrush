@@ -190,6 +190,9 @@ for (const series of existsSync(adir) ? readdirSync(adir).sort((a, b) => rank(a)
   if (!files.includes("README.md")) continue;
   const readme = readFileSync(join(sdir, "README.md"), "utf8");
   const seriesTitle = (readme.match(/^# (.+)$/m)?.[1] ?? series).trim();
+  // (the series' page is its README: it must link every article, or a reader cannot find it)
+  const unlisted = files.filter((f) => f !== "README.md" && !readme.includes(`](${f})`));
+  if (unlisted.length) throw new Error(`articles/${series}/README.md does not link ${unlisted.join(", ")}`);
   const pages: Page[] = files.map((f) => {
     const full = readFileSync(join(sdir, f), "utf8");
     const src = full.replace(/^(?:<!--[\s\S]*?-->\n?)+/, "");
