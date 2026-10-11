@@ -62,6 +62,30 @@ cell runs again. On the full page each notebook has its own interpreter (the
 four most recently used stay alive). The console is a scratchpad with its
 own interpreter, apart from every notebook (design/reactive-notebook.md).
 
+## The reactive notebook (being built)
+
+With the options `reactive: true` and `analyzer` (`{analyze(code, mode)}`
+resolving to the names a cell defines and reads: web/analyze-worker.ts,
+src/dataflow.ts), cells form a dependency graph, as in marimo
+(design/reactive-notebook.md):
+
+- Running a cell first runs its stale ancestors, then reruns what depends on
+  it, in graph order with ties in page order.
+- Cells run automatically only within the budget (`setBudget(ms)`, default
+  2 s; `Infinity` is marimo's autorun, 0 its lazy mode). The rest are left
+  stale and say why.
+- A name read by other cells has one defining cell. Second definitions and
+  cycles are errors on the cells (#1477's relaxation: names nobody reads may
+  be defined by several cells). An exception cancels the cells below it.
+  Deleting a cell, or a definition from its code, deletes the names.
+- Cells whose code changed since they ran are marked `edited`.
+- `runCells(ids, {remove, budget})` runs several cells and deletes others as
+  one action, an agent's batch of edits. The scheduler is
+  src/notebook-reactive.ts (`notebook.reactive`).
+
+The full page turns it on with `?reactive` in its address (or localStorage
+`sagebrush-reactive` = "1"); web/test-reactive.mjs tests it.
+
 ## Embedding notes
 
 - **The worker must be same-origin.** Host `sagebrush-worker.js` and `sagebrush-engine.wasm` with your page, or build them from this repository.

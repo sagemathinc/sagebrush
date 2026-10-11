@@ -174,3 +174,7 @@
   .sbnb .print3d { display: block !important; }
   .sbnb .sb3d-buttons, .sbnb .player { display: none !important; }
 }
+/* the reactive notebook: code edited since it ran; not run (an ancestor failed); an error in the graph */
+.sbnb .cell.edited .runb { color: #b45309; }
+.sbnb .cell.edited .gutter .n::after { content: "*"; color: #b45309; }
+.sbnb .cell.cancelled .out, .sbnb .cell.cancelled .n { opacity: .6; }

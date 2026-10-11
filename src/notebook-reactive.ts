@@ -115,13 +115,13 @@ export class Reactive {
    * registered and, if `stale`, marked stale (its outputs, if any, are from
    * another session).  Nothing runs.
    */
-  load(opts: { stale?: boolean } = {}): Promise<RunReport> {
+  load(opts: { stale?: boolean; fresh?: Set<string> } = {}): Promise<RunReport> {
     return this.serial(async () => {
       const cells = this.host.cells();
       await this.registerAll(cells.map((c) => c.id), cells);
       this.errors = new Map(this.graph.errors);
       for (const [id, errors] of this.errors) this.host.status(id, { state: "error", errors });
-      if (opts.stale ?? true) for (const c of cells) if (!this.errors.has(c.id)) this.markStale(c.id, "loaded");
+      if (opts.stale ?? true) for (const c of cells) if (!this.errors.has(c.id) && !opts.fresh?.has(c.id)) this.markStale(c.id, "loaded");
       return this.report([], [], [], []);
     });
   }
@@ -155,6 +155,8 @@ export class Reactive {
   /** Cells moved: only the order of ties changes. */
   reordered(): void {
     const order = this.host.cells().map((c) => c.id);
+    const present = new Set(order);
+    for (const id of [...this.registered.keys()]) if (!present.has(id)) this.registered.delete(id);
     this.graph.set(order.filter((id) => this.registered.has(id)).map((id) => this.graphCell(id)));
   }
 
@@ -325,7 +327,7 @@ export class Reactive {
       let block = blockedBy.get(id);
       if (!block) {
         for (const p of this.graph.parents(id)) {
-          if (this.errors.has(p)) block = { by: p, why: "error" };
+          if (this.errors.has(p) && this.suppliesOnly(p, id)) block = { by: p, why: "error" };
           else if (!order.includes(p) && this.outcome.get(p) === "exception") block = { by: p, why: "exception" };
           else if (!order.includes(p) && this.outcome.get(p) === "stopped") block = { by: p, why: "interrupted" };
           else if (stale.has(p)) {
@@ -367,6 +369,17 @@ export class Reactive {
     }
     if (forgetLater.length) await this.host.forget(forgetLater);
     return this.report(ran, [...stale], failed, cancelled);
+  }
+
+  // Whether a cell with an error is the only definer of a name `id` reads
+  // (else, as a second definition, it takes nothing from it).
+  private suppliesOnly(p: string, id: string): boolean {
+    const refs = this.registered.get(id)?.analysis?.refs;
+    for (const n of this.defsOf(p)) {
+      if (!refs?.has(n)) continue;
+      if (!(this.graph.definers.get(n) ?? []).some((d) => d !== p && !this.errors.has(d))) return true;
+    }
+    return false;
   }
 
   private cancelDescendants(id: string, block: { by: string; why: "exception" | "error" | "interrupted" }, blockedBy: Map<string, typeof block>, order: string[]): void {

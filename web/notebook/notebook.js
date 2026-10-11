@@ -17,6 +17,7 @@
 import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
 import { cellId } from "./ipynb.js";
+import { Reactive } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
 const STOP_MESSAGE = "\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n";
@@ -471,6 +472,7 @@ export function createNotebook(root, opts = {}) {
       k.on("restart", () => {
         k.execCount = 0;
         k.ran = new Set();
+        k.reactive?.restarted();
         if (k === kernel) for (const c of cells()) markStale(c);
       });
     }
@@ -604,16 +606,24 @@ export function createNotebook(root, opts = {}) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
     if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+    // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
+    if (reactive()) return engine().run([cell.id]);
+    return execCell(cell, cell.ta.value);
+  }
+  // Run a cell's code (`forget`: global names to delete first); resolves to
+  // {ok, ms, stopped} when it is done.
+  function execCell(cell, code, forget = []) {
     forgetInteracts(cell.out);
     cell.out.textContent = "";
     cell.time.textContent = "";
     freshen(cell);
-    if (!kernel) { appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true); return Promise.resolve(); }
+    cell.el.classList.remove("cancelled", "error");
+    if (!kernel) { appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true); return Promise.resolve({ ok: false, ms: 0, stopped: true }); }
     cell.el.classList.add("queued");
     cell.n.textContent = "[*]";
     cell.runb.textContent = "■";
     let failed = false;
-    return new Promise((resolve) => kernel.execute(cell.ta.value, { mode, cell: cell.id }, {
+    return new Promise((resolve) => kernel.execute(code, { mode, cell: cell.id, forget }, {
       start() {
         cell.el.classList.replace("queued", "running");
         const t0 = performance.now();
@@ -621,25 +631,132 @@ export function createNotebook(root, opts = {}) {
       },
       ...areaSink(cell.out),
       out(text, isErr) { failed ||= isErr; appendText(cell.out, text, isErr); },
-      done(ms) {
+      done(ms, info) {
         settle(cell);
         cell.n.textContent = `[${kernel ? ++kernel.execCount : ++execCount}]`;
         kernel?.ran?.add(cell.id);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
-        announce(`Cell ${index(cell) + 1} ${failed ? "raised an error" : "finished"}`);
-        resolve();
+        announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
+        resolve({ ok: !info?.error, ms });
       },
       stopped(message) {
         settle(cell);
         cell.n.textContent = "[ ]";
         cell.time.textContent = "";
         if (message) appendText(cell.out, message, true);
-        resolve();
+        resolve({ ok: false, ms: 0, stopped: true });
       },
-      skipped() { settle(cell); cell.n.textContent = "[ ]"; resolve(); },
+      skipped() { settle(cell); cell.n.textContent = "[ ]"; resolve({ ok: false, ms: 0, stopped: true }); },
     }));
   }
-  const runAll = () => Promise.all(cells().map(run)); // the kernel runs them in order
+  // (the kernel runs them in order; the reactive notebook in graph order)
+  const runAll = () => (reactive() ? engine().runAll() : Promise.all(cells().map(run)));
+
+  // ---------------------------------------------------------- the reactive notebook
+  // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
+  // the analysis a worker's: opts.analyzer.analyze(code, mode))
+  let reactiveOn = !!opts.reactive;
+  let budget = opts.budget ?? 2000;
+  const reactive = () => reactiveOn && !!kernel && !!opts.analyzer;
+  const analyses = new Map(); // mode + code -> Promise<analysis>
+  const cellById = (id) => cells().find((c) => c.id === id);
+  // The scheduler of the interpreter's state: one per interpreter (kept on it).
+  function engine() {
+    if (!kernel.reactive) {
+      const r = (kernel.reactive = new Reactive({
+        cells: () => cells().filter((c) => c.type === "code").map((c) => ({ id: c.id, code: c.ta.value, manual: !!c.metadata?.sagebrush?.manual })),
+        analyze(code) {
+          const key = mode + "\0" + code;
+          if (!analyses.has(key)) {
+            if (analyses.size > 2000) analyses.clear();
+            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => (a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted) })));
+          }
+          return analyses.get(key);
+        },
+        execute(id, code, forget) {
+          const cell = cellById(id);
+          return cell ? execCell(cell, code, forget).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
+        },
+        forget: (names) => new Promise((resolve) => kernel.execute("", { mode, forget: names }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
+        status(id, st) {
+          const cell = cellById(id);
+          if (cell) showStatus(cell, st);
+          emit("status", id, st);
+        },
+      }));
+      r.budget = budget;
+    }
+    return kernel.reactive;
+  }
+  const label = (id) => { const c = cellById(id); return c ? `cell ${index(c) + 1}` : "a deleted cell"; };
+  const labels = (ids) => ids.map(label).join(", ").replace(/, ([^,]*)$/, " and $1");
+  const secs = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`);
+  function errorText(e) {
+    switch (e.kind) {
+      case "multiple-definition":
+        return e.reading
+          ? `${e.name} is defined by ${labels(e.cells)}, so this cell cannot tell which one it reads. Rename it in all but one of them.`
+          : `${e.name} is also defined by ${labels(e.cells)}. A name read by other cells can be defined by only one cell: rename it in one of them, or start it with _ to keep it private to its cell.`;
+      case "cycle":
+        return `${labels(e.cells)} depend on each other in a cycle, so none of them can run first. Move a definition to break it.`;
+      case "import-star":
+        return `${e.message} Import the names you use (from m import a, b), or the module (import m).`;
+      default:
+        return `SyntaxError: ${e.message}`;
+    }
+  }
+  function showStatus(cell, st) {
+    const cls = cell.el.classList;
+    if (st.state === "queued") {
+      cls.remove("stale", "cancelled", "error");
+      cls.add("queued");
+      cell.n.textContent = "[*]";
+      cell.runb.textContent = "■";
+      return;
+    }
+    if (st.state === "running" || st.state === "done") return; // (execCell's sink)
+    settle(cell);
+    if (st.state === "stale") {
+      cls.remove("cancelled", "error");
+      const ms = kernel?.reactive?.times.get(cell.id);
+      const why = { budget: `not rerun automatically${ms ? ` (it takes about ${secs(ms)})` : ""}`, manual: "a manual cell: run it yourself", ancestor: "a cell it depends on is stale", interrupted: "interrupted", loaded: "not computed in this session", restart: "the interpreter restarted" }[st.why] ?? "";
+      cls.add("stale");
+      cell.time.textContent = "stale" + (st.why === "budget" || st.why === "manual" ? ": " + why : "");
+      cell.time.title = `Stale: ${why}. Run the cell to update it.`;
+      if (cell.n.textContent === "[*]") cell.n.textContent = "[ ]";
+      return;
+    }
+    forgetInteracts(cell.out);
+    cell.out.textContent = "";
+    cell.time.textContent = "";
+    freshen(cell);
+    cell.n.textContent = "[ ]";
+    if (st.state === "cancelled") {
+      cls.remove("error");
+      cls.add("cancelled");
+      const what = { exception: "raised an error", error: "has an error", interrupted: "was interrupted" }[st.why];
+      appendText(cell.out, `Not run: ${label(st.by)}, which this cell depends on, ${what}.\n`, true);
+    } else if (st.state === "error") {
+      cls.remove("cancelled");
+      cls.add("error");
+      for (const e of st.errors) appendText(cell.out, errorText(e) + "\n", true);
+      markEdited(cell);
+    }
+  }
+  // A cell whose code differs from what last ran ("edited": its output and
+  // what other cells see are the old code's)
+  function markEdited(cell) {
+    const r = kernel?.reactive;
+    const sub = reactive() && r ? r.submitted(cell.id) : undefined;
+    // (or never ran, with code)
+    cell.el.classList.toggle("edited", reactive() && cell.type === "code" && (sub !== undefined ? sub !== cell.ta.value : cell.ta.value.trim() !== ""));
+  }
+  // The page changed outside the scheduler (cells moved, deleted elsewhere, a document loaded).
+  function reactiveSync() {
+    if (!reactive() || !kernel.reactive) return;
+    kernel.reactive.reordered();
+    for (const c of cells()) if (c.type === "code") markEdited(c);
+  }
   const interrupt = () => kernel?.interrupt(STOP_MESSAGE);
   function clearOutputs() {
     for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); }
@@ -760,7 +877,7 @@ export function createNotebook(root, opts = {}) {
     cell.md.addEventListener("dblclick", () => { if (!opts.readOnly) editMd(cell); });
     cell.ta.value = code;
     cell.ta.readOnly = !!opts.readOnly;
-    cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); refilter(cell); });
+    cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); refilter(cell); markEdited(cell); });
     cell.ta.addEventListener("blur", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("click", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("keydown", (e) => editKey(cell, e));
@@ -961,6 +1078,8 @@ export function createNotebook(root, opts = {}) {
     else edit(next);
     relabel();
     announce("Cell deleted" + (command ? "; Z undoes" : ""));
+    // its names go; the cells reading them rerun
+    if (reactive() && cell.type === "code") engine().remove([cell.id]);
   }
   function undelete() {
     const t = trash.pop();
@@ -971,6 +1090,7 @@ export function createNotebook(root, opts = {}) {
     relabel();
     select(t.el.cell);
     announce("Cell restored");
+    reactiveSync();
   }
   function paste(cell, above) {
     if (!clip) return;
@@ -1064,6 +1184,7 @@ export function createNotebook(root, opts = {}) {
     if (before === cell.el || before === cell.el.nextElementSibling) return;
     if (before) before.before(cell.el); else cellsEl.appendChild(cell.el);
     relabel();
+    reactiveSync();
     select(cell);
     announce(`Moved to position ${index(cell) + 1}`);
   });
@@ -1127,6 +1248,7 @@ export function createNotebook(root, opts = {}) {
     hadFocus?.focus();
     cell.el.scrollIntoView({ block: "nearest" });
     relabel();
+    reactiveSync();
     announce(`Moved to position ${index(cell) + 1}`);
   }
 
@@ -1284,6 +1406,14 @@ export function createNotebook(root, opts = {}) {
     lastJson = JSON.stringify(snap);
     setSynced(rev, snap.cells);
     Promise.resolve().then(() => { loading = false; }); // after the observer's records for this
+    reactiveLoad();
+  }
+  // The reactive notebook takes the document's cells as they are: their
+  // code registered, stale unless this interpreter computed them.
+  function reactiveLoad() {
+    if (!reactive()) return;
+    if (kernel.reactive) return reactiveSync();
+    engine().load({ fresh: kernel.ran ?? new Set() });
   }
   // Apply a document changed elsewhere (another tab, a collaborator, an agent):
   // cells are matched by id; what changed is updated in place, so the cell
@@ -1391,6 +1521,7 @@ export function createNotebook(root, opts = {}) {
     if (keepLocal) setSynced(rev, list);
     lastJson = dirty ? null : JSON.stringify(snapshot()); // a merged change still has to be saved
     Promise.resolve().then(() => { loading = false; if (dirty) schedule(); });
+    reactiveSync();
     emit("remote", doc);
   }
   // Replace the cells with a document's (TimeTravel's revert): matched by id
@@ -1408,6 +1539,7 @@ export function createNotebook(root, opts = {}) {
     if (focused) cell.ta.setSelectionRange(Math.min(s0, text.length), Math.min(s1, text.length));
     autosize(cell.ta);
     paint(cell);
+    markEdited(cell);
     schedule();
   }
   function setMode(m, notify = true) {
@@ -1486,6 +1618,13 @@ export function createNotebook(root, opts = {}) {
     restart() { kernel?.restart(); },
     /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
     setKernel(k, { stale = true } = {}) { if (k === kernel) return; bindKernel(k); if (stale) for (const c of cells()) markStale(c); },
+    /** The reactive notebook (design/reactive-notebook.md): on or off, and its budget (ms; Infinity: autorun, 0: lazy). */
+    setReactive(on) { reactiveOn = !!on; if (on) reactiveLoad(); else for (const c of cells()) c.el.classList.remove("edited", "cancelled", "error"); },
+    get reactive() { return reactive() ? engine() : null; },
+    get budget() { return budget; },
+    setBudget(ms) { budget = ms; if (kernel?.reactive) kernel.reactive.budget = ms; },
+    /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
+    runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },
     setMode, setType, setInput, renderMd, select, edit,
     /** Measure every editor again now (after the notebook was hidden). */
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
