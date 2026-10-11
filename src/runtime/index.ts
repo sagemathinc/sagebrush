@@ -391,6 +391,15 @@ export function mimeBundle(v: any): Record<string, string> | null {
 // Show v richly if the host can, else print its repr; true if shown richly.
 function displayValue(v: any): boolean {
   const host = R.host;
+  // IPython's _ipython_display_ (ipywidgets' widgets draw themselves as
+  // controls), where the host can draw them
+  if (host?.interact && v !== null && !Obj.isType(v)) {
+    const ipd = Obj.getattr(v, "_ipython_display_", null);
+    if (ipd !== null) {
+      Obj.callObj(ipd, []);
+      return true;
+    }
+  }
   if (host?.display) {
     const b = mimeBundle(v);
     if (b !== null) {

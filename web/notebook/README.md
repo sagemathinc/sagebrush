@@ -3,7 +3,7 @@
 `web/notebook` is the notebook of [sagebrush.space](https://sagebrush.space) as a component. Its parts:
 
 - cells as in Jupyter: prompts `[n]:`, command and edit modes, Jupyter's keys, dragging to reorder, `+ Code` / `+ Text` between cells;
-- outputs: text, SVG and PNG pictures, typeset math, interactive 3D views, animations and `@interact` controls;
+- outputs: text, SVG and PNG pictures, typeset math, interactive 3D views, animations, `@interact` controls and ipywidgets' widgets (a slider, dropdown, button, ... or a `VBox` of them, as a cell's value or with `display()`: `.observe`, `Button.on_click` and `interactive_output` work);
 - Markdown cells with math, and Tab completion;
 - printing to PDF.
 

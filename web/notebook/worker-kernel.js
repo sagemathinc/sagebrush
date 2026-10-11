@@ -161,7 +161,9 @@ export class WorkerKernel {
   interact(iid, values, sink, opts = {}) {
     const id = this.nextId++;
     this.pending.set(id, sink);
-    this.track(id, { kind: "interact", iid, values });
+    // (a copy: the journal's document freezes what it is given, and the
+    // notebook keeps changing its own values object)
+    this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)) });
     this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) });
   }
 

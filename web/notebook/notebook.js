@@ -525,6 +525,11 @@ export function createNotebook(root, opts = {}) {
       c.options.forEach((o, i) => sel.add(new Option(o, i, false, i === c.value)));
       sel.onchange = () => set(+sel.value);
       it.setters[c.name] = (i) => { sel.value = i; it.values[c.name] = +i; };
+    } else if (c.kind === "button") {
+      // (ipywidgets' Button: the value counts the clicks)
+      const b = v.appendChild(h("button", "", { id, textContent: c.text }));
+      b.onclick = () => set((it.values[c.name] ?? 0) + 1);
+      it.setters[c.name] = (x) => { it.values[c.name] = +x; };
     } else if (c.kind === "checkbox") {
       const box = v.appendChild(h("input", "", { type: "checkbox", id, checked: !!c.value }));
       box.onchange = () => set(box.checked);
