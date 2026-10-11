@@ -305,6 +305,8 @@ class Visitor {
     // base, binds in the scope around it)
     let at = this.blocks.length - 1;
     while (!this.strict && ctx === "Store" && at > 0 && this.blocks[at].outside) at--;
+    // (`global x` there: the module's)
+    if (at > 0 && at < this.blocks.length - 1 && this.blocks[at].globalNames.has(node.id)) at = 0;
     if (ctx === "Store" && at < this.blocks.length - 1) {
       node.id = this.mangle(node.id, at === 0);
       if (at === 0) this.imported.set(node.id, null);

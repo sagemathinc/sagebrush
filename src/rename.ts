@@ -353,7 +353,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
       case "ListComp": case "SetComp": case "GeneratorExp": case "DictComp": {
         const gens = n.generators;
         // the first iterable is evaluated outside
-        walk(gens[0]?.iter, shadowed, stmt, under("generators"), fn);
+        walk(gens[0]?.iter, shadowed, stmt, under("iter0"), fn);
         const targets = new Set<string>();
         for (const g of gens) localsOf([g.target], []).forEach((t) => targets.add(t));
         const inner = fn || targets.has(name);
@@ -414,6 +414,52 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
 // value), which reads the old one.  Null when no one name fits: a use inside
 // a loop that also contains the definition, before it (the first pass reads
 // the old value, later ones the new).
+// When an occurrence inside a class (or a def's header) defining the name
+// runs: "now", while the class is made (the previous value); "later" (the
+// new one); or "maybe", when that cannot be told from the code.  The bodies
+// of functions, lambdas and generator expressions run when called or
+// consumed: a lambda called where it is written, or a generator passed to a
+// call (`sum(x for ...)`), now; a function or lambda or generator stored in
+// the class (a method, `f = lambda: ...`) and not used in its body again,
+// or a def's default, later; anything else maybe.
+function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "maybe" {
+  const SAFE = new Set(["staticmethod", "classmethod", "property", "abstractmethod"]);
+  const plainDecorators = (f: any) => f.decorator_list.every((d: any) => (d._type === "Name" && SAFE.has(d.id)) || (d._type === "Attribute" && ["setter", "getter", "deleter"].includes(d.attr)));
+  // whether `name` is read in the class's body outside `except`
+  const usedInClass = (name: string, except: any): boolean => {
+    if (def._type !== "ClassDef") return false;
+    let found = false;
+    const scan = (n: any): void => {
+      if (found || !n || typeof n !== "object" || n === except) return;
+      if (Array.isArray(n)) return n.forEach(scan);
+      if (n._type === "Name" && n.id === name && n.ctx?._type === "Load") { found = true; return; }
+      for (const k of Object.keys(n)) if (k !== "_type") scan(n[k]);
+    };
+    scan(def.body);
+    return found;
+  };
+  for (let j = defIdx + 1; j < o.path.length; j++) {
+    const [n, key] = o.path[j];
+    const deferred = ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "Lambda") && key === "body") ||
+      (n._type === "GeneratorExp" && (key === "elt" || key === "generators"));
+    if (!deferred) continue;
+    const [p, pkey] = o.path[j - 1] ?? [null, ""];
+    if (n._type === "Lambda" && p?._type === "Call" && pkey === "func") continue;
+    if (n._type === "GeneratorExp" && p?._type === "Call" && pkey === "args") continue;
+    // a default of a function (or lambda): runs when that is called
+    if ((p?._type === "FunctionDef" || p?._type === "AsyncFunctionDef" || p?._type === "Lambda") && pkey === "args") return "later";
+    let name: string | null = null;
+    if (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") {
+      if (!plainDecorators(n)) return "maybe";
+      name = n.name;
+    } else if ((p?._type === "Assign" && p.targets.length === 1 && p.targets[0]._type === "Name") && pkey === "value") name = p.targets[0].id;
+    else if (p?._type === "AnnAssign" && p.target._type === "Name" && pkey === "value") name = p.target.id;
+    if (name === null) return "maybe";
+    return usedInClass(name, n) ? "maybe" : "later";
+  }
+  return "now";
+}
+
 function whichReads(occ: Occurrence[], first: Occurrence): Map<Occurrence, "old" | "new"> | null {
   const out = new Map<Occurrence, "old" | "new">();
   const before = (a: Occurrence, b: Occurrence) => a.line < b.line || (a.line === b.line && a.col < b.col);
@@ -421,25 +467,20 @@ function whichReads(occ: Occurrence[], first: Occurrence): Map<Occurrence, "old"
   const LOOPS = new Set(["For", "AsyncFor", "While"]);
   // (a `global x` takes the name of the assignments in its function, if any)
   const globals = occ.filter((o) => o.global);
-  const fnOf = (o: Occurrence) => [...o.path].reverse().find(([n]) => n._type === "FunctionDef" || n._type === "AsyncFunctionDef")?.[0];
+  // (the function whose body it is in: a default is the enclosing one's)
+  const fnOf = (o: Occurrence) => [...o.path].reverse().find(([n, key]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && key === "body")?.[0];
   for (const o of occ) {
     if (o.global) continue;
     if (o === first || o.stmt > first.stmt || (o.stmt === first.stmt && o.store && !before(o, first))) { out.set(o, "new"); continue; }
     if (o.stmt < first.stmt) { out.set(o, "old"); continue; }
     // the same statement
     // (a class's decorators, bases and body, a def's decorators, defaults
-    // and annotations run before the name is bound; a def's body, and the
-    // bodies of the functions and lambdas in a class body, later, except a
-    // lambda called where it is written: `(lambda: C.a)()`)
+    // and annotations run before the name is bound: they read the previous
+    // value; what runs later reads the new one: timing)
     const defIdx = first.def ? o.path.findIndex(([n]) => n === first.def) : -1;
-    const later = (j: number) => {
-      const [n, key] = o.path[j];
-      if (key !== "body") return false;
-      if (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") return true;
-      return n._type === "Lambda" && !(o.path[j - 1]?.[0]._type === "Call" && o.path[j - 1]?.[1] === "func");
-    };
-    const header = defIdx >= 0 && (first.def._type === "ClassDef" || o.path[defIdx][1] !== "body") &&
-      !o.path.some((_, j) => j > defIdx && later(j));
+    const t = defIdx >= 0 && (first.def._type === "ClassDef" || o.path[defIdx][1] !== "body") ? timing(o, defIdx, first.def) : "later";
+    if (t === "maybe") return null;
+    const header = t === "now";
     const evaluatedFirst = header || o.path.some(([n, key]) =>
       ((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value" && inside(first, n)) ||
       ((n._type === "For" || n._type === "AsyncFor") && key === "iter" && inside(first, n)) ||
