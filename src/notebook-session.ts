@@ -115,6 +115,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     },
   };
   let changedNames = new Set<string>();
+  let seededBefore = false;
 
   const ready = (async () => {
     await initParser();
@@ -185,16 +186,18 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     opts.runs?.begin(m);
     let ok = true;
     changedNames = new Set();
-    // a seeded run (the reactive notebook's per-cell seeds): Python's random
-    // and numpy.random, if imported, start again.  In the browser's worker
-    // the run's entropy (os.urandom) is a stream from the seed (RunHooks), so
-    // they reseed from it, as a first import in the cell does; elsewhere
-    // (sagebrush notebook) from the seed itself (a first import there is not
-    // reproducible).
-    if (typeof m.seed === "string" && /^[0-9a-f]{64}$/i.test(m.seed)) {
-      const words = Array.from({ length: 8 }, (_, i) => parseInt(m.seed.slice(8 * i, 8 * i + 8), 16));
-      const [a, b] = opts.runs ? ["", ""] : [`0x${m.seed}`, JSON.stringify(words)];
-      run(`import sys as _s\n_g = _s.modules.get('random')\nif _g is not None: _g.seed(${a})\n_g = _s.modules.get('numpy.random')\nif _g is not None: _g.seed(${b})\ndel _s, _g\n`, host, "exec", "<seed>");
+    // A seeded run (the reactive notebook's per-cell seeds): Python's random
+    // and numpy.random start from seeds derived from the cell's, whether they
+    // are imported already or in the cell (lib/random.py, lib/numpy/random.py
+    // read builtins.__pyjs_seed__ when they are), so the numbers do not depend
+    // on what ran before.  os.urandom and secrets stay truly random.
+    const seed = typeof m.seed === "string" && /^[0-9a-f]{64}$/i.test(m.seed) ? m.seed : null;
+    if (seed || seededBefore) {
+      const words = seed ? Array.from({ length: 8 }, (_, i) => parseInt(seed.slice(8 * i, 8 * i + 8), 16)) : [];
+      run(seed
+        ? `import builtins as _b, sys as _s\n_b.__pyjs_seed__ = (0x${seed}, ${JSON.stringify(words)}, [0])\n_g = _s.modules.get('random')\nif _g is not None: _g.seed(0x${seed})\n_g = _s.modules.get('numpy.random')\nif _g is not None: _g.seed(${JSON.stringify(words)})\ndel _b, _s, _g\n`
+        : `import builtins as _b\n_b.__pyjs_seed__ = None\ndel _b\n`, host, "exec", "<seed>");
+      seededBefore = !!seed;
     }
     if (Array.isArray(m.forget) && m.forget.length) {
       // (names of any script: α, and page-order scoping's xʹ2)

@@ -22,6 +22,8 @@ interface Occurrence {
   end: number;
   store: boolean;
   stmt: number; // the top-level statement it is in
+  // its ancestors in that statement, each with the field it is under
+  path: [any, string][];
   // `import x` / `from m import x` (the name is the module's or the
   // module's attribute): renamed by adding `as`; null: cannot be (`import x.y`)
   alias?: string | null;
@@ -66,48 +68,52 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
     const start = bytesLen(text.slice(0, m.index + m[0].length - name.length));
     return [start, start + bytesLen(name)];
   };
-  const walk = (n: any, shadowed: boolean, stmt: number): void => {
+  const walk = (n: any, shadowed: boolean, stmt: number, path: [any, string][] = []): void => {
     if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) return n.forEach((x) => walk(x, shadowed, stmt));
+    if (Array.isArray(n)) return n.forEach((x) => walk(x, shadowed, stmt, path));
     if (typeof n._type !== "string") return;
+    const under = (key: string): [any, string][] => [...path, [n, key]];
     switch (n._type) {
       case "Name":
-        if (n.id === name && !shadowed) out.push({ line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type !== "Load", stmt });
+        if (n.id === name && !shadowed) out.push({ line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type !== "Load", stmt, path });
         return;
       case "FunctionDef": case "AsyncFunctionDef": case "Lambda": {
         // decorators, defaults and annotations are evaluated outside
-        walk(n.decorator_list, shadowed, stmt);
-        walk(n.args?.defaults, shadowed, stmt);
-        walk(n.args?.kw_defaults, shadowed, stmt);
-        walk(n.returns, shadowed, stmt);
+        walk(n.decorator_list, shadowed, stmt, under("decorator_list"));
+        walk(n.args?.defaults, shadowed, stmt, under("args"));
+        walk(n.args?.kw_defaults, shadowed, stmt, under("args"));
+        walk(n.returns, shadowed, stmt, under("returns"));
         if (n._type !== "Lambda" && n.name === name && !shadowed) {
           const p = defName(n);
-          if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt });
+          if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path });
         }
         const body = n._type === "Lambda" ? [n.body] : n.body;
-        walk(body, shadowed || localsOf(body, params(n.args)).has(name), stmt);
+        walk(body, shadowed || localsOf(body, params(n.args)).has(name), stmt, under("body"));
         return;
       }
       case "ClassDef":
-        walk(n.decorator_list, shadowed, stmt);
-        walk(n.bases, shadowed, stmt);
-        walk(n.keywords, shadowed, stmt);
+        walk(n.decorator_list, shadowed, stmt, under("decorator_list"));
+        walk(n.bases, shadowed, stmt, under("bases"));
+        walk(n.keywords, shadowed, stmt, under("keywords"));
         if (n.name === name && !shadowed) {
           const p = defName(n);
-          if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt });
+          if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path });
         }
         // (a class body's own bindings are its attributes; methods do not see them)
-        walk(n.body, shadowed || localsOf(n.body.filter((s: any) => !BINDING_TYPES.has(s._type)), []).has(name), stmt);
+        {
+          const attr = shadowed || localsOf(n.body.filter((s: any) => !BINDING_TYPES.has(s._type)), []).has(name);
+          for (const st of n.body) walk(st, BINDING_TYPES.has(st._type) ? shadowed : attr, stmt, under("body"));
+        }
         return;
       case "ListComp": case "SetComp": case "GeneratorExp": case "DictComp": {
         const gens = n.generators;
         // the first iterable is evaluated outside
-        walk(gens[0]?.iter, shadowed, stmt);
+        walk(gens[0]?.iter, shadowed, stmt, under("generators"));
         const targets = new Set<string>();
         for (const g of gens) localsOf([g.target], []).forEach((t) => targets.add(t));
         const inner = shadowed || targets.has(name);
-        gens.forEach((g: any, i: number) => { walk(g.target, inner, stmt); if (i) walk(g.iter, inner, stmt); walk(g.ifs, inner, stmt); });
-        walk(n._type === "DictComp" ? [n.key, n.value] : [n.elt], inner, stmt);
+        gens.forEach((g: any, i: number) => { walk(g.target, inner, stmt, under("generators")); if (i) walk(g.iter, inner, stmt, under("generators")); walk(g.ifs, inner, stmt, under("generators")); });
+        walk(n._type === "DictComp" ? [n.key, n.value] : [n.elt], inner, stmt, under("elt"));
         return;
       }
       case "alias": {
@@ -117,7 +123,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
           const text = lines[n.lineno - 1] ?? "";
           const seg = byteSlice(text, n.col_offset, n.end_col_offset);
           const k = n.asname ? seg.lastIndexOf(name) : seg.indexOf(name);
-          if (k >= 0) out.push({ line: n.lineno, col: n.col_offset + bytesLen(seg.slice(0, k)), end: n.col_offset + bytesLen(seg.slice(0, k + name.length)), store: true, stmt, ...(n.asname ? {} : { alias: n.name.includes(".") ? null : n.name }) });
+          if (k >= 0) out.push({ line: n.lineno, col: n.col_offset + bytesLen(seg.slice(0, k)), end: n.col_offset + bytesLen(seg.slice(0, k + name.length)), store: true, stmt, path, ...(n.asname ? {} : { alias: n.name.includes(".") ? null : n.name }) });
         }
         return;
       }
@@ -128,17 +134,47 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
           const m = new RegExp(`\\bglobal\\b[^#]*?\\b(${name})\\b`).exec(text);
           if (m) {
             const start = bytesLen(text.slice(0, m.index + m[0].length - name.length));
-            out.push({ line: n.lineno, col: start, end: start + bytesLen(name), store: false, stmt });
+            out.push({ line: n.lineno, col: start, end: start + bytesLen(name), store: false, stmt, path });
           }
         }
         return;
       }
-      case "Attribute": walk(n.value, shadowed, stmt); return; // (not the attribute's name)
-      case "keyword": walk(n.value, shadowed, stmt); return; // (not the argument's name)
+      case "Attribute": walk(n.value, shadowed, stmt, under("value")); return; // (not the attribute's name)
+      case "keyword": walk(n.value, shadowed, stmt, under("value")); return; // (not the argument's name)
     }
-    for (const k of Object.keys(n)) if (k !== "_type") walk(n[k], shadowed, stmt);
+    for (const k of Object.keys(n)) if (k !== "_type") walk(n[k], shadowed, stmt, under(k));
   };
-  tree.body.forEach((st: any, i: number) => walk(st, false, i));
+  tree.body.forEach((st: any, i: number) => walk(st, false, i, []));
+  return out;
+}
+
+// Which occurrences read the name's previous value (before the cell's first
+// definition, `first`, takes effect) and which its new one, in execution
+// order: by position, except what is evaluated before the binding (an
+// assignment's value, a for loop's iterable, a with item's expression, :='s
+// value), which reads the old one.  Null when no one name fits: a use inside
+// a loop that also contains the definition, before it (the first pass reads
+// the old value, later ones the new).
+function whichReads(occ: Occurrence[], first: Occurrence): Map<Occurrence, "old" | "new"> | null {
+  const out = new Map<Occurrence, "old" | "new">();
+  const before = (a: Occurrence, b: Occurrence) => a.line < b.line || (a.line === b.line && a.col < b.col);
+  const inside = (o: Occurrence, node: any) => o.path.some(([n]) => n === node);
+  const LOOPS = new Set(["For", "AsyncFor", "While"]);
+  for (const o of occ) {
+    if (o === first || o.stmt > first.stmt || (o.stmt === first.stmt && o.store && !before(o, first))) { out.set(o, "new"); continue; }
+    if (o.stmt < first.stmt) { out.set(o, "old"); continue; }
+    // the same statement
+    const evaluatedFirst = o.path.some(([n, key]) =>
+      ((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value" && inside(first, n)) ||
+      ((n._type === "For" || n._type === "AsyncFor") && key === "iter" && inside(first, n)) ||
+      (n._type === "NamedExpr" && key === "value" && inside(first, n)) ||
+      (n._type === "withitem" && key === "context_expr" && inside(first, n)));
+    if (evaluatedFirst) { out.set(o, "old"); continue; }
+    if (before(o, first)) {
+      if (o.path.some(([n]) => LOOPS.has(n._type) && inside(first, n))) return null;
+      out.set(o, "old");
+    } else out.set(o, "new");
+  }
   return out;
 }
 
@@ -163,15 +199,24 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   let occ = occurrences(tree, name, aLines);
   // each occurrence's new name: `to`, or (from the definition) `before` for those before it
   const target = new Map<Occurrence, string>();
+  let prefix: { line: number; text: string } | null = null;
   if (opts.from === "definition") {
     const first = occ.find((o) => o.store);
     if (!first) return source;
-    const after = (o: Occurrence) => o.stmt > first.stmt || (o.stmt === first.stmt && o.store);
-    for (const o of occ) if (after(o)) target.set(o, to);
-    else if (opts.before !== undefined) target.set(o, opts.before);
-    occ = occ.filter((o) => target.has(o));
+    const old = opts.before ?? name;
+    const reads = whichReads(occ, first);
+    if (!reads) return null;
+    for (const o of occ) target.set(o, reads.get(o) === "old" ? old : to);
+    // `x += 1` defining the new x: `xʹ2 = x; xʹ2 += 1` (at the top level only)
+    const aug = first.path.at(-1);
+    if (aug?.[0]._type === "AugAssign" && aug[1] === "target") {
+      const st = aug[0];
+      if (first.path.length !== 1 || st.col_offset !== 0) return null;
+      prefix = { line: st.lineno, text: `${to} = ${old}; ` };
+    }
+    occ = occ.filter((o) => target.get(o) !== name);
   } else for (const o of occ) target.set(o, to);
-  if (!occ.length) return source;
+  if (!occ.length && !prefix) return source;
   if (occ.some((o) => o.alias === null && target.get(o) !== name)) return null;
   const lines = source.split("\n");
   // positions in the original source: the same for Python; for Sage, the
@@ -213,6 +258,7 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     for (const [s, e, r] of reps) t = t.slice(0, s) + r + t.slice(e);
     lines[ln - 1] = t;
   }
+  if (prefix) lines[prefix.line - 1] = prefix.text + lines[prefix.line - 1];
   return lines.join("\n");
 }
 
@@ -263,6 +309,8 @@ export function renameRedefinitions(
       if (code === null) return null;
       if (code === c.code && mode === "sage") code = renameVar(c.code, name, to, current);
       if (code === null || code === c.code) return null;
+      // (Sage: var('x') also sets the global x, the first definition's: SR.var does not)
+      if (mode === "sage") code = code.replace(/(^|[^\w.\u02b9])var\((\s*)(['"])([^'"]*)\3/g, (all, pre, sp, q, names) => (names.split(/[\s,]+/).includes(name) ? `${pre}SR.var(${sp}${q}${names}${q}` : all));
       out.set(c.id, code);
       current = to;
     } else if (c.defines) {

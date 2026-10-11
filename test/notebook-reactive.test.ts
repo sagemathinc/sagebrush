@@ -260,3 +260,15 @@ test("an updater rerun automatically runs with its family (no change applied twi
   // x's change reaches the updater automatically: the definer of v reruns first
   assert.deepEqual((await nb.r.run(["c1"])).ran, ["c0", "c1", "c2", "c3"]);
 });
+
+test("a language change during a run waits for it (no crash)", async () => {
+  const nb = notebook(["x = 1", "print(x)"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  const run = nb.r.runAll();
+  const reset = nb.r.reset();
+  const rep = await run;
+  assert.deepEqual(rep.ran, ["c0", "c1"]);
+  await reset;
+  assert.deepEqual([...nb.r.stale].sort(), ["c0", "c1"]);
+});

@@ -178,8 +178,14 @@ class RandomState:
         return bytes(self.randint(0, 256, length).tolist())
 
 
-# (fresh entropy, as NumPy: in a reproducible notebook, its seeded stream)
-_global = RandomState()
+def _cell_seed():
+    # (the reactive notebook's per-cell seed: src/notebook-session.ts)
+    import builtins
+    return getattr(builtins, "__pyjs_seed__", None)
+
+
+# (fresh entropy, as NumPy; in a reactive notebook's cell, from the cell's seed)
+_global = RandomState(_cell_seed()[1] if _cell_seed() else None)
 seed = _global.seed
 get_state = _global.get_state
 set_state = _global.set_state
@@ -243,7 +249,13 @@ class Generator:
     methods reproduce NumPy's stream)."""
 
     def __init__(self, seed=None):
-        if seed is None:
+        if seed is None and _cell_seed():
+            # (a reactive notebook's cell: each default_rng() of the run its own
+            # stream, from the cell's seed)
+            s = _cell_seed()
+            s[2][0] += 1
+            seed = list(s[1]) + [s[2][0]]
+        elif seed is None:
             import os
             seed = int.from_bytes(os.urandom(16), "little")  # 128 bits, as NumPy's SeedSequence
         self._g = _r.pcg64(list(seed) if isinstance(seed, (list, tuple)) else int(seed))

@@ -150,9 +150,8 @@ export const replayEnv = {
   now: realPerfNow,
   /** the clock values read while the worker started (call once, when ready) */
   endStartup: (): ClockRecord => finish(),
-  /** a run starts: record its clock reads, replaying `clock` if given; `seed` (64 hex digits): its entropy from now on */
-  begin(clock?: number[], seed?: string) {
-    if (isSeed(seed)) useSeed(seed);
+  /** a run starts: record its clock reads, replaying `clock` if given */
+  begin(clock?: number[]) {
     recording = [];
     replaying = Array.isArray(clock) ? clock : null;
     replayPos = extra = 0;
