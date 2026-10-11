@@ -111,8 +111,11 @@ export class WorkerKernel {
       }
       if (m.done) {
         this.pending.delete(m.id);
+        // (Stop: it ended with the KeyboardInterrupt it was sent)
+        const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
-        p.done(m.ms, { error: !!m.error, ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}) });
+        else this.interrupted.delete(m.id);
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}) });
       }
     };
     w.onerror = (e) => this.emit("status", "error: " + (e.message || e));
@@ -125,7 +128,8 @@ export class WorkerKernel {
    * forget (global names to delete first: the reactive notebook), mangle
    * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
    * digits: the run's entropy, the reactive notebook's per-cell seeds)}
-   * The sink's done(ms, {error, files}) says whether the code raised, and
+   * The sink's done(ms, {error, interrupted, files}) says whether the code
+   * raised (interrupted: KeyboardInterrupt from interrupt()), and
    * which files it read and wrote ({reads, writes}: paths).
    */
   execute(code, opts, sink) {
