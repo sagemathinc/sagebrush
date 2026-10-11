@@ -32,6 +32,9 @@ interface Occurrence {
   // in a class body, a load that may read the class's attribute or the
   // global, depending on the run: it can only keep its name
   maybe?: true;
+  // the name of a def or class: the statement (what it evaluates before
+  // binding the name reads the previous value)
+  def?: any;
 }
 
 const BINDING_TYPES = new Set(["FunctionDef", "AsyncFunctionDef", "ClassDef"]);
@@ -158,7 +161,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
     walk(n.keywords, here, stmt, p("keywords"), outer);
     if (n.name === name && !here) {
       const d = defName(n);
-      if (d) out.push({ line: n.lineno, col: d[0], end: d[1], store: true, stmt, path });
+      if (d) out.push({ line: n.lineno, col: d[0], end: d[1], store: true, stmt, path, def: n });
     }
     if (declaresGlobal(n.body)) return walk(n.body, false, stmt, p("body"), outer);
     type State = boolean | "maybe";
@@ -317,13 +320,15 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
     switch (n._type) {
       case "Name": {
         if (n.id !== name) return;
-        const o: Occurrence = { line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type !== "Load", stmt, path };
+        // (`del x` acts on the binding there: a use, not a definition)
+        const o: Occurrence = { line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type === "Store", stmt, path };
         if (!shadowed) out.push(o);
         else if (shadowed !== true) {
           // (a class body's `x += 1` reads the global and binds the attribute:
           // not renamable)
           const aug = path.at(-1)?.[0]._type === "AugAssign" && path.at(-1)?.[1] === "target";
-          if (!o.store || aug) out.push({ ...o, store: false, ...(shadowed === "maybe" || aug ? { maybe: true as const } : {}) });
+          // (`del x` there deletes the class's x, never the global)
+          if (n.ctx?._type === "Load" || aug) out.push({ ...o, store: false, ...(shadowed === "maybe" || aug ? { maybe: true as const } : {}) });
         }
         return;
       }
@@ -335,7 +340,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         walk(n.returns, shadowed, stmt, under("returns"), fn);
         if (n._type !== "Lambda" && n.name === name && !shadowed) {
           const p = defName(n);
-          if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path });
+          if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path, def: n });
         }
         const body = n._type === "Lambda" ? [n.body] : n.body;
         const inner = fn || localsOf(body, params(n.args)).has(name);
@@ -423,6 +428,9 @@ function whichReads(occ: Occurrence[], first: Occurrence): Map<Occurrence, "old"
     if (o.stmt < first.stmt) { out.set(o, "old"); continue; }
     // the same statement
     const evaluatedFirst = o.path.some(([n, key]) =>
+      // (a class's decorators, bases and body, a def's decorators, defaults
+      // and annotations run before the name is bound; a def's body later)
+      (n === first.def && (n._type === "ClassDef" || key !== "body")) ||
       ((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value" && inside(first, n)) ||
       ((n._type === "For" || n._type === "AsyncFor") && key === "iter" && inside(first, n)) ||
       (n._type === "NamedExpr" && key === "value" && inside(first, n)) ||

@@ -29,6 +29,11 @@ class Block {
   globalNames = new Set<string>();
   // the kinds of the definitions of each name ("method" matters below)
   kinds = new Map<string, string[]>();
+  // (ours) visiting what is evaluated in the enclosing scope: a function's
+  // or lambda's signature, a class's header, a comprehension's first iterable
+  outside = false;
+  // (ours) a class's type parameters, seen from inside it (`class A[T]`)
+  typeParams = new Set<string>();
   constructor(public scope: Scope = Scope.Module) {}
 }
 
@@ -64,6 +69,12 @@ export interface CellAnalysis {
    * thing (ours: not an error)
    */
   imports?: Map<string, string>;
+  /**
+   * global names it leaves deleted without defining them: `except E as x`
+   * at its top level binds x and deletes it at the handler's end, wiping
+   * out another cell's x (ours: marimo counts x as local to the handler)
+   */
+  unbinds?: Set<string>;
 }
 
 const clone = (x: any): any =>
@@ -73,24 +84,52 @@ class Visitor {
   blocks: Block[] = [new Block()];
   obscured: (string | null)[] = [];
   refs = new Map<string, RefData[]>();
-  constructor(public id: string) {}
+  constructor(public id: string, public strict = false) {}
 
   mangle(name: string, ignoreScope = false): string {
     return isLocal(name) && (this.blocks.length === 1 || ignoreScope) ? `_${this.id}${name}` : name;
   }
   isDefined(name: string): boolean {
-    return this.blocks.some((b) => b.defs.has(name));
+    // (ours: a class's names are not seen from the bodies of the functions,
+    // lambdas, comprehensions and classes inside it, as in Python; marimo's
+    // visitor sees them)
+    if (this.strict) return this.blocks.some((b) => b.defs.has(name));
+    let skipClasses = false;
+    for (let i = this.blocks.length - 1; i >= 0; i--) {
+      const b = this.blocks[i];
+      if (b.defs.has(name) && !(skipClasses && b.scope === Scope.Class && !b.typeParams.has(name))) return true;
+      if (!b.outside && i > 0) skipClasses = true;
+    }
+    return false;
+  }
+  // visit `nodes` as evaluated in the scope around the innermost block
+  outside(nodes: unknown[]): void {
+    const b = this.blocks[this.blocks.length - 1];
+    const was = b.outside;
+    b.outside = true;
+    for (const n of nodes) {
+      if (Array.isArray(n)) for (const x of n) this.visit(x);
+      else this.visit(n);
+    }
+    b.outside = was;
   }
   addRef(name: string, deleted: boolean): void {
     let list = this.refs.get(name);
     if (!list) this.refs.set(name, (list = []));
-    const block = this.blocks[this.blocks.length - 1];
+    // (ours: what is evaluated outside a block, as a default, is a read of
+    // the block around it)
+    let i = this.blocks.length - 1;
+    while (!this.strict && i > 0 && this.blocks[i].outside) i--;
+    const block = this.blocks[i];
     const found = list.find((r) => r.block === block);
     if (found && deleted) found.deleted = true;
-    else if (!found) list.push({ deleted, block, parents: this.blocks.slice(0, -1) });
+    else if (!found) list.push({ deleted, block, parents: this.blocks.slice(0, i) });
   }
   removeRef(name: string, block: Block): void {
-    const list = (this.refs.get(name) ?? []).filter((r) => !r.parents.includes(block));
+    // (ours: only the reads that run later, from a function's body; a class
+    // body or a comprehension runs at once, before the definition)
+    const deferred = (r: RefData) => this.strict || [...r.parents.slice(r.parents.indexOf(block) + 1), r.block].some((b) => b.scope === Scope.Function);
+    const list = (this.refs.get(name) ?? []).filter((r) => !(r.parents.includes(block) && deferred(r)));
     if (list.length) this.refs.set(name, list);
     else this.refs.delete(name);
   }
@@ -101,7 +140,8 @@ class Visitor {
     if (!ks) block.kinds.set(name, (ks = []));
     ks.push(kind);
     // a name defined at the top after being captured (def f(): print(x) / x = 0)
-    if (kind !== "method" && (this.refs.get(name) ?? []).some((r) => r.parents.includes(block))) this.removeRef(name, block);
+    // (ours: not a class's names, which the scopes inside it do not see)
+    if (kind !== "method" && (this.strict || block.scope !== Scope.Class) && (this.refs.get(name) ?? []).some((r) => r.parents.includes(block))) this.removeRef(name, block);
   }
   define(name: string, kind: string): void {
     const idx = this.blocks[this.blocks.length - 1].globalNames.has(name) ? 0 : -1;
@@ -126,23 +166,35 @@ class Visitor {
   }
   genericVisit(node: Node): void {
     const t = node._type;
+    // (the same order as marimo's: what differs is only what isDefined sees)
     if (t === "ClassDef" || t === "Lambda") {
-      this.blocks.push(new Block(t === "ClassDef" ? Scope.Class : Scope.Function));
-      this.children(node);
+      const b = new Block(t === "ClassDef" ? Scope.Class : Scope.Function);
+      this.blocks.push(b);
+      for (const p of node.type_params ?? []) this.visit(p);
+      b.typeParams = new Set(b.defs);
+      for (const key of Object.keys(node)) {
+        if (key === "_type" || key === "type_params") continue;
+        if (key === "body") for (const x of Array.isArray(node.body) ? node.body : [node.body]) this.visit(x);
+        else this.outside([node[key]]);
+      }
       this.blocks.pop();
     } else if (t === "AsyncFunctionDef" || t === "FunctionDef") {
       this.blocks.push(new Block(Scope.Function));
       for (const p of node.type_params ?? []) this.visit(p);
-      this.children(node);
+      for (const key of Object.keys(node)) {
+        if (key === "_type") continue;
+        if (key === "body") for (const x of node.body) this.visit(x);
+        else this.outside([node[key]]);
+      }
       this.blocks.pop();
     } else if (t === "ListComp" || t === "SetComp" || t === "GeneratorExp") {
       this.blocks.push(new Block(Scope.Comprehension));
-      for (const g of node.generators) this.visit(g);
+      this.comprehensionGenerators(node.generators);
       this.visit(node.elt);
       this.blocks.pop();
     } else if (t === "DictComp") {
       this.blocks.push(new Block(Scope.Comprehension));
-      for (const g of node.generators) this.visit(g);
+      this.comprehensionGenerators(node.generators);
       this.visit(node.value);
       this.visit(node.key);
       this.blocks.pop();
@@ -208,12 +260,26 @@ class Visitor {
   }
   visit_AugAssign(node: Node): void {
     this.visit(node.value);
+    // (ours: `x += 1` reads x first, as Python does; marimo counts only the
+    // definition, so a cell redefining x this way would not depend on the
+    // cell it reads x from)
+    const t = node.target;
+    if (!this.strict && t._type === "Name" && !this.obscured.includes(t.id) && !isLocal(t.id) && !this.isDefined(t.id)) this.addRef(t.id, false);
     this.visit(node.target);
   }
   visit_AnnAssign(node: Node): void {
     if (node.value) this.visit(node.value);
     this.visit(node.annotation);
     this.visit(node.target);
+  }
+  // (the first iterable is evaluated outside)
+  comprehensionGenerators(gens: Node[]): void {
+    gens.forEach((g, i) => {
+      if (i) return this.visit(g);
+      this.outside([g.iter]);
+      this.visit(g.target);
+      for (const c of g.ifs) this.visit(c);
+    });
   }
   visit_comprehension(node: Node): void {
     this.visit(node.iter);
@@ -242,6 +308,10 @@ class Visitor {
       this.addRef(node.id, false);
     } else if (ctx === "Del" && !this.isDefined(node.id) && !isLocal(node.id)) {
       this.addRef(node.id, true);
+    } else if (!this.strict && ctx === "Del" && this.blocks[this.blocks.length - 1].scope === Scope.Class && !this.blocks[this.blocks.length - 1].outside) {
+      // (ours: in a class body, `del x` of the class's x: later reads of x
+      // are the global's again)
+      this.blocks[this.blocks.length - 1].defs.delete(node.id);
     } else if (isLocal(node.id)) {
       // a local resolves against the top-level block (marimo's mangling)
       const mangled = this.mangle(node.id, true);
@@ -329,7 +399,7 @@ class Visitor {
  * Magma cells after translation to Python, as they run.  In Sage, a top-level
  * `var('x y')` (or `function('f')`) defines its names, as running it does.
  */
-export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" } = {}): CellAnalysis {
+export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma"; strict?: boolean } = {}): CellAnalysis {
   // (marimo: some frontends send non-breaking spaces)
   source = source.replaceAll(" ", " ");
   // (IPython's obj? help lines, as the notebook runs them)
@@ -338,8 +408,11 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
   // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)
   else if (opts.mode === "magma") source = magmaToPython(source, "<cell>").replace(/^from _magma import \*\n/, "");
   const tree = parse(source, "exec") as Node;
+  const handlers = exceptNames(tree);
   const injected = opts.mode === "sage" ? sageInjected(tree) : [];
-  const v = new Visitor("cell_" + cellId);
+  // (strict: exactly marimo's analysis, without our corrections for Python's
+  // scoping: class scopes, defaults, `x += 1`, `del` in a class body)
+  const v = new Visitor("cell_" + cellId, !!opts.strict);
   v.visit(tree);
   const top = v.blocks[0];
   const defs = new Set([...top.defs].filter((n) => !isLocal(n)));
@@ -354,7 +427,29 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
     deleted: new Set([...v.refs].filter(([, rs]) => rs.some((r) => r.deleted)).map(([n]) => n)),
     mutations: new Set([...mutated(tree)].filter((n) => refs.has(n) && !defs.has(n))),
     imports: new Map([...v.imported].filter((e): e is [string, string] => e[1] !== null && defs.has(e[0]))),
+    unbinds: new Set([...handlers].filter((n) => !defs.has(n) && !isLocal(n))),
   };
+}
+
+// The names of `except E as x` handlers at a module's top level (through
+// compound statements, not into functions, classes, lambdas or comprehensions).
+function exceptNames(tree: Node): Set<string> {
+  const out = new Set<string>();
+  const scan = (n: any): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(scan);
+    switch (n._type) {
+      case "FunctionDef": case "AsyncFunctionDef": case "ClassDef": case "Lambda":
+      case "ListComp": case "SetComp": case "DictComp": case "GeneratorExp":
+        return;
+      case "ExceptHandler":
+        if (n.name) out.add(n.name);
+        break;
+    }
+    for (const k of Object.keys(n)) if (k !== "_type") scan(n[k]);
+  };
+  scan(tree.body);
+  return out;
 }
 
 // Methods that change their object in place (lists, dicts, sets, bytearrays,

@@ -75,6 +75,8 @@ export class NotebookGraph {
   readonly definers = new Map<string, string[]>();
   /** each name's updaters: the cells mutating its object, in page order (not when strict) */
   readonly updatersOf = new Map<string, string[]>();
+  /** each name's deleters: the cells deleting it (`del x`), in page order */
+  readonly deletersOf = new Map<string, string[]>();
   private files = new Map<string, { reads: string[]; writes: string[] }>();
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
@@ -134,7 +136,8 @@ export class NotebookGraph {
     this.errorsOf = new Map();
     this.definers.clear();
     const readers = new Map<string, string[]>();
-    const deleters = new Map<string, string[]>();
+    const deleters = this.deletersOf;
+    deleters.clear();
     const push = (m: Map<string, string[]>, k: string, v: string) => {
       const l = m.get(k);
       if (l) l.push(v);
@@ -147,6 +150,7 @@ export class NotebookGraph {
       for (const n of a.defs) push(this.definers, n, id);
       for (const n of a.refs) push(readers, n, id);
       for (const n of a.deleted) push(deleters, n, id);
+      if (!this.strict) for (const n of a.unbinds ?? []) push(deleters, n, id);
     }
     const edge = (p: string, c: string) => {
       if (p === c) return;
@@ -165,8 +169,10 @@ export class NotebookGraph {
       }
       for (const r of rs ?? []) for (const d of ds) edge(d, r);
     }
-    // a cell deleting a name runs after the others reading it
+    // a cell deleting a name runs after the others reading it (and, ours,
+    // after the cell defining it: there is nothing to delete before)
     for (const [name, xs] of deleters) for (const r of readers.get(name) ?? []) for (const x of xs) edge(r, x);
+    if (!this.strict) for (const [name, xs] of deleters) for (const d of this.definers.get(name) ?? []) for (const x of xs) edge(d, x);
     // Mutation tracking (ours, unless strict): the cells mutating a name's
     // object (its updaters) run after its definer, in page order, and before
     // the cells reading it.

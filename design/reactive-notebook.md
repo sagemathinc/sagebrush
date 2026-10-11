@@ -471,3 +471,67 @@ Third-party widget JavaScript would run in the page (or need a sandboxed
 iframe and a message bridge): "fighting XSS sucks and pulling in JS so
 explicitly feels like a leaky abstraction". Widgets are Sagebrush's own
 (ipywidgets subset, @interact, marimo's mo.ui), drawn by the page.
+
+## Differential fuzzing (October 11)
+
+William: "YES. I love fuzzing." `node dist/test/fuzz-reactive.js --seed N
+--cases N --steps N` (test/fuzz-lib.ts, test/fuzz_kernel.py) generates
+random notebooks weighted toward scoping (redefinitions, `+=`, walrus,
+`global`, `del`, `except ... as`, class bodies with compound statements,
+lambdas, comprehensions and method defaults), runs them through the real
+scheduler and renamer in CPython, then applies random edits, inserts,
+deletes and moves. After every step, every cell the scheduler shows as
+computed must print what a fresh top-to-bottom run of the notebook prints
+(the cells shown with an error, a refused rename, left out). Failures are
+shrunk to a few cells. The generator keeps to what the rules promise to
+match plain Python: no shared mutable objects, randomness, files, run-time
+conditional definitions, or functions called from other cells reading
+redefined names (they read their own cell's definition, by design).
+
+Found and fixed on the first day (each a case in
+test/fuzz-reactive.test.ts, which also runs 150 random notebooks in
+npm test, and fails on the code before the fix):
+
+1. `y = 7` then `y += 4` in the next cell: marimo's analysis does not
+   count `+=` as a read, so nothing was renamed and the second cell
+   deleted the first one's `y` before running. `x += 1` is now a read
+   (as in Python), and a name defined by several cells is renamed when a
+   later definition reads the previous one.
+2. A class's body, bases and decorators, and a def's defaults, read the
+   previous value of the class's or function's own name (they run before
+   it is bound); the renamer read them as the new one.
+3. `del y` was taken as a definition by the renamer (`del yʹ2`).
+4. A cell that deleted a name, edited to read it, or a reader inserted
+   above the deletion, found it gone: reading or deleting a deleted name
+   now reruns its definer (like an updater's family), and removing or
+   editing away a `del` reruns the definer.
+5. `except E as x` at the top level deletes the global `x` (Python does
+   at the handler's end): now counted as deleting it (`unbinds`).
+6. A move that made a cycle left the cells on it showing their old
+   outputs: a cell whose renamed code changed no longer counts as a cell
+   that worked before, so it shows the cycle.
+7. marimo's analysis lets the functions, lambdas and comprehensions inside
+   a class see the class's names (Python does not), resolves a method's
+   defaults inside the method, removes references "captured" by a later
+   class attribute, and keeps a class attribute defined after `del`. Fixed
+   in our analysis; `analyzeCell(..., { strict: true })` is still exactly
+   marimo's (both marimo oracles pass strict; 8 oracle cells differ when
+   not strict, listed in test/dataflow.test.ts).
+8. A cell that got an error kept the effect of its last run (a deletion, an
+   in-place change): now undone as for a removed cell.
+9. marimo's rule that a later definition "captures" earlier reads of a name
+   in nested scopes (`def f(): return x` then `x = 0`) also dropped reads
+   that run at once, in a class body or a comprehension: now only reads
+   from a function's body are dropped.
+10. Before a cell ran, every name it defined was deleted, including one
+    another cell also defines when it was not renamed (no other cell reads
+    it): a cell reading the previous value (in a lambda it calls at once)
+    found it gone. Names another valid cell defines are kept, as the
+    planning step already did (#1477).
+
+After the fixes, with no difference from plain Python: 20,000 notebooks
+from seed 10,001 with 8 random steps each (177,893 checks, 778,319 cell
+outputs compared) and 15,000 from seed 50,001 with 12 steps (192,377
+checks, 840,451 outputs). About 3% of the cells checked are shown with an
+error instead: a refused rename, mostly in class bodies whose reads depend
+on how the body runs, or a cycle made by a move.

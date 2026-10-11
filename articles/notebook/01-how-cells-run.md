@@ -23,8 +23,13 @@ The notebook reads each cell's code (without running it) and finds:
   assigns `a`.
 - **The names it reads**: names it uses that it has not defined above that
   use in the same cell. Builtins such as `print` are read too, but no cell
-  defines them, so they connect nothing.
-- **The names it deletes** (`del x` of a name another cell defines).
+  defines them, so they connect nothing. `x += 1` reads `x` before
+  defining it, and so does what is evaluated before a definition takes
+  effect: a function's default values, a class's body, a comprehension's
+  first iterable.
+- **The names it deletes** (`del x` of a name another cell defines). A
+  top-level `except E as x` counts too: Python deletes `x` at the end of
+  the handler.
 - **The objects it changes in place**: `v[0] = 1`, `z.x = 2`, `del v[0]`,
   augmented assignment to those, `v.append(...)` and other in-place methods
   (`extend`, `sort`, `update`, `add`, ...), `random.shuffle(v)` and
@@ -33,6 +38,8 @@ The notebook reads each cell's code (without running it) and finds:
 
 Names local to a function, a lambda, a class body or a comprehension are not
 the notebook's. A cell that defines a function which reads `x` reads `x`.
+As in Python, the functions, lambdas and comprehensions inside a class do
+not see the class's own names: `x` there is the notebook's.
 
 **Names starting with one underscore are private to their cell.** `_t`,
 `_i` or `_tmp` in two cells are two different variables, and no other cell
@@ -138,12 +145,19 @@ There is one interpreter per notebook (the console has its own).
 
 - **Before a cell runs, the names it defined last time are deleted**, and
   so are its private `_` names. A definition you removed from a cell is
-  gone once the cell runs.
+  gone once the cell runs. (A name that another cell also defines, and no
+  cell reads, is kept: it holds whichever cell set it last.)
 - **An updater runs with its family.** Running a cell that changes `v` in
   place reruns the cell defining `v` first, then every updater of `v` in
   page order, then the cells reading `v`. A change is never applied twice.
   Deleting an updater, or editing it so that it no longer changes `v`,
   reruns the family the same way.
+- **So does a deleted name.** Once a cell has run `del v`, `v` is gone:
+  running a cell that reads or deletes `v` reruns the cell defining `v`
+  first (and the deleting cell after the readers). Deleting the `del`, or
+  editing it away, reruns the definer, so `v` is back. A cell that gets an
+  error (a cycle, say) is out of the computation the same way: what it
+  changed in place or deleted is undone.
 - **Random numbers are the same on every run of a cell.** Each cell's
   random seed is derived from the notebook's seed (kept in the notebook)
   and the cell's id: Python's `random`, `numpy.random` (including
@@ -223,6 +237,8 @@ What the notebook cannot see from the code:
 | | marimo | Sagebrush |
 |---|---|---|
 | A name defined in several cells | an error | each cell reads the nearest definition above |
+| `x += 1` | defines `x` | reads `x`, then defines it |
+| A class's names, inside its methods, lambdas and comprehensions | seen | not seen, as in Python |
 | The same import in several cells | an error | one definition |
 | Changing an object from another cell (`v.append`) | not tracked | the cell is an updater: it runs with the definer, before the readers |
 | Files | `mo.watch.file` | tracked automatically |

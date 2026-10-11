@@ -91,6 +91,12 @@ export interface ReactiveHost {
 export const SCOPE_SEP = "\u02b9";
 /** A name as written (without page-order scoping's suffix). */
 export const written = (name: string) => name.replace(/\u02b9\d+$/, "");
+// How many spellings of `name` (x, xʹ2, xʹ3, ...) appear in code as whole
+// words (strings and attributes too: an overcount only keeps a rename).
+function spellings(code: string, name: string): number {
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_\u02b9])${name}(\u02b9\\d+)?(?![\\p{L}\\p{N}_\u02b9])`, "gu");
+  return new Set([...code.matchAll(re)].map((m) => m[0])).size;
+}
 
 export interface RunReport {
   /** the cells that ran, in order */
@@ -313,16 +319,25 @@ export class Reactive {
       for (const n of a.refs) readers.add(n);
       for (const n of [...a.defs, ...a.refs]) taken.add(n);
     }
+    // (`unread`: defined by several cells but read by none, as the analysis
+    // says; still renamed if a later definition reads the one before it,
+    // as `x += 1` does, which marimo's analysis does not count as a read)
+    const unread = new Set<string>();
     const conflicts = [...definers].filter(([n, ds]) => {
-      if (ds.length < 2 || !readers.has(n)) return false;
+      if (ds.length < 2) return false;
       const what = ds.map((d) => an.get(d)!.imports?.get(n));
-      return !(what[0] !== undefined && what.every((w) => w === what[0]));
+      if (what[0] !== undefined && what.every((w) => w === what[0])) return false;
+      if (!readers.has(n)) unread.add(n);
+      return true;
     }).map(([n]) => n).sort();
     const scoped = new Map<string, string>();
     for (const name of conflicts) {
       const cells = [...sources.keys()].map((id) => ({ id, code: eff.get(id)!, defines: !!an.get(id)?.defs.has(name), reads: !!an.get(id)?.refs.has(name) }));
       const r = await this.host.rename({ name, cells, taken: [...taken] });
       if (!r) continue;
+      // (kept only if a renamed definition reads an earlier one: its code
+      // has two of the name's spellings, x and xʹ2, or xʹ2 and xʹ3)
+      if (unread.has(name) && !r.some(([, code]) => spellings(code, name) > 1)) continue;
       for (const [id, code] of r) {
         eff.set(id, code);
       }
@@ -360,7 +375,7 @@ export class Reactive {
     const oldChildren = new Set<string>();
     const forgetNow = new Set<string>();
     const changed = new Set<string>();
-    // the names whose objects changed or deleted cells mutated
+    // the names whose objects changed or deleted cells mutated, or deleted
     const oldMutations = new Set<string>();
     // cells deleted elsewhere (no longer on the page) go as removed ones do
     for (const id of this.registered.keys()) if (!present.has(id) && !remove.includes(id)) remove = [...remove, id];
@@ -383,7 +398,7 @@ export class Reactive {
       if (!prev || prev.code === eff.get(id)) continue;
       changed.add(id);
       for (const c of this.graph.children(id)) oldChildren.add(c);
-      for (const n of prev.analysis?.mutations ?? []) oldMutations.add(n);
+      for (const n of [...(prev.analysis?.mutations ?? []), ...(prev.analysis?.deleted ?? []), ...(prev.analysis?.unbinds ?? [])]) oldMutations.add(n);
       // its old names go (unless it had an error, and so never ran this code)
       if (!this.errors.has(id)) for (const n of this.defsOf(id)) forgetNow.add(n);
     }
@@ -391,7 +406,7 @@ export class Reactive {
       if (!this.registered.has(id)) continue;
       changed.add(id);
       for (const c of this.graph.children(id)) oldChildren.add(c);
-      for (const n of this.registered.get(id)!.analysis?.mutations ?? []) oldMutations.add(n);
+      for (const n of [...(this.registered.get(id)!.analysis?.mutations ?? []), ...(this.registered.get(id)!.analysis?.deleted ?? []), ...(this.registered.get(id)!.analysis?.unbinds ?? [])]) oldMutations.add(n);
       if (!this.errors.has(id)) for (const n of this.defsOf(id)) forgetNow.add(n);
       this.registered.delete(id);
       this.stale.delete(id);
@@ -403,16 +418,18 @@ export class Reactive {
     await this.registerAll(sources, cells.filter((c) => present.has(c.id)), eff);
     const inGraph = new Set(this.graph.ids);
 
-    // errors: kept on previously valid cells only downstream of a submitted one
+    // errors: kept on previously valid cells only downstream of a submitted
+    // one, or of one whose code to run changed (page-order scoping: it no
+    // longer is the cell that worked)
     const submitted = new Set(ids);
-    const downstream = this.graph.closure(submitted);
+    const downstream = this.graph.closure([...submitted, ...rescoped]);
     const errors = new Map<string, CellError[]>();
     const keepAlive = new Set<string>();
     for (let [id, es] of this.graph.errors) {
       // reading a name another cell made ambiguous is an error only for a cell just run
       if (!submitted.has(id) && !errorsBefore.has(id)) es = es.filter((e) => !(e.kind === "multiple-definition" && e.reading));
       if (!es.length) continue;
-      const previouslyValid = before.has(id) && !submitted.has(id) && !errorsBefore.has(id);
+      const previouslyValid = before.has(id) && !submitted.has(id) && !rescoped.has(id) && !errorsBefore.has(id);
       if (previouslyValid && !downstream.has(id)) {
         for (const n of this.defsOf(id)) keepAlive.add(n);
         continue;
@@ -433,6 +450,12 @@ export class Reactive {
 
     const noLongerErrors = [...errorsBefore].filter((id) => !errors.has(id) && inGraph.has(id));
     const transitioned = [...errors.keys()].filter((id) => !errorsBefore.has(id) && before.has(id));
+    // (a cell now with an error is out of the computation: what it changed
+    // in place or deleted when it last ran is undone, as for a removed one)
+    for (const id of transitioned) {
+      const a = this.registered.get(id)?.analysis;
+      for (const n of [...(a?.mutations ?? []), ...(a?.deleted ?? []), ...(a?.unbinds ?? [])]) oldMutations.add(n);
+    }
     const roots = new Set(ids.filter((id) => !errors.has(id)));
     const auto = new Set<string>([...oldChildren, ...noLongerErrors, ...rescoped]);
     for (const id of transitioned) for (const c of this.graph.children(id)) if (!errors.has(c)) auto.add(c);
@@ -537,7 +560,10 @@ export class Reactive {
       if (!reg) continue; // (gone meanwhile)
       this.host.status(id, { state: "running" });
       const names = [...this.scoped].filter(([n]) => reg.code.includes(n));
-      const r = await this.host.execute(id, reg.code, this.defsOf(id), Object.fromEntries(names));
+      // (its names are deleted first, but not those another cell defines too,
+      // unrenamed (#1477): their value is that cell's until this one sets it)
+      const forget = this.defsOf(id).filter((n) => !(this.graph.definers.get(n) ?? []).some((d) => d !== id && !this.errors.has(d)));
+      const r = await this.host.execute(id, reg.code, forget, Object.fromEntries(names));
       ran.push(id);
       this.stale.delete(id);
       // files: what it read and wrote this time; a file it wrote, read by
@@ -589,13 +615,17 @@ export class Reactive {
   // Mutation tracking: an updater in a run runs with its family, however it
   // got there (run, rerun automatically, a file, a widget): the definer of
   // what it changes, every updater of it, and what depends on them, so that
-  // no change is applied twice.  Added cells are automatic ones.
+  // no change is applied twice.  So does a cell reading or deleting a name
+  // that a cell deletes: the name is gone until its definer runs again.
+  // Added cells are automatic ones.
   private withFamilies(required: Set<string>, optional: string[]): string[] {
     const inRun = new Set([...required, ...optional]);
     for (let grew = true; grew; ) {
       grew = false;
       for (const id of [...inRun]) {
-        for (const n of this.registered.get(id)?.analysis?.mutations ?? []) {
+        const a = this.registered.get(id)?.analysis;
+        const deleted = [...(a?.refs ?? []), ...(a?.deleted ?? []), ...(a?.unbinds ?? [])].filter((n) => (this.graph.deletersOf.get(n) ?? []).some((x) => !this.errors.has(x)));
+        for (const n of [...(a?.mutations ?? []), ...deleted]) {
           const ds = (this.graph.definers.get(n) ?? []).filter((d) => !this.errors.has(d));
           if (ds.length !== 1) continue;
           for (const f of this.graph.closure([ds[0], ...(this.graph.updatersOf.get(n) ?? [])])) {
