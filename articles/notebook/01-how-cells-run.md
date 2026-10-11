@@ -145,9 +145,11 @@ There is one interpreter per notebook (the console has its own).
   random seed is derived from the notebook's seed (kept in the notebook)
   and the cell's id: Python's `random`, `numpy.random` (including
   `default_rng()` without a seed) and Sage's random functions give the same
-  values however often, and in whatever order, the cell runs.
-  `os.urandom` and `secrets` are truly random: a key made in a notebook
-  cannot be reproduced from it.
+  values however often, and in whatever order, the cell runs (so do
+  generators made or reseeded without a seed: `random.Random()`,
+  `np.random.RandomState()`, `random.seed()`). `os.urandom` is truly
+  random: a key made from it in a notebook cannot be reproduced from the
+  notebook.
 - **Files**: a cell that writes a file runs before the cells that read it
   (section 2), and they run again when it does. A file uploaded in the
   Files panel reruns the cells that read it.
