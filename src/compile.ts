@@ -62,8 +62,9 @@ function syntaxError(e: PySyntaxError): any {
 // them), for bundled builds: their build id names the compiler, so a new
 // build never reads an older build's output.  --sage imports most of the
 // library, and compiling its 2.9 MB of Python took about 1.5 s at every start.
-// Best effort: an unwritable or sandboxed home just compiles as before.
-const BUILD_ID: string | undefined = (globalThis as any).__SAGEBRUSH_BUILD_ID__;
+// Best effort: an unwritable or sandboxed home just compiles as before.  Node
+// only: the browser worker bundles the same build id but has no disk.
+const BUILD_ID: string | undefined = process.versions?.node ? (globalThis as any).__SAGEBRUSH_BUILD_ID__ : undefined;
 let cacheRoot: string | null | undefined;
 function compileCacheDir(): string | null {
   if (cacheRoot !== undefined) return cacheRoot;
