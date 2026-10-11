@@ -10,6 +10,27 @@
 
 const STOPPED = "\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n";
 
+// A fast 53-bit hash of a run's output messages (cyrb53, fed incrementally),
+// for TimeTravel replay to check that a replayed run printed the same.
+function hashInit() { return [0xdeadbeef, 0x41c6ce57]; }
+function hashAdd(h, s) {
+  let [h1, h2] = h;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h[0] = h1; h[1] = h2;
+}
+function hashEnd(h) {
+  let [h1, h2] = h;
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+// (a display bundle with its keys in order)
+const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
+
 export class WorkerKernel {
   /**
    * @param {object} o
@@ -32,7 +53,12 @@ export class WorkerKernel {
     // clear(), done(ms), stopped(message), skipped()} for running code, or
     // {reply(message)} for a question
     this.pending = new Map();
-    this.listeners = { status: [], restart: [], ready: [] };
+    this.listeners = { status: [], restart: [], ready: [], run: [], execute: [] };
+    // TimeTravel's journal: id -> what a run is ({kind, code, ...}), its
+    // output hash and timing; reported by the "run" event when it is done
+    this.runs = new Map();
+    this.interrupted = new Set();
+    this.readyInfo = null; // the worker's ready message (seeded, startup clock)
     // where output addressed to an @interact goes (set by the notebook)
     this.targetSink = () => null;
   }
@@ -51,6 +77,7 @@ export class WorkerKernel {
       const m = ev.data;
       if (this.onMessage?.(m)) return;
       if (m.ready) {
+        this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
         this.ready = true;
@@ -61,7 +88,16 @@ export class WorkerKernel {
       const p = this.pending.get(m.id);
       if (!p) return;
       if (p.reply) { this.pending.delete(m.id); return p.reply(m); }
-      if (m.skipped) { this.pending.delete(m.id); return p.skipped ? p.skipped() : p.stopped(""); }
+      if (m.skipped) { this.pending.delete(m.id); this.runs.delete(m.id); return p.skipped ? p.skipped() : p.stopped(""); }
+      const r = this.runs.get(m.id);
+      if (r) {
+        if (m.start) r.t = Date.now(), r.t0 = performance.now();
+        const at = m.target != null ? "@" + m.target : "";
+        if (m.stream) hashAdd(r.h, `${at}${m.stream}:${m.text}`);
+        if (m.display) hashAdd(r.h, `${at}display:${canon(m.display)}`);
+        if (m.interact) hashAdd(r.h, `${at}interact:${canon(m.interact)}`);
+        if (m.clear) hashAdd(r.h, `${at}clear`);
+      }
       if (m.start) p.start?.();
       // output of an @interact's function goes to that interact's area
       const dest = m.target != null ? this.targetSink(m.target) : p;
@@ -71,16 +107,45 @@ export class WorkerKernel {
         if (m.interact) dest.interact(m.interact);
         if (m.clear) dest.clear();
       }
-      if (m.done) { this.pending.delete(m.id); p.done(m.ms); }
+      if (m.done) {
+        this.pending.delete(m.id);
+        if (r) this.finishRun(m, r);
+        p.done(m.ms);
+      }
     };
     w.onerror = (e) => this.emit("status", "error: " + (e.message || e));
   }
 
-  /** Run code; `sink` receives what happens to it.  opts: {mode: "python"|"sage"|"magma", repl} */
+  /**
+   * Run code; `sink` receives what happens to it.
+   * opts: {mode: "python"|"sage"|"magma", repl, cell (the notebook cell's id,
+   * for the journal), clock (TimeTravel replay: the clock values to replay)}
+   */
   execute(code, opts, sink) {
     const id = this.nextId++;
     this.pending.set(id, sink);
-    this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", ...(opts.repl ? { repl: true } : {}) });
+    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}) };
+    this.track(id, run);
+    this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}) });
+  }
+
+  // The journal (TimeTravel): "execute" as a run is asked for (the page
+  // saves the document's version then), "run" when it is done.
+  track(id, run) {
+    const r = { ...run, gen: this.generation, h: hashInit(), t: 0, t0: 0 };
+    this.runs.set(id, r);
+    this.emit("execute", r);
+  }
+  finishRun(m, r) {
+    this.runs.delete(m.id);
+    const rec = { ...r, ms: r.t0 ? performance.now() - r.t0 : m.ms, out: hashEnd(r.h) };
+    delete rec.h; delete rec.t0;
+    if (m.clock?.length) rec.clock = m.clock;
+    if (m.overflow) rec.overflow = true;
+    if (m.extra) rec.extra = m.extra;
+    if (m.unused) rec.unused = m.unused;
+    if (this.interrupted.delete(m.id)) rec.status = "interrupted";
+    this.emit("run", rec);
   }
 
   /** Ask the interpreter a question ({complete: text} or {check: source}); resolves to its reply, or `fallback` if it restarts. */
@@ -92,11 +157,12 @@ export class WorkerKernel {
     });
   }
 
-  /** Rerun an @interact's function with new values. */
-  interact(iid, values, sink) {
+  /** Rerun an @interact's function with new values (opts.clock: TimeTravel replay). */
+  interact(iid, values, sink, opts = {}) {
     const id = this.nextId++;
     this.pending.set(id, sink);
-    this.worker.postMessage({ id, interact: iid, values });
+    this.track(id, { kind: "interact", iid, values });
+    this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) });
   }
 
   /** Send the worker anything else (files). */
@@ -110,6 +176,7 @@ export class WorkerKernel {
   interrupt(message = STOPPED) {
     if ((!this.interruptFlag && !this.worker.interrupt) || this.pending.size === 0) return this.restart(message);
     const waiting = [...this.pending.keys()];
+    for (const id of waiting) if (this.runs.has(id)) this.interrupted.add(id); // (the journal: not exactly replayable)
     if (this.interruptFlag) {
       Atomics.store(this.interruptFlag, 1, this.nextId - 1);
       Atomics.store(this.interruptFlag, 0, 1);
@@ -125,6 +192,8 @@ export class WorkerKernel {
     this.worker?.terminate();
     const pending = [...this.pending.values()];
     this.pending.clear();
+    this.runs.clear();
+    this.interrupted.clear();
     for (const p of pending) p.stopped(message);
     this.start();
     this.emit("restart");

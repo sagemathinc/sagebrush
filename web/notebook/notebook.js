@@ -580,7 +580,7 @@ export function createNotebook(root, opts = {}) {
     cell.n.textContent = "[*]";
     cell.runb.textContent = "■";
     let failed = false;
-    return new Promise((resolve) => kernel.execute(cell.ta.value, { mode }, {
+    return new Promise((resolve) => kernel.execute(cell.ta.value, { mode, cell: cell.id }, {
       start() {
         cell.el.classList.replace("queued", "running");
         const t0 = performance.now();
@@ -1453,6 +1453,8 @@ export function createNotebook(root, opts = {}) {
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
     load, snapshot, applyRemote, replace, flush,
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
+    /** The next run's prompt number less one (after TimeTravel replayed runs). */
+    setExecCount(k) { execCount = k; },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */
     async attach(s) {
       unsubscribe?.();

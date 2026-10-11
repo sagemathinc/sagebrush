@@ -88,3 +88,29 @@ With both adapters the same component is all of these:
 - **Reading:** `.versions()` lists them, and `.docAt(time)` rebuilds the document at a version. `.patches()` returns the patches for sending elsewhere, such as CoCalc.
 - **Storage:** `IdbPatchStore(db, id)` ([stores.js](stores.js)) keeps the patches in IndexedDB and passes them to other tabs.
 - **Reverting:** the full page's TimeTravel panel shows any version read-only and reverts with `notebook.replace(doc)`.
+
+### Resume from here: the session at any version
+
+The history also keeps an **execution journal**, so TimeTravel can recreate the live session (the variables, not just the text) as it was at a version. The design and its measurements are in [design/timetravel-replay.md](../../design/timetravel-replay.md).
+
+- **What is journaled** (records in the same history, in patches that are not versions):
+  - each interpreter session: its id and the seed of its entropy;
+  - each run of a cell, of the console, or of an `@interact`: which code ran (a cell's input at the version when the run was asked for, so a cell edited afterwards still replays as it ran), how long it took, a hash of its output, and the clock values it read;
+  - the files the session read: their SHA-256 only. The bytes are kept in this browser (IndexedDB `sagebrush-blobs`).
+- **Determinism** comes from the worker ([web/replay-env.ts](../replay-env.ts)):
+  - its entropy (`random`, numpy's generators, `os.urandom`) is a ChaCha20 stream from the session's seed;
+  - the clock is real, and each run's reads are recorded and given back to the replay.
+  - The page's **Reproducible randomness** switch (per notebook, on by default) turns the seed off. Anyone with a history can reproduce its random values.
+- **Resume from here** (on the TimeTravel panel; marks under the slider show the versions where code ran):
+  - It opens a new tab with a new notebook: the version, and the history up to it.
+  - There it replays the runs of the session that was running then, which were asked for at that version or before. Each output is shown in its cell.
+  - The estimate is the session's start plus the runs' recorded times.
+  - Each replayed run is checked against the journal. The status line says the session is identical, or which run differs and how.
+  - Python's writes to files during a replay do not go to the browser's files.
+- **What cannot be resumed** says why:
+  - a run that was interrupted;
+  - an interpreter outside the browser (`sagebrush notebook`);
+  - a session that also ran another notebook's code (one tab's interpreter is shared by the notebooks opened in it);
+  - a history cleared while the interpreter ran.
+- **The kernel's side:** `WorkerKernel` reports `execute` (a run is asked for) and `run` (it finished: `{kind, code | iid, values, ms, out, clock, ...}`) events. `execute(code, {mode, cell, clock})` replays a run's clock.
+- **Tests:** [web/test-replay.mjs](../test-replay.mjs) records a session in headless Chromium (random numbers, the clock, numpy, `os.urandom`, a file, an `@interact`, the console) and resumes it in a new tab. It also checks that a replay whose output differs says where.

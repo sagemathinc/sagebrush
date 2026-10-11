@@ -44,7 +44,7 @@ export class MemoryStore {
 
 // IndexedDB "sagebrush": object stores "notebooks" (by id) and "files" (by
 // path); "sagebrush-history": "history" (TimeTravel's patches, by [notebook
-// id, patch id]).  They are opened at whatever version they have, never
+// id, patch id]); "sagebrush-blobs" (below).  They are opened at whatever version they have, never
 // upgraded: an upgrade waits until every page holding the database closes,
 // and a page of an older version of the site (another tab, the installed
 // app) would hold it.  New stores go in new databases.  A page lets go of a
@@ -69,6 +69,33 @@ function open(name, stores, onVersionChange) {
 }
 export const openDb = (name = "sagebrush", { onVersionChange } = {}) => open(name, { notebooks: { keyPath: "id" }, files: null }, onVersionChange);
 export const openHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-history", { history: { keyPath: ["nb", "time"] } }, onVersionChange);
+// "sagebrush-blobs": "blobs", file contents by their hash.  TimeTravel's
+// journal keeps only the hashes of the files a session read; replay and the
+// portable bundle find the bytes here.
+export const openBlobDb = ({ onVersionChange } = {}) => open("sagebrush-blobs", { blobs: null }, onVersionChange);
+
+/** The SHA-256 of bytes, in hex (a 53-bit hash, "c53:...", where there is no crypto.subtle: not a secure context). */
+export async function bytesHash(data) {
+  if (globalThis.crypto?.subtle) {
+    const d = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+    return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  let h1 = 0xdeadbeef ^ data.length, h2 = 0x41c6ce57 ^ data.length;
+  for (let i = 0; i < data.length; i++) { h1 = Math.imul(h1 ^ data[i], 2654435761); h2 = Math.imul(h2 ^ data[i], 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return "c53:" + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+/** Keep bytes by their hash; resolves to the hash. */
+export async function putBlob(db, data) {
+  const hash = await bytesHash(data);
+  if (db) {
+    const have = await idb(db, "blobs", "readonly", (st) => st.getKey(hash)).catch(() => undefined);
+    if (have === undefined) await idb(db, "blobs", "readwrite", (st) => st.put(data, hash)).catch((e) => console.warn("blobs:", e));
+  }
+  return hash;
+}
+export const getBlob = (db, hash) => idb(db, "blobs", "readonly", (st) => st.get(hash)).catch(() => undefined);
 export function idb(db, store, mode, f) {
   return new Promise((resolve, reject) => {
     if (!db) return resolve(undefined);

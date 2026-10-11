@@ -3,7 +3,7 @@
 // notebook` runs it in a Node worker thread behind a local server
 // (src/notebook.ts).  The protocol:
 //
-// In:  {id, code, sage?, magma?, repl?}  run code (`sage`: Sage mode, with
+// In:  {id, code, sage?, magma?, repl?, clock?}  run code (`sage`: Sage mode, with
 //                                 sage_all imported; `magma`: Magma, translated
 //                                 to Python; `repl`: display every expression
 //                                 statement, as at a prompt, not just the last)
@@ -16,6 +16,9 @@
 //      {id, target, interact: spec}           controls to draw
 //      {id, target, clear: true}              clear_output()
 //      then {id, done, ms} (or {id, skipped} for a run queued before an interrupt).
+// With RunHooks (the browser worker, for TimeTravel replay): a run's `clock`
+// is the clock values to replay, and `done` also has the run's clock record
+// (web/replay-env.ts ClockRecord).
 // `target` is null for the cell's own output, or the id of the @interact
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir } from "./compile";
@@ -26,11 +29,20 @@ export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
   write(fd: number, text: string): void;
   handle(m: any): Promise<void>;
+  // the interpreter is initialized
+  ready: Promise<unknown>;
+}
+
+// Around each run (TimeTravel replay, web/replay-env.ts): begin(m) as it
+// starts, and end()'s fields are added to its {id, done} message.
+export interface RunHooks {
+  begin(m: any): void;
+  end(): Record<string, unknown>;
 }
 
 // post: sends a message to the page.  captureStreams: replace sys.stdout and
 // sys.stderr's writers (the browser's fs shim captures them instead).
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void } = {}): Session {
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
@@ -147,6 +159,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     target = null;
     post({ id, start: true });
     const t0 = performance.now();
+    opts.runs?.begin(m);
     if (m.interact !== undefined) {
       run(`import _interact\n_interact._update(${Number(m.interact)}, ${JSON.stringify(JSON.stringify(m.values))})\n`, host, "exec", "<interact>");
     } else {
@@ -173,9 +186,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     }
     flush();
     target = null;
-    post({ id, done: true, ms: performance.now() - t0 });
+    const more = opts.runs?.end() ?? {};
+    post({ id, done: true, ms: performance.now() - t0, ...more });
     current = null;
   }
 
-  return { write, handle };
+  return { write, handle, ready };
 }

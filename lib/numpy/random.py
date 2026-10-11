@@ -58,8 +58,10 @@ class RandomState:
 
     def seed(self, seed=None):
         if seed is None:
-            import time
-            seed = int(time.time() * 1e6) & 0xFFFFFFFF
+            # fresh entropy, as NumPy (os.urandom: the session's seeded
+            # stream in a reproducible notebook, design/timetravel-replay.md)
+            import os
+            seed = [int.from_bytes(os.urandom(4), "little") for _ in range(8)]
         if isinstance(seed, (list, tuple, _np.ndarray)):
             self._g = _r.mt19937([int(s) for s in _np.asarray(seed).ravel().tolist()])
         else:
@@ -241,8 +243,8 @@ class Generator:
 
     def __init__(self, seed=None):
         if seed is None:
-            import time
-            seed = int(time.time() * 1e9)
+            import os
+            seed = int.from_bytes(os.urandom(16), "little")  # 128 bits, as NumPy's SeedSequence
         self._g = _r.pcg64(list(seed) if isinstance(seed, (list, tuple)) else int(seed))
 
     def __repr__(self):

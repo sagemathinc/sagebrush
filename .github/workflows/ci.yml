@@ -49,6 +49,12 @@ jobs:
         run: python3 conformance/run.py --runtime bun --show 20
       - name: .ipynb round trips keep metadata and raw cells
         run: node web/test-ipynb.mjs
+      - name: TimeTravel and its Resume from here (the session recreated by replay), in headless Chrome
+        run: |
+          python3 web/serve.py 8765 &
+          sleep 1
+          CHROME=google-chrome node web/test-replay.mjs
+          CHROME=google-chrome node web/test-timetravel.mjs
       - name: Sage mode (modular forms, elliptic curves), checked against Sage's output
         run: python3 sage-tests/run.py -v
       - name: symbolic calculus (limits, solve, taylor) in the WebAssembly engine

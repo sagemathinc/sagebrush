@@ -79,6 +79,9 @@
   #ttslider { flex: 1 1 200px; min-width: 120px; accent-color: var(--accent); }
   #ttinfo { color: var(--muted); font-size: 13px; }
   #timetravel .ttnote { color: var(--muted); font-size: 12px; margin: 6px 0 8px; }
+  #timetravel .ttnote label { white-space: nowrap; color: var(--fg); }
+  #ttmarks { position: relative; height: 6px; margin: 2px 0 0; }
+  #ttmarks i { position: absolute; top: 0; width: 3px; height: 6px; margin-left: -1px; border-radius: 1px; background: var(--accent); opacity: .7; }
   #opendlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #opendlg::backdrop { background: rgba(0,0,0,.35); }
   /* documentation search (docs-index.json, from lib/_pyjs_docsearch.py) */
@@ -209,11 +212,13 @@
       <button id="ttnext" aria-label="Newer version" title="Newer version">▶</button>
       <span id="ttinfo" aria-live="polite"></span>
       <span class="sp"></span>
+      <button id="ttresume" title="Open this version in a new tab with its variables: the code that had run then is run again, in the same order, with the same random numbers and clock">Resume from here</button>
       <button id="ttrevert" class="primary" title="Make this version the notebook (as a new version: nothing is lost)">Revert to this version</button>
       <button id="ttclear" class="danger" title="Forget every past version of this notebook">Clear history…</button>
       <button id="ttclose" aria-label="Close TimeTravel" title="Back to the notebook">✕</button>
     </div>
-    <p class="ttnote">The cells as they were, version by version, kept in this browser (outputs are not kept). Reverting adds a new version, so it can be undone here too.</p>
+    <div id="ttmarks" aria-hidden="true"></div>
+    <p class="ttnote">The cells as they were, version by version, kept in this browser (outputs are not kept). Reverting adds a new version, so it can be undone here too. The marks are the versions where code ran: <b>Resume from here</b> recreates the session as it was then, in a new tab. <label title="Random numbers (random, numpy, os.urandom) come from a seed kept in the history, so that a session can be recreated exactly; anyone with the history can then reproduce them. Takes effect when the interpreter restarts."><input type="checkbox" id="ttrepro" checked> Reproducible randomness</label></p>
     <div id="ttview"></div>
   </section>
   <div id="printhead"><h1 id="printname"></h1><p id="printinfo"></p></div>
@@ -300,7 +305,8 @@
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, idb } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb } from "./notebook/stores.js";
+import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 const EXAMPLES = {
   "Welcome": [
@@ -480,15 +486,27 @@ class RemoteWorker {
 // The kernel is Sagebrush in a Web Worker (or, under `sagebrush notebook`,
 // native Python behind the local server); the notebook is web/notebook.
 let db = null;
+// TimeTravel's execution journal (web/replay-page.js): each interpreter gets
+// a session id and its entropy's seed, in the Worker's name
+let journal = null, replaying = false;
 const kernel = new WorkerKernel({
-  createWorker: () => (LOCAL ? new RemoteWorker() : new Worker("sagebrush-worker.js", { type: "module" })),
+  createWorker: () => {
+    const name = journal?.workerName() ?? "";
+    return LOCAL ? new RemoteWorker() : new Worker("sagebrush-worker.js", { type: "module", name });
+  },
   // the browser's files (and, in the app, the notebook's folder) for Python's open()
+  // (a resumed session: the files it had, from the journal)
   onStart: async (w) => {
+    const old = await journal?.replayFiles();
+    if (old) return w.postMessage({ files: old });
     if (diskFiles.length) w.postMessage({ files: diskFiles });
-    if (!LOCAL) await sendFiles(w);
+    const sent = LOCAL ? [] : await sendFiles(w);
+    await journal?.filesSent([...diskFiles, ...(sent ?? [])]);
   },
   onMessage: (m) => {
     if (m.fsChanged === undefined) return false;
+    if (replaying) return true; // a replay rewrites old files: not into the browser's
+
     // in the app, a file Python wrote in its top folder goes to the notebook's folder
     if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data);
     fileChanged(m.fsChanged, m.data);
@@ -505,6 +523,16 @@ function writeDisk(path, data) {
   diskWrites.set(path, next);
 }
 const nb = createNotebook($("#cells"), { kernel });
+const blobDbReady = openBlobDb();
+let textHashFn = null;
+journal = createJournal({
+  kernel, nb, local: !!LOCAL,
+  history: () => nbHistory,
+  notebookId: () => current.id,
+  textHash: () => textHashFn,
+  blobs: () => blobDbReady,
+  reproducible: () => nb.meta.reproducible !== false,
+});
 nb.on("dirty", () => (savedEl.textContent = ""));
 nb.on("saved", (text) => (savedEl.textContent = text));
 // a change made in another tab: its name and language too
@@ -553,13 +581,14 @@ async function startHistory(id) {
     return;
   }
   let NotebookHistory;
-  try { ({ NotebookHistory } = await loadHistory()); } catch (e) { return console.warn("history:", e); }
+  try { ({ NotebookHistory, textHash: textHashFn } = await loadHistory()); } catch (e) { return console.warn("history:", e); }
   if (current.id !== id) return;
   const h = new NotebookHistory(new IdbPatchStore(hdb, id));
   await h.init();
   if (current.id !== id) return h.close(); // another notebook opened meanwhile
   nbHistory = h;
   for (const doc of historyQueue.splice(0)) h.record(doc); // (nothing for one that is the last version)
+  journal.flushPending(id);
   h.on(() => { if (!ttEl.hidden) ttRefresh(false); });
   if (!ttEl.hidden) ttRefresh(true); // opened while the history was loading
 }
@@ -582,14 +611,17 @@ function ttRefresh(toEnd) {
   ttSlider.max = Math.max(0, n - 1);
   if (toEnd || atEnd) ttSlider.value = ttSlider.max;
   ttShowVersion();
+  ttShowMarks();
 }
 function ttShowVersion() {
   const vs = nbHistory?.versions() ?? [], v = vs[+ttSlider.value];
   $("#ttrevert").disabled = !v || v.index === vs.length - 1;
   $("#ttprev").disabled = !v || v.index === 0;
   $("#ttnext").disabled = !v || v.index === vs.length - 1;
+  $("#ttresume").disabled = true;
   if (!v) { $("#ttinfo").textContent = ttUnavailable || (nbHistory ? "No versions yet." : "Loading the history…"); ttView?.load({ mode: nb.mode, cells: [] }); return; }
   $("#ttinfo").textContent = `Version ${v.index + 1} of ${vs.length} · ${new Date(v.ms).toLocaleString()}`;
+  ttShowResume(v);
   const doc = nbHistory.docAt(v.time);
   const firstView = !ttView;
   ttView ??= createNotebook($("#ttview"), { readOnly: true, mode: doc.mode });
@@ -598,6 +630,100 @@ function ttShowVersion() {
   ttView.load(doc);
   restoreAnchor(ttView, at);
 }
+// Resume from here (web/replay-page.js): the session as it was at this
+// version (after the code run while it was the newest), in a new tab.
+function ttShowResume(v) {
+  const b = $("#ttresume");
+  let plan;
+  try { plan = nbHistory.replayPlan(v.time); } catch (e) { console.warn("replay plan:", e); b.disabled = true; return; }
+  b.disabled = plan.blocking.length > 0;
+  b.textContent = plan.blocking.length ? "Cannot resume here" : plan.runs ? `Resume from here — ${fmtEstimate(plan.ms)}` : "Resume from here";
+  b.title = plan.blocking.length
+    ? `The session at this version cannot be recreated: ${plan.blocking.join("; ")}.`
+    : `Open this version in a new tab with its variables: ${plan.runs ? `the ${plan.runs} run${plan.runs === 1 ? "" : "s"} of code before it are run again, in the same order, with the same random numbers and clock` : "no code had run then"}` +
+      (plan.warnings.length ? ` (the result may differ: ${plan.warnings.join("; ")})` : "") + ".";
+  if (plan.runs) $("#ttinfo").textContent += ` · ${plan.runs} run${plan.runs === 1 ? "" : "s"}`;
+}
+// A mark under the slider at each version where code ran.
+function ttShowMarks() {
+  const el = $("#ttmarks"), vs = nbHistory?.versions() ?? [];
+  el.replaceChildren();
+  if (!nbHistory || vs.length < 2 || ttEl.hidden) return;
+  const idx = new Map(vs.map((v) => [v.time, v.index]));
+  const ran = new Set(nbHistory.records("run").map((r) => idx.get(r.at)).filter((i) => i !== undefined));
+  const sr = ttSlider.getBoundingClientRect(), mr = el.getBoundingClientRect();
+  const inset = 8, left = sr.left - mr.left + inset, width = Math.max(0, sr.width - 2 * inset);
+  for (const i of ran) el.appendChild(document.createElement("i")).style.left = `${left + (width * i) / (vs.length - 1)}px`;
+}
+$("#ttresume").onclick = () => {
+  const v = nbHistory?.versions()[+ttSlider.value];
+  if (!v) return;
+  nb.flush();
+  open_(`${location.pathname}?resume=${encodeURIComponent(current.id)}&at=${encodeURIComponent(v.time)}`);
+};
+const open_ = (url) => window.open(url, "_blank");
+$("#ttrepro").onchange = (e) => {
+  nb.setMeta({ reproducible: e.target.checked });
+  statusEl.textContent = `reproducible randomness ${e.target.checked ? "on" : "off"} (from the next restart of the interpreter)`;
+};
+addEventListener("resize", () => ttShowMarks());
+
+// A tab opened by Resume from here: a new notebook, the version with the
+// history up to it, and the session recreated by replaying its journal.
+async function resumeFrom(srcId, at) {
+  const hdb = await historyDbReady;
+  const src = await idb(db, "notebooks", "readonly", (st) => st.get(srcId));
+  if (!hdb || !src) throw new Error("that notebook is not in this browser");
+  const mod = await loadHistory();
+  textHashFn = mod.textHash;
+  const h = new mod.NotebookHistory(new IdbPatchStore(hdb, srcId));
+  await h.init();
+  const vs = h.versions(), v = vs.find((x) => x.time === at);
+  if (!v) { h.close(); throw new Error("that version is not in its history"); }
+  const plan = h.replayPlan(at), doc = h.docAt(at), nextMs = vs[v.index + 1]?.ms ?? Infinity;
+  h.close();
+  // the history up to the next version (with the journal of that time)
+  const id = newId();
+  const rows = (await idb(hdb, "history", "readonly", (st) => st.getAll(IDBKeyRange.bound([srcId, ""], [srcId, "\uffff"])))) ?? [];
+  await idb(hdb, "history", "readwrite", (st) => {
+    let r = null;
+    for (const row of rows) if (mod.decodePatchId(row.time).timeMs < nextMs) r = st.put({ nb: id, time: row.time, env: row.env });
+    return r;
+  });
+  const { id: _i, rev: _r, updated: _u, cells: _c, mode: _m, ...meta } = src;
+  const name = `${src.name || "Untitled"} (at version ${v.index + 1})`;
+  if (plan.session && !plan.blocking.length) journal.continueSession(plan, id);
+  await open(new IdbStore(db, id, { ...meta, id, name, mode: doc.mode, cells: doc.cells }), id);
+  return { plan, version: v.index + 1 };
+}
+async function replayResumed({ plan, version }) {
+  if (plan.blocking.length) {
+    statusEl.textContent = `The session at version ${version} cannot be recreated (${plan.blocking.join("; ")}): its cells are here, with a fresh interpreter.`;
+    return;
+  }
+  if (!plan.session || !plan.runs) { statusEl.textContent = `Version ${version}: no code had run then.`; return; }
+  if (!kernel.ready) await new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
+  replaying = true;
+  nb.setReadOnly(true);
+  let report;
+  try {
+    report = await journal.replay(plan, ({ done, total, left }) => {
+      statusEl.textContent = `recreating the session of version ${version}: run ${Math.min(done + 1, total)} of ${total} · ${fmtEstimate(left)} left`;
+    });
+  } finally {
+    replaying = false;
+    nb.setReadOnly(false);
+    if (journal.session) journal.session.replay = false;
+  }
+  nb.flush();
+  const t = `${(report.ms / 1000).toFixed(1)} s`;
+  statusEl.textContent = report.diverged.length
+    ? `Recreated version ${version}, with differences: ${report.diverged.slice(0, 3).map((d) => (d.n ? `run ${d.n}: ` : "") + d.reason).join("; ")}${report.diverged.length > 3 ? "; …" : ""}`
+    : `Recreated the session of version ${version}: ${report.runs} run${report.runs === 1 ? "" : "s"} replayed in ${t}, identical to the original`;
+  announce(statusEl.textContent);
+  window.sagebrush.replayReport = report;
+}
+
 // The cell nearest the middle of the window, and where it is on the screen.
 function anchorOf(notebook) {
   if (!notebook) return null;
@@ -652,6 +778,7 @@ $("#ttrevert").onclick = () => {
 $("#ttclear").onclick = async () => {
   if (!nbHistory || !confirm(`Forget every past version of "${docName()}"? The notebook itself stays as it is.`)) return;
   await nbHistory.clear(nb.snapshot());
+  journal.historyCleared(current.id);
   ttRefresh(true);
   announce("History cleared");
 };
@@ -822,6 +949,7 @@ async function open(store, id, kind = "browser") {
   const doc = await nb.attach(store);
   showName(doc.name);
   modeEl.value = nb.mode;
+  $("#ttrepro").checked = nb.meta.reproducible !== false;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
   startHistory(id);
   presence.open(id);
@@ -874,6 +1002,7 @@ async function openDiskFile(path) {
       diskFiles.push(["/" + e.name, await TAURI.fs.readFile(p)]);
     }
     kernel.post({ files: diskFiles });
+    for (const [p, d] of diskFiles) journal.fileEvent(p, d);
     statusEl.textContent = `opened ${name}` + (diskFiles.length ? ` (${diskFiles.length} file${diskFiles.length === 1 ? "" : "s"} from its folder)` : "");
   } catch (e) { statusEl.textContent = `could not open ${path}: ${e?.message ?? e}`; }
 }
@@ -1009,9 +1138,11 @@ async function allFiles() { return (await idb(db, "files", "readonly", (st) => s
 async function allPaths() { return (await idb(db, "files", "readonly", (st) => st.getAllKeys())) ?? []; }
 async function sendFiles(w) {
   db ??= await dbReady;
-  if (!db) return;
+  if (!db) return [];
   const keys = await allPaths(), vals = await allFiles();
-  w.postMessage({ files: keys.map((k, i) => [k, vals[i]]) });
+  const files = keys.map((k, i) => [k, vals[i]]);
+  w.postMessage({ files });
+  return files;
 }
 async function fileChanged(path, data) {
   await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
@@ -1031,7 +1162,7 @@ async function renderFiles() {
     dl.onclick = () => download(k.split("/").pop(), vals[i], "application/octet-stream");
     const rm = li.appendChild(Object.assign(document.createElement("button"), { textContent: "✕" }));
     rm.setAttribute("aria-label", `Delete ${k}`);
-    rm.onclick = async () => { await idb(db, "files", "readwrite", (st) => st.delete(k)); kernel.post({ fsPut: k, data: null }); renderFiles(); };
+    rm.onclick = async () => { await idb(db, "files", "readwrite", (st) => st.delete(k)); kernel.post({ fsPut: k, data: null }); journal.fileEvent(k, null); renderFiles(); };
   });
   if (!keys.length) ul.textContent = "No files yet.";
 }
@@ -1040,6 +1171,7 @@ async function addFiles(list) {
     const data = new Uint8Array(await f.arrayBuffer()), path = "/" + f.name;
     await idb(db, "files", "readwrite", (st) => st.put(data, path));
     kernel.post({ fsPut: path, data });
+    journal.fileEvent(path, data);
   }
   renderFiles();
   announce(`${list.length} file${list.length === 1 ? "" : "s"} added`);
@@ -1332,8 +1464,16 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // ?open=URL of a notebook (.ipynb, .py, ...) and file=URL (repeatable) of
   // data it reads: fetched into the browser's files, then opened (&run runs it)
   const qs = new URLSearchParams(location.search), remote = qs.get("open");
-  let opened = false;
-  if (remote) {
+  let opened = false, resumed = null;
+  // ?resume=notebook&at=version: TimeTravel's Resume from here
+  if (qs.has("resume")) {
+    try {
+      resumed = await resumeFrom(qs.get("resume"), qs.get("at"));
+      opened = true;
+    } catch (err) { statusEl.textContent = `could not resume: ${err.message ?? err}`; }
+    history.replaceState(null, "", location.pathname);
+  }
+  if (remote && !opened) {
     try {
       for (const u of qs.getAll("file")) {
         const name = decodeURIComponent(new URL(u, location.href).pathname.split("/").pop());
@@ -1378,6 +1518,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // the interpreter starts once the notebook has been drawn (it is not needed for that)
   await new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   kernel.start();
+  if (resumed) await replayResumed(resumed);
   if (qs.has("run")) { await kernel.started; nb.runAll(); }
   // the app: its menu items, files the system hands it, the self-test
   if (TAURI) {
