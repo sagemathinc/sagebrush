@@ -57,6 +57,7 @@ jobs:
           CHROME=google-chrome node web/test-timetravel.mjs
           CHROME=google-chrome node web/test-widgets.mjs
           CHROME=google-chrome node web/test-kernels.mjs
+          CHROME=google-chrome node web/test-reactive.mjs
       - name: Sage mode (modular forms, elliptic curves), checked against Sage's output
         run: python3 sage-tests/run.py -v
       - name: symbolic calculus (limits, solve, taylor) in the WebAssembly engine

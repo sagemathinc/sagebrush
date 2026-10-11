@@ -575,7 +575,22 @@ function writeDisk(path, data) {
   const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => TAURI.fs.writeFile(path, data)).catch((e) => console.warn(e));
   diskWrites.set(path, next);
 }
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true });
+// The reactive notebook (design/reactive-notebook.md), while it is being
+// built: on with ?reactive in the address, or localStorage sagebrush-reactive = "1".
+const REACTIVE = (() => { try { return new URLSearchParams(location.search).has("reactive") || localStorage.getItem("sagebrush-reactive") === "1"; } catch { return false; } })();
+// Its analyzer (web/analyze-worker.ts): a worker of its own, started on first use.
+let analyzeWorker = null, analyzeId = 0;
+const analyzeWaiting = new Map();
+const analyzer = {
+  analyze(code, mode) {
+    if (!analyzeWorker) {
+      analyzeWorker = new Worker(new URL("sagebrush-analyze.js", location.href), { type: "module" });
+      analyzeWorker.onmessage = (ev) => { const f = analyzeWaiting.get(ev.data.id); analyzeWaiting.delete(ev.data.id); f?.(ev.data); };
+    }
+    return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, code, mode }); });
+  },
+};
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE });
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
