@@ -13,12 +13,15 @@
 //   - the cells on a cycle get a CycleError;
 //   - cells run in topological order, ties going to the page order.
 //
-// Two differences, each deliberate:
+// Differences, each deliberate:
 //
 //   - #1477's relaxation (unless `strict`): several cells may define a name
 //     that no cell reads.  Such a name has no edges, so the graph is exact.
 //     Once a cell reads it, the definers and the readers have the error (the
 //     scheduler shows it only on the cells just run: no action at a distance).
+//   - Mutation tracking (unless `strict`): a cell visibly mutating another
+//     cell's object (src/dataflow.ts `mutations`) is its updater, run after
+//     the definer and other updaters above it, and before the readers.
 //   - A cycle error goes to every cell in a strongly connected component:
 //     every cell on a cycle.  marimo records, for each edge added, one path
 //     closing a cycle, and so misses some cells (in 70 of the oracle's 3,198
@@ -64,6 +67,8 @@ export class NotebookGraph {
   private errorsOf = new Map<string, CellError[]>();
   /** each name's defining cells, in page order */
   readonly definers = new Map<string, string[]>();
+  /** each name's updaters: the cells mutating its object, in page order (not when strict) */
+  readonly updatersOf = new Map<string, string[]>();
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
 
@@ -152,6 +157,17 @@ export class NotebookGraph {
     }
     // a cell deleting a name runs after the others reading it
     for (const [name, xs] of deleters) for (const r of readers.get(name) ?? []) for (const x of xs) edge(r, x);
+    // Mutation tracking (ours, unless strict): the cells mutating a name's
+    // object (its updaters) run after its definer, in page order, and before
+    // the cells reading it.
+    this.updatersOf.clear();
+    if (!this.strict) {
+      for (const [id, node] of this.nodes) for (const n of node.analysis?.mutations ?? []) if (this.definers.has(n)) push(this.updatersOf, n, id);
+      for (const [name, us] of this.updatersOf) {
+        for (let i = 0; i + 1 < us.length; i++) edge(us[i], us[i + 1]);
+        for (const r of readers.get(name) ?? []) if (!us.includes(r)) for (const u of us) edge(u, r);
+      }
+    }
     for (const scc of this.components()) {
       if (scc.length > 1) for (const id of scc) this.addError(id, { kind: "cycle", cells: scc });
     }

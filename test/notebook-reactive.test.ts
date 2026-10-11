@@ -198,3 +198,18 @@ test("cycles and syntax errors", async () => {
   assert.deepEqual(Object.keys(rep.errors).sort(), ["c0", "c1", "c2"]);
   assert.deepEqual(rep.ran, ["c3"]);
 });
+
+test("mutation tracking: an updater runs with its family, and the readers after it", async () => {
+  const nb = notebook(["v = [1]", "print(len(v))", "v.append(2)", "v.append(3)", "w = 1"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  // the reader runs after the updaters, though it is above them
+  assert.deepEqual((await nb.r.run(["c0"])).ran, ["c0", "c2", "c3", "c1"]);
+  // running one updater reruns the definer and every updater (never appending twice), then the reader
+  assert.deepEqual((await nb.r.run(["c3"])).ran, ["c0", "c2", "c3", "c1"]);
+  // deleting an updater undoes its mutation: the family reruns
+  assert.deepEqual((await nb.r.remove([nb.del(2)])).ran, ["c0", "c3", "c1"]);
+  // an updater's code changed to mutate nothing: the same
+  nb.set(2, "pass");
+  assert.deepEqual((await nb.r.run(["c3"])).ran, ["c0", "c1", "c3"]);
+});

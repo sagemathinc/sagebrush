@@ -51,6 +51,12 @@ export interface CellAnalysis {
   refs: Set<string>;
   /** the refs it deletes (`del x`) */
   deleted: Set<string>;
+  /**
+   * refs whose objects it visibly mutates at its top level (`v[i] = ...`,
+   * `z.x = ...`, `del v[i]`, `v.append(...)`, ...): ours, not marimo's
+   * (design/reactive-notebook.md, mutation tracking)
+   */
+  mutations?: Set<string>;
 }
 
 const clone = (x: any): any =>
@@ -315,11 +321,80 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
   for (const n of injected) {
     defs.add(n);
   }
+  const refs = new Set([...v.refs.keys()].filter((n) => !injected.includes(n)));
   return {
     defs,
-    refs: new Set([...v.refs.keys()].filter((n) => !injected.includes(n))),
+    refs,
     deleted: new Set([...v.refs].filter(([, rs]) => rs.some((r) => r.deleted)).map(([n]) => n)),
+    mutations: new Set([...mutated(tree)].filter((n) => refs.has(n) && !defs.has(n))),
   };
+}
+
+// Methods that change their object in place (lists, dicts, sets, bytearrays,
+// deques, NumPy arrays, Sage's mutable matrices and vectors).
+const MUTATORS = new Set([
+  "append", "extend", "insert", "pop", "popitem", "remove", "clear", "update", "add", "discard", "sort", "reverse",
+  "setdefault", "appendleft", "extendleft", "popleft", "rotate", "difference_update", "intersection_update",
+  "symmetric_difference_update", "fill", "resize", "put", "itemset", "partition", "byteswap", "set_immutable",
+  "set_row", "set_column", "set_block", "swap_rows", "swap_columns", "rescale_row", "add_multiple_of_row",
+  "add_multiple_of_column", "__setitem__", "__delitem__", "__iadd__", "__isub__", "__imul__",
+]);
+// Functions that change their first argument in place.
+const MUTATING_FUNCTIONS = new Set(["shuffle", "heappush", "heappop", "heapify", "heapreplace", "heappushpop", "copyto", "place", "putmask"]);
+
+// The names whose objects a module's top-level code visibly mutates (not
+// inside functions or classes: those mutate when called).
+function mutated(tree: Node): Set<string> {
+  const out = new Set<string>();
+  const root = (e: any): string | null => {
+    while (e && (e._type === "Subscript" || e._type === "Attribute")) e = e.value;
+    return e?._type === "Name" ? e.id : null;
+  };
+  const target = (t: any) => {
+    if (!t) return;
+    if (t._type === "Subscript" || t._type === "Attribute") {
+      const n = root(t);
+      if (n) out.add(n);
+    } else if (t._type === "Tuple" || t._type === "List") for (const x of t.elts) target(x);
+    else if (t._type === "Starred") target(t.value);
+  };
+  const walk = (node: any): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const x of node) walk(x);
+      return;
+    }
+    if (typeof node._type !== "string") return;
+    switch (node._type) {
+      case "FunctionDef": case "AsyncFunctionDef": case "ClassDef": case "Lambda":
+        // (their decorators and defaults run now)
+        walk(node.decorator_list);
+        walk(node.args?.defaults);
+        walk(node.args?.kw_defaults);
+        return;
+      case "Assign": for (const t of node.targets) target(t); break;
+      case "AugAssign": case "AnnAssign": target(node.target); break;
+      case "Delete": for (const t of node.targets) target(t); break;
+      case "For": case "AsyncFor": target(node.target); break;
+      case "With": case "AsyncWith": for (const it of node.items) target(it.optional_vars); break;
+      case "Call": {
+        const f = node.func;
+        if (f?._type === "Attribute" && MUTATORS.has(f.attr)) {
+          const n = root(f.value);
+          if (n) out.add(n);
+        }
+        const fname = f?._type === "Name" ? f.id : f?._type === "Attribute" ? f.attr : null;
+        if (fname && MUTATING_FUNCTIONS.has(fname) && node.args.length) {
+          const n = root(node.args[0]);
+          if (n) out.add(n);
+        }
+        break;
+      }
+    }
+    for (const key of Object.keys(node)) if (key !== "_type") walk(node[key]);
+  };
+  walk(tree.body);
+  return out;
 }
 
 /**

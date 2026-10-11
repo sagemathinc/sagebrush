@@ -683,7 +683,7 @@ export function createNotebook(root, opts = {}) {
           const key = mode + "\0" + code;
           if (!analyses.has(key)) {
             if (analyses.size > 2000) analyses.clear();
-            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => (a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted) })));
+            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => (a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []) })));
           }
           return analyses.get(key);
         },
@@ -1613,6 +1613,7 @@ export function createNotebook(root, opts = {}) {
       return {
         id: c.id, index: index(c), state, edited: cls.contains("edited"),
         defines: a ? [...a.defs] : [], reads: a ? [...a.refs].filter((n) => r.graph.definers.has(n)) : [],
+        ...(a?.mutations?.size ? { mutates: [...a.mutations].filter((n) => r.graph.definers.has(n)) } : {}),
         parents: r ? [...r.graph.parents(c.id)] : [], children: r ? [...r.graph.children(c.id)] : [],
         ...(r?.errors.has(c.id) ? { errors: r.errors.get(c.id).map(errorText) } : {}),
         ...(r?.times.has(c.id) ? { ms: Math.round(r.times.get(c.id)) } : {}),

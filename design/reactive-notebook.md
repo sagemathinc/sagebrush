@@ -340,6 +340,16 @@ compromises are unnecessary.
    - Deeply nested mutation (an object inside a list) only shows at the top
      level when the container itself changed. That is a stated limit, and
      `verify()` catches the rest.
+   - **Implemented first statically** (October 11): the analysis finds the
+     mutations visible in a cell's top-level code (`v[i] = …`, `z.x = …`,
+     `del v[i]`, augmented assignment to those, `v.append(…)` and other
+     in-place methods, `random.shuffle(v)`, `heapq.heappush(v, …)`). Such a
+     cell is an updater: readers run after it, updaters run in page order,
+     and running or deleting an updater reruns the definer and the whole
+     family first, so a mutation is never applied twice. Not seen: aliases
+     (`w = v; w.append(…)`) and mutation inside a function called later;
+     `verify()` finds those (web/test-reactive.mjs shows it). The runtime
+     counters remain the way to see everything.
 4. **Files and randomness** are ours already: the filesystem layer gives
    writer-to-reader edges, and the deterministic interpreter gives per-cell
    seeds and bit-identical math across browsers.

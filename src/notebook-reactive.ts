@@ -32,6 +32,9 @@
 //     cell reruns, so the value is its own.
 //   - A run can mutate several cells at once (an agent's batch of edits) and
 //     then runs once.
+//   - Mutation tracking: a cell mutating another's object runs with its
+//     family (the definer, then the updaters in page order), and the readers
+//     after them (src/notebook-graph.ts).
 import { NotebookGraph, type CellError, type GraphCell } from "./notebook-graph";
 import type { CellAnalysis } from "./dataflow";
 
@@ -217,11 +220,14 @@ export class Reactive {
     const oldChildren = new Set<string>();
     const forgetNow = new Set<string>();
     const changed = new Set<string>();
+    // the names whose objects changed or deleted cells mutated
+    const oldMutations = new Set<string>();
     for (const id of ids) {
       const prev = this.registered.get(id);
       if (!prev || prev.code === cells.find((c) => c.id === id)!.code) continue;
       changed.add(id);
       for (const c of this.graph.children(id)) oldChildren.add(c);
+      for (const n of prev.analysis?.mutations ?? []) oldMutations.add(n);
       // its old names go (unless it had an error, and so never ran this code)
       if (!this.errors.has(id)) for (const n of this.defsOf(id)) forgetNow.add(n);
     }
@@ -229,6 +235,7 @@ export class Reactive {
       if (!this.registered.has(id)) continue;
       changed.add(id);
       for (const c of this.graph.children(id)) oldChildren.add(c);
+      for (const n of this.registered.get(id)!.analysis?.mutations ?? []) oldMutations.add(n);
       if (!this.errors.has(id)) for (const n of this.defsOf(id)) forgetNow.add(n);
       this.registered.delete(id);
       this.stale.delete(id);
@@ -281,6 +288,22 @@ export class Reactive {
       if (k > 1 && ds?.length === 1 && !errors.has(ds[0])) auto.add(ds[0]);
     }
     for (const id of [...auto]) if (!inGraph.has(id) || roots.has(id) || errors.has(id)) auto.delete(id);
+
+    // mutation tracking: an updater (a cell mutating another's object) runs
+    // with its family: the definer first, then every updater, in page order,
+    // so that a mutation is never applied twice.  Also when an updater's
+    // code changed or it was deleted (its old mutations are undone).
+    const families = (names: Iterable<string>, into: Set<string>) => {
+      for (const n of names) {
+        const ds = (this.graph.definers.get(n) ?? []).filter((d) => !errors.has(d));
+        if (ds.length !== 1) continue;
+        into.add(ds[0]);
+        for (const u of this.graph.updatersOf.get(n) ?? []) if (!errors.has(u)) into.add(u);
+      }
+    };
+    families([...roots].flatMap((id) => [...(this.registered.get(id)?.analysis?.mutations ?? [])]), roots);
+    families(oldMutations, roots.size ? roots : auto);
+    for (const id of [...auto]) if (roots.has(id)) auto.delete(id);
 
     // what runs: the roots and their stale ancestors; then, automatically,
     // everything downstream of them and of `auto`
