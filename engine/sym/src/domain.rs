@@ -174,6 +174,14 @@ pub fn complex_encl(c: &Expr) -> Option<(Iv, Iv)> {
     if real_const(c) {
         return Some((encl(c)?, Iv(0.0, 0.0)));
     }
+    // the real and imaginary parts of a constant (log(x)^2 == 2 left
+    // -pi < imag_part(sqrt(2)) <= pi undecided)
+    if let Kind::Fun(f @ (Fun::RealPart | Fun::ImagPart), a) = &c.kind {
+        if a.len() == 1 {
+            let (re, im) = complex_encl(&a[0])?;
+            return Some((if *f == Fun::RealPart { re } else { im }, Iv(0.0, 0.0)));
+        }
+    }
     let ex = crate::expand::expand(c);
     let terms = match &ex.kind {
         Kind::Add(v) => v.clone(),

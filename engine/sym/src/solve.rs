@@ -567,12 +567,401 @@ fn roots_c(n: &Expr, x: &str) -> Vec<Sol> {
         Kind::Add(v) => v.iter().filter(|t| depends(t, x)).count(),
         _ => 1,
     };
+    let mut ks = vec![];
+    trig_kernels(&f, x, &mut ks);
+    if ks.len() >= 2 {
+        if let Some(sols) = trig_roots(&f, x, &ks) {
+            return sols;
+        }
+    }
+    if let Some(sols) = kernel_poly_roots(&f, x) {
+        return sols;
+    }
     if dep_terms > 1 {
         if let Some(sols) = radical_roots(&f, x) {
             return sols;
         }
     }
     invert_c(&f, x)
+}
+
+/// The trigonometric functions of x in e (sin(a) with a depending on x).
+fn trig_kernels(e: &Expr, x: &str, out: &mut Vec<Expr>) {
+    if let Kind::Fun(Fun::Sin | Fun::Cos | Fun::Tan | Fun::Cot | Fun::Sec | Fun::Csc, a) = &e.kind {
+        if a.len() == 1 && depends(&a[0], x) {
+            if !out.contains(e) {
+                out.push(e.clone());
+            }
+            return;
+        }
+    }
+    for c in e.children() {
+        trig_kernels(&c, x, out);
+    }
+}
+
+/// a = q x + c with q a nonzero rational number and c free of x.
+fn linear_in(a: &Expr, x: &str) -> Option<(Q, Expr)> {
+    let c = coeffs(&crate::expand::expand(a), x)?;
+    if c.len() != 2 || depends(&c[0], x) {
+        return None;
+    }
+    let q = c[1].as_num()?.as_rat()?.clone();
+    (!q.is_zero()).then(|| (q, c[0].clone()))
+}
+
+/// Equations in trigonometric functions of x (their arguments linear in x),
+/// a recurring complaint about Sage's solve, which gives sin(x) == cos(x),
+/// cos(2 x) == cos(x) back unsolved or only principal solutions: f(u) =
+/// f(v) as u, v linear (sin u = sin v: u = v + 2 pi n or u = pi - v + 2 pi
+/// n), a sin u + b cos u + c as R sin(u + phi) + c, and otherwise a
+/// polynomial in sin and cos of one angle.  Every value is an exact
+/// inversion, so these are checked as any other candidate.
+fn trig_roots(f: &Expr, x: &str, ks: &[Expr]) -> Option<Vec<Sol>> {
+    if let Some(s) = two_term_trig(f, x) {
+        return Some(s);
+    }
+    if let Some(s) = sin_cos_linear(f, x, ks) {
+        return Some(s);
+    }
+    trig_poly(f, x)
+}
+
+/// k f(a) for f = sin, cos, tan, k a number, a linear in x.
+fn trig_term(t: &Expr, x: &str) -> Option<(Expr, Fun, Expr)> {
+    let (k, g) = split_coeff(t);
+    if let Kind::Fun(f @ (Fun::Sin | Fun::Cos | Fun::Tan), a) = &g.kind {
+        if a.len() == 1 && linear_in(&a[0], x).is_some() {
+            return Some((num(k), f.clone(), a[0].clone()));
+        }
+    }
+    None
+}
+
+/// k (f(a) - g(b)) = 0 or k (f(a) + g(b)) = 0 for sin and cos (as sines:
+/// cos a = sin(a + pi/2), -sin w = sin(-w)), or tan with tan: linear
+/// equations in x and a new integer n.
+fn two_term_trig(f: &Expr, x: &str) -> Option<Vec<Sol>> {
+    let Kind::Add(v) = &f.kind else { return None };
+    if v.len() != 2 {
+        return None;
+    }
+    let (k1, f1, a1) = trig_term(&v[0], x)?;
+    let (k2, f2, a2) = trig_term(&v[1], x)?;
+    if a1 == a2 {
+        return None;
+    }
+    // f1(a1) = s f2(a2)
+    let s = if add2(&k1, &k2).is_zero() {
+        1
+    } else if sub(&k1, &k2).is_zero() {
+        -1
+    } else {
+        return None;
+    };
+    let as_sin = |g: &Fun, a: &Expr| if *g == Fun::Cos { add2(a, &div(&pi(), &int(2))) } else { a.clone() };
+    let eqs: Vec<(Expr, String)> = match (&f1, &f2) {
+        (Fun::Tan, Fun::Tan) => {
+            // tan a1 = tan(s a2): a1 = s a2 + pi n
+            let n = fresh("n");
+            vec![(sub(&sub(&a1, &mul2(&int(s), &a2)), &two_pi_n(&n, 1)), n)]
+        }
+        (Fun::Tan, _) | (_, Fun::Tan) => return None,
+        _ => {
+            let w1 = as_sin(&f1, &a1);
+            let w2 = mul2(&int(s), &as_sin(&f2, &a2));
+            let (n1, n2) = (fresh("n"), fresh("n"));
+            vec![
+                (sub(&sub(&w1, &w2), &two_pi_n(&n1, 2)), n1),
+                (sub(&sub(&add2(&w1, &w2), &pi()), &two_pi_n(&n2, 2)), n2),
+            ]
+        }
+    };
+    let mut out = vec![];
+    for (e, n) in eqs {
+        let c = coeffs(&crate::expand::expand(&e), x)?;
+        if c.len() != 2 || depends(&c[1], x) || c[1].is_zero() {
+            return None; // a branch without x: left to the general way
+        }
+        let val = crate::expand::expand(&neg(&div(&c[0], &c[1])));
+        out.push(Sol { val, cond: vec![], params: vec![n] });
+    }
+    Some(out)
+}
+
+/// A real nonzero number (exactly real: its enclosure has no imaginary part).
+fn real_nonzero(e: &Expr) -> Option<f64> {
+    if !free_symbols(e).is_empty() {
+        return None;
+    }
+    let (re, im) = crate::domain::complex_encl(e)?;
+    if im.0 != 0.0 || im.1 != 0.0 || re.contains_zero() {
+        return None;
+    }
+    Some(re.0)
+}
+
+/// A sin(u) + B cos(u) + C with A, B real numbers: R sin(u + phi) + C, R =
+/// sqrt(A^2 + B^2), phi the angle of (A, B) (sin(x) == cos(x): x == pi/4 +
+/// pi n1).
+fn sin_cos_linear(f: &Expr, x: &str, ks: &[Expr]) -> Option<Vec<Sol>> {
+    if ks.len() != 2 {
+        return None;
+    }
+    let u = match (&ks[0].kind, &ks[1].kind) {
+        (Kind::Fun(Fun::Sin, a), Kind::Fun(Fun::Cos, b)) | (Kind::Fun(Fun::Cos, b), Kind::Fun(Fun::Sin, a)) if a == b => a[0].clone(),
+        _ => return None,
+    };
+    let (sn, cn) = (fresh("_s"), fresh("_c"));
+    let p = crate::expand::expand(&subs(f, &[(sin(&u), sym(&sn)), (cos(&u), sym(&cn))]));
+    if depends(&p, x) {
+        return None;
+    }
+    let cs = coeffs(&p, &sn)?;
+    if cs.len() != 2 || depends(&cs[1], &cn) {
+        return None;
+    }
+    let cc = coeffs(&cs[0], &cn)?;
+    if cc.len() != 2 || depends(&cc[0], &cn) {
+        return None;
+    }
+    let (a, b, c) = (simplify_rational(&cs[1]), simplify_rational(&cc[1]), cc[0].clone());
+    let (af, bf) = (real_nonzero(&a)?, real_nonzero(&b)?);
+    let r = crate::simplify::simplify_full(&sqrt(&add2(&mul2(&a, &a), &mul2(&b, &b))));
+    let base = fun1(Fun::Atan, &simplify_rational(&div(&b, &a)));
+    let phi = if af > 0.0 {
+        base
+    } else if bf > 0.0 {
+        add2(&base, &pi())
+    } else {
+        sub(&base, &pi())
+    };
+    let g = add2(&sin(&add2(&u, &phi)), &simplify_rational(&div(&c, &r)));
+    Some(invert_c(&g, x))
+}
+
+/// The rational gcd of nonzero rationals (the largest q with each an
+/// integer multiple of q).
+fn gcd_q(qs: &[Q]) -> Q {
+    use num_integer::Integer;
+    let mut g = qs[0].clone();
+    for q in &qs[1..] {
+        let (a, b) = (g.numer() * q.denom(), q.numer() * g.denom());
+        g = Q::new(a.gcd(&b), g.denom() * q.denom());
+    }
+    if g < Q::zero() { -g } else { g }
+}
+
+/// sin(k u) and cos(k u) as polynomials in s = sin u, c = cos u.
+fn multiple_angle(k: i64, s: &Expr, c: &Expr) -> (Expr, Expr) {
+    let (mut sk, mut ck) = (zero(), int(1));
+    for _ in 0..k.unsigned_abs() {
+        let (s2, c2) = (add2(&mul2(&sk, c), &mul2(&ck, s)), sub(&mul2(&ck, c), &mul2(&sk, s)));
+        sk = crate::expand::expand(&s2);
+        ck = crate::expand::expand(&c2);
+    }
+    if k < 0 { (neg(&sk), ck) } else { (sk, ck) }
+}
+
+/// A polynomial in sin(k u + c), cos(k u + c) (tan and the others through
+/// sin and cos), u = g x: a polynomial P(s, c) in s = sin u, c = cos u on
+/// s^2 + c^2 = 1.  With c only in even powers it is one in s (sin(u) =
+/// each root), with s only in even powers one in c; homogeneous up to s^2 +
+/// c^2 = 1, one in t = tan u (with cos u = 0 when the degree drops: sin(x)
+/// cos(x) == 1/4 gives x == pi/12 + pi n); else squared, P0^2 = (1 - s^2)
+/// P1^2, each candidate checked.
+fn trig_poly(f: &Expr, x: &str) -> Option<Vec<Sol>> {
+    let (num_, _) = together(&crate::simplify::trig_to_sincos(f));
+    let n = crate::expand::expand(&num_);
+    let mut ks = vec![];
+    trig_kernels(&n, x, &mut ks);
+    let mut args = vec![];
+    for k in &ks {
+        let Kind::Fun(Fun::Sin | Fun::Cos, a) = &k.kind else { return None };
+        let (q, c) = linear_in(&a[0], x)?;
+        args.push((k.clone(), q, c));
+    }
+    if args.is_empty() {
+        return None;
+    }
+    let g = gcd_q(&args.iter().map(|t| t.1.clone()).collect::<Vec<_>>());
+    let u = mul2(&num(crate::num::Num::rat(g.clone())), &sym(x));
+    let (sn, cn) = (fresh("_s"), fresh("_c"));
+    let (s, c) = (sym(&sn), sym(&cn));
+    let mut rules = vec![];
+    for (k, q, off) in &args {
+        let m = (q / &g).to_integer();
+        use num_traits::ToPrimitive;
+        let m = m.to_i64().filter(|m| m.abs() <= 12)?;
+        let (sk, ck) = multiple_angle(m, &s, &c);
+        let (co, so) = (cos(off), sin(off));
+        let v = match &k.kind {
+            Kind::Fun(Fun::Sin, _) => add2(&mul2(&sk, &co), &mul2(&ck, &so)),
+            _ => sub(&mul2(&ck, &co), &mul2(&sk, &so)),
+        };
+        rules.push((k.clone(), v));
+    }
+    let p = crate::expand::expand(&subs(&n, &rules));
+    if depends(&p, x) {
+        return None;
+    }
+    // P = P0(s) + c P1(s) on c^2 = 1 - s^2 (and the same with s, c swapped)
+    let reduce = |p: &Expr, v: &str, w: &Expr| -> Option<(Expr, Expr)> {
+        let cs = coeffs(p, v)?;
+        let one_minus = sub(&int(1), &mul2(w, w));
+        let (mut p0, mut p1) = (zero(), zero());
+        for (i, ci) in cs.iter().enumerate() {
+            let t = mul2(ci, &pow(&one_minus, &int((i / 2) as i64)));
+            if i % 2 == 0 { p0 = add2(&p0, &t) } else { p1 = add2(&p1, &t) }
+        }
+        Some((crate::expand::expand(&p0), crate::expand::expand(&p1)))
+    };
+    let (p0, p1) = reduce(&p, &cn, &s)?;
+    if p1.is_zero() {
+        return poly_in_kernel(&p0, &sn, &sin(&u), x);
+    }
+    let (q0, q1) = reduce(&p, &sn, &c)?;
+    if q1.is_zero() {
+        return poly_in_kernel(&q0, &cn, &cos(&u), x);
+    }
+    // the monomials s^i c^j with their coefficients
+    let mut mons = vec![];
+    for (i, ci) in coeffs(&p, &sn)?.iter().enumerate() {
+        for (j, cij) in coeffs(ci, &cn)?.iter().enumerate() {
+            if !cij.is_zero() {
+                mons.push((i, j, cij.clone()));
+            }
+        }
+    }
+    let d = mons.iter().map(|m| m.0 + m.1).max()?;
+    if mons.iter().all(|m| (m.0 + m.1) % 2 == d % 2) {
+        // P / c^d with each monomial times (s^2 + c^2)^m: h(t), t = tan u
+        let tn = fresh("_t");
+        let t = sym(&tn);
+        let h = crate::expand::expand(&add(mons.iter().map(|(i, j, k)| {
+            let m = ((d - i - j) / 2) as i64;
+            mul(vec![k.clone(), pow(&t, &int(*i as i64)), pow(&add2(&int(1), &mul2(&t, &t)), &int(m))])
+        }).collect()));
+        let hc = coeffs(&h, &tn)?;
+        let mut out = if hc.len() > 1 { poly_in_kernel(&h, &tn, &fun1(Fun::Tan, &u), x)? } else { vec![] };
+        if hc.len() < d + 1 || hc.last().map_or(false, |l| l.is_zero()) {
+            // cos u = 0: P(+-1, 0) = 0 there
+            out.extend(invert_c(&cos(&u), x));
+        }
+        return Some(out);
+    }
+    // squared: P0 = -c P1 implies P0^2 = (1 - s^2) P1^2.  At a root s0, u =
+    // asin(s0) + 2 pi n has cos u = sqrt(1 - s0^2) (for every complex s0),
+    // u = pi - asin(s0) + 2 pi n the opposite: each branch is a solution
+    // exactly when P0(s0) +- sqrt(1 - s0^2) P1(s0) = 0, decided (exactly or
+    // by an enclosure) or kept as that condition
+    let r = crate::expand::expand(&sub(&mul2(&p0, &p0), &mul(vec![sub(&int(1), &mul2(&s, &s)), p1.clone(), p1.clone()])));
+    let c0: Vec<Expr> = coeffs(&r, &sn)?.iter().map(simplify_rational).collect();
+    if c0.len() < 2 || maybe_zero(c0.last().unwrap()) {
+        return None;
+    }
+    let f0 = crate::simplify::factor(&r);
+    let parts: Vec<Expr> = match &f0.kind {
+        Kind::Mul(v) => v.iter().map(|g| base_exp(g).0).collect(),
+        Kind::Pow(b, _) => vec![b.clone()],
+        _ => vec![r.clone()],
+    };
+    let mut roots = vec![];
+    for g in parts.iter().filter(|g| depends(g, &sn)) {
+        let c: Vec<Expr> = coeffs(g, &sn)?.iter().map(simplify_rational).collect();
+        let rs = poly_roots(&c);
+        if rs.is_empty() {
+            return None;
+        }
+        roots.extend(rs);
+    }
+    sort_roots(&mut roots);
+    let ginv = num(crate::num::Num::rat(g.recip()));
+    let mut out = vec![];
+    for s0 in roots {
+        let at = |e: &Expr| subs(e, &[(s.clone(), s0.clone())]);
+        let root = sqrt(&sub(&int(1), &mul2(&s0, &s0)));
+        let a0 = fun1(Fun::Asin, &s0);
+        for (sign, base) in [(1, a0.clone()), (-1, sub(&pi(), &a0))] {
+            let w = crate::simplify::simplify_full(&add2(&at(&p0), &mul(vec![int(sign), root.clone(), at(&p1)])));
+            let cond = if w.is_zero() {
+                vec![]
+            } else {
+                match (free_symbols(&w).is_empty(), crate::domain::complex_encl(&w)) {
+                    (true, Some((re, im))) if !(re.contains_zero() && im.contains_zero()) => continue,
+                    _ => vec![relation(Rel::Eq, &w, &zero())],
+                }
+            };
+            let n = fresh("n");
+            let val = crate::expand::expand(&mul2(&ginv, &add2(&base, &two_pi_n(&n, 2))));
+            out.push(Sol { val, cond, params: vec![n] });
+        }
+    }
+    Some(out)
+}
+
+/// The roots of the polynomial p in v (v standing for the kernel k(x)),
+/// then k(x) = each root inverted.  None when the leading coefficient may
+/// vanish or the roots are not found.
+fn poly_in_kernel(p: &Expr, v: &str, k: &Expr, x: &str) -> Option<Vec<Sol>> {
+    let c: Vec<Expr> = coeffs(p, v)?.iter().map(simplify_rational).collect();
+    if c.iter().any(|a| depends(a, x)) || c.len() < 2 || maybe_zero(c.last().unwrap()) {
+        return None;
+    }
+    // factor by factor (s^4, (s^2 - 2) (s - 1)): every root found or None
+    let f = crate::simplify::factor(p);
+    let parts: Vec<Expr> = match &f.kind {
+        Kind::Mul(v) => v.iter().map(|g| base_exp(g).0).collect(),
+        Kind::Pow(b, _) => vec![b.clone()],
+        _ => vec![p.clone()],
+    };
+    let mut roots = vec![];
+    for g in parts.iter().filter(|g| depends(g, v)) {
+        let c: Vec<Expr> = coeffs(g, v)?.iter().map(simplify_rational).collect();
+        let r = poly_roots(&c);
+        if r.is_empty() {
+            return None;
+        }
+        roots.extend(r);
+    }
+    sort_roots(&mut roots);
+    let mut out = vec![];
+    for r in roots {
+        out.extend(invert_c(&sub(k, &r), x));
+    }
+    Some(out)
+}
+
+/// f a polynomial of degree >= 2 in one function k(x) (log(x)^2 == 2, sin(x)^2
+/// + sin(x) - 1 == 0, which factor() does not split over QQ).
+fn kernel_poly_roots(f: &Expr, x: &str) -> Option<Vec<Sol>> {
+    fn kernels(e: &Expr, x: &str, out: &mut Vec<Expr>) {
+        let is_kernel = match &e.kind {
+            Kind::Fun(_, a) => a.iter().any(|a| depends(a, x)),
+            Kind::Pow(b, p) => b.is_const(Const::E) && depends(p, x),
+            _ => false,
+        };
+        if is_kernel {
+            if !out.contains(e) {
+                out.push(e.clone());
+            }
+            return;
+        }
+        for c in e.children() {
+            kernels(&c, x, out);
+        }
+    }
+    let mut ks = vec![];
+    kernels(f, x, &mut ks);
+    if ks.len() != 1 {
+        return None;
+    }
+    let vn = fresh("_k");
+    let p = crate::expand::expand(&subs(f, &[(ks[0].clone(), sym(&vn))]));
+    if depends(&p, x) || coeffs(&p, &vn).map_or(true, |c| c.len() < 3) {
+        return None;
+    }
+    poly_in_kernel(&p, &vn, &ks[0], x)
 }
 
 fn is_half(k: &Expr) -> bool {
@@ -881,8 +1270,12 @@ fn invert_c(e: &Expr, x: &str) -> Vec<Sol> {
         Kind::Fun(Fun::Log, a) => {
             // log(u) = t: u = e^t, when t is a value of the principal log:
             // -pi < Im(t) <= pi
+            // (none for a real constant t: log(x)^2 == 2 kept -pi <
+            // imag_part(sqrt(2)) <= pi)
+            let real_number = free_symbols(&t).is_empty() && crate::domain::complex_encl(&t).map_or(false, |(_, im)| im.0 == 0.0 && im.1 == 0.0);
             let im = fun1(Fun::ImagPart, &t);
-            let s = Sol { val: exp(&t), cond: vec![relation(Rel::Gt, &im, &neg(&pi())), relation(Rel::Le, &im, &pi())], params: vec![] };
+            let cond = if real_number { vec![] } else { vec![relation(Rel::Gt, &im, &neg(&pi())), relation(Rel::Le, &im, &pi())] };
+            let s = Sol { val: exp(&t), cond, params: vec![] };
             (a[0].clone(), vec![s])
         }
         Kind::Pow(b, p) if !depends(p, x) => {
@@ -1268,6 +1661,107 @@ fn nonzero_at_samples(sv: &Expr, z: &Expr, xs: &Expr, r: &Expr) -> bool {
     sampled >= 3
 }
 
+/// Each solution's integer parameters renamed n1, n2, ... in order (the
+/// searches use up names: sin(x) + sin(2 x) + sin(3 x) == 0 had n1, n2, n4),
+/// apart from the equation's own symbols.
+fn renumber_params(out: &mut [(Expr, Vec<Expr>, Vec<String>)], z: &Expr, x: &str) {
+    let mut taken = free_symbols(z);
+    taken.push(x.to_string());
+    // (the solutions' other symbols, r1 and such, are kept too)
+    for (rel, cond, params) in out.iter() {
+        for e in std::iter::once(rel).chain(cond.iter()) {
+            for s in free_symbols(e) {
+                if !params.contains(&s) && !taken.contains(&s) {
+                    taken.push(s);
+                }
+            }
+        }
+    }
+    let mut k = 0;
+    for (rel, cond, params) in out.iter_mut() {
+        let mut rules = vec![];
+        let mut names = vec![];
+        for p in params.iter() {
+            let name = loop {
+                k += 1;
+                let n = format!("n{}", k);
+                if !taken.contains(&n) {
+                    break n;
+                }
+            };
+            rules.push((sym(p), sym(&name)));
+            names.push(name);
+        }
+        if rules.iter().any(|(a, b)| a != b) {
+            *rel = subs(rel, &rules);
+            for c in cond.iter_mut() {
+                *c = subs(c, &rules);
+            }
+        }
+        *params = names;
+    }
+}
+
+/// Unconditional families x == c + p n (one integer parameter n) in their
+/// simplest form: p with a positive coefficient (n -> -n), a family inside
+/// another dropped, and c + p Z, c + p/2 + p Z merged into c + p/2 Z
+/// (sin(x)^2 == 1/4 had four families, x == +-pi/6 + pi n are two).
+fn merge_families(out: &mut Vec<(Expr, Vec<Expr>, Vec<String>)>, x: &str) {
+    let parts = |e: &(Expr, Vec<Expr>, Vec<String>)| -> Option<(Expr, Expr)> {
+        if !e.1.is_empty() || e.2.len() != 1 {
+            return None;
+        }
+        let Kind::Rel(Rel::Eq, l, v) = &e.0.kind else { return None };
+        if l.as_sym() != Some(x) {
+            return None;
+        }
+        let c = coeffs(v, &e.2[0])?;
+        (c.len() == 2 && !free_symbols(&c[0]).contains(&e.2[0]) && !free_symbols(&c[1]).contains(&e.2[0]) && !c[1].is_zero()).then(|| (c[0].clone(), c[1].clone()))
+    };
+    let ratio = |a: &Expr, b: &Expr| -> Option<Q> { simplify_rational(&div(a, b)).as_num()?.as_rat().cloned() };
+    let make = |c: &Expr, p: &Expr, n: &str| -> Expr { eq(&sym(x), &crate::expand::expand(&add2(c, &mul2(p, &sym(n))))) };
+    for e in out.iter_mut() {
+        if let Some((c, p)) = parts(e) {
+            if split_coeff(&p).0.is_negative() {
+                e.0 = make(&c, &neg(&p), &e.2[0]);
+            }
+        }
+    }
+    let half = Q::new(1.into(), 2.into());
+    loop {
+        let mut changed = false;
+        'outer: for i in 0..out.len() {
+            for j in 0..out.len() {
+                if i == j {
+                    continue;
+                }
+                let (Some((ci, pi_)), Some((cj, pj))) = (parts(&out[i]), parts(&out[j])) else { continue };
+                // family i inside family j: pi = k pj and ci - cj = m pj
+                if let (Some(k), Some(m)) = (ratio(&pi_, &pj), ratio(&sub(&ci, &cj), &pj)) {
+                    if k.is_integer() && m.is_integer() {
+                        out.remove(i);
+                        changed = true;
+                        break 'outer;
+                    }
+                    if k.is_one() && (&m - &half).is_integer() {
+                        // the offset nearer 0 kept
+                        let size = |c: &Expr| crate::eval::to_c64(c).map_or(f64::INFINITY, |w| w.0.hypot(w.1));
+                        let c = if size(&cj) < size(&ci) { cj } else { ci };
+                        let n = out[i].2[0].clone();
+                        out[i] = (make(&c, &div(&pi_, &int(2)), &n), vec![], vec![n]);
+                        out.remove(j);
+                        changed = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
 /// Every solution of one equation in x, with conditions (see Sol), then
 /// 0 == f for each factor f whose roots were not found (as a solution with
 /// that value): the public solve.
@@ -1449,6 +1943,8 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
             out.push((rel, cond, s.params));
         }
     }
+    merge_families(&mut out, x);
+    renumber_params(&mut out, &z, x);
     // the unconditional ones first, sorted as solve1 sorts
     out.sort_by(|a, b| {
         a.1.is_empty().cmp(&b.1.is_empty()).reverse().then_with(|| {
