@@ -1,0 +1,26 @@
+<!doctype html><html><body><script>
+// Runs cells in a fresh worker; returns each cell's output and time.
+window.runSession = (workerUrl, cells, name) => new Promise((resolve) => {
+  const t0 = performance.now();
+  const w = new Worker(workerUrl, { type: "module", name: name ?? "" });
+  const out = cells.map(() => ({ text: "", ms: 0 }));
+  let ready = 0;
+  w.onmessage = (ev) => {
+    const m = ev.data;
+    if (m.ready) {
+      ready = performance.now() - t0;
+      cells.forEach((code, i) => w.postMessage({ id: i + 1, code, sage: true }));
+      return;
+    }
+    if (m.id === undefined) return;
+    const o = out[m.id - 1];
+    if (m.stream) o.text += m.text;
+    if (m.display) o.text += "[display " + Object.keys(m.display).join(",") + "] " + (m.display["text/plain"] ?? "");
+    if (m.done) {
+      o.ms = m.ms;
+      if (m.id === cells.length) { w.terminate(); resolve({ ready, total: performance.now() - t0, out }); }
+    }
+  };
+  w.onerror = (e) => resolve({ error: String(e.message || e) });
+});
+</script></body></html>
