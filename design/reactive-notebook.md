@@ -1,6 +1,7 @@
 # A reactive notebook for sagebrush.space
 
-**Status:** proposal (October 11, 2026). Nothing is implemented. It follows
+**Status:** accepted direction (October 11, 2026); not implemented yet.
+William's decisions are recorded under "Decisions" at the end. It follows
 William's "there's no rule that this has to be exactly a Jupyter notebook",
 and Astra's repeated review suggestion: reactive like marimo, with bounds on
 recompute time.
@@ -62,9 +63,9 @@ recorded clocks precisely because it doesn't hold.
    in another is an edge. Moving it reruns the reading cells within the
    budget: marimo's UI model, which subsumes `@interact`. `@interact` keeps
    working as today.
-8. **The console is a scratchpad.** It reads the notebook's state, but what
-   it defines is not part of the graph. It cannot create hidden state that
-   cells depend on.
+8. **The console is separate:** its own interpreter, a quick ephemeral
+   scratchpad, with no access to any notebook's state. A notebook's state
+   comes only from its cells.
 9. **Caching (later):** a cell's outputs and values keyed by its code and
    its inputs' hashes, so reopening or resuming a notebook does not
    recompute everything.
@@ -110,13 +111,50 @@ recorded clocks precisely because it doesn't hold.
 
 Each step has its own browser tests.
 
-## Open questions
+## What a "name" is
 
-1. **Strict one-definition rule (marimo), or allow redefinition with a
-   warning?** Strict makes the graph and agents' reasoning exact.
-   Recommended: strict.
-2. **Run on edit, or on Shift+Enter?** Recommended: on Shift+Enter for the
-   edited cell, then automatic downstream within the budget. Typing never
-   runs code.
-3. **Budget default:** 1 s?
-4. **Keep a classic, Jupyter-order mode at all?** Recommended: no.
+A name is a **global variable**: a name bound at the top level of a cell. It
+is bound by:
+
+- assignment (`a = 5`, `a, b = ...`, `a += 1`, `a: int = 5`);
+- `def` and `class`;
+- `import x` and `from m import y` (binding `x`, `y`; `import x as z`
+  binds `z`);
+- a top-level `for` target, `with ... as`, an `except ... as`, a walrus `:=`;
+- `global a` inside a function that assigns `a`.
+
+Examples:
+
+- `a = 5` / `b = 10` in one cell defines `a` and `b`. Another cell may read
+  them, but `a = 6` or `a += 1` there is an error ("a is defined in cell 2").
+- `a.x = 1` and `a[0] = 1` do not define `a`: they mutate it, and are flagged
+  as untracked when `a` is another cell's.
+- Names local to a function, a lambda or a comprehension are not globals.
+- As in marimo, **names starting with `_` are private to their cell**: any
+  cell may use `_i` or `_tmp` freely. They are invisible to other cells and
+  never conflict.
+
+## Decisions (William, October 11, 2026)
+
+1. **One model:** reactive. No classic, Jupyter-order mode.
+2. **Agents' consistency (`run`/`graph`/`verify`) is the main reason** for
+   the model.
+3. **The console is a separate, ephemeral scratchpad** with its own
+   interpreter, not a view of a notebook's state.
+4. **The time budget is configurable.**
+   - marimo has no time budget, only "autorun" (its default) or "lazy" (mark
+     dependents stale). In lazy mode, running a cell first reruns its stale
+     ancestors ([docs](https://docs.marimo.io/guides/configuration/runtime_configuration/)).
+   - We use a budget so that cheap dependents always update and expensive
+     ones wait:
+     - autorun = an infinite budget;
+     - lazy = a budget of 0;
+     - the default is a few seconds, per notebook.
+   - As in marimo's lazy mode, running a cell first reruns its stale
+     ancestors.
+
+## Still open
+
+- **Strict one-definition rule:** recommended, with `_`-private names as the
+  escape hatch (see "What a name is").
+- **The budget's default value.**
