@@ -623,7 +623,7 @@ export function createNotebook(root, opts = {}) {
     cell.n.textContent = "[*]";
     cell.runb.textContent = "■";
     let failed = false;
-    return new Promise((resolve) => kernel.execute(code, { mode, cell: cell.id, forget }, {
+    return new Promise((resolve) => kernel.execute(code, { mode, cell: cell.id, forget, mangle: reactive() }, {
       start() {
         cell.el.classList.replace("queued", "running");
         const t0 = performance.now();

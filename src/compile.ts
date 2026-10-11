@@ -32,6 +32,8 @@ function displayLast(body: any[]): void {
 export interface CompileOptions {
   /** Sage syntax: `^` is `**`, `^^` is xor, int/int is an exact Rational. */
   sage?: boolean;
+  /** changes the parsed tree (CPython's AST) before compiling it */
+  transform?: (tree: any) => void;
 }
 
 export function compile(source: string, filename: string, moduleName: string, evalMode = false, single: boolean | "cell" = false, opts: CompileOptions = {}): Compiled {

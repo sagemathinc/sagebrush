@@ -113,7 +113,18 @@ try {
   r = await run(1);
   ok(JSON.stringify(r?.errors) === "[]", "two cells may define a name no cell reads (for i in ...)");
 
+  // `_` names are the cell's own (marimo's renaming)
+  await fileNew();
+  await set(["_t = 5\nprint(_t)", "print(_t)", "_h = 3\ndef f():\n    return _h + 1", "print(f())"]);
+  r = await run([0, 1, 2, 3]);
+  ok((await out(0)) === "5" && /NameError: name '_t' is not defined/.test(await out(1)), `a cell's _t is its own: another cell does not see it (${(await out(1)).split("\n").pop()})`);
+  ok((await out(3)) === "4", `a function keeps its cell's _h (f() = ${await out(3)})`);
+  await set(["_t = 6\nprint(_t)"]);
+  await run(0);
+  ok((await out(0)) === "6" && (await ev("(async () => 1)()")) === 1, "rerunning it");
+
   // Sage mode
+  await fileNew();
   await ev("sagebrush.notebook.setMode('sage'); true");
   await set(["R.<x> = QQ[]", "f = x^2 - 1\nprint(f.factor())"]);
   await run([0, 1]);
