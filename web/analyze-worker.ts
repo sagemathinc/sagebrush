@@ -6,7 +6,7 @@
 // In:  {id, code, mode}   mode: "python" | "sage" | "magma"
 // Out: {id, defs, refs, deleted, mutations} (arrays of names), or {id, error: {kind, message}}
 //      (kind "syntax" or "import-star")
-//      {id, rename: {name, cells: [{id, code, defines, reads}], taken, mode}}
+//      {id, rename: {name, cells: [{id, code, defines, reads}], taken, mode, sep?}}
 //        -> {id, sources: [[cell id, new code]] | null}: the fix of a name
 //        defined by several cells (src/rename.ts)
 import { analyzeCell, ImportStarError } from "../src/dataflow";
@@ -17,7 +17,7 @@ self.onmessage = (ev: MessageEvent) => {
   if (rename) {
     let sources: [string, string][] | null = null;
     try {
-      const r = renameRedefinitions(rename.cells, rename.name, new Set(rename.taken), rename.mode);
+      const r = renameRedefinitions(rename.cells, rename.name, new Set(rename.taken), rename.mode, rename.sep ?? "_");
       sources = r ? [...r] : null;
     } catch {}
     postMessage({ id, sources });

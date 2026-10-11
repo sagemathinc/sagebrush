@@ -580,8 +580,15 @@ function writeDisk(path, data) {
   diskWrites.set(path, next);
 }
 // The reactive notebook (design/reactive-notebook.md), while it is being
-// built: on with ?reactive in the address, or localStorage sagebrush-reactive = "1".
-const REACTIVE = (() => { try { return new URLSearchParams(location.search).has("reactive") || localStorage.getItem("sagebrush-reactive") === "1"; } catch { return false; } })();
+// built: ?reactive in the address turns it on in this browser (it stays on:
+// localStorage sagebrush-reactive), ?reactive=0 off.
+const REACTIVE = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get("reactive");
+    if (q !== null) localStorage.setItem("sagebrush-reactive", q === "0" || q === "off" ? "0" : "1");
+    return localStorage.getItem("sagebrush-reactive") === "1";
+  } catch { return false; }
+})();
 // (the address keeps ?reactive when the page rewrites it)
 const flagQuery = new URLSearchParams(location.search).has("reactive") ? "?reactive" : "";
 // Its analyzer (web/analyze-worker.ts): a worker of its own, started on first use.
@@ -1203,7 +1210,9 @@ fileMenu.addEventListener("click", async (e) => {
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
       // (each cell's arguments and return values: the names it reads and defines)
-      const g = new Map((nb.reactive?.graph.ids ?? []).map((id) => [nb.reactive.submitted(id), nb.reactive.graph.analysis(id)]));
+      // (of the code as written: page-order scoping's renames are not in the file)
+      const r = nb.reactive, ids = r?.graph.ids ?? [];
+      const g = new Map(await Promise.all(ids.map(async (id) => [r.submitted(id), await r.writtenAnalysis(id)])));
       download(fileBase() + ".py", toMarimo(nb.snapshot(), (code) => g.get(code) ?? null), "text/x-python");
       break;
     }

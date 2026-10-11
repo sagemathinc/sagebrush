@@ -149,7 +149,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       // exit() can't leave a notebook: it just ends the cell.
       if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return true;
       // (a cell's renamed `_` names are shown as written)
-      R.stderr.write(R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, ""));
+      // (and page-order scoping's xʹ2: src/notebook-reactive.ts)
+      R.stderr.write(R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, "").replace(/\u02b9\d+/g, ""));
       return false;
     }
   }
@@ -197,7 +198,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     }
     if (Array.isArray(m.forget) && m.forget.length) {
       const names = m.forget.filter((n: unknown) => typeof n === "string" && /^[A-Za-z_]\w*$/.test(n));
-      run(`import __main__ as _m\nfor _k in ${JSON.stringify(names)}: _m.__dict__.pop(_k, None)\ndel _m, _k\n`, host, "exec", "<forget>");
+      // (comprehensions: no name is left bound, even when there is nothing to delete)
+      run(`import __main__ as _m\n[_m.__dict__.pop(_k, None) for _k in ${JSON.stringify(names)}]\ndel _m\n`, host, "exec", "<forget>");
     }
     if (m.interact !== undefined) {
       ok = run(`import _interact\n_interact._update(${Number(m.interact)}, ${JSON.stringify(JSON.stringify(m.values))})\n`, host, "exec", "<interact>");
@@ -221,7 +223,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       } else {
         // "cell" mode: the value of a final expression is displayed, as in Jupyter.
         const mangle = typeof m.mangle === "string" && /^[A-Za-z0-9]+$/.test(m.mangle) ? m.mangle : null;
-        if (mangle) run(`import __main__ as _m\nfor _k in [k for k in _m.__dict__ if k.startswith(${JSON.stringify(localPrefix(mangle))})]: del _m.__dict__[_k]\ndel _m\n`, host, "exec", "<forget>");
+        if (mangle) run(`import __main__ as _m\n[_m.__dict__.pop(_k, None) for _k in [k for k in _m.__dict__ if k.startswith(${JSON.stringify(localPrefix(mangle))})]]\ndel _m\n`, host, "exec", "<forget>");
         ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle ? { transform: (t: any) => mangleLocals(t, mangle) } : {}) });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");

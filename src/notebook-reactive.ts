@@ -37,6 +37,11 @@
 //     after them (src/notebook-graph.ts).
 //   - Files: the files each run read and wrote give writer-to-reader edges;
 //     readers of a file just written, or changed outside (filesChanged), rerun.
+//   - Page-order scoping (with host.rename): a name defined by several cells
+//     and read is, for each cell, its nearest definition above it, as when a
+//     Jupyter notebook is read from the top.  The code that runs is renamed
+//     (x, xʹ2, xʹ3, ...: SCOPE_SEP), so each definition is its own variable
+//     and the graph stays exact; the page shows the code as written.
 import { NotebookGraph, type CellError, type GraphCell } from "./notebook-graph";
 import type { CellAnalysis } from "./dataflow";
 
@@ -73,7 +78,18 @@ export interface ReactiveHost {
   forget(names: string[]): Promise<void>;
   /** a cell's state changed */
   status(id: string, s: CellState): void;
+  /**
+   * Page-order scoping (optional): the new sources giving `name` one
+   * defining cell, each later definition renamed (src/rename.ts
+   * renameRedefinitions, with SCOPE_SEP), or null if it cannot be done.
+   */
+  rename?(request: { name: string; cells: { id: string; code: string; defines: boolean; reads: boolean }[]; taken: string[] }): Promise<[string, string][] | null>;
 }
+
+/** The separator of page-order scoping's names: `xʹ2` (U+02B9, a letter Python allows in names). */
+export const SCOPE_SEP = "\u02b9";
+/** A name as written (without page-order scoping's suffix). */
+export const written = (name: string) => name.replace(/\u02b9\d+$/, "");
 
 export interface RunReport {
   /** the cells that ran, in order */
@@ -89,6 +105,9 @@ export interface RunReport {
 }
 
 interface Registered {
+  /** the code as written and submitted */
+  source: string;
+  /** the code that runs: the source with page-order scoping's renames */
   code: string;
   analysis?: CellAnalysis;
   error?: CellError;
@@ -113,8 +132,12 @@ export class Reactive {
 
   constructor(readonly host: ReactiveHost) {}
 
-  /** The code the graph has for a cell (undefined: never submitted). */
+  /** The code the graph has for a cell, as written (undefined: never submitted). */
   submitted(id: string): string | undefined {
+    return this.registered.get(id)?.source;
+  }
+  /** The code that runs for a cell (page-order scoping's renames applied). */
+  effective(id: string): string | undefined {
     return this.registered.get(id)?.code;
   }
 
@@ -126,7 +149,7 @@ export class Reactive {
   load(opts: { stale?: boolean; fresh?: Set<string> } = {}): Promise<RunReport> {
     return this.serial(async () => {
       const cells = this.host.cells();
-      await this.registerAll(cells.map((c) => c.id), cells);
+      await this.registerAll(new Map(cells.map((c) => [c.id, c.code])), cells);
       this.errors = new Map(this.graph.errors);
       for (const [id, errors] of this.errors) this.host.status(id, { state: "error", errors });
       if (opts.stale ?? true) for (const c of cells) if (!this.errors.has(c.id) && !opts.fresh?.has(c.id)) this.markStale(c.id, "loaded");
@@ -160,12 +183,12 @@ export class Reactive {
     return this.serial(() => this.mutateAndRun(this.host.cells().map((c) => c.id), [], Infinity, true));
   }
 
-  /** Cells moved: only the order of ties changes. */
-  reordered(): void {
-    const order = this.host.cells().map((c) => c.id);
-    const present = new Set(order);
-    for (const id of [...this.registered.keys()]) if (!present.has(id)) this.registered.delete(id);
-    this.graph.set(order.filter((id) => this.registered.has(id)).map((id) => this.graphCell(id)));
+  /**
+   * Cells moved (or deleted elsewhere): the order of ties changes, and with
+   * page-order scoping, which definition a cell reads: those rerun.
+   */
+  reordered(): Promise<RunReport> {
+    return this.serial(() => this.mutateAndRun([], [], this.budget, false));
   }
 
   /** Files changed outside the cells (an upload): the cells that read them rerun, within the budget. */
@@ -210,18 +233,64 @@ export class Reactive {
     const r = this.registered.get(id)!;
     return { id, code: r.code, analysis: r.analysis, error: r.error };
   }
+  /** A cell's analysis of its code as written (for display and export: no scoping renames). */
+  async writtenAnalysis(id: string): Promise<CellAnalysis | null> {
+    const r = this.registered.get(id);
+    if (!r) return null;
+    const a = await this.host.analyze(r.source);
+    return "error" in a ? null : a;
+  }
 
-  private async registerAll(ids: string[], cells: CellInfo[]): Promise<void> {
-    const byId = new Map(cells.map((c) => [c.id, c]));
-    for (const id of ids) {
-      const c = byId.get(id);
-      if (!c) continue;
+  // Register these sources (id -> code as written, in page order), with
+  // their effective code; the graph is rebuilt.
+  private async registerAll(sources: Map<string, string>, cells: CellInfo[], eff?: Map<string, string>): Promise<void> {
+    eff ??= await this.effectiveCodes(sources);
+    for (const [id, source] of sources) {
+      const code = eff.get(id) ?? source;
       const prev = this.registered.get(id);
-      if (prev && prev.code === c.code) continue;
-      const a = await this.host.analyze(c.code);
-      this.registered.set(id, "error" in a ? { code: c.code, error: a.error } : { code: c.code, analysis: a });
+      if (prev && prev.code === code) {
+        prev.source = source;
+        continue;
+      }
+      const a = await this.host.analyze(code);
+      this.registered.set(id, "error" in a ? { source, code, error: a.error } : { source, code, analysis: a });
     }
     this.graph.set(cells.filter((c) => this.registered.has(c.id)).map((c) => this.graphCell(c.id)));
+  }
+
+  // Page-order scoping: the code each cell runs.  A name defined by several
+  // cells (not all the same import) and read by one is renamed in the later
+  // definitions and the cells reading them; names that cannot be renamed
+  // keep their multiple-definition error.
+  private async effectiveCodes(sources: Map<string, string>): Promise<Map<string, string>> {
+    const eff = new Map(sources);
+    if (!this.host.rename || sources.size < 2) return eff;
+    const an = new Map<string, CellAnalysis>();
+    for (const [id, code] of sources) {
+      const a = await this.host.analyze(code);
+      if (!("error" in a)) an.set(id, a);
+    }
+    const definers = new Map<string, string[]>(), readers = new Set<string>(), taken = new Set<string>();
+    for (const [id, a] of an) {
+      for (const n of a.defs) (definers.get(n) ?? definers.set(n, []).get(n)!).push(id);
+      for (const n of a.refs) readers.add(n);
+      for (const n of [...a.defs, ...a.refs]) taken.add(n);
+    }
+    const conflicts = [...definers].filter(([n, ds]) => {
+      if (ds.length < 2 || !readers.has(n)) return false;
+      const what = ds.map((d) => an.get(d)!.imports?.get(n));
+      return !(what[0] !== undefined && what.every((w) => w === what[0]));
+    }).map(([n]) => n).sort();
+    for (const name of conflicts) {
+      const cells = [...sources.keys()].map((id) => ({ id, code: eff.get(id)!, defines: !!an.get(id)?.defs.has(name), reads: !!an.get(id)?.refs.has(name) }));
+      const r = await this.host.rename({ name, cells, taken: [...taken] });
+      if (!r) continue;
+      for (const [id, code] of r) {
+        eff.set(id, code);
+      }
+      for (let k = 2; k <= cells.length + 1; k++) taken.add(name + SCOPE_SEP + k);
+    }
+    return eff;
   }
 
   private defsOf(id: string): string[] {
@@ -250,9 +319,25 @@ export class Reactive {
     const changed = new Set<string>();
     // the names whose objects changed or deleted cells mutated
     const oldMutations = new Set<string>();
-    for (const id of ids) {
+    // cells deleted elsewhere (no longer on the page) go as removed ones do
+    for (const id of this.registered.keys()) if (!present.has(id) && !remove.includes(id)) remove = [...remove, id];
+    // the sources after this action, in page order, and the code each runs
+    const sources = new Map<string, string>();
+    for (const c of cells) {
+      if (remove.includes(c.id)) continue;
+      if (ids.includes(c.id)) sources.set(c.id, c.code);
+      else if (this.registered.has(c.id)) sources.set(c.id, this.registered.get(c.id)!.source);
+    }
+    const eff = await this.effectiveCodes(sources);
+    // (cells whose code to run changed though they were not run: page-order scoping)
+    const rescoped = new Set<string>();
+    for (const [id, prev] of this.registered) {
+      if (!sources.has(id) || ids.includes(id) || prev.code === eff.get(id)) continue;
+      rescoped.add(id);
+    }
+    for (const id of [...ids, ...rescoped]) {
       const prev = this.registered.get(id);
-      if (!prev || prev.code === cells.find((c) => c.id === id)!.code) continue;
+      if (!prev || prev.code === eff.get(id)) continue;
       changed.add(id);
       for (const c of this.graph.children(id)) oldChildren.add(c);
       for (const n of prev.analysis?.mutations ?? []) oldMutations.add(n);
@@ -272,10 +357,7 @@ export class Reactive {
       this.files.delete(id);
     }
     for (const id of ids) if (!this.registered.has(id)) changed.add(id);
-    await this.registerAll(ids, cells.filter((c) => present.has(c.id)));
-    // registering may have dropped cells no longer on the page
-    for (const id of [...this.registered.keys()]) if (!present.has(id)) this.registered.delete(id);
-    this.graph.set(cells.filter((c) => this.registered.has(c.id)).map((c) => this.graphCell(c.id)));
+    await this.registerAll(sources, cells.filter((c) => present.has(c.id)), eff);
     const inGraph = new Set(this.graph.ids);
 
     // errors: kept on previously valid cells only downstream of a submitted one
@@ -309,7 +391,7 @@ export class Reactive {
     const noLongerErrors = [...errorsBefore].filter((id) => !errors.has(id) && inGraph.has(id));
     const transitioned = [...errors.keys()].filter((id) => !errorsBefore.has(id) && before.has(id));
     const roots = new Set(ids.filter((id) => !errors.has(id)));
-    const auto = new Set<string>([...oldChildren, ...noLongerErrors]);
+    const auto = new Set<string>([...oldChildren, ...noLongerErrors, ...rescoped]);
     for (const id of transitioned) for (const c of this.graph.children(id)) if (!errors.has(c)) auto.add(c);
     // #1477: a name whose definers dropped to one: that one reruns
     for (const [n, k] of definersBefore) {

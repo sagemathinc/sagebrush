@@ -208,16 +208,8 @@ for ties; an ancestor's error stops descendants.
    - **Built-in UI elements** (sliders, dropdowns, ...) are reactive values.
      A widget defined in one cell and read in another is an edge, and moving
      it reruns the reading cells.
-   - **Third-party widgets** use the **anywidget** protocol
-     ([manzt/anywidget](https://github.com/manzt/anywidget), MIT), which
-     marimo supports in place of ipywidgets:
-     - the front end is an ES module (`render({model, el})`) running in the
-       page;
-     - the model's state (get/set/`change:` events) is synced with the
-       Python object in the worker;
-     - Python gets a light `anywidget.AnyWidget` with traitlets-style synced
-       attributes.
-     This opens the existing anywidget ecosystem.
+   - Third-party widgets (anywidget): not adopted; see "anywidget: not
+     adopted" below.
    - Our light `ipywidgets` stays for compatibility (its controls become
      reactive values too).
    - In more detail: **widgets are inputs.** A widget defined in one cell and read (`n.value`)
@@ -397,11 +389,14 @@ compromises are unnecessary.
 8. **Mutation tracking: adopted** (version counters in the runtime; a cell
    that mutates another cell's object becomes its updater). See "What owning
    the parser and the runtime buys", 3.
+9. **Page-order scoping for redefinitions: adopted** (see below), over
+   marimo's error.
+10. **anywidget: not adopted.**
 
 ## Progress (October 11, 2026)
 
-On with `?reactive` in the address (or localStorage `sagebrush-reactive` =
-"1"); the default page is unchanged. Tests: test/dataflow, notebook-graph
+On with `?reactive` in the address, which keeps it on in that browser
+(`?reactive=0` turns it off); the default page is unchanged. Tests: test/dataflow, notebook-graph
 (marimo oracles), notebook-reactive, rename (npm test), and
 web/test-reactive.mjs (60 browser checks).
 
@@ -415,7 +410,7 @@ web/test-reactive.mjs (60 browser checks).
 | Per-cell seeds | web/replay-env.ts, notebook.js cellSeed | SHA-256 of the notebook's seed (in the document) and the cell id; Python's random and numpy.random reseeded. numpy.random's global generator now starts from entropy, as NumPy's. |
 | Mutation tracking | src/dataflow.ts `mutations` | static (visible top-level mutations); aliases and mutation inside functions are left to verify(). Runtime counters later. |
 | Files | web/shims/fs.ts, web/worker.ts | each run's reads and writes; uploads rerun readers. |
-| Widgets | lib/ipywidgets `_report` | the cells reading a moved widget's names rerun. anywidget not yet. |
+| Widgets | lib/ipywidgets `_report` | the cells reading a moved widget's names rerun. (anywidget: not adopted.) |
 | Fix for redefinitions | src/rename.ts | "Rename the later definitions of x (x_2, …)", keeping a Jupyter notebook's meaning; scope-aware; Sage through the preparser. |
 | Agents | notebook.js applyEdits/graph/verify; WebMCP edit_notebook, notebook_graph, verify_notebook | |
 | UI | index.html | Auto-run (2 s, 10 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
@@ -432,37 +427,37 @@ web/test-reactive.mjs (60 browser checks).
 2. `sagebrush notebook` (the same session in a Node worker thread) handles
    `forget`, `mangle` and `seed` (Python's random and numpy.random), but not
    yet file tracking or seeding os.urandom; it needs its own reactive test.
-3. anywidget; runtime mutation counters.
+3. Runtime mutation counters (later).
 
-## Open question: Sage's redefined `x` (found October 11, for William)
+## Page-order scoping for redefinitions (decided October 11: William)
 
-Building with reactive on by default, test-notebook stops at a sequence
-every Sage user writes:
+Found while measuring the flip: every Sage user writes `R.<x> = ZZ[]`, then
+`x = polygen(QQ, 'x')`, then `x = var('x')` in later cells, and reads `x` in
+others. Under marimo's rule those are errors, and renaming to `x_2` is
+unnatural for a polynomial variable. William chose **page-order scoping**:
+a cell reads the nearest definition above it, as a paper does ("let $K$ be
+..." holds until $K$ is redefined) and as a Jupyter notebook read from the
+top does.
 
-```
-R.<x> = ZZ[]                       # cell 5
-x = polygen(QQ, 'x'); K.<a> = …    # cell 6
-x = var('x'); K.<a> = …            # cell 7
-print(solve(x^2 == 2, x), …)       # cell 8
-```
+How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
 
-`x` (and `K`, `a`) are defined by several cells and read by others: under
-marimo's rule, errors on all of them. The one-click fix (x_2, x_3) is right
-for Python variables but unnatural for a polynomial variable. Options:
+- A name defined by several cells and read by one is renamed in the code
+  that runs: the later definitions and the cells reading them get `xʹ2`,
+  `xʹ3`, ... (U+02B9, a letter Python allows in names). The page shows the
+  code as written; error messages and the graph show `x`.
+- Each definition is its own variable, so the graph stays exact: editing
+  the first `x` reruns only the cells reading it.
+- The renames are recomputed when cells run, move or are deleted; a cell
+  whose renamed code changes (a definition inserted above it) reruns.
+- In Sage, `var('x')` alone on a line becomes `xʹ2 = SR.var('x')` (which
+  does not set the global `x`).
+- Names that cannot be renamed (Magma) keep marimo's error and its fix.
+- marimo's rule otherwise: a name nobody reads may be defined by several
+  cells (#1477), and the same import in several cells is not a conflict.
 
-1. **Keep marimo's rule** (as built). Sage notebooks need distinct names or
-   the fix; the error message could suggest `_x` for a cell-local generator.
-2. **Page order for redefinitions** (Jupyter's reading, made reactive): a
-   cell reads the nearest definition above it. The run-time code is renamed
-   invisibly (`x` on the page, `xʹ2` in the interpreter: U+02B9 is a valid
-   identifier character, removed from messages), exactly as the fix does in
-   src/rename.ts, so the graph stays exact and nothing is an error. Each
-   definition is its own variable; editing cell 6 reruns only the cells
-   between it and cell 7 that read x. A deviation from marimo with a reason
-   (Sage's idioms), and a moderate change: the scheduler would register the
-   renamed code.
-3. **Only for Sage mode** (2 in Sage, 1 in Python).
+## anywidget: not adopted (William, October 11)
 
-Not built: it changes the semantics William asked to match, so it is his
-decision. Everything else needed for the flip is listed under "Before it
-becomes the default".
+Third-party widget JavaScript would run in the page (or need a sandboxed
+iframe and a message bridge): "fighting XSS sucks and pulling in JS so
+explicitly feels like a leaky abstraction". Widgets are Sagebrush's own
+(ipywidgets subset, @interact, marimo's mo.ui), drawn by the page.
