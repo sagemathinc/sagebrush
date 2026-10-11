@@ -600,6 +600,19 @@ assert len(_d[0].conditions()) == 2  # F3
 _d = solve([_xs * _Y == 0, _xs > _a], _xs, _Y, solution_dict=True); assert all(d.conditions() for d in _d)
 _r1 = SR.var("r1"); _sys = solve([_xs * _Y == 0, _Y > _r1], _xs, _Y)  # F4: the external r1 is not captured
 assert all(str(s[0].rhs()) != "r1" and str(s[1].rhs()) != "r1" for s in _sys)
+_sys = solve([_Y == 1, _xs > 0], _xs, _Y); assert str(_sys[0][0].lhs()) == "x" and str(_sys[0][2]) == "r1 > 0"  # a requested variable is not new
 _b = 2**63 + 2; _ss = solve(sin(_xs) / cos(_xs / _b) == 0, _xs)  # F5: a huge period is not decided
 assert _ss[0].conditions(); raises(ValueError, _ss[0].subs, n1=_b // 2)
+assume(_xs > _Y); assert str(solve([_xs * _xs == 1, _Y == -_xs], _xs, _Y)) == "[[x == 1, y == -1]]"; forget()  # F6: jointly
+assume(_xs > 0); assert str(solve([_xs * _Y == 0], _xs, _Y)) == "[[x == r1, y == 0, r1 > 0]]" and solve([_xs == -1, _Y == 2], _xs, _Y) == []; forget()
+_zs = list(SR.var(" ".join("z%d" % i for i in range(14))))  # F7: a long chain is not a search explosion
+assert all(str(e.rhs()) == "1" for e in solve([sqrt(_zs[i]) == _zs[i + 1] for i in range(13)] + [_zs[-1] == 1], *_zs)[0])
 print("solve review ok")
+# trigonometric equations (sage-support: sin(x) == cos(x), cos(2 x) == cos(x) unsolved or principal only)
+assert str(solve(sin(_xs) == cos(_xs), _xs)) == "[x == pi*n1 + 1/4*pi for integer n1]"
+assert str(solve(cos(2 * _xs) == cos(_xs), _xs)) == "[x == 2/3*pi*n1 for integer n1]"
+assert str(solve(sin(_xs) * cos(_xs) == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/12*pi for integer n1, x == pi*n2 + 5/12*pi for integer n2]"
+assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/6*pi for integer n1, x == pi*n2 - 1/6*pi for integer n2]"
+assert str(solve(tan(_xs) == sin(_xs), _xs)) == "[x == pi*n1 for integer n1]" and len(solve(sin(_xs) + sin(2 * _xs) + sin(3 * _xs) == 0, _xs)) == 3
+assert str(solve(log(_xs)**2 == 2, _xs)) == "[x == e^(-sqrt(2)), x == e^sqrt(2)]"
+print("solve trig ok")

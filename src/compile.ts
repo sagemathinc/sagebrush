@@ -111,13 +111,20 @@ function compileCached(source: string, filename: string, name: string, sage: boo
     const key = createHash("sha256").update(name + "\0" + (sage ? "1" : "0") + "\0" + source).digest("hex").slice(0, 32);
     const jsonPath = join(dir, key + ".json");
     const v8Path = join(dir, key + ".v8");
+    // an entry is used only when whole: its code's hash recorded beside it
+    // (a file holding {} was accepted, and the module failed to load: the
+    // review's CACHE2-F1)
+    const sum = (code: string) => createHash("sha256").update(code).digest("hex");
     let compiled: Compiled | null = null;
     try {
-      compiled = JSON.parse(readFileSync(jsonPath, "utf8"));
+      const c = JSON.parse(readFileSync(jsonPath, "utf8"));
+      if (typeof c?.code === "string" && Array.isArray(c.lineMap) && c.sum === sum(c.code)) {
+        compiled = { code: c.code, lineMap: c.lineMap };
+      }
     } catch {}
     if (compiled === null) {
       compiled = compile(source, filename, name, false, false, { sage });
-      writeAtomic(jsonPath, JSON.stringify(compiled));
+      writeAtomic(jsonPath, JSON.stringify({ ...compiled, sum: sum(compiled.code) }));
     }
     let cachedData: Buffer | undefined;
     try {
