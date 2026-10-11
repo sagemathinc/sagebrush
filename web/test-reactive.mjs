@@ -141,6 +141,19 @@ try {
   const v2 = await ev("sagebrush.notebook.verify().then((r) => r.changed.map((c) => [c.before.trim(), c.after.trim()]))");
   ok(JSON.stringify(v2) === '[["4","3"]]', `...and verify finds it (${JSON.stringify(v2)})`);
 
+  // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
+  await fileNew();
+  await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);
+  await run([0, 1]);
+  const r1 = [await out(0), await out(1)];
+  await run(1);
+  await run(0);
+  const r2 = [await out(0), await out(1)];
+  ok(r1[0] === r2[0] && r1[1] === r2[1] && /^0\.\d+ 0\.\d+$/.test(r1[0]), `a cell's random numbers are the same on every run (${r1.join(" | ")})`);
+  const vs = await ev("sagebrush.notebook.verify().then((r) => r.changed.length)");
+  ok(vs === 0, `...and in a fresh interpreter: verify finds no difference (${vs})`);
+  ok(/^[0-9a-f]{64}$/.test(await ev("sagebrush.notebook.meta.seed")), "the notebook's seed is in its document");
+
   // Sage mode
   await fileNew();
   await ev("sagebrush.notebook.setMode('sage'); true");

@@ -11,7 +11,9 @@
 //                                 first, the reactive notebook's invalidation;
 //                                 `mangle`: the cell's id (alphanumeric): its `_`
 //                                 names are its own, as in marimo, and are
-//                                 deleted before it runs)
+//                                 deleted before it runs; `seed`: 64 hex digits,
+//                                 the run's entropy (RunHooks), and Python's
+//                                 random and numpy.random are reseeded from it)
 //      {id, interact, values}     an @interact control changed: rerun it
 //      {id, check, sage?}         -> {id, more}: is this input incomplete?
 //      {id, complete}             -> {id, matches, prefix}: Tab completion
@@ -172,6 +174,11 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     const t0 = performance.now();
     opts.runs?.begin(m);
     let ok = true;
+    // a seeded run (the reactive notebook's per-cell seeds): the generators
+    // already made draw again from the run's entropy (os.urandom)
+    if (typeof m.seed === "string" && opts.runs) {
+      run("import sys as _s\nfor _k in ('random', 'numpy.random'):\n    _g = _s.modules.get(_k)\n    if _g is not None: _g.seed()\ndel _s, _k, _g\n", host, "exec", "<seed>");
+    }
     if (Array.isArray(m.forget) && m.forget.length) {
       const names = m.forget.filter((n: unknown) => typeof n === "string" && /^[A-Za-z_]\w*$/.test(n));
       run(`import __main__ as _m\nfor _k in ${JSON.stringify(names)}: _m.__dict__.pop(_k, None)\ndel _m, _k\n`, host, "exec", "<forget>");

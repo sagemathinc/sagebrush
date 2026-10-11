@@ -178,7 +178,8 @@ class RandomState:
         return bytes(self.randint(0, 256, length).tolist())
 
 
-_global = RandomState(0)
+# (fresh entropy, as NumPy: in a reproducible notebook, its seeded stream)
+_global = RandomState()
 seed = _global.seed
 get_state = _global.get_state
 set_state = _global.set_state

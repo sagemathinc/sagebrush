@@ -67,20 +67,28 @@ function chacha20(seedHex: string) {
   };
 }
 
-if (typeof params.seed === "string" && /^[0-9a-f]{64}$/i.test(params.seed)) {
-  const g = chacha20(params.seed);
-  Math.random = g.float;
-  const grv = (a: any) => {
-    if (!ArrayBuffer.isView(a)) return crypto.getRandomValues(a); // (the browser's error)
-    g.fill(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
-    return a;
-  };
-  try {
-    Object.defineProperty(crypto, "getRandomValues", { value: grv, configurable: true, writable: true });
-  } catch {
-    (crypto as any).getRandomValues = grv;
+// The stream in use; a run may give its own seed (the reactive notebook's
+// per-cell seeds), which replaces it from then on.
+let gen: ReturnType<typeof chacha20> | null = null;
+const isSeed = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{64}$/i.test(s);
+function useSeed(seed: string) {
+  if (!gen) {
+    const realGrv = crypto.getRandomValues.bind(crypto);
+    Math.random = () => gen!.float();
+    const grv = (a: any) => {
+      if (!ArrayBuffer.isView(a)) return realGrv(a); // (the browser's error)
+      gen!.fill(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
+      return a;
+    };
+    try {
+      Object.defineProperty(crypto, "getRandomValues", { value: grv, configurable: true, writable: true });
+    } catch {
+      (crypto as any).getRandomValues = grv;
+    }
   }
+  gen = chacha20(seed);
 }
+if (isSeed(params.seed)) useSeed(params.seed);
 
 // ------------------------------------------------------------ the clock
 let recording: number[] | null = [];
@@ -142,8 +150,9 @@ export const replayEnv = {
   now: realPerfNow,
   /** the clock values read while the worker started (call once, when ready) */
   endStartup: (): ClockRecord => finish(),
-  /** a run starts: record its clock reads, replaying `clock` if given */
-  begin(clock?: number[]) {
+  /** a run starts: record its clock reads, replaying `clock` if given; `seed` (64 hex digits): its entropy from now on */
+  begin(clock?: number[], seed?: string) {
+    if (isSeed(seed)) useSeed(seed);
     recording = [];
     replaying = Array.isArray(clock) ? clock : null;
     replayPos = extra = 0;

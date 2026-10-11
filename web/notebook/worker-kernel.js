@@ -123,13 +123,14 @@ export class WorkerKernel {
    * opts: {mode: "python"|"sage"|"magma", repl, cell (the notebook cell's id,
    * for the journal), clock (TimeTravel replay: the clock values to replay),
    * forget (global names to delete first: the reactive notebook), mangle
-   * (the cell's `_` names are its own: the reactive notebook)}
+   * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
+   * digits: the run's entropy, the reactive notebook's per-cell seeds)}
    * The sink's done(ms, {error}) says whether the code raised.
    */
   execute(code, opts, sink) {
     const id = this.nextId++;
     this.pending.set(id, sink);
-    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}) };
+    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}) };
     const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
     this.track(id, run);
     this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget });
