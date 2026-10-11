@@ -57,9 +57,14 @@ class RandomState:
         self.seed(seed)
 
     def seed(self, seed=None):
+        if seed is None and _cell_seed():
+            # (a reactive notebook's cell: from the cell's seed, one stream per
+            # request of the run)
+            s = _cell_seed()
+            s[2][0] += 1
+            seed = list(s[1]) + [s[2][0]]
         if seed is None:
-            # fresh entropy, as NumPy (os.urandom: the session's seeded
-            # stream in a reproducible notebook, design/timetravel-replay.md)
+            # fresh entropy, as NumPy
             import os
             seed = [int.from_bytes(os.urandom(4), "little") for _ in range(8)]
         if isinstance(seed, (list, tuple, _np.ndarray)):

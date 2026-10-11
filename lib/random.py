@@ -6,13 +6,25 @@ import _random
 __all__ = ["Random", "seed", "random", "getrandbits", "randrange", "randint", "choice", "shuffle", "uniform", "sample", "gauss", "choices"]
 
 
+def _cell_entropy():
+    # (in a reactive notebook's cell, a generator made or reseeded without a
+    # seed draws from the cell's seed, one stream per request of the run:
+    # src/notebook-session.ts; elsewhere None, true entropy)
+    import builtins
+    s = getattr(builtins, "__pyjs_seed__", None)
+    if not s:
+        return None
+    s[2][0] += 1
+    return (s[0] << 32) + s[2][0]
+
+
 class Random:
     def __init__(self, x=None):
-        self._r = _random.Random(x)
+        self._r = _random.Random(_cell_entropy() if x is None else x)
         self.gauss_next = None
 
     def seed(self, a=None):
-        self._r.seed(a)
+        self._r.seed(_cell_entropy() if a is None else a)
         self.gauss_next = None
 
     def random(self):

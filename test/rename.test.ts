@@ -88,3 +88,19 @@ test("Sage cells with names of other scripts are renamed", () => {
   const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode: "sage" }); return { id: `c${i}`, code, defines: a.defs.has("\u03b1"), reads: a.refs.has("\u03b1") }; });
   assert.deepEqual(Object.fromEntries(renameRedefinitions(cells, "\u03b1", new Set(["\u03b1"]), "sage", "\u02b9")!), { c1: "\u03b1\u02b92 = \u03b1 + 1", c2: "print(\u03b1\u02b92^2)" });
 });
+
+test("second review: method defaults, global in a function, var in strings", () => {
+  const q = (codes: string[], name: string, mode: "python" | "sage" = "python") => {
+    const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode }); return { id: `c${i}`, code, defines: a.defs.has(name), reads: a.refs.has(name) }; });
+    const r = renameRedefinitions(cells, name, new Set([name]), mode, "\u02b9");
+    return r && Object.fromEntries(r);
+  };
+  // a method's default is evaluated in the class body (its x); the method's body sees the module's
+  assert.deepEqual(q(["x = 1", "print(x)", "x = 2\nclass C:\n    x = 100\n    def f(self, a=x):\n        return a, x", "print(C().f(), x)"], "x"), {
+    c2: "x\u02b92 = 2\nclass C:\n    x = 100\n    def f(self, a=x):\n        return a, x\u02b92", c3: "print(C().f(), x\u02b92)",
+  });
+  // global x and the assignment it declares get the same name
+  assert.deepEqual(q(["x = 1", "def f():\n    global x\n    x = 2\nf()", "print(x)"], "x"), { c1: "def f():\n    global x\u02b92\n    x\u02b92 = 2\nf()", c2: "print(x\u02b92)" });
+  // var in a string is a string
+  assert.deepEqual(q(["x = 1", "print(x)", "x = 2\nprint(\"var('x')\")", "print(x)"], "x", "sage"), { c2: "x\u02b92 = 2\nprint(\"var('x')\")", c3: "print(x\u02b92)" });
+});

@@ -156,7 +156,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       // (a cell's renamed `_` names are shown as written)
       // (and page-order scoping's names, as written: the run's `scoped`)
       let text = R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, "");
-      for (const [n, w] of scopedNames) text = text.split(n).join(w);
+      // (whole names only: xʹ2 is not the start of xʹ20)
+      for (const [n, w] of scopedNames) text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}\\p{Mn}_])`, "gu"), w);
       R.stderr.write(text);
       return false;
     }

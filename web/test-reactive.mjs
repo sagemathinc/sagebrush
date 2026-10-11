@@ -325,6 +325,48 @@ try {
   v16 = await ev("sagebrush.notebook.verify().then((r) => r.changed.length)");
   ok(v16 === 0, `...and finds nothing when nothing differs (${v16})`);
 
+  // second review: var('_x') is the cell's own; tracebacks keep longer names; verify does not hide text
+  await fileNew();
+  await ev("sagebrush.notebook.setMode('sage'); true");
+  await set(["var('_x')\n_x = 1\ndef f():\n    return _x", "var('_x')\n_x = 2", "print(f())"]);
+  await run([0, 1, 2]);
+  ok((await out(2)) === "1", `var('_x') in two cells: two variables (f() = ${await out(2)})`);
+  await ev("sagebrush.notebook.setMode('python'); true");
+  await set(["x = 1", "x = 2", "print(x + x\u02b920)"]);
+  await run([0, 1, 2]);
+  ok(/NameError: name 'x\u02b920' is not defined/.test(await out(2)), `a traceback keeps a longer name whole (${(await out(2)).split("\n").pop()})`);
+  await set(["v = [1]", "w = v\nw[0] += 1", "print('sbclip' + str(v[0]))"]);
+  await run([0, 1, 2]);
+  await run(1);
+  await run(2);
+  const vt = await ev("sagebrush.notebook.verify().then((r) => r.changed.map((c) => [c.before.trim(), c.after.trim()]))");
+  ok(JSON.stringify(vt) === '[["sbclip3","sbclip2"]]', `verify finds a text difference, whatever the text (${JSON.stringify(vt)})`);
+
+  // second review, F5: away and back during a run: the output lands in the cell shown
+  await fileNew();
+  const idA5 = await ev("localStorage.getItem('sagebrush-current')");
+  await set(["import time\ntime.sleep(1.5)\nx = 1\nprint('OLD')", "print(x)"]);
+  await run([0, 1]);
+  await set(["import time\ntime.sleep(1.5)\nx = 2\nprint('NEW')"]);
+  await ev("window.__runA5 = sagebrush.notebook.runAll(); true");
+  await sleep(300);
+  await fileNew();
+  await set(["b = 987\nprint(b)"]);
+  await run(0);
+  await ev(`sagebrush.open(${JSON.stringify(idA5)})`);
+  await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idA5)}`, 10000);
+  await ev("window.__runA5");
+  await sleep(1500);
+  const a5 = [await out(0), await out(1), await ev("sagebrush.notebook.graph().map((c) => c.state).join(',')")];
+  ok((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]), `F5: switching away and back during a run: the cell shows its output, or is stale (${JSON.stringify(a5)})`);
+
+  // second review: generators made or reseeded without a seed draw from the cell's seed too
+  await set(["import random\nimport numpy as np\nrandom.seed()\nprint(random.Random().random(), np.random.RandomState().rand(), random.random())"]);
+  await run(0);
+  const g1 = await out(0);
+  await run(0);
+  ok((await out(0)) === g1, `random.Random(), RandomState() and random.seed() without a seed repeat in a cell (${g1})`);
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);

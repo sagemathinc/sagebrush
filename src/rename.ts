@@ -27,6 +27,8 @@ interface Occurrence {
   // `import x` / `from m import x` (the name is the module's or the
   // module's attribute): renamed by adding `as`; null: cannot be (`import x.y`)
   alias?: string | null;
+  // `global x` in a function: the same name as that function's assignments
+  global?: true;
 }
 
 const BINDING_TYPES = new Set(["FunctionDef", "AsyncFunctionDef", "ClassDef"]);
@@ -100,9 +102,28 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
           if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path });
         }
         // (a class body's own bindings are its attributes; methods do not see them)
+        // (a method's or nested class's name is an attribute; its decorators,
+        // defaults, annotations and bases are evaluated in the class body; its
+        // body is not)
         {
-          const attr = shadowed || localsOf(n.body.filter((s: any) => !BINDING_TYPES.has(s._type)), []).has(name);
-          for (const st of n.body) walk(st, BINDING_TYPES.has(st._type) ? shadowed : attr, stmt, under("body"));
+          const attr = shadowed || localsOf(n.body.filter((s: any) => !BINDING_TYPES.has(s._type)), []).has(name) || n.body.some((s: any) => BINDING_TYPES.has(s._type) && s.name === name);
+          for (const st of n.body) {
+            const at = under("body");
+            if (!BINDING_TYPES.has(st._type)) { walk(st, attr, stmt, at); continue; }
+            const p2: [any, string][] = [...at, [st, "decorator_list"]];
+            walk(st.decorator_list, attr, stmt, p2);
+            if (st._type === "ClassDef") {
+              walk(st.bases, attr, stmt, p2);
+              walk(st.keywords, attr, stmt, p2);
+              const inner = shadowed || localsOf(st.body.filter((x: any) => !BINDING_TYPES.has(x._type)), []).has(name);
+              walk(st.body, inner, stmt, [...at, [st, "body"]]);
+            } else {
+              walk(st.args?.defaults, attr, stmt, p2);
+              walk(st.args?.kw_defaults, attr, stmt, p2);
+              walk(st.returns, attr, stmt, p2);
+              walk(st.body, shadowed || localsOf(st.body, params(st.args)).has(name), stmt, [...at, [st, "body"]]);
+            }
+          }
         }
         return;
       case "ListComp": case "SetComp": case "GeneratorExp": case "DictComp": {
@@ -134,7 +155,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
           const m = new RegExp(`\\bglobal\\b[^#]*?\\b(${name})\\b`).exec(text);
           if (m) {
             const start = bytesLen(text.slice(0, m.index + m[0].length - name.length));
-            out.push({ line: n.lineno, col: start, end: start + bytesLen(name), store: false, stmt, path });
+            out.push({ line: n.lineno, col: start, end: start + bytesLen(name), store: false, stmt, path, global: true });
           }
         }
         return;
@@ -160,7 +181,11 @@ function whichReads(occ: Occurrence[], first: Occurrence): Map<Occurrence, "old"
   const before = (a: Occurrence, b: Occurrence) => a.line < b.line || (a.line === b.line && a.col < b.col);
   const inside = (o: Occurrence, node: any) => o.path.some(([n]) => n === node);
   const LOOPS = new Set(["For", "AsyncFor", "While"]);
+  // (a `global x` takes the name of the assignments in its function, if any)
+  const globals = occ.filter((o) => o.global);
+  const fnOf = (o: Occurrence) => [...o.path].reverse().find(([n]) => n._type === "FunctionDef" || n._type === "AsyncFunctionDef")?.[0];
   for (const o of occ) {
+    if (o.global) continue;
     if (o === first || o.stmt > first.stmt || (o.stmt === first.stmt && o.store && !before(o, first))) { out.set(o, "new"); continue; }
     if (o.stmt < first.stmt) { out.set(o, "old"); continue; }
     // the same statement
@@ -174,6 +199,11 @@ function whichReads(occ: Occurrence[], first: Occurrence): Map<Occurrence, "old"
       if (o.path.some(([n]) => LOOPS.has(n._type) && inside(first, n))) return null;
       out.set(o, "old");
     } else out.set(o, "new");
+  }
+  for (const g of globals) {
+    const f = fnOf(g);
+    const store = occ.find((o) => o.store && !o.global && f && fnOf(o) === f);
+    out.set(g, store ? out.get(store)! : g.stmt > first.stmt || (g.stmt === first.stmt && !before(g, first)) ? "new" : "old");
   }
   return out;
 }
@@ -311,7 +341,7 @@ export function renameRedefinitions(
       if (code === c.code && mode === "sage") code = renameVar(c.code, name, to, current);
       if (code === null || code === c.code) return null;
       // (Sage: var('x') also sets the global x, the first definition's: SR.var does not)
-      if (mode === "sage") code = code.replace(/(^|[^\w.\u02b9])var\((\s*)(['"])([^'"]*)\3/g, (all, pre, sp, q, names) => (names.split(/[\s,]+/).includes(name) ? `${pre}SR.var(${sp}${q}${names}${q}` : all));
+      if (mode === "sage") code = srVar(code, name);
       out.set(c.id, code);
       current = to;
     } else if (c.defines) {
@@ -345,4 +375,21 @@ function renameVar(source: string, name: string, to: string, before: string): st
     tail = t;
   }
   return [...(i ? [head] : []), `${to} = SR.var(${JSON.stringify(name)})`, ...(i + 1 < lines.length ? [tail] : [])].join("\n");
+}
+
+// In Sage code, `var('... name ...')` calls (outside strings and comments) as
+// SR.var(...), which binds without setting the global.
+function srVar(code: string, name: string): string {
+  return code.split("\n").map((line) => {
+    const re = /(#.*)|((?:\b[rRbBuUfF]{1,2})?(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?))|([\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_]*)/gu;
+    const at: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line))) {
+      if (m[3] !== "var" || line[m.index - 1] === ".") continue;
+      const call = /^\s*\(\s*(['"])([^'"]*)\1/.exec(line.slice(m.index + 3));
+      if (call && call[2].split(/[\s,]+/).includes(name)) at.push(m.index);
+    }
+    for (const i of at.reverse()) line = line.slice(0, i) + "SR." + line.slice(i);
+    return line;
+  }).join("\n");
 }

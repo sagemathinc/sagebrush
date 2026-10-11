@@ -75,10 +75,8 @@ class Visitor {
   refs = new Map<string, RefData[]>();
   constructor(public id: string) {}
 
-  // names never renamed as private (a Sage cell's var('_x'), which sets the global _x)
-  keep = new Set<string>();
   mangle(name: string, ignoreScope = false): string {
-    return isLocal(name) && !this.keep.has(name) && (this.blocks.length === 1 || ignoreScope) ? `_${this.id}${name}` : name;
+    return isLocal(name) && (this.blocks.length === 1 || ignoreScope) ? `_${this.id}${name}` : name;
   }
   isDefined(name: string): boolean {
     return this.blocks.some((b) => b.defs.has(name));
@@ -346,7 +344,8 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
   const top = v.blocks[0];
   const defs = new Set([...top.defs].filter((n) => !isLocal(n)));
   for (const n of injected) {
-    defs.add(n);
+    // (a private _x of var('_x') is the cell's own: privateVars)
+    if (!isLocal(n)) defs.add(n);
   }
   const refs = new Set([...v.refs.keys()].filter((n) => !injected.includes(n)));
   return {
@@ -433,8 +432,8 @@ function mutated(tree: Node): Set<string> {
  */
 export function mangleLocals(tree: any, id: string): void {
   try {
+    privateVars(tree);
     const v = new Visitor("cell_" + id);
-    for (const n of sageInjected(tree)) v.keep.add(n);
     v.visit(tree);
   } catch (e) {
     if (!(e instanceof ImportStarError)) throw e;
@@ -442,6 +441,26 @@ export function mangleLocals(tree: any, id: string): void {
 }
 /** The prefix of a cell's renamed `_` names. */
 export const localPrefix = (id: string) => `_cell_${id}_`;
+
+// A Sage cell's top-level `var('_x ...')` naming private names: it would set
+// the global _x, shared by every cell; as `_x, ... = SR.var('_x ...')` (which
+// sets no global) it binds the cell's own _x, renamed as the cell's other
+// private names are.  In place, in pyparse's tree.
+function privateVars(tree: Node): void {
+  tree.body = tree.body.map((st: any) => {
+    const call = st._type === "Expr" ? st.value : null;
+    if (call?._type !== "Call" || call.func._type !== "Name" || call.func.id !== "var" || call.args.length !== 1 || call.keywords.length) return st;
+    const a = call.args[0];
+    if (a._type !== "Constant" || typeof a.value !== "string") return st;
+    const names = a.value.split(/[\s,]+/).filter(Boolean);
+    if (!names.some(isLocal) || !names.every((n: string) => /^[A-Za-z_]\w*$/.test(n))) return st;
+    const pos = { lineno: st.lineno, col_offset: st.col_offset, end_lineno: st.end_lineno, end_col_offset: st.end_col_offset };
+    const name = (id: string) => ({ _type: "Name", id, ctx: { _type: "Store" }, ...pos });
+    const target = names.length === 1 ? name(names[0]) : { _type: "Tuple", elts: names.map(name), ctx: { _type: "Store" }, ...pos };
+    const func = { _type: "Attribute", value: { _type: "Name", id: "SR", ctx: { _type: "Load" }, ...pos }, attr: "var", ctx: { _type: "Load" }, ...pos };
+    return { _type: "Assign", targets: [target], value: { ...call, func }, type_comment: null, ...pos };
+  });
+}
 
 // The names a Sage cell's top-level `var("x y")`, `var("x", "y")` or
 // `function("f")` statements bind in the notebook's namespace.

@@ -652,6 +652,20 @@ export function createNotebook(root, opts = {}) {
       out(text, isErr) { failed ||= isErr; appendText(cell.out, text, isErr); },
       done(ms, info) {
         settle(cell);
+        // (the notebook was switched away from while this ran: its output went to
+        // the cell as it was then; if the notebook is shown again, the cell shown
+        // now gets it; if not, the output is lost, so the run counts as stopped
+        // and the cell stays stale)
+        if (!cell.el.isConnected) {
+          const live = kernel === k ? cellById(cell.id) : null;
+          if (!live) return resolve({ ok: false, ms, stopped: true });
+          forgetInteracts(live.out);
+          live.out.replaceChildren(...cell.out.childNodes);
+          settle(live);
+          freshen(live);
+          live.el.classList.remove("cancelled", "error");
+          cell = live;
+        }
         cell.n.textContent = `[${kernel ? ++kernel.execCount : ++execCount}]`;
         kernel?.ran?.add(cell.id);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
@@ -1737,9 +1751,10 @@ export function createNotebook(root, opts = {}) {
   async function verify() {
     if (!kernel) throw new Error("no kernel");
     // (compared whole: pictures by their data, not only their descriptions)
-    // (with the ids that pictures number from counters made the same: the
-    // plot's sbclip7, and safeSvg's per-picture prefix s12-)
-    const whole = (c) => JSON.stringify(saveOutputs(c.out)).replace(/\bs\d+-(?=[A-Za-z])/g, "").replace(/\bsbclip\d+/g, "sbclip");
+    // (with the ids that pictures number from counters made the same, in
+    // their SVG only: the plot's sbclip7, and safeSvg's per-picture prefix s12-)
+    const ids = (svg) => svg.replace(/(\bid="|url\(#|href="#)s\d+-/g, "$1").replace(/(\bid="|url\(#|href="#)sbclip\d+/g, "$1sbclip");
+    const whole = (c) => JSON.stringify(saveOutputs(c.out).map((o) => (typeof o.data?.["image/svg+xml"] === "string" ? { ...o, data: { ...o.data, "image/svg+xml": ids(o.data["image/svg+xml"]) } } : o)));
     const before = new Map(cells().filter((c) => c.type === "code").map((c) => [c.id, [outputText(c.out), whole(c)]]));
     const ready = new Promise((resolve) => { const off = kernel.on("ready", () => { off(); resolve(); }); });
     kernel.restart();
