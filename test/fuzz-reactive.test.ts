@@ -54,6 +54,19 @@ export const REGRESSIONS: [string, Case][] = [
   ["cells after one that raises in plain Python, not depending on it, are compared (FUZZ-F3)", regression([
     "1 // 0", "class C:\n    a = 1", "class C:\n    a = 2\n    def m(self):\n        return C.a\nprint(C().m())", "print(C.a)",
   ])],
+  ["a generator stored in a class reads the new class when consumed (REACT-F20)", regression([
+    "class C:\n    a = 1", "print(C.a)", "class C:\n    a = 2\n    g = (C.a for i in [0])\nprint(list(C.g))",
+  ])],
+  ["a generator in a default reads the new function when consumed (REACT-F20)", regression(["f = 1", "print(f)", "def f(g=(f for _ in [0])):\n    return next(g) is f\nprint(f())"])],
+  ["a function called while its class is made: refused, not wrong (REACT-F21)", regression([
+    "class C:\n    a = 1", "print(C.a)", "class C:\n    def f():\n        return C.a\n    a = f() + 1\nprint(C.a)",
+  ])],
+  ["a generator consumed while the class is made reads the previous class", regression([
+    "class C:\n    a = 1", "print(C.a)", "class C:\n    a = 2\n    b = sum(C.a for i in [0])\n    def m(self):\n        return C.a\nprint(C.b, C().m())",
+  ])],
+  ["a `:=` in a default inside a function with `global x` binds the notebook's x (REACT-F22)", regression([
+    "x = 1", "def g():\n    global x\n    def f(a=(x := 2)):\n        return a\n    return f()\ng()\nprint(x)", "print(x)",
+  ], [{ kind: "edit", id: "c1", stmts: ["def g():\n    global x\n    def f(a=(x := 3)):\n        return a\n    return f()\ng()\nprint(x)"] }])],
 ];
 
 test("the reactive notebook computes what plain Python does: the fuzzer's cases", { skip: !hasPython && "no python3" }, async () => {
