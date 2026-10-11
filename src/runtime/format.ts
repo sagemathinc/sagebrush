@@ -2,6 +2,7 @@
 
 import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout, PrimBox } from "./object";
 import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice } from "./ops";
+import * as FD from "./fdlibm";
 
 const isInt = Number.isInteger;
 
@@ -62,7 +63,7 @@ export function formatFixed(x: number, p: number, alt = false): string {
 // [digits (p+1 significant), decimal exponent]
 function sciDigits(x: number, p: number): [string, number] {
   if (x === 0) return ["0".repeat(p + 1), 0];
-  let k = Math.floor(Math.log10(Math.abs(x)));
+  let k = Math.floor(FD.log10(Math.abs(x)));
   for (;;) {
     let digits: string;
     if (p - k >= 0) {

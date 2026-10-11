@@ -6,11 +6,12 @@
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { wasmFFT, wasmRfftRows } from "./kernels";
+import * as FD from "./fdlibm";
 
 // cos/sin of 2 pi/3, 4 pi/3, 2 pi/5, 4 pi/5, for the WebAssembly kernels
 // (the same values stockhamI computes)
 const RADIX_CONSTS = Float64Array.from([3, 5].flatMap((R) => [
-  Math.cos((2 * Math.PI) / R), Math.sin((2 * Math.PI) / R), Math.cos((4 * Math.PI) / R), Math.sin((4 * Math.PI) / R),
+  FD.cos((2 * Math.PI) / R), FD.sin((2 * Math.PI) / R), FD.cos((4 * Math.PI) / R), FD.sin((4 * Math.PI) / R),
 ]));
 
 // Per-size tables: twiddles cos/sin(2*pi*k/n) for k < n/2 and the bit-reversal permutation.
@@ -20,8 +21,8 @@ function table(n: number) {
   if (!t) {
     const c = new Float64Array(n >> 1), s = new Float64Array(n >> 1);
     for (let k = 0; k < n >> 1; k++) {
-      c[k] = Math.cos((2 * Math.PI * k) / n);
-      s[k] = Math.sin((2 * Math.PI * k) / n);
+      c[k] = FD.cos((2 * Math.PI * k) / n);
+      s[k] = FD.sin((2 * Math.PI * k) / n);
     }
     const rev = new Uint32Array(n);
     for (let i = 1, j = 0; i < n; i++) {
@@ -80,8 +81,8 @@ function chirp(n: number, inverse: boolean) {
     const cr = new Float64Array(n), ci = new Float64Array(n);
     for (let k = 0; k < n; k++) {
       const t = (Math.PI * ((k * k) % (2 * n))) / n;
-      cr[k] = Math.cos(t);
-      ci[k] = sg * Math.sin(t);
+      cr[k] = FD.cos(t);
+      ci[k] = sg * FD.sin(t);
     }
     const br = new Float64Array(m), bi = new Float64Array(m);
     br[0] = cr[0];
@@ -121,8 +122,8 @@ function twiddle(n: number) {
   if (!t) {
     const c = new Float64Array(n), s = new Float64Array(n);
     for (let k = 0; k < n; k++) {
-      c[k] = Math.cos((2 * Math.PI * k) / n);
-      s[k] = Math.sin((2 * Math.PI * k) / n);
+      c[k] = FD.cos((2 * Math.PI * k) / n);
+      s[k] = FD.sin((2 * Math.PI * k) / n);
     }
     t = { c, s };
     if (twiddles.size > 32) twiddles.clear();
@@ -181,8 +182,8 @@ function stockhamI(x: Float64Array, N: number, factors: number[], inverse: boole
         }
       }
     } else if (R === 3 || R === 5) {
-      const C1 = Math.cos((2 * Math.PI) / R), SN1 = Math.sin((2 * Math.PI) / R);
-      const C2 = Math.cos((4 * Math.PI) / R), SN2 = Math.sin((4 * Math.PI) / R);
+      const C1 = FD.cos((2 * Math.PI) / R), SN1 = FD.sin((2 * Math.PI) / R);
+      const C2 = FD.cos((4 * Math.PI) / R), SN2 = FD.sin((4 * Math.PI) / R);
       for (let jm = 0; jm < Ns; jm++) {
         for (let r = 1; r < R; r++) {
           const t = r * jm * step;

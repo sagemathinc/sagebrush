@@ -348,7 +348,7 @@ function poisson(g: Gen, lam: number): number {
     }
   }
   if (lam === 0) return 0;
-  const enlam = Math.exp(-lam);
+  const enlam = glibcExp(-lam);
   let X = 0, prod = 1.0;
   for (;;) {
     prod *= g.nextDouble();

@@ -76,15 +76,15 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### Arm Optimized Routines (MIT, as glibc's exp and log)
+### Arm Optimized Routines (MIT, as glibc's exp, log and pow)
 
-`src/runtime/libm.ts`, `src/runtime/exp_data.ts`, `src/runtime/log_data.ts`
-and `kernels/src/libm.rs` port the exp and log of Arm's Optimized Routines
-(as used by glibc), with their tables. Optimized Routines is licensed
+`src/runtime/libm.ts`, `src/runtime/exp_data.ts`, `src/runtime/log_data.ts`,
+`src/runtime/pow_data.ts` and `kernels/src/libm.rs` port the exp, log and pow
+of Arm's Optimized Routines (as used by glibc), with their tables. Optimized Routines is licensed
 "MIT OR Apache-2.0 WITH LLVM-exception"; Sagebrush uses it under MIT.
 
 ```
-Copyright (c) 2018-2025 Arm Limited.
+Copyright (c) 2018-2026 Arm Limited.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -105,10 +105,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### fdlibm (log1p)
+### fdlibm (log1p, and the elementary functions of fdlibm.ts)
 
 `src/runtime/libm.ts` and `kernels/src/libm.rs` port fdlibm's log1p (as in
-glibc's `sysdeps/ieee754/dbl-64/s_log1p.c`).
+glibc's `sysdeps/ieee754/dbl-64/s_log1p.c`). `src/runtime/fdlibm.ts` ports
+fdlibm's sin, cos, tan, asin, acos, atan, atan2, exp, expm1, log, log2, log10,
+log1p, sinh, cosh, tanh, asinh, acosh, atanh and hypot (most through the Rust
+libm crate and musl, below).
 
 ```
 Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -118,6 +121,45 @@ Permission to use, copy, modify, and distribute this
 software is freely granted, provided that this notice
 is preserved.
 ```
+
+### The Rust libm crate, musl and CORE-MATH (MIT)
+
+`src/runtime/fdlibm.ts` is ported line by line from the Rust libm crate 0.2.16
+("available for use under the MIT license"), whose functions come from musl
+libc and FreeBSD's msun (fdlibm, above) and, for cbrt, from the CORE-MATH
+project (MIT). `bench/libm-oracle` compiles the crate to check the port.
+
+```
+Copyright (c) 2018 Jorge Aparicio
+Copyright © 2005-2020 Rich Felker, et al. (musl libc)
+Copyright (c) 2021-2022 Alexei Sibidanov (CORE-MATH's cbrt)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+musl's notice for its math library: "Much of the math library code
+(src/math/* and src/complex/*) is Copyright © 1993,2004 Sun Microsystems or
+Copyright © 2003-2011 David Schultz or Copyright © 2003-2009 Steven G. Kargl or
+Copyright © 2003-2009 Bruce D. Evans or Copyright © 2008 Stephen L. Moshier or
+Copyright © 2017-2018 Arm Limited and labelled as such in comments in the
+individual source files. All have been licensed under extremely permissive
+terms."
 
 ### smalljac (used with the author's permission)
 

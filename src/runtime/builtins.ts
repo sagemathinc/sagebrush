@@ -9,6 +9,7 @@ import * as O from "./ops";
 import { INTR } from "./interrupt";
 import { repr, str, format, formatFixed } from "./format";
 import * as Ty from "./types";
+import { glibcPow } from "./libm";
 
 const isInt = Number.isInteger;
 
@@ -259,7 +260,7 @@ function roundImpl(x: any, nd: any = null): any {
     if (!Number.isFinite(v) || v === 0) return x;
     if (n >= 0) return O.mkfloat(n > 330 ? v : parseFloat(formatFixed(v, n)));
     if (n < -330) return O.mkfloat(0 * v);
-    const p = Math.pow(10, -n);
+    const p = glibcPow(10, -n);
     const q = v / p;
     let r = Math.round(q);
     if (Math.abs(q - Math.trunc(q)) === 0.5) r = 2 * Math.round(q / 2);

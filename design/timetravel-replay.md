@@ -11,8 +11,8 @@ William's decisions on the open questions:
 - only file hashes in the history;
 - CoCalc sync deferred.
 
-The portable bundle (`.sbreplay`) followed the same day. The cross-browser
-libm is next. Two runtime bugs
+The portable bundle (`.sbreplay`) and the deterministic libm (section 4)
+followed the same day. Two runtime bugs
 found along the way are fixed (see the end).
 
 ## The idea
@@ -155,15 +155,39 @@ Coverage today:
   - `cmath`;
   - most of numpy's ufuncs.
 
-Same-browser replay is exact today. **Cross-browser replay needs one
-deterministic libm for every transcendental function.** Two ways:
+Same-browser replay was exact already. **Cross-browser replay needed one
+deterministic libm for every transcendental function.**
 
-- extend `libm.ts`;
-- compile a libm (musl's, or CORE-MATH's correctly rounded one) to
-  WebAssembly.
+**Done.** No runtime code calls `Math.sin` and the like any more. Every
+function is TypeScript using only `+ − × ÷` and `sqrt`, which IEEE 754 and
+JavaScript define exactly:
 
-Choosing glibc's algorithms would also make pyjs agree with CPython on
-Linux, a conformance gain on its own.
+| Functions | Source | Check |
+|---|---|---|
+| `exp`, `log`, `log1p` | the existing glibc ports | — |
+| `pow` | ARM's, as glibc ships it | identical to glibc on $2 \times 10^6$ inputs; Chrome's `Math.pow` differed on 88, and it is the platform's, so it varies by OS |
+| `cosh`, `log10` | fdlibm's originals over glibc's `exp`/`log` | identical to glibc |
+| `sinh`, `tanh`, `expm1` | fdlibm's, with GCC's fused multiply-adds | closer to glibc than V8 |
+| `hypot` | V8's own algorithm (Chrome's bits) | as the linear-algebra kernels already did |
+| the rest | the Rust `libm` crate (musl, fdlibm, CORE-MATH's `cbrt`), ported line by line | bit for bit against that crate compiled to WebAssembly ([bench/libm-oracle](../bench/libm-oracle)) |
+
+[test/fdlibm.test.ts](../test/fdlibm.test.ts) checks two things in CI:
+
+- **One result for every engine:** every function gives the same bits in V8
+  and JavaScriptCore.
+- **glibc where claimed:** `exp`, `log`, `log1p`, `pow`, `cosh` and `log10`
+  give glibc's bits.
+
+The suites comparing against NumPy, Sage, mpmath and CPython all pass.
+
+**Two side effects:**
+
+- `1.0 ** nan` and `(-1.0) ** inf` are now `1.0`, as in CPython.
+  `Math.pow` gave NaN.
+- `pow` costs about 110 ns against `Math.pow`'s 19 ns.
+
+**What remains engine-dependent:** a NaN's sign and payload bits. Python
+sees them only through `struct.pack`.
 
 ### 5. Snapshots via pickle: mostly possible, with known limits
 
