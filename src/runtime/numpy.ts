@@ -19,8 +19,9 @@ import * as F from "./format";
 import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
-import { glibcLog, glibcExp, glibcLog1p, EXP_TABLES, LOG_TABLES } from "./libm";
+import { glibcLog, glibcExp, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow } from "./libm";
 import { gemmBuffers, wasmUnary, wasmSort, wasmArgsort } from "./kernels";
+import * as FD from "./fdlibm";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
 
@@ -800,13 +801,13 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   true_divide: { f: (x, y) => x / y, out: "float", c: cdiv },
   floor_divide: { f: (x, y) => fdivmod(x, y)[0], int: (x, y) => (y === 0 ? 0 : Math.floor(x / y)) },
   remainder: { f: (x, y) => fdivmod(x, y)[1], int: (x, y) => (y === 0 ? 0 : x - Math.floor(x / y) * y) },
-  power: { f: Math.pow, c: cpow, int: ipow },
+  power: { f: glibcPow, c: cpow, int: ipow },
   maximum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.max(x, y)) },
   minimum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.min(x, y)) },
   fmax: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.max(x, y)) },
   fmin: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.min(x, y)) },
-  arctan2: { f: Math.atan2, out: "float" },
-  hypot: { f: Math.hypot, out: "float" },
+  arctan2: { f: FD.atan2, out: "float" },
+  hypot: { f: FD.v8hypot, out: "float" },
   copysign: { f: (x, y) => (Object.is(Math.sign(y), -0) || y < 0 ? -Math.abs(x) : Math.abs(x)), out: "float" },
   logaddexp: { f: (x, y) => { const m = Math.max(x, y); return m === -Infinity ? m : m + glibcLog1p(glibcExp(-Math.abs(x - y))); }, out: "float" },
   equal: { f: (x, y) => +(x === y), out: "bool", c: (a, b, c, d) => [+(a === c && b === d), 0] },
@@ -846,9 +847,9 @@ function cpow(a: number, b: number, c: number, d: number): [number, number] {
     }
     return c < 0 ? cdiv(1, 0, rr, ri) : [rr, ri];
   }
-  const logr = Math.log(Math.hypot(a, b)), th = Math.atan2(b, a);
-  const mr = Math.exp(c * logr - d * th), ang = d * logr + c * th;
-  return [mr * Math.cos(ang), mr * Math.sin(ang)];
+  const logr = glibcLog(FD.v8hypot(a, b)), th = FD.atan2(b, a);
+  const mr = glibcExp(c * logr - d * th), ang = d * logr + c * th;
+  return [mr * FD.cos(ang), mr * FD.sin(ang)];
 }
 function ipow(x: number, y: number): number {
   if (y < 0) raise(T.ValueError, "Integers to negative integer powers are not allowed.");
@@ -891,7 +892,7 @@ const FAST_EXPR: Record<string, (x: string, y: string) => string> = {
   less_equal: (x, y) => `+(${x} <= ${y})`, greater: (x, y) => `+(${x} > ${y})`, greater_equal: (x, y) => `+(${x} >= ${y})`,
   maximum: (x, y) => `(${x} !== ${x} || ${y} !== ${y} ? NaN : ${x} > ${y} ? ${x} : ${y})`,
   minimum: (x, y) => `(${x} !== ${x} || ${y} !== ${y} ? NaN : ${x} < ${y} ? ${x} : ${y})`,
-  power: (x, y) => `Math.pow(${x}, ${y})`,
+  power: (x, y) => `POW(${x}, ${y})`,
 };
 const kernels = new Map<string, any>();
 function fastKernel(op: string, kind: string): any {
@@ -900,7 +901,7 @@ function fastKernel(op: string, kind: string): any {
   if (k === undefined) {
     const e = FAST_EXPR[op];
     const x = kind === "sa" ? "av" : "ad[ao + i]", y = kind === "as" ? "bv" : "bd[bo + i]";
-    k = new Function("ad", "ao", "av", "bd", "bo", "bv", "od", "n", `for (let i = 0; i < n; i++) od[i] = ${e(x, y)};`);
+    k = new Function("POW", "ad", "ao", "av", "bd", "bo", "bv", "od", "n", `for (let i = 0; i < n; i++) od[i] = ${e(x, y)};`).bind(null, glibcPow);
     kernels.set(key, k);
   }
   return k;
@@ -913,7 +914,7 @@ const strided = new Map<string, any>();
 function stridedKernel(op: string): any {
   let k = strided.get(op);
   if (k === undefined) {
-    k = new Function("ad", "ao", "as", "bd", "bo", "bs", "od", "shape", `
+    k = new Function("POW", "ad", "ao", "as", "bd", "bo", "bs", "od", "shape", `
       const nd = shape.length, last = nd - 1, L = shape[last], ia = as[last], ib = bs[last];
       const idx = new Array(nd).fill(0);
       let pa = ao, pb = bo, o = 0;
@@ -927,7 +928,7 @@ function stridedKernel(op: string): any {
           pa -= as[d] * shape[d]; pb -= bs[d] * shape[d]; idx[d] = 0;
         }
         if (d < 0) return;
-      }`);
+      }`).bind(null, glibcPow);
     strided.set(op, k);
   }
   return k;
@@ -1014,27 +1015,27 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   sign: { f: (x) => (x !== x ? NaN : x > 0 ? 1 : x < 0 ? -1 : 0), keepInt: true },
   square: { f: (x) => x * x, c: (a, b) => [a * a - b * b, 2 * a * b], keepInt: true },
   sqrt: { f: Math.sqrt, c: csqrt, float: true },
-  cbrt: { f: Math.cbrt, float: true },
+  cbrt: { f: FD.cbrt, float: true },
   // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
   exp: { f: glibcExp, c: cexp, float: true },
   exp2: { f: (x) => 2 ** x, float: true },
-  expm1: { f: Math.expm1, float: true },
+  expm1: { f: FD.expm1, float: true },
   log: { f: glibcLog, c: clog, float: true },
-  log2: { f: Math.log2, float: true },
-  log10: { f: Math.log10, float: true },
+  log2: { f: FD.log2, float: true },
+  log10: { f: FD.log10, float: true },
   log1p: { f: glibcLog1p, float: true },
-  sin: { f: Math.sin, c: (a, b) => (b === 0 ? [Math.sin(a), Number.isFinite(a) ? Math.cos(a) * b : b] : [hmul(Math.sin(a), b, "cosh"), hmul(Math.cos(a), b, "sinh")]), float: true },
-  cos: { f: Math.cos, c: (a, b) => (b === 0 ? [Math.cos(a), Number.isFinite(a) ? -Math.sin(a) * b : -b] : [hmul(Math.cos(a), b, "cosh"), -hmul(Math.sin(a), b, "sinh")]), float: true },
-  tan: { f: Math.tan, float: true },
-  arcsin: { f: Math.asin, float: true },
-  arccos: { f: Math.acos, float: true },
-  arctan: { f: Math.atan, float: true },
-  sinh: { f: Math.sinh, float: true },
-  cosh: { f: Math.cosh, float: true },
-  tanh: { f: Math.tanh, float: true },
-  arcsinh: { f: Math.asinh, float: true },
-  arccosh: { f: Math.acosh, float: true },
-  arctanh: { f: Math.atanh, float: true },
+  sin: { f: FD.sin, c: (a, b) => (b === 0 ? [FD.sin(a), Number.isFinite(a) ? FD.cos(a) * b : b] : [hmul(FD.sin(a), b, "cosh"), hmul(FD.cos(a), b, "sinh")]), float: true },
+  cos: { f: FD.cos, c: (a, b) => (b === 0 ? [FD.cos(a), Number.isFinite(a) ? -FD.sin(a) * b : -b] : [hmul(FD.cos(a), b, "cosh"), -hmul(FD.sin(a), b, "sinh")]), float: true },
+  tan: { f: FD.tan, float: true },
+  arcsin: { f: FD.asin, float: true },
+  arccos: { f: FD.acos, float: true },
+  arctan: { f: FD.atan, float: true },
+  sinh: { f: FD.sinh, float: true },
+  cosh: { f: FD.cosh, float: true },
+  tanh: { f: FD.tanh, float: true },
+  arcsinh: { f: FD.asinh, float: true },
+  arccosh: { f: FD.acosh, float: true },
+  arctanh: { f: FD.atanh, float: true },
   deg2rad: { f: (x) => (x * Math.PI) / 180, float: true },
   rad2deg: { f: (x) => (x * 180) / Math.PI, float: true },
   floor: { f: Math.floor, keepInt: true },
@@ -1057,8 +1058,8 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
 function hmul(c: number, y: number, f: "cosh" | "sinh"): number {
   if (c === 0 && Number.isFinite(y)) return f === "sinh" && y < 0 ? -c : c;
   const ay = Math.abs(y);
-  if (ay < 709 || !Number.isFinite(ay)) return c * (f === "cosh" ? Math.cosh(y) : Math.sinh(y));
-  const e = Math.exp(ay / 2);
+  if (ay < 709 || !Number.isFinite(ay)) return c * (f === "cosh" ? FD.cosh(y) : FD.sinh(y));
+  const e = glibcExp(ay / 2);
   const v = c * (e / 2) * e;
   return f === "sinh" && y < 0 ? -v : v;
 }
@@ -1073,24 +1074,24 @@ function cexp(a: number, b: number): [number, number] {
   // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
   if (b === 0) return [glibcExp(a), b];
   if (a > 709 && a < 1420) {
-    const e = Math.exp(a / 2);
-    return [Math.cos(b) * e * e, Math.sin(b) * e * e];
+    const e = glibcExp(a / 2);
+    return [FD.cos(b) * e * e, FD.sin(b) * e * e];
   }
   const e = glibcExp(a);
-  return [e * Math.cos(b), e * Math.sin(b)];
+  return [e * FD.cos(b), e * FD.sin(b)];
 }
 function clog(a: number, b: number): [number, number] {
-  const im = Math.atan2(b, a);
+  const im = FD.atan2(b, a);
   let x = Math.abs(a), y = Math.abs(b);
   if (x < y) [x, y] = [y, x];
-  if (!Number.isFinite(x) || x !== x || y !== y) return [glibcLog(Math.hypot(a, b)), im];
+  if (!Number.isFinite(x) || x !== x || y !== y) return [glibcLog(FD.v8hypot(a, b)), im];
   if (x === 0) return [-Infinity, im];
-  if (x > 2 ** 1000) return [glibcLog(Math.hypot(x / 4, y / 4)) + 2 * Math.LN2, im];
-  if (x < 2 ** -1000) return [glibcLog(Math.hypot(x * 2 ** 600, y * 2 ** 600)) - 600 * Math.LN2, im];
+  if (x > 2 ** 1000) return [glibcLog(FD.v8hypot(x / 4, y / 4)) + 2 * Math.LN2, im];
+  if (x < 2 ** -1000) return [glibcLog(FD.v8hypot(x * 2 ** 600, y * 2 ** 600)) - 600 * Math.LN2, im];
   // near the unit circle log|z| = log1p(|z|^2 - 1) / 2, with x^2 + y^2 - 1
   // from error-free products (Dekker): it cancels (0.6+0.8j)
   if (x > 0.5 && x < 2 && y < 1) {
-    const h = Math.hypot(x, y);
+    const h = FD.v8hypot(x, y);
     if (h > 0.7 && h < 1.4) {
       const [xh, xl] = twoProd(x, x), [yh, yl] = twoProd(y, y);
       const t = xh - 1; // exact (Sterbenz)
@@ -1098,7 +1099,7 @@ function clog(a: number, b: number): [number, number] {
       return [glibcLog1p(s + (err + xl + yl)) / 2, im];
     }
   }
-  return [glibcLog(Math.hypot(x, y)), im];
+  return [glibcLog(FD.v8hypot(x, y)), im];
 }
 
 // The principal square root as C99 csqrt: the sign of the imaginary part
@@ -1116,7 +1117,7 @@ function csqrt(a: number, b: number): [number, number] {
   let s = 1;
   if (m > 1e300) (a *= 0.25), (b *= 0.25), (s = 2);
   else if (m < 1e-300) (a *= 2 ** 600), (b *= 2 ** 600), (s = 2 ** -300);
-  const t = Math.sqrt((Math.abs(a) + Math.hypot(a, b)) / 2);
+  const t = Math.sqrt((Math.abs(a) + FD.v8hypot(a, b)) / 2);
   const neg = b < 0 || Object.is(b, -0);
   return a >= 0 ? [s * t, s * (b / (2 * t))] : [(s * Math.abs(b)) / (2 * t), neg ? -s * t : s * t];
 }
@@ -1127,11 +1128,11 @@ function roundHalfEven(x: number): number {
 
 // Tight loops for unary operations on real data: contiguous or strided.
 const UN_EXPR: Record<string, string> = {
-  negative: "-v", positive: "v", absolute: "Math.abs(v)", square: "v * v", sqrt: "Math.sqrt(v)", cbrt: "Math.cbrt(v)",
-  exp: "EXP(v)", exp2: "2 ** v", expm1: "Math.expm1(v)", log: "LOG(v)", log2: "Math.log2(v)", log10: "Math.log10(v)",
-  log1p: "LOG1P(v)", sin: "Math.sin(v)", cos: "Math.cos(v)", tan: "Math.tan(v)", arcsin: "Math.asin(v)",
-  arccos: "Math.acos(v)", arctan: "Math.atan(v)", sinh: "Math.sinh(v)", cosh: "Math.cosh(v)", tanh: "Math.tanh(v)",
-  arcsinh: "Math.asinh(v)", arccosh: "Math.acosh(v)", arctanh: "Math.atanh(v)", floor: "Math.floor(v)", ceil: "Math.ceil(v)",
+  negative: "-v", positive: "v", absolute: "Math.abs(v)", square: "v * v", sqrt: "Math.sqrt(v)", cbrt: "FD.cbrt(v)",
+  exp: "EXP(v)", exp2: "POW(2, v)", expm1: "FD.expm1(v)", log: "LOG(v)", log2: "FD.log2(v)", log10: "FD.log10(v)",
+  log1p: "LOG1P(v)", sin: "FD.sin(v)", cos: "FD.cos(v)", tan: "FD.tan(v)", arcsin: "FD.asin(v)",
+  arccos: "FD.acos(v)", arctan: "FD.atan(v)", sinh: "FD.sinh(v)", cosh: "FD.cosh(v)", tanh: "FD.tanh(v)",
+  arcsinh: "FD.asinh(v)", arccosh: "FD.acosh(v)", arctanh: "FD.atanh(v)", floor: "Math.floor(v)", ceil: "Math.ceil(v)",
   trunc: "Math.trunc(v)", isnan: "+(v !== v)", isfinite: "+(v - v === 0)", isinf: "+(v === Infinity || v === -Infinity)",
   deg2rad: "v * (Math.PI / 180)", rad2deg: "v * (180 / Math.PI)", logical_not: "+(v === 0)",
 };
@@ -1152,7 +1153,7 @@ function unaryKernel(op: string, contiguous: boolean): any {
            for (; d >= 0; d--) { p += st[d]; if (++idx[d] < shape[d]) break; p -= st[d] * shape[d]; idx[d] = 0; }
            if (d < 0) return;
          }`;
-    k = new Function("EXP", "LOG", "LOG1P", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog, glibcLog1p);
+    k = new Function("EXP", "LOG", "LOG1P", "FD", "POW", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog, glibcLog1p, FD, glibcPow);
     unKernels.set(key, k);
   }
   return k;
@@ -1168,7 +1169,7 @@ export function unary(op: string, x: any): any {
   }
   if (op === "absolute" && a.dt.cplx) {
     const out = empty(a.shape, a.dt === D.complex64 ? D.float32 : D.float64);
-    loop1(a.shape, a.strides, a.offset, (p, k) => (out.data[k] = Math.hypot(a.data[2 * p], a.data[2 * p + 1])));
+    loop1(a.shape, a.strides, a.offset, (p, k) => (out.data[k] = FD.v8hypot(a.data[2 * p], a.data[2 * p + 1])));
     return out;
   }
   if (op === "negative" && a.dt.kind === "b") raise(T.TypeError, "The numpy boolean negative, the `-` operator, is not supported, use the `~` operator or the logical_not function instead.");

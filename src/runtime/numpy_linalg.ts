@@ -11,6 +11,7 @@ import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype, ascontig, copy as npcopy } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
+import * as FD from "./fdlibm";
 
 const { T, raise, tuple } = Obj;
 const F64 = () => toDtype("float64");
@@ -32,7 +33,7 @@ function linalgError(msg: string): never {
   return raise(T.ValueError, msg);
 }
 
-// V8's Math.hypot of two numbers (src/builtins/math.tq, whose Kahan sum
+// V8's FD.v8hypot of two numbers (src/builtins/math.tq, whose Kahan sum
 // has no compensation to carry with two terms), written out so that every
 // engine, and the WebAssembly kernels, compute the same bits.
 function hypot(a: number, b: number): number {
@@ -723,11 +724,11 @@ function eigNormalize(n: number, d: number[], e: number[], V: number[][]): [Floa
   for (let j = 0; j < n; j++) {
     if (wi[j] === 0) {
       let nrm = 0;
-      for (let i = 0; i < n; i++) nrm = Math.hypot(nrm, V[i][j]);
+      for (let i = 0; i < n; i++) nrm = FD.v8hypot(nrm, V[i][j]);
       for (let i = 0; i < n; i++) vecs[2 * (i * n + j)] = nrm ? V[i][j] / nrm : V[i][j];
     } else if (wi[j] > 0) {
       let nrm = 0;
-      for (let i = 0; i < n; i++) nrm = Math.hypot(nrm, V[i][j], V[i][j + 1]);
+      for (let i = 0; i < n; i++) nrm = FD.v8hypot(nrm, V[i][j], V[i][j + 1]);
       // LAPACK makes the component of largest modulus real
       let big = 0, bi = 0;
       for (let i = 0; i < n; i++) {
@@ -738,7 +739,7 @@ function eigNormalize(n: number, d: number[], e: number[], V: number[][]): [Floa
         }
       }
       const [pr, pi] = [V[bi][j], -V[bi][j + 1]];
-      const pm = Math.hypot(pr, pi);
+      const pm = FD.v8hypot(pr, pi);
       const [ur, ui] = pm ? [pr / pm, pi / pm] : [1, 0];
       for (let i = 0; i < n; i++) {
         const re = (V[i][j] * ur - V[i][j + 1] * ui) / nrm, im = (V[i][j] * ui + V[i][j + 1] * ur) / nrm;
@@ -1039,7 +1040,7 @@ function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array
         for (let i = 0; i < M; i++) col[i] -= dot * Uo[i * N + k];
       }
       let nrm = 0;
-      for (let i = 0; i < M; i++) nrm = Math.hypot(nrm, col[i]);
+      for (let i = 0; i < M; i++) nrm = FD.v8hypot(nrm, col[i]);
       if (nrm > 1e-8) {
         for (let i = 0; i < M; i++) Uo[i * N + j] = col[i] / nrm;
         break;
@@ -1184,7 +1185,7 @@ newBuiltinModule("_nplinalg", (m) => {
             for (let i = 0; i < rows; i++) col[i] -= dot * Q[i * rows + k2];
           }
           let nrm = 0;
-          for (let i = 0; i < rows; i++) nrm = Math.hypot(nrm, col[i]);
+          for (let i = 0; i < rows; i++) nrm = FD.v8hypot(nrm, col[i]);
           if (nrm < 1e-10) continue;
           for (let i = 0; i < rows; i++) Q[i * rows + filled] = col[i] / nrm;
           filled++;

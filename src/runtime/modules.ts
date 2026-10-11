@@ -1,11 +1,12 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
 import { globalsDict, hooks } from "./object";
-import { glibcLog, glibcExp, glibcLog1p } from "./libm";
+import { glibcLog, glibcExp, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin } from "./builtins";
+import * as FD from "./fdlibm";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -272,26 +273,26 @@ newBuiltinModule("math", (m) => {
   m.nan = NaN;
   unary("sqrt", Math.sqrt, (x) => x >= 0 || x !== x);
   unary("exp", glibcExp);
-  unary("expm1", Math.expm1);
-  unary("sin", Math.sin, (x) => Number.isFinite(x) || x !== x);
-  unary("cos", Math.cos, (x) => Number.isFinite(x) || x !== x);
-  unary("tan", Math.tan, (x) => Number.isFinite(x) || x !== x);
-  unary("asin", Math.asin, (x) => (x >= -1 && x <= 1) || x !== x);
-  unary("acos", Math.acos, (x) => (x >= -1 && x <= 1) || x !== x);
-  unary("atan", Math.atan);
-  unary("sinh", Math.sinh);
-  unary("cosh", Math.cosh);
-  unary("tanh", Math.tanh);
-  unary("asinh", Math.asinh);
-  unary("acosh", Math.acosh, (x) => x >= 1 || x !== x);
-  unary("atanh", Math.atanh, (x) => (x > -1 && x < 1) || x !== x);
+  unary("expm1", FD.expm1);
+  unary("sin", FD.sin, (x) => Number.isFinite(x) || x !== x);
+  unary("cos", FD.cos, (x) => Number.isFinite(x) || x !== x);
+  unary("tan", FD.tan, (x) => Number.isFinite(x) || x !== x);
+  unary("asin", FD.asin, (x) => (x >= -1 && x <= 1) || x !== x);
+  unary("acos", FD.acos, (x) => (x >= -1 && x <= 1) || x !== x);
+  unary("atan", FD.atan);
+  unary("sinh", FD.sinh);
+  unary("cosh", FD.cosh);
+  unary("tanh", FD.tanh);
+  unary("asinh", FD.asinh);
+  unary("acosh", FD.acosh, (x) => x >= 1 || x !== x);
+  unary("atanh", FD.atanh, (x) => (x > -1 && x < 1) || x !== x);
   unary("fabs", Math.abs);
-  unary("log2", Math.log2, (x) => x > 0 || x !== x);
-  unary("log10", Math.log10, (x) => x > 0 || x !== x);
+  unary("log2", FD.log2, (x) => x > 0 || x !== x);
+  unary("log10", FD.log10, (x) => x > 0 || x !== x);
   unary("log1p", glibcLog1p, (x) => x > -1 || x !== x);
   unary("degrees", (x) => (x * 180) / Math.PI);
   unary("radians", (x) => (x * Math.PI) / 180);
-  unary("cbrt", Math.cbrt);
+  unary("cbrt", FD.cbrt);
   fn(m, "log", (x: any, base: any = undefined) => {
     const ln = (v: any) => {
       if (typeof v === "bigint") {
@@ -320,12 +321,12 @@ newBuiltinModule("math", (m) => {
     const a = F(x), b = F(y);
     if (a === 0 && b < 0) domain();
     if (a < 0 && !Number.isInteger(b) && Number.isFinite(b)) domain();
-    const r = Math.pow(a, b);
+    const r = glibcPow(a, b);
     if (!Number.isFinite(r) && Number.isFinite(a) && Number.isFinite(b)) range();
     return O.mkfloat(r);
   });
-  fn(m, "atan2", (y: any, x: any) => O.mkfloat(Math.atan2(F(y), F(x))));
-  fn(m, "hypot", (...xs: any[]) => O.mkfloat(Math.hypot(...xs.map(F))));
+  fn(m, "atan2", (y: any, x: any) => O.mkfloat(FD.atan2(F(y), F(x))));
+  fn(m, "hypot", (...xs: any[]) => O.mkfloat(FD.v8hypot(...xs.map(F))));
   fn(m, "copysign", (x: any, y: any) => {
     const a = Math.abs(F(x)), b = F(y);
     return O.mkfloat(b < 0 || Object.is(b, -0) ? -a : a);
@@ -452,7 +453,7 @@ newBuiltinModule("math", (m) => {
   });
   fn(m, "dist", (p: any, q: any) => {
     const a = O.toArray(p).map(F), b = O.toArray(q).map(F);
-    return O.mkfloat(Math.hypot(...a.map((v, i) => v - b[i])));
+    return O.mkfloat(FD.v8hypot(...a.map((v, i) => v - b[i])));
   });
 });
 

@@ -249,3 +249,128 @@ export function glibcLog1p(x: number): number {
   if (k === 0) return f - (hfsq - s2 * (hfsq + R));
   return fma(k, LN2_HI, -(hfsq - (s2 * (hfsq + R) + fma(k, LN2_LO, c)) - f));
 }
+
+// glibc's pow (ARM optimized-routines math/pow.c, MIT OR Apache-2.0 WITH
+// LLVM-exception, Copyright (c) 2018-2026 Arm Limited), ported line by line
+// with HAVE_FAST_FMA as glibc's x86-64 FMA build: the exact fma()s of the
+// source, and GCC's one fusion that matters (the polynomial's last product
+// into the sum: found against glibc 2.43 on 2*10^6 inputs, all identical).
+// V8's Math.pow calls the platform's (88 of those inputs differ from glibc
+// on Linux), so it differs between operating systems; this does not.
+import { POW_LN2HI, POW_LN2LO, POW_A, POW_INVC, POW_LOGC, POW_LOGCTAIL } from "./pow_data";
+const phi = (x: number): number => ((ef[0] = x), eu[1]);
+const plo = (x: number): number => ((ef[0] = x), eu[0]);
+let POW_TAIL = 0;
+// log(x) = y + POW_TAIL, with about 15 bits more than y (x > 0 finite)
+function powLog(x: number): number {
+  let k0 = 0;
+  if (x < 2.2250738585072014e-308) {
+    x *= 4503599627370496; // subnormal: normalized (2^52), the exponent adjusted below
+    k0 = -52;
+  }
+  const hx = phi(x), lx = plo(x);
+  const tmp = (hx - 0x3fe69555) | 0; // ix - OFF (OFF's low word is 0)
+  const i = (tmp >>> 13) & 127;
+  const kd = (tmp >> 20) + k0;
+  const z = bitsToDouble((hx - (tmp & 0xfff00000)) >>> 0, lx);
+  const invc = POW_INVC[i], logc = POW_LOGC[i], logctail = POW_LOGCTAIL[i];
+  const r = fma(z, invc, -1.0); // exact
+  const t1 = kd * POW_LN2HI + logc; // exact
+  const t2 = t1 + r;
+  const lo1 = kd * POW_LN2LO + logctail;
+  const lo2 = t1 - t2 + r;
+  const ar = POW_A[0] * r, ar2 = r * ar, ar3 = r * ar2;
+  const hi = t2 + ar2;
+  const lo3 = fma(ar, r, -ar2);
+  const lo4 = t2 - hi + ar2;
+  const q = POW_A[1] + r * POW_A[2] + ar2 * (POW_A[3] + r * POW_A[4] + ar2 * (POW_A[5] + r * POW_A[6]));
+  const lo = fma(ar3, q, lo1 + lo2 + lo3 + lo4);
+  const y = hi + lo;
+  POW_TAIL = hi - y + lo;
+  return y;
+}
+// sign * exp(x + xtail)
+function powExp(x: number, xtail: number, neg: boolean): number {
+  const abstop = (phi(x) >>> 20) & 0x7ff;
+  let big = false;
+  if (abstop < 0x3c9 || abstop >= 0x408) {
+    if (abstop < 0x3c9) {
+      const one = 1.0 + x; // tiny x
+      return neg ? -one : one;
+    }
+    if (abstop >= 0x409) return x < 0 ? (neg ? -0 : 0) : neg ? -Infinity : Infinity;
+    big = true; // large |x|: specialcase
+  }
+  const z = INVLN2N * x;
+  const kd = z + SHIFT - SHIFT;
+  const r = x + kd * NEGLN2HIN + kd * NEGLN2LON + xtail;
+  const i = kd & 127;
+  const tail = TAIL[i];
+  const r2 = r * r;
+  const tmp = fma(r2 * r2, fma(r, C5, C4), fma(r2, fma(r, C3, C2), tail + r));
+  // sbits = T[2i+1] + ((k + sign_bias) << 45): the high word changes
+  const sHi = (EXP_TAB[4 * i + 2] + (kd << 13) + (neg ? 0x80000000 : 0)) >>> 0, sLo = EXP_TAB[4 * i + 3];
+  if (big) {
+    if (kd > 0) {
+      const scale = bitsToDouble((sHi - (1009 << 20)) >>> 0, sLo);
+      return 2 ** 1009 * fma(scale, tmp, scale);
+    }
+    const scale = bitsToDouble((sHi + (1022 << 20)) >>> 0, sLo);
+    let y = scale + scale * tmp;
+    if (Math.abs(y) < 1.0) {
+      const one = y < 0 ? -1.0 : 1.0;
+      let lo = scale - y + scale * tmp;
+      const hi = one + y;
+      lo = one - hi + y + lo;
+      y = hi + lo - one;
+      if (y === 0) y = neg ? -0 : 0;
+    }
+    return 2 ** -1022 * y;
+  }
+  const scale = bitsToDouble(sHi, sLo);
+  return fma(scale, tmp, scale);
+}
+// 0: y is not an integer, 1: odd, 2: even
+function checkint(y: number): number {
+  if (!Number.isFinite(y) || Math.trunc(y) !== y) return 0;
+  if (Math.abs(y) >= 9007199254740992) return 2;
+  return y % 2 !== 0 ? 1 : 2;
+}
+/** x^y as glibc's pow (C semantics: pow(0, -1) = inf, pow(-8, 1/3) = NaN) */
+export function glibcPow(x: number, y: number): number {
+  let neg = false;
+  const topx = phi(x) >>> 20, topy = phi(y) >>> 20;
+  if (((topx - 0x001) >>> 0) >= 0x7ff - 0x001 || (((topy & 0x7ff) - 0x3be) >>> 0) >= 0x43e - 0x3be) {
+    // x < 2^-1022 or inf or nan, or |y| < 2^-65 or |y| >= 2^63 or nan
+    if (y === 0 || !Number.isFinite(y)) {
+      if (y === 0) return 1.0;
+      if (x === 1) return 1.0;
+      if (x !== x || y !== y) return x + y;
+      if (Math.abs(x) === 1) return 1.0;
+      if ((Math.abs(x) < 1) === (y > 0)) return 0.0; // |x|<1 && y==inf or |x|>1 && y==-inf
+      return y * y;
+    }
+    if (x === 0 || !Number.isFinite(x)) {
+      let x2 = x * x;
+      if ((x < 0 || Object.is(x, -0)) && checkint(y) === 1) x2 = -x2;
+      return y < 0 ? 1 / x2 : x2;
+    }
+    // x and y are non-zero finite
+    if (x < 0) {
+      const yint = checkint(y);
+      if (yint === 0) return NaN;
+      if (yint === 1) neg = true;
+      x = -x;
+    }
+    const ty = topy & 0x7ff;
+    if (((ty - 0x3be) >>> 0) >= 0x43e - 0x3be) {
+      if (x === 1) return neg ? -1.0 : 1.0;
+      if (ty < 0x3be) return x > 1 ? 1.0 + y : 1.0 - y; // |y| < 2^-65: x^y ~= 1 + y log(x)
+      return (x > 1) === (y > 0) ? Infinity : 0;
+    }
+  }
+  const hi = powLog(x), lo = POW_TAIL;
+  const ehi = y * hi;
+  const elo = y * lo + fma(y, hi, -ehi);
+  return powExp(ehi, elo, neg);
+}

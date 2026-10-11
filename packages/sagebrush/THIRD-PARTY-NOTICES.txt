@@ -62,15 +62,15 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### Arm Optimized Routines (MIT, as glibc's exp and log)
+### Arm Optimized Routines (MIT, as glibc's exp, log and pow)
 
-`src/runtime/libm.ts`, `src/runtime/exp_data.ts`, `src/runtime/log_data.ts`
-and `kernels/src/libm.rs` port the exp and log of Arm's Optimized Routines
-(as used by glibc), with their tables. Optimized Routines is licensed
+`src/runtime/libm.ts`, `src/runtime/exp_data.ts`, `src/runtime/log_data.ts`,
+`src/runtime/pow_data.ts` and `kernels/src/libm.rs` port the exp, log and pow
+of Arm's Optimized Routines (as used by glibc), with their tables. Optimized Routines is licensed
 "MIT OR Apache-2.0 WITH LLVM-exception"; Sagebrush uses it under MIT.
 
 ```
-Copyright (c) 2018-2025 Arm Limited.
+Copyright (c) 2018-2026 Arm Limited.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -91,10 +91,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### fdlibm (log1p)
+### fdlibm (log1p, and the elementary functions of fdlibm.ts)
 
 `src/runtime/libm.ts` and `kernels/src/libm.rs` port fdlibm's log1p (as in
-glibc's `sysdeps/ieee754/dbl-64/s_log1p.c`).
+glibc's `sysdeps/ieee754/dbl-64/s_log1p.c`). `src/runtime/fdlibm.ts` ports
+fdlibm's sin, cos, tan, asin, acos, atan, atan2, exp, expm1, log, log2, log10,
+log1p, sinh, cosh, tanh, asinh, acosh, atanh and hypot (most through the Rust
+libm crate and musl, below).
 
 ```
 Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.

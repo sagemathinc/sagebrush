@@ -6,6 +6,7 @@ import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple,
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox,
 } from "./object";
+import { glibcPow } from "./libm";
 
 const isInt = Number.isInteger;
 const isSafe = Number.isSafeInteger;
@@ -443,7 +444,7 @@ function powSlow(a: any, b: any): any {
 function floatPow(x: number, y: number): any {
   if (x === 0 && y < 0) raise(T.ZeroDivisionError, "zero to a negative power");
   if (x < 0 && !isInt(y) && Number.isFinite(y)) return complexHooks.pow(x, y);
-  const r = Math.pow(x, y);
+  const r = glibcPow(x, y); // (glibc's, in every engine: Math.pow is the platform's)
   if (!Number.isFinite(r) && Number.isFinite(x) && Number.isFinite(y)) raise(T.OverflowError, "(34, 'Numerical result out of range')");
   return mkfloat(r);
 }
