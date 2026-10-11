@@ -34,12 +34,13 @@ const CMP: Record<string, string> = {
 
 /** Parse `source` (mode "exec" or "eval") into the compiler's Module. */
 /** opts.sage: Sage syntax (`^` is `**`, `^^` is xor, int/int is a Rational). */
-export function parse(source: string, filename: string, mode: "exec" | "eval" = "exec", opts: { sage?: boolean } = {}): A.Module {
+/** opts.transform: changes pyparse's tree (CPython's AST) before it is lowered (the reactive notebook's renaming of a cell's `_` names). */
+export function parse(source: string, filename: string, mode: "exec" | "eval" = "exec", opts: { sage?: boolean; transform?: (tree: any) => void } = {}): A.Module {
   if (opts.sage) source = preparse(source);
   const lines = source.split("\n");
   let tree: any;
   try {
-    tree = pyparse(source, mode, opts);
+    tree = pyparse(source, mode, { sage: opts.sage });
   } catch (e) {
     if (e instanceof PegenError) {
       const i = e.info;
@@ -47,6 +48,7 @@ export function parse(source: string, filename: string, mode: "exec" | "eval" = 
     }
     throw e;
   }
+  opts.transform?.(tree);
   const c = new Convert(filename, lines, !!opts.sage);
   if (mode === "eval") return { body: [{ k: "Expr", line: tree.body.lineno, value: c.expr(tree.body) }], lines };
   return { body: c.stmts(tree.body), lines };

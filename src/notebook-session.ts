@@ -8,7 +8,10 @@
 //                                 translated to Python; `repl`: display every
 //                                 expression statement, as at a prompt, not just
 //                                 the last; `forget`: global names to delete
-//                                 first, the reactive notebook's invalidation)
+//                                 first, the reactive notebook's invalidation;
+//                                 `mangle`: the cell's id (alphanumeric): its `_`
+//                                 names are its own, as in marimo, and are
+//                                 deleted before it runs)
 //      {id, interact, values}     an @interact control changed: rerun it
 //      {id, check, sage?}         -> {id, more}: is this input incomplete?
 //      {id, complete}             -> {id, matches, prefix}: Tab completion
@@ -27,6 +30,7 @@
 import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { mangleLocals, localPrefix } from "./dataflow";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -123,7 +127,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   ];
 
   // Run Python, reporting an exception as a traceback on stderr; false if it raised.
-  function run(src: string, ns: any, mode: string, filename: string, o: { sage?: boolean } = {}): boolean {
+  function run(src: string, ns: any, mode: string, filename: string, o: { sage?: boolean; transform?: (tree: any) => void } = {}): boolean {
     try {
       R.loader.exec(src, ns, mode, filename, o);
       return true;
@@ -133,7 +137,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       target = null;
       // exit() can't leave a notebook: it just ends the cell.
       if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return true;
-      R.stderr.write(R.formatException(exc));
+      // (a cell's renamed `_` names are shown as written)
+      R.stderr.write(R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, ""));
       return false;
     }
   }
@@ -192,7 +197,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         else ok = false;
       } else {
         // "cell" mode: the value of a final expression is displayed, as in Jupyter.
-        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage });
+        const mangle = typeof m.mangle === "string" && /^[A-Za-z0-9]+$/.test(m.mangle) ? m.mangle : null;
+        if (mangle) run(`import __main__ as _m\nfor _k in [k for k in _m.__dict__ if k.startswith(${JSON.stringify(localPrefix(mangle))})]: del _m.__dict__[_k]\ndel _m\n`, host, "exec", "<forget>");
+        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle ? { transform: (t: any) => mangleLocals(t, mangle) } : {}) });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }

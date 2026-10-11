@@ -322,6 +322,22 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
   };
 }
 
+/**
+ * Rename a cell's `_` names as marimo does (`_x` -> `_cell_<id>_x`, where it
+ * refers to the cell's global), in place, in pyparse's tree: then each cell's
+ * `_` names are its own, though cells share the interpreter's globals.
+ * `id` must be alphanumeric.  (`import *`, an error in the graph, is left.)
+ */
+export function mangleLocals(tree: any, id: string): void {
+  try {
+    new Visitor("cell_" + id).visit(tree);
+  } catch (e) {
+    if (!(e instanceof ImportStarError)) throw e;
+  }
+}
+/** The prefix of a cell's renamed `_` names. */
+export const localPrefix = (id: string) => `_cell_${id}_`;
+
 // The names a Sage cell's top-level `var("x y")`, `var("x", "y")` or
 // `function("f")` statements bind in the notebook's namespace.
 function sageInjected(tree: Node): string[] {
