@@ -169,7 +169,7 @@ try {
   await set(["m = 3"]);
   await run(0);
   await until("!document.querySelector('#runstale').hidden", 5000).catch(() => {});
-  ok((await has(1, "stale")) && /Run stale \(1/.test(await ev("document.querySelector('#runstale').textContent")) && !(await ev("document.querySelector('#runstale').hidden")), `with auto-run off, the dependent is stale and Run stale offers it (${await ev("document.querySelector('#runstale').textContent")})`);
+  ok((await has(1, "stale")) && /^Run 1 stale/.test(await ev("document.querySelector('#runstale').textContent")) && !(await ev("document.querySelector('#runstale').hidden")), `with auto-run off, the dependent is stale and Run stale offers it (${await ev("document.querySelector('#runstale').textContent")})`);
   await ev("document.querySelector('#runstale').click(); true");
   // (the button updates on the next frame)
   await until("sagebrush.notebook.cells()[1].out.textContent.trim() === '30' && !sagebrush.notebook.cells()[1].el.classList.contains('stale') && document.querySelector('#runstale').hidden", 10000);
@@ -505,7 +505,7 @@ try {
   ok((await out(2)) === "6", "after a reload, the outputs are shown, stale");
   // the last run times are kept in the document: a stale cell and the Run stale button give estimates
   const est = await ev("[sagebrush.notebook.cells()[1].time.textContent, document.querySelector('#runstale').textContent]");
-  ok(/^stale \(~\d+ ms\)$/.test(est[0]) && /^Run stale \(3, ~under 1 s\)$/.test(est[1]), `after a reload, time estimates from the last runs (${JSON.stringify(est)})`);
+  ok(/^stale \(~\d+ ms\)$/.test(est[0]) && /^Run 3 stale \(<1 s\)$/.test(est[1]), `after a reload, time estimates from the last runs (${JSON.stringify(est)})`);
   const before = JSON.stringify(await ev("sagebrush.notebook.graph().map((c) => [c.state, c.reads, c.defines])"));
   r = await run(2);
   ok(JSON.stringify(r?.ran) === "[0,1,2]" && (await out(2)) === "6", `running the last cell first runs its stale ancestors (${JSON.stringify(r?.ran)}; before: ${before}; ${await out(2)})`);
