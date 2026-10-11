@@ -2748,7 +2748,7 @@ class _SolutionDict(dict):
         if self._params:
             t += " for integer " + ", ".join(self._params)
         if self._conds:
-            t += " if " + " and ".join(str(c) for c in self._conds)
+            t += " if " + " and ".join(Solution._cond_text(self, str))
         return t
 
 
@@ -2825,10 +2825,17 @@ class Solution(Expression):
                 if not (v.is_numeric() if hasattr(v, "is_numeric") else False) or _call("is_zero", (v - floor(v))._s)[0] != "1":
                     raise ValueError("%s is an integer parameter of the family, not %s" % (p, v))
                 params.remove(p)
-        rel = Expression.subs(self, *args, **kw)
-        keep = []
+        # the conditions first: where one fails the value may be undefined
+        # (1/a at a = 0 raised ZeroDivisionError, not "no solution")
+        keep, shown = [], []
+        failed = False
         for c in self._conds:
-            c2 = Expression.subs(c, *args, **kw)
+            try:
+                c2 = Expression.subs(c, *args, **kw)
+            except ZeroDivisionError:
+                shown.append(c)
+                continue
+            shown.append(c2)
             if c2.variables():
                 keep.append(c2)
                 continue
@@ -2839,9 +2846,15 @@ class Solution(Expression):
             if verdict is True:
                 continue
             if verdict is False:
-                shown = Solution(rel._s, [Expression.subs(d, *args, **kw) for d in self._conds])._cond_text(str)
-                raise ValueError("not a solution there: %s fails" % " and ".join(shown))
+                failed = True
+                continue
             keep.append(c2)
+        if failed:
+            raise ValueError("not a solution there: %s fails" % " and ".join(Solution(self._s, shown)._cond_text(str)))
+        try:
+            rel = Expression.subs(self, *args, **kw)
+        except ZeroDivisionError:
+            raise ValueError("not a solution there: %s is undefined" % Expression.rhs(self))
         return Solution(rel._s, keep, params)
 
     substitute = subs
@@ -3071,11 +3084,13 @@ def solve(f, *args, **kw):
         except ValueError as e:
             if "only linear systems" not in str(e) and "underdetermined" not in str(e):
                 raise
-            sols = _solve_system([g.lhs() - g.rhs() for g in eqs], names)
+            # (the inequalities' names are reserved too: a new r1 captured
+            # a free r1 of y > r1, the review's SOLVE2-F4)
+            sols = _solve_system([g.lhs() - g.rhs() for g in eqs], names, [n for q in ineqs for n in q._names()])
             if sols is None:
                 raise NotImplementedError("solve: this system (%s) is not solved; it is not polynomial over QQ, or no equation can be solved for one of its variables" % ", ".join(str(g) for g in eqs))
             if ineqs:
-                sols = _with_inequalities(sols, ineqs)
+                sols = _with_inequalities(sols, ineqs, eqs)
             return _system_out(sols, names, kw)
     else:
         r = _call("solve", str(len(eqs)), *[g._s for g in eqs], *names)
@@ -3092,7 +3107,7 @@ def solve(f, *args, **kw):
             sols.append([Expression(t) for t in part])
         i += 1 + m
     if ineqs:
-        sols = _with_inequalities(sols, ineqs)
+        sols = _with_inequalities(sols, ineqs, eqs)
     if _ASSUMPTIONS:
         sols = [sol for sol in (_assume_on(sol, names) for sol in sols) if sol is not None and _satisfies(sol)]
     if kw.get("multiplicities"):
@@ -3120,23 +3135,44 @@ def solve(f, *args, **kw):
             mults.append(m)
         return out, mults
     if kw.get("solution_dict"):
-        # an unresolved 0 == f is no solution to put in a dictionary ({0: f}
-        # read as a root: R2-SYMALG-F3)
-        if any(s.lhs()._op()[0] != "symbol" for sol in sols for s in sol):
-            raise NotImplementedError("solve: no explicit solution for %s (solution_dict needs one)" % ", ".join(str(s) for sol in sols for s in sol if s.lhs()._op()[0] != "symbol"))
-        return [_SolutionDict({s.lhs(): s.rhs() for s in sol}, [c for s in sol if isinstance(s, Solution) for c in s.conditions()],
-                              [p for s in sol if isinstance(s, Solution) for p in s._params]) for sol in sols]
+        return _solution_dicts(sols, 1 if one else len(names))
     if len(names) == 1 and not many:
         return [s for sol in sols for s in sol]
     return [list(sol) for sol in sols]
 
 
-def _with_inequalities(sols, ineqs):
-    """Each solution with the inequalities substituted: dropped if one is
-    false, the true ones omitted, the undecided ones kept (as conditions of a
-    Solution, or as relations beside a system's solution)."""
+def _solution_dicts(sols, nvars):
+    """Each solution [x == ..., y == ..., conditions...] as a _SolutionDict
+    keeping its conditions and integer parameters (a system's dictionaries
+    were plain, without them: the review's SOLVE2-F3)."""
     out = []
     for sol in sols:
+        assign, extra = sol[:nvars], sol[nvars:]
+        # an unresolved 0 == f is no solution to put in a dictionary ({0: f}
+        # read as a root: R2-SYMALG-F3)
+        bad = [s for s in assign if s._op()[0] != "rel:Eq" or s.lhs()._op()[0] != "symbol"]
+        if bad:
+            raise NotImplementedError("solve: no explicit solution for %s (solution_dict needs one)" % ", ".join(str(s) for s in bad))
+        conds = [c for s in assign if isinstance(s, Solution) for c in s.conditions()] + list(extra)
+        params = []
+        for s in assign:
+            if isinstance(s, Solution):
+                params += [p for p in s._params if p not in params]
+        out.append(_SolutionDict({s.lhs(): s.rhs() for s in assign}, conds, params))
+    return out
+
+
+def _with_inequalities(sols, ineqs, eqs=()):
+    """Each solution with the inequalities substituted: dropped if one is
+    false, the true ones omitted, the undecided ones kept (as conditions of a
+    Solution, or as relations beside a system's solution).  The solution's
+    new symbols (r1, n1: names not in the equations) are first renamed apart
+    from the inequalities' names (SOLVE2-F4)."""
+    theirs = set(n for q in ineqs for n in q._names())
+    mine = set(n for g in eqs for n in g._names())
+    out = []
+    for sol in sols:
+        sol = _rename_new_apart(sol, theirs, mine)
         sub = {}
         for s in sol:
             try:
@@ -3165,15 +3201,50 @@ def _with_inequalities(sols, ineqs):
     return out
 
 
+def _rename_new_apart(sol, theirs, mine):
+    """sol with its new symbols (names in neither the equations nor theirs's
+    owner) that collide with theirs renamed to unused ones."""
+    def names(s):
+        out = set(s._names())
+        if isinstance(s, Solution):
+            out |= set(s._params)
+            for c in s._conds:
+                out |= set(c._names())
+        return out
+    have = set()
+    for s in sol:
+        have |= names(s)
+    clash = sorted((have - mine) & theirs)
+    if not clash:
+        return sol
+    used = have | mine | theirs
+    ren = {}
+    for n in clash:
+        stem = n.rstrip("0123456789") or "r"
+        i = 1
+        while "%s%d" % (stem, i) in used:
+            i += 1
+        used.add("%s%d" % (stem, i))
+        ren[n] = "%s%d" % (stem, i)
+    sub = {Expression(_sym_s(a)): Expression(_sym_s(b)) for a, b in ren.items()}
+    out = []
+    for s in sol:
+        if isinstance(s, Solution):
+            out.append(Solution(Expression.subs(s, sub)._s, [Expression.subs(c, sub) for c in s._conds], [ren.get(p, p) for p in s._params]))
+        else:
+            out.append(s.subs(sub))
+    return out
+
+
 def _system_out(sols, names, kw):
     if kw.get("multiplicities"):
         raise NotImplementedError("solve: multiplicities=True for one equation in one variable")
     if kw.get("solution_dict"):
-        return [{s.lhs(): s.rhs() for s in sol if s._op()[0] == "rel:Eq" and s.lhs()._op()[0] == "symbol"} for sol in sols]
+        return _solution_dicts(sols, len(names))
     return [list(sol) for sol in sols]
 
 
-def _solve_system(zs, names):
+def _solve_system(zs, names, reserved=()):
     """The solutions of the equations zs == 0 (several equations, or one in
     several variables) that are not linear, as lists [x == ..., y == ...,
     (undecided conditions)], or None.  Polynomial systems over QQ with
@@ -3183,26 +3254,28 @@ def _solve_system(zs, names):
     become equations, and variables left free become new symbols r1, r2, ...
     (recurring complaints about Sage's solve: [sqrt(x) == 1, x == y] gave
     [], x*y == 0 in x, y lost the solution y == 0, nonlinear systems)."""
-    used = set(names)
+    used = set(names) | set(reserved)
     for z in zs:
         used |= set(z._names())
-    counter = [0]
 
-    def fresh():
+    def fresh(prefix="r"):
+        i = 0
         while True:
-            counter[0] += 1
-            n = "r%d" % counter[0]
+            i += 1
+            n = "%s%d" % (prefix, i)
             if n not in used:
                 used.add(n)
                 return n
 
     res = _solve_poly_system(zs, names)
-    if res is None:
+    if res is not None:
+        res = [(d, conds, []) for d, conds in res]
+    else:
         res = _solve_subst(zs, names, fresh)
     if res is None:
         return None
     out = []
-    for d, conds in res:
+    for d, conds, params in res:
         d = dict(d)
         for v in names:
             if v not in d:
@@ -3224,10 +3297,25 @@ def _solve_system(zs, names):
                     break
             keep.append(c)
         if ok:
-            sol = [Expression(_sym_s(v)) == d[v] for v in names] + keep
-            if sol not in out:
+            # each value a Solution with the integer parameters in it, so
+            # that they stay integers (pi*r1 for sin(x) == 0 allowed r1 =
+            # 1/2: the review's SOLVE2-F2); one only in the conditions goes
+            # with the first
+            sol = []
+            for v in names:
+                ps = [p for p in params if p in d[v]._names()]
+                sol.append(Solution((Expression(_sym_s(v)) == d[v])._s, [], ps))
+            loose = [p for p in params if not any(p in s._params for s in sol)]
+            if loose:
+                sol[0] = Solution(sol[0]._s, [], sol[0]._params + loose)
+            sol += keep
+            if not any(_same_solution(sol, o) for o in out):
                 out.append(sol)
     return out
+
+
+def _same_solution(a, b):
+    return len(a) == len(b) and all(str(s) == str(t) for s, t in zip(a, b))
 
 
 def _is_zero_expr(z):
@@ -3235,7 +3323,8 @@ def _is_zero_expr(z):
 
 
 def _solve_subst(zs, names, fresh, depth=0):
-    """[(assignment dict name -> value, conditions)] or None (see _solve_system)."""
+    """[(assignment dict name -> value, conditions, integer parameters)] or
+    None (see _solve_system)."""
     if depth > 12:
         return None
     rest = []
@@ -3253,7 +3342,7 @@ def _solve_subst(zs, names, fresh, depth=0):
             return None  # a condition on parameters alone: not decided here
         rest.append(z)
     if not rest:
-        return [({}, [])]
+        return [({}, [], [])]
     order = sorted(rest, key=lambda z: (len(set(z._names()) & set(names)), len(str(z))))
     for z in order:
         for v in [n for n in names if n in z._names()]:
@@ -3268,11 +3357,15 @@ def _solve_subst(zs, names, fresh, depth=0):
             fail = False
             for t in sols:
                 val = t.rhs()
-                # the solve's own new symbols (r1, n1) renamed apart
-                ren = {}
-                for nm in set(val._names()) | {nm for c in t.conditions() for nm in c._names()}:
+                # the solve's own new symbols (r1, n1) renamed apart, its
+                # integer parameters kept as such (SOLVE2-F2)
+                ren, ints = {}, []
+                for nm in set(val._names()) | {nm for c in t.conditions() for nm in c._names()} | set(t._params):
                     if nm not in set(z._names()) and nm not in names and (nm in t._params or nm[0] == "r"):
-                        ren[Expression(_sym_s(nm))] = Expression(_sym_s(fresh()))
+                        new = fresh("n") if nm in t._params else fresh()
+                        ren[Expression(_sym_s(nm))] = Expression(_sym_s(new))
+                        if nm in t._params:
+                            ints.append(new)
                 if ren:
                     val = val.subs(ren)
                 conds = [c.subs(ren) for c in t.conditions()]
@@ -3284,10 +3377,10 @@ def _solve_subst(zs, names, fresh, depth=0):
                 if r is None:
                     fail = True
                     break
-                for d, cs in r:
+                for d, cs, ps in r:
                     d2 = dict(d)
                     d2[v] = val
-                    out.append((d2, other + cs))
+                    out.append((d2, other + cs, ints + ps))
             if not fail:
                 return out
     return None

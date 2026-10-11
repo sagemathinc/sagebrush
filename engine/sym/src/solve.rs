@@ -336,10 +336,13 @@ pub struct Sol {
 
 thread_local! {
     /// Candidates obtained by squaring away radicals: not solutions by
-    /// construction, so their residual must vanish exactly (else
-    /// "residual == 0" stays as a condition).
-    static VERIFY: std::cell::RefCell<Vec<Expr>> = const { std::cell::RefCell::new(vec![]) };
-    /// Whether the last accepted residual was zero only numerically.
+    /// construction, so their residual must vanish exactly, else a condition
+    /// stays.  With one radical, A + B sqrt(b) = 0, also (w, B) for w = -A/B
+    /// in x: there the candidate is a solution exactly when w is the
+    /// principal square root (see radical_roots).
+    static VERIFY: std::cell::RefCell<Vec<(Expr, Option<(Expr, Expr)>)>> = const { std::cell::RefCell::new(vec![]) };
+    /// Whether the last accepted residual was zero only numerically (or,
+    /// for a candidate from squaring, not shown zero at all).
     static NUMERIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The names in use (the equation's symbols and the new ones so far).
     static USED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(vec![]) };
@@ -382,6 +385,12 @@ fn maybe_zero(e: &Expr) -> bool {
 /// and solved for its symbol when e is linear in one (a - 1 != 0 is a != 1).
 fn zero_rel(r: Rel, e: &Expr) -> Expr {
     let e = crate::simplify::simplify_rational(e);
+    // b^k vanishes exactly where b does (k > 0): a^2 != 0 is a != 0
+    if let Kind::Pow(b, k) = &e.kind {
+        if k.as_num().map_or(false, |k| k.is_exact() && k.is_positive()) {
+            return zero_rel(r, b);
+        }
+    }
     let fs = free_symbols(&e);
     if fs.len() == 1 {
         if let Some(c) = coeffs(&crate::expand::expand(&e), &fs[0]) {
@@ -603,6 +612,7 @@ fn replace_sqrt(e: &Expr, b: &Expr, r: &Expr) -> Expr {
 fn radical_roots(f: &Expr, x: &str) -> Option<Vec<Sol>> {
     let mut g = f.clone();
     let mut steps = 0;
+    let mut branch = None;
     while let Some(b) = find_sqrt(&g, x) {
         steps += 1;
         if steps > 4 {
@@ -614,6 +624,9 @@ fn radical_roots(f: &Expr, x: &str) -> Option<Vec<Sol>> {
         let (hn, _) = together(&h);
         let hn = crate::expand::expand(&hn);
         let c = coeffs(&hn, &rname)?;
+        if steps == 1 && c.len() == 2 {
+            branch = Some((neg(&div(&c[0], &c[1])), c[1].clone()));
+        }
         // reduce r^2 = b: A from the even powers, B from the odd ones
         let (mut a, mut bb) = (zero(), zero());
         for (i, ci) in c.iter().enumerate() {
@@ -636,8 +649,11 @@ fn radical_roots(f: &Expr, x: &str) -> Option<Vec<Sol>> {
     if steps == 0 {
         return None;
     }
+    // (A + B r = 0 at a root of A^2 - B^2 b, with B != 0 there: r = w and
+    // w^2 = b, so sqrt(b) = r exactly when w is the principal root)
+    let branch = if steps == 1 { branch } else { None };
     let sols = roots_c(&g, x);
-    VERIFY.with(|v| v.borrow_mut().extend(sols.iter().map(|s| s.val.clone())));
+    VERIFY.with(|v| v.borrow_mut().extend(sols.iter().map(|s| (s.val.clone(), branch.clone()))));
     Some(sols)
 }
 
@@ -1004,7 +1020,10 @@ fn periodic_decide(c: &Expr, params: &[String]) -> Option<bool> {
             if q.is_zero() {
                 return Some(1);
             }
-            let b = q.denom().to_u64()?;
+            // (capped before doubling: 2 b wrapped for b near 2^64, giving a
+            // small false period, and the pole exclusion of sin(x)/cos(x/b)
+            // was decided away: the review's SOLVE2-F5)
+            let b = q.denom().to_u64().filter(|&b| b <= 64)?;
             let m = if matches!(f, Fun::Tan | Fun::Cot) { b } else { 2 * b };
             return (m <= 64).then_some(m);
         }
@@ -1172,6 +1191,16 @@ fn holds_at(z: &Expr, xs: &Expr, s: &Sol, sub0: &[(Expr, Expr)]) -> Option<bool>
             }
         }
         if !free_symbols(&sv).is_empty() {
+            // a candidate from squaring holds only where its residual
+            // vanishes, which nothing here proves: accepted unproved, so
+            // that solve1_full attaches the residual as a condition (with
+            // the candidate's own conditions it was accepted as a solution:
+            // sqrt(x) == a x - 2 kept x == 1 at a = 1, residual 2: the
+            // review's SOLVE2-F1)
+            if VERIFY.with(|v| v.borrow().iter().any(|(c, _)| c == &s.val)) {
+                NUMERIC.with(|n| n.set(true));
+                return Some(true);
+            }
             // the conditions say when; without any, the candidate claims
             // every parameter value: false when it fails at every sample
             // (then it is no solution for those values), else undecided
@@ -1343,9 +1372,24 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
                 // a candidate from squaring, accepted by numerical agreement
                 // only: exact under its residual vanishing, kept as a
                 // condition
-                if NUMERIC.with(|n| n.get()) && VERIFY.with(|v| v.borrow().contains(&s.val)) {
-                    let r = crate::simplify::simplify_full(&subs(&z, &[(xs.clone(), s.val.clone())]));
-                    s.cond.push(relation(Rel::Eq, &r, &zero()));
+                let squared = VERIFY.with(|v| v.borrow().iter().find(|(c, _)| c == &s.val).map(|(_, b)| b.clone()));
+                if let (true, Some(branch)) = (NUMERIC.with(|n| n.get()), squared) {
+                    let at = |u: &Expr| crate::simplify::simplify_rational(&subs(u, &[(xs.clone(), s.val.clone())]));
+                    match branch {
+                        // w the principal root: -pi/2 < arg(w) <= pi/2, as
+                        // for sqrt(x) == a (decided for numbers below)
+                        Some((w, b)) if !maybe_zero(&at(&b)) => {
+                            let ar = fun1(Fun::Arg, &crate::simplify::simplify_full(&at(&w)));
+                            let h = div(&pi(), &int(2));
+                            s.cond.push(relation(Rel::Gt, &ar, &neg(&h)));
+                            s.cond.push(relation(Rel::Le, &ar, &h));
+                        }
+                        // else the equation itself there
+                        _ => s.cond.push(match &e.kind {
+                            Kind::Rel(Rel::Eq, l, r) => relation(Rel::Eq, &at(l), &at(r)),
+                            _ => relation(Rel::Eq, &at(&z), &zero()),
+                        }),
+                    }
                 }
             }
             Some(false) => continue,

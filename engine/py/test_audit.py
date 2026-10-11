@@ -588,3 +588,18 @@ assert len(solve([_xs**2 + _Y**2 == 1, _Y == _xs], _xs, _Y)) == 2 and str(solve(
 assert str(solve(tan(_xs) == 1, _xs)) == "[x == pi*n1 + 1/4*pi for integer n1]"
 assert len(solve(diff(exp(_xs * _t) * (_xs - 1)**2, _xs) == 0, _xs)) == 2
 print("solve complaints ok")
+# Astra's review of b644b68 (SOLVE2-F1..F4)
+_a = SR.var("a")
+_ss = solve(sqrt(_xs) == _a * _xs - 2, _xs)
+assert len(_ss) == 2 and solve(sqrt(_xs) == -2, _xs) == []  # F1: the a == 0 candidate is gone
+raises(ValueError, _ss[0].subs, a=1); assert str(_ss[1].subs(a=1)) == "x == 4"; raises(ValueError, _ss[1].subs, a=0)
+_sys = solve([sin(_xs) == 0, _xs == _Y], _xs, _Y); raises(ValueError, _sys[0][0].subs, n1=QQ(1) / 2)  # F2
+assert all(len(c.parameters()) == 1 for c in _sys[0])
+_d = solve([sqrt(_xs) == _a, _xs == _Y], _xs, _Y, solution_dict=True)
+assert len(_d[0].conditions()) == 2  # F3
+_d = solve([_xs * _Y == 0, _xs > _a], _xs, _Y, solution_dict=True); assert all(d.conditions() for d in _d)
+_r1 = SR.var("r1"); _sys = solve([_xs * _Y == 0, _Y > _r1], _xs, _Y)  # F4: the external r1 is not captured
+assert all(str(s[0].rhs()) != "r1" and str(s[1].rhs()) != "r1" for s in _sys)
+_b = 2**63 + 2; _ss = solve(sin(_xs) / cos(_xs / _b) == 0, _xs)  # F5: a huge period is not decided
+assert _ss[0].conditions(); raises(ValueError, _ss[0].subs, n1=_b // 2)
+print("solve review ok")
