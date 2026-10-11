@@ -157,6 +157,27 @@ try {
   r = await ev("sagebrush.notebook.filesChanged(['/data.txt']).then((r) => r.ran.length)");
   ok(r === 1 && (await out(2)) === "7", `a file changed outside (an upload) reruns its readers (${await out(2)})`);
 
+  // the controls: the auto-run time (kept in the notebook), Run stale, manual cells
+  await fileNew();
+  ok(!(await ev("document.querySelector('#autorun').hidden")), "the auto-run control shows");
+  await ev("(() => { const a = document.querySelector('#autorun'); a.value = 'never'; a.dispatchEvent(new Event('change')); return true; })()");
+  ok((await ev("sagebrush.notebook.budget")) === 0 && (await ev("sagebrush.notebook.meta.autorun")) === "never", "Auto-run: never sets the budget to 0, kept in the notebook");
+  await set(["m = 2", "print(m * 10)"]);
+  await run([0, 1]);
+  await set(["m = 3"]);
+  await run(0);
+  await sleep(100);
+  ok((await has(1, "stale")) && /Run stale \(1/.test(await ev("document.querySelector('#runstale').textContent")) && !(await ev("document.querySelector('#runstale').hidden")), `with auto-run off, the dependent is stale and Run stale offers it (${await ev("document.querySelector('#runstale').textContent")})`);
+  await ev("document.querySelector('#runstale').click(); true");
+  await until("sagebrush.notebook.cells()[1].out.textContent.trim() === '30'", 10000);
+  ok(!(await has(1, "stale")) && (await ev("document.querySelector('#runstale').hidden")), "Run stale runs it");
+  await ev("(() => { const a = document.querySelector('#autorun'); a.value = 'always'; a.dispatchEvent(new Event('change')); return true; })()");
+  await ev(`(() => { const c = sagebrush.notebook.cells()[1]; c.menuBtn.click(); document.querySelector('.sbnb-menu [data-m="manual"]').click(); return true; })()`);
+  ok((await has(1, "manual")) && (await ev("sagebrush.notebook.cells()[1].metadata?.sagebrush?.manual")) === true, "the cell menu makes a cell manual (in its metadata)");
+  await set(["m = 4"]);
+  r = await run(0);
+  ok(JSON.stringify(r?.stale) === "[1]" && (await out(1)) === "30", `a manual cell is not rerun automatically, even with auto-run always (${JSON.stringify(r)})`);
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);
@@ -191,8 +212,9 @@ try {
   await until(ready);
   await until(`sagebrush.notebook.cells().length >= 3 && sagebrush.notebook.cells()[2].el.classList.contains('stale')`, 10000);
   ok((await out(2)) === "6", "after a reload, the outputs are shown, stale");
+  const before = JSON.stringify(await ev("sagebrush.notebook.graph().map((c) => [c.state, c.reads, c.defines])"));
   r = await run(2);
-  ok(JSON.stringify(r?.ran) === "[0,1,2]" && (await out(2)) === "6", `running the last cell first runs its stale ancestors (${JSON.stringify(r?.ran)})`);
+  ok(JSON.stringify(r?.ran) === "[0,1,2]" && (await out(2)) === "6", `running the last cell first runs its stale ancestors (${JSON.stringify(r?.ran)}; before: ${before}; ${await out(2)})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
