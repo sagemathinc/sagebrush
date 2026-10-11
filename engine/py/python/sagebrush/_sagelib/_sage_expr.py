@@ -340,7 +340,10 @@ class Expression:
     def _latex_(self):
         t = _call("latex", self._s)[0]
         for n, l in _LATEX_NAMES.items():
-            if t == n:
+            # (the symbol alone, as written or as rendered: _y is _{y})
+            if n not in _LATEX_SYM:
+                _LATEX_SYM[n] = _call("latex", _sym_s(n))[0]
+            if t == n or t == _LATEX_SYM[n]:
                 return l
             t = t.replace("\\mathit{%s}" % n, l)
         return t
@@ -1522,6 +1525,9 @@ class _SymbolicRing:
 
             sage: t = SR.var('t'); t^2
             t^2
+            sage: u = SR.var('u', domain='real'); assumptions()
+            [u is real]
+            sage: forget()
         """
         if len(names) == 1 and isinstance(names[0], (list, tuple)):
             names = tuple(names[0])
@@ -1531,6 +1537,9 @@ class _SymbolicRing:
         if kw.get("latex_name") is not None:
             for n in names:
                 _LATEX_NAMES[n] = str(kw["latex_name"])
+        if kw.get("domain") in ("positive", "integer", "real", "complex"):
+            for v in vs:
+                assume(v, kw["domain"])
         return vs[0] if len(vs) == 1 else vs
 
     def _latex_(self):
@@ -1613,6 +1622,7 @@ _FAST_GLOBALS = {"_m": _M, "_gamma": _gamma, "_sgn": _sgn, "_undefined": _undefi
 # ------------------------------------------------------------------ constructors
 
 _LATEX_NAMES = {}   # symbol name -> LaTeX (var('th', latex_name=r'\theta'))
+_LATEX_SYM = {}     # symbol name -> its LaTeX without a latex_name
 
 
 # ---------------------------------------------------------------- assumptions
@@ -1769,7 +1779,7 @@ def _assume_on(sol, names):
             if str(r._v) != x:
                 continue
             if r._kind == "real":
-                extra.append(Expression(_call("parse", "imag_part(%s)" % v)[0]) == 0)
+                extra.append(_one("fun", "imag_part", v._s) == 0)
             elif r._kind == "positive":
                 extra.append(v > 0)
             elif r._kind == "negative":
@@ -1865,7 +1875,7 @@ def _system_assume(sols, names):
                 if v is None or not v.variables():
                     continue  # numerical values: _satisfies
                 if r._kind == "real":
-                    conds.append(Expression(_call("parse", "imag_part(%s)" % v)[0]) == 0)
+                    conds.append(_one("fun", "imag_part", v._s) == 0)
                 elif r._kind == "positive":
                     conds.append(v > 0)
                 elif r._kind == "negative":
@@ -3214,7 +3224,7 @@ def solve(f, *args, **kw):
             raise NotImplementedError("solve: multiplicities=True for one equation in one variable")
         out = [s for sol in sols for s in sol]
         z = eqs[0].lhs() - eqs[0].rhs()
-        v = Expression(_call("parse", names[0])[0])
+        v = Expression(_sym_s(names[0]))
         mults = []
         # an identity (x == x: every x, the solution x == r1) has multiplicity
         # 1, as in Sage, not the loop's cap 1001 (R2-SYMALG-F3)
@@ -3337,7 +3347,8 @@ def _solve_abs(eq, u, x):
     condition (0 == -2*x - e^x + e + 2 came from abs(x) = -x and holds at
     x = 1, no solution: ABS-F2)."""
     v = Expression(_sym_s(x))
-    a = Expression(_call("parse", "abs(%s)" % u)[0])
+    # (built, not parsed from its printed form: names of any script)
+    a = _one("fun", "abs", u._s)
     out = []
     for rep, cond in ((u, u >= 0), (-u, u < 0)):
         for t in solve(eq.subs({a: rep}), v):

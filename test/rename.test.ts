@@ -184,3 +184,29 @@ test("fifth review: break, continue, loop else, with, del of a tuple, walrus, ba
   assert.ok(q(["x=1", "print(x)", deep, "print(C.z,x)"], "x"));
   assert.ok(Date.now() - t < 1000, `${Date.now() - t} ms`);
 });
+
+test("sixth review: walrus that may not run, bindings in def and class headers, except as after its type", () => {
+  const q = (codes: string[], name: string) => {
+    const cells = codes.map((code, i) => { const a = analyzeCell(code, "c"); return { id: `c${i}`, code, defines: a.defs.has(name), reads: a.refs.has(name) }; });
+    const r = renameRedefinitions(cells, name, new Set([name]), "python", "\u02b9");
+    return r && Object.fromEntries(r);
+  };
+  const S = "x\u02b92";
+  const cls = (body: string) => q(["x=1", "print(x)", `x=2\nclass C:\n${body}`, "print(C.y,x)"], "x");
+  // a := that may not run: the read after it is undetermined (refused)
+  for (const body of ["    if False and (x:=100):\n        pass\n    y=x", "    if True or (x:=100):\n        y=x", "    (x:=100) if False else None\n    y=x"]) assert.equal(cls(body), null, body);
+  // one that surely runs binds the class's x
+  assert.deepEqual(cls("    (x:=100) and False\n    y=x"), { c2: `${S}=2\nclass C:\n    (x:=100) and False\n    y=x`, c3: `print(C.y,${S})` });
+  // := in a def's defaults or a class's bases binds the class's x
+  assert.deepEqual(cls("    def f(a=(x:=100)):\n        pass\n    y=x"), { c2: `${S}=2\nclass C:\n    def f(a=(x:=100)):\n        pass\n    y=x`, c3: `print(C.y,${S})` });
+  assert.deepEqual(cls("    class D(object if (x:=100) else object):\n        pass\n    y=x"), { c2: `${S}=2\nclass C:\n    class D(object if (x:=100) else object):\n        pass\n    y=x`, c3: `print(C.y,${S})` });
+  // x = x + 1 in a class body reads the module's x (not refused)
+  assert.deepEqual(cls("    x = x + 1\n    y=x"), { c2: `${S}=2\nclass C:\n    x = ${S} + 1\n    y=x`, c3: `print(C.y,${S})` });
+  // the target of `except E as x` is the one after E, not text in a string
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\ntry:\n    1/0\nexcept (ZeroDivisionError if 'as x:' else Exception) as x:\n    result=str(x)", "print(result, x)"], "x"),
+    { c2: `${S}=2\ntry:\n    1/0\nexcept (ZeroDivisionError if 'as x:' else Exception) as ${S}:\n    result=str(${S})`, c3: `print(result, ${S})` });
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\ntry:\n    1/0\nexcept (ValueError, ZeroDivisionError) as x:\n    result=str(x)", "print(result, x)"], "x"),
+    { c2: `${S}=2\ntry:\n    1/0\nexcept (ValueError, ZeroDivisionError) as ${S}:\n    result=str(${S})`, c3: `print(result, ${S})` });
+  // a function's := in a comprehension makes x its local
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\ndef f():\n    [(x := i) for i in range(3)]\n    return x", "print(f(), x)"], "x"), { c2: `${S}=2\ndef f():\n    [(x := i) for i in range(3)]\n    return x`, c3: `print(f(), ${S})` });
+});
