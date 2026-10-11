@@ -123,23 +123,23 @@ try {
   await run(0);
   ok((await out(0)) === "6" && (await ev("(async () => 1)()")) === 1, "rerunning it");
 
-  // agents: a batch of edits run once; the graph; verify finds hidden state
+  // agents: a batch of edits run once; the graph; mutation tracking; verify finds hidden state
   await fileNew();
   let e = await ev(`(async () => { const nb = sagebrush.notebook; const first = nb.cells()[0].id; const r = await nb.applyEdits({ set: [{ id: first, code: "v = [1, 2, 3]" }], insert: [{ code: "v.append(4)" }, { code: "print(len(v))" }, { code: "# notes", type: "markdown" }] }, { budget: Infinity }); return { ...r, first }; })()`);
   ok(e.ids.length === 3 && e.report.ran.length === 3 && e.outputs[e.ids[1]] === "4\n", `edit: three changes, one run (${JSON.stringify(e.report.ran.length)} cells ran; len(v) = ${JSON.stringify(e.outputs[e.ids[1]])})`);
   const g = await ev("sagebrush.notebook.graph()");
-  ok(g.length === 3 && JSON.stringify(g[0].defines) === '["v"]' && JSON.stringify(g[2].reads) === '["v"]' && g[2].parents.length === 1 && g.every((c) => c.state === "ok"), `graph: ${JSON.stringify(g.map((c) => [c.defines, c.reads, c.state]))}`);
-  await run(1);
+  ok(g.length === 3 && JSON.stringify(g[0].defines) === '["v"]' && JSON.stringify(g[1].mutates) === '["v"]' && JSON.stringify(g[2].reads) === '["v"]' && g[2].parents.length === 2 && g.every((c) => c.state === "ok"), `graph: ${JSON.stringify(g.map((c) => [c.defines, c.reads, c.mutates ?? [], c.parents.length, c.state]))}`);
+  r = await run(1);
+  ok(JSON.stringify(r?.ran) === "[0,1,2]" && (await out(2)) === "4", `running the append again reruns v's definer first, so it never appends twice; the reader follows (${JSON.stringify(r?.ran)}, len(v) = ${await out(2)})`);
+  // an alias (w = v) hides a mutation from the analysis: verify finds it
+  e = await ev(`(async () => { const r = await sagebrush.notebook.applyEdits({ insert: [{ code: "w = v" }, { code: "w.append(9)" }] }, { budget: Infinity }); return r.report.ran.length; })()`);
+  await run(4);
   await run(2);
-  ok((await out(2)) === "5", "running the append again by hand: len(v) = 5 (hidden state: a mutation)");
+  ok((await out(2)) === "6", `appending through the alias, by hand, twice: len(v) = ${await out(2)}`);
   const v = await ev("sagebrush.notebook.verify().then((r) => ({ same: r.same.length, changed: r.changed.map((c) => [c.before.trim(), c.after.trim()]) }))");
-  ok(JSON.stringify(v.changed) === '[["5","4"]]' && v.same === 2, `verify recomputes from scratch and finds the cell that differs (${JSON.stringify(v)})`);
+  ok(JSON.stringify(v.changed) === '[["6","4"]]', `verify recomputes from scratch and finds the cell that differs (${JSON.stringify(v)})`);
   e = await ev(`(async () => { const nb = sagebrush.notebook; const ids = nb.cells().map((c) => c.id); const r = await nb.applyEdits({ remove: [ids[1]] }); return r.report; })()`);
-  // (as in marimo, the append defines nothing, so deleting it reruns nothing: its mutation stays until
-  // mutation tracking; verify shows it)
-  ok(e.ran.length === 0 && (await out(1)) === "4", `edit: removing the append (which defines nothing) reruns nothing (len(v) = ${await out(1)})`);
-  const v2 = await ev("sagebrush.notebook.verify().then((r) => r.changed.map((c) => [c.before.trim(), c.after.trim()]))");
-  ok(JSON.stringify(v2) === '[["4","3"]]', `...and verify finds it (${JSON.stringify(v2)})`);
+  ok((await out(1)) === "3", `edit: removing the append (an updater) reruns v's definer and the reader (len(v) = ${await out(1)})`);
 
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();

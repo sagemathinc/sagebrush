@@ -86,3 +86,13 @@ test("cycles, import *, syntax errors", () => {
   const h = build(["print(y)", "y = 1"], false);
   assert.deepEqual(h.order(h.ids), ["c1", "c0"]);
 });
+
+test("updaters: cells mutating another cell's object run between its definer and readers", () => {
+  const g = build(["print(v)", "v = [1]", "v.append(2)", "v[0] = 5", "z = len(v)"], false);
+  assert.deepEqual(g.updatersOf.get("v"), ["c2", "c3"]);
+  assert.deepEqual(g.order(g.ids), ["c1", "c2", "c3", "c0", "c4"]);
+  assert.equal(g.errors.size, 0);
+  // strict (marimo): no such edges
+  const h = build(["print(v)", "v = [1]", "v.append(2)"], true);
+  assert.deepEqual(h.order(h.ids), ["c1", "c0", "c2"]);
+});
