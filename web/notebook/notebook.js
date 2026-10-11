@@ -17,7 +17,7 @@
 import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
 import { cellId } from "./ipynb.js";
-import { Reactive } from "../../src/notebook-reactive.ts";
+import { Reactive, SCOPE_SEP, written } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
 const STOP_MESSAGE = "\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n";
@@ -711,6 +711,8 @@ export function createNotebook(root, opts = {}) {
           return cell ? execCell(cell, code, forget).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
         },
         forget: (names) => new Promise((resolve) => kernel.execute("", { mode, forget: names }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
+        // page-order scoping (src/rename.ts in the analyzer's worker)
+        ...(opts.analyzer?.rename ? { rename: (q) => opts.analyzer.rename({ ...q, mode, sep: SCOPE_SEP }) } : {}),
         status(id, st) {
           const cell = cellById(id);
           if (cell) { showStatus(cell, st); markEdited(cell); }
@@ -725,6 +727,7 @@ export function createNotebook(root, opts = {}) {
   const labels = (ids) => ids.map(label).join(", ").replace(/, ([^,]*)$/, " and $1");
   const secs = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`);
   function errorText(e) {
+    if (e.name) e = { ...e, name: written(e.name) };
     switch (e.kind) {
       case "multiple-definition":
         return e.reading
@@ -834,6 +837,7 @@ export function createNotebook(root, opts = {}) {
   // The page changed outside the scheduler (cells moved, deleted elsewhere, a document loaded).
   function reactiveSync() {
     if (!reactive() || !kernel.reactive) return;
+    // (with page-order scoping, a move can change what a cell reads: those rerun)
     kernel.reactive.reordered();
     for (const c of cells()) if (c.type === "code") markEdited(c);
   }
@@ -1689,8 +1693,9 @@ export function createNotebook(root, opts = {}) {
       const state = cls.contains("running") ? "running" : cls.contains("queued") ? "queued" : cls.contains("error") ? "error" : cls.contains("cancelled") ? "cancelled" : cls.contains("stale") ? "stale" : r && r.submitted(c.id) === undefined ? "not run" : "ok";
       return {
         id: c.id, index: index(c), state, edited: cls.contains("edited"),
-        defines: a ? [...a.defs] : [], reads: a ? [...a.refs].filter((n) => r.graph.definers.has(n)) : [],
-        ...(a?.mutations?.size ? { mutates: [...a.mutations].filter((n) => r.graph.definers.has(n)) } : {}),
+        // (names as written: page-order scoping's xʹ2 is x)
+        defines: a ? [...new Set([...a.defs].map(written))] : [], reads: a ? [...new Set([...a.refs].filter((n) => r.graph.definers.has(n)).map(written))] : [],
+        ...(a?.mutations?.size ? { mutates: [...new Set([...a.mutations].filter((n) => r.graph.definers.has(n)).map(written))] } : {}),
         parents: r ? [...r.graph.parents(c.id)] : [], children: r ? [...r.graph.children(c.id)] : [],
         ...(r?.errors.has(c.id) ? { errors: r.errors.get(c.id).map(errorText) } : {}),
         ...(r?.times.has(c.id) ? { ms: Math.round(r.times.get(c.id)) } : {}),

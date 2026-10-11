@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Reactive, type CellInfo, type CellState } from "../src/notebook-reactive";
+import { Reactive, SCOPE_SEP, type CellInfo, type CellState } from "../src/notebook-reactive";
 import { analyzeCell } from "../src/dataflow";
+import { renameRedefinitions } from "../src/rename";
 
 // The reactive scheduler (src/notebook-reactive.ts) with a toy interpreter:
 // running a cell sets the names it defines (to "cell@n") after checking the
@@ -10,7 +11,7 @@ import { analyzeCell } from "../src/dataflow";
 
 const BUILTINS = new Set(["print", "range", "len"]);
 
-function notebook(codes: string[], manual: number[] = []) {
+function notebook(codes: string[], manual: number[] = [], scoped = false) {
   let cells: CellInfo[] = codes.map((code, i) => ({ id: `c${i}`, code, manual: manual.includes(i) }));
   const globals = new Map<string, string>();
   const states = new Map<string, CellState>();
@@ -40,6 +41,7 @@ function notebook(codes: string[], manual: number[] = []) {
       log.push("forget:" + [...names].sort().join(","));
     },
     status: (id, s) => states.set(id, s),
+    ...(scoped ? { rename: async (q: any) => { const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), "python", SCOPE_SEP); return r ? [...r] : null; } } : {}),
   });
   return {
     r, globals, states, log,
@@ -212,4 +214,39 @@ test("mutation tracking: an updater runs with its family, and the readers after 
   // an updater's code changed to mutate nothing: the same
   nb.set(2, "pass");
   assert.deepEqual((await nb.r.run(["c3"])).ran, ["c0", "c1", "c3"]);
+});
+
+test("page-order scoping: a cell reads the nearest definition above it", async () => {
+  const nb = notebook(["x = 1", "y = x", "x = 2", "z = x", "w = x + y"], [], true);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  const rep = await nb.r.runAll();
+  assert.deepEqual(rep.errors, {});
+  assert.equal(nb.r.effective("c2"), "x\u02b92 = 2");
+  assert.equal(nb.r.effective("c4"), "w = x\u02b92 + y");
+  assert.equal(nb.r.submitted("c2"), "x = 2");
+  // y read the first x; z and w the second
+  assert.ok(nb.globals.get("y")!.startsWith("c1@"));
+  assert.ok(nb.globals.has("x") && nb.globals.has("x\u02b92"));
+  // editing the first definition reruns only what reads it
+  nb.set(0, "x = 10");
+  assert.deepEqual((await nb.r.run(["c0"])).ran, ["c0", "c1", "c4"]);
+  // deleting the second definition: the cells below now read the first, and rerun
+  const gone = nb.del(2);
+  const r2 = await nb.r.remove([gone]);
+  assert.equal(nb.r.effective("c3"), "z = x");
+  assert.deepEqual(r2.ran.sort(), ["c3", "c4"]);
+  assert.equal(nb.globals.has("x\u02b92"), false);
+});
+
+test("page-order scoping: moving a definition changes what the cells below read", async () => {
+  const nb = notebook(["x = 1", "x = 2", "print(x)"], [], true);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.runAll();
+  assert.equal(nb.r.effective("c2"), "print(x\u02b92)");
+  nb.move(1, 2); // x = 1, print(x), x = 2
+  const rep = await nb.r.reordered();
+  assert.equal(nb.r.effective("c2"), "print(x)");
+  assert.ok(rep.ran.includes("c2"));
 });

@@ -33,3 +33,17 @@ test("a notebook in Jupyter's order: each later definition gets a new name", () 
   const r = renameRedefinitions(cells, "x", new Set(["x", "y", "x_2"]));
   assert.deepEqual(Object.fromEntries(r!), { c2: "x_3 = x + 1", c3: "print(x_3)", c4: "x_4 = x_3 * 10", c5: "y = x_4" });
 });
+
+test("page-order scoping's names (x\u02b92), and Sage chains", () => {
+  const codes = ["x = 1", "x = x + 1", "x = x * 10", "print(x)"];
+  const cells = codes.map((code, i) => { const a = analyzeCell(code); return { id: `c${i}`, code, defines: a.defs.has("x"), reads: a.refs.has("x") }; });
+  assert.deepEqual(Object.fromEntries(renameRedefinitions(cells, "x", new Set(["x"]), "python", "\u02b9")!), { c1: "x\u02b92 = x + 1", c2: "x\u02b93 = x\u02b92 * 10", c3: "print(x\u02b93)" });
+  const sage = ["R.<x> = QQ[]", "x = var('x')", "f = x^2 + 1/2\nx = 3"].map((code, i) => { const a = analyzeCell(code, "c", { mode: "sage" }); return { id: `c${i}`, code, defines: a.defs.has("x"), reads: a.refs.has("x") }; });
+  assert.deepEqual(Object.fromEntries(renameRedefinitions(sage, "x", new Set(["x"]), "sage", "\u02b9")!), { c1: "x\u02b92 = var('x')", c2: "f = x\u02b92^2 + 1/2\nx\u02b93 = 3" });
+});
+
+test("a Sage cell defining x by var('x') alone", () => {
+  const codes = ["x = polygen(QQ)", "var('x')\nprint(x^2)", "print(x)"];
+  const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode: "sage" }); return { id: `c${i}`, code, defines: a.defs.has("x"), reads: a.refs.has("x") }; });
+  assert.deepEqual(Object.fromEntries(renameRedefinitions(cells, "x", new Set(["x"]), "sage", "\u02b9")!), { c1: 'x\u02b92 = SR.var("x")\nprint(x\u02b92^2)', c2: "print(x\u02b92)" });
+});

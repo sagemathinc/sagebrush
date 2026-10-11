@@ -150,7 +150,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
  * new source, or null if it cannot be done reliably (Magma; a Sage cell
  * whose occurrences do not correspond after preparsing; a syntax error).
  */
-export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition" } = {}): string | null {
+export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
   if (opts.mode === "magma") return null;
   const analyzed = opts.mode === "sage" ? preparse(source) : source;
   let tree: any;
@@ -161,13 +161,18 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   }
   const aLines = analyzed.split("\n");
   let occ = occurrences(tree, name, aLines);
+  // each occurrence's new name: `to`, or (from the definition) `before` for those before it
+  const target = new Map<Occurrence, string>();
   if (opts.from === "definition") {
     const first = occ.find((o) => o.store);
     if (!first) return source;
-    occ = occ.filter((o) => o.stmt > first.stmt || (o.stmt === first.stmt && o.store));
-  }
+    const after = (o: Occurrence) => o.stmt > first.stmt || (o.stmt === first.stmt && o.store);
+    for (const o of occ) if (after(o)) target.set(o, to);
+    else if (opts.before !== undefined) target.set(o, opts.before);
+    occ = occ.filter((o) => target.has(o));
+  } else for (const o of occ) target.set(o, to);
   if (!occ.length) return source;
-  if (occ.some((o) => o.alias === null)) return null;
+  if (occ.some((o) => o.alias === null && target.get(o) !== name)) return null;
   const lines = source.split("\n");
   // positions in the original source: the same for Python; for Sage, the
   // k-th occurrence of the name on a line, as a whole word outside strings
@@ -192,7 +197,7 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
       spans = os.map((o) => [byteSlice(text, 0, o.col).length, byteSlice(text, 0, o.end).length]);
     }
     // (with the occurrence's replacement: `x as to` for an import of x)
-    const reps = spans.map(([s, e], i) => [s, e, os[i].alias ? `${os[i].alias} as ${to}` : to] as [number, number, string]);
+    const reps = spans.map(([s, e], i) => { const t = target.get(os[i])!; return [s, e, os[i].alias ? `${os[i].alias} as ${t}` : t] as [number, number, string]; });
     reps.sort((a, b) => b[0] - a[0]);
     let t = text;
     for (const [s, e, r] of reps) t = t.slice(0, s) + r + t.slice(e);
@@ -225,12 +230,13 @@ export function renameRedefinitions(
   name: string,
   taken: Set<string>,
   mode: Mode = "python",
+  sep = "_",
 ): Map<string, string> | null {
   const out = new Map<string, string>();
   let current = name, k = 1, seen = false;
   const fresh = () => {
     let n: string;
-    do n = `${name}_${++k}`;
+    do n = `${name}${sep}${++k}`;
     while (taken.has(n));
     taken.add(n);
     return n;
@@ -238,11 +244,12 @@ export function renameRedefinitions(
   for (const c of cells) {
     if (c.defines && seen) {
       const to = fresh();
-      // its reads before its definition are of the previous name
-      let code = current === name ? c.code : renameInCell(c.code, name, current, { mode });
+      // its reads before its definition are of the previous name (one pass: a Sage
+      // cell is mapped back through the preparser by the original name)
+      let code = renameInCell(c.code, name, to, { mode, from: "definition", ...(current === name ? {} : { before: current }) });
       if (code === null) return null;
-      code = renameInCell(code, current === name ? name : current, to, { mode, from: "definition" });
-      if (code === null) return null;
+      if (code === c.code && mode === "sage") code = renameVar(c.code, name, to, current);
+      if (code === null || code === c.code) return null;
       out.set(c.id, code);
       current = to;
     } else if (c.defines) {
@@ -254,4 +261,26 @@ export function renameRedefinitions(
     }
   }
   return out;
+}
+
+// A Sage cell defining the name only by `var('x')` on a line of its own:
+// `xʹ2 = SR.var('x')` (which binds it without setting the global x); its
+// earlier reads, of the previous name, renamed.  Null if it is not that simple.
+function renameVar(source: string, name: string, to: string, before: string): string | null {
+  const lines = source.split("\n");
+  const re = new RegExp(`^(\\s*)var\\(\\s*(['"])${name}\\2\\s*\\)\\s*$`);
+  const i = lines.findIndex((l) => re.test(l));
+  if (i < 0 || /^\s/.test(lines[i])) return null;
+  let head = lines.slice(0, i).join("\n"), tail = lines.slice(i + 1).join("\n");
+  if (before !== name && head) {
+    const h = renameInCell(head, name, before, { mode: "sage" });
+    if (h === null) return null;
+    head = h;
+  }
+  if (tail) {
+    const t = renameInCell(tail, name, to, { mode: "sage" });
+    if (t === null) return null;
+    tail = t;
+  }
+  return [...(i ? [head] : []), `${to} = SR.var(${JSON.stringify(name)})`, ...(i + 1 < lines.length ? [tail] : [])].join("\n");
 }

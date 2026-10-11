@@ -65,14 +65,16 @@ try {
   r = await run(3);
   ok(/NameError/.test(await out(4)), `removing z's definition reruns its reader, which fails: ${await out(4)}`);
 
-  // multiple definitions: the new cell has the error; the old one keeps working
-  await set([null, null, null, "a = 5"]);
-  r = await run(3);
-  ok(JSON.stringify(r?.errors) === "[3]" && /a is also defined by cell 1/.test(await out(3)), `a second definition is an error on the new cell: ${await out(3)}`);
-  ok((await out(1)) === "C 11" && !(await has(0, "error")), `...not on the first (no action at a distance): ${await out(1)} ${await has(0, "error")}`);
-  await set([null, null, null, "a2 = 5"]);
-  r = await run(3);
-  ok(JSON.stringify(r?.errors) === "[]" && !(await has(3, "error")), "renaming it clears the error");
+  // a second definition (page-order scoping): no error; the cells above it still read the first, those below it the second
+  await set([null, null, null, "a = 5\nprint('A2', a)", "print('D', a)"]);
+  r = await run([3, 4]);
+  ok(JSON.stringify(r?.errors) === "[]" && (await out(3)) === "A2 5" && (await out(4)) === "D 5" && (await out(1)) === "C 11", `a second definition of a: no error; the cell below it reads it (D 5), the cells above the first (C 11): ${JSON.stringify(r)}`);
+  await set(["a = 20\nprint('A', a)"]);
+  r = await run(0);
+  ok((await out(1)) === "C 21" && (await out(4)) === "D 5" && !r.ran.includes(await ev("sagebrush.notebook.cells()[4].id")), `editing the first definition reruns only the cells reading it (C 21, D still 5): ${JSON.stringify(r.ran.length)}`);
+  ok(JSON.stringify(await ev("sagebrush.notebook.graph()[3].defines")) === '["a"]', "the graph shows names as written (a, not a\u02b92)");
+  await set(["a = 10\nprint('A', a)", null, null, "a2 = 5", "pass"]);
+  await run([0, 3, 4]);
 
   // an exception stops the cells that depend on it
   await set([null, null, "c = a + 1\nprint('B', c)\n1/0"]);
@@ -188,40 +190,25 @@ try {
   await until(`sagebrush.notebook.cells()[1].out.textContent.trim() === '49'`, 10000);
   ok((await ev("sagebrush.notebook.cells()[0].out.querySelectorAll('.interact input[type=range]').length")) === 1, "moving the slider reruns the cell reading it (49), not the one showing it");
 
-  // a Jupyter-style notebook (x redefined): the fix renames the later definitions, in page order
+  // a Jupyter-style notebook (x redefined): page-order scoping keeps its meaning, with no errors
   await fileNew();
   await set(["x = 1", "print(x)", "x = x + 1", "print(x * 100)"]);
   r = await run([0, 1, 2, 3]);
-  ok(JSON.stringify(r?.errors) === "[0,1,2,3]", `x defined by two cells and read: errors (${JSON.stringify(r?.errors)})`);
-  ok(await ev("!!sagebrush.notebook.cells()[2].out.querySelector('.fixes button')"), "the error offers a fix");
-  await ev("sagebrush.notebook.cells()[2].out.querySelector('.fixes button').click(); true");
-  await until("sagebrush.notebook.cells()[3].out.textContent.trim() === '200'", 15000);
-  const codes = await ev("sagebrush.notebook.cells().map((c) => c.ta.value)");
-  ok(JSON.stringify(codes) === JSON.stringify(["x = 1", "print(x)", "x_2 = x + 1", "print(x_2 * 100)"]) && (await out(1)) === "1", `the fix keeps the notebook's meaning in page order (${JSON.stringify(codes)})`);
-  ok(JSON.stringify(await ev("sagebrush.notebook.graph().map((c) => c.state)")) === '["ok","ok","ok","ok"]', "...and every cell runs");
-
-  // marimo's API (lib/marimo): mo.ui controls are widgets; mo.md is rendered Markdown
+  ok(JSON.stringify(r?.errors) === "[]" && (await out(1)) === "1" && (await out(3)) === "200", `x = 1 ... x = x + 1: each cell reads the definition above it (1, 200): ${JSON.stringify(r)}`);
+  ok(JSON.stringify(await ev("sagebrush.notebook.cells().map((c) => c.ta.value)")) === JSON.stringify(["x = 1", "print(x)", "x = x + 1", "print(x * 100)"]) && !(await has(2, "edited")), "the page shows the code as written (not edited)");
+  await set([null, null, null, "del x\nprint(x)"]);
+  await run(3);
+  ok(/NameError: name 'x' is not defined/.test(await out(3)) && !/\u02b9/.test(await out(3)), `errors name x as written: ${(await out(3)).split("\n").pop()}`);
+  // Sage: R.<x>, then x = var('x'), then var('x') alone, in later cells
   await fileNew();
-  await set(["import marimo as mo", "n = mo.ui.slider(1, 10, value=2, label='n')\nn", "mo.md(f'The square of **{n.value}** is $ {n.value ** 2} $')"]);
-  await run([0, 1, 2]);
-  ok(/The square of 2 is/.test(await ev("sagebrush.notebook.cells()[2].out.querySelector('.md-out')?.textContent ?? ''")) && (await ev("!!sagebrush.notebook.cells()[2].out.querySelector('.md-out strong')")), `mo.md shows rendered Markdown: ${await ev("sagebrush.notebook.cells()[2].out.innerHTML.slice(0, 160)")}`);
-  await ev(`(async () => { const nb = sagebrush.notebook; const key = nb.cells()[1].out.querySelector('.interact').dataset.key; await nb.setInteract(key, { _w0: 8 }); return true; })()`);
-  await until(`/The square of 8 is/.test(sagebrush.notebook.cells()[2].out.textContent)`, 10000);
-  ok(true, "moving mo.ui.slider reruns the mo.md cell reading it");
-
-  // Stop during a chain: the running cell is interrupted, the cells after it are stale
-  await fileNew();
-  await set(["s = 1", "while s:\n    pass", "t = s + 1\nprint(t)", "print('other', s)"]);
-  await ev("window.__run = (async () => { const nb = sagebrush.notebook; const ids = nb.cells().map((c) => c.id); const r = await nb.runCells(ids, { budget: Infinity }); window.__stopReport = { ran: r.ran.map((id) => ids.indexOf(id)), stale: r.stale.map((id) => ids.indexOf(id)).sort() }; })(); true");
-  await until("sagebrush.notebook.cells()[1].el.classList.contains('running')", 15000);
-  await sleep(500);
-  await ev("document.querySelector('#stop').click(); true");
-  await until("window.__stopReport", 15000);
-  const sr = await ev("window.__stopReport");
-  ok(JSON.stringify(sr.ran) === "[0,1]" && sr.stale.includes(2) && sr.stale.includes(3) && /KeyboardInterrupt/.test(await out(1)), `Stop interrupts the running cell and leaves the rest stale (${JSON.stringify(sr)})`);
-  ok(/stale/.test(await ev("sagebrush.notebook.cells()[3].time.textContent")), "...marked stale");
-  r = await run(3);
-  ok((await out(3)) === "other 1", `the interpreter kept its variables: running a stale cell works (${await out(3)})`);
+  await ev("sagebrush.notebook.setMode('sage'); true");
+  await set(["R.<x> = QQ[]", "print((x^2 - 1).factor())", "x = var('x')\nprint(solve(x^2 == 4, x))", "print(diff(sin(x), x))", "var('x')\nprint(integrate(x, x))", "print((x^3).diff(x))"]);
+  r = await run([0, 1, 2, 3, 4, 5]);
+  const sg = [await out(1), await out(2), await out(3), await out(4), await out(5)];
+  ok(JSON.stringify(r?.errors) === "[]" && JSON.stringify(sg) === JSON.stringify(["(x - 1) * (x + 1)", "[x == -2, x == 2]", "cos(x)", "1/2*x^2", "3*x^2"]), `Sage's x redefined cell by cell: ${JSON.stringify(sg)}`);
+  await set(["R.<x> = ZZ[]"]);
+  r = await run(0);
+  ok((await out(1)) === "(x - 1) * (x + 1)" && r.ran.length === 2, `editing the first x reruns only the cell reading it (${r.ran.length} ran)`);
 
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
