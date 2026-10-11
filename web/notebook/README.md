@@ -79,9 +79,13 @@ src/dataflow.ts), cells form a dependency graph, as in marimo
   be defined by several cells). An exception cancels the cells below it.
   Deleting a cell, or a definition from its code, deletes the names.
 - Cells whose code changed since they ran are marked `edited`.
-- `runCells(ids, {remove, budget})` runs several cells and deletes others as
-  one action, an agent's batch of edits. The scheduler is
-  src/notebook-reactive.ts (`notebook.reactive`).
+- For agents: `applyEdits({set, insert, remove}, {budget})` changes several
+  cells and then runs once; `graph()` gives each cell's names, edges, state
+  and errors; `verify()` recomputes everything in a fresh interpreter and
+  lists the outputs that differ (hidden state). The full page offers them as
+  WebMCP tools (edit_notebook, notebook_graph, verify_notebook).
+  `runCells(ids, {remove, budget})` runs cells as one action. The scheduler
+  is src/notebook-reactive.ts (`notebook.reactive`).
 
 The full page turns it on with `?reactive` in its address (or localStorage
 `sagebrush-reactive` = "1"); web/test-reactive.mjs tests it.

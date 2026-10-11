@@ -1549,6 +1549,83 @@ export function createNotebook(root, opts = {}) {
   }
 
   // ---------------------------------------------------------- for agents
+  // An agent's batch of changes, applied together and then run once (the
+  // reactive notebook: what they affect reruns, in graph order):
+  //   {set: [{id, code?, type?}], insert: [{code, type?, after?: id | null (first), id?}], remove: [id]}
+  // Resolves to {ids (of inserted cells), report (the run's), outputs (id -> text of the cells that ran)}.
+  async function applyEdits(changes = {}, { run: doRun = true, budget: b } = {}) {
+    const changed = [];
+    for (const c of changes.set ?? []) {
+      const cell = cellById(c.id);
+      if (!cell) throw new Error(`no cell ${c.id}`);
+      if (c.type && c.type !== cell.type) setType(cell, c.type);
+      if (typeof c.code === "string" && c.code !== cell.ta.value) setInput(cell, c.code);
+      if (cell.type === "markdown") renderMd(cell);
+      else if (cell.type === "code") changed.push(cell.id);
+    }
+    const ids = [];
+    for (const c of changes.insert ?? []) {
+      const after = c.after === null ? null : c.after !== undefined ? cellById(c.after) : cells().at(-1);
+      if (c.after && !after) throw new Error(`no cell ${c.after}`);
+      const cell = addCell(c.code ?? "", after ? { after: after.el } : { first: true }, false, c.type ?? "code", c.id ?? null);
+      ids.push(cell.id);
+      if (cell.type === "markdown") renderMd(cell);
+      else if (cell.type === "code") changed.push(cell.id);
+    }
+    const removed = [];
+    for (const id of changes.remove ?? []) {
+      const cell = cellById(id);
+      if (!cell) continue;
+      if (active === cell) activate(null);
+      cell.el.remove();
+      if (cell.type === "code") removed.push(id);
+    }
+    if (!cells().length) addCell("");
+    relabel();
+    schedule();
+    let report = null;
+    if (doRun && reactive()) report = await engine().run(changed, { remove: removed, ...(b !== undefined ? { budget: b } : {}) });
+    else if (doRun) for (const id of changed) await run(cellById(id));
+    const ran = report ? report.ran : changed;
+    return { ids, report, outputs: Object.fromEntries(ran.map((id) => [id, cellById(id) ? outputText(cellById(id).out) : ""])) };
+  }
+  // The dependency graph, for agents: each code cell's names and edges, and its state.
+  function graph() {
+    const r = reactive() ? engine() : null;
+    return cells().filter((c) => c.type === "code").map((c, i) => {
+      const a = r?.graph.analysis(c.id);
+      const cls = c.el.classList;
+      const state = cls.contains("running") ? "running" : cls.contains("queued") ? "queued" : cls.contains("error") ? "error" : cls.contains("cancelled") ? "cancelled" : cls.contains("stale") ? "stale" : r && r.submitted(c.id) === undefined ? "not run" : "ok";
+      return {
+        id: c.id, index: index(c), state, edited: cls.contains("edited"),
+        defines: a ? [...a.defs] : [], reads: a ? [...a.refs].filter((n) => r.graph.definers.has(n)) : [],
+        parents: r ? [...r.graph.parents(c.id)] : [], children: r ? [...r.graph.children(c.id)] : [],
+        ...(r?.errors.has(c.id) ? { errors: r.errors.get(c.id).map(errorText) } : {}),
+        ...(r?.times.has(c.id) ? { ms: Math.round(r.times.get(c.id)) } : {}),
+        ...(c.metadata?.sagebrush?.manual ? { manual: true } : {}),
+      };
+    });
+  }
+  // Recompute everything from scratch in a fresh interpreter and compare
+  // with what was shown: resolves to {same, changed: [{id, before, after}], report}.
+  // (A difference means an output depended on something besides the code:
+  // a mutation the graph does not see, the clock, an unseeded random number.)
+  async function verify() {
+    if (!kernel) throw new Error("no kernel");
+    const before = new Map(cells().filter((c) => c.type === "code").map((c) => [c.id, outputText(c.out)]));
+    const ready = new Promise((resolve) => { const off = kernel.on("ready", () => { off(); resolve(); }); });
+    kernel.restart();
+    await ready;
+    const report = reactive() ? await engine().runAll() : (await Promise.all(cells().map(run)), null);
+    const same = [], changed = [];
+    for (const c of cells()) {
+      if (c.type !== "code") continue;
+      const after = outputText(c.out);
+      if (after === before.get(c.id)) same.push(c.id);
+      else changed.push({ id: c.id, before: before.get(c.id) ?? "", after });
+    }
+    return { same, changed, report };
+  }
   // A cell's output as text: pictures by their descriptions, controls by their values.
   function outputText(box) {
     const parts = [];
@@ -1625,6 +1702,7 @@ export function createNotebook(root, opts = {}) {
     setBudget(ms) { budget = ms; if (kernel?.reactive) kernel.reactive.budget = ms; },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
     runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },
+    applyEdits, graph, verify,
     setMode, setType, setInput, renderMd, select, edit,
     /** Measure every editor again now (after the notebook was hidden). */
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
