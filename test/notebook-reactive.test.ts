@@ -80,12 +80,14 @@ test("the budget: a slow descendant waits, with what is below it", async () => {
   await nb.r.run(["c0"]);
   nb.r.budget = 2000;
   const rep = await nb.r.run(["c0"]);
-  assert.deepEqual(rep.ran, ["c0"]);
-  assert.deepEqual(rep.stale.sort(), ["c1", "c2", "c3"]);
-  assert.equal(nb.r.staleSummary().ms, 3002);
+  // the cheap one runs; the slow one waits, with the one below it
+  assert.deepEqual(rep.ran, ["c0", "c3"]);
+  assert.deepEqual(rep.stale.sort(), ["c1", "c2"]);
+  assert.equal(nb.r.staleSummary().ms, 3001);
   assert.deepEqual(nb.states.get("c1"), { state: "stale", why: "budget" });
-  // an explicit run of everything stale
-  assert.deepEqual((await nb.r.run(["c2", "c3"])).ran, ["c1", "c2", "c3"]);
+  assert.deepEqual(nb.states.get("c2"), { state: "stale", why: "ancestor" });
+  // an explicit run of what is stale
+  assert.deepEqual((await nb.r.run(["c2"])).ran, ["c1", "c2"]);
 });
 
 test("an exception cancels the descendants; they wait for it", async () => {
