@@ -509,6 +509,24 @@ try {
   const before = JSON.stringify(await ev("sagebrush.notebook.graph().map((c) => [c.state, c.reads, c.defines])"));
   r = await run(2);
   ok(JSON.stringify(r?.ran) === "[0,1,2]" && (await out(2)) === "6", `running the last cell first runs its stale ancestors (${JSON.stringify(r?.ran)}; before: ${before}; ${await out(2)})`);
+
+  // last run times merge with changes from elsewhere: there only -> taken (and known to the
+  // scheduler); here only -> kept; a document without them changes nothing
+  const tm = await ev(`(() => {
+    const nb = sagebrush.notebook, R = 1e12;
+    const doc = (rev, ms0, code1) => { const d = nb.snapshot(); d.rev = rev; d.cells = d.cells.map((c, i) => ({ ...c, ...(i === 0 ? { ms: ms0 } : {}), ...(i === 1 && code1 != null ? { code: code1 } : {}) })); if (ms0 === null) delete d.cells[0].ms; return d; };
+    const c0 = nb.cells()[0], c1 = nb.cells()[1], code1 = c1.ta.value;
+    nb.applyRemote(doc(R + 1, 100, code1));
+    c1.ta.value = code1 + "  # here"; c1.ta.dispatchEvent(new Event("input", { bubbles: true }));
+    nb.applyRemote(doc(R + 2, 200, code1));
+    const a = [c0.ms, nb.reactive.times.get(c0.id), c1.ta.value.endsWith("# here")];
+    c0.ms = 300;
+    nb.applyRemote(doc(R + 3, 200, code1 + "  # here"));
+    const b = c0.ms;
+    nb.applyRemote(doc(R + 4, null, code1 + "  # here"));
+    return [...a, b, c0.ms, nb.snapshot().cells[0].ms];
+  })()`);
+  ok(JSON.stringify(tm) === "[200,200,true,300,300,300]", `run times merge: taken from elsewhere, kept from here (${JSON.stringify(tm)})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {

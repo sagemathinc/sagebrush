@@ -1457,7 +1457,7 @@ export function createNotebook(root, opts = {}) {
   // changes from elsewhere (stores.js: revisions)
   let synced = null;
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
-  const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null) });
+  const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
   const setSynced = (rev, list) => { synced = { rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) }; };
   function snapshot() {
     return {
@@ -1610,6 +1610,18 @@ export function createNotebook(root, opts = {}) {
           else c.metadata = rc.metadata ?? null;
         }
       }
+      // the last run time (a cache, never a conflict): a change here only is
+      // kept; otherwise the incoming one, unless it has none
+      if (c.type === "code") {
+        const lt = c.ms ?? null, rt = typeof rc.ms === "number" && rc.ms >= 0 ? rc.ms : null;
+        if (lt !== rt) {
+          if (rt === null || (b && b.ms === rt)) dirty = true;
+          else {
+            c.ms = rt;
+            kernel?.reactive?.times.set(c.id, rt);
+          }
+        }
+      }
       const L = c.ta.value, Rt = rc.code ?? "";
       let textChanged = false, conflictText = null;
       if (L !== Rt) {
@@ -1670,6 +1682,7 @@ export function createNotebook(root, opts = {}) {
     lastJson = dirty ? null : JSON.stringify(snapshot()); // a merged change still has to be saved
     Promise.resolve().then(() => { loading = false; if (dirty) schedule(); });
     reactiveSync();
+    seedTimes(); // (cells new from there)
     emit("remote", doc);
   }
   // Replace the cells with a document's (TimeTravel's revert): matched by id
