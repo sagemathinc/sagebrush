@@ -360,6 +360,24 @@ try {
   const a5 = [await out(0), await out(1), await ev("sagebrush.notebook.graph().map((c) => c.state).join(',')")];
   ok((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]), `F5: switching away and back during a run: the cell shows its output, or is stale (${JSON.stringify(a5)})`);
 
+  // third review, F16: verify keeps which clip path an SVG reference names
+  await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\"><clipPath id=\"sbclip1\"><rect width=\"100\" height=\"80\"/></clipPath><clipPath id=\"sbclip2\"><rect width=\"200\" height=\"80\"/></clipPath><rect width=\"200\" height=\"80\" fill=\"blue\" clip-path=\"url(#sbclip%d)\"/></svg>' % (1 + v[0] % 2)))"]);
+  await run([0, 1, 2]);
+  await run(1);
+  await run(2);
+  const v16b = await ev("sagebrush.notebook.verify().then((r) => r.changed.length)");
+  ok(v16b === 1, `F16: verify sees an SVG reference that names another clip path (${v16b} changed)`);
+
+  // third review: a Python function named var is the user's; Sage private vars of any script, several arguments
+  await set(["def var(name):\n    print('CALLED', name)", "var('_x')"]);
+  await run([0, 1]);
+  ok((await out(1)) === "CALLED _x", `a Python function named var is called as written (${await out(1)})`);
+  await ev("sagebrush.notebook.setMode('sage'); true");
+  await set(["var('_\u03b1')\nprint(_\u03b1)", "var('_x', '_y')\nprint(_x, _y)"]);
+  await run([0, 1]);
+  ok((await out(0)) === "_\u03b1" && (await out(1)) === "_x _y", `Sage var() of private names of any script, and of several (${await out(0)} | ${await out(1)})`);
+  await ev("sagebrush.notebook.setMode('python'); true");
+
   // second review: generators made or reseeded without a seed draw from the cell's seed too
   await set(["import random\nimport numpy as np\nrandom.seed()\nprint(random.Random().random(), np.random.RandomState().rand(), random.random())"]);
   await run(0);

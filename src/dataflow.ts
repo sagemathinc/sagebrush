@@ -430,9 +430,9 @@ function mutated(tree: Node): Set<string> {
  * `_` names are its own, though cells share the interpreter's globals.
  * `id` must be alphanumeric.  (`import *`, an error in the graph, is left.)
  */
-export function mangleLocals(tree: any, id: string): void {
+export function mangleLocals(tree: any, id: string, opts: { sage?: boolean } = {}): void {
   try {
-    privateVars(tree);
+    if (opts.sage) privateVars(tree);
     const v = new Visitor("cell_" + id);
     v.visit(tree);
   } catch (e) {
@@ -449,16 +449,17 @@ export const localPrefix = (id: string) => `_cell_${id}_`;
 function privateVars(tree: Node): void {
   tree.body = tree.body.map((st: any) => {
     const call = st._type === "Expr" ? st.value : null;
-    if (call?._type !== "Call" || call.func._type !== "Name" || call.func.id !== "var" || call.args.length !== 1 || call.keywords.length) return st;
-    const a = call.args[0];
-    if (a._type !== "Constant" || typeof a.value !== "string") return st;
-    const names = a.value.split(/[\s,]+/).filter(Boolean);
-    if (!names.some(isLocal) || !names.every((n: string) => /^[A-Za-z_]\w*$/.test(n))) return st;
+    if (call?._type !== "Call" || call.func._type !== "Name" || call.func.id !== "var" || !call.args.length || call.keywords.length) return st;
+    if (!call.args.every((a: any) => a._type === "Constant" && typeof a.value === "string")) return st;
+    const names = call.args.flatMap((a: any) => a.value.split(/[\s,]+/).filter(Boolean));
+    if (!names.some(isLocal) || !names.every((n: string) => /^[\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_]*$/u.test(n))) return st;
     const pos = { lineno: st.lineno, col_offset: st.col_offset, end_lineno: st.end_lineno, end_col_offset: st.end_col_offset };
     const name = (id: string) => ({ _type: "Name", id, ctx: { _type: "Store" }, ...pos });
     const target = names.length === 1 ? name(names[0]) : { _type: "Tuple", elts: names.map(name), ctx: { _type: "Store" }, ...pos };
     const func = { _type: "Attribute", value: { _type: "Name", id: "SR", ctx: { _type: "Load" }, ...pos }, attr: "var", ctx: { _type: "Load" }, ...pos };
-    return { _type: "Assign", targets: [target], value: { ...call, func }, type_comment: null, ...pos };
+    // (one string: SR.var('a b') gives a tuple for several names)
+    const arg = { _type: "Constant", value: names.join(" "), kind: null, ...pos };
+    return { _type: "Assign", targets: [target], value: { ...call, func, args: [arg] }, type_comment: null, ...pos };
   });
 }
 

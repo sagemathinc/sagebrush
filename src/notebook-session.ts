@@ -236,7 +236,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // "cell" mode: the value of a final expression is displayed, as in Jupyter.
         const mangle = typeof m.mangle === "string" && /^[A-Za-z0-9]+$/.test(m.mangle) ? m.mangle : null;
         if (mangle) run(`import __main__ as _m\n[_m.__dict__.pop(_k, None) for _k in [k for k in _m.__dict__ if k.startswith(${JSON.stringify(localPrefix(mangle))})]]\ndel _m\n`, host, "exec", "<forget>");
-        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle ? { transform: (t: any) => mangleLocals(t, mangle) } : {}) });
+        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle ? { transform: (t: any) => mangleLocals(t, mangle, { sage: !!m.sage }) } : {}) });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }

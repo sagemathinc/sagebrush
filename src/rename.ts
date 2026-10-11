@@ -32,6 +32,10 @@ interface Occurrence {
 }
 
 const BINDING_TYPES = new Set(["FunctionDef", "AsyncFunctionDef", "ClassDef"]);
+// whether the name, where the walk is, is a local (true), the global (false),
+// or, in a class body before the class binds it: the global for loads, an
+// attribute for stores ("store")
+type Shadow = boolean | "store";
 // CPython's columns are UTF-8 byte offsets
 const enc = new TextEncoder(), dec = new TextDecoder();
 const bytesLen = (s: string) => enc.encode(s).length;
@@ -70,14 +74,50 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
     const start = bytesLen(text.slice(0, m.index + m[0].length - name.length));
     return [start, start + bytesLen(name)];
   };
-  const walk = (n: any, shadowed: boolean, stmt: number, path: [any, string][] = []): void => {
+  // A class: its decorators and bases are evaluated where it is (`here`); its
+  // body in order: a load of the name reads the class's attribute once the
+  // body has bound it, before that the scope around (`outer`, which is also
+  // what its methods' bodies and nested classes' bodies see); the body's own
+  // bindings are attributes, never the global ("store": loads visible,
+  // stores not).
+  const walkClass = (n: any, here: Shadow, outer: Shadow, stmt: number, path: [any, string][], record: boolean): void => {
+    const p = (key: string): [any, string][] => [...path, [n, key]];
+    walk(n.decorator_list, here, stmt, p("decorator_list"));
+    walk(n.bases, here, stmt, p("bases"));
+    walk(n.keywords, here, stmt, p("keywords"));
+    if (record && n.name === name && !here) {
+      const d = defName(n);
+      if (d) out.push({ line: n.lineno, col: d[0], end: d[1], store: true, stmt, path });
+    }
+    let bound = false;
+    for (const st of n.body) {
+      const now: Shadow = outer === true || bound ? true : "store";
+      const at: [any, string][] = [...p("body"), [st, "body"]];
+      if (st._type === "FunctionDef" || st._type === "AsyncFunctionDef") {
+        walk(st.decorator_list, now, stmt, at);
+        walk(st.args?.defaults, now, stmt, at);
+        walk(st.args?.kw_defaults, now, stmt, at);
+        walk(st.returns, now, stmt, at);
+        walk(st.body, outer === true || localsOf(st.body, params(st.args)).has(name) ? true : outer, stmt, at);
+        if (st.name === name) bound = true;
+      } else if (st._type === "ClassDef") {
+        walkClass(st, now, outer, stmt, [...p("body")], false);
+        if (st.name === name) bound = true;
+      } else {
+        walk(st, now, stmt, at);
+        if (localsOf([st], []).has(name)) bound = true;
+      }
+    }
+  };
+  const walk = (n: any, shadowed: Shadow, stmt: number, path: [any, string][] = []): void => {
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n)) return n.forEach((x) => walk(x, shadowed, stmt, path));
     if (typeof n._type !== "string") return;
     const under = (key: string): [any, string][] => [...path, [n, key]];
     switch (n._type) {
       case "Name":
-        if (n.id === name && !shadowed) out.push({ line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type !== "Load", stmt, path });
+        if (n.id === name && shadowed === "store" && n.ctx?._type === "Load") out.push({ line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: false, stmt, path });
+        else if (n.id === name && !shadowed) out.push({ line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type !== "Load", stmt, path });
         return;
       case "FunctionDef": case "AsyncFunctionDef": case "Lambda": {
         // decorators, defaults and annotations are evaluated outside
@@ -94,37 +134,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         return;
       }
       case "ClassDef":
-        walk(n.decorator_list, shadowed, stmt, under("decorator_list"));
-        walk(n.bases, shadowed, stmt, under("bases"));
-        walk(n.keywords, shadowed, stmt, under("keywords"));
-        if (n.name === name && !shadowed) {
-          const p = defName(n);
-          if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path });
-        }
-        // (a class body's own bindings are its attributes; methods do not see them)
-        // (a method's or nested class's name is an attribute; its decorators,
-        // defaults, annotations and bases are evaluated in the class body; its
-        // body is not)
-        {
-          const attr = shadowed || localsOf(n.body.filter((s: any) => !BINDING_TYPES.has(s._type)), []).has(name) || n.body.some((s: any) => BINDING_TYPES.has(s._type) && s.name === name);
-          for (const st of n.body) {
-            const at = under("body");
-            if (!BINDING_TYPES.has(st._type)) { walk(st, attr, stmt, at); continue; }
-            const p2: [any, string][] = [...at, [st, "decorator_list"]];
-            walk(st.decorator_list, attr, stmt, p2);
-            if (st._type === "ClassDef") {
-              walk(st.bases, attr, stmt, p2);
-              walk(st.keywords, attr, stmt, p2);
-              const inner = shadowed || localsOf(st.body.filter((x: any) => !BINDING_TYPES.has(x._type)), []).has(name);
-              walk(st.body, inner, stmt, [...at, [st, "body"]]);
-            } else {
-              walk(st.args?.defaults, attr, stmt, p2);
-              walk(st.args?.kw_defaults, attr, stmt, p2);
-              walk(st.returns, attr, stmt, p2);
-              walk(st.body, shadowed || localsOf(st.body, params(st.args)).has(name), stmt, [...at, [st, "body"]]);
-            }
-          }
-        }
+        walkClass(n, shadowed, shadowed, stmt, path, true);
         return;
       case "ListComp": case "SetComp": case "GeneratorExp": case "DictComp": {
         const gens = n.generators;
@@ -380,16 +390,15 @@ function renameVar(source: string, name: string, to: string, before: string): st
 // In Sage code, `var('... name ...')` calls (outside strings and comments) as
 // SR.var(...), which binds without setting the global.
 function srVar(code: string, name: string): string {
-  return code.split("\n").map((line) => {
-    const re = /(#.*)|((?:\b[rRbBuUfF]{1,2})?(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?))|([\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_]*)/gu;
-    const at: number[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(line))) {
-      if (m[3] !== "var" || line[m.index - 1] === ".") continue;
-      const call = /^\s*\(\s*(['"])([^'"]*)\1/.exec(line.slice(m.index + 3));
-      if (call && call[2].split(/[\s,]+/).includes(name)) at.push(m.index);
-    }
-    for (const i of at.reverse()) line = line.slice(0, i) + "SR." + line.slice(i);
-    return line;
-  }).join("\n");
+  // (the whole cell at once: a triple-quoted string may span lines)
+  const re = /(#[^\n]*)|((?:\b[rRbBuUfF]{1,2})?(?:"""[\s\S]*?(?:"""|$)|'''[\s\S]*?(?:'''|$)|"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?))|([\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_]*)/gu;
+  const at: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    if (m[3] !== "var" || code[m.index - 1] === ".") continue;
+    const call = /^\s*\(\s*(['"])([^'"]*)\1/.exec(code.slice(m.index + 3));
+    if (call && call[2].split(/[\s,]+/).includes(name)) at.push(m.index);
+  }
+  for (const i of at.reverse()) code = code.slice(0, i) + "SR." + code.slice(i);
+  return code;
 }
