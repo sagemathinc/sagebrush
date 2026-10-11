@@ -112,7 +112,7 @@ export class WorkerKernel {
       if (m.done) {
         this.pending.delete(m.id);
         if (r) this.finishRun(m, r);
-        p.done(m.ms);
+        p.done(m.ms, { error: !!m.error });
       }
     };
     w.onerror = (e) => this.emit("status", "error: " + (e.message || e));
@@ -121,14 +121,17 @@ export class WorkerKernel {
   /**
    * Run code; `sink` receives what happens to it.
    * opts: {mode: "python"|"sage"|"magma", repl, cell (the notebook cell's id,
-   * for the journal), clock (TimeTravel replay: the clock values to replay)}
+   * for the journal), clock (TimeTravel replay: the clock values to replay),
+   * forget (global names to delete first: the reactive notebook)}
+   * The sink's done(ms, {error}) says whether the code raised.
    */
   execute(code, opts, sink) {
     const id = this.nextId++;
     this.pending.set(id, sink);
-    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}) };
+    const forget = opts.forget?.length ? { forget: [...opts.forget] } : {};
+    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
     this.track(id, run);
-    this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}) });
+    this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget });
   }
 
   // The journal (TimeTravel): "execute" as a run is asked for (the page
@@ -146,6 +149,7 @@ export class WorkerKernel {
     if (m.overflow) rec.overflow = true;
     if (m.extra) rec.extra = m.extra;
     if (m.unused) rec.unused = m.unused;
+    if (m.error) rec.error = true;
     if (this.interrupted.delete(m.id)) rec.status = "interrupted";
     this.emit("run", rec);
   }
