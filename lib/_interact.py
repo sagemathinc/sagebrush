@@ -287,6 +287,42 @@ class text_control(Control):
         super().__init__(str(value), None)
 
 
+class button(Control):
+    """A button; its value is the number of clicks (ipywidgets' Button).
+
+    EXAMPLES::
+
+        sage: from _interact import button  # sagebrush only
+        sage: button('Go').spec()  # sagebrush only
+        {'kind': 'button', 'text': 'Go', 'value': 0}
+    """
+    kind = "button"
+
+    def __init__(self, text="Button", label=""):
+        super().__init__(0, label)
+        self.text = text
+
+    def spec(self):
+        """The control's description for the page.
+
+        EXAMPLES::
+
+            sage: __import__('_interact').button('Go').spec()['text']  # sagebrush only
+            'Go'
+        """
+        return {"kind": "button", "value": 0, "text": self.text}
+
+    def convert(self, v):
+        """The number of clicks.
+
+        EXAMPLES::
+
+            sage: __import__('_interact').button().convert(2)  # sagebrush only
+            2
+        """
+        return int(v)
+
+
 def _label(v):
     return v if isinstance(v, str) else repr(v)
 
