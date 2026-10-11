@@ -252,9 +252,10 @@ export class Reactive {
   }
 
   /** The stale cells, in run order, and their predicted time. */
-  staleSummary(): { cells: string[]; ms: number } {
+  staleSummary(): { cells: string[]; ms: number; untimed: number } {
     const cells = this.graph.order(this.stale);
-    return { cells, ms: cells.reduce((s, id) => s + (this.times.get(id) ?? 0), 0) };
+    // (`untimed`: cells never timed, not counted in ms)
+    return { cells, ms: cells.reduce((s, id) => s + (this.times.get(id) ?? 0), 0), untimed: cells.filter((id) => !this.times.has(id)).length };
   }
 
   // ---------------------------------------------------------------------
