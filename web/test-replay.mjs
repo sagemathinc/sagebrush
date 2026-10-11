@@ -178,6 +178,32 @@ try {
   await a.until("sagebrush.history !== null", 10000);
   const after = await a.ev(`(() => { const p = sagebrush.history.replayPlan(${JSON.stringify(head)}); return p.runs; })()`);
   ok(after === 9, "after a reload, the same version still resumes with its 9 runs");
+
+  // ---- two notebooks in one tab share the interpreter: resuming the second
+  // replays the first one's runs too ("Cannot resume here" before)
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); return true; })()");
+  const rA = (await a.ev(outs))[0].trim().split(" ")[0];
+  await a.ev("document.querySelector('#filebtn').click(); document.querySelector('[data-f=\"new\"]').click(); true");
+  await a.until("sagebrush.notebook.cells().length === 1 && localStorage.getItem('sagebrush-current') !== null", 5000);
+  await sleep(500);
+  await a.ev("(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], 'c = r * 3\\nprint(c)'); return true; })()");
+  await sleep(700);
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); return true; })()");
+  await a.until("sagebrush.history !== null && sagebrush.history.records('run').length >= 2", 10000);
+  const bId = await a.ev("localStorage.getItem('sagebrush-current')"), bHead = await a.ev("sagebrush.history.head()");
+  const bp = await a.ev(`(() => { const p = sagebrush.history.replayPlan(${JSON.stringify(bHead)}); return { runs: p.runs, blocking: p.blocking, foreign: p.events.filter((e) => e.run?.foreign).length }; })()`);
+  ok(bp.runs === 2 && bp.foreign === 1 && bp.blocking.length === 0, "a new notebook in the same tab: its plan has the other notebook's run (foreign, code inline) and its own: " + JSON.stringify(bp));
+  const t4 = await (await fetch(`http://127.0.0.1:${port}/json/new?` + encodeURIComponent(new URL(`?resume=${encodeURIComponent(bId)}&at=${encodeURIComponent(bHead)}`, base).href), { method: "PUT" })).json();
+  const e = await tab(t4.webSocketDebuggerUrl);
+  await e.send("Page.bringToFront");
+  await e.until("window.sagebrush?.replayReport !== undefined", 60000);
+  const r4 = await e.ev("sagebrush.replayReport");
+  ok(r4.runs === 2 && r4.diverged.length === 0, "...it resumes, identical: " + (await e.ev("document.querySelector('#status').textContent")));
+  await e.ev("(() => { sagebrush.notebook.addCell('print(r, c == r * 3)'); return true; })()");
+  await e.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
+  const p4 = (await e.ev(outs)).at(-1).trim();
+  ok(p4 === `${rA} True`, "...with the first notebook's variables as they were: " + p4);
+  e.ws.close();
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {

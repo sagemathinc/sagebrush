@@ -644,6 +644,7 @@ function ttShowResume(v) {
     : `Open this version in a new tab with its variables: ${plan.runs ? `the ${plan.runs} run${plan.runs === 1 ? "" : "s"} of code before it are run again, in the same order, with the same random numbers and clock` : "no code had run then"}` +
       (plan.warnings.length ? ` (the result may differ: ${plan.warnings.join("; ")})` : "") + ".";
   if (plan.runs) $("#ttinfo").textContent += ` · ${plan.runs} run${plan.runs === 1 ? "" : "s"}`;
+  if (plan.blocking.length) $("#ttinfo").textContent += ` · cannot resume: ${plan.blocking[0]}`;
 }
 // A mark under the slider at each version where code ran.
 function ttShowMarks() {

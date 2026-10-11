@@ -95,7 +95,7 @@ The history also keeps an **execution journal**, so TimeTravel can recreate the 
 
 - **What is journaled** (records in the same history, in patches that are not versions):
   - each interpreter session: its id and the seed of its entropy;
-  - each run of a cell, of the console, or of an `@interact`: which code ran (a cell's input at the version when the run was asked for, so a cell edited afterwards still replays as it ran), how long it took, a hash of its output, and the clock values it read;
+  - each run of a cell, of the console, or of an `@interact`, including the runs the tab's interpreter made for the other notebooks opened in it (it is shared by them; these "foreign" runs keep their code inline, and a replay reruns them with their output hidden): which code ran (a cell's input at the version when the run was asked for, so a cell edited afterwards still replays as it ran), how long it took, a hash of its output, and the clock values it read;
   - the files the session read: their SHA-256 only. The bytes are kept in this browser (IndexedDB `sagebrush-blobs`).
 - **Determinism** comes from the worker ([web/replay-env.ts](../replay-env.ts)):
   - its entropy (`random`, numpy's generators, `os.urandom`) is a ChaCha20 stream from the session's seed;
@@ -110,7 +110,6 @@ The history also keeps an **execution journal**, so TimeTravel can recreate the 
 - **What cannot be resumed** says why:
   - a run that was interrupted;
   - an interpreter outside the browser (`sagebrush notebook`);
-  - a session that also ran another notebook's code (one tab's interpreter is shared by the notebooks opened in it);
   - a history cleared while the interpreter ran.
 - **The portable bundle:**
   - `File > Download with history (.sbreplay)` saves gzipped JSON: the notebook, its history patches (journal included), and the bytes of the files its sessions read. A typical one is a few KB.

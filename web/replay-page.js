@@ -6,8 +6,9 @@
 // history (web/notebook/history.js) of the notebook that did it: a
 // "session" record at that notebook's first run, then its runs, and the
 // file changes since.  The kernel is shared by the notebooks opened in a tab,
-// so a session that also ran another notebook's code is marked incomplete
-// there (it cannot be replayed from that notebook alone).
+// so each notebook's journal also has, in order, the runs the session made
+// for the other notebooks ("foreign" runs, with their code inline): a replay
+// reruns them too, and the session is recreated from one notebook alone.
 import { putBlob, getBlob } from "./notebook/stores.js";
 
 const hex = (u8) => [...u8].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -39,7 +40,9 @@ export function createJournal(o) {
       next = null;
     } else {
       const seed = !o.local && o.reproducible() ? hex(crypto.getRandomValues(new Uint8Array(32))) : undefined;
-      s = { id: newSid(), seed, files: [], fileEvents: [], n: 0, ran: new Set(), journaled: new Map(), t: Date.now(), startup: [], ms: 0, version: "" };
+      // events: the session's runs and file changes, in order ({nb, rec}): each
+      // notebook is journaled up to journaled.get(nb) of them
+      s = { id: newSid(), seed, files: [], events: [], n: 0, journaled: new Map(), t: Date.now(), startup: [], ms: 0, version: "" };
     }
     sessions.set(gen, s);
     for (const g of sessions.keys()) if (g < gen - 1) sessions.delete(g);
@@ -87,20 +90,26 @@ export function createJournal(o) {
     const recs = mine.flatMap(([, r]) => r);
     if (recs.length) write(nbId, recs);
   }
-  // the records a notebook still needs before `records`: the session's, the file changes since
-  function journalFor(nbId, s, records) {
+  // Bring a notebook's journal up to date: the session's record (once), then
+  // every event since its last update; another notebook's runs as foreign
+  // runs (their code inline, no cell).  (Copies: the history freezes what it
+  // is given, and write() completes them.)
+  function journalFor(nbId, s) {
     let j = s.journaled.get(nbId);
-    const before = [];
-    const others = [...s.ran].some((id) => id !== nbId);
-    if (!j) { j = { session: false, files: 0, incomplete: false }; s.journaled.set(nbId, j); }
-    if (!j.session || (others && !j.incomplete)) {
-      before.push(sessionRecord(s, others));
-      j.session = true;
-      j.incomplete = others;
+    const recs = [];
+    if (j === undefined) {
+      recs.push(sessionRecord(s, false));
+      j = 0;
     }
-    for (const f of s.fileEvents.slice(j.files)) before.push(f);
-    j.files = s.fileEvents.length;
-    write(nbId, [...before, ...records]);
+    for (const { nb, rec } of s.events.slice(j)) {
+      if (rec.type !== "run" || nb === nbId) recs.push({ ...rec });
+      else {
+        const { cell: _c, at: _a, ...r } = rec;
+        recs.push({ ...r, at: null, foreign: true });
+      }
+    }
+    s.journaled.set(nbId, s.events.length);
+    write(nbId, recs); // (write() puts a foreign run's _code inline: it has no cell)
   }
 
   // ---------------------------------------------------------- runs
@@ -126,8 +135,8 @@ export function createJournal(o) {
       ...(rec.overflow ? { overflow: true } : {}),
       ...(rec.status ? { status: rec.status } : {}),
     };
-    s.ran.add(rec.nb);
-    journalFor(rec.nb, s, [r]);
+    s.events.push({ nb: rec.nb, rec: r });
+    journalFor(rec.nb, s);
   });
 
   /** A file was put (data) or deleted (null) in the running interpreter. */
@@ -136,15 +145,15 @@ export function createJournal(o) {
     if (!s) return;
     const hash = data === null ? null : await putBlob(await o.blobs(), data);
     const f = { type: "file", id: `${s.id}:${++s.n}`, sid: s.id, n: s.n, t: Date.now(), path, hash };
-    s.fileEvents.push(f);
     const nbId = o.notebookId();
-    if (s.ran.has(nbId)) journalFor(nbId, s, []); // (else with that notebook's first run)
+    s.events.push({ nb: nbId, rec: f });
+    if (s.journaled.has(nbId)) journalFor(nbId, s); // (else with that notebook's first run)
   }
   /** The history was cleared: the running session cannot be replayed from it any more. */
   function historyCleared(nbId) {
     const s = current();
     if (!s) return;
-    s.journaled.set(nbId, { session: true, files: s.fileEvents.length, incomplete: true });
+    s.journaled.set(nbId, s.events.length);
     write(nbId, [sessionRecord(s, true)]);
   }
 
@@ -152,11 +161,13 @@ export function createJournal(o) {
   /** The next interpreter continues a journaled session (a replay plan's). */
   function continueSession(plan, nbId) {
     const ps = plan.session;
-    const files = plan.events.filter((e) => e.file).map((e) => e.file);
+    // the replayed events, as this session's (another notebook opened in this
+    // tab later gets them as foreign runs); the fork's journal has them already
+    const events = plan.events.map((e) => (e.file ? { nb: nbId, rec: e.file } : { nb: nbId, rec: { ...e.run, ...(e.code !== undefined ? { _code: e.code } : {}) } }));
     next = {
-      id: ps.id, seed: ps.seed, startup: ps.startup ?? [], files: ps.files ?? [], fileEvents: files, replay: true,
+      id: ps.id, seed: ps.seed, startup: ps.startup ?? [], files: ps.files ?? [], events, replay: true,
       n: plan.events.reduce((m, e) => Math.max(m, (e.run ?? e.file).n), 0),
-      ran: new Set([nbId]), journaled: new Map([[nbId, { session: true, files: files.length, incomplete: false }]]),
+      journaled: new Map([[nbId, events.length]]),
       t: ps.t, ms: ps.ms, version: ps.version, seeded: !!ps.seed,
     };
   }
