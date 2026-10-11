@@ -20,6 +20,74 @@ deleted cells, and one interpreter shared by every notebook in a tab. The
 TimeTravel journal (design/timetravel-replay.md) needs foreign runs and
 recorded clocks precisely because it doesn't hold.
 
+## The semantics are marimo's
+
+William: "either the same semantics they have, or a good reason for
+changes." marimo ([github.com/marimo-team/marimo](https://github.com/marimo-team/marimo),
+Apache-2.0) is documented and has thought these questions through. Its rules,
+from its [reactivity guide](https://docs.marimo.io/guides/reactivity/) and its
+source (`marimo/_ast/visitor.py`, `marimo/_runtime/dataflow`):
+
+- **References and definitions** come from static analysis: the globals a
+  cell reads but does not define, and the globals it defines. Functions,
+  classes and imports are variables too.
+- **Running a cell runs every cell that references a global it defines,**
+  transitively, in topological order. Ties go to the cell registered first:
+  the order on the page.
+- **Every global is defined by exactly one cell** (`MultipleDefinitionError`).
+- **Cycles** are errors (`CycleError`), and so is **`import *`**
+  (`ImportStarError`: it cannot be analyzed).
+- **Mutations are not tracked.** `v[1] = 5`, `z.x = 10` and `L.append(42)`
+  in a cell that does not define the object are references, not definitions.
+  They trigger nothing. The advice is to mutate only in the defining cell, or
+  to make new variables.
+  - William's first example (`sum(v)` updated) is not tracking. Editing
+    `v = [...]` reruns every cell that references `v`, in page order, and
+    the `v[1] = 5` cell happens to sit above `sum(v)`.
+  - His second example (`z.x = 10` leaving `z.x` showing 5) is the untracked
+    case.
+- **Names starting with `_` are local to their cell.** marimo mangles them
+  per cell, so cells may reuse them.
+- **Deleting a cell deletes its globals;** the cells referencing them are
+  invalidated.
+- **`del` of another cell's global** is a reference marked deleted; `global`
+  in a function refers to the module's name.
+- **An ancestor that raised** stops its descendants
+  (`MarimoAncestorPreventedError`); so does an interrupted one
+  (`MarimoAncestorStoppedError`).
+- **Lazy or autorun:**
+  - autorun runs the descendants, and is the default;
+  - lazy marks them stale, and running a cell first reruns its stale
+    ancestors;
+  - disabling a cell blocks it and its descendants.
+
+**How we keep to them:** real marimo is the oracle, as Sage, NumPy and Magma
+are for the rest of Sagebrush.
+
+- Our analysis, over our own parser's AST, must give the same definitions
+  and references as marimo's on its own test cases: `tests/_ast/test_visitor.py`
+  (109 tests) and `tests/_runtime/test_dataflow.py` (61), under Apache-2.0,
+  with attribution.
+- It must also agree on notebooks and generated snippets, through a
+  differential harness that runs `marimo` under CPython.
+- pyjs has no `ast` module, so marimo's own analyzer cannot simply run in the
+  browser. That option needs an `ast` module built on pyparse; it is not
+  needed for the oracle.
+
+**Deliberate differences, each with its reason:**
+
+| Difference | Reason |
+|---|---|
+| Runs on pyjs and Sagebrush's Rust engines in the page | Startup in about 120 ms, Sage and Magma modes. marimo's in-browser mode uses Pyodide. Not a semantic difference. |
+| A recompute **budget** besides autorun and lazy (autorun = infinite, lazy = 0) | Cheap dependents update; expensive ones wait for a person or an agent. Both of marimo's modes remain. |
+| **Per-cell seeded randomness** | `verify()` (recompute and compare) is exact. Random values still look random. |
+| A **warning** on a mutation of another cell's global | marimo only advises against it. The warning tells people and agents that dependents will not rerun. Execution is unchanged. |
+| **Markdown cells** | marimo writes `mo.md(...)`. Ours map to and from it on import and export. |
+| **Sage and Magma modes** | Analyzed after preparsing or translation; the preparser's temporaries are `_`-prefixed, so local. |
+
+marimo's `.py` notebook format (one function per cell) is a natural import
+and export format: then marimo notebooks open in Sagebrush and the reverse.
+
 ## The model
 
 1. **Each notebook has its own interpreter** (a Web Worker: about 120 ms to
@@ -32,16 +100,17 @@ recorded clocks precisely because it doesn't hold.
    - Cell B depends on cell A when B uses a name A defines.
    - Cells are shown in the author's order but run in graph order, so a name
      may be defined below its use, as in marimo and Observable.
-3. **Rules that make the graph well defined:**
+3. **Rules that make the graph well defined** (marimo's, above):
    - **One definition per name:** a name is defined in exactly one cell. A
      second definition is an error on both cells, with a clear message.
    - **No cycles:** a cycle is an error on the cells in it.
    - **Deleting a cell deletes its names.** The cells using them show
      `NameError`, with a pointer to the deleted cell.
-   - **Mutation is not tracked:** `L.append(5)` in a cell that did not define
-     `L` is flagged with a warning ("mutates L, defined in cell 3: changes
-     made here are not tracked"). marimo has the same limit. Sage's objects
-     are mostly immutable, so it matters less here.
+   - **Mutation is not tracked, as in marimo:** `L.append(5)` or `z.x = 10`
+     in a cell that did not define the object references it and triggers
+     nothing. We add a warning ("mutates z, defined in cell 3: cells reading
+     z will not rerun"). Sage's objects are mostly immutable, so it matters
+     less here.
 4. **Running.**
    - Running (or editing and running) a cell reruns it and every cell
      downstream, in graph order.
