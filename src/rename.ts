@@ -118,9 +118,37 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
     const tries: { s: State }[] = [];
     const note = () => { for (const t of tries) t.s = join(t.s, bound); };
     const now = (): Shadow => (outer || bound === true ? true : bound ? "maybe" : "store");
-    const expr = (x: any, at: [any, string][]) => walk(x, now(), stmt, at, outer);
+    // (an expression's loads see the state before it, but one binding the
+    // name, `(x := 1)`, has loads on both sides: they may read either)
+    const expr = (x: any, at: [any, string][]) => {
+      if (!x) return;
+      if (binds(x)) {
+        bound = join(bound, true);
+        walk(x, now(), stmt, at, outer);
+        bound = true;
+      } else walk(x, now(), stmt, at, outer);
+    };
     const binds = (x: any) => localsOf([x], []).has(name);
+    // whether it deletes the name: `del x`, `del (x, y)`, the end of `except E as x`
+    const deletes = (x: any): boolean => {
+      let found = false;
+      const scan = (n: any): void => {
+        if (found || !n || typeof n !== "object") return;
+        if (Array.isArray(n)) return n.forEach(scan);
+        if ((n._type === "Name" && n.id === name && n.ctx?._type === "Del") || (n._type === "ExceptHandler" && n.name === name)) { found = true; return; }
+        if (SCOPES.has(n._type)) return;
+        for (const k of Object.keys(n)) if (k !== "_type") scan(n[k]);
+      };
+      scan(x);
+      return found;
+    };
     const block = (list: any[], at: [any, string][]) => { for (const st of list) one(st, at); };
+    // In a block, statement after statement; where blocks meet (after an if,
+    // a try, a with, a loop) the states that may arrive are joined.  An
+    // exception may leave a try or a with body (one that suppresses it)
+    // anywhere: all the states in it arrive.  Loops (break, continue, else)
+    // are not followed: one that binds or deletes the name leaves it "maybe"
+    // (unless bound before and never deleted).
     const one = (st: any, at: [any, string][]): void => {
       note();
       const u = (key: string, ...more: [any, string][]): [any, string][] => [...at, [st, key], ...more];
@@ -139,33 +167,23 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         }
         case "For": case "AsyncFor": case "While": {
           if (st._type !== "While") expr(st.iter, u("iter"));
-          const pass = () => {
-            if (st._type === "While") expr(st.test, u("test"));
-            else {
-              expr(st.target, u("target"));
-              if (binds(st.target)) bound = true;
-            }
-            block(st.body, u("body"));
-          };
-          // the state at the top of the loop (before any pass or after one):
-          // found by passes that record nothing
-          let head = bound;
-          for (;;) {
-            const mark = out.length;
-            bound = head;
-            pass();
-            out.length = mark;
-            const h = join(head, bound);
-            if (h === head) break;
-            head = h;
+          const touched = binds(st) || deletes(st);
+          bound = !touched || (bound === true && !deletes(st)) ? bound : "maybe";
+          const head = bound;
+          if (st._type === "While") expr(st.test, u("test"));
+          else {
+            expr(st.target, u("target"));
+            if (binds(st.target)) bound = true;
           }
-          bound = head;
-          pass();
+          block(st.body, u("body"));
           bound = head;
           block(st.orelse, u("orelse"));
+          bound = head;
           break;
         }
-        case "With": case "AsyncWith":
+        case "With": case "AsyncWith": {
+          const t = { s: bound };
+          tries.push(t);
           for (const it of st.items) {
             expr(it.context_expr, u("items", [it, "context_expr"]));
             if (it.optional_vars) {
@@ -174,7 +192,10 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
             }
           }
           block(st.body, u("body"));
+          tries.pop();
+          bound = join(t.s, bound);
           break;
+        }
         case "Try": case "TryStar": {
           const t = { s: bound };
           tries.push(t);
@@ -215,8 +236,14 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
           break;
         }
         case "Delete":
+          walk(st, now(), stmt, at, outer);
+          if (deletes(st)) bound = false;
+          break;
+        case "AnnAssign":
+          // (`x: int` alone binds nothing)
+          if (!st.value) { walk(st, now(), stmt, at, outer); break; }
           expr(st, at);
-          if (st.targets.some((x: any) => x._type === "Name" && x.id === name)) bound = false;
+          if (binds(st.target)) bound = true;
           break;
         default:
           expr(st, at);
@@ -299,6 +326,18 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         }
         return;
       }
+      case "ExceptHandler":
+        // `except E as x` binds x (found after `as` on its line; else not renamable)
+        if (n.name === name && !shadowed) {
+          const text = lines[n.lineno - 1] ?? "";
+          const after = byteSlice(text, n.col_offset);
+          const m = new RegExp(`(\\bas\\s+)(${name})\\s*:`).exec(after);
+          if (m) {
+            const start = n.col_offset + bytesLen(after.slice(0, m.index + m[1].length));
+            out.push({ line: n.lineno, col: start, end: start + bytesLen(name), store: true, stmt, path });
+          } else out.push({ line: n.lineno, col: 0, end: 0, store: true, stmt, path, alias: null });
+        }
+        break;
       case "Attribute": walk(n.value, shadowed, stmt, under("value"), fn); return; // (not the attribute's name)
       case "keyword": walk(n.value, shadowed, stmt, under("value"), fn); return; // (not the argument's name)
     }

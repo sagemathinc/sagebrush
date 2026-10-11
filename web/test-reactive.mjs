@@ -381,6 +381,9 @@ try {
   await set(["var('_x', domain='real')\nprint(_x^2)", "var('_x', latex_name='t')\n_x = _x + 1\nprint(_x)", "print(_x)"]);
   await run([0, 1, 2]);
   ok((await out(0)) === "_x^2" && (await out(1)) === "_x + 1" && /NameError/.test(await out(2)), `Sage private var() with domain= and latex_name= are each cell's own (${await out(0)} | ${await out(1)} | ${(await out(2)).split("\n").pop()})`);
+  await set(["var('_x', domain='real')\nprint(assumptions())\nprint(solve(abs(_x) == 1, _x))\nforget()"]);
+  await run(0);
+  ok((await out(0)) === "[_x is real]\n[_x == 1, _x == -1]", `Sage private var() keeps domain='real' (${await out(0)})`);
   await set(["print(α^2)", "var('α')"]);
   await run([0, 1]);
   ok((await out(0)) === "α^2", `Sage var('α') defines α for the cell above (${await out(0)})`);
@@ -401,6 +404,20 @@ try {
     await run([0, 1, 2, 3]);
     ok((await out(3)) === want, `class body: ${JSON.stringify(code)} (${await out(3)})`);
   }
+
+  // fifth review: del of a tuple; except as binding a class body's global; refused when undetermined
+  // (the end of `except ... as x` deletes the global x: the reader prints C.y only)
+  for (const [code, reader, want] of [
+    ["x = 2\nclass C:\n    x = 100\n    z = 200\n    del (x, z)\n    y = x", "print(C.y, x)", "2 2"],
+    ["x = 2\nclass C:\n    global x\n    try:\n        1/0\n    except ZeroDivisionError as x:\n        y = str(x)", "print(C.y)", "division by zero"],
+  ]) {
+    await set(["x = 1", "print(x)", code, reader]);
+    await run([0, 1, 2, 3]);
+    ok((await out(3)) === want, `class body: ${JSON.stringify(code)} (${await out(3)})`);
+  }
+  await set(["x = 1", "print(x)", "x = 2\nclass C:\n    x = 100\n    for _i in range(1):\n        del x\n        break\n        x = 200\n    y = x", "print(C.y, x)"]);
+  await run([0, 1, 2, 3]);
+  ok(/x is defined by cell 1 and cell 3/.test(await out(3)) && /x is also defined by/.test(await out(2)), `a class-body read that depends on a loop is not renamed: the several-definitions error (${(await out(2)).slice(0, 120)} | ${(await out(3)).slice(0, 120)})`);
 
   // fourth review, F16: verify compares an SVG's text as text
   await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"80\"><text x=\"0\" y=\"30\">id=\"sbclip'+str(v[0])+'\"</text></svg>'))"]);

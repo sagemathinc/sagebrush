@@ -155,3 +155,32 @@ test("fourth review: class bodies through compound statements and nested scopes,
   // var('x') after an escaped triple quote in a string is text
   assert.deepEqual(q(["x=1", "print(x)", 'x=2\nprint("""hello\\"""\nvar(\'x\')\nbye""")', "print(x)"], "x", "sage"), { c2: `${S}=2\nprint("""hello\\"""\nvar('x')\nbye""")`, c3: `print(${S})` });
 });
+
+test("fifth review: break, continue, loop else, with, del of a tuple, walrus, bare annotations, except as", () => {
+  const q = (codes: string[], name: string) => {
+    const cells = codes.map((code, i) => { const a = analyzeCell(code, "c"); return { id: `c${i}`, code, defines: a.defs.has(name), reads: a.refs.has(name) }; });
+    const r = renameRedefinitions(cells, name, new Set([name]), "python", "\u02b9");
+    return r && Object.fromEntries(r);
+  };
+  const S = "x\u02b92";
+  // a loop that binds or deletes the name leaves its reads after it undetermined: refused
+  for (const loop of ["    for _i in range(1):\n        del x\n        break\n        x=200", "    for _i in range(1):\n        del x\n        continue\n        x=200", "    for _i in range(1):\n        break\n    else:\n        del x"]) {
+    assert.equal(q(["x=1", "print(x)", `x=2\nclass C:\n    x=100\n${loop}\n    y=x`, "print(C.y,x)"], "x"), null, loop);
+  }
+  // a with body may stop anywhere (a context manager may suppress the exception)
+  assert.equal(q(["x=1", "print(x)", "x=2\nclass C:\n    with Ignore():\n        1/0\n        x=100\n    y=x", "print(C.y,x)"], "x"), null);
+  // del (x, z) deletes x
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x=100\n    z=200\n    del (x,z)\n    y=x", "print(C.y,x)"], "x"), { c2: `${S}=2\nclass C:\n    x=100\n    z=200\n    del (x,z)\n    y=${S}`, c3: `print(C.y,${S})` });
+  // a walrus in a test binds the class's x
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    if (x:=100):\n        y=x", "print(C.y,x)"], "x"), { c2: `${S}=2\nclass C:\n    if (x:=100):\n        y=x`, c3: `print(C.y,${S})` });
+  // `x: int` alone binds nothing
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    x: int\n    y=x", "print(C.y,x)"], "x"), { c2: `${S}=2\nclass C:\n    x: int\n    y=${S}`, c3: `print(C.y,${S})` });
+  // `except E as x` binding the global (a class body's global, or the module's)
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\nclass C:\n    global x\n    try:\n        1/0\n    except ZeroDivisionError as x:\n        y=str(x)", "print(C.y)"], "x"), { c2: `${S}=2\nclass C:\n    global ${S}\n    try:\n        1/0\n    except ZeroDivisionError as ${S}:\n        y=str(${S})` });
+  assert.deepEqual(q(["x=1", "print(x)", "x=2\ntry:\n    1/0\nexcept ZeroDivisionError as x:\n    y=str(x)", "print(y, x)"], "x"), { c2: `${S}=2\ntry:\n    1/0\nexcept ZeroDivisionError as ${S}:\n    y=str(${S})`, c3: `print(y, ${S})` });
+  // deep loops are analyzed in linear time
+  const deep = "x=2\nclass C:\n" + Array.from({ length: 40 }, (_, i) => " ".repeat(4 * (i + 1)) + `for _i${i} in range(1):`).join("\n") + "\n" + " ".repeat(164) + "z=x";
+  const t = Date.now();
+  assert.ok(q(["x=1", "print(x)", deep, "print(C.z,x)"], "x"));
+  assert.ok(Date.now() - t < 1000, `${Date.now() - t} ms`);
+});
