@@ -111,7 +111,7 @@ export class Reactive {
   budget = 2000;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private host: ReactiveHost) {}
+  constructor(readonly host: ReactiveHost) {}
 
   /** The code the graph has for a cell (undefined: never submitted). */
   submitted(id: string): string | undefined {

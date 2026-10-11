@@ -693,7 +693,7 @@ export function createNotebook(root, opts = {}) {
           const key = mode + "\0" + code;
           if (!analyses.has(key)) {
             if (analyses.size > 2000) analyses.clear();
-            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => (a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []) })));
+            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => (a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) })));
           }
           return analyses.get(key);
         },
@@ -764,8 +764,38 @@ export function createNotebook(root, opts = {}) {
       cls.remove("cancelled");
       cls.add("error");
       for (const e of st.errors) appendText(cell.out, errorText(e) + "\n", true);
+      // the fix of a name several cells define: the later definitions get new names, in page order
+      const names = [...new Set(st.errors.filter((e) => e.kind === "multiple-definition").map((e) => e.name))];
+      if (names.length && opts.analyzer?.rename && !opts.readOnly) {
+        const bar = cell.out.appendChild(h("div", "fixes"));
+        for (const n of names) {
+          const b = bar.appendChild(h("button", "", { textContent: `Rename the later definitions of ${n} (${n}_2, …)`, title: `Keep the meaning of the cells in page order: each cell below the first that defines ${n} defines ${n}_2, ${n}_3, …, and the cells below it read that one` }));
+          b.onclick = async () => {
+            b.disabled = true;
+            const r = await fixRedefinitions(n);
+            if (!r) { b.disabled = false; b.textContent = `Cannot rename ${n} automatically here: rename it by hand`; }
+          };
+        }
+      }
       markEdited(cell);
     }
+  }
+  // Give `name` one defining cell, keeping the meaning of the cells in page
+  // order (src/rename.ts), and run what changed.  Resolves to the run's
+  // report, or null if it cannot be done automatically.
+  async function fixRedefinitions(name) {
+    if (!reactive() || !opts.analyzer?.rename) return null;
+    const r = engine();
+    const code = cells().filter((c) => c.type === "code");
+    const taken = new Set();
+    const info = await Promise.all(code.map(async (c) => {
+      const a = await r.host.analyze(c.ta.value);
+      if (!a.error) for (const n of [...a.defs, ...a.refs]) taken.add(n);
+      return { id: c.id, code: c.ta.value, defines: !a.error && a.defs.has(name), reads: !a.error && a.refs.has(name) };
+    }));
+    const sources = await opts.analyzer.rename({ name, cells: info, taken: [...taken], mode });
+    if (!sources) return null;
+    return (await applyEdits({ set: sources.map(([id, c]) => ({ id, code: c })) })).report ?? {};
   }
   // A manual cell (kept in its metadata, sagebrush.manual) never reruns automatically.
   function setManual(cell, on) {
@@ -1766,7 +1796,7 @@ export function createNotebook(root, opts = {}) {
     filesChanged(paths) { return reactive() && kernel.reactive ? kernel.reactive.filesChanged(paths) : Promise.resolve(null); },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
     runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },
-    applyEdits, graph, verify,
+    applyEdits, graph, verify, fixRedefinitions,
     setMode, setType, setInput, renderMd, select, edit,
     /** Measure every editor again now (after the notebook was hidden). */
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },

@@ -585,11 +585,18 @@ let analyzeWorker = null, analyzeId = 0;
 const analyzeWaiting = new Map();
 const analyzer = {
   analyze(code, mode) {
+    return this.ask({ code, mode });
+  },
+  // the fix of a name defined by several cells (web/analyze-worker.ts): new sources, or null
+  rename(request) {
+    return this.ask({ rename: request }).then((r) => r.sources);
+  },
+  ask(msg) {
     if (!analyzeWorker) {
       analyzeWorker = new Worker(new URL("sagebrush-analyze.js", location.href), { type: "module" });
       analyzeWorker.onmessage = (ev) => { const f = analyzeWaiting.get(ev.data.id); analyzeWaiting.delete(ev.data.id); f?.(ev.data); };
     }
-    return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, code, mode }); });
+    return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, ...msg }); });
   },
 };
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE });

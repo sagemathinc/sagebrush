@@ -179,3 +179,5 @@
 .sbnb .cell.edited .gutter .n::after { content: "*"; color: #b45309; }
 .sbnb .cell.cancelled .out, .sbnb .cell.cancelled .n { opacity: .6; }
 .sbnb .cell.manual .runb { outline: 1px dashed currentColor; outline-offset: -3px; }
+.sbnb .out .fixes { display: flex; flex-wrap: wrap; gap: .4em; margin: .3em 0; }
+.sbnb .out .fixes button { font: inherit; font-size: .9em; }

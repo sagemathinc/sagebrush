@@ -22,6 +22,8 @@
 //   - Mutation tracking (unless `strict`): a cell visibly mutating another
 //     cell's object (src/dataflow.ts `mutations`) is its updater, run after
 //     the definer and other updaters above it, and before the readers.
+//   - The same import (`import numpy as np`) in several cells is not a
+//     multiple definition: it defines the same thing.
 //   - Files (setFiles): a cell that wrote a file in its last run runs before
 //     the cells that read it.
 //   - A cycle error goes to every cell in a strongly connected component:
@@ -151,7 +153,10 @@ export class NotebookGraph {
     };
     for (const [name, ds] of this.definers) {
       const rs = readers.get(name);
-      if (ds.length > 1 && (this.strict || rs)) {
+      // (ours: the same import in several cells defines the same thing)
+      const what = ds.map((d) => this.nodes.get(d)!.analysis?.imports?.get(name));
+      const sameImport = !this.strict && what[0] !== undefined && what.every((w) => w === what[0]);
+      if (ds.length > 1 && (this.strict || rs) && !sameImport) {
         for (const d of ds) this.addError(d, { kind: "multiple-definition", name, cells: ds.filter((x) => x !== d) });
         // #1477: and on the cells reading it, which may be the ones that made it an error
         if (!this.strict) for (const r of rs ?? []) if (!ds.includes(r)) this.addError(r, { kind: "multiple-definition", name, cells: ds, reading: true });

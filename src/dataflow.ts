@@ -57,6 +57,12 @@ export interface CellAnalysis {
    * (design/reactive-notebook.md, mutation tracking)
    */
   mutations?: Set<string>;
+  /**
+   * defs bound only by an import, with what is imported ("numpy",
+   * "numpy.linalg:norm"): the same import in several cells defines the same
+   * thing (ours: not an error)
+   */
+  imports?: Map<string, string>;
 }
 
 const clone = (x: any): any =>
@@ -97,7 +103,9 @@ class Visitor {
     if (kind !== "method" && (this.refs.get(name) ?? []).some((r) => r.parents.includes(block))) this.removeRef(name, block);
   }
   define(name: string, kind: string): void {
-    this.defineIn(name, kind, this.blocks[this.blocks.length - 1].globalNames.has(name) ? 0 : -1);
+    const idx = this.blocks[this.blocks.length - 1].globalNames.has(name) ? 0 : -1;
+    if (kind !== "import" && (idx === 0 || this.blocks.length === 1)) this.imported.set(name, null);
+    this.defineIn(name, kind, idx);
   }
 
   visit(node: any): void {
@@ -260,11 +268,25 @@ class Visitor {
     alias.asname = this.mangle(alias.asname);
     return alias.asname;
   }
+  // (what each top-level name was bound to by an import; any other binding clears it)
+  imported = new Map<string, string | null>();
+  noteImport(name: string, what: string | null): void {
+    if (this.blocks.length !== 1 || this.blocks[0].globalNames.has(name)) return;
+    this.imported.set(name, this.imported.has(name) && this.imported.get(name) !== what ? null : what);
+  }
   visit_Import(node: Node): void {
-    for (const a of node.names) this.define(this.aliasName(a), "import");
+    for (const a of node.names) {
+      const n = this.aliasName(a);
+      this.define(n, "import");
+      this.noteImport(n, a.asname == null ? a.name.split(".")[0] : a.name);
+    }
   }
   visit_ImportFrom(node: Node): void {
-    for (const a of node.names) this.define(this.aliasName(a), "import");
+    for (const a of node.names) {
+      const n = this.aliasName(a);
+      this.define(n, "import");
+      this.noteImport(n, `${".".repeat(node.level ?? 0)}${node.module ?? ""}:${a.name}`);
+    }
   }
   visit_MatchAs(node: Node): void {
     if (node.name != null) {
@@ -327,6 +349,7 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
     refs,
     deleted: new Set([...v.refs].filter(([, rs]) => rs.some((r) => r.deleted)).map(([n]) => n)),
     mutations: new Set([...mutated(tree)].filter((n) => refs.has(n) && !defs.has(n))),
+    imports: new Map([...v.imported].filter((e): e is [string, string] => e[1] !== null && defs.has(e[0]))),
   };
 }
 
