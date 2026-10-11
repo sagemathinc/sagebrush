@@ -101,6 +101,20 @@ ok(/could not read/.test(await ev("document.querySelector('.cell .mdout')?.textC
 await ev("(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], 'edited'); nb.flush(); })()");
 await sleep(1500);
 ok(readFileSync(broken, "utf8") === junk && /not saved/.test(await ev("document.querySelector('#saved').textContent")), "...and editing it does not overwrite the file: " + (await ev("document.querySelector('#saved').textContent")));
+// the reactive notebook (?reactive) with the native session: graph order, a cell's own _ names, a removed definition
+await go(`${base}/nb/sub/reactive.ipynb/?reactive`);
+await ready();
+const r = await ev(`(async () => { try {
+  const nb = sagebrush.notebook;
+  const res = await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print('c', c)" }], insert: [{ code: "a = 2\\nz = 1\\n_t = 5" }, { code: "c = a * 10" }, { code: "print(_t)" }] }, { budget: Infinity });
+  const out = () => nb.cells().map((c) => c.out.textContent.trim());
+  const first = out();
+  await nb.applyEdits({ set: [{ id: nb.cells()[1].id, code: "a = 3" }], insert: [{ code: "print(z)" }] }, { budget: Infinity });
+  return { reactive: nb.reactiveOn, ran: res.report.ran.length, first, second: out() };
+} catch (e) { return { error: String(e.stack ?? e), reactive: sagebrush.notebook.reactiveOn, href: location.href }; } })()`);
+if (r?.error) console.log("reactive section:", JSON.stringify(r));
+ok(r.reactive && r.first[0] === "c 20" && /NameError: name '_t' is not defined/.test(r.first[3]), "reactive with the native session: graph order, and a cell's _t is its own: " + JSON.stringify(r.first));
+ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[4]), "...editing a cell reruns its dependents, and a removed definition is gone: " + JSON.stringify(r.second));
 
 cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
