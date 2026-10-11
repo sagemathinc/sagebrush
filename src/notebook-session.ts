@@ -23,7 +23,9 @@
 //      {id, target, interact: spec}           controls to draw
 //      {id, target, clear: true}              clear_output()
 //      then {id, done, ms, error?} (or {id, skipped} for a run queued before an
-//      interrupt); `error`: the code raised (a traceback was written).
+//      interrupt); `error`: the code raised (a traceback was written); `names`:
+//      global names whose widgets changed (an interact update: the reactive
+//      notebook reruns the cells reading them).
 // With RunHooks (the browser worker, for TimeTravel replay): a run's `clock`
 // is the clock values to replay, and `done` also has the run's clock record
 // (web/replay-env.ts ClockRecord).
@@ -105,7 +107,14 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       flush();
       if (current !== null) post({ id: current, target, clear: true });
     },
+    // global names whose widgets changed (lib/ipywidgets: the reactive notebook)
+    changed_names(spec: string) {
+      if (current === null) return false;
+      for (const n of JSON.parse(spec)) changedNames.add(String(n));
+      return true;
+    },
   };
+  let changedNames = new Set<string>();
 
   const ready = (async () => {
     await initParser();
@@ -174,6 +183,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     const t0 = performance.now();
     opts.runs?.begin(m);
     let ok = true;
+    changedNames = new Set();
     // a seeded run (the reactive notebook's per-cell seeds): the generators
     // already made draw again from the run's entropy (os.urandom)
     if (typeof m.seed === "string" && opts.runs) {
@@ -213,7 +223,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     flush();
     target = null;
     const more = opts.runs?.end() ?? {};
-    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...more });
+    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...(changedNames.size ? { names: [...changedNames] } : {}), ...more });
     current = null;
   }
 

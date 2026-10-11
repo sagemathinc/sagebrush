@@ -112,7 +112,7 @@ export class WorkerKernel {
       if (m.done) {
         this.pending.delete(m.id);
         if (r) this.finishRun(m, r);
-        p.done(m.ms, { error: !!m.error, ...(m.files ? { files: m.files } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}) });
       }
     };
     w.onerror = (e) => this.emit("status", "error: " + (e.message || e));

@@ -591,7 +591,16 @@ export function createNotebook(root, opts = {}) {
     kernel.interact(it.iid, it.values, {
       start() {},
       ...areaSink(it.buffer),
-      done() { it.out.replaceChildren(...it.buffer.childNodes); it.buffer = null; finish(); },
+      done(ms, info) {
+        it.out.replaceChildren(...it.buffer.childNodes);
+        it.buffer = null;
+        // widgets are inputs: the cells reading the ones that changed rerun (not the cell showing them)
+        if (info?.names?.length && reactive() && kernel.reactive) {
+          const owner = it.out.closest(".cell")?.cell;
+          kernel.reactive.namesChanged(info.names, owner ? [owner.id] : []);
+        }
+        finish();
+      },
       stopped(message) { it.buffer = null; appendText(it.out, message, true); it.dirty = false; finish(); },
     });
   }
