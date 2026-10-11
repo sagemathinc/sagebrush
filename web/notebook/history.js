@@ -21,7 +21,8 @@
 //   {type: "run", id: sid:n, sid, n, kind: "code" | "interact", at (the
 //    version when it was asked for), cell? | code?, src (hash of the code),
 //    mode, repl?, iid?, values?, t, ms, out (hash of its output), clock?,
-//    overflow?, status?: "interrupted"}
+//    overflow?, status?: "interrupted", foreign?}   (foreign: another
+//    notebook's run in the same interpreter, its code inline)
 //   {type: "file", id: sid:n, sid, n, t, path, hash | null}   a file put or deleted
 //
 // A run's code is the cell's input at version `at` (or `code`, for the
@@ -155,7 +156,7 @@ export class NotebookHistory {
     plan.session = s;
     plan.ms = s.ms ?? 0;
     if (s.kernel && s.kernel !== "browser") plan.blocking.push("the interpreter ran outside this browser");
-    if (s.incomplete) plan.blocking.push("the history was cleared while this interpreter was running");
+    if (s.incomplete) plan.blocking.push("some of this interpreter's earlier runs are not in this history (it was cleared, or the runs were another notebook's before Sagebrush recorded those too)");
     if (!s.seed) plan.warnings.push("reproducible randomness was off");
     const runs = this.records("run").filter((r) => r.sid === s.id && (r.at != null && order.has(r.at) ? order.get(r.at) <= idx : r.t < nextMs));
     const files = this.records("file").filter((f) => f.sid === s.id && f.t < nextMs);
