@@ -13,7 +13,7 @@ const oracle: {
   cases: { cells: string[]; parents: Record<string, string[]>; errors: Record<string, string[]>; order: string[]; runs: Record<string, string[]> }[];
 } = JSON.parse(readFileSync(process.env.GRAPH_ORACLE ?? __dirname + "/../../test/notebook-graph-oracle.json", "utf8"));
 
-const build = (cells: string[], strict: boolean) => new NotebookGraph(cells.map((code, i) => ({ id: `c${i}`, code })), { strict, analyze: analyzeCell });
+const build = (cells: string[], strict: boolean) => new NotebookGraph(cells.map((code, i) => ({ id: `c${i}`, code })), { strict, analyze: (code, id) => analyzeCell(code, id, { strict }) });
 
 function errorKinds(g: NotebookGraph): Record<string, string[]> {
   const out: Record<string, string[]> = {};
