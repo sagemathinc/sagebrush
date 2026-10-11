@@ -1,6 +1,7 @@
 // Notebook documents (web/notebook/types.ts NotebookDoc) to and from .ipynb
 // (nbformat 4.5, with cell ids) and .py/.sage/.m files with "# %%" cells.
 
+import { isMarimo, fromMarimo } from "./marimo.js";
 export const joinText = (t) => (Array.isArray(t) ? t.join("") : t ?? "");
 const lines = (t) => t.split(/(?<=\n)/);
 
@@ -59,6 +60,8 @@ export function fromFile(name, text, mode = "python") {
     const extra = j.metadata && Object.keys(j.metadata).length ? { metadata: j.metadata } : {};
     return { name: base, mode: modeOf(j.metadata), cells, ...extra, ...(j.nbformat === 4 && j.nbformat_minor > 5 ? { nbformat_minor: j.nbformat_minor } : {}) };
   }
+  // a marimo notebook (web/notebook/marimo.js)
+  if (/\.py$/i.test(name) && isMarimo(text)) return fromMarimo(name, text, cellId);
   // "# %%" starts a cell, "# %% [markdown]" a Markdown cell whose lines are comments (jupytext);
   // in Magma (.m), "// %%" and "//" comments
   const cells = [];

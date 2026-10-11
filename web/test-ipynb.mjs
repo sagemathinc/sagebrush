@@ -1,16 +1,17 @@
 // .ipynb round trips keep what Sagebrush does not use (audit F8): notebook
 // and cell metadata (widgets, tags, provenance), raw cells, attachments, the
 // original kernelspec.  node web/test-ipynb.mjs
-import { copyFileSync, mkdtempSync } from "node:fs";
+import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
-// (an ES module the browser loads; a .mjs copy for node)
-const copy = join(mkdtempSync(join(tmpdir(), "sb-ipynb-")), "ipynb.mjs");
-copyFileSync(new URL("./notebook/ipynb.js", import.meta.url), copy);
-const { fromFile, toIpynb, toScript } = await import(pathToFileURL(copy));
+// (ES modules the browser loads; copies for node, in a directory of ES modules)
+const tmp = mkdtempSync(join(tmpdir(), "sb-ipynb-"));
+writeFileSync(join(tmp, "package.json"), '{"type": "module"}');
+for (const f of ["ipynb.js", "marimo.js"]) copyFileSync(new URL("./notebook/" + f, import.meta.url), join(tmp, f));
+const { fromFile, toIpynb, toScript } = await import(pathToFileURL(join(tmp, "ipynb.js")));
 
 const original = {
   cells: [
@@ -71,3 +72,11 @@ ok("scripts keep raw cells (jupytext's [raw])", () => {
   assert.deepEqual(fromFile("t.py", s).cells.map((c) => [c.type ?? "code", c.code]), doc.cells.map((c) => [c.type ?? "code", c.code]));
 });
 console.log(`${pass} passed`);
+
+// a marimo notebook (.py) opens as its cells
+{
+  const text = 'import marimo\n\napp = marimo.App()\n\n\n@app.cell\ndef _():\n    import marimo as mo\n    return (mo,)\n\n\n@app.cell\ndef _(mo):\n    mo.md(r"""\n    # Title\n    """)\n    return\n\n\n@app.cell\ndef _():\n    x = 1\n    return (x,)\n\n\nif __name__ == "__main__":\n    app.run()\n';
+  const d = fromFile("nb.py", text);
+  assert.deepEqual(d.cells.map((c) => [c.type ?? "code", c.code]), [["markdown", "# Title"], ["code", "x = 1"]]);
+  console.log("ok   a marimo notebook (.py) opens as its cells");
+}

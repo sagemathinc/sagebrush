@@ -419,6 +419,7 @@ web/test-reactive.mjs (60 browser checks).
 | Fix for redefinitions | src/rename.ts | "Rename the later definitions of x (x_2, …)", keeping a Jupyter notebook's meaning; scope-aware; Sage through the preparser. |
 | Agents | notebook.js applyEdits/graph/verify; WebMCP edit_notebook, notebook_graph, verify_notebook | |
 | UI | index.html | Auto-run (2 s, 10 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
+| marimo's format | web/notebook/marimo.js | File > Open reads marimo .py notebooks (identical to marimo's parser on its 198 example notebooks, 1,805 cells); File > Download as marimo writes them (marimo reads all 198 back identically). |
 | TimeTravel | index.html replayResumed | a reactive notebook resumes a version by recomputing it, with its files as they were: no "Cannot resume here". |
 
 **Before it becomes the default (the one model):**
@@ -431,4 +432,4 @@ web/test-reactive.mjs (60 browser checks).
 2. `sagebrush notebook` (the same session in a Node worker thread) handles
    `forget`, `mangle` and `seed` (Python's random and numpy.random), but not
    yet file tracking or seeding os.urandom; it needs its own reactive test.
-3. anywidget; runtime mutation counters; marimo `.py` import and export.
+3. anywidget; runtime mutation counters.
