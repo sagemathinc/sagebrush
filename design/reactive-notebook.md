@@ -368,8 +368,7 @@ compromises are unnecessary.
 6. **Automatic file tracking: adopted** (writer-to-reader edges from the
    filesystem layer).
 
-## Still open
-
-- **Strict one-definition rule:** recommended, with `_`-private names as the
-  escape hatch (see "What a name is").
-- **The budget's default value.**
+7. **Budget default: 2 s.**
+8. **Mutation tracking: adopted** (version counters in the runtime; a cell
+   that mutates another cell's object becomes its updater). See "What owning
+   the parser and the runtime buys", 3.
