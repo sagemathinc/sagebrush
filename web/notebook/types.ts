@@ -20,6 +20,9 @@ export interface Cell {
   /** The execution count, the n of the prompt [n]:. */
   n?: number | string | null;
   attachments?: Record<string, Record<string, string>> | null;
+  /** A code cell's last run time in ms (estimates of stale cells; the time
+   * limit's choices after a reload).  In .ipynb: metadata.sagebrush.ms. */
+  ms?: number | null;
   /** nbformat's cell metadata (tags, ...), kept as it is. */
   metadata?: Record<string, unknown> | null;
 }

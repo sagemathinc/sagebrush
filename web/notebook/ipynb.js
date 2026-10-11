@@ -36,6 +36,8 @@ export function toIpynb(doc) {
     const base = { id: c.id, metadata: c.metadata ?? {}, source: lines(c.code) };
     if (c.type === "markdown") return { cell_type: "markdown", ...base, ...(c.attachments ? { attachments: c.attachments } : {}) };
     if (c.type === "raw") return { cell_type: "raw", ...base };
+    // (its last run time, in Sagebrush's namespace of the cell's metadata)
+    if (c.ms != null) base.metadata = { ...base.metadata, sagebrush: { ...(base.metadata.sagebrush ?? {}), ms: c.ms } };
     return { cell_type: "code", ...base, execution_count: c.n == null ? null : +c.n, outputs: (c.outputs ?? []).map((o) => (o.output_type === "stream" ? { ...o, text: lines(joinText(o.text)) } : o)) };
   };
   return JSON.stringify({ cells: doc.cells.map(cell), metadata, nbformat: 4, nbformat_minor: Math.max(5, +doc.nbformat_minor || 0) }, null, 1);
@@ -50,8 +52,16 @@ export function fromFile(name, text, mode = "python") {
     // nbformat 3: the cells of every worksheet, in order (not only the first)
     const cells = (j.cells ?? (j.worksheets ?? []).flatMap((w) => w?.cells ?? [])).map((c) => {
       const src = joinText(c.source ?? c.input), id = validId(c.id) ? c.id : cellId();
-      const metadata = c.metadata && Object.keys(c.metadata).length ? { metadata: c.metadata } : {};
-      if (c.cell_type === "code") return { id, code: src, outputs: c.outputs ?? [], n: c.execution_count ?? c.prompt_number ?? null, ...metadata };
+      let md = c.metadata, ms = null;
+      // (a code cell's last run time: metadata.sagebrush.ms, taken out of the metadata)
+      if (c.cell_type === "code" && typeof md?.sagebrush?.ms === "number" && md.sagebrush.ms >= 0) {
+        ms = md.sagebrush.ms;
+        const { ms: _ms, ...sb } = md.sagebrush;
+        const { sagebrush: _sb, ...others } = md;
+        md = Object.keys(sb).length ? { ...others, sagebrush: sb } : others;
+      }
+      const metadata = md && Object.keys(md).length ? { metadata: md } : {};
+      if (c.cell_type === "code") return { id, code: src, outputs: c.outputs ?? [], n: c.execution_count ?? c.prompt_number ?? null, ...(ms != null ? { ms } : {}), ...metadata };
       if (c.cell_type === "markdown") return { id, type: "markdown", code: src, attachments: c.attachments ?? null, ...metadata };
       // nbformat 3's heading cells are Markdown headings
       if (c.cell_type === "heading") return { id, type: "markdown", code: "#".repeat(c.level ?? 1) + " " + src, ...metadata };

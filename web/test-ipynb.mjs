@@ -71,6 +71,14 @@ ok("scripts keep raw cells (jupytext's [raw])", () => {
   assert.match(s, /# %% \[raw\]\n# \\section\{Results\}/);
   assert.deepEqual(fromFile("t.py", s).cells.map((c) => [c.type ?? "code", c.code]), doc.cells.map((c) => [c.type ?? "code", c.code]));
 });
+ok("a code cell's last run time round-trips in metadata.sagebrush.ms", () => {
+  const d = { mode: "python", cells: [{ id: "t1", code: "x = 1", outputs: [], n: 1, ms: 1200, metadata: { tags: ["slow"], sagebrush: { other: 1 } } }, { id: "t2", code: "y = 2", outputs: [], n: 2, ms: 0 }] };
+  const j = JSON.parse(toIpynb(d));
+  assert.deepEqual(j.cells[0].metadata, { tags: ["slow"], sagebrush: { other: 1, ms: 1200 } });
+  assert.deepEqual(j.cells[1].metadata, { sagebrush: { ms: 0 } });
+  const back = fromFile("t.ipynb", JSON.stringify(j));
+  assert.deepEqual(back.cells.map((c) => [c.ms, c.metadata ?? null]), [[1200, { tags: ["slow"], sagebrush: { other: 1 } }], [0, null]]);
+});
 console.log(`${pass} passed`);
 
 // a marimo notebook (.py) opens as its cells
