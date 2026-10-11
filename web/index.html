@@ -1471,10 +1471,10 @@ const tools = [
   },
   {
     name: "read_notebook",
-    description: "Return the notebook's cells as JSON: code cells with their output, and Markdown (text) cells.",
+    description: "Return the notebook's cells as JSON: code cells with their id and output, and Markdown (text) cells.",
     inputSchema: { type: "object", properties: {} },
     async execute() {
-      return { content: [{ type: "text", text: JSON.stringify({ mode: nb.mode, cells: cells().map((c) => (c.type === "markdown" ? { type: "markdown", text: c.ta.value } : { code: c.ta.value, output: nb.outputText(c.out) })) }) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ mode: nb.mode, cells: cells().map((c) => (c.type === "markdown" ? { id: c.id, type: "markdown", text: c.ta.value } : { id: c.id, code: c.ta.value, output: nb.outputText(c.out) })) }) }] };
     },
   },
   {
@@ -1488,6 +1488,40 @@ const tools = [
       nb.setInput(cell, text);
       await nb.renderMd(cell);
       return { content: [{ type: "text", text: cell.md.textContent.slice(0, 2000) }] };
+    },
+  },
+  {
+    name: "edit_notebook",
+    description: "Change several cells at once and then run once: set cells' code (by id), insert cells, delete cells. In the reactive notebook every cell affected reruns, in dependency order, and the result says which ran, which are left stale (too slow for the time budget, or manual), which failed, which did not run because a cell they depend on failed, and which have errors (a name defined by two cells, a cycle). Cell ids come from notebook_graph or read_notebook.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        set: { type: "array", items: { type: "object", properties: { id: { type: "string" }, code: { type: "string" }, type: { type: "string", enum: ["code", "markdown"] } }, required: ["id"] }, description: "Cells to change." },
+        insert: { type: "array", items: { type: "object", properties: { code: { type: "string" }, type: { type: "string", enum: ["code", "markdown"] }, after: { type: ["string", "null"], description: "Insert after this cell id (null: first; omitted: at the end)." } }, required: ["code"] }, description: "Cells to add." },
+        remove: { type: "array", items: { type: "string" }, description: "Ids of cells to delete." },
+        budget_ms: { type: "number", description: "Time budget for the cells rerun automatically (default: the notebook's, 2000; use a large number to update everything)." },
+      },
+    },
+    async execute({ set, insert, remove, budget_ms }) {
+      const r = await nb.applyEdits({ set, insert, remove }, budget_ms !== undefined ? { budget: budget_ms } : {});
+      return { content: [{ type: "text", text: JSON.stringify(r) }] };
+    },
+  },
+  {
+    name: "notebook_graph",
+    description: "The notebook's dependency graph: for each code cell its id, position, state (ok, stale, error, cancelled, not run, running), whether its code was edited since it ran, the names it defines and reads, the cells it depends on (parents) and that depend on it (children), errors, and its last run time.",
+    inputSchema: { type: "object", properties: {} },
+    async execute() {
+      return { content: [{ type: "text", text: JSON.stringify(nb.graph()) }] };
+    },
+  },
+  {
+    name: "verify_notebook",
+    description: "Recompute the whole notebook from scratch in a fresh interpreter and report the cells whose output differs from what was shown before. Use it before telling a person the notebook is done: a difference means an output depended on hidden state (a mutation from another cell, the order things were run in, unseeded randomness, the clock).",
+    inputSchema: { type: "object", properties: {} },
+    async execute() {
+      const r = await nb.verify();
+      return { content: [{ type: "text", text: JSON.stringify({ same: r.same.length, changed: r.changed, report: r.report }) }] };
     },
   },
   {
