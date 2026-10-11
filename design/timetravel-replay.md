@@ -11,7 +11,8 @@ William's decisions on the open questions:
 - only file hashes in the history;
 - CoCalc sync deferred.
 
-The cross-browser libm and the portable bundle are next. Two runtime bugs
+The portable bundle (`.sbreplay`) followed the same day. The cross-browser
+libm is next. Two runtime bugs
 found along the way are fixed (see the end).
 
 ## The idea

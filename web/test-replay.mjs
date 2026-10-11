@@ -63,7 +63,7 @@ try {
   await sleep(900);
   await a.ev("(() => { sagebrush.notebook.flush(); return true; })()");
   const head = await a.ev("sagebrush.history.head()");
-  await a.ev(`(() => { const nb = sagebrush.notebook; const c = nb.addCell(${JSON.stringify(PROBE)}, "end"); return true; })()`);
+  await a.ev(`(() => { const nb = sagebrush.notebook; nb.addCell(${JSON.stringify(PROBE)}); return true; })()`);
   await sleep(900);
   await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
   const probe = (await a.ev(outs)).at(-1).trim();
@@ -101,7 +101,7 @@ try {
   ok(JSON.stringify(resumed.slice(0, 4)) === JSON.stringify(original.slice(0, 4)), "the replayed outputs are the original ones");
   ok(resumed[4] === interactOut && (await b.ev("[...sagebrush.notebook.interacts.values()][0]?.values.n")) === 7, "the @interact shows its last output and its control at n = 7: " + resumed[4].trim());
   ok((await b.ev("sagebrush.notebook.cells()[1].ta.value")) === "a = 20\nprint(a)", "the cells are as at that version (the edit)...");
-  await b.ev(`(() => { sagebrush.notebook.addCell(${JSON.stringify(PROBE)}, "end"); return true; })()`);
+  await b.ev(`(() => { sagebrush.notebook.addCell(${JSON.stringify(PROBE)}); return true; })()`);
   await b.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
   const probe2 = (await b.ev(outs)).at(-1).trim();
   ok(probe2 === probe, "...and the session is the original's: " + probe2);
@@ -114,6 +114,36 @@ try {
   ok(bplan.runs === 8 && bplan.blocking.length === 0, "...so it can be resumed in turn: " + JSON.stringify(bplan));
   b.ws.close();
   await fetch(`http://127.0.0.1:${port}/json/close/` + t2.id);
+
+  // ---- the portable bundle, opened in another browser (a fresh profile: no notebooks, no files)
+  const bundle64 = await a.ev("sagebrush.bundle().then((u) => { let s = ''; for (const x of u) s += String.fromCharCode(x); return btoa(s); })");
+  ok(bundle64.length > 100, `File > Download with history: a ${Math.round((bundle64.length * 3) / 4)}-byte .sbreplay`);
+  const port2 = port + 1, profile2 = mkdtempSync(join(tmpdir(), "sb-replay2-"));
+  const chrome2 = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port2}`, "--window-size=1000,700", `--user-data-dir=${profile2}`, "about:blank"], { stdio: "ignore" });
+  try {
+    let tg2;
+    for (let i = 0; i < 100; i++) { try { tg2 = await (await fetch(`http://127.0.0.1:${port2}/json`)).json(); break; } catch { await sleep(100); } }
+    const d = await tab(tg2.find((t) => t.type === "page").webSocketDebuggerUrl);
+    await d.send("Page.navigate", { url: base });
+    await d.until(ready);
+    ok((await d.ev("indexedDB.databases().then((l) => l.length)")) >= 1 && (await d.ev("sagebrush.history ? sagebrush.history.records('run').length : 0")) === 0, "another browser: nothing journaled there");
+    const nid = await d.ev(`sagebrush.openBundle(Uint8Array.from(atob(${JSON.stringify(bundle64)}), (c) => c.charCodeAt(0)))`);
+    await d.until("sagebrush.history !== null && sagebrush.history.records('run').length > 0", 10000);
+    const dplan = await d.ev(`(() => { const p = sagebrush.history.replayPlan(${JSON.stringify(head)}); return { runs: p.runs, blocking: p.blocking }; })()`);
+    ok(dplan.runs === 7 && dplan.blocking.length === 0, "...opens the bundle with its history and journal: " + JSON.stringify(dplan));
+    await d.send("Page.navigate", { url: new URL(`?resume=${encodeURIComponent(nid)}&at=${encodeURIComponent(head)}`, base).href });
+    await d.until("window.sagebrush?.replayReport !== undefined", 60000);
+    const dr = await d.ev("sagebrush.replayReport");
+    ok(dr.runs === 7 && dr.diverged.length === 0, "...and resumes the version there, identical (the file's bytes came in the bundle): " + (await d.ev("document.querySelector('#status').textContent")));
+    await d.ev(`(() => { sagebrush.notebook.addCell(${JSON.stringify(PROBE)}); return true; })()`);
+    await d.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
+    ok((await d.ev(outs)).at(-1).trim() === probe, "...with the same session as the original browser's");
+    d.ws.close();
+  } finally {
+    chrome2.kill();
+    try { rmSync(profile2, { recursive: true, force: true }); } catch {}
+  }
+  await a.send("Page.bringToFront");
 
   // ---- reproducible randomness off: a warning; an interrupted run: not resumable
   await a.send("Page.bringToFront");
