@@ -61,7 +61,8 @@ export type CellState =
   | { state: "done"; ok: boolean; ms: number }
   | { state: "stale"; why: "budget" | "manual" | "ancestor" | "loaded" | "restart" | "interrupted" }
   | { state: "cancelled"; by: string; why: "exception" | "error" | "interrupted" }
-  | { state: "error"; errors: CellError[] };
+  // (submitted: the cell was just run, so a syntax error can be shown by running it)
+  | { state: "error"; errors: CellError[]; submitted?: boolean };
 
 export interface ReactiveHost {
   /** the code cells, in page order */
@@ -155,6 +156,20 @@ export class Reactive {
       if (opts.stale ?? true) for (const c of cells) if (!this.errors.has(c.id) && !opts.fresh?.has(c.id)) this.markStale(c.id, "loaded");
       return this.report([], [], [], []);
     });
+  }
+
+  /**
+   * The notebook's language changed: every cell is analyzed again (in it)
+   * and stale.
+   */
+  reset(): Promise<RunReport> {
+    this.registered.clear();
+    this.errors.clear();
+    this.stale.clear();
+    this.outcome.clear();
+    this.files.clear();
+    this.graph = new NotebookGraph();
+    return this.load({ stale: true });
   }
 
   /** The interpreter restarted: every cell is stale. */
@@ -382,7 +397,7 @@ export class Reactive {
     for (const id of errors.keys()) {
       if (!errorsBefore.has(id) && before.has(id) && !changed.has(id)) for (const n of this.defsOf(id)) if (!keepAlive.has(n)) forgetNow.add(n);
       this.stale.delete(id);
-      this.host.status(id, { state: "error", errors: errors.get(id)! });
+      this.host.status(id, { state: "error", errors: errors.get(id)!, ...(submitted.has(id) ? { submitted: true } : {}) });
     }
     // names another valid cell still defines, as it last ran (#1477's write-only names), stay
     for (const n of [...forgetNow]) if ((this.graph.definers.get(n) ?? []).some((d) => !changed.has(d) && !errors.has(d))) forgetNow.delete(n);

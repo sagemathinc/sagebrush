@@ -12,6 +12,7 @@
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
 import { magmaToPython } from "./magma";
+import { helpSyntax } from "./help-syntax";
 
 type Node = { _type: string; [field: string]: any };
 
@@ -331,6 +332,8 @@ class Visitor {
 export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" } = {}): CellAnalysis {
   // (marimo: some frontends send non-breaking spaces)
   source = source.replaceAll(" ", " ");
+  // (IPython's obj? help lines, as the notebook runs them)
+  if (opts.mode !== "magma") source = helpSyntax(source);
   if (opts.mode === "sage") source = preparse(source);
   // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)
   else if (opts.mode === "magma") source = magmaToPython(source, "<cell>").replace(/^from _magma import \*\n/, "");

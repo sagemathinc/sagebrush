@@ -214,8 +214,7 @@
       <button id="ttnext" aria-label="Newer version" title="Newer version">▶</button>
       <span id="ttinfo" aria-live="polite"></span>
       <span class="sp"></span>
-      <button id="ttresume" title="Open this version in a new tab with its variables: the code that had run then is run again, in the same order, with the same random numbers and clock">Resume from here</button>
-      <button id="ttrevert" class="primary" title="Make this version the notebook (as a new version: nothing is lost)">Revert to this version</button>
+      <button id="ttrevert" class="primary" title="Make this version the notebook (as a new version: nothing is lost) and compute it again, with the same random numbers and the files as they were then">Revert to this version</button>
       <button id="ttclear" class="danger" title="Forget every past version of this notebook">Clear history…</button>
       <button id="ttclose" aria-label="Close TimeTravel" title="Back to the notebook">✕</button>
     </div>
@@ -579,15 +578,16 @@ function writeDisk(path, data) {
   const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => TAURI.fs.writeFile(path, data)).catch((e) => console.warn(e));
   diskWrites.set(path, next);
 }
-// The reactive notebook (design/reactive-notebook.md), while it is being
-// built: ?reactive in the address turns it on in this browser (it stays on:
-// localStorage sagebrush-reactive), ?reactive=0 off.
+// The notebook is reactive (design/reactive-notebook.md).  ?reactive=0 in
+// the address turns that off in this browser (kept in localStorage
+// sagebrush-reactive; ?reactive turns it back on): a temporary way out while
+// the model is new.
 const REACTIVE = (() => {
   try {
     const q = new URLSearchParams(location.search).get("reactive");
     if (q !== null) localStorage.setItem("sagebrush-reactive", q === "0" || q === "off" ? "0" : "1");
-    return localStorage.getItem("sagebrush-reactive") === "1";
-  } catch { return false; }
+    return localStorage.getItem("sagebrush-reactive") !== "0";
+  } catch { return true; }
 })();
 // (the address keeps ?reactive when the page rewrites it)
 const flagQuery = new URLSearchParams(location.search).has("reactive") ? "?reactive" : "";
@@ -703,10 +703,8 @@ function ttShowVersion() {
   $("#ttrevert").disabled = !v || v.index === vs.length - 1;
   $("#ttprev").disabled = !v || v.index === 0;
   $("#ttnext").disabled = !v || v.index === vs.length - 1;
-  $("#ttresume").disabled = true;
   if (!v) { $("#ttinfo").textContent = ttUnavailable || (nbHistory ? "No versions yet." : "Loading the history…"); ttView?.load({ mode: nb.mode, cells: [] }); return; }
   $("#ttinfo").textContent = `Version ${v.index + 1} of ${vs.length} · ${new Date(v.ms).toLocaleString()}`;
-  ttShowResume(v);
   const doc = nbHistory.docAt(v.time);
   const firstView = !ttView;
   ttView ??= createNotebook($("#ttview"), { readOnly: true, mode: doc.mode });
@@ -714,28 +712,6 @@ function ttShowVersion() {
   const at = firstView ? ttAnchor : anchorOf(ttView);
   ttView.load(doc);
   restoreAnchor(ttView, at);
-}
-// Resume from here (web/replay-page.js): the session as it was at this
-// version (after the code run while it was the newest), in a new tab.
-function ttShowResume(v) {
-  const b = $("#ttresume");
-  // (the reactive notebook resumes any version by recomputing it)
-  if (nb.reactiveOn) {
-    b.disabled = false;
-    b.textContent = "Resume from here";
-    b.title = "Open this version in a new tab and compute its cells (with the same random numbers), with the files as they were then.";
-    return;
-  }
-  let plan;
-  try { plan = nbHistory.replayPlan(v.time); } catch (e) { console.warn("replay plan:", e); b.disabled = true; return; }
-  b.disabled = plan.blocking.length > 0;
-  b.textContent = plan.blocking.length ? "Cannot resume here" : plan.runs ? `Resume from here — ${fmtEstimate(plan.ms)}` : "Resume from here";
-  b.title = plan.blocking.length
-    ? `The session at this version cannot be recreated: ${plan.blocking.join("; ")}.`
-    : `Open this version in a new tab with its variables: ${plan.runs ? `the ${plan.runs} run${plan.runs === 1 ? "" : "s"} of code before it are run again, in the same order, with the same random numbers and clock` : "no code had run then"}` +
-      (plan.warnings.length ? ` (the result may differ: ${plan.warnings.join("; ")})` : "") + ".";
-  if (plan.runs) $("#ttinfo").textContent += ` · ${plan.runs} run${plan.runs === 1 ? "" : "s"}`;
-  if (plan.blocking.length) $("#ttinfo").textContent += ` · cannot resume: ${plan.blocking[0]}`;
 }
 // A mark under the slider at each version where code ran.
 function ttShowMarks() {
@@ -748,13 +724,6 @@ function ttShowMarks() {
   const inset = 8, left = sr.left - mr.left + inset, width = Math.max(0, sr.width - 2 * inset);
   for (const i of ran) el.appendChild(document.createElement("i")).style.left = `${left + (width * i) / (vs.length - 1)}px`;
 }
-$("#ttresume").onclick = () => {
-  const v = nbHistory?.versions()[+ttSlider.value];
-  if (!v) return;
-  nb.flush();
-  open_(`${location.pathname}?resume=${encodeURIComponent(current.id)}&at=${encodeURIComponent(v.time)}${flagQuery ? "&reactive" : ""}`);
-};
-const open_ = (url) => window.open(url, "_blank");
 $("#ttrepro").onchange = (e) => {
   nb.setMeta({ reproducible: e.target.checked });
   statusEl.textContent = `reproducible randomness ${e.target.checked ? "on" : "off"} (from the next restart of the interpreter)`;
@@ -795,24 +764,7 @@ async function replayResumed({ plan, version }) {
   // after putting back the files as they were then: no journal of runs needed.
   if (nb.reactiveOn) {
     if (!kernel.ready) await new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
-    replaying = true;
-    nb.setReadOnly(true);
-    let report, files;
-    try {
-      files = plan.events?.some((e) => e.file) ? await journal.replay({ ...plan, events: plan.events.filter((e) => e.file) }) : { diverged: [] };
-      statusEl.textContent = `recomputing version ${version}…`;
-      report = await nb.runAll();
-    } finally {
-      replaying = false;
-      nb.setReadOnly(false);
-      if (journal.session) journal.session.replay = false;
-    }
-    nb.flush();
-    const missing = files.diverged.map((d) => d.reason);
-    statusEl.textContent = `Recomputed version ${version}: ${report.ran.length} cell${report.ran.length === 1 ? "" : "s"} ran` +
-      (report.failed.length ? `, ${report.failed.length} raised an error` : "") + (missing.length ? ` (${missing.join("; ")})` : "");
-    announce(statusEl.textContent);
-    window.sagebrush.replayReport = { recomputed: true, ...report, missing };
+    await recompute(plan, `version ${version}`);
     return;
   }
   if (plan.blocking.length) {
@@ -881,10 +833,12 @@ $("#ttclose").onclick = () => ttShow(false);
 ttSlider.oninput = ttShowVersion;
 $("#ttprev").onclick = () => { ttSlider.value = +ttSlider.value - 1; ttShowVersion(); };
 $("#ttnext").onclick = () => { ttSlider.value = +ttSlider.value + 1; ttShowVersion(); };
-$("#ttrevert").onclick = () => {
+$("#ttrevert").onclick = async () => {
   const vs = nbHistory.versions(), v = vs[+ttSlider.value];
   const old = nbHistory.docAt(v.time);
-  // a cell whose code is unchanged keeps its output
+  let plan = null;
+  try { plan = nbHistory.replayPlan(v.time); } catch {}
+  // a cell whose code is unchanged keeps its output (until it is computed again)
   const now = new Map(nb.snapshot().cells.map((c) => [c.id, c]));
   const cells = old.cells.map((c) => { const k = now.get(c.id); return k && c.type !== "markdown" && !k.type && k.code === c.code ? { ...c, outputs: k.outputs, n: k.n } : c; });
   ttShow(false);
@@ -892,7 +846,36 @@ $("#ttrevert").onclick = () => {
   modeEl.value = nb.mode;
   announce(`Reverted to version ${v.index + 1}`);
   statusEl.textContent = `reverted to version ${v.index + 1} of ${vs.length}`;
+  // the reactive notebook: the session at that version is computed again
+  if (nb.reactiveOn) await recompute(plan, `version ${v.index + 1}`);
 };
+// The session of the notebook as it is now, computed from scratch: a fresh
+// interpreter, the files as they were then (a TimeTravel plan's file events),
+// every cell in graph order (per-cell seeds: the same random numbers).
+async function recompute(plan, what) {
+  if (!kernel) return null;
+  const ready = new Promise((r) => { const off = kernel.on("ready", () => { off(); r(); }); });
+  kernel.restart();
+  await ready;
+  replaying = true;
+  nb.setReadOnly(true);
+  let report, missing = [];
+  try {
+    if (plan?.events?.some((e) => e.file)) missing = (await journal.replay({ ...plan, events: plan.events.filter((e) => e.file) })).diverged.map((d) => d.reason);
+    statusEl.textContent = `computing ${what}…`;
+    report = await nb.runAll();
+  } finally {
+    replaying = false;
+    nb.setReadOnly(false);
+    if (journal.session) journal.session.replay = false;
+  }
+  nb.flush();
+  statusEl.textContent = `Computed ${what}: ${report.ran.length} cell${report.ran.length === 1 ? "" : "s"} ran` +
+    (report.failed.length ? `, ${report.failed.length} raised an error` : "") + (missing.length ? ` (${missing.join("; ")})` : "");
+  announce(statusEl.textContent);
+  window.sagebrush.replayReport = { recomputed: true, ...report, missing };
+  return report;
+}
 $("#ttclear").onclick = async () => {
   if (!nbHistory || !confirm(`Forget every past version of "${docName()}"? The notebook itself stays as it is.`)) return;
   await nbHistory.clear(nb.snapshot());

@@ -775,6 +775,13 @@ export function createNotebook(root, opts = {}) {
     } else if (st.state === "error") {
       cls.remove("cancelled");
       cls.add("error");
+      // a syntax error in a cell just run: the interpreter shows it (where, and in
+      // its language's words); such a cell defines nothing, so running it is harmless
+      if (st.submitted && st.errors.every((e) => e.kind === "syntax")) {
+        execCell(cell, cell.ta.value).then(() => cls.add("error"));
+        markEdited(cell);
+        return;
+      }
       for (const e of st.errors) appendText(cell.out, errorText(e) + "\n", true);
       // the fix of a name several cells define: the later definitions get new names, in page order
       const names = [...new Set(st.errors.filter((e) => e.kind === "multiple-definition").map((e) => e.name))];
@@ -1638,9 +1645,12 @@ export function createNotebook(root, opts = {}) {
     schedule();
   }
   function setMode(m, notify = true) {
+    const before = mode;
     mode = ["python", "sage", "magma"].includes(m) ? m : "python";
     for (const c of cells()) paint(c);
     if (notify) { emit("mode", mode); schedule(); }
+    // (the reactive notebook: its cells are analyzed again in the new language, and stale)
+    if (mode !== before && reactive() && kernel.reactive) kernel.reactive.reset();
   }
 
   // ---------------------------------------------------------- for agents
