@@ -182,22 +182,32 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   for (const [ln, os] of byLine) {
     const text = lines[ln - 1];
     if (text === undefined) return null;
-    let spans: [number, number][];
+    let spans: [number, number][] = [];
+    const reps: [number, number, string][] = [];
     if (opts.mode === "sage") {
       if (aLines.length !== lines.length) return null;
       const orig = wordSpans(text, name), ana = wordSpans(aLines[ln - 1], name);
-      if (orig.length !== ana.length) return null;
-      const aText = aLines[ln - 1];
-      spans = os.map((o) => {
-        const i = ana.findIndex(([s]) => bytesLen(aText.slice(0, s)) === o.col);
-        return i < 0 ? null : orig[i];
-      }).filter((x): x is [number, number] => x !== null);
-      if (spans.length !== os.length) return null;
+      const targets = new Set(os.map((o) => target.get(o)));
+      if (orig.length !== ana.length) {
+        // the preparser added occurrences (`K.<a> = ...` is `K = ...; (a,) =
+        // K._first_ngens(1)`): if they all get the same name, every one on
+        // the line as written does (there are no others to keep)
+        if (targets.size !== 1 || os.some((o) => o.alias) || ana.length !== os.length) return null;
+        reps.push(...orig.map(([a, b]) => [a, b, [...targets][0]!] as [number, number, string]));
+        os.length = 0;
+      } else {
+        const aText = aLines[ln - 1];
+        spans = os.map((o) => {
+          const i = ana.findIndex(([s]) => bytesLen(aText.slice(0, s)) === o.col);
+          return i < 0 ? null : orig[i];
+        }).filter((x): x is [number, number] => x !== null);
+        if (spans.length !== os.length) return null;
+      }
     } else {
       spans = os.map((o) => [byteSlice(text, 0, o.col).length, byteSlice(text, 0, o.end).length]);
     }
     // (with the occurrence's replacement: `x as to` for an import of x)
-    const reps = spans.map(([s, e], i) => { const t = target.get(os[i])!; return [s, e, os[i].alias ? `${os[i].alias} as ${t}` : t] as [number, number, string]; });
+    reps.push(...spans.map(([s, e], i) => { const t = target.get(os[i])!; return [s, e, os[i].alias ? `${os[i].alias} as ${t}` : t] as [number, number, string]; }));
     reps.sort((a, b) => b[0] - a[0]);
     let t = text;
     for (const [s, e, r] of reps) t = t.slice(0, s) + r + t.slice(e);
@@ -213,7 +223,10 @@ function wordSpans(line: string, name: string): [number, number][] {
   const re = /(#.*)|((?:\b[rRbBuUfF]{1,2})?(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?))|([A-Za-z_]\w*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line))) {
-    if (m[3] === name && line[m.index - 1] !== ".") out.push([m.index, m.index + name.length]);
+    if (m[3] !== name || line[m.index - 1] === ".") continue;
+    // (not a keyword argument: f(name=...))
+    if (/[(,]\s*$/.test(line.slice(0, m.index)) && /^\s*=(?!=)/.test(line.slice(m.index + name.length))) continue;
+    out.push([m.index, m.index + name.length]);
   }
   return out;
 }
