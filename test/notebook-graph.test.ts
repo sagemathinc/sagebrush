@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { NotebookGraph } from "../src/notebook-graph";
+import { analyzeCell } from "../src/dataflow";
 
 // src/notebook-graph.ts against marimo's own graph: test/notebook-graph-oracle.json
 // (test/marimo_graph_oracle.py) has random notebooks and marimo's example
@@ -12,7 +13,7 @@ const oracle: {
   cases: { cells: string[]; parents: Record<string, string[]>; errors: Record<string, string[]>; order: string[]; runs: Record<string, string[]> }[];
 } = JSON.parse(readFileSync(process.env.GRAPH_ORACLE ?? __dirname + "/../../test/notebook-graph-oracle.json", "utf8"));
 
-const build = (cells: string[], strict: boolean) => new NotebookGraph(cells.map((code, i) => ({ id: `c${i}`, code })), { strict });
+const build = (cells: string[], strict: boolean) => new NotebookGraph(cells.map((code, i) => ({ id: `c${i}`, code })), { strict, analyze: analyzeCell });
 
 function errorKinds(g: NotebookGraph): Record<string, string[]> {
   const out: Record<string, string[]> = {};
@@ -67,7 +68,8 @@ test("#1477: several cells may define a name no cell reads", () => {
   assert.deepEqual(g.definers.get("i"), ["c0", "c1"]);
   // ... until a cell reads it
   const h = build(["for i in range(3):\n    pass", "for i in range(5):\n    pass", "print(i)"], false);
-  assert.deepEqual([...h.errors.keys()].sort(), ["c0", "c1"]);
+  assert.deepEqual([...h.errors.keys()].sort(), ["c0", "c1", "c2"]);
+  assert.deepEqual(h.errors.get("c2"), [{ kind: "multiple-definition", name: "i", cells: ["c0", "c1"], reading: true }]);
   assert.deepEqual(h.errors.get("c0"), [{ kind: "multiple-definition", name: "i", cells: ["c1"] }]);
   // `df = clean(df)` reads df: still an error
   const k = build(["df = 1", "df = df + 1"], false);

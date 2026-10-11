@@ -17,16 +17,21 @@
 //
 //   - #1477's relaxation (unless `strict`): several cells may define a name
 //     that no cell reads.  Such a name has no edges, so the graph is exact.
+//     Once a cell reads it, the definers and the readers have the error (the
+//     scheduler shows it only on the cells just run: no action at a distance).
 //   - A cycle error goes to every cell in a strongly connected component:
 //     every cell on a cycle.  marimo records, for each edge added, one path
 //     closing a cycle, and so misses some cells (in 70 of the oracle's 3,198
 //     notebooks; never a whole cycle).
-import { analyzeCell, ImportStarError, type CellAnalysis } from "./dataflow";
+// (Analysis is given, or done by `options.analyze`, e.g. src/dataflow.ts's
+// analyzeCell: the page asks a worker, so that this module stays small.)
+import type { CellAnalysis } from "./dataflow";
 
 export type CellError =
   | { kind: "syntax"; message: string }
   | { kind: "import-star"; message: string }
-  | { kind: "multiple-definition"; name: string; cells: string[] }
+  // (reading: the cell reads a name several cells define, under #1477's relaxation)
+  | { kind: "multiple-definition"; name: string; cells: string[]; reading?: true }
   | { kind: "cycle"; cells: string[] };
 
 interface Node {
@@ -40,7 +45,16 @@ interface Node {
 export interface GraphOptions {
   /** marimo's one-definition rule exactly, without #1477's relaxation */
   strict?: boolean;
-  /** the cell id given to the analyzer (affects only `_`-name mangling) */
+  /** analyzes a cell given without its analysis (it throws ImportStarError or a syntax error) */
+  analyze?: (code: string, id: string) => CellAnalysis;
+}
+
+/** A cell: its analysis (or the error analyzing it), or just its code for `analyze`. */
+export interface GraphCell {
+  id: string;
+  code: string;
+  analysis?: CellAnalysis;
+  error?: CellError;
 }
 
 export class NotebookGraph {
@@ -51,21 +65,37 @@ export class NotebookGraph {
   /** each name's defining cells, in page order */
   readonly definers = new Map<string, string[]>();
   private readonly strict: boolean;
+  private readonly analyze?: (code: string, id: string) => CellAnalysis;
 
-  constructor(cells: { id: string; code: string }[] = [], options: GraphOptions = {}) {
+  constructor(cells: GraphCell[] = [], options: GraphOptions = {}) {
     this.strict = !!options.strict;
+    this.analyze = options.analyze;
     this.set(cells);
   }
 
   /** Replace the notebook's cells (in page order); unchanged code is not analyzed again. */
-  set(cells: { id: string; code: string }[]): void {
+  set(cells: GraphCell[]): void {
     const old = this.nodes;
     this.nodes = new Map();
-    for (const { id, code } of cells) {
-      const prev = old.get(id);
-      this.nodes.set(id, prev && prev.code === code ? prev : analyze(id, code));
+    for (const c of cells) {
+      const prev = old.get(c.id);
+      let node: Node;
+      if (c.analysis || c.error) node = { id: c.id, code: c.code, analysis: c.analysis, error: c.error };
+      else if (prev && prev.code === c.code) node = prev;
+      else node = this.analyzeNode(c.id, c.code);
+      this.nodes.set(c.id, node);
     }
     this.build();
+  }
+
+  private analyzeNode(id: string, code: string): Node {
+    if (!this.analyze) throw new Error(`cell ${id}: no analysis`);
+    try {
+      return { id, code, analysis: this.analyze(code, id) };
+    } catch (e: any) {
+      const kind = e?.name === "ImportStarError" ? "import-star" : "syntax";
+      return { id, code, error: { kind, message: String(e?.message ?? e) } };
+    }
   }
 
   get ids(): string[] {
@@ -115,6 +145,8 @@ export class NotebookGraph {
       const rs = readers.get(name);
       if (ds.length > 1 && (this.strict || rs)) {
         for (const d of ds) this.addError(d, { kind: "multiple-definition", name, cells: ds.filter((x) => x !== d) });
+        // #1477: and on the cells reading it, which may be the ones that made it an error
+        if (!this.strict) for (const r of rs ?? []) if (!ds.includes(r)) this.addError(r, { kind: "multiple-definition", name, cells: ds, reading: true });
       }
       for (const r of rs ?? []) for (const d of ds) edge(d, r);
     }
@@ -250,11 +282,3 @@ export class NotebookGraph {
   }
 }
 
-function analyze(id: string, code: string): Node {
-  try {
-    return { id, code, analysis: analyzeCell(code, id) };
-  } catch (e: any) {
-    if (e instanceof ImportStarError) return { id, code, error: { kind: "import-star", message: e.message } };
-    return { id, code, error: { kind: "syntax", message: String(e?.message ?? e) } };
-  }
-}

@@ -3,10 +3,12 @@
 // notebook` runs it in a Node worker thread behind a local server
 // (src/notebook.ts).  The protocol:
 //
-// In:  {id, code, sage?, magma?, repl?, clock?}  run code (`sage`: Sage mode, with
-//                                 sage_all imported; `magma`: Magma, translated
-//                                 to Python; `repl`: display every expression
-//                                 statement, as at a prompt, not just the last)
+// In:  {id, code, sage?, magma?, repl?, clock?, forget?}  run code (`sage`: Sage
+//                                 mode, with sage_all imported; `magma`: Magma,
+//                                 translated to Python; `repl`: display every
+//                                 expression statement, as at a prompt, not just
+//                                 the last; `forget`: global names to delete
+//                                 first, the reactive notebook's invalidation)
 //      {id, interact, values}     an @interact control changed: rerun it
 //      {id, check, sage?}         -> {id, more}: is this input incomplete?
 //      {id, complete}             -> {id, matches, prefix}: Tab completion
@@ -15,7 +17,8 @@
 //      {id, target, display: {mime: data}}   rich output (Jupyter MIME bundle)
 //      {id, target, interact: spec}           controls to draw
 //      {id, target, clear: true}              clear_output()
-//      then {id, done, ms} (or {id, skipped} for a run queued before an interrupt).
+//      then {id, done, ms, error?} (or {id, skipped} for a run queued before an
+//      interrupt); `error`: the code raised (a traceback was written).
 // With RunHooks (the browser worker, for TimeTravel replay): a run's `clock`
 // is the clock values to replay, and `done` also has the run's clock record
 // (web/replay-env.ts ClockRecord).
@@ -119,16 +122,19 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     ...Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k) => k.split("/")[0].replace(/\.py$/, "")),
   ];
 
-  // Run Python, reporting an exception as a traceback on stderr.
-  function run(src: string, ns: any, mode: string, filename: string, o: { sage?: boolean } = {}) {
+  // Run Python, reporting an exception as a traceback on stderr; false if it raised.
+  function run(src: string, ns: any, mode: string, filename: string, o: { sage?: boolean } = {}): boolean {
     try {
       R.loader.exec(src, ns, mode, filename, o);
+      return true;
     } catch (e) {
       const exc = R.toPyExc(e);
       flush();
       target = null;
       // exit() can't leave a notebook: it just ends the cell.
-      if (!R.typeOf(exc).$mro.includes(R.T.SystemExit)) R.stderr.write(R.formatException(exc));
+      if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return true;
+      R.stderr.write(R.formatException(exc));
+      return false;
     }
   }
 
@@ -160,8 +166,13 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     post({ id, start: true });
     const t0 = performance.now();
     opts.runs?.begin(m);
+    let ok = true;
+    if (Array.isArray(m.forget) && m.forget.length) {
+      const names = m.forget.filter((n: unknown) => typeof n === "string" && /^[A-Za-z_]\w*$/.test(n));
+      run(`import __main__ as _m\nfor _k in ${JSON.stringify(names)}: _m.__dict__.pop(_k, None)\ndel _m, _k\n`, host, "exec", "<forget>");
+    }
     if (m.interact !== undefined) {
-      run(`import _interact\n_interact._update(${Number(m.interact)}, ${JSON.stringify(JSON.stringify(m.values))})\n`, host, "exec", "<interact>");
+      ok = run(`import _interact\n_interact._update(${Number(m.interact)}, ${JSON.stringify(JSON.stringify(m.values))})\n`, host, "exec", "<interact>");
     } else {
       if (m.sage && !sageLoaded) {
         run("from sage_all import *\n", main, "exec", "<sage>");
@@ -177,17 +188,18 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
           const line = m.code.split("\n")[e.line - 1] ?? "";
           R.stderr.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (line ${e.line})\n`);
         }
-        if (py !== null) run(py, main, "exec", "<cell>");
+        if (py !== null) ok = run(py, main, "exec", "<cell>");
+        else ok = false;
       } else {
         // "cell" mode: the value of a final expression is displayed, as in Jupyter.
-        run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage });
+        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }
     flush();
     target = null;
     const more = opts.runs?.end() ?? {};
-    post({ id, done: true, ms: performance.now() - t0, ...more });
+    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...more });
     current = null;
   }
 

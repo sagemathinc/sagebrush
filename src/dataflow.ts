@@ -10,6 +10,8 @@
 // (annotations, import data, closures' required refs) are not.  The real
 // marimo is the oracle: test/dataflow.test.ts compares the two.
 import { parse } from "../pyparse/src/index";
+import { preparse } from "./sagepre";
+import { magmaToPython } from "./magma";
 
 type Node = { _type: string; [field: string]: any };
 
@@ -38,7 +40,9 @@ interface RefData {
 /** marimo's is_local: `_x` (not `__x`), and `__` itself. */
 export const isLocal = (name: string): boolean => name === "__" || (name.startsWith("_") && !name.startsWith("__"));
 
-export class ImportStarError extends Error {}
+export class ImportStarError extends Error {
+  override name = "ImportStarError";
+}
 
 export interface CellAnalysis {
   /** global names the cell defines (not `_`-local ones) */
@@ -290,16 +294,44 @@ class Visitor {
   }
 }
 
-/** A cell's definitions, references and deleted references, as marimo's compile_cell computes them. */
-export function analyzeCell(source: string, cellId = "c"): CellAnalysis {
+/**
+ * A cell's definitions, references and deleted references, as marimo's
+ * compile_cell computes them.  Sage cells are analyzed after preparsing, and
+ * Magma cells after translation to Python, as they run.  In Sage, a top-level
+ * `var('x y')` (or `function('f')`) defines its names, as running it does.
+ */
+export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" } = {}): CellAnalysis {
   // (marimo: some frontends send non-breaking spaces)
-  const tree = parse(source.replaceAll(" ", " "), "exec") as Node;
+  source = source.replaceAll(" ", " ");
+  if (opts.mode === "sage") source = preparse(source);
+  // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)
+  else if (opts.mode === "magma") source = magmaToPython(source, "<cell>").replace(/^from _magma import \*\n/, "");
+  const tree = parse(source, "exec") as Node;
+  const injected = opts.mode === "sage" ? sageInjected(tree) : [];
   const v = new Visitor("cell_" + cellId);
   v.visit(tree);
   const top = v.blocks[0];
+  const defs = new Set([...top.defs].filter((n) => !isLocal(n)));
+  for (const n of injected) {
+    defs.add(n);
+  }
   return {
-    defs: new Set([...top.defs].filter((n) => !isLocal(n))),
-    refs: new Set(v.refs.keys()),
+    defs,
+    refs: new Set([...v.refs.keys()].filter((n) => !injected.includes(n))),
     deleted: new Set([...v.refs].filter(([, rs]) => rs.some((r) => r.deleted)).map(([n]) => n)),
   };
+}
+
+// The names a Sage cell's top-level `var("x y")`, `var("x", "y")` or
+// `function("f")` statements bind in the notebook's namespace.
+function sageInjected(tree: Node): string[] {
+  const out: string[] = [];
+  for (const st of tree.body) {
+    const call = st._type === "Expr" ? st.value : null;
+    if (call?._type !== "Call" || call.func._type !== "Name" || !["var", "function"].includes(call.func.id)) continue;
+    for (const a of call.args) {
+      if (a._type === "Constant" && typeof a.value === "string") out.push(...a.value.split(/[\s,]+/).filter((n: string) => /^[A-Za-z_]\w*$/.test(n)));
+    }
+  }
+  return out;
 }
