@@ -335,6 +335,12 @@ pub struct Sol {
 }
 
 thread_local! {
+    /// Candidates obtained by squaring away radicals: not solutions by
+    /// construction, so their residual must vanish exactly (else
+    /// "residual == 0" stays as a condition).
+    static VERIFY: std::cell::RefCell<Vec<Expr>> = const { std::cell::RefCell::new(vec![]) };
+    /// Whether the last accepted residual was zero only numerically.
+    static NUMERIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The names in use (the equation's symbols and the new ones so far).
     static USED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(vec![]) };
 }
@@ -515,6 +521,13 @@ fn roots_c(n: &Expr, x: &str) -> Vec<Sol> {
         }
         return vec![];
     }
+    // a factor common to every term (e^(t x) in e^(t x) (t x^2 + ...)):
+    // its own roots and those of the rest (factor() is for polynomials)
+    if let Some((common, rest)) = common_factor(n, x) {
+        let mut out = roots_c(&common, x);
+        out.extend(roots_c(&rest, x));
+        return out;
+    }
     let f = crate::simplify::factor(n);
     if let Kind::Mul(v) = &f.kind {
         let mut out = vec![];
@@ -539,7 +552,121 @@ fn roots_c(n: &Expr, x: &str) -> Vec<Sol> {
             return poly_roots_c(&c, &f, x);
         }
     }
+    // a single term in x (k g(u) + c) is inverted exactly, with its
+    // conditions; squaring radicals is for sums of several (sqrt(x) == x - 2)
+    let dep_terms = match &f.kind {
+        Kind::Add(v) => v.iter().filter(|t| depends(t, x)).count(),
+        _ => 1,
+    };
+    if dep_terms > 1 {
+        if let Some(sols) = radical_roots(&f, x) {
+            return sols;
+        }
+    }
     invert_c(&f, x)
+}
+
+fn is_half(k: &Expr) -> bool {
+    k.as_num().and_then(|q| q.as_rat()).map_or(false, |q| q.denom() == &sagebrush_bigint::BigInt::from(2))
+}
+
+/// A square root sqrt(b) (b^(m/2), m odd) of an expression b in x.
+fn find_sqrt(e: &Expr, x: &str) -> Option<Expr> {
+    if let Kind::Pow(b, k) = &e.kind {
+        if depends(b, x) && is_half(k) {
+            return Some(b.clone());
+        }
+    }
+    e.children().iter().find_map(|c| find_sqrt(c, x))
+}
+
+/// e with b^(m/2) replaced by r^m.
+fn replace_sqrt(e: &Expr, b: &Expr, r: &Expr) -> Expr {
+    if let Kind::Pow(bb, k) = &e.kind {
+        if bb == b && is_half(k) {
+            return pow(r, &mul2(&int(2), k));
+        }
+    }
+    let ch = e.children();
+    if ch.is_empty() {
+        return e.clone();
+    }
+    rebuild(e, ch.iter().map(|c| replace_sqrt(c, b, r)).collect())
+}
+
+/// Equations with square roots of x (sqrt(x) == x - 2, sqrt(x + 1) -
+/// sqrt(x) == 1, a recurring complaint about Sage's solve): one radical
+/// r = sqrt(b) at a time, f = A + B r = 0 implies A^2 - B^2 b = 0; the
+/// roots of the result are candidates, each checked in the original
+/// equation by solve1_full (squaring adds extraneous ones).  None if f has
+/// no such radical, or more than four.
+fn radical_roots(f: &Expr, x: &str) -> Option<Vec<Sol>> {
+    let mut g = f.clone();
+    let mut steps = 0;
+    while let Some(b) = find_sqrt(&g, x) {
+        steps += 1;
+        if steps > 4 {
+            return None;
+        }
+        let rname = fresh("_rad");
+        let r = sym(&rname);
+        let h = crate::expand::expand(&replace_sqrt(&g, &b, &r));
+        let (hn, _) = together(&h);
+        let hn = crate::expand::expand(&hn);
+        let c = coeffs(&hn, &rname)?;
+        // reduce r^2 = b: A from the even powers, B from the odd ones
+        let (mut a, mut bb) = (zero(), zero());
+        for (i, ci) in c.iter().enumerate() {
+            let t = mul2(ci, &pow(&b, &int((i / 2) as i64)));
+            if i % 2 == 0 {
+                a = add2(&a, &t);
+            } else {
+                bb = add2(&bb, &t);
+            }
+        }
+        g = if bb.is_zero() || crate::simplify::simplify_full(&bb).is_zero() {
+            crate::expand::expand(&a)
+        } else {
+            crate::expand::expand(&sub(&mul2(&a, &a), &mul(vec![bb.clone(), bb, b.clone()])))
+        };
+        if g.is_zero() || depends(&g, &rname) {
+            return None; // an identity after squaring, or not reduced
+        }
+    }
+    if steps == 0 {
+        return None;
+    }
+    let sols = roots_c(&g, x);
+    VERIFY.with(|v| v.borrow_mut().extend(sols.iter().map(|s| s.val.clone())));
+    Some(sols)
+}
+
+/// n = common * rest for a factor (a power b^k, k > 0, of a non-polynomial
+/// b in x, or e^u) dividing every term of the sum n.
+fn common_factor(n: &Expr, x: &str) -> Option<(Expr, Expr)> {
+    let Kind::Add(terms) = &n.kind else { return None };
+    let factors = |t: &Expr| -> Vec<Expr> {
+        match &t.kind {
+            Kind::Mul(v) => v.clone(),
+            _ => vec![t.clone()],
+        }
+    };
+    let first = factors(&terms[0]);
+    for f in first {
+        if !depends(&f, x) {
+            continue;
+        }
+        let (b, k) = base_exp(&f);
+        let exp_like = b.is_const(Const::E);
+        if !exp_like && (k.as_num().map_or(true, |k| !k.is_positive()) || coeffs(&b, x).is_some()) {
+            continue; // polynomials are factor()'s
+        }
+        if terms[1..].iter().all(|t| factors(t).contains(&f)) {
+            let rest = crate::expand::expand(&add(terms.iter().map(|t| div(t, &f)).collect()));
+            return Some((f, rest));
+        }
+    }
+    None
 }
 
 /// The roots of the polynomial c[0] + c[1] x + ...: generic ones while the
@@ -850,6 +977,67 @@ fn invert_c(e: &Expr, x: &str) -> Vec<Sol> {
     out
 }
 
+/// A condition in one integer parameter n alone, where n occurs only in
+/// arguments q pi n + c (q rational) of periodic trigonometric functions:
+/// the condition is periodic in n, so it is decided by its values over one
+/// period (tan(x) == 1 gave pi*n1 + pi/4 "if cos(pi*n1 + 1/4*pi) != 0",
+/// which holds for every integer n1).
+fn periodic_decide(c: &Expr, params: &[String]) -> Option<bool> {
+    let fs = free_symbols(c);
+    if fs.len() != 1 || !params.contains(&fs[0]) {
+        return None;
+    }
+    let n = fs[0].clone();
+    // the period in n, or None if n occurs elsewhere
+    fn period(e: &Expr, n: &str) -> Option<u64> {
+        if !depends(e, n) {
+            return Some(1);
+        }
+        if let Kind::Fun(f @ (Fun::Sin | Fun::Cos | Fun::Tan | Fun::Cot | Fun::Sec | Fun::Csc), a) = &e.kind {
+            let cs = coeffs(&crate::expand::expand(&a[0]), n)?;
+            if cs.len() != 2 || depends(&cs[0], n) {
+                return None;
+            }
+            // cs[1] = q pi
+            let q = crate::simplify::simplify_rational(&div(&cs[1], &pi()));
+            let q = q.as_num()?.as_rat()?.clone();
+            if q.is_zero() {
+                return Some(1);
+            }
+            let b = q.denom().to_u64()?;
+            let m = if matches!(f, Fun::Tan | Fun::Cot) { b } else { 2 * b };
+            return (m <= 64).then_some(m);
+        }
+        if matches!(e.kind, Kind::Sym(_)) {
+            return None; // n itself, outside a trigonometric argument
+        }
+        let mut p = 1u64;
+        for c in e.children() {
+            let q = period(&c, n)?;
+            p = p / gcd_u64(p, q) * q;
+            if p > 64 {
+                return None;
+            }
+        }
+        Some(p)
+    }
+    fn gcd_u64(a: u64, b: u64) -> u64 {
+        if b == 0 { a } else { gcd_u64(b, a % b) }
+    }
+    use num_traits::ToPrimitive;
+    let p = period(c, &n)?;
+    let mut all = None;
+    for k in 0..p as i64 {
+        let v = decide(&subs(c, &[(sym(&n), int(k))]))?;
+        match all {
+            None => all = Some(v),
+            Some(w) if w != v => return None,
+            _ => {}
+        }
+    }
+    all
+}
+
 /// A relation between constants decided: Some(true/false), or None
 /// (exactly, or by an enclosure separating the sides).
 pub fn decide(c: &Expr) -> Option<bool> {
@@ -997,7 +1185,11 @@ fn holds_at(z: &Expr, xs: &Expr, s: &Sol, sub0: &[(Expr, Expr)]) -> Option<bool>
                 // an enclosure excluding 0 proves the residual nonzero; one
                 // holding 0 is agreement (see solve1_full: the inversion,
                 // not this test, is why a candidate is a solution)
-                return Some(re.contains_zero() && im.contains_zero());
+                let z0 = re.contains_zero() && im.contains_zero();
+                if z0 {
+                    NUMERIC.with(|n| n.set(true));
+                }
+                return Some(z0);
             }
         }
         let terms = match &z.kind {
@@ -1011,7 +1203,11 @@ fn holds_at(z: &Expr, xs: &Expr, s: &Sol, sub0: &[(Expr, Expr)]) -> Option<bool>
         // dropped (CSOL-F6)
         match crate::eval::to_c64(&sv) {
             Some((re, im)) if re.is_finite() && im.is_finite() && size.is_finite() && size > 0.0 => {
-                Some(re.hypot(im) <= 1e-12 * size)
+                let ok = re.hypot(im) <= 1e-12 * size;
+                if ok {
+                    NUMERIC.with(|n| n.set(true));
+                }
+                Some(ok)
             }
             _ => None,
         }
@@ -1120,6 +1316,7 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
         return out;
     }
     UNSOLVED.with(|u| u.borrow_mut().clear());
+    VERIFY.with(|v| v.borrow_mut().clear());
     let mut sols = roots_c(&n, x);
     let rest: Vec<Expr> = UNSOLVED.with(|u| std::mem::take(&mut *u.borrow_mut()));
     let mut out = vec![];
@@ -1139,19 +1336,57 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
         // separating enclosures, or stay attached.  The residual test
         // filters candidates, it does not certify them: agreement in numbers
         // never admits a value the inversion did not produce.)
-        match holds(&n, &xs, &s) {
-            Some(true) => {}
+        NUMERIC.with(|n| n.set(false));
+        let verdict = holds(&n, &xs, &s);
+        match verdict {
+            Some(true) => {
+                // a candidate from squaring, accepted by numerical agreement
+                // only: exact under its residual vanishing, kept as a
+                // condition
+                if NUMERIC.with(|n| n.get()) && VERIFY.with(|v| v.borrow().contains(&s.val)) {
+                    let r = crate::simplify::simplify_full(&subs(&z, &[(xs.clone(), s.val.clone())]));
+                    s.cond.push(relation(Rel::Eq, &r, &zero()));
+                }
+            }
             Some(false) => continue,
             None => {
                 undecided = true;
                 continue;
             }
         }
-        // decided conditions: dropped if true, the solution if one is false
+        // decided conditions: dropped if true, the solution if one is false;
+        // a condition fixing a symbol (t == 0) is substituted into the others
+        // (t == 0 and t == 2 is no solution)
+        let mut fixed: Vec<(Expr, Expr)> = vec![];
         let mut ok = true;
+        for c in &s.cond {
+            if let Kind::Rel(Rel::Eq, l, r) = &c.kind {
+                if l.as_sym().is_some() && free_symbols(r).is_empty() {
+                    if let Some((_, r0)) = fixed.iter().find(|(l0, _)| l0 == l) {
+                        if decide(&relation(Rel::Eq, r0, r)) == Some(false) {
+                            ok = false;
+                        }
+                    } else {
+                        fixed.push((l.clone(), r.clone()));
+                    }
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        let s_cond: Vec<Expr> = s.cond.iter().map(|c| {
+            if let Kind::Rel(Rel::Eq, l, r) = &c.kind {
+                if l.as_sym().is_some() && free_symbols(r).is_empty() {
+                    return c.clone();
+                }
+            }
+            if fixed.is_empty() { c.clone() } else { crate::simplify::simplify_rational(&subs(c, &fixed)) }
+        }).collect();
         let mut cond = vec![];
-        for c in s.cond {
-            match decide(&c) {
+        for c in s_cond {
+            let verdict = decide(&c).or_else(|| periodic_decide(&c, &s.params));
+            match verdict {
                 Some(true) => {}
                 Some(false) => ok = false,
                 None => {

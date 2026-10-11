@@ -579,3 +579,12 @@ for _n in (3, 4, 5):
     _C1, _C2 = CyclotomicField(_n, "z"), CyclotomicField(_n, "z"); assert _C1 is _C2 and _C1.ideal(2) == _C2.ideal(2) and _C1(_C2.gen()) == _C1.gen()  # R2-NFD-F3
 _px = polygen(QQ, "x"); assert CyclotomicField(3, "z") != NumberField(_px**2 + _px + 1, "z")
 print("cyclotomic unique ok")
+
+# recurring complaints about Sage's solve (sage-support): radicals, systems, inequalities, common factors, periodic conditions
+_Y = SR.var("y"); _t = SR.var("t")
+assert str(solve(sqrt(_Y) == _Y - 2, _Y)) == "[y == 4]" and str(solve(sqrt(_Y + 1) - sqrt(_Y) == 1, _Y)) == "[y == 0]"
+assert str(solve([sqrt(_xs) == 1, _xs == _Y], _xs, _Y)) == "[[x == 1, y == 1]]" and len(solve(_xs * _Y == 0, [_xs, _Y])) == 2
+assert len(solve([_xs**2 + _Y**2 == 1, _Y == _xs], _xs, _Y)) == 2 and str(solve([_xs**2 == 4, _xs > 0], _xs)) == "[[x == 2]]"
+assert str(solve(tan(_xs) == 1, _xs)) == "[x == pi*n1 + 1/4*pi for integer n1]"
+assert len(solve(diff(exp(_xs * _t) * (_xs - 1)**2, _xs) == 0, _xs)) == 2
+print("solve complaints ok")
