@@ -192,6 +192,7 @@ fn poly_roots(c: &[Expr]) -> Vec<Expr> {
                 crate::expand::expand(&div(&add2(&neg(b), &sq), &two_a)),
             ]
         }
+        4 if cubic_roots(c).is_some() => cubic_roots(c).unwrap(),
         _ => {
             // x^n = r (binomial): r^(1/n) e^(2 pi i k/n), k = 0, ..., n - 1
             let n = c.len() - 1;
@@ -202,9 +203,139 @@ fn poly_roots(c: &[Expr]) -> Vec<Expr> {
                     .map(|k| if k == 0 { root.clone() } else { mul2(&root, &exp(&mul(vec![rat(2 * k, n as i64), pi(), num(crate::num::Num::i())]))) })
                     .collect();
             }
+            // a cyclotomic polynomial (x^5 == 1 left x^4 + x^3 + x^2 + x + 1
+            // unsolved): the primitive n-th roots of unity
+            if let Some(n) = cyclotomic_index(c) {
+                let h = n as i64;
+                return (-(h - 1) / 2..=h / 2)
+                    .filter(|&k| gcd_i64(k.abs(), h) == 1)
+                    .map(|k| if h <= 2 { int(if k == 0 { 1 } else { -1 }) } else { exp(&mul(vec![rat(2 * k, h), pi(), num(crate::num::Num::i())])) })
+                    .collect();
+            }
             not_solved()
         }
     }
+}
+
+/// The roots of a cubic with rational coefficients (one without a rational
+/// root: those factor()), for x = t - b/3, t^3 + p t + q = 0, D = q^2/4 +
+/// p^3/27: three real roots for D < 0, in Viete's trigonometric form t =
+/// 2 sqrt(-p/3) cos(theta - 2 pi k/3), theta = acos(3 q/(2 p) sqrt(-3/p))/3
+/// (x^3 - 3 x + 1: 2 cos(2/9 pi), ...; Cardano's formula needs complex cube
+/// roots there, the casus irreducibilis); for D > 0 Cardano's with real
+/// cube roots A, B: A + B and -(A + B)/2 +- i sqrt(3)/2 (A - B).
+fn cubic_roots(c: &[Expr]) -> Option<Vec<Expr>> {
+    let q_of = |e: &Expr| e.as_num().and_then(|n| n.as_rat()).cloned();
+    let (a3, a2, a1, a0) = (q_of(&c[3])?, q_of(&c[2])?, q_of(&c[1])?, q_of(&c[0])?);
+    if a3.is_zero() {
+        return None;
+    }
+    let (b, cc, d) = (&a2 / &a3, &a1 / &a3, &a0 / &a3);
+    let three = Q::from_integer(3.into());
+    let p = &cc - &b * &b / &three;
+    let q = Q::from_integer(2.into()) * &b * &b * &b / Q::from_integer(27.into()) - &b * &cc / &three + &d;
+    let disc = &q * &q / Q::from_integer(4.into()) + &p * &p * &p / Q::from_integer(27.into());
+    let qn = |r: &Q| num(crate::num::Num::rat(r.clone()));
+    let shift = qn(&(-&b / &three));
+    if disc.is_zero() {
+        return None; // a repeated root: rational, found by factor()
+    }
+    use num_traits::Signed;
+    if disc.is_negative() {
+        let r = mul2(&int(2), &sqrt(&qn(&(-&p / &three))));
+        let arg = mul2(&qn(&(&three * &q / (Q::from_integer(2.into()) * &p))), &sqrt(&qn(&(-&three / &p))));
+        let theta = div(&fun1(Fun::Acos, &arg), &int(3));
+        // cos of a rational multiple of pi taken in [0, pi] (cos is even,
+        // 2 pi periodic): 2 cos(2/9 pi), not 2 cos(-10/9 pi)
+        let reduced = |t: Expr| -> Expr {
+            let Some(r) = simplify_rational(&div(&t, &pi())).as_num().and_then(|n| n.as_rat()).cloned() else { return cos(&t) };
+            let two = Q::from_integer(2.into());
+            let mut m = &r - (&r / &two).floor() * &two;
+            if m > Q::one() {
+                m = &two - m;
+            }
+            cos(&mul2(&qn(&m), &pi()))
+        };
+        let mut out: Vec<Expr> = (0..3)
+            .map(|k| crate::expand::expand(&add2(&shift, &mul2(&r, &reduced(sub(&theta, &mul(vec![rat(2 * k, 3), pi()])))))))
+            .collect();
+        sort_roots(&mut out);
+        return Some(out);
+    }
+    // real cube roots of u = -q/2 +- sqrt(D)
+    let sd = sqrt(&qn(&disc));
+    let cbrt = |u: Expr| -> Option<Expr> {
+        let (re, _) = crate::domain::complex_encl(&u)?;
+        if re.contains_zero() {
+            return None;
+        }
+        Some(if re.0 > 0.0 { pow(&u, &rat(1, 3)) } else { neg(&pow(&neg(&u), &rat(1, 3))) })
+    };
+    let half_q = qn(&(-&q / Q::from_integer(2.into())));
+    let a = cbrt(add2(&half_q, &sd))?;
+    let bb = cbrt(sub(&half_q, &sd))?;
+    let s_ = add2(&a, &bb);
+    let dlt = mul(vec![sub(&a, &bb), sqrt(&int(3)), rat(1, 2), num(crate::num::Num::i())]);
+    let mid = sub(&shift, &div(&s_, &int(2)));
+    let mut out = vec![
+        crate::expand::expand(&add2(&shift, &s_)),
+        crate::expand::expand(&sub(&mid, &dlt)),
+        crate::expand::expand(&add2(&mid, &dlt)),
+    ];
+    sort_roots(&mut out);
+    Some(out)
+}
+
+fn gcd_i64(a: i64, b: i64) -> i64 {
+    if b == 0 { a } else { gcd_i64(b, a % b) }
+}
+
+/// The cyclotomic polynomial Phi_n as integer coefficients (constant first),
+/// from x^n - 1 = prod over d | n of Phi_d; None past i128.
+fn cyclotomic(n: usize) -> Option<Vec<i128>> {
+    let mut p = vec![0i128; n + 1];
+    p[0] = -1;
+    p[n] = 1;
+    for d in 1..n {
+        if n % d == 0 {
+            let q = cyclotomic(d)?;
+            // exact division by the monic q
+            let mut r = p.clone();
+            let mut out = vec![0i128; r.len() - q.len() + 1];
+            for i in (0..out.len()).rev() {
+                let c = r[i + q.len() - 1];
+                out[i] = c;
+                for (j, qj) in q.iter().enumerate() {
+                    r[i + j] = r[i + j].checked_sub(c.checked_mul(*qj)?)?;
+                }
+            }
+            p = out;
+        }
+    }
+    Some(p)
+}
+
+/// n when the polynomial c (constant first) is a multiple of Phi_n with
+/// n > 2 (degree phi(n) <= 48).
+fn cyclotomic_index(c: &[Expr]) -> Option<usize> {
+    let d = c.len() - 1;
+    if !(2..=48).contains(&d) {
+        return None;
+    }
+    let lead = c[d].as_num()?.as_rat()?.clone();
+    let q: Vec<Q> = c.iter().map(|a| a.as_num().and_then(|n| n.as_rat()).map(|r| r / &lead)).collect::<Option<_>>()?;
+    let phi = |n: usize| (1..=n).filter(|&k| gcd_i64(k as i64, n as i64) == 1).count();
+    // phi(n) >= sqrt(n / 2), so n <= 2 d^2
+    for n in 3..=2 * d * d {
+        if phi(n) != d {
+            continue;
+        }
+        let Some(f) = cyclotomic(n) else { continue };
+        if f.iter().zip(&q).all(|(a, b)| Q::from_integer((*a).into()) == *b) {
+            return Some(n);
+        }
+    }
+    None
 }
 
 fn not_solved() -> Vec<Expr> {
@@ -289,7 +420,15 @@ fn linear_system(eqs: &[Expr], vars: &[String]) -> Option<Vec<Expr>> {
     let mut r = 0;
     let mut piv = vec![];
     for col in 0..n {
-        let Some(p) = (r..rows.len()).find(|&i| !simplify_rational(&rows[i][col]).is_zero()) else { continue };
+        // a pivot proved nonzero; a symbolic one (a x + y == 1) would be
+        // divided by unconditionally, so such systems go to the general
+        // solver, which splits the cases (a == 0 or not)
+        let Some(p) = (r..rows.len()).find(|&i| !simplify_rational(&rows[i][col]).is_zero() && !maybe_zero(&rows[i][col])) else {
+            if (r..rows.len()).any(|i| !simplify_rational(&rows[i][col]).is_zero()) {
+                return None;
+            }
+            continue;
+        };
         rows.swap(r, p);
         let inv = recip(&rows[r][col]);
         rows[r] = rows[r].iter().map(|v| simplify_rational(&mul2(v, &inv))).collect();
@@ -304,9 +443,14 @@ fn linear_system(eqs: &[Expr], vars: &[String]) -> Option<Vec<Expr>> {
         piv.push(col);
         r += 1;
     }
-    // inconsistent rows: no solution
+    // inconsistent rows: no solution; 0 == c + d is a condition on the
+    // parameters, for the general solver (Sage, and this, gave [] for
+    // [a + b == 1, a == b, c + d == 0] in a, b: ask.sagemath 10028)
     for row in &rows[r..] {
         if !row[n].is_zero() {
+            if maybe_zero(&row[n]) {
+                return None;
+            }
             return Some(vec![]);
         }
     }
@@ -367,7 +511,16 @@ fn plain(val: Expr) -> Sol {
 /// 0) may vanish: dividing by it was the review's CSOL-F13.
 fn maybe_zero(e: &Expr) -> bool {
     let s = crate::simplify::simplify_full(e);
-    if s.is_zero() || !free_symbols(&s).is_empty() {
+    if s.is_zero() {
+        return true;
+    }
+    // e^u never vanishes, nor does a product of such factors and nonzero
+    // numbers (log(x) - log(x + 1) == a had a branch where e^a == 0)
+    let never = |f: &Expr| matches!(&f.kind, Kind::Pow(b, _) if b.is_const(Const::E)) || f.as_num().map_or(false, |n| n.is_exact() && !n.is_zero());
+    if never(&s) || matches!(&s.kind, Kind::Mul(v) if v.iter().all(never)) {
+        return false;
+    }
+    if !free_symbols(&s).is_empty() {
         return true;
     }
     if let Some(n) = s.as_num() {
@@ -578,11 +731,51 @@ fn roots_c(n: &Expr, x: &str) -> Vec<Sol> {
         return sols;
     }
     if dep_terms > 1 {
+        if let Some(sols) = log_roots(&f, x) {
+            return sols;
+        }
         if let Some(sols) = radical_roots(&f, x) {
             return sols;
         }
     }
     invert_c(&f, x)
+}
+
+/// Sums of logarithms, k1 log(u1) + k2 log(u2) + ... + C = 0 with integers
+/// k (log(x) + log(x - 1) == log(2), unsolved by Sage): u1^k1 u2^k2 ... e^C
+/// = 1 holds at every solution, so its roots are the candidates, each
+/// checked in the original equation (log a + log b = log(a b) only up to
+/// 2 pi i: x = -1 is no solution there).
+fn log_roots(f: &Expr, x: &str) -> Option<Vec<Sol>> {
+    let Kind::Add(v) = &f.kind else { return None };
+    let mut prod = vec![];
+    let mut c = vec![];
+    let mut logs = 0;
+    for t in v {
+        if !depends(t, x) {
+            c.push(t.clone());
+            continue;
+        }
+        let (k, g) = split_coeff(t);
+        let Kind::Fun(Fun::Log, a) = &g.kind else { return None };
+        let k = k.as_rat().filter(|k| k.is_integer() && !k.is_zero())?.to_integer();
+        use num_traits::ToPrimitive;
+        let k = k.to_i64().filter(|k| k.unsigned_abs() <= 16)?;
+        prod.push(pow(&a[0], &int(k)));
+        logs += 1;
+    }
+    if logs < 2 {
+        return None;
+    }
+    prod.push(exp(&add(c)));
+    let (n, _) = together(&sub(&mul(prod), &int(1)));
+    let n = crate::expand::expand(&n);
+    if n.is_zero() || !depends(&n, x) {
+        return None;
+    }
+    let sols = roots_c(&n, x);
+    VERIFY.with(|v| v.borrow_mut().extend(sols.iter().map(|s| (s.val.clone(), None))));
+    Some(sols)
 }
 
 /// The trigonometric functions of x in e (sin(a) with a depending on x).
@@ -792,7 +985,7 @@ fn trig_poly(f: &Expr, x: &str) -> Option<Vec<Sol>> {
     for (k, q, off) in &args {
         let m = (q / &g).to_integer();
         use num_traits::ToPrimitive;
-        let m = m.to_i64().filter(|m| m.abs() <= 12)?;
+        let m = m.to_i64().filter(|m| m.unsigned_abs() <= 12)?;
         let (sk, ck) = multiple_angle(m, &s, &c);
         let (co, so) = (cos(off), sin(off));
         let v = match &k.kind {
@@ -1450,6 +1643,42 @@ fn periodic_decide(c: &Expr, params: &[String]) -> Option<bool> {
     all
 }
 
+/// Whether k1 log(q1) + k2 log(q2) + ... (rational k, positive rational q)
+/// is 0: exactly when q1^k1 q2^k2 ... = 1 (2 log(3) - log(9), left
+/// undecided by the simplifier); None for any other expression.
+fn log_sum_zero(e: &Expr) -> Option<bool> {
+    use num_integer::Integer;
+    use num_traits::{Signed, ToPrimitive};
+    let ex = crate::expand::expand(e);
+    let terms = match &ex.kind {
+        Kind::Add(v) => v.clone(),
+        _ => vec![ex.clone()],
+    };
+    let mut parts = vec![];
+    for t in &terms {
+        let (k, g) = split_coeff(t);
+        let k = k.as_rat()?.clone();
+        let Kind::Fun(Fun::Log, a) = &g.kind else { return None };
+        let q = a[0].as_num()?.as_rat()?.clone();
+        if !q.is_positive() {
+            return None;
+        }
+        parts.push((k, q));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let den = parts.iter().fold(sagebrush_bigint::BigInt::from(1), |l, (k, _)| l.lcm(k.denom()));
+    let mut prod = Q::one();
+    for (k, q) in parts {
+        let m = (k * Q::from_integer(den.clone())).to_integer().to_i64().filter(|m| m.unsigned_abs() <= 256)?;
+        for _ in 0..m.unsigned_abs() {
+            prod = if m > 0 { prod * &q } else { prod / &q };
+        }
+    }
+    Some(prod.is_one())
+}
+
 /// A relation between constants decided: Some(true/false), or None
 /// (exactly, or by an enclosure separating the sides).
 pub fn decide(c: &Expr) -> Option<bool> {
@@ -1500,6 +1729,9 @@ pub fn decide(c: &Expr) -> Option<bool> {
             Rel::Gt => q.is_positive(),
             Rel::Ge => !q.is_negative(),
         });
+    }
+    if log_sum_zero(&d) == Some(true) {
+        return Some(matches!(r, Rel::Eq | Rel::Le | Rel::Ge));
     }
     let (re, im) = crate::domain::complex_encl(&d)?;
     if re.contains_zero() && im.contains_zero() {
@@ -1573,7 +1805,7 @@ fn holds_at(z: &Expr, xs: &Expr, s: &Sol, sub0: &[(Expr, Expr)]) -> Option<bool>
             return Some(true);
         }
         let sv = crate::simplify::simplify_full(&v);
-        if sv.is_zero() {
+        if sv.is_zero() || log_sum_zero(&sv) == Some(true) {
             return Some(true);
         }
         // an exact number: zero or not, exactly (2 10^-400 is not 0, though
