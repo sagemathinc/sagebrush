@@ -2176,7 +2176,6 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
         }
     }
     merge_families(&mut out, x);
-    renumber_params(&mut out, &z, x);
     // the unconditional ones first, sorted as solve1 sorts
     out.sort_by(|a, b| {
         a.1.is_empty().cmp(&b.1.is_empty()).reverse().then_with(|| {
@@ -2191,6 +2190,8 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
             }
         })
     });
+    // (numbered in the order shown)
+    renumber_params(&mut out, &z, x);
     // an unresolved piece that is a factor of the numerator stands for
     // itself; one met inside an inversion (exp(x/(x+1)) == 1: x/(x+1) ==
     // 2 pi i n1) would lose that inversion's conditions and integer
