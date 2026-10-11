@@ -47,3 +47,16 @@ test("a Sage cell defining x by var('x') alone", () => {
   const cells = codes.map((code, i) => { const a = analyzeCell(code, "c", { mode: "sage" }); return { id: `c${i}`, code, defines: a.defs.has("x"), reads: a.refs.has("x") }; });
   assert.deepEqual(Object.fromEntries(renameRedefinitions(cells, "x", new Set(["x"]), "sage", "\u02b9")!), { c1: 'x\u02b92 = SR.var("x")\nprint(x\u02b92^2)', c2: "print(x\u02b92)" });
 });
+
+test("Sage's K.<a> = ... (the preparser adds an occurrence of K)", () => {
+  const codes = ["K.<a> = NumberField(x^3 - 11)\nK, K.discriminant()", "K.<a> = NumberField(x^7 - 11)\nK, K.discriminant(), a^7", "K", "print(a, K.degree())"];
+  const cells = (name: string) => codes.map((code, i) => { const an = analyzeCell(code, "c", { mode: "sage" }); return { id: `c${i}`, code, defines: an.defs.has(name), reads: an.refs.has(name) }; });
+  assert.deepEqual(Object.fromEntries(renameRedefinitions(cells("K"), "K", new Set(["K", "a"]), "sage", "\u02b9")!), {
+    c1: "K\u02b92.<a> = NumberField(x^7 - 11)\nK\u02b92, K\u02b92.discriminant(), a^7", c2: "K\u02b92", c3: "print(a, K\u02b92.degree())",
+  });
+  assert.deepEqual(Object.fromEntries(renameRedefinitions(cells("a"), "a", new Set(["K", "a"]), "sage", "\u02b9")!), {
+    c1: "K.<a\u02b92> = NumberField(x^7 - 11)\nK, K.discriminant(), a\u02b92^7", c3: "print(a\u02b92, K.degree())",
+  });
+  // a keyword argument is not the name
+  assert.equal(renameInCell("K = 1\nf(K=K)", "K", "K2", { mode: "sage" }), "K2 = 1\nf(K=K2)");
+});

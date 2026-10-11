@@ -140,13 +140,14 @@ export function parseEllipsis(code: string): string {
   return code;
 }
 
-// A number not preceded by an identifier character or a dot.
-const NUM = /(?<![\w.\0])((?:\d[\d_]*\.(?:\d[\d_]*)?|\.\d[\d_]*|\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)([rRjJ]?)(?![\w])/g;
+// A number not preceded by an identifier character (of any script: xʹ2 is a
+// name) or a dot.
+const NUM = /(?<![\p{L}\p{N}\p{Mn}_.\0])((?:\d[\d_]*\.(?:\d[\d_]*)?|\.\d[\d_]*|\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)([rRjJ]?)(?![\p{L}\p{N}_])/gu;
 
 /** Numeric literals: raw suffixes, reals as RealNumber, 12.factor(). */
 export function preparseNumbers(code: string): string {
   // 12.factor() -> (12).factor(), but not 1.e5 or 1.5
-  code = code.replace(/(?<![\w.\0])(\d[\d_]*)\.(?=[A-Za-z_])(?![eE][+-]?\d)/g, "($1).");
+  code = code.replace(/(?<![\p{L}\p{N}\p{Mn}_.\0])(\d[\d_]*)\.(?=[A-Za-z_])(?![eE][+-]?\d)/gu, "($1).");
   return code.replace(NUM, (all, num: string, suffix: string) => {
     if (suffix === "r" || suffix === "R") return num; // a raw Python literal
     if (suffix) return all; // complex: Python's
@@ -156,18 +157,23 @@ export function preparseNumbers(code: string): string {
   });
 }
 
-const GENS = /^(\s*)([A-Za-z_]\w*)\.<\s*([A-Za-z_][\w\s,]*)>\s*=\s*(.+?)\s*$/;
+// (names as Python allows them: letters of any script, e.g. the reactive
+// notebook's page-order scoping renames K to Kʹ2)
+const GENS = /^(\s*)([\p{L}_][\p{L}\p{N}_]*)\.<\s*([\p{L}_][\p{L}\p{N}_\s,]*)>\s*=\s*(.+?)\s*$/u;
 function generators(line: string): string {
   const m = GENS.exec(line);
   if (!m) return line;
   const [, indent, name, gens, all] = m;
   const names = gens.split(",").map((g) => g.trim()).filter(Boolean);
-  const tuple = `(${names.map((n) => `'${n}'`).join(", ")},)`;
+  // (the generators' printed names are as written: the reactive notebook's
+  // page-order scoping binds aʹ2 to a generator still called a)
+  const shown = (n: string) => n.replace(/\u02b9\d+$/, "");
+  const tuple = `(${names.map((n) => `'${shown(n)}'`).join(", ")},)`;
   const cut = topLevelSemicolon(all);
   // (and the following statements: R.<x> = QQ[]; S.<y> = QQ[])
   const rest = cut < 0 ? "" : "; " + generators(all.slice(cut + 1).trimStart());
   let rhs = (cut < 0 ? all : all.slice(0, cut)).trimEnd();
-  if (rhs.endsWith("[[]]")) rhs = rhs.slice(0, -4) + `[[${names.map((n) => `'${n}'`).join(", ")}]]`;
+  if (rhs.endsWith("[[]]")) rhs = rhs.slice(0, -4) + `[[${names.map((n) => `'${shown(n)}'`).join(", ")}]]`;
   else if (rhs.endsWith("[]")) rhs = rhs.slice(0, -2) + `[${tuple}]`;
   else if (rhs.endsWith("()")) rhs = rhs.slice(0, -1) + `names=${tuple})`;
   else if (rhs.endsWith(")")) rhs = rhs.slice(0, -1) + `, names=${tuple})`;
@@ -207,13 +213,13 @@ function topLevelSemicolon(s: string): number {
 }
 
 // f(x,y) = expr at the start of a statement (Sage's preparse_calculus).
-const CALC = /^(\s*)([A-Za-z_]\w*)\s*\(([^()=]+)\)\s*=(?!=)\s*(.+)$/;
+const CALC = /^(\s*)([\p{L}_][\p{L}\p{N}_]*)\s*\(([^()=]+)\)\s*=(?!=)\s*(.+)$/u;
 function calculus(line: string): string {
   const m = CALC.exec(line);
   if (!m) return line;
   const [, indent, f, args, rhs] = m;
   const vars = args.split(",").map((v) => v.trim());
-  if (!vars.every((v) => /^[A-Za-z_]\w*$/.test(v))) return line;
+  if (!vars.every((v) => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(v))) return line;
   // f(x) = x^2; f: the definition ends at a top-level ';' or a comment
   const hash = commentStart(rhs);
   const body = hash < 0 ? rhs : rhs.slice(0, hash);

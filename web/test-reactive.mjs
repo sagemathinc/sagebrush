@@ -209,6 +209,13 @@ try {
   await set(["R.<x> = ZZ[]"]);
   r = await run(0);
   ok((await out(1)) === "(x - 1) * (x + 1)" && r.ran.length === 2, `editing the first x reruns only the cell reading it (${r.ran.length} ran)`);
+  // K.<a> = NumberField(...) twice (the preparser writes K twice on that line), then K read below
+  await fileNew();
+  await ev("sagebrush.notebook.setMode('sage'); true");
+  await set(["R.<x> = QQ[]", "K.<a> = NumberField(x^3 - 11)\nK.degree()", "K.<a> = NumberField(x^7 - 11)\nK.degree(), a^7", "K", "a^2"]);
+  r = await run([0, 1, 2, 3, 4]);
+  const kf = [await out(1), await out(2), await out(3), await out(4)];
+  ok(JSON.stringify(r?.errors) === "[]" && JSON.stringify(kf) === JSON.stringify(["3", "(7, 11)", "Number Field in a with defining polynomial x^7 - 11", "a^2"]), `K.<a> defined twice: the cells below read the second, named a as written: ${JSON.stringify(kf)}`);
 
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
