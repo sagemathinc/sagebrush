@@ -300,6 +300,11 @@ Examples:
    - As in marimo's lazy mode, running a cell first reruns its stale
      ancestors.
 
+5. **#1477's relaxation: adopted.** A name may be defined by several cells
+   as long as no other cell reads it.
+6. **Automatic file tracking: adopted** (writer-to-reader edges from the
+   filesystem layer).
+
 ## Still open
 
 - **Strict one-definition rule:** recommended, with `_`-private names as the
