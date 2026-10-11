@@ -178,6 +178,20 @@ export class Reactive {
     });
   }
 
+  /**
+   * Values changed outside the cells (widgets moved: their global names):
+   * the cells reading them rerun, within the budget, except `exclude` (the
+   * cell showing the widgets).
+   */
+  namesChanged(names: string[], exclude: string[] = []): Promise<RunReport> {
+    return this.serial(async () => {
+      const readers = this.graph.ids.filter((id) => !exclude.includes(id) && !this.errors.has(id) && names.some((n) => this.registered.get(id)?.analysis?.refs.has(n)));
+      if (!readers.length) return this.report([], [], [], []);
+      const optional = [...this.graph.closure(readers)].filter((id) => !exclude.includes(id) && !this.errors.has(id));
+      return this.execute(new Set(), optional, this.budget, false);
+    });
+  }
+
   /** The stale cells, in run order, and their predicted time. */
   staleSummary(): { cells: string[]; ms: number } {
     const cells = this.graph.order(this.stale);

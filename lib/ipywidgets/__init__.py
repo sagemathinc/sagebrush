@@ -138,9 +138,11 @@ def _show(widgets):
     first = [True]
 
     def widgets_changed(**values):
+        changed = []
         for name, w, c in names:
             if name not in values:
                 continue
+            changed.append(w)
             if isinstance(w, Button):
                 if values[name] > w._value:
                     w._value = values[name]
@@ -152,8 +154,29 @@ def _show(widgets):
             first[0] = False
             for o in linked:
                 o._run()
+        else:
+            _report(changed)
 
     _interact.interact(widgets_changed, **controls)
+
+
+def _report(widgets):
+    """Tell the page which global names hold widgets whose values changed (the
+    reactive notebook reruns the cells that read them, as marimo does)."""
+    import builtins
+    import json
+    import sys
+    host = getattr(builtins, "__pyjs_host__", None)
+    main = sys.modules.get("__main__")
+    if host is None or main is None or not widgets:
+        return
+    ids = {id(w) for w in widgets}
+    found = []
+    for k, v in list(vars(main).items()):
+        if id(v) in ids or (isinstance(v, (list, tuple)) and any(id(x) in ids for x in v)):
+            found.append(k)
+    if found:
+        host("changed_names", json.dumps(found))
 
 
 class IntSlider(_Widget):

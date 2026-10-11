@@ -178,6 +178,15 @@ try {
   r = await run(0);
   ok(JSON.stringify(r?.stale) === "[1]" && (await out(1)) === "30", `a manual cell is not rerun automatically, even with auto-run always (${JSON.stringify(r)})`);
 
+  // widgets are inputs: moving a slider reruns the cells that read it
+  await fileNew();
+  await set(["from ipywidgets import IntSlider\nn = IntSlider(5, 1, 10, description='n')\nn", "print(n.value ** 2)"]);
+  await run([0, 1]);
+  ok((await out(1)) === "25", "a cell reads a slider's value (25)");
+  await ev(`(async () => { const nb = sagebrush.notebook; const key = nb.cells()[0].out.querySelector('.interact').dataset.key; await nb.setInteract(key, { _w0: 7 }); return true; })()`);
+  await until(`sagebrush.notebook.cells()[1].out.textContent.trim() === '49'`, 10000);
+  ok((await ev("sagebrush.notebook.cells()[0].out.querySelectorAll('.interact input[type=range]').length")) === 1, "moving the slider reruns the cell reading it (49), not the one showing it");
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);
