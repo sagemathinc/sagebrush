@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { analyzeCell, ImportStarError } from "../src/dataflow";
+import { analyzeCell, ImportStarError, mangleLocals } from "../src/dataflow";
+import { parse } from "../pyparse/src/index";
 
 // src/dataflow.ts against marimo itself: test/dataflow-oracle.json is what
 // marimo's compile_cell says of thousands of cells (test/marimo_oracle.py).
@@ -49,4 +50,18 @@ test("marimo's documented examples", () => {
   // a capture defined later in the cell is not a reference
   assert.deepEqual(a("def f():\n    print(x)\nx = 0"), { defs: ["f", "x"], refs: ["print"], deleted: [] });
   assert.throws(() => analyzeCell("from m import *"), ImportStarError);
+});
+
+test("Sage var(): names of any script define; a private one with keywords is the cell's own", () => {
+  assert.ok(analyzeCell("var('α')", "c", { mode: "sage" }).defs.has("α"));
+  assert.ok(analyzeCell("var('α β', domain='real')", "c", { mode: "sage" }).defs.has("β"));
+  for (const code of ["var('_x', domain='real')", "var('_x', latex_name='t')"]) {
+    const tree: any = parse(code, "exec");
+    mangleLocals(tree, "abc", { sage: true });
+    const st = tree.body[0];
+    assert.equal(st._type, "Assign");
+    assert.equal(st.targets[0].id, "_cell_abc_x");
+    assert.equal(st.value.func.attr, "var");
+    assert.equal(st.value.keywords.length, 1);
+  }
 });

@@ -47,4 +47,4 @@ sagebrush.space, using Cloudflare's `cf` CLI while logged in):
 
     bun web/build.ts && cd web/site && npm install && npx cf build && npx cf deploy --prebuilt
 
-Local preview: `cd web/dist && python3 -m http.server` (a module Worker needs http://, not file://).
+Local preview: `python3 web/serve.py` (a module Worker needs http://, not file://; it sends the COOP/COEP headers that `time.sleep` and interrupts need).
