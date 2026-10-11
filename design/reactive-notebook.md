@@ -281,6 +281,69 @@ Examples:
   cell may use `_i` or `_tmp` freely. They are invisible to other cells and
   never conflict.
 
+## The budget, precisely
+
+An action is running a cell, moving a slider, or an agent's batch of edits.
+After an action, the cells downstream need to run.
+
+- **The budget caps the wall time spent running them automatically.** Cells
+  are started in graph order while the time used is under the budget. When
+  it is exceeded, no new cell is started (the one running finishes), and the
+  rest are marked stale with "run 3 stale cells (about 12 s)".
+- **Prediction only drives the estimate and the order of the decision.** If
+  the recorded times say the whole set fits, it simply runs; if they say it
+  cannot, nothing downstream starts, rather than half of it. A cell never
+  run has no time yet, so it counts as 0 and the cap protects us.
+- **The two extremes are marimo's modes:** budget $\infty$ = autorun, budget
+  0 = lazy.
+- **A typical Sage cell takes milliseconds,** so a budget of 2 s means
+  "everything cheap is always up to date; a factorization that takes a
+  minute waits for you". Per notebook; an agent can raise it to $\infty$
+  before it reports, and `verify()` ignores it.
+- **Manual cells** (a per-cell flag) are never run automatically, whatever
+  the budget: for writes to the outside world, or long jobs.
+
+## What owning the parser and the runtime buys
+
+marimo is a layer on CPython: it can only analyze source and wrap
+execution. pyjs is our compiler and our runtime, so several of marimo's
+compromises are unnecessary.
+
+1. **The compiler is the analyzer.** Its scope analysis (src/scope.ts)
+   already decides, for every name, global or local. Definitions and
+   references fall out of compilation, so they cannot drift from what runs.
+2. **Cells are compiled as functions of their inputs** (marimo's own file
+   format, with `@app.cell def _(v): ...`, made real at compile time).
+   - A cell can only see the globals it references and can only bind its
+     own definitions.
+   - `_`-names are locals of that function, with no mangling pass.
+   - Hidden state between cells becomes impossible by construction. This is
+     what marimo's dead "strict mode" tried to do with copies.
+3. **Mutations can be detected, not just warned about.**
+   - The runtime's containers (list, dict, set, bytearray, NumPy arrays)
+     and object attribute stores can keep a version counter, bumped on each
+     mutation: a few nanoseconds.
+   - After a cell runs, the runtime knows exactly which other cells'
+     objects it changed (William's `v[1] = 5`, `z.x = 10`, `L.append`).
+   - We can then treat the cell as an updater: its readers depend on it,
+     and rerunning it reruns the definer first, then the updaters in page
+     order, then the readers.
+   - Deeply nested mutation (an object inside a list) only shows at the top
+     level when the container itself changed. That is a stated limit, and
+     `verify()` catches the rest.
+4. **Files and randomness** are ours already: the filesystem layer gives
+   writer-to-reader edges, and the deterministic interpreter gives per-cell
+   seeds and bit-identical math across browsers.
+5. **What actually ran is known.** For conditional definitions and `del`
+   (marimo #9347), the runtime knows whether a run really defined `x`. A
+   reader then gets a precise error ("cell 3 did not define x in its last
+   run: its `if` was false") instead of a stale value.
+6. **Refactoring is exact.** One-click fixes (rename to `_i`, rename a
+   redefinition, merge cells) are AST edits by the same parser.
+7. **Interrupting is cheap.** The interrupt flag is checked in Python loops
+   and in the Rust engines, so a cell can be stopped when the budget runs
+   out, and its dependents left stale.
+
 ## Decisions (William, October 11, 2026)
 
 1. **One model:** reactive. No classic, Jupyter-order mode.
