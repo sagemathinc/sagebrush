@@ -219,7 +219,7 @@ export function createJournal(o) {
           }));
         } else {
           // its controls set to the values, its output replaced (as the notebook does)
-          const it = o.nb.interacts.get(`${o.kernel.generation}:${r.iid}`);
+          const it = o.nb.interacts.get(`${o.kernel.uid ?? 0}.${o.kernel.generation}:${r.iid}`); // (notebook.js's key)
           if (it) {
             for (const [name, v] of Object.entries(r.values ?? {})) it.setters[name]?.(v);
             it.out.replaceChildren();
