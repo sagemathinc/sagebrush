@@ -1,6 +1,8 @@
 # A reactive notebook for sagebrush.space
 
-**Status:** accepted direction (October 11, 2026); not implemented yet.
+**Status:** accepted direction (October 11, 2026). Step 1 is implemented:
+one interpreter per notebook, Restart keeps outputs (stale), the console as a
+separate scratchpad (web/test-kernels.mjs).
 William's decisions are recorded under "Decisions" at the end. It follows
 William's "there's no rule that this has to be exactly a Jupyter notebook",
 and Astra's repeated review suggestion: reactive like marimo, with bounds on

@@ -32,6 +32,7 @@ function hashEnd(h) {
 const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
 
 export class WorkerKernel {
+  static count = 0;
   /**
    * @param {object} o
    * @param {() => Worker} o.createWorker a new worker (or anything with postMessage/onmessage/terminate)
@@ -39,6 +40,7 @@ export class WorkerKernel {
    * @param {(message: any) => boolean | void} [o.onMessage] sees each message first; returning true consumes it (e.g. fsChanged)
    */
   constructor({ createWorker, onStart, onMessage }) {
+    this.uid = ++WorkerKernel.count; // (one of several: a page may run one per notebook)
     this.createWorker = createWorker;
     this.onStart = onStart;
     this.onMessage = onMessage;

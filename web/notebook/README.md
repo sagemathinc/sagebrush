@@ -46,11 +46,21 @@ A document is `{mode: "python" | "sage" | "magma", cells: [{id, type?, code, out
 | Group | Methods |
 |---|---|
 | Cells | `cells()`, `addCell(code, where, focus, type)`, `setInput(cell, text)`, `setType(cell, type)`, `select(cell)` (command mode), `edit(cell)` |
-| Running | `run(cell)`, `runAll()`, `interrupt()`, `restart()` |
+| Running | `run(cell)`, `runAll()`, `interrupt()`, `restart()` (a fresh interpreter; the outputs stay, marked stale), `setKernel(kernel)` (another interpreter: the full page gives each notebook its own) |
 | The document | `load(doc)`, `snapshot()`, `applyRemote(doc)`, `attach(store)`, `detach()`, `flush()`, `setMeta(patch)`, `setMode(mode)` |
 | Events | `on("change" \| "remote" \| "saved" \| "dirty" \| "mode", f)` |
 | For agents | `outputText(box)` (an output as text, pictures by their descriptions); `pictures(box)` (as PNGs); `setInteract(id, values)` |
 | Other | `setReadOnly(bool)`, `showKeys()`, `destroy()` |
+
+## Stale outputs
+
+An output is **stale** when the current interpreter did not compute it:
+after Restart, after switching to another interpreter, or when it was loaded
+from storage or from another tab (the option `staleOnLoad: true`, which the
+full page uses). It stays visible, dimmed and labeled "stale", until its
+cell runs again. On the full page each notebook has its own interpreter (the
+four most recently used stay alive). The console is a scratchpad with its
+own interpreter, apart from every notebook (design/reactive-notebook.md).
 
 ## Embedding notes
 

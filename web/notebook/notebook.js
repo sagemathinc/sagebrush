@@ -259,7 +259,8 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 export function createNotebook(root, opts = {}) {
   addStyle();
   installPlotTip();
-  const kernel = opts.kernel ?? null;
+  // the interpreter; a page may give each notebook its own (setKernel)
+  let kernel = opts.kernel ?? null;
   const asset = (name) => new URL(name, new URL(opts.assetBase ?? "./", location.href)).href;
   let mode = opts.mode ?? "python";
   let meta = {}; // the document's other fields (name, ...), kept as they are
@@ -443,12 +444,38 @@ export function createNotebook(root, opts = {}) {
   // new output replaces the old in one step, so dragging a slider does not flicker.
   const interacts = new Map(); // "generation:id" -> state
   let controlCount = 0;
-  const generation = () => kernel?.generation ?? 0;
+  // (which interpreter, and which start of it: interacts drawn by another are stale)
+  const generation = () => (kernel ? `${kernel.uid ?? 0}.${kernel.generation}` : "0");
   function interactBox(iid) {
     const it = interacts.get(generation() + ":" + iid);
     return it ? (it.buffer ?? it.out) : null;
   }
-  if (kernel) kernel.targetSink = (target) => areaSink(interactBox(target));
+  // An output is stale when this interpreter did not produce it: after a
+  // restart, or loaded from storage, or from another tab (opts.staleOnLoad).
+  // It stays visible, dimmed, until the cell runs again.
+  function markStale(cell) {
+    if (cell.type !== "code" || (!cell.out.childNodes.length && !/\d/.test(cell.n.textContent))) return;
+    cell.el.classList.add("stale");
+    cell.time.textContent = "stale";
+    cell.time.title = "Not computed by the current interpreter: run the cell to update it";
+  }
+  const freshen = (cell) => { cell.el.classList.remove("stale"); cell.time.title = ""; };
+  function bindKernel(k) {
+    kernel = k;
+    if (!k) return;
+    k.targetSink = (target) => areaSink(interactBox(target));
+    k.execCount ??= 0;
+    k.ran ??= new Set(); // the cells whose output this interpreter computed
+    if (!k.__sbnbBound) {
+      k.__sbnbBound = true;
+      k.on("restart", () => {
+        k.execCount = 0;
+        k.ran = new Set();
+        if (k === kernel) for (const c of cells()) markStale(c);
+      });
+    }
+  }
+  bindKernel(kernel);
   const forgetInteracts = (box) => box.querySelectorAll(".interact").forEach((el) => interacts.delete(el.dataset.key));
   function renderInteract(box, spec) {
     const it = { iid: spec.id, gen: generation(), name: spec.name, values: {}, setters: {}, busy: false, dirty: false, buffer: null, waiters: [] };
@@ -580,6 +607,7 @@ export function createNotebook(root, opts = {}) {
     forgetInteracts(cell.out);
     cell.out.textContent = "";
     cell.time.textContent = "";
+    freshen(cell);
     if (!kernel) { appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true); return Promise.resolve(); }
     cell.el.classList.add("queued");
     cell.n.textContent = "[*]";
@@ -595,7 +623,8 @@ export function createNotebook(root, opts = {}) {
       out(text, isErr) { failed ||= isErr; appendText(cell.out, text, isErr); },
       done(ms) {
         settle(cell);
-        cell.n.textContent = `[${++execCount}]`;
+        cell.n.textContent = `[${kernel ? ++kernel.execCount : ++execCount}]`;
+        kernel?.ran?.add(cell.id);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed ? "raised an error" : "finished"}`);
         resolve();
@@ -613,9 +642,8 @@ export function createNotebook(root, opts = {}) {
   const runAll = () => Promise.all(cells().map(run)); // the kernel runs them in order
   const interrupt = () => kernel?.interrupt(STOP_MESSAGE);
   function clearOutputs() {
-    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; }
+    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); }
   }
-  kernel?.on("restart", () => { execCount = 0; });
 
   function autosize(ta) {
     if (!ta.offsetParent) return; // hidden: measured when it shows (the ResizeObserver below)
@@ -1239,6 +1267,7 @@ export function createNotebook(root, opts = {}) {
     } else {
       loadOutputs(cell.out, c.outputs);
       if (c.n != null) cell.n.textContent = `[${c.n}]`;
+      if (opts.staleOnLoad && !kernel?.ran?.has(cell.id)) markStale(cell);
     }
   }
   // Show a document, replacing what is there.
@@ -1249,7 +1278,7 @@ export function createNotebook(root, opts = {}) {
     setMode(m ?? mode, false);
     closeCompleter(); closeMenu(false); activate(null);
     cellsEl.textContent = "";
-    execCount = 0;
+    execCount = 0; // (without a kernel; an interpreter keeps its own count)
     for (const c of list?.length ? list : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
@@ -1322,6 +1351,7 @@ export function createNotebook(root, opts = {}) {
             forgetInteracts(c.out);
             c.out.replaceChildren();
             loadOutputs(c.out, rc.outputs);
+            if (opts.staleOnLoad) markStale(c);
             c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
           }
         } else c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
@@ -1446,20 +1476,23 @@ export function createNotebook(root, opts = {}) {
   }
 
   const api = {
-    root, kernel,
+    root,
+    get kernel() { return kernel; },
     get mode() { return mode; },
     get meta() { return meta; },
     get active() { return active; },
     cells, addCell, run, runAll, interrupt, clearOutputs,
-    /** A fresh interpreter and no outputs (Jupyter's Restart and clear). */
-    restart() { kernel?.restart(); clearOutputs(); },
+    /** A fresh interpreter; the outputs stay, marked stale until their cells run again. */
+    restart() { kernel?.restart(); },
+    /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
+    setKernel(k, { stale = true } = {}) { if (k === kernel) return; bindKernel(k); if (stale) for (const c of cells()) markStale(c); },
     setMode, setType, setInput, renderMd, select, edit,
     /** Measure every editor again now (after the notebook was hidden). */
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
     load, snapshot, applyRemote, replace, flush,
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
     /** The next run's prompt number less one (after TimeTravel replayed runs). */
-    setExecCount(k) { execCount = k; },
+    setExecCount(k) { if (kernel) kernel.execCount = k; else execCount = k; },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */
     async attach(s) {
       unsubscribe?.();

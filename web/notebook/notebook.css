@@ -42,6 +42,9 @@
 .sbnb .cell.markdown.rendered .runb { display: none; }
 .sbnb .cell.running .runb::before, .sbnb .cell.queued .runb::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); }
 .sbnb .cell.running .runb::before { animation: sbnb-spin .9s linear infinite; }
+/* an output the current interpreter did not compute (after a restart, or loaded): kept, dimmed */
+.sbnb .cell.stale .out, .sbnb .cell.stale .n { opacity: .5; }
+.sbnb .cell.stale .time { font-style: italic; }
 .sbnb .cell.queued .runb::before { border: 2px dashed var(--accent2); }
 @keyframes sbnb-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .sbnb .cell.running .runb::before { animation: none; border-color: var(--accent); } }
