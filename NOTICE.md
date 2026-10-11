@@ -167,7 +167,11 @@ terms."
 references, is a port of marimo's `ScopedVisitor` (`marimo/_ast/visitor.py`,
 github.com/marimo-team/marimo) to TypeScript, so that the reactive notebook
 has marimo's semantics. `test/marimo_oracle.py` runs marimo itself to check
-the port. marimo is under the Apache License, Version 2.0
+the port. `src/notebook-graph.ts` and `src/notebook-reactive.ts` follow
+marimo's dependency graph and runtime (`marimo/_runtime/dataflow`,
+`runtime.py`), `test/marimo_graph_oracle.py` checking the graph; and
+`web/notebook/marimo.js` reads and writes marimo's notebook format, checked
+by `test/marimo_format_oracle.py`. marimo is under the Apache License, Version 2.0
 ([LICENSE-APACHE](LICENSE-APACHE)).
 
 ```

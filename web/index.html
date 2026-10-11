@@ -276,6 +276,7 @@
   <hr>
   <button role="menuitem" data-f="ipynb">Download .ipynb</button>
   <button role="menuitem" data-f="py">Download .py</button>
+  <button role="menuitem" data-f="marimo" title="A marimo notebook (one function per cell), which marimo opens">Download as marimo (.py)</button>
   <button role="menuitem" data-f="bundle" title="The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version">Download with history (.sbreplay)</button>
   <button role="menuitem" data-f="import">Upload .ipynb, .py or .sbreplay…</button>
   <hr>
@@ -311,6 +312,7 @@ import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
+import { toMarimo } from "./notebook/marimo.js";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -1199,6 +1201,12 @@ fileMenu.addEventListener("click", async (e) => {
     case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() ? "text/plain" : "text/x-python"); break;
+    case "marimo": {
+      // (each cell's arguments and return values: the names it reads and defines)
+      const g = new Map((nb.reactive?.graph.ids ?? []).map((id) => [nb.reactive.submitted(id), nb.reactive.graph.analysis(id)]));
+      download(fileBase() + ".py", toMarimo(nb.snapshot(), (code) => g.get(code) ?? null), "text/x-python");
+      break;
+    }
     case "bundle": saveNow(); download(fileBase() + ".sbreplay", await makeBundle(), "application/gzip"); break;
     case "import": $("#importinput").click(); break;
     case "install": installPrompt?.prompt(); break;
