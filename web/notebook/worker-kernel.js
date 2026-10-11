@@ -112,7 +112,7 @@ export class WorkerKernel {
       if (m.done) {
         this.pending.delete(m.id);
         if (r) this.finishRun(m, r);
-        p.done(m.ms, { error: !!m.error });
+        p.done(m.ms, { error: !!m.error, ...(m.files ? { files: m.files } : {}) });
       }
     };
     w.onerror = (e) => this.emit("status", "error: " + (e.message || e));
@@ -125,7 +125,8 @@ export class WorkerKernel {
    * forget (global names to delete first: the reactive notebook), mangle
    * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
    * digits: the run's entropy, the reactive notebook's per-cell seeds)}
-   * The sink's done(ms, {error}) says whether the code raised.
+   * The sink's done(ms, {error, files}) says whether the code raised, and
+   * which files it read and wrote ({reads, writes}: paths).
    */
   execute(code, opts, sink) {
     const id = this.nextId++;

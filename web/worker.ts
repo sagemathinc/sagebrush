@@ -21,11 +21,29 @@ import { __hooks, load as loadFiles, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 
+// The files each run reads and writes (the reactive notebook's file edges):
+// sent with its `done` as {files: {reads, writes}}.  (The runtime's own
+// library, under /$pyjs, is not a file of the notebook.)
+let reads = new Set<string>(), writes = new Set<string>();
+const mine = (p: string) => !p.startsWith("/$pyjs");
 const session = notebookSession((m) => postMessage(m), {
-  runs: { begin: (m) => replayEnv.begin(m.clock, m.seed), end: () => replayEnv.end() as any },
+  runs: {
+    begin: (m) => {
+      reads = new Set();
+      writes = new Set();
+      replayEnv.begin(m.clock, m.seed);
+    },
+    end: () => ({ ...(replayEnv.end() as any), ...(reads.size || writes.size ? { files: { reads: [...reads], writes: [...writes] } } : {}) }),
+  },
 });
 __hooks.write = (fd, text) => session.write(fd, text);
-__hooks.changed = (path, data) => postMessage({ fsChanged: path, data });
+__hooks.changed = (path, data) => {
+  if (mine(path)) writes.add(path);
+  postMessage({ fsChanged: path, data });
+};
+__hooks.read = (path) => {
+  if (mine(path)) reads.add(path);
+};
 
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;

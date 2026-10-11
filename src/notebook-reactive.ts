@@ -35,6 +35,8 @@
 //   - Mutation tracking: a cell mutating another's object runs with its
 //     family (the definer, then the updaters in page order), and the readers
 //     after them (src/notebook-graph.ts).
+//   - Files: the files each run read and wrote give writer-to-reader edges;
+//     readers of a file just written, or changed outside (filesChanged), rerun.
 import { NotebookGraph, type CellError, type GraphCell } from "./notebook-graph";
 import type { CellAnalysis } from "./dataflow";
 
@@ -66,7 +68,7 @@ export interface ReactiveHost {
    * if it raised, `stopped` if it was interrupted or the interpreter
    * restarted.
    */
-  execute(id: string, code: string, forget: string[]): Promise<{ ok: boolean; ms: number; stopped?: boolean }>;
+  execute(id: string, code: string, forget: string[]): Promise<{ ok: boolean; ms: number; stopped?: boolean; files?: { reads: string[]; writes: string[] } }>;
   /** delete global names now (a cell deleted or broken) */
   forget(names: string[]): Promise<void>;
   /** a cell's state changed */
@@ -103,6 +105,8 @@ export class Reactive {
   times = new Map<string, number>();
   /** how each cell's last run ended */
   outcome = new Map<string, "ok" | "exception" | "stopped">();
+  /** the files each cell read and wrote in its last run */
+  files = new Map<string, { reads: string[]; writes: string[] }>();
   /** ms of automatic runs allowed after an action; Infinity = autorun, 0 = lazy */
   budget = 2000;
   private queue: Promise<unknown> = Promise.resolve();
@@ -162,6 +166,16 @@ export class Reactive {
     const present = new Set(order);
     for (const id of [...this.registered.keys()]) if (!present.has(id)) this.registered.delete(id);
     this.graph.set(order.filter((id) => this.registered.has(id)).map((id) => this.graphCell(id)));
+  }
+
+  /** Files changed outside the cells (an upload): the cells that read them rerun, within the budget. */
+  filesChanged(paths: string[]): Promise<RunReport> {
+    return this.serial(async () => {
+      const readers = new Set(paths.flatMap((p) => this.graph.readersOf(p)).filter((id) => !this.errors.has(id)));
+      if (!readers.size) return this.report([], [], [], []);
+      const optional = [...this.graph.closure(readers)].filter((id) => !this.errors.has(id));
+      return this.execute(new Set(), optional, this.budget, false);
+    });
   }
 
   /** The stale cells, in run order, and their predicted time. */
@@ -241,6 +255,7 @@ export class Reactive {
       this.stale.delete(id);
       this.times.delete(id);
       this.outcome.delete(id);
+      this.files.delete(id);
     }
     for (const id of ids) if (!this.registered.has(id)) changed.add(id);
     await this.registerAll(ids, cells.filter((c) => present.has(c.id)));
@@ -316,7 +331,7 @@ export class Reactive {
     return this.execute(required, optional, budget, all);
   }
 
-  private async execute(required: Set<string>, optional: string[], budget: number, all: boolean): Promise<RunReport> {
+  private async execute(required: Set<string>, optional: string[], budget: number, all: boolean, followAgain = false): Promise<RunReport> {
     const manual = new Set(this.host.cells().filter((c) => c.manual).map((c) => c.id));
     // optional cells not run: manual ones, and everything downstream of them
     const held = new Set<string>();
@@ -337,6 +352,7 @@ export class Reactive {
     let autoMs = 0;
     let stopped = false;
     const forgetLater: string[] = [];
+    const followUp = new Set<string>();
     for (const id of order) {
       const isAuto = !required.has(id);
       if (stopped) {
@@ -378,6 +394,18 @@ export class Reactive {
       const r = await this.host.execute(id, this.registered.get(id)!.code, this.defsOf(id));
       ran.push(id);
       this.stale.delete(id);
+      // files: what it read and wrote this time; a file it wrote, read by
+      // cells not in this run, makes them run after it (within the budget)
+      const io = r.files ?? { reads: [], writes: [] };
+      const prevIo = this.files.get(id);
+      if (io.reads.length || io.writes.length || prevIo) {
+        if (io.reads.length || io.writes.length) this.files.set(id, io);
+        else this.files.delete(id);
+        this.graph.setFiles(this.files);
+        for (const f of io.writes) for (const reader of this.graph.readersOf(f)) {
+          if (reader !== id && !order.includes(reader) && !this.errors.has(reader)) followUp.add(reader);
+        }
+      }
       this.times.set(id, r.ms);
       if (isAuto) autoMs += r.ms;
       if (r.stopped) {
@@ -394,6 +422,12 @@ export class Reactive {
       }
     }
     if (forgetLater.length) await this.host.forget(forgetLater);
+    // readers of files written in this run (once: a writer they lead back to is not rerun)
+    if (followUp.size && !stopped && !followAgain) {
+      const more = [...this.graph.closure(followUp)].filter((id) => !ran.includes(id) && !this.errors.has(id));
+      const r2 = await this.execute(new Set(), more, all ? Infinity : Math.max(0, budget - autoMs), all, true);
+      return this.report([...ran, ...r2.ran], [...new Set([...stale, ...r2.stale])], [...failed, ...r2.failed], [...cancelled, ...r2.cancelled]);
+    }
     return this.report(ran, [...stale], failed, cancelled);
   }
 
