@@ -105,8 +105,19 @@ class _Widget:
     def _ipython_display_(self):
         _show([self])
 
+    def __format__(self, spec):
+        # in an f-string (marimo's mo.md(f"... {slider}")): a marker that
+        # mo.md replaces by the control, as marimo's own elements do
+        if spec:
+            return format(self.value, spec)
+        _embedded[id(self)] = self
+        return "\u27e6w%d\u27e7" % id(self)
+
     def __repr__(self):
         return "%s(value=%r, description=%r)" % (type(self).__name__, self.value, self.description)
+
+
+_embedded = {}
 
 
 def _leaves(widgets):
