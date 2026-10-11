@@ -656,7 +656,7 @@ export function createNotebook(root, opts = {}) {
         kernel?.ran?.add(cell.id);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
-        resolve({ ok: !info?.error, ms, ...(info?.files ? { files: info.files } : {}) });
+        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true } : {}), ...(info?.files ? { files: info.files } : {}) });
       },
       stopped(message) {
         settle(cell);

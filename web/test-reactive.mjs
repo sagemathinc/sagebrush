@@ -208,6 +208,20 @@ try {
   await until(`/The square of 8 is/.test(sagebrush.notebook.cells()[2].out.textContent)`, 10000);
   ok(true, "moving mo.ui.slider reruns the mo.md cell reading it");
 
+  // Stop during a chain: the running cell is interrupted, the cells after it are stale
+  await fileNew();
+  await set(["s = 1", "while s:\n    pass", "t = s + 1\nprint(t)", "print('other', s)"]);
+  await ev("window.__run = (async () => { const nb = sagebrush.notebook; const ids = nb.cells().map((c) => c.id); const r = await nb.runCells(ids, { budget: Infinity }); window.__stopReport = { ran: r.ran.map((id) => ids.indexOf(id)), stale: r.stale.map((id) => ids.indexOf(id)).sort() }; })(); true");
+  await until("sagebrush.notebook.cells()[1].el.classList.contains('running')", 15000);
+  await sleep(500);
+  await ev("document.querySelector('#stop').click(); true");
+  await until("window.__stopReport", 15000);
+  const sr = await ev("window.__stopReport");
+  ok(JSON.stringify(sr.ran) === "[0,1]" && sr.stale.includes(2) && sr.stale.includes(3) && /KeyboardInterrupt/.test(await out(1)), `Stop interrupts the running cell and leaves the rest stale (${JSON.stringify(sr)})`);
+  ok(/stale/.test(await ev("sagebrush.notebook.cells()[3].time.textContent")), "...marked stale");
+  r = await run(3);
+  ok((await out(3)) === "other 1", `the interpreter kept its variables: running a stale cell works (${await out(3)})`);
+
   // per-cell seeds: a cell draws the same random numbers however often it runs; verify agrees
   await fileNew();
   await set(["import random\nimport numpy as np\nprint(random.random(), np.random.rand())", "x = random.randint(1, 10**9)\nprint(x)"]);
