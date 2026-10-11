@@ -2,7 +2,11 @@
 
 **Status:** accepted direction (October 11, 2026). Step 1 is implemented:
 one interpreter per notebook, Restart keeps outputs (stale), the console as a
-separate scratchpad (web/test-kernels.mjs).
+separate scratchpad (web/test-kernels.mjs). So is step 2's analysis:
+`src/dataflow.ts`, a port of marimo's `ScopedVisitor`, agrees exactly with
+marimo 0.25.1 on all 3,924 cells of `test/dataflow-oracle.json` (marimo's
+tests and example notebooks) and on all 13,032 top-level statements of
+CPython 3.14's standard library.
 William's decisions are recorded under "Decisions" at the end. It follows
 William's "there's no rule that this has to be exactly a Jupyter notebook",
 and Astra's repeated review suggestion: reactive like marimo, with bounds on
@@ -66,12 +70,14 @@ source (`marimo/_ast/visitor.py`, `marimo/_runtime/dataflow`):
 **How we keep to them:** real marimo is the oracle, as Sage, NumPy and Magma
 are for the rest of Sagebrush.
 
-- Our analysis, over our own parser's AST, must give the same definitions
-  and references as marimo's on its own test cases: `tests/_ast/test_visitor.py`
-  (109 tests) and `tests/_runtime/test_dataflow.py` (61), under Apache-2.0,
-  with attribution.
-- It must also agree on notebooks and generated snippets, through a
-  differential harness that runs `marimo` under CPython.
+- Our analysis, over our own parser's AST, gives the same definitions,
+  references and deleted references as marimo's `compile_cell`. The cells
+  compared are every string in marimo's tests that parses as Python, and
+  every cell of its example and test notebooks. `test/marimo_oracle.py` runs
+  marimo under CPython and writes `test/dataflow-oracle.json`, which
+  `test/dataflow.test.ts` checks in CI without marimo.
+- `DATAFLOW_ORACLE=file` checks against another corpus, such as the
+  standard library's top-level statements.
 - pyjs has no `ast` module, so marimo's own analyzer cannot simply run in the
   browser. That option needs an `ast` module built on pyparse; it is not
   needed for the oracle.

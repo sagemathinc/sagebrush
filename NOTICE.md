@@ -161,6 +161,19 @@ Copyright © 2017-2018 Arm Limited and labelled as such in comments in the
 individual source files. All have been licensed under extremely permissive
 terms."
 
+### marimo (Apache-2.0)
+
+`src/dataflow.ts`, which finds the names a notebook cell defines and
+references, is a port of marimo's `ScopedVisitor` (`marimo/_ast/visitor.py`,
+github.com/marimo-team/marimo) to TypeScript, so that the reactive notebook
+has marimo's semantics. `test/marimo_oracle.py` runs marimo itself to check
+the port. marimo is under the Apache License, Version 2.0
+([LICENSE-APACHE](LICENSE-APACHE)).
+
+```
+Copyright 2026 Marimo. All rights reserved.
+```
+
 ### smalljac (used with the author's permission)
 
 The a_p engine (`engine/ap`) follows the genus-1 strategy of Andrew V.
