@@ -169,8 +169,9 @@ try {
   await sleep(100);
   ok((await has(1, "stale")) && /Run stale \(1/.test(await ev("document.querySelector('#runstale').textContent")) && !(await ev("document.querySelector('#runstale').hidden")), `with auto-run off, the dependent is stale and Run stale offers it (${await ev("document.querySelector('#runstale').textContent")})`);
   await ev("document.querySelector('#runstale').click(); true");
-  await until("sagebrush.notebook.cells()[1].out.textContent.trim() === '30'", 10000);
-  ok(!(await has(1, "stale")) && (await ev("document.querySelector('#runstale').hidden")), "Run stale runs it");
+  // (the button updates on the next frame)
+  await until("sagebrush.notebook.cells()[1].out.textContent.trim() === '30' && !sagebrush.notebook.cells()[1].el.classList.contains('stale') && document.querySelector('#runstale').hidden", 10000);
+  ok(true, "Run stale runs it");
   await ev("(() => { const a = document.querySelector('#autorun'); a.value = 'always'; a.dispatchEvent(new Event('change')); return true; })()");
   await ev(`(() => { const c = sagebrush.notebook.cells()[1]; c.menuBtn.click(); document.querySelector('.sbnb-menu [data-m="manual"]').click(); return true; })()`);
   ok((await has(1, "manual")) && (await ev("sagebrush.notebook.cells()[1].metadata?.sagebrush?.manual")) === true, "the cell menu makes a cell manual (in its metadata)");
