@@ -616,3 +616,18 @@ assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/6*pi for in
 assert str(solve(tan(_xs) == sin(_xs), _xs)) == "[x == pi*n1 for integer n1]" and len(solve(sin(_xs) + sin(2 * _xs) + sin(3 * _xs) == 0, _xs)) == 3
 assert str(solve(log(_xs)**2 == 2, _xs)) == "[x == e^(-sqrt(2)), x == e^sqrt(2)]"
 print("solve trig ok")
+# linear systems with parameters, roots of unity, cubics, log sums, abs for real x, assumption names
+_c, _d = SR.var("c"), SR.var("d")
+assert str(solve([_a + _Y - 1, _a - _Y, _c + _d], [_a, _Y])) == "[[a == 1/2, y == 1/2, c + d == 0]]"  # ask.sagemath 10028
+assert str(solve([_a * _xs + _Y == 1, _xs - _Y == 0], _xs, _Y)) == "[[x == 1/(a + 1), y == 1/(a + 1), a != -1]]"
+assert len(solve(_xs**5 == 1, _xs)) == 5 and len(solve(_xs**12 == 1, _xs)) == 12
+assert str(solve(_xs**3 - 3 * _xs + 1 == 0, _xs)) == "[x == 2*cos(8/9*pi), x == 2*cos(4/9*pi), x == 2*cos(2/9*pi)]"
+for _f in (_xs**3 - _xs - 1, _xs**3 + _xs + 1, 2 * _xs**3 + 3 * _xs**2 - QQ(1) / 5):
+    _ss = solve(_f == 0, _xs); assert len(_ss) == 3 and all(abs(complex(_f.subs({_xs: _t.rhs()}))) < 1e-12 for _t in _ss)
+assert str(solve(log(_xs) + log(_xs - 1) == log(2), _xs)) == "[x == 2]" and str(solve(2 * log(_xs) == log(_xs + 6), _xs)) == "[x == 3]"
+assert str(solve(abs(_xs) == 2, _xs)) == "[0 == abs(x) - 2]"  # a circle in the complex plane
+assume(_xs, "real"); assert str(solve(abs(_xs) == 2, _xs)) == "[x == 2, x == -2]" and str(solve(abs(_xs) + abs(_xs - 2) == 4, _xs)) == "[x == 3, x == -1]"; forget()
+assume(_xs > _r1); assert str(solve([_xs * _Y == 0], _xs, _Y)) == "[[x == 0, y == r3, 0 > r1], [x == r2, y == 0, r2 > r1]]"; forget()
+_n1 = SR.var("n1"); assume(_xs > _n1); assert "n1 for" not in str(solve(sin(_xs) == 0, _xs)); forget()
+assert "0 ==" in str(solve(sin(-(2**63) * _xs + 1) + sin(_xs) + 2 * cos(_xs) == 0, _xs))  # TRIG-F1: no i64 overflow
+print("solve casebook ok")

@@ -3080,6 +3080,12 @@ def solve(f, *args, **kw):
     a*sin(u) + b*cos(u) == c, polynomials in sin and cos of one angle), and
     families that are one family are merged (sin(x)^2 == 1/4: x == +-pi/6 +
     pi*n); Sage gives these back unsolved or only principal solutions.
+    Cubics are solved in radicals, and with three real roots in Viete's
+    real trigonometric form (x^3 - 3*x + 1: 2*cos(2/9*pi), ...); roots of
+    unity exactly; sums of logarithms by exponentiating, each candidate
+    checked (log(x) + log(x - 1) == log(2): x == 2 only).  abs(u) is split
+    into u and -u where x is assumed real; for complex x, abs(x) == 2 is a
+    circle, which stays unresolved (Sage gives [x == -2, x == 2]).
 
     Systems: linear ones by elimination; polynomial ones over QQ with
     finitely many solutions through a lex Groebner basis; others by
@@ -3118,6 +3124,10 @@ def solve(f, *args, **kw):
         [x == pi*n1 + 1/4*pi for integer n1]
         sage: solve(cos(2*x) == cos(x), x)  # sagebrush only
         [x == 2/3*pi*n1 for integer n1]
+        sage: solve(x^3 - 3*x + 1 == 0, x)  # sagebrush only
+        [x == 2*cos(8/9*pi), x == 2*cos(4/9*pi), x == 2*cos(2/9*pi)]
+        sage: solve(log(x) + log(x - 1) == log(2), x)  # sagebrush only
+        [x == 2]
     """
     # (_raw: without the assumptions, for the system solver's own steps,
     # which apply them to the whole assignment)
@@ -3141,7 +3151,20 @@ def solve(f, *args, **kw):
     eqs = [g for g in eqs if g._op()[0] == "rel:Eq"]
     if not eqs:
         raise NotImplementedError("solve: inequalities without an equation")
+    # names the new symbols (r1, n1) must not take: those of the
+    # inequalities and the assumptions (assume(x > r1) had its r1 captured:
+    # the review's SOLVE2-F4/F6)
+    theirs = set(n for q in ineqs for n in q._names())
+    if not raw:
+        for r in _ASSUMPTIONS:
+            theirs |= set(r._names()) if isinstance(r, Expression) else {str(r._v)}
+    mine = set(n for g in eqs for n in g._names()) | set(names)
     one = len(eqs) == 1 and len(names) == 1
+    if one and not raw and not ineqs and not kw.get("multiplicities") and _assumed_real(names[0]):
+        u = _find_abs(eqs[0], names[0])
+        if u is not None:
+            out = _solve_abs(eqs[0], u, names[0])
+            return _solution_dicts([[t] for t in out], 1) if kw.get("solution_dict") else out
     if not one:
         try:
             r = _call("solve", str(len(eqs)), *[g._s for g in eqs], *names)
@@ -3150,9 +3173,10 @@ def solve(f, *args, **kw):
                 raise
             # (the inequalities' names are reserved too: a new r1 captured
             # a free r1 of y > r1, the review's SOLVE2-F4)
-            sols = _solve_system([g.lhs() - g.rhs() for g in eqs], names, [n for q in ineqs for n in q._names()])
+            sols = _solve_system([g.lhs() - g.rhs() for g in eqs], names, theirs)
             if sols is None:
                 raise NotImplementedError("solve: this system (%s) is not solved; it is not polynomial over QQ, or no equation can be solved for one of its variables" % ", ".join(str(g) for g in eqs))
+            sols = [_rename_new_apart(sol, theirs, mine) for sol in sols]
             if ineqs:
                 sols = _with_inequalities(sols, ineqs, eqs, names)
             if _ASSUMPTIONS and not raw:
@@ -3172,6 +3196,7 @@ def solve(f, *args, **kw):
         else:
             sols.append([Expression(t) for t in part])
         i += 1 + m
+    sols = [_rename_new_apart(sol, theirs, mine) for sol in sols]
     if ineqs:
         sols = _with_inequalities(sols, ineqs, eqs, names)
     if _ASSUMPTIONS and not raw:
@@ -3228,6 +3253,61 @@ def _solution_dicts(sols, nvars):
             if isinstance(s, Solution):
                 params += [p for p in s._params if p not in params]
         out.append(_SolutionDict({s.lhs(): s.rhs() for s in assign}, conds, params))
+    return out
+
+
+def _assumed_real(x):
+    """Whether the assumptions make x real (a feature such as 'real' or
+    'positive', or an inequality involving x)."""
+    for r in _ASSUMPTIONS:
+        if isinstance(r, _Feature):
+            if str(r._v) == x and r._kind in ("real", "positive", "negative", "integer", "rational", "even", "odd"):
+                return True
+        elif isinstance(r, Expression) and r._op()[0] in ("rel:Lt", "rel:Le", "rel:Gt", "rel:Ge") and x in r._names():
+            return True
+    return False
+
+
+def _find_abs(e, x):
+    """The argument u of some abs(u) in e with u depending on x, or None."""
+    op = e._op()
+    if op[0] == "fun:abs" and len(op) == 2:
+        u = Expression(op[1])
+        if x in u._names():
+            return u
+    for c in op[1:]:
+        r = _find_abs(Expression(c), x)
+        if r is not None:
+            return r
+    return None
+
+
+def _solve_abs(eq, u, x):
+    """eq in a real x with abs(u): the solutions of eq with abs(u) = u where
+    u >= 0 and with abs(u) = -u where u < 0 (Sage's solve(abs(x) == 2, x) is
+    [x == -2, x == 2] for every x, though |x| = 2 is a circle in the complex
+    plane; Sagebrush gives that answer where x is assumed real)."""
+    v = Expression(_sym_s(x))
+    a = Expression(_call("parse", "abs(%s)" % u)[0])
+    out = []
+    for rep, cond in ((u, u >= 0), (-u, u < 0)):
+        for t in solve(eq.subs({a: rep}), v):
+            if not isinstance(t, Solution) or t.lhs()._op()[0] != "symbol":
+                out.append(t)  # unresolved: 0 == f stays
+                continue
+            c = cond.subs({v: t.rhs()})
+            keep = list(t._conds)
+            if not c.variables():
+                verdict = _decide(c)
+                if verdict is False:
+                    continue
+                if verdict is None:
+                    keep.append(c)
+            else:
+                keep.append(c)
+            s2 = Solution(t._s, keep, t._params)
+            if not any(str(s2) == str(o) for o in out):
+                out.append(s2)
     return out
 
 
@@ -3411,7 +3491,7 @@ def _solve_subst(zs, names, fresh, depth=0, budget=None):
     budget[0] -= 1
     if budget[0] < 0:
         raise _SearchBudget()
-    rest = []
+    rest, pconds = [], []
     for z in zs:
         if _is_zero_expr(z):
             continue
@@ -3423,10 +3503,16 @@ def _solve_subst(zs, names, fresh, depth=0, budget=None):
                     return []
                 if v is True:
                     continue
-            return None  # a condition on parameters alone: not decided here
+            # an equation in the parameters alone: a condition on them
+            # (ask.sagemath 10028: c + d == 0 beside a + b == 1, a == b)
+            pconds.append(c)
+            continue
         rest.append(z)
     if not rest:
-        return [({}, [], [])]
+        return [({}, pconds, [])]
+    if pconds:
+        r = _solve_subst(rest, names, fresh, depth, budget)
+        return None if r is None else [(d, pconds + cs, ps) for d, cs, ps in r]
     order = sorted(rest, key=lambda z: (len(set(z._names()) & set(names)), len(str(z))))
     for z in order:
         for v in [n for n in names if n in z._names()]:
