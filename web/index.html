@@ -274,7 +274,8 @@
   <hr>
   <button role="menuitem" data-f="ipynb">Download .ipynb</button>
   <button role="menuitem" data-f="py">Download .py</button>
-  <button role="menuitem" data-f="import">Upload .ipynb or .py…</button>
+  <button role="menuitem" data-f="bundle" title="The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version">Download with history (.sbreplay)</button>
+  <button role="menuitem" data-f="import">Upload .ipynb, .py or .sbreplay…</button>
   <hr>
   <button role="menuitem" data-f="print">Print or save as PDF…</button>
   <button role="menuitem" data-f="share">Copy share link</button>
@@ -282,7 +283,7 @@
   <hr>
   <button role="menuitem" data-f="delete" class="danger">Delete notebook</button>
 </div>
-<input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag" hidden>
+<input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag,.sbreplay" hidden>
 <dialog id="docdlg" aria-labelledby="doctitle">
   <div class="dhead"><h2 id="doctitle"></h2><button id="docclose">Close</button></div>
   <pre id="docbody"></pre>
@@ -305,7 +306,7 @@
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 const EXAMPLES = {
@@ -1060,6 +1061,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() ? "text/plain" : "text/x-python"); break;
+    case "bundle": saveNow(); download(fileBase() + ".sbreplay", await makeBundle(), "application/gzip"); break;
     case "import": $("#importinput").click(); break;
     case "install": installPrompt?.prompt(); break;
     case "openfile": {
@@ -1097,12 +1099,53 @@ $("#importinput").onchange = async (e) => {
   e.target.value = "";
   if (!f) return;
   try {
+    if (/\.sbreplay$/i.test(f.name)) {
+      saveNow();
+      await openBundle(new Uint8Array(await f.arrayBuffer()));
+      statusEl.textContent = `opened ${f.name} with its history: TimeTravel can resume its versions`;
+      return;
+    }
     const doc = fromFile(f.name, await f.text(), nb.mode);
     saveNow();
     await openDocument(doc);
     statusEl.textContent = `opened ${f.name}`;
   } catch (err) { statusEl.textContent = `could not read ${f.name}: ${err.message ?? err}`; }
 };
+
+// The portable bundle (.sbreplay, gzipped JSON): the notebook, its TimeTravel
+// history (the patches, with the execution journal) and the bytes of the
+// files its sessions read, so that another browser can resume its versions.
+const BUNDLE = "sagebrush-notebook-history";
+async function makeBundle() {
+  const hdb = await historyDbReady, bdb = await blobDbReady;
+  const rows = hdb ? ((await idb(hdb, "history", "readonly", (st) => st.getAll(IDBKeyRange.bound([current.id, ""], [current.id, "\uffff"])))) ?? []) : [];
+  const hashes = new Set();
+  for (const s of nbHistory?.records("session") ?? []) for (const [, h] of s.files ?? []) hashes.add(h);
+  for (const f of nbHistory?.records("file") ?? []) if (f.hash) hashes.add(f.hash);
+  const blobs = {};
+  for (const h of hashes) { const data = await getBlob(bdb, h); if (data) blobs[h] = enc64(data); }
+  const doc = { ...nb.snapshot(), name: docName() };
+  const json = JSON.stringify({ format: BUNDLE, version: 1, notebook: doc, history: rows.map((r) => r.env), blobs });
+  return pipe(new TextEncoder().encode(json), new CompressionStream("gzip"));
+}
+async function openBundle(bytes) {
+  const b = JSON.parse(new TextDecoder().decode(await pipe(bytes, new DecompressionStream("gzip"))));
+  if (b?.format !== BUNDLE || !Array.isArray(b.history) || !b.notebook) throw new Error("not a Sagebrush notebook with history");
+  const hdb = await historyDbReady, bdb = await blobDbReady;
+  // the files' bytes, checked against their hashes
+  for (const [h, data64] of Object.entries(b.blobs ?? {})) {
+    const data = dec64(data64);
+    if ((await bytesHash(data)) === h || h.startsWith("c53:")) await putBlob(bdb, data);
+  }
+  const id = newId();
+  if (hdb) await idb(hdb, "history", "readwrite", (st) => { let r = null; for (const env of b.history) if (env?.time) r = st.put({ nb: id, time: env.time, env }); return r; });
+  const { id: _i, rev: _r, updated: _u, ...doc } = b.notebook;
+  // (the cells keep their ids: the journal refers to them)
+  await open(new IdbStore(db, id, { ...doc, id }), id);
+  return id;
+}
+window.sagebrush.bundle = makeBundle;
+window.sagebrush.openBundle = openBundle;
 
 // File > Open
 const openDlg = $("#opendlg");

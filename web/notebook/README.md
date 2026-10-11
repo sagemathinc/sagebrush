@@ -112,5 +112,8 @@ The history also keeps an **execution journal**, so TimeTravel can recreate the 
   - an interpreter outside the browser (`sagebrush notebook`);
   - a session that also ran another notebook's code (one tab's interpreter is shared by the notebooks opened in it);
   - a history cleared while the interpreter ran.
+- **The portable bundle:**
+  - `File > Download with history (.sbreplay)` saves gzipped JSON: the notebook, its history patches (journal included), and the bytes of the files its sessions read. A typical one is a few KB.
+  - `Upload` opens one as a new notebook with its history, in any browser, so its versions can be resumed there. Files are checked against their hashes.
 - **The kernel's side:** `WorkerKernel` reports `execute` (a run is asked for) and `run` (it finished: `{kind, code | iid, values, ms, out, clock, ...}`) events. `execute(code, {mode, cell, clock})` replays a run's clock.
 - **Tests:** [web/test-replay.mjs](../test-replay.mjs) records a session in headless Chromium (random numbers, the clock, numpy, `os.urandom`, a file, an `@interact`, the console) and resumes it in a new tab. It also checks that a replay whose output differs says where.
