@@ -63,7 +63,8 @@ function walrusTargets(n: any): string[] {
 
 // Whether evaluating expression (or simple statement) `n` binds `name` by
 // `:=` here: "no", "yes", or "maybe" (under `and`/`or` after the first
-// operand, a conditional expression's branches, a comprehension's body).
+// operand, a conditional expression's branches, a comprehension's body, a
+// chained comparison's later operands, an assert's message).
 function walrusBinds(n: any, name: string): "no" | "yes" | "maybe" {
   let res: "no" | "yes" | "maybe" = "no";
   const scan = (m: any, cond: boolean): void => {
@@ -76,6 +77,9 @@ function walrusBinds(n: any, name: string): "no" | "yes" | "maybe" {
         return;
       case "BoolOp": m.values.forEach((v: any, i: number) => scan(v, cond || i > 0)); return;
       case "IfExp": scan(m.test, cond); scan([m.body, m.orelse], true); return;
+      // (`a < b < c` evaluates c only if a < b; an assert's message only if it fails)
+      case "Compare": scan([m.left, m.comparators[0]], cond); scan(m.comparators.slice(1), true); return;
+      case "Assert": scan(m.test, cond); scan(m.msg, true); return;
       case "ListComp": case "SetComp": case "DictComp": case "GeneratorExp": scan(m.generators?.[0]?.iter, cond); scan([m.elt, m.key, m.value, m.generators?.map((g: any) => [g.ifs, g.iter])], true); return;
       case "FunctionDef": case "AsyncFunctionDef": scan([m.decorator_list, m.args?.defaults, m.args?.kw_defaults], cond); return;
       case "ClassDef": scan([m.decorator_list, m.bases, m.keywords], cond); return;

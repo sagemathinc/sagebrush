@@ -194,7 +194,7 @@ test("sixth review: walrus that may not run, bindings in def and class headers, 
   const S = "x\u02b92";
   const cls = (body: string) => q(["x=1", "print(x)", `x=2\nclass C:\n${body}`, "print(C.y,x)"], "x");
   // a := that may not run: the read after it is undetermined (refused)
-  for (const body of ["    if False and (x:=100):\n        pass\n    y=x", "    if True or (x:=100):\n        y=x", "    (x:=100) if False else None\n    y=x"]) assert.equal(cls(body), null, body);
+  for (const body of ["    if 0 > 1 > (x:=100):\n        pass\n    y=x", "    assert True,(x:=100)\n    y=x", "    if False and (x:=100):\n        pass\n    y=x", "    if True or (x:=100):\n        y=x", "    (x:=100) if False else None\n    y=x"]) assert.equal(cls(body), null, body);
   // one that surely runs binds the class's x
   assert.deepEqual(cls("    (x:=100) and False\n    y=x"), { c2: `${S}=2\nclass C:\n    (x:=100) and False\n    y=x`, c3: `print(C.y,${S})` });
   // := in a def's defaults or a class's bases binds the class's x
