@@ -9,3 +9,9 @@ run again, in an order the notebook works out from the code.
 
 This series describes exactly how that works, so that people and AI agents
 can predict what the notebook will do.
+
+1. [How cells run](01-how-cells-run.md): what a cell defines and reads, the
+   dependency graph, page-order scoping for names defined in several cells,
+   what runs and when (the time budget, stale cells), what the interpreter
+   keeps, errors, outputs from elsewhere, notes for AI agents, limits, and
+   the differences from marimo.
