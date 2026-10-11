@@ -567,7 +567,8 @@ export class MT {
   }
   seed(x: any) {
     let v: bigint;
-    if (x === null || x === undefined) v = BigInt(Date.now()) * 1000003n + BigInt(process.pid);
+    // seed(None): 256 bits of os.urandom, as CPython (it was the clock)
+    if (x === null || x === undefined) v = [...(require("crypto").randomBytes(32) as Uint8Array)].reduce((a, b) => (a << 8n) | BigInt(b), 0n);
     else if (O.isPyInt(x)) v = BigInt(typeof x === "boolean" ? +x : x);
     else if (typeof x === "string") v = BigInt.asUintN(64, BigInt(O.hashAny(x)));
     else v = BigInt.asUintN(64, BigInt(O.hashAny(x)));

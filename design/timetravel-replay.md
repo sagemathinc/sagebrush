@@ -1,8 +1,18 @@
 # TimeTravel replay: the live session at any point in the history
 
-**Status:** design and feasibility study (October 11, 2026). The experiments
-are run; nothing is implemented yet. Two runtime bugs found along the way are
-fixed (see the end).
+**Status:** implemented on October 11, 2026: the journal, the deterministic
+worker and "Resume from here", in [web/replay-env.ts](../web/replay-env.ts),
+[web/replay-page.js](../web/replay-page.js) and
+[web/notebook/history.js](../web/notebook/history.js); usage in
+[web/notebook/README.md](../web/notebook/README.md#resume-from-here-the-session-at-any-version).
+William's decisions on the open questions:
+- seeded entropy on, with a per-notebook switch;
+- recorded clock reads;
+- only file hashes in the history;
+- CoCalc sync deferred.
+
+The cross-browser libm and the portable bundle are next. Two runtime bugs
+found along the way are fixed (see the end).
 
 ## The idea
 

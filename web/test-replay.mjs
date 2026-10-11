@@ -1,0 +1,153 @@
+// TimeTravel's Resume from here (design/timetravel-replay.md), on the full
+// page in headless Chromium: runs are journaled in the history; resuming a
+// version in a new tab replays them and recreates the session exactly
+// (random numbers, the clock, os.urandom, numpy, a file read), with the code
+// as it ran, not as it was edited afterwards.  Serve web/dist first:
+//   bun web/build.ts && (cd web/dist && python3 ../serve.py 8765) &
+//   node web/test-replay.mjs
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
+const port = 9343;
+const profile = mkdtempSync(join(tmpdir(), "sb-replay-"));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let targets;
+for (let i = 0; i < 100; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
+const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
+async function tab(wsUrl) {
+  const ws = new WebSocket(wsUrl);
+  await new Promise((r) => (ws.onopen = r));
+  let n = 0; const waiting = new Map();
+  ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500)); return r.result?.value; };
+  const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
+  return { ws, send, ev, until };
+}
+const ready = "window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && document.querySelector('#status').textContent.startsWith('ready')";
+const outs = "sagebrush.notebook.cells().map((c) => c.out.textContent)";
+// run every cell and wait until none is queued or running
+const runAll = "(async () => { await sagebrush.notebook.runAll(); return true; })()";
+
+const CELLS = [
+  "import random, time, os\nr = random.random(); t = time.time(); u = os.urandom(4).hex()\nprint(r, u)",
+  "a = 10\nprint(a)",
+  "import numpy as np\ng = np.random.default_rng().integers(0, 1000, 3)\nprint(g)",
+  "data = open('data.txt').read()\nprint(data)",
+  "from ipywidgets import interact\n@interact(n=(1, 10))\ndef f(n=3):\n    global last\n    last = n * a\n    print('last =', last)",
+];
+const PROBE = "print(r, t, u, list(g), a, data, last, b)";
+
+try {
+  const a = await tab(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  await a.send("Page.navigate", { url: base });
+  await a.until(ready);
+  // a new notebook with these cells, and a file in the browser's files
+  await a.ev(`(() => { sagebrush.notebook.replace({ mode: "python", cells: ${JSON.stringify(CELLS.map((code, i) => ({ id: "c" + i, code })))} }); return true; })()`);
+  await a.ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File(["hello, file"], "data.txt")); dispatchEvent(new DragEvent("drop", { dataTransfer: dt, cancelable: true })); return true; })()`);
+  await sleep(800);
+  await a.ev(runAll);
+  const original = await a.ev(outs);
+  ok(original[3].trim() === "hello, file" && /^0\.\d+ [0-9a-f]{8}/.test(original[0]), "the cells ran: " + JSON.stringify(original.map((s) => s.trim())));
+  // an @interact moved (its function sets a variable), and the console's code (not in the notebook)
+  const moved = await a.ev("(async () => { const nb = sagebrush.notebook; const box = await nb.setInteract([...nb.interacts.keys()][0], { n: 7 }); return box.textContent; })()");
+  ok(/last = 70/.test(moved), "the @interact reran with n = 7: " + moved.trim());
+  const interactOut = (await a.ev(outs))[4];
+  await a.ev("new Promise((res) => sagebrush.kernel.execute('b = last + 1', { mode: 'python', repl: true }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: res, stopped: res, skipped: res }))");
+  // edit a cell without running it, then add a probe and run it
+  await sleep(700);
+  await a.ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[1], "a = 20\\nprint(a)"); return true; })()`);
+  await sleep(900);
+  await a.ev("(() => { sagebrush.notebook.flush(); return true; })()");
+  const head = await a.ev("sagebrush.history.head()");
+  await a.ev(`(() => { const nb = sagebrush.notebook; const c = nb.addCell(${JSON.stringify(PROBE)}, "end"); return true; })()`);
+  await sleep(900);
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
+  const probe = (await a.ev(outs)).at(-1).trim();
+  ok(/ 10 hello, file 70 71$/.test(probe), "the probe sees a = 10 (the edit was not run), the interact's and the console's variables: " + probe);
+
+  // ---- the journal
+  await sleep(500);
+  const runs = await a.ev("sagebrush.history.records('run').length");
+  const sessions = await a.ev("sagebrush.history.records('session')");
+  ok(runs === 8 && sessions.length === 1 && /^[0-9a-f]{64}$/.test(sessions[0].seed ?? ""), `journaled: ${runs} runs, ${sessions.length} session with a seed`);
+  ok(sessions[0].files?.length === 0 && (await a.ev("sagebrush.history.records('file').length")) === 1, "the file (dropped after the interpreter started) is a file event, with its hash only");
+  const plan = await a.ev(`(() => { const p = sagebrush.history.replayPlan(${JSON.stringify(head)}); return { runs: p.runs, ms: p.ms, blocking: p.blocking, warnings: p.warnings, files: p.events.filter((e) => e.file).length }; })()`);
+  ok(plan.runs === 7 && plan.files === 1 && plan.blocking.length === 0 && plan.warnings.length === 0, "the plan at the edited version: the 7 runs before it (cells, interact, console) and the file: " + JSON.stringify(plan));
+  const consoleRun = await a.ev("sagebrush.history.records('run').find((r) => r.code === 'b = last + 1') ?? null");
+  ok(consoleRun && consoleRun.repl && !consoleRun.cell, "the console's run keeps its code in the journal (it is not in the notebook)");
+  // ---- the panel: a mark, the estimate
+  await a.ev("document.querySelector('#ttbtn').click()");
+  await a.until("document.querySelectorAll('#ttmarks i').length > 0", 5000);
+  await a.ev(`(() => { const vs = sagebrush.history.versions(); const s = document.querySelector('#ttslider'); s.value = vs.findIndex((v) => v.time === ${JSON.stringify(head)}); s.dispatchEvent(new Event('input')); return true; })()`);
+  const btn = await a.ev("document.querySelector('#ttresume').textContent");
+  ok(/^Resume from here — (under a second|about \d+ s)$/.test(btn) && !(await a.ev("document.querySelector('#ttresume').disabled")), "the button: " + btn);
+  // ---- resume, in a new tab
+  await a.ev("window.open = (u) => { window.__opened = u; return null; }; true");
+  await a.ev("document.querySelector('#ttresume').click()");
+  const url = await a.ev("window.__opened");
+  ok(/\?resume=.+&at=/.test(url ?? ""), "Resume from here opens " + url);
+  const t2 = await (await fetch(`http://127.0.0.1:${port}/json/new?` + encodeURIComponent(new URL(url, base).href), { method: "PUT" })).json();
+  const b = await tab(t2.webSocketDebuggerUrl);
+  await b.send("Page.bringToFront");
+  await b.until("window.sagebrush?.replayReport !== undefined", 60000);
+  const report = await b.ev("sagebrush.replayReport");
+  const status = await b.ev("document.querySelector('#status').textContent");
+  ok(report.runs === 7 && report.diverged.length === 0, "replayed 7 runs, identical: " + status);
+  const resumed = await b.ev(outs);
+  ok(JSON.stringify(resumed.slice(0, 4)) === JSON.stringify(original.slice(0, 4)), "the replayed outputs are the original ones");
+  ok(resumed[4] === interactOut && (await b.ev("[...sagebrush.notebook.interacts.values()][0]?.values.n")) === 7, "the @interact shows its last output and its control at n = 7: " + resumed[4].trim());
+  ok((await b.ev("sagebrush.notebook.cells()[1].ta.value")) === "a = 20\nprint(a)", "the cells are as at that version (the edit)...");
+  await b.ev(`(() => { sagebrush.notebook.addCell(${JSON.stringify(PROBE)}, "end"); return true; })()`);
+  await b.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
+  const probe2 = (await b.ev(outs)).at(-1).trim();
+  ok(probe2 === probe, "...and the session is the original's: " + probe2);
+  ok(/\(at version \d+\)$/.test(await b.ev("document.querySelector('#nbname').value")), "the new notebook's name says which version: " + (await b.ev("document.querySelector('#nbname').value")));
+  ok((await b.ev("location.search")) === "", "the address no longer resumes (a reload does not fork again)");
+  // the resumed notebook's own history: the versions up to that one, and its journal continues
+  const bRuns = await b.ev("sagebrush.history ? sagebrush.history.records('run').length : -1");
+  ok(bRuns === 8, "its history has the original's journal and its new run: " + bRuns);
+  const bplan = await b.ev("(() => { const h = sagebrush.history; const p = h.replayPlan(h.head()); return { runs: p.runs, blocking: p.blocking }; })()");
+  ok(bplan.runs === 8 && bplan.blocking.length === 0, "...so it can be resumed in turn: " + JSON.stringify(bplan));
+  b.ws.close();
+  await fetch(`http://127.0.0.1:${port}/json/close/` + t2.id);
+
+  // ---- reproducible randomness off: a warning; an interrupted run: not resumable
+  await a.send("Page.bringToFront");
+  await a.ev("document.querySelector('#ttrepro').click(); true");
+  ok((await a.ev("sagebrush.notebook.meta.reproducible")) === false, "the switch turns reproducible randomness off for this notebook");
+  await a.ev("sagebrush.kernel.restart(); true");
+  await a.until("document.querySelector('#status').textContent.startsWith('ready')");
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[1]); return true; })()");
+  await sleep(500);
+  const p3 = await a.ev("(() => { const h = sagebrush.history; const p = h.replayPlan(h.head()); return { runs: p.runs, warnings: p.warnings, seeds: h.records('session').map((s) => !!s.seed) }; })()");
+  ok(p3.runs === 1 && p3.warnings.includes("reproducible randomness was off") && p3.seeds.includes(false), "with it off, the new session has no seed and resuming warns: " + JSON.stringify(p3));
+  await a.ev("document.querySelector('#ttrepro').click(); true");
+  // ---- a replay that differs says so: the journal's output hash of run 2 altered
+  await a.ev("(() => { const h = sagebrush.history; const r = h.records('run').find((x) => x.n === 2); h.journal([{ ...r, out: 'altered' }]); return true; })()");
+  await a.ev("document.querySelector('#ttresume').click()");
+  const url3 = await a.ev("window.__opened");
+  const t3 = await (await fetch(`http://127.0.0.1:${port}/json/new?` + encodeURIComponent(new URL(url3, base).href), { method: "PUT" })).json();
+  const c = await tab(t3.webSocketDebuggerUrl);
+  await c.send("Page.bringToFront");
+  await c.until("window.sagebrush?.replayReport !== undefined", 60000);
+  const r3 = await c.ev("sagebrush.replayReport"), s3 = await c.ev("document.querySelector('#status').textContent");
+  ok(r3.diverged.length === 1 && r3.diverged[0].n === 2 && /run 2: its output differs/.test(s3), "a replay whose output differs from the journal's says where: " + s3);
+  c.ws.close();
+  await fetch(`http://127.0.0.1:${port}/json/close/` + t3.id);
+  await a.send("Page.bringToFront");
+  // ---- reload: the journal is in IndexedDB
+  await a.send("Page.reload");
+  await a.until(ready);
+  await a.until("sagebrush.history !== null", 10000);
+  const after = await a.ev(`(() => { const p = sagebrush.history.replayPlan(${JSON.stringify(head)}); return p.runs; })()`);
+  ok(after === 7, "after a reload, the same version still resumes with its 7 runs");
+} catch (e) {
+  ok(false, String(e?.stack ?? e));
+} finally {
+  chrome.kill();
+  try { rmSync(profile, { recursive: true, force: true }); } catch {}
+}
