@@ -178,3 +178,4 @@
 .sbnb .cell.edited .runb { color: #b45309; }
 .sbnb .cell.edited .gutter .n::after { content: "*"; color: #b45309; }
 .sbnb .cell.cancelled .out, .sbnb .cell.cancelled .n { opacity: .6; }
+.sbnb .cell.manual .runb { outline: 1px dashed currentColor; outline-offset: -3px; }

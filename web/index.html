@@ -190,11 +190,13 @@
     <button id="addmd" title="Add a Markdown (text) cell at the end">+ Text</button>
     <button class="stop" id="stop" title="Interrupt the running program (KeyboardInterrupt; variables are kept)">Stop</button>
     <button id="restart" title="Fresh interpreter">Restart</button>
+    <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
+    <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option></select>
     <select id="examples" aria-label="Load examples"><option value="">Examples…</option></select>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, download, upload and share notebooks">File ▾</button>
     <button id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
-    <button id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt that shares the notebook's variables">Console</button>
+    <button id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
     <button id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
     <button id="keysbtn" title="Keyboard shortcuts (H in command mode)" aria-label="Keyboard shortcuts">⌨</button>
     <span id="status" role="status">loading…</span>
@@ -947,6 +949,27 @@ themeEl.value = document.documentElement.dataset.theme || "system";
 const setMode = (mode) => nb.setMode(mode);
 
 $("#runall").onclick = () => nb.runAll();
+// The reactive notebook's controls: the time budget for automatic reruns
+// (kept in the notebook), and running what is stale.
+const autorunEl = $("#autorun"), runStaleEl = $("#runstale");
+const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 2000);
+autorunEl.onchange = () => nb.setBudget(budgetOf(autorunEl.value));
+runStaleEl.onclick = () => { const s = nb.reactive?.staleSummary(); if (s?.cells.length) nb.runCells(s.cells, { budget: Infinity }); };
+let staleShown = 0;
+function showReactiveBar() {
+  const r = nb.reactive;
+  autorunEl.hidden = !nb.reactiveOn;
+  if (nb.reactiveOn) {
+    const b = nb.budget, v = b === Infinity ? "always" : b === 0 ? "never" : String(b);
+    if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`Auto-run: ${b / 1000} s`, v));
+    autorunEl.value = v;
+  }
+  const s = r?.staleSummary();
+  runStaleEl.hidden = !s?.cells.length;
+  if (s?.cells.length) runStaleEl.textContent = `Run stale (${s.cells.length}${s.ms >= 1000 ? `, about ${Math.round(s.ms / 1000)} s` : ""})`;
+}
+nb.on("status", () => { cancelAnimationFrame(staleShown); staleShown = requestAnimationFrame(showReactiveBar); });
+nb.on("budget", showReactiveBar);
 $("#add").onclick = () => nb.addCell("", null, true);
 $("#addmd").onclick = () => nb.addCell("", null, true, "markdown");
 $("#keysbtn").onclick = () => nb.showKeys();

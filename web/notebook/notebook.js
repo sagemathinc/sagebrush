@@ -216,7 +216,7 @@ function installPlotTip() {
 const TRASH_SVG = '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M2.5 4h11M6 4V2.5h4V4M4 4l.8 9.5h6.4L12 4M6.8 6.5v5M9.2 6.5v5"/></svg>';
 const MENU_HTML = `<button role="menuitem" data-m="above">Insert cell above <kbd>A</kbd></button><button role="menuitem" data-m="below">Insert cell below <kbd>B</kbd></button><hr>
 <button role="menuitem" data-m="up">Move up <kbd>Alt+↑</kbd></button><button role="menuitem" data-m="down">Move down <kbd>Alt+↓</kbd></button><hr>
-<button role="menuitem" data-m="type">Change to Markdown</button><button role="menuitem" data-m="split">Split at the cursor <kbd>Ctrl+;</kbd></button><button role="menuitem" data-m="clear">Clear output</button><button role="menuitem" data-m="delete" class="danger">Delete cell <kbd>D D</kbd></button>`;
+<button role="menuitem" data-m="type">Change to Markdown</button><button role="menuitem" data-m="split">Split at the cursor <kbd>Ctrl+;</kbd></button><button role="menuitem" data-m="clear">Clear output</button><button role="menuitem" data-m="manual" aria-checked="false">Run only by hand</button><button role="menuitem" data-m="delete" class="danger">Delete cell <kbd>D D</kbd></button>`;
 const k = (...keys) => keys.map((x) => `<kbd>${x}</kbd>`).join("+");
 const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-label="Close">✕</button></form>
 <p>As in Jupyter: ${k("Esc")} leaves the editor for <b>command mode</b>, where single keys act on cells; ${k("Enter")} goes back to editing.</p>
@@ -676,6 +676,7 @@ export function createNotebook(root, opts = {}) {
   const cellById = (id) => cells().find((c) => c.id === id);
   // The scheduler of the interpreter's state: one per interpreter (kept on it).
   function engine() {
+    if (kernel.reactive) kernel.reactive.budget = budget; // (the notebook's, when interpreters are switched)
     if (!kernel.reactive) {
       const r = (kernel.reactive = new Reactive({
         cells: () => cells().filter((c) => c.type === "code").map((c) => ({ id: c.id, code: c.ta.value, manual: !!c.metadata?.sagebrush?.manual })),
@@ -756,6 +757,23 @@ export function createNotebook(root, opts = {}) {
       for (const e of st.errors) appendText(cell.out, errorText(e) + "\n", true);
       markEdited(cell);
     }
+  }
+  // A manual cell (kept in its metadata, sagebrush.manual) never reruns automatically.
+  function setManual(cell, on) {
+    const sb = { ...(cell.metadata?.sagebrush ?? {}) };
+    if (on) sb.manual = true;
+    else delete sb.manual;
+    const md = { ...(cell.metadata ?? {}) };
+    if (Object.keys(sb).length) md.sagebrush = sb;
+    else delete md.sagebrush;
+    cell.metadata = Object.keys(md).length ? md : null;
+    showManual(cell);
+    schedule();
+  }
+  function showManual(cell) {
+    const on = !!cell.metadata?.sagebrush?.manual;
+    cell.el.classList.toggle("manual", on);
+    cell.runb.title = on ? "A manual cell: it runs only when you run it (Shift+Enter)" : cell.type === "code" ? "Run (Shift+Enter)" : cell.runb.title;
   }
   // A cell whose code differs from what last ran ("edited": its output and
   // what other cells see are the old code's)
@@ -1278,6 +1296,12 @@ export function createNotebook(root, opts = {}) {
     menu.style.left = `${Math.max(8, r.right + scrollX - menu.offsetWidth)}px`;
     cell.menuBtn.setAttribute("aria-expanded", "true");
     menu.querySelector('[data-m="type"]').textContent = cell.type === "markdown" ? "Change to Code" : "Change to Markdown";
+    // (the reactive notebook: a manual cell never reruns automatically)
+    const man = menu.querySelector('[data-m="manual"]');
+    man.hidden = !reactive() || cell.type !== "code";
+    man.setAttribute("role", "menuitemcheckbox");
+    man.setAttribute("aria-checked", String(!!cell.metadata?.sagebrush?.manual));
+    man.textContent = (cell.metadata?.sagebrush?.manual ? "✓ " : "") + "Run only by hand";
     menu.querySelector("button").focus();
   }
   function closeMenu(refocus) {
@@ -1301,6 +1325,7 @@ export function createNotebook(root, opts = {}) {
       case "split": return split(cell);
       case "clear": if (cell.type === "markdown") return cell.ta.focus(); forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
       case "delete": return remove(cell);
+      case "manual": setManual(cell, !cell.metadata?.sagebrush?.manual); return cell.menuBtn.focus();
     }
   });
   menu.addEventListener("keydown", (e) => {
@@ -1426,8 +1451,12 @@ export function createNotebook(root, opts = {}) {
   // code registered, stale unless this interpreter computed them.
   function reactiveLoad() {
     if (!reactive()) return;
-    if (kernel.reactive) return reactiveSync();
-    engine().load({ fresh: kernel.ran ?? new Set() });
+    const a = meta.autorun;
+    budget = a === "always" ? Infinity : a === "never" ? 0 : typeof a === "number" && a >= 0 ? a : opts.budget ?? 2000;
+    for (const c of cells()) if (c.type === "code") showManual(c);
+    if (kernel.reactive) reactiveSync();
+    else engine().load({ fresh: kernel.ran ?? new Set() });
+    emit("budget", budget); // (after: a listener may ask for the engine)
   }
   // Apply a document changed elsewhere (another tab, a collaborator, an agent):
   // cells are matched by id; what changed is updated in place, so the cell
@@ -1712,9 +1741,18 @@ export function createNotebook(root, opts = {}) {
     setKernel(k, { stale = true } = {}) { if (k === kernel) return; bindKernel(k); if (stale) for (const c of cells()) markStale(c); },
     /** The reactive notebook (design/reactive-notebook.md): on or off, and its budget (ms; Infinity: autorun, 0: lazy). */
     setReactive(on) { reactiveOn = !!on; if (on) reactiveLoad(); else for (const c of cells()) c.el.classList.remove("edited", "cancelled", "error"); },
-    get reactive() { return reactive() ? engine() : null; },
+    /** the scheduler (null until the document is loaded, or when off); reactiveOn: whether the notebook is reactive */
+    get reactive() { return reactive() ? kernel.reactive ?? null : null; },
+    get reactiveOn() { return reactive(); },
     get budget() { return budget; },
-    setBudget(ms) { budget = ms; if (kernel?.reactive) kernel.reactive.budget = ms; },
+    setBudget(ms, { save = true } = {}) {
+      budget = ms;
+      if (kernel?.reactive) kernel.reactive.budget = ms;
+      // (kept in the document: "always", "never" or milliseconds)
+      if (save) { meta = { ...meta, autorun: ms === Infinity ? "always" : ms <= 0 ? "never" : ms }; schedule(); }
+      emit("budget", ms);
+    },
+    setManual,
     /** Files changed outside the notebook's cells (uploaded, deleted): the cells that read them rerun (the reactive notebook). */
     filesChanged(paths) { return reactive() && kernel.reactive ? kernel.reactive.filesChanged(paths) : Promise.resolve(null); },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
