@@ -537,6 +537,24 @@ try {
     return [...a, b, c0.ms, nb.snapshot().cells[0].ms];
   })()`);
   ok(JSON.stringify(tm) === "[200,200,true,300,300,300]", `run times merge: taken from elsewhere, kept from here (${JSON.stringify(tm)})`);
+
+  // a redefinition that may not run (William, October 12): the new name
+  // starts as the previous value, so a skipped one leaves it, as in Python;
+  // the cell then reads the previous definition (editing it reruns the
+  // cell); its line numbers are as written (the initialization runs on the
+  // first statement's line, not a line of its own)
+  await fileNew();
+  await ev("sagebrush.notebook.setBudget(Infinity); true");
+  await set(["w = 1", "if False:\n    w = 2\nprint('W', w)", "print('V', w)"]);
+  r = await run([0, 1, 2]);
+  ok(JSON.stringify(r?.errors) === "[]" && (await out(1)) === "W 1" && (await out(2)) === "V 1", `a skipped redefinition leaves the previous value (${await out(1)}, ${await out(2)}; ${JSON.stringify(r)})`);
+  await set(["w = 5"]);
+  r = await run(0);
+  ok((await out(1)) === "W 5" && (await out(2)) === "V 5", `editing the previous definition reruns it (${await out(1)}, ${await out(2)})`);
+  await set([null, "if False:\n    w = 2\nprint('W', w)\n1/0"]);
+  await run(1);
+  const tb = await out(1);
+  ok(/line 4/.test(tb) && /ZeroDivisionError/.test(tb) && !/\u02b9|page-order/.test(tb), `its traceback has the line as written, and no internal names (${JSON.stringify(tb)})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
