@@ -516,8 +516,10 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     another cell. Renaming the text changes it; keeping it resolves to the
     old definition. Any such cell is refused, even one that only prints the
     text (review of 72dc9fd). A module's `x: int = v` keeps its key in
-    `__annotations__`: it becomes `x: int; xʹ2 = v`, and a bare `x: int`
-    keeps its name.
+    `__annotations__`: it becomes `xʹ2 = v; x: int` (the value assigned
+    first, as Python does, and its grouping kept, from the `=` on), and a
+    bare `x: int` keeps its name. A renamed cell that does not parse is
+    refused, never run broken (review of ea5db8d).
   - When a statement shares the prologue's logical line (`"doc"; print(x)`,
     or after a `\` on the next physical line), that line is split at the
     statement, with the initialization between. Otherwise the initialization

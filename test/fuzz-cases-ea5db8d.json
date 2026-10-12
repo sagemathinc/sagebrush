@@ -1,0 +1,574 @@
+[
+  {
+    "name": "annotated parenthesized literal",
+    "codes": [
+      "x=1",
+      "x: int = (2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parenthesized binary",
+    "codes": [
+      "x=1",
+      "x: int = (x + 1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parenthesized nested",
+    "codes": [
+      "x=1",
+      "x: int = ((x + 1))\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parenthesized call",
+    "codes": [
+      "x=1",
+      "x: int = (int(x) + 1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parenthesized conditional",
+    "codes": [
+      "x=1",
+      "x: int = (x + 1 if True else 0)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parenthesized list",
+    "codes": [
+      "x=1",
+      "x: int = ([x, x+1])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parenthesized dictionary",
+    "codes": [
+      "x=1",
+      "x: int = ({\"a\": x+1})\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parenthesized tuple extra",
+    "codes": [
+      "x=1",
+      "x: int = ((x, x+1))\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parentheses unicode",
+    "codes": [
+      "α=1",
+      "α: int = (α+1)\nprint(α)",
+      "print(α)"
+    ],
+    "change": [
+      0,
+      "α=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parentheses third definition",
+    "codes": [
+      "x=1",
+      "x=x+1",
+      "x: int = (x+1)\nprint(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parentheses taken suite",
+    "codes": [
+      "x=1",
+      "if True:\n    x: int = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parentheses skipped suite",
+    "codes": [
+      "x=1",
+      "if False:\n    x: int = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parentheses after semicolon",
+    "codes": [
+      "x=1",
+      "print(x); x: int = (x+1); print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parentheses multiline close",
+    "codes": [
+      "x=1",
+      "x: int = (x+1\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotated parentheses explicit continuation",
+    "codes": [
+      "x=1",
+      "x: int = (x + \\\n    1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future annotated parentheses",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nx: int = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation RHS reads old key",
+    "codes": [
+      "from __future__ import annotations\nx: float = 1",
+      "from __future__ import annotations\nx: str = __annotations__[\"x\"] + str(x)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx: float = 5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation RHS measures old key",
+    "codes": [
+      "from __future__ import annotations\nx: float = 1",
+      "from __future__ import annotations\nx: int = x + len(__annotations__[\"x\"])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx: float = 5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation caught division leaves key absent",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ntry:\n    x: int = x // 0\nexcept ZeroDivisionError:\n    print(\"x\" in __annotations__, x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation caught lookup leaves key absent",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ntry:\n    x: int = [x][4]\nexcept IndexError:\n    print(\"x\" in __annotations__, x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation RHS clears dictionary",
+    "codes": [
+      "from __future__ import annotations\nx: float = 1",
+      "from __future__ import annotations\nx: int = __annotations__.clear() or x+1\nprint(sorted(__annotations__),x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx: float = 5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation RHS replaces key",
+    "codes": [
+      "from __future__ import annotations\nx: float = 1",
+      "from __future__ import annotations\nx: int = __annotations__.update({\"x\":\"rhs\"}) or x+1\nprint(__annotations__[\"x\"],x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx: float = 5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation RHS function observes dictionary",
+    "codes": [
+      "from __future__ import annotations\nx: float = 1",
+      "from __future__ import annotations\ndef rhs(v):\n    print(__annotations__[\"x\"])\n    return v+1\nx: int = rhs(x)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx: float = 5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation RHS pops old key",
+    "codes": [
+      "from __future__ import annotations\nx: float = 1",
+      "from __future__ import annotations\nx: str = __annotations__.pop(\"x\") + str(x)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx: float = 5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "annotation direct binary control",
+    "codes": [
+      "x=1",
+      "x: int = x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation direct call control",
+    "codes": [
+      "x=1",
+      "x: int = int(x)+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation direct list control",
+    "codes": [
+      "x=1",
+      "x: int = [x,x+1]\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation direct dictionary control",
+    "codes": [
+      "x=1",
+      "x: int = {\"a\":x+1}\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation direct tuple control",
+    "codes": [
+      "x=1",
+      "x: int = (x,x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation direct generator control",
+    "codes": [
+      "x=1",
+      "x: int = (i for i in [x,x+1])\nprint(list(x))",
+      "print(\"done\")"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized target control",
+    "codes": [
+      "x=1",
+      "(x): int = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized annotation control",
+    "codes": [
+      "x=1",
+      "x: (int | str) = x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation class scope control",
+    "codes": [
+      "x=1",
+      "class C:\n    x: int = (7)\nx=x+1\nprint(C.x,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation function local control",
+    "codes": [
+      "x=1",
+      "def f():\n    x: int = (7)\n    return x\nx=x+1\nprint(f(),x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation without redefinition control",
+    "codes": [
+      "K=1",
+      "x: int = (K+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "K=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future key after success control",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nx: int = x+1\nprint(__annotations__[\"x\"],x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future bare key after redefinition control",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nx=x+1\nx: int\nprint(__annotations__[\"x\"],x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future annotation ignored target control",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\n(x): missing = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation simple skipped suite control",
+    "codes": [
+      "x=1",
+      "if False:\n    x: int = x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation literal RHS control",
+    "codes": [
+      "x=1",
+      "x: int = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future renamed annotation text boundary",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ny:x\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "annotation multiline annotation boundary",
+    "codes": [
+      "x=1",
+      "x: (int\n    | str) = x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "annotation value starts next line boundary",
+    "codes": [
+      "x=1",
+      "x: int = (\n    x+1\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "future renamed signature boundary",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ndef f(a:x): pass\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  }
+]
