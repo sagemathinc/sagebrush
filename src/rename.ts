@@ -411,6 +411,15 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         break;
       case "Attribute": walk(n.value, shadowed, stmt, under("value"), fn); return; // (not the attribute's name)
       case "keyword": walk(n.value, shadowed, stmt, under("value"), fn); return; // (not the argument's name)
+      case "AnnAssign": {
+        // (an annotation Python never evaluates, in a function or of a target
+        // that is not a simple name, reads nothing: left as written, REACT-2894-1)
+        const inFunction = path.some(([p, k]) => (p._type === "FunctionDef" || p._type === "AsyncFunctionDef") && k === "body");
+        walk(n.target, shadowed, stmt, under("target"), fn);
+        walk(n.value, shadowed, stmt, under("value"), fn);
+        if (n.simple && n.target?._type === "Name" && !inFunction) walk(n.annotation, shadowed, stmt, under("annotation"), fn);
+        return;
+      }
     }
     for (const k of Object.keys(n)) if (k !== "_type") walk(n[k], shadowed, stmt, under(k), fn);
   };

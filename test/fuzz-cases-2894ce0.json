@@ -1,0 +1,457 @@
+[
+  {
+    "name": "annotation actual index mutator",
+    "codes": [
+      "a=[]\nseen=[]",
+      "a[seen.append(1)]: missing",
+      "print(a,seen)"
+    ],
+    "change": [
+      0,
+      "a=[]\nseen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation actual attribute base mutator",
+    "codes": [
+      "a=[]\nseen=[]",
+      "(seen.append(1)).missing: missing",
+      "print(a,seen)"
+    ],
+    "change": [
+      0,
+      "a=[]\nseen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation actual tuple index mutators",
+    "codes": [
+      "a=[]\nseen=[]",
+      "a[seen.append(1),seen.append(2)]: missing",
+      "print(a,seen)"
+    ],
+    "change": [
+      0,
+      "a=[]\nseen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation actual slice index mutators",
+    "codes": [
+      "a=[]\nseen=[]",
+      "a[seen.append(1):seen.append(2):seen.append(3)]: missing",
+      "print(a,seen)"
+    ],
+    "change": [
+      0,
+      "a=[]\nseen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "valued annotation value then index side effects",
+    "codes": [
+      "a=[0]\nseen=[]",
+      "a[seen.append(\"index\") or 0]: missing = seen.append(\"value\") or 7",
+      "print(a,seen)"
+    ],
+    "change": [
+      0,
+      "a=[0]\nseen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation stops before index after missing base",
+    "codes": [
+      "seen=[]",
+      "try:\n    missing[seen.append(1)]: int\nexcept NameError:\n    pass",
+      "print(seen)"
+    ],
+    "change": [
+      0,
+      "seen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation ignores mutator in annotation",
+    "codes": [
+      "a=[]\nseen=[]",
+      "a[100]: seen.append(1)",
+      "print(a,seen)"
+    ],
+    "change": [
+      0,
+      "a=[]\nseen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module parenthesized annotation ignores mutator",
+    "codes": [
+      "seen=[]",
+      "(y): seen.append(1)",
+      "print(seen)"
+    ],
+    "change": [
+      0,
+      "seen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "valued parenthesized annotation ignores annotation call",
+    "codes": [
+      "seen=[]",
+      "(y): seen.append(1) = 9",
+      "print(y,seen)"
+    ],
+    "change": [
+      0,
+      "seen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation in nested method sees real global read",
+    "codes": [
+      "x=1",
+      "class C:\n    def value(self):\n        y: missing\n        return x",
+      "print(C().value())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation in function nested class parenthesized",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        (y): missing\n        value=x\n    return C.value",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation in nested function real global read",
+    "codes": [
+      "x=1",
+      "def f():\n    def g():\n        y: missing\n        return x\n    return g()",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "local simple annotation preserves local error",
+    "codes": [
+      "x=1",
+      "def f():\n    x: missing\n    return x",
+      "try:\n    print(f())\nexcept UnboundLocalError:\n    print(\"unbound\")"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized local annotation preserves closure",
+    "codes": [
+      "x=1",
+      "def outer():\n    y=x\n    def inner():\n        (y): missing\n        return y\n    return inner()",
+      "print(outer())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "function local annotation ignores mutation",
+    "codes": [
+      "seen=[]",
+      "def f():\n    y: seen.append(1)\n    return 3",
+      "print(f(),seen)"
+    ],
+    "change": [
+      0,
+      "seen=[5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored nested expression module attribute",
+    "codes": [
+      "def f():\n    return 3\n[].attr: (lambda: x)()",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    return 7\n[].attr: (lambda: x)()"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored nested expression module subscript",
+    "codes": [
+      "def f():\n    return 3\n[][100]: (lambda: x)()",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    return 7\n[][100]: (lambda: x)()"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored nested expression local compound",
+    "codes": [
+      "def f():\n    if True:\n        y: (lambda: x)()\n    return 3",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    if True:\n        y: (lambda: x)()\n    return 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation before repeated definition",
+    "codes": [
+      "x=1",
+      "(y): x\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored local annotation before repeated definition",
+    "codes": [
+      "x=1",
+      "def f():\n    y: x\n    return 3\nx=x+1\nprint(x,f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored local annotation after repeated definition",
+    "codes": [
+      "x=1",
+      "x=x+1\ndef f():\n    y: x\n    return 3\nprint(x,f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation target still raises for missing base",
+    "codes": [
+      "x=1",
+      "try:\n    missing.value: x\nexcept NameError:\n    print(\"missing\")",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation target still raises for missing index",
+    "codes": [
+      "x=1",
+      "try:\n    [][missing]: x\nexcept NameError:\n    print(\"missing\")",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation while body reads true dependency",
+    "codes": [
+      "x=1",
+      "def f():\n    (y): missing\n    while x < 0:\n        break\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming double parentheses",
+    "codes": [
+      "x=1",
+      "((y)): x\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming module attribute",
+    "codes": [
+      "x=1",
+      "[].missing: x\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming module subscript",
+    "codes": [
+      "x=1",
+      "[][100]: x\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming module slice",
+    "codes": [
+      "x=1",
+      "[][1:2]: x\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming valued parenthesized target",
+    "codes": [
+      "x=1",
+      "(y): x = 7\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming valued subscript target",
+    "codes": [
+      "x=1",
+      "box=[0]\nbox[0]: x = 7\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming class parenthesized annotation",
+    "codes": [
+      "x=1",
+      "class C:\n    (y): x\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming called local annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    y: x\n    return 3\nf()\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming called parenthesized local annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    (y): x\n    return 3\nf()\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming later module annotation control",
+    "codes": [
+      "x=1",
+      "x=x+1\n(y): x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation renaming earlier real target read control",
+    "codes": [
+      "x=1",
+      "[][x]: missing\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  }
+]
