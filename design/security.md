@@ -50,8 +50,9 @@ Untrusted content reaches the page in these ways:
    whatever it came from.
 5. **A Content-Security-Policy is a second line of defense.** web/build.ts
    writes it into `_headers` for `/`, `/board/*` and `/embed/*`. It allows
-   scripts only from the site, and the pages' own inline scripts by their
-   hashes, with no inline handlers, plugins, `<base>` or forms. Should markup
+   scripts only from the site and from Cloudflare's Web Analytics beacon
+   (which the site's host adds to its pages), and the pages' own inline
+   scripts by their hashes, with no inline handlers, plugins, `<base>` or forms. Should markup
    ever get past rules 1–4, no script it brought could run. The Python
    worker's script has its own response, so it has no such policy: it
    compiles Python to JavaScript.
