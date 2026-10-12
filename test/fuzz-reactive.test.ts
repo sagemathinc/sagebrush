@@ -67,6 +67,24 @@ export const REGRESSIONS: [string, Case][] = [
   ["a `:=` in a default inside a function with `global x` binds the notebook's x (REACT-F22)", regression([
     "x = 1", "def g():\n    global x\n    def f(a=(x := 2)):\n        return a\n    return f()\ng()\nprint(x)", "print(x)",
   ], [{ kind: "edit", id: "c1", stmts: ["def g():\n    global x\n    def f(a=(x := 3)):\n        return a\n    return f()\ng()\nprint(x)"] }])],
+  // (sagebrush-daybreak's review of 960105c)
+  ["a lambda written before a new x, called after it, reads the new x (REACT-F23)", regression(["x = 1", "f = lambda: x\nx = 2\nprint(f())", "assert x"])],
+  ["a function written before a new x, called after it, reads the new x (REACT-F23)", regression(["x = 1", "def f():\n    return x\nx = 2\nprint(f())", "assert x"])],
+  ["a lambda called before and after a new x: refused, not wrong (REACT-F23)", regression(["x = 1", "f = lambda: x\nprint(f())\nx = 2\nprint(f())", "assert x"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a generator that would bind x but never runs leaves x (REACT-F24)", regression(["x = 1", "g = ((x := 2) for _ in [0])\nprint(x)", "assert x"])],
+  ["a function setting x that is never called leaves x (REACT-F24)", regression(["x = 1", "def setx():\n    global x\n    x = 2\nprint(x)", "assert x"])],
+  ["a function setting x takes effect where it is called (REACT-F24)", regression(["x = 1", "def setx():\n    global x\n    x = 2\nprint(x)\nsetx()\nprint(x)", "print(x)"])],
+  ["a renamed class and function keep their names (REACT-F25)", regression([
+    "class C:\n    pass\ndef f():\n    pass", "class C:\n    def m(self):\n        pass\ndef f():\n    pass\nprint(C.__name__, C.__qualname__, C.m.__qualname__, f.__name__, f.__qualname__)", "print(C.__name__, f.__name__)",
+  ])],
+  ["annotations are read when asked for: the new definition (REACT-F26)", regression([
+    "def F():\n    pass", "def F(a: F) -> F:\n    pass\nprint(F.__annotations__['a'] is F)", "assert F",
+  ])],
+  ["`except E as x` deletes x for the cells below it, as in plain Python", regression(["x = 1", "print(x)", "try:\n    1 // 0\nexcept ZeroDivisionError as x:\n    pass", "print(x)"])],
+  ["a reader of a name an `except` cell with an error defines waits for it", regression([
+    "K = 7", "z, y = K, 9", "x, x = (lambda q: q + 1)(4), 7 - 4", "y += sum([i for i in range(3)])", "h2 = lambda: x\nprint(h2())\nx = 6\nprint(h2())",
+  ], [{ kind: "edit", id: "c2", stmts: ["x = K\ntry:\n    1 // 0\nexcept ZeroDivisionError as y:\n    print(type(y).__name__)"] }])],
+  ["a cell raising in plain Python raises here too (FUZZ-F4)", regression(["x = 1", "f = lambda: x\nx = 2\ndel x\nprint(f())", "print(x)"])],
 ];
 
 test("the reactive notebook computes what plain Python does: the fuzzer's cases", { skip: !hasPython && "no python3" }, async () => {
@@ -102,8 +120,9 @@ test("the fuzzer fails loudly when its interpreter dies, and shrinking ends (FUZ
   const k = new Kernel();
   await k.call({ op: "reset" });
   (k as any).p.kill();
-  await assert.rejects(k.call({ op: "reset" }), /python exited/);
-  assert.match(k.dead ?? "", /python exited/);
+  // (the write may fail before the exit is seen: either is the interpreter's death)
+  await assert.rejects(k.call({ op: "reset" }), /python (exited|'s stdin)/);
+  assert.match(k.dead ?? "", /python (exited|'s stdin)/);
   const c = makeCase(1, 6);
   const [small] = await shrink(k, c, { step: -1, cell: "", why: "the harness threw", detail: "" });
   assert.equal(small, c);

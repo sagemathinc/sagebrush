@@ -10,6 +10,8 @@ stdin/stdout:
 
 Each run answers {"out": printed text, "err": "Type: message" or null, "ms"}.
 """
+import ast
+import builtins
 import contextlib
 import io
 import json
@@ -25,18 +27,70 @@ def _timeout(*_):
 signal.signal(signal.SIGALRM, _timeout)
 
 
+# page-order scoping's renamed definitions get their names back, as the
+# notebook's interpreter does (src/rename.ts restoreDefNames, RENAME_HELPER)
+def _sb_rename(o, n):
+    old = getattr(o, "__name__", None)
+    try:
+        o.__name__ = n
+        o.__qualname__ = n
+    except Exception:
+        return
+    if isinstance(o, type) and isinstance(old, str):
+        for v in list(vars(o).values()):
+            f = getattr(v, "__func__", v)
+            q = getattr(f, "__qualname__", None)
+            if isinstance(q, str) and q.startswith(old + "."):
+                try:
+                    f.__qualname__ = n + q[len(old):]
+                except Exception:
+                    pass
+
+
+builtins.__sb_rename__ = _sb_rename
+DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def restore(tree, scoped):
+    def fix(stmts):
+        out = []
+        for st in stmts:
+            if not isinstance(st, DEFS):
+                for key in ("body", "orelse", "finalbody"):
+                    if isinstance(getattr(st, key, None), list):
+                        setattr(st, key, fix(getattr(st, key)))
+                for h in getattr(st, "handlers", None) or []:
+                    h.body = fix(h.body)
+                for c in getattr(st, "cases", None) or []:
+                    c.body = fix(c.body)
+            out.append(st)
+            if isinstance(st, DEFS) and st.name in scoped:
+                call = ast.Expr(ast.Call(ast.Name("__sb_rename__", ast.Load()), [ast.Name(st.name, ast.Load()), ast.Constant(scoped[st.name])], []))
+                for n in ast.walk(call):
+                    n.lineno = n.end_lineno = st.end_lineno
+                    n.col_offset = n.end_col_offset = st.end_col_offset
+                out.append(call)
+        return out
+
+    tree.body = fix(tree.body)
+    return tree
+
+
 def fresh():
     return {"__name__": "__main__", "__builtins__": __builtins__}
 
 
-def run(code, g):
+def run(code, g, scoped=None):
     buf = io.StringIO()
     err = None
     t = time.perf_counter()
     try:
         signal.alarm(2)
         with contextlib.redirect_stdout(buf):
-            exec(compile(code, "<cell>", "exec"), g)
+            tree = ast.parse(code, "<cell>")
+            if scoped:
+                restore(tree, scoped)
+            exec(compile(tree, "<cell>", "exec"), g)
     except BaseException as e:  # (SyntaxError and TimeoutError too)
         err = f"{type(e).__name__}: {e}"
     finally:
@@ -54,7 +108,7 @@ for line in sys.stdin:
     elif op == "exec":
         for k in m.get("forget", []):
             ns.pop(k, None)
-        r = run(m["code"], ns)
+        r = run(m["code"], ns, m.get("scoped"))
     elif op == "forget":
         for k in m["names"]:
             ns.pop(k, None)

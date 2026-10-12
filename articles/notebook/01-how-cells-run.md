@@ -100,13 +100,34 @@ If a name is defined by several cells and **no cell reads it** (a loop
 variable `i`, a scratch figure `fig`), nothing is renamed: each cell simply
 sets it. The same `import` in several cells is one definition.
 
-When renaming is not possible (Magma cells; a class body where a read of
-`x` gets either the class's own `x` or the notebook's depending on how the
-body runs, as after `if c: x = 1` or after a loop or `with` block that
-assigns or deletes `x`), marimo's rule applies: a name
+Code that runs later than it is written reads the definition in force
+when it runs: the body of a function, of a stored lambda, or of a
+generator expression; an annotation (read when asked for, as in Python
+3.14). So in
+
+```
+f = lambda: x
+x = 2
+print(f())
+```
+
+`f` reads the new `x`. A definition made inside a function (`global x`)
+takes effect where the cell calls that function. A renamed class or
+function keeps its name (`C.__name__` is `C`).
+
+When renaming is not possible, marimo's rule applies: a name
 read by other cells may be defined by only one cell, and the cells
 involved show an error with a button that renames the later definitions in
-the code itself.
+the code itself. That happens with Magma cells, and when the code does not
+say which definition a read gets:
+- a class body where `x` is the class's own or the notebook's depending on
+  how the body runs (after `if c: x = 1`, or a loop or `with` block that
+  assigns or deletes `x`);
+- a function or lambda the cell uses both before and after a new
+  definition;
+- a definition in code that may never run (a generator that is never
+  consumed, a function the cell never calls);
+- a function called while its class is being made.
 
 ## 4. What runs, and when
 

@@ -552,3 +552,37 @@ difference from plain Python: 15,000 notebooks from seed 1 with 6 steps
 (816,547). Not covered yet: budgets, manual cells, Stop, restarts and
 concurrent edits (each needs its own invariant), Sage and Magma cells, and
 pyjs as the interpreter (the fuzzer runs CPython).
+
+**sagebrush-codex's and sagebrush-daybreak's review of 960105c (October 12).**
+Both reviewers focused on *when* code runs. Fixed:
+- Code that runs later than written reads the definition in force when it
+  runs: function bodies, stored lambdas, generator expressions consumed
+  later (REACT-F20, F23), and annotations (lazy in Python 3.14; never
+  evaluated by pyjs) (F26).
+- A definition inside a function (`global x`) takes effect where the cell
+  calls it (F24).
+- Refused instead of guessing: a callable used both before and after a new
+  definition; a definition in code that may never run (an unconsumed
+  generator, an uncalled function); a function called while its class is
+  made (F21).
+- A `:=` in a default inside a function with `global x` (F22).
+- Renamed definitions keep `__name__` and `__qualname__` (F25):
+  restoreDefNames inserts `__sb_rename__(Cʹ2, "C")` in the tree at the
+  definition's last position, and the fuzzer's CPython does the same. This
+  found a pyjs bug: setting an attribute on a class ignored the
+  metaclass's data descriptors (`C.__name__ = ...` did nothing); also
+  type's `__doc__` had no setter. Both fixed.
+- `except E as x` counts as a definition (after which x is gone, as in
+  Python) for renaming and the graph.
+- In the default analysis, reads from module-level functions of a name the
+  cell defines later are references (marimo's capture rule drops them; a
+  function can be called before the definition). Strict mode is still
+  exactly marimo. On marimo's oracle, 23 cells gain such references, all of
+  names the cell defines.
+- A lazy-only definition (`:=` in an unconsumed generator) does not hide
+  the cell's later reads.
+- The fuzzer now also checks that a cell raising in plain Python raises
+  here, after the same output (FUZZ-F4). It applies to cells that read only
+  cells above them, and whose ancestors do too. It also generates lambdas
+  read before a new definition, unconsumed walrus generators, and
+  `__name__`/`__qualname__` prints.

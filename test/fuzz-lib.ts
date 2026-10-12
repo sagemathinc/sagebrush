@@ -140,7 +140,7 @@ export class Gen {
       // (sometimes a `:=` in the default: it binds the notebook's name)
       let dflt = this.expr(1);
       if (this.chance(0.2)) { dflt = `(${v} := ${dflt})`; def(v); }
-      const s = `def ${f}(a, b=${dflt}):\n    return ${body}`;
+      const s = `def ${f}(a, b=${dflt}):\n    return ${body}` + (this.chance(0.3) ? `\nprint(${f}.__name__, ${f}.__qualname__)` : "");
       this.funcs.add(f);
       return s;
     }
@@ -153,7 +153,7 @@ export class Gen {
       // later: called in this cell, after the class)
       if (this.chance(0.3)) {
         const a = this.pick([...attrs]);
-        return [`class ${c}:`, ...lines, `    def mm(self):`, `        return ${c}.${a}`, `    ff = lambda: ${c}.${a}`, `print(${c}().mm(), ${c}.ff())`].join("\n");
+        return [`class ${c}:`, ...lines, `    def mm(self):`, `        return ${c}.${a}`, `    ff = lambda: ${c}.${a}`, `print(${c}().mm(), ${c}.ff(), ${c}.__name__, ${c}.mm.__qualname__)`].join("\n");
       }
       return [`class ${c}:`, ...lines].join("\n");
     }
@@ -172,7 +172,17 @@ export class Gen {
       def(v);
       return `try:\n    ${v} = 10 // (${e})\nexcept ZeroDivisionError:\n    ${v} = -1`;
     }
-    if (r < 0.96 && this.ints.has(v)) return `print(${v})`;
+    if (r < 0.96 && this.ints.has(v)) {
+      const q = this.rand();
+      const h = `h${++this.n}`;
+      // (a lambda reading v, then a new v, then the call: the new value;
+      // called before and after: refused or right; a generator binding v
+      // that never runs: v stays)
+      if (q < 0.25) { const e = this.expr(); return `${h} = lambda: ${v}\n${v} = ${e}\nprint(${h}())`; }
+      if (q < 0.4) { const e = this.expr(); return `${h} = lambda: ${v}\nprint(${h}())\n${v} = ${e}\nprint(${h}())`; }
+      if (q < 0.55) return `${h} = ((${v} := ${this.expr()}) for _ in [0])\nprint(${v})`;
+      return `print(${v})`;
+    }
     const e = this.expr();
     def(v);
     return `${v} = ${e}`;
@@ -272,8 +282,8 @@ export async function runCase(k: Kernel, c: Case, stats: Stats): Promise<Failure
         return { error: { kind: e.name === "ImportStarError" ? "import-star" : "syntax", message: e.message } };
       }
     },
-    execute: async (id, src, forget) => {
-      const o: RunOut = await k.call({ op: "exec", code: src, forget });
+    execute: async (id, src, forget, scoped) => {
+      const o: RunOut = await k.call({ op: "exec", code: src, forget, scoped: scoped ?? {} });
       outs.set(id, o);
       return { ok: !o.err, ms: o.ms };
     },
@@ -298,10 +308,32 @@ export async function runCase(k: Kernel, c: Case, stats: Stats): Promise<Failure
     // depending on it; the others are compared)
     const raised = shown.filter((x) => want.get(x.id)!.err).map((x) => x.id);
     const unknown = r.graph.closure(raised);
+    const page = new Map(cells.map((x, i) => [x.id, i]));
+    // (whether a cell and all it depends on read only cells above them, as
+    // plain Python's top-to-bottom run does)
+    const inOrder = new Map<string, boolean>();
+    const ordered = (id: string): boolean => {
+      if (inOrder.has(id)) return inOrder.get(id)!;
+      inOrder.set(id, false);
+      // (and nothing above it runs after it: a `del` above runs after its
+      // readers, by design, unlike plain Python)
+      const v = [...r.graph.parents(id)].every((p) => page.get(p)! < page.get(id)! && ordered(p)) && [...r.graph.children(id)].every((c) => page.get(c)! > page.get(id)!);
+      inOrder.set(id, v);
+      return v;
+    };
     for (const x of shown) {
       const w = want.get(x.id)!;
-      if (unknown.has(x.id)) { stats.uncovered++; continue; }
       const s = states.get(x.id);
+      // (a cell raising in plain Python, reading only cells above it (and
+      // they likewise), as the reference does: it raises here too, after the
+      // same output)
+      if (w.err && s?.state !== "cancelled" && ordered(x.id)) {
+        const got = outs.get(x.id);
+        if (s?.state !== "done" || s.ok || got?.out !== w.out) return { step, cell: x.id, why: "plain Python raises, here it does not (or prints otherwise)", detail: `state ${JSON.stringify(s)}\nran:\n${r.effective(x.id)}\ngot: ${JSON.stringify(got)}\nwant: ${JSON.stringify(w)}` };
+        stats.compared++;
+        continue;
+      }
+      if (unknown.has(x.id)) { stats.uncovered++; continue; }
       if (s?.state === "cancelled") continue; // (waiting for an error elsewhere)
       const got = outs.get(x.id);
       const ctx = () => `state ${JSON.stringify(s)}\nran:\n${r.effective(x.id)}\ngot: ${JSON.stringify(got)}\nwant: ${JSON.stringify(w)}`;

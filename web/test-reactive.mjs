@@ -424,6 +424,11 @@ try {
   await run([0, 1, 2, 3]);
   ok((await out(3)) === "division by zero", `except ... as x after a string containing "as x:" (${await out(3)})`);
 
+  // daybreak's review, F25: a renamed class and function keep their names (in this interpreter)
+  await set(["class C:\n    pass\ndef f():\n    pass", "class C:\n    def m(self):\n        pass\ndef f():\n    pass\nprint(C.__name__, C.__qualname__, C.m.__qualname__, f.__name__, C())", "print(C.__name__)"]);
+  await run([0, 1, 2]);
+  ok(/^C C C\.m f <__main__\.C object at/.test(await out(1)) && (await out(2)) === "C", `renamed definitions keep their names (${await out(1)} | ${await out(2)})`);
+
   // fourth review, F16: verify compares an SVG's text as text
   await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"80\"><text x=\"0\" y=\"30\">id=\"sbclip'+str(v[0])+'\"</text></svg>'))"]);
   await run([0, 1, 2]);

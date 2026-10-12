@@ -148,9 +148,11 @@ export class NotebookGraph {
       const a = node.analysis;
       if (!a) continue;
       for (const n of a.defs) push(this.definers, n, id);
+      // (ours: `except E as x` binds x, then deletes it: a definition, after
+      // which x is gone, as in plain Python)
+      if (!this.strict) for (const n of a.unbinds ?? []) if (!a.defs.has(n)) push(this.definers, n, id);
       for (const n of a.refs) push(readers, n, id);
       for (const n of a.deleted) push(deleters, n, id);
-      if (!this.strict) for (const n of a.unbinds ?? []) push(deleters, n, id);
     }
     const edge = (p: string, c: string) => {
       if (p === c) return;

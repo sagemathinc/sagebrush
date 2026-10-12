@@ -14,20 +14,6 @@ const oracle: { marimo: string; cases: { code: string; defs?: string[]; refs?: s
 
 const sorted = (s: Set<string>) => [...s].sort();
 
-// Where we differ from marimo on purpose, as Python does: what is evaluated
-// before the cell binds a name (a default, a comprehension's first iterable,
-// the target of `x += 1`) reads the name's previous value, so it is a
-// reference (found by test/fuzz-reactive.ts).  Each: a fragment of the cell
-// (or, for the short ones, all of it), and the extra refs.
-const DIVERGES: [string, string[]][] = [
-  ["x += 5", ["x"]],
-  ["count += 1", ["count"]],
-  ["x = {x: x**3 for x in x}", ["x"]],
-  ["def uses_offset(x: int = offset())", ["offset"]],
-  ["one: int = first(),", ["first", "second"]],
-  ["def a(x: int = b()) -> int:", ["b", "c"]],
-];
-
 test(`definitions and references agree with marimo ${oracle.marimo}`, () => {
   const wrong: string[] = [];
   for (const c of oracle.cases) {
@@ -48,16 +34,24 @@ test(`definitions and references agree with marimo ${oracle.marimo}`, () => {
   assert.equal(wrong.length, 0, `${wrong.length} of ${oracle.cases.length} differ:\n${wrong.slice(0, 15).join("\n")}`);
 });
 
-test("ours (not strict): marimo's analysis, corrected where Python reads a name marimo does not count", () => {
+test("ours (not strict): marimo's analysis, plus the reads of a name's previous value that marimo does not count", () => {
+  // Where we differ from marimo on purpose, as Python does (found by
+  // test/fuzz-reactive.ts): what runs before the cell binds a name reads its
+  // previous value (a default, a comprehension's first iterable, `x += 1`,
+  // a function at the top level called before the definition below it), so
+  // it is a reference.  On marimo's oracle: the same definitions and
+  // deletions, and the same references plus some of names the cell defines.
   let n = 0;
   for (const c of oracle.cases) {
     if (c.error) continue;
-    const extra = DIVERGES.find(([frag]) => (frag.length < 12 ? c.code.trim() === frag : c.code.includes(frag)))?.[1] ?? [];
     const a = analyzeCell(c.code, "c1");
-    assert.deepEqual({ defs: sorted(a.defs), refs: sorted(a.refs), deleted: sorted(a.deleted) }, { defs: c.defs, refs: [...new Set([...(c.refs ?? []), ...extra])].sort(), deleted: c.deleted }, c.code);
+    assert.deepEqual([sorted(a.defs), sorted(a.deleted)], [c.defs, c.deleted], c.code);
+    const extra = sorted(a.refs).filter((r) => !(c.refs ?? []).includes(r));
+    assert.ok((c.refs ?? []).every((r) => a.refs.has(r)), c.code);
+    assert.deepEqual(extra.filter((r) => !a.defs.has(r)), [], c.code);
     if (extra.length) n++;
   }
-  assert.equal(n, 8);
+  assert.equal(n, 23);
   // a class's names are not seen from the bodies inside it; defaults and the
   // first iterable are evaluated in it; `del` in a class body; `x += 1`
   const refs = (code: string) => sorted(analyzeCell(code).refs);
@@ -69,13 +63,16 @@ test("ours (not strict): marimo's analysis, corrected where Python reads a name 
   assert.deepEqual(refs("class D:\n    z = 1\n    del z\n    a = z"), ["z"]);
   assert.deepEqual(refs("class A[T]:\n    def hello(self, x: T) -> T:\n        T"), []);
   assert.deepEqual(refs("y += 4"), ["y"]);
-  assert.deepEqual(refs("def f():\n    return x\nx = 0"), []);
+  // (a function at the top level may be called before the definition below it)
+  assert.deepEqual(refs("def f():\n    return x\nx = 0"), ["x"]);
+  assert.deepEqual(refs("def f():\n    def g():\n        return x\n    x = 0"), []);
+  assert.deepEqual(refs("def g():\n    global h\n    h = 1"), []);
   assert.deepEqual([...(analyzeCell("try:\n    1 // 0\nexcept ZeroDivisionError as x:\n    pass").unbinds ?? [])], ["x"]);
 });
 
 test("marimo's documented examples", () => {
   const a = (code: string) => {
-    const r = analyzeCell(code);
+    const r = analyzeCell(code, "c", { strict: true });
     return { defs: sorted(r.defs), refs: sorted(r.refs), deleted: sorted(r.deleted) };
   };
   // mutations are references, not definitions

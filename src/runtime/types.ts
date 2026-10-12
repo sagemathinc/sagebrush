@@ -83,7 +83,7 @@ getset(type, "__dict__", (c) => {
   }
   return d;
 });
-getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null);
+getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null, (c, v) => void c.$dict.set("__doc__", v));
 method(type, "__repr__", (c: any) => repr(c));
 method(type, "mro", (c: any) => c.$mro.slice());
 method(type, "__subclasses__", (c: any) => c.$subclasses.slice());

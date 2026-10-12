@@ -37,6 +37,7 @@ import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { mangleLocals, localPrefix } from "./dataflow";
+import { restoreDefNames, RENAME_HELPER } from "./rename";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -120,6 +121,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   let seededBefore = false;
   // page-order scoping's names in the running cell, and as written (xʹ2 -> x)
   let scopedNames: [string, string][] = [];
+  let renameHelper = false;
 
   const ready = (async () => {
     await initParser();
@@ -236,7 +238,11 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // "cell" mode: the value of a final expression is displayed, as in Jupyter.
         const mangle = typeof m.mangle === "string" && /^[A-Za-z0-9]+$/.test(m.mangle) ? m.mangle : null;
         if (mangle) run(`import __main__ as _m\n[_m.__dict__.pop(_k, None) for _k in [k for k in _m.__dict__ if k.startswith(${JSON.stringify(localPrefix(mangle))})]]\ndel _m\n`, host, "exec", "<forget>");
-        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle ? { transform: (t: any) => mangleLocals(t, mangle, { sage: !!m.sage }) } : {}) });
+        // (page-order scoping's renamed definitions get their names back: restoreDefNames)
+        const scoped = Object.fromEntries(scopedNames);
+        if (scopedNames.length && !renameHelper) { run(RENAME_HELPER, host, "exec", "<rename>"); renameHelper = true; }
+        const transform = (t: any) => { if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
+        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle || scopedNames.length ? { transform } : {}) });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }
