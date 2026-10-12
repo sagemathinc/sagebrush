@@ -97,7 +97,6 @@ function walrusBinds(n: any, name: string): "no" | "yes" | "maybe" {
 /** The occurrences of global `name` in a module's AST. */
 function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
   const out: Occurrence[] = [];
-  const futureText = tree.body.some((st: any) => st._type === "ImportFrom" && st.module === "__future__" && st.names.some((a: any) => a.name === "annotations"));
   // the names a function (or lambda, comprehension) body binds, minus its
   // `global`s (with `walrus` false: not counting `:=`; with `annotations`, a
   // function's: counting `x: int`, which makes x local there)
@@ -420,9 +419,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
         const inFunction = !!scope && scope[0]._type !== "ClassDef";
         walk(n.target, shadowed, stmt, under("target"), fn);
         walk(n.value, shadowed, stmt, under("value"), fn);
-        // (and with `from __future__ import annotations` it is its source
-        // text, which keeps the name as written)
-        if (n.simple && n.target?._type === "Name" && !inFunction && !futureText) walk(n.annotation, shadowed, stmt, under("annotation"), fn);
+        if (n.simple && n.target?._type === "Name" && !inFunction) walk(n.annotation, shadowed, stmt, under("annotation"), fn);
         return;
       }
     }
@@ -1220,6 +1217,24 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
       prefix = { line: st.lineno, text: `${to} = ${old}; ` };
     }
   } else for (const o of occ) target.set(o, to);
+  // (an annotation's target names its key in a module's __annotations__,
+  // whatever the value is stored under: a bare one keeps its name, and
+  // `x: int = v` becomes `x: int; xʹ2 = v`, below, REACT-72DC-2)
+  const annotated = (o: Occurrence): any => {
+    const [st, k] = o.path.at(-1) ?? [null, ""];
+    if (st?._type !== "AnnAssign" || k !== "target" || !st.simple) return null;
+    return o.path.some(([p, key]) => key === "body" && (p._type === "FunctionDef" || p._type === "AsyncFunctionDef" || p._type === "ClassDef")) ? null : st;
+  };
+  for (const o of occ) if (annotated(o) && !annotated(o).value) target.set(o, name);
+  // (with `from __future__ import annotations` an annotation is its text,
+  // and get_type_hints resolves that text: renaming it changes the one,
+  // not renaming it the other, REACT-8C82-1, REACT-72DC-1)
+  const future = tree.body.some((st: any) => st._type === "ImportFrom" && st.module === "__future__" && st.names.some((a: any) => a.name === "annotations"));
+  // (whether a function's or a statement's annotation holds it, at any depth)
+  const inAnnotation = (o: Occurrence) => o.path.some(([n, k]) => (n._type === "AnnAssign" && k === "annotation") || ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && (k === "annotations" || k === "returns")));
+  if (future && occ.some((o) => target.get(o) !== name && inAnnotation(o))) return null;
+  // (Sage: the line as preparsed is not the line as written)
+  if (opts.mode === "sage" && occ.some((o) => annotated(o)?.value && target.get(o) !== name)) return null;
   if (occ.some((o) => o.maybe && target.get(o) !== name)) return null;
   occ = occ.filter((o) => target.get(o) !== name);
   if (!occ.length && !prefix && !marker) return source;
@@ -1256,9 +1271,20 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
       }
     } else {
       spans = os.map((o) => [byteSlice(text, 0, o.col).length, byteSlice(text, 0, o.end).length]);
+      // (`x: int = v`: the key stays x, the value goes to the new name)
+      for (let i = 0; i < os.length; i++) {
+        const st = annotated(os[i]);
+        if (!st?.value) continue;
+        const ann = st.annotation;
+        if (ann.lineno !== ln || ann.end_lineno !== ln || st.value.lineno !== ln) return null;
+        const end = byteSlice(text, 0, st.value.col_offset).length;
+        if (os.some((o, j) => j !== i && spans[j][0] < end && spans[j][1] > spans[i][0])) return null;
+        reps.push([spans[i][0], end, `${name}: ${byteSlice(text, ann.col_offset, ann.end_col_offset)}; ${target.get(os[i])} = `]);
+        spans[i] = [-1, -1];
+      }
     }
     // (with the occurrence's replacement: `x as to` for an import of x)
-    reps.push(...spans.map(([s, e], i) => { const t = target.get(os[i])!; return [s, e, os[i].alias ? `${os[i].alias} as ${t}` : t] as [number, number, string]; }));
+    reps.push(...spans.flatMap(([s, e], i) => { if (s < 0) return []; const t = target.get(os[i])!; return [[s, e, os[i].alias ? `${os[i].alias} as ${t}` : t] as [number, number, string]]; }));
     reps.sort((a, b) => b[0] - a[0]);
     let t = text;
     for (const [s, e, r] of reps) t = t.slice(0, s) + r + t.slice(e);
