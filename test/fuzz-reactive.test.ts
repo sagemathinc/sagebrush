@@ -84,6 +84,23 @@ export const REGRESSIONS: [string, Case][] = [
   ["a reader of a name an `except` cell with an error defines waits for it", regression([
     "K = 7", "z, y = K, 9", "x, x = (lambda q: q + 1)(4), 7 - 4", "y += sum([i for i in range(3)])", "h2 = lambda: x\nprint(h2())\nx = 6\nprint(h2())",
   ], [{ kind: "edit", id: "c2", stmts: ["x = K\ntry:\n    1 // 0\nexcept ZeroDivisionError as y:\n    print(type(y).__name__)"] }])],
+  // (sagebrush-codex's review of 3bc474f)
+  ["`global x` in a class body, with := in a method's default (REACT-3BC-1)", regression(["x = 1", "class C:\n    global x\n    def f(a=(x := 2)):\n        return a\nprint(x)", "print(x)"])],
+  ["a lambda given to map runs when consumed: refused or right (REACT-3BC-2)", regression(["x = 1", "g = map(lambda _: x, [0])\nx = 2\nprint(next(g))", "print(x)"])],
+  ["a generator given to iter runs when consumed: refused or right (REACT-3BC-2)", regression(["x = 1", "g = iter(x for _ in [0])\nx = 2\nprint(next(g))", "print(x)"])],
+  ["a setter reading x before setting it, called once (REACT-3BC-3)", regression(["x = 1", "def bump():\n    global x\n    x = x + 1\nbump()\nprint(x)", "print(x)"])],
+  ["a setter reading x before setting it, called twice: refused or right (REACT-3BC-4)", regression(["x = 1", "def setx():\n    global x\n    print(x)\n    x = 2\nsetx()\nsetx()\nprint(x)", "print(x)"])],
+  ["a setter called under `if False`: x stays (REACT-3BC-5)", regression(["x = 1", "def setx():\n    global x\n    x = 2\nif False:\n    setx()\nprint(x)", "print(x)"])],
+  ["a setter called after `False and`: x stays (REACT-3BC-5)", regression(["x = 1", "def setx():\n    global x\n    x = 2\nFalse and setx()\nprint(x)", "print(x)"])],
+  ["a name a decorator chose is kept (REACT-3BC-6)", regression([
+    "def f():\n    pass", "def deco(fn):\n    fn.__name__ = 'custom'\n    return fn\n@deco\ndef f():\n    pass\nprint(f.__name__)", "print(f.__name__)",
+  ])],
+  ["a decorator's result keeps its own name (REACT-3BC-6)", regression([
+    "def f():\n    pass", "def deco(fn):\n    return lambda: 7\n@deco\ndef f():\n    pass\nprint(f.__name__, f())", "print(f())",
+  ])],
+  ["nested classes' and properties' qualified names (REACT-3BC-8)", regression([
+    "class C:\n    pass", "class C:\n    class D:\n        def m(self):\n            pass\n    @property\n    def a(self):\n        return 1\nprint(C.D.m.__qualname__, C.D.__qualname__, C.a.fget.__qualname__)", "print(C.__name__)",
+  ])],
   ["a cell raising in plain Python raises here too (FUZZ-F4)", regression(["x = 1", "f = lambda: x\nx = 2\ndel x\nprint(f())", "print(x)"])],
 ];
 
@@ -121,8 +138,8 @@ test("the fuzzer fails loudly when its interpreter dies, and shrinking ends (FUZ
   await k.call({ op: "reset" });
   (k as any).p.kill();
   // (the write may fail before the exit is seen: either is the interpreter's death)
-  await assert.rejects(k.call({ op: "reset" }), /python (exited|'s stdin)/);
-  assert.match(k.dead ?? "", /python (exited|'s stdin)/);
+  await assert.rejects(k.call({ op: "reset" }), /python( exited|'s stdin)/);
+  assert.match(k.dead ?? "", /python( exited|'s stdin)/);
   const c = makeCase(1, 6);
   const [small] = await shrink(k, c, { step: -1, cell: "", why: "the harness threw", detail: "" });
   assert.equal(small, c);

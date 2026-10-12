@@ -113,7 +113,9 @@ print(f())
 
 `f` reads the new `x`. A definition made inside a function (`global x`)
 takes effect where the cell calls that function. A renamed class or
-function keeps its name (`C.__name__` is `C`).
+function keeps its name once it is defined (`C.__name__` is `C`); code that
+looks at the name while the definition is being made (a decorator printing
+it, a metaclass, the class body itself) sees the internal one, `Cʹ2`.
 
 When renaming is not possible, marimo's rule applies: a name
 read by other cells may be defined by only one cell, and the cells
@@ -125,8 +127,12 @@ say which definition a read gets:
   assigns or deletes `x`);
 - a function or lambda the cell uses both before and after a new
   definition;
-- a definition in code that may never run (a generator that is never
-  consumed, a function the cell never calls);
+- a definition in code that may never run, or run more than once (a
+  generator that is never consumed; a function the cell never calls, or
+  calls under an `if`, in a loop, or twice when it reads the name first);
+- a function, lambda or generator given to a call that may keep it for
+  later (`map(lambda: x, ...)`; `sorted(..., key=lambda ...)` and
+  `list(... for ...)` run it at once);
 - a function called while its class is being made.
 
 ## 4. What runs, and when

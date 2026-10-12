@@ -451,7 +451,7 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     if (!deferred) continue;
     const [p, pkey] = o.path[j - 1] ?? [null, ""];
     if (n._type === "Lambda" && p?._type === "Call" && pkey === "func") continue;
-    if (n._type === "GeneratorExp" && p?._type === "Call" && pkey === "args") continue;
+    if ((n._type === "GeneratorExp" || n._type === "Lambda") && consumed(o.path, j)) continue;
     // a default of a function (or lambda): runs when that is called
     if ((p?._type === "FunctionDef" || p?._type === "AsyncFunctionDef" || p?._type === "Lambda") && pkey === "args") return "later";
     let name: string | null = null;
@@ -466,10 +466,22 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
   return "now";
 }
 
+// Calls that run (or consume) what they are given before returning:
+// `list(x for ...)`, `sorted(xs, key=lambda ...)`.  Other calls may keep it
+// for later (`map`, `iter`, a decorator).
+const CONSUMERS = new Set(["list", "tuple", "set", "frozenset", "dict", "sum", "sorted", "min", "max", "any", "all", "print"]);
+const consumes = (call: any) => call?._type === "Call" && ((call.func._type === "Name" && CONSUMERS.has(call.func.id)) || (call.func._type === "Attribute" && (call.func.attr === "sort" || call.func.attr === "join")));
+// whether path entry j (a lambda or generator) is given to such a call
+const consumed = (path: [any, string][], j: number) => {
+  const [p, pkey] = path[j - 1] ?? [null, ""];
+  return (pkey === "args" && consumes(p)) || (p?._type === "keyword" && pkey === "value" && consumes(path[j - 2]?.[0]));
+};
+
 // The outermost part of an occurrence's statement that runs later than it is
 // written: a function's body, a lambda's (unless called where it is
-// written, or passed to a call), a generator expression's body (unless
-// passed to a call), an annotation; with the index in its path.
+// written, or given to a call that runs it), a generator expression's body
+// (unless given to a call that consumes it), an annotation; with the index
+// in its path.
 function deferredOf(o: Occurrence): { node: any; j: number; kind: "callable" | "annotation" } | null {
   for (let j = 0; j < o.path.length; j++) {
     const [n, key] = o.path[j];
@@ -477,7 +489,7 @@ function deferredOf(o: Occurrence): { node: any; j: number; kind: "callable" | "
     if ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && (key === "annotations" || key === "returns")) return { node: n, j, kind: "annotation" };
     if ((n._type === "AnnAssign" && key === "annotation") || (n._type === "TypeAlias" && key === "value") || (n._type === "TypeVar" && key === "bound")) return { node: n, j, kind: "annotation" };
     if ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && key === "body") return { node: n, j, kind: "callable" };
-    const passed = (p?._type === "Call" && pkey === "args") || (p?._type === "keyword" && pkey === "value");
+    const passed = consumed(o.path, j);
     if (n._type === "Lambda" && key === "body" && !(p?._type === "Call" && pkey === "func") && !passed) return { node: n, j, kind: "callable" };
     if (n._type === "GeneratorExp" && (key === "elt" || key === "generators") && !passed) return { node: n, j, kind: "callable" };
   }
@@ -496,23 +508,30 @@ function callableName(o: Occurrence, d: { node: any; j: number }): string | null
 }
 
 // Where a cell's top-level statements use `fname`: each use's statement,
-// position, and whether it is a plain call that runs where it is written.
-function usesOf(body: any[], fname: string): { stmt: number; line: number; col: number; call: boolean }[] {
-  const out: { stmt: number; line: number; col: number; call: boolean }[] = [];
-  const scan = (n: any, stmt: number, later: boolean, parent: any, key: string): void => {
+// position, whether it is a plain call that runs where it is written, and
+// whether that runs exactly once (not under an if, a loop, `and`/`or`, a
+// comprehension, an exception handler).
+function usesOf(body: any[], fname: string): { stmt: number; line: number; col: number; call: boolean; once: boolean }[] {
+  const out: { stmt: number; line: number; col: number; call: boolean; once: boolean }[] = [];
+  const scan = (n: any, stmt: number, later: boolean, maybe: boolean, parent: any, key: string): void => {
     if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) return n.forEach((x) => scan(x, stmt, later, parent, key));
+    if (Array.isArray(n)) return n.forEach((x, i) => scan(x, stmt, later, maybe || (parent?._type === "BoolOp" && key === "values" && i > 0), parent, key));
     if (n._type === "Name" && n.id === fname && n.ctx?._type === "Load") {
-      out.push({ stmt, line: n.lineno, col: n.col_offset, call: !later && parent?._type === "Call" && key === "func" });
+      const call = !later && parent?._type === "Call" && key === "func";
+      out.push({ stmt, line: n.lineno, col: n.col_offset, call, once: call && !maybe });
       return;
     }
     for (const k of Object.keys(n)) {
       if (k === "_type") continue;
       const deferred = ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "Lambda") && k === "body") || (n._type === "GeneratorExp" && k !== "generators");
-      scan(n[k], stmt, later || deferred, n, k);
+      const t = n._type;
+      const cond = (t === "If" && k !== "test") || (t === "IfExp" && k !== "test") || ((t === "For" || t === "AsyncFor") && k !== "iter") || t === "While" ||
+        ((t === "Try" || t === "TryStar") && (k === "handlers" || k === "orelse")) || t === "Match" && k === "cases" ||
+        ((t === "ListComp" || t === "SetComp" || t === "DictComp" || t === "GeneratorExp") && k !== "generators") || t === "comprehension" && k !== "iter";
+      scan(n[k], stmt, later || deferred, maybe || cond, n, k);
     }
   };
-  body.forEach((st, i) => scan(st, i, false, null, ""));
+  body.forEach((st, i) => scan(st, i, false, false, null, ""));
   return out;
 }
 
@@ -525,18 +544,27 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   // a lazy generator's, cannot be placed)
   const df = deferredOf(first);
   let at: { stmt: number; line: number; col: number } = first;
+  let calls = 0;
   if (df) {
     const fname = df.kind === "callable" ? callableName(first, df) : null;
     const uses = fname ? usesOf(body, fname) : [];
-    if (!fname || !uses.length || uses.some((u) => !u.call) || df.node._type === "GeneratorExp") return null;
+    if (!fname || !uses.length || uses.some((u) => !u.once) || df.node._type === "GeneratorExp") return null;
     at = uses.reduce((a, u) => (u.stmt < a.stmt || (u.stmt === a.stmt && before(u, a)) ? u : a));
+    calls = uses.length;
   }
   const inside = (o: Occurrence, node: any) => o.path.some(([n]) => n === node);
+  // (what a statement evaluates before binding: an assignment's value, a for
+  // loop's iterable, a with item's expression, :='s value)
+  const evaluatedFirst = (o: Occurrence, first: Occurrence) => o.path.some(([n, key]) =>
+    ((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value" && inside(first, n)) ||
+    ((n._type === "For" || n._type === "AsyncFor") && key === "iter" && inside(first, n)) ||
+    (n._type === "NamedExpr" && key === "value" && inside(first, n)) ||
+    (n._type === "withitem" && key === "context_expr" && inside(first, n)));
   const LOOPS = new Set(["For", "AsyncFor", "While"]);
   // (a `global x` takes the name of the assignments in its function, if any)
   const globals = occ.filter((o) => o.global);
   // (the function whose body it is in: a default is the enclosing one's)
-  const fnOf = (o: Occurrence) => [...o.path].reverse().find(([n, key]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && key === "body")?.[0];
+  const fnOf = (o: Occurrence) => [...o.path].reverse().find(([n, key]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef") && key === "body")?.[0];
   for (const o of occ) {
     if (o.global) continue;
     if (o === first) { out.set(o, "new"); continue; }
@@ -549,8 +577,12 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     const inDef = first.def && o.path.some(([n]) => n === first.def);
     if (d && !inDef) {
       if (df && d.node === df.node) {
-        // (the same function as the definition: in its order)
-        out.set(o, before(o, first) && !o.store ? "old" : "new");
+        // (the same function as the definition: in its order, with what an
+        // assignment evaluates before binding; a read of the previous value
+        // only if the function runs once: a second call reads the new one)
+        const old = !o.store && (before(o, first) || evaluatedFirst(o, first));
+        if (old && calls !== 1) return null;
+        out.set(o, old ? "old" : "new");
         continue;
       }
       if (d.kind === "annotation" || o.stmt > at.stmt) { out.set(o, "new"); continue; }
@@ -571,12 +603,7 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     const t = defIdx >= 0 && (first.def._type === "ClassDef" || o.path[defIdx][1] !== "body") ? timing(o, defIdx, first.def) : "later";
     if (t === "maybe") return null;
     const header = t === "now";
-    const evaluatedFirst = header || o.path.some(([n, key]) =>
-      ((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value" && inside(first, n)) ||
-      ((n._type === "For" || n._type === "AsyncFor") && key === "iter" && inside(first, n)) ||
-      (n._type === "NamedExpr" && key === "value" && inside(first, n)) ||
-      (n._type === "withitem" && key === "context_expr" && inside(first, n)));
-    if (evaluatedFirst) { out.set(o, "old"); continue; }
+    if (header || evaluatedFirst(o, first)) { out.set(o, "old"); continue; }
     if (before(o, first)) {
       if (o.path.some(([n]) => LOOPS.has(n._type) && inside(first, n))) return null;
       out.set(o, "old");
@@ -797,7 +824,8 @@ export function restoreDefNames(tree: any, scoped: Record<string, string>): void
       if (w === null) continue;
       const pos = { lineno: st.end_lineno, col_offset: st.end_col_offset, end_lineno: st.end_lineno, end_col_offset: st.end_col_offset };
       const nm = (id: string) => ({ _type: "Name", id, ctx: { _type: "Load" }, ...pos });
-      out.push({ _type: "Expr", value: { _type: "Call", func: nm("__sb_rename__"), args: [nm(st.name), { _type: "Constant", value: w, kind: null, ...pos }], keywords: [], ...pos }, ...pos });
+      const str = (v: string) => ({ _type: "Constant", value: v, kind: null, ...pos });
+      out.push({ _type: "Expr", value: { _type: "Call", func: nm("__sb_rename__"), args: [nm(st.name), str(w), str(st.name)], keywords: [], ...pos }, ...pos });
     }
     return out;
   };
@@ -806,22 +834,28 @@ export function restoreDefNames(tree: any, scoped: Record<string, string>): void
 
 /** Python defining `__sb_rename__` in the builtins (restoreDefNames). */
 export const RENAME_HELPER = `import builtins as _b
-def _sb_rename(o, n):
-    old = getattr(o, '__name__', None)
+def _sb_rename(o, n, old):
+    # (only a name Python generated from the renamed definition: one a
+    # decorator chose, or a decorator's result, is left as it is)
+    if getattr(o, '__name__', None) != old:
+        return
     try:
         o.__name__ = n
-        o.__qualname__ = n
     except Exception:
         return
-    if isinstance(o, type) and isinstance(old, str):
-        for v in list(vars(o).values()):
-            f = getattr(v, '__func__', v)
+    def fix(v, seen):
+        for f in (v, getattr(v, '__func__', None), getattr(v, 'fget', None), getattr(v, 'fset', None), getattr(v, 'fdel', None)):
             q = getattr(f, '__qualname__', None)
-            if isinstance(q, str) and q.startswith(old + '.'):
+            if isinstance(q, str) and (q == old or q.startswith(old + '.')):
                 try:
                     f.__qualname__ = n + q[len(old):]
                 except Exception:
                     pass
+        if isinstance(v, type) and v not in seen:
+            seen.add(v)
+            for w in list(vars(v).values()):
+                fix(w, seen)
+    fix(o, set())
 _b.__sb_rename__ = _sb_rename
 del _b, _sb_rename
 `;
