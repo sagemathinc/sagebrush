@@ -264,7 +264,9 @@ try {
   // editing (web/board/edit.ts), with the mouse
   if (!process.env.NO_EDIT) {
     const mouse = async (type, x, y, o = {}) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, ...o });
-    const drag = async (from, to, o = {}) => {
+    // (with Alt held unless told otherwise: no snapping to other items, so a drag moves exactly as far)
+    const drag = async (from, to, o0 = {}) => {
+      const o = { modifiers: 1, ...o0 };
       await mouse("mousePressed", from.x, from.y, o);
       for (let i = 1; i <= 8; i++) await mouse("mouseMoved", from.x + ((to.x - from.x) * i) / 8, from.y + ((to.y - from.y) * i) / 8, o);
       await mouse("mouseReleased", to.x, to.y, { ...o, buttons: 0 });
@@ -283,11 +285,12 @@ try {
     // (while dragging, only the dragged note's edges may lose their routes;
     // let go, every edge is routed again, none left straight)
     const straight = `window.sagebrush.board.snapshot().edges.filter((e) => !e.points).map((e) => e.from + "->" + e.to)`;
-    await mouse("mousePressed", ca.x, ca.y);
-    for (let i = 1; i <= 8; i++) await mouse("mouseMoved", ca.x + (60 * i) / 8, ca.y + (90 * i) / 8);
+    // (Alt held: no snapping, so it moves exactly as far)
+    await mouse("mousePressed", ca.x, ca.y, { modifiers: 1 });
+    for (let i = 1; i <= 8; i++) await mouse("mouseMoved", ca.x + (60 * i) / 8, ca.y + (90 * i) / 8, { modifiers: 1 });
     const during = await ev(straight);
     check(during.every((x) => x.split("->").includes(a)), `while dragging ${a}, other edges went straight: ${during.join(", ")}`);
-    await mouse("mouseReleased", ca.x + 60, ca.y + 90, { buttons: 0 });
+    await mouse("mouseReleased", ca.x + 60, ca.y + 90, { buttons: 0, modifiers: 1 });
     await sleep(120);
     const after = await ev(straight);
     check(after.length === 0, `after dropping ${a}, edges left straight: ${after.join(", ")}`);
@@ -463,6 +466,67 @@ try {
       await ev("window.sagebrush.board.editing(false)");
       check(await ev("document.querySelector('.board-toolbar').hidden && !document.querySelector('.board-toolbar-panel')"), "the toolbar goes with Edit");
       await ev("window.sagebrush.board.editing(true)");
+      // selecting several (shift-click), moving them together, duplicating,
+      // copying and pasting, deleting, a rectangle (shift-drag on the
+      // background), snapping to another item's edge, the arrow keys
+      await ev("window.board.focus(['b', 'c'], true)");
+      await sleep(300);
+      const selected = () => ev("[...document.querySelectorAll('.board-item.selected')].length");
+      const shiftClick = async (id) => { const p = await center(id); await mouse("mousePressed", p.x, p.y, { modifiers: 8 }); await mouse("mouseReleased", p.x, p.y, { modifiers: 8 }); await sleep(150); };
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      await shiftClick("b");
+      await shiftClick("c");
+      check((await selected()) === 2, `shift-click selects two (${await selected()})`);
+      const [b0, c0] = [await box("b"), await box("c")];
+      const zz = await ev("window.board.camera.z");
+      await drag(await center("b"), { x: (await center("b")).x + 40, y: (await center("b")).y + 30 });
+      const [b1, c1] = [await box("b"), await box("c")];
+      check(Math.abs(b1.x - b0.x - 40 / zz) < 2 && Math.abs(c1.x - c0.x - 40 / zz) < 2 && Math.abs(c1.y - c0.y - (b1.y - b0.y)) < 1, `dragging one of two selected moves both (b ${b1.x - b0.x}, c ${c1.x - c0.x})`);
+      const nodes0 = (await docOf()).nodes.length, edges0 = (await docOf()).edges.length;
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }))");
+      await sleep(400);
+      let dd = await docOf();
+      check(dd.nodes.length === nodes0 + 2 && dd.edges.length > edges0 && (await selected()) === 2, `Ctrl+D duplicates the two, with their edge, and selects the copies (${dd.nodes.length - nodes0} nodes, ${dd.edges.length - edges0} edges)`);
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))");
+      await sleep(400);
+      dd = await docOf();
+      check(dd.nodes.length === nodes0 && dd.edges.length === edges0, "Delete removes the selected copies and their edges");
+      // (the clipboard: the page's own copy and paste events)
+      await shiftClick("b");
+      const copied = await ev("(() => { const t = new DataTransfer(); document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: t, bubbles: true })); return t.getData('text/plain'); })()");
+      check(/"sagebrush-board"/.test(copied), "copying puts the selection on the clipboard");
+      await ev(`(() => { const t = new DataTransfer(); t.setData('text/plain', ${JSON.stringify(copied)}); document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: t, bubbles: true })); })()`);
+      await sleep(400);
+      check((await docOf()).nodes.length === nodes0 + 1, "pasting it adds a copy");
+      await ev("(() => { const t = new DataTransfer(); t.setData('text/plain', 'Pasted words'); document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: t, bubbles: true })); })()");
+      await sleep(400);
+      check((await docOf()).nodes.some((n) => n.text === "Pasted words"), "pasting text makes a note of it");
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+      await sleep(300);
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+      await sleep(300);
+      check((await docOf()).nodes.length === nodes0, "undo takes the pastes back");
+      // (a rectangle around b and c, from empty background)
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      await ev("window.board.focus(['b', 'c'], true)");
+      await sleep(300);
+      const rect = await ev("(() => { const a = window.board.clientRect('b'), c = window.board.clientRect('c'); const r = window.board.el.getBoundingClientRect(); const x0 = Math.min(a.left, c.left) - 14, y0 = Math.min(a.top, c.top) - 14; return { x0, y0, x1: Math.max(a.left + a.width, c.left + c.width) + 14, y1: Math.max(a.top + a.height, c.top + c.height) + 14, free: !window.board.itemAt(x0 - r.left, y0 - r.top) }; })()");
+      if (rect.free) {
+        await drag({ x: rect.x0, y: rect.y0 }, { x: rect.x1, y: rect.y1 }, { modifiers: 8 });
+        const sel = await ev("[...document.querySelectorAll('.board-item.selected')].length");
+        check(sel >= 2, `a shift-drag rectangle selects what it holds (${sel})`);
+      }
+      // (snapping: let go 3 pixels from b's left edge, c lines up with it)
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      const [bs, cs] = [await box("b"), await box("c")], z3 = await ev("window.board.camera.z");
+      const cp = await center("c");
+      await drag(cp, { x: cp.x + (bs.x - cs.x) * z3 + 3, y: cp.y + 37 }, { modifiers: 0 });
+      check(Math.abs((await box("c")).x - bs.x) < 0.01, `c let go 3 px from b's left edge snaps to it (${(await box("c")).x - bs.x})`);
+      // (the arrow keys: the selection moves)
+      const cx0 = (await box("c")).x;
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }))");
+      await sleep(300);
+      check(Math.abs((await box("c")).x - cx0 - 10) < 0.01, `shift+→ moves the selection 10 (${(await box("c")).x - cx0})`);
       // (undone, all of it: the board before the import)
       for (let i = 0; i < 12 && (await docOf()).nodes.length !== before; i++) {
         await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
