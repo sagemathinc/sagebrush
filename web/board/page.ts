@@ -2,7 +2,10 @@
 // document (web/board/doc.ts); /board/ alone, Sagebrush's own architecture
 // (examples/sagebrush.json); ?items=N&strokes=N, a synthetic board for the
 // benchmark (bench.mjs, window.boardBench).  A document's tour steps through
-// its items with ← and →, and #N in the address is step N.
+// its items with ← and →, and #N in the address is step N.  A document with
+// pages shows one at a time (PageUp, PageDown; #p2 is page 2, #p2-3 its
+// step 3).  Print (or Save as PDF) puts every page on a sheet, or every step
+// of the tour on one with its caption (print.ts).
 //
 // Edit (web/board/edit.ts) changes the document; the changed document is
 // kept in this browser (localStorage, per source), until Revert.  The menu
@@ -12,8 +15,9 @@
 // window.sagebrush.board is the API for an agent driving the page (in the
 // shared browser, say): load(doc), focus(ids), step(n), snapshot().
 import { Board, synthetic, type Camera } from "./board";
-import { layout, type BoardDoc, type DocNote } from "./doc";
+import { layout, isBoard, pageCount, pageOf, pageView, type BoardDoc, type BoardPage, type DocNote } from "./doc";
 import { Editor, tidy } from "./edit";
+import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { render as markdown } from "../markdown";
 
 const q = new URLSearchParams(location.search);
@@ -21,6 +25,7 @@ const board = new Board(document.getElementById("board")!);
 const $ = (id: string) => document.getElementById(id)!;
 let doc: BoardDoc | null = null;
 let at = -1; // the tour's step; -1 before it starts
+let pageIx = 0, shownPage = -1; // the page shown
 let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
 let routingGen = 0, routed = false;
 
@@ -35,8 +40,10 @@ let original: BoardDoc | null = null;
 
 /** Lay out and draw a document, the camera where it is. */
 async function show(d: BoardDoc) {
-  if (!d || !Array.isArray(d.nodes)) throw new Error("board: a document needs nodes");
+  if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
   doc = d;
+  pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
+  const v = pageView(d, pageIx);
   board.markdown = (s) => markdown(s);
   if (hasMath(JSON.stringify(d))) {
     // KaTeX, the notebook's (its stylesheet and fonts beside it)
@@ -44,19 +51,13 @@ async function show(d: BoardDoc) {
     const m = await mathModule;
     board.typeset = (el) => m.typeset(el);
   }
-  const measure = (n: DocNote, w: number) => {
-    const k = JSON.stringify([n.title, n.text, n.detail, n.ref, w]);
-    let h = heights.get(k);
-    if (h === undefined) heights.set(k, (h = board.measure({ kind: "note", ...n }, w)));
-    return h;
-  };
   // (edges' routes are found between frames: large boards show at once,
   // their edges straight until routed)
-  const { items, edges, routing } = layout(d, measure, { deferRoutes: true });
+  const { items, edges, routing } = layout(v, measure, { deferRoutes: true });
   // (laid out again after an edit: an edge whose ends did not move keeps its
   // route until the new ones are ready, so only the moved items' edges are
   // straight meanwhile; the new routes replace them all at once)
-  const before = new Map(board.edgeList().map((e) => [`${e.from}\0${e.to}\0${e.label ?? ""}`, e]));
+  const before = new Map((shownPage === pageIx ? board.edgeList() : []).map((e) => [`${e.from}\0${e.to}\0${e.label ?? ""}`, e]));
   const now = new Map(items.map((it) => [it.id, it]));
   const still = (id: string) => {
     const a = board.item(id), b = now.get(id);
@@ -67,6 +68,7 @@ async function show(d: BoardDoc) {
     if (old?.points && still(e.from) && still(e.to)) { e.points = old.points; e.lx = old.lx; e.ly = old.ly; }
   }
   board.setItems(items, edges);
+  shownPage = pageIx;
   const gen = ++routingGen;
   routed = false;
   // (routed now if that is quick, 40 ms; the rest between frames)
@@ -82,19 +84,51 @@ async function show(d: BoardDoc) {
   placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
   document.title = (d.title ? d.title + " — " : "") + "Board — Sagebrush";
   $("title").textContent = d.title ?? "";
-  $("tour").hidden = !d.steps?.length && !d.intro;
+  $("tour").hidden = !v.steps?.length && !v.intro;
+  pageBar();
   $("revert").hidden = !original || JSON.stringify(original) === JSON.stringify(d);
 }
 
-/** Show a document from the start: the whole board, or step #N. */
-async function load(d: BoardDoc) {
-  await show(d);
-  const n = d.steps?.length ?? 0;
-  at = -1;
-  const m = /^#(\d+)$/.exec(location.hash);
-  if (m && n) step(Number(m[1]) - 1, true);
-  else step(-1, true);
+function measure(n: DocNote, w: number) {
+  const k = JSON.stringify([n.title, n.text, n.detail, n.ref, w]);
+  let h = heights.get(k);
+  if (h === undefined) heights.set(k, (h = board.measure({ kind: "note", ...n }, w)));
+  return h;
 }
+
+/** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
+async function load(d: BoardDoc) {
+  const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(location.hash);
+  pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
+  await show(d);
+  at = -1;
+  const n = Number(m?.[2] ?? m?.[3] ?? 0);
+  step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
+}
+
+/** Show page i (0-based), from its start. */
+async function page(i: number) {
+  if (!doc) return;
+  pageIx = Math.max(0, Math.min(pageCount(doc) - 1, i));
+  editor.clear();
+  await show(doc);
+  step(-1, true);
+}
+
+// the page picker: shown when there are pages
+function pageBar() {
+  const d = doc!, n = pageCount(d), sel = $("pgsel") as HTMLSelectElement;
+  $("pages").hidden = n < 2;
+  sel.replaceChildren(...Array.from({ length: n }, (_, i) => new Option(`${i + 1}. ${pageOf(d, i).title || "Page " + (i + 1)}`, String(i))));
+  sel.value = String(pageIx);
+  ($("pgprev") as HTMLButtonElement).disabled = pageIx <= 0;
+  ($("pgnext") as HTMLButtonElement).disabled = pageIx >= n - 1;
+  $("rmpage").hidden = $("namepage").hidden = n < 2;
+}
+
+/** The steps of the page shown. */
+const steps = () => (doc ? pageView(doc, pageIx).steps ?? [] : []);
+const hashFor = (i: number) => (pageIx ? `#p${pageIx + 1}${i >= 0 ? "-" + (i + 1) : ""}` : i >= 0 ? `#${i + 1}` : "");
 
 function caption(md: string, where: string) {
   const el = $("say");
@@ -107,20 +141,19 @@ function caption(md: string, where: string) {
 
 /** Go to step `i` of the tour (-1: the whole board, and the intro). */
 function step(i: number, now = false) {
-  const steps = doc?.steps ?? [];
-  at = Math.max(-1, Math.min(steps.length - 1, i));
+  const ss = steps();
+  at = Math.max(-1, Math.min(ss.length - 1, i));
   if (at < 0) {
-    caption(doc?.intro ?? "", steps.length ? `${steps.length} steps` : "");
+    caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
     board.focus(undefined, now);
-    history.replaceState(null, "", location.pathname + location.search);
   } else {
-    const s = steps[at];
-    caption(s.say ?? "", `${at + 1} / ${steps.length}`);
+    const s = ss[at];
+    caption(s.say ?? "", `${at + 1} / ${ss.length}`);
     board.focus(typeof s.focus === "string" ? [s.focus] : s.focus, now);
-    history.replaceState(null, "", `#${at + 1}`);
   }
+  history.replaceState(null, "", location.pathname + location.search + hashFor(at));
   ($("prev") as HTMLButtonElement).disabled = at < 0;
-  ($("next") as HTMLButtonElement).disabled = at >= steps.length - 1;
+  ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
 }
 
 $("prev").onclick = () => step(at - 1);
@@ -131,6 +164,8 @@ addEventListener("keydown", (e) => {
   if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
   else if (e.key === "ArrowLeft") step(at - 1);
   else if (e.key === "Escape" || e.key === "0") step(-1);
+  else if (e.key === "PageDown") page(pageIx + 1);
+  else if (e.key === "PageUp") page(pageIx - 1);
   else if (e.key === "+" || e.key === "=") board.zoomAt(1.25, innerWidth / 2, innerHeight / 2);
   else if (e.key === "-") board.zoomAt(0.8, innerWidth / 2, innerHeight / 2);
   else return;
@@ -156,7 +191,7 @@ if (q.has("items") || q.has("strokes")) {
     // (this browser's edits of it, if any)
     let saved: BoardDoc | null = null;
     try { saved = JSON.parse(localStorage.getItem(saveKey) ?? "null"); } catch {}
-    return load(saved && Array.isArray(saved.nodes) ? saved : d);
+    return load(isBoard(saved) ? saved! : d);
   }).catch(fail);
 }
 
@@ -164,7 +199,7 @@ if (q.has("items") || q.has("strokes")) {
 const editor = new Editor(board, () => doc, async (d) => {
   await show(d);
   try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch {}
-});
+}, (d) => pageOf(d, pageIx));
 const editBtn = $("edit");
 editBtn.onclick = () => {
   editor.setOn(!editor.on);
@@ -191,7 +226,41 @@ $("examples").onclick = async () => {
   }
   ($("exdlg") as HTMLDialogElement).showModal();
 };
-$("tidy").onclick = () => editor.commit((d) => Object.assign(d, tidy(d)));
+$("tidy").onclick = () => editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
+$("pgprev").onclick = () => page(pageIx - 1);
+$("pgnext").onclick = () => page(pageIx + 1);
+($("pgsel") as HTMLSelectElement).onchange = (e) => { page(Number((e.target as HTMLSelectElement).value)); (e.target as HTMLElement).blur(); };
+// a document's own nodes, edges and tour become its first page
+const PAGE_KEYS = ["intro", "layout", "columns", "direction", "nodes", "edges", "steps"] as const;
+function paged(d: BoardDoc): BoardPage[] {
+  if (!d.pages?.length) {
+    const p: any = { title: "Page 1" };
+    for (const k of PAGE_KEYS) if (d[k] !== undefined) { p[k] = d[k]; delete d[k]; }
+    p.nodes ??= [];
+    d.pages = [p];
+  }
+  return d.pages!;
+}
+$("addpage").onclick = async () => {
+  let n = 0;
+  await editor.commit((d) => { const ps = paged(d); ps.splice(pageIx + 1, 0, { title: `Page ${ps.length + 1}`, nodes: [] }); n = pageIx + 1; });
+  await page(n);
+  if (!editor.on) editBtn.click();
+};
+$("namepage").onclick = () => {
+  const name = prompt("This page's title", pageOf(doc!, pageIx).title ?? "");
+  if (name !== null) editor.commit((d) => { pageOf(d, pageIx).title = name.trim() || undefined; });
+};
+$("rmpage").onclick = async () => {
+  const p = pageOf(doc!, pageIx);
+  if (pageCount(doc!) < 2 || (p.nodes?.length && !confirm(`Delete the page “${p.title || "Page " + (pageIx + 1)}” and everything on it? (Undo brings it back.)`))) return;
+  await editor.commit((d) => {
+    d.pages!.splice(pageIx, 1);
+    // (one page left: the document's own again)
+    if (d.pages!.length === 1) { const [q] = d.pages!; delete d.pages; for (const k of PAGE_KEYS) if (q[k] !== undefined) (d as any)[k] = q[k]; }
+  });
+  await page(Math.min(pageIx, pageCount(doc!) - 1));
+};
 $("download").onclick = () => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 1)], { type: "application/json" }));
@@ -202,7 +271,8 @@ $("download").onclick = () => {
 $("copyjson").onclick = () => navigator.clipboard?.writeText(JSON.stringify(doc, null, 1));
 async function openText(text: string) {
   const d = JSON.parse(text) as BoardDoc;
-  if (!Array.isArray(d?.nodes)) throw new Error("not a board: a document needs nodes");
+  if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
+  pageIx = 0;
   await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
   board.focus(undefined, true);
 }
@@ -222,14 +292,63 @@ addEventListener("drop", async (e) => {
 $("newboard").onclick = () => editor.commit((d) => {
   for (const k of Object.keys(d)) delete (d as any)[k];
   Object.assign(d, { title: "Untitled board", nodes: [] });
+  pageIx = 0;
 }).then(() => { if (!editor.on) editBtn.click(); });
 $("revert").onclick = async () => {
   if (!original) return;
   try { localStorage.removeItem(saveKey); } catch {}
+  pageIx = 0;
   await editor.commit((d) => { for (const k of Object.keys(d)) delete (d as any)[k]; Object.assign(d, JSON.parse(JSON.stringify(original))); });
   try { localStorage.removeItem(saveKey); } catch {}
   board.focus(undefined, true);
 };
+// Print, or save as PDF: the sheets
+/** Sheets for printing: each page whole ("pages"), or each step of each
+ * page's tour with its caption ("tour"; a page with no tour, whole). */
+function sheets(mode: "pages" | "tour" = "pages"): Sheet[] {
+  const d = doc!, n = pageCount(d), out: Sheet[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = pageView(d, i);
+    const { items, edges } = layout(v, measure);
+    const box = (ids?: string[]) => {
+      const its = ids ? items.filter((it) => ids.includes(it.id)) : items;
+      if (!its.length) return { x0: 0, y0: 0, x1: 400, y1: 300 };
+      return { x0: Math.min(...its.map((it) => it.x)), y0: Math.min(...its.map((it) => it.y)), x1: Math.max(...its.map((it) => it.x + it.w)), y1: Math.max(...its.map((it) => it.y + it.h)) };
+    };
+    const title = d.pages?.length ? [d.title, pageOf(d, i).title || `Page ${i + 1}`].filter(Boolean).join(" — ") : d.title;
+    const where = n > 1 ? `page ${i + 1} of ${n}` : "";
+    const ss = mode === "tour" ? v.steps ?? [] : [];
+    if (!ss.length || v.intro) out.push({ items, edges, box: box(), title, caption: mode === "tour" ? v.intro : undefined, folio: where });
+    ss.forEach((s, k) => out.push({ items, edges, box: box(typeof s.focus === "string" ? [s.focus] : s.focus), title, caption: s.say, folio: [where, `step ${k + 1} of ${ss.length}`].filter(Boolean).join(", ") }));
+  }
+  return out;
+}
+async function printBoard(o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) {
+  if (!doc) return null;
+  // (math typeset in sheets too)
+  return printSheets(board, sheets(o.mode), { ...o, markdown: (s) => markdown(s) });
+}
+const prdlg = $("prdlg") as HTMLDialogElement;
+$("print").onclick = () => {
+  const d = doc!, tours = Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i).steps?.length ?? 0).reduce((a, b) => a + b, 0);
+  const n = pageCount(d);
+  $("pr-pages-n").textContent = n > 1 ? `${n} pages, a sheet each` : "the whole board, on one sheet";
+  ($("pr-tour") as HTMLInputElement).disabled = !tours;
+  $("pr-tour-n").textContent = tours ? `${tours} steps, a sheet each with its caption (and a page's intro, with the whole page)` : "this board has no tour";
+  if (!tours) ($("pr-pages") as HTMLInputElement).checked = true;
+  prdlg.showModal();
+};
+$("pr-go").onclick = async (e) => {
+  e.preventDefault();
+  const f = new FormData($("prform") as HTMLFormElement);
+  prdlg.close();
+  await printBoard({ mode: f.get("mode") as "pages" | "tour", paper: f.get("paper") as "letter" | "a4", orientation: f.get("orient") as "landscape" | "portrait" });
+};
+// (⌘P prints the sheets, not the screen)
+addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc) { e.preventDefault(); $("print").click(); }
+});
+
 // first paint: the end of the first render after load
 requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).firstPaint = performance.now(); }));
 
@@ -268,8 +387,12 @@ async function bench(path: Camera[]) {
     focus: (ids?: string[]) => board.focus(ids),
     /** Go to step n of the tour (0-based; -1 for the whole board). */
     step,
+    /** Show page n (0-based). */
+    page,
+    /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */
+    print: async (o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) => { const r = await printBoard(o); return r?.querySelectorAll(".pr-sheet").length ?? 0; },
     /** The document, the tour's step, the camera, and the laid out items' boxes. */
-    snapshot: () => ({ doc, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points }) => ({ id, from, to, points })) }),
+    snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points }) => ({ id, from, to, points })) }),
     /** Change the document (undoable, as an edit): f gets a copy to modify. */
     edit: (f: (d: BoardDoc) => void) => editor.commit(f),
     /** Turn Edit mode on or off. */

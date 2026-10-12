@@ -58,12 +58,11 @@ export interface DocStep {
   say?: string;
 }
 
-export interface BoardDoc {
+/** A page of a board: its own notes, edges and tour. */
+export interface BoardPage {
+  id?: string;
   title?: string;
-  /** Markdown, shown before the tour starts */
   intro?: string;
-  /** links' base for refs that are paths (e.g. a repository's blob URL) */
-  refBase?: string;
   layout?: DocGroup["layout"];
   columns?: number;
   direction?: DocGroup["direction"];
@@ -71,6 +70,44 @@ export interface BoardDoc {
   edges?: DocEdge[];
   steps?: DocStep[];
 }
+
+export interface BoardDoc {
+  title?: string;
+  /** pages, each with its own nodes, edges and steps; without them the
+   * document is one page (its own nodes, edges and steps) */
+  pages?: BoardPage[];
+  /** Markdown, shown before the tour starts */
+  intro?: string;
+  /** links' base for refs that are paths (e.g. a repository's blob URL) */
+  refBase?: string;
+  layout?: DocGroup["layout"];
+  columns?: number;
+  direction?: DocGroup["direction"];
+  /** (a document with pages has none of its own) */
+  nodes?: DocNode[];
+  edges?: DocEdge[];
+  steps?: DocStep[];
+}
+
+/** How many pages a document has. */
+export const pageCount = (d: BoardDoc) => (d.pages?.length ? d.pages.length : 1);
+
+/** Page i of a document, as the object holding its nodes, edges and steps
+ * (the document itself when it has no pages): changes to it change the document. */
+export function pageOf(d: BoardDoc, i: number): BoardPage {
+  if (!d.pages?.length) return d as BoardPage;
+  return d.pages[Math.max(0, Math.min(d.pages.length - 1, i))];
+}
+
+/** Page i as a one-page document, for layout() (the document's title and refBase). */
+export function pageView(d: BoardDoc, i: number): BoardDoc {
+  const p = pageOf(d, i);
+  if (p === (d as BoardPage)) return d;
+  return { title: d.title, refBase: d.refBase, intro: p.intro, layout: p.layout, columns: p.columns, direction: p.direction, nodes: p.nodes, edges: p.edges, steps: p.steps };
+}
+
+/** Whether something is a board document. */
+export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
 
 const GAP = 40, PAD = 24, TITLE = 34;
 
@@ -96,6 +133,8 @@ function noteSize(n: DocNote, measure?: Measure): Box {
  * edges, in world coordinates.
  */
 export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: boolean } = {}): { items: Item[]; edges: Edge[]; routing: Generator<void, void> } {
+  if (doc.pages?.length) doc = pageView(doc, 0);
+  const roots = doc.nodes ?? [];
   const items: Item[] = [];
   const parentOf = new Map<string, string>(); // node id -> the group directly holding it
   const ids = new Set<string>();
@@ -105,7 +144,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
     if (parent) parentOf.set(n.id, parent);
     if (n.kind === "group") for (const c of n.children) walk(c, n.id);
   };
-  for (const n of doc.nodes) walk(n, null);
+  for (const n of roots) walk(n, null);
   // links: absolute, or paths under the document's refBase
   const refOf = (n: DocNote) => n.ref && doc.refBase && !/^[a-z]+:/i.test(n.ref) ? doc.refBase + n.ref : n.ref;
   const edges = (doc.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
@@ -152,9 +191,9 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
     size.set(n.id, b);
     return b;
   };
-  const top = doc.nodes.map((n) => ({ id: n.id, ...sizeOf(n), fixed: n.x !== undefined && n.y !== undefined ? { x: n.x!, y: n.y! } : null }));
+  const top = roots.map((n) => ({ id: n.id, ...sizeOf(n), fixed: n.x !== undefined && n.y !== undefined ? { x: n.x!, y: n.y! } : null }));
   const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", doc.columns, edges.flatMap((e) => {
-    const members = new Set(doc.nodes.map((n) => n.id));
+    const members = new Set(roots.map((n) => n.id));
     const a = memberOf(e.from, members), b = memberOf(e.to, members);
     return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
   }));
@@ -172,7 +211,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent });
     }
   };
-  for (const n of doc.nodes) {
+  for (const n of roots) {
     const p = topPos.get(n.id)!;
     place(n, p.x, p.y, 0);
   }
@@ -190,12 +229,13 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
 // smallest group holding both ends.
 function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<string, string>): Generator<void, void> {
   if (!edges.length) return;
+  const roots = doc.nodes ?? [];
   const byId = new Map(items.map((it) => [it.id, it]));
   const rect = (id: string): Rect => { const it = byId.get(id)!; return { x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h }; };
   const ancestors = (id: string) => { const s = new Set<string>(); for (let p = parentOf.get(id); p; p = parentOf.get(p)) s.add(p); return s; };
   const groups = new Map<string, DocGroup>();
   const walk = (ns: DocNode[]) => { for (const n of ns) if (n.kind === "group") { groups.set(n.id, n); walk(n.children); } };
-  walk(doc.nodes);
+  walk(roots);
   const axisOf = (g: { layout?: DocGroup["layout"]; direction?: DocGroup["direction"] }): "h" | "v" | undefined => {
     const l = g.layout ?? "graph";
     return l === "row" ? "h" : l === "column" ? "v" : l === "graph" ? (g.direction === "LR" ? "h" : "v") : undefined;
@@ -223,7 +263,7 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
         else obstacles.push(rect(n.id));
       }
     };
-    scan(doc.nodes);
+    scan(roots);
     // the smallest group holding both: its layout's axis
     let common: string | undefined;
     for (const p of A) if (B.has(p)) { common = p; break; }

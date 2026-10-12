@@ -80,9 +80,13 @@ group), a style, and optionally `detail` (content shown only when zoomed in).
 | `shape` | rectangle, ellipse, line, arrow, with optional text |
 | `edge` | a connection between two items (or ports on them), with a label; stays attached when they move |
 | `image` | a stored image (a blob, as notebook attachments) |
-| `frame` | a region with a title; frames in order are the slides |
+| `frame` | a region with a title, inside a page |
 | `group` | items moved and laid out together |
 | `ref` | a link to a file and line, a paper, or a notebook cell |
+
+**Pages.** A board can have pages, each its own canvas with its own items,
+edges and tour, as in CoCalc, where every slide is a page of a whiteboard.
+A board without pages is one page.
 
 Edges are items, not drawings, so they survive moves and can be queried
 ("what depends on this?"). **Dataflow arrows are not stored.** They are
@@ -111,7 +115,7 @@ A board is one namespace, with one interpreter, as a notebook is. The
 reactive engine needs a page order for page-order scoping and for deciding
 which definition a read sees. On a board:
 
-- frames in their order come first;
+- pages in their order come first, then frames in their order;
 - within a frame, and for items outside any frame, reading order: by rows
   from top to bottom, then left to right.
 
@@ -201,7 +205,8 @@ box.
   the next frame on a second screen; a laser pointer; ink over the slide.
 - **Live slides:** code and widgets on a slide run reactively during the
   talk.
-- **Export** to PDF (one page per frame) and **import** of CoCalc boards and
+- **Export** to PDF (a sheet per page, or per step of the tour; done, see
+  "Pages and paper" below) and **import** of CoCalc boards and
   slides through CoCalc's existing export (`cocalc export board` gives
   `document.json` and `pages/*/page.json`). CoCalc's code cells become
   reactive code items; their explicit edges become ordinary edges.
@@ -332,6 +337,37 @@ at once (0.33 s) with straight edges, routed by 1 s.
 test-board.mjs checks that every routed edge is orthogonal, ends on its
 boxes' borders, and goes through no other note.
 
+**Pages and paper** (October 12). A document can have `pages`, each with its
+own nodes, edges, tour and intro; without them it is one page, as before.
+The page picker in the top bar (and PageUp/PageDown) moves between them;
+`#p2` in the address is page 2 and `#p2-3` its step 3 (`#3` is still step 3
+of page 1). The menu adds, renames and deletes pages: adding one to a board
+without pages makes the board page 1. Editing, Tidy and undo work on the
+page shown. examples/primes.json, three proofs that there are infinitely many
+primes, is a page each.
+
+**Print or save as PDF** (web/board/print.ts, the menu or Ctrl+P) lays out
+sheets and opens the browser's print dialog, whose Save as PDF is the PDF
+export: CoCalc users' most requested whiteboard feature.
+- Every page whole on a sheet, or the tour: a sheet per step, framed as the
+  camera frames it, with the caption under it (and each page's intro with
+  the whole page).
+- Letter or A4, landscape or portrait.
+- Notes are the board's own elements, so text stays text (selectable,
+  searchable) and math is KaTeX's; groups, edges, arrowheads, labels and ink
+  are SVG. Nothing is a bitmap, so it is sharp at any zoom.
+- Where text would be under 4 px on paper (a whole board of 10,000 notes),
+  a sheet draws what the screen does far out: boxes, legible titles, and
+  group titles by the map rule.
+
+Two things Chrome's printing needed: each sheet's picture has
+`contain: strict` (otherwise content positioned far outside it made extra
+pages and shrank others), and very large shapes are clipped to the sheet by
+hand. Agents call `print({ mode, paper, orientation, dialog: false })` to lay
+out the sheets without the dialog. test-board.mjs prints every example to a
+PDF in CI (CDP's Page.printToPDF) and checks its page count, its paper size,
+and that each sheet's notes fit their text, with math typeset.
+
 Still to do in step 1:
 - editing edges' labels, moving notes between groups;
 - shapes and frames;
@@ -349,6 +385,9 @@ Still to do in step 1:
 
 ## Decisions
 
+- **Pages** (William, October 12): boards have pages, as CoCalc's do, where
+  each slide is a whiteboard page. PDF export first, since it was the most
+  common complaint about CoCalc's whiteboard.
 - **Both hosts** (William, October 11): boards ultimately ship in both
   sagebrush.space and cocalc-ai, replacing CoCalc's whiteboard and slides.
 - **First use case** (William, October 11): brainstorming, meaning research
