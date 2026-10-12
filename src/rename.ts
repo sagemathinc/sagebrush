@@ -860,7 +860,14 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
       }
       return ({ Lt: p < q, LtE: p <= q, Gt: p > q, GtE: p >= q, Eq: p === q, NotEq: p !== q } as Record<string, boolean>)[op];
     }
-    if (a.t === "str" && b.t === "str") return ({ Lt: a.v < b.v, LtE: a.v <= b.v, Gt: a.v > b.v, GtE: a.v >= b.v, Eq: a.v === b.v, NotEq: a.v !== b.v } as Record<string, boolean>)[op];
+    // (by code point, as Python compares strings: REACT-DEEF-1)
+    if (a.t === "str" && b.t === "str") {
+      const c = [...a.v].map((ch) => ch.codePointAt(0)!), d = [...b.v].map((ch) => ch.codePointAt(0)!);
+      let k = 0;
+      while (k < c.length && k < d.length && c[k] === d[k]) k++;
+      const r = k < c.length && k < d.length ? c[k] - d[k] : c.length - d.length;
+      return ({ Lt: r < 0, LtE: r <= 0, Gt: r > 0, GtE: r >= 0, Eq: r === 0, NotEq: r !== 0 } as Record<string, boolean>)[op];
+    }
     return undefined;
   };
   const known = (e: any, want: boolean) => { const x = konst(e); return x !== undefined && truth(x) === want; };

@@ -955,7 +955,7 @@ method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "strin
 method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? s.repeat(Math.max(0, Number(x))) : NotImplemented));
 method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
-method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s < x : NotImplemented));
+method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) < 0 : NotImplemented));
 method(S, "__hash__", (s: any) => O.hashAny(unbox(s)));
 method(S, "__str__", (s: string) => s);
 method(S, "__getnewargs__", (s: any) => tuple([unbox(s)]));
@@ -1061,7 +1061,7 @@ export function sortList(a: any[], key: any, reverse: any): void {
   if (O.truth(reverse)) idx.reverse();
   let cmp: (i: number, j: number) => number;
   if (keys.every((k) => typeof k === "number")) cmp = (i, j) => (keys[i] < keys[j] ? -1 : keys[j] < keys[i] ? 1 : 0);
-  else if (keys.every((k) => typeof k === "string")) cmp = (i, j) => (keys[i] < keys[j] ? -1 : keys[j] < keys[i] ? 1 : 0);
+  else if (keys.every((k) => typeof k === "string")) cmp = (i, j) => Math.sign(O.strCmp(keys[i], keys[j]));
   else cmp = (i, j) => (O.truth(O.lt(keys[i], keys[j])) ? -1 : O.truth(O.lt(keys[j], keys[i])) ? 1 : 0);
   idx.sort(cmp);
   if (O.truth(reverse)) idx.reverse();
@@ -1942,9 +1942,9 @@ getset(object, "__dict__", (o) => {
   numDunders(int, O.isPyInt, true);
   numDunders(float, isNum, false);
   method(S, "__ne__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s !== x : NotImplemented));
-  method(S, "__le__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s <= x : NotImplemented));
-  method(S, "__gt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s > x : NotImplemented));
-  method(S, "__ge__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s >= x : NotImplemented));
+  method(S, "__le__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) <= 0 : NotImplemented));
+  method(S, "__gt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) > 0 : NotImplemented));
+  method(S, "__ge__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) >= 0 : NotImplemented));
   method(S, "__rmul__", (s: string, x: any) => (O.isPyInt(unbox(x)) ? s.repeat(Math.max(0, Number(unbox(x)))) : NotImplemented));
 }
 

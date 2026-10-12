@@ -19,3 +19,10 @@ test("an assignment's value is evaluated before its target", () => {
 test("an assignment's value raises before its target", () => {
   assert.equal(cli("-c", "def f():\n    try:\n        a[i] = missing\n    except NameError as e:\n        print(type(e).__name__)\n    a = [0]; i = 0\nf()\ndef g():\n    try:\n        a[0]: int = missing\n    except NameError as e:\n        print(type(e).__name__)\n    a = [0]\ng()\ndef h():\n    try:\n        o.v = missing\n    except NameError as e:\n        print(type(e).__name__)\n    o = 0\nh()\ndef k():\n    a = [5]\n    a[0] = a[0] + 1\n    b = {}\n    b[\"x\"] = a\n    print(a, b)\nk()\n"), "NameError\nNameError\nNameError\n[6] {'x': [6]}\n");
 });
+
+// Strings compare by code point, as in Python, not by UTF-16 unit as in
+// JavaScript: U+10000 (a surrogate pair) is after U+E000, in comparisons,
+// sorted, min and max, sequences, str.__lt__ (REACT-DEEF-1; CPython's output)
+test("strings compare by code point", () => {
+  assert.equal(cli("-c", "print('\\U00010000' < '\ue000', '\\U00010000' > '\ue000', '\ue000' < '\\U00010000', '\\U00010000' == '\ue000')\nprint('\\U00010000' <= '\ue000', '\\U00010000' >= '\ue000', 'a\\U00010000' < 'a\ue000', 'ab' < 'a\\U00010000')\nprint([ord(c) for c in sorted(['\\U00010000', '\ue000', 'z', '\uffff', '\\U0001F600'])])\nprint([ord(c) for c in sorted(['\\U00010000', '\ue000', 1 and 'q'])], ord(min('\\U00010000', '\ue000')), ord(max('\\U00010000', '\ue000')))\nprint(sorted([('\\U00010000', 1), ('\ue000', 2)])[0][1], '\\U00010000'.__lt__('\ue000'), ['\\U00010000'] < ['\ue000'])\nx = 1\nx += ((x:=10) if '\\U00010000' < '\ue000' else 0) + x\nprint(x)\n"), "False True True False\nFalse True False True\n[122, 57344, 65535, 65536, 128512]\n[113, 57344, 65536] 57344 65536\n2 False False\n2\n");
+});

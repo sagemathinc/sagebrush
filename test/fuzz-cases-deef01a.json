@@ -1,0 +1,374 @@
+[
+  {
+    "name": "unicode astral lt BMP conditional",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\U00010000' < '\\uE000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode astral le BMP conditional",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\U00010000' <= '\\uE000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode BMP gt astral conditional",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\uE000' > '\\U00010000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode BMP ge astral conditional",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\uE000' >= '\\U00010000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode and prefix",
+    "codes": [
+      "x=1",
+      "print((('\\U00010000' < '\\uE000') and (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode comparison chain",
+    "codes": [
+      "x=1",
+      "print(('\\U00010000' < '\\uE000' < (x:=\"z\"), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode repeated reset",
+    "codes": [
+      "x=1",
+      "a=[(((x:=10) if '\\U00010000' < '\\uE000' else 0),(x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode common prefix conditional",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 'prefix\\U00010000' < 'prefix\\uE000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode plain ordering",
+    "codes": [
+      "x=1",
+      "print('\\U00010000' < '\\uE000', '\\U00010000' > '\\uE000', '\\uE000' < '\\U00010000', '\\U00010000' == '\\uE000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode sorted codepoints",
+    "codes": [
+      "x=1",
+      "print([ord(c) for c in sorted(['\\U00010000', '\\uE000'])])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode augmented reset",
+    "codes": [
+      "x=1",
+      "x += ((x:=10) if '\\U00010000' < '\\uE000' else 0) + x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode true comparison boundary",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\U00010000' > '\\uE000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode true reversed comparison boundary",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\uE000' < '\\U00010000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode supplementary equality control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\U00010000' == '\\U00010000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode supplementary ordering control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\U00010000' < '\\U00010001' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "unicode BMP ordering control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if '\\uD7FF' < '\\uE000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "ASCII string ordering control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 'apple' < 'banana' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented repeating increment control",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1) for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented per iteration before store control",
+    "codes": [
+      "x=1",
+      "x += sum([x + (x:=2) for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented filtered increment control",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1) for i in [0,1] if i==0])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented repeating read control",
+    "codes": [
+      "x=1",
+      "x += sum([x for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented lambda read control",
+    "codes": [
+      "x=1",
+      "x += (lambda v: v+x)(2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented empty comprehension control",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1) for i in []])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented nested repeating control",
+    "codes": [
+      "x=1",
+      "x += sum([sum([(x:=x+1) for j in [0,1]]) for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented mutable reassignment control",
+    "codes": [
+      "x=[1]",
+      "x += ((x:=[2]), x)[1]\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=[5]"
+    ]
+  },
+  {
+    "name": "negative large integer comparison control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if -9007199254740993 < -9007199254740992 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "None direct false complement control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if not None else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "boolean integer comparison control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if True == 1 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "int float boundary control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 9007199254740992 == 9007199254740992.0 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "large mixed exact numeric refused boundary",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 18014398509481984 == 18014398509481984.0 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested skipped compare refused boundary",
+    "codes": [
+      "x=1",
+      "if (1 > 2 < (x:=2)) == False:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  }
+]
