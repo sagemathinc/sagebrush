@@ -1,0 +1,418 @@
+[
+  {
+    "name": "formfeed adjacent scalar must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000'\f'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed literal emoji must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\f'x' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed unicode and raw prefixes must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if u'\ud83d\ude00'\fR'x' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed triple quoted literals must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '''\ud83d\ude00'''\f\"\"\"x\"\"\" > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed multiline literals must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if ('\ud83d\ude00'\n\f'x') > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed continued literals must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\\\n\f'x' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed and binding must run control",
+    "codes": [
+      "x = 1",
+      "print(('\ud83d\ude00'\f'' > '' and (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed repeating binding must run control",
+    "codes": [
+      "x = 1",
+      "print([((x:=10) if '\ud83d\ude00'\f'' > '' else 0, x, (x:=20))[1] for i in [0,1]], x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "UTF8 BMP prefix control",
+    "codes": [
+      "x = 1",
+      "\u03c0 = 0; print(((x:=10) if '\ud83d\ude00' 'x' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "literal BMP and astral mixed control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\u03b1\ud83d\ude00\u00e9' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "space concatenation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00' '' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "tab concatenation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\t'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "newline concatenation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if ('\ud83d\ude00'\n'') > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "backslash continuation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\\\n'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF continuation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\\\r\n'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed inside literal control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00\fx' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed outside literal control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if \f'\ud83d\ude00' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw escaped double quote control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r\"\ud83d\ude00\\\"\\ud800\" > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw escaped single quote control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r'\ud83d\ude00\\'\\ud800' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw triple quoting control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if R'''\ud83d\ude00\\'\\ud800''' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "escaped triple delimiter control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if \"\"\"\ud83d\ude00\\\"\"\"\\\\ud800\"\"\" > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "mixed raw and scalar literals control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' r'\\ud800' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw then scalar literals control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r'\\ud800' '\\U00010000' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw and scalar with comments control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if (r'\\ud800' # fake \\udc00\n '\\U00010000') > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "escaped surrogate spelling concatenation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' '\\\\ud800' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "four escaped backslashes control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000\\\\\\\\ud800' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nonascii preceding a multiline literal control",
+    "codes": [
+      "x = 1",
+      "label = '\u00e9\ud83d\ude00'; print(((x:=10) if '''\ud83d\ude00\nx''' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "supplementary actual escape control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "mixed raw and ambiguous literal refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r'x' '\\ud800\\udc00' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "long ambiguous concatenation refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U0000D800' '\\U0000DC00' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "ambiguous triple quoted literal refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '''\\ud800\\udc00''' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "ambiguous continuation with raw prefix refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800'\\\n'\\udc00' r'x' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  }
+]
