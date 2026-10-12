@@ -775,6 +775,18 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   const globals = occ.filter((o) => o.global);
   // (the function whose body it is in: a default is the enclosing one's)
   const fnOf = (o: Occurrence) => [...o.path].reverse().find(([n, key]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef") && key === "body")?.[0];
+  // A := of the name in a comprehension that may run more than once, with a
+  // read in it that runs before the := in an iteration (its own value's
+  // too): the first iteration's read sees the previous value, later ones
+  // what the := stored; no one name fits (REACT-F813-1).  A read after it
+  // in the iteration always sees the new one.
+  const once = (c: any) => c.generators.every((g: any) => ["List", "Tuple", "Set"].includes(g.iter._type) && g.iter.elts.length <= 1 && !g.iter.elts.some((e: any) => e._type === "Starred"));
+  for (const st of occ) {
+    if (!st.store || st === first || st.global) continue;
+    for (const [c] of st.path) {
+      if (COMPS.has(c._type) && !once(c) && occ.some((r) => r !== st && !r.store && inside(r, c) && runsBefore(r, st))) return null;
+    }
+  }
   for (const o of occ) {
     if (o.global) continue;
     if (o === first) { out.set(o, "new"); continue; }
@@ -835,7 +847,8 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     const header = t === "now";
     if (header || evaluatedFirst(o, first)) { out.set(o, "old"); continue; }
     if (runsBefore(o, first)) {
-      if (o.path.some(([n]) => LOOPS.has(n._type) && inside(first, n))) return null;
+      // (a loop's body repeats; a for loop's iterable runs once, REACT-F813-2)
+      if (o.path.some(([n, k]) => LOOPS.has(n._type) && inside(first, n) && !((n._type === "For" || n._type === "AsyncFor") && k === "iter"))) return null;
       out.set(o, "old");
     } else out.set(o, "new");
   }

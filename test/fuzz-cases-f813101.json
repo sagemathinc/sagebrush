@@ -1,0 +1,178 @@
+[
+  {
+    "name": "augmented RHS repeated list increment",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1) for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "augmented RHS repeated list increment and later read",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1)+x for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "augmented RHS repeated list read before increment",
+    "codes": [
+      "x=1",
+      "x += sum([x+(x:=x+1) for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "augmented RHS repeated dictionary increment",
+    "codes": [
+      "x=1",
+      "x += sum({i:(x:=x+1)+x for i in [0,1]}.values())\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "augmented RHS repeated comprehension filter",
+    "codes": [
+      "x=1",
+      "x += sum([x for i in [0,1] if (x:=x+1)])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "augmented RHS nested repeated comprehension",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1)+x for i in [0,1] for j in [0]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single iteration list increment control",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1) for i in [0]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single iteration list increment and later read control",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=x+1)+x for i in [0]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single iteration dictionary increment control",
+    "codes": [
+      "x=1",
+      "x += sum({i:(x:=x+1)+x for i in [0]}.values())\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single iteration comprehension filter control",
+    "codes": [
+      "x=1",
+      "x += sum([x for i in [0] if (x:=x+1)])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "repeated constant walrus and later read control",
+    "codes": [
+      "x=1",
+      "x += sum([(x:=2)+x for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "read-only repeated comprehension control",
+    "codes": [
+      "x=1",
+      "x += sum([x for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "skipped and-branch walrus control",
+    "codes": [
+      "x=1",
+      "x += (False and (x:=9))+x\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "skipped conditional walrus control",
+    "codes": [
+      "x=1",
+      "x += ((x:=9) if False else 0)+x\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "plain assignment value rebinding control",
+    "codes": [
+      "x=1",
+      "x = (x:=2)+x\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "plain assignment read before value rebinding boundary",
+    "codes": [
+      "x=1",
+      "x = x+(x:=2)\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "loop iterable read after walrus control",
+    "codes": [
+      "x=1",
+      "for x in [(x:=2),x]:\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "loop iterable read before walrus boundary",
+    "codes": [
+      "x=1",
+      "for x in [x,(x:=2)]:\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "with context walrus then read control",
+    "codes": [
+      "class C:\n    def __init__(self,v): self.v=v\n    def __enter__(self): return self.v\n    def __exit__(self,*args): pass\nx=C(1)",
+      "with ((x:=C(2)),x)[1] as x:\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "with separate manager context rebinding control",
+    "codes": [
+      "class C:\n    def __init__(self,v): self.v=v\n    def __enter__(self): return self.v\n    def __exit__(self,*args): pass\nx=C(1)",
+      "with (x:=C(2)) as y:\n    print(y,x.v)",
+      "print(x.v)"
+    ]
+  },
+  {
+    "name": "loop tuple iterable read after walrus control",
+    "codes": [
+      "x=1",
+      "for x in ((x:=2),x):\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "loop iterable arithmetic after walrus control",
+    "codes": [
+      "x=1",
+      "for x in [(x:=2)+x]:\n    print(x)",
+      "print(x)"
+    ]
+  }
+]
