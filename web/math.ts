@@ -7,8 +7,11 @@ let css = false;
 export function typeset(root: Element) {
   if (!css) {
     css = true;
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: new URL("katex/katex.min.css", import.meta.url).href });
-    document.head.appendChild(link);
+    // (a page that carries the stylesheet itself, an exported board, has #sb-katex)
+    if (!document.getElementById("sb-katex")) {
+      const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: new URL("katex/katex.min.css", import.meta.url).href });
+      document.head.appendChild(link);
+    }
   }
   for (const el of root.querySelectorAll<HTMLElement>(".math[data-tex]")) {
     try {

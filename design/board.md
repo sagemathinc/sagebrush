@@ -423,6 +423,28 @@ are not valid Mermaid. CI runs it (at least 97% must agree).
 test-board.mjs does all of this with the mouse on an imported flowchart,
 at desktop and phone sizes.
 
+**One HTML file** (web/board/export.ts, *Download as HTML*, October 12).
+The whole board in one file that opens anywhere, offline: from disk, as an
+email attachment, or put on any web server. It holds:
+- the board page, its script, and the document (as JSON);
+- with math, KaTeX: its module as text, imported from a Blob, and its
+  stylesheet with the woff2 fonts as data: URLs.
+
+The examples come to 170 KB without math and 780 KB with it. Everything
+works in the file: pages, the tour, printing, editing (kept in that
+browser), even exporting again, from the copies the file carries. Agents
+call `exportHtml()`.
+
+web/board/test-export.mjs exports each example, opens the file from
+file:// with the network off, and checks:
+- the items, the pages, and math typeset in KaTeX's own fonts;
+- the PDF;
+- that no request reached the network;
+- that exporting again from the file gives the same bytes.
+
+It also passed in Chrome on a Mac. Safari is not yet checked: it cannot be
+automated there without enabling remote automation.
+
 Still to do in step 1:
 - shapes and frames;
 - a better top-level arrangement than one column of layers.

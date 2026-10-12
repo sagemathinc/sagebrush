@@ -23,6 +23,7 @@ import { layout, isBoard, pageCount, pageOf, pageView, type BoardDoc, type Board
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText, fromMermaid } from "./mermaid";
+import { embedded, exportHtml } from "./export";
 import { render as markdown } from "../markdown";
 
 const q = new URLSearchParams(location.search);
@@ -39,8 +40,8 @@ const hasMath = (s: string) => /\$|\\\(|\\\[/.test(s);
 
 // (a note's height at a width, measured once)
 const heights = new Map<string, number>();
-// (?mermaid=TEXT: a flowchart given in the address)
-const source = q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
+// (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
+const source = embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
 const saveKey = "sagebrush-board:" + source;
 let original: BoardDoc | null = null;
 
@@ -53,7 +54,9 @@ async function show(d: BoardDoc) {
   board.markdown = (s) => markdown(s);
   if (hasMath(JSON.stringify(d))) {
     // KaTeX, the notebook's (its stylesheet and fonts beside it)
-    mathModule ??= import(new URL("../sagebrush-math.js", import.meta.url).href);
+    // (an exported file carries the module as text: imported from a Blob)
+    const own = document.getElementById("sb-math")?.textContent;
+    mathModule ??= import(own ? URL.createObjectURL(new Blob([own], { type: "text/javascript" })) : new URL("../sagebrush-math.js", import.meta.url).href);
     const m = await mathModule;
     board.typeset = (el) => m.typeset(el);
   }
@@ -195,9 +198,9 @@ if (q.has("items") || q.has("strokes")) {
   board.setItems(synthetic(Number(q.get("items") ?? 2000), Number(q.get("strokes") ?? 20000)));
   board.setCamera({ x: 0, y: 0, z: 1 });
 } else {
-  const url = new URL(source.startsWith("mermaid:") ? "data:," : source, location.href);
+  const url = new URL(source.startsWith("mermaid:") || source.startsWith("embedded:") ? "data:," : source, location.href);
   // (JSON, or a Mermaid flowchart, or Markdown with some)
-  (source.startsWith("mermaid:") ? Promise.resolve(fromMermaid(source.slice(8))) : fetch(url).then((r) => {
+  (source.startsWith("embedded:") ? Promise.resolve(JSON.parse(embedded()!.textContent!) as BoardDoc) : source.startsWith("mermaid:") ? Promise.resolve(fromMermaid(source.slice(8))) : fetch(url).then((r) => {
     if (!r.ok) throw new Error(`${url.pathname}: ${r.status} ${r.statusText}`);
     return r.text();
   }).then((t) => boardFromText(t, decodeURIComponent(url.pathname.split("/").pop() ?? "")))).then((d: BoardDoc) => {
@@ -282,6 +285,21 @@ $("download").onclick = () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
+// Download as HTML: the board in one file (export.ts)
+$("html").onclick = async () => {
+  if (!doc) return;
+  try {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([await exportHtml(doc)], { type: "text/html" }));
+    a.download = fileName().replace(/\.json$/, ".html");
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (e) {
+    fail(e);
+  }
+};
+// (an exported file has no examples beside it)
+if (embedded()) $("examples").hidden = true;
 $("copyjson").onclick = () => navigator.clipboard?.writeText(JSON.stringify(doc, null, 1));
 async function openText(text: string, name?: string) {
   const d = boardFromText(text, name);
@@ -415,6 +433,8 @@ async function bench(path: Camera[]) {
     step,
     /** A Mermaid flowchart (or Markdown with some) as a board document, to load(), or to edit first. */
     fromMermaid: (text: string) => boardFromText(text),
+    /** The board as one self-contained HTML file (its text). */
+    exportHtml: () => exportHtml(doc!),
     /** Show page n (0-based). */
     page,
     /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */
