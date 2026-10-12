@@ -25,7 +25,10 @@ const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiti
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? "eval failed"); return r.result.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(200); } throw new Error("timeout: " + expr); };
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
-const open = async (path) => { await send("Page.navigate", { url: base + path }); await sleep(300); await until("document.readyState === 'complete'"); };
+// every page runs under its Content-Security-Policy without a violation
+const violations = [];
+const collect = async () => violations.push(...((await ev("window.__csp ?? []").catch(() => [])) ?? []));
+const open = async (path) => { await collect(); await send("Page.navigate", { url: base + path }); await sleep(300); await until("document.readyState === 'complete'"); };
 // the page's text with each formula as its TeX source (KaTeX's annotation);
 // a TeX command that lost its backslash (a JS string escape) fails the test
 const text = async () => {
@@ -42,6 +45,7 @@ async function shot(name) {
 
 try {
   await send("Page.enable");
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(location.pathname + ': ' + e.violatedDirective + ' ' + e.blockedURI));" });
   await open("/atlas/");
   let t = await text();
   ok(/Every Galois orbit of newforms/.test(t) && /5,951 weight-2 orbits agree with the LMFDB/.test(t), "front page: coverage and LMFDB agreement");
@@ -116,6 +120,12 @@ try {
   ok(j.dim === 20 && j.traces.length === 1000 && j.lmfdb === "agrees" && j.status === "proven", "389.2.a.e.json: dim 20, 1000 traces, proven, LMFDB agrees");
   const s = await (await fetch(base + "/atlas/mf/?rank=3&format=json")).json();
   ok(s.total === 0, "no stored curve of rank 3 below conductor 1000");
+  await collect();
+  ok(violations.length === 0, "no Content-Security-Policy violations: " + violations.join(", "));
+  for (const path of ["/atlas/", "/atlas/mf/389.2.a.e", "/atlas/mf/?level=11", "/atlas/mf/389.2.a.zz"]) {
+    const csp = (await fetch(base + path)).headers.get("content-security-policy") ?? "";
+    ok(/script-src 'self'/.test(csp) && /object-src 'none'/.test(csp), `${path} has the site's Content-Security-Policy`);
+  }
 } catch (e) {
   console.log("ERROR", e.message);
   process.exitCode = 1;

@@ -221,28 +221,12 @@ mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
-// A Content-Security-Policy for the pages (a second line of defense: were
-// something ever to slip markup past web/safe-html.ts and board documents'
-// checks, no script it brought could run): scripts only from this site, and
-// the pages' own inline scripts by their hashes; no plugins, no <base>, no
-// forms; and Cloudflare's Web Analytics beacon, which the site's host adds
-// to its pages.  (Images and fetches may come from elsewhere: Markdown's images,
-// ?doc= boards.  The Python worker, which compiles to JavaScript, has its
-// own response and so its own policy: none.)
-{
-  const hashes = (file: string) => [...readFileSync(join(here, "dist", file), "utf8").matchAll(/<script(?![^>]*\bsrc=)(?![^>]*type="(?:application\/json|text\/plain)")[^>]*>([\s\S]*?)<\/script>/g)]
-    .map((m) => `'sha256-${new Bun.CryptoHasher("sha256").update(m[1]).digest("base64")}'`);
-  const csp = (file: string) => ["default-src 'self'", `script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com ${hashes(file).join(" ")}`.trim(), "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https: http:", "font-src 'self' data:", "connect-src 'self' data: blob: https: http:", "worker-src 'self' blob:", "media-src 'self' data: blob:",
-    "frame-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'none'", "manifest-src 'self'"].join("; ");
-  const rules = [["/", "index.html"], ["/index.html", "index.html"], ["/board/*", "board/index.html"], ["/embed/*", "embed/index.html"]]
-    .map(([path, file]) => `${path}\n  Content-Security-Policy: ${csp(file)}`).join("\n");
-  writeFileSync(join(here, "dist", "_headers"), readFileSync(join(here, "_headers"), "utf8").trimEnd() + "\n# the pages' Content-Security-Policy (written by web/build.ts)\n" + rules + "\n");
-}
 mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "_headers", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");
+// every page's Content-Security-Policy, in _headers (web/csp.ts)
+(await import("./csp.ts")).writeHeaders();
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
 console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);

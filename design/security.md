@@ -24,7 +24,16 @@ Untrusted content reaches the page in these ways:
    HTML goes through one of these:
    - Markdown (web/markdown.ts): its raw HTML through web/safe-html.ts; links
      and images keep only harmless URLs.
-   - SVG output: an element and attribute allowlist (notebook.js `safeSvg`).
+   - SVG output (notebook.js `safeSvg`): an element allowlist; elements and
+     attributes judged by namespace and local name, never by the prefix the
+     text chose (`x:href` is an XLink href). An attribute value or style
+     declaration may name the picture's own ids, `url(#id)`; otherwise it has
+     no backslash (CSS escapes), slash or colon, so nothing in it can name
+     another site. `href` is a local `#id`, or for `<image>` an inline raster
+     `data:` URL. Only `aria-*` and `data-*`, which are text, may hold
+     anything.
+   - 3D scenes: their strings are set as DOM properties (`style.color`),
+     never spliced into CSS text.
    - Math: KaTeX, with `trust` off (no `\href`, `\url`, `\htmlClass`, ...).
    - HTML output (`text/html`, from `IPython.display.HTML`, tables):
      web/safe-html.ts.
@@ -48,8 +57,12 @@ Untrusted content reaches the page in these ways:
    every number a finite number, every text a string, every choice one of its
    values, and every color a color. It runs before a document is shown,
    whatever it came from.
-5. **A Content-Security-Policy is a second line of defense.** web/build.ts
-   writes it into `_headers` for `/`, `/board/*` and `/embed/*`. It allows
+5. **A Content-Security-Policy is a second line of defense,** on every page
+   (web/csp-policy.mts). web/csp.ts writes it into `_headers` for every
+   static page (one rule per top-level directory, with the hashes of its
+   pages' inline scripts; the build fails if a page is left without a policy
+   allowing its scripts), and the atlas's Worker-rendered pages set it
+   themselves (web/atlas/server.ts; its search box may submit to the site). It allows
    scripts only from the site and from Cloudflare's Web Analytics beacon
    (which the site's host adds to its pages), and the pages' own inline
    scripts by their hashes, with no inline handlers, plugins, `<base>` or forms. Should markup
@@ -57,9 +70,22 @@ Untrusted content reaches the page in these ways:
    worker's script has its own response, so it has no such policy: it
    compiles Python to JavaScript.
 6. **Python cannot reach JavaScript.** Python objects expose only Python
-   attributes (`constructor`, `__proto__`, `call` are AttributeErrors), there
-   is no `js` module, and attribute names reach generated code only as JSON
-   strings. Python has no network API.
+   attributes, there is no `js` module, and attribute names reach generated
+   code only as JSON strings. Python has no network API. In detail
+   (src/runtime/object.ts):
+   - an attribute is an own property of the instance; nothing a JavaScript
+     prototype has (`constructor`, `toString`) ever answers a Python
+     attribute read, through any path, cached or not;
+   - a store never runs a JavaScript setter: `__proto__` is stored as an own
+     data property, an ordinary attribute as in CPython;
+   - names starting with `$` are the runtime's own slots (`$cls`, `$m`): not
+     readable, writable or deletable from Python (`getattr`, `setattr`,
+     `__dict__`). This differs from CPython, where any string is a name;
+   - an array's `length` and elements are its list's, never attributes;
+   - text Python controls never becomes JavaScript source: a module's file
+     name, which ends up in a `//# sourceURL=` comment, is percent-encoded
+     (src/compile.ts `scriptName`), and the browser's eval refuses a name
+     with a line terminator.
 
 ## Found and fixed (October 12)
 
@@ -70,6 +96,23 @@ Untrusted content reaches the page in these ways:
 - **Remote images in code output** were a way for code to send data away.
   Fixed by rule 3.
 
+sagebrush-daybreak's review of 983418b found six more, all fixed:
+- **SEC-983-1, critical: Python reached JavaScript's `Function`.** An
+  attribute read site, primed by an instance's own attribute, answered the
+  next instance of a list subclass with an inherited JavaScript property
+  (`Array`); a `__proto__` store then ran JavaScript's prototype setter, and
+  `Function` followed. Raw JavaScript in the worker, which has the origin's
+  IndexedDB. And a `?doc=` board runs its code on open.
+- **SEC-983-2, critical: a newline in a module's file name** (Python controls
+  it through `sys.path`) ended the `//# sourceURL=` comment and ran the rest
+  as JavaScript.
+- **SEC-983-3/4, high: SVG output loaded from other sites** through CSS
+  escapes (`u\72 l(...)`) and an XLink href under another prefix (`x:href`).
+  The same review found `image-set('...')` in a style worked too.
+- **SEC-983-5, high: a 3D scene's label color** was spliced into CSS text:
+  `red;background-image:url(...)` loaded from another site.
+- **SEC-983-6, medium: the atlas, the articles and /demo/ had no policy.**
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS
@@ -78,14 +121,22 @@ Untrusted content reaches the page in these ways:
   allowed elements and attributes and harmless URLs may remain.
 - **web/board/test-xss.mjs:** a board with markup and script in every field
   is shown, run (its code displays hostile HTML and Markdown), edited,
-  printed and exported, and nothing runs. Also: the site's own pages run
-  under their policy with no violation.
+  printed and exported, and nothing runs. Its code items also try both
+  escapes from Python to the worker's JavaScript (which would post to a
+  BroadcastChannel the page listens on), and the notebook displays SVG and
+  3D outputs that would load from another site, while every request is
+  watched. Also: the site's own pages run under their policy with no
+  violation. Against the site before the fixes it failed all of these.
+- **test/security.test.ts:** the escapes, and the shapes around them, for
+  every instance layout (list, dict, int and plain subclasses).
+- **web/atlas/test-atlas.mjs:** the atlas's pages have the policy, and run
+  (computing in the page included) without a violation.
 
 ## Still to do
 
-- An adversarial review of the Python sandbox, a search for a way from
-  Python to JavaScript, by sagebrush-codex.
-- The policy for the other pages (the atlas, the articles, /demo/).
+- Further adversarial review of the Python sandbox (rule 6): it carries the
+  most weight, since the worker has the origin's storage and a `?doc=` board
+  runs its code on open.
 - Whether a notebook opened from a share link should run code without asking.
   It does not today: loaded outputs are stale until run. Boards from `?doc=`
-  do run their code on open, but their interpreter has no files.
+  do: safe only while rule 6 holds.

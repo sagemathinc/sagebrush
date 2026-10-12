@@ -8,6 +8,7 @@
 import { type Orbit, type Space, derive, parseLabel, spaceLabel } from "./model.ts";
 import { type IndexRow, type Query, esc, href, orbitBody, orbitTitle, page, pendingBody, search, searchBody, spaceBody, spaceCrumbs, spaceTitle } from "./render.ts";
 import { type CostModel, type Stats, aboutBody, homeBody } from "./pages.ts";
+import { pagePolicy } from "../csp-policy.mts";
 
 type Asset = (path: string) => Promise<Response>;
 
@@ -19,7 +20,10 @@ async function json<T>(asset: Asset, path: string): Promise<T | null> {
   return r.ok ? ((await r.json()) as T) : null;
 }
 
-const html = (body: string, status = 200, cache = "public, max-age=600") => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": cache } });
+// (the site's policy, as on every page; the search box is a form)
+const CSP = pagePolicy().replace("form-action 'none'", "form-action 'self'");
+const html = (body: string, status = 200, cache = "public, max-age=600") =>
+  new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": cache, "content-security-policy": CSP } });
 const jsonResponse = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*", "cache-control": "public, max-age=600" } });
 const redirect = (to: string, status = 302) => new Response(null, { status, headers: { location: to } });
 

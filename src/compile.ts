@@ -144,6 +144,16 @@ function compileCached(source: string, filename: string, name: string, sage: boo
   return { compiled, script: new Script(compiled.code, { filename: jsName }) };
 }
 
+// The name of a module's compiled script.  In the browser it becomes a
+// `//# sourceURL=` comment after the code (web/shims/vm.ts), and Python
+// controls the file name (through sys.path), so everything but plain path
+// characters is percent-encoded: a line terminator in a file name must never
+// end the comment and inject JavaScript (design/security.md).  Tracebacks
+// show the real file name, from R.scripts.
+export function scriptName(path: string): string {
+  return "py:" + path.replace(/[^\w/.~:@+,=-]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+}
+
 // Execute `source` as module `name`, registering it in sys.modules first.
 export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage")): any {
   const m = R.newModule(name);
@@ -152,7 +162,7 @@ export function execModule(source: string, filename: string, name: string, isPac
   if (isPackage) m.__path__ = [dirname(filename)];
   m.__builtins__ = R.builtins;
   R.dictSet(R.sysModules, name, m);
-  const jsName = "py:" + resolvePath(filename);
+  const jsName = scriptName(resolvePath(filename));
   let compiled: Compiled;
   let script: Script;
   try {
