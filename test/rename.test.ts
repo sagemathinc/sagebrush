@@ -329,7 +329,8 @@ test("a class's annotation inside a function is evaluated, unless it is text (RE
     "def f():\n    class C:\n        y: x\u02b92\n    return C\nx\u02b92 = x + 1\nprint(f().__annotations__['y'])");
   // (a method's local annotation is still never evaluated)
   assert.equal(renameInCell("class C:\n    def m(self):\n        y: x = 1\n        return y\nx = x + 1", "x", "x\u02b92", { from: "definition" }), "class C:\n    def m(self):\n        y: x = 1\n        return y\nx\u02b92 = x + 1");
-  // (with `from __future__ import annotations` the annotation is its text: kept as written)
-  assert.equal(renameInCell("from __future__ import annotations\ndef f():\n    class C:\n        y: x\n    return C\nx = x + 1\nprint(f().__annotations__['y'])", "x", "x\u02b92", { from: "definition" }),
-    "from __future__ import annotations\ndef f():\n    class C:\n        y: x\n    return C\nx\u02b92 = x + 1\nprint(f().__annotations__['y'])");
+  // (with `from __future__ import annotations` the annotation is text that
+  // type-hint functions resolve: neither renaming it nor keeping it is
+  // right, so the cell is refused, REACT-72DC-1)
+  assert.equal(renameInCell("from __future__ import annotations\ndef f():\n    class C:\n        y: x\n    return C\nx = x + 1\nprint(f().__annotations__['y'])", "x", "x\u02b92", { from: "definition" }), null);
 });

@@ -1,0 +1,522 @@
+[
+  {
+    "name": "future type hints class after redefinition",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    y:x\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future type hints class before redefinition",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nclass C:\n    y:x\nx=str\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future type hints qualified import",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nimport typing as t\nx=str\nclass C:\n    y:x\nprint(t.get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future annotationlib evaluates text",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom annotationlib import get_annotations\nx=str\nclass C:\n    y:x\nprint(get_annotations(C, globals=(lambda:0).__globals__, eval_str=True)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future parameterized type hint",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    y:list[x]\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__args__[0].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future hints after conditional definition",
+    "codes": [
+      "x=int\nflag=True",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nif flag:\n    x=str\nclass C:\n    y:x\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float\nflag=True"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future factory resolved type hints",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\ndef f():\n    class C:\n        y:x\n    return C\nx=str\nprint(get_type_hints(f(), globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future type hints reader in later cell",
+    "codes": [
+      "x=int",
+      "x=str",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nclass C:\n    y:x\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future unicode resolved type hint",
+    "codes": [
+      "α=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nα=str\nclass C:\n    y:α\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(α.__name__)"
+    ],
+    "change": [
+      0,
+      "α=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future self referenced redefined class",
+    "codes": [
+      "class C: pass",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nclass C:\n    y:C\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"] is C)",
+      "print(C.__name__)"
+    ],
+    "change": [
+      0,
+      "class C:\n    old=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future valued annotation loses written key",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nx:int=x+1\nprint(__annotations__[\"x\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future bare annotation after definition loses key",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nx=x+1\nx:int\nprint(__annotations__[\"x\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future annotation exposes generated dictionary key",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nx:int=x+1\nprint(sorted(__annotations__))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future previous annotation dictionary value stays stale",
+    "codes": [
+      "from __future__ import annotations\nx:int=1",
+      "from __future__ import annotations\nx:str=x+1\nprint(__annotations__[\"x\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx:int=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future unicode annotation loses written key",
+    "codes": [
+      "α=1",
+      "from __future__ import annotations\nα:int=α+1\nprint(__annotations__[\"α\"])",
+      "print(α)"
+    ],
+    "change": [
+      0,
+      "α=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future annotation key after third definition",
+    "codes": [
+      "x=1",
+      "x=x+1",
+      "from __future__ import annotations\nx:int=x+1\nprint(__annotations__[\"x\"],x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future conditional annotated definition loses key",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nif True:\n    x:int=x+1\nprint(__annotations__[\"x\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future bare annotation downstream loses key",
+    "codes": [
+      "x=1",
+      "x=x+1",
+      "from __future__ import annotations\nx:int\nprint(__annotations__[\"x\"],x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future module annotation string control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\ny:x\nx=str\nprint(__annotations__[\"y\"])",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future class annotation string control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nx=str\nclass C:\n    y:x\nprint(C.__annotations__[\"y\"])",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future valued class annotation string control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nx=str\nclass C:\n    y:x=7\nprint(C.__annotations__[\"y\"],C.y)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future nested annotation string control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\ndef f():\n    class C:\n        y:x\n    return C\nx=str\nprint(f().__annotations__[\"y\"])",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future local annotation ignored control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\ndef f():\n    y:x=7\n    return y\nprint(f())\nx=str",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future attribute annotation ignored control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nclass O: pass\no=O()\no.a:x\nx=str\nprint(x.__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future subscript annotation ignored control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\na=[1]\na[0]:x\nx=str\nprint(a,x.__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future real assigned value control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\ndef f():\n    y:missing=x\n    return y\nx=str\nprint(f().__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future explicit type hint namespace control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    y:x\nprint(get_type_hints(C, globalns={\"x\":x})[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future unevaluated annotationlib control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom annotationlib import get_annotations\nx=str\nclass C:\n    y:x\nprint(get_annotations(C)[\"y\"])",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lazy nonfuture class hint after definition control",
+    "codes": [
+      "x=int",
+      "from typing import get_type_hints\nx=str\nclass C:\n    y:x\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future unrelated module key control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nx=str\ny:int=7\nprint(__annotations__[\"y\"],y)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future annotated key without redefinition control",
+    "codes": [
+      "K=1",
+      "from __future__ import annotations\nx:int=K+1\nprint(__annotations__[\"x\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "K=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future class namespace shadows type hint control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    x=bytes\n    y:x\nprint(get_type_hints(C, globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future local namespace type hint control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    y:x\nprint(get_type_hints(C, localns={\"x\":x})[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future parenthesized assigned target control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\n(y):missing=x\nx=str\nprint(y.__name__,x.__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nonfuture nested method ignores annotation control",
+    "codes": [
+      "x=int",
+      "def f():\n    class C:\n        def m(self):\n            y:missing\n            return x\n    return C\nx=str\nprint(f()().m().__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nonfuture nested class actual annotation control",
+    "codes": [
+      "x=int",
+      "def f():\n    class C:\n        y:x\n    return C\nx=str\nprint(f().__annotations__[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lazy top level annotation before definition boundary",
+    "codes": [
+      "x=int",
+      "class C:\n    y:x\nx=str\nprint(C.__annotations__[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "lazy top level annotation early read boundary",
+    "codes": [
+      "x=int",
+      "class C:\n    y:x\nprint(C.__annotations__[\"y\"].__name__)\nx=str",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "future signature annotation before definition boundary",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\ndef f(a:x): pass\nx=str\nprint(f.__annotations__[\"a\"])",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "future signature annotation conditional boundary",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\ndef f(a:x): pass\nif False:\n    x=str\nprint(f.__annotations__[\"a\"])",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "refuse"
+  }
+]

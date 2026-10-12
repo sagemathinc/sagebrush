@@ -510,6 +510,14 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     text, kept as written. A class's annotation is asked for at a time the
     analysis cannot know, so if it names a redefined name the cell is
     refused, at the top level as inside a function (review of faca9da).
+
+    With `from __future__ import annotations`, an annotation naming a
+    redefined name is text that type-hint functions resolve, perhaps from
+    another cell. Renaming the text changes it; keeping it resolves to the
+    old definition. Any such cell is refused, even one that only prints the
+    text (review of 72dc9fd). A module's `x: int = v` keeps its key in
+    `__annotations__`: it becomes `x: int; xʹ2 = v`, and a bare `x: int`
+    keeps its name.
   - When a statement shares the prologue's logical line (`"doc"; print(x)`,
     or after a `\` on the next physical line), that line is split at the
     statement, with the initialization between. Otherwise the initialization
