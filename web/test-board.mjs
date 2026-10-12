@@ -430,6 +430,39 @@ try {
       dg = await docOf();
       check(dg.nodes.some((n) => n.id === "c") && !dg.nodes.find((n) => n.id === "s")?.children.some((c) => c.id === "c"), "dragging a note out of its group did not take it out");
       check(dg.nodes.find((n) => n.id === "s")?.children.length === 2, "the group lost its other members");
+      // the toolbar (Edit mode only): the default tools; connecting by taps;
+      // a note added, then cancelled; choosing this board's tools
+      check(await ev("!document.querySelector('.board-toolbar').hidden"), "the toolbar shows in Edit");
+      const tools = () => ev("[...document.querySelectorAll('.board-toolbar [data-tool]')].map((b) => b.dataset.tool).join()");
+      check((await tools()) === "note,code,group,connect", `the default tools: ${await tools()}`);
+      await ev("window.board.focus(['b', 'c'], true)");
+      await sleep(300);
+      await ev("document.querySelector('.board-toolbar [data-tool=connect]').click(), 1");
+      check(await ev("document.querySelector('.board-toolbar [data-tool=connect]').getAttribute('aria-pressed') === 'true'"), "Connect is on");
+      for (const id of ["c", "b"]) {
+        const p = await center(id);
+        await mouse("mousePressed", p.x, p.y);
+        await mouse("mouseReleased", p.x, p.y);
+        await sleep(200);
+      }
+      await sleep(300);
+      check((await docOf()).edges.some((e) => e.from === "c" && e.to === "b"), `tapping c, then b, in Connect did not connect them: ${JSON.stringify((await docOf()).edges.map((e) => e.from + ">" + e.to))}`);
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      check(await ev("document.querySelector('.board-toolbar [data-tool=connect]').getAttribute('aria-pressed') === 'false'"), "Escape leaves Connect");
+      const n0 = (await docOf()).nodes.length;
+      await ev("document.querySelector('.board-toolbar [data-tool=note]').click(), 1");
+      await until("!!document.querySelector('.board-editor .be-title')", 5000);
+      check((await docOf()).nodes.length === n0 + 1, "Note adds a note, its editor open");
+      await ev("document.querySelector('.board-editor .be-title').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      await sleep(400);
+      check((await docOf()).nodes.length === n0, "a new note left empty is not kept");
+      await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
+      await ev("(() => { const b = document.querySelector('.board-toolbar-panel [data-tool=group]'); b.checked = false; b.dispatchEvent(new Event('change')); })()");
+      await sleep(400);
+      check(JSON.stringify((await docOf()).tools) === '["note","code","connect"]' && (await tools()) === "note,code,connect", `the board's tools without Group: ${JSON.stringify((await docOf()).tools)}, shown ${await tools()}`);
+      await ev("window.sagebrush.board.editing(false)");
+      check(await ev("document.querySelector('.board-toolbar').hidden && !document.querySelector('.board-toolbar-panel')"), "the toolbar goes with Edit");
+      await ev("window.sagebrush.board.editing(true)");
       // (undone, all of it: the board before the import)
       for (let i = 0; i < 12 && (await docOf()).nodes.length !== before; i++) {
         await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");

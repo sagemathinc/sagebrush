@@ -26,6 +26,8 @@
 import { Board, synthetic, type Camera } from "./board";
 import { layout, isBoard, pageCount, pageOf, pageView, codeOrder, type BoardDoc, type BoardPage, type DocNote } from "./doc";
 import { BoardCode } from "./code";
+import { Toolbar, defaultTools } from "./toolbar";
+import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText, fromMermaid } from "./mermaid";
@@ -88,6 +90,7 @@ async function show(d: BoardDoc) {
   for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
   if (order.length || code) engine()?.sync(order).catch((e) => console.warn("board: code items:", e));
   board.setItems(items, edges);
+  toolbar.tools.value = d.tools ?? defaultTools();
   shownPage = pageIx;
   const gen = ++routingGen;
   routed = false;
@@ -251,11 +254,20 @@ const editor = new Editor(board, () => doc, async (d) => {
 }, (d) => pageOf(d, pageIx));
 editor.onRun = (id) => { code?.run([id]); };
 const editBtn = $("edit");
-editBtn.onclick = () => {
-  editor.setOn(!editor.on);
-  editBtn.setAttribute("aria-pressed", String(editor.on));
-  $("hint").hidden = !editor.on;
-};
+editBtn.onclick = () => editor.setOn(!editor.on);
+effect(() => {
+  editBtn.setAttribute("aria-pressed", String(editor.editing.value));
+  $("hint").hidden = !editor.editing.value;
+});
+// the toolbar, in Edit mode: adds at the middle of the view
+const center = () => { const v = board.view(); return { x: (v.x0 + v.x1) / 2, y: (v.y0 + v.y1) / 2 }; };
+const toolbar = new Toolbar(document.body, [
+  { id: "note", label: "Note", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y); } },
+  { id: "code", label: "Code", title: "Add Python code", run: () => { const c = center(); editor.addCode(c.x, c.y); } },
+  { id: "group", label: "Group", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
+  { id: "connect", label: "Connect", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
+  { id: "page", label: "Page", title: "Add a page after this one", run: () => $("addpage").click() },
+], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }));
 const menu = $("menu");
 $("menubtn").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
 addEventListener("click", () => { menu.hidden = true; });
@@ -493,6 +505,6 @@ async function bench(path: Camera[]) {
     /** Code items in reading order: their state ("" when up to date, or queued, running, stale, error, cancelled) and output as text, after what was asked for has run. */
     outputs: async () => { await code?.idle(); return outputs(); },
     /** Turn Edit mode on or off. */
-    editing: (on: boolean) => { if (editor.on !== on) editBtn.click(); },
+    editing: (on: boolean) => editor.setOn(on),
   },
 };

@@ -9,6 +9,7 @@
     "test": "tsc -p . && node --test 'dist/test/*.test.js' 'target/*.test.js'"
   },
   "devDependencies": {
+    "@preact/signals-core": "1.14.4",
     "@types/node": "^26.6.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",

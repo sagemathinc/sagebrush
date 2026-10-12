@@ -66,6 +66,16 @@
   .board-code.code-stale .board-code-out, .board-code.code-cancelled .board-code-out { opacity: .55; }
   .board-code.code-error, .board-code.code-failed { border-color: #b3261e; box-shadow: 0 0 0 1px #b3261e; }
   .board-code-editor .be-code { min-height: 160px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 4; }
+  /* the toolbar (Edit mode): what to add, this board's tools */
+  .board-toolbar { position: fixed; top: 50px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; gap: 4px; padding: 4px; background: #fff; border: 1px solid rgba(0, 0, 0, .12); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, .1); }
+  .board-toolbar[hidden] { display: none; }
+  .board-toolbar button { border-color: transparent; }
+  .board-toolbar button:hover { background: #eef2ea; }
+  .board-toolbar button[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
+  .board-toolbar .tb-more { color: #667; }
+  .board-toolbar-panel { position: fixed; top: 92px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
+  .board-toolbar-panel label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .board.connecting .board-note { cursor: crosshair; }
   .board-item.selected { outline: 2px solid #2a6f2f; outline-offset: 2px; }
   .board-editor { position: fixed; z-index: 3; box-sizing: border-box; background: #fff; border: 1px solid rgba(0, 0, 0, .18); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
   .board-editor input, .board-editor textarea { font: inherit; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 5px 8px; box-sizing: border-box; width: 100%; }

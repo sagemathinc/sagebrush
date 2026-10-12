@@ -86,6 +86,8 @@ export interface BoardPage {
 
 export interface BoardDoc {
   title?: string;
+  /** the toolbar's tools in Edit mode (toolbar.ts), in order; else the person's default */
+  tools?: string[];
   /** pages, each with its own nodes, edges and steps; without them the
    * document is one page (its own nodes, edges and steps) */
   pages?: BoardPage[];

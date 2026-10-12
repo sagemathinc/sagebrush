@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@preact/signals-core':
+        specifier: 1.14.4
+        version: 1.14.4
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
@@ -34,6 +37,9 @@ packages:
 
   '@cocalc/diff-match-patch@1.0.1':
     resolution: {integrity: sha512-sF55A4FvQLSA3GukGjlprMkAYvD89Q2HbqmAI1Pannqa1BePjhKkGIAM2DTMu+v/UHDjJJNgP7AxUQcMOc/gBg==}
+
+  '@preact/signals-core@1.14.4':
+    resolution: {integrity: sha512-HNB6HYeYKhQbJ1aKl+YRjrS4+QWHLKX6qKoUsfS/m0vqzsVaEBiZiaKbG/e+NKk2ch5ALQr/ihWaMHxiCuuWHA==}
 
   '@types/node@26.6.3':
     resolution: {integrity: sha512-dsqMQQoeTLqu9wynDD00q573mNzso3IdQOAfHRJqLCcmCFPoGo9A1bDpUcv/9tnKpErQWv9uKeGfl37EIS02Yg==}
@@ -211,6 +217,8 @@ packages:
 snapshots:
 
   '@cocalc/diff-match-patch@1.0.1': {}
+
+  '@preact/signals-core@1.14.4': {}
 
   '@types/node@26.6.3':
     dependencies:

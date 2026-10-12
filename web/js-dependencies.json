@@ -11,6 +11,15 @@
    ]
   },
   {
+   "name": "@preact/signals-core",
+   "version": "1.14.4",
+   "license": "MIT",
+   "path": "node_modules/.pnpm/@preact+signals-core@1.14.4/node_modules/@preact/signals-core",
+   "in": [
+    "the board"
+   ]
+  },
+  {
    "name": "@xterm/addon-fit",
    "version": "0.11.0",
    "license": "MIT",
