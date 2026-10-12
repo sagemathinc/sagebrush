@@ -155,6 +155,25 @@ How:
 - **Content.** KaTeX and Markdown render once per content change and are
   cached. Outputs (SVG plots, widgets) reuse the notebook's renderers.
 
+**Step 0, measured (October 12).** web/board/board.ts, about 300 lines and
+6.6 kB minified, implements the camera, the grid, mounting near the
+viewport, rectangles on the canvas when far out (one path per color), and
+the ink canvas with cached `Path2D`s. web/board/bench.mjs measures it in
+CI, in headless Chromium with software rendering. The render's own work per
+frame (p95) and the frame interval (p95):
+
+| | 2,000 notes, 20,000 strokes | 10,000 notes, 100,000 strokes |
+|---|---|---|
+| pan at 100% | 0.16 ms, 16.8 ms | 0.19 ms, 16.8 ms |
+| pan at 200% | 0.09 ms, 16.8 ms | 0.09 ms, 16.8 ms |
+| zoom from 100% to 4% and back | 3.0 ms, 17.1 ms | 3.4 ms, 17.3 ms |
+| pan at 10% | 0.43 ms, 16.8 ms | 0.46 ms, 16.8 ms |
+| first paint | 151 ms | 520 ms |
+
+Not yet measured: WebKit (the Tauri app on macOS/Linux; to do on a Mac),
+real GPUs, DOM items heavier than plain text (KaTeX, plots), and ink being
+drawn (not only displayed).
+
 ## Agents
 
 The board has the notebook's kind of API (`window.sagebrush.board` on

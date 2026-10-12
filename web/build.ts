@@ -120,6 +120,16 @@ for (const [entry, name] of [["client.ts", "atlas.js"], ["engine-worker.ts", "at
 }
 copyFileSync(join(here, "atlas", "llms.txt"), join(here, "dist", "atlas", "llms.txt"));
 if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn("web/dist/atlas/data is missing: run scripts/build-atlas.mjs (see web/atlas/README.md)");
+// Boards (design/board.md): step 0, the renderer's spike, at /board/
+{
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true });
+  if (!r.success) {
+    for (const l of r.logs) console.error(l);
+    process.exit(1);
+  }
+  builds.push(["the board", r]);
+  copyFileSync(join(here, "board", "index.html"), join(here, "dist", "board", "index.html"));
+}
 // The npm packages the bundles above contain (their metafiles' inputs) and
 // KaTeX (its stylesheet and fonts, copied): web/js-dependencies.json, from
 // which scripts/third-party-notices.mjs writes their notices; the page and
