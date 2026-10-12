@@ -468,10 +468,19 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
   and every occurrence in the cell is renamed, so a skipped redefinition
   leaves the previous value, as in Python, instead of leaving `xʹ2`
   unbound.
-  - The initialization is a line of its own:
-    `if 'x' in (lambda: 0).__globals__ or hasattr(__import__('builtins'), 'x'): xʹ2 = x  # page-order scoping`.
+  - The initialization is a line of its own, after the cell's docstring
+    and `__future__` imports:
+    `if 'x' in (lambda: 0).__globals__ or 'x' in (lambda: 0).__builtins__: xʹ2 = (lambda: x)()  # page-order scoping`.
     It binds the new name only if the previous one is bound (a global or a
     builtin), so an unbound previous name stays unbound, as Python's would.
+    It reads no name of the cell's but the previous one (a user's
+    `hasattr` is never called), and reads it in a lambda, so a `global x`
+    outside functions, which keeps its name, stays legal.
+  - It isn't used where annotations naming the name are kept as text
+    (`from __future__ import annotations`).
+  - A bare annotation (`x: int`) is not a binding, and a loop body with a
+    `break` or `continue` may skip what follows it (sagebrush-codex's
+    review of 8c8211a).
   - The cell then reads the previous definition, so editing it reruns the
     cell.
   - pyjs's session takes the line out of the text and runs the same

@@ -162,8 +162,8 @@ for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-e555
 for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-87fd4d5.json", "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]) {
   REGRESSIONS.push([`${c.name} (review of 87fd4d5)`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
 }
-// (and of 98eb351, 6748f98, 75a84fb, 156cd6b, 321cff0, c199015, f813101, feedd29, e17dfd3, 67bd48b, deef01a, 71f50d2, 8bb7065, 2e629d8, 006f38c and 51a8749)
-for (const [pin, c] of ["98eb351", "6748f98", "75a84fb", "156cd6b", "321cff0", "c199015", "f813101", "feedd29", "e17dfd3", "67bd48b", "deef01a", "71f50d2", "8bb7065", "2e629d8", "006f38c", "51a8749"].flatMap((pin) => (JSON.parse(readFileSync(__dirname + `/../../test/fuzz-cases-${pin}.json`, "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]).map((c) => [pin, c] as const))) {
+// (and of 98eb351, 6748f98, 75a84fb, 156cd6b, 321cff0, c199015, f813101, feedd29, e17dfd3, 67bd48b, deef01a, 71f50d2, 8bb7065, 2e629d8, 006f38c, 51a8749 and 8c8211a)
+for (const [pin, c] of ["98eb351", "6748f98", "75a84fb", "156cd6b", "321cff0", "c199015", "f813101", "feedd29", "e17dfd3", "67bd48b", "deef01a", "71f50d2", "8bb7065", "2e629d8", "006f38c", "51a8749", "8c8211a"].flatMap((pin) => (JSON.parse(readFileSync(__dirname + `/../../test/fuzz-cases-${pin}.json`, "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]).map((c) => [pin, c] as const))) {
   REGRESSIONS.push([`${c.name} (review of ${pin})`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
 }
 

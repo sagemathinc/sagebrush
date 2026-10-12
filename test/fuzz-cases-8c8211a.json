@@ -1,0 +1,789 @@
+[
+  {
+    "name": "conditional false control",
+    "codes": [
+      "x = 1",
+      "if False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional true control",
+    "codes": [
+      "x = 1",
+      "if True:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop break before first binding",
+    "codes": [
+      "x = 1",
+      "for i in [0]:\n    break\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop continue before first binding",
+    "codes": [
+      "x = 1",
+      "for i in [0, 1]:\n    continue\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop conditional break before binding",
+    "codes": [
+      "x = 1",
+      "for i in [0, 1]:\n    if i == 0:\n        break\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop continue repeated read",
+    "codes": [
+      "x = 1",
+      "for i in [0, 1]:\n    if i == 0:\n        continue\n    print(x)\n    x = x + 1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refused or right"
+  },
+  {
+    "name": "literal loop binding refused or right",
+    "codes": [
+      "x = 1",
+      "for i in [0, 1]:\n    x = x + 1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refused or right"
+  },
+  {
+    "name": "range loop binding control",
+    "codes": [
+      "x = 1",
+      "for i in range(2):\n    x = x + 1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import skipped redefinition",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import conditional annotation text",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations\nif False:\n    x = 2\ndef f(a: x):\n    pass\nprint(f.__annotations__[\"a\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import annotation before skipped redefinition",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations\ndef f(a: x):\n    pass\nif False:\n    x = 2\nprint(f.__annotations__[\"a\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional module global statement",
+    "codes": [
+      "x = 1",
+      "global x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module global statement control",
+    "codes": [
+      "x = 1",
+      "global x\nx = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional docstring",
+    "codes": [
+      "\"old doc\"\nx = 1",
+      "\"new doc\"\nif False:\n    x = 2\nprint(__doc__)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "\"other doc\"\nx = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiple conditional names control",
+    "codes": [
+      "x = 1\ny = 10",
+      "if False:\n    x = 2\n    y = 3\nprint(x, y)",
+      "print(x, y)"
+    ],
+    "change": [
+      0,
+      "x = 5\ny = 20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiple conditional helper names",
+    "codes": [
+      "x = 1\nhasattr = 10",
+      "if False:\n    x = 2\n    hasattr = 3\nprint(x, hasattr)",
+      "print(x, hasattr)"
+    ],
+    "change": [
+      0,
+      "x = 5\nhasattr = 20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unbound previous binds via conditional",
+    "codes": [
+      "if False:\n    x = 1",
+      "if True:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "if False:\n    x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unbound previous stays unbound control",
+    "codes": [
+      "if False:\n    x = 1",
+      "if False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "if False:\n    x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unbound previous and shadowed hasattr",
+    "codes": [
+      "xflag = True\nhasattr = 7\nif False:\n    x = 1",
+      "if xflag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "xflag = True\nhasattr = 8\nif False:\n    x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unbound previous and shadowed import",
+    "codes": [
+      "xflag = True\n__import__ = 7\nif False:\n    x = 1",
+      "if xflag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "xflag = True\n__import__ = 8\nif False:\n    x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bound previous and shadowed helper control",
+    "codes": [
+      "x = 1\nhasattr = 7\n__import__ = 8",
+      "if False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nhasattr = 7\n__import__ = 8"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "builtin previous conditional len control",
+    "codes": [
+      "if False:\n    len = 1",
+      "if False:\n    len = 2\nprint(len([1,2]))",
+      "print(len([1,2,3]))"
+    ],
+    "change": [
+      0,
+      "if False:\n    len = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "builtin previous shadowed hasattr",
+    "codes": [
+      "hasattr = 0\nif False:\n    len = 1",
+      "if False:\n    len = 2\nprint(len([1,2]))",
+      "print(len([1,2,3]))"
+    ],
+    "change": [
+      0,
+      "hasattr = 1\nif False:\n    len = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional setter control",
+    "codes": [
+      "x = 1",
+      "def setx():\n    global x\n    x = x + 1\nprint(x)\nsetx()\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional generator control",
+    "codes": [
+      "x = 1",
+      "g = ((x := x + 1) for _ in [0,1])\nprint(x)\nprint(list(g))\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional delete control",
+    "codes": [
+      "x = 1",
+      "if False:\n    x = 2\ndel x\ntry:\n    print(x)\nexcept NameError:\n    print(\"missing\")",
+      "try:\n    print(x)\nexcept NameError:\n    print(\"missing\")"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "skip then plain definition control",
+    "codes": [
+      "x = 1",
+      "if False:\n    x = 2\nprint(x)\nx = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional while running control",
+    "codes": [
+      "x = 1",
+      "n = 0\nwhile x < 7 and n < 10:\n    x = x + 1\n    n += 1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional lambda before and after refused or right",
+    "codes": [
+      "x = 1",
+      "f = lambda: x\nprint(f())\nif True:\n    x = 2\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refused or right"
+  },
+  {
+    "name": "chained skipped definitions control",
+    "codes": [
+      "x = 1",
+      "if False:\n    x = 2",
+      "if False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop break downstream reader",
+    "codes": [
+      "x = 1",
+      "for i in [0]:\n    break\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop continue with finally downstream reader",
+    "codes": [
+      "x = 1",
+      "for i in [0, 1]:\n    try:\n        continue\n    finally:\n        pass\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop continue taken binding control",
+    "codes": [
+      "x = 1",
+      "for i in [0, 1]:\n    if i == 0:\n        continue\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop range break control",
+    "codes": [
+      "x = 1",
+      "for i in range(2):\n    break\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import division skipped redefinition",
+    "codes": [
+      "x = 1",
+      "from __future__ import division\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import with docstring",
+    "codes": [
+      "x = 1",
+      "\"hello\"\nfrom __future__ import annotations\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import multiple conditional names",
+    "codes": [
+      "x = 1\ny = 10",
+      "from __future__ import annotations\nif False:\n    x = 2\n    y = 3\nprint(x,y)",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x = 5\ny = 20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional global declaration in if",
+    "codes": [
+      "x = 1",
+      "if True:\n    global x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional global declaration tuple",
+    "codes": [
+      "x = 1\ny = 10",
+      "global x, y\nif False:\n    x = 2\n    y = 3\nprint(x,y)",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x = 5\ny = 20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional annotation module global",
+    "codes": [
+      "x = 1",
+      "global x\nx: int\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module docstring plain definition control",
+    "codes": [
+      "\"old doc\"\nx = 1",
+      "\"new doc\"\nx = 2\nprint(__doc__)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "\"other doc\"\nx = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unbound previous conditional plain helper control",
+    "codes": [
+      "xflag = True\nif False:\n    x = 1",
+      "if xflag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "xflag = True\nif False:\n    x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "builtin previous shadowed import",
+    "codes": [
+      "__import__ = 0\nif False:\n    len = 1",
+      "if False:\n    len = 2\nprint(len([1,2]))",
+      "print(len([1,2,3]))"
+    ],
+    "change": [
+      0,
+      "__import__ = 1\nif False:\n    len = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional helper itself builtin control",
+    "codes": [
+      "if False:\n    hasattr = 0",
+      "if False:\n    hasattr = 1\nprint(hasattr(1,\"real\"))",
+      "print(hasattr(1,\"real\"))"
+    ],
+    "change": [
+      0,
+      "if False:\n    hasattr = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "two conditionals unbound previous and helper",
+    "codes": [
+      "xflag = True\nif False:\n    hasattr = 0\n    x = 1",
+      "if False:\n    hasattr = 1\nif xflag:\n    x = 2\nprint(x,hasattr(1,\"real\"))",
+      "print(x,hasattr(1,\"real\"))"
+    ],
+    "change": [
+      0,
+      "xflag = True\nif False:\n    hasattr = 5\n    x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "toggle binding off control",
+    "codes": [
+      "x = 1",
+      "flag = True",
+      "if flag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      1,
+      "flag = False"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "toggle binding on control",
+    "codes": [
+      "x = 1",
+      "flag = False",
+      "if flag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      1,
+      "flag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "toggle unbound binding off control",
+    "codes": [
+      "if False:\n    x = 1",
+      "flag = True",
+      "if flag:\n    x = 2\ntry:\n    print(x)\nexcept NameError:\n    print(\"missing\")",
+      "try:\n    print(x)\nexcept NameError:\n    print(\"missing\")"
+    ],
+    "change": [
+      1,
+      "flag = False"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional unicode name control",
+    "codes": [
+      "\u03b1 = 1",
+      "if False:\n    \u03b1 = 2\nprint(\u03b1)",
+      "print(\u03b1)"
+    ],
+    "change": [
+      0,
+      "\u03b1 = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "initializer helper artificial cycle hasattr",
+    "codes": [
+      "x = 1\nflag = True",
+      "if flag:\n    x = 2",
+      "hasattr = x",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "initializer helper artificial cycle __import__",
+    "codes": [
+      "x = 1\nflag = True",
+      "if flag:\n    x = 2",
+      "__import__ = x",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unrelated user helper control",
+    "codes": [
+      "x = 1",
+      "if False:\n    x = 2",
+      "help = x",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiple unbound conditional names control",
+    "codes": [
+      "flag = True\nif False:\n    x = 1\n    y = 2",
+      "if flag:\n    x = 3\n    y = 4\nprint(x,y)",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "flag = True\nif False:\n    x = 5\n    y = 6"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiple conditional traceback control",
+    "codes": [
+      "x = 1\ny = 2",
+      "if False:\n    x = 3\n    y = 4\nprint(x,y)\n1/0",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x = 5\ny = 6"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import taken conditional regression",
+    "codes": [
+      "x = 1\nflag = True",
+      "from __future__ import annotations\nif flag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module global taken conditional regression",
+    "codes": [
+      "x = 1\nflag = True",
+      "global x\nif flag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring taken conditional regression",
+    "codes": [
+      "\"old doc\"\nx = 1\nflag = True",
+      "\"new doc\"\nif flag:\n    x = 2\nprint(__doc__)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "\"other doc\"\nx = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation before skipped definition",
+    "codes": [
+      "x = 1",
+      "x: int\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation before empty loop",
+    "codes": [
+      "x = 1",
+      "x: int\nfor i in []:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation with value control",
+    "codes": [
+      "x = 1",
+      "x: int = 2\nif False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  }
+]
