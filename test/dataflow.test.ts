@@ -41,17 +41,24 @@ test("ours (not strict): marimo's analysis, plus the reads of a name's previous 
   // a function at the top level called before the definition below it), so
   // it is a reference.  On marimo's oracle: the same definitions and
   // deletions, and the same references plus some of names the cell defines.
-  let n = 0;
+  let n = 0, bare = 0;
+  // (an annotation alone, `x: int`, binds nothing: marimo counts it as a
+  // definition, we do not, REACT-44C5-1)
+  const annotated = (code: string) => new Set<string>((parse(code, "exec") as any).body.filter((st: any) => st._type === "AnnAssign" && !st.value && st.target._type === "Name").map((st: any) => st.target.id));
   for (const c of oracle.cases) {
     if (c.error) continue;
     const a = analyzeCell(c.code, "c1");
-    assert.deepEqual([sorted(a.defs), sorted(a.deleted)], [c.defs, c.deleted], c.code);
+    const missing = (c.defs ?? []).filter((d) => !a.defs.has(d));
+    const only = missing.length ? missing.filter((d) => annotated(c.code).has(d)) : [];
+    if (only.length) bare++;
+    assert.deepEqual([sorted(a.defs), sorted(a.deleted)], [(c.defs ?? []).filter((d) => !only.includes(d)), c.deleted], c.code);
     const extra = sorted(a.refs).filter((r) => !(c.refs ?? []).includes(r));
     assert.ok((c.refs ?? []).every((r) => a.refs.has(r)), c.code);
     assert.deepEqual(extra.filter((r) => !a.defs.has(r)), [], c.code);
     if (extra.length) n++;
   }
   assert.equal(n, 23);
+  assert.equal(bare, 22);
   // a class's names are not seen from the bodies inside it; defaults and the
   // first iterable are evaluated in it; `del` in a class body; `x += 1`
   const refs = (code: string) => sorted(analyzeCell(code).refs);

@@ -98,8 +98,9 @@ function walrusBinds(n: any, name: string): "no" | "yes" | "maybe" {
 function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
   const out: Occurrence[] = [];
   // the names a function (or lambda, comprehension) body binds, minus its
-  // `global`s (with `walrus` false: not counting `:=`)
-  const localsOf = (body: any[], params: string[], walrus = true): Set<string> => {
+  // `global`s (with `walrus` false: not counting `:=`; with `annotations`, a
+  // function's: counting `x: int`, which makes x local there)
+  const localsOf = (body: any[], params: string[], walrus = true, annotations = false): Set<string> => {
     const bound = new Set(params), glob = new Set<string>();
     const scan = (n: any): void => {
       if (!n || typeof n !== "object") return;
@@ -107,6 +108,8 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
       switch (n._type) {
         case "Global": case "Nonlocal": for (const g of n.names) glob.add(g); return;
         case "Name": if (n.ctx?._type !== "Load") bound.add(n.id); return;
+        // (an annotation alone binds nothing, `(x): int` nowhere: REACT-44C5-2)
+        case "AnnAssign": if (!n.value && n.target?._type === "Name") { if (annotations && n.simple) bound.add(n.target.id); return; } break;
         case "NamedExpr": if (walrus) scan(n.target); scan(n.value); return;
         // (a def's decorators, defaults, a class's bases are evaluated here)
         case "FunctionDef": case "AsyncFunctionDef": bound.add(n.name); scan([n.decorator_list, n.args?.defaults, n.args?.kw_defaults]); return;
@@ -321,7 +324,9 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
       case "Name": {
         if (n.id !== name) return;
         // (`del x` acts on the binding there: a use, not a definition)
-        const o: Occurrence = { line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type === "Store", stmt, path };
+        // (the target of an annotation alone is no binding: REACT-44C5-1)
+        const bareTarget = path.at(-1)?.[0]._type === "AnnAssign" && path.at(-1)?.[1] === "target" && path.at(-1)?.[0].value == null;
+        const o: Occurrence = { line: n.lineno, col: n.col_offset, end: n.end_col_offset, store: n.ctx?._type === "Store" && !bareTarget, stmt, path };
         if (!shadowed) out.push(o);
         else if (shadowed !== true) {
           // (a class body's `x += 1` reads the global and binds the attribute:
@@ -346,7 +351,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
           if (p) out.push({ line: n.lineno, col: p[0], end: p[1], store: true, stmt, path, def: n });
         }
         const body = n._type === "Lambda" ? [n.body] : n.body;
-        const inner = fn || localsOf(body, params(n.args)).has(name);
+        const inner = fn || localsOf(body, params(n.args), true, n._type !== "Lambda").has(name);
         walk(body, inner, stmt, under("body"), inner);
         return;
       }

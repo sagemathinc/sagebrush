@@ -1,0 +1,445 @@
+[
+  {
+    "name": "parenthesized function reader downstream",
+    "codes": [
+      "x=1",
+      "def f():\n    (x): int\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized function reader same cell",
+    "codes": [
+      "x=1",
+      "def f():\n    (x): int\n    return x\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "double parenthesized function reader",
+    "codes": [
+      "x=1",
+      "def f():\n    ((x)): int\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional parenthesized function reader",
+    "codes": [
+      "x=1",
+      "def f():\n    if False:\n        (x): int\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested parenthesized function reader",
+    "codes": [
+      "x=1",
+      "def outer():\n    def inner():\n        (x): int\n        return x\n    return inner()",
+      "print(outer())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "method parenthesized global reader",
+    "codes": [
+      "x=1",
+      "class C:\n    def f(self):\n        (x): int\n        return x",
+      "print(C().f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized function before repeated definition",
+    "codes": [
+      "x=1",
+      "def f():\n    (x): int\n    return x\nx=x+1\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized function after repeated definition",
+    "codes": [
+      "x=1",
+      "x=x+1\ndef f():\n    (x): int\n    return x\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized reader after two definitions",
+    "codes": [
+      "x=1",
+      "x=2",
+      "def f():\n    (x): int\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      1,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class parenthesized global reader",
+    "codes": [
+      "x=1",
+      "class C:\n    (x): int\n    y=x",
+      "print(C.y)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class simple annotation global reader",
+    "codes": [
+      "x=1",
+      "class C:\n    x: int\n    y=x",
+      "print(C.y)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "paren annotation ignores undefined annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    (x): missing\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "plain function reader control",
+    "codes": [
+      "x=1",
+      "def f():\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "explicit global paren reader control",
+    "codes": [
+      "x=1",
+      "def f():\n    global x\n    (x): int\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "simple function local annotation error control",
+    "codes": [
+      "x=1",
+      "def f():\n    x: int\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized local value control",
+    "codes": [
+      "x=1",
+      "def f():\n    (x): int=9\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized parameter control",
+    "codes": [
+      "x=1",
+      "def f(x):\n    (x): int\n    return x",
+      "print(f(9))"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized closed-over local control",
+    "codes": [
+      "x=1",
+      "def outer():\n    x=9\n    def f():\n        (x): int\n        return x\n    return f()",
+      "print(outer())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized nonlocal reader control",
+    "codes": [
+      "x=1",
+      "def outer():\n    y=9\n    def f():\n        nonlocal y\n        (y): int\n        return y\n    return f()",
+      "print(outer())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module parenthesized reader control",
+    "codes": [
+      "x=1",
+      "(x): int\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class explicit global parenthesized reader control",
+    "codes": [
+      "x=1",
+      "class C:\n    global x\n    (x): int\n    y=x",
+      "print(C.y)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "LF plain lines",
+    "codes": [
+      "x=1",
+      "\"doc\"\nif False:\n    x=2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "LF continued prologue",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "LF continued future",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations; \\\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF plain lines",
+    "codes": [
+      "x=1",
+      "\"doc\"\r\nif False:\r\n    x=2\r\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF continued prologue",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\r\nprint(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF continued future",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations; \\\r\nprint(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CR plain lines",
+    "codes": [
+      "x=1",
+      "\"doc\"\rif False:\r    x=2\rprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "CR continued prologue",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\rprint(x)\rif False:\r    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "CR continued future",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations; \\\rprint(x)\rif False:\r    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "bare subscript annotation index walrus",
+    "codes": [
+      "x=1",
+      "items=[0]\nitems[(x:=x+1)]: int\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare attribute annotation base walrus",
+    "codes": [
+      "x=1",
+      "class C: pass\n(x:=C()).value: int\nprint(type(x).__name__)",
+      "print(type(x).__name__)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare subscript annotation no lookup control",
+    "codes": [
+      "x=1",
+      "items=[]\nitems[100]: int\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare attribute annotation no lookup control",
+    "codes": [
+      "x=1",
+      "class C: pass\nobj=C()\nobj.missing: int\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  }
+]

@@ -235,7 +235,9 @@ test("an initialization after a prologue sharing its line: split there, and take
 });
 
 test("a bare annotation alone keeps the value; a module's global after a use stays an error (REACT-5EE9-2, 3)", () => {
-  assert.match(renameInCell("x: int\nprint(x)", "x", "xʹ2", { from: "definition" })!, /^if 'x' in .*\nxʹ2: int\nprint\(xʹ2\)$/);
+  // (an annotation alone binds nothing, so the cell defines nothing and reads x: REACT-44C5-1)
+  assert.equal(renameInCell("x: int\nprint(x)", "x", "xʹ2", { from: "definition" }), "x: int\nprint(x)");
+  assert.deepEqual([...analyzeCell("x: int\nprint(x)", "c").defs], []);
   // (valid as written: the global keeps its name)
   assert.match(renameInCell("global x\nif False:\n    x = 2\nprint(x)", "x", "xʹ2", { from: "definition" })!, /\nglobal x\nif False:\n    xʹ2 = 2/);
   // (invalid as written: renamed, so Python still rejects it)
@@ -276,8 +278,24 @@ test("parenthesized annotations and CRLF lines (REACT-D304-1, 2)", () => {
   // (`(x): int` is no use of x before a module's global: the global keeps its name)
   assert.match(renameInCell("(x): int\nglobal x\nif False:\n    x = 2\nprint(x)", "x", "x\u02b92", { from: "definition" })!, /^if 'x' in .*\n\(x\u02b92\): int\nglobal x\n/);
   // (a cell whose only binding is an annotation, in a function declaring x global: initialized)
-  assert.match(renameInCell("def f():\n    global x\n    (x): int\n    print(x)\nf()", "x", "x\u02b92", { from: "definition" })!, /^if 'x' in .*\ndef f\(\):\n    global x\u02b92\n/);
+  // (an annotation alone, in a function declaring x global: no definition either, 44C5-1)
+  assert.deepEqual([...analyzeCell("def f():\n    global x\n    (x): int\n    print(x)\nf()", "c").defs], ["f"]);
   // (a backslash before \r\n continues the line too)
   const out = renameInCell('"doc"; \\\r\nprint(x)\r\nif False:\r\n    x = 2', "x", "x\u02b92", { from: "definition" })!;
   assert.match(out, /^"doc"; \\\r\n# page-order scoping[^\n]*\nif 'x' in [^\n]*\nprint\(x\u02b92\)\r\n/);
+});
+
+test("an annotation alone binds nothing: dependencies, and functions' locals (REACT-44C5-1, 2)", () => {
+  const refs = (code: string) => [...analyzeCell(code, "c").refs].sort();
+  // (`(x): int` in a function: x is still the global)
+  assert.deepEqual(refs("def f():\n    (x): int\n    return x"), ["int", "x"]);
+  assert.deepEqual(refs("def f():\n    ((x)): int\n    return x"), ["int", "x"]);
+  // (`x: int` in a function makes x local; in a class body it binds nothing)
+  assert.deepEqual(refs("def f():\n    x: int\n    return x"), ["int"]);
+  assert.deepEqual(refs("class C:\n    x: int\n    y = x"), ["int", "x"]);
+  // (an attribute's or an item's evaluates the object and the index)
+  assert.deepEqual(refs("a.b: int\nitems[k]: int"), ["a", "int", "items", "k"]);
+  // (renaming: `return x` in such a function reads the new name)
+  assert.equal(renameInCell("x = x + 1\ndef f():\n    (x): int\n    return x\nprint(f())", "x", "x\u02b92", { from: "definition" }),
+    "x\u02b92 = x + 1\ndef f():\n    (x\u02b92): int\n    return x\u02b92\nprint(f())");
 });
