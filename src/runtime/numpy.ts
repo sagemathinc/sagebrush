@@ -899,6 +899,7 @@ function fastKernel(op: string, kind: string): any {
   const key = op + kind;
   let k = kernels.get(key);
   if (k === undefined) {
+    if (!Object.hasOwn(FAST_EXPR, op)) throw new Error(`no fast kernel for ${op}`); // generated code: only the table's own entries
     const e = FAST_EXPR[op];
     const x = kind === "sa" ? "av" : "ad[ao + i]", y = kind === "as" ? "bv" : "bd[bo + i]";
     k = new Function("POW", "ad", "ao", "av", "bd", "bo", "bv", "od", "n", `for (let i = 0; i < n; i++) od[i] = ${e(x, y)};`).bind(null, glibcPow);
@@ -914,6 +915,7 @@ const strided = new Map<string, any>();
 function stridedKernel(op: string): any {
   let k = strided.get(op);
   if (k === undefined) {
+    if (!Object.hasOwn(FAST_EXPR, op)) throw new Error(`no fast kernel for ${op}`);
     k = new Function("POW", "ad", "ao", "as", "bd", "bo", "bs", "od", "shape", `
       const nd = shape.length, last = nd - 1, L = shape[last], ia = as[last], ib = bs[last];
       const idx = new Array(nd).fill(0);
@@ -1141,6 +1143,7 @@ function unaryKernel(op: string, contiguous: boolean): any {
   const key = op + contiguous;
   let k = unKernels.get(key);
   if (k === undefined) {
+    if (!Object.hasOwn(UN_EXPR, op)) throw new Error(`no fast kernel for ${op}`);
     const body = contiguous
       ? `for (let i = 0; i < n; i++) { const v = ad[ao + i]; od[i] = ${UN_EXPR[op]}; }`
       : `const nd = shape.length, last = nd - 1, L = shape[last], s = st[last];

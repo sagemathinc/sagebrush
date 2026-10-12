@@ -507,7 +507,9 @@
     for (const t of geo.texts2d) {
       const s = document.createElement("span");
       s.textContent = t.text;
-      s.style.cssText = `position:absolute;left:${(t.position[0] * 100).toFixed(2)}%;top:${(t.position[1] * 100).toFixed(2)}%;font-size:${12 * (t.size || 1)}px;color:${t.color || "inherit"}`;
+      s.style.cssText = `position:absolute;left:${(+t.position[0] * 100).toFixed(2)}%;top:${(+t.position[1] * 100).toFixed(2)}%;font-size:${12 * (+t.size || 1)}px`;
+      // (a property, never spliced into cssText: a scene's strings are data)
+      s.style.color = typeof t.color === "string" ? t.color : "";
       layer.appendChild(s);
     }
     container.appendChild(wrap);

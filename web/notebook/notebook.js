@@ -107,29 +107,60 @@ function addStyle() {
 const h = (tag, cls, props = {}) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, props);
 
 // SVG from Python code is put in the page only after removing anything
-// active (scripts, event handlers, external links), with its ids made
-// unique so that several plots' clip paths cannot collide.
+// active (scripts, event handlers) and every address off the picture itself,
+// with its ids made unique so that several plots' clip paths cannot collide.
+// Elements and attributes are judged by namespace and local name, never by
+// the prefix the text chose (x:href is an XLink href).  An attribute value
+// (or style declaration) may name the picture's own ids, url(#id), and
+// otherwise contains no backslash (CSS escapes), slash or colon: so nothing in
+// it can load from anywhere else (design/security.md).  Only aria-* and data-*
+// attributes, which are text, may hold anything.
+const SVG_NS = "http://www.w3.org/2000/svg", XLINK_NS = "http://www.w3.org/1999/xlink", XML_NS = "http://www.w3.org/XML/1998/namespace";
 const SVG_TAGS = new Set("svg g path line polyline polygon circle ellipse rect text tspan title desc defs clipPath linearGradient radialGradient stop use marker symbol mask pattern image".split(" "));
 // (an <image>'s only allowed source: an inline raster picture, e.g. contourf's bands)
 const RASTER_URL = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]*$/;
+const LOCAL_URL = /url\(\s*(['"]?)#([\w.-]+)\1\s*\)/gi;
+function svgValue(v, pre) {
+  if (/[\\/:\u0000]|url\(|@import|expression\(/i.test(v.replace(LOCAL_URL, ""))) return null;
+  return v.replace(LOCAL_URL, (_, q, id) => `url(#${pre}${id})`);
+}
+function svgStyle(v, pre) {
+  const out = [];
+  for (const decl of v.split(";")) {
+    const i = decl.indexOf(":");
+    if (i < 0) continue;
+    const p = decl.slice(0, i).trim().toLowerCase(), val = svgValue(decl.slice(i + 1), pre);
+    if (/^[a-z][a-z-]*$/.test(p) && val !== null) out.push(`${p}:${val.trim()}`);
+  }
+  return out.join(";");
+}
 let svgCount = 0;
 export function safeSvg(text) {
   const root = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
-  if (root.localName !== "svg") return null;
+  if (root.namespaceURI !== SVG_NS || root.localName !== "svg") return null;
   const pre = `s${++svgCount}-`;
+  const isHref = (a) => a.localName === "href" && (a.namespaceURI === null || a.namespaceURI === XLINK_NS);
   const clean = (el) => {
     for (const child of [...el.children]) {
-      if (SVG_TAGS.has(child.localName)) clean(child); else child.remove();
+      if (child.namespaceURI === SVG_NS && SVG_TAGS.has(child.localName)) clean(child); else child.remove();
     }
-    if (el.localName === "image" && !RASTER_URL.test(el.getAttribute("href") ?? el.getAttribute("xlink:href") ?? "")) { el.remove(); return; }
-    for (const { name, value } of [...el.attributes]) {
-      const n = name.toLowerCase();
-      if (el.localName === "image" && (n === "href" || n === "xlink:href")) continue; // (checked above)
-      if (n.startsWith("on") || /javascript:|data:|@import|expression\(/i.test(value)) el.removeAttribute(name);
-      else if (n === "href" || n === "xlink:href") value.startsWith("#") ? el.setAttribute(name, "#" + pre + value.slice(1)) : el.removeAttribute(name);
-      else if (n === "id") el.setAttribute(name, pre + value);
-      else if (/url\(/i.test(value)) /url\(\s*#/i.test(value) ? el.setAttribute(name, value.replace(/url\(\s*#/gi, "url(#" + pre)) : el.removeAttribute(name);
+    for (const a of [...el.attributes]) {
+      const { localName: n, value } = a;
+      let keep = null;
+      if (isHref(a)) {
+        if (el.localName === "image") keep = RASTER_URL.test(value) ? value : null;
+        else keep = /^#[\w.-]+$/.test(value) ? "#" + pre + value.slice(1) : null;
+      } else if (a.namespaceURI === XML_NS) keep = n === "space" || n === "lang" ? svgValue(value, pre) : null;
+      else if (a.namespaceURI === null && /^[a-z_][\w.-]*$/i.test(n) && !/^on/i.test(n)) {
+        // (text for people and the page's script, never read as CSS or an address)
+        if (/^(aria|data)-/i.test(n)) keep = value;
+        else keep = n === "style" ? svgStyle(value, pre) : svgValue(value, pre);
+        if (keep !== null && n === "id") keep = pre + keep;
+      }
+      if (keep === null) el.removeAttributeNode(a);
+      else if (keep !== value) a.value = keep;
     }
+    if (el.localName === "image" && ![...el.attributes].some(isHref)) el.remove();
   };
   clean(root);
   return document.importNode(root, true);

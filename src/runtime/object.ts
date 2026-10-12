@@ -431,6 +431,25 @@ export function isDataDescriptor(d: any): boolean {
   return lookupType(t, "__set__") !== undefined || lookupType(t, "__delete__") !== undefined;
 }
 
+// Python must never reach JavaScript objects (design/security.md).  Names
+// starting with `$` are the runtime's own slots ($cls, $m, ...), so Python
+// attribute access never sees them; and `__proto__` is stored as an own data
+// property, since assignment would run JavaScript's prototype setter on
+// instances whose layout inherits from Object.prototype (subclasses of list,
+// dict, int, ...).
+export const reservedName = (name: string): boolean => name.charCodeAt(0) === 36;
+function reservedAttr(o: any, name: string): never {
+  raise(T.AttributeError, `'${typeName(o)}' object attribute '${name}' is reserved: names starting with '$' belong to the runtime`);
+}
+// An array's length and elements are its list's, not attributes.
+const arraySlot = (o: any, name: string): boolean => Array.isArray(o) && (name === "length" || /^\d+$/.test(name));
+const ownAttr = (o: any, name: string): boolean => hasOwn.call(o, name) && !arraySlot(o, name);
+export function putAttr(o: any, name: string, v: any): void {
+  if (arraySlot(o, name)) raise(T.AttributeError, `'${typeName(o)}' object attribute '${name}' is not supported`);
+  if (name === "__proto__") Object.defineProperty(o, name, { value: v, writable: true, enumerable: true, configurable: true });
+  else o[name] = v;
+}
+
 // Instances with an attribute dict: objects created from a Python class or a
 // module, never runtime-internal objects.
 export function hasInstanceDict(o: any): boolean {
@@ -459,6 +478,10 @@ function callGetattrHook(gf: any, o: any, name: string, dflt: any): any {
 }
 
 export function getattr(o: any, name: string, dflt?: any): any {
+  if (reservedName(name)) {
+    if (dflt !== undefined) return dflt;
+    raise(T.AttributeError, `'${typeName(o)}' object has no attribute '${name}'`);
+  }
   if (isType(o)) return typeGetattr(o, name, dflt);
   const t = typeOf(o);
   if (t.$customGet) {
@@ -479,10 +502,11 @@ export function getattr(o: any, name: string, dflt?: any): any {
 }
 
 export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any {
+  if (reservedName(name)) return getattr(o, name, dflt);
   const d = lookupType(t, name);
   // A data descriptor without __get__ yields to the instance dict.
-  if (d !== undefined && isDataDescriptor(d) && (lookupType(typeOf(d), "__get__") !== undefined || !(hasInstanceDict(o) && hasOwn.call(o, name)))) return descrGetOrGetattr(d, o, t, name);
-  if (hasInstanceDict(o) && hasOwn.call(o, name)) return o[name];
+  if (d !== undefined && isDataDescriptor(d) && (lookupType(typeOf(d), "__get__") !== undefined || !(hasInstanceDict(o) && ownAttr(o, name)))) return descrGetOrGetattr(d, o, t, name);
+  if (hasInstanceDict(o) && ownAttr(o, name)) return o[name];
   if (typeof o === "function" && o.$attrs !== undefined && o.$attrs.has(name)) return o.$attrs.get(name);
   if (d !== undefined) return descrGetOrGetattr(d, o, t, name);
   const gf = lookupType(t, "__getattr__");
@@ -554,6 +578,7 @@ function selfChecked(f: any, cls: PyType): any {
 }
 
 export function setattr(o: any, name: string, v: any): void {
+  if (reservedName(name)) reservedAttr(o, name);
   if (isType(o)) return setTypeAttr(o, name, v);
   const t = typeOf(o);
   if (t.$customSet) {
@@ -567,6 +592,7 @@ export function setattr(o: any, name: string, v: any): void {
 }
 
 export function genericSetattr(o: any, name: string, v: any, t: PyType) {
+  if (reservedName(name)) reservedAttr(o, name);
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
     const s = lookupType(typeOf(d), "__set__");
@@ -576,7 +602,7 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
     }
   }
   if (hasInstanceDict(o)) {
-    o[name] = v;
+    putAttr(o, name, v);
     return;
   }
   if (typeof o === "function" && o.$pyfn === true) {
@@ -595,6 +621,7 @@ export const objectSetattr = pyfn(function __setattr__(o: any, name: string, v: 
 }, "__setattr__");
 
 export function delattr(o: any, name: string): void {
+  if (reservedName(name)) reservedAttr(o, name);
   if (isType(o)) return delTypeAttr(o, name);
   const t = typeOf(o);
   const dl = lookupType(t, "__delattr__");
@@ -606,6 +633,7 @@ export function delattr(o: any, name: string): void {
 }
 
 export function genericDelattr(o: any, name: string, t: PyType): void {
+  if (reservedName(name)) reservedAttr(o, name);
   if (name === "__dict__" && hasInstanceDict(o) && lookupType(t, "__dict__") === lookupType(T.object, "__dict__")) {
     for (const k of Object.keys(o)) if (k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k))) delete o[k];
     return;
@@ -618,7 +646,7 @@ export function genericDelattr(o: any, name: string, t: PyType): void {
       return;
     }
   }
-  if (hasInstanceDict(o) && hasOwn.call(o, name)) {
+  if (hasInstanceDict(o) && ownAttr(o, name)) {
     delete o[name];
     return;
   }
@@ -649,7 +677,7 @@ function getattrMiss(o: any, name: string, S: any): any {
     if (!cls.$customGet && cls.$ctor !== null) {
       const d = lookupType(cls, name);
       if (d === undefined || !isDataDescriptor(d)) {
-        if (hasOwn.call(o, name)) {
+        if (ownAttr(o, name)) {
           S.c = cls;
           S.v = cls.$ver;
           S.k = 0;
@@ -676,7 +704,7 @@ function setattrMiss(o: any, name: string, v: any, S: any): void {
       if (d === undefined || !isDataDescriptor(d)) {
         S.c = cls;
         S.v = cls.$ver;
-        o[name] = v;
+        putAttr(o, name, v);
         return;
       }
     }
@@ -759,7 +787,7 @@ export function siteGet(name: string): (o: any) => any {
   const p = JSON.stringify(name);
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
   if (o != null && o.$cls === S.c && S.c.$ver === S.v) {
-    if (S.k === 0) { const t = o[${p}]; if (t !== undefined) return t; }
+    if (S.k === 0) { const t = o[${p}]; if (t !== undefined && (S.c.$jsBase === null || hasOwn.call(o, ${p}))) return t; }
     else if (o[${p}] === undefined || (S.c.$jsBase !== null && !hasOwn.call(o, ${p}))) return S.val;
   } else if (o === S.tc && o.$ver === S.tv) return S.tval;
   return miss(o, ${p}, S);
@@ -769,8 +797,10 @@ export function siteGet(name: string): (o: any) => any {
 export function siteSet(name: string): (o: any, v: any) => void {
   const S = { c: null, v: -1 };
   const p = JSON.stringify(name);
+  // A store to `__proto__` or `length` always takes the slow path (see putAttr).
+  const fast = name === "__proto__" || name === "length" ? "" : `if (o != null && o.$cls === S.c && S.c.$ver === S.v) { o[${p}] = v; return; }`;
   return new Function("S", "miss", `"use strict"; return function set_${jsName(name)}(o, v) {
-  if (o != null && o.$cls === S.c && S.c.$ver === S.v) { o[${p}] = v; return; }
+  ${fast}
   miss(o, ${p}, v, S);
 };`)(S, setattrMiss);
 }
@@ -913,7 +943,7 @@ function numAlias(d: PyDict, k: any): any {
 
 // The live `__dict__` of an instance: a PyDict whose `$m` is this Map-like
 // view of the object's own (non-`$`) properties.
-const isAttrKey = (o: any, k: string) => k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k));
+const isAttrKey = (o: any, k: string) => k[0] !== "$" && !arraySlot(o, k);
 export class AttrMap {
   constructor(public o: any) {}
   private names(): string[] {
@@ -927,7 +957,8 @@ export class AttrMap {
   }
   set(k: any, v: any): this {
     if (typeof k !== "string") raise(T.TypeError, `instance __dict__ keys must be str here, not '${typeName(k)}'`);
-    this.o[k] = v;
+    if (reservedName(k)) raise(T.TypeError, `instance __dict__ key '${k}' is reserved: names starting with '$' belong to the runtime`);
+    putAttr(this.o, k, v);
     return this;
   }
   delete(k: any): boolean {

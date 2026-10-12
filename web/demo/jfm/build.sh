@@ -55,4 +55,6 @@ done
 cp "$out"/*.mat "$tmp/"
 (cd "$tmp" && for n in U D; do node "$root/dist/src/cli.js" "$n.py" > /dev/null; done)
 cp "$tmp/U-vortices.html" "$tmp/D-vortices.html" "$out/"
+# the pages' Content-Security-Policy (the 3D views' inline scripts by hash)
+bun "$root/web/csp.ts"
 ls -la "$out"

@@ -1815,7 +1815,7 @@ export function builtinTypeFor(name: string, jsClass: any, module: string, call:
 // object.__class__ and object.__dict__ (a snapshot for now; writes through
 // __dict__ are not reflected).
 getset(object, "__class__", (o) => typeOf(o), (o, c) => {
-  if (!isType(c) || c.$ctor === null || !hasInstanceDict(o) || c.$jsBase !== null) raise(T.TypeError, "__class__ assignment only supported for mutable types or ModuleType subclasses");
+  if (!isType(c) || c.$ctor === null || !hasInstanceDict(o) || c.$jsBase !== null || o.$cls.$jsBase !== null) raise(T.TypeError, "__class__ assignment only supported for mutable types or ModuleType subclasses");
   Object.setPrototypeOf(o, c.$ctor!.prototype);
 });
 getset(object, "__dict__", (o) => {
