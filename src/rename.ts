@@ -447,13 +447,19 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     scan(def.body);
     return found;
   };
+  // (in a class nested in the one defining the name, a method or an
+  // annotation can be reached through that class, `D.m()` or `read(D)`,
+  // while the outer body still runs: so a use of the nested class there,
+  // or its decorators or metaclass, may run it before the name is bound,
+  // REACT-75A8-1)
+  const viaNested = (upTo: number) => def._type === "ClassDef" && o.path.slice(defIdx + 1, upTo).some(([n]) => n._type === "ClassDef" && (n.decorator_list.length || n.keywords?.length || usedInClass(n.name, n)));
   // (annotations: evaluated when asked for, Python 3.14)
   const lazy = ([n, key]: [any, string]) => ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && (key === "annotations" || key === "returns")) || (n._type === "AnnAssign" && key === "annotation");
   // (asked for later, except: future annotations (source text); a
   // decorator, a metaclass, a method's decorator or the class body itself
   // may ask for them before the name is bound)
   if (o.path.slice(defIdx).some(lazy)) {
-    if (FUTURE || def.decorator_list?.length || def.keywords?.length) return "maybe";
+    if (FUTURE || def.decorator_list?.length || def.keywords?.length || viaNested(o.path.length)) return "maybe";
     if (o.path.slice(defIdx + 1).some(([n]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && !plainDecorators(n))) return "maybe";
     if (def._type === "ClassDef" && mentions(def.body, ["__annotations__", "__annotate__", "annotationlib", "get_annotations", "get_type_hints", "locals", "vars"])) return "maybe";
     // (or a class body using one of its functions at all: given to a call,
@@ -489,7 +495,7 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     // metaclass or body: REACT-98EB-1); a lambda's: not followed
     if ((p?._type === "FunctionDef" || p?._type === "AsyncFunctionDef" || p?._type === "Lambda") && pkey === "args") {
       if (p._type === "Lambda" || !plainDecorators(p)) return "maybe";
-      if (def._type === "ClassDef" && (def.decorator_list.length || def.keywords?.length || usedInClass(p.name, p))) return "maybe";
+      if (def._type === "ClassDef" && (def.decorator_list.length || def.keywords?.length || usedInClass(p.name, p) || viaNested(j))) return "maybe";
       return "later";
     }
     let name: string | null = null;
@@ -501,7 +507,7 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     if (name === null) return "maybe";
     // (a class decorator, or a metaclass, may call it before the name is bound)
     if (def._type === "ClassDef" && (def.decorator_list.length || def.keywords?.length)) return "maybe";
-    return usedInClass(name, n) ? "maybe" : "later";
+    return usedInClass(name, n) || viaNested(j) ? "maybe" : "later";
   }
   return "now";
 }
@@ -551,9 +557,11 @@ function callableName(o: Occurrence, d: { node: any; j: number }): string | null
 // position, whether it is a plain call that runs where it is written, and
 // whether that runs exactly once (not under an if, a loop, `and`/`or`, a
 // comprehension, an exception handler).
-function usesOf(body: any[], fname: string): { stmt: number; line: number; col: number; call: boolean; once: boolean; node: any }[] {
-  const out: { stmt: number; line: number; col: number; call: boolean; once: boolean; node: any }[] = [];
-  const scan = (n: any, stmt: number, later: boolean, maybe: boolean, parent: any, key: string): void => {
+type Use = { stmt: number; line: number; col: number; call: boolean; once: boolean; node: any; path: [any, string][] };
+function usesOf(body: any[], fname: string): Use[] {
+  const out: Use[] = [];
+  // (path: its ancestors in the statement, each with the field it is under, as an Occurrence's)
+  const scan = (n: any, stmt: number, later: boolean, maybe: boolean, parent: any, key: string, path: [any, string][] = []): void => {
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n)) return n.forEach((x, i) => scan(x, stmt,
       // (a generator's later iterables run when it is consumed)
@@ -562,10 +570,10 @@ function usesOf(body: any[], fname: string): { stmt: number; line: number; col: 
       // comprehension's later iterables)
       maybe || (parent?._type === "BoolOp" && key === "values" && i > 0) || (parent?._type === "Compare" && key === "comparators" && i > 0) ||
         ((parent?._type === "ListComp" || parent?._type === "SetComp" || parent?._type === "DictComp") && key === "generators" && i > 0),
-      parent, key));
+      parent, key, path));
     if (n._type === "Name" && n.id === fname && n.ctx?._type === "Load") {
       const call = !later && parent?._type === "Call" && key === "func";
-      out.push({ stmt, line: n.lineno, col: n.col_offset, call, once: call && !maybe, node: call ? parent : null });
+      out.push({ stmt, line: n.lineno, col: n.col_offset, call, once: call && !maybe, node: call ? parent : null, path });
       return;
     }
     for (const k of Object.keys(n)) {
@@ -582,7 +590,7 @@ function usesOf(body: any[], fname: string): { stmt: number; line: number; col: 
         // (a context manager may suppress an exception from its body)
         ((t === "With" || t === "AsyncWith") && k === "body") ||
         ((t === "ListComp" || t === "SetComp" || t === "DictComp" || t === "GeneratorExp") && k !== "generators") || t === "comprehension" && k !== "iter";
-      scan(n[k], stmt, later || deferred, maybe || cond, n, k);
+      scan(n[k], stmt, later || deferred, maybe || cond, n, k, [...path, [n, k]]);
     }
   };
   body.forEach((st, i) => scan(st, i, false, false, null, ""));
@@ -647,13 +655,39 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   // text, which a rename would change)
   const futureAnnotations = body.some((st) => st._type === "ImportFrom" && st.module === "__future__" && st.names.some((a: any) => a.name === "annotations"));
   const before = (a: { line: number; col: number }, b: { line: number; col: number }) => a.line < b.line || (a.line === b.line && a.col < b.col);
+  // Whether occurrence a runs before b: in Python's order of evaluation,
+  // which is the source's except where a node evaluates a later field first
+  // (REACT-75A8-2, -3): an assignment its value before its targets, a call
+  // its positional and starred arguments before its keyword ones, a
+  // conditional expression its test, a loop or comprehension its iterable,
+  // := and a with item their value.
+  const FIRST: Record<string, string[]> = {
+    Assign: ["value", "targets"], AnnAssign: ["value", "target"], NamedExpr: ["value", "target"],
+    For: ["iter", "target"], AsyncFor: ["iter", "target"], comprehension: ["iter", "target", "ifs"],
+    ListComp: ["generators", "elt"], SetComp: ["generators", "elt"], GeneratorExp: ["generators", "elt"], DictComp: ["generators", "key", "value"],
+    Call: ["func", "args", "keywords"], ClassDef: ["bases", "keywords"], IfExp: ["test", "body", "orelse"], withitem: ["context_expr", "optional_vars"],
+  };
+  const runsBefore = (a: { stmt: number; line: number; col: number; path: [any, string][] }, b: { stmt: number; line: number; col: number; path: [any, string][] }) => {
+    if (a.stmt !== b.stmt) return a.stmt < b.stmt;
+    for (let j = 0; j < Math.min(a.path.length, b.path.length) && a.path[j][0] === b.path[j][0]; j++) {
+      const n = a.path[j][0], ka = a.path[j][1], kb = b.path[j][1];
+      if (ka !== kb) {
+        const order = FIRST[n._type], ia = order ? order.indexOf(ka) : -1, ib = order ? order.indexOf(kb) : -1;
+        if (ia >= 0 && ib >= 0) return ia < ib;
+        break;
+      }
+      // (the same field: different elements of it run in the source's order)
+      if (a.path[j + 1]?.[0] !== b.path[j + 1]?.[0]) break;
+    }
+    return before(a, b);
+  };
   // Where the definition takes effect: where it is written, or, made in a
   // function's body (`global x`), where the cell calls that function (only
   // there: a definition in code that runs at another time, or maybe never,
   // a lazy generator's, cannot be placed)
   const df = deferredOf(first);
   // (`node`: a setter's call, whose arguments are evaluated before it runs)
-  let at: { stmt: number; line: number; col: number; node?: any } = first;
+  let at: { stmt: number; line: number; col: number; node?: any; path: [any, string][] } = first;
   let calls = 0;
   if (df) {
     const fname = df.kind === "callable" ? callableName(first, df) : null;
@@ -685,7 +719,7 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
         mayNotRun(n, key, next, rest[j + 1]?.[1]) ||
         (n._type === "Compare" && key === "comparators" && next && n.comparators.indexOf(next) > 0);
     })) return null;
-    at = uses.reduce((a, u) => (u.stmt < a.stmt || (u.stmt === a.stmt && before(u, a)) ? u : a));
+    at = uses.reduce((a, u) => (u.stmt < a.stmt || (u.stmt === a.stmt && runsBefore(u, a)) ? u : a));
     calls = uses.length;
   }
   const inside = (o: Occurrence, node: any) => o.path.some(([n]) => n === node);
@@ -736,7 +770,7 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
       if (encl.some((n, j) => n._type === "ClassDef" && n.body.includes(encl[j + 1]) && encl[j + 1].name && n.body.some((b: any) => b !== encl[j + 1] && mentions(b, [encl[j + 1].name])))) return null;
       const fname = callableName(o, d);
       if (!fname) return null;
-      if (usesOf(body, fname).some((u) => u.stmt < at.stmt || (u.stmt === at.stmt && before(u, at)))) return null;
+      if (usesOf(body, fname).some((u) => u.stmt < at.stmt || (u.stmt === at.stmt && runsBefore(u, at)))) return null;
       out.set(o, "new");
       continue;
     }
@@ -748,9 +782,9 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
       out.set(o, "old");
       continue;
     }
-    if (o.stmt > at.stmt || (o.stmt === at.stmt && o.store && !before(o, at))) { out.set(o, "new"); continue; }
+    if (o.stmt > at.stmt || (o.stmt === at.stmt && o.store && !runsBefore(o, at))) { out.set(o, "new"); continue; }
     if (o.stmt < at.stmt) { out.set(o, "old"); continue; }
-    if (df) { out.set(o, before(o, at) ? "old" : "new"); continue; }
+    if (df) { out.set(o, runsBefore(o, at) ? "old" : "new"); continue; }
     // the same statement
     // (a class's decorators, bases and body, a def's decorators, defaults
     // and annotations run before the name is bound: they read the previous

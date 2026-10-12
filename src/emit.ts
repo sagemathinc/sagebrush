@@ -446,6 +446,21 @@ export class Emitter {
     return `(function ${e.kind}comp$$($it0) { ${inner} })(${first})`;
   }
 
+  // An assignment's value, evaluated before its target's container and index
+  // or object, as Python does (`a[f()] = g()` calls g first): kept in a
+  // temporary unless nothing can run in between (a constant; or a name
+  // stored into a target of names and constants, `a[i] = x`, `self.x = y`).
+  valueFirst(t: A.Expr, value: A.Expr): string {
+    const v = this.ex(value);
+    if (t.k !== "Subscript" && t.k !== "Attribute") return v;
+    const simple = (e: A.Expr): boolean => e.k === "Name" || e.k === "Const";
+    const parts = t.k === "Subscript" ? [t.value, t.index] : [t.value];
+    if (value.k === "Const" || (value.k === "Name" && parts.every(simple))) return v;
+    const tmp = this.temp();
+    this.w(`${tmp} = ${v};`);
+    return tmp;
+  }
+
   // Code (one line) assigning `value` (a JS expression) to a target.
   assignCode(t: A.Expr, value: string): string {
     switch (t.k) {
@@ -569,8 +584,8 @@ export class Emitter {
           st.targets[0].elts.forEach((t, i) => this.w(this.assignCode(t, ts[i])));
           return;
         }
+        if (st.targets.length === 1) return this.w(this.assignCode(st.targets[0], this.valueFirst(st.targets[0], st.value)));
         const v = this.ex(st.value);
-        if (st.targets.length === 1) return this.w(this.assignCode(st.targets[0], v));
         const t = this.temp();
         this.w(`${t} = ${v};`);
         for (const target of st.targets) this.w(this.assignCode(target, t));
@@ -579,7 +594,7 @@ export class Emitter {
       case "AugAssign":
         return this.augAssign(st);
       case "AnnAssign":
-        if (st.value !== null) this.w(this.assignCode(st.target, this.ex(st.value)));
+        if (st.value !== null) this.w(this.assignCode(st.target, this.valueFirst(st.target, st.value)));
         return;
       case "Return":
         if (this.fn.scope.kind !== "function") this.fail("'return' outside function");

@@ -1,0 +1,148 @@
+[
+  {
+    "name": "nested class method called by outer body",
+    "codes": [
+      "class C:\n    a=1",
+      "class C:\n    a=2\n    class D:\n        def m(): return C.a\n    saved=D.m()\nprint(C.saved)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "nested class lambda called by outer body",
+    "codes": [
+      "class C:\n    a=1",
+      "class C:\n    a=2\n    class D:\n        m=lambda: C.a\n    saved=D.m()\nprint(C.saved)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "nested class method annotation read by outer body",
+    "codes": [
+      "class C:\n    a=1",
+      "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    class D:\n        def m(p:C): pass\n    saved=read(D.m)\nprint(C.saved)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "nested class annotation read by outer body",
+    "codes": [
+      "class C:\n    a=1",
+      "def read(cls):\n    return cls.__annotations__[\"p\"].a\nclass C:\n    a=2\n    class D:\n        p:C\n    saved=read(D)\nprint(C.saved)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "nested class decorated method reads outer class",
+    "codes": [
+      "class C:\n    a=1",
+      "def deco(fn):\n    print(fn())\n    return fn\nclass C:\n    a=2\n    class D:\n        @deco\n        def m(): return C.a\nprint(C.a)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "nested class method later control",
+    "codes": [
+      "class C:\n    a=1",
+      "class C:\n    a=2\n    class D:\n        def m(): return C.a\nprint(C.D.m())",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "nested class annotation later control",
+    "codes": [
+      "class C:\n    a=1",
+      "class C:\n    a=2\n    class D:\n        def m(p:C): pass\nprint(C.D.m.__annotations__[\"p\"].a)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "setter in assignment target before textual rhs",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\na=[0]\na[setx()]=x\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter in dict assignment target before textual rhs",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\na={}\na[setx()]=x\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter in annotated target before textual rhs",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\na=[0]\na[setx()]:int=x\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter keyword before starred positional argument",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\ndef observe(value,marker):\n    print(value,marker)\nobserve(marker=setx(), *[x])",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter keyword before two starred positional arguments",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\ndef observe(a,b,marker):\n    print(a,b,marker)\nobserve(marker=setx(), *[x], *[x])",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter rhs changes target index hides IndexError",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\na=[0]\na[x-1]=setx()\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter positional before keyword control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\ndef observe(marker,value):\n    print(marker,value)\nobserve(setx(),value=x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter keyword and ordinary positional control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\ndef observe(value,marker):\n    print(value,marker)\nobserve(x,marker=setx())",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter rhs changes target index writes wrong slot",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\na=[11,22]\na[x-1]=setx()\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single cell setter in assignment target before textual rhs",
+    "codes": [
+      "x=1\ndef setx():\n    global x\n    x=2\n    return 0\na=[0]\na[setx()]=x\nprint(a,x)\nprint(x)"
+    ]
+  },
+  {
+    "name": "single cell setter in dict assignment target before textual rhs",
+    "codes": [
+      "x=1\ndef setx():\n    global x\n    x=2\n    return 0\na={}\na[setx()]=x\nprint(a,x)\nprint(x)"
+    ]
+  },
+  {
+    "name": "single cell setter in annotated target before textual rhs",
+    "codes": [
+      "x=1\ndef setx():\n    global x\n    x=2\n    return 0\na=[0]\na[setx()]:int=x\nprint(a,x)\nprint(x)"
+    ]
+  }
+]
