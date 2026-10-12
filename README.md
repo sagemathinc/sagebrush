@@ -143,7 +143,10 @@ Every interface is multithreaded except WASM: `threads=0` means all cores.
 Its parser is generated from CPython's own grammar, so syntax errors match
 CPython's. It passes 532 of 536 conformance programs, and pure-Python
 packages such as mpmath pass their own test suites. It is the front end for
-the engines.
+the engines. Strings are JavaScript strings, so a character past U+FFFF is a
+surrogate pair: they compare and sort by code point as in Python, but two
+lone surrogates that form a pair (`'\ud800\udc00'`) are the same string as
+that character (`'\U00010000'`), where CPython keeps them apart.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
   console running in the page, and nothing is sent to a server. See
