@@ -1,0 +1,334 @@
+[
+  {
+    "name": "first walrus repeated comprehension",
+    "codes": [
+      "x = 1",
+      "a=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "for iterable first walrus repeated comprehension",
+    "codes": [
+      "x = 1",
+      "for i in [(x:=x+1) for j in [0,1]]:\n    print(i,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus list read before increment",
+    "codes": [
+      "x = 1",
+      "a=[x+(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus list increment and after read",
+    "codes": [
+      "x = 1",
+      "a=[(x:=x+1)+x for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus dictionary increment",
+    "codes": [
+      "x = 1",
+      "a={i:(x:=x+1) for i in [0,1]}\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus set increment",
+    "codes": [
+      "x = 1",
+      "a=sorted({(x:=x+1) for i in [0,1]})\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus comprehension filter",
+    "codes": [
+      "x = 1",
+      "a=[x for i in [0,1] if (x:=x+1)]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus nested comprehension",
+    "codes": [
+      "x = 1",
+      "a=[(x:=x+1) for i in [0,1] for j in [0]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "new binding preceding repeated increment control",
+    "codes": [
+      "x = 1",
+      "x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "augmented binding preceding repeated increment control",
+    "codes": [
+      "x = 1",
+      "x+=1\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "new walrus preceding repeated increment control",
+    "codes": [
+      "x = 1",
+      "(x:=2)\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "ordinary setter new assignment preceding repeated increment control",
+    "codes": [
+      "x = 1",
+      "def setx():\n    global x\n    x=2\n    a=[(x:=x+1) for i in [0,1]]\n    print(a,x)\nsetx()",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "same statement initial walrus before repeat control",
+    "codes": [
+      "x = 1",
+      "a=((x:=2),[(x:=x+1) for i in [0,1]])\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "list iterable read once control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=2) for i in [x,x]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "range iterable read once control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=2) for i in range(x+1)])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "dict iterable read once control",
+    "codes": [
+      "x = 1",
+      "x+=sum({i:(x:=2)+x for i in range(x+1)}.values())\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "list first constant store and later increment control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=2)+(x:=x+1) for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "list constant filter store then increment control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=x+1) for i in [0,1] if (x:=2)])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "dict constant key store and value increment control",
+    "codes": [
+      "x = 1",
+      "x+=sum({(x:=i+2):(x:=x+1) for i in [0,1]}.values())\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "new assignment before comprehension with old read control",
+    "codes": [
+      "x = 1",
+      "x=2\na=[x+(x:=3) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "nested constant reset repeated singleton control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=2)+sum([(x:=x+1) for j in [0]]) for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "nested repeated with setter after initial body assignment control",
+    "codes": [
+      "x = 1",
+      "def setx():\n    global x\n    x=2\n    x+=sum([(x:=x+1) for i in [0,1]])\nsetx()\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "bounded while test value store",
+    "codes": [
+      "x = 1",
+      "count=0\nwhile (x:=x+1)<4 and count<3:\n    print(x)\n    count+=1\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "bounded while tuple test value store",
+    "codes": [
+      "x = 1",
+      "count=0\nwhile count<2 and ((x:=x+1),x)[1]<10:\n    print(x)\n    count+=1\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "bounded while body assignment",
+    "codes": [
+      "x = 1",
+      "count=0\nwhile count<2:\n    x=x+1\n    print(x)\n    count+=1",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "for body assignment reads preceding iteration",
+    "codes": [
+      "x=1",
+      "for i in [0,1]:\n    x=x+1\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "repeat after read-only iteration control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=2) if i else x for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "conditional walrus skipped control",
+    "codes": [
+      "x = 1",
+      "x+=sum([i or (x:=2) for i in [1,0]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "empty literal comp control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=x+1) for i in []])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single iter filter walrus control",
+    "codes": [
+      "x = 1",
+      "x+=sum([x for i in [0] if (x:=x+1)])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "new assignment enclosing comprehension control",
+    "codes": [
+      "x = 1",
+      "x=sum([(x:=2)+x for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "new assigned first def control",
+    "codes": [
+      "x = 1",
+      "def x():\n    return 1\na=[(x:=x()) for i in [0]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "outer list old firstiter read with singleton iteration control",
+    "codes": [
+      "x = 1",
+      "x+=sum([(x:=2) for i in [x]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "nested singleton lists control",
+    "codes": [
+      "x = 1",
+      "x+=sum([sum([(x:=x+1) for j in [0]]) for i in [0]])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "for else after target binding control",
+    "codes": [
+      "x = 1",
+      "for x in [2,3]:\n    print(x)\nelse:\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "listcomp return lambda after set control",
+    "codes": [
+      "x = 1",
+      "x=2\na=[lambda: (x:=x+1) for i in [0,1]]\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus single iteration control",
+    "codes": [
+      "x = 1",
+      "a=[(x:=x+1) for i in [0]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "first walrus constant and after read control",
+    "codes": [
+      "x = 1",
+      "a=[(x:=2)+x for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "bounded while constant assignment control",
+    "codes": [
+      "x = 1",
+      "count=0\nwhile count<2 and (x:=2):\n    print(x)\n    count+=1\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "for target equals iterable first walrus repeated comprehension boundary",
+    "codes": [
+      "x = 1",
+      "for x in [(x:=x+1) for j in [0,1]]:\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "outer loop nested iterable walrus boundary",
+    "codes": [
+      "x = 1",
+      "for j in [0,1]:\n    for x in [(x:=x+1),x]:\n        print(x)",
+      "print(x)"
+    ]
+  }
+]

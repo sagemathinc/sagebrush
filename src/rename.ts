@@ -775,16 +775,44 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   const globals = occ.filter((o) => o.global);
   // (the function whose body it is in: a default is the enclosing one's)
   const fnOf = (o: Occurrence) => [...o.path].reverse().find(([n, key]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef") && key === "body")?.[0];
-  // A := of the name in a comprehension that may run more than once, with a
-  // read in it that runs before the := in an iteration (its own value's
-  // too): the first iteration's read sees the previous value, later ones
-  // what the := stored; no one name fits (REACT-F813-1).  A read after it
-  // in the iteration always sees the new one.
-  const once = (c: any) => c.generators.every((g: any) => ["List", "Tuple", "Set"].includes(g.iter._type) && g.iter.elts.length <= 1 && !g.iter.elts.some((e: any) => e._type === "Starred"));
-  for (const st of occ) {
-    if (!st.store || st === first || st.global) continue;
-    for (const [c] of st.path) {
-      if (COMPS.has(c._type) && !once(c) && occ.some((r) => r !== st && !r.store && inside(r, c) && runsBefore(r, st))) return null;
+  // A read in a part of the cell that repeats (a loop's body or a while's
+  // test, a comprehension's element, conditions and later iterables), run
+  // in an iteration before a binding of the name there: the first
+  // iteration reads what was bound before, later ones what that binding
+  // stored, and no one name fits (REACT-F813-1, FEED-1, FEED-3).  Unless the
+  // part runs at most once; or a binding there always runs before the read
+  // in the iteration; or one before the part (in this cell) already gave
+  // the new name, which every iteration then reads (FEED-2).  A
+  // comprehension's first iterable, and a for loop's, run once.
+  const literalOnce = (it: any) => ["List", "Tuple", "Set"].includes(it?._type) && it.elts.length <= 1 && !it.elts.some((e: any) => e._type === "Starred");
+  const repeats = (n: any, k: string) =>
+    ((n._type === "For" || n._type === "AsyncFor") && (k === "target" || k === "body") && !literalOnce(n.iter)) ||
+    (n._type === "While" && (k === "test" || k === "body")) ||
+    (COMPS.has(n._type) && k !== "iter0" && !n.generators.every((g: any) => literalOnce(g.iter)));
+  const inRepeat = (o: Occurrence, R: any) => o.path.some(([n, k]) => n === R && repeats(n, k));
+  // (whether a binding inside R runs in every iteration: not under a
+  // condition, a later operand of and/or, or a loop inside R)
+  const everyTime = (s: Occurrence, R: any) => {
+    const j = s.path.findIndex(([n]) => n === R);
+    return !s.path.slice(j + 1).some(([n, k], i, rest) => {
+      const next = rest[i + 1]?.[0];
+      return n._type === "If" || n._type === "Try" || n._type === "TryStar" || n._type === "Match" || n._type === "With" || n._type === "AsyncWith" ||
+        (n._type === "IfExp" && k !== "test") || (n._type === "BoolOp" && next && n.values.indexOf(next) > 0) ||
+        ((n._type === "For" || n._type === "AsyncFor" || n._type === "While") && k !== "iter") || (COMPS.has(n._type) && k !== "iter0");
+    });
+  };
+  const plain = (o: Occurrence) => !o.global && !deferredOf(o);
+  for (const r of occ) {
+    if (r.store || !plain(r)) continue;
+    for (const [R, k] of r.path) {
+      if (!repeats(R, k)) continue;
+      const there = occ.filter((s) => s.store && plain(s) && inRepeat(s, R));
+      if (!there.some((s) => s !== r && runsBefore(r, s))) continue;
+      if (there.some((s) => runsBefore(s, r) && everyTime(s, R))) continue;
+      // (an augmented assignment binds its target after its value)
+      const boundBefore = (s: Occurrence) => runsBefore(s, r) && !(s.path.at(-1)?.[0]._type === "AugAssign" && s.path.at(-1)?.[1] === "target" && inside(r, s.path.at(-1)![0]));
+      if (occ.some((s) => s.store && plain(s) && !inRepeat(s, R) && boundBefore(s))) continue;
+      return null;
     }
   }
   for (const o of occ) {
