@@ -337,8 +337,66 @@ try {
       check(items.length === 6 && await ev("document.querySelectorAll('.board-shape-diamond').length === 1"), "Import Mermaid: not drawn");
       // (fitted widths: a short label, a narrow box)
       check(items.find((i) => i.id === "c").w < 120, "Import Mermaid: notes not fitted to their labels");
+      // edges: click one to select it, Delete, undo; double-click for its panel
+      await ev("window.sagebrush.board.editing(true)");
+      const toClient = (x, y) => ev(`(() => { const r = window.board.el.getBoundingClientRect(), c = window.board.camera; return { x: r.left + (${x} - c.x) * c.z, y: r.top + (${y} - c.y) * c.z }; })()`);
+      const edgeOf = async (from, to) => (await ev("window.sagebrush.board.snapshot().edges")).find((e) => e.from === from && e.to === to);
+      await ev("window.board.focus(['b', 'c'], true)");
+      await sleep(300);
+      let ebc = await edgeOf("b", "c");
+      let at = await toClient(ebc.lx, ebc.ly);
+      await mouse("mousePressed", at.x, at.y); await mouse("mouseReleased", at.x, at.y, { buttons: 0 });
+      check((await ev("window.sagebrush.board.snapshot().selectedEdge")) === ebc.id, "clicking an edge's label did not select it");
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))");
+      await sleep(300);
+      check(!(await docOf()).edges.some((e) => e.from === "b" && e.to === "c"), "Delete did not remove the selected edge");
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
       await sleep(400);
+      check((await docOf()).edges.some((e) => e.from === "b" && e.to === "c" && e.label === "yes"), "undo did not bring the edge back");
+      ebc = await edgeOf("b", "c");
+      // (on its line this time, not its label: the middle of its longest segment)
+      const p = ebc.points ?? [];
+      let best = 0;
+      for (let i = 0; i + 3 < p.length; i += 2) if (Math.hypot(p[i + 2] - p[i], p[i + 3] - p[i + 1]) > Math.hypot(p[best + 2] - p[best], p[best + 3] - p[best + 1])) best = i;
+      const onLine = { x: (p[best] + p[best + 2]) / 2, y: (p[best + 1] + p[best + 3]) / 2 };
+      // (away from the label, which may sit on that segment)
+      if (Math.hypot(onLine.x - ebc.lx, onLine.y - ebc.ly) < 30) { onLine.x = p[best] + (p[best + 2] - p[best]) * 0.15; onLine.y = p[best + 1] + (p[best + 3] - p[best + 1]) * 0.15; }
+      at = await toClient(onLine.x, onLine.y);
+      await mouse("mousePressed", at.x, at.y, { clickCount: 1 }); await mouse("mouseReleased", at.x, at.y, { clickCount: 1, buttons: 0 });
+      await mouse("mousePressed", at.x, at.y, { clickCount: 2 }); await mouse("mouseReleased", at.x, at.y, { clickCount: 2, buttons: 0 });
+      await until("document.querySelector('.board-edge-editor .be-label') === document.activeElement", 5000);
+      await ev("document.querySelector('.be-label').select()");
+      await send("Input.insertText", { text: "maybe so" });
+      await ev("(() => { const s = document.querySelector('.be-line'); s.value = 'dotted'; s.dispatchEvent(new Event('change')); })()");
+      await ev("document.querySelector('.be-label').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))");
+      await sleep(400);
+      check((await docOf()).edges.some((e) => e.from === "b" && e.to === "c" && e.label === "maybe so" && e.line === "dotted"), `the edge panel did not set the label and line: ${JSON.stringify((await docOf()).edges)}`);
+      // a note dragged into a group joins it; dragged out, it leaves
+      await ev("window.board.focus(['c', 's'], true)");
+      await sleep(300);
+      const sg = (await ev("window.sagebrush.board.snapshot().items")).find((i) => i.id === "s");
+      const cc = await center("c"), into = await toClient(sg.x + sg.w - 10, sg.y + sg.h - 10);
+      await drag(cc, into);
+      await sleep(300);
+      let dg = await docOf();
+      check(dg.nodes.find((n) => n.id === "s")?.children.some((c) => c.id === "c") && !dg.nodes.some((n) => n.id === "c"), "dragging a note into a group did not put it there");
+      const inside = (await ev("window.sagebrush.board.snapshot().items")).filter((i) => i.id === "c" || i.id === "s");
+      const [ci, si] = [inside.find((i) => i.id === "c"), inside.find((i) => i.id === "s")];
+      check(ci && si && ci.x >= si.x && ci.y >= si.y && ci.x + ci.w <= si.x + si.w && ci.y + ci.h <= si.y + si.h, "the group does not hold the note dragged into it");
+      const bb = await ev("window.board.bounds()");
+      await ev(`window.board.setCamera({ x: ${bb.x0} - 50, y: ${bb.y0} - 50, z: Math.min(1, (innerWidth - 40) / (${bb.x1 - bb.x0} + 700)) })`);
+      await sleep(300);
+      const cc2 = await center("c"), out = await toClient(bb.x1 + 400, bb.y0 + 40);
+      await drag(cc2, out);
+      await sleep(300);
+      dg = await docOf();
+      check(dg.nodes.some((n) => n.id === "c") && !dg.nodes.find((n) => n.id === "s")?.children.some((c) => c.id === "c"), "dragging a note out of its group did not take it out");
+      check(dg.nodes.find((n) => n.id === "s")?.children.length === 2, "the group lost its other members");
+      // (undone, all of it: the board before the import)
+      for (let i = 0; i < 12 && (await docOf()).nodes.length !== before; i++) {
+        await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+        await sleep(300);
+      }
       check((await docOf()).nodes.length === before, "undo did not bring the board back after Import Mermaid");
     }
     // pages: add one (the board becomes page 1), write on it, delete it

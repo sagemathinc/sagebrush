@@ -1,12 +1,14 @@
-// Editing a board (Edit mode on the board page): drag notes and groups,
-// double-click to write a note (or, on the background, to add one),
-// shift-drag from one note to another to connect them, Delete, undo and
-// redo.  Every change is a change to the document (web/board/doc.ts), laid
-// out again: a moved item, and the others in its group, keep the positions
-// they have (x and y), so nothing else moves; "Tidy" forgets them all.
+// Editing a board (Edit mode on the board page): drag notes and groups
+// (into another group, or out of one, by letting go there), double-click to
+// write a note (or, on the background, to add one), shift-drag from one note
+// to another to connect them; click an edge to select it, double-click it
+// (or Enter) for its label, arrowheads and line; Delete, undo and redo.
+// Every change is a change to the document (web/board/doc.ts), laid out
+// again: a moved item, and the others in its group, keep the positions they
+// have (x and y), so nothing else moves; "Tidy" forgets them all.
 
 import type { Board, Item } from "./board";
-import type { BoardDoc, BoardPage, DocGroup, DocNode, DocNote } from "./doc";
+import type { BoardDoc, BoardPage, DocEdge, DocGroup, DocNode, DocNote } from "./doc";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
 
@@ -42,6 +44,7 @@ export class Editor {
   private undos: string[] = [];
   private redos: string[] = [];
   private selected: string | null = null;
+  private edgeSel: number | null = null; // the selected edge: its index in the page's edges
   private panel: HTMLElement | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
@@ -49,6 +52,17 @@ export class Editor {
     private pg: (d: BoardDoc) => BoardPage = (d) => d as BoardPage) {
     board.onItemDown = (it, e) => this.down(it, e);
     board.onDoubleClick = (it, x, y) => this.dblclick(it, x, y);
+    board.onEdgeDown = (ed) => {
+      if (!this.on || this.panel || ed.src === undefined) return false;
+      this.select(null);
+      this.selectEdge(ed.src);
+      return true;
+    };
+    board.onEdgeDoubleClick = (ed) => {
+      if (!this.on || ed.src === undefined) return false;
+      this.openEdge(ed.src);
+      return true;
+    };
     addEventListener("keydown", (e) => this.key(e));
   }
 
@@ -69,25 +83,37 @@ export class Editor {
     if (this.undos.length > 200) this.undos.shift();
     this.redos = [];
     await this.change(d);
+    this.selectEdge(this.edgeSel);
   }
   async undo() {
     const cur = this.doc(), prev = this.undos.pop();
     if (!cur || !prev) return;
     this.redos.push(JSON.stringify(cur));
+    this.selectEdge(null);
     await this.change(JSON.parse(prev));
   }
   async redo() {
     const cur = this.doc(), next = this.redos.pop();
     if (!cur || !next) return;
     this.undos.push(JSON.stringify(cur));
+    this.selectEdge(null);
     await this.change(JSON.parse(next));
   }
 
   /** Nothing selected, no note open (another page is shown). */
-  clear() { this.select(null); this.close(); }
+  clear() { this.select(null); this.selectEdge(null); this.close(); }
   private select(id: string | null) {
     this.selected = id;
     this.board.select(id);
+    if (id) this.selectEdge(null);
+  }
+  // (an edge is selected by its index in the document, and drawn so by its
+  // id in the layout, found again after each layout)
+  private selectEdge(src: number | null) {
+    this.edgeSel = src;
+    this.board.selectedEdge = src === null ? null : this.board.edgeList().find((e) => e.src === src)?.id ?? null;
+    if (this.board.selectedEdge === null) this.edgeSel = null;
+    this.board.request();
   }
 
   // Positions of a container's members as they are now on the board (in
@@ -132,47 +158,150 @@ export class Editor {
     // drag (or, not moved, select)
     const d0 = this.doc(), f = d0 && find(this.pg(d0), it.id);
     if (!f) return false;
-    const moving = ids(f.node);
+    const moving = ids(f.node), self = new Set(moving);
+    const from = f.parent?.id ?? null;
+    // (where it would go if let go here: the innermost group under the
+    // pointer, not itself or inside it; or the top level)
+    const targetAt = (cx: number, cy: number) => { const w = this.board.toWorld(cx, cy); return this.board.groupsAt(w.x, w.y, self)[0]?.id ?? null; };
     let last = { x: e.clientX, y: e.clientY }, dist = 0;
     const move = (m: PointerEvent) => {
       const dx = (m.clientX - last.x) / z(), dy = (m.clientY - last.y) / z();
       dist += Math.abs(m.clientX - last.x) + Math.abs(m.clientY - last.y);
       last = { x: m.clientX, y: m.clientY };
-      if (dist > 3) this.board.translate(moving, dx, dy);
+      if (dist > 3) {
+        this.board.translate(moving, dx, dy);
+        const t = targetAt(m.clientX, m.clientY);
+        this.board.dropTarget = t !== from ? t : null;
+      }
     };
-    const up = () => {
+    const up = (u: PointerEvent) => {
       removeEventListener("pointermove", move);
       removeEventListener("pointerup", up);
       removeEventListener("pointercancel", up);
+      this.board.dropTarget = null;
       if (dist <= 3) { this.select(it.id); return; }
       this.select(it.id);
+      const target = u.type === "pointercancel" ? from : targetAt(u.clientX, u.clientY);
       this.commit((d) => {
         const g = find(this.pg(d), it.id);
         if (!g) return;
         // (its group's members, and every enclosing group's, keep their
         // places: a group growing moves nothing else)
-        this.freeze(d, g.parent, g.siblings);
-        for (let p = g.parent; p; ) {
-          const pf = find(this.pg(d), p.id)!;
-          this.freeze(d, pf.parent, pf.siblings);
-          p = pf.parent;
-        }
-        // (moved above or left of its group's origin: the group moves out
-        // that far, its members back by as much, so it still holds them)
-        if (g.parent) {
-          const minX = Math.min(0, ...g.siblings.map((s) => s.x ?? 0)), minY = Math.min(0, ...g.siblings.map((s) => s.y ?? 0));
-          if (minX < 0 || minY < 0) {
-            g.parent.x! += minX;
-            g.parent.y! += minY;
-            for (const s of g.siblings) { s.x! -= minX; s.y! -= minY; }
-          }
-        }
+        this.freezeUp(d, g);
+        if (target === from) { this.contain(g.parent, g.siblings); return; }
+        // into another group, or out to the top level: where it was let go,
+        // and that group's members, and every group around it, stay put
+        const into = target ? find(this.pg(d), target) : null;
+        if (target && (!into || into.node.kind !== "group")) return;
+        if (into) { this.freezeUp(d, into); this.freeze(d, into.node as DocGroup, (into.node as DocGroup).children); }
+        g.siblings.splice(g.siblings.indexOf(g.node), 1);
+        this.compact(g.parent, g.siblings);
+        const o = target ? this.board.item(target)?.inner : { x: 0, y: 0 }, now = this.board.item(it.id);
+        if (!o || !now) return;
+        g.node.x = Math.round((now.x - o.x) * 10) / 10;
+        g.node.y = Math.round((now.y - o.y) * 10) / 10;
+        const list = into ? (into.node as DocGroup).children : (this.pg(d).nodes ??= []);
+        list.push(g.node);
+        this.contain(into ? (into.node as DocGroup) : null, list);
       });
     };
     addEventListener("pointermove", move);
     addEventListener("pointerup", up);
     addEventListener("pointercancel", up);
     return true;
+  }
+
+  // A container's members, and every enclosing group's, keep their places.
+  private freezeUp(d: BoardDoc, f: Found) {
+    this.freeze(d, f.parent, f.siblings);
+    for (let p = f.parent; p; ) {
+      const pf = find(this.pg(d), p.id)!;
+      this.freeze(d, pf.parent, pf.siblings);
+      p = pf.parent;
+    }
+  }
+  // A member moved above or left of its group's origin: the group moves out
+  // that far, its members back by as much, so it still holds them.
+  private contain(parent: DocGroup | null, siblings: DocNode[]) {
+    if (!parent) return;
+    const minX = Math.min(0, ...siblings.map((s) => s.x ?? 0)), minY = Math.min(0, ...siblings.map((s) => s.y ?? 0));
+    if (minX < 0 || minY < 0) {
+      parent.x = (parent.x ?? 0) + minX;
+      parent.y = (parent.y ?? 0) + minY;
+      for (const s of siblings) { s.x = (s.x ?? 0) - minX; s.y = (s.y ?? 0) - minY; }
+    }
+  }
+  // A member taken out: the group closes up around the rest (its corner moves
+  // in as far as they allow, the rest staying where they are).
+  private compact(parent: DocGroup | null, siblings: DocNode[]) {
+    if (!parent || !siblings.length) return;
+    const minX = Math.min(...siblings.map((s) => s.x ?? 0)), minY = Math.min(...siblings.map((s) => s.y ?? 0));
+    if (minX > 0 || minY > 0) {
+      const dx = Math.max(0, minX), dy = Math.max(0, minY);
+      parent.x = (parent.x ?? 0) + dx;
+      parent.y = (parent.y ?? 0) + dy;
+      for (const s of siblings) { s.x = (s.x ?? 0) - dx; s.y = (s.y ?? 0) - dy; }
+    }
+  }
+
+  /** An edge's label, arrowheads and line, in a panel by its label (or middle). */
+  openEdge(src: number) {
+    this.close();
+    const d = this.doc(), e = d && this.pg(d).edges?.[src], laid = this.board.edgeList().find((x) => x.src === src);
+    const pts = laid && this.board.edgePoints(laid);
+    if (!e || !laid || !pts) return;
+    this.select(null);
+    this.selectEdge(src);
+    const wx = laid.lx ?? (pts[0] + pts[pts.length - 2]) / 2, wy = laid.ly ?? (pts[1] + pts[pts.length - 1]) / 2;
+    const r = this.board.el.getBoundingClientRect(), c = this.board.camera;
+    const cx = r.left + (wx - c.x) * c.z, cy = r.top + (wy - c.y) * c.z;
+    const p = document.createElement("div");
+    p.className = "board-editor board-edge-editor";
+    p.innerHTML = `<input class="be-label" placeholder="Label">` +
+      `<div class="be-row"><select class="be-arrow" title="Arrowheads"><option value="">→ at the end</option><option value="both">↔ both ends</option><option value="none">— none</option></select>` +
+      `<select class="be-line" title="Line"><option value="">solid</option><option value="dotted">dotted</option><option value="thick">thick</option></select>` +
+      `<button class="be-rev" title="Point it the other way">⇄</button></div>` +
+      `<div class="be-row"><button class="be-del">Delete</button><span></span><button class="be-cancel">Cancel</button><button class="be-done">Done</button></div>`;
+    const $ = <T extends HTMLElement>(s: string) => p.querySelector(s) as T;
+    $<HTMLInputElement>(".be-label").value = e.label ?? "";
+    $<HTMLSelectElement>(".be-arrow").value = e.arrow ?? "";
+    $<HTMLSelectElement>(".be-line").value = e.line ?? "";
+    let reversed = false;
+    $(".be-rev").onclick = () => { reversed = !reversed; $(".be-rev").classList.toggle("on", reversed); };
+    const w = Math.min(innerWidth - 16, 320);
+    p.style.width = w + "px";
+    p.style.left = Math.max(8, Math.min(innerWidth - w - 8, cx - w / 2)) + "px";
+    p.style.top = Math.max(52, Math.min(innerHeight - 140, cy + 14)) + "px";
+    document.body.append(p);
+    this.panel = p;
+    const done = () => {
+      const label = $<HTMLInputElement>(".be-label").value.trim(), arrow = $<HTMLSelectElement>(".be-arrow").value, line = $<HTMLSelectElement>(".be-line").value;
+      this.close();
+      this.commit((d) => {
+        const x = this.pg(d).edges?.[src] as DocEdge | undefined;
+        if (!x) return;
+        const set = (k: "label" | "arrow" | "line", v: string) => { if (v) (x as any)[k] = v; else delete x[k]; };
+        set("label", label);
+        set("arrow", arrow);
+        set("line", line);
+        if (reversed) [x.from, x.to] = [x.to, x.from];
+      });
+    };
+    const del = () => { this.close(); this.deleteEdge(src); };
+    $(".be-done").onclick = done;
+    $(".be-cancel").onclick = () => this.close();
+    $(".be-del").onclick = del;
+    p.addEventListener("keydown", (k) => {
+      k.stopPropagation();
+      if (k.key === "Escape") this.close();
+      else if (k.key === "Enter" && !(k.target instanceof HTMLSelectElement)) { k.preventDefault(); done(); }
+    });
+    $<HTMLInputElement>(".be-label").focus();
+  }
+
+  private deleteEdge(src: number) {
+    this.selectEdge(null);
+    this.commit((d) => { this.pg(d).edges?.splice(src, 1); });
   }
 
   private dblclick(it: Item | null, x: number, y: number): boolean {
@@ -254,6 +383,9 @@ export class Editor {
     if (mod && e.key.toLowerCase() === "z") { e.shiftKey ? this.redo() : this.undo(); }
     else if (mod && e.key.toLowerCase() === "y") this.redo();
     else if (!this.on) return;
+    else if ((e.key === "Delete" || e.key === "Backspace") && this.edgeSel !== null) this.deleteEdge(this.edgeSel);
+    else if (e.key === "Enter" && this.edgeSel !== null) this.openEdge(this.edgeSel);
+    else if (e.key === "Escape" && this.edgeSel !== null) this.selectEdge(null);
     else if ((e.key === "Delete" || e.key === "Backspace") && this.selected) { const id = this.selected; this.select(null); this.commit((d) => remove(this.pg(d), id)); }
     else if (e.key === "Enter" && this.selected) this.open(this.selected);
     else if (e.key === "Escape" && this.selected) this.select(null);

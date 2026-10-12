@@ -50,6 +50,8 @@ export interface Edge {
   /** arrowheads: at the end (the default), none, or both ends; the line's style */
   arrow?: "none" | "both";
   line?: "dotted" | "thick";
+  /** its index in the document's (the page's) edges */
+  src?: number;
 }
 
 export interface Camera {
@@ -115,6 +117,12 @@ export class Board {
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
   /** a double click: on an item, or (null) on the background at world (x, y); return true when handled */
   onDoubleClick: ((it: Item | null, x: number, y: number) => boolean) | null = null;
+  /** a press, or a double click, on an edge (not over a note): return true to take it */
+  onEdgeDown: ((e: Edge, ev: PointerEvent) => boolean) | null = null;
+  onEdgeDoubleClick: ((e: Edge) => boolean) | null = null;
+  /** an edge drawn selected, and a group outlined as where a dragged item would go */
+  selectedEdge: string | null = null;
+  dropTarget: string | null = null;
   private selected: string | null = null;
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
@@ -403,8 +411,8 @@ export class Board {
       ctx.roundRect(g.x, g.y, g.w, g.h, 14);
       ctx.fillStyle = g.color ?? GROUP;
       ctx.fill();
-      ctx.lineWidth = 1 / c.z;
-      ctx.strokeStyle = "rgba(0,0,0,.18)";
+      ctx.lineWidth = (g.id === this.dropTarget ? 3 : 1) / c.z;
+      ctx.strokeStyle = g.id === this.dropTarget ? "#2a6f2f" : "rgba(0,0,0,.18)";
       ctx.stroke();
     }
     // notes in view still waiting for their elements: placeholders
@@ -451,7 +459,9 @@ export class Board {
       const ex = p[n - 2], ey = p[n - 1], el = Math.hypot(ex - p[n - 4], ey - p[n - 3]) || 1, ux = (ex - p[n - 4]) / el, uy = (ey - p[n - 3]) / el;
       const sl = Math.hypot(p[2] - p[0], p[3] - p[1]) || 1, vx = (p[0] - p[2]) / sl, vy = (p[1] - p[3]) / sl;
       // the line (rounded corners), stopping short of its arrowheads
-      ctx.lineWidth = e.line === "thick" ? lw * 2 : lw;
+      const sel = e.id === this.selectedEdge;
+      ctx.strokeStyle = ctx.fillStyle = sel ? "#1f7a2a" : EDGE;
+      ctx.lineWidth = (e.line === "thick" ? lw * 2 : lw) * (sel ? 1.8 : 1);
       if (e.line === "dotted") ctx.setLineDash([4 * Math.max(1, 0.8 / c.z), 4 * Math.max(1, 0.8 / c.z)]);
       ctx.beginPath();
       ctx.moveTo(start ? p[0] - vx * head * 0.8 : p[0], start ? p[1] - vy * head * 0.8 : p[1]);
@@ -467,6 +477,7 @@ export class Board {
       if (e.label) labels.push([e.label, e.lx ?? (p[0] + ex) / 2, e.ly ?? (p[1] + ey) / 2]);
     }
     ctx.lineWidth = lw;
+    ctx.strokeStyle = ctx.fillStyle = EDGE;
     if (this.pending) {
       const a = this.byId.get(this.pending.from);
       if (a) {
@@ -626,6 +637,43 @@ export class Board {
     if (id) this.cache.get(id)?.classList.add("selected");
   }
 
+  /** An edge's route, or its straight line from border to border (world coordinates). */
+  edgePoints(e: Edge): number[] | null {
+    if (e.points) return e.points;
+    const a = this.byId.get(e.from), b = this.byId.get(e.to);
+    if (!a || !b) return null;
+    const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2, dx = bx - ax, dy = by - ay;
+    const exit = (it: Item) => Math.min(dx ? it.w / 2 / Math.abs(dx) : Infinity, dy ? it.h / 2 / Math.abs(dy) : Infinity);
+    const t0 = exit(a), t1 = 1 - exit(b);
+    return t1 <= t0 ? null : [ax + dx * t0, ay + dy * t0, ax + dx * t1, ay + dy * t1];
+  }
+
+  /** The edge at a screen point: on its label, or within 6 pixels of its line. */
+  edgeAt(sx: number, sy: number): Edge | null {
+    const c = this.camera, x = c.x + sx / c.z, y = c.y + sy / c.z, tol = 6 / c.z;
+    let best: Edge | null = null, bd = Infinity;
+    for (const e of this.edges) {
+      const p = this.edgePoints(e);
+      if (!p) continue;
+      if (e.label) {
+        const lx = e.lx ?? (p[0] + p[p.length - 2]) / 2, ly = e.ly ?? (p[1] + p[p.length - 1]) / 2, w = e.label.length * 6.8 + 10;
+        if (Math.abs(x - lx) <= w / 2 && Math.abs(y - ly) <= 9) return e;
+      }
+      for (let i = 0; i + 3 < p.length; i += 2) {
+        const [x0, y0, x1, y1] = [p[i], p[i + 1], p[i + 2], p[i + 3]], L = (x1 - x0) ** 2 + (y1 - y0) ** 2;
+        const t = L ? Math.max(0, Math.min(1, ((x - x0) * (x1 - x0) + (y - y0) * (y1 - y0)) / L)) : 0;
+        const d = Math.hypot(x - (x0 + t * (x1 - x0)), y - (y0 + t * (y1 - y0)));
+        if (d < tol && d < bd) { bd = d; best = e; }
+      }
+    }
+    return best;
+  }
+
+  /** The groups holding a world point, innermost first, leaving out `except`. */
+  groupsAt(x: number, y: number, except: Set<string> = new Set()): Item[] {
+    return [...this.boxes.query(x, y, x + 0.01, y + 0.01, new Set())].filter((it) => it.kind === "group" && !except.has(it.id)).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+  }
+
   /** The note or group at a screen point, innermost first. */
   itemAt(sx: number, sy: number): Item | null {
     const c = this.camera, x = c.x + sx / c.z, y = c.y + sy / c.z;
@@ -654,6 +702,9 @@ export class Board {
       cancelAnimationFrame(this.flight);
       if (this.onItemDown && down.size === 0 && e.isPrimary) {
         const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
+        // (an edge, drawn over groups and under notes, before the group it crosses)
+        const ed = it?.kind !== "note" && this.onEdgeDown ? this.edgeAt(e.clientX - r.left, e.clientY - r.top) : null;
+        if (ed && this.onEdgeDown!(ed, e)) return;
         if (it && this.onItemDown(it, e)) return;
       }
       down.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -676,6 +727,8 @@ export class Board {
     for (const t of ["pointerup", "pointercancel"]) this.el.addEventListener(t, (e) => { down.delete((e as PointerEvent).pointerId); });
     this.el.addEventListener("dblclick", (e) => {
       const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
+      const ed = it?.kind !== "note" && this.onEdgeDoubleClick ? this.edgeAt(e.clientX - r.left, e.clientY - r.top) : null;
+      if (ed && this.onEdgeDoubleClick!(ed)) return;
       const w = this.toWorld(e.clientX, e.clientY);
       if (this.onDoubleClick?.(it, w.x, w.y)) return;
       this.focus(it ? [it.id] : undefined);
@@ -683,7 +736,6 @@ export class Board {
   }
 }
 
-/** A synthetic board: `n` notes in a loose grid, `strokes` ink strokes among them. */
 // What a note shows far out: its title, or else its text's first line
 // without Markdown (a flowchart's notes have only text)
 const farLabels = new WeakMap<Item, string>();
@@ -697,6 +749,7 @@ export function farLabel(it: Item): string {
   return t;
 }
 
+/** A synthetic board: `n` notes in a loose grid, `strokes` ink strokes among them. */
 export function synthetic(n: number, strokes: number, seed = 1): Item[] {
   let s = seed;
   // (32-bit integer arithmetic: a float product past 2^53 loses its low bits)

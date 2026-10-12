@@ -420,7 +420,7 @@ async function bench(path: Camera[]) {
     /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */
     print: async (o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) => { const r = await printBoard(o); return r?.querySelectorAll(".pr-sheet").length ?? 0; },
     /** The document, the tour's step, the camera, and the laid out items' boxes. */
-    snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points }) => ({ id, from, to, points })) }),
+    snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
     /** Change the document (undoable, as an edit): f gets a copy to modify. */
     edit: (f: (d: BoardDoc) => void) => editor.commit(f),
     /** Turn Edit mode on or off. */
