@@ -519,7 +519,12 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     `__annotations__`: it becomes `xʹ2 = v; x: int` (the value assigned
     first, as Python does, and its grouping kept, from the `=` on), and a
     bare `x: int` keeps its name. A renamed cell that does not parse is
-    refused, never run broken (review of ea5db8d).
+    refused, never run broken (review of ea5db8d). A quoted annotation (a forward reference,
+    `y: "x"`) where Python may evaluate it is text that get_type_hints
+    resolves in the module's globals. If it names a redefined name, in any
+    cell, the notebook's redefinitions of that name are refused.
+    `Literal["x"]` is data, and annotations in a function's body are never
+    evaluated (review of 9848e41).
   - When a statement shares the prologue's logical line (`"doc"; print(x)`,
     or after a `\` on the next physical line), that line is split at the
     statement, with the initialization between. Otherwise the initialization

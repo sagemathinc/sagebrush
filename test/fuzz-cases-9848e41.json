@@ -1,0 +1,756 @@
+[
+  {
+    "name": "multiline annotated value next line",
+    "codes": [
+      "x=1",
+      "x: int = (\n    x+1\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value explicit continuation",
+    "codes": [
+      "x=1",
+      "x: int = x + \\\n    1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value list",
+    "codes": [
+      "x=1",
+      "x: int = [\n    x,\n    x+1\n]\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value dictionary",
+    "codes": [
+      "x=1",
+      "x: int = {\n    \"a\": x,\n    \"b\": x+1\n}\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value set",
+    "codes": [
+      "x=1",
+      "x: int = {\n    x, x+1\n}\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value tuple",
+    "codes": [
+      "x=1",
+      "x: int = (\n    x, x+1\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value generator",
+    "codes": [
+      "x=1",
+      "x: int = (\n    i for i in [x,x+1]\n)\nprint(list(x))",
+      "print(\"done\")"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value comprehension",
+    "codes": [
+      "x=1",
+      "x: int = [\n    i+x for i in [1,2]\n]\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value conditional",
+    "codes": [
+      "x=1",
+      "x: int = (x+1\n    if True\n    else 0)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value call",
+    "codes": [
+      "x=1",
+      "x: int = int(\n    x+1\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value string",
+    "codes": [
+      "x=1",
+      "x: int = (f\"value {x}\"\n    \" tail\")\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotated value nested expression",
+    "codes": [
+      "x=1",
+      "x: int = ((x+1)\n    +2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "wrapped annotation keeps value",
+    "codes": [
+      "x=1",
+      "x: (((int))) = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "tuple annotation keeps value",
+    "codes": [
+      "x=1",
+      "x: (int,str) = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lambda annotation keeps value",
+    "codes": [
+      "x=1",
+      "x: (lambda: int) = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "string annotation token characters",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nx: \"a # = ; ( )\" = (x+1)\nprint(__annotations__[\"x\"],x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unicode spans across closing line",
+    "codes": [
+      "α=1",
+      "α: int = (\n    α+1\n)\nprint(α)",
+      "print(α)"
+    ],
+    "change": [
+      0,
+      "α=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF multiline annotated assignment",
+    "codes": [
+      "x=1",
+      "x: int = (\r\n    x+1\r\n)\r\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "comment after annotated value",
+    "codes": [
+      "x=1",
+      "x: int = (x+1) # remains a comment\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unicode prefix on annotation line",
+    "codes": [
+      "x=1",
+      "print(\"é\"); x: int = (x+1); print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "two annotated names on one line",
+    "codes": [
+      "x=1\ny=10",
+      "x:int=(x+1); y:int=(y+x); print(x,y)",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "two annotated names multiline",
+    "codes": [
+      "x=1\ny=10",
+      "x:int=(\n x+1\n); y:int=(\n y+x\n)\nprint(x,y)",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "same name annotated twice inline",
+    "codes": [
+      "x=1",
+      "x:int=(x+1); x:str=(x+2); print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "same name annotated twice multiline",
+    "codes": [
+      "x=1",
+      "x:int=(\n x+1\n)\nx:str=(\n x+2\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "other name walrus in annotated value",
+    "codes": [
+      "x=1\ny=10",
+      "x:int=(y:=y+x)\ny:int=(y+x)\nprint(x,y)",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "third annotated definition multiline",
+    "codes": [
+      "x=1",
+      "x:int=(\n x+1\n)",
+      "x:int=(\n x+2\n)\nprint(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "postfix metadata old value read",
+    "codes": [
+      "from __future__ import annotations\nx:float=1",
+      "from __future__ import annotations\nx:int=(\n x+len(__annotations__[\"x\"])\n)\nprint(__annotations__[\"x\"],x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx:float=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "postfix metadata caught value exception",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ntry:\n    x:int=(\n        x//0\n    )\nexcept ZeroDivisionError:\n    print(\"x\" in __annotations__,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "postfix metadata clears previous dictionary",
+    "codes": [
+      "from __future__ import annotations\nx:float=1",
+      "from __future__ import annotations\nx:int=(\n __annotations__.clear() or x+1\n)\nprint(sorted(__annotations__),x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx:float=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "postfix metadata overwrites RHS key",
+    "codes": [
+      "from __future__ import annotations\nx:float=1",
+      "from __future__ import annotations\nx:int=(\n __annotations__.update({\"x\":\"rhs\"}) or x+1\n)\nprint(__annotations__[\"x\"],x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "from __future__ import annotations\nx:float=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "postfix metadata skipped suite",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nif False:\n    x:int=(\n        x+1\n    )\nprint(\"x\" in __annotations__,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "postfix metadata two inline keys",
+    "codes": [
+      "x=1\ny=10",
+      "from __future__ import annotations\nx:int=(x+1); y:str=(y+x); print(sorted(__annotations__),x,y)",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation mapping observes RHS first",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nclass D(dict):\n    def __setitem__(self,k,v):\n        print(\"annotation\",k)\n        super().__setitem__(k,v)\n__annotations__=D()\ndef rhs(v):\n    print(\"value\",v)\n    return v+1\nx:int=(rhs(x))\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation mapping failure follows assignment",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\nclass D(dict):\n    def __setitem__(self,k,v):\n        raise ValueError(\"annotation\")\n__annotations__=D()\ntry:\n    x:int=(x+1)\nexcept ValueError:\n    print(\"assigned\",x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring before multiline annotation",
+    "codes": [
+      "x=1",
+      "\"doc\"; x:int=(\n x+1\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import before multiline annotation",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations; x:int=(\n x+1\n)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline annotation refusal",
+    "codes": [
+      "x=1",
+      "x: (int\n | str) = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "continued equals refusal",
+    "codes": [
+      "x=1",
+      "x: int \\\n = (x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "future text rename refusal",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ny:x\nx=(x+1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "lazy class before definition refusal",
+    "codes": [
+      "x=1",
+      "class C:\n    y:x\nx=(x+1)\nprint(C.__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "lazy class quoted forward reference",
+    "codes": [
+      "x=int",
+      "from typing import get_type_hints\nx=str\nclass C:\n    y:\"x\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "lazy parameter quoted forward reference",
+    "codes": [
+      "x=int",
+      "from typing import get_type_hints\nx=str\ndef f(a:\"x\"):pass\nprint(get_type_hints(f,globalns=(lambda:0).__globals__)[\"a\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "lazy generic quoted forward reference",
+    "codes": [
+      "x=int",
+      "from typing import get_type_hints\nx=str\nclass C:\n    y:list[\"x\"]\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__args__[0].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future class quoted forward reference",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    y:\"x\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future parameter quoted forward reference",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\ndef f(a:\"x\"):pass\nprint(get_type_hints(f,globalns=(lambda:0).__globals__)[\"a\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future generic quoted forward reference",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    y:list[\"x\"]\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__args__[0].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "lazy return quoted forward reference",
+    "codes": [
+      "x=int",
+      "from typing import get_type_hints\nx=str\ndef f()->\"x\":pass\nprint(get_type_hints(f,globalns=(lambda:0).__globals__)[\"return\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "lazy later cell quoted forward reference",
+    "codes": [
+      "x=int",
+      "x=str",
+      "from typing import get_type_hints\nclass C:\n    y:\"x\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__name__)\nprint(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future return quoted forward reference",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\ndef f()->\"x\":pass\nprint(get_type_hints(f,globalns=(lambda:0).__globals__)[\"return\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "future later cell quoted forward reference",
+    "codes": [
+      "x=int",
+      "x=str",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nclass C:\n    y:\"x\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__name__)\nprint(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "unicode quoted forward reference",
+    "codes": [
+      "α=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nα=str\nclass C:\n    y:\"α\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(α.__name__)"
+    ],
+    "change": [
+      0,
+      "α=float"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "self class quoted forward reference",
+    "codes": [
+      "class C:pass",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nclass C:\n    child:\"C\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"child\"] is C)",
+      "print(isinstance(C,type))"
+    ],
+    "change": [
+      0,
+      "class C:\n    old=5"
+    ],
+    "expect": "run-or-refuse"
+  },
+  {
+    "name": "lazy unrelated quoted type control",
+    "codes": [
+      "x=int",
+      "from typing import get_type_hints\nx=str\nclass C:\n    y:\"int\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future unrelated quoted type control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints\nx=str\nclass C:\n    y:\"int\"\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored function local quoted annotation control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\ndef f():\n    y:\"x\"=7\n    return y\nx=str\nprint(f())",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored attribute quoted annotation control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nclass O:pass\no=O()\no.y:\"x\"\nx=str\nprint(x.__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "typing Literal string data control",
+    "codes": [
+      "x=int",
+      "from __future__ import annotations\nfrom typing import get_type_hints, Literal\nx=str\nclass C:\n    y:Literal[\"x\"]\nprint(get_type_hints(C,globalns=(lambda:0).__globals__)[\"y\"].__args__[0])",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ordinary string outside annotations control",
+    "codes": [
+      "x=int",
+      "text=\"x\"\nx=str\nprint(text,x.__name__)",
+      "print(x.__name__)"
+    ],
+    "change": [
+      0,
+      "x=float"
+    ],
+    "expect": "run"
+  }
+]
