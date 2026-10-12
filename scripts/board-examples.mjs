@@ -51,17 +51,18 @@ function integers(N = 10000) {
           text: n === 1 ? "the unit" : prime ? `$p = ${n}$` : `$${n} = ${tex}$`,
           detail: `$\\tau = ${tau}$, $\\sigma = ${sigma}$, $\\varphi = ${phi}$, $\\mu = ${mu}$` + (sigma === 2 * n ? " — **perfect**" : ""),
           color: prime ? "#cfe8c4" : PALETTE[Math.min(omega, PALETTE.length - 1)],
-          w: 150, h: 104,
+          w: 220, h: 124,
         });
       }
-      hundreds.push({ id: `h${t}${h}`, kind: "group", title: `${t * 1000 + h * 100 + 1}–${t * 1000 + h * 100 + 100}`, layout: "grid", children: notes });
+      hundreds.push({ id: `h${t}${h}`, kind: "group", title: `${t * 1000 + h * 100 + 1}–${t * 1000 + h * 100 + 100}`, layout: "grid", columns: 10, children: notes });
     }
-    thousands.push({ id: `t${t}`, kind: "group", title: `${t * 1000 + 1} to ${(t + 1) * 1000}`, layout: "grid", color: t % 2 ? "#eef2ea" : "#f1eee6", children: hundreds });
+    thousands.push({ id: `t${t}`, kind: "group", title: `${t * 1000 + 1} to ${(t + 1) * 1000}`, layout: "grid", columns: 5, color: t % 2 ? "#eef2ea" : "#f1eee6", children: hundreds });
   }
   return {
     title: `The integers to ${N.toLocaleString("en")}`,
     intro: `**${N.toLocaleString("en")} notes**, each an integer with its factorization; zoom in for $\\tau$, $\\sigma$, $\\varphi$ and $\\mu$. Primes are green, and the more prime factors, the warmer the color. Zoom out until the thousands are labels, then fly in anywhere.`,
     layout: "grid",
+    columns: 2,
     nodes: thousands,
     steps: [
       { focus: "t0", say: "The first thousand: **168 primes**, green." },
