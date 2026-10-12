@@ -897,7 +897,8 @@ export class Board {
 }
 
 // An element's position and size, and its color.
-const placement = (it: Item) => `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px;` + (it.color && it.kind !== "group" ? `--c:${it.color};` : "");
+// (numbers, and a color checked when the document was read: doc.ts cleanDoc; checked again, as items also come from elsewhere)
+const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px;height:${+it.h}px;` + (it.color && it.kind !== "group" && /^[#\w(),.%\s-]+$/.test(it.color) ? `--c:${it.color};` : "");
 // What an element shows (kept when this is unchanged).
 const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order]);
 // A code item's output, in the box that gives it the notebook's styles.

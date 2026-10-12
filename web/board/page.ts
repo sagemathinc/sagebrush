@@ -24,7 +24,7 @@
 // shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
 // outputs().
 import { Board, synthetic, type Camera } from "./board";
-import { layout, isBoard, pageCount, pageOf, pageView, codeOrder, type BoardDoc, type BoardPage, type DocNote } from "./doc";
+import { layout, isBoard, pageCount, pageOf, pageView, codeOrder, cleanDoc, type BoardDoc, type BoardPage, type DocNote } from "./doc";
 import { BoardCode } from "./code";
 import { Toolbar, defaultTools } from "./toolbar";
 import { effect } from "@preact/signals-core";
@@ -56,6 +56,8 @@ let original: BoardDoc | null = null;
 /** Lay out and draw a document, the camera where it is. */
 async function show(d: BoardDoc) {
   if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
+  // (only data: whatever it came from, REACT-XSS)
+  d = cleanDoc(d);
   doc = d;
   pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
   const v = pageView(d, pageIx);
