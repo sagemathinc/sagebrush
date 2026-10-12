@@ -758,7 +758,11 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   // one inside it, `v = x if (x := 2) else 0`, is placed by runsBefore)
   const evaluatedFirst = (o: Occurrence, first: Occurrence) => o.path.some(([n, key]) => {
     const elsewhere = inside(first, n) && !first.path.some(([m, k]) => m === n && k === key);
-    return elsewhere && (((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value") ||
+    // (an augmented assignment loads its target, and evaluates what the
+    // target is made of, before its value: the value comes first only for
+    // the binding of the target name itself, `x += x`, REACT-321C-1)
+    const augStore = n._type === "AugAssign" && first.path.at(-1)?.[0] === n && first.path.at(-1)?.[1] === "target";
+    return elsewhere && (((n._type === "Assign" || n._type === "AnnAssign") && key === "value") || (augStore && key === "value") ||
       ((n._type === "For" || n._type === "AsyncFor") && key === "iter") ||
       (n._type === "NamedExpr" && key === "value") ||
       (n._type === "withitem" && key === "context_expr"));

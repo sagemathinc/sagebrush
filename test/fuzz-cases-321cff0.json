@@ -1,0 +1,186 @@
+[
+  {
+    "name": "augmented target walrus before rhs read",
+    "codes": [
+      "x=1",
+      "a=[10,20,30]\na[(x:=2)-1] += x\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented target walrus before rhs multiplication",
+    "codes": [
+      "x=1",
+      "a=[10,20,30]\na[(x:=2)-1] *= x\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter augmented target walrus before rhs read",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    a=[10,20,30]\n    a[(x:=2)-1] += x\n    print(a,x)\nsetx()",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "augmented target attribute before rhs read",
+    "codes": [
+      "class Box: pass\nx=Box()\nx.v=1",
+      "b=Box()\nb.v=20\n(x:=b).v += x.v\nprint(b.v,x.v)",
+      "print(x.v)"
+    ]
+  },
+  {
+    "name": "augmented rhs walrus after target read control",
+    "codes": [
+      "x=1",
+      "a=[10,20,30]\na[x-1] += (x:=2)\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "ordinary target walrus after rhs read control",
+    "codes": [
+      "x=1",
+      "a=[10,20,30]\na[(x:=2)-1] = x\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "nested dictionary comprehension setter iterable control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return [0]\nprint({i:{j:x for j in [0]} for i in setx()})",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "comprehension later iterable uses new setter value control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return [0]\nprint([(i,j,x) for i in setx() for j in [x]])",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "dictionary comprehension condition uses new setter value control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return [0]\nprint({x:x+1 for i in setx() if x==2})",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "generator first iterable conditional after setter control",
+    "codes": [
+      "x=[1]",
+      "def setx():\n    global x\n    x=[2]\n    return True\ng=(i for i in (x if setx() else []))\nprint(list(g))",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "default direct read after another setter default control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\ndef f(a=setx(),b=x): return a,b\nprint(f())",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "keyword-only direct read after positional setter default control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\ndef f(a=setx(),*,b=x): return a,b\nprint(f())",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "default direct read before another setter default control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 0\ndef f(a=x,b=setx()): return a,b\nprint(f())",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "dictionary literal key walrus before value control",
+    "codes": [
+      "x=1",
+      "print({(x:=2):x})",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "dictionary literal value walrus before later key control",
+    "codes": [
+      "x=1",
+      "print({0:(x:=2),x:3})",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "ordinary assignment rhs nested walrus before target control",
+    "codes": [
+      "x=1",
+      "a=[0,0,0]\na[x-1] = (x:=2)+x\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "two walruses target after rhs control",
+    "codes": [
+      "x=1",
+      "a=[0,0,0]\na[(x:=2)-1] = (x:=3)+x\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter single iteration dictionary key before value control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    d={(x:=2):x for i in [0]}\n    print(d,x)\nsetx()",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter single iteration dictionary value after key control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    d={x:(x:=2) for i in [0]}\n    print(d,x)\nsetx()",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "ordinary if expression test walrus control",
+    "codes": [
+      "x=1",
+      "value=x if (x:=2) else 0\nprint(value,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "chained assignment keeps rhs snapshot control",
+    "codes": [
+      "x=1\na=[0]\ndef index():\n    global x\n    x=2\n    return 0\na[index()] = y = x\nprint(a,y,x)"
+    ]
+  },
+  {
+    "name": "unrenamed augmented target walrus order control",
+    "codes": [
+      "x=1\na=[10,20,30]\na[(x:=2)-1] += x\nprint(a,x)"
+    ]
+  },
+  {
+    "name": "direct setter call in augmented target control",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n    return 1\na=[10,20,30]\na[setx()] += x\nprint(a,x)",
+      "print(x)"
+    ]
+  }
+]
