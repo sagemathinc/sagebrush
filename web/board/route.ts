@@ -154,9 +154,13 @@ const intersects = (r: Rect, s: Rect) => r.x0 < s.x1 && s.x0 < r.x1 && r.y0 < s.
  * sides (and where along them) it leaves and enters.  Null if there is none
  * inside `region`.
  */
-function routeOne(a: Rect, b: Rect, obstacles: Rect[], region: Rect, used: Used, penalties: [number[], number[]],
+function routeOne(a: Rect, b: Rect, given: Rect[], region: Rect, used: Used, penalties: [number[], number[]],
   ports?: { sa: Side; ta: number; sb: Side; tb: number }): number[] | null {
-  const blocks = [grow(a, M), grow(b, M), ...obstacles.map((o) => grow(o, M))];
+  // (a box overlapping either end, say a group grown over it, cannot be
+  // kept clear of: it is not an obstacle for this edge)
+  const ga = grow(a, M), gb = grow(b, M);
+  const obstacles = given.filter((o) => !intersects(o, ga) && !intersects(o, gb));
+  const blocks = [ga, gb, ...obstacles.map((o) => grow(o, M))];
   const xsSet = new Set<number>(), ysSet = new Set<number>();
   for (const r of blocks) { xsSet.add(r.x0); xsSet.add(r.x1); ysSet.add(r.y0); ysSet.add(r.y1); }
   // the middles of the gaps between boxes (in x, then y): channels
@@ -234,9 +238,12 @@ function routeOne(a: Rect, b: Rect, obstacles: Rect[], region: Rect, used: Used,
     if (c < G(st)) { g[st] = c; seen[st] = stamp; parent[st] = -1; heap.push(st, c + h(i, j, s.s)); }
   }
   let best = Infinity, bestState = -1, bestGoal: typeof stubB[number] | null = null;
+  let pops = 0;
   while (heap.size) {
     const [st, f] = heap.pop();
     if (f >= best) break;
+    // (a bound on the work: the best found by then, or none)
+    if (++pops > 60000) break;
     if (S.done[st] === stamp) continue;
     S.done[st] = stamp;
     const d = st & 3, k = st >> 2, i = k % nx, j = (k / nx) | 0;

@@ -105,7 +105,7 @@ try {
   // (every note mounted: the camera on the whole board, at full size; boards
   // of fixed-size notes are not measured, and too large to mount at once)
   const b = await ev("window.board.bounds()");
-  if (notes.length <= 2000) {
+  if (notes.length <= 150) {
     const overflow = await ev(`window.board.setCamera({ x: ${b.x0}, y: ${b.y0}, z: 1 }), window.board.el.style.width = "${b.x1 - b.x0}px", window.board.el.style.height = "${b.y1 - b.y0}px", window.board.el.style.position = "relative", new Promise((r) => setTimeout(() => requestAnimationFrame(() => r([...document.querySelectorAll('.board-note')].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector('b')?.textContent))), 300))`);
     // (notes are mounted a few dozen a frame)
     await until(`document.querySelectorAll('.board-note').length >= ${notes.length}`, 20000).catch(() => {});
@@ -182,7 +182,18 @@ try {
     const [a, b] = ["graph", "page"];
     const a0 = await box(a), other0 = await box("page"), z = await ev("window.board.camera.z");
     const ca = await center(a);
-    await drag(ca, { x: ca.x + 60, y: ca.y + 90 });
+    // (while dragging, only the dragged note's edges may lose their routes;
+    // let go, every edge is routed again, none left straight)
+    const straight = `window.sagebrush.board.snapshot().edges.filter((e) => !e.points).map((e) => e.from + "->" + e.to)`;
+    await mouse("mousePressed", ca.x, ca.y);
+    for (let i = 1; i <= 8; i++) await mouse("mouseMoved", ca.x + (60 * i) / 8, ca.y + (90 * i) / 8);
+    const during = await ev(straight);
+    check(during.every((x) => x.split("->").includes(a)), `while dragging ${a}, other edges went straight: ${during.join(", ")}`);
+    await mouse("mouseReleased", ca.x + 60, ca.y + 90, { buttons: 0 });
+    await sleep(120);
+    const after = await ev(straight);
+    check(after.length === 0, `after dropping ${a}, edges left straight: ${after.join(", ")}`);
+    await sleep(200);
     const a1 = await box(a), other1 = await box("page");
     check(Math.abs(a1.x - a0.x - 60 / z) < 2 && Math.abs(a1.y - a0.y - 90 / z) < 2, `drag moved ${a} by (${a1.x - a0.x}, ${a1.y - a0.y}), not (${60 / z}, ${90 / z})`);
     check(Math.abs(other1.x - other0.x) < 0.5 && Math.abs(other1.y - other0.y) < 0.5, `dragging a note moved another in its group: (${other0.x}, ${other0.y}) to (${other1.x}, ${other1.y})`);

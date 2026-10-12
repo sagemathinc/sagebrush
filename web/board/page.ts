@@ -53,18 +53,32 @@ async function show(d: BoardDoc) {
   // (edges' routes are found between frames: large boards show at once,
   // their edges straight until routed)
   const { items, edges, routing } = layout(d, measure, { deferRoutes: true });
+  // (laid out again after an edit: an edge whose ends did not move keeps its
+  // route until the new ones are ready, so only the moved items' edges are
+  // straight meanwhile; the new routes replace them all at once)
+  const before = new Map(board.edgeList().map((e) => [`${e.from}\0${e.to}\0${e.label ?? ""}`, e]));
+  const now = new Map(items.map((it) => [it.id, it]));
+  const still = (id: string) => {
+    const a = board.item(id), b = now.get(id);
+    return !!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+  };
+  for (const e of edges) {
+    const old = before.get(`${e.from}\0${e.to}\0${e.label ?? ""}`);
+    if (old?.points && still(e.from) && still(e.to)) { e.points = old.points; e.lx = old.lx; e.ly = old.ly; }
+  }
   board.setItems(items, edges);
   const gen = ++routingGen;
   routed = false;
-  const work = () => {
+  // (routed now if that is quick, 40 ms; the rest between frames)
+  const work = (budget: number) => {
     if (gen !== routingGen) return;
     const t0 = performance.now();
-    while (performance.now() - t0 < 12) {
+    while (performance.now() - t0 < budget) {
       if (routing.next().done) { routed = true; board.request(); return; }
     }
-    setTimeout(work, 0);
+    setTimeout(() => work(12), 0);
   };
-  work();
+  work(40);
   placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
   document.title = (d.title ? d.title + " — " : "") + "Board — Sagebrush";
   $("title").textContent = d.title ?? "";

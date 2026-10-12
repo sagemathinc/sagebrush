@@ -233,8 +233,10 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
   const keepClear = items.filter((it) => it.kind === "note").map((it) => ({ x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h }) as Rect);
   for (const id of groups.keys()) { const hd = header(id); if (hd) keepClear.push(hd); }
   const routes = yield* routeSteps(reqs, keepClear);
+  // (all at once: an edge keeps the route it was given until now, if any)
   for (const e of edges) {
     const r = routes.get(e.id);
+    delete e.points; delete e.lx; delete e.ly;
     if (!r) continue;
     e.points = r.points;
     if (r.label) { e.lx = r.label.x; e.ly = r.label.y; }
