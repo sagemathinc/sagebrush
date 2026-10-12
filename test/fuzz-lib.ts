@@ -161,8 +161,25 @@ export class Gen {
     if (r < 0.8) { const e = this.expr(); def(v); return `if True:\n    ${v} = ${e}`; }
     if (r < 0.84 && this.ints.has(v)) { this.ints.delete(v); return `del ${v}`; }
     if (r < 0.88) {
-      // a function setting a global, called at once in its cell
-      const s = `def set${++this.n}():\n    global ${v}\n    ${v} = ${this.int(10)}\nset${this.n}()`;
+      // a function setting a global, called at once in its cell (given the
+      // old value; or setting it by a `:=` in a comprehension, which may be
+      // empty); or a decorator calling a function that reads v, before a new v
+      const q = this.rand(), n = ++this.n;
+      if (q < 0.15) {
+        const arg = this.ints.has(v) && this.chance(0.7) ? v : this.expr();
+        def(v);
+        return `def set${n}(value):\n    global ${v}\n    ${v} = value + 1\nset${n}(${this.chance(0.3) ? "value=" : ""}${arg})\nprint(${v})`;
+      }
+      if (q < 0.3) {
+        const it = this.pick(["[0]", "[]", "[0, 1]", "range(1)"]);
+        if (it === "[0]" || it === "[0, 1]") def(v);
+        return `def set${n}():\n    global ${v}\n    [(${v} := ${this.int(10)}) for _ in ${it}]\nset${n}()`;
+      }
+      if (q < 0.45 && this.ints.has(v)) {
+        const e = this.expr();
+        return `def deco${n}(fn):\n    print(fn())\n    return fn\n@deco${n}\ndef h${n}():\n    return ${v}\n${v} = ${e}\nprint(h${n}())`;
+      }
+      const s = `def set${n}():\n    global ${v}\n    ${v} = ${this.int(10)}\nset${n}()`;
       def(v);
       return s;
     }

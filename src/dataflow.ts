@@ -311,6 +311,12 @@ class Visitor {
     if (this.blocks[this.blocks.length - 1].scope === Scope.Comprehension && node.target._type === "Name") {
       for (let i = this.blocks.length - 1; i >= 0; i--) {
         if (this.blocks[i].scope !== Scope.Comprehension) {
+          // (ours: `global x` in that function: the module's x, defined when it is called)
+          if (!this.strict && i > 0 && this.blocks[i].globalNames.has(node.target.id)) {
+            this.imported.set(node.target.id, null);
+            this.defineIn(node.target.id, "variable", 0, true);
+            break;
+          }
           node.target.id = this.mangle(node.target.id, i === 0);
           const lazy = !this.strict && this.blocks.slice(i + 1).some((b) => b.lazy);
           this.defineIn(node.target.id, "variable", i, lazy);
