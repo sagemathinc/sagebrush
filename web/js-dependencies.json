@@ -91,6 +91,7 @@
    "license": "MIT",
    "path": "node_modules/.pnpm/marked@18.0.14/node_modules/marked",
    "in": [
+    "the board",
     "the notebook component",
     "the notebook page"
    ]
