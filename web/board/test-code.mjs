@@ -86,9 +86,15 @@ try {
   check(/ZeroDivisionError/.test(o.start.output), "the error's traceback: " + o.start.output);
   await show("start");
   check(await until("document.querySelector('[data-code=start]').classList.contains('code-failed')", 3000), "the item shows the error: " + await ev("document.querySelector('[data-code=start]').className + ' ' + window.board.code.state('start') + ' ' + document.querySelectorAll('[data-code=start]').length + ' ' + window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start').code"));
-  // the code editor, outside Edit: double-click, type, Shift+Enter
-  await ev(`(() => { const el = document.querySelector('[data-code=start]'); const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: r.left + 20, clientY: r.top + 10 })); return 1; })()`);
-  check(await until("!!document.querySelector('.board-code-editor .be-code')", 5000), "double-click opens the code editor");
+  // the code editor: outside Edit, a double-click only flies there; in Edit it opens the editor; type, Shift+Enter
+  const dbl = () => ev(`(() => { const el = document.querySelector('[data-code=start]'); const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: r.left + 20, clientY: r.top + 10 })); return 1; })()`);
+  await dbl();
+  await sleep(600);
+  check(await ev("!document.querySelector('.board-code-editor')"), "outside Edit, a double-click does not open the code editor");
+  await ev("window.sagebrush.board.editing(true)");
+  await show("start");
+  await dbl();
+  check(await until("!!document.querySelector('.board-code-editor .be-code')", 5000), "in Edit, a double-click opens the code editor");
   await ev(`(() => { const ta = document.querySelector('.board-code-editor .be-code'); ta.value = 'start = 6'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
   check(await until("window.sagebrush.board.outputs().then((os) => /^8 steps, as high as 16/.test(os.find((x) => x.id === 'path').output))", 30000), "Shift+Enter in the editor ran the change");
   check(await ev("!document.querySelector('.board-code-editor')"), "the editor closed");

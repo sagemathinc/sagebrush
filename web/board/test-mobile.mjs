@@ -54,15 +54,14 @@ try {
   await until("!document.querySelector('.board-toolbar').hidden", 5000);
   check(await inView(".board-toolbar"), "the toolbar is in view");
   check(await ev("!!document.querySelector('.board-toolbar [data-tool=undo]')"), "Undo is in the toolbar on a touch screen");
-  await ev("window.sagebrush.board.editing(false)");
-  // a double tap on a code item: its editor, a sheet with its buttons in view
+  // a double tap on a code item, in Edit: its editor, a sheet with its buttons in view
   await ev("window.board.focus(['start'], true)");
   await sleep(400);
   const c = await ev("(() => { const r = window.board.clientRect('start'); return { x: r.left + r.width / 2, y: r.top + 12 }; })()");
   await tap(c.x, c.y);
   await sleep(80);
   await tap(c.x, c.y);
-  check(await until("!!document.querySelector('.board-editor.be-sheet .be-code')", 5000), "a double tap opens the code editor, as a sheet");
+  check(await until("!!document.querySelector('.board-editor.be-sheet .be-code')", 5000), "a double tap in Edit opens the code editor, as a sheet");
   check(await inView(".board-editor .be-done"), "its Run button is in view");
   check(await ev("(() => { const p = document.querySelector('.board-editor'), d = p.querySelector('.be-done').getBoundingClientRect(), t = p.querySelector('.be-code').getBoundingClientRect(); return d.top < t.top; })()"), "the buttons come before the code");
   // the keyboard: half the screen (the visual viewport shrinks)
@@ -89,6 +88,21 @@ try {
   await tapEl(".board-toolbar [data-tool=undo]");
   await sleep(400);
   check((await ev("window.sagebrush.board.snapshot().doc.nodes.length")) === n0, "Undo took it back");
+  // editing a note on the phone, in Edit: a tap on the note selected, or a double tap
+  await ev("window.sagebrush.board.editing(true), window.board.focus(['about'], true)");
+  await sleep(500);
+  const ab = await ev("(() => { const r = window.board.clientRect('about'); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
+  await tap(ab.x, ab.y);
+  await sleep(600);
+  await tap(ab.x, ab.y);
+  check(await until("!!document.querySelector('.board-editor.be-sheet .be-title')", 3000), "a tap on the note selected opens its editor");
+  await tapEl(".board-editor .be-cancel");
+  await sleep(600);
+  await tap(ab.x, ab.y);
+  await sleep(80);
+  await tap(ab.x, ab.y);
+  check(await until("!!document.querySelector('.board-editor.be-sheet .be-title')", 3000), "a double tap opens a note's editor in Edit");
+  await tapEl(".board-editor .be-cancel");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

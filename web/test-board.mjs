@@ -285,8 +285,12 @@ try {
     // (while dragging, only the dragged note's edges may lose their routes;
     // let go, every edge is routed again, none left straight)
     const straight = `window.sagebrush.board.snapshot().edges.filter((e) => !e.points).map((e) => e.from + "->" + e.to)`;
-    // (Alt held: no snapping, so it moves exactly as far)
+    // (Alt held: no snapping, so it moves exactly as far; and the press is
+    // quick: a drag shows from its first move)
+    const tPress = Date.now();
     await mouse("mousePressed", ca.x, ca.y, { modifiers: 1 });
+    await mouse("mouseMoved", ca.x + 1, ca.y + 1, { modifiers: 1 });
+    check(Date.now() - tPress < 250, `pressing a note to drag it took ${Date.now() - tPress} ms`);
     for (let i = 1; i <= 8; i++) await mouse("mouseMoved", ca.x + (60 * i) / 8, ca.y + (90 * i) / 8, { modifiers: 1 });
     const during = await ev(straight);
     check(during.every((x) => x.split("->").includes(a)), `while dragging ${a}, other edges went straight: ${during.join(", ")}`);
