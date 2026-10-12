@@ -678,9 +678,16 @@ function getattrMiss(o: any, name: string, S: any): any {
       const d = lookupType(cls, name);
       if (d === undefined || !isDataDescriptor(d)) {
         if (ownAttr(o, name)) {
-          S.c = cls;
-          S.v = cls.$ver;
-          S.k = 0;
+          // The fast path answers with any property of that name, so a name
+          // that is also on the JavaScript prototype chain of the class's
+          // instances (a list or dict subclass's `constructor`, `push`) is
+          // never cached: Python never adds to these prototypes, so a name
+          // not on the chain now never will be.
+          if (cls.$jsBase === null || !(name in Object.getPrototypeOf(o))) {
+            S.c = cls;
+            S.v = cls.$ver;
+            S.k = 0;
+          }
           return o[name];
         }
         if (d !== undefined && !(typeof d === "function" && d.$pyfn === true) && (d === null || typeof d !== "object" || lookupType(typeOf(d), "__get__") === undefined)) {
@@ -787,7 +794,7 @@ export function siteGet(name: string): (o: any) => any {
   const p = JSON.stringify(name);
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
   if (o != null && o.$cls === S.c && S.c.$ver === S.v) {
-    if (S.k === 0) { const t = o[${p}]; if (t !== undefined && (S.c.$jsBase === null || hasOwn.call(o, ${p}))) return t; }
+    if (S.k === 0) { const t = o[${p}]; if (t !== undefined) return t; }
     else if (o[${p}] === undefined || (S.c.$jsBase !== null && !hasOwn.call(o, ${p}))) return S.val;
   } else if (o === S.tc && o.$ver === S.tv) return S.tval;
   return miss(o, ${p}, S);
