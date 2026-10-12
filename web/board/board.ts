@@ -818,7 +818,31 @@ export class Board {
       }
     });
     for (const t of ["pointerup", "pointercancel"]) this.el.addEventListener(t, (e) => { down.delete((e as PointerEvent).pointerId); });
+    // (a double tap: touch screens' double-click, which not every browser
+    // makes into a dblclick; one it does make is then ignored)
+    let tap: { t: number; x: number; y: number } | null = null, start: { t: number; x: number; y: number } | null = null, doubled = 0;
+    this.el.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch" && e.isPrimary) start = { t: e.timeStamp, x: e.clientX, y: e.clientY }; }, true);
+    this.el.addEventListener("pointerup", (e) => {
+      if (e.pointerType !== "touch" || !e.isPrimary || !start) return;
+      const quick = e.timeStamp - start.t < 300 && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 10;
+      start = null;
+      if (!quick) { tap = null; return; }
+      if (tap && e.timeStamp - tap.t < 350 && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 25) {
+        tap = null;
+        doubled = e.timeStamp;
+        this.doubleAt(e.clientX, e.clientY);
+      } else tap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+    }, true);
     this.el.addEventListener("dblclick", (e) => {
+      if (doubled && e.timeStamp - doubled < 600) return;
+      this.doubleAt(e.clientX, e.clientY);
+    });
+  }
+
+  // a double-click (or double tap) at a point on the page
+  private doubleAt(cx: number, cy: number) {
+    {
+      const e = { clientX: cx, clientY: cy };
       const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
       const ed = it?.kind !== "note" && this.onEdgeDoubleClick ? this.edgeAt(e.clientX - r.left, e.clientY - r.top) : null;
       if (ed && this.onEdgeDoubleClick!(ed)) return;
@@ -832,7 +856,7 @@ export class Board {
       if (Math.abs(to.z / c.z - 1) < 0.02 && Math.hypot(to.x - c.x, to.y - c.y) * c.z < 4) return;
       getSelection()?.removeAllRanges();
       this.flyTo(to);
-    });
+    }
   }
 }
 

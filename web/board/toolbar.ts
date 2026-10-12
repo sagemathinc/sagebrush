@@ -18,13 +18,14 @@ export interface Tool {
 export const DEFAULT_TOOLS = ["note", "code", "group", "connect"];
 const DEFAULT_KEY = "sagebrush-board-tools";
 
-/** The person's default tools for new boards. */
+/** The person's default tools for new boards (on a touch screen, with no
+ * keyboard for Ctrl+Z, Undo too). */
 export function defaultTools(): string[] {
   try {
     const t = JSON.parse(localStorage.getItem(DEFAULT_KEY) ?? "null");
     if (Array.isArray(t) && t.every((x) => typeof x === "string")) return t;
   } catch {}
-  return DEFAULT_TOOLS;
+  return matchMedia("(pointer: coarse)").matches ? [...DEFAULT_TOOLS, "undo"] : DEFAULT_TOOLS;
 }
 
 export class Toolbar {
