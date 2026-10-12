@@ -1,0 +1,522 @@
+[
+  {
+    "name": "docstring semicolon read before skipped binding",
+    "codes": [
+      "x = 1",
+      "\"doc\"; print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring semicolon skipped walrus then read",
+    "codes": [
+      "x = 1",
+      "\"doc\"; False and (x := 2); print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring semicolon taken walrus overwritten",
+    "codes": [
+      "x = 1\nflag = True",
+      "\"doc\"; flag and (x := 2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring semicolon increment",
+    "codes": [
+      "x = 1\nflag = True",
+      "\"doc\"; flag and (x := x + 1)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import semicolon read",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations; print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import semicolon taken walrus overwritten",
+    "codes": [
+      "x = 1\nflag = True",
+      "from __future__ import annotations; flag and (x := 2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline docstring semicolon read",
+    "codes": [
+      "x = 1",
+      "\"\"\"a\nb\"\"\"; print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized docstring semicolon read",
+    "codes": [
+      "x = 1",
+      "(\"a\"\n \"b\"); print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "continued docstring semicolon read",
+    "codes": [
+      "x = 1",
+      "\"a\" \\\n \"b\"; print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline future import semicolon read",
+    "codes": [
+      "x = 1",
+      "from __future__ import (\n    annotations\n); print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring and future import and read same line",
+    "codes": [
+      "x = 1",
+      "\"doc\"; from __future__ import annotations; print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "prologue semicolon two names",
+    "codes": [
+      "x = 1\ny = 10",
+      "\"doc\"; print(x, y)\nif False:\n    x = 2\n    y = 3",
+      "print(x, y)"
+    ],
+    "change": [
+      0,
+      "x = 5\ny = 20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "prologue and harmless semicolon control",
+    "codes": [
+      "x = 1",
+      "\"doc\"; print(\"hello\")\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring newline control",
+    "codes": [
+      "x = 1",
+      "\"doc\"\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import newline control",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future and docstring newline control",
+    "codes": [
+      "x = 1",
+      "\"doc\"\nfrom __future__ import annotations\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline docstring newline control",
+    "codes": [
+      "x = 1",
+      "\"\"\"a\nb\"\"\"\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "semicolon skipped walrus before print control",
+    "codes": [
+      "x = 1",
+      "False and (x := 2); print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "literal loop store before break control",
+    "codes": [
+      "x = 1",
+      "for i in [0]:\n    x = 2\n    break\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested loop break control",
+    "codes": [
+      "x = 1",
+      "for i in [0]:\n    for j in [0]:\n        break\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation only control",
+    "codes": [
+      "x = 1",
+      "x: int\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation and unknown conditional control",
+    "codes": [
+      "x = 1\nflag = False",
+      "x: int\nif flag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = False"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module global before first read control",
+    "codes": [
+      "x = 1",
+      "global x\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module global after prologue control",
+    "codes": [
+      "x = 1",
+      "\"doc\"\nfrom __future__ import annotations\nglobal x\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "duplicate module global after conditional binding",
+    "codes": [
+      "x = 1",
+      "global x\nif False:\n    x = 2\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "syntax error or refusal"
+  },
+  {
+    "name": "conditional class global control",
+    "codes": [
+      "x = 1",
+      "class C:\n    global x\n    if False:\n        x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "function builtins has builtin control",
+    "codes": [
+      "if False:\n    len = 1",
+      "if False:\n    len = 2\nprint(\"len\" in (lambda: 0).__builtins__, len([1,2]))",
+      "print(len([1,2,3]))"
+    ],
+    "change": [
+      0,
+      "if False:\n    len = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "builtin helpers shadowed after prologue control",
+    "codes": [
+      "hasattr = 1\n__import__ = 2\nflag = True\nif False:\n    x = 1",
+      "\"doc\"\nfrom __future__ import annotations\nif flag:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "hasattr = 3\n__import__ = 4\nflag = True\nif False:\n    x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future unrelated annotation control",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations\nif False:\n    x = 2\ndef f(a: int):\n    pass\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future naming annotation refused boundary",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations\nif False:\n    x = 2\ndef f(a: x):\n    pass\nprint(f.__annotations__[\"a\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refused or right"
+  },
+  {
+    "name": "prologue traceback control",
+    "codes": [
+      "x = 1",
+      "\"doc\"\nfrom __future__ import annotations\nif False:\n    x = 2\nprint(x)\n1 / 0",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiple prologue traceback control",
+    "codes": [
+      "x = 1\ny = 10",
+      "\"doc\"\nfrom __future__ import annotations\nif False:\n    x = 2\n    y = 3\nprint(x, y)\n1 / 0",
+      "print(x, y)"
+    ],
+    "change": [
+      0,
+      "x = 5\ny = 20"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation downstream reader",
+    "codes": [
+      "x = 1",
+      "x: int",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare unicode annotation",
+    "codes": [
+      "\u03b1 = 1",
+      "\u03b1: int\nprint(\u03b1)",
+      "print(\u03b1)"
+    ],
+    "change": [
+      0,
+      "\u03b1 = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after skipped binding syntax error",
+    "codes": [
+      "x = 1",
+      "if False:\n    x = 2\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "syntax error or refusal"
+  },
+  {
+    "name": "global after taken conditional syntax error",
+    "codes": [
+      "x = 1\nflag = True",
+      "if flag:\n    x = 2\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "syntax error or refusal"
+  },
+  {
+    "name": "global after earlier read syntax error",
+    "codes": [
+      "x = 1",
+      "print(\"entry\")\nprint(x)\nif False:\n    x = 2\nglobal x",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "syntax error or refusal"
+  },
+  {
+    "name": "global nested in if after binding syntax error",
+    "codes": [
+      "x = 1",
+      "if False:\n    x = 2\nif True:\n    global x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "syntax error or refusal"
+  },
+  {
+    "name": "duplicate global before binding control",
+    "codes": [
+      "x = 1",
+      "global x\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional bare annotation control",
+    "codes": [
+      "x = 1",
+      "if False:\n    x: int\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  }
+]

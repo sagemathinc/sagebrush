@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renameInCell, renameRedefinitions } from "../src/rename";
+import { renameInCell, renameRedefinitions, takeInitLines } from "../src/rename";
 import { analyzeCell } from "../src/dataflow";
 
 // src/rename.ts: renaming a global in cells, for the fix of multiple definitions.
@@ -211,4 +211,36 @@ test("sixth review: walrus that may not run, bindings in def and class headers, 
     { c2: `${S}=2\ntry:\n    1/0\nexcept (ValueError, ZeroDivisionError) as ${S}:\n    result=str(${S})`, c3: `print(result, ${S})` });
   // a function's := in a comprehension makes x its local
   assert.deepEqual(q(["x=1", "print(x)", "x=2\ndef f():\n    [(x := i) for i in range(3)]\n    return x", "print(f(), x)"], "x"), { c2: `${S}=2\ndef f():\n    [(x := i) for i in range(3)]\n    return x`, c3: `print(f(), ${S})` });
+});
+
+test("an initialization after a prologue sharing its line: split there, and taken out as written (REACT-5EE9-1)", () => {
+  const src = '"doc"; print(x)\nif False:\n    x = 2';
+  const out = renameInCell(src, "x", "xʹ2", { from: "definition" })!;
+  const lines = out.split("\n");
+  // (in plain Python: the docstring, the initialization, then the rest of the line)
+  assert.match(lines[0], /^"doc"; # page-order scoping/);
+  assert.match(lines[1], /^if 'x' in \(lambda: 0\)\.__globals__/);
+  assert.equal(lines[2], "print(xʹ2)");
+  // (taken out: the line as written, the initialization at its column)
+  const { code, inits } = takeInitLines(out);
+  assert.equal(code, '"doc"; print(xʹ2)\nif False:\n    xʹ2 = 2');
+  assert.deepEqual(inits, [["xʹ2", "x", 1, 7]]);
+  // (two names: both initializations there, in order)
+  const two = renameInCell(out, "y", "yʹ2", { from: "definition" });
+  assert.equal(two, out); // (no y)
+  const both = renameInCell(renameInCell('"dé"; print(x, y)\nif False:\n    x = y = 2', "x", "xʹ2", { from: "definition" })!, "y", "yʹ2", { from: "definition" })!;
+  const t = takeInitLines(both);
+  assert.equal(t.code, '"dé"; print(xʹ2, yʹ2)\nif False:\n    xʹ2 = yʹ2 = 2');
+  assert.deepEqual(t.inits.map(([n, , l, c]) => [n, l, c]), [["yʹ2", 1, 7], ["xʹ2", 1, 7]]); // (UTF-8 bytes)
+});
+
+test("a bare annotation alone keeps the value; a module's global after a use stays an error (REACT-5EE9-2, 3)", () => {
+  assert.match(renameInCell("x: int\nprint(x)", "x", "xʹ2", { from: "definition" })!, /^if 'x' in .*\nxʹ2: int\nprint\(xʹ2\)$/);
+  // (valid as written: the global keeps its name)
+  assert.match(renameInCell("global x\nif False:\n    x = 2\nprint(x)", "x", "xʹ2", { from: "definition" })!, /\nglobal x\nif False:\n    xʹ2 = 2/);
+  // (invalid as written: renamed, so Python still rejects it)
+  assert.match(renameInCell("if False:\n    x = 2\nglobal x\nprint(x)", "x", "xʹ2", { from: "definition" })!, /\nglobal xʹ2\n/);
+  assert.match(renameInCell("def f(a=x): pass\nif False:\n    x = 2\nglobal x", "x", "xʹ2", { from: "definition" })!, /\nglobal xʹ2$/);
+  // (a use in a lambda's or a comprehension's body is not the module's)
+  assert.match(renameInCell("f = lambda: x\n[x for _ in ()]\nglobal x\nif False:\n    x = 2", "x", "xʹ2", { from: "definition" })!, /\nglobal x\n/);
 });

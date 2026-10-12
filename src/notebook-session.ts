@@ -246,9 +246,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // the first statement's line, so the cell's line numbers are as written)
         const { code, inits } = takeInitLines(m.code);
         const initialize = (t: any) => {
-          // (each before the first statement after the lines that came before it)
-          for (const [n, w, before] of [...inits].reverse()) {
-            let i = t.body.findIndex((st: any) => st.lineno > before);
+          // (each before the first statement after the lines that came before
+          // it, or, in a line split for it, from its column on)
+          for (const [n, w, before, col] of [...inits].reverse()) {
+            let i = t.body.findIndex((st: any) => (col === undefined ? st.lineno > before : st.lineno > before || (st.lineno === before && st.col_offset >= col)));
             if (i < 0) i = t.body.length;
             const ln = t.body[i]?.lineno ?? before + 1, pos = { lineno: ln, col_offset: 0, end_lineno: ln, end_col_offset: 0 };
             const nm = (id: string, store = false) => ({ _type: "Name", id, ctx: { _type: store ? "Store" : "Load" }, ...pos });

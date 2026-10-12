@@ -1069,25 +1069,37 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
 // would be called, and the graph would see them read, REACT-8C82-2)
 // (and `from` is read in a lambda, another scope: a `global x` outside any
 // function may follow, which a use of x before it would make an error)
+// (a line split for an initialization, `"doc"; print(x)`, ends so; the
+// statement after the split is the line after the initialization lines)
+const SPLIT = "# page-order scoping: the line goes on after the next";
 export const initLine = (to: string, from: string) => `if '${from}' in (lambda: 0).__globals__ or '${from}' in (lambda: 0).__builtins__: ${to} = (lambda: ${from})()  # page-order scoping`;
 
 /**
  * The initialization lines page-order scoping put in a cell (after its
  * docstring and __future__ imports): the code without them, and for each
- * the [new, previous] names and how many of the cell's lines come before it.
- * pyjs runs them as statements there, on the next statement's line, so its
- * line numbers are the cell's as written.
+ * the [new, previous] names, how many of the cell's lines come before it,
+ * and, where it was put inside a line (split there), the UTF-8 column there
+ * of the statement it goes before.  pyjs runs them as statements there, so
+ * its line numbers are the cell's as written.
  */
-export function takeInitLines(code: string): { code: string; inits: [string, string, number][] } {
-  const inits: [string, string, number][] = [];
+export function takeInitLines(code: string): { code: string; inits: [string, string, number, number?][] } {
+  const inits: [string, string, number, number?][] = [];
   const N = "[\\p{L}_][\\p{L}\\p{N}\\p{Mn}\\p{Mc}_\\u02b9]*";
   const re = new RegExp(`^if '(${N})' in \\(lambda: 0\\)\\.__globals__ or '\\1' in \\(lambda: 0\\)\\.__builtins__: (${N}) = \\(lambda: \\1\\)\\(\\)  # page-order scoping$`, "u");
   const kept: string[] = [];
-  for (const line of code.split("\n")) {
-    const m = re.exec(line);
-    if (m) inits.push([m[2], m[1], kept.length]);
-    else kept.push(line);
+  const lines = code.split("\n");
+  let joining: string | null = null; // the first part of a split line
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i], m = re.exec(line);
+    if (m) {
+      inits.push(joining !== null ? [m[2], m[1], kept.length + 1, bytesLen(joining)] : [m[2], m[1], kept.length]);
+      continue;
+    }
+    if (joining !== null) { kept.push(joining + line); joining = null; continue; }
+    if (line.endsWith(SPLIT) && re.test(lines[i + 1] ?? "")) { joining = line.slice(0, -SPLIT.length); continue; }
+    kept.push(line);
   }
+  if (joining !== null) kept.push(joining);
   return inits.length ? { code: kept.join("\n"), inits } : { code, inits };
 }
 
@@ -1113,7 +1125,8 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   // each occurrence's new name: `to`, or (from the definition) `before` for those before it
   const target = new Map<Occurrence, string>();
   let prefix: { line: number; text: string } | null = null;
-  let marker: { after: number; text: string } | null = null;
+  // (`split`: the line `after` is split at this character, the initialization between)
+  let marker: { after: number; text: string; split?: number } | null = null;
   if (opts.from === "definition") {
     // (the first that binds: a bare annotation, `x: int`, binds nothing, REACT-8C82-4)
     const bare = (o: Occurrence) => o.path.at(-1)?.[0]._type === "AnnAssign" && o.path.at(-1)?.[1] === "target" && o.path.at(-1)?.[0].value == null;
@@ -1136,7 +1149,9 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     // (not where annotations naming it are kept as their text, which
     // renaming would change: REACT-8C82-1)
     const canInit = !(FUTURE && occ.some((o) => deferredOf(o)?.kind === "annotation"));
-    let init = canInit && plainFirst && !surely(first, 0);
+    // (a cell whose only binding is a bare annotation keeps the value: the
+    // new name starts as the previous one, REACT-5EE9-2)
+    let init = canInit && plainFirst && (bare(first) || !surely(first, 0));
     let reads = init ? null : whichReads(occ, first, tree.body);
     // (a binding in a function the analysis cannot place: initialized too)
     if (!init && !reads && !plainFirst && canInit) init = true;
@@ -1145,14 +1160,26 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     // (a `global x` outside any function, which does nothing, keeps its name:
     // as `global xʹ2` after the initialization it would be an error, an
     // assignment before the global declaration, REACT-8C82-1)
-    if (init) for (const o of occ) if (o.global && !o.path.some(([n, k]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef") && k === "body")) target.set(o, name);
+    // (but only where the cell as written is valid: a module's `global x`
+    // after a use of x there (an annotation of x too; not in a function, a
+    // lambda or a comprehension's body) is a SyntaxError in Python, which
+    // renamed as `global xʹ2` it stays, REACT-5EE9-3)
+    const nested = (o: Occurrence) => o.path.some(([n, k]) => ((BINDING_TYPES.has(n._type) || n._type === "Lambda") && k === "body") || (COMPREHENSIONS.has(n._type) && k !== "iter0"));
+    const usedBefore = (g: Occurrence) => occ.some((o) => !o.global && !nested(o) && (o.line < g.line || (o.line === g.line && o.col < g.col)));
+    if (init) for (const o of occ) if (o.global && !nested(o) && !usedBefore(o)) target.set(o, name);
     // (after the module's prologue, its docstring and __future__ imports,
     // which must come first: REACT-8C82-1)
     if (init) {
       let k = 0;
       if (tree.body[0]?._type === "Expr" && tree.body[0].value?._type === "Constant" && typeof tree.body[0].value.value === "string") k++;
       while (tree.body[k]?._type === "ImportFrom" && tree.body[k].module === "__future__") k++;
-      marker = { after: k ? tree.body[k - 1].end_lineno : 0, text: initLine(to, old) };
+      // (a statement after the prologue on its last line, `"doc"; print(x)`:
+      // the line is split there, REACT-5EE9-1)
+      const next = tree.body[k];
+      if (k && next && next.lineno === tree.body[k - 1].end_lineno) {
+        if (aLines[next.lineno - 1] !== source.split("\n")[next.lineno - 1]) return null; // (Sage, preparsed differently)
+        marker = { after: next.lineno, text: initLine(to, old), split: byteSlice(aLines[next.lineno - 1], 0, next.col_offset).length };
+      } else marker = { after: k ? tree.body[k - 1].end_lineno : 0, text: initLine(to, old) };
     }
     // `x += 1` defining the new x: `xʹ2 = x; xʹ2 += 1` (at the top level only)
     const aug = first.path.at(-1);
@@ -1207,7 +1234,10 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     lines[ln - 1] = t;
   }
   if (prefix) lines[prefix.line - 1] = prefix.text + lines[prefix.line - 1];
-  if (marker) lines.splice(marker.after, 0, marker.text);
+  if (marker?.split !== undefined) {
+    const t = lines[marker.after - 1];
+    lines.splice(marker.after - 1, 1, t.slice(0, marker.split) + SPLIT, marker.text, t.slice(marker.split));
+  } else if (marker) lines.splice(marker.after, 0, marker.text);
   return lines.join("\n");
 }
 

@@ -475,12 +475,19 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     builtin), so an unbound previous name stays unbound, as Python's would.
     It reads no name of the cell's but the previous one (a user's
     `hasattr` is never called), and reads it in a lambda, so a `global x`
-    outside functions, which keeps its name, stays legal.
+    outside functions, which keeps its name, stays legal. A module's
+    `global x` that comes after a use of `x` is a SyntaxError in Python, so
+    it is renamed and stays one (review of 5ee9fe8).
+  - When a statement shares the prologue's last line (`"doc"; print(x)`),
+    that line is split at the statement, with the initialization between.
+    The first part ends with a `# page-order scoping` comment, so pyjs's
+    session can join the line again.
   - It isn't used where annotations naming the name are kept as text
     (`from __future__ import annotations`).
   - A bare annotation (`x: int`) is not a binding, and a loop body with a
     `break` or `continue` may skip what follows it (sagebrush-codex's
-    review of 8c8211a).
+    review of 8c8211a). A cell whose only binding is a bare annotation is
+    initialized, so it keeps the value (review of 5ee9fe8).
   - The cell then reads the previous definition, so editing it reruns the
     cell.
   - pyjs's session takes the line out of the text and runs the same
