@@ -20,7 +20,7 @@ const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sand
 const cleanup = () => { chrome.kill(); server.kill(); };
 process.on("uncaughtException", (e) => { console.log("FAIL " + (e?.stack ?? e)); cleanup(); process.exit(1); });
 let targets;
-for (let i = 0; i < 100; i++) { try { targets = await (await fetch("http://127.0.0.1:9342/json")).json(); break; } catch { await sleep(100); } }
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch("http://127.0.0.1:9342/json")).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
