@@ -46,7 +46,10 @@ export class Editor {
   /** connecting by taps (the toolbar's Connect, for touch screens too): a
    * note tapped, then another, makes an edge between them */
   readonly connecting = signal(false);
+  /** the Select tool: a drag on the background draws a rectangle selecting what it holds (no shift needed; Space-drag pans) */
+  readonly selecting = signal(false);
   private connectFrom: string | null = null;
+  private space = false;
   get on() { return this.editing.value; }
   /** whether items are selected in Edit (the arrow keys then move them) */
   get hasSelection() { return this.on && this.selected.length > 0; }
@@ -88,7 +91,16 @@ export class Editor {
     effect(() => {
       this.board.el.classList.toggle("connecting", this.connecting.value);
       if (!this.connecting.value && this.connectFrom) { this.connectFrom = null; this.select(null); }
+      if (this.connecting.value) this.selecting.value = false;
     });
+    effect(() => {
+      this.board.el.classList.toggle("selecting", this.selecting.value);
+      if (this.selecting.value) this.connecting.value = false;
+    });
+    effect(() => { if (!this.editing.value) this.selecting.value = false; });
+    // (Space held: a drag pans, whatever the tool)
+    addEventListener("keydown", (e) => { if (e.key === " " && !this.typing()) this.space = true; });
+    addEventListener("keyup", (e) => { if (e.key === " ") this.space = false; });
   }
 
   setOn(on: boolean) {
@@ -97,14 +109,16 @@ export class Editor {
 
   /** Apply a change made to a copy of the document; undoable (with `merge`,
    * one step with the change before it: a new note and its first text). */
-  async commit(f: (d: BoardDoc) => void, merge = false) {
+  async commit(f: (d: BoardDoc) => void, merge = false, record = true) {
     const cur = this.doc();
     if (!cur) return;
     const before = JSON.stringify(cur), d = JSON.parse(before) as BoardDoc;
     f(d);
     const after = JSON.stringify(d);
     if (after === before) return;
-    if (!merge || !this.undos.length) this.undos.push(before);
+    // (not recorded: a setting kept in the document, the toolbar's tools, is no step to undo)
+    if (!record) {}
+    else if (!merge || !this.undos.length) this.undos.push(before);
     // (merged back to where it started: no step at all)
     else if (this.undos.at(-1) === after) this.undos.pop();
     if (this.undos.length > 200) this.undos.shift();
@@ -117,14 +131,20 @@ export class Editor {
     if (!cur || !prev) return;
     this.redos.push(JSON.stringify(cur));
     this.selectEdge(null);
-    await this.change(JSON.parse(prev));
+    await this.change(this.keep(cur, JSON.parse(prev)));
   }
   async redo() {
     const cur = this.doc(), next = this.redos.pop();
     if (!cur || !next) return;
     this.undos.push(JSON.stringify(cur));
     this.selectEdge(null);
-    await this.change(JSON.parse(next));
+    await this.change(this.keep(cur, JSON.parse(next)));
+  }
+  // (the settings undo leaves as they are: the toolbar's tools)
+  private keep(cur: BoardDoc, d: BoardDoc): BoardDoc {
+    if (cur.tools) d.tools = cur.tools;
+    else delete d.tools;
+    return d;
   }
 
   /** Nothing selected, no note open (another page is shown). */
@@ -147,7 +167,8 @@ export class Editor {
   // holds; a click (not a drag, which pans) selects nothing.
   private backgroundDown(e: PointerEvent): boolean {
     if (!this.on || this.panel || this.connecting.value) return false;
-    if (!e.shiftKey) {
+    const marquee = (e.shiftKey || this.selecting.value) && !this.space && e.button === 0;
+    if (!marquee) {
       const x0 = e.clientX, y0 = e.clientY;
       addEventListener("pointerup", (u) => { if (Math.hypot(u.clientX - x0, u.clientY - y0) < 4) { this.select(null); this.selectEdge(null); } }, { once: true });
       return false;
@@ -193,6 +214,10 @@ export class Editor {
 
   private down(it: Item, e: PointerEvent): boolean {
     if (!this.on || this.panel) return false;
+    // (in Edit a press on an item moves or selects it: no text selection, and
+    // none left from before, which the browser would start dragging instead)
+    e.preventDefault();
+    getSelection()?.removeAllRanges();
     const z = () => this.board.camera.z;
     if (this.connecting.value) {
       if (it.kind !== "note") return false;
@@ -684,6 +709,7 @@ export class Editor {
     else if (mod && e.key.toLowerCase() === "a") this.select(this.board.itemsIn(-1e9, -1e9, 1e9, 1e9).filter((it) => !it.parent).map((it) => it.id));
     else if (e.key.startsWith("Arrow") && this.selected.length) { const k = e.shiftKey ? 10 : 1; this.nudge(e.key === "ArrowLeft" ? -k : e.key === "ArrowRight" ? k : 0, e.key === "ArrowUp" ? -k : e.key === "ArrowDown" ? k : 0); }
     else if (e.key === "Escape" && this.connecting.value) this.connecting.value = false;
+    else if (e.key === "Escape" && this.selecting.value && !this.selected.length) this.selecting.value = false;
     else if (e.key === "Escape" && this.selected.length) this.select(null);
     else return;
     e.preventDefault();

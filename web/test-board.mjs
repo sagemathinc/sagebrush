@@ -464,9 +464,32 @@ try {
       await sleep(400);
       check((await docOf()).nodes.length === n0, "a new note left empty is not kept");
       await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
-      await ev("(() => { const b = document.querySelector('.board-toolbar-panel [data-tool=group]'); b.checked = false; b.dispatchEvent(new Event('change')); })()");
+      check(await ev("document.querySelectorAll('.board-toolbar-panel .tb-use').length >= 8"), "⋯ lists every tool");
+      await ev("(() => { const b = document.querySelector('.board-toolbar-panel input[data-tool=group]'); b.checked = false; b.dispatchEvent(new Event('change')); })()");
       await sleep(400);
       check(JSON.stringify((await docOf()).tools) === '["note","code","connect"]' && (await tools()) === "note,code,connect", `the board's tools without Group: ${JSON.stringify((await docOf()).tools)}, shown ${await tools()}`);
+      // (which tools a board shows is a setting: undo leaves it)
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+      await sleep(400);
+      check((await tools()) === "note,code,connect", `undo changed the toolbar: ${await tools()}`);
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true }))");
+      await sleep(400);
+      // (a tool used from the menu: Select, not on the toolbar, shows its icon on ⋯; a plain drag on the background selects)
+      await ev("document.querySelector('.board-toolbar-panel') || document.querySelector('.board-toolbar .tb-more').click(), 1");
+      await ev("document.querySelector('.board-toolbar-panel .tb-use[data-tool=select]').click(), 1");
+      await sleep(200);
+      check(await ev("!document.querySelector('.board-toolbar-panel') && /↖/.test(document.querySelector('.board-toolbar .tb-more').textContent)"), `Select from the menu: ⋯ shows its icon (${await ev("document.querySelector('.board-toolbar .tb-more').textContent")})`);
+      await ev("window.board.focus(['b', 'c'], true)");
+      await sleep(300);
+      const sr = await ev("(() => { const a = window.board.clientRect('b'), c = window.board.clientRect('c'); const r = window.board.el.getBoundingClientRect(); const x0 = Math.min(a.left, c.left) - 14, y0 = Math.min(a.top, c.top) - 14; return { x0, y0, x1: Math.max(a.left + a.width, c.left + c.width) + 14, y1: Math.max(a.top + a.height, c.top + c.height) + 14, free: !window.board.itemAt(x0 - r.left, y0 - r.top) }; })()");
+      if (sr.free) {
+        const cam0 = await ev("JSON.stringify(window.board.camera)");
+        await drag({ x: sr.x0, y: sr.y0 }, { x: sr.x1, y: sr.y1 }, { modifiers: 0 });
+        check((await ev("document.querySelectorAll('.board-item.selected').length")) >= 2 && cam0 === (await ev("JSON.stringify(window.board.camera)")), "with Select, a plain drag on the background selects (and does not pan)");
+      }
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      check(await ev("document.querySelector('.board-toolbar .tb-more').textContent === '⋯'"), "Esc leaves Select");
       await ev("window.sagebrush.board.editing(false)");
       check(await ev("document.querySelector('.board-toolbar').hidden && !document.querySelector('.board-toolbar-panel')"), "the toolbar goes with Edit");
       await ev("window.sagebrush.board.editing(true)");
@@ -485,7 +508,7 @@ try {
       const zz = await ev("window.board.camera.z");
       await drag(await center("b"), { x: (await center("b")).x + 40, y: (await center("b")).y + 30 });
       const [b1, c1] = [await box("b"), await box("c")];
-      check(Math.abs(b1.x - b0.x - 40 / zz) < 2 && Math.abs(c1.x - c0.x - 40 / zz) < 2 && Math.abs(c1.y - c0.y - (b1.y - b0.y)) < 1, `dragging one of two selected moves both (b ${b1.x - b0.x}, c ${c1.x - c0.x})`);
+      check(Math.abs(b1.x - b0.x - 40 / zz) < 2 && Math.abs(c1.x - c0.x - 40 / zz) < 2 && Math.abs(c1.y - c0.y - (b1.y - b0.y)) < 1, `dragging one of two selected moves both (b ${b1.x - b0.x}, ${b1.y - b0.y}; c ${c1.x - c0.x}, ${c1.y - c0.y}; want ${40 / zz})`);
       const nodes0 = (await docOf()).nodes.length, edges0 = (await docOf()).edges.length;
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }))");
       await sleep(400);

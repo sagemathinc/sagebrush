@@ -214,8 +214,9 @@ $("next").onclick = () => step(at + 1);
 $("fit").onclick = () => board.focus();
 addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
-  // (items selected in Edit: the arrow keys move them)
+  // (items selected in Edit: the arrow keys move them; in Edit, Space held pans)
   if (editor.hasSelection && e.key.startsWith("Arrow")) return;
+  if (editor.on && e.key === " ") return;
   if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
   else if (e.key === "ArrowLeft") step(at - 1);
   else if (e.key === "Escape" || e.key === "0") step(-1);
@@ -266,14 +267,16 @@ effect(() => {
 // the toolbar, in Edit mode: adds at the middle of the view
 const center = () => { const v = board.view(); return { x: (v.x0 + v.x1) / 2, y: (v.y0 + v.y1) / 2 }; };
 const toolbar = new Toolbar(document.body, [
-  { id: "note", label: "Note", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y); } },
-  { id: "code", label: "Code", title: "Add Python code", run: () => { const c = center(); editor.addCode(c.x, c.y); } },
-  { id: "group", label: "Group", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
-  { id: "connect", label: "Connect", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
-  { id: "page", label: "Page", title: "Add a page after this one", run: () => $("addpage").click() },
-  { id: "undo", label: "↶", title: "Undo (Ctrl+Z)", run: () => editor.undo() },
-  { id: "redo", label: "↷", title: "Redo (Ctrl+Shift+Z)", run: () => editor.redo() },
-], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }));
+  { id: "select", label: "Select", icon: "↖", title: "Select: drag on the background to select what the rectangle holds (Space-drag pans); Esc to stop", toggle: editor.selecting },
+  { id: "note", label: "Note", icon: "¶", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y); } },
+  { id: "code", label: "Code", icon: "{ }", title: "Add Python code", run: () => { const c = center(); editor.addCode(c.x, c.y); } },
+  { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
+  { id: "connect", label: "Connect", icon: "⤳", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
+  { id: "page", label: "Page", icon: "⧉", title: "Add a page after this one", run: () => $("addpage").click() },
+  { id: "undo", label: "↶", icon: "↶", title: "Undo (Ctrl+Z)", run: () => editor.undo() },
+  { id: "redo", label: "↷", icon: "↷", title: "Redo (Ctrl+Shift+Z)", run: () => editor.redo() },
+// (which tools a board shows is a setting, not an edit to undo)
+], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }, false, false));
 const menu = $("menu");
 $("menubtn").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
 addEventListener("click", () => { menu.hidden = true; });
@@ -293,10 +296,6 @@ $("examples").onclick = async () => {
     list.textContent = "The examples could not be loaded: " + String(e);
   }
   ($("exdlg") as HTMLDialogElement).showModal();
-};
-$("addcode").onclick = () => {
-  const v = board.view();
-  editor.addCode((v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2);
 };
 $("tidy").onclick = () => editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
 $("pgprev").onclick = () => page(pageIx - 1);

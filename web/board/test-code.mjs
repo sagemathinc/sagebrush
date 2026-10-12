@@ -120,7 +120,7 @@ try {
   check(/NameError/.test((await outputs()).path.output), "a NameError: " + (await outputs()).path.output);
   // a new item from the menu, at the view's center
   await ev("window.sagebrush.board.editing(true)");
-  await ev("document.getElementById('addcode').click(), 1");
+  await ev("document.querySelector('.board-toolbar [data-tool=code]').click(), 1");
   check(await until("!!document.querySelector('.board-code-editor .be-code')", 5000), "Add Python code opens the editor");
   await ev(`(() => { const ta = document.querySelector('.board-code-editor .be-code'); ta.value = 'start = 7'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 5 && /^16 steps, as high as 52/.test(os.find((x) => x.id === 'path').output))", 30000), "the new item defines start: path runs again");

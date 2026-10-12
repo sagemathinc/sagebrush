@@ -49,6 +49,7 @@
   .menu button[hidden] { display: none; }
   .board.editing { cursor: default; }
   .board.editing .board-note { cursor: move; }
+  .board.editing .board-item { user-select: none; -webkit-user-select: none; }
   /* code items: the place in the reading order, ▶, the code, its output (the notebook's) */
   .board-code-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .board-code-head > b { margin: 0; font-size: 15px; }
@@ -73,8 +74,19 @@
   .board-toolbar button:hover { background: #eef2ea; }
   .board-toolbar button[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
   .board-toolbar .tb-more { color: #667; }
-  .board-toolbar-panel { position: fixed; top: 92px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
-  .board-toolbar-panel label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .board-toolbar .tb-more.tb-on { background: #2a6f2f; color: #fff; }
+  /* "⋯": every tool (use it), and whether it is on the toolbar */
+  .board-toolbar-panel { position: fixed; z-index: 4; display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 200px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
+  .board-toolbar-panel .tb-row { display: flex; align-items: center; gap: 6px; }
+  .board-toolbar-panel .tb-use { flex: 1; text-align: left; border-color: transparent; }
+  .board-toolbar-panel .tb-use:hover { background: #eef2ea; }
+  .board-toolbar-panel .tb-use[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
+  .board-toolbar-panel .tb-icon { display: inline-block; min-width: 1.6em; text-align: center; color: #4a6b49; }
+  .board-toolbar-panel .tb-use[aria-pressed="true"] .tb-icon { color: inherit; }
+  .board-toolbar-panel input { margin: 0 6px; }
+  .board-toolbar-panel .tb-default { margin-top: 4px; font-size: 12px; color: #556; border-color: transparent; }
+  .menu hr { border: 0; border-top: 1px solid rgba(0, 0, 0, .1); margin: 4px 0; }
+  .board.selecting { cursor: default; }
   .board.connecting .board-note { cursor: crosshair; }
   /* a panel on a small or touch screen: a sheet at the top of what the keyboard leaves, its buttons first */
   .board-editor.be-sheet { left: 0 !important; right: 0; width: auto !important; border-radius: 0 0 10px 10px; overflow: auto; }
@@ -149,7 +161,7 @@
 </head>
 <body>
 <div id="board"></div>
-<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="pages" hidden><button id="pgprev" title="Previous page (PageUp)">‹</button><select id="pgsel" title="Page"></select><button id="pgnext" title="Next page (PageDown)">›</button></span><span id="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="examples">Examples…</button><button id="print">Print or save as PDF…</button><button id="addcode">Add Python code</button><button id="addpage">Add a page</button><button id="namepage" hidden>Rename this page…</button><button id="rmpage" hidden>Delete this page</button><button id="tidy">Tidy (automatic layout)</button><button id="html">Download as HTML (one file, works offline)</button><button id="download">Download JSON</button><button id="open">Open… (JSON, Mermaid)</button><button id="mermaid">Import Mermaid…</button><button id="copyjson">Copy JSON</button><button id="newboard">New board</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,.mmd,.mermaid,.md,application/json,text/markdown,text/plain" hidden></div>
+<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="pages" hidden><button id="pgprev" title="Previous page (PageUp)">‹</button><select id="pgsel" title="Page"></select><button id="pgnext" title="Next page (PageDown)">›</button></span><span id="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="newboard">New board</button><button id="open">Open… (JSON, Mermaid)</button><button id="mermaid">Import Mermaid…</button><button id="examples">Examples…</button><hr><button id="addpage">Add a page</button><button id="namepage" hidden>Rename this page…</button><button id="rmpage" hidden>Delete this page</button><button id="tidy">Tidy (automatic layout)</button><hr><button id="print">Print or save as PDF…</button><button id="html">Download as HTML (one file, works offline)</button><button id="download">Download JSON</button><button id="copyjson">Copy JSON</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,.mmd,.mermaid,.md,application/json,text/markdown,text/plain" hidden></div>
 <div id="tour" hidden><div id="say"></div><div id="nav"><div><button id="prev" title="Back (←)" disabled>←</button><button id="next" title="Next (→)">→</button></div><span id="where"></span></div></div>
 <dialog id="exdlg"><h3>Example boards</h3><div id="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog id="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>```mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea id="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div id="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button id="mm-go" class="be-done">Import</button></div></form></dialog>
