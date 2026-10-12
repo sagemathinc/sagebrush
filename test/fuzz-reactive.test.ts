@@ -139,6 +139,7 @@ export const REGRESSIONS: [string, Case][] = [
     "def f():\n    pass", "def make():\n    global f\n    def f():\n        pass\nmake()\nprint(f.__name__, f.__qualname__)", "print(f.__name__)",
   ])],
   ["a name only in a string does not make a rename (REACT-3BC-19)", regression(["def f():\n    pass", "def deco(fn):\n    print(fn.__name__)\n    return fn\n@deco\ndef f():\n    pass\nprint(\"f\")"])],
+  ["a keyword's read after a starred argument's walrus reads the new x", regression(["x = 1", "def observe(v, k):\n    print(v, k)\nobserve(k=x, *[(x := 2)])\nprint(x)", "print(x)"])],
   ["a cell raising in plain Python raises here too (FUZZ-F4)", regression(["x = 1", "f = lambda: x\nx = 2\ndel x\nprint(f())", "print(x)"])],
 ];
 
@@ -148,8 +149,8 @@ for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-e555
 for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-87fd4d5.json", "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]) {
   REGRESSIONS.push([`${c.name} (review of 87fd4d5)`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
 }
-// (and of 98eb351, 6748f98 and 75a84fb)
-for (const [pin, c] of ["98eb351", "6748f98", "75a84fb"].flatMap((pin) => (JSON.parse(readFileSync(__dirname + `/../../test/fuzz-cases-${pin}.json`, "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]).map((c) => [pin, c] as const))) {
+// (and of 98eb351, 6748f98, 75a84fb and 156cd6b)
+for (const [pin, c] of ["98eb351", "6748f98", "75a84fb", "156cd6b"].flatMap((pin) => (JSON.parse(readFileSync(__dirname + `/../../test/fuzz-cases-${pin}.json`, "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]).map((c) => [pin, c] as const))) {
   REGRESSIONS.push([`${c.name} (review of ${pin})`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
 }
 

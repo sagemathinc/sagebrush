@@ -448,14 +448,12 @@ export class Emitter {
 
   // An assignment's value, evaluated before its target's container and index
   // or object, as Python does (`a[f()] = g()` calls g first): kept in a
-  // temporary unless nothing can run in between (a constant; or a name
-  // stored into a target of names and constants, `a[i] = x`, `self.x = y`).
+  // temporary unless it is a constant (even loading a name can raise, and
+  // its error comes before the target's: REACT-156C-3).
   valueFirst(t: A.Expr, value: A.Expr): string {
     const v = this.ex(value);
     if (t.k !== "Subscript" && t.k !== "Attribute") return v;
-    const simple = (e: A.Expr): boolean => e.k === "Name" || e.k === "Const";
-    const parts = t.k === "Subscript" ? [t.value, t.index] : [t.value];
-    if (value.k === "Const" || (value.k === "Name" && parts.every(simple))) return v;
+    if (value.k === "Const") return v;
     const tmp = this.temp();
     this.w(`${tmp} = ${v};`);
     return tmp;
