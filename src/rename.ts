@@ -459,7 +459,19 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     // (or a class body using one of its functions at all: given to a call,
     // in a container, through an alias, any of which may ask, REACT-98EB-3)
     if (def._type === "ClassDef") {
-      const fns = def.body.filter((b: any) => b._type === "FunctionDef" || b._type === "AsyncFunctionDef").map((b: any) => b.name);
+      // (its functions: also those under if, for, while, try, with and match, REACT-6748-3)
+      const fns: string[] = [];
+      const collect = (sts: any[]): void => {
+        for (const b of sts ?? []) {
+          if (b._type === "FunctionDef" || b._type === "AsyncFunctionDef") fns.push(b.name);
+          else if (b._type !== "ClassDef") {
+            for (const k of ["body", "orelse", "finalbody"]) if (Array.isArray(b[k])) collect(b[k]);
+            for (const h of b.handlers ?? []) collect(h.body);
+            for (const c of b.cases ?? []) collect(c.body);
+          }
+        }
+      };
+      collect(def.body);
       if (fns.some((f: string) => usedInClass(f, null))) return "maybe";
     }
     return "later";
@@ -585,6 +597,13 @@ function passesAny(n: any, names: Set<string>): boolean {
   return Object.keys(n).some((k) => k !== "_type" && passesAny(n[k], names));
 }
 
+// Whether code makes a call.
+function hasCall(n: any): boolean {
+  if (!n || typeof n !== "object") return false;
+  if (Array.isArray(n)) return n.some(hasCall);
+  return n._type === "Call" || Object.keys(n).some((k) => k !== "_type" && hasCall(n[k]));
+}
+
 // Whether code mentions any of `names` (as names or attributes).
 function mentions(n: any, names: string[]): boolean {
   if (!n || typeof n !== "object") return false;
@@ -651,11 +670,15 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     // (and within it, the store is not after `and`/`or`, in a conditional
     // expression's branch, an assert's message, a later comparison operand,
     // or a comprehension's element, unless every iterable is a literal with
-    // elements and nothing filters: REACT-98EB-4)
+    // elements and nothing filters: REACT-98EB-4; and run more than once,
+    // the comprehension may not read the name: its later iterations read
+    // the new value, REACT-6748-2)
     const nonEmpty = (g: any) => !g.ifs.length && !g.is_async && ["List", "Tuple", "Set"].includes(g.iter._type) && g.iter.elts.length > 0 && !g.iter.elts.some((e: any) => e._type === "Starred");
+    const repeats = (n: any) => n.generators.some((g: any) => g.iter.elts.length > 1);
+    const readsIn = (n: any) => occ.some((o) => o !== first && o.path.some(([m]) => m === n));
     const mayNotRun = (n: any, key: string, next: any, nextKey: string | undefined) =>
       n._type === "GeneratorExp" || ((n._type === "ListComp" || n._type === "SetComp" || n._type === "DictComp") &&
-        (key === "generators" ? !(next === n.generators[0] && nextKey === "iter") : !n.generators.every(nonEmpty)));
+        (key === "generators" ? !(next === n.generators[0] && nextKey === "iter") : !n.generators.every(nonEmpty) || (repeats(n) && readsIn(n))));
     if (first.path.slice(i + 1).some(([n, key], j, rest) => {
       const next = rest[j + 1]?.[0];
       return (n._type === "BoolOp" && next && n.values.indexOf(next) > 0) || (n._type === "IfExp" && key !== "test") || (n._type === "Assert" && key === "msg") ||
@@ -717,18 +740,17 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
       out.set(o, "new");
       continue;
     }
-    if (o.stmt > at.stmt || (o.stmt === at.stmt && o.store && !before(o, at))) { out.set(o, "new"); continue; }
-    if (o.stmt < at.stmt) { out.set(o, "old"); continue; }
-    if (df) {
-      // (the setter's arguments are evaluated before it runs, REACT-98EB-2)
-      if (at.node && inside(o, at.node)) {
-        if (o.store) return null;
-        out.set(o, "old");
-        continue;
-      }
-      out.set(o, before(o, at) ? "old" : "new");
+    if (df && at.node && inside(o, at.node)) {
+      // (the setter's arguments are evaluated before it runs, REACT-98EB-2;
+      // not when they store the name or call anything, which may run the
+      // setter or store it first, REACT-6748-1)
+      if (o.store || hasCall([...at.node.args, ...at.node.keywords])) return null;
+      out.set(o, "old");
       continue;
     }
+    if (o.stmt > at.stmt || (o.stmt === at.stmt && o.store && !before(o, at))) { out.set(o, "new"); continue; }
+    if (o.stmt < at.stmt) { out.set(o, "old"); continue; }
+    if (df) { out.set(o, before(o, at) ? "old" : "new"); continue; }
     // the same statement
     // (a class's decorators, bases and body, a def's decorators, defaults
     // and annotations run before the name is bound: they read the previous

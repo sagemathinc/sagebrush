@@ -1,0 +1,122 @@
+[
+ {
+  "name": "setter positional argument store then read",
+  "codes": [
+   "x=1",
+   "def setx(a,b):\n    global x\n    x=a+b\n    return x\nsetx((x:=5),x)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter keyword argument store then read",
+  "codes": [
+   "x=1",
+   "def setx(a,b):\n    global x\n    x=a+b\n    return x\nsetx(a=(x:=5),b=x)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "nested setter call before argument read",
+  "codes": [
+   "x=1",
+   "def setx(a,b):\n    global x\n    x=a+b\n    return x\nsetx(setx(1,1),x)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control setter positional argument reads old",
+  "codes": [
+   "x=1",
+   "def setx(a,b):\n    global x\n    x=a+b\n    return x\nsetx(x,1)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter argument store without later read",
+  "codes": [
+   "x=1",
+   "def setx(a,b):\n    global x\n    x=a+b\n    return x\nsetx((x:=5),1)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "comprehension setter list",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    values=[(x:=x+1) for _ in [0,1]]\n    print(values)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "comprehension setter set",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    values={(x:=x+1) for _ in [0,1]}\n    print(values)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "comprehension setter dict",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    values={i:(x:=x+1) for i in [0,1]}\n    print(values)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "comprehension setter nested loops",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    values=[(x:=x+1) for i in [0,1] for j in [0,1]]\n    print(values)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "comprehension setter one iteration control",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    values=[(x:=x+1) for _ in [0]]\n    print(values)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "comprehension setter constant repeated control",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    values=[(x:=7) for _ in [0,1]]\n    print(values)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "annotation method in if body",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    if True:\n        def m(p:C): pass\n    saved=read(m)\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "annotation method in loop body",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    for i in [0]:\n        def m(p:C): pass\n    saved=read(m)\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "annotation method in try body",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    try:\n        def m(p:C): pass\n    finally:\n        pass\n    saved=read(m)\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "ordinary method annotation refusal",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    def m(p:C): pass\n    saved=read(m)\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ }
+]

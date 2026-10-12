@@ -168,12 +168,17 @@ export class Gen {
       if (q < 0.15) {
         const arg = this.ints.has(v) && this.chance(0.7) ? v : this.expr();
         def(v);
-        return `def set${n}(value):\n    global ${v}\n    ${v} = value + 1\nset${n}(${this.chance(0.3) ? "value=" : ""}${arg})\nprint(${v})`;
+        // (arguments storing the name, or calling the setter, before reading it)
+        const args = this.pick([`${arg}, 0`, `${arg}, 0`, `(${v} := ${this.int(10)}), ${v}`, `set${n}(1, 1), ${v}`]);
+        if (/:=|set/.test(args)) return `def set${n}(a, b):\n    global ${v}\n    ${v} = a + b\n    return ${v}\nset${n}(${args})\nprint(${v})`;
+        return `def set${n}(value, _=0):\n    global ${v}\n    ${v} = value + 1\nset${n}(${this.chance(0.3) ? "value=" : ""}${arg})\nprint(${v})`;
       }
       if (q < 0.3) {
         const it = this.pick(["[0]", "[]", "[0, 1]", "range(1)"]);
         if (it === "[0]" || it === "[0, 1]") def(v);
-        return `def set${n}():\n    global ${v}\n    [(${v} := ${this.int(10)}) for _ in ${it}]\nset${n}()`;
+        // (sometimes reading the name in each iteration)
+        const e = this.ints.has(v) && this.chance(0.5) ? `${v} + 1` : String(this.int(10));
+        return `def set${n}():\n    global ${v}\n    print([(${v} := ${e}) for _ in ${it}])\nset${n}()`;
       }
       if (q < 0.45 && this.ints.has(v)) {
         const e = this.expr();
