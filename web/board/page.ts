@@ -267,6 +267,8 @@ const toolbar = new Toolbar(document.body, [
   { id: "group", label: "Group", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
   { id: "connect", label: "Connect", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
   { id: "page", label: "Page", title: "Add a page after this one", run: () => $("addpage").click() },
+  { id: "undo", label: "↶", title: "Undo (Ctrl+Z)", run: () => editor.undo() },
+  { id: "redo", label: "↷", title: "Redo (Ctrl+Shift+Z)", run: () => editor.redo() },
 ], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }));
 const menu = $("menu");
 $("menubtn").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };

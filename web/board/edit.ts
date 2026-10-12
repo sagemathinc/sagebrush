@@ -88,14 +88,18 @@ export class Editor {
     this.editing.value = on;
   }
 
-  /** Apply a change made to a copy of the document; undoable. */
-  async commit(f: (d: BoardDoc) => void) {
+  /** Apply a change made to a copy of the document; undoable (with `merge`,
+   * one step with the change before it: a new note and its first text). */
+  async commit(f: (d: BoardDoc) => void, merge = false) {
     const cur = this.doc();
     if (!cur) return;
     const before = JSON.stringify(cur), d = JSON.parse(before) as BoardDoc;
     f(d);
-    if (JSON.stringify(d) === before) return;
-    this.undos.push(before);
+    const after = JSON.stringify(d);
+    if (after === before) return;
+    if (!merge || !this.undos.length) this.undos.push(before);
+    // (merged back to where it started: no step at all)
+    else if (this.undos.at(-1) === after) this.undos.pop();
     if (this.undos.length > 200) this.undos.shift();
     this.redos = [];
     await this.change(d);
@@ -301,9 +305,11 @@ export class Editor {
     let reversed = false;
     $(".be-rev").onclick = () => { reversed = !reversed; $(".be-rev").classList.toggle("on", reversed); };
     const w = Math.min(innerWidth - 16, 320);
-    p.style.width = w + "px";
-    p.style.left = Math.max(8, Math.min(innerWidth - w - 8, cx - w / 2)) + "px";
-    p.style.top = Math.max(52, Math.min(innerHeight - 140, cy + 14)) + "px";
+    this.place(p, () => {
+      p.style.width = w + "px";
+      p.style.left = Math.max(8, Math.min(innerWidth - w - 8, cx - w / 2)) + "px";
+      p.style.top = Math.max(52, Math.min(innerHeight - 140, cy + 14)) + "px";
+    });
     document.body.append(p);
     this.panel = p;
     const done = () => {
@@ -406,9 +412,11 @@ export class Editor {
     }
     // over the item, inside the window
     const w = Math.min(innerWidth - 16, Math.max(320, r.width));
-    p.style.width = w + "px";
-    p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + "px";
-    p.style.top = Math.max(52, Math.min(innerHeight - 330, r.top)) + "px";
+    this.place(p, () => {
+      p.style.width = w + "px";
+      p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + "px";
+      p.style.top = Math.max(52, Math.min(innerHeight - 330, r.top)) + "px";
+    });
     document.body.append(p);
     this.panel = p;
     this.select(id);
@@ -425,12 +433,12 @@ export class Editor {
         set("text", v(".be-text"));
         if (m.kind === "code") m.code = ($<HTMLTextAreaElement>(".be-code")?.value ?? "").replace(/\s+$/, "");
         if (m.kind !== "group") { set("detail", v(".be-detail")); set("ref", v(".be-ref")); }
-      });
+      }, fresh);
     };
     const cancel = () => {
       this.close();
       // (a new note left empty: not kept)
-      if (fresh && !v0()) this.commit((d) => remove(this.pg(d), id));
+      if (fresh && !v0()) this.commit((d) => remove(this.pg(d), id), true);
     };
     const v0 = () => ["title", "text", "code"].some((k) => ($<HTMLInputElement>(`.be-${k}`)?.value ?? "").trim());
     $(".be-done")!.onclick = done;
@@ -444,7 +452,30 @@ export class Editor {
     (code ? $<HTMLTextAreaElement>(".be-code") : fresh || !n.text ? $<HTMLInputElement>(".be-title") : $<HTMLTextAreaElement>(".be-text"))!.focus();
   }
 
+  // On a small or touch screen a panel is a sheet: as wide as the screen, at
+  // the top of what the keyboard leaves of it (the visual viewport: an
+  // iPhone does not resize the page for its keyboard), its buttons first,
+  // so that the keyboard never hides them.
+  private unplace: (() => void) | null = null;
+  private place(p: HTMLElement, desktop: () => void) {
+    if (innerWidth >= 600 && !matchMedia("(pointer: coarse)").matches) return desktop();
+    p.classList.add("be-sheet");
+    const row = p.querySelector(".be-done")?.closest(".be-row");
+    if (row) p.prepend(row);
+    const vv = window.visualViewport;
+    const fit = () => {
+      p.style.top = (vv?.offsetTop ?? 0) + "px";
+      p.style.maxHeight = (vv?.height ?? innerHeight) + "px";
+    };
+    fit();
+    vv?.addEventListener("resize", fit);
+    vv?.addEventListener("scroll", fit);
+    this.unplace = () => { vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); };
+  }
+
   private close() {
+    this.unplace?.();
+    this.unplace = null;
     this.panel?.remove();
     this.panel = null;
   }

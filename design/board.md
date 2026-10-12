@@ -529,6 +529,21 @@ The Edit button, the hint, the toolbar and the board's classes follow them,
 instead of each change having to remember every element that shows it. The
 renderer stays imperative.
 
+**Phones** (October 12). On a small or touch screen:
+- **The editor is a sheet:** as wide as the screen, at the top of the visual
+  viewport, so the iPhone's keyboard, which does not resize the page, never
+  covers it. Its buttons (Run, Done) come first, and it follows the
+  keyboard as it opens.
+- **A double tap is a double-click:** the board detects it itself, since not
+  every browser makes one.
+- **Undo is in the default toolbar.**
+- **The top bar keeps to one line.**
+
+Finishing a new note is one undo step with adding it, and a new note left
+empty leaves no step. web/board/test-mobile.mjs (15 checks) runs an iPhone
+viewport with touch events and a keyboard simulated by shrinking the
+viewport, and is in CI.
+
 ## Open questions
 
 - The editor for code items: a plain text area in a panel for now (Tab
