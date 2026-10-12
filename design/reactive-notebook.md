@@ -503,7 +503,8 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     (review of 44c5a65). An annotation's expression is a reference only where Python
     evaluates it: for a simple name at a module's or a class's top level
     (when asked for). It is never evaluated in a function, or for any other
-    target. An annotation alone mutates nothing (review of 3a97ae5).
+    target. An annotation alone mutates nothing (review of 3a97ae5). The renamer leaves such never-evaluated annotations as written, and
+    does not count them as reads (review of 2894ce0).
   - When a statement shares the prologue's logical line (`"doc"; print(x)`,
     or after a `\` on the next physical line), that line is split at the
     statement, with the initialization between. Otherwise the initialization

@@ -314,3 +314,11 @@ test("annotations Python never evaluates are no references; an annotation alone 
   assert.deepEqual([...a("a[i]: int").mutations ?? []], []);
   assert.deepEqual(refs("a[i]: int"), ["a", "i"]);
 });
+
+test("an annotation Python never evaluates is not renamed or counted (REACT-2894-1)", () => {
+  // (of a target that is not a simple name: left as written, and no read before the definition)
+  assert.equal(renameInCell("(y): x\nx = x + 1\nprint(x)", "x", "xʹ2", { from: "definition" }), "(y): x\nxʹ2 = x + 1\nprint(xʹ2)");
+  assert.equal(renameInCell("a[0]: x\nx = x + 1", "x", "xʹ2", { from: "definition" }), "a[0]: x\nxʹ2 = x + 1");
+  // (in a function called before the definition: no read through it)
+  assert.equal(renameInCell("def f():\n    y: x = 1\n    return y\nf()\nx = x + 1", "x", "xʹ2", { from: "definition" }), "def f():\n    y: x = 1\n    return y\nf()\nxʹ2 = x + 1");
+});
