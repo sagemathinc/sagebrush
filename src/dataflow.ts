@@ -34,6 +34,11 @@ class Block {
   outside = false;
   // (ours) a class's type parameters, seen from inside it (`class A[T]`)
   typeParams = new Set<string>();
+  // (ours) a generator expression's block (its body runs when consumed)
+  lazy = false;
+  // (ours) names defined here only by a `:=` in a generator's body, which may
+  // never run: a later read is still a read of the previous value
+  lazyDefs = new Set<string>();
   constructor(public scope: Scope = Scope.Module) {}
 }
 
@@ -41,6 +46,8 @@ interface RefData {
   deleted: boolean;
   block: Block;
   parents: Block[];
+  // (a `global x` statement's, which reads nothing itself)
+  global?: boolean;
 }
 
 /** marimo's is_local: `_x` (not `__x`), and `__` itself. */
@@ -97,7 +104,7 @@ class Visitor {
     let skipClasses = false;
     for (let i = this.blocks.length - 1; i >= 0; i--) {
       const b = this.blocks[i];
-      if (b.defs.has(name) && !(skipClasses && b.scope === Scope.Class && !b.typeParams.has(name))) return true;
+      if (b.defs.has(name) && !b.lazyDefs.has(name) && !(skipClasses && b.scope === Scope.Class && !b.typeParams.has(name))) return true;
       if (!b.outside && i > 0) skipClasses = true;
     }
     return false;
@@ -113,7 +120,7 @@ class Visitor {
     }
     b.outside = was;
   }
-  addRef(name: string, deleted: boolean): void {
+  addRef(name: string, deleted: boolean, global = false): void {
     let list = this.refs.get(name);
     if (!list) this.refs.set(name, (list = []));
     // (ours: what is evaluated outside a block, as a default, is a read of
@@ -123,12 +130,16 @@ class Visitor {
     const block = this.blocks[i];
     const found = list.find((r) => r.block === block);
     if (found && deleted) found.deleted = true;
-    else if (!found) list.push({ deleted, block, parents: this.blocks.slice(0, i) });
+    else if (!found) list.push({ deleted, block, parents: this.blocks.slice(0, i), ...(global ? { global } : {}) });
   }
   removeRef(name: string, block: Block): void {
     // (ours: only the reads that run later, from a function's body; a class
     // body or a comprehension runs at once, before the definition)
-    const deferred = (r: RefData) => this.strict || [...r.parents.slice(r.parents.indexOf(block) + 1), r.block].some((b) => b.scope === Scope.Function);
+    // (and, not strict, at the module's top level, only `global x`'s: a
+    // function written before the definition may be called before it too,
+    // reading the previous value; in a function, a later assignment makes
+    // the name its own, as marimo has it)
+    const deferred = (r: RefData) => this.strict || block !== this.blocks[0] || !!r.global;
     const list = (this.refs.get(name) ?? []).filter((r) => !(r.parents.includes(block) && deferred(r)));
     if (list.length) this.refs.set(name, list);
     else this.refs.delete(name);
@@ -136,6 +147,7 @@ class Visitor {
   defineIn(name: string, kind: string, idx: number): void {
     const block = idx < 0 ? this.blocks[this.blocks.length + idx] : this.blocks[idx];
     block.defs.add(name);
+    block.lazyDefs.delete(name);
     let ks = block.kinds.get(name);
     if (!ks) block.kinds.set(name, (ks = []));
     ks.push(kind);
@@ -188,7 +200,9 @@ class Visitor {
       }
       this.blocks.pop();
     } else if (t === "ListComp" || t === "SetComp" || t === "GeneratorExp") {
-      this.blocks.push(new Block(Scope.Comprehension));
+      const b = new Block(Scope.Comprehension);
+      b.lazy = t === "GeneratorExp";
+      this.blocks.push(b);
       this.comprehensionGenerators(node.generators);
       this.visit(node.elt);
       this.blocks.pop();
@@ -292,7 +306,9 @@ class Visitor {
       for (let i = this.blocks.length - 1; i >= 0; i--) {
         if (this.blocks[i].scope !== Scope.Comprehension) {
           node.target.id = this.mangle(node.target.id, i === 0);
+          const lazy = !this.strict && this.blocks.slice(i + 1).some((b) => b.lazy) && !this.blocks[i].defs.has(node.target.id);
           this.defineIn(node.target.id, "variable", i);
+          if (lazy) this.blocks[i].lazyDefs.add(node.target.id);
           break;
         }
       }
@@ -337,7 +353,7 @@ class Visitor {
     node.names = node.names.map((n: string) => this.mangle(n, true));
     for (const n of node.names) {
       this.blocks[this.blocks.length - 1].globalNames.add(n);
-      if (!this.blocks[0].defs.has(n)) this.addRef(n, false);
+      if (!this.blocks[0].defs.has(n)) this.addRef(n, false, true);
     }
   }
   aliasName(alias: Node): string {

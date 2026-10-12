@@ -181,6 +181,17 @@ export function bumpVersion(cls: PyType) {
 
 export function setTypeAttr(cls: PyType, name: string, value: any) {
   if (cls.$ctor === null && cls.$module === "builtins") raise(T.TypeError, `cannot set '${name}' attribute of immutable type '${cls.$name}'`);
+  // a data descriptor of the metaclass takes it (type's __name__,
+  // __qualname__, or a metaclass's property), as CPython's type.__setattr__
+  const d = lookupType(typeOf(cls), name);
+  if (d !== undefined && d !== null && typeof d === "object") {
+    const set = lookupType(typeOf(d), "__set__");
+    if (set !== undefined) {
+      set(d, cls, value);
+      bumpVersion(cls);
+      return;
+    }
+  }
   cls.$dict.set(name, value);
   bumpVersion(cls);
 }

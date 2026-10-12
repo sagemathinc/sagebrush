@@ -314,8 +314,11 @@ export class Reactive {
       if (!("error" in a)) an.set(id, a);
     }
     const definers = new Map<string, string[]>(), readers = new Set<string>(), taken = new Set<string>();
+    // (`except E as x` binds x and deletes it: for page-order scoping, a
+    // definition, after which x is gone, as in plain Python)
+    const definesName = (a: CellAnalysis, n: string) => a.defs.has(n) || !!a.unbinds?.has(n);
     for (const [id, a] of an) {
-      for (const n of a.defs) (definers.get(n) ?? definers.set(n, []).get(n)!).push(id);
+      for (const n of new Set([...a.defs, ...(a.unbinds ?? [])])) (definers.get(n) ?? definers.set(n, []).get(n)!).push(id);
       for (const n of a.refs) readers.add(n);
       for (const n of [...a.defs, ...a.refs]) taken.add(n);
     }
@@ -332,7 +335,7 @@ export class Reactive {
     }).map(([n]) => n).sort();
     const scoped = new Map<string, string>();
     for (const name of conflicts) {
-      const cells = [...sources.keys()].map((id) => ({ id, code: eff.get(id)!, defines: !!an.get(id)?.defs.has(name), reads: !!an.get(id)?.refs.has(name) }));
+      const cells = [...sources.keys()].map((id) => ({ id, code: eff.get(id)!, defines: !!an.get(id) && definesName(an.get(id)!, name), reads: !!an.get(id)?.refs.has(name) }));
       const r = await this.host.rename({ name, cells, taken: [...taken] });
       if (!r) continue;
       // (kept only if a renamed definition reads an earlier one: its code
@@ -647,7 +650,8 @@ export class Reactive {
   // (else, as a second definition, it takes nothing from it).
   private suppliesOnly(p: string, id: string): boolean {
     const refs = this.registered.get(id)?.analysis?.refs;
-    for (const n of this.defsOf(p)) {
+    // (`except E as x` defines x too: unbinds)
+    for (const n of [...this.defsOf(p), ...(this.registered.get(p)?.analysis?.unbinds ?? [])]) {
       if (!refs?.has(n)) continue;
       if (!(this.graph.definers.get(n) ?? []).some((d) => d !== p && !this.errors.has(d))) return true;
     }
