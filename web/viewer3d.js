@@ -210,6 +210,22 @@
           }
           lines.push({ pos: lp, col: lc });
         }
+      } else if (o.type === "marching_cubes") {
+        const m = marchingCubes(f32(o.field), o.shape, o.bounds, o.level);
+        const pos = toDisplay(m.pos), idx = m.idx, n = pos.length / 3;
+        const col = vertexColors(o, n);
+        let nor = null;
+        if (!o.flat_shading) {
+          nor = new Float32Array(3 * n);
+          for (let t = 0; t + 2 < idx.length; t += 3) {
+            const a = 3 * idx[t], b = 3 * idx[t + 1], c = 3 * idx[t + 2];
+            const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+            const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+            const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            for (const v of [a, b, c]) { nor[v] += nx; nor[v + 1] += ny; nor[v + 2] += nz; }
+          }
+        }
+        meshes.push({ pos, idx, col, nor, alpha: o.opacity ?? 1, side: "double", flat: !!o.flat_shading, wire: !!o.wireframe });
       } else if (o.type === "volume") {
         const b = o.bounds;
         volumes.push({ data: b64(o.data), shape: o.shape, bmin: D([b[0], b[2], b[4]], 0), bmax: D([b[1], b[3], b[5]], 0), o });
@@ -219,6 +235,86 @@
       }
     }
     return { tris, lines, points, texts, meshes, volumes, texts2d };
+  }
+
+  // The isosurface field == level of a field on a grid (z, y, x) over
+  // bounds [x0, x1, y0, y1, z0, z1], as triangles (pos, idx).  Each cube's
+  // surface is found from its faces: on each face, the segments between the
+  // edges the surface crosses (an ambiguous face decided by its center's
+  // value, so that neighbors agree and the surface has no cracks); the
+  // segments chain into loops, fanned into triangles.  A vertex is shared by
+  // the cubes around its grid edge.
+  function marchingCubes(F, shape, bounds, level) {
+    const [nz, ny, nx] = shape;
+    const at = (i, j, k) => F[(k * ny + j) * nx + i];
+    const X = (i) => bounds[0] + (bounds[1] - bounds[0]) * i / Math.max(1, nx - 1);
+    const Y = (j) => bounds[2] + (bounds[3] - bounds[2]) * j / Math.max(1, ny - 1);
+    const Z = (k) => bounds[4] + (bounds[5] - bounds[4]) * k / Math.max(1, nz - 1);
+    // corners (dx, dy, dz) and edges [corner, corner, axis]
+    const C = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
+    const E = [[0, 1], [1, 2], [3, 2], [0, 3], [4, 5], [5, 6], [7, 6], [4, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+    const edgeOf = new Map();
+    E.forEach(([a, b], e) => { edgeOf.set(a * 8 + b, e); edgeOf.set(b * 8 + a, e); });
+    // faces as corner cycles
+    const FACES = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]];
+    const pos = [], idx = [], vid = new Map(), v = new Float64Array(8);
+    const vertex = (i, j, k, e) => {
+      const [a, b] = E[e], ca = C[a], cb = C[b];
+      // the grid edge: its lower corner and axis
+      const ax = ca[0] !== cb[0] ? 0 : ca[1] !== cb[1] ? 1 : 2;
+      const lo = ca[ax] < cb[ax] ? ca : cb;
+      const key = (((k + lo[2]) * ny + (j + lo[1])) * nx + (i + lo[0])) * 3 + ax;
+      let id = vid.get(key);
+      if (id !== undefined) return id;
+      const va = v[a], vb = v[b], t = va === vb ? 0.5 : (level - va) / (vb - va);
+      const p = (c) => [X(i + c[0]), Y(j + c[1]), Z(k + c[2])];
+      const pa = p(ca), pb = p(cb);
+      id = pos.length / 3;
+      pos.push(pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t, pa[2] + (pb[2] - pa[2]) * t);
+      vid.set(key, id);
+      return id;
+    };
+    const segs = [];
+    for (let k = 0; k + 1 < nz; k++) for (let j = 0; j + 1 < ny; j++) for (let i = 0; i + 1 < nx; i++) {
+      let above = 0;
+      for (let c = 0; c < 8; c++) { v[c] = at(i + C[c][0], j + C[c][1], k + C[c][2]); if (v[c] > level) above |= 1 << c; }
+      if (above === 0 || above === 255) continue;
+      segs.length = 0;
+      for (const f of FACES) {
+        const ins = f.map((c) => (above >> c) & 1);
+        const cut = [0, 1, 2, 3].filter((q) => ins[q] !== ins[(q + 1) & 3]).map((q) => edgeOf.get(f[q] * 8 + f[(q + 1) & 3]));
+        if (cut.length === 2) segs.push(cut[0], cut[1]);
+        else if (cut.length === 4) {
+          // a saddle: the corners on the center's side are joined through it
+          const center = (v[f[0]] + v[f[1]] + v[f[2]] + v[f[3]]) / 4 > level ? 1 : 0;
+          const e = [0, 1, 2, 3].map((q) => edgeOf.get(f[q] * 8 + f[(q + 1) & 3]));
+          if (ins[0] === center) segs.push(e[0], e[1], e[2], e[3]); // cut off corners 1 and 3
+          else segs.push(e[3], e[0], e[1], e[2]); // cut off corners 0 and 2
+        }
+      }
+      // chain the segments into loops and fan each one
+      const used = new Uint8Array(segs.length / 2);
+      for (let s0 = 0; s0 < used.length; s0++) {
+        if (used[s0]) continue;
+        used[s0] = 1;
+        const loop = [segs[2 * s0], segs[2 * s0 + 1]];
+        for (let guard = 0; guard < 16; guard++) {
+          const end = loop[loop.length - 1];
+          let next = -1;
+          for (let s1 = 0; s1 < used.length; s1++) {
+            if (used[s1]) continue;
+            if (segs[2 * s1] === end) { next = segs[2 * s1 + 1]; used[s1] = 1; break; }
+            if (segs[2 * s1 + 1] === end) { next = segs[2 * s1]; used[s1] = 1; break; }
+          }
+          if (next < 0 || next === loop[0]) break;
+          loop.push(next);
+        }
+        if (loop.length < 3) continue;
+        const ids = loop.map((e) => vertex(i, j, k, e));
+        for (let q = 1; q + 1 < ids.length; q++) idx.push(ids[0], ids[q], ids[q + 1]);
+      }
+    }
+    return { pos: new Float32Array(pos), idx: new Uint32Array(idx) };
   }
 
   // a thick polyline as six-sided tubes (lineWidth > 1 is not portable);
@@ -264,14 +360,24 @@
     const fallback = container.querySelector("svg");
     const canvas = document.createElement("canvas");
     const opts = { antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true };
+    // (no WebGL: the static picture stays, saying why, not silently)
+    const explain = (why) => {
+      if (container.querySelector(".sb3d-why")) return false;
+      const p = document.createElement("p");
+      p.className = "sb3d-why";
+      p.style.cssText = "margin:4px 0;font-size:13px;opacity:.75";
+      p.textContent = why;
+      container.appendChild(p);
+      return false;
+    };
     let gl = canvas.getContext("webgl2", opts);
     const gl2 = !!gl;
     if (!gl) gl = canvas.getContext("webgl", opts);
-    if (!gl) return false;
+    if (!gl) return explain("This is a still picture: the interactive 3D view needs WebGL, which this browser has turned off. In Chrome, turn on Settings → System → “Use graphics acceleration when available” (chrome://gpu shows the state), then run the cell again.");
     const uintIdx = gl2 || !!gl.getExtension("OES_element_index_uint");
     const deriv = gl2 || !!gl.getExtension("OES_standard_derivatives");
     const prog = program(gl, gl2, deriv);
-    if (!prog) return false;
+    if (!prog) return explain("This is a still picture: the interactive 3D view could not start on this browser's graphics (its shaders did not compile).");
     const geo = build(scene);
     const buf = (data, target = gl.ARRAY_BUFFER) => {
       const b = gl.createBuffer();
@@ -406,8 +512,30 @@
     }
     container.appendChild(wrap);
     if (fallback) fallback.style.display = "none";
-    const restore = () => { wrap.remove(); if (fallback) fallback.style.display = ""; };
+    // The browser may take the context back (Chrome keeps about 16, and
+    // fewer when GPU memory is short): the static picture again, with a
+    // button to show the 3D view anew, not silently.
+    const restore = () => {
+      wrap.remove();
+      live.delete(entry);
+      if (!container.isConnected) return;
+      if (fallback) fallback.style.display = "";
+      const again = document.createElement("button");
+      again.type = "button";
+      again.className = "sb3d-again";
+      again.textContent = "Show it in 3D again";
+      again.title = "The browser released this 3D view's graphics context (it limits how many a page keeps).";
+      again.style.cssText = "display:block;margin:6px 0;font:inherit;font-size:13px;padding:4px 10px;border:1px solid #bbb;border-radius:6px;background:#fff;cursor:pointer";
+      again.onclick = () => { again.remove(); mount(container, scene); };
+      container.appendChild(again);
+    };
     canvas.addEventListener("webglcontextlost", restore);
+    // released when the view leaves the page (a cell run again, its output
+    // replaced): its context and GPU memory are not kept until garbage
+    // collection, which the observers above would delay forever
+    const entry = { canvas, release: () => { canvas.removeEventListener("webglcontextlost", restore); gl.getExtension("WEBGL_lose_context")?.loseContext(); } };
+    live.add(entry);
+    sweepSoon();
 
     const labels = [];
     const label = (i) => {
@@ -908,6 +1036,23 @@
     return true;
   }
 
+  // Views on the page; those detached for two sweeps in a row (a few
+  // seconds: not a node merely being moved) give their context back.
+  const live = new Set();
+  let sweepTimer = 0;
+  function sweepSoon() {
+    if (sweepTimer) return;
+    sweepTimer = setInterval(() => {
+      for (const v of live) {
+        if (v.canvas.isConnected) { v.gone = false; continue; }
+        if (!v.gone) { v.gone = true; continue; }
+        live.delete(v);
+        v.release();
+      }
+      if (!live.size) { clearInterval(sweepTimer); sweepTimer = 0; }
+    }, 2000);
+  }
+
   function compile(gl, vs, fs) {
     const sh = (type, src) => {
       const s = gl.createShader(type);
@@ -944,5 +1089,5 @@
       samples: u("samples"), alphaCoef: u("alphaCoef"), vol: u("vol"), lut: u("lut") };
   }
 
-  window.SagebrushViewer3d = { mount };
+  window.SagebrushViewer3d = { mount, marchingCubes };
 })();
