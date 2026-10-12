@@ -1,0 +1,338 @@
+[
+  {
+    "name": "lone high surrogate plain ordering",
+    "codes": [
+      "x = 1",
+      "print('\\ud800' < '\\ue000', '\\ud800' <= '\\ue000', '\\ud800' > '\\ue000', '\\ud800' >= '\\ue000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone low surrogate plain ordering",
+    "codes": [
+      "x = 1",
+      "print('\\udfff' < '\\uffff', '\\udfff' <= '\\uffff', '\\udfff' > '\\uffff', '\\udfff' >= '\\uffff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate common prefix",
+    "codes": [
+      "x = 1",
+      "print('prefix\\ud800' < 'prefix\\ue000', 'prefix\\udc00' < 'prefix\\uffff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate sorted fast path",
+    "codes": [
+      "x = 1",
+      "print([ord(c) for c in sorted(['\\ud800', '\\ue000', '\\udc00', '\\uffff'])])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate reverse sort",
+    "codes": [
+      "x = 1",
+      "s = ['\\ud800', '\\ue000', '\\udc00', '\\uffff']\ns.sort(reverse=True)\nprint([ord(c) for c in s])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate min max",
+    "codes": [
+      "x = 1",
+      "print(ord(min('\\ud800', '\\ue000')), ord(max('\\udfff', '\\uffff')))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate sequence ordering",
+    "codes": [
+      "x = 1",
+      "print(['\\ud800'] < ['\\ue000'], ('\\udfff', 1) < ('\\uffff', 2))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate ordering dunders",
+    "codes": [
+      "x = 1",
+      "print('\\ud800'.__lt__('\\ue000'), '\\ud800'.__le__('\\ue000'), '\\ud800'.__gt__('\\ue000'), '\\ud800'.__ge__('\\ue000'))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate sorting key",
+    "codes": [
+      "x = 1",
+      "print([ord(c) for c in sorted(['\\ud800', '\\ue000', '\\udc00', '\\uffff'], key=lambda s: s)])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone high surrogate conditional binding",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800' < '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone low surrogate conditional binding",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\uffff' > '\\udfff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate and binding",
+    "codes": [
+      "x = 1",
+      "print(('\\udc00' <= '\\ue000' and (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate comparison chain binding",
+    "codes": [
+      "x = 1",
+      "print(('\\ud800' < '\\ue000' < (x:='z'), ord(x) if isinstance(x,str) else x))",
+      "print(ord(x) if isinstance(x,str) else x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate repeated reset",
+    "codes": [
+      "x = 1",
+      "print([((x:=10) if '\\ud800' < '\\ue000' else 0, x, (x:=20))[1] for i in [0,1]], x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate augmented reset",
+    "codes": [
+      "x = 1",
+      "x += ((x:=10) if '\\ud800' < '\\ue000' else 0) + x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "astral versus upper BMP ordering control",
+    "codes": [
+      "x = 1",
+      "print('\\U00010000' < '\\ue000', '\\U00010000' >= '\\uffff', '\\ue000' < '\\U0010ffff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "astral high and low units ordering control",
+    "codes": [
+      "x = 1",
+      "print('\\U00010000' < '\\U00010400', '\\U00010000' < '\\U00010001', '\\U0010fffe' < '\\U0010ffff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "astral common prefix ordering control",
+    "codes": [
+      "x = 1",
+      "print('prefix\\U00010000' > 'prefix\\ue000', '\\U00010000a' < '\\U00010000b', '\\U00010000' < '\\U00010000a')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "scalar sorted min max control",
+    "codes": [
+      "x = 1",
+      "print([ord(c) for c in sorted(['\\U00010000', '\\ue000', 'z', '\\uffff', '\\U0010ffff'])], ord(min('\\U00010000','\\ue000')), ord(max('\\U00010000','\\ue000')))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "scalar sequence dunders control",
+    "codes": [
+      "x = 1",
+      "print(['\\U00010000'] > ['\\ue000'], ('\\U00010000',) > ('\\uffff',), '\\U00010000'.__lt__('\\ue000'))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "BMP before surrogates control",
+    "codes": [
+      "x = 1",
+      "print('\\ud7ff' < '\\ud800', '\\ud7ff' < '\\udfff', '\\ud7ff' < '\\ue000', '\\ud7ff' < '\\U00010000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogates between themselves control",
+    "codes": [
+      "x = 1",
+      "print('\\ud800' < '\\udbff', '\\udbff' < '\\udc00', '\\udc00' < '\\udfff', '\\ud800' == '\\ud800')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate prefix length control",
+    "codes": [
+      "x = 1",
+      "print('\\ud800' < '\\ud800a', '\\udfff' < '\\udfffa', '\\ud800a' < '\\ud800b')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "ASCII ordering and equality control",
+    "codes": [
+      "x = 1",
+      "print('a' < 'b', 'a' <= 'a', 'a' >= 'a', 'a' > 'b', '' < 'a', 'a' == 'a', 'a' != 'b')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "fixed scalar conditional binding control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ue000' < '\\U00010000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "fixed scalar repeated reset control",
+    "codes": [
+      "x = 1",
+      "print([((x:=10) if '\\ue000' < '\\U00010000' else 0, x, (x:=20))[1] for i in [0,1]], x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "fixed scalar augmented reset control",
+    "codes": [
+      "x = 1",
+      "x += ((x:=10) if '\\U00010000' < '\\ue000' else 0) + x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone surrogate opposite branch refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800' > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  }
+]

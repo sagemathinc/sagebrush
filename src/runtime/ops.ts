@@ -665,19 +665,21 @@ export function seqCmp(a: any[], b: any[], op: string): any {
 }
 
 // Strings compare by code point, as in Python, not by UTF-16 unit as in
-// JavaScript: a surrogate (part of U+10000 and up) is past U+E000..U+FFFF
-// (REACT-DEEF-1).
+// JavaScript: U+10000 and up (a surrogate pair) is past U+E000..U+FFFF
+// (REACT-DEEF-1), while a lone surrogate, which Python allows, is its own
+// code point (REACT-71F5-1).  At the first unit that differs, the code
+// points there: a pair's (stepping back to its first unit when the second
+// differs), or the unit itself.
 export function strCmp(a: string, b: string): number {
   if (a === b) return 0;
   const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    let x = a.charCodeAt(i), y = b.charCodeAt(i);
-    if (x === y) continue;
-    if (x >= 0xd800) x += x >= 0xe000 ? -0x800 : 0x2000;
-    if (y >= 0xd800) y += y >= 0xe000 ? -0x800 : 0x2000;
-    return x - y;
-  }
-  return a.length - b.length;
+  let i = 0;
+  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  if (i === n) return a.length - b.length;
+  const low = (u: number) => u >= 0xdc00 && u <= 0xdfff;
+  const p = i > 0 ? a.charCodeAt(i - 1) : 0;
+  if (p >= 0xd800 && p <= 0xdbff && (low(a.charCodeAt(i)) || low(b.charCodeAt(i)))) i--;
+  return a.codePointAt(i)! - b.codePointAt(i)!;
 }
 
 export function richCompare(a: any, b: any, op: string): any {
