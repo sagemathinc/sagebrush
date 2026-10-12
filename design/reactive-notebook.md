@@ -586,3 +586,37 @@ Both reviewers focused on *when* code runs. Fixed:
   cells above them, and whose ancestors do too. It also generates lambdas
   read before a new definition, unconsumed walrus generators, and
   `__name__`/`__qualname__` prints.
+
+**Reviews of 3bc474f (sagebrush-codex REACT-3BC-1..8; sagebrush-daybreak
+REACT-3BC-9..19, FUZZ-3BC-1; October 12).** Fixed:
+- *Running at once vs later.* Calls that consume what they are given
+  (list, sum, sorted, ...) run it at once; other calls (map, iter) may keep
+  it, so the rename is refused.
+- *Setters.* A `global x` setter takes effect only where it surely runs:
+  - a plain def, called exactly once, not under if/and/or/loops;
+  - not async, not a generator, not decorated, not rebound before the
+    call, and not called from inside an annotation.
+
+  Its read of the previous value needs a single call. `x = x + 1` inside
+  it reads the previous value.
+- *`global x`* in a class body.
+- *Construction hooks.* A decorated class, or one with a metaclass, refuses
+  methods that read the class.
+- *Annotations* are refused when they may be asked for before the
+  definition, under a decorator, or under future annotations.
+- *Lazy definitions.* A definition made only in a function body or an
+  unconsumed generator (however many) does not hide a later read.
+- *Hygiene.* Internal names avoid every identifier written in any cell;
+  `global` names are found in any script and over continued lines.
+- *The internal names' map* is cleared when nothing needs renaming.
+- *Names (the lowering daybreak proposed).* A renamed def or class is made
+  under its written name between `__sb_push__`/`__sb_pop__`, which keep
+  and restore the previous binding and move the new one to its internal
+  name. That replaces patching `__name__` afterwards. Decorators,
+  metaclasses, code names and nested qualified names all see the written
+  name, and so do f-string `{x=}` labels and t-string expressions.
+- *Fuzzer.* It compares the exception type of cells raising in plain
+  Python, and generates `{x=}` prints.
+
+Known limit: a base class's `__init_subclass__` calling a method that
+reads the class by name.

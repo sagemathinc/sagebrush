@@ -144,10 +144,14 @@ class Visitor {
     if (list.length) this.refs.set(name, list);
     else this.refs.delete(name);
   }
-  defineIn(name: string, kind: string, idx: number): void {
+  defineIn(name: string, kind: string, idx: number, lazy = false): void {
     const block = idx < 0 ? this.blocks[this.blocks.length + idx] : this.blocks[idx];
+    // (a lazy definition marks the name lazy unless a sure one came before;
+    // a sure one clears it)
+    const sure = block.defs.has(name) && !block.lazyDefs.has(name);
     block.defs.add(name);
-    block.lazyDefs.delete(name);
+    if (lazy && !sure) block.lazyDefs.add(name);
+    else if (!lazy) block.lazyDefs.delete(name);
     let ks = block.kinds.get(name);
     if (!ks) block.kinds.set(name, (ks = []));
     ks.push(kind);
@@ -158,7 +162,9 @@ class Visitor {
   define(name: string, kind: string): void {
     const idx = this.blocks[this.blocks.length - 1].globalNames.has(name) ? 0 : -1;
     if (kind !== "import" && (idx === 0 || this.blocks.length === 1)) this.imported.set(name, null);
-    this.defineIn(name, kind, idx);
+    // (ours: `global x` in a function's body defines x only when it is called)
+    const lazy = !this.strict && idx === 0 && this.blocks.slice(1).some((b) => (b.scope === Scope.Function && !b.outside) || b.lazy);
+    this.defineIn(name, kind, idx, lazy);
   }
 
   visit(node: any): void {
@@ -306,9 +312,8 @@ class Visitor {
       for (let i = this.blocks.length - 1; i >= 0; i--) {
         if (this.blocks[i].scope !== Scope.Comprehension) {
           node.target.id = this.mangle(node.target.id, i === 0);
-          const lazy = !this.strict && this.blocks.slice(i + 1).some((b) => b.lazy) && !this.blocks[i].defs.has(node.target.id);
-          this.defineIn(node.target.id, "variable", i);
-          if (lazy) this.blocks[i].lazyDefs.add(node.target.id);
+          const lazy = !this.strict && this.blocks.slice(i + 1).some((b) => b.lazy);
+          this.defineIn(node.target.id, "variable", i, lazy);
           break;
         }
       }

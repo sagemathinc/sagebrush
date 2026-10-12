@@ -181,7 +181,7 @@ export class Gen {
       if (q < 0.25) { const e = this.expr(); return `${h} = lambda: ${v}\n${v} = ${e}\nprint(${h}())`; }
       if (q < 0.4) { const e = this.expr(); return `${h} = lambda: ${v}\nprint(${h}())\n${v} = ${e}\nprint(${h}())`; }
       if (q < 0.55) return `${h} = ((${v} := ${this.expr()}) for _ in [0])\nprint(${v})`;
-      return `print(${v})`;
+      return this.chance(0.3) ? `print(f"{${v}=}")` : `print(${v})`;
     }
     const e = this.expr();
     def(v);
@@ -329,7 +329,9 @@ export async function runCase(k: Kernel, c: Case, stats: Stats): Promise<Failure
       // same output)
       if (w.err && s?.state !== "cancelled" && ordered(x.id)) {
         const got = outs.get(x.id);
-        if (s?.state !== "done" || s.ok || got?.out !== w.out) return { step, cell: x.id, why: "plain Python raises, here it does not (or prints otherwise)", detail: `state ${JSON.stringify(s)}\nran:\n${r.effective(x.id)}\ngot: ${JSON.stringify(got)}\nwant: ${JSON.stringify(w)}` };
+        // (the same exception, by its type)
+        const type = (e: string | null | undefined) => (e ?? "").split(":")[0];
+        if (s?.state !== "done" || s.ok || got?.out !== w.out || type(got?.err) !== type(w.err)) return { step, cell: x.id, why: "plain Python raises, here it does not (or prints otherwise)", detail: `state ${JSON.stringify(s)}\nran:\n${r.effective(x.id)}\ngot: ${JSON.stringify(got)}\nwant: ${JSON.stringify(w)}` };
         stats.compared++;
         continue;
       }

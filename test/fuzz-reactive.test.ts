@@ -101,6 +101,37 @@ export const REGRESSIONS: [string, Case][] = [
   ["nested classes' and properties' qualified names (REACT-3BC-8)", regression([
     "class C:\n    pass", "class C:\n    class D:\n        def m(self):\n            pass\n    @property\n    def a(self):\n        return 1\nprint(C.D.m.__qualname__, C.D.__qualname__, C.a.fget.__qualname__)", "print(C.__name__)",
   ])],
+  // (sagebrush-daybreak's interim review of 3bc474f)
+  ["an async setter's call does not run it: x stays", regression(["x = 1", "async def setx():\n    global x\n    x = 2\nc = setx()\nprint(x)\nc.close()", "print(x)"])],
+  ["a generator function's call does not run it: x stays", regression(["x = 1", "def setx():\n    global x\n    x = 2\n    yield\nsetx()\nprint(x)", "print(x)"])],
+  ["a decorated setter may not run: refused or right", regression(["x = 1", "def deco(f):\n    return lambda: None\n@deco\ndef setx():\n    global x\n    x = 2\nsetx()\nprint(x)", "print(x)"])],
+  ["a setter rebound before its call: refused or right", regression(["x = 1", "def setx():\n    global x\n    x = 2\nsetx = print\nsetx()\nprint(x)", "print(x)"])],
+  ["a class decorator calling a method that reads the class: refused or right", regression([
+    "class C:\n    a = 1", "def deco(c):\n    c.b = c().m()\n    return c\n@deco\nclass C:\n    a = 2\n    def m(self):\n        return C.a\nprint(C.b)", "print(C.a)",
+  ])],
+  ["an uncalled setter does not hide the cell's read of x: x edited, it reruns", regression(["x = 1", "def setx():\n    global x\n    x = 2\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["two unconsumed walrus generators do not hide the read of x", regression(["x = 1", "g1 = ((x := 2) for _ in [0])\ng2 = ((x := 3) for _ in [0])\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a call in an annotation does not run", regression(["x = 1", "def setx():\n    global x\n    x = 2\ndef f(a: setx()):\n    pass\nprint(x)", "print(x)"])],
+  // (sagebrush-daybreak's supplemental review of 3bc474f)
+  ["an annotation asked for before the new x: refused or right (REACT-3BC-10)", regression(["x = 1", "def f(a: x):\n    pass\nprint(f.__annotations__['a'])\nx = 2", "assert x == 2"])],
+  ["a type alias asked for before the new x: refused or right (REACT-3BC-10)", regression(["x = 1", "type A = x\nprint(A.__value__)\nx = 2", "assert x == 2"])],
+  ["future annotations keep their text: refused or right (REACT-3BC-10)", regression(["x = 1", "from __future__ import annotations\ndef f(a: x):\n    pass\nx = 2\nprint(f.__annotations__['a'])", "assert x == 2"])],
+  ["a parameter named like an internal name does not capture it (REACT-3BC-14)", regression(["x = 1", "x = 2", "def f(x\u02b92=99):\n    print(x)\nf()"])],
+  ["an except target named like an internal name does not capture it (REACT-3BC-14)", regression(["x = 1", "x = 2", "try:\n    1 / 0\nexcept Exception as x\u02b92:\n    print(type(x).__name__)"])],
+  ["global of a name in another script (REACT-3BC-15)", regression(["\u03b1 = 1", "def set\u03b1():\n    global \u03b1\n    \u03b1 = 2\nset\u03b1()\nprint(\u03b1)", "assert \u03b1 == 2"])],
+  ["a global statement continued over lines (REACT-3BC-15)", regression(["x = 1", "def setx():\n    global y, \\\n        x\n    x = 2\nsetx()\nprint(x)", "assert x == 2"])],
+  ["f\"{x=}\" shows x as written (REACT-3BC-16)", regression(["x = 1", "x = 2", "print(f\"{x=}\", f\"{x = }\", f\"{x=:>3}\")"])],
+  ["a t-string's expression shows x as written (REACT-3BC-16)", regression(["x = 1", "x = 2", "q = t\"{x}\"\nprint(q.interpolations[0].expression, q.interpolations[0].value)"])],
+  ["a metaclass sees no writes from the rename (REACT-3BC-17)", regression([
+    "class C:\n    pass", "events = []\nclass M(type):\n    def __setattr__(cls, name, value):\n        events.append(name)\n        super().__setattr__(name, value)\nclass C(metaclass=M):\n    pass\nprint(events, C.__name__)", "print(C.__name__)",
+  ])],
+  ["code names and decorators see the name as written (REACT-3BC-17)", regression([
+    "def f():\n    pass", "def deco(fn):\n    print(fn.__name__, fn.__code__.co_name)\n    return fn\n@deco\ndef f():\n    def g():\n        pass\n    return g\nprint(f.__code__.co_qualname, f().__qualname__)", "print(f.__name__)",
+  ])],
+  ["a definition made in a called function (global f) has its written name (REACT-3BC-17)", regression([
+    "def f():\n    pass", "def make():\n    global f\n    def f():\n        pass\nmake()\nprint(f.__name__, f.__qualname__)", "print(f.__name__)",
+  ])],
+  ["a name only in a string does not make a rename (REACT-3BC-19)", regression(["def f():\n    pass", "def deco(fn):\n    print(fn.__name__)\n    return fn\n@deco\ndef f():\n    pass\nprint(\"f\")"])],
   ["a cell raising in plain Python raises here too (FUZZ-F4)", regression(["x = 1", "f = lambda: x\nx = 2\ndel x\nprint(f())", "print(x)"])],
 ];
 

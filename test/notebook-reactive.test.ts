@@ -307,3 +307,17 @@ test("a cell run by hand that reads a deleted name runs its definer first, whate
   const rep2 = await nb2.r.run(["c1"]);
   assert.deepEqual(rep2.ran.slice(0, 2), ["c0", "c1"]);
 });
+
+test("the internal names' map is cleared when no cell needs renaming (REACT-3BC-18)", async () => {
+  const nb = notebook(["def f(): pass", "def f(): pass", "print(f)"], [], true);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.runAll();
+  assert.equal(nb.r.written("f\u02b92"), "f");
+  // (one action: the other two cells go, the one left now uses fʹ2 itself)
+  nb.set(1, "def f\u02b92(): pass");
+  nb.del(2);
+  nb.del(0);
+  await nb.r.run(["c1"], { remove: ["c0", "c2"] });
+  assert.equal(nb.r.written("f\u02b92"), "f\u02b92");
+});
