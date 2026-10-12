@@ -9,3 +9,4 @@ dist/
 *.log
 .DS_Store
 public/
+src/build-id.ts
