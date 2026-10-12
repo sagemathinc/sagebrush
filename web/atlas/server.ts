@@ -21,7 +21,7 @@ async function json<T>(asset: Asset, path: string): Promise<T | null> {
 
 const html = (body: string, status = 200, cache = "public, max-age=600") => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": cache } });
 const jsonResponse = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*", "cache-control": "public, max-age=600" } });
-const redirect = (to: string) => new Response(null, { status: 302, headers: { location: to } });
+const redirect = (to: string, status = 302) => new Response(null, { status, headers: { location: to } });
 
 function orbitJson(sp: Space, f: Orbit) {
   return { ...f, space: sp.label, level: sp.level, weight: sp.weight, T: sp.T, status: sp.status, derived: derive(sp, f), url: `https://sagebrush.space${href(f.label)}` };
@@ -78,12 +78,27 @@ export async function handleAtlas(request: Request, asset: Asset): Promise<Respo
       if (to) return redirect(to);
     }
     if (p.get("go") && /^\d+$/.test(p.get("level") ?? "")) return redirect(href(spaceLabel(+p.get("level")!, +(p.get("weight") || 2))));
+    // A listing by weight and level alone (the home page's grid, a newspace's
+    // breadcrumbs) is a page of data to index, at its own canonical URL; one
+    // weight and one level is that newspace's own page; other searches are
+    // not indexed.
+    const keys = [...new Set([...p.keys()])];
+    const num = /^\d+(-\d+)?$/;
+    const listing = keys.length > 0 && keys.every((k) => k === "weight" || k === "level") && keys.every((k) => num.test(p.get(k)!));
+    if (listing && /^\d+$/.test(p.get("weight") ?? "") && /^\d+$/.test(p.get("level") ?? "")) return redirect(href(spaceLabel(+p.get("level")!, +p.get("weight")!)), 301);
     const q: Query = {};
     for (const k of ["weight", "level", "dim", "cm", "sign", "rank"] as const) if (p.get(k)) q[k] = p.get(k)!;
     const start = Math.max(0, +(p.get("start") ?? 0) || 0), size = Math.min(1000, Math.max(1, +(p.get("limit") ?? 100) || 100));
     const rows = search(await loadIndex(asset), q);
     if (wantJson) return jsonResponse({ query: q, total: rows.length, start, results: rows.slice(start, start + size).map((r) => ({ label: r[0], level: r[1], weight: r[2], dim: r[3], cm: r[4] || null, sign: r[5] || null, traces: r[6], curve: r[7] ? { cremona: r[7][0], rank: r[7][1], torsion: r[7][2] } : null, lmfdb: r[8] > 0 ? "agrees" : r[8] < 0 ? "differs" : null })) });
     const unknown = p.get("q") ? `<p class="status bad">“${esc(p.get("q"))}” is not a label the atlas understands (try 389.2.a.e, 389.2.a, 389, 11a1 or 11.a).</p>` : "";
+    if (listing) {
+      const w = p.get("weight"), l = p.get("level");
+      const canon = "/atlas/mf/?" + [w ? `weight=${w}` : "", l ? `level=${l}` : ""].filter(Boolean).join("&");
+      const what = [w ? `weight ${w}` : "", l ? `level ${l.replace("-", "–")}` : ""].filter(Boolean).join(", ");
+      return html(page({ title: `Newforms of ${what}`, description: `The ${rows.length} newform orbits of ${what} in the Sagebrush Atlas, proven by its Rust engines.`, path: canon,
+        crumbs: [["Atlas", "/atlas/"], ["Modular forms", "/atlas/"], [what.charAt(0).toUpperCase() + what.slice(1)]], body: searchBody(q, rows.slice(start, start + size), rows.length, start, size), json: `${canon}&format=json` }));
+    }
     return html(page({ title: "Search", description: "Search the newform orbits of the Sagebrush Atlas.", path: "/atlas/mf/", crumbs: [["Atlas", "/atlas/"], ["Modular forms", "/atlas/"], ["Search"]], body: unknown + searchBody(q, rows.slice(start, start + size), rows.length, start, size), json: `/atlas/mf/?${p.toString()}&format=json`, noindex: true }));
   }
   if (path.startsWith("/atlas/mf/")) {
