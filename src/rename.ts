@@ -1120,6 +1120,61 @@ export function takeInitLines(code: string): { code: string; inits: [string, str
 }
 
 /**
+ * Whether a cell has a quoted annotation (a forward reference, `y: "x"`)
+ * naming `name` where Python may evaluate it: a class's or a module's
+ * annotation of a simple name, or a function's signature.  get_type_hints
+ * resolves its text in the module's globals, the name as written, which
+ * renaming the definitions leaves at the old one, and renaming the text
+ * changes the text: such notebooks are refused (REACT-9848-1).  A string in
+ * `Literal[...]` is data; annotations in a function's body, or of an
+ * attribute or an item, are never evaluated.
+ */
+export function forwardRefers(code: string, name: string, mode: Mode = "python"): boolean {
+  if (mode === "magma" || !code.includes(name)) return false;
+  let tree: any;
+  try {
+    tree = parse(mode === "sage" ? preparse(code) : code, "exec");
+  } catch {
+    return false;
+  }
+  const word = new RegExp(`(?<![\\p{L}\\p{N}_])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}\\p{Mn}\\p{Mc}_])`, "u");
+  const literal = (n: any) => n?._type === "Subscript" && ((n.value?._type === "Name" && n.value.id === "Literal") || (n.value?._type === "Attribute" && n.value.attr === "Literal"));
+  // (the strings of an annotation, but those in Literal[...])
+  const names = (n: any): boolean => {
+    if (!n || typeof n !== "object") return false;
+    if (Array.isArray(n)) return n.some(names);
+    if (n._type === "Constant") return typeof n.value === "string" && word.test(n.value);
+    if (literal(n)) return false;
+    return Object.keys(n).some((k) => k !== "_type" && names(n[k]));
+  };
+  let found = false;
+  const walk = (n: any, inFunction: boolean): void => {
+    if (found || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach((x) => walk(x, inFunction));
+    switch (n._type) {
+      case "FunctionDef": case "AsyncFunctionDef": case "Lambda": {
+        const a = n.args;
+        if (n._type !== "Lambda" && (names(n.returns) || (a && names([...a.posonlyargs, ...a.args, ...a.kwonlyargs, a.vararg, a.kwarg].filter(Boolean).map((x: any) => x.annotation))))) { found = true; return; }
+        walk([n.decorator_list, a?.defaults, a?.kw_defaults], inFunction);
+        walk(n.body, true);
+        return;
+      }
+      case "ClassDef":
+        walk([n.decorator_list, n.bases, n.keywords], inFunction);
+        walk(n.body, false);
+        return;
+      case "AnnAssign":
+        if (!inFunction && n.simple && n.target?._type === "Name" && names(n.annotation)) { found = true; return; }
+        walk([n.target, n.value], inFunction);
+        return;
+    }
+    for (const k of Object.keys(n)) if (k !== "_type") walk(n[k], inFunction);
+  };
+  walk(tree.body, false);
+  return found;
+}
+
+/**
  * Rename global `name` to `to` in a cell's source.  `from`: "all" renames
  * every occurrence (a cell reading the renamed definition); "definition"
  * keeps the occurrences before the cell first binds the name, and the reads
@@ -1220,6 +1275,7 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   // (an annotation's target names its key in a module's __annotations__,
   // whatever the value is stored under: a bare one keeps its name, and
   // `x: int = v` becomes `x: int; xʹ2 = v`, below, REACT-72DC-2)
+  if (forwardRefers(source, name, opts.mode)) return null;
   const annotated = (o: Occurrence): any => {
     const [st, k] = o.path.at(-1) ?? [null, ""];
     if (st?._type !== "AnnAssign" || k !== "target" || !st.simple) return null;
@@ -1353,6 +1409,9 @@ export function renameRedefinitions(
   mode: Mode = "python",
   sep = "_",
 ): Map<string, string> | null {
+  // (a quoted annotation naming it, in any cell, resolves to the global as
+  // written: refused, REACT-9848-1)
+  if (cells.some((c) => forwardRefers(c.code, name, mode))) return null;
   const out = new Map<string, string>();
   let current = name, k = 1, seen = false;
   const fresh = () => {

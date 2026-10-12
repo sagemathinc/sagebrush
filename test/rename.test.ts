@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renameInCell, renameRedefinitions, takeInitLines } from "../src/rename";
+import { renameInCell, renameRedefinitions, takeInitLines, forwardRefers } from "../src/rename";
 import { analyzeCell } from "../src/dataflow";
 
 // src/rename.ts: renaming a global in cells, for the fix of multiple definitions.
@@ -333,4 +333,17 @@ test("a class's annotation inside a function is evaluated, unless it is text (RE
   // type-hint functions resolve: neither renaming it nor keeping it is
   // right, so the cell is refused, REACT-72DC-1)
   assert.equal(renameInCell("from __future__ import annotations\ndef f():\n    class C:\n        y: x\n    return C\nx = x + 1\nprint(f().__annotations__['y'])", "x", "x\u02b92", { from: "definition" }), null);
+});
+
+test("a quoted annotation naming a redefined name is refused, in any cell (REACT-9848-1)", () => {
+  for (const code of ['class C:\n    y: "x"', 'def f(a: "list[x]") -> "x": pass', 'y: "x | None"']) assert.equal(forwardRefers(code, "x"), true, code);
+  for (const code of ['from typing import Literal\nclass C:\n    y: Literal["x"]', 'def f():\n    y: "x" = 1', 's = "x"', 'class C:\n    y: "xx"', 'o.a: "x"']) assert.equal(forwardRefers(code, "x"), false, code);
+  // (the cell holding it need not be renamed itself: its text resolves the global)
+  const cells = [
+    { id: "a", code: 'class C:\n    y: "x"', defines: false, reads: false },
+    { id: "b", code: "x = 1", defines: true, reads: false },
+    { id: "c", code: "x = 2", defines: true, reads: false },
+  ];
+  assert.equal(renameRedefinitions(cells, "x", new Set(), "python", "\u02b9"), null);
+  assert.notEqual(renameRedefinitions(cells.slice(1), "x", new Set(), "python", "\u02b9"), null);
 });
