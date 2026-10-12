@@ -700,3 +700,25 @@ The fuzzer now generates all four patterns:
 With the new generator, 98eb351 fails 5 cases within the first ~60; the fix
 passes 3,000 random notebooks (104,758 outputs compared). The review's 27
 cases are in test/fuzz-cases-98eb351.json.
+
+**Review of 6748f98 (sagebrush-codex REACT-6748-1..3; October 12).** All 14
+98EB variants were confirmed repaired. Seven of the ten new failures were
+regressions introduced by the 98EB fixes; all ten are fixed:
+- *Arguments that change the name first* (6748-1). Two calls now refuse:
+  `setx((x := 5), x)` stores the name in an argument, and
+  `setx(setx(1, 1), x)` runs a call there. A setter's arguments read the
+  previous value only when they do neither.
+- *Non-empty is not once* (6748-2). A comprehension that iterates more than
+  once, such as `[(x := x + 1) for _ in [0, 1]]`, reads the new value from
+  its second iteration on. When its literals have more than one element,
+  any other occurrence of the name inside it refuses. One iteration, and
+  repeated constants, still run.
+- *Methods under compound statements* (6748-3). A method defined under
+  `if`, `for`, `try` or `with` in a class body also counts as used, which
+  refuses the class's own annotations.
+
+The fuzzer now generates setter arguments that store the name or call the
+setter, and comprehension setters that read the name in each iteration.
+With it, 6748f98 fails 5 of the first cases, and the fix passes 3,000 random
+notebooks (102,980 outputs compared). The review's 15 cases are in
+test/fuzz-cases-6748f98.json.
