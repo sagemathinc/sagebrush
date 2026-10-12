@@ -1,6 +1,7 @@
 [
  {"file": "sagebrush.json", "title": "How Sagebrush is built", "about": "The architecture, with a tour: where it runs, the notebook, the compiler, the runtime, the library and the engines."},
  {"file": "primes.json", "title": "Three proofs that there are infinitely many primes", "about": "Euclid, Euler and Fürstenberg, a page each, with tours: pages, math, and printing (or saving as PDF) a sheet per page or per step."},
+ {"file": "live.json", "title": "The Collatz map, live", "about": "Code items: Python on one interpreter for the board, run reactively in reading order, their output under their code. Double-click one to change it (Shift+Enter runs it)."},
  {"file": "mermaid.md", "title": "Mermaid flowcharts, laid out by the board", "about": "Markdown with two Mermaid diagrams, a page each: a cell running, every shape and kind of line; and Mermaid's own code flow, about 100 nodes. Open your own .mmd file or paste one."},
  {"file": "source.json", "title": "Sagebrush's source, file by file", "about": "About 300 source files with their opening comments and links to GitHub; directories as groups, imports as edges. Generated from the repository."},
  {"file": "integers.json", "title": "The integers to 10,000", "about": "10,000 notes with factorizations and arithmetic functions in LaTeX: how a large board feels."}

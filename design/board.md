@@ -449,17 +449,72 @@ Still to do in step 1:
 - shapes and frames;
 - a better top-level arrangement than one column of layers.
 
+### Step 2 begun: live code items (October 12)
+
+A note with `kind: "code"` and `code` is Python, run as a notebook's cells
+are (web/board/code.ts). The engine *is* the notebook component, loaded the
+first time a board has code. A notebook kept out of sight holds a cell for
+each code item, in reading order. Each cell's live output element is shown
+inside its item, so everything a notebook's output does works on the board:
+plots, math, interacts, widgets, 3D, tracebacks. The board brings the same
+semantics with it:
+- the reactive scheduler and the time budget (here "always");
+- page-order scoping;
+- stale and error marks, and per-cell seeds.
+
+Reading order, which is also the order code runs in, goes:
+- page by page;
+- within a page, by rows from top to bottom, then left to right;
+- a group's items together, where the group is.
+
+This is computed from a layout with estimated sizes, so a growing output never
+reorders anything. The order is the small number on each item. A row is
+the boxes whose tops lie above the middle of the row's shortest box.
+
+- **Running.** A changed item runs when the board is laid out again, and
+  then what reads it does. ▶ on an item runs it again. Deleting an item
+  removes its definitions, and moving one reruns what now sees a different
+  definition.
+- **Editing.** Double-clicking a code item opens its code, in any mode, not
+  only Edit. Shift+Enter (or Run) saves and runs it. *Add Python code* in
+  the menu adds one at the center of the view.
+- **Layout.** An item grows to hold its output: its height is measured with
+  a copy of the output, again as the output changes, at most once a frame.
+  The board keeps every element whose item shows the same, now mounted as
+  well, so laying out again neither rebuilds nor blinks.
+- **States.** An item's border shows its state: running or waiting, failed
+  (an exception), error (cannot run), stale, cancelled.
+- **Printing and exporting.** Printed sheets show the outputs. An exported HTML file shows code
+  without running it: it carries no interpreter.
+- **Agents.** `run(ids?)` and `outputs()` give each item's state and output
+  as text, after what was asked for has run.
+
+Outputs are not saved in the document. A board's code runs when it is
+opened. Example: examples/live.json (the Collatz map).
+
+web/board/test-code.mjs (31 checks) covers:
+- the run on load and the reading order;
+- outputs inside their items, and items growing to hold them;
+- a change rerunning only its readers;
+- failures marked;
+- the editor and Shift+Enter, and ▶;
+- deleting a definition;
+- *Add Python code*, `run()`, and printing.
+
 ## Open questions
 
-- The editor for code items: the notebook uses plain text areas; a board may
-  want the same, for speed and consistency.
-- Whether reading order should ever be overridden explicitly (numbered code
-  items), or only by moving items.
+- The editor for code items: a plain text area in a panel for now (Tab
+  indents, Shift+Enter runs); in place, with completion, as the notebook's?
+- Whether outputs should be saved in the document (as .ipynb does), so a
+  board opens with them and an exported file shows them.
 - Sync in cocalc-ai: through its own collaborative documents or through the
   board's merge.
 - The file extension (`.board`?).
 
 ## Decisions
+
+- **Code items** (William, October 12: "yes - proceed"): reading order by
+  position only, with no manual numbering; Python only in the first slice.
 
 - **Pages** (William, October 12): boards have pages, as CoCalc's do, where
   each slide is a whiteboard page. PDF export first, since it was the most
