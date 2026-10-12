@@ -33,6 +33,8 @@ export interface Item {
   inner?: { x: number; y: number };
   /** the group holding it */
   parent?: string;
+  /** notes: an outline other than a rectangle (doc.ts's NoteShape) */
+  shape?: string;
 }
 
 export interface Edge {
@@ -45,6 +47,9 @@ export interface Edge {
   /** where its label goes (its center) */
   lx?: number;
   ly?: number;
+  /** arrowheads: at the end (the default), none, or both ends; the line's style */
+  arrow?: "none" | "both";
+  line?: "dotted" | "thick";
 }
 
 export interface Camera {
@@ -330,9 +335,9 @@ export class Board {
   }
 
   /** An item's element, unplaced (also for measuring a note's height at a width: `now`, math typeset at once). */
-  content(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref">, now = false): HTMLElement {
+  content(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape">, now = false): HTMLElement {
     const el = document.createElement("div");
-    el.className = `board-item board-${it.kind}`;
+    el.className = `board-item board-${it.kind}` + (it.shape && it.shape !== "rect" ? ` board-shape board-shape-${it.shape}` : it.shape ? " board-shape" : "");
     if (it.title) {
       const h = document.createElement("b");
       h.textContent = it.title;
@@ -364,7 +369,7 @@ export class Board {
   }
 
   /** A note's height at width `w`, as rendered (the element is measured in the world, unseen). */
-  measure(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref">, w: number): number {
+  measure(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape">, w: number): number {
     const el = this.content(it, true);
     el.style.cssText = `left:0;top:0;width:${w}px;visibility:hidden;`;
     el.classList.add("board-measure");
@@ -372,6 +377,17 @@ export class Board {
     const h = el.offsetHeight;
     el.remove();
     return h;
+  }
+
+  /** The width a note's text needs, at most `max` (its longest line, or `max` if it wraps). */
+  measureWidth(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape">, max: number): number {
+    const el = this.content(it, true);
+    el.style.cssText = `left:0;top:0;width:max-content;max-width:${max}px;visibility:hidden;`;
+    el.classList.add("board-measure");
+    this.world.append(el);
+    const w = el.offsetWidth + 1; // (layout pixels: the camera's scale does not apply)
+    el.remove();
+    return w;
   }
 
   // behind the notes: groups (outer first) and edges
@@ -404,53 +420,53 @@ export class Board {
     ctx.lineWidth = lw;
     ctx.strokeStyle = ctx.fillStyle = EDGE;
     const labels: [string, number, number][] = [];
+    // an arrowhead at (x, y), pointing along (ux, uy)
+    const arrowhead = (x: number, y: number, ux: number, uy: number) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - ux * head - uy * head * 0.45, y - uy * head + ux * head * 0.45);
+      ctx.lineTo(x - ux * head + uy * head * 0.45, y - uy * head - ux * head * 0.45);
+      ctx.fill();
+    };
     for (const e of this.edges) {
       const a = this.byId.get(e.from), b = this.byId.get(e.to);
       if (!a || !b) continue;
-      if (e.points) {
-        // a route: rounded corners, the arrowhead along its last segment
-        const p = e.points;
+      // its route, or straight from border to border
+      let p = e.points;
+      if (p) {
         let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
         for (let i = 0; i < p.length; i += 2) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); }
         if (x1 < v.x0 || x0 > v.x1 || y1 < v.y0 || y0 > v.y1) continue;
-        const n = p.length;
-        const ex = p[n - 2], ey = p[n - 1], dx = ex - p[n - 4], dy = ey - p[n - 3], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
-        ctx.beginPath();
-        ctx.moveTo(p[0], p[1]);
-        for (let i = 2; i < n - 2; i += 2) {
-          const r = Math.min(10, Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]) / 2, Math.hypot(p[i + 2] - p[i], p[i + 3] - p[i + 1]) / 2);
-          ctx.arcTo(p[i], p[i + 1], p[i + 2], p[i + 3], r);
-        }
-        ctx.lineTo(ex - ux * head * 0.8, ey - uy * head * 0.8);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(ex, ey);
-        ctx.lineTo(ex - ux * head - uy * head * 0.45, ey - uy * head + ux * head * 0.45);
-        ctx.lineTo(ex - ux * head + uy * head * 0.45, ey - uy * head - ux * head * 0.45);
-        ctx.fill();
-        if (e.label) labels.push([e.label, e.lx ?? (p[0] + ex) / 2, e.ly ?? (p[1] + ey) / 2]);
-        continue;
+      } else {
+        if (Math.max(a.x + a.w, b.x + b.w) < v.x0 || Math.min(a.x, b.x) > v.x1 || Math.max(a.y + a.h, b.y + b.h) < v.y0 || Math.min(a.y, b.y) > v.y1) continue;
+        const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
+        const dx = bx - ax, dy = by - ay;
+        // where the line leaves a box centered on its end: the fraction t of (dx, dy)
+        const exit = (it: Item) => Math.min(dx ? it.w / 2 / Math.abs(dx) : Infinity, dy ? it.h / 2 / Math.abs(dy) : Infinity);
+        const t0 = exit(a), t1 = 1 - exit(b);
+        if (t1 <= t0) continue; // overlapping boxes (a group and a member)
+        p = [ax + dx * t0, ay + dy * t0, ax + dx * t1, ay + dy * t1];
       }
-      if (Math.max(a.x + a.w, b.x + b.w) < v.x0 || Math.min(a.x, b.x) > v.x1 || Math.max(a.y + a.h, b.y + b.h) < v.y0 || Math.min(a.y, b.y) > v.y1) continue;
-      const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
-      const dx = bx - ax, dy = by - ay;
-      // where the line leaves a box centered on its end: the fraction t of (dx, dy)
-      const exit = (it: Item) => Math.min(dx ? it.w / 2 / Math.abs(dx) : Infinity, dy ? it.h / 2 / Math.abs(dy) : Infinity);
-      const t0 = exit(a), t1 = 1 - exit(b);
-      if (t1 <= t0) continue; // overlapping boxes (a group and a member)
-      const x0 = ax + dx * t0, y0 = ay + dy * t0, x1 = ax + dx * t1, y1 = ay + dy * t1;
-      const len = Math.hypot(x1 - x0, y1 - y0), ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+      const n = p.length, end = e.arrow !== "none", start = e.arrow === "both";
+      const ex = p[n - 2], ey = p[n - 1], el = Math.hypot(ex - p[n - 4], ey - p[n - 3]) || 1, ux = (ex - p[n - 4]) / el, uy = (ey - p[n - 3]) / el;
+      const sl = Math.hypot(p[2] - p[0], p[3] - p[1]) || 1, vx = (p[0] - p[2]) / sl, vy = (p[1] - p[3]) / sl;
+      // the line (rounded corners), stopping short of its arrowheads
+      ctx.lineWidth = e.line === "thick" ? lw * 2 : lw;
+      if (e.line === "dotted") ctx.setLineDash([4 * Math.max(1, 0.8 / c.z), 4 * Math.max(1, 0.8 / c.z)]);
       ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1 - ux * head * 0.8, y1 - uy * head * 0.8);
+      ctx.moveTo(start ? p[0] - vx * head * 0.8 : p[0], start ? p[1] - vy * head * 0.8 : p[1]);
+      for (let i = 2; i < n - 2; i += 2) {
+        const r = Math.min(10, Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]) / 2, Math.hypot(p[i + 2] - p[i], p[i + 3] - p[i + 1]) / 2);
+        ctx.arcTo(p[i], p[i + 1], p[i + 2], p[i + 3], r);
+      }
+      ctx.lineTo(end ? ex - ux * head * 0.8 : ex, end ? ey - uy * head * 0.8 : ey);
       ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x1 - ux * head - uy * head * 0.45, y1 - uy * head + ux * head * 0.45);
-      ctx.lineTo(x1 - ux * head + uy * head * 0.45, y1 - uy * head - ux * head * 0.45);
-      ctx.fill();
-      if (e.label) labels.push([e.label, (x0 + x1) / 2, (y0 + y1) / 2]);
+      ctx.setLineDash([]);
+      if (end) arrowhead(ex, ey, ux, uy);
+      if (start) arrowhead(p[0], p[1], vx, vy);
+      if (e.label) labels.push([e.label, e.lx ?? (p[0] + ex) / 2, e.ly ?? (p[1] + ey) / 2]);
     }
+    ctx.lineWidth = lw;
     if (this.pending) {
       const a = this.byId.get(this.pending.from);
       if (a) {
@@ -507,7 +523,19 @@ export class Board {
         ctx.font = `${12 / c.z}px system-ui, sans-serif`;
         ctx.fillStyle = "#10140f";
         // (only titles that fit: squeezed text is worse than none)
-        for (const it of inView) if (it.title && it.w * c.z > 40 && ctx.measureText(it.title).width <= it.w - 8 / c.z) ctx.fillText(it.title, it.x + 4 / c.z, it.y + 14 / c.z);
+        // (shrunk to fit its box, down to 7 px, rather than left out)
+        const font = ctx.font;
+        for (const it of inView) {
+          const t = farLabel(it);
+          if (!t || it.w * c.z <= 40) continue;
+          const w = ctx.measureText(t).width, room = it.w - 8 / c.z;
+          if (w <= room) { ctx.fillText(t, it.x + 4 / c.z, it.y + 14 / c.z); continue; }
+          const px = (12 * room) / w;
+          if (px < 7) continue;
+          ctx.font = `${px / c.z}px system-ui, sans-serif`;
+          ctx.fillText(t, it.x + 4 / c.z, it.y + (px + 2) / c.z);
+          ctx.font = font;
+        }
       }
     }
     if (far) {
@@ -656,6 +684,19 @@ export class Board {
 }
 
 /** A synthetic board: `n` notes in a loose grid, `strokes` ink strokes among them. */
+// What a note shows far out: its title, or else its text's first line
+// without Markdown (a flowchart's notes have only text)
+const farLabels = new WeakMap<Item, string>();
+export function farLabel(it: Item): string {
+  if (it.title) return it.title;
+  let t = farLabels.get(it);
+  if (t === undefined) {
+    t = (it.text ?? "").split("\n").find((l) => l.trim())?.replace(/\$\$?[^$]*\$\$?|!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\\(.)/g, "$1").replace(/[*_`#>]|^\s*[-+]\s/g, "").replace(/\s+/g, " ").trim() ?? "";
+    farLabels.set(it, t);
+  }
+  return t;
+}
+
 export function synthetic(n: number, strokes: number, seed = 1): Item[] {
   let s = seed;
   // (32-bit integer arithmetic: a float product past 2^53 loses its low bits)

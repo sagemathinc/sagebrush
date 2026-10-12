@@ -318,6 +318,29 @@ try {
     await ev("document.getElementById('tidy').click()");
     await sleep(300);
     check((await docOf()).nodes.every((n) => n.x === undefined), "Tidy kept positions");
+    // Import Mermaid…: a flowchart pasted in replaces the board (undoable);
+    // its shapes, labels, subgraph and edge styles carry over
+    {
+      const before = (await docOf()).nodes.length;
+      await ev("document.getElementById('mermaid').click()");
+      await until("document.getElementById('mmdlg').open");
+      await ev(`document.getElementById('mmtext').value = ${JSON.stringify("flowchart LR\n  a([Start]) --> b{Is it?}\n  b -->|yes| c[Done]\n  b -. no .-> d[[Retry]]\n  subgraph s [Later]\n    d <--> e[(Store)]\n  end\n  classDef hot fill:#fbb\n  class b hot")}`);
+      await ev("document.getElementById('mm-go').click()");
+      await until("!document.getElementById('mmdlg').open && window.sagebrush.board.snapshot().routed", 10000);
+      const dm = await docOf(), items = await ev("window.sagebrush.board.snapshot().items");
+      const sub = dm.nodes.find((n) => n.id === "s");
+      check(dm.nodes.length === 4 && sub?.kind === "group" && sub.title === "Later" && sub.children.map((c) => c.id).join() === "d,e", `Import Mermaid: nodes ${JSON.stringify(dm.nodes).slice(0, 200)}`);
+      check(dm.nodes.find((n) => n.id === "b")?.shape === "diamond" && dm.nodes.find((n) => n.id === "b")?.color === "#ffbbbb", "Import Mermaid: the diamond, its color");
+      check(dm.edges.some((e) => e.from === "b" && e.to === "d" && e.label === "no" && e.line === "dotted") && dm.edges.some((e) => e.from === "d" && e.to === "e" && e.arrow === "both"), `Import Mermaid: edges ${JSON.stringify(dm.edges)}`);
+      await ev("window.board.focus(['b'], true)");
+      await sleep(300);
+      check(items.length === 6 && await ev("document.querySelectorAll('.board-shape-diamond').length === 1"), "Import Mermaid: not drawn");
+      // (fitted widths: a short label, a narrow box)
+      check(items.find((i) => i.id === "c").w < 120, "Import Mermaid: notes not fitted to their labels");
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+      await sleep(400);
+      check((await docOf()).nodes.length === before, "undo did not bring the board back after Import Mermaid");
+    }
     // pages: add one (the board becomes page 1), write on it, delete it
     const nodes0 = (await docOf()).nodes.length;
     await ev("document.getElementById('addpage').click()");

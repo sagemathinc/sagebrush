@@ -12,12 +12,17 @@
 // downloads it as JSON, opens a JSON file (or drop one on the page), or
 // starts a new board.
 //
+// A Mermaid flowchart opens as a board too (mermaid.ts): ?doc= a .mmd file,
+// or Markdown with ```mermaid blocks (a page each), ?mermaid=TEXT, the Open
+// menu and a dropped file, or Import Mermaid… (pasted).
+//
 // window.sagebrush.board is the API for an agent driving the page (in the
 // shared browser, say): load(doc), focus(ids), step(n), snapshot().
 import { Board, synthetic, type Camera } from "./board";
 import { layout, isBoard, pageCount, pageOf, pageView, type BoardDoc, type BoardPage, type DocNote } from "./doc";
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
+import { boardFromText, fromMermaid } from "./mermaid";
 import { render as markdown } from "../markdown";
 
 const q = new URLSearchParams(location.search);
@@ -34,7 +39,8 @@ const hasMath = (s: string) => /\$|\\\(|\\\[/.test(s);
 
 // (a note's height at a width, measured once)
 const heights = new Map<string, number>();
-const source = q.get("doc") ?? "examples/sagebrush.json";
+// (?mermaid=TEXT: a flowchart given in the address)
+const source = q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
 const saveKey = "sagebrush-board:" + source;
 let original: BoardDoc | null = null;
 
@@ -90,11 +96,18 @@ async function show(d: BoardDoc) {
 }
 
 function measure(n: DocNote, w: number) {
-  const k = JSON.stringify([n.title, n.text, n.detail, n.ref, w]);
+  const k = JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, w]);
   let h = heights.get(k);
   if (h === undefined) heights.set(k, (h = board.measure({ kind: "note", ...n }, w)));
   return h;
 }
+// (and a `fit` note's width)
+measure.width = (n: DocNote, max: number) => {
+  const k = JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, max]);
+  let w = heights.get(k);
+  if (w === undefined) heights.set(k, (w = board.measureWidth({ kind: "note", ...n }, max)));
+  return w;
+};
 
 /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
 async function load(d: BoardDoc) {
@@ -182,11 +195,12 @@ if (q.has("items") || q.has("strokes")) {
   board.setItems(synthetic(Number(q.get("items") ?? 2000), Number(q.get("strokes") ?? 20000)));
   board.setCamera({ x: 0, y: 0, z: 1 });
 } else {
-  const url = new URL(source, location.href);
-  fetch(url).then((r) => {
+  const url = new URL(source.startsWith("mermaid:") ? "data:," : source, location.href);
+  // (JSON, or a Mermaid flowchart, or Markdown with some)
+  (source.startsWith("mermaid:") ? Promise.resolve(fromMermaid(source.slice(8))) : fetch(url).then((r) => {
     if (!r.ok) throw new Error(`${url.pathname}: ${r.status} ${r.statusText}`);
-    return r.json();
-  }).then((d: BoardDoc) => {
+    return r.text();
+  }).then((t) => boardFromText(t, decodeURIComponent(url.pathname.split("/").pop() ?? "")))).then((d: BoardDoc) => {
     original = d;
     // (this browser's edits of it, if any)
     let saved: BoardDoc | null = null;
@@ -269,8 +283,8 @@ $("download").onclick = () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 $("copyjson").onclick = () => navigator.clipboard?.writeText(JSON.stringify(doc, null, 1));
-async function openText(text: string) {
-  const d = JSON.parse(text) as BoardDoc;
+async function openText(text: string, name?: string) {
+  const d = boardFromText(text, name);
   if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
   pageIx = 0;
   await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
@@ -280,15 +294,27 @@ const picker = $("openfile") as HTMLInputElement;
 $("open").onclick = () => picker.click();
 picker.onchange = async () => {
   const f = picker.files?.[0];
-  if (f) await openText(await f.text()).catch(fail);
+  if (f) await openText(await f.text(), f.name).catch(fail);
   picker.value = "";
 };
 addEventListener("dragover", (e) => e.preventDefault());
 addEventListener("drop", async (e) => {
   e.preventDefault();
   const f = e.dataTransfer?.files?.[0];
-  if (f) await openText(await f.text()).catch(fail);
+  if (f) await openText(await f.text(), f.name).catch(fail);
 });
+// Import Mermaid…: a flowchart pasted in
+const mmdlg = $("mmdlg") as HTMLDialogElement, mmtext = $("mmtext") as HTMLTextAreaElement;
+$("mermaid").onclick = () => { $("mmerr").textContent = ""; mmdlg.showModal(); mmtext.focus(); };
+$("mm-go").onclick = async (e) => {
+  e.preventDefault();
+  try {
+    await openText(mmtext.value);
+    mmdlg.close();
+  } catch (err) {
+    $("mmerr").textContent = String((err as Error)?.message ?? err);
+  }
+};
 $("newboard").onclick = () => editor.commit((d) => {
   for (const k of Object.keys(d)) delete (d as any)[k];
   Object.assign(d, { title: "Untitled board", nodes: [] });
@@ -387,6 +413,8 @@ async function bench(path: Camera[]) {
     focus: (ids?: string[]) => board.focus(ids),
     /** Go to step n of the tour (0-based; -1 for the whole board). */
     step,
+    /** A Mermaid flowchart (or Markdown with some) as a board document, to load(), or to edit first. */
+    fromMermaid: (text: string) => boardFromText(text),
     /** Show page n (0-based). */
     page,
     /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */

@@ -3,7 +3,7 @@
 // selectable, their math KaTeX's, both vector in a PDF); groups and edges,
 // which the screen draws on a canvas, are SVG here, so nothing is a bitmap.
 
-import type { Board, Item, Edge } from "./board";
+import { farLabel, type Board, type Item, type Edge } from "./board";
 
 export interface Sheet {
   items: Item[];
@@ -60,19 +60,22 @@ function backSvg(items: Item[], edges: Edge[], box: Sheet["box"]): string {
     let ex0 = Infinity, ey0 = Infinity, ex1 = -Infinity, ey1 = -Infinity;
     for (let i = 0; i < p.length; i += 2) { ex0 = Math.min(ex0, p[i]); ex1 = Math.max(ex1, p[i]); ey0 = Math.min(ey0, p[i + 1]); ey1 = Math.max(ey1, p[i + 1]); }
     if (ex1 < cx0 || ex0 > cx1 || ey1 < cy0 || ey0 > cy1) continue;
-    const n = p.length, head = 9;
+    const n = p.length, head = 9, end = e.arrow !== "none", start = e.arrow === "both";
     const ex = p[n - 2], ey = p[n - 1], ddx = ex - p[n - 4], ddy = ey - p[n - 3], len = Math.hypot(ddx, ddy) || 1, ux = ddx / len, uy = ddy / len;
+    const sl = Math.hypot(p[2] - p[0], p[3] - p[1]) || 1, vx = (p[0] - p[2]) / sl, vy = (p[1] - p[3]) / sl;
     // rounded corners (radius 10, or half the shorter segment)
-    let d = `M${p[0]} ${p[1]}`;
+    let d = start ? `M${p[0] - vx * head * 0.8} ${p[1] - vy * head * 0.8}` : `M${p[0]} ${p[1]}`;
     for (let i = 2; i < n - 2; i += 2) {
       const r = Math.min(10, Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]) / 2, Math.hypot(p[i + 2] - p[i], p[i + 3] - p[i + 1]) / 2);
       const ix = (p[i - 2] - p[i]), iy = (p[i - 1] - p[i + 1]), il = Math.hypot(ix, iy) || 1;
       const ox = (p[i + 2] - p[i]), oy = (p[i + 3] - p[i + 1]), ol = Math.hypot(ox, oy) || 1;
       d += ` L${p[i] + (ix / il) * r} ${p[i + 1] + (iy / il) * r} Q${p[i]} ${p[i + 1]} ${p[i] + (ox / ol) * r} ${p[i + 1] + (oy / ol) * r}`;
     }
-    d += ` L${ex - ux * head * 0.8} ${ey - uy * head * 0.8}`;
-    out.push(`<path d="${d}" fill="none" stroke="${EDGE}" stroke-width="1.6"/>`);
-    out.push(`<path d="M${ex} ${ey}L${ex - ux * head - uy * head * 0.45} ${ey - uy * head + ux * head * 0.45}L${ex - ux * head + uy * head * 0.45} ${ey - uy * head - ux * head * 0.45}Z" fill="${EDGE}"/>`);
+    d += end ? ` L${ex - ux * head * 0.8} ${ey - uy * head * 0.8}` : ` L${ex} ${ey}`;
+    out.push(`<path d="${d}" fill="none" stroke="${EDGE}" stroke-width="${e.line === "thick" ? 3.2 : 1.6}"${e.line === "dotted" ? ' stroke-dasharray="4 4"' : ""}/>`);
+    const tip = (x: number, y: number, ux: number, uy: number) => `<path d="M${x} ${y}L${x - ux * head - uy * head * 0.45} ${y - uy * head + ux * head * 0.45}L${x - ux * head + uy * head * 0.45} ${y - uy * head - ux * head * 0.45}Z" fill="${EDGE}"/>`;
+    if (end) out.push(tip(ex, ey, ux, uy));
+    if (start) out.push(tip(p[0], p[1], vx, vy));
     if (e.label) {
       const x = e.lx ?? (p[0] + ex) / 2, y = e.ly ?? (p[1] + ey) / 2, w = e.label.length * 6.8 + 10;
       labels.push(`<rect x="${x - w / 2}" y="${y - 9}" width="${w}" height="18" fill="#fafaf7" fill-opacity=".95"/><text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="12" fill="#3d4a37">${esc(e.label)}</text>`);
@@ -109,7 +112,7 @@ export async function printSheets(board: Board, sheets: Sheet[], o: PrintOptions
 #board-print .pr-caption { margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 14px; }
 #board-print .pr-caption p { margin: 0 0 4px; }
 #board-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-#board-print .board-item { box-shadow: none; }
+#board-print .board-item:not(.board-shape-subroutine) { box-shadow: none; }
 #board-print .board-detail { opacity: 1; }`;
   root.append(style);
   for (const s of sheets) {
@@ -157,7 +160,8 @@ export async function printSheets(board: Board, sheets: Sheet[], o: PrintOptions
           if (it.kind !== "note" && it.kind !== "shape") continue;
           out.push(`<rect x="${it.x}" y="${it.y}" width="${it.w}" height="${it.h}" fill="${esc(it.color ?? "#9cc28f")}"${it.w * k > 8 ? ` stroke="rgba(0,0,0,.2)" stroke-width="${0.5 / k}"` : ""}/>`);
           const fs = 6 / k;
-          if (it.title && it.title.length * fs * 0.55 < it.w - 4 / k) out.push(`<text x="${it.x + 3 / k}" y="${it.y + fs * 1.2}" font-size="${fs}" fill="#10140f">${esc(it.title)}</text>`);
+          const t = farLabel(it);
+          if (t && t.length * fs * 0.55 < it.w - 4 / k) out.push(`<text x="${it.x + 3 / k}" y="${it.y + fs * 1.2}" font-size="${fs}" fill="#10140f">${esc(t)}</text>`);
         }
         // (a map's rule, as on screen: a group is labeled while 100 to 1,000
         // pixels wide, unless it has no groups inside)

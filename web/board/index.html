@@ -78,6 +78,28 @@
   #prdlg label span { color: #667; font-size: 13px; }
   #prdlg .sep { width: 10px; }
   .prnote { color: #556; font-size: 13px; margin: 0 0 12px; }
+  #mmdlg { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(640px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
+  #mmdlg h3 { margin: 0 0 10px; }
+  #mmtext { width: 100%; box-sizing: border-box; min-height: 220px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 8px; resize: vertical; }
+  #mmerr { color: #a33; font-size: 13px; min-height: 1.2em; margin: 6px 0; white-space: pre-wrap; }
+  /* notes' outlines (Mermaid's shapes): text centered */
+  .board-note.board-shape { text-align: center; display: flex; flex-direction: column; justify-content: center; }
+  .board-shape-round { border-radius: 16px; }
+  .board-shape-stadium, .board-shape-circle { border-radius: 999px; padding-left: 18px; padding-right: 18px; }
+  .board-shape-cylinder { border-radius: 50% / 14px; padding-top: 14px; padding-bottom: 12px; }
+  .board-shape-subroutine { padding-left: 16px; padding-right: 16px; box-shadow: inset 6px 0 0 -5px rgba(0, 0, 0, .4), inset -6px 0 0 -5px rgba(0, 0, 0, .4), 0 1px 3px rgba(0, 0, 0, .08); }
+  .board-shape-diamond, .board-shape-hexagon, .board-shape-lean-right, .board-shape-lean-left, .board-shape-trapezoid, .board-shape-inv-trapezoid, .board-shape-flag { background: none; border: 0; box-shadow: none; padding-left: 26px; padding-right: 26px; }
+  .board-shape-diamond { --poly: polygon(16px 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 16px 100%, 0 50%); }
+  .board-shape-hexagon { --poly: polygon(12px 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 12px 100%, 0 50%); }
+  .board-shape-lean-right { --poly: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%); }
+  .board-shape-lean-left { --poly: polygon(0 0, calc(100% - 14px) 0, 100% 100%, 14px 100%); }
+  .board-shape-trapezoid { --poly: polygon(14px 0, calc(100% - 14px) 0, 100% 100%, 0 100%); }
+  .board-shape-inv-trapezoid { --poly: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%); }
+  .board-shape-flag { --poly: polygon(0 0, 100% 0, 100% 100%, 0 100%, 14px 50%); }
+  .board-shape-diamond::before, .board-shape-hexagon::before, .board-shape-lean-right::before, .board-shape-lean-left::before, .board-shape-trapezoid::before, .board-shape-inv-trapezoid::before, .board-shape-flag::before,
+  .board-shape-diamond::after, .board-shape-hexagon::after, .board-shape-lean-right::after, .board-shape-lean-left::after, .board-shape-trapezoid::after, .board-shape-inv-trapezoid::after, .board-shape-flag::after { content: ""; position: absolute; inset: 0; clip-path: var(--poly); z-index: -1; }
+  .board-shape-diamond::before, .board-shape-hexagon::before, .board-shape-lean-right::before, .board-shape-lean-left::before, .board-shape-trapezoid::before, .board-shape-inv-trapezoid::before, .board-shape-flag::before { background: rgba(0, 0, 0, .28); }
+  .board-shape-diamond::after, .board-shape-hexagon::after, .board-shape-lean-right::after, .board-shape-lean-left::after, .board-shape-trapezoid::after, .board-shape-inv-trapezoid::after, .board-shape-flag::after { inset: 1.2px; background: var(--c, #fff); }
   .prbtns { display: flex; justify-content: flex-end; gap: 8px; }
   #tour { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2; width: min(720px, calc(100% - 24px)); box-sizing: border-box; background: rgba(255, 255, 255, .96); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
   #tour[hidden] { display: none; }
@@ -92,9 +114,10 @@
 </head>
 <body>
 <div id="board"></div>
-<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="pages" hidden><button id="pgprev" title="Previous page (PageUp)">‹</button><select id="pgsel" title="Page"></select><button id="pgnext" title="Next page (PageDown)">›</button></span><span id="hint" hidden>Drag to move · double-click to write or add · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎ Edit</button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="examples">Examples…</button><button id="print">Print or save as PDF…</button><button id="addpage">Add a page</button><button id="namepage" hidden>Rename this page…</button><button id="rmpage" hidden>Delete this page</button><button id="tidy">Tidy (automatic layout)</button><button id="download">Download JSON</button><button id="open">Open JSON…</button><button id="copyjson">Copy JSON</button><button id="newboard">New board</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,application/json" hidden></div>
+<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="pages" hidden><button id="pgprev" title="Previous page (PageUp)">‹</button><select id="pgsel" title="Page"></select><button id="pgnext" title="Next page (PageDown)">›</button></span><span id="hint" hidden>Drag to move · double-click to write or add · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎ Edit</button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="examples">Examples…</button><button id="print">Print or save as PDF…</button><button id="addpage">Add a page</button><button id="namepage" hidden>Rename this page…</button><button id="rmpage" hidden>Delete this page</button><button id="tidy">Tidy (automatic layout)</button><button id="download">Download JSON</button><button id="open">Open… (JSON, Mermaid)</button><button id="mermaid">Import Mermaid…</button><button id="copyjson">Copy JSON</button><button id="newboard">New board</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,.mmd,.mermaid,.md,application/json,text/markdown,text/plain" hidden></div>
 <div id="tour" hidden><div id="say"></div><div id="nav"><div><button id="prev" title="Back (←)" disabled>←</button><button id="next" title="Next (→)">→</button></div><span id="where"></span></div></div>
 <dialog id="exdlg"><h3>Example boards</h3><div id="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
+<dialog id="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>```mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea id="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div id="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button id="mm-go" class="be-done">Import</button></div></form></dialog>
 <dialog id="prdlg"><h3>Print or save as PDF</h3><form id="prform" method="dialog">
 <fieldset><legend>What</legend><label><input type="radio" name="mode" value="pages" id="pr-pages" checked> Every page <span id="pr-pages-n"></span></label><label><input type="radio" name="mode" value="tour" id="pr-tour"> The tour <span id="pr-tour-n"></span></label></fieldset>
 <fieldset><legend>Paper</legend><label><input type="radio" name="paper" value="letter" checked> Letter</label><label><input type="radio" name="paper" value="a4"> A4</label><span class="sep"></span><label><input type="radio" name="orient" value="landscape" checked> Landscape</label><label><input type="radio" name="orient" value="portrait"> Portrait</label></fieldset>

@@ -130,7 +130,7 @@ if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn
   builds.push(["the board", r]);
   copyFileSync(join(here, "board", "index.html"), join(here, "dist", "board", "index.html"));
   mkdirSync(join(here, "dist", "board", "examples"), { recursive: true });
-  for (const f of readdirSync(join(here, "board", "examples"))) if (f.endsWith(".json")) copyFileSync(join(here, "board", "examples", f), join(here, "dist", "board", "examples", f));
+  for (const f of readdirSync(join(here, "board", "examples"))) if (/\.(json|md|mmd)$/.test(f)) copyFileSync(join(here, "board", "examples", f), join(here, "dist", "board", "examples", f));
   // (and the generated ones: scripts/board-examples.mjs)
   const gen = Bun.spawnSync(["node", join(here, "..", "scripts", "board-examples.mjs"), join(here, "dist", "board", "examples")]);
   if (gen.exitCode !== 0) { console.error(gen.stderr.toString()); process.exit(1); }

@@ -61,8 +61,15 @@ jobs:
           CHROME=google-chrome node web/board/bench.mjs
           CHROME=google-chrome node web/test-board.mjs
           CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/primes.json
+          CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/mermaid.md
           CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/source.json
           CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/integers.json
+      - name: Mermaid flowcharts on boards, against Mermaid's own parser (its e2e and docs flowcharts)
+        run: |
+          git clone -q --depth 1 --branch mermaid@12.1.0 --filter=blob:none --sparse https://github.com/mermaid-js/mermaid.git /tmp/mermaid-src
+          git -C /tmp/mermaid-src sparse-checkout set e2e packages/mermaid/src/docs/syntax
+          mkdir -p /tmp/mm && (cd /tmp/mm && npm init -y >/dev/null && npm i --no-audit --no-fund mermaid@12.1.0 >/dev/null)
+          MIN_SAME=0.97 CHROME=google-chrome node web/board/test-mermaid.mjs /tmp/mm /tmp/mermaid-src/e2e /tmp/mermaid-src/packages/mermaid/src/docs/syntax/flowchart.md
       - name: Sage mode (modular forms, elliptic curves), checked against Sage's output
         run: python3 sage-tests/run.py -v
       - name: symbolic calculus (limits, solve, taylor) in the WebAssembly engine

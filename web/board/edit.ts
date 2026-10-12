@@ -248,10 +248,12 @@ export class Editor {
   }
 
   private key(e: KeyboardEvent) {
-    if (!this.on || this.panel || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (this.panel || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    // (undo and redo also outside Edit: opening or importing a board replaces it)
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "z") { e.shiftKey ? this.redo() : this.undo(); }
     else if (mod && e.key.toLowerCase() === "y") this.redo();
+    else if (!this.on) return;
     else if ((e.key === "Delete" || e.key === "Backspace") && this.selected) { const id = this.selected; this.select(null); this.commit((d) => remove(this.pg(d), id)); }
     else if (e.key === "Enter" && this.selected) this.open(this.selected);
     else if (e.key === "Escape" && this.selected) this.select(null);

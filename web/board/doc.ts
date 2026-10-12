@@ -19,11 +19,17 @@ export interface DocNote {
   /** a link: a source file (path#Lline), a paper, a page */
   ref?: string;
   color?: string;
+  /** its outline (a flowchart's: Mermaid's shapes); its text is then centered */
+  shape?: NoteShape;
+  /** as wide as its text needs, up to `w` (default 260), rather than `w` */
+  fit?: boolean;
   x?: number;
   y?: number;
   w?: number;
   h?: number;
 }
+
+export type NoteShape = "rect" | "round" | "stadium" | "circle" | "diamond" | "hexagon" | "cylinder" | "subroutine" | "lean-right" | "lean-left" | "trapezoid" | "inv-trapezoid" | "flag";
 
 export interface DocGroup {
   id: string;
@@ -49,6 +55,9 @@ export interface DocEdge {
   label?: string;
   /** used to lay out, not drawn (to place one box below another) */
   hidden?: boolean;
+  /** arrowheads: at the end (the default), none, or both ends */
+  arrow?: "none" | "both";
+  line?: "dotted" | "thick";
 }
 
 /** A step of a tour: the camera shows these items while the caption explains them. */
@@ -113,14 +122,17 @@ const GAP = 40, PAD = 24, TITLE = 34;
 
 interface Box { w: number; h: number }
 
-/** A note's rendered height at a width (the renderer's measure()). */
-export type Measure = (n: DocNote, w: number) => number;
+/** A note's rendered height at a width (the renderer's measure()), and
+ * optionally the width its text needs, up to a most (for `fit` notes). */
+export type Measure = ((n: DocNote, w: number) => number) & { width?: (n: DocNote, max: number) => number };
 
 // A note's size: given, measured, or estimated from its text's length (about
 // 7 px a character, 20 px a line), with room for the title and the link.
 function noteSize(n: DocNote, measure?: Measure): Box {
-  if (n.w && n.h) return { w: n.w, h: n.h };
-  const w = n.w ?? 260;
+  if (n.w && n.h && !n.fit) return { w: n.w, h: n.h };
+  const most = n.w ?? 260;
+  const longest = Math.max(...[n.title ?? "", ...(n.text ?? "").split("\n")].map((l) => l.length));
+  const w = !n.fit ? most : Math.min(most, Math.max(60, Math.ceil(measure?.width ? measure.width(n, most) + 2 : longest * 7.4 + (n.shape && n.shape !== "rect" ? 50 : 26))));
   if (measure) return { w, h: n.h ?? Math.max(60, Math.ceil(measure(n, w)) + 2) };
   const chars = (n.text ?? "").length;
   const lines = Math.ceil(chars / Math.max(10, (w - 24) / 7.2)) + (n.text?.match(/\n/g)?.length ?? 0);
@@ -160,7 +172,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   const innerTop = new Map<string, number>(); // a group's members' origin, below its title
   const sizeOf = (n: DocNode): Box => {
     if (n.kind !== "group") {
-      const b = noteSize(n, measure && ((m, w) => measure({ ...m, ref: refOf(m) }, w)));
+      const b = noteSize(n, measure && Object.assign((m: DocNote, w: number) => measure({ ...m, ref: refOf(m) }, w), { width: measure.width && ((m: DocNote, w: number) => measure.width!({ ...m, ref: refOf(m) }, w)) }));
       size.set(n.id, b);
       return b;
     }
@@ -208,14 +220,14 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         place(c, x + p.x, y + p.y, depth + 1, n.id);
       }
     } else {
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent });
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}) });
     }
   };
   for (const n of roots) {
     const p = topPos.get(n.id)!;
     place(n, p.x, p.y, 0);
   }
-  const out: Edge[] = edges.filter((e) => !e.hidden).map((e, i) => ({ id: `e${i}`, from: e.from, to: e.to, label: e.label }));
+  const out: Edge[] = edges.filter((e) => !e.hidden).map((e, i) => ({ id: `e${i}`, from: e.from, to: e.to, label: e.label, ...(e.arrow ? { arrow: e.arrow } : {}), ...(e.line ? { line: e.line } : {}) }));
   // the edges' routes: now, or (deferRoutes) as the caller runs `routing`;
   // edges are straight until then
   const routing = routeEdges(doc, items, out, parentOf);
