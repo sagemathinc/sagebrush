@@ -562,6 +562,16 @@ try {
   await set(["w = 1\nhasattr = 7\n__import__ = 8", "'''doc'''\nfrom __future__ import annotations\nglobal w\nif False:\n    w = 2\nprint('W', w, __doc__)", "print('V', w)"]);
   r = await run([0, 1, 2]);
   ok(JSON.stringify(r?.errors) === "[]" && /^W 1 (doc|None)$/.test(await out(1)) && (await out(2)) === "V 1", `the initialization after the prologue, with a global and a user's hasattr (${await out(1)}, ${await out(2)}; ${JSON.stringify(r)})`);
+  // (a statement on the prologue's line, `"doc"; print(w)`: the
+  // initialization goes between them, and the line numbers stay as written:
+  // REACT-5EE9-1)
+  await set(["w = 1", "\"doc\"; print('W', w); False and (w := 2)\nprint('W2', w)", "print('V', w)"]);
+  r = await run([0, 1, 2]);
+  ok(JSON.stringify(r?.errors) === "[]" && (await out(1)) === "W 1\nW2 1" && (await out(2)) === "V 1", `an initialization inside the prologue's line (${await out(1)}, ${await out(2)}; ${JSON.stringify(r)})`);
+  await set([null, "\"doc\"; print('W', w); False and (w := 2)\nprint('W2', w)\n1/0"]);
+  await run(1);
+  const tb2 = await out(1);
+  ok(/^W 1\nW2 1\n/.test(tb2) && /line 3/.test(tb2) && !/ʹ|page-order/.test(tb2), `its traceback has the line as written (${JSON.stringify(tb2)})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
