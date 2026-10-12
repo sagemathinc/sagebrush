@@ -1,0 +1,338 @@
+[
+  {
+    "name": "adjacent surrogates plain ordering",
+    "codes": [
+      "x = 1",
+      "print('\\ud800\\udc00' < '\\udbff', '\\ud800\\udc00' <= '\\udbff', '\\ud800\\udc00' > '\\udbff', '\\ud800\\udc00' >= '\\udbff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates dynamic chr ordering",
+    "codes": [
+      "x = 1",
+      "a = chr(0xd800) + chr(0xdc00)\nb = chr(0xdbff)\nprint(a < b, a > b)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates joined ordering",
+    "codes": [
+      "x = 1",
+      "print(''.join(['\\ud800', '\\udc00']) < '\\udbff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates common prefix",
+    "codes": [
+      "x = 1",
+      "print('prefix\\ud800\\udc00' < 'prefix\\udbff', 'a\\udbfe\\udfff' < 'a\\udbff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates sorted key",
+    "codes": [
+      "x = 1",
+      "print(sorted([0,1], key=lambda i: ['\\ud800\\udc00','\\udbff'][i]))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates reverse sorted key",
+    "codes": [
+      "x = 1",
+      "print(sorted([0,1], key=lambda i: ['\\ud800\\udc00','\\udbff'][i], reverse=True))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates min max key",
+    "codes": [
+      "x = 1",
+      "print(min([0,1], key=lambda i: ['\\ud800\\udc00','\\udbff'][i]), max([0,1], key=lambda i: ['\\ud800\\udc00','\\udbff'][i]))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates sequence ordering",
+    "codes": [
+      "x = 1",
+      "print(['\\ud800\\udc00'] < ['\\udbff'], ('\\ud800\\udc00',1) < ('\\udbff',2))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates ordering dunders",
+    "codes": [
+      "x = 1",
+      "print('\\ud800\\udc00'.__lt__('\\udbff'), '\\ud800\\udc00'.__le__('\\udbff'), '\\ud800\\udc00'.__gt__('\\udbff'), '\\ud800\\udc00'.__ge__('\\udbff'))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates augmented reset",
+    "codes": [
+      "x = 1",
+      "x += ((x:=10) if '\\ud800\\udc00' < '\\udbff' else 0) + x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates augmented repeating reset",
+    "codes": [
+      "x = 1",
+      "x += sum([((x:=10) if '\\ud800\\udc00' < '\\udbff' else 0) + x for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates false branch binding",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800\\udc00' > '\\udbff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates false and binding",
+    "codes": [
+      "x = 1",
+      "print(('\\ud800\\udc00' > '\\udbff' and (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates false repeated binding",
+    "codes": [
+      "x = 1",
+      "print([((x:=10) if '\\ud800\\udc00' > '\\udbff' else 0, x, (x:=20))[1] for i in [0,1]], x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone high versus upper BMP control",
+    "codes": [
+      "x = 1",
+      "print('\\ud800' < '\\ue000', '\\ud800' <= '\\ue000', '\\ud800' > '\\ue000', '\\ud800' >= '\\ue000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone low versus upper BMP control",
+    "codes": [
+      "x = 1",
+      "print('\\udfff' < '\\uffff', '\\udfff' <= '\\uffff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "scalar versus lone high control",
+    "codes": [
+      "x = 1",
+      "print('\\U00010000' > '\\udbff', '\\udbff' < '\\U00010000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "scalar versus upper BMP control",
+    "codes": [
+      "x = 1",
+      "print('\\U00010000' > '\\ue000', '\\U0010ffff' > '\\uffff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "equal high different low scalar control",
+    "codes": [
+      "x = 1",
+      "print('\\U00010000' < '\\U00010001', '\\U00010001' < '\\U000103ff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "pair versus lone at shared high control",
+    "codes": [
+      "x = 1",
+      "print('\\U00010000' > '\\ud800x', '\\ud800\\ue000' < '\\U00010000', '\\U0010ffff' > '\\udbffx')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "prefix ends on high surrogate control",
+    "codes": [
+      "x = 1",
+      "print('\\ud800' < '\\U00010000', '\\U00010000' > '\\ud800', 'prefix\\udbff' < 'prefix\\U0010ffff')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "prefix ends on complete pair control",
+    "codes": [
+      "x = 1",
+      "print('\\U00010000' < '\\U00010000a', '\\U00010000a' > '\\U00010000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone pair reversed ordering control",
+    "codes": [
+      "x = 1",
+      "print('\\udc00\\ud800' < '\\ue000', '\\udc00\\ud800' < '\\U00010000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "surrogates separated by character control",
+    "codes": [
+      "x = 1",
+      "print('\\ud800x\\udc00' < '\\udbff', '\\udbffx\\udfff' < '\\ue000')",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "scalar sorting and min max control",
+    "codes": [
+      "x = 1",
+      "print([i for s,i in sorted([('\\U00010000',0),('\\ue000',1),('\\ud800',2)])], min([0,1],key=lambda i: ['\\ud800','\\U00010000'][i]))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone conditional reset control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800' < '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "lone augmented reset control",
+    "codes": [
+      "x = 1",
+      "x += ((x:=10) if '\\ud800' < '\\ue000' else 0) + x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  },
+  {
+    "name": "adjacent surrogates true branch refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800\\udc00' < '\\udbff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ]
+  }
+]

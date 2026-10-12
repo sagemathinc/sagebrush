@@ -522,6 +522,8 @@ const consumed = (_path: [any, string][], _j: number) => false;
 
 // (whether the cell being renamed has `from __future__ import annotations`)
 let FUTURE = false;
+// (and its lines, as analyzed)
+let SOURCE: string[] = [];
 
 // The outermost part of an occurrence's statement that runs later than it is
 // written: a function's body, a lambda's (unless called where it is
@@ -812,7 +814,15 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
       if (typeof v === "boolean") return { t: "bool", v };
       if (typeof v === "bigint") return { t: "int", v };
       if (typeof v === "number") return { t: "float", v };
-      if (typeof v === "string") return { t: "str", v };
+      // (pyparse's JavaScript string cannot tell two lone surrogates written
+      // as escapes, '\ud800\udc00', from the character they pair to: such a
+      // string, a pair in it and a surrogate escape on its lines, is not
+      // known, REACT-8BB7-1)
+      if (typeof v === "string") {
+        const pair = /[\ud800-\udbff][\udc00-\udfff]/.test(v);
+        const text = SOURCE.slice(e.lineno - 1, (e.end_lineno ?? e.lineno)).join("\n");
+        return pair && /\\(u|U0000)[dD][89a-fA-F][0-9a-fA-F]{2}/.test(text) ? undefined : { t: "str", v };
+      }
       if (v && typeof v === "object" && v.name === "None") return { t: "none", v: null };
       if (v && typeof v === "object" && v.name === "Ellipsis") return { t: "ellipsis", v: null };
       if (v && typeof v === "object" && "imag" in v) return { t: "complex", v };
@@ -1031,6 +1041,7 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     const first = occ.find((o) => o.store);
     if (!first) return source;
     const old = opts.before ?? name;
+    SOURCE = aLines;
     FUTURE = tree.body.some((st: any) => st._type === "ImportFrom" && st.module === "__future__" && st.names.some((a: any) => a.name === "annotations"));
     const reads = whichReads(occ, first, tree.body);
     if (!reads) return null;
