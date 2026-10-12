@@ -12,6 +12,12 @@ export class Scope {
   nonlocals = new Set<string>();
   params = new Set<string>();
   iterVars = new Set<string>(); // comprehension targets
+  // what CPython's symbol table has seen of a name in this scope, which a
+  // later `global` or `nonlocal` naming it may not follow: a use, an
+  // annotation (`x: int`), a binding (not an import; not a module's `:=` in
+  // a comprehension).  Annotations of other names are evaluated later, in
+  // scopes of their own (Python 3.14), so they are not uses.
+  before = new Map<string, number>();
   nonlocalLines = new Map<string, number>();
   isGenerator = false;
   isAsync = false;
@@ -73,6 +79,8 @@ function findEnclosing(scope: Scope | null, name: string): Scope | null {
   return null;
 }
 
+const USE = 1, ANNOT = 2, BOUND = 4;
+
 export class SyntaxErr extends Error {
   constructor(
     public msg: string,
@@ -117,8 +125,21 @@ class Collector {
     }
   }
 
-  bind(name: string) {
+  bind(name: string, how = BOUND) {
     this.s.bound.add(name);
+    this.mark(this.s, name, how);
+  }
+
+  mark(s: Scope, name: string, how: number) {
+    if (how) s.before.set(name, (s.before.get(name) ?? 0) | how);
+  }
+
+  // `global` or `nonlocal` naming n: an error after a use, an annotation or a binding of n here
+  declare(n: string, what: "global" | "nonlocal", line: number) {
+    const f = this.s.before.get(n) ?? 0;
+    if (f & USE) throw new SyntaxErr(`name '${n}' is used prior to ${what} declaration`, line);
+    if (f & ANNOT) throw new SyntaxErr(`annotated name '${n}' can't be ${what}`, line);
+    if (f & BOUND) throw new SyntaxErr(`name '${n}' is assigned to before ${what} declaration`, line);
   }
 
   stmts(body: A.Stmt[]) {
@@ -168,6 +189,7 @@ class Collector {
         if (st.value) this.expr(st.value);
         if (st.value || st.target.k !== "Name") this.bindTarget(st.target);
         else if (st.target.k === "Name" && this.s.kind !== "module" && this.s.kind !== "class") this.bind(st.target.id);
+        if (st.target.k === "Name") this.mark(this.s, st.target.id, ANNOT);
         return;
       case "Return":
         if (st.value) this.expr(st.value);
@@ -203,16 +225,16 @@ class Collector {
         return;
       }
       case "Import":
-        return st.names.forEach((a) => this.bind(a.asname ?? a.name.split(".")[0]));
+        return st.names.forEach((a) => this.bind(a.asname ?? a.name.split(".")[0], 0));
       case "ImportFrom":
         return st.names.forEach((a) => {
-          if (a.name !== "*") this.bind(a.asname ?? a.name);
+          if (a.name !== "*") this.bind(a.asname ?? a.name, 0);
         });
       case "Global":
         return st.names.forEach((n) => {
           if (this.s.params.has(n)) throw new SyntaxErr(`name '${n}' is parameter and global`, st.line);
           if (this.s.nonlocals.has(n)) throw new SyntaxErr(`name '${n}' is nonlocal and global`, st.line);
-          if (this.s.bound.has(n)) throw new SyntaxErr(`name '${n}' is assigned to before global declaration`, st.line);
+          this.declare(n, "global", st.line);
           this.s.globals.add(n);
         });
       case "Nonlocal":
@@ -220,7 +242,7 @@ class Collector {
           if (this.s.kind === "module") throw new SyntaxErr("nonlocal declaration not allowed at module level", st.line);
           if (this.s.params.has(n)) throw new SyntaxErr(`name '${n}' is parameter and nonlocal`, st.line);
           if (this.s.globals.has(n)) throw new SyntaxErr(`name '${n}' is nonlocal and global`, st.line);
-          if (this.s.bound.has(n)) throw new SyntaxErr(`name '${n}' is assigned to before nonlocal declaration`, st.line);
+          this.declare(n, "nonlocal", st.line);
           this.s.nonlocals.add(n);
           if (this.s.kind !== "class") this.s.nonlocalLines.set(n, st.line);
         });
@@ -258,6 +280,7 @@ class Collector {
     if (e === null) return;
     switch (e.k) {
       case "Name":
+        this.mark(this.s, e.id, USE);
         if (e.id === "super" || e.id === "__class__") {
           for (let s: Scope | null = this.s; s !== null && s.kind !== "class"; s = s.parent) s.usesSuper = true;
         }
@@ -344,8 +367,9 @@ class Collector {
           if (s.kind === "class") throw new SyntaxErr("assignment expression within a comprehension cannot be used in a class body", e.line);
           for (let c: Scope = this.s; c !== s; c = c.parent!) c.nonlocals.add(e.target);
         }
-        if (s.kind !== "module") s.bound.add(e.target);
-        else s.bound.add(e.target);
+        s.bound.add(e.target);
+        // (in a comprehension at a module's top level, CPython's table does not count it)
+        if (s === this.s || s.kind !== "module") this.mark(s, e.target, BOUND);
         return this.expr(e.value);
       }
     }

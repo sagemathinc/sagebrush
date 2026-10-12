@@ -1,0 +1,574 @@
+[
+  {
+    "name": "docstring continued to next physical line",
+    "codes": [
+      "x = 1",
+      "\"doc\"; \\\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring continued taken walrus",
+    "codes": [
+      "x = 1\nflag = True",
+      "\"doc\"; \\\nflag and (x := 2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future continued to next physical line",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations; \\\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future continued taken walrus",
+    "codes": [
+      "x = 1\nflag = True",
+      "from __future__ import annotations; \\\nflag and (x := 2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline docstring continued to next physical line",
+    "codes": [
+      "x = 1",
+      "\"\"\"doc\nline\"\"\"; \\\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline docstring continued taken walrus",
+    "codes": [
+      "x = 1\nflag = True",
+      "\"\"\"doc\nline\"\"\"; \\\nflag and (x := 2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline future continued to next physical line",
+    "codes": [
+      "x = 1",
+      "from __future__ import (\n annotations\n); \\\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline future continued taken walrus",
+    "codes": [
+      "x = 1\nflag = True",
+      "from __future__ import (\n annotations\n); \\\nflag and (x := 2)\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after skipped module alias",
+    "codes": [
+      "x = 1",
+      "if False:\n    import math as x\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after skipped from alias",
+    "codes": [
+      "x = 1",
+      "if False:\n    from math import pi as x\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after skipped from unaliased",
+    "codes": [
+      "pi = 1",
+      "if False:\n    from math import pi\nglobal pi\nprint(pi)",
+      "print(pi)"
+    ],
+    "change": [
+      0,
+      "pi = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after argument annotation",
+    "codes": [
+      "x = 1",
+      "def f(a: x): pass\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after return annotation",
+    "codes": [
+      "x = 1",
+      "def f() -> x: pass\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after module annotation",
+    "codes": [
+      "x = 1",
+      "y: x\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after vararg annotation",
+    "codes": [
+      "x = 1",
+      "def f(*a: x, **b: x): pass\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after combined annotations",
+    "codes": [
+      "x = 1",
+      "def f(a: x=0, /, *, b: x=0): pass\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after empty list walrus control",
+    "codes": [
+      "x = 1",
+      "[(x:=2) for _ in []]\nglobal x\nif False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after generator walrus control",
+    "codes": [
+      "x = 1",
+      "g=((x:=2) for _ in [])\nglobal x\nif False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after taken list walrus control",
+    "codes": [
+      "x = 1",
+      "[(x:=2) for _ in [0]]\nglobal x\nif False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after empty comp read control",
+    "codes": [
+      "x = 1",
+      "[x for _ in []]\nglobal x\nif False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after lambda body control",
+    "codes": [
+      "x = 1",
+      "f=lambda: x\nglobal x\nif False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after function body control",
+    "codes": [
+      "x = 1",
+      "def f(): return x\nglobal x\nif False:\n    x = 3\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after import then skipped rebind",
+    "codes": [
+      "x = 1\nflag = False",
+      "if flag:\n    from math import floor as x\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5\nflag = False"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after skipped import Unicode",
+    "codes": [
+      "\u03b1 = 1",
+      "if False:\n    from math import pi as \u03b1\nglobal \u03b1\nprint(\u03b1)",
+      "print(\u03b1)"
+    ],
+    "change": [
+      0,
+      "\u03b1 = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "duplicate global after skipped import",
+    "codes": [
+      "x = 1",
+      "global x\nif False:\n    import math as x\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after annotated assignment of other name",
+    "codes": [
+      "x = 1",
+      "y: x = 3\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after conditional annotation",
+    "codes": [
+      "x = 1",
+      "if False:\n    y: x\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "continued prologue blank continuation",
+    "codes": [
+      "x = 1",
+      "\"doc\"; \\\n\\\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "continued prologue two names",
+    "codes": [
+      "x = 1\ny = 3",
+      "\"doc\"; \\\nprint(x,y)\nif False:\n    x = y = 2",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x = 5\ny = 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "continued prologue annotation only",
+    "codes": [
+      "x = 1",
+      "\"doc\"; \\\nx: int\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "taken import before global control",
+    "codes": [
+      "x = 1",
+      "from math import floor as x\nglobal x\nprint(x(3.5))",
+      "print(x(2.5))"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global before conditional import control",
+    "codes": [
+      "x = 1",
+      "global x\nif False:\n    import math as x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global before lazy annotation control",
+    "codes": [
+      "x = 1",
+      "global x\ny: x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "default before global invalid control",
+    "codes": [
+      "x = 1",
+      "def f(a=x): pass\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "annotation target before global invalid control",
+    "codes": [
+      "x = 1",
+      "x: int\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "import and actual read before global invalid control",
+    "codes": [
+      "x = 1",
+      "if False:\n    import math as x\nprint(x)\nglobal x",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "comprehension iter0 before global invalid control",
+    "codes": [
+      "x = [1]",
+      "[i for i in x]\nglobal x\nif False:\n    x = []\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = [5]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "same line Unicode prologue read control",
+    "codes": [
+      "x = 1",
+      "\"\ud83d\ude00doc\"; print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "same line future two names control",
+    "codes": [
+      "x=1\ny=3",
+      "from __future__ import annotations; print(x,y)\nif False:\n    x = y = 2",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "continuation inside docstring control",
+    "codes": [
+      "x = 1",
+      "\"doc\" \\\n\"continued\"; print(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "newline after prologue control",
+    "codes": [
+      "x = 1",
+      "\"doc\"\nprint(x)\nif False:\n    x = 2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "same line prologue traceback control",
+    "codes": [
+      "x = 1",
+      "\"\ud83d\ude00doc\"; print(x)\nif False:\n    x = 2\n1 / 0",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiple initializer traceback control",
+    "codes": [
+      "x=1\ny=3",
+      "\"\u00e9\"; print(x,y)\nif False:\n    x = y = 2\n1 / 0",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future annotation naming name refusal boundary",
+    "codes": [
+      "x = 1",
+      "from __future__ import annotations\ny: x\nglobal x\nif False:\n    x = 2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  }
+]

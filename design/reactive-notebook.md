@@ -477,9 +477,21 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     `hasattr` is never called), and reads it in a lambda, so a `global x`
     outside functions, which keeps its name, stays legal. A module's
     `global x` that comes after a use of `x` is a SyntaxError in Python, so
-    it is renamed and stays one (review of 5ee9fe8).
-  - When a statement shares the prologue's last line (`"doc"; print(x)`),
-    that line is split at the statement, with the initialization between.
+    it is renamed and stays one (review of 5ee9fe8). The rules are
+    CPython 3.14's:
+    - a read, an annotated target, or any binding counts as a use;
+    - an import does not, and neither does an annotation of another name
+      (evaluated later, in its own scope);
+    - nor does anything in a function's, lambda's or comprehension's body
+      (review of d2c5a5c).
+
+    pyjs's compiler (src/scope.ts) now applies the same rules to `global`
+    and `nonlocal` everywhere. It used to reject a global after an import,
+    and accepted one after a read.
+  - When a statement shares the prologue's logical line (`"doc"; print(x)`,
+    or after a `\` on the next physical line), that line is split at the
+    statement, with the initialization between. Otherwise the initialization
+    goes after the logical line's last physical line.
     The first part ends with a `# page-order scoping` comment, so pyjs's
     session can join the line again.
   - It isn't used where annotations naming the name are kept as text

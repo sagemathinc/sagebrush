@@ -572,6 +572,14 @@ try {
   await run(1);
   const tb2 = await out(1);
   ok(/^W 1\nW2 1\n/.test(tb2) && /line 3/.test(tb2) && !/ʹ|page-order/.test(tb2), `its traceback has the line as written (${JSON.stringify(tb2)})`);
+  // (and when the line goes on after a backslash, REACT-D2C5-2)
+  await set(["w = 1", "\"doc\"; \\\nprint('W', w); False and (w := 2)\nprint('W2', w)", "print('V', w)"]);
+  r = await run([0, 1, 2]);
+  ok(JSON.stringify(r?.errors) === "[]" && (await out(1)) === "W 1\nW2 1" && (await out(2)) === "V 1", `an initialization after a prologue going on after a backslash (${await out(1)}, ${await out(2)}; ${JSON.stringify(r)})`);
+  // (a module's global after an import, or a comprehension's :=, is valid Python: REACT-D2C5-3)
+  await set(["w = 1", "if False:\n    import math as w\nglobal w\nprint('W', w)", "from math import floor\nglobal floor\nprint(floor(3.5))", "[(z := 2) for _ in [0]]\nglobal z\nprint(z)"]);
+  r = await run([0, 1, 2, 3]);
+  ok((await out(1)) === "W 1" && (await out(2)) === "3" && (await out(3)) === "2", `a global after an import or a comprehension's := (${await out(1)}, ${await out(2)}, ${await out(3)}; ${JSON.stringify(r)})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
