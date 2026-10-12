@@ -280,6 +280,26 @@ The menu downloads or opens JSON (a file can also be dropped on the page),
 and starts a new board. Agents have `edit(f)` and `editing(on)`.
 test-board.mjs drives all of it with the mouse, at desktop and phone sizes.
 
+**Examples** (the menu's Examples…, web/board/examples/index.json):
+- the architecture tour;
+- *Sagebrush's source, file by file*: 301 files, 26 directories, 586 edges;
+- *The integers to 10,000*: 10,000 notes, each with LaTeX.
+
+The last two are generated at build time by scripts/board-examples.mjs.
+Large boards taught the renderer three things:
+- **Zoom threshold:** below zoom 0.5, text is under 7 px, so notes are drawn on the canvas there (it was 0.35).
+- **Mounting budget:** new elements are built at most 4 ms and 30 elements a frame, nearest the center first, with placeholders until then.
+- **Math:** KaTeX typesets a few milliseconds a frame.
+
+Measured in headless Chromium on the integers (10,000 notes with math), frame
+intervals:
+- panning at zoom 0.4: p95 16.9 ms, max 21;
+- panning far out: p95 17 ms;
+- panning close up onto new math: p50 16.7, p95 28 ms;
+- zooming all the way out and back: max about 100 ms.
+
+The document loads in about 0.2 s. CI checks all three examples.
+
 Still to do in step 1:
 - edge routing around groups (today edges are straight, border to border);
 - editing edges' labels, moving notes between groups;

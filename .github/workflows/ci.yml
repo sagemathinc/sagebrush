@@ -60,6 +60,8 @@ jobs:
           CHROME=google-chrome node web/test-reactive.mjs
           CHROME=google-chrome node web/board/bench.mjs
           CHROME=google-chrome node web/test-board.mjs
+          CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/source.json
+          CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/integers.json
       - name: Sage mode (modular forms, elliptic curves), checked against Sage's output
         run: python3 sage-tests/run.py -v
       - name: symbolic calculus (limits, solve, taylor) in the WebAssembly engine
