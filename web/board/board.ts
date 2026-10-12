@@ -744,7 +744,13 @@ export class Board {
 
   /** The notes and groups wholly inside a world rectangle. */
   itemsIn(x0: number, y0: number, x1: number, y1: number): Item[] {
-    return [...this.boxes.query(x0, y0, x1, y1, new Set())].filter((it) => (it.kind === "note" || it.kind === "group") && it.x >= x0 && it.y >= y0 && it.x + it.w <= x1 && it.y + it.h <= y1);
+    return this.near(x0, y0, x1, y1).filter((it) => it.x >= x0 && it.y >= y0 && it.x + it.w <= x1 && it.y + it.h <= y1);
+  }
+  /** The notes and groups overlapping a world rectangle (a large one: every item, not the grid's cells). */
+  near(x0: number, y0: number, x1: number, y1: number): Item[] {
+    const big = ((x1 - x0) / CELL) * ((y1 - y0) / CELL) > 4 * this.byId.size + 64;
+    const its = big ? [...this.byId.values()] : [...this.boxes.query(x0, y0, x1, y1, new Set())];
+    return its.filter((it) => (it.kind === "note" || it.kind === "group") && it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0);
   }
 
   /** An edge's route, or its straight line from border to border (world coordinates). */

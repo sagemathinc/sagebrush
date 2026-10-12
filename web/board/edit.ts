@@ -242,6 +242,7 @@ export class Editor {
     const d0 = this.doc(), f = d0 && find(this.pg(d0), it.id);
     if (!f) return false;
     const several = this.selected.length > 1 && this.selected.includes(it.id) ? this.topSelected(d0!) : null;
+    const wasOnly = this.selected.length === 1 && this.selected[0] === it.id;
     const moving = several ? [...new Set(several.flatMap((id) => { const g = find(this.pg(d0!), id); return g ? ids(g.node) : []; }))] : ids(f.node), self = new Set(moving);
     const from = f.parent?.id ?? null;
     const snap = this.snapper(several ?? [it.id], self);
@@ -288,6 +289,8 @@ export class Editor {
         });
         return;
       }
+      // (on a touch screen, a tap on the one item selected opens it: there is no Enter)
+      if (dist <= 3 && u.pointerType === "touch" && wasOnly && u.type !== "pointercancel") { this.open(it.id); return; }
       if (dist <= 3) { this.select(it.id); return; }
       this.select(it.id);
       const target = u.type === "pointercancel" ? from : targetAt(u.clientX, u.clientY);
@@ -329,8 +332,7 @@ export class Editor {
     const x1 = Math.max(...boxes.map((b) => b.x + b.w)), y1 = Math.max(...boxes.map((b) => b.y + b.h));
     const v = this.board.view();
     const around = (o: Item) => o.x <= x0 && o.y <= y0 && o.x + o.w >= x1 && o.y + o.h >= y1;
-    const others = this.board.itemsIn(v.x0 - 1e6, v.y0 - 1e6, v.x1 + 1e6, v.y1 + 1e6)
-      .filter((o) => !self.has(o.id) && !around(o) && o.x < v.x1 && o.x + o.w > v.x0 && o.y < v.y1 && o.y + o.h > v.y0);
+    const others = this.board.near(v.x0, v.y0, v.x1, v.y1).filter((o) => !self.has(o.id) && !around(o));
     const xs = others.flatMap((o) => [o.x, o.x + o.w / 2, o.x + o.w]), ys = others.flatMap((o) => [o.y, o.y + o.h / 2, o.y + o.h]);
     const best = (lines: number[], edges: number[]) => {
       const tol = 6 / this.board.camera.z;
@@ -534,12 +536,7 @@ export class Editor {
   }
 
   private dblclick(it: Item | null, x: number, y: number): boolean {
-    // (a code item's code is edited in any mode, as a notebook's cells are)
-    if (!this.on) {
-      if (it?.code === undefined) return false;
-      this.open(it.id);
-      return true;
-    }
+    if (!this.on) return false;
     if (it) { this.open(it.id); return true; }
     // a new note where the double click was (at the top level)
     this.addNote(x, y);
