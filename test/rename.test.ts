@@ -322,3 +322,14 @@ test("an annotation Python never evaluates is not renamed or counted (REACT-2894
   // (in a function called before the definition: no read through it)
   assert.equal(renameInCell("def f():\n    y: x = 1\n    return y\nf()\nx = x + 1", "x", "xʹ2", { from: "definition" }), "def f():\n    y: x = 1\n    return y\nf()\nxʹ2 = x + 1");
 });
+
+test("a class's annotation inside a function is evaluated, unless it is text (REACT-FACA-1)", () => {
+  // (asked for after the redefinition: the new name)
+  assert.equal(renameInCell("def f():\n    class C:\n        y: x\n    return C\nx = x + 1\nprint(f().__annotations__['y'])", "x", "x\u02b92", { from: "definition" }),
+    "def f():\n    class C:\n        y: x\u02b92\n    return C\nx\u02b92 = x + 1\nprint(f().__annotations__['y'])");
+  // (a method's local annotation is still never evaluated)
+  assert.equal(renameInCell("class C:\n    def m(self):\n        y: x = 1\n        return y\nx = x + 1", "x", "x\u02b92", { from: "definition" }), "class C:\n    def m(self):\n        y: x = 1\n        return y\nx\u02b92 = x + 1");
+  // (with `from __future__ import annotations` the annotation is its text: kept as written)
+  assert.equal(renameInCell("from __future__ import annotations\ndef f():\n    class C:\n        y: x\n    return C\nx = x + 1\nprint(f().__annotations__['y'])", "x", "x\u02b92", { from: "definition" }),
+    "from __future__ import annotations\ndef f():\n    class C:\n        y: x\n    return C\nx\u02b92 = x + 1\nprint(f().__annotations__['y'])");
+});
