@@ -1245,6 +1245,20 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   // and comments, if the counts agree
   const byLine = new Map<number, Occurrence[]>();
   for (const o of occ) (byLine.get(o.line) ?? byLine.set(o.line, []).get(o.line)!).push(o);
+  // (insertions at the end of an annotated assignment, on its last line:
+  // below; that line is rewritten too)
+  const extra = new Map<number, [number, number, string][]>();
+  if (opts.mode !== "sage") {
+    for (const o of occ) {
+      const st = annotated(o);
+      if (!st?.value) continue;
+      const endText = lines[st.end_lineno - 1];
+      if (endText === undefined || st.annotation.lineno !== o.line || st.annotation.end_lineno !== o.line) return null;
+      const at = byteSlice(endText, 0, st.end_col_offset).length;
+      (extra.get(st.end_lineno) ?? extra.set(st.end_lineno, []).get(st.end_lineno)!).push([at, at, `; ${name}: ${byteSlice(lines[o.line - 1], st.annotation.col_offset, st.annotation.end_col_offset)}`]);
+      if (!byLine.has(st.end_lineno)) byLine.set(st.end_lineno, []);
+    }
+  }
   for (const [ln, os] of byLine) {
     const text = lines[ln - 1];
     if (text === undefined) return null;
@@ -1271,20 +1285,23 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
       }
     } else {
       spans = os.map((o) => [byteSlice(text, 0, o.col).length, byteSlice(text, 0, o.end).length]);
-      // (`x: int = v`: the key stays x, the value goes to the new name)
+      // (`x: int = v`: the key stays x, the value goes to the new name,
+      // assigned first as Python does: `xʹ2 = v; x: int`, from the `=` itself,
+      // so the value keeps its grouping, REACT-EA5D-1, 2)
       for (let i = 0; i < os.length; i++) {
         const st = annotated(os[i]);
         if (!st?.value) continue;
-        const ann = st.annotation;
-        if (ann.lineno !== ln || ann.end_lineno !== ln || st.value.lineno !== ln) return null;
-        const end = byteSlice(text, 0, st.value.col_offset).length;
+        const annEnd = byteSlice(text, 0, st.annotation.end_col_offset).length;
+        const eq = /^[\s)]*=/.exec(text.slice(annEnd));
+        if (!eq) return null;
+        const end = annEnd + eq[0].length;
         if (os.some((o, j) => j !== i && spans[j][0] < end && spans[j][1] > spans[i][0])) return null;
-        reps.push([spans[i][0], end, `${name}: ${byteSlice(text, ann.col_offset, ann.end_col_offset)}; ${target.get(os[i])} = `]);
+        reps.push([spans[i][0], end, `${target.get(os[i])} =`]);
         spans[i] = [-1, -1];
       }
     }
     // (with the occurrence's replacement: `x as to` for an import of x)
-    reps.push(...spans.flatMap(([s, e], i) => { if (s < 0) return []; const t = target.get(os[i])!; return [[s, e, os[i].alias ? `${os[i].alias} as ${t}` : t] as [number, number, string]]; }));
+    reps.push(...spans.flatMap(([s, e], i) => { if (s < 0) return []; const t = target.get(os[i])!; return [[s, e, os[i].alias ? `${os[i].alias} as ${t}` : t] as [number, number, string]]; }), ...(extra.get(ln) ?? []));
     reps.sort((a, b) => b[0] - a[0]);
     let t = text;
     for (const [s, e, r] of reps) t = t.slice(0, s) + r + t.slice(e);
@@ -1295,7 +1312,15 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     const t = lines[marker.after - 1];
     lines.splice(marker.after - 1, 1, t.slice(0, marker.split) + SPLIT, marker.text, t.slice(marker.split));
   } else if (marker) lines.splice(marker.after, 0, marker.text);
-  return lines.join("\n");
+  const result = lines.join("\n");
+  // (and it is still Python: a rewrite that is not is refused, never
+  // returned broken, REACT-EA5D-1)
+  try {
+    parse(opts.mode === "sage" ? preparse(result) : result, "exec");
+  } catch {
+    return null;
+  }
+  return result;
 }
 
 // The spans of `name` as a whole word in a line, outside strings and comments
