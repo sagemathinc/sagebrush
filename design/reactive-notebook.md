@@ -493,6 +493,14 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     it neither binds nor annotates `x`. A simple annotation of a name
     declared global or nonlocal is an error, except at a module's top level
     (review of d304971). A line ending in `\` before `\r\n` continues too.
+
+    An annotation alone binds nothing. The analysis (src/dataflow.ts)
+    therefore no longer counts `x: int` as a definition at a module's top
+    level or in a class body, and `(x): int` nowhere. In a function, a
+    simple one makes `x` local, as in CPython. marimo counts them as
+    definitions, and strict mode still does. An attribute's or an item's
+    annotation evaluates the object and the index, and fetches nothing
+    (review of 44c5a65).
   - When a statement shares the prologue's logical line (`"doc"; print(x)`,
     or after a `\` on the next physical line), that line is split at the
     statement, with the initialization between. Otherwise the initialization

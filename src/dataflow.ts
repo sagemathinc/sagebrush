@@ -290,7 +290,22 @@ class Visitor {
   visit_AnnAssign(node: Node): void {
     if (node.value) this.visit(node.value);
     this.visit(node.annotation);
-    this.visit(node.target);
+    const t = node.target;
+    // (ours: an annotation alone binds nothing: `(x): int` nowhere, and
+    // `x: int` only makes x a function's local, as CPython does; one of an
+    // attribute or an item evaluates the object and the index, REACT-44C5-1)
+    if (!this.strict && !node.value) {
+      if (t._type === "Name") {
+        if (node.simple && this.blocks[this.blocks.length - 1].scope === Scope.Function) this.visit(t);
+        return;
+      }
+      if (t._type === "Attribute") return this.visit(t.value);
+      if (t._type === "Subscript") {
+        this.visit(t.value);
+        return this.visit(t.slice);
+      }
+    }
+    this.visit(t);
   }
   // (the first iterable is evaluated outside)
   comprehensionGenerators(gens: Node[]): void {

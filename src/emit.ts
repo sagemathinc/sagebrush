@@ -593,6 +593,13 @@ export class Emitter {
         return this.augAssign(st);
       case "AnnAssign":
         if (st.value !== null) this.w(this.assignCode(st.target, this.valueFirst(st.target, st.value)));
+        // (alone, one of an attribute or an item evaluates the object and the
+        // index, and fetches and stores nothing: REACT-44C5-3)
+        else if (st.target.k === "Attribute") this.w(`void (${this.ex(st.target.value)});`);
+        else if (st.target.k === "Subscript") {
+          this.w(`void (${this.ex(st.target.value)});`);
+          this.w(`void (${this.ex(st.target.index)});`);
+        }
         return;
       case "Return":
         if (this.fn.scope.kind !== "function") this.fail("'return' outside function");
