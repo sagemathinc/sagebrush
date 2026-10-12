@@ -565,6 +565,26 @@ While dragging, the moving box snaps to the edges and middles of the items in
 view within 6 pixels, and guide lines show what it lines up with. Alt
 turns snapping off. test-board.mjs drives all of this with the mouse.
 
+**The toolbar's menu, and Select** (October 12, William's design). "⋯" at
+the toolbar's end is a menu of every tool, each with:
+- its icon and name: click it to use the tool;
+- a checkbox: whether the tool is also on the toolbar.
+
+A mode that is on but not on the toolbar shows its icon on "⋯" (↖ ⋯). Later
+tools may need submenus. Which tools a board shows is a setting, not an
+edit: undo neither records nor reverts it.
+
+**Select** (↖): a drag on the background draws a rectangle selecting what it
+holds, with no Shift needed. Space-drag still pans, as do the wheel and two
+fingers. Select and Connect exclude each other, and Esc leaves either.
+
+In Edit, a press on an item never starts a text selection (an old one,
+which the browser would start dragging, is cleared). The board's ⋯ menu
+groups its items:
+- opening;
+- pages and Tidy;
+- printing and saving.
+
 ## Open questions
 
 - The editor for code items: a plain text area in a panel for now (Tab
