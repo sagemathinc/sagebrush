@@ -12,6 +12,12 @@ const cells = (codes: string[]) => codes.map((code, i) => ({ id: `c${i}`, stmts:
 const regression = (codes: string[], ops: Op[] = []): Case => ({ seed: 0, cells: cells(codes), ops });
 const stats = (): Stats => ({ compared: 0, refused: 0, unclean: 0, steps: 0, uncovered: 0 });
 
+// The cases that must run, not be refused: the reviews' controls (except
+// those of a call running what it is given, now refused by design), and a
+// plain definition made in a function declaring it global.
+const MUST_RUN = (what: string) =>
+  (/control/.test(what) && !/sorted|sum consumes|list consumes|generator consumed|list sort/.test(what)) || /definition made in a called function/.test(what);
+
 export const REGRESSIONS: [string, Case][] = [
   ["`y += 4` redefines y from the definition above", regression(["K = 7", "y = K", "y += 4\nprint(y)"])],
   ["a class reads its own name's previous definition in its body", regression(["class D:\n    a = 6", "class D:\n    def m0(self, p=D.a):\n        return p\n    a = 1\nprint(D.a, D().m0())", "print(D.a)"])],
@@ -138,14 +144,21 @@ export const REGRESSIONS: [string, Case][] = [
 
 // (sagebrush-codex's cases from its review of e555163, as it wrote them)
 for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-e555163.json", "utf8")) as { name: string; codes: string[] }[]) REGRESSIONS.push([`${c.name} (review of e555163)`, regression(c.codes)]);
+// (and of 87fd4d5, with the earlier reviews' cases it kept: `change` edits a cell)
+for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-87fd4d5.json", "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]) {
+  REGRESSIONS.push([`${c.name} (review of 87fd4d5)`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
+}
 
 test("the reactive notebook computes what plain Python does: the fuzzer's cases", { skip: !hasPython && "no python3" }, async () => {
   const k = new Kernel();
   try {
     const failed: string[] = [];
     for (const [what, c] of REGRESSIONS) {
-      const f = await runCase(k, c, stats());
+      const st = stats();
+      const f = await runCase(k, c, st);
       if (f) failed.push(`${what}\n${show(c)}\n${f.why}, ${f.cell} after step ${f.step}\n${f.detail}`);
+      // (a control must run: a refusal would pass the comparison unseen)
+      else if (MUST_RUN(what) && st.refused) failed.push(`${what}: ${st.refused} cells refused, expected to run`);
     }
     assert.deepEqual(failed, []);
   } finally {

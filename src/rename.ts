@@ -429,8 +429,8 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
 // the class (a method, `f = lambda: ...`) and not used in its body again,
 // or a def's default, later; anything else maybe.
 function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "maybe" {
-  const SAFE = new Set(["staticmethod", "classmethod", "property", "abstractmethod"]);
-  const plainDecorators = (f: any) => f.decorator_list.every((d: any) => (d._type === "Name" && SAFE.has(d.id) && !REBOUND.has(d.id)) || (d._type === "Attribute" && ["setter", "getter", "deleter"].includes(d.attr)));
+  // (a decorator is a call: whatever its name, it may run the function)
+  const plainDecorators = (f: any) => f.decorator_list.length === 0;
   // whether `name` is read in the class's body outside `except`
   const usedInClass = (name: string, except: any): boolean => {
     if (def._type !== "ClassDef") return false;
@@ -453,6 +453,11 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     if (FUTURE || def.decorator_list?.length || def.keywords?.length) return "maybe";
     if (o.path.slice(defIdx + 1).some(([n]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && !plainDecorators(n))) return "maybe";
     if (def._type === "ClassDef" && mentions(def.body, ["__annotations__", "__annotate__", "annotationlib", "get_annotations", "get_type_hints"])) return "maybe";
+    // (or a class body handing one of its functions to a call, which may ask)
+    if (def._type === "ClassDef") {
+      const fns = new Set<string>(def.body.filter((b: any) => b._type === "FunctionDef" || b._type === "AsyncFunctionDef").map((b: any) => b.name));
+      if (fns.size && passesAny(def.body, fns)) return "maybe";
+    }
     return "later";
   }
   for (let j = defIdx + 1; j < o.path.length; j++) {
@@ -479,26 +484,16 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
   return "now";
 }
 
-// Calls that run (or consume) what they are given before returning:
-// `list(x for ...)`, `sorted(xs, key=lambda ...)`.  Other calls may keep it
-// for later (`map`, `iter`, a decorator).
-const CONSUMERS = new Set(["list", "tuple", "set", "frozenset", "sum", "sorted", "min", "max", "any", "all"]);
-// (the names the cell being renamed binds anywhere: a `list` of its own is
-// not the builtin; and whether it has `from __future__ import annotations`)
-let REBOUND = new Set<string>();
+// Whether a lambda or generator (path entry j) is given to a call that runs
+// it before returning: never assumed.  A name, even list or sorted, may be
+// another cell's function, and builtins' arguments have roles (sum's start,
+// max's several arguments) that keep what they are given; a lambda or
+// generator given to any call may run later, and a read of the redefined
+// name in it is refused.
+const consumed = (_path: [any, string][], _j: number) => false;
+
+// (whether the cell being renamed has `from __future__ import annotations`)
 let FUTURE = false;
-const builtin = (call: any, names: Set<string>) => call?._type === "Call" && call.func._type === "Name" && names.has(call.func.id) && !REBOUND.has(call.func.id);
-// whether path entry j is given to a call that runs it at once: a generator
-// as a positional argument of a consumer, a lambda as the key of sorted,
-// min, max or a .sort(...)
-const consumed = (path: [any, string][], j: number) => {
-  const [n] = path[j];
-  const [p, pkey] = path[j - 1] ?? [null, ""];
-  if (n._type === "GeneratorExp") return pkey === "args" && builtin(p, CONSUMERS);
-  if (n._type !== "Lambda" || p?._type !== "keyword" || pkey !== "value" || p.arg !== "key") return false;
-  const call = path[j - 2]?.[0];
-  return builtin(call, new Set(["sorted", "min", "max"])) || (call?._type === "Call" && call.func._type === "Attribute" && call.func.attr === "sort");
-};
 
 // The outermost part of an occurrence's statement that runs later than it is
 // written: a function's body, a lambda's (unless called where it is
@@ -562,6 +557,8 @@ function usesOf(body: any[], fname: string): { stmt: number; line: number; col: 
         // (a try body may stop at any statement; an assert's message runs
         // only when it fails)
         ((t === "Try" || t === "TryStar") && (k === "body" || k === "handlers" || k === "orelse")) || t === "Match" && k === "cases" || (t === "Assert" && k === "msg") ||
+        // (a context manager may suppress an exception from its body)
+        ((t === "With" || t === "AsyncWith") && k === "body") ||
         ((t === "ListComp" || t === "SetComp" || t === "DictComp" || t === "GeneratorExp") && k !== "generators") || t === "comprehension" && k !== "iter";
       scan(n[k], stmt, later || deferred, maybe || cond, n, k);
     }
@@ -570,20 +567,12 @@ function usesOf(body: any[], fname: string): { stmt: number; line: number; col: 
   return out;
 }
 
-// The names a module binds anywhere, in any scope.
-function boundNames(tree: any): Set<string> {
-  const out = new Set<string>();
-  const scan = (n: any): void => {
-    if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) return n.forEach(scan);
-    if (n._type === "Name" && n.ctx?._type === "Store") out.add(n.id);
-    if ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef") && n.name) out.add(n.name);
-    if (n._type === "arg") out.add(n.arg);
-    if (n._type === "alias") out.add((n.asname ?? n.name).split(".")[0]);
-    for (const k of Object.keys(n)) if (k !== "_type") scan(n[k]);
-  };
-  scan(tree.body);
-  return out;
+// Whether code passes any of `names` to a call (as an argument).
+function passesAny(n: any, names: Set<string>): boolean {
+  if (!n || typeof n !== "object") return false;
+  if (Array.isArray(n)) return n.some((x) => passesAny(x, names));
+  if (n._type === "Call" && [...n.args, ...n.keywords.map((k: any) => k.value)].some((a: any) => a?._type === "Name" && names.has(a.id))) return true;
+  return Object.keys(n).some((k) => k !== "_type" && passesAny(n[k], names));
 }
 
 // Whether code mentions any of `names` (as names or attributes).
@@ -642,11 +631,19 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     if (!fname || !uses.length || uses.some((u) => !u.once) || !plainSetter(df.node, fname, body)) return null;
     // (and the call reaches the store: a statement of the function's body
     // itself, after no return or raise)
+    // (a def's own name is stored by the def statement itself: first.def)
     const i = first.path.findIndex(([n, key]) => n === df.node && key === "body");
-    const st = first.path[i + 1]?.[0];
+    const st = first.path[i + 1]?.[0] ?? first.def;
     const k = df.node.body.indexOf(st);
     const COMPOUND = new Set(["If", "For", "AsyncFor", "While", "Try", "TryStar", "With", "AsyncWith", "Match"]);
     if (k < 0 || COMPOUND.has(st._type) || df.node.body.slice(0, k).some((b: any) => exits(b))) return null;
+    // (and within it, the store is not after `and`/`or`, in a conditional
+    // expression's branch, an assert's message or a later comparison operand)
+    if (first.path.slice(i + 1).some(([n, key], j, rest) => {
+      const next = rest[j + 1]?.[0];
+      return (n._type === "BoolOp" && next && n.values.indexOf(next) > 0) || (n._type === "IfExp" && key !== "test") || (n._type === "Assert" && key === "msg") ||
+        (n._type === "Compare" && key === "comparators" && next && n.comparators.indexOf(next) > 0);
+    })) return null;
     at = uses.reduce((a, u) => (u.stmt < a.stmt || (u.stmt === a.stmt && before(u, a)) ? u : a));
     calls = uses.length;
   }
@@ -748,7 +745,6 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     const first = occ.find((o) => o.store);
     if (!first) return source;
     const old = opts.before ?? name;
-    REBOUND = boundNames(tree);
     FUTURE = tree.body.some((st: any) => st._type === "ImportFrom" && st.module === "__future__" && st.names.some((a: any) => a.name === "annotations"));
     const reads = whichReads(occ, first, tree.body);
     if (!reads) return null;

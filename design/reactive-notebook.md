@@ -643,3 +643,30 @@ reads the class by name.
 
 The review's 30 cases are in test/fuzz-cases-e555163.json, run by the
 fuzz test.
+
+**sagebrush-codex's review of 87fd4d5 (October 12).** Every list of
+"consumers" and "plain decorators" had a counterexample:
+- `sum([], gen)` keeps the generator as its start;
+- `max` returns one of its arguments;
+- `list` may be another cell's function;
+- `Box.sort(key=)` may store the key;
+- a `.setter` decorator may run its function.
+
+So none is assumed any more:
+- *Calls and decorators.* A lambda or generator given to any call, and a
+  decorated function whose body reads the redefined name, are refused.
+- *Setters.* A setter's store must also surely run within its statement
+  (not after and/or, in an assert message, a conditional branch or a later
+  comparison operand). A call inside a `with` body may not run (the
+  context manager may suppress an exception).
+- *Own annotations.* A class body handing one of its functions to a call
+  refuses the class's own annotations.
+- *Two regressions fixed.* A def's own name as a setter's store was
+  refused; it is now placed by the def statement itself. In pyjs, a
+  definition the enclosing scope declares global was qualified with the
+  scope's name; CPython uses the bare name, and so does pyjs now
+  (src/scope.ts).
+
+The fuzz test now loads the review's 96 cases
+(test/fuzz-cases-87fd4d5.json), and requires the controls to run, not
+just to avoid a wrong value (MUST_RUN).

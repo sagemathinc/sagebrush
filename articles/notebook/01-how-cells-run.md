@@ -131,9 +131,10 @@ say which definition a read gets:
 - a definition in code that may never run, or run more than once (a
   generator that is never consumed; a function the cell never calls, or
   calls under an `if`, in a loop, or twice when it reads the name first);
-- a function, lambda or generator given to a call that may keep it for
-  later (`map(lambda: x, ...)`; `sorted(..., key=lambda ...)` and
-  `list(... for ...)` run it at once);
+- a lambda or generator given to a call (`map(lambda: x, ...)`,
+  `sum(x for ...)`): the call may run it at once or keep it for later;
+- a function with a decorator, when its body reads the name (the
+  decorator may call it);
 - a function called while its class is being made (by the class body, a
   class decorator or a metaclass);
 - an annotation that may be asked for before the new definition, and

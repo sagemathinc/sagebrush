@@ -429,6 +429,11 @@ try {
   await run([0, 1, 2]);
   ok(/^C C C\.m f <__main__\.C object at/.test(await out(1)) && (await out(2)) === "C", `renamed definitions keep their names (${await out(1)} | ${await out(2)})`);
 
+  // a definition the class body declares global is qualified as the module's (as CPython)
+  await set(["class Outer:\n    global gf, GC\n    def gf():\n        pass\n    class GC:\n        pass\nprint(gf.__qualname__, GC.__qualname__)"]);
+  await run(0);
+  ok((await out(0)) === "gf GC", `global definitions in a class body: module qualified names (${await out(0)})`);
+
   // fourth review, F16: verify compares an SVG's text as text
   await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"80\"><text x=\"0\" y=\"30\">id=\"sbclip'+str(v[0])+'\"</text></svg>'))"]);
   await run([0, 1, 2]);
