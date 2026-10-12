@@ -544,6 +544,27 @@ empty leaves no step. web/board/test-mobile.mjs (15 checks) runs an iPhone
 viewport with touch events and a keyboard simulated by shrinking the
 viewport, and is in CI.
 
+**Selecting several, and alignment** (October 12), in Edit:
+- shift-click adds an item to the selection, or takes it out;
+- shift-drag on the background draws a rectangle selecting what it holds,
+  while a plain drag still pans and a click on the background selects
+  nothing;
+- Ctrl+A selects everything at the top level.
+
+Dragging one of several selected items moves them all. These all apply to
+the selection:
+- Delete;
+- the arrow keys (Shift: 10);
+- Ctrl+D, duplicating;
+- copy, cut and paste: the page's own clipboard events, so no permission is
+  asked. The edges among the items go along. Pasted items get new ids and
+  go beside the originals, or in the middle of the view on another board.
+  Pasting plain text makes a note of it.
+
+While dragging, the moving box snaps to the edges and middles of the items in
+view within 6 pixels, and guide lines show what it lines up with. Alt
+turns snapping off. test-board.mjs drives all of this with the mouse.
+
 ## Open questions
 
 - The editor for code items: a plain text area in a panel for now (Tab

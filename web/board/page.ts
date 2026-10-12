@@ -212,6 +212,8 @@ $("next").onclick = () => step(at + 1);
 $("fit").onclick = () => board.focus();
 addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
+  // (items selected in Edit: the arrow keys move them)
+  if (editor.hasSelection && e.key.startsWith("Arrow")) return;
   if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
   else if (e.key === "ArrowLeft") step(at - 1);
   else if (e.key === "Escape" || e.key === "0") step(-1);

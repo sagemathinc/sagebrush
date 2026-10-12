@@ -48,9 +48,11 @@ export class Editor {
   readonly connecting = signal(false);
   private connectFrom: string | null = null;
   get on() { return this.editing.value; }
+  /** whether items are selected in Edit (the arrow keys then move them) */
+  get hasSelection() { return this.on && this.selected.length > 0; }
   private undos: string[] = [];
   private redos: string[] = [];
-  private selected: string | null = null;
+  private selected: string[] = [];
   private edgeSel: number | null = null; // the selected edge: its index in the page's edges
   private panel: HTMLElement | null = null;
   /** Run a code item (its code is as it was: a changed one runs as the board is laid out again) */
@@ -72,7 +74,12 @@ export class Editor {
       this.openEdge(ed.src);
       return true;
     };
+    board.onBackgroundDown = (e) => this.backgroundDown(e);
     addEventListener("keydown", (e) => this.key(e));
+    // copying, cutting and pasting items (the page's own clipboard events: no permission asked)
+    document.addEventListener("copy", (e) => this.clip(e, false));
+    document.addEventListener("cut", (e) => this.clip(e, true));
+    document.addEventListener("paste", (e) => this.paste(e));
     effect(() => {
       const on = this.editing.value;
       if (!on) { this.select(null); this.close(); this.connecting.value = false; }
@@ -122,10 +129,46 @@ export class Editor {
 
   /** Nothing selected, no note open (another page is shown). */
   clear() { this.select(null); this.selectEdge(null); this.close(); }
-  private select(id: string | null) {
-    this.selected = id;
-    this.board.select(id);
-    if (id) this.selectEdge(null);
+  private select(ids: string | string[] | null) {
+    this.selected = ids === null ? [] : typeof ids === "string" ? [ids] : [...new Set(ids)];
+    this.board.select(this.selected);
+    if (this.selected.length) this.selectEdge(null);
+  }
+  /** The selected items not inside another selected one (what moves, copies, deletes). */
+  private topSelected(d: BoardDoc): string[] {
+    const sel = new Set(this.selected);
+    return this.selected.filter((id) => {
+      for (let f = find(this.pg(d), id); f?.parent; f = find(this.pg(d), f.parent.id)) if (sel.has(f.parent.id)) return false;
+      return true;
+    });
+  }
+
+  // A press on the background: with shift, a rectangle selecting what it
+  // holds; a click (not a drag, which pans) selects nothing.
+  private backgroundDown(e: PointerEvent): boolean {
+    if (!this.on || this.panel || this.connecting.value) return false;
+    if (!e.shiftKey) {
+      const x0 = e.clientX, y0 = e.clientY;
+      addEventListener("pointerup", (u) => { if (Math.hypot(u.clientX - x0, u.clientY - y0) < 4) { this.select(null); this.selectEdge(null); } }, { once: true });
+      return false;
+    }
+    const a = this.board.toWorld(e.clientX, e.clientY);
+    const move = (m: PointerEvent) => {
+      const b = this.board.toWorld(m.clientX, m.clientY);
+      this.board.marquee = { x0: a.x, y0: a.y, x1: b.x, y1: b.y };
+      this.board.request();
+    };
+    const up = (u: PointerEvent) => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      const b = this.board.toWorld(u.clientX, u.clientY);
+      this.board.marquee = null;
+      const inside = this.board.itemsIn(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)).map((it) => it.id);
+      this.select([...this.selected, ...inside]);
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    return true;
   }
   // (an edge is selected by its index in the document, and drawn so by its
   // id in the layout, found again after each layout)
@@ -167,8 +210,12 @@ export class Editor {
       });
       return true;
     }
+    // (shift-click: add to the selection, or take out of it)
+    const toggle = () => this.select(this.selected.includes(it.id) ? this.selected.filter((x) => x !== it.id) : [...this.selected, it.id]);
+    if (e.shiftKey && it.kind !== "note") { toggle(); return true; }
     if (e.shiftKey && it.kind === "note") {
       // connect: a dashed line to the pointer, an edge where it is let go
+      const x0 = e.clientX, y0 = e.clientY;
       const move = (m: PointerEvent) => {
         const w = this.board.toWorld(m.clientX, m.clientY);
         this.board.pending = { from: it.id, x: w.x, y: w.y };
@@ -185,29 +232,40 @@ export class Editor {
             const p = this.pg(d);
             if (!(p.edges ?? []).some((x) => x.from === it.id && x.to === to.id)) (p.edges ??= []).push({ from: it.id, to: to.id });
           });
-        }
+        } else if (Math.hypot(u.clientX - x0, u.clientY - y0) < 4) toggle();
       };
       addEventListener("pointermove", move);
       addEventListener("pointerup", up);
       return true;
     }
-    // drag (or, not moved, select)
+    // drag (or, not moved, select): the selection, if this is one of several selected
     const d0 = this.doc(), f = d0 && find(this.pg(d0), it.id);
     if (!f) return false;
-    const moving = ids(f.node), self = new Set(moving);
+    const several = this.selected.length > 1 && this.selected.includes(it.id) ? this.topSelected(d0!) : null;
+    const moving = several ? [...new Set(several.flatMap((id) => { const g = find(this.pg(d0!), id); return g ? ids(g.node) : []; }))] : ids(f.node), self = new Set(moving);
     const from = f.parent?.id ?? null;
+    const snap = this.snapper(several ?? [it.id], self);
     // (where it would go if let go here: the innermost group under the
     // pointer, not itself or inside it; or the top level)
     const targetAt = (cx: number, cy: number) => { const w = this.board.toWorld(cx, cy); return this.board.groupsAt(w.x, w.y, self)[0]?.id ?? null; };
     let last = { x: e.clientX, y: e.clientY }, dist = 0;
+    // (the pointer's offset since the press, and how far the items have moved: they differ by the snapping)
+    const raw = { x: 0, y: 0 }, applied = { x: 0, y: 0 };
     const move = (m: PointerEvent) => {
-      const dx = (m.clientX - last.x) / z(), dy = (m.clientY - last.y) / z();
+      raw.x += (m.clientX - last.x) / z();
+      raw.y += (m.clientY - last.y) / z();
       dist += Math.abs(m.clientX - last.x) + Math.abs(m.clientY - last.y);
       last = { x: m.clientX, y: m.clientY };
       if (dist > 3) {
-        this.board.translate(moving, dx, dy);
-        const t = targetAt(m.clientX, m.clientY);
-        this.board.dropTarget = t !== from ? t : null;
+        const to = m.altKey ? { x: raw.x, y: raw.y, xs: [], ys: [] } : snap(raw.x, raw.y);
+        this.board.translate(moving, to.x - applied.x, to.y - applied.y);
+        applied.x = to.x;
+        applied.y = to.y;
+        this.board.guides = to.xs.length || to.ys.length ? { xs: to.xs, ys: to.ys } : null;
+        if (!several) {
+          const t = targetAt(m.clientX, m.clientY);
+          this.board.dropTarget = t !== from ? t : null;
+        }
       }
     };
     const up = (u: PointerEvent) => {
@@ -215,6 +273,21 @@ export class Editor {
       removeEventListener("pointerup", up);
       removeEventListener("pointercancel", up);
       this.board.dropTarget = null;
+      this.board.guides = null;
+      this.board.request();
+      if (several) {
+        if (dist <= 3) return;
+        // (each where it was let go, in its group; the others keep their places)
+        this.commit((d) => {
+          for (const id of several) {
+            const g = find(this.pg(d), id);
+            if (!g) continue;
+            this.freezeUp(d, g);
+            this.contain(g.parent, g.siblings);
+          }
+        });
+        return;
+      }
       if (dist <= 3) { this.select(it.id); return; }
       this.select(it.id);
       const target = u.type === "pointercancel" ? from : targetAt(u.clientX, u.clientY);
@@ -245,6 +318,124 @@ export class Editor {
     addEventListener("pointerup", up);
     addEventListener("pointercancel", up);
     return true;
+  }
+
+  // Alignment while dragging: the moving items' box, its edges and middle,
+  // snaps to those of the items in view (not moving, not around them) within
+  // 6 pixels; returns the offset to apply, and the guides to draw.
+  private snapper(top: string[], self: Set<string>) {
+    const boxes = top.map((id) => this.board.item(id)).filter((b): b is Item => !!b);
+    const x0 = Math.min(...boxes.map((b) => b.x)), y0 = Math.min(...boxes.map((b) => b.y));
+    const x1 = Math.max(...boxes.map((b) => b.x + b.w)), y1 = Math.max(...boxes.map((b) => b.y + b.h));
+    const v = this.board.view();
+    const around = (o: Item) => o.x <= x0 && o.y <= y0 && o.x + o.w >= x1 && o.y + o.h >= y1;
+    const others = this.board.itemsIn(v.x0 - 1e6, v.y0 - 1e6, v.x1 + 1e6, v.y1 + 1e6)
+      .filter((o) => !self.has(o.id) && !around(o) && o.x < v.x1 && o.x + o.w > v.x0 && o.y < v.y1 && o.y + o.h > v.y0);
+    const xs = others.flatMap((o) => [o.x, o.x + o.w / 2, o.x + o.w]), ys = others.flatMap((o) => [o.y, o.y + o.h / 2, o.y + o.h]);
+    const best = (lines: number[], edges: number[]) => {
+      const tol = 6 / this.board.camera.z;
+      let d = Infinity, at: number[] = [];
+      for (const l of lines) for (const e of edges) {
+        const k = l - e;
+        if (Math.abs(k) > tol || Math.abs(k) > Math.abs(d) + 1e-6) continue;
+        if (Math.abs(Math.abs(k) - Math.abs(d)) < 1e-6) at.push(l);
+        else { d = k; at = [l]; }
+      }
+      return { d: Number.isFinite(d) ? d : 0, at: Number.isFinite(d) ? [...new Set(at)] : [] };
+    };
+    return (dx: number, dy: number) => {
+      if (!boxes.length) return { x: dx, y: dy, xs: [] as number[], ys: [] as number[] };
+      const bx = best(xs, [x0 + dx, (x0 + x1) / 2 + dx, x1 + dx]), by = best(ys, [y0 + dy, (y0 + y1) / 2 + dy, y1 + dy]);
+      return { x: dx + bx.d, y: dy + by.d, xs: bx.at, ys: by.at };
+    };
+  }
+
+  // The selection as a clipboard's text (and in it, its edges); pasted
+  // back, with new ids, beside where it was (another board: in the middle
+  // of the view).  Text that is not one is a new note.
+  private copied(): string | null {
+    const d = this.doc();
+    if (!d || !this.selected.length) return null;
+    const nodes = this.topSelected(d).map((id) => find(this.pg(d), id)?.node).filter((n): n is DocNode => !!n);
+    const inside = new Set(nodes.flatMap(ids));
+    const edges = (this.pg(d).edges ?? []).filter((e) => inside.has(e.from) && inside.has(e.to));
+    // (positions in the world, to paste beside)
+    const at = Object.fromEntries(nodes.map((n) => [n.id, this.board.item(n.id)]).filter(([, it]) => it).map(([id, it]) => [id, { x: (it as Item).x, y: (it as Item).y }]));
+    return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at });
+  }
+  private clip(e: ClipboardEvent, cut: boolean) {
+    if (!this.on || this.panel || this.typing()) return;
+    const text = this.copied();
+    if (!text) return;
+    e.preventDefault();
+    e.clipboardData?.setData("text/plain", text);
+    if (cut) this.deleteSelected();
+  }
+  private paste(e: ClipboardEvent) {
+    if (!this.on || this.panel || this.typing()) return;
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (!text.trim()) return;
+    e.preventDefault();
+    this.insert(text);
+  }
+  private typing() {
+    const a = document.activeElement;
+    return a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement || (a as HTMLElement | null)?.isContentEditable;
+  }
+  private insert(text: string) {
+    let data: { nodes: DocNode[]; edges: DocEdge[]; at?: Record<string, { x: number; y: number }> } | null = null;
+    try {
+      const j = JSON.parse(text);
+      if (j?.["sagebrush-board"] && Array.isArray(j.nodes)) data = j;
+    } catch {}
+    const v = this.board.view(), cx = (v.x0 + v.x1) / 2, cy = (v.y0 + v.y1) / 2;
+    if (!data) {
+      // (plain text: a note holding it)
+      const id = "n" + Math.random().toString(36).slice(2, 8);
+      return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, text: text.trim(), x: Math.round(cx - 130), y: Math.round(cy - 30) }); }).then(() => this.select(id));
+    }
+    const fresh = new Map<string, string>();
+    const renew = (n: DocNode): DocNode => {
+      const id = (n.kind === "group" ? "g" : "n") + Math.random().toString(36).slice(2, 8);
+      fresh.set(n.id, id);
+      return n.kind === "group" ? { ...n, id, children: n.children.map(renew) } : { ...n, id };
+    };
+    const nodes = data.nodes.map(renew);
+    nodes.forEach((n, i) => {
+      const was = data!.at?.[data!.nodes[i].id];
+      n.x = Math.round(was ? was.x + 24 : cx - 130 + 24 * i);
+      n.y = Math.round(was ? was.y + 24 : cy - 30 + 24 * i);
+    });
+    const edges = data.edges.filter((e) => fresh.has(e.from) && fresh.has(e.to)).map((e) => ({ ...e, from: fresh.get(e.from)!, to: fresh.get(e.to)! }));
+    return this.commit((d) => {
+      const p = this.pg(d);
+      p.nodes ??= [];
+      this.freeze(d, null, p.nodes);
+      p.nodes.push(...nodes);
+      if (edges.length) (p.edges ??= []).push(...edges);
+    }).then(() => this.select(nodes.map((n) => n.id)));
+  }
+  private deleteSelected() {
+    const d = this.doc();
+    if (!d) return;
+    const gone = this.topSelected(d);
+    this.select(null);
+    this.commit((d) => { for (const id of gone) remove(this.pg(d), id); });
+  }
+  // the selection moved by (dx, dy) world units, each in its group
+  private nudge(dx: number, dy: number) {
+    const d0 = this.doc();
+    if (!d0) return;
+    const top = this.topSelected(d0);
+    this.board.translate([...new Set(top.flatMap((id) => { const g = find(this.pg(d0), id); return g ? ids(g.node) : []; }))], dx, dy);
+    this.commit((d) => {
+      for (const id of top) {
+        const g = find(this.pg(d), id);
+        if (!g) continue;
+        this.freezeUp(d, g);
+        this.contain(g.parent, g.siblings);
+      }
+    });
   }
 
   // A container's members, and every enclosing group's, keep their places.
@@ -490,10 +681,13 @@ export class Editor {
     else if ((e.key === "Delete" || e.key === "Backspace") && this.edgeSel !== null) this.deleteEdge(this.edgeSel);
     else if (e.key === "Enter" && this.edgeSel !== null) this.openEdge(this.edgeSel);
     else if (e.key === "Escape" && this.edgeSel !== null) this.selectEdge(null);
-    else if ((e.key === "Delete" || e.key === "Backspace") && this.selected) { const id = this.selected; this.select(null); this.commit((d) => remove(this.pg(d), id)); }
-    else if (e.key === "Enter" && this.selected) this.open(this.selected);
+    else if ((e.key === "Delete" || e.key === "Backspace") && this.selected.length) this.deleteSelected();
+    else if (e.key === "Enter" && this.selected.length === 1) this.open(this.selected[0]);
+    else if (mod && e.key.toLowerCase() === "d" && this.selected.length) { const t = this.copied(); if (t) this.insert(t); }
+    else if (mod && e.key.toLowerCase() === "a") this.select(this.board.itemsIn(-1e9, -1e9, 1e9, 1e9).filter((it) => !it.parent).map((it) => it.id));
+    else if (e.key.startsWith("Arrow") && this.selected.length) { const k = e.shiftKey ? 10 : 1; this.nudge(e.key === "ArrowLeft" ? -k : e.key === "ArrowRight" ? k : 0, e.key === "ArrowUp" ? -k : e.key === "ArrowDown" ? k : 0); }
     else if (e.key === "Escape" && this.connecting.value) this.connecting.value = false;
-    else if (e.key === "Escape" && this.selected) this.select(null);
+    else if (e.key === "Escape" && this.selected.length) this.select(null);
     else return;
     e.preventDefault();
     e.stopImmediatePropagation();

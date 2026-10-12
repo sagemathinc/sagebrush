@@ -123,6 +123,11 @@ export class Board {
   private edges: Edge[] = [];
   /** an edge being drawn: from an item to a world point */
   pending: { from: string; x: number; y: number } | null = null;
+  /** a rectangle being drawn to select what it holds, and the alignment guides of a drag (world coordinates) */
+  marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  guides: { xs: number[]; ys: number[] } | null = null;
+  /** a press on the background (no item there): return true to take it (the board does not pan) */
+  onBackgroundDown: ((e: PointerEvent) => boolean) | null = null;
   private byId = new Map<string, Item>();
   private close = false;
   private flight = 0;
@@ -141,7 +146,7 @@ export class Board {
   /** an edge drawn selected, and a group outlined as where a dragged item would go */
   selectedEdge: string | null = null;
   dropTarget: string | null = null;
-  private selected: string | null = null;
+  private selection = new Set<string>();
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
   private paths = new Map<string, Path2D>();
@@ -333,7 +338,7 @@ export class Board {
         el = this.itemEl(it);
         this.cache.set(it.id, el);
       }
-      el.classList.toggle("selected", it.id === this.selected);
+      el.classList.toggle("selected", this.selection.has(it.id));
       if (el.dataset.untypeset) { delete el.dataset.untypeset; this.typesetSoon(el); }
       frag.append(el);
       this.mounted.set(it.id, el);
@@ -674,6 +679,23 @@ export class Board {
       ctx.stroke(p);
       n++;
     }
+    // the selection rectangle being drawn, and a drag's alignment guides
+    if (this.marquee) {
+      const m = this.marquee;
+      ctx.fillStyle = "rgba(42, 111, 47, .08)";
+      ctx.strokeStyle = "rgba(42, 111, 47, .7)";
+      ctx.lineWidth = 1 / c.z;
+      ctx.fillRect(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1), Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0));
+      ctx.strokeRect(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1), Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0));
+    }
+    if (this.guides) {
+      ctx.strokeStyle = "#d6336c";
+      ctx.lineWidth = 1 / c.z;
+      ctx.beginPath();
+      for (const x of this.guides.xs) { ctx.moveTo(x, v.y0); ctx.lineTo(x, v.y1); }
+      for (const y of this.guides.ys) { ctx.moveTo(v.x0, y); ctx.lineTo(v.x1, y); }
+      ctx.stroke();
+    }
     this.stats.drawn = n;
   }
 
@@ -712,10 +734,17 @@ export class Board {
     this.request();
   }
   /** Outline one item (or none). */
-  select(id: string | null) {
-    if (this.selected) this.cache.get(this.selected)?.classList.remove("selected");
-    this.selected = id;
-    if (id) this.cache.get(id)?.classList.add("selected");
+  /** Outline these items (one, several, or none). */
+  select(ids: string | string[] | null) {
+    for (const id of this.selection) this.cache.get(id)?.classList.remove("selected");
+    this.selection = new Set(ids === null ? [] : typeof ids === "string" ? [ids] : ids);
+    for (const id of this.selection) this.cache.get(id)?.classList.add("selected");
+    this.request();
+  }
+
+  /** The notes and groups wholly inside a world rectangle. */
+  itemsIn(x0: number, y0: number, x1: number, y1: number): Item[] {
+    return [...this.boxes.query(x0, y0, x1, y1, new Set())].filter((it) => (it.kind === "note" || it.kind === "group") && it.x >= x0 && it.y >= y0 && it.x + it.w <= x1 && it.y + it.h <= y1);
   }
 
   /** An edge's route, or its straight line from border to border (world coordinates). */
@@ -799,6 +828,7 @@ export class Board {
         const ed = it?.kind !== "note" && this.onEdgeDown ? this.edgeAt(e.clientX - r.left, e.clientY - r.top) : null;
         if (ed && this.onEdgeDown!(ed, e)) return;
         if (it && this.onItemDown(it, e)) return;
+        if (!it && !ed && this.onBackgroundDown?.(e)) return;
       }
       down.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.el.setPointerCapture(e.pointerId);
