@@ -775,6 +775,9 @@ const compare = (op: string, a: K, b: K): boolean | undefined => {
 };
 const known = (e: any, want: boolean) => { const x = konst(e); return x !== undefined && truth(x) === want; };
 const nonEmpty = (it: any) => ["List", "Tuple", "Set"].includes(it?._type) && it.elts.length > 0 && !it.elts.some((e: any) => e._type === "Starred");
+// (whether a loop's body may leave an iteration early, skipping what follows:
+// a break or continue anywhere in it, conservatively, REACT-8C82-3)
+const leaves = (n: any): boolean => !!n && typeof n === "object" && (Array.isArray(n) ? n.some(leaves) : n._type === "Break" || n._type === "Continue" || (!["FunctionDef", "AsyncFunctionDef", "ClassDef", "Lambda"].includes(n._type) && Object.keys(n).some((k) => k !== "_type" && leaves(n[k]))));
 // (a statement that cannot raise before it binds: `x = 2`)
 const safe = (st: any) => (st?._type === "Assign" || st?._type === "AnnAssign") && st.value?._type === "Constant" && [st.targets ?? [st.target]].flat().every((t: any) => t._type === "Name");
 const mayskip = ([n, k]: [any, string], next: any) =>
@@ -783,7 +786,7 @@ const mayskip = ([n, k]: [any, string], next: any) =>
   (n._type === "Compare" && k === "comparators" && next && n.comparators.indexOf(next) > 0 &&
     !known({ _type: "Compare", left: n.left, ops: n.ops.slice(0, n.comparators.indexOf(next)), comparators: n.comparators.slice(0, n.comparators.indexOf(next)) }, true)) ||
   (n._type === "Assert" && k === "msg") ||
-  ((n._type === "For" || n._type === "AsyncFor") && (k === "orelse" || ((k === "body" || k === "target") && !nonEmpty(n.iter)))) ||
+  ((n._type === "For" || n._type === "AsyncFor") && (k === "orelse" || ((k === "body" || k === "target") && !nonEmpty(n.iter)) || (k === "body" && leaves(n.body)))) ||
   (n._type === "While" && (k === "body" || k === "orelse")) ||
   ((n._type === "Try" || n._type === "TryStar") && k !== "finalbody" && !(k === "body" && safe(n.body[0]) && n.body[0] === next)) ||
   ((n._type === "With" || n._type === "AsyncWith") && k === "body") ||
@@ -1062,24 +1065,30 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
 }
 
 /** A page-order scoping initialization line (renameInCell): `to` is `from`'s value, if `from` is bound. */
-export const initLine = (to: string, from: string) => `if '${from}' in (lambda: 0).__globals__ or hasattr(__import__('builtins'), '${from}'): ${to} = ${from}  # page-order scoping`;
+// (no name of the cell's is read but `from`: a user's hasattr or __import__
+// would be called, and the graph would see them read, REACT-8C82-2)
+// (and `from` is read in a lambda, another scope: a `global x` outside any
+// function may follow, which a use of x before it would make an error)
+export const initLine = (to: string, from: string) => `if '${from}' in (lambda: 0).__globals__ or '${from}' in (lambda: 0).__builtins__: ${to} = (lambda: ${from})()  # page-order scoping`;
 
 /**
- * The initialization lines page-order scoping put at the top of a cell:
- * the code without them, and the [new, previous] names they bind.  pyjs
- * runs them as statements of the cell's first line, so its line numbers are
- * the cell's as written.
+ * The initialization lines page-order scoping put in a cell (after its
+ * docstring and __future__ imports): the code without them, and for each
+ * the [new, previous] names and how many of the cell's lines come before it.
+ * pyjs runs them as statements there, on the next statement's line, so its
+ * line numbers are the cell's as written.
  */
-export function takeInitLines(code: string): { code: string; inits: [string, string][] } {
-  const inits: [string, string][] = [];
+export function takeInitLines(code: string): { code: string; inits: [string, string, number][] } {
+  const inits: [string, string, number][] = [];
   const N = "[\\p{L}_][\\p{L}\\p{N}\\p{Mn}\\p{Mc}_\\u02b9]*";
-  const re = new RegExp(`^if '(${N})' in \\(lambda: 0\\)\\.__globals__ or hasattr\\(__import__\\('builtins'\\), '\\1'\\): (${N}) = \\1  # page-order scoping\\n`, "u");
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(code))) {
-    inits.push([m[2], m[1]]);
-    code = code.slice(m[0].length);
+  const re = new RegExp(`^if '(${N})' in \\(lambda: 0\\)\\.__globals__ or '\\1' in \\(lambda: 0\\)\\.__builtins__: (${N}) = \\(lambda: \\1\\)\\(\\)  # page-order scoping$`, "u");
+  const kept: string[] = [];
+  for (const line of code.split("\n")) {
+    const m = re.exec(line);
+    if (m) inits.push([m[2], m[1], kept.length]);
+    else kept.push(line);
   }
-  return { code, inits };
+  return inits.length ? { code: kept.join("\n"), inits } : { code, inits };
 }
 
 /**
@@ -1104,9 +1113,11 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   // each occurrence's new name: `to`, or (from the definition) `before` for those before it
   const target = new Map<Occurrence, string>();
   let prefix: { line: number; text: string } | null = null;
-  let marker: string | null = null;
+  let marker: { after: number; text: string } | null = null;
   if (opts.from === "definition") {
-    const first = occ.find((o) => o.store);
+    // (the first that binds: a bare annotation, `x: int`, binds nothing, REACT-8C82-4)
+    const bare = (o: Occurrence) => o.path.at(-1)?.[0]._type === "AnnAssign" && o.path.at(-1)?.[1] === "target" && o.path.at(-1)?.[0].value == null;
+    const first = occ.find((o) => o.store && !bare(o)) ?? occ.find((o) => o.store);
     if (!first) return source;
     const old = opts.before ?? name;
     SOURCE = aLines;
@@ -1122,14 +1133,27 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     // on the first statement's line, so the cell's line numbers are kept;
     // the graph sees the read of the previous name.
     const plainFirst = !first.global && deferredOf(first) === null;
-    let init = plainFirst && !surely(first, 0);
+    // (not where annotations naming it are kept as their text, which
+    // renaming would change: REACT-8C82-1)
+    const canInit = !(FUTURE && occ.some((o) => deferredOf(o)?.kind === "annotation"));
+    let init = canInit && plainFirst && !surely(first, 0);
     let reads = init ? null : whichReads(occ, first, tree.body);
-    // (a binding in a function the analysis cannot place: initialized too,
-    // unless annotations are kept as their text, which renaming would change)
-    if (!init && !reads && !plainFirst && !FUTURE) init = true;
+    // (a binding in a function the analysis cannot place: initialized too)
+    if (!init && !reads && !plainFirst && canInit) init = true;
     if (!init && !reads) return null;
     for (const o of occ) target.set(o, !init && reads!.get(o) === "old" ? old : to);
-    if (init) marker = initLine(to, old);
+    // (a `global x` outside any function, which does nothing, keeps its name:
+    // as `global xʹ2` after the initialization it would be an error, an
+    // assignment before the global declaration, REACT-8C82-1)
+    if (init) for (const o of occ) if (o.global && !o.path.some(([n, k]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef") && k === "body")) target.set(o, name);
+    // (after the module's prologue, its docstring and __future__ imports,
+    // which must come first: REACT-8C82-1)
+    if (init) {
+      let k = 0;
+      if (tree.body[0]?._type === "Expr" && tree.body[0].value?._type === "Constant" && typeof tree.body[0].value.value === "string") k++;
+      while (tree.body[k]?._type === "ImportFrom" && tree.body[k].module === "__future__") k++;
+      marker = { after: k ? tree.body[k - 1].end_lineno : 0, text: initLine(to, old) };
+    }
     // `x += 1` defining the new x: `xʹ2 = x; xʹ2 += 1` (at the top level only)
     const aug = first.path.at(-1);
     if (!init && aug?.[0]._type === "AugAssign" && aug[1] === "target") {
@@ -1183,7 +1207,8 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     lines[ln - 1] = t;
   }
   if (prefix) lines[prefix.line - 1] = prefix.text + lines[prefix.line - 1];
-  return (marker ? marker + "\n" : "") + lines.join("\n");
+  if (marker) lines.splice(marker.after, 0, marker.text);
+  return lines.join("\n");
 }
 
 // The spans of `name` as a whole word in a line, outside strings and comments

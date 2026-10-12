@@ -261,6 +261,9 @@ getset(fnType, "__globals__", (f) => {
   const g = f.$globals[NS_GLOBALS] ?? f.$globals;
   return g[NS_DICT] ?? globalsDict(g);
 });
+// (the builtins' namespace, as CPython 3.10's functions have it: page-order
+// scoping's initialization line reads it, src/rename.ts initLine)
+getset(fnType, "__builtins__", () => getattr(hooks.importModule("builtins"), "__dict__"));
 // A code object describing a compiled function's signature (no bytecode).
 export class FnCode {
   constructor(public f: any) {}

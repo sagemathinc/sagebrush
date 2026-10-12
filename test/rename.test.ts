@@ -74,7 +74,7 @@ test("review cases: compound statements, class attributes, x += 1, Sage var (REA
   // a use in a loop before the definition in that loop, a loop that may not
   // run: the new name starts as the previous value and every occurrence is
   // the new name (before William's decision of October 12: refused)
-  assert.deepEqual(q(["x = 10", "while x < 20:\n    x = x + 1"], "x"), { c1: "if 'x' in (lambda: 0).__globals__ or hasattr(__import__('builtins'), 'x'): xʹ2 = x  # page-order scoping\nwhile xʹ2 < 20:\n    xʹ2 = xʹ2 + 1" });
+  assert.deepEqual(q(["x = 10", "while x < 20:\n    x = x + 1"], "x"), { c1: "if 'x' in (lambda: 0).__globals__ or 'x' in (lambda: 0).__builtins__: xʹ2 = (lambda: x)()  # page-order scoping\nwhile xʹ2 < 20:\n    xʹ2 = xʹ2 + 1" });
   // methods do not see class attributes
   assert.deepEqual(q(["x = 1", "x = 2\nclass C:\n    x = 100\n    def f(self):\n        return x", "print(C().f(), x)"], "x"), {
     c1: "x\u02b92 = 2\nclass C:\n    x = 100\n    def f(self):\n        return x\u02b92", c2: "print(C().f(), x\u02b92)",

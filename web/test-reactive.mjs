@@ -555,6 +555,13 @@ try {
   await run(1);
   const tb = await out(1);
   ok(/line 4/.test(tb) && /ZeroDivisionError/.test(tb) && !/\u02b9|page-order/.test(tb), `its traceback has the line as written, and no internal names (${JSON.stringify(tb)})`);
+  // (the initialization reads no name of the cell's but the previous one:
+  // a user's hasattr is not called; it comes after a docstring and a
+  // __future__ import; a `global w` outside functions stays legal:
+  // sagebrush-codex's REACT-8C82-1, -2)
+  await set(["w = 1\nhasattr = 7\n__import__ = 8", "'''doc'''\nfrom __future__ import annotations\nglobal w\nif False:\n    w = 2\nprint('W', w, __doc__)", "print('V', w)"]);
+  r = await run([0, 1, 2]);
+  ok(JSON.stringify(r?.errors) === "[]" && /^W 1 (doc|None)$/.test(await out(1)) && (await out(2)) === "V 1", `the initialization after the prologue, with a global and a user's hasattr (${await out(1)}, ${await out(2)}; ${JSON.stringify(r)})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {

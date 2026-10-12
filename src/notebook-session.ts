@@ -246,22 +246,26 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // the first statement's line, so the cell's line numbers are as written)
         const { code, inits } = takeInitLines(m.code);
         const initialize = (t: any) => {
-          const ln = t.body[0]?.lineno ?? 1, pos = { lineno: ln, col_offset: 0, end_lineno: ln, end_col_offset: 0 };
-          const nm = (id: string, store = false) => ({ _type: "Name", id, ctx: { _type: store ? "Store" : "Load" }, ...pos });
-          const str = (v: string) => ({ _type: "Constant", value: v, kind: null, ...pos });
-          const call = (f: any, args: any[]) => ({ _type: "Call", func: f, args, keywords: [], ...pos });
-          const noArgs = { _type: "arguments", posonlyargs: [], args: [], vararg: null, kwonlyargs: [], kw_defaults: [], kwarg: null, defaults: [] };
-          const globalsOf = { _type: "Attribute", value: { _type: "Lambda", args: noArgs, body: { _type: "Constant", value: 0, kind: null, ...pos }, ...pos }, attr: "__globals__", ctx: { _type: "Load" }, ...pos };
-          // if 'x' in (lambda: 0).__globals__ or hasattr(__import__('builtins'), 'x'): xʹ2 = x
-          t.body.unshift(...inits.map(([n, w]) => ({
-            _type: "If",
-            test: { _type: "BoolOp", op: { _type: "Or" }, values: [
-              { _type: "Compare", left: str(w), ops: [{ _type: "In" }], comparators: [globalsOf], ...pos },
-              call(nm("hasattr"), [call(nm("__import__"), [str("builtins")]), str(w)]),
-            ], ...pos },
-            body: [{ _type: "Assign", targets: [nm(n, true)], value: nm(w), type_comment: null, ...pos }],
-            orelse: [], ...pos,
-          })));
+          // (each before the first statement after the lines that came before it)
+          for (const [n, w, before] of [...inits].reverse()) {
+            let i = t.body.findIndex((st: any) => st.lineno > before);
+            if (i < 0) i = t.body.length;
+            const ln = t.body[i]?.lineno ?? before + 1, pos = { lineno: ln, col_offset: 0, end_lineno: ln, end_col_offset: 0 };
+            const nm = (id: string, store = false) => ({ _type: "Name", id, ctx: { _type: store ? "Store" : "Load" }, ...pos });
+            const str = (v: string) => ({ _type: "Constant", value: v, kind: null, ...pos });
+            const noArgs = { _type: "arguments", posonlyargs: [], args: [], vararg: null, kwonlyargs: [], kw_defaults: [], kwarg: null, defaults: [] };
+            const of = (attr: string) => ({ _type: "Attribute", value: { _type: "Lambda", args: noArgs, body: { _type: "Constant", value: 0, kind: null, ...pos }, ...pos }, attr, ctx: { _type: "Load" }, ...pos });
+            // if 'x' in (lambda: 0).__globals__ or 'x' in (lambda: 0).__builtins__: xʹ2 = (lambda: x)()
+            t.body.splice(i, 0, {
+              _type: "If",
+              test: { _type: "BoolOp", op: { _type: "Or" }, values: [
+                { _type: "Compare", left: str(w), ops: [{ _type: "In" }], comparators: [of("__globals__")], ...pos },
+                { _type: "Compare", left: str(w), ops: [{ _type: "In" }], comparators: [of("__builtins__")], ...pos },
+              ], ...pos },
+              body: [{ _type: "Assign", targets: [nm(n, true)], value: { _type: "Call", func: { _type: "Lambda", args: noArgs, body: nm(w), ...pos }, args: [], keywords: [], ...pos }, type_comment: null, ...pos }],
+              orelse: [], ...pos,
+            });
+          }
         };
         const transform = (t: any) => { if (inits.length) initialize(t); if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
         ok = run(helpSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle || scopedNames.length || inits.length ? { transform } : {}) });
