@@ -37,6 +37,8 @@ const show = (id) => ev(`window.board.focus([${JSON.stringify(id)}], true), wind
 const setCode = (id, code) => ev(`window.sagebrush.board.edit((d) => { const walk = (ns) => { for (const x of ns) { if (x.id === ${JSON.stringify(id)}) x.code = ${JSON.stringify(code)}; if (x.children) walk(x.children); } }; walk(d.nodes); })`);
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Log.enable"]) await send(m);
+  // (SLOW=1: a slow network, as a first visit)
+  if (process.env.SLOW) { await send("Network.enable"); await send("Network.setCacheDisabled", { cacheDisabled: true }); await send("Network.emulateNetworkConditions", { offline: false, latency: 300, downloadThroughput: 400000, uploadThroughput: 100000 }); }
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear()");
@@ -60,6 +62,9 @@ try {
   const fits = await until("[...document.querySelectorAll('.board-code')].every((el) => el.scrollHeight <= el.clientHeight + 2)", 5000);
   check(fits, "code items hold their output (no overflow)");
   // a change reruns what reads it, and only that
+  const diag = await ev("JSON.stringify({ it: window.board.item('record'), view: window.board.view(), cam: window.board.camera, mounted: window.board.stats.mounted, codes: [...document.querySelectorAll('.board-code')].map((e) => e.dataset.code), pages: location.href })");
+  if (!(await ev("!!document.querySelector('[data-code=record] .board-code-out')"))) console.log("note: record was not mounted here (seen once on a first visit): " + diag);
+  await show("record");
   const recordBefore = await ev("document.querySelector('[data-code=record] .board-code-out').textContent");
   await ev("window.__marker = document.querySelector('[data-code=record] .board-code-out pre.txt'); 1");
   await setCode("start", "start = 97");
@@ -95,6 +100,14 @@ try {
   await show("record");
   await ev("document.querySelector('[data-code=record] .board-code-run').click(), 1");
   check(await until(`window.sagebrush.board.outputs().then((os) => { const t = os.find((x) => x.id === 'record').output; return /^\\d+\\.\\d/.test(t) && t !== ${JSON.stringify(r0)}; })`, 30000), "▶ ran the item again: " + r0 + " / " + (await outputs()).record.output + " " + await ev("document.querySelector('[data-code=record] .board-code-run')?.outerHTML"));
+  // an item added while another runs: its output shows in it when it runs
+  await setCode("record", "import time\nt0 = time.time()\nwhile time.time() - t0 < 1.5:\n    pass\nprint('slow')");
+  await sleep(300);
+  await ev("window.sagebrush.board.edit((d) => { d.nodes.push({ id: 'late', kind: 'code', code: 'print(\"late\", 6 * 7)' }); })");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((x) => x.id === 'late')?.output === 'late 42\\n')", 30000), "the late item ran");
+  await show("late");
+  check(await until("document.querySelector('[data-code=late] .board-code-out')?.textContent === 'late 42\\n'", 5000), "its output is in its item: " + await ev("document.querySelector('[data-code=late]')?.innerHTML.slice(0, 300)"));
+  await ev("window.sagebrush.board.edit((d) => { d.nodes = d.nodes.filter((x) => x.id !== 'late'); })");
   // deleting an item: its names go, and what read them fails
   await ev("window.sagebrush.board.edit((d) => { d.nodes = d.nodes.filter((x) => x.id !== 'start'); d.edges = d.edges.filter((e) => e.from !== 'start' && e.to !== 'start'); })");
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 4 && os.find((x) => x.id === 'path').state === 'failed')", 30000), "path fails without start");

@@ -359,9 +359,16 @@ export class Board {
     this.request();
   }
 
-  /** Show code items' states again (their elements, mounted or not). */
+  /** Show code items' states again, and their outputs (their elements, mounted or not). */
   codeStates() {
-    for (const el of this.cache.values()) if (el.dataset.code) showState(el, this.code?.state(el.dataset.code) ?? "");
+    for (const el of this.cache.values()) {
+      const id = el.dataset.code;
+      if (!id) continue;
+      showState(el, this.code?.state(id) ?? "");
+      // (an element built before the engine had its cell: the output now)
+      const out = this.code?.output(id, false);
+      if (out && !el.contains(out)) el.querySelector(".board-code-src")!.after(outBox(out));
+    }
   }
 
   // math waiting to be typeset, a few milliseconds of it per frame (a fast
@@ -427,12 +434,7 @@ export class Board {
       el.append(pre);
       // its output: the engine's own element (a copy, to measure or print)
       const out = it.id ? this.code?.output(it.id, now) : null;
-      if (out) {
-        const box = document.createElement("div");
-        box.className = "sbnb board-code-out";
-        box.append(out);
-        el.append(box);
-      }
+      if (out) el.append(outBox(out));
       if (it.id) {
         el.dataset.code = it.id;
         showState(el, this.code?.state(it.id) ?? "");
@@ -819,6 +821,13 @@ export class Board {
 const placement = (it: Item) => `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px;` + (it.color && it.kind !== "group" ? `--c:${it.color};` : "");
 // What an element shows (kept when this is unchanged).
 const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order]);
+// A code item's output, in the box that gives it the notebook's styles.
+function outBox(out: HTMLElement) {
+  const box = document.createElement("div");
+  box.className = "sbnb board-code-out";
+  box.append(out);
+  return box;
+}
 const STATES = ["queued", "running", "stale", "error", "failed", "cancelled", "interrupted"];
 function showState(el: HTMLElement, state: string) {
   for (const s of STATES) el.classList.toggle("code-" + s, s === state);
