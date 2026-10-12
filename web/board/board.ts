@@ -31,6 +31,8 @@ export interface Item {
   depth?: number;
   /** groups: where their members' positions are measured from */
   inner?: { x: number; y: number };
+  /** the group holding it */
+  parent?: string;
 }
 
 export interface Edge {
@@ -484,7 +486,13 @@ export class Board {
       // (between 11 and 22 pixels on screen), with a halo
       const groups = [...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind === "group" && it.title).sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
       ctx.lineJoin = "round";
+      // (a map's rule: a group is labeled while it is between 100 and 1,000
+      // pixels wide on screen, so the levels of nesting take turns; a group
+      // with no groups inside keeps its label when larger)
+      const parents = new Set(groups.map((g) => g.parent).filter(Boolean));
       for (const g of groups) {
+        const sw = g.w * c.z;
+        if (sw < 100 || (sw > 1000 && parents.has(g.id))) continue;
         // the title, or without its parenthetical when that is larger
         const size = (t: string) => Math.min(22, (g.w * c.z) / (t.length * 0.62), 11 + 11 / (1 + (g.depth ?? 0)));
         const short = g.title!.replace(/\s*\(.*\)\s*$/, "");

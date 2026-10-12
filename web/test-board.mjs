@@ -87,6 +87,15 @@ try {
     const overflow2 = await ev("[...document.querySelectorAll('.board-note')].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector('b')?.textContent)");
     check(!overflow.length && !overflow2.length, `text overflows: ${[...overflow, ...overflow2].join(", ")}`);
     await ev(`window.board.el.style.cssText = "", window.board.focus(undefined, true)`);
+  } else {
+    // (a large board: a region of it, close up, its math typeset)
+    await ev(`window.board.setCamera({ x: ${b.x0}, y: ${b.y0}, z: 1 })`);
+    await until("window.board.math.length === 0 && !window.board.unbuilt", 20000).catch(() => {});
+    await sleep(300);
+    const over = await ev("[...document.querySelectorAll('.board-note')].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector('b')?.textContent)");
+    const n = await ev("document.querySelectorAll('.board-note').length");
+    check(n > 20 && !over.length, `text overflows in ${over.length} of ${n} notes: ${over.slice(0, 8).join(", ")}`);
+    await ev("window.board.focus(undefined, true)");
   }
   // math was typeset where the document has it (close to the first note with math)
   const withMath = notes.find((n) => /\$/.test(JSON.stringify(s.doc.nodes).match(new RegExp(`"id":"${n.id}"[^}]*`))?.[0] ?? ""));

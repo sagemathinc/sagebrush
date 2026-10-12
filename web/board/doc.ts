@@ -30,6 +30,8 @@ export interface DocGroup {
   title?: string;
   text?: string;
   layout?: "row" | "column" | "grid" | "graph";
+  /** grid layout: how many columns (default: as square as can be) */
+  columns?: number;
   /** graph layout: layers top to bottom (TB, the default) or left to right (LR) */
   direction?: "TB" | "LR";
   children: DocNode[];
@@ -62,6 +64,7 @@ export interface BoardDoc {
   /** links' base for refs that are paths (e.g. a repository's blob URL) */
   refBase?: string;
   layout?: DocGroup["layout"];
+  columns?: number;
   direction?: DocGroup["direction"];
   nodes: DocNode[];
   edges?: DocEdge[];
@@ -122,7 +125,7 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
       return b;
     }
     const kids = n.children.map((c) => ({ c, b: sizeOf(c) }));
-    const pos = arrange(kids.map((k) => ({ id: k.c.id, ...k.b, fixed: k.c.x !== undefined && k.c.y !== undefined ? { x: k.c.x!, y: k.c.y! } : null })), n.layout ?? "graph", n.direction ?? "TB",
+    const pos = arrange(kids.map((k) => ({ id: k.c.id, ...k.b, fixed: k.c.x !== undefined && k.c.y !== undefined ? { x: k.c.x!, y: k.c.y! } : null })), n.layout ?? "graph", n.direction ?? "TB", n.columns,
       edges.flatMap((e) => {
         const members = new Set(n.children.map((c) => c.id));
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
@@ -149,23 +152,23 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
     return b;
   };
   const top = doc.nodes.map((n) => ({ id: n.id, ...sizeOf(n), fixed: n.x !== undefined && n.y !== undefined ? { x: n.x!, y: n.y! } : null }));
-  const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", edges.flatMap((e) => {
+  const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", doc.columns, edges.flatMap((e) => {
     const members = new Set(doc.nodes.map((n) => n.id));
     const a = memberOf(e.from, members), b = memberOf(e.to, members);
     return a && b && a !== b ? [[a, b] as [string, string]] : [];
   }));
 
   // absolute positions, and the items
-  const place = (n: DocNode, x: number, y: number, depth: number) => {
+  const place = (n: DocNode, x: number, y: number, depth: number, parent?: string) => {
     const b = size.get(n.id)!;
     if (n.kind === "group") {
-      items.push({ id: n.id, kind: "group", x, y, w: b.w, h: b.h, title: n.title, text: n.text, color: n.color, depth, inner: { x: x + PAD, y: y + innerTop.get(n.id)! } });
+      items.push({ id: n.id, kind: "group", x, y, w: b.w, h: b.h, title: n.title, text: n.text, color: n.color, depth, parent, inner: { x: x + PAD, y: y + innerTop.get(n.id)! } });
       for (const c of n.children) {
         const p = rel.get(c.id)!;
-        place(c, x + p.x, y + p.y, depth + 1);
+        place(c, x + p.x, y + p.y, depth + 1, n.id);
       }
     } else {
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth });
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent });
     }
   };
   for (const n of doc.nodes) {
@@ -178,7 +181,7 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
 interface Node { id: string; w: number; h: number; fixed: { x: number; y: number } | null }
 
 // Positions (top left, relative) for boxes in one container.
-function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", allLinks: [string, string][]): Map<string, { x: number; y: number }> {
+function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: [string, string][]): Map<string, { x: number; y: number }> {
   const out = new Map<string, { x: number; y: number }>();
   // (positioned boxes keep their places; the others are laid out among themselves)
   const nodes = all.filter((n) => !n.fixed), free = new Set(nodes.map((n) => n.id));
@@ -190,7 +193,7 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
       at += (kind === "row" ? n.w : n.h) + GAP;
     }
   } else if (kind === "grid") {
-    const cols = Math.ceil(Math.sqrt(nodes.length));
+    const cols = Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length)));
     const cw = Math.max(...nodes.map((n) => n.w), 0), ch = Math.max(...nodes.map((n) => n.h), 0);
     nodes.forEach((n, i) => out.set(n.id, { x: (i % cols) * (cw + GAP), y: Math.floor(i / cols) * (ch + GAP) }));
   } else {
