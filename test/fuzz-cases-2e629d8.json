@@ -1,0 +1,340 @@
+[
+  {
+    "name": "scalar greater than lone high must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' > '\\udbff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "scalar greater equal lone low must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U0001f600' >= '\\udfff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lone high less than scalar must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800' < '\\U00010000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lone low less equal scalar must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\udfff' <= '\\U0010ffff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "literal emoji greater than lone must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00' > '\\ud800' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "long surrogate escape comparison must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' > '\\U0000D800' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unrelated surrogate literal same line must run control",
+    "codes": [
+      "x = 1",
+      "print(bool('\\ud800'), (x:=10) if '\\U00010000' > '\\ue000' else 0, x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unrelated surrogate statement same line must run control",
+    "codes": [
+      "x = 1",
+      "label = '\\ud800'; print(((x:=10) if '\\U00010000' > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "trailing surrogate comment must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' > '\\ue000' else 0, x)) # '\\ud800'",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw text with emoji must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r'\ud83d\ude00\\ud800' > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "escaped backslash with scalar must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000\\\\ud800' > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "adjacent literals comment must run control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if (\n    '\\U00010000' # \\ud800\n    ''\n) > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lone comparison in and chain must run control",
+    "codes": [
+      "x = 1",
+      "print(('\\U00010000' > '\\ud800' and (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "comment on repeated scalar binding must run control",
+    "codes": [
+      "x = 1",
+      "print([((x:=10) if '\\U00010000' > '\\ue000' else 0, x, (x:=20))[1] for i in [0,1]], x) # \\ud800",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "scalar versus BMP unchanged control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lone versus BMP unchanged control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800' < '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "comment on separate line unchanged control",
+    "codes": [
+      "x = 1",
+      "# \\ud800\nprint(((x:=10) if '\\U00010000' > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "lone comparison on separate lines unchanged control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if (\n    '\\U00010000' >\n    '\\ud800'\n) else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw escaped text without pair unchanged control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r'\\ud800' > 'A' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "adjacent scalar literals unchanged control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' 'x' > '\\ue000' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "numeric comparison and surrogate text unchanged control",
+    "codes": [
+      "x = 1",
+      "print(bool('\\ud800'), (x:=10) if 2 > 1 else 0, x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "augmented scalar lone comparison unchanged control",
+    "codes": [
+      "x = 1",
+      "x += ((x:=10) if '\\U00010000' > '\\ud800' else 0) + x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "adjacent surrogate short escapes refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800\\udc00' > '\\udbff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "adjacent surrogate long escapes refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U0000D800\\U0000DC00' > '\\udbff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "adjacent surrogate multiline literals refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if (\n    '\\ud800'\n    '\\udc00'\n) > '\\udbff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "adjacent surrogate mixed escapes refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\uD800\\U0000dC00' > '\\udbff' else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  }
+]

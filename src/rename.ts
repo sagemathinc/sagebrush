@@ -520,6 +520,49 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
 // name in it is refused.
 const consumed = (_path: [any, string][], _j: number) => false;
 
+// Whether a string constant's own literals (its span in the source:
+// concatenated literals, the comments and line breaks between them) write a
+// surrogate as an escape, \ud800 or \U0000d800: not in a raw literal, not
+// after an escaped backslash (REACT-2E62-1).  True when its source cannot be
+// read so (conservative).
+function surrogateEscape(e: any): boolean {
+  // (columns are UTF-8 byte offsets)
+  const at = (line: string, bytes: number) => {
+    let i = 0, b = 0;
+    while (i < line.length && b < bytes) { const c = line.codePointAt(i)!; b += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; i += c > 0xffff ? 2 : 1; }
+    return i;
+  };
+  const first = e.lineno - 1, last = (e.end_lineno ?? e.lineno) - 1;
+  if (!SOURCE[first] || !SOURCE[last]) return true;
+  const t = first === last ? SOURCE[first].slice(at(SOURCE[first], e.col_offset), at(SOURCE[first], e.end_col_offset)) :
+    [SOURCE[first].slice(at(SOURCE[first], e.col_offset)), ...SOURCE.slice(first + 1, last), SOURCE[last].slice(0, at(SOURCE[last], e.end_col_offset))].join("\n");
+  let i = 0;
+  while (i < t.length) {
+    const c = t[i];
+    if (c === " " || c === "\t" || c === "\n" || c === "\r" || c === "(" || c === ")") { i++; continue; }
+    if (c === "\\" && (t[i + 1] === "\n" || t[i + 1] === "\r")) { i += 2; continue; }
+    if (c === "#") { while (i < t.length && t[i] !== "\n") i++; continue; }
+    const pre = /^[rRbBuU]{0,2}/.exec(t.slice(i))![0];
+    const raw = /[rR]/.test(pre);
+    i += pre.length;
+    const q = t[i];
+    if (q !== "'" && q !== '"') return true;
+    const close = t.startsWith(q.repeat(3), i) ? q.repeat(3) : q;
+    i += close.length;
+    for (;;) {
+      if (i >= t.length) return true;
+      if (t.startsWith(close, i)) { i += close.length; break; }
+      if (t[i] === "\\") {
+        if (!raw && ((t[i + 1] === "u" && /^[dD][89a-fA-F][0-9a-fA-F]{2}$/.test(t.slice(i + 2, i + 6))) || (t[i + 1] === "U" && /^0000[dD][89a-fA-F][0-9a-fA-F]{2}$/.test(t.slice(i + 2, i + 10))))) return true;
+        i += 2;
+        continue;
+      }
+      i++;
+    }
+  }
+  return false;
+}
+
 // (whether the cell being renamed has `from __future__ import annotations`)
 let FUTURE = false;
 // (and its lines, as analyzed)
@@ -819,9 +862,7 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
       // string, a pair in it and a surrogate escape on its lines, is not
       // known, REACT-8BB7-1)
       if (typeof v === "string") {
-        const pair = /[\ud800-\udbff][\udc00-\udfff]/.test(v);
-        const text = SOURCE.slice(e.lineno - 1, (e.end_lineno ?? e.lineno)).join("\n");
-        return pair && /\\(u|U0000)[dD][89a-fA-F][0-9a-fA-F]{2}/.test(text) ? undefined : { t: "str", v };
+        return /[\ud800-\udbff][\udc00-\udfff]/.test(v) && surrogateEscape(e) ? undefined : { t: "str", v };
       }
       if (v && typeof v === "object" && v.name === "None") return { t: "none", v: null };
       if (v && typeof v === "object" && v.name === "Ellipsis") return { t: "ellipsis", v: null };
