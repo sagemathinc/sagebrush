@@ -271,3 +271,13 @@ test("a prologue's logical line goes on after a backslash; imports and later-eva
     assert.match(renameInCell(before + "\nglobal x\nif False:\n    x = 2\nprint(x)", "x", "xʹ2", { from: "definition" })!, /\nglobal xʹ2\n/, before);
   }
 });
+
+test("parenthesized annotations and CRLF lines (REACT-D304-1, 2)", () => {
+  // (`(x): int` is no use of x before a module's global: the global keeps its name)
+  assert.match(renameInCell("(x): int\nglobal x\nif False:\n    x = 2\nprint(x)", "x", "x\u02b92", { from: "definition" })!, /^if 'x' in .*\n\(x\u02b92\): int\nglobal x\n/);
+  // (a cell whose only binding is an annotation, in a function declaring x global: initialized)
+  assert.match(renameInCell("def f():\n    global x\n    (x): int\n    print(x)\nf()", "x", "x\u02b92", { from: "definition" })!, /^if 'x' in .*\ndef f\(\):\n    global x\u02b92\n/);
+  // (a backslash before \r\n continues the line too)
+  const out = renameInCell('"doc"; \\\r\nprint(x)\r\nif False:\r\n    x = 2', "x", "x\u02b92", { from: "definition" })!;
+  assert.match(out, /^"doc"; \\\r\n# page-order scoping[^\n]*\nif 'x' in [^\n]*\nprint\(x\u02b92\)\r\n/);
+});

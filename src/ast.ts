@@ -78,7 +78,9 @@ export type Stmt =
   | { k: "Expr"; line: number; value: Expr }
   | { k: "Assign"; line: number; targets: Expr[]; value: Expr }
   | { k: "AugAssign"; line: number; target: Expr; op: string; value: Expr }
-  | { k: "AnnAssign"; line: number; target: Expr; value: Expr | null }
+  // (simple: the target is a name, not in parentheses: only then is the
+  // name annotated, and bound in a function by a bare annotation)
+  | { k: "AnnAssign"; line: number; target: Expr; value: Expr | null; simple: boolean }
   | { k: "Return"; line: number; value: Expr | null }
   | { k: "If"; line: number; test: Expr; body: Stmt[]; orelse: Stmt[] }
   | { k: "While"; line: number; test: Expr; body: Stmt[]; orelse: Stmt[] }

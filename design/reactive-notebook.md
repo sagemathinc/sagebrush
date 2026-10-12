@@ -488,6 +488,11 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     pyjs's compiler (src/scope.ts) now applies the same rules to `global`
     and `nonlocal` everywhere. It used to reject a global after an import,
     and accepted one after a read.
+
+    A parenthesized annotation, `(x): int`, is not simple. Without a value
+    it neither binds nor annotates `x`. A simple annotation of a name
+    declared global or nonlocal is an error, except at a module's top level
+    (review of d304971). A line ending in `\` before `\r\n` continues too.
   - When a statement shares the prologue's logical line (`"doc"; print(x)`,
     or after a `\` on the next physical line), that line is split at the
     statement, with the initialization between. Otherwise the initialization

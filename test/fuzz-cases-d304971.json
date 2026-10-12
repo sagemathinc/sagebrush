@@ -1,0 +1,496 @@
+[
+  {
+    "name": "parenthesized annotation before global",
+    "codes": [
+      "x=1",
+      "(x): int\nglobal x\nif False:\n    x=2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized annotation only before global",
+    "codes": [
+      "x=1",
+      "(x): int\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "double parenthesized annotation before global",
+    "codes": [
+      "x=1",
+      "((x)): int\nglobal x\nif False:\n    x=2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "double parenthesized annotation only before global",
+    "codes": [
+      "x=1",
+      "((x)): int\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unevaluated parenthesized annotation before global",
+    "codes": [
+      "x=1",
+      "(x): print(\"annotation\")\nglobal x\nif False:\n    x=2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unevaluated parenthesized annotation only before global",
+    "codes": [
+      "x=1",
+      "(x): print(\"annotation\")\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "function parenthesized annotation global",
+    "codes": [
+      "x=1",
+      "def f():\n    (x): int\n    global x\n    print(x)\nf()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class parenthesized annotation global",
+    "codes": [
+      "x=1",
+      "class C:\n    (x): int\n    global x\n    print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring continuation CRLF",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\r\nprint(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "docstring continuation LF",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import continuation CRLF",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations; \\\r\nprint(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future import continuation LF",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations; \\\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline docstring continuation CRLF",
+    "codes": [
+      "x=1",
+      "\"\"\"a\r\nb\"\"\"; \\\r\nprint(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiline docstring continuation LF",
+    "codes": [
+      "x=1",
+      "\"\"\"a\nb\"\"\"; \\\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF two names",
+    "codes": [
+      "x=1\ny=3",
+      "\"doc\"; \\\r\nprint(x,y)\r\nif False:\r\n    x=y=2",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF same physical line control",
+    "codes": [
+      "x=1",
+      "\"doc\"; print(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module parenthesized annotation standalone",
+    "codes": [
+      "x=1",
+      "(x): int\nglobal x\nprint(\"ok\")",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nonlocal parenthesized annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    a=2\n    def g():\n        (a): int\n        nonlocal a\n        return a\n    return g()\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global before parenthesized annotation control",
+    "codes": [
+      "x=1",
+      "global x\n(x): int\nif False:\n    x=2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "function global before parenthesized annotation control",
+    "codes": [
+      "x=1",
+      "def f():\n    global x\n    (x): int\n    print(x)\nf()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized annotation assigned invalid control",
+    "codes": [
+      "x=1",
+      "(x): int = 2\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "simple annotation global invalid control",
+    "codes": [
+      "x=1",
+      "x: int\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized annotation after prologue",
+    "codes": [
+      "x=1",
+      "\"doc\"; (x): int; global x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized annotation Unicode",
+    "codes": [
+      "\u03b1=1",
+      "(\u03b1): int\nglobal \u03b1\nprint(\u03b1)",
+      "print(\u03b1)"
+    ],
+    "change": [
+      0,
+      "\u03b1=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF taken walrus",
+    "codes": [
+      "x=1\nflag=True",
+      "\"doc\"; \\\r\nflag and (x:=2)\r\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5\nflag=True"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF blank continued line",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\r\n\\\r\nprint(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF indented continuation",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\r\n    print(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "LF indented continuation control",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\n    print(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "prologue comment backslash control",
+    "codes": [
+      "x=1",
+      "\"doc\" # \\\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "CRLF prologue comment backslash control",
+    "codes": [
+      "x=1",
+      "\"doc\" # \\\r\nprint(x)\r\nif False:\r\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "hash inside prologue control",
+    "codes": [
+      "x=1",
+      "\"#doc\"; \\\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "trailing continuation before blank control",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\n\nprint(x)\nif False:\n    x=2",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "multiple continuations and names control",
+    "codes": [
+      "x=1\ny=3",
+      "\"\ud83d\ude00doc\"; \\\n\\\nprint(x,y)\nif False:\n    x=y=2",
+      "print(x,y)"
+    ],
+    "change": [
+      0,
+      "x=5\ny=7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "continued prologue traceback control",
+    "codes": [
+      "x=1",
+      "\"doc\"; \\\nprint(x)\nif False:\n    x=2\n1 / 0",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after lazy annotation control",
+    "codes": [
+      "x=1",
+      "def f(a:x) -> x: pass\nglobal x\nif False:\n    x=2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "global after import control",
+    "codes": [
+      "x=1",
+      "if False:\n    import math as x\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "comprehension global control",
+    "codes": [
+      "x=1",
+      "[(x:=2) for _ in [0]]\nglobal x\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future naming annotation boundary",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ny:x\nif False:\n    x=2\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "refuse"
+  }
+]

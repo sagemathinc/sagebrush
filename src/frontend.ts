@@ -210,7 +210,7 @@ class Convert {
       case "AugAssign":
         return { k: "AugAssign", line, target: this.expr(s.target), op: this.binop(s.op._type), value: this.expr(s.value) };
       case "AnnAssign":
-        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null };
+        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null, simple: !!s.simple };
       case "Return":
         return { k: "Return", line, value: s.value ? this.expr(s.value) : null };
       case "If":

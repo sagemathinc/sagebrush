@@ -1151,7 +1151,9 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     const canInit = !(FUTURE && occ.some((o) => deferredOf(o)?.kind === "annotation"));
     // (a cell whose only binding is a bare annotation keeps the value: the
     // new name starts as the previous one, REACT-5EE9-2)
-    let init = canInit && plainFirst && (bare(first) || !surely(first, 0));
+    // (and so does one whose only bindings are annotations, wherever they
+    // are: `(x): int` in a function declaring x global, REACT-D304-1)
+    let init = canInit && ((plainFirst && !surely(first, 0)) || bare(first));
     let reads = init ? null : whichReads(occ, first, tree.body);
     // (a binding in a function the analysis cannot place: initialized too)
     if (!init && !reads && !plainFirst && canInit) init = true;
@@ -1166,7 +1168,9 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     // REACT-5EE9-3; not in a function's, a lambda's or a comprehension's
     // body, nor an annotation of something else, evaluated later, D2C5-1)
     const nested = (o: Occurrence) => o.path.some(([n, k]) => ((BINDING_TYPES.has(n._type) || n._type === "Lambda") && k === "body") || (COMPREHENSIONS.has(n._type) && k !== "iter0"));
-    const counts = (o: Occurrence) => !o.global && !nested(o) && deferredOf(o)?.kind !== "annotation" && !o.path.some(([n]) => n._type === "Import" || n._type === "ImportFrom");
+    // (`(x): int`, not simple and without a value, neither binds nor annotates x, D304-1)
+    const parenthesized = (o: Occurrence) => { const [n, k] = o.path.at(-1) ?? [null, ""]; return n?._type === "AnnAssign" && k === "target" && !n.simple && n.value == null; };
+    const counts = (o: Occurrence) => !o.global && !nested(o) && !parenthesized(o) && deferredOf(o)?.kind !== "annotation" && !o.path.some(([n]) => n._type === "Import" || n._type === "ImportFrom");
     const usedBefore = (g: Occurrence) => occ.some((o) => counts(o) && (o.line < g.line || (o.line === g.line && o.col < g.col)));
     if (init) for (const o of occ) if (o.global && !nested(o) && !usedBefore(o)) target.set(o, name);
     // (after the module's prologue, its docstring and __future__ imports,
@@ -1178,7 +1182,8 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
       // (the prologue's logical line: its physical lines go on while one
       // ends with a `\` outside a comment)
       const next = tree.body[k], last = tree.body[k - 1];
-      const goesOn = (text: string) => text.replace(/#.*/, "").endsWith("\\");
+      // (a line may end with \r\n: D304-2)
+      const goesOn = (text: string) => text.replace(/#.*/, "").replace(/\r$/, "").endsWith("\\");
       let end = last?.end_lineno ?? 0;
       if (last) for (let t = byteSlice(aLines[end - 1], last.end_col_offset); end < aLines.length && goesOn(t); t = aLines[end++]);
       // (a statement after the prologue on its logical line, `"doc"; print(x)`,
