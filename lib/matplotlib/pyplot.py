@@ -7,16 +7,49 @@
 Supported: figure, subplots, subplot, plot (format strings), scatter, bar,
 barh, hist, fill_between, errorbar, step, axhline, axvline, text, annotate,
 title, xlabel, ylabel, xlim, ylim, xscale/yscale ('log'), xticks, yticks,
-grid, legend, axis, suptitle, savefig (SVG), show, close, gcf, gca, clf.
+grid, legend, axis, suptitle, savefig (SVG), show, close, gcf, gca, clf;
+contourf and colorbar; GridSpec (matplotlib.gridspec) and add_axes; rc and
+rcParams font sizes; $...$ math in any text (matplotlib's mathtext subset).
 In the notebook, figures made in a cell are shown when it finishes (as in
 Jupyter); on the command line show() writes an SVG file and prints its path.
 """
 
 import math
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, render_svg, render_frame,
+from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color, colormap, describe_svg)
 
 PT = 100 / 72  # pixels per point at 100 dpi
+
+# rc settings (only those set: unset ones keep matplotlib's defaults below)
+rcParams = {}
+_NAMED_SIZES = {"xx-small": 0.579, "x-small": 0.694, "small": 0.833, "medium": 1.0, "large": 1.2, "x-large": 1.44,
+                "xx-large": 1.728, "larger": 1.2, "smaller": 0.833}
+_RC_ALIASES = {"fontsize": "size", "lw": "linewidth", "c": "color"}
+
+
+def rc(group, **kw):
+    """plt.rc('axes', titlesize=15): font sizes are honored, the rest is kept."""
+    for g in (group if isinstance(group, (list, tuple)) else [group]):
+        for k, v in kw.items():
+            rcParams["%s.%s" % (g, _RC_ALIASES.get(k, k))] = v
+
+
+def rcdefaults():
+    rcParams.clear()
+
+
+def _size_px(v, default_pt):
+    """A font size (points, or a name like 'large') in pixels at 100 dpi."""
+    base = rcParams.get("font.size", 10)
+    if v is None:
+        v = default_pt
+    if isinstance(v, str):
+        v = _NAMED_SIZES.get(v, 1.0) * float(base)
+    return float(v) * PT
+
+
+def _rc_size(key, default):
+    return _size_px(rcParams.get(key, default), default)
 
 _MARKERS = set(".,ov^<>spP*hH+xXDd|_")
 _LINESTYLES = ("--", "-.", "-", ":")
@@ -364,14 +397,17 @@ class Axes:
     def transAxes(self):
         return _AxesFraction()
 
-    def annotate(self, text, xy, xytext=None, arrowprops=None, fontsize=10, ha="center", **kw):
+    def annotate(self, text, xy, xytext=None, arrowprops=None, fontsize=10, ha=None, **kw):
         if xytext is None:
             xytext = xy
         if arrowprops is not None and tuple(xytext) != tuple(xy):
             self._add(Arrow(xytext, xy, color=arrowprops.get("color", arrowprops.get("facecolor", "currentColor")),
                             thickness=1.2))
-        self._add(Text(text, xytext[0], xytext[1], fontsize=fontsize * PT, horizontal_alignment=ha,
-                       vertical_alignment="bottom" if arrowprops else "baseline", no_bbox=True))
+        # (matplotlib: the text's left end at xytext, unless told otherwise)
+        ha = kw.get("horizontalalignment", ha) or ("center" if arrowprops else "left")
+        size = kw.get("size", fontsize)
+        return _Artist(self._add(Text(text, xytext[0], xytext[1], fontsize=_size_px(size, 10), horizontal_alignment=ha, color=to_color(kw.get("color")),
+                       vertical_alignment=kw.get("verticalalignment", kw.get("va", "bottom" if arrowprops else "baseline")), no_bbox=True)), "text.Text")
 
     def pie(self, x, labels=None, colors=None, autopct=None, startangle=0, **kw):
         vals = [float(v) for v in _list(x)]
@@ -416,14 +452,80 @@ class Axes:
         return _Artist(self._prims[-1], "image.AxesImage")
 
     # ---------------------------------------------------------------- settings
-    def set_title(self, s, **kw):
+    def set_title(self, s, fontsize=None, **kw):
         self._opts["title"] = str(s)
+        size = kw.get("size", (fontsize or {}).get("fontsize") if isinstance(fontsize, dict) else fontsize)
+        if size is not None:
+            self._opts["title_size"] = _size_px(size, 12)
 
-    def set_xlabel(self, s, **kw):
+    def set_xlabel(self, s, fontsize=None, **kw):
         self._opts["xlabel"] = str(s)
+        if (fontsize or kw.get("size")) is not None:
+            self._opts["label_size"] = _size_px(fontsize or kw.get("size"), 10)
 
-    def set_ylabel(self, s, **kw):
+    def set_ylabel(self, s, fontsize=None, labelpad=None, **kw):
         self._opts["ylabel"] = str(s)
+        if (fontsize or kw.get("size")) is not None:
+            self._opts["label_size"] = _size_px(fontsize or kw.get("size"), 10)
+        if labelpad is not None:
+            self._opts["ylabel_pad"] = float(labelpad) * PT
+
+    def tick_params(self, axis="both", labelsize=None, **kw):
+        if labelsize is not None:
+            self._opts["tick_size"] = _size_px(labelsize, 10)
+
+    def set_rasterization_zorder(self, z):
+        pass  # (contourf is drawn as a picture already)
+
+    def get_position(self):
+        return self._rect
+
+    # ---------------------------------------------------------------- contourf
+    def contourf(self, *args, levels=None, cmap=None, colors=None, extend="neither", alpha=None, vmin=None, vmax=None, **kw):
+        """Filled contours of Z (on its index grid, or over X, Y): drawn as
+        one picture of the bands, as matplotlib's rasterized output looks."""
+        import numpy as np
+        if len(args) >= 3:
+            X, Y, Z = args[0], args[1], args[2]
+            if len(args) > 3 and levels is None:
+                levels = args[3]
+        else:
+            X = Y = None
+            Z = args[0]
+            if len(args) > 1 and levels is None:
+                levels = args[1]
+        Z = np.asarray(Z, dtype=float)
+        ny, nx = Z.shape
+        finite = Z[~np.isnan(Z)]
+        zlo, zhi = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
+        if levels is None or isinstance(levels, int):
+            from _graphics import nice_ticks
+            L, _ = nice_ticks(zlo, zhi, (levels or 7) + 1)
+            L = [float(v) for v in L]
+            if L[0] > zlo:
+                L.insert(0, L[0] - (L[1] - L[0]))
+            if L[-1] < zhi:
+                L.append(L[-1] + (L[-1] - L[-2]))
+        else:
+            L = [float(v) for v in (levels.tolist() if hasattr(levels, "tolist") else levels)]
+        cs = ContourSet(L, cmap, colors, extend, alpha)
+        x0, x1 = (float(np.min(X)), float(np.max(X))) if X is not None else (0.0, float(nx - 1))
+        y0, y1 = (float(np.min(Y)), float(np.max(Y))) if Y is not None else (0.0, float(ny - 1))
+        # (at most about 640 x 512 samples: twice what a panel of a figure shows)
+        sx, sy = max(1, -(-nx // 640)), max(1, -(-ny // 512))
+        Zs = Z[::sy, ::sx]
+        idx = np.digitize(Zs, np.array(L))
+        idx[np.isnan(Zs)] = 0
+        # the top level belongs to the top band, as in matplotlib
+        idx[Zs == L[-1]] = len(L) - 1
+        # (a palette picture: one byte, the band, per sample)
+        self._add(Image(_png_url(idx.astype(np.uint8)[::-1], cs._lut), x0, x1, y0, y1, what="filled contours, %d levels from %s to %s" % (len(L), _short(L[0]), _short(L[-1]))))
+        self._opts.setdefault("xmin", x0)
+        self._opts.setdefault("xmax", x1)
+        self._opts.setdefault("ymin", y0)
+        self._opts.setdefault("ymax", y1)
+        self._opts["margins"] = 0
+        return cs
 
     def set_xlim(self, left=None, right=None, **kw):
         if isinstance(left, (tuple, list)):
@@ -512,6 +614,13 @@ class Axes:
 
     def _panel(self):
         o = {k: v for k, v in self._opts.items() if not k.startswith("_")}
+        # matplotlib's text: sizes from rc (10 pt ticks and labels, a 12 pt
+        # title), titles not bold
+        o.setdefault("tick_size", _rc_size("xtick.labelsize", "medium"))
+        o.setdefault("label_size", _rc_size("axes.labelsize", "medium"))
+        o.setdefault("title_size", _rc_size("axes.titlesize", "large"))
+        o.setdefault("title_weight", "normal")
+        o.setdefault("tick_format", "matplotlib")
         o.setdefault("frame", True)
         o.setdefault("margins", 0.05)
         if o.get("legend") is None:
@@ -582,7 +691,27 @@ class Figure:
     def __repr__(self):
         return "<Figure size %dx%d with %d Axes>" % (self._size[0] * 100, self._size[1] * 100, len(self.axes))
 
+    def add_axes(self, rect, **kw):
+        """Axes at [left, bottom, width, height] (fractions of the figure)."""
+        l, b, w, h = [float(v) for v in rect]
+        ax = Axes(self, (l, 1 - b - h, w, h))
+        ax._opts["exact"] = True
+        self.axes.append(ax)
+        return ax
+
+    def add_gridspec(self, nrows=1, ncols=1, **kw):
+        from matplotlib.gridspec import GridSpec
+        return GridSpec(nrows, ncols, figure=self, **kw)
+
+    def colorbar(self, mappable=None, cax=None, ax=None, **kw):
+        return _colorbar(self, mappable, cax, ax, **kw)
+
     def add_subplot(self, nrows=1, ncols=1, index=1, **kw):
+        if hasattr(nrows, "get_position"):  # a SubplotSpec (gs[i, j])
+            ax = Axes(self, nrows.get_position(self))
+            ax._opts["exact"] = True
+            self.axes.append(ax)
+            return ax
         if isinstance(nrows, int) and nrows > 100 and ncols == 1 and index == 1:
             nrows, ncols, index = nrows // 100, (nrows // 10) % 10, nrows % 10
         r, c = (index - 1) // ncols, (index - 1) % ncols
@@ -784,12 +913,141 @@ def ylim(*args, **kw):
 def xticks(ticks=None, labels=None, **kw):
     if ticks is not None:
         gca().set_xticks(ticks, labels)
+    if kw.get("fontsize", kw.get("size")) is not None:
+        gca()._opts["tick_size"] = _size_px(kw.get("fontsize", kw.get("size")), 10)
 
 
 def yticks(ticks=None, labels=None, **kw):
     if ticks is not None:
         gca().set_yticks(ticks, labels)
+    if kw.get("fontsize", kw.get("size")) is not None:
+        gca()._opts["tick_size"] = _size_px(kw.get("fontsize", kw.get("size")), 10)
 
 
-def colorbar(*args, **kw):
-    pass
+def colorbar(mappable=None, cax=None, ax=None, **kw):
+    return _colorbar(gcf(), mappable, cax, ax, **kw)
+
+
+def rc_context(rc=None):
+    import contextlib
+
+    @contextlib.contextmanager
+    def ctx():
+        saved = dict(rcParams)
+        rcParams.update(rc or {})
+        try:
+            yield
+        finally:
+            rcParams.clear()
+            rcParams.update(saved)
+    return ctx()
+
+
+def contourf(*args, **kw):
+    return gca().contourf(*args, **kw)
+
+
+def GridSpec(*args, **kw):
+    from matplotlib.gridspec import GridSpec as G
+    return G(*args, **kw)
+
+
+# ---------------------------------------------------------------- contour sets, colorbars, pictures
+
+def _short(v):
+    return ("%.4g" % v).replace("-", "\u2212")
+
+
+class ContourSet:
+    """What contourf returns: the levels and the bands' colors (a mappable for colorbar)."""
+
+    def __init__(self, levels, cmap, colors, extend, alpha):
+        self.levels = levels
+        self.cmap = cmap
+        n = len(levels) - 1
+        lo, hi = levels[0], levels[-1]
+        mids = [(levels[i] + levels[i + 1]) / 2 for i in builtin_range(n)]
+        if colors is not None:
+            cl = [colors] if isinstance(colors, str) else list(colors)
+            band = [to_color(cl[i % len(cl)]) for i in builtin_range(n)]
+        else:
+            band = [colormap((m - lo) / (hi - lo) if hi > lo else 0.5, cmap or "viridis") for m in mids]
+        self._band = band
+        a = int(round(255 * (1.0 if alpha is None else float(alpha))))
+        rgb = [_rgb(c) for c in band]
+        clear = (0, 0, 0, 0)
+        below = rgb[0] + (a,) if extend in ("min", "both") else clear
+        above = rgb[-1] + (a,) if extend in ("max", "both") else clear
+        # digitize: 0 below the first level, 1..n the bands, n+1 above
+        self._lut = [below] + [c + (a,) for c in rgb] + [above]
+
+    def get_cmap(self):
+        return self.cmap
+
+
+def _rgb(c):
+    c = to_color(c) or "#000000"
+    if c.startswith("#") and len(c) >= 7:
+        return (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+    if c.startswith("rgb"):
+        v = [int(float(t)) for t in c[c.index("(") + 1:c.index(")")].split(",")[:3]]
+        return tuple(v)
+    return (0, 0, 0)
+
+
+def _png_url(pixels, palette=None):
+    """A data: URL of a PNG: an (h, w, 4) uint8 array of colors, or an (h, w)
+    uint8 array of indices into `palette` [(r, g, b, a), ...]."""
+    import zlib, struct, base64
+    h, w = int(pixels.shape[0]), int(pixels.shape[1])
+    bpp = 1 if palette is not None else 4
+    raw, row = pixels.tobytes(), w * bpp
+    data = b"".join(b"\x00" + raw[i * row:(i + 1) * row] for i in builtin_range(h))
+
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    if palette is not None:
+        head = chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 3, 0, 0, 0))
+        head += chunk(b"PLTE", bytes([v for c in palette for v in c[:3]]))
+        head += chunk(b"tRNS", bytes([c[3] for c in palette]))
+    else:
+        head = chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+    png = b"\x89PNG\r\n\x1a\n" + head + chunk(b"IDAT", zlib.compress(data, 9)) + chunk(b"IEND", b"")
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
+class Colorbar:
+    """A colorbar in its own axes (cax): the bands of a contourf, ticks and a label on the right."""
+
+    def __init__(self, mappable, cax):
+        self.mappable, self.ax = mappable, cax
+        L = mappable.levels
+        rects = [(0.0, L[i], 1.0, L[i + 1] - L[i]) for i in builtin_range(len(L) - 1)]
+        cax._prims = [Rects(rects, colors=list(mappable._band))]
+        cax._opts.update({"xmin": 0.0, "xmax": 1.0, "ymin": L[0], "ymax": L[-1], "margins": 0, "xticks": [],
+                          "yaxis_side": "right", "_colorbar": True})
+
+    def set_label(self, label="", labelpad=None, **kw):
+        self.ax._opts["ylabel"] = str(label)
+        if labelpad is not None:
+            self.ax._opts["ylabel_pad"] = float(labelpad) * PT
+
+    def set_ticks(self, ticks, labels=None, **kw):
+        self.ax.set_yticks(ticks, labels)
+
+    def set_ticklabels(self, labels, **kw):
+        self.ax.set_yticklabels(labels)
+
+
+def _colorbar(fig, mappable, cax, ax, **kw):
+    if mappable is None or not hasattr(mappable, "levels"):
+        return None  # (only contourf's sets have a colorbar yet)
+    if cax is None:
+        # room taken from the axes' right side, as matplotlib does
+        parent = ax if ax is not None else fig.gca()
+        fx, fy, fw, fh = parent._rect
+        parent._rect = (fx, fy, fw * 0.82, fh)
+        cax = Axes(fig, (fx + fw * 0.85, fy + fh * 0.05, fw * 0.04, fh * 0.9))
+        cax._opts["exact"] = parent._opts.get("exact", False)
+        fig.axes.append(cax)
+    return Colorbar(mappable, cax)

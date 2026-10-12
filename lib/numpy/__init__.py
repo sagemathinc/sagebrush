@@ -1961,6 +1961,99 @@ def frombuffer(buffer, dtype=float, count=-1, offset=0):
     return _np.frombuffer(buffer, dtype, count, offset)
 
 
+class _StrArray(list):
+    """A read-only array of strings (dtype '<Un', from np.load): sagebrush's
+    numpy has no string arrays, so this indexes, iterates and prints like one."""
+
+    def __init__(self, items, shape, n):
+        super().__init__(items)
+        self.shape, self.ndim, self.size = tuple(shape), len(shape), len(items)
+        self.dtype = "<U%d" % n
+
+    def tolist(self):
+        return list(self)
+
+    def __repr__(self):
+        return "array([%s], dtype='%s')" % (", ".join(repr(x) for x in self), self.dtype)
+
+    def __str__(self):
+        return "[%s]" % " ".join(repr(x) for x in self)
+
+
+_NPY_TYPES = {"f8": "float64", "f4": "float32", "i8": "int64", "i4": "int32", "i2": "int16", "i1": "int8",
+              "u8": "uint64", "u4": "uint32", "u2": "uint16", "u1": "uint8", "b1": "bool"}
+
+
+def load(file, mmap_mode=None, allow_pickle=False, fix_imports=True, encoding="ASCII"):
+    """An array saved by np.save (the .npy format, version 1, 2 or 3):
+    numbers and booleans, either byte order, C or Fortran order; and arrays
+    of strings ('<Un'), read only."""
+    if isinstance(file, (bytes, bytearray)):
+        data = bytes(file)
+    elif hasattr(file, "read"):
+        data = file.read()
+    else:
+        with open(file, "rb") as f:
+            data = f.read()
+    if data[:6] != b"\x93NUMPY":
+        if data[:2] == b"PK":
+            raise ValueError("np.load: .npz archives are not supported yet")
+        raise ValueError("np.load: not a .npy file (the pickle format is not supported)")
+    major = data[6]
+    if major == 1:
+        hlen, start = data[8] | (data[9] << 8), 10
+    else:
+        hlen, start = int.from_bytes(data[8:12], "little"), 12
+    import re as _re
+    header = data[start:start + hlen].decode("latin1")
+    m_d = _re.search(r"'descr':\s*'([^']*)'", header)
+    m_f = _re.search(r"'fortran_order':\s*(True|False)", header)
+    m_s = _re.search(r"'shape':\s*\(([^)]*)\)", header)
+    if not (m_d and m_f and m_s):
+        raise ValueError("np.load: cannot read the header %r" % header)
+    descr, fortran = m_d.group(1), m_f.group(1) == "True"
+    shape = tuple(int(x) for x in m_s.group(1).replace(" ", "").split(",") if x)
+    body = data[start + hlen:]
+    count = 1
+    for d in shape:
+        count *= d
+    order, kind = descr[0], descr[1:]
+    if kind.startswith("U"):
+        n = int(kind[1:])
+        bo = "big" if order == ">" else "little"
+        items = ["".join(chr(int.from_bytes(body[4 * (n * i + k):4 * (n * i + k + 1)], bo)) for k in range(n)).rstrip("\x00")
+                 for i in range(count)]
+        return _StrArray(items, shape, n)
+    if kind not in _NPY_TYPES:
+        raise ValueError("np.load: dtype %r is not supported" % descr)
+    a = frombuffer(body, dtype=(">" if order == ">" else "<") + kind if kind != "b1" else "bool", count=count)
+    if fortran:
+        return a.reshape(tuple(reversed(shape))).T.copy() if len(shape) > 1 else a.reshape(shape)
+    return a.reshape(shape)
+
+
+def save(file, arr, allow_pickle=True, fix_imports=True):
+    """Write an array in the .npy format (version 1.0, little-endian, C order)."""
+    a = asarray(arr)
+    kinds = {v: k for k, v in _NPY_TYPES.items()}
+    kind = kinds.get(str(a.dtype))
+    if kind is None:
+        raise ValueError("np.save: dtype %s is not supported" % a.dtype)
+    descr = ("|" if kind in ("u1", "i1", "b1") else "<") + kind
+    shape = tuple(a.shape)
+    header = "{'descr': '%s', 'fortran_order': False, 'shape': %s, }" % (descr, "(%s,)" % shape[0] if len(shape) == 1 else str(shape))
+    pad = 64 - (10 + len(header) + 1) % 64
+    header = header + " " * pad + "\n"
+    out = b"\x93NUMPY\x01\x00" + bytes([len(header) & 255, len(header) >> 8]) + header.encode("latin1") + a.tobytes()
+    if hasattr(file, "write"):
+        file.write(out)
+        return
+    if not str(file).endswith(".npy"):
+        file = str(file) + ".npy"
+    with open(file, "wb") as f:
+        f.write(out)
+
+
 def _m_tobytes(self, order="C"):
     if order == "F":
         self = self.T

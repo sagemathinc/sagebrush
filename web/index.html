@@ -1785,12 +1785,45 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   }
   if (remote && !opened) {
     try {
+      // (the bytes of a URL, the status line counting them)
+      const fetchBytes = async (url, label) => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`${label}: ${r.status}`);
+        const total = Number(r.headers.get("content-length")) || 0;
+        if (!r.body || total < 2e6) return new Uint8Array(await r.arrayBuffer());
+        const reader = r.body.getReader(), chunks = [];
+        let got = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          got += value.length;
+          statusEl.textContent = `fetching ${label}: ${(got / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB…`;
+        }
+        const out = new Uint8Array(got);
+        let at = 0;
+        for (const c of chunks) { out.set(c, at); at += c.length; }
+        return out;
+      };
       for (const u of qs.getAll("file")) {
-        const name = decodeURIComponent(new URL(u, location.href).pathname.split("/").pop());
-        statusEl.textContent = `fetching ${name}…`;
-        const r = await fetch(u);
-        if (!r.ok) throw new Error(`${name}: ${r.status}`);
-        const data = new Uint8Array(await r.arrayBuffer());
+        let name = decodeURIComponent(new URL(u, location.href).pathname.split("/").pop());
+        let data;
+        if (name.endsWith(".parts.json")) {
+          // a file too large to host whole (a static host's limit per file):
+          // {"name": "data.npy", "parts": ["data.npy.0", ...]}, joined here
+          const r = await fetch(u);
+          if (!r.ok) throw new Error(`${name}: ${r.status}`);
+          const m = await r.json();
+          name = m.name;
+          const parts = [];
+          for (const [i, p] of m.parts.entries()) parts.push(await fetchBytes(new URL(p, new URL(u, location.href)).href, `${name} (part ${i + 1} of ${m.parts.length})`));
+          data = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+          let at = 0;
+          for (const p of parts) { data.set(p, at); at += p.length; }
+        } else {
+          statusEl.textContent = `fetching ${name}…`;
+          data = await fetchBytes(u, name);
+        }
         await idb(db, "files", "readwrite", (st) => st.put(data, "/" + name));
       }
       const name = decodeURIComponent(new URL(remote, location.href).pathname.split("/").pop()) || "notebook.ipynb";

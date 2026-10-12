@@ -108,7 +108,9 @@ const h = (tag, cls, props = {}) => Object.assign(document.createElement(tag), c
 // SVG from Python code is put in the page only after removing anything
 // active (scripts, event handlers, external links), with its ids made
 // unique so that several plots' clip paths cannot collide.
-const SVG_TAGS = new Set("svg g path line polyline polygon circle ellipse rect text tspan title desc defs clipPath linearGradient radialGradient stop use marker symbol mask pattern".split(" "));
+const SVG_TAGS = new Set("svg g path line polyline polygon circle ellipse rect text tspan title desc defs clipPath linearGradient radialGradient stop use marker symbol mask pattern image".split(" "));
+// (an <image>'s only allowed source: an inline raster picture, e.g. contourf's bands)
+const RASTER_URL = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]*$/;
 let svgCount = 0;
 export function safeSvg(text) {
   const root = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
@@ -118,8 +120,10 @@ export function safeSvg(text) {
     for (const child of [...el.children]) {
       if (SVG_TAGS.has(child.localName)) clean(child); else child.remove();
     }
+    if (el.localName === "image" && !RASTER_URL.test(el.getAttribute("href") ?? el.getAttribute("xlink:href") ?? "")) { el.remove(); return; }
     for (const { name, value } of [...el.attributes]) {
       const n = name.toLowerCase();
+      if (el.localName === "image" && (n === "href" || n === "xlink:href")) continue; // (checked above)
       if (n.startsWith("on") || /javascript:|data:|@import|expression\(/i.test(value)) el.removeAttribute(name);
       else if (n === "href" || n === "xlink:href") value.startsWith("#") ? el.setAttribute(name, "#" + pre + value.slice(1)) : el.removeAttribute(name);
       else if (n === "id") el.setAttribute(name, pre + value);

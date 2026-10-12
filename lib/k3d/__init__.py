@@ -10,7 +10,8 @@ that notebooks written for k3d run in the browser:
     html = plot.get_snapshot()          # a standalone, interactive page
 
 Objects: mesh, points, line, lines, volume (ray-marched in WebGL2),
-surface, vectors, text, text2d, label.  Arrays travel to the viewer in
+marching_cubes (an isosurface, computed in the viewer as k3d does), surface,
+vectors, text, text2d, label.  Arrays travel to the viewer in
 binary (float32/uint32/uint8, base64), so meshes of millions of triangles
 are fine.  The static picture (files, agents, no WebGL) is an SVG of the
 bounding box with a description.
@@ -27,7 +28,7 @@ from . import colormaps
 __version__ = "2.16.0.sagebrush"
 SCENE_MIME = "application/vnd.sagebrush.scene3d+json"
 
-__all__ = ["plot", "mesh", "points", "line", "lines", "volume", "surface", "vectors", "text", "text2d",
+__all__ = ["plot", "mesh", "points", "line", "lines", "volume", "marching_cubes", "surface", "vectors", "text", "text2d",
            "label", "matplotlib_color_maps", "basic_color_maps", "paraview_color_maps", "helpers",
            "Plot", "colormaps"]
 
@@ -295,6 +296,37 @@ class Volume(Drawable):
         return "volume of %dx%dx%d voxels from %s to %s" % (x, y, z, _g(self.color_range[0]), _g(self.color_range[1]))
 
 
+class MarchingCubes(Drawable):
+    """The isosurface scalar_field == level of a field on a grid (z, y, x)
+    over [xmin, xmax] x [ymin, ymax] x [zmin, zmax]: the field travels to the
+    viewer (float32), which finds the surface, as k3d's does."""
+    kind = "marching_cubes"
+
+    def __init__(self, scalar_field, level, xmin=-0.5, xmax=0.5, ymin=-0.5, ymax=0.5, zmin=-0.5, zmax=0.5,
+                 color=0x0000FF, opacity=1.0, wireframe=False, flat_shading=True, model_matrix=None, **kw):
+        super().__init__(**kw)
+        f = np.asarray(scalar_field, dtype=np.float32)
+        if f.ndim != 3:
+            raise ValueError("scalar_field must be a 3-D array (z, y, x)")
+        self.shape = [int(d) for d in f.shape]
+        self.field = f.reshape((-1,))
+        self.level = float(level)
+        self.bounds = [float(xmin), float(xmax), float(ymin), float(ymax), float(zmin), float(zmax)]
+        self.color, self.opacity, self.wireframe, self.flat_shading = color, float(opacity), bool(wireframe), bool(flat_shading)
+
+    def _bounds(self):
+        b = self.bounds
+        return [b[0], b[2], b[4]], [b[1], b[3], b[5]]
+
+    def _scene(self):
+        return {"type": "marching_cubes", "field": _b(self.field), "shape": self.shape, "bounds": self.bounds, "level": self.level,
+                "color": _hex(self.color), "opacity": self.opacity, "wireframe": self.wireframe, "flat_shading": self.flat_shading}
+
+    def _describe(self):
+        z, y, x = self.shape
+        return "isosurface at level %s of a %dx%dx%d field" % (_g(self.level), x, y, z)
+
+
 class Text(Drawable):
     kind = "text"
 
@@ -346,6 +378,11 @@ def volume(volume, **kw):
     color, opacity_function ([t0, a0, t1, a1, ...]) the opacity, both over
     color_range; alpha_coef scales the opacity."""
     return Volume(volume, **kw)
+
+
+def marching_cubes(scalar_field, level, **kw):
+    """The isosurface scalar_field == level (k3d.marching_cubes)."""
+    return MarchingCubes(scalar_field, level, **kw)
 
 
 def text(text, position=(0, 0, 0), **kw):

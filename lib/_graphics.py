@@ -61,7 +61,7 @@ _CMAPS = {
     "rainbow": ["#7f00ff", "#3f61fa", "#00b4eb", "#40ecd3", "#80feb3", "#c0eb8d", "#ffb360", "#ff6130", "#ff0000"],
     "plasma": ["#0d0887", "#46039f", "#7201a8", "#9c179e", "#bd3786", "#d8576b", "#ed7953", "#fb9f3a", "#fdca26", "#f0f921"],
     "Blues": ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"],
-    "Spectral": ["#9e0142", "#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#e6f598", "#abdda4", "#66c2a5", "#3288bd", "#5e4fa2"],
+    "Spectral": ["#9e0142", "#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#ffffbf", "#e6f598", "#abdda4", "#66c2a5", "#3288bd", "#5e4fa2"],
     "RdBu": ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"],
 }
 
@@ -70,6 +70,8 @@ def colormap(t, name="viridis"):
     """The color at t in [0, 1] of a colormap: viridis, gray, coolwarm, jet,
     hot, rainbow, plasma, Blues, Spectral, RdBu (a "_r" suffix reverses)."""
     t = 0.0 if t != t else max(0.0, min(1.0, t))
+    if not isinstance(name, str) and hasattr(name, "_color"):  # a matplotlib.colors colormap
+        return name._color(t)
     name = name if isinstance(name, str) else "viridis"
     if name.endswith("_r"):
         name, t = name[:-2], 1 - t
@@ -114,6 +116,189 @@ def _fmt(v):
 
 def _esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+# ------------------------------------------------------------ math in text
+
+_TEX_SYMBOLS = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ϵ", "varepsilon": "ε", "zeta": "ζ", "eta": "η",
+    "theta": "θ", "vartheta": "ϑ", "iota": "ι", "kappa": "κ", "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π",
+    "varpi": "ϖ", "rho": "ρ", "varrho": "ϱ", "sigma": "σ", "varsigma": "ς", "tau": "τ", "upsilon": "υ", "phi": "ϕ",
+    "varphi": "φ", "chi": "χ", "psi": "ψ", "omega": "ω", "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ",
+    "Xi": "Ξ", "Pi": "Π", "Sigma": "Σ", "Upsilon": "Υ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+    "pm": "±", "mp": "∓", "times": "×", "cdot": "·", "div": "÷", "infty": "∞", "partial": "∂", "nabla": "∇",
+    "leq": "≤", "le": "≤", "geq": "≥", "ge": "≥", "neq": "≠", "ne": "≠", "approx": "≈", "sim": "∼", "simeq": "≃",
+    "equiv": "≡", "propto": "∝", "langle": "⟨", "rangle": "⟩", "prime": "′", "circ": "∘", "degree": "°",
+    "to": "→", "rightarrow": "→", "leftarrow": "←", "Rightarrow": "⇒", "in": "∈", "sum": "∑", "prod": "∏", "int": "∫",
+    "oint": "∮", "sqrt": "√", "ell": "ℓ", "hbar": "ℏ", "Re": "ℜ", "Im": "ℑ", "ldots": "…", "cdots": "⋯", "dots": "…",
+    "%": "%", "$": "$", "{": "{", "}": "}", "_": "_", "#": "#", "&": "&", ",": "\u2009", ";": "\u2005", ":": "\u2005",
+    "!": "", " ": " ", "quad": "\u2003", "qquad": "\u2003\u2003", "log": "log", "ln": "ln", "exp": "exp",
+    "sin": "sin", "cos": "cos", "tan": "tan", "max": "max", "min": "min", "lim": "lim", "det": "det",
+}
+_TEX_FUNCS = {"log", "ln", "exp", "sin", "cos", "tan", "max", "min", "lim", "det"}
+
+
+def _tex_tokens(s):
+    out, i = [], 0
+    while i < len(s):
+        c = s[i]
+        if c == "\\":
+            j = i + 1
+            if j < len(s) and s[j].isalpha():
+                while j < len(s) and s[j].isalpha():
+                    j += 1
+                out.append(s[i:j])
+                i = j
+            else:
+                out.append(s[i:i + 2])
+                i += 2
+        else:
+            out.append(c)
+            i += 1
+    return out
+
+
+def _tex_svg(tex):
+    """A TeX math string (matplotlib's mathtext subset) as SVG tspans:
+    italic letters, symbols, sub- and superscripts, \\overline, \\mathrm,
+    \\mathbf, \\frac and \\sqrt (inline)."""
+    toks = _tex_tokens(tex)
+    pos = [0]
+
+    def group():
+        # the next argument: {...} or one token
+        if pos[0] >= len(toks):
+            return []
+        t = toks[pos[0]]
+        pos[0] += 1
+        if t != "{":
+            return [t]
+        depth, start = 1, pos[0]
+        while pos[0] < len(toks) and depth:
+            if toks[pos[0]] == "{":
+                depth += 1
+            elif toks[pos[0]] == "}":
+                depth -= 1
+            pos[0] += 1
+        return toks[start:pos[0] - 1]
+
+    def render(ts, style):
+        sub = list(ts)
+        save = pos[0]
+        nonlocal_toks = toks[:]
+        toks[:] = sub
+        pos[0] = 0
+        out = run(style)
+        toks[:] = nonlocal_toks
+        pos[0] = save
+        return out
+
+    def piece(text, style):
+        if not text:
+            return ""
+        attrs = ""
+        if style.get("it"):
+            attrs += ' font-style="italic"'
+        if style.get("bf"):
+            attrs += ' font-weight="bold"'
+        if style.get("over"):
+            attrs += ' text-decoration="overline"'
+        return "<tspan%s>%s</tspan>" % (attrs, _esc(text)) if attrs else _esc(text)
+
+    def run(style):
+        out = []
+        while pos[0] < len(toks):
+            t = toks[pos[0]]
+            pos[0] += 1
+            if t in ("^", "_"):
+                arg = group()
+                up = t == "^"
+                inner = render(arg, style)
+                # (the shift in the script's own size, back in the base size)
+                out.append('<tspan font-size="70%%" dy="%s">%s</tspan><tspan dy="%s">\u200b</tspan>' % (
+                    "-0.55em" if up else "0.35em", inner, "0.385em" if up else "-0.245em"))
+            elif t == "{":
+                pos[0] -= 1
+                out.append(render(group(), style))
+            elif t == "}":
+                continue
+            elif t == "~":
+                out.append("\u00a0")
+            elif t.isspace():
+                continue
+            elif t.startswith("\\"):
+                name = t[1:]
+                if name in ("mathrm", "rm", "text", "textrm", "operatorname", "mathsf"):
+                    out.append(render(group(), dict(style, it=False)))
+                elif name in ("mathbf", "bf", "textbf", "boldsymbol"):
+                    out.append(render(group(), dict(style, bf=True)))
+                elif name in ("mathit", "textit", "it"):
+                    out.append(render(group(), dict(style, it=True)))
+                elif name in ("overline", "bar", "widebar"):
+                    out.append(render(group(), dict(style, over=True)))
+                elif name in ("hat", "widehat", "tilde", "widetilde", "vec", "dot", "ddot"):
+                    mark = {"hat": "\u0302", "widehat": "\u0302", "tilde": "\u0303", "widetilde": "\u0303",
+                            "vec": "\u20d7", "dot": "\u0307", "ddot": "\u0308"}[name]
+                    out.append(render(group(), style) + mark)
+                elif name == "frac":
+                    a, b = render(group(), style), render(group(), style)
+                    out.append("%s/%s" % (a, b))
+                elif name == "sqrt":
+                    out.append("√(" + render(group(), style) + ")")
+                elif name in ("left", "right", "big", "Big", "bigg", "Bigg", "displaystyle", "textstyle", "limits"):
+                    continue
+                elif name in _TEX_FUNCS:
+                    out.append(piece(name, dict(style, it=False)))
+                elif name in ("leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "equiv", "propto", "to", "rightarrow", "in"):
+                    out.append("\u2004%s\u2004" % _TEX_SYMBOLS[name])
+                elif name in ("pm", "mp", "times", "cdot", "div"):
+                    out.append("\u2005%s\u2005" % _TEX_SYMBOLS[name])
+                elif name in _TEX_SYMBOLS:
+                    out.append(piece(_TEX_SYMBOLS[name], dict(style, it=style.get("it") and name[:1].islower() and name in (
+                        "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta", "vartheta", "iota",
+                        "kappa", "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "upsilon", "phi", "varphi", "chi",
+                        "psi", "omega"))))
+                else:
+                    out.append(piece(name, style))
+            elif t in "=<>":
+                out.append("\u2004%s\u2004" % _esc(t))  # (relations: spaced, as in TeX)
+            elif t in "+-" and out and not out[-1].endswith(("(", "[", "\u2004", "\u2005")):
+                out.append("\u2005%s\u2005" % ("\u2212" if t == "-" else t))  # (binary operators)
+            elif t == "-":
+                out.append("\u2212")
+            else:
+                out.append(piece(t, dict(style, it=style.get("it") and t.isalpha())))
+        return "".join(out)
+
+    return run({"it": True})
+
+
+def _rich(s):
+    """Text for SVG, its $...$ parts typeset (as matplotlib does)."""
+    s = str(s)
+    if "$" not in s:
+        return _esc(s)
+    parts, out, i = [], [], 0
+    # split on unescaped $
+    buf, math = "", False
+    while i < len(s):
+        c = s[i]
+        if c == "\\" and i + 1 < len(s) and s[i + 1] == "$":
+            buf += "$" if not math else "\\$"
+            i += 2
+            continue
+        if c == "$":
+            parts.append((buf, math))
+            buf, math = "", not math
+        else:
+            buf += c
+        i += 1
+    if math:  # an unbalanced $: plain text
+        return _esc(s)
+    parts.append((buf, False))
+    for text, m in parts:
+        out.append(_tex_svg(text) if m else _esc(text))
+    return "".join(out)
 
 
 def _num(v, step=None):
@@ -494,7 +679,7 @@ class Text(Primitive):
             _fmt(p[0]), _fmt(p[1]), _fmt(o.get("fontsize", 11)), anchor, base,
             ' fill="%s"' % _esc(color) if color else "",
             ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "",
-            _esc(self.string))
+            _rich(self.string))
 
     def describe(self):
         return 'text "%s"' % self.string
@@ -529,6 +714,35 @@ class Arrow(Primitive):
 
     def describe(self):
         return "arrow from (%s, %s) to (%s, %s)" % (_num(self.tail[0]), _num(self.tail[1]), _num(self.head[0]), _num(self.head[1]))
+
+
+class Image(Primitive):
+    """A raster picture (a data: URL) over the data box [x0, x1] x [y0, y1]:
+    contourf's and imshow's large grids, one <image> rather than a rectangle
+    per cell."""
+    kind = "image"
+
+    def __init__(self, href, x0, x1, y0, y1, **options):
+        super().__init__(**options)
+        self.href, self.x0, self.x1, self.y0, self.y1 = href, float(x0), float(x1), float(y0), float(y1)
+
+    def bbox(self):
+        return (min(self.x0, self.x1), max(self.x0, self.x1), min(self.y0, self.y1), max(self.y0, self.y1))
+
+    def legend(self):
+        return None
+
+    def svg(self, P):
+        a, b = P.map(self.x0, self.y1, clamp=False), P.map(self.x1, self.y0, clamp=False)
+        if a is None or b is None:
+            return ""
+        x, y = min(a[0], b[0]), min(a[1], b[1])
+        return '<image href="%s" x="%s" y="%s" width="%s" height="%s" preserveAspectRatio="none"%s/>' % (
+            self.href, _fmt(x), _fmt(y), _fmt(abs(b[0] - a[0])), _fmt(abs(b[1] - a[1])),
+            ' style="image-rendering:pixelated"' if self.options.get("pixelated") else "")
+
+    def describe(self):
+        return self.options.get("what") or "image"
 
 
 class AxLine(Primitive):
@@ -609,14 +823,36 @@ def _range(lo, hi, log):
     return lo, hi
 
 
+def _mpl_labels(vals):
+    """Tick labels as matplotlib's ScalarFormatter writes them: as many
+    decimals as the ticks need, the same for all, and a true minus sign."""
+    vals = [float(v) for v in vals]
+    d = 0
+    for v in vals:
+        for k in range(0, 7):
+            if abs(round(v, k) - v) <= 1e-9 * max(1.0, abs(v)):
+                d = max(d, k)
+                break
+        else:
+            d = 6
+    out = []
+    for v in vals:
+        t = "%.*f" % (d, v)
+        if float(t) == 0:
+            t = t.lstrip("-")
+        out.append(t.replace("-", "\u2212"))
+    return out
+
+
 def _log_ticks(lo, hi):
     a, b = math.floor(math.log10(lo) + 1e-9), math.ceil(math.log10(hi) - 1e-9)
     return [10.0 ** k for k in range(a, b + 1) if lo * (1 - 1e-9) <= 10.0 ** k <= hi * (1 + 1e-9)]
 
 
 def _pow10_label(v):
+    # (as matplotlib: 10 with the exponent raised)
     k = int(round(math.log10(v)))
-    return '10<tspan dy="-5" font-size="8">%d</tspan>' % k if not (-1 <= k <= 3) else _num(v)
+    return '10<tspan font-size="70%%" dy="-0.55em">%s</tspan><tspan dy="0.385em">\u200b</tspan>' % (("\u2212%d" % -k) if k < 0 else k)
 
 
 class Panel:
@@ -703,15 +939,24 @@ class Panel:
         return xlo, xhi, ylo, yhi, xlog, ylog
 
     def ticks(self, lo, hi, log, positions, labels, target):
+        mpl = self.options.get("tick_format") == "matplotlib"
         if positions is not None:
             pos = [float(v) for v in positions]
-            labs = [str(s) for s in labels] if labels is not None else [_num(v) for v in pos]
-            return [(v, _esc(s)) for v, s in zip(pos, labs) if lo - 1e-9 * abs(hi - lo) <= v <= hi + 1e-9 * abs(hi - lo)]
+            if labels is not None:
+                labs = [_rich(s) for s in labels]
+            elif mpl:
+                labs = _mpl_labels(pos)
+            else:
+                step = min((abs(b - a) for a, b in zip(pos, pos[1:]) if b != a), default=None)
+                labs = [_num(v, step) for v in pos]
+            return [(v, s) for v, s in zip(pos, labs) if lo - 1e-9 * abs(hi - lo) <= v <= hi + 1e-9 * abs(hi - lo)]
         if log:
             t = _log_ticks(lo, hi)
             if len(t) >= 2:
                 return [(v, _pow10_label(v)) for v in t]
         ticks, step = nice_ticks(lo, hi, target)
+        if mpl:
+            return list(zip(ticks, _mpl_labels(ticks)))
         return [(v, _num(v, step)) for v in ticks]
 
     def svg(self, x, y, w, h):
@@ -720,14 +965,21 @@ class Panel:
         frame = o.get("frame", False)
         show_axes = o.get("axes", True)
         title, xlabel, ylabel = o.get("title"), o.get("xlabel"), o.get("ylabel")
+        # font sizes (pixels): tick labels, axis labels, title
+        ts, ls, tts = float(o.get("tick_size", 10.5)), float(o.get("label_size", 12)), float(o.get("title_size", 14))
+        right_y = o.get("yaxis_side") == "right"
         # margins around the plot area, for tick labels, axis labels and title
-        top = 10 + (22 if title else 0)
-        bottom = 26 + (18 if xlabel else 0) if show_axes else 8
+        top = 10 + (tts + 8 if title else 0)
+        bottom = (ts * 1.75 + (ls * 1.3 + 4 if xlabel else 6)) if show_axes else 8
         right = 14
         guess = self.ranges(max(w - 70, 50), max(h - top - bottom, 50))
         yt = self.ticks(guess[2], guess[3], guess[5], o.get("yticks"), o.get("yticklabels"), max(3, int(h / 70)))
-        lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * 6.4 + 10
-        left = (lw + (18 if ylabel else 0)) if show_axes else 8
+        lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
+        left = (lw + (ls + 6 if ylabel else 0)) if show_axes else 8
+        if o.get("exact"):
+            # (matplotlib's axes: the box is the plot area; labels and the
+            # title go outside it)
+            left = top = right = bottom = 0
         pw, ph = max(20, w - left - right), max(20, h - top - bottom)
         ar = o.get("aspect_ratio")
         if o.get("fit_aspect") and ar not in (None, "automatic", "auto") and None not in (
@@ -775,15 +1027,24 @@ class Panel:
                 _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph)))
         if show_axes and (xlabel or ylabel):
             if xlabel:
-                out.append('<text x="%s" y="%s" text-anchor="middle" font-size="12">%s</text>' % (
-                    _fmt(P.left + pw / 2), _fmt(P.top + ph + 38), _esc(xlabel)))
+                has_xt = bool(xt)
+                out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s">%s</text>' % (
+                    _fmt(P.left + pw / 2), _fmt(P.top + ph + (ts * 1.75 if has_xt else 4) + ls * 1.0), _fmt(ls), _rich(xlabel)))
             if ylabel:
-                cx, cy = x + 12, P.top + ph / 2
-                out.append('<text x="%s" y="%s" text-anchor="middle" font-size="12" transform="rotate(-90 %s %s)">%s</text>' % (
-                    _fmt(cx), _fmt(cy), _fmt(cx), _fmt(cy), _esc(ylabel)))
+                lwr = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
+                pad = float(o.get("ylabel_pad", 0))
+                if right_y:
+                    cx = P.left + pw + lwr + ls * 0.55 + pad
+                    rot = 90 if o.get("ylabel_rotation") == 90 else -90
+                else:
+                    cx, rot = P.left - lwr - ls * 0.55 - pad, -90
+                cy = P.top + ph / 2
+                out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="%s" transform="rotate(%s %s %s)">%s</text>' % (
+                    _fmt(cx), _fmt(cy), _fmt(ls), rot, _fmt(cx), _fmt(cy), _rich(ylabel)))
         if title:
-            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="14" font-weight="600">%s</text>' % (
-                _fmt(P.left + pw / 2), _fmt(y + 20), _esc(title)))
+            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
+                _fmt(P.left + pw / 2), _fmt(P.top - max(8, tts * 0.6 + 4)), _fmt(tts),
+                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", _rich(title)))
         out.append(self._legend_svg(P))
         out.append("</g>")
         return "".join(out), self.describe(xlo, xhi, ylo, yhi, xlog, ylog)
@@ -791,6 +1052,8 @@ class Panel:
     def _axes_svg(self, P, xt, yt, frame):
         out = []
         tick = []
+        ts = float(self.options.get("tick_size", 10.5))
+        right_y = self.options.get("yaxis_side") == "right"
         if frame:
             out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="none" stroke="currentColor" stroke-width="0.8"/>' % (
                 _fmt(P.left), _fmt(P.top), _fmt(P.w), _fmt(P.h)))
@@ -814,11 +1077,15 @@ class Panel:
             tick.append("M%s %sv%s" % (_fmt(p[0]), _fmt(ax_y), "4" if frame else "3"))
             if skip_x is not None and abs(v - skip_x) < 1e-12:
                 continue
-            ly = (P.top + P.h if frame else min(max(ax_y, P.top), P.top + P.h)) + 15
+            ly = (P.top + P.h if frame else min(max(ax_y, P.top), P.top + P.h)) + ts * 1.43
             labels.append('<text x="%s" y="%s" text-anchor="middle">%s</text>' % (_fmt(p[0]), _fmt(ly), s))
         for v, s in yt:
             p = P.map(P.xlo, v, clamp=False)
             if p is None:
+                continue
+            if right_y:
+                tick.append("M%s %sh4" % (_fmt(P.left + P.w), _fmt(p[1])))
+                labels.append('<text x="%s" y="%s" text-anchor="start" dominant-baseline="middle">%s</text>' % (_fmt(P.left + P.w + 6), _fmt(p[1]), s))
                 continue
             tick.append("M%s %sh%s" % (_fmt(ax_x), _fmt(p[1]), "-4" if frame else "-3"))
             if skip_y is not None and abs(v - skip_y) < 1e-12:
@@ -826,7 +1093,7 @@ class Panel:
             lx = (P.left if frame else min(max(ax_x, P.left), P.left + P.w)) - 6
             labels.append('<text x="%s" y="%s" text-anchor="end" dominant-baseline="middle">%s</text>' % (_fmt(lx), _fmt(p[1]), s))
         out.append('<path d="%s" stroke="currentColor" stroke-width="0.8"/>' % "".join(tick))
-        out.append('<g font-size="10.5">%s</g>' % "".join(labels))
+        out.append('<g font-size="%s">%s</g>' % (_fmt(ts), "".join(labels)))
         return "".join(out)
 
     def _legend_svg(self, P):
@@ -857,7 +1124,7 @@ class Panel:
             else:
                 out.append('<rect x="%s" y="%s" width="22" height="10" fill="%s"%s/>' % (
                     _fmt(lx + 7), _fmt(cy - 5), c, ' fill-opacity="%s"' % _fmt(p.options["alpha"]) if p.options.get("alpha") is not None else ""))
-            out.append('<text x="%s" y="%s" dominant-baseline="middle" font-size="11">%s</text>' % (_fmt(lx + 35), _fmt(cy), _esc(s)))
+            out.append('<text x="%s" y="%s" dominant-baseline="middle" font-size="11">%s</text>' % (_fmt(lx + 35), _fmt(cy), _rich(s)))
         out.append("</g>")
         return "".join(out)
 
@@ -909,11 +1176,14 @@ def render_frame(panels, width=640, height=480, title=None):
     top = 30 if title else 0
     body, descs = [], []
     for panel, (fx, fy, fw, fh) in panels:
-        s, d = panel.svg(fx * width + 4, top + fy * (height - top) + 2, fw * width - 8, fh * (height - top) - 4)
+        if panel.options.get("exact"):
+            s, d = panel.svg(fx * width, top + fy * (height - top), fw * width, fh * (height - top))
+        else:
+            s, d = panel.svg(fx * width + 4, top + fy * (height - top) + 2, fw * width - 8, fh * (height - top) - 4)
         body.append(s)
         descs.append(d)
     if title:
-        body.insert(0, '<text x="%s" y="20" text-anchor="middle" font-size="15" font-weight="600">%s</text>' % (_fmt(width / 2), _esc(title)))
+        body.insert(0, '<text x="%s" y="20" text-anchor="middle" font-size="15" font-weight="600">%s</text>' % (_fmt(width / 2), _rich(title)))
     kind = "Plot" if len(panels) == 1 else "Figure with %d plots" % len(panels)
     desc = kind + (' "%s"' % title if title else "") + ": " + " | ".join(descs)
     return "".join(body), desc
