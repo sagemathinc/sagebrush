@@ -198,6 +198,8 @@ if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn
 // The Cloudflare site (web/site) serves the same files.
 rmSync(join(here, "site", "public", "atlas"), { recursive: true, force: true });
 cpSync(join(here, "dist", "atlas"), join(here, "site", "public", "atlas"), { recursive: true });
+// the site Worker's build id: its edge cache of atlas pages is keyed on it
+writeFileSync(join(here, "site", "src", "build-id.ts"), `// written by web/build.ts\nexport const BUILD = ${JSON.stringify(Date.now().toString(36))};\n`);
 // boards (/board/)
 rmSync(join(here, "site", "public", "board"), { recursive: true, force: true });
 cpSync(join(here, "dist", "board"), join(here, "site", "public", "board"), { recursive: true });
