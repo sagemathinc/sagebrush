@@ -1,0 +1,234 @@
+[
+ {
+  "name": "decorated function invoked before later x",
+  "codes": [
+   "x=1",
+   "def deco(fn):\n    print(fn())\n    return fn\n@deco\ndef f():\n    return x\nx=2\nprint(f())",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "decorated function reading own name",
+  "codes": [
+   "def f(): pass\nf.a=1",
+   "def deco(fn):\n    print(fn())\n    return fn\n@deco\ndef f():\n    return f.a\nf.a=2\nprint(f.a)",
+   "print(f.a)"
+  ]
+ },
+ {
+  "name": "decorator invokes stored lambda default",
+  "codes": [
+   "def f(): pass\nf.a=1",
+   "def deco(fn):\n    print(fn.__defaults__[0]())\n    return fn\n@deco\ndef f(g=lambda: f.a):\n    pass\nf.a=2\nprint(f.a)",
+   "print(f.a)"
+  ]
+ },
+ {
+  "name": "decorator consumes generator default",
+  "codes": [
+   "def f(): pass\nf.a=1",
+   "def deco(fn):\n    print(next(fn.__defaults__[0]))\n    return fn\n@deco\ndef f(g=(f.a for _ in [0])):\n    pass\nf.a=2\nprint(f.a)",
+   "print(f.a)"
+  ]
+ },
+ {
+  "name": "setter store in empty list comprehension",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    [(x:=2) for _ in []]\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter store in filtered list comprehension",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    [(x:=2) for _ in [0] if False]\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter store in empty set comprehension",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    {(x:=2) for _ in []}\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter store in empty dict comprehension",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    {0:(x:=2) for _ in []}\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter store in unconsumed generator",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    g=((x:=2) for _ in [0])\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter store in deferred lambda",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    g=lambda:(x:=2)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter argument reads previous x",
+  "codes": [
+   "x=1",
+   "def setx(value):\n    global x\n    x=value+1\nsetx(x)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter keyword argument reads previous x",
+  "codes": [
+   "x=1",
+   "def setx(value):\n    global x\n    x=value+1\nsetx(value=x)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter generator argument reads previous x",
+  "codes": [
+   "x=1",
+   "def setx(value):\n    global x\n    x=next(value)+1\nsetx(x for _ in [0])\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control setter constant argument",
+  "codes": [
+   "x=1",
+   "def setx(value):\n    global x\n    x=value+1\nsetx(1)\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control nonempty setter comprehension",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    [(x:=2) for _ in [0]]\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "annotation reader list argument",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn[0].__annotations__[\"p\"].a\nclass C:\n    a=2\n    def m(p:C): pass\n    saved=read([m])\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "annotation reader alias argument",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    def m(p:C): pass\n    alias=m\n    saved=read(alias)\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "annotation reader starred argument",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    def m(p:C): pass\n    saved=read(*[m])\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "annotation reader nested tuple argument",
+  "codes": [
+   "class C: a=1",
+   "def read(fn):\n    return fn[0].__annotations__[\"p\"].a\nclass C:\n    a=2\n    def m(p:C): pass\n    saved=read((m,))\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "control global function factory",
+  "codes": [
+   "def f(): pass",
+   "def make():\n    global f\n    def f(): return 2\nmake()\nprint(f.__name__,f.__qualname__,f())",
+   "print(f())"
+  ]
+ },
+ {
+  "name": "nonlocal function qualified name",
+  "codes": [
+   "def outer():\n    def f(): pass\n    def inner():\n        nonlocal f\n        def f(): pass\n    inner()\n    print(f.__qualname__)\nouter()"
+  ]
+ },
+ {
+  "name": "nonlocal class qualified name",
+  "codes": [
+   "def outer():\n    class C: pass\n    def inner():\n        nonlocal C\n        class C: pass\n    inner()\n    print(C.__qualname__)\nouter()"
+  ]
+ },
+ {
+  "name": "list comprehension global assignment edit",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    [(x:=2) for _ in [0]]\nsetx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "def setx():\n    global x\n    [(x:=3) for _ in [0]]\nsetx()\nprint(x)"
+  ]
+ },
+ {
+  "name": "set comprehension global assignment edit",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    {(x:=2) for _ in [0]}\nsetx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "def setx():\n    global x\n    {(x:=3) for _ in [0]}\nsetx()\nprint(x)"
+  ]
+ },
+ {
+  "name": "dict comprehension global assignment edit",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    {0:(x:=2) for _ in [0]}\nsetx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "def setx():\n    global x\n    {0:(x:=3) for _ in [0]}\nsetx()\nprint(x)"
+  ]
+ },
+ {
+  "name": "global comprehension assignment removed",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    [(x:=2) for _ in [0]]\nsetx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "print(x)"
+  ]
+ },
+ {
+  "name": "global comprehension assignment dependency",
+  "codes": [
+   "K=2\nx=1",
+   "def setx():\n    global x\n    [(x:=K) for _ in [0]]\nsetx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   0,
+   "K=3\nx=1"
+  ]
+ }
+]

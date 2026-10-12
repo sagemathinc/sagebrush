@@ -670,3 +670,33 @@ So none is assumed any more:
 The fuzz test now loads the review's 96 cases
 (test/fuzz-cases-87fd4d5.json), and requires the controls to run, not
 just to avoid a wrong value (MUST_RUN).
+
+**Review of 98eb351 (sagebrush-codex REACT-98EB-1..4; October 12).** All
+19 earlier variants were confirmed fixed. Four groups were fixed here, with
+14 failing variants:
+- *Decorators run what they decorate* (98EB-1). In each case below, the
+  rename is refused:
+  - a function written before the new definition, with a decorator (its
+    own, or its class's decorator, metaclass or body using it), since it
+    may already have run;
+  - a decorated def whose body reads its own name;
+  - a default of a decorated function, or of a method its class may call.
+- *A setter's arguments are evaluated before it runs* (98EB-2):
+  `setx(x)` reads the previous x.
+- *Annotations through containers and aliases* (98EB-3). Any use of a
+  method's name in its class body, and `locals()`/`vars()`, refuses the
+  class's own annotations.
+- *A global `:=` in a comprehension* (98EB-4). In a function declaring the
+  name global, it defines the module's name in the analysis (it was missed,
+  so an edit did not rerun its readers). As a setter's store, it counts
+  only if the comprehension surely runs: every iterable a literal with
+  elements, and no filters.
+
+The fuzzer now generates all four patterns:
+- setters given the old value;
+- comprehension setters over empty and non-empty iterables;
+- decorators that call a function reading a name redefined below.
+
+With the new generator, 98eb351 fails 5 cases within the first ~60; the fix
+passes 3,000 random notebooks (104,758 outputs compared). The review's 27
+cases are in test/fuzz-cases-98eb351.json.

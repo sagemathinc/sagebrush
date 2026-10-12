@@ -431,6 +431,9 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
 function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "maybe" {
   // (a decorator is a call: whatever its name, it may run the function)
   const plainDecorators = (f: any) => f.decorator_list.length === 0;
+  // (the body of the def defining the name: its decorators may call it
+  // before the name is bound, REACT-98EB-1)
+  if (def._type !== "ClassDef" && o.path[defIdx][1] === "body") return plainDecorators(def) ? "later" : "maybe";
   // whether `name` is read in the class's body outside `except`
   const usedInClass = (name: string, except: any): boolean => {
     if (def._type !== "ClassDef") return false;
@@ -452,11 +455,12 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
   if (o.path.slice(defIdx).some(lazy)) {
     if (FUTURE || def.decorator_list?.length || def.keywords?.length) return "maybe";
     if (o.path.slice(defIdx + 1).some(([n]) => (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && !plainDecorators(n))) return "maybe";
-    if (def._type === "ClassDef" && mentions(def.body, ["__annotations__", "__annotate__", "annotationlib", "get_annotations", "get_type_hints"])) return "maybe";
-    // (or a class body handing one of its functions to a call, which may ask)
+    if (def._type === "ClassDef" && mentions(def.body, ["__annotations__", "__annotate__", "annotationlib", "get_annotations", "get_type_hints", "locals", "vars"])) return "maybe";
+    // (or a class body using one of its functions at all: given to a call,
+    // in a container, through an alias, any of which may ask, REACT-98EB-3)
     if (def._type === "ClassDef") {
-      const fns = new Set<string>(def.body.filter((b: any) => b._type === "FunctionDef" || b._type === "AsyncFunctionDef").map((b: any) => b.name));
-      if (fns.size && passesAny(def.body, fns)) return "maybe";
+      const fns = def.body.filter((b: any) => b._type === "FunctionDef" || b._type === "AsyncFunctionDef").map((b: any) => b.name);
+      if (fns.some((f: string) => usedInClass(f, null))) return "maybe";
     }
     return "later";
   }
@@ -468,8 +472,14 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     const [p, pkey] = o.path[j - 1] ?? [null, ""];
     if (n._type === "Lambda" && p?._type === "Call" && pkey === "func") continue;
     if ((n._type === "GeneratorExp" || n._type === "Lambda") && consumed(o.path, j)) continue;
-    // a default of a function (or lambda): runs when that is called
-    if ((p?._type === "FunctionDef" || p?._type === "AsyncFunctionDef" || p?._type === "Lambda") && pkey === "args") return "later";
+    // a default of a function: runs when it is called, or anything given
+    // the function calls it (its decorators, its class's decorators,
+    // metaclass or body: REACT-98EB-1); a lambda's: not followed
+    if ((p?._type === "FunctionDef" || p?._type === "AsyncFunctionDef" || p?._type === "Lambda") && pkey === "args") {
+      if (p._type === "Lambda" || !plainDecorators(p)) return "maybe";
+      if (def._type === "ClassDef" && (def.decorator_list.length || def.keywords?.length || usedInClass(p.name, p))) return "maybe";
+      return "later";
+    }
     let name: string | null = null;
     if (n._type === "FunctionDef" || n._type === "AsyncFunctionDef") {
       if (!plainDecorators(n)) return "maybe";
@@ -529,8 +539,8 @@ function callableName(o: Occurrence, d: { node: any; j: number }): string | null
 // position, whether it is a plain call that runs where it is written, and
 // whether that runs exactly once (not under an if, a loop, `and`/`or`, a
 // comprehension, an exception handler).
-function usesOf(body: any[], fname: string): { stmt: number; line: number; col: number; call: boolean; once: boolean }[] {
-  const out: { stmt: number; line: number; col: number; call: boolean; once: boolean }[] = [];
+function usesOf(body: any[], fname: string): { stmt: number; line: number; col: number; call: boolean; once: boolean; node: any }[] {
+  const out: { stmt: number; line: number; col: number; call: boolean; once: boolean; node: any }[] = [];
   const scan = (n: any, stmt: number, later: boolean, maybe: boolean, parent: any, key: string): void => {
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n)) return n.forEach((x, i) => scan(x, stmt,
@@ -543,7 +553,7 @@ function usesOf(body: any[], fname: string): { stmt: number; line: number; col: 
       parent, key));
     if (n._type === "Name" && n.id === fname && n.ctx?._type === "Load") {
       const call = !later && parent?._type === "Call" && key === "func";
-      out.push({ stmt, line: n.lineno, col: n.col_offset, call, once: call && !maybe });
+      out.push({ stmt, line: n.lineno, col: n.col_offset, call, once: call && !maybe, node: call ? parent : null });
       return;
     }
     for (const k of Object.keys(n)) {
@@ -623,7 +633,8 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   // there: a definition in code that runs at another time, or maybe never,
   // a lazy generator's, cannot be placed)
   const df = deferredOf(first);
-  let at: { stmt: number; line: number; col: number } = first;
+  // (`node`: a setter's call, whose arguments are evaluated before it runs)
+  let at: { stmt: number; line: number; col: number; node?: any } = first;
   let calls = 0;
   if (df) {
     const fname = df.kind === "callable" ? callableName(first, df) : null;
@@ -638,10 +649,17 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     const COMPOUND = new Set(["If", "For", "AsyncFor", "While", "Try", "TryStar", "With", "AsyncWith", "Match"]);
     if (k < 0 || COMPOUND.has(st._type) || df.node.body.slice(0, k).some((b: any) => exits(b))) return null;
     // (and within it, the store is not after `and`/`or`, in a conditional
-    // expression's branch, an assert's message or a later comparison operand)
+    // expression's branch, an assert's message, a later comparison operand,
+    // or a comprehension's element, unless every iterable is a literal with
+    // elements and nothing filters: REACT-98EB-4)
+    const nonEmpty = (g: any) => !g.ifs.length && !g.is_async && ["List", "Tuple", "Set"].includes(g.iter._type) && g.iter.elts.length > 0 && !g.iter.elts.some((e: any) => e._type === "Starred");
+    const mayNotRun = (n: any, key: string, next: any, nextKey: string | undefined) =>
+      n._type === "GeneratorExp" || ((n._type === "ListComp" || n._type === "SetComp" || n._type === "DictComp") &&
+        (key === "generators" ? !(next === n.generators[0] && nextKey === "iter") : !n.generators.every(nonEmpty)));
     if (first.path.slice(i + 1).some(([n, key], j, rest) => {
       const next = rest[j + 1]?.[0];
       return (n._type === "BoolOp" && next && n.values.indexOf(next) > 0) || (n._type === "IfExp" && key !== "test") || (n._type === "Assert" && key === "msg") ||
+        mayNotRun(n, key, next, rest[j + 1]?.[1]) ||
         (n._type === "Compare" && key === "comparators" && next && n.comparators.indexOf(next) > 0);
     })) return null;
     at = uses.reduce((a, u) => (u.stmt < a.stmt || (u.stmt === a.stmt && before(u, a)) ? u : a));
@@ -688,6 +706,11 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
         continue;
       }
       if (o.stmt > at.stmt) { out.set(o, "new"); continue; }
+      // (written before: decorators, a class's decorators, metaclass or
+      // body may call it there, REACT-98EB-1)
+      const encl = o.path.slice(0, o.path.findIndex(([n]) => n === d.node) + 1).map(([n]) => n);
+      if (encl.some((n) => n.decorator_list?.length || (n._type === "ClassDef" && n.keywords?.length))) return null;
+      if (encl.some((n, j) => n._type === "ClassDef" && n.body.includes(encl[j + 1]) && encl[j + 1].name && n.body.some((b: any) => b !== encl[j + 1] && mentions(b, [encl[j + 1].name])))) return null;
       const fname = callableName(o, d);
       if (!fname) return null;
       if (usesOf(body, fname).some((u) => u.stmt < at.stmt || (u.stmt === at.stmt && before(u, at)))) return null;
@@ -696,13 +719,22 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     }
     if (o.stmt > at.stmt || (o.stmt === at.stmt && o.store && !before(o, at))) { out.set(o, "new"); continue; }
     if (o.stmt < at.stmt) { out.set(o, "old"); continue; }
-    if (df) { out.set(o, before(o, at) ? "old" : "new"); continue; }
+    if (df) {
+      // (the setter's arguments are evaluated before it runs, REACT-98EB-2)
+      if (at.node && inside(o, at.node)) {
+        if (o.store) return null;
+        out.set(o, "old");
+        continue;
+      }
+      out.set(o, before(o, at) ? "old" : "new");
+      continue;
+    }
     // the same statement
     // (a class's decorators, bases and body, a def's decorators, defaults
     // and annotations run before the name is bound: they read the previous
     // value; what runs later reads the new one: timing)
     const defIdx = first.def ? o.path.findIndex(([n]) => n === first.def) : -1;
-    const t = defIdx >= 0 && (first.def._type === "ClassDef" || o.path[defIdx][1] !== "body") ? timing(o, defIdx, first.def) : "later";
+    const t = defIdx >= 0 && (first.def._type === "ClassDef" || o.path[defIdx][1] !== "body" || first.def.decorator_list.length) ? timing(o, defIdx, first.def) : "later";
     if (t === "maybe") return null;
     const header = t === "now";
     if (header || evaluatedFirst(o, first)) { out.set(o, "old"); continue; }
