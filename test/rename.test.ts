@@ -288,14 +288,29 @@ test("parenthesized annotations and CRLF lines (REACT-D304-1, 2)", () => {
 test("an annotation alone binds nothing: dependencies, and functions' locals (REACT-44C5-1, 2)", () => {
   const refs = (code: string) => [...analyzeCell(code, "c").refs].sort();
   // (`(x): int` in a function: x is still the global)
-  assert.deepEqual(refs("def f():\n    (x): int\n    return x"), ["int", "x"]);
-  assert.deepEqual(refs("def f():\n    ((x)): int\n    return x"), ["int", "x"]);
+  assert.deepEqual(refs("def f():\n    (x): int\n    return x"), ["x"]);
+  assert.deepEqual(refs("def f():\n    ((x)): int\n    return x"), ["x"]);
   // (`x: int` in a function makes x local; in a class body it binds nothing)
-  assert.deepEqual(refs("def f():\n    x: int\n    return x"), ["int"]);
+  assert.deepEqual(refs("def f():\n    x: int\n    return x"), []);
   assert.deepEqual(refs("class C:\n    x: int\n    y = x"), ["int", "x"]);
   // (an attribute's or an item's evaluates the object and the index)
-  assert.deepEqual(refs("a.b: int\nitems[k]: int"), ["a", "int", "items", "k"]);
+  assert.deepEqual(refs("a.b: int\nitems[k]: int"), ["a", "items", "k"]);
   // (renaming: `return x` in such a function reads the new name)
   assert.equal(renameInCell("x = x + 1\ndef f():\n    (x): int\n    return x\nprint(f())", "x", "x\u02b92", { from: "definition" }),
     "x\u02b92 = x + 1\ndef f():\n    (x\u02b92): int\n    return x\u02b92\nprint(f())");
+});
+
+test("annotations Python never evaluates are no references; an annotation alone mutates nothing (REACT-3A97-1, 2)", () => {
+  const a = (code: string) => analyzeCell(code, "c");
+  const refs = (code: string) => [...a(code).refs].sort();
+  // (in a function, and for targets that are not simple names: never evaluated)
+  assert.deepEqual(refs("def f():\n    y: x\n    return 3"), []);
+  assert.deepEqual(refs("def f():\n    (y): x = 1\n    return y"), []);
+  assert.deepEqual(refs("(y): x"), []);
+  assert.deepEqual(refs("a.b: x"), ["a"]);
+  // (a simple name at the top level: evaluated when asked for, a reference)
+  assert.deepEqual(refs("y: x"), ["x"]);
+  // (`a[i]: int` neither fetches nor stores: a and i are read, a is not changed)
+  assert.deepEqual([...a("a[i]: int").mutations ?? []], []);
+  assert.deepEqual(refs("a[i]: int"), ["a", "i"]);
 });

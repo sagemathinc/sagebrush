@@ -500,7 +500,10 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     simple one makes `x` local, as in CPython. marimo counts them as
     definitions, and strict mode still does. An attribute's or an item's
     annotation evaluates the object and the index, and fetches nothing
-    (review of 44c5a65).
+    (review of 44c5a65). An annotation's expression is a reference only where Python
+    evaluates it: for a simple name at a module's or a class's top level
+    (when asked for). It is never evaluated in a function, or for any other
+    target. An annotation alone mutates nothing (review of 3a97ae5).
   - When a statement shares the prologue's logical line (`"doc"; print(x)`,
     or after a `\` on the next physical line), that line is split at the
     statement, with the initialization between. Otherwise the initialization
