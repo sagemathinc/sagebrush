@@ -37,7 +37,7 @@ import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { mangleLocals, localPrefix } from "./dataflow";
-import { restoreDefNames, RENAME_HELPER } from "./rename";
+import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -241,8 +241,30 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // (page-order scoping's renamed definitions get their names back: restoreDefNames)
         const scoped = Object.fromEntries(scopedNames);
         if (scopedNames.length && !renameHelper) { run(RENAME_HELPER, host, "exec", "<rename>"); renameHelper = true; }
-        const transform = (t: any) => { if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
-        ok = run(helpSyntax(m.code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle || scopedNames.length ? { transform } : {}) });
+        // (page-order scoping's initialization lines, `xʹ2 = x  # page-order
+        // scoping`: taken out of the text and run as the first statements, on
+        // the first statement's line, so the cell's line numbers are as written)
+        const { code, inits } = takeInitLines(m.code);
+        const initialize = (t: any) => {
+          const ln = t.body[0]?.lineno ?? 1, pos = { lineno: ln, col_offset: 0, end_lineno: ln, end_col_offset: 0 };
+          const nm = (id: string, store = false) => ({ _type: "Name", id, ctx: { _type: store ? "Store" : "Load" }, ...pos });
+          const str = (v: string) => ({ _type: "Constant", value: v, kind: null, ...pos });
+          const call = (f: any, args: any[]) => ({ _type: "Call", func: f, args, keywords: [], ...pos });
+          const noArgs = { _type: "arguments", posonlyargs: [], args: [], vararg: null, kwonlyargs: [], kw_defaults: [], kwarg: null, defaults: [] };
+          const globalsOf = { _type: "Attribute", value: { _type: "Lambda", args: noArgs, body: { _type: "Constant", value: 0, kind: null, ...pos }, ...pos }, attr: "__globals__", ctx: { _type: "Load" }, ...pos };
+          // if 'x' in (lambda: 0).__globals__ or hasattr(__import__('builtins'), 'x'): xʹ2 = x
+          t.body.unshift(...inits.map(([n, w]) => ({
+            _type: "If",
+            test: { _type: "BoolOp", op: { _type: "Or" }, values: [
+              { _type: "Compare", left: str(w), ops: [{ _type: "In" }], comparators: [globalsOf], ...pos },
+              call(nm("hasattr"), [call(nm("__import__"), [str("builtins")]), str(w)]),
+            ], ...pos },
+            body: [{ _type: "Assign", targets: [nm(n, true)], value: nm(w), type_comment: null, ...pos }],
+            orelse: [], ...pos,
+          })));
+        };
+        const transform = (t: any) => { if (inits.length) initialize(t); if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
+        ok = run(helpSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle || scopedNames.length || inits.length ? { transform } : {}) });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }

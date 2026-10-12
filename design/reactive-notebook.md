@@ -461,6 +461,23 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
   whose renamed code changes (a definition inserted above it) reruns.
 - In Sage, `var('x')` alone on a line becomes `xʹ2 = SR.var('x')` (which
   does not set the global `x`).
+- A redefinition that may not run is initialized from the previous value
+  (William, October 12). Examples: `if c: x = 2`; a loop body; a `try`
+  that raises first; a skipped `:=`; a function binding `global x` that
+  the analysis cannot place. The new name starts as the previous value,
+  and every occurrence in the cell is renamed, so a skipped redefinition
+  leaves the previous value, as in Python, instead of leaving `xʹ2`
+  unbound.
+  - The initialization is a line of its own:
+    `if 'x' in (lambda: 0).__globals__ or hasattr(__import__('builtins'), 'x'): xʹ2 = x  # page-order scoping`.
+    It binds the new name only if the previous one is bound (a global or a
+    builtin), so an unbound previous name stays unbound, as Python's would.
+  - The cell then reads the previous definition, so editing it reruns the
+    cell.
+  - pyjs's session takes the line out of the text and runs the same
+    statement on the first statement's line, so tracebacks keep the cell's
+    line numbers. Other hosts (the CPython differential driver, Jupyter
+    kernels) run the line as written.
 - Names that cannot be renamed (Magma) keep marimo's error and its fix.
 - marimo's rule otherwise: a name nobody reads may be defined by several
   cells (#1477), and the same import in several cells is not a conflict.

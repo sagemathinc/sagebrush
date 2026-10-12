@@ -143,6 +143,16 @@ export const REGRESSIONS: [string, Case][] = [
   ["an assignment's value reads the new x after its own := (as REACT-C199-1)", regression(["x = 1", "x = (x := 2) + x\nprint(x)", "print(x)"])],
   ["a for loop's iterable reads the new x after its own := (runs once): control", regression(["x = [1]", "for x in [(x := [2]), x]:\n    print(x)", "print(x)"])],
   ["an assignment's value before its own := reads the previous x: refused or right", regression(["x = 1", "x = x + (x := 2)\nprint(x)", "print(x)"])],
+  ["an if False redefinition leaves the previous x: control (William: initialize the new name)", regression(["x = 1", "if False:\n    x = 2\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["an if True redefinition: control (William: initialize the new name)", regression(["x = 1", "if True:\n    x = 2\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a redefinition after a simple statement, under if False: control (William: initialize the new name)", regression(["x = 1", "y = 0\nif y:\n    x = 2\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a for loop over nothing leaves the previous x: control (William: initialize the new name)", regression(["x = 1", "for i in range(0):\n    x = i\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a for loop that runs redefines x: control (William: initialize the new name)", regression(["x = 1", "for i in range(3):\n    x = x + i\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a while loop that never runs leaves the previous x: control (William: initialize the new name)", regression(["x = 1", "while False:\n    x = 2\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a try that raises before the redefinition: control (William: initialize the new name)", regression(["x = 1", "try:\n    1 / 0\n    x = 2\nexcept ZeroDivisionError:\n    pass\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a setter not called leaves the previous x: control (William: initialize the new name)", regression(["x = 1", "def setx():\n    global x\n    x = 2\nif False:\n    setx()\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a skipped := leaves the previous x: control (William: initialize the new name)", regression(["x = 1", "False and (x := 2)\nprint(x)", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
+  ["a redefinition only downstream reads, skipped: control (William: initialize the new name)", regression(["x = 1", "if False:\n    x = 2", "print(x)"], [{ kind: "edit", id: "c0", stmts: ["x = 5"] }])],
   ["a cell raising in plain Python raises here too (FUZZ-F4)", regression(["x = 1", "f = lambda: x\nx = 2\ndel x\nprint(f())", "print(x)"])],
 ];
 
