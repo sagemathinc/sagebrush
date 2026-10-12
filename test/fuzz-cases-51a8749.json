@@ -1,0 +1,262 @@
+[
+  {
+    "name": "repeated formfeeds control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\f\f'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "mixed whitespace around formfeed control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U00010000' \t\f \t'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed before concatenation comment control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if ('\ud83d\ude00'\f# \\ud800\n'') > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed after concatenation comment control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if ('\ud83d\ude00'# \\ud800\n\f'') > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed before raw surrogate text control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\fr'\\ud800' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "raw text before formfeed and scalar control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r'\\ud800'\f'\\U00010000' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed before escaped backslash text control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\f'\\\\ud800' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed before raw triple string control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\fR'''\\ud800''' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed before continuation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\f\\\n'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed after CRLF continuation control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\ud83d\ude00'\\\r\n\f'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nonascii columns and formfeed control",
+    "codes": [
+      "x = 1",
+      "label = '\u00e9\ud83d\ude00'; print(((x:=10) if '\ud83d\ude00'\f'' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "empty literal before formfeed control",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if ''\f'\ud83d\ude00' > \"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "formfeed between short surrogate escapes refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800'\f'\\udc00' > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "formfeed before ambiguous pair refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if ''\f'\\ud800\\udc00' > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "raw empty string before formfeed and pair refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if r''\f'\\ud800\\udc00' > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "formfeed between mixed surrogate escapes refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\U0000D800'\f'\\uDc00' > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "formfeed between triple surrogate literals refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '''\\ud800'''\f\"\"\"\\udc00\"\"\" > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "comment and formfeed between surrogate literals refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if ('\\ud800' # fake raw r''\n\f'\\udc00') > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "formfeeds and empty literal inside pair refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800'\f''\f'\\udc00' > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  },
+  {
+    "name": "CRLF continuation and formfeed inside pair refused boundary",
+    "codes": [
+      "x = 1",
+      "print(((x:=10) if '\\ud800'\\\r\n\f'\\udc00' > \"\\udbff\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x = 5"
+    ],
+    "expect": "refuse"
+  }
+]
