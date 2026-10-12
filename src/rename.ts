@@ -667,8 +667,37 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     ListComp: ["generators", "elt"], SetComp: ["generators", "elt"], GeneratorExp: ["generators", "elt"], DictComp: ["generators", "key", "value"],
     Call: ["func", "args", "keywords"], ClassDef: ["bases", "keywords"], IfExp: ["test", "body", "orelse"], withitem: ["context_expr", "optional_vars"],
   };
-  const runsBefore = (a: { stmt: number; line: number; col: number; path: [any, string][] }, b: { stmt: number; line: number; col: number; path: [any, string][] }) => {
-    if (a.stmt !== b.stmt) return a.stmt < b.stmt;
+  // (an occurrence's path takes shortcuts that a use's does not: a
+  // comprehension's first iterable as "iter0", its targets, later iterables
+  // and conditions under "generators" with no comprehension node, a dict
+  // comprehension's key and value both as "elt", defaults under "args" with
+  // no arguments node; both made the AST's, REACT-156C-1)
+  type At = { stmt: number; line: number; col: number; path: [any, string][] };
+  const COMPS = new Set(["ListComp", "SetComp", "GeneratorExp", "DictComp"]);
+  const canon = (o: At): [any, string][] => {
+    const out: [any, string][] = [];
+    o.path.forEach(([n, k], j) => {
+      const next = o.path[j + 1]?.[0];
+      // (the child the path goes on to: the next entry's node, or at its end the name itself)
+      const is = (v: any) => v != null && (next ? v === next : v._type === "Name" && v.lineno === o.line && v.col_offset === o.col);
+      const has = (v: any) => (Array.isArray(v) ? v.some(is) : is(v));
+      if (k === "iter0") { out.push([n, "generators"], [n.generators[0], "iter"]); return; }
+      if (COMPS.has(n._type) && k === "generators") {
+        const g = n.generators.find((g: any) => has(g.target) || has(g.iter) || has(g.ifs));
+        if (g) { out.push([n, k], [g, has(g.target) ? "target" : has(g.iter) ? "iter" : "ifs"]); return; }
+      }
+      if (n._type === "DictComp" && k === "elt") { out.push([n, has(n.key) ? "key" : "value"]); return; }
+      if ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "Lambda") && k === "args" && next !== n.args && n.args) {
+        out.push([n, k], [n.args, has(n.args.kw_defaults) ? "kw_defaults" : "defaults"]);
+        return;
+      }
+      out.push([n, k]);
+    });
+    return out;
+  };
+  const runsBefore = (a0: At, b0: At) => {
+    if (a0.stmt !== b0.stmt) return a0.stmt < b0.stmt;
+    const a = { ...a0, path: canon(a0) }, b = { ...b0, path: canon(b0) };
     for (let j = 0; j < Math.min(a.path.length, b.path.length) && a.path[j][0] === b.path[j][0]; j++) {
       const n = a.path[j][0], ka = a.path[j][1], kb = b.path[j][1];
       if (ka !== kb) {
@@ -725,11 +754,15 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   const inside = (o: Occurrence, node: any) => o.path.some(([n]) => n === node);
   // (what a statement evaluates before binding: an assignment's value, a for
   // loop's iterable, a with item's expression, :='s value)
-  const evaluatedFirst = (o: Occurrence, first: Occurrence) => o.path.some(([n, key]) =>
-    ((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value" && inside(first, n)) ||
-    ((n._type === "For" || n._type === "AsyncFor") && key === "iter" && inside(first, n)) ||
-    (n._type === "NamedExpr" && key === "value" && inside(first, n)) ||
-    (n._type === "withitem" && key === "context_expr" && inside(first, n)));
+  // (the binding elsewhere in that statement than the part evaluated first:
+  // one inside it, `v = x if (x := 2) else 0`, is placed by runsBefore)
+  const evaluatedFirst = (o: Occurrence, first: Occurrence) => o.path.some(([n, key]) => {
+    const elsewhere = inside(first, n) && !first.path.some(([m, k]) => m === n && k === key);
+    return elsewhere && (((n._type === "Assign" || n._type === "AnnAssign" || n._type === "AugAssign") && key === "value") ||
+      ((n._type === "For" || n._type === "AsyncFor") && key === "iter") ||
+      (n._type === "NamedExpr" && key === "value") ||
+      (n._type === "withitem" && key === "context_expr"));
+  });
   const LOOPS = new Set(["For", "AsyncFor", "While"]);
   // (a `global x` takes the name of the assignments in its function, if any)
   const globals = occ.filter((o) => o.global);
@@ -750,7 +783,7 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
         // (the same function as the definition: in its order, with what an
         // assignment evaluates before binding; a read of the previous value
         // only if the function runs once: a second call reads the new one)
-        const old = !o.store && (before(o, first) || evaluatedFirst(o, first));
+        const old = !o.store && (runsBefore(o, first) || evaluatedFirst(o, first));
         if (old && calls !== 1) return null;
         out.set(o, old ? "old" : "new");
         continue;
@@ -794,7 +827,7 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     if (t === "maybe") return null;
     const header = t === "now";
     if (header || evaluatedFirst(o, first)) { out.set(o, "old"); continue; }
-    if (before(o, first)) {
+    if (runsBefore(o, first)) {
       if (o.path.some(([n]) => LOOPS.has(n._type) && inside(first, n))) return null;
       out.set(o, "old");
     } else out.set(o, "new");
