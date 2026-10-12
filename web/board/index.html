@@ -37,6 +37,27 @@
   #title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
   button { font: inherit; border: 1px solid rgba(0, 0, 0, .18); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
+  #hint { color: #667; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #edit[aria-pressed="true"] { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
+  .menuwrap { position: relative; }
+  .menu { position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); padding: 4px; display: flex; flex-direction: column; min-width: 200px; }
+  .menu[hidden] { display: none; }
+  .menu button { border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; background: none; }
+  .menu button:hover { background: #eef2ea; }
+  .menu button[hidden] { display: none; }
+  .board.editing { cursor: default; }
+  .board.editing .board-note { cursor: move; }
+  .board-item.selected { outline: 2px solid #2a6f2f; outline-offset: 2px; }
+  .board-editor { position: fixed; z-index: 3; box-sizing: border-box; background: #fff; border: 1px solid rgba(0, 0, 0, .18); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .board-editor input, .board-editor textarea { font: inherit; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 5px 8px; box-sizing: border-box; width: 100%; }
+  .board-editor .be-title { font-weight: 600; }
+  .board-editor textarea { min-height: 120px; resize: vertical; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .board-editor .be-detail { min-height: 70px; }
+  .board-editor summary { cursor: pointer; color: #556; font-size: 12px; }
+  .be-row { display: flex; gap: 6px; }
+  .be-row span { flex: 1; }
+  .be-done { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
+  @media (max-width: 700px) { #hint { display: none; } }
   #tour { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2; width: min(720px, calc(100% - 24px)); box-sizing: border-box; background: rgba(255, 255, 255, .96); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
   #tour[hidden] { display: none; }
   #say { flex: 1; max-height: 30vh; overflow: auto; }
@@ -50,7 +71,7 @@
 </head>
 <body>
 <div id="board"></div>
-<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><button id="fit" title="Show everything (0)">⤢</button></div>
+<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="hint" hidden>Drag to move · double-click to write or add · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎ Edit</button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="tidy">Tidy (automatic layout)</button><button id="download">Download JSON</button><button id="open">Open JSON…</button><button id="copyjson">Copy JSON</button><button id="newboard">New board</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,application/json" hidden></div>
 <div id="tour" hidden><div id="say"></div><div id="nav"><div><button id="prev" title="Back (←)" disabled>←</button><button id="next" title="Next (→)">→</button></div><span id="where"></span></div></div>
 <script type="module" src="/board/board.js"></script>
 </body>
