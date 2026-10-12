@@ -40,6 +40,11 @@ export interface Edge {
   from: string;
   to: string;
   label?: string;
+  /** its route (web/board/route.ts): x0, y0, x1, y1, ...; straight from border to border without one */
+  points?: number[];
+  /** where its label goes (its center) */
+  lx?: number;
+  ly?: number;
 }
 
 export interface Camera {
@@ -402,6 +407,30 @@ export class Board {
     for (const e of this.edges) {
       const a = this.byId.get(e.from), b = this.byId.get(e.to);
       if (!a || !b) continue;
+      if (e.points) {
+        // a route: rounded corners, the arrowhead along its last segment
+        const p = e.points;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let i = 0; i < p.length; i += 2) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); }
+        if (x1 < v.x0 || x0 > v.x1 || y1 < v.y0 || y0 > v.y1) continue;
+        const n = p.length;
+        const ex = p[n - 2], ey = p[n - 1], dx = ex - p[n - 4], dy = ey - p[n - 3], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+        ctx.beginPath();
+        ctx.moveTo(p[0], p[1]);
+        for (let i = 2; i < n - 2; i += 2) {
+          const r = Math.min(10, Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]) / 2, Math.hypot(p[i + 2] - p[i], p[i + 3] - p[i + 1]) / 2);
+          ctx.arcTo(p[i], p[i + 1], p[i + 2], p[i + 3], r);
+        }
+        ctx.lineTo(ex - ux * head * 0.8, ey - uy * head * 0.8);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - ux * head - uy * head * 0.45, ey - uy * head + ux * head * 0.45);
+        ctx.lineTo(ex - ux * head + uy * head * 0.45, ey - uy * head - ux * head * 0.45);
+        ctx.fill();
+        if (e.label) labels.push([e.label, e.lx ?? (p[0] + ex) / 2, e.ly ?? (p[1] + ey) / 2]);
+        continue;
+      }
       if (Math.max(a.x + a.w, b.x + b.w) < v.x0 || Math.min(a.x, b.x) > v.x1 || Math.max(a.y + a.h, b.y + b.h) < v.y0 || Math.min(a.y, b.y) > v.y1) continue;
       const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
       const dx = bx - ax, dy = by - ay;
@@ -538,6 +567,9 @@ export class Board {
     const it = this.byId.get(id), r = this.el.getBoundingClientRect(), c = this.camera;
     return it ? { left: r.left + (it.x - c.x) * c.z, top: r.top + (it.y - c.y) * c.z, width: it.w * c.z, height: it.h * c.z } : null;
   }
+  edgeList(): Edge[] {
+    return this.edges;
+  }
   item(id: string): Item | undefined {
     return this.byId.get(id);
   }
@@ -554,6 +586,8 @@ export class Board {
       const el = this.cache.get(it.id);
       if (el) { el.style.left = it.x + "px"; el.style.top = it.y + "px"; }
     }
+    const moved = new Set(ids);
+    for (const e of this.edges) if (moved.has(e.from) || moved.has(e.to)) { delete e.points; delete e.lx; delete e.ly; }
     this.mountedFor = null;
     this.request();
   }

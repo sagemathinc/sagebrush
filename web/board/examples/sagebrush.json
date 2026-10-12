@@ -505,18 +505,6 @@
    "label": "wasm"
   },
   {
-   "from": "web",
-   "to": "math"
-  },
-  {
-   "from": "py",
-   "to": "math"
-  },
-  {
-   "from": "node",
-   "to": "math"
-  },
-  {
    "from": "math",
    "to": "core"
   },
@@ -529,6 +517,10 @@
    "from": "engines",
    "to": "tests",
    "hidden": true
+  },
+  {
+   "from": "bindings",
+   "to": "math"
   }
  ],
  "steps": [
