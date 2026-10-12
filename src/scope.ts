@@ -130,7 +130,9 @@ class Collector {
   }
 
   newScope(kind: ScopeKind, name: string, node: object): Scope {
-    const prefix = this.s.kind === "module" ? "" : this.s.kind === "function" ? `${this.s.qualname}.<locals>.` : `${this.s.qualname}.`;
+    // (CPython: a name the enclosing scope declares global is qualified as
+    // the module's)
+    const prefix = this.s.kind === "module" || this.s.globals.has(name) ? "" : this.s.kind === "function" ? `${this.s.qualname}.<locals>.` : `${this.s.qualname}.`;
     const sc = new Scope(kind, name, this.s, prefix + name);
     this.s.children.set(node, sc);
     return sc;

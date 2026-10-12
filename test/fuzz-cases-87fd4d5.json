@@ -1,0 +1,815 @@
+[
+ {
+  "name": "control: deferred method",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    def m(self):\n        return C.a\nprint(C().m())"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: deferred lambda",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    f=lambda: C.a\nprint(C.f())"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: direct immediate lambda",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=(lambda: C.a)()+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "stored generator body",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    g=(C.a for i in [0])\nprint(list(C.g))"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: generator first iterable",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    g=(v for v in [C.a])\nprint(list(C.g))"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: generator consumed immediately",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=sum(C.a for i in [0])+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "class body calls its function",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    def f():\n        return C.a\n    a=f()+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "class body invokes callback",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=sum(map(lambda _: C.a,[0]))+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "class method decorator invokes lambda",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    @(lambda f: (C.a,f)[1])\n    def m(self):\n        return 7\nprint(C().m())"
+  ],
+  "change": null
+ },
+ {
+  "name": "higher order immediate lambda",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=(lambda f:f())(lambda:C.a)+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "generator in own-name function default",
+  "codes": [
+   "f=1",
+   "def f(g=(f for _ in [0])):\n    return next(g) is f\nprint(f())"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: function default walrus",
+  "codes": [
+   "x=1",
+   "def f(a=(x:=2)):\n    return a\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "def f(a=(x:=3)):\n    return a\nprint(x)"
+  ]
+ },
+ {
+  "name": "control: lambda default walrus",
+  "codes": [
+   "x=1",
+   "f=lambda a=(x:=2): a\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "f=lambda a=(x:=3): a\nprint(x)"
+  ]
+ },
+ {
+  "name": "global walrus nested function default",
+  "codes": [
+   "x=1",
+   "def g():\n    global x\n    def f(a=(x:=2)):\n        return a\n    return f()\ng()\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "def g():\n    global x\n    def f(a=(x:=3)):\n        return a\n    return f()\ng()\nprint(x)"
+  ]
+ },
+ {
+  "name": "global walrus method default",
+  "codes": [
+   "x=1",
+   "class C:\n    global x\n    def f(a=(x:=2)):\n        return a\nprint(x)",
+   "print(x)"
+  ],
+  "change": [
+   1,
+   "class C:\n    global x\n    def f(a=(x:=3)):\n        return a\nprint(x)"
+  ]
+ },
+ {
+  "name": "class body calls its function with earlier reader",
+  "codes": [
+   "class C:\n    a=1",
+   "print(C.a)",
+   "class C:\n    def f():\n        return C.a\n    a=f()+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "class body invokes callback with earlier reader",
+  "codes": [
+   "class C:\n    a=1",
+   "print(C.a)",
+   "class C:\n    a=sum(map(lambda _: C.a,[0]))+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "class method decorator invokes lambda with earlier reader",
+  "codes": [
+   "class C:\n    a=1",
+   "print(C.a)",
+   "class C:\n    a=2\n    @(lambda f: (C.a,f)[1])\n    def m(self):\n        return 7\nprint(C().m())"
+  ],
+  "change": null
+ },
+ {
+  "name": "higher order immediate lambda with earlier reader",
+  "codes": [
+   "class C:\n    a=1",
+   "print(C.a)",
+   "class C:\n    a=(lambda f:f())(lambda:C.a)+1\nprint(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "repair control: deferred method and lambda with external reader",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    def m(self):\n        return C.a\n    f=lambda: C.a\nprint(C().m(),C.f())",
+   "print(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "repair control: direct lambda with external reader",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=(lambda:C.a)()+1\n    def m(self):\n        return C.a\nprint(C.a,C().m())",
+   "print(C.a)"
+  ],
+  "change": null
+ },
+ {
+  "name": "repair control: default reads global parameter name",
+  "codes": [
+   "a=1",
+   "def f(a,b=a):\n    return b\nprint(f(9))"
+  ],
+  "change": [
+   0,
+   "a=2"
+  ]
+ },
+ {
+  "name": "fuzzer checks unrelated output after reference exception",
+  "codes": [
+   "1//0",
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    g=(C.a for i in [0])\nprint(list(C.g))"
+  ],
+  "change": null
+ },
+ {
+  "name": "iter stores generator",
+  "codes": [
+   "x=1",
+   "g=iter(x for _ in [0])\nx=2\nprint(next(g))",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "map stores lambda",
+  "codes": [
+   "x=1",
+   "g=map(lambda _:x,[0])\nx=2\nprint(next(g))",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "callback returned by identity",
+  "codes": [
+   "x=1",
+   "g=(lambda f:f)(lambda:x)\nx=2\nprint(g())",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "keyword generator saved",
+  "codes": [
+   "x=1",
+   "def keep(g):\n    return g\nh=keep(g=(x for _ in [0]))\nx=2\nprint(next(h))",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: list consumes generator immediately",
+  "codes": [
+   "x=1",
+   "g=list(x for _ in [0])\nx=2\nprint(g)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: list consumes map immediately",
+  "codes": [
+   "x=1",
+   "g=list(map(lambda _:x,[0]))\nx=2\nprint(g)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "global update reads previous value",
+  "codes": [
+   "x=1",
+   "def bump():\n    global x\n    x=x+1\nbump()\nprint(x)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "global setter called twice",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    print(x)\n    x=2\nsetx()\nsetx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "global setter in false branch",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\nif False:\n    setx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "global setter short circuited",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\nFalse and setx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "global setter in unused generator filter",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\nh=(i for i in [0] if setx())\nprint(x)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: global setter direct call",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\nsetx()\nprint(x)",
+   "print(x)"
+  ],
+  "change": null
+ },
+ {
+  "name": "class generator passed to iter",
+  "codes": [
+   "class C:\n    a=1",
+   "print(C.a)",
+   "class C:\n    a=2\n    g=iter(C.a for _ in [0])\nprint(next(C.g))"
+  ],
+  "change": null
+ },
+ {
+  "name": "decorator observes definition name",
+  "codes": [
+   "def f():\n    pass",
+   "print(f.__name__)",
+   "def deco(fn):\n    print(fn.__name__)\n    return fn\n@deco\ndef f():\n    pass\nprint(f.__name__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "decorator customizes definition name",
+  "codes": [
+   "def f():\n    pass",
+   "print(f.__name__)",
+   "def deco(fn):\n    fn.__name__=\"custom\"\n    return fn\n@deco\ndef f():\n    pass\nprint(f.__name__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "decorator returns lambda",
+  "codes": [
+   "def f():\n    pass",
+   "print(f.__name__)",
+   "def deco(fn):\n    return lambda:7\n@deco\ndef f():\n    pass\nprint(f.__name__,f())"
+  ],
+  "change": null
+ },
+ {
+  "name": "nested function qualified name",
+  "codes": [
+   "def f():\n    pass",
+   "print(f.__name__)",
+   "def f():\n    def g():\n        pass\n    return g\nprint(f().__qualname__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: plain function name",
+  "codes": [
+   "def f():\n    pass",
+   "print(f.__name__)",
+   "def f():\n    pass\nprint(f.__name__,f.__qualname__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "metaclass observes class name",
+  "codes": [
+   "class C:\n    pass",
+   "print(C.__name__)",
+   "class Meta(type):\n    def __new__(m,name,bases,ns):\n        print(name)\n        return type.__new__(m,name,bases,ns)\nclass C(metaclass=Meta):\n    pass\nprint(C.__name__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "class body observes qualified name",
+  "codes": [
+   "class C:\n    pass",
+   "print(C.__name__)",
+   "class C:\n    print(__qualname__)\nprint(C.__qualname__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "property function qualified name",
+  "codes": [
+   "class C:\n    pass",
+   "print(C.__name__)",
+   "class C:\n    @property\n    def a(self):\n        return 1\nprint(C.a.fget.__qualname__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "nested class method qualified name",
+  "codes": [
+   "class C:\n    pass",
+   "print(C.__name__)",
+   "class C:\n    class D:\n        def m(self):\n            pass\nprint(C.D.m.__qualname__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "control: plain class method name",
+  "codes": [
+   "class C:\n    pass",
+   "print(C.__name__)",
+   "class C:\n    def m(self):\n        pass\nprint(C.__name__,C.__qualname__,C.m.__qualname__)"
+  ],
+  "change": null
+ },
+ {
+  "name": "dict retains lambda",
+  "codes": [
+   "x=1",
+   "g=dict(a=lambda: x)\nx=2\nprint(g[\"a\"]())",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "dict retains generator",
+  "codes": [
+   "x=1",
+   "g=dict(a=(x for _ in [0]))\nx=2\nprint(next(g[\"a\"]))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "min retains default lambda",
+  "codes": [
+   "x=1",
+   "g=min([], default=lambda: x)\nx=2\nprint(g())",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "max returns callable argument",
+  "codes": [
+   "x=1",
+   "g=max(lambda: x, lambda: 3, key=lambda f: 0)\nx=2\nprint(g())",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "shadowed list retains generator",
+  "codes": [
+   "x=1",
+   "def list(g):\n    return g\ng=list(x for _ in [0])\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "join method retains generator",
+  "codes": [
+   "x=1",
+   "class Box:\n    def join(self,g):\n        return g\ng=Box().join(x for _ in [0])\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control sorted invokes key",
+  "codes": [
+   "x=1",
+   "g=sorted([1,0],key=lambda i: i*x)\nx=2\nprint(g)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter in skipped assert message",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\nassert True, setx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter in skipped chained comparison",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\n0 > 1 < setx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter after caught exception",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\ntry:\n    1/0\n    setx()\nexcept ZeroDivisionError:\n    pass\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter in second empty comprehension iterable",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\ng=[i for j in [] for i in [setx()]]\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter in second unconsumed generator iterable",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\ng=(i for j in [0] for i in [setx()])\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control setter in assert test",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=2\nassert setx() is None\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter returns before store",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    return\n    x=2\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter with false branch in body",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    if False:\n        x=2\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "class global function name",
+  "codes": [
+   "def f():\n    pass",
+   "class Outer:\n    global f\n    def f():\n        pass\nprint(f.__name__, f.__qualname__)",
+   "print(f.__name__)"
+  ]
+ },
+ {
+  "name": "class global class name",
+  "codes": [
+   "class C:\n    pass",
+   "class Outer:\n    global C\n    class C:\n        pass\nprint(C.__name__, C.__qualname__)",
+   "print(C.__name__)"
+  ]
+ },
+ {
+  "name": "definition with globals shadowed",
+  "codes": [
+   "globals=7\ndef f():\n    return 1",
+   "def f():\n    return 2\nprint(f())",
+   "print(f())"
+  ]
+ },
+ {
+  "name": "definition with local globals parameter",
+  "codes": [
+   "def f():\n    pass",
+   "def make(globals):\n    global f\n    def f():\n        return 2\nmake(7)\nprint(f())",
+   "print(f())"
+  ]
+ },
+ {
+  "name": "class method decorator builtin name rebound",
+  "codes": [
+   "class C:\n    a=1",
+   "def staticmethod(fn):\n    print(fn())\n    return fn\nclass C:\n    a=2\n    @staticmethod\n    def m():\n        return C.a\nprint(C.a)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "debug text simple control",
+  "codes": [
+   "x=1",
+   "x=2",
+   "print(f\"{x=}\", f\"{x + 1=}\")"
+  ]
+ },
+ {
+  "name": "debug text string literal identifier",
+  "codes": [
+   "x=1",
+   "x=2",
+   "print(f\"{'x'=}: {x}\")"
+  ]
+ },
+ {
+  "name": "t-string text string literal identifier",
+  "codes": [
+   "x=1",
+   "x=2",
+   "q=t\"{'x'} {x}\"\nprint(q.interpolations[0].expression, q.interpolations[0].value)"
+  ]
+ },
+ {
+  "name": "recursive definition control",
+  "codes": [
+   "def f(n):\n    return -1",
+   "def f(n):\n    return 1 if n==0 else n*f(n-1)\nprint(f(4))",
+   "print(f(3))"
+  ]
+ },
+ {
+  "name": "future annotation referring to own function",
+  "codes": [
+   "def f():\n    pass",
+   "from __future__ import annotations\ndef f(a: f):\n    pass\nprint(f.__annotations__[\"a\"])",
+   "print(f.__name__)"
+  ]
+ },
+ {
+  "name": "future annotation referring to own class",
+  "codes": [
+   "class C:\n    pass",
+   "from __future__ import annotations\nclass C:\n    a: C\nprint(C.__annotations__[\"a\"])",
+   "print(C.__name__)"
+  ]
+ },
+ {
+  "name": "method annotation requested while making class",
+  "codes": [
+   "class C:\n    a=1",
+   "class C:\n    a=2\n    def m(p: C):\n        pass\n    saved=m.__annotations__[\"p\"].a\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "metaclass requests class annotation",
+  "codes": [
+   "class C:\n    a=1",
+   "class Meta(type):\n    def __new__(m, name, bases, ns):\n        c=super().__new__(m,name,bases,ns)\n        print(c.__annotations__[\"v\"].a)\n        return c\nclass C(metaclass=Meta):\n    a=2\n    v: C\nprint(C.a)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "setter repeated in second comprehension iterable",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    x=x+1\n    return x\ng=[i for j in [0,1] for i in [setx()]]\nprint(g,x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "method decorator requests own-class annotation",
+  "codes": [
+   "class C:\n    a=1",
+   "def deco(fn):\n    print(fn.__annotations__[\"p\"].a)\n    return fn\nclass C:\n    a=2\n    @deco\n    def m(p: C):\n        pass\nprint(C.a)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "sum retains generator start",
+  "codes": [
+   "x=1",
+   "g=sum([], (x for _ in [0]))\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "max selects generator argument",
+  "codes": [
+   "x=1",
+   "g=max((x for _ in [0]), (), key=lambda g: 0)\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "min selects generator argument",
+  "codes": [
+   "x=1",
+   "g=min((x for _ in [0]), (), key=lambda g: 0)\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control sum consumes iterable",
+  "codes": [
+   "x=1",
+   "g=sum(x for _ in [0])\nx=2\nprint(g)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "consumer rebound in preceding cell",
+  "codes": [
+   "def list(g):\n    return g\nx=1",
+   "g=list(x for _ in [0])\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "consumer bound by match pattern",
+  "codes": [
+   "x=1",
+   "match (lambda g: g):\n    case list:\n        pass\ng=list(x for _ in [0])\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "consumer bound as exception target",
+  "codes": [
+   "x=1",
+   "class Save(Exception):\n    def __call__(self,g):\n        return g\ntry:\n    raise Save()\nexcept Save as list:\n    g=list(x for _ in [0])\nx=2\nprint(next(g))",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "sort method retains key lambda",
+  "codes": [
+   "x=1",
+   "class Box:\n    def sort(self, *, key):\n        return key\ng=Box().sort(key=lambda: x)\nx=2\nprint(g())",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control real list sort calls key",
+  "codes": [
+   "x=1",
+   "g=[2,1]\ng.sort(key=lambda i: i*x)\nx=2\nprint(g)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter walrus in skipped bool operand",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    False and (x:=2)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter walrus in skipped assert message",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    assert True, (x:=2)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter walrus in skipped comparison",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    0 > 1 < (x:=2)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "control setter direct walrus",
+  "codes": [
+   "x=1",
+   "def setx():\n    global x\n    (x:=2)\nsetx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "setter call after suppressed exception",
+  "codes": [
+   "x=1",
+   "class Suppress:\n    def __enter__(self):\n        return self\n    def __exit__(self,*args):\n        return True\ndef setx():\n    global x\n    x=2\nwith Suppress():\n    1/0\n    setx()\nprint(x)",
+   "print(x)"
+  ]
+ },
+ {
+  "name": "decorator rebound in preceding cell",
+  "codes": [
+   "def staticmethod(fn):\n    print(fn())\n    return fn\nclass C:\n    a=1",
+   "class C:\n    a=2\n    @staticmethod\n    def m():\n        return C.a\nprint(C.a)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "setter decorator is custom method",
+  "codes": [
+   "class C:\n    a=1",
+   "class Hooks:\n    def setter(self,fn):\n        print(fn())\n        return fn\nh=Hooks()\nclass C:\n    a=2\n    @h.setter\n    def m():\n        return C.a\nprint(C.a)",
+   "print(C.a)"
+  ]
+ },
+ {
+  "name": "global function qualname without renaming",
+  "codes": [
+   "class Outer:\n    global f\n    def f():\n        pass\nprint(f.__name__,f.__qualname__)"
+  ]
+ },
+ {
+  "name": "global class qualname without renaming",
+  "codes": [
+   "class Outer:\n    global C\n    class C:\n        pass\nprint(C.__name__,C.__qualname__)"
+  ]
+ },
+ {
+  "name": "control global function in function",
+  "codes": [
+   "def f():\n    pass",
+   "def make():\n    global f\n    def f():\n        return 2\nmake()\nprint(f.__name__, f.__qualname__, f())",
+   "print(f())"
+  ]
+ },
+ {
+  "name": "class body passes annotated method to reader",
+  "codes": [
+   "class C:\n    a=1",
+   "def read(fn):\n    return fn.__annotations__[\"p\"].a\nclass C:\n    a=2\n    def m(p:C):\n        pass\n    saved=read(m)\nprint(C.saved)",
+   "print(C.a)"
+  ]
+ }
+]
