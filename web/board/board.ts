@@ -770,9 +770,21 @@ export class Board {
       e.preventDefault();
       cancelAnimationFrame(this.flight);
       const r = this.el.getBoundingClientRect();
-      if (e.ctrlKey) this.zoomAt(Math.exp(-e.deltaY / 200), e.clientX - r.left, e.clientY - r.top);
-      else this.panBy(e.deltaX, e.deltaY);
+      const k = e.deltaMode === 1 ? 16 : 1; // (lines, Firefox's wheel)
+      // (a trackpad's pinch is many small deltas, a mouse wheel's notch one
+      // large one: capped, so both zoom at a comfortable rate)
+      if (e.ctrlKey) this.zoomAt(Math.exp(-Math.sign(e.deltaY) * Math.min(10, Math.abs(e.deltaY * k)) / 50), e.clientX - r.left, e.clientY - r.top);
+      else this.panBy(e.deltaX * k, e.deltaY * k);
     }, { passive: false });
+    // (Safari's pinch: gesture events with a scale, not ctrl+wheel)
+    let scale = 1;
+    this.el.addEventListener("gesturestart", (e) => { e.preventDefault(); scale = 1; });
+    this.el.addEventListener("gesturechange", (e: any) => {
+      e.preventDefault();
+      const r = this.el.getBoundingClientRect();
+      this.zoomAt(e.scale / scale, e.clientX - r.left, e.clientY - r.top);
+      scale = e.scale;
+    });
     const down = new Map<number, { x: number; y: number }>();
     const mid = () => {
       const [p, q] = [...down.values()];
@@ -812,7 +824,14 @@ export class Board {
       if (ed && this.onEdgeDoubleClick!(ed)) return;
       const w = this.toWorld(e.clientX, e.clientY);
       if (this.onDoubleClick?.(it, w.x, w.y)) return;
-      this.focus(it ? [it.id] : undefined);
+      // (flying there; already there, a double-click selects a word, as on
+      // any page, and the camera stays)
+      const b = this.bounds(it ? [it.id] : undefined);
+      if (!b) return;
+      const to = this.cameraFor(b.x0, b.y0, b.x1, b.y1, it ? 2 : 1.5), c = this.camera;
+      if (Math.abs(to.z / c.z - 1) < 0.02 && Math.hypot(to.x - c.x, to.y - c.y) * c.z < 4) return;
+      getSelection()?.removeAllRanges();
+      this.flyTo(to);
     });
   }
 }

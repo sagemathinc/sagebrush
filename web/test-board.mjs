@@ -126,6 +126,44 @@ try {
     check(n > 20 && !over.length, `text overflows in ${over.length} of ${n} notes: ${over.slice(0, 8).join(", ")}`);
     await ev("window.board.focus(undefined, true)");
   }
+  // input: a trackpad's pinch (many small ctrl+wheel deltas) zooms quickly;
+  // a double-click flies to a note and leaves no text selected; on the note
+  // already shown, it selects a word and the camera stays
+  {
+    await ev("window.board.focus(undefined, true)");
+    await sleep(100);
+    const z0 = await ev("window.board.camera.z");
+    for (let i = 0; i < 50; i++) await ev(`window.board.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -3, ctrlKey: true, clientX: ${W / 2}, clientY: ${H / 2}, bubbles: true, cancelable: true })), 1`);
+    const z1 = await ev("window.board.camera.z");
+    check(z1 / z0 > 10 || z1 > 7.9, `a pinch of 150 zooms ${(z1 / z0).toFixed(2)}x (want more than 10x)`);
+    await ev("window.board.focus(undefined, true)");
+    await sleep(200);
+    const pick = await ev(`(() => { const r = window.board.el.getBoundingClientRect(); for (let y = r.top + 70; y < r.bottom - 40; y += 17) for (let x = r.left + 20; x < r.right - 20; x += 17) { const it = window.board.itemAt(x - r.left, y - r.top); if (it && it.kind === 'note' && it.w * window.board.camera.z > 30) return { id: it.id, x, y }; } return null; })()`);
+    const dbl = async (x, y) => {
+      for (const clickCount of [1, 2]) {
+        await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount });
+        await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount });
+      }
+      await sleep(700);
+    };
+    if (pick) {
+      const c0 = await ev("window.board.camera");
+      await dbl(pick.x, pick.y);
+      const c1 = await ev("window.board.camera");
+      check(Math.abs(c1.z / c0.z - 1) > 0.02 || Math.hypot(c1.x - c0.x, c1.y - c0.y) > 1, "a double-click on a note flies to it");
+      check(await ev("getSelection().toString() === ''"), `a double-click that flies selects no text (${await ev("getSelection().toString()")})`);
+      // (a word of that note's text, now in view)
+      const word = await ev(`(() => { const c = window.board.clientRect(${JSON.stringify(pick.id)}); const el = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2)?.closest('.board-note'); if (!el) return null; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { const m = /\\w{3,}/.exec(n.textContent); if (!m) continue; const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + 1); const b = r.getBoundingClientRect(); if (b.width) return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; } return null; })()`);
+      if (word) {
+        await dbl(word.x, word.y);
+        const c2 = await ev("window.board.camera");
+        check(Math.abs(c2.z / c1.z - 1) < 0.02 && Math.hypot(c2.x - c1.x, c2.y - c1.y) < 1, "a double-click on the note shown leaves the camera");
+        check(await ev("getSelection().toString().trim().length > 0"), "a double-click on the note shown selects a word");
+      }
+    }
+    await ev("getSelection().removeAllRanges(), window.board.focus(undefined, true)");
+    await sleep(300);
+  }
   // math was typeset where the document has it (close to the first note with math)
   const withMath = notes.find((n) => /\$/.test(JSON.stringify(pg.nodes).match(new RegExp(`"id":"${n.id}"[^}]*`))?.[0] ?? ""));
   if (withMath) {
