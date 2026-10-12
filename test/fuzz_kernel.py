@@ -27,58 +27,98 @@ def _timeout(*_):
 signal.signal(signal.SIGALRM, _timeout)
 
 
-# page-order scoping's renamed definitions get their names back, as the
-# notebook's interpreter does (src/rename.ts restoreDefNames, RENAME_HELPER)
-def _sb_rename(o, n, old):
-    if getattr(o, "__name__", None) != old:
-        return
-    try:
-        o.__name__ = n
-    except Exception:
-        return
+# page-order scoping's renamed definitions are made under their written names
+# and moved, as the notebook's interpreter does (src/rename.ts
+# restoreDefNames, RENAME_HELPER)
+def _sb_lowering():
+    missing = object()
+    saved = []
 
-    def fix(v, seen):
-        for f in (v, getattr(v, "__func__", None), getattr(v, "fget", None), getattr(v, "fset", None), getattr(v, "fdel", None)):
-            q = getattr(f, "__qualname__", None)
-            if isinstance(q, str) and (q == old or q.startswith(old + ".")):
-                try:
-                    f.__qualname__ = n + q[len(old):]
-                except Exception:
-                    pass
-        if isinstance(v, type) and v not in seen:
-            seen.add(v)
-            for w in list(vars(v).values()):
-                fix(w, seen)
+    def push(g, w):
+        saved.append((w, g.get(w, missing)))
 
-    fix(o, set())
+    def pop(g, w, n):
+        g[n] = g[w]
+        while saved:
+            sw, v = saved.pop()
+            if sw == w:
+                break
+        else:
+            return
+        if v is missing:
+            g.pop(w, None)
+        else:
+            g[w] = v
+
+    return push, pop
 
 
-builtins.__sb_rename__ = _sb_rename
+builtins.__sb_push__, builtins.__sb_pop__ = _sb_lowering()
 DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 
 def restore(tree, scoped):
-    def fix(stmts):
+    if not scoped:
+        return tree
+    import re
+    pat = re.compile("(?<![\\w\u02b9])(" + "|".join(re.escape(k) for k in scoped) + ")(?![\\w\u02b9])")
+
+    def written(t):
+        return pat.sub(lambda m: scoped[m.group(1)], t)
+
+    for n in ast.walk(tree):
+        if isinstance(n, ast.JoinedStr) or type(n).__name__ == "TemplateStr":
+            for v in n.values:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    v.value = written(v.value)
+        if type(n).__name__ == "Interpolation" and isinstance(getattr(n, "str", None), str):
+            n.str = written(n.str)
+
+    def call(fn, args, node, end):
+        c = ast.Expr(ast.Call(ast.Name(fn, ast.Load()), [ast.Call(ast.Name("globals", ast.Load()), [], [])] + [ast.Constant(a) for a in args], []))
+        for m in ast.walk(c):
+            m.lineno = m.end_lineno = node.end_lineno if end else node.lineno
+            m.col_offset = m.end_col_offset = node.end_col_offset if end else node.col_offset
+        return c
+
+    def fix(stmts, globs):
         out = []
         for st in stmts:
             if not isinstance(st, DEFS):
                 for key in ("body", "orelse", "finalbody"):
                     if isinstance(getattr(st, key, None), list):
-                        setattr(st, key, fix(getattr(st, key)))
+                        setattr(st, key, fix(getattr(st, key), globs))
                 for h in getattr(st, "handlers", None) or []:
-                    h.body = fix(h.body)
+                    h.body = fix(h.body, globs)
                 for c in getattr(st, "cases", None) or []:
-                    c.body = fix(c.body)
-            out.append(st)
-            if isinstance(st, DEFS) and st.name in scoped:
-                call = ast.Expr(ast.Call(ast.Name("__sb_rename__", ast.Load()), [ast.Name(st.name, ast.Load()), ast.Constant(scoped[st.name]), ast.Constant(st.name)], []))
-                for n in ast.walk(call):
-                    n.lineno = n.end_lineno = st.end_lineno
-                    n.col_offset = n.end_col_offset = st.end_col_offset
-                out.append(call)
+                    c.body = fix(c.body, globs)
+            elif not isinstance(st, ast.ClassDef):
+                gs = []
+
+                def scan(n):
+                    if isinstance(n, ast.Global):
+                        gs.append(n)
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                        return
+                    for c in ast.iter_child_nodes(n):
+                        scan(c)
+
+                for b in st.body:
+                    scan(b)
+                st.body = fix(st.body, gs)
+            declared = globs is None or any(st.name in g.names for g in globs) if isinstance(st, DEFS) else False
+            if isinstance(st, DEFS) and declared and st.name in scoped:
+                internal, w = st.name, scoped[st.name]
+                st.name = w
+                for g in globs or []:
+                    if internal in g.names and w not in g.names:
+                        g.names.append(w)
+                out += [call("__sb_push__", [w], st, False), st, call("__sb_pop__", [w, internal], st, True)]
+            else:
+                out.append(st)
         return out
 
-    tree.body = fix(tree.body)
+    tree.body = fix(tree.body, None)
     return tree
 
 

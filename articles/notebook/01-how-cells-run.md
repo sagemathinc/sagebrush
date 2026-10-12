@@ -113,9 +113,10 @@ print(f())
 
 `f` reads the new `x`. A definition made inside a function (`global x`)
 takes effect where the cell calls that function. A renamed class or
-function keeps its name once it is defined (`C.__name__` is `C`); code that
-looks at the name while the definition is being made (a decorator printing
-it, a metaclass, the class body itself) sees the internal one, `Cʹ2`.
+function is made under its written name and only then moved to the
+internal one, so its `__name__`, `__qualname__`, code names and what its
+decorators and metaclass see are all `C`; so are an f-string's `{x=}`
+label and a t-string's expression.
 
 When renaming is not possible, marimo's rule applies: a name
 read by other cells may be defined by only one cell, and the cells
@@ -133,7 +134,16 @@ say which definition a read gets:
 - a function, lambda or generator given to a call that may keep it for
   later (`map(lambda: x, ...)`; `sorted(..., key=lambda ...)` and
   `list(... for ...)` run it at once);
-- a function called while its class is being made.
+- a function called while its class is being made (by the class body, a
+  class decorator or a metaclass);
+- an annotation that may be asked for before the new definition, and
+  annotations under `from __future__ import annotations` (they are source
+  text).
+
+One case the notebook cannot see: a base class's `__init_subclass__` (or a
+descriptor's `__set_name__`) calling a method of the new class while it is
+being made, where the method reads the class by name. That method reads
+the new class, which is not bound yet.
 
 ## 4. What runs, and when
 

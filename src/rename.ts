@@ -129,7 +129,7 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
   // the position of a def's or class's name: after "def " / "class " on its line
   const defName = (n: any): [number, number] | null => {
     const text = lines[n.lineno - 1] ?? "";
-    const m = new RegExp(`\\b(?:def|class)\\s+(${name})\\b`).exec(text);
+    const m = new RegExp(`(?<![\\p{L}\\p{N}_])(?:def|class)\\s+(${name})(?![\\p{L}\\p{N}\\p{Mn}\\p{Mc}_\u02b9])`, "u").exec(text);
     if (!m) return null;
     const start = bytesLen(text.slice(0, m.index + m[0].length - name.length));
     return [start, start + bytesLen(name)];
@@ -378,12 +378,15 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
       case "Global": {
         // (in a function: `global x` names the module's x)
         if (n.names.includes(name) && !shadowed) {
-          const text = lines[n.lineno - 1] ?? "";
-          const m = new RegExp(`\\bglobal\\b[^#]*?\\b(${name})\\b`).exec(text);
+          // (names of any script; the statement may go on over `\` lines)
+          const text = lines.slice(n.lineno - 1, n.end_lineno ?? n.lineno).join("\n");
+          const m = new RegExp(`(?<![\\p{L}\\p{N}_])global(?![\\p{L}\\p{N}_])[^#]*?(?<![\\p{L}\\p{N}_\u02b9])(${name})(?![\\p{L}\\p{N}\\p{Mn}\\p{Mc}_\u02b9])`, "u").exec(text);
           if (m) {
-            const start = bytesLen(text.slice(0, m.index + m[0].length - name.length));
-            out.push({ line: n.lineno, col: start, end: start + bytesLen(name), store: false, stmt, path, global: true });
-          }
+            const at = m.index + m[0].length - name.length;
+            const before = text.slice(0, at), ln = n.lineno + (before.match(/\n/g)?.length ?? 0);
+            const start = bytesLen(before.slice(before.lastIndexOf("\n") + 1));
+            out.push({ line: ln, col: start, end: start + bytesLen(name), store: false, stmt, path, global: true });
+          } else out.push({ line: n.lineno, col: 0, end: 0, store: false, stmt, path, global: true, alias: null });
         }
         return;
       }
@@ -443,7 +446,8 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
   };
   // (annotations: evaluated when asked for, Python 3.14)
   const lazy = ([n, key]: [any, string]) => ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && (key === "annotations" || key === "returns")) || (n._type === "AnnAssign" && key === "annotation");
-  if (o.path.slice(defIdx).some(lazy)) return "later";
+  // (a decorator may ask for them before the name is bound)
+  if (o.path.slice(defIdx).some(lazy)) return def.decorator_list?.length ? "maybe" : "later";
   for (let j = defIdx + 1; j < o.path.length; j++) {
     const [n, key] = o.path[j];
     const deferred = ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "Lambda") && key === "body") ||
@@ -461,6 +465,8 @@ function timing(o: Occurrence, defIdx: number, def: any): "now" | "later" | "may
     } else if ((p?._type === "Assign" && p.targets.length === 1 && p.targets[0]._type === "Name") && pkey === "value") name = p.targets[0].id;
     else if (p?._type === "AnnAssign" && p.target._type === "Name" && pkey === "value") name = p.target.id;
     if (name === null) return "maybe";
+    // (a class decorator, or a metaclass, may call it before the name is bound)
+    if (def._type === "ClassDef" && (def.decorator_list.length || def.keywords?.length)) return "maybe";
     return usedInClass(name, n) ? "maybe" : "later";
   }
   return "now";
@@ -523,7 +529,9 @@ function usesOf(body: any[], fname: string): { stmt: number; line: number; col: 
     }
     for (const k of Object.keys(n)) {
       if (k === "_type") continue;
-      const deferred = ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "Lambda") && k === "body") || (n._type === "GeneratorExp" && k !== "generators");
+      const deferred = ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "Lambda") && k === "body") || (n._type === "GeneratorExp" && k !== "generators") ||
+        // (annotations: evaluated when asked for)
+        (n._type === "arg" && k === "annotation") || ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef") && k === "returns") || (n._type === "AnnAssign" && k === "annotation");
       const t = n._type;
       const cond = (t === "If" && k !== "test") || (t === "IfExp" && k !== "test") || ((t === "For" || t === "AsyncFor") && k !== "iter") || t === "While" ||
         ((t === "Try" || t === "TryStar") && (k === "handlers" || k === "orelse")) || t === "Match" && k === "cases" ||
@@ -535,8 +543,31 @@ function usesOf(body: any[], fname: string): { stmt: number; line: number; col: 
   return out;
 }
 
+// Whether calling `fname` runs this function's body, where written: a plain
+// def (not async, not a generator, not decorated), the only binding of its
+// name in the cell.
+function plainSetter(f: any, fname: string, body: any[]): boolean {
+  if (f._type !== "FunctionDef" || f.decorator_list.length) return false;
+  let ok = true, defs = 0;
+  const scan = (n: any, inF: boolean): void => {
+    if (!ok || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach((x) => scan(x, inF));
+    if (inF && (n._type === "Yield" || n._type === "YieldFrom")) ok = false;
+    if (!inF && ((n._type === "Name" && n.id === fname && n.ctx?._type !== "Load") || ((n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef") && n.name === fname) || (n._type === "alias" && (n.asname ?? n.name) === fname))) defs++;
+    // (not into nested scopes' own yields)
+    const nested = inF && (n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "Lambda" || n._type === "GeneratorExp" || n._type === "ClassDef");
+    if (nested) return;
+    for (const k of Object.keys(n)) if (k !== "_type") scan(n[k], inF || n === f);
+  };
+  scan(body, false);
+  return ok && defs === 1;
+}
+
 function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map<Occurrence, "old" | "new"> | null {
   const out = new Map<Occurrence, "old" | "new">();
+  // (`from __future__ import annotations`: annotations are their source
+  // text, which a rename would change)
+  const futureAnnotations = body.some((st) => st._type === "ImportFrom" && st.module === "__future__" && st.names.some((a: any) => a.name === "annotations"));
   const before = (a: { line: number; col: number }, b: { line: number; col: number }) => a.line < b.line || (a.line === b.line && a.col < b.col);
   // Where the definition takes effect: where it is written, or, made in a
   // function's body (`global x`), where the cell calls that function (only
@@ -548,7 +579,7 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   if (df) {
     const fname = df.kind === "callable" ? callableName(first, df) : null;
     const uses = fname ? usesOf(body, fname) : [];
-    if (!fname || !uses.length || uses.some((u) => !u.once) || df.node._type === "GeneratorExp") return null;
+    if (!fname || !uses.length || uses.some((u) => !u.once) || !plainSetter(df.node, fname, body)) return null;
     at = uses.reduce((a, u) => (u.stmt < a.stmt || (u.stmt === a.stmt && before(u, a)) ? u : a));
     calls = uses.length;
   }
@@ -585,7 +616,14 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
         out.set(o, old ? "old" : "new");
         continue;
       }
-      if (d.kind === "annotation" || o.stmt > at.stmt) { out.set(o, "new"); continue; }
+      // (an annotation is read when asked for: written after the definition,
+      // that is after it; before, it may be asked for before or after)
+      if (d.kind === "annotation") {
+        if (futureAnnotations || o.stmt <= at.stmt) return null;
+        out.set(o, "new");
+        continue;
+      }
+      if (o.stmt > at.stmt) { out.set(o, "new"); continue; }
       const fname = callableName(o, d);
       if (!fname) return null;
       if (usesOf(body, fname).some((u) => u.stmt < at.stmt || (u.stmt === at.stmt && before(u, at)))) return null;
@@ -804,58 +842,97 @@ function srVar(code: string, name: string): string {
 }
 
 /**
- * Page-order scoping renames a definition (`class Cʹ2`), which Python then
- * names Cʹ2: after each top-level def or class (also in if, for, with, try
- * blocks) whose name `scoped` maps to a name as written, a call
- * `__sb_rename__(Cʹ2, "C")` gives back its `__name__` and `__qualname__` (and
- * its methods' qualified names).  In place, in pyparse's tree, at the
- * definition's last position (no line moves).  The interpreter defines
- * `__sb_rename__` in its builtins (RENAME_HELPER).
+ * Page-order scoping renames a definition (`class Cʹ2`).  So that it is
+ * made under its written name (its `__name__`, `__qualname__`, code names,
+ * what decorators and metaclasses see), each top-level def or class (also in
+ * if, for, with, try blocks) whose name `scoped` maps to a name as written is
+ * made under that name, between `__sb_push__(globals(), "C")`, which keeps
+ * the previous C, and `__sb_pop__(globals(), "C", "Cʹ2")`, which moves the new
+ * one to Cʹ2 and puts the previous C back.  And f-strings' `{x=}` text and
+ * t-strings' expressions show the names as written.  In place, in pyparse's
+ * tree, at the definition's positions (no line moves).  The interpreter
+ * defines the two functions in its builtins (RENAME_HELPER).
  */
 export function restoreDefNames(tree: any, scoped: Record<string, string>): void {
-  const fix = (list: any[]): any[] => {
+  const keys = Object.keys(scoped);
+  if (!keys.length) return;
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_\u02b9])(${keys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![\\p{L}\\p{N}\\p{Mn}\\p{Mc}_\u02b9])`, "gu");
+  const written = (t: string) => t.replace(re, (k) => scoped[k]);
+  // (source text Python keeps: f"{x=}"'s label, a t-string's expression)
+  const texts = (n: any): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(texts);
+    if ((n._type === "JoinedStr" || n._type === "TemplateStr") && Array.isArray(n.values)) for (const v of n.values) if (v?._type === "Constant" && typeof v.value === "string") v.value = written(v.value);
+    if (n._type === "Interpolation" && typeof n.str === "string") n.str = written(n.str);
+    for (const k of Object.keys(n)) if (k !== "_type") texts(n[k]);
+  };
+  texts(tree.body);
+  // (`globals`: in a function, the `global` statements naming the module's
+  // names, or null at the top level; a definition there of an internal name
+  // the function declares global is lowered too, with the written name
+  // declared global as well)
+  const fix = (list: any[], globals: any[] | null): any[] => {
     const out: any[] = [];
     for (const st of list) {
-      for (const key of ["body", "orelse", "finalbody"]) if (st._type !== "FunctionDef" && st._type !== "AsyncFunctionDef" && st._type !== "ClassDef" && Array.isArray(st[key])) st[key] = fix(st[key]);
-      if (Array.isArray(st.handlers)) for (const h of st.handlers) h.body = fix(h.body);
-      if (Array.isArray(st.cases)) for (const c of st.cases) c.body = fix(c.body);
-      out.push(st);
-      const w = (st._type === "FunctionDef" || st._type === "AsyncFunctionDef" || st._type === "ClassDef") && Object.hasOwn(scoped, st.name) ? scoped[st.name] : null;
-      if (w === null) continue;
-      const pos = { lineno: st.end_lineno, col_offset: st.end_col_offset, end_lineno: st.end_lineno, end_col_offset: st.end_col_offset };
-      const nm = (id: string) => ({ _type: "Name", id, ctx: { _type: "Load" }, ...pos });
-      const str = (v: string) => ({ _type: "Constant", value: v, kind: null, ...pos });
-      out.push({ _type: "Expr", value: { _type: "Call", func: nm("__sb_rename__"), args: [nm(st.name), str(w), str(st.name)], keywords: [], ...pos }, ...pos });
+      const isDef = st._type === "FunctionDef" || st._type === "AsyncFunctionDef" || st._type === "ClassDef";
+      if (!isDef) {
+        for (const key of ["body", "orelse", "finalbody"]) if (Array.isArray(st[key])) st[key] = fix(st[key], globals);
+        if (Array.isArray(st.handlers)) for (const h of st.handlers) h.body = fix(h.body, globals);
+        if (Array.isArray(st.cases)) for (const c of st.cases) c.body = fix(c.body, globals);
+      } else if (st._type !== "ClassDef") {
+        const gs: any[] = [];
+        const scan = (n: any): void => {
+          if (!n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(scan);
+          if (n._type === "Global") gs.push(n);
+          if (n._type === "FunctionDef" || n._type === "AsyncFunctionDef" || n._type === "ClassDef" || n._type === "Lambda") return;
+          for (const k of Object.keys(n)) if (k !== "_type") scan(n[k]);
+        };
+        scan(st.body);
+        st.body = fix(st.body, gs);
+      }
+      const declared = globals === null || globals.some((g) => g.names.includes(st.name));
+      const w = isDef && declared && Object.hasOwn(scoped, st.name) ? scoped[st.name] : null;
+      if (w === null) {
+        out.push(st);
+        continue;
+      }
+      const at = (n: any) => ({ lineno: n.lineno, col_offset: n.col_offset, end_lineno: n.lineno, end_col_offset: n.col_offset });
+      const call = (fn: string, args: string[], pos: any) => {
+        const nm = (id: string) => ({ _type: "Name", id, ctx: { _type: "Load" }, ...pos });
+        const g = { _type: "Call", func: nm("globals"), args: [], keywords: [], ...pos };
+        return { _type: "Expr", value: { _type: "Call", func: nm(fn), args: [g, ...args.map((v) => ({ _type: "Constant", value: v, kind: null, ...pos }))], keywords: [], ...pos }, ...pos };
+      };
+      const internal = st.name;
+      st.name = w;
+      if (globals) for (const g of globals) if (g.names.includes(internal) && !g.names.includes(w)) g.names.push(w);
+      out.push(call("__sb_push__", [w], at(st)), st, call("__sb_pop__", [w, internal], { lineno: st.end_lineno, col_offset: st.end_col_offset, end_lineno: st.end_lineno, end_col_offset: st.end_col_offset }));
     }
     return out;
   };
-  tree.body = fix(tree.body);
+  tree.body = fix(tree.body, null);
 }
 
-/** Python defining `__sb_rename__` in the builtins (restoreDefNames). */
+/** Python defining `__sb_push__` and `__sb_pop__` in the builtins (restoreDefNames). */
 export const RENAME_HELPER = `import builtins as _b
-def _sb_rename(o, n, old):
-    # (only a name Python generated from the renamed definition: one a
-    # decorator chose, or a decorator's result, is left as it is)
-    if getattr(o, '__name__', None) != old:
-        return
-    try:
-        o.__name__ = n
-    except Exception:
-        return
-    def fix(v, seen):
-        for f in (v, getattr(v, '__func__', None), getattr(v, 'fget', None), getattr(v, 'fset', None), getattr(v, 'fdel', None)):
-            q = getattr(f, '__qualname__', None)
-            if isinstance(q, str) and (q == old or q.startswith(old + '.')):
-                try:
-                    f.__qualname__ = n + q[len(old):]
-                except Exception:
-                    pass
-        if isinstance(v, type) and v not in seen:
-            seen.add(v)
-            for w in list(vars(v).values()):
-                fix(w, seen)
-    fix(o, set())
-_b.__sb_rename__ = _sb_rename
-del _b, _sb_rename
+def _sb_lowering():
+    missing = object()
+    saved = []
+    def push(g, w):
+        saved.append((w, g.get(w, missing)))
+    def pop(g, w, n):
+        g[n] = g[w]
+        while saved:
+            sw, v = saved.pop()
+            if sw == w:
+                break
+        else:
+            return
+        if v is missing:
+            g.pop(w, None)
+        else:
+            g[w] = v
+    return push, pop
+_b.__sb_push__, _b.__sb_pop__ = _sb_lowering()
+del _b, _sb_lowering
 `;

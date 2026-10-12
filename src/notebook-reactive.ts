@@ -184,6 +184,7 @@ export class Reactive {
       this.outcome.clear();
       this.files.clear();
       this.graph = new NotebookGraph();
+      this.scoped = new Map();
       return this.loadNow({ stale: true });
     });
   }
@@ -307,7 +308,10 @@ export class Reactive {
   // keep their multiple-definition error.
   private async effectiveCodes(sources: Map<string, string>): Promise<Map<string, string>> {
     const eff = new Map(sources);
-    if (!this.host.rename || sources.size < 2) return eff;
+    if (!this.host.rename || sources.size < 2) {
+      this.scoped = new Map();
+      return eff;
+    }
     const an = new Map<string, CellAnalysis>();
     for (const [id, code] of sources) {
       const a = await this.host.analyze(code);
@@ -322,6 +326,9 @@ export class Reactive {
       for (const n of a.refs) readers.add(n);
       for (const n of [...a.defs, ...a.refs]) taken.add(n);
     }
+    // (and every name written anywhere in the cells, in any scope: a
+    // parameter or local named xʹ2 must not capture the new name)
+    for (const code of sources.values()) for (const m of code.matchAll(/[\p{L}_][\p{L}\p{N}\p{Mn}\p{Mc}_\u02b9]*/gu)) taken.add(m[0]);
     // (`unread`: defined by several cells but read by none, as the analysis
     // says; still renamed if a later definition reads the one before it,
     // as `x += 1` does, which marimo's analysis does not count as a read)
