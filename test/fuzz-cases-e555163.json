@@ -1,0 +1,242 @@
+[
+  {
+    "name": "dict retains lambda",
+    "codes": [
+      "x=1",
+      "g=dict(a=lambda: x)\nx=2\nprint(g[\"a\"]())",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "dict retains generator",
+    "codes": [
+      "x=1",
+      "g=dict(a=(x for _ in [0]))\nx=2\nprint(next(g[\"a\"]))",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "min retains default lambda",
+    "codes": [
+      "x=1",
+      "g=min([], default=lambda: x)\nx=2\nprint(g())",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "max returns callable argument",
+    "codes": [
+      "x=1",
+      "g=max(lambda: x, lambda: 3, key=lambda f: 0)\nx=2\nprint(g())",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "shadowed list retains generator",
+    "codes": [
+      "x=1",
+      "def list(g):\n    return g\ng=list(x for _ in [0])\nx=2\nprint(next(g))",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "join method retains generator",
+    "codes": [
+      "x=1",
+      "class Box:\n    def join(self,g):\n        return g\ng=Box().join(x for _ in [0])\nx=2\nprint(next(g))",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "control sorted invokes key",
+    "codes": [
+      "x=1",
+      "g=sorted([1,0],key=lambda i: i*x)\nx=2\nprint(g)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter in skipped assert message",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\nassert True, setx()\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter in skipped chained comparison",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\n0 > 1 < setx()\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter after caught exception",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\ntry:\n    1/0\n    setx()\nexcept ZeroDivisionError:\n    pass\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter in second empty comprehension iterable",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\ng=[i for j in [] for i in [setx()]]\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter in second unconsumed generator iterable",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\ng=(i for j in [0] for i in [setx()])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "control setter in assert test",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=2\nassert setx() is None\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter returns before store",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    return\n    x=2\nsetx()\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "setter with false branch in body",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    if False:\n        x=2\nsetx()\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "class global function name",
+    "codes": [
+      "def f():\n    pass",
+      "class Outer:\n    global f\n    def f():\n        pass\nprint(f.__name__, f.__qualname__)",
+      "print(f.__name__)"
+    ]
+  },
+  {
+    "name": "class global class name",
+    "codes": [
+      "class C:\n    pass",
+      "class Outer:\n    global C\n    class C:\n        pass\nprint(C.__name__, C.__qualname__)",
+      "print(C.__name__)"
+    ]
+  },
+  {
+    "name": "definition with globals shadowed",
+    "codes": [
+      "globals=7\ndef f():\n    return 1",
+      "def f():\n    return 2\nprint(f())",
+      "print(f())"
+    ]
+  },
+  {
+    "name": "definition with local globals parameter",
+    "codes": [
+      "def f():\n    pass",
+      "def make(globals):\n    global f\n    def f():\n        return 2\nmake(7)\nprint(f())",
+      "print(f())"
+    ]
+  },
+  {
+    "name": "class method decorator builtin name rebound",
+    "codes": [
+      "class C:\n    a=1",
+      "def staticmethod(fn):\n    print(fn())\n    return fn\nclass C:\n    a=2\n    @staticmethod\n    def m():\n        return C.a\nprint(C.a)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "debug text simple control",
+    "codes": [
+      "x=1",
+      "x=2",
+      "print(f\"{x=}\", f\"{x + 1=}\")"
+    ]
+  },
+  {
+    "name": "debug text string literal identifier",
+    "codes": [
+      "x=1",
+      "x=2",
+      "print(f\"{'x'=}: {x}\")"
+    ]
+  },
+  {
+    "name": "t-string text string literal identifier",
+    "codes": [
+      "x=1",
+      "x=2",
+      "q=t\"{'x'} {x}\"\nprint(q.interpolations[0].expression, q.interpolations[0].value)"
+    ]
+  },
+  {
+    "name": "recursive definition control",
+    "codes": [
+      "def f(n):\n    return -1",
+      "def f(n):\n    return 1 if n==0 else n*f(n-1)\nprint(f(4))",
+      "print(f(3))"
+    ]
+  },
+  {
+    "name": "future annotation referring to own function",
+    "codes": [
+      "def f():\n    pass",
+      "from __future__ import annotations\ndef f(a: f):\n    pass\nprint(f.__annotations__[\"a\"])",
+      "print(f.__name__)"
+    ]
+  },
+  {
+    "name": "future annotation referring to own class",
+    "codes": [
+      "class C:\n    pass",
+      "from __future__ import annotations\nclass C:\n    a: C\nprint(C.__annotations__[\"a\"])",
+      "print(C.__name__)"
+    ]
+  },
+  {
+    "name": "method annotation requested while making class",
+    "codes": [
+      "class C:\n    a=1",
+      "class C:\n    a=2\n    def m(p: C):\n        pass\n    saved=m.__annotations__[\"p\"].a\nprint(C.saved)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "metaclass requests class annotation",
+    "codes": [
+      "class C:\n    a=1",
+      "class Meta(type):\n    def __new__(m, name, bases, ns):\n        c=super().__new__(m,name,bases,ns)\n        print(c.__annotations__[\"v\"].a)\n        return c\nclass C(metaclass=Meta):\n    a=2\n    v: C\nprint(C.a)",
+      "print(C.a)"
+    ]
+  },
+  {
+    "name": "setter repeated in second comprehension iterable",
+    "codes": [
+      "x=1",
+      "def setx():\n    global x\n    x=x+1\n    return x\ng=[i for j in [0,1] for i in [setx()]]\nprint(g,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "method decorator requests own-class annotation",
+    "codes": [
+      "class C:\n    a=1",
+      "def deco(fn):\n    print(fn.__annotations__[\"p\"].a)\n    return fn\nclass C:\n    a=2\n    @deco\n    def m(p: C):\n        pass\nprint(C.a)",
+      "print(C.a)"
+    ]
+  }
+]

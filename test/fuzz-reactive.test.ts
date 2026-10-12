@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { Kernel, makeCase, runCase, shrink, show, type Case, type Op, type Stats } from "./fuzz-lib";
 
 const hasPython = spawnSync("python3", ["--version"]).status === 0;
@@ -134,6 +135,9 @@ export const REGRESSIONS: [string, Case][] = [
   ["a name only in a string does not make a rename (REACT-3BC-19)", regression(["def f():\n    pass", "def deco(fn):\n    print(fn.__name__)\n    return fn\n@deco\ndef f():\n    pass\nprint(\"f\")"])],
   ["a cell raising in plain Python raises here too (FUZZ-F4)", regression(["x = 1", "f = lambda: x\nx = 2\ndel x\nprint(f())", "print(x)"])],
 ];
+
+// (sagebrush-codex's cases from its review of e555163, as it wrote them)
+for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-e555163.json", "utf8")) as { name: string; codes: string[] }[]) REGRESSIONS.push([`${c.name} (review of e555163)`, regression(c.codes)]);
 
 test("the reactive notebook computes what plain Python does: the fuzzer's cases", { skip: !hasPython && "no python3" }, async () => {
   const k = new Kernel();
