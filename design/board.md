@@ -263,9 +263,26 @@ which `/board/` shows. web/test-board.mjs checks a document in CI:
 `SHOT=dir` saves screenshots of the overview and each step. The step 0 benchmark is unchanged
 (pan p95 0.2 ms, zoom 3.6 ms, first paint 182 ms).
 
+**Editing** (web/board/edit.ts, the Edit button):
+- drag notes and groups;
+- double-click to write a note (or a group's title), with Markdown, a detail and a link;
+- double-click the background to add a note;
+- shift-drag from note to note to connect them;
+- Delete, and undo/redo.
+
+Every edit changes the document, which is then laid out again. The moved
+item gets a position (x, y), and so do the other members of its group and
+of every enclosing group, so nothing else moves. Positioned boxes are left
+out of automatic layout; Tidy forgets all the positions. Edits are kept in
+this browser, per source, until Revert.
+
+The menu downloads or opens JSON (a file can also be dropped on the page),
+and starts a new board. Agents have `edit(f)` and `editing(on)`.
+test-board.mjs drives all of it with the mouse, at desktop and phone sizes.
+
 Still to do in step 1:
 - edge routing around groups (today edges are straight, border to border);
-- moving and editing;
+- editing edges' labels, moving notes between groups;
 - shapes and frames;
 - a better top-level arrangement than one column of layers.
 

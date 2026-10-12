@@ -114,6 +114,7 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
   // sizes, bottom up; positions relative to the parent, top down
   const size = new Map<string, Box>();
   const rel = new Map<string, { x: number; y: number }>();
+  const innerTop = new Map<string, number>(); // a group's members' origin, below its title
   const sizeOf = (n: DocNode): Box => {
     if (n.kind !== "group") {
       const b = noteSize(n, measure && ((m, w) => measure({ ...m, ref: refOf(m) }, w)));
@@ -127,6 +128,9 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
         return a && b && a !== b ? [[a, b] as [string, string]] : [];
       }));
+    // (a group's members start at its origin)
+    const minX = Math.min(...[...pos.values()].map((p) => p.x)), minY = Math.min(...[...pos.values()].map((p) => p.y));
+    if (kids.length) for (const [id, p] of pos) pos.set(id, { x: p.x - minX, y: p.y - minY });
     let w = 0, h = 0;
     for (const k of kids) {
       const p = pos.get(k.c.id)!;
@@ -135,6 +139,7 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
     }
     const bw = Math.max(w + 2 * PAD, 200);
     const top = PAD + (n.title ? TITLE : 0) + (n.text ? (measure ? measure({ id: n.id, text: n.text }, bw - 2 * PAD) : 28) + 8 : 0);
+    innerTop.set(n.id, top);
     for (const k of kids) {
       const p = pos.get(k.c.id)!;
       rel.set(k.c.id, { x: PAD + p.x, y: top + p.y });
@@ -154,7 +159,7 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
   const place = (n: DocNode, x: number, y: number, depth: number) => {
     const b = size.get(n.id)!;
     if (n.kind === "group") {
-      items.push({ id: n.id, kind: "group", x, y, w: b.w, h: b.h, title: n.title, text: n.text, color: n.color, depth });
+      items.push({ id: n.id, kind: "group", x, y, w: b.w, h: b.h, title: n.title, text: n.text, color: n.color, depth, inner: { x: x + PAD, y: y + innerTop.get(n.id)! } });
       for (const c of n.children) {
         const p = rel.get(c.id)!;
         place(c, x + p.x, y + p.y, depth + 1);
@@ -173,8 +178,11 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
 interface Node { id: string; w: number; h: number; fixed: { x: number; y: number } | null }
 
 // Positions (top left, relative) for boxes in one container.
-function arrange(nodes: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", links: [string, string][]): Map<string, { x: number; y: number }> {
+function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", allLinks: [string, string][]): Map<string, { x: number; y: number }> {
   const out = new Map<string, { x: number; y: number }>();
+  // (positioned boxes keep their places; the others are laid out among themselves)
+  const nodes = all.filter((n) => !n.fixed), free = new Set(nodes.map((n) => n.id));
+  const links = allLinks.filter(([a, b]) => free.has(a) && free.has(b));
   if (kind === "row" || kind === "column") {
     let at = 0;
     for (const n of nodes) {
@@ -188,7 +196,13 @@ function arrange(nodes: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB"
   } else {
     for (const [id, p] of layered(nodes, links, dir)) out.set(id, p);
   }
-  for (const n of nodes) if (n.fixed) out.set(n.id, n.fixed);
+  // (placed beside the positioned ones, when there are both)
+  const fixed = all.filter((n) => n.fixed);
+  if (fixed.length && nodes.length) {
+    const right = Math.max(...fixed.map((n) => n.fixed!.x + n.w)) + GAP * 2, top = Math.min(...fixed.map((n) => n.fixed!.y));
+    for (const [id, p] of out) out.set(id, { x: p.x + right, y: p.y + top });
+  }
+  for (const n of fixed) out.set(n.id, n.fixed!);
   return out;
 }
 

@@ -4,10 +4,16 @@
 // benchmark (bench.mjs, window.boardBench).  A document's tour steps through
 // its items with ← and →, and #N in the address is step N.
 //
+// Edit (web/board/edit.ts) changes the document; the changed document is
+// kept in this browser (localStorage, per source), until Revert.  The menu
+// downloads it as JSON, opens a JSON file (or drop one on the page), or
+// starts a new board.
+//
 // window.sagebrush.board is the API for an agent driving the page (in the
 // shared browser, say): load(doc), focus(ids), step(n), snapshot().
 import { Board, synthetic, type Camera } from "./board";
 import { layout, type BoardDoc, type DocNote } from "./doc";
+import { Editor, tidy } from "./edit";
 import { render as markdown } from "../markdown";
 
 const q = new URLSearchParams(location.search);
@@ -20,7 +26,14 @@ let placed: { id: string; kind: string; x: number; y: number; w: number; h: numb
 let mathModule: Promise<{ typeset: (el: Element) => void }> | null = null;
 const hasMath = (s: string) => /\$|\\\(|\\\[/.test(s);
 
-async function load(d: BoardDoc) {
+// (a note's height at a width, measured once)
+const heights = new Map<string, number>();
+const source = q.get("doc") ?? "examples/sagebrush.json";
+const saveKey = "sagebrush-board:" + source;
+let original: BoardDoc | null = null;
+
+/** Lay out and draw a document, the camera where it is. */
+async function show(d: BoardDoc) {
   if (!d || !Array.isArray(d.nodes)) throw new Error("board: a document needs nodes");
   doc = d;
   board.markdown = (s) => markdown(s);
@@ -30,14 +43,25 @@ async function load(d: BoardDoc) {
     const m = await mathModule;
     board.typeset = (el) => m.typeset(el);
   }
-  const measure = (n: DocNote, w: number) => board.measure({ kind: "note", ...n }, w);
+  const measure = (n: DocNote, w: number) => {
+    const k = JSON.stringify([n.title, n.text, n.detail, n.ref, w]);
+    let h = heights.get(k);
+    if (h === undefined) heights.set(k, (h = board.measure({ kind: "note", ...n }, w)));
+    return h;
+  };
   const { items, edges } = layout(d, measure);
   board.setItems(items, edges);
   placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
   document.title = (d.title ? d.title + " — " : "") + "Board — Sagebrush";
   $("title").textContent = d.title ?? "";
+  $("tour").hidden = !d.steps?.length && !d.intro;
+  $("revert").hidden = !original || JSON.stringify(original) === JSON.stringify(d);
+}
+
+/** Show a document from the start: the whole board, or step #N. */
+async function load(d: BoardDoc) {
+  await show(d);
   const n = d.steps?.length ?? 0;
-  $("tour").hidden = !n && !d.intro;
   at = -1;
   const m = /^#(\d+)$/.exec(location.hash);
   if (m && n) step(Number(m[1]) - 1, true);
@@ -75,7 +99,7 @@ $("prev").onclick = () => step(at - 1);
 $("next").onclick = () => step(at + 1);
 $("fit").onclick = () => board.focus();
 addEventListener("keydown", (e) => {
-  if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
   else if (e.key === "ArrowLeft") step(at - 1);
   else if (e.key === "Escape" || e.key === "0") step(-1);
@@ -95,12 +119,73 @@ if (q.has("items") || q.has("strokes")) {
   board.setItems(synthetic(Number(q.get("items") ?? 2000), Number(q.get("strokes") ?? 20000)));
   board.setCamera({ x: 0, y: 0, z: 1 });
 } else {
-  const url = new URL(q.get("doc") ?? "examples/sagebrush.json", location.href);
+  const url = new URL(source, location.href);
   fetch(url).then((r) => {
     if (!r.ok) throw new Error(`${url.pathname}: ${r.status} ${r.statusText}`);
     return r.json();
-  }).then(load).catch(fail);
+  }).then((d: BoardDoc) => {
+    original = d;
+    // (this browser's edits of it, if any)
+    let saved: BoardDoc | null = null;
+    try { saved = JSON.parse(localStorage.getItem(saveKey) ?? "null"); } catch {}
+    return load(saved && Array.isArray(saved.nodes) ? saved : d);
+  }).catch(fail);
 }
+
+// editing, and keeping what was edited
+const editor = new Editor(board, () => doc, async (d) => {
+  await show(d);
+  try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch {}
+});
+const editBtn = $("edit");
+editBtn.onclick = () => {
+  editor.setOn(!editor.on);
+  editBtn.setAttribute("aria-pressed", String(editor.on));
+  $("hint").hidden = !editor.on;
+};
+const menu = $("menu");
+$("menubtn").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+addEventListener("click", () => { menu.hidden = true; });
+const fileName = () => ((doc?.title ?? "board").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "board") + ".json";
+$("tidy").onclick = () => editor.commit((d) => Object.assign(d, tidy(d)));
+$("download").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 1)], { type: "application/json" }));
+  a.download = fileName();
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$("copyjson").onclick = () => navigator.clipboard?.writeText(JSON.stringify(doc, null, 1));
+async function openText(text: string) {
+  const d = JSON.parse(text) as BoardDoc;
+  if (!Array.isArray(d?.nodes)) throw new Error("not a board: a document needs nodes");
+  await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
+  board.focus(undefined, true);
+}
+const picker = $("openfile") as HTMLInputElement;
+$("open").onclick = () => picker.click();
+picker.onchange = async () => {
+  const f = picker.files?.[0];
+  if (f) await openText(await f.text()).catch(fail);
+  picker.value = "";
+};
+addEventListener("dragover", (e) => e.preventDefault());
+addEventListener("drop", async (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer?.files?.[0];
+  if (f) await openText(await f.text()).catch(fail);
+});
+$("newboard").onclick = () => editor.commit((d) => {
+  for (const k of Object.keys(d)) delete (d as any)[k];
+  Object.assign(d, { title: "Untitled board", nodes: [] });
+}).then(() => { if (!editor.on) editBtn.click(); });
+$("revert").onclick = async () => {
+  if (!original) return;
+  try { localStorage.removeItem(saveKey); } catch {}
+  await editor.commit((d) => { for (const k of Object.keys(d)) delete (d as any)[k]; Object.assign(d, JSON.parse(JSON.stringify(original))); });
+  try { localStorage.removeItem(saveKey); } catch {}
+  board.focus(undefined, true);
+};
 // first paint: the end of the first render after load
 requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).firstPaint = performance.now(); }));
 
@@ -141,5 +226,9 @@ async function bench(path: Camera[]) {
     step,
     /** The document, the tour's step, the camera, and the laid out items' boxes. */
     snapshot: () => ({ doc, step: at, camera: board.camera, view: board.view(), items: placed }),
+    /** Change the document (undoable, as an edit): f gets a copy to modify. */
+    edit: (f: (d: BoardDoc) => void) => editor.commit(f),
+    /** Turn Edit mode on or off. */
+    editing: (on: boolean) => { if (editor.on !== on) editBtn.click(); },
   },
 };

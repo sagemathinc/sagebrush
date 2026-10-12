@@ -94,6 +94,92 @@ try {
     await ev("window.board.setCamera({ x: window.board.bounds(['sched']).x0 - 40, y: window.board.bounds(['sched']).y0 - 40, z: 1.6 })");
     await shot("close");
   }
+  // editing (web/board/edit.ts), with the mouse
+  if (!process.env.NO_EDIT) {
+    const mouse = async (type, x, y, o = {}) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, ...o });
+    const drag = async (from, to, o = {}) => {
+      await mouse("mousePressed", from.x, from.y, o);
+      for (let i = 1; i <= 8; i++) await mouse("mouseMoved", from.x + ((to.x - from.x) * i) / 8, from.y + ((to.y - from.y) * i) / 8, o);
+      await mouse("mouseReleased", to.x, to.y, { ...o, buttons: 0 });
+      await sleep(300);
+    };
+    const center = (id) => ev(`(() => { const r = window.board.clientRect(${JSON.stringify(id)}); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 30) }; })()`);
+    const box = (id) => ev(`(() => { const i = window.sagebrush.board.snapshot().items.find((i) => i.id === ${JSON.stringify(id)}); return i && { x: i.x, y: i.y }; })()`);
+    const docOf = () => ev("JSON.parse(JSON.stringify(window.sagebrush.board.snapshot().doc))");
+    await ev("localStorage.clear(), window.sagebrush.board.editing(true)");
+    // show one group's notes, large enough to hit
+    await ev("window.board.focus(['nb'], true)");
+    await sleep(200);
+    const [a, b] = ["graph", "page"];
+    const a0 = await box(a), other0 = await box("page"), z = await ev("window.board.camera.z");
+    const ca = await center(a);
+    await drag(ca, { x: ca.x + 60, y: ca.y + 90 });
+    const a1 = await box(a), other1 = await box("page");
+    check(Math.abs(a1.x - a0.x - 60 / z) < 2 && Math.abs(a1.y - a0.y - 90 / z) < 2, `drag moved ${a} by (${a1.x - a0.x}, ${a1.y - a0.y}), not (${60 / z}, ${90 / z})`);
+    check(Math.abs(other1.x - other0.x) < 0.5 && Math.abs(other1.y - other0.y) < 0.5, `dragging a note moved another in its group: (${other0.x}, ${other0.y}) to (${other1.x}, ${other1.y})`);
+    // undo, redo
+    await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+    await sleep(200);
+    const a2 = await box(a);
+    check(Math.abs(a2.x - a0.x) < 1 && Math.abs(a2.y - a0.y) < 1, "undo did not put the note back");
+    await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true }))");
+    await sleep(200);
+    check(Math.abs((await box(a)).x - a1.x) < 1, "redo did not move it again");
+    // (back where it was: on a small screen it may now cover another note)
+    await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+    await sleep(200);
+    // connect: shift-drag from one note to another
+    const edges0 = (await docOf()).edges.length;
+    await ev(`window.board.focus(${JSON.stringify([a, b])}, true)`);
+    await sleep(200);
+    const cb = await center(b), ca2 = await center(a);
+    await drag(ca2, cb, { modifiers: 8 });
+    const d1 = await docOf();
+    check(d1.edges.length === edges0 + 1 && d1.edges.some((e) => e.from === a && e.to === b), "shift-drag did not connect the notes");
+    // a new note: double-click the background, write, Ctrl+Enter
+    // (the camera over empty space right of everything)
+    await ev("(() => { const b = window.board.bounds(); window.board.setCamera({ x: b.x1 + 100, y: b.y0, z: 1 }); })()");
+    await sleep(200);
+    const empty = await ev("({ x: innerWidth / 2, y: innerHeight / 2 })");
+    await mouse("mousePressed", empty.x, empty.y, { clickCount: 1 }); await mouse("mouseReleased", empty.x, empty.y, { clickCount: 1, buttons: 0 });
+    await mouse("mousePressed", empty.x, empty.y, { clickCount: 2 }); await mouse("mouseReleased", empty.x, empty.y, { clickCount: 2, buttons: 0 });
+    await until("document.querySelector('.board-editor .be-title') === document.activeElement", 5000);
+    await send("Input.insertText", { text: "A new note" });
+    await ev("document.querySelector('.be-text').focus()");
+    await send("Input.insertText", { text: "with $x^2$" });
+    await ev("document.querySelector('.be-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))");
+    await sleep(400);
+    const d2 = await docOf(), added = d2.nodes.find((n) => n.title === "A new note");
+    check(added && added.text === "with $x^2$" && typeof added.x === "number", "double-click did not add the note");
+    check(!d2.nodes.some((n) => n.id !== added?.id && n.x === undefined), "adding a note did not keep the others in place");
+    // a group's members do not move when one of them is dragged, nor do other groups
+    // delete it (selected by a click), and undo
+    if (added) {
+      const cn = await center(added.id);
+      await mouse("mousePressed", cn.x, cn.y); await mouse("mouseReleased", cn.x, cn.y, { buttons: 0 });
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))");
+      await sleep(300);
+      check(!(await docOf()).nodes.some((n) => n.id === added.id), "Delete did not remove the selected note");
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+      await sleep(300);
+      check((await docOf()).nodes.some((n) => n.id === added.id), "undo did not bring the note back");
+    }
+    // kept across a reload; Revert
+    await send("Page.reload");
+    await until("window.sagebrush?.board?.snapshot().items.length > 0");
+    check((await docOf()).nodes.some((n) => n.title === "A new note"), "the edits were not kept across a reload");
+    check(!(await ev("document.getElementById('revert').hidden")), "Revert is hidden after edits");
+    await ev("document.getElementById('revert').click()");
+    await sleep(400);
+    check(!(await docOf()).nodes.some((n) => n.title === "A new note"), "Revert did not restore the original");
+    check(await ev("localStorage.length === 0"), "Revert left the edits saved");
+    // Tidy forgets positions
+    await ev("window.sagebrush.board.edit((d) => { d.nodes[0].x = 5000; d.nodes[0].y = 5000; })");
+    await ev("document.getElementById('tidy').click()");
+    await sleep(300);
+    check((await docOf()).nodes.every((n) => n.x === undefined), "Tidy kept positions");
+    await ev("localStorage.clear()");
+  }
   check(!errors.length, "page errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

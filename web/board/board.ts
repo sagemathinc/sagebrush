@@ -29,6 +29,8 @@ export interface Item {
   ref?: string;
   /** groups and notes: how deeply nested (groups are drawn outer first) */
   depth?: number;
+  /** groups: where their members' positions are measured from */
+  inner?: { x: number; y: number };
 }
 
 export interface Edge {
@@ -61,6 +63,14 @@ class Grid {
       }
     }
   }
+  remove(it: Item) {
+    for (let i = Math.floor(it.x / CELL); i <= Math.floor((it.x + it.w) / CELL); i++) {
+      for (let j = Math.floor(it.y / CELL); j <= Math.floor((it.y + it.h) / CELL); j++) {
+        const c = this.cells.get(i + "," + j);
+        if (c) { const k = c.indexOf(it); if (k >= 0) c.splice(k, 1); }
+      }
+    }
+  }
   query(x0: number, y0: number, x1: number, y1: number, out: Set<Item>): Set<Item> {
     for (let i = Math.floor(x0 / CELL); i <= Math.floor(x1 / CELL); i++) {
       for (let j = Math.floor(y0 / CELL); j <= Math.floor(y1 / CELL); j++) {
@@ -79,12 +89,19 @@ export class Board {
   private back: HTMLCanvasElement; // behind them: groups and edges
   private bctx: CanvasRenderingContext2D;
   private edges: Edge[] = [];
+  /** an edge being drawn: from an item to a world point */
+  pending: { from: string; x: number; y: number } | null = null;
   private byId = new Map<string, Item>();
   private close = false;
   private flight = 0;
   /** Markdown to HTML for notes (plain text without it), and math typesetting */
   markdown: ((src: string) => string) | null = null;
   typeset: ((el: HTMLElement) => void) | null = null;
+  /** a press on an item (not a link): return true to take it (the board does not pan) */
+  onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
+  /** a double click: on an item, or (null) on the background at world (x, y); return true when handled */
+  onDoubleClick: ((it: Item | null, x: number, y: number) => boolean) | null = null;
+  private selected: string | null = null;
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
   private paths = new Map<string, Path2D>();
@@ -199,7 +216,7 @@ export class Board {
     this.flight = requestAnimationFrame(step);
   }
 
-  private request() {
+  request() {
     if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.render(); });
   }
 
@@ -256,6 +273,7 @@ export class Board {
         el = this.itemEl(it);
         this.cache.set(it.id, el);
       }
+      el.classList.toggle("selected", it.id === this.selected);
       frag.append(el);
       this.mounted.set(it.id, el);
       this.stats.mounts++;
@@ -357,6 +375,17 @@ export class Board {
       ctx.fill();
       if (e.label) labels.push([e.label, (x0 + x1) / 2, (y0 + y1) / 2]);
     }
+    if (this.pending) {
+      const a = this.byId.get(this.pending.from);
+      if (a) {
+        ctx.setLineDash([6 / c.z, 4 / c.z]);
+        ctx.beginPath();
+        ctx.moveTo(a.x + a.w / 2, a.y + a.h / 2);
+        ctx.lineTo(this.pending.x, this.pending.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
     // labels, on top of every line, when legible
     if (labels.length && 12 * c.z >= 7) {
       ctx.font = "12px system-ui, sans-serif";
@@ -446,6 +475,42 @@ export class Board {
     this.stats.drawn = n;
   }
 
+  /** World coordinates of a point on the page (client coordinates). */
+  toWorld(cx: number, cy: number) {
+    const r = this.el.getBoundingClientRect(), c = this.camera;
+    return { x: c.x + (cx - r.left) / c.z, y: c.y + (cy - r.top) / c.z };
+  }
+  /** The page rectangle (client coordinates) of an item. */
+  clientRect(id: string) {
+    const it = this.byId.get(id), r = this.el.getBoundingClientRect(), c = this.camera;
+    return it ? { left: r.left + (it.x - c.x) * c.z, top: r.top + (it.y - c.y) * c.z, width: it.w * c.z, height: it.h * c.z } : null;
+  }
+  item(id: string): Item | undefined {
+    return this.byId.get(id);
+  }
+  /** Move these items by (dx, dy) world units now (dragging): their boxes, elements and edges. */
+  translate(ids: string[], dx: number, dy: number) {
+    for (const id of ids) {
+      const it = this.byId.get(id);
+      if (!it) continue;
+      this.boxes.remove(it);
+      it.x += dx;
+      it.y += dy;
+      if (it.inner) it.inner = { x: it.inner.x + dx, y: it.inner.y + dy };
+      this.boxes.add(it);
+      const el = this.cache.get(it.id);
+      if (el) { el.style.left = it.x + "px"; el.style.top = it.y + "px"; }
+    }
+    this.mountedFor = null;
+    this.request();
+  }
+  /** Outline one item (or none). */
+  select(id: string | null) {
+    if (this.selected) this.cache.get(this.selected)?.classList.remove("selected");
+    this.selected = id;
+    if (id) this.cache.get(id)?.classList.add("selected");
+  }
+
   /** The note or group at a screen point, innermost first. */
   itemAt(sx: number, sy: number): Item | null {
     const c = this.camera, x = c.x + sx / c.z, y = c.y + sy / c.z;
@@ -472,6 +537,10 @@ export class Board {
     this.el.addEventListener("pointerdown", (e) => {
       if ((e.target as Element).closest?.("a")) return; // links stay links
       cancelAnimationFrame(this.flight);
+      if (this.onItemDown && down.size === 0 && e.isPrimary) {
+        const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
+        if (it && this.onItemDown(it, e)) return;
+      }
       down.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.el.setPointerCapture(e.pointerId);
     });
@@ -492,6 +561,8 @@ export class Board {
     for (const t of ["pointerup", "pointercancel"]) this.el.addEventListener(t, (e) => { down.delete((e as PointerEvent).pointerId); });
     this.el.addEventListener("dblclick", (e) => {
       const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
+      const w = this.toWorld(e.clientX, e.clientY);
+      if (this.onDoubleClick?.(it, w.x, w.y)) return;
       this.focus(it ? [it.id] : undefined);
     });
   }
