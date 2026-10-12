@@ -1,0 +1,599 @@
+{
+ "title": "How Sagebrush is built",
+ "intro": "**Sagebrush is Python 3.14 compiled to JavaScript, with a Sage library and Rust engines, running wherever JavaScript runs.** Drag to pan. Pinch or Ctrl+scroll to zoom: zoomed in, notes show their details. Double-click a box to go to it. Use **→** to take the tour.",
+ "refBase": "https://github.com/sagemathinc/sagebrush/blob/master/",
+ "layout": "graph",
+ "nodes": [
+  {
+   "id": "hosts",
+   "kind": "group",
+   "title": "Where it runs",
+   "layout": "row",
+   "color": "#f4ecd8",
+   "text": "One compiler and runtime in every host. Python never runs on a server we pay for.",
+   "children": [
+    {
+     "id": "site",
+     "title": "sagebrush.space",
+     "text": "The notebook as a static site on Cloudflare. Python runs **in your browser**, in a Web Worker. Installable as a PWA, and it works offline.",
+     "ref": "web/index.html"
+    },
+    {
+     "id": "app",
+     "title": "Desktop app",
+     "text": "Tauri 2: the same page in the system web view, about 10–15 MB. Rust adds real files and the notebook's folder.",
+     "detail": "Python still runs as WebAssembly/JS in the web view. A native-speed path (V8 + N-API engines, or CPython) is a later option.",
+     "ref": "app/README.md"
+    },
+    {
+     "id": "cli",
+     "title": "npx sagebrush",
+     "text": "The CLI: a REPL, scripts, `--sage`, `--magma`. One self-contained bundle (scripts/build-cli.mjs) that embeds lib/ and the engine's wasm. It compiles and runs with pyjs directly, as do the Jupyter kernel and the CDN module.",
+     "ref": "src/cli.ts"
+    },
+    {
+     "id": "jupyter",
+     "title": "Jupyter kernel",
+     "text": "`sagebrush --install-jupyter-kernel`. It speaks the Jupyter protocol over its own pure-JS ZeroMQ, so it needs neither Python nor libzmq.",
+     "ref": "src/kernel.ts"
+    },
+    {
+     "id": "local",
+     "title": "sagebrush notebook",
+     "text": "The site's page served locally. Python runs in a Node worker thread per notebook, with this computer's files.",
+     "ref": "src/notebook.ts"
+    },
+    {
+     "id": "cdn",
+     "title": "CDN / artifacts",
+     "text": "An ES module for chat artifacts and other pages: the parser, the runtime and the engine in one import.",
+     "ref": "cdn/README.md"
+    }
+   ]
+  },
+  {
+   "id": "nb",
+   "kind": "group",
+   "title": "The notebook",
+   "layout": "graph",
+   "color": "#e3eef8",
+   "text": "Jupyter-style cells in plain DOM. Reactive by default: marimo's semantics, but scoped by page order.",
+   "children": [
+    {
+     "id": "page",
+     "title": "The page",
+     "text": "Cells, outputs (SVG plots, KaTeX, 3D, @interact), Jupyter keys, .ipynb, time travel. No framework.",
+     "detail": "web/notebook/notebook.js is about 2,000 lines. A *Kernel* plug-in runs code: WorkerKernel here, a CoCalc project kernel later.",
+     "ref": "web/notebook/notebook.js"
+    },
+    {
+     "id": "analyze",
+     "title": "Analyzer worker",
+     "text": "A port of marimo's ScopedVisitor: the names each cell **defines** and **reads**.",
+     "detail": "`{strict: true}` is exactly marimo. The default fixes class scopes, `x += 1` as a read, lazy definitions, and except-as unbinding. Differentially tested against marimo's own analysis.",
+     "ref": "src/dataflow.ts"
+    },
+    {
+     "id": "graph",
+     "title": "Dependency graph",
+     "text": "Definers → readers, plus deleters, updaters and *families*: every cell that writes a name runs together.",
+     "ref": "src/notebook-graph.ts"
+    },
+    {
+     "id": "sched",
+     "title": "Reactive scheduler",
+     "text": "Which cells are stale, what runs, in which order. It undoes a cell's definitions before it reruns, and estimates times from the last run.",
+     "detail": "Page order, not a single global namespace: a later redefinition of `x` is a **new** `x` for the cells below it. Effective code renames the shadowed spellings (`xʹ2`).",
+     "ref": "src/notebook-reactive.ts"
+    },
+    {
+     "id": "rename",
+     "title": "Renamer",
+     "text": "Rewrites a cell so each read sees the right definition. It **refuses** when timing is uncertain (decorators, calls that may run later), rather than guessing.",
+     "detail": "Its rules are tested by a differential fuzzer: random notebooks, run in pyjs and in CPython with the same lowering. Around 5 million cell outputs compared so far, with 0 failures in the latest campaigns.",
+     "ref": "src/rename.ts"
+    },
+    {
+     "id": "worker",
+     "title": "Interpreter worker",
+     "text": "The pyjs runtime in a Web Worker. A runaway cell hangs only the worker, and **Stop** terminates it.",
+     "ref": "web/worker.ts"
+    },
+    {
+     "id": "session",
+     "title": "Notebook session",
+     "text": "The message protocol: run code (Sage, Python or Magma), stream output, complete, and forget names. The same in the browser and in Node.",
+     "ref": "src/notebook-session.ts"
+    }
+   ],
+   "direction": "LR"
+  },
+  {
+   "id": "pyjs",
+   "kind": "group",
+   "title": "pyjs: Python → JavaScript",
+   "layout": "graph",
+   "color": "#e8f1e1",
+   "text": "A compiler that keeps real Python semantics. The goal (PLAN.md) is within 2× of CPython on every benchmark, with no cliffs.",
+   "children": [
+    {
+     "id": "sagepre",
+     "title": "Sage preparser",
+     "text": "`[1..10]`, `100r`, `R.<x> = ...`. It rewrites text line by line, so line numbers stay.",
+     "ref": "src/sagepre.ts"
+    },
+    {
+     "id": "magma",
+     "title": "Magma front end",
+     "text": "Magma → Python: 1-based sequences with value semantics, `~x` arguments. It runs on lib/_magma.py.",
+     "ref": "src/magma.ts"
+    },
+    {
+     "id": "pyparse",
+     "title": "pyparse",
+     "text": "**CPython 3.14's own grammar**, generated in TypeScript. The same AST and the same SyntaxErrors, to the column.",
+     "ref": "pyparse/README.md"
+    },
+    {
+     "id": "frontend",
+     "title": "Front end",
+     "text": "pyparse's tree → the compiler's AST.",
+     "ref": "src/frontend.ts"
+    },
+    {
+     "id": "scope",
+     "title": "Scopes",
+     "text": "Local, closure, global or class namespace, per module, function, lambda, class and comprehension. The same rules as CPython's symtable.",
+     "ref": "src/scope.ts"
+    },
+    {
+     "id": "emit",
+     "title": "Code generator",
+     "text": "AST → JavaScript. Runtime helpers and inline caches per site; counting loops for `range`.",
+     "detail": "Ints are JS numbers until they overflow, then BigInt. Floats are boxed only where identity matters. See PLAN.md for the value representation.",
+     "ref": "src/emit.ts"
+    },
+    {
+     "id": "compile",
+     "title": "compile / run",
+     "text": "Compile modules (cached by a hash of src/ and lib/), import them, and run them.",
+     "ref": "src/compile.ts"
+    }
+   ],
+   "direction": "LR"
+  },
+  {
+   "id": "runtime",
+   "kind": "group",
+   "title": "The runtime (src/runtime, ~18k lines)",
+   "layout": "grid",
+   "color": "#efe6f3",
+   "children": [
+    {
+     "id": "objects",
+     "title": "Object model",
+     "text": "Types, the MRO, descriptors, metaclasses, `__slots__`, and exceptions with CPython's tracebacks.",
+     "ref": "src/runtime/object.ts"
+    },
+    {
+     "id": "builtins",
+     "title": "Builtins & modules",
+     "text": "Builtins, the import machinery, and modules written in JS (`re`, `struct`, `zlib`, ...).",
+     "ref": "src/runtime/modules.ts"
+    },
+    {
+     "id": "numerics",
+     "title": "Bit-exact numerics",
+     "text": "`math` with glibc's and fdlibm's algorithms, so floats print exactly as in CPython.",
+     "ref": "src/runtime/libm.ts"
+    },
+    {
+     "id": "numpy",
+     "title": "NumPy subset",
+     "text": "ndarrays, `linalg`, `fft` and `random`, written to match NumPy's results.",
+     "ref": "src/runtime/numpy.ts"
+    },
+    {
+     "id": "simd",
+     "title": "SIMD kernels",
+     "text": "matmul, LU, QR, eig and SVD in WebAssembly SIMD, with the same operations in the same order as the JS fallback.",
+     "ref": "src/runtime/kernels.ts"
+    },
+    {
+     "id": "bridge",
+     "title": "Engine bridge",
+     "text": "The builtin module `_sbengine`: request JSON → reply JSON. The 450 KB wasm is compiled on first use.",
+     "ref": "src/runtime/engine.ts"
+    }
+   ]
+  },
+  {
+   "id": "lib",
+   "kind": "group",
+   "title": "Python & Sage library (lib/, ~77k lines of Python)",
+   "layout": "row",
+   "color": "#f6e3e0",
+   "children": [
+    {
+     "id": "stdlib",
+     "title": "Standard library",
+     "text": "Pure-Python pieces of CPython's stdlib: `fractions`, `functools`, `collections`, `copy`, ...",
+     "ref": "lib/fractions.py"
+    },
+    {
+     "id": "sage",
+     "title": "The Sage layer",
+     "text": "`_sage_*.py`: number fields, modular forms, elliptic curves, matrices, symbolic expressions, graphs, polyhedra...",
+     "detail": "`import sage.all` and `from sage.rings.integer import Integer` work: every sage.* module is a view of Sagebrush's names (lib/_sage_shim.py).",
+     "ref": "lib/_sage_shim.py"
+    },
+    {
+     "id": "graphics",
+     "title": "Graphics",
+     "text": "Plots as SVG, 3D scenes for the viewer, animations, and @interact.",
+     "ref": "lib/_graphics.py"
+    }
+   ]
+  },
+  {
+   "id": "engines",
+   "kind": "group",
+   "title": "Rust engines (engine/, ~55k lines, clean-room MIT/Apache)",
+   "layout": "graph",
+   "color": "#f3efd9",
+   "text": "The heavy mathematics, written from the literature. FLINT, PARI and Magma are used only as test oracles.",
+   "children": [
+    {
+     "id": "core",
+     "kind": "group",
+     "title": "Foundations",
+     "layout": "row",
+     "color": "#ebe5c8",
+     "children": [
+      {
+       "id": "bigint",
+       "title": "bigint",
+       "text": "Big integers and rationals.",
+       "ref": "engine/bigint/src/lib.rs",
+       "w": 180
+      },
+      {
+       "id": "arith",
+       "title": "arith",
+       "text": "Exact arithmetic in the spirit of FLINT: $\\mathbb{Z}/n$, polynomials, matrices.",
+       "ref": "engine/arith/src/lib.rs",
+       "w": 200
+      },
+      {
+       "id": "ball",
+       "title": "ball",
+       "text": "Rigorous ball arithmetic $m\\,2^e \\pm r$.",
+       "ref": "engine/ball/src/lib.rs",
+       "w": 180
+      }
+     ]
+    },
+    {
+     "id": "math",
+     "kind": "group",
+     "title": "Mathematics",
+     "layout": "grid",
+     "color": "#ebe5c8",
+     "children": [
+      {
+       "id": "modsym",
+       "title": "modsym",
+       "text": "Modular symbols: Hecke operators $T_p$ on $S_2(\\Gamma_0(N))$.",
+       "ref": "engine/modsym/src/lib.rs",
+       "w": 220
+      },
+      {
+       "id": "ap",
+       "title": "ap",
+       "text": "$a_p = p + 1 - \\#E(\\mathbb{F}_p)$ for all $p$ up to a bound, in parallel.",
+       "ref": "engine/ap/src/lib.rs",
+       "w": 220
+      },
+      {
+       "id": "sym",
+       "title": "sym",
+       "text": "The symbolic expression engine: simplification, and Sage's printing and LaTeX.",
+       "ref": "engine/sym/src/lib.rs",
+       "w": 220
+      },
+      {
+       "id": "mpoly",
+       "title": "mpoly",
+       "text": "Sparse multivariate polynomials over $\\mathbb{Z}$ and $\\mathbb{Q}$.",
+       "ref": "engine/mpoly/src/lib.rs",
+       "w": 220
+      },
+      {
+       "id": "classgroup",
+       "title": "classgroup",
+       "text": "Class groups of quadratic fields, and regulators.",
+       "ref": "engine/classgroup/src/lib.rs",
+       "w": 220
+      },
+      {
+       "id": "galois",
+       "title": "galois",
+       "text": "Galois groups as transitive groups $nTk$.",
+       "ref": "engine/galois/src/lib.rs",
+       "w": 220
+      },
+      {
+       "id": "group",
+       "title": "group",
+       "text": "Permutation groups with Schreier–Sims.",
+       "ref": "engine/group/src/lib.rs",
+       "w": 220
+      },
+      {
+       "id": "poly",
+       "title": "poly",
+       "text": "Factoring in $\\mathbb{Z}[x]$ in pure Rust, so it works in wasm too.",
+       "ref": "engine/poly/src/lib.rs",
+       "w": 220
+      }
+     ]
+    },
+    {
+     "id": "bindings",
+     "kind": "group",
+     "title": "Bindings",
+     "layout": "row",
+     "color": "#ebe5c8",
+     "children": [
+      {
+       "id": "web",
+       "title": "engine/web",
+       "text": "A plain wasm32 module with a JSON ABI. One file embeds it anywhere.",
+       "ref": "engine/web/src/lib.rs",
+       "w": 200
+      },
+      {
+       "id": "py",
+       "title": "engine/py",
+       "text": "The CPython extension `sagebrush._native`. It releases the GIL.",
+       "ref": "engine/py/src/lib.rs",
+       "w": 200
+      },
+      {
+       "id": "node",
+       "title": "engine/node",
+       "text": "A native Node addon, multithreaded.",
+       "ref": "engine/node/src/lib.rs",
+       "w": 200
+      }
+     ]
+    }
+   ],
+   "direction": "LR"
+  },
+  {
+   "id": "tests",
+   "kind": "group",
+   "title": "How we know it is right",
+   "layout": "row",
+   "color": "#ececec",
+   "children": [
+    {
+     "id": "conformance",
+     "title": "Conformance",
+     "text": "CPython's own test suite and MicroPython's tests, run under pyjs.",
+     "ref": "conformance/README.md"
+    },
+    {
+     "id": "sagetests",
+     "title": "Sage doctests",
+     "text": "Sage's documentation examples, preparsed, against Sagebrush.",
+     "ref": "sage-tests/run.py"
+    },
+    {
+     "id": "fuzz",
+     "title": "Differential fuzzing",
+     "text": "Random reactive notebooks in pyjs vs CPython. Failing cases shrink to minimal regression tests.",
+     "ref": "test/fuzz-reactive.ts"
+    },
+    {
+     "id": "oracle",
+     "title": "Oracles",
+     "text": "Engines against FLINT, PARI, Magma and the LMFDB.",
+     "ref": "engine/oracle/src/lib.rs"
+    }
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "from": "site",
+   "to": "page"
+  },
+  {
+   "from": "app",
+   "to": "page",
+   "label": "same page"
+  },
+  {
+   "from": "local",
+   "to": "session",
+   "label": "Node worker"
+  },
+  {
+   "from": "page",
+   "to": "analyze",
+   "label": "cell sources"
+  },
+  {
+   "from": "analyze",
+   "to": "graph",
+   "label": "defs / refs"
+  },
+  {
+   "from": "graph",
+   "to": "sched"
+  },
+  {
+   "from": "sched",
+   "to": "rename",
+   "label": "effective code"
+  },
+  {
+   "from": "sched",
+   "to": "worker",
+   "label": "run cells"
+  },
+  {
+   "from": "worker",
+   "to": "session"
+  },
+  {
+   "from": "session",
+   "to": "compile"
+  },
+  {
+   "from": "sagepre",
+   "to": "pyparse"
+  },
+  {
+   "from": "magma",
+   "to": "pyparse",
+   "label": "Python source"
+  },
+  {
+   "from": "pyparse",
+   "to": "frontend",
+   "label": "CPython's AST"
+  },
+  {
+   "from": "frontend",
+   "to": "scope"
+  },
+  {
+   "from": "scope",
+   "to": "emit"
+  },
+  {
+   "from": "emit",
+   "to": "compile",
+   "label": "JavaScript"
+  },
+  {
+   "from": "compile",
+   "to": "objects",
+   "label": "calls"
+  },
+  {
+   "from": "builtins",
+   "to": "stdlib",
+   "label": "import"
+  },
+  {
+   "from": "builtins",
+   "to": "sage",
+   "label": "import"
+  },
+  {
+   "from": "sage",
+   "to": "bridge",
+   "label": "JSON requests"
+  },
+  {
+   "from": "bridge",
+   "to": "web",
+   "label": "wasm"
+  },
+  {
+   "from": "web",
+   "to": "math"
+  },
+  {
+   "from": "py",
+   "to": "math"
+  },
+  {
+   "from": "node",
+   "to": "math"
+  },
+  {
+   "from": "math",
+   "to": "core"
+  },
+  {
+   "from": "lib",
+   "to": "tests",
+   "hidden": true
+  },
+  {
+   "from": "engines",
+   "to": "tests",
+   "hidden": true
+  }
+ ],
+ "steps": [
+  {
+   "focus": "hosts",
+   "say": "**Where it runs.** Sagebrush is one compiler and one runtime, embedded in six hosts. The browser is the main one: on sagebrush.space your Python runs on **your** machine, so it costs nothing to serve and keeps working offline."
+  },
+  {
+   "focus": [
+    "site",
+    "page",
+    "worker"
+   ],
+   "say": "**The notebook page** is plain DOM, with no framework. Python runs in a **Web Worker**, so a runaway cell can't freeze the page: *Stop* terminates the worker. The cost is that a refresh loses the session. That's why stale/fresh state and pickle checkpoints matter."
+  },
+  {
+   "focus": [
+    "analyze",
+    "graph",
+    "sched"
+   ],
+   "say": "**Reactive by default.** A worker of its own analyzes each cell: what it defines and what it reads (a port of marimo's analysis). The graph links definers to readers. The scheduler then knows which cells are stale, what to run, and about how long it will take."
+  },
+  {
+   "focus": [
+    "sched",
+    "rename"
+   ],
+   "say": "**Scoped by page order** (unlike marimo). Redefining `x` lower down makes a *new* `x` for the cells below it. The renamer makes that true by rewriting reads (`xʹ2`). Whenever timing is uncertain it **refuses** rather than guessing: about 3% of cells."
+  },
+  {
+   "focus": "pyjs",
+   "say": "**pyjs**: Sage and Magma become Python. CPython's own grammar (pyparse, generated in TypeScript) parses it, scopes are resolved as in CPython's symtable, and the code generator emits JavaScript that V8 JIT-compiles."
+  },
+  {
+   "focus": [
+    "emit",
+    "compile",
+    "objects"
+   ],
+   "say": "The generated JavaScript calls the **runtime** for Python semantics: ints that overflow into BigInt, descriptors, metaclasses, CPython-exact float printing. The target is within 2× of CPython on every benchmark, with no cliffs."
+  },
+  {
+   "focus": "runtime",
+   "say": "**The runtime** is about 18k lines of TypeScript. Beyond objects and builtins, it has bit-exact `math` (the algorithms of glibc and fdlibm), a NumPy subset, and WebAssembly SIMD kernels for dense linear algebra."
+  },
+  {
+   "focus": "lib",
+   "say": "**The Python and Sage library** is ~77k lines of Python, compiled by pyjs like user code. `import sage.all` works: the sage.* modules are views of Sagebrush's names."
+  },
+  {
+   "focus": [
+    "sage",
+    "bridge",
+    "web"
+   ],
+   "say": "The heavy mathematics goes through **one narrow door**: JSON requests to `_sbengine`, a 450 KB WebAssembly module compiled on first use."
+  },
+  {
+   "focus": "engines",
+   "say": "**The Rust engines** are ~55k lines, clean-room from the literature: modular symbols, $a_p$ of elliptic curves, class groups, Galois groups, symbolic algebra, ball arithmetic. The same crates are also a CPython extension and a Node addon, for native speed."
+  },
+  {
+   "focus": "tests",
+   "say": "**How we know it is right:** CPython's and MicroPython's own tests, Sage's doctests, FLINT, PARI and LMFDB as oracles, and differential fuzzing of the reactive notebook against CPython. Every reviewer finding becomes a regression case."
+  }
+ ]
+}

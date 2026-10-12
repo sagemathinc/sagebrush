@@ -120,7 +120,7 @@ for (const [entry, name] of [["client.ts", "atlas.js"], ["engine-worker.ts", "at
 }
 copyFileSync(join(here, "atlas", "llms.txt"), join(here, "dist", "atlas", "llms.txt"));
 if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn("web/dist/atlas/data is missing: run scripts/build-atlas.mjs (see web/atlas/README.md)");
-// Boards (design/board.md): step 0, the renderer's spike, at /board/
+// Boards (design/board.md), at /board/, with their example documents
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true });
   if (!r.success) {
@@ -129,6 +129,8 @@ if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn
   }
   builds.push(["the board", r]);
   copyFileSync(join(here, "board", "index.html"), join(here, "dist", "board", "index.html"));
+  mkdirSync(join(here, "dist", "board", "examples"), { recursive: true });
+  for (const f of readdirSync(join(here, "board", "examples"))) if (f.endsWith(".json")) copyFileSync(join(here, "board", "examples", f), join(here, "dist", "board", "examples", f));
 }
 // The npm packages the bundles above contain (their metafiles' inputs) and
 // KaTeX (its stylesheet and fonts, copied): web/js-dependencies.json, from
