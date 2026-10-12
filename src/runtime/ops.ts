@@ -664,10 +664,26 @@ export function seqCmp(a: any[], b: any[], op: string): any {
   return cmpResult(a.length - b.length, op);
 }
 
+// Strings compare by code point, as in Python, not by UTF-16 unit as in
+// JavaScript: a surrogate (part of U+10000 and up) is past U+E000..U+FFFF
+// (REACT-DEEF-1).
+export function strCmp(a: string, b: string): number {
+  if (a === b) return 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    let x = a.charCodeAt(i), y = b.charCodeAt(i);
+    if (x === y) continue;
+    if (x >= 0xd800) x += x >= 0xe000 ? -0x800 : 0x2000;
+    if (y >= 0xd800) y += y >= 0xe000 ? -0x800 : 0x2000;
+    return x - y;
+  }
+  return a.length - b.length;
+}
+
 export function richCompare(a: any, b: any, op: string): any {
   const c = numCmp(a, b);
   if (c !== undefined) return cmpResult(c, op);
-  if (typeof a === "string" && typeof b === "string") return cmpResult(a < b ? -1 : a > b ? 1 : 0, op);
+  if (typeof a === "string" && typeof b === "string") return cmpResult(strCmp(a, b), op);
   if (Array.isArray(a) && Array.isArray(b) && (a as any).$t === (b as any).$t && (a as any).$cls === undefined && (b as any).$cls === undefined) return seqCmp(a, b, op);
   if (a instanceof PySet && b instanceof PySet && (a.$cls === T.set || a.$cls === T.frozenset) && (b.$cls === T.set || b.$cls === T.frozenset)) {
     const na = a.$d.$m.size, nb = b.$d.$m.size;
