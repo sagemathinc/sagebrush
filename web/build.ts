@@ -225,13 +225,14 @@ copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "ind
 // something ever to slip markup past web/safe-html.ts and board documents'
 // checks, no script it brought could run): scripts only from this site, and
 // the pages' own inline scripts by their hashes; no plugins, no <base>, no
-// forms.  (Images and fetches may come from elsewhere: Markdown's images,
+// forms; and Cloudflare's Web Analytics beacon, which the site's host adds
+// to its pages.  (Images and fetches may come from elsewhere: Markdown's images,
 // ?doc= boards.  The Python worker, which compiles to JavaScript, has its
 // own response and so its own policy: none.)
 {
   const hashes = (file: string) => [...readFileSync(join(here, "dist", file), "utf8").matchAll(/<script(?![^>]*\bsrc=)(?![^>]*type="(?:application\/json|text\/plain)")[^>]*>([\s\S]*?)<\/script>/g)]
     .map((m) => `'sha256-${new Bun.CryptoHasher("sha256").update(m[1]).digest("base64")}'`);
-  const csp = (file: string) => ["default-src 'self'", `script-src 'self' 'wasm-unsafe-eval' ${hashes(file).join(" ")}`.trim(), "style-src 'self' 'unsafe-inline'",
+  const csp = (file: string) => ["default-src 'self'", `script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com ${hashes(file).join(" ")}`.trim(), "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https: http:", "font-src 'self' data:", "connect-src 'self' data: blob: https: http:", "worker-src 'self' blob:", "media-src 'self' data: blob:",
     "frame-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'none'", "manifest-src 'self'"].join("; ");
   const rules = [["/", "index.html"], ["/index.html", "index.html"], ["/board/*", "board/index.html"], ["/embed/*", "embed/index.html"]]
