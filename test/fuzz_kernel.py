@@ -29,22 +29,28 @@ signal.signal(signal.SIGALRM, _timeout)
 
 # page-order scoping's renamed definitions get their names back, as the
 # notebook's interpreter does (src/rename.ts restoreDefNames, RENAME_HELPER)
-def _sb_rename(o, n):
-    old = getattr(o, "__name__", None)
+def _sb_rename(o, n, old):
+    if getattr(o, "__name__", None) != old:
+        return
     try:
         o.__name__ = n
-        o.__qualname__ = n
     except Exception:
         return
-    if isinstance(o, type) and isinstance(old, str):
-        for v in list(vars(o).values()):
-            f = getattr(v, "__func__", v)
+
+    def fix(v, seen):
+        for f in (v, getattr(v, "__func__", None), getattr(v, "fget", None), getattr(v, "fset", None), getattr(v, "fdel", None)):
             q = getattr(f, "__qualname__", None)
-            if isinstance(q, str) and q.startswith(old + "."):
+            if isinstance(q, str) and (q == old or q.startswith(old + ".")):
                 try:
                     f.__qualname__ = n + q[len(old):]
                 except Exception:
                     pass
+        if isinstance(v, type) and v not in seen:
+            seen.add(v)
+            for w in list(vars(v).values()):
+                fix(w, seen)
+
+    fix(o, set())
 
 
 builtins.__sb_rename__ = _sb_rename
@@ -65,7 +71,7 @@ def restore(tree, scoped):
                     c.body = fix(c.body)
             out.append(st)
             if isinstance(st, DEFS) and st.name in scoped:
-                call = ast.Expr(ast.Call(ast.Name("__sb_rename__", ast.Load()), [ast.Name(st.name, ast.Load()), ast.Constant(scoped[st.name])], []))
+                call = ast.Expr(ast.Call(ast.Name("__sb_rename__", ast.Load()), [ast.Name(st.name, ast.Load()), ast.Constant(scoped[st.name]), ast.Constant(st.name)], []))
                 for n in ast.walk(call):
                     n.lineno = n.end_lineno = st.end_lineno
                     n.col_offset = n.end_col_offset = st.end_col_offset
