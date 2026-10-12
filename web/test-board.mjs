@@ -516,17 +516,23 @@ try {
         const sel = await ev("[...document.querySelectorAll('.board-item.selected')].length");
         check(sel >= 2, `a shift-drag rectangle selects what it holds (${sel})`);
       }
-      // (snapping: let go 3 pixels from b's left edge, c lines up with it)
+      // (snapping: two notes of their own, far from the rest; one let go 3
+      // pixels from the other's left edge lines up with it)
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-      const [bs, cs] = [await box("b"), await box("c")], z3 = await ev("window.board.camera.z");
-      const cp = await center("c");
-      await drag(cp, { x: cp.x + (bs.x - cs.x) * z3 + 3, y: cp.y + 37 }, { modifiers: 0 });
-      check(Math.abs((await box("c")).x - bs.x) < 0.01, `c let go 3 px from b's left edge snaps to it (${(await box("c")).x - bs.x})`);
+      await ev("window.sagebrush.board.edit((d) => { d.nodes.push({ id: 'sa', text: 'Snap A', x: 20000, y: 20000 }, { id: 'sb', text: 'Snap B', x: 20300, y: 20260 }); })");
+      await sleep(400);
+      await ev("window.board.focus(['sa', 'sb'], true)");
+      await sleep(400);
+      const [sa, sb] = [await box("sa"), await box("sb")], z3 = await ev("window.board.camera.z");
+      const sp = await center("sb");
+      await drag(sp, { x: sp.x + (sa.x - sb.x) * z3 + 3, y: sp.y }, { modifiers: 0 });
+      check(Math.abs((await box("sb")).x - sa.x) < 0.01, `a note let go 3 px from another's left edge snaps to it (${(await box("sb")).x - sa.x})`);
+      // (the note dragged is the one selected)
       // (the arrow keys: the selection moves)
-      const cx0 = (await box("c")).x;
+      const sx0 = (await box("sb")).x;
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }))");
       await sleep(300);
-      check(Math.abs((await box("c")).x - cx0 - 10) < 0.01, `shift+→ moves the selection 10 (${(await box("c")).x - cx0})`);
+      check(Math.abs((await box("sb")).x - sx0 - 10) < 0.01, `shift+→ moves the selection 10 (${(await box("sb")).x - sx0})`);
       // (undone, all of it: the board before the import)
       for (let i = 0; i < 12 && (await docOf()).nodes.length !== before; i++) {
         await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
