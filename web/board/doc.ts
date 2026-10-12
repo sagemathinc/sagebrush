@@ -227,7 +227,8 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
     const p = topPos.get(n.id)!;
     place(n, p.x, p.y, 0);
   }
-  const out: Edge[] = edges.filter((e) => !e.hidden).map((e, i) => ({ id: `e${i}`, from: e.from, to: e.to, label: e.label, ...(e.arrow ? { arrow: e.arrow } : {}), ...(e.line ? { line: e.line } : {}) }));
+  const srcOf = new Map((doc.edges ?? []).map((e, i) => [e, i]));
+  const out: Edge[] = edges.filter((e) => !e.hidden).map((e, i) => ({ id: `e${i}`, from: e.from, to: e.to, label: e.label, src: srcOf.get(e), ...(e.arrow ? { arrow: e.arrow } : {}), ...(e.line ? { line: e.line } : {}) }));
   // the edges' routes: now, or (deferRoutes) as the caller runs `routing`;
   // edges are straight until then
   const routing = routeEdges(doc, items, out, parentOf);

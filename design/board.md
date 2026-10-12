@@ -406,8 +406,24 @@ It parses every flowchart in Mermaid's end-to-end tests and docs (490 at
 images, entities are decoded, and a `%%` comment is not a node; the other 2
 are not valid Mermaid. CI runs it (at least 97% must agree).
 
+**Editing edges, and groups' members** (October 12):
+- **Edges.** In Edit, a click selects an edge, on its line or its label,
+  before the group it crosses; it is drawn darker. Delete removes it.
+  Double-click (or Enter) opens a panel with:
+  - its label;
+  - its arrowheads (at the end, both, or none);
+  - its line (solid, dotted, thick);
+  - ⇄ to reverse it, and Delete.
+- **Groups.** A note or group let go over another group joins it; that
+  group is outlined while dragging. Let go outside every group, it goes to
+  the top level. Everything else stays where it is. The group it left
+  closes up, and the group it joined grows around it.
+- **Undo and redo** work outside Edit too.
+
+test-board.mjs does all of this with the mouse on an imported flowchart,
+at desktop and phone sizes.
+
 Still to do in step 1:
-- editing edges' labels, moving notes between groups;
 - shapes and frames;
 - a better top-level arrangement than one column of layers.
 
