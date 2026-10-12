@@ -223,6 +223,8 @@ try {
   await run([0, 1, 2, 3, 4, 5]);
   await set([null, "x = 2"]);
   await run(1);
+  // (the reader's output may arrive just after the run's report: waited for, up to 10 s)
+  await until(`sagebrush.notebook.cells()[3].out.textContent.trim() !== "[1]"`, 10000).catch(() => {});
   ok((await out(3)) === "[2]", `F2: an updater reached automatically runs with its definer: v is [2], not [1, 2] (${await out(3)})`);
   await set([null, null, null, null, "pass"]);
   await run(4);
