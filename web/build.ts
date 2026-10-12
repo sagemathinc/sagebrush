@@ -195,6 +195,9 @@ if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn
 // The Cloudflare site (web/site) serves the same files.
 rmSync(join(here, "site", "public", "atlas"), { recursive: true, force: true });
 cpSync(join(here, "dist", "atlas"), join(here, "site", "public", "atlas"), { recursive: true });
+// boards (/board/)
+rmSync(join(here, "site", "public", "board"), { recursive: true, force: true });
+cpSync(join(here, "dist", "board"), join(here, "site", "public", "board"), { recursive: true });
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
 // the 3D viewer, loaded by the page when a Graphics3d is shown
 copyFileSync(join(here, "viewer3d.js"), join(here, "dist", "sagebrush-viewer3d.js"));
