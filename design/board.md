@@ -300,8 +300,39 @@ intervals:
 
 The document loads in about 0.2 s. CI checks all three examples.
 
+**Edge routing** (web/board/route.ts). Edges are orthogonal routes that
+go around boxes. The method is after Excalidraw's elbow arrows
+(elbowArrow.ts, MIT):
+- A* over a sparse grid whose lines are the boxes' edges;
+- a bend costs more than a step;
+- no reversing;
+- a stub out of each box.
+
+Theirs avoid only the arrow's own two ends. Ours avoid:
+- every note;
+- every group an edge doesn't belong to;
+- the titles of the groups it enters.
+
+They also keep 16 px clear, and prefer the middles of the gaps (channels).
+Running along an earlier route costs 2.5 times its length. The ends that
+share a side of a box are spread along it in the order their routes go,
+then routed again. Each label goes on a segment where it covers no note,
+no header and no other label. In a graph layout, the gaps between layers
+widen to fit the labels crossing them.
+
+The layered layout now places each node as near the middle of its
+neighbors in the layer before as order and gaps allow (sweeps down and up,
+an isotonic fit), so edges run straighter.
+
+A* is guided by distance plus the bends still needed. Search buffers are
+reused, and obstacles are rasterized onto the grid. The 587 edges of the
+source map route in 0.65 s, in slices between frames, so the board shows
+at once (0.33 s) with straight edges, routed by 1 s.
+
+test-board.mjs checks that every routed edge is orthogonal, ends on its
+boxes' borders, and goes through no other note.
+
 Still to do in step 1:
-- edge routing around groups (today edges are straight, border to border);
 - editing edges' labels, moving notes between groups;
 - shapes and frames;
 - a better top-level arrangement than one column of layers.

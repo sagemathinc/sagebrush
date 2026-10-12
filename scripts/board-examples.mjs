@@ -106,7 +106,8 @@ function summary(text, ext) {
   }
   const s = body.join(" ").replace(/\s+/g, " ").trim();
   if (!s) return "";
-  const sentences = s.match(/[^.!?]+[.!?:]+(\s|$)/g) ?? [s];
+  // (sentences end at . ! ? followed by a space or the end, not inside "notebook.js")
+  const sentences = s.match(/.+?[.!?](?=\s|$)/g)?.map((x) => x + " ") ?? [s];
   let t = "";
   for (const x of sentences) { if ((t + x).length > 260 && t) break; t += x; }
   return (t || s).trim().slice(0, 300);

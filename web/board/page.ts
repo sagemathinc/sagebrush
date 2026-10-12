@@ -22,6 +22,7 @@ const $ = (id: string) => document.getElementById(id)!;
 let doc: BoardDoc | null = null;
 let at = -1; // the tour's step; -1 before it starts
 let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
+let routingGen = 0, routed = false;
 
 let mathModule: Promise<{ typeset: (el: Element) => void }> | null = null;
 const hasMath = (s: string) => /\$|\\\(|\\\[/.test(s);
@@ -49,8 +50,21 @@ async function show(d: BoardDoc) {
     if (h === undefined) heights.set(k, (h = board.measure({ kind: "note", ...n }, w)));
     return h;
   };
-  const { items, edges } = layout(d, measure);
+  // (edges' routes are found between frames: large boards show at once,
+  // their edges straight until routed)
+  const { items, edges, routing } = layout(d, measure, { deferRoutes: true });
   board.setItems(items, edges);
+  const gen = ++routingGen;
+  routed = false;
+  const work = () => {
+    if (gen !== routingGen) return;
+    const t0 = performance.now();
+    while (performance.now() - t0 < 12) {
+      if (routing.next().done) { routed = true; board.request(); return; }
+    }
+    setTimeout(work, 0);
+  };
+  work();
   placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
   document.title = (d.title ? d.title + " — " : "") + "Board — Sagebrush";
   $("title").textContent = d.title ?? "";
@@ -241,7 +255,7 @@ async function bench(path: Camera[]) {
     /** Go to step n of the tour (0-based; -1 for the whole board). */
     step,
     /** The document, the tour's step, the camera, and the laid out items' boxes. */
-    snapshot: () => ({ doc, step: at, camera: board.camera, view: board.view(), items: placed }),
+    snapshot: () => ({ doc, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points }) => ({ id, from, to, points })) }),
     /** Change the document (undoable, as an edit): f gets a copy to modify. */
     edit: (f: (d: BoardDoc) => void) => editor.commit(f),
     /** Turn Edit mode on or off. */

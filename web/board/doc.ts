@@ -6,6 +6,7 @@
 // keeps them (a person moved it), the rest are placed.
 
 import type { Item, Edge } from "./board";
+import { routeSteps, type Rect, type RouteRequest } from "./route";
 
 export interface DocNote {
   id: string;
@@ -94,7 +95,7 @@ function noteSize(n: DocNote, measure?: Measure): Box {
  * Place a board's nodes: returns the renderer's items (groups, notes) and
  * edges, in world coordinates.
  */
-export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges: Edge[] } {
+export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: boolean } = {}): { items: Item[]; edges: Edge[]; routing: Generator<void, void> } {
   const items: Item[] = [];
   const parentOf = new Map<string, string>(); // node id -> the group directly holding it
   const ids = new Set<string>();
@@ -129,7 +130,7 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
       edges.flatMap((e) => {
         const members = new Set(n.children.map((c) => c.id));
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
-        return a && b && a !== b ? [[a, b] as [string, string]] : [];
+        return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
       }));
     // (a group's members start at its origin)
     const minX = Math.min(...[...pos.values()].map((p) => p.x)), minY = Math.min(...[...pos.values()].map((p) => p.y));
@@ -155,7 +156,7 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
   const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", doc.columns, edges.flatMap((e) => {
     const members = new Set(doc.nodes.map((n) => n.id));
     const a = memberOf(e.from, members), b = memberOf(e.to, members);
-    return a && b && a !== b ? [[a, b] as [string, string]] : [];
+    return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
   }));
 
   // absolute positions, and the items
@@ -175,13 +176,80 @@ export function layout(doc: BoardDoc, measure?: Measure): { items: Item[]; edges
     const p = topPos.get(n.id)!;
     place(n, p.x, p.y, 0);
   }
-  return { items, edges: edges.filter((e) => !e.hidden).map((e, i) => ({ id: `e${i}`, from: e.from, to: e.to, label: e.label })) };
+  const out: Edge[] = edges.filter((e) => !e.hidden).map((e, i) => ({ id: `e${i}`, from: e.from, to: e.to, label: e.label }));
+  // the edges' routes: now, or (deferRoutes) as the caller runs `routing`;
+  // edges are straight until then
+  const routing = routeEdges(doc, items, out, parentOf);
+  if (!opts.deferRoutes) for (;;) if (routing.next().done) break;
+  return { items, edges: out, routing };
+}
+
+// Each edge's route around everything it does not belong to: the outermost
+// boxes not holding either end (a group holding an end is entered, and its
+// other members are what to go around), along the axis of the layout of the
+// smallest group holding both ends.
+function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<string, string>): Generator<void, void> {
+  if (!edges.length) return;
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const rect = (id: string): Rect => { const it = byId.get(id)!; return { x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h }; };
+  const ancestors = (id: string) => { const s = new Set<string>(); for (let p = parentOf.get(id); p; p = parentOf.get(p)) s.add(p); return s; };
+  const groups = new Map<string, DocGroup>();
+  const walk = (ns: DocNode[]) => { for (const n of ns) if (n.kind === "group") { groups.set(n.id, n); walk(n.children); } };
+  walk(doc.nodes);
+  const axisOf = (g: { layout?: DocGroup["layout"]; direction?: DocGroup["direction"] }): "h" | "v" | undefined => {
+    const l = g.layout ?? "graph";
+    return l === "row" ? "h" : l === "column" ? "v" : l === "graph" ? (g.direction === "LR" ? "h" : "v") : undefined;
+  };
+  // a group's title and text: kept clear by the edges entering it, and by labels
+  const header = (id: string): Rect | null => {
+    const it = byId.get(id)!, g = groups.get(id)!;
+    if (!it.inner || (!g.title && !g.text)) return null;
+    const w = Math.max(g.title ? g.title.length * 9.5 + 48 : 0, g.text ? Math.min(it.w, 600) : 0);
+    return { x0: it.x, y0: it.y, x1: it.x + Math.min(it.w, w), y1: it.inner.y - 10 };
+  };
+  const reqs: RouteRequest[] = [];
+  for (const e of edges) {
+    const A = ancestors(e.from), B = ancestors(e.to);
+    if (A.has(e.to) || B.has(e.from)) continue; // a group and its member: no line
+    const obstacles: Rect[] = [];
+    const scan = (ns: DocNode[]) => {
+      for (const n of ns) {
+        if (n.id === e.from || n.id === e.to) continue;
+        if (A.has(n.id) || B.has(n.id)) {
+          const hd = header(n.id);
+          if (hd) obstacles.push(hd);
+          scan((n as DocGroup).children);
+        }
+        else obstacles.push(rect(n.id));
+      }
+    };
+    scan(doc.nodes);
+    // the smallest group holding both: its layout's axis
+    let common: string | undefined;
+    for (const p of A) if (B.has(p)) { common = p; break; }
+    const axis = axisOf(common ? groups.get(common)! : doc);
+    reqs.push({ id: e.id, a: rect(e.from), b: rect(e.to), obstacles, axis, label: e.label ? { w: e.label.length * 6.8 + 14, h: 20 } : undefined });
+  }
+  const keepClear = items.filter((it) => it.kind === "note").map((it) => ({ x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h }) as Rect);
+  for (const id of groups.keys()) { const hd = header(id); if (hd) keepClear.push(hd); }
+  const routes = yield* routeSteps(reqs, keepClear);
+  for (const e of edges) {
+    const r = routes.get(e.id);
+    if (!r) continue;
+    e.points = r.points;
+    if (r.label) { e.lx = r.label.x; e.ly = r.label.y; }
+  }
 }
 
 interface Node { id: string; w: number; h: number; fixed: { x: number; y: number } | null }
 
 // Positions (top left, relative) for boxes in one container.
-function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: [string, string][]): Map<string, { x: number; y: number }> {
+// an edge between two boxes laid out together: from, to, its label's width
+type Link = [string, string, number];
+/** The width an edge's label takes (12 px text). */
+export const labelWidth = (e: { label?: string; hidden?: boolean }) => (e.label && !e.hidden ? e.label.length * 6.8 + 14 : 0);
+
+function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: Link[]): Map<string, { x: number; y: number }> {
   const out = new Map<string, { x: number; y: number }>();
   // (positioned boxes keep their places; the others are laid out among themselves)
   const nodes = all.filter((n) => !n.fixed), free = new Set(nodes.map((n) => n.id));
@@ -211,7 +279,7 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
 
 // A layered (Sugiyama-style) layout: cycles broken, layers by longest path,
 // orders by barycenters (sweeps down and up), each layer centered.
-function layered(nodes: Node[], links: [string, string][], dir: "TB" | "LR"): Map<string, { x: number; y: number }> {
+function layered(nodes: Node[], links: Link[], dir: "TB" | "LR"): Map<string, { x: number; y: number }> {
   const ids = nodes.map((n) => n.id);
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const uniq = new Map<string, [string, string]>();
@@ -262,20 +330,62 @@ function layered(nodes: Node[], links: [string, string][], dir: "TB" | "LR"): Ma
       reindex();
     }
   }
-  // coordinates: layers stacked along the direction, each centered across it
+  // coordinates: layers stacked along the direction; across it, each node
+  // as near the middle of its neighbors in the layer before as the order
+  // and the gaps allow (sweeps down and up), so edges run straight
   const along = (n: Node) => (dir === "TB" ? n.h : n.w), across = (n: Node) => (dir === "TB" ? n.w : n.h);
-  const spans = layers.map((l) => l.reduce((s, v) => s + across(byId.get(v)!), 0) + GAP * Math.max(0, l.length - 1));
+  const size = (v: string) => across(byId.get(v)!);
+  const spans = layers.map((l) => l.reduce((s, v) => s + size(v), 0) + GAP * Math.max(0, l.length - 1));
   const widest = Math.max(...spans, 0);
-  const pos = new Map<string, { x: number; y: number }>();
-  let at = 0;
+  const center = new Map<string, number>();
   layers.forEach((l, k) => {
     let c = (widest - spans[k]) / 2;
-    for (const v of l) {
-      const n = byId.get(v)!;
-      pos.set(v, dir === "TB" ? { x: c, y: at } : { x: at, y: c });
-      c += across(n) + GAP;
+    for (const v of l) { center.set(v, c + size(v) / 2); c += size(v) + GAP; }
+  });
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  for (let sweep = 0; sweep < 8; sweep++) {
+    const down = sweep % 2 === 0;
+    for (const l of down ? layers.slice(1) : layers.slice(0, -1).reverse()) {
+      const want = l.map((v) => { const ns = down ? preds.get(v)! : succs.get(v)!; return ns.length ? mean(ns.map((u) => center.get(u)!)) : center.get(v)!; });
+      fit(want, l.map(size)).forEach((c, i) => center.set(l[i], c));
     }
-    at += Math.max(...l.map((v) => along(byId.get(v)!))) + GAP * 2;
+  }
+  const lo = Math.min(...[...center].map(([v, c]) => c - size(v) / 2));
+  const pos = new Map<string, { x: number; y: number }>();
+  let at = 0;
+  // (the gap after a layer fits the labels of the edges crossing it: left
+  // to right, their width; top to bottom, their height)
+  const gapAfter = layers.map(() => GAP * 2);
+  for (const [a, b, w] of links) {
+    const la = layer.get(a)!, lb = layer.get(b)!;
+    if (w && Math.abs(la - lb) === 1) gapAfter[Math.min(la, lb)] = Math.max(gapAfter[Math.min(la, lb)], (dir === "LR" ? w : 20) + 64);
+  }
+  layers.forEach((l, k) => {
+    for (const v of l) {
+      const c = center.get(v)! - size(v) / 2 - lo;
+      pos.set(v, dir === "TB" ? { x: c, y: at } : { x: at, y: c });
+    }
+    at += Math.max(...l.map((v) => along(byId.get(v)!))) + gapAfter[k];
   });
   return pos;
+}
+
+// The centers nearest `want` (least squares) for boxes of `sizes` in this
+// order, at least GAP apart: an isotonic regression, by pooling adjacent
+// violators, of the wanted centers less each box's least offset.
+function fit(want: number[], sizes: number[]): number[] {
+  const off = [0];
+  for (let i = 1; i < sizes.length; i++) off.push(off[i - 1] + (sizes[i - 1] + sizes[i]) / 2 + GAP);
+  const blocks: { sum: number; n: number }[] = [];
+  for (let i = 0; i < want.length; i++) {
+    blocks.push({ sum: want[i] - off[i], n: 1 });
+    while (blocks.length > 1 && blocks[blocks.length - 2].sum / blocks[blocks.length - 2].n > blocks[blocks.length - 1].sum / blocks[blocks.length - 1].n) {
+      const b = blocks.pop()!;
+      blocks[blocks.length - 1].sum += b.sum;
+      blocks[blocks.length - 1].n += b.n;
+    }
+  }
+  const out: number[] = [];
+  for (const b of blocks) for (let k = 0; k < b.n; k++) out.push(b.sum / b.n + off[out.length]);
+  return out;
 }

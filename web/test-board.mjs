@@ -50,10 +50,12 @@ try {
   await send("Page.navigate", { url });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const loadMs = Date.now() - t0;
+  await until("window.sagebrush.board.snapshot().routed", 60000);
+  const routeMs = Date.now() - t0;
   await sleep(300);
   const s = await ev("window.sagebrush.board.snapshot()");
   const notes = s.items.filter((i) => i.kind === "note"), groups = s.items.filter((i) => i.kind === "group");
-  console.log(`${notes.length} notes, ${groups.length} groups, ${s.doc.edges?.length ?? 0} edges, ${s.doc.steps?.length ?? 0} steps; shown in ${loadMs} ms`);
+  console.log(`${notes.length} notes, ${groups.length} groups, ${s.doc.edges?.length ?? 0} edges, ${s.doc.steps?.length ?? 0} steps; shown in ${loadMs} ms, routed by ${routeMs} ms`);
   // no two boxes overlap unless one holds the other (a sweep over x)
   const inside = (a, b) => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
   const byX = [...s.items].sort((a, b) => a.x - b.x);
@@ -61,6 +63,31 @@ try {
     const a = byX[i], b = byX[j];
     const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     check(!overlap || inside(a, b) || inside(b, a), `${a.id} and ${b.id} overlap`);
+  }
+  // each routed edge: axis-parallel segments, from its box's border to the
+  // other's, through no other note
+  {
+    const s2 = await ev("window.sagebrush.board.snapshot()");
+    const box = new Map(s2.items.map((i) => [i.id, i]));
+    const onBorder = (b, x, y) => (Math.abs(x - b.x) < 0.5 || Math.abs(x - b.x - b.w) < 0.5) && y >= b.y - 0.5 && y <= b.y + b.h + 0.5 || (Math.abs(y - b.y) < 0.5 || Math.abs(y - b.y - b.h) < 0.5) && x >= b.x - 0.5 && x <= b.x + b.w + 0.5;
+    const noteList = s2.items.filter((i) => i.kind === "note");
+    let routedN = 0, bad = [];
+    for (const e of s2.edges) {
+      const p = e.points;
+      if (!p) continue;
+      routedN++;
+      const a = box.get(e.from), b = box.get(e.to);
+      if (!onBorder(a, p[0], p[1]) || !onBorder(b, p[p.length - 2], p[p.length - 1])) bad.push(`${e.from}->${e.to}: ends off the borders`);
+      for (let i = 0; i + 3 < p.length; i += 2) {
+        const [x0, y0, x1, y1] = [p[i], p[i + 1], p[i + 2], p[i + 3]];
+        if (x0 !== x1 && y0 !== y1) { bad.push(`${e.from}->${e.to}: a diagonal segment`); break; }
+        const lo = { x: Math.min(x0, x1), y: Math.min(y0, y1) }, hi = { x: Math.max(x0, x1), y: Math.max(y0, y1) };
+        const hit = noteList.find((n) => n.id !== e.from && n.id !== e.to && lo.x < n.x + n.w - 0.5 && hi.x > n.x + 0.5 && lo.y < n.y + n.h - 0.5 && hi.y > n.y + 0.5);
+        if (hit) { bad.push(`${e.from}->${e.to}: through ${hit.id}`); break; }
+      }
+    }
+    check(!bad.length, `routes: ${bad.slice(0, 6).join("; ")}${bad.length > 6 ? ` (${bad.length} in all)` : ""}`);
+    check(!s2.edges.length || routedN >= s2.edges.length * 0.9, `only ${routedN} of ${s2.edges.length} edges routed`);
   }
   // each group holds its children
   const walk = (node) => {
@@ -102,7 +129,8 @@ try {
   if (withMath) {
     await ev(`window.board.focus([${JSON.stringify(withMath.id)}], true)`);
     await sleep(400);
-    check(await ev("document.querySelectorAll('.board-note .katex').length > 0"), "no math typeset");
+    // (where the page found math: a $ in a code comment need not be)
+    check(await ev("document.querySelectorAll('.board-note .math').length === 0 || document.querySelectorAll('.board-note .katex').length > 0"), "no math typeset");
   }
   // the tour moves the camera, and #N is its step
   for (let i = 0; i < (s.doc.steps?.length ?? 0); i++) {
