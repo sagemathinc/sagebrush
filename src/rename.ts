@@ -1161,11 +1161,13 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
     // as `global xʹ2` after the initialization it would be an error, an
     // assignment before the global declaration, REACT-8C82-1)
     // (but only where the cell as written is valid: a module's `global x`
-    // after a use of x there (an annotation of x too; not in a function, a
-    // lambda or a comprehension's body) is a SyntaxError in Python, which
-    // renamed as `global xʹ2` it stays, REACT-5EE9-3)
+    // after a use of x there, or a binding but an import, or `x` annotated,
+    // is a SyntaxError in Python, which renamed as `global xʹ2` it stays,
+    // REACT-5EE9-3; not in a function's, a lambda's or a comprehension's
+    // body, nor an annotation of something else, evaluated later, D2C5-1)
     const nested = (o: Occurrence) => o.path.some(([n, k]) => ((BINDING_TYPES.has(n._type) || n._type === "Lambda") && k === "body") || (COMPREHENSIONS.has(n._type) && k !== "iter0"));
-    const usedBefore = (g: Occurrence) => occ.some((o) => !o.global && !nested(o) && (o.line < g.line || (o.line === g.line && o.col < g.col)));
+    const counts = (o: Occurrence) => !o.global && !nested(o) && deferredOf(o)?.kind !== "annotation" && !o.path.some(([n]) => n._type === "Import" || n._type === "ImportFrom");
+    const usedBefore = (g: Occurrence) => occ.some((o) => counts(o) && (o.line < g.line || (o.line === g.line && o.col < g.col)));
     if (init) for (const o of occ) if (o.global && !nested(o) && !usedBefore(o)) target.set(o, name);
     // (after the module's prologue, its docstring and __future__ imports,
     // which must come first: REACT-8C82-1)
@@ -1173,13 +1175,18 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
       let k = 0;
       if (tree.body[0]?._type === "Expr" && tree.body[0].value?._type === "Constant" && typeof tree.body[0].value.value === "string") k++;
       while (tree.body[k]?._type === "ImportFrom" && tree.body[k].module === "__future__") k++;
-      // (a statement after the prologue on its last line, `"doc"; print(x)`:
-      // the line is split there, REACT-5EE9-1)
-      const next = tree.body[k];
-      if (k && next && next.lineno === tree.body[k - 1].end_lineno) {
+      // (the prologue's logical line: its physical lines go on while one
+      // ends with a `\` outside a comment)
+      const next = tree.body[k], last = tree.body[k - 1];
+      const goesOn = (text: string) => text.replace(/#.*/, "").endsWith("\\");
+      let end = last?.end_lineno ?? 0;
+      if (last) for (let t = byteSlice(aLines[end - 1], last.end_col_offset); end < aLines.length && goesOn(t); t = aLines[end++]);
+      // (a statement after the prologue on its logical line, `"doc"; print(x)`,
+      // maybe after a `\`: the line is split there, REACT-5EE9-1, D2C5-2)
+      if (last && next && next.lineno <= end) {
         if (aLines[next.lineno - 1] !== source.split("\n")[next.lineno - 1]) return null; // (Sage, preparsed differently)
         marker = { after: next.lineno, text: initLine(to, old), split: byteSlice(aLines[next.lineno - 1], 0, next.col_offset).length };
-      } else marker = { after: k ? tree.body[k - 1].end_lineno : 0, text: initLine(to, old) };
+      } else marker = { after: end, text: initLine(to, old) };
     }
     // `x += 1` defining the new x: `xʹ2 = x; xʹ2 += 1` (at the top level only)
     const aug = first.path.at(-1);

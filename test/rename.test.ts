@@ -244,3 +244,30 @@ test("a bare annotation alone keeps the value; a module's global after a use sta
   // (a use in a lambda's or a comprehension's body is not the module's)
   assert.match(renameInCell("f = lambda: x\n[x for _ in ()]\nglobal x\nif False:\n    x = 2", "x", "xʹ2", { from: "definition" })!, /\nglobal x\n/);
 });
+
+test("a prologue's logical line goes on after a backslash; imports and later-evaluated annotations are not uses before a global (REACT-D2C5-1, 2)", () => {
+  // (split at the statement, on the next physical line)
+  const src = '"doc"; \\\nprint(x)\nif False:\n    x = 2';
+  const out = renameInCell(src, "x", "xʹ2", { from: "definition" })!;
+  const lines = out.split("\n");
+  assert.equal(lines[0], '"doc"; \\');
+  assert.match(lines[1], /^# page-order scoping/);
+  assert.match(lines[2], /^if 'x' in/);
+  assert.equal(lines[3], "print(xʹ2)");
+  assert.deepEqual(takeInitLines(out), { code: '"doc"; \\\nprint(xʹ2)\nif False:\n    xʹ2 = 2', inits: [["xʹ2", "x", 2, 0]] });
+  // (two names: the second goes after the logical line too, never inside it)
+  const both = renameInCell(renameInCell('"doc"; \\\nprint(x, y)\nif False:\n    x = y = 2', "x", "xʹ2", { from: "definition" })!, "y", "yʹ2", { from: "definition" })!;
+  const t = takeInitLines(both);
+  assert.equal(t.code, '"doc"; \\\nprint(xʹ2, yʹ2)\nif False:\n    xʹ2 = yʹ2 = 2');
+  assert.deepEqual(t.inits.map(([n, , l, c]) => [n, l, c]), [["yʹ2", 2, 0], ["xʹ2", 2, 0]]);
+  // (a backslash, then a blank line: a logical line of its own, so the initialization comes after it)
+  assert.match(renameInCell('"doc"; \\\n\nprint(x)\nif False:\n    x = 2', "x", "xʹ2", { from: "definition" })!, /^"doc"; \\\n\nif 'x' in .*\nprint\(xʹ2\)/);
+  // (valid as written, so the global keeps its name: an import, an annotation of something else)
+  for (const before of ["if False:\n    import math as x", "if False:\n    from math import floor as x", "def f(a: x) -> x: pass", "y: x = 3"]) {
+    assert.match(renameInCell(before + "\nglobal x\nif False:\n    x = 2\nprint(x)", "x", "xʹ2", { from: "definition" })!, /\nglobal x\n/, before);
+  }
+  // (invalid as written: a default, an annotated target, a read after an import)
+  for (const before of ["def f(a=x): pass", "x: int", "import math as x\nprint(x)"]) {
+    assert.match(renameInCell(before + "\nglobal x\nif False:\n    x = 2\nprint(x)", "x", "xʹ2", { from: "definition" })!, /\nglobal xʹ2\n/, before);
+  }
+});
