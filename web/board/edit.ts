@@ -7,6 +7,7 @@
 // again: a moved item, and the others in its group, keep the positions they
 // have (x and y), so nothing else moves; "Tidy" forgets them all.
 
+import { effect, signal } from "@preact/signals-core";
 import type { Board, Item } from "./board";
 import type { BoardDoc, BoardPage, DocEdge, DocGroup, DocNode, DocNote } from "./doc";
 
@@ -40,7 +41,13 @@ export function tidy<T extends BoardDoc | BoardPage>(doc: T): T {
 }
 
 export class Editor {
-  on = false;
+  /** Edit mode (the toolbar shows while it is on) */
+  readonly editing = signal(false);
+  /** connecting by taps (the toolbar's Connect, for touch screens too): a
+   * note tapped, then another, makes an edge between them */
+  readonly connecting = signal(false);
+  private connectFrom: string | null = null;
+  get on() { return this.editing.value; }
   private undos: string[] = [];
   private redos: string[] = [];
   private selected: string | null = null;
@@ -66,12 +73,19 @@ export class Editor {
       return true;
     };
     addEventListener("keydown", (e) => this.key(e));
+    effect(() => {
+      const on = this.editing.value;
+      if (!on) { this.select(null); this.close(); this.connecting.value = false; }
+      this.board.el.classList.toggle("editing", on);
+    });
+    effect(() => {
+      this.board.el.classList.toggle("connecting", this.connecting.value);
+      if (!this.connecting.value && this.connectFrom) { this.connectFrom = null; this.select(null); }
+    });
   }
 
   setOn(on: boolean) {
-    this.on = on;
-    if (!on) { this.select(null); this.close(); }
-    this.board.el.classList.toggle("editing", on);
+    this.editing.value = on;
   }
 
   /** Apply a change made to a copy of the document; undoable. */
@@ -133,6 +147,22 @@ export class Editor {
   private down(it: Item, e: PointerEvent): boolean {
     if (!this.on || this.panel) return false;
     const z = () => this.board.camera.z;
+    if (this.connecting.value) {
+      if (it.kind !== "note") return false;
+      const from = this.connectFrom;
+      if (!from || from === it.id) {
+        this.connectFrom = from === it.id ? null : it.id;
+        this.select(this.connectFrom);
+        return true;
+      }
+      this.connectFrom = null;
+      this.select(null);
+      this.commit((d) => {
+        const p = this.pg(d);
+        if (!(p.edges ?? []).some((x) => x.from === from && x.to === it.id)) (p.edges ??= []).push({ from, to: it.id });
+      });
+      return true;
+    }
     if (e.shiftKey && it.kind === "note") {
       // connect: a dashed line to the pointer, an edge where it is let go
       const move = (m: PointerEvent) => {
@@ -315,10 +345,21 @@ export class Editor {
     }
     if (it) { this.open(it.id); return true; }
     // a new note where the double click was (at the top level)
+    this.addNote(x, y);
+    return true;
+  }
+
+  /** A new note where (x, y) is (the world; at the top level), being written. */
+  addNote(x: number, y: number) {
     const id = "n" + Math.random().toString(36).slice(2, 8);
     // (the others at the top level keep their places)
-    this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, title: "", text: "", x: Math.round(x - 130), y: Math.round(y - 30) }); }).then(() => this.open(id, true));
-    return true;
+    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, title: "", text: "", x: Math.round(x - 130), y: Math.round(y - 30) }); }).then(() => this.open(id, true));
+  }
+
+  /** A new empty group where (x, y) is (at the top level): notes are dragged into it. */
+  addGroup(x: number, y: number) {
+    const id = "g" + Math.random().toString(36).slice(2, 8);
+    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, kind: "group", title: "", children: [], x: Math.round(x - 100), y: Math.round(y - 40) }); }).then(() => this.open(id, true));
   }
 
   /** A new code item where (x, y) is (the world; at the top level), its code being written. */
@@ -420,6 +461,7 @@ export class Editor {
     else if (e.key === "Escape" && this.edgeSel !== null) this.selectEdge(null);
     else if ((e.key === "Delete" || e.key === "Backspace") && this.selected) { const id = this.selected; this.select(null); this.commit((d) => remove(this.pg(d), id)); }
     else if (e.key === "Enter" && this.selected) this.open(this.selected);
+    else if (e.key === "Escape" && this.connecting.value) this.connecting.value = false;
     else if (e.key === "Escape" && this.selected) this.select(null);
     else return;
     e.preventDefault();

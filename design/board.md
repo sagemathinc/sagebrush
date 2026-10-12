@@ -501,6 +501,34 @@ web/board/test-code.mjs (31 checks) covers:
 - deleting a definition;
 - *Add Python code*, `run()`, and printing.
 
+### Step 2 continued: the toolbar, and signals (October 12)
+
+William's decisions:
+- one kind of item;
+- a toolbar only in Edit;
+- signals for the UI.
+
+**The toolbar** (web/board/toolbar.ts) appears only in Edit. Edit is when
+you get the tools out, so View mode is as bare as before. Its tools are:
+- **Note** and **Code**, added in the middle of the view, their editor open;
+- **Group**, an empty one to drag notes into;
+- **Connect**, a mode: tap a note, then another. This is how you connect on
+  touch screens; Esc leaves the mode.
+- **Page**, if chosen.
+
+Each board keeps its own tools (`tools` in the document), as a workshop lays
+out the tools of the job at hand. "⋯" chooses them, as an edit (undoable).
+"Use these for new boards" makes them the person's default.
+
+**Signals** (@preact/signals-core, MIT, about 1.6 KB) hold the UI's state:
+- Edit mode;
+- Connect;
+- the toolbar's tools.
+
+The Edit button, the hint, the toolbar and the board's classes follow them,
+instead of each change having to remember every element that shows it. The
+renderer stays imperative.
+
 ## Open questions
 
 - The editor for code items: a plain text area in a panel for now (Tab
