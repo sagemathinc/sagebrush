@@ -75,7 +75,8 @@ def restore(tree, scoped):
             n.str = written(n.str)
 
     def call(fn, args, node, end):
-        c = ast.Expr(ast.Call(ast.Name(fn, ast.Load()), [ast.Call(ast.Name("globals", ast.Load()), [], [])] + [ast.Constant(a) for a in args], []))
+        g = ast.Attribute(ast.Lambda(ast.arguments([], [], None, [], [], None, []), ast.Constant(0)), "__globals__", ast.Load())
+        c = ast.Expr(ast.Call(ast.Name(fn, ast.Load()), [g] + [ast.Constant(a) for a in args], []))
         for m in ast.walk(c):
             m.lineno = m.end_lineno = node.end_lineno if end else node.lineno
             m.col_offset = m.end_col_offset = node.end_col_offset if end else node.col_offset
@@ -92,7 +93,7 @@ def restore(tree, scoped):
                     h.body = fix(h.body, globs)
                 for c in getattr(st, "cases", None) or []:
                     c.body = fix(c.body, globs)
-            elif not isinstance(st, ast.ClassDef):
+            else:
                 gs = []
 
                 def scan(n):

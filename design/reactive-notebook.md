@@ -620,3 +620,26 @@ REACT-3BC-9..19, FUZZ-3BC-1; October 12).** Fixed:
 
 Known limit: a base class's `__init_subclass__` calling a method that
 reads the class by name.
+
+**sagebrush-codex's review of e555163 (October 12).** Fixed:
+- *A regression from the lowering:* it called `globals()`, which user code
+  may rebind (a parameter named `globals`). It now uses
+  `(lambda: 0).__globals__`, which no name can shadow.
+- *Consumers by role.* Only generators passed positionally to list, tuple,
+  set, frozenset, sum, sorted, min, max, any, all, and lambdas given as
+  `key=` to sorted/min/max/`.sort`, run at once. Neither dict nor `.join`
+  counts, nor a consumer the cell rebinds.
+- *More places that may not run:* an assert's message, a chained
+  comparison's later operands, a try body, a comprehension's later
+  iterables, and a generator's later iterables (lazy).
+- *A setter's store* must be a statement of its body, with no return, raise
+  or assert before it.
+- *Lowering in class bodies* that declare a name global.
+- *Rebound decorators.* A rebound staticmethod, classmethod or property is
+  not a plain decorator.
+- *Annotations of the definition itself* are refused under future
+  annotations, with a class decorator or metaclass, a method decorator, or
+  when the class body mentions annotations.
+
+The review's 30 cases are in test/fuzz-cases-e555163.json, run by the
+fuzz test.
