@@ -1,0 +1,416 @@
+[
+  {
+    "name": "ignored annotation cycle simple local",
+    "codes": [
+      "def f():\n    y: x\n    return 3",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    y: x\n    return 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle parenthesized local",
+    "codes": [
+      "def f():\n    (y): x\n    return 3",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    (y): x\n    return 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle valued local",
+    "codes": [
+      "def f():\n    y: x = 9\n    return 3",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    y: x = 9\n    return 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle valued parenthesized local",
+    "codes": [
+      "def f():\n    (y): x = 9\n    return 3",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    (y): x = 9\n    return 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle local attribute",
+    "codes": [
+      "def f():\n    [].missing: x\n    return 3",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    [].missing: x\n    return 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle local subscript",
+    "codes": [
+      "def f():\n    [][100]: x\n    return 3",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    [][100]: x\n    return 7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle module parentheses",
+    "codes": [
+      "def f():\n    return 3\n(y): x",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    return 7\n(y): x"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle class parentheses",
+    "codes": [
+      "class C:\n    (y): x\n    z=3",
+      "x=C.z",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "class C:\n    (y): x\n    z=7"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored annotation cycle nested function",
+    "codes": [
+      "def f():\n    def inner():\n        y: x\n        return 3\n    return inner()",
+      "x=f()",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "def f():\n    def inner():\n        y: x\n        return 7\n    return inner()"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation false mutation list index",
+    "codes": [
+      "a=[10,20]",
+      "i=len(a)",
+      "a[i]: int",
+      "print(i)"
+    ],
+    "change": [
+      0,
+      "a=[10,20,30]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation false mutation dict index",
+    "codes": [
+      "a={1:10}",
+      "i=len(a)",
+      "a[i+10]: int",
+      "print(i)"
+    ],
+    "change": [
+      0,
+      "a={1:10,2:20}"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation false mutation slice",
+    "codes": [
+      "a=[10,20]",
+      "i=len(a)",
+      "a[:i]: int",
+      "print(i)"
+    ],
+    "change": [
+      0,
+      "a=[10,20,30]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation false mutation tuple indices",
+    "codes": [
+      "a=[10,20]",
+      "i=len(a)",
+      "a[i,i+1]: int",
+      "print(i)"
+    ],
+    "change": [
+      0,
+      "a=[10,20,30]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation false mutation nested attribute",
+    "codes": [
+      "a=[[],[]]",
+      "i=len(a)-1",
+      "a[i].missing: int",
+      "print(i)"
+    ],
+    "change": [
+      0,
+      "a=[[],[],[]]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation false mutation nested subscript",
+    "codes": [
+      "a=[[],[]]",
+      "i=len(a)-1",
+      "a[i][100]: int",
+      "print(i)"
+    ],
+    "change": [
+      0,
+      "a=[[],[],[]]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "local annotation global target read control",
+    "codes": [
+      "x=1",
+      "def f():\n    (x): missing\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "local simple annotation stays local control",
+    "codes": [
+      "x=1",
+      "def f():\n    x: missing\n    x=8\n    return x",
+      "print(f(),x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "ignored local annotation without cycle control",
+    "codes": [
+      "x=1",
+      "def f():\n    y: missing\n    return x",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation attribute base dependency control",
+    "codes": [
+      "class C: pass\nx=C()",
+      "x.missing: missing\nprint(type(x).__name__)"
+    ],
+    "change": [
+      0,
+      "class D: pass\nx=D()"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation index dependency control",
+    "codes": [
+      "i=1",
+      "[][i]: missing\nprint(i)"
+    ],
+    "change": [
+      0,
+      "i=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare annotation slice dependencies control",
+    "codes": [
+      "i=1",
+      "[][i:i+1:i+2]: missing\nprint(i)"
+    ],
+    "change": [
+      0,
+      "i=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "simple module annotation no definition control",
+    "codes": [
+      "x=1",
+      "x: missing\nprint(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class simple annotation fallback control",
+    "codes": [
+      "x=1",
+      "class C:\n    x: missing\n    value=x",
+      "print(C.value)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class parenthesized annotation fallback control",
+    "codes": [
+      "x=1",
+      "class C:\n    (x): missing\n    value=x",
+      "print(C.value)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parenthesized closure after definition control",
+    "codes": [
+      "x=1",
+      "x=x+1\ndef f():\n    (x): missing\n    return x\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare target no item fetch control",
+    "codes": [
+      "a=[]",
+      "a[100]: missing\nprint(\"ok\")"
+    ],
+    "change": [
+      0,
+      "a=[1]"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "bare target no attribute fetch control",
+    "codes": [
+      "class C: pass\na=C()",
+      "a.missing: missing\nprint(\"ok\")"
+    ],
+    "change": [
+      0,
+      "class D: pass\na=D()"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "local bare target index walrus control",
+    "codes": [
+      "x=1",
+      "def f():\n    y=x\n    [][(y:=y+1)]: missing\n    return y",
+      "print(f())"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "repeated bare target index walrus control",
+    "codes": [
+      "x=1",
+      "[][ (x:=x+1) ]: missing\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "tuple target expression evaluation control",
+    "codes": [
+      "x=1",
+      "seen=[]\ndef part(v):\n    seen.append(v)\n    return v\n[][part(x),part(x+1)]: missing\nprint(seen)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "slice target expression evaluation control",
+    "codes": [
+      "x=1",
+      "seen=[]\ndef part(v):\n    seen.append(v)\n    return v\n[][part(x):part(x+1):part(x+2)]: missing\nprint(seen)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "real mutation dependency control",
+    "codes": [
+      "a=[1,2]",
+      "a[0]=7",
+      "print(a)"
+    ],
+    "change": [
+      0,
+      "a=[3,4]"
+    ],
+    "expect": "run"
+  }
+]

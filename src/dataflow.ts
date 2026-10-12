@@ -289,8 +289,11 @@ class Visitor {
   }
   visit_AnnAssign(node: Node): void {
     if (node.value) this.visit(node.value);
-    this.visit(node.annotation);
     const t = node.target;
+    // (ours: the annotation is evaluated only for a simple name at a module's
+    // or a class's top level, when asked for (a reference all the same);
+    // never in a function, nor for any other target: REACT-3A97-1)
+    if (this.strict || (node.simple && t._type === "Name" && this.blocks[this.blocks.length - 1].scope !== Scope.Function)) this.visit(node.annotation);
     // (ours: an annotation alone binds nothing: `(x): int` nowhere, and
     // `x: int` only makes x a function's local, as CPython does; one of an
     // attribute or an item evaluates the object and the index, REACT-44C5-1)
@@ -547,7 +550,14 @@ function mutated(tree: Node): Set<string> {
         walk(node.args?.kw_defaults);
         return;
       case "Assign": for (const t of node.targets) target(t); break;
-      case "AugAssign": case "AnnAssign": target(node.target); break;
+      case "AugAssign": target(node.target); break;
+      // (an annotation alone stores nothing, and its annotation is not run
+      // here; its object and index are evaluated: REACT-3A97-2)
+      case "AnnAssign":
+        if (node.value) target(node.target);
+        walk(node.value);
+        walk(node.target);
+        return;
       case "Delete": for (const t of node.targets) target(t); break;
       case "For": case "AsyncFor": target(node.target); break;
       case "With": case "AsyncWith": for (const it of node.items) target(it.optional_vars); break;

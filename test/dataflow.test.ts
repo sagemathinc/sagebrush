@@ -41,7 +41,7 @@ test("ours (not strict): marimo's analysis, plus the reads of a name's previous 
   // a function at the top level called before the definition below it), so
   // it is a reference.  On marimo's oracle: the same definitions and
   // deletions, and the same references plus some of names the cell defines.
-  let n = 0, bare = 0;
+  let n = 0, bare = 0, unevaluated = 0;
   // (an annotation alone, `x: int`, binds nothing: marimo counts it as a
   // definition, we do not, REACT-44C5-1)
   const annotated = (code: string) => new Set<string>((parse(code, "exec") as any).body.filter((st: any) => st._type === "AnnAssign" && !st.value && st.target._type === "Name").map((st: any) => st.target.id));
@@ -53,12 +53,27 @@ test("ours (not strict): marimo's analysis, plus the reads of a name's previous 
     if (only.length) bare++;
     assert.deepEqual([sorted(a.defs), sorted(a.deleted)], [(c.defs ?? []).filter((d) => !only.includes(d)), c.deleted], c.code);
     const extra = sorted(a.refs).filter((r) => !(c.refs ?? []).includes(r));
-    assert.ok((c.refs ?? []).every((r) => a.refs.has(r)), c.code);
+    // (marimo counts names in annotations Python never evaluates, in a
+    // function or of a target that is not a simple name: we do not, REACT-3A97-1)
+    const lost = (c.refs ?? []).filter((r) => !a.refs.has(r));
+    if (lost.length) {
+      unevaluated++;
+      const inAnnotations = new Set<string>();
+      const scan = (n: any, inAnn: boolean): void => {
+        if (!n || typeof n !== "object") return;
+        if (Array.isArray(n)) return n.forEach((x) => scan(x, inAnn));
+        if (n._type === "Name" && inAnn) inAnnotations.add(n.id);
+        for (const k of Object.keys(n)) if (k !== "_type") scan(n[k], inAnn || (n._type === "AnnAssign" && k === "annotation"));
+      };
+      scan(parse(c.code, "exec"), false);
+      assert.deepEqual(lost.filter((r) => !inAnnotations.has(r)), [], c.code);
+    }
     assert.deepEqual(extra.filter((r) => !a.defs.has(r)), [], c.code);
     if (extra.length) n++;
   }
   assert.equal(n, 23);
   assert.equal(bare, 22);
+  assert.equal(unevaluated, 2);
   // a class's names are not seen from the bodies inside it; defaults and the
   // first iterable are evaluated in it; `del` in a class body; `x += 1`
   const refs = (code: string) => sorted(analyzeCell(code).refs);
