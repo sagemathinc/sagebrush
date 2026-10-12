@@ -147,6 +147,22 @@ const menu = $("menu");
 $("menubtn").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
 addEventListener("click", () => { menu.hidden = true; });
 const fileName = () => ((doc?.title ?? "board").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "board") + ".json";
+$("examples").onclick = async () => {
+  const list = $("exlist");
+  try {
+    const ex = (await (await fetch(new URL("examples/index.json", location.href))).json()) as { file: string; title: string; about: string }[];
+    list.replaceChildren(...ex.map((e) => {
+      const a = document.createElement("a");
+      a.href = `?doc=${encodeURIComponent("examples/" + e.file)}`;
+      if (source === "examples/" + e.file) a.className = "current";
+      a.append(Object.assign(document.createElement("b"), { textContent: e.title }), Object.assign(document.createElement("span"), { textContent: e.about }));
+      return a;
+    }));
+  } catch (e) {
+    list.textContent = "The examples could not be loaded: " + String(e);
+  }
+  ($("exdlg") as HTMLDialogElement).showModal();
+};
 $("tidy").onclick = () => editor.commit((d) => Object.assign(d, tidy(d)));
 $("download").onclick = () => {
   const a = document.createElement("a");

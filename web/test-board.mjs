@@ -46,16 +46,19 @@ try {
   await send("Runtime.enable");
   await send("Log.enable");
   await send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: W < 600 });
+  const t0 = Date.now();
   await send("Page.navigate", { url });
-  await until("window.sagebrush?.board?.snapshot().items.length > 0");
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  const loadMs = Date.now() - t0;
   await sleep(300);
   const s = await ev("window.sagebrush.board.snapshot()");
   const notes = s.items.filter((i) => i.kind === "note"), groups = s.items.filter((i) => i.kind === "group");
-  console.log(`${notes.length} notes, ${groups.length} groups, ${s.doc.edges?.length ?? 0} edges, ${s.doc.steps?.length ?? 0} steps`);
-  // no two boxes overlap unless one holds the other
+  console.log(`${notes.length} notes, ${groups.length} groups, ${s.doc.edges?.length ?? 0} edges, ${s.doc.steps?.length ?? 0} steps; shown in ${loadMs} ms`);
+  // no two boxes overlap unless one holds the other (a sweep over x)
   const inside = (a, b) => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
-  for (let i = 0; i < s.items.length; i++) for (let j = i + 1; j < s.items.length; j++) {
-    const a = s.items[i], b = s.items[j];
+  const byX = [...s.items].sort((a, b) => a.x - b.x);
+  for (let i = 0; i < byX.length; i++) for (let j = i + 1; j < byX.length && byX[j].x < byX[i].x + byX[i].w; j++) {
+    const a = byX[i], b = byX[j];
     const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     check(!overlap || inside(a, b) || inside(b, a), `${a.id} and ${b.id} overlap`);
   }
@@ -72,15 +75,26 @@ try {
   // notes' text fits (fully zoomed in, at the whole board's camera, every mounted note)
   await ev("window.sagebrush.board.step(-1)");
   await shot("board");
-  // (every note mounted: the camera on the whole board, at full size)
+  // (every note mounted: the camera on the whole board, at full size; boards
+  // of fixed-size notes are not measured, and too large to mount at once)
   const b = await ev("window.board.bounds()");
-  const overflow = await ev(`window.board.setCamera({ x: ${b.x0}, y: ${b.y0}, z: 1 }), window.board.el.style.width = "${b.x1 - b.x0}px", window.board.el.style.height = "${b.y1 - b.y0}px", window.board.el.style.position = "relative", new Promise((r) => setTimeout(() => requestAnimationFrame(() => r([...document.querySelectorAll('.board-note')].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector('b')?.textContent))), 300))`);
-  const mounted = await ev("document.querySelectorAll('.board-note').length");
+  if (notes.length <= 2000) {
+    const overflow = await ev(`window.board.setCamera({ x: ${b.x0}, y: ${b.y0}, z: 1 }), window.board.el.style.width = "${b.x1 - b.x0}px", window.board.el.style.height = "${b.y1 - b.y0}px", window.board.el.style.position = "relative", new Promise((r) => setTimeout(() => requestAnimationFrame(() => r([...document.querySelectorAll('.board-note')].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector('b')?.textContent))), 300))`);
+    // (notes are mounted a few dozen a frame)
+    await until(`document.querySelectorAll('.board-note').length >= ${notes.length}`, 20000).catch(() => {});
+    const mounted = await ev("document.querySelectorAll('.board-note').length");
   check(mounted === notes.length, `${mounted} of ${notes.length} notes mounted to check their text`);
-  await ev(`window.board.el.style.cssText = "", window.board.focus(undefined, true)`);
-  check(!overflow.length, `text overflows: ${overflow.join(", ")}`);
-  // math was typeset where the document has it
-  if (/\$/.test(JSON.stringify(s.doc.nodes))) check(await ev("document.querySelectorAll('.board-note .katex').length > 0"), "no math typeset");
+    const overflow2 = await ev("[...document.querySelectorAll('.board-note')].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector('b')?.textContent)");
+    check(!overflow.length && !overflow2.length, `text overflows: ${[...overflow, ...overflow2].join(", ")}`);
+    await ev(`window.board.el.style.cssText = "", window.board.focus(undefined, true)`);
+  }
+  // math was typeset where the document has it (close to the first note with math)
+  const withMath = notes.find((n) => /\$/.test(JSON.stringify(s.doc.nodes).match(new RegExp(`"id":"${n.id}"[^}]*`))?.[0] ?? ""));
+  if (withMath) {
+    await ev(`window.board.focus([${JSON.stringify(withMath.id)}], true)`);
+    await sleep(400);
+    check(await ev("document.querySelectorAll('.board-note .katex').length > 0"), "no math typeset");
+  }
   // the tour moves the camera, and #N is its step
   for (let i = 0; i < (s.doc.steps?.length ?? 0); i++) {
     const before = await ev("JSON.stringify(window.board.camera)");
@@ -91,8 +105,26 @@ try {
     await shot(`step${String(i + 1).padStart(2, "0")}`);
   }
   if (process.env.SHOT) {
-    await ev("window.board.setCamera({ x: window.board.bounds(['sched']).x0 - 40, y: window.board.bounds(['sched']).y0 - 40, z: 1.6 })");
+    const id = notes[Math.min(20, notes.length - 1)].id;
+    await ev(`window.board.setCamera({ x: window.board.bounds([${JSON.stringify(id)}]).x0 - 40, y: window.board.bounds([${JSON.stringify(id)}]).y0 - 40, z: 1.6 })`);
     await shot("close");
+  }
+  // how it feels: frames while panning close up and far out, and zooming out and in
+  if (process.env.PERF) {
+    const B = await ev("window.board.bounds()");
+    const paths = {
+      pan1: `Array.from({ length: 240 }, (_, i) => ({ x: ${B.x0} + i * 14, y: ${B.y0} + i * 6, z: 1 }))`,
+      pan04: `Array.from({ length: 240 }, (_, i) => ({ x: ${B.x0} + i * 30, y: ${B.y0} + i * 12, z: 0.4 }))`,
+      panFar: `Array.from({ length: 240 }, (_, i) => ({ x: ${B.x0} + i * 120, y: ${B.y0} + i * 40, z: 0.06 }))`,
+      zoom: `Array.from({ length: 240 }, (_, i) => { const t = i < 120 ? i / 120 : (240 - i) / 120; return { x: ${B.x0}, y: ${B.y0}, z: Math.exp(Math.log(1.2) * (1 - t) + Math.log(${Math.max(0.01, 1200 / (B.x1 - B.x0))}) * t) }; })`,
+    };
+    paths.zoomAgain = paths.zoom;
+    for (const [k, p] of Object.entries(paths)) {
+      const r = await ev(`boardBench(${p})`);
+      console.log(`${k}: frame interval p50 ${r.interval.p50.toFixed(1)} p95 ${r.interval.p95.toFixed(1)} max ${r.interval.max.toFixed(0)} ms; render p95 ${r.work.p95.toFixed(1)} ms; mounted ${r.mounted}`);
+    }
+    await sleep(1000);
+    console.log("math still waiting:", await ev("window.board.math?.length ?? 0"));
   }
   // editing (web/board/edit.ts), with the mouse
   if (!process.env.NO_EDIT) {

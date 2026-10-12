@@ -47,7 +47,9 @@ export interface Camera {
 }
 
 const CELL = 512; // the spatial grid's cell, in world units
-const FAR = 0.35; // below this zoom: rectangles on the canvas, no DOM
+const FAR = 0.5; // below this zoom: rectangles on the canvas, no DOM (text under 7 px is not read)
+const BUDGET = 4; // ms of building notes' elements per frame; the rest wait, drawn as placeholders
+const PER_FRAME = 30; // and at most this many elements added (each costs the browser's layout too)
 const MARGIN = 0.5; // mounted: the viewport plus this fraction around it
 const CLOSE = 1.1; // from this zoom: notes' details
 const GROUP = "#eef2ea", INK = "#2a6f2f", EDGE = "#5f7457";
@@ -113,6 +115,7 @@ export class Board {
   insets = { top: 0, right: 0, bottom: 0, left: 0 };
   private frame = 0;
   private mountedFor: { x0: number; y0: number; x1: number; y1: number; far: boolean } | null = null;
+  private unbuilt = false; // the last mount ran out of its budget
   private dpr = Math.max(1, globalThis.devicePixelRatio || 1);
   /** counters, for the benchmark */
   stats = { frames: 0, mounts: 0, mounted: 0, drawn: 0 };
@@ -247,17 +250,20 @@ export class Board {
     if (this.close !== c.z >= CLOSE) this.world.classList.toggle("close", (this.close = c.z >= CLOSE));
     // mount what is near the view, when the view left what was mounted for
     const m = this.mountedFor;
-    if (!m || m.far !== far || v.x0 < m.x0 || v.y0 < m.y0 || v.x1 > m.x1 || v.y1 > m.y1) {
+    if (!m || this.unbuilt || m.far !== far || v.x0 < m.x0 || v.y0 < m.y0 || v.x1 > m.x1 || v.y1 > m.y1) {
       const mw = (v.x1 - v.x0) * MARGIN, mh = (v.y1 - v.y0) * MARGIN;
       const r = { x0: v.x0 - mw, y0: v.y0 - mh, x1: v.x1 + mw, y1: v.y1 + mh, far };
-      this.mount(far ? new Set() : this.boxes.query(r.x0, r.y0, r.x1, r.y1, new Set()));
+      this.unbuilt = !this.mount(far ? new Set() : this.boxes.query(r.x0, r.y0, r.x1, r.y1, new Set()), (v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2);
       this.mountedFor = r;
+      if (this.unbuilt) this.request();
     }
     this.drawBack(v, far);
     this.draw(v, far);
   }
 
-  private mount(want: Set<Item>) {
+  // Mount `want`, nearest (cx, cy) first, building new elements for at most
+  // BUDGET ms; returns whether all of them are mounted.
+  private mount(want: Set<Item>, cx: number, cy: number): boolean {
     const ids = new Set([...want].map((it) => it.id));
     for (const [id, el] of this.mounted) {
       if (!ids.has(id)) {
@@ -266,20 +272,29 @@ export class Board {
       }
     }
     const frag = document.createDocumentFragment();
-    for (const it of want) {
-      if (this.mounted.has(it.id)) continue;
+    const todo = [...want].filter((it) => !this.mounted.has(it.id));
+    const d = (it: Item) => Math.abs(it.x + it.w / 2 - cx) + Math.abs(it.y + it.h / 2 - cy);
+    if (todo.length > 50) todo.sort((a, b) => d(a) - d(b));
+    const t0 = performance.now();
+    let all = true, added = 0;
+    for (const it of todo) {
+      if (added >= PER_FRAME) { all = false; break; }
+      added++;
       let el = this.cache.get(it.id);
       if (!el) {
+        if (performance.now() - t0 > BUDGET) { all = false; break; }
         el = this.itemEl(it);
         this.cache.set(it.id, el);
       }
       el.classList.toggle("selected", it.id === this.selected);
+      if (el.dataset.untypeset) { delete el.dataset.untypeset; this.typesetSoon(el); }
       frag.append(el);
       this.mounted.set(it.id, el);
       this.stats.mounts++;
     }
     this.world.append(frag);
     this.stats.mounted = this.mounted.size;
+    return all;
   }
 
   private itemEl(it: Item): HTMLElement {
@@ -288,8 +303,27 @@ export class Board {
     return el;
   }
 
-  /** An item's element, unplaced (also for measuring a note's height at a width). */
-  content(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref">): HTMLElement {
+  // math waiting to be typeset, a few milliseconds of it per frame (a fast
+  // flight across thousands of notes never waits for KaTeX)
+  private math: HTMLElement[] = [];
+  private mathFrame = 0;
+  private typesetSoon(el: HTMLElement) {
+    this.math.push(el);
+    if (!this.mathFrame) this.mathFrame = requestAnimationFrame(() => this.typesetSome());
+  }
+  private typesetSome() {
+    this.mathFrame = 0;
+    const t0 = performance.now();
+    while (this.math.length && performance.now() - t0 < 4) {
+      const el = this.math.pop()!; // (the latest mounted first: what is in view)
+      if (el.isConnected) this.typeset?.(el);
+      else el.dataset.untypeset = "1";
+    }
+    if (this.math.length) this.mathFrame = requestAnimationFrame(() => this.typesetSome());
+  }
+
+  /** An item's element, unplaced (also for measuring a note's height at a width: `now`, math typeset at once). */
+  content(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref">, now = false): HTMLElement {
     const el = document.createElement("div");
     el.className = `board-item board-${it.kind}`;
     if (it.title) {
@@ -315,13 +349,16 @@ export class Board {
       a.textContent = "↗ " + decodeURIComponent(it.ref.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\//, "").replace(/^https?:\/\//, ""));
       el.append(a);
     }
-    if (this.typeset && el.querySelector(".math")) this.typeset(el);
+    if (this.typeset && el.querySelector(".math")) {
+      if (now) this.typeset(el);
+      else this.typesetSoon(el);
+    }
     return el;
   }
 
   /** A note's height at width `w`, as rendered (the element is measured in the world, unseen). */
   measure(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref">, w: number): number {
-    const el = this.content(it);
+    const el = this.content(it, true);
     el.style.cssText = `left:0;top:0;width:${w}px;visibility:hidden;`;
     el.classList.add("board-measure");
     this.world.append(el);
@@ -346,6 +383,14 @@ export class Board {
       ctx.lineWidth = 1 / c.z;
       ctx.strokeStyle = "rgba(0,0,0,.18)";
       ctx.stroke();
+    }
+    // notes in view still waiting for their elements: placeholders
+    if (!far && this.unbuilt) {
+      for (const it of this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())) {
+        if (it.kind !== "note" || this.mounted.has(it.id)) continue;
+        ctx.fillStyle = it.color ?? "#fff";
+        ctx.fillRect(it.x, it.y, it.w, it.h);
+      }
     }
     // edges: center to center, from border to border, an arrowhead at the end
     const lw = Math.max(1.6, 1.2 / c.z), head = Math.max(9, 7 / c.z);
