@@ -1,20 +1,23 @@
 // Markdown for the notebook's text cells (marked, GitHub flavor), bundled
 // into the page script (web/build.ts).  Safe for untrusted notebooks: raw
-// HTML is shown as text (except <br>), links and images keep only harmless
-// URLs, and math ($...$, $$...$$, \(...\), \[...\]) becomes elements the page
+// HTML is restricted to formatting (web/safe-html.ts: colored spans, bold,
+// tables, images with a width, as Jupyter notebooks use), links and images
+// keep only harmless URLs, and math ($...$, $$...$$, \(...\), \[...\]) becomes elements the page
 // typesets with KaTeX (web/math.ts).  Images may refer to a cell's
 // attachments (attachment:name), as in Jupyter.
 import { Marked, type Tokens } from "marked";
+import { safeHtml, safeImage, safeLink } from "./safe-html";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const SAFE_LINK = /^(https?:|mailto:|#|\/(?!\/)|\.{1,2}\/|[\w.~-]+(?:[/?#]|$))/i;
-const SAFE_IMG = /^(https?:|data:image\/(?:png|jpe?g|gif|webp|svg\+xml);)/i;
 
 export interface Options {
   // syntax highlighting of fenced code (Python and Sage), as HTML
   highlight?: (code: string, lang: string) => string | null;
   // a cell's attachments: name -> {mime: base64}
   attachments?: Record<string, Record<string, string>> | null;
+  // false for what code produced: no images from other sites (an image's
+  // address could carry away what the code read)
+  remote?: boolean;
 }
 
 function mathExtension() {
@@ -61,22 +64,18 @@ export function render(src: string, opts: Options = {}): string {
   md.use({
     renderer: {
       html(t: Tokens.HTML | Tokens.Tag) {
-        return /^<br\s*\/?>$/i.test(t.text.trim()) ? "<br>" : esc(t.text);
+        return safeHtml(t.text, opts);
       },
       link(t: Tokens.Link) {
         const text = this.parser.parseInline(t.tokens);
-        if (!SAFE_LINK.test(t.href)) return text;
-        const ext = /^https?:/i.test(t.href);
-        return `<a href="${esc(t.href)}"${t.title ? ` title="${esc(t.title)}"` : ""}${ext ? ' target="_blank" rel="noopener noreferrer"' : ""}>${text}</a>`;
+        const href = safeLink(t.href);
+        if (href === null) return text;
+        const ext = /^https?:/i.test(href);
+        return `<a href="${esc(href)}"${t.title ? ` title="${esc(t.title)}"` : ""}${ext ? ' target="_blank" rel="noopener noreferrer"' : ""}>${text}</a>`;
       },
       image(t: Tokens.Image) {
-        let src = t.href;
-        const a = /^attachment:(.+)$/.exec(src);
-        if (a && opts.attachments?.[a[1]]) {
-          const [mime, b64] = Object.entries(opts.attachments[a[1]])[0];
-          src = `data:${mime};base64,${b64}`;
-        }
-        if (!SAFE_IMG.test(src)) return esc(t.text);
+        const src = safeImage(t.href, opts);
+        if (src === null) return esc(t.text);
         return `<img src="${esc(src)}" alt="${esc(t.text)}"${t.title ? ` title="${esc(t.title)}"` : ""}>`;
       },
       code(t: Tokens.Code) {

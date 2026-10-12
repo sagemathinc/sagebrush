@@ -16,6 +16,7 @@
 // See web/notebook/README.md.
 import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
+import { safeHtml } from "../safe-html.ts";
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
@@ -333,9 +334,19 @@ export function createNotebook(root, opts = {}) {
   function appendMarkdown(box, b) {
     const el = h("div", "md-out");
     el.sbBundle = { "text/markdown": b["text/markdown"], "text/plain": b["text/plain"] ?? b["text/markdown"] };
-    el.innerHTML = renderMarkdown(b["text/markdown"], { highlight: mdHighlight });
+    // (no images from other sites: code made this, and an image's address could carry away what it read)
+    el.innerHTML = renderMarkdown(b["text/markdown"], { highlight: mdHighlight, remote: false });
     box.appendChild(el);
     if (el.querySelector(".math")) loadMath().then((mm) => mm.typeset(el)).catch(() => {});
+  }
+  // HTML output (IPython.display.HTML, tables): the restricted HTML of
+  // web/safe-html.ts (formatting only, nothing that runs), no images from
+  // other sites
+  function appendHtml(box, b) {
+    const el = h("div", "html-out");
+    el.sbBundle = { ...b };
+    el.innerHTML = safeHtml(b["text/html"], { remote: false });
+    box.appendChild(el);
   }
   function appendDisplay(box, b) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
@@ -356,6 +367,7 @@ export function createNotebook(root, opts = {}) {
       if (svg.classList.contains("sb-anim")) player(fig, svg);
     }
     else if (raster) fig.appendChild(Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }));
+    else if (typeof b["text/html"] === "string" && !b["application/json"]) return appendHtml(box, b);
     else {
       // nothing to draw: shown as text (JSON pretty-printed), and the whole
       // bundle kept for saving (an application/json result was saved as its

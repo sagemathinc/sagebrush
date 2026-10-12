@@ -122,6 +122,45 @@ export function pageView(d: BoardDoc, i: number): BoardDoc {
 }
 
 /** Whether something is a board document. */
+// A document as it may be trusted: it comes from any address (?doc=), a
+// file, a paste, an agent, a browser's storage.  Every number a finite
+// number, every text a string, every choice one of its values, every color
+// a color: nothing in it can reach the page's markup or styles as anything
+// but data (the print view writes SVG from positions; a note's color is a
+// CSS variable).
+const SHAPES = new Set(["rect", "round", "stadium", "circle", "diamond", "hexagon", "cylinder", "subroutine", "lean-right", "lean-left", "trapezoid", "inv-trapezoid", "flag"]);
+const COLOR = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(rgba?|hsla?)\(\s*[-\d.]+%?(deg)?\s*(,\s*[-\d.]+%?\s*){2,3}\))$/i;
+export const safeColor = (c: unknown): string | undefined => (typeof c === "string" && COLOR.test(c.trim()) ? c.trim() : undefined);
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+const str = (v: unknown) => (typeof v === "string" ? v : v == null ? undefined : String(v));
+const one = <T extends string>(v: unknown, of: readonly T[]): T | undefined => (of.includes(v as T) ? (v as T) : undefined);
+const strip = <T extends object>(o: T): T => { for (const k of Object.keys(o)) if ((o as any)[k] === undefined) delete (o as any)[k]; return o; };
+const LAYOUTS = ["row", "column", "grid", "graph"] as const, DIRS = ["TB", "LR"] as const;
+
+export function cleanDoc(d: any): BoardDoc {
+  const node = (n: any): DocNode | null => {
+    if (!n || typeof n !== "object" || n.id == null) return null;
+    if (n.kind === "group") {
+      return strip({ id: String(n.id), kind: "group" as const, title: str(n.title), text: str(n.text), layout: one(n.layout, LAYOUTS), columns: num(n.columns), direction: one(n.direction, DIRS),
+        children: (Array.isArray(n.children) ? n.children : []).map(node).filter((c: DocNode | null): c is DocNode => !!c), color: safeColor(n.color), x: num(n.x), y: num(n.y) });
+    }
+    return strip({ id: String(n.id), kind: one(n.kind, ["note", "code"] as const), code: str(n.code), title: str(n.title), text: str(n.text), detail: str(n.detail), ref: str(n.ref),
+      color: safeColor(n.color), shape: SHAPES.has(n.shape) ? (n.shape as NoteShape) : undefined, fit: n.fit === true ? true : undefined,
+      x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
+  };
+  const page = (p: any) => strip({
+    id: str(p?.id), title: str(p?.title), intro: str(p?.intro), layout: one(p?.layout, LAYOUTS), columns: num(p?.columns), direction: one(p?.direction, DIRS),
+    nodes: Array.isArray(p?.nodes) ? p.nodes.map(node).filter((n: DocNode | null): n is DocNode => !!n) : undefined,
+    edges: Array.isArray(p?.edges) ? p.edges.filter((e: any) => e && e.from != null && e.to != null).map((e: any) => strip({ from: String(e.from), to: String(e.to), label: str(e.label),
+      hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
+    steps: Array.isArray(p?.steps) ? p.steps.filter((t: any) => t && (typeof t.focus === "string" || Array.isArray(t.focus))).map((t: any) => strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) })) : undefined,
+  });
+  const out: any = strip({ ...page(d), title: str(d?.title), refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined });
+  delete out.id;
+  if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
+  return out as BoardDoc;
+}
+
 export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
 
 const GAP = 40, PAD = 24, TITLE = 34;
