@@ -225,6 +225,50 @@ box.
 Before step 0, the notebook work in progress finishes: differential fuzzing
 of the reactive notebook, then two-way widgets.
 
+### Step 1 so far: an agent's board, viewed
+
+`/board/?doc=URL` shows a board document (web/board/doc.ts). An agent
+writes structure, not coordinates:
+- notes: Markdown with math, plus a `detail` shown only when zoomed in, plus a `ref`;
+- groups, laid out as a row, a column, a grid, or a graph;
+- edges, labeled, or `hidden` (used only to place boxes);
+- a tour of steps, each with the items to focus and a caption.
+
+The layout measures each note as rendered (so the text fits), then places
+groups bottom up. Graph layouts are layered in the Sugiyama style:
+- depth-first search breaks cycles;
+- layers come from the longest path;
+- barycenter sweeps order each layer.
+
+Edges between members of different groups lay out the groups that hold
+them. Groups and edges are drawn on a canvas behind the notes. Far out,
+group titles are drawn as map labels.
+
+The tour (←/→, `#N` in the address) flies the camera to each step's items,
+clear of the caption. Double-click flies to a box. Pinch zooms on touch screens.
+
+`window.sagebrush.board` is the agent's handle in a browser it drives:
+- `load(doc)`;
+- `focus(ids)`;
+- `step(n)`;
+- `snapshot()`, which returns the document, the step, the camera and every placed box.
+
+The first document is examples/sagebrush.json, Sagebrush's own architecture,
+which `/board/` shows. web/test-board.mjs checks a document in CI:
+- no boxes overlap except a group and its members;
+- every note's text fits;
+- math is typeset;
+- every step moves the camera.
+
+`SHOT=dir` saves screenshots of the overview and each step. The step 0 benchmark is unchanged
+(pan p95 0.2 ms, zoom 3.6 ms, first paint 182 ms).
+
+Still to do in step 1:
+- edge routing around groups (today edges are straight, border to border);
+- moving and editing;
+- shapes and frames;
+- a better top-level arrangement than one column of layers.
+
 ## Open questions
 
 - The editor for code items: the notebook uses plain text areas; a board may

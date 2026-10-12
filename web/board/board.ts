@@ -1,4 +1,4 @@
-// Boards (design/board.md), step 0: the renderer's core, measured.
+// Boards (design/board.md): the renderer.
 //
 // One container whose CSS transform is the camera holds the items' DOM;
 // only the items near the viewport are mounted (a spatial grid finds them);
@@ -6,11 +6,13 @@
 // and no DOM at all; ink is on the canvas too, each stroke a cached Path2D.
 // Panning and zooming change the transform (and redraw the canvas) once per
 // animation frame; mounting follows only when the view has left the region
-// mounted for it.
+// mounted for it.  Groups (boxes holding notes) and edges between items are
+// drawn on a canvas behind the notes; notes show Markdown with math, and
+// their detail (semantic zoom) only when zoomed in.
 
 export interface Item {
   id: string;
-  kind: "note" | "shape" | "ink";
+  kind: "note" | "shape" | "ink" | "group";
   x: number;
   y: number;
   w: number;
@@ -21,6 +23,19 @@ export interface Item {
   /** ink: points relative to (x, y), as x0, y0, x1, y1, ... */
   points?: Float32Array;
   width?: number;
+  /** notes: Markdown shown only when zoomed in */
+  detail?: string;
+  /** notes: a link, shown at the note's foot */
+  ref?: string;
+  /** groups and notes: how deeply nested (groups are drawn outer first) */
+  depth?: number;
+}
+
+export interface Edge {
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
 }
 
 export interface Camera {
@@ -32,6 +47,8 @@ export interface Camera {
 const CELL = 512; // the spatial grid's cell, in world units
 const FAR = 0.35; // below this zoom: rectangles on the canvas, no DOM
 const MARGIN = 0.5; // mounted: the viewport plus this fraction around it
+const CLOSE = 1.1; // from this zoom: notes' details
+const GROUP = "#eef2ea", INK = "#2a6f2f", EDGE = "#5f7457";
 
 // A uniform grid: each item is in the cells its box overlaps.
 class Grid {
@@ -57,8 +74,17 @@ class Grid {
 export class Board {
   readonly el: HTMLElement;
   private world: HTMLElement;
-  private canvas: HTMLCanvasElement;
+  private canvas: HTMLCanvasElement; // in front of the notes: ink, and everything far out
   private ctx: CanvasRenderingContext2D;
+  private back: HTMLCanvasElement; // behind them: groups and edges
+  private bctx: CanvasRenderingContext2D;
+  private edges: Edge[] = [];
+  private byId = new Map<string, Item>();
+  private close = false;
+  private flight = 0;
+  /** Markdown to HTML for notes (plain text without it), and math typesetting */
+  markdown: ((src: string) => string) | null = null;
+  typeset: ((el: HTMLElement) => void) | null = null;
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
   private paths = new Map<string, Path2D>();
@@ -66,6 +92,8 @@ export class Board {
   private mounted = new Map<string, HTMLElement>();
   private cache = new Map<string, HTMLElement>(); // rendered once, kept
   camera: Camera = { x: 0, y: 0, z: 1 };
+  /** screen space that focus() keeps clear (a toolbar, a caption) */
+  insets = { top: 0, right: 0, bottom: 0, left: 0 };
   private frame = 0;
   private mountedFor: { x0: number; y0: number; x1: number; y1: number; far: boolean } | null = null;
   private dpr = Math.max(1, globalThis.devicePixelRatio || 1);
@@ -77,17 +105,22 @@ export class Board {
     this.el.className = "board";
     this.canvas = document.createElement("canvas");
     this.canvas.className = "board-canvas";
+    this.back = document.createElement("canvas");
+    this.back.className = "board-canvas board-back";
     this.world = document.createElement("div");
     this.world.className = "board-world";
-    this.el.append(this.canvas, this.world);
+    this.el.append(this.back, this.world, this.canvas);
     parent.append(this.el);
     this.ctx = this.canvas.getContext("2d")!;
+    this.bctx = this.back.getContext("2d")!;
     new ResizeObserver(() => this.resize()).observe(this.el);
     this.resize();
     this.input();
   }
 
-  setItems(items: Item[]) {
+  setItems(items: Item[], edges: Edge[] = []) {
+    this.edges = edges;
+    this.byId = new Map(items.map((it) => [it.id, it]));
     this.boxes = new Grid();
     this.strokes = new Grid();
     this.paths.clear();
@@ -96,6 +129,7 @@ export class Board {
     this.cache.clear();
     this.mountedFor = null;
     this.maxWidth = 0;
+    this.world.replaceChildren();
     for (const it of items) {
       (it.kind === "ink" ? this.strokes : this.boxes).add(it);
       if (it.kind === "ink") this.maxWidth = Math.max(this.maxWidth, it.width ?? 2);
@@ -115,8 +149,54 @@ export class Board {
     this.request();
   }
   setCamera(c: Camera) {
+    cancelAnimationFrame(this.flight);
     this.camera = c;
     this.request();
+  }
+
+  /** The camera showing the world rectangle (x0, y0)-(x1, y1), with a margin, zoomed in at most to `max`. */
+  cameraFor(x0: number, y0: number, x1: number, y1: number, max = 1.5): Camera {
+    const W = this.canvas.width / this.dpr, H = this.canvas.height / this.dpr, i = this.insets;
+    const w = Math.max(50, W - i.left - i.right), h = Math.max(50, H - i.top - i.bottom), m = Math.min(32, w / 12);
+    const z = Math.min(max, (w - 2 * m) / Math.max(1, x1 - x0), (h - 2 * m) / Math.max(1, y1 - y0));
+    // the rectangle's center at the center of the clear area
+    return { x: (x0 + x1) / 2 - (i.left + w / 2) / z, y: (y0 + y1) / 2 - (i.top + h / 2) / z, z };
+  }
+
+  /** The bounds of the items with these ids (all items when none are given). */
+  bounds(ids?: string[]) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const it of ids ? ids.map((i) => this.byId.get(i)).filter((i) => i) as Item[] : this.byId.values()) {
+      x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y);
+      x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h);
+    }
+    return x0 <= x1 ? { x0, y0, x1, y1 } : null;
+  }
+
+  /** Move the camera to show these items (all when none are given), smoothly unless `now`. */
+  focus(ids?: string[], now = false) {
+    const b = this.bounds(ids);
+    if (!b) return;
+    const c = this.cameraFor(b.x0, b.y0, b.x1, b.y1, ids ? 2 : 1.5);
+    if (now) this.setCamera(c);
+    else this.flyTo(c);
+  }
+
+  /** Move the camera to `to` over `ms`, zooming geometrically. */
+  flyTo(to: Camera, ms = 450) {
+    cancelAnimationFrame(this.flight);
+    const from = this.camera, t0 = performance.now();
+    const w = this.canvas.width / this.dpr / 2, h = this.canvas.height / this.dpr / 2;
+    // interpolate the center and log(zoom)
+    const cx0 = from.x + w / from.z, cy0 = from.y + h / from.z, cx1 = to.x + w / to.z, cy1 = to.y + h / to.z;
+    const step = () => {
+      const u = Math.min(1, (performance.now() - t0) / ms), e = u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2;
+      const z = from.z * (to.z / from.z) ** e, cx = cx0 + (cx1 - cx0) * e, cy = cy0 + (cy1 - cy0) * e;
+      this.camera = { x: cx - w / z, y: cy - h / z, z };
+      this.render();
+      if (u < 1) this.flight = requestAnimationFrame(step);
+    };
+    this.flight = requestAnimationFrame(step);
   }
 
   private request() {
@@ -125,10 +205,12 @@ export class Board {
 
   private resize() {
     const r = this.el.getBoundingClientRect();
-    this.canvas.width = Math.max(1, Math.round(r.width * this.dpr));
-    this.canvas.height = Math.max(1, Math.round(r.height * this.dpr));
-    this.canvas.style.width = r.width + "px";
-    this.canvas.style.height = r.height + "px";
+    for (const cv of [this.canvas, this.back]) {
+      cv.width = Math.max(1, Math.round(r.width * this.dpr));
+      cv.height = Math.max(1, Math.round(r.height * this.dpr));
+      cv.style.width = r.width + "px";
+      cv.style.height = r.height + "px";
+    }
     this.mountedFor = null;
     this.request();
   }
@@ -145,6 +227,7 @@ export class Board {
     // the camera: one transform
     this.world.style.transform = `translate(${-c.x * c.z}px, ${-c.y * c.z}px) scale(${c.z})`;
     this.world.style.visibility = far ? "hidden" : "visible";
+    if (this.close !== c.z >= CLOSE) this.world.classList.toggle("close", (this.close = c.z >= CLOSE));
     // mount what is near the view, when the view left what was mounted for
     const m = this.mountedFor;
     if (!m || m.far !== far || v.x0 < m.x0 || v.y0 < m.y0 || v.x1 > m.x1 || v.y1 > m.y1) {
@@ -153,6 +236,7 @@ export class Board {
       this.mount(far ? new Set() : this.boxes.query(r.x0, r.y0, r.x1, r.y1, new Set()));
       this.mountedFor = r;
     }
+    this.drawBack(v, far);
     this.draw(v, far);
   }
 
@@ -181,20 +265,113 @@ export class Board {
   }
 
   private itemEl(it: Item): HTMLElement {
+    const el = this.content(it);
+    el.style.cssText = `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px;` + (it.color && it.kind !== "group" ? `--c:${it.color};` : "");
+    return el;
+  }
+
+  /** An item's element, unplaced (also for measuring a note's height at a width). */
+  content(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref">): HTMLElement {
     const el = document.createElement("div");
     el.className = `board-item board-${it.kind}`;
-    el.style.cssText = `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px;` + (it.color ? `--c:${it.color};` : "");
     if (it.title) {
       const h = document.createElement("b");
       h.textContent = it.title;
       el.append(h);
     }
-    if (it.text) {
-      const p = document.createElement("p");
-      p.textContent = it.text;
-      el.append(p);
+    const md = (src: string, cls: string) => {
+      const d = document.createElement("div");
+      d.className = cls;
+      if (this.markdown) d.innerHTML = this.markdown(src);
+      else d.textContent = src;
+      el.append(d);
+    };
+    if (it.text) md(it.text, "board-text");
+    if (it.detail) md(it.detail, "board-detail");
+    if (it.ref && /^https?:\/\//i.test(it.ref)) {
+      const a = document.createElement("a");
+      a.className = "board-ref";
+      a.href = it.ref;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "↗ " + decodeURIComponent(it.ref.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\//, "").replace(/^https?:\/\//, ""));
+      el.append(a);
     }
+    if (this.typeset && el.querySelector(".math")) this.typeset(el);
     return el;
+  }
+
+  /** A note's height at width `w`, as rendered (the element is measured in the world, unseen). */
+  measure(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref">, w: number): number {
+    const el = this.content(it);
+    el.style.cssText = `left:0;top:0;width:${w}px;visibility:hidden;`;
+    el.classList.add("board-measure");
+    this.world.append(el);
+    const h = el.offsetHeight;
+    el.remove();
+    return h;
+  }
+
+  // behind the notes: groups (outer first) and edges
+  private drawBack(v: { x0: number; y0: number; x1: number; y1: number }, far: boolean) {
+    const ctx = this.bctx, c = this.camera, d = this.dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.back.width, this.back.height);
+    if (!this.edges.length && !this.byId.size) return;
+    ctx.setTransform(c.z * d, 0, 0, c.z * d, -c.x * c.z * d, -c.y * c.z * d);
+    const groups = [...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind === "group").sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+    for (const g of groups) {
+      ctx.beginPath();
+      ctx.roundRect(g.x, g.y, g.w, g.h, 14);
+      ctx.fillStyle = g.color ?? GROUP;
+      ctx.fill();
+      ctx.lineWidth = 1 / c.z;
+      ctx.strokeStyle = "rgba(0,0,0,.18)";
+      ctx.stroke();
+    }
+    // edges: center to center, from border to border, an arrowhead at the end
+    const lw = Math.max(1.6, 1.2 / c.z), head = Math.max(9, 7 / c.z);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = ctx.fillStyle = EDGE;
+    const labels: [string, number, number][] = [];
+    for (const e of this.edges) {
+      const a = this.byId.get(e.from), b = this.byId.get(e.to);
+      if (!a || !b) continue;
+      if (Math.max(a.x + a.w, b.x + b.w) < v.x0 || Math.min(a.x, b.x) > v.x1 || Math.max(a.y + a.h, b.y + b.h) < v.y0 || Math.min(a.y, b.y) > v.y1) continue;
+      const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
+      const dx = bx - ax, dy = by - ay;
+      // where the line leaves a box centered on its end: the fraction t of (dx, dy)
+      const exit = (it: Item) => Math.min(dx ? it.w / 2 / Math.abs(dx) : Infinity, dy ? it.h / 2 / Math.abs(dy) : Infinity);
+      const t0 = exit(a), t1 = 1 - exit(b);
+      if (t1 <= t0) continue; // overlapping boxes (a group and a member)
+      const x0 = ax + dx * t0, y0 = ay + dy * t0, x1 = ax + dx * t1, y1 = ay + dy * t1;
+      const len = Math.hypot(x1 - x0, y1 - y0), ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1 - ux * head * 0.8, y1 - uy * head * 0.8);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - ux * head - uy * head * 0.45, y1 - uy * head + ux * head * 0.45);
+      ctx.lineTo(x1 - ux * head + uy * head * 0.45, y1 - uy * head - ux * head * 0.45);
+      ctx.fill();
+      if (e.label) labels.push([e.label, (x0 + x1) / 2, (y0 + y1) / 2]);
+    }
+    // labels, on top of every line, when legible
+    if (labels.length && 12 * c.z >= 7) {
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (const [text, x, y] of labels) {
+        const w = ctx.measureText(text).width + 10;
+        ctx.fillStyle = "rgba(250,250,247,.92)";
+        ctx.fillRect(x - w / 2, y - 9, w, 18);
+        ctx.fillStyle = "#3d4a37";
+        ctx.fillText(text, x, y);
+      }
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
   }
 
   private draw(v: { x0: number; y0: number; x1: number; y1: number }, far: boolean) {
@@ -207,7 +384,7 @@ export class Board {
       // far out: the boxes as rectangles, with their titles when legible
       // (one path per color, one fill each: far fewer state changes than a
       // fillRect per item)
-      const inView = this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set());
+      const inView = new Set([...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind !== "group"));
       const byColor = new Map<string, Item[]>();
       for (const it of inView) {
         const k = it.color ?? "#9cc28f";
@@ -224,7 +401,27 @@ export class Board {
       if (260 * c.z > 40) {
         ctx.font = `${12 / c.z}px system-ui, sans-serif`;
         ctx.fillStyle = "#10140f";
-        for (const it of inView) if (it.title && it.w * c.z > 40) ctx.fillText(it.title, it.x + 4 / c.z, it.y + 14 / c.z, it.w - 8 / c.z);
+        // (only titles that fit: squeezed text is worse than none)
+        for (const it of inView) if (it.title && it.w * c.z > 40 && ctx.measureText(it.title).width <= it.w - 8 / c.z) ctx.fillText(it.title, it.x + 4 / c.z, it.y + 14 / c.z);
+      }
+    }
+    if (far) {
+      // groups' titles over their members, as large as their groups allow
+      // (between 11 and 22 pixels on screen), with a halo
+      const groups = [...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind === "group" && it.title).sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+      ctx.lineJoin = "round";
+      for (const g of groups) {
+        // the title, or without its parenthetical when that is larger
+        const size = (t: string) => Math.min(22, (g.w * c.z) / (t.length * 0.62), 11 + 11 / (1 + (g.depth ?? 0)));
+        const short = g.title!.replace(/\s*\(.*\)\s*$/, "");
+        const title = size(short) > size(g.title!) + 3 ? short : g.title!, px = size(title);
+        if (px < 11) continue;
+        ctx.font = `600 ${px / c.z}px system-ui, sans-serif`;
+        ctx.lineWidth = 4 / c.z;
+        ctx.strokeStyle = "rgba(250,250,247,.9)";
+        ctx.strokeText(title, g.x + 6 / c.z, g.y + (px + 4) / c.z, g.w - 12 / c.z);
+        ctx.fillStyle = "#1d241a";
+        ctx.fillText(title, g.x + 6 / c.z, g.y + (px + 4) / c.z, g.w - 12 / c.z);
       }
     }
     // ink (far out, strokes thinner than half a pixel are skipped, and when
@@ -249,22 +446,54 @@ export class Board {
     this.stats.drawn = n;
   }
 
-  // wheel: pan (zoom with Ctrl, as trackpads pinch); drag: pan
+  /** The note or group at a screen point, innermost first. */
+  itemAt(sx: number, sy: number): Item | null {
+    const c = this.camera, x = c.x + sx / c.z, y = c.y + sy / c.z;
+    const hits = [...this.boxes.query(x, y, x + 0.01, y + 0.01, new Set())];
+    hits.sort((a, b) => (a.kind === "group" ? 0 : 100) + (a.depth ?? 0) - ((b.kind === "group" ? 0 : 100) + (b.depth ?? 0)));
+    return hits.pop() ?? null;
+  }
+
+  // wheel: pan (zoom with Ctrl, as trackpads pinch); drag: pan; two
+  // fingers: pinch; double click: fly to the item there (or everything)
   private input() {
     this.el.addEventListener("wheel", (e) => {
       e.preventDefault();
+      cancelAnimationFrame(this.flight);
       const r = this.el.getBoundingClientRect();
       if (e.ctrlKey) this.zoomAt(Math.exp(-e.deltaY / 200), e.clientX - r.left, e.clientY - r.top);
       else this.panBy(e.deltaX, e.deltaY);
     }, { passive: false });
-    let last: { x: number; y: number } | null = null;
-    this.el.addEventListener("pointerdown", (e) => { last = { x: e.clientX, y: e.clientY }; this.el.setPointerCapture(e.pointerId); });
-    this.el.addEventListener("pointermove", (e) => {
-      if (!last) return;
-      this.panBy(last.x - e.clientX, last.y - e.clientY);
-      last = { x: e.clientX, y: e.clientY };
+    const down = new Map<number, { x: number; y: number }>();
+    const mid = () => {
+      const [p, q] = [...down.values()];
+      return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, d: Math.hypot(p.x - q.x, p.y - q.y) };
+    };
+    this.el.addEventListener("pointerdown", (e) => {
+      if ((e.target as Element).closest?.("a")) return; // links stay links
+      cancelAnimationFrame(this.flight);
+      down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this.el.setPointerCapture(e.pointerId);
     });
-    this.el.addEventListener("pointerup", () => { last = null; });
+    this.el.addEventListener("pointermove", (e) => {
+      const last = down.get(e.pointerId);
+      if (!last) return;
+      if (down.size === 2) {
+        const r = this.el.getBoundingClientRect(), a = mid();
+        down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const b = mid();
+        this.panBy(a.x - b.x, a.y - b.y);
+        if (a.d > 0) this.zoomAt(b.d / a.d, b.x - r.left, b.y - r.top);
+      } else if (down.size === 1) {
+        this.panBy(last.x - e.clientX, last.y - e.clientY);
+        down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+    });
+    for (const t of ["pointerup", "pointercancel"]) this.el.addEventListener(t, (e) => { down.delete((e as PointerEvent).pointerId); });
+    this.el.addEventListener("dblclick", (e) => {
+      const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
+      this.focus(it ? [it.id] : undefined);
+    });
   }
 }
 

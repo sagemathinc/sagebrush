@@ -5,18 +5,53 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Board — Sagebrush</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #fafaf7; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  html, body { margin: 0; height: 100%; background: #fafaf7; color: #1d241a; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   #board { position: fixed; inset: 0; }
   .board { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
   .board-canvas { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  .board-back { z-index: 0; }
   .board-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
   .board-item { position: absolute; box-sizing: border-box; border-radius: 8px; padding: 8px 10px; overflow: hidden; background: var(--c, #fff); border: 1px solid rgba(0, 0, 0, .12); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); contain: layout paint; }
-  .board-item b { display: block; margin-bottom: 4px; }
-  .board-item p { margin: 0; color: #333; }
+  .board-item.board-measure { height: auto; }
+  .board-note { z-index: 1; }
+  .board-item > b { display: block; margin-bottom: 4px; font-size: 15px; }
+  .board-item p { margin: 0 0 6px; }
+  .board-item p:last-child { margin-bottom: 0; }
+  .board-item ul, .board-item ol { margin: 0 0 6px; padding-left: 18px; }
+  .board-item code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(0, 0, 0, .06); padding: 0 3px; border-radius: 3px; }
+  .board-item pre { margin: 0 0 6px; font-size: 12px; background: rgba(0, 0, 0, .05); padding: 4px 6px; border-radius: 4px; overflow: hidden; }
+  .board-item pre code { background: none; padding: 0; }
+  .board-detail { margin-top: 6px; padding-top: 5px; border-top: 1px dashed rgba(0, 0, 0, .18); font-size: 11px; line-height: 1.4; color: #3a4436; transition: opacity .2s; }
+  .board-detail code, .board-detail pre { font-size: 10px; }
+  .board-world:not(.close) .board-detail { opacity: .35; }
+  .board-ref { display: block; margin-top: 6px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #2a6f2f; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .board-ref:hover { text-decoration: underline; }
+  .board-group { background: none; border: 0; box-shadow: none; padding: 14px 24px; overflow: visible; z-index: 0; pointer-events: none; }
+  .board-group > b { font-size: 17px; color: #24301f; }
+  .board-group .board-text { color: #4a5544; max-width: 70ch; }
+  .board-group a { pointer-events: auto; }
+
+  #top { position: fixed; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(250, 250, 247, .92); border-bottom: 1px solid rgba(0, 0, 0, .08); pointer-events: none; }
+  #top > * { pointer-events: auto; }
+  #home { color: #2a6f2f; font-weight: 600; text-decoration: none; }
+  #title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+  button { font: inherit; border: 1px solid rgba(0, 0, 0, .18); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  #tour { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2; width: min(720px, calc(100% - 24px)); box-sizing: border-box; background: rgba(255, 255, 255, .96); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
+  #tour[hidden] { display: none; }
+  #say { flex: 1; max-height: 30vh; overflow: auto; }
+  #say p { margin: 0 0 4px; }
+  #say p:last-child { margin: 0; }
+  #say code { font-size: 12px; background: rgba(0, 0, 0, .06); padding: 0 3px; border-radius: 3px; }
+  #where { color: #667; font-size: 12px; white-space: nowrap; }
+  #nav { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #nav div { display: flex; gap: 4px; }
 </style>
 </head>
 <body>
 <div id="board"></div>
+<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><button id="fit" title="Show everything (0)">⤢</button></div>
+<div id="tour" hidden><div id="say"></div><div id="nav"><div><button id="prev" title="Back (←)" disabled>←</button><button id="next" title="Next (→)">→</button></div><span id="where"></span></div></div>
 <script type="module" src="/board/board.js"></script>
 </body>
 </html>
