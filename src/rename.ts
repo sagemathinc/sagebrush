@@ -97,6 +97,7 @@ function walrusBinds(n: any, name: string): "no" | "yes" | "maybe" {
 /** The occurrences of global `name` in a module's AST. */
 function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
   const out: Occurrence[] = [];
+  const futureText = tree.body.some((st: any) => st._type === "ImportFrom" && st.module === "__future__" && st.names.some((a: any) => a.name === "annotations"));
   // the names a function (or lambda, comprehension) body binds, minus its
   // `global`s (with `walrus` false: not counting `:=`; with `annotations`, a
   // function's: counting `x: int`, which makes x local there)
@@ -413,11 +414,15 @@ function occurrences(tree: any, name: string, lines: string[]): Occurrence[] {
       case "keyword": walk(n.value, shadowed, stmt, under("value"), fn); return; // (not the argument's name)
       case "AnnAssign": {
         // (an annotation Python never evaluates, in a function or of a target
-        // that is not a simple name, reads nothing: left as written, REACT-2894-1)
-        const inFunction = path.some(([p, k]) => (p._type === "FunctionDef" || p._type === "AsyncFunctionDef") && k === "body");
+        // that is not a simple name, reads nothing: left as written, REACT-2894-1;
+        // in a function's body, not a class's inside it, REACT-FACA-1)
+        const scope = path.findLast(([p, k]) => k === "body" && (p._type === "FunctionDef" || p._type === "AsyncFunctionDef" || p._type === "ClassDef"));
+        const inFunction = !!scope && scope[0]._type !== "ClassDef";
         walk(n.target, shadowed, stmt, under("target"), fn);
         walk(n.value, shadowed, stmt, under("value"), fn);
-        if (n.simple && n.target?._type === "Name" && !inFunction) walk(n.annotation, shadowed, stmt, under("annotation"), fn);
+        // (and with `from __future__ import annotations` it is its source
+        // text, which keeps the name as written)
+        if (n.simple && n.target?._type === "Name" && !inFunction && !futureText) walk(n.annotation, shadowed, stmt, under("annotation"), fn);
         return;
       }
     }

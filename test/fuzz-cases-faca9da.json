@@ -1,0 +1,523 @@
+[
+  {
+    "name": "nested class annotation after binding",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class valued annotation after binding",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x=9\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "twice nested function class annotation",
+    "codes": [
+      "x=1",
+      "def outer():\n    def inner():\n        class C:\n            y: x\n        return C\n    return inner()\nx=x+1\nprint(outer().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "method creates annotated class",
+    "codes": [
+      "x=1",
+      "class Factory:\n    def make(self):\n        class C:\n            y: x\n        return C\nx=x+1\nprint(Factory().make().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "twice nested class inside function",
+    "codes": [
+      "x=1",
+      "def f():\n    class Outer:\n        class Inner:\n            y: x\n    return Outer.Inner\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "conditional nested class annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    if True:\n        class C:\n            y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "loop nested class annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    for i in [0]:\n        class C:\n            y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class same annotation target",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        x: x\n    return C\nx=x+1\nprint(f().__annotations__[\"x\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class compound annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x+10\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class tuple annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: (x,x+1)\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class called lambda annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: (lambda: x)()\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class builtin call annotation",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: str(x)\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class enclosing global declaration",
+    "codes": [
+      "x=1",
+      "def f():\n    global x\n    class C:\n        y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class factory called before binding lazy read",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x\n    return C\nC=f()\nx=x+1\nprint(C.__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class annotation downstream reader",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x\n    return C\nx=x+1\nC=f()",
+      "print(C.__annotations__[\"y\"],x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "factory in later cell after repeated definition",
+    "codes": [
+      "x=1",
+      "x=x+1",
+      "def f():\n    class C:\n        y: x\n    return C\nprint(f().__annotations__[\"y\"],x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "factory later cell materialized before downstream reader",
+    "codes": [
+      "x=1",
+      "x=x+1",
+      "def f():\n    class C:\n        y: x\n    return C\nC=f()",
+      "print(C.__annotations__[\"y\"],x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class after second repeated definition",
+    "codes": [
+      "x=1",
+      "x=x+1",
+      "def f():\n    class C:\n        y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"],x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class evaluated from function return",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x\n    return C.__annotations__[\"y\"]\nx=x+1\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "unicode nested class annotation",
+    "codes": [
+      "α=1",
+      "def f():\n    class C:\n        y: α\n    return C\nα=α+1\nprint(f().__annotations__[\"y\"])",
+      "print(α)"
+    ],
+    "change": [
+      0,
+      "α=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "local closure class annotation control",
+    "codes": [
+      "x=1",
+      "def f():\n    x=9\n    class C:\n        y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "parameter closure class annotation control",
+    "codes": [
+      "x=1",
+      "def f(x):\n    class C:\n        y: x\n    return C\nx=x+1\nprint(f(9).__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "class attribute annotation control",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        x=9\n        y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module class simple annotation control",
+    "codes": [
+      "x=1",
+      "x=x+1\nclass C:\n    y: x\nprint(C.__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module nested classes annotation control",
+    "codes": [
+      "x=1",
+      "x=x+1\nclass Outer:\n    class Inner:\n        y: x\nprint(Outer.Inner.__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "future nested class string annotation control",
+    "codes": [
+      "x=1",
+      "from __future__ import annotations\ndef f():\n    class C:\n        y: x\n    return C\nx=x+1\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class annotation early evaluation control",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x\n    return C\nprint(f().__annotations__[\"y\"])\nx=x+1",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class conditional skipped definition control",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: x\n    return C\nif False:\n    x=9\nprint(f().__annotations__[\"y\"])",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class parenthesized annotation ignored control",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        (y): x\n    return C\nprint(f().__name__)\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested function simple annotation ignored control",
+    "codes": [
+      "x=1",
+      "def f():\n    y: x\n    return 9\nprint(f())\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested method simple annotation ignored control",
+    "codes": [
+      "x=1",
+      "class C:\n    def f(self):\n        y: x\n        return 9\nprint(C().f())\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class attribute annotation ignored control",
+    "codes": [
+      "x=1",
+      "def f():\n    class Obj: pass\n    obj=Obj()\n    class C:\n        obj.y: x\n    return C\nprint(f().__name__)\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class subscript annotation ignored control",
+    "codes": [
+      "x=1",
+      "def f():\n    a=[9]\n    class C:\n        a[0]: x\n    return C\nprint(f().__name__)\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class target base evaluation control",
+    "codes": [
+      "x=1",
+      "def f():\n    a=[x]\n    class C:\n        a[0]: missing\n    return a[0]\nx=x+1\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class assignment value evaluation control",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        y: missing=x\n    return C.y\nx=x+1\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested local valued annotation ignored control",
+    "codes": [
+      "x=1",
+      "def f():\n    y: x=9\n    return y\nprint(f())\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class unbound ignored expression control",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        (y): missing[x]\n    return C\nprint(f().__name__)\nx=x+1\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "module valued parenthesized annotation ignored control",
+    "codes": [
+      "x=1",
+      "(y): x=9\nx=x+1\nprint(y,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested class actual method read control",
+    "codes": [
+      "x=1",
+      "def f():\n    class C:\n        def g(self): return x\n    return C\nx=x+1\nprint(f()().g())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  },
+  {
+    "name": "nested function closure read control",
+    "codes": [
+      "x=1",
+      "def f():\n    def g(): return x\n    return g()\nx=x+1\nprint(f())",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ],
+    "expect": "run"
+  }
+]

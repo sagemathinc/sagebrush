@@ -13,10 +13,11 @@ const regression = (codes: string[], ops: Op[] = []): Case => ({ seed: 0, cells:
 const stats = (): Stats => ({ compared: 0, refused: 0, unclean: 0, steps: 0, uncovered: 0 });
 
 // The cases that must run, not be refused: the reviews' controls (except
-// those of a call running what it is given, now refused by design), and a
+// those of a call running what it is given, now refused by design, and a
+// class's lazy annotation asked for at an unknown time, REACT-FACA-1), and a
 // plain definition made in a function declaring it global.
 const MUST_RUN = (what: string) =>
-  (/control/.test(what) && !/sorted|sum consumes|list consumes|generator consumed|list sort/.test(what)) || /definition made in a called function|\(must run\)/.test(what);
+  (/control/.test(what) && !/sorted|sum consumes|list consumes|generator consumed|list sort|nested class annotation early evaluation/.test(what)) || /definition made in a called function|\(must run\)/.test(what);
 
 export const REGRESSIONS: [string, Case][] = [
   ["`y += 4` redefines y from the definition above", regression(["K = 7", "y = K", "y += 4\nprint(y)"])],
@@ -162,11 +163,13 @@ for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-e555
 for (const c of JSON.parse(readFileSync(__dirname + "/../../test/fuzz-cases-87fd4d5.json", "utf8")) as { name: string; codes: string[]; change?: [number, string] | null }[]) {
   REGRESSIONS.push([`${c.name} (review of 87fd4d5)`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
 }
-// (and of 98eb351, 6748f98, 75a84fb, 156cd6b, 321cff0, c199015, f813101, feedd29, e17dfd3, 67bd48b, deef01a, 71f50d2, 8bb7065, 2e629d8, 006f38c, 51a8749, 8c8211a, 5ee9fe8, d2c5a5c, d304971, 44c5a65, 3a97ae5 and 2894ce0)
-for (const [pin, c] of ["98eb351", "6748f98", "75a84fb", "156cd6b", "321cff0", "c199015", "f813101", "feedd29", "e17dfd3", "67bd48b", "deef01a", "71f50d2", "8bb7065", "2e629d8", "006f38c", "51a8749", "8c8211a", "5ee9fe8", "d2c5a5c", "d304971", "44c5a65", "3a97ae5", "2894ce0"].flatMap((pin) => (JSON.parse(readFileSync(__dirname + `/../../test/fuzz-cases-${pin}.json`, "utf8")) as { name: string; codes: string[]; change?: [number, string] | null; expect?: string }[]).map((c) => [pin, c] as const))) {
+// (and of 98eb351, 6748f98, 75a84fb, 156cd6b, 321cff0, c199015, f813101, feedd29, e17dfd3, 67bd48b, deef01a, 71f50d2, 8bb7065, 2e629d8, 006f38c, 51a8749, 8c8211a, 5ee9fe8, d2c5a5c, d304971, 44c5a65, 3a97ae5, 2894ce0 and faca9da)
+for (const [pin, c] of ["98eb351", "6748f98", "75a84fb", "156cd6b", "321cff0", "c199015", "f813101", "feedd29", "e17dfd3", "67bd48b", "deef01a", "71f50d2", "8bb7065", "2e629d8", "006f38c", "51a8749", "8c8211a", "5ee9fe8", "d2c5a5c", "d304971", "44c5a65", "3a97ae5", "2894ce0", "faca9da"].flatMap((pin) => (JSON.parse(readFileSync(__dirname + `/../../test/fuzz-cases-${pin}.json`, "utf8")) as { name: string; codes: string[]; change?: [number, string] | null; expect?: string }[]).map((c) => [pin, c] as const))) {
   // (a case the review expects to run: a refusal would pass unseen; except
-  // where annotations kept as text name it, refused by design, REACT-8C82-1)
-  REGRESSIONS.push([`${c.name} (review of ${pin})${c.expect === "run" && !/future import .*annotation/.test(c.name) ? " (must run)" : ""}`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
+  // the documented refusals: where annotations kept as text name it,
+  // REACT-8C82-1, and a class's lazy annotation that may be asked for before
+  // the redefinition, as at the top level, REACT-FACA-1)
+  REGRESSIONS.push([`${c.name} (review of ${pin})${c.expect === "run" && !/future import .*annotation|^(class factory called before binding lazy read|nested class annotation early evaluation control)$/.test(c.name) ? " (must run)" : ""}`, regression(c.codes, c.change ? [{ kind: "edit", id: `c${c.change[0]}`, stmts: [c.change[1]] }] : [])]);
 }
 
 test("the reactive notebook computes what plain Python does: the fuzzer's cases", { skip: !hasPython && "no python3" }, async () => {
