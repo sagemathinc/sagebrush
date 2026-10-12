@@ -762,10 +762,13 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     // target is made of, before its value: the value comes first only for
     // the binding of the target name itself, `x += x`, REACT-321C-1)
     const augStore = n._type === "AugAssign" && first.path.at(-1)?.[0] === n && first.path.at(-1)?.[1] === "target";
-    return elsewhere && (((n._type === "Assign" || n._type === "AnnAssign") && key === "value") || (augStore && key === "value") ||
+    const firstPart = elsewhere && (((n._type === "Assign" || n._type === "AnnAssign") && key === "value") || (augStore && key === "value") ||
       ((n._type === "For" || n._type === "AsyncFor") && key === "iter") ||
       (n._type === "NamedExpr" && key === "value") ||
       (n._type === "withitem" && key === "context_expr"));
+    // (and no := in that part binds the name before the read: after one,
+    // `x += (x := 2) + x`, it reads the new value, REACT-C199-1)
+    return firstPart && !occ.some((s) => s.store && s !== first && !s.global && s.path.some(([m, k]) => m === n && k === key) && runsBefore(s, o));
   });
   const LOOPS = new Set(["For", "AsyncFor", "While"]);
   // (a `global x` takes the name of the assignments in its function, if any)
