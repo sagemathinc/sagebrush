@@ -1,0 +1,124 @@
+// Code items on a board (web/board/code.ts): examples/live.json runs, in
+// reading order, reactively; outputs show in their items, which grow to hold
+// them; editing (the agent API, and the code editor: double-click, then
+// Shift+Enter) reruns what depends on the change; deleting an item removes
+// its definitions; ▶ runs an item.  Serve web/dist first (python3
+// web/serve.py 8765), then
+//   node web/board/test-code.mjs
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
+const port = 9454, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const profile = mkdtempSync(join(tmpdir(), "sb-code-prof-"));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let targets;
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
+const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+await new Promise((r) => (ws.onopen = r));
+let n = 0; const waiting = new Map(); const errors = [];
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "")) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
+};
+const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
+const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
+const fails = [];
+let checks = 0;
+const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
+const outputs = () => ev("window.sagebrush.board.outputs().then((os) => Object.fromEntries(os.map((o) => [o.id, o])))");
+const item = (id) => ev(`window.sagebrush.board.snapshot().items.find((it) => it.id === ${JSON.stringify(id)})`);
+const show = (id) => ev(`window.board.focus([${JSON.stringify(id)}], true), window.board.render(), 1`);
+const setCode = (id, code) => ev(`window.sagebrush.board.edit((d) => { const walk = (ns) => { for (const x of ns) { if (x.id === ${JSON.stringify(id)}) x.code = ${JSON.stringify(code)}; if (x.children) walk(x.children); } }; walk(d.nodes); })`);
+try {
+  for (const m of ["Page.enable", "Runtime.enable", "Log.enable"]) await send(m);
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  await ev("localStorage.clear()");
+  // everything runs on load, in reading order
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 5 && os.every((o) => o.state === '' && (o.output || o.id === 'start' || o.id === 'collatz')))", 90000), "the board's code items all ran");
+  check(await until("document.querySelectorAll('.board-code .board-code-run').length === 5 && !!document.querySelector('[data-code=path] .board-code-out pre.txt')", 10000), "every code item is shown, with ▶");
+  let o = await outputs();
+  if (fails.length) fails.push(JSON.stringify(o).slice(0, 600));
+  check(/^111 steps, as high as 9232/.test(o.path?.output), "path: " + o.path?.output);
+  check(/^27 → 82 → 41/.test(o.head?.output), "head: " + o.head?.output);
+  check(/^871 takes 178 steps/.test(o.record?.output), "record: " + o.record?.output);
+  const order = await ev("Object.keys(window.sagebrush.board.snapshot()) && [...document.querySelectorAll('.board-code')].map((el) => [el.dataset.code, el.querySelector('.board-code-n').textContent])");
+  const nth = Object.fromEntries(order);
+  // (by position: rows top to bottom, each left to right)
+  const pos = await ev("Object.fromEntries(window.sagebrush.board.snapshot().items.map((it) => [it.id, it]))");
+  const byRows = Object.keys(nth).sort((a, b) => (Math.abs(pos[a].y - pos[b].y) < 30 ? pos[a].x - pos[b].x : pos[a].y - pos[b].y));
+  check(byRows.every((id, i) => nth[id] === String(i + 1)), "reading order: " + JSON.stringify(nth) + " rows: " + byRows);
+  check(Number(nth.start) < Number(nth.path) && Number(nth.collatz) < Number(nth.path) && Number(nth.path) < Number(nth.head), "definitions read before their readers");
+  // the output is the notebook's, in the item, and the item holds it
+  check(await ev("!!document.querySelector('[data-code=path] .board-code-out pre.txt')"), "path's output is in its item");
+  const fits = await until("[...document.querySelectorAll('.board-code')].every((el) => el.scrollHeight <= el.clientHeight + 2)", 5000);
+  check(fits, "code items hold their output (no overflow)");
+  // a change reruns what reads it, and only that
+  const recordBefore = await ev("document.querySelector('[data-code=record] .board-code-out').textContent");
+  await ev("window.__marker = document.querySelector('[data-code=record] .board-code-out pre.txt'); 1");
+  await setCode("start", "start = 97");
+  check(await until("window.sagebrush.board.outputs().then((os) => /^118 steps/.test(os.find((x) => x.id === 'path').output))", 30000), "path reran after start changed");
+  o = await outputs();
+  check(/^97 → 292/.test(o.head?.output), "head reran: " + o.head?.output);
+  check(await ev("document.querySelector('[data-code=record] .board-code-out pre.txt') === window.__marker"), "record did not rerun (its output element is the same)");
+  check(recordBefore === (await ev("document.querySelector('[data-code=record] .board-code-out').textContent")), "record's output unchanged");
+  // more output: the item grows
+  const h0 = (await item("head")).h;
+  await setCode("head", "for k in path[:12]:\n    print(k)");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((x) => x.id === 'head').output.split('\\n').filter(Boolean).length === 12)", 30000), "head printed 12 lines");
+  check(await until(`window.sagebrush.board.snapshot().items.find((it) => it.id === 'head').h > ${h0 + 80}`, 10000), "head grew with its output");
+  check(await ev("[...document.querySelectorAll('.board-code')].every((el) => el.scrollHeight <= el.clientHeight + 2)"), "still no overflow after growing");
+  // an error shows, and its item is marked
+  await setCode("start", "start = 1 // 0");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((x) => x.id === 'start').state === 'failed')", 30000), "start is an error");
+  o = await outputs();
+  check(/ZeroDivisionError/.test(o.start.output), "the error's traceback: " + o.start.output);
+  await show("start");
+  check(await until("document.querySelector('[data-code=start]').classList.contains('code-failed')", 3000), "the item shows the error: " + await ev("document.querySelector('[data-code=start]').className + ' ' + window.board.code.state('start') + ' ' + document.querySelectorAll('[data-code=start]').length + ' ' + window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start').code"));
+  // the code editor, outside Edit: double-click, type, Shift+Enter
+  await ev(`(() => { const el = document.querySelector('[data-code=start]'); const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: r.left + 20, clientY: r.top + 10 })); return 1; })()`);
+  check(await until("!!document.querySelector('.board-code-editor .be-code')", 5000), "double-click opens the code editor");
+  await ev(`(() => { const ta = document.querySelector('.board-code-editor .be-code'); ta.value = 'start = 6'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
+  check(await until("window.sagebrush.board.outputs().then((os) => /^8 steps, as high as 16/.test(os.find((x) => x.id === 'path').output))", 30000), "Shift+Enter in the editor ran the change");
+  check(await ev("!document.querySelector('.board-code-editor')"), "the editor closed");
+  check(await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start').code") === "start = 6", "the document has the new code");
+  // ▶ runs an item
+  await setCode("record", "import time\nprint(time.time())");
+  await until("window.sagebrush.board.outputs().then((os) => /^\\d+\\.\\d/.test(os.find((x) => x.id === 'record').output))", 30000);
+  const r0 = (await outputs()).record.output;
+  await show("record");
+  await ev("document.querySelector('[data-code=record] .board-code-run').click(), 1");
+  check(await until(`window.sagebrush.board.outputs().then((os) => { const t = os.find((x) => x.id === 'record').output; return /^\\d+\\.\\d/.test(t) && t !== ${JSON.stringify(r0)}; })`, 30000), "▶ ran the item again: " + r0 + " / " + (await outputs()).record.output + " " + await ev("document.querySelector('[data-code=record] .board-code-run')?.outerHTML"));
+  // deleting an item: its names go, and what read them fails
+  await ev("window.sagebrush.board.edit((d) => { d.nodes = d.nodes.filter((x) => x.id !== 'start'); d.edges = d.edges.filter((e) => e.from !== 'start' && e.to !== 'start'); })");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 4 && os.find((x) => x.id === 'path').state === 'failed')", 30000), "path fails without start");
+  check(/NameError/.test((await outputs()).path.output), "a NameError: " + (await outputs()).path.output);
+  // a new item from the menu, at the view's center
+  await ev("window.sagebrush.board.editing(true)");
+  await ev("document.getElementById('addcode').click(), 1");
+  check(await until("!!document.querySelector('.board-code-editor .be-code')", 5000), "Add Python code opens the editor");
+  await ev(`(() => { const ta = document.querySelector('.board-code-editor .be-code'); ta.value = 'start = 7'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 5 && /^16 steps, as high as 52/.test(os.find((x) => x.id === 'path').output))", 30000), "the new item defines start: path runs again");
+  // run() for agents: everything, then the outputs
+  const all = await ev("window.sagebrush.board.run()");
+  check(all.length === 5 && all.every((x) => x.state === "" || x.id === "record"), "run(): " + JSON.stringify(all.map((x) => [x.id, x.state])));
+  // print has the outputs
+  const printed = await ev("window.sagebrush.board.print({ dialog: false }).then(() => document.querySelector('.pr-sheet [data-code=path] .board-code-out')?.textContent ?? JSON.stringify([document.querySelectorAll('.pr-sheet').length, document.querySelectorAll('.pr-sheet .board-code').length, document.querySelector('.pr-sheet')?.dataset.far, document.querySelector('.pr-sheet [data-code=path]')?.outerHTML.slice(0, 300)]))");
+  check(/16 steps/.test(printed), "printed sheets show outputs: " + printed.slice(0, 80));
+  check(!errors.length, "errors: " + errors.join(" | "));
+} catch (e) {
+  fails.push(String(e?.stack ?? e));
+} finally {
+  chrome.kill();
+  await sleep(200);
+  rmSync(profile, { recursive: true, force: true });
+}
+console.log(`${checks - fails.length}/${checks} checks passed`);
+for (const f of fails) console.log("FAIL", f);
+process.exit(fails.length ? 1 : 0);

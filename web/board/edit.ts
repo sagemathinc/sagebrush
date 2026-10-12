@@ -46,6 +46,8 @@ export class Editor {
   private selected: string | null = null;
   private edgeSel: number | null = null; // the selected edge: its index in the page's edges
   private panel: HTMLElement | null = null;
+  /** Run a code item (its code is as it was: a changed one runs as the board is laid out again) */
+  onRun: ((id: string) => void) | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -305,7 +307,12 @@ export class Editor {
   }
 
   private dblclick(it: Item | null, x: number, y: number): boolean {
-    if (!this.on) return false;
+    // (a code item's code is edited in any mode, as a notebook's cells are)
+    if (!this.on) {
+      if (it?.code === undefined) return false;
+      this.open(it.id);
+      return true;
+    }
     if (it) { this.open(it.id); return true; }
     // a new note where the double click was (at the top level)
     const id = "n" + Math.random().toString(36).slice(2, 8);
@@ -314,20 +321,43 @@ export class Editor {
     return true;
   }
 
-  /** Write a note or a group's title and text, in a panel over it. */
+  /** A new code item where (x, y) is (the world; at the top level), its code being written. */
+  addCode(x: number, y: number) {
+    const id = "c" + Math.random().toString(36).slice(2, 8);
+    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, kind: "code", code: "", x: Math.round(x - 220), y: Math.round(y - 40) }); }).then(() => this.open(id, true));
+  }
+
+  /** Write a note or a group's title and text (a code item's code), in a panel over it. */
   open(id: string, fresh = false) {
     this.close();
     const d = this.doc(), f = d && find(this.pg(d), id), r = this.board.clientRect(id);
     if (!f || !r) return;
-    const n = f.node as Omit<DocNote, "kind"> & { kind?: "note" | "group" };
+    const n = f.node as Omit<DocNote, "kind"> & { kind?: "note" | "group" | "code" };
+    const code = n.kind === "code";
     const p = document.createElement("div");
-    p.className = "board-editor";
+    p.className = "board-editor" + (code ? " board-code-editor" : "");
     p.innerHTML = `<input class="be-title" placeholder="Title"><textarea class="be-text" placeholder="Markdown, with math: $x^2$"></textarea>` +
       (n.kind === "group" ? "" : `<details><summary>Detail, shown zoomed in</summary><textarea class="be-detail"></textarea></details><input class="be-ref" placeholder="Link (https://…)">`) +
-      `<div class="be-row"><button class="be-del">Delete</button><span></span><button class="be-cancel">Cancel</button><button class="be-done">Done</button></div>`;
+      `<div class="be-row"><button class="be-del">Delete</button><span></span><button class="be-cancel">Cancel</button><button class="be-done">${code ? "Run" : "Done"}</button></div>`;
     const $ = <T extends HTMLElement>(s: string) => p.querySelector(s) as T | null;
     $<HTMLInputElement>(".be-title")!.value = n.title ?? "";
     $<HTMLTextAreaElement>(".be-text")!.value = n.text ?? "";
+    if (code) {
+      // its code first; its text (Markdown, above the code) is a caption
+      const ta = document.createElement("textarea");
+      ta.className = "be-code";
+      ta.placeholder = "Python (Shift+Enter runs it, and what depends on it)";
+      ta.spellcheck = false;
+      ta.value = n.code ?? "";
+      ta.addEventListener("keydown", (e) => {
+        if (e.key !== "Tab" || e.shiftKey) return;
+        e.preventDefault();
+        ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end");
+      });
+      $(".be-title")!.after(ta);
+      $<HTMLTextAreaElement>(".be-text")!.placeholder = "Text above the code (Markdown, with math)";
+      $<HTMLTextAreaElement>(".be-text")!.rows = 2;
+    }
     if ($(".be-detail")) {
       $<HTMLTextAreaElement>(".be-detail")!.value = n.detail ?? "";
       if (n.detail) $<HTMLDetailsElement>("details")!.open = true;
@@ -343,6 +373,7 @@ export class Editor {
     this.select(id);
     const done = () => {
       const v = (s: string) => ($<HTMLInputElement>(s)?.value ?? "").trim();
+      if (code && ($<HTMLTextAreaElement>(".be-code")?.value ?? "").replace(/\s+$/, "") === (n.code ?? "")) this.onRun?.(id);
       this.close();
       this.commit((d) => {
         const g = find(this.pg(d), id);
@@ -351,6 +382,7 @@ export class Editor {
         const set = (k: string, val: string) => { if (val) m[k] = val; else delete m[k]; };
         set("title", v(".be-title"));
         set("text", v(".be-text"));
+        if (m.kind === "code") m.code = ($<HTMLTextAreaElement>(".be-code")?.value ?? "").replace(/\s+$/, "");
         if (m.kind !== "group") { set("detail", v(".be-detail")); set("ref", v(".be-ref")); }
       });
     };
@@ -359,16 +391,16 @@ export class Editor {
       // (a new note left empty: not kept)
       if (fresh && !v0()) this.commit((d) => remove(this.pg(d), id));
     };
-    const v0 = () => ["title", "text"].some((k) => ($<HTMLInputElement>(`.be-${k}`)?.value ?? "").trim());
+    const v0 = () => ["title", "text", "code"].some((k) => ($<HTMLInputElement>(`.be-${k}`)?.value ?? "").trim());
     $(".be-done")!.onclick = done;
     $(".be-cancel")!.onclick = cancel;
     $(".be-del")!.onclick = () => { this.close(); this.commit((d) => remove(this.pg(d), id)); };
     p.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Escape") cancel();
-      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) done();
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || (code && e.shiftKey))) { e.preventDefault(); done(); }
     });
-    (fresh || !n.text ? $<HTMLInputElement>(".be-title") : $<HTMLTextAreaElement>(".be-text"))!.focus();
+    (code ? $<HTMLTextAreaElement>(".be-code") : fresh || !n.text ? $<HTMLInputElement>(".be-title") : $<HTMLTextAreaElement>(".be-text"))!.focus();
   }
 
   private close() {

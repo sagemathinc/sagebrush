@@ -35,6 +35,22 @@ export interface Item {
   parent?: string;
   /** notes: an outline other than a rectangle (doc.ts's NoteShape) */
   shape?: string;
+  /** code items (notes with code): the code, and where it is in the board's reading order (1, 2, ...) */
+  code?: string;
+  order?: number;
+}
+
+/** What an item's element shows. */
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order">>;
+
+/** Code items' engine (code.ts, through page.ts): their output, state and running. */
+export interface CodeHost {
+  highlight(src: string): string;
+  /** the live output element (a copy for measuring and printing) */
+  output(id: string, copy: boolean): HTMLElement | null;
+  /** "" (up to date), or queued, running, stale, error, failed, cancelled, interrupted (code.ts's CodeState) */
+  state(id: string): string;
+  run(id: string): void;
 }
 
 export interface Edge {
@@ -113,6 +129,8 @@ export class Board {
   /** Markdown to HTML for notes (plain text without it), and math typesetting */
   markdown: ((src: string) => string) | null = null;
   typeset: ((el: HTMLElement) => void) | null = null;
+  /** code items' output and running (none: their code only): setCode() */
+  code: CodeHost | null = null;
   /** a press on an item (not a link): return true to take it (the board does not pan) */
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
   /** a double click: on an item, or (null) on the background at world (x, y); return true when handled */
@@ -164,12 +182,21 @@ export class Board {
     this.boxes = new Grid();
     this.strokes = new Grid();
     this.paths.clear();
-    for (const m of this.mounted.values()) m.remove();
-    this.mounted.clear();
-    this.cache.clear();
+    // (an element whose item shows the same is kept, and stays mounted, only
+    // placed again: laid out again after an edit, or as a code item's output
+    // grows, the board neither builds every note again nor blinks)
+    const old = this.cache;
+    this.cache = new Map();
+    for (const it of items) {
+      const el = old.get(it.id);
+      if (el && el.dataset.key === contentKey(it)) {
+        el.style.cssText = placement(it);
+        this.cache.set(it.id, el);
+      }
+    }
+    for (const [id, m] of this.mounted) if (this.cache.get(id) !== m) { m.remove(); this.mounted.delete(id); }
     this.mountedFor = null;
     this.maxWidth = 0;
-    this.world.replaceChildren();
     for (const it of items) {
       (it.kind === "ink" ? this.strokes : this.boxes).add(it);
       if (it.kind === "ink") this.maxWidth = Math.max(this.maxWidth, it.width ?? 2);
@@ -319,8 +346,22 @@ export class Board {
 
   private itemEl(it: Item): HTMLElement {
     const el = this.content(it);
-    el.style.cssText = `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px;` + (it.color && it.kind !== "group" ? `--c:${it.color};` : "");
+    el.style.cssText = placement(it);
+    el.dataset.key = contentKey(it);
     return el;
+  }
+
+  /** Run code items with this engine (their elements are built again). */
+  setCode(host: CodeHost | null) {
+    this.code = host;
+    for (const [id, el] of this.cache) if (el.dataset.code) { el.remove(); this.cache.delete(id); this.mounted.delete(id); }
+    this.mountedFor = null;
+    this.request();
+  }
+
+  /** Show code items' states again (their elements, mounted or not). */
+  codeStates() {
+    for (const el of this.cache.values()) if (el.dataset.code) showState(el, this.code?.state(el.dataset.code) ?? "");
   }
 
   // math waiting to be typeset, a few milliseconds of it per frame (a fast
@@ -343,10 +384,29 @@ export class Board {
   }
 
   /** An item's element, unplaced (also for measuring a note's height at a width: `now`, math typeset at once). */
-  content(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape">, now = false): HTMLElement {
+  content(it: Content, now = false): HTMLElement {
     const el = document.createElement("div");
-    el.className = `board-item board-${it.kind}` + (it.shape && it.shape !== "rect" ? ` board-shape board-shape-${it.shape}` : it.shape ? " board-shape" : "");
-    if (it.title) {
+    el.className = `board-item board-${it.kind}` + (it.shape && it.shape !== "rect" ? ` board-shape board-shape-${it.shape}` : it.shape ? " board-shape" : "") + (it.code !== undefined ? " board-code" : "");
+    // a code item: its place in the reading order and ▶ before the title
+    if (it.code !== undefined) {
+      const head = document.createElement("div");
+      head.className = "board-code-head";
+      const n = document.createElement("span");
+      n.className = "board-code-n";
+      n.textContent = it.order ? String(it.order) : "";
+      n.title = "Its place in the board's reading order (top to bottom, then left to right; a group's items together)";
+      head.append(n);
+      if (this.code && it.id) {
+        const id = it.id, run = document.createElement("button");
+        run.className = "board-code-run";
+        run.textContent = "▶";
+        run.title = "Run (and what depends on it)";
+        run.onclick = (e) => { e.stopPropagation(); this.code?.run(id); };
+        head.append(run);
+      }
+      if (it.title) head.append(Object.assign(document.createElement("b"), { textContent: it.title }));
+      el.append(head);
+    } else if (it.title) {
       const h = document.createElement("b");
       h.textContent = it.title;
       el.append(h);
@@ -359,6 +419,25 @@ export class Board {
       el.append(d);
     };
     if (it.text) md(it.text, "board-text");
+    if (it.code !== undefined) {
+      const pre = document.createElement("pre");
+      pre.className = "sbnb board-code-src"; // (the notebook's colors for code)
+      if (this.code) pre.innerHTML = this.code.highlight(it.code);
+      else pre.textContent = it.code;
+      el.append(pre);
+      // its output: the engine's own element (a copy, to measure or print)
+      const out = it.id ? this.code?.output(it.id, now) : null;
+      if (out) {
+        const box = document.createElement("div");
+        box.className = "sbnb board-code-out";
+        box.append(out);
+        el.append(box);
+      }
+      if (it.id) {
+        el.dataset.code = it.id;
+        showState(el, this.code?.state(it.id) ?? "");
+      }
+    }
     if (it.detail) md(it.detail, "board-detail");
     if (it.ref && /^https?:\/\//i.test(it.ref)) {
       const a = document.createElement("a");
@@ -377,7 +456,7 @@ export class Board {
   }
 
   /** A note's height at width `w`, as rendered (the element is measured in the world, unseen). */
-  measure(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape">, w: number): number {
+  measure(it: Content, w: number): number {
     const el = this.content(it, true);
     el.style.cssText = `left:0;top:0;width:${w}px;visibility:hidden;`;
     el.classList.add("board-measure");
@@ -388,7 +467,7 @@ export class Board {
   }
 
   /** The width a note's text needs, at most `max` (its longest line, or `max` if it wraps). */
-  measureWidth(it: Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape">, max: number): number {
+  measureWidth(it: Content, max: number): number {
     const el = this.content(it, true);
     el.style.cssText = `left:0;top:0;width:max-content;max-width:${max}px;visibility:hidden;`;
     el.classList.add("board-measure");
@@ -698,7 +777,7 @@ export class Board {
       return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, d: Math.hypot(p.x - q.x, p.y - q.y) };
     };
     this.el.addEventListener("pointerdown", (e) => {
-      if ((e.target as Element).closest?.("a")) return; // links stay links
+      if ((e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas")) return; // links, buttons, controls and 3D views stay theirs
       cancelAnimationFrame(this.flight);
       if (this.onItemDown && down.size === 0 && e.isPrimary) {
         const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
@@ -736,12 +815,22 @@ export class Board {
   }
 }
 
+// An element's position and size, and its color.
+const placement = (it: Item) => `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px;` + (it.color && it.kind !== "group" ? `--c:${it.color};` : "");
+// What an element shows (kept when this is unchanged).
+const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order]);
+const STATES = ["queued", "running", "stale", "error", "failed", "cancelled", "interrupted"];
+function showState(el: HTMLElement, state: string) {
+  for (const s of STATES) el.classList.toggle("code-" + s, s === state);
+}
+
 // What a note shows far out: its title, or else its text's first line
 // without Markdown (a flowchart's notes have only text)
 const farLabels = new WeakMap<Item, string>();
 export function farLabel(it: Item): string {
   if (it.title) return it.title;
   let t = farLabels.get(it);
+  if (t === undefined && !it.text && it.code) farLabels.set(it, (t = it.code.split("\n").find((l) => l.trim())?.trim() ?? ""));
   if (t === undefined) {
     t = (it.text ?? "").split("\n").find((l) => l.trim())?.replace(/\$\$?[^$]*\$\$?|!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\\(.)/g, "$1").replace(/[*_`#>]|^\s*[-+]\s/g, "").replace(/\s+/g, " ").trim() ?? "";
     farLabels.set(it, t);

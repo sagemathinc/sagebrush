@@ -10,7 +10,11 @@ import { routeSteps, type Rect, type RouteRequest } from "./route";
 
 export interface DocNote {
   id: string;
-  kind?: "note";
+  /** "code": a code item, Python run on the board's interpreter (reactive, as
+   * a notebook's cells: web/board/code.ts), its output under it */
+  kind?: "note" | "code";
+  /** a code item's code */
+  code?: string;
   title?: string;
   /** Markdown with math ($...$), shown at every zoom */
   text?: string;
@@ -130,14 +134,55 @@ export type Measure = ((n: DocNote, w: number) => number) & { width?: (n: DocNot
 // 7 px a character, 20 px a line), with room for the title and the link.
 function noteSize(n: DocNote, measure?: Measure): Box {
   if (n.w && n.h && !n.fit) return { w: n.w, h: n.h };
-  const most = n.w ?? 260;
+  // (code items: wider, for their output)
+  const most = n.w ?? (n.kind === "code" ? 440 : 260);
   const longest = Math.max(...[n.title ?? "", ...(n.text ?? "").split("\n")].map((l) => l.length));
   const w = !n.fit ? most : Math.min(most, Math.max(60, Math.ceil(measure?.width ? measure.width(n, most) + 2 : longest * 7.4 + (n.shape && n.shape !== "rect" ? 50 : 26))));
   if (measure) return { w, h: n.h ?? Math.max(60, Math.ceil(measure(n, w)) + 2) };
   const chars = (n.text ?? "").length;
   const lines = Math.ceil(chars / Math.max(10, (w - 24) / 7.2)) + (n.text?.match(/\n/g)?.length ?? 0);
-  const h = n.h ?? Math.max(70, 24 + (n.title ? 24 : 0) + lines * 20 + (n.detail ? 26 : 0) + (n.ref ? 22 : 0));
+  const code = n.kind === "code" ? 34 + 18 * (n.code ?? "").split("\n").length : 0;
+  const h = n.h ?? Math.max(70, 24 + (n.title ? 24 : 0) + lines * 20 + (n.detail ? 26 : 0) + (n.ref ? 22 : 0) + code);
   return { w, h };
+}
+
+const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.kind === "code"));
+
+/**
+ * A board's code items in reading order, which is the order they run in
+ * (one interpreter for the board, as a notebook's cells): page by page; on
+ * a page, top to bottom and then left to right, and a group's items
+ * together, where the group is.  The positions are those of a layout with
+ * estimated sizes, so that the order does not change as outputs grow.
+ */
+export function codeOrder(d: BoardDoc): { id: string; code: string }[] {
+  const out: { id: string; code: string }[] = [];
+  for (let i = 0; i < pageCount(d); i++) {
+    const v = pageView(d, i);
+    if (!hasCode(v.nodes ?? [])) continue;
+    const { items } = layout(v, undefined, { deferRoutes: true });
+    const kids = new Map<string | undefined, Item[]>();
+    for (const it of items) if (it.kind === "note" || it.kind === "group") (kids.get(it.parent) ?? kids.set(it.parent, []).get(it.parent)!).push(it);
+    const visit = (parent: string | undefined): Item[] => rows(kids.get(parent) ?? []).flatMap((it) => (it.kind === "group" ? visit(it.id) : [it]));
+    for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code });
+  }
+  return out;
+}
+
+// Boxes in rows (a box whose top is above the middle of the row's shortest
+// box so far joins it), top to bottom, each row left to right.
+function rows(xs: Item[]): Item[] {
+  const byTop = [...xs].sort((a, b) => a.y - b.y || a.x - b.x), out: Item[] = [];
+  let row: Item[] = [], top = 0, short = 0;
+  const flush = () => { out.push(...row.sort((a, b) => a.x - b.x)); row = []; };
+  for (const it of byTop) {
+    if (row.length && it.y >= top + Math.min(short, it.h) / 2) flush();
+    if (!row.length) { top = it.y; short = it.h; }
+    short = Math.min(short, it.h);
+    row.push(it);
+  }
+  flush();
+  return out;
 }
 
 /**
@@ -220,7 +265,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         place(c, x + p.x, y + p.y, depth + 1, n.id);
       }
     } else {
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}) });
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.kind === "code" ? { code: n.code ?? "" } : {}) });
     }
   };
   for (const n of roots) {

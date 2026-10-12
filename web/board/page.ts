@@ -16,10 +16,16 @@
 // or Markdown with ```mermaid blocks (a page each), ?mermaid=TEXT, the Open
 // menu and a dropped file, or Import Mermaid… (pasted).
 //
+// Code items (kind "code") are Python, run on one interpreter for the board
+// as a notebook's cells are, in reading order (code.ts, loaded the first
+// time a board has some); their output shows under their code.
+//
 // window.sagebrush.board is the API for an agent driving the page (in the
-// shared browser, say): load(doc), focus(ids), step(n), snapshot().
+// shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
+// outputs().
 import { Board, synthetic, type Camera } from "./board";
-import { layout, isBoard, pageCount, pageOf, pageView, type BoardDoc, type BoardPage, type DocNote } from "./doc";
+import { layout, isBoard, pageCount, pageOf, pageView, codeOrder, type BoardDoc, type BoardPage, type DocNote } from "./doc";
+import { BoardCode } from "./code";
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText, fromMermaid } from "./mermaid";
@@ -76,6 +82,11 @@ async function show(d: BoardDoc) {
     const old = before.get(`${e.from}\0${e.to}\0${e.label ?? ""}`);
     if (old?.points && still(e.from) && still(e.to)) { e.points = old.points; e.lx = old.lx; e.ly = old.ly; }
   }
+  // code items: their places in the reading order; the engine runs what changed
+  const order = codeOrder(d);
+  const nth = new Map(order.map((c, i) => [c.id, i + 1]));
+  for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
+  if (order.length || code) engine()?.sync(order).catch((e) => console.warn("board: code items:", e));
   board.setItems(items, edges);
   shownPage = pageIx;
   const gen = ++routingGen;
@@ -99,18 +110,39 @@ async function show(d: BoardDoc) {
 }
 
 function measure(n: DocNote, w: number) {
+  // (a code item's height changes with its output: measured each time)
+  if (n.kind === "code") return board.measure({ ...n, kind: "note", code: n.code ?? "", order: 1 }, w);
   const k = JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, w]);
   let h = heights.get(k);
-  if (h === undefined) heights.set(k, (h = board.measure({ kind: "note", ...n }, w)));
+  if (h === undefined) heights.set(k, (h = board.measure({ ...n, kind: "note" }, w)));
   return h;
 }
 // (and a `fit` note's width)
 measure.width = (n: DocNote, max: number) => {
   const k = JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, max]);
   let w = heights.get(k);
-  if (w === undefined) heights.set(k, (w = board.measureWidth({ kind: "note", ...n }, max)));
+  if (w === undefined) heights.set(k, (w = board.measureWidth({ ...n, kind: "note" }, max)));
   return w;
 };
+
+// The engine of code items (none in an exported file: the code shows, as text)
+let code: BoardCode | null = null;
+function engine(): BoardCode | null {
+  if (code || embedded()) return code;
+  const c = (code = new BoardCode(new URL("../", import.meta.url)));
+  c.onChange = () => { board.codeStates(); relayout(); };
+  c.ready.then((ok) => {
+    if (!ok) return;
+    board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(id, copy), state: (id) => c.state(id), run: (id) => { c.run([id]); } });
+    relayout();
+  });
+  return c;
+}
+// (laid out again as outputs change: once a frame at most)
+let relayoutFrame = 0;
+function relayout() {
+  if (!relayoutFrame) relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; if (doc) show(doc).catch(fail); });
+}
 
 /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
 async function load(d: BoardDoc) {
@@ -217,6 +249,7 @@ const editor = new Editor(board, () => doc, async (d) => {
   await show(d);
   try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch {}
 }, (d) => pageOf(d, pageIx));
+editor.onRun = (id) => { code?.run([id]); };
 const editBtn = $("edit");
 editBtn.onclick = () => {
   editor.setOn(!editor.on);
@@ -242,6 +275,10 @@ $("examples").onclick = async () => {
     list.textContent = "The examples could not be loaded: " + String(e);
   }
   ($("exdlg") as HTMLDialogElement).showModal();
+};
+$("addcode").onclick = () => {
+  const v = board.view();
+  editor.addCode((v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2);
 };
 $("tidy").onclick = () => editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
 $("pgprev").onclick = () => page(pageIx - 1);
@@ -393,6 +430,10 @@ addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc) { e.preventDefault(); $("print").click(); }
 });
 
+function outputs() {
+  return doc ? codeOrder(doc).map(({ id, code: src }) => ({ id, code: src, state: code?.state(id) ?? "", output: code?.text(id) ?? "" })) : [];
+}
+
 // first paint: the end of the first render after load
 requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).firstPaint = performance.now(); }));
 
@@ -443,6 +484,14 @@ async function bench(path: Camera[]) {
     snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
     /** Change the document (undoable, as an edit): f gets a copy to modify. */
     edit: (f: (d: BoardDoc) => void) => editor.commit(f),
+    /** Run code items (all when none are given), then what depends on them; resolves to outputs(). */
+    run: async (ids?: string[]) => {
+      const c = engine();
+      if (c) { await c.idle(); await (ids ? c.run(ids) : c.runAll()); }
+      return outputs();
+    },
+    /** Code items in reading order: their state ("" when up to date, or queued, running, stale, error, cancelled) and output as text, after what was asked for has run. */
+    outputs: async () => { await code?.idle(); return outputs(); },
     /** Turn Edit mode on or off. */
     editing: (on: boolean) => { if (editor.on !== on) editBtn.click(); },
   },

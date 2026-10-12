@@ -1,0 +1,26 @@
+{
+ "title": "The Collatz map, live",
+ "intro": "**Code items run.** Each one is Python, run on one interpreter for the whole board, in reading order (the small numbers), and reactively, as a notebook's cells are: change `start` (double-click it, then Shift+Enter) and what reads it runs again. Use **→** for the tour.",
+ "layout": "graph",
+ "nodes": [
+  {"id": "about", "title": "The Collatz map", "text": "Halve an even number; send an odd $n$ to $3n + 1$. Every start tried so far reaches $1$ (the conjecture, open since 1937).", "color": "#f3e3b5"},
+  {"id": "collatz", "kind": "code", "title": "The orbit", "code": "def collatz(n):\n    path = [n]\n    while n != 1:\n        n = n // 2 if n % 2 == 0 else 3 * n + 1\n        path.append(n)\n    return path"},
+  {"id": "start", "kind": "code", "title": "Where to start", "code": "start = 27"},
+  {"id": "path", "kind": "code", "title": "Its path", "code": "path = collatz(start)\nprint(len(path) - 1, \"steps, as high as\", max(path))"},
+  {"id": "head", "kind": "code", "title": "The first steps", "code": "print(*path[:16], sep=\" → \")"},
+  {"id": "record", "kind": "code", "title": "Longest below 1000", "code": "best = max(range(1, 1000), key=lambda k: len(collatz(k)))\nprint(best, \"takes\", len(collatz(best)) - 1, \"steps\")"}
+ ],
+ "edges": [
+  {"from": "about", "to": "collatz"},
+  {"from": "collatz", "to": "path", "label": "defines"},
+  {"from": "start", "to": "path", "label": "reads"},
+  {"from": "path", "to": "head"},
+  {"from": "collatz", "to": "record"}
+ ],
+ "steps": [
+  {"focus": ["about", "collatz"], "say": "A function, defined in a code item: the items after it in reading order can call it."},
+  {"focus": ["start", "path"], "say": "`path` reads `start` and calls `collatz`. Change `start` to $97$ and this item, and the one below it, run again."},
+  {"focus": ["path", "head"], "say": "Output shows under the code, and the board makes room for it."},
+  {"focus": ["record"], "say": "Items that do not read `start` do not rerun when it changes."}
+ ]
+}
