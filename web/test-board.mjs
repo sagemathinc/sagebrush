@@ -54,8 +54,10 @@ try {
   const routeMs = Date.now() - t0;
   await sleep(300);
   const s = await ev("window.sagebrush.board.snapshot()");
+  // (a document with pages: its first page is shown)
+  const pg = s.doc.pages?.length ? s.doc.pages[s.page] : s.doc;
   const notes = s.items.filter((i) => i.kind === "note"), groups = s.items.filter((i) => i.kind === "group");
-  console.log(`${notes.length} notes, ${groups.length} groups, ${s.doc.edges?.length ?? 0} edges, ${s.doc.steps?.length ?? 0} steps; shown in ${loadMs} ms, routed by ${routeMs} ms`);
+  console.log(`${notes.length} notes, ${groups.length} groups, ${pg.edges?.length ?? 0} edges, ${pg.steps?.length ?? 0} steps${s.pages > 1 ? ` on the first of ${s.pages} pages` : ""}; shown in ${loadMs} ms, routed by ${routeMs} ms`);
   // no two boxes overlap unless one holds the other (a sweep over x)
   const inside = (a, b) => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
   const byX = [...s.items].sort((a, b) => a.x - b.x);
@@ -98,7 +100,7 @@ try {
       walk(c);
     }
   };
-  s.doc.nodes.forEach(walk);
+  pg.nodes.forEach(walk);
   // notes' text fits (fully zoomed in, at the whole board's camera, every mounted note)
   await ev("window.sagebrush.board.step(-1)");
   await shot("board");
@@ -125,7 +127,7 @@ try {
     await ev("window.board.focus(undefined, true)");
   }
   // math was typeset where the document has it (close to the first note with math)
-  const withMath = notes.find((n) => /\$/.test(JSON.stringify(s.doc.nodes).match(new RegExp(`"id":"${n.id}"[^}]*`))?.[0] ?? ""));
+  const withMath = notes.find((n) => /\$/.test(JSON.stringify(pg.nodes).match(new RegExp(`"id":"${n.id}"[^}]*`))?.[0] ?? ""));
   if (withMath) {
     await ev(`window.board.focus([${JSON.stringify(withMath.id)}], true)`);
     await sleep(400);
@@ -133,13 +135,71 @@ try {
     check(await ev("document.querySelectorAll('.board-note .math').length === 0 || document.querySelectorAll('.board-note .katex').length > 0"), "no math typeset");
   }
   // the tour moves the camera, and #N is its step
-  for (let i = 0; i < (s.doc.steps?.length ?? 0); i++) {
+  for (let i = 0; i < (pg.steps?.length ?? 0); i++) {
     const before = await ev("JSON.stringify(window.board.camera)");
     await ev(`window.sagebrush.board.step(${i})`);
     await sleep(550);
     check((await ev("JSON.stringify(window.board.camera)")) !== before || i === 0, `step ${i + 1} did not move the camera`);
     check((await ev("location.hash")) === `#${i + 1}`, `step ${i + 1}: hash`);
     await shot(`step${String(i + 1).padStart(2, "0")}`);
+  }
+  // pages: each its own board, #pP its address; PageDown and PageUp
+  if (s.pages > 1) {
+    for (let p = 1; p < s.pages; p++) {
+      await ev(`window.sagebrush.board.page(${p})`);
+      await until("window.sagebrush.board.snapshot().routed", 20000);
+      const sp = await ev("window.sagebrush.board.snapshot()");
+      const want = s.doc.pages[p].nodes.length;
+      check(sp.page === p && sp.items.filter((i) => i.kind === "note").length === want, `page ${p + 1}: ${sp.items.length} items, not its ${want} notes`);
+      check((await ev("location.hash")) === `#p${p + 1}`, `page ${p + 1}: hash ${await ev("location.hash")}`);
+      check(await ev(`document.getElementById("pgsel").value === "${p}" && !document.getElementById("pages").hidden`), `page ${p + 1}: the picker`);
+      if (s.doc.pages[p].steps?.length) {
+        await ev("window.sagebrush.board.step(1)");
+        check((await ev("location.hash")) === `#p${p + 1}-2`, `page ${p + 1} step 2: hash`);
+      }
+      await shot(`page${p + 1}`);
+    }
+    await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }))");
+    await sleep(300);
+    check((await ev("window.sagebrush.board.snapshot().page")) === s.pages - 2, "PageUp did not go back a page");
+    // the address opens the page and step
+    // (a new hash alone does not reload the page)
+    await send("Page.navigate", { url: url + `#p${s.pages}-1` });
+    await ev("window.oldPage = 1");
+    await send("Page.reload");
+    await until("!window.oldPage && window.sagebrush?.board?.snapshot().items.length > 0", 30000);
+    await sleep(300);
+    const sn = await ev("window.sagebrush.board.snapshot()");
+    check(sn.page === s.pages - 1 && sn.step === (s.doc.pages[s.pages - 1].steps?.length ? 0 : -1), `#p${s.pages}-1 opened page ${sn.page + 1}, step ${sn.step + 1}`);
+    await ev("window.sagebrush.board.page(0)");
+  }
+  // print (or save as PDF): a sheet per page, or per step of the tours; the
+  // PDF has as many pages, and the sheets' notes fit their text, math typeset
+  {
+    const sp = await ev("window.sagebrush.board.snapshot()");
+    const pages = sp.doc.pages?.length ? sp.doc.pages : [sp.doc];
+    for (const mode of ["pages", "tour"]) {
+      const want = mode === "pages" ? pages.length : pages.reduce((n, p) => n + (p.steps?.length ? p.steps.length + (p.intro ? 1 : 0) : 1), 0);
+      if (mode === "tour" && want === pages.length) continue;
+      if (want > 40) continue; // (a large board's: the layout is checked above)
+      const n = await ev(`window.sagebrush.board.print({ mode: "${mode}", dialog: false })`);
+      check(n === want, `print ${mode}: ${n} sheets, not ${want}`);
+      const sheet = await ev(`[...document.querySelectorAll("#board-print .pr-sheet")].map((s) => ({ notes: s.querySelectorAll(".board-note").length, over: [...s.querySelectorAll(".board-note")].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector("b")?.textContent), math: s.querySelectorAll(".math").length, katex: s.querySelectorAll(".katex").length, paths: s.querySelectorAll(".pr-back path").length, far: !!s.dataset.far }))`);
+      sheet.forEach((x, i) => {
+        check(x.notes > 0 || x.far, `print ${mode}: sheet ${i + 1} has no notes`);
+        check(!x.over.length, `print ${mode}: sheet ${i + 1}: text overflows in ${x.over.join(", ")}`);
+        check(!x.math || x.katex, `print ${mode}: sheet ${i + 1}: math not typeset`);
+      });
+      const pdf = await send("Page.printToPDF", { preferCSSPageSize: true, printBackground: true });
+      const bytes = Buffer.from(pdf.data ?? "", "base64"), text = bytes.toString("latin1");
+      const pdfPages = (text.match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
+      check(pdfPages === want, `print ${mode}: the PDF has ${pdfPages} pages, not ${want}`);
+      // (landscape letter: 792 x 612 points)
+      check(/\/MediaBox\s*\[\s*0 0 792 612\s*\]/.test(text), `print ${mode}: the PDF's pages are not landscape Letter`);
+      if (process.env.SHOT) writeFileSync(join(process.env.SHOT, `print-${mode}.pdf`), bytes);
+      console.log(`print ${mode}: ${n} sheets, a ${(bytes.length / 1024).toFixed(0)} KB PDF`);
+    }
+    await ev(`document.getElementById("board-print")?.remove()`);
   }
   if (process.env.SHOT) {
     const id = notes[Math.min(20, notes.length - 1)].id;
@@ -258,6 +318,25 @@ try {
     await ev("document.getElementById('tidy').click()");
     await sleep(300);
     check((await docOf()).nodes.every((n) => n.x === undefined), "Tidy kept positions");
+    // pages: add one (the board becomes page 1), write on it, delete it
+    const nodes0 = (await docOf()).nodes.length;
+    await ev("document.getElementById('addpage').click()");
+    await sleep(500);
+    let dp = await docOf();
+    check(dp.pages?.length === 2 && dp.pages[0].nodes.length === nodes0 && !dp.nodes && dp.pages[1].nodes.length === 0, "Add a page did not make two pages");
+    check((await ev("window.sagebrush.board.snapshot().page")) === 1 && (await ev("location.hash")) === "#p2", "Add a page did not show the new page");
+    await ev("window.sagebrush.board.edit((d) => { d.pages[1].nodes.push({ id: 'p2note', title: 'On page 2' }); })");
+    await sleep(300);
+    check((await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "p2note", "page 2 does not show its own note");
+    await ev("window.sagebrush.board.page(0)");
+    await sleep(300);
+    check((await ev("window.sagebrush.board.snapshot().items.filter((i) => i.kind === 'note').length")) > 1, "page 1 lost its notes");
+    await ev("window.sagebrush.board.page(1)");
+    await ev("window.sagebrush.board.edit((d) => { d.pages[1].nodes = []; })");
+    await ev("document.getElementById('rmpage').click()");
+    await sleep(500);
+    dp = await docOf();
+    check(!dp.pages && dp.nodes.length === nodes0, "Delete this page did not leave the board as it was");
     await ev("localStorage.clear()");
   }
   check(!errors.length, "page errors: " + errors.join(" | "));

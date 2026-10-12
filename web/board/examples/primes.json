@@ -1,0 +1,81 @@
+{
+ "title": "Three proofs that there are infinitely many primes",
+ "pages": [
+  {
+   "title": "Euclid",
+   "intro": "**Euclid, *Elements* IX.20 (about 300 BC).** Any finite list of primes leaves one out. Use **→** to step through the proof, and **PageDown** for the next proof.",
+   "layout": "graph",
+   "nodes": [
+    {"id": "list", "title": "Suppose", "text": "there are only finitely many primes, $p_1, p_2, \\dots, p_n$."},
+    {"id": "N", "title": "Construct", "text": "$$N = p_1 p_2 \\cdots p_n + 1.$$", "detail": "For the first six primes, $N = 2\\cdot3\\cdot5\\cdot7\\cdot11\\cdot13 + 1 = 30031 = 59 \\cdot 509$: $N$ need not be prime itself, only have a prime factor outside the list."},
+    {"id": "q", "title": "A prime factor", "text": "$N > 1$, so some prime $q$ divides $N$."},
+    {"id": "notin", "title": "It is not on the list", "text": "If $q = p_i$, then $q$ divides both $N$ and $p_1 \\cdots p_n$, so $q \\mid N - p_1\\cdots p_n = 1$. No prime divides $1$."},
+    {"id": "end", "title": "So", "text": "No finite list holds every prime: **there are infinitely many**.", "color": "#e3f0dc"}
+   ],
+   "edges": [
+    {"from": "list", "to": "N", "label": "multiply, add 1"},
+    {"from": "N", "to": "q", "label": "every n > 1"},
+    {"from": "q", "to": "notin"},
+    {"from": "notin", "to": "end", "label": "contradiction"}
+   ],
+   "steps": [
+    {"focus": ["list", "N"], "say": "Start from any finite list of primes and multiply them all together, then add $1$."},
+    {"focus": ["N", "q"], "say": "Every integer greater than $1$ has a prime factor (its smallest divisor greater than $1$ is prime)."},
+    {"focus": ["q", "notin"], "say": "That prime cannot be on the list: it would divide the difference $N - p_1\\cdots p_n = 1$."},
+    {"focus": "end", "say": "The list was arbitrary, so no list is complete."}
+   ]
+  },
+  {
+   "title": "Euler",
+   "intro": "**Euler (1737).** Unique factorization turns a sum over all integers into a product over the primes; the sum is infinite, so the product needs infinitely many factors. More: $\\sum_p 1/p$ diverges.",
+   "layout": "graph",
+   "nodes": [
+    {"id": "prod", "title": "Euler's product", "text": "For real $s > 1$, $$\\zeta(s) = \\sum_{n \\ge 1} \\frac{1}{n^s} = \\prod_p \\frac{1}{1 - p^{-s}}.$$", "detail": "Expand each factor as a geometric series $\\sum_k p^{-ks}$ and multiply out: each $n^{-s}$ appears exactly once, by unique factorization."},
+    {"id": "big", "title": "The sum is unbounded", "text": "As $s \\to 1^+$, $\\zeta(s) \\ge \\sum_{n \\le M} n^{-s} \\to \\sum_{n \\le M} \\frac1n$, for every $M$; the harmonic series diverges, so $\\zeta(s) \\to \\infty$."},
+    {"id": "finite", "title": "If the primes were finite", "text": "the product would be finite too, tending to $\\prod_p \\frac{1}{1 - 1/p} < \\infty$ as $s \\to 1^+$."},
+    {"id": "end", "title": "So", "text": "**There are infinitely many primes.**", "color": "#e3f0dc"},
+    {"id": "more", "title": "And more", "text": "$$\\log \\zeta(s) = \\sum_p \\frac{1}{p^s} + O(1),$$ so $\\sum_p \\frac1p = \\infty$: the primes are not even as sparse as the squares.", "detail": "Expand $\\log \\zeta(s) = \\sum_p \\sum_{k \\ge 1} \\frac{p^{-ks}}{k}$. The terms with $k \\ge 2$ add up to at most $\\sum_p \\frac{p^{-2s}}{1 - p^{-s}} \\le 2 \\sum_{n \\ge 2} \\frac{1}{n^2}$, bounded as $s \\to 1^+$."}
+   ],
+   "edges": [
+    {"from": "prod", "to": "big"},
+    {"from": "prod", "to": "finite"},
+    {"from": "big", "to": "end", "label": "contradiction"},
+    {"from": "finite", "to": "end"},
+    {"from": "prod", "to": "more", "label": "take logs"}
+   ],
+   "steps": [
+    {"focus": "prod", "say": "Each integer is a product of primes in exactly one way, so the sum over integers factors as a product over primes."},
+    {"focus": ["big", "finite"], "say": "The left side grows without bound as $s \\to 1$; a finite product of factors each tending to $(1 - 1/p)^{-1}$ would not."},
+    {"focus": "end", "say": "So the product has infinitely many factors."},
+    {"focus": "more", "say": "Taking logarithms gives more than Euclid did: the sum of the reciprocals of the primes diverges."}
+   ]
+  },
+  {
+   "title": "Fürstenberg",
+   "intro": "**Fürstenberg (1955), a proof by topology.** Arithmetic progressions make the integers a topological space in which finite unions of closed sets are closed, as always, and nonempty open sets are infinite.",
+   "layout": "graph",
+   "nodes": [
+    {"id": "top", "title": "The topology", "text": "Call $U \\subseteq \\mathbb{Z}$ open when it is a union of progressions $$S(a, b) = \\{a + nb : n \\in \\mathbb{Z}\\}, \\quad b \\ge 1.$$", "detail": "The intersection of two progressions is empty or a progression (with modulus the lcm), so these sets are a topology."},
+    {"id": "inf", "title": "Open sets are infinite", "text": "A nonempty open set contains some $S(a, b)$, which is infinite."},
+    {"id": "closed", "title": "Progressions are closed", "text": "$$S(a, b) = \\mathbb{Z} \\setminus \\bigcup_{i=1}^{b-1} S(a + i, b),$$ the complement of an open set."},
+    {"id": "union", "title": "The primes cover", "text": "Every integer except $\\pm 1$ has a prime factor: $$\\mathbb{Z} \\setminus \\{-1, 1\\} = \\bigcup_{p} S(0, p).$$"},
+    {"id": "fin", "title": "If the primes were finite", "text": "the union would be a finite union of closed sets: closed. Then $\\{-1, 1\\}$ would be open, and finite."},
+    {"id": "end", "title": "So", "text": "**There are infinitely many primes.**", "color": "#e3f0dc"}
+   ],
+   "edges": [
+    {"from": "top", "to": "inf"},
+    {"from": "top", "to": "closed"},
+    {"from": "closed", "to": "fin", "label": "finite union"},
+    {"from": "union", "to": "fin"},
+    {"from": "inf", "to": "end"},
+    {"from": "fin", "to": "end", "label": "contradiction"}
+   ],
+   "steps": [
+    {"focus": "top", "say": "Declare the arithmetic progressions, and their unions, open."},
+    {"focus": ["inf", "closed"], "say": "Two facts: nonempty open sets are infinite, and each progression is also closed, being the complement of the other residue classes mod $b$."},
+    {"focus": ["union", "fin"], "say": "The multiples of the primes cover everything but $\\pm 1$. With finitely many primes that cover is closed, so $\\{-1, 1\\}$ is open."},
+    {"focus": "end", "say": "But a finite nonempty set is not open."}
+   ]
+  }
+ ]
+}

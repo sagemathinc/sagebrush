@@ -6,11 +6,11 @@
 // they have (x and y), so nothing else moves; "Tidy" forgets them all.
 
 import type { Board, Item } from "./board";
-import type { BoardDoc, DocGroup, DocNode, DocNote } from "./doc";
+import type { BoardDoc, BoardPage, DocGroup, DocNode, DocNote } from "./doc";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
 
-export function find(doc: BoardDoc, id: string): Found | null {
+export function find(doc: BoardDoc | BoardPage, id: string): Found | null {
   const walk = (list: DocNode[], parent: DocGroup | null): Found | null => {
     for (const n of list) {
       if (n.id === id) return { node: n, parent, siblings: list };
@@ -21,7 +21,7 @@ export function find(doc: BoardDoc, id: string): Found | null {
     }
     return null;
   };
-  return walk(doc.nodes, null);
+  return walk(doc.nodes ?? [], null);
 }
 
 function ids(n: DocNode): string[] {
@@ -29,12 +29,12 @@ function ids(n: DocNode): string[] {
 }
 
 /** A copy of the document without positions (automatic layout again). */
-export function tidy(doc: BoardDoc): BoardDoc {
+export function tidy<T extends BoardDoc | BoardPage>(doc: T): T {
   const strip = (n: DocNode): DocNode => {
     const { x: _x, y: _y, ...rest } = n as any;
     return rest.kind === "group" ? { ...rest, children: rest.children.map(strip) } : rest;
   };
-  return { ...doc, nodes: doc.nodes.map(strip) };
+  return { ...doc, nodes: (doc.nodes ?? []).map(strip) };
 }
 
 export class Editor {
@@ -44,7 +44,9 @@ export class Editor {
   private selected: string | null = null;
   private panel: HTMLElement | null = null;
 
-  constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>) {
+  // (edits are to the page shown: pg(d) is it, within the whole document d)
+  constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
+    private pg: (d: BoardDoc) => BoardPage = (d) => d as BoardPage) {
     board.onItemDown = (it, e) => this.down(it, e);
     board.onDoubleClick = (it, x, y) => this.dblclick(it, x, y);
     addEventListener("keydown", (e) => this.key(e));
@@ -81,6 +83,8 @@ export class Editor {
     await this.change(JSON.parse(next));
   }
 
+  /** Nothing selected, no note open (another page is shown). */
+  clear() { this.select(null); this.close(); }
   private select(id: string | null) {
     this.selected = id;
     this.board.select(id);
@@ -89,7 +93,7 @@ export class Editor {
   // Positions of a container's members as they are now on the board (in
   // its coordinates: a group's members from its inner origin, the top
   // level's in the world), written into the document.
-  private freeze(d: BoardDoc, parent: DocGroup | null, siblings: DocNode[]) {
+  private freeze(_d: BoardDoc, parent: DocGroup | null, siblings: DocNode[]) {
     const o = parent ? this.board.item(parent.id)?.inner : { x: 0, y: 0 };
     if (!o) return;
     for (const s of siblings) {
@@ -116,7 +120,8 @@ export class Editor {
         const r = this.board.el.getBoundingClientRect(), to = this.board.itemAt(u.clientX - r.left, u.clientY - r.top);
         if (to && to.id !== it.id && to.kind === "note") {
           this.commit((d) => {
-            if (!(d.edges ?? []).some((x) => x.from === it.id && x.to === to.id)) (d.edges ??= []).push({ from: it.id, to: to.id });
+            const p = this.pg(d);
+            if (!(p.edges ?? []).some((x) => x.from === it.id && x.to === to.id)) (p.edges ??= []).push({ from: it.id, to: to.id });
           });
         }
       };
@@ -125,7 +130,7 @@ export class Editor {
       return true;
     }
     // drag (or, not moved, select)
-    const d0 = this.doc(), f = d0 && find(d0, it.id);
+    const d0 = this.doc(), f = d0 && find(this.pg(d0), it.id);
     if (!f) return false;
     const moving = ids(f.node);
     let last = { x: e.clientX, y: e.clientY }, dist = 0;
@@ -142,13 +147,13 @@ export class Editor {
       if (dist <= 3) { this.select(it.id); return; }
       this.select(it.id);
       this.commit((d) => {
-        const g = find(d, it.id);
+        const g = find(this.pg(d), it.id);
         if (!g) return;
         // (its group's members, and every enclosing group's, keep their
         // places: a group growing moves nothing else)
         this.freeze(d, g.parent, g.siblings);
         for (let p = g.parent; p; ) {
-          const pf = find(d, p.id)!;
+          const pf = find(this.pg(d), p.id)!;
           this.freeze(d, pf.parent, pf.siblings);
           p = pf.parent;
         }
@@ -176,14 +181,14 @@ export class Editor {
     // a new note where the double click was (at the top level)
     const id = "n" + Math.random().toString(36).slice(2, 8);
     // (the others at the top level keep their places)
-    this.commit((d) => { this.freeze(d, null, d.nodes); d.nodes.push({ id, title: "", text: "", x: Math.round(x - 130), y: Math.round(y - 30) }); }).then(() => this.open(id, true));
+    this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, title: "", text: "", x: Math.round(x - 130), y: Math.round(y - 30) }); }).then(() => this.open(id, true));
     return true;
   }
 
   /** Write a note or a group's title and text, in a panel over it. */
   open(id: string, fresh = false) {
     this.close();
-    const d = this.doc(), f = d && find(d, id), r = this.board.clientRect(id);
+    const d = this.doc(), f = d && find(this.pg(d), id), r = this.board.clientRect(id);
     if (!f || !r) return;
     const n = f.node as Omit<DocNote, "kind"> & { kind?: "note" | "group" };
     const p = document.createElement("div");
@@ -211,7 +216,7 @@ export class Editor {
       const v = (s: string) => ($<HTMLInputElement>(s)?.value ?? "").trim();
       this.close();
       this.commit((d) => {
-        const g = find(d, id);
+        const g = find(this.pg(d), id);
         if (!g) return;
         const m = g.node as any;
         const set = (k: string, val: string) => { if (val) m[k] = val; else delete m[k]; };
@@ -223,12 +228,12 @@ export class Editor {
     const cancel = () => {
       this.close();
       // (a new note left empty: not kept)
-      if (fresh && !v0()) this.commit((d) => remove(d, id));
+      if (fresh && !v0()) this.commit((d) => remove(this.pg(d), id));
     };
     const v0 = () => ["title", "text"].some((k) => ($<HTMLInputElement>(`.be-${k}`)?.value ?? "").trim());
     $(".be-done")!.onclick = done;
     $(".be-cancel")!.onclick = cancel;
-    $(".be-del")!.onclick = () => { this.close(); this.commit((d) => remove(d, id)); };
+    $(".be-del")!.onclick = () => { this.close(); this.commit((d) => remove(this.pg(d), id)); };
     p.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Escape") cancel();
@@ -247,7 +252,7 @@ export class Editor {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "z") { e.shiftKey ? this.redo() : this.undo(); }
     else if (mod && e.key.toLowerCase() === "y") this.redo();
-    else if ((e.key === "Delete" || e.key === "Backspace") && this.selected) { const id = this.selected; this.select(null); this.commit((d) => remove(d, id)); }
+    else if ((e.key === "Delete" || e.key === "Backspace") && this.selected) { const id = this.selected; this.select(null); this.commit((d) => remove(this.pg(d), id)); }
     else if (e.key === "Enter" && this.selected) this.open(this.selected);
     else if (e.key === "Escape" && this.selected) this.select(null);
     else return;
@@ -257,7 +262,7 @@ export class Editor {
 }
 
 /** Remove a node (a group with its members) and the edges to and from it. */
-export function remove(d: BoardDoc, id: string) {
+export function remove(d: BoardDoc | BoardPage, id: string) {
   const f = find(d, id);
   if (!f) return;
   const gone = new Set(ids(f.node));

@@ -66,6 +66,19 @@
   #exlist b { color: #2a6f2f; }
   #exlist span { display: block; color: #556; font-size: 13px; }
   #exdlg form { text-align: right; margin-top: 8px; }
+  #pages { display: flex; align-items: center; gap: 4px; }
+  #pages[hidden] { display: none; }
+  #pgsel { font: inherit; max-width: 34vw; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 3px 4px; background: #fff; }
+  #pages button { padding: 4px 8px; }
+  #prdlg { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(520px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
+  #prdlg h3 { margin: 0 0 10px; }
+  #prdlg fieldset { border: 0; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  #prdlg legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+  #prdlg fieldset:first-of-type label { flex-basis: 100%; }
+  #prdlg label span { color: #667; font-size: 13px; }
+  #prdlg .sep { width: 10px; }
+  .prnote { color: #556; font-size: 13px; margin: 0 0 12px; }
+  .prbtns { display: flex; justify-content: flex-end; gap: 8px; }
   #tour { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2; width: min(720px, calc(100% - 24px)); box-sizing: border-box; background: rgba(255, 255, 255, .96); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
   #tour[hidden] { display: none; }
   #say { flex: 1; max-height: 30vh; overflow: auto; }
@@ -79,9 +92,14 @@
 </head>
 <body>
 <div id="board"></div>
-<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="hint" hidden>Drag to move · double-click to write or add · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎ Edit</button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="examples">Examples…</button><button id="tidy">Tidy (automatic layout)</button><button id="download">Download JSON</button><button id="open">Open JSON…</button><button id="copyjson">Copy JSON</button><button id="newboard">New board</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,application/json" hidden></div>
+<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="pages" hidden><button id="pgprev" title="Previous page (PageUp)">‹</button><select id="pgsel" title="Page"></select><button id="pgnext" title="Next page (PageDown)">›</button></span><span id="hint" hidden>Drag to move · double-click to write or add · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎ Edit</button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="examples">Examples…</button><button id="print">Print or save as PDF…</button><button id="addpage">Add a page</button><button id="namepage" hidden>Rename this page…</button><button id="rmpage" hidden>Delete this page</button><button id="tidy">Tidy (automatic layout)</button><button id="download">Download JSON</button><button id="open">Open JSON…</button><button id="copyjson">Copy JSON</button><button id="newboard">New board</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,application/json" hidden></div>
 <div id="tour" hidden><div id="say"></div><div id="nav"><div><button id="prev" title="Back (←)" disabled>←</button><button id="next" title="Next (→)">→</button></div><span id="where"></span></div></div>
 <dialog id="exdlg"><h3>Example boards</h3><div id="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
+<dialog id="prdlg"><h3>Print or save as PDF</h3><form id="prform" method="dialog">
+<fieldset><legend>What</legend><label><input type="radio" name="mode" value="pages" id="pr-pages" checked> Every page <span id="pr-pages-n"></span></label><label><input type="radio" name="mode" value="tour" id="pr-tour"> The tour <span id="pr-tour-n"></span></label></fieldset>
+<fieldset><legend>Paper</legend><label><input type="radio" name="paper" value="letter" checked> Letter</label><label><input type="radio" name="paper" value="a4"> A4</label><span class="sep"></span><label><input type="radio" name="orient" value="landscape" checked> Landscape</label><label><input type="radio" name="orient" value="portrait"> Portrait</label></fieldset>
+<p class="prnote">Your browser's print dialog opens next: choose <b>Save as PDF</b> as its destination for a PDF. Text stays text, and math and arrows stay sharp at any zoom.</p>
+<div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button id="pr-go" class="be-done">Print…</button></div></form></dialog>
 <script type="module" src="/board/board.js"></script>
 </body>
 </html>
