@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board — Sagebrush</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fafaf7; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #board { position: fixed; inset: 0; }
+  .board { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+  .board-canvas { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  .board-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+  .board-item { position: absolute; box-sizing: border-box; border-radius: 8px; padding: 8px 10px; overflow: hidden; background: var(--c, #fff); border: 1px solid rgba(0, 0, 0, .12); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); contain: layout paint; }
+  .board-item b { display: block; margin-bottom: 4px; }
+  .board-item p { margin: 0; color: #333; }
+</style>
+</head>
+<body>
+<div id="board"></div>
+<script type="module" src="/board/board.js"></script>
+</body>
+</html>
