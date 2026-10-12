@@ -1,0 +1,530 @@
+[
+  {
+    "name": "large integer comparison prefix",
+    "codes": [
+      "x=1",
+      "print((9007199254740992 == 9007199254740993 < (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "large integer conditional expression",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 9007199254740992 == 9007199254740993 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "large integer boolean prefix",
+    "codes": [
+      "x=1",
+      "print(((9007199254740992 == 9007199254740993) and (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "large integer repeated comprehension",
+    "codes": [
+      "x=1",
+      "a=[((9007199254740992 == 9007199254740993 < (x:=10)), (x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "large integer unequal real branch control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 9007199254740992 != 9007199254740993 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "large integer strict less real branch control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 9007199254740992 < 9007199254740993 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "large integer strict greater real branch control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 9007199254740993 > 9007199254740992 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "None and conditional expression",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if None and True else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested None and boolean prefix",
+    "codes": [
+      "x=1",
+      "print((((None and True) and (x:=10)), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "None and reset in repeated comprehension",
+    "codes": [
+      "x=1",
+      "a=[(((x:=10) if None and True else 0), (x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "empty bytes conditional expression",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if b\"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "zero imaginary conditional expression",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 0j else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "bytes reset in repeated comprehension",
+    "codes": [
+      "x=1",
+      "a=[(((x:=10) if b\"\" else 0), (x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "zero imaginary reset in repeated comprehension",
+    "codes": [
+      "x=1",
+      "a=[(((x:=10) if 0j else 0), (x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "None and negated test control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if not (None and True) else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "None and reached else control",
+    "codes": [
+      "x=1",
+      "print((0 if None and True else (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "bytes not reached branch control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if not b\"\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "zero imaginary not reached branch control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if not 0j else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested and in comparison If",
+    "codes": [
+      "x=1",
+      "if (False and (x:=2)) == False:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested comparison in comparison If",
+    "codes": [
+      "x=1",
+      "if (1 > 2 < (x:=2)) == False:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested and right operand If",
+    "codes": [
+      "x=1",
+      "if 0 == (False and (x:=2)):\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested comparison right operand If",
+    "codes": [
+      "x=1",
+      "if False == (1 > 2 < (x:=2)):\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested and in comparison IfExp",
+    "codes": [
+      "x=1",
+      "print(x if (False and (x:=2)) == False else 0)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested comparison in comparison IfExp",
+    "codes": [
+      "x=1",
+      "print(x if (1 > 2 < (x:=2)) == False else 0)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested and in comparison While",
+    "codes": [
+      "x=1",
+      "i=0\nwhile i<2 and (False and (x:=2)) == False:\n print(x)\n i+=1",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "nested and followed by true If",
+    "codes": [
+      "x=1",
+      "if ((False and (x:=2)) == False) and True:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe nested or comparison control",
+    "codes": [
+      "x=1",
+      "if (False or (x:=2)) == 2:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe and If control",
+    "codes": [
+      "x=1",
+      "if True and (x:=2):\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe comparison If control",
+    "codes": [
+      "x=1",
+      "if 0 < 1 < (x:=2):\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe small integer prefix control",
+    "codes": [
+      "x=1",
+      "print((1 == 1 < (x:=10), x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe None or conditional control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if None or True else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe false and else control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if not (False and True) else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe bytes nonempty control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if b\"a\" else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe nonzero imaginary control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 1j else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe equal large integer control",
+    "codes": [
+      "x=1",
+      "print(((x:=10) if 9007199254740993 == 9007199254740993 else 0, x))",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented repeated None reset control",
+    "codes": [
+      "x=1",
+      "x += sum([(((x:=10) if None and True else 0), (x:=x+1))[1] for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented repeated bytes reset control",
+    "codes": [
+      "x=1",
+      "x += sum([(((x:=10) if b\"\" else 0), (x:=x+1))[1] for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "augmented repeated large reset control",
+    "codes": [
+      "x=1",
+      "x += sum([(((x:=10) if 9007199254740992 == 9007199254740993 else 0), (x:=x+1))[1] for i in [0,1]])\nprint(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe while comparison binding control",
+    "codes": [
+      "x=1",
+      "i=0\nwhile i<2 and 0 < 1 < (x:=2):\n print(x)\n i+=1",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe nested compare binding control",
+    "codes": [
+      "x=1",
+      "if (0 < 1 < (x:=2)) == True:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "safe nested and binding control",
+    "codes": [
+      "x=1",
+      "if (True and (x:=2)) == 2:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "compare nested and repeated store",
+    "codes": [
+      "x=1",
+      "for i in [0,1]:\n if (False and (x:=2)) == False:\n  x=x+1\n  print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "while compare nested and repeated store",
+    "codes": [
+      "x=1",
+      "i=0\nwhile i<2 and (False and (x:=2)) == False:\n x=x+1\n print(x)\n i+=1",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "seeded nested comparison control",
+    "codes": [
+      "x=1",
+      "x=7\nif (False and (x:=2)) == False:\n print(x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  }
+]

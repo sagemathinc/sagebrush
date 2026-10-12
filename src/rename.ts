@@ -756,12 +756,17 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   // loop's iterable, a with item's expression, :='s value)
   // (the binding elsewhere in that statement than the part evaluated first:
   // one inside it, `v = x if (x := 2) else 0`, is placed by runsBefore)
+  // (the cell's first binding an augmented assignment's target: renamed as
+  // `xʹ2 = x; xʹ2 += ...`, the new name bound before the statement runs)
+  const prefixed = first.path.length === 1 && first.path[0][0]._type === "AugAssign" && first.path[0][1] === "target";
   const evaluatedFirst = (o: Occurrence, first: Occurrence) => o.path.some(([n, key]) => {
     const elsewhere = inside(first, n) && !first.path.some(([m, k]) => m === n && k === key);
     // (an augmented assignment loads its target, and evaluates what the
     // target is made of, before its value: the value comes first only for
     // the binding of the target name itself, `x += x`, REACT-321C-1)
-    const augStore = n._type === "AugAssign" && first.path.at(-1)?.[0] === n && first.path.at(-1)?.[1] === "target";
+    // (not when the cell's first binding is that target at the top level:
+    // `xʹ2 = x; xʹ2 += ...` binds the new name first, and the value reads it)
+    const augStore = n._type === "AugAssign" && first.path.at(-1)?.[0] === n && first.path.at(-1)?.[1] === "target" && !prefixed;
     const firstPart = elsewhere && (((n._type === "Assign" || n._type === "AnnAssign") && key === "value") || (augStore && key === "value") ||
       ((n._type === "For" || n._type === "AsyncFor") && key === "iter") ||
       (n._type === "NamedExpr" && key === "value") ||
@@ -796,24 +801,69 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
   // literal with elements), a try's body or handlers, a with's body, a
   // match's cases, a comprehension's body (unless over literals with
   // elements and no conditions): REACT-E17D-2, -3)
-  // (a constant's value, folded through not, and/or and comparisons of constants; undefined if not one)
-  const konst = (e: any): any => {
-    if (e?._type === "Constant") return e.value;
-    if (e?._type === "UnaryOp" && e.op?._type === "Not") { const v = konst(e.operand); return v === undefined ? undefined : !v; }
+  // (a constant's value, folded through not, unary minus, and/or and
+  // comparisons of numbers and strings; undefined when not known.  pyparse
+  // gives ints as BigInts, floats as numbers, None and ... as {name},
+  // bytes as byte arrays, imaginary numbers as {imag}: REACT-67BD-1, -2)
+  type K = { t: "bool" | "int" | "float" | "str" | "none" | "bytes" | "complex" | "ellipsis"; v: any };
+  const konst = (e: any): K | undefined => {
+    if (e?._type === "Constant") {
+      const v = e.value;
+      if (typeof v === "boolean") return { t: "bool", v };
+      if (typeof v === "bigint") return { t: "int", v };
+      if (typeof v === "number") return { t: "float", v };
+      if (typeof v === "string") return { t: "str", v };
+      if (v && typeof v === "object" && v.name === "None") return { t: "none", v: null };
+      if (v && typeof v === "object" && v.name === "Ellipsis") return { t: "ellipsis", v: null };
+      if (v && typeof v === "object" && "imag" in v) return { t: "complex", v };
+      if (v instanceof Uint8Array) return { t: "bytes", v };
+      return undefined;
+    }
+    if (e?._type === "UnaryOp") {
+      const x = konst(e.operand);
+      if (!x) return undefined;
+      if (e.op?._type === "Not") return { t: "bool", v: !truth(x) };
+      if (e.op?._type === "USub" && (x.t === "int" || x.t === "float")) return { t: x.t, v: -x.v };
+      return undefined;
+    }
     if (e?._type === "BoolOp") {
-      const vs = e.values.map(konst);
-      if (vs.some((v: any) => v === undefined)) return undefined;
-      return e.op?._type === "And" ? vs.find((v: any) => !v) ?? vs.at(-1) : vs.find((v: any) => !!v) ?? vs.at(-1);
+      const xs = e.values.map(konst);
+      if (xs.some((x: K | undefined) => !x)) return undefined;
+      const and = e.op?._type === "And";
+      return xs.find((x: K) => truth(x) !== and) ?? xs.at(-1);
     }
     if (e?._type === "Compare") {
-      // (ints are BigInts here)
-      const xs = [e.left, ...e.comparators].map(konst).map((v: any) => (typeof v === "bigint" ? Number(v) : v));
-      if (xs.some((v: any) => typeof v !== "number")) return undefined;
-      return e.ops.every((op: any, i: number) => ({ Lt: xs[i] < xs[i + 1], LtE: xs[i] <= xs[i + 1], Gt: xs[i] > xs[i + 1], GtE: xs[i] >= xs[i + 1], Eq: xs[i] === xs[i + 1], NotEq: xs[i] !== xs[i + 1] } as any)[op._type] ?? false);
+      const xs = [e.left, ...e.comparators].map(konst);
+      if (xs.some((x) => !x)) return undefined;
+      for (let i = 0; i < e.ops.length; i++) {
+        const c = compare(e.ops[i]._type, xs[i]!, xs[i + 1]!);
+        if (c === undefined) return undefined;
+        if (!c) return { t: "bool", v: false };
+      }
+      return { t: "bool", v: true };
     }
     return undefined;
   };
-  const known = (e: any, want: boolean) => { const v = konst(e); return v !== undefined && !!v === want; };
+  const truth = (x: K): boolean =>
+    x.t === "bool" ? x.v : x.t === "int" ? x.v !== 0n : x.t === "float" ? x.v !== 0 : x.t === "str" ? x.v !== "" :
+    x.t === "none" ? false : x.t === "bytes" ? x.v.length > 0 : x.t === "complex" ? x.v.imag !== 0 || !!x.v.real : true;
+  // (an int as a BigInt, a bool as 0 or 1; a float as itself)
+  const num = (x: K): bigint | number | undefined => (x.t === "int" ? x.v : x.t === "bool" ? (x.v ? 1n : 0n) : x.t === "float" ? x.v : undefined);
+  const compare = (op: string, a: K, b: K): boolean | undefined => {
+    let p = num(a), q = num(b);
+    if (p !== undefined && q !== undefined) {
+      // (an int and a float: exactly, only for ints a double holds exactly)
+      if (typeof p !== typeof q) {
+        const i = (typeof p === "bigint" ? p : q) as bigint;
+        if (i > 2n ** 53n || i < -(2n ** 53n)) return undefined;
+        p = Number(p); q = Number(q);
+      }
+      return ({ Lt: p < q, LtE: p <= q, Gt: p > q, GtE: p >= q, Eq: p === q, NotEq: p !== q } as Record<string, boolean>)[op];
+    }
+    if (a.t === "str" && b.t === "str") return ({ Lt: a.v < b.v, LtE: a.v <= b.v, Gt: a.v > b.v, GtE: a.v >= b.v, Eq: a.v === b.v, NotEq: a.v !== b.v } as Record<string, boolean>)[op];
+    return undefined;
+  };
+  const known = (e: any, want: boolean) => { const x = konst(e); return x !== undefined && truth(x) === want; };
   const nonEmpty = (it: any) => ["List", "Tuple", "Set"].includes(it?._type) && it.elts.length > 0 && !it.elts.some((e: any) => e._type === "Starred");
   // (a statement that cannot raise before it binds: `x = 2`)
   const safe = (st: any) => (st?._type === "Assign" || st?._type === "AnnAssign") && st.value?._type === "Constant" && [st.targets ?? [st.target]].flat().every((t: any) => t._type === "Name");
@@ -821,14 +871,15 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     ((n._type === "If" || n._type === "IfExp") && k !== "test" && !(k === "body" && known(n.test, true)) && !(k === "orelse" && known(n.test, false))) ||
     (n._type === "BoolOp" && next && n.values.indexOf(next) > 0 && !n.values.slice(0, n.values.indexOf(next)).every((v: any) => known(v, n.op?._type === "And"))) ||
     (n._type === "Compare" && k === "comparators" && next && n.comparators.indexOf(next) > 0 &&
-      konst({ _type: "Compare", left: n.left, ops: n.ops.slice(0, n.comparators.indexOf(next)), comparators: n.comparators.slice(0, n.comparators.indexOf(next)) }) !== true) ||
+      !known({ _type: "Compare", left: n.left, ops: n.ops.slice(0, n.comparators.indexOf(next)), comparators: n.comparators.slice(0, n.comparators.indexOf(next)) }, true)) ||
     (n._type === "Assert" && k === "msg") ||
     ((n._type === "For" || n._type === "AsyncFor") && (k === "orelse" || ((k === "body" || k === "target") && !nonEmpty(n.iter)))) ||
     (n._type === "While" && (k === "body" || k === "orelse")) ||
     ((n._type === "Try" || n._type === "TryStar") && k !== "finalbody" && !(k === "body" && safe(n.body[0]) && n.body[0] === next)) ||
     ((n._type === "With" || n._type === "AsyncWith") && k === "body") ||
     (n._type === "Match" && k === "cases" && !(konst(n.subject) !== undefined && next === n.cases[0] && !n.cases[0].guard &&
-      ((n.cases[0].pattern?._type === "MatchValue" && konst(n.cases[0].pattern.value) === konst(n.subject)) || (n.cases[0].pattern?._type === "MatchAs" && !n.cases[0].pattern.pattern)))) ||
+      ((n.cases[0].pattern?._type === "MatchValue" && compare("Eq", konst(n.cases[0].pattern.value) ?? { t: "none", v: null }, konst(n.subject)!) === true && konst(n.cases[0].pattern.value)?.t === konst(n.subject)?.t) ||
+        (n.cases[0].pattern?._type === "MatchAs" && !n.cases[0].pattern.pattern)))) ||
     (COMPS.has(n._type) && k !== "iter0" && !n.generators.every((g: any) => nonEmpty(g.iter) && !g.ifs.length));
   // (whether a binding runs whenever `from` does: nothing between them may skip it;
   // `from` is a path index in s, or the point where s's and r's paths part)
@@ -838,8 +889,12 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     let start = from;
     const [n, k] = s.path[from] ?? [null, ""];
     if (r && n && k === "test" && (n._type === "If" || n._type === "While" || n._type === "IfExp") && r.path[from]?.[0] === n && r.path[from][1] === "body") {
+      // (a true `and` makes each operand true, so an `and` or comparison in
+      // one is true too; a true comparison only had its operands evaluated,
+      // whatever they hold may have been skipped: REACT-67BD-3)
       start = from + 1;
-      while (start < s.path.length && ((s.path[start][0]._type === "BoolOp" && s.path[start][0].op?._type === "And") || s.path[start][0]._type === "Compare")) start++;
+      while (start < s.path.length && s.path[start][0]._type === "BoolOp" && s.path[start][0].op?._type === "And") start++;
+      if (start < s.path.length && s.path[start][0]._type === "Compare") start++;
     }
     return !s.path.slice(start).some((e, i, rest) => mayskip(e, rest[i + 1]?.[0] ?? null));
   };
@@ -864,7 +919,8 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
       if (there.some((s) => runsBefore(s, r) && everyTime(s, R))) continue;
       // (an augmented assignment binds its target after its value)
       // (and one before R counts only if it surely ran: REACT-E17D-1)
-      const boundBefore = (s: Occurrence) => runsBefore(s, r) && surely(s, parting(s, r), r) && !(s.path.at(-1)?.[0]._type === "AugAssign" && s.path.at(-1)?.[1] === "target" && inside(r, s.path.at(-1)![0]));
+      const boundBefore = (s: Occurrence) => (prefixed && s === first) ||
+        (runsBefore(s, r) && surely(s, parting(s, r), r) && !(s.path.at(-1)?.[0]._type === "AugAssign" && s.path.at(-1)?.[1] === "target" && inside(r, s.path.at(-1)![0])));
       if (occ.some((s) => s.store && plain(s) && !inRepeat(s, R) && boundBefore(s))) continue;
       return null;
     }
