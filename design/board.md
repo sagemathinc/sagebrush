@@ -368,6 +368,44 @@ out the sheets without the dialog. test-board.mjs prints every example to a
 PDF in CI (CDP's Page.printToPDF) and checks its page count, its paper size,
 and that each sheet's notes fit their text, with math typeset.
 
+**Mermaid** (web/board/mermaid.ts, October 12). A Mermaid flowchart becomes
+a board, which lays it out and routes its edges itself, so labels never
+overlap. Excalidraw's users ask for this, and Mermaid's own layout is what
+they complain about. What carries over:
+- nodes with their labels and shapes, also from the `A@{ shape: ... }` syntax;
+- edges, chained (`a --> b --> c`) and fanned (`a & b --> c`), with labels,
+  arrowheads at either end, both ends or none, dotted and thick lines;
+  `~~~` places without drawing;
+- nested subgraphs as groups, with their own `direction`;
+- colors from `classDef`, `class`, `:::` and `style` (dark fills lightened
+  so that text stays readable);
+- links from `click`, titles from the front matter, Markdown strings,
+  `<br>`, `<b>`, images and math.
+
+Notes got `shape` (drawn with CSS: rounded, stadium, cylinder, subroutine,
+and polygons via clip-path) and `fit`, which makes a note as wide as its
+text. Edges got `arrow` and `line`. Far out, a note without a title shows
+the first line of its text, shrunk to fit.
+
+You open a `.mmd` file, or Markdown, where each ```` ```mermaid ```` block
+becomes a page titled by the heading above it. You can also paste a
+diagram into *Import Mermaid…*, put it in the address (`?mermaid=`), or,
+as an agent, call `fromMermaid(text)`. Undo (now also outside Edit) brings
+back the board it replaced. examples/mermaid.md has two pages: a cell
+running, with every shape and kind of line, and Mermaid's own code-flow
+diagram (about 100 nodes).
+
+web/board/test-mermaid.mjs is a differential test against Mermaid itself.
+It parses every flowchart in Mermaid's end-to-end tests and docs (490 at
+12.1.0) with both parsers, Mermaid's in headless Chromium, and compares:
+- the nodes, by id and label;
+- the edges, by ends, label and line;
+- the subgraphs, by title and members.
+
+482 agree exactly. The 6 that differ are deliberate: images are kept as
+images, entities are decoded, and a `%%` comment is not a node; the other 2
+are not valid Mermaid. CI runs it (at least 97% must agree).
+
 Still to do in step 1:
 - editing edges' labels, moving notes between groups;
 - shapes and frames;
