@@ -539,7 +539,8 @@ function surrogateEscape(e: any): boolean {
   let i = 0;
   while (i < t.length) {
     const c = t[i];
-    if (c === " " || c === "\t" || c === "\n" || c === "\r" || c === "(" || c === ")") { i++; continue; }
+    // (whitespace between tokens as the lexer skips it, form feed too: REACT-006F-1)
+    if (c === " " || c === "\t" || c === "\f" || c === "\n" || c === "\r" || c === "(" || c === ")") { i++; continue; }
     if (c === "\\" && (t[i + 1] === "\n" || t[i + 1] === "\r")) { i += 2; continue; }
     if (c === "#") { while (i < t.length && t[i] !== "\n") i++; continue; }
     const pre = /^[rRbBuU]{0,2}/.exec(t.slice(i))![0];
