@@ -177,7 +177,7 @@ export function spaceTitle(n: number, k: number) {
 }
 
 export function spaceCrumbs(n: number, k: number): [string, string?][] {
-  return [["Atlas", "/atlas/"], ["Modular forms", "/atlas/mf/"], [`Weight ${k}`, `/atlas/mf/?weight=${k}`], [`Level ${n}`, `/atlas/mf/?weight=${k}&level=${n}`], [spaceLabel(n, k)]];
+  return [["Atlas", "/atlas/"], ["Modular forms", "/atlas/mf/"], [`Weight ${k}`, `/atlas/mf/?weight=${k}`], [`Level ${n}`, `/atlas/mf/?level=${n}`], [spaceLabel(n, k)]];
 }
 
 function orbitRow(sp: Space, f: Orbit): string {

@@ -177,7 +177,7 @@ ${nav}
 }
 
 const md = renderer();
-const urls: { url: string; date: string }[] = [{ url: "/", date: new Date().toISOString().slice(0, 10) }, { url: "/atlas/", date: new Date().toISOString().slice(0, 10) }, { url: "/demo/jfm/", date: new Date().toISOString().slice(0, 10) }];
+const urls: { url: string; date: string }[] = [{ url: "/", date: new Date().toISOString().slice(0, 10) }, { url: "/atlas/", date: new Date().toISOString().slice(0, 10) }, { url: "/demo/jfm/", date: new Date().toISOString().slice(0, 10) }, { url: "/board/", date: new Date().toISOString().slice(0, 10) }];
 const seriesList: { slug: string; title: string; description: string; count: number }[] = [];
 rmSync(join(out, "articles"), { recursive: true, force: true });
 const adir = join(root, "articles");

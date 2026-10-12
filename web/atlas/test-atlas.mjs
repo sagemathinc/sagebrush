@@ -58,6 +58,20 @@ try {
   const v = await ev("document.querySelector('#verify-status').textContent");
   ok(/✓ Identical to the stored data: 5 orbits/.test(v), "389.2.a recomputed in the browser: " + v);
 
+  // what search engines are told: listings by weight and level are pages
+  // to index; one weight and one level is that newspace's page; other
+  // searches are not indexed (and data pages do not link to them)
+  {
+    const get = async (u) => { const r = await fetch(base + u, { redirect: "manual" }); return { status: r.status, location: r.headers.get("location"), body: r.status === 200 ? await r.text() : "" }; };
+    const exact = await get("/atlas/mf/?weight=2&level=608");
+    ok(exact.status === 301 && /\/atlas\/mf\/608\.2\.a$/.test(exact.location ?? ""), "weight 2, level 608: a permanent redirect to its newspace page");
+    const listing = await get("/atlas/mf/?weight=2&level=1-100");
+    ok(!/noindex/.test(listing.body) && /rel="canonical" href="https:\/\/sagebrush\.space\/atlas\/mf\/\?weight=2&#38;level=1-100"/.test(listing.body), "a listing by weight and level: indexed, its own canonical URL");
+    ok(/noindex/.test((await get("/atlas/mf/?weight=2&cm=yes")).body), "other searches: not indexed");
+    const space = await get("/atlas/mf/37.2.a");
+    ok(!/href="\/atlas\/mf\/\?weight=2&amp;level=37"/.test(space.body) && /href="\/atlas\/mf\/\?level=37"/.test(space.body), "a newspace's breadcrumbs link to indexed listings");
+  }
+
   await open("/atlas/mf/389.2.a.a");
   t = await text();
   ok(/q - 2q\^\{2\} - 2q\^\{3\} \+ 2q\^\{4\} - 3q\^\{5\}/.test(t) && /389a1/.test(t) && /rank 2/.test(t), "389.2.a.a: q-expansion, curve 389a1 of rank 2");
@@ -68,7 +82,7 @@ try {
   ok(/78,49\d primes p < 10⁶/.test(await ev("document.querySelector('#st-status').textContent")), "Sato-Tate from a_p, p < 10^6, computed in the page: " + (await ev("document.querySelector('#st-status').textContent")));
 
   await open("/atlas/mf/27.2.a.a");
-  ok(/complex multiplication by +\$\\mathbb\{Q\}\(\\sqrt\{-3\}\)\$/.test(await text()), "27.2.a.a: CM by Q(sqrt -3)");
+  ok(/complex multiplication by +\$\\mathbb\{Q\}\(\\sqrt\{-3\}\)\$/i.test(await text()), "27.2.a.a: CM by Q(sqrt -3)");
   await open("/atlas/mf/23.2.a.a");
   t = await text();
   ok(/x\^\{2\} \+ x - 1/.test(t) && /\\mathbb\{Q\}\(\\sqrt\{5\}\)/.test(t), "23.2.a.a: coefficient field Q(sqrt 5), x^2 + x - 1");
