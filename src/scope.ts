@@ -185,12 +185,23 @@ class Collector {
         if (st.target.k === "Name") this.bind(st.target.id);
         else this.expr(st.target);
         return;
-      case "AnnAssign":
+      case "AnnAssign": {
         if (st.value) this.expr(st.value);
-        if (st.value || st.target.k !== "Name") this.bindTarget(st.target);
-        else if (st.target.k === "Name" && this.s.kind !== "module" && this.s.kind !== "class") this.bind(st.target.id);
-        if (st.target.k === "Name") this.mark(this.s, st.target.id, ANNOT);
+        const t = st.target;
+        // `(x): int`, not simple: x is neither annotated nor (without a value) bound
+        if (t.k !== "Name" || !st.simple) {
+          if (st.value || t.k !== "Name") this.bindTarget(t);
+          return;
+        }
+        // (a name declared global or nonlocal cannot be annotated, but at a module's top level)
+        if (this.s.kind !== "module" && (this.s.globals.has(t.id) || this.s.nonlocals.has(t.id))) {
+          throw new SyntaxErr(`annotated name '${t.id}' can't be ${this.s.globals.has(t.id) ? "global" : "nonlocal"}`, st.line);
+        }
+        if (st.value) this.bindTarget(t);
+        else if (this.s.kind !== "module" && this.s.kind !== "class") this.bind(t.id);
+        this.mark(this.s, t.id, ANNOT);
         return;
+      }
       case "Return":
         if (st.value) this.expr(st.value);
         return;

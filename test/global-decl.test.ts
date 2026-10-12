@@ -40,6 +40,9 @@ const CASES: [string, string, string | null, string | null][] = [
   ["import then read", "import math as x\nprint(x)", USED, USED],
   ["global, assign", "global x\nx = 1", ASSIGNED, ASSIGNED],
   ["global twice", "global x", null, null],
+  // (`(x): int` is not simple: x is neither annotated nor, without a value, bound: REACT-D304-1)
+  ["parenthesized annotation", "(x): int", null, null],
+  ["parenthesized annotation with a value", "(x): int = 1", ASSIGNED, ASSIGNED],
 ];
 
 const error = (src: string): string | null => {
@@ -63,6 +66,22 @@ test("global after what, as CPython 3.14 (REACT-D2C5-3)", () => {
     }
   }
   assert.deepEqual(wrong, []);
+});
+
+test("an annotation after global or nonlocal, as CPython 3.14 (REACT-D304-1, 3)", () => {
+  const fn = (b: string) => "def g():\n" + b.split("\n").map((l) => "    " + l).join("\n");
+  const cls = (b: string) => "class C:\n" + b.split("\n").map((l) => "    " + l).join("\n");
+  const nl = (b: string) => "def g():\n    x = 1\n    def h():\n" + b.split("\n").map((l) => "        " + l).join("\n");
+  for (const b of ["global x\nx: int", "global x\nx: int = 1"]) {
+    // (valid at a module's top level only)
+    assert.equal(error(b), null, b);
+    assert.match(error(fn(b))!, /annotated name 'x' can't be global/, b);
+    assert.match(error(cls(b))!, /annotated name 'x' can't be global/, b);
+    assert.match(error(nl(b.replace("global", "nonlocal")))!, /annotated name 'x' can't be nonlocal/, b);
+  }
+  for (const b of ["global x\n(x): int", "global x\n(x): int = 1"]) {
+    for (const src of [b, fn(b), cls(b), nl(b.replace("global", "nonlocal"))]) assert.equal(error(src), null, src);
+  }
 });
 
 test("nonlocal after what, as CPython 3.14", () => {
