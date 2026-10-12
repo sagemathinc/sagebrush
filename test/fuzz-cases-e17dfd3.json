@@ -1,0 +1,238 @@
+[
+  {
+    "name": "conditional earlier cell binding",
+    "codes": [
+      "x=1",
+      "if False:\n    x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ],
+    "change": [
+      0,
+      "x=5"
+    ]
+  },
+  {
+    "name": "conditional earlier loop binding",
+    "codes": [
+      "x=1",
+      "if False:\n    x=2\nfor i in [0,1]:\n    x=x+1\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "shortcircuit earlier binding",
+    "codes": [
+      "x=1",
+      "False and (x:=2)\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "empty earlier loop binding",
+    "codes": [
+      "x=1",
+      "for j in []:\n    x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "empty earlier comprehension binding",
+    "codes": [
+      "x=1",
+      "a=[(x:=2) for j in []]\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "try skipped earlier binding",
+    "codes": [
+      "x=1",
+      "try:\n    1/0\n    x=2\nexcept ZeroDivisionError:\n    pass\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "compare conditional preceding in comp",
+    "codes": [
+      "x=1",
+      "a=[((1>2<(x:=10)),(x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "compare conditional in filter",
+    "codes": [
+      "x=1",
+      "a=[(x:=x+1) for i in [0,1] if 1>2<(x:=10) or True]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "assert message skipped inside for",
+    "codes": [
+      "x=1",
+      "for i in [0,1]:\n    assert True,(x:=10)\n    x=x+1\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "assert message skipped inside while",
+    "codes": [
+      "x=1",
+      "count=0\nwhile count<2:\n    assert True,(x:=10)\n    x=x+1\n    print(x)\n    count+=1",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "with skipped first binding outside repeat",
+    "codes": [
+      "x=1",
+      "class Quiet:\n    def __enter__(self): return self\n    def __exit__(self,*args): return True\nwith Quiet():\n    1/0\n    x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "match skipped first binding outside repeat",
+    "codes": [
+      "x=1",
+      "match 1:\n    case 2:\n        x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single for increment control",
+    "codes": [
+      "x=1",
+      "for i in [0]:\n    x=x+1\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "literal singleton target body control",
+    "codes": [
+      "x=1",
+      "for x in [2]:\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "nonliteral for with prior assignment control",
+    "codes": [
+      "x=1",
+      "x=2\nfor i in range(2):\n    x=x+1\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "comparison unconditional store control",
+    "codes": [
+      "x=1",
+      "a=[((1<(x:=2)<3),(x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "for assert test store control",
+    "codes": [
+      "x=1",
+      "for i in [0,1]:\n    assert (x:=2)\n    x=x+1\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "loop if true initial constant control",
+    "codes": [
+      "x=1",
+      "for i in [0,1]:\n    if True:\n        x=2\n    x=x+1\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "loop for else reads new control",
+    "codes": [
+      "x=1",
+      "for x in [2,3]:\n    pass\nelse:\n    print(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "dict repeated argument firstiter read control",
+    "codes": [
+      "x=1",
+      "x+=sum([(x:=2) for i in range(x+1)])\nprint(x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "while if true initial constant control",
+    "codes": [
+      "x=1",
+      "count=0\nwhile count<2:\n    if True:\n        x=2\n    x=x+1\n    print(x)\n    count+=1",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "conditional true earlier binding control",
+    "codes": [
+      "x=1",
+      "if True:\n    x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "shortcircuit true earlier binding control",
+    "codes": [
+      "x=1",
+      "True and (x:=2)\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "nonempty earlier loop binding control",
+    "codes": [
+      "x=1",
+      "for j in [0]:\n    x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "nonempty earlier comprehension binding control",
+    "codes": [
+      "x=1",
+      "a=[(x:=2) for j in [0]]\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "try completed earlier binding control",
+    "codes": [
+      "x=1",
+      "try:\n    x=2\nexcept ZeroDivisionError:\n    pass\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "match taken earlier binding control",
+    "codes": [
+      "x=1",
+      "match 1:\n    case 1:\n        x=2\na=[(x:=x+1) for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "comparison later store evaluated control",
+    "codes": [
+      "x=1",
+      "a=[((1<2<(x:=10)),(x:=x+1))[1] for i in [0,1]]\nprint(a,x)",
+      "print(x)"
+    ]
+  },
+  {
+    "name": "single iteration skipped comparison boundary",
+    "codes": [
+      "x=1",
+      "a=[((1>2<(x:=10)),(x:=x+1))[1] for i in [0]]\nprint(a,x)",
+      "print(x)"
+    ]
+  }
+]

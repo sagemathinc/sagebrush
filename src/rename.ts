@@ -790,27 +790,81 @@ function whichReads(occ: Occurrence[], first: Occurrence, body: any[] = []): Map
     (n._type === "While" && (k === "test" || k === "body")) ||
     (COMPS.has(n._type) && k !== "iter0" && !n.generators.every((g: any) => literalOnce(g.iter)));
   const inRepeat = (o: Occurrence, R: any) => o.path.some(([n, k]) => n === R && repeats(n, k));
-  // (whether a binding inside R runs in every iteration: not under a
-  // condition, a later operand of and/or, or a loop inside R)
-  const everyTime = (s: Occurrence, R: any) => {
-    const j = s.path.findIndex(([n]) => n === R);
-    return !s.path.slice(j + 1).some(([n, k], i, rest) => {
-      const next = rest[i + 1]?.[0];
-      return n._type === "If" || n._type === "Try" || n._type === "TryStar" || n._type === "Match" || n._type === "With" || n._type === "AsyncWith" ||
-        (n._type === "IfExp" && k !== "test") || (n._type === "BoolOp" && next && n.values.indexOf(next) > 0) ||
-        ((n._type === "For" || n._type === "AsyncFor" || n._type === "While") && k !== "iter") || (COMPS.has(n._type) && k !== "iter0");
-    });
+  // (whether a path entry may skip what is under it: a branch of an if (not
+  // `if True`) or a conditional expression, a later operand of and/or or of
+  // a chained comparison, an assert's message, a loop's body (unless over a
+  // literal with elements), a try's body or handlers, a with's body, a
+  // match's cases, a comprehension's body (unless over literals with
+  // elements and no conditions): REACT-E17D-2, -3)
+  // (a constant's value, folded through not, and/or and comparisons of constants; undefined if not one)
+  const konst = (e: any): any => {
+    if (e?._type === "Constant") return e.value;
+    if (e?._type === "UnaryOp" && e.op?._type === "Not") { const v = konst(e.operand); return v === undefined ? undefined : !v; }
+    if (e?._type === "BoolOp") {
+      const vs = e.values.map(konst);
+      if (vs.some((v: any) => v === undefined)) return undefined;
+      return e.op?._type === "And" ? vs.find((v: any) => !v) ?? vs.at(-1) : vs.find((v: any) => !!v) ?? vs.at(-1);
+    }
+    if (e?._type === "Compare") {
+      // (ints are BigInts here)
+      const xs = [e.left, ...e.comparators].map(konst).map((v: any) => (typeof v === "bigint" ? Number(v) : v));
+      if (xs.some((v: any) => typeof v !== "number")) return undefined;
+      return e.ops.every((op: any, i: number) => ({ Lt: xs[i] < xs[i + 1], LtE: xs[i] <= xs[i + 1], Gt: xs[i] > xs[i + 1], GtE: xs[i] >= xs[i + 1], Eq: xs[i] === xs[i + 1], NotEq: xs[i] !== xs[i + 1] } as any)[op._type] ?? false);
+    }
+    return undefined;
   };
+  const known = (e: any, want: boolean) => { const v = konst(e); return v !== undefined && !!v === want; };
+  const nonEmpty = (it: any) => ["List", "Tuple", "Set"].includes(it?._type) && it.elts.length > 0 && !it.elts.some((e: any) => e._type === "Starred");
+  // (a statement that cannot raise before it binds: `x = 2`)
+  const safe = (st: any) => (st?._type === "Assign" || st?._type === "AnnAssign") && st.value?._type === "Constant" && [st.targets ?? [st.target]].flat().every((t: any) => t._type === "Name");
+  const mayskip = ([n, k]: [any, string], next: any) =>
+    ((n._type === "If" || n._type === "IfExp") && k !== "test" && !(k === "body" && known(n.test, true)) && !(k === "orelse" && known(n.test, false))) ||
+    (n._type === "BoolOp" && next && n.values.indexOf(next) > 0 && !n.values.slice(0, n.values.indexOf(next)).every((v: any) => known(v, n.op?._type === "And"))) ||
+    (n._type === "Compare" && k === "comparators" && next && n.comparators.indexOf(next) > 0 &&
+      konst({ _type: "Compare", left: n.left, ops: n.ops.slice(0, n.comparators.indexOf(next)), comparators: n.comparators.slice(0, n.comparators.indexOf(next)) }) !== true) ||
+    (n._type === "Assert" && k === "msg") ||
+    ((n._type === "For" || n._type === "AsyncFor") && (k === "orelse" || ((k === "body" || k === "target") && !nonEmpty(n.iter)))) ||
+    (n._type === "While" && (k === "body" || k === "orelse")) ||
+    ((n._type === "Try" || n._type === "TryStar") && k !== "finalbody" && !(k === "body" && safe(n.body[0]) && n.body[0] === next)) ||
+    ((n._type === "With" || n._type === "AsyncWith") && k === "body") ||
+    (n._type === "Match" && k === "cases" && !(konst(n.subject) !== undefined && next === n.cases[0] && !n.cases[0].guard &&
+      ((n.cases[0].pattern?._type === "MatchValue" && konst(n.cases[0].pattern.value) === konst(n.subject)) || (n.cases[0].pattern?._type === "MatchAs" && !n.cases[0].pattern.pattern)))) ||
+    (COMPS.has(n._type) && k !== "iter0" && !n.generators.every((g: any) => nonEmpty(g.iter) && !g.ifs.length));
+  // (whether a binding runs whenever `from` does: nothing between them may skip it;
+  // `from` is a path index in s, or the point where s's and r's paths part)
+  // (a body reached through a test was reached with the test true: every
+  // operand of an `and`, or of a chained comparison, in it ran)
+  const surely = (s: Occurrence, from: number, r?: Occurrence) => {
+    let start = from;
+    const [n, k] = s.path[from] ?? [null, ""];
+    if (r && n && k === "test" && (n._type === "If" || n._type === "While" || n._type === "IfExp") && r.path[from]?.[0] === n && r.path[from][1] === "body") {
+      start = from + 1;
+      while (start < s.path.length && ((s.path[start][0]._type === "BoolOp" && s.path[start][0].op?._type === "And") || s.path[start][0]._type === "Compare")) start++;
+    }
+    return !s.path.slice(start).some((e, i, rest) => mayskip(e, rest[i + 1]?.[0] ?? null));
+  };
+  const parting = (s: Occurrence, r: Occurrence) => {
+    let j = 0;
+    while (j < s.path.length && j < r.path.length && s.path[j][0] === r.path[j][0] && s.path[j][1] === r.path[j][1]) j++;
+    return j;
+  };
+  // (a binding inside R runs in every iteration: nothing in R may skip it)
+  const everyTime = (s: Occurrence, R: any) => surely(s, s.path.findIndex(([n]) => n === R) + 1);
   const plain = (o: Occurrence) => !o.global && !deferredOf(o);
   for (const r of occ) {
     if (r.store || !plain(r)) continue;
+    // (a read after the cell's first binding in that same statement reads
+    // the new name: some binding before it there must surely have run,
+    // `(1 > 2 < (x := 10), x)` reads the previous x, REACT-E17D-2)
+    if (r.stmt === first.stmt && runsBefore(first, r) && plain(first) && !occ.some((s) => s.store && plain(s) && s.stmt === r.stmt && runsBefore(s, r) && surely(s, parting(s, r), r))) return null;
     for (const [R, k] of r.path) {
       if (!repeats(R, k)) continue;
       const there = occ.filter((s) => s.store && plain(s) && inRepeat(s, R));
       if (!there.some((s) => s !== r && runsBefore(r, s))) continue;
       if (there.some((s) => runsBefore(s, r) && everyTime(s, R))) continue;
       // (an augmented assignment binds its target after its value)
-      const boundBefore = (s: Occurrence) => runsBefore(s, r) && !(s.path.at(-1)?.[0]._type === "AugAssign" && s.path.at(-1)?.[1] === "target" && inside(r, s.path.at(-1)![0]));
+      // (and one before R counts only if it surely ran: REACT-E17D-1)
+      const boundBefore = (s: Occurrence) => runsBefore(s, r) && surely(s, parting(s, r), r) && !(s.path.at(-1)?.[0]._type === "AugAssign" && s.path.at(-1)?.[1] === "target" && inside(r, s.path.at(-1)![0]));
       if (occ.some((s) => s.store && plain(s) && !inRepeat(s, R) && boundBefore(s))) continue;
       return null;
     }
