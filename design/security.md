@@ -155,6 +155,20 @@ Its re-review of 5deaa70 found one more, fixed:
   as much again on attribute-heavy Python; it is kept as the backstop that
   makes the whole class of cache escape impossible, not only the paths found
   so far.
+  - **It is a switch** (`hardened` in src/runtime/object.ts), on by default.
+    `SAGEBRUSH_HARDENED=0` in the environment, or `setHardened(false)` before
+    any code is compiled, turns it off. Each read site is generated with or
+    without the check, so off costs nothing.
+  - **Measured** on an attribute-heavy loop (five attribute reads per
+    iteration, 2 million iterations, Node): 0.165 s on, 0.108 s off, against
+    CPython's 0.136 s.
+  - **Both ways are tested:** CI runs test/security.test.ts with it off too.
+    Every Python-level escape test passes either way, since the primary rule
+    (a site is primed only by an object with its class's own prototype)
+    holds. The TypeScript test of a forged object shows what it adds: off,
+    the forged object gets JavaScript's `Function`.
+  - **Whether to turn it off by default** waits on the separate runner,
+    which makes any escape worthless (see "Still to do").
 
 Its re-review of 61c9cfe found two more, both medium (neither reached
 `Function`), both fixed:
@@ -256,6 +270,9 @@ attribute lookup), and is never handed to Python.
 
 ## Still to do
 
+- The separate runner: Python in a sandboxed, opaque-origin frame on its own
+  domain, with nothing worth stealing, so an escape from rule 6 gets nothing.
+  Then the attribute-read backstop can be off by default.
 - Further adversarial review of the Python sandbox (rule 6): it carries the
   most weight, since the worker has the origin's storage and a `?doc=` board
   runs its code on open.
