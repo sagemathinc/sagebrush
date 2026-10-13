@@ -85,6 +85,8 @@ try {
   await ev("localStorage.clear()");
   await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
   await ev("window.sagebrush.board.editing(true)");
+  // (laid out: on a slow machine the items come a moment after load)
+  await until("!!window.board?.item('m')", 20000);
 
   // math in a title: typeset (KaTeX), not shown as $...$
   await ev("(() => { const it = window.board.item('m'); window.board.setCamera({ x: it.x - 100, y: it.y - 100, z: 1 }); window.board.render(); return 1; })()");
