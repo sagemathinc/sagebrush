@@ -62,7 +62,7 @@ export class BoardCode {
     document.body.append(root);
     this.nb = mod.createNotebook(root, { kernel, reactive: true, analyzer, assetBase: new URL(".", this.base).href });
     this.nb.load({ mode: "python", cells: [], autorun: "always" });
-    this.highlight = (src) => mod.highlight(src, false);
+    this.highlight = (src) => mod.highlight(src, this.mode === "sage");
     // (a cell's state is its element's class: queued, running, stale, error, cancelled)
     this.observer = new MutationObserver(() => this.changed());
     this.observer.observe(root, { attributes: true, attributeFilter: ["class"], subtree: true });
@@ -115,23 +115,28 @@ export class BoardCode {
    * changes what others read: those rerun), and the new ones and those whose
    * code changed run, then what depends on them.  Resolves to the ids run.
    */
-  sync(items: { id: string; code: string }[]): Promise<string[]> {
+  sync(items: { id: string; code: string }[], mode: "python" | "sage" = "python"): Promise<string[]> {
     // (one after another: a sync sees what the one before it did)
-    const p = this.last.then(() => this.syncNow(items));
+    const p = this.last.then(() => this.syncNow(items, mode));
     this.last = p.catch(() => {});
     return p;
   }
   private last: Promise<unknown> = Promise.resolve();
-  private async syncNow(items: { id: string; code: string }[]): Promise<string[]> {
+  /** the board's language (BoardDoc.mode) */
+  mode: "python" | "sage" = "python";
+  private async syncNow(items: { id: string; code: string }[], mode: "python" | "sage"): Promise<string[]> {
     if (!(await this.ready)) return [];
     const nb = this.nb;
     const now = nb.cells().filter((c: any) => c.type === "code");
     const before = new Map<string, string>(now.map((c: any) => [c.id, c.ta.value]));
-    const changed = items.filter((it) => before.get(it.id) !== it.code).map((it) => it.id);
+    // (another language: every item runs again, in it)
+    const relang = mode !== this.mode;
+    this.mode = mode;
+    const changed = items.filter((it) => relang || before.get(it.id) !== it.code).map((it) => it.id);
     const same = now.length === items.length && items.every((it, i) => now[i].id === it.id);
     if (changed.length || !same) {
       nb.applyRemote({
-        mode: "python",
+        mode,
         cells: items.map((it) => {
           const c = this.cell(it.id);
           return { id: it.id, code: it.code, ...(c ? { outputs: nb.saveOutputs(c.out) } : {}) };

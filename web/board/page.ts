@@ -98,7 +98,8 @@ async function show(d: BoardDoc) {
   const order = codeOrder(d);
   const nth = new Map(order.map((c, i) => [c.id, i + 1]));
   for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
-  if (order.length || code) engine()?.sync(order).catch((e) => console.warn("board: code items:", e));
+  if (order.length || code) engine()?.sync(order, d.mode ?? "python").catch((e) => console.warn("board: code items:", e));
+  for (const b of document.querySelectorAll<HTMLButtonElement>("#lang button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
   board.setItems(items, edges);
   toolbar.tools.value = d.tools ?? defaultTools();
   shownPage = pageIx;
@@ -337,6 +338,10 @@ $("examples").onclick = async () => {
   ($("exdlg") as HTMLDialogElement).showModal();
 };
 $("tidy").onclick = () => editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
+// the language of the board's code (one per board): Python or Sage
+for (const b of document.querySelectorAll<HTMLButtonElement>("#lang button")) {
+  b.onclick = () => editor.commit((d) => { if (b.dataset.mode === "sage") d.mode = "sage"; else delete d.mode; });
+}
 $("pgprev").onclick = () => page(pageIx - 1);
 $("pgnext").onclick = () => page(pageIx + 1);
 ($("pgsel") as HTMLSelectElement).onchange = (e) => { page(Number((e.target as HTMLSelectElement).value)); (e.target as HTMLElement).blur(); };

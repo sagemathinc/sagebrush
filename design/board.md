@@ -126,6 +126,10 @@ time budget, Run stale, the stale marks and their time estimates, `verify()`
 and per-cell seeds all apply unchanged. Widgets on a board are two-way, as
 planned for the notebook: one model, any number of views.
 
+A board has one language, `mode` in the document: Python (the default, not
+written) or Sage, chosen in the ⋯ menu ("Code: Python | Sage"), as an edit.
+Changing it runs every code item again, in the new language.
+
 ## Fast
 
 The budgets, measured in CI with synthetic boards in headless Chromium and
