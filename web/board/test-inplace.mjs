@@ -251,6 +251,26 @@ try {
   check((await ev("JSON.stringify(window.sagebrush.board.snapshot().doc)")) === before, "left empty, it is not kept");
   await undoKey();
   check(!(await node("g")).title.endsWith(" two"), "...and leaves no undo step (undo takes back the edit before it)");
+  // a new note, dragged by its frame while it is written, then written in (William's I5)
+  await ev("document.querySelector('.board-toolbar [data-tool=note]').click(), 1");
+  check(await until("!!window.board.editing && document.activeElement === document.querySelector('.board-editing .be-title')", 3000), "Note: a new note being written");
+  const nid = await ev("window.board.editing");
+  const e1 = await elRect(".board-editing"), x1 = (await ev(`window.board.item(${JSON.stringify(nid)}).x`));
+  // (120 pixels on the screen: 120 / zoom in the world)
+  const moved = 120 / (await ev("window.board.camera.z"));
+  // (its frame: the padding at its left edge)
+  const fx = e1.left + 4, fy = e1.top + (e1.bottom - e1.top) / 2;
+  await mouse("mousePressed", fx, fy);
+  for (let i = 1; i <= 8; i++) await mouse("mouseMoved", fx + 15 * i, fy + 5 * i, { buttons: 1 });
+  await mouse("mouseReleased", fx + 120, fy + 40);
+  await sleep(300);
+  check(await until(`window.board.editing === ${JSON.stringify(nid)} && Math.abs(window.board.item(${JSON.stringify(nid)}).x - ${x1 + moved}) <= 8`, 3000), "dragged by its frame, it moves, and is still being written: " + JSON.stringify([x1, await ev(`window.board.item(${JSON.stringify(nid)})?.x`), await ev("window.board.editing")]));
+  await ev("document.querySelector('.board-editing .be-title').focus(), 1");
+  await type("Placed first");
+  await key("Escape");
+  await sleep(300);
+  const placed = await node(nid);
+  check(placed?.title === "Placed first" && Math.abs(placed.x - (x1 + moved)) <= 8, "then written in, it is kept, where it was put: " + JSON.stringify(placed));
   // markup typed in a title is text
   await show("a");
   await dblclick(r0.left + 40, r0.top + 14);

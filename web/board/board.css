@@ -125,9 +125,11 @@ button:disabled { opacity: .4; cursor: default; }
 :is(.be-md, .be-codebox) .hk { color: #8a3b8f; } :is(.be-md, .be-codebox) .hb { color: #2a6fb0; } :is(.be-md, .be-codebox) .hs { color: #975200; } :is(.be-md, .be-codebox) .hn { color: #0b7a52; }
 :is(.be-md, .be-codebox) .hc { color: #5f665f; font-style: italic; } :is(.be-md, .be-codebox) .hp { color: #5f665f; } :is(.be-md, .be-codebox) .hd { color: #7f5800; } :is(.be-md, .be-codebox) .hf { color: #2350a8; }
 /* an item being written where it is (inplace.ts): its parts as fields, at its place, size and look */
-.board .board-item.board-editing { z-index: 3; overflow: visible; contain: none; cursor: auto; user-select: text; -webkit-user-select: text; }
+.board .board-item.board-editing { z-index: 3; overflow: visible; contain: none; cursor: move; user-select: text; -webkit-user-select: text; }
 .board-group.board-editing { pointer-events: auto; }
 .board-editing [hidden] { display: none !important; }
+/* (its frame drags it; its fields are written in) */
+.board-editing :is(textarea, input, .mb, .be-md, .be-codebox, .board-code-out) { cursor: text; }
 .board-editing textarea, .board-editing input { display: block; width: 100%; box-sizing: border-box; margin: 0; padding: 0; border: 0; border-radius: 3px; outline: none; resize: none; overflow: hidden; background: transparent; font: inherit; color: inherit; }
 .board-editing .be-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
 .board-group.board-editing .be-title { font-size: 17px; }
