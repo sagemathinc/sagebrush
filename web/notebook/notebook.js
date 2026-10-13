@@ -113,15 +113,23 @@ const h = (tag, cls, props = {}) => Object.assign(document.createElement(tag), c
 // the prefix the text chose (x:href is an XLink href).  An attribute value
 // (or style declaration) may name the picture's own ids, url(#id), and
 // otherwise contains no backslash (CSS escapes), slash or colon: so nothing in
-// it can load from anywhere else (design/security.md).  Only aria-* and data-*
+// it can load from anywhere else (design/security.md); and the only CSS
+// functions are transforms, colors and arithmetic.  Only aria-* and data-*
 // attributes, which are text, may hold anything.
 const SVG_NS = "http://www.w3.org/2000/svg", XLINK_NS = "http://www.w3.org/1999/xlink", XML_NS = "http://www.w3.org/XML/1998/namespace";
 const SVG_TAGS = new Set("svg g path line polyline polygon circle ellipse rect text tspan title desc defs clipPath linearGradient radialGradient stop use marker symbol mask pattern image".split(" "));
 // (an <image>'s only allowed source: an inline raster picture, e.g. contourf's bands)
 const RASTER_URL = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]*$/;
 const LOCAL_URL = /url\(\s*(['"]?)#([\w.-]+)\1\s*\)/gi;
+// (the CSS functions a value may use: transforms, colors, arithmetic; never
+// one that loads, as image-set(), image(), cross-fade(), even from this site)
+const SVG_FUNCS = new Set("matrix translate translatex translatey rotate scale scalex scaley skewx skewy rgb rgba hsl hsla var calc min max clamp".split(" "));
+// (and no property that takes an image or other content, as a style or an attribute)
+const SVG_NO_PROPS = /^(background|cursor|list-style|content|border-image|mask-image|shape-outside|-webkit-)/i;
 function svgValue(v, pre) {
-  if (/[\\/:\u0000]|url\(|@import|expression\(/i.test(v.replace(LOCAL_URL, ""))) return null;
+  const rest = v.replace(LOCAL_URL, "");
+  if (/[\\/:\u0000]|url\(|@import|expression\(/i.test(rest)) return null;
+  for (const m of rest.matchAll(/([\w-]*)\s*\(/g)) if (!SVG_FUNCS.has(m[1].toLowerCase())) return null;
   return v.replace(LOCAL_URL, (_, q, id) => `url(#${pre}${id})`);
 }
 function svgStyle(v, pre) {
@@ -130,7 +138,7 @@ function svgStyle(v, pre) {
     const i = decl.indexOf(":");
     if (i < 0) continue;
     const p = decl.slice(0, i).trim().toLowerCase(), val = svgValue(decl.slice(i + 1), pre);
-    if (/^[a-z][a-z-]*$/.test(p) && val !== null) out.push(`${p}:${val.trim()}`);
+    if (/^[a-z][a-z-]*$/.test(p) && !SVG_NO_PROPS.test(p) && val !== null) out.push(`${p}:${val.trim()}`);
   }
   return out.join(";");
 }
@@ -151,7 +159,7 @@ export function safeSvg(text) {
         if (el.localName === "image") keep = RASTER_URL.test(value) ? value : null;
         else keep = /^#[\w.-]+$/.test(value) ? "#" + pre + value.slice(1) : null;
       } else if (a.namespaceURI === XML_NS) keep = n === "space" || n === "lang" ? svgValue(value, pre) : null;
-      else if (a.namespaceURI === null && /^[a-z_][\w.-]*$/i.test(n) && !/^on/i.test(n)) {
+      else if (a.namespaceURI === null && /^[a-z_][\w.-]*$/i.test(n) && !/^on/i.test(n) && !SVG_NO_PROPS.test(n)) {
         // (text for people and the page's script, never read as CSS or an address)
         if (/^(aria|data)-/i.test(n)) keep = value;
         else keep = n === "style" ? svgStyle(value, pre) : svgValue(value, pre);

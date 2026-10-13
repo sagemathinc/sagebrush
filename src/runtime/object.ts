@@ -659,6 +659,12 @@ export function genericDelattr(o: any, name: string, t: PyType): void {
 // so each owns its V8 type feedback.  Caches are keyed on (class, version);
 // any change to a class or its bases bumps the version.
 
+// The prototype an instance of a Python class has: its constructor's (an
+// array, for a list or tuple subclass).
+function instanceProto(cls: PyType): any {
+  return cls.$jsBase === ListLayout || cls.$jsBase === TupleLayout ? Array.prototype : cls.$ctor!.prototype;
+}
+
 function getattrMiss(o: any, name: string, S: any): any {
   if (isType(o)) {
     // Class attributes that are plain values or functions can be cached
@@ -683,7 +689,10 @@ function getattrMiss(o: any, name: string, S: any): any {
           // instances (a list or dict subclass's `constructor`, `push`) is
           // never cached: Python never adds to these prototypes, so a name
           // not on the chain now never will be.
-          if (cls.$jsBase === null || !(name in Object.getPrototypeOf(o))) {
+          // (and only for an object that has its class's layout: never one
+          // whose `$cls` says otherwise)
+          const proto = Object.getPrototypeOf(o);
+          if (proto === instanceProto(cls) && (cls.$jsBase === null || !(name in proto))) {
             S.c = cls;
             S.v = cls.$ver;
             S.k = 0;
@@ -1235,15 +1244,17 @@ export class ObjMap {
   keys(): IterableIterator<string> {
     return this.names().values();
   }
+  // (the runtime's own slots, `$...`, are no names: design/security.md rule 6)
   get(k: any): any {
-    return typeof k === "string" && Object.prototype.hasOwnProperty.call(this.o, k) ? this.o[k] : undefined;
+    return typeof k === "string" && !reservedName(k) && Object.prototype.hasOwnProperty.call(this.o, k) ? this.o[k] : undefined;
   }
   has(k: any): boolean {
     return this.get(k) !== undefined;
   }
   set(k: any, v: any): this {
     if (typeof k !== "string") raise(T.TypeError, "module namespace keys must be strings");
-    this.o[k] = v;
+    if (reservedName(k)) raise(T.TypeError, `namespace key '${k}' is reserved: names starting with '$' belong to the runtime`);
+    putAttr(this.o, k, v);
     return this;
   }
   delete(k: any): boolean {

@@ -2107,8 +2107,13 @@ export const SimpleNamespace = objectType("SimpleNamespace", [object], new Map()
   init.$kw = (pos: any[], names: string[], values: any[]) => {
     if (pos.length > 2) raise(T.TypeError, "SimpleNamespace expected at most 1 positional argument");
     const self = pos[0];
-    if (pos.length === 2) O.forEach(callObj(T.dict, [pos[1]]), (k: any) => void (self[k] = O.getitem(pos[1], k)));
-    names.forEach((n, i) => (self[n] = values[i]));
+    // (as attributes are set: a name is a string, and never one of the runtime's own)
+    const put = (k: any, v: any) => {
+      if (typeof k !== "string") raise(T.TypeError, `keywords must be strings, not '${typeName(k)}'`);
+      setattr(self, k, v);
+    };
+    if (pos.length === 2) O.forEach(callObj(T.dict, [pos[1]]), (k: any) => put(k, O.getitem(pos[1], k)));
+    names.forEach((n, i) => put(n, values[i]));
     return null;
   };
   method(SimpleNamespace, "__repr__", (self: any) => {

@@ -112,6 +112,89 @@ print(out)
   assert.equal(run(src), "['AttributeError', 'AttributeError', 'AttributeError', 'TypeError', 'L', 'default', False, 'AttributeError', 'AttributeError', 'AttributeError', 'TypeError', 'P', 'default', False]\n");
 });
 
+// sagebrush-daybreak at 18f5216: globals() wrote `$cls` and `$m` onto the
+// module object, so a module could pass for a list subclass and mislead the
+// attribute cache.  No namespace takes a `$` name; and the cache primes only
+// for an object with its class's own layout.
+test("no namespace takes the runtime's $ names: globals(), a module's __dict__, SimpleNamespace", () => {
+  const src = `
+import sys, types
+class L(list): pass
+out = []
+def attempt(f):
+    try:
+        f()
+        out.append("ok")
+    except (TypeError, AttributeError) as e:
+        out.append(type(e).__name__)
+attempt(lambda: globals().__setitem__("$cls", L))
+attempt(lambda: globals().__setitem__("$m", {}))
+out.append(globals().get("$cls", "absent"))
+m = types.ModuleType("m")
+attempt(lambda: vars(m).__setitem__("$cls", L))
+attempt(lambda: types.SimpleNamespace(**{"$cls": L}))
+attempt(lambda: types.SimpleNamespace({"$cls": L}))
+out.append(type(sys.modules[__name__]).__name__)
+out.append(type(m).__name__)
+globals()["__proto__"] = [1]
+out.append(globals()["__proto__"])
+out.append(types.SimpleNamespace(a=1, b=2).b)
+print(out)
+`;
+  assert.equal(run(src), "['TypeError', 'TypeError', 'absent', 'TypeError', 'AttributeError', 'TypeError', 'module', 'module', [1], 2]\n");
+});
+
+// sagebrush-daybreak's full SEC-18F-1 chain (report on 18f5216), as written:
+// it printed 42 (JavaScript's Function); CPython raises AttributeError.
+test("SEC-18F-1: the forged-layout cache chain never reaches JavaScript", () => {
+  const src = `
+import sys
+
+class L(list): pass
+class D(dict): pass
+class Q(property): pass
+
+def leak(o):
+    return (o.constructor, o.__lookupSetter__,
+            o.__defineGetter__, o.__defineSetter__)
+
+try:
+    m, g = sys.modules[__name__], globals()
+    for name in ("constructor", "__lookupSetter__", "__defineGetter__", "__defineSetter__"):
+        g[name] = None
+    g["$cls"] = L
+    leak(m)
+    Array, lookup_setter, define_getter, define_setter = leak(L())
+    x = Q()
+    x.get = lookup_setter
+    g["$cls"], g["$m"] = D, x
+    proto_setter = m["__proto__"]
+    x.set = define_getter
+    m["$cls"] = lambda: Q
+    x.set = define_setter
+    m["fget"] = proto_setter
+    property.__init__(x, Array)
+    g["$cls"] = Q
+    leak(m)
+    Function = leak(x)[0]
+    print(Function("return 6 * 7")())
+except (AttributeError, TypeError) as e:
+    print(type(e).__name__)
+# (the smaller case: a module primes a site for L's attribute, then a real L)
+class M: pass
+mm = M()
+mm.constructor = None
+leak2 = lambda o: o.constructor
+leak2(mm)
+try:
+    leak2(L())
+    print("leaked")
+except AttributeError:
+    print("AttributeError")
+`;
+  assert.equal(run(src), "TypeError\nAttributeError\n");
+});
+
 test("__class__ assignment cannot move a list subclass's array onto a plain class", () => {
   const src = `
 class L(list): pass

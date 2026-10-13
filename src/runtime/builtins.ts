@@ -123,7 +123,7 @@ function printImpl(args: any[], sep: any, end: any, file: any, flush: any) {
 (print as any).$kw = (pos: any[], names: string[], values: any[]) => {
   const kw: any = { sep: " ", end: "\n", file: null, flush: false };
   names.forEach((n, i) => {
-    if (!(n in kw)) raise(T.TypeError, `print() got an unexpected keyword argument '${n}'`);
+    if (!Object.hasOwn(kw, n)) raise(T.TypeError, `print() got an unexpected keyword argument '${n}'`);
     kw[n] = values[i];
   });
   return printImpl(pos, kw.sep, kw.end, kw.file, kw.flush);
