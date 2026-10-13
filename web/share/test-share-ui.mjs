@@ -83,7 +83,8 @@ try {
 
   // a file whose bytes don't match its hash is refused
   const sha = await ev("window.shared.c.manifest.files.find((f) => f.path === 'data/points.csv').sha256");
-  await dev.bucket.put(`b/${sha}`, "x,y\n6,6\n6,6\n");
+  const { key } = await dev.db.prepare("SELECT key FROM holdings WHERE sha256 = ?1").bind(sha).first();
+  await dev.bucket.put(key, "x,y\n6,6\n6,6\n");
   // (bypassing this browser's cache, which keeps the good copy: the names are hashes)
   await send("Network.enable");
   await send("Network.clearBrowserCache");
