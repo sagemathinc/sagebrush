@@ -40,10 +40,12 @@ export interface Item {
   order?: number;
   /** code items: only the code's output shows */
   hideCode?: boolean;
+  /** notes: a picture (its name, size, and its address when not in this browser) */
+  image?: { key: string; w: number; h: number; src?: string };
 }
 
 /** What an item's element shows. */
-export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode">>;
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "image">>;
 
 /** Code items' engine (code.ts, through page.ts): their output, state and running. */
 export interface CodeHost {
@@ -127,6 +129,8 @@ export class Board {
   pending: { from: string; x: number; y: number } | null = null;
   /** a rectangle being drawn to select what it holds, and the alignment guides of a drag (world coordinates) */
   marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** the item with a resize handle at its bottom right corner (Edit: the one selected note) */
+  handle: string | null = null;
   guides: { xs: number[]; ys: number[] } | null = null;
   /** a press on the background (no item there): return true to take it (the board does not pan) */
   onBackgroundDown: ((e: PointerEvent) => boolean) | null = null;
@@ -140,6 +144,8 @@ export class Board {
   code: CodeHost | null = null;
   /** a code item's { } (show or hide its code) was clicked */
   onToggleCode: ((id: string) => void) | null = null;
+  /** where a picture's bytes are, by its name (images.ts) */
+  imageUrl: ((name: string) => string | undefined) | null = null;
   /** a press on an item (not a link): return true to take it (the board does not pan) */
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
   /** a double click: on an item, or (null) on the background at world (x, y); return true when handled */
@@ -437,6 +443,18 @@ export class Board {
       h.textContent = it.title;
       el.append(h);
     }
+    // its picture (as wide as the note; its height from its shape, before it loads)
+    if (it.image) {
+      const img = document.createElement("img");
+      img.className = "board-img";
+      img.alt = it.title ?? "";
+      img.draggable = false;
+      img.style.aspectRatio = `${it.image.w} / ${it.image.h}`;
+      const src = it.image.src ?? this.imageUrl?.(it.image.key);
+      if (src) img.src = src;
+      el.append(img);
+      if (onlyImage(it)) el.classList.add("board-picture");
+    }
     const md = (src: string, cls: string) => {
       const d = document.createElement("div");
       d.className = cls;
@@ -621,6 +639,11 @@ export class Board {
       const inView = new Set([...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind !== "group"));
       const byColor = new Map<string, Item[]>();
       for (const it of inView) {
+        // (a picture: drawn itself, once it is decoded)
+        if (it.image) {
+          const im = this.picture(it.image);
+          if (im) { ctx.drawImage(im, it.x, it.y, it.w, it.h); continue; }
+        }
         const k = it.color ?? "#9cc28f";
         (byColor.get(k) ?? byColor.set(k, []).get(k)!).push(it);
       }
@@ -704,6 +727,17 @@ export class Board {
       ctx.fillRect(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1), Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0));
       ctx.strokeRect(Math.min(m.x0, m.x1), Math.min(m.y0, m.y1), Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0));
     }
+    if (this.handle && !far) {
+      const it = this.byId.get(this.handle);
+      if (it) {
+        const s = 9 / c.z;
+        ctx.fillStyle = "#fff";
+        ctx.strokeStyle = "#2a6f2f";
+        ctx.lineWidth = 1.5 / c.z;
+        ctx.fillRect(it.x + it.w - s / 2, it.y + it.h - s / 2, s, s);
+        ctx.strokeRect(it.x + it.w - s / 2, it.y + it.h - s / 2, s, s);
+      }
+    }
     if (this.guides) {
       ctx.strokeStyle = "#d6336c";
       ctx.lineWidth = 1 / c.z;
@@ -713,6 +747,36 @@ export class Board {
       ctx.stroke();
     }
     this.stats.drawn = n;
+  }
+
+  /** Show an item at a new size at once (a resize under way: the document follows when it ends). */
+  resizeItem(id: string, w: number, h?: number) {
+    const it = this.byId.get(id);
+    if (!it) return;
+    it.w = w;
+    if (h !== undefined) it.h = h;
+    const el = this.cache.get(id);
+    if (el) {
+      el.style.cssText = placement(it);
+      // (a note's height follows its text: measured again when the resize ends)
+      if (h === undefined) el.style.height = "auto";
+    }
+    this.request();
+  }
+
+  // Pictures far out, as decoded images for the canvas (each loaded once; drawn when ready).
+  private pictures = new Map<string, HTMLImageElement>();
+  private picture(i: NonNullable<Item["image"]>): HTMLImageElement | null {
+    const src = i.src ?? this.imageUrl?.(i.key);
+    if (!src) return null;
+    let im = this.pictures.get(src);
+    if (!im) {
+      im = new Image();
+      im.onload = () => this.request();
+      im.src = src;
+      this.pictures.set(src, im);
+    }
+    return im.complete && im.naturalWidth ? im : null;
   }
 
   /** World coordinates of a point on the page (client coordinates). */
@@ -915,8 +979,10 @@ export class Board {
 // An element's position and size, and its color.
 // (numbers, and a color checked when the document was read: doc.ts cleanDoc; checked again, as items also come from elsewhere)
 const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px;height:${+it.h}px;` + (it.color && it.kind !== "group" && /^[#\w(),.%\s-]+$/.test(it.color) ? `--c:${it.color};` : "");
+// (a note that is only a picture: shown as the picture alone; as doc.ts's onlyImage)
+const onlyImage = (it: Content) => !!it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref;
 // What an element shows (kept when this is unchanged).
-const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode]);
+const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image]);
 // A code item's output, in the box that gives it the notebook's styles.
 function outBox(out: HTMLElement) {
   const box = document.createElement("div");

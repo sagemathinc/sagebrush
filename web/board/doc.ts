@@ -6,14 +6,18 @@
 // keeps them (a person moved it), the rest are placed.
 
 import type { Item, Edge } from "./board";
+import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
 
 // Every note has the same optional parts, shown (and edited) in this order:
-// its title, its text, its code with the code's output, its detail, its link.
+// its title, its picture, its text, its code with the code's output, its
+// detail, its link.  A note that is only a picture is shown as the picture.
 export interface DocNote {
   id: string;
   kind?: "note";
   title?: string;
+  /** a picture: its name in the document's `images` (images.ts) */
+  image?: string;
   /** Markdown with math ($...$), shown at every zoom */
   text?: string;
   /** Python, run on the board's interpreter (reactive, as a notebook's cells:
@@ -92,6 +96,9 @@ export interface BoardDoc {
   title?: string;
   /** the toolbar's tools in Edit mode (toolbar.ts), in order; else the person's default */
   tools?: string[];
+  /** the pictures notes show, by name: each one's size (and its bytes, as a
+   * data: URL, in a board that left the browser: images.ts) */
+  images?: Record<string, ImageInfo>;
   /** pages, each with its own nodes, edges and steps; without them the
    * document is one page (its own nodes, edges and steps) */
   pages?: BoardPage[];
@@ -118,11 +125,11 @@ export function pageOf(d: BoardDoc, i: number): BoardPage {
   return d.pages[Math.max(0, Math.min(d.pages.length - 1, i))];
 }
 
-/** Page i as a one-page document, for layout() (the document's title and refBase). */
+/** Page i as a one-page document, for layout() (the document's title, refBase and pictures). */
 export function pageView(d: BoardDoc, i: number): BoardDoc {
   const p = pageOf(d, i);
   if (p === (d as BoardPage)) return d;
-  return { title: d.title, refBase: d.refBase, intro: p.intro, layout: p.layout, columns: p.columns, direction: p.direction, nodes: p.nodes, edges: p.edges, steps: p.steps };
+  return { title: d.title, refBase: d.refBase, images: d.images, intro: p.intro, layout: p.layout, columns: p.columns, direction: p.direction, nodes: p.nodes, edges: p.edges, steps: p.steps };
 }
 
 /** Whether something is a board document. */
@@ -140,6 +147,21 @@ const str = (v: unknown) => (typeof v === "string" ? v : v == null ? undefined :
 const one = <T extends string>(v: unknown, of: readonly T[]): T | undefined => (of.includes(v as T) ? (v as T) : undefined);
 const strip = <T extends object>(o: T): T => { for (const k of Object.keys(o)) if ((o as any)[k] === undefined) delete (o as any)[k]; return o; };
 const LAYOUTS = ["row", "column", "grid", "graph"] as const, DIRS = ["TB", "LR"] as const;
+// (a picture's name, and where its bytes may be: a raster image's data: URL, or an https: address)
+const IMAGE_NAME = /^[\w-]{1,100}$/;
+const IMAGE_SRC = /^(data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]*|https:\/\/[^\s"'<>\\]+)$/;
+function cleanImages(m: any): Record<string, ImageInfo> | undefined {
+  if (!m || typeof m !== "object" || Array.isArray(m)) return undefined;
+  const out: Record<string, ImageInfo> = {};
+  for (const [k, v] of Object.entries(m) as [string, any][]) {
+    const w = num(v?.w), h = num(v?.h);
+    if (!IMAGE_NAME.test(k) || !w || !h || w <= 0 || h <= 0) continue;
+    // (a source that is not a raster image's data: URL or an https: address: the picture is dropped)
+    if (v.src !== undefined && !(typeof v.src === "string" && IMAGE_SRC.test(v.src))) continue;
+    out[k] = v.src !== undefined ? { w, h, src: v.src } : { w, h };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 export function cleanDoc(d: any): BoardDoc {
   const node = (n: any): DocNode | null => {
@@ -150,7 +172,7 @@ export function cleanDoc(d: any): BoardDoc {
     }
     // (kind "code": the code items of documents before every note could have code)
     const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
-    return strip({ id: String(n.id), title: str(n.title), text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
+    return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
       color: safeColor(n.color), shape: SHAPES.has(n.shape) ? (n.shape as NoteShape) : undefined, fit: n.fit === true ? true : undefined,
       x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
   };
@@ -161,7 +183,7 @@ export function cleanDoc(d: any): BoardDoc {
       hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
     steps: Array.isArray(p?.steps) ? p.steps.filter((t: any) => t && (typeof t.focus === "string" || Array.isArray(t.focus))).map((t: any) => strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) })) : undefined,
   });
-  const out: any = strip({ ...page(d), title: str(d?.title), refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined });
+  const out: any = strip({ ...page(d), title: str(d?.title), refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
   delete out.id;
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
   return out as BoardDoc;
@@ -175,12 +197,19 @@ interface Box { w: number; h: number }
 
 /** A note's rendered height at a width (the renderer's measure()), and
  * optionally the width its text needs, up to a most (for `fit` notes). */
-export type Measure = ((n: DocNote, w: number) => number) & { width?: (n: DocNote, max: number) => number };
+export type Measure = ((n: MeasuredNote, w: number) => number) & { width?: (n: MeasuredNote, max: number) => number };
+/** A note as measured: with its picture's name and size (`img`). */
+export type MeasuredNote = DocNote & { img?: ImageInfo & { key: string } };
 
 // A note's size: given, measured, or estimated from its text's length (about
 // 7 px a character, 20 px a line), with room for the title and the link.
-function noteSize(n: DocNote, measure?: Measure): Box {
+function noteSize(n: DocNote, measure?: Measure, img?: ImageInfo): Box {
   if (n.w && n.h && !n.fit) return { w: n.w, h: n.h };
+  // (only a picture: its width, or at most 480; its height from its shape)
+  if (img && onlyImage(n)) {
+    const w = n.w ?? Math.min(480, img.w);
+    return { w, h: Math.round((w * img.h) / img.w) };
+  }
   // (code items: wider, for their output)
   const most = n.w ?? (n.code !== undefined ? 440 : 260);
   const longest = Math.max(...[n.title ?? "", ...(n.text ?? "").split("\n")].map((l) => l.length));
@@ -189,9 +218,14 @@ function noteSize(n: DocNote, measure?: Measure): Box {
   const chars = (n.text ?? "").length;
   const lines = Math.ceil(chars / Math.max(10, (w - 24) / 7.2)) + (n.text?.match(/\n/g)?.length ?? 0);
   const code = n.code === undefined ? 0 : 34 + (n.hideCode ? 0 : 18 * n.code.split("\n").length);
-  const h = n.h ?? Math.max(70, 24 + (n.title ? 24 : 0) + lines * 20 + (n.detail ? 26 : 0) + (n.ref ? 22 : 0) + code);
+  const pic = img ? Math.round(((w - 24) * img.h) / img.w) + 8 : 0;
+  const h = n.h ?? Math.max(70, 24 + (n.title ? 24 : 0) + pic + lines * 20 + (n.detail ? 26 : 0) + (n.ref ? 22 : 0) + code);
   return { w, h };
 }
+
+/** Whether a note is only a picture (shown as the picture alone). */
+export const onlyImage = (n: { image?: string | object; title?: string; text?: string; code?: string; detail?: string; ref?: string }) =>
+  !!n.image && !n.title && !n.text && n.code === undefined && !n.detail && !n.ref;
 
 const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.code !== undefined));
 
@@ -251,6 +285,8 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   for (const n of roots) walk(n, null);
   // links: absolute, or paths under the document's refBase
   const refOf = (n: DocNote) => n.ref && doc.refBase && !/^[a-z]+:/i.test(n.ref) ? doc.refBase + n.ref : n.ref;
+  // (a note's picture: its name and size, and where its bytes are when not in this browser)
+  const imgOf = (n: DocNote) => { const i = n.image ? doc.images?.[n.image] : undefined; return i ? { key: n.image!, ...i } : undefined; };
   const edges = (doc.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
   // the member of `members` that holds node `id` (itself, or a group around it)
   const memberOf = (id: string, members: Set<string>): string | null => {
@@ -264,7 +300,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   const innerTop = new Map<string, number>(); // a group's members' origin, below its title
   const sizeOf = (n: DocNode): Box => {
     if (n.kind !== "group") {
-      const b = noteSize(n, measure && Object.assign((m: DocNote, w: number) => measure({ ...m, ref: refOf(m) }, w), { width: measure.width && ((m: DocNote, w: number) => measure.width!({ ...m, ref: refOf(m) }, w)) }));
+      const b = noteSize(n, measure && Object.assign((m: DocNote, w: number) => measure({ ...m, ref: refOf(m), img: imgOf(m) }, w), { width: measure.width && ((m: DocNote, w: number) => measure.width!({ ...m, ref: refOf(m), img: imgOf(m) }, w)) }), imgOf(n));
       size.set(n.id, b);
       return b;
     }
@@ -312,7 +348,8 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         place(c, x + p.x, y + p.y, depth + 1, n.id);
       }
     } else {
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}) } : {}) });
+      const img = imgOf(n);
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}) } : {}) });
     }
   };
   for (const n of roots) {

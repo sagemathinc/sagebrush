@@ -26,7 +26,7 @@
 // shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
 // outputs().
 import { Board, synthetic, type Camera } from "./board";
-import { layout, isBoard, pageCount, pageOf, pageView, codeOrder, cleanDoc, type BoardDoc, type BoardPage, type DocNote } from "./doc";
+import { layout, isBoard, pageCount, pageOf, pageView, codeOrder, cleanDoc, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
 import { BoardCode } from "./code";
 import { Toolbar, defaultTools } from "./toolbar";
 import { effect } from "@preact/signals-core";
@@ -35,9 +35,13 @@ import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText, fromMermaid } from "./mermaid";
 import { embedded, exportHtml } from "./export";
 import { render as markdown } from "../markdown";
+import { Images, IMAGE_TYPES } from "./images";
 
 const q = new URLSearchParams(location.search);
 const board = new Board(document.getElementById("board")!);
+// pictures: kept in this browser by name; a board that carries them (data: URLs) gives them up on the way in
+const images = new Images();
+board.imageUrl = (name) => images.url(name);
 const $ = (id: string) => document.getElementById(id)!;
 let doc: BoardDoc | null = null;
 let at = -1; // the tour's step; -1 before it starts
@@ -60,6 +64,8 @@ async function show(d: BoardDoc) {
   if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
   // (only data: whatever it came from, REACT-XSS)
   d = cleanDoc(d);
+  await images.absorb(d);
+  await images.ensure(Object.keys(d.images ?? {}));
   doc = d;
   pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
   const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
@@ -113,7 +119,9 @@ async function show(d: BoardDoc) {
   $("title").textContent = d.title ?? "";
   $("tour").hidden = !v.steps?.length && !v.intro;
   pageBar();
-  $("revert").hidden = !original || JSON.stringify(original) === JSON.stringify(d);
+  // (a board's pictures aside: carried, or kept here, they are the same)
+  const same = (a: BoardDoc, b: BoardDoc) => JSON.stringify({ ...a, images: undefined }) === JSON.stringify({ ...b, images: undefined });
+  $("revert").hidden = !original || same(original, d);
 }
 
 // A reader's { } outside Edit: the code items whose code shows (or hides)
@@ -129,19 +137,19 @@ board.onToggleCode = (id) => {
   if (doc) show(doc).catch(fail);
 };
 
-function measure(n: DocNote, w: number) {
+function measure(n: MeasuredNote, w: number) {
   // (a code item's height changes with its output: measured each time)
-  if (n.code !== undefined) return board.measure({ ...n, kind: "note", order: 1 }, w);
-  const k = JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, w]);
+  if (n.code !== undefined) return board.measure({ ...n, kind: "note", order: 1, image: n.img }, w);
+  const k = JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w]);
   let h = heights.get(k);
-  if (h === undefined) heights.set(k, (h = board.measure({ ...n, kind: "note" }, w)));
+  if (h === undefined) heights.set(k, (h = board.measure({ ...n, kind: "note", image: n.img }, w)));
   return h;
 }
 // (and a `fit` note's width)
-measure.width = (n: DocNote, max: number) => {
-  const k = JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, max]);
+measure.width = (n: MeasuredNote, max: number) => {
+  const k = JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, max]);
   let w = heights.get(k);
-  if (w === undefined) heights.set(k, (w = board.measureWidth({ ...n, kind: "note" }, max)));
+  if (w === undefined) heights.set(k, (w = board.measureWidth({ ...n, kind: "note", image: n.img }, max)));
   return w;
 };
 
@@ -270,10 +278,12 @@ if (q.has("items") || q.has("strokes")) {
 // editing, and keeping what was edited
 const editor = new Editor(board, () => doc, async (d) => {
   await show(d);
-  try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch {}
+  // (the document as shown: its pictures' bytes are kept apart, images.ts)
+  try { localStorage.setItem(saveKey, JSON.stringify(doc)); } catch {}
 }, (d) => pageOf(d, pageIx));
 editor.onRun = (id) => { code?.run([id]); };
 editor.highlight = () => code?.highlight ?? null;
+editor.images = images;
 const editBtn = $("edit");
 editBtn.onclick = () => editor.setOn(!editor.on);
 effect(() => {
@@ -286,6 +296,7 @@ const toolbar = new Toolbar(document.body, [
   { id: "select", label: "Select", icon: "↖", title: "Select: drag on the background to select what the rectangle holds (Space-drag pans); Esc to stop", toggle: editor.selecting },
   { id: "note", label: "Note", icon: "¶", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y); } },
   { id: "code", label: "Code", icon: "{ }", title: "Add a note with Python code (any note can have code: + Code in its editor)", run: () => { const c = center(); editor.addCode(c.x, c.y); } },
+  { id: "image", label: "Image", icon: "▨", title: "Add pictures (or paste one, or drop files on the board)", run: () => pickImages() },
   { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
   { id: "connect", label: "Connect", icon: "⤳", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
   { id: "page", label: "Page", icon: "⧉", title: "Add a page after this one", run: () => $("addpage").click() },
@@ -293,6 +304,12 @@ const toolbar = new Toolbar(document.body, [
   { id: "redo", label: "↷", icon: "↷", title: "Redo (Ctrl+Shift+Z)", run: () => editor.redo() },
 // (which tools a board shows is a setting, not an edit to undo)
 ], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }, false, false));
+// pictures chosen from files (or the camera, on a phone), added in the middle of the view
+function pickImages() {
+  const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp", multiple: true });
+  input.onchange = () => { const c = center(); if (input.files?.length) editor.addImages(input.files, c.x, c.y).catch(fail); };
+  input.click();
+}
 const menu = $("menu");
 $("menubtn").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
 addEventListener("click", () => { menu.hidden = true; });
@@ -348,9 +365,10 @@ $("rmpage").onclick = async () => {
   });
   await page(Math.min(pageIx, pageCount(doc!) - 1));
 };
-$("download").onclick = () => {
+$("download").onclick = async () => {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 1)], { type: "application/json" }));
+  // (with its pictures)
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(await images.inline(doc!), null, 1)], { type: "application/json" }));
   a.download = fileName();
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -360,7 +378,7 @@ $("html").onclick = async () => {
   if (!doc) return;
   try {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([await exportHtml(doc)], { type: "text/html" }));
+    a.href = URL.createObjectURL(new Blob([await exportHtml(await images.inline(doc))], { type: "text/html" }));
     a.download = fileName().replace(/\.json$/, ".html");
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -370,7 +388,7 @@ $("html").onclick = async () => {
 };
 // (an exported file has no examples beside it)
 if (embedded()) $("examples").hidden = true;
-$("copyjson").onclick = () => navigator.clipboard?.writeText(JSON.stringify(doc, null, 1));
+$("copyjson").onclick = async () => navigator.clipboard?.writeText(JSON.stringify(await images.inline(doc!), null, 1));
 async function openText(text: string, name?: string) {
   const d = boardFromText(text, name);
   if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
@@ -388,7 +406,16 @@ picker.onchange = async () => {
 addEventListener("dragover", (e) => e.preventDefault());
 addEventListener("drop", async (e) => {
   e.preventDefault();
-  const f = e.dataTransfer?.files?.[0];
+  // pictures: added where they were dropped (in Edit); another file opens as a board
+  const files = [...(e.dataTransfer?.files ?? [])];
+  const pics = files.filter((f) => IMAGE_TYPES.test(f.type));
+  if (pics.length) {
+    if (!editor.on) editor.setOn(true);
+    const w = board.toWorld(e.clientX, e.clientY);
+    await editor.addImages(pics, w.x, w.y).catch(fail);
+    return;
+  }
+  const f = files[0];
   if (f) await openText(await f.text(), f.name).catch(fail);
 });
 // Import Mermaid…: a flowchart pasted in
@@ -508,7 +535,9 @@ async function bench(path: Camera[]) {
     /** A Mermaid flowchart (or Markdown with some) as a board document, to load(), or to edit first. */
     fromMermaid: (text: string) => boardFromText(text),
     /** The board as one self-contained HTML file (its text). */
-    exportHtml: () => exportHtml(doc!),
+    exportHtml: async () => exportHtml(await images.inline(doc!)),
+    /** the document as a file carries it: with its pictures (data: URLs) */
+    portable: () => images.inline(doc!),
     /** Show page n (0-based). */
     page,
     /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */

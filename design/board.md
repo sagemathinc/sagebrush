@@ -609,6 +609,31 @@ it:
 
 Printing leaves out ▶ and `{ }`. test-code.mjs checks all of this (50 checks).
 
+**Images** (October 13). A picture is another optional part of a note,
+shown after its title: `image` names it, and the document's `images` gives
+its size. A note that is only a picture is shown as the picture alone, and
+far out the canvas draws the picture itself.
+- **Storage.** The bytes are kept apart from the document, in this
+  browser's IndexedDB (web/board/images.ts), named by the SHA-256 of their
+  content. Undo snapshots, the saved document and layout never copy them.
+  A board that leaves the browser (Download, Copy JSON, an exported HTML
+  file, `portable()` for agents) carries them in `images` as data: URLs.
+  Opening one takes them back in, under the names of their own content, so
+  a document cannot replace another picture.
+- **Sources** (cleanDoc). A PNG, JPEG, GIF or WebP `data:` URL, or an
+  https: address. Nothing else, so no SVG, and a picture is only ever an
+  `<img>`.
+- **In.** Paste (a screenshot), drop files on the board (where they land),
+  the toolbar's Image (files, or a phone's camera), or "+ Image" in a
+  note's editor. A picture over 2400 pixels on a side or about 2 MB is
+  scaled down and saved again as WebP (JPEG where the browser cannot write
+  WebP). An animated GIF stays as it is.
+- **Resizing.** In Edit, the one selected note has a handle at its bottom
+  right corner. Dragging it sets the note's width: a picture keeps its
+  shape, and any other note's height follows its text. It is one undo step.
+
+web/board/test-images.mjs (27 checks, in CI) covers all of this.
+
 ## Open questions
 
 - Completion in the board's code editor, as the notebook's.
