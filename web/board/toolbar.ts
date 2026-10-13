@@ -50,11 +50,17 @@ export class Toolbar {
     this.el.setAttribute("role", "toolbar");
     this.el.setAttribute("aria-label", "Add to the board");
     parent.append(this.el);
-    effect(() => {
+    this.own.push(effect(() => {
       this.el.hidden = !editing.value;
       if (!editing.value) this.closePanel();
-    });
-    effect(() => this.render(this.tools.value));
+    }), effect(() => this.render(this.tools.value)));
+  }
+  private own: (() => void)[] = []; // (its own effects)
+  /** Take the toolbar away: its effects, its menu and its element. */
+  destroy() {
+    for (const d of [...this.own.splice(0), ...this.bound.splice(0)]) d();
+    this.closePanel();
+    this.el.remove();
   }
 
   private render(ids: string[]) {
