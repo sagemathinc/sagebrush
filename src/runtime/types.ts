@@ -3,7 +3,7 @@
 import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
-  isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
+  isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
@@ -16,6 +16,7 @@ export function method(cls: PyType, name: string, f: any, s: Signature | null = 
   f = checkArity(f, name, true);
   pyfn(f, name, s);
   f.$builtinMethod = true;
+  f.$owner = cls; // the type whose instances this method is for (a receiver check applies everywhere it is called)
   f.__qualname__ = `${cls.$name}.${name}`;
   cls.$dict.set(name, f);
   return f;
@@ -23,10 +24,16 @@ export function method(cls: PyType, name: string, f: any, s: Signature | null = 
 
 // A data descriptor computed by JS: type `getset_descriptor`.
 export class GetSet {
-  constructor(public name: string, public get: (o: any) => any, public set: ((o: any, v: any) => void) | null = null) {}
+  constructor(public owner: PyType, public name: string, public get: (o: any) => any, public set: ((o: any, v: any) => void) | null = null) {}
 }
 export function getset(cls: PyType, name: string, get: (o: any) => any, set: ((o: any, v: any) => void) | null = null) {
-  cls.$dict.set(name, new GetSet(name, get, set));
+  cls.$dict.set(name, new GetSet(cls, name, get, set));
+}
+// A get/set descriptor applies only to an instance of the type it is for; a
+// wrong receiver reaches a JavaScript property of an opaque object otherwise
+// (design/security.md rule 6).
+function descrReceiver(d: GetSet, o: any): void {
+  if (!isinstance(o, d.owner)) raise(T.TypeError, `descriptor '${d.name}' for '${d.owner.$name}' objects doesn't apply to a '${typeName(o)}' object`);
 }
 
 // ------------------------------------------------------------------ object, type
@@ -76,7 +83,9 @@ getset(type, "__bases__", (c) => tuple(c.$bases.slice()));
 getset(type, "__base__", (c) => c.$bases[0] ?? null);
 getset(type, "__dict__", (c) => {
   const d = new PyDict();
-  for (const [k, v] of c.$dict) dictSet(d, k, v);
+  // (a builtin method leaves the type's dict as its receiver-checking form, so
+  // vars(cls)[name](receiver, ...) cannot run it on a wrong receiver)
+  for (const [k, v] of c.$dict) dictSet(d, k, v !== null && typeof v === "function" && v.$owner !== undefined ? selfChecked(v, v.$owner) : v);
   // The class that first gives its instances a __dict__ shows the slot.
   if (c.$ctor !== null && c !== object && !c.$dict.has("__slots__") && !c.$dict.has("__dict__") && c.$bases.every((b: any) => b.$ctor === null || b === object || b.$jsBase !== null)) {
     dictSet(d, "__dict__", object.$dict.get("__dict__"));
@@ -138,9 +147,11 @@ export function bindClass(jsClass: any, cls: PyType) {
 
 const getsetType = builtinType("getset_descriptor", [object], () => raise(T.TypeError, "cannot create 'getset_descriptor' instances"));
 bindClass(GetSet, getsetType);
-method(getsetType, "__get__", (d: GetSet, o: any, _t: any) => (o === null ? d : d.get(o)));
+method(getsetType, "__get__", (d: GetSet, o: any, _t: any) => { if (o === null) return d; descrReceiver(d, o); return d.get(o); });
 method(getsetType, "__set__", (d: GetSet, o: any, v: any) => {
-  if (d.set === null) raise(T.AttributeError, `attribute '${d.name}' of '${typeName(o)}' objects is not writable`);
+  // (the receiver first, as CPython: nothing about the descriptor is used on a wrong one)
+  descrReceiver(d, o);
+  if (d.set === null) raise(T.AttributeError, `attribute '${d.name}' of '${d.owner.$name}' objects is not writable`);
   d.set(o, v);
   return null;
 });
@@ -299,7 +310,7 @@ getset(fnType, "__dict__", (f) => {
   return d;
 });
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
-method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f, o)));
+method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f, f.$owner) : f, o)));
 method(fnType, "__call__", (f: any, ...a: any[]) => f(...a));
 
 const bfType = builtinType("builtin_function_or_method", [object], () => raise(T.TypeError, "cannot create 'builtin_function_or_method' instances"));
@@ -1970,7 +1981,7 @@ hooks.primProxy = (base: PyType): PyType => {
   for (const [k, v] of base.$dict) {
     if (k === "__new__" || k === "__init__") continue;
     if (typeof v === "function" && v.$builtinMethod === true) d.set(k, unboxing(v));
-    else if (v instanceof GetSet) d.set(k, new GetSet(v.name, (o) => v.get(unbox(o)), v.set));
+    else if (v instanceof GetSet) d.set(k, new GetSet(v.owner, v.name, (o) => v.get(unbox(o)), v.set));
   }
   // int.__format__ with a float presentation type goes through float(self),
   // which a subclass may override.
@@ -2063,7 +2074,7 @@ export function structseq(name: string, fields: string[], values: any[]): any {
   if (cls === undefined) {
     const d = new Map<string, any>();
     cls = objectType(name.slice(name.lastIndexOf(".") + 1), [tupleType], d, name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "builtins");
-    fields.forEach((f, i) => d.set(f, new GetSet(f, (o) => o[i])));
+    fields.forEach((f, i) => d.set(f, new GetSet(cls!, f, (o) => o[i])));
     d.set("n_fields", fields.length);
     d.set("_fields", tuple(fields));
     const c = cls;

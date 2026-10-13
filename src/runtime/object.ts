@@ -576,7 +576,7 @@ function typeGetattr(cls: PyType, name: string, dflt?: any): any {
 }
 
 // `list.append` and friends, called unbound: CPython checks self's type.
-function selfChecked(f: any, cls: PyType): any {
+export function selfChecked(f: any, cls: PyType): any {
   let c = f.$selfChecked;
   if (c === undefined) {
     c = function (self: any, ...args: any[]) {
