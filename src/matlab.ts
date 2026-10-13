@@ -972,6 +972,8 @@ class Emitter {
       for (const f of this.funcs) this.funcDef(f);
       const scope: Scope = { fn: null, vars: new Set(), globals: new Set(), persistents: new Set() };
       this.stmts(stmts, scope);
+      // (the figures the program drew)
+      this.emit("_m.end_program()");
     });
     this.emit("except BaseException as _e:");
     this.indent(() => this.emit("_m.report(_e, _L)"));

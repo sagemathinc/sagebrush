@@ -10,7 +10,8 @@ layout: `x = 1×3` and the values, no blank lines), and each step's output
 is compared token by token (whitespace is the PDF's, not MATLAB's).
 
 Results: pass, diff (the first step that differs), missing (a function
-Sagebrush lacks), error, and skipped (examples with figures).
+Sagebrush lacks) and error.  Examples with figures run too (their pictures
+are not compared): "figure" when they run and their text output matches.
 """
 import json, os, re, subprocess, sys, tempfile, concurrent.futures as cf
 from collections import Counter
@@ -45,8 +46,13 @@ def norm(lines):
 
 
 def run(e):
-    if e.get("images"):
-        return {"status": "skipped"}
+    r = run1(e)
+    if e.get("images") and r["status"] == "pass":
+        r["status"] = "figure"
+    return r
+
+
+def run1(e):
     code = []
     for s in e["steps"]:
         code.append(s["code"])
@@ -70,6 +76,8 @@ def run(e):
             first = (err.strip().split("\n") or [""])[0][:200]
             return {"status": "error", "why": first, "step": k}
         got = parts[k].split("\n")
+        # (the CLI's note of a figure it saved is not MATLAB's output)
+        got = [l for l in got if not (l.startswith("Saved ") and ".svg" in l) and not l.startswith("<Figure size")]
         if norm(got) != norm(s["out"]):
             return {"status": "diff", "step": k, "want": s["out"][:12], "got": got[:12]}
     return {"status": "pass"}
@@ -87,11 +95,11 @@ def main():
         r["page"] = e["page"]
     json.dump(results, open(OUT, "w"), indent=1)
     c = Counter(r["status"] for r in results)
-    ran = len(results) - c["skipped"]
-    print("%d examples: %d pass, %d diff, %d missing a function, %d error, %d skipped (figures)" % (
-        len(results), c["pass"], c["diff"], c["missing"], c["error"], c["skipped"]))
-    if ran:
-        print("pass rate of those run: %.1f%%" % (100 * c["pass"] / ran))
+    figs = sum(1 for e in exs if e.get("images"))
+    print("%d examples: %d pass, %d diff, %d missing a function, %d error" % (
+        len(results), c["pass"] + c["figure"], c["diff"], c["missing"], c["error"]))
+    print("without figures: %d of %d pass; with figures: %d of %d run (text output matching)" % (
+        c["pass"], len(results) - figs, c["figure"], figs))
     miss = Counter(r["why"] for r in results if r["status"] == "missing")
     print("most wanted functions:", ", ".join("%s (%d)" % kv for kv in miss.most_common(40)))
     if names:
