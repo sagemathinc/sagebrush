@@ -148,6 +148,17 @@ try {
   await outside();
   await undoKey();
   check(!(await node("c")).hideCode, "undone");
+  // its code hidden when editing starts, then shown with { }: as tall as its code (William's I1)
+  await ev("window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === 'c').hideCode = true; })");
+  await show("c");
+  const rc2 = await rect("c");
+  await dblclick(rc2.left + 120, rc2.top + 14);
+  await until("window.board.editing === 'c'", 3000);
+  await ev("document.querySelector('.ip-bar .ip-hide').click(), 1");
+  check(await until("(() => { const t = document.querySelector('.board-editing .be-code'); return !t.closest('[hidden]') && t.offsetHeight >= t.scrollHeight - 1 && t.offsetHeight >= 30; })()", 3000), "code hidden when editing began, shown with { }: its field as tall as its code: " + await ev("(() => { const t = document.querySelector('.board-editing .be-code'); return [t.offsetHeight, t.scrollHeight]; })()"));
+  await outside();
+  await undoKey();
+  await undoKey();
 
   // colors: eight and none
   await show("a");
