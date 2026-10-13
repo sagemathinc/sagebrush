@@ -68,7 +68,7 @@
   {
    "id": "together",
    "title": "Everything together!",
-   "text": "Is there an **algorithm** that decides whether any polynomial equation has a rational solution? Over $\\mathbb{Z}$ there is none (Hilbert's 10th problem: Matiyasevich, 1970). Over $\\mathbb{Q}$ it is **open**. For surfaces the local–global principle can fail (the Brauer–Manin obstruction), and the search goes on.",
+   "text": "Is there an **algorithm** that decides whether any polynomial equation has a rational solution? Over $\\mathbb{Z}$ there is none (Hilbert's 10th problem: Matiyasevich, 1970). Over $\\mathbb{Q}$ the question was long open; a proof that it is undecidable too was claimed in September 2026 (an OpenAI preprint, not yet formalized or refereed). For surfaces the local–global principle can fail (the Brauer–Manin obstruction).",
    "color": "#f3e3b5",
    "shape": "round",
    "w": 420
@@ -134,7 +134,7 @@
   },
   {
    "focus": "together",
-   "say": "Everything together: over $\\mathbb{Q}$ we still don't know if an algorithm exists."
+   "say": "Everything together: no algorithm over $\\mathbb{Z}$; over $\\mathbb{Q}$, a claimed proof (2026) awaits checking."
   }
  ]
 }
