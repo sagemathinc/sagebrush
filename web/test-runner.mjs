@@ -36,7 +36,7 @@ ws.onmessage = (e) => {
     for (const [method, params] of [["Runtime.enable", {}], ["Log.enable", {}], ["Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }], ["Runtime.runIfWaitingForDebugger", {}]]) ws.send(JSON.stringify({ id: ++n, method, params, sessionId: sid }));
   }
   if (m.method === "Log.entryAdded" && /Content Security Policy/.test(m.params.entry.text)) violations.push(m.params.entry.text);
-  if (process.env.DEBUG && (m.method === "Log.entryAdded" || m.method === "Runtime.exceptionThrown" || m.method === "Runtime.consoleAPICalled")) console.log("  [" + (m.sessionId ?? "page").slice(0, 6) + "]", JSON.stringify(m.params).slice(0, 600));
+  if (process.env.RUNNER_DEBUG && (m.method === "Log.entryAdded" || m.method === "Runtime.exceptionThrown" || m.method === "Runtime.consoleAPICalled")) console.log("  [" + (m.sessionId ?? "page").slice(0, 6) + "]", JSON.stringify(m.params).slice(0, 600));
 };
 const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
 const evIn = async (expression, { contextId, sessionId } = {}) => {
@@ -63,6 +63,9 @@ const PROBE = `(async () => {
   try { out.parentDocument = !!(self.parent && self.parent !== self && self.parent.document); } catch { out.parentDocument = false; }
   try { out.cookie = typeof document !== "undefined" ? document.cookie : null; } catch { out.cookie = "denied"; }
   out.isolated = self.crossOriginIsolated;
+  out.secure = self.isSecureContext;
+  out.subtle = !!(self.crypto && self.crypto.subtle);
+  out.precompiled = !!self.__SAGEBRUSH_PRECOMPILED__;
   const reach = async (u, credentials = "include") => { try { await fetch(u, { mode: "cors", credentials }); return true; } catch { return false; } };
   out.elsewhere = await reach("https://example.com/");
   out.sitePage = await reach(${JSON.stringify(new URL("/", base).href)} + "?probe");
@@ -85,6 +88,11 @@ try {
   ok((await run("sum(range(10))")).trim() === "45", "code runs in the runner");
   ok((await run("from fractions import Fraction\nprint(Fraction(1, 3) + Fraction(1, 6))")).includes("1/2"), "printing works");
   ok((await run("import numpy as np\nprint(np.arange(6).reshape(2, 3).sum(axis=0))")).includes("[3 5 7]"), "numpy works");
+  // (the engine and the precompiled library: fetched by the page, handed through the frame)
+  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change', {bubbles: true})); })()");
+  await sleep(500);
+  const f = (await run("factor(2^64 + 1)")).trim();
+  ok(f === "274177 * 67280421310721", "Sage mode and the engine work, with no network in the runner: " + f);
 
   // Stop: a KeyboardInterrupt that keeps the variables (if the frame is cross-origin isolated)
   await run("kept = 42");
@@ -101,14 +109,14 @@ try {
   ok(!!frameCtx, "found the frame's context");
   const inFrame = await evIn(PROBE, { contextId: frameCtx.id, sessionId: frameCtx.sessionId });
   ok(inFrame.origin === "null" && !inFrame.localStorage && !inFrame.indexedDB && !inFrame.parentDocument && inFrame.cookie !== "x", "the frame: an opaque origin, no storage, no page: " + JSON.stringify(inFrame));
-  ok(!inFrame.elsewhere && !inFrame.sitePage && !inFrame.websocket, "the frame: no network elsewhere, and the site's pages unreadable");
-  ok(inFrame.ownFiles, "the frame: Sagebrush's own static files");
+  ok(!inFrame.elsewhere && !inFrame.sitePage && !inFrame.websocket && !inFrame.ownFiles, "the frame: no network at all, not even Sagebrush's own files");
   await until("true");
   const wk = workers.at(-1);
   ok(!!wk, "found the worker");
   const inWorker = await evIn(PROBE, { sessionId: wk });
-  ok(inWorker.origin === "null" && !inWorker.indexedDB && !inWorker.elsewhere && !inWorker.sitePage && !inWorker.websocket && inWorker.ownFiles, "the worker (where escaped code would run): the same: " + JSON.stringify(inWorker));
+  ok(inWorker.origin === "null" && !inWorker.indexedDB && !inWorker.elsewhere && !inWorker.sitePage && !inWorker.websocket && !inWorker.ownFiles, "the worker (where escaped code would run): the same, no network at all: " + JSON.stringify(inWorker));
   await sleep(500);
+  ok(inWorker.precompiled, "the precompiled library reached the worker (checked by its SHA-256 without crypto.subtle: the runner's worker is not a secure context)");
   ok(violations.length > 0 && violations.some((v) => /example\.com\/beacon/.test(v)), `the attempts were blocked by the runner's policy, the beacon too (${violations.length} CSP reports)`);
 } catch (e) {
   failures++;

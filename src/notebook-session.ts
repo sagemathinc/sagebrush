@@ -194,7 +194,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     current = id;
     target = null;
     post({ id, start: true });
-    const t0 = performance.now();
+    // (the run's time, for the reactive notebook's budget: from here, but not
+    // counting Sage's one-time load below, which is the interpreter's, not the cell's)
+    let t0 = performance.now();
     opts.runs?.begin(m);
     let ok = true;
     changedNames = new Set();
@@ -224,6 +226,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       if (m.sage && !sageLoaded) {
         run("from sage_all import *\n", main, "exec", "<sage>");
         sageLoaded = true;
+        t0 = performance.now();
       }
       if (m.magma) {
         // Magma: translated to Python (src/magma.ts); Magma prints its own values

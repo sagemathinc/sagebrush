@@ -373,8 +373,11 @@
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
-// Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md); ?runner=0 runs it in a plain worker
-const RUNNER = new URLSearchParams(location.search).get("runner") !== "0";
+// Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md),
+// where the page is cross-origin isolated (the runner hands files to the
+// interpreter through a SharedArrayBuffer) and not the desktop app's (whose
+// pages are its own); ?runner=0 runs it in a plain worker
+const RUNNER = new URLSearchParams(location.search).get("runner") !== "0" && globalThis.crossOriginIsolated === true && !window.__TAURI__;
 import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
@@ -571,7 +574,7 @@ function makeKernel(owner) {
   const k = new WorkerKernel({
     createWorker: () => {
       const name = j?.workerName() ?? "";
-      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name }) : new Worker("sagebrush-worker.js", { type: "module", name });
+      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: () => new Worker("sagebrush-worker.js", { type: "module", name }) }) : new Worker("sagebrush-worker.js", { type: "module", name });
     },
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)

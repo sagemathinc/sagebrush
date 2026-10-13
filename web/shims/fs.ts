@@ -86,17 +86,28 @@ export function mount(entries: [string, Remote][]) {
 }
 // (synchronously: Python's open() is synchronous, and a worker may block)
 function fetchRemote(path: string, m: Remote): Uint8Array {
-  if (typeof XMLHttpRequest !== "function") fail("EIO", -5, "fetch", path);
-  const x = new XMLHttpRequest();
-  x.open("GET", m.url, false);
-  x.responseType = "arraybuffer";
-  try {
-    x.send();
-  } catch {
-    fail("EIO", -5, "fetch", path);
+  let data: Uint8Array;
+  const sync = (globalThis as any).__SAGEBRUSH_FETCH_SYNC__;
+  if (typeof sync === "function") {
+    // (in the runner, which has no network, the page fetches it: web/runner)
+    try {
+      data = sync(m.url);
+    } catch (e) {
+      fail("EIO", -5, `fetch (${(e as Error)?.message ?? e})`, path);
+    }
+  } else {
+    if (typeof XMLHttpRequest !== "function") fail("EIO", -5, "fetch", path);
+    const x = new XMLHttpRequest();
+    x.open("GET", m.url, false);
+    x.responseType = "arraybuffer";
+    try {
+      x.send();
+    } catch {
+      fail("EIO", -5, "fetch", path);
+    }
+    if (x.status !== 200) fail("EIO", -5, `fetch (HTTP ${x.status})`, path);
+    data = new Uint8Array(x.response as ArrayBuffer);
   }
-  if (x.status !== 200) fail("EIO", -5, `fetch (HTTP ${x.status})`, path);
-  const data = new Uint8Array(x.response as ArrayBuffer);
   if (data.length !== m.size || sha256Hex(data) !== m.sha256) fail("EIO", -5, "fetch (the file is not the one shared: wrong SHA-256)", path);
   return data;
 }
