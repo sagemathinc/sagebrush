@@ -6,8 +6,15 @@
 // precompiled library, whose URLs have a content hash, are cache-first.  A cached response keeps its headers, so the
 // page stays cross-origin isolated offline (Stop keeps its variables).
 // Everything else (the Atlas, demos, data a notebook fetches) is not cached.
+//
+// The cache is the origin's storage, which any script of the origin can
+// write: a kept copy is served only if it still has the SHA-256 the build
+// gave it (DIGESTS, from web/build.ts), else it is dropped and fetched again,
+// or, offline, not served (design/security.md, SEC-8D6-1).  This script
+// itself cannot be changed that way: the browser fetches it.
 const VERSION = "__VERSION__";
 const SHELL = __SHELL__;
+const DIGESTS = __DIGESTS__;
 const CACHE = "sagebrush-" + VERSION;
 
 self.addEventListener("install", (ev) => {
@@ -27,6 +34,16 @@ self.addEventListener("activate", (ev) => {
 
 const scope = new URL(self.registration.scope);
 const shellPaths = new Set(SHELL.map((p) => new URL(p, scope).pathname));
+const wanted = new Map(Object.entries(DIGESTS).map(([p, d]) => [new URL(p, scope).pathname, d]));
+
+// a kept response, if its bytes are still what the build made
+async function intact(res, pathname) {
+  if (!res) return null;
+  const want = wanted.get(pathname);
+  if (!want) return null;
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", await res.clone().arrayBuffer()));
+  return [...h].map((b) => b.toString(16).padStart(2, "0")).join("") === want ? res : null;
+}
 
 self.addEventListener("fetch", (ev) => {
   const req = ev.request;
@@ -37,7 +54,13 @@ self.addEventListener("fetch", (ev) => {
   const page = req.mode === "navigate" && (url.pathname === scope.pathname || url.pathname === scope.pathname + "index.html");
   if (!page && !shellPaths.has(url.pathname)) return;
   if (url.searchParams.has("h")) {
-    ev.respondWith((async () => (await caches.match(req)) ?? fetchAndKeep(req))());
+    ev.respondWith((async () => {
+      const hit = await caches.match(req);
+      const ok = await intact(hit, url.pathname);
+      if (ok) return ok;
+      if (hit) await (await caches.open(CACHE)).delete(req);
+      return fetchAndKeep(req);
+    })());
     return;
   }
   ev.respondWith((async () => {
@@ -45,7 +68,8 @@ self.addEventListener("fetch", (ev) => {
       return await fetchAndKeep(req, page ? new Request(new URL("./", scope)) : undefined);
     } catch (e) {
       const hit = await caches.match(page ? new URL("./", scope).href : req, { ignoreSearch: page });
-      if (hit) return hit;
+      const ok = await intact(hit, page ? scope.pathname : url.pathname);
+      if (ok) return ok;
       throw e;
     }
   })());

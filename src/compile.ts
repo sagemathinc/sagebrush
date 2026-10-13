@@ -109,19 +109,32 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
 // Library modules compiled when the site was built (the browser's worker
 // fetches them: web/worker.ts, made by web/build.ts with
 // SAGEBRUSH_PRECOMPILE_OUT): Sage mode's start compiled 2 MB of Python, more
-// than a second, at every page load.  Keyed by mode and module name, and used
-// only by the build they were made with (its id covers the compiler and the
-// library), and only for a library file of the same length.
-interface Precompiled { build: string; modules: Record<string, Compiled & { len: number }> }
+// than a second, at every page load.  An entry is used only for the library
+// file it was made from: by the build that made it (whose id covers the
+// compiler and the library), for its mode and module, at its exact path in
+// the library, whose source is the library's own (the embedded copy,
+// __PYJS_LIB__).  (The worker checks the whole table's SHA-256 before
+// installing it: design/security.md, SEC-8D6-1, PRE-8D6-2.)
+interface Precompiled { build: string; modules: Record<string, Compiled & { path: string }> }
 const precompiledKey = (name: string, sage: boolean) => (sage ? "sage|" : "py|") + name;
+// (a file in the library: its path in it, or null)
+function libPath(filename: string): string | null {
+  const dir = libDir();
+  return filename.startsWith(dir + "/") ? filename.slice(dir.length + 1) : null;
+}
 function precompiled(source: string, filename: string, name: string, sage: boolean): Compiled | null {
-  const p: Precompiled | undefined = (globalThis as any).__SAGEBRUSH_PRECOMPILED__;
-  if (p === undefined || p.build !== (globalThis as any).__SAGEBRUSH_BUILD_ID__ || !filename.startsWith(libDir())) return null;
-  const m = Object.hasOwn(p.modules, precompiledKey(name, sage)) ? p.modules[precompiledKey(name, sage)] : undefined;
-  return m !== undefined && m.len === source.length && typeof m.code === "string" ? { code: m.code, lineMap: m.lineMap } : null;
+  const g = globalThis as any;
+  const p: Precompiled | undefined = g.__SAGEBRUSH_PRECOMPILED__;
+  if (p === undefined || p === null || typeof p !== "object" || p.build !== g.__SAGEBRUSH_BUILD_ID__ || typeof p.modules !== "object" || p.modules === null) return null;
+  const rel = libPath(filename), lib = g.__PYJS_LIB__;
+  if (rel === null || lib === undefined || !Object.hasOwn(lib, rel) || lib[rel] !== source) return null;
+  const key = precompiledKey(name, sage);
+  const m = Object.hasOwn(p.modules, key) ? p.modules[key] : undefined;
+  if (m === undefined || m === null || typeof m !== "object" || m.path !== rel || typeof m.code !== "string" || !Array.isArray(m.lineMap)) return null;
+  return { code: m.code, lineMap: m.lineMap };
 }
 // (making them: every library module compiled in this process, written at exit)
-const recording: Record<string, Compiled & { len: number }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
+const recording: Record<string, Compiled & { path: string }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
 if (recording !== null) {
   process.on("exit", () => {
     const out = process.env.SAGEBRUSH_PRECOMPILE_OUT!;
@@ -137,9 +150,9 @@ if (recording !== null) {
 function compileCached(source: string, filename: string, name: string, sage: boolean, jsName: string): { compiled: Compiled; script: Script } {
   const pre = precompiled(source, filename, name, sage);
   if (pre !== null) return { compiled: pre, script: new Script(pre.code, { filename: jsName }) };
-  if (recording !== null && filename.startsWith(libDir())) {
+  if (recording !== null && libPath(filename) !== null) {
     const compiled = compile(source, filename, name, false, false, { sage });
-    recording[precompiledKey(name, sage)] = { ...compiled, len: source.length };
+    recording[precompiledKey(name, sage)] = { ...compiled, path: libPath(filename)! };
     return { compiled, script: new Script(compiled.code, { filename: jsName }) };
   }
   const dir = filename.startsWith(libDir()) ? compileCacheDir() : null;

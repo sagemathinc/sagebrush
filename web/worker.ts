@@ -48,11 +48,22 @@ __hooks.read = (path) => {
 // The library modules compiled when the site was built (src/compile.ts,
 // precompiled; web/build.ts), fetched as the worker starts: a Sage run waits
 // for them (Sage mode's start compiled 2 MB of Python, over a second), other
-// code uses them once they are here.  Without them, modules compile as before.
-const precompiled = fetch(new URL("sagebrush-precompiled.json?h=" + (globalThis as any).__SAGEBRUSH_BUILD_ID__, self.location.href))
-  .then((r) => (r.ok ? r.json() : null))
-  .then((p) => { if (p) (globalThis as any).__SAGEBRUSH_PRECOMPILED__ = p; })
-  .catch(() => {});
+// code uses them once they are here.  It is code, and a cached copy is the
+// origin's storage, which any script of the origin can write: it is used only
+// if its bytes have the SHA-256 this worker was built with (design/security.md,
+// SEC-8D6-1).  Without them, modules compile as before.
+declare const __SB_PRECOMPILED_HASH__: string;
+const precompiled = (async () => {
+  try {
+    if (!crypto?.subtle) return;
+    const r = await fetch(new URL("sagebrush-precompiled.json?h=" + __SB_PRECOMPILED_HASH__.slice(0, 16), self.location.href));
+    if (!r.ok) return;
+    const bytes = await r.arrayBuffer();
+    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    if ([...h].map((b) => b.toString(16).padStart(2, "0")).join("") !== __SB_PRECOMPILED_HASH__) return;
+    (globalThis as any).__SAGEBRUSH_PRECOMPILED__ = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {}
+})();
 
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;

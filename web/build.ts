@@ -12,9 +12,30 @@ const shims: Record<string, string> = {
 // the engine's content hash, in the URL the worker fetches it from: a new
 // engine is never served from a cache
 const engineHash = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"))).digest("hex").slice(0, 16);
+// The bundled compiler and library (build/cli, scripts/build-cli.mjs) must be
+// the current sources': the worker embeds that library, and the library
+// compiled ahead below is compiled by that bundle.
+const { buildId: currentBuildId } = await import("../scripts/build-id.mjs");
+const buildId = /__SAGEBRUSH_BUILD_ID__ = "([0-9a-f]+)"/.exec(readFileSync(join(here, "..", "build", "cli", "lib.gen.js"), "utf8"))?.[1];
+if (buildId !== currentBuildId(join(here, ".."))) throw new Error("build/cli is not the current sources' build: run node scripts/build-cli.mjs first");
+// Library modules compiled ahead (src/compile.ts, precompiled): Sage mode's
+// start, and the modules scientific notebooks import first, compiled by the
+// CLI built from the same sources, so the worker does not compile 2 MB of
+// Python at every page load.  Made before the worker, which carries the
+// file's SHA-256 and uses it only if the bytes it fetched have it
+// (design/security.md, SEC-8D6-1: a cached copy is origin storage).
+mkdirSync(join(here, "dist"), { recursive: true });
+const prePath = join(here, "dist", "sagebrush-precompiled.json");
+rmSync(prePath, { force: true });
+for (const args of [["--sage", "-c", "pass"], ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"]]) {
+  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: prePath, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
+  if (r.exitCode !== 0) throw new Error(`precompiling the library: ${r.stderr.toString().slice(0, 500)}`);
+}
+if (JSON.parse(readFileSync(prePath, "utf8")).build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
+const precompiledHash = new Bun.CryptoHasher("sha256").update(readFileSync(prePath)).digest("hex");
 const result = await Bun.build(<any>{
   metafile: true,
-  define: { __SB_ENGINE_HASH__: JSON.stringify(engineHash) },
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineHash), __SB_PRECOMPILED_HASH__: JSON.stringify(precompiledHash) },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",
@@ -212,23 +233,17 @@ const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
-// Library modules compiled ahead (src/compile.ts, precompiled): Sage mode's
-// start, and the modules scientific notebooks import first, compiled by the
-// CLI built from the same sources (the same build id, checked), so the
-// worker does not compile 2 MB of Python at every page load.
-const buildId = /__SAGEBRUSH_BUILD_ID__ = "([0-9a-f]+)"/.exec(readFileSync(join(here, "..", "build", "cli", "lib.gen.js"), "utf8"))![1];
-const prePath = join(here, "dist", "sagebrush-precompiled.json");
-rmSync(prePath, { force: true });
-for (const args of [["--sage", "-c", "pass"], ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"]]) {
-  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: prePath, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
-  if (r.exitCode !== 0) throw new Error(`precompiling the library: ${r.stderr.toString().slice(0, 500)}`);
-}
-if (JSON.parse(readFileSync(prePath, "utf8")).build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
-const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${buildId}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
-shellHash.update(engineHash + buildId);
-writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)));
+shellHash.update(engineHash + precompiledHash);
+// (each of them by its SHA-256: the service worker serves a kept copy only if
+// it still has it; design/security.md, SEC-8D6-1)
+const DIGESTS = Object.fromEntries(SHELL.map((p) => {
+  const file = p === "./" ? "index.html" : p.split("?")[0];
+  return [p.split("?")[0], new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "dist", file))).digest("hex")];
+}));
+writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
 mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
