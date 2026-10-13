@@ -75,7 +75,6 @@ export async function exportHtml(doc: BoardDoc): Promise<string> {
     .replace(/<link rel="canonical"[^>]*>\n?/, "")
     .replace(/<meta name="generator"[^>]*>\n?/, "")
     .replace(/<head>/, () => `<head>\n<meta name="generator" content="Sagebrush boards (sagebrush.space/board), exported ${new Date().toISOString().slice(0, 10)}">`)
-    .replace(/<a id="home" href="\/"/, '<a id="home" href="https://sagebrush.space/board/"')
     .replace(/<script type="module" src="[^"]*board\.js"><\/script>/, () => parts);
 }
 

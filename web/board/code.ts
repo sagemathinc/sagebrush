@@ -22,7 +22,8 @@ export class BoardCode {
   private observer: MutationObserver | null = null;
   private pending = 0;
 
-  constructor(private base: URL) {
+  /** @param base where the notebook's files are (sagebrush-notebook.js, the worker, runner/); runner: Python in the runner, an opaque-origin sandboxed frame (design/runner.md), else a plain worker */
+  constructor(private base: URL, private opts: { runner: boolean } = { runner: true }) {
     this.ready = this.start().then(() => true, (e) => {
       console.warn("board: code items cannot run here:", e);
       return false;
@@ -31,8 +32,7 @@ export class BoardCode {
 
   private async start() {
     const mod = await import(new URL("sagebrush-notebook.js", this.base).href);
-    // (Python in the runner, an opaque-origin sandboxed frame, as on the notebook page: design/runner.md)
-    const runner = new URLSearchParams(location.search).get("runner") !== "0" && globalThis.crossOriginIsolated === true && !(window as any).__TAURI__;
+    const runner = this.opts.runner;
     const kernel = new mod.WorkerKernel({ createWorker: () => (runner ? new mod.RunnerWorker(new URL("runner/", this.base).href, { fallback: () => new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" }) }) : new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" })) });
     kernel.start();
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)

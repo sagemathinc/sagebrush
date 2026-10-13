@@ -10,7 +10,7 @@
 import { effect, signal } from "@preact/signals-core";
 import type { Board, Item } from "./board";
 import type { BoardDoc, BoardPage, DocEdge, DocGroup, DocNode, DocNote } from "./doc";
-import { prepare, type Images, type ImageInfo } from "./images";
+import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
@@ -66,7 +66,7 @@ export class Editor {
   /** the code highlighter (HTML), once the notebook is loaded: code is written in the notebook's editor */
   highlight: (() => ((src: string) => string) | null) | null = null;
   /** where pictures are kept (images.ts) */
-  images: Images | null = null;
+  images: ImageStore | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -90,11 +90,11 @@ export class Editor {
       const at = this.on && !this.panel && e.pointerType === "mouse" && this.atHandle(e);
       board.el.style.cursor = at ? "nwse-resize" : "";
     });
-    addEventListener("keydown", (e) => this.key(e));
+    this.listen(window, "keydown", (e) => this.key(e));
     // copying, cutting and pasting items (the page's own clipboard events: no permission asked)
-    document.addEventListener("copy", (e) => this.clip(e, false));
-    document.addEventListener("cut", (e) => this.clip(e, true));
-    document.addEventListener("paste", (e) => this.paste(e));
+    this.listen(document, "copy", (e) => this.clip(e, false));
+    this.listen(document, "cut", (e) => this.clip(e, true));
+    this.listen(document, "paste", (e) => this.paste(e));
     effect(() => {
       const on = this.editing.value;
       if (!on) { this.select(null); this.close(); this.connecting.value = false; }
@@ -111,8 +111,19 @@ export class Editor {
     });
     effect(() => { if (!this.editing.value) this.selecting.value = false; });
     // (Space held: a drag pans, whatever the tool)
-    addEventListener("keydown", (e) => { if (e.key === " " && !this.typing()) this.space = true; });
-    addEventListener("keyup", (e) => { if (e.key === " ") this.space = false; });
+    this.listen(window, "keydown", (e) => { if (e.key === " " && !this.typing()) this.space = true; });
+    this.listen(window, "keyup", (e) => { if (e.key === " ") this.space = false; });
+  }
+  // (the page's events it listens to, until destroy())
+  private offs: (() => void)[] = [];
+  private listen(t: EventTarget, type: string, f: (e: any) => void) {
+    t.addEventListener(type, f);
+    this.offs.push(() => t.removeEventListener(type, f));
+  }
+  /** Stop listening to the page (the board is unmounted). */
+  destroy() {
+    this.close();
+    for (const f of this.offs.splice(0)) f();
   }
 
   setOn(on: boolean) {
