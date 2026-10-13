@@ -104,6 +104,9 @@ if (bench) {
 // first paint: the end of the first render after load
 requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).firstPaint = performance.now(); }));
 
+// (for tests: mount and unmount boards on this page with its host: test-mount.mjs)
+export { mountBoard, host, mounted };
+
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
 (window as any).sagebrush = { ...(window as any).sagebrush, board: mounted.agent };

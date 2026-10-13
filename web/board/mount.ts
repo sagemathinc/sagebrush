@@ -89,8 +89,11 @@ export interface BoardHost {
   exportHtml?(d: BoardDoc): Promise<string>;
 }
 
-// (its stylesheet, once a page, first: the page's own rules win)
+// (its stylesheet, once a page, first: the page's own rules win; it goes
+// with the last board unmounted)
+let mounted = 0;
 function addStyle() {
+  mounted++;
   if (document.querySelector("style[data-sbb]")) return;
   const s = document.createElement("style");
   s.dataset.sbb = "";
@@ -380,10 +383,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editor.images = images;
   const editBtn = $("edit");
   editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
-  effect(() => {
+  offs.push(effect(() => {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
     $("hint").hidden = !editor.editing.value;
-  });
+  }));
   // the toolbar, in Edit mode: adds at the middle of the view
   const center = () => { const v = board.view(); return { x: (v.x0 + v.x1) / 2, y: (v.y0 + v.y1) / 2 }; };
   const toolbar = new Toolbar(root, [
@@ -720,12 +723,27 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   return {
     board,
     bench,
-    destroy() {
+    /** Unmount: what is being written is kept first; then nothing of the
+     * board is left (its listeners and effects, the code engine and its
+     * interpreter, TimeTravel's history, its elements; its stylesheet with
+     * the last board on the page). */
+    async destroy() {
+      await editor.destroy();
       for (const f of offs.splice(0)) f();
-      editor.destroy();
+      toolbar.destroy();
+      code?.close();
+      code = null;
       boardHistory?.close?.();
+      cancelAnimationFrame(relayoutFrame);
+      cancelAnimationFrame(ttFrame);
+      routingGen++; // (no more routing)
+      board.destroy();
+      // (what it put in the page: printed sheets, a file chooser left open)
+      document.getElementById("board-print")?.remove();
+      for (const i of document.querySelectorAll("input.sb-fileinput")) i.remove();
       root.replaceChildren();
       root.classList.remove("sbb");
+      if (--mounted === 0) document.querySelector("style[data-sbb]")?.remove();
     },
     agent: {
       /** Show a board document (see web/board/doc.ts); resolves when it is laid out. */

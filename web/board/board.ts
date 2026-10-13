@@ -191,9 +191,21 @@ export class Board {
     parent.append(this.el);
     this.ctx = this.canvas.getContext("2d")!;
     this.bctx = this.back.getContext("2d")!;
-    new ResizeObserver(() => this.resize()).observe(this.el);
+    this.sizes.observe(this.el);
     this.resize();
     this.input();
+  }
+
+  private sizes = new ResizeObserver(() => this.resize());
+  /** Take the board away: its element, and nothing left waiting (frames, the observer). */
+  destroy() {
+    this.sizes.disconnect();
+    cancelAnimationFrame(this.frame);
+    cancelAnimationFrame(this.flight);
+    cancelAnimationFrame(this.mathFrame);
+    this.frame = this.flight = this.mathFrame = 0;
+    this.math = [];
+    this.el.remove();
   }
 
   setItems(items: Item[], edges: Edge[] = []) {

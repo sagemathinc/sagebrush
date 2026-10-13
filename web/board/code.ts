@@ -32,32 +32,34 @@ export class BoardCode {
 
   private async start() {
     const mod = await import(new URL("sagebrush-notebook.js", this.base).href);
+    if (this.closed) throw new Error("closed");
     const runner = this.opts.runner;
-    const kernel = new mod.WorkerKernel({ createWorker: () => (runner ? new mod.RunnerWorker(new URL("runner/", this.base).href, { fallback: () => new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" }) }) : new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" })) });
+    const kernel = (this.kernel = new mod.WorkerKernel({ createWorker: () => (runner ? new mod.RunnerWorker(new URL("runner/", this.base).href, { fallback: () => new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" }) }) : new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" })) }));
     kernel.start();
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)
-    let worker: Worker | null = null, next = 0;
+    let next = 0;
     const waiting = new Map<number, (m: any) => void>();
     const ask = (msg: any) => {
-      if (!worker) {
-        worker = new Worker(new URL("sagebrush-analyze.js", this.base), { type: "module" });
+      if (this.closed) return Promise.resolve({ error: { kind: "analyzer", message: "closed" }, sources: null });
+      if (!this.analyzer) {
+        const worker = (this.analyzer = new Worker(new URL("sagebrush-analyze.js", this.base), { type: "module" }));
         worker.onmessage = (ev) => { const f = waiting.get(ev.data.id); waiting.delete(ev.data.id); f?.(ev.data); };
         worker.onerror = (e) => {
-          worker?.terminate();
-          worker = null;
+          worker.terminate();
+          if (this.analyzer === worker) this.analyzer = null;
           const ws = [...waiting.values()];
           waiting.clear();
           for (const f of ws) f({ error: { kind: "analyzer", message: e?.message || "the analyzer failed" }, sources: null });
         };
       }
-      return new Promise<any>((resolve) => { const id = ++next; waiting.set(id, resolve); worker!.postMessage({ id, ...msg }); });
+      return new Promise<any>((resolve) => { const id = ++next; waiting.set(id, resolve); this.analyzer!.postMessage({ id, ...msg }); });
     };
     const analyzer = {
       analyze: (code: string, mode: string) => ask({ code, mode }),
       rename: (request: any) => ask({ rename: request }).then((r) => r.sources),
     };
     // (out of sight, but in the document: the notebook keeps only the output of a cell that is)
-    const root = document.createElement("div");
+    const root = (this.root = document.createElement("div"));
     root.className = "board-code-engine";
     root.setAttribute("aria-hidden", "true");
     root.style.cssText = "position:absolute;left:-100000px;top:0;width:640px;";
@@ -73,14 +75,14 @@ export class BoardCode {
   // (several changes at once, and many as output streams in: one layout; and
   // after a run, how it ended)
   private changed() {
-    if (this.pending) return;
+    if (this.pending || this.closed) return;
     this.pending = window.setTimeout(() => {
       this.pending = 0;
       this.onChange?.();
       // (and once more after anything was running or waiting: how a run
       // ended is not always a change the observers see)
       const busy = !!this.nb?.cells().some((c: any) => c.el.classList.contains("running") || c.el.classList.contains("queued"));
-      if (busy || this.busy) window.setTimeout(() => this.changed(), 250);
+      if ((busy || this.busy) && !this.closed) window.setTimeout(() => this.changed(), 250);
       this.busy = busy;
     }, 60);
   }
@@ -96,7 +98,9 @@ export class BoardCode {
     if (!c) return null;
     if (!this.watched.has(c.out)) {
       this.watched.add(c.out);
-      new MutationObserver(() => this.changed()).observe(c.out, { childList: true, subtree: true, characterData: true });
+      const o = new MutationObserver(() => this.changed());
+      o.observe(c.out, { childList: true, subtree: true, characterData: true });
+      this.outputs.push(o);
     }
     return copy ? (c.out.cloneNode(true) as HTMLElement) : c.out;
   }
@@ -164,6 +168,29 @@ export class BoardCode {
   interrupt() {
     this.nb?.interrupt();
   }
+  /** Stop for good (the board is unmounted): the notebook, the interpreter
+   * (its worker, or the runner's frame), the analyzer, the observers, the
+   * element kept out of sight. */
+  close() {
+    this.closed = true;
+    clearTimeout(this.pending);
+    this.pending = 0;
+    this.observer?.disconnect();
+    for (const o of this.outputs.splice(0)) o.disconnect();
+    this.nb?.destroy();
+    this.nb = null;
+    this.kernel?.close();
+    this.kernel = null;
+    this.analyzer?.terminate();
+    this.analyzer = null;
+    this.root?.remove();
+    this.root = null;
+  }
+  private closed = false;
+  private kernel: any = null;
+  private analyzer: Worker | null = null;
+  private root: HTMLElement | null = null;
+  private outputs: MutationObserver[] = [];
   /** A code item's output as text (pictures by their descriptions), for agents. */
   text(id: string): string {
     const c = this.cell(id);

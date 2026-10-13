@@ -113,7 +113,9 @@ export class InPlace {
     // focus to where the tap was: given back, in the click, so that a phone's keyboard opens)
     const back = () => { if (!this.ended && !this.el.contains(document.activeElement)) first.focus({ preventScroll: true }); };
     document.addEventListener("click", back, true);
-    setTimeout(() => document.removeEventListener("click", back, true), 700);
+    const unback = () => document.removeEventListener("click", back, true);
+    setTimeout(unback, 700);
+    this.off.push(unback);
     requestAnimationFrame(() => { this.fit(); this.room(); this.place(); this.reveal(); });
     return true;
   }

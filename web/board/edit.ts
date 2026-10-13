@@ -97,35 +97,35 @@ export class Editor {
     this.listen(document, "copy", (e) => this.clip(e, false));
     this.listen(document, "cut", (e) => this.clip(e, true));
     this.listen(document, "paste", (e) => this.paste(e));
-    effect(() => {
+    this.effects.push(effect(() => {
       const on = this.editing.value;
       if (!on) { this.select(null); this.close(); this.connecting.value = false; }
       this.board.el.classList.toggle("editing", on);
-    });
-    effect(() => {
+    }), effect(() => {
       this.board.el.classList.toggle("connecting", this.connecting.value);
       if (!this.connecting.value && this.connectFrom) { this.connectFrom = null; this.select(null); }
       if (this.connecting.value) this.selecting.value = false;
-    });
-    effect(() => {
+    }), effect(() => {
       this.board.el.classList.toggle("selecting", this.selecting.value);
       if (this.selecting.value) this.connecting.value = false;
-    });
-    effect(() => { if (!this.editing.value) this.selecting.value = false; });
+    }), effect(() => { if (!this.editing.value) this.selecting.value = false; }));
     // (Space held: a drag pans, whatever the tool)
     this.listen(window, "keydown", (e) => { if (e.key === " " && !this.typing() && this.isActive()) this.space = true; });
     this.listen(window, "keyup", (e) => { if (e.key === " ") this.space = false; });
   }
-  // (the page's events it listens to, until destroy())
+  // (the page's events it listens to, and its effects, until destroy())
   private offs: (() => void)[] = [];
+  private effects: (() => void)[] = [];
   private listen(t: EventTarget, type: string, f: (e: any) => void) {
     t.addEventListener(type, f);
     this.offs.push(() => t.removeEventListener(type, f));
   }
-  /** Stop listening to the page (the board is unmounted). */
-  destroy() {
+  /** Stop (the board is unmounted): what is being written is kept first; then
+   * no more listening to the page, and its effects disposed. */
+  async destroy() {
+    await this.inplace?.end();
     this.close();
-    for (const f of this.offs.splice(0)) f();
+    for (const f of [...this.offs.splice(0), ...this.effects.splice(0)]) f();
   }
 
   setOn(on: boolean) {
