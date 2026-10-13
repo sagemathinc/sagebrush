@@ -15,6 +15,8 @@ export default {
     const url = new URL(request.url);
     const shared = await handleShare(request, env as ShareEnv, ctx);
     if (shared) return shared;
+    // a shared collection's page (web/share/view.html, at /s/)
+    if (/^\/s\/[a-z2-7]{12}(@[0-9a-f]{8,64})?\/?$/.test(url.pathname)) return env.ASSETS.fetch(new Request(new URL("/s/", url), request));
     if (url.pathname === "/atlas" || url.pathname.startsWith("/atlas/")) {
       const cache = caches.default;
       // JSON and HTML differ by Accept for the same URL

@@ -120,6 +120,16 @@
   /* an open panel: checked */
   .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
+  #sharedlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
+  #sharedlg::backdrop { background: rgba(0,0,0,.35); }
+  #sharedlg h4 { margin: 12px 0 2px; font-size: 14px; }
+  #sharedlg .note { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+  #sharedlg label { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+  #sharedlg label input[type=text] { flex: 1; }
+  #sharedlg ul { list-style: none; margin: 6px 0; padding: 0; max-height: 30vh; overflow: auto; font-size: 13px; }
+  #sharedlg li label { margin: 2px 0; }
+  #sharedlg li .size { color: var(--muted); margin-left: auto; }
+  #sharedlg .result { overflow-wrap: anywhere; font-size: 13px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -302,7 +312,7 @@
   <button role="menuitem" data-f="import">Upload .ipynb, .py or .sbreplay…</button>
   <hr>
   <button role="menuitem" data-f="print">Print or save as PDF…</button>
-  <button role="menuitem" data-f="share">Copy share link</button>
+  <button role="menuitem" data-f="share" id="sharemenu">Copy share link</button>
   <button role="menuitem" data-f="install" hidden>Install as an app…</button>
   <hr>
   <button role="menuitem" data-f="delete" class="danger">Delete notebook</button>
@@ -322,6 +332,22 @@
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="extitle">Examples</b><button aria-label="Close">✕</button></form>
   <p class="exnote">Each opens as a new notebook; yours stays saved.</p>
   <div id="exlist"></div>
+</dialog>
+<dialog id="sharedlg" aria-labelledby="sharetitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
+  <h4>A link with the notebook in it</h4>
+  <p class="note">No account needed. The link holds the cells' code and text, not outputs or files, and is never sent to a server.</p>
+  <button id="sharelink">Copy link</button>
+  <h4>Upload, with its files</h4>
+  <p class="note">A page at sagebrush.space/s/… with this notebook, its outputs and the files you choose, for anyone with the link. You can delete it at any time. Needs a CoCalc account.</p>
+  <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
+  <div id="shareform" hidden>
+    <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
+    <label>License <select id="sharelicense"><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option><option value="">None given</option></select></label>
+    <ul id="sharefiles" aria-label="Files to include"></ul>
+    <button class="primary" id="shareupload">Upload</button> <span id="shareprogress" class="note"></span>
+    <p class="result" id="shareresult"></p>
+  </div>
 </dialog>
 <input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag,.sbreplay" hidden>
 <dialog id="docdlg" aria-labelledby="doctitle">
@@ -350,6 +376,7 @@ import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlo
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
+import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -1236,6 +1263,75 @@ async function shareLink() {
   const frag = typeof CompressionStream === "function" ? "z=" + enc64(await pipe(json, new CompressionStream("deflate-raw"))) : "c=" + enc64(json);
   return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : isMagma() ? "m=magma&" : "") + frag;
 }
+async function copyShareLink() {
+  const url = await shareLink();
+  history.replaceState(null, "", url);
+  try { await navigator.clipboard.writeText(url); statusEl.textContent = "link copied"; } catch { statusEl.textContent = "link in the address bar"; }
+}
+
+// Sharing with files (web/share; design/sharing.md), where the site has it:
+// "Copy share link" becomes "Share…", a dialog with the link and an upload.
+let sharing = { enabled: false };
+const shareDlg = $("#sharedlg");
+const shareReady = shareStatus().then((s) => {
+  sharing = s;
+  if (s.enabled) $("#sharemenu").textContent = "Share…";
+});
+$("#sharelink").onclick = async () => { await copyShareLink(); shareDlg.close(); };
+async function openShare() {
+  await shareReady;
+  sharing = await shareStatus();
+  const me = sharing.enabled ? sharing.me : null;
+  $("#sharesignin").hidden = !!me;
+  $("#shareform").hidden = !me;
+  $("#signin").href = signInUrl(location.pathname + "?share" + location.hash);
+  $("#shareresult").textContent = "";
+  $("#shareprogress").textContent = "";
+  if (me) {
+    $("#sharetitlein").value = docName();
+    const ul = $("#sharefiles");
+    ul.replaceChildren();
+    const li = (text, size, checked, disabled) => {
+      const l = document.createElement("li"), lab = document.createElement("label"), box = document.createElement("input"), sz = document.createElement("span");
+      box.type = "checkbox"; box.checked = checked; box.disabled = disabled; box.value = text;
+      sz.className = "size"; sz.textContent = size;
+      lab.append(box, document.createTextNode(" " + text), sz);
+      l.append(lab);
+      ul.append(l);
+    };
+    li(fileBase() + ".ipynb", "this notebook", true, true);
+    db ??= await dbReady;
+    if (db) {
+      const keys = await allPaths(), vals = await allFiles();
+      keys.forEach((k, i) => li(String(k).replace(/^\/+/, ""), fmtSize(vals[i]?.length ?? 0), true, false));
+    }
+  }
+  shareDlg.showModal();
+}
+$("#shareupload").onclick = async () => {
+  const btn = $("#shareupload"), prog = $("#shareprogress"), out = $("#shareresult");
+  btn.disabled = true;
+  out.textContent = "";
+  try {
+    const name = fileBase() + ".ipynb";
+    const files = [{ path: name, data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }];
+    if (db) {
+      const keys = await allPaths(), vals = await allFiles(), want = new Set([...$("#sharefiles").querySelectorAll("input:checked:not(:disabled)")].map((b) => b.value));
+      keys.forEach((k, i) => { const p = String(k).replace(/^\/+/, ""); if (want.has(p) && p !== name) files.push({ path: p, data: vals[i] }); });
+    }
+    const prev = nb.snapshot().share_id ?? null;
+    const r = await uploadCollection({ id: prev, title: $("#sharetitlein").value.trim() || docName(), license: $("#sharelicense").value, files }, (done, total) => { prog.textContent = total ? `uploading ${fmtSize(done)} of ${fmtSize(total)}` : ""; });
+    nb.setMeta({ share_id: r.id });
+    prog.textContent = "";
+    const a = Object.assign(document.createElement("a"), { href: r.url, target: "_blank", rel: "noopener", textContent: r.url });
+    out.replaceChildren(document.createTextNode(prev ? "A new version is at " : "Shared at "), a, document.createTextNode(". "));
+    try { await navigator.clipboard.writeText(r.url); out.append("Link copied."); } catch {}
+  } catch (e) {
+    prog.textContent = "";
+    out.textContent = "Upload failed: " + (e?.message ?? e);
+  } finally { btn.disabled = false; }
+};
+
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
   if (!z && !c) return null;
@@ -1279,7 +1375,7 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""]); cells()[0].ta.focus(); break;
     case "open": await showOpen(); break;
-    case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
+    case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, share_id: undefined, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
@@ -1305,9 +1401,8 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "print": window.print(); break;
     case "share": {
-      const url = await shareLink();
-      history.replaceState(null, "", url);
-      try { await navigator.clipboard.writeText(url); statusEl.textContent = "link copied"; } catch { statusEl.textContent = "link in the address bar"; }
+      if (sharing.enabled) { openShare(); break; }
+      await copyShareLink();
       break;
     }
     case "delete": {
@@ -1848,6 +1943,11 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (opened) {}
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
   else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  // back from signing in to share (?share): the dialog again
+  if (qs.has("share")) {
+    history.replaceState(null, "", location.pathname + flagQuery + location.hash);
+    openShare();
+  }
   // the installed app opened with files (.ipynb, .py, .sage) from the computer
   if ("launchQueue" in window) launchQueue.setConsumer(async (params) => {
     for (const h of params.files ?? []) {

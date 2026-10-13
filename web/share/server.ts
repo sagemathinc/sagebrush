@@ -162,7 +162,7 @@ async function login(req: Request, env: ShareEnv): Promise<Response> {
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
   const payload = b64url(enc.encode(JSON.stringify({ state, verifier, ret: returnPath(url.searchParams.get("return")), exp: now() + 600 })));
   const signed = `${payload}.${await hmac(env.SESSION_KEY, "oauth\n" + payload)}`;
-  const to = new URL("/oauth/authorize", env.COCALC_ORIGIN);
+  const to = new URL("/auth/oauth/authorize", env.COCALC_ORIGIN);
   for (const [k, v] of Object.entries({ response_type: "code", client_id: "sagebrush", redirect_uri: `${url.origin}/auth/callback`, state, code_challenge: challenge, code_challenge_method: "S256" })) to.searchParams.set(k, v);
   return new Response(null, { status: 302, headers: { location: to.toString(), "set-cookie": cookie(OAUTH, signed, 600), "cache-control": "no-store" } });
 }
@@ -179,7 +179,7 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
   if (url.searchParams.get("error")) return new Response(null, { status: 302, headers: { location: st.ret, "set-cookie": clear } });
   const code = url.searchParams.get("code");
   if (!code) return err(400, "no code");
-  const r = await fetch(new URL("/oauth/token", env.COCALC_ORIGIN), {
+  const r = await fetch(new URL("/api/v2/auth/oauth/token", env.COCALC_ORIGIN), {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) },
     body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: `${url.origin}/auth/callback`, code_verifier: st.verifier }),
@@ -201,7 +201,7 @@ async function limits(env: ShareEnv, id: string): Promise<Limits | null> {
   if (c && c.fetched > now() - LIMITS_TTL) return JSON.parse(c.limits);
   if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : null;
   try {
-    const u = new URL("/api/sagebrush/limits", env.COCALC_ORIGIN);
+    const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
     u.searchParams.set("account_id", id);
     const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
     if (r.status === 404) return null; // no such account: no uploads
