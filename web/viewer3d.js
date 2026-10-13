@@ -355,6 +355,15 @@
     return out;
   }
 
+  // the background an element shows: its own, or the first one behind it (white if none)
+  function pageBackground(el) {
+    for (let e = el; e; e = e.parentElement) {
+      const c = getComputedStyle(e).backgroundColor;
+      if (c && c !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(c)) return c;
+    }
+    return "#fff";
+  }
+
   function mount(container, scene) {
     if (!container || !scene) return false;
     const fallback = container.querySelector("svg");
@@ -592,6 +601,9 @@
     function draw() {
       const dpr = window.devicePixelRatio || 1;
       const full = document.fullscreenElement === wrap;
+      // full screen shows the view alone, over the backdrop (black): it keeps
+      // the background it had in the page
+      wrap.style.background = full ? pageBackground(container) : "";
       const w = full ? window.innerWidth : scene.fill ? container.clientWidth || 800 : Math.min(container.clientWidth || 560, 640);
       const h = full ? window.innerHeight : scene.fill ? Math.max(300, Math.round(window.innerHeight - 24)) : Math.round(w * 0.82);
       if (w !== W || h !== H) {
