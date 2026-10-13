@@ -8,6 +8,7 @@
 //                                        notebook's worker, where that is allowed)
 //   else, in Node, the file wasm/sagebrush-engine.wasm above this module.
 
+import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { INTR } from "./interrupt";
@@ -39,7 +40,11 @@ function engineBytes(): Uint8Array {
     x.responseType = "arraybuffer";
     x.send();
     if (x.status !== 200) throw new Error(`could not load the engine (HTTP ${x.status})`);
-    return new Uint8Array(x.response);
+    const b = new Uint8Array(x.response);
+    // (the browser's worker says which bytes it was built with: anything else,
+    // a cached copy rewritten, say, is not run; design/security.md, SEC-522-1)
+    if (typeof g.__SAGEBRUSH_ENGINE_SHA256__ === "string" && sha256Hex(b) !== g.__SAGEBRUSH_ENGINE_SHA256__) throw new Error("the engine fetched is not the one this page was built with");
+    return b;
   }
   const fs = g.process?.getBuiltinModule?.("fs"), path = g.process?.getBuiltinModule?.("path");
   if (fs && path) {

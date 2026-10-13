@@ -289,6 +289,22 @@ browser (sagebrush-precompiled.json) could be poisoned, fixed with two lows:
 web/test-pwa.mjs rewrites the kept copies of the precompiled library, the
 engine and (offline) the worker, and checks that none of them is used.
 
+Its re-review of 522d311 found the bytes were checked but not the rest of
+the response (SEC-522-1, medium): a script could keep the page's exact bytes
+as a redirect, with a Refresh, or without its security headers (no
+cross-origin isolation, no policy), and the service worker served that
+response as kept. Now a kept copy counts only if it is a response the service
+worker kept itself (same-origin, 200, not redirected, from its own address,
+in this version's cache), and it is served as a response the service worker
+makes: the verified bytes with the build's status, type and headers
+(cross-origin isolation everywhere, the page's own policy), never the kept
+response's. A copy that fails is dropped. The worker also checks the
+engine's SHA-256 itself before running it (src/runtime/sha256.ts, as it
+loads synchronously), as it does the precompiled library's. web/test-pwa.mjs
+keeps the page's bytes without its headers, as a redirect, and with a
+Refresh, and checks none of them is served, with the browser's HTTP cache
+cleared so only the service worker can answer.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS

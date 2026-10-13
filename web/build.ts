@@ -11,7 +11,8 @@ const shims: Record<string, string> = {
 };
 // the engine's content hash, in the URL the worker fetches it from: a new
 // engine is never served from a cache
-const engineHash = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"))).digest("hex").slice(0, 16);
+const engineSha256 = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"))).digest("hex");
+const engineHash = engineSha256.slice(0, 16);
 // The bundled compiler and library (build/cli, scripts/build-cli.mjs) must be
 // the current sources': the worker embeds that library, and the library
 // compiled ahead below is compiled by that bundle.
@@ -35,7 +36,7 @@ if (JSON.parse(readFileSync(prePath, "utf8")).build !== buildId) throw new Error
 const precompiledHash = new Bun.CryptoHasher("sha256").update(readFileSync(prePath)).digest("hex");
 const result = await Bun.build(<any>{
   metafile: true,
-  define: { __SB_ENGINE_HASH__: JSON.stringify(engineHash), __SB_PRECOMPILED_HASH__: JSON.stringify(precompiledHash) },
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_PRECOMPILED_HASH__: JSON.stringify(precompiledHash) },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",
@@ -237,11 +238,22 @@ const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + precompiledHash);
-// (each of them by its SHA-256: the service worker serves a kept copy only if
-// it still has it; design/security.md, SEC-8D6-1)
+// (each of them by its SHA-256, and the response it is served as: the service
+// worker serves a kept copy only if it still has those bytes, and then as a
+// response it makes, with this status and these headers, never the kept
+// response's own; design/security.md, SEC-8D6-1, SEC-522-1)
+const { scriptHashes } = await import("./csp.ts");
+const { pagePolicy } = await import("./csp-policy.mts");
+const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript", json: "application/json", wasm: "application/wasm", css: "text/css", woff2: "font/woff2", png: "image/png", svg: "image/svg+xml", webmanifest: "application/manifest+json" };
 const DIGESTS = Object.fromEntries(SHELL.map((p) => {
   const file = p === "./" ? "index.html" : p.split("?")[0];
-  return [p.split("?")[0], new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "dist", file))).digest("hex")];
+  const bytes = readFileSync(join(here, "dist", file));
+  const mime = MIME[file.split(".").pop()!];
+  if (!mime) throw new Error(`sw.js: no type for ${file}`);
+  // (as web/_headers and web/csp.ts give it: every file cross-origin isolated, a page its policy)
+  const headers: Record<string, string> = { "Content-Type": mime, "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
+  if (file.endsWith(".html")) headers["Content-Security-Policy"] = pagePolicy(scriptHashes(bytes.toString("utf8")));
+  return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), headers }];
 }));
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
 mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
