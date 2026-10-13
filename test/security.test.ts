@@ -87,6 +87,51 @@ print(out)
 
 // The runtime's own slots ($cls, $m, ...) are not Python attributes: a
 // deliberate difference from CPython, where any string is a valid name.
+// sagebrush-daybreak SEC-61C-1 (61c9cfe): __pyjs_host__ dispatched through the
+// host object's prototype, so a Python-chosen op like "constructor" called a
+// JavaScript method and returned a raw JS value.  Only an own function operation.
+test("SEC-61C-1: __pyjs_host__ answers only an own host operation", () => {
+  const src = `
+import builtins
+for op in ("constructor", "toString", "__defineGetter__", "valueOf", "hasOwnProperty"):
+    print(op, builtins.__pyjs_host__(op))
+print("int", builtins.__pyjs_host__(1))
+`;
+  assert.equal(run(src), "constructor None\ntoString None\n__defineGetter__ None\nvalueOf None\nhasOwnProperty None\nint None\n");
+});
+
+// sagebrush-daybreak SEC-61C-2: a subclass of a JS-backed builtin exposed the
+// runtime's implementation fields (bytes' Uint8Array, a reversed iterator's raw
+// closure) as Python attributes.  Those names are the runtime's, like $ slots.
+test("SEC-61C-2: a JS-backed builtin subclass never exposes its implementation fields", () => {
+  const src = `
+class B(bytes): pass
+class BA(bytearray): pass
+class R(reversed): pass
+class E(enumerate): pass
+class Z(zip): pass
+class M(map): pass
+class CX(complex): pass
+out = []
+cases = [(B(b"abc"), "a"), (B(b"abc"), "n"), (BA(b"xy"), "a"), (R([10, 20]), "get"), (R([10, 20]), "a"),
+         (E([1]), "it"), (Z([1]), "its"), (M(str, [1]), "f"), (CX(1, 2), "re"), (CX(1, 2), "im")]
+for x, name in cases:
+    try:
+        getattr(x, name); out.append("leak:" + name)
+    except AttributeError:
+        pass
+# a user attribute works, and the buffer is intact; a reserved field cannot be written
+b = B(b"xy"); b.user = 5
+try:
+    b.a = "clobber"; out.append("wrote a")
+except AttributeError:
+    pass
+out.append((bytes(b) == b"xy", b.user, sorted(vars(b))))
+print(out)
+`;
+  assert.equal(run(src), "[(True, 5, ['user'])]\n");
+});
+
 test("names starting with $ are the runtime's: not readable, writable or deletable from Python", () => {
   const src = `
 class L(list): pass

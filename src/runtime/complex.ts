@@ -140,7 +140,7 @@ complexType.$kw = (pos: any[], names: string[], values: any[]) => {
   const b = bindArgs("complex", sig(["real", "imag"]), pos, names, values);
   return complexCall(b[0], b[1]);
 };
-Ty.subclassable(complexType, PyComplex);
+Ty.subclassable(complexType, PyComplex, ["re", "im"]);
 {
   const M = (name: string, f: any) => Ty.method(complexType, name, f);
   const bin = (name: string, f: (a: [number, number], b: [number, number]) => PyComplex) => {

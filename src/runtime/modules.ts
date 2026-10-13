@@ -32,14 +32,15 @@ function fn(m: any, name: string, f: any) {
 }
 
 export function importModule(name: string): any {
-  const existing = dictGet(sysModules, name);
-  if (existing !== undefined) return existing;
-  // (a module's name is never one of the runtime's own: design/security.md rule 6)
+  // (a module's name is never one of the runtime's own, checked before the
+  // lookup so a pre-seeded sys.modules entry cannot smuggle one in: rule 6)
   if (typeof name !== "string" || name.split(".").some((p) => p === "" || p.charCodeAt(0) === 36)) {
     const e = T.ModuleNotFoundError(`No module named '${name}'`);
     e.name = name;
     throw e;
   }
+  const existing = dictGet(sysModules, name);
+  if (existing !== undefined) return existing;
   const dot = name.lastIndexOf(".");
   if (dot > 0) {
     importModule(name.slice(0, dot));

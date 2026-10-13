@@ -19,13 +19,12 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = []; const choosers = [];
+let n = 0; const waiting = new Map(); const errors = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "")) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
-  if (m.method === "Page.fileChooserOpened") choosers.push(m.params);
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
@@ -57,7 +56,6 @@ const png = (w, h, noisy = false, name = "pic.png") => `(async () => {
 const paste = (file) => ev(`(async () => { const dt = new DataTransfer(); dt.items.add(await ${file}); document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true })); return 1; })()`);
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Log.enable", "DOM.enable"]) await send(m);
-  await send("Page.setInterceptFileChooserDialog", { enabled: true });
   const url = `${base}board/?mermaid=${encodeURIComponent("flowchart LR\n a[First] --> b[Second]")}`;
   await send("Page.navigate", { url });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
@@ -116,14 +114,17 @@ try {
   check(t.w === 460 && (await item("t")).h < h0, `a note resized to 460 wide, and shorter: ${t.w}, ${h0} -> ${(await item("t")).h}`);
   // + Image in a note's editor: title, picture, text, in that order
   writeFileSync(join(profile, "chosen.png"), Buffer.from(await ev(`(async () => { const f = await ${png(80, 40, false)}; const b = new Uint8Array(await f.arrayBuffer()); let s = ""; for (const x of b) s += String.fromCharCode(x); return btoa(s); })()`), "base64"));
+  // The board's own file inputs (toolbar Image, + Image) carry class
+  // sb-fileinput; set the chosen file on the one the click just created,
+  // which fires its change handler.  (Avoids the flaky CDP file-chooser
+  // event, and the page's unrelated Open-file input.)
   const choose = async () => {
-    for (let i = 0; i < 200 && !choosers.length; i++) await sleep(50);
-    const c = choosers.shift();
-    if (c) { await send("DOM.setFileInputFiles", { files: [join(profile, "chosen.png")], backendNodeId: c.backendNodeId }); return true; }
-    // (no file-chooser event: set the files on the input directly)
-    const doc = await send("DOM.getDocument", { depth: -1 });
-    const q = await send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "input[type=file]" });
-    if (q?.nodeId) { await send("DOM.setFileInputFiles", { files: [join(profile, "chosen.png")], nodeId: q.nodeId }); return true; }
+    for (let i = 0; i < 200; i++) {
+      const doc = await send("DOM.getDocument", { depth: -1 });
+      const q = await send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "input.sb-fileinput" });
+      if (q?.nodeId) { await send("DOM.setFileInputFiles", { files: [join(profile, "chosen.png")], nodeId: q.nodeId }); return true; }
+      await sleep(50);
+    }
     return false;
   };
   r = await rect("t");

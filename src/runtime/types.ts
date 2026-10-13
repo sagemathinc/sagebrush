@@ -2015,8 +2015,10 @@ method(type, "mro", (c: any) => c.$mro.filter((x: any) => !x.$hidden));
 
 // Types whose instances are runtime JS objects: a subclass instance is the
 // base type's object re-prototyped onto the subclass.
-export function subclassable(P: PyType, jsClass: any) {
+// `fields`: the layout's own implementation property names (not Python attributes).
+export function subclassable(P: PyType, jsClass: any, fields: string[] = []) {
   P.$jsBase = jsClass;
+  if (fields.length) P.$impl = new Set(fields);
   const make = (cls: any, o: any) => {
     if (cls === P) return o;
     if (!isType(cls) || !cls.$mro.includes(P)) raise(T.TypeError, `${P.$name}.__new__(X): X is not a subtype of ${P.$name}`);
@@ -2029,15 +2031,15 @@ export function subclassable(P: PyType, jsClass: any) {
   nw.$kw = (pos: any[], names: string[], values: any[]) => make(pos[0], callKw(P, pos.slice(1), names, values));
   P.$dict.set("__new__", nw);
 }
-subclassable(bytesType, PyBytes);
-subclassable(bytearray, PyByteArray);
-subclassable(T.map, MapIter);
-subclassable(T.filter, FilterIter);
-subclassable(T.zip, Zip);
-subclassable(T.enumerate, Enumerate);
-subclassable(T.reversed, ReversedIter);
-subclassable(staticmethod, PyStaticMethod);
-subclassable(classmethod, PyClassMethod);
+subclassable(bytesType, PyBytes, ["a", "n"]);
+subclassable(bytearray, PyByteArray, ["a", "n"]);
+subclassable(T.map, MapIter, ["f", "its"]);
+subclassable(T.filter, FilterIter, ["f", "it"]);
+subclassable(T.zip, Zip, ["its", "strict"]);
+subclassable(T.enumerate, Enumerate, ["it", "i"]);
+subclassable(T.reversed, ReversedIter, ["a", "i", "get"]);
+subclassable(staticmethod, PyStaticMethod, ["f"]);
+subclassable(classmethod, PyClassMethod, ["f"]);
 // property subclasses commonly override __init__ and call super().__init__.
 property.$jsBase = PyProperty;
 property.$dict.set("__new__", pyfn(function __new__(cls: PyType, ..._args: any[]) {
