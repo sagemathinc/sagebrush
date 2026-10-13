@@ -256,9 +256,10 @@ Its re-review of 65e998a confirmed that, and found two follow-ups, fixed:
 - **HARD-65E-2 (hardening):** some builtin `__new__` made an instance of any
   class: int's, str's and float's by keyword (`int.__new__(StrSubclass,
   "10", base=16)`, a str subclass holding an int), and BaseException's,
-  tuple's and frozenset's at all. Every builtin `__new__` is now an
-  `allocator()` (src/runtime/types.ts): it makes only its own type's
-  subtypes, checked on every way of calling it, as CPython's do.
+  tuple's and frozenset's at all. Every builtin `__new__` but object's and
+  type's (which make any class) is now an `allocator()`
+  (src/runtime/types.ts): it makes only its own type's subtypes, checked on
+  every way of calling it, as CPython's do.
 
 A test now checks the structure for every builtin type: each method in its
 dict is its own or an ancestor's, and its `__new__` is object's, type's, or
