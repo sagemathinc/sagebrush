@@ -27,6 +27,7 @@ const fns = {
   tanh: FD.tanh, asinh: FD.asinh, acosh: FD.acosh, atanh: FD.atanh, expm1: FD.expm1, log2: FD.log2, log10: FD.log10,
   cbrt: FD.cbrt, atan2: (x) => FD.atan2(x, 0.7), hypot: (x) => FD.v8hypot(x, 1.3, x / 3),
   exp: L.glibcExp, log: L.glibcLog, log1p: L.glibcLog1p, pow: (x) => L.glibcPow(Math.abs(x), 1.37), powi: (x) => L.glibcPow(x, 7),
+  erf: FD.erf, erfc: FD.erfc, lgamma: FD.lgamma, tgamma: (x) => FD.tgamma(x % 180), exp2: (x) => L.glibcExp2(x % 1100),
 };
 const out = {};
 for (const [k, f] of Object.entries(fns)) {
@@ -52,11 +53,11 @@ test("elementary functions: the same bits in V8 (node) and JavaScriptCore (bun)"
   writeFileSync(file, SCRIPT);
   const v8 = JSON.parse(execFileSync(process.execPath, [file], { encoding: "utf8" }));
   const jsc = JSON.parse(execFileSync("bun", [file], { encoding: "utf8" }));
-  assert.equal(Object.keys(v8).length, 23);
+  assert.equal(Object.keys(v8).length, 28);
   assert.deepEqual(jsc, v8);
 });
 
-test("exp, log, log1p, pow, cosh, log10: glibc's bits (CPython's math)", { skip: !has("python3") && "no python3 here" }, () => {
+test("exp, exp2, log, log1p, pow, cosh, log10: glibc's bits (CPython's math)", { skip: !has("python3") && "no python3 here" }, () => {
   const FD = require(join(runtime, "fdlibm.js"));
   const L = require(join(runtime, "libm.js"));
   let s = 777;
@@ -76,7 +77,7 @@ def safe(f, *a):
     try: return b(f(*a))
     except (OverflowError, ValueError): return None
 print(json.dumps({
-  'exp': [safe(math.exp, x) for x in d['sm']], 'log': [b(math.log(x)) for x in d['pos']],
+  'exp': [safe(math.exp, x) for x in d['sm']], 'exp2': [safe(math.exp2, x * 13) for x in d['py']], 'log': [b(math.log(x)) for x in d['pos']],
   'log1p': [b(math.log1p(x)) for x in d['pos']], 'log10': [b(math.log10(x)) for x in d['pos']],
   'cosh': [safe(math.cosh, x) for x in d['sm']], 'pow': [safe(math.pow, x, y) for x, y in zip(d['pos'], d['py'])],
 }))`], { encoding: "utf8", maxBuffer: 1 << 26 }));
@@ -90,6 +91,7 @@ print(json.dumps({
     assert.equal(bad, 0, `${name}: ${bad} of ${n} differ from glibc (${ex})`);
   };
   check("exp", (i) => L.glibcExp(sm[i]));
+  check("exp2", (i) => L.glibcExp2(py[i] * 13));
   check("log", (i) => L.glibcLog(pos[i]));
   check("log1p", (i) => L.glibcLog1p(pos[i]));
   check("log10", (i) => FD.log10(pos[i]));

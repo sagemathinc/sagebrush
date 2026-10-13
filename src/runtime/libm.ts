@@ -173,6 +173,59 @@ function glibcExpSlow(x: number): number {
   return fma(scale, tmp, scale);
 }
 
+// glibc's exp2 (ARM optimized-routines math/exp2.c, MIT OR Apache-2.0 WITH
+// LLVM-exception, Copyright (c) 2018-2023 Arm Limited), over exp's tables:
+// x = k/128 + r, 2^x = 2^(k/128) 2^r.  Python's math.exp2 calls it.
+const EXP2_POLY = [0.6931471805599453, 0.24022650695909065, 0.0555041086686087, 0.009618131975721055, 0.0013332074570119598]; // (0x1.62e42fefa39efp-1, 0x1.ebfbdff82c424p-3, 0x1.c6b08d70cf4b5p-5, 0x1.3b2abd24650ccp-7, 0x1.5d7e09b4e3a84p-10)
+const EXP2_SHIFT = 6755399441055744 / 128; // 0x1.8p52 / N
+export function glibcExp2(x: number): number {
+  ef[0] = x;
+  let abstop = (eu[1] >>> 20) & 0x7ff;
+  if (((abstop - 0x3c9) >>> 0) >= 0x408 - 0x3c9) { // |x| < 2^-54 or |x| >= 512, or nan
+    if (((abstop - 0x3c9) | 0) < 0) return 1.0 + x;
+    if (abstop >= 0x409) { // |x| >= 1024
+      if (x === -Infinity) return 0.0;
+      if (abstop >= 0x7ff) return 1.0 + x;
+      if (x > 0) return Infinity;
+      if (x <= -1075) return 0.0;
+    }
+    if (Math.abs(x) > 928) abstop = 0; // (2 asuint64(x) > 2 asuint64(928.0): large |x| is special-cased below)
+  }
+  const kd0 = x + EXP2_SHIFT;
+  ef[0] = kd0;
+  const k = eu[0] | 0; // the low word of kd0's bits: k (a signed 32-bit integer here)
+  const kd = kd0 - EXP2_SHIFT;
+  const r = x - kd;
+  const i = k & 127;
+  const tail = bitsToDouble(EXP_TAB[4 * i], EXP_TAB[4 * i + 1]);
+  // (sbits = T[2i+1] + (k << 45): the table holds 2^(i/128) less i << 45; only the high word changes)
+  const sHi = (EXP_TAB[4 * i + 2] + (k << 13)) >>> 0, sLo = EXP_TAB[4 * i + 3];
+  const [C1, C2e, C3e, C4e, C5e] = EXP2_POLY;
+  const r2 = r * r;
+  // (glibc builds exp2 without fused multiply-adds: no contraction here)
+  const tmp = tail + r * C1 + r2 * (C2e + r * C3e) + r2 * r2 * (C4e + r * C5e);
+  if (abstop === 0) {
+    if (k >= 0) {
+      // (k > 0: the exponent may overflow; glibc scales by 2^-1 and back, here
+      // by 2^-1009 so that nothing overflows; the scalings are exact)
+      const scale = bitsToDouble((sHi - (1009 << 20)) >>> 0, sLo);
+      return 2 ** 1009 * (scale + scale * tmp);
+    }
+    const scale = bitsToDouble((sHi + (1022 << 20)) >>> 0, sLo);
+    let y = scale + scale * tmp;
+    if (y < 1.0) {
+      let lo = scale - y + scale * tmp;
+      const hi = 1.0 + y;
+      lo = 1.0 - hi + y + lo;
+      y = hi + lo - 1.0;
+      if (y === 0) y = 0;
+    }
+    return 2 ** -1022 * y;
+  }
+  const scale = bitsToDouble(sHi, sLo);
+  return scale + scale * tmp;
+}
+
 // The tables of glibcExp and glibcLog, packed for the WebAssembly kernels
 // (kernels/src/libm.rs): exp: tail[128], base[128], c2..c5, tbits[128]
 // (doubles whose bits are glibc's T[2i+1]); log: (invc, logc)[128], A[5],

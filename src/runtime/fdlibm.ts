@@ -22,7 +22,7 @@
 // originals over glibc's exp and log, with GCC's fused multiply-adds where
 // they matter), and hypot V8 (as numpy_linalg's kernels).
 
-import { glibcLog, glibcExp } from "./libm";
+import { glibcLog, glibcExp, glibcPow } from "./libm";
 
 // ------------------------------------------------------------ the bits of a double
 const F = new Float64Array(1), U = new Uint32Array(F.buffer); // (little-endian: U[1] is the high word)
@@ -1090,4 +1090,225 @@ export function v8hypot(...xs: number[]): number {
     sum = pre;
   }
   return Math.sqrt(sum) * max;
+}
+
+// ------------------------------------------------------------ erf, erfc, lgamma, tgamma
+// (Python's math.erf, erfc, gamma and lgamma.)  erf and erfc are fdlibm's
+// s_erf.c and lgamma its e_lgamma_r.c, ported as the rest of this file from
+// the Rust libm crate, but calling glibc's exp and log as glibc's builds of
+// the same sources do (so erf and erfc agree with CPython on Linux).  tgamma
+// is musl's Lanczos approximation (g = 6.024680040776729583740234375, the
+// constants CPython's math.gamma uses too) over glibc's exp and pow.
+const ERX = 8.45062911510467529297e-01, EFX8 = 1.02703333676410069053e+00;
+const PP = [1.28379167095512558561e-01, -3.25042107247001499370e-01, -2.84817495755985104766e-02, -5.77027029648944159157e-03, -2.37630166566501626084e-05];
+const QQ = [3.97917223959155352819e-01, 6.50222499887672944485e-02, 5.08130628187576562776e-03, 1.32494738004321644526e-04, -3.96022827877536812320e-06];
+const PA = [-2.36211856075265944077e-03, 4.14856118683748331666e-01, -3.72207876035701323847e-01, 3.18346619901161753674e-01,
+  -1.10894694282396677476e-01, 3.54783043256182359371e-02, -2.16637559486879084300e-03];
+const QA = [1.06420880400844228286e-01, 5.40397917702171048937e-01, 7.18286544141962662868e-02, 1.26171219808761642112e-01,
+  1.36370839120290507362e-02, 1.19844998467991074170e-02];
+const RA = [-9.86494403484714822705e-03, -6.93858572707181764372e-01, -1.05586262253232909814e+01, -6.23753324503260060396e+01,
+  -1.62396669462573470355e+02, -1.84605092906711035994e+02, -8.12874355063065934246e+01, -9.81432934416914548592e+00];
+const SA = [1.96512716674392571292e+01, 1.37657754143519042600e+02, 4.34565877475229228821e+02, 6.45387271733267880336e+02,
+  4.29008140027567833386e+02, 1.08635005541779435134e+02, 6.57024977031928170135e+00, -6.04244152148580987438e-02];
+const RB = [-9.86494292470009928597e-03, -7.99283237680523006574e-01, -1.77579549177547519889e+01, -1.60636384855821916062e+02,
+  -6.37566443368389627722e+02, -1.02509513161107724954e+03, -4.83519191608651397019e+02];
+const SB = [3.03380607434824582924e+01, 3.25792512996573918826e+02, 1.53672958608443695994e+03, 3.19985821950859553908e+03,
+  2.55305040643316442583e+03, 4.74528541206955367215e+02, -2.24409524465858183362e+01];
+const X1P_1022 = 2 ** -1022;
+function erfc1(x: number): number {
+  const s = Math.abs(x) - 1.0;
+  const p = PA[0] + s * (PA[1] + s * (PA[2] + s * (PA[3] + s * (PA[4] + s * (PA[5] + s * PA[6])))));
+  const q = 1.0 + s * (QA[0] + s * (QA[1] + s * (QA[2] + s * (QA[3] + s * (QA[4] + s * QA[5])))));
+  return 1.0 - ERX - p / q;
+}
+function erfc2(ix: number, x: number): number {
+  if (ix < 0x3ff40000) return erfc1(x); // |x| < 1.25
+  x = Math.abs(x);
+  const s = 1.0 / (x * x);
+  let r: number, bigS: number;
+  if (ix < 0x4006db6d) { // |x| < 1/.35
+    r = RA[0] + s * (RA[1] + s * (RA[2] + s * (RA[3] + s * (RA[4] + s * (RA[5] + s * (RA[6] + s * RA[7]))))));
+    bigS = 1.0 + s * (SA[0] + s * (SA[1] + s * (SA[2] + s * (SA[3] + s * (SA[4] + s * (SA[5] + s * (SA[6] + s * SA[7])))))));
+  } else {
+    r = RB[0] + s * (RB[1] + s * (RB[2] + s * (RB[3] + s * (RB[4] + s * (RB[5] + s * RB[6])))));
+    bigS = 1.0 + s * (SB[0] + s * (SB[1] + s * (SB[2] + s * (SB[3] + s * (SB[4] + s * (SB[5] + s * SB[6]))))));
+  }
+  const z = zeroLow(x);
+  return (glibcExp(-z * z - 0.5625) * glibcExp((z - x) * (z + x) + r / bigS)) / x;
+}
+const erfR = (z: number) => PP[0] + z * (PP[1] + z * (PP[2] + z * (PP[3] + z * PP[4])));
+const erfS = (z: number) => 1.0 + z * (QQ[0] + z * (QQ[1] + z * (QQ[2] + z * (QQ[3] + z * QQ[4]))));
+export function erf(x: number): number {
+  let ix = hiw(x);
+  const sign = ix >>> 31;
+  ix &= 0x7fffffff;
+  if (ix >= 0x7ff00000) return 1.0 - 2.0 * sign + 1.0 / x; // nan, +-inf
+  if (ix < 0x3feb0000) { // |x| < 0.84375
+    if (ix < 0x3e300000) return 0.125 * (8.0 * x + EFX8 * x); // |x| < 2^-28
+    const z = x * x;
+    return x + x * (erfR(z) / erfS(z));
+  }
+  const y = ix < 0x40180000 ? 1.0 - erfc2(ix, x) : 1.0 - X1P_1022; // |x| < 6
+  return sign ? -y : y;
+}
+export function erfc(x: number): number {
+  let ix = hiw(x);
+  const sign = ix >>> 31;
+  ix &= 0x7fffffff;
+  if (ix >= 0x7ff00000) return 2.0 * sign + 1.0 / x;
+  if (ix < 0x3feb0000) { // |x| < 0.84375
+    if (ix < 0x3c700000) return 1.0 - x; // |x| < 2^-56
+    const z = x * x;
+    const y = erfR(z) / erfS(z);
+    if (sign || ix < 0x3fd00000) return 1.0 - (x + x * y); // x < 1/4
+    return 0.5 - (x - 0.5 + x * y);
+  }
+  if (ix < 0x403c0000) return sign ? 2.0 - erfc2(ix, x) : erfc2(ix, x); // |x| < 28
+  return sign ? 2.0 - X1P_1022 : X1P_1022 * X1P_1022;
+}
+
+const LG_PI = 3.14159265358979311600e+00;
+const LA = [7.72156649015328655494e-02, 3.22467033424113591611e-01, 6.73523010531292681824e-02, 2.05808084325167332806e-02,
+  7.38555086081402883957e-03, 2.89051383673415629091e-03, 1.19270763183362067845e-03, 5.10069792153511336608e-04,
+  2.20862790713908385557e-04, 1.08011567247583939954e-04, 2.52144565451257326939e-05, 4.48640949618915160150e-05];
+const TC = 1.46163214496836224576e+00, TF = -1.21486290535849611461e-01, TT = -3.63867699703950536541e-18;
+const LT = [4.83836122723810047042e-01, -1.47587722994593911752e-01, 6.46249402391333854778e-02, -3.27885410759859649565e-02,
+  1.79706750811820387126e-02, -1.03142241298341437450e-02, 6.10053870246291332635e-03, -3.68452016781138256760e-03,
+  2.25964780900612472250e-03, -1.40346469989232843813e-03, 8.81081882437654011382e-04, -5.38595305356740546715e-04,
+  3.15632070903625950361e-04, -3.12754168375120860518e-04, 3.35529192635519073543e-04];
+const LU = [-7.72156649015328655494e-02, 6.32827064025093366517e-01, 1.45492250137234768737e+00, 9.77717527963372745603e-01,
+  2.28963728064692451092e-01, 1.33810918536787660377e-02];
+const LV = [2.45597793713041134822e+00, 2.12848976379893395361e+00, 7.69285150456672783825e-01, 1.04222645593369134254e-01,
+  3.21709242282423911810e-03];
+const LGS = [-7.72156649015328655494e-02, 2.14982415960608852501e-01, 3.25778796408930981787e-01, 1.46350472652464452805e-01,
+  2.66422703033638609560e-02, 1.84028451407337715652e-03, 3.19475326584100867617e-05];
+const LR = [1.39200533467621045958e+00, 7.21935547567138069525e-01, 1.71933865632803078993e-01, 1.86459191715652901344e-02,
+  7.77942496381893596434e-04, 7.32668430744625636189e-06];
+const LW = [4.18938533204672725052e-01, 8.33333333333329678849e-02, -2.77777777728775536470e-03, 7.93650558643019558500e-04,
+  -5.95187557450339963135e-04, 8.36339918996282139126e-04, -1.63092934096575273989e-03];
+/** sin(pi x) for x > 2^-100 (its sign is arbitrary when it is 0) */
+function sinPi(x: number): number {
+  x = 2.0 * (x * 0.5 - Math.floor(x * 0.5)); // x mod 2
+  let n = Math.trunc(x * 4.0);
+  n = Math.trunc((n + 1) / 2);
+  x -= n * 0.5;
+  x *= LG_PI;
+  switch (n) {
+    case 1: return kCos(x, 0.0);
+    case 2: return kSin(-x, 0.0, 0);
+    case 3: return -kCos(x, 0.0);
+    default: return kSin(x, 0.0, 0);
+  }
+}
+/** log|Gamma(x)| (fdlibm's lgamma_r; a nonpositive integer gives +inf) */
+export function lgamma(x: number): number {
+  const ix = hiw(x) & 0x7fffffff, lx = low(x);
+  const sign = x < 0 || Object.is(x, -0);
+  if (ix >= 0x7ff00000) return x * x;
+  if (ix < (0x3ff - 70) << 20) return -glibcLog(Math.abs(x)); // |x| < 2^-70
+  let nadj = 0;
+  if (sign) {
+    x = -x;
+    let t = sinPi(x);
+    if (t === 0.0) return 1.0 / (x - x); // -integer
+    if (t < 0) t = -t;
+    nadj = glibcLog(LG_PI / (t * x));
+  }
+  let r: number;
+  if ((ix === 0x3ff00000 || ix === 0x40000000) && lx === 0) r = 0.0; // 1 and 2
+  else if (ix < 0x40000000) { // x < 2
+    let y: number, i: number;
+    if (ix <= 0x3feccccc) { // lgamma(x) = lgamma(x+1) - log(x)
+      r = -glibcLog(x);
+      if (ix >= 0x3fe76944) { y = 1.0 - x; i = 0; } else if (ix >= 0x3fcda661) { y = x - (TC - 1.0); i = 1; } else { y = x; i = 2; }
+    } else {
+      r = 0.0;
+      if (ix >= 0x3ffbb4c3) { y = 2.0 - x; i = 0; } else if (ix >= 0x3ff3b4c4) { y = x - TC; i = 1; } else { y = x - 1.0; i = 2; }
+    }
+    if (i === 0) {
+      const z = y * y;
+      const p1 = LA[0] + z * (LA[2] + z * (LA[4] + z * (LA[6] + z * (LA[8] + z * LA[10]))));
+      const p2 = z * (LA[1] + z * (LA[3] + z * (LA[5] + z * (LA[7] + z * (LA[9] + z * LA[11])))));
+      r += y * p1 + p2 - 0.5 * y;
+    } else if (i === 1) {
+      const z = y * y, w = z * y;
+      const p1 = LT[0] + w * (LT[3] + w * (LT[6] + w * (LT[9] + w * LT[12])));
+      const p2 = LT[1] + w * (LT[4] + w * (LT[7] + w * (LT[10] + w * LT[13])));
+      const p3 = LT[2] + w * (LT[5] + w * (LT[8] + w * (LT[11] + w * LT[14])));
+      r += TF + (z * p1 - (TT - w * (p2 + y * p3)));
+    } else {
+      const p1 = y * (LU[0] + y * (LU[1] + y * (LU[2] + y * (LU[3] + y * (LU[4] + y * LU[5])))));
+      const p2 = 1.0 + y * (LV[0] + y * (LV[1] + y * (LV[2] + y * (LV[3] + y * LV[4]))));
+      r += -0.5 * y + p1 / p2;
+    }
+  } else if (ix < 0x40200000) { // x < 8
+    const i = Math.trunc(x);
+    const y = x - i;
+    const p = y * (LGS[0] + y * (LGS[1] + y * (LGS[2] + y * (LGS[3] + y * (LGS[4] + y * (LGS[5] + y * LGS[6]))))));
+    const q = 1.0 + y * (LR[0] + y * (LR[1] + y * (LR[2] + y * (LR[3] + y * (LR[4] + y * LR[5])))));
+    r = 0.5 * y + p / q;
+    let z = 1.0; // lgamma(1+s) = log(s) + lgamma(s)
+    if (i >= 7) z *= y + 6.0;
+    if (i >= 6) z *= y + 5.0;
+    if (i >= 5) z *= y + 4.0;
+    if (i >= 4) z *= y + 3.0;
+    if (i >= 3) { z *= y + 2.0; r += glibcLog(z); }
+  } else if (ix < 0x43900000) { // x < 2^58
+    const t = glibcLog(x), z = 1.0 / x, y = z * z;
+    const w = LW[0] + z * (LW[1] + y * (LW[2] + y * (LW[3] + y * (LW[4] + y * (LW[5] + y * LW[6])))));
+    r = (x - 0.5) * (t - 1.0) + w;
+  } else r = x * (glibcLog(x) - 1.0);
+  return sign ? nadj - r : r;
+}
+
+const GMHALF = 5.524680040776729583740234375;
+const SNUM = [23531376880.410759688572007674451636754734846804940, 42919803642.649098768957899047001988850926355848959,
+  35711959237.355668049440185451547166705960488635843, 17921034426.037209699919755754458931112671403265390,
+  6039542586.3520280050642916443072979210699388420708, 1439720407.3117216736632230727949123939715485786772,
+  248874557.86205415651146038641322942321632125127801, 31426415.585400194380614231628318205362874684987640,
+  2876370.6289353724412254090516208496135991145378768, 186056.26539522349504029498971604569928220784236328,
+  8071.6720023658162106380029022722506138218516325024, 210.82427775157934587250973392071336271166969580291,
+  2.5066282746310002701649081771338373386264310793408];
+const SDEN = [0.0, 39916800.0, 120543840.0, 150917976.0, 105258076.0, 45995730.0, 13339535.0, 2637558.0, 357423.0, 32670.0,
+  1925.0, 66.0, 1.0];
+const FACT = [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800, 39916800, 479001600, 6227020800, 87178291200,
+  1307674368000, 20922789888000, 355687428096000, 6402373705728000, 121645100408832000, 2432902008176640000,
+  51090942171709440000, 1124000727777607680000];
+function lanczosS(x: number): number {
+  let num = 0.0, den = 0.0;
+  if (x < 8.0) {
+    for (let i = 12; i >= 0; i--) { num = num * x + SNUM[i]; den = den * x + SDEN[i]; }
+  } else {
+    for (let i = 0; i <= 12; i++) { num = num / x + SNUM[i]; den = den / x + SDEN[i]; }
+  }
+  return num / den;
+}
+/** Gamma(x) (musl's tgamma: NaN at the nonpositive integers and -inf, +-inf at +-0) */
+export function tgamma(x: number): number {
+  const ix = hiw(x) & 0x7fffffff;
+  const sign = x < 0 || Object.is(x, -0);
+  if (ix >= 0x7ff00000) return x + Infinity;
+  if (ix < (0x3ff - 54) << 20) return 1.0 / x; // |x| < 2^-54
+  if (x === Math.floor(x)) {
+    if (sign) return NaN;
+    if (x <= FACT.length) return FACT[x - 1];
+  }
+  if (ix >= 0x40670000) { // |x| >= 184
+    if (sign) return Math.floor(x) * 0.5 === Math.floor(x * 0.5) ? 0.0 : -0.0;
+    return x * 2 ** 1023;
+  }
+  const absx = sign ? -x : x;
+  let y = absx + GMHALF, dy: number;
+  if (absx > GMHALF) { dy = y - absx; dy -= GMHALF; } else { dy = y - GMHALF; dy -= absx; }
+  let z = absx - 0.5;
+  let r = lanczosS(absx) * glibcExp(-y);
+  if (x < 0.0) {
+    r = -LG_PI / (sinPi(absx) * absx * r);
+    dy = -dy;
+    z = -z;
+  }
+  r += (dy * (GMHALF + 0.5) * r) / y;
+  z = glibcPow(y, 0.5 * z);
+  y = r * z * z;
+  return y;
 }

@@ -1,12 +1,13 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
 import { globalsDict, hooks, setattr, putAttr } from "./object";
-import { glibcLog, glibcExp, glibcLog1p, glibcPow } from "./libm";
+import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin } from "./builtins";
 import * as FD from "./fdlibm";
+import { floatRepr } from "./format";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -462,6 +463,64 @@ newBuiltinModule("math", (m) => {
     let r: any = 1;
     O.forEach(it, (v) => (r = O.mul(r, v)));
     return r;
+  });
+  // erf, erfc, gamma, lgamma and exp2 (fdlibm.ts, libm.ts), raising as CPython's do
+  unary("erf", FD.erf);
+  unary("erfc", FD.erfc);
+  unary("exp2", glibcExp2);
+  // (0, the negative integers and -inf are outside their domain; CPython 3.14's message)
+  const notInteger = (v: number) => raise(T.ValueError, `expected a noninteger or positive integer, got ${floatRepr(v)}`);
+  fn(m, "gamma", (x: any) => {
+    const v = F(x);
+    if (v === 0 || v === -Infinity || (v < 0 && Math.floor(v) === v)) notInteger(v);
+    const r = FD.tgamma(v);
+    if (!Number.isFinite(r) && Number.isFinite(v)) range();
+    return O.mkfloat(r);
+  });
+  fn(m, "lgamma", (x: any) => {
+    const v = F(x);
+    if (v <= 0 && v !== -Infinity && Math.floor(v) === v) notInteger(v);
+    const r = FD.lgamma(v);
+    if (!Number.isFinite(r) && Number.isFinite(v)) range();
+    return O.mkfloat(r);
+  });
+  // nextafter and ulp: steps through the doubles in order (their bits, as integers ordered with the sign)
+  const bitsF = new Float64Array(1), bitsI = new BigInt64Array(bitsF.buffer);
+  const toOrd = (v: number): bigint => {
+    bitsF[0] = v;
+    const b = bitsI[0];
+    return b < 0n ? -(b & 0x7fffffffffffffffn) : b;
+  };
+  const fromOrd = (k: bigint): number => {
+    bitsI[0] = k < 0n ? (-k) | -0x8000000000000000n : k;
+    return bitsF[0];
+  };
+  const nextafter = (a: number, b: number, steps = 1n): number => {
+    if (a !== a || b !== b) return a !== a ? a : b;
+    if (a === b || steps === 0n) return a === b ? b : a;
+    const ka = toOrd(a), kb = toOrd(b);
+    const r = kb > ka ? (kb - ka <= steps ? kb : ka + steps) : (ka - kb <= steps ? kb : ka - steps);
+    if (r === kb) return b;
+    // (0 and -0 are one place in this order: a zero has a's sign, as CPython's)
+    if (r === 0n) return a < 0 || Object.is(a, -0) ? -0 : 0;
+    return fromOrd(r);
+  };
+  m.nextafter = builtin((x: any, y: any, steps: any) => {
+    let n = 1n;
+    if (steps !== undefined && steps !== null) {
+      n = BigInt(typeof steps === "boolean" ? +steps : O.index(steps));
+      if (n < 0n) raise(T.ValueError, "steps must be a non-negative integer");
+    }
+    return O.mkfloat(nextafter(F(x), F(y), n));
+  }, "nextafter", { args: ["x", "y"], posonly: 2, vararg: null, kwonly: ["steps"], kwarg: null });
+  fn(m, "ulp", (x: any) => {
+    let v = F(x);
+    if (v !== v) return O.mkfloat(v);
+    v = Math.abs(v);
+    if (v === Infinity) return O.mkfloat(v);
+    const up = nextafter(v, Infinity);
+    if (up === Infinity) return O.mkfloat(v - nextafter(v, -Infinity));
+    return O.mkfloat(up - v);
   });
   fn(m, "dist", (p: any, q: any) => {
     const a = O.toArray(p).map(F), b = O.toArray(q).map(F);
