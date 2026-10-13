@@ -25,6 +25,8 @@ export default defineConfig({
               SHARE_DB: bindings.d1({ name: "sagebrush-share-dev", id: "94675861-6f72-4cbc-a419-b28647eb9e9e" }),
               SHARE_BUCKET: bindings.r2({ name: "sagebrush-share-dev" }),
               FILES_ORIGIN: bindings.text("https://files.cocalcusercontent.dev"),
+              // (lite4b: the dev CoCalc, its seed bay, with this site registered as a client)
+              COCALC_ORIGIN: bindings.text("https://lite4b.cocalc.ai"),
               SHARE_DEV: bindings.text("1"),
               COCALC_CLIENT_SECRET: bindings.secret(),
               SESSION_KEY: bindings.secret(),
