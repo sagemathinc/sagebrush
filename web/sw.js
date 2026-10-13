@@ -8,10 +8,15 @@
 // Everything else (the Atlas, demos, data a notebook fetches) is not cached.
 //
 // The cache is the origin's storage, which any script of the origin can
-// write: a kept copy is served only if it still has the SHA-256 the build
-// gave it (DIGESTS, from web/build.ts), else it is dropped and fetched again,
-// or, offline, not served (design/security.md, SEC-8D6-1).  This script
-// itself cannot be changed that way: the browser fetches it.
+// write: it could put there the right bytes as a different response (a
+// redirect, a page without its security headers).  So a kept copy is used
+// only if it is a response this script kept (same-origin, 200, not
+// redirected, from its own address) whose bytes still have the SHA-256 the
+// build gave them, and it is then served as a response made here, with the
+// build's status and headers (DIGESTS, from web/build.ts), never the kept
+// one; else it is dropped and fetched again, or, offline, not served
+// (design/security.md, SEC-8D6-1, SEC-522-1).  This script itself cannot be
+// changed that way: the browser fetches it.
 const VERSION = "__VERSION__";
 const SHELL = __SHELL__;
 const DIGESTS = __DIGESTS__;
@@ -36,13 +41,28 @@ const scope = new URL(self.registration.scope);
 const shellPaths = new Set(SHELL.map((p) => new URL(p, scope).pathname));
 const wanted = new Map(Object.entries(DIGESTS).map(([p, d]) => [new URL(p, scope).pathname, d]));
 
-// a kept response, if its bytes are still what the build made
-async function intact(res, pathname) {
+// a kept response as the build made it, or null
+async function verified(res, pathname) {
   if (!res) return null;
   const want = wanted.get(pathname);
-  if (!want) return null;
-  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", await res.clone().arrayBuffer()));
-  return [...h].map((b) => b.toString(16).padStart(2, "0")).join("") === want ? res : null;
+  if (!want || res.type !== "basic" || res.status !== 200 || res.redirected) return null;
+  let u;
+  try { u = new URL(res.url); } catch { return null; }
+  const page = pathname === scope.pathname;
+  if (u.origin !== scope.origin || !(u.pathname === pathname || (page && u.pathname === scope.pathname + "index.html"))) return null;
+  const bytes = await res.clone().arrayBuffer();
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  if ([...h].map((b) => b.toString(16).padStart(2, "0")).join("") !== want.sha256) return null;
+  return new Response(bytes, { status: 200, headers: want.headers });
+}
+
+// this version's kept copy of a request, verified; a bad one is dropped
+async function kept(req, pathname, opts) {
+  const cache = await caches.open(CACHE);
+  const hit = await cache.match(req, opts);
+  const ok = await verified(hit, pathname);
+  if (hit && !ok) await cache.delete(req, opts);
+  return ok;
 }
 
 self.addEventListener("fetch", (ev) => {
@@ -54,21 +74,14 @@ self.addEventListener("fetch", (ev) => {
   const page = req.mode === "navigate" && (url.pathname === scope.pathname || url.pathname === scope.pathname + "index.html");
   if (!page && !shellPaths.has(url.pathname)) return;
   if (url.searchParams.has("h")) {
-    ev.respondWith((async () => {
-      const hit = await caches.match(req);
-      const ok = await intact(hit, url.pathname);
-      if (ok) return ok;
-      if (hit) await (await caches.open(CACHE)).delete(req);
-      return fetchAndKeep(req);
-    })());
+    ev.respondWith((async () => (await kept(req, url.pathname)) ?? fetchAndKeep(req))());
     return;
   }
   ev.respondWith((async () => {
     try {
       return await fetchAndKeep(req, page ? new Request(new URL("./", scope)) : undefined);
     } catch (e) {
-      const hit = await caches.match(page ? new URL("./", scope).href : req, { ignoreSearch: page });
-      const ok = await intact(hit, page ? scope.pathname : url.pathname);
+      const ok = await kept(page ? new Request(new URL("./", scope)) : req, page ? scope.pathname : url.pathname, { ignoreSearch: page });
       if (ok) return ok;
       throw e;
     }

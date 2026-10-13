@@ -4,7 +4,7 @@
 //
 //   bun web/build.ts && node web/test-pwa.mjs      (CHROME=... for the browser)
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,6 +85,61 @@ await send("Page.reload", { ignoreCache: false });
 await sleep(3000);
 const status = await ev("document.querySelector('#status')?.textContent");
 ok(!/POISONED/.test(status), "offline, a rewritten worker never runs (the browser's own HTTP cache, which no script can write, may still start the real one): " + JSON.stringify(status));
+// The right bytes as another response (SEC-522-1): the page without its
+// security headers, as a redirect, with a Refresh.  Each is put in the cache
+// from this tab, and the page opened, offline, in a new tab (the browser's
+// HTTP cache cleared, so only the service worker can answer).
+const genuinePage = readFileSync(join(here, "dist", "index.html")).toString("base64");
+const putPage = (init) => ev(`(async () => {
+  const b = Uint8Array.from(atob(${JSON.stringify(genuinePage)}), (c) => c.charCodeAt(0));
+  // (the service worker's cache, under the page's key: it drops a bad entry, so it may be gone)
+  const name = (await caches.keys()).find((k) => k.startsWith("sagebrush-"));
+  if (!name) return false;
+  const c = await caches.open(name);
+  const req = (await c.keys()).find((r) => new URL(r.url).pathname === "/") ?? new Request(new URL("/", location.href));
+  await c.put(req, new Response(b, ${JSON.stringify(init)}));
+  return (await c.match(req)).type === "default";
+})()`);
+// (the service worker looked at the rewritten entry, refused it and dropped it)
+const pageDropped = () => ev(`(async () => { const name = (await caches.keys()).find((k) => k.startsWith("sagebrush-")); const c = await caches.open(name); return !(await c.keys()).some((r) => new URL(r.url).pathname === "/"); })()`);
+async function openTab(path) {
+  await send("Network.clearBrowserCache");
+  const t = await (await fetch(`http://127.0.0.1:9342/json/new?${url}${path.replace(/^\//, "")}`, { method: "PUT" })).json();
+  const tws = new WebSocket(t.webSocketDebuggerUrl);
+  await new Promise((r) => (tws.onopen = r));
+  let k = 0; const w = new Map();
+  tws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w.has(m.id)) { w.get(m.id)(m.result ?? m.error); w.delete(m.id); } };
+  const tsend = (method, params = {}) => new Promise((r) => { const id = ++k; w.set(id, r); tws.send(JSON.stringify({ id, method, params })); });
+  await sleep(2500);
+  const r = (await tsend("Runtime.evaluate", { expression: "({ path: location.pathname, href: location.href, loaded: !!document.querySelector('#status'), isolated: self.crossOriginIsolated })", returnByValue: true })).result?.value ?? {};
+  // (where it went, even to an error page: a followed redirect shows here)
+  r.went = ((await tsend("Page.getNavigationHistory")).entries ?? []).map((e) => e.url).join(" ");
+  await tsend("Page.close").catch(() => {});
+  tws.close();
+  return r;
+}
+await send("Network.enable");
+// (the same answer to a fetch from this page: the service worker's offline
+// fallback, deterministic: refused, or the build's own response)
+// (first: offline, the service worker answers for the page, as built)
+ok(await ev(`fetch("/").then((r) => r.status === 200 && r.headers.get("cross-origin-opener-policy") === "same-origin" && !!r.headers.get("content-security-policy"), () => false)`), "offline, the service worker serves the kept page with the build's status and headers");
+const fetchPage = () => ev(`fetch("/", { cache: "no-store", redirect: "manual" }).then((r) => ({ status: r.status, type: r.type, coop: r.headers.get("cross-origin-opener-policy"), csp: !!r.headers.get("content-security-policy"), refresh: r.headers.get("refresh") }), (e) => ({ refused: String(e) }))`);
+const asBuilt = (r) => !!r.refused || (r.status === 200 && r.coop === "same-origin" && r.csp && !r.refresh);
+for (const [what, init] of [["without its security headers", { headers: { "Content-Type": "text/html" } }], ["as a redirect", { status: 302, headers: { Location: "/redirect-proof" } }], ["with a Refresh", { headers: { "Content-Type": "text/html", Refresh: "0; url=/refresh-proof" } }]]) {
+  ok(await putPage(init), `(the page's kept copy: its bytes, ${what})`);
+  await send("Network.clearBrowserCache");
+  const r = await fetchPage();
+  ok(asBuilt(r), `offline, the page's kept copy ${what} is refused or served as built: ` + JSON.stringify(r));
+}
+ok(await putPage({ headers: { "Content-Type": "text/html" } }), "(the page's kept copy: its bytes, without its security headers)");
+let seen = await openTab("/");
+ok(!(seen.loaded && !seen.isolated) && (await pageDropped()), "offline, the page is never served without its headers (cross-origin isolation, policy), and the entry is dropped: " + JSON.stringify(seen));
+ok(await putPage({ status: 302, headers: { Location: "/redirect-proof" } }), "(the page's kept copy: its bytes, as a redirect)");
+seen = await openTab("/");
+ok(!/redirect-proof/.test(seen.went ?? "") && !/redirect-proof/.test(seen.href ?? "") && (await pageDropped()), "offline, a kept redirect is not followed, and the entry is dropped: " + JSON.stringify(seen));
+ok(await putPage({ headers: { "Content-Type": "text/html", Refresh: "0; url=/refresh-proof" } }), "(the page's kept copy: its bytes, with a Refresh)");
+seen = await openTab("/");
+ok(!/refresh-proof/.test(seen.went ?? "") && !/refresh-proof/.test(seen.href ?? "") && (await pageDropped()), "offline, a kept Refresh is not followed, and the entry is dropped: " + JSON.stringify(seen));
 ws.close(); cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);
