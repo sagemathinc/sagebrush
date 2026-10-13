@@ -1619,7 +1619,7 @@ function squeezeMatmul(out: NDArray, a: NDArray, b: NDArray, ct: DType): any {
 
 // ------------------------------------------------------------------ printing (NumPy's arrayprint)
 
-export const printopts = { precision: 8, threshold: 1000, edgeitems: 3, linewidth: 75, suppress: false, sign: "-" };
+export const printopts = Obj.table({ precision: 8, threshold: 1000, edgeitems: 3, linewidth: 75, suppress: false, sign: "-" });
 
 // Shortest round-trip digits of x: [digits, exponent] with x = 0.d1d2... * 10^exp
 // (round-tripping through float32 while a float32 array is being printed).
@@ -2378,7 +2378,7 @@ newBuiltinModule("_numpy", (m) => {
     if (suppress !== null) printopts.suppress = !!suppress;
     return null;
   });
-  fn("printopt", (k: string) => (printopts as any)[k]);
+  fn("printopt", (k: string) => (typeof k === "string" && Object.hasOwn(printopts, k) ? (printopts as any)[k] : null));
   fn("format_float", (x: any) => positional(toNum(x), printopts.precision, true));
   fn("format_f32", (x: any) => {
     const v = toNum(x);

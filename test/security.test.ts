@@ -134,6 +134,40 @@ print(out)
   assert.equal(run(src), "[(True, 5, ['user'])]\n");
 });
 
+// sagebrush-daybreak SEC-2C5-1 (2c5ccc1): __pyjs_run__ passed any Python
+// object as the compiled code's globals, so a Python function as ns let it
+// read `constructor` through Function.prototype.  Only a module or a dict.
+test("SEC-2C5-1: __pyjs_run__ runs only in a module or dict namespace", () => {
+  const src = `
+def fn(): pass
+out = []
+for ns in (fn, [], 0, "s"):
+    try:
+        __pyjs_run__("r = 1", ns, False); out.append("ran")
+    except TypeError:
+        out.append("TypeError")
+o, e = __pyjs_run__("print(1 + 1)", {}, False)
+out.append((o.strip(), e))
+o, e = __pyjs_run__("print(constructor)", {}, False)
+out.append("NameError" in (e or ""))
+d = {"x": 5}
+__pyjs_run__("y = x + 1", d, False)
+out.append(d["y"])
+print(out)
+`;
+  assert.equal(run(src), "['TypeError', 'TypeError', 'TypeError', 'TypeError', ('2', None), True, 6]\n");
+});
+
+// SEC-2C5-2: _numpy.printopt indexed its options object with a Python key, so
+// `constructor` returned JavaScript Object.  Only its own keys.
+test("SEC-2C5-2: _numpy.printopt returns only its own options", () => {
+  const src = `
+import _numpy
+print([_numpy.printopt(k) for k in ("constructor", "__proto__", "toString", "hasOwnProperty")], _numpy.printopt("precision"))
+`;
+  assert.equal(run(src), "[None, None, None, None] 8\n");
+});
+
 // sagebrush-daybreak's re-review of dd9b8cb (SEC-DD9-1..3): lookup tables
 // matched inherited names ("constructor"), __getstate__ walked raw properties,
 // and __dict__ writes, assignment and deletion reached a layout's own storage.

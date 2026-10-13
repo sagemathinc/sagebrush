@@ -308,6 +308,11 @@ B.builtins.help = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importM
 // the module ns, capturing what it prints: (output, traceback or None).
 // lib/_pyjs_doctest.py runs examples with it; sage chooses Sage syntax.
 B.builtins.__pyjs_run__ = Obj.builtin((src: any, ns: any, sage: any) => {
+  // ns is the globals the compiled code reads and writes as `$g[name]`: it
+  // must be a module (null-prototype) or a dict (wrapped in a null-prototype
+  // namespace), never an object through whose JavaScript prototype `$g[name]`
+  // could reach a raw function (design/security.md rule 6).
+  const g = Obj.typeOf(ns) === T.module ? ns : ns instanceof Obj.PyDict ? Obj.namespaceOf(ns) : raise(T.TypeError, "__pyjs_run__() globals must be a module or dict");
   B.stdout.flush();
   const out: string[] = [];
   const so = B.stdout as any, se = B.stderr as any;
@@ -318,7 +323,7 @@ B.builtins.__pyjs_run__ = Obj.builtin((src: any, ns: any, sage: any) => {
   const host = R.host;
   R.host = null;
   try {
-    (M.loader.exec as any)(String(src), ns, "single", "<doctest>", { sage: O.truth(sage) });
+    (M.loader.exec as any)(String(src), g, "single", "<doctest>", { sage: O.truth(sage) });
   } catch (e) {
     err = formatException(Obj.toPyExc(e));
   } finally {
