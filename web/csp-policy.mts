@@ -28,15 +28,17 @@ export function pagePolicy(scriptHashes: string[] = []): string {
 
 // The runner's (web/runner/index.html; design/runner.md): Python's
 // interpreter in an opaque-origin sandboxed frame, whose worker (a blob:)
-// inherits this policy.  It may load Sagebrush's own static files and run
-// compiled Python (eval) and WebAssembly; nothing else: no other network,
+// inherits this policy.  It may load Sagebrush's own static files and shared
+// collections' files, and run compiled Python (eval) and WebAssembly; nothing
+// else: no other network,
 // no frames, no forms.
 export function runnerPolicy(scriptHashes: string[] = []): string {
   return [
     "default-src 'none'",
     ["script-src 'unsafe-eval' 'wasm-unsafe-eval' blob:", ...scriptHashes].join(" "),
     "worker-src blob:",
-    "connect-src 'self'",
+    // (and shared collections' files, which the worker reads when Python opens them)
+    "connect-src 'self' https://files.cocalcusercontent.com https://files.cocalcusercontent.dev",
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'self'",

@@ -79,6 +79,8 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     if (!existsSync(file)) return res.writeHead(404).end("not found");
     const h = { "content-type": MIME[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" };
     for (const [pattern, hs] of rules) if (path === pattern || (pattern.endsWith("*") && path.startsWith(pattern.slice(0, -1)))) for (const [k, v] of hs) h[k] = v;
+    // (the runner may read this server's files origin, as it may the real one's)
+    if (path.startsWith("/runner/") && h["Content-Security-Policy"]) h["Content-Security-Policy"] = h["Content-Security-Policy"].replace("connect-src 'self'", `connect-src 'self' ${files}`);
     res.writeHead(200, h);
     res.end(readFileSync(file));
   });

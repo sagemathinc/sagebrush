@@ -5,7 +5,7 @@
 // each is fetched from the user-content domain, and checked against its
 // SHA-256, the first time the code reads it.  Everything shown here comes
 // from the uploader, so it goes into the page as text, never as markup.
-import { createNotebook, fromFile, MemoryStore, toIpynb, WorkerKernel } from "../notebook/index.js";
+import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
 
 interface File { path: string; sha256: string; size: number }
 interface Shared {
@@ -62,7 +62,8 @@ async function main() {
   // one interpreter, with every file of the collection mounted
   const mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
   const kernel = new WorkerKernel({
-    createWorker: () => new Worker("/sagebrush-worker.js", { type: "module" }),
+    // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
+    createWorker: () => new RunnerWorker("/runner/"),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
   let nb: any = null;

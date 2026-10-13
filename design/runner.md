@@ -1,6 +1,6 @@
 # The runner: Python where an escape gets nothing
 
-*Status: built and tested behind a flag (`?runner` on the notebook page). It becomes the default once every browser suite passes with it and it runs from the user-content domain.*
+*Status: the default on the notebook page and on boards (`?runner=0` turns it off, for now), and the only way the shared-collection page runs code. Every notebook browser suite passes with it. It still runs from a path of sagebrush.space; the user-content domain comes next.*
 
 ## Why
 
@@ -48,8 +48,12 @@ In headless Chromium (web/test-runner.mjs):
 
 ## Next
 
-1. **Every browser suite with `?runner`:** notebook, widgets, TimeTravel replay (the worker's name carries replay's parameters, and is passed through), boards, the console. Then the runner becomes the default.
-2. **The user-content domain** (`run.cocalcusercontent.com`): a second wall. A different site adds process isolation and partitions the HTTP cache.
-3. **A strict check of each message's shape** on the page side: everything from the runner is untrusted. Outputs already are (design/security.md, rules 1–4).
-4. **Firefox and Safari:** opaque-origin cross-origin isolation, and `blob:` workers in sandboxed frames.
-5. **Then the attribute-read backstop** (`SAGEBRUSH_HARDENED`) can default off: the runner contains what it was guarding against.
+1. **No network at all in the interpreter.**
+   - **Today:** `connect-src` still allows the runner's own origin (for the interpreter's files) and the files domain (for mounted files). CORS blocks reading anything else there, but query-bearing GETs can still be *sent*, into logs or a cache.
+   - **Plan:** the frame fetches the interpreter's files itself and hands the bytes to the worker. Mounted files are brokered: the worker asks the frame and waits on an `Atomics.wait` over a SharedArrayBuffer (the frame is cross-origin isolated), and the frame fetches exactly the manifest's files. The worker then gets `connect-src 'none'`.
+   - **Also:** the page checks and bounds every message from the runner.
+2. **The user-content domain** (`run.cocalcusercontent.com`): a second wall. A different site adds process isolation and partitions the HTTP cache. This needs:
+   - the page's `frame-src` widened to it;
+   - the runner's `frame-ancestors` set to the sites that may embed it.
+3. **Firefox and Safari:** opaque-origin cross-origin isolation, and classic `blob:` workers in sandboxed frames.
+4. **Then the attribute-read backstop** (`SAGEBRUSH_HARDENED`) can default off: the runner contains what it was guarding against.

@@ -1,5 +1,6 @@
-// The runner (design/runner.md) in headless Chromium: the notebook page with
-// ?runner runs Python in an opaque-origin sandboxed frame.  Checks that code
+// The runner (design/runner.md) in headless Chromium: the notebook page runs
+// Python in an opaque-origin sandboxed frame (?runner=0: in a plain worker,
+// where NO_RUNNER=1 checks that these tests fail).  Checks that code
 // runs, that Stop keeps the variables, and, from inside the frame and its
 // worker (as an escape would be), that there is no storage, no page and no
 // network beyond Sagebrush's own files.  Serve web/dist first:
@@ -76,7 +77,7 @@ try {
   await send("Runtime.enable");
   await send("Log.enable");
   await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
-  await send("Page.navigate", { url: new URL(process.env.NO_RUNNER ? "./" : "?runner", base).href });
+  await send("Page.navigate", { url: new URL(process.env.NO_RUNNER ? "?runner=0" : "./", base).href });
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
   console.log("     " + (await ev("document.querySelector('#status').textContent")));
   const frame = await ev("(() => { const f = document.querySelector('iframe[sandbox]'); return f && { sandbox: f.getAttribute('sandbox'), src: f.src }; })()");
