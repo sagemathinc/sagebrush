@@ -12,7 +12,7 @@ import { join } from "node:path";
 const doc = process.argv[2] ?? "examples/sagebrush.json";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const url = `${base}board/?doc=${encodeURIComponent(doc)}`;
-const port = 9451;
+const port = +(process.env.CDP_PORT ?? 9451);
 const profile = mkdtempSync(join(tmpdir(), "sb-board-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const [W, H] = (process.env.SIZE ?? "1280x800").split("x").map(Number);
