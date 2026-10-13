@@ -15,6 +15,11 @@ const ICONS: Record<string, Shape[]> = {
   page: [["rect", 8, 3, 12, 15, 1.5], ["path", "M5 7v12.5A1.5 1.5 0 0 0 6.5 21H16"]],
   undo: [["path", "M9 14 4 9l5-5"], ["path", "M4 9h10.5a5.5 5.5 0 0 1 0 11H11"]],
   redo: [["path", "m15 14 5-5-5-5"], ["path", "M20 9H9.5a5.5 5.5 0 0 0 0 11H13"]],
+  // an item's own toolbar (inplace.ts)
+  run: [["path", "M7 4.5v15L19 12z"]],
+  detail: [["circle", 10.5, 10.5, 6.5], ["path", "m15.5 15.5 5 5M7.5 10.5h6M10.5 7.5v6"]],
+  link: [["path", "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"], ["path", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"]],
+  trash: [["path", "M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"]],
 };
 
 const NS = "http://www.w3.org/2000/svg";

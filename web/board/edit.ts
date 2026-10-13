@@ -11,7 +11,7 @@ import { effect, signal } from "@preact/signals-core";
 import type { Board, Item } from "./board";
 import type { BoardDoc, BoardPage, DocEdge, DocGroup, DocNode, DocNote } from "./doc";
 import { prepare, type Images, type ImageInfo } from "./images";
-import { highlightMarkdown } from "../notebook/highlight.js";
+import { InPlace, type InPlaceHost } from "./inplace";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
 
@@ -59,7 +59,8 @@ export class Editor {
   private redos: string[] = [];
   private selected: string[] = [];
   private edgeSel: number | null = null; // the selected edge: its index in the page's edges
-  private panel: HTMLElement | null = null;
+  private panel: HTMLElement | null = null; // an edge's
+  private inplace: InPlace | null = null; // the item being written where it is
   /** Run a code item (its code is as it was: a changed one runs as the board is laid out again) */
   onRun: ((id: string) => void) | null = null;
   /** the code highlighter (HTML), once the notebook is loaded: code is written in the notebook's editor */
@@ -119,37 +120,51 @@ export class Editor {
   }
 
   /** Apply a change made to a copy of the document; undoable (with `merge`,
-   * one step with the change before it: a new note and its first text). */
-  async commit(f: (d: BoardDoc) => void, merge = false, record = true) {
+   * one step with the change before it: a new note and its first text).
+   * Whether there is now an undo step holding it (false: merged back to
+   * where its step started, so none), or null if nothing changed. */
+  async commit(f: (d: BoardDoc) => void, merge = false, record = true): Promise<boolean | null> {
     const cur = this.doc();
-    if (!cur) return;
+    if (!cur) return null;
     const before = JSON.stringify(cur), d = JSON.parse(before) as BoardDoc;
     f(d);
     const after = JSON.stringify(d);
-    if (after === before) return;
+    if (after === before) return null;
+    let stepped = record;
     // (not recorded: a setting kept in the document, the toolbar's tools, is no step to undo)
     if (!record) {}
     else if (!merge || !this.undos.length) this.undos.push(before);
     // (merged back to where it started: no step at all)
-    else if (this.undos.at(-1) === after) this.undos.pop();
+    else if (this.undos.at(-1) === after) { this.undos.pop(); stepped = false; }
     if (this.undos.length > 200) this.undos.shift();
     this.redos = [];
     await this.change(d);
     this.selectEdge(this.edgeSel);
+    this.gone();
+    return stepped;
+  }
+  // (the item being written is no longer there: undone, or removed by an agent)
+  private gone() {
+    if (this.inplace && !this.board.item(this.inplace.id)) this.inplace.abandon();
   }
   async undo() {
+    // (what is being written is kept first: it is what undo takes back)
+    await this.inplace?.end();
     const cur = this.doc(), prev = this.undos.pop();
     if (!cur || !prev) return;
     this.redos.push(JSON.stringify(cur));
     this.selectEdge(null);
     await this.change(this.keep(cur, JSON.parse(prev)));
+    this.gone();
   }
   async redo() {
+    await this.inplace?.end();
     const cur = this.doc(), next = this.redos.pop();
     if (!cur || !next) return;
     this.undos.push(JSON.stringify(cur));
     this.selectEdge(null);
     await this.change(this.keep(cur, JSON.parse(next)));
+    this.gone();
   }
   // (the settings undo leaves as they are: the toolbar's tools)
   private keep(cur: BoardDoc, d: BoardDoc): BoardDoc {
@@ -164,7 +179,7 @@ export class Editor {
     this.selected = ids === null ? [] : typeof ids === "string" ? [ids] : [...new Set(ids)];
     this.board.select(this.selected);
     // (one note selected, in Edit: its corner resizes it)
-    this.board.handle = this.on && this.selected.length === 1 && this.board.item(this.selected[0])?.kind === "note" ? this.selected[0] : null;
+    this.board.handle = this.on && !this.inplace && this.selected.length === 1 && this.board.item(this.selected[0])?.kind === "note" ? this.selected[0] : null;
     this.board.request();
     if (this.selected.length) this.selectEdge(null);
   }
@@ -661,7 +676,7 @@ export class Editor {
 
   private dblclick(it: Item | null, x: number, y: number): boolean {
     if (!this.on) return false;
-    if (it) { this.open(it.id); return true; }
+    if (it) { this.open(it.id, false, { x, y }); return true; }
     // a new note where the double click was (at the top level)
     this.addNote(x, y);
     return true;
@@ -697,160 +712,36 @@ export class Editor {
   }
 
   /**
-   * Write an item, in a panel over it.  A note's parts come in the order it
-   * shows them: title, picture, text, code, detail, link; the parts it does
-   * not have are small "+ Image", "+ Code", "+ Detail" and "+ Link" buttons,
-   * so that a plain note's editor stays plain.  A group has a title and text.
+   * Write an item where it is (inplace.ts): its parts become fields in its
+   * own element, with a small toolbar over it.  Leaving keeps what was
+   * written, as one undo step (with `fresh`, one with adding it).
    */
-  open(id: string, fresh = false) {
+  open(id: string, fresh = false, at?: { x: number; y: number }) {
+    // (already being written: a touch's tap on it selected and its double tap both say so)
+    if (this.inplace?.id === id && this.inplace.active) return;
     this.close();
-    const d = this.doc(), f = d && find(this.pg(d), id), r = this.board.clientRect(id);
-    if (!f || !r) return;
-    const group = f.node.kind === "group";
-    const n = f.node as DocNote;
-    const p = document.createElement("div");
-    p.className = "board-editor";
-    p.innerHTML = `<input class="be-title" placeholder="Title">` +
-      (group ? "" : `<div class="be-part be-imagepart" hidden><img class="be-thumb" alt=""><button type="button" class="be-rmimage">Remove the picture</button></div>`) +
-      `<textarea class="be-text" placeholder="Text: Markdown, with math: $x^2$"></textarea>` +
-      (group ? "" : `<div class="be-part be-codepart" hidden><div class="be-codebox"><textarea class="be-code" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Python (Shift+Enter runs it, and what depends on it)"></textarea></div>` +
-        `<label class="be-hide"><input type="checkbox" class="be-hidecode"> Hide the code: show only its output</label></div>` +
-        `<textarea class="be-detail be-part" hidden placeholder="Detail, shown when zoomed in (Markdown)"></textarea><input class="be-ref be-part" hidden placeholder="Link (https://…)">` +
-        `<div class="be-add"><button data-part="image">+ Image</button><button data-part="code">+ Code</button><button data-part="detail">+ Detail</button><button data-part="ref">+ Link</button></div>`) +
-      `<div class="be-row"><button class="be-del">Delete</button><span></span><button class="be-cancel">Cancel</button><button class="be-done">Done</button></div>`;
-    const $ = <T extends HTMLElement>(s: string) => p.querySelector(s) as T | null;
-    const title = $<HTMLInputElement>(".be-title")!, text = $<HTMLTextAreaElement>(".be-text")!;
-    const ta = $<HTMLTextAreaElement>(".be-code"), detail = $<HTMLTextAreaElement>(".be-detail"), ref = $<HTMLInputElement>(".be-ref");
-    const hide = $<HTMLInputElement>(".be-hidecode");
-    title.value = n.title ?? "";
-    text.value = n.text ?? "";
-    // Markdown, highlighted as the notebook's Markdown cells are
-    for (const t of [text, detail]) if (t) markdownOverlay(t);
-    const part = (k: string) => (k === "code" ? $(".be-codepart") : k === "detail" ? detail : ref)!;
-    const has = (k: string) => !group && !part(k).hidden;
-    // the code: the notebook's editor (its highlighted code under a clear textarea), once the notebook is loaded
-    const hl = this.highlight?.() ?? null;
-    if (ta) {
-      ta.value = n.code ?? "";
-      hide!.checked = !!n.hideCode;
-      let paint = () => {};
-      if (hl) {
-        const box = $(".be-codebox")!, pre = document.createElement("pre");
-        box.className = "be-codebox sbnb";
-        const ed = document.createElement("div");
-        ed.className = "ed";
-        pre.setAttribute("aria-hidden", "true");
-        ed.append(pre, ta);
-        box.append(ed);
-        paint = () => {
-          pre.innerHTML = hl(ta.value);
-          ta.style.height = "auto";
-          ta.style.height = ta.scrollHeight + "px";
-        };
-      }
-      ta.addEventListener("input", paint);
-      ta.addEventListener("keydown", (e) => {
-        if (e.key !== "Tab" || e.shiftKey) return;
-        e.preventDefault();
-        ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end");
-        paint();
-      });
-      requestAnimationFrame(paint);
-    }
-    const doneLabel = () => { $(".be-done")!.textContent = has("code") ? "Run" : "Done"; };
-    const addRow = () => { if ($(".be-add")) $(".be-add")!.hidden = [...p.querySelectorAll<HTMLElement>(".be-add button")].every((b) => b.hidden); };
-    // its picture: shown small; + Image chooses one (or another), Remove takes it off
-    let pic: { key: string; info: ImageInfo } | null = n.image && d!.images?.[n.image] ? { key: n.image, info: d!.images[n.image] } : null;
-    const showPic = () => {
-      if (group) return;
-      $(".be-imagepart")!.hidden = !pic;
-      p.querySelector<HTMLElement>('[data-part="image"]')!.hidden = !!pic;
-      if (pic) $<HTMLImageElement>(".be-thumb")!.src = pic.info.src ?? this.images?.url(pic.key) ?? "";
-      addRow();
-    };
-    const choosePic = () => {
-      const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp" });
-      input.className = "sb-fileinput";
-      input.style.cssText = "position:fixed;left:-9999px";
-      input.onchange = async () => {
-        input.remove();
-        const f = input.files?.[0], ready = f ? await prepare(f) : null;
-        if (!ready || !this.images) return;
-        pic = { key: await this.images.put(ready.blob), info: { w: ready.w, h: ready.h } };
-        showPic();
-      };
-      // (one at most: a chooser cancelled earlier left its input behind)
-      for (const old of document.querySelectorAll("input.sb-fileinput")) old.remove();
-      document.body.append(input);
-      input.click();
-    };
-    const show = (k: string, focus: boolean) => {
-      if (k === "image") return choosePic();
-      part(k).hidden = false;
-      p.querySelector<HTMLElement>(`[data-part="${k}"]`)!.hidden = true;
-      addRow();
-      doneLabel();
-      if (focus) (k === "code" ? ta : part(k))!.focus();
-      if (k === "code") ta!.dispatchEvent(new Event("input"));
-    };
-    if (!group) {
-      if (n.code !== undefined) show("code", false);
-      if (n.detail) { detail!.value = n.detail; show("detail", false); }
-      if (n.ref) { ref!.value = n.ref; show("ref", false); }
-      for (const b of p.querySelectorAll<HTMLButtonElement>(".be-add button")) b.onclick = () => show(b.dataset.part!, true);
-      $(".be-rmimage")!.onclick = () => { pic = null; showPic(); };
-      showPic();
-    }
-    doneLabel();
-    // over the item, inside the window
-    const w = Math.min(innerWidth - 16, Math.max(n.code !== undefined ? 440 : 320, r.width));
-    this.place(p, () => {
-      p.style.width = w + "px";
-      p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + "px";
-      p.style.top = Math.max(52, Math.min(innerHeight - 330, r.top)) + "px";
+    const s: InPlace = new InPlace(this.host, id, fresh, () => {
+      if (this.inplace !== s) return;
+      this.inplace = null;
+      this.select(this.selected); // (its resize handle back)
     });
-    document.body.append(p);
-    this.panel = p;
+    if (!s.start(at)) return;
+    this.inplace = s;
     this.select(id);
-    // (code left empty: no code)
-    const codeNow = () => (has("code") ? ta!.value.replace(/\s+$/, "") : "");
-    const done = () => {
-      const v = (el: HTMLInputElement | HTMLTextAreaElement | null) => (el?.value ?? "").trim();
-      const c = codeNow();
-      // (unchanged code is not run by the sync: run it, as Run says)
-      if (c && c === n.code) this.onRun?.(id);
-      this.close();
-      this.commit((d) => {
-        const g = find(this.pg(d), id);
-        if (!g) return;
-        const m = g.node as any;
-        const set = (k: string, val: string | boolean | undefined) => { if (val) m[k] = val; else delete m[k]; };
-        set("title", v(title));
-        set("text", v(text));
-        if (group) return;
-        set("image", pic?.key);
-        if (pic) (d.images ??= {})[pic.key] ??= { w: pic.info.w, h: pic.info.h };
-        set("code", c || undefined);
-        set("hideCode", !!c && hide!.checked);
-        set("detail", has("detail") ? v(detail) : "");
-        set("ref", has("ref") ? v(ref) : "");
-      }, fresh);
+  }
+  // what editing in place needs of the editor
+  private get host(): InPlaceHost {
+    const ed = this;
+    return {
+      board: this.board,
+      doc: () => this.doc(),
+      node: (d, id) => (find(this.pg(d), id)?.node as DocNote | DocGroup | undefined) ?? null,
+      commit: (f, merge) => this.commit(f, merge),
+      remove: (d, id) => remove(this.pg(d), id),
+      run: (id) => this.onRun?.(id),
+      highlight: () => this.highlight?.() ?? null,
+      get images() { return ed.images; },
     };
-    const cancel = () => {
-      this.close();
-      // (a new note left empty: not kept)
-      if (fresh && !v0()) this.commit((d) => remove(this.pg(d), id), true);
-    };
-    const v0 = () => !!pic || [title, text, ta].some((el) => (el?.value ?? "").trim());
-    $(".be-done")!.onclick = done;
-    $(".be-cancel")!.onclick = cancel;
-    $(".be-del")!.onclick = () => { this.close(); this.commit((d) => remove(this.pg(d), id)); };
-    p.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Escape") cancel();
-      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || (e.shiftKey && e.target === ta))) { e.preventDefault(); done(); }
-    });
-    (n.code !== undefined && (fresh || !n.code) ? ta : fresh || !n.text ? title : text)!.focus();
   }
 
   // On a small or touch screen a panel is a sheet: as wide as the screen, at
@@ -875,6 +766,7 @@ export class Editor {
   }
 
   private close() {
+    this.inplace?.end();
     this.unplace?.();
     this.unplace = null;
     this.panel?.remove();
@@ -913,24 +805,4 @@ export function remove(d: BoardDoc | BoardPage, id: string) {
   f.siblings.splice(f.siblings.indexOf(f.node), 1);
   d.edges = (d.edges ?? []).filter((e) => !gone.has(e.from) && !gone.has(e.to));
   d.steps = d.steps?.map((s) => ({ ...s, focus: typeof s.focus === "string" ? s.focus : s.focus.filter((x) => !gone.has(x)) })).filter((s) => typeof s.focus !== "string" || !gone.has(s.focus));
-}
-
-// A Markdown field, highlighted: its text, coloured, under the textarea,
-// whose own text is clear (only its caret and selection show).  Colours only,
-// so the two keep the same widths; both keep room for a scroll bar, so they
-// wrap alike.  Hidden with its textarea.
-function markdownOverlay(ta: HTMLTextAreaElement) {
-  const box = document.createElement("div");
-  box.className = "be-md";
-  const pre = document.createElement("pre");
-  pre.setAttribute("aria-hidden", "true");
-  ta.replaceWith(box);
-  box.append(pre, ta);
-  const paint = () => {
-    pre.innerHTML = highlightMarkdown(ta.value, false);
-    pre.scrollTop = ta.scrollTop;
-  };
-  ta.addEventListener("input", paint);
-  ta.addEventListener("scroll", () => { pre.scrollTop = ta.scrollTop; });
-  paint();
 }

@@ -163,6 +163,11 @@ export class Board {
   private maxWidth = 0; // the widest stroke's width
   private mounted = new Map<string, HTMLElement>();
   private cache = new Map<string, HTMLElement>(); // rendered once, kept
+  /** the item being edited where it is (edit.ts): its element is kept as it is, and mounted wherever the camera goes */
+  private editingId: string | null = null;
+  private editingEl: HTMLElement | null = null;
+  /** after each frame drawn (the camera may have moved): what floats over the board follows */
+  onRender: (() => void) | null = null;
   camera: Camera = { x: 0, y: 0, z: 1 };
   /** screen space that focus() keeps clear (a toolbar, a caption) */
   insets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -204,7 +209,11 @@ export class Board {
     this.cache = new Map();
     for (const it of items) {
       const el = old.get(it.id);
-      if (el && el.dataset.key === contentKey(it)) {
+      if (el && it.id === this.editingId) {
+        // (being edited: kept whatever it now shows, as tall as its fields)
+        el.style.cssText = placement(it) + `height:auto;min-height:${+it.h}px;`;
+        this.cache.set(it.id, el);
+      } else if (el && el.dataset.key === contentKey(it)) {
         el.style.cssText = placement(it);
         this.cache.set(it.id, el);
       }
@@ -321,11 +330,47 @@ export class Board {
     }
     this.drawBack(v, far);
     this.draw(v, far);
+    this.onRender?.();
   }
+
+  /** Edit an item where it is: its element, mounted, kept as it is until
+   * this is called with another item or null (then it is built again from
+   * the document).  The editor puts its fields in it. */
+  editElement(id: string | null): HTMLElement | null {
+    const was = this.editingId, wasEl = this.editingEl;
+    this.editingId = id;
+    this.editingEl = null;
+    if (was && (was !== id || !id)) {
+      wasEl?.remove();
+      if (this.cache.get(was) === wasEl) { this.cache.delete(was); this.mounted.delete(was); }
+    }
+    this.mountedFor = null;
+    this.request();
+    const it = id ? this.byId.get(id) : undefined;
+    if (!id || !it) return null;
+    let el = this.cache.get(id);
+    if (!el) {
+      el = this.itemEl(it);
+      this.cache.set(id, el);
+    }
+    el.style.height = "auto";
+    el.style.minHeight = +it.h + "px";
+    if (!el.isConnected) {
+      this.world.append(el);
+      this.mounted.set(id, el);
+    }
+    return (this.editingEl = el);
+  }
+  /** The item being edited where it is, if any, and its element. */
+  get editing() { return this.editingId; }
+  get editingElement() { return this.editingEl; }
 
   // Mount `want`, nearest (cx, cy) first, building new elements for at most
   // BUDGET ms; returns whether all of them are mounted.
   private mount(want: Set<Item>, cx: number, cy: number): boolean {
+    // (the item being edited stays, wherever the camera goes)
+    const ed = this.editingId ? this.byId.get(this.editingId) : undefined;
+    if (ed) want.add(ed);
     const ids = new Set([...want].map((it) => it.id));
     for (const [id, el] of this.mounted) {
       if (!ids.has(id)) {
@@ -383,7 +428,8 @@ export class Board {
       // (an element built before the engine had its cell: the output now)
       const out = this.code?.output(id, false);
       // (after its code; or, the code hidden, after what comes before it)
-      if (out && !el.contains(out)) (el.querySelector(".board-code-src") ?? el.querySelector(".board-text") ?? el.querySelector(".board-code-head"))!.after(outBox(out));
+      // (being edited: after its code's field)
+      if (out && !el.contains(out)) (el.querySelector(".board-code-src, .be-codepart") ?? el.querySelector(".board-text") ?? el.querySelector(".board-code-head"))?.after(outBox(out));
     }
   }
 
@@ -906,7 +952,8 @@ export class Board {
       return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, d: Math.hypot(p.x - q.x, p.y - q.y) };
     };
     this.el.addEventListener("pointerdown", (e) => {
-      if ((e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas")) return; // links, buttons, controls and 3D views stay theirs
+      // (links, buttons, controls, 3D views and the item being edited stay theirs)
+      if ((e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas, .board-editing")) return;
       cancelAnimationFrame(this.flight);
       if (this.onItemDown && down.size === 0 && e.isPrimary) {
         const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
@@ -946,12 +993,12 @@ export class Board {
       if (tap && e.timeStamp - tap.t < 350 && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 25) {
         tap = null;
         doubled = e.timeStamp;
-        this.doubleAt(e.clientX, e.clientY);
+        if (!editingAt(e)) this.doubleAt(e.clientX, e.clientY);
       } else tap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
     }, true);
     this.el.addEventListener("dblclick", (e) => {
       if (doubled && e.timeStamp - doubled < 600) return;
-      this.doubleAt(e.clientX, e.clientY);
+      if (!editingAt(e)) this.doubleAt(e.clientX, e.clientY);
     });
   }
 
@@ -983,6 +1030,8 @@ const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px
 const onlyImage = (it: Content) => !!it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref;
 // What an element shows (kept when this is unchanged).
 const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image]);
+// (a double-click in the item being edited selects a word, as in any field)
+const editingAt = (e: Event) => !!(e.target as Element | null)?.closest?.(".board-editing");
 // A code item's output, in the box that gives it the notebook's styles.
 function outBox(out: HTMLElement) {
   const box = document.createElement("div");

@@ -129,11 +129,11 @@ try {
   };
   r = await rect("t");
   await ev(`(() => { const x = ${r.x + 20}, y = ${r.y + 12}; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: x, clientY: y })); return 1; })()`);
-  await until("!!document.querySelector('.board-editor .be-title')", 5000);
-  await ev("[...document.querySelectorAll('.be-add button')].find((b) => b.textContent === '+ Image').click(), 1");
-  check(await choose(), "+ Image asks for a file");
-  check(await until("!document.querySelector('.board-editor .be-imagepart').hidden && document.querySelector('.board-editor .be-thumb').naturalWidth === 80"), "the editor shows the chosen picture");
-  await ev("document.querySelector('.board-editor .be-done').click(), 1");
+  await until("!!document.querySelector('.board-editing .be-title')", 5000);
+  await ev("document.querySelector('.ip-bar .ip-image').click(), 1");
+  check(await choose(), "+ image asks for a file");
+  check(await until("document.querySelector('.board-editing .be-pic .board-img')?.naturalWidth === 80"), "the item being edited shows the chosen picture");
+  await ev("document.querySelector('.board-editing .be-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 1");
   check(await until("(() => { const t = window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 't'); return !!t.image && !!t.text; })()"), "the note has the picture and keeps its text");
   await ev("window.board.focus(['t'], true), 1");
   await sleep(400);

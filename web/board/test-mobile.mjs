@@ -67,28 +67,27 @@ try {
   await tap(c.x, c.y);
   await sleep(80);
   await tap(c.x, c.y);
-  check(await until("!!document.querySelector('.board-editor.be-sheet .be-code')", 5000), "a double tap in Edit opens the code editor, as a sheet");
-  check(await inView(".board-editor .be-done"), "its Run button is in view");
-  check(await ev("(() => { const p = document.querySelector('.board-editor'), d = p.querySelector('.be-done').getBoundingClientRect(), t = p.querySelector('.be-code').getBoundingClientRect(); return d.top < t.top; })()"), "the buttons come before the code");
+  check(await until("!!document.querySelector('[data-code=start].board-editing .be-code')", 5000), "a double tap in Edit makes the code item editable where it is");
+  check(await until("!!document.querySelector('.ip-bar.ip-dock')", 3000) && await inView(".ip-bar .ip-run"), "its toolbar is docked along the bottom, with run in view");
   // the keyboard: half the screen (the visual viewport shrinks)
   await send("Emulation.setDeviceMetricsOverride", { width: W, height: 400, deviceScaleFactor: 3, mobile: true });
   await sleep(400);
-  check(await inView(".board-editor .be-done"), "with the keyboard up, Run is still in view");
-  check(await ev("document.querySelector('.board-editor').getBoundingClientRect().bottom <= window.visualViewport.height + 1"), "the sheet fits above the keyboard");
-  // typing and Run
-  await ev("(() => { const ta = document.querySelector('.board-editor .be-code'); ta.focus(); ta.select(); })()");
+  check(await inView(".ip-bar .ip-run"), "with the keyboard up, run is still in view");
+  check(await ev("Math.abs(document.querySelector('.ip-bar').getBoundingClientRect().bottom - (window.visualViewport.offsetTop + window.visualViewport.height)) <= 1"), "the toolbar sits just above the keyboard");
+  check(await ev("(() => { const t = document.querySelector('.board-editing .be-code').getBoundingClientRect(), b = document.querySelector('.ip-bar').getBoundingClientRect(); return t.top >= 40 && t.top + 20 <= b.top; })()"), "the code being written is in view, above the toolbar: " + await ev("JSON.stringify([document.querySelector('.board-editing .be-code').getBoundingClientRect(), document.querySelector('.ip-bar').getBoundingClientRect()])"));
+  // typing and run
+  await ev("(() => { const ta = document.querySelector('.board-editing .be-code'); ta.focus(); ta.select(); })()");
   await send("Input.insertText", { text: "start = 6" });
-  await tapEl(".board-editor .be-done");
+  await tapEl(".ip-bar .ip-run");
   check(await until("window.sagebrush.board.outputs().then((os) => /^8 steps/.test(os.find((x) => x.id === 'path').output))", 30000), "Run on the phone ran the change");
   await send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 3, mobile: true });
-  // the toolbar's Note: a sheet too; Undo takes the change back
+  // the toolbar's Note: written where it is; Undo takes it back
   await ev("window.sagebrush.board.editing(true)");
   const n0 = await ev("window.sagebrush.board.snapshot().doc.nodes.length");
   await tapEl(".board-toolbar [data-tool=note]");
-  check(await until("!!document.querySelector('.board-editor.be-sheet .be-title')", 5000), "Note opens its editor as a sheet");
-  await ev("document.querySelector('.board-editor .be-title').focus()");
+  check(await until("document.activeElement === document.querySelector('.board-editing .be-title')", 5000), "Note adds a note, its title being written");
   await send("Input.insertText", { text: "From the phone" });
-  await tapEl(".board-editor .be-done");
+  await tapEl("#top");
   await sleep(400);
   check((await ev("window.sagebrush.board.snapshot().doc.nodes.length")) === n0 + 1, "the note was added");
   await tapEl(".board-toolbar [data-tool=undo]");
@@ -101,14 +100,15 @@ try {
   await tap(ab.x, ab.y);
   await sleep(600);
   await tap(ab.x, ab.y);
-  check(await until("!!document.querySelector('.board-editor.be-sheet .be-title')", 3000), "a tap on the note selected opens its editor");
-  await tapEl(".board-editor .be-cancel");
+  check(await until("!!document.querySelector('.board-editing .be-title')", 3000), "a tap on the note selected edits it where it is");
+  await tapEl("#top");
   await sleep(600);
+  check(await ev("!document.querySelector('.board-editing')"), "a tap elsewhere leaves it");
   await tap(ab.x, ab.y);
   await sleep(80);
   await tap(ab.x, ab.y);
-  check(await until("!!document.querySelector('.board-editor.be-sheet .be-title')", 3000), "a double tap opens a note's editor in Edit");
-  await tapEl(".board-editor .be-cancel");
+  check(await until("!!document.querySelector('.board-editing .be-title')", 3000), "a double tap edits a note in Edit");
+  await tapEl("#top");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
