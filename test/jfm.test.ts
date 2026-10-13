@@ -130,3 +130,48 @@ print(s["type"], s["shape"], s["level"], s["color"], mc._describe())
   assert.ok(closed(two));
   delete g.window;
 });
+
+test("k3d.marching_cubes on an uneven grid (spacings_x, ...); unsupported arguments are said, once", () => {
+  // a sphere sampled at uneven x (denser near 0): round only if the viewer
+  // places the samples where the spacings say
+  const out = cli("-c", `
+import k3d, numpy as np, warnings
+t = np.linspace(-1, 1, 33)
+xs = np.sign(t) * np.abs(t) ** 1.5
+g = np.linspace(-1, 1, 33)
+F = np.sqrt(xs[None, None, :] ** 2 + g[None, :, None] ** 2 + g[:, None, None] ** 2).astype(np.float32)
+mc = k3d.marching_cubes(F, level=0.6, xmin=-1, xmax=1, ymin=-1, ymax=1, zmin=-1, zmax=1, spacings_x=np.diff(xs))
+s = mc._scene()
+print(s["spacings"][0] is not None, s["spacings"][1] is None, s["spacings"][2] is None)
+print(s["spacings"][0])
+bad = k3d.marching_cubes(F, level=0.6, spacings_x=[1, 2, 3])
+print(bad._scene()["spacings"])
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    k3d.marching_cubes(F, level=0.6, roughness=0.2)
+    k3d.marching_cubes(F, level=0.6, roughness=0.3)
+    k3d.plot(snapshot_type="online")
+print([str(x.message) for x in w])
+`);
+  const [flags, sx, bad, warned] = out.trim().split("\n");
+  assert.equal(flags, "True True True");
+  assert.equal(bad, "[None, None, None]");
+  assert.equal(warned, `["k3d.marching_cubes: Sagebrush's k3d does not support roughness; ignored", "k3d.plot: Sagebrush's k3d does not support snapshot_type; ignored"]`);
+  const g = globalThis as any;
+  g.window = {};
+  new Function(readFileSync(__dirname + "/../../web/viewer3d.js", "utf8"))();
+  const mcf = g.window.SagebrushViewer3d.marchingCubes;
+  const n = 33, xs = Array.from({ length: n }, (_, i) => { const t = -1 + 2 * i / (n - 1); return Math.sign(t) * Math.abs(t) ** 1.5; });
+  const F = new Float32Array(n * n * n);
+  for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) F[(k * n + j) * n + i] = Math.hypot(xs[i], -1 + 2 * j / (n - 1), -1 + 2 * k / (n - 1));
+  const worst = (r: { pos: Float32Array }) => {
+    let e = 0;
+    for (let v = 0; v < r.pos.length; v += 3) e = Math.max(e, Math.abs(Math.hypot(r.pos[v], r.pos[v + 1], r.pos[v + 2]) - 0.6));
+    return e;
+  };
+  const uneven = mcf(F, [n, n, n], [-1, 1, -1, 1, -1, 1], 0.6, [sx, null, null]);
+  const even = mcf(F, [n, n, n], [-1, 1, -1, 1, -1, 1], 0.6);
+  assert.ok(worst(uneven) < 0.02, `uneven: ${worst(uneven)}`);
+  assert.ok(worst(even) > 0.1, `even: ${worst(even)}`);
+  delete g.window;
+});
