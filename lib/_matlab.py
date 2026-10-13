@@ -149,7 +149,11 @@ def report(e, line):
     if isinstance(e, (SystemExit, KeyboardInterrupt)):
         raise e
     _sys.stdout.flush()
+    st = list(getattr(e, "_mstack", None) or [])
     out = [_message(e)]
+    if getattr(e, "_using", False) and st:
+        # (error() or argument validation in a function: MATLAB names the function first)
+        out = ["Error using %s" % st[0][0], _message(e)]
     lines = _src[1]
     for fname, ln in list(getattr(e, "_mstack", None) or []) + [(_scriptname(), line)]:
         out.append("")
@@ -184,6 +188,12 @@ def _dtclass(dt):
     return dt.name
 
 
+def _contig(a):
+    """a C-contiguous array with a's values (a copy: Sagebrush's numpy's
+    ascontiguousarray can return a view whose reshape(-1) is a copy)"""
+    return np.array(a)
+
+
 def _canon(a):
     """MATLAB drops trailing singleton dimensions: leading axes here."""
     while a.ndim > 2 and a.shape[0] == 1:
@@ -198,7 +208,7 @@ def _box(a):
     k = a.dtype.kind
     if k == "c":
         if not np.any(a.imag):
-            a = np.ascontiguousarray(a.real)
+            a = _contig(a.real)
             k = "f"
     if a.size == 1:
         if k == "f" and a.dtype.itemsize == 8:
@@ -323,7 +333,7 @@ def _unmat(m):
     m = np.asarray(m)
     if m.ndim == 1:
         m = m.reshape((-1, 1))
-    return _box(np.ascontiguousarray(m.T))
+    return _box(_contig(m.T))
 
 
 def _int_round(r, cls):
@@ -394,10 +404,32 @@ def _sub(A, B):
 
 
 def _mul(A, B):
+    if (A.dtype.kind == "c") != (B.dtype.kind == "c"):
+        # (a real times a complex: each part on its own, so that a zero part stays zero)
+        R, Z = (A, B) if B.dtype.kind == "c" else (B, A)
+        with np.errstate(invalid="ignore"):
+            re_ = np.where(Z.real == 0, 0.0, R * Z.real)
+            im = np.where(Z.imag == 0, 0.0, R * Z.imag)
+        return _cplx(re_, im)
     return A * B
 
 
+def _cplx(re_, im):
+    """a complex array from its parts (re + 1j*im would turn an infinite or NaN part into NaN + ...)"""
+    re_, im = np.broadcast_arrays(re_, im)
+    out = np.zeros(re_.shape, dtype=np.complex128)
+    out.real = re_
+    out.imag = im
+    return out
+
+
 def _div(A, B):
+    if A.dtype.kind == "c" and B.dtype.kind != "c":
+        # (a complex divided by a real: each part on its own, a zero part stays zero)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            re_ = np.where(A.real == 0, 0.0, A.real / B)
+            im = np.where(A.imag == 0, 0.0, A.imag / B)
+        return _cplx(re_, im)
     with np.errstate(divide="ignore", invalid="ignore"):
         return A / B
 
@@ -1486,7 +1518,7 @@ def _combine(vecs, d):
         term = vecs[k].reshape(shape) * stride
         pos = term if pos is None else pos + term
         stride *= d[k]
-    return _canon(np.ascontiguousarray(pos))
+    return _canon(_contig(pos))
 
 
 def index(obj, args):
@@ -1596,6 +1628,8 @@ def fieldname(v):
 
 
 def field_cs(obj, name):
+    if type(obj) is Builtin or type(obj) is Function:
+        return [field(obj, name)]
     t = type(obj)
     if t is Struct:
         if name not in obj.fields:
@@ -1612,6 +1646,10 @@ def field_cs(obj, name):
 
 
 def field(obj, name):
+    if type(obj) is Builtin or type(obj) is Function:
+        if obj.name in _CLASSES:
+            return _class_static(obj.name, name)
+        obj = val(obj)
     if type(obj) is Struct and len(obj.a) == 1:
         d = obj.a[0]
         if name in d:
@@ -1709,8 +1747,8 @@ def set1(cur, i, v):
     if type(cur) is np.ndarray and type(i) is float and type(v) is float and cur.dtype == np.float64:
         k = int(i)
         if k == i:
-            if 0 < k <= cur.size:
-                cur.reshape(-1)[k - 1] = v
+            if 0 < k <= cur.size and cur.ndim == 2:
+                cur[(k - 1) // cur.shape[1], (k - 1) % cur.shape[1]] = v
                 return cur
             if k == cur.size + 1 and cur.ndim == 2:
                 g = _grow1(cur, k, v)
@@ -1847,8 +1885,8 @@ def _assign_paren(cur, args, v, brace=False):
     if cur is not None and type(cur) is np.ndarray and tv is float and cur.dtype == np.float64 and len(args) <= 2 and type(args[0]) is float:
         if len(args) == 1:
             k = int(args[0])
-            if k == args[0] and 1 <= k <= cur.size:
-                cur.reshape(-1)[k - 1] = v
+            if k == args[0] and 1 <= k <= cur.size and cur.ndim == 2:
+                cur[(k - 1) // cur.shape[1], (k - 1) % cur.shape[1]] = v
                 return cur
             if k == args[0] and k == cur.size + 1 and cur.ndim == 2:
                 g = _grow1(cur, k, v)
@@ -1989,15 +2027,16 @@ def _set_numeric(cur, pos, v):
     if tv is Cell or tv is Struct or tv is Str or tv is StrArr or _iscallable(v):
         raise _err("Conversion to %s from %s is not possible." % (class_(cur), class_(v)), "MATLAB:invalidConversion")
     va = _arr(v)
-    out = np.ascontiguousarray(a)
+    out = _contig(a)
     k = out.dtype.kind
     if va.dtype.kind == "c":
         if np.any(va.imag) and k in "fc":
             if k == "f":
                 out = out.astype(np.complex128 if out.dtype.itemsize == 8 else np.complex64)
         else:
-            va = np.ascontiguousarray(va.real)
+            va = _contig(va.real)
     flat_v = va.reshape(-1)
+    out = np.array(out)  # (a fresh contiguous array: its reshape(-1) is a view)
     k = out.dtype.kind
     if k in "iu":
         if flat_v.dtype.kind not in "iu":
@@ -2264,6 +2303,13 @@ def _special(x):
     return "Inf" if x > 0 else "-Inf"
 
 
+def _scale_exponent(maxabs):
+    """the exponent of a matrix's common scale factor: the largest element
+    shows as 1.xxxx (from 1000 up) or 0.xxxx (below 0.001)"""
+    l = _math.log10(maxabs)
+    return int(_math.floor(l)) if maxabs >= 1 else int(_math.ceil(l))
+
+
 class _NumFmt:
     """how the elements of a real double array print: format short (4
     decimals, fields 10 wide) or long (15 decimals, 20 wide); integers 6
@@ -2290,7 +2336,7 @@ class _NumFmt:
             self.kind = "e"
             self.width = 25 if long_ else 13
             return
-        ex = int(_math.floor(_math.log10(maxabs)))
+        ex = _scale_exponent(maxabs)
         self.scale = 10.0 ** ex
         self.scale_text = "1.0e%+03d" % ex
         self.kind = "fix"
@@ -2332,7 +2378,7 @@ def _fmt_complex_parts(A, scalar):
                 return _special(x)
             return "%.*e" % (dec, x)
         return f, None
-    ex = int(_math.floor(_math.log10(maxabs)))
+    ex = _scale_exponent(maxabs)
     sc = 10.0 ** ex
 
     def f(x):
@@ -2345,7 +2391,7 @@ def _fmt_complex_parts(A, scalar):
 def _matrix_rows(cols_text, width, nrows, ncols):
     """the lines of a matrix whose elements are formatted (cols_text[j][i]),
     split into column groups that fit the window"""
-    per = max(1, (_WIDTH - 1) // width) if width else ncols
+    per = max(1, (_WIDTH - 1) // width) if width and not _doc_layout() else ncols
     blocks = []
     if ncols <= per:
         blocks.append("\n".join("".join(cols_text[j][i].rjust(width) for j in range(ncols)) for i in range(nrows)))
@@ -2400,7 +2446,7 @@ def _numeric_blocks(v):
         for suffix, p in pages:
             blocks.append(None)
             blocks.append(suffix)
-            blocks.extend(_numeric_blocks(_box(np.ascontiguousarray(p)) if p.dtype.kind in "fbc" and p.dtype.itemsize in (1, 8, 16) else p)[1])
+            blocks.extend(_numeric_blocks(_box(_contig(p)) if p.dtype.kind in "fbc" and p.dtype.itemsize in (1, 8, 16) else p)[1])
         return head, [b for b in blocks if b is not None]
     rows, cols = d
     M = a.T  # MATLAB orientation
@@ -2434,14 +2480,15 @@ def _numeric_blocks(v):
             for i in range(rows):
                 z = complex(M[i, j])
                 im = z.imag
-                sign = "-" if (im < 0 or (im == 0 and _math.copysign(1, im) < 0)) else "+"
-                re_ = "0" if z.real == 0 else f(z.real)
+                sign = "-" if im < 0 else "+"
+                re_ = f(z.real + 0.0)  # (-0 prints as 0)
                 col.append((re_, sign, f(abs(im)) if im == im else "NaN"))
             parts.append(col)
         wr = max(9 if not long_ else 20, max(len(p[0]) for c in parts for p in c) + 2)
-        wi = max(len(p[2]) for c in parts for p in c)
-        texts = [["%s %s %si" % (p[0].rjust(wr), p[1], p[2].rjust(wi)) for p in c] for c in parts]
-        w = wr + wi + 4
+        # (the imaginary part's field: at least a one-digit number and a space)
+        wi = max(max(len(p[2]) for c in parts for p in c), len(f(1.0)) + 1)
+        texts = [["%s %s%si" % (p[0].rjust(wr), p[1], p[2].rjust(wi)) for p in c] for c in parts]
+        w = wr + wi + 3
         body = []
         if scale:
             body.append("   %s *" % scale)
@@ -2504,7 +2551,7 @@ def _brief(v, in_cell):
             return "0×0 char" if in_cell else "''"
         return "%s char" % _dimstr(d) if in_cell else "[%s char]" % _dimstr(d)
     if t is Str:
-        return '"%s"' % v.s
+        return '["%s"]' % v.s if in_cell else '"%s"' % v.s
     if t is Cell:
         return "%s cell" % _dimstr(d) if in_cell else "{%s cell}" % _dimstr(d)
     if t is Struct:
@@ -2531,6 +2578,11 @@ def _brief(v, in_cell):
             A = _arr(v).reshape(-1)
             if cls == "logical" or cls in _INTS or _isint_arr(A.astype(np.float64)):
                 return "[%s]" % " ".join("%d" % int(x) if np.isfinite(x) else _special(float(x)) for x in A)
+            if cls == "double":
+                # (format short, the row's common format, when it needs no scale factor)
+                nf = _NumFmt(A.reshape((1, -1)).astype(np.float64), False, _format["num"] == "long")
+                if nf.scale is None:
+                    return "[%s]" % " ".join(nf.fmt(float(x)) for x in A)
             return "%s %s" % (_dimstr(d), cls)
         return "%s %s" % (_dimstr(d), cls) if in_cell else "[%s %s]" % (_dimstr(d), cls)
     if t is MException:
@@ -2556,12 +2608,11 @@ def _cell_blocks(v):
             t = texts[j][i]
             x = v.a[j * rows + i]
             pad = widths[j] - len(t)
-            if type(x) is Char and t.startswith("'"):
-                col.append("{" + t + " " * pad + "}")
-            elif t.startswith("["):
+            if t.startswith("["):
+                # (numbers right-aligned in their brackets; the rest padded before the brace)
                 col.append("{" + "[" + " " * pad + t[1:] + "}")
             else:
-                col.append("{" + t + "}" + " " * pad)
+                col.append("{" + t + " " * pad + "}")
         lines_cols.append(col)
     per_w = [max(len(s) for s in c) + 4 for c in lines_cols]
     out = []
@@ -2655,8 +2706,62 @@ def _blocks(v):
     return [], ["    %r" % (v,)], False
 
 
+# SAGEBRUSH_MATLAB_DISPLAY=doc: the layout of MATLAB's documentation (and
+# the Live Editor): `name = 1×3` then the values, no blank lines.  Used by
+# matlab-tests/docs.py to compare with the documentation's examples.
+_DOC_LAYOUT = []
+
+
+def _doc_layout():
+    if not _DOC_LAYOUT:
+        import os
+        _DOC_LAYOUT.append(os.environ.get("SAGEBRUSH_MATLAB_DISPLAY", "") == "doc")
+    return _DOC_LAYOUT[0]
+
+
+def _nd_pages(v):
+    """an N-D numeric, logical or char array's pages: [(index text, 2-D value)]"""
+    out = []
+    for suffix, p in _pages(v):
+        pv = Char(_contig(p)) if type(v) is Char else _box(_contig(p))
+        out.append((suffix, pv))
+    return out
+
+
+def _is_nd(v):
+    return (type(v) is np.ndarray or type(v) is Char) and _arr(v).ndim > 2 and _numel(v) > 0
+
+
 def display(name, v):
+    if _is_nd(v):
+        # A(:,:,1) = ... page by page (logical and integer arrays: their class first)
+        cls = class_(v)
+        pre = ("  %s %s array" % (_dimstr(_dims(v)), cls)) if cls not in ("double", "char") else None
+        if _doc_layout():
+            out = ["%s = %s" % (name, pre.strip() if pre else "")]
+            for suffix, pv in _nd_pages(v):
+                out.append("%s%s =" % (name, suffix))
+                out.extend(_blocks(pv)[1])
+            _write("\n".join(out) + "\n")
+            return
+        loose = _format["spacing"] == "loose"
+        if pre:
+            _write(("\n%s =\n\n%s\n" if loose else "%s =\n%s\n") % (name, pre))
+        for suffix, pv in _nd_pages(v):
+            body = "\n\n".join(_blocks(pv)[1]) if loose else "\n".join(_blocks(pv)[1])
+            _write(("\n%s%s =\n\n%s\n\n" if loose else "%s%s =\n%s\n") % (name, suffix, body))
+        return
     head, body, obj = _blocks(v)
+    if _doc_layout():
+        t = type(v)
+        if head:
+            h = head[0].strip()
+        elif (t is np.ndarray or t is complex) and _numel(v) > 1:
+            h = _dimstr(_dims(v)) + (" complex" if _arr(v).dtype.kind == "c" else "")
+        else:
+            h = ""
+        _write("%s = %s\n%s\n" % (name, h, "\n".join(head[1:] + body)))
+        return
     blocks = head + body
     if _format["spacing"] == "loose":
         _write("\n%s =%s\n\n%s\n\n" % (name, " " if obj else "", "\n\n".join(blocks)))
@@ -2666,6 +2771,9 @@ def display(name, v):
 
 def _disp_text(v):
     t = type(v)
+    if _is_nd(v):
+        loose = _format["spacing"] == "loose"
+        return "".join(("%s =\n\n%s\n\n" if loose else "%s =\n%s\n") % (suffix, "\n".join(_blocks(pv)[1])) for suffix, pv in _nd_pages(v))
     if t is Char:
         if v.a.size == 0:
             return ""
@@ -2726,7 +2834,7 @@ def _take_along(A, idx, axis):
     fi = I2.reshape((-1, shp[-1]))
     rows = np.arange(fa.shape[0]).reshape((-1, 1))
     out = fa[rows, fi].reshape(shp)
-    return np.ascontiguousarray(np.moveaxis(out, -1, axis))
+    return _contig(np.moveaxis(out, -1, axis))
 
 
 def _fmod(A, B):
@@ -2879,7 +2987,7 @@ def eye_(*args):
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
     m = np.eye(d[0], d[1])
-    return _finish(np.ascontiguousarray(m.T), cls or "double")
+    return _finish(_contig(m.T), cls or "double")
 
 
 # MATLAB's default generator: the Mersenne twister seeded with 5489, its
@@ -3173,7 +3281,7 @@ def char_(*args):
         if type(x) is Cell:
             return _pad_rows([_text(e) for e in x.a])
         a = _farr(x)
-        return Char(np.ascontiguousarray(a.real if a.dtype.kind == "c" else a))
+        return Char(_contig(a.real if a.dtype.kind == "c" else a))
     rows = []
     for x in args:
         if type(x) is Cell:
@@ -3318,7 +3426,7 @@ def _round_half_away(A):
 
 def _round_c(A):
     if A.dtype.kind == "c":
-        return _round_c(np.ascontiguousarray(A.real)) + 1j * _round_c(np.ascontiguousarray(A.imag))
+        return _round_c(_contig(A.real)) + 1j * _round_c(_contig(A.imag))
     # (x + 0.5 rounds up for the largest double below 0.5)
     return np.where(np.abs(A) < 0.5, 0.0 * A, _round_half_away(A))
 
@@ -3370,7 +3478,7 @@ def real_(x):
     if type(x) is complex:
         return x.real
     A = _farr(x)
-    return _box(np.ascontiguousarray(A.real) if A.dtype.kind == "c" else A.copy())
+    return _box(_contig(A.real) if A.dtype.kind == "c" else A.copy())
 
 
 @_bs("imag")
@@ -3378,7 +3486,7 @@ def imag_(x):
     if type(x) is complex:
         return x.imag
     A = _farr(x)
-    return _box(np.ascontiguousarray(A.imag) if A.dtype.kind == "c" else np.zeros(A.shape))
+    return _box(_contig(A.imag) if A.dtype.kind == "c" else np.zeros(A.shape))
 
 
 @_bs("conj")
@@ -3645,11 +3753,25 @@ def _dim_arg(args, d):
                 flags.append(s)
         elif _numel(a) == 0:
             continue
+        elif _numel(a) > 1:
+            dim = sorted(set(int(k) for k in _arr(a).reshape(-1)))
         else:
             dim = _int_arg(a, "dimension")
     if dim is None:
         dim = _default_dim(d)
     return dim, flags
+
+
+def _collapse(A, dims):
+    """A (stored) with MATLAB dimensions dims merged into its last axis: (B, result shape)"""
+    nd = max(A.ndim, max(dims))
+    A = A.reshape((1,) * (nd - A.ndim) + A.shape)
+    axes = [nd - k for k in dims]
+    others = [ax for ax in range(nd) if ax not in axes]
+    B = np.transpose(A, others + axes)
+    B = np.array(B).reshape(tuple(A.shape[ax] for ax in others) + (-1,))
+    shape = tuple(1 if ax in axes else A.shape[ax] for ax in range(nd))
+    return B, shape
 
 
 def _reduce(x, args, f, name, empty_value=0.0, out_cls=None):
@@ -3669,6 +3791,9 @@ def _reduce(x, args, f, name, empty_value=0.0, out_cls=None):
     if dim == "all":
         A = A.reshape((1, -1))
         dim = 1
+    if type(dim) is list:
+        B, shape = _collapse(A, dim)
+        return _finish(_canon(_contig(np.asarray(f(B, B.ndim - 1)).reshape(shape))), oc)
     nd = A.ndim
     if dim > nd:
         r = f(A.reshape((1,) + A.shape), 0)
@@ -3679,7 +3804,7 @@ def _reduce(x, args, f, name, empty_value=0.0, out_cls=None):
         shp = list(A.shape)
         shp[axis] = 1
         res = np.asarray(r).reshape(shp)
-    return _finish(np.ascontiguousarray(res), oc)
+    return _finish(_contig(res), oc)
 
 
 def _nan_flags(args):
@@ -3816,6 +3941,8 @@ def _cum(x, args, f, name):
     cls = class_(x)
     oc = "double" if cls in ("logical", "char") else cls
     A = _farr(x, name)
+    if "omitnan" in flags or "omitmissing" in flags:
+        A = np.where(np.isnan(A), 1.0 if name == "cumprod" else 0.0, A)
     if dim == "all" or dim > A.ndim:
         return _finish(A.copy(), oc)
     ax = A.ndim - dim
@@ -3823,7 +3950,7 @@ def _cum(x, args, f, name):
         r = np.flip(f(np.flip(A, axis=ax), ax), axis=ax)
     else:
         r = f(A, ax)
-    return _finish(np.ascontiguousarray(r), oc)
+    return _finish(_contig(r), oc)
 
 
 @_bs("cumsum")
@@ -3860,33 +3987,36 @@ def diff_(x, n=1.0, dim=None):
             if ax >= 0:
                 shp[ax] = 0
             return np.zeros(tuple(shp)) if ax >= 0 else np.zeros((0, 0))
-        r = _box(np.ascontiguousarray(np.diff(A, axis=ax)))
+        r = _box(_contig(np.diff(A, axis=ax)))
     return r
 
 
 def _minmax(nargout, args, which):
-    """max/min: (x), (x, [], dim), (a, b), with [m, i] outputs"""
+    """max/min: (x), (x, [], dim or vecdim or 'all'), (a, b); flags 'linear',
+    'omitnan' (the default) and 'includenan'; [m, i] outputs"""
     big = which == "max"
-    if len(args) >= 2 and _numel(args[1]) > 0:
-        a, b = args[0], args[1]
-        if type(a) is float and type(b) is float:
+    flags = [_text(a).lower() for a in args[1:] if _istext(a)]
+    nums = [a for a in args[1:] if not _istext(a)]
+    include = "includenan" in flags or "includemissing" in flags
+    if nums and _numel(nums[0]) > 0:
+        a, b = args[0], nums[0]
+        if type(a) is float and type(b) is float and not include:
             if a != a:
                 return b
             if b != b:
                 return a
             return (a if a >= b else b) if big else (a if a <= b else b)
         cls = _arith_class(a, b, which)
-        f = np.fmax if big else np.fmin
+        f = (np.maximum if big else np.minimum) if include else (np.fmax if big else np.fmin)
         return _finish(_broadcast(f, _farr(a), _farr(b)), cls)
     x = args[0]
     d = _dims(x)
     dim = None
-    for a in args[2:]:
-        if _istext(a):
-            if _text(a).lower() == "all":
-                dim = "all"
-        else:
-            dim = _int_arg(a)
+    if "all" in flags:
+        dim = "all"
+    elif len(nums) > 1:
+        dv = nums[1]
+        dim = sorted(set(int(k) for k in _arr(dv).reshape(-1))) if _numel(dv) > 1 else _int_arg(dv)
     cls = class_(x)
     A = _farr(x, which)
     if dim is None:
@@ -3894,34 +4024,52 @@ def _minmax(nargout, args, which):
             e = np.zeros((0, 0))
             return e if nargout <= 1 else [e, e.copy()]
         dim = _default_dim(d)
+    full = A
     if dim == "all":
-        A = A.reshape((1, -1))
-        dim = 1
-    if dim > A.ndim:
-        A = A.reshape((1,) * (dim - A.ndim) + A.shape)
-    ax = A.ndim - dim
-    if A.shape[ax] == 0:
-        shp = list(A.shape)
+        dim = list(range(1, len(d) + 1))
+    if type(dim) is list:
+        B, shape = _collapse(A, dim)
+        # (linear indices into x: the merged axis's positions map back through an index array)
+        P, _ = _collapse(np.arange(A.size, dtype=np.float64).reshape(A.shape), dim)
+        A2 = B
+        ax = A2.ndim - 1
+    else:
+        if dim > A.ndim:
+            A = A.reshape((1,) * (dim - A.ndim) + A.shape)
+        ax = A.ndim - dim
+        A2 = A
+        shape = list(A.shape)
+        shape[ax] = 1
+        P = None
+    if A2.shape[ax] == 0:
+        shp = list(A2.shape)
         shp[ax] = 0
         e = np.zeros(tuple(shp))
         return e if nargout <= 1 else [e, e.copy()]
-    key = np.abs(A) if A.dtype.kind == "c" else A
+    key = np.abs(A2) if A2.dtype.kind == "c" else A2
     nan = np.isnan(key)
     filled = np.where(nan, -np.inf if big else np.inf, key)
     idx = np.argmax(filled, axis=ax) if big else np.argmin(filled, axis=ax)
-    if A.dtype.kind == "c":
-        # (equal magnitudes: the larger angle)
-        pass
+    if include:
+        anynan = np.any(nan, axis=ax)
+        firstnan = np.argmax(nan, axis=ax)
+        idx = np.where(anynan, firstnan, idx)
     idx = np.where(np.all(nan, axis=ax), 0, idx)
-    vals = _take_along(A, np.expand_dims(idx, ax), axis=ax)
-    shp = list(A.shape)
-    shp[ax] = 1
-    vals = _canon(np.ascontiguousarray(vals.reshape(shp)))
+    vals = _take_along(A2, np.expand_dims(idx, ax), ax)
+    vals = _canon(_contig(vals.reshape(shape)))
     oc = "double" if cls in ("logical", "char") else cls
     m = _finish(vals, oc)
     if nargout <= 1:
         return m
-    return [m, _box(_canon(np.ascontiguousarray((idx + 1).astype(np.float64).reshape(shp))))]
+    if P is not None:
+        lin = _take_along(P, np.expand_dims(idx, ax), ax).reshape(shape) + 1
+    elif "linear" in flags:
+        # (the position along the axis, as a linear index into x)
+        pos = np.arange(A2.size, dtype=np.float64).reshape(A2.shape)
+        lin = _take_along(pos, np.expand_dims(idx, ax), ax).reshape(shape) + 1
+    else:
+        lin = (idx + 1).astype(np.float64).reshape(shape)
+    return [m, _box(_canon(_contig(lin)))]
 
 
 @_bi("max")
@@ -3943,17 +4091,31 @@ def bounds_(nargout, x):
 def sort_(nargout, x, *args):
     desc = False
     dim = None
-    for a in args:
+    method = "auto"
+    args = list(args)
+    while args:
+        a = args.pop(0)
         if _istext(a):
-            desc = _text(a).lower() == "descend"
+            t = _text(a).lower()
+            if t in ("ascend", "descend"):
+                desc = t == "descend"
+            elif t == "comparisonmethod" and args:
+                method = _text(args.pop(0)).lower()
+            elif t == "missingplacement" and args:
+                args.pop(0)
         else:
             dim = _int_arg(a)
-    if type(x) is Cell:
-        strs = [_text(e) for e in x.a]
-        order = sorted(range(len(strs)), key=lambda k: strs[k])
-        if desc:
-            order = sorted(range(len(strs)), key=lambda k: strs[k], reverse=True)
-        r = Cell([cp(x.a[k]) for k in order], x.shape)
+    if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and _isvec(x):
+        vals = list(_arr(x).reshape(-1))
+        order = sorted(range(len(vals)), key=lambda k: (vals[k].real, vals[k].imag), reverse=desc)
+        r = _box(np.array([vals[k] for k in order]).reshape(_arr(x).shape))
+        return r if nargout <= 1 else [r, _box(np.array([float(k + 1) for k in order]).reshape(_arr(x).shape))]
+    if type(x) is Cell or type(x) is StrArr or type(x) is Str:
+        if type(x) is Str:
+            return x if nargout <= 1 else [x, 1.0]
+        strs = [_text(e) if type(x) is Cell else e for e in x.a]
+        order = sorted(range(len(strs)), key=lambda k: strs[k], reverse=desc)
+        r = x._like([cp(x.a[k]) for k in order], x.shape)
         if nargout <= 1:
             return r
         return [r, _box(np.array([float(k + 1) for k in order]).reshape(_stored(x.shape)))]
@@ -3982,11 +4144,11 @@ def sort_(nargout, x, *args):
             order = _take_along(order, o2, axis=ax)
     else:
         order = np.argsort(-key.astype(np.float64) if desc else key, axis=ax, kind="stable")
-    s = np.ascontiguousarray(_take_along(A, order, axis=ax))
+    s = _contig(_take_along(A, order, axis=ax))
     sv = Char(s) if cls == "char" else _box(s)
     if nargout <= 1:
         return sv
-    return [sv, _box(np.ascontiguousarray((order + 1).astype(np.float64)))]
+    return [sv, _box(_contig((order + 1).astype(np.float64)))]
 
 
 @_bi("sortrows")
@@ -4136,7 +4298,7 @@ def permute_(x, order):
     a = _arr(x).reshape(tuple(reversed(d)))
     # (MATLAB dimension k is stored axis nd-1-k)
     axes = [nd - 1 - o[nd - 1 - ax] for ax in range(nd)]
-    r = _canon(np.ascontiguousarray(np.transpose(a, axes)))
+    r = _canon(_contig(np.transpose(a, axes)))
     return Char(r) if type(x) is Char else _box(r)
 
 
@@ -4159,7 +4321,7 @@ def repmat_(x, *args):
         big = _canon(np.tile(idx, reps))
         return x._like([cp(x.a[int(k)]) for k in big.reshape(-1)], tuple(reversed(big.shape)))
     a = _arr(x).reshape(tuple(reversed(d)))
-    out = _canon(np.ascontiguousarray(np.tile(a, reps)))
+    out = _canon(_contig(np.tile(a, reps)))
     return Char(out) if t is Char else _box(out)
 
 
@@ -4191,7 +4353,7 @@ def _flip(x, dim):
     ax = a.ndim - dim
     if ax < 0:
         return cp(x)
-    r = np.ascontiguousarray(np.flip(a, axis=ax))
+    r = _contig(np.flip(a, axis=ax))
     return Char(r) if t is Char else _box(r)
 
 
@@ -4234,7 +4396,7 @@ def circshift_(x, k, dim=None):
         ax = r.ndim - dm
         if ax >= 0:
             r = np.roll(r, s, axis=ax)
-    r = np.ascontiguousarray(r)
+    r = _contig(r)
     return Char(r) if type(x) is Char else _box(r)
 
 
@@ -4253,7 +4415,7 @@ def diag_(x, k=0.0):
                 out[i, i + k] = v[i]
             else:
                 out[i - k, i] = v[i]
-        return _finish(np.ascontiguousarray(out.T), oc)
+        return _finish(_contig(out.T), oc)
     rows, cols = M.shape
     vals = [M[i, i + k] for i in range(rows) if 0 <= i + k < cols]
     return _finish(np.array(vals, dtype=M.dtype).reshape((1, len(vals))), oc)
@@ -4523,7 +4685,7 @@ def polyfit_(x, y, n):
     V = np.array([[xi ** (n - k) for k in range(n + 1)] for xi in xv]).reshape((xv.size, n + 1))
     Q, R = np.linalg.qr(V)
     p = np.linalg.solve(R, Q.T @ yv)
-    return _box(np.ascontiguousarray(p.reshape((-1, 1))))
+    return _box(_contig(p.reshape((-1, 1))))
 
 
 @_bs("roots")
@@ -4559,7 +4721,7 @@ def poly_(r):
         c = np.concatenate([c, [0]]) - z * np.concatenate([[0], c])
     if not np.any(np.imag(c)):
         c = np.real(c)
-    return _box(np.ascontiguousarray(c.reshape((-1, 1))))
+    return _box(_contig(c.reshape((-1, 1))))
 
 
 @_bs("conv")
@@ -4787,7 +4949,7 @@ def accumarray_(subs, vals, sz=None, func=None, fill=0.0):
 
 @_bi("disp")
 def disp_(nargout, x):
-    _write(_disp_text(x))
+    _write(_strip_links(_disp_text(x)))
     return NOVAL
 
 
@@ -5037,7 +5199,7 @@ def fprintf_(nargout, *args):
         return NOVAL
     s = _sprintf(_text(args[0]), args[1:])
     if fid == 1:
-        _write(s)
+        _write(_strip_links(s))
     elif fid == 2:
         _write_err(s)
     else:
@@ -5076,7 +5238,7 @@ def num2str_(x, f=None):
     if f is not None and _istext(f):
         A = _arr(x)
         M = A.T if A.ndim == 2 else A.reshape((-1, 1)).T
-        rows = [_sprintf(_text(f), [_box(np.ascontiguousarray(M[i:i + 1, :].T))]) for i in range(M.shape[0])]
+        rows = [_sprintf(_text(f), [_box(_contig(M[i:i + 1, :].T))]) for i in range(M.shape[0])]
         # (num2str trims leading blanks, even with a field width)
         return _pad_rows(_trim_common(rows))
     prec = _int_arg(f) if f is not None else None
@@ -5493,6 +5655,8 @@ _text_pred("endsWith", lambda t, q: t.endswith(q))
 
 def _char_pred(f):
     def g(nargout, s):
+        if type(s) is Cell or type(s) is StrArr:
+            return Cell([g(1, Char(_text(e)) if type(e) is not str else Char(e)) for e in s.a], s.shape)
         if type(s) is not Char:
             if type(s) is Str:
                 return _box(np.array([f(c) for c in s.s], dtype=bool).reshape((len(s.s), 1)))
@@ -5566,6 +5730,12 @@ def regexpi_(nargout, s, pat, *opts):
 
 
 def _regexp(nargout, s, pat, opts, flags):
+    if type(s) is Cell or type(s) is StrArr:
+        # (each element: a cell of results)
+        per = [_regexp(max(1, nargout), Char(_text(e)) if type(e) is not str else Char(e), pat, opts, flags) for e in s.a]
+        if nargout <= 1:
+            return Cell(per, s.shape)
+        return [Cell([p[k] for p in per], s.shape) for k in range(nargout)]
     t = _text(s)
     once = False
     wanted = []
@@ -6013,7 +6183,7 @@ def error_(nargout, *args):
     ident, msg = _error_args(args)
     if not msg and not ident:
         return NOVAL
-    raise MatlabError(msg, ident)
+    raise _using(MatlabError(msg, ident))
 
 
 @_bi("warning")
@@ -6239,11 +6409,10 @@ def ws_call(name, ns, args, nargout):
             if names[0] == "global":
                 _globals.clear()
             return NOVAL
-        import fnmatch
         allv = _ws_vars(ns)
         for n in names:
             for v in allv:
-                if fnmatch.fnmatchcase(v, n):
+                if _glob_match(n, v):
                     key = "_k_" + v if v in _PYKW else v
                     if key in ns:
                         try:
@@ -6275,10 +6444,27 @@ def ws_call(name, ns, args, nargout):
         return 0.0
     if name in ("who", "whos"):
         vs = sorted(_ws_vars(ns))
+        want = [_text(a) for a in args if not _text(a).startswith("-")]
+        if want:
+            vs = [v for v in vs if any(_glob_match(w, v) for w in want)]
+        if name == "who":
+            if nargout >= 1:
+                return Cell([Char(v) for v in vs], (len(vs), 1))
+            if vs:
+                _write("\nYour variables are:\n\n" + "  ".join(vs) + "  \n\n")
+            return NOVAL
+        vals = [(v, ns["_k_" + v if v in _PYKW else v]) for v in vs]
         if nargout >= 1:
-            return Cell([Char(v) for v in vs], (len(vs), 1))
-        if vs:
-            _write("\nYour variables are:\n\n" + "  ".join(vs) + "  \n\n")
+            return Struct([{"name": Char(v), "size": _box(np.array([float(x) for x in _dims(x)]).reshape((-1, 1))),
+                            "bytes": float(_bytes(x)), "class": Char(class_(x))} for v, x in vals], (len(vals), 1),
+                          ["name", "size", "bytes", "class"])
+        if vals:
+            w = max(4, max(len(v) for v in vs))
+            lines = ["  %s      Size            Bytes  Class     Attributes" % "Name".ljust(w), ""]
+            for v, x in vals:
+                size = "x".join(str(d) for d in _dims(x))
+                lines.append("  %s      %-14s%7d  %-10s" % (v.ljust(w), size, _bytes(x), class_(x)))
+            _write("\n".join(lines) + "\n\n")
         return NOVAL
     if name in ("load", "save"):
         return _matfile(name, ns, args, nargout)
@@ -6289,8 +6475,9 @@ _PYKW = set(("False None True and as assert async await break class continue def
              "if import in is lambda nonlocal not or pass raise return try while with yield match case type globals locals print exec").split())
 
 
-def _matfile(name, ns, args, nargout):
-    raise _err("%s of .mat files is not available yet." % name)
+def _matfile_unused(name, ns, args, nargout):
+    pass
+
 
 
 def case_match(v, c):
@@ -6348,3 +6535,1555 @@ def magic_(n):
         for j in (0, k):
             M[k, j], M[k + p, j] = M[k + p, j], M[k, j]
     return _unmat(M)
+
+
+# ------------------------------------------------------------------ arguments blocks (function argument validation)
+
+
+def split_nv(a, npos, names):
+    """a function's arguments as (positional, name-value pairs): the pairs
+    follow the positional arguments; names match case-insensitively"""
+    low = [n.lower() for n in names]
+    k = 0
+    while k < len(a) and k < npos and not (_istext(a[k]) and _text(a[k]).lower() in low and k + 1 < len(a)):
+        k += 1
+    pos = tuple(a[:k])
+    rest = a[k:]
+    if len(rest) % 2:
+        raise _err("Invalid argument list. Check for wrong number of positional arguments or placement of positional arguments after name-value arguments.", "MATLAB:TooManyInputs")
+    pairs = []
+    for i in range(0, len(rest), 2):
+        n = rest[i]
+        if not _istext(n):
+            raise _err("Invalid argument list. Check for wrong number of positional arguments or placement of positional arguments after name-value arguments.")
+        t = _text(n)
+        if t.lower() not in low:
+            raise _err("Invalid name-value argument '%s'. Valid names are: %s." % (t, ", ".join("'%s'" % x for x in names)), "")
+        pairs.append((names[low.index(t.lower())], rest[i + 1]))
+    return pos, pairs
+
+
+def nv_has(pairs, name):
+    return any(n == name for n, _ in pairs)
+
+
+def nv_get(pairs, name):
+    v = None
+    for n, x in pairs:
+        if n == name:
+            v = x  # (the last one given wins)
+    return cp(v)
+
+
+def _arg_prefix(pos):
+    if type(pos) is str:
+        return "Invalid name-value argument '%s'. " % pos
+    return "Invalid argument at position %d. " % pos
+
+
+def _numeric_class(c):
+    return c in _INTS or c in ("double", "single")
+
+
+def arg_check(v, dims, cls, pos):
+    """an argument converted to its declared class and size (or the error MATLAB gives)"""
+    if cls:
+        c = class_(v)
+        if c != cls:
+            ok = True
+            try:
+                if cls in ("double", "single", "logical") or cls in _INTS:
+                    if not (_numeric_class(c) or c in ("logical", "char")):
+                        ok = False
+                    else:
+                        v = _convert(v, cls)
+                elif cls == "char":
+                    if c == "string":
+                        v = Char(_text(v)) if type(v) is Str else char_(v)
+                    elif _numeric_class(c):
+                        v = char_(v)
+                    else:
+                        ok = False
+                elif cls == "string":
+                    if c in ("char", "cell") or _numeric_class(c) or c == "logical":
+                        v = string_(v)
+                    else:
+                        ok = False
+                elif cls in ("cell", "struct", "function_handle"):
+                    ok = False
+                # (other classes: enumerations and objects are not checked here)
+            except MatlabError:
+                ok = False
+            if not ok:
+                raise _using(_arg_prefix(pos) + "Value must be of type %s or be convertible to %s." % (cls, cls))
+    if dims is not None:
+        d = list(_dims(v))
+        want = list(dims)
+        nd = max(len(d), len(want))
+        d2 = d + [1] * (nd - len(d))
+        w2 = want + [1] * (nd - len(want))
+        if not all(w is None or w == x for w, x in zip(w2, d2)):
+            fixed = [w for w in want]
+            n = _numel(v)
+            if n == 1 and all(w is not None for w in fixed):
+                # scalar expansion
+                v = repmat_(v, *[float(w) for w in fixed])
+            elif len(d) == 2 and (d[0] == 1 or d[1] == 1) and len(want) == 2 and (want[0] in (1, None) or want[1] in (1, None)) and \
+                    ((want[0] == 1 and want[1] in (None, n)) or (want[1] == 1 and want[0] in (None, n))):
+                # a row for a column, or a column for a row
+                v = reshape_(v, float(want[0] if want[0] is not None else n), float(want[1] if want[1] is not None else n))
+            else:
+                spec = "×".join(":" if w is None else str(w) for w in want)
+                raise _using(_arg_prefix(pos) + "Value must be of size %s." % spec)
+    return v
+
+
+def _using(e):
+    e = e if isinstance(e, MatlabError) else MatlabError(str(e))
+    e._using = True
+    return e
+
+
+def validate(thunk, pos):
+    """an arguments block's validation function, its error with MATLAB's prefix"""
+    try:
+        thunk()
+    except MatlabError as e:
+        raise _using(MatlabError(_arg_prefix(pos) + e.message, e.identifier))
+
+
+def _vfail(msg, ident):
+    raise MatlabError(msg, "MATLAB:validators:" + ident)
+
+
+def _vnum(v):
+    return _isnumlike(v) and type(v) is not Char
+
+
+def _velems(v):
+    A = _farr(v)
+    return A
+
+
+@_bi("mustBeNumeric")
+def mustBeNumeric_(nargout, v):
+    if not (_numeric_class(class_(v))):
+        _vfail("Value must be numeric.", "mustBeNumeric")
+    return NOVAL
+
+
+@_bi("mustBeNumericOrLogical")
+def mustBeNumericOrLogical_(nargout, v):
+    if not (_numeric_class(class_(v)) or class_(v) == "logical"):
+        _vfail("Value must be numeric or logical.", "mustBeNumericOrLogical")
+    return NOVAL
+
+
+@_bi("mustBeReal")
+def mustBeReal_(nargout, v):
+    if not _isnumlike(v) or (_arr(v).dtype.kind == "c" and np.any(_arr(v).imag)):
+        _vfail("Value must be real.", "mustBeReal")
+    return NOVAL
+
+
+def _pred_validator(name, msg, pred, numeric=True):
+    def g(nargout, v):
+        if numeric and not (_numeric_class(class_(v)) or class_(v) in ("logical", "char")):
+            _vfail(msg, name[0].lower() + name[1:])
+        A = _farr(v)
+        if A.size and not bool(np.all(pred(A))):
+            _vfail(msg, name)
+        return NOVAL
+    _B[name] = Builtin(g, name)
+
+
+_pred_validator("mustBeFinite", "Value must be finite.", lambda A: np.isfinite(A))
+_pred_validator("mustBeNonNan", "Value must not be NaN.", lambda A: ~np.isnan(A))
+_pred_validator("mustBePositive", "Value must be positive.", lambda A: A > 0)
+_pred_validator("mustBeNonnegative", "Value must be nonnegative.", lambda A: A >= 0)
+_pred_validator("mustBeNegative", "Value must be negative.", lambda A: A < 0)
+_pred_validator("mustBeNonpositive", "Value must not be positive.", lambda A: A <= 0)
+_pred_validator("mustBeNonzero", "Value must not be zero.", lambda A: A != 0)
+_pred_validator("mustBeInteger", "Value must be integer.", lambda A: np.isfinite(A) & (A == np.floor(A)))
+
+
+@_bi("mustBeNonempty")
+def mustBeNonempty_(nargout, v):
+    if _numel(v) == 0:
+        _vfail("Value must not be empty.", "mustBeNonempty")
+    return NOVAL
+
+
+@_bi("mustBeScalarOrEmpty")
+def mustBeScalarOrEmpty_(nargout, v):
+    if _numel(v) > 1:
+        _vfail("Value must be scalar or empty.", "mustBeScalarOrEmpty")
+    return NOVAL
+
+
+@_bi("mustBeVector")
+def mustBeVector_(nargout, v, *opt):
+    if not _isvec(v) or (_numel(v) == 0 and not opt):
+        _vfail("Value must be a 1-by-n vector or an n-by-1 vector.", "mustBeVector")
+    return NOVAL
+
+
+def _cmp_validator(name, text, f):
+    def g(nargout, v, c):
+        A = _farr(v)
+        C = _farr(c)
+        if A.size and not bool(np.all(_broadcast(f, A, C))):
+            _vfail("Value must be %s %s." % (text, _num2str_g(_scalar(c))), name)
+        return NOVAL
+    _B[name] = Builtin(g, name)
+
+
+_cmp_validator("mustBeGreaterThan", "greater than", lambda a, c: a > c)
+_cmp_validator("mustBeGreaterThanOrEqual", "greater than or equal to", lambda a, c: a >= c)
+_cmp_validator("mustBeLessThan", "less than", lambda a, c: a < c)
+_cmp_validator("mustBeLessThanOrEqual", "less than or equal to", lambda a, c: a <= c)
+
+
+@_bi("mustBeInRange")
+def mustBeInRange_(nargout, v, lo, hi, *opt):
+    A = _farr(v)
+    a = _scalar(lo)
+    b = _scalar(hi)
+    flags = [_text(o).lower() for o in opt if _istext(o)]
+    lo_ok = A > a if ("exclusive" in flags or "exclude-lower" in flags) else A >= a
+    hi_ok = A < b if ("exclusive" in flags or "exclude-upper" in flags) else A <= b
+    if A.size and not bool(np.all(lo_ok & hi_ok)):
+        _vfail("Value must be within the range specified by %s and %s." % (_num2str_g(a), _num2str_g(b)), "mustBeInRange")
+    return NOVAL
+
+
+@_bi("mustBeMember")
+def mustBeMember_(nargout, v, s):
+    tf = ismember_(1, v, s)
+    if not cond(tf if _numel(tf) else True):
+        items = [_text(e) for e in s.a] if type(s) is Cell else ([str(x) for x in s.a] if type(s) is StrArr else [_num2str_g(float(x)) for x in _farr(s).reshape(-1)])
+        quote = type(s) is Cell or type(s) is StrArr
+        _vfail("Value must be a member of this set:\n" + "\n".join("    " + ("'%s'" % x if quote else x) for x in items), "mustBeMember")
+    return NOVAL
+
+
+@_bi("mustBeText")
+def mustBeText_(nargout, v):
+    if not (type(v) is Char or type(v) is Str or type(v) is StrArr or (type(v) is Cell and all(type(e) is Char for e in v.a))):
+        _vfail("Value must be a character vector, string array, or cell array of character vectors.", "mustBeText")
+    return NOVAL
+
+
+@_bi("mustBeTextScalar")
+def mustBeTextScalar_(nargout, v):
+    if not (type(v) is Str or (type(v) is Char and _dims(v)[0] <= 1)):
+        _vfail("Value must be a character vector or string scalar.", "mustBeTextScalar")
+    return NOVAL
+
+
+@_bi("mustBeNonzeroLengthText")
+def mustBeNonzeroLengthText_(nargout, v):
+    if not ((type(v) is Str and v.s) or (type(v) is Char and v.a.size) or (type(v) is Cell and v.a and all(type(e) is Char and e.a.size for e in v.a))):
+        _vfail("Value must be text with one or more characters.", "mustBeNonzeroLengthText")
+    return NOVAL
+
+
+@_bi("mustBeA")
+def mustBeA_(nargout, v, classes):
+    names = [_text(e) for e in classes.a] if type(classes) is Cell else ([s for s in classes.a] if type(classes) is StrArr else [_text(classes)])
+    if not any(isa_(v, Char(n)) for n in names):
+        _vfail("Value must be one of the following types: %s." % " or ".join("'%s'" % n for n in names), "mustBeA")
+    return NOVAL
+
+
+@_bi("mustBeUnderlyingType")
+def mustBeUnderlyingType_(nargout, v, t):
+    names = [_text(e) for e in t.a] if type(t) is Cell else [_text(t)]
+    if class_(v) not in names:
+        _vfail("Value must have one of these underlying types: %s." % ", ".join(names), "mustBeUnderlyingType")
+    return NOVAL
+
+
+@_bi("mustBeNonsparse")
+def mustBeNonsparse_(nargout, v):
+    return NOVAL
+
+
+@_bi("mustBeNonmissing")
+def mustBeNonmissing_(nargout, v):
+    if _isnumlike(v) and np.any(np.isnan(_farr(v).real)):
+        _vfail("Value must not have missing data.", "mustBeNonmissing")
+    if type(v) is StrArr and any(x is None for x in v.a):
+        _vfail("Value must not have missing data.", "mustBeNonmissing")
+    return NOVAL
+
+
+@_bi("mustBeValidVariableName")
+def mustBeValidVariableName_(nargout, v):
+    names = [_text(e) for e in v.a] if type(v) in (Cell, StrArr) and type(v) is not StrArr else ([s for s in v.a] if type(v) is StrArr else [_text(v)])
+    bad = [n for n in names if not isvarname_(Char(n))]
+    if bad:
+        _vfail("These are not valid variable names: %s." % ", ".join("'%s'" % n for n in bad), "mustBeValidVariableName")
+    return NOVAL
+
+
+@_bi("mustBeFile")
+def mustBeFile_(nargout, v):
+    import os
+    if not os.path.isfile(_text(v)):
+        _vfail("The following files do not exist: '%s'." % _text(v), "mustBeFile")
+    return NOVAL
+
+
+@_bi("mustBeFolder")
+def mustBeFolder_(nargout, v):
+    import os
+    if not os.path.isdir(_text(v)):
+        _vfail("The following folders do not exist: '%s'." % _text(v), "mustBeFolder")
+    return NOVAL
+
+
+# ------------------------------------------------------------------ more outputs and small functions (from the documentation's examples)
+
+import cmath as _cmath
+
+_CMATH = {"sqrt": _cmath.sqrt, "exp": _cmath.exp, "log": _cmath.log, "log10": _cmath.log10,
+          "log2": lambda z: _cmath.log(z) / _math.log(2), "log1p": lambda z: _cmath.log(1 + z), "expm1": lambda z: _cmath.exp(z) - 1,
+          "sin": _cmath.sin, "cos": _cmath.cos, "tan": _cmath.tan, "asin": _cmath.asin, "acos": _cmath.acos, "atan": _cmath.atan,
+          "sinh": _cmath.sinh, "cosh": _cmath.cosh, "tanh": _cmath.tanh, "asinh": _cmath.asinh, "acosh": _cmath.acosh,
+          "atanh": _cmath.atanh, "sec": lambda z: 1 / _cmath.cos(z), "csc": lambda z: 1 / _cmath.sin(z), "cot": lambda z: 1 / _cmath.tan(z)}
+
+
+def _complex_fallback(name):
+    """the elementwise math function for complex arrays numpy here lacks"""
+    old = _B[name].f
+    f = _CMATH[name]
+
+    def g(nargout, x):
+        try:
+            return old(nargout, x)
+        except (TypeError, ValueError, NotImplementedError) as e:
+            if "complex" not in str(e):
+                raise
+            A = _farr(x).astype(np.complex128)
+            out = np.array([f(complex(z)) for z in A.reshape(-1)], dtype=np.complex128).reshape(A.shape)
+            return _finish(out, "single" if class_(x) == "single" else "double")
+    _B[name] = Builtin(g, name)
+
+
+for _n in _CMATH:
+    if _n in _B:
+        _complex_fallback(_n)
+
+
+def _bezout(a, b):
+    """g = gcd(a, b) = u a + v b"""
+    a, b = int(a), int(b)
+    u0, v0, u1, v1 = 1, 0, 0, 1
+    x, y = abs(a), abs(b)
+    while y:
+        q = x // y
+        x, y = y, x - q * y
+        u0, u1 = u1, u0 - q * u1
+        v0, v1 = v1, v0 - q * v1
+    return x, u0 * (1 if a >= 0 else -1), v0 * (1 if b >= 0 else -1)
+
+
+@_bi("gcd")
+def gcd_n(nargout, a, b):
+    if nargout <= 1:
+        return _pairwise(a, b, _gcd1, "gcd")
+    A, B = np.broadcast_arrays(_farr(a), _farr(b))
+    res = [_bezout(x, y) for x, y in zip(A.reshape(-1), B.reshape(-1))]
+    cls = _arith_class(a, b, "gcd")
+    outs = [_finish(np.array([float(r[k]) for r in res]).reshape(A.shape), cls) for k in range(3)]
+    return outs[:nargout]
+
+
+@_bi("histc")
+def histc_n(nargout, x, edges, *rest):
+    X = _farr(x).reshape(-1)
+    E = _farr(edges).reshape(-1)
+    n = np.zeros(E.size)
+    ind = np.zeros(X.size)
+    for i, v in enumerate(X):
+        k = int(np.searchsorted(E, v, side="right")) - 1
+        if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
+            n[k] += 1
+            ind[i] = k + 1
+    counts = _box(n.reshape(_arr(edges).shape))
+    if nargout <= 1:
+        return counts
+    return [counts, _box(ind.reshape(_arr(x).shape))]
+
+
+@_bi("meshgrid")
+def meshgrid_n(nargout, x, y=None, z=None):
+    xv = _farr(x).reshape(-1)
+    yv = _farr(y if y is not None else x).reshape(-1)
+    if nargout <= 2 and z is None:
+        X = np.tile(xv.reshape((1, -1)), (yv.size, 1))
+        Y = np.tile(yv.reshape((-1, 1)), (1, xv.size))
+        return _unmat(X) if nargout <= 1 else [_unmat(X), _unmat(Y)]
+    zv = _farr(z if z is not None else x).reshape(-1)
+    # MATLAB size: numel(y)-by-numel(x)-by-numel(z); stored with the axes reversed
+    shape = (zv.size, xv.size, yv.size)
+    X = np.broadcast_to(xv.reshape((1, -1, 1)), shape)
+    Y = np.broadcast_to(yv.reshape((1, 1, -1)), shape)
+    Z = np.broadcast_to(zv.reshape((-1, 1, 1)), shape)
+    return [_box(np.array(X)), _box(np.array(Y)), _box(np.array(Z))][:max(1, nargout)]
+
+
+def _setop2(nargout, a, b, op, opts):
+    r = _setop(a, b, op, 1, opts)
+    if nargout <= 1:
+        return r
+    if type(a) is Cell or type(b) is Cell:
+        A = [_text(e) for e in (a.a if type(a) is Cell else [a])]
+        B = [_text(e) for e in (b.a if type(b) is Cell else [b])]
+        C = [_text(e) for e in r.a]
+    else:
+        A = [float(v) for v in _farr(a).reshape(-1)]
+        B = [float(v) for v in _farr(b).reshape(-1)]
+        C = [float(v) for v in _farr(r).reshape(-1)] if _numel(r) else []
+    stable = any(_istext(o) and _text(o) == "stable" for o in opts)
+
+    def last(seq, v):
+        return len(seq) - seq[::-1].index(v)
+
+    def first(seq, v):
+        return seq.index(v) + 1
+
+    pick = first if stable else last
+    col = lambda vals: _box(np.array(vals, dtype=np.float64).reshape((1, len(vals)))) if vals else np.zeros((1, 0))
+    if op == "union":
+        ia = [pick(A, v) for v in C if v in A]
+        ib = [pick(B, v) for v in C if v not in A]
+        return [r, col(ia), col(ib)][:nargout]
+    if op == "intersect":
+        return [r, col([pick(A, v) for v in C]), col([pick(B, v) for v in C])][:nargout]
+    return [r, col([pick(A, v) for v in C])][:nargout]
+
+
+@_bi("union")
+def union_n(nargout, a, b, *opts):
+    return _setop2(nargout, a, b, "union", opts)
+
+
+@_bi("intersect")
+def intersect_n(nargout, a, b, *opts):
+    return _setop2(nargout, a, b, "intersect", opts)
+
+
+@_bi("setdiff")
+def setdiff_n(nargout, a, b, *opts):
+    return _setop2(nargout, a, b, "setdiff", opts)
+
+
+@_bi("bounds")
+def bounds_n(nargout, x, *args):
+    return [min_(1, x, np.zeros((0, 0)), *args), max_(1, x, np.zeros((0, 0)), *args)] if args else [min_(1, x), max_(1, x)]
+
+
+@_bs("getfield")
+def getfield_n(s, *path):
+    cur = s
+    for p in path:
+        if type(p) is Cell:
+            cur = index(cur, list(p.a))
+        else:
+            cur = field(cur, _text(p))
+    return cp(cur)
+
+
+@_bs("setfield")
+def setfield_n(s, *args):
+    *path, v = args
+    steps = [("p", list(p.a)) if type(p) is Cell else ("f", _text(p)) for p in path]
+    return assign(cp(s), steps, cp(v))
+
+
+@_bs("orderfields")
+def orderfields_n(s, order=None):
+    r = cp(s)
+    if order is None:
+        r.fields = sorted(r.fields)
+    elif type(order) is Struct:
+        r.fields = list(order.fields)
+    elif type(order) is Cell:
+        r.fields = [_text(e) for e in order.a]
+    else:
+        idx = [int(k) - 1 for k in _farr(order).reshape(-1)]
+        r.fields = [s.fields[k] for k in idx]
+    return r
+
+
+@_bs("num2cell")
+def num2cell_n(x, dims=None):
+    if dims is None:
+        return num2cell_(x)
+    # the dimensions listed go into each cell
+    ds = sorted(int(k) for k in _arr(dims).reshape(-1))
+    d = list(_dims(x))
+    nd = max(len(d), max(ds))
+    d = d + [1] * (nd - len(d))
+    outer = [1 if (k + 1) in ds else d[k] for k in range(nd)]
+    cells = []
+    for lin in range(_prod(outer)):
+        sub = []
+        rem = lin
+        for k in range(nd):
+            sub.append(rem % outer[k])
+            rem //= outer[k]
+        args = [COLON if (k + 1) in ds else float(sub[k] + 1) for k in range(nd)]
+        cells.append(index(x, args))
+    return Cell(cells, outer)
+
+
+@_bs("trapz")
+def trapz_n(*args):
+    if len(args) == 1:
+        x, y = None, args[0]
+    else:
+        x, y = args[0], args[1]
+    if _isvec(y):
+        yv = _farr(y).reshape(-1)
+        dx = np.diff(_farr(x).reshape(-1)) if x is not None else np.ones(yv.size - 1)
+        return float(np.sum(dx * (yv[1:] + yv[:-1]) / 2))
+    Y = _mat(y)
+    if x is None:
+        dx = np.ones((Y.shape[0] - 1, 1))
+    elif _numel(x) == 1:
+        dx = np.full((Y.shape[0] - 1, 1), _scalar(x))
+    else:
+        dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
+    return _unmat(np.sum(dx * (Y[1:] + Y[:-1]) / 2, axis=0).reshape((1, -1)))
+
+
+def _glob_match(pat, s):
+    """a wildcard pattern (* and ?) against a name"""
+    rx = "^" + "".join(".*" if c == "*" else "." if c == "?" else _re.escape(c) for c in pat) + "$"
+    return _re.match(rx, s) is not None
+
+
+def _civil(t):
+    """(year, month, day, hour, minute, second) of a Unix time (UTC)"""
+    days = int(t // 86400)
+    secs = t - days * 86400
+    z = days + 719468
+    era = (z if z >= 0 else z - 146096) // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    y = yoe + era * 400
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    d = doy - (153 * mp + 2) // 5 + 1
+    m = mp + 3 if mp < 10 else mp - 9
+    return (y + (1 if m <= 2 else 0), m, d, int(secs // 3600), int(secs % 3600 // 60), secs % 60)
+
+
+@_bs("clock")
+def clock_n():
+    import time
+    return _box(np.array([float(v) for v in _civil(time.time())]).reshape((6, 1)))
+
+
+_rng_states = {}
+
+
+@_bi("rng")
+def rng_n(nargout, *args):
+    prev = None
+    if nargout >= 1:
+        st = _rng[0].get_state()
+        key = float(len(_rng_states) + 1)
+        _rng_states[key] = st
+        prev = _struct1({"Type": Char("twister"), "Seed": 0.0, "State": key})
+    if args:
+        a = args[0]
+        if type(a) is Struct:
+            key = a.a[0].get("State")
+            if key is not None and _scalar(key) in _rng_states:
+                _rng[0].set_state(_rng_states[_scalar(key)])
+            return prev if prev is not None else NOVAL
+        if _istext(a):
+            s = _text(a).lower()
+            if s in ("default", "twister"):
+                _rng[0] = np.random.RandomState(5489)
+            elif s == "shuffle":
+                import time
+                _rng[0] = np.random.RandomState(int(time.time() * 1000) % 4294967296)
+        else:
+            seed = _int_arg(a)
+            _rng[0] = np.random.RandomState(seed if seed != 0 else 5489)
+    return prev if prev is not None else NOVAL
+
+
+@_bi("format")
+def format_n(nargout, *args):
+    prev = _struct1({"NumericFormat": Char(_format["num"]), "LineSpacing": Char(_format["spacing"])}) if nargout >= 1 else None
+    if args and type(args[0]) is Struct:
+        d = args[0].a[0]
+        _format["num"] = _text(d.get("NumericFormat", Char("short")))
+        _format["spacing"] = _text(d.get("LineSpacing", Char("loose")))
+    elif args or nargout == 0:
+        format_(0, *args)
+    return prev if prev is not None else NOVAL
+
+
+def _class_static(cls, name):
+    """uint8.empty, double.empty(0,5): a class's static methods"""
+    if name == "empty":
+        def empty(nargout, *dims):
+            if not dims:
+                d = (0, 0)
+            else:
+                d, _ = _dimsarg(dims, "empty")
+                if _prod(d) != 0:
+                    raise _err("At least one dimension must be zero.")
+            if cls == "cell":
+                return Cell([], d)
+            if cls == "char":
+                return Char(np.zeros(_stored(d)))
+            return _filled(d, 0, cls)
+        return Builtin(empty, cls + ".empty")
+    raise _err("The class %s has no Constant property or Static method named '%s'." % (cls, name))
+
+
+_CLASSES = ("double", "single", "logical", "char", "cell") + tuple(_INTS)
+
+
+# ------------------------------------------------------------------ set functions (as their documentation says)
+# C is a row vector when the input(s) are row vectors (union and intersect:
+# both; setdiff and unique: A), else a column; index outputs are columns;
+# 'rows' works on the rows of matrices; NaNs are all distinct; 'stable'
+# keeps the order of appearance, else C is sorted.
+
+
+def _set_items(v, rows):
+    """(kind, items) of a set function's input: items are hashable keys"""
+    t = type(v)
+    if t is Cell:
+        return "cell", [_text(e) for e in v.a]
+    if t is StrArr or t is Str:
+        return "string", list(v.a) if t is StrArr else [v.s]
+    if rows:
+        M = _mat(v)
+        return "rows", [tuple(float(x) for x in r) for r in M]
+    A = _arr(v).reshape(-1)
+    if A.dtype.kind == "c":
+        return "num", [complex(x) for x in A]
+    return "num", [float(x) for x in A]
+
+
+def _is_nan_key(k):
+    return k != k if type(k) is float else (type(k) is tuple and any(x != x for x in k))
+
+
+def _sort_keys(keys):
+    if keys and type(keys[0]) is complex:
+        return sorted(keys, key=lambda z: (abs(z), _math.atan2(z.imag, z.real)))
+    return sorted(keys)
+
+
+def _set_result(keys, kind, like, row, ncols=None):
+    """the set function's C from its keys, in the input's class"""
+    n = len(keys)
+    if kind == "cell":
+        return Cell([Char(k) for k in keys], (1, n) if row else (n, 1))
+    if kind == "string":
+        return _strarr(keys, (1, n) if row else (n, 1)) if n else StrArr([], (1, 0) if row else (0, 1))
+    if kind == "rows":
+        M = np.array(keys, dtype=np.float64).reshape((n, ncols))
+        out = _unmat(M)
+        return _finish(_farr(out), class_(like)) if class_(like) not in ("double", "char", "logical") else (Char(_arr(out)) if class_(like) == "char" else out)
+    a = _arr(like)
+    arr = np.array(keys, dtype=a.dtype if a.dtype.kind != "b" else np.float64) if n else np.zeros(0, dtype=a.dtype)
+    shaped = arr.reshape((n, 1)) if row else arr.reshape((1, n))
+    if type(like) is Char:
+        return Char(shaped.astype(np.float64))
+    if a.dtype.kind == "b":
+        return _box(shaped.astype(bool))
+    return _box(shaped) if a.dtype.kind in "fc" else _canon(shaped)
+
+
+def _colvec(vals):
+    return _box(np.array([float(v) for v in vals]).reshape((1, len(vals)))) if vals else np.zeros((1, 0))
+
+
+def _setfn(nargout, op, a, b, opts):
+    flags = [_text(o).lower() for o in opts if _istext(o)]
+    rows = "rows" in flags
+    stable = "stable" in flags
+    ka, A = _set_items(a, rows)
+    kb, B = _set_items(b, rows) if b is not None else (ka, [])
+    kind = ka if ka in ("cell", "string") else (kb if kb in ("cell", "string") else ka)
+    def char_rows(v):
+        # (a char array with a cell array: each of its rows, trailing blanks removed)
+        return [r.rstrip(" ") for r in v.rows()] if type(v) is Char and v.a.size else [_text(v)]
+    if kind in ("cell", "string") and (ka != kind or kb != kind) and b is not None:
+        A = char_rows(a) if ka not in ("cell", "string") else A
+        B = char_rows(b) if kb not in ("cell", "string") else B
+    sb = set(B)
+    sa = set(A)
+    first_a = {}
+    for i, k in enumerate(A):
+        first_a.setdefault(k, i)
+    last_a = {k: i for i, k in enumerate(A)}
+    first_b = {}
+    for i, k in enumerate(B):
+        first_b.setdefault(k, i)
+    last_b = {k: i for i, k in enumerate(B)}
+    # (the first occurrence, as since R2013a; 'legacy': the last)
+    legacy = "legacy" in flags
+    pick_a = last_a if legacy else first_a
+    pick_b = last_b if legacy else first_b
+    nans_a = [i for i, k in enumerate(A) if _is_nan_key(k)]
+    nans_b = [i for i, k in enumerate(B) if _is_nan_key(k)]
+    if op == "union":
+        keys = [k for k in dict.fromkeys(A + B) if not _is_nan_key(k)]
+        if stable:
+            order = keys
+        else:
+            order = _sort_keys(keys)
+        ia = [pick_a[k] for k in order if k in sa]
+        ib = [pick_b[k] for k in order if k not in sa]
+        # NaNs: every one, A's then B's
+        order = order + [A[i] for i in nans_a] + [B[i] for i in nans_b]
+        ia += nans_a
+        ib += nans_b
+        if not stable:
+            # (indices follow C's order)
+            pass
+        row = _set_isrow(a) and _set_isrow(b)
+        outs = [order, ia, ib]
+    elif op == "intersect":
+        keys = [k for k in dict.fromkeys(A) if k in sb and not _is_nan_key(k)]
+        order = keys if stable else _sort_keys(keys)
+        outs = [order, [pick_a[k] for k in order], [pick_b[k] for k in order]]
+        row = _set_isrow(a) and _set_isrow(b)
+    elif op == "setdiff":
+        keys = [k for k in dict.fromkeys(A) if k not in sb and not _is_nan_key(k)]
+        order = keys if stable else _sort_keys(keys)
+        order = order + [A[i] for i in nans_a]
+        outs = [order, [pick_a[k] for k in order if not _is_nan_key(k)] + nans_a]
+        row = _set_isrow(a)
+    else:  # unique
+        last = "last" in flags
+        keys = [k for k in dict.fromkeys(A) if not _is_nan_key(k)]
+        order = keys if stable else _sort_keys(keys)
+        pick = last_a if (last or legacy) else first_a
+        ia = [pick[k] for k in order] + nans_a
+        pos = {k: j for j, k in enumerate(order)}
+        ic = []
+        nk = 0
+        for k in A:
+            if _is_nan_key(k):
+                ic.append(len(order) + nk)
+                nk += 1
+            else:
+                ic.append(pos[k])
+        order = order + [A[i] for i in nans_a]
+        outs = [order, ia, ic]
+        d = _dims(a)
+        row = len(d) == 2 and d[0] == 1 and not rows
+        if d == (0, 0) and kind == "num":
+            empty = _empty_like(a) if type(a) is not np.ndarray else np.zeros((0, 0), dtype=_arr(a).dtype)
+            return empty if nargout <= 1 else [empty, np.zeros((0, 1)), np.zeros((0, 1))][:nargout]
+    if rows:
+        row = False
+    ncols = _dims(a)[1] if rows else None
+    like = a if kind == ka else b
+    C = _set_result(outs[0], kind, like, row, ncols)
+    if nargout <= 1:
+        return C
+    if legacy:
+        return [C] + [_box(np.array([float(i + 1) for i in v]).reshape((len(v), 1))) if v else np.zeros((0, 1)) for v in outs[1:nargout]]
+    return [C] + [_colvec([i + 1 for i in v]) for v in outs[1:nargout]]
+
+
+def _set_isrow(v):
+    d = _dims(v)
+    return len(d) == 2 and d[0] == 1 and _numel(v) > 0 or (type(v) is Char and d[0] == 1)
+
+
+@_bi("union")
+def union_s(nargout, a, b, *opts):
+    return _setfn(nargout, "union", a, b, opts)
+
+
+@_bi("intersect")
+def intersect_s(nargout, a, b, *opts):
+    return _setfn(nargout, "intersect", a, b, opts)
+
+
+@_bi("setdiff")
+def setdiff_s(nargout, a, b, *opts):
+    return _setfn(nargout, "setdiff", a, b, opts)
+
+
+@_bi("unique")
+def unique_s(nargout, a, *opts):
+    return _setfn(nargout, "unique", a, None, opts)
+
+
+@_bi("ismember")
+def ismember_s(nargout, a, s, *opts):
+    rows = any(_istext(o) and _text(o).lower() == "rows" for o in opts)
+    if type(a) in (Cell, StrArr, Str) or type(s) in (Cell, StrArr, Str) or (type(a) is Char and type(s) is not Char and type(s) is not np.ndarray):
+        S = [_text(e) if type(e) is not str else e for e in (s.a if type(s) in (Cell, StrArr) else [s])]
+        pos = {}
+        for i, k in enumerate(S):
+            pos.setdefault(k, i + 1)
+        if type(a) in (Cell, StrArr):
+            keys = [_text(e) if type(e) is not str else e for e in a.a]
+            tf = _box(np.array([k in pos for k in keys], dtype=bool).reshape(_stored(a.shape)))
+            loc = _box(np.array([float(pos.get(k, 0)) for k in keys]).reshape(_stored(a.shape)))
+        else:
+            k = _text(a)
+            tf, loc = k in pos, float(pos.get(k, 0))
+        return tf if nargout <= 1 else [tf, loc]
+    if rows:
+        A = [tuple(float(x) for x in r) for r in _mat(a)]
+        B = [tuple(float(x) for x in r) for r in _mat(s)]
+        pos = {}
+        for i, k in enumerate(B):
+            pos.setdefault(k, i + 1)
+        tf = _box(np.array([k in pos for k in A], dtype=bool).reshape((1, len(A))))
+        loc = _box(np.array([float(pos.get(k, 0)) for k in A]).reshape((1, len(A))))
+        return tf if nargout <= 1 else [tf, loc]
+    A = _farr(a)
+    pos = {}
+    for i, v in enumerate(_farr(s).reshape(-1)):
+        pos.setdefault(complex(v) if np.iscomplexobj(v) else float(v), i + 1)
+    keys = [complex(v) if A.dtype.kind == "c" else float(v) for v in A.reshape(-1)]
+    tf = _box(np.array([k in pos for k in keys], dtype=bool).reshape(A.shape))
+    if nargout <= 1:
+        return tf
+    return [tf, _box(np.array([float(pos.get(k, 0)) for k in keys]).reshape(A.shape))]
+
+
+# ------------------------------------------------------------------ accumarray, bitshift, interp1, cond, ... (from the documentation's examples)
+
+
+@_bi("accumarray")
+def accumarray_n(nargout, subs, vals, sz=None, func=None, fill=None, issparse=None):
+    S = _mat(subs)
+    if S.shape[0] == 1 and _numel(vals) != 1 and S.shape[1] == _numel(vals):
+        S = S.T
+    S = S.astype(np.int64)
+    V = vals
+    n = S.shape[0]
+    nd = S.shape[1]
+    if sz is not None and _numel(sz):
+        dims = [int(x) for x in _arr(sz).reshape(-1)]
+    else:
+        dims = [int(np.max(S[:, k])) for k in range(nd)] if n else [0] * nd
+    if nd == 1:
+        dims = [dims[0], 1]
+    # the groups: subscripts -> the values, in the order given
+    groups = {}
+    order = []
+    vflat = list(_arr(V).reshape(-1)) if _numel(V) != 1 else None
+    for i in range(n):
+        key = tuple(int(x) for x in S[i])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(i)
+    total = _prod(dims)
+    use_cell = False
+    results = {}
+    cls = class_(V)
+    for key in order:
+        idx = groups[key]
+        if func is None or _numel(func) == 0:
+            if vflat is None:
+                r = _scalar(V) * len(idx)
+            else:
+                r = sum(float(vflat[i]) for i in idx)
+            results[key] = r
+        else:
+            # (the group's values as a column, in their order)
+            col = index(V, [np.array([float(i + 1) for i in idx]).reshape((1, len(idx)))]) if vflat is not None else _filled((len(idx), 1), _scalar(V), "double")
+            if _isvec(col) and _dims(col)[0] == 1 and len(idx) > 1:
+                col = transpose(col)
+            r = _call(func, [col])
+            if type(r) is Cell:
+                use_cell = True
+            results[key] = r
+    lin = lambda key: sum((key[k] - 1) * _prod(dims[:k]) for k in range(len(key))) if nd > 1 else key[0] - 1
+    if use_cell:
+        items = [np.zeros((0, 0)) for _ in range(total)]
+        for key, r in results.items():
+            items[lin(key)] = r.a[0] if type(r) is Cell and len(r.a) == 1 else r
+        return Cell(items, dims)
+    fillv = _scalar(fill) if fill is not None and _numel(fill) else 0.0
+    out = np.full(total, fillv)
+    for key, r in results.items():
+        out[lin(key)] = _scalar(r)
+    shaped = out.reshape(_stored(dims))
+    rcls = class_(next(iter(results.values()))) if results and func is not None and _numel(func) else ("double" if cls in ("logical", "char") else cls)
+    return _finish(_canon(shaped), rcls if rcls in _INTS or rcls in ("single", "double") else "double")
+
+
+@_bi("bitshift")
+def bitshift_n(nargout, a, k, assumedtype=None):
+    cls = _text(assumedtype) if assumedtype is not None else class_(a)
+    if cls not in _INTS:
+        cls = "uint64" if cls == "double" else cls
+    bits = int(cls.lstrip("uint")) if cls in _INTS else 53
+    A, K = np.broadcast_arrays(_farr(a), _farr(k))
+    signed = not cls.startswith("u")
+    out = []
+    for x, s in zip(A.reshape(-1), K.reshape(-1)):
+        x = int(x)
+        s = int(s)
+        r = x << s if s >= 0 else x >> -s
+        # (the bits shifted out are lost: masked to the type's width)
+        r &= (1 << bits) - 1
+        if signed and r >= 1 << (bits - 1):
+            r -= 1 << bits
+        out.append(float(r))
+    r = np.array(out).reshape(A.shape)
+    if class_(a) in _INTS:
+        return _finish(r, class_(a))
+    return _box(r)
+
+
+def _pchip_slopes(x, y):
+    """Fritsch-Carlson slopes (the shape-preserving piecewise cubic)"""
+    n = len(x)
+    h = [x[k + 1] - x[k] for k in range(n - 1)]
+    delta = [(y[k + 1] - y[k]) / h[k] for k in range(n - 1)]
+    d = [0.0] * n
+    if n == 2:
+        return [delta[0], delta[0]]
+    for k in range(1, n - 1):
+        if delta[k - 1] * delta[k] > 0:
+            w1 = 2 * h[k] + h[k - 1]
+            w2 = h[k] + 2 * h[k - 1]
+            d[k] = (w1 + w2) / (w1 / delta[k - 1] + w2 / delta[k])
+        else:
+            d[k] = 0.0
+
+    def end(h0, h1, d0, d1):
+        s = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1)
+        if (s > 0) != (d0 > 0) or s == 0 and False:
+            return 0.0
+        if (d0 > 0) != (d1 > 0) and abs(s) > abs(3 * d0):
+            return 3 * d0
+        return s
+    d[0] = end(h[0], h[1], delta[0], delta[1])
+    d[-1] = end(h[-1], h[-2], delta[-1], delta[-2])
+    return d
+
+
+def _spline_slopes(x, y):
+    """the not-a-knot cubic spline's first derivatives"""
+    n = len(x)
+    if n == 2:
+        s = (y[1] - y[0]) / (x[1] - x[0])
+        return [s, s]
+    if n == 3:
+        # (the parabola through the points)
+        h0, h1 = x[1] - x[0], x[2] - x[1]
+        d0, d1 = (y[1] - y[0]) / h0, (y[2] - y[1]) / h1
+        c = (d1 - d0) / (h0 + h1)
+        return [d0 - c * h0, d0 + c * h0, d1 + c * h1]
+    h = [x[k + 1] - x[k] for k in range(n - 1)]
+    delta = [(y[k + 1] - y[k]) / h[k] for k in range(n - 1)]
+    A = np.zeros((n, n))
+    r = np.zeros(n)
+    A[0, 0] = h[1]
+    A[0, 1] = h[0] + h[1]
+    r[0] = ((h[0] + 2 * (h[0] + h[1])) * h[1] * delta[0] + h[0] ** 2 * delta[1]) / (h[0] + h[1])
+    for k in range(1, n - 1):
+        A[k, k - 1] = h[k]
+        A[k, k] = 2 * (h[k - 1] + h[k])
+        A[k, k + 1] = h[k - 1]
+        r[k] = 3 * (h[k] * delta[k - 1] + h[k - 1] * delta[k])
+    A[n - 1, n - 2] = h[-1] + h[-2]
+    A[n - 1, n - 1] = h[-2]
+    r[n - 1] = (h[-1] ** 2 * delta[-2] + (2 * (h[-2] + h[-1]) + h[-1]) * h[-2] * delta[-1]) / (h[-2] + h[-1])
+    return list(np.linalg.solve(A, r))
+
+
+def _hermite(x, y, d, q):
+    """the piecewise cubic with values y and slopes d at q (extrapolating with the end pieces)"""
+    n = len(x)
+    k = int(np.searchsorted(np.array(x), q, side="right")) - 1
+    k = min(max(k, 0), n - 2)
+    h = x[k + 1] - x[k]
+    t = (q - x[k]) / h
+    h00 = (1 + 2 * t) * (1 - t) ** 2
+    h10 = t * (1 - t) ** 2
+    h01 = t * t * (3 - 2 * t)
+    h11 = t * t * (t - 1)
+    return h00 * y[k] + h10 * h * d[k] + h01 * y[k + 1] + h11 * h * d[k + 1]
+
+
+@_bs("interp1")
+def interp1_n(*args):
+    args = list(args)
+    method = "linear"
+    extrap = None
+    # (trailing options: a method name, 'extrap' or a value outside the domain)
+    while args and (_istext(args[-1]) or (len(args) >= 4 and not _istext(args[-1]) and _istext(args[-2]))):
+        a = args.pop()
+        if _istext(a):
+            t = _text(a).lower()
+            if t == "extrap":
+                extrap = "extrap"
+            else:
+                method = {"*linear": "linear", "cubic": "pchip", "*cubic": "pchip"}.get(t, t)
+        else:
+            extrap = a
+    if len(args) == 2:
+        v, xq = args
+        n = _dims(v)[0] if not _isvec(v) else _numel(v)
+        x = np.arange(1.0, n + 1)
+    else:
+        x, v, xq = args[0], args[1], args[2]
+        x = _farr(x).reshape(-1)
+    X = list(float(t) for t in x)
+    vec = _isvec(v)
+    V = _mat(v)
+    if vec:
+        V = V.reshape((-1, 1))
+    order = sorted(range(len(X)), key=lambda k: X[k])
+    X = [X[k] for k in order]
+    V = V[order]
+    Q = _farr(xq)
+    qs = [float(t) for t in Q.reshape(-1)]
+    out = np.zeros((len(qs), V.shape[1]), dtype=V.dtype if V.dtype.kind == "c" else np.float64)
+    lo, hi = X[0], X[-1]
+    for j in range(V.shape[1]):
+        y = [V[k, j] for k in range(len(X))]
+        if method in ("pchip", "spline", "makima"):
+            if V.dtype.kind == "c":
+                dr = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.real for z in y])
+                di = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.imag for z in y])
+                d = [complex(a, b) for a, b in zip(dr, di)]
+            else:
+                d = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [float(t) for t in y])
+        for i, q in enumerate(qs):
+            outside = q < lo or q > hi or q != q
+            if outside and extrap != "extrap" and method not in ("pchip", "spline", "makima") or (outside and extrap is not None and extrap != "extrap"):
+                out[i, j] = _math.nan if extrap is None else _scalar(extrap)
+                continue
+            if q != q:
+                out[i, j] = _math.nan
+                continue
+            if method in ("pchip", "spline", "makima"):
+                out[i, j] = _hermite(X, y, d, q)
+                continue
+            k = int(np.searchsorted(np.array(X), q, side="right")) - 1
+            k = min(max(k, 0), len(X) - 2)
+            if method == "nearest":
+                out[i, j] = y[k] if (q - X[k]) < (X[k + 1] - q) else y[k + 1]
+            elif method == "previous":
+                out[i, j] = y[k + 1] if q >= X[k + 1] else y[k]
+            elif method == "next":
+                out[i, j] = y[k] if q <= X[k] else y[k + 1]
+            else:
+                t = (q - X[k]) / (X[k + 1] - X[k])
+                out[i, j] = y[k] + t * (y[k + 1] - y[k])
+    if vec:
+        return _box(out.reshape(-1).reshape(Q.shape))
+    # (a matrix of values: one column per column of v, a row per query)
+    return _unmat(out)
+
+
+@_bs("cond")
+def cond_n(x, p=None):
+    if p is None or (not _istext(p) and _scalar(p) == 2):
+        M = _mat(x)
+        s = np.linalg.svd(M, compute_uv=False)
+        return float(s[0] / s[-1]) if s[-1] != 0 else _math.inf
+    return norm_(x, p) * norm_(inv_(x), p)
+
+
+@_bs("char")
+def char_n(*args):
+    if len(args) == 1:
+        return char_(*args)
+    rows = []
+    for x in args:
+        if type(x) is Cell:
+            rows.extend(_text(e) for e in x.a)
+        elif type(x) is Char:
+            rows.extend(x.rows() if x.a.size else [""])
+        elif type(x) is Str:
+            rows.append(x.s)
+        elif type(x) is StrArr:
+            rows.extend(x.a)
+        else:
+            # (a numeric matrix: one row of characters per row)
+            M = _mat(x)
+            rows.extend("".join(chr(int(c)) for c in r) for r in M)
+    return _pad_rows(rows)
+
+
+def func2str_text2(f):
+    if type(f) is Anon:
+        return f.text
+    return f.name
+
+
+@_bs("func2str")
+def func2str_n(f):
+    # (a named handle's text is its name: func2str(@cos) is 'cos')
+    if not _iscallable(f):
+        raise _err("Input argument must be a function handle.")
+    return Char(func2str_text2(f))
+
+
+def _class_value(name, dbl, sgl):
+    def g(nargout, *args):
+        cls = _text(args[0]) if args and _istext(args[0]) else "double"
+        if cls == "single":
+            return _canon(np.array([[sgl]], dtype=np.float32))
+        return dbl
+    _B[name] = Builtin(g, name)
+
+
+_class_value("realmax", 1.7976931348623157e308, 3.4028234663852886e38)
+_class_value("realmin", 2.2250738585072014e-308, 1.1754943508222875e-38)
+_class_value("flintmax", 9007199254740992.0, 16777216.0)
+
+_eps_old = _B["eps"].f
+
+
+def _eps_n(nargout, *args):
+    if args and _istext(args[0]) and _text(args[0]) == "single":
+        return _canon(np.array([[1.1920928955078125e-07]], dtype=np.float32))
+    if args and class_(args[0]) == "single":
+        x = abs(float(_arr(args[0]).reshape(-1)[0]))
+        e = _math.frexp(x)[1] if x else -125
+        return _canon(np.array([[_math.ldexp(1.0, e - 24)]], dtype=np.float32))
+    return _eps_old(nargout, *args)
+
+
+_B["eps"] = Builtin(_eps_n, "eps")
+
+
+@_bs("factor")
+def factor_n(n):
+    cls = class_(n)
+    m = int(_scalar(n))
+    out = []
+    d = 2
+    while d * d <= m:
+        while m % d == 0:
+            out.append(float(d))
+            m //= d
+        d += 1
+    if m > 1 or not out:
+        out.append(float(m))
+    r = np.array(out).reshape((len(out), 1))
+    return _finish(r, cls) if cls in _INTS or cls == "single" else _box(r)
+
+
+_HREF = _re.compile(r'<a\s+href\s*=\s*"[^"]*"\s*>(.*?)</a>', _re.S)
+
+
+def _strip_links(s):
+    """MATLAB's hyperlinks (<a href="...">text</a>) as their text, as a terminal shows them"""
+    return _HREF.sub(lambda m: m.group(1), s) if "<a" in s else s
+
+
+def intlit(digits, radix, cls):
+    """a hex or binary literal (0x87u32): an integer of the smallest unsigned type that holds it"""
+    v = int(digits, radix)
+    if not cls:
+        bits = len(digits) * (4 if radix == 16 else 1)
+        cls = "uint8" if bits <= 8 else "uint16" if bits <= 16 else "uint32" if bits <= 32 else "uint64"
+    elif cls.startswith("int"):
+        # (a signed suffix: the bits as a two's complement number)
+        w = int(cls[3:])
+        if v >= 1 << (w - 1):
+            v -= 1 << w
+    return np.array([[v]], dtype=_INTS[cls][0])
+
+
+_BYTES = {"double": 8, "single": 4, "logical": 1, "char": 2, "int8": 1, "uint8": 1, "int16": 2, "uint16": 2,
+          "int32": 4, "uint32": 4, "int64": 8, "uint64": 8}
+
+
+def _bytes(v):
+    c = class_(v)
+    if c in _BYTES:
+        return _numel(v) * _BYTES[c] * (2 if _isnumlike(v) and _arr(v).dtype.kind == "c" else 1)
+    if type(v) is Cell:
+        return sum(_bytes(e) + 112 for e in v.a)
+    if type(v) is Struct:
+        return sum(_bytes(x) + 112 for d in v.a for x in d.values()) + 64 * len(v.fields)
+    if type(v) in (Str, StrArr):
+        return 150 + sum(2 * len(x or "") for x in (v.a if type(v) is StrArr else [v.s]))
+    return 8
+
+
+# ------------------------------------------------------------------ load and save (.mat files: lib/_matlab_mat.py; text with -ascii)
+
+
+def _matfile(name, ns, args, nargout):
+    import _matlab_mat as mat
+    words = [_text(a) for a in args]
+    flags = [w.lower() for w in words if w.startswith("-")]
+    rest = [w for w in words if not w.startswith("-")]
+    if name == "load":
+        return _load(mat, ns, rest, flags, nargout)
+    return _save(mat, ns, rest, flags, args)
+
+
+def _mat_path(f, must_exist):
+    import os
+    if os.path.splitext(f)[1] == "" and not (must_exist and os.path.exists(f)):
+        return f + ".mat"
+    return f
+
+
+def _load(mat, ns, rest, flags, nargout):
+    import os
+    if not rest:
+        rest = ["matlab.mat"]
+    fname = rest[0]
+    names = rest[1:]
+    path = _mat_path(fname, True)
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        raise _err("Unable to find file or directory '%s'." % fname, "MATLAB:load:couldNotReadFile")
+    ascii_ = "-ascii" in flags or (not data[126:128] in (b"IM", b"MI") and "-mat" not in flags and not path.endswith(".mat"))
+    if ascii_:
+        rows = []
+        for line in data.decode("latin1").splitlines():
+            line = line.split("%")[0].strip()
+            if not line:
+                continue
+            rows.append([float(x) for x in _re.split(r"[\s,]+", line) if x])
+        if rows and any(len(r) != len(rows[0]) for r in rows):
+            raise _err("Number of columns on line %d of ASCII file %s must be the same as previous lines." % (2, fname))
+        value = _unmat(np.array(rows, dtype=np.float64)) if rows else np.zeros((0, 0))
+        if nargout >= 1:
+            return value
+        var = _re.sub(r"\W", "_", os.path.splitext(os.path.basename(fname))[0])
+        if not var or not var[0].isalpha():
+            var = "X" + var
+        _ws_set(ns, var, value)
+        return NOVAL
+    try:
+        variables = mat.read(data)
+    except mat.MatError as e:
+        raise _err("Unable to read MAT-file %s: %s." % (fname, e), "MATLAB:load:unableToReadMatFile")
+    if names:
+        variables = [x for x in variables if any(_glob_match(n, x[0]) for n in names)]
+        for n in names:
+            if "*" not in n and not any(x[0] == n for x in variables):
+                warning_("Variable '%s' not found." % n)
+    if nargout >= 1:
+        return _struct1({n: v for n, v, _ in variables})
+    for n, v, g in variables:
+        if g:
+            global_set(n, v)
+        _ws_set(ns, n, v)
+    return NOVAL
+
+
+def _ws_set(ns, name, v):
+    key = "_k_" + name if name in _PYKW else name
+    if ns is not _workspace_globals_check(ns):
+        raise _err("load can only create variables in a script or the Command Window here: use S = load(...) in a function.")
+    ns[key] = v
+
+
+def _workspace_globals_check(ns):
+    # (a function's locals() is a copy: assignments to it do not reach its variables)
+    return ns if "__name__" in ns else None
+
+
+def _save(mat, ns, rest, flags, args):
+    import os
+    fname = rest[0] if rest else "matlab.mat"
+    names = rest[1:]
+    if "-struct" in flags:
+        # save(f, '-struct', 's' [, fields]): the fields of s as variables
+        sname = names[0]
+        s = ns.get("_k_" + sname if sname in _PYKW else sname)
+        if type(s) is not Struct or len(s.a) != 1:
+            raise _err("The argument to -STRUCT must be the name of a scalar structure variable.")
+        fields = names[1:] or s.fields
+        variables = [(f, s.a[0][f]) for f in fields]
+    else:
+        allv = _ws_vars(ns)
+        if names:
+            chosen = []
+            for n in names:
+                hit = [v for v in allv if _glob_match(n, v)]
+                if not hit:
+                    raise _err("Variable '%s' not found." % n, "MATLAB:save:couldNotWriteFile")
+                chosen.extend(h for h in hit if h not in chosen)
+        else:
+            chosen = allv
+        variables = [(v, ns["_k_" + v if v in _PYKW else v]) for v in chosen]
+        variables = [(n, v) for n, v in variables if not _iscallable(v) or type(v) in (Anon, Handle)]
+    if "-ascii" in flags:
+        digits = 16 if "-double" in flags else 8
+        sep = "\t" if "-tabs" in flags else "   "
+        lines = []
+        for n, v in variables:
+            if not _isnumlike(v):
+                warning_("Attempt to write an unsupported data type to an ASCII file. Variable '%s' not written to file." % n)
+                continue
+            M = _mat(v)
+            for row in M:
+                lines.append("".join(sep + ("% .*e" % (digits - 1, float(x))) for x in row))
+        with open(fname, "w") as fh:
+            fh.write("\n".join(lines) + ("\n" if lines else ""))
+        return NOVAL
+    if "-v7.3" in flags:
+        raise _err("Saving -v7.3 (HDF5) files is not supported: use -v7.")
+    path = _mat_path(fname, False)
+    existing = []
+    if "-append" in flags and os.path.exists(path):
+        with open(path, "rb") as fh:
+            existing = [(n, v) for n, v, _ in mat.read(fh.read()) if n not in {x[0] for x in variables}]
+    data = mat.write(existing + variables, compress="-v6" not in flags and "-v4" not in flags)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return NOVAL
+
+
+# ------------------------------------------------------------------ files and folders
+
+import os as _os
+
+
+@_bs("filesep")
+def filesep_():
+    return Char("/")
+
+
+@_bs("pathsep")
+def pathsep_():
+    return Char(":")
+
+
+@_bs("fullfile")
+def fullfile_(*parts):
+    names = []
+    for p in parts:
+        t = _text(p) if _istext(p) else None
+        if t is None:
+            raise _err("All inputs must be strings, character vectors, or cell arrays of character vectors.")
+        if t:
+            names.append(t)
+    if not names:
+        return Char("")
+    out = names[0]
+    for t in names[1:]:
+        out = out.rstrip("/") + "/" + t.lstrip("/") if out else t
+    out = _re.sub(r"/+", "/", out)
+    return Str(out) if any(type(p) is Str for p in parts) else Char(out)
+
+
+@_bi("fileparts")
+def fileparts_(nargout, f):
+    t = _text(f)
+    d, base = (t.rsplit("/", 1) if "/" in t else ("", t))
+    if "/" in t and d == "":
+        d = "/"
+    name, ext = (base.rsplit(".", 1) if "." in base[1:] else (base, None))
+    ext = "." + ext if ext is not None else ""
+    mk = (lambda s: Str(s)) if type(f) is Str else (lambda s: Char(s))
+    out = [mk(d), mk(name), mk(ext)]
+    return out[0] if nargout <= 1 else out[:nargout]
+
+
+@_bs("tempdir")
+def tempdir_():
+    d = _os.environ.get("TMPDIR", "/tmp")
+    return Char(d.rstrip("/") + "/")
+
+
+_tmp_count = [0]
+
+
+@_bs("tempname")
+def tempname_(d=None):
+    import random
+    _tmp_count[0] += 1
+    base = _text(d) if d is not None else _os.environ.get("TMPDIR", "/tmp")
+    return Char(base.rstrip("/") + "/tp%08x_%d" % (random.getrandbits(32), _tmp_count[0]))
+
+
+@_bs("pwd")
+def pwd_():
+    return Char(_os.getcwd())
+
+
+@_bi("cd")
+def cd_(nargout, d=None):
+    old = _os.getcwd()
+    if d is not None:
+        t = _text(d)
+        try:
+            _os.chdir(_os.path.expanduser(t))
+        except OSError:
+            raise _err("Cannot CD to %s (Name is nonexistent or not a directory)." % t, "MATLAB:cd:NonExistentFolder")
+    return Char(old) if nargout >= 1 or d is None else NOVAL
+
+
+@_bs("isfile")
+def isfile_(f):
+    return _os.path.isfile(_text(f))
+
+
+@_bs("isfolder")
+def isfolder_(f):
+    return _os.path.isdir(_text(f))
+
+
+@_bi("mkdir")
+def mkdir_(nargout, *args):
+    path = "/".join(_text(a) for a in args)
+    existed = _os.path.isdir(path)
+    try:
+        _os.makedirs(path, exist_ok=True)
+        ok = True
+    except OSError:
+        ok = False
+    if existed and nargout == 0:
+        warning_("Directory already exists.")
+    return [ok, Char("Directory already exists." if existed else ""), Char("MATLAB:MKDIR:DirectoryExists" if existed else "")][:nargout] if nargout > 1 else (ok if nargout == 1 else NOVAL)
+
+
+@_bi("rmdir")
+def rmdir_(nargout, d, *opts):
+    import shutil
+    t = _text(d)
+    try:
+        if opts and _text(opts[0]) == "s":
+            shutil.rmtree(t)
+        else:
+            _os.rmdir(t)
+        ok = True
+    except OSError:
+        ok = False
+        if nargout == 0:
+            raise _err("No directories were removed.")
+    return ok if nargout >= 1 else NOVAL
+
+
+@_bi("delete")
+def delete_(nargout, *files):
+    for f in files:
+        t = _text(f)
+        if "*" in t or "?" in t:
+            d, pat = (t.rsplit("/", 1) if "/" in t else (".", t))
+            for name in _os.listdir(d):
+                if _glob_match(pat, name):
+                    _os.remove(_os.path.join(d, name))
+            continue
+        try:
+            _os.remove(t)
+        except OSError:
+            warning_("File '%s' not found." % t)
+    return NOVAL
+
+
+@_bs("fileread")
+def fileread_(f, *opts):
+    t = _text(f)
+    try:
+        with open(t) as fh:
+            return Char(fh.read())
+    except OSError:
+        raise _err("Could not open file %s. No such file or directory." % t, "MATLAB:fileread:cannotOpenFile")
+
+
+class _MFile:
+    __slots__ = ("fh", "name", "mode")
+
+
+_next_fid = [3]
+
+
+@_bi("fopen")
+def fopen_(nargout, f, mode=None, *rest):
+    if _isnumlike(f) and _scalar(f) == _math.floor(_scalar(f)):
+        fid = int(_scalar(f))
+        h = _files.get(fid)
+        return Char(h.name) if h else Char("")
+    t = _text(f)
+    m = _text(mode) if mode is not None else "r"
+    # (text mode: fprintf and fgetl work on text)
+    pm = m.replace("t", "").replace("b", "") or "r"
+    try:
+        fh = open(t, pm)
+    except OSError as e:
+        if nargout >= 2:
+            return [-1.0, Char(str(e))]
+        return -1.0
+    fid = _next_fid[0]
+    _next_fid[0] += 1
+    mf = _MFile()
+    mf.fh = fh
+    mf.name = t
+    mf.mode = m
+    _files[fid] = mf
+    return float(fid) if nargout <= 1 else [float(fid), Char("")]
+
+
+@_bi("fclose")
+def fclose_(nargout, fid):
+    if _istext(fid) and _text(fid) == "all":
+        for k in list(_files):
+            _files[k].fh.close()
+            del _files[k]
+        return 0.0 if nargout else NOVAL
+    k = int(_scalar(fid))
+    h = _files.pop(k, None)
+    if h is None:
+        raise _err("Invalid file identifier.  Use fopen to generate a valid file identifier.", "MATLAB:FileIO:InvalidFid")
+    h.fh.close()
+    return 0.0 if nargout else NOVAL
+
+
+def _fh(fid):
+    h = _files.get(int(_scalar(fid)))
+    if h is None:
+        raise _err("Invalid file identifier.  Use fopen to generate a valid file identifier.", "MATLAB:FileIO:InvalidFid")
+    return h.fh
+
+
+@_bs("fgetl")
+def fgetl_(fid):
+    line = _fh(fid).readline()
+    if not line:
+        return -1.0
+    return Char(line.rstrip("\n").rstrip("\r"))
+
+
+@_bs("fgets")
+def fgets_(fid, *n):
+    line = _fh(fid).readline()
+    return Char(line) if line else -1.0
+
+
+@_bs("feof")
+def feof_(fid):
+    fh = _fh(fid)
+    pos = fh.tell()
+    c = fh.read(1)
+    if not c:
+        return True
+    fh.seek(pos)
+    return False
+
+
+@_bs("frewind")
+def frewind_(fid):
+    _fh(fid).seek(0)

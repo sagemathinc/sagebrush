@@ -1,0 +1,19 @@
+double 2x3 [1 2 3;4 5 6]
+double 2x3x2 [1 3 5 7 9 11;2 4 6 8 10 12]
+int8 2x2 [-5 100;7 -128]
+uint16 1x3 [1 65535 3]
+single 2x1 [1.5;-2.25]
+logical 2x3 [true false true;false false true]
+char 2x3 ['abc';'def']
+double 2x2 [1+2i -0-3.5i;4+0i 0+0i]
+cell 2x2 {double 1x1 1, double 1x3 [1 2 3], char 1x3 ['two'], cell 1x2 {double 1x1 4, char 1x4 ['five']}}
+struct 1x2 [struct {name=char 1x3 ['Ada'], v=double 1x2 [1 2]}; struct {name=char 1x3 ['Bob'], v=double 1x1 3}]
+double 0x0 []
+char 0x0 []
+cell 1x12 {char 1x1 ['A'], char 1x1 ['C'], char 1x1 ['L'], char 1x1 ['T'], char 1x3 ['cel'], char 1x1 ['e'], char 1x2 ['ec'], char 1x2 ['i8'], char 1x3 ['s32'], char 1x2 ['st'], char 1x3 ['u16'], char 1x1 ['z']}
+struct {A=double 2x3 [1 2 3;4 5 6], cel=cell 2x2 {double 1x1 1, double 1x3 [1 2 3], char 1x3 ['two'], cell 1x2 {double 1x1 4, char 1x4 ['five']}}}
+double 4x4 [16 5 9 4;2 11 7 14;3 10 6 15;13 8 12 1]
+cell 2x2 {double 1x1 1, double 1x2 [2 3], char 1x1 ['a'], cell 0x0 {}}
+struct {a=int16 1x2 [1 2], b=char 1x4 ['text']}
+double 1x2 [1+2i 3+0i]
+cell 1x5 {char 1x1 ['q'], char 1x1 ['r'], char 1x1 ['w'], char 1x1 ['x'], char 1x1 ['y']}

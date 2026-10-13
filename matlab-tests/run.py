@@ -11,6 +11,8 @@ expected output, which is committed (so that the check needs no Octave):
 - test_NAME.out: the output of the same program under Octave.  These tests
   print values with show.m (class, size, mat2str(x, 17)) or fprintf, whose
   output MATLAB and Octave agree on, since their displays (x = 5) differ.
+- data/: .mat files, written by Octave (make_octave_mat.m, run by hand) and
+  by Sagebrush (make_sagebrush_mat.m, run by --regen).
 - test_NAME.matlab.out: MATLAB's own output, written by hand from MATLAB's
   documented behaviour (its display format, and the places where Octave
   differs from MATLAB).  --regen never touches these.
@@ -50,6 +52,10 @@ def octave_copy(f):
 
 
 if "--regen" in sys.argv:
+    # (data/sagebrush.mat is Sagebrush's: Octave's reading of it is test_matfile_sagebrush's output)
+    code, out, err = run(["node", CLI, "--matlab", "make_sagebrush_mat.m"])
+    if code:
+        sys.exit("sagebrush failed on make_sagebrush_mat.m:\n%s" % err[-2000:])
     for f in files:
         kind, path = expected(f)
         if kind == "matlab":

@@ -95,3 +95,28 @@ show(T(end));
 show(squeeze(T(1, 2, :)));
 show(numel(T));
 show(size(zeros(3, 1, 2)));
+% linear and logical assignment into a matrix (and its transpose), growth then writes
+X = magic(4);
+X(1:2:end) = 0;
+show(X);
+Y = magic(4)';
+Y([1 3 16]) = -1;
+show(Y);
+Z = magic(3);
+Z(Z > 5) = 1;
+show(Z);
+W = magic(3)';
+W(2) = 100;
+W(3, 1) = 200;
+show(W);
+g = [];
+for k = 1:20
+  g(end + 1) = k;
+end
+g(1) = -1;
+g(20) = -20;
+show(g);
+h = zeros(3, 1);
+h(end + 1) = 4;
+h(2) = 9;
+show(h);
