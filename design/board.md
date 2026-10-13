@@ -756,6 +756,27 @@ JSON element a line.
 
 web/board/test-cocalc.mjs (19 checks) opens a current board and an old one.
 
+**One package, two hosts** (October 13, web/board/mount.ts). A board is
+mounted in an element by its host: `mountBoard(element, host)`. Everything
+that depends on where the board lives is the host's:
+- the store: where the document comes from, where its edits go, and Revert;
+- pictures' bytes;
+- the code items' engine (and so the kernel: the runner, or another);
+- KaTeX;
+- TimeTravel's history;
+- the address, the title, the home link, the examples, and Download as HTML.
+
+What a host does not give is not offered. With no engine, code shows as
+text; with no history, there is no TimeTravel. The board's parts (the top
+bar, its menu, the tour's caption, TimeTravel's bar, the dialogs) are
+built in the element and positioned within it, and its stylesheet
+(board.css) is put in the page once. sagebrush.space's page (page.ts) is
+one host: localStorage and IndexedDB, the runner, sagebrush-math.js,
+sagebrush-history.js. `destroy()` unmounts a board, and its listeners.
+packages/sagebrush-board builds it as `@sagemathinc/sagebrush-board` (one ES
+module and its types; not published yet). Its test mounts two boards side
+by side with a host of its own. CoCalc is to be the next host.
+
 **Math in titles.** A title's `$...$` and `\(...\)` are typeset with
 KaTeX, as in Markdown; the title is built as text and math elements, never
 from markup. Far out, on the canvas and on printed group labels, a title's

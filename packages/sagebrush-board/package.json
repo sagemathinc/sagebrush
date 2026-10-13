@@ -1,0 +1,29 @@
+{
+  "name": "@sagemathinc/sagebrush-board",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sagebrush boards: a whiteboard for agents and people (notes with Markdown and math, live code, pages, a tour, TimeTravel), mounted in an element by its host",
+  "keywords": ["whiteboard", "board", "markdown", "math", "python", "notebook"],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "bun build.mjs",
+    "test": "node test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sagemathinc/sagebrush.git",
+    "directory": "packages/sagebrush-board"
+  },
+  "homepage": "https://sagebrush.space/board/",
+  "bugs": "https://github.com/sagemathinc/sagebrush/issues",
+  "author": "William Stein <wstein@sagemath.com>",
+  "license": "MIT OR Apache-2.0"
+}

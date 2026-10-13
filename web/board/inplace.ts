@@ -14,7 +14,7 @@
 
 import type { Board } from "./board";
 import type { BoardDoc, DocGroup, DocNote } from "./doc";
-import { prepare, type Images, type ImageInfo } from "./images";
+import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { highlight as highlightPython, highlightMarkdown } from "../notebook/highlight.js";
 import { icon } from "./icons";
 import { BlockEditor } from "./blocks";
@@ -37,7 +37,7 @@ export interface InPlaceHost {
   run(id: string): void;
   /** the board's code highlighter (its language), once the notebook is loaded */
   highlight(): ((src: string) => string) | null;
-  images: Images | null;
+  images: ImageStore | null;
 }
 
 // a small or touch screen: the toolbar docks above the keyboard

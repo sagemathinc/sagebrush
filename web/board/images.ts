@@ -146,6 +146,19 @@ export async function prepare(file: Blob, opts: { paste?: boolean } = {}): Promi
 }
 
 /** The pictures of the boards in this browser: object URLs to show them, and their bytes. */
+/** Where pictures' bytes are kept, by name (the SHA-256 of their content):
+ * what a board needs of a host's store (Images: this browser's IndexedDB). */
+export interface ImageStore {
+  url(name: string): string | undefined;
+  put(blob: Blob): Promise<string>;
+  /** have these at hand to show */
+  ensure(names: Iterable<string>): Promise<unknown>;
+  /** take in the pictures a document carries (data: URLs), under their own names */
+  absorb(d: BoardDoc): Promise<unknown>;
+  /** the document with its pictures in it (data: URLs), as a file carries it */
+  inline(d: BoardDoc): Promise<BoardDoc>;
+}
+
 export class Images {
   private urls = new Map<string, string>();
   private blobs = new Map<string, Blob>();
