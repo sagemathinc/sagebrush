@@ -1,0 +1,413 @@
+{
+ "title": "Museum tour: how do you solve polynomial equations? (after Bianca Viray)",
+ "mode": "sage",
+ "intro": "**A self-guided museum tour for math**, Bianca Viray's board rebuilt in Sagebrush. Press **→** for the tour; the pink boxes run Sage live in your browser.",
+ "layout": "graph",
+ "nodes": [
+  {
+   "id": "c",
+   "text": "**How do you solve polynomial equations?**\n\n*over $\\mathbb{Q}$",
+   "shape": "circle",
+   "color": "#f3e3b5",
+   "w": 300
+  },
+  {
+   "id": "together",
+   "text": "Why split it up? Let's consider everything together!",
+   "shape": "round"
+  },
+  {
+   "id": "algo",
+   "text": "Solve by an algorithm, like with a computer program?",
+   "shape": "round"
+  },
+  {
+   "id": "ratalg",
+   "text": "For an algorithm, we need to restrict to solutions of a given form, say rational solutions.",
+   "shape": "round"
+  },
+  {
+   "id": "undec",
+   "text": "This may be an **undecidable** problem! This means that it might be IMPOSSIBLE to ever create an algorithm which can solve this problem.",
+   "shape": "hexagon",
+   "color": "#f6e7b4",
+   "w": 300
+  },
+  {
+   "id": "hilbert",
+   "text": "Go explore: Hilbert's 10th problem (no algorithm over $\\mathbb{Z}$, Matiyasevich 1970; over $\\mathbb{Q}$ still open)",
+   "shape": "diamond",
+   "color": "#ffffff",
+   "w": 280
+  },
+  {
+   "id": "one",
+   "text": "In one variable",
+   "shape": "round"
+  },
+  {
+   "id": "approx",
+   "text": "approximate solutions?",
+   "shape": "round"
+  },
+  {
+   "id": "newton",
+   "text": "Newton–Raphson method",
+   "shape": "round"
+  },
+  {
+   "id": "newtonlive",
+   "text": "Newton's method on $x^5 - x - 1$: the number of correct digits doubles each step.",
+   "title": "(was: In progress)",
+   "color": "#efc0c0",
+   "w": 380,
+   "code": "f(x) = x^5 - x - 1\nfp = diff(f, x)\nx0 = 1.0\nfor i in range(6):\n    x0 = x0 - f(x0)/fp(x0)\n    print(i, x0)"
+  },
+  {
+   "id": "form",
+   "text": "In a particular form? Maybe using $n$th roots?",
+   "shape": "round"
+  },
+  {
+   "id": "impossible",
+   "text": "This is impossible!",
+   "shape": "hexagon",
+   "color": "#f5d0d0"
+  },
+  {
+   "id": "galoisstar",
+   "text": "BUT in articulating what makes this difficult, Galois gave a new perspective on this problem.",
+   "shape": "hexagon",
+   "color": "#f6e7b4",
+   "w": 280
+  },
+  {
+   "id": "exact",
+   "text": "any form, but they should be exact!",
+   "shape": "round"
+  },
+  {
+   "id": "quotient",
+   "text": "Use quotient rings and linear algebra to understand exact roots abstractly",
+   "w": 380,
+   "code": "R.<x> = QQ[]\n# K = Q[x]/(x^5 - x - 1), a = the class of x\nK.<a> = NumberField(x^5 - x - 1)\nprint(a^5)            # = a + 1\nprint((a^2 + 1)^-1)   # exact inverse, by linear algebra"
+  },
+  {
+   "id": "galois",
+   "text": "Galois theory helps us understand how different roots interact with each other",
+   "shape": "round"
+  },
+  {
+   "id": "galoislive",
+   "text": "Solvable by radicals exactly when the Galois group is solvable: $x^3 - 2$ yes, $x^5 - x - 1$ ($S_5$) no.",
+   "title": "(was: In progress)",
+   "color": "#efc0c0",
+   "w": 380,
+   "code": "R.<x> = QQ[]\nfor g in [x^3 - 2, x^5 - x - 1]:\n    G = g.galois_group()\n    print(g, '|', G, '| order', G.order(), '| solvable:', G.is_solvable())"
+  },
+  {
+   "id": "two",
+   "text": "In 2 or more variables",
+   "shape": "round"
+  },
+  {
+   "id": "inf",
+   "text": "Then there are **infinitely** many solutions. What does it mean to describe them?",
+   "shape": "circle",
+   "w": 260
+  },
+  {
+   "id": "param",
+   "text": "Parameterize the solutions like for parameterized curves or general solutions in linear algebra?",
+   "w": 380,
+   "code": "t = var('t')\nX, Y = (1 - t^2)/(1 + t^2), 2*t/(1 + t^2)   # the circle x^2 + y^2 = 1\nprint([(X(t=s), Y(t=s)) for s in [1/2, 2/3, 3/7]])"
+  },
+  {
+   "id": "obst",
+   "text": "There is a geometric obstruction to this! This means that there are certain geometric properties of the polynomial equation that make such a parameterization IMPOSSIBLE",
+   "shape": "hexagon",
+   "color": "#f6e7b4",
+   "w": 320
+  },
+  {
+   "id": "explore1",
+   "text": "Go explore: Rationality, Fundamental groups. Can you map a sphere to a donut in a continuous way?",
+   "shape": "diamond",
+   "color": "#ffffff",
+   "w": 260
+  },
+  {
+   "id": "complex",
+   "text": "We can first try to understand the geometry of all solutions considered as a complex manifold or an algebraic variety.",
+   "shape": "round",
+   "w": 280
+  },
+  {
+   "id": "explore2",
+   "text": "Go explore: Algebraic geometry, perhaps birational geometry and moduli spaces in particular",
+   "shape": "diamond",
+   "color": "#ffffff",
+   "w": 260
+  },
+  {
+   "id": "restrict",
+   "text": "Let's consider solutions of a restricted form, say rational solutions.",
+   "shape": "round"
+  },
+  {
+   "id": "finite",
+   "text": "First determine if the solutions are finite or infinite",
+   "shape": "round"
+  },
+  {
+   "id": "conj",
+   "text": "Conjecturally, only polynomial equations with simple geometry (or that contain an object with simple geometry) should be able to have infinitely many solutions",
+   "shape": "hexagon",
+   "color": "#f6e7b4",
+   "w": 320
+  },
+  {
+   "id": "conjlive",
+   "text": "Genus 1 can have infinitely many rational points (a group of positive rank); genus $\\ge 2$ only finitely many (Faltings).",
+   "title": "(was: In progress)",
+   "color": "#efc0c0",
+   "w": 420,
+   "code": "E = EllipticCurve([0, 0, 0, -2, 0])     # y^2 = x^3 - 2x, genus 1\nP = E.gens()[0]\nprint('rank', E.rank(), ':', [n*P for n in [1, 2, 3]])\npts = []                                  # y^2 = x^5 - x + 1, genus 2\nfor d in range(1, 13):\n    for m in range(-40, 41):\n        if gcd(m, d) == 1:\n            v = (m/d)^5 - m/d + 1\n            p, q = v.numerator(), v.denominator()\n            if p >= 0 and isqrt(p)^2 == p and isqrt(q)^2 == q:\n                pts.append((m/d, isqrt(p)/isqrt(q)))\nprint('genus 2, small points:', pts)"
+  },
+  {
+   "id": "explore3",
+   "text": "Go explore: varieties of general type, the Bombieri–Lang–Vojta conjecture (varieties of general type cannot have Zariski dense rational points), the Mordell conjecture / Faltings's theorem (curves of genus at least 2 have only finitely many rational points).",
+   "shape": "diamond",
+   "color": "#ffffff",
+   "w": 320
+  }
+ ],
+ "edges": [
+  {
+   "from": "c",
+   "to": "one",
+   "arrow": "none"
+  },
+  {
+   "from": "c",
+   "to": "two",
+   "arrow": "none"
+  },
+  {
+   "from": "c",
+   "to": "together",
+   "arrow": "none"
+  },
+  {
+   "from": "together",
+   "to": "algo",
+   "arrow": "none"
+  },
+  {
+   "from": "algo",
+   "to": "ratalg",
+   "arrow": "none"
+  },
+  {
+   "from": "ratalg",
+   "to": "undec",
+   "arrow": "none"
+  },
+  {
+   "from": "undec",
+   "to": "hilbert"
+  },
+  {
+   "from": "one",
+   "to": "approx",
+   "arrow": "none"
+  },
+  {
+   "from": "approx",
+   "to": "newton",
+   "arrow": "none"
+  },
+  {
+   "from": "newton",
+   "to": "newtonlive",
+   "arrow": "none"
+  },
+  {
+   "from": "one",
+   "to": "form",
+   "arrow": "none"
+  },
+  {
+   "from": "form",
+   "to": "impossible",
+   "arrow": "none"
+  },
+  {
+   "from": "impossible",
+   "to": "galoisstar",
+   "arrow": "none"
+  },
+  {
+   "from": "one",
+   "to": "exact",
+   "arrow": "none"
+  },
+  {
+   "from": "exact",
+   "to": "quotient",
+   "arrow": "none"
+  },
+  {
+   "from": "quotient",
+   "to": "galois",
+   "arrow": "none"
+  },
+  {
+   "from": "galois",
+   "to": "galoisstar",
+   "arrow": "none"
+  },
+  {
+   "from": "galois",
+   "to": "galoislive",
+   "arrow": "none"
+  },
+  {
+   "from": "two",
+   "to": "inf",
+   "arrow": "none"
+  },
+  {
+   "from": "inf",
+   "to": "param",
+   "arrow": "none"
+  },
+  {
+   "from": "param",
+   "to": "obst",
+   "arrow": "none"
+  },
+  {
+   "from": "obst",
+   "to": "explore1",
+   "arrow": "none"
+  },
+  {
+   "from": "obst",
+   "to": "complex",
+   "arrow": "none"
+  },
+  {
+   "from": "complex",
+   "to": "explore2",
+   "arrow": "none"
+  },
+  {
+   "from": "inf",
+   "to": "restrict",
+   "arrow": "none"
+  },
+  {
+   "from": "obst",
+   "to": "restrict",
+   "arrow": "none"
+  },
+  {
+   "from": "restrict",
+   "to": "finite",
+   "arrow": "none"
+  },
+  {
+   "from": "finite",
+   "to": "conj",
+   "arrow": "none"
+  },
+  {
+   "from": "conj",
+   "to": "conjlive",
+   "arrow": "none"
+  },
+  {
+   "from": "conj",
+   "to": "explore3",
+   "arrow": "none"
+  }
+ ],
+ "steps": [
+  {
+   "focus": "c",
+   "say": "Bianca Viray's museum tour, rebuilt as a Sagebrush board. **→** walks it; the pink boxes (her \"In progress\") now compute live, in Sage, in your browser."
+  },
+  {
+   "focus": [
+    "one",
+    "approx",
+    "newton",
+    "newtonlive"
+   ],
+   "say": "One variable, approximately: Newton–Raphson."
+  },
+  {
+   "focus": [
+    "form",
+    "impossible",
+    "galoisstar"
+   ],
+   "say": "With $n$th roots? Impossible in general, but Galois explained why."
+  },
+  {
+   "focus": [
+    "exact",
+    "quotient"
+   ],
+   "say": "Exactly: compute with the roots abstractly, in $\\mathbb{Q}[x]/(f)$."
+  },
+  {
+   "focus": [
+    "galois",
+    "galoislive"
+   ],
+   "say": "Galois groups: solvable or not."
+  },
+  {
+   "focus": [
+    "two",
+    "inf",
+    "param"
+   ],
+   "say": "Two or more variables: infinitely many solutions. Parameterize them?"
+  },
+  {
+   "focus": [
+    "obst",
+    "explore1",
+    "complex",
+    "explore2"
+   ],
+   "say": "A geometric obstruction, and where to go explore."
+  },
+  {
+   "focus": [
+    "restrict",
+    "finite",
+    "conj",
+    "conjlive"
+   ],
+   "say": "Rational points: finitely or infinitely many? Genus decides, conjecturally in general."
+  },
+  {
+   "focus": "explore3",
+   "say": "Go explore: Bombieri–Lang–Vojta, Mordell–Faltings."
+  },
+  {
+   "focus": [
+    "together",
+    "algo",
+    "ratalg",
+    "undec",
+    "hilbert"
+   ],
+   "say": "Everything together: is there an algorithm at all? Hilbert's 10th problem."
+  }
+ ]
+}
