@@ -43,6 +43,10 @@ jobs:
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
           node web/test-cli-assets.mjs build/cli/pyjs.cjs
+      - name: shared collections (the share API and the files Worker, in Miniflare)
+        run: |
+          (cd web/site && npm ci --silent)
+          node web/share/test-share.mjs
       - name: conformance (Node)
         run: python3 conformance/run.py --runtime node --show 20
       - name: conformance (Deno)
