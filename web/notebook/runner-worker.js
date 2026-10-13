@@ -20,13 +20,55 @@
 
 const OWN = /\/sagebrush-(engine\.wasm|precompiled\.json)$/;
 
+// Files mode: the runner for a page that has the engine's files itself (a
+// board downloaded as one HTML file).  A file:// page is never cross-origin
+// isolated, so there is no SharedArrayBuffer and no broker: the frame (a
+// srcdoc of its own, opaque, sandboxed) makes blob: URLs of the files, and
+// the worker reads them (the engine by synchronous XHR, the precompiled
+// library by fetch; __SB_FILES__ in web/worker.ts).  Its policy allows no
+// network but those blob: URLs.  No interrupt flag: Stop restarts the
+// worker.  (A srcdoc frame also inherits its parent's policy: the page must
+// allow inline scripts in it, as a downloaded file, with no policy, does.)
+// (its script tags built at run time: this module is bundled into pages'
+// inline scripts, where a literal </script ends the page's script, and a
+// literal <script after a <!-- makes the parser skip the page's own end tag)
+const LT = String.fromCharCode(60);
+const SCRIPT = LT + "script>", END_SCRIPT = LT + "/script>";
+const FILES_RUNNER = `<!doctype html><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src blob:; base-uri 'none'; form-action 'none'">
+${SCRIPT}
+(() => {
+  let started = false;
+  addEventListener("message", (e) => {
+    if (started || e.source !== parent || !e.data || e.data.sagebrushRunnerFiles !== 1 || e.ports.length !== 1) return;
+    started = true;
+    const port = e.ports[0], f = e.data.files || {};
+    try {
+      const url = (name, type) => URL.createObjectURL(new Blob([f[name]], { type }));
+      const files = { "sagebrush-engine.wasm": url("sagebrush-engine.wasm", "application/wasm"), "sagebrush-precompiled.json": url("sagebrush-precompiled.json", "application/json") };
+      const script = new Blob(["self.__SB_FILES__ = " + JSON.stringify(files) + ";\\n", f["sagebrush-worker.js"]], { type: "text/javascript" });
+      const w = new Worker(URL.createObjectURL(script), { name: String(e.data.name || "") });
+      w.onmessage = (m) => { let d = m.data; if (d && d.ready) d = { ...d, interrupt: null }; port.postMessage(d); };
+      w.onerror = (ev) => port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
+      port.onmessage = (m) => w.postMessage(m.data);
+      port.postMessage({ runnerReady: true });
+    } catch (err) {
+      port.postMessage({ runnerError: String((err && err.message) || err) });
+    }
+  });
+})();
+${END_SCRIPT}`;
+
 export class RunnerWorker {
   /**
    * @param {string} src the runner page's URL
-   * @param {{name?: string, fallback?: () => any}} [o] the worker's name (TimeTravel
-   *   replay's parameters), and a plain worker to use if the frame doesn't answer
+   * @param {{name?: string, fallback?: () => any, files?: Record<string, ArrayBuffer>}} [o]
+   *   the worker's name (TimeTravel replay's parameters); a plain worker to use
+   *   if the frame doesn't answer; or, with src null, the engine's files
+   *   themselves (sagebrush-worker.js, sagebrush-engine.wasm and
+   *   sagebrush-precompiled.json), for files mode
    */
-  constructor(src, { name = "", fallback } = {}) {
+  constructor(src, { name = "", fallback, files } = {}) {
     this.onmessage = null;
     this.onerror = null;
     this.queue = [];
@@ -47,8 +89,8 @@ export class RunnerWorker {
     this.timer = fallback ? setTimeout(giveUp, 10000) : null;
     // what the interpreter may ask this page to fetch: its own files under
     // base, and the files it was told to mount (by URL)
-    const runner = new URL(src, location.href);
-    this.base = new URL("../", runner).href;
+    const runner = new URL(src ?? "about:blank", location.href);
+    this.base = files ? "" : new URL("../", runner).href;
     this.mounted = new Set();
     const ch = new MessageChannel();
     ch.port1.onmessage = (e) => {
@@ -69,10 +111,16 @@ export class RunnerWorker {
     };
     const f = (this.frame = document.createElement("iframe"));
     f.setAttribute("sandbox", "allow-scripts");
-    f.setAttribute("allow", "cross-origin-isolated");
     f.setAttribute("aria-hidden", "true");
     f.tabIndex = -1;
     f.style.display = "none";
+    if (files) {
+      f.srcdoc = FILES_RUNNER;
+      f.addEventListener("load", () => f.contentWindow?.postMessage({ sagebrushRunnerFiles: 1, name, files }, "*", [ch.port2]), { once: true });
+      document.body.appendChild(f);
+      return;
+    }
+    f.setAttribute("allow", "cross-origin-isolated");
     f.src = runner.href;
     const script = fetch(new URL("sagebrush-worker.js", this.base)).then((r) => {
       if (!r.ok) throw new Error(`the interpreter could not be loaded (HTTP ${r.status})`);
