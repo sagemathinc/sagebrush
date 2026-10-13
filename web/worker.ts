@@ -26,6 +26,7 @@ const BASE: string = (globalThis as any).__SB_BASE__ ?? self.location.href;
 import "../build/cli/lib.gen.js";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
+import { sha256Hex } from "../src/runtime/sha256";
 import { notebookSession } from "../src/notebook-session";
 
 // The files each run reads and writes (the reactive notebook's file edges):
@@ -52,6 +53,43 @@ __hooks.read = (path) => {
   if (mine(path)) reads.add(path);
 };
 
+// In the runner (web/runner/index.html) this worker has no network at all:
+// its frame sends, as the first message, a broker (two SharedArrayBuffers),
+// and a file it needs (the engine, a shared collection's file) is fetched by
+// the page and copied through it, a chunk at a time, while this worker waits
+// on Atomics.wait.  The page fetches only the interpreter's own files and the
+// files it mounted.
+const BROKERED = !!(globalThis as any).__SB_BROKERED__;
+let brokerSet: () => void = () => {};
+const brokered = new Promise<void>((r) => (brokerSet = r));
+let ctrl: Int32Array | null = null, chunk: Uint8Array | null = null;
+function fetchSync(url: string): Uint8Array {
+  if (!ctrl || !chunk) throw new Error("no broker");
+  const parts: Uint8Array[] = [];
+  let off = 0, total = 0;
+  do {
+    Atomics.store(ctrl, 0, 0);
+    postMessage({ brokerFetch: url, offset: off });
+    Atomics.wait(ctrl, 0, 0);
+    if (ctrl[1] !== 1) throw new Error("could not fetch " + url);
+    const n = ctrl[2];
+    total = ctrl[3];
+    parts.push(chunk.slice(0, n));
+    off += n;
+    if (n === 0 && off < total) throw new Error("could not fetch " + url);
+  } while (off < total);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) out.set(p, (at += p.length) - p.length);
+  return out;
+}
+function setBroker(b: { ctrl: SharedArrayBuffer; data: SharedArrayBuffer }) {
+  ctrl = new Int32Array(b.ctrl);
+  chunk = new Uint8Array(b.data);
+  (globalThis as any).__SAGEBRUSH_FETCH_SYNC__ = fetchSync;
+  brokerSet();
+}
+
 // The library modules compiled when the site was built (src/compile.ts,
 // precompiled; web/build.ts), fetched as the worker starts: a Sage run waits
 // for them (Sage mode's start compiled 2 MB of Python, over a second), other
@@ -62,18 +100,25 @@ __hooks.read = (path) => {
 declare const __SB_PRECOMPILED_HASH__: string;
 const precompiled = (async () => {
   try {
-    if (!crypto?.subtle) return;
-    const r = await fetch(new URL("sagebrush-precompiled.json?h=" + __SB_PRECOMPILED_HASH__.slice(0, 16), BASE));
-    if (!r.ok) return;
-    const bytes = await r.arrayBuffer();
-    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-    if ([...h].map((b) => b.toString(16).padStart(2, "0")).join("") !== __SB_PRECOMPILED_HASH__) return;
+    const url = new URL("sagebrush-precompiled.json?h=" + __SB_PRECOMPILED_HASH__.slice(0, 16), BASE).href;
+    let bytes: ArrayBuffer;
+    if (BROKERED) {
+      await brokered;
+      bytes = fetchSync(url).slice().buffer;
+    } else {
+      const r = await fetch(url);
+      if (!r.ok) return;
+      bytes = await r.arrayBuffer();
+    }
+    // (the runner's worker is not a secure context, so no crypto.subtle: the synchronous SHA-256)
+    if (sha256Hex(new Uint8Array(bytes)) !== __SB_PRECOMPILED_HASH__) return;
     (globalThis as any).__SAGEBRUSH_PRECOMPILED__ = JSON.parse(new TextDecoder().decode(bytes));
   } catch {}
 })();
 
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;
+  if (m.broker && BROKERED && !ctrl) return setBroker(m.broker);
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
   if (m.mount) return mount(m.mount);

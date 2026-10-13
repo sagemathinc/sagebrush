@@ -3,40 +3,68 @@
 <title>Sagebrush runner</title>
 <!--
 The runner (design/runner.md): Python's interpreter in a frame with an opaque
-origin.  A page loads this in <iframe sandbox="allow-scripts"> (no
-allow-same-origin), so here there is no cookie, no IndexedDB, no
-localStorage, no page and, by this page's Content-Security-Policy (web/csp.ts),
-no network beyond Sagebrush's own static files.  Its worker, started from a
-blob: URL, inherits all of that.  The page sends one message with a
-MessagePort; from then on messages go page <-> this frame <-> the worker.
-The interrupt flag (a SharedArrayBuffer) stays here: the page asks for Stop
-by message.
+origin and no network.  A page loads this in <iframe sandbox="allow-scripts">
+(no allow-same-origin), so here there is no cookie, no IndexedDB, no
+localStorage and no page; by this page's Content-Security-Policy
+(web/csp.ts: connect-src 'none'), no network either.  Its worker, started
+from a blob: URL, inherits all of that.
+
+The page sends one message with a MessagePort and the interpreter's script.
+From then on messages go page <-> this frame <-> the worker.  A file the
+worker needs (the engine, a shared collection's file) is fetched by the page
+and copied to the worker through a SharedArrayBuffer while it waits (its
+reads are synchronous).  The interrupt flag stays here: the page asks for
+Stop by message.
 -->
 <script>
 (() => {
-  const base = new URL("../", location.href).href;
+  const CHUNK = 4 << 20;
   let started = false;
-  addEventListener("message", async (e) => {
-    if (started || e.source !== parent || !e.data || e.data.sagebrushRunner !== 1 || e.ports.length !== 1) return;
+  addEventListener("message", (e) => {
+    if (started || e.source !== parent || !e.data || e.data.sagebrushRunner !== 1 || e.ports.length !== 1 || typeof e.data.script !== "string" || typeof e.data.base !== "string") return;
     started = true;
     const port = e.ports[0];
     try {
-      const r = await fetch(base + "sagebrush-worker.js", { credentials: "omit" });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const text = await r.text();
-      if (typeof e.data.sha256 === "string") {
-        const h = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, "0")).join("");
-        if (h !== e.data.sha256) throw new Error("the interpreter's script is not the one this page was built with");
-      }
-      // (the worker resolves its other files, the engine and the precompiled
-      // library, against this base, as its own URL is a blob:)
-      const url = URL.createObjectURL(new Blob(["self.__SB_BASE__ = " + JSON.stringify(base) + ";\n", text], { type: "text/javascript" }));
+      // (the worker resolves its other files against base, as its own URL is a blob:)
+      const prefix = "self.__SB_BASE__ = " + JSON.stringify(e.data.base) + "; self.__SB_BROKERED__ = true;\n";
+      const url = URL.createObjectURL(new Blob([prefix, e.data.script], { type: "text/javascript" }));
       // (a classic worker: Chrome refuses a module worker from a blob: in an
       // opaque origin, and the bundle has no imports or exports)
       const w = new Worker(url, { name: String(e.data.name ?? "") });
+      const ctrl = new Int32Array(new SharedArrayBuffer(16));
+      const data = new Uint8Array(new SharedArrayBuffer(CHUNK));
+      w.postMessage({ broker: { ctrl: ctrl.buffer, data: data.buffer } });
+      // files the page fetched, by URL; requests waiting for the page
+      const files = new Map(), waiting = new Map();
+      let next = 0;
+      // (a file is kept here only while the worker reads it, a chunk at a time)
+      const answer = (url, bytes, offset) => {
+        if (!bytes) {
+          Atomics.store(ctrl, 1, 2);
+        } else {
+          const n = Math.max(0, Math.min(CHUNK, bytes.length - offset));
+          data.set(bytes.subarray(offset, offset + n));
+          Atomics.store(ctrl, 1, 1);
+          Atomics.store(ctrl, 2, n);
+          Atomics.store(ctrl, 3, bytes.length);
+          if (offset + n >= bytes.length) files.delete(url);
+          else files.set(url, bytes);
+        }
+        Atomics.store(ctrl, 0, 1);
+        Atomics.notify(ctrl, 0);
+      };
       let flag = null;
       w.onmessage = (m) => {
         let d = m.data;
+        if (d && typeof d.brokerFetch === "string") {
+          const off = Number(d.offset) || 0;
+          const have = files.get(d.brokerFetch);
+          if (have) return answer(d.brokerFetch, have, off);
+          const id = ++next;
+          waiting.set(id, off);
+          port.postMessage({ runnerFetch: id, url: d.brokerFetch });
+          return;
+        }
         if (d && d.ready && d.interrupt) {
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
@@ -51,6 +79,12 @@ by message.
             Atomics.store(flag, 1, d.runnerInterrupt);
             Atomics.store(flag, 0, 1);
           }
+          return;
+        }
+        if (d && typeof d.runnerFetched === "number" && waiting.has(d.runnerFetched)) {
+          const off = waiting.get(d.runnerFetched);
+          waiting.delete(d.runnerFetched);
+          answer(String(d.url), d.bytes instanceof ArrayBuffer ? new Uint8Array(d.bytes) : null, off);
           return;
         }
         w.postMessage(d);

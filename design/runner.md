@@ -1,6 +1,6 @@
 # The runner: Python where an escape gets nothing
 
-*Status: the default on the notebook page and on boards (`?runner=0` turns it off, for now), and the only way the shared-collection page runs code. Every notebook browser suite passes with it. It still runs from a path of sagebrush.space; the user-content domain comes next.*
+*Status: the default on the notebook page and on boards, and the only way the shared-collection page runs code. The interpreter in it has no network at all. Every notebook and board browser suite passes with it. It still runs from a path of sagebrush.space; the user-content domain comes next.*
 
 ## Why
 
@@ -15,23 +15,25 @@ The runner moves the interpreter somewhere with **no storage, no page and no net
 
 `RunnerWorker` (web/notebook/runner-worker.js) is a drop-in for `new Worker("sagebrush-worker.js")`. `WorkerKernel`, the notebook, boards and the console don't change.
 
-1. **The frame.** It adds a hidden `<iframe sandbox="allow-scripts">` (with no `allow-same-origin`) showing web/runner/index.html. The frame's origin is opaque: no cookies, no IndexedDB, no localStorage, and no access to the page.
-2. **The worker.** The page sends the frame one message carrying a `MessagePort`. The frame:
-   - fetches `sagebrush-worker.js` with CORS (optionally checking its SHA-256);
-   - starts it as a classic worker from a `blob:` URL. Chrome refuses a *module* worker from a `blob:` in an opaque origin, and the bundle has no imports or exports;
-   - tells the worker where its other files (the engine, the precompiled library) are.
-3. **Relaying.** From then on messages go page ↔ frame ↔ worker.
-4. **Stop.** The interrupt flag (a SharedArrayBuffer) stays in the frame, which is cross-origin isolated (`allow="cross-origin-isolated"` and the site's COOP/COEP). The page asks for Stop by message. KeyboardInterrupt keeps the variables, as without the runner.
+1. **The frame.** It adds a hidden `<iframe sandbox="allow-scripts">` (no `allow-same-origin`) showing web/runner/index.html. The frame's origin is opaque: no cookies, no IndexedDB, no localStorage, and no access to the page.
+2. **The worker.** The page fetches `sagebrush-worker.js` itself and sends its text with one message carrying a `MessagePort`. The frame starts it as a classic worker from a `blob:` URL. (Chrome refuses a *module* worker from a `blob:` in an opaque origin, and the bundle has no imports or exports.)
+3. **No network.** The runner's Content-Security-Policy (web/csp-policy.mts, `runnerPolicy`), which the `blob:` worker inherits, is:
+   - `default-src 'none'`;
+   - scripts: its inline script by hash, `blob:`, `'unsafe-eval'` (compiled Python) and `'wasm-unsafe-eval'`;
+   - **`connect-src 'none'`.**
+4. **Files the interpreter needs** (its engine, its precompiled library, the files of a shared collection it was told to mount) are fetched by the page and handed over:
+   - the worker asks the frame;
+   - the page fetches, but only those files: its own interpreter files, and URLs it mounted;
+   - the frame copies the bytes, a 4 MB chunk at a time, into a SharedArrayBuffer while the worker waits on `Atomics.wait`. Python's file reads are synchronous.
+   - The worker still checks each file's SHA-256.
+5. **Relaying.** Other messages go page ↔ frame ↔ worker.
+6. **Stop.** The interrupt flag stays in the frame, which is cross-origin isolated (`allow="cross-origin-isolated"` and the site's COOP/COEP). The page asks for Stop by message. KeyboardInterrupt keeps the variables.
 
-**The runner page's Content-Security-Policy** (web/csp-policy.mts `runnerPolicy`), which the `blob:` worker inherits:
-- `default-src 'none'`;
-- scripts: the page's own inline script by hash, `blob:`, `'unsafe-eval'` (compiled Python) and `'wasm-unsafe-eval'`;
-- `connect-src 'self'`: Sagebrush's own static files, which are served with `Access-Control-Allow-Origin: *`.
+**Not a secure context.** The worker in the opaque frame has no `crypto.subtle`, so it checks hashes with the synchronous SHA-256 in src/runtime/sha256.ts.
 
-So code in the worker can read the files it is sent, but can't send them anywhere:
-- other sites, WebSockets and beacons are blocked by the policy;
-- the site's pages aren't readable (no CORS);
-- cookies aren't sent (an opaque origin is cross-site to everything).
+**Where it is used:**
+- **Always** on the shared-collection page (someone else's code), with no fallback.
+- **By default** on the notebook page and on boards, where the page is cross-origin isolated and not the desktop app. There, if the frame doesn't answer within a few seconds, a plain worker is used instead. Offline, a service worker doesn't serve a sandboxed frame. `?runner=0` turns the runner off.
 
 ## Measured
 
@@ -48,12 +50,10 @@ In headless Chromium (web/test-runner.mjs):
 
 ## Next
 
-1. **No network at all in the interpreter.**
-   - **Today:** `connect-src` still allows the runner's own origin (for the interpreter's files) and the files domain (for mounted files). CORS blocks reading anything else there, but query-bearing GETs can still be *sent*, into logs or a cache.
-   - **Plan:** the frame fetches the interpreter's files itself and hands the bytes to the worker. Mounted files are brokered: the worker asks the frame and waits on an `Atomics.wait` over a SharedArrayBuffer (the frame is cross-origin isolated), and the frame fetches exactly the manifest's files. The worker then gets `connect-src 'none'`.
-   - **Also:** the page checks and bounds every message from the runner.
+1. **Bound every message from the runner** on the page side: everything from the runner is untrusted. Outputs already are (design/security.md, rules 1–4).
 2. **The user-content domain** (`run.cocalcusercontent.com`): a second wall. A different site adds process isolation and partitions the HTTP cache. This needs:
    - the page's `frame-src` widened to it;
    - the runner's `frame-ancestors` set to the sites that may embed it.
-3. **Firefox and Safari:** opaque-origin cross-origin isolation, and classic `blob:` workers in sandboxed frames.
-4. **Then the attribute-read backstop** (`SAGEBRUSH_HARDENED`) can default off: the runner contains what it was guarding against.
+3. **Startup without V8's code cache:** a `blob:` worker compiles its script afresh each time. It is about 330 ms to ready, against 165 ms for a plain worker.
+4. **Firefox and Safari:** opaque-origin cross-origin isolation, and classic `blob:` workers in sandboxed frames.
+5. **Then the attribute-read backstop** (`SAGEBRUSH_HARDENED`) can default off: the runner contains what it was guarding against.

@@ -35,12 +35,17 @@ function engineBytes(): Uint8Array {
     return b;
   }
   if (g.__SAGEBRUSH_ENGINE_URL__) {
-    const x = new XMLHttpRequest();
-    x.open("GET", String(g.__SAGEBRUSH_ENGINE_URL__), false);
-    x.responseType = "arraybuffer";
-    x.send();
-    if (x.status !== 200) throw new Error(`could not load the engine (HTTP ${x.status})`);
-    const b = new Uint8Array(x.response);
+    let b: Uint8Array;
+    // (in the runner, which has no network, the page fetches it: web/runner)
+    if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") b = g.__SAGEBRUSH_FETCH_SYNC__(String(g.__SAGEBRUSH_ENGINE_URL__));
+    else {
+      const x = new XMLHttpRequest();
+      x.open("GET", String(g.__SAGEBRUSH_ENGINE_URL__), false);
+      x.responseType = "arraybuffer";
+      x.send();
+      if (x.status !== 200) throw new Error(`could not load the engine (HTTP ${x.status})`);
+      b = new Uint8Array(x.response);
+    }
     // (the browser's worker says which bytes it was built with: anything else,
     // a cached copy rewritten, say, is not run; design/security.md, SEC-522-1)
     if (typeof g.__SAGEBRUSH_ENGINE_SHA256__ === "string" && sha256Hex(b) !== g.__SAGEBRUSH_ENGINE_SHA256__) throw new Error("the engine fetched is not the one this page was built with");
