@@ -451,7 +451,7 @@ Still to do in step 1:
 
 ### Step 2 begun: live code items (October 12)
 
-A note with `kind: "code"` and `code` is Python, run as a notebook's cells
+A note with `code` is Python, run as a notebook's cells
 are (web/board/code.ts). The engine *is* the notebook component, loaded the
 first time a board has code. A notebook kept out of sight holds a cell for
 each code item, in reading order. Each cell's live output element is shown
@@ -475,9 +475,9 @@ the boxes whose tops lie above the middle of the row's shortest box.
   then what reads it does. ▶ on an item runs it again. Deleting an item
   removes its definitions, and moving one reruns what now sees a different
   definition.
-- **Editing.** Double-clicking a code item opens its code, in any mode, not
-  only Edit. Shift+Enter (or Run) saves and runs it. *Add Python code* in
-  the menu adds one at the center of the view.
+- **Editing.** In Edit, double-clicking a code item opens its editor.
+  Shift+Enter (or Run) saves and runs it. The toolbar's Code adds one at
+  the center of the view.
 - **Layout.** An item grows to hold its output: its height is measured with
   a copy of the output, again as the output changes, at most once a frame.
   The board keeps every element whose item shows the same, now mounted as
@@ -585,10 +585,33 @@ groups its items:
 - pages and Tidy;
 - printing and saving.
 
+**One kind of item** (October 13, William's design). Every note has the
+same optional parts, shown in this order and edited in it:
+- title;
+- text (Markdown);
+- code, with its output under it;
+- detail (shown when zoomed in);
+- link.
+
+A note with `code` is a code item, whatever else it has. `kind: "code"`
+is gone; documents that say it still open, as notes with code. The editor
+shows the parts a note has, and the others as small "+ Code", "+ Detail"
+and "+ Link" buttons, so a plain note's editor stays plain. Code left empty
+makes it a plain note again. The code is written in the notebook's editor,
+its highlighted code under a clear textarea, once the notebook is loaded.
+
+**Hiding code.** `hideCode: true` shows a code item's output without its
+code. The editor has a switch for it, and `{ }` in the item's head toggles
+it:
+- in Edit it changes the board, and is undoable;
+- outside Edit it shows or hides the code for this reader only, without
+  changing the document.
+
+Printing leaves out ▶ and `{ }`. test-code.mjs checks all of this (50 checks).
+
 ## Open questions
 
-- The editor for code items: a plain text area in a panel for now (Tab
-  indents, Shift+Enter runs); in place, with completion, as the notebook's?
+- Completion in the board's code editor, as the notebook's.
 - Whether outputs should be saved in the document (as .ipynb does), so a
   board opens with them and an exported file shows them.
 - Sync in cocalc-ai: through its own collaborative documents or through the

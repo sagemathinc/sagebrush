@@ -113,7 +113,8 @@ export async function printSheets(board: Board, sheets: Sheet[], o: PrintOptions
 #board-print .pr-caption p { margin: 0 0 4px; }
 #board-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 #board-print .board-item:not(.board-shape-subroutine) { box-shadow: none; }
-#board-print .board-detail { opacity: 1; }`;
+#board-print .board-detail { opacity: 1; }
+#board-print .board-code-run, #board-print .board-code-toggle { display: none; }`;
   root.append(style);
   for (const s of sheets) {
     const sheet = document.createElement("section");

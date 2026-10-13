@@ -8,16 +8,20 @@
 import type { Item, Edge } from "./board";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
 
+// Every note has the same optional parts, shown (and edited) in this order:
+// its title, its text, its code with the code's output, its detail, its link.
 export interface DocNote {
   id: string;
-  /** "code": a code item, Python run on the board's interpreter (reactive, as
-   * a notebook's cells: web/board/code.ts), its output under it */
-  kind?: "note" | "code";
-  /** a code item's code */
-  code?: string;
+  kind?: "note";
   title?: string;
   /** Markdown with math ($...$), shown at every zoom */
   text?: string;
+  /** Python, run on the board's interpreter (reactive, as a notebook's cells:
+   * web/board/code.ts), its output under it: a note with code is a code item.
+   * (Documents before October 13, 2026 also said `kind: "code"`.) */
+  code?: string;
+  /** show only the code's output, not the code */
+  hideCode?: boolean;
   /** Markdown shown only when zoomed in (semantic zoom) */
   detail?: string;
   /** a link: a source file (path#Lline), a paper, a page */
@@ -144,7 +148,9 @@ export function cleanDoc(d: any): BoardDoc {
       return strip({ id: String(n.id), kind: "group" as const, title: str(n.title), text: str(n.text), layout: one(n.layout, LAYOUTS), columns: num(n.columns), direction: one(n.direction, DIRS),
         children: (Array.isArray(n.children) ? n.children : []).map(node).filter((c: DocNode | null): c is DocNode => !!c), color: safeColor(n.color), x: num(n.x), y: num(n.y) });
     }
-    return strip({ id: String(n.id), kind: one(n.kind, ["note", "code"] as const), code: str(n.code), title: str(n.title), text: str(n.text), detail: str(n.detail), ref: str(n.ref),
+    // (kind "code": the code items of documents before every note could have code)
+    const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
+    return strip({ id: String(n.id), title: str(n.title), text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
       color: safeColor(n.color), shape: SHAPES.has(n.shape) ? (n.shape as NoteShape) : undefined, fit: n.fit === true ? true : undefined,
       x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
   };
@@ -176,18 +182,18 @@ export type Measure = ((n: DocNote, w: number) => number) & { width?: (n: DocNot
 function noteSize(n: DocNote, measure?: Measure): Box {
   if (n.w && n.h && !n.fit) return { w: n.w, h: n.h };
   // (code items: wider, for their output)
-  const most = n.w ?? (n.kind === "code" ? 440 : 260);
+  const most = n.w ?? (n.code !== undefined ? 440 : 260);
   const longest = Math.max(...[n.title ?? "", ...(n.text ?? "").split("\n")].map((l) => l.length));
   const w = !n.fit ? most : Math.min(most, Math.max(60, Math.ceil(measure?.width ? measure.width(n, most) + 2 : longest * 7.4 + (n.shape && n.shape !== "rect" ? 50 : 26))));
   if (measure) return { w, h: n.h ?? Math.max(60, Math.ceil(measure(n, w)) + 2) };
   const chars = (n.text ?? "").length;
   const lines = Math.ceil(chars / Math.max(10, (w - 24) / 7.2)) + (n.text?.match(/\n/g)?.length ?? 0);
-  const code = n.kind === "code" ? 34 + 18 * (n.code ?? "").split("\n").length : 0;
+  const code = n.code === undefined ? 0 : 34 + (n.hideCode ? 0 : 18 * n.code.split("\n").length);
   const h = n.h ?? Math.max(70, 24 + (n.title ? 24 : 0) + lines * 20 + (n.detail ? 26 : 0) + (n.ref ? 22 : 0) + code);
   return { w, h };
 }
 
-const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.kind === "code"));
+const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.code !== undefined));
 
 /**
  * A board's code items in reading order, which is the order they run in
@@ -306,7 +312,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         place(c, x + p.x, y + p.y, depth + 1, n.id);
       }
     } else {
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.kind === "code" ? { code: n.code ?? "" } : {}) });
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}) } : {}) });
     }
   };
   for (const n of roots) {

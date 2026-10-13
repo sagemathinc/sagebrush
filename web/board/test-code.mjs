@@ -90,14 +90,14 @@ try {
   const dbl = () => ev(`(() => { const el = document.querySelector('[data-code=start]'); const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: r.left + 20, clientY: r.top + 10 })); return 1; })()`);
   await dbl();
   await sleep(600);
-  check(await ev("!document.querySelector('.board-code-editor')"), "outside Edit, a double-click does not open the code editor");
+  check(await ev("!document.querySelector('.board-editor')"), "outside Edit, a double-click does not open the code editor");
   await ev("window.sagebrush.board.editing(true)");
   await show("start");
   await dbl();
-  check(await until("!!document.querySelector('.board-code-editor .be-code')", 5000), "in Edit, a double-click opens the code editor");
-  await ev(`(() => { const ta = document.querySelector('.board-code-editor .be-code'); ta.value = 'start = 6'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
+  check(await until("!!document.querySelector('.board-editor .be-code')", 5000), "in Edit, a double-click opens the code editor");
+  await ev(`(() => { const ta = document.querySelector('.board-editor .be-code'); ta.value = 'start = 6'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
   check(await until("window.sagebrush.board.outputs().then((os) => /^8 steps, as high as 16/.test(os.find((x) => x.id === 'path').output))", 30000), "Shift+Enter in the editor ran the change");
-  check(await ev("!document.querySelector('.board-code-editor')"), "the editor closed");
+  check(await ev("!document.querySelector('.board-editor')"), "the editor closed");
   check(await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start').code") === "start = 6", "the document has the new code");
   // ▶ runs an item
   await setCode("record", "import time\nprint(time.time())");
@@ -121,9 +121,52 @@ try {
   // a new item from the menu, at the view's center
   await ev("window.sagebrush.board.editing(true)");
   await ev("document.querySelector('.board-toolbar [data-tool=code]').click(), 1");
-  check(await until("!!document.querySelector('.board-code-editor .be-code')", 5000), "Add Python code opens the editor");
-  await ev(`(() => { const ta = document.querySelector('.board-code-editor .be-code'); ta.value = 'start = 7'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
+  check(await until("!!document.querySelector('.board-editor .be-code')", 5000), "Add Python code opens the editor");
+  await ev(`(() => { const ta = document.querySelector('.board-editor .be-code'); ta.value = 'start = 7'; ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 5 && /^16 steps, as high as 52/.test(os.find((x) => x.id === 'path').output))", 30000), "the new item defines start: path runs again");
+  // one kind of item: any note can have code; its parts are edited in the order they show
+  await ev("window.sagebrush.board.edit((d) => { d.nodes.push({ id: 'plain', title: 'Square', text: 'A note', x: 3000, y: 0 }); })");
+  await show("plain");
+  const dblAt = (id) => ev(`(() => { const r = window.board.clientRect(${JSON.stringify(id)}); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()`);
+  await dblAt("plain");
+  check(await until("!!document.querySelector('.board-editor .be-title')", 5000), "a note's editor opens");
+  const partNames = await ev("[...document.querySelectorAll('.board-editor .be-title, .board-editor .be-text, .board-editor .be-codepart, .board-editor .be-detail, .board-editor .be-ref, .be-add button')].filter((e) => e.offsetParent).map((e) => e.tagName === 'BUTTON' ? e.textContent : e.classList[0])");
+  check(JSON.stringify(partNames) === JSON.stringify(["be-title", "be-text", "+ Code", "+ Detail", "+ Link"]), "a plain note's editor: its title and text, then + Code, + Detail, + Link: " + JSON.stringify(partNames));
+  await ev("[...document.querySelectorAll('.be-add button')].find((b) => b.textContent === '+ Code').click(), 1");
+  check(await ev("document.activeElement?.classList.contains('be-code') && document.querySelector('.board-editor .be-done').textContent === 'Run'"), "+ Code: the code is being written, and Done is Run");
+  check(await ev("!!document.querySelector('.board-editor .be-codebox.sbnb .ed pre')"), "code is written in the notebook's editor");
+  await ev(`(() => { const ta = document.querySelector('.board-editor .be-code'); ta.value = 'sq = 12 ** 2\\nprint(sq)'; ta.dispatchEvent(new Event('input')); return 1; })()`);
+  check(await ev("document.querySelector('.board-editor .be-codebox pre').textContent.startsWith('sq = 12') && !!document.querySelector('.board-editor .be-codebox pre span')"), "highlighted as it is typed");
+  await ev(`(() => { document.querySelector('.board-editor .be-code').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((x) => x.id === 'plain')?.output === '144\\n')", 30000), "the note's code ran");
+  const pn = await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'plain')");
+  check(pn.title === "Square" && pn.text === "A note" && pn.code === "sq = 12 ** 2\nprint(sq)" && pn.kind === undefined, "the note kept its title and text, and has the code: " + JSON.stringify(pn));
+  await show("plain");
+  const shown = () => ev("[...document.querySelector('[data-code=plain]').children].map((e) => ['board-code-head', 'board-text', 'board-code-src', 'board-code-out'].find((c) => e.classList.contains(c)) ?? e.className).join()");
+  check(await until("document.querySelector('[data-code=plain] .board-code-out')?.textContent === '144\\n'", 5000) && (await shown()) === "board-code-head,board-text,board-code-src,board-code-out", "shown in order: title, text, code, output: " + (await shown()));
+  // { } hides the code (its output stays): in Edit, in the document
+  await ev("document.querySelector('[data-code=plain] .board-code-toggle').click(), 1");
+  check(await until("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'plain').hideCode === true", 5000), "in Edit, { } hides the code, in the document");
+  await show("plain");
+  check(await until("document.querySelector('[data-code=plain] .board-code-out')?.textContent === '144\\n'", 5000) && (await shown()) === "board-code-head,board-text,board-code-out", "hidden: the output shows, not the code: " + (await shown()));
+  // outside Edit, { } shows it to this reader only
+  await ev("window.sagebrush.board.editing(false)");
+  await show("plain");
+  await ev("document.querySelector('[data-code=plain] .board-code-toggle').click(), 1");
+  check(await until("!!document.querySelector('[data-code=plain] .board-code-src')", 5000), "outside Edit, { } shows the code");
+  check((await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'plain').hideCode")) === true, "...to this reader: the document still hides it");
+  await ev("document.querySelector('[data-code=plain] .board-code-toggle').click(), 1");
+  check(await until("!document.querySelector('[data-code=plain] .board-code-src') && !!document.querySelector('[data-code=plain] .board-code-out')", 5000), "{ } again hides it");
+  // the editor's switch; and code left empty: a plain note again
+  await ev("window.sagebrush.board.editing(true)");
+  await show("plain");
+  await dblAt("plain");
+  await until("!!document.querySelector('.board-editor .be-hidecode')", 5000);
+  check(await ev("document.querySelector('.board-editor .be-hidecode').checked && !document.querySelector('.board-editor .be-codepart').hidden"), "its editor says the code is hidden");
+  await ev(`(() => { const ta = document.querySelector('.board-editor .be-code'); ta.value = ''; document.querySelector('.board-editor .be-done').click(); return 1; })()`);
+  check(await until("(() => { const n = window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'plain'); return n.code === undefined && n.hideCode === undefined && n.title === 'Square' && n.text === 'A note'; })()", 5000), "code left empty: a plain note again");
+  check(await until("window.sagebrush.board.outputs().then((os) => !os.some((x) => x.id === 'plain'))", 10000), "...no longer a code item");
+  await ev("window.sagebrush.board.edit((d) => { d.nodes = d.nodes.filter((x) => x.id !== 'plain'); })");
   // run() for agents: everything, then the outputs
   const all = await ev("window.sagebrush.board.run()");
   check(all.length === 5 && all.every((x) => x.state === "" || x.id === "record"), "run(): " + JSON.stringify(all.map((x) => [x.id, x.state])));
