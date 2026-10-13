@@ -132,6 +132,10 @@ try {
   check(await until("!!document.querySelector('.board-editor .be-title')", 5000), "a note's editor opens");
   const partNames = await ev("[...document.querySelectorAll('.board-editor .be-title, .board-editor .be-text, .board-editor .be-codepart, .board-editor .be-detail, .board-editor .be-ref, .be-add button')].filter((e) => e.offsetParent).map((e) => e.tagName === 'BUTTON' ? e.textContent : e.classList[0])");
   check(JSON.stringify(partNames) === JSON.stringify(["be-title", "be-text", "+ Image", "+ Code", "+ Detail", "+ Link"]), "a plain note's editor: its title and text, then + Image, + Code, + Detail, + Link: " + JSON.stringify(partNames));
+  // its text is Markdown, highlighted as in the notebook (headings, math, emphasis), under a clear textarea
+  await ev(`(() => { const ta = document.querySelector('.board-editor .be-text'); ta.value = '## Head\\n$x^2$ and **bold**'; ta.dispatchEvent(new Event('input')); return 1; })()`);
+  check(await ev("(() => { const ta = document.querySelector('.board-editor .be-text'), pre = ta.parentElement.querySelector('pre'); return ta.parentElement.className === 'be-md' && !!pre.querySelector('.hf') && !!pre.querySelector('.hd') && !!pre.querySelector('.hk') && pre.textContent === ta.value + '\\n' && getComputedStyle(ta).color === 'rgba(0, 0, 0, 0)'; })()"), "a note's text is highlighted Markdown");
+  await ev("(() => { const ta = document.querySelector('.board-editor .be-text'); ta.value = 'A note'; ta.dispatchEvent(new Event('input')); return 1; })()");
   await ev("[...document.querySelectorAll('.be-add button')].find((b) => b.textContent === '+ Code').click(), 1");
   check(await ev("document.activeElement?.classList.contains('be-code') && document.querySelector('.board-editor .be-done').textContent === 'Run'"), "+ Code: the code is being written, and Done is Run");
   check(await ev("!!document.querySelector('.board-editor .be-codebox.sbnb .ed pre')"), "code is written in the notebook's editor");
