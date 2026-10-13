@@ -92,7 +92,16 @@ export interface BoardPage {
   steps?: DocStep[];
 }
 
+/** What a board document says it is (written first in every document):
+ * `{ format: "sagebrush-board", version: 1, ... }`.  A document without it
+ * is taken as version 1 (boards written before October 13, 2026). */
+export const FORMAT = "sagebrush-board";
+export const VERSION = 1;
+
 export interface BoardDoc {
+  format?: typeof FORMAT;
+  /** the format's version: 1 */
+  version?: number;
   title?: string;
   /** the language of its code items: Python (the default) or Sage (one per board) */
   mode?: "python" | "sage";
@@ -185,10 +194,19 @@ export function cleanDoc(d: any): BoardDoc {
       hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
     steps: Array.isArray(p?.steps) ? p.steps.filter((t: any) => t && (typeof t.focus === "string" || Array.isArray(t.focus))).map((t: any) => strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) })) : undefined,
   });
-  const out: any = strip({ ...page(d), title: str(d?.title), mode: d?.mode === "sage" ? "sage" : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
+  const out: any = strip({ format: FORMAT, version: VERSION, ...page(d), title: str(d?.title), mode: d?.mode === "sage" ? "sage" : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
   delete out.id;
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
   return out as BoardDoc;
+}
+
+/** Why this cannot be shown as a board of this format (another format, or a
+ * later version than this page reads), or null. */
+export function formatError(d: any): string | null {
+  if (d?.format !== undefined && d.format !== FORMAT) return `not a Sagebrush board: its format is "${String(d.format).slice(0, 40)}"`;
+  if (d?.version !== undefined && !(Number.isInteger(d.version) && d.version >= 1)) return "not a Sagebrush board: its version is not a number";
+  if (d?.version > VERSION) return `this board is in version ${d.version} of the format, from a later Sagebrush; this page reads version ${VERSION}: reload it, or update the app`;
+  return null;
 }
 
 export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
