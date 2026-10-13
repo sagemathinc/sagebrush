@@ -233,6 +233,7 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
  * @param {import("./types").Kernel} [opts.kernel] runs code (none: cells cannot run)
  * @param {"python"|"sage"|"magma"} [opts.mode]
  * @param {string} [opts.assetBase] where sagebrush-math.js and sagebrush-viewer3d.js are (default: the page)
+ * @param {(name: string) => string | undefined} [opts.assetUrl] the URL of one of them, if not under assetBase (a blob: in a downloaded file)
  * @param {boolean} [opts.readOnly]
  * @returns {import("./types").Notebook}
  */
@@ -241,7 +242,7 @@ export function createNotebook(root, opts = {}) {
   installPlotTip();
   // the interpreter; a page may give each notebook its own (setKernel)
   let kernel = opts.kernel ?? null;
-  const asset = (name) => new URL(name, new URL(opts.assetBase ?? "./", location.href)).href;
+  const asset = (name) => opts.assetUrl?.(name) ?? new URL(name, new URL(opts.assetBase ?? "./", location.href)).href;
   let mode = opts.mode ?? "python";
   let meta = {}; // the document's other fields (name, ...), kept as they are
   let execCount = 0;
