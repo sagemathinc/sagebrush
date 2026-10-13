@@ -277,6 +277,29 @@ try {
     const docOf = () => ev("JSON.parse(JSON.stringify(window.sagebrush.board.snapshot().doc))");
     await ev("localStorage.clear(), window.sagebrush.board.editing(true)");
     check(await ev("document.getElementById('revert').hidden"), "Revert is shown for a board not edited (its format and version, added, are no edit)");
+    // few items in view: their text shows down to zoom 0.35 (William's I8); fewer than that, boxes
+    await ev("(() => { const c = window.board.camera; window.board.setCamera({ ...c, z: 0.42 }); window.board.render(); return 1; })()");
+    check(await ev("getComputedStyle(document.querySelector('.board-world')).visibility === 'visible' && document.querySelectorAll('.board-note').length > 5"), "at zoom 0.42, with few items in view, their text shows");
+    await ev("(() => { const c = window.board.camera; window.board.setCamera({ ...c, z: 0.3 }); window.board.render(); return 1; })()");
+    check(await ev("getComputedStyle(document.querySelector('.board-world')).visibility === 'hidden'"), "at zoom 0.3, boxes on the canvas");
+    // the board's title: in Edit, a click renames it where it is (William's I7)
+    // (until here throws on a timeout: as a yes or no)
+    const waits = (expr, ms) => until(expr, ms).then(() => true, () => false);
+    const t0 = (await docOf()).title;
+    const tb = await ev("(() => { const r = document.getElementById('title').getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()");
+    await mouse("mousePressed", tb.x, tb.y); await mouse("mouseReleased", tb.x, tb.y, { buttons: 0 });
+    check(await waits("document.activeElement === document.querySelector('#title input')", 2000), "in Edit, a click on the title renames it there");
+    await ev("document.activeElement.select(), 1");
+    await send("Input.insertText", { text: "Renamed board" });
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    check(await waits("window.sagebrush.board.snapshot().doc.title === 'Renamed board' && document.getElementById('title').textContent === 'Renamed board'", 3000), "Enter keeps the new title: " + (await docOf()).title);
+    await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1");
+    check(await waits(`window.sagebrush.board.snapshot().doc.title === ${JSON.stringify(t0)}`, 3000), "undo takes it back");
+    await mouse("mousePressed", tb.x, tb.y); await mouse("mouseReleased", tb.x, tb.y, { buttons: 0 });
+    await until("!!document.querySelector('#title input')", 2000);
+    await send("Input.insertText", { text: "Not this" });
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    check(await waits(`!document.querySelector('#title input') && window.sagebrush.board.snapshot().doc.title === ${JSON.stringify(t0)}`, 3000), "Esc keeps the title as it was");
     // show one group's notes, large enough to hit
     await ev("window.board.focus(['nb'], true)");
     await sleep(200);

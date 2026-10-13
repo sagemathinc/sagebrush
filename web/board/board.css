@@ -37,6 +37,11 @@
 #top:has(.menu:not([hidden])) { z-index: 6; }
 #home { color: #2a6f2f; font-weight: 600; text-decoration: none; }
 #title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+/* in Edit, the title is renamed by a click (an untitled board says so) */
+.sbb-editing #title { pointer-events: auto; cursor: text; }
+.sbb-editing #title:hover { text-decoration: underline dotted rgba(0, 0, 0, .35); }
+.sbb-editing #title:empty::before { content: "Untitled board"; color: #8a8f99; font-weight: 400; }
+#title input { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid rgba(0, 0, 0, .25); border-radius: 5px; padding: 1px 6px; background: #fff; }
 button { font: inherit; border: 1px solid rgba(0, 0, 0, .18); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 button:disabled { opacity: .4; cursor: default; }
 #hint { color: #667; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
