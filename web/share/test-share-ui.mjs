@@ -2,6 +2,9 @@
 // notebook page (File > Share…), open the link, and run it, against the
 // share API in Miniflare (web/share/serve-dev.mjs) and web/dist.
 //   bun web/build.ts && node web/share/test-share-ui.mjs
+// or against a deployment with the dev sign-in (the tampering check needs
+// the local database, so it is skipped):
+//   SHARE_URL=https://dev.sagebrush.space DEV_AUTH_TOKEN=... node web/share/test-share-ui.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +12,11 @@ import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
 
 const A = "11111111-1111-4111-8111-111111111111";
-const dev = await startDev({ sitePort: 18790, filesPort: 18791, limits: { [A]: { tier: "dev", storage_bytes: 1e8, max_file_bytes: 1e7, private_links: false } } });
+const REMOTE = process.env.SHARE_URL;
+const dev = REMOTE
+  ? { site: REMOTE.replace(/\/$/, ""), log: { files: [] }, close: async () => {} }
+  : await startDev({ sitePort: 18790, filesPort: 18791, limits: { [A]: { tier: "dev", storage_bytes: 1e8, max_file_bytes: 1e7, private_links: false } } });
+const TOKEN = REMOTE ? process.env.DEV_AUTH_TOKEN : "dev-token";
 const profile = mkdtempSync(join(tmpdir(), "sb-share-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9341", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
@@ -49,7 +56,7 @@ try {
   ok(await ev("!document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "signed out: Sign in with CoCalc");
   ok((await ev("document.querySelector('#signin').getAttribute('href')")).startsWith("/auth/login?return=%2F%3Fshare"), "sign-in returns to the page with ?share");
   await ev("document.querySelector('#sharedlg').close()");
-  const signed = await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ token: 'dev-token', account_id: '${A}' }) }).then((r) => r.status)`);
+  const signed = await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ token: ${JSON.stringify(TOKEN)}, account_id: '${A}' }) }).then((r) => r.status)`);
   ok(signed === 200, "dev sign-in");
 
   await ev("document.querySelector('#sharemenu').click()");
@@ -72,28 +79,30 @@ try {
   ok(await ev("!!document.querySelector('#nb .cell .stale, #nb .cell.stale')"), "marked stale: computed elsewhere");
   ok(/Nothing has run yet/.test(await ev("document.querySelector('#status').textContent")), "the page says nothing has run");
   await sleep(1500);
-  ok(dev.log.files.length === 1, "only the notebook was fetched from the files domain: " + JSON.stringify(dev.log.files));
+  if (!REMOTE) ok(dev.log.files.length === 1, "only the notebook was fetched from the files domain: " + JSON.stringify(dev.log.files));
 
   // Run all: the data file is fetched when the code reads it
   await ev("document.querySelector('#runall').click()");
   await until("(() => { const c = document.querySelector('#nb .cell'); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent) && !c.classList.contains('running') && !c.classList.contains('queued') && !document.querySelector('#nb .cell .stale, #nb .cell.stale'); })()", 60000);
   const ran = await ev("document.querySelector('#nb .cell .out').textContent");
   ok(ran.includes("x,y;1,2;3,4"), "Run all runs it here, reading the mounted file: " + ran.trim());
-  ok(dev.log.files.length === 2, "the data file was fetched when read: " + JSON.stringify(dev.log.files));
+  if (!REMOTE) ok(dev.log.files.length === 2, "the data file was fetched when read: " + JSON.stringify(dev.log.files));
 
-  // a file whose bytes don't match its hash is refused
-  const sha = await ev("window.shared.c.manifest.files.find((f) => f.path === 'data/points.csv').sha256");
-  const { key } = await dev.db.prepare("SELECT key FROM holdings WHERE sha256 = ?1").bind(sha).first();
-  await dev.bucket.put(key, "x,y\n6,6\n6,6\n");
-  // (bypassing this browser's cache, which keeps the good copy: the names are hashes)
-  await send("Network.enable");
-  await send("Network.clearBrowserCache");
-  await send("Page.navigate", { url: link });
-  await until("document.querySelectorAll('#nb .cell').length >= 1");
-  await ev("document.querySelector('#runall').click()");
-  await until("(() => { const c = document.querySelector('#nb .cell'); return !c.classList.contains('running') && !c.classList.contains('queued') && !document.querySelector('#nb .cell .stale, #nb .cell.stale'); })()", 60000);
-  const bad = await ev("document.querySelector('#nb .cell .out').textContent");
-  ok(/EIO/.test(bad) && /SHA-256/.test(bad) && !bad.includes("6,6"), "a file that is not the one shared is refused: " + bad.trim().split("\n").at(-1));
+  if (!REMOTE) {
+    // a file whose bytes don't match its hash is refused
+    const sha = await ev("window.shared.c.manifest.files.find((f) => f.path === 'data/points.csv').sha256");
+    const { key } = await dev.db.prepare("SELECT key FROM holdings WHERE sha256 = ?1").bind(sha).first();
+    await dev.bucket.put(key, "x,y\n6,6\n6,6\n");
+    // (bypassing this browser's cache, which keeps the good copy: the names are hashes)
+    await send("Network.enable");
+    await send("Network.clearBrowserCache");
+    await send("Page.navigate", { url: link });
+    await until("document.querySelectorAll('#nb .cell').length >= 1");
+    await ev("document.querySelector('#runall').click()");
+    await until("(() => { const c = document.querySelector('#nb .cell'); return !c.classList.contains('running') && !c.classList.contains('queued') && !document.querySelector('#nb .cell .stale, #nb .cell.stale'); })()", 60000);
+    const bad = await ev("document.querySelector('#nb .cell .out').textContent");
+    ok(/EIO/.test(bad) && /SHA-256/.test(bad) && !bad.includes("6,6"), "a file that is not the one shared is refused: " + bad.trim().split("\n").at(-1));
+  }
 
   // deleted by its owner: gone
   const id = link.split("/s/")[1];
@@ -109,7 +118,8 @@ try {
 } finally {
   chrome.kill();
   await dev.close();
-  rmSync(profile, { recursive: true, force: true });
+  await sleep(300);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

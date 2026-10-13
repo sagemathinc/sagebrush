@@ -22,7 +22,7 @@ export default defineConfig({
         ASSETS: bindings.assets(),
         ...(dev
           ? {
-              SHARE_DB: bindings.d1({ name: "sagebrush-share-dev" }),
+              SHARE_DB: bindings.d1({ name: "sagebrush-share-dev", id: "94675861-6f72-4cbc-a419-b28647eb9e9e" }),
               SHARE_BUCKET: bindings.r2({ name: "sagebrush-share-dev" }),
               FILES_ORIGIN: bindings.text("https://files.cocalcusercontent.dev"),
               SHARE_DEV: bindings.text("1"),
