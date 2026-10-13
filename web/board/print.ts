@@ -3,7 +3,7 @@
 // selectable, their math KaTeX's, both vector in a PDF); groups and edges,
 // which the screen draws on a canvas, are SVG here, so nothing is a bitmap.
 
-import { farLabel, type Board, type Item, type Edge } from "./board";
+import { farLabel, plainTitle, type Board, type Item, type Edge } from "./board";
 
 export interface Sheet {
   items: Item[];
@@ -169,8 +169,8 @@ export async function printSheets(board: Board, sheets: Sheet[], o: PrintOptions
         const parents = new Set(shown.filter((it) => it.kind === "group").map((it) => it.parent).filter(Boolean));
         for (const g of shown.filter((it) => it.kind === "group" && it.title)) {
           if (g.w * k < 100 || (g.w * k > 1000 && parents.has(g.id))) continue;
-          const fs = Math.min(14 / k, (g.w / (g.title!.length * 0.6)));
-          if (fs * k >= 7) out.push(`<text x="${g.x + 6 / k}" y="${g.y + fs * 1.1}" font-size="${fs}" font-weight="600" fill="#1d241a" stroke="#fafaf7" stroke-width="${3 / k}" paint-order="stroke">${esc(g.title!)}</text>`);
+          const fs = Math.min(14 / k, (g.w / (plainTitle(g.title!).length * 0.6)));
+          if (fs * k >= 7) out.push(`<text x="${g.x + 6 / k}" y="${g.y + fs * 1.1}" font-size="${fs}" font-weight="600" fill="#1d241a" stroke="#fafaf7" stroke-width="${3 / k}" paint-order="stroke">${esc(plainTitle(g.title!))}</text>`);
         }
         world.insertAdjacentHTML("beforeend", `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${v.x0}px;top:${v.y0}px;overflow:visible" width="${v.x1 - v.x0}" height="${v.y1 - v.y0}" viewBox="${v.x0} ${v.y0} ${v.x1 - v.x0} ${v.y1 - v.y0}" font-family="system-ui, sans-serif">${out.join("")}</svg>`);
       }

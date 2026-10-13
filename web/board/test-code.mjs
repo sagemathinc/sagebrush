@@ -134,11 +134,13 @@ try {
   await dblAt("plain");
   check(await until("!!document.querySelector('.board-editing .be-title')", 5000), "a note is being edited where it is");
   const partNames = await ev("[...document.querySelectorAll('.board-editing .be-title, .board-editing .be-text, .board-editing .be-codepart, .board-editing .be-detail, .board-editing .be-ref, .ip-bar > button')].filter((e) => e.offsetParent).map((e) => e.classList[0])");
-  check(JSON.stringify(partNames) === JSON.stringify(["be-title", "be-text", "ip-image", "ip-code", "ip-detail", "ip-link", "ip-color", "ip-delete"]), "a plain note: its title and text, and a toolbar with + image, + code, + detail, + link, color and delete: " + JSON.stringify(partNames));
+  check(JSON.stringify(partNames) === JSON.stringify(["be-title", "mb", "ip-image", "ip-code", "ip-detail", "ip-link", "ip-color", "ip-delete"]), "a plain note: its title and text, and a toolbar with + image, + code, + detail, + link, color and delete: " + JSON.stringify(partNames));
   // its text is Markdown, highlighted as in the notebook (headings, math, emphasis), under a clear textarea
-  await ev(`(() => { const ta = document.querySelector('.board-editing .be-text'); ta.value = '## Head\\n$x^2$ and **bold**'; ta.dispatchEvent(new Event('input')); return 1; })()`);
-  check(await ev("(() => { const ta = document.querySelector('.board-editing .be-text'), pre = ta.parentElement.querySelector('pre'); return ta.parentElement.className === 'be-md' && !!pre.querySelector('.hf') && !!pre.querySelector('.hd') && !!pre.querySelector('.hk') && pre.textContent === ta.value + '\\n' && getComputedStyle(ta).color === 'rgba(0, 0, 0, 0)'; })()"), "a note's text is highlighted Markdown");
-  await ev("(() => { const ta = document.querySelector('.board-editing .be-text'); ta.value = 'A note'; ta.dispatchEvent(new Event('input')); return 1; })()");
+  // (its text is blocks: a click on one writes in it)
+  await ev("document.querySelector('.board-editing .mb-block').click(), 1");
+  await ev(`(() => { const ta = document.querySelector('.board-editing .mb-edit textarea'); ta.value = '## Head\\n$x^2$ and **bold**'; ta.dispatchEvent(new Event('input')); return 1; })()`);
+  check(await ev("(() => { const ta = document.querySelector('.board-editing .mb-edit textarea'), pre = ta.parentElement.querySelector('pre'); return ta.parentElement.classList.contains('be-md') && !!pre.querySelector('.hf') && !!pre.querySelector('.hd') && !!pre.querySelector('.hk') && pre.textContent === ta.value + '\\n' && getComputedStyle(ta).color === 'rgba(0, 0, 0, 0)'; })()"), "a note's text is highlighted Markdown");
+  await ev("(() => { const ta = document.querySelector('.board-editing .mb-edit textarea'); ta.value = 'A note'; ta.dispatchEvent(new Event('input')); return 1; })()");
   await ev("document.querySelector('.ip-bar .ip-code').click(), 1");
   check(await ev("document.activeElement?.classList.contains('be-code') && !document.querySelector('.ip-bar .ip-run').hidden && document.querySelector('.ip-bar .ip-code').hidden"), "+ code: the code is being written, and the toolbar has run instead of + code");
   check(await ev("!!document.querySelector('.board-editing .be-codebox pre')"), "code is written over its highlighted copy");

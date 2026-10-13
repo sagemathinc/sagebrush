@@ -664,8 +664,43 @@ note) edits an item where it is (web/board/inplace.ts):
 - Keys and pastes in a field are the field's: no shortcut of the board's
   or the tour's sees them.
 
-web/board/test-inplace.mjs (57 checks) does all of this with the mouse and
+web/board/test-inplace.mjs (58 checks) does all of this with the mouse and
 keyboard; test-mobile.mjs with touch, the keyboard up.
+
+**The text as blocks** (October 13, web/board/blocks.ts). An item's text,
+being edited, is a list of blocks, as in Notion, without contenteditable:
+paragraphs, headings, list items, quotes, display math and fenced code.
+Each is shown rendered (the board's safe Markdown renderer, and KaTeX)
+until it is clicked; then it is its own Markdown, in a clear textarea over
+its highlighted copy, where it was. Blocks are laid out exactly as the
+whole text is shown, so nothing moves when editing starts, and a
+double-click lands in the block, at the place, it was on.
+- **Enter** at the end of a block starts another (after a list item, the
+  next item; Enter on an empty item ends the list); Shift+Enter, or Enter
+  elsewhere, is a new line. In fenced code or display math, Enter is a new
+  line until it is closed.
+- **Backspace** at the start joins a block to the one before (its marker
+  dropped); in the first block it takes the marker off (a heading, an item
+  or a quote becomes a paragraph). **Delete** at the end joins the next.
+- **The arrows** cross from block to block, keeping the caret's column
+  (found from the highlighted copy's line boxes).
+- **What a block is follows its Markdown:** "# " at its start makes it a
+  heading as it is typed (its field grows to the heading's size).
+- **A paste is text**, never HTML; text with blank lines becomes several
+  blocks once the block is left.
+- **The Markdown stays the document:** blocks are cut from it with the space
+  between them and joined back exactly (a text left unchanged comes back
+  byte for byte).
+
+It takes the Markdown renderer and the typesetter from its host and knows
+nothing of the board, so the notebook's Markdown cells can use it.
+web/board/test-blocks.mjs (38 checks) drives it with the keyboard;
+test-mobile.mjs taps from block to block.
+
+**Math in titles.** A title's `$...$` and `\(...\)` are typeset with
+KaTeX, as in Markdown; the title is built as text and math elements, never
+from markup. Far out, on the canvas and on printed group labels, a title's
+math is its TeX.
 
 ## Open questions
 
