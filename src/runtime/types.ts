@@ -3,7 +3,7 @@
 import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
-  isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked,
+  isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
@@ -85,7 +85,7 @@ getset(type, "__dict__", (c) => {
   const d = new PyDict();
   // (a builtin method leaves the type's dict as its receiver-checking form, so
   // vars(cls)[name](receiver, ...) cannot run it on a wrong receiver)
-  for (const [k, v] of c.$dict) dictSet(d, k, v !== null && typeof v === "function" && v.$owner !== undefined ? selfChecked(v, v.$owner) : v);
+  for (const [k, v] of c.$dict) dictSet(d, k, v !== null && typeof v === "function" && v.$owner !== undefined ? selfChecked(v) : v);
   // The class that first gives its instances a __dict__ shows the slot.
   if (c.$ctor !== null && c !== object && !c.$dict.has("__slots__") && !c.$dict.has("__dict__") && c.$bases.every((b: any) => b.$ctor === null || b === object || b.$jsBase !== null)) {
     dictSet(d, "__dict__", object.$dict.get("__dict__"));
@@ -242,7 +242,7 @@ method(superType, "__getattribute__", (s: PySuper, name: string) => {
   for (let i = mro.indexOf(s.cls) + 1; i < mro.length; i++) {
     const d = mro[i].$dict.get(name);
     if (d === undefined) continue;
-    if (typeof d === "function") return d.$pyfn === true && !(isType(s.obj) && start === s.obj) ? bindMethod(d, s.obj) : d;
+    if (typeof d === "function") return d.$pyfn === true && !(isType(s.obj) && start === s.obj) ? bindMethod(d, s.obj) : unboundFunction(d);
     const g = d !== null && typeof d === "object" ? lookupType(typeOf(d), "__get__") : undefined;
     if (g !== undefined) return g(d, isType(s.obj) && start === s.obj ? null : s.obj, start);
     return d;
@@ -310,7 +310,7 @@ getset(fnType, "__dict__", (f) => {
   return d;
 });
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
-method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f, f.$owner) : f, o)));
+method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f) : f, o)));
 method(fnType, "__call__", (f: any, ...a: any[]) => f(...a));
 
 const bfType = builtinType("builtin_function_or_method", [object], () => raise(T.TypeError, "cannot create 'builtin_function_or_method' instances"));
@@ -1970,6 +1970,7 @@ function unboxing(f: any): any {
   };
   pyfn(w, f.__name__, f.$sig ?? null);
   (w as any).$builtinMethod = true;
+  (w as any).$owner = f.$owner; // (the base type's: a str subclass's upper is str's, checked as str's)
   (w as any).__qualname__ = f.__qualname__;
   (w as any).$unboxing = true;
   return w;
@@ -1994,6 +1995,7 @@ hooks.primProxy = (base: PyType): PyType => {
       return f0(unbox(self), spec);
     }, "__format__");
     (fmtW as any).$builtinMethod = true;
+    (fmtW as any).$owner = int;
     (fmtW as any).$unboxing = true;
     d.set("__format__", fmtW);
   }

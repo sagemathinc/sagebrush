@@ -211,6 +211,30 @@ Built-in descriptors and methods now record their owning type (`GetSet.owner`,
 binding, and a direct call of what `vars(cls)` returns (the receiver-checking
 form). Normal attribute access and method calls are unchanged.
 
+Its re-review of 15bfb45 found that fix incomplete: three more ways to reach a
+built-in method unchecked, all high (none reached `Function`), fixed together:
+- **SEC-15B-1: a bound built-in method's `__func__`** was the raw method, so
+  `array("B").__imul__.__func__(bytes_subclass, 2)` rewrote an immutable
+  bytes object's storage.
+- **SEC-15B-2: keyword calls skipped the check.** The checking form's
+  keyword adapter called the raw method (and a custom adapter, such as
+  `SimpleNamespace.__init__`'s, was copied unchecked), so
+  `str.encode(opaque_object, encoding="utf-8")` ran.
+- **SEC-15B-3: class lookup used the class reached, not the method's owner.**
+  It checked only on types without instances of their own
+  (`ModuleType.__repr__` ran on anything), a str subclass's copies of str's
+  methods had no owner, and one wrapper was cached for whichever class was
+  reached first (`bool.bit_length(1)` then failed).
+
+The structural fix (`selfChecked` in src/runtime/object.ts): a built-in
+method has exactly one form Python may hold, made for its immutable owner and
+cached on it, which checks the receiver on every way of calling it:
+positionally, by keyword (`self=` included, once the arguments are bound),
+and through its own keyword adapter. Class lookup, a class's `__dict__`,
+`super()`, `function.__get__` and a bound method's `__func__` all give that
+form; the raw method runs only where the receiver is known (an instance's own
+attribute lookup), and is never handed to Python.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS
