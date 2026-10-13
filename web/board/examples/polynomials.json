@@ -1,0 +1,140 @@
+{
+ "title": "How do you solve polynomial equations over Q? A museum tour",
+ "mode": "sage",
+ "intro": "**A self-guided “museum tour” for math**, after Bianca Viray's talk. Press **→** for the tour; the code runs live in your browser.",
+ "layout": "graph",
+ "nodes": [
+  {
+   "id": "q",
+   "title": "How do you solve polynomial equations over $\\mathbb{Q}$?",
+   "text": "Find the **rational** solutions of $f(x_1, \\ldots, x_n) = 0$, with $f$ having rational coefficients.",
+   "color": "#f3e3b5",
+   "shape": "round",
+   "w": 360
+  },
+  {
+   "id": "one",
+   "kind": "group",
+   "title": "In one variable",
+   "layout": "column",
+   "color": "#e3eef8",
+   "children": [
+    {
+     "id": "roots",
+     "title": "Rational roots",
+     "text": "A rational root $p/q$ in lowest terms has $p \\mid a_0$ and $q \\mid a_n$: finitely many to try. Better: factor over $\\mathbb{Q}$.",
+     "code": "R.<x> = QQ[]\nf = 2*x^3 - 3*x^2 - 11*x + 6\nprint(f.factor())\nprint(f.roots())",
+     "w": 380
+    },
+    {
+     "id": "radicals",
+     "title": "...and the others?",
+     "text": "Galois: the roots can be written with radicals exactly when the Galois group is solvable. $x^5 - x - 1$ has group $S_5$ (5T5): no formula.",
+     "code": "R.<x> = QQ[]\nfor g in [x^3 - 2, x^5 - x - 1]:\n    print(g, '->', g.galois_group())",
+     "w": 380
+    }
+   ]
+  },
+  {
+   "id": "many",
+   "kind": "group",
+   "title": "In 2 or more variables",
+   "layout": "column",
+   "color": "#e3f1e6",
+   "children": [
+    {
+     "id": "conics",
+     "title": "Degree 2: conics",
+     "text": "Hasse–Minkowski: a conic has a rational point iff it has one over $\\mathbb{R}$ and over every $\\mathbb{Q}_p$. Then the lines through one point give them all:",
+     "code": "t = var('t')\nX, Y = (1 - t^2)/(1 + t^2), 2*t/(1 + t^2)   # on x^2 + y^2 = 1\npts = [(X(t=s), Y(t=s)) for s in [1/2, 2/3, 3/7]]\nprint(pts)\nprint([a^2 + b^2 for a, b in pts])",
+     "w": 400
+    },
+    {
+     "id": "cubics",
+     "title": "Degree 3: elliptic curves",
+     "text": "Mordell: the rational points form a finitely generated group. $y^2 = x^3 - 2x$ has rank 1: chords and tangents from one point give infinitely many.",
+     "code": "E = EllipticCurve([0, 0, 0, -2, 0])\nprint('rank', E.rank(), 'generator', E.gens())\nP = E.gens()[0]\nfor n in [2, 3]:\n    print(n, '*P =', n*P)",
+     "w": 400
+    },
+    {
+     "id": "higher",
+     "title": "Higher genus",
+     "text": "Faltings: a curve of genus $\\ge 2$ has only **finitely many** rational points. A search for small ones on $y^2 = x^5 - x + 1$ (each with $\\pm y$):",
+     "code": "pts = []\nfor d in range(1, 13):\n    for n in range(-40, 41):\n        if gcd(n, d) != 1:\n            continue\n        a = n/d\n        v = a^5 - a + 1\n        p, q = v.numerator(), v.denominator()\n        if p >= 0 and isqrt(p)^2 == p and isqrt(q)^2 == q:\n            pts.append((a, isqrt(p)/isqrt(q)))\nprint(pts)",
+     "w": 400
+    }
+   ]
+  },
+  {
+   "id": "together",
+   "title": "Everything together!",
+   "text": "Is there an **algorithm** that decides whether any polynomial equation has a rational solution? Over $\\mathbb{Z}$ there is none (Hilbert's 10th problem: Matiyasevich, 1970). Over $\\mathbb{Q}$ it is **open**. For surfaces the local–global principle can fail (the Brauer–Manin obstruction), and the search goes on.",
+   "color": "#f3e3b5",
+   "shape": "round",
+   "w": 420
+  }
+ ],
+ "edges": [
+  {
+   "from": "q",
+   "to": "one"
+  },
+  {
+   "from": "q",
+   "to": "many"
+  },
+  {
+   "from": "roots",
+   "to": "radicals",
+   "label": "harder"
+  },
+  {
+   "from": "conics",
+   "to": "cubics",
+   "label": "degree 3"
+  },
+  {
+   "from": "cubics",
+   "to": "higher",
+   "label": "genus ≥ 2"
+  },
+  {
+   "from": "one",
+   "to": "together"
+  },
+  {
+   "from": "many",
+   "to": "together"
+  }
+ ],
+ "steps": [
+  {
+   "focus": "q",
+   "say": "A museum tour: **→** moves on. Each box with code runs live in your browser (Sage), and you can change it: **Edit**, double-click a box, Shift+Enter."
+  },
+  {
+   "focus": "roots",
+   "say": "One variable, rational roots: finitely many candidates, and factoring over $\\mathbb{Q}$ finds them."
+  },
+  {
+   "focus": "radicals",
+   "say": "The other roots: is there a formula? Only if the Galois group is solvable. $S_5$ is not."
+  },
+  {
+   "focus": "conics",
+   "say": "Two variables, degree 2: the local–global principle holds, and one point gives them all."
+  },
+  {
+   "focus": "cubics",
+   "say": "Degree 3: a finitely generated group of points. Try another curve: change the coefficients."
+  },
+  {
+   "focus": "higher",
+   "say": "Genus 2 and up: finitely many points (Faltings), but finding them all is hard."
+  },
+  {
+   "focus": "together",
+   "say": "Everything together: over $\\mathbb{Q}$ we still don't know if an algorithm exists."
+  }
+ ]
+}
