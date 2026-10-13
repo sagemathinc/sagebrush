@@ -43,7 +43,11 @@ try {
     check(!/offline/i.test(await ev("document.querySelector('[data-sbb=html]').textContent")), `${doc}: the menu says the file works offline`);
     const file = join(dir, doc.split("/").pop().replace(/\.\w+$/, "") + ".html");
     writeFileSync(file, html);
-    // the file, offline
+    // the file, offline (after a blank page: no request of the site's page,
+    // such as its code engine's, made late, is counted as the file's)
+    await send("Page.navigate", { url: "about:blank" });
+    await until("location.href === 'about:blank' && document.readyState === 'complete'", 5000);
+    await sleep(300);
     await send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     requests = [];
     await send("Page.navigate", { url: "file://" + file });
