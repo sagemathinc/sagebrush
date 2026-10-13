@@ -1,0 +1,22 @@
+double 1x1 0.13812025
+double 1x1 0.13812025
+double 1x1 0.36788106999999998
+logical 1x1 true
+double 2x1 [1.4142135600000001;1.4142135600000001]
+logical 1x1 true
+double 1x1 2.0945514799999998
+double 3x1 [4.9107142899999996;4.6428571400000003;3.66071429]
+double 1x15 [2 3 5 7 11 13 17 19 23 29 31 37 41 43 47]
+cell 1x9 {char 1x5 ['brown'], char 1x3 ['dog'], char 1x3 ['end'], char 1x3 ['fox'], char 1x5 ['jumps'], char 1x4 ['lazy'], char 1x4 ['over'], char 1x5 ['quick'], char 1x3 ['the']}
+double 1x9 [1 1 1 1 1 1 1 1 3]
+char 1x3 ['the']
+char 1x2 ['Cy']
+double 1x1 32
+char 1x12 ['Ann, Bob, Cy']
+logical 1x3 [true false true]
+double 1x4 [0.5 0.33333332999999998 0.25 0.20000000000000001]
+double 1x1 5.0761904800000002
+double 1x5 [1 1.5 2 2.5 3]
+double 5x5 [1 1 1 1 1;1 2 3 4 5;1 3 6 10 15;1 4 10 20 35;1 5 15 35 70]
+double 1x5 [70 35 15 5 1]
+char 1x35 ['1^2=1, 2^2=4, 3^2=9, 4^2=16, 5^2=25']
