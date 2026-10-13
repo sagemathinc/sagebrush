@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
 import type { BoardCode } from "./code";
 import { Toolbar, defaultTools } from "./toolbar";
 import { effect } from "@preact/signals-core";
@@ -71,8 +71,8 @@ export interface BoardHost {
   store?: BoardStore;
   /** where pictures' bytes are kept (images.ts: Images, this browser's IndexedDB) */
   images: ImageStore;
-  /** the engine of code items, made the first time a board has code */
-  code?: () => BoardCode;
+  /** the engine of code items, made the first time a board has code (the document then) */
+  code?: (d: BoardDoc) => BoardCode;
   /** KaTeX, loaded the first time a board has math */
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
@@ -85,8 +85,11 @@ export interface BoardHost {
   home?: string;
   /** the example boards (Examples…) */
   examples?: { list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]> };
-  /** the board as one HTML file (Download as HTML) */
-  exportHtml?(d: BoardDoc): Promise<string>;
+  /** the board as one HTML file (Download as HTML); with `python`, the file
+   * carries the code's engine, so its code runs without the network */
+  exportHtml?(d: BoardDoc, o?: { python?: boolean }): Promise<string>;
+  /** whether exportHtml can carry the engine, and about how much more that is ("6 MB") */
+  exportPython?(d: BoardDoc): string | null;
 }
 
 // (its stylesheet, once a page, first: the page's own rules win; it goes
@@ -108,6 +111,11 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
+<dialog data-sbb="htmldlg"><h3>Download as HTML</h3><form data-sbb="htmlform" method="dialog">
+<p class="prnote">One file, which opens in any browser. To run its code, it loads Python from the web, unless Python is included.</p>
+<fieldset data-sbb="html-py-set"><label><input type="checkbox" name="python" data-sbb="html-py"> Include Python, so its code runs without the network <span data-sbb="html-size"></span></label></fieldset>
+<fieldset><legend>Its code runs with</legend><label><input type="radio" name="engine" value="pinned" checked> the version of Sagebrush it was saved with</label><label><input type="radio" name="engine" value="latest"> the latest version, when online (else that one)</label></fieldset>
+<div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="html-go" class="be-done">Download</button></div></form></dialog>
 <dialog data-sbb="prdlg"><h3>Print or save as PDF</h3><form data-sbb="prform" method="dialog">
 <fieldset><legend>What</legend><label><input type="radio" name="mode" value="pages" data-sbb="pr-pages" checked> Every page <span data-sbb="pr-pages-n"></span></label><label><input type="radio" name="mode" value="tour" data-sbb="pr-tour"> The tour <span data-sbb="pr-tour-n"></span></label></fieldset>
 <fieldset><legend>Paper</legend><label><input type="radio" name="paper" value="letter" checked> Letter</label><label><input type="radio" name="paper" value="a4"> A4</label><span class="sep"></span><label><input type="radio" name="orient" value="landscape" checked> Landscape</label><label><input type="radio" name="orient" value="portrait"> Portrait</label></fieldset>
@@ -258,10 +266,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let code: BoardCode | null = null;
   function engine(): BoardCode | null {
     if (code || !host.code) return code;
-    const c = (code = host.code());
+    const c = (code = host.code(doc!));
     c.onChange = () => { board.codeStates(); relayout(); };
     c.ready.then((ok) => {
-      if (!ok) return;
+      // (it could not start: the caption says why, until the next edit)
+      if (!ok) {
+        if (code === c && c.error) say(`**The code can't run here:** ${c.error}`);
+        return;
+      }
       board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(id, copy), state: (id) => c.state(id), run: (id) => { c.run([id]); } });
       relayout();
     });
@@ -519,19 +531,40 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
-  // Download as HTML: the board in one file (export.ts)
-  $("html").onclick = async () => {
+  // Download as HTML: the board in one file (export.ts); a board with code
+  // asks first whether the file carries Python, and which version it runs
+  const htmldlg = $("htmldlg") as HTMLDialogElement;
+  $("html").onclick = () => {
+    if (!doc) return;
+    if (!anyCode(doc)) return void downloadHtml(false);
+    const size = host.exportPython?.(doc) ?? null;
+    $("html-py-set").hidden = !size;
+    ($("html-py") as HTMLInputElement).checked = false;
+    $("html-size").textContent = size ? `(about ${size} more)` : "";
+    for (const r of root.querySelectorAll<HTMLInputElement>("[data-sbb=htmlform] input[name=engine]")) r.checked = r.value === (doc.engine ?? "pinned");
+    htmldlg.showModal();
+  };
+  $("html-go").onclick = async (e) => {
+    e.preventDefault();
+    const f = new FormData($("htmlform") as HTMLFormElement);
+    htmldlg.close();
+    // (which version it runs is the board's: kept in it)
+    const use = f.get("engine") === "latest" ? "latest" : undefined;
+    if (doc && use !== doc.engine) await editor.commit((d) => { if (use) d.engine = use; else delete d.engine; });
+    await downloadHtml(f.get("python") === "on");
+  };
+  async function downloadHtml(python: boolean) {
     if (!doc) return;
     try {
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(doc))], { type: "text/html" }));
+      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(doc), { python })], { type: "text/html" }));
       a.download = fileName().replace(/\.json$/, ".html");
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } catch (e) {
       fail(e);
     }
-  };
+  }
   // (what the host does not have is not offered: an exported file has no examples beside it)
   $("examples").hidden = !host.examples;
   $("html").hidden = !host.exportHtml;
@@ -551,8 +584,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let converted = "", notice = "";
   function sayConverted() {
     if (!converted) return;
-    notice = converted;
+    say(converted);
     converted = "";
+  }
+  /** A notice in the caption, until the next edit. */
+  function say(md: string) {
+    notice = md;
     $("tour").hidden = false;
     caption(notice, "");
   }
@@ -794,7 +831,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** A Mermaid flowchart (or Markdown with some) as a board document, to load(), or to edit first. */
       fromMermaid: (text: string) => boardFromText(text),
       /** The board as one self-contained HTML file (its text). */
-      exportHtml: async () => host.exportHtml!(await images.inline(doc!)),
+      exportHtml: async (o?: { python?: boolean }) => host.exportHtml!(await images.inline(doc!), o),
       /** the document as a file carries it: with its pictures (data: URLs) */
       portable: () => images.inline(doc!),
       /** Show page n (0-based). */

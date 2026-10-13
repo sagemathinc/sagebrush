@@ -46,18 +46,22 @@ Each is optional, except `images`. What a host does not give is not offered.
 |---|---|---|
 | `store` | where the document comes from (`load`), where edits go (`save`), and `revert` | nothing is shown until `agent.load(doc)` |
 | `images` | where pictures' bytes are kept, by the SHA-256 of their content | (required) |
-| `code` | the code items' engine: `() => new BoardCode(base, { runner })` | code shows as text, not run |
+| `code` | the code items' engine, given the document: `(doc) => new BoardCode(base, { runner })` | code shows as text, not run |
 | `math` | KaTeX: `() => import(...)`, a module with `typeset(el)` | math shows as its TeX |
 | `history` | TimeTravel's versions (`BoardHistory` on a patchflow PatchStore) | no TimeTravel |
 | `address` | where the page and step shown are kept (`#p2-3`) | not kept |
 | `title`, `home` | the page's title; where "Sagebrush" in the top bar goes | |
 | `examples` | the example boards | no Examples… |
-| `exportHtml` | the board as one HTML file | no Download as HTML |
+| `exportHtml` | the board as one HTML file; with `{ python: true }`, carrying the code's engine | no Download as HTML |
+| `exportPython` | whether `exportHtml` can carry the engine, and about how much more that is (`"5 MB"`) | Download as HTML doesn't offer it |
 
 `BoardCode` is given where the notebook's files are (`sagebrush-notebook.js`, the
-worker, `runner/`). Python runs in the runner (`runner: true`): a sandboxed
-frame with an opaque origin, on a domain of its own. A host must not run it
-anywhere that can reach the host's own credentials (design/security.md).
+worker, `runner/`), or an engine's parts (`EngineParts`: how a downloaded
+board gets its engine, engine.ts). Python runs in the runner (`runner: true`):
+a sandboxed frame with an opaque origin, on a domain of its own. A host must
+not run it anywhere that can reach the host's own credentials
+(design/security.md). If the engine can't start, the board says why in its
+caption.
 
 ## Also exported
 

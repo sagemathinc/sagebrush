@@ -10,11 +10,38 @@
 /** "": up to date; "error": cannot run (a syntax error, a name defined twice, a cycle); "failed": raised an exception; "cancelled": not run, as one it reads failed */
 export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed" | "cancelled" | "interrupted";
 
+/** Where a board's code engine comes from (design/engines.md): its notebook
+ * module, the interpreter's worker, the reactive notebook's analyzer, and
+ * where the notebook finds its assets (3D, math).  siteEngine(): the files
+ * beside the page; a downloaded file's (engine.ts): bytes it carries or
+ * fetches by the engine's id. */
+export interface EngineParts {
+  module(): Promise<any>;
+  worker(mod: any): any;
+  analyzer(): Worker;
+  assets(): { assetBase?: string; assetUrl?: (name: string) => string | undefined };
+}
+
+/** The engine whose files are at `base` (sagebrush-notebook.js, the worker,
+ * runner/): Python in the runner, an opaque-origin sandboxed frame
+ * (design/runner.md), or with runner false, a plain worker. */
+export function siteEngine(base: URL, runner = true): EngineParts {
+  const plain = () => new Worker(new URL("sagebrush-worker.js", base), { type: "module" });
+  return {
+    module: () => import(new URL("sagebrush-notebook.js", base).href),
+    worker: (mod) => (runner ? new mod.RunnerWorker(new URL("runner/", base).href, { fallback: plain }) : plain()),
+    analyzer: () => new Worker(new URL("sagebrush-analyze.js", base)),
+    assets: () => ({ assetBase: new URL(".", base).href }),
+  };
+}
+
 export class BoardCode {
   /** resolves when the interpreter and the notebook are ready (false: they could not be loaded) */
   readonly ready: Promise<boolean>;
   /** a cell's output or state changed (the board lays itself out again) */
   onChange: (() => void) | null = null;
+  /** why the engine could not start (ready resolved false) */
+  error: string | null = null;
   /** the code highlighter (HTML), once the notebook is loaded */
   highlight: ((src: string) => string) | null = null;
   private nb: any = null;
@@ -22,19 +49,22 @@ export class BoardCode {
   private observer: MutationObserver | null = null;
   private pending = 0;
 
-  /** @param base where the notebook's files are (sagebrush-notebook.js, the worker, runner/); runner: Python in the runner, an opaque-origin sandboxed frame (design/runner.md), else a plain worker */
-  constructor(private base: URL, private opts: { runner: boolean } = { runner: true }) {
+  private parts: EngineParts;
+
+  /** @param engine the engine's parts, or where its files are (siteEngine(base, opts.runner)) */
+  constructor(engine: URL | EngineParts, opts: { runner: boolean } = { runner: true }) {
+    this.parts = engine instanceof URL ? siteEngine(engine, opts.runner) : engine;
     this.ready = this.start().then(() => true, (e) => {
       console.warn("board: code items cannot run here:", e);
+      this.error = String(e?.message ?? e);
       return false;
     });
   }
 
   private async start() {
-    const mod = await import(new URL("sagebrush-notebook.js", this.base).href);
+    const mod = await this.parts.module();
     if (this.closed) throw new Error("closed");
-    const runner = this.opts.runner;
-    const kernel = (this.kernel = new mod.WorkerKernel({ createWorker: () => (runner ? new mod.RunnerWorker(new URL("runner/", this.base).href, { fallback: () => new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" }) }) : new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" })) }));
+    const kernel = (this.kernel = new mod.WorkerKernel({ createWorker: () => this.parts.worker(mod) }));
     kernel.start();
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)
     let next = 0;
@@ -42,7 +72,7 @@ export class BoardCode {
     const ask = (msg: any) => {
       if (this.closed) return Promise.resolve({ error: { kind: "analyzer", message: "closed" }, sources: null });
       if (!this.analyzer) {
-        const worker = (this.analyzer = new Worker(new URL("sagebrush-analyze.js", this.base)));
+        const worker = (this.analyzer = this.parts.analyzer());
         worker.onmessage = (ev) => { const f = waiting.get(ev.data.id); waiting.delete(ev.data.id); f?.(ev.data); };
         worker.onerror = (e) => {
           worker.terminate();
@@ -64,7 +94,7 @@ export class BoardCode {
     root.setAttribute("aria-hidden", "true");
     root.style.cssText = "position:absolute;left:-100000px;top:0;width:640px;";
     document.body.append(root);
-    this.nb = mod.createNotebook(root, { kernel, reactive: true, analyzer, assetBase: new URL(".", this.base).href });
+    this.nb = mod.createNotebook(root, { kernel, reactive: true, analyzer, ...this.parts.assets() });
     this.nb.load({ mode: "python", cells: [], autorun: "always" });
     this.highlight = (src) => mod.highlight(src, this.mode === "sage");
     // (a cell's state is its element's class: queued, running, stale, error, cancelled)

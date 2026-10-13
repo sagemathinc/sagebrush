@@ -192,13 +192,15 @@
 [data-sbb=pages][hidden] { display: none; }
 [data-sbb=pgsel] { font: inherit; max-width: 34vw; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 3px 4px; background: #fff; }
 [data-sbb=pages] button { padding: 4px 8px; }
-[data-sbb=prdlg] { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(520px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
-[data-sbb=prdlg] h3 { margin: 0 0 10px; }
-[data-sbb=prdlg] fieldset { border: 0; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
-[data-sbb=prdlg] legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
-[data-sbb=prdlg] fieldset:first-of-type label { flex-basis: 100%; }
-[data-sbb=prdlg] label span { color: #667; font-size: 13px; }
-[data-sbb=prdlg] .sep { width: 10px; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg]) { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(520px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
+:is([data-sbb=prdlg], [data-sbb=htmldlg]) h3 { margin: 0 0 10px; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg]) fieldset { border: 0; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg]) legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg]) fieldset:first-of-type label { flex-basis: 100%; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg]) label span { color: #667; font-size: 13px; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg]) .sep { width: 10px; }
+[data-sbb=htmldlg] label { flex-basis: 100%; }
+[data-sbb=htmldlg] fieldset[hidden] { display: none; }
 :where(.sbb, .sbb-layer) .prnote { color: #556; font-size: 13px; margin: 0 0 12px; }
 [data-sbb=mmdlg] { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(640px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
 [data-sbb=mmdlg] h3 { margin: 0 0 10px; }

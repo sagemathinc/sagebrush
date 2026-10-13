@@ -25,9 +25,10 @@
 // outputs(), versions(), version(i); window.board is the board itself.
 import { synthetic } from "./board";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
-import { BoardCode } from "./code";
+import { BoardCode, siteEngine } from "./code";
+import { OWN_ENGINE, chooseEngine, fileEngine } from "./engine";
 import { boardFromText, fromMermaid } from "./mermaid";
-import { embedded, exportHtml } from "./export";
+import { embedded, engineRef, exportHtml } from "./export";
 import { Images } from "./images";
 import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
@@ -39,6 +40,8 @@ const source = embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q
 const saveKey = "sagebrush-board:" + source;
 const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
+// (an exported file: the engine its code runs with, and the site it comes from)
+const ref = file ? engineRef() : null;
 
 const host: BoardHost = {
   store: {
@@ -55,8 +58,8 @@ const host: BoardHost = {
       let saved: BoardDoc | null = null;
       try { saved = JSON.parse(localStorage.getItem(saveKey) ?? "null"); } catch {}
       const doc = isBoard(saved) ? saved! : original;
-      // (an exported file: its code shows but doesn't run, which it says)
-      if (file && anyCode(doc)) notice = "**This file shows its code but doesn't run it.** To run it, download its JSON (⋯) and open that at [sagebrush.space/board](https://sagebrush.space/board/).";
+      // (an exported file with no engine to run its code: its code shows, and it says so)
+      if (file && !ref && anyCode(doc)) notice = "**This file shows its code but doesn't run it.** To run it, download its JSON (⋯) and open that at [sagebrush.space/board](https://sagebrush.space/board/).";
       return { doc, original, notice };
     },
     save(d) {
@@ -68,11 +71,12 @@ const host: BoardHost = {
   },
   // pictures: kept in this browser by name
   images: new Images(),
-  // (an exported file carries no interpreter: its code shows, as text)
-  code: file ? undefined : () => new BoardCode(new URL("../", import.meta.url), {
-    // (Python in the runner, an opaque-origin sandboxed frame, as on the notebook page: design/runner.md)
-    runner: q.get("runner") !== "0" && globalThis.crossOriginIsolated === true && !(window as any).__TAURI__,
-  }),
+  // the engine of code items: the site's, Python in the runner, an
+  // opaque-origin sandboxed frame, as on the notebook page (design/runner.md);
+  // an exported file's, carried in it or fetched from its site, by its id or
+  // the latest (engine.ts)
+  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), q.get("runner") !== "0" && globalThis.crossOriginIsolated === true && !(window as any).__TAURI__))
+    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
@@ -97,7 +101,9 @@ const host: BoardHost = {
       return ex.map((e) => ({ title: e.title, about: e.about, href: `?doc=${encodeURIComponent("examples/" + e.file)}`, current: source === "examples/" + e.file }));
     },
   },
-  exportHtml: (d) => exportHtml(d),
+  exportHtml: (d, o) => exportHtml(d, o),
+  // (the engine's parts, compressed: about 5 MB, and the Sage library 2.8 MB more)
+  exportPython: (d) => (OWN_ENGINE ? (d.mode === "sage" ? "8 MB" : "5 MB") : null),
 };
 
 const mounted = mountBoard(document.getElementById("board")!, host);

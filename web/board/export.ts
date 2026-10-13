@@ -13,12 +13,29 @@
 // own copies (#sb-template, #sb-board, #sb-math, #sb-katex).
 
 import type { BoardDoc } from "./doc";
+import { OWN_ENGINE, checked, embeddedText, engineFiles, fetched, pack, type EngineRef } from "./engine";
 
 /** Whether this page is an exported file (its document embedded). */
 export const embedded = () => document.getElementById("sb-doc");
 
-// text for a <script> or <style>: nothing that ends it early
-const inline = (s: string) => s.replace(/<\/(script|style)/gi, "<\\/$1");
+/** An exported file's engine: the site it came from, and the engine's id (engine.ts). */
+export function engineRef(): EngineRef | null {
+  try {
+    const r = JSON.parse(document.getElementById("sb-engine-ref")?.textContent ?? "null");
+    return r && typeof r.site === "string" && typeof r.id === "string" && /^https?:/.test(r.site) ? { site: r.site, id: r.id } : null;
+  } catch {
+    return null;
+  }
+}
+
+// text for a <script> or <style>: nothing that ends it early, and no "<!--"
+// (after which the parser takes a "<script" as nested, and the script's own
+// end as that one's: the page stops loading); undone by unescapeInline
+const inline = (s: string) => s.replace(/<\/(script|style)/gi, "<\\/$1").replace(/<!--/g, "<\\!--");
+// JavaScript for a <script>: the same, written \x3C, which is "<" in a string,
+// a template and a regular expression alike (where "\!" may not be), and
+// stays as it is when exported again
+const inlineJs = (s: string) => s.replace(/<(\/script|!--)/gi, "\\x3C$1");
 
 async function text(url: URL): Promise<string> {
   const r = await fetch(url);
@@ -50,8 +67,9 @@ async function katexCss(base: URL): Promise<string> {
   });
 }
 
-/** The board page as one HTML file holding `doc`. */
-export async function exportHtml(doc: BoardDoc): Promise<string> {
+/** The board page as one HTML file holding `doc`; with `python`, the code's
+ * engine too (engine.ts), compressed, so its code runs without the network. */
+export async function exportHtml(doc: BoardDoc, o: { python?: boolean } = {}): Promise<string> {
   const own = (id: string) => document.getElementById(id)?.textContent ?? null;
   const here = new URL(".", location.href); // (the board's directory: /board/)
   const site = new URL("..", here);
@@ -61,15 +79,25 @@ export async function exportHtml(doc: BoardDoc): Promise<string> {
   const board = ex ? own("sb-board")! : await text(new URL("board.js", here));
   const mathJs = !math ? null : ex && own("sb-math") ? own("sb-math")! : await text(new URL("sagebrush-math.js", site));
   const mathCss = !math ? null : ex && own("sb-katex") ? own("sb-katex")! : await katexCss(site);
+  // the engine: where it comes from (this site, or the file's), and with
+  // python its parts, each checked (or carried as they are from a file that has them)
+  const ref: EngineRef | null = ex ? engineRef() : OWN_ENGINE ? { site: site.href, id: OWN_ENGINE.id } : null;
+  const engine: string[] = [];
+  if (ref) engine.push(`<script type="application/json" id="sb-engine-ref">${JSON.stringify(ref).replace(/</g, "\\u003c")}</script>`);
+  if (ref && o.python && OWN_ENGINE) {
+    const have = embeddedText(), get = checked(fetched(new URL(`engine/${OWN_ENGINE.id}/`, ref.site).href), OWN_ENGINE.files);
+    for (const name of engineFiles(doc.mode === "sage")) engine.push(`<script type="application/octet-stream" data-sb-engine="${name}">${have.get(name) ?? (await pack(await get(name)))}</script>`);
+  }
   // (the template rides along for exporting again, its scripts' ends escaped
   // as everything inline is, and unescaped when used)
   const json = JSON.stringify(doc).replace(/</g, "\\u003c");
   const parts = [
     `<script type="application/json" id="sb-doc">${json}</script>`,
     `<script type="text/plain" id="sb-template">${inline(template)}</script>`,
-    mathJs ? `<script type="text/plain" id="sb-math">${inline(mathJs)}</script>` : "",
+    mathJs ? `<script type="text/plain" id="sb-math">${inlineJs(mathJs)}</script>` : "",
     mathCss ? `<style id="sb-katex">${inline(mathCss)}</style>` : "",
-    `<script type="module" id="sb-board">${inline(board)}</script>`,
+    ...engine,
+    `<script type="module" id="sb-board">${inlineJs(board)}</script>`,
   ].join("\n");
   const title = (doc.title ?? "Board").replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"));
   return template
@@ -82,5 +110,5 @@ export async function exportHtml(doc: BoardDoc): Promise<string> {
 
 /** The text of an embedded part an exported page carries (#sb-template has its scripts' ends escaped). */
 export function unescapeInline(s: string): string {
-  return s.replace(/<\\\/(script|style)/gi, "</$1");
+  return s.replace(/<\\\/(script|style)/gi, "</$1").replace(/<\\!--/g, "<!--");
 }
