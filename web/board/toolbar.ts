@@ -9,6 +9,7 @@
 // changes.
 
 import { effect, signal, type ReadonlySignal, type Signal } from "@preact/signals-core";
+import { icon } from "./icons";
 
 export interface Tool {
   id: string;
@@ -64,7 +65,8 @@ export class Toolbar {
       if (!t) continue;
       const b = document.createElement("button");
       // (its name; on a narrow screen, its icon)
-      b.append(Object.assign(document.createElement("span"), { className: "tb-i", textContent: t.icon }), Object.assign(document.createElement("span"), { className: "tb-l", textContent: t.label }));
+      // (a tool named by its glyph, as undo: its icon everywhere)
+      b.append(glyph(t, "tb-i"), t.label === t.icon ? glyph(t, "tb-l") : Object.assign(document.createElement("span"), { className: "tb-l", textContent: t.label }));
       b.setAttribute("aria-label", t.label);
       b.title = t.title;
       b.dataset.tool = t.id;
@@ -78,7 +80,7 @@ export class Toolbar {
     // (a mode on that is not on the toolbar: its icon on "⋯")
     this.bound.push(effect(() => {
       const on = this.all.filter((t) => t.toggle?.value && !this.tools.value.includes(t.id));
-      more.textContent = on.length ? `${on.map((t) => t.icon).join(" ")} ⋯` : "⋯";
+      more.replaceChildren(...on.map((t) => glyph(t, "tb-on-i")), "⋯");
       more.classList.toggle("tb-on", on.length > 0);
     }));
     more.onclick = (e) => { e.stopPropagation(); this.panel ? this.closePanel() : this.openPanel(); };
@@ -107,7 +109,7 @@ export class Toolbar {
       use.dataset.tool = t.id;
       use.title = t.title;
       use.setAttribute("role", "menuitem");
-      use.append(Object.assign(document.createElement("span"), { className: "tb-icon", textContent: t.icon }), ` ${t.label}`);
+      use.append(glyph(t, "tb-icon"), ` ${t.label === t.icon ? t.title.replace(/ \(.*$/, "") : t.label}`);
       this.use(use, t, () => this.closePanel());
       const box = document.createElement("input");
       box.type = "checkbox";
@@ -145,4 +147,13 @@ export class Toolbar {
     this.panel = null;
     removeEventListener("pointerdown", this.outside);
   }
+}
+
+// a tool's icon in a span of this class: its drawing, else its glyph
+function glyph(t: Tool, className: string): HTMLSpanElement {
+  const span = Object.assign(document.createElement("span"), { className });
+  const svg = icon(t.id);
+  if (svg) span.append(svg);
+  else span.textContent = t.icon;
+  return span;
 }

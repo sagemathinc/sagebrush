@@ -478,7 +478,7 @@ try {
       await ev("document.querySelector('.board-toolbar-panel') || document.querySelector('.board-toolbar .tb-more').click(), 1");
       await ev("document.querySelector('.board-toolbar-panel .tb-use[data-tool=select]').click(), 1");
       await sleep(200);
-      check(await ev("!document.querySelector('.board-toolbar-panel') && /↖/.test(document.querySelector('.board-toolbar .tb-more').textContent)"), `Select from the menu: ⋯ shows its icon (${await ev("document.querySelector('.board-toolbar .tb-more').textContent")})`);
+      check(await ev("!document.querySelector('.board-toolbar-panel') && !!document.querySelector('.board-toolbar .tb-more [data-icon=select]')"), `Select from the menu: ⋯ shows its icon (${await ev("document.querySelector('.board-toolbar .tb-more').textContent")})`);
       await ev("window.board.focus(['b', 'c'], true)");
       await sleep(300);
       const sr = await ev("(() => { const a = window.board.clientRect('b'), c = window.board.clientRect('c'); const r = window.board.el.getBoundingClientRect(); const x0 = Math.min(a.left, c.left) - 14, y0 = Math.min(a.top, c.top) - 14; return { x0, y0, x1: Math.max(a.left + a.width, c.left + c.width) + 14, y1: Math.max(a.top + a.height, c.top + c.height) + 14, free: !window.board.itemAt(x0 - r.left, y0 - r.top) }; })()");
@@ -489,7 +489,7 @@ try {
       }
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-      check(await ev("document.querySelector('.board-toolbar .tb-more').textContent === '⋯'"), "Esc leaves Select");
+      check(await ev("document.querySelector('.board-toolbar .tb-more').textContent === '⋯' && !document.querySelector('.board-toolbar .tb-more svg')"), "Esc leaves Select");
       await ev("window.sagebrush.board.editing(false)");
       check(await ev("document.querySelector('.board-toolbar').hidden && !document.querySelector('.board-toolbar-panel')"), "the toolbar goes with Edit");
       await ev("window.sagebrush.board.editing(true)");

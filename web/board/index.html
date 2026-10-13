@@ -39,6 +39,8 @@
 
   #top { position: fixed; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(250, 250, 247, .92); border-bottom: 1px solid rgba(0, 0, 0, .08); pointer-events: none; }
   #top > * { pointer-events: auto; }
+  /* (its ⋯ menu open: above the Edit toolbar and its panel, which are below the bar) */
+  #top:has(.menu:not([hidden])) { z-index: 6; }
   #home { color: #2a6f2f; font-weight: 600; text-decoration: none; }
   #title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
   button { font: inherit; border: 1px solid rgba(0, 0, 0, .18); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
@@ -95,7 +97,12 @@
   .board-toolbar button[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
   .board-toolbar .tb-more { color: #667; }
   .board-toolbar .tb-i { display: none; }
-  @media (max-width: 600px) { .board-toolbar .tb-i { display: inline; } .board-toolbar .tb-l { display: none; } .board-toolbar button { min-width: 40px; padding: 4px 8px; } }
+  @media (max-width: 600px) { .board-toolbar button .tb-i { display: inline-flex; } .board-toolbar button .tb-l { display: none; } .board-toolbar button { min-width: 40px; min-height: 40px; padding: 4px 8px; } .board-toolbar .tb-svg { width: 22px; height: 22px; } .board-toolbar .tb-more { font-size: 20px; } }
+  /* the tools' icons: line drawings in the text color (web/board/icons.ts) */
+  .tb-svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; display: block; }
+  .tb-i, .tb-l, .tb-icon, .tb-on-i { align-items: center; justify-content: center; }
+  .tb-l:has(.tb-svg), .tb-on-i { display: inline-flex; }
+  .board-toolbar .tb-more { display: inline-flex; align-items: center; gap: 4px; }
   .board-toolbar .tb-more.tb-on { background: #2a6f2f; color: #fff; }
   /* "⋯": every tool (use it), and whether it is on the toolbar */
   .board-toolbar-panel { position: fixed; z-index: 4; display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 200px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
@@ -103,7 +110,7 @@
   .board-toolbar-panel .tb-use { flex: 1; text-align: left; border-color: transparent; }
   .board-toolbar-panel .tb-use:hover { background: #eef2ea; }
   .board-toolbar-panel .tb-use[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
-  .board-toolbar-panel .tb-icon { display: inline-block; min-width: 1.6em; text-align: center; color: #4a6b49; }
+  .board-toolbar-panel .tb-icon { display: inline-flex; vertical-align: middle; min-width: 1.6em; text-align: center; color: #4a6b49; }
   .board-toolbar-panel .tb-use[aria-pressed="true"] .tb-icon { color: inherit; }
   .board-toolbar-panel input { margin: 0 6px; }
   .board-toolbar-panel .tb-default { margin-top: 4px; font-size: 12px; color: #556; border-color: transparent; }
