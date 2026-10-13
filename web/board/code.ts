@@ -98,8 +98,10 @@ export class BoardCode {
     if (!c) return null;
     if (!this.watched.has(c.out)) {
       this.watched.add(c.out);
-      const o = new MutationObserver(() => this.changed());
-      o.observe(c.out, { childList: true, subtree: true, characterData: true });
+      // (its size, not its every change: a 3D view rewrites its labels every
+      // frame as it turns, and the board is laid out again only for a size)
+      const o = new ResizeObserver(() => this.changed());
+      o.observe(c.out);
       this.outputs.push(o);
     }
     return copy ? (c.out.cloneNode(true) as HTMLElement) : c.out;
@@ -190,7 +192,7 @@ export class BoardCode {
   private kernel: any = null;
   private analyzer: Worker | null = null;
   private root: HTMLElement | null = null;
-  private outputs: MutationObserver[] = [];
+  private outputs: ResizeObserver[] = [];
   /** A code item's output as text (pictures by their descriptions), for agents. */
   text(id: string): string {
     const c = this.cell(id);

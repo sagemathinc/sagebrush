@@ -265,9 +265,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     });
     return c;
   }
-  // (laid out again as outputs change: once a frame at most)
-  let relayoutFrame = 0;
+  // (laid out again as outputs change size: once a frame at most; never
+  // while items are dragged or resized, which a layout would put back where
+  // the document has them: once they are let go)
+  let relayoutFrame = 0, relayoutHeld = false;
   function relayout() {
+    if (editor.moving) { relayoutHeld = true; return; }
     if (!relayoutFrame) relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; redraw().catch(fail); });
   }
 
@@ -378,6 +381,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
+  editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
   editor.onRun = (id) => { code?.run([id]); };
   editor.highlight = () => code?.highlight ?? null;
   editor.images = images;

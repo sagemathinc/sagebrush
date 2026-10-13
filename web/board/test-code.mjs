@@ -201,6 +201,39 @@ try {
   check(await ev("window.sagebrush.board.snapshot().doc.mode === 'sage' && document.querySelector('#lang [data-mode=sage]').getAttribute('aria-pressed') === 'true'"), "the document says Sage, and so does the menu");
   await ev("document.querySelector('#lang [data-mode=python]').click(), 1");
   check(await until("window.sagebrush.board.outputs().then((os) => (os.find((x) => x.id === 'pow')?.output ?? '') === '8\\n')", 20000) && await ev("window.sagebrush.board.snapshot().doc.mode === undefined"), "Python again (the default, not written)");
+  // An output that changes every frame without changing size (a 3D view's
+  // labels as it turns): dragging another item works, and resizing an item
+  // whose output grows with its width does not snap back (William's I2, I3).
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes.push({ id: 'ticker', code: 'print("tick")', x: 0, y: 5000 }, { id: 'mover', title: 'Mover', text: 'drag me', x: 0, y: 5300, w: 220 }, { id: 'wide', code: 'print("w")', x: 700, y: 5000, w: 300 }); })`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((x) => x.id === 'ticker')?.output === 'tick\\n' && os.find((x) => x.id === 'wide')?.output === 'w\\n')", 30000), "the ticker and the wide item ran");
+  await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: -100, y: 4900, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  await ev("window.__tick = setInterval(() => { const t = document.querySelector('[data-code=ticker] .board-code-out pre.txt')?.firstChild; if (t) t.data = t.data === 'tick\\n' ? 'tock\\n' : 'tick\\n'; }, 16), 1");
+  const mouse = (type, x, y) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+  const x0 = (await item("mover")).x, m0 = await ev("(() => { const r = window.board.clientRect('mover'); return { x: r.left + r.width / 2, y: r.top + 15 }; })()");
+  await mouse("mousePressed", m0.x, m0.y);
+  for (let i = 1; i <= 10; i++) { await mouse("mouseMoved", m0.x + 15 * i, m0.y); await sleep(40); }
+  await mouse("mouseReleased", m0.x + 150, m0.y);
+  check(await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${x0 + 150}) <= 8`, 3000), "dragged while another output changes every frame, the note lands where it was let go: " + JSON.stringify([x0, (await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover')"))?.x]));
+  // the wide item's output as tall as a third of its width (as a 3D view is), and it resized by its corner
+  await ev("(() => { const o = document.querySelector('[data-code=wide] .board-code-out .out'); o.style.aspectRatio = '3 / 1'; return 1; })()");
+  const wr = await ev("(() => { const r = window.board.clientRect('wide'); return { x: r.left, y: r.top, w: r.width }; })()");
+  await mouse("mousePressed", wr.x + 30, wr.y + 10);
+  await mouse("mouseReleased", wr.x + 30, wr.y + 10);
+  await sleep(200);
+  const corner = await ev("(() => { const r = window.board.clientRect('wide'); return { x: r.left + r.width - 2, y: r.top + r.height - 2 }; })()");
+  await mouse("mousePressed", corner.x, corner.y);
+  const widths = [];
+  for (let i = 1; i <= 8; i++) {
+    await mouse("mouseMoved", corner.x + 20 * i, corner.y);
+    await sleep(60);
+    widths.push(await ev("document.querySelector('[data-code=wide]').getBoundingClientRect().width"));
+  }
+  await mouse("mouseReleased", corner.x + 160, corner.y);
+  await ev("clearInterval(window.__tick), 1");
+  check(widths.every((w, i) => i === 0 || w >= widths[i - 1] - 1) && widths.at(-1) > widths[0] + 100, "resizing it, it grows steadily, never put back: " + JSON.stringify(widths.map(Math.round)));
+  check(await until("Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'wide').w - 460) <= 4", 3000), "...and keeps its new width: " + (await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'wide').w")));
+  await ev("window.sagebrush.board.editing(false)");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

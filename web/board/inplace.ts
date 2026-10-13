@@ -313,6 +313,9 @@ export class InPlace {
     this.hideCode = !this.hideCode;
     this.codePart!.hidden = this.hideCode;
     this.refresh();
+    // (shown again: as tall as its code; it could not be measured hidden)
+    this.fit();
+    this.place();
     this.save();
   }
 
@@ -397,6 +400,8 @@ export class InPlace {
   /** Fields as tall as what they hold. */
   private fit() {
     for (const ta of this.el.querySelectorAll<HTMLTextAreaElement>("textarea")) {
+      // (a hidden field has no height to measure: measured when it shows)
+      if (!ta.offsetParent) continue;
       ta.style.height = "auto";
       ta.style.height = ta.scrollHeight + "px";
     }

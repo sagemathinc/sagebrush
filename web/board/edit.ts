@@ -61,6 +61,14 @@ export class Editor {
   private edgeSel: number | null = null; // the selected edge: its index in the page's edges
   private panel: HTMLElement | null = null; // an edge's
   private inplace: InPlace | null = null; // the item being written where it is
+  /** whether items are being dragged or resized now (the board is not laid out again meanwhile: mount.ts) */
+  moving = false;
+  /** a drag or a resize ended */
+  onSettled: (() => void) | null = null;
+  private hold(on: boolean) {
+    this.moving = on;
+    if (!on) this.onSettled?.();
+  }
   /** Whether the page's keys and clipboard are this board's (one of several on a page: focus.ts) */
   isActive: () => boolean = () => true;
   /** Run a code item (its code is as it was: a changed one runs as the board is laid out again) */
@@ -325,6 +333,7 @@ export class Editor {
     let last = { x: e.clientX, y: e.clientY }, dist = 0;
     // (the pointer's offset since the press, and how far the items have moved: they differ by the snapping)
     const raw = { x: 0, y: 0 }, applied = { x: 0, y: 0 };
+    this.hold(true);
     const move = (m: PointerEvent) => {
       raw.x += (m.clientX - last.x) / z();
       raw.y += (m.clientY - last.y) / z();
@@ -346,6 +355,7 @@ export class Editor {
       removeEventListener("pointermove", move);
       removeEventListener("pointerup", up);
       removeEventListener("pointercancel", up);
+      this.hold(false);
       this.board.dropTarget = null;
       this.board.guides = null;
       this.board.request();
@@ -410,6 +420,7 @@ export class Editor {
     e.preventDefault();
     const z = this.board.camera.z, x0 = e.clientX, w0 = it.w, ratio = it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref ? it.image.h / it.image.w : 0;
     let w = w0;
+    this.hold(true);
     const move = (m: PointerEvent) => {
       w = Math.max(ratio ? 24 : 120, Math.round(w0 + (m.clientX - x0) / z));
       this.board.resizeItem(it.id, w, ratio ? Math.round(w * ratio) : undefined);
@@ -418,6 +429,7 @@ export class Editor {
       removeEventListener("pointermove", move);
       removeEventListener("pointerup", up);
       removeEventListener("pointercancel", up);
+      this.hold(false);
       if (w === w0) return;
       this.commit((d) => {
         const g = find(this.pg(d), it.id);
