@@ -409,14 +409,15 @@ export class Editor {
   }
 
   /** Add pictures (files: pasted, dropped, chosen) at (x, y) in the world, each a note that is only the picture. */
-  async addImages(files: Iterable<Blob>, x: number, y: number) {
+  async addImages(files: Iterable<Blob>, x: number, y: number, opts: { paste?: boolean } = {}) {
     if (!this.images) return;
     const added: { id: string; key: string; info: ImageInfo; w: number }[] = [];
     for (const f of files) {
-      const p = await prepare(f);
+      const p = await prepare(f, opts);
       if (!p) continue;
       const key = await this.images.put(p.blob);
-      added.push({ id: "p" + Math.random().toString(36).slice(2, 8), key, info: { w: p.w, h: p.h }, w: Math.min(480, p.w) });
+      // (at its natural size, in CSS pixels: a 2x screenshot at half its pixels)
+      added.push({ id: "p" + Math.random().toString(36).slice(2, 8), key, info: { w: p.w, h: p.h }, w: Math.min(480, p.cssW) });
     }
     if (!added.length) return;
     await this.commit((d) => {
@@ -493,7 +494,7 @@ export class Editor {
     if (pics.length) {
       e.preventDefault();
       const v = this.board.view();
-      this.addImages(pics, (v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2);
+      this.addImages(pics, (v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2, { paste: true });
       return;
     }
     const text = e.clipboardData?.getData("text/plain") ?? "";

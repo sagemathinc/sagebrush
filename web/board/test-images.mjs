@@ -144,6 +144,27 @@ try {
   await ev("document.querySelector('.board-toolbar [data-tool=image]').click(), 1");
   check(await choose(), "the toolbar's Image asks for files");
   check(await until(`window.sagebrush.board.snapshot().doc.nodes.filter((x) => x.image).length === ${k0 + 1}`), "...and adds the picture");
+  // HiDPI: a screenshot shows at its size on its screen (sharp), not one CSS
+  // pixel per pixel (twice as large, and blurry): its density from the file
+  // (a PNG's pHYs: 144 dpi is 2x), else, for a paste, the screen's
+  const dpi = (w, h, d) => `(async () => {
+    const f = await ${png(w, h)}, b = new Uint8Array(await f.arrayBuffer());
+    const crc = (bytes) => { let c = ~0; for (const x of bytes) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return ~c >>> 0; };
+    const ppm = Math.round(${d} / 0.0254), chunk = new Uint8Array(21), v = new DataView(chunk.buffer);
+    v.setUint32(0, 9); chunk.set([0x70, 0x48, 0x59, 0x73], 4); v.setUint32(8, ppm); v.setUint32(12, ppm); chunk[16] = 1; v.setUint32(17, crc(chunk.subarray(4, 17)));
+    return new File([b.subarray(0, 33), chunk, b.subarray(33)], "shot.png", { type: "image/png" });
+  })()`;
+  const widthOf = async (pw) => { await until(`Object.values(window.sagebrush.board.snapshot().doc.images ?? {}).some((i) => i.w === ${pw})`); const d = await docOf(); const key = Object.keys(d.images).find((k) => d.images[k].w === pw); return d.nodes.find((x) => x.image === key)?.w; };
+  await paste(dpi(400, 200, 144));
+  check((await widthOf(400)) === 200, "a 144 dpi (2x) screenshot is shown at half its pixels");
+  await paste(dpi(410, 200, 96));
+  check((await widthOf(410)) === 410, "a 96 dpi picture at its pixels");
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await paste(png(420, 100));
+  check((await widthOf(420)) === 210, "pasted on a 2x screen, with no density of its own: half its pixels");
+  await ev(`(async () => { const dt = new DataTransfer(); dt.items.add(await ${png(430, 100, false, "drop2.png")}); document.querySelector("#board").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, clientX: 600, clientY: 400, bubbles: true, cancelable: true })); return 1; })()`);
+  check((await widthOf(430)) === 430, "a dropped file is not a screenshot of this screen: at its pixels");
+  await send("Emulation.clearDeviceMetricsOverride");
   // leaving the browser: Download / Copy / exported HTML carry the bytes
   const portable = await ev("window.sagebrush.board.portable()");
   check(Object.values(portable.images).every((i) => /^data:image\/(png|webp|jpeg);base64,/.test(i.src)), "a downloaded board carries its pictures: " + JSON.stringify(Object.values(portable.images).map((i) => (i.src ?? "").slice(0, 30))));
