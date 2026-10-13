@@ -16,6 +16,7 @@
 // math ($$...$$) is typeset as everywhere on a board.  The grammar followed is
 // Mermaid's flow.jison (MIT); mermaidBlocks() finds the diagrams in Markdown.
 
+import { fromCocalcBoard, isCocalcBoard, leftOut } from "./cocalc";
 import type { BoardDoc, DocEdge, DocGroup, DocNode, DocNote, NoteShape } from "./doc";
 
 /** Whether a text looks like a Mermaid flowchart. */
@@ -35,9 +36,15 @@ export function mermaidBlocks(md: string): { text: string; heading?: string }[] 
 }
 
 /** A text as a board: JSON, a Mermaid flowchart, or Markdown with flowcharts (a page each); `name` (a file's) titles it. */
-export function boardFromText(text: string, name?: string): BoardDoc {
+export function boardFromText(text: string, name?: string, note?: (md: string) => void): BoardDoc {
   const t = text.trimStart();
   const titled = (d: BoardDoc) => { if (!d.title && name) d.title = name.replace(/\.[^.]*$/, ""); return d; };
+  // (a CoCalc whiteboard or slides file: JSON lines of its elements, cocalc.ts)
+  if (isCocalcBoard(t)) {
+    const c = fromCocalcBoard(t), l = leftOut(c.left);
+    note?.(`Converted from a CoCalc ${/\.slides$/i.test(name ?? "") ? "slides" : "whiteboard"} file.` + (l ? ` Left out, as a board has nothing like them yet: ${l}.` : ""));
+    return titled(c.doc);
+  }
   if (t.startsWith("{")) return JSON.parse(t) as BoardDoc;
   if (isMermaid(t)) return titled(fromMermaid(t));
   const blocks = mermaidBlocks(text);

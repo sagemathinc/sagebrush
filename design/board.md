@@ -726,6 +726,30 @@ version again, as an edit: undoable, and a version itself. Agents call
 `versions()` and `version(i)`. An exported HTML file has no TimeTravel.
 web/board/test-history.mjs (34 checks).
 
+**CoCalc whiteboards** (October 13, web/board/cocalc.ts). Sagebrush
+boards replace CoCalc's whiteboard, so a CoCalc `.board` (or `.slides`)
+file opens as a board: one way, with no shared schema and nothing going
+back. Open…, a dropped file or `?doc=` take it; it is a syncdb file, one
+JSON element a line.
+- Pages (`type: "page"`, by `data.pos`; in the oldest files, `page`
+  numbers) become pages, unless there is one.
+- Notes, texts and code cells become notes at their places and widths
+  (their heights follow their text): a note keeps its color (CoCalc's
+  yellow if it had none), a code cell its code and hidden input; a Sage
+  kernel makes the board Sage. Outputs are not kept.
+- Frames become groups holding what is inside them, frames within frames
+  groups within groups. A group fits what it holds, so the notes stay where
+  they were and a frame's own size is not kept.
+- Edges between two of these become edges.
+- Before CoCalc's schema version 1, Markdown escaped `\(`, `\)`, `\[` and
+  `\]`, which were not math: they are unescaped, as CoCalc's migration does.
+- What a board has nothing like yet (pen strokes, icons, timers,
+  stopwatches, chats, terminals, speaker notes, slides' backgrounds, hidden
+  elements, and edges to them) is left out, and the caption says what was,
+  until the next edit.
+
+web/board/test-cocalc.mjs (19 checks) opens a current board and an old one.
+
 **Math in titles.** A title's `$...$` and `\(...\)` are typeset with
 KaTeX, as in Markdown; the title is built as text and math elements, never
 from markup. Far out, on the canvas and on printed group labels, a title's

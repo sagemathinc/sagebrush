@@ -212,6 +212,8 @@ export function formatError(d: any): string | null {
 export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
 
 const GAP = 40, PAD = 24, TITLE = 34;
+/** A group's padding, and its title's height (its members' origin is below them). */
+export const GROUP_PAD = PAD, GROUP_TITLE = TITLE;
 
 interface Box { w: number; h: number }
 
