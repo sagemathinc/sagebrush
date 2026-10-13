@@ -94,6 +94,8 @@ export interface BoardPage {
 
 export interface BoardDoc {
   title?: string;
+  /** the language of its code items: Python (the default) or Sage (one per board) */
+  mode?: "python" | "sage";
   /** the toolbar's tools in Edit mode (toolbar.ts), in order; else the person's default */
   tools?: string[];
   /** the pictures notes show, by name: each one's size (and its bytes, as a
@@ -183,7 +185,7 @@ export function cleanDoc(d: any): BoardDoc {
       hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
     steps: Array.isArray(p?.steps) ? p.steps.filter((t: any) => t && (typeof t.focus === "string" || Array.isArray(t.focus))).map((t: any) => strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) })) : undefined,
   });
-  const out: any = strip({ ...page(d), title: str(d?.title), refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
+  const out: any = strip({ ...page(d), title: str(d?.title), mode: d?.mode === "sage" ? "sage" : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
   delete out.id;
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
   return out as BoardDoc;
