@@ -134,6 +134,20 @@ Its re-review of 18f5216 found two more, both fixed:
   `image-set('...')` and `cursor`: to this site only, but a way to put data
   in a request. Fixed by the function and property allowlists (rule 1).
 
+Its re-review of 5deaa70 found one more, fixed:
+- **SEC-5DE-1, critical: importing wrote a `$` slot.** A submodule became
+  its parent's attribute with a raw property store, so a custom
+  `sys.meta_path` loader plus an arbitrary `sys.modules` parent could write
+  `$ctor` on a class or `$cls` on an object, forge a layout, and reach
+  `Function`. Fixed three ways: a module's name is never a `$` name, the
+  child is bound with `setattr` (so the reserved-name rule applies), and the
+  attribute-read cache now returns a value only when it is the object's own
+  property, so even a forged layout cannot leak an inherited JavaScript
+  property. The own-property check on every cached read costs roughly half
+  as much again on attribute-heavy Python; it is kept as the backstop that
+  makes the whole class of cache escape impossible, not only the paths found
+  so far.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS
