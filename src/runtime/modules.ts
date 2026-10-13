@@ -34,7 +34,8 @@ function fn(m: any, name: string, f: any) {
 export function importModule(name: string): any {
   // (a module's name is never one of the runtime's own, checked before the
   // lookup so a pre-seeded sys.modules entry cannot smuggle one in: rule 6)
-  if (typeof name !== "string" || name.split(".").some((p) => p === "" || p.charCodeAt(0) === 36)) {
+  // (no `$` anywhere, no empty part; no allocation, as this runs on every import)
+  if (typeof name !== "string" || name === "" || name.indexOf("$") >= 0 || name.indexOf("..") >= 0 || name.charCodeAt(0) === 46 || name.charCodeAt(name.length - 1) === 46) {
     const e = T.ModuleNotFoundError(`No module named '${name}'`);
     e.name = name;
     throw e;
@@ -187,8 +188,8 @@ export function importStar(m: any, g: any) {
     names = O.toArray(d).filter((k: any) => typeof k === "string" && !k.startsWith("_") && !k.startsWith("$"));
   }
   for (const k of names) {
-    if (typeof k !== "string") raise(T.TypeError, `Item in ${"__all__"} must be str, not ${typeName(k)}`);
-    if (k.charCodeAt(0) === 36) raise(T.AttributeError, `module has no attribute '${k}'`);
+    if (typeof k !== "string") raise(T.TypeError, `Item in ${m.__name__}.__all__ must be str, not ${typeName(k)}`);
+    // (getattr refuses a `$` name; putAttr stores `__proto__` as data)
     putAttr(g, k, getattr(m, k));
   }
 }

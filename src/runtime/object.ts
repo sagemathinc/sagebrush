@@ -443,13 +443,22 @@ export function isDataDescriptor(d: any): boolean {
 // instances whose layout inherits from Object.prototype (subclasses of list,
 // dict, int, ...).
 export const reservedName = (name: string): boolean => name.charCodeAt(0) === 36;
+/** A lookup table with no prototype: only its own entries are ever found
+ * (a Python-chosen key like "constructor" is not in it), design/security.md rule 6. */
+export const table = <V extends object>(entries: V): V => Object.assign(Object.create(null), entries);
 function reservedAttr(o: any, name: string): never {
-  raise(T.AttributeError, `'${typeName(o)}' object attribute '${name}' is reserved: names starting with '$' belong to the runtime`);
+  const why = reservedName(name) ? "names starting with '$' belong to the runtime" : "it is the runtime's own field of this type";
+  raise(T.AttributeError, `'${typeName(o)}' object attribute '${name}' is reserved: ${why}`);
 }
 // An array's length and elements are its list's, not attributes.
 const arraySlot = (o: any, name: string): boolean => Array.isArray(o) && (name === "length" || /^\d+$/.test(name));
-const ownAttr = (o: any, name: string): boolean => hasOwn.call(o, name) && !arraySlot(o, name) && !(o.$cls !== undefined && o.$cls.$impl !== undefined && o.$cls.$impl.has(name));
+// A JS-backed layout's own implementation field (bytes' `a`), which is the runtime's, not an attribute.
+const implField = (o: any, name: string): boolean => o.$cls !== undefined && o.$cls.$impl !== undefined && o.$cls.$impl.has(name);
+const ownAttr = (o: any, name: string): boolean => hasOwn.call(o, name) && !arraySlot(o, name) && !implField(o, name);
 export function putAttr(o: any, name: string, v: any): void {
+  // (every Python-named write comes here: setattr, the store cache, an
+  // instance's __dict__ and its assignment, import *)
+  if (implField(o, name)) reservedAttr(o, name);
   if (arraySlot(o, name)) raise(T.AttributeError, `'${typeName(o)}' object attribute '${name}' is not supported`);
   if (name === "__proto__") Object.defineProperty(o, name, { value: v, writable: true, enumerable: true, configurable: true });
   else o[name] = v;
@@ -598,7 +607,7 @@ export function setattr(o: any, name: string, v: any): void {
 
 export function genericSetattr(o: any, name: string, v: any, t: PyType) {
   if (reservedName(name)) reservedAttr(o, name);
-  if (o.$cls !== undefined && o.$cls.$impl !== undefined && o.$cls.$impl.has(name)) raise(T.AttributeError, `'${t.$name}' object attribute '${name}' is reserved by the runtime`);
+  if (implField(o, name)) reservedAttr(o, name);
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
     const s = lookupType(typeOf(d), "__set__");
@@ -641,7 +650,7 @@ export function delattr(o: any, name: string): void {
 export function genericDelattr(o: any, name: string, t: PyType): void {
   if (reservedName(name)) reservedAttr(o, name);
   if (name === "__dict__" && hasInstanceDict(o) && lookupType(t, "__dict__") === lookupType(T.object, "__dict__")) {
-    for (const k of Object.keys(o)) if (k[0] !== "$" && !(Array.isArray(o) && /^\d+$/.test(k))) delete o[k];
+    for (const k of attrNames(o)) delete o[k];
     return;
   }
   const d = lookupType(t, name);
@@ -966,11 +975,13 @@ function numAlias(d: PyDict, k: any): any {
 
 // The live `__dict__` of an instance: a PyDict whose `$m` is this Map-like
 // view of the object's own (non-`$`) properties.
-const isAttrKey = (o: any, k: string) => k[0] !== "$" && !arraySlot(o, k) && !(o.$cls !== undefined && o.$cls.$impl !== undefined && o.$cls.$impl.has(k));
+const isAttrKey = (o: any, k: string) => k[0] !== "$" && !arraySlot(o, k) && !implField(o, k);
+/** The names in an instance's attribute dict (its `__dict__`, `vars()`, `dir()`). */
+export const attrNames = (o: any): string[] => Object.keys(o).filter((k) => isAttrKey(o, k));
 export class AttrMap {
   constructor(public o: any) {}
   private names(): string[] {
-    return Object.keys(this.o).filter((k) => isAttrKey(this.o, k));
+    return attrNames(this.o);
   }
   get(k: any): any {
     return typeof k === "string" && isAttrKey(this.o, k) && hasOwn.call(this.o, k) ? this.o[k] : undefined;
@@ -1171,7 +1182,6 @@ export function dictClear(d: PyDict) {
 export class PyBytes {
   constructor(public a: Uint8Array, public n: number = a.length) {}
 }
-export const BYTES_IMPL = ["a", "n"];
 export class PyByteArray extends PyBytes {}
 export function isBytesLike(x: any): x is PyBytes {
   return x instanceof PyBytes;

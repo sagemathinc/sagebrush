@@ -1,7 +1,7 @@
 // The struct module: pack/unpack of C structs via DataView, with CPython's
 // native ('@') sizes and alignment for a 64-bit little-endian platform.
 
-import { T, PyBytes, PyByteArray, raise, typeName, tuple, objectType, isinstance, callObj } from "./object";
+import { T, PyBytes, PyByteArray, raise, typeName, tuple, objectType, isinstance, callObj, table } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { newBuiltinModule } from "./modules";
@@ -19,8 +19,8 @@ interface Layout {
   nargs: number;
 }
 
-const STD: Record<string, number> = { x: 1, c: 1, b: 1, B: 1, "?": 1, h: 2, H: 2, i: 4, I: 4, l: 4, L: 4, q: 8, Q: 8, e: 2, f: 4, d: 8, s: 1, p: 1 };
-const NATIVE: Record<string, number> = { ...STD, l: 8, L: 8, n: 8, N: 8, P: 8 };
+const STD: Record<string, number> = table({ x: 1, c: 1, b: 1, B: 1, "?": 1, h: 2, H: 2, i: 4, I: 4, l: 4, L: 4, q: 8, Q: 8, e: 2, f: 4, d: 8, s: 1, p: 1 });
+const NATIVE: Record<string, number> = table({ ...STD, l: 8, L: 8, n: 8, N: 8, P: 8 });
 
 let StructError: any;
 const cache = new Map<string, Layout>();
@@ -86,7 +86,7 @@ function intArg(v: any, code: string): bigint {
   return BigInt(f(v));
 }
 
-const RANGE: Record<string, [bigint, bigint]> = {};
+const RANGE: Record<string, [bigint, bigint]> = table({});
 for (const [c, bits, signed] of [["b", 8, 1], ["B", 8, 0], ["h", 16, 1], ["H", 16, 0], ["i", 32, 1], ["I", 32, 0], ["q", 64, 1], ["Q", 64, 0], ["n", 64, 1], ["N", 64, 0], ["P", 64, 0]] as const) {
   RANGE[c] = signed ? [-(1n << BigInt(bits - 1)), (1n << BigInt(bits - 1)) - 1n] : [0n, (1n << BigInt(bits)) - 1n];
 }

@@ -45,7 +45,7 @@ export class DType {
   }
 }
 
-const D: Record<string, DType> = {};
+const D: Record<string, DType> = Obj.table({});
 const def = (name: string, kind: Kind, size: number, char: string, ctor: any, rank: number) => (D[name] = new DType(name, kind, size, char, ctor, rank));
 def("bool", "b", 1, "?", Uint8Array, 0);
 def("int8", "i", 1, "b", Int8Array, 1);
@@ -60,7 +60,7 @@ def("float32", "f", 4, "f", Float32Array, 3);
 def("float64", "f", 8, "d", Float64Array, 4);
 def("complex64", "c", 8, "F", Float32Array, 3);
 def("complex128", "c", 16, "D", Float64Array, 4);
-const ALIASES: Record<string, string> = {
+const ALIASES: Record<string, string> = Obj.table({
   bool: "bool", bool_: "bool", "?": "bool", b1: "bool",
   int8: "int8", i1: "int8", byte: "int8", int16: "int16", i2: "int16", short: "int16", int32: "int32", i4: "int32", intc: "int32",
   int64: "int64", i8: "int64", int: "int64", int_: "int64", intp: "int64", long: "int64", longlong: "int64", l: "int64", q: "int64",
@@ -69,10 +69,10 @@ const ALIASES: Record<string, string> = {
   float32: "float32", f4: "float32", single: "float32", f: "float32", float64: "float64", f8: "float64", float: "float64", double: "float64", d: "float64",
   float_: "float64", longdouble: "float64", complex64: "complex64", c8: "complex64", F: "complex64", csingle: "complex64",
   complex128: "complex128", c16: "complex128", complex: "complex128", D: "complex128", cdouble: "complex128", complex_: "complex128",
-};
-const RANGE: Record<string, [number, number]> = {
+});
+const RANGE: Record<string, [number, number]> = Obj.table({
   int8: [-128, 127], int16: [-32768, 32767], int32: [-2147483648, 2147483647], uint8: [0, 255], uint16: [0, 65535], uint32: [0, 4294967295],
-};
+});
 
 // Python type objects that name dtypes (float -> float64, np.float64 -> float64, ...).
 const typeDtypes = new Map<any, DType>();
@@ -375,7 +375,7 @@ function assign(out: NDArray, src: NDArray) {
 
 // ------------------------------------------------------------------ from Python values
 
-let scalarCtors: Record<string, any> = {}; // dtype name -> NumPy scalar type (registered by lib/numpy)
+let scalarCtors: Record<string, any> = Obj.table({}); // dtype name -> NumPy scalar type (registered by lib/numpy)
 
 function isSeq(x: any): boolean {
   return Array.isArray(x) || (x !== null && typeof x === "object" && typeName(x) === "range");
@@ -794,7 +794,7 @@ function fdivmod(a: number, b: number): [number, number] {
   return [floordiv, mod];
 }
 
-const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin; noBool?: boolean }> = {
+const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin; noBool?: boolean }> = Obj.table({
   add: { f: (x, y) => x + y, c: (a, b, c, d) => [a + c, b + d] },
   subtract: { f: (x, y) => x - y, c: (a, b, c, d) => [a - c, b - d], noBool: true },
   multiply: { f: (x, y) => x * y, c: (a, b, c, d) => [a * c - b * d, a * d + b * c] },
@@ -824,7 +824,7 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   bitwise_xor: { f: (x, y) => Number(BigInt.asIntN(64, BigInt(x) ^ BigInt(y))) },
   left_shift: { f: (x, y) => x * 2 ** y },
   right_shift: { f: (x, y) => Math.floor(x / 2 ** y) },
-};
+});
 function cdiv(a: number, b: number, c: number, d: number): [number, number] {
   // Smith's algorithm, as NumPy
   if (Math.abs(c) >= Math.abs(d)) {
@@ -1010,7 +1010,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
 
 type Un = (x: number) => number;
 type CUn = (re: number, im: number) => [number, number];
-const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; out?: "bool" }> = {
+const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; out?: "bool" }> = Obj.table({
   negative: { f: (x) => -x, c: (a, b) => [-a, -b], keepInt: true },
   positive: { f: (x) => x, c: (a, b) => [a, b], keepInt: true },
   absolute: { f: Math.abs, keepInt: true },
@@ -1051,7 +1051,7 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   signbit: { f: (x) => +(x < 0 || Object.is(x, -0)), out: "bool" },
   logical_not: { f: (x) => +(x === 0), out: "bool", c: (a, b) => [+(a === 0 && b === 0), 0] },
   invert: { f: (x) => -x - 1, keepInt: true },
-};
+});
 // Complex exp, log, sin and cos without spurious overflow, cancellation or
 // NaN (the systematic review's R2-NUM-F3: log(1.3e308+1.3e308j) and
 // exp(710+pi/4 j) were inf, log(1+1e-8j).real 0, sin(711j) NaN+inf j).
@@ -1129,7 +1129,7 @@ function roundHalfEven(x: number): number {
 }
 
 // Tight loops for unary operations on real data: contiguous or strided.
-const UN_EXPR: Record<string, string> = {
+const UN_EXPR: Record<string, string> = Obj.table({
   negative: "-v", positive: "v", absolute: "Math.abs(v)", square: "v * v", sqrt: "Math.sqrt(v)", cbrt: "FD.cbrt(v)",
   exp: "EXP(v)", exp2: "POW(2, v)", expm1: "FD.expm1(v)", log: "LOG(v)", log2: "FD.log2(v)", log10: "FD.log10(v)",
   log1p: "LOG1P(v)", sin: "FD.sin(v)", cos: "FD.cos(v)", tan: "FD.tan(v)", arcsin: "FD.asin(v)",
@@ -1137,7 +1137,7 @@ const UN_EXPR: Record<string, string> = {
   arcsinh: "FD.asinh(v)", arccosh: "FD.acosh(v)", arctanh: "FD.atanh(v)", floor: "Math.floor(v)", ceil: "Math.ceil(v)",
   trunc: "Math.trunc(v)", isnan: "+(v !== v)", isfinite: "+(v - v === 0)", isinf: "+(v === Infinity || v === -Infinity)",
   deg2rad: "v * (Math.PI / 180)", rad2deg: "v * (180 / Math.PI)", logical_not: "+(v === 0)",
-};
+});
 const unKernels = new Map<string, any>();
 function unaryKernel(op: string, contiguous: boolean): any {
   const key = op + contiguous;
