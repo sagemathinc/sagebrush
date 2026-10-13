@@ -26,7 +26,7 @@
 // shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
 // outputs().
 import { Board, synthetic, type Camera } from "./board";
-import { layout, isBoard, pageCount, pageOf, pageView, codeOrder, cleanDoc, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
 import { BoardCode } from "./code";
 import { Toolbar, defaultTools } from "./toolbar";
 import { effect } from "@preact/signals-core";
@@ -61,6 +61,8 @@ let original: BoardDoc | null = null;
 
 /** Lay out and draw a document, the camera where it is. */
 async function show(d: BoardDoc) {
+  const bad = formatError(d);
+  if (bad) throw new Error(bad);
   if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
   // (only data: whatever it came from, REACT-XSS)
   d = cleanDoc(d);
@@ -120,10 +122,14 @@ async function show(d: BoardDoc) {
   $("title").textContent = d.title ?? "";
   $("tour").hidden = !v.steps?.length && !v.intro;
   pageBar();
-  // (a board's pictures aside: carried, or kept here, they are the same)
-  const same = (a: BoardDoc, b: BoardDoc) => JSON.stringify({ ...a, images: undefined }) === JSON.stringify({ ...b, images: undefined });
-  $("revert").hidden = !original || same(original, d);
+  // (compared with the original as it is shown: cleaned, so that its keys'
+  // order, or the format's name and version added, are no edit)
+  if (original && originalKey?.[0] !== original) originalKey = [original, shownKey(cleanDoc(original))];
+  $("revert").hidden = !original || originalKey![1] === shownKey(d);
 }
+// (a board's pictures aside: carried, or kept here, they are the same)
+const shownKey = (d: BoardDoc) => JSON.stringify({ ...d, images: undefined });
+let originalKey: [BoardDoc, string] | null = null;
 
 // A reader's { } outside Edit: the code items whose code shows (or hides)
 // otherwise than the board says, for this reader only.
@@ -403,6 +409,8 @@ if (embedded()) $("examples").hidden = true;
 $("copyjson").onclick = async () => navigator.clipboard?.writeText(JSON.stringify(await images.inline(doc!), null, 1));
 async function openText(text: string, name?: string) {
   const d = boardFromText(text, name);
+  const bad = formatError(d);
+  if (bad) throw new Error(bad);
   if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
   pageIx = 0;
   await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });

@@ -105,7 +105,11 @@ Closest, its `detail`: the code, the full text, the links. An architecture
 board can be a readable overview and a reference at once.
 
 **Files.** The format is JSON: items keyed by id, plus metadata, saved like
-a notebook (local storage, files, TimeTravel). The notebook's three-way
+a notebook (local storage, files, TimeTravel). Every document says what it
+is, first: `{ "format": "sagebrush-board", "version": 1, ... }` (doc.ts
+`cleanDoc` writes it). A document without it is version 1 (boards written
+before October 13, 2026). Another format, or a later version than the page
+reads, is refused with a message saying so, and the board shown stays. The notebook's three-way
 merge carries over unchanged in spirit, at the granularity of an item's
 field rather than a cell's.
 

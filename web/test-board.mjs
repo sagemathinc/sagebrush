@@ -276,6 +276,7 @@ try {
     const box = (id) => ev(`(() => { const i = window.sagebrush.board.snapshot().items.find((i) => i.id === ${JSON.stringify(id)}); return i && { x: i.x, y: i.y }; })()`);
     const docOf = () => ev("JSON.parse(JSON.stringify(window.sagebrush.board.snapshot().doc))");
     await ev("localStorage.clear(), window.sagebrush.board.editing(true)");
+    check(await ev("document.getElementById('revert').hidden"), "Revert is shown for a board not edited (its format and version, added, are no edit)");
     // show one group's notes, large enough to hit
     await ev("window.board.focus(['nb'], true)");
     await sleep(200);
@@ -586,6 +587,17 @@ try {
     await sleep(500);
     dp = await docOf();
     check(!dp.pages && dp.nodes.length === nodes0, "Delete this page did not leave the board as it was");
+    // the format's name and version: first in every document; a board
+    // without them is version 1; another format or a later version is refused
+    const keys = await ev("Object.keys(window.sagebrush.board.snapshot().doc).slice(0, 2).join()");
+    const port = await ev("window.sagebrush.board.portable().then((d) => JSON.stringify([d.format, d.version]))");
+    check(keys === "format,version" && port === '["sagebrush-board",1]', `the document does not start with its format and version: ${keys} ${port}`);
+    await ev(`window.sagebrush.board.load({ title: "Old", nodes: [{ id: "o1", title: "Written before versions" }] })`);
+    check((await docOf()).version === 1 && (await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "o1", "a board without a version is not read as version 1");
+    for (const [bad, says] of [[{ format: "sagebrush-board", version: 2, nodes: [{ id: "n2" }] }, "version 2"], [{ format: "excalidraw", nodes: [{ id: "x" }] }, "excalidraw"]]) {
+      const err = await ev(`window.sagebrush.board.load(${JSON.stringify(bad)}).then(() => "", (e) => String(e.message))`);
+      check(err.includes(says) && (await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "o1", `a board in ${says} was not refused, or replaced the board shown: ${err}`);
+    }
     await ev("localStorage.clear()");
   }
   check(!errors.length, "page errors: " + errors.join(" | "));
