@@ -975,8 +975,9 @@ export class Board {
       return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, d: Math.hypot(p.x - q.x, p.y - q.y) };
     };
     this.el.addEventListener("pointerdown", (e) => {
-      // (links, buttons, controls, 3D views and the item being edited stay theirs)
-      if ((e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas, .board-editing")) return;
+      // (links, buttons, controls, 3D views, and the fields of the item being
+      // edited, stay theirs; its frame drags it, as any item's does)
+      if ((e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
       cancelAnimationFrame(this.flight);
       if (this.onItemDown && down.size === 0 && e.isPrimary) {
         const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
