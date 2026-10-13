@@ -338,13 +338,10 @@ They also settled several function rules:
 - a real times a complex number keeps a zero part zero (`NaN*1i` is
   $0 + \mathrm{NaN}\,i$).
 
-Sagebrush's `math` module has no `gamma`, `lgamma`, `erf` or `erfc`, so
-lib/_matlab.py computes them:
-- `gamma`: Lanczos (g = 7), exact factorials at the integers;
-- `erf` and `erfc`: a series of positive terms below 2.5, and the
-  continued fraction for the tail.
-
-They agree with Octave to 12 or more digits (test_builtins).
+`gamma`, `gammaln`, `erf` and `erfc` use Python's `math` (src/runtime:
+fdlibm's erf and lgamma, musl's tgamma). `gamma` is exact at the integers,
+as MATLAB's is, and Inf at the poles. They agree with Octave to 12 or more
+digits (test_builtins).
 
 Still to match: `randn` (MATLAB's ziggurat on the twister is not numpy's),
 eigenvector signs (LAPACK's), and `uint64` beyond $2^{53}$.

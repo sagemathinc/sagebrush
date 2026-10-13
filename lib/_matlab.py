@@ -3480,37 +3480,15 @@ _unary("cot", lambda A: 1 / np.tan(A))
 _unary("sind", _sind)
 _unary("cosd", _cosd)
 _unary("tand", lambda A: _sind(A) / _cosd(A))
-# (Sagebrush's math module has no gamma, lgamma, erf or erfc: double-precision versions here)
-_LANCZOS = (0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
-            12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7)
-
-
-def _lanczos_log(x):
-    """log Gamma(x) for x >= 0.5 (Lanczos, g = 7)"""
-    x -= 1
-    a = _LANCZOS[0]
-    t = x + 7.5
-    for i in range(1, 9):
-        a += _LANCZOS[i] / (x + i)
-    return 0.5 * _math.log(2 * _math.pi) + (x + 0.5) * _math.log(t) - t + _math.log(a)
-
-
 def _gamma(x):
+    """MATLAB's gamma: exact (x-1)! at the integers up to 171, Inf at the poles"""
     if x != x or x == -_math.inf:
         return _math.nan
     if x == _math.floor(x):
         if x <= 0:
             return _math.inf
-        if x <= 171:
-            # (exact at the integers, as MATLAB's: (x-1)!)
-            return float(_math.factorial(int(x) - 1))
-        return _math.inf
-    if x < 0.5:
-        # (reflection: Gamma(x) Gamma(1-x) = pi / sin(pi x))
-        return _math.pi / (_math.sin(_math.pi * x) * _gamma(1 - x))
-    if x > 171.7:
-        return _math.inf
-    return _math.exp(_lanczos_log(x))
+        return float(_math.factorial(int(x) - 1)) if x <= 171 else _math.inf
+    return _math.gamma(x)
 
 
 def _lgamma(x):
@@ -3518,65 +3496,13 @@ def _lgamma(x):
         return _math.nan
     if x <= 0 and x == _math.floor(x):
         return _math.inf
-    if x == _math.floor(x) and x <= 171:
-        return _math.log(_math.factorial(int(x) - 1))
-    if x < 0.5:
-        return _math.log(_math.pi / abs(_math.sin(_math.pi * x))) - _lgamma(1 - x)
-    return _lanczos_log(x)
-
-
-def _erfc_cf(x):
-    """erfc(x) for x >= 1: its continued fraction (modified Lentz)"""
-    tiny = 1e-300
-    f = x or tiny
-    C, D = f, 0.0
-    for n in range(1, 2000):
-        a = n / 2.0
-        D = x + a * D
-        D = 1 / (D or tiny)
-        C = x + a / C
-        C = C or tiny
-        delta = C * D
-        f *= delta
-        if abs(delta - 1) < 1e-16:
-            break
-    return _math.exp(-x * x) / (_math.sqrt(_math.pi) * f)
-
-
-def _erf_series(x):
-    """erf(x) for |x| < 3: 2/sqrt(pi) exp(-x^2) sum 2^n x^(2n+1) / (1*3*...*(2n+1)), all terms positive"""
-    term = x
-    total = x
-    x2 = 2 * x * x
-    for n in range(1, 200):
-        term *= x2 / (2 * n + 1)
-        total += term
-        if abs(term) < 1e-17 * abs(total):
-            break
-    return 2 / _math.sqrt(_math.pi) * _math.exp(-x * x) * total
-
-
-def _erf(x):
-    if x != x:
-        return _math.nan
-    if abs(x) < 2.5:
-        return _erf_series(x)
-    e = _erfc_cf(abs(x))
-    return 1 - e if x > 0 else e - 1
-
-
-def _erfc(x):
-    if x != x:
-        return _math.nan
-    if x < 1:
-        return 1 - _erf(x) if x > -2.5 else 2 - _erfc_cf(-x)
-    return _erfc_cf(x)
+    return _math.lgamma(x)
 
 
 _unary("gamma", lambda A: _vec_math(_gamma, A, _math.inf))
 _unary("gammaln", lambda A: _vec_math(_lgamma, A, _math.inf))
-_unary("erf", lambda A: _vec_math(_erf, A))
-_unary("erfc", lambda A: _vec_math(_erfc, A))
+_unary("erf", lambda A: _vec_math(_math.erf, A))
+_unary("erfc", lambda A: _vec_math(_math.erfc, A))
 
 
 def _round_half_away(A):
