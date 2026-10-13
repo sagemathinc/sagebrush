@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sagebrush runner</title>
+<!--
+The runner (design/runner.md): Python's interpreter in a frame with an opaque
+origin.  A page loads this in <iframe sandbox="allow-scripts"> (no
+allow-same-origin), so here there is no cookie, no IndexedDB, no
+localStorage, no page and, by this page's Content-Security-Policy (web/csp.ts),
+no network beyond Sagebrush's own static files.  Its worker, started from a
+blob: URL, inherits all of that.  The page sends one message with a
+MessagePort; from then on messages go page <-> this frame <-> the worker.
+The interrupt flag (a SharedArrayBuffer) stays here: the page asks for Stop
+by message.
+-->
+<script>
+(() => {
+  const base = new URL("../", location.href).href;
+  let started = false;
+  addEventListener("message", async (e) => {
+    if (started || e.source !== parent || !e.data || e.data.sagebrushRunner !== 1 || e.ports.length !== 1) return;
+    started = true;
+    const port = e.ports[0];
+    try {
+      const r = await fetch(base + "sagebrush-worker.js", { credentials: "omit" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const text = await r.text();
+      if (typeof e.data.sha256 === "string") {
+        const h = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        if (h !== e.data.sha256) throw new Error("the interpreter's script is not the one this page was built with");
+      }
+      // (the worker resolves its other files, the engine and the precompiled
+      // library, against this base, as its own URL is a blob:)
+      const url = URL.createObjectURL(new Blob(["self.__SB_BASE__ = " + JSON.stringify(base) + ";\n", text], { type: "text/javascript" }));
+      // (a classic worker: Chrome refuses a module worker from a blob: in an
+      // opaque origin, and the bundle has no imports or exports)
+      const w = new Worker(url, { name: String(e.data.name ?? "") });
+      let flag = null;
+      w.onmessage = (m) => {
+        let d = m.data;
+        if (d && d.ready && d.interrupt) {
+          flag = new Int32Array(d.interrupt);
+          d = { ...d, interrupt: null, interruptible: true };
+        }
+        port.postMessage(d);
+      };
+      w.onerror = (ev) => port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
+      port.onmessage = (m) => {
+        const d = m.data;
+        if (d && typeof d.runnerInterrupt === "number") {
+          if (flag) {
+            Atomics.store(flag, 1, d.runnerInterrupt);
+            Atomics.store(flag, 0, 1);
+          }
+          return;
+        }
+        w.postMessage(d);
+      };
+      port.postMessage({ runnerReady: true });
+    } catch (err) {
+      port.postMessage({ runnerError: String(err && err.message || err) });
+    }
+  });
+})();
+</script>

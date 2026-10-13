@@ -9,7 +9,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { pagePolicy } from "./csp-policy.mts";
+import { pagePolicy, runnerPolicy } from "./csp-policy.mts";
 
 const here = dirname(new URL(import.meta.url).pathname);
 
@@ -51,7 +51,7 @@ export function headersFor(dir: string): string {
   }
   const rules: [string, string][] = [];
   for (const g of [...groups.values()].sort((a, b) => a.patterns[0].localeCompare(b.patterns[0])))
-    for (const pattern of g.patterns) rules.push([pattern, pagePolicy([...g.hashes].sort())]);
+    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" ? runnerPolicy : pagePolicy)([...g.hashes].sort())]);
   // every page: exactly one policy, allowing each of its scripts
   for (const p of pages(dir)) {
     const need = scriptHashes(readFileSync(join(dir, p), "utf8"));

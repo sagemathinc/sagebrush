@@ -48,6 +48,11 @@ jobs:
           (cd web/site && npm ci --silent)
           node web/share/test-share.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+      - name: the runner (Python in an opaque-origin sandboxed frame) in headless Chrome
+        run: |
+          python3 web/serve.py 8765 &
+          sleep 1
+          CHROME=google-chrome node web/test-runner.mjs
       - name: conformance (Node)
         run: python3 conformance/run.py --runtime node --show 20
       - name: conformance (Deno)

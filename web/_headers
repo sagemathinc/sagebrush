@@ -7,3 +7,11 @@
 # the service worker and the page: always revalidated (a deploy shows up at once)
 /sw.js
   Cache-Control: no-cache
+# the interpreter's files, which the runner (an opaque origin: web/runner/)
+# fetches with CORS
+/sagebrush-worker.js
+  Access-Control-Allow-Origin: *
+/sagebrush-engine.wasm
+  Access-Control-Allow-Origin: *
+/sagebrush-precompiled.json
+  Access-Control-Allow-Origin: *
