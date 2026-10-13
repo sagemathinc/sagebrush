@@ -249,6 +249,21 @@ and through its own keyword adapter. Class lookup, a class's `__dict__`,
 form; the raw method runs only where the receiver is known (an instance's own
 attribute lookup), and is never handed to Python.
 
+Its re-review of 65e998a confirmed that, and found two follow-ups, fixed:
+- **CORR-65E-1 (correctness):** coroutine's `send`, `throw` and `close`
+  were the generator's own methods, so through the class they now refused a
+  coroutine. Coroutine has its own methods (doing what the generator's do).
+- **HARD-65E-2 (hardening):** some builtin `__new__` made an instance of any
+  class: int's, str's and float's by keyword (`int.__new__(StrSubclass,
+  "10", base=16)`, a str subclass holding an int), and BaseException's,
+  tuple's and frozenset's at all. Every builtin `__new__` is now an
+  `allocator()` (src/runtime/types.ts): it makes only its own type's
+  subtypes, checked on every way of calling it, as CPython's do.
+
+A test now checks the structure for every builtin type: each method in its
+dict is its own or an ancestor's, and its `__new__` is object's, type's, or
+an allocator for it.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS

@@ -211,6 +211,58 @@ print(out)
   assert.equal(run("print(int.bit_length(1), bool.bit_length(1), bool.bit_length(True))"), "1 1 1\n");
 });
 
+// sagebrush-daybreak CORR-65E-1 and HARD-65E-2 (65e998a): coroutine shared
+// the generator's methods (owned by generator, so now refused for a
+// coroutine through its class), and some builtin __new__ (int's, str's and
+// float's by keyword, BaseException's, tuple's, frozenset's) made an instance
+// of any class, a str subclass holding an int.  The structure, for every
+// builtin type: a method in its dict is its own or an ancestor's, and its
+// __new__ is object's, type's, or an allocator for it (types.ts allocator(),
+// which checks the class it is asked to make, by keyword too).
+test("CORR-65E-1/HARD-65E-2: every builtin type's methods are its own; every builtin __new__ checks the class it makes", () => {
+  void R;
+  const seen = new Set<any>();
+  const walk = (c: any) => {
+    if (!c || seen.has(c)) return;
+    seen.add(c);
+    for (const s of c.$subclasses ?? []) walk(s?.deref?.() ?? s);
+  };
+  for (const v of Object.values(T)) if (v && (v as any).$mro) walk(v);
+  assert.ok(seen.size > 50, `types found: ${seen.size}`);
+  const bad: string[] = [];
+  for (const c of seen) {
+    for (const [k, v] of c.$dict as Map<string, any>) {
+      if (typeof v === "function" && v.$owner !== undefined && !c.$mro.includes(v.$owner)) bad.push(`${c.$name}.${k} is ${v.$owner.$name}'s`);
+    }
+    const nw = c.$dict.get("__new__");
+    if (typeof nw === "function" && c !== T.object && c !== T.type && !(nw.$allocator !== undefined && c.$mro.includes(nw.$allocator))) bad.push(`${c.$name}.__new__ is not an allocator`);
+  }
+  assert.deepEqual(bad, []);
+  const src = `
+import types
+async def f():
+    return 7
+out = []
+for call in (lambda c: type(c).send(c, None), lambda c: vars(type(c))["send"](c, None)):
+    c = f()
+    try:
+        call(c)
+    except StopIteration as e:
+        out.append(e.value)
+class S(str): pass
+class I(int): pass
+for call in (lambda: int.__new__(S, "10", base=16), lambda: str.__new__(I, object="hello"), lambda: BaseException.__new__(types.SimpleNamespace),
+             lambda: tuple.__new__(int), lambda: frozenset.__new__(list), lambda: bytes.__new__(S, source=b"x")):
+    try:
+        call(); out.append("made")
+    except TypeError:
+        out.append("TypeError")
+out.append((int.__new__(I, "10", base=16), str.__new__(S, object="hi"), type(BaseException.__new__(ValueError, 1)).__name__))
+print(out)
+`;
+  assert.equal(run(src), "[7, 7, 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', (16, 'hi', 'ValueError')]\n");
+});
+
 // sagebrush-daybreak SEC-2C5-1 (2c5ccc1): __pyjs_run__ passed any Python
 // object as the compiled code's globals, so a Python function as ns let it
 // read `constructor` through Function.prototype.  Only a module or a dict.
