@@ -697,7 +697,13 @@ double-click lands in the block, at the place, it was on.
   byte for byte).
 
 It takes the Markdown renderer and the typesetter from its host and knows
-nothing of the board, so the notebook's Markdown cells can use it.
+nothing of the board; the notebook's Markdown cells use it too (October 13:
+a rendered cell double-clicked shows its blocks where its text was, and the
+cell's textarea stays the document, written to and followed by the blocks;
+the notebook's own keys, Shift+Enter, Esc, and ↑ and ↓ out of the cell, come
+first: `onKey`, `onEdge`). Its stylesheet, web/board/blocks.css, goes in the
+page once; each host sets its own spacing and headings' sizes.
+web/test-notebook-blocks.mjs (26 checks).
 web/board/test-blocks.mjs (38 checks) drives it with the keyboard;
 test-mobile.mjs taps from block to block.
 

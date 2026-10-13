@@ -1,0 +1,25 @@
+/* The block Markdown editor (blocks.ts), for every page that uses it (the
+   board, the notebook's Markdown cells): put in the page once, first, so a
+   page's own rules win.  A block shows rendered, laid out as the whole text
+   would be; the block being written is its Markdown in a clear textarea over
+   its highlighted copy, in the same font, so the two wrap alike.  A host
+   sets the spacing and the headings' sizes of its own text. */
+.mb-block { cursor: text; }
+.mb-empty { min-height: 1.45em; }
+.mb-empty::before { content: attr(data-placeholder); color: var(--muted, #8a8f99); }
+/* a list's items are blocks of their own, and one list */
+.mb > .mb-item:has(+ .mb-item) > :is(ul, ol) { margin-bottom: 0; }
+.mb > .mb-item + .mb-item > :is(ul, ol) { margin-top: 0; }
+.mb > .mb-item.mb-edit:has(+ .mb-item) { margin-bottom: 0; }
+/* the block being written */
+.mb-edit { position: relative; }
+.mb-edit > pre { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; font: inherit; color: inherit; white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden; pointer-events: none; }
+.mb-edit > textarea { position: relative; display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; font: inherit; color: transparent; caret-color: var(--fg, #1d2330); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mb-edit > textarea::placeholder { color: var(--muted, #8a8f99); }
+.mb-edit > textarea::selection { background: rgba(42, 111, 47, .25); color: transparent; }
+.mb-edit .hk { color: var(--hk, #8a3b8f); } .mb-edit .hb { color: var(--hb, #2a6fb0); } .mb-edit .hs { color: var(--hs, #975200); } .mb-edit .hn { color: var(--hn, #0b7a52); }
+.mb-edit .hc { color: var(--hc, #5f665f); font-style: italic; } .mb-edit .hp { color: var(--hc, #5f665f); } .mb-edit .hd { color: var(--hd, #7f5800); } .mb-edit .hf { color: var(--hf, #2350a8); }
+/* its kind as it is typed: a heading's size and weight; code's font */
+.mb-edit.mb-heading { font-weight: 700; }
+.mb-edit.mb-h1 { font-size: 2em; } .mb-edit.mb-h2 { font-size: 1.5em; } .mb-edit.mb-h3 { font-size: 1.17em; } .mb-edit.mb-h5 { font-size: .83em; } .mb-edit.mb-h6 { font-size: .67em; }
+.mb-edit.mb-code { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }

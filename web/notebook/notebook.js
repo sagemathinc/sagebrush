@@ -16,6 +16,7 @@
 // See web/notebook/README.md.
 import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
+import { BlockEditor } from "../board/blocks.ts";
 import { safeHtml } from "../safe-html.ts";
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
@@ -273,6 +274,8 @@ export function createNotebook(root, opts = {}) {
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
     cell.hl.innerHTML = cell.type === "code" ? highlight(cell.ta.value, isSage()) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
+    if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
 
   // ---------------------------------------------------------- output areas
@@ -896,7 +899,7 @@ export function createNotebook(root, opts = {}) {
   let resizing = 0;
   const resizeAll = () => {
     cancelAnimationFrame(resizing);
-    resizing = requestAnimationFrame(() => cellsEl.querySelectorAll(".ed textarea").forEach(autosize));
+    resizing = requestAnimationFrame(() => cellsEl.querySelectorAll(".ed textarea, .mb-edit textarea").forEach(autosize));
   };
   addEventListener("resize", resizeAll);
   document.fonts?.ready.then(resizeAll);
@@ -996,9 +999,9 @@ export function createNotebook(root, opts = {}) {
       + `<div class="head" role="toolbar"><span class="drag" draggable="true" title="Drag to move the cell" aria-hidden="true">⠿</span><select data-a="type" aria-label="Cell type" title="Cell type (M: Markdown, Y: code, R: raw)"><option value="code">Code</option><option value="markdown">Markdown</option><option value="raw">Raw</option></select><button data-a="up" title="Move up (Alt+↑)" aria-label="Move up">↑</button><button data-a="down" title="Move down (Alt+↓)" aria-label="Move down">↓</button><button data-a="del" title="Delete (D D; Z undoes)" aria-label="Delete">${TRASH_SVG}</button><button data-a="menu" aria-haspopup="menu" aria-expanded="false" title="Cell actions">⋯</button></div>`
       + `<div class="adder"><button data-a="addcode" title="Insert a code cell below">+ Code</button><button data-a="addmd" title="Insert a Markdown (text) cell below">+ Text</button></div>`;
     const q = (s) => el.querySelector(s);
-    const cell = { id: id ?? cellId(), el, type: "code", ta: q("textarea"), hl: q(".ed pre"), out: q(".out"), md: q(".mdout"), time: q(".time"), n: q(".n"), runb: q(".runb"), typeSel: q('[data-a="type"]'), menuBtn: q('[data-a="menu"]'), attachments: null, metadata: null };
+    const cell = { id: id ?? cellId(), el, type: "code", ta: q("textarea"), hl: q(".ed pre"), out: q(".out"), md: q(".mdout"), time: q(".time"), n: q(".n"), runb: q(".runb"), typeSel: q('[data-a="type"]'), menuBtn: q('[data-a="menu"]'), attachments: null, metadata: null, blocks: null, blocksText: null };
     el.cell = cell;
-    cell.md.addEventListener("dblclick", () => { if (!opts.readOnly) editMd(cell); });
+    cell.md.addEventListener("dblclick", (e) => { if (!opts.readOnly) editMd(cell, { x: e.clientX, y: e.clientY }); });
     cell.ta.value = code;
     cell.ta.readOnly = !!opts.readOnly;
     cell.ta.addEventListener("input", () => { autosize(cell.ta); paint(cell); refilter(cell); markEdited(cell); });
@@ -1023,7 +1026,7 @@ export function createNotebook(root, opts = {}) {
     autosize(cell.ta);
     paint(cell);
     relabel();
-    if (focus) cell.ta.focus();
+    if (focus) focusInput(cell, "start");
     return cell;
   }
 
@@ -1047,6 +1050,7 @@ export function createNotebook(root, opts = {}) {
   function edit(cell, where) {
     if (!cell) return;
     if (cell.el.classList.contains("rendered")) return select(cell); // rendered Markdown: Enter edits it
+    if (ensureBlocks(cell)) { cell.blocks.focus(where === "start" ? "start" : "end"); cell.el.scrollIntoView({ block: "nearest" }); return; }
     cell.ta.focus({ preventScroll: true });
     if (where === "start") cell.ta.setSelectionRange(0, 0);
     else if (where === "end") cell.ta.setSelectionRange(cell.ta.value.length, cell.ta.value.length);
@@ -1325,6 +1329,10 @@ export function createNotebook(root, opts = {}) {
     cell.runb.title = cell.type === "markdown" ? "Show the text (Shift+Enter)" : cell.type === "raw" ? "Raw text: not run" : "Run (Shift+Enter)";
     cell.typeSel.value = cell.type;
     if (cell.type !== "code") { forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; }
+    // (a Markdown cell being written is blocks; one about to be shown rendered,
+    // as a notebook's are when it opens, is not made blocks first)
+    if (cell.type === "markdown") queueMicrotask(() => ensureBlocks(cell));
+    else closeBlocks(cell);
     paint(cell);
     relabel();
   }
@@ -1333,6 +1341,7 @@ export function createNotebook(root, opts = {}) {
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (!lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
+    closeBlocks(cell);
     cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
     if (cell.md.querySelector(".math")) {
@@ -1341,10 +1350,65 @@ export function createNotebook(root, opts = {}) {
     }
     schedule();
   }
-  function editMd(cell) {
+  // (at: where it was double-clicked: that block, the caret there; nothing
+  // moves, as the blocks are laid out as the text was shown)
+  function editMd(cell, at) {
     cell.el.classList.remove("rendered");
+    if (ensureBlocks(cell)) return cell.blocks.focus(at ?? "end");
     autosize(cell.ta);
     cell.ta.focus();
+  }
+  // A Markdown cell being written: its text as blocks (web/board/blocks.ts),
+  // each shown rendered until it is clicked, then its own Markdown, as a
+  // board's text is.  The cell's textarea keeps the text: what is saved,
+  // merged, recorded and run; the blocks write to it, and follow it (paint).
+  const ensureBlocks = (cell) => (cell.type === "markdown" && !cell.el.classList.contains("rendered") && cell.el.isConnected ? openBlocks(cell) : cell.blocks);
+  function openBlocks(cell) {
+    if (cell.blocks || opts.readOnly) return cell.blocks;
+    const b = new BlockEditor(cell.ta.value, {
+      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments }),
+      typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
+      highlight: (src) => highlightMarkdown(src, isSage()),
+      placeholder: "Text: Markdown, with math: $x^2$",
+      onChange: (v) => { cell.blocksText = v; cell.ta.value = v; cell.ta.dispatchEvent(new Event("input")); },
+      onKey: (e) => mdKey(cell, e),
+      onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
+    });
+    cell.blocks = b;
+    cell.blocksText = cell.ta.value;
+    cell.ta.closest(".ed").before(b.el);
+    cell.el.classList.add("blocks");
+    return b;
+  }
+  function closeBlocks(cell) {
+    if (!cell.blocks) return;
+    cell.blocks.el.remove();
+    cell.blocks = cell.blocksText = null;
+    cell.el.classList.remove("blocks");
+  }
+  // The notebook's keys in a block being written: Shift/Ctrl/Alt+Enter show
+  // the text (and go on), Esc is command mode, Alt+↑/↓ move the cell.
+  function mdKey(cell, e) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (e.key === "Enter" && (e.shiftKey || mod || e.altKey)) {
+      e.preventDefault();
+      run(cell);
+      if (e.shiftKey) advance(cell);
+      else if (e.altKey && !opts.readOnly) addCell("", { after: cell.el }, true);
+    } else if (e.key === "Escape" || (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "m")) {
+      e.preventDefault();
+      select(cell);
+    } else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      move(cell, e.key === "ArrowUp" ? -1 : 1);
+    } else return false;
+    return true;
+  }
+  // Write in a cell: its blocks (Markdown) or its editor.
+  function focusInput(cell, where = "end") {
+    if (ensureBlocks(cell)) return cell.blocks.focus(where);
+    cell.ta.focus();
+    if (where === "start") cell.ta.setSelectionRange(0, 0);
   }
 
   // Accessible names: "Cell 3", "Cell 3 code", ...
@@ -1361,7 +1425,8 @@ export function createNotebook(root, opts = {}) {
   function advance(cell) {
     const next = nextCell(cell) ?? (opts.readOnly ? null : addCell("", { after: cell.el }));
     if (!next) return;
-    (next.el.classList.contains("rendered") ? next.md : next.ta).focus();
+    if (next.el.classList.contains("rendered")) next.md.focus();
+    else focusInput(next, "start");
     next.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
   function move(cell, d) {
@@ -1413,9 +1478,9 @@ export function createNotebook(root, opts = {}) {
       case "below": return void addCell("", { after: cell.el }, true);
       case "up": move(cell, -1); return cell.menuBtn.focus();
       case "down": move(cell, 1); return cell.menuBtn.focus();
-      case "type": setType(cell, cell.type === "markdown" ? "code" : "markdown"); schedule(); return cell.ta.focus();
+      case "type": setType(cell, cell.type === "markdown" ? "code" : "markdown"); schedule(); return focusInput(cell);
       case "split": return split(cell);
-      case "clear": if (cell.type === "markdown") return cell.ta.focus(); forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
+      case "clear": if (cell.type === "markdown") return focusInput(cell); forgetInteracts(cell.out); cell.out.textContent = ""; cell.time.textContent = ""; cell.n.textContent = "[ ]"; return cell.ta.focus();
       case "delete": return remove(cell);
       case "manual": setManual(cell, !cell.metadata?.sagebrush?.manual); return cell.menuBtn.focus();
     }

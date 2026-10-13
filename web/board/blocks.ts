@@ -17,6 +17,16 @@
 // Nothing here is the board's: the notebook's Markdown cells can use it.
 
 import { highlightMarkdown } from "../notebook/highlight.js";
+import css from "./blocks.css" with { type: "text" };
+
+// (its stylesheet, once a page, first: the page's own rules win)
+function addStyle() {
+  if (document.querySelector("style[data-mb]")) return;
+  const s = document.createElement("style");
+  s.dataset.mb = "";
+  s.textContent = css;
+  document.head.prepend(s);
+}
 
 export type BlockKind = "paragraph" | "heading" | "item" | "quote" | "math" | "code";
 
@@ -101,6 +111,10 @@ export interface BlockEditorOptions {
   placeholder?: string;
   /** after every change of the text */
   onChange?: (value: string) => void;
+  /** a key in the block being written, before the editor's own: true if the host took it (a notebook's Shift+Enter) */
+  onKey?: (e: KeyboardEvent) => boolean;
+  /** ↑ on the first line of the first block, ↓ on the last of the last: true if the host moved on (to another cell) */
+  onEdge?: (up: boolean) => boolean;
 }
 
 export class BlockEditor {
@@ -114,6 +128,7 @@ export class BlockEditor {
   private pressed = false; // a block pressed, its click to come
 
   constructor(value: string, private o: BlockEditorOptions) {
+    addStyle();
     this.el.className = "mb";
     this.blocks = splitOne(value);
     this.box.className = "be-md mb-edit";
@@ -247,7 +262,7 @@ export class BlockEditor {
   }
 
   private key(e: KeyboardEvent) {
-    if (e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.isComposing || this.o.onKey?.(e) || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
     const ta = this.ta, s = ta.selectionStart, end = ta.selectionEnd, n = ta.value.length, i = this.active;
     const none = s === end;
     const go = (j: number, caret: number | { x: number; y: number }) => { e.preventDefault(); this.activate(j, caret); };
@@ -264,9 +279,10 @@ export class BlockEditor {
     else if (e.key === "ArrowRight" && !e.shiftKey && none && s === n && i < this.blocks.length - 1) go(i + 1, 0);
     else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && none) {
       const up = e.key === "ArrowUp", j = up ? i - 1 : i + 1;
-      if (j < 0 || j >= this.blocks.length) return;
       const r = this.caretRect(s), edge = this.caretRect(up ? 0 : n);
       if (!r || !edge || Math.abs(r.top - edge.top) > r.height / 2) return; // (not its first or last line: the textarea's own)
+      // (the first block's first line, the last's last: the host's, if it goes on from there)
+      if (j < 0 || j >= this.blocks.length) { if (this.o.onEdge?.(up)) e.preventDefault(); return; }
       e.preventDefault();
       const x = r.left;
       this.activate(j, up ? Infinity : 0);
