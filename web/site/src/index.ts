@@ -1,16 +1,20 @@
 import { env } from "cloudflare:workers";
 import { handleAtlas } from "../../atlas/server.ts";
+import { handleShare, scheduled, type ShareEnv } from "../../share/server.ts";
 import { BUILD } from "./build-id.ts";
 
 // Static assets are served before this runs.  The atlas's pages are
 // rendered here from its static data (web/atlas), and kept in the edge
 // cache for as long as their Cache-Control allows (KaTeX makes a large
 // page cost tens of milliseconds to render), under a key with the build's
-// id (web/build.ts writes it), so that a deploy is seen at once; anything
-// else is a 404 page.
+// id (web/build.ts writes it), so that a deploy is seen at once.  The share
+// API (/auth/, /api/share/, /api/admin/) is web/share/server.ts, on where
+// its bindings are (the dev site for now).  Anything else is a 404 page.
 export default {
   async fetch(request, _env, ctx) {
     const url = new URL(request.url);
+    const shared = await handleShare(request, env as ShareEnv, ctx);
+    if (shared) return shared;
     if (url.pathname === "/atlas" || url.pathname.startsWith("/atlas/")) {
       const cache = caches.default;
       // JSON and HTML differ by Accept for the same URL
@@ -29,5 +33,8 @@ export default {
       }
     }
     return env.ASSETS.fetch(request);
+  },
+  async scheduled() {
+    await scheduled(env as ShareEnv);
   },
 } satisfies ExportedHandler;
