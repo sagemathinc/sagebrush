@@ -238,6 +238,12 @@ test("CORR-65E-1/HARD-65E-2: every builtin type's methods are its own; every bui
     if (typeof nw === "function" && c !== T.object && c !== T.type && !(nw.$allocator !== undefined && c.$mro.includes(nw.$allocator))) bad.push(`${c.$name}.__new__ is not an allocator`);
   }
   assert.deepEqual(bad, []);
+  // and a function in a builtin type's dict with neither an owner nor an
+  // allocator is one of these, which apply to any object (every value is an
+  // object) or make classes: a new builtin cannot fall outside the rules unseen
+  const ownerless: string[] = [];
+  for (const c of seen) for (const [k, v] of c.$dict as Map<string, any>) if (typeof v === "function" && v.$owner === undefined && v.$allocator === undefined) ownerless.push(`${c.$name}.${k}`);
+  assert.deepEqual(ownerless.sort(), ["object.__eq__", "object.__ge__", "object.__gt__", "object.__hash__", "object.__init__", "object.__le__", "object.__lt__", "object.__ne__", "object.__new__", "object.__setattr__", "type.__new__", "type.__prepare__"]);
   const src = `
 import types
 async def f():
