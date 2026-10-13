@@ -6,8 +6,8 @@
  "nodes": [
   {
    "id": "q",
-   "title": "How do you solve polynomial equations over $\\mathbb{Q}$?",
-   "text": "Find the **rational** solutions of $f(x_1, \\ldots, x_n) = 0$, with $f$ having rational coefficients.",
+   "title": "How do you solve polynomial equations?",
+   "text": "Over $\\mathbb{Q}$: find the **rational** solutions of $f(x_1, \\ldots, x_n) = 0$, with $f$ having rational coefficients.",
    "color": "#f3e3b5",
    "shape": "round",
    "w": 360
