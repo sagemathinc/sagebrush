@@ -186,8 +186,9 @@ async function load(d: BoardDoc) {
 /** Show page i (0-based), from its start. */
 async function page(i: number) {
   if (!doc) return;
-  pageIx = Math.max(0, Math.min(pageCount(doc) - 1, i));
+  // (first: what is being written is kept on its own page)
   editor.clear();
+  pageIx = Math.max(0, Math.min(pageCount(doc) - 1, i));
   await show(doc);
   step(-1, true);
 }

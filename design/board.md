@@ -479,9 +479,9 @@ the boxes whose tops lie above the middle of the row's shortest box.
   then what reads it does. ▶ on an item runs it again. Deleting an item
   removes its definitions, and moving one reruns what now sees a different
   definition.
-- **Editing.** In Edit, double-clicking a code item opens its editor.
-  Shift+Enter (or Run) saves and runs it. The toolbar's Code adds one at
-  the center of the view.
+- **Editing.** In Edit, double-clicking a code item makes its code editable
+  where it is. Shift+Enter (or ▶ on its toolbar) keeps the change and runs
+  it. The toolbar's Code adds one at the center of the view.
 - **Layout.** An item grows to hold its output: its height is measured with
   a copy of the output, again as the output changes, at most once a frame.
   The board keeps every element whose item shows the same, now mounted as
@@ -534,10 +534,10 @@ instead of each change having to remember every element that shows it. The
 renderer stays imperative.
 
 **Phones** (October 12). On a small or touch screen:
-- **The editor is a sheet:** as wide as the screen, at the top of the visual
-  viewport, so the iPhone's keyboard, which does not resize the page, never
-  covers it. Its buttons (Run, Done) come first, and it follows the
-  keyboard as it opens.
+- **An item's toolbar is docked** along the bottom of the visual viewport,
+  just above the keyboard (the iPhone's keyboard does not resize the page),
+  and the field being written is panned into view above it (see "Editing
+  in place").
 - **A double tap is a double-click:** the board detects it itself, since not
   every browser makes one.
 - **Undo is in the default toolbar.**
@@ -598,15 +598,15 @@ same optional parts, shown in this order and edited in it:
 - link.
 
 A note with `code` is a code item, whatever else it has. `kind: "code"`
-is gone; documents that say it still open, as notes with code. The editor
-shows the parts a note has, and the others as small "+ Code", "+ Detail"
-and "+ Link" buttons, so a plain note's editor stays plain. Code left empty
-makes it a plain note again. The code is written in the notebook's editor,
-its highlighted code under a clear textarea, once the notebook is loaded.
+is gone; documents that say it still open, as notes with code. Editing
+shows the parts a note has, and its toolbar offers the others ("+ code",
+"+ detail", "+ link"), so a plain note stays plain. Code left empty makes
+it a plain note again. The code is highlighted under a clear textarea, in
+the board's language once the notebook is loaded.
 
 **Hiding code.** `hideCode: true` shows a code item's output without its
-code. The editor has a switch for it, and `{ }` in the item's head toggles
-it:
+code. `{ }` in the item's head (and on its toolbar while it is edited)
+toggles it:
 - in Edit it changes the board, and is undoable;
 - outside Edit it shows or hides the code for this reader only, without
   changing the document.
@@ -637,6 +637,35 @@ far out the canvas draws the picture itself.
   shape, and any other note's height follows its text. It is one undo step.
 
 web/board/test-images.mjs (27 checks, in CI) covers all of this.
+
+**Editing in place** (October 13, William's design: the panel over an item
+was "jarring"). In Edit, a double-click (a double tap, Enter, or a new
+note) edits an item where it is (web/board/inplace.ts):
+- **It stays.** It keeps its place, its width and its look; its parts
+  become fields in its own element: the title as a title, the text as its
+  Markdown (highlighted as a notebook's Markdown cells are), the code in the
+  same box, highlighted, and the detail and the link when it has them. The
+  field double-clicked gets the caret, where it was clicked. Far out, the
+  camera first comes close enough to write in.
+- **Its toolbar** floats above it (below it when there is no room; on a
+  phone, docked above the keyboard): ▶ run, `{ }`, + image, + code,
+  + detail, + link, color, delete. A + is shown only for a part it lacks;
+  run and `{ }` only for code. Color is eight light tints and none, in the
+  `color` field. A picture being edited has ✕ to take it off.
+- **No Cancel.** A click outside, or Esc, leaves, keeping what was
+  written; undo takes it back. A whole visit is one undo step: its runs
+  (Shift+Enter keeps the change, runs it, and stays), its toolbar's changes
+  and what is kept on leaving. A part left empty is taken off; a new note
+  left empty is not kept, and leaves no undo step.
+- **The board keeps the element** while it is edited: laid out again (its
+  code run, say), it is placed but not rebuilt, so its fields and output
+  stay; it stays mounted wherever the camera goes. Its height follows its
+  fields. Undo, or the item removed by an agent, ends editing.
+- Keys and pastes in a field are the field's: no shortcut of the board's
+  or the tour's sees them.
+
+web/board/test-inplace.mjs (57 checks) does all of this with the mouse and
+keyboard; test-mobile.mjs with touch, the keyboard up.
 
 ## Open questions
 

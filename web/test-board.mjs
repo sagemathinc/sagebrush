@@ -328,7 +328,7 @@ try {
     const empty = await ev("({ x: innerWidth / 2, y: innerHeight / 2 })");
     await mouse("mousePressed", empty.x, empty.y, { clickCount: 1 }); await mouse("mouseReleased", empty.x, empty.y, { clickCount: 1, buttons: 0 });
     await mouse("mousePressed", empty.x, empty.y, { clickCount: 2 }); await mouse("mouseReleased", empty.x, empty.y, { clickCount: 2, buttons: 0 });
-    await until("document.querySelector('.board-editor .be-title') === document.activeElement", 5000);
+    await until("document.querySelector('.board-editing .be-title') === document.activeElement", 5000);
     await send("Input.insertText", { text: "A new note" });
     await ev("document.querySelector('.be-text').focus()");
     await send("Input.insertText", { text: "with $x^2$" });
@@ -458,9 +458,9 @@ try {
       check(await ev("document.querySelector('.board-toolbar [data-tool=connect]').getAttribute('aria-pressed') === 'false'"), "Escape leaves Connect");
       const n0 = (await docOf()).nodes.length;
       await ev("document.querySelector('.board-toolbar [data-tool=note]').click(), 1");
-      await until("!!document.querySelector('.board-editor .be-title')", 5000);
-      check((await docOf()).nodes.length === n0 + 1, "Note adds a note, its editor open");
-      await ev("document.querySelector('.board-editor .be-title').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      await until("!!document.querySelector('.board-editing .be-title')", 5000);
+      check((await docOf()).nodes.length === n0 + 1, "Note adds a note, being written where it is");
+      await ev("document.querySelector('.board-editing .be-title').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
       await sleep(400);
       check((await docOf()).nodes.length === n0, "a new note left empty is not kept");
       await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
