@@ -766,12 +766,15 @@ export class Editor {
     };
     const choosePic = () => {
       const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp" });
+      input.style.cssText = "position:fixed;left:-9999px";
       input.onchange = async () => {
+        input.remove();
         const f = input.files?.[0], ready = f ? await prepare(f) : null;
         if (!ready || !this.images) return;
         pic = { key: await this.images.put(ready.blob), info: { w: ready.w, h: ready.h } };
         showPic();
       };
+      document.body.append(input);
       input.click();
     };
     const show = (k: string, focus: boolean) => {
