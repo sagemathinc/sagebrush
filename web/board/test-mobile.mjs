@@ -109,6 +109,26 @@ try {
   await tap(ab.x, ab.y);
   check(await until("!!document.querySelector('.board-editing .be-title')", 3000), "a double tap edits a note in Edit");
   await tapEl("#top");
+  await sleep(600);
+  // its text's blocks: a tap writes in one, a tap on another (the first, shown again, is now two) writes in that one
+  await ev("window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === 'about').text = 'First block\\n\\nSecond block\\n\\nThird block'; }).then(() => 1)");
+  await ev("window.board.focus(['about'], true)");
+  await sleep(500);
+  const ab2 = await ev("(() => { const r = window.board.clientRect('about'); return { x: r.left + r.width / 2, y: r.top + 14 }; })()");
+  await tap(ab2.x, ab2.y);
+  await sleep(80);
+  await tap(ab2.x, ab2.y);
+  await until("!!document.querySelector('.board-editing .mb')", 3000);
+  const blockMid = (i) => ev(`(() => { const r = document.querySelector('.board-editing .mb').children[${i}].getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2 }; })()`);
+  let bm = await blockMid(0);
+  await tap(bm.x, bm.y);
+  check(await until("document.activeElement?.closest?.('.mb-edit') && document.activeElement.value === 'First block'", 3000), "a tap on a block writes in it: " + await ev("document.activeElement?.value"));
+  await ev("(() => { const t = document.activeElement; t.value = 'First\\n\\nblock, now two'; t.dispatchEvent(new Event('input')); return 1; })()");
+  bm = await blockMid(2);
+  await tap(bm.x, bm.y);
+  check(await until("document.activeElement?.closest?.('.mb-edit') && document.activeElement.value === 'Third block'", 3000), "a tap on another block writes in that one: " + await ev("document.activeElement?.value"));
+  await tapEl("#top");
+  check(await until("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'about').text === 'First\\n\\nblock, now two\\n\\nSecond block\\n\\nThird block'", 3000), "what was written is kept: " + await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'about').text)"));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

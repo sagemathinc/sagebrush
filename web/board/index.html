@@ -138,6 +138,20 @@
   .board-editing .be-md > pre { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; font: inherit; scrollbar-gutter: auto; }
   .board-editing .be-md > textarea { scrollbar-gutter: auto; color: transparent; caret-color: #1d2330; }
   .board-editing .board-detail { opacity: 1; }
+  /* the text as blocks (blocks.ts): each rendered until clicked, then its Markdown where it was.
+     Laid out as the text is shown whole: margins collapse through the blocks, a paragraph keeps
+     its space below unless it ends the text, and a list's items are one list */
+  .mb > .mb-block:not(:last-child) > p:last-child { margin-bottom: 6px; }
+  .mb > .mb-item:has(+ .mb-item) > :is(ul, ol) { margin-bottom: 0; }
+  .mb > .mb-edit:not(:last-child) { margin-bottom: 6px; }
+  .mb > .mb-item.mb-edit:has(+ .mb-item) { margin-bottom: 0; }
+  .board-editing .mb-block { cursor: text; border-radius: 3px; }
+  .board-editing .mb-block:hover { background: rgba(0, 0, 0, .03); }
+  .mb-empty { min-height: 1.45em; }
+  .mb-empty::before { content: attr(data-placeholder); color: #8a8f99; }
+  .mb-edit.mb-heading { font-weight: 700; }
+  .mb-edit.mb-h1 { font-size: 2em; } .mb-edit.mb-h2 { font-size: 1.5em; } .mb-edit.mb-h3 { font-size: 1.17em; } .mb-edit.mb-h5 { font-size: .83em; } .mb-edit.mb-h6 { font-size: .67em; }
+  .mb-edit.mb-code { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .board-editing .be-ref { margin-top: 6px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #2a6f2f; }
   .board-editing .be-md:focus-within, .board-editing .be-title:focus, .board-editing .be-ref:focus { background: rgba(0, 0, 0, .04); }
   .board-editing .be-pic { position: relative; }

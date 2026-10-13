@@ -473,7 +473,7 @@ export class Board {
         run.onclick = (e) => { e.stopPropagation(); this.code?.run(id); };
         head.append(run);
       }
-      if (it.title) head.append(Object.assign(document.createElement("b"), { textContent: it.title }));
+      if (it.title) head.append(titleEl(it.title));
       if (this.onToggleCode && it.id) {
         const id = it.id, t = document.createElement("button");
         t.className = "board-code-toggle" + (it.hideCode ? " off" : "");
@@ -485,9 +485,7 @@ export class Board {
       }
       el.append(head);
     } else if (it.title) {
-      const h = document.createElement("b");
-      h.textContent = it.title;
-      el.append(h);
+      el.append(titleEl(it.title));
     }
     // its picture (as wide as the note; its height from its shape, before it loads)
     if (it.image) {
@@ -734,8 +732,8 @@ export class Board {
         if (sw < 100 || (sw > 1000 && parents.has(g.id))) continue;
         // the title, or without its parenthetical when that is larger
         const size = (t: string) => Math.min(22, (g.w * c.z) / (t.length * 0.62), 11 + 11 / (1 + (g.depth ?? 0)));
-        const short = g.title!.replace(/\s*\(.*\)\s*$/, "");
-        const title = size(short) > size(g.title!) + 3 ? short : g.title!, px = size(title);
+        const full = plainTitle(g.title!), short = full.replace(/\s*\(.*\)\s*$/, "");
+        const title = size(short) > size(full) + 3 ? short : full, px = size(title);
         if (px < 11) continue;
         ctx.font = `600 ${px / c.z}px system-ui, sans-serif`;
         ctx.lineWidth = 4 / c.z;
@@ -1044,11 +1042,34 @@ function showState(el: HTMLElement, state: string) {
   for (const s of STATES) el.classList.toggle("code-" + s, s === state);
 }
 
+// A title: its text, and its math ($...$, \(...\), as in Markdown) as
+// elements KaTeX typesets; built as text and elements, never from markup.
+const TITLE_MATH = /\$(?!\s)((?:\\.|[^\\$\n])+?)(?<!\s)\$(?!\d)|\\\(([\s\S]+?)\\\)/g;
+function titleEl(title: string): HTMLElement {
+  const b = document.createElement("b");
+  let last = 0;
+  for (const m of title.matchAll(TITLE_MATH)) {
+    b.append(title.slice(last, m.index));
+    const s = document.createElement("span");
+    s.className = "math";
+    s.dataset.tex = (m[1] ?? m[2]).trim();
+    s.textContent = m[0];
+    b.append(s);
+    last = m.index + m[0].length;
+  }
+  b.append(title.slice(last));
+  return b;
+}
+/** A title as plain text (drawn on a canvas, or as an SVG label): its math as its TeX. */
+export function plainTitle(title: string): string {
+  return title.replace(TITLE_MATH, (_, a, b) => (a ?? b).trim());
+}
+
 // What a note shows far out: its title, or else its text's first line
 // without Markdown (a flowchart's notes have only text)
 const farLabels = new WeakMap<Item, string>();
 export function farLabel(it: Item): string {
-  if (it.title) return it.title;
+  if (it.title) return plainTitle(it.title);
   let t = farLabels.get(it);
   if (t === undefined && !it.text && it.code) farLabels.set(it, (t = it.code.split("\n").find((l) => l.trim())?.trim() ?? ""));
   if (t === undefined) {

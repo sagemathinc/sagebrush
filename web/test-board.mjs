@@ -330,9 +330,9 @@ try {
     await mouse("mousePressed", empty.x, empty.y, { clickCount: 2 }); await mouse("mouseReleased", empty.x, empty.y, { clickCount: 2, buttons: 0 });
     await until("document.querySelector('.board-editing .be-title') === document.activeElement", 5000);
     await send("Input.insertText", { text: "A new note" });
-    await ev("document.querySelector('.be-text').focus()");
+    await ev("document.querySelector('.board-editing .mb-block').click(), 1");
     await send("Input.insertText", { text: "with $x^2$" });
-    await ev("document.querySelector('.be-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))");
+    await ev("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))");
     await sleep(400);
     const d2 = await docOf(), added = d2.nodes.find((n) => n.title === "A new note");
     check(added && added.text === "with $x^2$" && typeof added.x === "number", "double-click did not add the note");

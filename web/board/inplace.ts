@@ -3,7 +3,8 @@
 // become editable there, in the order it shows them:
 // - the title, as a title;
 // - the picture (✕ takes it off);
-// - the text: Markdown, highlighted as a notebook's Markdown cells are;
+// - the text, as blocks: each shown rendered until it is clicked, then its
+//   Markdown, highlighted (blocks.ts);
 // - the code, in the same box, highlighted; Shift+Enter runs it;
 // - the detail and the link, when it has them.
 // A small toolbar floats above it (on a phone, above the keyboard): run,
@@ -16,6 +17,7 @@ import type { BoardDoc, DocGroup, DocNote } from "./doc";
 import { prepare, type Images, type ImageInfo } from "./images";
 import { highlight as highlightPython, highlightMarkdown } from "../notebook/highlight.js";
 import { icon } from "./icons";
+import { BlockEditor } from "./blocks";
 
 /** A note's colors: light tints, under which text reads as on white. */
 export const COLORS: [string, string][] = [
@@ -47,7 +49,7 @@ export class InPlace {
   private colors: HTMLElement | null = null;
   private group = false;
   private title!: HTMLTextAreaElement;
-  private text!: HTMLTextAreaElement;
+  private text!: BlockEditor;
   private code: HTMLTextAreaElement | null = null;
   private codePart: HTMLElement | null = null;
   private detail: HTMLTextAreaElement | null = null;
@@ -96,17 +98,23 @@ export class InPlace {
     this.fit();
     // the field to write in: the one double-clicked, where it was; else a
     // code item's code, a new or untitled note's title, or the end of its text
+    let first: HTMLTextAreaElement | HTMLInputElement;
     const hit = shown?.part === "title" ? this.title : shown?.part === "code" ? this.code : p ? this.fieldAt(p.x, p.y) : null;
-    const first = hit ?? (this.hasCode && !this.hideCode ? this.code! : this.fresh || !note.text ? this.title : this.text);
-    const k = shown && hit !== this.text ? Math.min(shown.offset, first.value.length) : (hit && p && caretAt(hit, p.x, p.y)) ?? first.value.length;
-    first.focus({ preventScroll: true });
-    first.setSelectionRange(k, k);
+    if (hit === "text" || (!hit && !(this.hasCode && !this.hideCode) && !this.fresh && note.text)) {
+      this.text.focus(hit === "text" && p ? p : "end");
+      first = this.text.field!;
+    } else {
+      first = (hit as HTMLTextAreaElement | HTMLInputElement | null) ?? (this.hasCode && !this.hideCode ? this.code! : this.title);
+      const k = shown ? Math.min(shown.offset, first.value.length) : (hit && p && caretAt(first, p.x, p.y)) ?? first.value.length;
+      first.focus({ preventScroll: true });
+      first.setSelectionRange(k, k);
+    }
     // (a double tap is followed by its mouse events, whose press takes the
     // focus to where the tap was: given back, in the click, so that a phone's keyboard opens)
     const back = () => { if (!this.ended && !this.el.contains(document.activeElement)) first.focus({ preventScroll: true }); };
     document.addEventListener("click", back, true);
     setTimeout(() => document.removeEventListener("click", back, true), 700);
-    requestAnimationFrame(() => { this.fit(); this.place(); this.reveal(); });
+    requestAnimationFrame(() => { this.fit(); this.room(); this.place(); this.reveal(); });
     return true;
   }
 
@@ -114,11 +122,11 @@ export class InPlace {
     const { board } = this.host, r = board.el.getBoundingClientRect(), c = board.camera;
     return { x: r.left + (w.x - c.x) * c.z, y: r.top + (w.y - c.y) * c.z };
   }
-  // the field at a point of the page, if any
-  private fieldAt(x: number, y: number): HTMLTextAreaElement | HTMLInputElement | null {
-    for (const f of [this.title, this.text, this.code, this.detail, this.ref]) {
+  // the field at a point of the page, if any ("text": the blocks)
+  private fieldAt(x: number, y: number): HTMLTextAreaElement | HTMLInputElement | "text" | null {
+    for (const f of [this.title, this.text.el, this.code, this.detail, this.ref]) {
       const r = f && !f.closest("[hidden]") && f.getBoundingClientRect();
-      if (r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return f;
+      if (r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return f === this.text.el ? "text" : (f as HTMLTextAreaElement | HTMLInputElement);
     }
     return null;
   }
@@ -137,8 +145,15 @@ export class InPlace {
       head.querySelector(":scope > b")?.remove();
       head.insertBefore(this.title, head.querySelector(".board-code-toggle"));
     }
-    this.text = area("be-text", n.text ?? "", this.group ? "Text (Markdown)" : "Text: Markdown, with math: $x^2$");
-    const text = markdownField(this.text);
+    const { board } = this.host;
+    this.text = new BlockEditor(n.text ?? "", {
+      render: (s) => board.markdown?.(s) ?? esc(s),
+      typeset: board.typeset,
+      placeholder: this.group ? "Text (Markdown)" : "Text: Markdown, with math: $x^2$",
+      onChange: () => { this.fit(); this.place(); },
+    });
+    const text = this.text.el;
+    text.classList.add("be-text");
     // (a code item without text: none shown, until Enter in its title)
     text.hidden = !n.text && n.code !== undefined;
     const parts: (HTMLElement | null)[] = [head ?? this.title, this.pic ? this.picture() : null, text];
@@ -334,7 +349,7 @@ export class InPlace {
       const old = this.picEl;
       const box = this.picture();
       if (old) old.replaceWith(box);
-      else this.el.querySelector(":scope > .be-md")!.before(box);
+      else this.text.el.before(box);
       this.refresh();
       this.save();
       this.place();
@@ -363,9 +378,8 @@ export class InPlace {
       else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.end(); }
       else if (e.key === "Enter" && e.target === this.title && !e.shiftKey) {
         e.preventDefault();
-        this.text.parentElement!.hidden = false;
-        this.text.focus();
-        this.text.setSelectionRange(0, 0);
+        this.text.el.hidden = false;
+        this.text.focus("start");
         this.fit();
       }
     };
@@ -404,6 +418,15 @@ export class InPlace {
     b.style.left = Math.round(Math.max(8, Math.min(innerWidth - bw - 8, r.left))) + "px";
   }
 
+  // Room for the toolbar above the item, so that it covers nothing of it
+  // (on a phone it is docked below): the board moves down if need be.
+  private room() {
+    if (phone()) return;
+    const top = this.el.getBoundingClientRect().top, need = clearTop() + this.bar.offsetHeight + 8;
+    if (top < need) this.host.board.panBy(0, top - need);
+    this.host.board.render();
+  }
+
   // The field being written in, in view: below the top bar and the Edit
   // toolbar, above the keyboard and the docked toolbar, within the sides.
   private reveal() {
@@ -423,7 +446,7 @@ export class InPlace {
     const v = (el: HTMLInputElement | HTMLTextAreaElement | null) => (el?.value ?? "").trim();
     const set = (k: string, val: string | boolean | undefined) => { if (val) n[k] = val; else delete n[k]; };
     set("title", v(this.title));
-    set("text", v(this.text));
+    set("text", this.text.value.trim());
     set("color", this.color);
     if (this.group) return;
     set("image", this.pic?.key);
@@ -497,6 +520,8 @@ export class InPlace {
 // Where the board is clear of the top bar and the Edit toolbar (page coordinates).
 const clearTop = () => Math.max(48, document.querySelector(".board-toolbar:not([hidden])")?.getBoundingClientRect().bottom ?? 0) + 6;
 
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
 function area(cls: string, value: string, placeholder: string) {
   const ta = document.createElement("textarea");
   ta.className = cls;
@@ -531,8 +556,9 @@ function caretPoint(within: Element, x: number, y: number): number | null {
 // ...in an item as shown: its title's or its code's (their text is the field's)
 function caretIn(el: HTMLElement, x: number, y: number): { part: "title" | "code"; offset: number } | null {
   for (const [part, sel] of [["title", ":scope > b, :scope > .board-code-head > b"], ["code", ":scope > .board-code-src"]] as const) {
-    const e = el.querySelector(sel), k = e && caretPoint(e, x, y);
-    if (k !== null && k !== undefined) return { part, offset: k };
+    // (a title with math typeset is not its source's text: no place in it)
+    const e = el.querySelector(sel), k = e && !e.querySelector(".math") ? caretPoint(e, x, y) : null;
+    if (k !== null) return { part, offset: k };
   }
   return null;
 }

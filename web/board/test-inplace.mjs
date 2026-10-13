@@ -93,9 +93,10 @@ try {
   // writing in two fields, then leaving with a click outside: one undo step
   await ev("(() => { const t = document.querySelector('.board-editing .be-title'); t.setSelectionRange(t.value.length, t.value.length); return 1; })()");
   await type(" one");
-  await ev("(() => { const t = document.querySelector('.board-editing .be-text'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()");
+  await ev("document.querySelector('.board-editing .mb-block').click(), 1");
+  await ev("(() => { const t = document.querySelector('.board-editing .mb-edit textarea'); t.setSelectionRange(t.value.length, t.value.length); return 1; })()");
   await type(" and more");
-  check(await ev("document.querySelector('.board-editing .be-md pre').textContent === 'Some *text* with $x^2$ and more\\n'"), "the text is its Markdown, highlighted as it is typed");
+  check(await ev("document.querySelector('.board-editing .mb-edit pre').textContent === 'Some *text* with $x^2$ and more\\n'"), "the text is its Markdown, highlighted as it is typed");
   check((await node("a")).title === "Alpha", "nothing is kept while writing");
   await outside();
   check(!(await editing()) && await ev("!document.querySelector('.ip-bar')"), "a click outside leaves it, and its toolbar goes");
@@ -166,7 +167,7 @@ try {
   await type("Deep");
   await ev("document.querySelector('.ip-bar .ip-link').click(), 1");
   check(await ev("document.activeElement === document.querySelector('.board-editing .be-ref')"), "+ link: its field, being written");
-  const order = await ev("[...document.querySelector('.board-editing').children].filter((e) => !e.hidden).map((e) => e.classList.contains('be-md') && e.querySelector('.be-detail') ? 'detail' : e.classList.contains('be-md') ? 'text' : e.classList[0]).join()");
+  const order = await ev("[...document.querySelector('.board-editing').children].filter((e) => !e.hidden).map((e) => e.classList.contains('be-md') && e.querySelector('.be-detail') ? 'detail' : e.classList.contains('mb') ? 'text' : e.classList[0]).join()");
   check(order === "be-title,text,detail,be-ref", "the parts in the order an item shows them: " + order);
   await type("https://example.org/a");
   await outside();
@@ -198,9 +199,11 @@ try {
   check(Math.abs(bb.left - Math.max(8, eb.left)) < 2, "the toolbar follows the camera: " + JSON.stringify([eb, bb]));
   // pasting into a field is the field's (no note made of it)
   const count = await ev("window.sagebrush.board.snapshot().doc.nodes.length");
-  await ev("(() => { const t = document.querySelector('.board-editing .be-text'); t.focus(); const dt = new DataTransfer(); dt.setData('text/plain', 'pasted'); dt.setData('text/html', '<b onclick=alert(1)>pasted</b>'); t.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return 1; })()");
+  await ev("document.querySelector('.board-editing .mb-edit') || document.querySelector('.board-editing .mb-block').click(), 1");
+  await ev("(() => { const t = document.querySelector('.board-editing .mb-edit textarea'); const dt = new DataTransfer(); dt.setData('text/plain', 'pasted'); dt.setData('text/html', '<b onclick=alert(1)>pasted</b>'); t.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return 1; })()");
   await sleep(200);
   check((await ev("window.sagebrush.board.snapshot().doc.nodes.length")) === count, "a paste in a field makes no note");
+  check(await ev("(() => { const v = document.querySelector('.board-editing .mb-edit textarea').value; return v.includes('pasted') && !v.includes('<'); })()"), "a paste in the text is its plain text, never its HTML: " + await ev("document.querySelector('.board-editing .mb-edit textarea').value"));
   // the item removed while it is being written (an agent's edit): editing ends
   await ev("window.sagebrush.board.edit((d) => { d.nodes = d.nodes.filter((x) => x.id !== 'b'); }).then(() => 1)");
   check(await until("!window.board.editing && !document.querySelector('.ip-bar')", 3000), "its item removed by someone else, editing it ends");
