@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { handleAtlas } from "../../atlas/server.ts";
 import { handleShare, scheduled, type ShareEnv } from "../../share/server.ts";
+import { handleEngines, type EnginesEnv } from "../../engines.ts";
 import { BUILD } from "./build-id.ts";
 
 // Static assets are served before this runs.  The atlas's pages are
@@ -15,6 +16,9 @@ export default {
     const url = new URL(request.url);
     const shared = await handleShare(request, env as ShareEnv, ctx);
     if (shared) return shared;
+    // engines by their content, from R2 (web/engines.ts)
+    const engine = await handleEngines(request, env as EnginesEnv, ctx);
+    if (engine) return engine;
     // a shared collection's page (web/share/view.html, at /s/)
     if (/^\/s\/[a-z2-7]{12}(@[0-9a-f]{8,64})?\/?$/.test(url.pathname)) return env.ASSETS.fetch(new Request(new URL("/s/", url), request));
     if (url.pathname === "/atlas" || url.pathname.startsWith("/atlas/")) {

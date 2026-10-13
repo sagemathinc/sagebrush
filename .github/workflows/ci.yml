@@ -47,6 +47,7 @@ jobs:
         run: |
           (cd web/site && npm ci --silent)
           node web/share/test-share.mjs
+          node web/test-engines.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
       - name: the runner (Python in an opaque-origin sandboxed frame) in headless Chrome
         run: |

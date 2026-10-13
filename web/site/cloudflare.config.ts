@@ -20,6 +20,8 @@ export default defineConfig({
       domains: [dev ? "dev.sagebrush.space" : "sagebrush.space"],
       env: {
         ASSETS: bindings.assets(),
+        // engines by their content, kept forever (web/engines.ts, scripts/publish-engine.mjs)
+        ENGINES: bindings.r2({ name: "sagebrush-releases" }),
         ...(dev
           ? {
               SHARE_DB: bindings.d1({ name: "sagebrush-share-dev", id: "94675861-6f72-4cbc-a419-b28647eb9e9e" }),

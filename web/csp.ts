@@ -4,8 +4,9 @@
 // they write pages, or `bun web/csp.ts`.  The pages under one top-level
 // directory share a rule (/board/*) allowing all their inline scripts by
 // hash; rules never overlap (two matching rules would be two policies, both
-// enforced).  Fails if a page is left without a policy that allows its own
-// scripts.
+// enforced).  The runner's pages (web/runner, and its copies in the engines
+// under engine/) get the runner's policy.  Fails if a page is left without a
+// policy that allows its own scripts.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -51,7 +52,7 @@ export function headersFor(dir: string): string {
   }
   const rules: [string, string][] = [];
   for (const g of [...groups.values()].sort((a, b) => a.patterns[0].localeCompare(b.patterns[0])))
-    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" ? runnerPolicy : pagePolicy)([...g.hashes].sort())]);
+    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" || g.patterns[0] === "/engine/*" ? runnerPolicy : pagePolicy)([...g.hashes].sort())]);
   // every page: exactly one policy, allowing each of its scripts
   for (const p of pages(dir)) {
     const need = scriptHashes(readFileSync(join(dir, p), "utf8"));

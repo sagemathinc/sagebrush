@@ -42,7 +42,7 @@ export class BoardCode {
     const ask = (msg: any) => {
       if (this.closed) return Promise.resolve({ error: { kind: "analyzer", message: "closed" }, sources: null });
       if (!this.analyzer) {
-        const worker = (this.analyzer = new Worker(new URL("sagebrush-analyze.js", this.base), { type: "module" }));
+        const worker = (this.analyzer = new Worker(new URL("sagebrush-analyze.js", this.base)));
         worker.onmessage = (ev) => { const f = waiting.get(ev.data.id); waiting.delete(ev.data.id); f?.(ev.data); };
         worker.onerror = (e) => {
           worker.terminate();
