@@ -3,7 +3,8 @@
 // in-memory store and nothing else (no code engine, math, history, examples
 // or export).  Each shows its own document, keeps its parts within its own
 // element, saves its own edits, offers nothing its host lacks, shows code as
-// text, edits in place, and is unmounted by destroy() while the other works.
+// text, edits in place, takes the page's keys and clipboard only when it is
+// the one in use, and is unmounted by destroy() while the other works.
 // Build first (bun build.mjs), then
 //   node test.mjs
 import { spawn } from "node:child_process";
@@ -18,8 +19,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const site = mkdtempSync(join(tmpdir(), "sb-pkg-site-")), profile = mkdtempSync(join(tmpdir(), "sb-pkg-"));
 copyFileSync(join(here, "dist", "index.js"), join(site, "index.js"));
-const A = { title: "A", nodes: [{ id: "a1", title: "In A", text: "first" }, { id: "a2", title: "Code in A", code: "x = 1" }] };
-const B = { title: "B", nodes: [{ id: "b1", title: "In B", text: "second" }] };
+const A = { title: "A", nodes: [{ id: "a1", title: "In A", text: "first" }, { id: "a2", title: "Code in A", code: "x = 1" }], steps: [{ focus: "a1" }, { focus: "a2" }] };
+const B = { title: "B", nodes: [{ id: "b1", title: "In B", text: "second" }, { id: "b2", title: "Also in B" }], steps: [{ focus: "b1" }, { focus: "b2" }] };
 writeFileSync(join(site, "index.html"), `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
 <div id="a" style="position:absolute;left:0;top:0;width:620px;height:560px"></div>
 <div id="b" style="position:absolute;left:640px;top:0;width:620px;height:560px"></div>
@@ -69,8 +70,36 @@ const box = (who, sel) => ev(`(() => { const r = document.getElementById(${JSON.
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url });
-  check(await until("window.A?.api.agent.snapshot().items.length === 2 && window.B?.api.agent.snapshot().items.length === 1", 20000), "each board shows its own document");
-  check((await ev("A.api.agent.snapshot().items.map((i) => i.id).join()")) === "a1,a2" && (await ev("B.api.agent.snapshot().items.map((i) => i.id).join()")) === "b1", "...A's items in A, B's in B");
+  check(await until("window.A?.api.agent.snapshot().items.length === 2 && window.B?.api.agent.snapshot().items.length === 2", 20000), "each board shows its own document");
+  check((await ev("A.api.agent.snapshot().items.map((i) => i.id).join()")) === "a1,a2" && (await ev("B.api.agent.snapshot().items.map((i) => i.id).join()")) === "b1,b2", "...A's items in A, B's in B");
+  // the page's keys: the first board mounted's, until another is used
+  const key = async (k, code) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: k, windowsVirtualKeyCode: code }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: code }); await sleep(80); };
+  const steps = () => ev("[A.api.agent.snapshot().step, B.api.agent.snapshot().step].join()");
+  await key("ArrowRight", 39);
+  check((await steps()) === "0,-1", "→ steps A's tour (the first mounted), not B's: " + await steps());
+  // a press in B: B's
+  const inB = await ev("(() => { const r = document.getElementById('b').getBoundingClientRect(); return { x: r.left + 40, y: r.bottom - 40 }; })()");
+  await mouse("mousePressed", inB.x, inB.y); await mouse("mouseReleased", inB.x, inB.y);
+  await key("ArrowRight", 39);
+  check((await steps()) === "0,0", "after a press in B, → steps B's tour only: " + await steps());
+  // Delete and the clipboard, in Edit: the board in use's only
+  await ev("A.api.agent.editing(true), B.api.agent.editing(true), A.api.agent.step(-1), B.api.agent.step(-1), 1");
+  await sleep(500);
+  const centre = async (who, id) => ev(`(() => { const r = ${who}.api.board.clientRect(${JSON.stringify(id)}); return { x: r.left + r.width / 2, y: r.top + Math.min(20, r.height / 2) }; })()`);
+  let p = await centre("A", "a1");
+  await mouse("mousePressed", p.x, p.y); await mouse("mouseReleased", p.x, p.y);
+  p = await centre("B", "b2");
+  await mouse("mousePressed", p.x, p.y); await mouse("mouseReleased", p.x, p.y);
+  await key("Delete", 46);
+  check(await until("B.api.agent.snapshot().doc.nodes.map((x) => x.id).join() === 'b1' && A.api.agent.snapshot().doc.nodes.length === 2", 3000), "Delete deletes what is selected in B, the board in use, and nothing in A: " + await ev("JSON.stringify([A.api.agent.snapshot().doc.nodes.map((x) => x.id), B.api.agent.snapshot().doc.nodes.map((x) => x.id)])"));
+  await ev("(() => { const dt = new DataTransfer(); dt.setData('text/plain', 'Pasted'); document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return 1; })()");
+  check(await until("B.api.agent.snapshot().doc.nodes.some((x) => x.text === 'Pasted') && !A.api.agent.snapshot().doc.nodes.some((x) => x.text === 'Pasted')", 3000), "a paste makes a note in B only");
+  // the focus in A (its menu's button): A's again
+  await ev("document.querySelector('#a button').focus(), 1");
+  await ev("A.api.agent.editing(false), B.api.agent.editing(false), 1");
+  await key("ArrowRight", 39);
+  check((await steps()).startsWith("0,"), "with the focus in A, → steps A's tour: " + await steps());
+  await ev("A.api.agent.step(-1), B.api.agent.step(-1), document.activeElement.blur(), 1");
   check(await ev("document.querySelectorAll('style[data-sbb]').length === 1 && document.querySelectorAll('style[data-mb]').length === 0"), "the board's stylesheet is in the page once");
   // the parts are within each board's element
   const at = await box("b", "#top"), bb = await ev("(() => { const r = document.getElementById('b').getBoundingClientRect(); return { left: r.left, right: r.right }; })()");
@@ -85,7 +114,8 @@ try {
   await ev("document.body.click(), 1");
   // an edit in A is A's: its store keeps it, B's does not
   await ev("A.api.agent.edit((d) => { d.nodes[0].title = 'Renamed in A'; })");
-  check(await until("A.kept.saves === 1 && A.kept.doc.nodes[0].title === 'Renamed in A' && B.kept.saves === 0", 3000), "an edit in A goes to A's store only: " + await ev("JSON.stringify([A.kept.saves, B.kept.saves])"));
+  const bSaves = await ev("B.kept.saves");
+  check(await until(`A.kept.doc.nodes[0].title === 'Renamed in A' && B.kept.saves === ${bSaves} && !B.kept.doc.nodes.some((x) => x.title === 'Renamed in A')`, 3000), "an edit in A goes to A's store only");
   // editing in place, with the mouse, within A
   await ev("A.api.agent.editing(true), A.api.board.focus(['a1'], true), A.api.board.render(), 1");
   await sleep(200);
@@ -100,7 +130,7 @@ try {
   await ev("B.api.destroy(), 1");
   check(await ev("document.getElementById('b').children.length === 0 && !document.getElementById('b').classList.contains('sbb')"), "destroy() takes B off its element");
   await ev("A.api.agent.edit((d) => { d.nodes[1].code = 'x = 2'; })");
-  check(await until("A.kept.doc.nodes[1].code === 'x = 2' && B.kept.saves === 0", 3000), "A goes on after B is gone");
+  check(await until(`A.kept.doc.nodes[1].code === 'x = 2' && B.kept.saves === ${bSaves}`, 3000), "A goes on after B is gone");
   await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })), 1");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
