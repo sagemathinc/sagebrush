@@ -307,7 +307,10 @@ const toolbar = new Toolbar(document.body, [
 // pictures chosen from files (or the camera, on a phone), added in the middle of the view
 function pickImages() {
   const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp", multiple: true });
-  input.onchange = () => { const c = center(); if (input.files?.length) editor.addImages(input.files, c.x, c.y).catch(fail); };
+  // (in the DOM, out of sight: some browsers do not open the chooser for a detached input)
+  input.style.cssText = "position:fixed;left:-9999px";
+  input.onchange = () => { input.remove(); const c = center(); if (input.files?.length) editor.addImages(input.files, c.x, c.y).catch(fail); };
+  document.body.append(input);
   input.click();
 }
 const menu = $("menu");

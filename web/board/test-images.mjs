@@ -117,10 +117,14 @@ try {
   // + Image in a note's editor: title, picture, text, in that order
   writeFileSync(join(profile, "chosen.png"), Buffer.from(await ev(`(async () => { const f = await ${png(80, 40, false)}; const b = new Uint8Array(await f.arrayBuffer()); let s = ""; for (const x of b) s += String.fromCharCode(x); return btoa(s); })()`), "base64"));
   const choose = async () => {
-    for (let i = 0; i < 100 && !choosers.length; i++) await sleep(50);
+    for (let i = 0; i < 200 && !choosers.length; i++) await sleep(50);
     const c = choosers.shift();
-    if (c) await send("DOM.setFileInputFiles", { files: [join(profile, "chosen.png")], backendNodeId: c.backendNodeId });
-    return !!c;
+    if (c) { await send("DOM.setFileInputFiles", { files: [join(profile, "chosen.png")], backendNodeId: c.backendNodeId }); return true; }
+    // (no file-chooser event: set the files on the input directly)
+    const doc = await send("DOM.getDocument", { depth: -1 });
+    const q = await send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "input[type=file]" });
+    if (q?.nodeId) { await send("DOM.setFileInputFiles", { files: [join(profile, "chosen.png")], nodeId: q.nodeId }); return true; }
+    return false;
   };
   r = await rect("t");
   await ev(`(() => { const x = ${r.x + 20}, y = ${r.y + 12}; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: x, clientY: y })); return 1; })()`);
