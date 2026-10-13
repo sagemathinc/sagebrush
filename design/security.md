@@ -94,7 +94,15 @@ Untrusted content reaches the page in these ways:
    - text Python controls never becomes JavaScript source: a module's file
      name, which ends up in a `//# sourceURL=` comment, is percent-encoded
      (src/compile.ts `scriptName`), and the browser's eval refuses a name
-     with a line terminator.
+     with a line terminator;
+   - `__pyjs_host__` answers only an own function operation of the host named
+     by a string, never an inherited JavaScript method (`constructor`,
+     `toString`);
+   - a subclass of a JavaScript-backed builtin (bytes, bytearray, complex,
+     the lazy iterators, array.array) does not expose that layout's own
+     implementation fields (bytes' `Uint8Array`, a reversed iterator's
+     closure) as Python attributes; those names are the runtime's, like the
+     `$` slots, hidden from access and `vars()`.
 
 ## Found and fixed (October 12)
 
@@ -147,6 +155,17 @@ Its re-review of 5deaa70 found one more, fixed:
   as much again on attribute-heavy Python; it is kept as the backstop that
   makes the whole class of cache escape impossible, not only the paths found
   so far.
+
+Its re-review of 61c9cfe found two more, both medium (neither reached
+`Function`), both fixed:
+- **SEC-61C-1: `__pyjs_host__` called inherited host methods.** A
+  Python-chosen op like `constructor` reached `Object` through the host
+  object's prototype and returned a raw JavaScript object. It now answers
+  only an own function operation named by a string.
+- **SEC-61C-2: builtin subclasses exposed implementation fields.** A bytes
+  subclass gave out its `Uint8Array`, a reversed-iterator subclass its raw
+  closure. Each JavaScript-backed layout's own field names are now the
+  runtime's, hidden from attribute access and `vars()` like `$` slots.
 
 ## Tests
 

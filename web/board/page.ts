@@ -308,6 +308,7 @@ const toolbar = new Toolbar(document.body, [
 function pickImages() {
   const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp", multiple: true });
   // (in the DOM, out of sight: some browsers do not open the chooser for a detached input)
+  input.className = "sb-fileinput";
   input.style.cssText = "position:fixed;left:-9999px";
   input.onchange = () => { input.remove(); const c = center(); if (input.files?.length) editor.addImages(input.files, c.x, c.y).catch(fail); };
   document.body.append(input);

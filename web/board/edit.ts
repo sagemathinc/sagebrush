@@ -766,6 +766,7 @@ export class Editor {
     };
     const choosePic = () => {
       const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp" });
+      input.className = "sb-fileinput";
       input.style.cssText = "position:fixed;left:-9999px";
       input.onchange = async () => {
         input.remove();

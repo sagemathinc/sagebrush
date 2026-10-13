@@ -413,7 +413,10 @@ function displayValue(v: any): boolean {
 }
 B.builtins.__pyjs_display__ = Obj.builtin((v: any) => displayValue(v), "display");
 B.builtins.__pyjs_host__ = Obj.builtin((op: any, ...args: any[]) => {
-  const f = R.host?.[op];
+  // (an own operation of the host, named by a string: never an inherited
+  // JavaScript method like `constructor` or `toString`, design/security.md rule 6)
+  if (typeof op !== "string" || R.host == null || !Object.hasOwn(R.host, op)) return null;
+  const f = R.host[op];
   if (typeof f !== "function") return null;
   B.stdout.flush();
   return f(...args) ?? null;
