@@ -21,7 +21,7 @@ export interface Tool {
   run?: () => void;
 }
 
-export const DEFAULT_TOOLS = ["note", "code", "group", "connect"];
+export const DEFAULT_TOOLS = ["note", "code", "image", "group", "connect"];
 const DEFAULT_KEY = "sagebrush-board-tools";
 
 /** The person's default tools for new boards (on a touch screen, with no
@@ -63,7 +63,9 @@ export class Toolbar {
       const t = this.all.find((x) => x.id === id);
       if (!t) continue;
       const b = document.createElement("button");
-      b.textContent = t.label;
+      // (its name; on a narrow screen, its icon)
+      b.append(Object.assign(document.createElement("span"), { className: "tb-i", textContent: t.icon }), Object.assign(document.createElement("span"), { className: "tb-l", textContent: t.label }));
+      b.setAttribute("aria-label", t.label);
       b.title = t.title;
       b.dataset.tool = t.id;
       this.use(b, t);

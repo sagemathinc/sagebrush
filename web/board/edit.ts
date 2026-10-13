@@ -10,6 +10,7 @@
 import { effect, signal } from "@preact/signals-core";
 import type { Board, Item } from "./board";
 import type { BoardDoc, BoardPage, DocEdge, DocGroup, DocNode, DocNote } from "./doc";
+import { prepare, type Images, type ImageInfo } from "./images";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
 
@@ -62,6 +63,8 @@ export class Editor {
   onRun: ((id: string) => void) | null = null;
   /** the code highlighter (HTML), once the notebook is loaded: code is written in the notebook's editor */
   highlight: (() => ((src: string) => string) | null) | null = null;
+  /** where pictures are kept (images.ts) */
+  images: Images | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -80,6 +83,11 @@ export class Editor {
       return true;
     };
     board.onBackgroundDown = (e) => this.backgroundDown(e);
+    // (the resize handle's cursor)
+    board.el.addEventListener("pointermove", (e) => {
+      const at = this.on && !this.panel && e.pointerType === "mouse" && this.atHandle(e);
+      board.el.style.cursor = at ? "nwse-resize" : "";
+    });
     addEventListener("keydown", (e) => this.key(e));
     // copying, cutting and pasting items (the page's own clipboard events: no permission asked)
     document.addEventListener("copy", (e) => this.clip(e, false));
@@ -154,6 +162,9 @@ export class Editor {
   private select(ids: string | string[] | null) {
     this.selected = ids === null ? [] : typeof ids === "string" ? [ids] : [...new Set(ids)];
     this.board.select(this.selected);
+    // (one note selected, in Edit: its corner resizes it)
+    this.board.handle = this.on && this.selected.length === 1 && this.board.item(this.selected[0])?.kind === "note" ? this.selected[0] : null;
+    this.board.request();
     if (this.selected.length) this.selectEdge(null);
   }
   /** The selected items not inside another selected one (what moves, copies, deletes). */
@@ -169,6 +180,9 @@ export class Editor {
   // holds; a click (not a drag, which pans) selects nothing.
   private backgroundDown(e: PointerEvent): boolean {
     if (!this.on || this.panel || this.connecting.value) return false;
+    // (the resize handle reaches past its item's corner)
+    const h = this.atHandle(e);
+    if (h) return this.resize(h, e);
     const marquee = (e.shiftKey || this.selecting.value) && !this.space && e.button === 0;
     if (!marquee) {
       const x0 = e.clientX, y0 = e.clientY;
@@ -265,6 +279,9 @@ export class Editor {
       addEventListener("pointerup", up);
       return true;
     }
+    // the selected item's corner: resize it
+    const h = this.atHandle(e);
+    if (h) return this.resize(h, e);
     // drag (or, not moved, select): the selection, if this is one of several selected
     const d0 = this.doc(), f = d0 && find(this.pg(d0), it.id);
     if (!f) return false;
@@ -350,6 +367,70 @@ export class Editor {
     return true;
   }
 
+  // Resizing: one selected note (a picture, or any note) has a handle at its
+  // bottom right corner (the board draws it): dragging it sets the note's
+  // width; a picture keeps its shape, and a note's height follows its text.
+  private atHandle(e: PointerEvent): Item | null {
+    if (this.selected.length !== 1) return null;
+    const it = this.board.item(this.selected[0]), r = it && it.kind === "note" ? this.board.clientRect(it.id) : null;
+    if (!it || !r) return null;
+    const reach = e.pointerType === "touch" ? 22 : 10;
+    return Math.abs(e.clientX - (r.left + r.width)) <= reach && Math.abs(e.clientY - (r.top + r.height)) <= reach ? it : null;
+  }
+  private resize(it: Item, e: PointerEvent): boolean {
+    e.preventDefault();
+    const z = this.board.camera.z, x0 = e.clientX, w0 = it.w, ratio = it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref ? it.image.h / it.image.w : 0;
+    let w = w0;
+    const move = (m: PointerEvent) => {
+      w = Math.max(ratio ? 24 : 120, Math.round(w0 + (m.clientX - x0) / z));
+      this.board.resizeItem(it.id, w, ratio ? Math.round(w * ratio) : undefined);
+    };
+    const up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      if (w === w0) return;
+      this.commit((d) => {
+        const g = find(this.pg(d), it.id);
+        if (!g || g.node.kind === "group") return;
+        this.freezeUp(d, g);
+        const n = g.node as DocNote;
+        n.w = w;
+        // (its height follows: its text's, or its picture's shape; and it no longer fits its text)
+        delete n.h;
+        delete n.fit;
+        this.contain(g.parent, g.siblings);
+      });
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", up);
+    return true;
+  }
+
+  /** Add pictures (files: pasted, dropped, chosen) at (x, y) in the world, each a note that is only the picture. */
+  async addImages(files: Iterable<Blob>, x: number, y: number) {
+    if (!this.images) return;
+    const added: { id: string; key: string; info: ImageInfo; w: number }[] = [];
+    for (const f of files) {
+      const p = await prepare(f);
+      if (!p) continue;
+      const key = await this.images.put(p.blob);
+      added.push({ id: "p" + Math.random().toString(36).slice(2, 8), key, info: { w: p.w, h: p.h }, w: Math.min(480, p.w) });
+    }
+    if (!added.length) return;
+    await this.commit((d) => {
+      const p = this.pg(d);
+      p.nodes ??= [];
+      this.freeze(d, null, p.nodes);
+      added.forEach((a, i) => {
+        (d.images ??= {})[a.key] = a.info;
+        p.nodes!.push({ id: a.id, image: a.key, w: a.w, x: Math.round(x - a.w / 2 + 30 * i), y: Math.round(y - (a.w * a.info.h) / a.info.w / 2 + 30 * i) });
+      });
+    });
+    this.select(added.map((a) => a.id));
+  }
+
   // Alignment while dragging: the moving items' box, its edges and middle,
   // snaps to those of the items in view (not moving, not around them) within
   // 6 pixels; returns the offset to apply, and the guides to draw.
@@ -390,7 +471,12 @@ export class Editor {
     const edges = (this.pg(d).edges ?? []).filter((e) => inside.has(e.from) && inside.has(e.to));
     // (positions in the world, to paste beside)
     const at = Object.fromEntries(nodes.map((n) => [n.id, this.board.item(n.id)]).filter(([, it]) => it).map(([id, it]) => [id, { x: (it as Item).x, y: (it as Item).y }]));
-    return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at });
+    // (and the sizes of their pictures, kept in this browser)
+    const pics = new Set<string>();
+    const walk = (ns: DocNode[]) => { for (const n of ns) { if (n.kind === "group") walk(n.children); else if (n.image) pics.add(n.image); } };
+    walk(nodes);
+    const images = Object.fromEntries([...pics].filter((k) => d.images?.[k]).map((k) => [k, d.images![k]]));
+    return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at, ...(pics.size ? { images } : {}) });
   }
   private clip(e: ClipboardEvent, cut: boolean) {
     if (!this.on || this.panel || this.typing()) return;
@@ -402,6 +488,14 @@ export class Editor {
   }
   private paste(e: ClipboardEvent) {
     if (!this.on || this.panel || this.typing()) return;
+    // a picture (a screenshot, say): a note that is it, in the middle of the view
+    const pics = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+    if (pics.length) {
+      e.preventDefault();
+      const v = this.board.view();
+      this.addImages(pics, (v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2);
+      return;
+    }
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (!text.trim()) return;
     e.preventDefault();
@@ -412,7 +506,7 @@ export class Editor {
     return a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement || (a as HTMLElement | null)?.isContentEditable;
   }
   private insert(text: string) {
-    let data: { nodes: DocNode[]; edges: DocEdge[]; at?: Record<string, { x: number; y: number }> } | null = null;
+    let data: { nodes: DocNode[]; edges: DocEdge[]; at?: Record<string, { x: number; y: number }>; images?: Record<string, ImageInfo> } | null = null;
     try {
       const j = JSON.parse(text);
       if (j?.["sagebrush-board"] && Array.isArray(j.nodes)) data = j;
@@ -442,6 +536,7 @@ export class Editor {
       this.freeze(d, null, p.nodes);
       p.nodes.push(...nodes);
       if (edges.length) (p.edges ??= []).push(...edges);
+      for (const [k, v] of Object.entries(data!.images ?? {})) if (v && typeof v.w === "number" && typeof v.h === "number") (d.images ??= {})[k] ??= { w: v.w, h: v.h };
     }).then(() => this.select(nodes.map((n) => n.id)));
   }
   private deleteSelected() {
@@ -601,9 +696,9 @@ export class Editor {
 
   /**
    * Write an item, in a panel over it.  A note's parts come in the order it
-   * shows them: title, text, code, detail, link; the parts it does not have
-   * are small "+ Code", "+ Detail" and "+ Link" buttons, so that a plain
-   * note's editor stays plain.  A group has a title and text.
+   * shows them: title, picture, text, code, detail, link; the parts it does
+   * not have are small "+ Image", "+ Code", "+ Detail" and "+ Link" buttons,
+   * so that a plain note's editor stays plain.  A group has a title and text.
    */
   open(id: string, fresh = false) {
     this.close();
@@ -613,11 +708,13 @@ export class Editor {
     const n = f.node as DocNote;
     const p = document.createElement("div");
     p.className = "board-editor";
-    p.innerHTML = `<input class="be-title" placeholder="Title"><textarea class="be-text" placeholder="Text: Markdown, with math: $x^2$"></textarea>` +
+    p.innerHTML = `<input class="be-title" placeholder="Title">` +
+      (group ? "" : `<div class="be-part be-imagepart" hidden><img class="be-thumb" alt=""><button type="button" class="be-rmimage">Remove the picture</button></div>`) +
+      `<textarea class="be-text" placeholder="Text: Markdown, with math: $x^2$"></textarea>` +
       (group ? "" : `<div class="be-part be-codepart" hidden><div class="be-codebox"><textarea class="be-code" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Python (Shift+Enter runs it, and what depends on it)"></textarea></div>` +
         `<label class="be-hide"><input type="checkbox" class="be-hidecode"> Hide the code: show only its output</label></div>` +
         `<textarea class="be-detail be-part" hidden placeholder="Detail, shown when zoomed in (Markdown)"></textarea><input class="be-ref be-part" hidden placeholder="Link (https://…)">` +
-        `<div class="be-add"><button data-part="code">+ Code</button><button data-part="detail">+ Detail</button><button data-part="ref">+ Link</button></div>`) +
+        `<div class="be-add"><button data-part="image">+ Image</button><button data-part="code">+ Code</button><button data-part="detail">+ Detail</button><button data-part="ref">+ Link</button></div>`) +
       `<div class="be-row"><button class="be-del">Delete</button><span></span><button class="be-cancel">Cancel</button><button class="be-done">Done</button></div>`;
     const $ = <T extends HTMLElement>(s: string) => p.querySelector(s) as T | null;
     const title = $<HTMLInputElement>(".be-title")!, text = $<HTMLTextAreaElement>(".be-text")!;
@@ -657,10 +754,31 @@ export class Editor {
       requestAnimationFrame(paint);
     }
     const doneLabel = () => { $(".be-done")!.textContent = has("code") ? "Run" : "Done"; };
+    const addRow = () => { if ($(".be-add")) $(".be-add")!.hidden = [...p.querySelectorAll<HTMLElement>(".be-add button")].every((b) => b.hidden); };
+    // its picture: shown small; + Image chooses one (or another), Remove takes it off
+    let pic: { key: string; info: ImageInfo } | null = n.image && d!.images?.[n.image] ? { key: n.image, info: d!.images[n.image] } : null;
+    const showPic = () => {
+      if (group) return;
+      $(".be-imagepart")!.hidden = !pic;
+      p.querySelector<HTMLElement>('[data-part="image"]')!.hidden = !!pic;
+      if (pic) $<HTMLImageElement>(".be-thumb")!.src = pic.info.src ?? this.images?.url(pic.key) ?? "";
+      addRow();
+    };
+    const choosePic = () => {
+      const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp" });
+      input.onchange = async () => {
+        const f = input.files?.[0], ready = f ? await prepare(f) : null;
+        if (!ready || !this.images) return;
+        pic = { key: await this.images.put(ready.blob), info: { w: ready.w, h: ready.h } };
+        showPic();
+      };
+      input.click();
+    };
     const show = (k: string, focus: boolean) => {
+      if (k === "image") return choosePic();
       part(k).hidden = false;
       p.querySelector<HTMLElement>(`[data-part="${k}"]`)!.hidden = true;
-      $(".be-add")!.hidden = [...p.querySelectorAll<HTMLElement>(".be-add button")].every((b) => b.hidden);
+      addRow();
       doneLabel();
       if (focus) (k === "code" ? ta : part(k))!.focus();
       if (k === "code") ta!.dispatchEvent(new Event("input"));
@@ -670,6 +788,8 @@ export class Editor {
       if (n.detail) { detail!.value = n.detail; show("detail", false); }
       if (n.ref) { ref!.value = n.ref; show("ref", false); }
       for (const b of p.querySelectorAll<HTMLButtonElement>(".be-add button")) b.onclick = () => show(b.dataset.part!, true);
+      $(".be-rmimage")!.onclick = () => { pic = null; showPic(); };
+      showPic();
     }
     doneLabel();
     // over the item, inside the window
@@ -698,6 +818,8 @@ export class Editor {
         set("title", v(title));
         set("text", v(text));
         if (group) return;
+        set("image", pic?.key);
+        if (pic) (d.images ??= {})[pic.key] ??= { w: pic.info.w, h: pic.info.h };
         set("code", c || undefined);
         set("hideCode", !!c && hide!.checked);
         set("detail", has("detail") ? v(detail) : "");
@@ -709,7 +831,7 @@ export class Editor {
       // (a new note left empty: not kept)
       if (fresh && !v0()) this.commit((d) => remove(this.pg(d), id), true);
     };
-    const v0 = () => [title, text, ta].some((el) => (el?.value ?? "").trim());
+    const v0 = () => !!pic || [title, text, ta].some((el) => (el?.value ?? "").trim());
     $(".be-done")!.onclick = done;
     $(".be-cancel")!.onclick = cancel;
     $(".be-del")!.onclick = () => { this.close(); this.commit((d) => remove(this.pg(d), id)); };

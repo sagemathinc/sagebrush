@@ -16,6 +16,10 @@
   .board-item { position: absolute; box-sizing: border-box; border-radius: 8px; padding: 8px 10px; overflow: hidden; background: var(--c, #fff); border: 1px solid rgba(0, 0, 0, .12); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); contain: layout paint; }
   .board-item.board-measure { height: auto; }
   .board-note { z-index: 1; }
+  /* pictures: in a note, as wide as it; a note that is only a picture, the picture alone */
+  .board-img { display: block; width: 100%; height: auto; margin: 2px 0 6px; border-radius: 4px; }
+  .board-item.board-picture { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+  .board-item.board-picture .board-img { margin: 0; height: 100%; border-radius: 2px; }
   .board-item > b { display: block; margin-bottom: 4px; font-size: 15px; }
   .board-item p { margin: 0 0 6px; }
   .board-item p:last-child { margin-bottom: 0; }
@@ -77,7 +81,10 @@
   .board-editor .be-hide { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #556; margin-top: 4px; }
   .board-editor .be-hide input { width: auto; }
   .board-editor [hidden] { display: none !important; }
-  .be-add { display: flex; gap: 6px; }
+  .board-editor .be-imagepart { display: flex; align-items: center; gap: 8px; }
+  .board-editor .be-thumb { max-height: 72px; max-width: 50%; border-radius: 4px; border: 1px solid rgba(0, 0, 0, .12); }
+  .board-editor .be-rmimage { font-size: 12px; }
+  .be-add { display: flex; flex-wrap: wrap; gap: 6px; }
   .be-add button { border: 1px dashed rgba(0, 0, 0, .25); background: none; border-radius: 6px; padding: 2px 8px; font-size: 12px; color: #556; cursor: pointer; }
   .be-add button:hover { border-style: solid; color: #2a6f2f; }
   /* the toolbar (Edit mode): what to add, this board's tools */
@@ -87,6 +94,8 @@
   .board-toolbar button:hover { background: #eef2ea; }
   .board-toolbar button[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
   .board-toolbar .tb-more { color: #667; }
+  .board-toolbar .tb-i { display: none; }
+  @media (max-width: 600px) { .board-toolbar .tb-i { display: inline; } .board-toolbar .tb-l { display: none; } .board-toolbar button { min-width: 40px; padding: 4px 8px; } }
   .board-toolbar .tb-more.tb-on { background: #2a6f2f; color: #fff; }
   /* "⋯": every tool (use it), and whether it is on the toolbar */
   .board-toolbar-panel { position: fixed; z-index: 4; display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 200px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
