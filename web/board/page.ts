@@ -311,6 +311,8 @@ function pickImages() {
   input.className = "sb-fileinput";
   input.style.cssText = "position:fixed;left:-9999px";
   input.onchange = () => { input.remove(); const c = center(); if (input.files?.length) editor.addImages(input.files, c.x, c.y).catch(fail); };
+  // (one at most: a chooser cancelled earlier left its input behind)
+  for (const old of document.querySelectorAll("input.sb-fileinput")) old.remove();
   document.body.append(input);
   input.click();
 }

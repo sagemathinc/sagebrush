@@ -2,22 +2,22 @@
 // matching JS typed array (64-bit codes in BigInt64Array/BigUint64Array), so
 // values are exact and the bytes are available for the buffer protocol.
 
-import { T, PyBytes, NotImplemented, raise, typeName, tuple, typeOf } from "./object";
+import { T, PyBytes, NotImplemented, raise, typeName, tuple, typeOf, table } from "./object";
 import * as O from "./ops";
 import { repr } from "./format";
 import * as Ty from "./types";
 import { newBuiltinModule } from "./modules";
 
 type TA = Int8Array | Uint8Array | Int16Array | Uint16Array | Int32Array | Uint32Array | BigInt64Array | BigUint64Array | Float32Array | Float64Array;
-const CTORS: Record<string, any> = {
+const CTORS: Record<string, any> = table({
   b: Int8Array, B: Uint8Array, u: Uint32Array, h: Int16Array, H: Uint16Array, i: Int32Array, I: Uint32Array,
   l: BigInt64Array, L: BigUint64Array, q: BigInt64Array, Q: BigUint64Array, f: Float32Array, d: Float64Array,
-};
-const RANGES: Record<string, [bigint, bigint]> = {
+});
+const RANGES: Record<string, [bigint, bigint]> = table({
   b: [-128n, 127n], B: [0n, 255n], h: [-32768n, 32767n], H: [0n, 65535n], i: [-2147483648n, 2147483647n], I: [0n, 4294967295n],
   l: [-(2n ** 63n), 2n ** 63n - 1n], L: [0n, 2n ** 64n - 1n], q: [-(2n ** 63n), 2n ** 63n - 1n], Q: [0n, 2n ** 64n - 1n],
-};
-export const SIZES: Record<string, number> = { b: 1, B: 1, u: 4, h: 2, H: 2, i: 4, I: 4, l: 8, L: 8, q: 8, Q: 8, f: 4, d: 8 };
+});
+export const SIZES: Record<string, number> = table({ b: 1, B: 1, u: 4, h: 2, H: 2, i: 4, I: 4, l: 8, L: 8, q: 8, Q: 8, f: 4, d: 8 });
 const BIG = new Set(["l", "L", "q", "Q"]);
 
 export class PyArray {
@@ -149,7 +149,8 @@ export function arrayDelitem(o: PyArray, k: any): void {
 
 newBuiltinModule("array", (m) => {
   const make = (tc: any, init: any = undefined) => {
-    if (typeof tc !== "string" || !(tc in SIZES)) raise(T.ValueError, "bad typecode (must be b, B, u, h, H, i, I, l, L, q, Q, f or d)");
+    if (typeof tc !== "string" || tc.length !== 1) raise(T.TypeError, `array() argument 1 must be a unicode character, not ${typeof tc === "string" ? "a string of length " + tc.length : typeName(tc)}`);
+    if (!(tc in SIZES)) raise(T.ValueError, "bad typecode (must be b, B, u, h, H, i, I, l, L, q, Q, f or d)");
     const r = new PyArray(tc);
     if (init !== undefined) {
       if (init instanceof PyArray) {

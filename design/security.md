@@ -167,6 +167,26 @@ Its re-review of 61c9cfe found two more, both medium (neither reached
   closure. Each JavaScript-backed layout's own field names are now the
   runtime's, hidden from attribute access and `vars()` like `$` slots.
 
+Its re-review of dd9b8cb, together with a review of my own of the code
+written after a model fallback, found the SEC-61C-2 fix incomplete: each
+place that listed or wrote an instance's attributes had its own rule. Three
+medium findings, fixed together:
+- **SEC-DD9-1: lookup tables matched inherited names.** `array("constructor")`
+  passed `tc in SIZES` and handed out JavaScript `Object`; memoryview's
+  formats and NumPy's dtype names had the same shape. Every string-keyed
+  table in the runtime is now built with no prototype (`table()` in
+  src/runtime/object.ts), so only its own entries are ever found.
+- **SEC-DD9-2: `__getstate__` walked raw properties** and exported a layout's
+  storage (a reversed iterator's closure, an array's typed buffer).
+- **SEC-DD9-3: `__dict__` writes, assignment and deletion** reached a
+  layout's storage, truncating or deleting it.
+
+The structural fix: one function, `attrNames`, says what an instance's
+attribute dict holds, and `__dict__`, `vars()`, `dir()`, `__getstate__` and
+`del obj.__dict__` all use it; and `putAttr`, where every Python-named write
+ends, refuses a layout's own field. `dir()` of a list subclass also no longer
+lists its elements.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS

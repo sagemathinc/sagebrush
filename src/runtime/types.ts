@@ -5,7 +5,7 @@ import {
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, instanceDict, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
+  hooks, unbox, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat } from "./format";
@@ -1785,7 +1785,7 @@ function defaultDir(x: any): any[] {
   const names = new Set<string>();
   if (isType(x)) for (const c of x.$mro) for (const k of c.$dict.keys()) names.add(k);
   else {
-    if (hasInstanceDict(x)) for (const k of Object.keys(x)) if (k[0] !== "$") names.add(k);
+    if (hasInstanceDict(x)) for (const k of attrNames(x)) names.add(k);
     for (const c of typeOf(x).$mro) for (const k of c.$dict.keys()) names.add(k);
   }
   return [...names].sort();
@@ -2214,10 +2214,9 @@ export const unionType = builtinTypeFor("UnionType", PyUnion, "types", () => rai
   const getstate = method(object, "__getstate__", (self: any) => {
     if (!hasInstanceDict(self)) return null;
     const d = new PyDict();
-    // (not a bytes subclass instance's storage, a and n: its pickle restored
-    // them as attributes and broke it)
-    const own = self instanceof PyBytes ? (k: string) => k !== "a" && k !== "n" : () => true;
-    for (const k of Object.keys(self)) if (k[0] !== "$" && !(Array.isArray(self) && /^\d+$/.test(k)) && own(k)) dictSet(d, k, self[k]);
+    // (the attribute dict: never a layout's own storage, as a bytes
+    // subclass's buffer, which a pickle would restore as attributes)
+    for (const k of attrNames(self)) dictSet(d, k, self[k]);
     return d.$m.size ? d : null;
   });
   const reduceNewobj = (self: any) => {

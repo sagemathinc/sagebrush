@@ -1,13 +1,13 @@
 // memoryview: a one-dimensional view of the bytes of a buffer exporter
 // (bytes, bytearray, array.array), sharing memory with it.
 
-import { T, PyBytes, PyByteArray, NotImplemented, Ellipsis, raise, typeName, tuple, isinstance } from "./object";
+import { T, PyBytes, PyByteArray, NotImplemented, Ellipsis, raise, typeName, tuple, isinstance, table } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { PyArray, SIZES } from "./array";
 import { builtins } from "./builtins";
 
-const FORMATS: Record<string, number> = { ...SIZES, c: 1, "?": 1, n: 8, N: 8, P: 8, e: 2 };
+const FORMATS: Record<string, number> = table({ ...SIZES, c: 1, "?": 1, n: 8, N: 8, P: 8, e: 2 });
 
 export class PyMemoryView {
   released = false;

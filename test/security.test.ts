@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scriptName } from "../src/compile";
 import { runInThisContext } from "../web/shims/vm";
+import { R } from "../src/runtime/index";
+import { siteGet, objectType, T } from "../src/runtime/object";
 
 // Python must never reach JavaScript (design/security.md, rule 6).  The
 // escapes sagebrush-daybreak found at 983418b, and the shapes around them.
@@ -130,6 +132,73 @@ out.append((bytes(b) == b"xy", b.user, sorted(vars(b))))
 print(out)
 `;
   assert.equal(run(src), "[(True, 5, ['user'])]\n");
+});
+
+// sagebrush-daybreak's re-review of dd9b8cb (SEC-DD9-1..3): lookup tables
+// matched inherited names ("constructor"), __getstate__ walked raw properties,
+// and __dict__ writes, assignment and deletion reached a layout's own storage.
+test("SEC-DD9-1: a lookup table finds only its own entries (array typecodes, memoryview formats, dtypes)", () => {
+  const src = `
+from array import array
+out = []
+for tc in ("constructor", "toString", "__proto__", "hasOwnProperty", "zz"):
+    try:
+        array(tc); out.append("made " + tc)
+    except (TypeError, ValueError) as e:
+        out.append(type(e).__name__)
+for fmt in ("constructor", "toString"):
+    try:
+        memoryview(b"abcd").cast(fmt); out.append("cast " + fmt)
+    except ValueError:
+        out.append("ValueError")
+out.append(array("i").itemsize)
+print(out)
+`;
+  assert.equal(run(src), "['TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'ValueError', 'ValueError', 4]\n");
+});
+
+test("SEC-DD9-2: default pickle state is the attribute dict, never a layout's own storage", () => {
+  const src = `
+import pickle
+from array import array
+class R(reversed): pass
+class E(enumerate): pass
+class Z(zip): pass
+class M(map): pass
+class CX(complex): pass
+class A(array): pass
+class B(bytes): pass
+out = [R([1]).__getstate__(), E([1]).__getstate__(), Z([1]).__getstate__(), M(str, [1]).__getstate__(), CX(1).__getstate__()]
+a = A("B", [1]); a.user = 3
+out.append(a.__getstate__())
+b = B(b"xy"); b.user = 4
+p = pickle.loads(pickle.dumps(b))
+out.append((type(p).__name__, bytes(p), p.user))
+print(out)
+`;
+  assert.equal(run(src), "[None, None, None, None, None, {'user': 3}, ('B', b'xy', 4)]\n");
+});
+
+test("SEC-DD9-3: __dict__ writes, assignment and deletion never reach a layout's own storage", () => {
+  const src = `
+from array import array
+class B(bytes): pass
+class A(array): pass
+b = B(b"xy"); b.user = 1
+a = A("B", [1])
+out = []
+for f in (lambda: vars(b).__setitem__("n", 0), lambda: b.__dict__.setdefault("a", 0), lambda: b.__dict__.update({"n": 0}),
+          lambda: setattr(b, "__dict__", {"n": 0}), lambda: vars(a).__setitem__("tc", "constructor")):
+    try:
+        f(); out.append("wrote")
+    except AttributeError:
+        out.append("refused")
+out.append((len(b), bytes(b), a.itemsize, a.typecode, list(a)))
+del b.__dict__
+out.append((len(b), bytes(b), hasattr(b, "user")))
+print(out)
+`;
+  assert.equal(run(src), "['refused', 'refused', 'refused', 'refused', 'refused', (2, b'xy', 1, 'B', [1]), (2, b'xy', False)]\n");
 });
 
 test("names starting with $ are the runtime's: not readable, writable or deletable from Python", () => {
@@ -285,22 +354,42 @@ except (ModuleNotFoundError, AttributeError, TypeError) as e:
   assert.equal(run(src), "ModuleNotFoundError\n");
 });
 
-test("SEC-5DE-1 backstop: a cached attribute read returns only the object's own property", () => {
-  // Prime an attribute-read site on a plain instance, then read the same
-  // site on an object with JavaScript's prototype: never the inherited one.
+// The backstop itself, independent of how a forged object might arise (no
+// Python path can make one now, so this is driven from TypeScript): an
+// attribute-read site primed by a genuine instance of C, then given a
+// JavaScript function that only claims to be a C, never answers with the
+// function's inherited `constructor` (JavaScript's Function).
+test("SEC-5DE-1 backstop: a cached attribute read answers only an object's own property, whatever its class tag says", () => {
+  void R; // (the runtime, initialized)
+  const C = objectType("C", [T.object], new Map(), "test");
+  const real: any = new (C.$ctor as any)();
+  real.constructor = "own";
+  const get = siteGet("constructor");
+  assert.equal(get(real), "own"); // (primes the site for C)
+  assert.equal(get(real), "own"); // (the cached path)
+  const forged: any = function () {};
+  forged.$cls = C;
+  let got: any;
+  try {
+    got = get(forged);
+  } catch {
+    got = "raised";
+  }
+  assert.notEqual(got, Function);
+  assert.equal(got, "raised");
+});
+
+// dir() shows only what the instance dict holds: not a list subclass's
+// elements, nor a JavaScript-backed layout's own fields (as CPython).
+test("dir() lists neither a list subclass's elements nor a builtin subclass's implementation fields", () => {
   const src = `
-class C: pass
-def read(o): return o.constructor
-a = C()
-a.constructor = "mine"
-print(read(a))
-b = C()
-try:
-    print(read(b))
-except AttributeError:
-    print("AttributeError")
+class L(list): pass
+class B(bytes): pass
+x = L([7, 8]); x.t = 1
+b = B(b"ab"); b.u = 2
+print([n for n in dir(x) if n in ("0", "1", "length", "t")], [n for n in dir(b) if n in ("a", "n", "u")])
 `;
-  assert.equal(run(src), "mine\nAttributeError\n");
+  assert.equal(run(src), "['t'] ['u']\n");
 });
 
 test("SEC-5DE-1: importing cannot write a runtime $ slot onto any parent", () => {

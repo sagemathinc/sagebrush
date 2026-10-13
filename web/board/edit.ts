@@ -775,6 +775,8 @@ export class Editor {
         pic = { key: await this.images.put(ready.blob), info: { w: ready.w, h: ready.h } };
         showPic();
       };
+      // (one at most: a chooser cancelled earlier left its input behind)
+      for (const old of document.querySelectorAll("input.sb-fileinput")) old.remove();
       document.body.append(input);
       input.click();
     };

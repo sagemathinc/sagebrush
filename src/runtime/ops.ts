@@ -4,7 +4,7 @@
 
 import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox,
+  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
 } from "./object";
 import { glibcPow } from "./libm";
 
@@ -85,7 +85,7 @@ function special(o: any, name: string): any {
 }
 const MISSING = {};
 
-const OPS: Record<string, [string, string, string]> = {
+const OPS: Record<string, [string, string, string]> = table({
   add: ["__add__", "__radd__", "+"],
   sub: ["__sub__", "__rsub__", "-"],
   mul: ["__mul__", "__rmul__", "*"],
@@ -99,7 +99,7 @@ const OPS: Record<string, [string, string, string]> = {
   or: ["__or__", "__ror__", "|"],
   xor: ["__xor__", "__rxor__", "^"],
   matmul: ["__matmul__", "__rmatmul__", "@"],
-};
+});
 
 // Reusing temporaries, as NumPy does (where the reference count is 1): in
 // `a*2 + 1` the array from `a*2` exists only for the `+`, which can write
@@ -625,8 +625,8 @@ export function abs(a: any): any {
 
 // ------------------------------------------------------------------ comparison
 
-const REFLECT: Record<string, string> = { __lt__: "__gt__", __le__: "__ge__", __gt__: "__lt__", __ge__: "__le__", __eq__: "__eq__", __ne__: "__ne__" };
-const SYM: Record<string, string> = { __lt__: "<", __le__: "<=", __gt__: ">", __ge__: ">=" };
+const REFLECT: Record<string, string> = table({ __lt__: "__gt__", __le__: "__ge__", __gt__: "__lt__", __ge__: "__le__", __eq__: "__eq__", __ne__: "__ne__" });
+const SYM: Record<string, string> = table({ __lt__: "<", __le__: "<=", __gt__: ">", __ge__: ">=" });
 
 // -1, 0, 1 or NaN (unordered) when both are numbers, else undefined.
 function numCmp(a: any, b: any): number | undefined {
