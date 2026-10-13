@@ -314,6 +314,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
 
   function caption(md: string, where: string) {
     const el = $("say");
+    el.classList.remove("open");
     el.innerHTML = markdown(md);
     if (board.typeset && hasMath(md)) board.typeset(el);
     $("where").textContent = where;
@@ -338,6 +339,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
   }
 
+  // (on a phone the caption is one line: a tap shows it whole, or one line again)
+  $("say").onclick = (e) => {
+    if ((e.target as Element).closest("a")) return;
+    $("say").classList.toggle("open");
+    board.insets = { ...board.insets, bottom: $("tour").hidden ? 0 : $("tour").offsetHeight + 18 };
+  };
   $("prev").onclick = () => step(at - 1);
   $("next").onclick = () => step(at + 1);
   $("fit").onclick = () => board.focus();
