@@ -43,7 +43,7 @@ jobs:
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
           node web/test-cli-assets.mjs build/cli/pyjs.cjs
-      - name: shared collections: the share API and the files Worker in Miniflare, and sharing from the page in headless Chrome
+      - name: shared collections (the share API and the files Worker in Miniflare; sharing from the page in headless Chrome)
         run: |
           (cd web/site && npm ci --silent)
           node web/share/test-share.mjs
