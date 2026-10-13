@@ -135,6 +135,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // A namespace for the session's own Python (interact updates, figure flushing).
     const host = R.newModule("__sagebrush_host__");
     host.__builtins__ = R.builtins;
+    // display(), a builtin in a notebook, as IPython makes it (display(widget)
+    // without an import is common): IPython.display's, imported when first used
+    R.loader.exec("import builtins as _b\ndef display(*objs, **kw):\n    from IPython.display import display as _d\n    return _d(*objs, **kw)\n_b.display = display\ndel _b, display\n", host, "exec", "<init>");
     return { main, host };
   })();
 

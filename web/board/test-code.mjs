@@ -177,6 +177,13 @@ try {
   // print has the outputs
   const printed = await ev("window.sagebrush.board.print({ dialog: false }).then(() => document.querySelector('.pr-sheet [data-code=path] .board-code-out')?.textContent ?? JSON.stringify([document.querySelectorAll('.pr-sheet').length, document.querySelectorAll('.pr-sheet .board-code').length, document.querySelector('.pr-sheet')?.dataset.far, document.querySelector('.pr-sheet [data-code=path]')?.outerHTML.slice(0, 300)]))");
   check(/16 steps/.test(printed), "printed sheets show outputs: " + printed.slice(0, 80));
+  // widgets (I2): one shown with display() (a builtin, as in IPython), and the
+  // item reading it reruns when it changes
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes.push({ id: 'wid', code: 'import ipywidgets as wg\\nknob = wg.IntSlider(value=2, min=1, max=9)\\ndisplay(knob)', x: 0, y: 3000 }, { id: 'reader', code: 'print("knob is", knob.value)', x: 600, y: 3000 }); })`);
+  check(await until("window.sagebrush.board.outputs().then((os) => /knob is 2/.test(os.find((x) => x.id === 'reader')?.output ?? ''))", 30000), "a widget shown with display() (no import)");
+  await show("wid");
+  await ev("(() => { const r = [...document.querySelectorAll('.board-item input[type=range]')].pop(); r.value = 7; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); return 1; })()");
+  check(await until("window.sagebrush.board.outputs().then((os) => /knob is 7/.test(os.find((x) => x.id === 'reader')?.output ?? ''))", 20000), "moving it reruns the item that reads it");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
