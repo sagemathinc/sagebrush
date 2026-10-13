@@ -319,7 +319,36 @@ def asarray(a, dtype=None, order=None, *, copy=None, like=None):
     return _np.asarray(a, dtype)
 
 
-asanyarray = ascontiguousarray = asfarray = asarray
+asanyarray = asfarray = asarray
+
+
+def _contiguous(a, forward):
+    # (each axis's stride is the item size times the sizes of the axes after
+    # it, C order, or before it, Fortran order; axes of size 1 don't matter)
+    step = a.itemsize
+    axes = list(zip(a.shape, a.strides))
+    for n, st in (axes if forward else reversed(axes)):
+        if n != 1 and st != step:
+            return False
+        step *= n
+    return True
+
+
+def ascontiguousarray(a, dtype=None, *, like=None):
+    """The array in C order: itself if it is already, else a copy (never a
+    strided view, which reshape would then copy, losing writes)."""
+    a = asarray(a, dtype)
+    if a.ndim == 0:
+        a = a.reshape(1)
+    return a if _contiguous(a, False) else a.copy()
+
+
+def asfortranarray(a, dtype=None, *, like=None):
+    """The array in Fortran order: itself if it is already, else a copy."""
+    a = asarray(a, dtype)
+    if a.ndim == 0:
+        a = a.reshape(1)
+    return a if _contiguous(a, True) else a.T.copy().T
 
 
 def copy(a, order="K", subok=False):
