@@ -9,7 +9,8 @@
 // parents (diff-match-patch for the text of a cell), so the history is
 // compact, any version can be rebuilt, and the patches could be sent to CoCalc
 // as they are.  Patches are kept by a PatchStore (IdbPatchStore: this
-// browser's IndexedDB, shared by the tabs that have the notebook open).
+// browser's IndexedDB, shared by the tabs that have the notebook open); the
+// history itself is patch-history.js's, shared with boards.
 //
 // The execution journal (design/timetravel-replay.md) is in the same history,
 // in patches marked {meta: {journal: true}}, which are not versions:
@@ -27,8 +28,10 @@
 //
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
-import { Session, createImmerDbCodec, decodePatchId } from "patchflow";
+import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
 export { decodePatchId };
+// (this module is the sagebrush-history.js bundle: boards load the shared history from it)
+export { PatchHistory, createImmerDbCodec };
 
 export const SCHEMA = { primaryKeys: ["type", "id"], stringCols: ["input"] };
 const codec = createImmerDbCodec(SCHEMA);
@@ -71,21 +74,9 @@ export function textHash(s) {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-export class NotebookHistory {
+export class NotebookHistory extends PatchHistory {
   /** @param store a patchflow PatchStore, with clear() */
-  constructor(store) { this.store = store; this.session = null; this.listeners = new Set(); this.edits = null; }
-  async init() {
-    this.session?.close();
-    this.session = new Session({ codec, patchStore: this.store });
-    await this.session.init();
-    this.edits = null;
-    this.session.on("change", () => { this.edits = null; this.emit(); });
-    this.unclear = this.store.onClear?.(() => this.init().then(() => this.emit()));
-    return this;
-  }
-  on(f) { this.listeners.add(f); return () => this.listeners.delete(f); }
-  emit() { for (const f of this.listeners) f(); }
-  committed() { return this.session.getCommittedDocument() ?? codec.fromString(""); }
+  constructor(store) { super(store, codec); }
   /** Record the document as it is now (nothing if it has not changed). */
   record(doc) {
     if (!this.session) return null;
@@ -102,38 +93,17 @@ export class NotebookHistory {
       if (old) next = next.delete({ type: "cell", id });
       next = next.set(r);
     }
-    if (next.isEqual(cur)) return null;
-    this.edits = null;
-    const env = this.session.commit(next);
-    this.emit();
-    return env;
+    return this.commit(next);
   }
   /** Add journal records (one patch, which is not a version). */
   journal(records) {
     if (!this.session || !records.length) return null;
     let next = this.committed();
     for (const r of records) next = next.set(r);
-    if (next.isEqual(this.committed())) return null;
-    this.edits = null;
-    const env = this.session.commit(next, { meta: { journal: true } });
-    this.emit();
-    return env;
+    return this.commit(next, { journal: true });
   }
-  // the patch ids that are versions (not the journal's), oldest first
-  editTimes() {
-    if (!this.session) return [];
-    return (this.edits ??= this.session.versions().filter((t) => !this.session.getPatch(t)?.meta?.journal));
-  }
-  /** The versions, oldest first: {time (the patch id), ms, index}. */
-  versions() {
-    return this.editTimes().map((time, index) => ({ time, ms: decodePatchId(time).timeMs, index }));
-  }
-  /** The newest version's id, or null. */
-  head() { const e = this.editTimes(); return e[e.length - 1] ?? null; }
   /** The document at a version. */
-  docAt(time) { return fromRecords(this.session.value({ time })); }
-  /** The patches, for sending elsewhere (CoCalc). */
-  patches() { return this.session?.history() ?? []; }
+  docAt(time) { return fromRecords(this.valueAt(time)); }
   /** The journal's records of a type ("session", "run", "file"). */
   records(type) { return this.session ? this.session.value().get({ type }) : []; }
 
@@ -184,10 +154,8 @@ export class NotebookHistory {
   }
   /** Forget every version; the history starts again from `doc`. */
   async clear(doc) {
-    await this.store.clear();
-    await this.init();
+    await super.clear();
     if (doc) this.record(doc);
     this.emit();
   }
-  close() { this.unclear?.(); this.session?.close(); this.session = null; this.listeners.clear(); }
 }

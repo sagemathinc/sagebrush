@@ -69,6 +69,8 @@ function open(name, stores, onVersionChange) {
 }
 export const openDb = (name = "sagebrush", { onVersionChange } = {}) => open(name, { notebooks: { keyPath: "id" }, files: null }, onVersionChange);
 export const openHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-history", { history: { keyPath: ["nb", "time"] } }, onVersionChange);
+// "sagebrush-board-history": "history", boards' TimeTravel (web/board/history.ts), by [board id, patch id]: apart from notebooks'.
+export const openBoardHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-board-history", { history: { keyPath: ["nb", "time"] } }, onVersionChange);
 // "sagebrush-blobs": "blobs", file contents by their hash.  TimeTravel's
 // journal keeps only the hashes of the files a session read; replay and the
 // portable bundle find the bytes here.
