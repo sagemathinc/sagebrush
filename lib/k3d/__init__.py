@@ -67,6 +67,19 @@ def _range(attr, cr):
     return [float(attr.min()), float(attr.max())]
 
 
+_warned = set()
+
+
+def _unsupported(where, kw):
+    """Arguments of k3d's that this k3d does not do: said once each, not
+    silently dropped (a reader changing them would otherwise see nothing)."""
+    new = sorted(k for k in kw if (where, k) not in _warned)
+    if new:
+        import warnings
+        _warned.update((where, k) for k in new)
+        warnings.warn("%s: Sagebrush's k3d does not support %s; ignored" % (where, ", ".join(new)), stacklevel=4)
+
+
 def _transform(v, model_matrix):
     """Positions (n, 3) through a 4x4 model matrix."""
     if model_matrix is None:
@@ -88,6 +101,7 @@ class Drawable:
         self.visible = kw.pop("visible", True)
         self.compression_level = kw.pop("compression_level", 0)
         self._extra = kw
+        _unsupported("k3d." + self.kind, kw)
 
     def __add__(self, other):
         return Group([self]) + other
@@ -296,6 +310,16 @@ class Volume(Drawable):
         return "volume of %dx%dx%d voxels from %s to %s" % (x, y, z, _g(self.color_range[0]), _g(self.color_range[1]))
 
 
+def _spacing(sp, n):
+    """Distances between n samples (n - 1 positive numbers) as float32, or None."""
+    if sp is None:
+        return None
+    a = np.asarray(sp, dtype=np.float32).reshape((-1,))
+    if a.size != n - 1 or n < 2 or not bool(np.all(a > 0)):
+        return None
+    return a
+
+
 class MarchingCubes(Drawable):
     """The isosurface scalar_field == level of a field on a grid (z, y, x)
     over [xmin, xmax] x [ymin, ymax] x [zmin, zmax]: the field travels to the
@@ -303,12 +327,18 @@ class MarchingCubes(Drawable):
     kind = "marching_cubes"
 
     def __init__(self, scalar_field, level, xmin=-0.5, xmax=0.5, ymin=-0.5, ymax=0.5, zmin=-0.5, zmax=0.5,
-                 color=0x0000FF, opacity=1.0, wireframe=False, flat_shading=True, model_matrix=None, **kw):
+                 color=0x0000FF, opacity=1.0, wireframe=False, flat_shading=True, model_matrix=None,
+                 spacings_x=None, spacings_y=None, spacings_z=None, **kw):
         super().__init__(**kw)
         f = np.asarray(scalar_field, dtype=np.float32)
         if f.ndim != 3:
             raise ValueError("scalar_field must be a 3-D array (z, y, x)")
         self.shape = [int(d) for d in f.shape]
+        # an uneven grid, as k3d's: along each axis the distances between
+        # consecutive samples, one fewer than the samples; any other length
+        # (or none) is an even grid.  The grid still spans [xmin, xmax] (...):
+        # the distances say where the samples are within it.
+        self.spacings = [_spacing(sp, n) for sp, n in zip((spacings_x, spacings_y, spacings_z), self.shape[::-1])]
         self.field = f.reshape((-1,))
         self.level = float(level)
         self.bounds = [float(xmin), float(xmax), float(ymin), float(ymax), float(zmin), float(zmax)]
@@ -320,6 +350,7 @@ class MarchingCubes(Drawable):
 
     def _scene(self):
         return {"type": "marching_cubes", "field": _b(self.field), "shape": self.shape, "bounds": self.bounds, "level": self.level,
+                "spacings": [None if sp is None else _b(sp) for sp in self.spacings],
                 "color": _hex(self.color), "opacity": self.opacity, "wireframe": self.wireframe, "flat_shading": self.flat_shading}
 
     def _describe(self):
@@ -460,6 +491,7 @@ class Plot:
         self.menu_visibility, self.camera_fov, self.lighting = menu_visibility, camera_fov, lighting
         self.camera = []
         self.colorbar_object_id = -1
+        _unsupported("k3d.plot", kw)
 
     def __iadd__(self, obj):
         for o in obj._objects():

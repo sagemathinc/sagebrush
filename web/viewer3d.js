@@ -211,7 +211,7 @@
           lines.push({ pos: lp, col: lc });
         }
       } else if (o.type === "marching_cubes") {
-        const m = marchingCubes(f32(o.field), o.shape, o.bounds, o.level);
+        const m = marchingCubes(f32(o.field), o.shape, o.bounds, o.level, o.spacings);
         const pos = toDisplay(m.pos), idx = m.idx, n = pos.length / 3;
         const col = vertexColors(o, n);
         let nor = null;
@@ -243,13 +243,25 @@
   // edges the surface crosses (an ambiguous face decided by its center's
   // value, so that neighbors agree and the surface has no cracks); the
   // segments chain into loops, fanned into triangles.  A vertex is shared by
-  // the cubes around its grid edge.
-  function marchingCubes(F, shape, bounds, level) {
+  // the cubes around its grid edge.  An uneven grid (k3d's spacings_x, ...:
+  // the distances between consecutive samples along an axis) places the
+  // samples within the same bounds.
+  function marchingCubes(F, shape, bounds, level, spacings) {
     const [nz, ny, nx] = shape;
     const at = (i, j, k) => F[(k * ny + j) * nx + i];
-    const X = (i) => bounds[0] + (bounds[1] - bounds[0]) * i / Math.max(1, nx - 1);
-    const Y = (j) => bounds[2] + (bounds[3] - bounds[2]) * j / Math.max(1, ny - 1);
-    const Z = (k) => bounds[4] + (bounds[5] - bounds[4]) * k / Math.max(1, nz - 1);
+    const axis = (n, lo, hi, sp) => {
+      const g = new Float64Array(n);
+      const d = sp ? f32(sp) : null;
+      if (d && d.length === n - 1) {
+        let total = 0;
+        for (const v of d) total += v;
+        let s = 0;
+        for (let i = 0; i < n; i++) { g[i] = lo + (hi - lo) * s / total; if (i < n - 1) s += d[i]; }
+      } else for (let i = 0; i < n; i++) g[i] = lo + (hi - lo) * i / Math.max(1, n - 1);
+      return g;
+    };
+    const gx = axis(nx, bounds[0], bounds[1], spacings?.[0]), gy = axis(ny, bounds[2], bounds[3], spacings?.[1]), gz = axis(nz, bounds[4], bounds[5], spacings?.[2]);
+    const X = (i) => gx[i], Y = (j) => gy[j], Z = (k) => gz[k];
     // corners (dx, dy, dz) and edges [corner, corner, axis]
     const C = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
     const E = [[0, 1], [1, 2], [3, 2], [0, 3], [4, 5], [5, 6], [7, 6], [4, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
