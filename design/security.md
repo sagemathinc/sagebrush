@@ -265,6 +265,30 @@ A test now checks the structure for every builtin type: each method in its
 dict is its own or an ancestor's, and its `__new__` is object's, type's, or
 an allocator for it.
 
+Its re-review of 8d6b54b found that the library compiled ahead for the
+browser (sagebrush-precompiled.json) could be poisoned, fixed with two lows:
+- **SEC-8D6-1, medium: a kept copy of code was trusted.** The service
+  worker kept the precompiled library cache-first in CacheStorage, which any
+  script of the origin can write, and its address named the build, not the
+  bytes. So a transient escape into the worker could rewrite it and run again
+  after a clean reload (daybreak showed it). The same held for the engine
+  (cache-first) and, offline, for the page and the worker. Fixed twice over:
+  - the service worker carries the SHA-256 of every file it keeps (web/build.ts
+    writes them into sw.js, which no page script can change) and serves a kept
+    copy only if it still has it, else drops it and fetches it again, or,
+    offline, does not serve it;
+  - the worker carries the precompiled library's SHA-256 (the library is
+    compiled before the worker is built) and installs only bytes that have it.
+- **PRE-8D6-2, low:** an entry is used only for the library file it was
+  made from: its exact path in the library (not a sibling with the same
+  prefix) and the library's own source (not a file of the same length).
+- **BUILD-8D6-3, low:** web/build.ts checks that build/cli is the current
+  sources' build (scripts/build-id.mjs, shared with build-cli.mjs), so the
+  worker and the library compiled ahead always come from the same sources.
+
+web/test-pwa.mjs rewrites the kept copies of the precompiled library, the
+engine and (offline) the worker, and checks that none of them is used.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS
