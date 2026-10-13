@@ -54,6 +54,12 @@ try {
   await until("!document.querySelector('.board-toolbar').hidden", 5000);
   check(await inView(".board-toolbar"), "the toolbar is in view");
   check(await ev("!!document.querySelector('.board-toolbar [data-tool=undo]')"), "Undo is in the toolbar on a touch screen");
+  // its tools are drawn icons, at least 22 px, in buttons at least 40 px
+  check(await ev("[...document.querySelectorAll('.board-toolbar button[data-tool]')].every((b) => { const s = b.querySelector('.tb-i svg')?.getBoundingClientRect(), r = b.getBoundingClientRect(); return s && s.width >= 22 && r.width >= 40 && r.height >= 40; })"), "the toolbar's icons are drawings of a readable size");
+  // the top bar's ⋯ menu opens over the toolbar, not under it
+  await tapEl("#menubtn");
+  check(await ev("(() => { const t = document.querySelector('.board-toolbar').getBoundingClientRect(); const hit = [...document.querySelectorAll('#menu button')].find((b) => { const r = b.getBoundingClientRect(); return r.bottom > t.top && r.top < t.bottom && r.right > t.left && r.left < t.right; }); if (!hit) return 'no overlap'; const r = hit.getBoundingClientRect(), x = Math.max(r.left, t.left) + 4, y = (Math.max(r.top, t.top) + Math.min(r.bottom, t.bottom)) / 2; return document.getElementById('menu').contains(document.elementFromPoint(x, y)); })()") === true, "the ⋯ menu is above the toolbar");
+  await tapEl("#menubtn");
   // a double tap on a code item, in Edit: its editor, a sheet with its buttons in view
   await ev("window.board.focus(['start'], true)");
   await sleep(400);
