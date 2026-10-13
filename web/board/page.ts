@@ -128,8 +128,9 @@ async function show(d: BoardDoc, view = false) {
   placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
   document.title = (d.title ? d.title + " — " : "") + "Board — Sagebrush";
   $("title").textContent = d.title ?? "";
-  // (the tour's caption: not over TimeTravel's bar)
-  $("tour").hidden = view || (!v.steps?.length && !v.intro);
+  // (the tour's caption: not over TimeTravel's bar; a notice, until the next edit)
+  $("tour").hidden = view || (!v.steps?.length && !v.intro && !notice);
+  if (notice && !view && !v.steps?.length && !v.intro) caption(notice, "");
   pageBar();
   // (compared with the original as it is shown: cleaned, so that its keys'
   // order, or the format's name and version added, are no edit)
@@ -287,12 +288,12 @@ if (q.has("items") || q.has("strokes")) {
   (source.startsWith("embedded:") ? Promise.resolve(JSON.parse(embedded()!.textContent!) as BoardDoc) : source.startsWith("mermaid:") ? Promise.resolve(fromMermaid(source.slice(8))) : fetch(url).then((r) => {
     if (!r.ok) throw new Error(`${url.pathname}: ${r.status} ${r.statusText}`);
     return r.text();
-  }).then((t) => boardFromText(t, decodeURIComponent(url.pathname.split("/").pop() ?? "")))).then((d: BoardDoc) => {
+  }).then((t) => boardFromText(t, decodeURIComponent(url.pathname.split("/").pop() ?? ""), (md) => { converted = md; }))).then((d: BoardDoc) => {
     original = d;
     // (this browser's edits of it, if any)
     let saved: BoardDoc | null = null;
     try { saved = JSON.parse(localStorage.getItem(saveKey) ?? "null"); } catch {}
-    return load(isBoard(saved) ? saved! : d);
+    return load(isBoard(saved) ? saved! : d).then(sayConverted);
   }).catch(fail);
 }
 
@@ -300,6 +301,7 @@ if (q.has("items") || q.has("strokes")) {
 const editor = new Editor(board, () => doc, async (d) => {
   // (an edit, an agent's say, while a version is looked at: the board as it is)
   closeTimeTravel(false);
+  notice = "";
   const prev = doc;
   await show(d);
   // (the document as shown: its pictures' bytes are kept apart, images.ts)
@@ -425,13 +427,24 @@ $("html").onclick = async () => {
 if (embedded()) $("examples").hidden = true;
 $("copyjson").onclick = async () => navigator.clipboard?.writeText(JSON.stringify(await images.inline(doc!), null, 1));
 async function openText(text: string, name?: string) {
-  const d = boardFromText(text, name);
+  const d = boardFromText(text, name, (md) => { converted = md; });
   const bad = formatError(d);
   if (bad) throw new Error(bad);
   if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
   pageIx = 0;
   await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
   board.focus(undefined, true);
+  sayConverted();
+}
+// (a CoCalc board, converted: said in the caption, with what was left out,
+// until the next edit)
+let converted = "", notice = "";
+function sayConverted() {
+  if (!converted) return;
+  notice = converted;
+  converted = "";
+  $("tour").hidden = false;
+  caption(notice, "");
 }
 const picker = $("openfile") as HTMLInputElement;
 $("open").onclick = () => picker.click();
