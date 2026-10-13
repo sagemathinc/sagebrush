@@ -26,6 +26,7 @@ export default defineConfig({
               SHARE_BUCKET: bindings.r2({ name: "sagebrush-share-dev" }),
               FILES_ORIGIN: bindings.text("https://files.cocalcusercontent.dev"),
               SHARE_DEV: bindings.text("1"),
+              COCALC_CLIENT_SECRET: bindings.secret(),
               SESSION_KEY: bindings.secret(),
               PURGE_KEY: bindings.secret(),
               DEV_AUTH_TOKEN: bindings.secret(),
