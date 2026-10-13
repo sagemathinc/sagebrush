@@ -162,6 +162,55 @@ print(out)
   assert.equal(run(src), "['TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', b'abc', ([1, 2, 1, 2], 3, 'X')]\n");
 });
 
+// sagebrush-daybreak SEC-15B-1..3 (15bfb45): built-in methods still reached
+// Python unchecked by other ways: a bound method's __func__, keyword calls
+// (generated and custom keyword adapters, self= included), class lookup on a
+// type with instances of its own (ModuleType.__repr__), a str subclass's
+// copies of str's methods, and a wrapper cached for whichever class was
+// reached first (bool.bit_length checked for bool).  Now every way gives one
+// receiver-checking form, made for the method's own type.
+test("SEC-15B-1..3: a built-in method checks its receiver however Python reaches or calls it", () => {
+  const src = `
+import array, types, _nprandom
+out = []
+def attempt(f):
+    try:
+        f(); out.append("ran")
+    except TypeError:
+        out.append("TypeError")
+class B(bytes): pass
+b = B(b"abc"); b.tc = "B"
+attempt(lambda: array.array("B", [1]).__imul__.__func__(b, 2))
+raw = _nprandom.pcg64(1)
+f = vars(str)["encode"]
+attempt(lambda: f(raw, encoding="utf-8"))
+attempt(lambda: str.encode(raw, encoding="utf-8"))
+attempt(lambda: str.encode(self=raw, encoding="utf-8"))
+attempt(lambda: f.__get__(raw, object)(encoding="utf-8"))
+class C: pass
+c = C()
+attempt(lambda: vars(types.SimpleNamespace)["__init__"](c, injected=7))
+attempt(lambda: types.ModuleType.__repr__(raw))
+class S(str): pass
+attempt(lambda: S.upper(raw))
+attempt(lambda: super(S, S).upper(raw))
+out.append((bytes(b), vars(c)))
+# the right receivers still work, in either order of first access
+out.append((bool.bit_length(1), int.bit_length(1), bool.bit_length(True)))
+out.append((str.encode("x", encoding="utf-8"), S.upper(S("ab")), "ab".upper.__func__("cd"), types.MethodType(str.upper, "z")()))
+class U:
+    def m(self): return 42
+out.append(U().m.__func__ is U.__dict__["m"])
+print(out)
+`;
+  assert.equal(
+    run(src),
+    "['TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', (b'abc', {}), (1, 1, 1), (b'x', 'AB', 'CD', 'Z'), True]\n",
+  );
+  // int first, then bool: the same answers
+  assert.equal(run("print(int.bit_length(1), bool.bit_length(1), bool.bit_length(True))"), "1 1 1\n");
+});
+
 // sagebrush-daybreak SEC-2C5-1 (2c5ccc1): __pyjs_run__ passed any Python
 // object as the compiled code's globals, so a Python function as ns let it
 // read `constructor` through Function.prototype.  Only a module or a dict.

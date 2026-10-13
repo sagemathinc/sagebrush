@@ -333,7 +333,8 @@ export function missingArg(f: any, name: string, kwonly = false): never {
 export function bindMethod(f: any, self: any): any {
   const m: any = (...a: any[]) => f(self, ...a);
   m.$self = self;
-  m.$func = f;
+  // (__func__: a builtin method's receiver-checking form, never the raw function)
+  m.$func = f.$owner !== undefined ? selfChecked(f) : f;
   m.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, [self, ...pos], names, values);
   return m;
 }
@@ -563,7 +564,7 @@ function typeGetattr(cls: PyType, name: string, dflt?: any): any {
   if (md !== undefined && isDataDescriptor(md)) return descrGet(md, cls, meta);
   const d = lookupType(cls, name);
   if (d !== undefined) {
-    if (typeof d === "function") return d.$builtinMethod === true && cls.$ctor === null ? selfChecked(d, cls) : d; // functions on a class are plain functions
+    if (typeof d === "function") return unboundFunction(d); // functions on a class are plain functions (builtin ones check their receiver)
     if (d !== null && typeof d === "object") {
       const g = lookupType(typeOf(d), "__get__");
       if (g !== undefined) return g(d, null, cls);
@@ -575,20 +576,53 @@ function typeGetattr(cls: PyType, name: string, dflt?: any): any {
   raise(T.AttributeError, `type object '${cls.$name}' has no attribute '${name}'`);
 }
 
-// `list.append` and friends, called unbound: CPython checks self's type.
-export function selfChecked(f: any, cls: PyType): any {
-  let c = f.$selfChecked;
-  if (c === undefined) {
-    c = function (self: any, ...args: any[]) {
-      if (self === undefined) raise(T.TypeError, `unbound method ${cls.$name}.${f.__name__}() needs an argument`);
-      if (!isinstance(self, cls)) raise(T.TypeError, `descriptor '${f.__name__}' for '${cls.$name}' objects doesn't apply to a '${typeName(self)}' object`);
-      return f(self, ...args);
+// A builtin method (types.ts method(): a JS function taking self first, its
+// immutable owner in $owner) as Python may hold it: `list.append` and friends
+// check self's type, as CPython's do, on every way of calling them
+// (positionally, by keyword, self= included).  The raw function trusts its
+// receiver; it is used only where the receiver is known to be right (an
+// instance's own lookup) and is never handed to Python: class lookup, the
+// class's __dict__, super(), function.__get__ and a bound method's __func__
+// all give this form.  One per function, made for its owner (never for the
+// class it happened to be reached through: bool.bit_length checks for int).
+export function selfChecked(f: any): any {
+  if (f.$selfChecked !== undefined) return f.$selfChecked;
+  const cls: PyType = f.$owner;
+  if (cls === undefined) throw new Error(`selfChecked: ${f.__name__} has no owner`);
+  const check = (self: any) => {
+    if (self === undefined) raise(T.TypeError, `unbound method ${cls.$name}.${f.__name__}() needs an argument`);
+    if (!isinstance(self, cls)) raise(T.TypeError, `descriptor '${f.__name__}' for '${cls.$name}' objects doesn't apply to a '${typeName(self)}' object`);
+  };
+  const c: any = function (self: any, ...args: any[]) {
+    check(self);
+    return f(self, ...args);
+  };
+  // (its name, signature, qualname, ...; not the raw function's own keyword
+  // adapter, nor anything leading back to the raw function)
+  for (const k of Object.keys(f)) if (k !== "$kw" && k !== "$raw" && k !== "$selfChecked") c[k] = f[k];
+  // keywords: the receiver is checked once it is known (self= included), then
+  // the raw function (or its own adapter) runs
+  const kw = f.$kw;
+  if (kw !== undefined) {
+    c.$kw = (pos: any[], names: string[], values: any[]) => {
+      check(pos[0]);
+      return kw(pos, names, values);
     };
-    for (const k of Object.keys(f)) c[k] = f[k];
-    if (f.$sig !== undefined) c.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, pos, names, values);
-    f.$selfChecked = c;
+  } else if (f.$sig !== undefined) {
+    c.$kw = (pos: any[], names: string[], values: any[]) => {
+      const a = bindArgs(f.__name__, f.$sig, pos, names, values);
+      check(a[0]);
+      return (f.$raw ?? f)(...a);
+    };
   }
+  c.$selfChecked = c;
+  f.$selfChecked = c;
   return c;
+}
+
+// A function found in a class's dict, as Python sees it when no instance binds it.
+export function unboundFunction(d: any): any {
+  return d.$owner !== undefined ? selfChecked(d) : d;
 }
 
 export function setattr(o: any, name: string, v: any): void {
