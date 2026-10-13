@@ -187,6 +187,17 @@ attribute dict holds, and `__dict__`, `vars()`, `dir()`, `__getstate__` and
 ends, refuses a layout's own field. `dir()` of a list subclass also no longer
 lists its elements.
 
+Its re-review of 2c5ccc1 found two more, both fixed:
+- **SEC-2C5-1, critical: `__pyjs_run__` ran in any object's namespace.** The
+  compiled code reads its globals as `$g[name]`, so a Python function as the
+  namespace let `constructor` reach JavaScript `Function`. It now runs only
+  in a module (null-prototype) or a dict (wrapped in a null-prototype
+  namespace); anything else is a TypeError. This is the interactive/doctest
+  runner, so it needed the same care as `exec`/`eval`.
+- **SEC-2C5-2, medium: `_numpy.printopt` indexed its options with a Python
+  key**, so `constructor` returned JavaScript `Object`. Its options table is
+  now prototype-less, and it returns only its own keys.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS
