@@ -255,7 +255,7 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
 function layered(front: any, back: any): any {
   return new Proxy(Object.create(null), {
     get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k in front && front[k] !== undefined ? front[k] : back[k]),
-    set: (_t, k, v) => ((front[k] = v), true),
+    set: (_t, k, v) => { if (typeof k === "string" && k.charCodeAt(0) === 36) raise(T.TypeError, `name '${k}' is reserved`); front[k] = v; return true; },
     has: (_t, k) => k in front || k in back,
     deleteProperty: (_t, k) => (delete front[k], true),
     ownKeys: () => [...new Set([...Reflect.ownKeys(front), ...Reflect.ownKeys(back)])],

@@ -803,7 +803,7 @@ export function siteGet(name: string): (o: any) => any {
   const p = JSON.stringify(name);
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
   if (o != null && o.$cls === S.c && S.c.$ver === S.v) {
-    if (S.k === 0) { const t = o[${p}]; if (t !== undefined) return t; }
+    if (S.k === 0) { const t = o[${p}]; if (t !== undefined && hasOwn.call(o, ${p})) return t; }
     else if (o[${p}] === undefined || (S.c.$jsBase !== null && !hasOwn.call(o, ${p}))) return S.val;
   } else if (o === S.tc && o.$ver === S.tv) return S.tval;
   return miss(o, ${p}, S);

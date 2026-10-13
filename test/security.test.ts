@@ -195,6 +195,105 @@ except AttributeError:
   assert.equal(run(src), "TypeError\nAttributeError\n");
 });
 
+// sagebrush-daybreak SEC-5DE-1 (5deaa70): a custom sys.meta_path loader plus
+// sys.modules parents wrote a child module's name onto its parent with a raw
+// property store, so `$ctor`/`$cls` could be forged on a class or object.
+// A module name is never a runtime slot, and the child is bound with setattr.
+// sagebrush-daybreak's SEC-5DE-1 chain as written, plus the backstop: even
+// if some write path forged $cls on a differently laid-out object, a cached
+// attribute read checks the value is the object's own, so no JavaScript
+// property inherited through a forged layout is ever returned.
+test("SEC-5DE-1: the import-forged-layout chain never reaches JavaScript", () => {
+  const src = `
+import sys
+class Hook:
+    values = {}
+    def find_spec(self, name, *args):
+        if name in self.values:
+            self.name = name
+            return self
+    def create_module(self, spec):
+        return self.values[self.name]
+    def exec_module(self, module):
+        pass
+h = Hook(); h.loader = h
+sys.meta_path.insert(0, h)
+def plant(parent, slot, value):
+    sys.modules["p"] = parent
+    sys.modules.pop("p." + slot, None)
+    h.values["p." + slot] = value
+    __import__("p." + slot)
+class C: pass
+def carrier(): pass
+try:
+    plant(C, "$ctor", carrier)
+    o = object.__new__(C)
+    plant(o, "$cls", C)
+    o.constructor = None
+    def read(o): return o.constructor
+    read(o)
+    plant(carrier, "$cls", C)
+    print(read(carrier)("return 6 * 7")())
+except (ModuleNotFoundError, AttributeError, TypeError) as e:
+    print(type(e).__name__)
+`;
+  assert.equal(run(src), "ModuleNotFoundError\n");
+});
+
+test("SEC-5DE-1 backstop: a cached attribute read returns only the object's own property", () => {
+  // Prime an attribute-read site on a plain instance, then read the same
+  // site on an object with JavaScript's prototype: never the inherited one.
+  const src = `
+class C: pass
+def read(o): return o.constructor
+a = C()
+a.constructor = "mine"
+print(read(a))
+b = C()
+try:
+    print(read(b))
+except AttributeError:
+    print("AttributeError")
+`;
+  assert.equal(run(src), "mine\nAttributeError\n");
+});
+
+test("SEC-5DE-1: importing cannot write a runtime $ slot onto any parent", () => {
+  const src = `
+import sys, types
+class L(list): pass
+class Loader:
+    def __init__(self, target): self.target = target
+    def find_spec(self, name, path, target):
+        return types.SimpleNamespace(loader=self) if "." in name else None
+    def create_module(self, spec): return self.target
+    def exec_module(self, m): pass
+def bind(parent, child, value):
+    sys.modules["pk"] = parent
+    sys.modules.pop("pk." + child, None)
+    ld = Loader(value); sys.meta_path.insert(0, ld)
+    try: __import__("pk." + child)
+    finally: sys.meta_path.remove(ld)
+out = []
+def attempt(f):
+    try:
+        f(); out.append("ok")
+    except (ModuleNotFoundError, TypeError, AttributeError) as e:
+        out.append(type(e).__name__)
+inst = L()
+attempt(lambda: bind(inst, "$cls", L))
+out.append(type(inst).__name__)
+attempt(lambda: bind(L, "$ctor", object))
+out.append(L([1]).append(2) or "list")
+def fn(): pass
+attempt(lambda: bind(fn, "$cls", L))
+bind(L, "weird", 5)
+out.append(getattr(L, "weird", "none"))
+print(out)
+`;
+  assert.equal(run(src), "['ModuleNotFoundError', 'L', 'ModuleNotFoundError', 'list', 'ModuleNotFoundError', 5]\n");
+});
+
 test("__class__ assignment cannot move a list subclass's array onto a plain class", () => {
   const src = `
 class L(list): pass

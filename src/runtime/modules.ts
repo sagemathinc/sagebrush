@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks } from "./object";
+import { globalsDict, hooks, setattr, putAttr } from "./object";
 import { glibcLog, glibcExp, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
@@ -34,6 +34,12 @@ function fn(m: any, name: string, f: any) {
 export function importModule(name: string): any {
   const existing = dictGet(sysModules, name);
   if (existing !== undefined) return existing;
+  // (a module's name is never one of the runtime's own: design/security.md rule 6)
+  if (typeof name !== "string" || name.split(".").some((p) => p === "" || p.charCodeAt(0) === 36)) {
+    const e = T.ModuleNotFoundError(`No module named '${name}'`);
+    e.name = name;
+    throw e;
+  }
   const dot = name.lastIndexOf(".");
   if (dot > 0) {
     importModule(name.slice(0, dot));
@@ -52,10 +58,7 @@ export function importModule(name: string): any {
       if (mod === null || mod === undefined) mod = Ty.newModule(name);
       dictSet(sysModules, name, mod);
       callObj(getattr(ld, "exec_module"), [mod]);
-      if (dot > 0) {
-        const parent = dictGet(sysModules, name.slice(0, dot));
-        parent[name.slice(dot + 1)] = mod;
-      }
+      if (dot > 0) bindChild(name, dot, mod);
       return mod;
     }
   }
@@ -73,11 +76,14 @@ export function importModule(name: string): any {
       throw e;
     }
   }
-  if (dot > 0) {
-    const parent = dictGet(sysModules, name.slice(0, dot));
-    parent[name.slice(dot + 1)] = m;
-  }
+  if (dot > 0) bindChild(name, dot, m);
   return m;
+}
+// A submodule becomes its parent's attribute, as CPython does it: setattr
+// (sys.modules may hold any object as the parent).
+function bindChild(name: string, dot: number, m: any) {
+  const parent = dictGet(sysModules, name.slice(0, dot));
+  if (parent !== undefined && parent !== null) setattr(parent, name.slice(dot + 1), m);
 }
 
 // builtins.__import__, and the import statements, which call a replaced
@@ -179,7 +185,11 @@ export function importStar(m: any, g: any) {
     if (d === null) raise(T.ImportError, "from-import-* object has no __dict__ and no __all__");
     names = O.toArray(d).filter((k: any) => typeof k === "string" && !k.startsWith("_") && !k.startsWith("$"));
   }
-  for (const k of names) g[k] = getattr(m, k);
+  for (const k of names) {
+    if (typeof k !== "string") raise(T.TypeError, `Item in ${"__all__"} must be str, not ${typeName(k)}`);
+    if (k.charCodeAt(0) === 36) raise(T.AttributeError, `module has no attribute '${k}'`);
+    putAttr(g, k, getattr(m, k));
+  }
 }
 
 // ------------------------------------------------------------------ sys
