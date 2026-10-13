@@ -22,9 +22,14 @@
 // alone (hideCode; { } on the item shows the code: in Edit, for the board,
 // otherwise only for this reader).
 //
+// TimeTravel (history.ts): every change kept is a version, in this
+// browser; the ⋯ menu's TimeTravel shows a bar with a slider over them, to
+// look at any version (read only: its code is shown, not run) and Revert to
+// it (an edit, undoable).
+//
 // window.sagebrush.board is the API for an agent driving the page (in the
 // shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
-// outputs().
+// outputs(), versions(), version(i).
 import { Board, synthetic, type Camera } from "./board";
 import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
 import { BoardCode } from "./code";
@@ -36,6 +41,8 @@ import { boardFromText, fromMermaid } from "./mermaid";
 import { embedded, exportHtml } from "./export";
 import { render as markdown } from "../markdown";
 import { Images, IMAGE_TYPES } from "./images";
+import { BoardHistory, type HistoryModule } from "./history";
+import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
 
 const q = new URLSearchParams(location.search);
 const board = new Board(document.getElementById("board")!);
@@ -59,8 +66,9 @@ const source = embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q
 const saveKey = "sagebrush-board:" + source;
 let original: BoardDoc | null = null;
 
-/** Lay out and draw a document, the camera where it is. */
-async function show(d: BoardDoc) {
+/** Lay out and draw a document, the camera where it is (`view`: a version
+ * being looked at in TimeTravel, which is not the document and does not run). */
+async function show(d: BoardDoc, view = false) {
   const bad = formatError(d);
   if (bad) throw new Error(bad);
   if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
@@ -68,7 +76,7 @@ async function show(d: BoardDoc) {
   d = cleanDoc(d);
   await images.absorb(d);
   await images.ensure(Object.keys(d.images ?? {}));
-  doc = d;
+  if (!view) doc = d;
   pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
   const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
   board.markdown = (s) => markdown(s);
@@ -100,7 +108,7 @@ async function show(d: BoardDoc) {
   const order = codeOrder(d);
   const nth = new Map(order.map((c, i) => [c.id, i + 1]));
   for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
-  if (order.length || code) engine()?.sync(order, d.mode ?? "python").catch((e) => console.warn("board: code items:", e));
+  if (!view && (order.length || code)) engine()?.sync(order, d.mode ?? "python").catch((e) => console.warn("board: code items:", e));
   for (const b of document.querySelectorAll<HTMLButtonElement>("#lang button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
   board.setItems(items, edges);
   toolbar.tools.value = d.tools ?? defaultTools();
@@ -120,13 +128,16 @@ async function show(d: BoardDoc) {
   placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
   document.title = (d.title ? d.title + " — " : "") + "Board — Sagebrush";
   $("title").textContent = d.title ?? "";
-  $("tour").hidden = !v.steps?.length && !v.intro;
+  // (the tour's caption: not over TimeTravel's bar)
+  $("tour").hidden = view || (!v.steps?.length && !v.intro);
   pageBar();
   // (compared with the original as it is shown: cleaned, so that its keys'
   // order, or the format's name and version added, are no edit)
   if (original && originalKey?.[0] !== original) originalKey = [original, shownKey(cleanDoc(original))];
-  $("revert").hidden = !original || originalKey![1] === shownKey(d);
+  $("revert").hidden = view || !original || originalKey![1] === shownKey(d);
 }
+/** Draw again what is shown: the document, or the version being looked at. */
+const redraw = () => (viewing ? show(viewing, true) : doc ? show(doc) : Promise.resolve());
 // (a board's pictures aside: carried, or kept here, they are the same)
 const shownKey = (d: BoardDoc) => JSON.stringify({ ...d, images: undefined });
 let originalKey: [BoardDoc, string] | null = null;
@@ -141,7 +152,7 @@ function flip(v: BoardDoc): BoardDoc {
 board.onToggleCode = (id) => {
   if (editor.on) { flipped.delete(id); editor.toggleCode(id); return; }
   if (!flipped.delete(id)) flipped.add(id);
-  if (doc) show(doc).catch(fail);
+  redraw().catch(fail);
 };
 
 function measure(n: MeasuredNote, w: number) {
@@ -176,14 +187,16 @@ function engine(): BoardCode | null {
 // (laid out again as outputs change: once a frame at most)
 let relayoutFrame = 0;
 function relayout() {
-  if (!relayoutFrame) relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; if (doc) show(doc).catch(fail); });
+  if (!relayoutFrame) relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; redraw().catch(fail); });
 }
 
 /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
 async function load(d: BoardDoc) {
   const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(location.hash);
   pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
+  closeTimeTravel(false);
   await show(d);
+  if (boardHistory) remember();
   at = -1;
   const n = Number(m?.[2] ?? m?.[3] ?? 0);
   step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
@@ -194,8 +207,8 @@ async function page(i: number) {
   if (!doc) return;
   // (first: what is being written is kept on its own page)
   editor.clear();
-  pageIx = Math.max(0, Math.min(pageCount(doc) - 1, i));
-  await show(doc);
+  pageIx = Math.max(0, Math.min(pageCount(viewing ?? doc) - 1, i));
+  await redraw();
   step(-1, true);
 }
 
@@ -285,15 +298,19 @@ if (q.has("items") || q.has("strokes")) {
 
 // editing, and keeping what was edited
 const editor = new Editor(board, () => doc, async (d) => {
+  // (an edit, an agent's say, while a version is looked at: the board as it is)
+  closeTimeTravel(false);
+  const prev = doc;
   await show(d);
   // (the document as shown: its pictures' bytes are kept apart, images.ts)
   try { localStorage.setItem(saveKey, JSON.stringify(doc)); } catch {}
+  remember(prev);
 }, (d) => pageOf(d, pageIx));
 editor.onRun = (id) => { code?.run([id]); };
 editor.highlight = () => code?.highlight ?? null;
 editor.images = images;
 const editBtn = $("edit");
-editBtn.onclick = () => editor.setOn(!editor.on);
+editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
 effect(() => {
   editBtn.setAttribute("aria-pressed", String(editor.editing.value));
   $("hint").hidden = !editor.editing.value;
@@ -541,6 +558,92 @@ async function bench(path: Camera[]) {
     mounted: board.stats.mounted, mounts: board.stats.mounts, drawn: board.stats.drawn,
   };
 }
+// TimeTravel: the history loaded (patchflow, in sagebrush-history.js) the
+// first time it is needed: the first edit, or the menu's TimeTravel.  Not
+// in an exported file, which has no history.
+let boardHistory: BoardHistory | null = null;
+let historyReady: Promise<BoardHistory | null> | null = null;
+function timeTravel(): Promise<BoardHistory | null> {
+  if (embedded()) return Promise.resolve(null);
+  return (historyReady ??= (async () => {
+    try {
+      const [mod, db] = await Promise.all([import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule>, openBoardHistoryDb()]);
+      if (!db) return null;
+      const h = await new BoardHistory(mod, new IdbPatchStore(db, "board:" + source)).init();
+      h.on(() => { if (!$("tt").hidden) ttUpdate(); });
+      return (boardHistory = h);
+    } catch (e) {
+      console.warn("board: TimeTravel:", e);
+      return null;
+    }
+  })());
+}
+// Keep the board as a version (and, the first time, the board as it was
+// before this change, if the history does not have it yet).
+let remembered = false;
+function remember(prev?: BoardDoc | null) {
+  timeTravel().then((h) => {
+    if (!h) return;
+    if (!remembered && prev) h.record(prev);
+    remembered = true;
+    if (doc) h.record(doc);
+  });
+}
+// The bar: a slider over the versions (the newest at the right), when, Revert, ✕.
+let viewing: BoardDoc | null = null;
+let liveCode: Board["code"] = null;
+const slider = $("ttslider") as HTMLInputElement;
+async function openTimeTravel() {
+  const h = await timeTravel();
+  if (!h || !doc) { fail(new Error("TimeTravel is not available here (it keeps its history in this browser's storage)")); return; }
+  h.record(doc);
+  remembered = true;
+  editor.setOn(false);
+  $("tour").hidden = true;
+  $("tt").hidden = false;
+  // (code is shown, not run: the live outputs are the board's as it is now)
+  liveCode = board.code;
+  board.setCode(null);
+  slider.max = String(h.versions().length - 1);
+  slider.value = slider.max;
+  ttUpdate();
+  slider.focus();
+}
+function ttUpdate() {
+  const vs = boardHistory?.versions() ?? [];
+  const atEnd = slider.value === slider.max;
+  slider.max = String(Math.max(0, vs.length - 1));
+  if (atEnd) slider.value = slider.max;
+  const i = Number(slider.value), v = vs[i];
+  if (!v) return;
+  $("ttwhen").textContent = `Version ${i + 1} of ${vs.length} · ${new Date(v.ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+  ($("ttrevert") as HTMLButtonElement).disabled = i === vs.length - 1;
+  viewing = boardHistory!.docAt(v.time);
+  redraw().catch(fail);
+}
+/** Close the bar: the board as it is again (`now`: drawn at once). */
+function closeTimeTravel(now = true) {
+  if ($("tt").hidden) return;
+  $("tt").hidden = true;
+  viewing = null;
+  if (liveCode) board.setCode(liveCode);
+  liveCode = null;
+  if (now) redraw().catch(fail);
+}
+let ttFrame = 0;
+slider.oninput = () => { if (!ttFrame) ttFrame = requestAnimationFrame(() => { ttFrame = 0; ttUpdate(); }); };
+$("timetravel").onclick = () => openTimeTravel();
+$("ttclose").onclick = () => closeTimeTravel();
+$("ttrevert").onclick = async () => {
+  const v = viewing;
+  if (!v) return;
+  closeTimeTravel(false);
+  // (an edit like any other: undoable, and a version itself; the toolbar's tools are a setting, left as they are)
+  await editor.commit((d) => { const tools = d.tools; for (const k of Object.keys(d)) delete (d as any)[k]; Object.assign(d, JSON.parse(JSON.stringify(v))); if (tools) d.tools = tools; else delete d.tools; });
+};
+addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("tt").hidden) { e.preventDefault(); e.stopImmediatePropagation(); closeTimeTravel(); } }, true);
+if (embedded()) $("timetravel").hidden = true;
+
 (window as any).board = board;
 (window as any).boardBench = bench;
 (window as any).sagebrush = {
@@ -576,5 +679,9 @@ async function bench(path: Camera[]) {
     outputs: async () => { await code?.idle(); return outputs(); },
     /** Turn Edit mode on or off. */
     editing: (on: boolean) => editor.setOn(on),
+    /** TimeTravel: the versions kept in this browser, oldest first ({index, ms}). */
+    versions: async () => (await timeTravel())?.versions().map(({ index, ms }) => ({ index, ms })) ?? [],
+    /** The board at version i (a document, as load() takes it). */
+    version: async (i: number) => { const h = await timeTravel(), v = h?.versions()[i]; return v ? h!.docAt(v.time) : null; },
   },
 };

@@ -701,6 +701,31 @@ nothing of the board, so the notebook's Markdown cells can use it.
 web/board/test-blocks.mjs (38 checks) drives it with the keyboard;
 test-mobile.mjs taps from block to block.
 
+**TimeTravel** (October 13, web/board/history.ts). Every change kept is a
+version: an edit, a drag when it ends (never while it moves), an undo, an
+agent's edit. They are patchflow patches, as the notebook's history is (its
+generic part is web/notebook/patch-history.js, shared by both), kept in
+this browser's IndexedDB in a database of the board's own
+(`sagebrush-board-history`), so a notebook's history is never touched. A
+board is records keyed by (type, page, id): the document, each page, each
+item (note or group: its parent, its place among its siblings, its fields)
+and each edge. Text fields are string columns, patched character by
+character, and a changed record is patched in place, so moving an item is a
+patch of its x and y (a few hundred bytes), and typing a letter is one too.
+Not recorded: the format's name and version, and the toolbar's tools (a
+setting, as for undo). patchflow (170 kB) is loaded with the
+sagebrush-history.js bundle the first time it is needed: the first edit, or
+TimeTravel.
+
+The ⋯ menu's **TimeTravel…** shows a bar at the bottom: a slider over the
+versions (the newest at the right), when the one shown was kept, **Revert**,
+and **✕** (or Esc). Moving the slider shows that version, read only: Edit is
+off, its code is shown and not run (no ▶, no outputs: they are the board's
+as it is now), and its pages can be turned. Revert makes the board that
+version again, as an edit: undoable, and a version itself. Agents call
+`versions()` and `version(i)`. An exported HTML file has no TimeTravel.
+web/board/test-history.mjs (34 checks).
+
 **Math in titles.** A title's `$...$` and `\(...\)` are typeset with
 KaTeX, as in Markdown; the title is built as text and math elements, never
 from markup. Far out, on the canvas and on printed group labels, a title's
