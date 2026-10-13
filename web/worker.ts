@@ -20,7 +20,10 @@ declare const __SB_ENGINE_HASH__: string;
 // (in the runner, web/runner/index.html, the worker's URL is a blob: and its
 // files are at __SB_BASE__)
 const BASE: string = (globalThis as any).__SB_BASE__ ?? self.location.href;
-(globalThis as any).__SAGEBRUSH_ENGINE_URL__ = new URL("sagebrush-engine.wasm?h=" + __SB_ENGINE_HASH__.slice(0, 16), BASE).href;
+// (in a downloaded file's runner, web/notebook/runner-worker.js's files mode,
+// the files are blob: URLs: __SB_FILES__ maps their names to them)
+const FILES: Record<string, string> | undefined = (globalThis as any).__SB_FILES__;
+(globalThis as any).__SAGEBRUSH_ENGINE_URL__ = FILES?.["sagebrush-engine.wasm"] ?? new URL("sagebrush-engine.wasm?h=" + __SB_ENGINE_HASH__.slice(0, 16), BASE).href;
 // (and its SHA-256, checked before it runs: src/runtime/engine.ts)
 (globalThis as any).__SAGEBRUSH_ENGINE_SHA256__ = __SB_ENGINE_HASH__;
 import "../build/cli/lib.gen.js";
@@ -100,7 +103,7 @@ function setBroker(b: { ctrl: SharedArrayBuffer; data: SharedArrayBuffer }) {
 declare const __SB_PRECOMPILED_HASH__: string;
 const precompiled = (async () => {
   try {
-    const url = new URL("sagebrush-precompiled.json?h=" + __SB_PRECOMPILED_HASH__.slice(0, 16), BASE).href;
+    const url = FILES?.["sagebrush-precompiled.json"] ?? new URL("sagebrush-precompiled.json?h=" + __SB_PRECOMPILED_HASH__.slice(0, 16), BASE).href;
     let bytes: ArrayBuffer;
     if (BROKERED) {
       await brokered;
