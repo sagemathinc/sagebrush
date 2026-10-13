@@ -372,6 +372,9 @@
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
+import { RunnerWorker } from "./notebook/runner-worker.js";
+// ?runner: Python in the runner, an opaque-origin sandboxed frame (design/runner.md), being tested
+const RUNNER = new URLSearchParams(location.search).has("runner");
 import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
@@ -568,7 +571,7 @@ function makeKernel(owner) {
   const k = new WorkerKernel({
     createWorker: () => {
       const name = j?.workerName() ?? "";
-      return LOCAL ? new RemoteWorker() : new Worker("sagebrush-worker.js", { type: "module", name });
+      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name }) : new Worker("sagebrush-worker.js", { type: "module", name });
     },
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)

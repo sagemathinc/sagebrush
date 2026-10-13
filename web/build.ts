@@ -263,11 +263,15 @@ mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
 mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
+// the runner: the interpreter in an opaque-origin frame (web/runner; design/runner.md)
+mkdirSync(join(here, "dist", "runner"), { recursive: true });
+copyFileSync(join(here, "runner", "index.html"), join(here, "dist", "runner", "index.html"));
+mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");

@@ -1,0 +1,122 @@
+// The runner (design/runner.md) in headless Chromium: the notebook page with
+// ?runner runs Python in an opaque-origin sandboxed frame.  Checks that code
+// runs, that Stop keeps the variables, and, from inside the frame and its
+// worker (as an escape would be), that there is no storage, no page and no
+// network beyond Sagebrush's own files.  Serve web/dist first:
+//   python3 web/serve.py 8765 &  node web/test-runner.mjs   (SB_URL=... for another)
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
+const profile = mkdtempSync(join(tmpdir(), "sb-runner-"));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9343", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let targets;
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch("http://127.0.0.1:9343/json")).json(); break; } catch { await sleep(100); } }
+const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+await new Promise((r) => (ws.onopen = r));
+let n = 0;
+const waiting = new Map();
+const contexts = [];
+const workers = []; // sessionIds of attached workers
+const frames = []; // and of frames in their own process
+const violations = [];
+ws.onmessage = (e) => {
+  const m = JSON.parse(e.data);
+  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.method === "Runtime.executionContextCreated") contexts.push({ ...m.params.context, sessionId: m.sessionId });
+  if (m.method === "Target.attachedToTarget") {
+    // (each frame in another process, and each worker, is a target of its own)
+    const sid = m.params.sessionId;
+    if (m.params.targetInfo.type === "worker") workers.push(sid);
+    if (m.params.targetInfo.type === "iframe") frames.push(sid);
+    for (const [method, params] of [["Runtime.enable", {}], ["Log.enable", {}], ["Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }], ["Runtime.runIfWaitingForDebugger", {}]]) ws.send(JSON.stringify({ id: ++n, method, params, sessionId: sid }));
+  }
+  if (m.method === "Log.entryAdded" && /Content Security Policy/.test(m.params.entry.text)) violations.push(m.params.entry.text);
+  if (process.env.DEBUG && (m.method === "Log.entryAdded" || m.method === "Runtime.exceptionThrown" || m.method === "Runtime.consoleAPICalled")) console.log("  [" + (m.sessionId ?? "page").slice(0, 6) + "]", JSON.stringify(m.params).slice(0, 600));
+};
+const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+const evIn = async (expression, { contextId, sessionId } = {}) => {
+  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId ? { contextId } : {}) }, sessionId);
+  if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
+  return r.result?.value;
+};
+const ev = (x) => evIn(x);
+const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
+let failures = 0;
+const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
+async function run(code) {
+  await ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', shiftKey: true, bubbles: true})); })()`);
+  await sleep(150);
+  await until("(() => { const c = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1); return !c.classList.contains('running') && !c.classList.contains('queued') && /\\[\\d+\\]/.test(c.querySelector('.n').textContent); })()", 60000);
+  return ev("[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1).querySelector('.out').textContent");
+}
+// what a script in a context can reach
+const PROBE = `(async () => {
+  const out = {};
+  out.origin = self.origin;
+  try { localStorage.length; out.localStorage = true; } catch { out.localStorage = false; }
+  try { await new Promise((res, rej) => { const r = indexedDB.open("probe"); r.onsuccess = res; r.onerror = () => rej(r.error); }); out.indexedDB = true; } catch { out.indexedDB = false; }
+  try { out.parentDocument = !!(self.parent && self.parent !== self && self.parent.document); } catch { out.parentDocument = false; }
+  try { out.cookie = typeof document !== "undefined" ? document.cookie : null; } catch { out.cookie = "denied"; }
+  out.isolated = self.crossOriginIsolated;
+  const reach = async (u, credentials = "include") => { try { await fetch(u, { mode: "cors", credentials }); return true; } catch { return false; } };
+  out.elsewhere = await reach("https://example.com/");
+  out.sitePage = await reach(${JSON.stringify(new URL("/", base).href)} + "?probe");
+  out.ownFiles = await reach(${JSON.stringify(new URL("sagebrush-worker.js", base).href)}, "omit");
+  out.websocket = await new Promise((res) => { try { const w = new WebSocket("wss://example.com/"); w.onopen = () => res(true); w.onerror = () => res(false); } catch { res(false); } });
+  // (a beacon is queued, then checked: the CSP reports say whether it went)
+  if (typeof navigator.sendBeacon === "function") navigator.sendBeacon("https://example.com/beacon", "x");
+  return out;
+})()`;
+
+try {
+  await send("Runtime.enable");
+  await send("Log.enable");
+  await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+  await send("Page.navigate", { url: new URL(process.env.NO_RUNNER ? "./" : "?runner", base).href });
+  await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+  console.log("     " + (await ev("document.querySelector('#status').textContent")));
+  const frame = await ev("(() => { const f = document.querySelector('iframe[sandbox]'); return f && { sandbox: f.getAttribute('sandbox'), src: f.src }; })()");
+  ok(frame?.sandbox === "allow-scripts", "the interpreter runs in <iframe sandbox=\"allow-scripts\">: " + JSON.stringify(frame));
+  ok((await run("sum(range(10))")).trim() === "45", "code runs in the runner");
+  ok((await run("from fractions import Fraction\nprint(Fraction(1, 3) + Fraction(1, 6))")).includes("1/2"), "printing works");
+  ok((await run("import numpy as np\nprint(np.arange(6).reshape(2, 3).sum(axis=0))")).includes("[3 5 7]"), "numpy works");
+
+  // Stop: a KeyboardInterrupt that keeps the variables (if the frame is cross-origin isolated)
+  await run("kept = 42");
+  await ev(`(() => { document.querySelector('#add').click(); const c = [...document.querySelectorAll('.cell')].at(-1); const ta = c.querySelector('textarea'); ta.value = 'while True:\\n    pass'; ta.dispatchEvent(new Event('input', {bubbles: true})); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', shiftKey: true, bubbles: true})); })()`);
+  await sleep(1500);
+  await ev("document.querySelector('#stop').click()");
+  await until("!document.querySelector('.cell.running')", 10000);
+  const stopped = await ev("[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1).querySelector('.out').textContent");
+  const kept = (await run("globals()['kept']")).trim();
+  ok(/KeyboardInterrupt/.test(stopped) && kept === "42", `Stop interrupts and keeps the variables: ${JSON.stringify(stopped.trim().split("\n").at(-1))}, kept = ${kept}`);
+
+  // from inside: the frame's own context, and the worker
+  const frameCtx = contexts.find((c) => c.auxData?.isDefault && (c.origin === "null" || /\/runner\//.test(c.name ?? "") || (c.sessionId && frames.includes(c.sessionId))));
+  ok(!!frameCtx, "found the frame's context");
+  const inFrame = await evIn(PROBE, { contextId: frameCtx.id, sessionId: frameCtx.sessionId });
+  ok(inFrame.origin === "null" && !inFrame.localStorage && !inFrame.indexedDB && !inFrame.parentDocument && inFrame.cookie !== "x", "the frame: an opaque origin, no storage, no page: " + JSON.stringify(inFrame));
+  ok(!inFrame.elsewhere && !inFrame.sitePage && !inFrame.websocket, "the frame: no network elsewhere, and the site's pages unreadable");
+  ok(inFrame.ownFiles, "the frame: Sagebrush's own static files");
+  await until("true");
+  const wk = workers.at(-1);
+  ok(!!wk, "found the worker");
+  const inWorker = await evIn(PROBE, { sessionId: wk });
+  ok(inWorker.origin === "null" && !inWorker.indexedDB && !inWorker.elsewhere && !inWorker.sitePage && !inWorker.websocket && inWorker.ownFiles, "the worker (where escaped code would run): the same: " + JSON.stringify(inWorker));
+  await sleep(500);
+  ok(violations.length > 0 && violations.some((v) => /example\.com\/beacon/.test(v)), `the attempts were blocked by the runner's policy, the beacon too (${violations.length} CSP reports)`);
+} catch (e) {
+  failures++;
+  console.log("FAIL", e.message);
+  console.log("  status:", await ev("document.querySelector('#status')?.textContent").catch((x) => x.message));
+} finally {
+  chrome.kill();
+  await sleep(300);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+}
+console.log(failures ? `${failures} failed` : "all passed");
+process.exit(failures ? 1 : 0);
