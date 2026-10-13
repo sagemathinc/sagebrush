@@ -30,8 +30,11 @@ Untrusted content reaches the page in these ways:
      declaration may name the picture's own ids, `url(#id)`; otherwise it has
      no backslash (CSS escapes), slash or colon, so nothing in it can name
      another site. `href` is a local `#id`, or for `<image>` an inline raster
-     `data:` URL. Only `aria-*` and `data-*`, which are text, may hold
-     anything.
+     `data:` URL. The only CSS functions are transforms, colors and
+     arithmetic (never `image-set()` and the like), and no property that
+     takes an image or content (`background*`, `cursor`, `list-style*`,
+     `content`, ...) is kept, as a style or an attribute. Only `aria-*` and
+     `data-*`, which are text, may hold anything.
    - 3D scenes: their strings are set as DOM properties (`style.color`),
      never spliced into CSS text.
    - Math: KaTeX, with `trust` off (no `\href`, `\url`, `\htmlClass`, ...).
@@ -79,8 +82,14 @@ Untrusted content reaches the page in these ways:
    - a store never runs a JavaScript setter: `__proto__` is stored as an own
      data property, an ordinary attribute as in CPython;
    - names starting with `$` are the runtime's own slots (`$cls`, `$m`): not
-     readable, writable or deletable from Python (`getattr`, `setattr`,
-     `__dict__`). This differs from CPython, where any string is a name;
+     readable, writable or deletable from Python, through any namespace:
+     `getattr`, `setattr`, an instance's `__dict__`, `globals()` and a
+     module's `__dict__`, `SimpleNamespace(**kw)`. This differs from
+     CPython, where any string is a name;
+   - an attribute-read site caches an instance attribute only for an object
+     that has its class's own JavaScript prototype, and, for a list or dict
+     subclass, only a name that is not on that prototype chain: a forged
+     class tag can never make it answer with a JavaScript property;
    - an array's `length` and elements are its list's, never attributes;
    - text Python controls never becomes JavaScript source: a module's file
      name, which ends up in a `//# sourceURL=` comment, is percent-encoded
@@ -112,6 +121,18 @@ sagebrush-daybreak's review of 983418b found six more, all fixed:
 - **SEC-983-5, high: a 3D scene's label color** was spliced into CSS text:
   `red;background-image:url(...)` loaded from another site.
 - **SEC-983-6, medium: the atlas, the articles and /demo/ had no policy.**
+
+Its re-review of 18f5216 found two more, both fixed:
+- **SEC-18F-1, critical: Python reached `Function` again.** `globals()`
+  wrote the runtime's `$cls` and `$m` onto the module object, so a module
+  could pass for a list subclass, prime an attribute-read site, and that
+  site then answered a real list-subclass instance with a JavaScript
+  property. From there, through a forged dict and a property subclass, to
+  `Function`, in a board's worker. Fixed twice over (rule 6): no namespace
+  takes a `$` name, and the cache checks the object's real prototype.
+- **SEC-18F-2, medium: relative requests from SVG output** through
+  `image-set('...')` and `cursor`: to this site only, but a way to put data
+  in a request. Fixed by the function and property allowlists (rule 1).
 
 ## Tests
 
