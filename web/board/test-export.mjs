@@ -40,7 +40,7 @@ try {
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     const html = await ev("window.sagebrush.board.exportHtml()");
     const s0 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, math: JSON.stringify(s.doc).includes('$'), code: JSON.stringify(s.doc).includes('\"code\":') }; })()");
-    check(!/offline/i.test(await ev("document.getElementById('html').textContent")), `${doc}: the menu says the file works offline`);
+    check(!/offline/i.test(await ev("document.querySelector('[data-sbb=html]').textContent")), `${doc}: the menu says the file works offline`);
     const file = join(dir, doc.split("/").pop().replace(/\.\w+$/, "") + ".html");
     writeFileSync(file, html);
     // the file, offline
@@ -51,9 +51,9 @@ try {
     await sleep(500);
     const s1 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, title: document.title }; })()");
     check(s1.pages === s0.pages && s1.items === s0.items, `${doc}: the file shows ${s1.items} items on ${s1.pages} pages, not ${s0.items} on ${s0.pages}`);
-    check(!(await ev("document.getElementById('examples').hidden === false")), `${doc}: Examples shown in the file`);
+    check(!(await ev("document.querySelector('[data-sbb=examples]').hidden === false")), `${doc}: Examples shown in the file`);
     // code: shown, not run, and the file says so (only when there is code)
-    const said = await ev("!document.getElementById('tour').hidden && /doesn't run/.test(document.getElementById('say').textContent)");
+    const said = await ev("!document.querySelector('[data-sbb=tour]').hidden && /doesn't run/.test(document.querySelector('[data-sbb=say]').textContent)");
     check(said === s0.code, s0.code ? `${doc}: the file doesn't say its code doesn't run` : `${doc}: the file says code doesn't run, with no code`);
     // math, typeset with KaTeX's own fonts (inline)
     if (s0.math) {

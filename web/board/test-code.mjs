@@ -196,10 +196,10 @@ try {
   // a board's language (I3): Sage from the ⋯ menu, every item runs in it; Python again
   await ev(`window.sagebrush.board.edit((d) => { d.nodes.push({ id: 'pow', code: 'print(2^10)', x: 0, y: 3600 }); })`);
   check(await until("window.sagebrush.board.outputs().then((os) => (os.find((x) => x.id === 'pow')?.output ?? '') === '8\\n')", 20000), "Python: ^ is xor");
-  await ev("document.querySelector('#lang [data-mode=sage]').click(), 1");
+  await ev("document.querySelector('[data-sbb=lang] [data-mode=sage]').click(), 1");
   check(await until("window.sagebrush.board.outputs().then((os) => (os.find((x) => x.id === 'pow')?.output ?? '') === '1024\\n' && /knob is 2/.test(os.find((x) => x.id === 'reader')?.output ?? ''))", 60000), "Sage, from the menu: ^ is a power, and every item ran again (the knob made anew)");
-  check(await ev("window.sagebrush.board.snapshot().doc.mode === 'sage' && document.querySelector('#lang [data-mode=sage]').getAttribute('aria-pressed') === 'true'"), "the document says Sage, and so does the menu");
-  await ev("document.querySelector('#lang [data-mode=python]').click(), 1");
+  check(await ev("window.sagebrush.board.snapshot().doc.mode === 'sage' && document.querySelector('[data-sbb=lang] [data-mode=sage]').getAttribute('aria-pressed') === 'true'"), "the document says Sage, and so does the menu");
+  await ev("document.querySelector('[data-sbb=lang] [data-mode=python]').click(), 1");
   check(await until("window.sagebrush.board.outputs().then((os) => (os.find((x) => x.id === 'pow')?.output ?? '') === '8\\n')", 20000) && await ev("window.sagebrush.board.snapshot().doc.mode === undefined"), "Python again (the default, not written)");
   // An output that changes every frame without changing size (a 3D view's
   // labels as it turns): dragging another item works, and resizing an item

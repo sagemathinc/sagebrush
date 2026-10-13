@@ -5,6 +5,8 @@
 // element, saves its own edits, offers nothing its host lacks, shows code as
 // text, edits in place, takes the page's keys and clipboard only when it is
 // the one in use, and is unmounted by destroy() while the other works.
+// Their parts have no ids, and the host's own elements of the same names
+// are left alone.
 // Build first (bun build.mjs), then
 //   node test.mjs
 import { spawn } from "node:child_process";
@@ -24,6 +26,7 @@ const B = { title: "B", nodes: [{ id: "b1", title: "In B", text: "second" }, { i
 writeFileSync(join(site, "index.html"), `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
 <div id="a" style="position:absolute;left:0;top:0;width:620px;height:560px"></div>
 <div id="b" style="position:absolute;left:640px;top:0;width:620px;height:560px"></div>
+<div style="position:absolute;left:0;top:580px"><div id="top">The host's top</div><span id="title">The host's title</span><div id="menu">The host's menu</div></div>
 <script type="module">
 import { mountBoard } from "./index.js";
 const images = { url: () => undefined, put: async () => "", ensure: async () => {}, absorb: async () => {}, inline: async (d) => d };
@@ -100,17 +103,21 @@ try {
   await key("ArrowRight", 39);
   check((await steps()).startsWith("0,"), "with the focus in A, → steps A's tour: " + await steps());
   await ev("A.api.agent.step(-1), B.api.agent.step(-1), document.activeElement.blur(), 1");
-  check(await ev("document.querySelectorAll('style[data-sbb]').length === 1 && document.querySelectorAll('style[data-mb]').length === 0"), "the board's stylesheet is in the page once");
+  check(await ev("document.querySelectorAll('style[data-sbb-css]').length === 1 && document.querySelectorAll('style[data-mb]').length === 0"), "the board's stylesheet is in the page once");
+  // the parts have no ids, which two boards (or a board and its host) would
+  // share: the host's own #top, #title and #menu are left as they are
+  check(await ev("document.querySelectorAll('#a [id], #b [id]').length === 0"), "ids in the boards: " + await ev("[...document.querySelectorAll('#a [id], #b [id]')].slice(0, 5).map((e) => e.id).join()"));
+  check(await ev("getComputedStyle(document.getElementById('top')).position === 'static' && document.getElementById('title').textContent === \"The host's title\" && getComputedStyle(document.getElementById('title')).fontWeight === '400' && getComputedStyle(document.getElementById('menu')).position === 'static'"), "the board's styles reach the host's own #top, #title or #menu");
   // the parts are within each board's element
-  const at = await box("b", "#top"), bb = await ev("(() => { const r = document.getElementById('b').getBoundingClientRect(); return { left: r.left, right: r.right }; })()");
+  const at = await box("b", "[data-sbb=top]"), bb = await ev("(() => { const r = document.getElementById('b').getBoundingClientRect(); return { left: r.left, right: r.right }; })()");
   check(at.left >= bb.left - 1 && at.right <= bb.right + 1, "B's top bar is within B: " + JSON.stringify([at, bb]));
   check(await ev("[...document.querySelectorAll('#a .board-note, #b .board-note')].every((e) => { const root = e.closest('.sbb'), r = e.getBoundingClientRect(), b = root.getBoundingClientRect(); return r.left >= b.left - 1; })"), "each board's notes are in its own element");
   // what the host does not give is not offered; code shows as text
-  check(await ev("['timetravel', 'examples', 'html'].every((id) => document.querySelector('#a #' + id).hidden)"), "no history, examples or export: TimeTravel…, Examples… and Download as HTML are not in the menu");
+  check(await ev("['timetravel', 'examples', 'html'].every((id) => document.querySelector('#a [data-sbb=' + id + ']').hidden)"), "no history, examples or export: TimeTravel…, Examples… and Download as HTML are not in the menu");
   check(await until("document.querySelector('#a .board-code-src')?.textContent === 'x = 1' && !document.querySelector('#a .board-code-run')", 3000), "no code engine: code shows as text, with no ▶");
   // each board's menu is its own
-  await ev("document.querySelector('#b #menubtn').click(), 1");
-  check(await ev("!document.querySelector('#b #menu').hidden && document.querySelector('#a #menu').hidden"), "B's ⋯ opens B's menu");
+  await ev("document.querySelector('#b [data-sbb=menubtn]').click(), 1");
+  check(await ev("!document.querySelector('#b [data-sbb=menu]').hidden && document.querySelector('#a [data-sbb=menu]').hidden"), "B's ⋯ opens B's menu");
   await ev("document.body.click(), 1");
   // an edit in A is A's: its store keeps it, B's does not
   await ev("A.api.agent.edit((d) => { d.nodes[0].title = 'Renamed in A'; })");

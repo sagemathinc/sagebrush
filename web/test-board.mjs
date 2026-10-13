@@ -190,7 +190,7 @@ try {
       const want = s.doc.pages[p].nodes.length;
       check(sp.page === p && sp.items.filter((i) => i.kind === "note").length === want, `page ${p + 1}: ${sp.items.length} items, not its ${want} notes`);
       check((await ev("location.hash")) === `#p${p + 1}`, `page ${p + 1}: hash ${await ev("location.hash")}`);
-      check(await ev(`document.getElementById("pgsel").value === "${p}" && !document.getElementById("pages").hidden`), `page ${p + 1}: the picker`);
+      check(await ev(`document.querySelector("[data-sbb=pgsel]").value === "${p}" && !document.querySelector("[data-sbb=pages]").hidden`), `page ${p + 1}: the picker`);
       if (s.doc.pages[p].steps?.length) {
         await ev("window.sagebrush.board.step(1)");
         check((await ev("location.hash")) === `#p${p + 1}-2`, `page ${p + 1} step 2: hash`);
@@ -276,7 +276,7 @@ try {
     const box = (id) => ev(`(() => { const i = window.sagebrush.board.snapshot().items.find((i) => i.id === ${JSON.stringify(id)}); return i && { x: i.x, y: i.y }; })()`);
     const docOf = () => ev("JSON.parse(JSON.stringify(window.sagebrush.board.snapshot().doc))");
     await ev("localStorage.clear(), window.sagebrush.board.editing(true)");
-    check(await ev("document.getElementById('revert').hidden"), "Revert is shown for a board not edited (its format and version, added, are no edit)");
+    check(await ev("document.querySelector('[data-sbb=revert]').hidden"), "Revert is shown for a board not edited (its format and version, added, are no edit)");
     // few items in view: their text shows down to zoom 0.35 (William's I8); fewer than that, boxes
     await ev("(() => { const c = window.board.camera; window.board.setCamera({ ...c, z: 0.42 }); window.board.render(); return 1; })()");
     check(await ev("getComputedStyle(document.querySelector('.board-world')).visibility === 'visible' && document.querySelectorAll('.board-note').length > 5"), "at zoom 0.42, with few items in view, their text shows");
@@ -286,20 +286,20 @@ try {
     // (until here throws on a timeout: as a yes or no)
     const waits = (expr, ms) => until(expr, ms).then(() => true, () => false);
     const t0 = (await docOf()).title;
-    const tb = await ev("(() => { const r = document.getElementById('title').getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()");
+    const tb = await ev("(() => { const r = document.querySelector('[data-sbb=title]').getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()");
     await mouse("mousePressed", tb.x, tb.y); await mouse("mouseReleased", tb.x, tb.y, { buttons: 0 });
-    check(await waits("document.activeElement === document.querySelector('#title input')", 2000), "in Edit, a click on the title renames it there");
+    check(await waits("document.activeElement === document.querySelector('[data-sbb=title] input')", 2000), "in Edit, a click on the title renames it there");
     await ev("document.activeElement.select(), 1");
     await send("Input.insertText", { text: "Renamed board" });
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-    check(await waits("window.sagebrush.board.snapshot().doc.title === 'Renamed board' && document.getElementById('title').textContent === 'Renamed board'", 3000), "Enter keeps the new title: " + (await docOf()).title);
+    check(await waits("window.sagebrush.board.snapshot().doc.title === 'Renamed board' && document.querySelector('[data-sbb=title]').textContent === 'Renamed board'", 3000), "Enter keeps the new title: " + (await docOf()).title);
     await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1");
     check(await waits(`window.sagebrush.board.snapshot().doc.title === ${JSON.stringify(t0)}`, 3000), "undo takes it back");
     await mouse("mousePressed", tb.x, tb.y); await mouse("mouseReleased", tb.x, tb.y, { buttons: 0 });
-    await until("!!document.querySelector('#title input')", 2000);
+    await until("!!document.querySelector('[data-sbb=title] input')", 2000);
     await send("Input.insertText", { text: "Not this" });
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    check(await waits(`!document.querySelector('#title input') && window.sagebrush.board.snapshot().doc.title === ${JSON.stringify(t0)}`, 3000), "Esc keeps the title as it was");
+    check(await waits(`!document.querySelector('[data-sbb=title] input') && window.sagebrush.board.snapshot().doc.title === ${JSON.stringify(t0)}`, 3000), "Esc keeps the title as it was");
     // show one group's notes, large enough to hit
     await ev("window.board.focus(['nb'], true)");
     await sleep(200);
@@ -377,25 +377,25 @@ try {
     await send("Page.reload");
     await until("window.sagebrush?.board?.snapshot().items.length > 0");
     check((await docOf()).nodes.some((n) => n.title === "A new note"), "the edits were not kept across a reload");
-    check(!(await ev("document.getElementById('revert').hidden")), "Revert is hidden after edits");
-    await ev("document.getElementById('revert').click()");
+    check(!(await ev("document.querySelector('[data-sbb=revert]').hidden")), "Revert is hidden after edits");
+    await ev("document.querySelector('[data-sbb=revert]').click()");
     await sleep(400);
     check(!(await docOf()).nodes.some((n) => n.title === "A new note"), "Revert did not restore the original");
     check(await ev("localStorage.length === 0"), "Revert left the edits saved");
     // Tidy forgets positions
     await ev("window.sagebrush.board.edit((d) => { d.nodes[0].x = 5000; d.nodes[0].y = 5000; })");
-    await ev("document.getElementById('tidy').click()");
+    await ev("document.querySelector('[data-sbb=tidy]').click()");
     await sleep(300);
     check((await docOf()).nodes.every((n) => n.x === undefined), "Tidy kept positions");
     // Import Mermaid…: a flowchart pasted in replaces the board (undoable);
     // its shapes, labels, subgraph and edge styles carry over
     {
       const before = (await docOf()).nodes.length;
-      await ev("document.getElementById('mermaid').click()");
-      await until("document.getElementById('mmdlg').open");
-      await ev(`document.getElementById('mmtext').value = ${JSON.stringify("flowchart LR\n  a([Start]) --> b{Is it?}\n  b -->|yes| c[Done]\n  b -. no .-> d[[Retry]]\n  subgraph s [Later]\n    d <--> e[(Store)]\n  end\n  classDef hot fill:#fbb\n  class b hot")}`);
-      await ev("document.getElementById('mm-go').click()");
-      await until("!document.getElementById('mmdlg').open && window.sagebrush.board.snapshot().routed", 10000);
+      await ev("document.querySelector('[data-sbb=mermaid]').click()");
+      await until("document.querySelector('[data-sbb=mmdlg]').open");
+      await ev(`document.querySelector('[data-sbb=mmtext]').value = ${JSON.stringify("flowchart LR\n  a([Start]) --> b{Is it?}\n  b -->|yes| c[Done]\n  b -. no .-> d[[Retry]]\n  subgraph s [Later]\n    d <--> e[(Store)]\n  end\n  classDef hot fill:#fbb\n  class b hot")}`);
+      await ev("document.querySelector('[data-sbb=mm-go]').click()");
+      await until("!document.querySelector('[data-sbb=mmdlg]').open && window.sagebrush.board.snapshot().routed", 10000);
       const dm = await docOf(), items = await ev("window.sagebrush.board.snapshot().items");
       const sub = dm.nodes.find((n) => n.id === "s");
       check(dm.nodes.length === 4 && sub?.kind === "group" && sub.title === "Later" && sub.children.map((c) => c.id).join() === "d,e", `Import Mermaid: nodes ${JSON.stringify(dm.nodes).slice(0, 200)}`);
@@ -593,7 +593,7 @@ try {
     }
     // pages: add one (the board becomes page 1), write on it, delete it
     const nodes0 = (await docOf()).nodes.length;
-    await ev("document.getElementById('addpage').click()");
+    await ev("document.querySelector('[data-sbb=addpage]').click()");
     await sleep(500);
     let dp = await docOf();
     check(dp.pages?.length === 2 && dp.pages[0].nodes.length === nodes0 && !dp.nodes && dp.pages[1].nodes.length === 0, "Add a page did not make two pages");
@@ -606,7 +606,7 @@ try {
     check((await ev("window.sagebrush.board.snapshot().items.filter((i) => i.kind === 'note').length")) > 1, "page 1 lost its notes");
     await ev("window.sagebrush.board.page(1)");
     await ev("window.sagebrush.board.edit((d) => { d.pages[1].nodes = []; })");
-    await ev("document.getElementById('rmpage').click()");
+    await ev("document.querySelector('[data-sbb=rmpage]').click()");
     await sleep(500);
     dp = await docOf();
     check(!dp.pages && dp.nodes.length === nodes0, "Delete this page did not leave the board as it was");
@@ -627,7 +627,7 @@ try {
 } catch (e) {
   fails.push(String(e?.stack ?? e));
   if (errors.length) fails.push("page errors: " + errors.join(" | "));
-  fails.push("the page says: " + (await ev("document.getElementById('say')?.textContent ?? ''").catch(() => "")));
+  fails.push("the page says: " + (await ev("document.querySelector('[data-sbb=say]')?.textContent ?? ''").catch(() => "")));
 } finally {
   ws.close();
   chrome.kill();
