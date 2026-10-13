@@ -32,6 +32,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
+      - name: the security tests with the attribute-read backstop off (SAGEBRUSH_HARDENED=0), so that path never rots
+        run: SAGEBRUSH_HARDENED=0 node --test dist/test/security.test.js
       - name: single-file bundle
         run: node scripts/build-cli.mjs
       - name: the web page builds, and the npm packages in it are those in its notices

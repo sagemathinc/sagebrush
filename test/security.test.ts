@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { scriptName } from "../src/compile";
 import { runInThisContext } from "../web/shims/vm";
 import { R } from "../src/runtime/index";
-import { siteGet, objectType, T } from "../src/runtime/object";
+import { siteGet, objectType, T, setHardened, isHardened } from "../src/runtime/object";
 
 // Python must never reach JavaScript (design/security.md, rule 6).  The
 // escapes sagebrush-daybreak found at 983418b, and the shapes around them.
@@ -472,6 +472,9 @@ except (ModuleNotFoundError, AttributeError, TypeError) as e:
 // function's inherited `constructor` (JavaScript's Function).
 test("SEC-5DE-1 backstop: a cached attribute read answers only an object's own property, whatever its class tag says", () => {
   void R; // (the runtime, initialized)
+  // (the backstop is a switch, SAGEBRUSH_HARDENED; this tests it on, whatever the environment says)
+  const was = isHardened();
+  setHardened(true);
   const C = objectType("C", [T.object], new Map(), "test");
   const real: any = new (C.$ctor as any)();
   real.constructor = "own";
@@ -488,6 +491,13 @@ test("SEC-5DE-1 backstop: a cached attribute read answers only an object's own p
   }
   assert.notEqual(got, Function);
   assert.equal(got, "raised");
+  // off, the same site answers with the inherited property: what the backstop is for
+  setHardened(false);
+  const bare = siteGet("constructor");
+  bare(real);
+  bare(real);
+  assert.equal(bare(forged), Function);
+  setHardened(was);
 });
 
 // dir() shows only what the instance dict holds: not a list subclass's

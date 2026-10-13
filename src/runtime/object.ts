@@ -848,12 +848,29 @@ function fillCallSite(S: any, cls: PyType, fn: any) {
 
 const jsName = (name: string) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : "attr");
 
+// The attribute-read backstop (design/security.md, SEC-5DE-1): a cached read
+// of an instance attribute returns a value only when it is the object's own
+// property, so that even an object forging another class's tag could never
+// get an inherited JavaScript property (constructor: Function) from a site.
+// The primary rule is getattrMiss's (a site is primed only by an object with
+// its class's own prototype); this is defense in depth, and costs about half
+// as much again on attribute-heavy code.  On by default; SAGEBRUSH_HARDENED=0
+// in the environment, or setHardened(false) before any code is compiled, turns
+// it off.  It is chosen as each read site is generated, so off costs nothing.
+let hardened = !(typeof process === "object" && process?.env?.SAGEBRUSH_HARDENED === "0");
+/** Turn the attribute-read backstop on or off: for read sites generated from now on (so, before code runs). */
+export function setHardened(on: boolean): void {
+  hardened = on;
+}
+export const isHardened = (): boolean => hardened;
+
 export function siteGet(name: string): (o: any) => any {
   const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined };
   const p = JSON.stringify(name);
+  const own = hardened ? `if (hasOwn.call(o, ${p})) { const t = o[${p}]; if (t !== undefined) return t; }` : `{ const t = o[${p}]; if (t !== undefined) return t; }`;
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
   if (o != null && o.$cls === S.c && S.c.$ver === S.v) {
-    if (S.k === 0) { if (hasOwn.call(o, ${p})) { const t = o[${p}]; if (t !== undefined) return t; } }
+    if (S.k === 0) { ${own} }
     else if (o[${p}] === undefined || (S.c.$jsBase !== null && !hasOwn.call(o, ${p}))) return S.val;
   } else if (o === S.tc && o.$ver === S.tv) return S.tval;
   return miss(o, ${p}, S);
