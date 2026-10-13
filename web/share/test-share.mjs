@@ -38,7 +38,7 @@ const fake = { codes: new Map(), limits: new Map(), limitsStatus: 200, tokenCall
 async function cocalc(req) {
   const u = new URL(req.url);
   const basic = req.headers.get("authorization") === "Basic " + Buffer.from("sagebrush:" + SECRET).toString("base64");
-  if (u.pathname === "/oauth/token" && req.method === "POST") {
+  if (u.pathname === "/api/v2/auth/oauth/token" && req.method === "POST") {
     fake.tokenCalls++;
     if (!basic) return Response.json({ error: "invalid_client" }, { status: 401 });
     const f = new URLSearchParams(await req.text());
@@ -48,7 +48,7 @@ async function cocalc(req) {
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     return Response.json({ account_id: c.account_id, email: c.email, email_verified: c.verified, name: "Test" });
   }
-  if (u.pathname === "/api/sagebrush/limits") {
+  if (u.pathname === "/api/v2/sagebrush/limits") {
     if (!basic) return Response.json({ error: "invalid_client" }, { status: 401 });
     if (fake.limitsStatus !== 200) return new Response("down", { status: fake.limitsStatus });
     const l = fake.limits.get(u.searchParams.get("account_id"));
@@ -111,7 +111,7 @@ async function upload(c, files, title = "T") {
 // ---- sign-in
 {
   const { r, to, cb, session } = await signIn(A);
-  ok(r.status === 302 && to.origin === COCALC && to.pathname === "/oauth/authorize", "login redirects to CoCalc's authorize page");
+  ok(r.status === 302 && to.origin === COCALC && to.pathname === "/auth/oauth/authorize", "login redirects to CoCalc's authorize page");
   ok(to.searchParams.get("client_id") === "sagebrush" && to.searchParams.get("code_challenge_method") === "S256" && to.searchParams.get("redirect_uri") === SITE + "/auth/callback", "authorize parameters");
   ok(cb.status === 302 && cb.headers.get("location") === "/x" && session, "the callback starts a session and returns to the page");
   const setc = cb.headers.getSetCookie().join("\n");

@@ -1580,7 +1580,7 @@ authorization of the copyright holder.
 
 == JavaScript packages in the notebook page's bundles (12) ==
 
-(from web/js-dependencies.json aa9b0f9205471928)
+(from web/js-dependencies.json 2ff23eb22de9a286)
 
 @cocalc/diff-match-patch 1.0.1: Apache-2.0 (in TimeTravel)
 @preact/signals-core 1.14.4: MIT (in the board)
@@ -1592,7 +1592,7 @@ immer 10.2.0: MIT (in TimeTravel)
 immutable 4.3.9: MIT (in TimeTravel)
 katex 0.19.0: MIT (in KaTeX's stylesheet and fonts (copied), math, the atlas)
 lru-cache 11.2.4: BlueOak-1.0.0 (in TimeTravel) [vendored by another package; license text from 11.5.3]
-marked 18.0.14: MIT (in the board, the notebook component, the notebook page)
+marked 18.0.14: MIT (in the board, the notebook component, the notebook page, the shared collection page)
 patchflow 0.12.0: MIT (in TimeTravel)
 
 ------------------------------------------------------------------------

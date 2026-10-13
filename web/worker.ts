@@ -5,6 +5,8 @@
 //
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
 //           {fsPut: path, data}        a file uploaded (data) or deleted (null) in the page
+//           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
+//                                       fetched when Python first reads them (web/shims/fs.ts)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
 //           {ready, version, interrupt, seeded, startup}  started (interrupt: the
 //                                       shared flag, if any; seeded, startup: web/replay-env.ts)
@@ -19,7 +21,7 @@ declare const __SB_ENGINE_HASH__: string;
 // (and its SHA-256, checked before it runs: src/runtime/engine.ts)
 (globalThis as any).__SAGEBRUSH_ENGINE_SHA256__ = __SB_ENGINE_HASH__;
 import "../build/cli/lib.gen.js";
-import { __hooks, load as loadFiles, put as putFile } from "./shims/fs";
+import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 
@@ -71,6 +73,7 @@ self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
+  if (m.mount) return mount(m.mount);
   if (m.sage) await precompiled;
   await session.handle(m);
 };

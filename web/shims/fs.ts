@@ -4,7 +4,10 @@
 // about every change Python makes.  Paths are absolute from "/", which is
 // also the initial working directory.  Output streams go to hooks.write.
 // (read: a file's contents were read, for the reactive notebook's file
-// tracking)
+// tracking)  A shared collection's files are mounted (mount()): fetched from
+// the user-content domain the first time Python reads them, and checked
+// against their SHA-256, so a notebook that reads one file of a large
+// collection downloads only that file.
 const hooks: {
   write: (fd: number, s: string) => void;
   changed: (path: string, data: Uint8Array | null) => void;
@@ -12,9 +15,18 @@ const hooks: {
 } = { write: () => {}, changed: () => {}, read: () => {} };
 export const __hooks = hooks;
 
+import { sha256Hex } from "../../src/runtime/sha256";
+
+interface Remote {
+  url: string;
+  sha256: string;
+  size: number;
+}
 interface Entry {
   data: Uint8Array;
   mtime: number;
+  /** not fetched yet */
+  remote?: Remote;
 }
 const files = new Map<string, Entry>();
 const dirs = new Map<string, number>([["/", Date.now()]]); // path -> mtime
@@ -64,6 +76,38 @@ export function load(entries: [string, Uint8Array][]) {
     files.set(r, { data: new Uint8Array(data), mtime: Date.now() });
   }
 }
+// A shared collection's files: [path, {url, sha256, size}], fetched when read.
+export function mount(entries: [string, Remote][]) {
+  for (const [p, remote] of entries) {
+    const r = resolve(p);
+    ensureDirs(r);
+    files.set(r, { data: new Uint8Array(0), mtime: Date.now(), remote: { url: String(remote.url), sha256: String(remote.sha256), size: Number(remote.size) } });
+  }
+}
+// (synchronously: Python's open() is synchronous, and a worker may block)
+function fetchRemote(path: string, m: Remote): Uint8Array {
+  if (typeof XMLHttpRequest !== "function") fail("EIO", -5, "fetch", path);
+  const x = new XMLHttpRequest();
+  x.open("GET", m.url, false);
+  x.responseType = "arraybuffer";
+  try {
+    x.send();
+  } catch {
+    fail("EIO", -5, "fetch", path);
+  }
+  if (x.status !== 200) fail("EIO", -5, `fetch (HTTP ${x.status})`, path);
+  const data = new Uint8Array(x.response as ArrayBuffer);
+  if (data.length !== m.size || sha256Hex(data) !== m.sha256) fail("EIO", -5, "fetch (the file is not the one shared: wrong SHA-256)", path);
+  return data;
+}
+function contents(r: string, f: Entry): Uint8Array {
+  if (f.remote) {
+    f.data = fetchRemote(r, f.remote);
+    delete f.remote;
+  }
+  return f.data;
+}
+
 // Changes the page makes (an upload, a delete in the files panel).
 export function put(p: string, data: Uint8Array | null) {
   const r = resolve(p);
@@ -96,15 +140,17 @@ export function readFileSync(p: string, enc?: any): any {
   const f = files.get(r);
   if (!f) dirs.has(r) ? fail("EISDIR", -21, "read", p) : fail("ENOENT", -2, "open", p);
   hooks.read(r);
+  const data = contents(r, f!);
   const encoding = typeof enc === "string" ? enc : enc?.encoding;
-  return encoding ? new TextDecoder().decode(f!.data) : f!.data.slice();
+  return encoding ? new TextDecoder().decode(data) : data.slice();
 }
 export function writeFileSync(p: string, data: any) {
   setFile(resolve(p), bytes(data));
 }
 export function appendFileSync(p: string, data: any) {
   const r = resolve(p);
-  const old = files.get(r)?.data ?? new Uint8Array(0);
+  const f = files.get(r);
+  const old = f ? contents(r, f) : new Uint8Array(0);
   const add = bytes(data);
   const both = new Uint8Array(old.length + add.length);
   both.set(old);
@@ -147,7 +193,7 @@ export function statSync(p: string) {
     isDirectory: () => !f,
     isFile: () => !!f,
     isSymbolicLink: () => false,
-    size: f ? f.data.length : 0,
+    size: f ? (f.remote ? f.remote.size : f.data.length) : 0,
     mode: f ? 0o100644 : 0o40755,
     ino: 0, dev: 0, nlink: 1, uid: 0, gid: 0,
     atimeMs: t, mtimeMs: t, ctimeMs: t,
@@ -172,7 +218,7 @@ export function renameSync(a: string, b: string) {
   if (f) {
     files.delete(ra);
     hooks.changed(ra, null);
-    setFile(rb, f.data);
+    setFile(rb, contents(ra, f));
     return;
   }
   if (!dirs.has(ra)) fail("ENOENT", -2, "rename", a);
@@ -182,8 +228,9 @@ export function renameSync(a: string, b: string) {
       files.delete(k);
       hooks.changed(k, null);
       const nk = rb + k.slice(ra.length);
+      const data = contents(k, v);
       files.set(nk, v);
-      hooks.changed(nk, v.data);
+      hooks.changed(nk, data);
     }
   }
   for (const [k, v] of [...dirs]) {

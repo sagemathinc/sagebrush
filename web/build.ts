@@ -82,8 +82,10 @@ const analyzeResult = await Bun.build(<any>{
   minify: true,
   plugins: [{ name: "unames", setup(build) { build.onResolve({ filter: /unames\.gen$/ }, () => ({ path: join(here, "shims", "unames.ts") })); } }],
 });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult]];
-for (const r of [result, consoleResult, mathResult, notebookResult, historyResult, analyzeResult]) {
+// A shared collection's page, /s/<id> (web/share/view.ts; design/sharing.md)
+const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true });
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult]];
+for (const r of [result, consoleResult, mathResult, notebookResult, historyResult, analyzeResult, shareResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -261,7 +263,11 @@ mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
 mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+// the shared collection page, served for /s/<id> by the site's Worker
+mkdirSync(join(here, "dist", "s"), { recursive: true });
+copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
+mkdirSync(join(here, "site", "public", "s"), { recursive: true });
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");
