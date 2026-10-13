@@ -17,13 +17,14 @@
 // - history: TimeTravel's versions in this browser's IndexedDB (history.ts,
 //   patchflow from sagebrush-history.js);
 // - the address's hash, the page's title, the examples, Download as HTML.
-// An exported file has no code engine, no TimeTravel and no examples.
+// An exported file has no code engine (its code shows, and a notice says it
+// doesn't run), no TimeTravel and no examples.
 //
 // window.sagebrush.board is the API for an agent driving the page (in the
 // shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
 // outputs(), versions(), version(i); window.board is the board itself.
 import { synthetic } from "./board";
-import { isBoard, type BoardDoc } from "./doc";
+import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode } from "./code";
 import { boardFromText, fromMermaid } from "./mermaid";
 import { embedded, exportHtml } from "./export";
@@ -53,7 +54,10 @@ const host: BoardHost = {
       // (this browser's edits of it, if any)
       let saved: BoardDoc | null = null;
       try { saved = JSON.parse(localStorage.getItem(saveKey) ?? "null"); } catch {}
-      return { doc: isBoard(saved) ? saved! : original, original, notice };
+      const doc = isBoard(saved) ? saved! : original;
+      // (an exported file: its code shows but doesn't run, which it says)
+      if (file && anyCode(doc)) notice = "**This file shows its code but doesn't run it.** To run it, download its JSON (⋯) and open that at [sagebrush.space/board](https://sagebrush.space/board/).";
+      return { doc, original, notice };
     },
     save(d) {
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch {}

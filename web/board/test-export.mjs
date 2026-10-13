@@ -1,16 +1,17 @@
 // Download as HTML (web/board/export.ts): each board exported from the
 // site opens from a file, offline (the network off), with its pages, math
 // (KaTeX's fonts inline) and printing; exported again from that file, it is
-// the same file.  Serve web/dist first (python3 web/serve.py 8765), then
+// the same file.  A board with code says, in the file, that its code doesn't
+// run there; the menu doesn't promise that the file works offline.  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-export.mjs [doc.json ...]
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const docs = process.argv.slice(2).length ? process.argv.slice(2) : ["examples/primes.json", "examples/sagebrush.json", "examples/mermaid.md"];
+const docs = process.argv.slice(2).length ? process.argv.slice(2) : ["examples/primes.json", "examples/sagebrush.json", "examples/mermaid.md", "examples/live.json"];
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
-const port = 9453, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const port = Number(process.env.CDP_PORT ?? 9453), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dir = mkdtempSync(join(tmpdir(), "sb-export-")), profile = mkdtempSync(join(tmpdir(), "sb-export-prof-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;
@@ -38,7 +39,8 @@ try {
     await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent(doc)}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     const html = await ev("window.sagebrush.board.exportHtml()");
-    const s0 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, math: JSON.stringify(s.doc).includes('$') }; })()");
+    const s0 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, math: JSON.stringify(s.doc).includes('$'), code: JSON.stringify(s.doc).includes('\"code\":') }; })()");
+    check(!/offline/i.test(await ev("document.getElementById('html').textContent")), `${doc}: the menu says the file works offline`);
     const file = join(dir, doc.split("/").pop().replace(/\.\w+$/, "") + ".html");
     writeFileSync(file, html);
     // the file, offline
@@ -50,6 +52,9 @@ try {
     const s1 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, title: document.title }; })()");
     check(s1.pages === s0.pages && s1.items === s0.items, `${doc}: the file shows ${s1.items} items on ${s1.pages} pages, not ${s0.items} on ${s0.pages}`);
     check(!(await ev("document.getElementById('examples').hidden === false")), `${doc}: Examples shown in the file`);
+    // code: shown, not run, and the file says so (only when there is code)
+    const said = await ev("!document.getElementById('tour').hidden && /doesn't run/.test(document.getElementById('say').textContent)");
+    check(said === s0.code, s0.code ? `${doc}: the file doesn't say its code doesn't run` : `${doc}: the file says code doesn't run, with no code`);
     // math, typeset with KaTeX's own fonts (inline)
     if (s0.math) {
       const id = await ev("(() => { const d = window.sagebrush.board.snapshot(); const p = d.doc.pages ? d.doc.pages[d.page] : d.doc; const walk = (ns) => { for (const n of ns) { if (n.kind === 'group') { const r = walk(n.children); if (r) return r; } else if (/\\$/.test((n.text ?? '') + (n.detail ?? ''))) return n.id; } }; return walk(p.nodes); })()");

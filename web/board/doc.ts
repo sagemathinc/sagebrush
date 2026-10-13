@@ -250,6 +250,8 @@ export const onlyImage = (n: { image?: string | object; title?: string; text?: s
   !!n.image && !n.title && !n.text && n.code === undefined && !n.detail && !n.ref;
 
 const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.code !== undefined));
+/** Whether a board has code items, on any page. */
+export const anyCode = (d: BoardDoc) => Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i)).some((v) => hasCode(v.nodes ?? []));
 
 /**
  * A board's code items in reading order, which is the order they run in

@@ -1,6 +1,8 @@
 // A board as one HTML file (Download as HTML): the board page, its script,
 // and the document, inline, so it opens anywhere, offline, from a file or an
-// email attachment, and can be put on any web server as it is.  With math,
+// email attachment, and can be put on any web server as it is.  Its code
+// items show their code but don't run: the file carries no interpreter, and
+// says so (page.ts).  With math,
 // KaTeX comes too (its module as text, imported from a Blob, and its
 // stylesheet with the fonts as data: URLs), about 0.7 MB more.  It is the
 // whole board: pages, the tour, printing, even editing (kept in that
