@@ -25,6 +25,9 @@ class WarningMessage:
 
 
 def formatwarning(message, category, filename, lineno, line=None):
+    # (no file, as in the browser's notebook: no "filename:lineno: " either)
+    if not filename:
+        return "%s: %s\n" % (category.__name__, message)
     return "%s:%s: %s: %s\n" % (filename, lineno, category.__name__, message)
 
 
@@ -54,7 +57,7 @@ def warn(message, category=None, stacklevel=1, source=None, *, skip_file_prefixe
     text = str(message)
     if not isinstance(message, Warning):
         message = category(message)
-    filename = sys.argv[0] if sys.argv else "<string>"
+    filename = sys.argv[0] if sys.argv else ""
     warn_explicit(message, category, filename, 0, "__main__")
 
 
