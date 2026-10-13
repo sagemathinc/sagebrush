@@ -61,6 +61,8 @@ export class Editor {
   private edgeSel: number | null = null; // the selected edge: its index in the page's edges
   private panel: HTMLElement | null = null; // an edge's
   private inplace: InPlace | null = null; // the item being written where it is
+  /** Whether the page's keys and clipboard are this board's (one of several on a page: focus.ts) */
+  isActive: () => boolean = () => true;
   /** Run a code item (its code is as it was: a changed one runs as the board is laid out again) */
   onRun: ((id: string) => void) | null = null;
   /** the code highlighter (HTML), once the notebook is loaded: code is written in the notebook's editor */
@@ -111,7 +113,7 @@ export class Editor {
     });
     effect(() => { if (!this.editing.value) this.selecting.value = false; });
     // (Space held: a drag pans, whatever the tool)
-    this.listen(window, "keydown", (e) => { if (e.key === " " && !this.typing()) this.space = true; });
+    this.listen(window, "keydown", (e) => { if (e.key === " " && !this.typing() && this.isActive()) this.space = true; });
     this.listen(window, "keyup", (e) => { if (e.key === " ") this.space = false; });
   }
   // (the page's events it listens to, until destroy())
@@ -507,6 +509,7 @@ export class Editor {
     return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at, ...(pics.size ? { images } : {}) });
   }
   private clip(e: ClipboardEvent, cut: boolean) {
+    if (!this.isActive()) return;
     if (!this.on || this.panel || this.typing()) return;
     const text = this.copied();
     if (!text) return;
@@ -515,6 +518,7 @@ export class Editor {
     if (cut) this.deleteSelected();
   }
   private paste(e: ClipboardEvent) {
+    if (!this.isActive()) return;
     if (!this.on || this.panel || this.typing()) return;
     // a picture (a screenshot, say): a note that is it, in the middle of the view
     const pics = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
@@ -785,6 +789,7 @@ export class Editor {
   }
 
   private key(e: KeyboardEvent) {
+    if (!this.isActive()) return;
     if (this.panel || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     // (undo and redo also outside Edit: opening or importing a board replaces it)
     const mod = e.metaKey || e.ctrlKey;

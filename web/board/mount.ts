@@ -45,6 +45,7 @@ import { boardFromText } from "./mermaid";
 import { render as markdown } from "../markdown";
 import { IMAGE_TYPES, type ImageStore } from "./images";
 import type { Version } from "./history";
+import { track, active } from "./focus";
 import css from "./board.css" with { type: "text" };
 
 /** Where a board's document comes from, and where its edits go. */
@@ -127,6 +128,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (listeners on the page, taken off by destroy())
   const offs: (() => void)[] = [];
   const on = (t: EventTarget, type: string, f: (e: any) => void, capture = false) => { t.addEventListener(type, f, capture); offs.push(() => t.removeEventListener(type, f, capture)); };
+  // (the page's keys are this board's only when it is the active one: focus.ts)
+  offs.push(track(root));
+  const mine = () => active(root);
   let doc: BoardDoc | null = null;
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
@@ -331,7 +335,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("next").onclick = () => step(at + 1);
   $("fit").onclick = () => board.focus();
   on(window, "keydown", (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!mine() || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
     // (items selected in Edit: the arrow keys move them; in Edit, Space held pans)
     if (editor.hasSelection && e.key.startsWith("Arrow")) return;
     if (editor.on && e.key === " ") return;
@@ -370,6 +374,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     host.store?.save(doc!);
     remember(prev);
   }, (d) => pageOf(d, pageIx));
+  editor.isActive = mine;
   editor.onRun = (id) => { code?.run([id]); };
   editor.highlight = () => code?.highlight ?? null;
   editor.images = images;
@@ -516,8 +521,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (f) await openText(await f.text(), f.name).catch(fail);
     picker.value = "";
   };
-  on(window, "dragover", (e: DragEvent) => e.preventDefault());
-  on(window, "drop", async (e: DragEvent) => {
+  // (files dropped on this board)
+  on(root, "dragover", (e: DragEvent) => e.preventDefault());
+  on(root, "drop", async (e: DragEvent) => {
     e.preventDefault();
     // pictures: added where they were dropped (in Edit); another file opens as a board
     const files = [...(e.dataTransfer?.files ?? [])];
@@ -600,7 +606,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   // (⌘P prints the sheets, not the screen)
   on(window, "keydown", (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc) { e.preventDefault(); $("print").click(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc && mine()) { e.preventDefault(); $("print").click(); }
   });
 
   function outputs() {
@@ -708,7 +714,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (an edit like any other: undoable, and a version itself; the toolbar's tools are a setting, left as they are)
     await editor.commit((d) => { const tools = d.tools; for (const k of Object.keys(d)) delete (d as any)[k]; Object.assign(d, JSON.parse(JSON.stringify(v))); if (tools) d.tools = tools; else delete d.tools; });
   };
-  on(window, "keydown", (e: KeyboardEvent) => { if (e.key === "Escape" && !$("tt").hidden) { e.preventDefault(); e.stopImmediatePropagation(); closeTimeTravel(); } }, true);
+  on(window, "keydown", (e: KeyboardEvent) => { if (e.key === "Escape" && !$("tt").hidden && mine()) { e.preventDefault(); e.stopImmediatePropagation(); closeTimeTravel(); } }, true);
   $("timetravel").hidden = !host.history;
 
   return {
