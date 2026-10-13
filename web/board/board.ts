@@ -38,10 +38,12 @@ export interface Item {
   /** code items (notes with code): the code, and where it is in the board's reading order (1, 2, ...) */
   code?: string;
   order?: number;
+  /** code items: only the code's output shows */
+  hideCode?: boolean;
 }
 
 /** What an item's element shows. */
-export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order">>;
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode">>;
 
 /** Code items' engine (code.ts, through page.ts): their output, state and running. */
 export interface CodeHost {
@@ -136,6 +138,8 @@ export class Board {
   typeset: ((el: HTMLElement) => void) | null = null;
   /** code items' output and running (none: their code only): setCode() */
   code: CodeHost | null = null;
+  /** a code item's { } (show or hide its code) was clicked */
+  onToggleCode: ((id: string) => void) | null = null;
   /** a press on an item (not a link): return true to take it (the board does not pan) */
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
   /** a double click: on an item, or (null) on the background at world (x, y); return true when handled */
@@ -372,7 +376,8 @@ export class Board {
       showState(el, this.code?.state(id) ?? "");
       // (an element built before the engine had its cell: the output now)
       const out = this.code?.output(id, false);
-      if (out && !el.contains(out)) el.querySelector(".board-code-src")!.after(outBox(out));
+      // (after its code; or, the code hidden, after what comes before it)
+      if (out && !el.contains(out)) (el.querySelector(".board-code-src") ?? el.querySelector(".board-text") ?? el.querySelector(".board-code-head"))!.after(outBox(out));
     }
   }
 
@@ -417,6 +422,15 @@ export class Board {
         head.append(run);
       }
       if (it.title) head.append(Object.assign(document.createElement("b"), { textContent: it.title }));
+      if (this.onToggleCode && it.id) {
+        const id = it.id, t = document.createElement("button");
+        t.className = "board-code-toggle" + (it.hideCode ? " off" : "");
+        t.textContent = "{ }";
+        t.title = it.hideCode ? "Show the code" : "Hide the code (its output stays)";
+        t.setAttribute("aria-pressed", String(!it.hideCode));
+        t.onclick = (e) => { e.stopPropagation(); this.onToggleCode?.(id); };
+        head.append(t);
+      }
       el.append(head);
     } else if (it.title) {
       const h = document.createElement("b");
@@ -432,11 +446,13 @@ export class Board {
     };
     if (it.text) md(it.text, "board-text");
     if (it.code !== undefined) {
-      const pre = document.createElement("pre");
-      pre.className = "sbnb board-code-src"; // (the notebook's colors for code)
-      if (this.code) pre.innerHTML = this.code.highlight(it.code);
-      else pre.textContent = it.code;
-      el.append(pre);
+      if (!it.hideCode) {
+        const pre = document.createElement("pre");
+        pre.className = "sbnb board-code-src"; // (the notebook's colors for code)
+        if (this.code) pre.innerHTML = this.code.highlight(it.code);
+        else pre.textContent = it.code;
+        el.append(pre);
+      }
       // its output: the engine's own element (a copy, to measure or print)
       const out = it.id ? this.code?.output(it.id, now) : null;
       if (out) el.append(outBox(out));
@@ -900,7 +916,7 @@ export class Board {
 // (numbers, and a color checked when the document was read: doc.ts cleanDoc; checked again, as items also come from elsewhere)
 const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px;height:${+it.h}px;` + (it.color && it.kind !== "group" && /^[#\w(),.%\s-]+$/.test(it.color) ? `--c:${it.color};` : "");
 // What an element shows (kept when this is unchanged).
-const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order]);
+const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode]);
 // A code item's output, in the box that gives it the notebook's styles.
 function outBox(out: HTMLElement) {
   const box = document.createElement("div");

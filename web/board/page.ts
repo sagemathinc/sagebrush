@@ -16,9 +16,11 @@
 // or Markdown with ```mermaid blocks (a page each), ?mermaid=TEXT, the Open
 // menu and a dropped file, or Import Mermaid… (pasted).
 //
-// Code items (kind "code") are Python, run on one interpreter for the board
-// as a notebook's cells are, in reading order (code.ts, loaded the first
-// time a board has some); their output shows under their code.
+// Code items (notes with code) are Python, run on one interpreter for the
+// board as a notebook's cells are, in reading order (code.ts, loaded the
+// first time a board has some); their output shows under their code, or
+// alone (hideCode; { } on the item shows the code: in Edit, for the board,
+// otherwise only for this reader).
 //
 // window.sagebrush.board is the API for an agent driving the page (in the
 // shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
@@ -60,7 +62,7 @@ async function show(d: BoardDoc) {
   d = cleanDoc(d);
   doc = d;
   pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
-  const v = pageView(d, pageIx);
+  const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
   board.markdown = (s) => markdown(s);
   if (hasMath(JSON.stringify(d))) {
     // KaTeX, the notebook's (its stylesheet and fonts beside it)
@@ -114,9 +116,22 @@ async function show(d: BoardDoc) {
   $("revert").hidden = !original || JSON.stringify(original) === JSON.stringify(d);
 }
 
+// A reader's { } outside Edit: the code items whose code shows (or hides)
+// otherwise than the board says, for this reader only.
+const flipped = new Set<string>();
+function flip(v: BoardDoc): BoardDoc {
+  const node = (n: any): any => (n.kind === "group" ? { ...n, children: n.children.map(node) } : flipped.has(n.id) && n.code !== undefined ? { ...n, hideCode: !n.hideCode } : n);
+  return { ...v, nodes: (v.nodes ?? []).map(node) };
+}
+board.onToggleCode = (id) => {
+  if (editor.on) { flipped.delete(id); editor.toggleCode(id); return; }
+  if (!flipped.delete(id)) flipped.add(id);
+  if (doc) show(doc).catch(fail);
+};
+
 function measure(n: DocNote, w: number) {
   // (a code item's height changes with its output: measured each time)
-  if (n.kind === "code") return board.measure({ ...n, kind: "note", code: n.code ?? "", order: 1 }, w);
+  if (n.code !== undefined) return board.measure({ ...n, kind: "note", order: 1 }, w);
   const k = JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, w]);
   let h = heights.get(k);
   if (h === undefined) heights.set(k, (h = board.measure({ ...n, kind: "note" }, w)));
@@ -258,6 +273,7 @@ const editor = new Editor(board, () => doc, async (d) => {
   try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch {}
 }, (d) => pageOf(d, pageIx));
 editor.onRun = (id) => { code?.run([id]); };
+editor.highlight = () => code?.highlight ?? null;
 const editBtn = $("edit");
 editBtn.onclick = () => editor.setOn(!editor.on);
 effect(() => {
@@ -269,7 +285,7 @@ const center = () => { const v = board.view(); return { x: (v.x0 + v.x1) / 2, y:
 const toolbar = new Toolbar(document.body, [
   { id: "select", label: "Select", icon: "↖", title: "Select: drag on the background to select what the rectangle holds (Space-drag pans); Esc to stop", toggle: editor.selecting },
   { id: "note", label: "Note", icon: "¶", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y); } },
-  { id: "code", label: "Code", icon: "{ }", title: "Add Python code", run: () => { const c = center(); editor.addCode(c.x, c.y); } },
+  { id: "code", label: "Code", icon: "{ }", title: "Add a note with Python code (any note can have code: + Code in its editor)", run: () => { const c = center(); editor.addCode(c.x, c.y); } },
   { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
   { id: "connect", label: "Connect", icon: "⤳", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
   { id: "page", label: "Page", icon: "⧉", title: "Add a page after this one", run: () => $("addpage").click() },

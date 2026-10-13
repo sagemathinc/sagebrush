@@ -60,6 +60,8 @@ export class Editor {
   private panel: HTMLElement | null = null;
   /** Run a code item (its code is as it was: a changed one runs as the board is laid out again) */
   onRun: ((id: string) => void) | null = null;
+  /** the code highlighter (HTML), once the notebook is loaded: code is written in the notebook's editor */
+  highlight: (() => ((src: string) => string) | null) | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -581,50 +583,97 @@ export class Editor {
     return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, kind: "group", title: "", children: [], x: Math.round(x - 100), y: Math.round(y - 40) }); }).then(() => this.open(id, true));
   }
 
-  /** A new code item where (x, y) is (the world; at the top level), its code being written. */
+  /** A new note with code where (x, y) is (the world; at the top level), its code being written. */
   addCode(x: number, y: number) {
     const id = "c" + Math.random().toString(36).slice(2, 8);
-    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, kind: "code", code: "", x: Math.round(x - 220), y: Math.round(y - 40) }); }).then(() => this.open(id, true));
+    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, code: "", x: Math.round(x - 220), y: Math.round(y - 40) }); }).then(() => this.open(id, true));
   }
 
-  /** Write a note or a group's title and text (a code item's code), in a panel over it. */
+  /** Show or hide a code item's code (its output stays). */
+  toggleCode(id: string) {
+    return this.commit((d) => {
+      const n = find(this.pg(d), id)?.node as DocNote | undefined;
+      if (!n || n.code === undefined) return;
+      if (n.hideCode) delete n.hideCode;
+      else n.hideCode = true;
+    });
+  }
+
+  /**
+   * Write an item, in a panel over it.  A note's parts come in the order it
+   * shows them: title, text, code, detail, link; the parts it does not have
+   * are small "+ Code", "+ Detail" and "+ Link" buttons, so that a plain
+   * note's editor stays plain.  A group has a title and text.
+   */
   open(id: string, fresh = false) {
     this.close();
     const d = this.doc(), f = d && find(this.pg(d), id), r = this.board.clientRect(id);
     if (!f || !r) return;
-    const n = f.node as Omit<DocNote, "kind"> & { kind?: "note" | "group" | "code" };
-    const code = n.kind === "code";
+    const group = f.node.kind === "group";
+    const n = f.node as DocNote;
     const p = document.createElement("div");
-    p.className = "board-editor" + (code ? " board-code-editor" : "");
-    p.innerHTML = `<input class="be-title" placeholder="Title"><textarea class="be-text" placeholder="Markdown, with math: $x^2$"></textarea>` +
-      (n.kind === "group" ? "" : `<details><summary>Detail, shown zoomed in</summary><textarea class="be-detail"></textarea></details><input class="be-ref" placeholder="Link (https://…)">`) +
-      `<div class="be-row"><button class="be-del">Delete</button><span></span><button class="be-cancel">Cancel</button><button class="be-done">${code ? "Run" : "Done"}</button></div>`;
+    p.className = "board-editor";
+    p.innerHTML = `<input class="be-title" placeholder="Title"><textarea class="be-text" placeholder="Text: Markdown, with math: $x^2$"></textarea>` +
+      (group ? "" : `<div class="be-part be-codepart" hidden><div class="be-codebox"><textarea class="be-code" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Python (Shift+Enter runs it, and what depends on it)"></textarea></div>` +
+        `<label class="be-hide"><input type="checkbox" class="be-hidecode"> Hide the code: show only its output</label></div>` +
+        `<textarea class="be-detail be-part" hidden placeholder="Detail, shown when zoomed in (Markdown)"></textarea><input class="be-ref be-part" hidden placeholder="Link (https://…)">` +
+        `<div class="be-add"><button data-part="code">+ Code</button><button data-part="detail">+ Detail</button><button data-part="ref">+ Link</button></div>`) +
+      `<div class="be-row"><button class="be-del">Delete</button><span></span><button class="be-cancel">Cancel</button><button class="be-done">Done</button></div>`;
     const $ = <T extends HTMLElement>(s: string) => p.querySelector(s) as T | null;
-    $<HTMLInputElement>(".be-title")!.value = n.title ?? "";
-    $<HTMLTextAreaElement>(".be-text")!.value = n.text ?? "";
-    if (code) {
-      // its code first; its text (Markdown, above the code) is a caption
-      const ta = document.createElement("textarea");
-      ta.className = "be-code";
-      ta.placeholder = "Python (Shift+Enter runs it, and what depends on it)";
-      ta.spellcheck = false;
+    const title = $<HTMLInputElement>(".be-title")!, text = $<HTMLTextAreaElement>(".be-text")!;
+    const ta = $<HTMLTextAreaElement>(".be-code"), detail = $<HTMLTextAreaElement>(".be-detail"), ref = $<HTMLInputElement>(".be-ref");
+    const hide = $<HTMLInputElement>(".be-hidecode");
+    title.value = n.title ?? "";
+    text.value = n.text ?? "";
+    const part = (k: string) => (k === "code" ? $(".be-codepart") : k === "detail" ? detail : ref)!;
+    const has = (k: string) => !group && !part(k).hidden;
+    // the code: the notebook's editor (its highlighted code under a clear textarea), once the notebook is loaded
+    const hl = this.highlight?.() ?? null;
+    if (ta) {
       ta.value = n.code ?? "";
+      hide!.checked = !!n.hideCode;
+      let paint = () => {};
+      if (hl) {
+        const box = $(".be-codebox")!, pre = document.createElement("pre");
+        box.className = "be-codebox sbnb";
+        const ed = document.createElement("div");
+        ed.className = "ed";
+        pre.setAttribute("aria-hidden", "true");
+        ed.append(pre, ta);
+        box.append(ed);
+        paint = () => {
+          pre.innerHTML = hl(ta.value);
+          ta.style.height = "auto";
+          ta.style.height = ta.scrollHeight + "px";
+        };
+      }
+      ta.addEventListener("input", paint);
       ta.addEventListener("keydown", (e) => {
         if (e.key !== "Tab" || e.shiftKey) return;
         e.preventDefault();
         ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end");
+        paint();
       });
-      $(".be-title")!.after(ta);
-      $<HTMLTextAreaElement>(".be-text")!.placeholder = "Text above the code (Markdown, with math)";
-      $<HTMLTextAreaElement>(".be-text")!.rows = 2;
+      requestAnimationFrame(paint);
     }
-    if ($(".be-detail")) {
-      $<HTMLTextAreaElement>(".be-detail")!.value = n.detail ?? "";
-      if (n.detail) $<HTMLDetailsElement>("details")!.open = true;
-      $<HTMLInputElement>(".be-ref")!.value = n.ref ?? "";
+    const doneLabel = () => { $(".be-done")!.textContent = has("code") ? "Run" : "Done"; };
+    const show = (k: string, focus: boolean) => {
+      part(k).hidden = false;
+      p.querySelector<HTMLElement>(`[data-part="${k}"]`)!.hidden = true;
+      $(".be-add")!.hidden = [...p.querySelectorAll<HTMLElement>(".be-add button")].every((b) => b.hidden);
+      doneLabel();
+      if (focus) (k === "code" ? ta : part(k))!.focus();
+      if (k === "code") ta!.dispatchEvent(new Event("input"));
+    };
+    if (!group) {
+      if (n.code !== undefined) show("code", false);
+      if (n.detail) { detail!.value = n.detail; show("detail", false); }
+      if (n.ref) { ref!.value = n.ref; show("ref", false); }
+      for (const b of p.querySelectorAll<HTMLButtonElement>(".be-add button")) b.onclick = () => show(b.dataset.part!, true);
     }
+    doneLabel();
     // over the item, inside the window
-    const w = Math.min(innerWidth - 16, Math.max(320, r.width));
+    const w = Math.min(innerWidth - 16, Math.max(n.code !== undefined ? 440 : 320, r.width));
     this.place(p, () => {
       p.style.width = w + "px";
       p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + "px";
@@ -633,19 +682,26 @@ export class Editor {
     document.body.append(p);
     this.panel = p;
     this.select(id);
+    // (code left empty: no code)
+    const codeNow = () => (has("code") ? ta!.value.replace(/\s+$/, "") : "");
     const done = () => {
-      const v = (s: string) => ($<HTMLInputElement>(s)?.value ?? "").trim();
-      if (code && ($<HTMLTextAreaElement>(".be-code")?.value ?? "").replace(/\s+$/, "") === (n.code ?? "")) this.onRun?.(id);
+      const v = (el: HTMLInputElement | HTMLTextAreaElement | null) => (el?.value ?? "").trim();
+      const c = codeNow();
+      // (unchanged code is not run by the sync: run it, as Run says)
+      if (c && c === n.code) this.onRun?.(id);
       this.close();
       this.commit((d) => {
         const g = find(this.pg(d), id);
         if (!g) return;
         const m = g.node as any;
-        const set = (k: string, val: string) => { if (val) m[k] = val; else delete m[k]; };
-        set("title", v(".be-title"));
-        set("text", v(".be-text"));
-        if (m.kind === "code") m.code = ($<HTMLTextAreaElement>(".be-code")?.value ?? "").replace(/\s+$/, "");
-        if (m.kind !== "group") { set("detail", v(".be-detail")); set("ref", v(".be-ref")); }
+        const set = (k: string, val: string | boolean | undefined) => { if (val) m[k] = val; else delete m[k]; };
+        set("title", v(title));
+        set("text", v(text));
+        if (group) return;
+        set("code", c || undefined);
+        set("hideCode", !!c && hide!.checked);
+        set("detail", has("detail") ? v(detail) : "");
+        set("ref", has("ref") ? v(ref) : "");
       }, fresh);
     };
     const cancel = () => {
@@ -653,16 +709,16 @@ export class Editor {
       // (a new note left empty: not kept)
       if (fresh && !v0()) this.commit((d) => remove(this.pg(d), id), true);
     };
-    const v0 = () => ["title", "text", "code"].some((k) => ($<HTMLInputElement>(`.be-${k}`)?.value ?? "").trim());
+    const v0 = () => [title, text, ta].some((el) => (el?.value ?? "").trim());
     $(".be-done")!.onclick = done;
     $(".be-cancel")!.onclick = cancel;
     $(".be-del")!.onclick = () => { this.close(); this.commit((d) => remove(this.pg(d), id)); };
     p.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Escape") cancel();
-      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || (code && e.shiftKey))) { e.preventDefault(); done(); }
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || (e.shiftKey && e.target === ta))) { e.preventDefault(); done(); }
     });
-    (code ? $<HTMLTextAreaElement>(".be-code") : fresh || !n.text ? $<HTMLInputElement>(".be-title") : $<HTMLTextAreaElement>(".be-text"))!.focus();
+    (n.code !== undefined && (fresh || !n.code) ? ta : fresh || !n.text ? title : text)!.focus();
   }
 
   // On a small or touch screen a panel is a sheet: as wide as the screen, at
