@@ -1,9 +1,13 @@
 /* A board and its page's parts (mount.ts): the top bar, the Edit toolbar,
    the tour's caption, TimeTravel's bar, the panels and dialogs.  Put in the
    page once, first, by mountBoard, so a host's own rules win; .sbb is the
-   element a board is mounted in, which a host places and sizes. */
+   element a board is mounted in, which a host places and sizes.  Every rule
+   is the board's alone: its selector names one of its parts ([data-sbb=...])
+   or classes (board-, ip-, be-, tb-, mb), or it is within :where(.sbb,
+   .sbb-layer), a board or a panel it puts on the page (the item's toolbar,
+   the Edit toolbar's ⋯ panel, an edge's editor), which adds no specificity. */
 .sbb { touch-action: manipulation; position: relative; overflow: hidden; background: #fafaf7; color: #1d241a; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-.board { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+:where(.sbb, .sbb-layer) .board { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
 .board-canvas { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .board-back { z-index: 0; }
 .board-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
@@ -42,20 +46,20 @@
 .sbb-editing [data-sbb=title]:hover { text-decoration: underline dotted rgba(0, 0, 0, .35); }
 .sbb-editing [data-sbb=title]:empty::before { content: "Untitled board"; color: #8a8f99; font-weight: 400; }
 [data-sbb=title] input { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid rgba(0, 0, 0, .25); border-radius: 5px; padding: 1px 6px; background: #fff; }
-button { font: inherit; border: 1px solid rgba(0, 0, 0, .18); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-button:disabled { opacity: .4; cursor: default; }
+:where(.sbb, .sbb-layer) button { font: inherit; border: 1px solid rgba(0, 0, 0, .18); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+:where(.sbb, .sbb-layer) button:disabled { opacity: .4; cursor: default; }
 [data-sbb=hint] { color: #667; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 [data-sbb=edit][aria-pressed="true"] { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
-.menuwrap { position: relative; }
-.menu { position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); padding: 4px; display: flex; flex-direction: column; min-width: 200px; }
-.menu[hidden] { display: none; }
-.menu button { border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; background: none; }
-.menu button:hover { background: #eef2ea; }
-.menu button[hidden] { display: none; }
+:where(.sbb, .sbb-layer) .menuwrap { position: relative; }
+:where(.sbb, .sbb-layer) .menu { position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); padding: 4px; display: flex; flex-direction: column; min-width: 200px; }
+:where(.sbb, .sbb-layer) .menu[hidden] { display: none; }
+:where(.sbb, .sbb-layer) .menu button { border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; background: none; }
+:where(.sbb, .sbb-layer) .menu button:hover { background: #eef2ea; }
+:where(.sbb, .sbb-layer) .menu button[hidden] { display: none; }
 [data-sbb=lang] { display: flex; align-items: center; gap: 4px; padding: 4px 10px; color: #556; }
 [data-sbb=lang] button { padding: 3px 9px; border: 1px solid rgba(0, 0, 0, .15); border-radius: 5px; }
 [data-sbb=lang] button[aria-pressed="true"] { background: #2a6f2f; border-color: #2a6f2f; color: #fff; }
-.board.editing { cursor: default; }
+:where(.sbb, .sbb-layer) .board.editing { cursor: default; }
 .board.editing .board-note { cursor: move; }
 .board.editing .board-item { user-select: none; -webkit-user-select: none; }
 /* code items: the place in the reading order, ▶, the code, its output (the notebook's) */
@@ -104,8 +108,8 @@ button:disabled { opacity: .4; cursor: default; }
 .board-toolbar-panel .tb-use[aria-pressed="true"] .tb-icon { color: inherit; }
 .board-toolbar-panel input { margin: 0 6px; }
 .board-toolbar-panel .tb-default { margin-top: 4px; font-size: 12px; color: #556; border-color: transparent; }
-.menu hr { border: 0; border-top: 1px solid rgba(0, 0, 0, .1); margin: 4px 0; }
-.board.selecting { cursor: default; }
+:where(.sbb, .sbb-layer) .menu hr { border: 0; border-top: 1px solid rgba(0, 0, 0, .1); margin: 4px 0; }
+:where(.sbb, .sbb-layer) .board.selecting { cursor: default; }
 .board.connecting .board-note { cursor: crosshair; }
 /* a panel on a small or touch screen: a sheet at the top of what the keyboard leaves, its buttons first */
 .board-editor.be-sheet { left: 0 !important; right: 0; width: auto !important; border-radius: 0 0 10px 10px; overflow: auto; }
@@ -195,7 +199,7 @@ button:disabled { opacity: .4; cursor: default; }
 [data-sbb=prdlg] fieldset:first-of-type label { flex-basis: 100%; }
 [data-sbb=prdlg] label span { color: #667; font-size: 13px; }
 [data-sbb=prdlg] .sep { width: 10px; }
-.prnote { color: #556; font-size: 13px; margin: 0 0 12px; }
+:where(.sbb, .sbb-layer) .prnote { color: #556; font-size: 13px; margin: 0 0 12px; }
 [data-sbb=mmdlg] { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(640px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
 [data-sbb=mmdlg] h3 { margin: 0 0 10px; }
 [data-sbb=mmtext] { width: 100%; box-sizing: border-box; min-height: 220px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 8px; resize: vertical; }
@@ -218,7 +222,7 @@ button:disabled { opacity: .4; cursor: default; }
 .board-shape-diamond::after, .board-shape-hexagon::after, .board-shape-lean-right::after, .board-shape-lean-left::after, .board-shape-trapezoid::after, .board-shape-inv-trapezoid::after, .board-shape-flag::after { content: ""; position: absolute; inset: 0; clip-path: var(--poly); z-index: -1; }
 .board-shape-diamond::before, .board-shape-hexagon::before, .board-shape-lean-right::before, .board-shape-lean-left::before, .board-shape-trapezoid::before, .board-shape-inv-trapezoid::before, .board-shape-flag::before { background: rgba(0, 0, 0, .28); }
 .board-shape-diamond::after, .board-shape-hexagon::after, .board-shape-lean-right::after, .board-shape-lean-left::after, .board-shape-trapezoid::after, .board-shape-inv-trapezoid::after, .board-shape-flag::after { inset: 1.2px; background: var(--c, #fff); }
-.prbtns { display: flex; justify-content: flex-end; gap: 8px; }
+:where(.sbb, .sbb-layer) .prbtns { display: flex; justify-content: flex-end; gap: 8px; }
 [data-sbb=tour] { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2; width: min(720px, calc(100% - 24px)); box-sizing: border-box; background: rgba(255, 255, 255, .96); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
 [data-sbb=tour][hidden] { display: none; }
 /* TimeTravel's bar: a slider over the versions, when, Revert, ✕ */
