@@ -118,3 +118,6 @@ CREATE TABLE purges (
 
 -- A batch's guard: inserting NULL here fails, which rolls the whole batch back.
 CREATE TABLE guard (x INTEGER NOT NULL);
+
+-- Small state: the inventory check's place in R2 (reconcile_cursor).
+CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);

@@ -57,7 +57,7 @@ export interface R2 {
   get(key: string, opts?: Record<string, unknown>): Promise<R2Obj | null>;
   head(key: string): Promise<{ size: number } | null>;
   delete(keys: string | string[]): Promise<void>;
-  list(opts: { prefix: string; limit?: number; cursor?: string }): Promise<{ objects: { key: string }[]; truncated: boolean; cursor?: string }>;
+  list(opts: { prefix: string; limit?: number; cursor?: string }): Promise<{ objects: { key: string; uploaded: Date }[]; truncated: boolean; cursor?: string }>;
 }
 export interface ShareEnv {
   SHARE_DB?: D1;
@@ -175,15 +175,24 @@ const guard = (db: D1, cond: string, ...binds: unknown[]) => [
   db.prepare(`INSERT INTO guard (x) SELECT CASE WHEN ${cond} THEN 1 ELSE NULL END`).bind(...binds),
   db.prepare("DELETE FROM guard"),
 ];
-const NOT_DELETING = "NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?1 AND deleting IS NOT NULL)";
+/**
+ * Who a request is: the account, and the session it authenticated with.
+ * Every write checks, inside its transaction, that this exact session still
+ * exists for an account not being deleted (live()): purge drops the sessions
+ * first, so a request already past its first check can't write afterwards.
+ */
+interface Who { id: string; session: string }
+const LIVE = "EXISTS (SELECT 1 FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?2 AND s.account_id = ?1 AND s.expires > ?3 AND a.deleting IS NULL)";
+const live = (db: D1, who: Who) => guard(db, LIVE, who.id, who.session, now());
 
 // ---- sessions
 
-async function account(req: Request, env: ShareEnv): Promise<string | null> {
+async function account(req: Request, env: ShareEnv): Promise<Who | null> {
   const t = cookies(req).get(SESSION);
   if (!t || !env.SHARE_DB) return null;
-  const row = await env.SHARE_DB.prepare("SELECT s.account_id FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(await sha256Hex(t), now()).first<{ account_id: string }>();
-  return row?.account_id ?? null;
+  const session = await sha256Hex(t);
+  const row = await env.SHARE_DB.prepare("SELECT s.account_id FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string }>();
+  return row ? { id: row.account_id, session } : null;
 }
 
 /** A session cookie, or null if the account is being deleted or was deleted in CoCalc. */
@@ -251,8 +260,9 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
 
 // ---- limits, from CoCalc's membership tiers
 
-async function limits(env: ShareEnv, id: string): Promise<Limits | null> {
+async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
   const db = env.SHARE_DB!;
+  const id = who.id;
   const c = await db.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(id).first<{ limits: string; fetched: number }>();
   if (c && c.fetched > now() - LIMITS_TTL) return JSON.parse(c.limits);
   if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : null;
@@ -265,7 +275,8 @@ async function limits(env: ShareEnv, id: string): Promise<Limits | null> {
     const v = (await r.json()) as Limits;
     if (!Number.isSafeInteger(v.storage_bytes) || !Number.isSafeInteger(v.max_file_bytes)) throw new Error("bad limits");
     const l: Limits = { tier: String(v.tier ?? ""), storage_bytes: v.storage_bytes, max_file_bytes: v.max_file_bytes, private_links: v.private_links === true };
-    await db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3").bind(id, JSON.stringify(l), now()).run();
+    // (cached only while the session is live: never a row for a deleted account)
+    await db.batch([...live(db, who), db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3").bind(id, JSON.stringify(l), now())]).catch(() => {});
     return l;
   } catch {
     // CoCalc is unreachable: keep what we had, never read it as zero
@@ -284,12 +295,21 @@ async function usage(db: D1, id: string): Promise<number> {
 }
 
 /** Reserve bytes for an R2 object about to be written: one conditional INSERT. */
-async function reserve(db: D1, id: string, bytes: number, limit: number, key: string): Promise<string | null> {
+async function reserve(db: D1, who: Who, bytes: number, limit: number, key: string): Promise<{ id: string; expires: number } | null> {
   const rid = crypto.randomUUID();
   const t = now();
-  const r = await db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${NOT_DELETING} AND ${USED} + ?4 <= ?7`).bind(id, t, rid, bytes, key, t + RESERVE_SECONDS, limit).run();
-  return r.meta?.changes === 1 ? rid : null;
+  try {
+    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${USED} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit)])) as D1Result<unknown>[];
+    return r[2]?.meta?.changes === 1 ? { id: rid, expires: t + RESERVE_SECONDS } : null;
+  } catch {
+    return null;
+  }
 }
+/** Batch statements that use up the reservation, failing the batch if it expired or was reclaimed. */
+const consume = (db: D1, rid: string) => [
+  ...guard(db, "EXISTS (SELECT 1 FROM reservations WHERE id = ?1 AND expires > ?2)", rid, now()),
+  db.prepare("DELETE FROM reservations WHERE id = ?1").bind(rid),
+];
 
 /** An R2 write whose D1 write failed: undo it now if possible (else the scheduled job does). */
 async function abandon(env: ShareEnv, key: string, rid: string) {
@@ -301,11 +321,12 @@ async function abandon(env: ShareEnv, key: string, rid: string) {
 
 // ---- uploading
 
-async function check(req: Request, env: ShareEnv, id: string): Promise<Response> {
+async function check(req: Request, env: ShareEnv, who: Who): Promise<Response> {
+  const id = who.id;
   const body = (await req.json().catch(() => null)) as { blobs?: { sha256: string; size: number }[] } | null;
   const blobs = body?.blobs;
   if (!Array.isArray(blobs) || blobs.length > MAX_FILES || !blobs.every((b) => b && HEX64.test(b.sha256) && Number.isSafeInteger(b.size) && b.size >= 0)) return err(400, "bad request");
-  const lim = await limits(env, id);
+  const lim = await limits(env, who);
   if (!lim) return err(403, "uploads need a CoCalc account in good standing");
   const max = Math.min(lim.max_file_bytes, MAX_PUT);
   const big = blobs.find((b) => b.size > max);
@@ -324,18 +345,20 @@ async function check(req: Request, env: ShareEnv, id: string): Promise<Response>
   return json({ missing: missing.map((b) => b.sha256) });
 }
 
-async function putBlob(req: Request, env: ShareEnv, id: string, sha: string): Promise<Response> {
+async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Promise<Response> {
+  const id = who.id;
   const cl = req.headers.get("content-length");
   if (!cl || !/^\d{1,12}$/.test(cl)) return err(411, "content-length required");
   const size = Number(cl);
-  const lim = await limits(env, id);
+  const lim = await limits(env, who);
   if (!lim) return err(403, "uploads need a CoCalc account in good standing");
   if (size > Math.min(lim.max_file_bytes, MAX_PUT)) return err(413, "file too large");
   const db = env.SHARE_DB!;
   if (await db.prepare("SELECT 1 AS x FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(id, sha).first()) return json({ ok: true });
   const key = await newKey(id);
-  const rid = await reserve(db, id, size, lim.storage_bytes, key);
-  if (!rid) return err(413, "over your storage limit");
+  const res = await reserve(db, who, size, lim.storage_bytes, key);
+  if (!res) return err(413, "over your storage limit");
+  const rid = res.id;
   let obj: { size: number } | null = null;
   try {
     // R2 refuses the upload unless the bytes hash to sha
@@ -345,14 +368,19 @@ async function putBlob(req: Request, env: ShareEnv, id: string, sha: string): Pr
     await abandon(env, key, rid);
     return err(400, obj ? "the file's size is not its content-length" : "the file's SHA-256 does not match");
   }
+  // (an upload outlives its reservation: the scheduled job may reclaim it, so this one is abandoned)
+  if (now() >= res.expires) {
+    await abandon(env, key, rid);
+    return err(408, "the upload took too long; try again");
+  }
   const t = now();
   try {
     await db.batch([
-      ...guard(db, NOT_DELETING, id),
+      ...live(db, who),
+      ...consume(db, rid),
       // (the same file uploaded twice at once: this copy is not needed)
       db.prepare("INSERT INTO r2_deletes (key, created) SELECT ?3, ?4 WHERE EXISTS (SELECT 1 FROM holdings WHERE account_id = ?1 AND sha256 = ?2)").bind(id, sha, key, t),
       db.prepare("INSERT INTO holdings (account_id, sha256, size, key, created) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT DO NOTHING").bind(id, sha, size, key, t),
-      db.prepare("DELETE FROM reservations WHERE id = ?1").bind(rid),
     ]);
   } catch {
     await abandon(env, key, rid);
@@ -361,25 +389,33 @@ async function putBlob(req: Request, env: ShareEnv, id: string, sha: string): Pr
   return json({ ok: true });
 }
 
-async function createCollection(req: Request, env: ShareEnv, id: string): Promise<Response> {
+async function createCollection(req: Request, env: ShareEnv, who: Who): Promise<Response> {
+  const id = who.id;
   const body = (await req.json().catch(() => null)) as { title?: unknown } | null;
   const title = typeof body?.title === "string" ? body.title.trim().slice(0, 200) : "";
   if (!title) return err(400, "a title is required");
-  if (!(await limits(env, id))) return err(403, "uploads need a CoCalc account in good standing");
+  if (!(await limits(env, who))) return err(403, "uploads need a CoCalc account in good standing");
   const cid = newId();
   const t = now();
-  const r = await env.SHARE_DB!.prepare(`INSERT INTO collections (id, owner, title, created, updated) SELECT ?2, ?1, ?3, ?4, ?4 WHERE ${NOT_DELETING} AND (SELECT COUNT(*) FROM collections WHERE owner = ?1) < ?5`).bind(id, cid, title, t, MAX_COLLECTIONS).run();
-  if (r.meta?.changes !== 1) return err(403, `at most ${MAX_COLLECTIONS} collections`);
+  const db = env.SHARE_DB!;
+  let r: D1Result<unknown>[];
+  try {
+    r = (await db.batch([...live(db, who), db.prepare("INSERT INTO collections (id, owner, title, created, updated) SELECT ?2, ?1, ?3, ?4, ?4 WHERE (SELECT COUNT(*) FROM collections WHERE owner = ?1) < ?5").bind(id, cid, title, t, MAX_COLLECTIONS)])) as D1Result<unknown>[];
+  } catch {
+    return err(401, "sign in first");
+  }
+  if (r[2]?.meta?.changes !== 1) return err(403, `at most ${MAX_COLLECTIONS} collections`);
   return json({ id: cid }, 201);
 }
 
 const LICENSE = /^[A-Za-z0-9.+\- ()]{1,64}$/;
 
-async function commit(req: Request, env: ShareEnv, id: string, cid: string): Promise<Response> {
+async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promise<Response> {
+  const id = who.id;
   const db = env.SHARE_DB!;
   const col = await db.prepare("SELECT owner, latest, title FROM collections WHERE id = ?1").bind(cid).first<{ owner: string; latest: string | null; title: string }>();
   if (!col || col.owner !== id) return err(404, "no such collection");
-  const lim = await limits(env, id);
+  const lim = await limits(env, who);
   if (!lim) return err(403, "uploads need a CoCalc account in good standing");
   const body = (await req.json().catch(() => null)) as { title?: unknown; license?: unknown; files?: unknown } | null;
   const files = body?.files;
@@ -418,8 +454,9 @@ async function commit(req: Request, env: ShareEnv, id: string, cid: string): Pro
   const hash = await sha256Hex(text);
   const key = await newKey(id);
   // (a manifest is stored and counted as the account's bytes too)
-  const rid = await reserve(db, id, bytes, lim.storage_bytes, key);
-  if (!rid) return err(413, "over your storage limit");
+  const res = await reserve(db, who, bytes, lim.storage_bytes, key);
+  if (!res) return err(413, "over your storage limit");
+  const rid = res.id;
   try {
     await env.SHARE_BUCKET!.put(key, text, { sha256: hash, httpMetadata: { contentType: "application/json" } });
   } catch {
@@ -438,11 +475,12 @@ async function commit(req: Request, env: ShareEnv, id: string, cid: string): Pro
   }
   stmts.push(
     db.prepare("UPDATE collections SET latest = ?1, updated = ?2, title = ?3 WHERE id = ?4").bind(hash, t, title, cid),
-    db.prepare("DELETE FROM reservations WHERE id = ?1").bind(rid),
-    // the checks made above, again, inside the transaction: the account is not
-    // being deleted, the collection is still its own and under the version
-    // limit, and every file is still held
-    ...guard(db, `${NOT_DELETING} AND EXISTS (SELECT 1 FROM collections WHERE id = ?2 AND owner = ?1)
+    ...consume(db, rid),
+    // the checks made above, again, inside the transaction: the session is
+    // live, the collection is still its own and under the version limit, and
+    // every file is still held
+    ...live(db, who),
+    ...guard(db, `EXISTS (SELECT 1 FROM collections WHERE id = ?2 AND owner = ?1)
       AND (SELECT COUNT(*) FROM versions WHERE collection = ?2) <= ?4
       AND NOT EXISTS (SELECT 1 FROM version_blobs vb WHERE vb.version = ?3 AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.account_id = ?1 AND h.sha256 = vb.sha256))`, id, cid, hash, MAX_VERSIONS),
   );
@@ -562,14 +600,17 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
       const left = await bucket.list({ prefix: r.key, limit: 1 });
       const uploading = r.account_id ? await db.prepare("SELECT 1 AS x FROM reservations WHERE account_id = ?1 AND expires > ?2 LIMIT 1").bind(r.account_id, now()).first() : null;
       if (left.objects.length || uploading) continue; // (again next time)
-      const p = r.purge ? await db.prepare("SELECT kind FROM purges WHERE request_id = ?1").bind(r.purge).first<{ kind: string }>() : null;
+      // done: every purge of this account (they coalesce) is.  An account deleted
+      // in CoCalc (it has a tombstone, whichever purge got here first) is gone;
+      // one that only deleted its shared data can share again.
+      const h = await accountHash(r.account_id!);
+      const admin = await db.prepare("SELECT 1 AS x FROM tombstones WHERE account_hash = ?1").bind(h).first();
       await db.batch([
         db.prepare("DELETE FROM r2_deletes WHERE key = ?1").bind(r.key),
         db.prepare("DELETE FROM reservations WHERE account_id = ?1").bind(r.account_id),
-        // done: an account deleted in CoCalc is gone (its tombstone stays); one
-        // that deleted its shared data can share again
-        p?.kind === "admin" ? db.prepare("DELETE FROM accounts WHERE account_id = ?1").bind(r.account_id) : db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1").bind(r.account_id),
-        db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL WHERE request_id = ?1").bind(r.purge, now()),
+        admin ? db.prepare("DELETE FROM accounts WHERE account_id = ?1").bind(r.account_id) : db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1").bind(r.account_id),
+        db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(r.account_id),
+        db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL, lease = NULL WHERE account_hash = ?1 AND status <> 'done' AND kind <> 'collection'").bind(h, now()),
       ]);
     } catch {
       // (R2 or D1 failed: the row stays, and the next drain tries again)
@@ -626,6 +667,8 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   if (!env.SHARE_DB || !env.SHARE_BUCKET) return;
   const db = env.SHARE_DB;
   const t = now();
+  // purges left waiting for a prefix another purge of the account finished (they coalesce: run again)
+  await db.prepare("UPDATE purges SET status = 'pending', lease = NULL WHERE status = 'files' AND account_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM r2_deletes d WHERE d.prefix = 1 AND d.account_id = purges.account_id)").run();
   // purges whose run was cut short
   for (const p of (await db.prepare("SELECT request_id FROM purges WHERE kind <> 'collection' AND (status = 'pending' OR (status = 'running' AND lease < ?1)) LIMIT 20").bind(t).all<{ request_id: string }>()).results) await runPurge(env, p.request_id);
   // reservations whose upload ended without its D1 write: the object, if any, is unreferenced
@@ -642,7 +685,27 @@ export async function scheduled(env: ShareEnv): Promise<void> {
     db.prepare(`DELETE FROM holdings WHERE rowid IN (${idle})`).bind(t - DAY),
   ]);
   await drain(env, 500);
+  await reconcile(env);
   await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
+}
+
+/**
+ * The inventory check, a page of R2 at a time (resuming where the last run
+ * stopped): an object no row references, two days after it was written, is
+ * deleted.  This catches what nothing else can, such as an upload whose R2
+ * write landed after its reservation was reclaimed and its key deleted.
+ */
+async function reconcile(env: ShareEnv): Promise<void> {
+  const db = env.SHARE_DB!;
+  const at = await db.prepare("SELECT v FROM meta WHERE k = 'reconcile_cursor'").first<{ v: string }>();
+  const l = await env.SHARE_BUCKET!.list({ prefix: "a/", limit: 1000, ...(at?.v ? { cursor: at.v } : {}) });
+  const old = Date.now() - 2 * DAY * 1000;
+  for (const o of l.objects) {
+    if (new Date(o.uploaded).valueOf() > old) continue;
+    await db.prepare("INSERT OR IGNORE INTO r2_deletes (key, created) SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM holdings WHERE key = ?1) AND NOT EXISTS (SELECT 1 FROM versions WHERE manifest_key = ?1) AND NOT EXISTS (SELECT 1 FROM reservations WHERE key = ?1)").bind(o.key, now()).run();
+  }
+  await db.prepare("INSERT INTO meta (k, v) VALUES ('reconcile_cursor', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1").bind(l.truncated ? (l.cursor ?? "") : "").run();
+  await drain(env, 500);
 }
 
 // ---- routing
@@ -674,25 +737,26 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
     const s = await startSession(env, { account_id: b.account_id, email: "dev@example.com", name: "Dev" });
     return s ? json({ ok: true }, 200, { "set-cookie": s }) : err(403, "this account can't sign in to share files");
   }
-  const id = await account(req, env);
+  const who = await account(req, env);
+  const id = who?.id;
   if (p === "/auth/logout" && m === "POST") {
     const t = cookies(req).get(SESSION);
     if (t) await env.SHARE_DB.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(await sha256Hex(t)).run();
     return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
-  if (!id) return err(401, "sign in first");
+  if (!who || !id) return err(401, "sign in first");
   if (p === "/api/share/me" && m === "GET") {
     const a = await env.SHARE_DB.prepare("SELECT email, name FROM accounts WHERE account_id = ?1").bind(id).first();
-    return json({ account_id: id, ...a, usage: await usage(env.SHARE_DB, id), limits: await limits(env, id) });
+    return json({ account_id: id, ...a, usage: await usage(env.SHARE_DB, id), limits: await limits(env, who) });
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);
   if (m !== "GET" && m !== "PUT" && m !== "DELETE" && !/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
-  if (p === "/api/share/collections" && m === "POST") return createCollection(req, env, id);
-  if (p === "/api/share/check" && m === "POST") return check(req, env, id);
+  if (p === "/api/share/collections" && m === "POST") return createCollection(req, env, who);
+  if (p === "/api/share/check" && m === "POST") return check(req, env, who);
   g = p.match(/^\/api\/share\/blob\/([0-9a-f]{64})$/);
-  if (g && m === "PUT") return putBlob(req, env, id, g[1]);
+  if (g && m === "PUT") return putBlob(req, env, who, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})\/versions$/);
-  if (g && m === "POST") return commit(req, env, id, g[1]);
+  if (g && m === "POST") return commit(req, env, who, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})$/);
   if (g && m === "DELETE") {
     const c = await env.SHARE_DB.prepare("SELECT owner FROM collections WHERE id = ?1").bind(g[1]).first<{ owner: string }>();

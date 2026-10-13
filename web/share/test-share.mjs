@@ -34,7 +34,7 @@ const sha = (b) => createHash("sha256").update(b).digest("hex");
 const b64url = (b) => Buffer.from(b).toString("base64url");
 
 // ---- a fake CoCalc: codes, PKCE, the token endpoint and limits
-const fake = { codes: new Map(), limits: new Map(), limitsStatus: 200, tokenCalls: 0 };
+const fake = { codes: new Map(), limits: new Map(), limitsStatus: 200, tokenCalls: 0, limitsGate: null };
 async function cocalc(req) {
   const u = new URL(req.url);
   const basic = req.headers.get("authorization") === "Basic " + Buffer.from("sagebrush:" + SECRET).toString("base64");
@@ -49,6 +49,7 @@ async function cocalc(req) {
     return Response.json({ account_id: c.account_id, email: c.email, email_verified: c.verified, name: "Test" });
   }
   if (u.pathname === "/api/v2/sagebrush/limits") {
+    if (fake.limitsGate) await fake.limitsGate;
     if (!basic) return Response.json({ error: "invalid_client" }, { status: 401 });
     if (fake.limitsStatus !== 200) return new Response("down", { status: fake.limitsStatus });
     const l = fake.limits.get(u.searchParams.get("account_id"));
@@ -359,6 +360,71 @@ async function purgeStatus(rid) {
   ok(cb.status === 403, "it can't sign in while being deleted");
   const commit = await fetchSite(`/api/share/collections/${col.id}/versions`, { method: "POST", headers: { cookie: sw, origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ files: [{ path: "w", sha256: sha(f), size: f.length }] }) });
   ok(commit.status === 401, "nor commit");
+}
+{
+  // SEC-6DA-1: a request authenticated before a purge can't write after it
+  const D = "77777777-7777-4777-8777-777777777777";
+  fake.limits.set(D, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  const d = api((await signIn(D)).session);
+  await db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(D).run();
+  let release;
+  fake.limitsGate = new Promise((r) => (release = r));
+  const creating = d.post("/api/share/collections", { title: "late" });
+  await new Promise((r) => setTimeout(r, 200));
+  fake.limitsGate = null;
+  ok((await adminPurge(D, "9b2d6c1e-0000-4000-8000-0000000000d1")).status === 202, "a purge while a request waits on CoCalc");
+  for (let i = 0; i < 50 && (await purgeStatus("9b2d6c1e-0000-4000-8000-0000000000d1")).status !== "done"; i++) await new Promise((r) => setTimeout(r, 50));
+  release();
+  const late = await creating;
+  const rows = await db.prepare("SELECT (SELECT COUNT(*) FROM collections WHERE owner = ?1) + (SELECT COUNT(*) FROM limits_cache WHERE account_id = ?1) + (SELECT COUNT(*) FROM accounts WHERE account_id = ?1) AS n").bind(D).first();
+  ok(late.status !== 201 && rows.n === 0, `the request that was waiting writes nothing afterwards: ${late.status}, ${rows.n} rows`);
+}
+{
+  // SEC-6DA-2: an upload whose reservation was reclaimed while it ran is refused, and leaves nothing
+  const E = "88888888-8888-4888-8888-888888888888";
+  fake.limits.set(E, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  const se = (await signIn(E)).session;
+  const bytes = Buffer.from("slow upload bytes");
+  let go;
+  const gate = new Promise((r) => (go = r));
+  const body = new ReadableStream({ async start(c) { c.enqueue(bytes.subarray(0, 4)); await gate; c.enqueue(bytes.subarray(4)); c.close(); } });
+  const putting = fetchSite(`/api/share/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: se, origin: SITE, "content-length": String(bytes.length) }, body, duplex: "half" });
+  let reserved = null;
+  for (let i = 0; i < 50 && !reserved; i++) {
+    reserved = await db.prepare("SELECT id, key FROM reservations WHERE account_id = ?1").bind(E).first();
+    if (!reserved) await new Promise((r) => setTimeout(r, 20));
+  }
+  if (reserved) {
+    await db.prepare("UPDATE reservations SET expires = 1 WHERE id = ?1").bind(reserved.id).run();
+    await tick();
+  }
+  go();
+  const r = await putting;
+  const holding = await keyOf(E, sha(bytes));
+  ok(!!reserved && r.status !== 200 && !holding && !(await stored(reserved.key)), `a reclaimed upload is refused and leaves no object: ${r.status}, reserved ${!!reserved}, holding ${!!holding}`);
+  // and an object no row references is found by the inventory check, two days on
+  const stray = "a/0000000000000000000000000000strv/late";
+  await bucket.put(stray, "late");
+  await tick();
+  ok(await stored(stray), "a fresh unreferenced object is left alone (it may be an upload in progress)");
+}
+{
+  // SEC-6DA-3: purges of one account coalesce; an admin deletion dominates
+  for (const order of ["admin-admin", "self-admin"]) {
+    const F = order === "admin-admin" ? "99999999-9999-4999-8999-999999999991" : "99999999-9999-4999-8999-999999999992";
+    fake.limits.set(F, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+    const f = api((await signIn(F)).session);
+    await upload(f, [["f.txt", Buffer.from("f " + order)]], "F");
+    const ids = [`9b2d6c1e-0000-4000-8000-0000000f${order === "admin-admin" ? "01" : "11"}01`, `9b2d6c1e-0000-4000-8000-0000000f${order === "admin-admin" ? "01" : "11"}02`];
+    if (order === "admin-admin") await Promise.all(ids.map((rid) => adminPurge(F, rid)));
+    else await Promise.all([f.post("/api/share/delete-everything", { confirm: "delete" }), adminPurge(F, ids[1])]);
+    for (let i = 0; i < 3; i++) await tick();
+    const sts = await Promise.all(ids.slice(order === "admin-admin" ? 0 : 1).map(async (rid) => (await purgeStatus(rid)).status));
+    const all = await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE account_hash = (SELECT account_hash FROM purges WHERE request_id = ?1) AND status <> 'done'").bind(ids[1]).first();
+    const acct = await db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE account_id = ?1").bind(F).first();
+    const back = await signIn(F);
+    ok(sts.every((x) => x === "done") && all.n === 0 && acct.n === 0 && !back.session, `${order}: every purge finishes, and the account is gone for good: ${JSON.stringify(sts)}, ${all.n} unfinished, ${acct.n} account rows`);
+  }
 }
 {
   // "Delete my shared data"
