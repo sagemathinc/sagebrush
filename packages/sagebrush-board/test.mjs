@@ -6,7 +6,7 @@
 // text, edits in place, takes the page's keys and clipboard only when it is
 // the one in use, and is unmounted by destroy() while the other works.
 // Their parts have no ids, and the host's own elements of the same names
-// are left alone.
+// or classes, and its buttons, are left alone.
 // Build first (bun build.mjs), then
 //   node test.mjs
 import { spawn } from "node:child_process";
@@ -26,7 +26,7 @@ const B = { title: "B", nodes: [{ id: "b1", title: "In B", text: "second" }, { i
 writeFileSync(join(site, "index.html"), `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
 <div id="a" style="position:absolute;left:0;top:0;width:620px;height:560px"></div>
 <div id="b" style="position:absolute;left:640px;top:0;width:620px;height:560px"></div>
-<div style="position:absolute;left:0;top:580px"><div id="top">The host's top</div><span id="title">The host's title</span><div id="menu">The host's menu</div></div>
+<div style="position:absolute;left:0;top:580px"><div id="top">The host's top</div><span id="title">The host's title</span><div id="menu">The host's menu</div><div class="menu">The host's .menu</div><button id="hostbtn">The host's button</button></div>
 <script type="module">
 import { mountBoard } from "./index.js";
 const images = { url: () => undefined, put: async () => "", ensure: async () => {}, absorb: async () => {}, inline: async (d) => d };
@@ -108,6 +108,8 @@ try {
   // share: the host's own #top, #title and #menu are left as they are
   check(await ev("document.querySelectorAll('#a [id], #b [id]').length === 0"), "ids in the boards: " + await ev("[...document.querySelectorAll('#a [id], #b [id]')].slice(0, 5).map((e) => e.id).join()"));
   check(await ev("getComputedStyle(document.getElementById('top')).position === 'static' && document.getElementById('title').textContent === \"The host's title\" && getComputedStyle(document.getElementById('title')).fontWeight === '400' && getComputedStyle(document.getElementById('menu')).position === 'static'"), "the board's styles reach the host's own #top, #title or #menu");
+  // nor its class and element rules: the host's own .menu and buttons
+  check(await ev("getComputedStyle(document.querySelector('body > div > .menu')).position === 'static' && getComputedStyle(document.getElementById('hostbtn')).paddingLeft !== '10px' && getComputedStyle(document.querySelector('#a [data-sbb=fit]')).paddingLeft === '10px'"), "the board's rules reach the host's own .menu or buttons: " + await ev("JSON.stringify([getComputedStyle(document.querySelector('body > div > .menu')).position, getComputedStyle(document.getElementById('hostbtn')).padding])"));
   // the parts are within each board's element
   const at = await box("b", "[data-sbb=top]"), bb = await ev("(() => { const r = document.getElementById('b').getBoundingClientRect(); return { left: r.left, right: r.right }; })()");
   check(at.left >= bb.left - 1 && at.right <= bb.right + 1, "B's top bar is within B: " + JSON.stringify([at, bb]));

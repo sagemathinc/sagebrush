@@ -651,7 +651,7 @@ export class Editor {
     const r = this.board.el.getBoundingClientRect(), c = this.board.camera;
     const cx = r.left + (wx - c.x) * c.z, cy = r.top + (wy - c.y) * c.z;
     const p = document.createElement("div");
-    p.className = "board-editor board-edge-editor";
+    p.className = "board-editor board-edge-editor sbb-layer";
     p.innerHTML = `<input class="be-label" placeholder="Label">` +
       `<div class="be-row"><select class="be-arrow" title="Arrowheads"><option value="">→ at the end</option><option value="both">↔ both ends</option><option value="none">— none</option></select>` +
       `<select class="be-line" title="Line"><option value="">solid</option><option value="dotted">dotted</option><option value="thick">thick</option></select>` +

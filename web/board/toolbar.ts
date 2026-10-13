@@ -105,7 +105,7 @@ export class Toolbar {
   // the menu: every tool (use it), and whether it is on the toolbar; at "⋯"
   private openPanel() {
     const p = document.createElement("div");
-    p.className = "board-toolbar-panel";
+    p.className = "board-toolbar-panel sbb-layer";
     p.setAttribute("role", "menu");
     for (const t of this.all) {
       const row = document.createElement("div");

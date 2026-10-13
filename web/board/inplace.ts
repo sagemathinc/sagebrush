@@ -233,7 +233,7 @@ export class InPlace {
   // The toolbar over the item.
   private toolbar() {
     const b = this.bar;
-    b.className = "ip-bar";
+    b.className = "ip-bar sbb-layer";
     b.setAttribute("role", "toolbar");
     b.setAttribute("aria-label", "This item");
     const tool = (cls: string, label: string, ic: string, f: () => void, plus = false) => {
