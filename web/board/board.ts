@@ -82,6 +82,9 @@ export interface Camera {
 
 const CELL = 512; // the spatial grid's cell, in world units
 const FAR = 0.5; // below this zoom: rectangles on the canvas, no DOM (text under 7 px is not read)
+// ...unless few items are in view: then their text shows down to this zoom
+// (6 px: small but still read; few elements cost nothing to show)
+const FEW_FAR = 0.35, FEW = 300;
 const BUDGET = 4; // ms of building notes' elements per frame; the rest wait, drawn as placeholders
 const PER_FRAME = 30; // and at most this many elements added (each costs the browser's layout too)
 const MARGIN = 0.5; // mounted: the viewport plus this fraction around it
@@ -106,6 +109,16 @@ class Grid {
         if (c) { const k = c.indexOf(it); if (k >= 0) c.splice(k, 1); }
       }
     }
+  }
+  /** Whether more than `max` items overlap the rectangle (an item in several cells may count more than once: a bound, found quickly). */
+  more(x0: number, y0: number, x1: number, y1: number, max: number): boolean {
+    let n = 0;
+    for (let i = Math.floor(x0 / CELL); i <= Math.floor(x1 / CELL); i++) {
+      for (let j = Math.floor(y0 / CELL); j <= Math.floor(y1 / CELL); j++) {
+        for (const it of this.cells.get(i + "," + j) ?? []) if (it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0 && ++n > max) return true;
+      }
+    }
+    return false;
   }
   query(x0: number, y0: number, x1: number, y1: number, out: Set<Item>): Set<Item> {
     for (let i = Math.floor(x0 / CELL); i <= Math.floor(x1 / CELL); i++) {
@@ -326,7 +339,7 @@ export class Board {
 
   render() {
     this.stats.frames++;
-    const c = this.camera, v = this.view(), far = c.z < FAR;
+    const c = this.camera, v = this.view(), far = c.z < FAR && (c.z < FEW_FAR || this.boxes.more(v.x0, v.y0, v.x1, v.y1, FEW));
     // the camera: one transform
     this.world.style.transform = `translate(${-c.x * c.z}px, ${-c.y * c.z}px) scale(${c.z})`;
     this.world.style.visibility = far ? "hidden" : "visible";

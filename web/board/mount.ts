@@ -207,7 +207,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     work(40);
     placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
     host.title?.(d.title ?? "");
-    $("title").textContent = d.title ?? "";
+    // (not while it is being renamed)
+    if (!$("title").querySelector("input")) $("title").textContent = d.title ?? "";
     // (the tour's caption: not over TimeTravel's bar; a notice, until the next edit)
     $("tour").hidden = view || (!v.steps?.length && !v.intro && !notice);
     if (notice && !view && !v.steps?.length && !v.intro) caption(notice, "");
@@ -381,6 +382,31 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
+  // The board's title: in Edit, a click renames it where it is (Enter, or
+  // leaving, keeps the name, as an edit; Esc does not)
+  const titleEl = $("title");
+  titleEl.onclick = () => {
+    if (!editor.on || !doc || titleEl.querySelector("input")) return;
+    const input = Object.assign(document.createElement("input"), { value: doc.title ?? "", placeholder: "Untitled board" });
+    input.setAttribute("aria-label", "The board's title");
+    titleEl.replaceChildren(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (keep: boolean) => {
+      if (done) return;
+      done = true;
+      const t = input.value.trim(), was = doc?.title ?? "";
+      titleEl.textContent = keep ? t : was;
+      if (keep && t !== was) editor.commit((d) => { if (t) d.title = t; else delete d.title; });
+    };
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); finish(true); input.blur(); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    };
+    input.onblur = () => finish(true);
+  };
   editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
   editor.onRun = (id) => { code?.run([id]); };
   editor.highlight = () => code?.highlight ?? null;
@@ -390,6 +416,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   offs.push(effect(() => {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
     $("hint").hidden = !editor.editing.value;
+    root.classList.toggle("sbb-editing", editor.editing.value);
   }));
   // the toolbar, in Edit mode: adds at the middle of the view
   const center = () => { const v = board.view(); return { x: (v.x0 + v.x1) / 2, y: (v.y0 + v.y1) / 2 }; };
