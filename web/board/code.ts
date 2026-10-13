@@ -31,7 +31,9 @@ export class BoardCode {
 
   private async start() {
     const mod = await import(new URL("sagebrush-notebook.js", this.base).href);
-    const kernel = new mod.WorkerKernel({ createWorker: () => new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" }) });
+    // (Python in the runner, an opaque-origin sandboxed frame, as on the notebook page: design/runner.md)
+    const runner = new URLSearchParams(location.search).get("runner") !== "0";
+    const kernel = new mod.WorkerKernel({ createWorker: () => (runner ? new mod.RunnerWorker(new URL("runner/", this.base).href) : new Worker(new URL("sagebrush-worker.js", this.base), { type: "module" })) });
     kernel.start();
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)
     let worker: Worker | null = null, next = 0;

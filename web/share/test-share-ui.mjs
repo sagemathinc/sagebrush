@@ -85,6 +85,7 @@ try {
   await ev("document.querySelector('#runall').click()");
   await until("(() => { const c = document.querySelector('#nb .cell'); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent) && !c.classList.contains('running') && !c.classList.contains('queued') && !document.querySelector('#nb .cell .stale, #nb .cell.stale'); })()", 60000);
   const ran = await ev("document.querySelector('#nb .cell .out').textContent");
+  ok(await ev("(() => { const f = document.querySelector('iframe[sandbox]'); return !!f && f.getAttribute('sandbox') === 'allow-scripts' && /\\/runner\\/$/.test(f.src); })()"), "shared code runs in the runner (an opaque-origin sandboxed frame), never a same-origin worker");
   ok(ran.includes("x,y;1,2;3,4"), "Run all runs it here, reading the mounted file: " + ran.trim());
   if (!REMOTE) ok(dev.log.files.length === 2, "the data file was fetched when read: " + JSON.stringify(dev.log.files));
 

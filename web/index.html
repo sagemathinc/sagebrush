@@ -373,8 +373,8 @@
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
-// ?runner: Python in the runner, an opaque-origin sandboxed frame (design/runner.md), being tested
-const RUNNER = new URLSearchParams(location.search).has("runner");
+// Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md); ?runner=0 runs it in a plain worker
+const RUNNER = new URLSearchParams(location.search).get("runner") !== "0";
 import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
