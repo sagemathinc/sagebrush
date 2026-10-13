@@ -1,0 +1,108 @@
+% Cell arrays and structs: creation, indexing, assignment, comma-separated
+% lists, value semantics.
+c = {1, 'two', [3 4 5]};
+show(c);
+show(c{2});
+show(c(2));
+show(c([1 3]));
+show(class(c(1)));
+show(numel(c));
+c{5} = 'five';
+show(c);
+c(2) = [];
+show(c);
+d = cell(2, 3);
+show(d);
+show(size(d));
+d{2, 3} = 7;
+show(d{2, 3});
+show(isempty(d{1, 1}));
+nested = {1, {2, {3}}};
+show(nested{2}{2}{1});
+e = {};
+e{end + 1} = 'a';
+e{end + 1} = 'b';
+show(e);
+words = {'pear', 'apple', 'fig'};
+show(sort(words));
+show(strjoin(words, '-'));
+show(numel(words));
+[first, second] = words{1:2};
+show(first);
+show(second);
+args = {2, 3};
+show(max(args{:}));
+show([args{:}]);
+z = {};
+show(isempty(z));
+show(iscell(z));
+s.name = 'Ada';
+s.age = 36;
+show(s);
+show(s.name);
+show(isfield(s, 'age'));
+show(isfield(s, 'height'));
+show(fieldnames(s));
+s.address.city = 'London';
+show(s.address.city);
+s.scores(3) = 9;
+show(s.scores);
+t = s;
+t.name = 'Grace';
+show(s.name);
+show(t.name);
+fld = 'age';
+show(s.(fld));
+s.(fld) = 37;
+show(s.age);
+r = rmfield(s, 'address');
+show(fieldnames(r));
+p = struct('x', 1, 'y', 'b');
+show(p);
+q = struct('v', {10, 20, 30});
+show(size(q));
+show(q(2).v);
+show([q.v]);
+q(4).v = 40;
+show([q.v]);
+w = struct();
+show(isstruct(w));
+show(numel(fieldnames(w)));
+pts(1).x = 1;
+pts(2).x = 5;
+show(numel(pts));
+show(pts(2).x);
+show(arrayfun(@(pt) pt.x * 2, pts));
+show(struct2cell(p));
+cs = cell2struct({1; 'b'}, {'one'; 'two'}, 1);
+show(cs);
+show(num2cell([1 2 3]));
+show(cell2mat({[1 2], [3]; [4 5], [6]}));
+m = containers_free_count({'a', 'b', 'a', 'c', 'a'});
+show(m);
+A = [1 2 3];
+B = A;
+B(1) = 100;
+show(A);
+C = {A};
+A(2) = 200;
+show(C{1});
+S.v = A;
+A(3) = 300;
+show(S.v);
+show(modify(A));
+show(A);
+show(iscellstr({'a', 'b'}));
+show(iscellstr({'a', 1}));
+show(cellfun(@ischar, {'a', 1, 'b'}));
+show(cellfun(@(x) numel(x), {'ab', [1 2 3]}));
+show(structfun(@(v) v * 2, struct('a', 1, 'b', 2)));
+
+function n = containers_free_count(list)
+  % how many times the first element occurs
+  n = sum(strcmp(list, list{1}));
+end
+
+function v = modify(v)
+  v(1) = -1;
+end

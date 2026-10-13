@@ -99,6 +99,8 @@ jobs:
         run: scripts/sync-python-package.sh --check && node scripts/gen-viewer3d.mjs --check && node cdn/build.mjs --check
       - name: Magma mode (modular forms, elliptic curves), checked against Magma's output
         run: python3 magma-tests/run.py -v
+      - name: MATLAB mode, checked against GNU Octave's output (and MATLAB's documented display)
+        run: python3 matlab-tests/run.py -v
       - name: numpy, checked against NumPy itself
         # NumPy's AVX-512 kernels for exp/log/sin... differ from glibc's libm in
         # the last bit; sagebrush (like NumPy without AVX-512) follows glibc.
@@ -151,7 +153,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: each package's third-party notices are up to date, and nothing (L)GPL is linked
         run: node scripts/third-party-notices.mjs --check
-      - name: the TypeScript tests and the Sage, calculus and Magma suites on it
+      - name: the TypeScript tests and the Sage, calculus, Magma and MATLAB suites on it
         run: |
           python3 -m pip install scipy
           pnpm run build
@@ -160,6 +162,7 @@ jobs:
           python3 sage-tests/run.py -v
           python3 sage-tests/run_calculus.py
           python3 magma-tests/run.py -v
+          python3 matlab-tests/run.py -v
       - name: a fresh CPython extension, with the audit's regressions and Sage's tests
         run: |
           python3 -m pip install maturin

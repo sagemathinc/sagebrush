@@ -1,0 +1,98 @@
+char 1x5 ['Hello']
+double 1x2 [1 5]
+char 1x4 ['char']
+double 1x5 [72 101 108 108 111]
+char 1x2 ['Hi']
+char 1x12 ['Hello, world']
+char 2x2 ['ab';'cd']
+double 1x1 3
+char 1x5 ['HELLO']
+char 1x5 ['hello']
+char 1x5 ['olleH']
+char 1x5 ['a+b+c']
+char 1x3 ['pad']
+cell 1x3 {char 1x1 ['a'], char 1x1 ['b'], char 1x1 ['c']}
+cell 1x3 {char 1x3 ['one'], char 1x3 ['two'], char 1x5 ['three']}
+char 1x3 ['abc']
+char 1x2 ['ab']
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true
+logical 1x1 true
+logical 1x3 [false true false]
+double 1x2 [2 5]
+logical 1x1 true
+char 1x2 ['42']
+char 1x6 ['3.1416']
+char 1x4 ['-0.5']
+char 1x7 ['123.456']
+char 1x11 ['10000000000']
+char 1x10 ['1.2346e-05']
+char 1x7 ['1  2  3']
+char 1x27 ['1.5        2.25           3']
+char 1x12 ['10 -200    3']
+char 1x1 ['1']
+char 1x9 ['3.1415927']
+char 1x7 ['3.14159']
+char 1x1 ['3']
+char 1x9 ['[1 2;3 4]']
+char 1x12 ['[0.1 0.3333]']
+char 1x12 ['[true false]']
+char 1x4 ['-2.5']
+char 1x2 ['42']
+char 1x6 ['   42|']
+char 1x6 ['42   |']
+char 1x5 ['003.1']
+char 1x12 ['1.234568e+04']
+char 1x6 ['0.0001']
+char 1x5 ['1e+06']
+char 1x11 ['1.23457e+08']
+char 1x2 ['ff']
+char 1x2 ['10']
+char 1x2 ['Hi']
+char 1x3 ['a-b']
+char 1x6 ['1,2,3,']
+char 1x4 ['1 x
+']
+char 1x16 ['1.003.002.004.00']
+char 1x3 ['50%']
+char 1x3 ['a	b']
+char 1x3 ['abc']
+char 1x4 ['9798']
+char 1x6 ['   ab|']
+char 1x2 ['+5']
+char 1x2 ['[]']
+char 1x6 ['1 and ']
+char 1x3 ['Inf']
+char 1x4 ['-Inf']
+char 1x5 ['  NaN']
+3 apples
+no newline
+a=1
+b=2
+to stdout 7
+double 1x1 3.5
+double 1x1 NaN
+double 1x3 [1 NaN 2000]
+double 1x3 [1 2 3]
+char 1x6 ['abc###']
+char 1x11 ['world hello']
+cell 1x3 {char 1x1 ['1'], char 1x2 ['22'], char 1x3 ['333']}
+cell 1x1 {cell 1x2 {char 1x3 ['key'], char 1x5 ['value']}}
+double 1x2 [2 5]
+logical 1x3 [false true false]
+char 1x3 ['   ']
+char 1x2 ['hi']
+char 1x6 ['ababab']
+char 1x3 ['xAB']
+char 2x3 ['a  ';'bcd']
+cell 2x1 {char 1x2 ['ab'], char 1x2 ['cd']}
+double 1x1 294
+logical 1x3 [true true true]
+logical 1x1 true
+cell 1x2 {char 1x1 ['a'], char 1x1 ['b']}
+logical 1x1 true
+logical 1x1 true
+char 1x6 ['string']
+char 2x4 ['1  2';'3  4']
+char 1x12 ['MIXED CASE 1']

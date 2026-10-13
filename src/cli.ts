@@ -13,6 +13,7 @@ import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { getattr } from "./runtime/object";
 import { isMainThread, workerData } from "worker_threads";
@@ -27,9 +28,12 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --sage   Sage syntax (2^3 == 8, 2/3 is a Rational) with sage_all imported;
            implied for .sage files
   --magma  Magma: the program is Magma, translated to Python (src/magma.ts)
-           and run on lib/_magma.py; implied for .m and .mag files
+           and run on lib/_magma.py; implied for .mag files, and for .m files
+           that assign with :=
+  --matlab MATLAB: the program is MATLAB, translated to Python (src/matlab.ts)
+           and run on lib/_matlab.py; implied for other .m files
   -q       no banner on the interactive prompt
-  --emit   print the JavaScript compiled from file (with --magma: the Python)
+  --emit   print the JavaScript compiled from file (with --magma or --matlab: the Python)
   -V       print the version
   --licenses  the licenses of Sagebrush and of what it contains
   --search QUERY [--json]
@@ -83,12 +87,36 @@ R.host = {
     R.stdout.write(`${bundle["text/plain"] ?? ""}\nSaved ${path}${desc ? ` (${desc.length > 300 ? desc.slice(0, 300) + "…" : desc})` : ""}\n`);
     return true;
   },
+  // (MATLAB function files on the path: lib/_matlab_files.py)
+  ...matlabHostOps(),
 };
 
 // --sage: Sage syntax for everything typed or passed on the command line.
 let sage = false;
 let magma = false;
-const isMagma = (f: string | null) => magma || (f !== null && /\.(m|mag|magma)$/.test(f));
+let matlab = false;
+// .m is both Magma's and MATLAB's: looksLikeMagma decides (src/matlab.ts)
+const mFileIsMagma = (f: string) => {
+  try {
+    return looksLikeMagma(readFileSync(f, "utf8"));
+  } catch {
+    return false;
+  }
+};
+const isMagma = (f: string | null) => magma || (!matlab && f !== null && (/\.(mag|magma)$/.test(f) || (/\.m$/.test(f) && mFileIsMagma(f))));
+const isMatlab = (f: string | null) => matlab || (!magma && f !== null && /\.m$/.test(f) && !mFileIsMagma(f));
+
+/** MATLAB source as Python, or null after reporting a syntax error. */
+function matlabSource(src: string, file: string): string | null {
+  try {
+    return matlabToPython(src, file);
+  } catch (e) {
+    if (!(e instanceof MatlabSyntaxError)) throw e;
+    process.stderr.write(matlabSyntaxMessage(e, src, file));
+    process.exitCode = 1;
+    return null;
+  }
+}
 
 /** Magma source as Python, or null after reporting a syntax error. */
 function magmaSource(src: string, file: string): string | null {
@@ -243,6 +271,7 @@ async function main() {
     else if (a === "-q") quiet = true;
     else if (a === "--sage") sage = true;
     else if (a === "--magma") magma = true;
+    else if (a === "--matlab") matlab = true;
     else if (a === "-V" || a === "--version") {
       process.stdout.write(VERSION + "\n");
       return;
@@ -285,6 +314,11 @@ async function main() {
       if (py !== null) process.stdout.write(py);
       return;
     }
+    if (isMatlab(file)) {
+      const py = matlabSource(readFileSync(file, "utf8"), file);
+      if (py !== null) process.stdout.write(py);
+      return;
+    }
     process.stdout.write(compile(readFileSync(file, "utf8"), file, "__main__", false, false, { sage: sage || file.endsWith(".sage") }).code + "\n");
     return;
   }
@@ -297,7 +331,11 @@ async function main() {
   let code: number | null = null;
   let main: any = null;
   const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
-  if (cmd !== null && isMagma(null)) {
+  if (cmd !== null && isMatlab(null)) {
+    main = mainModule("<string>");
+    const py = matlabSource(cmd, "<string>");
+    if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
+  } else if (cmd !== null && isMagma(null)) {
     main = mainModule("<string>");
     const py = magmaSource(cmd, "<string>");
     if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
@@ -307,6 +345,11 @@ async function main() {
   } else if (mod !== null) {
     code = guarded(() => {
       main = execModuleAsMain(mod!);
+    });
+  } else if (file !== null && file !== "-" && isMatlab(file)) {
+    const py = matlabSource(readFileSync(file, "utf8"), file);
+    if (py !== null) code = guarded(() => {
+      main = execModule(py, file!, "__main__", false, false);
     });
   } else if (file !== null && file !== "-" && isMagma(file)) {
     const py = magmaSource(readFileSync(file, "utf8"), file);

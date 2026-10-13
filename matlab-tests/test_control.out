@@ -1,0 +1,46 @@
+double 1x1 16
+double 1x1 9
+double 1x1 6
+double 2x1 [1;3]
+double 2x1 [2;4]
+cell 1x1 {double 1x1 1}
+cell 1x1 {char 1x3 ['two']}
+char 1x5 ['large']
+double 1x1 1
+double 1x1 2
+double 1x1 2
+double 1x1 3
+char 1x4 ['four']
+char 1x15 ['Value 42 is bad']
+char 1x5 ['my:id']
+char 1x13 ['plain message']
+char 1x6 ['caught']
+in try
+double 1x1 55
+double 1x2 [3 2]
+double 1x1 3
+double 1x1 103
+double 1x1 111
+double 1x1 3
+double 1x1 0
+cell 1x3 {double 1x1 11, double 1x1 22, double 1x1 33}
+double 1x1 5
+double 1x1 42
+double 1x1 11
+double 1x1 11
+double 1x1 81
+double 1x3 [2 4 6]
+double 1x3 [2 3 0]
+logical 1x3 [true false true]
+cell 1x2 {double 1x2 [1 1], double 1x2 [2 2]}
+double 1x3 [1 4 9]
+cell 1x2 {cell 1x1 {double 1x1 1}, cell 1x1 {double 1x1 2}}
+double 1x2 [5 7]
+double 1x2 [2 1]
+double 1x1 4
+double 1x1 5
+double 1x1 2
+double 1x3 [10 20 30]
+double 1x1 3
+double 1x1 10
+char 1x8 ['2 inputs']
