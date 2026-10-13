@@ -2,8 +2,8 @@
 // installs as an app.  web/build.ts fills in VERSION and SHELL.
 //
 // The app's own files (SHELL) are fetched network-first, so a deploy shows
-// up at once, with the cached copy when offline; the engine, whose URL has a
-// content hash, is cache-first.  A cached response keeps its headers, so the
+// up at once, with the cached copy when offline; the engine and the
+// precompiled library, whose URLs have a content hash, are cache-first.  A cached response keeps its headers, so the
 // page stays cross-origin isolated offline (Stop keeps its variables).
 // Everything else (the Atlas, demos, data a notebook fetches) is not cached.
 const VERSION = "__VERSION__";
@@ -36,7 +36,7 @@ self.addEventListener("fetch", (ev) => {
   // the page itself (with any ?open=... or #share link): the cached "./" when offline
   const page = req.mode === "navigate" && (url.pathname === scope.pathname || url.pathname === scope.pathname + "index.html");
   if (!page && !shellPaths.has(url.pathname)) return;
-  if (url.pathname.endsWith(".wasm") && url.searchParams.has("h")) {
+  if (url.searchParams.has("h")) {
     ev.respondWith((async () => (await caches.match(req)) ?? fetchAndKeep(req))());
     return;
   }

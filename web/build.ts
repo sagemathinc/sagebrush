@@ -212,17 +212,29 @@ const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
-const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine.wasm?h=${engineHash}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+// Library modules compiled ahead (src/compile.ts, precompiled): Sage mode's
+// start, and the modules scientific notebooks import first, compiled by the
+// CLI built from the same sources (the same build id, checked), so the
+// worker does not compile 2 MB of Python at every page load.
+const buildId = /__SAGEBRUSH_BUILD_ID__ = "([0-9a-f]+)"/.exec(readFileSync(join(here, "..", "build", "cli", "lib.gen.js"), "utf8"))![1];
+const prePath = join(here, "dist", "sagebrush-precompiled.json");
+rmSync(prePath, { force: true });
+for (const args of [["--sage", "-c", "pass"], ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"]]) {
+  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: prePath, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
+  if (r.exitCode !== 0) throw new Error(`precompiling the library: ${r.stderr.toString().slice(0, 500)}`);
+}
+if (JSON.parse(readFileSync(prePath, "utf8")).build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
+const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${buildId}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
-shellHash.update(engineHash);
+shellHash.update(engineHash + buildId);
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)));
 mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
 mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");

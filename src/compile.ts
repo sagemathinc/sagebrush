@@ -106,8 +106,42 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
   } catch {}
 }
 
+// Library modules compiled when the site was built (the browser's worker
+// fetches them: web/worker.ts, made by web/build.ts with
+// SAGEBRUSH_PRECOMPILE_OUT): Sage mode's start compiled 2 MB of Python, more
+// than a second, at every page load.  Keyed by mode and module name, and used
+// only by the build they were made with (its id covers the compiler and the
+// library), and only for a library file of the same length.
+interface Precompiled { build: string; modules: Record<string, Compiled & { len: number }> }
+const precompiledKey = (name: string, sage: boolean) => (sage ? "sage|" : "py|") + name;
+function precompiled(source: string, filename: string, name: string, sage: boolean): Compiled | null {
+  const p: Precompiled | undefined = (globalThis as any).__SAGEBRUSH_PRECOMPILED__;
+  if (p === undefined || p.build !== (globalThis as any).__SAGEBRUSH_BUILD_ID__ || !filename.startsWith(libDir())) return null;
+  const m = Object.hasOwn(p.modules, precompiledKey(name, sage)) ? p.modules[precompiledKey(name, sage)] : undefined;
+  return m !== undefined && m.len === source.length && typeof m.code === "string" ? { code: m.code, lineMap: m.lineMap } : null;
+}
+// (making them: every library module compiled in this process, written at exit)
+const recording: Record<string, Compiled & { len: number }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
+if (recording !== null) {
+  process.on("exit", () => {
+    const out = process.env.SAGEBRUSH_PRECOMPILE_OUT!;
+    let prev: Precompiled | null = null;
+    try { prev = JSON.parse(readFileSync(out, "utf8")); } catch {}
+    const build = (globalThis as any).__SAGEBRUSH_BUILD_ID__;
+    const modules = prev !== null && prev.build === build ? { ...prev.modules, ...recording } : recording;
+    writeFileSync(out, JSON.stringify({ build, modules }));
+  });
+}
+
 // The compiled module, from the cache when there.
 function compileCached(source: string, filename: string, name: string, sage: boolean, jsName: string): { compiled: Compiled; script: Script } {
+  const pre = precompiled(source, filename, name, sage);
+  if (pre !== null) return { compiled: pre, script: new Script(pre.code, { filename: jsName }) };
+  if (recording !== null && filename.startsWith(libDir())) {
+    const compiled = compile(source, filename, name, false, false, { sage });
+    recording[precompiledKey(name, sage)] = { ...compiled, len: source.length };
+    return { compiled, script: new Script(compiled.code, { filename: jsName }) };
+  }
   const dir = filename.startsWith(libDir()) ? compileCacheDir() : null;
   if (dir !== null) {
     const key = createHash("sha256").update(name + "\0" + (sage ? "1" : "0") + "\0" + source).digest("hex").slice(0, 32);
