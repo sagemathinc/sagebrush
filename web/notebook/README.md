@@ -93,7 +93,7 @@ the browser, for now); web/test-reactive.mjs tests it.
 ## Embedding notes
 
 - **The worker must be same-origin.** Host `sagebrush-worker.js` and `sagebrush-engine.wasm` with your page, or build them from this repository.
-- **`assetBase`** is where the notebook finds `sagebrush-math.js` (KaTeX, loaded on first use) and `sagebrush-viewer3d.js`.
+- **`assetBase`** is where the notebook finds `sagebrush-math.js` (KaTeX, loaded on first use) and `sagebrush-viewer3d.js`. **`assetUrl(name)`**, if given, can return another URL for one of them, such as a `blob:` in a page that carries its files itself.
 - **Stop interrupts only in a cross-origin-isolated page.** With the headers `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`), Stop raises KeyboardInterrupt and keeps the variables. Without them, Stop restarts the interpreter.
 - **Colors** are CSS variables (`--fg`, `--bg`, `--line`, `--accent`, ...) that a page can set; the defaults are light. Everything is scoped to `.sbnb`, plus `.sbnb-pop` for menus and dialogs.
 
