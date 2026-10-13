@@ -11,6 +11,7 @@ import { effect, signal } from "@preact/signals-core";
 import type { Board, Item } from "./board";
 import type { BoardDoc, BoardPage, DocEdge, DocGroup, DocNode, DocNote } from "./doc";
 import { prepare, type Images, type ImageInfo } from "./images";
+import { highlightMarkdown } from "../notebook/highlight.js";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
 
@@ -723,6 +724,8 @@ export class Editor {
     const hide = $<HTMLInputElement>(".be-hidecode");
     title.value = n.title ?? "";
     text.value = n.text ?? "";
+    // Markdown, highlighted as the notebook's Markdown cells are
+    for (const t of [text, detail]) if (t) markdownOverlay(t);
     const part = (k: string) => (k === "code" ? $(".be-codepart") : k === "detail" ? detail : ref)!;
     const has = (k: string) => !group && !part(k).hidden;
     // the code: the notebook's editor (its highlighted code under a clear textarea), once the notebook is loaded
@@ -910,4 +913,24 @@ export function remove(d: BoardDoc | BoardPage, id: string) {
   f.siblings.splice(f.siblings.indexOf(f.node), 1);
   d.edges = (d.edges ?? []).filter((e) => !gone.has(e.from) && !gone.has(e.to));
   d.steps = d.steps?.map((s) => ({ ...s, focus: typeof s.focus === "string" ? s.focus : s.focus.filter((x) => !gone.has(x)) })).filter((s) => typeof s.focus !== "string" || !gone.has(s.focus));
+}
+
+// A Markdown field, highlighted: its text, coloured, under the textarea,
+// whose own text is clear (only its caret and selection show).  Colours only,
+// so the two keep the same widths; both keep room for a scroll bar, so they
+// wrap alike.  Hidden with its textarea.
+function markdownOverlay(ta: HTMLTextAreaElement) {
+  const box = document.createElement("div");
+  box.className = "be-md";
+  const pre = document.createElement("pre");
+  pre.setAttribute("aria-hidden", "true");
+  ta.replaceWith(box);
+  box.append(pre, ta);
+  const paint = () => {
+    pre.innerHTML = highlightMarkdown(ta.value, false);
+    pre.scrollTop = ta.scrollTop;
+  };
+  ta.addEventListener("input", paint);
+  ta.addEventListener("scroll", () => { pre.scrollTop = ta.scrollTop; });
+  paint();
 }

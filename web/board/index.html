@@ -128,6 +128,15 @@
   .board-editor .be-title { font-weight: 600; }
   .board-editor textarea { min-height: 120px; resize: vertical; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .board-editor .be-detail { min-height: 70px; }
+  /* Markdown fields: highlighted text under a clear textarea (edit.ts markdownOverlay; the notebook's colours) */
+  .be-md { position: relative; }
+  .be-md:has(> textarea[hidden]) { display: none; }
+  .be-md > pre { position: absolute; inset: 0; margin: 0; box-sizing: border-box; border: 1px solid transparent; padding: 5px 8px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden; scrollbar-gutter: stable; pointer-events: none; color: #1d2330; }
+  .be-md > textarea { position: relative; display: block; background: transparent; color: transparent; caret-color: #1d2330; overflow-wrap: anywhere; scrollbar-gutter: stable; }
+  .be-md > textarea::placeholder { color: #8a8f99; }
+  .be-md > textarea::selection { background: rgba(42, 111, 47, .25); color: transparent; }
+  .be-md .hk { color: #8a3b8f; } .be-md .hb { color: #2a6fb0; } .be-md .hs { color: #975200; } .be-md .hn { color: #0b7a52; }
+  .be-md .hc { color: #5f665f; font-style: italic; } .be-md .hp { color: #5f665f; } .be-md .hd { color: #7f5800; } .be-md .hf { color: #2350a8; }
   .board-editor:has(.be-codepart:not([hidden])) .be-text { min-height: 52px; }
   .be-row { display: flex; gap: 6px; }
   .be-row span { flex: 1; }
