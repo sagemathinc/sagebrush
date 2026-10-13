@@ -109,6 +109,9 @@ for (const r of [result, consoleResult, mathResult, notebookResult, historyResul
   }
   rmSync(tmp);
   const js = (await app.outputs[0].text()).trim();
+  // (inlined in <script>: an end tag inside would end it early, and a <script
+  // after a <!-- would make the parser skip its real end tag)
+  if (/<\/?script/i.test(js)) throw new Error("the notebook page's script contains <script or </script, which breaks it inlined in index.html");
   writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + "<script>" + js + "</script>" + html.slice(m.index + m[0].length));
 }
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
@@ -146,9 +149,51 @@ for (const [entry, name] of [["client.ts", "atlas.js"], ["engine-worker.ts", "at
 }
 copyFileSync(join(here, "atlas", "llms.txt"), join(here, "dist", "atlas", "llms.txt"));
 if (!existsSync(join(here, "dist", "atlas", "data", "stats.json"))) console.warn("web/dist/atlas/data is missing: run scripts/build-atlas.mjs (see web/atlas/README.md)");
+copyFileSync(join(here, "viewer3d.js"), join(here, "dist", "sagebrush-viewer3d.js"));
+// the runner: the interpreter in an opaque-origin frame (web/runner; design/runner.md)
+mkdirSync(join(here, "dist", "runner"), { recursive: true });
+copyFileSync(join(here, "runner", "index.html"), join(here, "dist", "runner", "index.html"));
+const { scriptHashes } = await import("./csp.ts");
+const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript", json: "application/json", wasm: "application/wasm", css: "text/css", woff2: "font/woff2", png: "image/png", svg: "image/svg+xml", webmanifest: "application/manifest+json" };
+// The engine, by its content (design/engines.md): what runs code, published
+// at sagebrush.space/engine/<id>/ and kept forever (scripts/publish-engine.mjs),
+// so that a board or notebook saved with one can keep running with it (an
+// exported HTML file pins its id).  <id> is a hash of the files' hashes; each
+// file's response headers are in the manifest, which the site's Worker
+// serves them with.  `api` is the version of the interface between a page
+// and these files (WorkerKernel, RunnerWorker, the worker's messages): a page
+// uses another engine only if its api is the same.
+const ENGINE_API = 2;
+let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "", api: ENGINE_API, files: {} };
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html"];
+{
+  const { runnerPolicy } = await import("./csp-policy.mts");
+  const sha = (b: Uint8Array | string) => new Bun.CryptoHasher("sha256").update(b).digest("hex");
+  const files: Record<string, { sha256: string; size: number; headers: Record<string, string> }> = {};
+  for (const f of ENGINE_FILES) {
+    const bytes = readFileSync(join(here, "dist", f));
+    const headers: Record<string, string> = { "Content-Type": MIME[f.split(".").pop()!] };
+    if (f.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": runnerPolicy(scriptHashes(bytes.toString("utf8"))), "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Opener-Policy": "same-origin" });
+    files[f] = { sha256: sha(bytes), size: bytes.length, headers };
+  }
+  const id = sha(JSON.stringify(Object.entries(files).map(([f, d]) => [f, d.sha256]))).slice(0, 20);
+  rmSync(join(here, "dist", "engine"), { recursive: true, force: true });
+  for (const f of ENGINE_FILES) {
+    mkdirSync(dirname(join(here, "dist", "engine", id, f)), { recursive: true });
+    copyFileSync(join(here, "dist", f), join(here, "dist", "engine", id, f));
+  }
+  writeFileSync(join(here, "dist", "engine", id, "manifest.json"), JSON.stringify({ format: "sagebrush-engine", id, api: ENGINE_API, files }, null, 1) + "\n");
+  writeFileSync(join(here, "dist", "engine", "latest.json"), JSON.stringify({ id, api: ENGINE_API }) + "\n");
+  mkdirSync(join(here, "site", "public", "engine"), { recursive: true });
+  copyFileSync(join(here, "dist", "engine", "latest.json"), join(here, "site", "public", "engine", "latest.json"));
+  ENGINE = { id, api: ENGINE_API, files: Object.fromEntries(Object.entries(files).map(([f, d]) => [f, d.sha256])) };
+  console.log(`engine ${id} (api ${ENGINE_API}): web/dist/engine/${id}/`);
+}
 // Boards (design/board.md), at /board/, with their example documents
 {
-  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true });
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
+    // (the engine it was built with, by its files' SHA-256s: an exported board pins it, design/engines.md)
+    define: { __SB_ENGINE__: JSON.stringify(ENGINE) } });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
@@ -231,7 +276,6 @@ rmSync(join(here, "site", "public", "board"), { recursive: true, force: true });
 cpSync(join(here, "dist", "board"), join(here, "site", "public", "board"), { recursive: true });
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
 // the 3D viewer, loaded by the page when a Graphics3d is shown
-copyFileSync(join(here, "viewer3d.js"), join(here, "dist", "sagebrush-viewer3d.js"));
 // The app (PWA): manifest, icons, and the service worker with the files it
 // keeps for offline use, versioned by their content
 const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
@@ -246,9 +290,7 @@ shellHash.update(engineHash + precompiledHash);
 // worker serves a kept copy only if it still has those bytes, and then as a
 // response it makes, with this status and these headers, never the kept
 // response's own; design/security.md, SEC-8D6-1, SEC-522-1)
-const { scriptHashes } = await import("./csp.ts");
 const { pagePolicy } = await import("./csp-policy.mts");
-const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript", json: "application/json", wasm: "application/wasm", css: "text/css", woff2: "font/woff2", png: "image/png", svg: "image/svg+xml", webmanifest: "application/manifest+json" };
 const DIGESTS = Object.fromEntries(SHELL.map((p) => {
   const file = p === "./" ? "index.html" : p.split("?")[0];
   const bytes = readFileSync(join(here, "dist", file));
@@ -265,9 +307,6 @@ mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
 mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
-// the runner: the interpreter in an opaque-origin frame (web/runner; design/runner.md)
-mkdirSync(join(here, "dist", "runner"), { recursive: true });
-copyFileSync(join(here, "runner", "index.html"), join(here, "dist", "runner", "index.html"));
 mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
 mkdirSync(join(here, "dist", "s"), { recursive: true });
@@ -275,38 +314,6 @@ copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.ht
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
 for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
-// The engine, by its content (design/engines.md): what runs code, published
-// at sagebrush.space/engine/<id>/ and kept forever (scripts/publish-engine.mjs),
-// so that a board or notebook saved with one can keep running with it (an
-// exported HTML file pins its id).  <id> is a hash of the files' hashes; each
-// file's response headers are in the manifest, which the site's Worker
-// serves them with.  `api` is the version of the interface between a page
-// and these files (WorkerKernel, RunnerWorker, the worker's messages): a page
-// uses another engine only if its api is the same.
-const ENGINE_API = 1;
-const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html"];
-{
-  const { runnerPolicy } = await import("./csp-policy.mts");
-  const sha = (b: Uint8Array | string) => new Bun.CryptoHasher("sha256").update(b).digest("hex");
-  const files: Record<string, { sha256: string; size: number; headers: Record<string, string> }> = {};
-  for (const f of ENGINE_FILES) {
-    const bytes = readFileSync(join(here, "dist", f));
-    const headers: Record<string, string> = { "Content-Type": MIME[f.split(".").pop()!] };
-    if (f.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": runnerPolicy(scriptHashes(bytes.toString("utf8"))), "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Opener-Policy": "same-origin" });
-    files[f] = { sha256: sha(bytes), size: bytes.length, headers };
-  }
-  const id = sha(JSON.stringify(Object.entries(files).map(([f, d]) => [f, d.sha256]))).slice(0, 20);
-  rmSync(join(here, "dist", "engine"), { recursive: true, force: true });
-  for (const f of ENGINE_FILES) {
-    mkdirSync(dirname(join(here, "dist", "engine", id, f)), { recursive: true });
-    copyFileSync(join(here, "dist", f), join(here, "dist", "engine", id, f));
-  }
-  writeFileSync(join(here, "dist", "engine", id, "manifest.json"), JSON.stringify({ format: "sagebrush-engine", id, api: ENGINE_API, files }, null, 1) + "\n");
-  writeFileSync(join(here, "dist", "engine", "latest.json"), JSON.stringify({ id, api: ENGINE_API }) + "\n");
-  mkdirSync(join(here, "site", "public", "engine"), { recursive: true });
-  copyFileSync(join(here, "dist", "engine", "latest.json"), join(here, "site", "public", "engine", "latest.json"));
-  console.log(`engine ${id} (api ${ENGINE_API}): web/dist/engine/${id}/`);
-}
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");
 // every page's Content-Security-Policy, in _headers (web/csp.ts)
