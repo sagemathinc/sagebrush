@@ -1,8 +1,10 @@
 // Boards on a phone: an iPhone-sized screen with touch.  The top bar fits
 // on one line; Edit shows the toolbar (with Undo, there being no Ctrl+Z);
 // a double tap on a code item opens its editor as a sheet, whose buttons
-// stay in view when the keyboard takes half the screen; typing and Run
-// work; the toolbar's Note opens one too.  Serve web/dist first (python3
+// are a thin row under the Edit toolbar, in view when the keyboard takes
+// half the screen; typing and Run work; the toolbar's Note opens one too.
+// The page does not zoom (double taps are the board's), and the tour's
+// caption is a line until tapped.  Serve web/dist first (python3
 // web/serve.py 8765), then
 //   node web/board/test-mobile.mjs
 import { spawn } from "node:child_process";
@@ -11,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
-const port = 9455, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const port = Number(process.env.CDP_PORT ?? 9455), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const W = 390, H = 844;
 const profile = mkdtempSync(join(tmpdir(), "sb-mobile-prof-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--window-size=${W},${H}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
@@ -46,6 +48,22 @@ try {
   await ev("localStorage.clear()");
   await until("window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === ''))", 90000);
   check(await ev("matchMedia('(pointer: coarse)').matches"), "the emulated phone has a coarse pointer");
+  // the page does not zoom: a double tap or a pinch is the board's
+  check(await ev("/maximum-scale=1/.test(document.querySelector('meta[name=viewport]').content) && getComputedStyle(document.querySelector('.sbb')).touchAction === 'manipulation'"), "the page itself does not zoom");
+  // the tour's caption: a line; a tap shows it whole, and the board keeps clear of it
+  const sayH = () => ev("document.getElementById('say').getBoundingClientRect().height");
+  const line = await ev("parseFloat(getComputedStyle(document.getElementById('say')).lineHeight) || 20");
+  const h1 = await sayH();
+  check(!(await ev("document.getElementById('tour').hidden")) && h1 <= line * 1.5, `the tour's caption is one line (${h1} px)`);
+  await tapEl("#say");
+  await sleep(200);
+  const h2 = await sayH();
+  check(h2 > line * 2.5, `a tap shows the whole caption (${h2} px)`);
+  check(await ev("window.board.insets.bottom >= document.getElementById('tour').offsetHeight"), "the board keeps clear of the whole caption");
+  await tapEl("#next");
+  await sleep(200);
+  check((await sayH()) <= line * 1.5, "the next step's caption is a line again");
+  await tapEl("#prev");
   // the top bar: one line, every control in view
   check(await ev("document.getElementById('top').offsetHeight < 60"), `the top bar wraps (${await ev("document.getElementById('top').offsetHeight")} px)`);
   check(await ev("[...document.querySelectorAll('#top button, #top select')].filter((e) => e.offsetParent).every((e) => { const b = e.getBoundingClientRect(); return b.right <= innerWidth + 1 && b.left >= -1; })"), "a top bar control is off screen");
@@ -68,13 +86,20 @@ try {
   await sleep(80);
   await tap(c.x, c.y);
   check(await until("!!document.querySelector('[data-code=start].board-editing .be-code')", 5000), "a double tap in Edit makes the code item editable where it is");
-  check(await until("!!document.querySelector('.ip-bar.ip-dock')", 3000) && await inView(".ip-bar .ip-run"), "its toolbar is docked along the bottom, with run in view");
+  const under = "(() => { const b = document.querySelector('.ip-bar').getBoundingClientRect(), t = document.querySelector('.board-toolbar').getBoundingClientRect(), v = window.visualViewport; return Math.abs(b.top - Math.max(t.bottom, v.offsetTop)) <= 1 && b.height <= 40; })()";
+  check(await until("!!document.querySelector('.ip-bar.ip-dock')", 3000) && await inView(".ip-bar .ip-run"), "its toolbar is in view, with run");
+  check(await ev(under), "its toolbar is a thin row right under the Edit toolbar: " + await ev("JSON.stringify([document.querySelector('.ip-bar').getBoundingClientRect(), document.querySelector('.board-toolbar').getBoundingClientRect()])"));
+  check(await inView(".ip-bar"), "the whole row is on screen");
   // the keyboard: half the screen (the visual viewport shrinks)
   await send("Emulation.setDeviceMetricsOverride", { width: W, height: 400, deviceScaleFactor: 3, mobile: true });
   await sleep(400);
   check(await inView(".ip-bar .ip-run"), "with the keyboard up, run is still in view");
-  check(await ev("Math.abs(document.querySelector('.ip-bar').getBoundingClientRect().bottom - (window.visualViewport.offsetTop + window.visualViewport.height)) <= 1"), "the toolbar sits just above the keyboard");
-  check(await ev("(() => { const t = document.querySelector('.board-editing .be-code').getBoundingClientRect(), b = document.querySelector('.ip-bar').getBoundingClientRect(); return t.top >= 40 && t.top + 20 <= b.top; })()"), "the code being written is in view, above the toolbar: " + await ev("JSON.stringify([document.querySelector('.board-editing .be-code').getBoundingClientRect(), document.querySelector('.ip-bar').getBoundingClientRect()])"));
+  check(await ev(under), "with the keyboard up, the toolbar is still under the Edit toolbar");
+  check(await ev("(() => { const t = document.querySelector('.board-editing .be-code').getBoundingClientRect(), b = document.querySelector('.ip-bar').getBoundingClientRect(), v = window.visualViewport; return t.top >= b.bottom && t.top + 20 <= v.offsetTop + v.height; })()"), "the code being written is in view, between the toolbar and the keyboard: " + await ev("JSON.stringify([document.querySelector('.board-editing .be-code').getBoundingClientRect(), document.querySelector('.ip-bar').getBoundingClientRect()])"));
+  // the colors open below the row, on screen
+  await tapEl(".ip-bar .ip-color");
+  check(await until("!!document.querySelector('.ip-colors')", 2000) && await ev("document.querySelector('.ip-colors').getBoundingClientRect().top >= document.querySelector('.ip-bar').getBoundingClientRect().bottom") && await inView(".ip-colors"), "the colors open below the toolbar, in view");
+  await tapEl(".ip-bar .ip-color");
   // typing and run
   await ev("(() => { const ta = document.querySelector('.board-editing .be-code'); ta.focus(); ta.select(); })()");
   await send("Input.insertText", { text: "start = 6" });

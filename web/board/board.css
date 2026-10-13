@@ -2,7 +2,7 @@
    the tour's caption, TimeTravel's bar, the panels and dialogs.  Put in the
    page once, first, by mountBoard, so a host's own rules win; .sbb is the
    element a board is mounted in, which a host places and sizes. */
-.sbb { position: relative; overflow: hidden; background: #fafaf7; color: #1d241a; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sbb { touch-action: manipulation; position: relative; overflow: hidden; background: #fafaf7; color: #1d241a; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .board { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
 .board-canvas { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .board-back { z-index: 0; }
@@ -168,9 +168,9 @@ button:disabled { opacity: .4; cursor: default; }
 .ip-colors { position: absolute; top: calc(100% + 4px); right: 0; display: grid; grid-template-columns: repeat(3, 28px); gap: 6px; padding: 8px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
 .ip-c { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .2); }
 .ip-c[aria-pressed="true"] { box-shadow: 0 0 0 2px #2a6f2f; }
-.ip-bar.ip-dock { box-sizing: border-box; justify-content: center; flex-wrap: wrap; border-width: 1px 0 0; border-radius: 0; }
-.ip-bar.ip-dock > button { min-width: 40px; height: 40px; }
-.ip-bar.ip-dock .ip-colors { top: auto; bottom: calc(100% + 4px); right: 8px; }
+/* on a phone: a thin row of buttons under the Edit toolbar */
+.ip-bar.ip-dock { box-sizing: border-box; max-width: 100vw; flex-wrap: nowrap; gap: 0; padding: 1px 2px; border-top: 0; border-radius: 0 0 9px 9px; box-shadow: 0 2px 6px rgba(0, 0, 0, .1); }
+.ip-bar.ip-dock > button { flex: none; min-width: 34px; height: 34px; padding: 0 4px; }
 .be-row { display: flex; gap: 6px; }
 .be-row span { flex: 1; }
 .be-done { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
@@ -229,6 +229,8 @@ button:disabled { opacity: .4; cursor: default; }
 #ttclose { border-color: transparent; }
 @media (max-width: 600px) { #tt { flex-wrap: wrap; } #ttslider { flex-basis: 100%; } #ttwhen { flex: 1; } }
 #say { flex: 1; max-height: 30vh; overflow: auto; }
+/* on a phone, the caption is a line until it is tapped */
+@media (max-width: 600px) { #say:not(.open) { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; } #say:not(.open) p { display: inline; } }
 #say p { margin: 0 0 4px; }
 #say p:last-child { margin: 0; }
 #say code { font-size: 12px; background: rgba(0, 0, 0, .06); padding: 0 3px; border-radius: 3px; }

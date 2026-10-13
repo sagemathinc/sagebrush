@@ -407,15 +407,19 @@ export class InPlace {
     }
   }
 
-  /** The toolbar above the item (below it if there is no room), or, on a phone, along the bottom of what the keyboard leaves. */
+  /** The toolbar above the item (below it if there is no room), or, on a
+   * phone, a thin row right under the Edit toolbar (William: the keyboard and
+   * the toolbars filled the screen), within what the keyboard leaves. */
   place() {
     if (this.ended) return;
     const b = this.bar, vv = window.visualViewport;
     if (phone()) {
       b.classList.add("ip-dock");
-      b.style.left = (vv?.offsetLeft ?? 0) + "px";
-      b.style.width = (vv?.width ?? innerWidth) + "px";
-      b.style.top = Math.round((vv ? vv.offsetTop + vv.height : innerHeight) - b.offsetHeight) + "px";
+      const tb = document.querySelector(".board-toolbar:not([hidden])")?.getBoundingClientRect();
+      const L = vv?.offsetLeft ?? 0, W = vv?.width ?? innerWidth, bw = b.offsetWidth;
+      const mid = tb ? tb.left + tb.width / 2 : L + W / 2;
+      b.style.top = Math.round(Math.max(tb ? tb.bottom : 48, vv?.offsetTop ?? 0)) + "px";
+      b.style.left = Math.round(Math.max(L, Math.min(L + W - bw, mid - bw / 2))) + "px";
       return;
     }
     const r = this.el.getBoundingClientRect(), bw = b.offsetWidth, bh = b.offsetHeight, top0 = clearTop();
@@ -426,7 +430,7 @@ export class InPlace {
   }
 
   // Room for the toolbar above the item, so that it covers nothing of it
-  // (on a phone it is docked below): the board moves down if need be.
+  // (on a phone it is under the Edit toolbar): the board moves down if need be.
   private room() {
     if (phone()) return;
     const top = this.el.getBoundingClientRect().top, need = clearTop() + this.bar.offsetHeight + 8;
@@ -434,13 +438,14 @@ export class InPlace {
     this.host.board.render();
   }
 
-  // The field being written in, in view: below the top bar and the Edit
-  // toolbar, above the keyboard and the docked toolbar, within the sides.
+  // The field being written in, in view: below the top bar, the Edit
+  // toolbar (and on a phone the item's), above the keyboard, within the sides.
   private reveal() {
     const a = document.activeElement;
     if (this.ended || !(a instanceof HTMLElement) || !this.el.contains(a)) return;
-    const vv = window.visualViewport, top = Math.max((vv?.offsetTop ?? 0) + 48, clearTop());
-    const bottom = (vv ? vv.offsetTop + vv.height : innerHeight) - (phone() ? this.bar.offsetHeight : 0) - 8;
+    // (on a phone, below the item's toolbar, under the Edit toolbar)
+    const vv = window.visualViewport, top = Math.max((vv?.offsetTop ?? 0) + 48, clearTop(), phone() ? this.bar.getBoundingClientRect().bottom + 6 : 0);
+    const bottom = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
     const left = (vv?.offsetLeft ?? 0) + 8, right = (vv ? vv.offsetLeft + vv.width : innerWidth) - 8;
     const r = a.getBoundingClientRect(), need = Math.min(r.height, 48);
     const dy = r.top < top ? r.top - top : r.top + need > bottom ? r.top + need - bottom : 0;
