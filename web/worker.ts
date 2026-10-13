@@ -45,10 +45,20 @@ __hooks.read = (path) => {
   if (mine(path)) reads.add(path);
 };
 
+// The library modules compiled when the site was built (src/compile.ts,
+// precompiled; web/build.ts), fetched as the worker starts: a Sage run waits
+// for them (Sage mode's start compiled 2 MB of Python, over a second), other
+// code uses them once they are here.  Without them, modules compile as before.
+const precompiled = fetch(new URL("sagebrush-precompiled.json?h=" + (globalThis as any).__SAGEBRUSH_BUILD_ID__, self.location.href))
+  .then((r) => (r.ok ? r.json() : null))
+  .then((p) => { if (p) (globalThis as any).__SAGEBRUSH_PRECOMPILED__ = p; })
+  .catch(() => {});
+
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
+  if (m.sage) await precompiled;
   await session.handle(m);
 };
 // The interrupt flag, shared with the page when it is cross-origin isolated
