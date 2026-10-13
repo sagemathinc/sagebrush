@@ -83,12 +83,39 @@ const toDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject)
 });
 
 /**
+ * How many pixels a screenshot has per CSS pixel, as its file says: a PNG's
+ * pHYs chunk, where a screen's 1x is 72 dpi (a macOS screenshot from a 2x
+ * screen says 144).  Only a screenshot's densities count, 1.5x to 3x: 96 dpi
+ * (Windows' usual) and print resolutions (300 dpi) say nothing about a
+ * screen.  Null: it does not say.
+ */
+export function density(b: Uint8Array): number | null {
+  const u32 = (i: number) => ((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]) >>> 0;
+  if (!(b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47)) return null;
+  // the signature, then chunks (length, type, data, CRC); pHYs comes before IDAT
+  for (let i = 8; i + 8 <= b.length; ) {
+    const len = u32(i), type = String.fromCharCode(b[i + 4], b[i + 5], b[i + 6], b[i + 7]);
+    if (type === "pHYs") {
+      if (len < 9 || i + 17 > b.length || b[i + 16] !== 1 || u32(i + 8) !== u32(i + 12)) return null;
+      const dpi = u32(i + 8) * 0.0254;
+      return dpi >= 100 && dpi <= 230 ? Math.round((dpi / 72) * 4) / 4 : null;
+    }
+    if (type === "IDAT" || type === "IEND") return null;
+    i += 12 + len;
+  }
+  return null;
+}
+
+/**
  * A picture as a board keeps it: one of the raster types, at most 2400
  * pixels on a side and about 2 MB (a larger one is scaled down and saved
  * again, as WebP, or JPEG where the browser cannot write WebP).  Null: not
- * a picture a board takes.
+ * a picture a board takes.  Also its natural width in CSS pixels (`cssW`):
+ * its pixels over its density, from the file, or else, for a paste, from
+ * the screen it was surely taken on (a 2x screenshot shows at the size it
+ * had on the screen, sharp, not twice that and blurry).
  */
-export async function prepare(file: Blob): Promise<{ blob: Blob; w: number; h: number } | null> {
+export async function prepare(file: Blob, opts: { paste?: boolean } = {}): Promise<{ blob: Blob; w: number; h: number; cssW: number } | null> {
   if (!IMAGE_TYPES.test(file.type)) return null;
   let bmp: ImageBitmap;
   try {
@@ -97,10 +124,13 @@ export async function prepare(file: Blob): Promise<{ blob: Blob; w: number; h: n
     return null;
   }
   const { width: w, height: h } = bmp;
+  let dens = density(new Uint8Array(await file.slice(0, 1 << 16).arrayBuffer()));
+  if (dens === null) dens = opts.paste ? globalThis.devicePixelRatio || 1 : 1;
+  const cssW = Math.max(1, Math.round(w / Math.min(4, Math.max(1, dens))));
   // (an animated GIF stays as it is)
   if (file.type === "image/gif" || (Math.max(w, h) <= MAX_SIDE && file.size <= MAX_BYTES)) {
     bmp.close();
-    return { blob: file, w, h };
+    return { blob: file, w, h, cssW };
   }
   const k = Math.min(1, MAX_SIDE / Math.max(w, h));
   const cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(h * k));
@@ -112,7 +142,7 @@ export async function prepare(file: Blob): Promise<{ blob: Blob; w: number; h: n
   const encode = (type: string) => new Promise<Blob | null>((r) => c.toBlob(r, type, 0.9));
   let blob = await encode("image/webp");
   if (!blob || blob.type !== "image/webp") blob = await encode("image/jpeg");
-  return blob ? { blob, w: cw, h: ch } : null;
+  return blob ? { blob, w: cw, h: ch, cssW } : null;
 }
 
 /** The pictures of the boards in this browser: object URLs to show them, and their bytes. */
