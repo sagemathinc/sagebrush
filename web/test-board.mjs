@@ -615,6 +615,10 @@ try {
     const keys = await ev("Object.keys(window.sagebrush.board.snapshot().doc).slice(0, 2).join()");
     const port = await ev("window.sagebrush.board.portable().then((d) => JSON.stringify([d.format, d.version]))");
     check(keys === "format,version" && port === '["sagebrush-board",1]', `the document does not start with its format and version: ${keys} ${port}`);
+    // Download JSON: the board's file, foo.board.json, its canonical text (doc.ts canonical(); test-format.mjs)
+    const dl = await ev(`new Promise((resolve) => { const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { HTMLAnchorElement.prototype.click = click; fetch(this.href).then((r) => r.text()).then((text) => resolve({ name: this.download, text })); }; document.querySelector("[data-sbb=download]").click(); })`);
+    const file = await ev("window.sagebrush.board.json()");
+    check(/\.board\.json$/.test(dl.name) && dl.text === file && file.startsWith('{\n  "format": "sagebrush-board",\n  "version": 1,\n'), `Download JSON is not the board's file, foo.board.json, in canonical JSON: ${dl.name} ${JSON.stringify(dl.text.slice(0, 60))}`);
     await ev(`window.sagebrush.board.load({ title: "Old", nodes: [{ id: "o1", title: "Written before versions" }] })`);
     check((await docOf()).version === 1 && (await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "o1", "a board without a version is not read as version 1");
     for (const [bad, says] of [[{ format: "sagebrush-board", version: 2, nodes: [{ id: "n2" }] }, "version 2"], [{ format: "excalidraw", nodes: [{ id: "x" }] }, "excalidraw"]]) {
