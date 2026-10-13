@@ -15,7 +15,7 @@ export default defineConfig({
       env: {
         SHARE_BUCKET: bindings.r2({ name: dev ? "sagebrush-share-dev" : "sagebrush-share" }),
         // (which files each collection may serve)
-        SHARE_DB: bindings.d1({ name: dev ? "sagebrush-share-dev" : "sagebrush-share" }),
+        SHARE_DB: dev ? bindings.d1({ name: "sagebrush-share-dev", id: "94675861-6f72-4cbc-a419-b28647eb9e9e" }) : bindings.d1({ name: "sagebrush-share" }),
       },
     };
   },
