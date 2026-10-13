@@ -31,6 +31,13 @@ is the board's API for agents and tests (`load`, `snapshot`, `edit`,
 `run`, `outputs`, `print`, ...). `destroy()` takes the board off the
 element, and its listeners off the page.
 
+The board's parts carry no ids, so several boards can share a page with
+each other and with the host's own elements. Each part is marked with
+`data-sbb`, for example `[data-sbb=edit]` (the Edit button),
+`[data-sbb=menu]` (the ⋯ menu) and `[data-sbb=tour]` (the tour's
+caption). The stylesheet goes into the page once, as
+`<style data-sbb-css>`.
+
 ## What the host gives (mount.ts `BoardHost`)
 
 Each is optional, except `images`. What a host does not give is not offered.

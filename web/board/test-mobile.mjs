@@ -51,33 +51,33 @@ try {
   // the page does not zoom: a double tap or a pinch is the board's
   check(await ev("/maximum-scale=1/.test(document.querySelector('meta[name=viewport]').content) && getComputedStyle(document.querySelector('.sbb')).touchAction === 'manipulation'"), "the page itself does not zoom");
   // the tour's caption: a line; a tap shows it whole, and the board keeps clear of it
-  const sayH = () => ev("document.getElementById('say').getBoundingClientRect().height");
-  const line = await ev("parseFloat(getComputedStyle(document.getElementById('say')).lineHeight) || 20");
+  const sayH = () => ev("document.querySelector('[data-sbb=say]').getBoundingClientRect().height");
+  const line = await ev("parseFloat(getComputedStyle(document.querySelector('[data-sbb=say]')).lineHeight) || 20");
   const h1 = await sayH();
-  check(!(await ev("document.getElementById('tour').hidden")) && h1 <= line * 1.5, `the tour's caption is one line (${h1} px)`);
-  await tapEl("#say");
+  check(!(await ev("document.querySelector('[data-sbb=tour]').hidden")) && h1 <= line * 1.5, `the tour's caption is one line (${h1} px)`);
+  await tapEl("[data-sbb=say]");
   await sleep(200);
   const h2 = await sayH();
   check(h2 > line * 2.5, `a tap shows the whole caption (${h2} px)`);
-  check(await ev("window.board.insets.bottom >= document.getElementById('tour').offsetHeight"), "the board keeps clear of the whole caption");
-  await tapEl("#next");
+  check(await ev("window.board.insets.bottom >= document.querySelector('[data-sbb=tour]').offsetHeight"), "the board keeps clear of the whole caption");
+  await tapEl("[data-sbb=next]");
   await sleep(200);
   check((await sayH()) <= line * 1.5, "the next step's caption is a line again");
-  await tapEl("#prev");
+  await tapEl("[data-sbb=prev]");
   // the top bar: one line, every control in view
-  check(await ev("document.getElementById('top').offsetHeight < 60"), `the top bar wraps (${await ev("document.getElementById('top').offsetHeight")} px)`);
-  check(await ev("[...document.querySelectorAll('#top button, #top select')].filter((e) => e.offsetParent).every((e) => { const b = e.getBoundingClientRect(); return b.right <= innerWidth + 1 && b.left >= -1; })"), "a top bar control is off screen");
+  check(await ev("document.querySelector('[data-sbb=top]').offsetHeight < 60"), `the top bar wraps (${await ev("document.querySelector('[data-sbb=top]').offsetHeight")} px)`);
+  check(await ev("[...document.querySelectorAll('[data-sbb=top] button, [data-sbb=top] select')].filter((e) => e.offsetParent).every((e) => { const b = e.getBoundingClientRect(); return b.right <= innerWidth + 1 && b.left >= -1; })"), "a top bar control is off screen");
   // Edit: the toolbar, in view, with Undo
-  await tapEl("#edit");
+  await tapEl("[data-sbb=edit]");
   await until("!document.querySelector('.board-toolbar').hidden", 5000);
   check(await inView(".board-toolbar"), "the toolbar is in view");
   check(await ev("!!document.querySelector('.board-toolbar [data-tool=undo]')"), "Undo is in the toolbar on a touch screen");
   // its tools are drawn icons, at least 22 px, in buttons at least 40 px
   check(await ev("[...document.querySelectorAll('.board-toolbar button[data-tool]')].every((b) => { const s = b.querySelector('.tb-i svg')?.getBoundingClientRect(), r = b.getBoundingClientRect(); return s && s.width >= 22 && r.width >= 40 && r.height >= 40; })"), "the toolbar's icons are drawings of a readable size");
   // the top bar's ⋯ menu opens over the toolbar, not under it
-  await tapEl("#menubtn");
-  check(await ev("(() => { const t = document.querySelector('.board-toolbar').getBoundingClientRect(); const hit = [...document.querySelectorAll('#menu button')].find((b) => { const r = b.getBoundingClientRect(); return r.bottom > t.top && r.top < t.bottom && r.right > t.left && r.left < t.right; }); if (!hit) return 'no overlap'; const r = hit.getBoundingClientRect(), x = Math.max(r.left, t.left) + 4, y = (Math.max(r.top, t.top) + Math.min(r.bottom, t.bottom)) / 2; return document.getElementById('menu').contains(document.elementFromPoint(x, y)); })()") === true, "the ⋯ menu is above the toolbar");
-  await tapEl("#menubtn");
+  await tapEl("[data-sbb=menubtn]");
+  check(await ev("(() => { const t = document.querySelector('.board-toolbar').getBoundingClientRect(); const hit = [...document.querySelectorAll('[data-sbb=menu] button')].find((b) => { const r = b.getBoundingClientRect(); return r.bottom > t.top && r.top < t.bottom && r.right > t.left && r.left < t.right; }); if (!hit) return 'no overlap'; const r = hit.getBoundingClientRect(), x = Math.max(r.left, t.left) + 4, y = (Math.max(r.top, t.top) + Math.min(r.bottom, t.bottom)) / 2; return document.querySelector('[data-sbb=menu]').contains(document.elementFromPoint(x, y)); })()") === true, "the ⋯ menu is above the toolbar");
+  await tapEl("[data-sbb=menubtn]");
   // a double tap on a code item, in Edit: its editor, a sheet with its buttons in view
   await ev("window.board.focus(['start'], true)");
   await sleep(400);
@@ -112,7 +112,7 @@ try {
   await tapEl(".board-toolbar [data-tool=note]");
   check(await until("document.activeElement === document.querySelector('.board-editing .be-title')", 5000), "Note adds a note, its title being written");
   await send("Input.insertText", { text: "From the phone" });
-  await tapEl("#top");
+  await tapEl("[data-sbb=top]");
   await sleep(400);
   check((await ev("window.sagebrush.board.snapshot().doc.nodes.length")) === n0 + 1, "the note was added");
   await tapEl(".board-toolbar [data-tool=undo]");
@@ -126,14 +126,14 @@ try {
   await sleep(600);
   await tap(ab.x, ab.y);
   check(await until("!!document.querySelector('.board-editing .be-title')", 3000), "a tap on the note selected edits it where it is");
-  await tapEl("#top");
+  await tapEl("[data-sbb=top]");
   await sleep(600);
   check(await ev("!document.querySelector('.board-editing')"), "a tap elsewhere leaves it");
   await tap(ab.x, ab.y);
   await sleep(80);
   await tap(ab.x, ab.y);
   check(await until("!!document.querySelector('.board-editing .be-title')", 3000), "a double tap edits a note in Edit");
-  await tapEl("#top");
+  await tapEl("[data-sbb=top]");
   await sleep(600);
   // its text's blocks: a tap writes in one, a tap on another (the first, shown again, is now two) writes in that one
   await ev("window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === 'about').text = 'First block\\n\\nSecond block\\n\\nThird block'; }).then(() => 1)");
@@ -152,7 +152,7 @@ try {
   bm = await blockMid(2);
   await tap(bm.x, bm.y);
   check(await until("document.activeElement?.closest?.('.mb-edit') && document.activeElement.value === 'Third block'", 3000), "a tap on another block writes in that one: " + await ev("document.activeElement?.value"));
-  await tapEl("#top");
+  await tapEl("[data-sbb=top]");
   check(await until("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'about').text === 'First\\n\\nblock, now two\\n\\nSecond block\\n\\nThird block'", 3000), "what was written is kept: " + await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'about').text)"));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {

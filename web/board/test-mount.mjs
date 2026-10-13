@@ -90,8 +90,8 @@ try {
     }
     if (i % 5 === 3) {
       await ev("window.__b.agent.edit((d) => { d.title = 'Edited ' + Date.now(); })");
-      await ev("document.querySelector('#board #timetravel').click(), 1");
-      check(await until("!document.querySelector('#board #tt').hidden", 5000), `round ${i + 1}: TimeTravel's bar is open`);
+      await ev("document.querySelector('#board [data-sbb=timetravel]').click(), 1");
+      check(await until("!document.querySelector('#board [data-sbb=tt]').hidden", 5000), `round ${i + 1}: TimeTravel's bar is open`);
     }
     await ev("window.__b.destroy().then(() => { window.__b = null; return 1; })");
   }

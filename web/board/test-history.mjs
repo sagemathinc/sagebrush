@@ -79,37 +79,37 @@ try {
   check(v0.format === "sagebrush-board" && v0.version === 1, "a version is a board document, with its format and version");
   // the ⋯ menu's TimeTravel: a bar with a slider, at the newest version
   await ev(`${B}.editing(false)`);
-  await ev("document.getElementById('timetravel').click(), 1");
-  check(await until("!document.getElementById('tt').hidden", 3000), "TimeTravel… shows its bar");
-  check(await ev("(() => { const s = document.getElementById('ttslider'); return s.max === '2' && s.value === '2' && document.getElementById('ttrevert').disabled && /Version 3 of 3/.test(document.getElementById('ttwhen').textContent); })()"), "the slider is at the newest of 3 versions: " + await ev("document.getElementById('ttwhen').textContent"));
+  await ev("document.querySelector('[data-sbb=timetravel]').click(), 1");
+  check(await until("!document.querySelector('[data-sbb=tt]').hidden", 3000), "TimeTravel… shows its bar");
+  check(await ev("(() => { const s = document.querySelector('[data-sbb=ttslider]'); return s.max === '2' && s.value === '2' && document.querySelector('[data-sbb=ttrevert]').disabled && /Version 3 of 3/.test(document.querySelector('[data-sbb=ttwhen]').textContent); })()"), "the slider is at the newest of 3 versions: " + await ev("document.querySelector('[data-sbb=ttwhen]').textContent"));
   // looking at the first: shown, read only (the document is still the board as it is)
-  await ev("(() => { const s = document.getElementById('ttslider'); s.value = '0'; s.dispatchEvent(new Event('input')); return 1; })()");
+  await ev("(() => { const s = document.querySelector('[data-sbb=ttslider]'); s.value = '0'; s.dispatchEvent(new Event('input')); return 1; })()");
   check(await until(`[...document.querySelectorAll('.board-note b')].some((b) => b.textContent === ${JSON.stringify(t0)})`, 5000), "the slider at version 1 shows it");
   check(noteOn(0, id)(await docOf()).title === "Renamed" && (await count()) === 3, "looking at a version changes nothing");
-  check(await ev("!document.getElementById('ttrevert').disabled && !document.getElementById('edit').getAttribute('aria-pressed').includes('true')"), "Revert is offered; Edit is off");
+  check(await ev("!document.querySelector('[data-sbb=ttrevert]').disabled && !document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed').includes('true')"), "Revert is offered; Edit is off");
   // PageDown: the version's next page
   await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true })), 1");
-  check(await until(`${B}.snapshot().page === 1`, 3000) && !(await ev("document.getElementById('tt').hidden")), "PageDown shows the version's next page");
+  check(await until(`${B}.snapshot().page === 1`, 3000) && !(await ev("document.querySelector('[data-sbb=tt]').hidden")), "PageDown shows the version's next page");
   await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true })), 1");
   // Revert: the board is that version again, as an edit (a version, undoable)
-  await ev("document.getElementById('ttrevert').click(), 1");
-  check(await until("document.getElementById('tt').hidden", 3000), "Revert closes the bar");
+  await ev("document.querySelector('[data-sbb=ttrevert]').click(), 1");
+  check(await until("document.querySelector('[data-sbb=tt]').hidden", 3000), "Revert closes the bar");
   check(await until(`(() => { const d = ${B}.snapshot().doc; return d.pages[0].nodes.find((x) => x.id === ${JSON.stringify(id)}).title === ${JSON.stringify(t0)}; })()`, 3000), "Revert: the board is version 1 again");
   check(canon(await docOf()) === canon(d0), "...all of it");
   check(await until(`${B}.versions().then((v) => v.length === 4)`, 3000), "...and that is a version");
   await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1");
   check(await until(`${B}.snapshot().doc.pages[0].nodes.find((x) => x.id === ${JSON.stringify(id)}).title === "Renamed"`, 3000), "undo takes the revert back");
   // ✕ and Esc close the bar: the board as it is
-  await ev("document.getElementById('timetravel').click(), 1");
-  await until("!document.getElementById('tt').hidden", 3000);
-  await ev("(() => { const s = document.getElementById('ttslider'); s.value = '0'; s.dispatchEvent(new Event('input')); return 1; })()");
+  await ev("document.querySelector('[data-sbb=timetravel]').click(), 1");
+  await until("!document.querySelector('[data-sbb=tt]').hidden", 3000);
+  await ev("(() => { const s = document.querySelector('[data-sbb=ttslider]'); s.value = '0'; s.dispatchEvent(new Event('input')); return 1; })()");
   await sleep(300);
-  await ev("document.getElementById('ttclose').click(), 1");
-  check(await until(`document.getElementById('tt').hidden && window.board.item(${JSON.stringify(id)})?.title === "Renamed"`, 3000), "✕ closes it: the board as it is: " + await ev(`window.board.item(${JSON.stringify(id)})?.title`));
-  await ev("document.getElementById('timetravel').click(), 1");
-  await until("!document.getElementById('tt').hidden", 3000);
+  await ev("document.querySelector('[data-sbb=ttclose]').click(), 1");
+  check(await until(`document.querySelector('[data-sbb=tt]').hidden && window.board.item(${JSON.stringify(id)})?.title === "Renamed"`, 3000), "✕ closes it: the board as it is: " + await ev(`window.board.item(${JSON.stringify(id)})?.title`));
+  await ev("document.querySelector('[data-sbb=timetravel]').click(), 1");
+  await until("!document.querySelector('[data-sbb=tt]').hidden", 3000);
   await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 1");
-  check(await until("document.getElementById('tt').hidden", 2000), "Esc closes it");
+  check(await until("document.querySelector('[data-sbb=tt]').hidden", 2000), "Esc closes it");
   // kept across a reload, in a database of the board's own (the notebook's is untouched)
   const nv = await count();
   await send("Page.reload");
@@ -128,15 +128,15 @@ try {
   await ev(`${B}.edit((d) => { d.nodes.find((x) => x.id === 'start').code = 'start = 97'; })`);
   await until(`${B}.outputs().then((os) => /^118 steps/.test(os.find((x) => x.id === 'path').output))`, 30000);
   const after = await ev(`${B}.outputs().then((os) => JSON.stringify(os))`);
-  await ev("document.getElementById('timetravel').click(), 1");
-  await until("!document.getElementById('tt').hidden", 3000);
-  await ev("(() => { const s = document.getElementById('ttslider'); s.value = '0'; s.dispatchEvent(new Event('input')); return 1; })()");
-  check(await ev("document.getElementById('tour').hidden"), "the tour's caption is not shown over the bar");
+  await ev("document.querySelector('[data-sbb=timetravel]').click(), 1");
+  await until("!document.querySelector('[data-sbb=tt]').hidden", 3000);
+  await ev("(() => { const s = document.querySelector('[data-sbb=ttslider]'); s.value = '0'; s.dispatchEvent(new Event('input')); return 1; })()");
+  check(await ev("document.querySelector('[data-sbb=tour]').hidden"), "the tour's caption is not shown over the bar");
   check(await until("[...document.querySelectorAll('.board-code-src')].some((p) => p.textContent === 'start = 27')", 5000), "a version's code is shown: " + await ev("[...document.querySelectorAll('.board-code-src')].map((p) => p.textContent).join(' | ')"));
   check(await ev("!document.querySelector('.board-code-run') && !document.querySelector('.board-code-out')"), "...not run: no ▶, no outputs");
   await sleep(500);
   check((await ev(`${B}.outputs().then((os) => JSON.stringify(os))`)) === after, "nothing ran while looking at it");
-  await ev("document.getElementById('ttclose').click(), 1");
+  await ev("document.querySelector('[data-sbb=ttclose]').click(), 1");
   check(await until("!!document.querySelector('[data-code=path] .board-code-out') && !!document.querySelector('.board-code-run')", 5000), "closed, the board's outputs are back");
   check(before !== after, "(the edit had run)");
   check(!errors.length, "errors: " + errors.join(" | "));

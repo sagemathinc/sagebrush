@@ -35,9 +35,9 @@ const docOf = () => ev(`JSON.parse(JSON.stringify(${B}.snapshot().doc))`);
 const open = async (name, text) => {
   const f = join(profile, name);
   writeFileSync(f, text);
-  await ev("document.getElementById('open').click(), 1");
+  await ev("document.querySelector('[data-sbb=open]').click(), 1");
   const d = await send("DOM.getDocument", { depth: -1 });
-  const q = await send("DOM.querySelector", { nodeId: d.root.nodeId, selector: "#openfile" });
+  const q = await send("DOM.querySelector", { nodeId: d.root.nodeId, selector: "[data-sbb=openfile]" });
   await send("DOM.setFileInputFiles", { files: [f], nodeId: q.nodeId });
   await sleep(800);
 };
@@ -95,8 +95,8 @@ try {
   check(JSON.stringify(p1.edges) === JSON.stringify([{ from: "n1", to: "t1" }]), "the edge between two notes is kept, the one to a pen stroke is not: " + JSON.stringify(p1.edges));
   check(!JSON.stringify(d).includes("pen1") && !JSON.stringify(d).includes("hidden") && !JSON.stringify(d).includes("sel"), "nothing of what was left out is in the board");
   check(d.pages[1].nodes.map((x) => x.id).join() === "n3", "the second page has its note");
-  const said = await ev("document.getElementById('say').textContent");
-  check(!(await ev("document.getElementById('tour').hidden")) && /Converted from a CoCalc whiteboard file/.test(said) && /1 pen stroke/.test(said) && /1 timer/.test(said) && /1 icon/.test(said) && /1 connection to something left out/.test(said) && /1 hidden note/.test(said) && /speaker notes/.test(said) && !/selection/.test(said), "the caption says it was converted, and what was left out: " + said);
+  const said = await ev("document.querySelector('[data-sbb=say]').textContent");
+  check(!(await ev("document.querySelector('[data-sbb=tour]').hidden")) && /Converted from a CoCalc whiteboard file/.test(said) && /1 pen stroke/.test(said) && /1 timer/.test(said) && /1 icon/.test(said) && /1 connection to something left out/.test(said) && /1 hidden note/.test(said) && /speaker notes/.test(said) && !/selection/.test(said), "the caption says it was converted, and what was left out: " + said);
   // shown where they were: a member of a group at its place on CoCalc's board
   await until(`!!window.board.item("n1") && !!window.board.item("c1")`, 5000);
   const at = await ev(`["n1", "c1", "t1", "f1"].map((id) => { const it = window.board.item(id); return it && [id, Math.round(it.x), Math.round(it.y), it.parent ?? ""]; })`);
@@ -112,7 +112,7 @@ try {
   await open("old.board", LEGACY);
   d = await docOf();
   check(d.pages?.length === 2 && d.pages[0].nodes[0]?.text === "Old (not math) and [brackets]" && d.pages[1].nodes[0]?.text === "Page two", "an old board: its pages by number, \\( \\[ unescaped: " + JSON.stringify(d.pages?.map((p) => p.nodes.map((x) => x.text))));
-  check(/Converted from a CoCalc whiteboard file\.$/.test((await ev("document.getElementById('say').textContent")).trim()), "nothing left out: the caption says only that it was converted");
+  check(/Converted from a CoCalc whiteboard file\.$/.test((await ev("document.querySelector('[data-sbb=say]').textContent")).trim()), "nothing left out: the caption says only that it was converted");
   // a one-line JSON board is still a board, not taken for CoCalc's
   await open("one.json", JSON.stringify({ title: "One line", nodes: [{ id: "solo", title: "Solo" }] }));
   d = await docOf();

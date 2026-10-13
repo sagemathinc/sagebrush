@@ -94,25 +94,25 @@ export interface BoardHost {
 let mounted = 0;
 function addStyle() {
   mounted++;
-  if (document.querySelector("style[data-sbb]")) return;
+  if (document.querySelector("style[data-sbb-css]")) return;
   const s = document.createElement("style");
-  s.dataset.sbb = "";
+  s.dataset.sbbCss = "";
   s.textContent = css;
   document.head.prepend(s);
 }
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div id="top"><a id="home" href="/">Sagebrush</a><span id="title"></span><span id="pages" hidden><button id="pgprev" title="Previous page (PageUp)">‹</button><select id="pgsel" title="Page"></select><button id="pgnext" title="Next page (PageDown)">›</button></span><span id="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button id="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button id="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button id="menubtn" title="More">⋯</button><div id="menu" class="menu" hidden><button id="newboard">New board</button><button id="open">Open… (JSON, Mermaid, a CoCalc board)</button><button id="mermaid">Import Mermaid…</button><button id="examples">Examples…</button><hr><button id="addpage">Add a page</button><button id="namepage" hidden>Rename this page…</button><button id="rmpage" hidden>Delete this page</button><button id="tidy">Tidy (automatic layout)</button><div id="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button id="print">Print or save as PDF…</button><button id="html">Download as HTML (one file)</button><button id="download">Download JSON</button><button id="copyjson">Copy JSON</button><button id="timetravel">TimeTravel…</button><button id="revert" hidden>Revert to the original</button></div></span><input id="openfile" type="file" accept=".json,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
-<div id="tour" hidden><div id="say"></div><div id="nav"><div><button id="prev" title="Back (←)" disabled>←</button><button id="next" title="Next (→)">→</button></div><span id="where"></span></div></div>
-<div id="tt" hidden role="group" aria-label="TimeTravel"><input type="range" id="ttslider" min="0" max="0" value="0" aria-label="Version"><span id="ttwhen"></span><button id="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button id="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
-<dialog id="exdlg"><h3>Example boards</h3><div id="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
-<dialog id="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea id="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div id="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button id="mm-go" class="be-done">Import</button></div></form></dialog>
-<dialog id="prdlg"><h3>Print or save as PDF</h3><form id="prform" method="dialog">
-<fieldset><legend>What</legend><label><input type="radio" name="mode" value="pages" id="pr-pages" checked> Every page <span id="pr-pages-n"></span></label><label><input type="radio" name="mode" value="tour" id="pr-tour"> The tour <span id="pr-tour-n"></span></label></fieldset>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="namepage" hidden>Rename this page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
+<div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" disabled>←</button><button data-sbb="next" title="Next (→)">→</button></div><span data-sbb="where"></span></div></div>
+<div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
+<dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
+<dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
+<dialog data-sbb="prdlg"><h3>Print or save as PDF</h3><form data-sbb="prform" method="dialog">
+<fieldset><legend>What</legend><label><input type="radio" name="mode" value="pages" data-sbb="pr-pages" checked> Every page <span data-sbb="pr-pages-n"></span></label><label><input type="radio" name="mode" value="tour" data-sbb="pr-tour"> The tour <span data-sbb="pr-tour-n"></span></label></fieldset>
 <fieldset><legend>Paper</legend><label><input type="radio" name="paper" value="letter" checked> Letter</label><label><input type="radio" name="paper" value="a4"> A4</label><span class="sep"></span><label><input type="radio" name="orient" value="landscape" checked> Landscape</label><label><input type="radio" name="orient" value="portrait"> Portrait</label></fieldset>
 <p class="prnote">Your browser's print dialog opens next: choose <b>Save as PDF</b> as its destination for a PDF. Text stays text, and math and arrows stay sharp at any zoom.</p>
-<div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button id="pr-go" class="be-done">Print…</button></div></form></dialog>`;
+<div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="pr-go" class="be-done">Print…</button></div></form></dialog>`;
 
 export type BoardApi = ReturnType<typeof mountBoard>;
 
@@ -122,8 +122,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   root.classList.add("sbb");
   const board = new Board(root);
   root.insertAdjacentHTML("beforeend", CHROME);
-  // (the parts, found within root)
-  const $ = (id: string) => root.querySelector<HTMLElement>("#" + id)!;
+  // (the parts, found within root by their data-sbb: no ids, which two
+  // boards on a page, or the host's own elements, would share)
+  const $ = (part: string) => root.querySelector<HTMLElement>(`[data-sbb="${part}"]`)!;
   ($("home") as HTMLAnchorElement).href = host.home ?? "/";
   // pictures: where the host keeps them (by name); a board that carries them (data: URLs) gives them up on the way in
   const images = host.images;
@@ -189,7 +190,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const nth = new Map(order.map((c, i) => [c.id, i + 1]));
     for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
     if (!view && (order.length || code)) engine()?.sync(order, d.mode ?? "python").catch((e) => console.warn("board: code items:", e));
-    for (const b of root.querySelectorAll<HTMLButtonElement>("#lang button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
+    for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     board.setItems(items, edges);
     toolbar.tools.value = d.tools ?? defaultTools();
     shownPage = pageIx;
@@ -473,7 +474,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   $("tidy").onclick = () => editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
   // the language of the board's code (one per board): Python or Sage
-  for (const b of root.querySelectorAll<HTMLButtonElement>("#lang button")) {
+  for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) {
     b.onclick = () => editor.commit((d) => { if (b.dataset.mode === "sage") d.mode = "sage"; else delete d.mode; });
   }
   $("pgprev").onclick = () => page(pageIx - 1);
@@ -781,7 +782,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       for (const i of document.querySelectorAll("input.sb-fileinput")) i.remove();
       root.replaceChildren();
       root.classList.remove("sbb");
-      if (--mounted === 0) document.querySelector("style[data-sbb]")?.remove();
+      if (--mounted === 0) document.querySelector("style[data-sbb-css]")?.remove();
     },
     agent: {
       /** Show a board document (see web/board/doc.ts); resolves when it is laid out. */
