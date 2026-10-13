@@ -196,6 +196,108 @@ both directions:
 Not supported: MATLAB 7.3 (HDF5) files and objects (strings are saved as
 char arrays, with a warning). Sparse matrices are read as full ones.
 
+## Graphics
+
+lib/_matlab_plot.py keeps MATLAB's graphics objects and draws them with
+Sagebrush's matplotlib (lib/matplotlib, SVG):
+- **The objects** are the root, figures, axes, and the plots in them (Line,
+  Bar, Histogram, Image, Surface, Legend, Text and the rest). They are
+  handles (`HandleObj` in lib/_matlab.py), with MATLAB's property names, so
+  `h.LineWidth = 2`, `set(h, 'Color', 'r')`, `get(gca, 'XLim')`,
+  `isgraphics` and handle arrays all work.
+- **When figures are drawn:** a figure is drawn when the program ends (or,
+  in a notebook, the cell), if anything in it changed since it was last
+  shown. `figure(n)`, `gcf`, `gca`, `clf`, `close`, `subplot`, `hold` and
+  `tiledlayout`/`nexttile` keep MATLAB's current-figure and current-axes
+  rules.
+- **What is kept from MATLAB:**
+  - hold is off by default, so a plotting function replaces the axes'
+    contents, title, labels, limits and color order (MATLAB's `newplot`);
+  - the color order is MATLAB's (`lines`), LineSpec strings (`'r--o'`) work,
+    and so do name-value properties;
+  - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
+    at the top, with `YDir` reversed;
+  - colormaps `parula`, `jet`, `hot`, `gray`, `turbo` and the others. `jet`
+    and `hot` are MATLAB's formulas (they agree with Octave). `parula` and
+    `turbo` are interpolated from their published anchor colors.
+- **Automatic limits** are computed by the axes, and every axes is drawn
+  with its own limits (not the shim's padded ones), so the picture agrees
+  with `get(gca, 'XLim')`:
+  - The tick step is a fifth of the span, rounded to the nearest 1, 2, 5
+    or 10 times a power of 10 on a log scale (Octave's rule). The limits
+    are the multiples of that step around the data.
+  - A 3-D axes' z axis uses a third of the span, which gives `surf(peaks)`
+    MATLAB's [−10 10].
+  - Images, contours, bars along their axis, and surfaces seen from above
+    are tight to the data.
+  - test_plot_limits pins all of this against Octave.
+- **3-D** (`surf`, `mesh`, `plot3`, `scatter3`, `stem3`, `sphere`): an
+  orthographic projection with MATLAB's view matrix for (az, el) (default
+  (−37.5, 30)):
+  - the box is a cube, or has the data's proportions with `axis equal`;
+  - the back planes carry grid lines, and tick labels go on the front
+    edges;
+  - surfaces are depth-sorted quadrilaterals (the painter's algorithm), one
+    SVG path each, colored by FaceColor/EdgeColor (`'flat'` takes the first
+    corner's CData, `'interp'` averages the four);
+  - `mesh` has white faces and height-colored edges;
+  - `shading` sets both colors.
+  - Seen from above (`view(2)`, `pcolor`), a surface is the same faces in
+    data coordinates.
+  - Hold off resets the view to 2-D (`newplot`); `surf` and `plot3` then
+    turn it to 3-D.
+- **Contours:** contour lines come from marching squares (saddle cells are
+  split by the centre's value), oriented with the higher values on the left
+  as Octave's are, and they give `contourc` and `[C,h] = contour(...)`
+  MATLAB's contour matrix. Closed lines repeat their first point, exactly
+  as Octave's do.
+  - Line colors are the level's colormap color; `clabel` writes the
+    levels.
+  - `contourf` draws flat bands as one pixelated PNG (Z interpolated
+    bilinearly, as the lines are), with black lines.
+- **Histograms:**
+  - with a bin count, the width is the round step that fits and the left
+    edge is a multiple of it (`histcounts([2 3 5 7 11 13 17 19 23 29], 6)`
+    has edges `0:4.9:29.4`, as the documentation shows);
+  - otherwise Scott's rule, rounded to 1, 2, 3, 5 or 10 times a power of
+    10;
+  - `histcounts` and `discretize` share this binning (test_hist,
+    `.matlab.out`, from the documentation's outputs).
+- **Bars:**
+  - grouped bars sit side by side in a group min(0.8, n/(n+1.5)) wide;
+  - stacked bars sit on the series before them;
+  - `XEndPoints`/`YEndPoints` give the bar tips;
+  - a string array of names places the bars in that order.
+- **How arrays reach matplotlib:** they cross through `_m._mat`, in MATLAB
+  orientation. This is the one place the reversed axes are turned back.
+- **Workarounds for the shim:**
+  - images are drawn as PNGs, with `pixelated` so cells stay sharp, because
+    the shim's `imshow` flips the image and mislabels its ticks;
+  - `contourf` is drawn the same way, because the shim's samples Z only at
+    the grid points (the browser then blurs the bands);
+  - error bars are drawn as lines, because the shim's `errorbar` takes only
+    symmetric errors;
+  - a colorbar is the shim's contourf colorbar, given the colormap as
+    bands;
+  - a reversed y axis is drawn by negating y and relabeling the ticks.
+- **Not yet:**
+  - lighting (`camlight`, `lighting` and `material` do nothing);
+  - polar axes, `annotation`, `uifigure` and apps, `animatedline`;
+  - raster output: `print`, `saveas` and `exportgraphics` write SVG.
+
+Tests:
+- **test_plot** compares objects' properties after plotting (limits, data,
+  colors, counts) with Octave's. Octave has no `h.Prop` syntax, so it uses
+  `get`. Where the two differ, it compares only what they share: Octave's
+  `scatter` stores XData as a column and MATLAB keeps the row given, so the
+  test checks its `numel`.
+- **test_plot_limits** (Octave) covers automatic limits in 2-D and 3-D,
+  the view, and contour matrices.
+- **test_plot_handles** (`.matlab.out`, by hand) covers dot syntax.
+- **test_hist** (`.matlab.out`) has the documentation's binning examples.
+- The pictures themselves were checked by eye: rendered SVG, screenshotted
+  in Chromium.
+
 ## MATLAB's documentation as a test
 
 MathWorks' PDF documentation for R2026b (the Function Reference: 21,120
@@ -235,6 +337,14 @@ They also settled several function rules:
 - `func2str(@cos)` is `'cos'`;
 - a real times a complex number keeps a zero part zero (`NaN*1i` is
   $0 + \mathrm{NaN}\,i$).
+
+Sagebrush's `math` module has no `gamma`, `lgamma`, `erf` or `erfc`, so
+lib/_matlab.py computes them:
+- `gamma`: Lanczos (g = 7), exact factorials at the integers;
+- `erf` and `erfc`: a series of positive terms below 2.5, and the
+  continued fraction for the tail.
+
+They agree with Octave to 12 or more digits (test_builtins).
 
 Still to match: `randn` (MATLAB's ziggurat on the twister is not numpy's),
 eigenvector signs (LAPACK's), and `uint64` beyond $2^{53}$.
@@ -316,7 +426,7 @@ time, and `str2func` of an anonymous function's text is not supported.
 
 ## Not yet
 
-- plotting (`plot` and friends, onto Sagebrush's matplotlib);
+- polar axes, lighting and apps (see Graphics);
 - MATLAB as a notebook and board language (it works from the CLI only);
 - `eval`;
 - `classdef` and nested functions;

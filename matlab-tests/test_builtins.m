@@ -169,3 +169,31 @@ show(rem(-3:3, 2));
 show(sign(-0.5));
 show(round(1234.5678 * 100) / 100);
 show(fix([2.5 -2.5]));
+% gamma, gammaln, erf, erfc (exact at the integers; elsewhere to 12 digits)
+show(gamma([1 5 10 20 171]));
+show(gamma([0 -1 -2]));
+show(round(gamma([0.5 -1.5 10.3 0.01]) ./ 10.^floor(log10(abs(gamma([0.5 -1.5 10.3 0.01])))) * 1e12) / 1e12);
+show(round(gammaln([10 0.3 100 1e5]) * 1e10) / 1e10);
+show(round(erf([0 0.1 0.5 -1 2 2.5 3 6]) * 1e13) / 1e13);
+e = erfc([0.5 1 2 5 10 -1 -3]);
+show(round(e ./ 10.^floor(log10(e)) * 1e12) / 1e12);
+show(floor(log10(e)));
+% ndgrid in n dimensions
+[X1, X2, X3] = ndgrid(1:2, 3:5, 6:7);
+show(size(X1));
+show(X1(:)');
+show(X2(:)');
+show(X3(:)');
+[A, B] = ndgrid(1:3);
+show(B);
+% polyfit's degrees of freedom and centering
+x = 1:10;
+y = x.^2 + 3;
+[p, S, mu] = polyfit(x, y, 2);
+show(S.df);
+% (mu's orientation: MATLAB's polyfit makes a column, Octave's a row)
+show(round(mu(:)' * 1e12) / 1e12);
+show(round(polyval(p, (5 - mu(1)) / mu(2)) * 1e9) / 1e9);
+[p, S] = polyfit(x, y + [0 1 0 -1 0 1 0 -1 0 1], 1);
+show(S.df);
+show(round(S.normr * 1e9) / 1e9);

@@ -148,7 +148,15 @@ def report(e, line):
         return
     if isinstance(e, (SystemExit, KeyboardInterrupt)):
         raise e
+    try:
+        end_program()
+    except Exception:
+        pass
     _sys.stdout.flush()
+    if _os.environ.get("SAGEBRUSH_MATLAB_TRACEBACK") and not isinstance(e, MatlabError):
+        # (for debugging the runtime: where in Python an internal error came from)
+        import traceback
+        traceback.print_exception(type(e), e, e.__traceback__)
     st = list(getattr(e, "_mstack", None) or [])
     out = [_message(e)]
     if getattr(e, "_using", False) and st:
@@ -286,7 +294,7 @@ def _dims(v):
         return tuple(reversed(v.shape))
     if t is Char:
         return tuple(reversed(v.a.shape))
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is HandleArr:
         return v.shape
     if isinstance(v, Undef):
         raise _undefined(v.name or "?")
@@ -301,7 +309,7 @@ def _numel(v):
         return v.size
     if t is Char:
         return v.a.size
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is HandleArr:
         return len(v.a)
     return 1
 
@@ -1101,6 +1109,8 @@ def cp(v):
         return Struct([{k: cp(x) for k, x in d.items()} for d in v.a], v.shape, list(v.fields))
     if t is StrArr:
         return StrArr(list(v.a), v.shape)
+    if t is HandleArr:
+        return HandleArr(list(v.a), v.shape)
     if t is dict:
         # (a struct array's element)
         return {k: cp(x) for k, x in v.items()}
@@ -1550,10 +1560,13 @@ def index(obj, args):
         if t is Char:
             return Char(r)
         return _box(r)
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is HandleArr:
         pos, out = _positions(obj.shape, args)
         items = [cp(obj.a[int(k)]) for k in pos.reshape(-1)]
         return obj._like(items, out)
+    if isinstance(obj, HandleObj):
+        pos, out = _positions((1, 1), args)
+        return obj if pos.size == 1 else HandleArr([obj] * pos.size, out)
     if t is Str:
         pos, out = _positions((1, 1), args)
         if pos.size == 1:
@@ -1630,6 +1643,10 @@ def fieldname(v):
 def field_cs(obj, name):
     if type(obj) is Builtin or type(obj) is Function:
         return [field(obj, name)]
+    if isinstance(obj, HandleObj):
+        return [obj.mget(name)]
+    if type(obj) is HandleArr:
+        return [o.mget(name) for o in obj.a]
     t = type(obj)
     if t is Struct:
         if name not in obj.fields:
@@ -1696,6 +1713,22 @@ def assign(base, path, v):
 def _asg(cur, path, i, v):
     kind, arg = path[i]
     last = i == len(path) - 1
+    if kind == "f" and isinstance(cur, HandleObj):
+        # (a handle: its property is set, every variable holding it sees the change)
+        if last:
+            cur.mset(arg, v)
+        else:
+            inner = cur.mget(arg)
+            nv = _asg(inner, path, i + 1, v)
+            if nv is not inner:
+                cur.mset(arg, nv)
+        return cur
+    if kind == "f" and type(cur) is HandleArr:
+        if not last:
+            raise _err("Dot indexing into an array of handles is not supported: index one first.")
+        for o in cur.a:
+            o.mset(arg, v)
+        return cur
     if kind == "f":
         s = _as_struct(cur)
         if len(s.a) != 1:
@@ -1859,6 +1892,8 @@ def _resize(cur, dims):
     # containers: positions of the old elements in the new layout
     fill = (lambda: _empty_double()) if t is Cell else None
     total = _prod(nw)
+    if t is HandleArr:
+        raise _err("Unable to grow an array of graphics objects with gaps: assign every element in order.")
     if t is Struct:
         items = [{f: _empty_double() for f in cur.fields} for _ in range(total)]
     elif t is StrArr:
@@ -1908,6 +1943,9 @@ def _assign_paren(cur, args, v, brace=False):
     if tc is float or tc is bool or tc is complex:
         cur = _arr(cur).copy()
         tc = np.ndarray
+    if isinstance(cur, HandleObj):
+        cur = HandleArr([cur], (1, 1))
+        tc = HandleArr
     if tc is Str:
         cur = StrArr([cur.s], (1, 1))
         tc = StrArr
@@ -1949,6 +1987,11 @@ def _assign_paren(cur, args, v, brace=False):
                             src.setdefault(f, _empty_double())
             cur.a[int(p)] = dict(src) if nv == 1 and pos.size > 1 else src
         return cur
+    if tc is HandleArr:
+        items = _handles(v)
+        for k, p in enumerate(pos):
+            cur.a[int(p)] = items[0 if nv == 1 else k]
+        return cur._like(cur.a, cur.shape) if len(cur.a) == 1 else cur
     if tc is StrArr:
         vals = _strings_of(v)
         for k, p in enumerate(pos):
@@ -1999,6 +2042,8 @@ def _strings_of(v):
 
 def _empty_like(v):
     t = type(v)
+    if isinstance(v, HandleObj) or t is HandleArr:
+        return HandleArr([], (0, 0))
     if t is Cell:
         return Cell([], (0, 0))
     if t is Struct:
@@ -2134,6 +2179,10 @@ def class_(v):
         return "function_handle"
     if t is MException:
         return "MException"
+    if isinstance(v, HandleObj):
+        return v._mclass
+    if t is HandleArr:
+        return v.a[0]._mclass if v.a else "matlab.graphics.Graphics"
     if t is int:
         return "double"
     if isinstance(v, Undef):
@@ -2169,6 +2218,8 @@ def vcat(rows):
 
 def _cat_class(vals):
     """the class of a concatenation"""
+    if any(isinstance(v, HandleObj) or type(v) is HandleArr for v in vals):
+        return "handle"
     classes = [class_(v) for v in vals]
     if "cell" in classes:
         return "cell"
@@ -2200,6 +2251,10 @@ def _cat(vals, dim):
         if cls == "char":
             return Char("") if type(v) is not Char else v
         return v if cls != "cell" else Cell([], (0, 0))
+    if cls == "handle":
+        items = [v if type(v) is HandleArr else HandleArr([v], (1, 1)) for v in parts]
+        r = _cat_containers(items, dim, Cell)
+        return HandleArr(r.a, r.shape)
     if cls == "cell":
         items = [v if type(v) is Cell else Cell([v], (1, 1)) for v in parts]
         return _cat_containers(items, dim, Cell)
@@ -2587,6 +2642,9 @@ def _brief(v, in_cell):
         return "%s %s" % (_dimstr(d), cls) if in_cell else "[%s %s]" % (_dimstr(d), cls)
     if t is MException:
         return "[1×1 MException]" if not in_cell else "1×1 MException"
+    if isinstance(v, HandleObj):
+        n = v._mclass.split(".")[-1]
+        return "1×1 %s" % n if in_cell else "[1×1 %s]" % n
     return str(v)
 
 
@@ -2694,6 +2752,14 @@ def _blocks(v):
         return h, b, True
     if t is Anon or t is Handle or t is Function or t is Builtin:
         return ["  function_handle with value:"], ["    " + func2str_text(v)], False
+    if isinstance(v, HandleObj):
+        h, b = _handle_blocks(v)
+        return h, b, True
+    if t is HandleArr:
+        # (objects of different classes: a "graphics array", as MATLAB calls it)
+        kinds = set(o._mclass for o in v.a)
+        name = class_(v).split(".")[-1] if len(kinds) == 1 else "graphics"
+        return ["  %s %s array:" % (_dimstr(v.shape), name)], ["\n".join("    %s" % o._mclass.split(".")[-1] for o in v.a)], False
     if t is MException:
         return ["  MException with properties:"], ["\n".join([
             "    identifier: '%s'" % v.identifier,
@@ -3414,10 +3480,103 @@ _unary("cot", lambda A: 1 / np.tan(A))
 _unary("sind", _sind)
 _unary("cosd", _cosd)
 _unary("tand", lambda A: _sind(A) / _cosd(A))
-_unary("gamma", lambda A: _vec_math(_math.gamma, A, _math.inf))
-_unary("gammaln", lambda A: _vec_math(_math.lgamma, A, _math.inf))
-_unary("erf", lambda A: _vec_math(_math.erf, A))
-_unary("erfc", lambda A: _vec_math(_math.erfc, A))
+# (Sagebrush's math module has no gamma, lgamma, erf or erfc: double-precision versions here)
+_LANCZOS = (0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+            12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7)
+
+
+def _lanczos_log(x):
+    """log Gamma(x) for x >= 0.5 (Lanczos, g = 7)"""
+    x -= 1
+    a = _LANCZOS[0]
+    t = x + 7.5
+    for i in range(1, 9):
+        a += _LANCZOS[i] / (x + i)
+    return 0.5 * _math.log(2 * _math.pi) + (x + 0.5) * _math.log(t) - t + _math.log(a)
+
+
+def _gamma(x):
+    if x != x or x == -_math.inf:
+        return _math.nan
+    if x == _math.floor(x):
+        if x <= 0:
+            return _math.inf
+        if x <= 171:
+            # (exact at the integers, as MATLAB's: (x-1)!)
+            return float(_math.factorial(int(x) - 1))
+        return _math.inf
+    if x < 0.5:
+        # (reflection: Gamma(x) Gamma(1-x) = pi / sin(pi x))
+        return _math.pi / (_math.sin(_math.pi * x) * _gamma(1 - x))
+    if x > 171.7:
+        return _math.inf
+    return _math.exp(_lanczos_log(x))
+
+
+def _lgamma(x):
+    if x != x:
+        return _math.nan
+    if x <= 0 and x == _math.floor(x):
+        return _math.inf
+    if x == _math.floor(x) and x <= 171:
+        return _math.log(_math.factorial(int(x) - 1))
+    if x < 0.5:
+        return _math.log(_math.pi / abs(_math.sin(_math.pi * x))) - _lgamma(1 - x)
+    return _lanczos_log(x)
+
+
+def _erfc_cf(x):
+    """erfc(x) for x >= 1: its continued fraction (modified Lentz)"""
+    tiny = 1e-300
+    f = x or tiny
+    C, D = f, 0.0
+    for n in range(1, 2000):
+        a = n / 2.0
+        D = x + a * D
+        D = 1 / (D or tiny)
+        C = x + a / C
+        C = C or tiny
+        delta = C * D
+        f *= delta
+        if abs(delta - 1) < 1e-16:
+            break
+    return _math.exp(-x * x) / (_math.sqrt(_math.pi) * f)
+
+
+def _erf_series(x):
+    """erf(x) for |x| < 3: 2/sqrt(pi) exp(-x^2) sum 2^n x^(2n+1) / (1*3*...*(2n+1)), all terms positive"""
+    term = x
+    total = x
+    x2 = 2 * x * x
+    for n in range(1, 200):
+        term *= x2 / (2 * n + 1)
+        total += term
+        if abs(term) < 1e-17 * abs(total):
+            break
+    return 2 / _math.sqrt(_math.pi) * _math.exp(-x * x) * total
+
+
+def _erf(x):
+    if x != x:
+        return _math.nan
+    if abs(x) < 2.5:
+        return _erf_series(x)
+    e = _erfc_cf(abs(x))
+    return 1 - e if x > 0 else e - 1
+
+
+def _erfc(x):
+    if x != x:
+        return _math.nan
+    if x < 1:
+        return 1 - _erf(x) if x > -2.5 else 2 - _erfc_cf(-x)
+    return _erfc_cf(x)
+
+
+_unary("gamma", lambda A: _vec_math(_gamma, A, _math.inf))
+_unary("gammaln", lambda A: _vec_math(_lgamma, A, _math.inf))
+_unary("erf", lambda A: _vec_math(_erf, A))
+_unary("erfc", lambda A: _vec_math(_erfc, A))
 
 
 def _round_half_away(A):
@@ -4448,12 +4607,28 @@ def meshgrid_(nargout, x, y=None, z=None):
 
 
 @_bi("ndgrid")
-def ndgrid_(nargout, x, y=None):
-    xv = _farr(x).reshape(-1)
-    yv = _farr(y if y is not None else x).reshape(-1)
-    X = np.tile(xv.reshape((-1, 1)), (1, yv.size))
-    Y = np.tile(yv.reshape((1, -1)), (xv.size, 1))
-    return _unmat(X) if nargout <= 1 else [_unmat(X), _unmat(Y)]
+def ndgrid_(nargout, *vs):
+    """[X1,...,Xn] = ndgrid(x1,...,xn): Xk varies along dimension k (one vector: used n times)"""
+    if not vs:
+        raise _err("Not enough input arguments.")
+    if len(vs) == 1:
+        vs = vs * max(2, nargout)
+    vecs = [_farr(v).reshape(-1) for v in vs]
+    if len(vecs) == 2:
+        xv, yv = vecs
+        X = np.tile(xv.reshape((-1, 1)), (1, yv.size))
+        Y = np.tile(yv.reshape((1, -1)), (xv.size, 1))
+        return _unmat(X) if nargout <= 1 else [_unmat(X), _unmat(Y)]
+    dims = [v.size for v in vecs]
+    nd = len(dims)
+    shape = tuple(reversed(dims))
+    out = []
+    for k, v in enumerate(vecs):
+        # (MATLAB's dimension k is the stored array's axis nd-1-k)
+        ax = nd - 1 - k
+        a = v.reshape(tuple(dims[k] if i == ax else 1 for i in range(nd)))
+        out.append(_box(np.tile(a, tuple(1 if i == ax else shape[i] for i in range(nd)))))
+    return out[0] if nargout <= 1 else out[:nargout]
 
 # ---- linear algebra
 
@@ -4677,15 +4852,30 @@ def polyval_(p, x):
     return _box(y)
 
 
-@_bs("polyfit")
-def polyfit_(x, y, n):
+@_bi("polyfit")
+def polyfit_(nargout, x, y, n):
+    """p (highest power first); [p,S]: S.R, S.df, S.normr; [p,S,mu]: fitted on (x - mu(1))/mu(2)"""
     xv = _farr(x).reshape(-1)
     yv = _farr(y).reshape(-1)
     n = _int_arg(n)
+    mu = None
+    if nargout >= 3:
+        m = float(np.mean(xv))
+        sd = float(np.sqrt(np.sum((xv - m) ** 2) / max(1, xv.size - 1)))
+        mu = (m, sd)
+        xv = (xv - m) / sd
     V = np.array([[xi ** (n - k) for k in range(n + 1)] for xi in xv]).reshape((xv.size, n + 1))
     Q, R = np.linalg.qr(V)
     p = np.linalg.solve(R, Q.T @ yv)
-    return _box(_contig(p.reshape((-1, 1))))
+    P = _box(_contig(p.reshape((-1, 1))))
+    if nargout <= 1:
+        return P
+    r = yv - V @ p
+    S = _struct1({"R": _unmat(np.array(R)), "df": float(max(0, xv.size - (n + 1))), "normr": float(np.sqrt(np.sum(r * r)))})
+    out = [P, S]
+    if mu is not None:
+        out.append(np.array([[mu[0], mu[1]]]).reshape((1, 2)) if False else _box(np.array([mu[0], mu[1]]).reshape((1, 2))))
+    return out[:nargout]
 
 
 @_bs("roots")
@@ -6133,7 +6323,7 @@ def _isequal2(a, b, nan_equal):
         except MatlabError:
             return False
         return _dims(a) == _dims(b) and sa == sb
-    if _iscallable(a) or _iscallable(b):
+    if _iscallable(a) or _iscallable(b) or isinstance(a, HandleObj) or isinstance(b, HandleObj):
         return a is b
     if not (_isnumlike(a) and _isnumlike(b)):
         return False
@@ -7980,6 +8170,10 @@ def rmdir_(nargout, d, *opts):
 @_bi("delete")
 def delete_(nargout, *files):
     for f in files:
+        if isinstance(f, HandleObj) or type(f) is HandleArr:
+            for o in _handles(f):
+                o.delete()
+            continue
         t = _text(f)
         if "*" in t or "?" in t:
             d, pat = (t.rsplit("/", 1) if "/" in t else (".", t))
@@ -8087,3 +8281,98 @@ def feof_(fid):
 @_bs("frewind")
 def frewind_(fid):
     _fh(fid).seek(0)
+
+
+# ------------------------------------------------------------------ handle objects (graphics: lib/_matlab_plot.py)
+
+
+class HandleObj:
+    """A MATLAB handle object: properties by name (case-insensitive), shared
+    by every variable that holds it (no copy on assignment)."""
+    _mclass = "handle"
+
+    def __init__(self):
+        self.props = {}
+        self.valid = True
+
+    def _key(self, name):
+        low = name.lower()
+        for k in self.props:
+            if k.lower() == low:
+                return k
+        raise _err("Unrecognized property '%s' for class '%s'." % (name, self._mclass), "MATLAB:class:InvalidProperty")
+
+    def mget(self, name):
+        return self.props[self._key(name)]
+
+    def mset(self, name, value):
+        self.props[self._key(name)] = value
+
+
+class HandleArr:
+    """An array of handle objects (plot(Y) returns one)."""
+    __slots__ = ("shape", "a")
+
+    def __init__(self, a, shape):
+        self.a = a
+        self.shape = _canon_dims(shape)
+
+    def _like(self, a, shape):
+        if _prod(shape) == 1:
+            return a[0]
+        return HandleArr(a, shape)
+
+
+def _handles(v):
+    """the objects of a handle value (one, or an array)"""
+    if isinstance(v, HandleObj):
+        return [v]
+    if type(v) is HandleArr:
+        return list(v.a)
+    if _isnumlike(v) and _numel(v) == 0:
+        return []
+    raise _err("Invalid or deleted object.", "MATLAB:class:InvalidHandle")
+
+
+def _plot_module():
+    import _matlab_plot
+    return _matlab_plot
+
+
+def _lazy_plot(name):
+    def g(nargout, *args):
+        return _plot_module().call(name, nargout, args)
+    return Builtin(g, name)
+
+
+_PLOT_FNS = ("figure gcf gca groot clf cla close hold ishold subplot plot plot3 semilogx semilogy loglog line scatter bar barh "
+             "histogram hist stairs stem area errorbar fill patch pie imagesc image imshow colorbar colormap caxis clim "
+             "contour contourf surf mesh title subtitle sgtitle xlabel ylabel zlabel legend grid box axis xlim ylim zlim "
+             "xticks yticks xticklabels yticklabels text set get drawnow print saveas exportgraphics xline yline view "
+             "isgraphics ishandle ishghandle shg refresh rotate3d zoom pan linkaxes daspect pbaspect "
+             "parula jet hot gray cool spring summer autumn winter bone copper pink hsv turbo lines tiledlayout nexttile peaks "
+             "sphere cylinder contourc clabel scatter3 stem3 pcolor shading axes colororder findobj fplot quiver "
+             "histcounts discretize zticks zticklabels camlight lighting material light").split()
+for _n in _PLOT_FNS:
+    _B[_n] = _lazy_plot(_n)
+
+
+def end_program():
+    """after a program (or a notebook cell): show the figures it drew or changed"""
+    mod = _sys.modules.get("_matlab_plot")
+    if mod is not None:
+        mod.flush()
+
+
+# ---- handle values in the rest of the runtime
+
+
+def _handle_blocks(v):
+    """the display of a handle object: its class and main properties"""
+    name = v._mclass.split(".")[-1]
+    if name == "Figure":
+        name = "Figure (%d)" % int(_scalar(v.props.get("Number", 1.0)))
+    keys = list(v.props)[:12]
+    w = max([len(k) for k in keys] + [0])
+    lines = ["    %s: %s" % (k.rjust(w), _brief(v.props[k], False) if v.props[k] is not None else "[]") for k in keys]
+    return ["  %s with properties:" % name], ["\n".join(lines)] if lines else []
