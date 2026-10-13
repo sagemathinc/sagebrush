@@ -203,6 +203,39 @@ export function cleanDoc(d: any): BoardDoc {
   return out as BoardDoc;
 }
 
+// A document's keys in a file, in this order: what it is, its settings, its
+// content, and its pictures (data: URLs, possibly large) last.
+const DOC_KEYS = ["format", "version", "title", "mode", "engine", "refBase", "tools", "intro", "layout", "columns", "direction", "nodes", "edges", "steps", "pages", "images"];
+
+/**
+ * A document as its file holds it (foo.board.json): cleaned (cleanDoc), its
+ * keys in a fixed order (format and version first), two spaces of indent,
+ * and arrays of numbers or strings on one line.  The same document is always
+ * the same text, so a change is a small diff, and reading and writing a file
+ * gives it back as it was.
+ */
+export function canonical(d: BoardDoc): string {
+  const c: any = cleanDoc(d), out: any = {};
+  for (const k of DOC_KEYS) if (c[k] !== undefined) out[k] = c[k];
+  for (const k of Object.keys(c)) if (!(k in out)) out[k] = c[k];
+  const text = (v: any, indent: string): string => {
+    if (Array.isArray(v)) {
+      if (!v.length) return "[]";
+      if (v.every((x) => typeof x !== "object" || x === null)) return "[" + v.map((x) => JSON.stringify(x)).join(", ") + "]";
+      const i2 = indent + "  ";
+      return "[\n" + v.map((x) => i2 + text(x, i2)).join(",\n") + "\n" + indent + "]";
+    }
+    if (v && typeof v === "object") {
+      const ks = Object.keys(v).filter((k) => v[k] !== undefined);
+      if (!ks.length) return "{}";
+      const i2 = indent + "  ";
+      return "{\n" + ks.map((k) => i2 + JSON.stringify(k) + ": " + text(v[k], i2)).join(",\n") + "\n" + indent + "}";
+    }
+    return JSON.stringify(v);
+  };
+  return text(out, "") + "\n";
+}
+
 /** Why this cannot be shown as a board of this format (another format, or a
  * later version than this page reads), or null. */
 export function formatError(d: any): string | null {

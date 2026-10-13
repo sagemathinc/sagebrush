@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
 import type { BoardCode } from "./code";
 import { Toolbar, defaultTools } from "./toolbar";
 import { effect } from "@preact/signals-core";
@@ -467,7 +467,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const menu = $("menu");
   $("menubtn").onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
   on(window, "click", () => { menu.hidden = true; });
-  const fileName = () => ((doc?.title ?? "board").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "board") + ".json";
+  // (foo.board.json: the board's file, canonical JSON)
+  const fileName = () => ((doc?.title ?? "board").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "board") + ".board.json";
   $("examples").onclick = async () => {
     const list = $("exlist");
     try {
@@ -526,7 +527,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("download").onclick = async () => {
     const a = document.createElement("a");
     // (with its pictures)
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(await images.inline(doc!), null, 1)], { type: "application/json" }));
+    a.href = URL.createObjectURL(new Blob([canonical(await images.inline(doc!))], { type: "application/json" }));
     a.download = fileName();
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -558,7 +559,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     try {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(doc), { python })], { type: "text/html" }));
-      a.download = fileName().replace(/\.json$/, ".html");
+      a.download = fileName().replace(/\.board\.json$/, ".html");
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } catch (e) {
@@ -568,7 +569,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (what the host does not have is not offered: an exported file has no examples beside it)
   $("examples").hidden = !host.examples;
   $("html").hidden = !host.exportHtml;
-  $("copyjson").onclick = async () => navigator.clipboard?.writeText(JSON.stringify(await images.inline(doc!), null, 1));
+  $("copyjson").onclick = async () => navigator.clipboard?.writeText(canonical(await images.inline(doc!)));
   async function openText(text: string, name?: string) {
     const d = boardFromText(text, name, (md) => { converted = md; });
     const bad = formatError(d);
@@ -834,6 +835,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       exportHtml: async (o?: { python?: boolean }) => host.exportHtml!(await images.inline(doc!), o),
       /** the document as a file carries it: with its pictures (data: URLs) */
       portable: () => images.inline(doc!),
+      /** the board's file (foo.board.json), as Download JSON writes it */
+      json: async () => canonical(await images.inline(doc!)),
       /** Show page n (0-based). */
       page,
       /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */

@@ -65,7 +65,7 @@ caption.
 
 ## Also exported
 
-- **The document:** `cleanDoc`, `formatError`, `layout`, and the types.
+- **The document:** `cleanDoc`, `canonical` (its file, `foo.board.json`), `formatError`, `layout`, and the types.
 - **TimeTravel's records:** `toRecords` and `fromRecords` (a board as records
   keyed by type, page and id), `BoardHistory`, `SCHEMA`.
 - **Other formats:** `boardFromText` and `fromMermaid` (JSON, Mermaid);
