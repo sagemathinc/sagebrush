@@ -22,6 +22,34 @@ export function method(cls: PyType, name: string, f: any, s: Signature | null = 
   return f;
 }
 
+// Store a builtin type's __new__ (its first argument the class to make): it
+// makes only instances of that type's subtypes, checked on every way of
+// calling it (positionally, and by keyword through `kw`, the adapter for
+// keyword arguments, given the class first), as CPython's do.  The type is
+// kept as `$allocator` (test/security.test.ts checks every type's __new__).
+export function allocator(owner: PyType, f: (cls: any, ...args: any[]) => any, kw?: (pos: any[], names: string[], values: any[]) => any) {
+  const check = (cls: any) => {
+    if (cls === owner) return;
+    if (!isType(cls)) raise(T.TypeError, `${owner.$name}.__new__(X): X is not a type object (${typeName(cls)})`);
+    if (!cls.$mro.includes(owner)) raise(T.TypeError, `${owner.$name}.__new__(${cls.$name}): ${cls.$name} is not a subtype of ${owner.$name}`);
+  };
+  const nw: any = pyfn(function __new__(cls: any, ...args: any[]) {
+    if (cls === undefined) raise(T.TypeError, `${owner.$name}.__new__(): not enough arguments`);
+    check(cls);
+    return f(cls, ...args);
+  }, "__new__");
+  if (kw !== undefined) {
+    nw.$kw = (pos: any[], names: string[], values: any[]) => {
+      if (pos.length === 0) raise(T.TypeError, `${owner.$name}.__new__(): not enough arguments`);
+      check(pos[0]);
+      return kw(pos, names, values);
+    };
+  }
+  nw.$allocator = owner;
+  owner.$dict.set("__new__", nw);
+  return nw;
+}
+
 // A data descriptor computed by JS: type `getset_descriptor`.
 export class GetSet {
   constructor(public owner: PyType, public name: string, public get: (o: any) => any, public set: ((o: any, v: any) => void) | null = null) {}
@@ -424,14 +452,14 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
 
 const BaseException = objectType("BaseException", [object], new Map(), "builtins");
 T.BaseException = BaseException;
-BaseException.$dict.set("__new__", pyfn(function __new__(cls: PyType, ...args: any[]) {
+allocator(BaseException, (cls: PyType, ...args: any[]) => {
   const o = new cls.$ctor!();
   o.args = tuple(args);
   // Exceptions raised by the runtime are thrown right after creation, so
   // capture the stack now; `raise` re-captures at the raise site.
   captureTraceback(o);
   return o;
-}, "__new__"));
+});
 method(BaseException, "__init__", (self: any, ...args: any[]) => {
   self.args = tuple(args);
   return null;
@@ -1145,13 +1173,13 @@ method(list, "__init__", (a: any[], it: any = undefined) => {
   for (const v of items) a.push(v);
   return null;
 });
-tupleType.$dict.set("__new__", pyfn(function __new__(cls: PyType, it: any = undefined) {
+allocator(tupleType, (cls: PyType, it: any = undefined) => {
   const items = it === undefined ? [] : O.toArray(it);
   if (cls === tupleType) return tuple(items);
   const a = new cls.$ctor!();
   for (const v of items) a.push(v);
   return a;
-}, "__new__"));
+});
 const seqOps = (cls: PyType, isTuple: boolean) => {
   const same = (b: any) => Array.isArray(b) && !!(b as any).$t === isTuple;
   for (const op of ["__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"]) method(cls, op, (a: any[], b: any) => (same(b) ? O.seqCmp(a, b, op) : NotImplemented));
@@ -1332,11 +1360,11 @@ method(set, "__init__", (s: O.PySet, it: any = undefined) => {
   if (it !== undefined) O.forEach(it, (v) => O.setAdd(s, v));
   return null;
 });
-frozenset.$dict.set("__new__", pyfn(function __new__(cls: PyType, it: any = undefined) {
+allocator(frozenset, (cls: PyType, it: any = undefined) => {
   const s = cls === frozenset ? O.newSet(undefined, true) : new cls.$ctor!();
   if (it !== undefined) O.forEach(it, (v) => O.setAdd(s, v));
   return s;
-}, "__new__"));
+});
 Object.defineProperty(O.PySet.prototype, "$cls", {
   get(this: O.PySet) {
     return this.$frozen ? frozenset : set;
@@ -2006,22 +2034,14 @@ hooks.primProxy = (base: PyType): PyType => {
 };
 for (const [P, L] of [[int, IntLayout], [float, FloatLayout], [S, StrLayout]] as const) {
   P.$jsBase = L;
-  const nw = pyfn(function __new__(cls: PyType, ...args: any[]) {
-    const v = P(...args);
+  // (a subclass's instance boxes the value)
+  const box = (cls: any, v: any) => {
     if (cls === P) return v;
-    if (!isType(cls) || !cls.$mro.includes(P)) raise(T.TypeError, `${P.$name}.__new__(X): X is not a subtype of ${P.$name}`);
     const o = new cls.$ctor!();
     o.$v = v;
     return o;
-  }, "__new__");
-  nw.$kw = (pos: any[], names: string[], values: any[]) => {
-    const v = callKw(P, pos.slice(1), names, values);
-    if (pos[0] === P) return v;
-    const o = new pos[0].$ctor!();
-    o.$v = v;
-    return o;
   };
-  P.$dict.set("__new__", nw);
+  allocator(P, (cls: any, ...args: any[]) => box(cls, P(...args)), (pos, names, values) => box(pos[0], callKw(P, pos.slice(1), names, values)));
 }
 getset(type, "__mro__", (c) => tuple(c.$mro.filter((x: any) => !x.$hidden)));
 method(type, "mro", (c: any) => c.$mro.filter((x: any) => !x.$hidden));
@@ -2032,17 +2052,12 @@ method(type, "mro", (c: any) => c.$mro.filter((x: any) => !x.$hidden));
 export function subclassable(P: PyType, jsClass: any, fields: string[] = []) {
   P.$jsBase = jsClass;
   if (fields.length) P.$impl = new Set(fields);
-  const make = (cls: any, o: any) => {
-    if (cls === P) return o;
-    if (!isType(cls) || !cls.$mro.includes(P)) raise(T.TypeError, `${P.$name}.__new__(X): X is not a subtype of ${P.$name}`);
-    Object.setPrototypeOf(o, cls.$ctor!.prototype);
+  // (a subclass's instance is the base type's object, re-prototyped)
+  const adopt = (cls: any, o: any) => {
+    if (cls !== P) Object.setPrototypeOf(o, cls.$ctor!.prototype);
     return o;
   };
-  const nw = pyfn(function __new__(cls: PyType, ...args: any[]) {
-    return make(cls, P(...args));
-  }, "__new__");
-  nw.$kw = (pos: any[], names: string[], values: any[]) => make(pos[0], callKw(P, pos.slice(1), names, values));
-  P.$dict.set("__new__", nw);
+  allocator(P, (cls: any, ...args: any[]) => adopt(cls, P(...args)), (pos, names, values) => adopt(pos[0], callKw(P, pos.slice(1), names, values)));
 }
 subclassable(bytesType, PyBytes, ["a", "n"]);
 subclassable(bytearray, PyByteArray, ["a", "n"]);
@@ -2055,12 +2070,11 @@ subclassable(staticmethod, PyStaticMethod, ["f"]);
 subclassable(classmethod, PyClassMethod, ["f"]);
 // property subclasses commonly override __init__ and call super().__init__.
 property.$jsBase = PyProperty;
-property.$dict.set("__new__", pyfn(function __new__(cls: PyType, ..._args: any[]) {
-  if (!isType(cls) || !cls.$mro.includes(property)) raise(T.TypeError, `property.__new__(X): X is not a subtype of property`);
+allocator(property, (cls: PyType, ..._args: any[]) => {
   const o = cls === property ? new PyProperty(null, null, null, null) : new cls.$ctor!();
   o.fget = o.fset = o.fdel = o.doc = null;
   return o;
-}, "__new__"));
+});
 method(property, "__init__", (p: PyProperty, fget: any = null, fset: any = null, fdel: any = null, doc: any = null) => {
   p.fget = fget;
   p.fset = fset;
@@ -2093,7 +2107,13 @@ export function structseq(name: string, fields: string[], values: any[]): any {
 // `async def` compiles to a JS generator function whose generator objects
 // have type coroutine (via `$cls` on the function's prototype).
 export const coroutine = builtinType("coroutine", [object], () => raise(T.TypeError, "cannot create 'coroutine' instances"));
-for (const n of ["send", "throw", "close"]) coroutine.$dict.set(n, generator.$dict.get(n));
+// (its own methods, doing what a generator's do: a method is its owner's
+// alone, and checks for it, so the generator's cannot be shared)
+for (const n of ["send", "throw", "close"]) {
+  const g = generator.$dict.get(n);
+  const f = method(coroutine, n, (c: any, ...a: any[]) => g(c, ...a), g.$sig ?? null);
+  if (g.$kw !== undefined) f.$kw = (pos: any[], names: string[], values: any[]) => g.$kw(pos, names, values);
+}
 method(coroutine, "__repr__", (g: any) => `<coroutine object ${g.$fn?.__qualname__ ?? "?"} at 0x${O.id(g).toString(16)}>`);
 // coro.__await__() is an iterator over the same frames.
 export class CoroWrapper {
