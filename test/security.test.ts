@@ -134,6 +134,34 @@ print(out)
   assert.equal(run(src), "[(True, 5, ['user'])]\n");
 });
 
+// sagebrush-daybreak SEC-BBB-1/2 (bbb4432): built-in descriptors and methods
+// had no owner, so one fetched through vars(cls) could be applied to any
+// receiver.  Each now records its type and checks the receiver on every path.
+test("SEC-BBB-1/2: built-in descriptors and methods apply only to their own type's instances", () => {
+  const src = `
+import array
+out = []
+def attempt(f):
+    try:
+        f(); out.append("ran")
+    except TypeError:
+        out.append("TypeError")
+attempt(lambda: vars(range)["step"].__get__(object(), object))
+attempt(lambda: vars(range)["start"].__set__(object(), 1))
+class B(bytes): pass
+b = B(b"abc")
+m = vars(array.array)["__imul__"]
+attempt(lambda: m.__get__(b, B)(2))
+attempt(lambda: m(b, 2))
+attempt(lambda: vars(range)["__repr__"](object()))
+out.append(bytes(b))
+a = array.array("i", [1, 2]); m(a, 2)
+out.append((list(a), vars(range)["step"].__get__(range(0, 9, 3), range), vars(str)["upper"]("x")))
+print(out)
+`;
+  assert.equal(run(src), "['TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', b'abc', ([1, 2, 1, 2], 3, 'X')]\n");
+});
+
 // sagebrush-daybreak SEC-2C5-1 (2c5ccc1): __pyjs_run__ passed any Python
 // object as the compiled code's globals, so a Python function as ns let it
 // read `constructor` through Function.prototype.  Only a module or a dict.

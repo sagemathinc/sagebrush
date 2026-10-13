@@ -198,6 +198,19 @@ Its re-review of 2c5ccc1 found two more, both fixed:
   key**, so `constructor` returned JavaScript `Object`. Its options table is
   now prototype-less, and it returns only its own keys.
 
+Its re-review of bbb4432 found two descriptor-boundary violations, fixed:
+- **SEC-BBB-1, high:** a built-in get/set descriptor (`getset_descriptor`)
+  recorded no owner, so one fetched from `vars(cls)` could be applied to any
+  receiver, reaching a JavaScript property of an opaque runtime object.
+- **SEC-BBB-2, medium:** a built-in method fetched from `vars(cls)` could be
+  bound to, or called on, an instance of another type and write that
+  object's protected storage.
+
+Built-in descriptors and methods now record their owning type (`GetSet.owner`,
+`f.$owner`) and check the receiver first on every path: `__get__`, `__set__`,
+binding, and a direct call of what `vars(cls)` returns (the receiver-checking
+form). Normal attribute access and method calls are unchanged.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS
