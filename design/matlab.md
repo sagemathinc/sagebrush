@@ -69,6 +69,22 @@ built so far.
 are made (`@(x) x + a`), as MATLAB does. They print as MATLAB writes them
 back (`@(x)x+a`).
 
+**Newer syntax:**
+- `f(x, Name=value)` (R2021a) is `f(x, "Name", value)`.
+- `0x87u32` and `0b1011` (R2019b) are integers. Without a suffix, a literal
+  is the smallest unsigned type that holds it.
+- **`arguments` blocks** declare a function's arguments, and their checks
+  run in order when it is called:
+  - a default makes an argument optional, and is used when it is missing;
+  - the declared class and size convert the value where they can (a char
+    vector to a string, a column to a `(1,:)` row, a scalar expanded),
+    and are an error otherwise;
+  - the validation functions (`mustBeNumeric` and friends, with MATLAB's
+    messages) run left to right;
+  - name-value arguments (`opts.Name`) become a struct of the trailing
+    name/value pairs, names matched case-insensitively;
+  - `Output` blocks are ignored, and `Repeating` blocks are not supported.
+
 **Errors** stop the program (unlike Magma, MATLAB does not go on to the next
 statement). They are reported on stderr as MATLAB reports them: the message,
 then `Error in name (line n)` for each function and for the script. The
@@ -156,6 +172,73 @@ from versions 7.0 to 26.1.
 - `format long`, `format compact` and `format short` all work. `disp` prints
   the same body without the name.
 
+## .mat files
+
+`load` and `save` read and write Level 5 MAT-files, which is what MATLAB
+writes up to `-v7`, in lib/_matlab_mat.py, following MathWorks' "MAT-File
+Format":
+- numeric, logical, char, cell and struct arrays, including N-D, complex and
+  every integer class;
+- compressed (`-v7`, the default) or not (`-v6`);
+- `S = load(f)`, `load(f, 'x', 'y')`, `save(f, 'x', '-append')` and
+  `save(f, '-struct', 's')`;
+- `-ascii` files both ways.
+
+MAT-files store arrays column-major, which is the C order of Sagebrush's
+reversed-axes arrays, so this boundary needs no transpose. Tests pin it in
+both directions:
+- **test_matfile** loads a file Octave wrote (matlab-tests/data/octave.mat,
+  from make_octave_mat.m);
+- **test_matfile_sagebrush** reads data/sagebrush.mat, which Sagebrush writes
+  during `--regen`, and its expected output is Octave's reading of the same
+  file.
+
+Not supported: MATLAB 7.3 (HDF5) files and objects (strings are saved as
+char arrays, with a warning). Sparse matrices are read as full ones.
+
+## MATLAB's documentation as a test
+
+MathWorks' PDF documentation for R2026b (the Function Reference: 21,120
+pages, 2,313 functions) holds 8,252 examples with the output MATLAB printed.
+It is not in this repository. In the PDF, the code is black DejaVuSansMono
+9pt, the output is the same font in gray (808080), and example titles are
+bold. So /scratch/mwdoc/extract_examples.py (PyMuPDF, outside the repository)
+separates code from output exactly, and writes examples.jsonl.
+
+- `python3 matlab-tests/docs.py [-j N] [function ...]` runs each example
+  under `SAGEBRUSH_MATLAB_DISPLAY=doc`, the documentation's layout (`x =
+  1×3` and the values, as the Live Editor writes them).
+- It compares every step's output token by token, since whitespace in a PDF
+  is not MATLAB's. The Live Editor's `10^3 ×` is compared as `1.0e+03 *`, and
+  `1×3 string` as `string array`.
+- It reports pass, diff, missing (a function Sagebrush lacks), error and
+  skipped (examples with figures).
+
+Run 2 (October 13):
+- 825 of the 5,532 examples without figures pass;
+- of the 1,139 examples of functions Sagebrush has, 658 pass;
+- the rest need tables, `datetime`, classes, files, or graphics: 2,720
+  examples draw figures.
+
+The examples settled several display rules:
+- a matrix's scale factor below 1 is $10^{\lceil \log_{10} m \rceil}$, so
+  the largest element shows as 0.xxxx;
+- a complex number's imaginary part has a field at least 7 wide
+  (`-5.3000 +10.9000i`), and $-0$ prints with `+`;
+- cells pad inside their braces (`{1×2 cell }`) and show short double rows
+  inline (`{[2.6000 4.7000 3.9000]}`);
+- N-D arrays print page by page (`A(:,:,1) =`).
+
+They also settled several function rules:
+- set functions return the first occurrence's index (as since R2013a, and
+  the last with `'legacy'`), with C oriented as each function's page says;
+- `func2str(@cos)` is `'cos'`;
+- a real times a complex number keeps a zero part zero (`NaN*1i` is
+  $0 + \mathrm{NaN}\,i$).
+
+Still to match: `randn` (MATLAB's ziggurat on the twister is not numpy's),
+eigenvector signs (LAPACK's), and `uint64` beyond $2^{53}$.
+
 ## Testing
 
 - **matlab-tests/** (`python3 matlab-tests/run.py [-v] [name]`): each
@@ -234,7 +317,6 @@ time, and `str2func` of an anonymous function's text is not supported.
 ## Not yet
 
 - plotting (`plot` and friends, onto Sagebrush's matplotlib);
-- `.mat` files (`load`/`save`, over lib/scipy/io/matlab.py);
 - MATLAB as a notebook and board language (it works from the CLI only);
 - `eval`;
 - `classdef` and nested functions;

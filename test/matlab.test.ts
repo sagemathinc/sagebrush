@@ -118,3 +118,33 @@ test("the CLI runs a .m file as Magma or as MATLAB, as looksLikeMagma says; --ma
   assert.equal(run("c.m", "fprintf('%d\\n', 6 * 7);\n", "--matlab"), "42\n");
   assert.equal(run("d.mag", "print 6 * 7;\n"), "42\n");
 });
+
+test("name=value arguments are \"name\", value", () => {
+  assert.match(py("plot(x, y, LineWidth=2)"), /_m\.Str\("LineWidth"\), 2\.0/);
+  // (an assignment inside parentheses is never name=value: x(1) = 2 is assignment)
+  assert.doesNotMatch(py("x = 1; x(1) = 2;"), /_m\.Str/);
+});
+
+test("arguments blocks: defaults, conversions, validators, name-value options", () => {
+  const code = py(`function r = f(a, b, opts)
+  arguments
+    a double
+    b (1,:) {mustBeNumeric} = [1 2]
+    opts.Scale (1,1) double {mustBePositive} = 1
+  end
+  r = a;
+end`);
+  assert.match(code, /_m\.split_nv\(_a, 2, \["Scale"\]\)/);
+  assert.match(code, /if isinstance\(b, _m\.Undef\): b = _m\.hcat\(\[1\.0, 2\.0\]\)/);
+  assert.match(code, /_m\.arg_check\(a, None, "double", 1\)/);
+  assert.match(code, /_m\.arg_check\(b, \[1, None\], None, 2\)/);
+  assert.match(code, /_m\.validate\(lambda: _m\.call\(_m\.fn\("mustBePositive"\), \[_t\], 0\), "Scale"\)/);
+  // (no command syntax inside the block: `a double` is a declaration)
+  assert.doesNotMatch(code, /_m\.Char\("double"\)/);
+});
+
+test("hex and binary literals are integers (0x87u32, 0b101)", () => {
+  assert.match(py("x = 0x87u32;"), /_m\.intlit\("87", 16, "uint32"\)/);
+  assert.match(py("x = 0b101;"), /_m\.intlit\("101", 2, ""\)/);
+  assert.match(py("x = 0xFFs8;"), /_m\.intlit\("FF", 16, "int8"\)/);
+});

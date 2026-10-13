@@ -1,0 +1,10 @@
+double 2x3 [1 2 3;4 5 6]
+double 2x3x2 [1 3 5 7 9 11;2 4 6 8 10 12]
+int8 2x2 [-5 100;7 -128]
+single 2x1 [1.5;-2.25]
+logical 2x3 [true false true;false false true]
+char 2x3 ['abc';'def']
+double 2x2 [1+2i -0-3.5i;4+0i 0+0i]
+cell 2x2 {double 1x1 1, double 1x3 [1 2 3], char 1x3 ['two'], cell 1x2 {double 1x1 4, char 1x4 ['five']}}
+struct 1x2 [struct {name=char 1x3 ['Ada'], v=double 1x2 [1 2]}; struct {name=char 1x3 ['Bob'], v=double 1x1 3}]
+double 0x0 []

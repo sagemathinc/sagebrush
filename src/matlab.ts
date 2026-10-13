@@ -55,6 +55,7 @@ export function lex(src: string): Tok[] {
   let sp = false;
   const stack: string[] = []; // open brackets
   let stmtStart = true;
+  let argBlock = false; // inside an arguments block (no command syntax: `a double`)
   const col = () => i - lineStart + 1;
   const push = (t: TokT, v: string, L: number, C: number, extra: Partial<Tok> = {}) => {
     out.push({ t, v, line: L, col: C, sp, ...extra });
@@ -152,10 +153,16 @@ export function lex(src: string): Tok[] {
     }
     if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(src[i + 1] ?? ""))) {
       let j = i;
-      if (c === "0" && (src[i + 1] === "x" || src[i + 1] === "X") && /[0-9a-fA-F]/.test(src[i + 2] ?? "")) {
+      // 0x87, 0b1011, with a type suffix (0x87u32, 0b1s8): integers (R2019b)
+      const radix = c === "0" ? ({ x: 16, X: 16, b: 2, B: 2 } as Record<string, number>)[src[i + 1]] : undefined;
+      if (radix && (radix === 16 ? /[0-9a-fA-F]/ : /[01]/).test(src[i + 2] ?? "")) {
         j = i + 2;
-        while (j < n && /[0-9a-fA-F]/.test(src[j])) j++;
-        push("num", String(parseInt(src.slice(i + 2, j), 16)), L, C);
+        while (j < n && (radix === 16 ? /[0-9a-fA-F]/ : /[01]/).test(src[j])) j++;
+        const digits = src.slice(i + 2, j);
+        const m = /^(u8|u16|u32|u64|s8|s16|s32|s64)(?![A-Za-z0-9_])/.exec(src.slice(j));
+        const suffix = m ? m[1] : "";
+        if (m) j += suffix.length;
+        push("num", `int:${radix}:${digits}:${suffix}`, L, C);
         i = j;
         continue;
       }
@@ -183,12 +190,19 @@ export function lex(src: string): Tok[] {
       while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
       const w = src.slice(i, j);
       if (KEYWORDS.has(w)) {
+        if (w === "end" && argBlock && stmtStart) argBlock = false;
         push("kw", OCTAVE_ENDS.has(w) ? "end" : w, L, C);
         i = j;
         continue;
       }
+      if (w === "arguments" && stmtStart && /^[ \t]*(\(|\r?\n|%|$)/.test(src.slice(j, j + 200))) {
+        argBlock = true;
+        push("id", w, L, C);
+        i = j;
+        continue;
+      }
       // command syntax: `format long`, `hold on`, `disp hello`, `save f -ascii`
-      if (stmtStart && !stack.length && (src[j] === " " || src[j] === "\t")) {
+      if (stmtStart && !argBlock && !stack.length && (src[j] === " " || src[j] === "\t")) {
         let k = j;
         while (src[k] === " " || src[k] === "\t") k++;
         const d = src[k] ?? "";
@@ -275,7 +289,10 @@ type Stmt = { line: number; col: number } & (
   | { k: "cmd"; name: string; args: string[]; print: boolean }
 );
 
-interface FuncDef { name: string; params: string[]; outs: string[]; body: Stmt[]; line: number }
+interface FuncDef { name: string; params: string[]; outs: string[]; body: Stmt[]; line: number; args: ArgEntry[] }
+
+/** an entry of an `arguments` block: x (1,:) double {mustBeNumeric} = 0, or opts.Name ... */
+interface ArgEntry { name: string; field: string | null; dims: (number | null)[] | null; cls: string | null; validators: Expr[]; dflt: Expr | null; line: number }
 
 // ------------------------------------------------------------------ parser
 
@@ -534,15 +551,83 @@ class Parser {
       this.next();
     }
     const body: Stmt[] = [];
+    const args: ArgEntry[] = [];
     while (true) {
       this.skipSeps();
       const t = this.peek();
       if (t.t === "eof") break;
       if (this.at("function")) break; // the next function (files without `end`)
       if (this.at("end")) { this.next(); break; }
+      if (!body.length && this.atArgumentsBlock()) { this.argumentsBlock(args); continue; }
       body.push(...this.statementAndSep());
     }
-    return { name, params, outs, body, line: ft.line };
+    return { name, params, outs, body, line: ft.line, args };
+  }
+
+  /** `arguments` (or `arguments (Input)`) starting a line: a validation block */
+  atArgumentsBlock() {
+    const t = this.peek(), u = this.peek(1);
+    return t.t === "id" && t.v === "arguments" && (u.t === "nl" || (u.t === "op" && u.v === "(" && u.line === t.line) || (u.t === "op" && u.v === ";"));
+  }
+
+  /** an arguments block's entries (Output blocks are skipped; Repeating is not supported) */
+  argumentsBlock(out: ArgEntry[]) {
+    const kw = this.next();
+    const attrs: string[] = [];
+    if (this.eat("(")) {
+      while (!this.at(")")) {
+        const a = this.next();
+        if (a.t === "eof") this.fail("expected ')'");
+        if (a.t === "id") attrs.push(a.v);
+      }
+      this.next();
+    }
+    if (attrs.includes("Repeating")) this.fail("Repeating arguments blocks are not supported yet", kw);
+    const output = attrs.includes("Output");
+    while (true) {
+      this.skipSeps();
+      if (this.at("end")) { this.next(); return; }
+      const t = this.peek();
+      if (t.t === "eof") this.fail("expected 'end' to close the arguments block");
+      const name = this.ident();
+      let field: string | null = null;
+      if (this.at(".") && this.peek(1).t === "id") { this.next(); field = this.next().v; }
+      let dims: (number | null)[] | null = null;
+      if (this.at("(") && this.peek().line === t.line) {
+        this.next();
+        dims = [];
+        while (!this.at(")")) {
+          if (this.eat(",")) continue;
+          const d = this.next();
+          if (d.t === "num") dims.push(Number(d.v));
+          else if (d.t === "op" && d.v === ":") dims.push(null);
+          else this.fail("expected a size", d);
+        }
+        this.next();
+      }
+      let cls: string | null = null;
+      if (this.peek().t === "id" && this.peek().line === t.line) {
+        cls = this.next().v;
+        while (this.at(".") && this.peek(1).t === "id") { this.next(); cls += "." + this.next().v; }
+      }
+      const validators: Expr[] = [];
+      if (this.at("{") && this.peek().line === t.line) {
+        this.next();
+        this.mat.push(false);
+        try {
+          while (!this.at("}")) {
+            if (this.eat(",")) continue;
+            validators.push(this.postfixExpr());
+          }
+        } finally {
+          this.mat.pop();
+        }
+        this.next();
+      }
+      let dflt: Expr | null = null;
+      if (this.eat("=")) dflt = this.expr();
+      if (!output) out.push({ name, field, dims, cls, validators, dflt, line: t.line });
+    }
   }
 
   // -------- expressions
@@ -682,7 +767,13 @@ class Parser {
           while (this.peek().t === "nl") this.next();
           frame.cur = args.length;
           if (this.at(":") && this.colonEnds(1)) { this.next(); args.push({ k: "colon" }); }
-          else args.push(this.expr());
+          else if (close === ")" && this.peek().t === "id" && this.at("=", 1)) {
+            // name=value (R2021a): the same as "name", value
+            args.push({ k: "str", v: this.next().v, dq: true });
+            this.next();
+            frame.cur = args.length;
+            args.push(this.expr());
+          } else args.push(this.expr());
           while (this.peek().t === "nl") this.next();
         } while (this.eat(","));
       }
@@ -891,11 +982,19 @@ class Emitter {
   funcDef(f: FuncDef) {
     const py = pyName(f.name);
     const varargin = f.params[f.params.length - 1] === "varargin";
-    const params = varargin ? f.params.slice(0, -1) : f.params;
+    let params = varargin ? f.params.slice(0, -1) : f.params;
     const varargout = f.outs[f.outs.length - 1] === "varargout";
     const scope: Scope = { fn: f, vars: new Set(), globals: new Set(), persistents: new Set() };
     this.emit(`def ${py}(_nargout, *_a):`);
     this.indent(() => {
+      // name-value arguments (opts.Name in an arguments block): the trailing pairs
+      const nvParams = [...new Set(f.args.filter((a) => a.field).map((a) => a.name))];
+      if (nvParams.length) {
+        const names = f.args.filter((a) => a.field).map((a) => a.field!);
+        const npos = params.length - nvParams.length;
+        this.emit(`_a, _nv = _m.split_nv(_a, ${npos}, ${JSON.stringify(names)})`);
+        params = params.filter((p) => !nvParams.includes(p));
+      }
       const ps = params.map((p, k) => (p === "~" ? `_unused${k}` : pyName(p)));
       const names = JSON.stringify(params);
       if (params.length) this.emit(`${ps.join(", ")}${ps.length === 1 ? "," : ""} = _m.inargs(_a, ${names}, ${varargin ? "True" : "False"}, ${JSON.stringify(f.name)})`);
@@ -914,12 +1013,72 @@ class Emitter {
       for (const o of f.outs) scope.vars.add(o);
       this.emit(`_L = ${f.line}`);
       this.emit("try:");
-      this.indent(() => this.stmts(f.body, scope));
+      this.indent(() => {
+        this.argumentChecks(f, scope);
+        this.stmts(f.body, scope);
+      });
       this.emit("except BaseException as _e:");
       this.indent(() => this.emit(`raise _m.trace(_e, ${JSON.stringify(f.name)}, _L)`));
       this.emit(`return ${this.retExpr(f)}`);
     });
     this.emit(`${py} = _m.Function(${py}, ${JSON.stringify(f.name)}, ${f.params.length}, ${f.outs.length}, ${varargin ? "True" : "False"}, ${varargout ? "True" : "False"})`);
+  }
+
+  /** an arguments block's defaults, conversions and validations, in order */
+  argumentChecks(f: FuncDef, scope: Scope) {
+    const nv = new Map<string, ArgEntry[]>();
+    let pos = 0;
+    for (const a of f.args) {
+      if (a.field) {
+        if (!nv.has(a.name)) nv.set(a.name, []);
+        nv.get(a.name)!.push(a);
+        continue;
+      }
+      pos = f.params.indexOf(a.name) + 1;
+      const v = pyName(a.name);
+      this.emit(`_L = ${a.line}`);
+      if (a.dflt) this.emit(`if isinstance(${v}, _m.Undef): ${v} = ${this.valueExpr(a.dflt, scope)}`);
+      this.emitArgCheck(v, a, `${pos}`, scope);
+    }
+    for (const [name, entries] of nv) {
+      const v = pyName(name);
+      scope.vars.add(name);
+      // defaults first, then the caller's values (each converted and validated)
+      this.emit(`${v} = _m.Struct([{}], (1, 1), [])`);
+      for (const a of entries) {
+        this.emit(`_L = ${a.line}`);
+        const fld = JSON.stringify(a.field);
+        this.emit(`if _m.nv_has(_nv, ${fld}):`);
+        this.indent(() => this.emit(`${v} = _m.assign(${v}, [("f", ${fld})], _m.nv_get(_nv, ${fld}))`));
+        if (a.dflt) {
+          this.emit("else:");
+          this.indent(() => this.emit(`${v} = _m.assign(${v}, [("f", ${fld})], ${this.valueExpr(a.dflt!, scope)})`));
+        }
+        this.emit(`if ${fld} in ${v}.fields:`);
+        this.indent(() => {
+          this.emit(`_t = _m.field(${v}, ${fld})`);
+          this.emitArgCheck("_t", a, JSON.stringify(a.field), scope);
+          this.emit(`${v} = _m.assign(${v}, [("f", ${fld})], _t)`);
+        });
+      }
+    }
+  }
+
+  emitArgCheck(v: string, a: ArgEntry, pos: string, scope: Scope) {
+    if (a.dims || a.cls) {
+      const dims = a.dims ? `[${a.dims.map((d) => (d === null ? "None" : `${d}`)).join(", ")}]` : "None";
+      this.emit(`if not isinstance(${v}, _m.Undef): ${v} = _m.arg_check(${v}, ${dims}, ${a.cls ? JSON.stringify(a.cls) : "None"}, ${pos})`);
+    }
+    for (const val of a.validators) {
+      // a validator named alone gets the value; a call names its arguments
+      let call: string;
+      if (val.k === "id") call = `_m.call(${this.lookup(val.name, scope)}, [${v}], 0)`;
+      else if (val.k === "index" && !val.brace && val.e.k === "id") {
+        const ve = { ...val } as any;
+        call = this.indexExpr(ve, scope, "0");
+      } else call = this.expr(val, scope);
+      this.emit(`if not isinstance(${v}, _m.Undef): _m.validate(lambda: ${call}, ${pos})`);
+    }
   }
 
   retExpr(f: FuncDef) {
@@ -1049,6 +1208,10 @@ class Emitter {
       else this.emit(pyName(e.name));
       return;
     }
+    if (e.k === "id" && WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) {
+      // (whos, clear, ... alone: they see the workspace)
+      e = { k: "index", e, brace: false, args: [], frame: { code: "", n: 0, cur: 0 } };
+    }
     const t = this.fresh();
     if (e.k === "id" && !this.fnNames.has(e.name) && !scope.fn) {
       // a variable of the workspace, or a function called with no arguments
@@ -1155,6 +1318,7 @@ class Emitter {
         if (this.isVar(e.name, scope)) return pyName(e.name);
         if (e.name === "nargin" && scope.fn) return "_m.nargs(_a)";
         if (e.name === "nargout" && scope.fn) return "_m.nargs(_nargout)";
+        if (WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) return `_m.ws_call(${JSON.stringify(e.name)}, ${scope.fn ? "locals()" : "globals()"}, [], 1)`;
         return `_m.val(${this.lookup(e.name, scope)})`;
       }
       case "end": return `_m.end(${e.frame.code}, ${e.pos}, ${e.frame.n})`;
@@ -1179,8 +1343,12 @@ class Emitter {
           return `_m.brace(${base}, ${this.argList(e.args, scope)})`;
         }
         return this.indexExpr(e, scope, "1");
-      case "field": return `_m.field(${this.expr(e.e, scope)}, ${JSON.stringify(e.name)})`;
-      case "dynfield": return `_m.field(${this.expr(e.e, scope)}, _m.fieldname(${this.expr(e.name, scope)}))`;
+      case "field": {
+        const f = `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
+        // (a class's static method named alone is called: uint8.empty)
+        return e.e.k === "id" && !this.isVar(e.e.name, scope) ? `_m.val(${f})` : f;
+      }
+      case "dynfield": return `_m.field(${this.fieldBase(e.e, scope)}, _m.fieldname(${this.expr(e.name, scope)}))`;
       case "matrix": {
         const rows = e.rows.map((r) => this.argList(r, scope));
         if (e.cell) return `_m.cell_lit([${rows.join(", ")}])`;
@@ -1196,6 +1364,13 @@ class Emitter {
     }
   }
 
+  /** what `.name` applies to: a name that is not a variable is the function
+   * itself (uint8.empty, a class's static method; or f.x, f called first) */
+  fieldBase(e: Expr, scope: Scope): string {
+    if (e.k === "id" && !this.isVar(e.name, scope) && !(scope.caps?.has(e.name)) && !(scope.fn && (e.name === "nargin" || e.name === "nargout"))) return this.lookup(e.name, scope);
+    return this.expr(e, scope);
+  }
+
   /** x(args): indexing a variable, or calling a function, with nargout */
   indexExpr(e: Extract<Expr, { k: "index" }>, scope: Scope, nargout: string): string {
     let base: string;
@@ -1209,6 +1384,7 @@ class Emitter {
       }
       base = this.lookup(f.name, scope);
     } else if (f.k === "id" && scope.caps?.has(f.name)) base = `_m.capf(${pyName(f.name)}, ${JSON.stringify(f.name)})`;
+    else if (f.k === "field" && f.e.k === "id" && !this.isVar(f.e.name, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
     else base = this.expr(f, scope);
     e.frame.code = base;
     return `_m.paren(${base}, ${this.argList(e.args, scope)}, ${nargout})`;
@@ -1230,8 +1406,8 @@ class Emitter {
       a.frame.code = base;
       return `_m.brace_cs(${base}, ${this.argList(a.args, scope)})`;
     }
-    if (a.k === "field") return `_m.field_cs(${this.expr(a.e, scope)}, ${JSON.stringify(a.name)})`;
-    if (a.k === "dynfield") return `_m.field_cs(${this.expr(a.e, scope)}, _m.fieldname(${this.expr(a.name, scope)}))`;
+    if (a.k === "field") return `_m.field_cs(${this.fieldBase(a.e, scope)}, ${JSON.stringify(a.name)})`;
+    if (a.k === "dynfield") return `_m.field_cs(${this.fieldBase(a.e, scope)}, _m.fieldname(${this.expr(a.name, scope)}))`;
     return `[${this.expr(a, scope)}]`;
   }
 
@@ -1281,6 +1457,12 @@ function freeNames(e: Expr, out: Set<string>) {
 }
 
 function numLit(v: string): string {
+  if (v.startsWith("int:")) {
+    // (a hex or binary literal: the smallest unsigned type that holds it, or its suffix's type)
+    const [, radix, digits, suffix] = v.split(":");
+    const cls = suffix ? (suffix[0] === "u" ? "uint" : "int") + suffix.slice(1) : "";
+    return `_m.intlit(${JSON.stringify(digits)}, ${radix}, ${JSON.stringify(cls)})`;
+  }
   let imag = false;
   if (v.endsWith("i")) { imag = true; v = v.slice(0, -1); }
   if (v.startsWith(".")) v = "0" + v;
