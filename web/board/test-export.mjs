@@ -1,8 +1,11 @@
 // Download as HTML (web/board/export.ts): each board exported from the
 // site opens from a file, offline (the network off), with its pages, math
 // (KaTeX's fonts inline) and printing; exported again from that file, it is
-// the same file.  A board with code says, in the file, that its code doesn't
-// run there; the menu doesn't promise that the file works offline.  Serve web/dist first (python3 web/serve.py 8765), then
+// the same file.  A board with code, offline and without Python in it,
+// asks the network only for its engine, and says why its code can't run
+// (test-offline.mjs: the engine in files).  Its scripts have nothing in
+// them that would end them early.  Serve web/dist first (python3
+// web/serve.py 8765), then
 //   node web/board/test-export.mjs [doc.json ...]
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -41,6 +44,10 @@ try {
     const html = await ev("window.sagebrush.board.exportHtml()");
     const s0 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, math: JSON.stringify(s.doc).includes('$'), code: JSON.stringify(s.doc).includes('\"code\":') }; })()");
     check(!/offline/i.test(await ev("document.querySelector('[data-sbb=html]').textContent")), `${doc}: the menu says the file works offline`);
+    // (its scripts: nothing in them ends them early, and no "<!--", after which
+    // a "<script" in them would keep the page from loading)
+    const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    check(scripts.length >= 3 && scripts.every((t) => !/<!--|<\/script/i.test(t)), `${doc}: a script in the file has "<!--" or "</script" in it`);
     const file = join(dir, doc.split("/").pop().replace(/\.\w+$/, "") + ".html");
     writeFileSync(file, html);
     // the file, offline (after a blank page: no request of the site's page,
@@ -56,9 +63,9 @@ try {
     const s1 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, title: document.title }; })()");
     check(s1.pages === s0.pages && s1.items === s0.items, `${doc}: the file shows ${s1.items} items on ${s1.pages} pages, not ${s0.items} on ${s0.pages}`);
     check(!(await ev("document.querySelector('[data-sbb=examples]').hidden === false")), `${doc}: Examples shown in the file`);
-    // code: shown, not run, and the file says so (only when there is code)
-    const said = await ev("!document.querySelector('[data-sbb=tour]').hidden && /doesn't run/.test(document.querySelector('[data-sbb=say]').textContent)");
-    check(said === s0.code, s0.code ? `${doc}: the file doesn't say its code doesn't run` : `${doc}: the file says code doesn't run, with no code`);
+    // code, offline, without Python in the file: it says why it can't run (only when there is code)
+    const said = await until("!document.querySelector('[data-sbb=tour]').hidden && /can't run here/.test(document.querySelector('[data-sbb=say]').textContent)", s0.code ? 20000 : 1500).then(() => true, () => false);
+    check(said === s0.code, s0.code ? `${doc}: offline, the file doesn't say why its code can't run` : `${doc}: the file says code can't run, with no code`);
     // math, typeset with KaTeX's own fonts (inline)
     if (s0.math) {
       const id = await ev("(() => { const d = window.sagebrush.board.snapshot(); const p = d.doc.pages ? d.doc.pages[d.page] : d.doc; const walk = (ns) => { for (const n of ns) { if (n.kind === 'group') { const r = walk(n.children); if (r) return r; } else if (/\\$/.test((n.text ?? '') + (n.detail ?? ''))) return n.id; } }; return walk(p.nodes); })()");
@@ -84,8 +91,10 @@ try {
     // exported again, from the file: the same file
     const again = await ev("window.sagebrush.board.exportHtml()");
     check(again === html, `${doc}: exported again from the file, ${again.length} bytes, not the same ${html.length}`);
-    check(!requests.length, `${doc}: the file asked the network for ${requests.slice(0, 3).join(", ")}`);
-    check(!errors.length, `${doc}: errors in the file: ${errors.slice(0, 3).join(" | ")}`);
+    // (but for its engine, with code: offline, those fail)
+    const engine = /\/engine\/[0-9a-f]{20}\//;
+    check(!requests.filter((u) => !(s0.code && engine.test(u))).length, `${doc}: the file asked the network for ${requests.slice(0, 3).join(", ")}`);
+    check(!errors.filter((e) => !(s0.code && engine.test(e))).length, `${doc}: errors in the file: ${errors.slice(0, 3).join(" | ")}`);
     console.log(`${doc}: ${(html.length / 1024).toFixed(0)} KB, ${s1.items} items, ${s1.pages} page(s), ${sheets} sheet(s)`);
   }
 } catch (e) {

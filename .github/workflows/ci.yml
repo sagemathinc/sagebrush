@@ -80,6 +80,7 @@ jobs:
           CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/source.json
           CHROME=google-chrome NO_EDIT=1 node web/test-board.mjs examples/integers.json
           CHROME=google-chrome node web/board/test-export.mjs
+          CHROME=google-chrome node web/board/test-offline.mjs
           CHROME=google-chrome node web/board/test-code.mjs
           CHROME=google-chrome node web/board/test-images.mjs
           CHROME=google-chrome node web/board/test-mobile.mjs
