@@ -678,7 +678,7 @@ const analyzer = {
   },
   ask(msg) {
     if (!analyzeWorker) {
-      analyzeWorker = new Worker(new URL("sagebrush-analyze.js", location.href), { type: "module" });
+      analyzeWorker = new Worker(new URL("sagebrush-analyze.js", location.href));
       analyzeWorker.onmessage = (ev) => { const f = analyzeWaiting.get(ev.data.id); analyzeWaiting.delete(ev.data.id); f?.(ev.data); };
       // (a failed analyzer: what waits gets an error, never nothing, and the next request starts a new one)
       analyzeWorker.onerror = (e) => {

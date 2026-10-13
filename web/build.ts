@@ -3,7 +3,7 @@
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
 // web/shims, the Python library is embedded, the Unicode name table is not.
 import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const here = import.meta.dir;
 const shims: Record<string, string> = {
@@ -78,7 +78,9 @@ const analyzeResult = await Bun.build(<any>{
   outdir: join(here, "dist"),
   naming: "sagebrush-analyze.js",
   target: "browser",
-  format: "esm",
+  // (a classic worker: a module worker can't start from a blob: in a file,
+  // which is how an exported board's engine runs; it has no imports anyway)
+  format: "iife",
   minify: true,
   plugins: [{ name: "unames", setup(build) { build.onResolve({ filter: /unames\.gen$/ }, () => ({ path: join(here, "shims", "unames.ts") })); } }],
 });
@@ -273,6 +275,38 @@ copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.ht
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
 for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
+// The engine, by its content (design/engines.md): what runs code, published
+// at sagebrush.space/engine/<id>/ and kept forever (scripts/publish-engine.mjs),
+// so that a board or notebook saved with one can keep running with it (an
+// exported HTML file pins its id).  <id> is a hash of the files' hashes; each
+// file's response headers are in the manifest, which the site's Worker
+// serves them with.  `api` is the version of the interface between a page
+// and these files (WorkerKernel, RunnerWorker, the worker's messages): a page
+// uses another engine only if its api is the same.
+const ENGINE_API = 1;
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html"];
+{
+  const { runnerPolicy } = await import("./csp-policy.mts");
+  const sha = (b: Uint8Array | string) => new Bun.CryptoHasher("sha256").update(b).digest("hex");
+  const files: Record<string, { sha256: string; size: number; headers: Record<string, string> }> = {};
+  for (const f of ENGINE_FILES) {
+    const bytes = readFileSync(join(here, "dist", f));
+    const headers: Record<string, string> = { "Content-Type": MIME[f.split(".").pop()!] };
+    if (f.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": runnerPolicy(scriptHashes(bytes.toString("utf8"))), "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Opener-Policy": "same-origin" });
+    files[f] = { sha256: sha(bytes), size: bytes.length, headers };
+  }
+  const id = sha(JSON.stringify(Object.entries(files).map(([f, d]) => [f, d.sha256]))).slice(0, 20);
+  rmSync(join(here, "dist", "engine"), { recursive: true, force: true });
+  for (const f of ENGINE_FILES) {
+    mkdirSync(dirname(join(here, "dist", "engine", id, f)), { recursive: true });
+    copyFileSync(join(here, "dist", f), join(here, "dist", "engine", id, f));
+  }
+  writeFileSync(join(here, "dist", "engine", id, "manifest.json"), JSON.stringify({ format: "sagebrush-engine", id, api: ENGINE_API, files }, null, 1) + "\n");
+  writeFileSync(join(here, "dist", "engine", "latest.json"), JSON.stringify({ id, api: ENGINE_API }) + "\n");
+  mkdirSync(join(here, "site", "public", "engine"), { recursive: true });
+  copyFileSync(join(here, "dist", "engine", "latest.json"), join(here, "site", "public", "engine", "latest.json"));
+  console.log(`engine ${id} (api ${ENGINE_API}): web/dist/engine/${id}/`);
+}
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");
 // every page's Content-Security-Policy, in _headers (web/csp.ts)
