@@ -103,13 +103,18 @@ const putPage = (init) => ev(`(async () => {
 // (the service worker looked at the rewritten entry, refused it and dropped it)
 const pageDropped = () => ev(`(async () => { const name = (await caches.keys()).find((k) => k.startsWith("sagebrush-")); const c = await caches.open(name); return !(await c.keys()).some((r) => new URL(r.url).pathname === "/"); })()`);
 async function openTab(path) {
-  await send("Network.clearBrowserCache");
-  const t = await (await fetch(`http://127.0.0.1:9342/json/new?${url}${path.replace(/^\//, "")}`, { method: "PUT" })).json();
+  // (opened blank, its HTTP cache off, then sent to the page: so nothing but
+  // the service worker can answer; sagebrush-daybreak's suggestion)
+  const t = await (await fetch("http://127.0.0.1:9342/json/new?about:blank", { method: "PUT" })).json();
   const tws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((r) => (tws.onopen = r));
   let k = 0; const w = new Map();
   tws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w.has(m.id)) { w.get(m.id)(m.result ?? m.error); w.delete(m.id); } };
   const tsend = (method, params = {}) => new Promise((r) => { const id = ++k; w.set(id, r); tws.send(JSON.stringify({ id, method, params })); });
+  await tsend("Network.enable");
+  await tsend("Network.setCacheDisabled", { cacheDisabled: true });
+  await tsend("Network.clearBrowserCache");
+  await tsend("Page.navigate", { url: url + path.replace(/^\//, "") });
   await sleep(2500);
   const r = (await tsend("Runtime.evaluate", { expression: "({ path: location.pathname, href: location.href, loaded: !!document.querySelector('#status'), isolated: self.crossOriginIsolated })", returnByValue: true })).result?.value ?? {};
   // (where it went, even to an error page: a followed redirect shows here)
