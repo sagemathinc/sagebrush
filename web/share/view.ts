@@ -33,7 +33,7 @@ async function main() {
   const r = await fetch(`/api/share/c/${m[1]}${m[2] ? `?at=${m[2]}` : ""}`);
   if (!r.ok) return fail(r.status === 404 ? "This collection doesn't exist, or its owner deleted it." : `The collection could not be loaded (HTTP ${r.status}).`);
   const c = (await r.json()) as Shared;
-  const fileUrl = (f: File) => new URL(`/b/${f.sha256}`, c.files_origin).href;
+  const fileUrl = (f: File) => new URL(`/c/${c.id}/${f.sha256}`, c.files_origin).href;
 
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;

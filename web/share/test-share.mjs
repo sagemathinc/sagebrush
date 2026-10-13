@@ -148,47 +148,57 @@ async function upload(c, files, title = "T") {
 }
 
 // ---- uploading and reading
+const keyOf = async (account, h) => (await db.prepare("SELECT key FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(account, h).first())?.key ?? null;
+const stored = async (key) => !!key && !!(await bucket.head(key));
+const tick = async () => (await mf.getWorker()).scheduled({ cron: "17 3 * * *" });
+const fileAt = (col, h, init) => mf.dispatchFetch(`${FILES}/c/${col}/${h}`, init);
 const a = api((await signIn(A)).session);
 fake.limits.set(B, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
 const b = api((await signIn(B)).session);
 const data = Buffer.from("x,y\n1,2\n3,4\n");
 const nb = Buffer.from('{"cells": []}');
-let colA;
+let colA, keyA;
 {
   const bad = await a.put(`/api/share/blob/${sha(data)}`, Buffer.from("not the data"));
   ok(bad.status === 400, "R2 refuses bytes that don't match the hash");
-  ok(!(await bucket.head(`b/${sha(data)}`)), "nothing stored after a bad upload");
+  ok(!(await keyOf(A, sha(data))) && (await bucket.list({ prefix: "a/" })).objects.length === 0, "nothing stored after a bad upload");
   const { col, v } = await upload(a, [["data/points.csv", data], ["paper.ipynb", nb]], "Paper");
   colA = col;
+  keyA = await keyOf(A, sha(data));
   const vj = await v.json();
   ok(v.status === 201 && /^[0-9a-f]{64}$/.test(vj.version) && vj.url === `/s/${col}`, "a version is committed");
   const g = await (await fetchSite(`/api/share/c/${col}`)).json();
   ok(g.manifest.files.length === 2 && g.manifest.files[0].path === "data/points.csv" && g.manifest.collection === col && g.manifest.format === "sagebrush-collection" && g.manifest.license === "CC-BY-4.0", "anyone can read the manifest");
-  const text = await (await fetchSite(`/api/share/m/${vj.version}`)).text();
-  ok(sha(text) === vj.version, "a manifest's name is the SHA-256 of its bytes");
+  const mk = (await db.prepare("SELECT manifest_key FROM versions WHERE hash = ?1").bind(vj.version).first()).manifest_key;
+  ok(sha(await (await bucket.get(mk)).text()) === vj.version, "a version's name is the SHA-256 of its manifest's bytes");
   const at = await (await fetchSite(`/api/share/c/${col}?at=${vj.version.slice(0, 16)}`)).json();
   ok(at.version === vj.version, "a frozen link finds its version");
+  ok(keyA.startsWith("a/") && !keyA.includes(sha(data)) && !keyA.includes(A), "stored under the account's prefix, a random name (not the hash, not the account id)");
 
-  const f = await mf.dispatchFetch(`${FILES}/b/${sha(data)}`);
-  ok(f.status === 200 && Buffer.from(await f.arrayBuffer()).equals(data), "the files domain serves the file");
+  const f = await fileAt(col, sha(data));
+  ok(f.status === 200 && Buffer.from(await f.arrayBuffer()).equals(data), "the files domain serves a file of the collection");
   ok(f.headers.get("content-type") === "application/octet-stream" && /^attachment/.test(f.headers.get("content-disposition")) && f.headers.get("x-content-type-options") === "nosniff" && /sandbox/.test(f.headers.get("content-security-policy")), "served as a sandboxed attachment, never a page");
   ok(f.headers.get("access-control-allow-origin") === "*" && f.headers.get("cross-origin-resource-policy") === "cross-origin", "readable with CORS from an isolated page");
-  const part = await mf.dispatchFetch(`${FILES}/b/${sha(data)}`, { headers: { range: "bytes=4-6" } });
+  ok(/private/.test(f.headers.get("cache-control")), "kept by the browser only, never a shared cache");
+  const part = await fileAt(col, sha(data), { headers: { range: "bytes=4-6" } });
   ok(part.status === 206 && (await part.text()) === "1,2" && part.headers.get("content-range") === `bytes 4-6/${data.length}`, "range requests");
-  const bad416 = await mf.dispatchFetch(`${FILES}/b/${sha(data)}`, { headers: { range: "bytes=999-" } });
-  ok(bad416.status === 416, "an unsatisfiable range is 416");
-  ok((await mf.dispatchFetch(`${FILES}/x/${sha(data)}`)).status === 404 && (await mf.dispatchFetch(`${FILES}/b/${sha(data)}`, { method: "POST" })).status === 405, "nothing else on the files domain");
+  ok((await fileAt(col, sha(data), { headers: { range: "bytes=999-" } })).status === 416, "an unsatisfiable range is 416");
+  ok((await mf.dispatchFetch(`${FILES}/b/${sha(data)}`)).status === 404 && (await fileAt(col, sha(data), { method: "POST" })).status === 405, "nothing else on the files domain (no reading by hash alone)");
   const me = await (await a.get("/api/share/me")).json();
-  ok(me.usage === data.length + nb.length, "usage counts the files");
+  ok(me.usage > data.length + nb.length && me.usage < data.length + nb.length + 1000, "usage counts the files and the manifest: " + me.usage);
 }
 
-// ---- isolation between accounts
+// ---- isolation between accounts (SEC-243-5: a hash is not a capability)
 {
   const ck = await (await b.post("/api/share/check", { blobs: [{ sha256: sha(data), size: data.length }] })).json();
   ok(ck.missing.includes(sha(data)), "another account can't learn that a file exists (dedup is per account)");
   const col = await (await b.post("/api/share/collections", { title: "B" })).json();
   const v = await b.post(`/api/share/collections/${col.id}/versions`, { files: [{ path: "stolen.csv", sha256: sha(data), size: data.length }] });
   ok(v.status === 409, "an account can't reference a file it hasn't uploaded");
+  ok((await fileAt(col.id, sha(data))).status === 404, "nor read another collection's file through its own");
+  const secret = Buffer.from("low entropy secret: yes");
+  await a.put(`/api/share/blob/${sha(secret)}`, secret);
+  ok(!!(await keyOf(A, sha(secret))) && (await fileAt(colA, sha(secret))).status === 404, "an upload not in any version is not served, even through its owner's collection");
   const v2 = await b.post(`/api/share/collections/${colA}/versions`, { files: [{ path: "x", sha256: sha(data), size: data.length }] });
   ok(v2.status === 404, "an account can't add versions to someone else's collection");
   ok((await b.del(`/api/share/collections/${colA}`)).status === 404, "or delete it");
@@ -196,6 +206,17 @@ let colA;
   ok(x.status === 403, "a cross-site POST is refused");
   const y = await fetchSite("/api/share/collections", { method: "POST", headers: { cookie: (await signIn(B)).session, origin: SITE, "content-type": "text/plain" }, body: '{"title":"t"}' });
   ok(y.status === 415, "a form-encodable POST is refused");
+}
+
+// ---- the sign-in return path (SEC-243-7)
+for (const ret of ["/\t/evil.example/proof", "/\n/evil.example/", "/\r/evil.example/", " /x", "/\\evil.example", "//evil.example", "/%09/evil.example", "https://evil.example/", "/x\u0000"]) {
+  const { cb } = await signIn(A, { ret });
+  const loc = cb.headers.get("location");
+  ok(new URL(loc, SITE).origin === SITE && !/[\u0000-\u001f]/.test(loc), `return ${JSON.stringify(ret)} stays on the site: ${JSON.stringify(loc)}`);
+}
+{
+  const { cb } = await signIn(A, { ret: "/s/abc?x=1#y" });
+  ok(cb.headers.get("location") === "/s/abc?x=1#y", "an ordinary return path is kept");
 }
 
 // ---- validation and limits
@@ -211,6 +232,27 @@ let colA;
   ok(over.status === 413, "uploads over the storage limit are refused");
   const lie = await b.put(`/api/share/blob/${sha("6000")}`, Buffer.alloc(6000));
   ok(lie.status === 413, "a PUT over max_file_bytes is refused without check");
+  const stream = new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2, 3])); c.close(); } });
+  const nolen = await fetchSite(`/api/share/blob/${sha(Buffer.from([1, 2, 3]))}`, { method: "PUT", headers: { cookie: (await signIn(B)).session, origin: SITE }, body: stream, duplex: "half" });
+  ok(nolen.status === 411 || nolen.status === 200, "a PUT without a length is refused (or sized by the platform): " + nolen.status);
+}
+{
+  // SEC-243-1: concurrent uploads can't all pass one quota check
+  const Q = "55555555-5555-4555-8555-555555555555";
+  fake.limits.set(Q, { tier: "member", storage_bytes: 10, max_file_bytes: 100, private_links: false });
+  const q = api((await signIn(Q)).session);
+  const files = Array.from({ length: 8 }, (_, i) => Buffer.from(`file ${i}!`));
+  const rs = await Promise.all(files.map((f) => q.put(`/api/share/blob/${sha(f)}`, f)));
+  const accepted = rs.filter((r) => r.status === 200).length;
+  const used = (await (await q.get("/api/share/me")).json()).usage;
+  ok(accepted === 1 && used <= 10, `eight concurrent 8-byte uploads under a 10-byte limit: ${accepted} accepted, ${used} bytes used`);
+  // SEC-243-6: manifests are counted (a 0-byte file can't back unlimited metadata)
+  const empty = Buffer.alloc(0);
+  ok((await q.put(`/api/share/blob/${sha(empty)}`, empty)).status === 200, "a 0-byte file is uploaded");
+  const col = await (await q.post("/api/share/collections", { title: "M" })).json();
+  const many = Array.from({ length: 50 }, (_, i) => ({ path: `p${i}`, sha256: sha(empty), size: 0 }));
+  ok((await q.post(`/api/share/collections/${col.id}/versions`, { files: many })).status === 413, "a manifest over the storage limit is refused");
+  ok((await q.post(`/api/share/collections/${col.id}/versions`, { files: [{ path: "e", sha256: sha(empty), size: 0 }] })).status === 413, "even a small one, when the quota is used up");
 }
 {
   // CoCalc down: the cached limits hold; with nothing cached, no uploads
@@ -229,17 +271,43 @@ let colA;
   // B uploads the same bytes as A, for its own collection
   const shared = await upload(b, [["same.csv", data]], "B's copy");
   ok(shared.v.status === 201, "B uploads its own copy of the same file");
+  const keyB = await keyOf(B, sha(data));
+  ok(keyB && keyB !== keyA, "B's copy is its own object");
   // A starts another upload, not committed yet
   const pending = Buffer.from("pending upload");
   await a.put(`/api/share/blob/${sha(pending)}`, pending);
+  const keyNb = await keyOf(A, sha(nb)), keyPending = await keyOf(A, sha(pending));
   const d = await a.del(`/api/share/collections/${colA}`);
   ok(d.status === 200, "the owner deletes a collection");
-  ok((await fetchSite(`/api/share/c/${colA}`)).status === 404, "the collection's link is gone");
-  ok(!(await bucket.head(`b/${sha(nb)}`)), "a file nobody else holds is deleted from R2");
-  ok(!!(await bucket.head(`b/${sha(data)}`)), "a file B uploaded too stays (B's copy)");
-  ok(!!(await bucket.head(`b/${sha(pending)}`)), "A's upload for another collection is not touched");
+  ok((await fetchSite(`/api/share/c/${colA}`)).status === 404 && (await fileAt(colA, sha(data))).status === 404, "its link and files stop at once");
+  await tick();
+  ok(!(await stored(keyNb)) && !(await stored(keyA)), "its files are deleted from R2");
+  ok(await stored(keyB), "B's copy of the same bytes stays");
+  ok(await stored(keyPending), "A's upload for another collection is not touched");
   const vs = await db.prepare("SELECT COUNT(*) AS n FROM versions WHERE collection = ?").bind(colA).first();
-  ok(vs.n === 0, "its versions are gone from D1");
+  ok(vs.n === 0 && (await db.prepare("SELECT COUNT(*) AS n FROM r2_deletes").first()).n === 0, "its versions are gone from D1, and the outbox is empty");
+}
+{
+  // SEC-243-4: an object written to R2 whose D1 write never happened is found and deleted
+  const orphan = "a/0000000000000000000000000000orph/xyz";
+  await bucket.put(orphan, "orphan");
+  await db.prepare("INSERT INTO reservations (id, account_id, bytes, key, expires) VALUES ('r1', ?1, 6, ?2, 1)").bind(A, orphan).run();
+  // and an outbox row survives a failed delete until R2 confirms it
+  await db.prepare("INSERT INTO r2_deletes (key, created) VALUES ('a/0000000000000000000000000000orph/gone', 1)").run();
+  await tick();
+  ok(!(await stored(orphan)) && !(await db.prepare("SELECT 1 AS x FROM reservations WHERE id = 'r1'").first()), "an expired reservation's unreferenced object is deleted");
+  ok(!(await db.prepare("SELECT 1 AS x FROM r2_deletes").first()), "the outbox drains");
+}
+const sign = (ts, method, path, body) => "sha256=" + createHmac("sha256", PURGE_KEY).update(`${ts}\n${method}\n${path}\n${body}`).digest("hex");
+async function adminPurge(account_id, request_id) {
+  const body = JSON.stringify({ account_id, request_id });
+  const ts = Math.floor(Date.now() / 1000);
+  return fetchSite("/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "POST", "/api/admin/purge", body) }, body });
+}
+async function purgeStatus(rid) {
+  const ts = Math.floor(Date.now() / 1000);
+  const p = `/api/admin/purge/${rid}`;
+  return (await fetchSite(p, { headers: { "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "GET", p, "") } })).json();
 }
 {
   // the account-deletion purge, signed by CoCalc
@@ -248,50 +316,70 @@ let colA;
   const c = api((await signIn(C)).session);
   const mine = Buffer.from("only C has this");
   const { col } = await upload(c, [["c.txt", mine], ["same.csv", data]], "C");
+  const keyC = await keyOf(C, sha(mine));
   const body = JSON.stringify({ account_id: C, request_id: "9b2d6c1e-0000-4000-8000-000000000001" });
-  const sign = (ts, method, path, b) => "sha256=" + createHmac("sha256", PURGE_KEY).update(`${ts}\n${method}\n${path}\n${b}`).digest("hex");
   const ts = Math.floor(Date.now() / 1000);
   const post = (headers) => fetchSite("/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
   ok((await post({})).status === 401, "an unsigned purge is refused");
   ok((await post({ "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "POST", "/api/admin/purge", body + " ") })).status === 401, "a purge signed over other bytes is refused");
   ok((await post({ "x-sagebrush-timestamp": String(ts - 600), "x-sagebrush-signature": sign(ts - 600, "POST", "/api/admin/purge", body) })).status === 401, "an old signature is refused");
   ok((await post({ "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "GET", "/api/admin/purge", body) })).status === 401, "the signature binds the method");
-  const r = await post({ "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "POST", "/api/admin/purge", body) });
+  const r = await adminPurge(C, "9b2d6c1e-0000-4000-8000-000000000001");
   ok(r.status === 202 && (await r.json()).status === "accepted", "a signed purge is accepted");
   let st;
   for (let i = 0; i < 50; i++) {
-    const p = "/api/admin/purge/9b2d6c1e-0000-4000-8000-000000000001";
-    st = await (await fetchSite(p, { headers: { "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "GET", p, "") } })).json();
+    st = await purgeStatus("9b2d6c1e-0000-4000-8000-000000000001");
     if (st.status === "done") break;
     await new Promise((res) => setTimeout(res, 50));
   }
-  ok(st.status === "done" && st.collections === 1 && st.bytes === mine.length, "the purge finishes and says what it removed");
-  ok((await fetchSite(`/api/share/c/${col}`)).status === 404 && !(await bucket.head(`b/${sha(mine)}`)), "C's collection and files are gone");
-  ok(!!(await bucket.head(`b/${sha(data)}`)), "B's copy of a file C also had stays");
+  ok(st.status === "done" && st.collections === 1 && st.bytes > mine.length + data.length, "the purge finishes and says what it removed: " + JSON.stringify(st));
+  ok((await fetchSite(`/api/share/c/${col}`)).status === 404 && !(await stored(keyC)) && (await bucket.list({ prefix: keyC.slice(0, keyC.lastIndexOf("/") + 1) })).objects.length === 0, "C's collection and its whole prefix are gone");
+  ok(await stored(await keyOf(B, sha(data))), "B's copy of a file C also had stays");
   ok((await c.get("/api/share/me")).status === 401, "C's sessions are gone");
-  const again = await post({ "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "POST", "/api/admin/purge", body) });
-  ok(again.status === 202, "a retry with the same request_id is accepted again");
-  const none = JSON.stringify({ account_id: "44444444-4444-4444-8444-444444444444", request_id: "9b2d6c1e-0000-4000-8000-000000000002" });
-  const r0 = await fetchSite("/api/admin/purge", { method: "POST", headers: { "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": sign(ts, "POST", "/api/admin/purge", none) }, body: none });
-  ok(r0.status === 202, "a purge for an account with no data is a normal 202");
+  const left = await db.prepare("SELECT (SELECT COUNT(*) FROM accounts WHERE account_id = ?1) + (SELECT COUNT(*) FROM purges WHERE account_id = ?1) + (SELECT COUNT(*) FROM limits_cache WHERE account_id = ?1) AS n").bind(C).first();
+  ok(left.n === 0, "no row names C's account id any more (the purge record keeps a hash)");
+  const back = await signIn(C);
+  ok(back.cb.status === 403 && !back.session, "a deleted CoCalc account can't sign in again (a tombstone, by hash)");
+  ok((await adminPurge(C, "9b2d6c1e-0000-4000-8000-000000000001")).status === 202, "a retry with the same request_id is accepted again");
+  ok((await adminPurge(B, "9b2d6c1e-0000-4000-8000-000000000001")).status === 409, "the same request_id for another account is refused (SEC-243-8)");
+  ok((await adminPurge("44444444-4444-4444-8444-444444444444", "9b2d6c1e-0000-4000-8000-000000000002")).status === 202, "a purge for an account with no data is a normal 202");
+}
+{
+  // SEC-243-2: an account being deleted can't write, or sign in, until it is done
+  const W = "66666666-6666-4666-8666-666666666666";
+  fake.limits.set(W, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  const sw = (await signIn(W)).session;
+  const w = api(sw);
+  const f = Buffer.from("w's file");
+  await w.put(`/api/share/blob/${sha(f)}`, f);
+  const col = await (await w.post("/api/share/collections", { title: "W" })).json();
+  await db.prepare("UPDATE accounts SET deleting = 1 WHERE account_id = ?1").bind(W).run();
+  ok((await w.get("/api/share/me")).status === 401, "its sessions stop at once");
+  const { cb } = await signIn(W);
+  ok(cb.status === 403, "it can't sign in while being deleted");
+  const commit = await fetchSite(`/api/share/collections/${col.id}/versions`, { method: "POST", headers: { cookie: sw, origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ files: [{ path: "w", sha256: sha(f), size: f.length }] }) });
+  ok(commit.status === 401, "nor commit");
 }
 {
   // "Delete my shared data"
   const r = await b.post("/api/share/delete-everything", {});
   ok(r.status === 400, "delete-everything needs confirmation");
+  const keyB = await keyOf(B, sha(data));
   const r2 = await b.post("/api/share/delete-everything", { confirm: "delete" });
   ok(r2.status === 200, "delete-everything");
-  ok(!(await bucket.head(`b/${sha(data)}`)), "the last holder gone: the file is deleted");
+  await tick();
+  ok(!(await stored(keyB)), "B's files are deleted from R2");
   const left = await db.prepare("SELECT (SELECT COUNT(*) FROM collections WHERE owner = ?1) + (SELECT COUNT(*) FROM holdings WHERE account_id = ?1) + (SELECT COUNT(*) FROM sessions WHERE account_id = ?1) AS n").bind(B).first();
   ok(left.n === 0, "nothing of B's is left in D1");
+  const again = await signIn(B);
+  ok(!!again.session, "B can sign in and share again afterwards");
 }
 {
   // the daily job drops uploads nobody committed within a day
-  const pending = Buffer.from("pending upload");
+  const keyPending = await keyOf(A, sha(Buffer.from("pending upload")));
   await db.prepare("UPDATE holdings SET created = created - 2 * 86400").run();
-  const w = await mf.getWorker();
-  await w.scheduled({ cron: "0 3 * * *" });
-  ok(!(await bucket.head(`b/${sha(pending)}`)), "an upload never committed is dropped after a day");
+  await tick();
+  ok(!(await stored(keyPending)) && !(await keyOf(A, sha(Buffer.from("pending upload")))), "an upload never committed is dropped after a day");
 }
 
 await mf.dispose();

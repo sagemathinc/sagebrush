@@ -12,7 +12,11 @@ export default defineConfig({
       compatibilityDate: "2026-10-01",
       entrypoint,
       domains: [dev ? "files.cocalcusercontent.dev" : "files.cocalcusercontent.com"],
-      env: { SHARE_BUCKET: bindings.r2({ name: dev ? "sagebrush-share-dev" : "sagebrush-share" }) },
+      env: {
+        SHARE_BUCKET: bindings.r2({ name: dev ? "sagebrush-share-dev" : "sagebrush-share" }),
+        // (which files each collection may serve)
+        SHARE_DB: bindings.d1({ name: dev ? "sagebrush-share-dev" : "sagebrush-share" }),
+      },
     };
   },
 });
