@@ -381,6 +381,13 @@ class pAdicGeneric_:
         return _sa().infinity
 
     # -------------------------------------------------------- conversion
+    def __getitem__(self, names):
+        # K[['T']]: power series (polynomial rings over p-adics: not yet)
+        if isinstance(names, list):
+            import _sage_series
+            return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
+        raise NotImplementedError("polynomial rings over p-adic rings are not available in sagebrush yet")
+
     def __call__(self, x=0, absprec=None, relprec=None):
         """Convert x (an integer, rational, p-adic number, element of
         Integers(p^k)) to precision absprec (absolute) and relprec

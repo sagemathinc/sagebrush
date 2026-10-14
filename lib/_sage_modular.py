@@ -1910,6 +1910,21 @@ class EllipticCurve_rational_field:
         """
         return _LSeries(self)
 
+    def padic_lseries(self, p, normalize=None, implementation="eclib", precision=None):
+        """The p-adic L-series of E at a prime p of good ordinary or
+        multiplicative reduction (supersingular primes: not yet), from the
+        exact modular symbols; see lib/_sage_padic_lseries.py.
+
+        EXAMPLES::
+
+            sage: L = EllipticCurve('37a1').padic_lseries(5); L
+            5-adic L-series of Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field
+            sage: L.series(3)
+            O(5^5) + (1 + 4*5 + O(5^2))*T + (3 + O(5^2))*T^2 + (2 + 2*5 + O(5^2))*T^3 + (4 + 3*5 + O(5^2))*T^4 + O(T^5)
+        """
+        import _sage_padic_lseries
+        return _sage_padic_lseries.padic_lseries(self, p, normalize=normalize, implementation=implementation, precision=precision)
+
     def quadratic_twist(self, D):
         """The quadratic twist by D, as a global minimal model.
 
@@ -2850,6 +2865,8 @@ class EllipticCurveModularSymbol:
             ps = [p for p in range(2, bound + 1) if all(p % d for d in range(2, int(p ** 0.5) + 1)) and N % p]
             self._aps = [[p, int(a)] for p, a in zip(ps, self._ap_values(ps))]
         r = _call("ec_modsym", n=self._N, aps=self._aps, cusps=[[str(a), str(b)] for a, b in cusps])
+        # X(H_1(X_0(N), Z)) = cycles * Z (engine/modsym/src/cycles.rs)
+        self._cycles = int(r["cycles"])
         return int(r["zero"]), [int(v) for v in r["values"]]
 
     def _ap_values(self, ps):
