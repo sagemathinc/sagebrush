@@ -35,6 +35,8 @@ export function siteEngine(base: URL, runner = true): EngineParts {
   };
 }
 
+import { PREVIEW_MS, makePreview, previewLabel, type Preview } from "./preview";
+
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
 
@@ -156,7 +158,7 @@ export class BoardCode {
    * changes what others read: those rerun), and the new ones and those whose
    * code changed run, then what depends on them.  Resolves to the ids run.
    */
-  sync(items: { id: string; code: string }[], mode: "python" | "sage" = "python", seed?: string): Promise<string[]> {
+  sync(items: { id: string; code: string; preview?: Preview }[], mode: "python" | "sage" = "python", seed?: string): Promise<string[]> {
     // (one after another: a sync sees what the one before it did)
     const p = this.last.then(() => this.syncNow(items, mode, seed ?? BOARD_SEED));
     this.last = p.catch(() => {});
@@ -167,7 +169,7 @@ export class BoardCode {
   mode: "python" | "sage" = "python";
   /** the board's seed (BoardDoc.seed) */
   seed = BOARD_SEED;
-  private async syncNow(items: { id: string; code: string }[], mode: "python" | "sage", seed: string): Promise<string[]> {
+  private async syncNow(items: { id: string; code: string; preview?: Preview }[], mode: "python" | "sage", seed: string): Promise<string[]> {
     if (!(await this.ready)) return [];
     const nb = this.nb;
     const now = nb.cells().filter((c: any) => c.type === "code");
@@ -178,26 +180,101 @@ export class BoardCode {
     this.seed = seed;
     const changed = items.filter((it) => relang || before.get(it.id) !== it.code).map((it) => it.id);
     const same = now.length === items.length && items.every((it, i) => now[i].id === it.id);
+    // items new here with a preview (a slow item's output, kept in the file:
+    // preview.ts): shown, as stale, and not run, nor what reads them, until
+    // someone runs them: manual cells until then.  (Items already here, in
+    // another language or with another seed, all run.)
+    const held = items.filter((it) => it.preview && !before.has(it.id));
+    if (relang) for (const id of [...this.held]) if (before.has(id)) this.held.delete(id);
+    for (const it of held) this.held.add(it.id);
+    // (an item held whose code changed: run, as any edit)
+    for (const id of changed) if (!held.some((it) => it.id === id)) this.held.delete(id);
     if (changed.length || !same) {
       nb.applyRemote({
         mode,
         seed,
         cells: items.map((it) => {
           const c = this.cell(it.id);
-          return { id: it.id, code: it.code, ...(c ? { outputs: nb.saveOutputs(c.out) } : {}) };
+          const manual = this.held.has(it.id) ? { metadata: { sagebrush: { manual: true } } } : {};
+          if (held.includes(it)) return { id: it.id, code: it.code, outputs: it.preview!.outputs, ms: it.preview!.ms, ...manual };
+          return { id: it.id, code: it.code, ...(c ? { outputs: nb.saveOutputs(c.out) } : {}), ...manual };
         }),
       }, false);
     }
-    if (changed.length) await nb.runCells(changed).finally(() => this.changed());
+    for (const it of held) {
+      const c = this.cell(it.id);
+      if (c) c.out.dataset.preview = previewLabel(it.preview!);
+    }
+    if (!changed.length) return changed;
+    let report: any;
+    if (held.length && nb.reactive) {
+      // (every item registered, those not changed kept as they are; then the
+      // others run, but not what reads a held one, which would run it)
+      await nb.reactive.load({ stale: true, fresh: new Set(items.filter((it) => !changed.includes(it.id)).map((it) => it.id)) });
+      const blocked: Set<string> = nb.reactive.graph.closure(held.map((it) => it.id));
+      report = await nb.runCells(changed.filter((id) => !blocked.has(id))).finally(() => this.changed());
+    } else report = await nb.runCells(changed).finally(() => this.changed());
+    this.ran(report);
     return changed;
+  }
+
+  /** items shown with their previews, not run yet (manual cells until they are) */
+  private held = new Set<string>();
+  /** Items about to run on request (all: run all): the held ones among them, above and below them, are held no longer. */
+  private release(ids: string[] | null) {
+    if (!this.held.size) return;
+    const g = this.nb.reactive?.graph;
+    const near = ids && g ? new Set<string>([...g.closure(ids), ...g.closure(ids, { children: false })]) : null;
+    for (const id of [...this.held]) {
+      if (near && !near.has(id)) continue;
+      this.held.delete(id);
+      const c = this.cell(id);
+      if (c) this.nb.setManual(c, false);
+    }
+  }
+  /** Called with the items that ran, after each run (sync, ▶, run all). */
+  onRan: ((ids: string[]) => void) | null = null;
+  private ran(report: any) {
+    const ids: string[] = Array.isArray(report?.ran) ? report.ran : [];
+    for (const id of ids) {
+      const c = this.cell(id);
+      if (c) delete c.out.dataset.preview;
+    }
+    if (ids.length) this.onRan?.(ids);
+  }
+  /** an item over this many ms from root keeps a preview (preview.ts) */
+  previewMs = PREVIEW_MS;
+  /**
+   * Previews of these items' outputs as they are now: an item over previewMs
+   * from root, its preview; under it, null (it needs none).  Absent: an item
+   * whose output is not one to keep (running, interrupted, a widget moved).
+   */
+  async previews(ids: string[]): Promise<Map<string, Preview | null>> {
+    const out = new Map<string, Preview | null>();
+    if (!(await this.ready)) return out;
+    const keys = await this.nb.outputKeys();
+    for (const id of ids) {
+      const c = this.cell(id), k = keys?.[id], state = this.state(id);
+      if (!c || !k || k.widget || (state !== "" && state !== "failed")) continue;
+      out.set(id, k.fromRoot > this.previewMs ? await makePreview(this.nb.saveOutputs(c.out), { at: new Date().toISOString(), ms: k.ms ?? 0, total: k.fromRoot }) : null);
+    }
+    return out;
   }
 
   /** Run these code items, then what depends on them (resolves to the reactive notebook's report). */
   async run(ids: string[]): Promise<any> {
-    return (await this.ready) ? this.nb.runCells(ids).finally(() => this.changed()) : null;
+    if (!(await this.ready)) return null;
+    this.release(ids);
+    const report = await this.nb.runCells(ids).finally(() => this.changed());
+    this.ran(report);
+    return report;
   }
   async runAll(): Promise<any> {
-    return (await this.ready) ? this.nb.runAll().finally(() => this.changed()) : null;
+    if (!(await this.ready)) return null;
+    this.release(null);
+    const report = await this.nb.runAll().finally(() => this.changed());
+    this.ran(report);
+    return report;
   }
   /** Resolves when what was asked for has run (syncs, and what they started). */
   async idle(): Promise<void> {

@@ -5,6 +5,7 @@
 // into positioned items for the renderer (board.ts): an item with x and y
 // keeps them (a person moved it), the rest are placed.
 
+import { cleanPreview, type Preview } from "./preview";
 import type { Item, Edge } from "./board";
 import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
@@ -27,6 +28,9 @@ export interface DocNote {
   code?: string;
   /** show only the code's output, not the code */
   hideCode?: boolean;
+  /** a slow code item's output, kept to show before it runs (preview.ts,
+   * design/outputs.md); last in the file */
+  preview?: Preview;
   /** Markdown shown only when zoomed in (semantic zoom) */
   detail?: string;
   /** a link: a source file (path#Lline), a paper, a page */
@@ -221,7 +225,7 @@ export function cleanDoc(d: any): BoardDoc {
     const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
     return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
       color: safeColor(n.color), shape: SHAPES.has(n.shape) ? (n.shape as NoteShape) : undefined, fit: n.fit === true ? true : undefined,
-      x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
+      x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h), preview: code !== undefined ? cleanPreview(n.preview) : undefined });
   };
   const page = (p: any) => strip({
     id: str(p?.id), title: str(p?.title), intro: str(p?.intro), layout: one(p?.layout, LAYOUTS), columns: num(p?.columns), direction: one(p?.direction, DIRS),
