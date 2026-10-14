@@ -26,10 +26,11 @@ export interface RemoteBoard {
   hash(): Promise<string | null>;
   /** The document it has now; null: none yet. */
   load(): Promise<BoardDoc | null>;
-  /** Keep the document as it is now; with `ifHash`, only if the document it
-   * has now is that one (its hash), checked and written as one step: false
-   * if it is not. */
-  save(doc: BoardDoc, ifHash?: string): Promise<void | boolean>;
+  /** Keep the document, only if the document it has now is `expected` (its
+   * hash; null: it has none), checked and written as one step: true if
+   * kept, false if not.  Always a precondition: null is "none", never "any"
+   * (CORR-6B0-1). */
+  save(doc: BoardDoc, expected: string | null): Promise<boolean>;
   /** save(doc, ifHash) is a compare-and-swap: required (a hash asked just
    * before a save is not one, CORR-DAF-2); cachedStore refuses a remote
    * without it. */
@@ -303,7 +304,8 @@ export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offl
  * them given the ids of the pages they are (adopted()); where which page is
  * which cannot be told, ours is kept, and said.
  */
-export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = new IdbDocCache()): BoardStore & { synced: Promise<Synced> } {
+export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = new IdbDocCache(),
+  retry: { first: number; max: number; tries: number } = { first: 250, max: 8000, tries: 8 }): BoardStore & { synced: Promise<Synced>; busy(): boolean } {
   if (remote.cas !== true) throw new Error("cachedStore: the remote's save must be a compare-and-swap (cas: true)");
   let entry: CachedDoc | null = null;
   // (the remote has answered: edits go to it too)
@@ -335,6 +337,11 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   }
   const parse = (json: string) => cleanDoc(JSON.parse(json));
   const dirty = () => !!entry && entry.hash !== entry.remoteHash;
+  // the remote version the copy is based on, as a document: kept while
+  // they differ; the copy itself, if they do not; none (the remote had no
+  // document: an empty board), so a document made here and one made
+  // elsewhere meanwhile are merged, not one taken over the other
+  const baseOf = (e: CachedDoc) => (e.base !== undefined ? parse(e.base) : e.remoteHash === null ? cleanDoc({}) : parse(e.json));
   // (the remote has `d` now: the copy is based on it)
   async function sent(d: BoardDoc, h: string) {
     if (!entry) return;
@@ -346,29 +353,48 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   // save on its way at a time, the next once it is done (from a step); only
   // over the remote version the copy is based on (compare-and-swap: a copy
   // whose ids the remote has not seen, CORR-DAF-4, never written over a
-  // change made elsewhere).  Refused: the remote is asked again, and its
-  // newer document merged, then pushed.
-  let saving = false;
+  // change made elsewhere).  Refused: after a wait (doubling, with jitter),
+  // the remote's newer document (a change heard meanwhile, or asked for)
+  // merged, then pushed; refused `tries` times running, no more: the copy
+  // kept, busy, and each edit or change from elsewhere one more try
+  // (PERF-6B0-2).
+  let saving = false, refused = 0, waiting: ReturnType<typeof setTimeout> | null = null, stalled = false, busy = false;
   function push() {
-    if (!online || saving || !dirty()) return;
+    if (!online || saving || waiting || stalled || !dirty()) return;
     saving = true;
-    const d = parse(entry!.json);
-    remote.save(d, entry!.remoteHash ?? undefined).then(
+    const d = parse(entry!.json), expected = entry!.remoteHash;
+    remote.save(d, expected).then(
       async (ok) => {
-        if (ok === false) { step(async () => { saving = false; ask(); }); return; }
+        if (ok === false) {
+          step(async () => {
+            saving = false;
+            if (++refused >= retry.tries) { stalled = true; busy = true; resolveSynced("busy"); return; }
+            const ms = Math.min(retry.max, retry.first * 2 ** (refused - 1)) * (0.75 + Math.random() / 2);
+            waiting = setTimeout(() => step(async () => {
+              waiting = null;
+              // (a change heard meanwhile, merged: pushed; else the remote asked)
+              if (entry!.remoteHash !== expected) push();
+              else ask();
+            }), ms);
+          });
+          return;
+        }
         const h = await docHash(d);
-        step(async () => { await sent(d, h); saving = false; push(); });
+        step(async () => { await sent(d, h); refused = 0; busy = false; saving = false; push(); });
       },
       (e) => step(async () => { saving = false; console.warn("board: the remote:", e); }),
     );
   }
+  // (an edit, or a change from elsewhere: once stopped, one more try; true
+  // if stopped: the remote's document, then, may be newer than any heard)
+  const kick = () => { if (!stalled) return false; stalled = false; refused = retry.tries - 1; return true; };
 
   // the remote's document `theirs` (from a step)
   async function arrived(theirs: BoardDoc, theirHash: string): Promise<Synced> {
     let s: Synced;
     // (pages without ids, from elsewhere: given those of the pages they are;
     // which is which cannot be told: ours kept, and said, the remote given ours)
-    const t = entry && !(theirHash === entry.remoteHash || theirHash === entry.hash) ? adopted(parse(entry.base ?? entry.json), theirs) : theirs;
+    const t = entry && !(theirHash === entry.remoteHash || theirHash === entry.hash) ? adopted(baseOf(entry), theirs) : theirs;
     if (!t) {
       entry = { ...entry!, remoteHash: theirHash, base: canonical(theirs) };
       await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
@@ -387,7 +413,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       s = "replaced";
     } else {
       // (edits here the remote has not seen, or a save of them on its way: merged)
-      const m = merge3(parse(entry.base ?? entry.json), parse(entry.json), theirs), doc = identified(m.doc), conflicts = m.conflicts;
+      const m = merge3(baseOf(entry), parse(entry.json), theirs), doc = identified(m.doc), conflicts = m.conflicts;
       await keep(doc, theirHash, canonical(theirs));
       present(doc, conflicts.length ? mergedNotice(conflicts.length) : undefined);
       s = "merged";
@@ -433,7 +459,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     heard++;
     if (!opened) return;
     const doc = cleanDoc(d);
-    step(async () => { lastHeard = await arrived(doc, await docHash(doc)); });
+    step(async () => { kick(); lastHeard = await arrived(doc, await docHash(doc)); });
   }
 
   // The remote's document, its pages given ids, saved over it only if it
@@ -456,6 +482,9 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
 
   return {
     synced,
+    /** Whether the copy holds what the remote has not taken, and it is not
+     * trying now: busy (opened busy, or its saves refused `tries` times). */
+    busy: () => busy,
     async load() {
       const c = await step(async () => cache.get(key).catch(() => null)), copy = c && parse(c.json);
       // (a copy whose pages have ids: shown at once, the remote asked meanwhile)
@@ -475,6 +504,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
         // version given them; they go with the next save, by compare-and-swap)
         if (got.busy) {
           await keep(got.doc, got.hash, canonical(got.doc));
+          busy = true;
           view = got.doc;
           resolveSynced("busy");
           // (a change heard since it was asked for: as any)
@@ -495,17 +525,20 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       view = d;
       step(async () => {
         const doc = identified(from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d);
-        const base = dirty() ? entry!.base ?? entry!.json : entry?.json;
+        const base = dirty() ? entry!.base ?? (entry!.remoteHash === null ? undefined : entry!.json) : entry?.json;
         await keep(doc, entry?.remoteHash ?? null, base);
         if (doc !== d) present(doc);
-        push();
+        // (stopped: the remote asked first, its newer document merged, then pushed)
+        if (kick()) ask();
+        else push();
       });
     },
     subscribe(f) {
       listeners.add(f);
       for (const [d, n] of unsent.splice(0)) present(d, n);
       offRemote ??= remote.subscribe?.(changed);
-      return () => { listeners.delete(f); if (!listeners.size) { offRemote?.(); offRemote = undefined; } };
+      // (none left: no more listening, nor a retry waiting)
+      return () => { listeners.delete(f); if (!listeners.size) { offRemote?.(); offRemote = undefined; if (waiting) { clearTimeout(waiting); waiting = null; } } };
     },
   };
 }
