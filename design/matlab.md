@@ -29,7 +29,9 @@ and runs on a runtime library with MATLAB's semantics:
     whose bound its page gives; fminsearch is the Nelder-Mead method of
     Lagarias, Reeds, Wright and Wright (1998) in the steps MATLAB's
     "fminsearch Algorithm" page spells out; lsqnonneg is Lawson and
-    Hanson's NNLS (1974, chapter 23);
+    Hanson's NNLS (1974, chapter 23); quad is Gander and Gautschi's
+    adaptive Simpson step (2000, section 3) with the page's absolute
+    tolerance per subinterval;
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -597,6 +599,10 @@ The rest:
   unset (Lawson and Hanson's 3 times the number of variables), what
   counts as an iteration (a least-squares solve), and the message for
   exitflag 0. Display 'iter', which its page does not list, is refused;
+- quad's likewise: a subinterval with an Inf or NaN value is not
+  subdivided (with a warning), at most 10000 evaluations (with a warning),
+  the trace's number format, and a single result for single limits or
+  values;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula

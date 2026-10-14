@@ -62,3 +62,13 @@ show(r(lsqnonneg([1 1; 1 1], [1; 1])));
 show(r(lsqnonneg([1 2 3], 4)));
 show(r(lsqnonneg([2 -1 0; -1 2 -1; 0 -1 2; 1 1 1], [1; 0; -3; 2])));
 [x, rn, res, ef, out, lambda] = lsqnonneg([1 2; 3 4; 5 6], [3; -1; 2]); show(r(x)); show(r(lambda));
+% quad (to 8 digits with a tight tolerance)
+show(r8(quad(@(x) 1./(x.^3 - 2*x - 5), 0, 2, 1e-12)));
+show(r8(quad(@(x) exp(-x.^2), -3, 3, 1e-12)));
+show(r8(quad(@(x) sin(x).^2, 0, pi, 1e-12)));
+show(r8(quad(@(x) x.^5 - 3*x, 1, 4, 1e-12)));
+show(r8(quad(@(x) exp(x), 1, 0, 1e-12)));
+show(r8(quad(@(x) abs(x - 1/3), 0, 1, 1e-12)));
+show(r8(quad(@(x) sqrt(x), 0, 1, 1e-12)));
+show(r8(quad(@(x) log(1 + x) ./ (1 + x.^2), 0, 1, 1e-12)));
+show(quad(@(x) x, 2, 2));
