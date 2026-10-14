@@ -13,7 +13,9 @@
 // changed there stays removed (CORR-891-4); a change made elsewhere while
 // the copy's push was on its way is merged and pushed (CORR-C06-1); a
 // blank page keeps its identity (CORR-C06-2); documents are given the board
-// one at a time, in order (CORR-C06-3).
+// one at a time, in order (CORR-C06-3); an answer asked for before a
+// change made elsewhere is not taken over it (CORR-EB9-1); pages are told
+// apart by their own fields too, and the store gives pages ids (CORR-EB9-2).
 //   bun web/board/test-cached-store.mjs
 import { cachedStore, merge3 } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
@@ -241,9 +243,9 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
 // CORR-C06-2: a page without an id, items or title; another put in front of it there, it edited here
 {
   const A = { nodes: [] }, B = { nodes: [{ id: "b", title: "B" }] }, X = { nodes: [{ id: "x", title: "X" }] };
-  const { doc: m } = merge3(cleanDoc({ pages: [A, B] }), cleanDoc({ pages: [{ ...A, intro: "mine" }, B] }), cleanDoc({ pages: [X, A, B] }));
+  const { doc: m, conflicts } = merge3(cleanDoc({ pages: [A, B] }), cleanDoc({ pages: [{ ...A, intro: "mine" }, B] }), cleanDoc({ pages: [X, A, B] }));
   const pages = m.pages.map((p) => (p.intro ? "A:" + p.intro : p.nodes.map((n) => n.id).join("") || "A")).join(",");
-  check(pages === "x,A:mine,b", "a blank page (no id, items or title), another put in front of it there, it edited here: three pages, the edit on it: " + pages);
+  check(pages === "A:mine,b" && conflicts.some((c) => c.field === "pages"), "a blank page (no id, items or title) that cannot be told apart: ours kept, never a page doubled nor an edit moved, and the conflict said: " + pages + " " + JSON.stringify(conflicts));
 }
 
 // CORR-C06-3: two documents given the board, the second's showing done first: shown in the order given
@@ -268,6 +270,49 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   gates.get("r2")?.open();
   await tick(30);
   check(before === "r1" && given.join() === "r1,r2" && done.join() === "r1,r2", "two documents given the board: the second given once the first is shown: " + JSON.stringify({ before, given, done }));
+}
+
+// CORR-EB9-1: the remote's document asked for, then changed elsewhere before the answer came: the change kept, the old answer not taken
+{
+  const cache = memCache(), base = cleanDoc({ title: "base", nodes: [{ id: "n", title: "N" }] });
+  await cache.put({ key: "k8", json: canonical(base), hash: await hashOf(base), remoteHash: await hashOf(base), at: 0 });
+  const R = fakeRemote({ title: "r1", nodes: [{ id: "n", title: "N" }] });
+  R.holds.load = held();
+  const loadGate = R.holds.load;
+  const store = cachedStore(R, "k8", cache);
+  const shown = [];
+  store.subscribe((d) => { shown.push(d.title); });
+  await store.load();
+  for (let k = 0; k < 50 && !R.calls.includes("load"); k++) await tick(10);
+  R.change({ title: "r2", nodes: [{ id: "n", title: "N" }] });
+  await tick(30);
+  loadGate.open();
+  await store.synced;
+  await tick(50);
+  const copyNow = JSON.parse(cache.m.get("k8").json).title;
+  check(copyNow === "r2" && shown.at(-1) === "r2" && R.doc.title === "r2", "an answer asked for before a change made elsewhere came: not taken over it: " + JSON.stringify({ copy: copyNow, shown, remote: R.doc.title, calls: R.calls }));
+}
+
+// CORR-EB9-2: pages with no items or title, told apart by their intros; one put in front there, another made a slide here
+{
+  const A = { intro: "A", nodes: [] }, B = { intro: "B", nodes: [] }, X = { intro: "X", nodes: [] };
+  const { doc: m, conflicts } = merge3(cleanDoc({ pages: [A, B] }), cleanDoc({ pages: [A, { ...B, slide: { x: 0, y: 0, w: 100, h: 100 } }] }), cleanDoc({ pages: [X, A, B] }));
+  const pages = m.pages.map((p) => p.intro + (p.slide ? ":slide" : "")).join(",");
+  check(pages === "X,A,B:slide" && !conflicts.length, "pages told apart by their intro: one put in front there, another made a slide here: each on its own page: " + pages + " " + JSON.stringify(conflicts));
+}
+
+// pages without ids: given ids by the store, in what the board is given, the copy and the remote
+{
+  const cache = memCache(), anon = cleanDoc({ pages: [{ title: "One", nodes: [{ id: "a" }] }, { title: "Two", nodes: [{ id: "b" }] }] });
+  await cache.put({ key: "k9", json: canonical(anon), hash: await hashOf(anon), remoteHash: await hashOf(anon), at: 0 });
+  const R = fakeRemote(anon);
+  const store = cachedStore(R, "k9", cache);
+  store.subscribe(() => {});
+  const got = await store.load();
+  await store.synced;
+  await tick(50);
+  const ids = got.doc.pages.map((p) => p.id), copyIds = JSON.parse(cache.m.get("k9").json).pages.map((p) => p.id), remoteIds = R.doc.pages.map((p) => p.id);
+  check(ids.every((x) => typeof x === "string" && x) && new Set(ids).size === 2 && JSON.stringify(copyIds) === JSON.stringify(ids) && JSON.stringify(remoteIds) === JSON.stringify(ids), "pages without ids: given ids, the same in the board's, the copy's and the remote's: " + JSON.stringify({ ids, copyIds, remoteIds }));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
