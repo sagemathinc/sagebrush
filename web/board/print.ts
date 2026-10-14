@@ -33,7 +33,12 @@ function sheetSize(o: PrintOptions) {
 }
 
 const GROUP = "#eef2ea", EDGE = "#5f7457";
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** Text for markup (HTML, or an SVG file: also svg.ts's): only characters
+ * XML allows (controls dropped, a lone surrogate replaced), and &, <, >, "
+ * and ' escaped (SEC-270-1). */
+export const xmlEscape = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "").replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd")
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+const esc = xmlEscape;
 
 // Groups (outer first) and edges as SVG, in world coordinates.
 function backSvg(items: Item[], edges: Edge[], box: Sheet["box"]): string {

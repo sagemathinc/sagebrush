@@ -31,6 +31,18 @@ test("board render: an example board, to a file; a Mermaid flowchart from standa
   }
 });
 
+test("board render: a note whose text is cut to its box is said, its id quoted (no control character reaches the terminal)", () => {
+  const r = cli(["-"], JSON.stringify({ nodes: [{ id: "a\u001b[31m", w: 90, h: 25, text: "This fixed-height note contains enough text to be clipped badly." }] }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /text cut to its note's box/);
+  assert.ok(r.stderr.includes(JSON.stringify("a\u001b[31m")) && !r.stderr.includes("\u001b"), r.stderr);
+});
+
+test("board: only `board render` is the board's command (else a program named board, as before)", () => {
+  const r = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "nonsense"], { encoding: "utf8" });
+  assert.doesNotMatch(r.stderr + r.stdout, /usage: sagebrush board render/);
+});
+
 test("board render: a page that is not there, a file that is not there, no file", () => {
   const p = cli([examples + "primes.json", "--page", "9"]);
   assert.equal(p.status, 2);

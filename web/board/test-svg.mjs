@@ -59,7 +59,7 @@ function inspect(svg) {
 
 // ---- the example boards: every page; the same each time; nothing overflows --
 const HASHES = {
-  "sagebrush-0": "51e95ef263e8a047", "live-0": "ad4092bfdcbd68b2", "primes-0": "a50e6755a7c6348b", "primes-1": "bed8b854ba59fee4", "primes-2": "3df9c7d962b85d2a", "polynomials-0": "a1b832249bae1ceb", "museum-tour-0": "999888d248719e81",
+  "sagebrush-0": "2f5f2011255f7238", "live-0": "ad4092bfdcbd68b2", "primes-0": "a50e6755a7c6348b", "primes-1": "bed8b854ba59fee4", "primes-2": "3df9c7d962b85d2a", "polynomials-0": "a1b832249bae1ceb", "museum-tour-0": "999888d248719e81",
 };
 const got = {};
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
@@ -127,6 +127,34 @@ if (process.env.UPDATE) console.log(JSON.stringify(got));
       check(!/[\u0000-\u0008]/.test(svg) && !/[\ud800-\udbff](?![\udc00-\udfff])/.test(svg), "no character XML does not allow");
     }
   }
+}
+
+// SEC-270-1: an edge's label (the print view's writer) with a NUL and a lone surrogate: still XML
+{
+  const { svg } = boardSvg({ layout: "graph", nodes: [{ id: "a", title: "A" }, { id: "b", title: "B" }], edges: [{ from: "a", to: "b", label: "pre\u0000mid\ud800post" }] });
+  const { bad, texts } = inspect(svg);
+  check(!bad.length && !/[\u0000-\u0008]/.test(svg) && !/[\ud800-\udbff](?![\udc00-\udfff])/.test(svg) && texts.join("").includes("premid\ufffdpost"), "an edge's label with a NUL and a lone surrogate: well-formed, the NUL dropped, the surrogate replaced: " + bad.join("; "));
+}
+// HARD-270-2: places and sizes at the edge of what a number is, sizes below zero: every number written finite, sizes positive; said
+{
+  const cases = [
+    { nodes: [{ id: "a", text: "x", x: 1e308, y: 0, w: 1e308, h: 100 }] },
+    { nodes: [{ id: "a", text: "x", x: -1.7e308, y: 1.7e308, w: 200 }, { id: "b", text: "y", x: 0, y: 0 }], edges: [{ from: "a", to: "b", label: "far" }] },
+    { nodes: [{ id: "a", text: "x", x: 10, y: 10, w: -50, h: -10 }, { id: "s", kind: "sticker", emoji: "⭐", x: 1e300, y: -1e300, w: 1e300 }] },
+  ];
+  cases.forEach((doc, k) => {
+    const r = boardSvg(doc), { bad } = inspect(r.svg);
+    const dims = [...r.svg.matchAll(/\s(width|height)="([^"]*)"/g)].map((m) => Number(m[2]));
+    check(!bad.length && !/Infinity|NaN|\de[+-]?\d/.test(r.svg) && dims.every((v) => Number.isFinite(v) && v > 0) && r.left.includes("places or sizes out of range (brought within it)"), `geometry case ${k}: every number finite, every size positive, and said: ` + JSON.stringify({ bad: bad.slice(0, 3), left: r.left, dims: dims.filter((v) => !(v > 0)).slice(0, 3) }));
+  });
+}
+// CORR-270-3: a slide's card and the page's background: drawn (the picture said)
+{
+  const r = boardSvg({ slide: { x: 0, y: 0, w: 800, h: 450 }, background: { color: "#ff0000", image: "bg" }, images: { bg: { w: 640, h: 480 } }, nodes: [{ id: "a", x: 20, y: 20, w: 100, h: 80, text: "A" }] });
+  const vb = /viewBox="([^"]*)"/.exec(r.svg)[1].split(" ").map(Number);
+  check(r.svg.includes('fill="#ff0000"') && /<rect x="0" y="0" width="800" height="450" fill="#fff"/.test(r.svg) && vb[0] <= 0 && vb[1] <= 0 && vb[0] + vb[2] >= 800 && vb[1] + vb[3] >= 450 && r.left.includes("the page's background picture") && !inspect(r.svg).bad.length, "a slide's card and the page's background color, drawn, the whole slide shown, the picture said: " + JSON.stringify({ vb, left: r.left }));
+  const plain = boardSvg({ background: { color: "#123456" }, nodes: [{ id: "a", x: 0, y: 0, text: "A" }] });
+  check(/^<\?xml[^\n]*\n<svg[^>]*>(<title>[^<]*<\/title>)?<defs>.*?<\/defs><rect [^>]*fill="#123456"\/>/.test(plain.svg), "without a slide, the background's color behind the whole board");
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);

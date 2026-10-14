@@ -13,8 +13,8 @@
 // colors.
 
 import { Lexer, type Token, type Tokens } from "marked";
-import { cleanDoc, layout, pageView, type BoardDoc, type Measure, type MeasuredNote } from "./doc";
-import { backShapes } from "./print";
+import { cleanDoc, layout, lookOf, pageView, type BoardDoc, type Measure, type MeasuredNote } from "./doc";
+import { backShapes, xmlEscape } from "./print";
 import { inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
 import type { Item } from "./board";
@@ -180,10 +180,11 @@ export const measure: Measure = Object.assign(
 
 // ---- the file --------------------------------------------------------------
 
-// XML's characters only, escaped (text and quoted attributes alike)
-const esc = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/g, "").replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "�")
-  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-const n1 = (v: number) => String(Math.round(v * 10) / 10);
+// XML's characters only, escaped (text and quoted attributes alike; the print view's too)
+const esc = xmlEscape;
+// (a number written: finite, a tenth at most; places and sizes are clamped first, HARD-270-2)
+const n1 = (v: number) => (Number.isFinite(v) ? String(Math.round(v * 10) / 10) : "0");
+const LIM = 1e7;
 const BG = "#fafaf7", TEXT = "#1d241a";
 
 function outline(it: Item, fill: string): string {
@@ -231,14 +232,38 @@ function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean)
 export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: string; left: string[]; overflow: string[] } {
   const d = cleanDoc(doc), v = pageView(d, o.page ?? 0), left = new Set<string>(), overflow: string[] = [];
   const { items, edges } = layout(v, measure);
+  // (places within ten million, sizes from 1 to ten million: a board's
+  // numbers, however large, never make a number SVG cannot use, HARD-270-2)
+  let clamped = false;
+  const c = (v: number, lo = -LIM, hi = LIM) => { const r = Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : 0; if (r !== v) clamped = true; return r; };
+  for (const it of items) {
+    it.x = c(it.x); it.y = c(it.y); it.w = c(it.w, 1); it.h = c(it.h, 1);
+    if (it.outline) it.outline = it.outline.map((p) => c(p));
+  }
+  for (const e of edges) {
+    if (e.points) e.points = e.points.map((p) => c(p));
+    if (e.lx !== undefined) e.lx = c(e.lx);
+    if (e.ly !== undefined) e.ly = c(e.ly);
+  }
+  // the page's look: its slide's card, its background (CORR-270-3)
+  const look = lookOf(d, o.page ?? 0), slide = look.slide && { x: c(look.slide.x), y: c(look.slide.y), w: c(look.slide.w, 1), h: c(look.slide.h, 1) }, bg = look.background;
+  if (clamped) left.add("places or sizes out of range (brought within it)");
+  if (bg?.image) left.add("the page's background picture");
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const it of items) { x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h); }
   for (const e of edges) for (let i = 0; i < (e.points?.length ?? 0); i += 2) { x0 = Math.min(x0, e.points![i]); x1 = Math.max(x1, e.points![i]); y0 = Math.min(y0, e.points![i + 1]); y1 = Math.max(y1, e.points![i + 1]); }
-  if (!items.length) { x0 = y0 = 0; x1 = y1 = 100; }
+  if (slide) { x0 = Math.min(x0, slide.x); y0 = Math.min(y0, slide.y); x1 = Math.max(x1, slide.x + slide.w); y1 = Math.max(y1, slide.y + slide.h); }
+  if (!items.length && !slide) { x0 = y0 = 0; x1 = y1 = 100; }
   const M = 24;
   x0 -= M; y0 -= M; x1 += M; y1 += M;
   const box = { x0, y0, x1, y1 }, W = x1 - x0, H = y1 - y0;
-  const out: string[] = [`<rect x="${n1(x0)}" y="${n1(y0)}" width="${n1(W)}" height="${n1(H)}" fill="${BG}"/>`, backShapes(items, edges, box)];
+  // (the background: behind the whole board, or, with a slide, on its card)
+  const out: string[] = [`<rect x="${n1(x0)}" y="${n1(y0)}" width="${n1(W)}" height="${n1(H)}" fill="${slide || !bg?.color ? BG : esc(bg.color)}"/>`];
+  if (slide) {
+    out.push(`<rect x="${n1(slide.x)}" y="${n1(slide.y)}" width="${n1(slide.w)}" height="${n1(slide.h)}" fill="#fff" stroke="#000" stroke-opacity=".18"/>`);
+    if (bg?.color) out.push(`<rect x="${n1(slide.x)}" y="${n1(slide.y)}" width="${n1(slide.w)}" height="${n1(slide.h)}" fill="${esc(bg.color)}"/>`);
+  }
+  out.push(backShapes(items, edges, box));
   const clips: string[] = [];
   // groups' titles and text, outer first
   for (const g of items.filter((it) => it.kind === "group").sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0))) {
