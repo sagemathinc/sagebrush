@@ -291,8 +291,11 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
 - **What is kept from MATLAB:**
   - hold is off by default, so a plotting function replaces the axes'
     contents, title, labels, limits and color order (MATLAB's `newplot`);
-  - the color order is MATLAB's (`lines`), LineSpec strings (`'r--o'`) work,
-    and so do name-value properties;
+  - the color order (`lines`, `ColorOrder`) is the seven-color palette of
+    MATLAB releases before R2025a, from [0 0.4470 0.7410]. Current MATLAB's
+    default is the changed "gem" palette of R2025a (its colororder page
+    gives the new triplets); Sagebrush deliberately keeps the older one;
+  - LineSpec strings (`'r--o'`) work, and so do name-value properties;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
   - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,
@@ -361,6 +364,19 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - stacked bars sit on the series before them;
   - `XEndPoints`/`YEndPoints` give the bar tips;
   - a string array of names places the bars in that order.
+- **quiver** scales its arrows by Sagebrush's rule: the longest arrow as
+  long as the grid's spacing (the data's range over the square root of the
+  number of arrows), times the scale given to `quiver` (0.9 by default;
+  Sagebrush's quiver object has no `AutoScaleFactor` property). MATLAB
+  documents only that the arrows are scaled so as not to overlap, with
+  `AutoScaleFactor` 0.9 by default; its scaling and Octave's both differ
+  from Sagebrush's (`quiver([0 1], [0 1], [1 1], [1 -1])` leaves the x
+  limits at [0 1.6] here).
+- **spy** draws a blue `.` marker of size 6 at each nonzero by default:
+  Sagebrush's choice, since MATLAB's documentation does not state the
+  default marker (Octave's is `*` for fewer than 1000 nonzeros and `.`
+  otherwise). Its limits, 0 to n + 1 and 0 to m + 1 with the rows downward,
+  are Octave's, and its label `nz = nnz(S)` is documented.
 - **How arrays reach matplotlib:** they cross through `_m._mat`, in MATLAB
   orientation. This is the one place the reversed axes are turned back.
 - **Workarounds for the shim:**
