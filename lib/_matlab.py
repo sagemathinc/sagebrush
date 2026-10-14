@@ -4471,6 +4471,150 @@ def _cum(x, args, f, name):
     return _finish(_contig(r), oc)
 
 
+# ------------------------------------------------------------------ fft
+
+def _fft1(A, n, ax, inverse):
+    """numpy's transform along stored axis ax, length n; for real data, the
+    half that numpy's rfft computes and its mirror image, conjugated, so the
+    result is exactly conjugate-symmetric (as FFTW makes MATLAB's)"""
+    if A.dtype.kind != "c" and not inverse:
+        h = np.fft.rfft(A, n=n, axis=ax)
+        A2 = np.moveaxis(h, ax, -1)
+        full = np.zeros(A2.shape[:-1] + (n,), dtype=np.complex128)
+        m = A2.shape[-1]
+        full[..., :m] = A2
+        # (the DC and Nyquist terms of real data are real)
+        full[..., 0] = full[..., 0].real
+        if n % 2 == 0:
+            full[..., n // 2] = full[..., n // 2].real
+        if n > 1:
+            k = np.arange(m, n)
+            full[..., m:] = np.conj(A2[..., n - k])
+        # (a zero imaginary part is +0, as FFTW's)
+        full = _cplx(full.real, np.where(full.imag == 0, 0.0, full.imag))
+        return np.moveaxis(full, -1, ax)
+    return np.fft.ifft(A, n=n, axis=ax) if inverse else np.fft.fft(A, n=n, axis=ax)
+
+
+def _fft_call(x, args, inverse, name):
+    args = list(args)
+    symmetric = False
+    if args and _istext(args[-1]):
+        flag = _text(args[-1]).lower()
+        if flag == "symmetric":
+            symmetric = True
+        elif flag != "nonsymmetric":
+            raise _err("Invalid option.")
+        args.pop()
+    A = _farr(x, name)
+    d = _dims(x)
+    n = None if not args or _numel(args[0]) == 0 else args[0]
+    dim = _default_dim(d) if len(args) < 2 else _int_arg(args[1], "dimension")
+    if n is not None:
+        n = _scalar(n)
+        if n != _math.floor(n) or n < 0:
+            raise _err("N must be a positive integer scalar.")
+        n = int(n)
+    if dim > A.ndim:
+        # (along a trailing singleton dimension: a length-1 transform)
+        A = A.reshape((1,) * (dim - A.ndim) + A.shape)
+    ax = A.ndim - dim
+    length = A.shape[ax] if n is None else n
+    if length == 0:
+        shape = list(A.shape)
+        shape[ax] = 0
+        return _canon(np.zeros(tuple(shape)))
+    if inverse and not symmetric and A.dtype.kind == "c" and A.shape[ax] == length:
+        # (MATLAB's ifft is real when X is exactly conjugate-symmetric along dim)
+        B = np.moveaxis(A, ax, -1)
+        k = np.arange(length)
+        symmetric = bool(np.all(B == np.conj(B[..., (length - k) % length])))
+    elif inverse and A.dtype.kind != "c":
+        symmetric = symmetric or bool(np.all(A == np.take(A, (length - np.arange(A.shape[ax])) % A.shape[ax], axis=ax))) and A.shape[ax] == length
+    if symmetric and inverse:
+        # (ifft(X, 'symmetric'): the first half, as if conjugate-symmetric; real)
+        r = np.fft.irfft(np.take(A, np.arange(min(A.shape[ax], length // 2 + 1)), axis=ax), n=length, axis=ax)
+        return _box(_contig(r))
+    r = _fft1(A, length, ax, inverse)
+    if class_(x) == "single":
+        return _canon(r.astype(np.complex64))
+    return _box(_contig(r))
+
+
+@_bs("fft")
+def fft_(x, *args):
+    return _fft_call(x, args, False, "fft")
+
+
+@_bs("ifft")
+def ifft_(x, *args):
+    return _fft_call(x, args, True, "ifft")
+
+
+def _fftn_call(x, sizes, inverse, name, nd=None):
+    A = _farr(x, name)
+    r = A
+    dims = len(_dims(x)) if nd is None else nd
+    sz = None if sizes is None else [int(float(v)) for v in _arr(sizes).reshape(-1)]
+    real = A.dtype.kind != "c"
+    for dim in range(1, dims + 1):
+        if dim > r.ndim:
+            r = r.reshape((1,) + r.shape)
+        ax = r.ndim - dim
+        n = r.shape[ax] if sz is None or dim > len(sz) else sz[dim - 1]
+        if n == 0:
+            shape = list(r.shape)
+            shape[ax] = 0
+            return _canon(np.zeros(tuple(shape)))
+        r = _fft1(r, n, ax, inverse) if real and not inverse else (np.fft.ifft(r, n=n, axis=ax) if inverse else np.fft.fft(r, n=n, axis=ax))
+        real = False
+    return _box(_contig(r))
+
+
+@_bs("fft2")
+def fft2_(x, m=None, n=None):
+    return _fftn_call(x, None if m is None else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None else m), False, "fft2", 2)
+
+
+@_bs("ifft2")
+def ifft2_(x, m=None, n=None, *flags):
+    return _fftn_call(x, None if m is None or _istext(m) else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None and not _istext(n) else m), True, "ifft2", 2)
+
+
+@_bs("fftn")
+def fftn_(x, sizes=None):
+    return _fftn_call(x, sizes, False, "fftn")
+
+
+@_bs("ifftn")
+def ifftn_(x, sizes=None, *flags):
+    return _fftn_call(x, None if sizes is None or _istext(sizes) else sizes, True, "ifftn")
+
+
+def _fftshift_call(x, dim, inverse):
+    """the zero frequency to the middle (fftshift: each axis rolled by floor(n/2)) or back"""
+    A = _arr(x)
+    axes = range(A.ndim) if dim is None else [A.ndim - _int_arg(dim, "dimension")]
+    r = A
+    for ax in axes:
+        if 0 <= ax < r.ndim:
+            n = r.shape[ax]
+            r = np.roll(r, -(n // 2) if inverse else n // 2, axis=ax)
+    if type(x) is Char:
+        return Char(_contig(r))
+    return _box(_contig(r)) if r.dtype.kind in "fbc" else _canon(_contig(r))
+
+
+@_bs("fftshift")
+def fftshift_(x, dim=None):
+    return _fftshift_call(x, dim, False)
+
+
+@_bs("ifftshift")
+def ifftshift_(x, dim=None):
+    return _fftshift_call(x, dim, True)
+
+
 @_bs("cumsum")
 def cumsum_(x, *args):
     return _cum(x, args, lambda A, ax: np.cumsum(A, axis=ax), "cumsum")
