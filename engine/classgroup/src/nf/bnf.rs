@@ -216,7 +216,7 @@ fn in_lattice_f64(basis: &ZMat, inv: &[Vec<f64>], v: &[BigInt], err: &BigInt, pr
     })
 }
 
-fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Result<(ZMat, BigInt), bool> {
+pub(crate) fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Result<(ZMat, BigInt), bool> {
     let p = prec as usize;
     let small = err * 64;
     let uld = std::env::var("QCL_UL").is_ok();
@@ -430,7 +430,7 @@ fn random_weights(k: usize, t: f64, rng: &mut u64) -> Vec<f64> {
 }
 
 /// The HNF of the product of two ideals given by Z-bases.
-fn ideal_mul(o: &Order, a: &ZMat, b: &ZMat) -> ZMat {
+pub(crate) fn ideal_mul(o: &Order, a: &ZMat, b: &ZMat) -> ZMat {
     let t = crate::clock::Instant::now();
     let r = ideal_mul_impl(o, a, b);
     T_MUL.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
@@ -454,7 +454,7 @@ fn ideal_mul_impl(o: &Order, a: &ZMat, b: &ZMat) -> ZMat {
 
 /// The HNF of a full-rank lattice containing d Z^n (rows include d e_i),
 /// reducing entries modulo d along the way.
-fn hnf_mod_d(rows: &ZMat, d: &BigInt) -> ZMat {
+pub(crate) fn hnf_mod_d(rows: &ZMat, d: &BigInt) -> ZMat {
     let n = rows[0].len();
     let mut w: ZMat = (0..n).map(|i| (0..n).map(|j| if i == j { d.clone() } else { BigInt::zero() }).collect()).collect();
     for r in rows {
@@ -602,7 +602,9 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
 /// analytic estimate) they generate the group of factor-base units.
 #[derive(Clone, Debug)]
 pub struct Relations {
+    /// fb[..ngen]: every prime ideal of norm below `bound`
     pub fb: Vec<PrimeIdeal>,
+    pub bound: u64,
     pub rels: Vec<Relation>,
     pub elems: Vec<Vec<BigInt>>,
     pub order: Order,
@@ -807,7 +809,7 @@ pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relatio
         tm.linalg_s += t.elapsed().as_secs_f64();
         if let Some(Found { group, reg, reg_fixed, prec, certified, reg_digits }) = res {
             tm.relations = rels.len();
-            let relations = Relations { fb: fld.fb[..fld.ngen].to_vec(), rels, elems, order: fld.o };
+            let relations = Relations { fb: fld.fb[..fld.ngen].to_vec(), bound, rels, elems, order: fld.o };
             return Ok((Bnf { n, r1, r2, disc: dk, group, regulator: reg, reg_fixed, prec, w, w_proven, certified, reg_digits, assumed_primes }, tm, relations));
         }
         want = rels.len() + more;
@@ -839,7 +841,7 @@ fn element_logs(fld: &Field, elems: &[Vec<BigInt>], prec: u32, cache: &mut Optio
 
 /// A basis of {z in Z^k : z Y = 0 mod d} (Y: k rows y_t): the HNF of
 /// [Y | I] together with [d I | 0], rows whose Y-part vanishes.
-fn kernel_lattice(ys: &[Vec<BigInt>], d: &BigInt) -> Vec<Vec<BigInt>> {
+pub(crate) fn kernel_lattice(ys: &[Vec<BigInt>], d: &BigInt) -> Vec<Vec<BigInt>> {
     let k = ys.len();
     if k == 0 {
         return vec![];

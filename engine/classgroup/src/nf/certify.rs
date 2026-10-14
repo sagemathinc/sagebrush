@@ -131,6 +131,12 @@ pub fn log_hr_lower(split: &[(u64, Vec<(u32, u32)>)], x: u64, n: usize, r1: usiz
 /// error) or None (rank deficient, or too imprecise: Err(true), which more
 /// precision may cure).
 pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: u32) -> Result<(Ball, Ball, BigInt, f64), bool> {
+    regulator_bounds_t(lams, errs, basis, prec).map(|(lo, hi, d, rel, _)| (lo, hi, d, rel))
+}
+
+/// regulator_bounds, also returning T (r rows over the lambdas): the units
+/// whose logarithms are b = T lambda (for their compact representations).
+pub fn regulator_bounds_t(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: u32) -> Result<(Ball, Ball, BigInt, f64, Vec<Vec<BigInt>>), bool> {
     let r = basis.len();
     let m = lams.len();
     if r == 0 || m < r {
@@ -235,7 +241,7 @@ pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: 
     let (lo, hi) = (lo.mul_2exp(scale), hi.mul_2exp(scale));
     // the relative error (for the digits shown only): pert / d
     let rel = hi.sub(&lo, 64).div(&lo.add(&hi, 64), 64).map_or(1.0, |q| q.to_f64_approx().abs()) + 2f64.powf(-(prec as f64) * 0.9);
-    Ok((lo, hi, d, rel))
+    Ok((lo, hi, d, rel, t))
 }
 
 /// The splitting of the primes below x in the quadratic field of
