@@ -641,6 +641,17 @@ try {
       const err = await ev(`window.sagebrush.board.load(${JSON.stringify(bad)}).then(() => "", (e) => String(e.message))`);
       check(err.includes(says) && (await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "o1", `a board in ${says} was not refused, or replaced the board shown: ${err}`);
     }
+    // a board's language: MATLAB and Magma code items, translated as in the notebook;
+    // the language buttons switch it, and every item runs again in the new one
+    await ev(`window.sagebrush.board.load({ title: "Languages", mode: "matlab", nodes: [{ id: "m1", title: "Data", code: "x = 1:5;\\ny = x.^2" }, { id: "m2", title: "Sum", code: "s = sum(y)" }] })`);
+    let outs = (await ev("(async () => JSON.stringify(await window.sagebrush.board.run()))()"));
+    const text = (j) => JSON.parse(j).map((o) => o.output).join(" ");
+    check(/y =\s+1\s+4\s+9\s+16\s+25/.test(text(outs)) && /s =\s+55/.test(text(outs)), "a MATLAB board's code items run as MATLAB: " + outs);
+    check((await ev("document.querySelector('[data-sbb=lang] button[data-mode=matlab]').getAttribute('aria-pressed')")) === "true", "the MATLAB button is pressed on a MATLAB board");
+    await ev(`window.sagebrush.board.edit((d) => { d.mode = "magma"; for (const n of d.nodes) n.code = n.id === "m1" ? "x := 2^10;\\nx;" : "Factorization(x + 2);"; })`);
+    outs = await ev("(async () => JSON.stringify(await window.sagebrush.board.outputs()))()");
+    check(outs.includes("1024") && outs.includes("<2, 1>, <3, 3>, <19, 1>"), "switched to Magma, the items run as Magma: " + outs);
+    check((await docOf()).mode === "magma", "the board's file says magma");
     await ev("localStorage.clear()");
   }
   check(!errors.length, "page errors: " + errors.join(" | "));
