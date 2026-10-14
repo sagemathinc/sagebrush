@@ -1910,6 +1910,62 @@ class EllipticCurve_rational_field:
         """
         return _LSeries(self)
 
+    def quadratic_twist(self, D):
+        """The quadratic twist by D, as a global minimal model.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('11a1')
+            sage: E.quadratic_twist(5)
+            Elliptic Curve defined by y^2 + y = x^3 + x^2 - 258*x - 2981 over Rational Field
+            sage: E.quadratic_twist(-4).conductor()
+            176
+        """
+        D = _exact_int(D, "D")
+        if D == 0:
+            raise ValueError("the twisting parameter must be nonzero")
+        c4, c6 = (int(c) for c in self.c_invariants())
+        return EllipticCurve_rational_field([0, 0, 0, -27 * D * D * c4, -54 * D ** 3 * c6]).minimal_model()
+
+    def modular_symbol(self, sign=1, normalize=None, implementation=None, nap=0):
+        """The modular symbol map of E, sign +1 (the only sign so far), as
+        Sage defines it: r -> lambda^+(r) / Omega^+, Omega^+ the least
+        positive real period of E, with lambda^+(r) = -pi i (int_r^(i oo) f
+        + int_(-r)^(i oo) f), f the newform of E; so its value at 0 is
+        L(E,1)/Omega^+, which is L_ratio() times the number of components
+        of E(R).  (Stein and Wuthrich's [r]^+ (Math. Comp. 82 (2013),
+        section 3), used by the p-adic L-series, divides by Omega_E =
+        E.period_lattice().omega() instead: it is this value divided by
+        the number of components.)
+
+        The map itself is exact: the newform's eigen-functional on Manin
+        symbols, computed multimodularly, checked exactly, and checked to
+        have E's a_q for every good prime up to the Sturm bound (engine
+        modsym/ec_map.rs; values at cusps by continued fractions, after
+        psage's modular_symbol_map, ported with William Stein's
+        permission).  Its scale comes from L(E,1)/Omega_E; when that is 0,
+        from the first quadratic twist by D > 0 with L(E_D,1) != 0 (Birch's
+        formula: sum_a (D/a) [a/D]^+ = sqrt(D) L(E_D,1)/Omega_E); when no
+        such twist exists (N a square and odd rank), from one period
+        computed numerically and recognized as a rational with denominator
+        at most 64.  The exact L-ratios rest on the premise of L_ratio() (a
+        bound on their denominators; see there).  The values agree with
+        Sage's default implementation (eclib) on 61 curves of conductor
+        below 1000 (sage-tests/test_ec_modsym.sage).
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('11a1'); f = E.modular_symbol(); f
+            Modular symbol with sign 1 over Rational Field attached to Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+            sage: f(0), f(1/7), f(1/5), f(-3/7)
+            (1/5, 7/10, 6/5, -9/5)
+            sage: EllipticCurve('37a1').modular_symbol()(1/5)
+            1
+        """
+        if sign != 1:
+            raise NotImplementedError("modular symbols of sign %s are not available in sagebrush yet (sign=1 only)" % (sign,))
+        return EllipticCurveModularSymbol(self)
+
     def sha(self):
         """The Tate-Shafarevich group (its analytic order: an()).
 
@@ -2640,6 +2696,240 @@ class _PeriodLattice:
 
     def __repr__(self):
         return "Period lattice associated to %r" % (self._E,)
+
+
+def _kronecker(D, a):
+    """The Kronecker symbol (D/a) for a > 0."""
+    if a == 1:
+        return 1
+    r = 1
+    while a % 2 == 0:
+        a //= 2
+        if D % 2 == 0:
+            return 0
+        if D % 8 in (3, 5):
+            r = -r
+    # the Jacobi symbol (D/a), a odd
+    D %= a
+    while D:
+        while D % 2 == 0:
+            D //= 2
+            if a % 8 in (3, 5):
+                r = -r
+        D, a = a, D
+        if D % 4 == 3 and a % 4 == 3:
+            r = -r
+        D %= a
+    return r if a == 1 else 0
+
+
+def _is_fundamental_discriminant(D):
+    if D % 4 == 1:
+        return all(D % (q * q) for q in range(3, int(abs(D) ** 0.5) + 2, 2))
+    if D % 4 == 0:
+        m = D // 4
+        return m % 4 in (2, 3) and all(m % (q * q) for q in range(3, int(abs(m) ** 0.5) + 2, 2))
+    return False
+
+
+class EllipticCurveModularSymbol:
+    """The modular symbol map r -> [r]^+ of an elliptic curve over Q (see
+    EllipticCurve.modular_symbol).
+
+    EXAMPLES::
+
+        sage: f = EllipticCurve('11a1').modular_symbol(); f.sign(), f(2/5)
+        (1, -13/10)
+    """
+
+    def __init__(self, E):
+        self._E = E
+        self._Em = E.minimal_model()
+        self._N = int(E.conductor())
+        self._aps = None
+        self._scale = None
+        self._zero = None
+
+    def __repr__(self):
+        return "Modular symbol with sign 1 over Rational Field attached to %r" % (self._E,)
+
+    def sign(self):
+        """1.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').modular_symbol().sign()
+            1
+        """
+        return 1
+
+    def elliptic_curve(self):
+        """The curve.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').modular_symbol().elliptic_curve()
+            Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+        """
+        return self._E
+
+    def base_ring(self):
+        """QQ.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').modular_symbol().base_ring()
+            Rational Field
+        """
+        from sage_all import QQ
+        return QQ
+
+    def _raw(self, cusps):
+        """X(0:1) and {0, a/b} in the exact map's units (engine)."""
+        if self._aps is None:
+            # a_q for the good primes up to the Sturm bound [SL2(Z) :
+            # Gamma0(N)]/6, which the engine checks all of
+            N = self._N
+            idx = N
+            for q in range(2, N + 1):
+                if N % q == 0 and all(q % d for d in range(2, int(q ** 0.5) + 1)):
+                    idx = idx // q * (q + 1)
+            bound = max(100, -(-idx // 6))
+            ps = [p for p in range(2, bound + 1) if all(p % d for d in range(2, int(p ** 0.5) + 1)) and N % p]
+            self._aps = [[p, int(a)] for p, a in zip(ps, self._ap_values(ps))]
+        r = _call("ec_modsym", n=self._N, aps=self._aps, cusps=[[str(a), str(b)] for a, b in cusps])
+        return int(r["zero"]), [int(v) for v in r["values"]]
+
+    def _ap_values(self, ps):
+        """a_p for the primes ps (good for E), from one aplist."""
+        if not ps:
+            return []
+        allp = self._Em.aplist(ps[-1] + 1)
+        primes = [q for q in range(2, ps[-1] + 1) if all(q % d for d in range(2, int(q ** 0.5) + 1))]
+        table = dict(zip(primes, allp))
+        return [table[p] for p in ps]
+
+    def _normalization(self):
+        """(scale, X(0:1)) with Stein and Wuthrich's [a/b]^+ = lambda^+/Omega_E
+        = scale ({0, a/b} - X(0:1)) (the symbol {0, a/b} and X in the exact
+        map's units)."""
+        if self._scale is not None:
+            return self._scale, self._zero
+        from fractions import Fraction
+        zero, _ = self._raw([])
+        if zero != 0:
+            L = Fraction(self._Em.lseries().L_ratio())
+            if L == 0:
+                raise ArithmeticError("L(E,1) = 0 but the modular symbol {0, oo} is not: inconsistent data")
+            scale = -L / zero
+        else:
+            scale = self._twist_scale()
+        self._scale, self._zero = scale, zero
+        return scale, zero
+
+    def _twist_scale(self):
+        """The scale from the first fundamental D > 0 prime to N with
+        sum_a (D/a) {0, a/D} != 0: that sum, times the scale, is
+        sqrt(D) L(E_D,1)/Omega_E = L_ratio(E_D) u, u = sqrt(D) Omega_(E_D)
+        / Omega_E (a small rational, recognized from proven enclosures)."""
+        from fractions import Fraction
+        import _sage_ec as _ec
+        N = self._N
+        for D in range(5, 2000):
+            if not _is_fundamental_discriminant(D) or _gcd(D, N) != 1:
+                continue
+            cusps = [(a, D) for a in range(1, D) if _gcd(a, D) == 1]
+            _, vals = self._raw(cusps)
+            T = sum(_kronecker(D, a) * v for (a, _), v in zip(cusps, vals))
+            if T == 0:
+                continue
+            ED = self._Em.quadratic_twist(D)
+            LD = Fraction(ED.lseries().L_ratio())
+            if LD == 0:
+                raise ArithmeticError("the twist by %d has L(E_D,1) = 0 but a nonzero twisted modular symbol" % D)
+            lo1, hi1 = _ec.real_period_ball(ED._a)
+            lo0, hi0 = _ec.real_period_ball(self._Em._a)
+            import math
+            sq = math.isqrt(D)
+            if sq * sq == D:
+                raise ArithmeticError("D = %d is a square" % D)
+            # sqrt(D) Omega_D / Omega_E, as an interval
+            slo = Fraction(math.isqrt(D * 10 ** 40), 10 ** 20)
+            shi = slo + Fraction(1, 10 ** 20)
+            ulo, uhi = _ec._iv_quotient(slo * lo1, shi * hi1, lo0, hi0)
+            cands = [Fraction(n, d) for d in (1, 2, 4) for n in range(1, 17) if ulo <= Fraction(n, d) <= uhi]
+            cands = sorted(set(cands))
+            if len(cands) != 1 or uhi - ulo > Fraction(1, 10 ** 6):
+                raise ArithmeticError("the period ratio sqrt(D) Omega_D/Omega_E in [%s, %s] is not recognized" % (float(ulo), float(uhi)))
+            return LD * cands[0] / T
+        return self._period_scale()
+
+    def _period_scale(self):
+        """The scale from one period, when no twist by D > 0 has L(E_D,1) !=
+        0 (N a square and odd rank: every such twist keeps the root number
+        -1).  For gamma = (a, b; N, d) in Gamma0(N) the path from
+        z0 = (-d + i)/N to gamma z0 = (a + i)/N closes up, so
+        2 pi i int_(i oo)^(a/N) f dz = sum a_n/n e^(-2 pi n/N)
+        (e^(2 pi i n a/N) - e^(-2 pi i n d/N)), whose real part over Omega^+
+        is Sage's symbol at a/N: a rational, recognized (denominator at most
+        64) from the sum to double precision."""
+        import math
+        from fractions import Fraction
+        N = self._N
+        cinf = self._components()
+        omega_plus = float(self._Em.period_lattice().omega()) / cinf
+        for a in range(1, N):
+            if _gcd(a, N) != 1:
+                continue
+            _, vals = self._raw([(a, N)])
+            zero, _ = self._raw([])
+            v = vals[0] - zero
+            if v == 0:
+                continue
+            d = pow(a, -1, N)
+            M = 8 * N + 50
+            an = self._Em.anlist(M)
+            re = 0.0
+            for n in range(1, M + 1):
+                if an[n]:
+                    re += an[n] / n * math.exp(-2 * math.pi * n / N) * (math.cos(2 * math.pi * n * a / N) - math.cos(2 * math.pi * n * d / N))
+            x = re / omega_plus
+            q = Fraction(x).limit_denominator(64)
+            if abs(float(q) - x) > 1e-8 or q == 0:
+                raise ArithmeticError("the period %r is not recognized as a small rational" % x)
+            # q is the Sage-normalized value at a/N; the scale here is for
+            # [r]^+ = Sage's value / (number of components)
+            return q / (v * cinf)
+        raise ArithmeticError("no cusp a/N with a nonzero modular symbol was found")
+
+    def __call__(self, r):
+        """[r]^+ for a rational r.
+
+        EXAMPLES::
+
+            sage: f = EllipticCurve('11a1').modular_symbol(); f(1/2), f(3/11)
+            (-4/5, 1/2)
+        """
+        from fractions import Fraction
+        r = Fraction(r)
+        scale, zero = self._normalization()
+        _, vals = self._raw([(r.numerator, r.denominator)])
+        from sage_all import QQ
+        return QQ(scale * (vals[0] - zero) * self._components())
+
+    def _components(self):
+        if not hasattr(self, "_cinf"):
+            self._cinf = int(self._Em.real_components())
+        return self._cinf
+
+    def _plus(self, r):
+        """Stein and Wuthrich's [r]^+ = lambda^+(r) / Omega_E (a Fraction):
+        this map's value divided by the number of components of E(R)."""
+        from fractions import Fraction
+        r = Fraction(r)
+        scale, zero = self._normalization()
+        _, vals = self._raw([(r.numerator, r.denominator)])
+        return scale * (vals[0] - zero)
 
 
 class _LSeries:
