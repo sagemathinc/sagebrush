@@ -291,3 +291,23 @@ print(type(c).__name__, len(c), c[0] is not None, len(c[1]), len(c[2]), c.has_xe
     "ErrorbarContainer 3 True 4 2 True True",
   ]);
 });
+
+test("imshow sets a norm's missing limit from the data on the norm itself, so a second image keeps it", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+import numpy as np
+for kw in [{"vmax": 10}, {"vmin": -3}]:
+    n = Normalize(**kw)
+    a = plt.imshow(np.array([[2.0, 3.0]]), norm=n)
+    print(n.vmin, n.vmax, tuple(float(v) for v in a.get_clim()))
+    b = plt.imshow(np.array([[0.0, 1.0]]), norm=n)
+    print(n.vmin, n.vmax, tuple(float(v) for v in b.get_clim()))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "2.0 10.0 (2.0, 10.0)",
+    "2.0 10.0 (2.0, 10.0)",
+    "-3.0 3.0 (-3.0, 3.0)",
+    "-3.0 3.0 (-3.0, 3.0)",
+  ]);
+});

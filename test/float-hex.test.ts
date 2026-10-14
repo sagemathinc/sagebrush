@@ -144,3 +144,25 @@ test("float.hex and float.fromhex as CPython's", () => {
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), join(dir, "fhex.py")], { encoding: "utf8" });
   assert.deepEqual(out.trimEnd().split("\n"), EXPECTED);
 });
+
+test("float.fromhex takes a str subclass and keeps -nan's sign; math.copysign reads a NaN's sign bit (as CPython's)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "float-hex-"));
+  writeFileSync(join(dir, "nan.py"), `import math, struct
+class S(str):
+    pass
+print(float.fromhex(S("0x1.8p1")), type(float.fromhex(S("1"))).__name__)
+x = float.fromhex("-nan")
+print(math.copysign(1.0, x), struct.pack(">d", x).hex(), repr(x), x.hex())
+print(math.copysign(1.0, float.fromhex("nan")), math.copysign(1.0, float.fromhex(" -NaN ")), math.copysign(1.0, float.fromhex("+nan")))
+print(math.copysign(1.0, -0.0), math.copysign(-2.0, 0.0), math.copysign(3.0, -math.inf))
+print(struct.pack(">d", math.copysign(math.nan, -1.0)).hex(), struct.pack(">d", math.copysign(-math.nan, 1.0)).hex())
+`);
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), join(dir, "nan.py")], { encoding: "utf8" });
+  assert.deepEqual(out.trimEnd().split("\n"), [
+    "3.0 float",
+    "-1.0 fff8000000000000 nan nan",
+    "1.0 -1.0 1.0",
+    "-1.0 2.0 -3.0",
+    "fff8000000000000 7ff8000000000000",
+  ]);
+});

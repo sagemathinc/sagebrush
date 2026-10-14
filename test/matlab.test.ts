@@ -195,15 +195,18 @@ test("reactive notebook: a MATLAB cell's definitions and references (src/dataflo
 
 test("MATLAB consoles wait for the end of an open block (is_complete, the session's check)", async () => {
   const { matlabIsIncomplete } = require("../src/matlab");
-  for (const t of ["if true", "for k = 1:3\n  disp(k)", "x = [1 2", "x = 1 + ...", "%{\na note", "while x < 3\n  if x"]) assert.equal(matlabIsIncomplete(t), true, t);
-  for (const t of ["x = 1", "if true\n  x = 1;\nend", "x = 1 +* 2", "x = )", "%{\n%}\nx = 1"]) assert.equal(matlabIsIncomplete(t), false, t);
+  for (const t of ["if true", "for k = 1:3\n  disp(k)", "x = [1 2", "x = 1 + ...", "%{\na note", "while x < 3\n  if x",
+    "x = 1 ...", "disp(1) ... % continue", "x = 1 ...\n"]) assert.equal(matlabIsIncomplete(t), true, t);
+  for (const t of ["x = 1", "if true\n  x = 1;\nend", "x = 1 +* 2", "x = )", "%{\n%}\nx = 1", "x = 1 ...\n+ 2"]) assert.equal(matlabIsIncomplete(t), false, t);
   const { notebookSession } = require("../src/notebook-session");
   const msgs: any[] = [];
   const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
   await s.ready;
   await s.handle({ id: 1, check: "if true", matlab: true });
   await s.handle({ id: 2, check: "if true\n  x = 1;\nend", matlab: true });
-  assert.deepEqual([1, 2].map((id) => msgs.find((m) => m.id === id).more), [true, false]);
+  await s.handle({ id: 3, check: "x = 1 ...", matlab: true });
+  await s.handle({ id: 4, check: "disp(1) ... % continue", matlab: true });
+  assert.deepEqual([1, 2, 3, 4].map((id) => msgs.find((m) => m.id === id).more), [true, false, true, true]);
 });
 
 test("a .m file whose outer block comment holds := runs as MATLAB (the CLI's guess)", () => {
