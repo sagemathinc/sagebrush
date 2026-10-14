@@ -147,7 +147,11 @@ function ensure(points: number) {
 
 const strictlyInside = (r: Rect, x: number, y: number) => x > r.x0 + 1e-6 && x < r.x1 - 1e-6 && y > r.y0 + 1e-6 && y < r.y1 - 1e-6;
 const grow = (r: Rect, m: number): Rect => ({ x0: r.x0 - m, y0: r.y0 - m, x1: r.x1 + m, y1: r.y1 + m });
+/** The most grid points one route's search may have. */
+const MAX_GRID = 500_000;
 const intersects = (r: Rect, s: Rect) => r.x0 < s.x1 && s.x0 < r.x1 && r.y0 < s.y1 && s.y0 < r.y1;
+// (intersects(grow(r, m), s), without a new box for each of a large board's obstacles)
+const near = (r: Rect, m: number, s: Rect) => r.x0 - m < s.x1 && s.x0 < r.x1 + m && r.y0 - m < s.y1 && s.y0 < r.y1 + m;
 
 /**
  * One route from a to b, keeping clear of `obstacles`; `ports` fixes the
@@ -185,6 +189,10 @@ function routeOne(a: Rect, b: Rect, given: Rect[], region: Rect, used: Used, pen
   const xs = [...xsSet].filter((v) => v >= region.x0 && v <= region.x1).sort((p, q) => p - q);
   const ys = [...ysSet].filter((v) => v >= region.y0 && v <= region.y1).sort((p, q) => p - q);
   const nx = xs.length, ny = ys.length;
+  // (too large a grid to search, among a large board's thousands of boxes:
+  // no route in this region; the edge stays straight rather than the page
+  // running out of memory)
+  if (nx * ny > MAX_GRID) return null;
   const xi = new Map(xs.map((v, i) => [v, i])), yi = new Map(ys.map((v, i) => [v, i]));
   // blocked grid points and segments: each box near, rasterized onto the grid
   const near = blocks.filter((r) => intersects(r, region));
@@ -330,7 +338,7 @@ export function* routeSteps(reqs: RouteRequest[], boxes: Rect[]): Generator<void
         for (const o of r.obstacles) { region.x0 = Math.min(region.x0, o.x0); region.y0 = Math.min(region.y0, o.y0); region.x1 = Math.max(region.x1, o.x1); region.y1 = Math.max(region.y1, o.y1); }
         region.x0 -= 4 * M; region.y0 -= 4 * M; region.x1 += 4 * M; region.y1 += 4 * M;
       }
-      const obs = r.obstacles.filter((o) => intersects(grow(o, M), region));
+      const obs = r.obstacles.filter((o) => near(o, M, region));
       const p = routeOne(r.a, r.b, obs, region, used, pen, ports);
       if (p) return p;
     }
@@ -387,7 +395,7 @@ export function* routeSteps(reqs: RouteRequest[], boxes: Rect[]): Generator<void
       const pen = sidePenalty(r.a, r.b, r.axis);
       for (const pad of [3 * M + 120, 3 * M + 600]) {
         const region = regionFor(r, pad);
-        p = routeOne(r.a, r.b, r.obstacles.filter((o) => intersects(grow(o, M), region)), region, used2, pen, f);
+        p = routeOne(r.a, r.b, r.obstacles.filter((o) => near(o, M, region)), region, used2, pen, f);
         if (p) break;
       }
       p ??= first.get(r.id)!;

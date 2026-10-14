@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 const items = Number(process.argv[2] ?? 2000), strokes = Number(process.argv[3] ?? 20000);
 const url = `${process.env.SB_URL ?? "http://127.0.0.1:8765/"}board/?items=${items}&strokes=${strokes}`;
-const port = 9450;
+const port = Number(process.env.CDP_PORT ?? 9450);
 const profile = mkdtempSync(join(tmpdir(), "sb-board-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
