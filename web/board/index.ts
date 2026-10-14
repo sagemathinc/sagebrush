@@ -6,7 +6,7 @@ export { BoardCode, siteEngine, type EngineParts } from "./code";
 export { Images, type ImageStore, type ImageInfo } from "./images";
 export { FORMAT, VERSION, cleanDoc, canonical, formatError, isBoard, layout, pageCount, pageOf, type BoardDoc, type BoardPage, type DocNode, type DocNote, type DocGroup, type DocEdge } from "./doc";
 export { BoardHistory, SCHEMA, toRecords, fromRecords, type HistoryModule, type Version } from "./history";
-export { cachedStore, IdbDocCache, merge3, docHash, identified, mergedNotice, type RemoteBoard, type DocCache, type CachedDoc, type Conflict, type Synced } from "./cached";
+export { cachedStore, IdbDocCache, merge3, docHash, identified, adopted, mergedNotice, type RemoteBoard, type DocCache, type CachedDoc, type Conflict, type Synced } from "./cached";
 export { boardFromText, fromMermaid } from "./mermaid";
 export { fromCocalcBoard, isCocalcBoard, leftOut } from "./cocalc";
 export { fromCanvas, toCanvas, isCanvas, canvasLeftOut, type Canvas } from "./canvas";

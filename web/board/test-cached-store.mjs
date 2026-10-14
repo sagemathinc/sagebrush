@@ -15,7 +15,11 @@
 // blank page keeps its identity (CORR-C06-2); documents are given the board
 // one at a time, in order (CORR-C06-3); an answer asked for before a
 // change made elsewhere is not taken over it (CORR-EB9-1); pages are told
-// apart by their own fields too, and the store gives pages ids (CORR-EB9-2).
+// apart by their own fields too, and the store gives pages ids (CORR-EB9-2);
+// the store opens by giving the remote's pages ids, saved only over the
+// document they were given to, and from the new one if it changed
+// (CORR-DB8-1, -2); a tie between pages is ours kept and said (CORR-DB8-3);
+// pages without ids arriving later get the ids of the pages they are.
 //   bun web/board/test-cached-store.mjs
 import { cachedStore, merge3 } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
@@ -31,13 +35,14 @@ const titleOf = (json) => JSON.parse(json).nodes[0].title;
 
 // an in-memory copy, and a remote whose calls can be held
 const memCache = () => { const m = new Map(); return { m, get: async (k) => m.get(k) ?? null, put: async (c) => { m.set(c.key, { ...c }); } }; };
-const fakeRemote = (d) => {
-  const r = { doc: d && copy(d), calls: [], holds: {}, fs: new Set() };
+const fakeRemote = (d, o = {}) => {
+  const r = { doc: d && copy(d), calls: [], holds: {}, fs: new Set(), saves: 0, cas: !!o.cas };
   const gate = async (name) => { r.calls.push(name); const h = r.holds[name]; if (h) { delete r.holds[name]; await h.p; } };
   // (the hash of the document it has when asked, answered when let go)
   r.hash = async () => { const h = r.doc ? await hashOf(r.doc) : null; await gate("hash"); return h; };
   r.load = async () => { const d0 = r.doc && copy(r.doc); await gate("load"); return d0; };
-  r.save = async (x) => { await gate("save"); r.doc = copy(x); };
+  // (with cas: only over the document whose hash it is given, as it is when the save is done)
+  r.save = async (x, ifHash) => { await gate("save"); if (r.cas && ifHash && (r.doc ? await hashOf(r.doc) : null) !== ifHash) return false; r.doc = copy(x); r.saves++; };
   r.subscribe = (f) => { r.fs.add(f); return () => r.fs.delete(f); };
   r.change = (x) => { r.doc = copy(x); for (const f of r.fs) f(copy(x)); };
   return r;
@@ -313,6 +318,84 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   await tick(50);
   const ids = got.doc.pages.map((p) => p.id), copyIds = JSON.parse(cache.m.get("k9").json).pages.map((p) => p.id), remoteIds = R.doc.pages.map((p) => p.id);
   check(ids.every((x) => typeof x === "string" && x) && new Set(ids).size === 2 && JSON.stringify(copyIds) === JSON.stringify(ids) && JSON.stringify(remoteIds) === JSON.stringify(ids), "pages without ids: given ids, the same in the board's, the copy's and the remote's: " + JSON.stringify({ ids, copyIds, remoteIds }));
+}
+
+// CORR-DB8-1: no copy, the remote's pages without ids: given ids, saved to the remote, the same everywhere
+{
+  const cache = memCache(), anon = { pages: [{ title: "One", nodes: [{ id: "a" }] }, { title: "Two", nodes: [{ id: "b" }] }] };
+  const R = fakeRemote(anon);
+  const store = cachedStore(R, "m1", cache);
+  store.subscribe(() => {});
+  const got = await store.load();
+  const s1 = await store.synced;
+  await tick(50);
+  const e = cache.m.get("m1"), ids = got.doc.pages.map((p) => p.id), copyIds = JSON.parse(e.json).pages.map((p) => p.id), remoteIds = R.doc.pages.map((p) => p.id);
+  check(s1 === "fresh" && ids.every(Boolean) && JSON.stringify(copyIds) === JSON.stringify(ids) && JSON.stringify(remoteIds) === JSON.stringify(ids) && R.saves === 1 && e.hash === e.remoteHash, "no copy, the remote's pages without ids: given ids, saved to the remote before anything else, the same everywhere: " + JSON.stringify({ s1, ids, copyIds, remoteIds, saves: R.saves, clean: e.hash === e.remoteHash }));
+}
+
+// CORR-DB8-2: the ids' save held, the remote changed meanwhile (compare-and-swap): the save refused, the migration from the new document, one page
+{
+  const cache = memCache(), old = { pages: [{ title: "One", nodes: [{ id: "a", title: "old" }] }] };
+  await cache.put({ key: "m2", json: JSON.stringify(cleanDoc(old)), hash: await hashOf(old), remoteHash: await hashOf(old), at: 0 });
+  const R = fakeRemote(old, { cas: true });
+  R.holds.save = held();
+  const saveGate = R.holds.save;
+  const store = cachedStore(R, "m2", cache);
+  store.subscribe(() => {});
+  const loading = store.load();
+  for (let k = 0; k < 50 && !R.calls.includes("save"); k++) await tick(10);
+  R.change({ pages: [{ title: "One!", nodes: [{ id: "a", title: "new" }] }] });
+  saveGate.open();
+  const got = await loading;
+  await store.synced;
+  await tick(50);
+  const pages = (d) => d.pages.map((p) => [p.id, p.title, p.nodes[0]?.title]);
+  const copyP = pages(JSON.parse(cache.m.get("m2").json)), remoteP = pages(R.doc);
+  check(got.doc.pages.length === 1 && got.doc.pages[0].title === "One!" && copyP.length === 1 && JSON.stringify(copyP) === JSON.stringify(remoteP) && copyP[0][2] === "new" && copyP[0][0], "the remote changed while the ids were being saved: refused, given ids again from the new document, one page everywhere: " + JSON.stringify({ got: pages(got.doc), copyP, remoteP, calls: R.calls }));
+}
+// (a remote without compare-and-swap: changed before the save, its hash asked just before: the same)
+{
+  const cache = memCache(), old = { pages: [{ title: "One", nodes: [{ id: "a", title: "old" }] }] };
+  const R = fakeRemote(old);
+  R.holds.load = held();
+  const loadGate = R.holds.load;
+  const store = cachedStore(R, "m3", cache);
+  store.subscribe(() => {});
+  const loading = store.load();
+  for (let k = 0; k < 50 && !R.calls.includes("load"); k++) await tick(10);
+  R.change({ pages: [{ title: "One!", nodes: [{ id: "a", title: "new" }] }] });
+  loadGate.open();
+  const got = await loading;
+  await store.synced;
+  await tick(50);
+  check(got.doc.pages.length === 1 && got.doc.pages[0].title === "One!" && R.doc.pages.length === 1 && R.doc.pages[0].id === got.doc.pages[0].id && R.saves === 1, "a remote without compare-and-swap, changed before the save: its hash asked just before, the ids given again from the new document: " + JSON.stringify({ got: got.doc.pages.map((p) => [p.id, p.title]), remote: R.doc.pages.map((p) => [p.id, p.title]), saves: R.saves, calls: R.calls }));
+}
+
+// CORR-DB8-3: pages that tie (two the same): ours kept, and the conflict said; never a guess by place
+{
+  const S = { title: "Same", nodes: [] };
+  const { doc: m, conflicts } = merge3(cleanDoc({ pages: [S, S] }), cleanDoc({ pages: [S, { ...S, slide: { x: 0, y: 0, w: 100, h: 100 } }] }), cleanDoc({ pages: [S, S, S] }));
+  check(m.pages.length === 2 && !!m.pages[1].slide && conflicts.some((c) => c.field === "pages"), "pages that tie: ours kept, the conflict said: " + JSON.stringify({ pages: m.pages.map((p) => !!p.slide), conflicts }));
+}
+
+// after the migration, a document from elsewhere whose pages have no ids: given those of the pages they are; which is which cannot be told: ours kept, said
+{
+  const cache = memCache(), start = cleanDoc({ pages: [{ id: "p1", title: "One", nodes: [{ id: "a" }] }, { id: "p2", title: "Two", nodes: [{ id: "b" }] }] });
+  await cache.put({ key: "m4", json: canonical(start), hash: await hashOf(start), remoteHash: await hashOf(start), at: 0 });
+  const R = fakeRemote(start);
+  const store = cachedStore(R, "m4", cache);
+  const notes = [];
+  store.subscribe((d, n) => { if (n) notes.push(n); });
+  await store.load();
+  await store.synced;
+  R.change({ pages: [{ title: "Zero", nodes: [{ id: "z" }] }, { title: "One, edited", nodes: [{ id: "a" }] }, { title: "Two", nodes: [{ id: "b" }] }] });
+  await tick(80);
+  const after = JSON.parse(cache.m.get("m4").json).pages;
+  check(after.length === 3 && after[1].id === "p1" && after[1].title === "One, edited" && after[2].id === "p2" && after[0].id && !["p1", "p2"].includes(after[0].id) && JSON.stringify(R.doc.pages.map((p) => p.id)) === JSON.stringify(after.map((p) => p.id)), "pages without ids from elsewhere: given the ids of the pages they are, a new one its own, the remote's too: " + JSON.stringify(after.map((p) => [p.id, p.title])));
+  R.change({ pages: [{ title: "Dup", nodes: [] }, { title: "Dup", nodes: [] }] });
+  await tick(80);
+  const kept = JSON.parse(cache.m.get("m4").json).pages.map((p) => p.title).join();
+  check(kept === after.map((p) => p.title).join() && notes.length === 1 && R.doc.pages.map((p) => p.title).join() === kept, "which page is which cannot be told: ours kept, said, and the remote's ours again: " + JSON.stringify({ kept, notes: notes.length, remote: R.doc.pages.map((p) => p.title) }));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
