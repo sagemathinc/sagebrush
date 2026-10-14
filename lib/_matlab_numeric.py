@@ -363,3 +363,332 @@ def rcond_(x):
 @_bs("linsolve")
 def linsolve_(a, b, opts=None):
     return _m.mldivide(a, b)
+
+
+# ------------------------------------------------------------------ polynomials
+
+def _poly_row(p):
+    a = _arr(p).reshape(-1)
+    return a.astype(np.complex128) if a.dtype.kind == "c" else a.astype(np.float64)
+
+
+def _trim(c):
+    """leading zeros dropped (one element kept)"""
+    k = 0
+    while k < c.size - 1 and c[k] == 0:
+        k += 1
+    return c[k:]
+
+
+def _row_value(c):
+    return _box(np.array(c.reshape((-1, 1))))
+
+
+def _deriv(c):
+    n = c.size
+    if n <= 1:
+        return np.zeros(1, dtype=c.dtype)
+    return c[:-1] * np.arange(n - 1, 0, -1)
+
+
+@_bi("polyder")
+def polyder_(nargout, a, b=None):
+    """polyder(p); polyder(a, b): the derivative of a*b; [q, d] = polyder(b, a): of b/a"""
+    A = _poly_row(a)
+    if b is None:
+        return _row_value(_trim(_deriv(A)))
+    B = _poly_row(b)
+    if nargout < 2:
+        # (the product a*b: a' b + a b')
+        return _row_value(_trim(_add_poly(np.convolve(_deriv(A), B), np.convolve(A, _deriv(B)))))
+    # (the quotient a/b: (a' b - a b') / b^2)
+    num = _add_poly(np.convolve(_deriv(A), B), -np.convolve(A, _deriv(B)))
+    den = np.convolve(B, B)
+    return [_row_value(_trim(num)), _row_value(_trim(den))]
+
+
+def _add_poly(p, q):
+    n = max(p.size, q.size)
+    r = np.zeros(n, dtype=np.result_type(p.dtype, q.dtype))
+    r[n - p.size:] += p
+    r[n - q.size:] += q
+    return r
+
+
+@_bs("polyint")
+def polyint_(p, k=0.0):
+    c = _poly_row(p)
+    n = c.size
+    r = np.zeros(n + 1, dtype=c.dtype)
+    r[:n] = c / np.arange(n, 0, -1)
+    r[n] = _scalar(k) if not (isinstance(k, complex)) else k
+    return _row_value(r)
+
+
+@_bs("polyvalm")
+def polyvalm_(p, X):
+    c = _poly_row(p)
+    M = _mat(X)
+    if M.ndim != 2 or M.shape[0] != M.shape[1]:
+        raise _err("Input X must be a square matrix.")
+    n = M.shape[0]
+    Y = np.zeros((n, n), dtype=np.result_type(c.dtype, M.dtype))
+    for a in c:
+        Y = Y @ M + a * np.eye(n)
+    return _unmat(Y)
+
+
+# ------------------------------------------------------------------ piecewise polynomials
+
+def _pp(breaks, coefs, pieces, order, dim):
+    return _m._struct1({"form": Char("pp"), "breaks": _box(np.array(np.asarray(breaks, dtype=np.float64).reshape((-1, 1)))),
+                        "coefs": _unmat(np.asarray(coefs)), "pieces": float(pieces), "order": float(order), "dim": float(dim)})
+
+
+def _pp_parts(pp):
+    if type(pp) is not _m.Struct or "coefs" not in pp.fields:
+        raise _err("Input must be a piecewise polynomial structure.")
+    d = pp.a[0]
+    br = _arr(d["breaks"]).reshape(-1).astype(np.float64)
+    C = _mat(d["coefs"])
+    dim = int(_scalar(d["dim"])) if "dim" in d else 1
+    return br, C, dim
+
+
+def _ppval(br, C, dim, xs):
+    """values at xs (a flat array): each piece's polynomial in x - breaks(i),
+    the end pieces extended beyond the breaks; one row per dimension"""
+    pieces = br.size - 1
+    k = np.searchsorted(br[1:-1], xs, side="right") if pieces > 1 else np.zeros(xs.size, dtype=np.int64)
+    t = xs - br[k]
+    out = np.zeros((dim, xs.size), dtype=C.dtype)
+    for di in range(dim):
+        rows = C[k * dim + di]
+        v = np.zeros(xs.size, dtype=C.dtype)
+        for j in range(C.shape[1]):
+            v = v * t + rows[:, j]
+        out[di] = v
+    out[:, np.isnan(xs)] = np.nan
+    return out
+
+
+def _cubic_coefs(x, y, d):
+    """the Hermite cubic of each piece, in x - x(k): [c3 c2 c1 c0]"""
+    h = np.diff(x)
+    y = np.asarray(y)
+    d = np.asarray(d)
+    delta = np.diff(y) / h
+    c3 = (d[:-1] + d[1:] - 2 * delta) / (h * h)
+    c2 = (3 * delta - 2 * d[:-1] - d[1:]) / h
+    return np.stack([c3, c2, d[:-1], y[:-1]], axis=1)
+
+
+def _xy_data(x, y):
+    X = _arr(x).reshape(-1).astype(np.float64)
+    Y = _mat(y)
+    vec = Y.shape[0] == 1 or Y.shape[1] == 1
+    if vec:
+        Y = Y.reshape((1, -1))
+    if np.any(np.diff(X) <= 0):
+        order = np.argsort(X, kind="stable")
+        X = X[order]
+        if Y.shape[1] == X.size:
+            Y = Y[:, order]
+        if np.any(np.diff(X) == 0):
+            raise _err("The data sites should be distinct.")
+    return X, Y, vec
+
+
+def _spline_pp(x, y):
+    """MATLAB's spline: not-a-knot (2 points: the line; 3: the parabola), or
+    clamped when y has two values more than x (the end slopes)"""
+    X, Y, vec = _xy_data(x, y)
+    n = X.size
+    dim = Y.shape[0]
+    clamped = Y.shape[1] == n + 2
+    if not clamped and Y.shape[1] != n:
+        raise _err("The number of sites, %d, is incompatible with the number of values, %d." % (n, Y.shape[1]))
+    rows = []
+    order = 4
+    for di in range(dim):
+        yv = Y[di]
+        if clamped:
+            s0, s1, yv = yv[0], yv[-1], yv[1:-1]
+            d = _clamped_slopes(X, yv, s0, s1)
+            rows.append(_cubic_coefs(X, yv, d))
+        elif n == 2:
+            order = 2
+            rows.append(np.array([[(yv[1] - yv[0]) / (X[1] - X[0]), yv[0]]]))
+        elif n == 3:
+            # (the parabola through the three points, in its two pieces)
+            order = 3
+            d = _m._spline_slopes(list(X), [complex(t) if np.iscomplexobj(yv) else float(t) for t in yv])
+            c = _cubic_coefs(X, yv, np.array(d))
+            rows.append(c[:, 1:])
+        else:
+            d = _m._spline_slopes(list(X), [float(t) for t in yv]) if not np.iscomplexobj(yv) else \
+                [complex(a, b) for a, b in zip(_m._spline_slopes(list(X), [float(t) for t in yv.real]), _m._spline_slopes(list(X), [float(t) for t in yv.imag]))]
+            rows.append(_cubic_coefs(X, yv, np.array(d)))
+    pieces = rows[0].shape[0]
+    C = np.zeros((pieces * dim, rows[0].shape[1]), dtype=np.result_type(*[r.dtype for r in rows]))
+    for di in range(dim):
+        C[di::dim] = rows[di]
+    return X, C, dim, vec
+
+
+def _clamped_slopes(X, y, s0, s1):
+    n = X.size
+    h = np.diff(X)
+    delta = np.diff(y) / h
+    A = np.zeros((n, n))
+    r = np.zeros(n, dtype=np.result_type(y.dtype, np.float64))
+    A[0, 0] = 1.0
+    r[0] = s0
+    A[n - 1, n - 1] = 1.0
+    r[n - 1] = s1
+    for k in range(1, n - 1):
+        A[k, k - 1] = h[k]
+        A[k, k] = 2 * (h[k - 1] + h[k])
+        A[k, k + 1] = h[k - 1]
+        r[k] = 3 * (h[k] * delta[k - 1] + h[k - 1] * delta[k])
+    return np.linalg.solve(A, r)
+
+
+def _pchip_pp(x, y):
+    X, Y, vec = _xy_data(x, y)
+    if Y.shape[1] != X.size:
+        raise _err("The number of sites, %d, is incompatible with the number of values, %d." % (X.size, Y.shape[1]))
+    dim = Y.shape[0]
+    rows = [_cubic_coefs(X, Y[di], np.array(_m._pchip_slopes(list(X), [float(t) for t in Y[di]]))) for di in range(dim)]
+    pieces = rows[0].shape[0]
+    C = np.zeros((pieces * dim, 4))
+    for di in range(dim):
+        C[di::dim] = rows[di]
+    return X, C, dim, vec
+
+
+def _pp_or_values(builder, x, y, xq):
+    X, C, dim, vec = builder(x, y)
+    if xq is None:
+        return _pp(X, C, X.size - 1, C.shape[1], dim)
+    Q = _arr(xq).astype(np.float64)
+    vals = _ppval(X, C, dim, Q.reshape(-1))
+    if dim == 1:
+        return _box(np.array(vals.reshape(Q.shape)))
+    # (a value per dimension and query: dim-by-size(xq))
+    qd = list(_m._dims(xq))
+    if len(qd) == 2 and qd[0] == 1:
+        qd = [qd[1]]
+    out = vals.reshape([dim] + [int(v) for v in qd])
+    return _box(np.array(np.moveaxis(out, 0, -1).reshape(tuple(reversed([dim] + [int(v) for v in qd])))))
+
+
+@_bs("spline")
+def spline_(x, y, xq=None):
+    return _pp_or_values(_spline_pp, x, y, xq)
+
+
+@_bs("pchip")
+def pchip_(x, y, xq=None):
+    return _pp_or_values(_pchip_pp, x, y, xq)
+
+
+@_bs("ppval")
+def ppval_(pp, xx):
+    br, C, dim = _pp_parts(pp)
+    Q = _arr(xx).astype(np.float64)
+    vals = _ppval(br, C, dim, Q.reshape(-1))
+    if dim == 1:
+        return _box(np.array(vals.reshape(Q.shape)))
+    return _unmat(vals) if Q.size else _unmat(np.zeros((dim, 0)))
+
+
+@_bs("mkpp")
+def mkpp_(breaks, coefs, d=1.0):
+    br = _arr(breaks).reshape(-1).astype(np.float64)
+    dim = int(_scalar(d))
+    C = _mat(coefs)
+    pieces = br.size - 1
+    if C.size % (pieces * dim):
+        raise _err("The number of coefficients does not match the number of pieces and the dimension.")
+    order = C.size // (pieces * dim)
+    C = C.reshape((pieces * dim, order)) if C.shape != (pieces * dim, order) else C
+    return _pp(br, C, pieces, order, dim)
+
+
+@_bi("unmkpp")
+def unmkpp_(nargout, pp):
+    br, C, dim = _pp_parts(pp)
+    out = [_box(np.array(br.reshape((-1, 1)))), _unmat(C), float(br.size - 1), float(C.shape[1]), float(dim)]
+    return out[0] if nargout <= 1 else out[:nargout]
+
+
+# ------------------------------------------------------------------ interp2
+
+@_bs("interp2")
+def interp2_(*args):
+    """interp2(X, Y, V, Xq, Yq[, method[, extrapval]]), interp2(V, Xq, Yq), interp2(V[, k]):
+    linear (the default), nearest or spline (a tensor-product not-a-knot spline)"""
+    args = list(args)
+    method, extrap = "linear", _math.nan
+    if args and not _istext(args[-1]) and len(args) >= 2 and _istext(args[-2]):
+        extrap = _scalar(args.pop())
+    if args and _istext(args[-1]):
+        method = _text(args.pop()).lower().lstrip("*")
+    if method == "cubic":
+        method = "spline"
+    if method not in ("linear", "nearest", "spline"):
+        raise _err("Invalid interpolation method.")
+    if len(args) in (1, 2):
+        V = _mat(args[0])
+        k = int(_scalar(args[1])) if len(args) == 2 else 1
+        m, n = V.shape
+        x = np.arange(1.0, n + 1)
+        y = np.arange(1.0, m + 1)
+        step = 2.0 ** -k
+        Xq, Yq = np.meshgrid(np.arange(1.0, n + step / 2, step), np.arange(1.0, m + step / 2, step))
+    elif len(args) == 3:
+        V = _mat(args[0])
+        m, n = V.shape
+        x, y = np.arange(1.0, n + 1), np.arange(1.0, m + 1)
+        Xq, Yq = _mat(args[1]), _mat(args[2])
+    else:
+        Xa, Ya, V, Xq, Yq = _mat(args[0]), _mat(args[1]), _mat(args[2]), _mat(args[3]), _mat(args[4])
+        x = Xa[0, :] if Xa.ndim == 2 and Xa.shape[0] > 1 and Xa.shape == V.shape else Xa.reshape(-1)
+        y = Ya[:, 0] if Ya.ndim == 2 and Ya.shape[1] > 1 and Ya.shape == V.shape else Ya.reshape(-1)
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    if V.shape != (y.size, x.size):
+        raise _err("The lengths of X and Y must match the size of V.")
+    # (a vector of x queries and one of y queries, of different orientations: their grid)
+    if Xq.shape[0] == 1 and Yq.shape[1] == 1 and Xq.size > 1 and Yq.size > 1:
+        Xq, Yq = np.meshgrid(Xq.reshape(-1), Yq.reshape(-1))
+    shape = Xq.shape
+    xq, yq = Xq.reshape(-1).astype(np.float64), Yq.reshape(-1).astype(np.float64)
+    out = np.full(xq.size, np.nan, dtype=V.dtype if V.dtype.kind == "c" else np.float64)
+    inside = (xq >= x[0]) & (xq <= x[-1]) & (yq >= y[0]) & (yq <= y[-1])
+    if method == "spline":
+        # (along x for each row, then along y)
+        res = np.zeros(xq.size, dtype=out.dtype)
+        rowsplines = [_spline_pp(_box(np.array(x.reshape((-1, 1)))), _box(np.array(V[i].reshape((-1, 1)))))[:2] for i in range(y.size)]
+        for q in range(xq.size):
+            col = np.array([_ppval(br, C, 1, np.array([xq[q]]))[0, 0] for br, C in rowsplines])
+            br, C, _, _ = _spline_pp(_box(np.array(y.reshape((-1, 1)))), _box(np.array(col.reshape((-1, 1)))))
+            res[q] = _ppval(br, C, 1, np.array([yq[q]]))[0, 0]
+        out[inside] = res[inside]
+    else:
+        i = np.clip(np.searchsorted(x, xq, side="right") - 1, 0, max(x.size - 2, 0))
+        j = np.clip(np.searchsorted(y, yq, side="right") - 1, 0, max(y.size - 2, 0))
+        if method == "nearest":
+            ii = np.where((x.size > 1) & (xq - x[i] >= x[np.minimum(i + 1, x.size - 1)] - xq), np.minimum(i + 1, x.size - 1), i)
+            jj = np.where((y.size > 1) & (yq - y[j] >= y[np.minimum(j + 1, y.size - 1)] - yq), np.minimum(j + 1, y.size - 1), j)
+            res = V[jj, ii]
+        else:
+            i1, j1 = np.minimum(i + 1, x.size - 1), np.minimum(j + 1, y.size - 1)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                tx = np.where(i1 > i, (xq - x[i]) / (x[i1] - x[i]), 0.0)
+                ty = np.where(j1 > j, (yq - y[j]) / (y[j1] - y[j]), 0.0)
+            res = (V[j, i] * (1 - tx) * (1 - ty) + V[j, i1] * tx * (1 - ty) + V[j1, i] * (1 - tx) * ty + V[j1, i1] * tx * ty)
+        out[inside] = res[inside]
+    out[~inside] = extrap
+    return _unmat(out.reshape(shape))
