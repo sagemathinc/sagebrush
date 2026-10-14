@@ -277,3 +277,6 @@
 .sbb [data-sbb=pr-bar] button { min-width: 32px; border-color: transparent; background: none; font-size: 18px; line-height: 1; padding: 4px 8px; }
 .sbb [data-sbb=pr-where] { min-width: 52px; text-align: center; font-size: 13px; color: #556; }
 .sbb.sbb-idle [data-sbb=pr-bar] { opacity: 0; }
+
+/* a template's items under a page made from it (mount.ts): shown, not this page's to edit */
+.sbb .board-item.board-inert { pointer-events: none; }

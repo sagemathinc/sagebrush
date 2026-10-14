@@ -34,8 +34,8 @@
 // uses, window.sagebrush.board on sagebrush.space: load(doc), focus(ids),
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
-import { Board, type Camera } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
+import { Board, type Camera, type Edge, type Item } from "./board";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, templateOf, lookOf, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import { Toolbar, defaultTools } from "./toolbar";
@@ -119,6 +119,8 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <dialog data-sbb="pgdlg"><h3>Page</h3><form data-sbb="pgform" method="dialog">
 <fieldset data-sbb="pg-title-set"><label>Title <input type="text" data-sbb="pg-title" maxlength="200"></label></fieldset>
 <fieldset><label><input type="checkbox" data-sbb="pg-slide"> A slide (16:9): a card it is arranged on, which Present shows</label></fieldset>
+<fieldset data-sbb="pg-tpl-set"><label><input type="checkbox" data-sbb="pg-template"> A template: pages made from it show its card, background and items under their own</label></fieldset>
+<fieldset data-sbb="pg-uses-set"><label>Made from <select data-sbb="pg-uses"></select></label></fieldset>
 <fieldset><legend>Background</legend><div data-sbb="pg-colors" role="group" aria-label="Background color"></div></fieldset>
 <fieldset data-sbb="pg-pic-set"><button type="button" data-sbb="pg-pic">Picture…</button><button type="button" data-sbb="pg-nopic">No picture</button><span data-sbb="pg-pic-on"></span></fieldset>
 <div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="pg-go" class="be-done">Done</button></div></form></dialog>
@@ -189,6 +191,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (documents loaded: a preview computed for one is not kept in another)
   let loads = 0;
 
+  // a page made from a template: the template's items and edges under its
+  // own (their ids "tpl:...", inert: shown, not the page's to edit; their
+  // code shown on the template's page only)
+  function underlay(d: BoardDoc, i: number): { items: Item[]; edges: Edge[] } {
+    const t = templateOf(d, i);
+    if (t < 0) return { items: [], edges: [] };
+    const tl = layout(pageView(d, t), measure), id = (s: string) => "tpl:" + s;
+    return {
+      items: tl.items.map((it) => ({ ...it, id: id(it.id), parent: it.parent && id(it.parent), inert: true, code: undefined, order: undefined, hideCode: undefined })),
+      edges: tl.edges.map((e) => ({ ...e, id: id(e.id), from: id(e.from), to: id(e.to), src: undefined })),
+    };
+  }
+
   /** Lay out and draw a document, the camera where it is (`view`: a version
    * being looked at in TimeTravel, which is not the document and does not run). */
   async function show(d: BoardDoc, view = false) {
@@ -231,9 +246,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
     if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
-    board.setItems(items, edges);
-    // (the page's slide and background)
-    board.backdrop = v.slide || v.background ? { slide: v.slide, ...v.background } : null;
+    // (a template's under the page's own)
+    const under = underlay(d, pageIx);
+    board.setItems([...under.items, ...items], [...under.edges, ...edges]);
+    // (the page's slide and background, or its template's)
+    const look = lookOf(d, pageIx);
+    board.backdrop = look.slide || look.background ? { slide: look.slide, ...look.background } : null;
     toolbar.tools.value = d.tools ?? defaultTools();
     shownPage = pageIx;
     const gen = ++routingGen;
@@ -372,7 +390,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function pageBar() {
     const d = doc!, n = pageCount(d), sel = $("pgsel") as HTMLSelectElement;
     $("pages").hidden = n < 2;
-    sel.replaceChildren(...Array.from({ length: n }, (_, i) => new Option(`${i + 1}. ${pageOf(d, i).title || "Page " + (i + 1)}`, String(i))));
+    sel.replaceChildren(...Array.from({ length: n }, (_, i) => new Option(`${i + 1}. ${pageOf(d, i).title || "Page " + (i + 1)}${d.pages?.length && pageOf(d, i).template ? " (template)" : ""}`, String(i))));
     sel.value = String(pageIx);
     ($("pgprev") as HTMLButtonElement).disabled = pageIx <= 0;
     ($("pgnext") as HTMLButtonElement).disabled = pageIx >= n - 1;
@@ -400,7 +418,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (at < 0) {
       caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
       // (a slide: its card)
-      const s = doc && pageView(doc, pageIx).slide;
+      const s = doc && lookOf(doc, pageIx).slide;
       if (s) { const c = board.cameraFor(s.x, s.y, s.x + s.w, s.y + s.h); if (now) board.setCamera(c); else board.flyTo(c); }
       else board.focus(undefined, now);
     } else {
@@ -573,7 +591,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   $("addpage").onclick = async () => {
     let n = 0;
-    await editor.commit((d) => { const ps = paged(d); ps.splice(pageIx + 1, 0, { title: `Page ${ps.length + 1}`, nodes: [] }); n = pageIx + 1; });
+    // (made from the template the page shown uses, or is)
+    await editor.commit((d) => {
+      const ps = paged(d), cur = ps[pageIx], uses = cur?.template ? cur.id : cur?.uses;
+      ps.splice(pageIx + 1, 0, { title: `Page ${ps.length + 1}`, nodes: [], ...(uses ? { uses } : {}) });
+      n = pageIx + 1;
+    });
     await page(n);
     if (!editor.on) editBtn.click();
   };
@@ -594,19 +617,27 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     swatches.append(b);
   }
   const pgShow = () => {
-    const slide = ($("pg-slide") as HTMLInputElement).checked;
+    const slide = ($("pg-slide") as HTMLInputElement).checked, tpl = ($("pg-template") as HTMLInputElement).checked;
+    $("pg-uses-set").hidden = tpl || ($("pg-uses") as HTMLSelectElement).options.length < 2;
     for (const b of swatches.querySelectorAll<HTMLButtonElement>("button")) b.setAttribute("aria-pressed", String((b.dataset.color || undefined) === pend.color));
     $("pg-pic-set").hidden = !slide;
     $("pg-nopic").hidden = !pend.image;
     $("pg-pic-on").textContent = pend.image ? "a picture covers the card" : "";
   };
-  $("pg-slide").onchange = pgShow;
+  $("pg-slide").onchange = $("pg-template").onchange = pgShow;
   $("pageprops").onclick = () => {
     if (!doc) return;
     const p = pageOf(doc, pageIx);
     $("pg-title-set").hidden = !doc.pages?.length;
     ($("pg-title") as HTMLInputElement).value = p.title ?? "";
     ($("pg-slide") as HTMLInputElement).checked = !!p.slide;
+    // (templates: a board with pages; this page one, or made from one of the others)
+    const paged = !!doc.pages?.length;
+    $("pg-tpl-set").hidden = !paged;
+    ($("pg-template") as HTMLInputElement).checked = paged && !!p.template;
+    const uses = $("pg-uses") as HTMLSelectElement, tpls = paged ? doc.pages!.map((q, k) => [q, k] as const).filter(([q, k]) => q.template && q.id && k !== pageIx) : [];
+    uses.replaceChildren(new Option("No template", ""), ...tpls.map(([q, k]) => new Option(q.title || `Page ${k + 1}`, q.id!)));
+    uses.value = p.uses && tpls.some(([q]) => q.id === p.uses) ? p.uses : "";
     pend = { color: p.background?.color, image: p.background?.image };
     pgShow();
     pgdlg.showModal();
@@ -635,7 +666,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const card = slide && !pageOf(doc!, pageIx).slide ? cardAround() : null;
     await editor.commit((d) => {
       const p = pageOf(d, pageIx);
-      if (d.pages?.length) p.title = title || undefined;
+      if (d.pages?.length) {
+        p.title = title || undefined;
+        const tpl = ($("pg-template") as HTMLInputElement).checked, uses = ($("pg-uses") as HTMLSelectElement).value;
+        if (tpl) { p.template = true; p.id ??= "t" + Math.random().toString(36).slice(2, 8); delete p.uses; }
+        else { delete p.template; if (uses) p.uses = uses; else delete p.uses; }
+      }
       if (!slide) delete p.slide;
       else if (card) p.slide = card;
       const bg = { ...(pend.color ? { color: pend.color } : {}), ...(slide && pend.image ? { image: pend.image } : {}) };
@@ -806,8 +842,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function sheets(mode: "pages" | "tour" = "pages"): Sheet[] {
     const d = doc!, n = pageCount(d), out: Sheet[] = [];
     for (let i = 0; i < n; i++) {
-      const v = pageView(d, i);
-      const { items, edges } = layout(v, measure);
+      // (a template is no sheet of its own; a page made from one has its items under its own)
+      if (d.pages?.length && pageOf(d, i).template) continue;
+      const v = pageView(d, i), under = underlay(d, i);
+      const own = layout(v, measure), items = [...under.items, ...own.items], edges = [...under.edges, ...own.edges];
       const box = (ids?: string[]) => {
         const its = ids ? items.filter((it) => ids.includes(it.id)) : items;
         if (!its.length) return { x0: 0, y0: 0, x1: 400, y1: 300 };
@@ -815,8 +853,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       };
       const title = d.pages?.length ? [d.title, pageOf(d, i).title || `Page ${i + 1}`].filter(Boolean).join(" — ") : d.title;
       // (a slide: its sheet is its card; and its backdrop under it all)
-      const backdrop = v.slide || v.background ? { slide: v.slide, ...v.background } : undefined;
-      const whole = v.slide ? { x0: v.slide.x, y0: v.slide.y, x1: v.slide.x + v.slide.w, y1: v.slide.y + v.slide.h } : box();
+      const look = lookOf(d, i), sl = look.slide;
+      const backdrop = sl || look.background ? { slide: sl, ...look.background } : undefined;
+      const whole = sl ? { x0: sl.x, y0: sl.y, x1: sl.x + sl.w, y1: sl.y + sl.h } : box();
       const where = n > 1 ? `page ${i + 1} of ${n}` : "";
       const ss = mode === "tour" ? v.steps ?? [] : [];
       if (!ss.length || v.intro) out.push({ items, edges, box: whole, title, caption: mode === "tour" ? v.intro : undefined, folio: where, backdrop });
@@ -859,6 +898,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (on) {
       const frames: { page: number; step: number }[] = [];
       for (let p = 0; p < pageCount(doc); p++) {
+        // (a template is shown on the pages made from it, not on its own)
+        if (doc.pages?.length && pageOf(doc, p).template) continue;
         frames.push({ page: p, step: -1 });
         (pageView(doc, p).steps ?? []).forEach((_, k) => frames.push({ page: p, step: k }));
       }
@@ -892,7 +933,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     P.i = Math.max(0, Math.min(P.frames.length - 1, i));
     const f = P.frames[P.i];
     if (f.page !== pageIx) await page(f.page);
-    const v = pageView(doc, pageIx), s = v.slide, st = f.step >= 0 ? v.steps?.[f.step] : undefined;
+    const v = pageView(doc, pageIx), s = lookOf(doc, pageIx).slide, st = f.step >= 0 ? v.steps?.[f.step] : undefined;
     at = f.step;
     board.insets = { top: 0, right: 0, bottom: 0, left: 0 };
     // (a slide's card fills the screen one way, the rest dark: letterboxed)
@@ -920,7 +961,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   // (the dark around a slide's card: where the card is on the screen, as the camera moves)
   function placeMask() {
-    const s = doc && presenting ? pageView(doc, pageIx).slide : undefined;
+    const s = doc && presenting ? lookOf(doc, pageIx).slide : undefined;
     if (!s) return;
     const c = board.camera;
     Object.assign(prMask.style, { left: (s.x - c.x) * c.z + "px", top: (s.y - c.y) * c.z + "px", width: s.w * c.z + "px", height: s.h * c.z + "px" });

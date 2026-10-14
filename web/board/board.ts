@@ -38,6 +38,8 @@ export interface Item {
   outline?: number[];
   /** ink: below 1, a highlighter's */
   opacity?: number;
+  /** shown, not the page's own (a template's, under a page made from it): not picked, selected or dropped into */
+  inert?: boolean;
   /** notes: Markdown shown only when zoomed in */
   detail?: string;
   /** notes: a link, shown at the note's foot */
@@ -60,7 +62,7 @@ export interface Item {
 }
 
 /** What an item's element shows. */
-export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "image">>;
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "image" | "inert">>;
 
 /** Code items' engine (code.ts, through page.ts): their output, state and running. */
 export interface CodeHost {
@@ -513,7 +515,7 @@ export class Board {
   /** An item's element, unplaced (also for measuring a note's height at a width: `now`, math typeset at once). */
   content(it: Content, now = false): HTMLElement {
     const el = document.createElement("div");
-    el.className = `board-item board-${it.kind}` + (it.shape && it.shape !== "rect" ? ` board-shape board-shape-${it.shape}` : it.shape ? " board-shape" : "") + (it.code !== undefined ? " board-code" : "");
+    el.className = `board-item board-${it.kind}` + (it.shape && it.shape !== "rect" ? ` board-shape board-shape-${it.shape}` : it.shape ? " board-shape" : "") + (it.code !== undefined ? " board-code" : "") + (it.inert ? " board-inert" : "");
     // a code item: its place in the reading order and ▶ before the title
     if (it.code !== undefined) {
       const head = document.createElement("div");
@@ -1001,7 +1003,7 @@ export class Board {
   near(x0: number, y0: number, x1: number, y1: number): Item[] {
     const big = ((x1 - x0) / CELL) * ((y1 - y0) / CELL) > 4 * this.byId.size + 64;
     const its = big ? [...this.byId.values()] : [...this.boxes.query(x0, y0, x1, y1, new Set()), ...this.strokes.query(x0, y0, x1, y1, new Set())];
-    return its.filter((it) => (it.kind === "note" || it.kind === "group" || it.kind === "ink") && it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0);
+    return its.filter((it) => (it.kind === "note" || it.kind === "group" || it.kind === "ink") && !it.inert && it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0);
   }
 
   /** An edge's route, or its straight line from border to border (world coordinates). */
@@ -1038,7 +1040,7 @@ export class Board {
 
   /** The groups holding a world point, innermost first, leaving out `except`. */
   groupsAt(x: number, y: number, except: Set<string> = new Set()): Item[] {
-    return [...this.boxes.query(x, y, x + 0.01, y + 0.01, new Set())].filter((it) => it.kind === "group" && !except.has(it.id)).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+    return [...this.boxes.query(x, y, x + 0.01, y + 0.01, new Set())].filter((it) => it.kind === "group" && !it.inert && !except.has(it.id)).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
   }
 
   // (erasing: the stroke at a page point goes, shown faded until the drag ends)
@@ -1057,7 +1059,7 @@ export class Board {
     const hits = [...this.strokes.query(x - t, y - t, x + t, y + t, new Set())];
     for (let i = hits.length - 1; i >= 0; i--) {
       const it = hits[i];
-      if (it.outline && inkHit(it.outline, x - it.x, y - it.y, t)) return it;
+      if (it.outline && !it.inert && inkHit(it.outline, x - it.x, y - it.y, t)) return it;
     }
     return null;
   }
@@ -1065,7 +1067,7 @@ export class Board {
   /** The note or group at a screen point, innermost first. */
   itemAt(sx: number, sy: number): Item | null {
     const c = this.camera, x = c.x + sx / c.z, y = c.y + sy / c.z;
-    const hits = [...this.boxes.query(x, y, x + 0.01, y + 0.01, new Set())];
+    const hits = [...this.boxes.query(x, y, x + 0.01, y + 0.01, new Set())].filter((it) => !it.inert);
     hits.sort((a, b) => (a.kind === "group" ? 0 : 100) + (a.depth ?? 0) - ((b.kind === "group" ? 0 : 100) + (b.depth ?? 0)));
     return hits.pop() ?? null;
   }
