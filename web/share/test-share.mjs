@@ -3,7 +3,7 @@
 //
 //   node web/share/test-share.mjs
 import { createHash, createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -75,7 +75,8 @@ const mf = new Miniflare(convertV4MiniflareOptions({
 }));
 const db = await mf.getD1Database("SHARE_DB");
 const bucket = await mf.getR2Bucket("SHARE_BUCKET");
-for (const s of readFileSync(join(here, "migrations/0001_init.sql"), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
+for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql")).sort())
+  for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
 
 const fetchSite = (path, init = {}) => mf.dispatchFetch(SITE + path, { redirect: "manual", ...init });
 const sessionOf = (r) => (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
@@ -165,8 +166,9 @@ let colA, keyA;
   ok(!(await keyOf(A, sha(data))) && (await bucket.list({ prefix: "a/" })).objects.length === 0, "nothing stored after a bad upload");
   const { col, v } = await upload(a, [["data/points.csv", data], ["paper.ipynb", nb]], "Paper");
   colA = col;
-  keyA = await keyOf(A, sha(data));
+  // (the response read before anything else is awaited: Miniflare's bodies don't wait)
   const vj = await v.json();
+  keyA = await keyOf(A, sha(data));
   ok(v.status === 201 && /^[0-9a-f]{64}$/.test(vj.version) && vj.url === `/s/${col}`, "a version is committed");
   const g = await (await fetchSite(`/api/share/c/${col}`)).json();
   ok(g.manifest.files.length === 2 && g.manifest.files[0].path === "data/points.csv" && g.manifest.collection === col && g.manifest.format === "sagebrush-collection" && g.manifest.license === "CC-BY-4.0", "anyone can read the manifest");
@@ -210,7 +212,8 @@ let colA, keyA;
 }
 
 // ---- the sign-in return path (SEC-243-7)
-for (const ret of ["/\t/evil.example/proof", "/\n/evil.example/", "/\r/evil.example/", " /x", "/\\evil.example", "//evil.example", "/%09/evil.example", "https://evil.example/", "/x\u0000"]) {
+// (and dot segments, which normalize to //host: SEC-SHARE-1)
+for (const ret of ["/\t/evil.example/proof", "/\n/evil.example/", "/\r/evil.example/", " /x", "/\\evil.example", "//evil.example", "/%09/evil.example", "https://evil.example/", "/x\u0000", "/%2e%2e//evil.example/proof", "/%2E%2E//evil.example/", "/a/%2e%2e/%2e%2e//evil.example/", "/./..//evil.example/", "/a/..//evil.example/"]) {
   const { cb } = await signIn(A, { ret });
   const loc = cb.headers.get("location");
   ok(new URL(loc, SITE).origin === SITE && !/[\u0000-\u001f]/.test(loc), `return ${JSON.stringify(ret)} stays on the site: ${JSON.stringify(loc)}`);
@@ -446,6 +449,48 @@ async function purgeStatus(rid) {
   await db.prepare("UPDATE holdings SET created = created - 2 * 86400").run();
   await tick();
   ok(!(await stored(keyPending)) && !(await keyOf(A, sha(Buffer.from("pending upload")))), "an upload never committed is dropped after a day");
+}
+{
+  // HARD-SHARE-3: what a signed-in loop can pile up is bounded
+  const S = "55555555-5555-4555-8555-555555555555";
+  let last;
+  for (let i = 0; i < 24; i++) last = (await signIn(S)).session;
+  const n = (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(S).first()).n;
+  ok(n === 20 && (await api(last).get("/api/share/me")).status === 200, `at most 20 sessions per account, the newest kept: ${n}`);
+  // records of deleted collections: at most 1000 per account, and 30 days
+  const hA = sha("sagebrush-account\n" + A);
+  const old = Math.floor(Date.now() / 1000) - 40 * 86400;
+  const fill = [];
+  for (let i = 0; i < 1005; i++) fill.push(db.prepare("INSERT INTO purges (request_id, account_hash, collection, kind, status, collections, bytes, created, finished) VALUES (?1, ?2, 'aaaaaaaaaaaa', 'collection', 'done', 1, 0, ?3, ?3)").bind(`fill-${i}`, hA, old + i));
+  await db.batch(fill);
+  const col = await (await a.post("/api/share/collections", { title: "gone" })).json();
+  ok((await a.del(`/api/share/collections/${col.id}`)).status === 200, "a collection deleted");
+  const kept = (await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND account_hash = ?1").bind(hA).first()).n;
+  const newest = await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND account_hash = ?1 AND collection = ?2").bind(hA, col.id).first();
+  ok(kept === 1000 && newest.n === 1, `at most 1000 records of deleted collections per account, the newest kept: ${kept}`);
+  await tick();
+  const stale = (await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND finished < ?1").bind(Math.floor(Date.now() / 1000) - 30 * 86400).first()).n;
+  const fresh = await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND collection = ?1").bind(col.id).first();
+  ok(stale === 0 && fresh.n === 1, `records older than 30 days go with the daily job, newer ones stay: ${stale} old left`);
+}
+{
+  // PRIV-SHARE-2: whether a purged account's row goes is decided with the
+  // purge's last write (a tombstone written after its files were found
+  // empty still counts)
+  const G = "66666666-6666-4666-8666-666666666666";
+  const hG = sha("sagebrush-account\n" + G);
+  const t = Math.floor(Date.now() / 1000);
+  await db.batch([
+    db.prepare("INSERT OR REPLACE INTO accounts (account_id, created, last_login, deleting) VALUES (?1, ?2, ?2, ?2)").bind(G, t),
+    db.prepare("INSERT INTO purges (request_id, account_hash, account_id, kind, status, created) VALUES ('self-race', ?1, ?2, 'self', 'files', ?3)").bind(hG, G, t),
+    db.prepare("INSERT INTO r2_deletes (key, prefix, account_id, created) VALUES (?1, 1, ?2, ?3)").bind(`a/${hG.slice(0, 32)}/`, G, t),
+    db.prepare("INSERT INTO tombstones (account_hash, created) VALUES (?1, ?2)").bind(hG, t),
+    db.prepare("INSERT INTO purges (request_id, account_hash, account_id, kind, status, created) VALUES ('admin-race', ?1, ?2, 'admin', 'files', ?3)").bind(hG, G, t),
+  ]);
+  await tick();
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE account_id = ?1").bind(G).first();
+  const sts = (await db.prepare("SELECT status FROM purges WHERE request_id IN ('self-race', 'admin-race')").all()).results.map((r) => r.status);
+  ok(row.n === 0 && sts.length === 2 && sts.every((s) => s === "done"), `a purge finishing with a tombstone present removes the account row: ${row.n} rows, ${JSON.stringify(sts)}`);
 }
 
 await mf.dispose();
