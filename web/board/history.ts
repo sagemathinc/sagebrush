@@ -114,7 +114,7 @@ export function fromRecords(rs: Records): BoardDoc {
 
 export class BoardHistory {
   private h: PatchHistoryLike;
-  constructor(mod: HistoryModule, private store: { drop?(): Promise<void> }) {
+  constructor(mod: HistoryModule, store: unknown) {
     this.h = new mod.PatchHistory(store, mod.createImmerDbCodec(SCHEMA));
   }
   async init() { await this.h.init(); return this; }
@@ -142,6 +142,4 @@ export class BoardHistory {
   /** The patches (for agents and tests). */
   patches() { return this.h.patches(); }
   close() { this.h.close(); }
-  /** Close it and forget its versions (another document in its place). */
-  async drop() { this.h.close(); await this.store.drop?.(); }
 }
