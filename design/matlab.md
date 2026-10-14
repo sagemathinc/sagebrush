@@ -194,7 +194,10 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
     solution instead.)
   - a rectangular A by QR with column pivoting: the basic solution, its
     free variables 0, with "Rank deficient, rank = r, tol = ..." when the
-    rank is short (Octave: the minimum-norm solution).
+    rank is short (Octave: the minimum-norm solution). Its norms are
+    scaled, as LAPACK's are, so entries near 1e154 or 1e-308 neither
+    overflow nor underflow. A NaN or Inf in A gives NaN throughout.
+  - the warnings are the same whether A, b or both are complex.
   - `inv` of a singular matrix is Inf throughout, with the warning.
 
 ## Display
