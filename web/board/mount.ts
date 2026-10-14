@@ -1239,6 +1239,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   on(window, "keydown", (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc && mine()) { e.preventDefault(); $("print").click(); }
   });
+  // (⌘S downloads the board as one HTML file, as ⋯ Download as HTML does,
+  // not the page (William); what is being written in a note is kept first.
+  // Seen before a field's own keys; with a dialog open, nothing more)
+  on(window, "keydown", async (e: KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s" || !doc || !mine() || !host.exportHtml) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (root.querySelector("dialog[open]")) return;
+    await editor.keepWriting();
+    $("html").click();
+  }, true);
 
   function outputs() {
     return doc ? codeOrder(doc).map(({ id, code: src }) => ({ id, code: src, state: code?.state(id) ?? "", output: code?.text(id) ?? "" })) : [];
