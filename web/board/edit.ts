@@ -74,6 +74,10 @@ export class Editor {
   private inplace: InPlace | null = null; // the item being written where it is
   /** whether items are being dragged or resized now (the board is not laid out again meanwhile: mount.ts) */
   moving = false;
+  // (the drag or resize going on: how to drop it)
+  private gesture: (() => void) | null = null;
+  /** Drop the drag or resize going on, keeping nothing of it (another document is shown). */
+  cancelGesture() { const g = this.gesture; this.gesture = null; g?.(); }
   /** a drag or a resize ended */
   onSettled: (() => void) | null = null;
   private hold(on: boolean) {
@@ -428,6 +432,7 @@ export class Editor {
       }
     };
     const up = (u: PointerEvent) => {
+      this.gesture = null;
       // (where it was let go: the last move may not have come, coalesced away)
       if (u.type === "pointerup") move(u);
       removeEventListener("pointermove", move);
@@ -481,6 +486,16 @@ export class Editor {
     addEventListener("pointermove", move);
     addEventListener("pointerup", up);
     addEventListener("pointercancel", up);
+    // (another document shown meanwhile: the gesture dropped, nothing kept, CORR-59E-1)
+    this.gesture = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      this.board.dropTarget = null;
+      this.board.guides = null;
+      this.board.request();
+      this.hold(false);
+    };
     return true;
   }
 
@@ -505,6 +520,7 @@ export class Editor {
       this.board.resizeItem(it.id, w, ratio ? Math.round(w * ratio) : undefined);
     };
     const up = (u: PointerEvent) => {
+      this.gesture = null;
       // (where it was let go: the last move may not have come)
       if (u.type === "pointerup") move(u);
       removeEventListener("pointermove", move);
@@ -528,6 +544,16 @@ export class Editor {
     addEventListener("pointermove", move);
     addEventListener("pointerup", up);
     addEventListener("pointercancel", up);
+    // (another document shown meanwhile: the gesture dropped, nothing kept, CORR-59E-1)
+    this.gesture = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      this.board.dropTarget = null;
+      this.board.guides = null;
+      this.board.request();
+      this.hold(false);
+    };
     return true;
   }
 

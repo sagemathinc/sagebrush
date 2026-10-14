@@ -261,6 +261,20 @@ try {
   check(widths.every((w, i) => i === 0 || w >= widths[i - 1] - 1) && widths.at(-1) > widths[0] + 100, "resizing it, it grows steadily, never put back: " + JSON.stringify(widths.map(Math.round)));
   check(await until("Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'wide').w - 460) <= 4", 3000), "...and keeps its new width: " + (await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'wide').w")));
   await ev("window.sagebrush.board.editing(false)");
+  // another document loaded while an item is dragged, with an item of the same id (CORR-59E-1, daybreak): the drag dropped, nothing of it in the new one
+  {
+    await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: -100, y: 4900, z: 1 }), window.board.render(), 1");
+    await sleep(300);
+    const q0 = await ev("(() => { const r = window.board.clientRect('mover'); return r && { x: r.left + r.width / 2, y: r.top + 15 }; })()");
+    await mouse("mousePressed", q0.x, q0.y);
+    for (let i = 1; i <= 4; i++) { await mouse("mouseMoved", q0.x + 15 * i, q0.y); await sleep(40); }
+    await ev(`window.sagebrush.board.load({ title: "B", nodes: [{ id: "mover", title: "Mover in B", x: 1000, y: 5300, w: 220 }, { id: "other", title: "Other", x: 0, y: 5000 }] }).then(() => 1)`);
+    for (let i = 5; i <= 8; i++) { await mouse("mouseMoved", q0.x + 15 * i, q0.y); await sleep(40); }
+    await mouse("mouseReleased", q0.x + 120, q0.y);
+    await sleep(400);
+    const b = await ev("(() => { const d = window.sagebrush.board.snapshot().doc, n = d.nodes.find((x) => x.id === 'mover'), o = d.nodes.find((x) => x.id === 'other'); return { title: d.title, x: n?.x, y: n?.y, ox: o?.x, oy: o?.y, drawn: window.board.item('mover')?.x }; })()");
+    check(b.title === "B" && b.x === 1000 && b.y === 5300 && b.ox === 0 && b.oy === 5000 && b.drawn === 1000, "another document loaded during a drag: drawn, and nothing of the drag in it: " + JSON.stringify(b));
+  }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
