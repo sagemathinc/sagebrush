@@ -102,7 +102,10 @@ export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | un
       }
     } catch {}
   }
-  return { bytes: checked(embedded() ?? fetched(new URL(`engine/${own.id}/`, ref.site).href), own.files), id: own.id };
+  // (a part the file doesn't carry, e.g. the Sage library in a file made
+  // before offline mode carried every language's: from the site, checked the same)
+  const carried = embedded(), site = fetched(new URL(`engine/${own.id}/`, ref.site).href);
+  return { bytes: checked(carried ? (name) => carried(name).catch(() => site(name)) : site, own.files), id: own.id };
 }
 
 /** The engine's parts from `bytes`: all loaded and checked before Python
@@ -116,7 +119,7 @@ export function fileEngine(load: () => Promise<{ bytes: Bytes }>, o: { sage: boo
       const { bytes } = await load();
       const names = engineFiles(o.sage);
       const got = await Promise.all(names.map((n) => bytes(n).catch((e) => {
-        throw new Error(e?.message === "Failed to fetch" ? `this file runs its code with Python from the site it came from, which can't be reached (no network?)` : String(e?.message ?? e));
+        throw new Error(e?.message === "Failed to fetch" ? `this file's code needs parts of Sagebrush it doesn't carry (${n}), from the site it came from, which can't be reached (no network?). Download it again in offline mode.` : String(e?.message ?? e));
       })));
       names.forEach((n, i) => { raw.set(n, got[i]); urls.set(n, URL.createObjectURL(new Blob([got[i]], { type: type(n) }))); });
       if (o.math) urls.set("sagebrush-math.js", URL.createObjectURL(new Blob([o.math], { type: "text/javascript" })));

@@ -90,7 +90,8 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean } = {}): P
     // own address: an engine not published there can still be carried)
     const local = checked(fetched(site.href), OWN_ENGINE.files), published = checked(fetched(new URL(`engine/${OWN_ENGINE.id}/`, ref.site).href), OWN_ENGINE.files);
     const have = embeddedText(), get = (name: string) => (ex ? published(name) : local(name).catch(() => published(name)));
-    for (const name of engineFiles(doc.mode === "sage")) engine.push(`<script type="application/octet-stream" data-sb-engine="${name}">${have.get(name) ?? (await pack(await get(name)))}</script>`);
+    // (every part, the Sage library too: a file's board may change its language, William)
+    for (const name of engineFiles(true)) engine.push(`<script type="application/octet-stream" data-sb-engine="${name}">${have.get(name) ?? (await pack(await get(name)))}</script>`);
   }
   // (the template rides along for exporting again, its scripts' ends escaped
   // as everything inline is, and unescaped when used)

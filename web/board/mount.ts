@@ -140,8 +140,8 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <fieldset data-sbb="pg-pic-set"><button type="button" data-sbb="pg-pic">Picture…</button><button type="button" data-sbb="pg-nopic">No picture</button><span data-sbb="pg-pic-on"></span></fieldset>
 <div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="pg-go" class="be-done">Done</button></div></form></dialog>
 <dialog data-sbb="htmldlg"><h3>Download as HTML</h3><form data-sbb="htmlform" method="dialog">
-<p class="prnote">One file, which opens in any browser. To run its code, it loads Python from the web, unless Python is included.</p>
-<fieldset data-sbb="html-py-set"><label><input type="checkbox" name="python" data-sbb="html-py"> Include Python, so its code runs without the network <span data-sbb="html-size"></span></label></fieldset>
+<p class="prnote">One file, which opens in any browser. To run its code, it loads Sagebrush from the web, unless in offline mode.</p>
+<fieldset data-sbb="html-py-set"><label><input type="checkbox" name="python" data-sbb="html-py"> Offline mode: code runs without the network <span data-sbb="html-size"></span></label></fieldset>
 <fieldset><legend>Its code runs with</legend><label><input type="radio" name="engine" value="pinned" checked> the version of Sagebrush it was saved with</label><label><input type="radio" name="engine" value="latest"> the latest version, when online (else that one)</label></fieldset>
 <div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="html-go" class="be-done">Download</button></div></form></dialog>
 <dialog data-sbb="prdlg"><h3>Print or save as PDF</h3><form data-sbb="prform" method="dialog">
@@ -799,7 +799,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
   };
   // Download as HTML: the board in one file (export.ts); a board with code
-  // asks first whether the file carries Python, and which version it runs
+  // asks first whether the file carries Sagebrush (offline mode: every
+  // language's runtime), and which version it runs
   const htmldlg = $("htmldlg") as HTMLDialogElement;
   $("html").onclick = () => {
     if (!doc) return;
@@ -807,7 +808,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const size = host.exportPython?.(doc) ?? null;
     $("html-py-set").hidden = !size;
     ($("html-py") as HTMLInputElement).checked = false;
-    $("html-size").textContent = size ? `(about ${size} more)` : "";
+    $("html-size").textContent = size ? `(the file is about ${size} larger)` : "";
     for (const r of root.querySelectorAll<HTMLInputElement>("[data-sbb=htmlform] input[name=engine]")) r.checked = r.value === (doc.engine ?? "pinned");
     htmldlg.showModal();
   };
