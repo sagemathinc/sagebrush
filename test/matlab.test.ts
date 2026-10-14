@@ -607,3 +607,17 @@ test("deconv and qr validate as documented: RegularizationFactor one real number
     "qr: the outputForm argument needs the column permutation P, which is not supported in Sagebrush.",
   ]);
 });
+
+test("repelem takes a string scalar and string arrays, and only numeric scalar or vector factors, as documented", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "u = repelem(\"x\", 3); disp(class(u)); disp(mat2str(size(u))); disp(u(3));",
+    "u = repelem([\"a\" \"b\"], [1 2]); disp(u(3));",
+    "disp(mat2str(repelem([1 2], int8(2))));",
+    "try, repelem([1 2 3 4], [1 1; 1 1]), catch e, disp(e.message), end",
+    "try, repelem([8 9], 'a'), catch e, disp(e.message), end",
+    "try, repelem([8 9], true), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["string", "[1 3]", "x", "b", "[1 1 2 2]",
+    "Replication factors must be scalars or vectors.", "Replication factors must be numeric.", "Replication factors must be numeric."]);
+});

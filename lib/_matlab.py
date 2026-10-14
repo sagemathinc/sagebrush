@@ -5313,10 +5313,18 @@ def repelem_(x, *args):
     or one count per index of that dimension"""
     if not args:
         raise _err("Not enough input arguments.")
+    if type(x) is Str:
+        x = StrArr([x.s], (1, 1))
     t = type(x)
     d = list(_dims(x))
 
     def counts(v, size):
+        # (integer-valued numeric scalars or vectors, as documented: not
+        # char, logical or a matrix)
+        if class_(v) not in ("double", "single") and class_(v) not in _INTS:
+            raise _err("Replication factors must be numeric.")
+        if not (_numel(v) == 1 or _isvec(v)):
+            raise _err("Replication factors must be scalars or vectors.")
         c = _farr(v).reshape(-1)
         if c.dtype.kind == "c" or not np.all(np.isfinite(c)) or np.any(c < 0) or np.any(c != np.floor(c)):
             raise _err("Replication factors must be nonnegative integers.")
