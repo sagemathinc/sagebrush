@@ -1306,33 +1306,41 @@ _FUNCS["barh"] = lambda nargout, args: _bar(args, True)
 
 
 def _binpick(lo, hi, raw, nbins=None):
-    """bin edges over [lo, hi] for a raw bin width: a round width (1, 2, 3, 5 or 10
-    times a power of 10) and a left edge on a multiple of it; with a number of
-    bins, exactly that many, as wide as the data needs on a round step.
-    (histcounts([2 3 5 7 11 13 17 19 23 29], 6) has edges 0:4.9:29.4.)"""
+    """bin edges over [lo, hi].  MATLAB documents that its edges fall on "nice"
+    numbers without giving the rule, so these rules are Sagebrush's, chosen
+    to reproduce the published examples' edges exactly (histcounts of
+    randn(100,1), randn(10), randn(1000,1) and randn(10000,1) from the
+    default state, of primes(100), and histcounts([2 3 5 7 11 13 17 19 23
+    29], 6)'s 0:4.9:29.4):
+    - with no bin count, the raw width rounded to the nearest of 1, 2, 3, 5
+      or 10 times its power of 10, the left edge the multiple of it at or
+      below lo, and as many bins as reach hi;
+    - with a bin count n, the left edge lo rounded down to a multiple of the
+      raw width cut to one significant digit, and the width a multiple of
+      the largest power of 10 that fits in the interval of widths for which
+      n bins, but not n - 1, reach hi from that edge.
+    Data all at one value get the bins of [v - 1/2, v + 1/2]."""
     if hi - lo <= math.sqrt(2.0 ** (math.frexp(max(abs(lo), abs(hi)))[1] - 53)):
-        # (all the data at one value)
         n = nbins or 1
         a, b = lo - 0.5, hi + 0.5
         return [a + (b - a) * i / n for i in range(n + 1)]
-    p10 = 10.0 ** math.floor(math.log10(raw))
-    rel = raw / p10
+    unit = 10.0 ** math.floor(math.log10(raw))
+    lead = raw / unit  # (in [1, 10))
     if nbins is None:
-        w = p10 * (1 if rel < 1.5 else 2 if rel < 2.5 else 3 if rel < 4 else 5 if rel < 7.5 else 10)
+        nice = min((1.0, 2.0, 3.0, 5.0, 10.0), key=lambda c: abs(lead - c))
+        w = nice * unit
         left = min(w * math.floor(lo / w), lo)
-        n = max(1, int(math.ceil((hi - left) / w - 1e-12)))
-        right = max(left + n * w, hi)
-    else:
-        w = p10 * math.floor(rel)
-        left = min(w * math.floor(lo / w), lo)
-        n = nbins
-        if n > 1:
-            ll = (hi - left) / n
-            ul = (hi - left) / (n - 1)
-            q = 10.0 ** math.floor(math.log10(ul - ll))
-            w = q * math.ceil(ll / q)
-        right = max(left + n * w, hi)
-    return [left + i * w for i in range(n)] + [right]
+        n = max(1, int(math.ceil((hi - left) / w - 1e-9)))
+        return [left + i * w for i in range(n)] + [max(left + n * w, hi)]
+    n = nbins
+    cut = math.floor(lead) * unit
+    left = min(cut * math.floor(lo / cut), lo)
+    if n == 1:
+        return [left, max(hi, left + cut)]
+    shortest, longest = (hi - left) / n, (hi - left) / (n - 1)
+    q = 10.0 ** math.floor(math.log10(longest - shortest))
+    w = q * math.ceil(shortest / q)
+    return [left + i * w for i in range(n)] + [max(left + n * w, hi)]
 
 
 def _auto_edges(data, nbins=None):
