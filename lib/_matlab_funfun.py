@@ -855,3 +855,115 @@ def fminsearch_(nargout, *args):
         row(it, vals[0], proc)
         if output("iter", it, pts[0], vals[0], proc):
             return result(pts[0], vals[0], it, -1, stopped)
+
+
+# ------------------------------------------------------------------ lsqnonneg
+
+def _real_matrix(v, what):
+    if type(v) is _m.Sparse:
+        v = _m._B["full"].f(1, v)
+    if type(v) is _m.Char or not _m._isnumlike(v) or _m.class_(v) != "double":
+        raise _err("lsqnonneg: %s must be a real double matrix." % what)
+    a = _m._mat(v)
+    if a.dtype.kind == "c":
+        if np.any(a.imag != 0):
+            raise _err("lsqnonneg: %s must be real." % what)
+        a = a.real
+    return np.array(a, dtype=float)
+
+
+@_bi("lsqnonneg")
+def lsqnonneg_(nargout, *args):
+    """lsqnonneg as its documentation page describes it: lsqnonneg(C, d),
+    lsqnonneg(C, d, options) and lsqnonneg(problem), with outputs
+    [x, resnorm, residual, exitflag, output, lambda]: the x >= 0 that
+    minimizes norm(C*x - d), with resnorm = norm(d - C*x)^2, the residual
+    d - C*x and the dual vector lambda = C'*(d - C*x).  The method is the
+    one the page cites, Lawson and Hanson's NNLS active-set algorithm
+    (Solving Least Squares Problems, Prentice-Hall 1974, chapter 23): move
+    the variable of largest positive lambda into the passive set, solve
+    the least-squares problem on that set (here by mldivide's QR), and
+    while the solution has a nonpositive entry, step back toward the
+    previous x as far as keeps it nonnegative and free the variables that
+    reach 0.  It stops when no free variable has lambda above TolX
+    (default 10*eps*norm(C,1)*length(C), as the page gives it).  The
+    options are Display ('notify', 'final', 'off' or 'none') and TolX.
+
+    Sagebrush's own choices, where the page fixes nothing: TolX is the
+    threshold for entering (lambda above it), for a positive entry and for
+    reaching 0; the limit behind exitflag 0 is MaxIter if set and
+    otherwise Lawson and Hanson's 3 times the number of variables;
+    iterations counts the least-squares solves; a sparse C is used as a
+    full matrix; and the message for exitflag 0 is Sagebrush's own"""
+    C, d, options = _problem(args, "lsqnonneg", ["C", "d"], 2)
+    if nargout > 6:
+        raise _err("Too many output arguments.")
+    options = _options_arg(options, "lsqnonneg")
+    disp = _display(options, "lsqnonneg")
+    if disp == "iter":
+        raise _err("lsqnonneg: Display 'iter' is not supported; use 'notify', 'final', 'off' or 'none'.")
+    A = _real_matrix(C, "C")
+    if type(d) is not _m.Sparse and _m._isnumlike(d) and _m._numel(d) and min(_m._arr(d).shape) != 1:
+        raise _err("lsqnonneg: d must be a vector.")
+    b = _real_matrix(d, "d").T.reshape((-1, 1))
+    m, n = A.shape
+    if b.shape[0] != m:
+        raise _err("lsqnonneg: the length of d must equal the number of rows of C.")
+    if not (np.all(np.isfinite(A)) and np.all(np.isfinite(b))):
+        raise _err("lsqnonneg: C and d must be finite.")
+    tol = _opt(options, "TolX")
+    tol = 10 * _EPS * (float(np.max(np.sum(np.abs(A), axis=0))) if A.size else 0.0) * max(m, n) if tol is None \
+        else float(_m._scalar(tol))
+    mi = _opt(options, "MaxIter")
+    maxit = 3.0 * n if mi is None else float(_m._scalar(mi))
+    x = np.zeros((n, 1))
+    passive = np.zeros(n, dtype=bool)
+    it = 0
+    flag = 1
+
+    def dual(x):
+        return (A.T @ (b - A @ x)).reshape(-1)
+
+    def solve(P):
+        z = np.zeros((n, 1))
+        if np.any(P):
+            z[P] = _m._qr_solve(A[:, P], b)
+        return z
+
+    w = dual(x)
+    while np.any(~passive) and np.max(np.where(passive, -np.inf, w)) > tol:
+        if it >= maxit:
+            flag = 0
+            break
+        t = int(np.argmax(np.where(passive, -np.inf, w)))
+        passive[t] = True
+        z = solve(passive)
+        it += 1
+        while np.any(z[passive] <= tol):
+            if it >= maxit:
+                flag = 0
+                break
+            neg = passive & (z.reshape(-1) <= tol)
+            xs, zs = x.reshape(-1)[neg], z.reshape(-1)[neg]
+            alpha = float(np.min(xs / (xs - zs)))
+            x = x + alpha * (z - x)
+            passive &= ~(np.abs(x.reshape(-1)) <= tol)
+            x[~passive] = 0.0
+            z = solve(passive)
+            it += 1
+        if flag == 0:
+            break
+        x = z
+        w = dual(x)
+    residual = b - A @ x
+    lam = dual(x).reshape((-1, 1))
+    if flag == 1:
+        msg = "Optimization terminated."
+    else:
+        msg = "lsqnonneg stopped: it reached the iteration limit of %d before finishing." % maxit
+    if disp == "final" or (disp == "notify" and flag != 1):
+        _m._write(msg + "\n")
+    out = [_m._unmat(x), float(np.sum(residual ** 2)), _m._unmat(residual), float(flag),
+           _m._struct1({"iterations": float(it), "algorithm": _m.Char("active-set"), "message": _m.Char(msg)}),
+           _m._unmat(lam)]
+    return out[0] if nargout <= 1 else out[:max(nargout, 1)]

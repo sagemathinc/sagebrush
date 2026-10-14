@@ -884,3 +884,38 @@ test("fminsearch's limits, x0's shape, the problem structure and its refusals", 
     "fminsearch: the PlotFcns option is not supported in Sagebrush.",
   ]);
 });
+
+test("lsqnonneg reproduces its published examples, and its limit, problem structure and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "C = [0.0372 0.2869; 0.6861 0.7071; 0.6233 0.6245; 0.6344 0.6170]; d = [0.8587; 0.1781; 0.0747; 0.8405];",
+    "[x,resnorm,residual,exitflag,output,lambda] = lsqnonneg(C,d);",
+    "fprintf('%.4f ', x, resnorm, residual, exitflag, output.iterations, lambda); fprintf('\\n'); disp(output.algorithm); disp(output.message);",
+    "fprintf('%.4f %.4f\\n', norm(C*x - d), norm(residual)^2);",
+    "x = lsqnonneg(C,d,optimset(Display='final'));",
+    "x = lsqnonneg(C,d);",
+    "[x,rn,res,e,out] = lsqnonneg(magic(5), [1; -1; 2; -2; 3], optimset('MaxIter', 1, 'Display', 'off')); disp(mat2str([e out.iterations all(x >= 0)]));",
+    "x = lsqnonneg(magic(5), [1; -1; 2; -2; 3], optimset('MaxIter', 1));",
+    "x = lsqnonneg(sparse([1 0; 0 1]), [1; 2]); disp(mat2str([issparse(x) x']));",
+    "p.C = [1 0; 0 1]; p.d = [3; -1]; p.solver = 'lsqnonneg'; disp(mat2str(lsqnonneg(p)'));",
+    "try, lsqnonneg([1 2; 3 4], [1; 2; 3]), catch err, disp(err.message), end",
+    "try, lsqnonneg([1 2; 3 4], [1 2; 3 4]), catch err, disp(err.message), end",
+    "try, lsqnonneg([1i 2; 3 4], [1; 2]), catch err, disp(err.message), end",
+    "try, lsqnonneg(single([1 2; 3 4]), [1; 2]), catch err, disp(err.message), end",
+    "try, lsqnonneg([1 2; 3 4], [1; 2], optimset('Display', 'iter')), catch err, disp(err.message), end",
+    "try, lsqnonneg([1 NaN; 3 4], [1; 2]), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "0.0000 0.6929 0.8315 0.6599 -0.3119 -0.3580 0.4130 1.0000 1.0000 -0.1506 -0.0000",
+    "active-set", "Optimization terminated.", "0.9118 0.8315",
+    "Optimization terminated.",
+    "[0 1 1]", "lsqnonneg stopped: it reached the iteration limit of 1 before finishing.",
+    "[0 1 2]", "[3 0]",
+    "lsqnonneg: the length of d must equal the number of rows of C.",
+    "lsqnonneg: d must be a vector.",
+    "lsqnonneg: C must be real.",
+    "lsqnonneg: C must be a real double matrix.",
+    "lsqnonneg: Display 'iter' is not supported; use 'notify', 'final', 'off' or 'none'.",
+    "lsqnonneg: C and d must be finite.",
+  ]);
+});

@@ -28,7 +28,8 @@ and runs on a runtime library with MATLAB's semantics:
     Forsythe, Malcolm and Moler 1976, section 8.2), with the tolerance
     whose bound its page gives; fminsearch is the Nelder-Mead method of
     Lagarias, Reeds, Wright and Wright (1998) in the steps MATLAB's
-    "fminsearch Algorithm" page spells out;
+    "fminsearch Algorithm" page spells out; lsqnonneg is Lawson and
+    Hanson's NNLS (1974, chapter 23);
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -591,6 +592,11 @@ The rest:
   best in each component, every value within TolFun of the best), as are
   a complex value being an error and the messages other than the
   converged one. PlotFcns is refused;
+- lsqnonneg's likewise: how TolX enters the tests (for entering, for a
+  positive entry and for reaching 0), the iteration limit when MaxIter is
+  unset (Lawson and Hanson's 3 times the number of variables), what
+  counts as an iteration (a least-squares solve), and the message for
+  exitflag 0. Display 'iter', which its page does not list, is refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
