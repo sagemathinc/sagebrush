@@ -52,3 +52,13 @@ for prec in [53, 100, 256]:
     for (m, e) in [(2, 0), (1, -30), (45, 0), (1, -1), (10, 0), (100, 0), (3, -2), (7, 1), (12345, -10), (1, -300)]:
         x = x_of(m, e)
         out("e1", prec, m, e, C(x).exp_integral_e(1).real())
+# log Gamma and digamma (x > 0): near the zeros of log Gamma (1, 2), tiny,
+# huge, half-integers, and random positive dyadics
+gcases = [(1, 0), (2, 0), (1, -1), (3, -1), (2**100 + 1, -100), (2**101 - 1, -100), (1, -30), (1, -1000), (12345, -10),
+          (1, 50), (7, 3000), (5, -1), (1461, -1), (3, -2), (884279719003555, -48), (100, 0)]
+gcases += [(m, e) for (m, e) in cases if m > 0 and -3000 < Integer(m).nbits() + e < 3000]
+for prec in [53, 100, 256, 1000]:
+    for (m, e) in gcases:
+        x = x_of(m, e)
+        out("lgamma", prec, m, e, x.log_gamma())
+        out("digamma", prec, m, e, x.psi())
