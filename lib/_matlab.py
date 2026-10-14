@@ -4066,6 +4066,8 @@ def round_(nargout, x, n=None, kind=None):
         if type(x) is float:
             if abs(x) < 0.5:
                 return 0.0 * x
+            if x != x or x in (_math.inf, -_math.inf):
+                return x  # (NaN and Inf round to themselves)
             return float(_math.floor(x + 0.5)) if x >= 0 else -float(_math.floor(-x + 0.5))
         cls = class_(x)
         if cls in _INTS:
@@ -8996,3 +8998,4 @@ def _handle_blocks(v):
 # ------------------------------------------------------------------ sparse matrices (lib/_matlab_sparse.py)
 
 import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
+import _matlab_numeric  # noqa: E402,F401  (more numerical built-ins)

@@ -197,3 +197,5 @@ show(round(polyval(p, (5 - mu(1)) / mu(2)) * 1e9) / 1e9);
 [p, S] = polyfit(x, y + [0 1 0 -1 0 1 0 -1 0 1], 1);
 show(S.df);
 show(round(S.normr * 1e9) / 1e9);
+% round of NaN and Inf scalars: themselves
+show(round(NaN)); show(round(Inf)); show(round(-Inf)); show(round([NaN Inf -2.5]));
