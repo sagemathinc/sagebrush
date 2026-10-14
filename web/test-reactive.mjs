@@ -582,6 +582,16 @@ try {
   await set(["w = 1", "if False:\n    import math as w\nglobal w\nprint('W', w)", "from math import floor\nglobal floor\nprint(floor(3.5))", "[(z := 2) for _ in [0]]\nglobal z\nprint(z)"]);
   r = await run([0, 1, 2, 3]);
   ok((await out(1)) === "W 1" && (await out(2)) === "3" && (await out(3)) === "2", `a global after an import or a comprehension's := (${await out(1)}, ${await out(2)}, ${await out(3)}; ${JSON.stringify(r)})`);
+  // MATLAB (src/dataflow.ts's matlab mode): definitions and reads flow the same way;
+  // a function defined in a cell is a definition; ans links no cells
+  await fileNew();
+  await ev("sagebrush.notebook.setMode('matlab'); sagebrush.notebook.setBudget(Infinity); true");
+  await set(["x = 2;", "y = twice(x)", "function r = twice(v)\n  r = 2 * v;\nend", "3 + 4", "ans"]);
+  r = await run([0, 1, 2, 3, 4]);
+  ok(JSON.stringify(r?.errors) === "[]" && /y =\s+4/.test(await out(1)), `MATLAB cells run in graph order, the function first (${JSON.stringify(await out(1))}; ${JSON.stringify(r)})`);
+  await set(["x = 5;"]);
+  r = await run(0);
+  ok(JSON.stringify(r?.ran) === "[0,1]" && /y =\s+10/.test(await out(1)), `editing x reruns y = twice(x) only (${JSON.stringify(r?.ran)}, ${JSON.stringify(await out(1))})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
