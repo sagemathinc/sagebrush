@@ -152,6 +152,21 @@ try {
   if (process.env.SHOT) { await key("ArrowRight", 39); const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOT, Buffer.from(r.data, "base64")); }
   await key("Escape", 27);
   check(await ev("!document.querySelector('.sbb').classList.contains('sbb-present')"), "...and Esc leaves it");
+  // a move whose page is slow to draw, the board destroyed meanwhile (CORR-C08-1, daybreak): nothing more happens, nothing thrown
+  await ev(`(async () => { const m = await import(new URL("board.js", location.href).href), im = m.host.images, ensure = im.ensure.bind(im); window.__gates = []; im.ensure = (names) => new Promise((ok) => window.__gates.push(() => ensure(names).then(ok))); return 1; })()`);
+  await ev(`${B}.present().then(() => 1)`);
+  await ev("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })), 1");
+  await sleep(300);
+  await ev("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })), 1");
+  const held = await until("window.__gates.length > 0", 3000);
+  await ev(`import(new URL("board.js", location.href).href).then((m) => { window.__gone = m.mounted.destroy(); return 1; })`);
+  await sleep(100);
+  await ev("window.__gates.splice(0).forEach((g) => g()), 1");
+  await ev("window.__gone.then(() => 1)");
+  await sleep(600);
+  await ev("window.__gates.splice(0).forEach((g) => g()), 1");
+  await sleep(300);
+  check(held && (await ev("!document.querySelector('.sbb, .board-item')")), "destroyed while a Present move waits for its page: nothing of the board drawn again");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
