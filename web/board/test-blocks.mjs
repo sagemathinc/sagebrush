@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
-const port = 9459, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const port = Number(process.env.CDP_PORT ?? 9459), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-blocks-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;
@@ -81,12 +81,13 @@ const open = async (id, at = { dx: 40, dy: 14 }) => {
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `${base}board/` });
-  await until("!!window.sagebrush?.board?.load", 60000);
+  // (the page's own board shown first: loaded before it, ours would be replaced by it, as on CI once)
+  if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the page's board was not shown");
   await ev("localStorage.clear()");
   await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
   await ev("window.sagebrush.board.editing(true)");
   // (laid out: on a slow machine the items come a moment after load)
-  await until("!!window.board?.item('m')", 20000);
+  if (!(await until("window.sagebrush.board.snapshot().doc?.title === 'Blocks' && !!window.board?.item('m')", 20000))) throw new Error("the test's board was not shown: " + await ev("window.sagebrush.board.snapshot().doc?.title"));
 
   // math in a title: typeset (KaTeX), not shown as $...$
   await ev("(() => { const it = window.board.item('m'); window.board.setCamera({ x: it.x - 100, y: it.y - 100, z: 1 }); window.board.render(); return 1; })()");
