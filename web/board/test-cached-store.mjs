@@ -10,7 +10,10 @@
 // without ids keep their identity when another is put in front
 // (CORR-891-2); an edit made from the first of two documents given the
 // board is merged with the second (CORR-891-3); a picture removed here and
-// changed there stays removed (CORR-891-4).
+// changed there stays removed (CORR-891-4); a change made elsewhere while
+// the copy's push was on its way is merged and pushed (CORR-C06-1); a
+// blank page keeps its identity (CORR-C06-2); documents are given the board
+// one at a time, in order (CORR-C06-3).
 //   bun web/board/test-cached-store.mjs
 import { cachedStore, merge3 } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
@@ -87,7 +90,7 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   const first = await loading;
   await store.synced;
   await tick(50);
-  check(first.doc.nodes[0].title === "old" && shown.join() === "new" && titleOf(cache.m.get("k2").json) === "new", "a change made elsewhere during the first load: shown after it, and the copy's: " + JSON.stringify({ first: first.doc.nodes[0].title, shown, copy: titleOf(cache.m.get("k2").json) }));
+  check((first.doc.nodes[0].title === "new" || shown.at(-1) === "new") && titleOf(cache.m.get("k2").json) === "new", "a change made elsewhere during the first load: the board ends with it (given at once, or after), and so does the copy: " + JSON.stringify({ first: first.doc.nodes[0].title, shown, copy: titleOf(cache.m.get("k2").json) }));
 }
 
 // CORR-3D2-3: merge3(d, d, d) is d, whatever the ids hold
@@ -128,12 +131,15 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   const store = cachedStore(R, "k3", cache);
   const shown = [];
   let showGate = held();
+  const firstShow = showGate;
   store.subscribe((d) => { shown.push(d.nodes.map((x) => x.title).join("+")); const g = showGate; showGate = null; return g ? g.p : undefined; });
   await store.load();
-  await store.synced;
-  await tick();
-  // (the remote's, given the board; not yet shown; an edit made from the copy)
+  for (let k = 0; k < 50 && !shown.length; k++) await tick(10);
+  // (the remote's, given the board; not yet shown; an edit made from the copy; then shown)
   store.save(cleanDoc({ title: "T", nodes: [{ id: "n", title: "mine" }] }));
+  await tick();
+  firstShow.open();
+  await store.synced;
   await tick(50);
   const kept = JSON.parse(cache.m.get("k3").json).nodes.map((x) => x.title).join("+");
   check(kept === "mine+theirs", "an edit made from the view before the remote's was shown: merged with it, in the copy: " + kept);
@@ -194,11 +200,12 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   gates[0].open();
   await tick(30);
   store.save(cleanDoc({ title: "r1", nodes: [{ id: "n", title: "mine" }] }));
+  await tick(30);
+  gates[1]?.open();
   await tick(50);
   const kept = JSON.parse(cache.m.get("k5").json);
   check(kept.title === "r2" && kept.nodes[0].title === "mine", "an edit made from the first of two documents given: merged with the second, not over it: " + JSON.stringify({ title: kept.title, n: kept.nodes[0].title }));
-  for (const g of gates) g.open();
-  await tick(50);
+  for (let k = 0; k < 5; k++) { for (const g of gates) g.open(); await tick(20); }
   check(given.at(-1) === "r2/mine" && R.doc.title === "r2" && R.doc.nodes[0].title === "mine", "...given the board, and the remote's: " + JSON.stringify({ given, remote: [R.doc.title, R.doc.nodes[0].title] }));
 }
 
@@ -209,6 +216,58 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   const theirs = copy(base); theirs.images.a = { w: 30, h: 30 };
   const { doc: m, conflicts } = merge3(base, ours, theirs);
   check(!m.images?.a && conflicts.length === 1, "a picture removed here and changed there: ours, removed, listed: " + JSON.stringify([m.images, conflicts.length]));
+}
+
+// CORR-C06-1: a copy with an edit the remote has not seen; a change made elsewhere while the copy's push is on its way
+{
+  const cache = memCache(), base = cleanDoc({ title: "T", nodes: [{ id: "n", title: "base" }] }), ours = cleanDoc({ title: "T", nodes: [{ id: "n", title: "ours" }] });
+  await cache.put({ key: "k6", json: canonical(ours), hash: await hashOf(ours), remoteHash: await hashOf(base), base: canonical(base), at: 0 });
+  const R = fakeRemote(base);
+  R.holds.save = held();
+  const saveGate = R.holds.save;
+  const store = cachedStore(R, "k6", cache);
+  const shown = [];
+  store.subscribe((d) => { shown.push(d.nodes.map((x) => x.title).join("+")); });
+  await store.load();
+  for (let k = 0; k < 50 && !R.calls.includes("save"); k++) await tick(10);
+  R.change({ title: "T", nodes: [{ id: "n", title: "base" }, { id: "t", title: "theirs" }] });
+  saveGate.open();
+  await store.synced;
+  await tick(80);
+  const copyNow = JSON.parse(cache.m.get("k6").json).nodes.map((x) => x.title).join("+"), remoteNow = R.doc.nodes.map((x) => x.title).join("+");
+  check(R.calls.includes("save") && copyNow === "ours+theirs" && remoteNow === "ours+theirs" && shown.at(-1) === "ours+theirs", "a change made elsewhere while the copy's push was on its way: merged, and the merge pushed: " + JSON.stringify({ copy: copyNow, remote: remoteNow, shown }));
+}
+
+// CORR-C06-2: a page without an id, items or title; another put in front of it there, it edited here
+{
+  const A = { nodes: [] }, B = { nodes: [{ id: "b", title: "B" }] }, X = { nodes: [{ id: "x", title: "X" }] };
+  const { doc: m } = merge3(cleanDoc({ pages: [A, B] }), cleanDoc({ pages: [{ ...A, intro: "mine" }, B] }), cleanDoc({ pages: [X, A, B] }));
+  const pages = m.pages.map((p) => (p.intro ? "A:" + p.intro : p.nodes.map((n) => n.id).join("") || "A")).join(",");
+  check(pages === "x,A:mine,b", "a blank page (no id, items or title), another put in front of it there, it edited here: three pages, the edit on it: " + pages);
+}
+
+// CORR-C06-3: two documents given the board, the second's showing done first: shown in the order given
+{
+  const cache = memCache(), base = cleanDoc({ title: "base", nodes: [{ id: "n", title: "N" }] });
+  await cache.put({ key: "k7", json: canonical(base), hash: await hashOf(base), remoteHash: await hashOf(base), at: 0 });
+  const R = fakeRemote(base);
+  const store = cachedStore(R, "k7", cache);
+  const gates = new Map(), given = [], done = [];
+  store.subscribe((d) => { given.push(d.title); const g = held(); gates.set(d.title, g); return g.p.then(() => done.push(d.title)); });
+  await store.load();
+  await store.synced;
+  R.change({ title: "r1", nodes: [{ id: "n", title: "N" }] });
+  await tick(20);
+  R.change({ title: "r2", nodes: [{ id: "n", title: "N" }] });
+  await tick(20);
+  const before = given.join();
+  gates.get("r2")?.open();
+  await tick(20);
+  gates.get("r1")?.open();
+  await tick(20);
+  gates.get("r2")?.open();
+  await tick(30);
+  check(before === "r1" && given.join() === "r1,r2" && done.join() === "r1,r2", "two documents given the board: the second given once the first is shown: " + JSON.stringify({ before, given, done }));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);

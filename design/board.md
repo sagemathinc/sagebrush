@@ -745,6 +745,18 @@ version again, as an edit: undoable, and a version itself. Agents call
 `versions()` and `version(i)`. An exported HTML file has no TimeTravel.
 web/board/test-history.mjs (34 checks).
 
+A version is recorded once its edit is drawn (in order; at once when the
+history is read, and when the page goes out of sight or away), and made at
+once from the board's records (patchflow's `withRecords`), not one record at
+a time, which remade the document's indexes for each (October 14,
+test-history-speed.mjs and test-history-order.mjs). **A known cost for very
+large boards:** patchflow's own commit still applies a patch record by
+record (its graph's `applyPatchBatch`, under immer). On a board of 4,000
+items, a version where every item's record changed (an item removed near
+the start, so every later item's place changed) takes about 1.9 s, after
+the edit is drawn; an ordinary edit's takes about 0.25 s, and the first
+version (the whole board) 0.6 s. Making that faster is patchflow's to do.
+
 **CoCalc whiteboards** (October 13, web/board/cocalc.ts). Sagebrush
 boards replace CoCalc's whiteboard, so a CoCalc `.board` (or `.slides`)
 file opens as a board: one way, with no shared schema and nothing going
