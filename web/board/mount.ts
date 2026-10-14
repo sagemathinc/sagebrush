@@ -35,8 +35,9 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
+import { overCap, sameOutputs } from "./preview";
 import { Toolbar, defaultTools } from "./toolbar";
 import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
@@ -126,6 +127,25 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 export type BoardApi = ReturnType<typeof mountBoard>;
 
 /** Mount a board in `root` (which the host places and sizes), with what the host provides. */
+// The code notes of a document, by id (every page, in groups too).
+function codeNotes(d: BoardDoc): Map<string, DocNote> {
+  const out = new Map<string, DocNote>();
+  const walk = (ns: DocNode[] | undefined) => {
+    for (const n of ns ?? []) {
+      if (n.kind === "group") walk(n.children);
+      else if (n.kind !== "ink" && n.code !== undefined) out.set(n.id, n);
+    }
+  };
+  walk(d.nodes);
+  for (const p of d.pages ?? []) walk(p.nodes);
+  return out;
+}
+// Code items in reading order with their previews (code.ts shows a preview, and doesn't run it, when it opens).
+function withPreviews(d: BoardDoc, order: { id: string; code: string }[]) {
+  const notes = codeNotes(d);
+  return order.map((it) => { const p = notes.get(it.id)?.preview; return p ? { ...it, preview: p } : it; });
+}
+
 export function mountBoard(root: HTMLElement, host: BoardHost) {
   addStyle();
   root.classList.add("sbb");
@@ -198,7 +218,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const order = codeOrder(d);
     const nth = new Map(order.map((c, i) => [c.id, i + 1]));
     for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
-    if (!view && (order.length || code)) engine()?.sync(order, d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
+    if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     board.setItems(items, edges);
     toolbar.tools.value = d.tools ?? defaultTools();
@@ -269,6 +289,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (code || !host.code) return code;
     const c = (code = host.code(doc!));
     c.onChange = () => { board.codeStates(); relayout(); };
+    c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
     c.ready.then((ok) => {
       // (it could not start: the caption says why, until the next edit)
       if (!ok) {
@@ -280,6 +301,25 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     });
     return c;
   }
+  // Previews of slow code items (preview.ts, design/outputs.md): after a run,
+  // an item that ran keeps one if it is slow from root and loses it if not,
+  // written only when what it shows changed, and not as a step to undo
+  async function keepPreviews(c: BoardCode, ids: string[]) {
+    const got = await c.previews(ids);
+    if (!got.size || code !== c) return;
+    await editor.commit((d) => {
+      const notes = codeNotes(d);
+      for (const [id, p] of got) {
+        const n = notes.get(id);
+        if (!n) continue;
+        if (p === null) delete n.preview;
+        else if (!sameOutputs(p, n.preview)) n.preview = p;
+      }
+      const kept = new Map([...notes].filter(([, n]) => n.preview).map(([id, n]) => [id, n.preview!]));
+      for (const id of overCap(kept)) delete notes.get(id)!.preview;
+    }, false, false);
+  }
+
   // (laid out again as outputs change size: once a frame at most; never
   // while items are dragged or resized, which a layout would put back where
   // the document has them: once they are let go)
@@ -861,6 +901,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       json: async () => canonical(await images.inline(doc!)),
       /** the board as a JSON Canvas (Download JSON Canvas), and what that left out, in words */
       canvas: () => canvasText(),
+      /** Code items slower than this from root (ms; default 10 s) keep a preview of their output in the document (design/outputs.md). */
+      setPreviewThreshold(ms: number) { const c = engine(); if (c && Number.isFinite(ms) && ms >= 0) c.previewMs = ms; },
       /** each code item's output key, time from root, and whether a widget moved since it ran (design/outputs.md) */
       outputKeys: async () => (await engine()?.outputKeys()) ?? null,
       /** Show page n (0-based). */

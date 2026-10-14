@@ -77,6 +77,8 @@
 .board-code.code-running .board-code-n::after { content: " running"; font-weight: 400; color: #5d645f; }
 .board-code.code-queued .board-code-n::after { content: " waiting"; font-weight: 400; color: #5d645f; }
 .board-code.code-stale .board-code-out, .board-code.code-cancelled .board-code-out { opacity: .55; }
+/* a slow item's preview, kept in the file (preview.ts): said so until it runs */
+.board-code.code-stale .board-code-out > [data-preview]::before { content: attr(data-preview); display: block; font: italic 12px system-ui, sans-serif; color: #555; margin: 0 0 4px; }
 .board-code.code-error, .board-code.code-failed { border-color: #b3261e; box-shadow: 0 0 0 1px #b3261e; }
 /* { }: show or hide an item's code (its output stays) */
 .board-code-toggle { margin-left: auto; border: 0; background: none; padding: 0 4px; font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #8a918b; cursor: pointer; border-radius: 4px; line-height: 18px; }

@@ -1,6 +1,6 @@
 # Outputs: what is kept, where, and for how long
 
-*Status: decided (William, October 14 2026); being built in the steps below.*
+*Status: decided (William, October 14 2026). Steps 1 and 2 are built (web/board/preview.ts, code.ts); the rest follow.*
 
 A code item's output (or a reactive notebook cell's) is a function of its
 code and its inputs. So an output is something to recompute, not to store.
@@ -41,19 +41,23 @@ running it.
 - **Bounded:**
   - per cell, at most 32 KB: text cut to its first 4 KB and last 1 KB with
     "… n lines …" between, and at most one picture, re-encoded as WebP or
-    PNG at most 640 pixels wide;
-  - no 3D scenes and no widgets (the picture of a 3D scene is kept);
+    PNG at most 640 pixels wide (an SVG is drawn as a picture, never kept);
+  - only plain text, LaTeX, Markdown and raster pictures: no HTML, no SVG,
+    no 3D scenes and no widgets (the picture of a 3D scene is kept);
   - per document, at most 512 KB of previews. Past that, the cells closest
     to the 10 s line lose theirs first.
 - **A preview is written only when its cell finishes running** and its
   output differs from the preview already kept. So the document's history
   (TimeTravel, CoCalc's patches) grows with slow reruns, not with every run.
 - **Shown as a preview,** greyed like a stale output, with when it was
-  computed and how long it took: "computed October 13, 42 s. Run to
-  update". Running the cell replaces it.
-- **In the file:** a node's `preview: {at, ms, outputs}`, where `outputs` is
-  a list of Jupyter outputs (`stream`, `display_data`), as everywhere else in
-  Sagebrush. Canonical JSON puts it last in the node.
+  computed and how long it took: "Preview, computed October 13 (42 s). Run
+  to update." Opening a board does not run an item with a preview, nor
+  anything that reads it (they are manual cells until someone runs them);
+  everything else runs as usual. Running it, or Run all, replaces it.
+- **In the file:** a code node's `preview: {at, ms, total, outputs}`: when,
+  its own time, its time from root, and a list of Jupyter outputs (`stream`,
+  `display_data`), as everywhere else in Sagebrush. Canonical JSON puts it
+  last in the node. It is not an undo step.
 
 ## 2. The cache beside the document
 

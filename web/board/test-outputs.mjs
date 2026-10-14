@@ -2,7 +2,10 @@
 // board's seed makes its random numbers the same at every load (and another
 // seed, others); each code item's output key changes exactly when its code or
 // anything upstream does; its time from root is its own time and its
-// ancestors'; a new board gets a seed of its own.  Serve web/dist first
+// ancestors'; a new board gets a seed of its own.  Step 2: an item slow
+// from root keeps a bounded preview in the file (and loses it when fast),
+// written only when its output changes; opened again, the board shows the
+// previews, marked, without running them, and runs the rest.  Serve web/dist first
 // (python3 web/serve.py 8765), then
 //   node web/board/test-outputs.mjs
 import { spawn } from "node:child_process";
@@ -69,6 +72,11 @@ try {
   // a board without a seed: the same numbers at every load too
   const n1 = await open(board(null)), n2 = await open(board(null));
   check(n1 === n2 && n1 !== a1, `a board without a seed: ${n1} ${n2}`);
+  // an item named __proto__: its own entry, and the result's prototype untouched (SEC-781-1)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "ids", nodes: [{ id: "__proto__", code: "a = 1" }, { id: "q", code: "b = a" }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 30000);
+  const special = await ev("window.sagebrush.board.outputKeys().then((k) => ({ own: Object.hasOwn(k, '__proto__'), keys: Object.keys(k).sort(), proto: Object.getPrototypeOf(k) === Object.prototype, inherited: k.key === undefined }))");
+  check(special.own && special.keys.join() === "__proto__,q" && special.proto && special.inherited, "an item named __proto__ has its own entry, and the result is a plain object: " + JSON.stringify(special));
   // the file keeps the seed (canonical, after the engine's field)
   await open(board(SEED_A));
   const file = await ev("window.sagebrush.board.json()");
@@ -86,6 +94,60 @@ try {
   // a new board gets a seed of its own
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
   check(await until("window.sagebrush.board.json().then((t) => /\"seed\": \"[0-9a-f]{64}\"/.test(t) && !t.includes('aaaa'))", 10000), "a new board has a seed of its own");
+
+  // Step 2: previews.  s takes 2.5 s; d and p and big read it; f is on its own.
+  // (an item over 1 s from root keeps one here, rather than 10 s)
+  const slow = (extra = "") => `import time\nt0 = time.time()\nwhile time.time() - t0 < 2.5:\n    pass\nx = 42${extra}\nprint("slow done", x)`;
+  const pboard = (sCode) => ({
+    title: "Previews", seed: SEED_A,
+    nodes: [
+      { id: "s", code: sCode },
+      { id: "d", code: "y = x + 1\nprint('y is', y)" },
+      { id: "big", code: "print('a' * 100000 + str(x))" },
+      { id: "p", code: "import matplotlib.pyplot as plt\nplt.plot([1, 2, x])\nplt.show()" },
+      { id: "f", code: "print('fast')" },
+    ],
+  });
+  const doneAll = (ms = 120000) => until("window.sagebrush.board.outputs().then((os) => os.length === 5 && os.every((o) => o.state === ''))", ms);
+  const nodesOf = async () => Object.fromEntries(JSON.parse(await ev("window.sagebrush.board.json()")).nodes.map((n) => [n.id, n]));
+  await ev("window.sagebrush.board.setPreviewThreshold(1000), 1");
+  await ev(`window.sagebrush.board.load(${JSON.stringify(pboard(slow()))}).then(() => 1)`);
+  check(await doneAll(), "the board with a slow item ran: " + JSON.stringify(await outputs()).slice(0, 300));
+  check(await until("window.sagebrush.board.json().then((t) => ['s', 'd', 'big', 'p'].every((id) => JSON.parse(t).nodes.find((n) => n.id === id).preview))", 20000), "the items slow from root have previews");
+  let ns = await nodesOf();
+  check(!ns.f.preview, "the fast item has none");
+  check(ns.s.preview.total >= 2400 && ns.d.preview.total >= ns.s.preview.total && ns.f && /slow done 42/.test(ns.s.preview.outputs[0].text), "a preview: its time from root and its output: " + JSON.stringify(ns.s.preview).slice(0, 200));
+  const bigText = ns.big.preview.outputs.map((o) => o.text ?? "").join("");
+  check(bigText.length < 6000 && /… \d+ characters …/.test(bigText) && bigText.endsWith("42\n"), "a long output is cut to its head and tail: " + bigText.length);
+  const pic = JSON.stringify(ns.p.preview.outputs);
+  check(/image\/(webp|png)/.test(pic) && !/svg/.test(pic) && pic.length < 32 * 1024, "a plot's preview is a small raster picture: " + pic.slice(0, 120));
+  // run again, the same output: the file doesn't change
+  const file1 = await ev("window.sagebrush.board.json()");
+  await ev("window.sagebrush.board.run(['s']).then(() => 1)");
+  await sleep(1500);
+  check((await ev("window.sagebrush.board.json()")) === file1, "rerun with the same output: the file is as it was");
+
+  // opened again, in a fresh page: the previews show, marked, and the slow items don't run; the fast one does
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  const t0 = Date.now();
+  await ev(`window.sagebrush.board.load(${JSON.stringify(JSON.parse(file1))}).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'f')?.state === '' && /fast/.test(os.find((o) => o.id === 'f').output))", 60000), "the fast item ran");
+  const o2 = await outputs();
+  check(["s", "d", "big", "p"].every((id) => o2[id].state === "stale") && /slow done 42/.test(o2.s.output) && /y is 43/.test(o2.d.output), "the slow items show their previews, stale: " + JSON.stringify(Object.values(o2).map((o) => [o.id, o.state])));
+  // (not run: their times are their previews', and the fast one's its own)
+  const kp = await keys(), saved = JSON.parse(file1).nodes;
+  check(kp.s.ms === saved.find((n) => n.id === "s").preview.ms && kp.d.ms === saved.find((n) => n.id === "d").preview.ms, "...and did not run: " + JSON.stringify([kp.s, kp.d]));
+  await ev("window.board.focus(['s'], true), window.board.render(), 1");
+  check(await until("(() => { const el = document.querySelector('[data-code=s] .board-code-out > [data-preview]'); return !!el && getComputedStyle(el, '::before').content.includes('Preview, computed') && getComputedStyle(el, '::before').content.includes('Run to update.'); })()", 5000), "a preview says so");
+  check(Date.now() - t0 < 30000, "shown without waiting for them");
+  // run it: the preview's label goes, and what reads it runs too
+  await ev("window.sagebrush.board.run(['s']).then(() => 1)");
+  check(await doneAll(), "run, the slow item and what reads it are up to date");
+  check(await ev("!document.querySelector('[data-code=s] .board-code-out > [data-preview]')"), "...and no longer say they are previews");
+  // made fast: its preview, and its readers', go
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = "x = 42\\nprint('slow done', x)"; }).then(() => 1)`);
+  check(await until("window.sagebrush.board.json().then((t) => JSON.parse(t).nodes.every((n) => !n.preview))", 30000), "fast now: no previews: " + JSON.stringify(Object.values(await nodesOf()).map((n) => [n.id, !!n.preview])));
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
