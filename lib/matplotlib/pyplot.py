@@ -429,27 +429,72 @@ class Axes:
             a = b
         self._opts.update({"aspect_ratio": 1, "axes": False, "xmin": -1.3, "xmax": 1.3, "ymin": -1.3, "ymax": 1.3})
 
-    def imshow(self, X, cmap="viridis", vmin=None, vmax=None, aspect=None, origin="upper", extent=None, **kw):
-        rows = [list(r) for r in (X.tolist() if hasattr(X, "tolist") else X)]
-        nr, nc = len(rows), len(rows[0]) if rows else 0
-        flat = [float(v) for r in rows for v in r]
-        lo = min(flat) if vmin is None else vmin
-        hi = max(flat) if vmax is None else vmax
-        x0, x1, y0, y1 = extent if extent else (-0.5, nc - 0.5, nr - 0.5, -0.5) if origin == "upper" else (-0.5, nc - 0.5, -0.5, nr - 0.5)
-        dx, dy = (x1 - x0) / nc, (y1 - y0) / nr
-        rects, colors = [], []
-        for i, r in enumerate(rows):
-            for j, v in enumerate(r):
-                rects.append((x0 + j * dx, y0 + i * dy, dx, dy) if dy > 0 else (x0 + j * dx, y0 + (i + 1) * dy, dx, -dy))
-                colors.append(colormap((float(v) - lo) / (hi - lo) if hi > lo else 0.5, cmap))
-        self._add(Rects(rects, colors=colors))
-        if origin == "upper" and not extent:
-            self._opts.update({"ymin": nr - 0.5, "ymax": -0.5})
-        self._opts.setdefault("margins", 0)
+    def imshow(self, X, cmap=None, norm=None, aspect=None, interpolation=None, alpha=None, vmin=None, vmax=None,
+               origin=None, extent=None, **kw):
+        """An image, as matplotlib draws it: row 0 at the top (origin='upper', the
+        y axis inverted) or at the bottom ('lower'); the axes' limits are the
+        extent, (-0.5, ncols - 0.5, nrows - 0.5, -0.5) by default, and with
+        aspect 'equal' (the default) the box shrinks to keep the cells square.
+        Values map through the colormap's 256 colors between vmin and vmax (NaN
+        is transparent); an (M, N, 3) or (M, N, 4) array is RGB(A), floats in
+        [0, 1] or integers in [0, 255].  One PNG, its cells sharp unless an
+        interpolation is asked for."""
+        import numpy as np
+        A = np.asarray(X)
+        if A.ndim not in (2, 3) or (A.ndim == 3 and A.shape[2] not in (3, 4)):
+            raise TypeError("Invalid shape %s for image data" % (tuple(A.shape),))
+        nr, nc = int(A.shape[0]), int(A.shape[1])
+        origin = origin or "upper"
+        if extent is None:
+            extent = (-0.5, nc - 0.5, nr - 0.5, -0.5) if origin == "upper" else (-0.5, nc - 0.5, -0.5, nr - 0.5)
+        left, right, bottom, top = (float(v) for v in extent)
+        lo = hi = None
+        if A.ndim == 3:
+            F = A.astype(float)
+            if A.dtype.kind in "iu":
+                F = F / 255.0
+            px = np.zeros((nr, nc, 4), dtype=np.uint8)
+            for ch in range(A.shape[2]):
+                px[:, :, ch] = np.clip(np.round(F[:, :, ch] * 255), 0, 255).astype(np.uint8)
+            if A.shape[2] == 3:
+                px[:, :, 3] = 255
+        else:
+            F = A.astype(float)
+            finite = F[np.isfinite(F)]
+            if norm is not None and getattr(norm, "vmin", None) is not None:
+                vmin = norm.vmin if vmin is None else vmin
+                vmax = norm.vmax if vmax is None else vmax
+            lo = float(vmin) if vmin is not None else (float(finite.min()) if finite.size else 0.0)
+            hi = float(vmax) if vmax is not None else (float(finite.max()) if finite.size else 1.0)
+            name = cmap or "viridis"
+            lut = np.zeros((257, 4), dtype=np.uint8)
+            for i in builtin_range(256):
+                r, g, b = _rgb(colormap(i / 255, name))
+                lut[i] = (r, g, b, 255)
+            # (matplotlib: index floor(256 t), t clipped to [0, 1]; NaN, the "bad" color, transparent)
+            t = (F - lo) / (hi - lo) if hi > lo else np.zeros(F.shape) + 0.5
+            idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * 256), 0, 255).astype(int)
+            idx = np.where(np.isnan(F), 256, idx)
+            px = lut[idx]
+        if alpha is not None:
+            px[:, :, 3] = (px[:, :, 3].astype(float) * float(alpha)).astype(np.uint8)
+        sharp = interpolation in (None, "nearest", "none", "antialiased", "auto")
+        prim = Image(_png_url(px), left, right, bottom, top, first_row_y=top if origin == "upper" else bottom,
+                     first_col_x=left, pixelated=sharp, what="image %d by %d" % (nr, nc))
+        self._add(prim)
+        # (the axes' limits are the extent: y inverted when bottom > top, as with origin 'upper')
+        self._opts.update({"xmin": left, "xmax": right, "ymin": bottom, "ymax": top, "margins": 0})
         self._opts["_image"] = True
-        if aspect in (None, "equal"):
-            self._opts["aspect_ratio"] = 1
-        return _Artist(self._prims[-1], "image.AxesImage")
+        if aspect in (None, "equal") or isinstance(aspect, (int, float)):
+            self._opts["aspect_ratio"] = 1 if aspect in (None, "equal") else float(aspect)
+            self._opts["fit_aspect"] = True
+        art = _Artist(prim, "image.AxesImage")
+        art.cmap, art._clim = (cmap or "viridis"), (lo, hi)
+        art.get_clim = lambda: art._clim
+        art.get_extent = lambda: [left, right, bottom, top]
+        art.get_array = lambda: A
+        self._mappable = art
+        return art
 
     # ---------------------------------------------------------------- settings
     def set_title(self, s, fontsize=None, **kw):

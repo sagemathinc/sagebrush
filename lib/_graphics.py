@@ -737,9 +737,27 @@ class Image(Primitive):
         if a is None or b is None:
             return ""
         x, y = min(a[0], b[0]), min(a[1], b[1])
-        return '<image href="%s" x="%s" y="%s" width="%s" height="%s" preserveAspectRatio="none"%s/>' % (
-            self.href, _fmt(x), _fmt(y), _fmt(abs(b[0] - a[0])), _fmt(abs(b[1] - a[1])),
-            ' style="image-rendering:pixelated"' if self.options.get("pixelated") else "")
+        w, h = abs(b[0] - a[0]), abs(b[1] - a[1])
+        # (options first_row_y and first_col_x: the data coordinates of the
+        # picture's first row and column; otherwise its top row is at the top)
+        sx = sy = 1
+        o = self.options
+        if o.get("first_row_y") is not None:
+            other = self.y0 if float(o["first_row_y"]) == self.y1 else self.y1
+            p, q = P.map(self.x0, float(o["first_row_y"]), clamp=False), P.map(self.x0, other, clamp=False)
+            if p is not None and q is not None and p[1] > q[1]:
+                sy = -1
+        if o.get("first_col_x") is not None:
+            other = self.x1 if float(o["first_col_x"]) == self.x0 else self.x0
+            p, q = P.map(float(o["first_col_x"]), self.y0, clamp=False), P.map(other, self.y0, clamp=False)
+            if p is not None and q is not None and p[0] > q[0]:
+                sx = -1
+        flip = ""
+        if sx != 1 or sy != 1:
+            flip = ' transform="matrix(%d 0 0 %d %s %s)"' % (sx, sy, _fmt(2 * x + w if sx < 0 else 0), _fmt(2 * y + h if sy < 0 else 0))
+        return '<image href="%s" x="%s" y="%s" width="%s" height="%s" preserveAspectRatio="none"%s%s/>' % (
+            self.href, _fmt(x), _fmt(y), _fmt(w), _fmt(h),
+            ' style="image-rendering:pixelated"' if o.get("pixelated") else "", flip)
 
     def describe(self):
         return self.options.get("what") or "image"
@@ -815,9 +833,10 @@ class _Placed:
 
 
 def _range(lo, hi, log):
+    """the axis's range: a degenerate one widened (hi < lo stays: an inverted axis, as matplotlib's)"""
     if lo is None:
         return (1.0, 10.0) if log else (-1.0, 1.0)
-    if hi - lo <= 0 or (not log and abs(hi - lo) < 1e-12 * max(1.0, abs(lo))):
+    if hi == lo or (not log and abs(hi - lo) < 1e-12 * max(1.0, abs(lo))):
         d = abs(lo) * 0.1 if lo else 1.0
         return (lo / 2, lo * 2) if log and lo > 0 else (lo - d, hi + d)
     return lo, hi
@@ -927,19 +946,24 @@ class Panel:
         xlo, xhi = _range(xlo, xhi, xlog)
         ylo, yhi = _range(ylo, yhi, ylog)
         ar = o.get("aspect_ratio")
-        if ar not in (None, "automatic", "auto") and not xlog and not ylog:
+        # (fit_aspect with all four limits set: the box takes the shape, the limits stay, as matplotlib's adjustable='box')
+        boxed = o.get("fit_aspect") and None not in (o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax"))
+        if ar not in (None, "automatic", "auto") and not xlog and not ylog and not boxed:
             ar = float(ar)
-            sx, sy = w / (xhi - xlo), h / ((yhi - ylo) * ar)
+            # (an inverted axis keeps its direction: the spans' signs)
+            gx, gy = (1.0 if xhi > xlo else -1.0), (1.0 if yhi > ylo else -1.0)
+            sx, sy = w / abs(xhi - xlo), h / (abs(yhi - ylo) * ar)
             if sx > sy:
                 c, half = (xlo + xhi) / 2, w / sy / 2
-                xlo, xhi = c - half, c + half
+                xlo, xhi = c - gx * half, c + gx * half
             else:
                 c, half = (ylo + yhi) / 2, h / (sx * ar) / 2
-                ylo, yhi = c - half, c + half
+                ylo, yhi = c - gy * half, c + gy * half
         return xlo, xhi, ylo, yhi, xlog, ylog
 
     def ticks(self, lo, hi, log, positions, labels, target):
         mpl = self.options.get("tick_format") == "matplotlib"
+        lo, hi = min(lo, hi), max(lo, hi)  # (an inverted axis has the same ticks)
         if positions is not None:
             pos = [float(v) for v in positions]
             if labels is not None:
@@ -985,7 +1009,7 @@ class Panel:
         if o.get("fit_aspect") and ar not in (None, "automatic", "auto") and None not in (
                 o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax")):
             # keep the ranges and shrink the plot area to their shape instead
-            xr, yr = float(o["xmax"]) - float(o["xmin"]), (float(o["ymax"]) - float(o["ymin"])) * float(ar)
+            xr, yr = abs(float(o["xmax"]) - float(o["xmin"])), abs(float(o["ymax"]) - float(o["ymin"])) * float(ar)
             if xr > 0 and yr > 0:
                 k = min(pw / xr, ph / yr)
                 left += (pw - xr * k) / 2
