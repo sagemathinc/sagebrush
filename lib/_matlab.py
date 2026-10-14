@@ -5751,17 +5751,77 @@ def conv_(a, b, shape=None):
 
 
 @_bi("deconv")
-def deconv_(nargout, b, a):
-    B = list(_farr(b).reshape(-1))
-    A = list(_farr(a).reshape(-1))
-    q = []
-    r = B[:]
-    for k in range(len(B) - len(A) + 1):
-        c = r[k] / A[0]
-        q.append(c)
-        for j in range(len(A)):
-            r[k + j] -= c * A[j]
-    out = [_box(np.array(q).reshape((-1, 1))), _box(np.array(r).reshape((-1, 1)))]
+def deconv_(nargout, y, h, *args):
+    """deconv as documented: [x, r] = deconv(y, h) by polynomial long
+    division, with y = conv(x, h) + r; with Method="least-squares" (and a
+    shape, "full", "same" or "valid", of the convolution y holds) the x that
+    minimizes norm(r)^2 + norm(alpha*x)^2 for RegularizationFactor alpha
+    (default 0), and of those the one of least norm.  x and r are oriented
+    as y, single if y or h is; for the full convolution with h longer than
+    y, x = 0 and r = y."""
+    args = list(args)
+    shape = "full"
+    if args and _istext(args[0]) and _text(args[0]).lower() in ("full", "same", "valid"):
+        shape = _text(args.pop(0)).lower()
+    if len(args) % 2:
+        raise _err("Name-value arguments must come in pairs.")
+    method, alpha = "long-division", 0.0
+    for k in range(0, len(args), 2):
+        name = _text(args[k]).lower() if _istext(args[k]) else None
+        if name == "method":
+            method = _text(args[k + 1]).lower() if _istext(args[k + 1]) else None
+            if method not in ("long-division", "least-squares"):
+                raise _err("Method must be \"long-division\" or \"least-squares\".")
+        elif name == "regularizationfactor":
+            alpha = _scalar(args[k + 1])
+        else:
+            raise _err("deconv: the option '%s' is not supported." % (_text(args[k]) if name else "?"))
+    if method == "long-division" and shape != "full":
+        raise _err("The shape must be \"full\" when Method is \"long-division\".")
+    if method == "long-division" and alpha != 0:
+        raise _err("RegularizationFactor must be 0 when Method is \"long-division\".")
+    cls = "single" if "single" in (class_(y), class_(h)) else "double"
+    Y = _farr(y).reshape(-1)
+    H = _farr(h).reshape(-1)
+    cplx = Y.dtype.kind == "c" or H.dtype.kind == "c"
+    dt = np.complex128 if cplx else np.float64
+    Y, H = Y.astype(dt), H.astype(dt)
+    col = _dims(y)[1] == 1 and _dims(y)[0] > 1
+
+    def orient(v):
+        v = np.array(v, dtype=dt)
+        return _finish(v.reshape((1, -1)) if col else v.reshape((-1, 1)), cls)
+    if shape == "full" and H.size > Y.size:
+        out = [orient([0.0]), orient(Y)]
+    elif method == "long-division":
+        if H.size == 0 or H[0] == 0:
+            raise _err("First coefficient of h must be non-zero.")
+        q = []
+        r = list(Y)
+        for k in range(len(Y) - len(H) + 1):
+            c = r[k] / H[0]
+            q.append(c)
+            for j in range(len(H)):
+                r[k + j] -= c * H[j]
+        out = [orient(q), orient(r)]
+    else:
+        nh = H.size
+        nx = {"full": Y.size - nh + 1, "same": Y.size, "valid": Y.size + nh - 1}[shape]
+        # (the convolution's matrix: column j is conv(e_j, h), then the rows the shape keeps)
+        F = np.zeros((nx + nh - 1, nx), dtype=dt)
+        for j in range(nx):
+            F[j:j + nh, j] = H
+        if shape == "same":
+            F = F[nh // 2:nh // 2 + nx, :]
+        elif shape == "valid":
+            F = F[nh - 1:nx, :]
+        M, rhs = F, Y
+        if alpha != 0:
+            M = np.concatenate([F, alpha * np.eye(nx, dtype=dt)], axis=0)
+            rhs = np.concatenate([Y, np.zeros(nx, dtype=dt)])
+        # (the least-squares solution of least norm, by the SVD)
+        x = np.linalg.lstsq(M, rhs, rcond=None)[0]
+        out = [orient(x), orient(Y - F @ x)]
     return out[0] if nargout <= 1 else out
 
 
