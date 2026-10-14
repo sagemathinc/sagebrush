@@ -109,7 +109,11 @@ try {
   check(await ev("document.querySelectorAll('.board-item span[style]').length") >= 1, "the safe formatting (a colored span) is kept");
   // a board with pages: a hostile page title (the picker, Page..., printing) and step, presented; a hostile background
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: X("deck"), pages: [
-    { title: X("page-title"), slide: { x: 0, y: 0, w: "1280\"><img src=x onerror=\"window.__xss.push('slide')\">", h: 720 }, background: { color: "red;background:url(javascript:window.__xss.push('bg'))", image: "../../x\" onerror=\"window.__xss.push('bgimg')" }, nodes: [{ id: "p", title: X("p") }], steps: [{ focus: "p", say: X("pstep") }] },
+    { title: X("page-title"), slide: { x: 0, y: 0, w: "1280\"><img src=x onerror=\"window.__xss.push('slide')\">", h: 720 }, background: { color: "red;background:url(javascript:window.__xss.push('bg'))", image: "../../x\" onerror=\"window.__xss.push('bgimg')" }, nodes: [{ id: "p", title: X("p") },
+      // (hostile stickers: markup as the emoji, as an icon's name; CSS as the color)
+      { id: "s1", kind: "sticker", emoji: X("emoji"), x: 300, y: 0 }, { id: "s2", kind: "sticker", icon: X("icon"), x: 400, y: 0 },
+      { id: "s3", kind: "sticker", emoji: "⭐", color: "red;background:url(javascript:window.__xss.push('sticker'))", x: 500, y: 0 },
+      { id: "s4", kind: "sticker", icon: "star", color: "#0f0\"><img src=x onerror=\"window.__xss.push('scolor')\">", x: 600, y: 0 }], steps: [{ focus: "p", say: X("pstep") }] },
     { title: X("page-two"), slide: { x: 0, y: 0, w: 640, h: 360 }, background: { color: "#123456" }, nodes: [{ id: "q", title: "Q" }] },
   ] })}).then(() => 1)`);
   await sleep(800);
@@ -126,6 +130,8 @@ try {
   await ev("window.sagebrush.board.present(false).then(() => 1)");
   const pd = await ev("window.sagebrush.board.snapshot().doc");
   check(!pd.pages[0].slide && !pd.pages[0].background && pd.pages[1].background?.color === "#123456", "a hostile card and background are not kept; a sound one is: " + JSON.stringify([pd.pages[0].slide, pd.pages[0].background, pd.pages[1].background]));
+  const sk = pd.pages[0].nodes.filter((n) => n.kind === "sticker");
+  check(JSON.stringify(sk) === '[{"id":"s3","kind":"sticker","emoji":"⭐","x":500,"y":0},{"id":"s4","kind":"sticker","icon":"star","x":600,"y":0}]', "hostile stickers are not kept, nor a hostile color: " + JSON.stringify(sk));
   check(!dialogs.length && (await ev("window.__xss")).length === 0, `with pages, presented: script ran: ${JSON.stringify(await ev("window.__xss"))} ${dialogs.join(", ")}`);
   const found2 = await ev(`[...document.querySelectorAll("*")].flatMap((el) => [...el.attributes].filter((a) => /^on/i.test(a.name)).map((a) => el.tagName + "[" + a.name + "]"))`);
   check(found2.length === 0, `with pages, presented: elements: ${found2.join(", ")}`);

@@ -83,7 +83,23 @@ export interface DocInk {
   y: number;
 }
 
-export type DocNode = DocNote | DocGroup | DocInk;
+// A sticker (stickers.ts): an emoji, or a CoCalc icon by name, shown
+// without a frame, as wide as `w` (default 64).  (A picture alone is a
+// note with only a picture.)
+export interface DocSticker {
+  id: string;
+  kind: "sticker";
+  /** one emoji (one grapheme) */
+  emoji?: string;
+  /** one of CoCalc's icons, by name (a converted CoCalc board), and its color */
+  icon?: string;
+  color?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+}
+
+export type DocNode = DocNote | DocGroup | DocInk | DocSticker;
 
 /** A slide's card on its page (board coordinates). */
 export interface SlideRect { x: number; y: number; w: number; h: number }
@@ -185,6 +201,14 @@ export function pageOf(d: BoardDoc, i: number): BoardPage {
   return d.pages[Math.max(0, Math.min(d.pages.length - 1, i))];
 }
 
+/** The pages shown as pages (Present, JSON Canvas): those that are not
+ * templates (a template is shown on the pages made from it), or, when all
+ * are templates, all of them. */
+export function shownPages(d: BoardDoc): number[] {
+  const all = [...Array(pageCount(d)).keys()], own = all.filter((p) => !d.pages?.length || !pageOf(d, p).template);
+  return own.length ? own : all;
+}
+
 /** The template page that page i is made from (its index), or -1. */
 export function templateOf(d: BoardDoc, i: number): number {
   if (!d.pages?.length) return -1;
@@ -262,6 +286,12 @@ export function cleanDoc(d: any): BoardDoc {
       const world = ps.map((v: number, i: number) => (i % 3 === 0 ? v + n.x : i % 3 === 1 ? v + n.y : v));
       return inkNode(String(n.id), world, { size: size !== undefined && size > 0 && size <= 200 ? size : undefined, color: safeColor(n.color), opacity: opacity !== undefined && opacity > 0 && opacity < 1 ? opacity : undefined });
     }
+    // (a sticker: one emoji, or an icon's name; else none)
+    if (n.kind === "sticker") {
+      const emoji = oneEmoji(n.emoji), icon = typeof n.icon === "string" && ICON_NAME.test(n.icon) ? n.icon : undefined, w = num(n.w);
+      if (!emoji && !icon) return null;
+      return strip({ id: String(n.id), kind: "sticker" as const, emoji, icon, color: safeColor(n.color), x: num(n.x), y: num(n.y), w: w !== undefined && w >= 8 && w <= 4000 ? w : undefined });
+    }
     // (kind "code": the code items of documents before every note could have code)
     const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
     return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
@@ -281,7 +311,7 @@ export function cleanDoc(d: any): BoardDoc {
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
   // (previews: at most DOC_MAX in all, every page's, SEC-14C-2)
   const notes: DocNote[] = [];
-  const walk = (ns: DocNode[] | undefined) => { for (const n of ns ?? []) n.kind === "group" ? walk(n.children) : n.kind !== "ink" && n.preview && notes.push(n); };
+  const walk = (ns: DocNode[] | undefined) => { for (const n of ns ?? []) n.kind === "group" ? walk(n.children) : n.kind !== "ink" && n.kind !== "sticker" && n.preview && notes.push(n); };
   walk(out.nodes);
   for (const p of out.pages ?? []) walk(p.nodes);
   capPreviews(notes);
@@ -355,6 +385,20 @@ export type MeasuredNote = DocNote & { img?: ImageInfo & { key: string } };
 
 // A note's size: given, measured, or estimated from its text's length (about
 // 7 px a character, 20 px a line), with room for the title and the link.
+/** A sticker's width, unless it says. */
+export const STICKER_SIZE = 64;
+
+/** A CoCalc icon's name, as a sticker may have one (and only such reaches a host). */
+export const ICON_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/** `s` if it is one emoji: one grapheme, at most 16 code units, no ASCII letter and no control character; else undefined. */
+export function oneEmoji(s: unknown): string | undefined {
+  if (typeof s !== "string") return undefined;
+  const t = s.trim();
+  if (!t || t.length > 16 || /[A-Za-z]|\p{Cc}/u.test(t)) return undefined;
+  return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t)].length === 1 ? t : undefined;
+}
+
 /** A pen's width, unless a stroke says. */
 export const INK_SIZE = 3;
 
@@ -404,7 +448,7 @@ function noteSize(n: DocNote, measure?: Measure, img?: ImageInfo): Box {
 export const onlyImage = (n: { image?: string | object; title?: string; text?: string; code?: string; detail?: string; ref?: string }) =>
   !!n.image && !n.title && !n.text && n.code === undefined && !n.detail && !n.ref;
 
-const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.kind !== "ink" && n.code !== undefined));
+const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined));
 /** Whether a board has code items, on any page. */
 export const anyCode = (d: BoardDoc) => Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i)).some((v) => hasCode(v.nodes ?? []));
 
@@ -483,6 +527,12 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       size.set(n.id, b);
       return b;
     }
+    if (n.kind === "sticker") {
+      // (square, as wide as it says)
+      const w = n.w ?? STICKER_SIZE, b = { w, h: w };
+      size.set(n.id, b);
+      return b;
+    }
     if (n.kind !== "group") {
       const b = noteSize(n, measure && Object.assign((m: DocNote, w: number) => measure({ ...m, ref: refOf(m), img: imgOf(m) }, w), { width: measure.width && ((m: DocNote, w: number) => measure.width!({ ...m, ref: refOf(m), img: imgOf(m) }, w)) }), imgOf(n));
       size.set(n.id, b);
@@ -531,6 +581,8 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         const p = rel.get(c.id)!;
         place(c, x + p.x, y + p.y, depth + 1, n.id);
       }
+    } else if (n.kind === "sticker") {
+      items.push({ id: n.id, kind: "sticker", x, y, w: b.w, h: b.h, ...(n.emoji ? { emoji: n.emoji } : {}), ...(n.icon ? { icon: n.icon } : {}), color: n.color, depth, parent });
     } else if (n.kind === "ink") {
       // (its outline, from its corner)
       items.push({ id: n.id, kind: "ink", x, y, w: b.w, h: b.h, outline: inkOutline(n.points, { size: n.size ?? INK_SIZE, streamline: 0, last: true }), width: n.size ?? INK_SIZE, color: n.color, depth, parent, ...(n.opacity !== undefined ? { opacity: n.opacity } : {}) });
