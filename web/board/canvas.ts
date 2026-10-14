@@ -177,6 +177,11 @@ export function toCanvas(doc: BoardDoc, laid: (page: number) => { items: Item[];
       nodes.push(onlyLink ? { id: id(it.id), type: "link", ...at(it), url: it.ref!, ...(color ? { color } : {}) } : { id: id(it.id), type: "text", ...at(it), text: markdownOf(it, mode), ...(color ? { color } : {}) });
     }
     leave("ink", items.filter((x) => x.kind === "ink" || x.kind === "shape").length);
+    // (a sticker's emoji: a text card; an icon has nothing like it)
+    for (const it of items.filter((x) => x.kind === "sticker")) {
+      if (it.emoji) nodes.push({ id: id(it.id), type: "text", ...at(it), text: it.emoji });
+      else leave("sticker");
+    }
     es.forEach((e, k) => edges.push({ id: id(`e${k + 1}`), fromNode: id(e.from), toNode: id(e.to), ...(e.label ? { label: e.label } : {}), ...(e.arrow === "none" ? { toEnd: "none" } : e.arrow === "both" ? { fromEnd: "arrow", toEnd: "arrow" } : {}) }));
     y0 += bottom + (paged ? 2 * PAD + TITLE : 0) + 200;
   }
@@ -188,7 +193,7 @@ const WORDS: Record<string, [string, string]> = {
   edge: ["connection to something left out", "connections to something left out"], step: ["step of the tour", "steps of the tour"],
   intro: ["page's intro", "pages' intros"], outline: ["note's outline", "notes' outlines"], picture: ["picture not in this browser", "pictures not in this browser"],
   template: ["template page (its items are on the pages made from it)", "template pages (their items are on the pages made from them)"],
-  ink: ["pen stroke", "pen strokes"], slidecard: ["slide's card", "slides' cards"], pagebg: ["page's background", "pages' backgrounds"],
+  ink: ["pen stroke", "pen strokes"], sticker: ["sticker", "stickers"], slidecard: ["slide's card", "slides' cards"], pagebg: ["page's background", "pages' backgrounds"],
 };
 /** What was left out, in words ("4 steps of the tour and 1 page's intro"), or "" if nothing. */
 export function canvasLeftOut(left: Record<string, number>): string {

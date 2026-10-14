@@ -57,6 +57,17 @@ check(!bg.pages[0].slide && !bg.pages[0].background && !bg.pages[1].slide && JSO
 const bt = canonical({ title: "Deck", nodes: [{ id: "a" }], slide: { x: 0, y: 0, w: 160, h: 90 }, background: { color: "#ffffff" } });
 check(Object.keys(JSON.parse(bt)).join() === "format,version,title,slide,background,nodes" && canonical(JSON.parse(bt)) === bt, "in the file, the slide and background come before the content: " + Object.keys(JSON.parse(bt)).join());
 
+// a sticker: one emoji or an icon's name (kept in that form), else dropped; a picture is a note's
+const st = cleanDoc({ nodes: [
+  { id: "e", kind: "sticker", emoji: "⭐", w: 80, x: 1, y: 2, junk: 1 },
+  { id: "i", kind: "sticker", icon: "star", color: "#f00", w: 3 },
+  { id: "p", kind: "sticker", image: "a-picture" },
+  { id: "z", kind: "sticker", emoji: " 👍🏿 ", icon: "Star", color: "red;x:y" },
+  { id: "none", kind: "sticker" },
+  { id: "bad", kind: "sticker", icon: "<img src=x onerror=1>", emoji: "x".repeat(40) },
+] });
+check(st.nodes.map((n) => n.id).join() === "e,i,z" && JSON.stringify(st.nodes[2]) === '{"id":"z","kind":"sticker","emoji":"👍🏿"}' && JSON.stringify(st.nodes[0]) === '{"id":"e","kind":"sticker","emoji":"⭐","x":1,"y":2,"w":80}' && st.nodes[1].w === undefined && st.nodes[1].color === "#f00", "a sticker is kept in its form (a width too small dropped); one with nothing, or only a bad name, is not: " + JSON.stringify(st.nodes));
+
 // what the board does not keep is not in its file
 check(!canonical({ nodes: [{ id: "a", title: "A", junk: 1 }], junk: 2 }).includes("junk"), "what a board does not keep is left out of its file");
 

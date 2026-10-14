@@ -21,14 +21,15 @@
 // element's corner, as wide as CoCalc drew them, 2 radius; their color; a
 // highlighter's opacity; CoCalc's chisel nib, round); frames become groups
 // holding what is inside them (frames within frames, groups within groups);
-// edges become edges; a slides file's pages are slides (CoCalc's card, 16:9,
+// icons become stickers (their names, colors and sizes); edges become
+// edges; a slides file's pages are slides (CoCalc's card, 16:9,
 // where it was: slides-editor/fixed-elements.ts, or a page's own).  The rest
-// has nothing like it on a board yet (icons, timers, stopwatches, chats,
+// has nothing like it on a board yet (timers, stopwatches, chats,
 // terminals, speaker notes): it is left out, and counted, so the person is
 // told what was.  Outputs are not
 // kept: a board's code runs when it is opened.
 
-import { inkNode, inkSize, type BoardDoc, type BoardPage, type DocEdge, type DocInk, type DocNote } from "./doc";
+import { ICON_NAME, inkNode, inkSize, type BoardDoc, type BoardPage, type DocEdge, type DocInk, type DocNote, type DocSticker } from "./doc";
 import { simplifyInk } from "./ink";
 import { nest } from "./nest";
 
@@ -85,6 +86,11 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
   }
   const markdown = (s: unknown) => (typeof s === "string" ? (legacy ? s.replace(/\\([()[\]])/g, "$1") : s) : "");
 
+  // an icon: a sticker, its name kept (drawn by the host, else as an emoji close to it: stickers.ts), its color, its size
+  const sticker = (e: El): DocSticker => {
+    const b = box(e), lower = typeof e.data?.icon === "string" ? e.data.icon.toLowerCase() : "", name = ICON_NAME.test(lower) ? lower : "square";
+    return { id: e.id, kind: "sticker", icon: name, ...(typeof e.data?.color === "string" ? { color: e.data.color } : {}), w: Math.max(8, Math.round(Math.min(b.w, b.h))) };
+  };
   // a pen stroke: its path (from the element's corner) on the board, its width, color, opacity
   const stroke = (e: El): DocInk | null => {
     const path: unknown[] = Array.isArray(e.data?.path) ? e.data.path : [], pts: number[] = [];
@@ -106,6 +112,7 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
     const p = pages[Math.min(count - 1, pageOf(e))];
     if (e.type === "note" || e.type === "text" || e.type === "code") p.items.push(e);
     else if (e.type === "slide") p.slide = e;
+    else if (e.type === "icon") p.items.push(e);
     else if (e.type === "pen") { const s = stroke(e); if (s) { strokes.set(e.id, s); p.items.push(e); } else leave("pen"); }
     else if (e.type === "frame") p.frames.push(e);
     else if (e.type === "edge") p.edges.push(e);
@@ -129,7 +136,7 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
     const nodes = nest(frames.map(boxed), items.map(boxed), ({ e }) => {
       const title = typeof e.str === "string" ? e.str.trim() : "";
       return { id: e.id, ...(title ? { title } : {}) };
-    }, ({ e }) => strokes.get(e.id) ?? note(e));
+    }, ({ e }) => strokes.get(e.id) ?? (e.type === "icon" ? sticker(e) : note(e)));
     const ids = new Set([...items, ...frames].map((e) => e.id));
     const es: DocEdge[] = [];
     for (const e of edges) {

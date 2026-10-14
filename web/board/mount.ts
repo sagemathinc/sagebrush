@@ -76,6 +76,8 @@ export interface BoardHost {
   store?: BoardStore;
   /** where pictures' bytes are kept (images.ts: Images, this browser's IndexedDB) */
   images: ImageStore;
+  /** a CoCalc icon by its name (a converted board's stickers), as the host draws it; none: an emoji close to it (stickers.ts) */
+  icon?(name: string): Element | null;
   /** the engine of code items, made the first time a board has code (the document then) */
   code?: (d: BoardDoc) => BoardCode;
   /** KaTeX, loaded the first time a board has math */
@@ -147,7 +149,7 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
   const walk = (ns: DocNode[] | undefined) => {
     for (const n of ns ?? []) {
       if (n.kind === "group") walk(n.children);
-      else if (n.kind !== "ink" && n.code !== undefined) out.set(n.id, n);
+      else if (n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined) out.set(n.id, n);
     }
   };
   walk(d.nodes);
@@ -172,6 +174,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // pictures: where the host keeps them (by name); a board that carries them (data: URLs) gives them up on the way in
   const images = host.images;
   board.imageUrl = (name) => images.url(name);
+  board.icon = host.icon ? (name) => host.icon!(name) : null;
   // (listeners on the page, taken off by destroy())
   const offs: (() => void)[] = [];
   const on = (t: EventTarget, type: string, f: (e: any) => void, capture = false) => { t.addEventListener(type, f, capture); offs.push(() => t.removeEventListener(type, f, capture)); };
