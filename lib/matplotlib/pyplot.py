@@ -219,13 +219,14 @@ class Axes:
                 edgecolors=None, color=None, vmin=None, vmax=None, **kw):
         xs, ys = _list(x), _list(y)
         n = len(xs)
-        colors = None
+        colors = clim = None
         if c is not None and not isinstance(c, str) and not (isinstance(c, tuple) and len(c) in (3, 4)):
             cl = list(c.tolist() if hasattr(c, "tolist") else c)
             if cl and isinstance(cl[0], (int, float)):
                 lo = min(cl) if vmin is None else vmin
                 hi = max(cl) if vmax is None else vmax
                 colors = [colormap((v - lo) / (hi - lo) if hi > lo else 0.5, cmap or "viridis") for v in cl]
+                clim = (float(lo), float(hi))
             else:
                 colors = [to_color(v) for v in cl]
         col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None))
@@ -235,7 +236,12 @@ class Axes:
         r = math.sqrt(36 if s is None or sizes is not None else float(s)) * PT / 2
         p = Points(xs, ys, marker=marker, size=r, sizes=sizes, color=col, colors=colors, alpha=alpha,
                    label=label, edgecolor=edgecolors if edgecolors not in (None, "none", "face") else None)
-        return _Artist(self._add(p), "collections.PathCollection")
+        art = _Artist(self._add(p), "collections.PathCollection")
+        if clim is not None:
+            # (colored by values: a mappable, for colorbar)
+            art.cmap, art._clim, art._ax = (cmap or "viridis"), clim, self
+            art.get_clim = lambda: art._clim
+        return art
 
     def bar(self, x, height, width=0.8, bottom=None, align="center", color=None, label=None,
             edgecolor=None, tick_label=None, alpha=None, **kw):
@@ -535,7 +541,7 @@ class Axes:
         art.get_clim = lambda: art._clim
         art.get_extent = lambda: [left, right, bottom, top]
         art.get_array = lambda: A
-        self._mappable = art
+        art._ax = self
         return art
 
     # ---------------------------------------------------------------- settings
@@ -616,6 +622,7 @@ class Axes:
         self._opts.setdefault("ymin", y0)
         self._opts.setdefault("ymax", y1)
         self._opts["margins"] = 0
+        cs._ax = self
         return cs
 
     def set_xlim(self, left=None, right=None, **kw):
@@ -856,6 +863,7 @@ class Figure:
 
     def clear(self):
         self.axes = []
+        self._gci = None
 
     clf = clear
 
@@ -978,9 +986,34 @@ def _forward(name):
     return f
 
 
-for _name in ("plot", "scatter", "bar", "barh", "hist", "fill_between", "errorbar", "step", "stem",
-              "axhline", "axvline", "text", "annotate", "pie", "imshow", "grid", "legend", "axis"):
+for _name in ("plot", "bar", "barh", "hist", "fill_between", "errorbar", "step", "stem",
+              "axhline", "axvline", "text", "annotate", "pie", "grid", "legend", "axis"):
     globals()[_name] = _forward(_name)
+
+
+def sci(im):
+    """Make im the current image (what colorbar() uses without a mappable)."""
+    gcf()._gci = im
+
+
+def gci():
+    """The current image: the last one pyplot's imshow, scatter or contourf made (or sci set), or None."""
+    return getattr(gcf(), "_gci", None)
+
+
+def _forward_sci(name):
+    # (pyplot's imshow, scatter and contourf make their result the current image, as
+    # matplotlib's do; the Axes methods do not)
+    def f(*args, **kw):
+        r = getattr(gca(), name)(*args, **kw)
+        sci(r)
+        return r
+    f.__name__ = name
+    return f
+
+
+for _name in ("imshow", "scatter"):
+    globals()[_name] = _forward_sci(_name)
 
 title = _forward("set_title")
 xlabel = _forward("set_xlabel")
@@ -1035,7 +1068,9 @@ def rc_context(rc=None):
 
 
 def contourf(*args, **kw):
-    return gca().contourf(*args, **kw)
+    r = gca().contourf(*args, **kw)
+    sci(r)
+    return r
 
 
 def GridSpec(*args, **kw):
@@ -1117,6 +1152,9 @@ class ContourSet:
     def get_cmap(self):
         return self.cmap
 
+    def get_clim(self):
+        return (self.levels[0], self.levels[-1])
+
 
 def _rgb(c):
     c = to_color(c) or "#000000"
@@ -1150,14 +1188,31 @@ def _png_url(pixels, palette=None):
 
 
 class Colorbar:
-    """A colorbar in its own axes (cax): the bands of a contourf, ticks and a label on the right."""
+    """A colorbar in its own axes (cax), ticks and a label on the right: a contour
+    set's bands, or a continuous mappable's colormap from vmin to vmax (an image,
+    a scatter colored by values, a ScalarMappable)."""
 
     def __init__(self, mappable, cax):
         self.mappable, self.ax = mappable, cax
-        L = mappable.levels
-        rects = [(0.0, L[i], 1.0, L[i + 1] - L[i]) for i in builtin_range(len(L) - 1)]
-        cax._prims = [Rects(rects, colors=list(mappable._band))]
-        cax._opts.update({"xmin": 0.0, "xmax": 1.0, "ymin": L[0], "ymax": L[-1], "margins": 0, "xticks": [],
+        if hasattr(mappable, "levels") and hasattr(mappable, "_band"):
+            L = mappable.levels
+            rects = [(0.0, L[i], 1.0, L[i + 1] - L[i]) for i in builtin_range(len(L) - 1)]
+            cax._prims = [Rects(rects, colors=list(mappable._band))]
+            lo, hi = L[0], L[-1]
+        else:
+            import numpy as np
+            lo, hi = (float(v) for v in mappable.get_clim())
+            if not hi > lo:
+                lo, hi = lo - 0.5, hi + 0.5
+            # (256 rows of the colormap, the highest value at the top)
+            cmap = mappable.get_cmap() if hasattr(mappable, "get_cmap") else getattr(mappable, "cmap", None)
+            px = np.zeros((256, 1, 4), dtype=np.uint8)
+            for i in builtin_range(256):
+                r, g, b = _rgb(colormap((255 - i) / 255, cmap or "viridis"))
+                px[i, 0] = (r, g, b, 255)
+            cax._prims = [Image(_png_url(px), 0.0, 1.0, lo, hi, first_row_y=hi, what="colorbar from %s to %s" % (_short(lo), _short(hi)))]
+        self.vmin, self.vmax = lo, hi
+        cax._opts.update({"xmin": 0.0, "xmax": 1.0, "ymin": lo, "ymax": hi, "margins": 0, "xticks": [],
                           "yaxis_side": "right", "_colorbar": True})
 
     def set_label(self, label="", labelpad=None, **kw):
@@ -1172,9 +1227,20 @@ class Colorbar:
         self.ax.set_yticklabels(labels)
 
 
+_NO_MAPPABLE = ("No mappable was found to use for colorbar creation. First define a mappable such as an image "
+                "(with imshow) or a contour set (with contourf).")
+
+
 def _colorbar(fig, mappable, cax, ax, **kw):
-    if mappable is None or not hasattr(mappable, "levels"):
-        return None  # (only contourf's sets have a colorbar yet)
+    if mappable is None:
+        mappable = getattr(fig, "_gci", None)
+        if mappable is None:
+            raise RuntimeError(_NO_MAPPABLE)
+    if not (hasattr(mappable, "levels") and hasattr(mappable, "_band")) and not hasattr(mappable, "get_clim"):
+        raise TypeError("colorbar() needs a mappable (an image, a contour set, a scatter colored by values, "
+                        "a ScalarMappable), not %s" % type(mappable).__name__)
+    if cax is None and ax is None and getattr(mappable, "_ax", None) is not None:
+        ax = mappable._ax
     if cax is None:
         # room taken from the axes' right side, as matplotlib does
         parent = ax if ax is not None else fig.gca()
@@ -1183,4 +1249,7 @@ def _colorbar(fig, mappable, cax, ax, **kw):
         cax = Axes(fig, (fx + fw * 0.85, fy + fh * 0.05, fw * 0.04, fh * 0.9))
         cax._opts["exact"] = parent._opts.get("exact", False)
         fig.axes.append(cax)
-    return Colorbar(mappable, cax)
+    cb = Colorbar(mappable, cax)
+    if kw.get("label"):
+        cb.set_label(kw["label"])
+    return cb

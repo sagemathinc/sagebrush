@@ -61,7 +61,10 @@ class LinearSegmentedColormap(Colormap):
 
 class Normalize:
     def __init__(self, vmin=None, vmax=None, clip=False):
-        self.vmin, self.vmax, self.clip = vmin, vmax, clip
+        # (floats, as matplotlib's: Normalize(0, 10).vmin is 0.0)
+        self.vmin = None if vmin is None else float(vmin)
+        self.vmax = None if vmax is None else float(vmax)
+        self.clip = clip
 
     def __call__(self, v):
         return (v - self.vmin) / (self.vmax - self.vmin)
