@@ -45,7 +45,7 @@ const SETUP = `(async () => {
     const doc = { title, nodes: [{ id: "a", title: "A note", x: 0, y: 0 }] };
     const store = { load: async () => ({ doc }), save() {}, documentId: (fresh) => (fresh || !id ? (id = "d" + ++n) : id) };
     const fake = (name) => {
-      const f = { name, docs: [], closed: 0, record(d) { if (this.closed) throw new Error("recorded after closing: " + name); this.docs.push(d.title); }, versions() { return this.docs.map((t, i) => ({ time: String(i), ms: 0, index: i })); }, docAt() { return doc; }, on() { return () => {}; }, close() { this.closed++; } };
+      const f = { name, docs: [], notes: [], closed: 0, ons: 0, record(d) { if (this.closed) throw new Error("recorded after closing: " + name); this.docs.push(d.title); this.notes.push(d.nodes?.[0]?.title); }, versions() { return this.docs.map((t, i) => ({ time: String(i), ms: 0, index: i })); }, docAt() { return doc; }, on() { this.ons++; return () => {}; }, close() { this.closed++; } };
       H.hist[name] = f;
       return f;
     };
@@ -62,7 +62,7 @@ const SETUP = `(async () => {
 })()`;
 const H = (expr) => ev(`(() => { const H = window.cur.H; return ${expr}; })()`);
 const edit = (title) => ev(`window.cur.b.agent.edit((d) => { d.title = ${JSON.stringify(title)}; }).then(() => 1)`);
-const recorded = (name) => H(`H.hist[${JSON.stringify(name)}] ? { docs: H.hist[${JSON.stringify(name)}].docs, closed: H.hist[${JSON.stringify(name)}].closed } : null`);
+const recorded = (name) => H(`H.hist[${JSON.stringify(name)}] ? { docs: H.hist[${JSON.stringify(name)}].docs, notes: H.hist[${JSON.stringify(name)}].notes, closed: H.hist[${JSON.stringify(name)}].closed, ons: H.hist[${JSON.stringify(name)}].ons } : null`);
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
@@ -120,6 +120,30 @@ try {
   const e3 = await recorded("d1");
   await ev("(() => { window.requestAnimationFrame = window.__raf; window.cur.el.remove(); window.cur = null; return 1; })()");
   check(JSON.stringify(e3?.docs) === '["A","B"]' && e3?.closed === 1, "destroyed with versions waiting for a frame: recorded first, then closed: " + JSON.stringify(e3));
+  // CORR-54B-1: a history still opening, nothing waiting to be recorded, the board destroyed; then it opens: closed, not listened to
+  await ev(`mountWith("A", false)`);
+  await ev("(window.cur.b.agent.versions(), 1)");
+  await until(`window.cur.H.calls.includes("d1")`);
+  await ev("window.cur.b.destroy().then(() => 1)");
+  await H(`(H.open.d1(), 1)`);
+  await sleep(100);
+  const s1 = await recorded("d1");
+  await ev("(() => { window.cur.el.remove(); window.cur = null; return 1; })()");
+  check(s1?.closed === 1 && s1?.ons === 0, "destroyed while its history opened: once open, it is closed and not listened to: " + JSON.stringify(s1));
+
+  // CORR-54B-2: a note being written when the board is destroyed: kept, and a version of it
+  await ev(`mountWith("A", true)`);
+  await edit("B");
+  await ev("window.cur.b.agent.versions().then(() => 1)");
+  await ev("window.cur.b.agent.editing(true), window.cur.b.board.focus(['a'], true), window.cur.b.board.render(), 1");
+  await sleep(200);
+  await ev("(() => { const r = window.cur.b.board.clientRect('a'); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  const open = await until("!!window.cur.el.querySelector('.board-editing')", 3000);
+  await ev("(() => { const f = window.cur.el.querySelector('.board-editing .be-title, .board-editing input, .board-editing textarea'); f.value = 'Written as destroyed'; f.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()");
+  await ev("window.cur.b.destroy().then(() => 1)");
+  const s2 = await recorded("d1");
+  await ev("(() => { window.cur.el.remove(); window.cur = null; return 1; })()");
+  check(open && s2?.notes.at(-1) === "Written as destroyed" && s2?.closed === 1, "a note being written when the board is destroyed: a version of it, then the history closed: " + JSON.stringify(s2));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
