@@ -414,9 +414,11 @@ class Axes(GObj):
 def _nice_limits(lo, hi, log=False, ticint=5):
     if log and lo > 0:
         return 10.0 ** math.floor(math.log10(lo)), 10.0 ** math.ceil(math.log10(hi))
-    # (the tick step: a fifth of the span, rounded to the nearest 1, 2, 5 or 10 times a
-    # power of 10 on a log scale, as Octave does; the limits on multiples of it.  A 3-D
-    # axes' z axis is short on the screen: a third, which gives surf(peaks) its [-10 10])
+    # (Sagebrush's rule: the tick step a fifth of the span, rounded to 1, 2, 5 or 10
+    # times a power of 10 at the geometric means (sqrt 2, sqrt 10, sqrt 50), the limits
+    # on multiples of it.  It agrees with Octave's limits for most spans, not all.  A 3-D
+    # axes' z axis is short on the screen: a third, which gives surf(peaks) its
+    # [-10 10])
     raw = (hi - lo) / ticint
     b = math.floor(math.log10(raw))
     x = raw / 10.0 ** b
@@ -927,8 +929,6 @@ def _cmap_formula(name, m):
 # (an approximation of MATLAB's parula: the colors it passes through)
 _PARULA = [(0.2422, 0.1504, 0.6603), (0.2810, 0.3228, 0.9579), (0.1786, 0.5289, 0.9682), (0.0689, 0.6948, 0.8394),
            (0.2161, 0.7843, 0.5923), (0.6720, 0.7793, 0.2227), (0.9970, 0.7659, 0.2199), (0.9769, 0.9839, 0.0805)]
-_TURBO = [(0.1900, 0.0718, 0.2322), (0.2737, 0.4086, 0.8901), (0.1361, 0.7232, 0.8728), (0.3256, 0.9635, 0.4582),
-          (0.7461, 0.9547, 0.2287), (0.9888, 0.6884, 0.1910), (0.8710, 0.2793, 0.0507), (0.4796, 0.0158, 0.0106)]
 
 
 def _interp_stops(stops, m):
@@ -945,8 +945,15 @@ def _interp_stops(stops, m):
 def colormap_values(name, m=256):
     if name == "parula":
         rows = _interp_stops(_PARULA, m)
+    elif name == "turbo" and m == 1:
+        # (one color: the table's last, as Octave's turbo(1) is)
+        from _matlab_turbo import TURBO
+        rows = [TURBO[-1]]
     elif name == "turbo":
-        rows = _interp_stops(_TURBO, m)
+        # (Google's published table, lib/_matlab_turbo.py, interpolated linearly
+        # for other sizes, as Octave's turbo is)
+        from _matlab_turbo import TURBO
+        rows = _interp_stops(TURBO, m)
     elif name == "lines":
         rows = [COLOR_ORDER[k % len(COLOR_ORDER)] for k in range(m)]
     else:
@@ -1470,7 +1477,11 @@ def histogram_(nargout, args):
 
 @_fn("hist")
 def hist_(nargout, args):
-    """the old hist: 10 bins of equal width over the data's range (or the bin centers given)"""
+    """the old hist: 10 bins (or n) of equal width over the data's range, as
+    documented, or bins around the centers given, their edges halfway between.
+    A value on an inner edge goes to the bin above it, as histcounts documents
+    its bins (Octave's hist puts it in the bin below); data all at one value
+    spread over a range n wide around it: both Sagebrush's choices"""
     y = args[0]
     data = [v for v in _vec(y) if v == v]
     lo, hi = (min(data), max(data)) if data else (0.0, 1.0)
@@ -1630,7 +1641,9 @@ def pie_(nargout, args):
     if len(args) > 1 and type(args[-1]) in (_m.Cell, _m.StrArr):
         labels = [_m._text(e) if type(e) is not str else e for e in args[-1].a]
     total = sum(vals)
-    frac = [v / total for v in vals] if total > 1 or abs(total - 1) < 1e-12 else vals
+    # (as documented: values summing to more than 1 are normalized; otherwise
+    # they are the slices' areas, a partial pie if they sum to less than 1)
+    frac = [v / total for v in vals] if total > 1 else vals
     a = math.pi / 2
     for k, f in enumerate(frac):
         b = a - 2 * math.pi * f
@@ -1639,8 +1652,10 @@ def pie_(nargout, args):
         ys = [0.0] + [math.sin(a + (b - a) * j / npts) for j in range(npts + 1)]
         Patch(ax, XData=_colvec(xs), YData=_colvec(ys), FaceColor=_rgb_value(_cmap_row(ax, k, len(frac))), EdgeColor=_rgb_value((0, 0, 0)))
         mid = (a + b) / 2
-        lab = labels[k] if labels else ("%d%%" % round(100 * f) if round(100 * f) >= 1 or f == 0 else "< 1%")
-        Text(ax, String=_m.Char(lab), Position=np.array([[1.15 * math.cos(mid)], [1.15 * math.sin(mid)], [0.0]]),
+        # (each label its percentage rounded half away from zero, at 1.2 times the
+        # radius: as Octave's are)
+        lab = labels[k] if labels else "%d%%" % math.floor(100 * f + 0.5)
+        Text(ax, String=_m.Char(lab), Position=np.array([[1.2 * math.cos(mid)], [1.2 * math.sin(mid)], [0.0]]),
              HorizontalAlignment=_m.Char("center"))
         a = b
     ax.props["DataAspectRatioMode"] = _m.Char("manual")
@@ -2491,7 +2506,9 @@ def quiver_(nargout, args):
         xs = [float(k // d[0] + 1) for k in range(len(u))]
         ys = [float(k % d[0] + 1) for k in range(len(u))]
     if scale:
-        # (MATLAB's autoscale: the longest arrow as long as the grid's spacing, times scale)
+        # (MATLAB documents that the arrows are scaled not to overlap, by
+        # AutoScaleFactor 0.9; how is Sagebrush's: the longest arrow as long as
+        # the grid's spacing, times the factor)
         n = max(1, len(u))
         rx = (max(xs) - min(xs)) if xs else 1.0
         ry = (max(ys) - min(ys)) if ys else 1.0
@@ -2984,9 +3001,14 @@ def _draw_scatter(c, mx, label, cmap, clim, xy=None):
 
 
 def _bar_geometry(c):
-    """(centers, widths, bottoms, tops) of a Bar's bars: grouped side by side as
-    MATLAB places them (group width min(0.8, n/(n+1.5))), or stacked on the
-    series before it"""
+    """(centers, widths, bottoms, tops) of a Bar's bars: grouped side by side,
+    or stacked on the series before it.  A group of n bars takes 0.8 of the
+    spacing, as one bar does (10% of it on each side), in n equal slots, each
+    bar BarWidth of its slot, so that at BarWidth 1 a group's bars touch, as
+    documented.  MATLAB documents GroupWidth (the fraction of the space a
+    group takes, GroupWidthMode "auto" by default) but not how its auto mode
+    chooses the value; Sagebrush always uses 0.8, and MATLAB's groups are
+    narrower: Sagebrush's rule, not MATLAB's"""
     xs = _vec(c.props["XData"])
     ys = _vec(c.props["YData"])
     w = _f(c.props["BarWidth"])
@@ -3004,8 +3026,8 @@ def _bar_geometry(c):
                     bottoms[i] += v - base
         return xs, [w * step] * len(xs), bottoms, [b + y - base for b, y in zip(bottoms, ys)]
     if n > 1 and style == "grouped":
-        gw = min(0.8, n / (n + 1.5)) * step
-        return [x - gw / 2 + (2 * k + 1) * gw / (2 * n) for x in xs], [w * gw / n] * len(xs), bottoms, ys
+        gw = 0.8 * step
+        return [x - gw / 2 + (k + 0.5) * gw / n for x in xs], [w * gw / n] * len(xs), bottoms, ys
     return xs, [w * step] * len(xs), bottoms, ys
 
 
@@ -3508,9 +3530,11 @@ def sphere_(nargout, args):
     if args and isinstance(args[0], Axes):
         ax, args = args[0], args[1:]
     n = int(_f(args[0])) if args else 20
-    th = np.linspace(-math.pi, math.pi, n + 1)
+    # ((n+1)-by-(n+1), as documented: rows follow the latitude phi from -pi/2 to
+    # pi/2, columns the longitude theta from 0 to 2 pi, as Octave's sphere has
+    # them; stored transposed)
+    th = np.linspace(0.0, 2 * math.pi, n + 1)
     ph = np.linspace(-math.pi / 2, math.pi / 2, n + 1)
-    # (MATLAB's (n+1)-by-(n+1): rows follow phi, columns theta; stored transposed)
     X = np.array([[math.cos(p) * math.cos(t) for p in ph] for t in th])
     Y = np.array([[math.cos(p) * math.sin(t) for p in ph] for t in th])
     Z = np.array([[math.sin(p) for p in ph] for t in th])

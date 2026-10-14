@@ -51,4 +51,18 @@ show(get(h, 'LevelList'));
 pcolor(magic(4));
 show(numel(findobj(gca, 'Type', 'surface')));
 show(get(gca, 'View'));
+% colormaps: the same values as Octave's (to 12 places: their last bits
+% depend on the order of operations), and turbo from Google's table
+r = @(M) round(M * 1e12) / 1e12;
+for n = [1 2 3 5 8 10 17]
+  show(r(jet(n))); show(r(hot(n))); show(r(bone(n))); show(r(pink(n))); show(r(copper(n))); show(r(hsv(n)));
+end
+show(r(turbo(8))); show(r(turbo(1))); show(size(turbo(0)));
+T = turbo(256);
+show(T(1:51:end, :));
+% sphere: columns from theta = 0 to 2 pi, rows from the south pole
+[x, y, z] = sphere(4);
+show(round(x * 1e12) / 1e12);
+show(round(y * 1e12) / 1e12);
+show(z);
 close all

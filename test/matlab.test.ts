@@ -509,3 +509,17 @@ test("the close-to-singular warning prints Higham's estimated RCOND, as the publ
     "lastwarn(''); x = magic(4) \\ [34; 34; 34; 34]; disp(lastwarn)"], { encoding: "utf8" });
   assert.equal(out.trim(), "Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = 1.306145e-17.");
 });
+
+test("grouped bars by Sagebrush's rule (a group 0.8 of the spacing, BarWidth of each slot), and pie's labels as Octave's", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "f = figure('visible', 'off');",
+    "b = bar(magic(3)); disp(mat2str(b(1).XEndPoints, 6)); disp(mat2str(b(3).XEndPoints, 6));",
+    "Y = magic(3); b = bar([1 3 5], Y(:, 1:2), 1); disp(mat2str(b(2).XEndPoints, 6));",
+    "pie([0.002 1 2]); t = findobj(gca, 'Type', 'text'); disp(strjoin(get(t, 'String')', ' ')); p = get(t(1), 'Position'); disp(norm(p(1:2)) == 1.2);",
+    // (a total just below 1 is a partial pie, its values the slices' areas, as documented and as Octave draws it)
+    "pie([0.004999999999999, 0.994999999999501]); t = findobj(gca, 'Type', 'text'); disp(strjoin(get(t, 'String')', ' '));",
+    "close all",
+  ].join(" ")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["[0.733333 1.73333 2.73333]", "[1.26667 2.26667 3.26667]", "[1.4 3.4 5.4]", "67% 33% 0%", "1", "99% 0%"]);
+});

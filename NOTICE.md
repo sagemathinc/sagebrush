@@ -193,6 +193,11 @@ chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
   LICENSE file). It is in the Python package and the `sagebrush` npm
   package, whose license metadata say so.
 
+- `lib/_matlab_turbo.py`: Google's Turbo colormap table (Anton Mikhailov,
+  Google LLC, 2019), Apache License 2.0
+  ([LICENSE-APACHE](LICENSE-APACHE)), the table as published and as
+  matplotlib ships it.
+
 ## Used only by tests and benchmarks (not distributed in any package)
 
 - `upstream/micropython/`: MicroPython's test suite (MIT; its `LICENSE`).
