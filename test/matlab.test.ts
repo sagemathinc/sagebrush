@@ -621,3 +621,38 @@ test("repelem takes a string scalar and string arrays, and only numeric scalar o
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["string", "[1 3]", "x", "b", "[1 1 2 2]",
     "Replication factors must be scalars or vectors.", "Replication factors must be numeric.", "Replication factors must be numeric."]);
 });
+
+test("optimset and optimget as documented: their pages' examples, solver defaults, partial names, merging and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "o = optimset('fzero'); disp(o.TolX == eps); disp(o.Display);",
+    "disp(strjoin(fieldnames(optimset())', ','));",
+    // (the page's merging examples, with MaxIter in place of PlotFcns, which Sagebrush refuses)
+    "oldopts = optimset(TolFun=1e-6); options = optimset(oldopts, MaxIter=40, TolX=1e-6); disp(mat2str([options.TolFun options.TolX options.MaxIter]));",
+    "oldopts = optimset(Display='iter', TolX=1e-6); newopts = optimset(MaxIter=40, Display='off'); options = optimset(oldopts, newopts); disp(options.Display); disp(options.TolX);",
+    "o = optimset(@fminbnd); disp(mat2str([o.MaxFunEvals o.MaxIter o.TolX])); o = optimset('fminsearch'); disp(isempty(o.MaxIter)); disp(o.TolFun);",
+    "disp(optimget(optimset('tolx', 3), 'TolX')); disp(optimget(optimset(), 'MaxIter', 7)); disp(optimget(optimset('Display', 'iter'), 'disp'));",
+    "try, optimset('Bogus', 1), catch e, disp(e.message), end",
+    "try, optimset('Max', 1), catch e, disp(e.message), end",
+    "try, optimset('Display', 'loud'), catch e, disp(e.message), end",
+    // (each value checked as the listing says, also from a structure; the words stored in lower case)
+    "o = optimset('Display', 'ITER', 'FunValCheck', 'ON'); disp([o.Display ' ' o.FunValCheck]);",
+    "try, optimset('MaxIter', 1.5), catch e, disp(e.message), end",
+    "try, optimset('MaxIter', 1+2i), catch e, disp(e.message), end",
+    "try, optimset('TolX', 1+2i), catch e, disp(e.message), end",
+    "try, optimset('OutputFcn', 17), catch e, disp(e.message), end",
+    "try, optimset('PlotFcns', 'optimplotfval'), catch e, disp(e.message), end",
+    "s.MaxIter = 1.5; try, optimset(optimset(), s), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "1", "notify", "Display,FunValCheck,MaxFunEvals,MaxIter,OutputFcn,PlotFcns,TolFun,TolX",
+    "[1e-06 1e-06 40]", "off", "1.0000e-06", "[500 500 0.0001]", "1", "1.0000e-04",
+    "3", "7", "iter",
+    "optimset: unrecognized parameter name 'Bogus'.", "optimset: ambiguous parameter name 'Max' (MaxFunEvals, MaxIter).",
+    "optimset: Display must be 'notify', 'final', 'off', 'none' or 'iter'.",
+    "iter on", "optimset: MaxIter must be a positive integer.", "optimset: MaxIter must be a positive integer.",
+    "optimset: TolX must be a nonnegative real scalar.",
+    "optimset: OutputFcn must be a function handle or a cell array of function handles.",
+    "optimset: the PlotFcns option is not supported in Sagebrush.", "optimset: MaxIter must be a positive integer.",
+  ]);
+});
