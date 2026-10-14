@@ -36,7 +36,7 @@ The interfaces are in [types.ts](types.ts).
   - `MemoryStore`;
   - `IdbStore`: this browser's IndexedDB. The same notebook open in two tabs stays in step.
 
-A document is `{mode: "python" | "sage" | "magma", cells: [{id, type?, code, outputs?, n?, attachments?}], ...}`:
+A document is `{mode: "python" | "sage" | "magma" | "matlab", cells: [{id, type?, code, outputs?, n?, attachments?}], ...}`:
 - `outputs` are Jupyter's output records, as in `.ipynb`;
 - other fields (name, ...) are kept as they are;
 - [ipynb.js](ipynb.js) converts to and from `.ipynb` (nbformat 4.5, with cell ids) and `# %%` scripts.

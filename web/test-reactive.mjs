@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 const base = (process.env.SB_URL ?? "http://127.0.0.1:8765/") + "?reactive";
-const port = 9351;
+const port = Number(process.env.CDP_PORT ?? 9351); // (CDP_PORT: several agents' runs do not collide)
 const profile = mkdtempSync(join(tmpdir(), "sb-reactive-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
