@@ -71,6 +71,18 @@ export function exitText(code: unknown): string {
   return t.length > STATUS_MAX ? `${t.slice(0, STATUS_MAX)}… (${t.length - STATUS_MAX} more characters)` : t;
 }
 
+/** How a SystemExit's status ends a cell, by Python's rule (its type, not
+ * how this runtime holds it, CORR-588-1): None, or an integer (bool and int
+ * subclasses too) that is 0, ends it well; another integer fails it, saying
+ * nothing; anything else fails it, its text written (exitText). */
+export function exitStatus(code: unknown): { ok: boolean; text: string | null } {
+  if (code === null || code === undefined) return { ok: true, text: null };
+  try {
+    if (R.typeOf(code).$mro.includes(R.T.int)) return { ok: !R.truth(code), text: null };
+  } catch {}
+  return { ok: false, text: exitText(code) };
+}
+
 // post: sends a message to the page.  captureStreams: replace sys.stdout and
 // sys.stderr's writers (the browser's fs shim captures them instead).
 export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks } = {}): Session {
@@ -180,9 +192,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       // errors in a cell (lib/_magma.py raises SystemExit(1) once it has
       // said them); a message for a status is written, as Python does.
       if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
-        const c = exc.code;
-        if (c === null || c === undefined || c === 0 || c === false) return true;
-        if (typeof c !== "number" && typeof c !== "boolean") R.stderr.write(exitText(c) + "\n");
+        const s = exitStatus(exc.code);
+        if (s.ok) return true;
+        if (s.text !== null) R.stderr.write(s.text + "\n");
         return false;
       }
       // (a cell's renamed `_` names are shown as written)
