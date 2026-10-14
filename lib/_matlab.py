@@ -415,7 +415,9 @@ def _int_round(r, cls):
     if r.dtype.kind == "c":
         r = r.real
     if r.dtype.kind in "iu":
-        return np.clip(r, lo, hi).astype(dt)
+        # (the bounds inside the source class's own range, which clip needs)
+        _, slo, shi = _INTS[_dtclass(r.dtype)]
+        return np.clip(r, max(lo, slo), min(hi, shi)).astype(dt)
     r = np.where(np.isnan(r), 0.0, r)
     r = np.where(r >= 0, np.floor(r + 0.5), -np.floor(-r + 0.5))
     return np.clip(r, float(lo), float(hi)).astype(dt)
