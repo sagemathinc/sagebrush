@@ -621,3 +621,19 @@ test("repelem takes a string scalar and string arrays, and only numeric scalar o
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["string", "[1 3]", "x", "b", "[1 1 2 2]",
     "Replication factors must be scalars or vectors.", "Replication factors must be numeric.", "Replication factors must be numeric."]);
 });
+
+test("a newline in a struct's text field or a string array's element is displayed as ↵, as MATLAB's published displays show it", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "err = struct('message', sprintf('Error using average>check_inputs (line 11)\\nInput must be a vector.'), 'identifier', 'AVG:NotAVector')",
+    "s = struct('n', \"x\" + newline)",
+    "t = [\"This is line one.\" + newline; \"Here is line two.\" + newline]",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.split("\n").filter((s: string) => s.trim() !== "" && !/=|with fields|string array/.test(s)), [
+    "       message: 'Error using average>check_inputs (line 11)↵Input must be a vector.'",
+    "    identifier: 'AVG:NotAVector'",
+    "    n: \"x↵\"",
+    "    \"This is line one.↵\"",
+    "    \"Here is line two.↵\"",
+  ]);
+});
