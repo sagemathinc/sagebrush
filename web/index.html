@@ -227,7 +227,7 @@
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <span class="sp"></span>
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
-    <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option></select>
+    <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
@@ -288,6 +288,7 @@
         <li><b>Tab</b> after a name completes it (<code>e.</code><b>Tab</b> lists what <code>e</code> can do); otherwise it indents: press <b>Esc</b> first to Tab out of the cell. <b>File → Print</b> saves the notebook, outputs and all, as a PDF. Variables persist between cells; the <b>Console</b> (in the <b>⋯</b> menu) is a scratchpad with its own interpreter.</li>
         <li><b>Sage</b> mode: <code>^</code> is a power (<code>^^</code> is xor), <code>2/3</code> is an exact rational; <code>factor</code>, <code>is_prime</code>, <code>ModularSymbols</code>, <code>EllipticCurve</code>, polynomial rings, Gröbner bases and symbolic calculus (<code>diff</code>, <code>integrate</code>, <code>solve</code>, <code>desolve</code>) run on Sagebrush's Rust engines.</li>
         <li><b>Magma</b> mode: Magma programs are translated to Python in this page and print what Magma prints.</li>
+        <li><b>MATLAB</b> mode: MATLAB programs are translated to Python in this page, run on Sagebrush's numpy, and print what MATLAB prints; plots and 3-D surfaces too.</li>
         <li><b>Python</b>: CPython 3.14's own grammar, with <code>numpy</code> (checked against NumPy itself), <code>matplotlib.pyplot</code>, Sage-style <code>plot</code>, <code>@interact</code> and <code>animate</code>; pure-Python packages such as mpmath pass their own test suites.</li>
         <li>Notebooks and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>; <b>Files</b> lists what Python's <code>open()</code> sees. Your code runs in a Web Worker on this page; nothing is sent anywhere.</li>
       </ul>
@@ -490,6 +491,15 @@ const EXAMPLES = {
     "// Elliptic curves\nE := EllipticCurve(\"389a1\");\nE;\nRank(E), Conductor(E), TorsionSubgroup(E);\n[ TraceOfFrobenius(E, p) : p in PrimesUpTo(50) ];",
     "Newforms(CuspForms(37, 2));",
   ],
+  "MATLAB": [
+    {"md": "## MATLAB\n\nMATLAB programs, translated to Python in this page and run on Sagebrush's numpy. Values print as MATLAB prints them (checked against GNU Octave and MATLAB's documentation), variables and functions stay for the next cells, and figures show when a cell ends."},
+    "% Matrices and linear algebra\nA = [4 -2; 1 1]\nx = A \\ [2; 3]\n[V, D] = eig([2 1; 1 3]);\ndiag(D)'",
+    "% A function defined in a cell is there for the cells after it\nfunction y = collatz(n)\n  y = n;\n  while n ~= 1\n    if mod(n, 2) == 0, n = n / 2; else, n = 3 * n + 1; end\n    y(end + 1) = n;\n  end\nend",
+    "c = collatz(27);\nfprintf('%d steps, peak %d\\n', numel(c) - 1, max(c))",
+    "% Structs and cell arrays\ns = struct('name', {'Ada', 'Emmy'}, 'born', {1815, 1882});\nfor k = 1:numel(s)\n  fprintf('%s was born in %d\\n', s(k).name, s(k).born);\nend\nnames = upper({s.name})",
+    "% Figures\nx = linspace(0, 2*pi, 200);\nplot(x, sin(x), x, cos(x), '--')\nlegend('sin', 'cos'); title('Figures show when the cell ends'); grid on",
+    "% Surfaces in 3-D\n[X, Y, Z] = peaks(40);\nsurf(X, Y, Z)\ncolorbar",
+  ],
   "numpy": [
     "import numpy as np\na = np.arange(12).reshape(3, 4)\nprint(a)\na.sum(axis=0), a.mean(), a[a % 3 == 0], a.T @ a",
     "# Seeded streams match NumPy's exactly\nnp.random.seed(0)\nx = np.random.randn(100_000)\nx.mean(), x.std(), np.percentile(x, [5, 50, 95])",
@@ -513,6 +523,7 @@ const EXAMPLES = {
 
 const SAGE_EXAMPLES = new Set(["Sage", "Calculus (Sage)", "Group theory (Sage)", "Galois groups (Sage)", "Plots (Sage)", "Polynomials (Sage)", "Gröbner bases (Sage)", "Modular forms (Sage)", "Algebraic number theory (Sage)"]);
 const MAGMA_EXAMPLES = new Set(["Magma"]);
+const MATLAB_EXAMPLES = new Set(["MATLAB"]);
 const $ = (s) => document.querySelector(s);
 const statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme");
 const announce = (text) => ($("#announce").textContent = text);
@@ -715,6 +726,7 @@ window.sagebrush = {
 };
 const isSage = () => nb.mode === "sage";
 const isMagma = () => nb.mode === "magma";
+const isMatlab = () => nb.mode === "matlab";
 // Printing (File > Print, or Ctrl+P) gives the notebook alone (the print CSS
 // above and web/notebook/notebook.css): its name on top, and the notebook's
 // name as the PDF's file name.
@@ -1103,8 +1115,9 @@ modeEl.onchange = () => setMode(modeEl.value);
 // File > Examples…: by language; each opens as a new notebook (yours stays saved)
 const exDlg = $("#exdlg");
 {
-  const groups = { Python: [], Sage: [], Magma: [] };
-  for (const k of Object.keys(EXAMPLES)) groups[SAGE_EXAMPLES.has(k) ? "Sage" : MAGMA_EXAMPLES.has(k) ? "Magma" : "Python"].push(k);
+  // (a group's name, lowercased, is its notebooks' language)
+  const groups = { Python: [], Sage: [], Magma: [], MATLAB: [] };
+  for (const k of Object.keys(EXAMPLES)) groups[SAGE_EXAMPLES.has(k) ? "Sage" : MAGMA_EXAMPLES.has(k) ? "Magma" : MATLAB_EXAMPLES.has(k) ? "MATLAB" : "Python"].push(k);
   for (const [g, ks] of Object.entries(groups)) {
     if (!ks.length) continue;
     const h = document.createElement("h4");
@@ -1271,7 +1284,7 @@ async function pipe(u8, stream) { return new Uint8Array(await new Response(new B
 async function shareLink() {
   const json = new TextEncoder().encode(JSON.stringify(nb.snapshot().cells.map((c) => (c.type === "markdown" ? { md: c.code } : c.code))));
   const frag = typeof CompressionStream === "function" ? "z=" + enc64(await pipe(json, new CompressionStream("deflate-raw"))) : "c=" + enc64(json);
-  return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : isMagma() ? "m=magma&" : "") + frag;
+  return location.origin + location.pathname + "#" + (isSage() ? "m=sage&" : isMagma() ? "m=magma&" : isMatlab() ? "m=matlab&" : "") + frag;
 }
 async function copyShareLink() {
   const url = await shareLink();
@@ -1387,7 +1400,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "open": await showOpen(); break;
     case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, share_id: undefined, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
-    case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() ? "text/plain" : "text/x-python"); break;
+    case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() || isMatlab() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
       // (each cell's arguments and return values: the names it reads and defines)
       // (of the code as written: page-order scoping's renames are not in the file)
@@ -1711,18 +1724,20 @@ const tools = [
   },
   {
     name: "run_python",
-    description: "Run Python 3.14 code (or Sage syntax with sage=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/contour_plot/plot3d/... (sage=true; 3D plots come back as a picture of the default view). Sage mode also has symbolic calculus (diff, integrate, limit, solve, taylor, desolve) on Sagebrush's own engine; animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
+    description: "Run Python 3.14 code (or Sage syntax with sage=true, Magma with magma=true, MATLAB with matlab=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/contour_plot/plot3d/... (sage=true; 3D plots come back as a picture of the default view). Sage mode also has symbolic calculus (diff, integrate, limit, solve, taylor, desolve) on Sagebrush's own engine; animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
     inputSchema: {
       type: "object",
       properties: {
         code: { type: "string", description: "The Python source to run." },
         sage: { type: "boolean", description: "Sage syntax: ^ is a power, 2/3 is an exact rational, factor() etc. are available." },
         magma: { type: "boolean", description: "The code is Magma (translated to Python in the browser): := assignment, statements end with ;, Factorization, ModularSymbols, EllipticCurve, ..." },
+        matlab: { type: "boolean", description: "The code is MATLAB (translated to Python in the browser, on numpy): values print as MATLAB prints them; plot, surf and the other graphics draw figures." },
       },
       required: ["code"],
     },
-    async execute({ code, sage, magma }) {
+    async execute({ code, sage, magma, matlab }) {
       if (magma) setMode("magma");
+      else if (matlab) setMode("matlab");
       else if (sage !== undefined) setMode(sage ? "sage" : "python");
       const last = cells().at(-1);
       const cell = last && last.type === "code" && last.ta.value.trim() === "" ? last : nb.addCell("");
@@ -1952,7 +1967,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
   }
   else if (opened) {}
-  else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : "python", shared);
+  else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
   else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   // back from signing in to share (?share): the dialog again
   if (qs.has("share")) {

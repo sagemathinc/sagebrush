@@ -200,6 +200,28 @@ try {
   await ready();
   await until("document.querySelector('#nbname').value === 'Shared notebook'");
   ok((await ev("[...document.querySelectorAll('textarea')].some(t => t.value.includes(\"open('up.csv')\"))")), `share link (${link.length} chars) opens the cells`);
+  // MATLAB mode: values printed as MATLAB prints them, a function for later cells, an
+  // error, a figure; MATLAB's highlighting; a share link that reopens in MATLAB
+  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'matlab'; m.dispatchEvent(new Event('change')); })()");
+  out = await runCode("A = magic(3);\nb = A(2, :)");
+  ok(out.includes("b =") && /3\s+5\s+7/.test(out), "MATLAB mode prints as MATLAB: " + JSON.stringify(out.trim()));
+  await runCode("function y = twice(x)\n  y = 2 * x; % doubled\nend");
+  out = await runCode("twice(b)");
+  ok(/6\s+10\s+14/.test(out), "a MATLAB function defined in a cell works in the next: " + JSON.stringify(out.trim()));
+  out = await runCode("c = nothere + 1");
+  ok(out.trim() === "Unrecognized function or variable 'nothere'.", "a MATLAB error is MATLAB's message: " + JSON.stringify(out.trim()));
+  await runCode("plot(1:3, [2 4 3])");
+  ok(await ev("!![...document.querySelectorAll('.cell')].at(-1).querySelector('.out svg, .out img')"), "a MATLAB figure is shown");
+  ok(await ev("[...document.querySelectorAll('.cell')].some(c => [...c.querySelectorAll('.hc')].some(e => e.textContent === '% doubled') && [...c.querySelectorAll('.hf')].some(e => e.textContent === 'twice'))"),
+    "MATLAB code is highlighted as MATLAB (% comments, the function's name)");
+  await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");
+  await until("location.hash.includes('m=matlab')");
+  const mlink = await ev("location.href");
+  await send("Page.navigate", { url: "about:blank" });
+  await send("Page.navigate", { url: mlink });
+  await ready();
+  await until("document.querySelector('#nbname').value === 'Shared notebook'");
+  ok((await ev("document.querySelector('#mode').value")) === "matlab", "a MATLAB share link reopens in MATLAB mode");
 } catch (e) {
   console.log("ERROR", e.message);
   process.exitCode = 1;
