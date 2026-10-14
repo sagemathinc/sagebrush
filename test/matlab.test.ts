@@ -759,3 +759,58 @@ test("fzero's other exits: no sign change, overflow, a sign change at a pole (ne
     "fzero stopped searching for an interval containing a sign change: the function value at x = -1.7162e+154 is Inf.",
   ]);
 });
+
+test("fminbnd reproduces its published examples, and its exits and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const done = ["Optimization terminated:", " the current x satisfies the termination criteria using OPTIONS.TolX of 1.000000e-04"];
+  assert.deepEqual(run("options = optimset(Display=\"iter\"); x = fminbnd(@sin,0,2*pi,options);"), [
+    " Func-count     x          f(x)         Procedure",
+    "    1        2.39996      0.67549        initial",
+    "    2        3.88322     -0.67549        golden",
+    "    3        4.79993    -0.996171        golden",
+    "    4        5.08984    -0.929607        parabolic",
+    "    5        4.70582    -0.999978        parabolic",
+    "    6         4.7118           -1        parabolic",
+    "    7        4.71239           -1        parabolic",
+    "    8        4.71236           -1        parabolic",
+    "    9        4.71242           -1        parabolic", ...done]);
+  assert.deepEqual(run("h = @(x) 1./((x-0.3).^2+0.01) + 1./((x-0.9).^2+0.04) - 6; x = fminbnd(h,0.3,1,optimset('Display','iter'));"), [
+    " Func-count     x          f(x)         Procedure",
+    "    1       0.567376      12.9098        initial",
+    "    2       0.732624      13.7746        golden",
+    "    3       0.465248      25.1714        golden",
+    "    4       0.644416      11.2693        parabolic",
+    "    5         0.6413      11.2583        parabolic",
+    "    6       0.637618      11.2529        parabolic",
+    "    7       0.636985      11.2528        parabolic",
+    "    8       0.637019      11.2528        parabolic",
+    "    9       0.637052      11.2528        parabolic", ...done]);
+  assert.deepEqual(run([
+    "[x,fval,exitflag,output] = fminbnd(@sin,0,2*pi); fprintf('%.4f %.4f %d %d %d\\n', x, fval, exitflag, output.iterations, output.funcCount); disp(output.algorithm); disp(output.message); disp(double(output.message(end)));",
+    "fprintf('%.4f\\n', fminbnd(@(x)sin(x-9/7),1,2*pi)); [x fval] = fminbnd(@(x)-tan(cos(x)),3,8); fprintf('%.4f %.4f\\n', x, fval);",
+    "o = optimset('Display', 'off');",
+    "[x,f,e,o2] = fminbnd(@sin, 2, 1, o); disp(mat2str([x f e o2.funcCount]));",
+    "[x,f,e,o2] = fminbnd(@sin, 0, 2*pi, optimset(o, 'MaxFunEvals', 4)); disp(mat2str([e o2.funcCount o2.iterations]));",
+    "[x,f,e,o2] = fminbnd(@sin, 0, 2*pi, optimset(o, 'MaxIter', 4)); disp(mat2str([e o2.funcCount o2.iterations]));",
+    "[x,f,e,o2] = fminbnd(@sin, 0, 2*pi, optimset(o, 'OutputFcn', @(x,v,s) v.iteration >= 3)); disp(mat2str([e o2.iterations]));",
+    "p.objective = @sin; p.x1 = 0; p.x2 = 2*pi; p.solver = 'fminbnd'; fprintf('%.4f\\n', fminbnd(p));",
+    "x = fminbnd(@sin, 0, 2*pi, optimset('MaxIter', 2));",
+    "try, fminbnd(@(x) sqrt(x - 2), 0, 1), catch err, disp(err.message), end",
+    "try, fminbnd(@(x) x, 0, Inf), catch err, disp(err.message), end",
+    "try, fminbnd(@(x) x, single(0), 1), catch err, disp(err.message), end",
+    "try, fminbnd(@(x) NaN, 0, 1, optimset('FunValCheck', 'on')), catch err, disp(err.message), end",
+    "p = optimset(); p.PlotFcns = @optimplotfval; try, fminbnd(@sin, 0, 1, p), catch err, disp(err.message), end",
+  ].join("\n")), [
+    "4.7124 -1.0000 1 8 9", "golden section search, parabolic interpolation", ...done, "    32",
+    "5.9981", "6.2832 -1.5574",
+    "[NaN NaN -2 0]", "[0 4 3]", "[0 5 4]", "[-1 3]", "4.7124",
+    "fminbnd stopped: it reached the MaxIter limit of 2 before meeting TolX.",
+    "fminbnd: the objective function returned a complex value; only real values can be minimized.",
+    "fminbnd: the bounds x1 and x2 must be finite.",
+    "fminbnd: the bounds x1 and x2 must be double scalars.",
+    "fminbnd: the objective function returned NaN (FunValCheck is on).",
+    "fminbnd: the PlotFcns option is not supported in Sagebrush.",
+  ]);
+});

@@ -522,3 +522,185 @@ def fzero_(nargout, *args):
            _m._struct1({"intervaliterations": float(intervals), "iterations": float(iters), "funcCount": float(F.count),
                         "algorithm": _m.Char("bisection, interpolation"), "message": _m.Char(msg)})]
     return out[0] if nargout <= 1 else out[:nargout]
+
+
+# ------------------------------------------------------------------ fminbnd
+
+def _problem(args, solver, fields, nargs):
+    """the arguments of solver(fun, ..., options) or solver(problem), the
+    problem structure holding the given fields and solver"""
+    if len(args) == 1 and type(args[0]) is _m.Struct:
+        p = args[0]
+        if _m._numel(p) != 1:
+            raise _err("%s: the problem must be a scalar structure." % solver)
+        d = p.a[0]
+        for k in fields + ["solver"]:
+            if k not in d:
+                raise _err("%s: the problem structure needs the field '%s'." % (solver, k))
+        if not _istext(d["solver"]) or _text(d["solver"]) != solver:
+            raise _err("%s: the problem structure's solver must be '%s'." % (solver, solver))
+        return [d[k] for k in fields] + [d.get("options")]
+    if len(args) < nargs:
+        raise _err("Not enough input arguments.")
+    if len(args) > nargs + 1:
+        raise _err("Too many input arguments.")
+    return list(args) + [None] * (nargs + 1 - len(args))
+
+
+def _real_value(f, x, solver, check):
+    """fun(x) for a minimizer: a real scalar (NaN allowed unless
+    FunValCheck is on; a complex value is always an error)"""
+    r = _m._call(f, [x])
+    if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != 1:
+        raise _err("%s: the objective function must return a numeric scalar." % solver)
+    a = _m._arr(r).reshape(-1)[0]
+    if np.iscomplexobj(a):
+        if a.imag != 0:
+            raise _err("%s: the objective function returned a complex value; only real values can be minimized." % solver)
+        a = a.real
+    v = float(a)
+    if check and v != v:
+        raise _err("%s: the objective function returned NaN (FunValCheck is on)." % solver)
+    return v
+
+
+def _positive_count(options, name, solver):
+    v = _opt(options, name, solver)
+    v = float(_m._scalar(v)) if not isinstance(v, float) else v
+    return v
+
+
+@_bi("fminbnd")
+def fminbnd_(nargout, *args):
+    """fminbnd as its documentation page describes it: fminbnd(fun, x1, x2),
+    fminbnd(fun, x1, x2, options) and fminbnd(problem), with outputs
+    [x, fval, exitflag, output].  The method is the one the page cites:
+    Brent's localmin (R. P. Brent, Algorithms for Minimization without
+    Derivatives, 1973, chapter 5; the Fortran fmin of Forsythe, Malcolm and
+    Moler, Computer Methods for Mathematical Computations, 1976, section
+    8.2), golden section search with parabolic interpolation, which never
+    evaluates fun at the ends of the interval.  Its tolerance is
+    sqrt(eps)*|x| + TolX/3, the one whose bound
+    2*(TolX + 3*abs(x)*sqrt(eps)) the page gives.  The options are Display,
+    FunValCheck, MaxFunEvals and MaxIter (500 each), OutputFcn and TolX
+    (1e-4).  As the published displays show, the first evaluation is not
+    an iteration.
+
+    Sagebrush's own choices, where the page fixes nothing: x1 > x2 returns
+    NaN with exitflag -2 without evaluating fun; a complex value is an
+    error even with FunValCheck off; the limits are checked after the
+    convergence test, before each new evaluation; output functions are
+    called after each evaluation (the first with state 'init', then
+    'iter'); the
+    messages other than the converged one are Sagebrush's own; and
+    PlotFcns is refused"""
+    fun, x1, x2, options = _problem(args, "fminbnd", ["objective", "x1", "x2"], 3)
+    if nargout > 4:
+        raise _err("Too many output arguments.")
+    options = _options_arg(options, "fminbnd")
+    f = _m._fn_arg(fun)
+    disp = _display(options, "fminbnd")
+    outs = _output_fcns(options, "fminbnd")
+    check = _opt(options, "FunValCheck", "fminbnd") == "on"
+    ends = []
+    for v in (x1, x2):
+        if type(v) is _m.Char or not _m._isnumlike(v) or _m._numel(v) != 1 or _m.class_(v) != "double":
+            raise _err("fminbnd: the bounds x1 and x2 must be double scalars.")
+        a = _m._arr(v).reshape(-1)[0]
+        if np.iscomplexobj(a) and a.imag != 0:
+            raise _err("fminbnd: the bounds x1 and x2 must be real.")
+        e = float(a.real)
+        if not _math.isfinite(e):
+            raise _err("fminbnd: the bounds x1 and x2 must be finite.")
+        ends.append(e)
+    a, b = ends
+    tolx = float(_m._scalar(_opt(options, "TolX", "fminbnd")))
+    maxfun = _positive_count(options, "MaxFunEvals", "fminbnd")
+    maxit = _positive_count(options, "MaxIter", "fminbnd")
+    show = disp == "iter"
+    count, it = 0, 0
+    algorithm = "golden section search, parabolic interpolation"
+
+    def result(x, fx, flag, msg):
+        if outs and flag != -2:
+            _call_output(outs, x, {"funccount": float(count), "fval": fx, "iteration": float(it),
+                                   "procedure": _m.Char("")}, "done")
+        if disp == "iter" or disp == "final" or (disp == "notify" and flag != 1):
+            _m._write(("\n" if show else "") + msg + "\n")
+        out = [x, fx, float(flag), _m._struct1({"iterations": float(it), "funcCount": float(count),
+                                               "algorithm": _m.Char(algorithm), "message": _m.Char(msg)})]
+        return out[0] if nargout <= 1 else out[:nargout]
+
+    if a > b:
+        return result(_math.nan, _math.nan, -2, "fminbnd stopped: the bounds are inconsistent (x1 > x2).")
+    if show:
+        _m._write(" Func-count     x          f(x)         Procedure\n")
+
+    def row(x, fx, proc):
+        if show:
+            _m._write("%5.0f%15.6g%13.6g        %s\n" % (count, x, fx, proc))
+
+    c = 0.5 * (3.0 - _math.sqrt(5.0))
+    seps = _math.sqrt(_EPS)
+    v = w = x = a + c * (b - a)
+    d = e = 0.0
+    fx = _real_value(f, x, "fminbnd", check)
+    count = 1
+    fv = fw = fx
+    row(x, fx, "initial")
+    if outs and _call_output(outs, x, {"funccount": 1.0, "fval": fx, "iteration": 0.0,
+                                       "procedure": _m.Char("initial")}, "init"):
+        return result(x, fx, -1, "fminbnd stopped: an output function asked it to stop.")
+    while True:
+        xm = 0.5 * (a + b)
+        tol1 = seps * abs(x) + tolx / 3.0
+        tol2 = 2.0 * tol1
+        if abs(x - xm) <= tol2 - 0.5 * (b - a):
+            return result(x, fx, 1, "Optimization terminated:\n the current x satisfies the termination criteria "
+                                    "using OPTIONS.TolX of %e " % tolx)
+        if count >= maxfun or it >= maxit:
+            which = "MaxFunEvals" if count >= maxfun else "MaxIter"
+            return result(x, fx, 0, "fminbnd stopped: it reached the %s limit of %d before meeting TolX."
+                          % (which, maxfun if which == "MaxFunEvals" else maxit))
+        golden = True
+        if abs(e) > tol1:
+            r = (x - w) * (fx - fv)
+            q = (x - v) * (fx - fw)
+            p = (x - v) * q - (x - w) * r
+            q = 2.0 * (q - r)
+            if q > 0.0:
+                p = -p
+            q = abs(q)
+            r, e = e, d
+            if abs(p) < abs(0.5 * q * r) and p > q * (a - x) and p < q * (b - x):
+                d = p / q
+                u = x + d
+                if u - a < tol2 or b - u < tol2:
+                    d = tol1 if xm >= x else -tol1
+                golden = False
+        if golden:
+            e = (b - x) if x < xm else (a - x)
+            d = c * e
+        u = x + (d if abs(d) >= tol1 else (tol1 if d > 0 else -tol1))
+        fu = _real_value(f, u, "fminbnd", check)
+        count += 1
+        it += 1
+        row(u, fu, "golden" if golden else "parabolic")
+        if fu <= fx:
+            if u >= x:
+                a = x
+            else:
+                b = x
+            v, fv, w, fw, x, fx = w, fw, x, fx, u, fu
+        else:
+            if u < x:
+                a = u
+            else:
+                b = u
+            if fu <= fw or w == x:
+                v, fv, w, fw = w, fw, u, fu
+            elif fu <= fv or v == x or v == w:
+                v, fv = u, fu
+        if outs and _call_output(outs, x, {"funccount": float(count), "fval": fx, "iteration": float(it),
+                                           "procedure": _m.Char("golden" if golden else "parabolic")}, "iter"):
+            return result(x, fx, -1, "fminbnd stopped: an output function asked it to stop.")

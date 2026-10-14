@@ -24,3 +24,18 @@ show(r(fzero(@(x) x - 2, [0 4], optimset('TolX', 1e-3))) > 1.99);
 show(class(fzero(@(x) x - 2, single([0 4]))));
 show(class(fzero(@(x) single(x) - 2, [0 4])));
 show(r(double(fzero(@(x) x.^2 - 2, single([0 2])))) - sqrt(2) < 1e-6);
+% fminbnd (to 8 digits with a tight TolX: the default 1e-4 leaves the
+% last digits to the method)
+r8 = @(x) round(x * 1e8) / 1e8 + 0;
+t = optimset('TolX', 1e-12);
+show(r8(fminbnd(@sin, 0, 2*pi, t)));
+show(r8(fminbnd(@(x) sin(x - 9/7), 1, 2*pi, t)));
+show(r8(fminbnd(@(x) 1 ./ ((x - 0.3).^2 + 0.01) + 1 ./ ((x - 0.9).^2 + 0.04) - 6, 0.3, 1, t)));
+show(r8(fminbnd(@(x) -tan(cos(x)), 3, 8, t)));
+show(r8(fminbnd(@(x) (x - 2).^2 + 1, -10, 10, t)));
+show(r8(fminbnd(@(x) x.^4 - 3*x.^3 + 2, 0, 5, t)));
+show(r8(fminbnd(@(x) abs(x - 0.7), 0, 1, t)));
+show(round(fminbnd(@(x) -x.*exp(-3*x), 0, 2, t) * 1e6) / 1e6);  % (a flat minimum: sqrt(eps) accuracy)
+[x, fval] = fminbnd(@(x) cos(x), 2, 4, t); show(r8([x fval]));
+show(r8(fminbnd(@(x) x.^2, 3, 3)));
+show(abs(fminbnd(@sin, 0, 2*pi) - 3*pi/2) < 1e-4);
