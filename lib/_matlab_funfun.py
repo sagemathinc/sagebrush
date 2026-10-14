@@ -166,3 +166,359 @@ def optimget_(nargout, options, name, *default):
     if v is None or _is_empty(v):
         return default[0] if default else _empty()
     return v
+
+
+# ------------------------------------------------------------------ the solvers' common parts
+
+def _opt(options, name, solver=None):
+    """an option's value from an options structure, or the solver's
+    default (as optimset gives it) when it is absent or [] (None with no
+    solver)"""
+    v = None
+    if options is not None:
+        d = options.a[0]
+        v = next((d[k] for k in d if k.lower() == name.lower()), None)
+    if v is None or _is_empty(v):
+        v = _DEFAULTS[solver].get(name) if solver else None
+    if v is not None and _istext(v):
+        # (the option words in any case, also from a structure built by hand)
+        v = _text(v).lower() if name in ("Display", "FunValCheck") else _text(v)
+    return v
+
+
+def _options_arg(options, solver):
+    if options is None or _is_empty(options):
+        return None
+    if type(options) is not _m.Struct or _m._numel(options) != 1:
+        raise _err("%s: options must be a scalar structure, typically made by optimset." % solver)
+    return options
+
+
+def _display(options, solver):
+    v = _opt(options, "Display", solver)
+    v = "off" if v == "none" else v
+    if v not in ("off", "iter", "final", "notify"):
+        raise _err("%s: Display must be 'notify', 'final', 'off', 'none' or 'iter'." % solver)
+    return v
+
+
+def _output_fcns(options, solver):
+    """the OutputFcn option as a list of functions; PlotFcns, which would
+    need MATLAB's predefined plot functions, is refused"""
+    if _opt(options, "PlotFcns", solver) is not None:
+        raise _err("%s: the PlotFcns option is not supported in Sagebrush." % solver)
+    v = _opt(options, "OutputFcn", solver)
+    if v is None:
+        return []
+    fs = v.a if type(v) is _m.Cell else [v]
+    return [_m._fn_arg(f) for f in fs]
+
+
+def _call_output(fcns, x, values, state):
+    """call each output function as stop = outfun(x, optimValues, state);
+    true if any asks to stop.  The start is two calls, 'init' and then
+    'iter' for iteration 0, as the published history an fminsearch output
+    function records shows"""
+    stop = False
+    for st in (("init", "iter") if state == "init" else (state,)):
+        for f in fcns:
+            r = _m._call(f, [x, _m._struct1(dict(values)), _m.Char(st)])
+            stop = _m._logical_val(r) or stop
+        if stop:
+            break
+    return stop
+
+
+def _single_round(v):
+    return float(np.float32(v))
+
+
+def _same_round(v):
+    return v
+
+
+# ------------------------------------------------------------------ fzero
+
+class _ZeroFun:
+    """fun for fzero: a real scalar value of a real scalar x, counted; its
+    precision is single once x0 or a value is single"""
+
+    def __init__(self, f, single, check):
+        self.f, self.single, self.check, self.count = f, single, check, 0
+
+    def __call__(self, x):
+        arg = _m._canon(np.array([[x]], dtype=np.float32)) if self.single else x
+        r = _m._call(self.f, [arg])
+        self.count += 1
+        if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != 1:
+            raise _err("fzero: the function must return a numeric scalar.")
+        if _m.class_(r) == "single":
+            self.single = True
+        a = _m._arr(r).reshape(-1)[0]
+        if np.iscomplexobj(a) and a.imag != 0:
+            if self.check:
+                raise _err("fzero: the function returned a complex value at x = %g (FunValCheck is on)." % x)
+            return complex(a)
+        v = float(a.real) if np.iscomplexobj(a) else float(a)
+        if self.check and not _math.isfinite(v):
+            raise _err("fzero: the function returned %s at x = %g (FunValCheck is on)." % (_m._special(v), x))
+        return _single_round(v) if self.single else v
+
+
+def _changes_sign(u, v):
+    return u == 0 or v == 0 or (u < 0) != (v < 0)
+
+
+def _fzero_row(count, x, fx, proc):
+    _m._write("%5.0f%16.6g%14.6g        %s\n" % (count, x, fx, proc))
+
+
+def _fzero_search_row(count, a, fa, b, fb, proc):
+    _m._write("%5.0f%16.6g%14.6g%14.6g%14.6g               %s\n" % (count, a, fa, b, fb, proc))
+
+
+def _fzero_search(F, x0, show, outs):
+    """Look outward from a scalar x0 for a sign change.  As fzero's
+    published iterative displays show, step k tries a = x0 - dx*sqrt(2)^k
+    and then b = x0 + dx*sqrt(2)^k, with dx = x0/50, and stops at the first
+    value whose sign differs from the other end's.  For x0 = 0, where that
+    rule gives no step, dx = 1/50 is Sagebrush's own choice, as is ending
+    the search (exitflag -6) when the next a or b would overflow.  Returns
+    (a, fa, b, fb, k, flag, x, fx) where flag is None when it found a sign
+    change"""
+    fx0 = F(x0)
+    R = _single_round if F.single else _same_round
+    if show:
+        _m._write("Search for an interval around %g containing a sign change:\n" % x0)
+        _m._write(" Func-count    a          f(a)             b          f(b)                    Procedure\n")
+        if type(fx0) is complex:
+            _m._write("%5.0f%16.6g%14s%14.6g%14s               initial interval\n" % (1, x0, "complex", x0, "complex"))
+        else:
+            _fzero_search_row(1, x0, fx0, x0, fx0, "initial interval")
+    vals = {"funccount": 1.0, "fval": fx0, "iteration": 0.0, "procedure": _m.Char("initial interval")}
+    if type(fx0) is complex:
+        return None, None, None, None, 0, -4, x0, fx0
+    if not _math.isfinite(fx0):
+        return None, None, None, None, 0, -3, x0, fx0
+    if outs and _call_output(outs, x0, vals, "init"):
+        return None, None, None, None, 0, -1, x0, fx0
+    a = b = x0
+    fa = fb = fx0
+    if fx0 == 0:
+        return a, fa, b, fb, 0, None, x0, fx0
+    dx = x0 / 50 if x0 != 0 else 1 / 50
+    k = 0
+    while True:
+        k += 1
+        step = R(_math.ldexp(dx, k // 2) * (_math.sqrt(2) if k % 2 else 1.0))
+        na, nb = R(x0 - step), R(x0 + step)
+        if not (_math.isfinite(na) and _math.isfinite(nb)):
+            return a, fa, b, fb, k - 1, -6, None, None
+        a = na
+        fa = F(a)
+        bad = type(fa) is complex or not _math.isfinite(fa)
+        if bad or not _changes_sign(fa, fb):
+            if not bad:
+                b = nb
+                fb = F(b)
+                bad = type(fb) is complex or not _math.isfinite(fb)
+        if show:
+            if type(fa) is complex or type(fb) is complex:
+                _m._write("%5.0f%16.6g%14s%14.6g%14s               search\n" % (F.count, a, _fmt_val(fa), b, _fmt_val(fb)))
+            else:
+                _fzero_search_row(F.count, a, fa, b, fb, "search")
+        for x, fx in ((a, fa), (b, fb)):
+            if type(fx) is complex:
+                return a, fa, b, fb, k, -4, x, fx
+            if not _math.isfinite(fx):
+                return a, fa, b, fb, k, -3, x, fx
+        vals = {"funccount": float(F.count), "fval": fb, "iteration": float(k), "procedure": _m.Char("search")}
+        if outs and _call_output(outs, b, vals, "iter"):
+            return a, fa, b, fb, k, -1, b, fb
+        if _changes_sign(fa, fb):
+            return a, fa, b, fb, k, None, None, None
+
+
+def _fmt_val(v):
+    return "complex" if type(v) is complex else "%.6g" % v
+
+
+def _fzero_brent(F, a, fa, b, fb, tol, show, outs, it0):
+    """Brent's zero-finder (R. P. Brent, Algorithms for Minimization without
+    Derivatives, Prentice-Hall 1973, chapter 4, procedure zero; the Fortran
+    zeroin of Forsythe, Malcolm and Moler, Computer Methods for Mathematical
+    Computations, Prentice-Hall 1976, section 7.2): on [a, b], where f
+    changes sign, keep b the best point and c the other end of the
+    bracket, and take an inverse quadratic (or, with two points, secant)
+    step when it falls well inside the bracket and shrinks fast enough, and
+    bisection otherwise, until the bracket is within
+    tol1 = 2*u*|b| + tol/2 (u the unit roundoff, 2^-53 or 2^-24 in single)
+    or f(b) = 0.  Each step rounds in the working precision.  Returns
+    (b, fb, iterations, stopped by an output function)"""
+    R = _single_round if F.single else _same_round
+    u = 2.0 ** -24 if F.single else 2.0 ** -53
+    tol = R(tol)
+    c, fc = a, fa
+    d = e = R(b - a)
+    proc = "initial"
+    it = 0
+    while True:
+        if abs(fc) < abs(fb):
+            a, b, c = b, c, b
+            fa, fb, fc = fb, fc, fb
+        if show:
+            _fzero_row(F.count, b, fb, proc)
+        if it and outs:
+            vals = {"funccount": float(F.count), "fval": fb, "iteration": float(it0 + it), "procedure": _m.Char(proc)}
+            if _call_output(outs, b, vals, "iter"):
+                return b, fb, it, True
+        tol1 = R(R(2 * u * abs(b)) + R(0.5 * tol))
+        xm = R(0.5 * R(c - b))
+        if abs(xm) <= tol1 or fb == 0:
+            return b, fb, it, False
+        proc = "bisection"
+        if abs(e) >= tol1 and abs(fa) > abs(fb):
+            s = R(fb / fa)
+            if a == c:
+                p = R(R(2 * xm) * s)
+                q = R(1 - s)
+            else:
+                q = R(fa / fc)
+                r = R(fb / fc)
+                p = R(s * R(R(R(R(2 * xm) * q) * R(q - r)) - R(R(b - a) * R(r - 1))))
+                q = R(R(R(q - 1) * R(r - 1)) * R(s - 1))
+            if p > 0:
+                q = -q
+            else:
+                p = -p
+            if R(2 * p) < R(R(R(3 * xm) * q) - abs(R(tol1 * q))) and p < abs(R(R(0.5 * e) * q)):
+                e = d
+                d = R(p / q)
+                proc = "interpolation"
+        if proc == "bisection":
+            d = e = xm
+        a, fa = b, fb
+        b = R(b + d) if abs(d) > tol1 else R(b + (tol1 if xm > 0 else -tol1))
+        fb = F(b)
+        it += 1
+        if type(fb) is complex or fb != fb:
+            raise _err("fzero: the function returned %s at x = %g, inside the interval; fzero cannot continue."
+                       % ("a complex value" if type(fb) is complex else "NaN", b))
+        if (fb > 0 and fc > 0) or (fb < 0 and fc < 0):
+            c, fc = a, fa
+            d = e = R(b - a)
+
+
+@_bi("fzero")
+def fzero_(nargout, *args):
+    """fzero as its documentation page describes it: fzero(fun, x0),
+    fzero(fun, x0, options) and fzero(problem), with outputs
+    [x, fval, exitflag, output].  A two-element x0 must bracket a sign
+    change (an error otherwise); from a scalar x0 it first searches outward
+    for one (_fzero_search).  The zero itself is Brent's method
+    (_fzero_brent), which the page cites.  The options are Display,
+    FunValCheck, OutputFcn and TolX (default eps, or eps('single') when x0
+    or fun(x0) is single, when the arithmetic is single too).
+
+    Sagebrush's own choices, where the page fixes nothing: a NaN or
+    complex value inside the bracket is an error rather than a guess;
+    exitflag -5 is never given, since the page says what it means (a
+    possible singular point) but not how it is detected, so a sign change
+    at a pole ends like any other, x the sign change's place and fval its
+    large value; output functions see
+    the search's steps as iterations too; the messages other than 'Zero
+    found in the interval [a, b]' are Sagebrush's own; and PlotFcns is
+    refused"""
+    if len(args) == 1 and type(args[0]) is _m.Struct:
+        p = args[0]
+        if _m._numel(p) != 1:
+            raise _err("fzero: the problem must be a scalar structure.")
+        d = p.a[0]
+        for k in ("objective", "x0", "solver"):
+            if k not in d:
+                raise _err("fzero: the problem structure needs the field '%s'." % k)
+        if not _istext(d["solver"]) or _text(d["solver"]) != "fzero":
+            raise _err("fzero: the problem structure's solver must be 'fzero'.")
+        fun, x0, options = d["objective"], d["x0"], d.get("options")
+    elif len(args) in (2, 3):
+        fun, x0 = args[0], args[1]
+        options = args[2] if len(args) == 3 else None
+    elif len(args) < 2:
+        raise _err("Not enough input arguments.")
+    else:
+        raise _err("Too many input arguments.")
+    if nargout > 4:
+        raise _err("Too many output arguments.")
+    options = _options_arg(options, "fzero")
+    f = _m._fn_arg(fun)
+    disp = _display(options, "fzero")
+    outs = _output_fcns(options, "fzero")
+    check = _opt(options, "FunValCheck", "fzero") == "on"
+    if type(x0) is _m.Char or not _m._isnumlike(x0) or _m._numel(x0) not in (1, 2):
+        raise _err("fzero: x0 must be a real scalar or a two-element real vector.")
+    xa = _m._arr(x0).T.reshape(-1)
+    if np.iscomplexobj(xa) and np.any(xa.imag != 0):
+        raise _err("fzero: x0 must be real.")
+    xs = [float(v.real) if np.iscomplexobj(xa) else float(v) for v in xa]
+    F = _ZeroFun(f, _m.class_(x0) == "single", check)
+    if F.single:
+        xs = [_single_round(v) for v in xs]
+    tolx = _opt(options, "TolX")
+    show = disp == "iter"
+    intervals, iters, flag, x, fx = 0, 0, None, None, None
+    if len(xs) == 2:
+        if not all(_math.isfinite(v) for v in xs):
+            raise _err("fzero: the interval x0 must be finite.")
+        a, b = xs
+        fa = F(a)
+        fb = F(b)
+        for v, fv in ((a, fa), (b, fb)):
+            if type(fv) is complex or not _math.isfinite(fv):
+                raise _err("fzero: the function value at the interval end x = %g must be real and finite." % v)
+        if not _changes_sign(fa, fb):
+            raise _err("fzero: the function values at the interval endpoints must differ in sign.")
+        if show:
+            _m._write(" Func-count    x          f(x)             Procedure\n")
+    else:
+        if not _math.isfinite(xs[0]):
+            raise _err("fzero: x0 must be finite.")
+        a, fa, b, fb, intervals, flag, x, fx = _fzero_search(F, xs[0], show, outs)
+        if flag is None and show:
+            _m._write("\nSearch for a zero in the interval [%g, %g]:\n" % (a, b))
+            _m._write(" Func-count    x          f(x)             Procedure\n")
+    if tolx is None:
+        tolx = 1.1920928955078125e-07 if F.single else _EPS
+    a0, b0, fa0, fb0 = a, b, fa, fb
+    if flag is None:
+        if len(xs) == 2 and outs:
+            best = (b, fb) if abs(fb) <= abs(fa) else (a, fa)
+            vals = {"funccount": float(F.count), "fval": best[1], "iteration": 0.0, "procedure": _m.Char("initial")}
+            if _call_output(outs, best[0], vals, "init"):
+                flag, x, fx = -1, best[0], best[1]
+        if flag is None:
+            x, fx, iters, stopped = _fzero_brent(F, a, fa, b, fb, float(_m._scalar(tolx)), show, outs, intervals)
+            flag = -1 if stopped else 1
+    if flag == 1:
+        msg = "Zero found in the interval [%g, %g]" % (a0, b0)
+    elif flag == -1:
+        msg = "fzero stopped: an output function asked it to stop."
+    elif flag == -6:
+        msg = "fzero found no sign change: the search interval around %g grew as far as [%g, %g]." % (xs[0], a0, b0)
+    else:
+        msg = ("fzero stopped searching for an interval containing a sign change: the function value at x = %g is %s."
+               % (x, "complex" if flag == -4 else _m._special(fx)))
+    if flag in (-3, -4, -6):
+        x = fx = _math.nan
+    if outs:
+        vals = {"funccount": float(F.count), "fval": fx if type(fx) is not complex else _math.nan,
+                "iteration": float(intervals + iters), "procedure": _m.Char("")}
+        _call_output(outs, x, vals, "done")
+    if disp == "iter" or disp == "final" or (disp == "notify" and flag != 1):
+        _m._write(("\n" if show else "") + msg + "\n")
+
+    def num(v):
+        return _m._canon(np.array([[v]], dtype=np.float32)) if F.single else float(v)
+    out = [num(x), num(fx), num(float(flag)),
+           _m._struct1({"intervaliterations": float(intervals), "iterations": float(iters), "funcCount": float(F.count),
+                        "algorithm": _m.Char("bisection, interpolation"), "message": _m.Char(msg)})]
+    return out[0] if nargout <= 1 else out[:nargout]

@@ -656,3 +656,106 @@ test("optimset and optimget as documented: their pages' examples, solver default
     "optimset: the PlotFcns option is not supported in Sagebrush.", "optimset: MaxIter must be a positive integer.",
   ]);
 });
+
+test("fzero reproduces its published examples: results, output structures and iterative displays", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  // (the doc page's single, interval and double examples: counts and messages)
+  const counts = run([
+    "f = @(x)cosh(x)-2*sinh(x);",
+    "[x,fval,exitflag,output] = fzero(f,single(1)); disp(class(x)); disp(class(exitflag)); fprintf('%.4f %d %d\\n', x, exitflag, output.intervaliterations); disp(output.message);",
+    "[x2,fval2,exitflag2,output2] = fzero(f,single([-1,1])); fprintf('%.4f %d %d %d\\n', x2, output2.intervaliterations, output2.iterations, output2.funcCount); disp(output2.message);",
+    "[x3,fval3,exitflag3,output3] = fzero(f,[-1,1]); fprintf('%.4f %.4e %d %d %d\\n', x3, fval3, output3.intervaliterations, output3.iterations, output3.funcCount); disp(output3.algorithm);",
+    "fun = @(x) exp(-exp(-x)) - x; [x fval exitflag output] = fzero(fun,[0 1]); fprintf('%.4f %g %d %d %d\\n', x, fval, exitflag, output.iterations, output.funcCount);",
+  ].join("\n"));
+  assert.deepEqual(counts, ["single", "single", "0.5493 1 9", "Zero found in the interval [0.547452, 1.32]",
+    "0.5493 0 5 7", "Zero found in the interval [-1, 1]",
+    "0.5493 -2.2204e-16 0 7 9", "bisection, interpolation", "0.5671 0 1 5 7"]);
+  // (the published displays of humps from an interval and from a point, to the digit)
+  const humps = "h = @(x) 1./((x-0.3).^2+0.01) + 1./((x-0.9).^2+0.04) - 6; options = optimset('Display','iter');";
+  assert.deepEqual(run(humps + " a = fzero(h,[-1 1],options);"), [
+    " Func-count    x          f(x)             Procedure",
+    "    2              -1      -5.13779        initial",
+    "    3       -0.513876      -4.02235        interpolation",
+    "    4       -0.513876      -4.02235        bisection",
+    "    5       -0.473635      -3.83767        interpolation",
+    "    6       -0.115287      0.414441        bisection",
+    "    7       -0.115287      0.414441        interpolation",
+    "    8       -0.132562    -0.0226907        interpolation",
+    "    9       -0.131666    -0.0011492        interpolation",
+    "   10       -0.131618   1.88371e-07        interpolation",
+    "   11       -0.131618   -2.7935e-11        interpolation",
+    "   12       -0.131618   8.88178e-16        interpolation",
+    "   13       -0.131618   8.88178e-16        interpolation",
+    "Zero found in the interval [-1, 1]"]);
+  assert.deepEqual(run(humps + " a = fzero(h,-0.2,options);"), [
+    "Search for an interval around -0.2 containing a sign change:",
+    " Func-count    a          f(a)             b          f(b)                    Procedure",
+    "    1            -0.2      -1.35385          -0.2      -1.35385               initial interval",
+    "    3       -0.194343      -1.26077     -0.205657      -1.44411               search",
+    "    5          -0.192      -1.22137        -0.208       -1.4807               search",
+    "    7       -0.188686      -1.16477     -0.211314      -1.53167               search",
+    "    9          -0.184      -1.08293        -0.216      -1.60224               search",
+    "   11       -0.177373     -0.963455     -0.222627      -1.69911               search",
+    "   13          -0.168     -0.786636        -0.232      -1.83055               search",
+    "   15       -0.154745      -0.51962     -0.245255      -2.00602               search",
+    "   17          -0.136     -0.104165        -0.264      -2.23521               search",
+    "   18        -0.10949      0.572246        -0.264      -2.23521               search",
+    "Search for a zero in the interval [-0.10949, -0.264]:",
+    " Func-count    x          f(x)             Procedure",
+    "   18        -0.10949      0.572246        initial",
+    "   19       -0.140984     -0.219277        interpolation",
+    "   20       -0.132259    -0.0154224        interpolation",
+    "   21       -0.131617   3.40729e-05        interpolation",
+    "   22       -0.131618  -6.79505e-08        interpolation",
+    "   23       -0.131618  -2.98428e-13        interpolation",
+    "   24       -0.131618   8.88178e-16        interpolation",
+    "   25       -0.131618   8.88178e-16        interpolation",
+    "Zero found in the interval [-0.10949, -0.264]"]);
+  // (the problem structure, the Display levels and an output function)
+  assert.deepEqual(run([
+    "problem.objective = @(x)sin(cosh(x)); problem.x0 = 1; problem.solver = 'fzero'; problem.options = optimset(@fzero);",
+    "fprintf('%.4f\\n', fzero(problem));",
+    "x = fzero(@(x) x - 2, [0 4], optimset('Display', 'final')); x = fzero(@(x) x - 2, [0 4]); x = fzero(@(x) x - 2, [0 4], optimset('Display', 'off'));",
+    "[x,f,e,o] = fzero(@cos, [1 2], optimset('OutputFcn', @(x, v, s) v.iteration >= 2, 'Display', 'off')); fprintf('%d %d\\n', e, o.iterations);",
+  ].join("\n")), ["1.8115", "Zero found in the interval [0, 4]", "-1 2"]);
+});
+
+test("fzero's other exits: no sign change, overflow, a sign change at a pole (never -5), and its refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "o = optimset('Display', 'off');",
+    "[x,f,e] = fzero(@(x) sqrt(x) - 10, 1, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@(x) 1./x + 1, 0, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@(x) x.^2 + 1, 1, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@(x) 1 + 0*x, 1, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@tan, [1 2], o); disp(mat2str([abs(x - pi/2) < 1e-15 abs(f) > 1e14 e]));",
+    "[x,f,e,out] = fzero(@(x) x.^2, 0, o); disp(mat2str([x f e out.funcCount]));",
+    "try, fzero(@(x) x + 2, [0 4]), catch err, disp(err.message), end",
+    "try, fzero(@(x) x + 2, [0 Inf]), catch err, disp(err.message), end",
+    "try, fzero(@(x) x + 2, [0 1 2]), catch err, disp(err.message), end",
+    "try, fzero(@(x) x + 2, 1i), catch err, disp(err.message), end",
+    "p = optimset(); p.PlotFcns = @optimplotx; try, fzero(@(x) x + 2, 1, p), catch err, disp(err.message), end",
+    "try, fzero(@(x) sqrt(x) - 10, 1, optimset('FunValCheck', 'on')), catch err, disp(err.message), end",
+    "q = optimset(); q.FunValCheck = 'ON'; try, fzero(@(x) sqrt(x) - 10, 1, q), catch err, disp(err.message), end",
+    "try, fzero(@(x) [x x], 1), catch err, disp(err.message), end",
+    "try, p.objective = @sin; p.x0 = 3; fzero(p), catch err, disp(err.message), end",
+    "try, fzero(@(x) x - 0.5 + 0 ./ (abs(x - 0.5) >= 0.1), [0 1]), catch err, disp(err.message), end",
+    "x = fzero(@(x) x.^2 + 1, 1);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[NaN NaN -4]", "[NaN NaN -3]", "[NaN NaN -3]", "[NaN NaN -6]", "[1 1 1]", "[0 0 1 1]",
+    "fzero: the function values at the interval endpoints must differ in sign.",
+    "fzero: the interval x0 must be finite.",
+    "fzero: x0 must be a real scalar or a two-element real vector.",
+    "fzero: x0 must be real.",
+    "fzero: the PlotFcns option is not supported in Sagebrush.",
+    "fzero: the function returned a complex value at x = -0.28 (FunValCheck is on).",
+    "fzero: the function returned a complex value at x = -0.28 (FunValCheck is on).",
+    "fzero: the function must return a numeric scalar.",
+    "fzero: the problem structure needs the field 'solver'.",
+    "fzero: the function returned NaN at x = 0.5, inside the interval; fzero cannot continue.",
+    "fzero stopped searching for an interval containing a sign change: the function value at x = -1.7162e+154 is Inf.",
+  ]);
+});
