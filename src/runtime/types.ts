@@ -710,7 +710,52 @@ method(float, "as_integer_ratio", (x: any) => {
 });
 getset(float, "real", (x) => x);
 getset(float, "imag", () => new FloatBox(0));
-float.$dict.set("fromhex", new PyClassMethod(pyfn((_c: any, s: string) => O.mkfloat(parseFloat(s)), "fromhex")));
+// (CPython's: the sign, 0x, the leading digit (0 only for zero and subnormals), all 13
+// digits of the fraction, and the binary exponent: 0x1.0000000000000p+0)
+method(float, "hex", (x: any) => {
+  const v = O.fv(x)!;
+  if (v !== v) return "nan";
+  if (!Number.isFinite(v)) return v < 0 ? "-inf" : "inf";
+  const sign = v < 0 || Object.is(v, -0) ? "-" : "";
+  if (v === 0) return sign + "0x0.0p+0";
+  const dv = new DataView(new ArrayBuffer(8));
+  dv.setFloat64(0, v);
+  const bits = dv.getBigUint64(0), biased = Number((bits >> 52n) & 0x7ffn);
+  const e = biased ? biased - 1023 : -1022;
+  return `${sign}0x${biased ? 1 : 0}.${(bits & ((1n << 52n) - 1n)).toString(16).padStart(13, "0")}p${e < 0 ? "-" : "+"}${Math.abs(e)}`;
+});
+function floatFromHex(s: string): number {
+  const bad = () => raise(T.ValueError, "invalid hexadecimal floating-point string");
+  const t = String(s).replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, "");
+  const special = /^([+-]?)(inf|infinity|nan)$/i.exec(t);
+  if (special) return special[2].toLowerCase() === "nan" ? NaN : special[1] === "-" ? -Infinity : Infinity;
+  const m = /^([+-]?)(?:0x)?([0-9a-f]*)(?:\.([0-9a-f]*))?(?:p([+-]?\d+))?$/i.exec(t);
+  if (!m || !(m[2] + (m[3] ?? ""))) bad();
+  const neg = m![1] === "-", frac = m![3] ?? "";
+  // the value is N 2^adj exactly; rounded to the nearest double, ties to even
+  const N = BigInt("0x" + (m![2] + frac || "0"));
+  const adj = BigInt(m![4] ?? 0) - 4n * BigInt(frac.length);
+  if (N === 0n) return neg ? -0 : 0;
+  const e = BigInt(N.toString(2).length - 1) + adj; // 2^e <= value < 2^(e+1)
+  const big = () => raise(T.OverflowError, "hexadecimal value too large to represent as a float");
+  if (e > 1023n) big();
+  if (e < -1076n) return neg ? -0 : 0;
+  const lsb = (e > -1022n ? e : -1022n) - 52n, shift = lsb - adj;
+  let q: bigint;
+  if (shift > 0n) {
+    q = N >> shift;
+    const rem = N - (q << shift), half = 1n << (shift - 1n);
+    if (rem > half || (rem === half && (q & 1n))) q += 1n;
+  } else q = N << -shift;
+  const v = Number(q) * 2 ** Number(lsb);
+  if (v === Infinity) big();
+  return neg ? -v : v;
+}
+float.$dict.set("fromhex", new PyClassMethod(pyfn((c: any, s: any) => {
+  if (typeof s !== "string") raise(T.TypeError, `bad argument type for built-in operation`);
+  const f = O.mkfloat(floatFromHex(s));
+  return c === float ? f : c(f);
+}, "fromhex")));
 
 builtinType("bool", [int], (x: any = false) => O.truth(x));
 method(T.bool, "__repr__", (x: any) => (x ? "True" : "False"));
