@@ -322,6 +322,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const under = underlay(d, pageIx, { items, edges });
     // (code items' heights were for these two layouts, the page's and its template's: PERF-F2A-1)
     codeHeights.clear();
+    // (an item being dragged or resized: not put back where the document has
+    // it; the board laid out again once it is let go, CI Oct 14)
+    if (editor.moving && !view) { relayoutHeld = true; return true; }
     board.setItems([...under.items, ...items], [...under.edges, ...edges]);
     // (the page's slide and background, or its template's)
     const look = lookOf(d, pageIx);
@@ -478,7 +481,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let relayoutFrame = 0, relayoutHeld = false;
   function relayout() {
     if (editor.moving) { relayoutHeld = true; return; }
-    if (!relayoutFrame) relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; redraw().catch(fail); });
+    // (and if an item came to be dragged or resized meanwhile: once it is let go)
+    if (!relayoutFrame) relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; if (editor.moving) { relayoutHeld = true; return; } redraw().catch(fail); });
   }
   // (fonts that came after notes were measured, KaTeX's among them: the
   // notes measured again, or their text would overflow them)
