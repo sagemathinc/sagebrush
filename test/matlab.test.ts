@@ -12,6 +12,9 @@ test(".m files: Magma assigns with :=, MATLAB never does", () => {
   assert.equal(looksLikeMagma("function y = f(x)\n  y = x';\nend"), false);
   // := only in a MATLAB comment or string: MATLAB
   assert.equal(looksLikeMagma("% in Magma one writes x := 5\nx = 5;"), false);
+  // (block comments nest, as the lexer reads them: := in the outer one after an inner %} is still a comment)
+  assert.equal(looksLikeMagma("%{\nouter\n%{\ninner\n%}\n:= only in the outer comment\n%}\nx=1;"), false);
+  assert.equal(looksLikeMagma("%{\n%{\n%}\n%}\nx := 1;"), true);
   assert.equal(looksLikeMagma("s = 'x := 5';\ndisp(s)"), false);
   assert.equal(looksLikeMagma('s = "a := b";'), false);
   assert.equal(looksLikeMagma("%{\nx := 1\n%}\ny = 2;"), false);
@@ -188,4 +191,27 @@ test("reactive notebook: a MATLAB cell's definitions and references (src/dataflo
   assert.throws(() => analyzeCell("x = [1 2", "c", { mode: "matlab" }), MatlabSyntaxError);
   assert.equal(renameInCell("x = 1", "x", "x_2", { mode: "matlab" }), null);
   assert.equal(forwardRefers("x = 1", "x", "matlab"), false);
+});
+
+test("MATLAB consoles wait for the end of an open block (is_complete, the session's check)", async () => {
+  const { matlabIsIncomplete } = require("../src/matlab");
+  for (const t of ["if true", "for k = 1:3\n  disp(k)", "x = [1 2", "x = 1 + ...", "%{\na note", "while x < 3\n  if x"]) assert.equal(matlabIsIncomplete(t), true, t);
+  for (const t of ["x = 1", "if true\n  x = 1;\nend", "x = 1 +* 2", "x = )", "%{\n%}\nx = 1"]) assert.equal(matlabIsIncomplete(t), false, t);
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  await s.handle({ id: 1, check: "if true", matlab: true });
+  await s.handle({ id: 2, check: "if true\n  x = 1;\nend", matlab: true });
+  assert.deepEqual([1, 2].map((id) => msgs.find((m) => m.id === id).more), [true, false]);
+});
+
+test("a .m file whose outer block comment holds := runs as MATLAB (the CLI's guess)", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const f = join(mkdtempSync(join(tmpdir(), "sb-mfile-")), "nested.m");
+  writeFileSync(f, "%{\nouter\n%{\ninner\n%}\n:= only in the outer comment\n%}\nx = 6 * 7\n");
+  assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", f], { encoding: "utf8" }), "\nx =\n\n    42\n\n");
 });

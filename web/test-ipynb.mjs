@@ -103,6 +103,8 @@ console.log(`${pass} passed`);
   assert.equal(toScript(d), "%%\n% Data\nx = 1:3;\n\n%% [markdown]\n% # Results\n% the *sum*\n\n%%\ns = sum(x)\n");
   assert.deepEqual(fromFile("a.m", toScript(d)).cells.map((c) => c.code), d.cells.map((c) => c.code));
   // (a MATLAB script without sections is one cell; := in a comment does not make it Magma)
+  // (block comments nest: a := in the outer one, after an inner %}, is still a comment)
+  assert.equal(fromFile("n.m", "%{\nouter\n%{\ninner\n%}\n:= only in the outer comment\n%}\nx=1;").mode, "matlab");
   assert.deepEqual([fromFile("b.m", "% x := 1 in Magma\nx = 1").mode, fromFile("c.m", "x := 1;\nx;").mode, fromFile("d.m", "// %%\nprint 1;").mode, fromFile("e.mag", "print 1;").mode],
     ["matlab", "magma", "magma", "magma"]);
   const j = JSON.parse(toIpynb({ mode: "matlab", cells: [{ id: "a", code: "x = 1" }] }));

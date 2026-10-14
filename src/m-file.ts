@@ -9,11 +9,40 @@
  * A MATLAB file that has `:=` only in a comment or a string is MATLAB.
  */
 export function looksLikeMagma(src: string): boolean {
-  const code = src
-    .replace(/^[ \t]*%\{[ \t]*$[\s\S]*?^[ \t]*%\}[ \t]*$/gm, " ") // MATLAB block comments
+  const code = withoutBlockComments(src)
     .replace(/\/\*[\s\S]*?\*\//g, " ") // Magma block comments
     .replace(/"(?:[^"\\\n]|\\.)*"/g, '""') // strings of both languages
     .replace(/(^|[^\w)\]}.'])'(?:[^'\n]|'')*'/g, "$1''") // MATLAB character vectors (not transposes)
     .replace(/(\/\/|%|#).*$/gm, ""); // line comments of both
   return /:=/.test(code);
+}
+
+/**
+ * The text without MATLAB's block comments: from a line that is `%{` alone
+ * (or Octave's `#{`) to its matching `%}`, nested as the translator's lexer
+ * nests them; an unclosed one runs to the end.  Lines are kept (empty), so
+ * line numbers stay.
+ */
+export function withoutBlockComments(src: string): string {
+  let depth = 0;
+  return src.split("\n").map((line) => {
+    const t = line.trim();
+    if (t === "%{" || t === "#{") { depth++; return ""; }
+    if (depth > 0) {
+      if (t === "%}" || t === "#}") depth--;
+      return "";
+    }
+    return line;
+  }).join("\n");
+}
+
+/** Whether MATLAB text ends inside a block comment (a console waits for more). */
+export function inBlockComment(src: string): boolean {
+  let depth = 0;
+  for (const line of src.split("\n")) {
+    const t = line.trim();
+    if (t === "%{" || t === "#{") depth++;
+    else if (depth > 0 && (t === "%}" || t === "#}")) depth--;
+  }
+  return depth > 0;
 }
