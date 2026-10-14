@@ -4,7 +4,11 @@
 // named by its tooltip; only one emoji, only an icon's name, else no
 // sticker; drawn far out too; printed; an item as a note is (dragged, held
 // by a rectangle); kept in the board's file; in a JSON Canvas an emoji is a
-// text card and an icon is left out, said so.  Serve web/dist first (python3 web/serve.py
+// text card and an icon is left out, said so.  In Edit: Sticker in ⋯ (not
+// on the toolbar) opens a picker of 48 emoji and Picture…; an emoji chosen
+// is a sticker, selected; its corner resizes it, square; a double-click or
+// Enter opens the picker for it, an emoji chosen replacing an icon; Esc or
+// a press outside closes it.  Serve web/dist first (python3 web/serve.py
 // 8765), then
 //   node web/board/test-stickers.mjs
 import { spawn } from "node:child_process";
@@ -113,6 +117,69 @@ try {
   const cv = await ev(`${B}.canvas()`);
   const cards = JSON.parse(cv.text).nodes.filter((x) => x.type === "text").map((x) => x.text).sort().join();
   check(/2 stickers/.test(cv.left) && cards.includes("🚀") && cards.includes("👩🏽‍💻"), "a JSON Canvas: an emoji sticker a text card; an icon left out, said so: " + cv.left + " " + cards);
+  // the picker (Edit): Sticker in ⋯, not on the toolbar; 48 emoji and Picture…
+  const snap = () => ev(`${B}.snapshot().doc`);
+  const picker = "document.querySelector('[data-sbb=stickers]')";
+  check(await ev("!document.querySelector('.board-toolbar > [data-tool=sticker]')"), "Sticker is not on the toolbar");
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
+  check(await ev("!!document.querySelector('.board-toolbar-panel .tb-use[data-tool=sticker]')"), "Sticker is in ⋯");
+  await ev("document.querySelector('.board-toolbar-panel .tb-use[data-tool=sticker]').click(), 1");
+  check(await ev(`!!${picker} && ${picker}.querySelectorAll('.bs-emoji').length === 48 && !!${picker}.querySelector('.bs-picture') && document.activeElement?.classList.contains('bs-emoji')`), "Sticker opens the picker: 48 emoji (the first focused) and Picture…");
+  if (process.env.SHOT) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOT, Buffer.from(r.data, "base64")); }
+  const n0 = (await snap()).nodes.length;
+  await ev(`[...${picker}.querySelectorAll('.bs-emoji')].find((b) => b.textContent === "🎉").click(), 1`);
+  await sleep(300);
+  const added = (await snap()).nodes.at(-1);
+  check((await snap()).nodes.length === n0 + 1 && added.kind === "sticker" && added.emoji === "🎉" && !added.w && (await ev(`!${picker} && window.board.handle === ${JSON.stringify(added.id)}`)), "an emoji chosen: a sticker of it, selected, its corner a handle: " + JSON.stringify(added));
+  // resized by its corner: square
+  const a0 = await ev(`window.board.item(${JSON.stringify(added.id)})`), h0 = await toClient(a0.x + a0.w, a0.y + a0.h);
+  await mouse("mousePressed", h0.x, h0.y);
+  for (let k = 1; k <= 6; k++) await mouse("mouseMoved", h0.x + k * 10, h0.y + k * 3);
+  await mouse("mouseReleased", h0.x + 60, h0.y + 18);
+  await sleep(400);
+  const a1 = await ev(`window.board.item(${JSON.stringify(added.id)})`), w1 = (await snap()).nodes.find((x) => x.id === added.id).w;
+  check(Math.abs(a1.w - 124) < 2 && a1.h === a1.w && w1 === a1.w, "a sticker resized by its corner stays square: " + JSON.stringify([a1.w, a1.h, w1]));
+  // double-click: the picker for it (no Picture…), its emoji marked; a choice changes it
+  const c1 = await toClient(a1.x + a1.w / 2, a1.y + a1.h / 2);
+  await mouse("mousePressed", c1.x, c1.y); await mouse("mouseReleased", c1.x, c1.y);
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: c1.x, y: c1.y, button: "left", buttons: 1, clickCount: 2 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: c1.x, y: c1.y, button: "left", buttons: 0, clickCount: 2 });
+  await sleep(300);
+  check(await ev(`!!${picker} && !${picker}.querySelector('.bs-picture') && ${picker}.querySelector('.bs-emoji.on')?.textContent === "🎉"`), "a double-click opens the picker for that sticker, its emoji marked");
+  await ev(`[...${picker}.querySelectorAll('.bs-emoji')].find((b) => b.textContent === "🚀").click(), 1`);
+  await sleep(300);
+  check((await snap()).nodes.find((x) => x.id === added.id).emoji === "🚀", "...and a choice changes it");
+  // Enter on a selected icon sticker: the picker; an emoji chosen replaces the icon (and its color)
+  await ev(`window.board.setCamera({ x: 300, y: -300, z: 1 }), window.board.render(), 1`);
+  await sleep(200);
+  const u0 = await ev(`window.board.item("u")`), uc = await toClient(u0.x + u0.w / 2, u0.y + u0.h / 2);
+  await mouse("mousePressed", uc.x, uc.y); await mouse("mouseReleased", uc.x, uc.y);
+  await sleep(200);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await sleep(200);
+  check(await ev(`!!${picker}`), "Enter on a selected sticker opens its picker");
+  await ev(`[...${picker}.querySelectorAll('.bs-emoji')].find((b) => b.textContent === "✅").click(), 1`);
+  await sleep(300);
+  check(JSON.stringify((await snap()).nodes.find((x) => x.id === "u")) === '{"id":"u","kind":"sticker","emoji":"✅","x":700,"y":0,"w":60}', "an emoji chosen for an icon sticker replaces the icon and its color: " + JSON.stringify((await snap()).nodes.find((x) => x.id === "u")));
+  // closed by Esc, and by a press outside it; Picture… chooses pictures (a file input), the picker closed
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), document.querySelector('.board-toolbar-panel .tb-use[data-tool=sticker]').click(), 1");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await sleep(100);
+  const escaped = await ev(`!${picker}`);
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), document.querySelector('.board-toolbar-panel .tb-use[data-tool=sticker]').click(), 1");
+  await sleep(50);
+  const far0 = await toClient(-20, 600);
+  await mouse("mousePressed", far0.x, far0.y); await mouse("mouseReleased", far0.x, far0.y);
+  await sleep(100);
+  check(escaped && (await ev(`!${picker}`)), "Esc closes the picker, and so does a press outside it");
+  await ev(`document.querySelector('.board-toolbar .tb-more').click(), document.querySelector('.board-toolbar-panel .tb-use[data-tool=sticker]').click(), HTMLInputElement.prototype.click = function () { window.__chose = this.type + ":" + this.accept; }, ${picker}.querySelector('.bs-picture').click(), 1`);
+  check(await ev(`!${picker} && /^file:image/.test(window.__chose ?? "")`), "Picture… chooses pictures: " + await ev("window.__chose"));
+  // one undo takes back one change
+  await ev("window.sagebrush.board.editing(true), 1");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "z", code: "KeyZ", windowsVirtualKeyCode: 90, modifiers: 2 });
+  await sleep(300);
+  check((await snap()).nodes.find((x) => x.id === "u").icon === "cocalc-unknown", "one undo takes back the icon's change");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

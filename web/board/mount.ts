@@ -537,6 +537,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     { id: "note", label: "Note", icon: "¶", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y); } },
     { id: "code", label: "Code", icon: "{ }", title: "Add a note with Python code (any note can have code: + Code in its editor)", run: () => { const c = center(); editor.addCode(c.x, c.y); } },
     { id: "image", label: "Image", icon: "▨", title: "Add pictures (or paste one, or drop files on the board)", run: () => pickImages() },
+    { id: "sticker", label: "Sticker", icon: "☺", title: "Add a sticker: an emoji (double-click one to change it)", run: () => editor.pickSticker({ at: center(), under: toolbar.el }) },
     { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
     { id: "connect", label: "Connect", icon: "⤳", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
     { id: "draw", label: "Draw", icon: "✎", title: "Draw: drag to draw (a pen's pressure counts; once a pen has drawn, a finger pans); Esc to stop", toggle: editor.drawing },
@@ -548,6 +549,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   ], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }, false, false));
   // the pen row: the pen's color and width, a highlighter, the eraser (pen.ts)
   const pen = new PenRow(root, editor.drawing, editor.erasing, () => toolbar.el);
+  editor.onPickPicture = () => pickImages();
   editor.penStyle = () => pen.style();
   // pictures chosen from files (or the camera, on a phone), added in the middle of the view
   function pickImages() {
