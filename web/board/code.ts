@@ -361,9 +361,18 @@ export class BoardCode {
    * that read files), computed here or shown from the cache, the slowest
    * first, at most DOC_CAP in all.  Previews are in the board already.
    */
-  async carry(): Promise<CachedOutputs[]> {
+  async carry(): Promise<CachedOutputs[]>;
+  /** ...and only if the items are these, in this language and with this
+   * seed, when the outputs are read (the document exported: else null) */
+  async carry(expect: { mode: BoardMode; seed?: string; items: { id: string; code: string }[] }): Promise<CachedOutputs[] | null>;
+  async carry(expect?: { mode: BoardMode; seed?: string; items: { id: string; code: string }[] }): Promise<CachedOutputs[] | null> {
     if (!(await this.ready)) return [];
     await this.last;
+    const same = () => {
+      if (!expect) return true;
+      const cs = this.nb.cells().filter((c: any) => c.type === "code");
+      return this.mode === expect.mode && this.seed === (expect.seed ?? BOARD_SEED) && cs.length === expect.items.length && cs.every((c: any, i: number) => c.id === expect.items[i].id && c.ta.value === expect.items[i].code);
+    };
     // (each output read between two readings of the keys, with no run
     // finished meanwhile: an item whose key is the same in both is of its
     // key, CORR-2D0-1; else, read again)
@@ -373,6 +382,7 @@ export class BoardCode {
       const runs = this.runs, gens = new Map(this.gens);
       const keys = await this.nb.outputKeys();
       if (this.closed) return [];
+      if (!same()) return null;
       out = [];
       const ids: string[] = [];
       for (const c of this.nb.cells()) {
@@ -388,6 +398,7 @@ export class BoardCode {
         ids.push(id);
       }
       const again = await this.nb.outputKeys();
+      if (!same()) return null;
       if (this.runs === runs && ids.every((id, i) => again?.[id]?.key === out[i].key)) break;
     }
     out.sort((a, b) => b.total - a.total);
