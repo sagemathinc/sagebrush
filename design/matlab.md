@@ -162,9 +162,16 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
 - **`colon`** computes `a:d:b` as MATLAB does: the second half of the
   elements is counted back from the end point. **`linspace`** uses MATLAB's
   formula. **`rand`** gives MATLAB's numbers: the Mersenne twister seeded
-  with 5489, as `rng default` does, and so do `randi` and `sprand`, which
-  are built on it as MATLAB's are. `randn` does not, since MATLAB's
-  algorithm for it differs from numpy's.
+  with 5489, as `rng default` does, and so do `randi`, `randperm(n)` and
+  `sprand`, which are built on it as MATLAB's are. **`randn`** is MATLAB's
+  ziggurat on the same stream:
+  - 256 layers (Marsaglia and Tsang's), each draw two 32-bit words a and b;
+  - the layer is 255 - (b >> 24);
+  - u = 2w/2^53 - 1, with w the 53 bits of a >> 3 and b's low 24 bits;
+  - mostly u x[layer]; else the wedge test with one more uniform, or the
+    tail beyond r;
+  - the layers' edges are a table of 15-digit constants.
+  So `rand`, `randn` and `randi` interleave on one stream as MATLAB's do.
 
 ## Display
 
@@ -443,6 +450,8 @@ since it compares against the committed outputs.
   Octave needs them before they are called.
 - **Display:** Octave prints `x = 5` on one line, and its matrix columns are
   narrower.
+- **Random numbers:** Octave's `randn` is not MATLAB's ziggurat; Sagebrush's
+  `rand`, `randn` and `randi` give MATLAB's numbers.
 - **Sparse matrices:**
   - `max(S, F)`, `dot`, `unique`, and `lu`'s permutation are sparse in
     MATLAB and full in Octave;
@@ -475,5 +484,9 @@ time, and `str2func` of an anonymous function's text is not supported.
 - `classdef` and nested functions;
 - string arrays beyond the basics;
 - `containers.Map`, file I/O beyond `fprintf`, `input`;
-- `randn` matching MATLAB's stream;
+- `randperm(n, k)` with k < n giving MATLAB's numbers (`randperm(n)`
+  does);
+- `int64` and `uint64` beyond 2^53: Sagebrush's numpy stores them in
+  doubles, so `intmax('int64')` shows 9223372036854775808 and
+  `intmax('uint64')` 18446744073709551616;
 - sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`).
