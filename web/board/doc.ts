@@ -108,6 +108,11 @@ export interface BoardDoc {
   /** in a downloaded file (export.ts, engine.ts), the engine its code runs
    * with: the latest, when online; else (the default) the one it was saved with */
   engine?: "latest";
+  /** the seed of its code's random numbers (64 hex digits): each code item
+   * draws from the hash of it and the item's id, so the same board draws the
+   * same numbers, and its outputs can be cached (design/outputs.md); a board
+   * without one uses BOARD_SEED */
+  seed?: string;
   /** the toolbar's tools in Edit mode (toolbar.ts), in order; else the person's default */
   tools?: string[];
   /** the pictures notes show, by name: each one's size (and its bytes, as a
@@ -197,7 +202,7 @@ export function cleanDoc(d: any): BoardDoc {
       hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
     steps: Array.isArray(p?.steps) ? p.steps.filter((t: any) => t && (typeof t.focus === "string" || Array.isArray(t.focus))).map((t: any) => strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) })) : undefined,
   });
-  const out: any = strip({ format: FORMAT, version: VERSION, ...page(d), title: str(d?.title), mode: d?.mode === "sage" ? "sage" : undefined, engine: d?.engine === "latest" ? "latest" : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
+  const out: any = strip({ format: FORMAT, version: VERSION, ...page(d), title: str(d?.title), mode: d?.mode === "sage" ? "sage" : undefined, engine: d?.engine === "latest" ? "latest" : undefined, seed: typeof d?.seed === "string" && /^[0-9a-f]{64}$/.test(d.seed) ? d.seed : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
   delete out.id;
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
   return out as BoardDoc;
@@ -205,7 +210,7 @@ export function cleanDoc(d: any): BoardDoc {
 
 // A document's keys in a file, in this order: what it is, its settings, its
 // content, and its pictures (data: URLs, possibly large) last.
-const DOC_KEYS = ["format", "version", "title", "mode", "engine", "refBase", "tools", "intro", "layout", "columns", "direction", "nodes", "edges", "steps", "pages", "images"];
+const DOC_KEYS = ["format", "version", "title", "mode", "engine", "seed", "refBase", "tools", "intro", "layout", "columns", "direction", "nodes", "edges", "steps", "pages", "images"];
 
 /**
  * A document as its file holds it (foo.board.json): cleaned (cleanDoc), its

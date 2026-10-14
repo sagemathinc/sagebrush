@@ -198,7 +198,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const order = codeOrder(d);
     const nth = new Map(order.map((c, i) => [c.id, i + 1]));
     for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
-    if (!view && (order.length || code)) engine()?.sync(order, d.mode ?? "python").catch((e) => console.warn("board: code items:", e));
+    if (!view && (order.length || code)) engine()?.sync(order, d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     board.setItems(items, edges);
     toolbar.tools.value = d.tools ?? defaultTools();
@@ -653,7 +653,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   $("newboard").onclick = () => editor.commit((d) => {
     for (const k of Object.keys(d)) delete (d as any)[k];
-    Object.assign(d, { title: "Untitled board", nodes: [] });
+    Object.assign(d, { title: "Untitled board", seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join(""), nodes: [] });
     pageIx = 0;
   }).then(() => { if (!editor.on) editBtn.click(); });
   $("revert").onclick = async () => {
@@ -861,6 +861,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       json: async () => canonical(await images.inline(doc!)),
       /** the board as a JSON Canvas (Download JSON Canvas), and what that left out, in words */
       canvas: () => canvasText(),
+      /** each code item's output key, time from root, and whether a widget moved since it ran (design/outputs.md) */
+      outputKeys: async () => (await engine()?.outputKeys()) ?? null,
       /** Show page n (0-based). */
       page,
       /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */

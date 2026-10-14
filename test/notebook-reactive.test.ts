@@ -321,3 +321,73 @@ test("the internal names' map is cleared when no cell needs renaming (REACT-3BC-
   await nb.r.run(["c1"], { remove: ["c0", "c2"] });
   assert.equal(nb.r.written("f\u02b92"), "f\u02b92");
 });
+
+// Output keys and time from root (design/outputs.md)
+import { createHash } from "node:crypto";
+const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+const keysOf = async (nb: ReturnType<typeof notebook>, mode = "python", seed = "s") => Object.fromEntries(await nb.r.keys({ mode, seed: (id) => seed + ":" + id, hash: sha }));
+
+test("output keys change exactly when the cell or anything upstream does", async () => {
+  const nb = notebook(["a = 1", "b = a + 1", "c = b + 1", "d = 5"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.runAll();
+  const k0 = await keysOf(nb);
+  assert.ok(Object.values(k0).every((k) => typeof k === "string" && /^[0-9a-f]{64}$/.test(k)));
+  assert.equal(new Set(Object.values(k0)).size, 4);
+  // the same notebook again: the same keys
+  assert.deepEqual(await keysOf(nb), k0);
+  // changing a: a, b, c change; d does not
+  nb.set(0, "a = 2");
+  await nb.r.run(["c0"]);
+  const k1 = await keysOf(nb);
+  for (const id of ["c0", "c1", "c2"]) assert.notEqual(k1[id], k0[id], id);
+  assert.equal(k1.c3, k0.c3);
+  // changing c: only c
+  nb.set(2, "c = b + 2");
+  await nb.r.run(["c2"]);
+  const k2 = await keysOf(nb);
+  assert.deepEqual([k2.c0, k2.c1, k2.c3], [k1.c0, k1.c1, k1.c3]);
+  assert.notEqual(k2.c2, k1.c2);
+  // the language and the seed are in every key
+  const py = await keysOf(nb), sage = await keysOf(nb, "sage"), seeded = await keysOf(nb, "python", "t");
+  for (const id of ["c0", "c1", "c2", "c3"]) {
+    assert.notEqual(sage[id], py[id]);
+    assert.notEqual(seeded[id], py[id]);
+  }
+});
+
+test("output keys: a cell with an error, and what reads from it, have none", async () => {
+  const nb = notebook(["a = (", "a = 1", "a = 2", "b = a + 1", "d = 5"]);
+  await nb.r.load();
+  const k = await keysOf(nb);
+  assert.equal(k.c0, null);
+  assert.equal(k.c1, null);
+  assert.equal(k.c2, null);
+  assert.equal(k.c3, null);
+  assert.match(k.c4 ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("time from root counts every cell it depends on, each once", async () => {
+  // a diamond: d reads b and c, both read a
+  const nb = notebook(["a = 1  # 1000 ms", "b = a  # 2000 ms", "c = a  # 3000 ms", "d = b + c  # 500 ms", "e = 1  # 7 ms"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  assert.deepEqual(nb.r.fromRoot("c3"), { ms: 0, untimed: 4 });
+  await nb.r.runAll();
+  assert.deepEqual(nb.r.fromRoot("c3"), { ms: 6500, untimed: 0 });
+  assert.deepEqual(nb.r.fromRoot("c1"), { ms: 3000, untimed: 0 });
+  assert.deepEqual(nb.r.fromRoot("c4"), { ms: 7, untimed: 0 });
+});
+
+test("cells run because a widget moved are marked, until a restart", async () => {
+  const nb = notebook(["w = 1", "x = w + 1", "y = x + 1", "z = 2"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.runAll();
+  assert.equal(nb.r.widgetDriven.size, 0);
+  await nb.r.namesChanged(["w"], ["c0"]);
+  assert.deepEqual([...nb.r.widgetDriven].sort(), ["c1", "c2"]);
+  nb.r.restarted();
+  assert.equal(nb.r.widgetDriven.size, 0);
+});
