@@ -774,7 +774,7 @@ def _logical_arr(v, name):
     if t is np.ndarray and v.dtype.kind == "b":
         return v
     A = _farr(v, name)
-    if A.dtype.kind == "f" and np.any(np.isnan(A)):
+    if A.dtype.kind in "fc" and np.any(np.isnan(A)):
         raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
     return A != 0
 
@@ -844,10 +844,11 @@ def cond(v):
     if _numel(v) == 0:
         return False
     A = _arr(v)
+    if A.dtype.kind in "fc" and np.any(np.isnan(A)):
+        # (a NaN in either part of a complex value)
+        raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
     if A.dtype.kind == "c":
         A = A.real
-    if A.dtype.kind == "f" and np.any(np.isnan(A)):
-        raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
     return bool(np.all(A != 0))
 
 
@@ -1189,7 +1190,7 @@ class Struct:
 class Sparse:
     """A sparse matrix (double or logical): lib/_matlab_sparse.py.  m-by-n,
     compressed sparse column (jc, ir, pr), as MATLAB stores it; immutable."""
-    __slots__ = ("m", "n", "jc", "ir", "pr")
+    __slots__ = ("m", "n", "jc", "ir", "pr", "cap")  # (cap: the capacity spalloc reserved, for nzmax)
 
     def __repr__(self):
         return "<%dx%d sparse, %d nonzeros>" % (self.m, self.n, self.pr.size)
@@ -4404,7 +4405,10 @@ def find_(nargout, x, n=None, direction=None):
     nz = np.nonzero(flat != 0)[0]
     if n is not None:
         k = _int_arg(n)
-        if direction is not None and _text(direction) == "last":
+        d = "first" if direction is None else _text(direction).lower()
+        if d not in ("first", "last"):
+            raise _err('Invalid search direction. Use "first" or "last".', "MATLAB:find:InvalidDirection")
+        if d == "last":
             nz = nz[nz.size - k:] if k else nz[:0]
         else:
             nz = nz[:k]
@@ -6721,10 +6725,14 @@ def ws_call(name, ns, args, nargout):
                           ["name", "size", "bytes", "class"])
         if vals:
             w = max(4, max(len(v) for v in vs))
-            lines = ["  %s      Size            Bytes  Class     Attributes" % "Name".ljust(w), ""]
+            # (the size column as wide as the widest size, 14 at least)
+            sw = max([14] + [len("x".join(str(d) for d in _dims(x))) + 1 for v, x in vals])
+            lines = ["  %s      %sBytes  Class     Attributes" % ("Name".ljust(w), "Size".ljust(sw + 2)), ""]
             for v, x in vals:
-                size = "x".join(str(d) for d in _dims(x))
-                lines.append("  %s      %-14s%7d  %-10s" % (v.ljust(w), size, _bytes(x), class_(x)))
+                size = "x".join(str(d) for d in _dims(x)).ljust(sw)
+                attrs = ", ".join(a for a, on in (("sparse", type(x) is Sparse), ("complex", _isnumlike(x) and not _sp.isreal(x))) if on)
+                lines.append(("  %s      %-14s%7d  %-10s%s" % (v.ljust(w), size, _bytes(x), class_(x), attrs)).rstrip() if attrs else
+                             "  %s      %-14s%7d  %-10s" % (v.ljust(w), size, _bytes(x), class_(x)))
             _write("\n".join(lines) + "\n\n")
         return NOVAL
     if name in ("load", "save"):
@@ -7973,6 +7981,8 @@ _BYTES = {"double": 8, "single": 4, "logical": 1, "char": 2, "int8": 1, "uint8":
 
 
 def _bytes(v):
+    if type(v) is Sparse:
+        return _sp.nbytes(v)
     c = class_(v)
     if c in _BYTES:
         return _numel(v) * _BYTES[c] * (2 if _isnumlike(v) and _arr(v).dtype.kind == "c" else 1)

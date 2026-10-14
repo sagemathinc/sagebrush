@@ -218,3 +218,23 @@ test("a .m file whose outer block comment holds := runs as MATLAB (the CLI's gue
   writeFileSync(f, "%{\nouter\n%{\ninner\n%}\n:= only in the outer comment\n%}\nx = 6 * 7\n");
   assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", f], { encoding: "utf8" }), "\nx =\n\n    42\n\n");
 });
+
+test("sparse single matrices stay single when a result is empty; whos marks sparse and complex", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "sparse-"));
+  writeFileSync(join(dir, "s.m"), [
+    "S = sparse(single(zeros(2, 3))); T = sparse(single([0 2; 0 0]));",
+    "c = {class(S), class(S.'), class(T), class(T(1,1)), class(T(1,:)), class(T([], :)), class(repmat(S, 2, 2)), class(T(:, []))};",
+    "fprintf('%s ', c{:}); fprintf('\\n');",
+    "C = sparse([1 2], [1 2], [1i 2]); B = sparse(1e6, 1e6);",
+    "whos B C",
+  ].join("\n"));
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8" });
+  const lines = out.split("\n");
+  assert.equal(lines[0], "single single single single single single single single ");
+  assert.match(out, /\n  B +1000000x1000000 +8000024  double +sparse\n/);
+  assert.match(out, /\n  C +2x2 +72  double +sparse, complex\n/);
+});
