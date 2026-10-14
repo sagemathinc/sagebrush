@@ -247,6 +247,12 @@ function repl(main: any, quiet: boolean): Promise<number> {
 
 async function main() {
   const argv = process.argv.slice(2);
+  // (a board's command: loaded only then, src/board-cli.ts)
+  if (argv[0] === "board") {
+    const { boardCommand } = await import("./board-cli");
+    process.exitCode = await boardCommand(argv.slice(1));
+    return;
+  }
   if (argv[0] === "--install-jupyter-kernel" || argv[0] === "--uninstall-jupyter-kernel") {
     process.exitCode = installKernel(argv.slice(1), argv[0] === "--uninstall-jupyter-kernel");
     return;
