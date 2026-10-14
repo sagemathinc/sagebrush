@@ -185,6 +185,25 @@ Sutherland's smalljac (with Kiran Kedlaya). On 2026-10-02 Andrew Sutherland
 gave explicit permission for this port to be licensed however Sagebrush
 chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
 
+### PSAGE (used with the author's permission)
+
+Parts of PSAGE (https://github.com/williamstein/psage, distributed under the
+GNU GPL, version 3 or later) may be ported to Sagebrush with the copyright
+holder's permission. William Stein is the sole author and copyright holder
+of the files below; on 2026-10-14 he gave permission for them to be ported to
+Sagebrush and licensed under MIT OR Apache-2.0:
+
+- every file in `psage/modform/hilbert/sqrt5` (Hilbert modular forms over
+  $\mathbb{Q}(\sqrt{5})$; see [engine/hmf/PROVENANCE.md](engine/hmf/PROVENANCE.md));
+- in `psage/modform/rational` ($p$-adic $L$-series of elliptic curves and
+  modular symbols): `modular_symbol_map.pyx`/`.pxd`, `newforms.py`,
+  `padic_elliptic_lseries_fast.pyx`, `special.py`, `special_fast.pyx`,
+  `unfiled.py`.
+
+`psage/modform/rational/padic_lseries.py` credits Jennifer Balakrishnan with
+its first version, so it is not covered: it is not ported unless she also
+gives permission. Nothing else in PSAGE is covered.
+
 ## Data
 
 - `lib/_cremona_small.py`: elliptic curves of conductor below 1000 from John
