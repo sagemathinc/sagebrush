@@ -8,12 +8,15 @@
 //! {"ok": RESULT} or {"error": MESSAGE}.  Single-threaded.  The functions
 //! and their results mirror the Python bindings (py/src/lib.rs: modsym,
 //! ap, mf); newspace/newforms factor with sagebrush-poly (pure Rust) and
-//! "factor" exposes it.  Big integers are decimal strings.
+//! "factor" exposes it; "hmf_*" are Hilbert modular forms (hmf.rs).  Big
+//! integers are decimal strings.
 
 use sagebrush_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::{Character, GeneralSpace};
 use serde_json::{json, Value};
+
+mod hmf;
 
 static mut REPLY: Vec<u8> = Vec::new();
 
@@ -407,6 +410,8 @@ fn perm_group_named(v: &Value) -> Result<Value, String> {
 fn dispatch(v: &Value) -> Result<Value, String> {
     let f = v.get("fn").and_then(Value::as_str).ok_or("missing fn")?;
     match f {
+        // ---- Hilbert modular forms over Q(sqrt 5): engine/hmf (hmf.rs) ----
+        f if f.starts_with("hmf_") => hmf::dispatch(f, v),
         "perm_group" => perm_group(v),
         "perm_group_named" => perm_group_named(v),
         "characters" => {

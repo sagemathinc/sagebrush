@@ -16,6 +16,8 @@ __all__ = [
     # modular forms and elliptic curves (Sagebrush's engines)
     "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
     "Newforms", "newform_orbits",
+    # Hilbert modular forms over Q(sqrt(5)) (engine/hmf; PSAGE's names)
+    "HilbertModularForms",
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
@@ -98,6 +100,7 @@ def show(obj, **options):
     return _show2d(obj, **options)
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)
+from _sage_hmf import HilbertModularForms
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
 from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,

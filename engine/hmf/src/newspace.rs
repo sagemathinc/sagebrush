@@ -139,6 +139,8 @@ pub struct Newspaces {
     divisors: Vec<(Ideal, usize)>,
     /// Hecke matrices by (level, prime), computed once.
     hecke: Mutex<HashMap<(Hnf, Hnf), Arc<HeckeMatrix>>>,
+    /// The newform orbits, computed once.
+    orbits: Mutex<Option<NewformOrbits>>,
 }
 
 /// The characteristic polynomial of an operator on S_2^new(N), and its
@@ -155,7 +157,7 @@ impl Newspaces {
         for (m, _) in &divisors {
             spaces.insert(m.hnf, Space::from_ideal(m.clone())?);
         }
-        Ok(Newspaces { level, spaces, divisors, hecke: Mutex::new(HashMap::new()) })
+        Ok(Newspaces { level, spaces, divisors, hecke: Mutex::new(HashMap::new()), orbits: Mutex::new(None) })
     }
     pub fn space(&self, m: &Ideal) -> &Space {
         &self.spaces[&m.hnf]
@@ -332,6 +334,15 @@ impl Newspaces {
     /// Q (degree = dimension of the orbit) of the new characteristic
     /// polynomial of a separating operator, sorted by degree.
     pub fn newform_orbits(&self) -> Result<NewformOrbits, String> {
+        if let Some(o) = self.orbits.lock().unwrap().as_ref() {
+            return Ok(o.clone());
+        }
+        let o = self.compute_newform_orbits()?;
+        *self.orbits.lock().unwrap() = Some(o.clone());
+        Ok(o)
+    }
+
+    fn compute_newform_orbits(&self) -> Result<NewformOrbits, String> {
         let (op, cp) = self.separating_operator()?;
         let factors = if cp.new.len() <= 1 { vec![] } else { sagebrush_poly::factor(&cp.new).1 };
         let orbits: Vec<Vec<BigInt>> = factors.into_iter().map(|(g, e)| {
@@ -405,6 +416,7 @@ pub fn aplists(space: &Space, forms: &[RationalNewform], bound: u64) -> Result<V
     Ok((0..forms.len()).map(|t| primes.iter().zip(&per_prime).map(|(p, v)| (*p, v[t])).collect()).collect())
 }
 
+#[derive(Clone, Debug)]
 pub struct NewformOrbits {
     /// The separating operator used.
     pub op: HeckeOp,

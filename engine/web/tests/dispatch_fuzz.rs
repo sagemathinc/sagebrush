@@ -58,6 +58,15 @@ fn requests() -> Vec<Value> {
         json!({"fn": "quartic_search", "I": "48", "J": "-432", "max_cost": 1000}),
         json!({"fn": "aplist_many", "curves": [[0, -1, 1, -10, -20]], "n": 30}),
         json!({"fn": "moments", "a": [0, -1, 1, -10, -20], "n": 30, "kmax": 2}),
+        json!({"fn": "hmf_ideal", "gens": [[31, 0], [-13, 1]]}),
+        json!({"fn": "hmf_primes", "bound": 30}),
+        json!({"fn": "hmf_dimension", "level": [[-2, 5]]}),
+        json!({"fn": "hmf_hecke_matrix", "level": [[-2, 5]], "p": [[2, 0]]}),
+        json!({"fn": "hmf_hecke_rows", "level": [[-2, 5]], "p": [[3, 0]], "rows": [0, 1]}),
+        json!({"fn": "hmf_degeneracy", "level": [[6, 0]], "p": [[2, 0]]}),
+        json!({"fn": "hmf_new_dimension", "level": [[6, 0]]}),
+        json!({"fn": "hmf_newform_orbits", "level": [[-5, 18]]}),
+        json!({"fn": "hmf_rational_newforms", "level": [[-2, 5]], "bound": 30}),
     ]
 }
 
