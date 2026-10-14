@@ -47,11 +47,12 @@ const SETUP = `(async () => {
   await m.mounted.destroy();
   window.__m = m;
   window.fake = (d, delay) => {
-    const r = { doc: d && JSON.parse(JSON.stringify(d)), delay, offline: false, calls: [], fs: new Set() };
+    const r = { doc: d && JSON.parse(JSON.stringify(d)), delay, offline: false, calls: [], fs: new Set(), cas: true };
     r.wait = () => new Promise((ok, no) => setTimeout(() => (r.offline ? no(new Error("offline")) : ok()), r.delay));
     r.hash = async () => { r.calls.push("hash"); await r.wait(); return r.doc ? m.docHash(r.doc) : null; };
     r.load = async () => { r.calls.push("load"); await r.wait(); return r.doc && JSON.parse(JSON.stringify(r.doc)); };
-    r.save = async (x) => { r.calls.push("save"); await r.wait(); r.doc = JSON.parse(JSON.stringify(x)); };
+    // (compare-and-swap: only over the document whose hash it is given, as it is when the save is done)
+    r.save = async (x, ifHash) => { r.calls.push("save"); await r.wait(); if (ifHash && (r.doc ? await m.docHash(r.doc) : null) !== ifHash) return false; r.doc = JSON.parse(JSON.stringify(x)); };
     r.subscribe = (f) => { r.fs.add(f); return () => r.fs.delete(f); };
     r.change = (x) => { r.doc = JSON.parse(JSON.stringify(x)); for (const f of r.fs) f(JSON.parse(JSON.stringify(x))); };
     return r;

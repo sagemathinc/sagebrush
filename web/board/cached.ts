@@ -27,12 +27,13 @@ export interface RemoteBoard {
   /** The document it has now; null: none yet. */
   load(): Promise<BoardDoc | null>;
   /** Keep the document as it is now; with `ifHash`, only if the document it
-   * has now is that one (its hash): false if it is not.  (A remote that
-   * cannot tell, `cas` not true, saves whatever: the store asks its hash
-   * just before instead.) */
+   * has now is that one (its hash), checked and written as one step: false
+   * if it is not. */
   save(doc: BoardDoc, ifHash?: string): Promise<void | boolean>;
-  /** Whether save(doc, ifHash) is a compare-and-swap. */
-  cas?: boolean;
+  /** save(doc, ifHash) is a compare-and-swap: required (a hash asked just
+   * before a save is not one, CORR-DAF-2); cachedStore refuses a remote
+   * without it. */
+  cas: true;
   /** Its changes made elsewhere (another person, another tab): the document then. */
   subscribe?(f: (doc: BoardDoc) => void): () => void;
 }
@@ -58,10 +59,14 @@ export async function docHash(d: BoardDoc): Promise<string> {
 const req = <T>(r: IDBRequest<T>) => new Promise<T>((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
 
 /** Copies of documents in this browser's IndexedDB (database
- * sagebrush-board-docs), the least recently opened dropped beyond `max`. */
+ * sagebrush-board-docs-2), the least recently opened dropped beyond `max`.
+ * (-2: copies whose pages have ids.  The first database's copies, from
+ * development builds before pages had ids, are never read: one holding
+ * edits the remote has not seen loses them, CORR-DAF-1.  The store has not
+ * shipped with it.) */
 export class IdbDocCache implements DocCache {
   private db: Promise<IDBDatabase> | null = null;
-  constructor(private name = "sagebrush-board-docs", private max = 200) {}
+  constructor(private name = "sagebrush-board-docs-2", private max = 200) {}
   private open() {
     return (this.db ??= new Promise<IDBDatabase>((ok, no) => {
       const r = indexedDB.open(this.name, 1);
@@ -176,10 +181,12 @@ export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc:
 // (CORR-891-2).  Each is matched to the base page (one this side does not
 // have by its id) it shares most with: its items, its title, and each of
 // its other fields (intro, slide, background, tour, template) with the same
-// value.  Only a match that is the one best both ways is taken: a tie, two
-// pages best matched to one, or a page matching none while a base page is
-// left, and which page it is cannot be told: null (the caller keeps ours,
-// and says so, CORR-DB8-3).  Never a guess, by place or otherwise.
+// value.  Only a match that is the one best both ways is taken: the base
+// page is this page's unique best, and this page the base page's unique best
+// among this side's (CORR-DAF-3).  Otherwise (a tie, a page whose best
+// prefers another, or a page matching none while a base page is left) which
+// page it is cannot be told: null (the caller keeps ours, and says so,
+// CORR-DB8-3).  Never a guess, by place or otherwise.
 function aligned(baseRecs: any[], recs: any[], side: string): any[] | null {
   const pagesOf = (rs: any[]) => rs.filter((r) => r.type === "page").sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0));
   const sp = pagesOf(recs).filter((r) => r.anon === true);
@@ -197,17 +204,19 @@ function aligned(baseRecs: any[], recs: any[], side: string): any[] | null {
     for (const [k, v] of fields(p)) if (k in q && same(v, q[k])) n += 0.25;
     return n;
   };
+  const S = sp.map((_, j) => bp.map((_, i) => score(j, i)));
+  // (the one best of a row of scores, -1 for a tie; none above 0: undefined)
+  const unique = (v: number[]) => { const best = Math.max(0, ...v); if (best === 0) return undefined; const at = v.flatMap((x, k) => (x === best ? [k] : [])); return at.length === 1 ? at[0] : -1; };
   const to = new Map<number, number>(), chosen = new Map<number, number>();
   for (let j = 0; j < sp.length; j++) {
-    const scores = bp.map((_, i) => score(j, i)), best = Math.max(0, ...scores);
-    if (best === 0) continue;
-    const at = scores.flatMap((v, i) => (v === best ? [i] : []));
+    const i = unique(S[j]);
+    if (i === undefined) continue;
     // (a tie for its best: which it is cannot be told)
-    if (at.length > 1) return null;
-    // (two pages best matched to one base page: the same)
-    if (chosen.has(at[0])) return null;
-    chosen.set(at[0], j);
-    to.set(j, at[0]);
+    if (i < 0) return null;
+    // (its best base page's best is another page, or a tie: not mutual)
+    if (unique(S.map((row) => row[i])) !== j) return null;
+    chosen.set(i, j);
+    to.set(j, i);
   }
   // (a page matching none while a base page is left: it may be that one)
   if (sp.some((_, j) => !to.has(j)) && bp.some((_, i) => !chosen.has(i))) return null;
@@ -261,7 +270,7 @@ export function identified(d: BoardDoc): BoardDoc {
 }
 
 /** How the store's first load ended, once the remote has answered (or not). */
-export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offline";
+export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offline" | "busy";
 
 /**
  * A BoardStore for `remote`, its copy in `cache` under `key` (see
@@ -275,21 +284,27 @@ export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offl
  * document, a save) is answered by a step of its own, in the order the
  * answers come, so an edit reaches the copy at once, whatever the remote.
  * One save is on its way at a time: whatever the copy holds that the remote
- * has not seen goes next, the copy as it is then; a change made elsewhere
- * while a save is on its way is merged with the copy before it (and goes
- * with the next one, CORR-C06-1).  The documents given the board are given
+ * has not seen goes next, the copy as it is then, saved only over the
+ * remote version the copy is based on (compare-and-swap); a change made
+ * elsewhere while a save is on its way refuses it, and is merged with the
+ * copy, which goes next (CORR-C06-1).  The documents given the board are given
  * one at a time, each once the one before is shown (CORR-C06-3).
  *
  * Pages have ids (CORR-DB8): the copy is always a document whose pages
  * have them.  With no copy, the store opens by migrating: the remote's
  * document, its pages given ids, saved over it only if the remote still has
- * that document (compare-and-swap, or its hash asked again just before);
- * changed meanwhile, from the new one.  Only then does anything else begin.
+ * that document (compare-and-swap); changed meanwhile, from the new one.
+ * Only then does anything else begin.  Still changing after ten tries, the
+ * newest is opened with ids given here, not saved; `synced` says "busy", and
+ * the ids go to the remote with the next save (an edit, a change from
+ * elsewhere merged, or the next open), by compare-and-swap like every save
+ * (CORR-DAF-4).
  * A document from elsewhere that comes later with pages without ids has
  * them given the ids of the pages they are (adopted()); where which page is
  * which cannot be told, ours is kept, and said.
  */
 export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = new IdbDocCache()): BoardStore & { synced: Promise<Synced> } {
+  if (remote.cas !== true) throw new Error("cachedStore: the remote's save must be a compare-and-swap (cas: true)");
   let entry: CachedDoc | null = null;
   // (the remote has answered: edits go to it too)
   let online = false;
@@ -328,14 +343,22 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   }
 
   // The copy, if it holds what the remote has not seen, to the remote: one
-  // save on its way at a time, the next once it is done (from a step)
+  // save on its way at a time, the next once it is done (from a step); only
+  // over the remote version the copy is based on (compare-and-swap: a copy
+  // whose ids the remote has not seen, CORR-DAF-4, never written over a
+  // change made elsewhere).  Refused: the remote is asked again, and its
+  // newer document merged, then pushed.
   let saving = false;
   function push() {
     if (!online || saving || !dirty()) return;
     saving = true;
     const d = parse(entry!.json);
-    remote.save(d).then(
-      async () => { const h = await docHash(d); step(async () => { await sent(d, h); saving = false; push(); }); },
+    remote.save(d, entry!.remoteHash ?? undefined).then(
+      async (ok) => {
+        if (ok === false) { step(async () => { saving = false; ask(); }); return; }
+        const h = await docHash(d);
+        step(async () => { await sent(d, h); saving = false; push(); });
+      },
       (e) => step(async () => { saving = false; console.warn("board: the remote:", e); }),
     );
   }
@@ -414,16 +437,17 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   }
 
   // The remote's document, its pages given ids, saved over it only if it
-  // still has that document (compare-and-swap, or its hash asked just
-  // before); changed meanwhile, from the new one (CORR-DB8-1, -2)
-  async function migrate(): Promise<{ doc: BoardDoc; hash: string } | null> {
+  // still has that document (compare-and-swap); changed meanwhile, from the
+  // new one (CORR-DB8-1, -2).  Ten refused: the newest, its ids given here
+  // only (`busy`, CORR-DAF-4), `hash` the remote's version it is, `at` the
+  // changes heard when it was asked for
+  async function migrate(): Promise<{ doc: BoardDoc; hash: string; busy?: true; at?: number } | null> {
     for (let tries = 0; ; tries++) {
-      const r = await remote.load();
+      const at = heard, r = await remote.load();
       if (!r) return null;
       const R = cleanDoc(r), h = await docHash(R), I = identified(R);
       if (I === R) return { doc: R, hash: h };
-      if (tries >= 10) throw new Error("the board's document kept changing while its pages were given ids");
-      if (!remote.cas && (await remote.hash()) !== h) continue;
+      if (tries >= 10) return { doc: I, hash: h, busy: true, at };
       if ((await remote.save(I, h)) === false) continue;
       return { doc: I, hash: await docHash(I) };
     }
@@ -441,12 +465,22 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
         return { doc: view! };
       }
       // (none, or one from before pages had ids: the remote's, migrated, then open)
-      let got: { doc: BoardDoc; hash: string } | null;
+      let got: Awaited<ReturnType<typeof migrate>>;
       try { got = await migrate(); } catch (e) { resolveSynced("offline"); throw e; }
       return step(async () => {
         online = true;
         opened = true;
         if (!got) { resolveSynced("fresh"); return null; }
+        // (busy: the copy holds the ids the remote has not seen, based on its
+        // version given them; they go with the next save, by compare-and-swap)
+        if (got.busy) {
+          await keep(got.doc, got.hash, canonical(got.doc));
+          view = got.doc;
+          resolveSynced("busy");
+          // (a change heard since it was asked for: as any)
+          if (heard !== got.at) ask();
+          return { doc: view };
+        }
         await keep(got.doc, got.hash);
         view = got.doc;
         resolveSynced("fresh");
