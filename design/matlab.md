@@ -53,6 +53,13 @@ cases:
   when it runs: `(x if "x" in globals() else _m.fn("x"))`.
 - **A function named without arguments is called,** as MATLAB does
   (`rand`, `pi`). A handle is a value.
+- **A global variable** is one value shared by every workspace that
+  declares it (`_m.global_get`, `_m.global_set`). Each use reads it from
+  that registry at that point, since any call, even earlier in the same
+  expression, may have changed it; an anonymous function keeps the value
+  it had when the function was made. An indexed, field or cell assignment
+  evaluates its index and value first, then starts from the registry's
+  value at that point; each assignment writes it back.
 
 **Calls** pass `nargout`, as MATLAB does: the number of outputs the caller
 wants. It is 0 for a statement, 1 in an expression, and n in
