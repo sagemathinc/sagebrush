@@ -615,7 +615,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     notice = "";
     const prev = doc, g = loadGen;
     // (not drawn, the board destroyed meanwhile: the edit is still saved; another board loaded: not)
-    if (!(await show(d))) { if (destroyed && g === loadGen) host.store?.save(cleanDoc(d)); return; }
+    if (!(await show(d))) {
+      if (destroyed && g === loadGen) {
+        // (and a version of it: recorded before the history is closed, CORR-54B-2)
+        const kept = cleanDoc(d);
+        host.store?.save(kept);
+        if (!remembered && prev && prev !== replaced) toRecord.push(prev);
+        remembered = true;
+        toRecord.push(kept);
+      }
+      return;
+    }
     // (the document as shown: its pictures' bytes are kept apart, by the host's images)
     host.store?.save(doc!);
     remember(prev);
@@ -1393,8 +1403,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // (the versions waiting, recorded first, CORR-CA3-3)
       cancelAnimationFrame(recordFrame);
       if (toRecord.length) await recordNow().catch((e) => console.warn("board: TimeTravel:", e));
+      // (and the history closed, one still opening too, once it is: not the
+      // board's, nor listened to, CORR-54B-1)
       historyShut = true;
-      boardHistory?.close?.();
+      const last = historyReady;
+      historyGen++;
+      historyReady = null;
+      boardHistory = null;
+      last?.then((h) => h?.close?.(), () => {});
       cancelAnimationFrame(relayoutFrame);
       clearTimeout(idle);
       presenting = null;
