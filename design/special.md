@@ -1,8 +1,8 @@
 # Special functions
 
 lib/_special.py is the numerical core of Sagebrush's special functions.
-MATLAB's special functions, Sagebrush's scipy.special and Sage are to use
-it. It is plain Python with numpy and math, in double
+MATLAB's functions (lib/_matlab_special.py) use it, and so will Sagebrush's
+scipy.special and Sage. It is plain Python with numpy and math, in double
 precision, with no MATLAB types:
 
 - every function works elementwise on scalars or numpy arrays (broadcast),
@@ -12,7 +12,8 @@ precision, with no MATLAB types:
   available yet" from "invalid") where the function has a value that
   Sagebrush does not compute; and `ValueError` where it has none. It never
   guesses. A NaN argument gives NaN; an infinite one gives the limit a
-  docstring states, or a refusal;
+  docstring states, or a refusal. The MATLAB wrappers turn a pole into
+  MATLAB's Inf, and anything else into an error;
 - each docstring gives the method's source (a section of the NIST Digital
   Library of Mathematical Functions, DLMF, or a paper), the domain, and the
   largest error found against mpmath, including where the error grows.
@@ -45,6 +46,8 @@ follow the functions' own condition numbers or the method's: for complex s,
 zeta's and hurwitz_zeta's absolute error grows with |Im s| (about
 8 |Im s| eps of max(1, |zeta|), from the rounding of the phases Im s log k),
 the error functions' with |z|^2, and E1's and Ei's with |x|.
+matlab-tests/test_special.m checks the MATLAB functions against GNU Octave,
+to 10 digits, on the examples from their documentation pages and more.
 
 ## Not yet
 
