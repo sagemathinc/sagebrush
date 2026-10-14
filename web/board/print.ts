@@ -3,7 +3,7 @@
 // selectable, their math KaTeX's, both vector in a PDF); groups and edges,
 // which the screen draws on a canvas, are SVG here, so nothing is a bitmap.
 
-import { INK, farLabel, plainTitle, type Board, type Item, type Edge } from "./board";
+import { INK, farLabel, plainTitle, type Backdrop, type Board, type Item, type Edge } from "./board";
 import { inkPath } from "./ink";
 
 export interface Sheet {
@@ -16,6 +16,8 @@ export interface Sheet {
   caption?: string;
   /** a line in the corner: "2 / 7" */
   folio?: string;
+  /** the page's slide and background (board.ts Backdrop) */
+  backdrop?: Backdrop;
 }
 
 export interface PrintOptions {
@@ -149,6 +151,24 @@ export async function printSheets(board: Board, sheets: Sheet[], o: PrintOptions
       world.className = "pr-world";
       world.style.transform = `scale(${k}) translate(${-v.x0}px, ${-v.y0}px)`;
       world.innerHTML = backSvg(s.items, s.edges, v);
+      // (the page's backdrop under all: the slide's card, the background's color, a picture on the card;
+      // made as elements, their styles set as properties: nothing of the document is markup)
+      const bd = s.backdrop;
+      if (bd) {
+        const r = bd.slide ?? { x: v.x0, y: v.y0, w: v.x1 - v.x0, h: v.y1 - v.y0 };
+        const layer = (style: (st: CSSStyleDeclaration) => void) => {
+          const el = document.createElement("div");
+          Object.assign(el.style, { position: "absolute", left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
+          style(el.style);
+          return el;
+        };
+        const layers: HTMLElement[] = [];
+        if (bd.slide) layers.push(layer((st) => { st.background = "#fff"; st.boxShadow = "0 1px 6px rgba(0, 0, 0, .18)"; }));
+        if (bd.color) layers.push(layer((st) => { st.backgroundColor = bd.color!; }));
+        const url = bd.slide && bd.image ? board.imageUrl?.(bd.image) : undefined;
+        if (url) layers.push(layer((st) => { st.backgroundImage = `url(${JSON.stringify(url)})`; st.backgroundSize = "cover"; st.backgroundPosition = "center"; }));
+        world.prepend(...layers);
+      }
       // groups (outer first), then notes, then ink over them as on screen
       const shown = s.items.filter((it) => !(it.x > v.x1 || it.x + it.w < v.x0 || it.y > v.y1 || it.y + it.h < v.y0));
       const rank = (it: Item) => (it.kind === "group" ? (it.depth ?? 0) : 1000);

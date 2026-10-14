@@ -217,6 +217,8 @@ export class Images {
       };
       walk(d.nodes);
       for (const p of d.pages ?? []) walk(p.nodes);
+      // (and the pages' backgrounds)
+      for (const p of [d, ...(d.pages ?? [])]) if (p.background?.image && rename.has(p.background.image)) p.background.image = rename.get(p.background.image);
     }
     return true;
   }

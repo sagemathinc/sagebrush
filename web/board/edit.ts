@@ -8,8 +8,8 @@
 // have (x and y), so nothing else moves; "Tidy" forgets them all.
 
 import { effect, signal } from "@preact/signals-core";
-import type { Board, Item } from "./board";
-import type { BoardDoc, BoardPage, DocEdge, DocGroup, DocNode, DocNote } from "./doc";
+import { INK, type Board, type InkStyle, type Item } from "./board";
+import { inkNode, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
 
@@ -50,11 +50,21 @@ export class Editor {
   readonly connecting = signal(false);
   /** the Select tool: a drag on the background draws a rectangle selecting what it holds (no shift needed; Space-drag pans) */
   readonly selecting = signal(false);
+  /** the Draw tool: a drag draws a stroke, in the pen's style (the pen row: pen.ts; Space-drag pans) */
+  readonly drawing = signal(false);
+  /** the Erase tool: a drag removes the strokes it goes across (one undo brings them all back) */
+  readonly erasing = signal(false);
+  /** the pen's style (the pen row's) */
+  penStyle: () => InkStyle = () => ({ size: 3, color: INK });
   private connectFrom: string | null = null;
   private space = false;
   get on() { return this.editing.value; }
   /** whether items are selected in Edit (the arrow keys then move them) */
   get hasSelection() { return this.on && this.selected.length > 0; }
+  /** whether Esc is the editor's now: a tool on, something selected, an edge's panel open (else it is the page's: the whole board) */
+  get escapes() {
+    return this.on && (this.edgeSel !== null || this.selected.length > 0 || !!this.panel || this.drawing.value || this.erasing.value || this.connecting.value || this.selecting.value);
+  }
   private undos: string[] = [];
   private redos: string[] = [];
   private selected: string[] = [];
@@ -95,6 +105,15 @@ export class Editor {
       return true;
     };
     board.onBackgroundDown = (e) => this.backgroundDown(e);
+    // drawing and erasing: the board follows the pointer (board.ts); a
+    // stroke drawn goes at the page's top level, over what is there
+    board.pen = () => (this.on && this.drawing.value && !this.space && !this.panel ? this.penStyle() : null);
+    board.eraser = () => this.on && this.erasing.value && !this.space && !this.panel;
+    board.onStroke = (points, style) => {
+      if (!points.length) return;
+      this.commit((d) => { (this.pg(d).nodes ??= []).push(inkNode("s" + Math.random().toString(36).slice(2, 8), points, style)); });
+    };
+    board.onErase = (gone) => { this.commit((d) => { for (const id of gone) remove(this.pg(d), id); }); };
     // (the resize handle's cursor)
     board.el.addEventListener("pointermove", (e) => {
       const at = this.on && !this.panel && e.pointerType === "mouse" && this.atHandle(e);
@@ -112,11 +131,18 @@ export class Editor {
     }), effect(() => {
       this.board.el.classList.toggle("connecting", this.connecting.value);
       if (!this.connecting.value && this.connectFrom) { this.connectFrom = null; this.select(null); }
-      if (this.connecting.value) this.selecting.value = false;
+      if (this.connecting.value) { this.selecting.value = false; this.drawing.value = false; this.erasing.value = false; }
     }), effect(() => {
       this.board.el.classList.toggle("selecting", this.selecting.value);
-      if (this.selecting.value) this.connecting.value = false;
-    }), effect(() => { if (!this.editing.value) this.selecting.value = false; }));
+      if (this.selecting.value) { this.connecting.value = false; this.drawing.value = false; this.erasing.value = false; }
+    }), effect(() => {
+      // (one tool at a time: drawing, nothing selected nor being written)
+      this.board.el.classList.toggle("drawing", this.drawing.value);
+      if (this.drawing.value) { this.connecting.value = false; this.selecting.value = false; this.erasing.value = false; this.select(null); this.close(); }
+    }), effect(() => {
+      this.board.el.classList.toggle("erasing", this.erasing.value);
+      if (this.erasing.value) { this.connecting.value = false; this.selecting.value = false; this.drawing.value = false; this.select(null); this.close(); }
+    }), effect(() => { if (!this.editing.value) { this.selecting.value = false; this.drawing.value = false; this.erasing.value = false; } }));
     // (Space held: a drag pans, whatever the tool)
     this.listen(window, "keydown", (e) => { if (e.key === " " && !this.typing() && this.isActive()) this.space = true; });
     this.listen(window, "keyup", (e) => { if (e.key === " ") this.space = false; });
@@ -816,6 +842,7 @@ export class Editor {
     else if (mod && e.key.toLowerCase() === "d" && this.selected.length) { const t = this.copied(); if (t) this.insert(t); }
     else if (mod && e.key.toLowerCase() === "a") this.select(this.board.itemsIn(-1e9, -1e9, 1e9, 1e9).filter((it) => !it.parent).map((it) => it.id));
     else if (e.key.startsWith("Arrow") && this.selected.length) { const k = e.shiftKey ? 10 : 1; this.nudge(e.key === "ArrowLeft" ? -k : e.key === "ArrowRight" ? k : 0, e.key === "ArrowUp" ? -k : e.key === "ArrowDown" ? k : 0); }
+    else if (e.key === "Escape" && (this.drawing.value || this.erasing.value)) { this.drawing.value = false; this.erasing.value = false; }
     else if (e.key === "Escape" && this.connecting.value) this.connecting.value = false;
     else if (e.key === "Escape" && this.selecting.value && !this.selected.length) this.selecting.value = false;
     else if (e.key === "Escape" && this.selected.length) this.select(null);

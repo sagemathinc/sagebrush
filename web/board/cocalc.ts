@@ -17,14 +17,19 @@
 //
 // Notes, texts and code cells become notes (code with its code; a Sage
 // kernel makes the board Sage), at their places and widths (their heights
-// follow their text); frames become groups holding what is inside them
-// (frames within frames, groups within groups); edges become edges.  The
-// rest has nothing like it on a board yet (pen strokes, icons, timers,
-// stopwatches, chats, terminals, speaker notes, slides' backgrounds): it is
-// left out, and counted, so the person is told what was.  Outputs are not
+// follow their text); pen strokes become strokes (their paths, from the
+// element's corner, as wide as CoCalc drew them, 2 radius; their color; a
+// highlighter's opacity; CoCalc's chisel nib, round); frames become groups
+// holding what is inside them (frames within frames, groups within groups);
+// edges become edges; a slides file's pages are slides (CoCalc's card, 16:9,
+// where it was: slides-editor/fixed-elements.ts, or a page's own).  The rest
+// has nothing like it on a board yet (icons, timers, stopwatches, chats,
+// terminals, speaker notes): it is left out, and counted, so the person is
+// told what was.  Outputs are not
 // kept: a board's code runs when it is opened.
 
-import type { BoardDoc, BoardPage, DocEdge, DocNote } from "./doc";
+import { inkNode, inkSize, type BoardDoc, type BoardPage, type DocEdge, type DocInk, type DocNote } from "./doc";
+import { simplifyInk } from "./ink";
 import { nest } from "./nest";
 
 const TYPES = new Set(["chat", "code", "edge", "frame", "icon", "note", "page", "pen", "selection", "slide", "stopwatch", "terminal", "text", "timer", "speaker_notes"]);
@@ -54,8 +59,11 @@ export interface Converted {
 
 const num = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 10) / 10 : d);
 
-/** A CoCalc whiteboard or slides file as a Sagebrush board. */
-export function fromCocalcBoard(text: string): Converted {
+// CoCalc's slide: a card of this size, at this place, on every page of a slides file
+const CARD = { x: (-3 * 197) / 2, y: -492, w: 3 * 350, h: 3 * 197 };
+
+/** A CoCalc whiteboard or slides file (`slides`: its pages are slides) as a Sagebrush board. */
+export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Converted {
   const els: El[] = [];
   for (const l of lines(text)) {
     try { const e = JSON.parse(l); if (element(e)) els.push(e); } catch { /* (a line that is not an element: CoCalc skips it too) */ }
@@ -77,13 +85,28 @@ export function fromCocalcBoard(text: string): Converted {
   }
   const markdown = (s: unknown) => (typeof s === "string" ? (legacy ? s.replace(/\\([()[\]])/g, "$1") : s) : "");
 
-  const pages = Array.from({ length: count }, () => ({ items: [] as El[], frames: [] as El[], edges: [] as El[] }));
+  // a pen stroke: its path (from the element's corner) on the board, its width, color, opacity
+  const stroke = (e: El): DocInk | null => {
+    const path: unknown[] = Array.isArray(e.data?.path) ? e.data.path : [], pts: number[] = [];
+    for (let i = 0; i + 1 < path.length; i += 2) {
+      const x = path[i], y = path[i + 1];
+      if (typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y)) pts.push(num(e.x) + x, num(e.y) + y, 0.5);
+    }
+    if (!pts.length) return null;
+    const r = typeof e.data?.radius === "number" && e.data.radius > 0 ? Math.min(100, e.data.radius) : 1;
+    const opacity = typeof e.data?.opacity === "number" && e.data.opacity > 0 && e.data.opacity < 1 ? e.data.opacity : undefined;
+    return inkNode(e.id, simplifyInk(pts, 0.2), { size: 2 * r, color: typeof e.data?.color === "string" ? e.data.color : undefined, opacity });
+  };
+  const pages = Array.from({ length: count }, () => ({ items: [] as El[], frames: [] as El[], edges: [] as El[], slide: null as El | null }));
+  const strokes = new Map<string, DocInk>();
   let sage = false;
   for (const e of els) {
     if (e.type === "page" || e.type === "selection") continue; // (a page is made below; a selection is not content)
     if (e.invisible && e.type !== "speaker_notes") { leave(e.type); continue; }
     const p = pages[Math.min(count - 1, pageOf(e))];
     if (e.type === "note" || e.type === "text" || e.type === "code") p.items.push(e);
+    else if (e.type === "slide") p.slide = e;
+    else if (e.type === "pen") { const s = stroke(e); if (s) { strokes.set(e.id, s); p.items.push(e); } else leave("pen"); }
     else if (e.type === "frame") p.frames.push(e);
     else if (e.type === "edge") p.edges.push(e);
     else leave(e.type);
@@ -99,13 +122,14 @@ export function fromCocalcBoard(text: string): Converted {
     return { id: e.id, text: markdown(e.str), ...(e.type === "note" ? { color: typeof e.data?.color === "string" ? e.data.color : NOTE_COLOR } : {}), w };
   };
 
-  const converted = pages.map(({ items, frames, edges }): BoardPage => {
+  const converted = pages.map(({ items, frames, edges, slide }): BoardPage => {
     // (each frame a group holding what is inside it, each note where it was: nest.ts)
-    const boxed = (e: El) => ({ ...box(e), id: e.id, z: num(e.z), e });
+    // (a stroke's box: its points and its width around them)
+    const boxed = (e: El) => { const s = strokes.get(e.id); return { ...(s ? { x: s.x, y: s.y, ...inkSize(s) } : box(e)), id: e.id, z: num(e.z), e }; };
     const nodes = nest(frames.map(boxed), items.map(boxed), ({ e }) => {
       const title = typeof e.str === "string" ? e.str.trim() : "";
       return { id: e.id, ...(title ? { title } : {}) };
-    }, ({ e }) => note(e));
+    }, ({ e }) => strokes.get(e.id) ?? note(e));
     const ids = new Set([...items, ...frames].map((e) => e.id));
     const es: DocEdge[] = [];
     for (const e of edges) {
@@ -113,11 +137,14 @@ export function fromCocalcBoard(text: string): Converted {
       if (typeof from === "string" && typeof to === "string" && ids.has(from) && ids.has(to)) es.push({ from, to });
       else leave("edge");
     }
-    return { nodes, edges: es };
+    // (a slide: the page's own card, or CoCalc's)
+    const sized = slide && typeof slide.w === "number" && slide.w > 0 && typeof slide.h === "number" && slide.h > 0;
+    const card = sized ? box(slide!) : o.slides || slide ? CARD : null;
+    return { ...(card ? { slide: card } : {}), nodes, edges: es };
   });
 
   const doc: BoardDoc = count === 1
-    ? { ...(sage ? { mode: "sage" as const } : {}), nodes: converted[0].nodes, edges: converted[0].edges }
+    ? { ...(sage ? { mode: "sage" as const } : {}), ...(converted[0].slide ? { slide: converted[0].slide } : {}), nodes: converted[0].nodes, edges: converted[0].edges }
     : { ...(sage ? { mode: "sage" as const } : {}), pages: converted.map((p, i) => ({ title: `Page ${i + 1}`, ...p })) };
   return { doc, left };
 }

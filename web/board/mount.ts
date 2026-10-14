@@ -39,6 +39,7 @@ import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, c
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import { Toolbar, defaultTools } from "./toolbar";
+import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
@@ -221,6 +222,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     board.setItems(items, edges);
+    // (the page's slide and background)
+    board.backdrop = v.slide || v.background ? { slide: v.slide, ...v.background } : null;
     toolbar.tools.value = d.tools ?? defaultTools();
     shownPage = pageIx;
     const gen = ++routingGen;
@@ -409,7 +412,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (editor.on && e.key === " ") return;
     if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
     else if (e.key === "ArrowLeft") step(at - 1);
-    else if (e.key === "Escape" || e.key === "0") step(-1);
+    // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
+    else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") step(-1);
     else if (e.key === "PageDown") page(pageIx + 1);
     else if (e.key === "PageUp") page(pageIx - 1);
     else if (e.key === "+" || e.key === "=") board.zoomAt(1.25, board.el.clientWidth / 2, board.el.clientHeight / 2);
@@ -488,11 +492,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     { id: "image", label: "Image", icon: "▨", title: "Add pictures (or paste one, or drop files on the board)", run: () => pickImages() },
     { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
     { id: "connect", label: "Connect", icon: "⤳", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
+    { id: "draw", label: "Draw", icon: "✎", title: "Draw: drag to draw (a pen's pressure counts; once a pen has drawn, a finger pans); Esc to stop", toggle: editor.drawing },
+    { id: "erase", label: "Erase", icon: "⌫", title: "Erase: drag across strokes to remove them; Esc to stop", toggle: editor.erasing },
     { id: "page", label: "Page", icon: "⧉", title: "Add a page after this one", run: () => $("addpage").click() },
     { id: "undo", label: "↶", icon: "↶", title: "Undo (Ctrl+Z)", run: () => editor.undo() },
     { id: "redo", label: "↷", icon: "↷", title: "Redo (Ctrl+Shift+Z)", run: () => editor.redo() },
   // (which tools a board shows is a setting, not an edit to undo)
   ], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }, false, false));
+  // the pen row: the pen's color and width, a highlighter, the eraser (pen.ts)
+  const pen = new PenRow(root, editor.drawing, editor.erasing, () => toolbar.el);
+  editor.penStyle = () => pen.style();
   // pictures chosen from files (or the camera, on a phone), added in the middle of the view
   function pickImages() {
     const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp", multiple: true });
@@ -535,7 +544,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("pgnext").onclick = () => page(pageIx + 1);
   ($("pgsel") as HTMLSelectElement).onchange = (e) => { page(Number((e.target as HTMLSelectElement).value)); (e.target as HTMLElement).blur(); };
   // a document's own nodes, edges and tour become its first page
-  const PAGE_KEYS = ["intro", "layout", "columns", "direction", "nodes", "edges", "steps"] as const;
+  const PAGE_KEYS = ["intro", "layout", "columns", "direction", "slide", "background", "nodes", "edges", "steps"] as const;
   function paged(d: BoardDoc): BoardPage[] {
     if (!d.pages?.length) {
       const p: any = { title: "Page 1" };
@@ -718,10 +727,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         return { x0: Math.min(...its.map((it) => it.x)), y0: Math.min(...its.map((it) => it.y)), x1: Math.max(...its.map((it) => it.x + it.w)), y1: Math.max(...its.map((it) => it.y + it.h)) };
       };
       const title = d.pages?.length ? [d.title, pageOf(d, i).title || `Page ${i + 1}`].filter(Boolean).join(" — ") : d.title;
+      // (a slide: its sheet is its card; and its backdrop under it all)
+      const backdrop = v.slide || v.background ? { slide: v.slide, ...v.background } : undefined;
+      const whole = v.slide ? { x0: v.slide.x, y0: v.slide.y, x1: v.slide.x + v.slide.w, y1: v.slide.y + v.slide.h } : box();
       const where = n > 1 ? `page ${i + 1} of ${n}` : "";
       const ss = mode === "tour" ? v.steps ?? [] : [];
-      if (!ss.length || v.intro) out.push({ items, edges, box: box(), title, caption: mode === "tour" ? v.intro : undefined, folio: where });
-      ss.forEach((s, k) => out.push({ items, edges, box: box(typeof s.focus === "string" ? [s.focus] : s.focus), title, caption: s.say, folio: [where, `step ${k + 1} of ${ss.length}`].filter(Boolean).join(", ") }));
+      if (!ss.length || v.intro) out.push({ items, edges, box: whole, title, caption: mode === "tour" ? v.intro : undefined, folio: where, backdrop });
+      ss.forEach((s, k) => out.push({ items, edges, box: box(typeof s.focus === "string" ? [s.focus] : s.focus), title, caption: s.say, folio: [where, `step ${k + 1} of ${ss.length}`].filter(Boolean).join(", "), backdrop }));
     }
     return out;
   }
@@ -870,6 +882,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       await editor.destroy();
       for (const f of offs.splice(0)) f();
       toolbar.destroy();
+      pen.destroy();
       code?.close();
       code = null;
       boardHistory?.close?.();

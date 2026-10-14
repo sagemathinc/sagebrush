@@ -43,10 +43,10 @@ const open = async (name, text) => {
 };
 const jsonl = (els) => els.map((e) => JSON.stringify(e)).join("\n") + "\n";
 
-// a current CoCalc board: two pages; on the first, a frame holding a note
-// and a frame holding a code cell; texts, math, an edge, and things a board
-// has nothing like (a pen stroke, a timer, an icon, an edge to the stroke,
-// a hidden note), a selection (not content), speaker notes
+// a current CoCalc board: two pages; on the first, a frame holding a note,
+// a highlighter's stroke and a frame holding a code cell; texts, math, an
+// edge, a pen stroke and an edge to it, and things a board has nothing like
+// (a timer, an icon, a hidden note), a selection (not content), speaker notes
 const CURRENT = jsonl([
   { id: "p1", type: "page", z: 0, data: { pos: 0, schemaVersion: 1 } },
   { id: "p2", type: "page", z: 0, data: { pos: 1, schemaVersion: 1 } },
@@ -59,6 +59,7 @@ const CURRENT = jsonl([
   { id: "e1", type: "edge", x: 0, y: 0, w: 0, h: 0, z: 7, page: "p1", data: { from: "n1", to: "t1" } },
   { id: "pen1", type: "pen", x: 0, y: 0, w: 10, h: 10, z: 8, page: "p1", data: { path: [0, 0, 5, 5, 10, 10], color: "#000" } },
   { id: "e2", type: "edge", x: 0, y: 0, w: 0, h: 0, z: 9, page: "p1", data: { from: "n1", to: "pen1" } },
+  { id: "pen2", type: "pen", x: 300, y: 500, w: 200, h: 40, z: 14, page: "p1", data: { path: [0, 0, 50, 20, 100, 40, 150, 20, 200, 0], color: "#c0392b", radius: 3, opacity: 0.4, nib: "chisel" } },
   { id: "tm", type: "timer", x: 0, y: 0, w: 100, h: 50, z: 10, page: "p1", data: { countdown: 60 } },
   { id: "ic", type: "icon", x: 0, y: 0, w: 50, h: 50, z: 11, page: "p1", data: { icon: "star" } },
   { id: "hid", type: "note", x: 0, y: 0, w: 50, h: 50, z: 12, page: "p1", str: "hidden", invisible: true },
@@ -92,11 +93,16 @@ try {
   check(c1?.code === "print(2^10)" && c1.hideCode === true && !("output" in c1), "a code cell: its code, its input hidden, no outputs: " + JSON.stringify(c1));
   const t1 = p1.nodes.find((x) => x.id === "t1"), n2 = p1.nodes.find((x) => x.id === "n2");
   check(t1?.text === "# Plain text" && !t1.color && n2?.color === "#fff9c4", "a text is a note without a color; a note without one has CoCalc's");
-  check(JSON.stringify(p1.edges) === JSON.stringify([{ from: "n1", to: "t1" }]), "the edge between two notes is kept, the one to a pen stroke is not: " + JSON.stringify(p1.edges));
-  check(!JSON.stringify(d).includes("pen1") && !JSON.stringify(d).includes("hidden") && !JSON.stringify(d).includes("sel"), "nothing of what was left out is in the board");
+  check(JSON.stringify(p1.edges) === JSON.stringify([{ from: "n1", to: "t1" }, { from: "n1", to: "pen1" }]), "the edges are kept, the one to a pen stroke too: " + JSON.stringify(p1.edges));
+  check(!JSON.stringify(d).includes("hidden") && !JSON.stringify(d).includes('"sel"'), "nothing of what was left out is in the board");
+  // pen strokes: strokes, as wide as CoCalc drew them (2 radius), their color, a highlighter's opacity, in their frame's group
+  const pen1 = p1.nodes.find((x) => x.id === "pen1"), pen2 = f1?.children?.find((x) => x.id === "pen2");
+  check(pen1?.kind === "ink" && pen1.size === 2 && pen1.color === "#000" && pen2?.kind === "ink" && pen2.size === 6 && pen2.color === "#c0392b" && pen2.opacity === 0.4, "pen strokes are strokes: their width (2 radius), color, a highlighter's opacity, in their frame's group: " + JSON.stringify([pen1, pen2]).slice(0, 300));
+  const at2 = await ev(`(() => { const it = window.board.item("pen2"); return it && [it.x, it.y]; })()`);
+  check(at2 && Math.abs(at2[0] + pen2.points[0] - 300) < 1 && Math.abs(at2[1] + pen2.points[1] - 500) < 1, "...each where it was on CoCalc's board: its first point at " + JSON.stringify(at2 && [at2[0] + pen2.points[0], at2[1] + pen2.points[1]]));
   check(d.pages[1].nodes.map((x) => x.id).join() === "n3", "the second page has its note");
   const said = await ev("document.querySelector('[data-sbb=say]').textContent");
-  check(!(await ev("document.querySelector('[data-sbb=tour]').hidden")) && /Converted from a CoCalc whiteboard file/.test(said) && /1 pen stroke/.test(said) && /1 timer/.test(said) && /1 icon/.test(said) && /1 connection to something left out/.test(said) && /1 hidden note/.test(said) && /speaker notes/.test(said) && !/selection/.test(said), "the caption says it was converted, and what was left out: " + said);
+  check(!(await ev("document.querySelector('[data-sbb=tour]').hidden")) && /Converted from a CoCalc whiteboard file/.test(said) && !/pen stroke/.test(said) && /1 timer/.test(said) && /1 icon/.test(said) && !/connection/.test(said) && /1 hidden note/.test(said) && /speaker notes/.test(said) && !/selection/.test(said), "the caption says it was converted, and what was left out: " + said);
   // shown where they were: a member of a group at its place on CoCalc's board
   await until(`!!window.board.item("n1") && !!window.board.item("c1")`, 5000);
   const at = await ev(`["n1", "c1", "t1", "f1"].map((id) => { const it = window.board.item(id); return it && [id, Math.round(it.x), Math.round(it.y), it.parent ?? ""]; })`);
@@ -113,6 +119,20 @@ try {
   d = await docOf();
   check(d.pages?.length === 2 && d.pages[0].nodes[0]?.text === "Old (not math) and [brackets]" && d.pages[1].nodes[0]?.text === "Page two", "an old board: its pages by number, \\( \\[ unescaped: " + JSON.stringify(d.pages?.map((p) => p.nodes.map((x) => x.text))));
   check(/Converted from a CoCalc whiteboard file\.$/.test((await ev("document.querySelector('[data-sbb=say]').textContent")).trim()), "nothing left out: the caption says only that it was converted");
+  check(!d.pages.some((p) => p.slide) && !(await docOf()).slide, "a whiteboard's pages are not slides");
+  // a slides file: its pages are slides, on CoCalc's card (or a page's own, when it has one)
+  await open("deck.slides", jsonl([
+    { id: "q1", type: "page", z: 0, data: { pos: 0, schemaVersion: 1 } },
+    { id: "q2", type: "page", z: 0, data: { pos: 1, schemaVersion: 1 } },
+    { id: "q3", type: "page", z: 0, data: { pos: 2, schemaVersion: 1 } },
+    { id: "a1", type: "text", x: -400, y: -400, w: 300, h: 60, z: 1, page: "q1", str: "# A title" },
+    { id: "a2", type: "note", x: -400, y: -300, w: 300, h: 100, z: 2, page: "q2", str: "Second" },
+    { id: "s2", type: "slide", x: -600, y: -500, w: 1200, h: 675, z: 0, page: "q2" },
+  ]));
+  d = await docOf();
+  const said2 = await ev("document.querySelector('[data-sbb=say]').textContent");
+  check(JSON.stringify(d.pages?.[0]?.slide) === JSON.stringify({ x: -295.5, y: -492, w: 1050, h: 591 }) && JSON.stringify(d.pages?.[1]?.slide) === JSON.stringify({ x: -600, y: -500, w: 1200, h: 675 }) && JSON.stringify(d.pages?.[2]?.slide) === JSON.stringify({ x: -295.5, y: -492, w: 1050, h: 591 }), "a slides file's pages are slides: CoCalc's card (an empty page too), or the page's own: " + JSON.stringify(d.pages?.map((p) => p.slide)));
+  check(/Converted from a CoCalc slides file/.test(said2) && !/Left out/.test(said2), "...and the caption leaves nothing out: " + said2);
   // a one-line JSON board is still a board, not taken for CoCalc's
   await open("one.json", JSON.stringify({ title: "One line", nodes: [{ id: "solo", title: "Solo" }] }));
   d = await docOf();

@@ -42,7 +42,7 @@ export function boardFromText(text: string, name?: string, note?: (md: string) =
   const titled = (d: BoardDoc) => { if (!d.title && name) d.title = name.replace(/\.[^.]*$/, ""); return d; };
   // (a CoCalc whiteboard or slides file: JSON lines of its elements, cocalc.ts)
   if (isCocalcBoard(t)) {
-    const c = fromCocalcBoard(t), l = leftOut(c.left);
+    const c = fromCocalcBoard(t, { slides: /\.slides$/i.test(name ?? "") }), l = leftOut(c.left);
     note?.(`Converted from a CoCalc ${/\.slides$/i.test(name ?? "") ? "slides" : "whiteboard"} file.` + (l ? ` Left out, as a board has nothing like them yet: ${l}.` : ""));
     return titled(c.doc);
   }

@@ -465,7 +465,7 @@ try {
       // a note added, then cancelled; choosing this board's tools
       check(await ev("!document.querySelector('.board-toolbar').hidden"), "the toolbar shows in Edit");
       const tools = () => ev("[...document.querySelectorAll('.board-toolbar [data-tool]')].map((b) => b.dataset.tool).join()");
-      check((await tools()) === "note,code,image,group,connect", `the default tools: ${await tools()}`);
+      check((await tools()) === "note,code,image,group,connect,draw", `the default tools: ${await tools()}`);
       await ev("window.board.focus(['b', 'c'], true)");
       await sleep(300);
       await ev("document.querySelector('.board-toolbar [data-tool=connect]').click(), 1");
@@ -491,11 +491,11 @@ try {
       check(await ev("document.querySelectorAll('.board-toolbar-panel .tb-use').length >= 8"), "⋯ lists every tool");
       await ev("(() => { const b = document.querySelector('.board-toolbar-panel input[data-tool=group]'); b.checked = false; b.dispatchEvent(new Event('change')); })()");
       await sleep(400);
-      check(JSON.stringify((await docOf()).tools) === '["note","code","image","connect"]' && (await tools()) === "note,code,image,connect", `the board's tools without Group: ${JSON.stringify((await docOf()).tools)}, shown ${await tools()}`);
+      check(JSON.stringify((await docOf()).tools) === '["note","code","image","connect","draw"]' && (await tools()) === "note,code,image,connect,draw", `the board's tools without Group: ${JSON.stringify((await docOf()).tools)}, shown ${await tools()}`);
       // (which tools a board shows is a setting: undo leaves it)
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
       await sleep(400);
-      check((await tools()) === "note,code,image,connect", `undo changed the toolbar: ${await tools()}`);
+      check((await tools()) === "note,code,image,connect,draw", `undo changed the toolbar: ${await tools()}`);
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true }))");
       await sleep(400);
       // (a tool used from the menu: Select, not on the toolbar, shows its icon on ⋯; a plain drag on the background selects)
