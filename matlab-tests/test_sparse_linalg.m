@@ -49,6 +49,22 @@ show(istril(S)); show(istriu(triu(S))); show(bandwidth(S, 'lower')); show(bandwi
 show(isbanded(S, 2, 3)); show(isbanded(S, 1, 3)); show(ishermitian(sparse([1 2i; -2i 1])));
 show(issymmetric([1 2; 2 1])); show(istril([1 0; 2 3])); show(bandwidth([1 2 0; 0 1 2; 0 0 1], 'upper'));
 
+% nzmax's reservation lasts through assignment (and grows past it)
+A = spalloc(4, 4, 6); n1 = nzmax(A); A(2, 3) = 7; n2 = nzmax(A); A(1, 1) = 0; n3 = nzmax(A); A(1:3, 1:3) = 1;
+show([n1 n2 n3 nzmax(A)]);
+% skew modes
+show([ishermitian(sparse([0 1; -1 0])), ishermitian(sparse([0 1; -1 0]), 'skew'), ishermitian(sparse([0 1i; 1i 0]), 'skew'), issymmetric(sparse([0 1; -1 0]), 'skew')]);
+% a density outside [0, 1] is refused
+for d = [-0.1 1.1]
+  try
+    sprand(2, 2, d);
+    disp('accepted');
+  catch
+    disp('refused');
+  end
+end
+show(r(condest(sparse([4 1; 1 3]))));
+
 function sp(x)
 fprintf('sparse=%d ', issparse(x));
 show(full(x));

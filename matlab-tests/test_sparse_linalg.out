@@ -63,3 +63,8 @@ logical 1x1 true
 logical 1x1 true
 logical 1x1 true
 double 1x1 1
+double 1x4 [6 6 6 9]
+logical 1x4 [false true true true]
+refused
+refused
+double 1x1 2.2727272727000001

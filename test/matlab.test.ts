@@ -315,3 +315,24 @@ test(".mat files are untrusted: decompression is bounded, sparse metadata is che
   assert.equal(msg("single.mat"), "single.mat: single 1 2 3.25");
   assert.equal(msg("fine.mat"), "fine.mat: double 1 2 3");
 });
+
+test("sparse: single kept by spdiags and cast-like; 'like', cast, normest and condest never expand; sprandsym's density", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "sparse-"));
+  writeFileSync(join(dir, "s.m"), [
+    "A = sparse(single([1 0; 0 2])); [B, d] = spdiags(A); fprintf('%s %s\\n', class(A), class(B));",
+    "x = sparse(single([1 0 2])); y = cast(x, 'like', sparse(single(1i))); fprintf('%s %d %d\\n', class(y), issparse(y), ~isreal(y));",
+    "y = cast(sparse([1 0 2]), 'like', single(1)); fprintf('%s %d\\n', class(y), issparse(y));",
+    "S = sparse(1e5, 1e5); Z = zeros(2, 2, 'like', S); O = ones(1, 3, 'like', sparse(1i));",
+    "fprintf('%s %d %d %d | %d %d\\n', class(Z), issparse(Z), size(Z), issparse(O), ~isreal(O));",
+    "C = cast(S, 'like', sparse(1)); fprintf('%d %d\\n', issparse(C), nnz(C));",
+    "E = speye(1e5); fprintf('%g %g\\n', normest(E), condest(E));",
+    "[n, c] = normest(sparse(3, 3)); fprintf('%g %g\\n', n, c);",
+    "rng(1); R = sprandsym(1000, 0.2); fprintf('%d %.3f\\n', isequal(R, R'), nnz(R) / 1e6);",
+  ].join("\n"));
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8", timeout: 120000 });
+  assert.deepEqual(out.trim().split("\n"), ["single single", "single 1 1", "single 0", "double 1 2 2 | 1 1", "1 0", "1 1", "0 0", "1 0.200"]);
+});
