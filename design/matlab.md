@@ -191,8 +191,17 @@ from versions 7.0 to 26.1.
   `{'abc'}` and `{3×3 double}`.
 - **Structs** print `x = ` (with a space, as MATLAB writes objects), then
   `  struct with fields:` and the names right-aligned.
-- `format long`, `format compact` and `format short` all work. `disp` prints
-  the same body without the name.
+- **Formats:** `short`, `long` and `compact` work, and so do:
+  - `shortG` and `longG`: `%.5g` in 13 columns, `%.15g` in 26;
+  - `shortE` and `longE`: `%.4e` in 13, `%.15e` in 26;
+  - `bank`: two decimals in 14, a complex number's real part alone;
+  - `hex`: the value's bits, and an integer class's bytes;
+  - `rat`: each element's continued fraction to within 1e-6 of itself,
+    with the numerator right-aligned in 8 and the denominator left-aligned
+    in 7.
+  Integer-valued arrays keep format short's layout under G and E. A
+  single shows 7 decimals under the long formats. `disp` prints the same
+  body without the name.
 
 ## .mat files
 
