@@ -1,0 +1,180 @@
+// Operators on values Magma has no arithmetic for: an error, never a value
+// (Python would repeat, join or count them).  Each statement's error is
+// reported and the session goes on.
+s := 3 * [4, 5];
+t := "xy" * 2;
+u := "xy" + "z";
+v := [6] + [7, 8];
+w := <2, 3> * 3;
+b := false + 2;
+c := [] - 1;
+d := 5 - {@ 1 @};
+e := {* 2, 2 *} * 1/2;
+f := -[9];
+g := -false;
+h := 10 div true;
+k := true mod 3;
+m := 4 / false;
+n := 3 ^ true;
+p := 2 + <"a">;
+q := [[1, 2]] * 2;
+r := 7 + [1/3, 2];
+// eq and ne compare values of one kind only
+3 eq "3";
+"3" ne 3;
+false eq 0;
+[2] eq 2;
+<1> eq [1];
+// op-assignment names its operator, without the types
+x := 11;
+x +:= "a";
+x -:= [2];
+x *:= true;
+x;
+// reductions of strings, booleans and sequences
+&+ ["p", "q"];
+&* [true, false];
+&+ [[1], [2, 3]];
+&and [0, 1];
+&+ ["only"];
+// what Magma does allow
+"ab" * "cd";
+"ab" ^ 3;
+"ab" ^ 0 eq "";
+"ab" ^ -2;
+x := 4;
+x +:= 3;
+x *:= 2;
+x -:= 1/2;
+x;
+-x;
+- -5;
+2 * 3 + 4 - 5;
+(1/3) * 3;
+2^-2;
+1.5 * 2;
+&+ [1, 2, 3];
+&* [1/2, 4];
+&and [true, false];
+"q" eq "q";
+[1, 2] eq [1, 2];
+<1, 2> ne <1, 3>;
+P<t> := PolynomialRing(Integers());
+(t + 1) * (t - 1);
+-t + 2;
+P2<z> := PolynomialRing(Rationals());
+z * [1];
+// unary plus has arithmetic only
++"pq";
++true;
++[3];
++<3>;
++7;
++(2/3);
+// eq across kinds: sets and indexed sets compare, multisets count
+{3} eq {* 3 *};
+{@ 3 @} ne {* 3 *};
+{3} eq {@ 3 @};
+{* 3 *} eq {* 3, 3 *};
+{* 3, 3 *} eq {* 3, 3 *};
+Type(3) eq "RngIntElt";
+Type(3) eq RngIntElt;
+3 eq Integers();
+Integers() eq Rationals();
+<3> eq <3, 4>;
+<3, 4> eq <3, "x">;
+<3, 4> eq <3, 4>;
+3 eq Matrix(Integers(), 1, 1, [3]);
+3 eq Matrix(Integers(), 2, 2, [3, 0, 0, 3]);
+3 eq Matrix(Integers(), 2, 2, [3, 1, 0, 3]);
+3 eq Matrix(Integers(), 1, 2, [3, 0]);
+// membership coerces into the universe of the elements
+4 in ["4"];
+"4" in [4];
+false in [4];
+4 in [[4]];
+4 notin {"x"};
+4 in {* "4" *};
+4 in <4, "4">;
+1 in ["1"];
+1 in {"1"};
+1 notin ["a", ""];
+4 in [1..5];
+4 in {2, 4};
+// unary plus: elements only
+P<w> := PolynomialRing(Integers());
++Integers();
++P;
+rr := rec< recformat< k > | k := 1 >;
++rr;
++w;
++Matrix(Integers(), 1, 1, [4]);
+// eq: structures, records, polynomials across rings
+P2<v> := PolynomialRing(Rationals());
+1 eq P;
+P eq Integers();
+P eq P2;
+P eq P;
+Integers() eq Integers();
+rr eq rr;
+1 eq rr;
+Matrix(Integers(), 1, 1, [4]) eq P;
+Matrix(Integers(), 1, 1, [4]) eq w;
+w eq v;
+2*w eq v;
+w^2 eq w^2;
+// a polynomial over the integers divides by units only
+w / 1;
+w / -1;
+w / 3;
+v / 3;
+// typed universes, also empty
+E := [ Integers() | ];
+"4" in E;
+3/4 in E;
+4 in E;
+F := { Integers() | };
+"4" notin F;
+G := [ Integers() | 4 ];
+3/4 in G;
+4 in G;
+// Include converts into the universe, by value
+Include([2.5], 4);
+Include([5], 6/3);
+Include([1/3], 2);
+Kf<s> := NumberField(w^2 - 5);
+Include([7], Kf!2);
+Include([{* 1 *}], {2});
+1 in ["", "q"];
+Kf!1 in [w];
+Matrix(Integers(), 2, 2, [1, 0, 0, 1]) in [1];
+1 eq Matrix(Integers(), 2, 2, [1, 0, 0, 1]);
+RealField(30) eq RealField(30);
+PolynomialRing(Integers()) eq P;
+// ordering, set operations, cat and the two-value sequence intrinsics
+[1, 5] lt [2];
+<3, 1> le <3, 2>;
+"pear" gt "apple";
+[1, 5] ge ["q"];
+Matrix(Integers(), 2, 2, [1, 2, 3, 4]) lt Matrix(Integers(), 1, 1, [5]);
+{4, 5} lt {6};
+<1, 2> gt <1, 2, 3>;
+[1] cat ["b"];
+"ab" cat 3;
+{7} join {* 7 *};
+{2} join {"z"};
+{2} subset {"z"};
+(w + 1) div (3/4);
+Matrix(Integers(), 1, 4, [1, 2, 3, 4])^2;
+Matrix(Integers(), 2, 2, [1, 2, 3, 4]) / 3;
+B := Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]);
+B * B;
+B * Matrix(Integers(), 3, 1, [1, 0, 2]);
+w / 2.5;
+// parents the operator rules don't model keep their own arithmetic
+Ec := EllipticCurve([0, 0, 1, -7, 6]);
+Pa := Ec![0, 2]; Pb := Ec![2, 0];
+Pa + Pb;
+2*Pa - Pb;
+Pa +:= Pb; Pa;
+B * Matrix(Rationals(), 2, 2, [1, 0, 0, 1]);
