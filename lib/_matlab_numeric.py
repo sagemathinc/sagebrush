@@ -47,19 +47,17 @@ def hilb_(n, *args):
 
 @_bs("invhilb")
 def invhilb_(n, *args):
-    """the exact inverse of hilb(n) (its integers, by MATLAB's recurrence in exact arithmetic)"""
+    """the exact inverse of hilb(n), entry by entry from the closed form
+    (H_n^-1)_ij = (-1)^(i+j) (i+j-1) C(n+i-1, n-j) C(n+j-1, n-i) C(i+j-2, i-1)^2
+    (Choi, "Tricks or treats with the Hilbert matrix", Amer. Math. Monthly
+    90, 1983), in exact integers, then rounded once to double"""
     _, cls = _class_arg(args)
     n = _n_arg(n)
     H = np.zeros((n, n))
-    p = n
     for i in range(1, n + 1):
-        if i > 1:
-            p = ((n - i + 1) * p * (n + i - 1)) // ((i - 1) ** 2)
-        r = p * p
-        H[i - 1, i - 1] = float(r // (2 * i - 1))
-        for j in range(i + 1, n + 1):
-            r = -((n - j + 1) * r * (n + j - 1)) // ((j - 1) ** 2)
-            H[i - 1, j - 1] = H[j - 1, i - 1] = float(r // (i + j - 1))
+        for j in range(i, n + 1):
+            v = (i + j - 1) * _math.comb(n + i - 1, n - j) * _math.comb(n + j - 1, n - i) * _math.comb(i + j - 2, i - 1) ** 2
+            H[i - 1, j - 1] = H[j - 1, i - 1] = float(-v if (i + j) % 2 else v)
     return _as_class(H, cls)
 
 
