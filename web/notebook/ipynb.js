@@ -1,7 +1,9 @@
 // Notebook documents (web/notebook/types.ts NotebookDoc) to and from .ipynb
-// (nbformat 4.5, with cell ids) and .py/.sage/.m files with "# %%" cells.
+// (nbformat 4.5, with cell ids) and .py/.sage/.m files with "# %%" cells
+// (MATLAB's own "%%" sections in a MATLAB .m file).
 
 import { isMarimo, fromMarimo } from "./marimo.js";
+import { looksLikeMagma } from "../../src/m-file.ts";
 export const joinText = (t) => (Array.isArray(t) ? t.join("") : t ?? "");
 const lines = (t) => t.split(/(?<=\n)/);
 
@@ -13,12 +15,14 @@ const KERNELSPEC = {
   python: { name: "python3", display_name: "Python 3", language: "python" },
   sage: { name: "sagemath", display_name: "SageMath", language: "sage" },
   magma: { name: "magma", display_name: "Magma", language: "magma" },
+  matlab: { name: "matlab", display_name: "MATLAB", language: "matlab" },
 };
 /** The mode a notebook's metadata says (its kernel). */
 function modeOf(metadata) {
   const k = metadata?.kernelspec ?? {};
   const lang = `${k.name ?? ""} ${k.language ?? ""} ${metadata?.language_info?.name ?? ""}`;
-  return /magma/i.test(lang) ? "magma" : /sage/i.test(lang) ? "sage" : "python";
+  // (MATLAB: the MathWorks kernel's notebooks too, jupyter_matlab_kernel, and Octave's)
+  return /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : /sage/i.test(lang) ? "sage" : "python";
 }
 
 /** The .ipynb text of a document.  What Sagebrush does not use (notebook and
@@ -73,24 +77,32 @@ export function fromFile(name, text, mode = "python") {
   // a marimo notebook (web/notebook/marimo.js)
   if (/\.py$/i.test(name) && isMarimo(text)) return fromMarimo(name, text, cellId);
   // "# %%" starts a cell, "# %% [markdown]" a Markdown cell whose lines are comments (jupytext);
-  // in Magma (.m), "// %%" and "//" comments
+  // in Magma (.mag, or .m with := or "// %%"), "// %%" and "//" comments; in MATLAB (.m),
+  // MATLAB's own sections: "%%" (its title, if any, a comment heading the cell), "%" comments
+  const lang = /\.sage$/i.test(name) ? "sage" : /\.mag$/i.test(name) ? "magma"
+    : /\.m$/i.test(name) ? (/^\/\/ ?%%/m.test(text) || looksLikeMagma(text) ? "magma" : "matlab") : mode;
+  const marker = lang === "matlab" ? /^%%(.*)$/ : /^(?:#|\/\/) ?%%(.*)$/;
+  const comment = lang === "matlab" ? /^% ?/ : /^(?:#|\/\/) ?/;
   const cells = [];
   let cur = { code: "" };
   for (const line of text.split("\n")) {
-    const m = /^(?:#|\/\/) ?%%(.*)$/.exec(line);
+    const m = marker.exec(line);
     if (m) {
       if (cur.code.trim() || cells.length) cells.push(cur);
       cur = /\[markdown\]|\[md\]/.test(m[1]) ? { type: "markdown", code: "" } : /\[raw\]/.test(m[1]) ? { type: "raw", code: "" } : { code: "" };
-    } else cur.code += (cur.type ? line.replace(/^(?:#|\/\/) ?/, "") : line) + "\n";
+      if (lang === "matlab" && !cur.type && m[1].trim()) cur.code = "% " + m[1].trim() + "\n";
+    } else cur.code += (cur.type ? line.replace(comment, "") : line) + "\n";
   }
   cells.push(cur);
   for (const c of cells) { c.code = c.code.replace(/\n+$/, "").replace(/^\n+/, ""); c.id = cellId(); }
-  return { name: base, mode: /\.sage$/i.test(name) ? "sage" : /\.(m|mag)$/i.test(name) ? "magma" : mode, cells: cells.filter((c, i) => c.code || i === 0) };
+  return { name: base, mode: lang, cells: cells.filter((c, i) => c.code || i === 0) };
 }
 
-/** The cells as a script: "# %%" cells, Markdown and raw cells as comments (jupytext's percent format). */
+/** The cells as a script: "# %%" cells, Markdown and raw cells as comments (jupytext's percent
+ * format; in MATLAB, "%%" sections and "%" comments, as jupytext writes MATLAB). */
 export function toScript(doc) {
-  const cm = doc.mode === "magma" ? "//" : "#";
+  const cm = doc.mode === "magma" ? "//" : doc.mode === "matlab" ? "%" : "#";
+  const mark = doc.mode === "matlab" ? "%%" : cm + " %%";
   const commented = (code) => code.split("\n").map((l) => (l ? cm + " " + l : cm)).join("\n");
-  return doc.cells.map((c) => (c.type === "markdown" || c.type === "raw" ? `${cm} %% [${c.type}]\n` + commented(c.code) : cm + " %%\n" + c.code)).join("\n\n") + "\n";
+  return doc.cells.map((c) => (c.type === "markdown" || c.type === "raw" ? `${mark} [${c.type}]\n` + commented(c.code) : mark + "\n" + c.code)).join("\n\n") + "\n";
 }
