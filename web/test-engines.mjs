@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { engineIdText, isManifest } from "./engine-id.mts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "site/package.json"));
@@ -45,6 +47,24 @@ ok(head.status === 200 && head.headers.get("content-length") === String(man.file
 ok((await get(`/engine/${"0".repeat(20)}/sagebrush-worker.js`)).status === 404, "an engine that doesn't exist: 404");
 ok((await get(`/engine/${id}/nothing.js`)).status === 404, "a file not in the manifest: 404");
 ok((await get(`/engine/${id}/sagebrush-worker.js`, { method: "POST" })).status === 405, "only GET and HEAD");
+// an object in the bucket that the manifest doesn't list, named like an
+// Object property: not served (SEC-CAC-3)
+await bucket.put(`engine/${id}/constructor`, "stray");
+ok((await get(`/engine/${id}/constructor`)).status === 404 && (await get(`/engine/${id}/tostring`)).status === 404, "an object the manifest doesn't list (constructor): 404");
+// the id is the manifest's content: its api and each file's hash, size and
+// headers; a change of headers alone (the runner's policy) is another engine (SEC-CAC-2)
+const idOf = (api, files) => createHash("sha256").update(engineIdText(api, files)).digest("hex").slice(0, 20);
+ok(isManifest(man) && man.id === id && idOf(man.api, man.files) === id, "the engine's id is its manifest's content");
+const runnerFile = man.files["runner/index.html"];
+const tightened = { ...man.files, "runner/index.html": { ...runnerFile, headers: { ...runnerFile.headers, "Content-Security-Policy": runnerFile.headers["Content-Security-Policy"] + "; frame-src 'none'" } } };
+ok(idOf(man.api, tightened) !== id && idOf(man.api + 1, man.files) !== id, "another runner policy, or another api: another id");
+ok(idOf(man.api, Object.fromEntries(Object.entries(man.files).reverse())) === id, "the id doesn't depend on the order of the files");
+// an id with no engine, asked for again: answered without reading R2 again (HARD-CAC-5)
+const unknown = "f".repeat(20);
+ok((await get(`/engine/${unknown}/sagebrush-worker.js`)).status === 404, "an unknown id: 404");
+// (published just after: still 404 for a minute, as R2 isn't asked again)
+for (const f of [...Object.keys(man.files), "manifest.json"]) await bucket.put(`engine/${unknown}/${f}`, readFileSync(join(dir, f)));
+ok((await get(`/engine/${unknown}/sagebrush-worker.js`)).status === 404, "an unknown id asked for again soon: answered without reading R2");
 ok((await get(`/engine/latest.json`)).status === 418 && (await get(`/other`)).status === 418, "other paths are not the route's");
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);

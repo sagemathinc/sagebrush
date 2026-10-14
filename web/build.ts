@@ -158,9 +158,9 @@ const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "te
 // The engine, by its content (design/engines.md): what runs code, published
 // at sagebrush.space/engine/<id>/ and kept forever (scripts/publish-engine.mjs),
 // so that a board or notebook saved with one can keep running with it (an
-// exported HTML file pins its id).  <id> is a hash of the files' hashes; each
-// file's response headers are in the manifest, which the site's Worker
-// serves them with.  `api` is the version of the interface between a page
+// exported HTML file pins its id).  <id> is a hash of its api and each
+// file's hash, size and response headers (web/engine-id.mts); the headers are
+// in the manifest, which the site's Worker serves them with.  `api` is the version of the interface between a page
 // and these files (WorkerKernel, RunnerWorker, the worker's messages): a page
 // uses another engine only if its api is the same.
 const ENGINE_API = 2;
@@ -168,6 +168,7 @@ let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "
 const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html"];
 {
   const { runnerPolicy } = await import("./csp-policy.mts");
+  const { engineIdText } = await import("./engine-id.mts");
   const sha = (b: Uint8Array | string) => new Bun.CryptoHasher("sha256").update(b).digest("hex");
   const files: Record<string, { sha256: string; size: number; headers: Record<string, string> }> = {};
   for (const f of ENGINE_FILES) {
@@ -176,7 +177,7 @@ const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush
     if (f.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": runnerPolicy(scriptHashes(bytes.toString("utf8"))), "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Opener-Policy": "same-origin" });
     files[f] = { sha256: sha(bytes), size: bytes.length, headers };
   }
-  const id = sha(JSON.stringify(Object.entries(files).map(([f, d]) => [f, d.sha256]))).slice(0, 20);
+  const id = sha(engineIdText(ENGINE_API, files)).slice(0, 20);
   rmSync(join(here, "dist", "engine"), { recursive: true, force: true });
   for (const f of ENGINE_FILES) {
     mkdirSync(dirname(join(here, "dist", "engine", id, f)), { recursive: true });

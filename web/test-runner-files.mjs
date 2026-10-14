@@ -26,7 +26,9 @@ const run = (code, mode) => new Promise((done) => {
 window.t = { run, kernel, sab: typeof SharedArrayBuffer, isolated: self.crossOriginIsolated };
 </script>`;
 const MIME = { ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".html": "text/html" };
+const requests = [];
 const server = createServer((req, res) => {
+  requests.push(req.url);
   const path = new URL(req.url, "http://x").pathname;
   if (path === "/files-test.html") return res.writeHead(200, { "content-type": "text/html" }).end(PAGE);
   const file = normalize(join(DIST, path));
@@ -78,6 +80,17 @@ try {
     return { origin: self.origin, elsewhere: await reach("https://example.com/"), site: await reach(${JSON.stringify(base + "/sagebrush-worker.js")}), idb };
   })()`, wk));
   ok(!!probe && probe.origin === "null" && !probe.elsewhere && !probe.site && !probe.idb, "the worker: an opaque origin, no network (not even the page's server), no IndexedDB: " + JSON.stringify(probe));
+  // nor through the page: asked to fetch for it (as the URL runner's broker
+  // does), the page fetches nothing, not even one of the engine's own names (SEC-CAC-1)
+  const got = wk && (await ev(`new Promise((done) => {
+    const got = [];
+    self.addEventListener("message", (e) => { if (e.data && e.data.runnerFetched === 987654) got.push(e.data.bytes ? e.data.bytes.byteLength : null); });
+    self.postMessage({ runnerFetch: 987654, url: ${JSON.stringify(base + "/sagebrush-engine.wasm?leak=1")} });
+    self.postMessage({ runnerFetch: 987654, url: ${JSON.stringify(base + "/sagebrush-worker.js?leak=2")} });
+    setTimeout(() => done(got), 1500);
+  })`, wk));
+  const leaked = requests.filter((u) => u.includes("leak"));
+  ok(Array.isArray(got) && got.every((b) => b === null) && !leaked.length, "asked to fetch for the worker, the page fetches nothing: " + JSON.stringify({ got, leaked }));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

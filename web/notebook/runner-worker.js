@@ -88,9 +88,11 @@ export class RunnerWorker {
     };
     this.timer = fallback ? setTimeout(giveUp, 10000) : null;
     // what the interpreter may ask this page to fetch: its own files under
-    // base, and the files it was told to mount (by URL)
+    // base, and the files it was told to mount (by URL); in files mode,
+    // nothing: it has its files already, and this page fetches nothing for
+    // it (SEC-CAC-1)
     const runner = new URL(src ?? "about:blank", location.href);
-    this.base = files ? "" : new URL("../", runner).href;
+    this.base = files ? null : new URL("../", runner).href;
     this.mounted = new Set();
     const ch = new MessageChannel();
     ch.port1.onmessage = (e) => {
@@ -146,7 +148,7 @@ export class RunnerWorker {
     let bytes = null;
     try {
       const u = new URL(String(url));
-      const allowed = this.mounted.has(u.href) || (u.href.startsWith(this.base) && OWN.test(u.pathname));
+      const allowed = !!this.base && (this.mounted.has(u.href) || (u.href.startsWith(this.base) && OWN.test(u.pathname)));
       if (allowed) {
         const r = await fetch(u.href);
         if (r.ok) bytes = await r.arrayBuffer();

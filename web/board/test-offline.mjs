@@ -16,6 +16,8 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
+import { engineIdText } from "../engine-id.mts";
 
 const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -158,13 +160,24 @@ try {
   const latestHtml = await ev("window.sagebrush.board.exportHtml()");
   const fl = join(dir, "latest.html");
   writeFileSync(fl, latestHtml);
-  const other = "0123456789abcdef0123", manifest = JSON.parse(readFileSync(join(ownDir, "manifest.json"), "utf8"));
+  // (another engine: the same files, one more header, so another id, web/engine-id.mts)
+  const manifest = JSON.parse(readFileSync(join(ownDir, "manifest.json"), "utf8"));
+  const otherFiles = { ...manifest.files, "sagebrush-worker.js": { ...manifest.files["sagebrush-worker.js"], headers: { ...manifest.files["sagebrush-worker.js"].headers, "X-Test": "another engine" } } };
+  const other = createHash("sha256").update(engineIdText(manifest.api, otherFiles)).digest("hex").slice(0, 20);
   for (const f of Object.keys(manifest.files)) overrides.set(`/engine/${other}/${f}`, readFileSync(join(ownDir, f)));
-  overrides.set(`/engine/${other}/manifest.json`, Buffer.from(JSON.stringify({ ...manifest, id: other })));
+  overrides.set(`/engine/${other}/manifest.json`, Buffer.from(JSON.stringify({ ...manifest, id: other, files: otherFiles })));
   overrides.set("/engine/latest.json", Buffer.from(JSON.stringify({ id: other, api: own.api })));
   await open(fl);
   check(await ran(), "set to the latest, the file runs its code: " + await caption());
   check(requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && !requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with the site's latest engine: " + requests.slice(0, 4).join(", "));
+  // a manifest whose content doesn't give its id: not taken (HARD-CAC-4)
+  const forged = "0123456789abcdef0123";
+  for (const f of Object.keys(manifest.files)) overrides.set(`/engine/${forged}/${f}`, readFileSync(join(ownDir, f)));
+  overrides.set(`/engine/${forged}/manifest.json`, Buffer.from(JSON.stringify({ ...manifest, id: forged })));
+  overrides.set("/engine/latest.json", Buffer.from(JSON.stringify({ id: forged, api: own.api })));
+  await open(fl);
+  check(await ran(), "the latest with a manifest that isn't its id's: the file runs its code: " + await caption());
+  check(!requests.some((u) => u.startsWith(`${site}engine/${forged}/`) && !u.endsWith("/manifest.json")) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + requests.slice(0, 4).join(", "));
   overrides.set("/engine/latest.json", Buffer.from(JSON.stringify({ id: other, api: own.api + 1 })));
   await open(fl);
   check(await ran(), "the latest with another api: the file runs its code: " + await caption());

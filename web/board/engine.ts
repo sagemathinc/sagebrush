@@ -11,9 +11,13 @@
 // can substitute an engine.  A board set to run with the latest engine
 // (doc.engine "latest") takes the site's latest.json instead, if its api is
 // this script's, each part checked against that engine's manifest (trusted
-// as the site is, over HTTPS); else, or offline, its own.
+// as the site is, over HTTPS), whose format, id and api must be latest.json's
+// and whose content must give that id (web/engine-id.mts, HARD-CAC-4); else,
+// or offline, its own.  (The file itself is not signed: an edited file can
+// name another site, or carry another script.)
 
 import type { EngineParts } from "./code";
+import { engineIdText, isManifest } from "../engine-id.mts";
 
 /** The engine this script was built with (web/build.ts): its id, its api, and its files' SHA-256s. */
 declare const __SB_ENGINE__: { id: string; api: number; files: Record<string, string> } | undefined;
@@ -91,8 +95,10 @@ export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | un
       if (latest?.api === own.api && typeof latest.id === "string" && /^[0-9a-f]{20}$/.test(latest.id) && latest.id !== own.id) {
         const base = new URL(`engine/${latest.id}/`, ref.site).href;
         const m = await (await fetch(new URL("manifest.json", base))).json();
-        const sums = Object.fromEntries(Object.entries(m?.files ?? {}).map(([k, v]: [string, any]) => [k, String(v?.sha256)]));
-        return { bytes: checked(fetched(base), sums), id: latest.id };
+        if (isManifest(m) && m.id === latest.id && m.api === own.api && (await sha256(new TextEncoder().encode(engineIdText(m.api, m.files)).buffer as ArrayBuffer)).slice(0, 20) === m.id) {
+          const sums = Object.fromEntries(Object.entries(m.files).map(([k, v]) => [k, v.sha256]));
+          return { bytes: checked(fetched(base), sums), id: latest.id };
+        }
       }
     } catch {}
   }
