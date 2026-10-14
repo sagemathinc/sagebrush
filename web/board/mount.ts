@@ -1199,8 +1199,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     wake();
   }, true);
   on($("pr-bar"), "click", (e: MouseEvent) => { if (woken) { woken = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
-  // (the screen's size changed: full screen, a phone turned: the frame fitted again)
-  on(window, "resize", () => { if (presenting) requestAnimationFrame(() => presenting && showFrame(presenting.i, true).catch(fail)); });
+  // (the board's size changed: full screen, a phone turned: the frame fitted
+  // again, once the board has its new size: a window's resize comes first,
+  // and a camera fitted then is fitted to the old one)
+  board.onResize = () => { if (presenting) showFrame(presenting.i, true).catch(fail); };
   // (leaving the full screen a presentation entered, by the browser's own Esc
   // say, leaves Present; an Esc that left Present itself has left full screen
   // too: nothing more happens; full screen granted once Present was left is left)
