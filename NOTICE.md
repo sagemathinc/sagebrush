@@ -31,6 +31,10 @@ Copyright (c) 2001 Python Software Foundation. See
   (vendored in `pyparse/vendor/cpython`), with TypeScript ports of parts of
   CPython's `Parser/` directory, and a Unicode character-name table generated
   from Python's `unicodedata`.
+- `src/runtime/ops.ts`, `intTrueDiv`: int / int follows the scheme of
+  CPython's `long_true_divide` (`Objects/longobject.c`): the shift, the two
+  extra bits and the sticky bit, a single round to even at the result's
+  precision (subnormals included), then exact scaling.
 
 ### NumPy (BSD 3-Clause)
 
