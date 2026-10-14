@@ -7,7 +7,7 @@
 // layout), so a note stays where it was, and a group is where its members
 // make it.
 
-import { GROUP_PAD, GROUP_TITLE, type DocGroup, type DocInk, type DocNode, type DocNote } from "./doc";
+import { GROUP_PAD, GROUP_TITLE, type DocGroup, type DocInk, type DocNode, type DocNote, type DocSticker } from "./doc";
 
 export interface Box { id: string; x: number; y: number; w: number; h: number; z: number }
 
@@ -16,7 +16,7 @@ const round = (v: number) => Math.round(v * 10) / 10;
 /** The tree of `frames` and `items`: a frame's group by `group` (its title,
  * whether it has one, decides where its members start), an item's note (or
  * stroke) by `note`; each placed, siblings in the order of their z. */
-export function nest<F extends Box, I extends Box>(frames: F[], items: I[], group: (f: F) => Omit<DocGroup, "kind" | "children" | "x" | "y">, note: (i: I) => DocNote | DocInk): DocNode[] {
+export function nest<F extends Box, I extends Box>(frames: F[], items: I[], group: (f: F) => Omit<DocGroup, "kind" | "children" | "x" | "y">, note: (i: I) => DocNote | DocInk | DocSticker): DocNode[] {
   const fs = frames.slice().sort((a, b) => b.w * b.h - a.w * a.h);
   const holds = (f: Box, x: number, y: number) => x >= f.x && x <= f.x + f.w && y >= f.y && y <= f.y + f.h;
   const parent = new Map<string, F | null>();

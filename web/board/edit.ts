@@ -578,7 +578,7 @@ export class Editor {
     const at = Object.fromEntries(nodes.map((n) => [n.id, this.board.item(n.id)]).filter(([, it]) => it).map(([id, it]) => [id, { x: (it as Item).x, y: (it as Item).y }]));
     // (and the sizes of their pictures, kept in this browser)
     const pics = new Set<string>();
-    const walk = (ns: DocNode[]) => { for (const n of ns) { if (n.kind === "group") walk(n.children); else if (n.kind !== "ink" && n.image) pics.add(n.image); } };
+    const walk = (ns: DocNode[]) => { for (const n of ns) { if (n.kind === "group") walk(n.children); else if (n.kind !== "ink" && n.kind !== "sticker" && n.image) pics.add(n.image); } };
     walk(nodes);
     const images = Object.fromEntries([...pics].filter((k) => d.images?.[k]).map((k) => [k, d.images![k]]));
     return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at, ...(pics.size ? { images } : {}) });

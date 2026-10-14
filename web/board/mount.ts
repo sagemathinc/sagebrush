@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type Edge, type Item } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, templateOf, lookOf, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import type { OutputCache } from "./outcache";
@@ -76,6 +76,8 @@ export interface BoardHost {
   store?: BoardStore;
   /** where pictures' bytes are kept (images.ts: Images, this browser's IndexedDB) */
   images: ImageStore;
+  /** a CoCalc icon by its name (a converted board's stickers), as the host draws it; none: an emoji close to it (stickers.ts) */
+  icon?(name: string): Element | null;
   /** the engine of code items, made the first time a board has code (the document then) */
   code?: (d: BoardDoc) => BoardCode;
   /** KaTeX, loaded the first time a board has math */
@@ -147,7 +149,7 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
   const walk = (ns: DocNode[] | undefined) => {
     for (const n of ns ?? []) {
       if (n.kind === "group") walk(n.children);
-      else if (n.kind !== "ink" && n.code !== undefined) out.set(n.id, n);
+      else if (n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined) out.set(n.id, n);
     }
   };
   walk(d.nodes);
@@ -172,6 +174,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // pictures: where the host keeps them (by name); a board that carries them (data: URLs) gives them up on the way in
   const images = host.images;
   board.imageUrl = (name) => images.url(name);
+  board.icon = host.icon ? (name) => host.icon!(name) : null;
   // (listeners on the page, taken off by destroy())
   const offs: (() => void)[] = [];
   const on = (t: EventTarget, type: string, f: (e: any) => void, capture = false) => { t.addEventListener(type, f, capture); offs.push(() => t.removeEventListener(type, f, capture)); };
@@ -195,14 +198,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let loads = 0;
 
   // a page made from a template: the template's items and edges under its
-  // own (their ids "tpl:...", inert: shown, not the page's to edit; their
-  // code shown on the template's page only)
-  function underlay(d: BoardDoc, i: number): { items: Item[]; edges: Edge[] } {
+  // `own` (inert: shown, not the page's to edit; their code shown on the
+  // template's page only, unless `keepCode`: a JSON Canvas).  Their ids are
+  // "tpl:...", or "tpl2:..." and so on: a prefix none of the page's own ids
+  // starts with (CORR-00C-1)
+  function underlay(d: BoardDoc, i: number, own: { items: Item[]; edges: Edge[] }, keepCode = false): { items: Item[]; edges: Edge[] } {
     const t = templateOf(d, i);
     if (t < 0) return { items: [], edges: [] };
-    const tl = layout(pageView(d, t), measure), id = (s: string) => "tpl:" + s;
+    const taken = [...own.items, ...own.edges].map((x) => x.id);
+    let pre = "tpl:";
+    for (let k = 2; taken.some((s) => s.startsWith(pre)); k++) pre = `tpl${k}:`;
+    const tl = layout(pageView(d, t), measure), id = (s: string) => pre + s;
     return {
-      items: tl.items.map((it) => ({ ...it, id: id(it.id), parent: it.parent && id(it.parent), inert: true, code: undefined, order: undefined, hideCode: undefined })),
+      items: tl.items.map((it) => ({ ...it, id: id(it.id), parent: it.parent && id(it.parent), inert: true, ...(keepCode ? {} : { code: undefined, order: undefined, hideCode: undefined }) })),
       edges: tl.edges.map((e) => ({ ...e, id: id(e.id), from: id(e.from), to: id(e.to), src: undefined })),
     };
   }
@@ -250,7 +258,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (a template's under the page's own)
-    const under = underlay(d, pageIx);
+    const under = underlay(d, pageIx, { items, edges });
     board.setItems([...under.items, ...items], [...under.edges, ...edges]);
     // (the page's slide and background, or its template's)
     const look = lookOf(d, pageIx);
@@ -710,10 +718,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
   // Download JSON Canvas (canvas.ts): the board as it is laid out, each page
-  // below the one before; what a canvas has nothing like is said in the caption
+  // below the one before (a template's items on each page made from it, as
+  // shown; CORR-00C-3); what a canvas has nothing like is said in the caption
   async function canvasText() {
     const d = await images.inline(doc!);
-    const { canvas, left } = toCanvas(d, (i) => layout(pageView(d, i), measure));
+    const { canvas, left } = toCanvas(d, (i) => {
+      const l = layout(pageView(d, i), measure), u = underlay(d, i, l, true);
+      return { items: [...u.items, ...l.items], edges: [...u.edges, ...l.edges] };
+    });
     return { text: JSON.stringify(canvas, null, "\t") + "\n", left: canvasLeftOut(left) };
   }
   $("canvas").onclick = async () => {
@@ -845,11 +857,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
    * page's tour with its caption ("tour"; a page with no tour, whole). */
   function sheets(mode: "pages" | "tour" = "pages"): Sheet[] {
     const d = doc!, n = pageCount(d), out: Sheet[] = [];
-    for (let i = 0; i < n; i++) {
-      // (a template is no sheet of its own; a page made from one has its items under its own)
-      if (d.pages?.length && pageOf(d, i).template) continue;
-      const v = pageView(d, i), under = underlay(d, i);
-      const own = layout(v, measure), items = [...under.items, ...own.items], edges = [...under.edges, ...own.edges];
+    // (a template is no sheet of its own, unless all are; a page made from one has its items under its own)
+    for (const i of shownPages(d)) {
+      const v = pageView(d, i), own = layout(v, measure), under = underlay(d, i, own);
+      const items = [...under.items, ...own.items], edges = [...under.edges, ...own.edges];
       const box = (ids?: string[]) => {
         const its = ids ? items.filter((it) => ids.includes(it.id)) : items;
         if (!its.length) return { x0: 0, y0: 0, x1: 400, y1: 300 };
@@ -901,9 +912,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!doc || !!presenting === on) return;
     if (on) {
       const frames: { page: number; step: number }[] = [];
-      for (let p = 0; p < pageCount(doc); p++) {
-        // (a template is shown on the pages made from it, not on its own)
-        if (doc.pages?.length && pageOf(doc, p).template) continue;
+      // (a template is shown on the pages made from it, not on its own;
+      // all templates: themselves, CORR-00C-2)
+      for (const p of shownPages(doc)) {
         frames.push({ page: p, step: -1 });
         (pageView(doc, p).steps ?? []).forEach((_, k) => frames.push({ page: p, step: k }));
       }

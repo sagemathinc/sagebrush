@@ -2,7 +2,10 @@
 // template page shows the template's card, background and items under its
 // own; they are not its to edit (not picked, not selected); a change to the
 // template shows on every page made from it; the page picker says which
-// pages are templates; Present and printing leave templates out; Add a
+// pages are templates; Present and printing leave templates out (all
+// templates: show them); a JSON Canvas has a template's items on the pages
+// made from it, leaves the template out and says so; the template layer's
+// ids are none of the page's own (CORR-00C-1, -2, -3); Add a
 // page makes the new page from the template of the page shown; Page… makes
 // a page a template, or one made from a template, or neither.  Serve
 // web/dist first (python3 web/serve.py 8765), then
@@ -116,6 +119,36 @@ try {
   await sleep(300);
   d = await docNow();
   check(d.pages[2].template === true && /^t[a-z0-9]+$/.test(d.pages[2].id ?? "") && !d.pages[2].uses, "a page made a template gets an id, and is made from none: " + JSON.stringify([d.pages[2].id, d.pages[2].uses]));
+  // CORR-00C-1: a page's own item with the id the template layer would give the template's item: both shown
+  const clash = { pages: [{ id: "t", template: true, nodes: [{ id: "x", title: "Template", x: 0, y: 0 }] }, { uses: "t", nodes: [{ id: "tpl:x", title: "Own", x: 600, y: 0 }] }] };
+  await ev(`${B}.load(${JSON.stringify(clash)}).then(() => ${B}.page(1)).then(() => 1)`);
+  await until(`${B}.snapshot().page === 1 && !!window.board.item("tpl:x")`, 3000);
+  await sleep(300);
+  const both = await ev(`(() => { const own = window.board.item("tpl:x"), els = [...document.querySelectorAll(".board-item")].map((e) => e.textContent.trim()); return { own: own && { title: own.title, inert: !!own.inert }, els }; })()`);
+  const tplItem = await ev(`[...document.querySelectorAll(".board-item.board-inert")].map((e) => e.textContent.trim()).join()`);
+  check(both.own?.title === "Own" && !both.own.inert && both.els.includes("Own") && both.els.includes("Template") && tplItem === "Template", "a page's own item named as the template layer's: both shown, the page's own its own: " + JSON.stringify([both, tplItem]));
+  // (an element shown again under the same id and title, inert once and the page's own now: not inert)
+  const swap = { pages: [{ id: "t", template: true, nodes: [{ id: "x", title: "Same", x: 0, y: 0 }] }, { uses: "t", nodes: [] }, { nodes: [{ id: "tpl:x", title: "Same", x: 0, y: 0 }] }] };
+  await ev(`${B}.load(${JSON.stringify(swap)}).then(() => ${B}.page(1)).then(() => 1)`);
+  await until(`!!document.querySelector(".board-item.board-inert")`, 3000);
+  await ev(`${B}.page(2).then(() => 1)`);
+  await until(`${B}.snapshot().page === 2`, 3000);
+  await sleep(300);
+  check(await ev(`[...document.querySelectorAll(".board-item")].filter((e) => /Same/.test(e.textContent)).map((e) => e.classList.contains("board-inert")).join() === "false"`), "an item no longer inert is drawn so (its element not kept)");
+  await ev(`${B}.load(${JSON.stringify(clash)}).then(() => ${B}.page(1)).then(() => 1)`);
+  await until(`${B}.snapshot().page === 1`, 3000);
+  // CORR-00C-3: a JSON Canvas has the template's items on the page made from it; the template's own page left out, said so
+  const cv = await ev(`${B}.canvas()`), cn = JSON.parse(cv.text).nodes;
+  const texts = cn.filter((x) => x.type === "text").map((x) => x.text).sort().join(), groups = cn.filter((x) => x.type === "group").map((x) => x.label).join();
+  check(texts === "## Own,## Template" && groups === "Page 2" && /1 template page/.test(cv.left), "a JSON Canvas: the template's items on the page made from it, the template itself left out, said so: " + JSON.stringify([texts, groups, cv.left]));
+  // CORR-00C-2: a board whose pages are all templates: Present and printing show the templates themselves
+  await ev(`${B}.load(${JSON.stringify({ pages: [{ id: "a", template: true, nodes: [{ id: "p", title: "P" }] }, { id: "b", template: true, nodes: [] }] })}).then(() => 1)`);
+  const allT = await ev(`${B}.present()`);
+  check(allT?.of === 2 && /^\d \/ 2$/.test(await ev("document.querySelector('[data-sbb=pr-where]').textContent")), "all templates: Present shows them: " + JSON.stringify(allT));
+  await key("Escape", 27);
+  await sleep(200);
+  check((await ev(`${B}.print({ dialog: false })`)) === 2, "all templates: printing prints them");
+  await ev("document.getElementById('board-print')?.remove(), 1");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
