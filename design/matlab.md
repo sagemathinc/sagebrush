@@ -314,29 +314,19 @@ A notebook cell, or a Jupyter cell, is translated in cell mode
 - Function files (`name.m`) load through the same host operation as in the
   CLI, where there is a file system.
 
-## MATLAB's documentation as a test
+## Published examples as a test
 
-MathWorks' PDF documentation for R2026b (the Function Reference: 21,120
-pages, 2,313 functions) holds 8,252 examples with the output MATLAB printed.
-It is not in this repository. In the PDF, the code is black DejaVuSansMono
-9pt, the output is the same font in gray (808080), and example titles are
-bold. So /scratch/mwdoc/extract_examples.py (PyMuPDF, outside the repository)
-separates code from output exactly, and writes examples.jsonl.
+A corpus of published MATLAB examples, each with the output MATLAB printed,
+is kept outside this repository.
 
 - `python3 matlab-tests/docs.py [-j N] [function ...]` runs each example
-  under `SAGEBRUSH_MATLAB_DISPLAY=doc`, the documentation's layout (`x =
-  1×3` and the values, as the Live Editor writes them).
-- It compares every step's output token by token, since whitespace in a PDF
-  is not MATLAB's. The Live Editor's `10^3 ×` is compared as `1.0e+03 *`, and
+  under `SAGEBRUSH_MATLAB_DISPLAY=doc` (`x = 1×3` and the values, the
+  layout such examples use).
+- It compares every step's output token by token, since the corpus's
+  whitespace is not MATLAB's. `10^3 ×` is compared as `1.0e+03 *`, and
   `1×3 string` as `string array`.
 - It reports pass, diff, missing (a function Sagebrush lacks), error and
   skipped (examples with figures).
-
-Run 2 (October 13):
-- 825 of the 5,532 examples without figures pass;
-- of the 1,139 examples of functions Sagebrush has, 658 pass;
-- the rest need tables, `datetime`, classes, files, or graphics: 2,720
-  examples draw figures.
 
 The examples settled several display rules:
 - a matrix's scale factor below 1 is $10^{\lceil \log_{10} m \rceil}$, so
