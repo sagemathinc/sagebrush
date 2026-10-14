@@ -26,8 +26,13 @@ export interface RemoteBoard {
   hash(): Promise<string | null>;
   /** The document it has now; null: none yet. */
   load(): Promise<BoardDoc | null>;
-  /** Keep the document as it is now. */
-  save(doc: BoardDoc): Promise<void>;
+  /** Keep the document as it is now; with `ifHash`, only if the document it
+   * has now is that one (its hash): false if it is not.  (A remote that
+   * cannot tell, `cas` not true, saves whatever: the store asks its hash
+   * just before instead.) */
+  save(doc: BoardDoc, ifHash?: string): Promise<void | boolean>;
+  /** Whether save(doc, ifHash) is a compare-and-swap. */
+  cas?: boolean;
   /** Its changes made elsewhere (another person, another tab): the document then. */
   subscribe?(f: (doc: BoardDoc) => void): () => void;
 }
@@ -166,14 +171,15 @@ export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc:
 }
 
 // A side's pages without ids (a document from elsewhere: the store gives
-// its own pages ids, CORR-EB9-2), keyed as the base's they are: records key
+// pages ids at open, CORR-DB8-1), keyed as the base's they are: records key
 // such a page by its place, which a page put in front of it changes
-// (CORR-891-2).  Each is matched, one to one, to the base page (one this
-// side does not have by its id) it shares most with: its items, its title,
-// and each of its other fields (intro, slide, background, tour, template)
-// with the same value.  A page matching none is a page added, if no base
-// page is left for it; if some are, which it is cannot be told: null (the
-// caller keeps ours, and says so), never a guess.
+// (CORR-891-2).  Each is matched to the base page (one this side does not
+// have by its id) it shares most with: its items, its title, and each of
+// its other fields (intro, slide, background, tour, template) with the same
+// value.  Only a match that is the one best both ways is taken: a tie, two
+// pages best matched to one, or a page matching none while a base page is
+// left, and which page it is cannot be told: null (the caller keeps ours,
+// and says so, CORR-DB8-3).  Never a guess, by place or otherwise.
 function aligned(baseRecs: any[], recs: any[], side: string): any[] | null {
   const pagesOf = (rs: any[]) => rs.filter((r) => r.type === "page").sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0));
   const sp = pagesOf(recs).filter((r) => r.anon === true);
@@ -183,19 +189,28 @@ function aligned(baseRecs: any[], recs: any[], side: string): any[] | null {
   const itemsOf = (rs: any[], pid: string) => new Set(rs.filter((r) => r.type === "item" && r.page === pid).map((r) => r.id));
   const bItems = bp.map((p) => itemsOf(baseRecs, p.page)), sItems = sp.map((p) => itemsOf(recs, p.page));
   const fields = (r: any) => Object.entries(r).filter(([k]) => !["type", "page", "id", "pos", "anon", "title"].includes(k));
-  const pairs: [number, number, number][] = [];
-  sp.forEach((p, j) => bp.forEach((q, i) => {
-    let score = 0;
-    for (const id of sItems[j]) if (bItems[i].has(id)) score++;
-    if (p.title && p.title === q.title) score += 0.5;
-    for (const [k, v] of fields(p)) if (k in q && same(v, q[k])) score += 0.25;
-    if (score > 0) pairs.push([score, j, i]);
-  }));
-  pairs.sort((a, b) => b[0] - a[0] || Math.abs(a[1] - a[2]) - Math.abs(b[1] - b[2]));
-  const to = new Map<number, number>(), taken = new Set<number>();
-  for (const [, j, i] of pairs) if (!to.has(j) && !taken.has(i)) { to.set(j, i); taken.add(i); }
-  // (one matching none while a base page is left: which it is cannot be told)
-  if (sp.some((_, j) => !to.has(j)) && bp.some((_, i) => !taken.has(i))) return null;
+  const score = (j: number, i: number) => {
+    const p = sp[j], q = bp[i];
+    let n = 0;
+    for (const id of sItems[j]) if (bItems[i].has(id)) n++;
+    if (p.title && p.title === q.title) n += 0.5;
+    for (const [k, v] of fields(p)) if (k in q && same(v, q[k])) n += 0.25;
+    return n;
+  };
+  const to = new Map<number, number>(), chosen = new Map<number, number>();
+  for (let j = 0; j < sp.length; j++) {
+    const scores = bp.map((_, i) => score(j, i)), best = Math.max(0, ...scores);
+    if (best === 0) continue;
+    const at = scores.flatMap((v, i) => (v === best ? [i] : []));
+    // (a tie for its best: which it is cannot be told)
+    if (at.length > 1) return null;
+    // (two pages best matched to one base page: the same)
+    if (chosen.has(at[0])) return null;
+    chosen.set(at[0], j);
+    to.set(j, at[0]);
+  }
+  // (a page matching none while a base page is left: it may be that one)
+  if (sp.some((_, j) => !to.has(j)) && bp.some((_, i) => !chosen.has(i))) return null;
   // (keys: the base page's; a new page's, none any page has)
   const used = new Set([...baseRecs, ...recs].filter((r) => r.type === "page").map((r) => r.page));
   const key = new Map<string, string>();
@@ -205,6 +220,30 @@ function aligned(baseRecs: any[], recs: any[], side: string): any[] | null {
     else { let k = `#${side}${j}`; while (used.has(k)) k += "#"; used.add(k); key.set(p.page, k); }
   });
   return recs.map((r) => (key.has(r.page) ? { ...r, page: key.get(r.page) } : r));
+}
+
+/** A document from elsewhere whose pages lack ids, after the store gave its
+ * pages ids: each such page given the id of the page of `base` it is
+ * (aligned(), strictly), a new one an id of its own; `theirs` itself if
+ * every page has an id; null if which page is which cannot be told. */
+export function adopted(base: BoardDoc, theirs: BoardDoc): BoardDoc | null {
+  if (!theirs.pages?.some((p) => p.id == null)) return theirs;
+  const baseRecs = toRecords(base), recs = aligned(baseRecs, toRecords(theirs), "t");
+  if (!recs) return null;
+  const known = new Set(baseRecs.filter((r) => r.type === "page").map((r) => r.page));
+  const taken = new Set(recs.filter((r) => r.type === "page").map((r) => r.page));
+  const fresh = new Map<string, string>();
+  for (const r of recs) if (r.type === "page" && r.anon === true && !known.has(r.page)) {
+    let k; do k = "p" + Math.random().toString(36).slice(2, 10); while (taken.has(k));
+    taken.add(k);
+    fresh.set(r.page, k);
+  }
+  const out = recs.map((r) => {
+    const page = fresh.get(r.page) ?? r.page;
+    if (r.type === "page" && r.anon === true) { const { anon: _a, ...x } = r; return { ...x, page, anon: false }; }
+    return page === r.page ? r : { ...r, page };
+  });
+  return identified(cleanDoc(fromRecords(records(out))));
 }
 
 /** The caption's words for a merge with conflicts. */
@@ -240,6 +279,15 @@ export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offl
  * while a save is on its way is merged with the copy before it (and goes
  * with the next one, CORR-C06-1).  The documents given the board are given
  * one at a time, each once the one before is shown (CORR-C06-3).
+ *
+ * Pages have ids (CORR-DB8): the copy is always a document whose pages
+ * have them.  With no copy, the store opens by migrating: the remote's
+ * document, its pages given ids, saved over it only if the remote still has
+ * that document (compare-and-swap, or its hash asked again just before);
+ * changed meanwhile, from the new one.  Only then does anything else begin.
+ * A document from elsewhere that comes later with pages without ids has
+ * them given the ids of the pages they are (adopted()); where which page is
+ * which cannot be told, ours is kept, and said.
  */
 export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = new IdbDocCache()): BoardStore & { synced: Promise<Synced> } {
   let entry: CachedDoc | null = null;
@@ -295,15 +343,24 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   // the remote's document `theirs` (from a step)
   async function arrived(theirs: BoardDoc, theirHash: string): Promise<Synced> {
     let s: Synced;
+    // (pages without ids, from elsewhere: given those of the pages they are;
+    // which is which cannot be told: ours kept, and said, the remote given ours)
+    const t = entry && !(theirHash === entry.remoteHash || theirHash === entry.hash) ? adopted(parse(entry.base ?? entry.json), theirs) : theirs;
+    if (!t) {
+      entry = { ...entry!, remoteHash: theirHash, base: canonical(theirs) };
+      await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
+      present(parse(entry.json), mergedNotice(1));
+      push();
+      return "merged";
+    }
+    theirs = t;
     // (what the copy is based on, or shows, already: our own save, come back)
     if (entry && (theirHash === entry.remoteHash || theirHash === entry.hash)) {
       if (theirHash === entry.hash && dirty()) await sent(theirs, theirHash);
       s = "same";
     } else if (!entry || !dirty()) {
-      // (its pages given ids, if it came without: the copy's, and the remote's next)
-      const doc = identified(theirs);
-      await keep(doc, theirHash, canonical(theirs));
-      present(doc);
+      await keep(theirs, theirHash, canonical(theirs));
+      present(theirs);
       s = "replaced";
     } else {
       // (edits here the remote has not seen, or a save of them on its way: merged)
@@ -344,41 +401,57 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     }), () => step(async () => { if (!stale()) resolveSynced("offline"); }));
   }
 
-  // a change made elsewhere: a step (and, as it comes, newer than any answer asked for before it)
+  // a change made elsewhere: a step (and, as it comes, newer than any answer
+  // asked for before it); before the store is open (migrating), none: the
+  // migration's save is over the remote's document as it is, and the store,
+  // once open, asks again
+  let opened = false;
   function changed(d: BoardDoc) {
-    const doc = cleanDoc(d);
     heard++;
+    if (!opened) return;
+    const doc = cleanDoc(d);
     step(async () => { lastHeard = await arrived(doc, await docHash(doc)); });
+  }
+
+  // The remote's document, its pages given ids, saved over it only if it
+  // still has that document (compare-and-swap, or its hash asked just
+  // before); changed meanwhile, from the new one (CORR-DB8-1, -2)
+  async function migrate(): Promise<{ doc: BoardDoc; hash: string } | null> {
+    for (let tries = 0; ; tries++) {
+      const r = await remote.load();
+      if (!r) return null;
+      const R = cleanDoc(r), h = await docHash(R), I = identified(R);
+      if (I === R) return { doc: R, hash: h };
+      if (tries >= 10) throw new Error("the board's document kept changing while its pages were given ids");
+      if (!remote.cas && (await remote.hash()) !== h) continue;
+      if ((await remote.save(I, h)) === false) continue;
+      return { doc: I, hash: await docHash(I) };
+    }
   }
   let offRemote: (() => void) | undefined;
 
   return {
     synced,
     async load() {
-      const c = await step(async () => cache.get(key).catch(() => null));
-      if (c) {
-        await step(async () => {
-          entry ??= c;
-          // (pages without ids, from before: given them, in the copy)
-          const doc = parse(entry.json), withIds = identified(doc);
-          if (withIds !== doc) await keep(withIds, entry.remoteHash, entry.hash === entry.remoteHash ? entry.json : entry.base ?? entry.json);
-          view = withIds;
-        });
+      const c = await step(async () => cache.get(key).catch(() => null)), copy = c && parse(c.json);
+      // (a copy whose pages have ids: shown at once, the remote asked meanwhile)
+      if (c && copy && identified(copy) === copy) {
+        await step(async () => { entry = c; view = copy; opened = true; });
         ask();
         return { doc: view! };
       }
-      // (no copy: the remote's; a change made elsewhere meanwhile, after it)
-      let d: BoardDoc | null;
-      try { d = await remote.load(); } catch (e) { resolveSynced("offline"); throw e; }
+      // (none, or one from before pages had ids: the remote's, migrated, then open)
+      let got: { doc: BoardDoc; hash: string } | null;
+      try { got = await migrate(); } catch (e) { resolveSynced("offline"); throw e; }
       return step(async () => {
         online = true;
-        if (!entry) {
-          if (!d) { resolveSynced("fresh"); return null; }
-          const doc = cleanDoc(d), withIds = identified(doc);
-          await keep(withIds, await docHash(doc), canonical(doc));
-        }
-        view = parse(entry!.json);
+        opened = true;
+        if (!got) { resolveSynced("fresh"); return null; }
+        await keep(got.doc, got.hash);
+        view = got.doc;
         resolveSynced("fresh");
+        // (a change since: as any)
+        ask();
         return { doc: view };
       });
     },
