@@ -30,3 +30,8 @@ show(r(interp2([3 2 1], [3 2 1], W, 2.5, 2.5))); show(r(interp2([3 2 1], [1 2 3]
 show(r(interp2(1:4, 4:-1:1, V, 2.2, 3.1, 'spline'))); show(r(interp2(1:4, 4:-1:1, V, 2.2, 3.1)));
 % (pchip of complex values)
 show(r(pchip([1 2 3], [1+1i 2-1i 4+2i], 1.5))); pp = pchip([1 2 3], [1+1i 2-1i 4+2i]); show(r(ppval(pp, [1.2 2.8])));
+% (2 and 3 points: linear and quadratic interpolation, one piece each)
+[b, c, l, k, d] = unmkpp(spline([1 2 3], [1 4 10])); show(b); show(c); show([l k d]);
+[b, c, l, k, d] = unmkpp(spline([1 3], [2 8])); show(b); show(c); show([l k d]);
+show(r(spline([1 2 3], [1 4 10], [0 1.5 2.5 4]))); show(r(spline([1 3], [2 8], [0 2 5])));
+show(r(spline([0 1 3], [1+1i 2 -1i], [0.5 2]))); show(r(spline([0 1 3], [1 2 4; 0 1 0], [0.5 2])));
