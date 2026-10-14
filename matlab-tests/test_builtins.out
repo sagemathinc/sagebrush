@@ -174,3 +174,7 @@ double 1x2 [5.5 3.0276503540970001]
 double 1x1 28
 double 1x1 8
 double 1x1 23.76756129
+double 1x1 NaN
+double 1x1 Inf
+double 1x1 -Inf
+double 1x3 [NaN Inf -3]
