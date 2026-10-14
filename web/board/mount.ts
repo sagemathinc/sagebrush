@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type Edge, type Item } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
@@ -163,23 +163,27 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 export type BoardApi = ReturnType<typeof mountBoard>;
 
 /** Mount a board in `root` (which the host places and sizes), with what the host provides. */
-// The code notes of a document, by id (every page, in groups too).
+// The code notes of a document, by their cells' ids (codeOrder: every
+// page, in groups too; an id on several pages, each page's its own).
 function codeNotes(d: BoardDoc): Map<string, DocNote> {
-  const out = new Map<string, DocNote>();
-  const walk = (ns: DocNode[] | undefined) => {
-    for (const n of ns ?? []) {
-      if (n.kind === "group") walk(n.children);
-      else if (n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined) out.set(n.id, n);
-    }
-  };
-  walk(d.nodes);
-  for (const p of d.pages ?? []) walk(p.nodes);
+  const out = new Map<string, DocNote>(), cells = codeOrder(d);
+  for (let i = 0; i < pageCount(d); i++) {
+    const on = new Map<string, DocNote>();
+    const walk = (ns: DocNode[] | undefined) => {
+      for (const n of ns ?? []) {
+        if (n.kind === "group") walk(n.children);
+        else if (n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined) on.set(n.id, n);
+      }
+    };
+    walk(pageOf(d, i).nodes);
+    for (const c of cells) if (c.page === i && on.has(c.item)) out.set(c.id, on.get(c.item)!);
+  }
   return out;
 }
 // Code items in reading order with their previews (code.ts shows a preview, and doesn't run it, when it opens).
-function withPreviews(d: BoardDoc, order: { id: string; code: string }[]) {
+function withPreviews(d: BoardDoc, order: CodeCell[]) {
   const notes = codeNotes(d);
-  return order.map((it) => { const p = notes.get(it.id)?.preview; return p ? { ...it, preview: p } : it; });
+  return order.map(({ id, code }) => { const p = notes.get(id)?.preview; return p ? { id, code, preview: p } : { id, code }; });
 }
 
 export function mountBoard(root: HTMLElement, host: BoardHost) {
@@ -204,6 +208,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   offs.push(track(root));
   const mine = () => active(root);
   let doc: BoardDoc | null = null;
+  // (a code item on the page shown: its cell's id, codeOrder's)
+  let cellOf = new Map<string, string>();
+  const cell = (id: string) => cellOf.get(id) ?? id;
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
   let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
@@ -320,7 +327,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // code items: their places in the reading order; the engine runs what changed
     const order = codeOrder(d);
     const nth = new Map(order.map((c, i) => [c.id, i + 1]));
-    for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
+    // (the board's items are the page's: their cells, by their ids on it)
+    cellOf = new Map(order.filter((c) => c.page === pageIx).map((c) => [c.item, c.id]));
+    for (const it of items) if (it.code !== undefined) it.order = nth.get(cellOf.get(it.id) ?? it.id);
     if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (a template's under the page's own)
@@ -453,7 +462,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         if (code === c && c.error) say(`**The code can't run here:** ${c.error}`);
         return;
       }
-      board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(id, copy), state: (id) => c.state(id), run: (id) => { c.run([id]); } });
+      board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } });
       relayout();
     });
     return c;
@@ -678,7 +687,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     input.onblur = () => finish(true);
   };
   editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
-  editor.onRun = (id) => { code?.run([id]); };
+  editor.onRun = (id) => { code?.run([cell(id)]); };
   editor.highlight = () => code?.highlight ?? null;
   editor.images = images;
   const editBtn = $("edit");
