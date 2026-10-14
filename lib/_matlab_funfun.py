@@ -967,3 +967,134 @@ def lsqnonneg_(nargout, *args):
            _m._struct1({"iterations": float(it), "algorithm": _m.Char("active-set"), "message": _m.Char(msg)}),
            _m._unmat(lam)]
     return out[0] if nargout <= 1 else out[:max(nargout, 1)]
+
+
+# ------------------------------------------------------------------ quad
+
+@_bi("quad")
+def quad_(nargout, fun, *args):
+    """quad as its documentation page describes it: quad(fun, a, b),
+    quad(fun, a, b, tol), quad(fun, a, b, tol, trace) and
+    [q, fcnEvals] = quad(...), recursive adaptive Simpson quadrature of a
+    vectorized fun over finite a and b, with tol an absolute error
+    tolerance on each subinterval (default 1e-6).  Each step is the one of
+    Gander and Gautschi, "Adaptive quadrature -- revisited" (BIT 40, 2000),
+    section 3, the reference the page gives: on [a, b], with f at a, the
+    midpoint m and b already known, f at the two quarter points (two new
+    values), Simpson's rule i1 on [a, b] and the composite one i2 on its
+    halves, and i1 replaced by one Romberg step (16*i2 - i1)/15.  A
+    subinterval is accepted, with that value, when |i1 - i2| <= tol (the
+    page's absolute tolerance, in place of the paper's relative test), or
+    when, as in the paper's criterion (2.7), it holds no machine number
+    between its ends and m (with a warning that tol may not be met);
+    otherwise its halves are integrated in turn.  There is no limit on the
+    recursion depth, as the paper argues.
+
+    Sagebrush's own choices, where the page fixes nothing: a subinterval
+    with an Inf or NaN value is not subdivided further, and the warning
+    says the integrand is not finite; at most 10000 evaluations, after
+    which the remaining subintervals are accepted with a warning; the
+    trace's number format; and single precision: a single a, b or value
+    gives a single result, computed in double"""
+    if len(args) < 2:
+        raise _err("Not enough input arguments.")
+    if len(args) > 4:
+        raise _err("Too many input arguments.")
+    f = _m._fn_arg(fun)
+    single = False
+    ends = []
+    for v in args[:2]:
+        if type(v) is _m.Char or not _m._isnumlike(v) or _m._numel(v) != 1 or _m.class_(v) not in ("double", "single"):
+            raise _err("quad: the limits a and b must be double or single scalars.")
+        single = single or _m.class_(v) == "single"
+        e = _m._arr(v).reshape(-1)[0]
+        if np.iscomplexobj(e) and e.imag != 0:
+            raise _err("quad: the limits a and b must be real.")
+        e = float(e.real)
+        if not _math.isfinite(e):
+            raise _err("quad: the limits a and b must be finite.")
+        ends.append(e)
+    tol = 1e-6
+    if len(args) > 2 and not _is_empty(args[2]):
+        t = args[2]
+        if type(t) is _m.Char or not _m._isnumlike(t) or _m._numel(t) != 1 or np.iscomplexobj(_m._arr(t)) \
+                or not _m._scalar(t) >= 0:
+            raise _err("quad: tol must be a nonnegative scalar.")
+        tol = float(_m._scalar(t))
+    trace = len(args) > 3 and not _is_empty(args[3]) and bool(_m._logical_val(args[3]))
+    count = [0]
+    cplx = [False]
+
+    def values(xs):
+        r = _m._call(f, [_m._box(np.array(xs, dtype=float).reshape((-1, 1)))])
+        if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != len(xs):
+            raise _err("quad: the integrand must return a vector of the same length as its input "
+                       "(use array operators such as .* and ./).")
+        nonlocal single
+        single = single or _m.class_(r) == "single"
+        y = np.array(_m._arr(r)).reshape(-1)
+        count[0] += len(xs)
+        if np.iscomplexobj(y) and np.any(y.imag != 0):
+            cplx[0] = True
+            return [complex(v) for v in y]
+        return [float(v.real) if np.iscomplexobj(y) else float(v) for v in y]
+
+    a, b = ends
+    fa, fm, fb = values([a, (a + b) / 2, b])
+    warned = set()
+
+    def warn(key, msg):
+        if key not in warned:
+            warned.add(key)
+            _m.warning_(msg)
+
+    # (the recursion as an explicit stack of intervals, each "new", or
+    # waiting for its left or its right half; the halves' values are added
+    # as the recursion would add them)
+    stack = [{"lo": a, "hi": b, "f": (fa, fm, fb), "state": "new"}]
+    result = None
+    while stack:
+        fr = stack[-1]
+        lo, hi = fr["lo"], fr["hi"]
+        flo, fmid, fhi = fr["f"]
+        m = (lo + hi) / 2
+        h = (hi - lo) / 4
+        fml, fmr = values([lo + h, hi - h])
+        i1 = h / 1.5 * (flo + 4 * fmid + fhi)
+        i2 = h / 3 * (flo + 4 * (fml + fmr) + 2 * fmid + fhi)
+        i1 = (16 * i2 - i1) / 15
+        finite = all(_math.isfinite(abs(v)) for v in (flo, fmid, fhi, fml, fmr))
+        met = abs(i1 - i2) <= tol
+        tiny = m <= min(lo, hi) or max(lo, hi) <= m
+        if not (met or tiny or not finite or count[0] >= 10000):
+            fr["state"] = "left"
+            fr["mid"] = (fml, fmr)
+            stack.append({"lo": lo, "hi": m, "f": (flo, fml, fmid), "state": "new"})
+            continue
+        if not finite:
+            warn("finite", "quad: the integrand is Inf or NaN in the interval, so the result is not finite.")
+        elif tiny and not met:
+            warn("tiny", "quad: a subinterval holds no more machine numbers; the tolerance may not be met.")
+        elif not met:
+            warn("count", "quad: the limit of 10000 function evaluations was reached; the tolerance may not be met.")
+        if trace:
+            _m._write("%10d %21.14g %21.14g %21.14g\n" % (count[0], lo, hi - lo, i1.real))
+        q = i1
+        stack.pop()
+        # (deliver q to the waiting parents)
+        while stack:
+            parent = stack[-1]
+            if parent["state"] == "left":
+                parent["left"] = q
+                parent["state"] = "right"
+                pm = (parent["lo"] + parent["hi"]) / 2
+                pf = parent["f"]
+                stack.append({"lo": pm, "hi": parent["hi"], "f": (pf[1], parent["mid"][1], pf[2]), "state": "new"})
+                break
+            q = parent["left"] + q
+            stack.pop()
+        else:
+            result = q
+    q = result
+    out = _m._canon(np.array([[q]], dtype=np.complex64 if cplx[0] else np.float32)) if single else q
+    return out if nargout <= 1 else [out, float(count[0])][:nargout]

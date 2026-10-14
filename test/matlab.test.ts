@@ -919,3 +919,29 @@ test("lsqnonneg reproduces its published examples, and its limit, problem struct
     "lsqnonneg: C and d must be finite.",
   ]);
 });
+
+test("quad: its published example, the evaluation count, trace, warnings and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "myfun = @(x) 1./(x.^3-2*x-5); fprintf('%.4f\\n', quad(myfun,0,2));",
+    // (Simpson's rule is exact for a cubic: the first step is accepted, after 5 values)
+    "[q, n] = quad(@(x) x.^3 - x, 0, 2); disp(mat2str([q n]));",
+    "q = quad(@(x) x.^2, 0, 1, [], 1);",
+    "[q, n] = quad(@(x) exp(x), 0, 1); disp(abs(q - (exp(1) - 1)) < 1e-6 && n > 5);",
+    "disp(quad(@(x) x, 2, 2)); fprintf('%.4f\\n', quad(@(x) x, 1, 0)); disp(class(quad(@(x) x, single(0), 1)));",
+    "q = quad(@(x) exp(1i*x), 0, pi); fprintf('%.6f %.6f\\n', real(q), imag(q));",
+    "lastwarn(''); q = quad(@(x) 1./sqrt(x), 0, 1); [msg, id] = lastwarn; disp(msg); disp(isnan(q));",
+    "try, quad(@(x) 1, 0, 1), catch e, disp(e.message), end",
+    "try, quad(@(x) x, 0, Inf), catch e, disp(e.message), end",
+    "try, quad(@(x) x, 0, 1, -1), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "-0.4605", "[2 5]",
+    "5                     0                     1      0.33333333333333",
+    "1", "0", "-0.5000", "single", "0.000000 2.000000",
+    "quad: the integrand is Inf or NaN in the interval, so the result is not finite.", "1",
+    "quad: the integrand must return a vector of the same length as its input (use array operators such as .* and ./).",
+    "quad: the limits a and b must be finite.",
+    "quad: tol must be a nonnegative scalar.",
+  ]);
+});
