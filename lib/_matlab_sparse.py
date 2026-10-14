@@ -825,6 +825,282 @@ def _elementwise_fn(name):
     return g
 
 
+# ------------------------------------------------------------------ reductions and shape
+
+def _dim_arg(S, args):
+    """sum(S), sum(S, dim), sum(S, 'all'): 1, 2, 3+ (S itself), "all"; None for other options"""
+    if not args:
+        return 2 if S.m == 1 else 1
+    if len(args) > 1:
+        return None
+    a = args[0]
+    if type(a) is _m.Char or type(a) is _m.Str:
+        return "all" if _m._text(a).lower() == "all" else None
+    if not _is_scalar(a):
+        return None
+    d = _m._scalar(a)
+    if d != _math.floor(d) or d < 1:
+        return None
+    return int(d)
+
+
+def _group_sum(groups, vals, n):
+    if vals.dtype.kind == "c":
+        return _m._cplx(np.bincount(groups, weights=vals.real, minlength=n), np.bincount(groups, weights=vals.imag, minlength=n))
+    return np.bincount(groups, weights=vals, minlength=n)
+
+
+def _reduced(S, d, vals):
+    """a sum along dimension d (1, 2 or "all") as a sparse matrix"""
+    k = np.arange(S.n if d == 1 else S.m if d == 2 else 1, dtype=_I)
+    z = np.zeros(k.size, dtype=_I)
+    if d == 1:
+        return make(1, S.n, z, k, vals)
+    if d == 2:
+        return make(S.m, 1, k, z, vals)
+    return make(1, 1, z, z, vals)
+
+
+def sum_(S, d):
+    v = _fvals(S)
+    if d == "all":
+        r = _reduced(S, d, np.array([_group_sum(np.zeros(v.size, dtype=_I), v, 1)[0]]))
+    else:
+        r = _reduced(S, d, _group_sum(_cols(S) if d == 1 else S.ir, v, S.n if d == 1 else S.m))
+    return _cast(r, "single" if class_(S) == "single" else "double")
+
+
+def anyall(S, d, is_all):
+    v = S.pr.real if S.pr.dtype.kind == "c" else S.pr
+    if is_all:
+        nz = np.ones(v.size, dtype=bool)
+    else:
+        nz = ~np.isnan(v) if v.dtype.kind == "f" else np.ones(v.size, dtype=bool)
+    if d == "all":
+        g, size, full_n = np.zeros(v.size, dtype=_I), 1, S.m * S.n
+    elif d == 1:
+        g, size, full_n = _cols(S), S.n, S.m
+    else:
+        g, size, full_n = S.ir, S.m, S.n
+    cnt = np.bincount(g[nz], minlength=size) if g.size else np.zeros(size, dtype=_I)
+    vals = (cnt == full_n) if is_all else (cnt > 0)
+    return _reduced(S, d, vals)
+
+
+def diag_(S, k=0):
+    k = int(k)
+    if S.m == 1 or S.n == 1:
+        # a vector: the matrix with it on diagonal k
+        n = S.m * S.n + abs(k)
+        p = _keys(S)
+        return make(n, n, p + max(-k, 0), p + max(k, 0), S.pr)
+    rows, cols = S.ir, _cols(S)
+    on = (cols - rows) == k
+    length = max(0, min(S.m + min(k, 0), S.n - max(k, 0)))
+    r = rows[on] - max(-k, 0)
+    return make(length, 1, r, np.zeros(r.size, dtype=_I), S.pr[on])
+
+
+def tri(S, k, lower):
+    rows, cols = S.ir, _cols(S)
+    keep = (cols - rows <= k) if lower else (cols - rows >= k)
+    return make(S.m, S.n, rows[keep], cols[keep], S.pr[keep])
+
+
+def kron_(A, B):
+    A, B = _as_sparse(A), _as_sparse(B)
+    na, nb = A.pr.size, B.pr.size
+    ra, ca = np.repeat(A.ir, nb), np.repeat(_cols(A), nb)
+    rb, cb = np.tile(B.ir, na), np.tile(_cols(B), na)
+    vals = np.repeat(_fvals(A), nb) * np.tile(_fvals(B), na)
+    r = make(A.m * B.m, A.n * B.n, ra * B.m + rb, ca * B.n + cb, vals)
+    return r if not (islogical(A) and islogical(B)) else r
+
+
+def repmat_(S, r, c):
+    if r == 0 or c == 0 or not S.pr.size:
+        return zeros(S.m * r, S.n * c, islogical(S))
+    rows, cols = S.ir, _cols(S)
+    k = S.pr.size
+    br = np.repeat(np.arange(r, dtype=_I), k)
+    allr = np.tile(rows, r) + br * S.m
+    allc = np.tile(cols, r)
+    vals = np.tile(S.pr, r)
+    bc = np.repeat(np.arange(c, dtype=_I), allr.size)
+    return make(S.m * r, S.n * c, np.tile(allr, c), np.tile(allc, c) + bc * S.n, np.tile(vals, c))
+
+
+def flip(S, lr):
+    rows, cols = S.ir, _cols(S)
+    if lr:
+        return make(S.m, S.n, rows, S.n - 1 - cols, S.pr)
+    return make(S.m, S.n, S.m - 1 - rows, cols, S.pr)
+
+
+def _size_list(args):
+    """reshape's sizes: (m, n), one of them [] for 'whatever fits'"""
+    if len(args) == 1:
+        d = [float(x) for x in _m._arr(args[0]).reshape(-1)]
+        return d
+    out = []
+    for a in args:
+        out.append(None if _m._numel(a) == 0 else float(_m._scalar(a)))
+    return out
+
+
+def _reshape_b(nargout, S, *args):
+    if type(S) is not Sparse:
+        return _SPARSE_OUT_FN["reshape"](nargout, S, *args)
+    d = _size_list(args)
+    if len(d) > 2:
+        if all(x == 1 for x in d[2:] if x is not None) and None not in d[2:]:
+            d = d[:2]
+        else:
+            raise _err("N-D sparse arrays are not supported.", "MATLAB:reshape:sparseNDmatrix")
+    total = S.m * S.n
+    if None in d:
+        known = [x for x in d if x is not None]
+        other = int(known[0]) if known else 1
+        d = [total // other if x is None else int(x) for x in d]
+    return reshape(S, int(d[0]), int(d[1]))
+
+
+def _sum_b(nargout, x, *args):
+    if type(x) is Sparse:
+        d = _dim_arg(x, args)
+        if d is not None:
+            return x if d not in (1, 2, "all") else sum_(x, d)
+    return _SPARSE_OUT_FN["sum"](nargout, x, *args)
+
+
+def _anyall_b(is_all):
+    name = "all" if is_all else "any"
+
+    def g(nargout, x, *args):
+        if type(x) is Sparse:
+            d = _dim_arg(x, args)
+            if d is not None:
+                if d not in (1, 2, "all"):
+                    return _with(x, x.pr != 0, "logical") if not islogical(x) else x
+                return anyall(x, d, is_all)
+        return _SPARSE_OUT_FN[name](nargout, x, *args)
+    return g
+
+
+def _mean_b(nargout, x, *args):
+    if type(x) is Sparse and x.m * x.n:
+        d = _dim_arg(x, args)
+        if d in (1, 2, "all"):
+            n = x.m if d == 1 else x.n if d == 2 else x.m * x.n
+            return binop("rdivide", sum_(x, d), float(n))
+    return _SPARSE_OUT_FN["mean"](nargout, x, *args)
+
+
+def _diag_b(nargout, x, k=0.0):
+    if type(x) is Sparse:
+        return diag_(x, _m._scalar(k))
+    return _SPARSE_OUT_FN["diag"](nargout, x, k)
+
+
+def _tri_b(lower):
+    name = "tril" if lower else "triu"
+
+    def g(nargout, x, k=0.0):
+        if type(x) is Sparse:
+            return tri(x, int(_m._scalar(k)), lower)
+        return _SPARSE_OUT_FN[name](nargout, x, k)
+    return g
+
+
+def _kron_b(nargout, a, b):
+    if type(a) is Sparse or type(b) is Sparse:
+        for x in (a, b):
+            if _m.class_(x) in _m._INTS:
+                raise _err("Sparse integer array arithmetic operations are not supported.", "MATLAB:sparseInteger")
+        r = kron_(a, b)
+        return _cast(r, _m._arith_class(a, b, "times")) if not (islogical(r) and False) else r
+    return _FULL["kron"](nargout, a, b)
+
+
+def _repmat_b(nargout, x, *args):
+    if type(x) is Sparse:
+        if len(args) == 1:
+            d = [int(float(v)) for v in _m._arr(args[0]).reshape(-1)]
+            d = d * 2 if len(d) == 1 else d
+        else:
+            d = [int(_m._scalar(a)) for a in args]
+        if len(d) == 2 or all(v == 1 for v in d[2:]):
+            return repmat_(x, max(d[0], 0), max(d[1], 0))
+    return _SPARSE_OUT_FN["repmat"](nargout, x, *args)
+
+
+def _flip_b(lr):
+    name = "fliplr" if lr else "flipud"
+
+    def g(nargout, x):
+        if type(x) is Sparse:
+            return flip(x, lr)
+        return _FULL[name](nargout, x)
+    return g
+
+
+# built-ins MATLAB keeps sparse, computed on the full matrix: which of their
+# outputs are sparse (the others, such as max's indices, full)
+_SPARSE_OUT = {
+    "prod": (0,), "cumsum": (0,), "cumprod": (0,), "max": (0,), "min": (0,), "median": (0,), "std": (0,),
+    "var": (0,), "dot": (0,), "circshift": (0,), "rot90": (0,), "permute": (0,), "squeeze": (0,),
+    "blkdiag": (0,), "sort": (0,), "unique": (0,), "sum": (0,), "any": (0,), "all": (0,), "mean": (0,),
+    "diag": (0,), "tril": (0,), "triu": (0,), "repmat": (0,), "reshape": (0,),
+}
+_SPARSE_OUT_FN = {}
+
+
+def _sparse_out(name):
+    f = _FULL[name]
+    which = _SPARSE_OUT[name]
+
+    def g(nargout, *args):
+        if not _has_sparse(args):
+            return f(nargout, *args)
+        r = f(nargout, *[full(a) if type(a) is Sparse else a for a in args])
+        multi = type(r) is list
+        outs = r if multi else [r]
+        outs = [from_full(o) if k in which and _m._isnumlike(o) and _m.class_(o) in ("double", "single", "logical")
+                and len(_m._dims(o)) == 2 else o for k, o in enumerate(outs)]
+        return outs if multi else outs[0]
+    return g
+
+
+def blkdiag_b(nargout, *args):
+    """blkdiag(A, B, ...): the matrices along the diagonal; sparse if one is"""
+    if not args:
+        return np.zeros((0, 0))
+    mats = []
+    for a in args:
+        if not (_m._isnumlike(a) or type(a) is Sparse) or len(_m._dims(a)) > 2:
+            raise _err("Inputs must be 2-D numeric or logical arrays.")
+        mats.append(_as_sparse(a) if _m.class_(a) in ("double", "single", "logical") else from_full(_m._farr(a)))
+    rows, cols, vals = [], [], []
+    m = n = 0
+    for A in mats:
+        rows.append(A.ir + m)
+        cols.append(_cols(A) + n)
+        vals.append(_fvals(A))
+        m += A.m
+        n += A.n
+    r = make(m, n, np.concatenate(rows), np.concatenate(cols), np.concatenate(vals))
+    cls = "single" if any(_m.class_(a) == "single" for a in args) else "double"
+    r = _cast(r, cls)
+    return r if _has_sparse(args) else full(r)
+
+
+_SPECIAL = {
+    "sum": _sum_b, "any": _anyall_b(False), "all": _anyall_b(True), "mean": _mean_b, "diag": _diag_b,
+    "tril": _tri_b(True), "triu": _tri_b(False), "kron": _kron_b, "repmat": _repmat_b, "reshape": _reshape_b,
+    "fliplr": _flip_b(True), "flipud": _flip_b(False),
+}
+
+
 # ------------------------------------------------------------------ built-in functions
 
 def _int(x, what="Sparse matrix sizes", clip=False):
@@ -1045,10 +1321,20 @@ def activate():
 
 
 def _register():
+    _m._B["blkdiag"] = _m.Builtin(blkdiag_b, "blkdiag")
     for name in sorted(_ZERO_KEEPING | _SPARSE_FULL):
         if name in _m._B:
             _FULL[name] = _m._B[name].f
             _NATIVE[name] = _elementwise_fn(name)
+    for name in _SPARSE_OUT:
+        if name in _m._B:
+            _FULL[name] = _m._B[name].f
+            _SPARSE_OUT_FN[name] = _sparse_out(name)
+            _NATIVE[name] = _SPARSE_OUT_FN[name]
+    for name, f in _SPECIAL.items():
+        if name in _m._B:
+            _FULL.setdefault(name, _m._B[name].f)
+            _NATIVE[name] = f
     for name in ("plus", "minus", "times", "rdivide", "power"):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = _operator_fn(name)

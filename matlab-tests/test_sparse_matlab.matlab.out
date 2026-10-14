@@ -242,6 +242,14 @@ logical sparse nnz=5 4x4
 0 0 1 0 0 1 1 0 0 0 0 1 1 0 0 0 
 logical 4x4
 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+logical sparse nnz=4 1x4
+1 1 1 1 
+logical sparse nnz=0 1x4
+0 0 0 0 
+logical sparse nnz=4 4x1
+1 1 1 1 
+logical sparse nnz=1 1x1
+1 
 logical sparse nnz=13 4x4
 1 1 1 1 1 1 0 1 1 1 1 0 0 1 1 1 
 double sparse nnz=5 4x4
@@ -296,16 +304,71 @@ logical sparse nnz=0 4x4
 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
 logical 4x4
 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+double sparse nnz=16 4x4
+2 2 2 2 2 2 3 2 2 2 2 4 5 2 2 2 
+double sparse nnz=6 4x4
+1 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=5 4x4
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=0 4x4
+0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+double sparse nnz=16 4x4
+-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 
 double sparse nnz=5 4x4
 0 0 1 0 0 4 9 0 0 0 0 16 25 0 0 0 
 double sparse nnz=5 4x4
 0 0 1 0 0 4 9 0 0 0 0 16 25 0 0 0 
 double 4x4
 1 1 2 1 1 3 4 1 1 1 1 5 6 1 1 1 
+double sparse nnz=4 1x4
+1 5 4 5 
+double sparse nnz=4 4x1
+5 2 4 4 
+double sparse nnz=1 1x1
+15 
+double sparse nnz=1 1x1
+15 
+double sparse nnz=3 1x4
+0 1 1 1 
+double sparse nnz=3 1x4
+re 1 0 -3 0 
+im 2 0 0 2 
+double sparse nnz=0 1x4
+0 0 0 0 
 double 1x4
 2 12 5 6 
+double sparse nnz=10 4x4
+0 0 1 1 0 2 5 5 0 0 0 4 5 5 5 5 
+double sparse nnz=10 4x4
+0 0 1 0 0 2 4 0 0 2 4 4 5 2 4 4 
+double sparse nnz=1 4x4
+0 0 0 0 0 0 0 0 0 0 0 0 5 0 0 0 
+double sparse nnz=4 1x4
+1 3 4 5 
+double sparse nnz=4 4x1
+5 2 3 4 
+double sparse nnz=1 1x1
+5 
+double sparse nnz=0 1x4
+0 0 0 0 
+double sparse nnz=0 1x4
+0 0 0 0 
+double sparse nnz=0 1x3
+0 0 0 
+double sparse nnz=4 1x4
+0.25 1.25 1 1.25 
+double sparse nnz=4 4x1
+1.25 0.5 1 1 
+double sparse nnz=1 1x4
+0 1 0 0 
+double sparse nnz=4 1x4
+0.5 1.5 2 2.5 
+double sparse nnz=4 1x4
+0.25 2.25 4 6.25 
 double 1x1
 3 
+double sparse nnz=4 1x4
+1 13 16 25 
 double 1x1
 5 
 double 1x1
@@ -334,12 +397,60 @@ im -2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2
 double sparse nnz=3 4x4
 re 1 0 0 0 0 0 -3 0 0 0 0 0 0 0 0 0 
 im 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 
+double sparse nnz=5 2x8
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=5 16x1
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
 double sparse nnz=5 16x1
 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
 double sparse nnz=5 1x16
 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=10 8x4
+0 0 1 0 0 0 1 0 0 2 3 0 0 2 3 0 0 0 0 4 0 0 0 4 5 0 0 0 5 0 0 0 
+double sparse nnz=4 1x8
+0 3 0 -1 0 3 0 -1 
+double sparse nnz=10 8x8
+0 0 0 0 1 0 0 0 0 0 0 0 0 1 0 0 0 0 2 0 3 0 0 0 0 0 0 2 0 3 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 0 4 5 0 0 0 0 0 0 0 0 5 0 0 0 0 0 0 
+double sparse nnz=30 16x16
+0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 2 0 2 0 3 0 3 0 0 0 0 0 0 0 0 0 0 4 6 0 0 6 9 0 0 0 0 0 0 0 0 0 0 0 0 8 0 0 0 12 0 0 0 0 0 0 0 0 10 0 0 0 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8 12 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 16 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 5 0 5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 10 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+double sparse nnz=30 16x16
+0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 2 3 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 4 0 0 0 0 5 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 3 0 0 0 0 0 0 0 0 0 0 4 6 0 0 6 9 0 0 0 0 0 0 0 0 0 0 0 0 8 0 0 0 12 0 0 0 0 0 0 0 0 10 0 0 0 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8 12 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 16 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 10 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
 double 16x16
 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 2 3 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 4 0 0 0 0 5 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 2 0 2 0 3 0 3 0 0 0 0 0 0 0 0 0 0 4 6 0 0 6 9 0 0 0 0 0 0 0 0 0 0 0 0 8 0 0 0 12 0 0 0 0 0 0 0 0 10 0 0 0 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8 12 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 16 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 5 0 5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 10 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+double sparse nnz=1 4x1
+0 2 0 0 
+double sparse nnz=0 3x1
+0 0 0 
+double sparse nnz=2 4x4
+0 0 0 0 0 3 0 0 0 0 0 0 0 0 0 -1 
+double sparse nnz=2 2x2
+1 0 0 2 
+double sparse nnz=4 4x4
+0 0 1 0 0 2 3 0 0 0 0 4 0 0 0 0 
+double sparse nnz=2 4x4
+0 0 0 0 0 2 0 0 0 0 0 0 5 0 0 0 
+double sparse nnz=3 4x4
+0 0 1 0 0 0 3 0 0 0 0 4 0 0 0 0 
+double sparse nnz=1 4x4
+0 0 0 0 0 0 0 0 0 0 0 0 5 0 0 0 
+double sparse nnz=5 4x4
+5 0 0 0 0 0 0 4 0 2 3 0 0 0 1 0 
+double sparse nnz=5 4x4
+0 1 0 0 0 3 2 0 4 0 0 0 0 0 0 5 
+double sparse nnz=5 4x4
+5 0 0 0 0 0 2 0 0 0 3 1 0 4 0 0 
+double sparse nnz=5 4x4
+0 0 0 1 0 0 2 3 4 0 0 0 0 5 0 0 
+double sparse nnz=5 4x4
+0 0 0 5 0 2 0 0 1 3 0 0 0 0 4 0 
+double sparse nnz=5 4x4
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=7 6x6
+0 0 1 0 0 0 0 2 3 0 0 0 0 0 0 4 0 0 5 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 1 
+double sparse nnz=11 8x8
+1 0 1 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 4 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 4 0 0 0 0 5 0 0 0 
+double 8x8
+1 0 1 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 4 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 4 0 0 0 0 5 0 0 0 
 double sparse nnz=11 4x8
 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 1 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
 double sparse nnz=11 4x8
@@ -471,6 +582,14 @@ cell 4x4
 logical 1x2
 1 0 
 ERROR MATLAB:arrayfun:SparseInputNotSupported: Sparse inputs are not supported by ARRAYFUN.
+double sparse nnz=5 4x4
+0 0 0 1 0 0 2 3 0 0 0 4 0 0 0 5 
+double sparse nnz=5 4x4
+5 2 3 4 0 0 1 0 0 0 0 0 0 0 0 0 
+double sparse nnz=5 6x1
+0 1 2 3 4 5 
+double sparse nnz=5 6x1
+0 1 2 3 4 5 
 logical 4x4
 1 1 0 1 1 0 1 1 1 1 1 0 0 1 1 1 
 double 1x1
