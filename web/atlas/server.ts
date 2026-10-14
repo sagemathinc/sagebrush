@@ -22,8 +22,19 @@ async function json<T>(asset: Asset, path: string): Promise<T | null> {
 
 // (the site's policy, as on every page; the search box is a form)
 const CSP = pagePolicy().replace("form-action 'none'", "form-action 'self'");
+// (and cross-origin isolated, as web/_headers makes every static page: it
+// doesn't reach a response made here)
 const html = (body: string, status = 200, cache = "public, max-age=600") =>
-  new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": cache, "content-security-policy": CSP } });
+  new Response(body, {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": cache,
+      "content-security-policy": CSP,
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-embedder-policy": "require-corp",
+    },
+  });
 const jsonResponse = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*", "cache-control": "public, max-age=600" } });
 const redirect = (to: string, status = 302) => new Response(null, { status, headers: { location: to } });
 

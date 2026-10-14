@@ -123,9 +123,13 @@ try {
   await collect();
   ok(violations.length === 0, "no Content-Security-Policy violations: " + violations.join(", "));
   for (const path of ["/atlas/", "/atlas/mf/389.2.a.e", "/atlas/mf/?level=11", "/atlas/mf/389.2.a.zz"]) {
-    const csp = (await fetch(base + path)).headers.get("content-security-policy") ?? "";
+    const h = (await fetch(base + path)).headers;
+    const csp = h.get("content-security-policy") ?? "";
     ok(/script-src 'self'/.test(csp) && /object-src 'none'/.test(csp), `${path} has the site's Content-Security-Policy`);
+    ok(h.get("cross-origin-opener-policy") === "same-origin" && h.get("cross-origin-embedder-policy") === "require-corp", `${path} is cross-origin isolated, as every static page`);
   }
+  await open("/atlas/mf/389.2.a.e");
+  ok((await ev("crossOriginIsolated")) === true, "a record page is crossOriginIsolated in the browser");
 } catch (e) {
   console.log("ERROR", e.message);
   process.exitCode = 1;

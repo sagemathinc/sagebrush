@@ -13,7 +13,7 @@
 // - images: pictures in this browser's IndexedDB (images.ts);
 // - outputs: slow code items' outputs, kept between visits (outcache.ts);
 // - code: the notebook's engine (code.ts), Python in the runner, an
-//   opaque-origin sandboxed frame (?runner=0: a plain worker);
+//   opaque-origin sandboxed frame (?runner=0 on a loopback host: a plain worker);
 // - math: KaTeX (sagebrush-math.js, or an exported file's own copy);
 // - history: TimeTravel's versions in this browser's IndexedDB (history.ts,
 //   patchflow from sagebrush-history.js);
@@ -102,7 +102,9 @@ const host: BoardHost = {
   // opaque-origin sandboxed frame, as on the notebook page (design/runner.md);
   // an exported file's, carried in it or fetched from its site, by its id or
   // the latest (engine.ts)
-  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), q.get("runner") !== "0" && globalThis.crossOriginIsolated === true && !(window as any).__TAURI__))
+  // (?runner=0 only on a loopback host, for tests: elsewhere a link could add
+  // it to someone else's code; only in Chromium, as on the notebook page)
+  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__))
     : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob

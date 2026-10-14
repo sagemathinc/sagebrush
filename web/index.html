@@ -377,8 +377,11 @@ import { RunnerWorker } from "./notebook/runner-worker.js";
 // Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md),
 // where the page is cross-origin isolated (the runner hands files to the
 // interpreter through a SharedArrayBuffer) and not the desktop app's (whose
-// pages are its own); ?runner=0 runs it in a plain worker
-const RUNNER = new URLSearchParams(location.search).get("runner") !== "0" && globalThis.crossOriginIsolated === true && !window.__TAURI__;
+// pages are its own); ?runner=0 runs it in a plain worker, on a loopback
+// host only (tests): elsewhere a link could add it to someone else's code.
+// Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
+// every browser on iOS, doesn't start its worker (design/runner.md, Next)
+const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
 import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
