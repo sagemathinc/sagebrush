@@ -25,3 +25,8 @@ show(r(funm([1 1; 0 1], @exp))); show(r(funm([1 1; 0 1], @cos))); show(r(funm([1
 show(r(funm([2 1; 0 2], @cosh))); show(r(funm([2 1; 0 2], @sinh))); show(r(funm([2 1; 0 2], @log)));
 show(invhilb(9)); A = invhilb(12); show(A(6:7, 11:12));
 show(magic(5)); show(magic(6)); show(magic(8)); show(magic(10)); show(magic(14)); show(sum(magic(18)) - sum(magic(18), 2)');
+% (rcond, estimated: agrees with LAPACK's estimate, as Octave's rcond uses it)
+r10 = @(x) round(x ./ 10.^floor(log10(abs(x))) * 1e9) / 1e9 .* 10.^floor(log10(abs(x)));
+show(r10([rcond([4 -2 1; 3 6 -4; 2 1 8]) rcond(vander(1:6)) rcond(toeplitz([4 1 0 0 2])) rcond([1 2 3; 4 5 6; 7 8 10])]));
+show(r10([rcond([2 -1 0 0; -1 2 -1 0; 0 -1 2 -1; 0 0 -1 2]) rcond(pascal(7)) rcond([1+2i 3; 4i 5-1i]) rcond(magic(6) + eye(6))]));
+show(rcond(eye(3))); show(rcond(zeros(2)));
