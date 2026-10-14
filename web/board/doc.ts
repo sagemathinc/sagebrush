@@ -306,8 +306,8 @@ export type MeasuredNote = DocNote & { img?: ImageInfo & { key: string } };
 /** A pen's width, unless a stroke says. */
 export const INK_SIZE = 3;
 
-// a stroke's box: its points, and the pen's size around them
-const inkSize = (n: DocInk): Box => {
+/** A stroke's box: its points, and the pen's size around them. */
+export const inkSize = (n: DocInk): Box => {
   const pad = n.size ?? INK_SIZE;
   let w = 0, h = 0;
   for (let i = 0; i + 2 < n.points.length; i += 3) { w = Math.max(w, n.points[i]); h = Math.max(h, n.points[i + 1]); }

@@ -17,14 +17,17 @@
 //
 // Notes, texts and code cells become notes (code with its code; a Sage
 // kernel makes the board Sage), at their places and widths (their heights
-// follow their text); frames become groups holding what is inside them
-// (frames within frames, groups within groups); edges become edges.  The
-// rest has nothing like it on a board yet (pen strokes, icons, timers,
-// stopwatches, chats, terminals, speaker notes, slides' backgrounds): it is
-// left out, and counted, so the person is told what was.  Outputs are not
+// follow their text); pen strokes become strokes (their paths, from the
+// element's corner, as wide as CoCalc drew them, 2 radius; their color; a
+// highlighter's opacity; CoCalc's chisel nib, round); frames become groups
+// holding what is inside them (frames within frames, groups within groups);
+// edges become edges.  The rest has nothing like it on a board yet (icons,
+// timers, stopwatches, chats, terminals, speaker notes, slides'
+// backgrounds): it is left out, and counted, so the person is told what was.  Outputs are not
 // kept: a board's code runs when it is opened.
 
-import type { BoardDoc, BoardPage, DocEdge, DocNote } from "./doc";
+import { inkNode, inkSize, type BoardDoc, type BoardPage, type DocEdge, type DocInk, type DocNote } from "./doc";
+import { simplifyInk } from "./ink";
 import { nest } from "./nest";
 
 const TYPES = new Set(["chat", "code", "edge", "frame", "icon", "note", "page", "pen", "selection", "slide", "stopwatch", "terminal", "text", "timer", "speaker_notes"]);
@@ -77,13 +80,27 @@ export function fromCocalcBoard(text: string): Converted {
   }
   const markdown = (s: unknown) => (typeof s === "string" ? (legacy ? s.replace(/\\([()[\]])/g, "$1") : s) : "");
 
+  // a pen stroke: its path (from the element's corner) on the board, its width, color, opacity
+  const stroke = (e: El): DocInk | null => {
+    const path: unknown[] = Array.isArray(e.data?.path) ? e.data.path : [], pts: number[] = [];
+    for (let i = 0; i + 1 < path.length; i += 2) {
+      const x = path[i], y = path[i + 1];
+      if (typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y)) pts.push(num(e.x) + x, num(e.y) + y, 0.5);
+    }
+    if (!pts.length) return null;
+    const r = typeof e.data?.radius === "number" && e.data.radius > 0 ? Math.min(100, e.data.radius) : 1;
+    const opacity = typeof e.data?.opacity === "number" && e.data.opacity > 0 && e.data.opacity < 1 ? e.data.opacity : undefined;
+    return inkNode(e.id, simplifyInk(pts, 0.2), { size: 2 * r, color: typeof e.data?.color === "string" ? e.data.color : undefined, opacity });
+  };
   const pages = Array.from({ length: count }, () => ({ items: [] as El[], frames: [] as El[], edges: [] as El[] }));
+  const strokes = new Map<string, DocInk>();
   let sage = false;
   for (const e of els) {
     if (e.type === "page" || e.type === "selection") continue; // (a page is made below; a selection is not content)
     if (e.invisible && e.type !== "speaker_notes") { leave(e.type); continue; }
     const p = pages[Math.min(count - 1, pageOf(e))];
     if (e.type === "note" || e.type === "text" || e.type === "code") p.items.push(e);
+    else if (e.type === "pen") { const s = stroke(e); if (s) { strokes.set(e.id, s); p.items.push(e); } else leave("pen"); }
     else if (e.type === "frame") p.frames.push(e);
     else if (e.type === "edge") p.edges.push(e);
     else leave(e.type);
@@ -101,11 +118,12 @@ export function fromCocalcBoard(text: string): Converted {
 
   const converted = pages.map(({ items, frames, edges }): BoardPage => {
     // (each frame a group holding what is inside it, each note where it was: nest.ts)
-    const boxed = (e: El) => ({ ...box(e), id: e.id, z: num(e.z), e });
+    // (a stroke's box: its points and its width around them)
+    const boxed = (e: El) => { const s = strokes.get(e.id); return { ...(s ? { x: s.x, y: s.y, ...inkSize(s) } : box(e)), id: e.id, z: num(e.z), e }; };
     const nodes = nest(frames.map(boxed), items.map(boxed), ({ e }) => {
       const title = typeof e.str === "string" ? e.str.trim() : "";
       return { id: e.id, ...(title ? { title } : {}) };
-    }, ({ e }) => note(e));
+    }, ({ e }) => strokes.get(e.id) ?? note(e));
     const ids = new Set([...items, ...frames].map((e) => e.id));
     const es: DocEdge[] = [];
     for (const e of edges) {
