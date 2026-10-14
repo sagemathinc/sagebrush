@@ -690,10 +690,15 @@ def _col_norms(M):
 
 
 def _qr_solve(A, B):
-    """A \\ B for a rectangular A as MATLAB solves it: Householder QR with
-    column pivoting (LAPACK's dgeqp3 and dlarfg conventions), the rank where
-    |R(k,k)| falls to max(m,n) eps |R(1,1)| or below, and the basic solution:
-    the free variables 0, with MATLAB's warning when the rank is short"""
+    """A \\ B for a rectangular A: Householder QR with column pivoting
+    (Golub and Van Loan, "Matrix Computations", 5.4.1; the reflectors with
+    LAPACK's dlarfg conventions), and the basic solution, the free variables
+    0.  The rank is the number of |R(k,k)| above max(m,n) eps |R(1,1)|.
+    This formula and the basic solution were in the original
+    implementation; they are not documented, but three published examples'
+    "Rank deficient" warnings print exactly this tolerance (ones(3) by QR,
+    [1 2]/[1 0; 2 0; 1 0], and magic(8)'s first six columns), and the
+    latter two's published solutions are the basic ones Sagebrush gives"""
     m, n = A.shape
     cplx = A.dtype.kind == "c" or B.dtype.kind == "c"
     dt = np.complex128 if cplx else np.float64
