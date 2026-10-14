@@ -218,6 +218,8 @@ export class Editor {
     await this.change(this.keep(cur, JSON.parse(next)));
     this.gone();
   }
+  /** Forget the undo and redo steps (the document changed elsewhere: an undo would write the older one back). */
+  forget() { this.undos = []; this.redos = []; }
   // (the settings undo leaves as they are: the toolbar's tools)
   private keep(cur: BoardDoc, d: BoardDoc): BoardDoc {
     if (cur.tools) d.tools = cur.tools;

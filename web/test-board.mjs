@@ -652,6 +652,18 @@ try {
     outs = await ev("(async () => JSON.stringify(await window.sagebrush.board.outputs()))()");
     check(outs.includes("1024") && outs.includes("<2, 1>, <3, 3>, <19, 1>"), "switched to Magma, the items run as Magma: " + outs);
     check((await docOf()).mode === "magma", "the board's file says magma");
+    // notes measured all at once (mount.ts premeasure) are the sizes measuring each alone gives
+    const many = { title: "Measured", nodes: [
+      ...Array.from({ length: 60 }, (_, i) => ({ id: "s" + i, title: "Note " + i, text: "Some *text* " + "word ".repeat(i % 13) + (i % 5 === 0 ? "with $x^{" + i + "}$" : ""), ...(i % 4 === 0 ? { detail: "More, when zoomed in" } : {}), ...(i % 6 === 0 ? { ref: "https://example.org/" + i } : {}), ...(i % 3 === 0 ? { fit: true } : { w: 220 + (i % 5) * 40 }), x: (i % 10) * 420, y: Math.floor(i / 10) * 400 })),
+      { id: "grp", kind: "group", title: "A group", text: "Its own text, measured too", children: [{ id: "g1", title: "Member", text: "inside" }], x: 0, y: 3000 },
+    ] };
+    await ev("(() => { const b = window.board; window.__counts = { one: 0, many: 0 }; for (const k of ['measure', 'measureWidth']) { const f = b[k].bind(b); b[k] = (...a) => (window.__counts.one++, f(...a)); } if (b.measureMany) { const g = b.measureMany.bind(b); b.measureMany = (l) => (window.__counts.many++, g(l)); } return 1; })()");
+    await ev(`window.sagebrush.board.load(${JSON.stringify(many)}).then(() => 1)`);
+    const counts = await ev("window.__counts");
+    await ev("(() => { for (const k of ['measure', 'measureWidth', 'measureMany']) delete window.board[k]; return 1; })()");
+    check(counts.one === 0 && counts.many >= 1 && counts.many <= 3, "a board's notes are measured together, not one layout each: " + JSON.stringify(counts));
+    const mismatched = await ev(`(() => { const d = window.sagebrush.board.snapshot().doc, bad = []; for (const n of d.nodes) { if (n.kind === "group") continue; const it = window.board.item(n.id); const h = Math.max(60, Math.ceil(window.board.measure({ kind: "note", title: n.title, text: n.text, detail: n.detail, ref: n.ref }, it.w)) + 2); if (h !== it.h) bad.push([n.id, it.w, it.h, h]); } return bad; })()`);
+    check(mismatched.length === 0, "notes measured all at once have the sizes measuring each alone gives: " + JSON.stringify(mismatched.slice(0, 5)));
     await ev("localStorage.clear()");
   }
   check(!errors.length, "page errors: " + errors.join(" | "));

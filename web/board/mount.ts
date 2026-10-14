@@ -74,6 +74,10 @@ export interface BoardStore {
    * beside it; `set`: so it is now.  Its notes' remote pictures show at
    * once; else each when clicked (William, SEC-89C-3). */
   writtenHere?(set?: boolean): boolean;
+  /** The document as it is elsewhere, when it changes there (another person;
+   * or newer than the copy load() gave at once: cached.ts), with a notice
+   * for the caption (a merge's); shown in place.  Returns: stop. */
+  subscribe?(f: (doc: BoardDoc, notice?: string) => void): () => void;
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
@@ -291,7 +295,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     // (edges' routes are found between frames: large boards show at once,
     // their edges straight until routed)
+    premeasure(v);
+    if (templateOf(d, pageIx) >= 0) premeasure(pageView(d, templateOf(d, pageIx)));
     const { items, edges, routing } = layout(v, measure, { deferRoutes: true });
+    codeHeights.clear();
     // (laid out again after an edit: an edge whose ends did not move keeps its
     // route until the new ones are ready, so only the moved items' edges are
     // straight meanwhile; the new routes replace them all at once)
@@ -364,21 +371,56 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     redraw().catch(fail);
   };
 
+  const heightKey = (n: MeasuredNote, w: number) => JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w]);
+  const widthKey = (n: MeasuredNote, max: number) => JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, max]);
+  // (code items' heights measured with the rest for one layout: premeasure)
+  const codeHeights = new Map<string, number>();
   function measure(n: MeasuredNote, w: number) {
     // (a code item's height changes with its output: measured each time)
-    if (n.code !== undefined) return board.measure({ ...n, kind: "note", order: 1, image: n.img }, w);
-    const k = JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w]);
+    if (n.code !== undefined) {
+      const k = n.id + "\0" + heightKey(n, w), h = codeHeights.get(k);
+      if (h !== undefined) { codeHeights.delete(k); return h; }
+      return board.measure({ ...n, kind: "note", order: 1, image: n.img }, w);
+    }
+    const k = heightKey(n, w);
     let h = heights.get(k);
     if (h === undefined) heights.set(k, (h = board.measure({ ...n, kind: "note", image: n.img }, w)));
     return h;
   }
   // (and a `fit` note's width)
   measure.width = (n: MeasuredNote, max: number) => {
-    const k = JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, max]);
+    const k = widthKey(n, max);
     let w = heights.get(k);
     if (w === undefined) heights.set(k, (w = board.measureWidth({ ...n, kind: "note", image: n.img }, max)));
     return w;
   };
+  // What layout() will measure for `v`, measured at once: the notes all put
+  // on the page together and read after one layout of it, not one layout
+  // each (a large board's first drawing: 1000 notes, 250 ms of the 440).
+  // Found by laying it out with a measure that only notes what it is asked:
+  // the widths first (a fitted note's height is measured at its width), then
+  // the heights.
+  function premeasure(v: BoardDoc) {
+    for (let pass = 0; pass < 2; pass++) {
+      const hs = new Map<string, [MeasuredNote, number]>(), ws = new Map<string, [MeasuredNote, number]>();
+      const ask = Object.assign((n: MeasuredNote, w: number) => {
+        const k = n.code !== undefined ? n.id + "\0" + heightKey(n, w) : heightKey(n, w);
+        if (!(n.code !== undefined ? codeHeights : heights).has(k)) hs.set(k, [n, w]);
+        return 60;
+      }, { width: (n: MeasuredNote, max: number) => { const k = widthKey(n, max), w = heights.get(k); if (w === undefined) ws.set(k, [n, max]); return w ?? max; } });
+      layout(v, ask, { deferRoutes: true });
+      if (ws.size) {
+        const got = board.measureMany([...ws.values()].map(([n, max]) => ({ it: { ...n, kind: "note" as const, image: n.img }, w: max, width: true })));
+        [...ws.keys()].forEach((k, i) => heights.set(k, got[i]));
+        continue;
+      }
+      if (hs.size) {
+        const got = board.measureMany([...hs.values()].map(([n, w]) => ({ it: { ...n, kind: "note" as const, image: n.img, ...(n.code !== undefined ? { order: 1 } : {}) }, w })));
+        [...hs].forEach(([k, [n]], i) => (n.code !== undefined ? codeHeights : heights).set(k, got[i]));
+      }
+      return;
+    }
+  }
 
   // The engine of code items: the host's (none: the code shows, as text, as in an exported file)
   let code: BoardCode | null = null;
@@ -540,7 +582,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (a document the host or an agent loads meanwhile wins: the store's,
   // arriving later, is not shown over it)
   const opening = loads;
-  host.store?.load().then((r) => {
+  const opened = host.store?.load().then((r) => {
     if (!r || loads !== opening) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
@@ -560,6 +602,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
+  // a document from elsewhere (the store's: another person's change, or the
+  // remote's, newer than the copy shown first): shown in place, the same
+  // document (its camera, outputs and history kept), once the first is; the
+  // undo steps before it forgotten, so that an undo cannot write the older
+  // document back over it
+  const unsubscribe = host.store?.subscribe?.((d, note) => {
+    (opened ?? Promise.resolve()).then(async () => {
+      if (destroyed || !doc) return;
+      closeTimeTravel(false);
+      const prev = doc;
+      editor.forget();
+      if (!(await show(d))) return;
+      remember(prev);
+      if (note) say(note);
+    }).catch(fail);
+  });
+  if (unsubscribe) offs.push(unsubscribe);
   // The board's title: in Edit, a click renames it where it is (Enter, or
   // leaving, keeps the name, as an edit; Esc does not)
   const titleEl = $("title");
