@@ -538,6 +538,10 @@ The rest:
   `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
   construction is Sagebrush's own (exactly the requested number of
   nonzeros);
+- automatic histogram edges: MATLAB documents what its bins do but not how
+  it picks "nice" edges, so Sagebrush's rules are its own (Scott's width
+  rounded to Heckbert's nice numbers, 1, 2, 5 or 10 times a power of 10)
+  and its edges can differ from MATLAB's;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
