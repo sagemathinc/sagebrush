@@ -321,6 +321,30 @@ try {
   await sleep(2500);
   const hasNew = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idSwept)}, ${JSON.stringify(newKey)}]); g.onsuccess = () => { db.close(); res(!!g.result); }; }; })`);
   check(hasNew, "the newer run's entry survives the older run's sweep");
+
+  // The sweep's mark is of one moment: if an item runs while the older run's
+  // keys are being found (their hash held here), that sweep doesn't happen,
+  // and the newer entry stays, the board over its cap (CORR-68B-2)
+  await ev(`(() => { window.__holdDigest = 0; const digest = crypto.subtle.digest.bind(crypto.subtle); crypto.subtle.digest = (...a) => { const p = digest(...a); if (window.__holdDigest !== 1) return p; window.__holdDigest = 2; return new Promise((res, rej) => { window.__digestHeld = () => p.then(res, rej); }); }; const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (value, key) { const r = put.call(this, value, key); if (window.__digestAfterPut && this.name === "entries" && value && Array.isArray(value.outputs)) { window.__digestAfterPut = false; this.transaction.addEventListener("complete", () => { window.__holdDigest = 1; }); } return r; }; })(), 1`);
+  await ev("window.__holdPut = 0, window.__released = [], 1");
+  const marked = { title: "marked", seed: SEED_C, nodes: [{ id: "m", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('m', os.urandom(8).hex())" }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(marked)}).then(() => 1)`);
+  const idMarked = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result, t = db.transaction(['entries', 'docs'], 'readwrite'); for (let i = 0; i < 5; i++) t.objectStore('entries').put({ doc: ${JSON.stringify(idMarked)}, key: 'big-' + i, outputs: [], at: '2026-10-14T00:00:00.000Z', ms: 1, total: 1, bytes: 16000000, used: Date.now() + 1e9 }); t.objectStore('docs').put({ doc: ${JSON.stringify(idMarked)}, bytes: 80000000, used: Date.now() }); t.oncomplete = () => { db.close(); res(1); }; }; })`);
+  // (the old run's entry written, then the hash of its keys for the sweep held)
+  await ev("window.__digestAfterPut = true, 1");
+  check(await until("window.__holdDigest === 2", 60000), "the older run's keys, for its sweep, held");
+  // (meanwhile the item changes and runs; its write's completion held, so the older sweep comes first)
+  await ev("window.__holdPut = 1, 1");
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes[0].code += "\\n3"; }).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os[0].state === '' && /\\n3$/.test(os[0].code))", 60000) && await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "the item, changed, ran; its write held");
+  const markedKey = (await keys()).m.key;
+  await ev("window.__digestHeld(), 1");
+  await sleep(500);
+  await ev("window.__released.splice(0).forEach((f) => f()), 1");
+  await sleep(2500);
+  const stays = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idMarked)}, ${JSON.stringify(markedKey)}]); g.onsuccess = () => { db.close(); res(!!g.result); }; }; })`);
+  check(stays, "the newer run's entry stays");
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

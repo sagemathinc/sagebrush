@@ -64,14 +64,15 @@ async function nameOf(blob: Blob): Promise<string> {
   return "i" + (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
 }
 
-const toBlob = (dataUrl: string): Blob | null => {
-  const m = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=\s]*)$/.exec(dataUrl);
-  if (!m) return null;
+const toBlob = (src: string): Blob | null => {
+  // (the one grammar of data: pictures, image-size.ts: any case of the type, jpg too)
+  const d = dataUrl(src);
+  if (!d) return null;
   try {
-    const bin = atob(m[2].replace(/\s+/g, ""));
+    const bin = atob(d.base64.replace(/\s+/g, ""));
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new Blob([bytes], { type: m[1] });
+    return new Blob([bytes], { type: d.type });
   } catch {
     return null;
   }

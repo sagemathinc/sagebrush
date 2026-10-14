@@ -6,6 +6,7 @@
 // keeps them (a person moved it), the rest are placed.
 
 import { capPreviews, cleanPreview, type Preview } from "./preview";
+import { dataUrl } from "../image-size";
 import type { Item, Edge } from "./board";
 import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
@@ -251,7 +252,9 @@ const strip = <T extends object>(o: T): T => { for (const k of Object.keys(o)) i
 const LAYOUTS = ["row", "column", "grid", "graph"] as const, DIRS = ["TB", "LR"] as const;
 // (a picture's name, and where its bytes may be: a raster image's data: URL, or an https: address)
 const IMAGE_NAME = /^[\w-]{1,100}$/;
-const IMAGE_SRC = /^(data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]*|https:\/\/[^\s"'<>\\]+)$/;
+// (data: URLs as image-size.ts reads them, any case of the type and jpg too: one grammar, CORR-68B-1)
+const IMAGE_SRC = /^https:\/\/[^\s"'<>\\]+$/;
+const imageSrc = (s: string) => IMAGE_SRC.test(s) || dataUrl(s) !== null;
 function cleanImages(m: any): Record<string, ImageInfo> | undefined {
   if (!m || typeof m !== "object" || Array.isArray(m)) return undefined;
   const out: Record<string, ImageInfo> = {};
@@ -259,7 +262,7 @@ function cleanImages(m: any): Record<string, ImageInfo> | undefined {
     const w = num(v?.w), h = num(v?.h);
     if (!IMAGE_NAME.test(k) || !w || !h || w <= 0 || h <= 0) continue;
     // (a source that is not a raster image's data: URL or an https: address: the picture is dropped)
-    if (v.src !== undefined && !(typeof v.src === "string" && IMAGE_SRC.test(v.src))) continue;
+    if (v.src !== undefined && !(typeof v.src === "string" && imageSrc(v.src))) continue;
     out[k] = v.src !== undefined ? { w, h, src: v.src } : { w, h };
   }
   return Object.keys(out).length ? out : undefined;
