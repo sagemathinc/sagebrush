@@ -240,6 +240,16 @@
 /* TimeTravel's bar: a slider over the versions, when, Revert, ✕ */
 [data-sbb=tt] { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3; width: min(720px, calc(100% - 24px)); box-sizing: border-box; display: flex; gap: 10px; align-items: center; background: rgba(255, 255, 255, .97); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 8px 12px; }
 [data-sbb=tt][hidden] { display: none; }
+/* Find (mount.ts, find.ts): a small bar at the top right, under the top bar; the item it shows outlined, its words marked */
+[data-sbb=find] { position: absolute; top: 48px; right: 12px; z-index: 4; display: flex; gap: 2px; align-items: center; background: rgba(255, 255, 255, .97); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 4px 4px 4px 10px; }
+[data-sbb=find][hidden] { display: none; }
+[data-sbb=findq] { width: 190px; border: 0; outline: none; background: none; font: inherit; padding: 4px 0; }
+[data-sbb=findn] { font-size: 12px; color: #556; white-space: nowrap; padding: 0 6px; min-width: 5.6em; text-align: right; }
+[data-sbb=find].none [data-sbb=findn] { color: #a33; }
+[data-sbb=find] button { border-color: transparent; padding: 2px 7px; }
+.board-item.found { outline: 2px solid #d9a400; outline-offset: 3px; }
+::highlight(sb-find) { background: #ffe066; color: inherit; }
+@media (max-width: 600px) { [data-sbb=find] { left: 8px; right: 8px; } [data-sbb=findq] { flex: 1; width: auto; min-width: 0; } }
 [data-sbb=ttslider] { flex: 1; min-width: 80px; accent-color: #2a6f2f; }
 [data-sbb=ttwhen] { font-size: 12px; color: #556; white-space: nowrap; }
 [data-sbb=ttclose] { border-color: transparent; }
@@ -270,7 +280,7 @@
 /* Present (mount.ts): the board fills the screen (or the window), none of its other parts showing;
    around a slide's card, dark; a step's words under it; the controls fading while the pointer is still */
 .sbb.sbb-present { position: fixed; inset: 0; z-index: 2147483000; }
-.sbb.sbb-present :is([data-sbb=top], [data-sbb=tour], [data-sbb=tt], .board-toolbar, .ink-row) { display: none !important; }
+.sbb.sbb-present :is([data-sbb=top], [data-sbb=tour], [data-sbb=tt], [data-sbb=find], .board-toolbar, .ink-row) { display: none !important; }
 .sbb :is([data-sbb=pr-mask], [data-sbb=pr-say], [data-sbb=pr-bar])[hidden] { display: none; }
 .sbb [data-sbb=pr-mask] { position: absolute; z-index: 4; pointer-events: none; box-shadow: 0 0 0 100vmax #16181a; }
 .sbb [data-sbb=pr-say] { position: absolute; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); box-sizing: border-box; max-width: min(900px, calc(100% - 48px)); padding: 10px 16px; border-radius: 10px; background: rgba(20, 22, 24, .84); color: #fff; font-size: 18px; line-height: 1.4; }
