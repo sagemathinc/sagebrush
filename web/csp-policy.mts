@@ -42,3 +42,34 @@ export function runnerPolicy(scriptHashes: string[] = []): string {
     "frame-ancestors 'self'",
   ].join("; ");
 }
+
+// The frame other sites show a board in (/frame/board/; design/frame.md): a
+// downloaded board's page, served by this site, sandboxed without
+// allow-same-origin, so that it has an opaque origin however a page embeds
+// it (with the iframe's sandbox attribute or without): a board another site
+// posts to it can never run as this site, nor reach its storage.  That, not
+// this policy, is what keeps others' code from the site.  Its scripts are
+// what a downloaded file runs: its own inline ones by their hashes, the
+// engine's and KaTeX's modules from blob: URLs, and the runner's files-mode
+// frame (a srcdoc, which inherits this policy) with its one inline script by
+// its hash (`runnerScriptHash`), whose interpreter compiles Python to
+// JavaScript (eval).  Popups (its links) open unsandboxed; downloads
+// (Download as HTML) are allowed.  Any page may show it.
+export function framePolicy(scriptHashes: string[] = [], runnerScriptHash = ""): string {
+  return [
+    "default-src 'self'",
+    ["script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:", ...scriptHashes, runnerScriptHash].filter(Boolean).join(" "),
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https: http:",
+    "font-src 'self' data:",
+    "connect-src 'self' data: blob: https: http:",
+    "worker-src 'self' blob:",
+    "media-src 'self' data: blob:",
+    "frame-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads",
+    "frame-ancestors *",
+  ].join("; ");
+}

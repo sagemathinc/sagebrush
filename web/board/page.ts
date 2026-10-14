@@ -44,13 +44,63 @@ const saveKey = "sagebrush-board:" + source;
 const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
 const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
+// (the frame other sites show a board in, /frame/board/ (export.ts
+// frameHtml, design/frame.md): an exported page whose document its parent
+// posts, its engine the one it was built with, from the site it is served
+// from, which exporting it again names too)
+const fromParent = embedded()?.dataset.sbFrom === "parent";
+if (fromParent && OWN_ENGINE && !document.getElementById("sb-engine-ref")) {
+  const r = document.createElement("script");
+  r.type = "application/json";
+  r.id = "sb-engine-ref";
+  r.textContent = JSON.stringify({ site: new URL("/", location.href).href, id: OWN_ENGINE.id });
+  document.head.append(r);
+}
 // (an exported file: the engine its code runs with, and the site it comes from)
 const ref = file ? engineRef() : null;
+
+// A frame's document: the first its parent posts, as
+// { sagebrush: "board", version: 1, text, name? } (a file's contents and
+// name: JSON, Mermaid, Markdown, a CoCalc whiteboard or a JSON Canvas, as
+// Open… takes); a later one replaces it.  Only the parent's messages count.
+// The frame says { sagebrush: "ready", version: 1 } when it listens, and
+// { sagebrush: "error", version: 1, message } for a text that isn't a board.
+// Opened on its own, it shows an empty board that says what it is for.
+let fromParentDoc: (d: { doc: BoardDoc; notice: string }) => void = () => {};
+const parentDoc = new Promise<{ doc: BoardDoc; notice: string }>((r) => (fromParentDoc = r));
+if (fromParent) {
+  // (nothing it says is secret: to any parent)
+  const say = (m: { sagebrush: string; message?: string }) => parent.postMessage({ ...m, version: 1 }, "*");
+  if (parent === window) fromParentDoc({ doc: { title: "Board", nodes: [] }, notice: "**This page shows a board another site's page gives it.** To open a board, go to [sagebrush.space/board](https://sagebrush.space/board/)." });
+  else {
+    let first = true;
+    addEventListener("message", (e) => {
+      const m = e.data;
+      if (e.source !== parent || !m || m.sagebrush !== "board" || m.version !== 1 || typeof m.text !== "string") return;
+      let notice = "", doc: BoardDoc;
+      try {
+        doc = boardFromText(m.text, typeof m.name === "string" ? m.name : undefined, (md) => { notice = md; });
+        if (!isBoard(doc)) throw new Error("not a board");
+      } catch (err: any) {
+        say({ sagebrush: "error", message: String(err?.message ?? err) });
+        return;
+      }
+      if (first) fromParentDoc({ doc, notice });
+      else void mounted.agent.load(doc);
+      first = false;
+    });
+    say({ sagebrush: "ready" });
+  }
+}
 
 const host: BoardHost = {
   store: {
     async load() {
       if (bench) return null;
+      if (fromParent) {
+        const { doc, notice } = await parentDoc;
+        return { doc, original: doc, notice };
+      }
       let notice = "";
       const url = new URL(source.startsWith("mermaid:") || source.startsWith("embedded:") ? "data:," : source, location.href);
       // (JSON, or a Mermaid flowchart, or Markdown with some, or a CoCalc whiteboard)
