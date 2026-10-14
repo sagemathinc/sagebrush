@@ -50,7 +50,7 @@ const DOC = {
     { title: "Slide", intro: "Speaker notes: not for the audience", slide: { x: 0, y: 0, w: 1280, h: 720 }, background: { color: "#d7e6fa" },
       nodes: [{ id: "t", title: "The title", text: "Of the talk", x: 60, y: 60 }, { id: "c", title: "Live", code: "x = 6 * 7\nprint(x)", x: 60, y: 360 }],
       steps: [{ focus: "t", say: "The *title*" }, { focus: "c", say: "Some code, live" }] },
-    { title: "Plain", nodes: [{ id: "p", title: "A plain page", x: 0, y: 0 }] },
+    { title: "Plain", nodes: [{ id: "p", title: "A plain page", x: 0, y: 0 }], steps: [{ focus: "p", say: "PAGE TWO STEP" }] },
   ],
 };
 
@@ -76,7 +76,7 @@ try {
   check(await ev("['top', 'tour'].every((p) => getComputedStyle(document.querySelector(`[data-sbb=${p}]`)).display === 'none') && getComputedStyle(document.querySelector('.board-toolbar')).display === 'none'"), "...none of its other parts show (the top bar, the caption, the Edit toolbar)");
   // the first frame: the slide's card, fitted, letterboxed
   const fr = await ev(`${B}.present()`);
-  check(fr?.frame === 0 && fr.of === 4, "frames: the slide, its two steps, the next page: " + JSON.stringify(fr));
+  check(fr?.frame === 0 && fr.of === 5, "frames: the slide, its two steps, the next page, its step: " + JSON.stringify(fr));
   // (the screen's size: full screen's, or the window's)
   const card = await cardOnScreen(), [w, h] = await ev("[innerWidth, innerHeight]");
   check(Math.abs(card.x0) < 2 && Math.abs(card.x1 - w) < 2 && Math.abs(card.y0 - (h - (card.x1 - card.x0) * 9 / 16) / 2) < 2, "the card fills the screen's width, centered: " + JSON.stringify([card, w, h]));
@@ -90,19 +90,33 @@ try {
   check((await ev("window.__ran.join()")) === "c" && await until(`${B}.outputs().then((os) => os.some((o) => o.id === "c" && /42/.test(o.output) && o.state === ""))`, 20000), "▶ on a slide runs its item: " + await ev("window.__ran.join()"));
   // → a step: its words under it, the camera on its items
   await key("ArrowRight", 39);
-  check(await ev("!document.querySelector('[data-sbb=pr-say]').hidden && /title/.test(document.querySelector('[data-sbb=pr-say]').textContent) && !!document.querySelector('[data-sbb=pr-say] em')") && (await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "2 / 4", "→: the tour's step, its words under it (Markdown)");
+  check(await ev("!document.querySelector('[data-sbb=pr-say]').hidden && /title/.test(document.querySelector('[data-sbb=pr-say]').textContent) && !!document.querySelector('[data-sbb=pr-say] em')") && (await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "2 / 5", "→: the tour's step, its words under it (Markdown)");
   const t = await ev("(() => { const r = window.board.clientRect('t'); return { w: r.width, l: r.left, r: r.right }; })()");
   check(t.w > 250 && t.l > 0 && t.l + t.w < (await ev("innerWidth")), "...the camera on its item: " + JSON.stringify(t));
   // → → the next page, whole, no card
   await key("ArrowRight", 39);
   await key("ArrowRight", 39);
-  check((await ev(`${B}.snapshot().page`)) === 1 && await ev("document.querySelector('[data-sbb=pr-mask]').hidden && document.querySelector('[data-sbb=pr-next]').disabled"), "→ →: the next page, whole, no card; the last frame");
+  check((await ev(`${B}.snapshot().page`)) === 1 && (await ev(`${B}.snapshot().step`)) === -1 && await ev("document.querySelector('[data-sbb=pr-mask]').hidden && document.querySelector('[data-sbb=pr-say]').hidden"), "→ →: the next page, whole, no card");
   await key("ArrowLeft", 37);
-  check((await ev(`${B}.snapshot().page`)) === 0 && (await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "3 / 4", "←: back to the slide's last step");
+  check((await ev(`${B}.snapshot().page`)) === 0 && (await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "3 / 5", "←: back to the slide's last step");
   await key("Home", 36);
-  check((await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "1 / 4", "Home: the first");
+  check((await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "1 / 5", "Home: the first");
   await key("End", 35);
-  check((await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "4 / 4", "End: the last");
+  check((await ev("document.querySelector('[data-sbb=pr-where]').textContent")) === "5 / 5" && await ev("document.querySelector('[data-sbb=pr-next]').disabled"), "End: the last (the next page's step)");
+  // moves overtaken (CORR-2B5-1, daybreak): a page slow to draw (the host's
+  // pictures, held), End then Home, done in the other order: Home's frame,
+  // not End's step
+  await key("Home", 36);
+  await ev(`(async () => { const m = await import(new URL("board.js", location.href).href), im = m.host.images, ensure = im.ensure.bind(im); window.__ensure = ensure; window.__gates = []; im.ensure = (names) => new Promise((ok) => window.__gates.push(() => ensure(names).then(ok))); return 1; })()`);
+  await ev("(() => { for (const key of ['End', 'Home']) window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); return 1; })()");
+  check(await until("window.__gates.length === 2", 3000), "two moves wait for their pages: " + await ev("window.__gates.length"));
+  await ev("window.__gates[1](), 1");
+  await sleep(300);
+  await ev("window.__gates[0](), 1");
+  await sleep(600);
+  const raced = await ev(`${B}.present().then((p) => ({ p, s: ${B}.snapshot(), say: document.querySelector('[data-sbb=pr-say]').hidden, where: document.querySelector('[data-sbb=pr-where]').textContent }))`);
+  check(raced.p?.frame === 0 && raced.s.page === 0 && raced.s.step === -1 && raced.say && raced.where === "1 / 5", "End then Home, drawn in the other order: Home's frame (page 0 whole, no words), not End's: " + JSON.stringify({ p: raced.p, page: raced.s.page, step: raced.s.step, sayHidden: raced.say, where: raced.where }));
+  await ev(`import(new URL("board.js", location.href).href).then((m) => { m.host.images.ensure = window.__ensure; return 1; })`);
   // Esc: as it was
   await key("Escape", 27);
   await sleep(300);
