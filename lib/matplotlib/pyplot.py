@@ -556,15 +556,19 @@ class Axes:
         cs = ContourSet(L, cmap, colors, extend, alpha)
         x0, x1 = (float(np.min(X)), float(np.max(X))) if X is not None else (0.0, float(nx - 1))
         y0, y1 = (float(np.min(Y)), float(np.max(Y))) if Y is not None else (0.0, float(ny - 1))
-        # (at most about 640 x 512 samples: twice what a panel of a figure shows)
-        sx, sy = max(1, -(-nx // 640)), max(1, -(-ny // 512))
-        Zs = Z[::sy, ::sx]
+        Zs = _fine(Z, X, Y, x0, x1, y0, y1)
+        if Zs is None:
+            # (a grid that is not rectangular: at most about 640 x 512 of its own samples)
+            sx, sy = max(1, -(-nx // 640)), max(1, -(-ny // 512))
+            Zs = Z[::sy, ::sx]
         idx = np.digitize(Zs, np.array(L))
-        idx[np.isnan(Zs)] = 0
         # the top level belongs to the top band, as in matplotlib
         idx[Zs == L[-1]] = len(L) - 1
-        # (a palette picture: one byte, the band, per sample)
-        self._add(Image(_png_url(idx.astype(np.uint8)[::-1], cs._lut), x0, x1, y0, y1, what="filled contours, %d levels from %s to %s" % (len(L), _short(L[0]), _short(L[-1]))))
+        # (NaN: no band, transparent)
+        idx[np.isnan(Zs)] = len(cs._lut)
+        # (a palette picture: one byte, the band, per sample; its first row is y1's)
+        self._add(Image(_png_url(idx.astype(np.uint8)[::-1], cs._lut + [(0, 0, 0, 0)]), x0, x1, y0, y1, first_row_y=y1, first_col_x=x0,
+                        pixelated=True, what="filled contours, %d levels from %s to %s" % (len(L), _short(L[0]), _short(L[-1]))))
         self._opts.setdefault("xmin", x0)
         self._opts.setdefault("xmax", x1)
         self._opts.setdefault("ymin", y0)
@@ -1001,6 +1005,48 @@ def GridSpec(*args, **kw):
 
 def _short(v):
     return ("%.4g" % v).replace("-", "\u2212")
+
+
+def _fine(Z, X, Y, x0, x1, y0, y1, W=480, H=360):
+    """Z on a fine W x H raster of [x0, x1] x [y0, y1] (rows from y0 up), interpolated
+    bilinearly within the grid's cells, as matplotlib's filled contours follow the
+    levels' linear crossings; None when the grid is not rectangular"""
+    import numpy as np
+    ny, nx = Z.shape
+    if ny < 2 or nx < 2:
+        return None
+    if X is None:
+        xs = np.arange(float(nx))
+    else:
+        Xa = np.asarray(X, dtype=float)
+        xs = Xa if Xa.ndim == 1 else Xa[0]
+        if Xa.ndim == 2 and not bool(np.all(Xa == xs.reshape((1, nx)))):
+            return None
+    if Y is None:
+        ys = np.arange(float(ny))
+    else:
+        Ya = np.asarray(Y, dtype=float)
+        ys = Ya if Ya.ndim == 1 else Ya[:, 0]
+        if Ya.ndim == 2 and not bool(np.all(Ya == ys.reshape((ny, 1)))):
+            return None
+    if xs.shape[0] != nx or ys.shape[0] != ny:
+        return None
+    if xs[0] > xs[-1]:
+        xs, Z = xs[::-1], Z[:, ::-1]
+    if ys[0] > ys[-1]:
+        ys, Z = ys[::-1], Z[::-1, :]
+    if not (bool(np.all(np.diff(xs) > 0)) and bool(np.all(np.diff(ys) > 0))):
+        return None
+    W, H = max(W, nx), max(H, ny)
+    fx = np.interp(np.linspace(x0, x1, W), xs, np.arange(float(nx)))
+    fy = np.interp(np.linspace(y0, y1, H), ys, np.arange(float(ny)))
+    j0 = np.clip(np.floor(fx), 0, nx - 2).astype(int)
+    i0 = np.clip(np.floor(fy), 0, ny - 2).astype(int)
+    tx = (fx - j0).reshape((1, W))
+    ty = (fy - i0).reshape((H, 1))
+    I0 = np.tile(i0.reshape((H, 1)), (1, W))
+    J0 = np.tile(j0.reshape((1, W)), (H, 1))
+    return (Z[I0, J0] * (1 - tx) + Z[I0, J0 + 1] * tx) * (1 - ty) + (Z[I0 + 1, J0] * (1 - tx) + Z[I0 + 1, J0 + 1] * tx) * ty
 
 
 class ContourSet:

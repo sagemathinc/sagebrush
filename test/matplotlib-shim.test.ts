@@ -71,3 +71,38 @@ for origin in ["upper", "lower"]:
     assert.equal(flipped, k === 1);
   }
 });
+
+test("contourf: matplotlib's levels and limits; bands end where Z crosses a level, not at the grid's points", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import numpy as np
+x = np.linspace(-3, 3, 7); y = np.linspace(-2, 2, 5)
+X, Y = np.meshgrid(x, y)
+for Z in [X**2 + Y**2, np.sin(X) * Y * 10]:
+    fig, ax = plt.subplots()
+    cs = ax.contourf(X, Y, Z)
+    print([float(v) for v in cs.levels], tuple(float(v) for v in ax.get_xlim()), tuple(float(v) for v in ax.get_ylim()))
+fig, ax = plt.subplots()
+cs = ax.contourf(X**2 + Y**2, 5)
+print([float(v) for v in cs.levels], tuple(float(v) for v in ax.get_xlim()), tuple(float(v) for v in ax.get_ylim()))
+x = np.array([0.0, 1.0, 2.0]); y = np.array([0.0, 1.0])
+X, Y = np.meshgrid(x, y)
+fig, ax = plt.subplots()
+ax.contourf(X, Y, X * 2.0, levels=[0, 1, 3, 4], cmap="gray")
+print(fig._repr_svg_())
+`);
+  const lines = out.split("\n");
+  assert.deepEqual(lines.slice(0, 3), [
+    "[0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0] (-3.0, 3.0) (-2.0, 2.0)",
+    "[-20.0, -15.0, -10.0, -5.0, 0.0, 5.0, 10.0, 15.0, 20.0] (-3.0, 3.0) (-2.0, 2.0)",
+    "[0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0] (0.0, 6.0) (0.0, 4.0)",
+  ]);
+  // Z = 2x on a 3-point grid crosses the levels 1 and 3 at x = 0.5 and 1.5: a quarter
+  // and three quarters of the way across (matplotlib draws the bands there too)
+  const url = /<image href="(data:image\/png;base64,[^"]+)"/.exec(lines.slice(3).join("\n"))![1];
+  const row = png(url)[0];
+  const edges: number[] = [];
+  for (let i = 1; i < row.length; i++) if (row[i].join() !== row[i - 1].join()) edges.push(i / row.length);
+  assert.equal(edges.length, 2);
+  assert.ok(Math.abs(edges[0] - 0.25) < 0.01 && Math.abs(edges[1] - 0.75) < 0.01, String(edges));
+});
