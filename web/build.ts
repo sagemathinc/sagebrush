@@ -120,11 +120,13 @@ copyFileSync(join(here, "_headers"), join(here, "dist", "_headers"));
 // the engines (modular symbols, a_p ...), fetched by the worker on first use
 copyFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"), join(here, "dist", "sagebrush-engine.wasm"));
 // The documentation indexes for the page's search box, one per language that
-// has one: Sage's library (lib/_pyjs_docsearch.py) and MATLAB's built-ins
-// (lib/_matlab_docsearch.py), run by the CLI bundle (build it first with npm
-// run build:cli)
-for (const [mod, file] of [["_pyjs_docsearch", "docs-index.json"], ["_matlab_docsearch", "docs-index-matlab.json"]]) {
-  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), "-m", mod, "--index"]);
+// has one: Sage's library (lib/_pyjs_docsearch.py), MATLAB's built-ins
+// (lib/_matlab_docsearch.py) and Magma's intrinsics (lib/_magma_docsearch.py),
+// and the capability map made from them (lib/_capability_map.py, for
+// llms.txt), run by the CLI bundle (build it first with npm run build:cli)
+for (const [mod, file, args] of [["_pyjs_docsearch", "docs-index.json", ["--index"]], ["_matlab_docsearch", "docs-index-matlab.json", ["--index"]],
+  ["_magma_docsearch", "docs-index-magma.json", ["--index"]], ["_capability_map", "capabilities.md", []]] as [string, string, string[]][]) {
+  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), "-m", mod, ...args]);
   if (r.exitCode !== 0) {
     console.error(`${file}: ` + r.stderr.toString());
     process.exit(1);
@@ -297,9 +299,9 @@ const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
-const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", "docs-index-matlab.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
 const shellHash = new Bun.CryptoHasher("sha256");
-for (const f of ["index.html", "docs-index.json", "docs-index-matlab.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
+for (const f of ["index.html", "docs-index.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + precompiledHash);
 // (each of them by its SHA-256, and the response it is served as: the service
 // worker serves a kept copy only if it still has those bytes, and then as a
@@ -327,7 +329,7 @@ mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "docs-index.json", "docs-index-matlab.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "capabilities.md", "docs-index.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");
