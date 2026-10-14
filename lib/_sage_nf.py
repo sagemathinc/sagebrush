@@ -3,8 +3,9 @@ prime ideals, class groups, unit groups, regulators and integral bases,
 computed by the Rust engine (sagebrush.nf: engine/classgroup, clean-room,
 MIT/Apache).  Printed as Sage prints them.  Class groups and regulators
 assume GRH (as PARI's do, and Sage's with proof=False).  proof=True asks
-for a proven result: given where Sagebrush has one, otherwise
-NotImplementedError rather than the GRH value."""
+for a proven result: the engine's unconditional certificate within its
+limits (see class_group), otherwise NotImplementedError rather than the
+GRH value."""
 
 from fractions import Fraction as _F
 import functools as _ft
@@ -20,18 +21,9 @@ def _nf():
     return nf
 
 
-# proof=True asks for a proven result: given where one is available, else
+# proof=True asks for a proven result (the engine's certificate), else
 # NotImplementedError, never the GRH-conditional value.  (proof=None and
 # proof=False give the engine's result, which assumes GRH.)
-def _unproven(what):
-    raise NotImplementedError(
-        "%s with proof=True is not implemented: Sagebrush's class groups and "
-        "regulators assume GRH (call it with proof=False)" % what)
-
-
-# Below this |D|, the class number of an imaginary quadratic field is proven
-# by counting reduced forms (about |D|/6 steps).
-_FORMS_BOUND = 4 * 10**6
 
 
 def _count_reduced_forms(D):
@@ -48,6 +40,46 @@ def _count_reduced_forms(D):
             if c >= a and not (a == c and b < 0):
                 h += 1
         a += 1
+    return h
+
+
+def _count_real_classes(D):
+    """h(D) for a fundamental discriminant D > 0, by reduced indefinite
+    forms: (a, b, c) with b^2 - 4ac = D, 0 < b < sqrt D and
+    sqrt D - b < 2|a| < sqrt D + b, in orbits of the cycle step
+    rho(a, b, c) = (c, b', (b'^2 - D)/(4c)) (b' = -b mod 2|c|,
+    sqrt D - 2|c| < b' < sqrt D) together with (a, b, c) -> (-a, b, -c),
+    which identifies the narrow classes of I and lambda I, N(lambda) < 0
+    (Cohen, GTM 138, 5.6).  Exact integer comparisons; checked against Sage
+    for the 909 fundamental D < 3000."""
+    from math import isqrt
+    k = isqrt(D)
+    lt = lambda x: x < 0 or x * x < D      # x < sqrt D
+    gt = lambda x: x > 0 and x * x > D     # x > sqrt D
+    forms = set()
+    for b in range(1, k + 1):
+        if (b - D) % 2 or not lt(b):
+            continue
+        n = (D - b * b) // 4               # -ac > 0
+        for a in range(1, n + 1):
+            if n % a == 0 and gt(2 * a + b) and lt(2 * a - b):
+                forms.add((a, b, -(n // a)))
+                forms.add((-a, b, n // a))
+    seen, h = set(), 0
+    for f in forms:
+        if f in seen:
+            continue
+        h += 1
+        stack = [f]
+        while stack:
+            g = stack.pop()
+            if g in seen:
+                continue
+            seen.add(g)
+            a, b, c = g
+            bp = k - ((k + b) % (2 * abs(c)))
+            stack.append((c, bp, (bp * bp - D) // (4 * c)))
+            stack.append((-a, b, -c))
     return h
 
 
@@ -379,8 +411,10 @@ class NumberField_absolute:
         """The unit group: its rank (Dirichlet, from the signature, which is
         proven: certified root isolation) and its roots of unity.  With
         proof=True, NotImplementedError unless the number of roots of unity
-        is proven too (the ones found, verified exactly, are all the residue
-        fields allow).  No fundamental units yet.
+        is proven (the ones found, verified exactly, are all the residue
+        fields allow) and the units found are proven to generate the unit
+        group (the certificate of class_group(proof=True), within its
+        limits).  No fundamental units yet.
 
         EXAMPLES::
 
@@ -389,9 +423,13 @@ class NumberField_absolute:
             Unit group with structure C2 x Z of Number Field in a with defining polynomial x^3 - 2
             sage: U.rank()
             1
+            sage: NumberField(x^4 - 10*x^2 + 1, 'a').unit_group(proof=True)
+            Unit group with structure C2 x Z x Z x Z of Number Field in a with defining polynomial x^4 - 10*x^2 + 1
         """
         if proof and not self._nfdata().get("w_proven"):
             raise NotImplementedError("unit_group with proof=True: the number of roots of unity found is not proven complete")
+        if proof:
+            self._proven_bnf("unit_group")
         return UnitGroup(self)
 
     def _bnfdata(self):
@@ -400,15 +438,18 @@ class NumberField_absolute:
             if self._n == 2 and abs(self.discriminant()) >= 1000:
                 # the quadratic algorithms are much faster (their
                 # certificate status kept: the systematic review's ASR-F2)
-                d = _nf().quadratic_class_group_data(self.discriminant())
-                # (and what the discriminant itself assumes: probable primes
-                # in the maximal order, the systematic review's R2-NFD-F1)
-                self._bnf = {"h": d["h"], "cyc": d["cyc"], "regulator": d["regulator"] if d["regulator"] is not None else "1",
-                             "certified": d.get("certified", False),
-                             "assumes": list(d.get("assumes", ["GRH"])) + list(self._nfdata().get("assumes", []))}
+                self._bnf = self._quadratic_bnfdata()
             else:
                 self._bnf = _nf().bnf(self._f)
         return self._bnf
+
+    def _quadratic_bnfdata(self):
+        d = _nf().quadratic_class_group_data(self.discriminant())
+        # (and what the discriminant itself assumes: probable primes in
+        # the maximal order, the systematic review's R2-NFD-F1)
+        return {"h": d["h"], "cyc": d["cyc"], "regulator": d["regulator"] if d["regulator"] is not None else "1",
+                "certified": d.get("certified", False),
+                "assumes": list(d.get("assumes", ["GRH"])) + list(self._nfdata().get("assumes", []))}
 
     def _bnf_checked(self, proof):
         """_bnfdata, refusing (unless proof=False) a class group or regulator
@@ -422,10 +463,75 @@ class NumberField_absolute:
             raise NotImplementedError("this class group assumes, besides GRH: %s (call with proof=False to accept it)" % "; ".join(extra))
         return d
 
+    def _proven_bnf(self, what):
+        """The class group and regulator proven without GRH by the engine's
+        certificate (sagebrush.nf.bnf_certify), cached with its refusal or
+        failure: NotImplementedError, saying why, when there is none.
+
+        For quadratic fields it is also checked by algorithms independent
+        of the one certified, never against a cached general result:
+          * |d| >= 1000: the class number and invariants against the
+            quadratic algorithms (sagebrush.nf.quadratic_class_group_data);
+          * 0 < d < 1000: the class number against the classes of reduced
+            indefinite forms (_count_real_classes);
+          * -10^5 <= d < 0: the class number against the number of reduced
+            forms.
+        A disagreement is a RuntimeError (a bug, or for the quadratic
+        algorithms GRH false).  self._bnf_proof_check records which checks
+        ran.  The regulator is not cross-checked.  (Tests of this routing,
+        the refusals and the cross-checks: test/sage-proof.test.ts.)
+        """
+        if self._nfdata().get("assumes"):
+            # the discriminant (the maximal order) rests on probable primes
+            raise NotImplementedError("%s with proof=True: the maximal order assumes %s" % (what, "; ".join(self._nfdata()["assumes"])))
+        p = getattr(self, "_bnf_proof", None)
+        if p is None:
+            try:
+                p = _nf().bnf_certify(self._f)
+            except ValueError as e:
+                p = str(e)
+            self._bnf_proof = p
+        if isinstance(p, str):
+            raise NotImplementedError("%s with proof=True: %s" % (what, p))
+        if getattr(self, "_bnf_proof_check", None) is None:
+            done = []
+            if self._n == 2:
+                D = self.discriminant()
+                if abs(D) >= 1000:
+                    g = self._quadratic_bnfdata()
+                    cyc = [int(c) for c in g["cyc"]]
+                    if int(g["h"]) != p["h"] or cyc != p["cyc"]:
+                        raise RuntimeError("the proven class group %s disagrees with the quadratic algorithms' %s" % (p["cyc"], cyc))
+                    done.append("quadratic")
+                elif D > 0:
+                    if _count_real_classes(D) != p["h"]:
+                        raise RuntimeError("the proven class number %d is not the number of classes of reduced forms" % p["h"])
+                    done.append("real forms")
+                if D < 0 and -D <= 10**5:
+                    if _count_reduced_forms(D) != p["h"]:
+                        raise RuntimeError("the proven class number %d is not the number of reduced forms" % p["h"])
+                    done.append("reduced forms")
+            self._bnf_proof_check = tuple(done)
+        return p
+
     def class_group(self, proof=None, names="c"):
-        """The class group, assuming GRH.  With proof=True: proven for
-        imaginary quadratic fields of small discriminant whose class number
-        is squarefree (so the group is cyclic), else NotImplementedError.
+        """The class group, assuming GRH.
+
+        With proof=True it is proven without GRH, or NotImplementedError
+        says why not.  The engine's certificate
+        (engine/classgroup/src/nf/proof.rs, sagebrush.nf.bnf_certify) shows
+        three things:
+          * the prime ideals of norm at most M, the smaller of Minkowski's
+            bound and Zimmert's (Invent. Math. 62 (1981), Satz 2), lie in
+            the subgroup generated by the factor base;
+          * the units found are all of them: Zimmert's lower bound for the
+            regulator (Satz 3) bounds their index, and each prime up to that
+            bound is excluded by power-residue characters;
+          * no relation is missing: the same test at each prime dividing h
+            (Elsenhans and Voight, arXiv:2510.05501).
+        It refuses when M or that index bound exceeds 10^6, saying which
+        bound and by how much.  M is about 0.64 sqrt|d| for imaginary
+        quadratic fields and sqrt|d|/188 for totally real sextic ones.
 
         EXAMPLES::
 
@@ -434,38 +540,29 @@ class NumberField_absolute:
             Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^2 + 23
             sage: NumberField(x^3 - 11, 'a').class_group().invariants()
             (2,)
-            sage: NumberField(x^2 + 23, 'a').class_group(proof=True)  # sagebrush only
+            sage: NumberField(x^2 + 23, 'a').class_group(proof=True)
             Class group of order 3 with structure C3 of Number Field in a with defining polynomial x^2 + 23
-            sage: NumberField(x^3 - 11, 'a').class_group(proof=True)  # sagebrush only
+            sage: NumberField(x^3 - 11, 'a').class_group(proof=True)
+            Class group of order 2 with structure C2 of Number Field in a with defining polynomial x^3 - 11
+            sage: NumberField(x^2 + 2184, 'a').class_group(proof=True).invariants()
+            (6, 2, 2)
+            sage: NumberField(x^2 + 3*10^12 + 1, 'a').class_group(proof=True)  # sagebrush only
             Traceback (most recent call last):
             ...
-            NotImplementedError: class_group with proof=True is not implemented: Sagebrush's class groups and regulators assume GRH (call it with proof=False)
+            NotImplementedError: class_group with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it)
         """
         if proof:
-            h = self._proven_class_number("class_group")
-            if any(h % (p * p) == 0 for p in range(2, int(h**0.5) + 1)):
-                _unproven("class_group (its structure)")
-            if [int(c) for c in self._bnfdata()["cyc"]] != ([h] if h > 1 else []):
-                raise RuntimeError("the class group disagrees with the proven class number %d" % h)
-        self._bnf_checked(proof)
-        return ClassGroup(self)
+            p = self._proven_bnf("class_group")
+            return ClassGroup(self, p["h"], p["cyc"])
+        d = self._bnf_checked(proof)
+        return ClassGroup(self, d["h"], d["cyc"])
 
     def _proven_class_number(self, what):
-        if self._nfdata().get("assumes"):
-            # the discriminant (the maximal order) rests on probable primes
-            raise NotImplementedError("%s with proof=True: the maximal order assumes %s" % (what, "; ".join(self._nfdata()["assumes"])))
-        D = self.discriminant()
-        if self._n == 2 and D < 0 and -D <= _FORMS_BOUND:
-            h = _count_reduced_forms(D)
-            if h != int(self._bnfdata()["h"]):
-                raise RuntimeError("the class number assuming GRH, %s, is not the proven %d" % (self._bnfdata()["h"], h))
-            return h
-        _unproven(what)
+        return self._proven_bnf(what)["h"]
 
     def class_number(self, proof=None):
-        """The class number, assuming GRH.  With proof=True: proven (by
-        counting reduced forms) for imaginary quadratic fields with
-        |disc| <= 4*10^6, else NotImplementedError.
+        """The class number, assuming GRH.  With proof=True: proven without
+        GRH, or NotImplementedError (see class_group).
 
         EXAMPLES::
 
@@ -474,18 +571,20 @@ class NumberField_absolute:
             (2, 1)
             sage: NumberField(x^2 + 5, 'a').class_number(proof=True)
             2
-            sage: NumberField(x^2 - 10, 'a').class_number(proof=True)  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: class_number with proof=True is not implemented: Sagebrush's class groups and regulators assume GRH (call it with proof=False)
+            sage: NumberField(x^2 - 10, 'a').class_number(proof=True)
+            2
+            sage: NumberField(x^5 - 11, 'a').class_number(proof=True)
+            5
+            sage: NumberField(x^4 - 18*x - 1, 'a').class_number(proof=True)
+            4
         """
         if proof:
             return self._proven_class_number("class_number")
         return self._bnf_checked(proof)["h"]
 
     def regulator(self, proof=None):
-        """The regulator, assuming GRH.  With proof=True: only for fields with
-        unit rank 0 (regulator 1), else NotImplementedError.
+        """The regulator, assuming GRH.  With proof=True: proven without GRH
+        (its digits certified), or NotImplementedError (see class_group).
 
         EXAMPLES::
 
@@ -496,11 +595,15 @@ class NumberField_absolute:
             5.58720662606091
             sage: NumberField(x^2 + 1, 'a').regulator(proof=True)
             1.00000000000000
+            sage: NumberField(x^3 - 11, 'a').regulator(proof=True)  # abs tol 1e-10
+            5.58720662606091
+            sage: NumberField(x^2 - 1000000007, 'a').regulator(proof=True)  # rel tol 1e-12
+            14693.6218553639
         """
         if proof:
             if self.unit_rank() == 0:
                 return _sa().RR(1)
-            _unproven("regulator")
+            return _sa().RR(self._proven_bnf("regulator")["regulator"])
         return _sa().RR(self._bnf_checked(proof)["regulator"])
 
     def unit_rank(self):
@@ -1343,9 +1446,14 @@ class ClassGroup:
         sage: C.order(), C.is_cyclic()
         (3, True)
     """
-    def __init__(self, K):
+    def __init__(self, K, h=None, cyc=None):
+        # (h and cyc as given: GRH's or the proven ones, see class_group)
         self._K = K
-        self._cyc = tuple(K._bnfdata()["cyc"])
+        if cyc is None:
+            d = K._bnfdata()
+            h, cyc = d["h"], d["cyc"]
+        self._h = int(h)
+        self._cyc = tuple(int(c) for c in cyc)
 
     def __repr__(self):
         h = self.order()
@@ -1362,7 +1470,7 @@ class ClassGroup:
             sage: NumberField(x^2 + 23, 'a').class_group().order()
             3
         """
-        return self._K._bnfdata()["h"]
+        return self._h
 
     cardinality = order
 
