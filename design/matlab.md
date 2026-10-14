@@ -163,7 +163,10 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
   elements is counted back from the end point. **`linspace`** uses MATLAB's
   formula. **`rand`** gives MATLAB's numbers: the Mersenne twister seeded
   with 5489, as `rng default` does, and so do `randi`, `randperm(n)` and
-  `sprand`, which are built on it as MATLAB's are. **`randn`** is MATLAB's
+  `sprand`, which are built on it as MATLAB's are. (`sprand` and `sprandn`
+  draw their places with replacement and keep each place once, as
+  MATLAB's do, so a matrix has somewhat fewer nonzeros than the density
+  asks; Octave's sample without replacement.) **`randn`** is MATLAB's
   ziggurat on the same stream:
   - 256 layers (Marsaglia and Tsang's), each draw two 32-bit words a and b;
   - the layer is 255 - (b >> 24);
@@ -172,6 +175,18 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
     tail beyond r;
   - the layers' edges are a table of 15-digit constants.
   So `rand`, `randn` and `randi` interleave on one stream as MATLAB's do.
+
+- **Solving** `A\b` follows MATLAB's choices:
+  - a square A by LU with partial pivoting. A nearly singular one gives
+    MATLAB's warning ("close to singular ... RCOND = ...", for up to 500
+    rows) and the LU's result. An exactly singular one gives "singular to
+    working precision" and the result of going on past the zero pivot,
+    with its Inf and NaN, as LAPACK does. (Octave gives a least-squares
+    solution instead.)
+  - a rectangular A by QR with column pivoting: the basic solution, its
+    free variables 0, with "Rank deficient, rank = r, tol = ..." when the
+    rank is short (Octave: the minimum-norm solution).
+  - `inv` of a singular matrix is Inf throughout, with the warning.
 
 ## Display
 
