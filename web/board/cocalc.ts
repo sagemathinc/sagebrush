@@ -123,9 +123,10 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
   const note = (e: El): DocNote => {
     const { w } = box(e);
     if (e.type === "code") {
-      // (the board's language: the first code cell's kernel that is not Python's)
+      // (the board's language: the first code cell's kernel that is not Python's;
+      // Sage last, since Sagebrush's own kernels, sagebrush-matlab and sagebrush-magma, have "sage" in them)
       const k = String(e.data?.kernel ?? "");
-      if (!mode) mode = /sage/i.test(k) ? "sage" : /magma/i.test(k) ? "magma" : /matlab|octave/i.test(k) ? "matlab" : undefined;
+      if (!mode) mode = /matlab|octave/i.test(k) ? "matlab" : /magma/i.test(k) ? "magma" : /sage/i.test(k) ? "sage" : undefined;
       return { id: e.id, code: typeof e.str === "string" ? e.str : "", ...(e.data?.hideInput ? { hideCode: true } : {}), w };
     }
     return { id: e.id, text: markdown(e.str), ...(e.type === "note" ? { color: typeof e.data?.color === "string" ? e.data.color : NOTE_COLOR } : {}), w };
