@@ -160,8 +160,16 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       const exc = R.toPyExc(e);
       flush();
       target = null;
-      // exit() can't leave a notebook: it just ends the cell.
-      if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return true;
+      // exit() can't leave a notebook: it just ends the cell.  An exit with
+      // a failure's status is the cell failing: sys.exit(1), and Magma's
+      // errors in a cell (lib/_magma.py raises SystemExit(1) once it has
+      // said them); a message for a status is written, as Python does.
+      if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
+        const c = exc.code;
+        if (c === null || c === undefined || c === 0 || c === false) return true;
+        if (typeof c !== "number" && typeof c !== "boolean") R.stderr.write(R.str(c) + "\n");
+        return false;
+      }
       // (a cell's renamed `_` names are shown as written)
       // (and page-order scoping's names, as written: the run's `scoped`)
       let text = R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, "");

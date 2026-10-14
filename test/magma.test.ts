@@ -84,3 +84,37 @@ test("constructors name< ... > parse; those not implemented yet raise at run tim
   assert.match(py("assigned r`a;"), /_m\._assigned\(r, "a"\)/);
   assert.match(py("delete r`a;"), /_m\._assign_path\(r, \[\("attr", "a", \(1, 9\)\)\], _m\._DELETE\)/);
 });
+
+test("notebook session: a Magma cell's error fails its cell, said as Magma says it; quit, and Python's sys.exit() or sys.exit(0), only end theirs", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells: [string, object][] = [
+    ["x := 6 * 7;\nprint x;", { magma: true }],
+    ["print NotAnIntrinsic(7);", { magma: true }],
+    ['error "no";', { magma: true }],
+    ["y := 1 div 0;", { magma: true }],
+    ["print x +;", { magma: true }],
+    ["print x + 1;\nquit;\nprint 0;", { magma: true }],
+    ["import sys\nprint('before')\nsys.exit()", {}],
+    ["import sys\nsys.exit(0)", {}],
+    ["import sys\nsys.exit(1)", {}],
+    ["import sys\nsys.exit('a message')", {}],
+    ["print x;", { magma: true }],
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i][0], ...cells[i][1] });
+  const out = (id: number, stream: string) => msgs.filter((m) => m.id === id && m.stream === stream).map((m) => m.text).join("");
+  const failed = (id: number) => !!msgs.find((m) => m.id === id && m.done)?.error;
+  assert.deepEqual(cells.map((_, i) => failed(i + 1)), [false, true, true, true, true, false, false, false, true, true, false]);
+  assert.equal(out(1, "stdout"), "42\n");
+  assert.match(out(2, "stdout"), /User error: Identifier 'NotAnIntrinsic' has not been declared or assigned/);
+  assert.match(out(3, "stdout"), /Runtime error: no/);
+  assert.match(out(4, "stdout"), /Runtime error/);
+  assert.match(out(5, "stderr"), /User error: bad syntax/);
+  assert.equal(out(6, "stdout"), "43\n");
+  assert.equal(out(7, "stdout"), "before\n");
+  assert.equal(out(10, "stderr"), "a message\n");
+  // (the session goes on, x as it was)
+  assert.equal(out(11, "stdout"), "42\n");
+});
