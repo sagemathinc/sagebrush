@@ -1,5 +1,5 @@
-"""MATLAB's special functions psi, beta, betaln, erfcx, erfinv, erfcinv and
-expint, for lib/_matlab.py: thin wrappers that give the numerics in
+"""MATLAB's special functions psi, beta, betaln, erfcx, erfinv, erfcinv,
+expint, ellipke, ellipj and legendre, for lib/_matlab.py: thin wrappers that give the numerics in
 lib/_special.py (shared with Sagebrush's scipy.special and Sage) MATLAB's
 argument rules, classes and values at the poles, as the functions'
 documentation pages describe them.
@@ -161,3 +161,114 @@ def _expint_value(v):
 
 
 _unary("expint", _expint_value, allow_complex=True)
+
+
+# ------------------------------------------------------------------ ellipke, ellipj
+
+def _tol(name, args):
+    """the optional accuracy argument: a nonnegative real scalar (Sagebrush
+    computes to full accuracy whatever it is, which meets any tol)"""
+    if len(args) > 1:
+        raise _err("Too many input arguments.")
+    if args:
+        t = _m._farr(args[0], name)
+        if t.size != 1 or t.dtype.kind == "c" or not float(t.reshape(-1)[0]) >= 0:
+            raise _err("%s: tol must be a nonnegative real scalar." % name)
+
+
+def _m_range(name, M):
+    if M.dtype.kind == "c":
+        raise _err("%s: M must be real." % name)
+    if M.size and (np.any(M < 0) or np.any(M > 1)):
+        raise _err("%s: M must be in the range 0 <= M <= 1." % name)
+
+
+@_bi("ellipke")
+def ellipke_(nargout, *args):
+    """[K, E] = ellipke(M) and ellipke(M, tol), as the documentation page
+    describes them: M real in [0, 1], K(1) = Inf and E(1) = 1.  The complete
+    elliptic integrals from lib/_special.py (DLMF 19.8.5's AGM for K;
+    DLMF 19.5.2 and 19.12.2's series for E); tol is accepted and checked,
+    and the results are always to full accuracy"""
+    if not args:
+        raise _err("Not enough input arguments.")
+    if nargout > 2:
+        raise _err("Too many output arguments.")
+    A, cls = _values("ellipke", args[0])
+    _m_range("ellipke", A)
+    _tol("ellipke", args[1:])
+    K = _m._finish(_map("ellipke", lambda v: _math.inf if v == 1 else _sf._ellipk1(v), A), cls)
+    if nargout < 2:
+        return K
+    return [K, _m._finish(_map("ellipke", _sf._ellipe1, A), cls)]
+
+
+@_bi("ellipj")
+def ellipj_(nargout, *args):
+    """[SN, CN, DN] = ellipj(U, M) and ellipj(U, M, tol), as the
+    documentation page describes them: U real, M real in [0, 1], the same
+    size or one of them a scalar; U must also be finite (a Sagebrush limit:
+    the page does not say, and Octave gives NaN for an infinite U).  lib/_special.py's ellipj (DLMF 22.20's
+    AGM after reducing U by the periods; the ascending Landen
+    transformation, DLMF 22.7, for M > 0.9); tol is accepted and checked,
+    and the results are always to full accuracy"""
+    if len(args) < 2:
+        raise _err("Not enough input arguments.")
+    if nargout > 3:
+        raise _err("Too many output arguments.")
+    (U, cu), (M, cm) = _values("ellipj", args[0]), _values("ellipj", args[1])
+    if U.dtype.kind == "c":
+        raise _err("ellipj: U must be real.")
+    _m_range("ellipj", M)
+    _tol("ellipj", args[2:])
+    if U.size != 1 and M.size != 1 and U.shape != M.shape:
+        raise _err("ellipj: U and M must be the same size, or one of them a scalar.")
+    Ub, Mb = np.broadcast_arrays(U, M)
+    if Ub.size and not np.all(np.isfinite(Ub)):
+        raise _err("ellipj: U must be finite in Sagebrush.")
+    vals = [_sf._ellipj1(float(u), float(m)) for u, m in zip(Ub.reshape(-1), Mb.reshape(-1))]
+    cls = "single" if "single" in (cu, cm) else "double"
+    outs = [_m._finish(np.array([v[i] for v in vals] if vals else [], dtype=float).reshape(Ub.shape), cls)
+            for i in range(3)]
+    return outs[0] if nargout <= 1 else outs[:max(nargout, 1)]
+
+
+# ------------------------------------------------------------------ legendre
+
+@_bi("legendre")
+def legendre_(nargout, *args):
+    """P = legendre(n, X) and legendre(n, X, normalization) for
+    normalization "unnorm" (default), "sch" or "norm", as the documentation
+    page describes them: n a nonnegative integer scalar, X real in [-1, 1];
+    P(m+1, ...) is the function of order m at each element of X, an
+    (n+1)-by-numel(X) matrix for a vector X and [n+1, size(X)] otherwise.
+    lib/_special.py's legendre_all: "unnorm" is the Ferrers function with
+    the Condon-Shortley phase (-1)^m, as the page defines it, and "sch" and
+    "norm" are without it; the unnormalized values overflow to Inf for
+    large n, as the page says"""
+    if len(args) < 2:
+        raise _err("Not enough input arguments.")
+    if len(args) > 3:
+        raise _err("Too many input arguments.")
+    nv = _m._farr(args[0], "legendre")
+    if nv.size != 1 or nv.dtype.kind == "c" or not np.isfinite(nv).all() or float(nv.reshape(-1)[0]) < 0 \
+            or float(nv.reshape(-1)[0]) != _math.floor(float(nv.reshape(-1)[0])):
+        raise _err("legendre: n must be a nonnegative integer scalar.")
+    n = int(float(nv.reshape(-1)[0]))
+    norm = "unnorm"
+    if len(args) == 3:
+        if not _m._istext(args[2]) or _m._text(args[2]).lower() not in ("unnorm", "sch", "norm"):
+            raise _err("legendre: normalization must be 'unnorm', 'sch' or 'norm'.")
+        norm = _m._text(args[2]).lower()
+    A, cls = _values("legendre", args[1])
+    if A.dtype.kind == "c" or (A.size and (np.any(~(A >= -1)) or np.any(~(A <= 1)))):
+        raise _err("legendre: X must be real and in the range -1 <= X <= 1.")
+    flat = A.reshape(-1)
+    rows = [_sf.legendre_all(n, float(v), norm) for v in flat]
+    R = np.array(rows if rows else [], dtype=float).reshape((flat.size, n + 1))
+    # (Sagebrush stores arrays in MATLAB's column-major order, so this
+    # numpy shape is MATLAB's (n+1)-by-numel; otherwise [n+1, size(X)])
+    vector = A.ndim <= 2 and min(A.shape) <= 1
+    if not vector:
+        R = R.reshape(A.shape + (n + 1,))
+    return _m._finish(R, cls)
