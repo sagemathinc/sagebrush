@@ -20,3 +20,14 @@ logical 1x1 true
 char 1x6 ['single']
 char 1x6 ['single']
 logical 1x1 true
+double 1x1 4.7123889800000001
+double 1x1 5.9981032699999997
+double 1x1 0.63700897999999995
+double 1x1 6.2831853100000004
+double 1x1 2
+double 1x1 2.25
+double 1x1 0.69999999999999996
+double 1x1 0.33333299999999999
+double 1x2 [3.1415926500000002 -1]
+double 1x1 3
+logical 1x1 true

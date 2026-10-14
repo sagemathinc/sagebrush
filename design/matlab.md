@@ -24,7 +24,9 @@ and runs on a runtime library with MATLAB's semantics:
     solvers: fzero is Brent's method (Brent 1973, chapter 4; Forsythe,
     Malcolm and Moler 1976, section 7.2), which its page cites, after an
     outward search for a sign change whose steps the published iterative
-    displays fix;
+    displays fix; fminbnd is Brent's localmin (Brent 1973, chapter 5;
+    Forsythe, Malcolm and Moler 1976, section 8.2), with the tolerance
+    whose bound its page gives;
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -578,6 +580,10 @@ The rest:
   is detected; a sign change at a pole ends like any other), an error for
   a NaN or complex value inside the interval, when output functions are called, and the messages
   other than "Zero found in the interval [a, b]". PlotFcns is refused;
+- fminbnd's likewise: x1 > x2 returns NaN (exitflag -2) without calling
+  fun, a complex value is an error even with FunValCheck off, MaxFunEvals
+  and MaxIter are checked after the convergence test, and the messages
+  other than the converged one are Sagebrush's own. PlotFcns is refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
