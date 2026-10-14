@@ -2481,6 +2481,12 @@ def cell_lit(rows):
 # ------------------------------------------------------------------ display
 
 _format = {"num": "short", "spacing": "loose"}
+_FORMAT_NAMES = {k.lower(): k for k in ("short", "long", "shortG", "longG", "shortE", "longE", "rat", "bank", "hex", "+")}
+
+
+def _long():
+    """whether the format is long (long, longG or longE)"""
+    return _format["num"].startswith("long")
 _WIDTH = 80
 
 
@@ -2512,7 +2518,7 @@ class _NumFmt:
     wide below 1000, else 12; a common scale factor (1.0e+03 *) for a
     matrix outside [0.001, 1000), e-notation for such a scalar"""
 
-    def __init__(self, A, scalar, long_=False):
+    def __init__(self, A, scalar, long_=False, single=False):
         F = A[np.isfinite(A)] if A.size else A
         self.scale = None
         self.long = long_
@@ -2524,13 +2530,16 @@ class _NumFmt:
         self.dec = 15 if long_ else 4
         lo, hi = (1e-3, 100.0) if long_ else (1e-3, 1e3)
         fixw = 20 if long_ else 10
-        if lo <= maxabs < hi or maxabs == 0:
+        if single and long_:
+            # (format long shows a single to 7 decimals)
+            self.dec, fixw = 7, 12
+        if lo < maxabs < hi or maxabs == 0:
             self.kind = "fix"
             self.width = fixw
             return
         if scalar:
             self.kind = "e"
-            self.width = 25 if long_ else 13
+            self.width = 26 if long_ else 13
             return
         ex = _scale_exponent(maxabs)
         self.scale = 10.0 ** ex
@@ -2634,7 +2643,7 @@ def _numeric_blocks(v):
     if numel == 0:
         if cls == "double" and d == (0, 0):
             return [], ["     []"]
-        return [], ["  %s empty %s %s" % (_dimstr(d), cls, "matrix" if cls not in ("logical", "char") else "array")]
+        return [], ["  %s empty %s %s" % (_dimstr(d), cls, "matrix" if cls not in ("logical", "char") and len(d) == 2 else "array")]
     if len(d) > 2:
         pages = _pages(v)
         # (every page in the same format)
@@ -2659,8 +2668,14 @@ def _numeric_blocks(v):
             head.append("  " + cls)
         else:
             head.append("  %s %s %s" % (_dimstr(d), cls, _shape_word(d)))
+        if _format["num"] == "hex":
+            # (format hex: each integer's bytes, two's complement)
+            nb = a.dtype.itemsize
+            texts = [["%0*x" % (2 * nb, int(M[i, j]) % (1 << (8 * nb))) for i in range(rows)] for j in range(cols)]
+            return head, _matrix_rows(texts, 2 * nb + 3, rows, cols)
         texts = [["%d" % int(M[i, j]) for i in range(rows)] for j in range(cols)]
-        w = max(len(t) for col in texts for t in col) + 3
+        # (the widest magnitude, a column for a minus sign if there is one, and 3)
+        w = max(len(t.lstrip("-")) for col in texts for t in col) + (1 if any(t.startswith("-") for col in texts for t in col) else 0) + 3
         return head, _matrix_rows(texts, w, rows, cols)
     if cls == "single":
         if scalar:
@@ -2668,6 +2683,9 @@ def _numeric_blocks(v):
         else:
             head.append("  %s single %s" % (_dimstr(d), _shape_word(d)))
     long_ = _format["num"] == "long"
+    alt = _alt_blocks(M, a, cls, scalar, rows, cols)
+    if alt is not None:
+        return head, alt
     if a.dtype.kind == "c":
         f, scale = _fmt_complex_parts(M, scalar)
         parts = []
@@ -2680,18 +2698,18 @@ def _numeric_blocks(v):
                 re_ = f(z.real + 0.0)  # (-0 prints as 0)
                 col.append((re_, sign, f(abs(im)) if im == im else "NaN"))
             parts.append(col)
-        wr = max(9 if not long_ else 20, max(len(p[0]) for c in parts for p in c) + 2)
+        wr = max(9 if not long_ else 19, max(len(p[0]) for c in parts for p in c) + 2)
         # (the imaginary part's field: at least a one-digit number and a space)
         wi = max(max(len(p[2]) for c in parts for p in c), len(f(1.0)) + 1)
         texts = [["%s %s%si" % (p[0].rjust(wr), p[1], p[2].rjust(wi)) for p in c] for c in parts]
         w = wr + wi + 3
         body = []
         if scale:
-            body.append("   %s *" % scale)
+            body.append(("%s *" % scale).rjust(12))
         body.extend(_matrix_rows(texts, w, rows, cols))
         return head, body
     A = M.astype(np.float64)
-    nf = _NumFmt(A, scalar, long_)
+    nf = _NumFmt(A, scalar, long_, single=cls == "single")
     texts = [[nf.fmt(float(A[i, j])) for i in range(rows)] for j in range(cols)]
     w = nf.width
     longest = max(len(t) for c in texts for t in c)
@@ -2699,9 +2717,122 @@ def _numeric_blocks(v):
         w = longest + 3 if nf.kind == "int" else longest + 2
     body = []
     if nf.scale is not None:
-        body.append("   %s *" % nf.scale_text)
+        # (right-aligned in 12: "   1.0e+03 *", "  1.0e+100 *")
+        body.append(("%s *" % nf.scale_text).rjust(12))
     body.extend(_matrix_rows(texts, w, rows, cols))
     return head, body
+
+
+def _hex_double(x, single=False):
+    """a value's bits in hex (MATLAB's NaN, as its own constant, has the sign bit set)"""
+    import struct as _struct
+    if x != x:
+        return "fff80000"[:8] if single else "fff8000000000000"
+    if single:
+        return _struct.pack(">f", x).hex()
+    return _struct.pack(">d", x).hex()
+
+
+def _round_away(v):
+    """MATLAB's round: half away from zero, as an exact integer"""
+    return int(_math.floor(v + 0.5)) if v >= 0 else -int(_math.floor(-v + 0.5))
+
+
+def _rat1(x, tol=None):
+    """MATLAB's rat of one value: the continued fraction of nearest-integer
+    steps, until within tol (1e-6 |x|, as format rat uses); (n, d), d >= 0"""
+    if x != x:
+        return 0, 0
+    if x in (_math.inf, -_math.inf):
+        return (1 if x > 0 else -1), 0
+    if tol is None:
+        tol = 1e-6 * abs(x)
+    lastn, lastd = 1, 0
+    n, d = _round_away(x), 1
+    frac = x - n
+    for _ in range(64):
+        if abs(x - n / d) < tol or frac == 0:
+            break
+        flip = 1.0 / frac
+        step = _round_away(flip)
+        frac = flip - step
+        n, lastn = n * step + lastn, n
+        d, lastd = d * step + lastd, d
+    if d < 0:
+        n, d = -n, -d
+    return n, d
+
+
+def _alt_blocks(M, a, cls, scalar, rows, cols):
+    """the body of a double or single matrix (MATLAB-oriented M) under format
+    shortG, longG, shortE, longE, bank or hex; None under short and long (and rat)"""
+    mode = _format["num"]
+    if mode not in ("shortG", "longG", "shortE", "longE", "bank", "hex", "rat") or cls not in ("double", "single"):
+        return None
+    single = cls == "single"
+    cplx = a.dtype.kind == "c"
+    R = M.real.astype(np.float64) if cplx else M.astype(np.float64)
+    I = M.imag.astype(np.float64) if cplx else None
+
+    def special(x):
+        return _special(x) if (x != x or x in (_math.inf, -_math.inf)) else None
+    if mode == "rat":
+        # (each element its own approximation: numerator right-aligned in 8, /denominator left in 7)
+        def part(x):
+            n, d = _rat1(x)
+            return str(n), ("" if d == 1 else "/%d" % d)
+        if cplx:
+            texts = []
+            for j in range(cols):
+                col = []
+                for i in range(rows):
+                    rn, rd = part(float(R[i, j]))
+                    im = float(I[i, j])
+                    inum, iden = part(abs(im))
+                    col.append(rn.rjust(8) + rd.ljust(7) + " " + ("-" if im < 0 else "+") + inum.rjust(5) + (iden + "i").ljust(7))
+                texts.append(col)
+        else:
+            texts = [[(lambda p: p[0].rjust(8) + p[1].ljust(7))(part(float(R[i, j]))) for i in range(rows)] for j in range(cols)]
+        return _matrix_rows(texts, max(len(t) for c in texts for t in c) if rows and cols else 0, rows, cols)
+    if mode == "hex":
+        if cplx:
+            texts = [["   %s   %si" % (_hex_double(float(R[i, j]), single), _hex_double(float(I[i, j]), single)) for i in range(rows)] for j in range(cols)]
+            return _matrix_rows(texts, len(texts[0][0]) if rows and cols else 0, rows, cols)
+        texts = [[_hex_double(float(R[i, j]), single) for i in range(rows)] for j in range(cols)]
+        return _matrix_rows(texts, (8 if single else 16) + 3, rows, cols)
+    if mode == "bank":
+        # (two decimals, a complex number's real part alone; 0 itself as 0)
+        def b(x):
+            return special(x) or ("0" if x == 0 else "%.2f" % x)
+        texts = [[b(float(R[i, j])) for i in range(rows)] for j in range(cols)]
+        w = max([14] + [len(t) + 1 for c in texts for t in c])
+        return _matrix_rows(texts, w, rows, cols)
+    F = np.concatenate([R.reshape(-1)] + ([I.reshape(-1)] if cplx else []))
+    fin = F[np.isfinite(F)]
+    if not cplx and _isint_arr(fin) and (float(np.max(np.abs(fin))) if fin.size else 0.0) < 1e9:
+        return None  # (integers: as format short shows them)
+    long_ = mode.startswith("long")
+    g = mode.endswith("G")
+    if single and long_:
+        prec, w = 7, 16
+    else:
+        prec, w = (15 if long_ else (5 if g else 4)), (26 if long_ else 13)
+    if single and mode == "shortE":
+        w = 12
+    spec = "%%.%d%s" % (prec, "g" if g else "e")
+
+    def f(x):
+        return special(x) or ("0" if x == 0 else spec % (x + 0.0))
+    if cplx:
+        wr = w + 1 if long_ else w
+        wi = (21 if long_ else 10) if g else 0
+        texts = [["%s %s %si" % (f(float(R[i, j])).rjust(wr), "-" if I[i, j] < 0 else "+", f(abs(float(I[i, j]))).rjust(wi))
+                  for i in range(rows)] for j in range(cols)]
+        width = max(len(t) for c in texts for t in c)
+        return _matrix_rows(texts, width, rows, cols)
+    texts = [[f(float(R[i, j])) for i in range(rows)] for j in range(cols)]
+    width = max([w] + [len(t) + 1 for c in texts for t in c])
+    return _matrix_rows(texts, width, rows, cols)
 
 
 def _shape_word(d):
@@ -2723,8 +2854,26 @@ def _short_scalar(x):
     if type(x) is complex:
         f, _ = _fmt_complex_parts(np.array([[x]]), True)
         return "%s %s %si" % (f(x.real), "-" if x.imag < 0 else "+", f(abs(x.imag)))
+    mode = _format["num"]
+    if mode in ("bank", "hex", "shortG", "longG", "shortE", "longE") and type(x) is not complex:
+        return _alt_scalar(x)
     nf = _NumFmt(np.array([[x]]), True, _format["num"] == "long")
     return nf.fmt(x)
+
+
+def _alt_scalar(x):
+    """a double in format bank, hex, shortG, longG, shortE or longE, without padding"""
+    mode = _format["num"]
+    if mode == "hex":
+        return _hex_double(x)
+    if x != x or x in (_math.inf, -_math.inf):
+        return _special(x)
+    if mode == "bank":
+        return "0" if x == 0 else "%.2f" % x
+    if x == _math.floor(x) and abs(x) < 1e9:
+        return "%d" % x
+    prec = 15 if mode.startswith("long") else (5 if mode.endswith("G") else 4)
+    return ("%%.%d%s" % (prec, "g" if mode.endswith("G") else "e")) % x
 
 
 def _g5(x):
@@ -2749,6 +2898,9 @@ def _brief(v, in_cell):
     if t is Str:
         return '["%s"]' % v.s if in_cell else '"%s"' % v.s
     if t is Cell:
+        if not in_cell and len(v.a) == 1 and _isnumlike(v.a[0]) and _numel(v.a[0]) == 1:
+            # (a struct's field holding a 1-by-1 cell of a scalar: its element, b: {[1]})
+            return "{%s}" % _brief(v.a[0], True)
         return "%s cell" % _dimstr(d) if in_cell else "{%s cell}" % _dimstr(d)
     if t is Struct:
         return "%s struct" % _dimstr(d) if in_cell else "[%s struct]" % _dimstr(d)
@@ -2772,13 +2924,18 @@ def _brief(v, in_cell):
             return "[%s]" % " ".join(_g5(float(x)) for x in A)
         if len(d) == 2 and d[0] == 1 and n <= 10 and in_cell and _arr(v).dtype.kind != "c":
             A = _arr(v).reshape(-1)
+            if cls == "double" and _format["num"] == "bank":
+                return "[%s]" % " ".join(_alt_scalar(float(x)) for x in A)
+            if _format["num"] == "hex":
+                return "%s %s" % (_dimstr(d), cls)
             if cls == "logical" or cls in _INTS or _isint_arr(A.astype(np.float64)):
                 return "[%s]" % " ".join("%d" % int(x) if np.isfinite(x) else _special(float(x)) for x in A)
             if cls == "double":
                 # (format short, the row's common format, when it needs no scale factor)
                 nf = _NumFmt(A.reshape((1, -1)).astype(np.float64), False, _format["num"] == "long")
                 if nf.scale is None:
-                    return "[%s]" % " ".join(nf.fmt(float(x)) for x in A)
+                    # (an integer element without decimals: [1.5000 2.2500 3])
+                    return "[%s]" % " ".join("%d" % x if np.isfinite(x) and x == np.floor(x) else nf.fmt(float(x)) for x in A)
             return "%s %s" % (_dimstr(d), cls)
         return "%s %s" % (_dimstr(d), cls) if in_cell else "[%s %s]" % (_dimstr(d), cls)
     if t is MException:
@@ -2975,6 +3132,9 @@ def display(name, v):
     blocks = head + body
     if _format["spacing"] == "loose":
         _write("\n%s =%s\n\n%s\n\n" % (name, " " if obj else "", "\n\n".join(blocks)))
+    elif type(v) is Struct and len(v.a) == 1 and v.fields:
+        # (format compact still separates a struct's header from its fields)
+        _write("%s = \n%s\n\n%s\n" % (name, "\n".join(head), "\n".join(body)))
     else:
         _write("%s =%s\n%s\n" % (name, " " if obj else "", "\n".join(blocks)))
 
@@ -6556,10 +6716,8 @@ def format_(nargout, *args):
         elif s == "default":
             _format["num"] = "short"
             _format["spacing"] = "loose"
-        elif s in ("short", "long"):
-            _format["num"] = s
-        elif s in ("shortg", "longg", "shorte", "longe", "rat", "bank", "hex", "+"):
-            _format["num"] = "long" if s.startswith("long") else "short"
+        elif s in _FORMAT_NAMES:
+            _format["num"] = _FORMAT_NAMES[s]
     return NOVAL
 
 

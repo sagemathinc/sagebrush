@@ -220,12 +220,12 @@ def blocks(S):
         f, scale = _m._fmt_complex_parts(vals.reshape((-1, 1)), nz == 1)
         parts = [(f(z.real + 0.0), "-" if z.imag < 0 else "+", f(abs(z.imag)) if z.imag == z.imag else "NaN")
                  for z in (complex(x) for x in vals)]
-        wr = max(9 if _m._format["num"] != "long" else 20, max(len(p[0]) for p in parts) + 2)
+        wr = max(9 if _m._format["num"] != "long" else 19, max(len(p[0]) for p in parts) + 2)
         wi = max(max(len(p[2]) for p in parts), len(f(1.0)) + 1)
         texts = ["%s %s%si" % (p[0].rjust(wr), p[1], p[2].rjust(wi)) for p in parts]
         w = wr + wi + 3 - (_m._format["num"] == "long")
         if scale:
-            body.append("   %s *" % scale)
+            body.append(("%s *" % scale).rjust(12))
     else:
         nf = _m._NumFmt(vals.reshape((-1, 1)), nz == 1, _m._format["num"] == "long")
         texts = [nf.fmt(float(x)) for x in vals]
@@ -234,7 +234,7 @@ def blocks(S):
         if longest + 2 > w:
             w = longest + 3 if nf.kind == "int" else longest + 2
         if nf.scale is not None:
-            body.append("   %s *" % nf.scale_text)
+            body.append(("%s *" % nf.scale_text).rjust(12))
     lines = []
     for k in range(nz):
         r = str(int(rows[k]))
