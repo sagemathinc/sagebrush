@@ -200,7 +200,9 @@ export class Images {
    * (its notes renamed to match).  Resolves to whether it changed.
    */
   async absorb(d: BoardDoc, budget?: PixelBudget): Promise<boolean> {
-    const carried = Object.entries(d.images ?? {}).filter(([, v]) => v.src?.startsWith("data:"));
+    // (every source but an https: address: a data: URL in any case is one,
+    // SEC-1D8-1; dataUrl below decides, and what it can't read is dropped)
+    const carried = Object.entries(d.images ?? {}).filter(([, v]) => !!v.src && !/^https:\/\//i.test(v.src));
     if (!carried.length) return false;
     const rename = new Map<string, string>();
     // (each within the bounds its header gives, and all within the
