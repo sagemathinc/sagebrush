@@ -1189,8 +1189,148 @@ def _band_solve(S, B):
     return X
 
 
+# the most multiply-adds a band solve may take (beyond, the sparse LU)
+MAX_BAND_WORK = 1 << 29
+
+# the most a sparse LU factorization may hold (nonzeros of L and U together)
+# and do (multiply-adds); a matrix whose factors fill in beyond is refused
+MAX_LU_FILL = 1 << 22
+MAX_LU_WORK = 1 << 24
+
+
+class _LU:
+    """P*A = L*U for a square sparse A, by columns: at step k row prow[k] of A is
+    the pivot, L's column k (unit diagonal) is lrow[k] (A's rows; lstep[k], the
+    steps they are pivoted at) with values lval[k], and U's column j is
+    ustep[j] (steps before j) with values uval[j] over the diagonal udiag[j]"""
+
+    def solve(self, B, trans=False):
+        """A \\ B, or A' \\ B (the conjugate transpose); B an n-by-k full matrix"""
+        n = self.n
+        dt = np.complex128 if self.udiag.dtype.kind == "c" or B.dtype.kind == "c" else np.float64
+        b = np.array(B, dtype=dt).reshape((n, -1))
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            if not trans:
+                # (L y = P b, then U x = y)
+                y = np.zeros_like(b)
+                for k in range(n):
+                    y[k] = b[self.prow[k]]
+                    if self.lrow[k].size:
+                        b[self.lrow[k]] -= self.lval[k].reshape((-1, 1)) * y[k].reshape((1, -1))
+                for j in range(n - 1, -1, -1):
+                    y[j] /= self.udiag[j]
+                    if self.ustep[j].size:
+                        y[self.ustep[j]] -= self.uval[j].reshape((-1, 1)) * y[j].reshape((1, -1))
+                return y
+            # (A' = U' L' P: U' w = b, then L' v = w, then x = P' v)
+            w = b
+            for j in range(n):
+                if self.ustep[j].size:
+                    w[j] -= (np.conj(self.uval[j]).reshape((-1, 1)) * w[self.ustep[j]]).sum(axis=0)
+                w[j] /= np.conj(self.udiag[j])
+            for k in range(n - 1, -1, -1):
+                if self.lstep[k].size:
+                    w[k] -= (np.conj(self.lval[k]).reshape((-1, 1)) * w[self.lstep[k]]).sum(axis=0)
+            x = np.zeros_like(w)
+            x[self.prow] = w
+            return x
+
+
+def _too_much_fill(n):
+    return _err("Out of memory: the LU factors of this %dx%d sparse matrix fill in too far to solve with it (Sagebrush orders no columns to reduce fill)." % (n, n), "MATLAB:nomem")
+
+
+def _sparse_lu(S):
+    """the LU factorization of a square sparse S, never its full form:
+    left-looking, each column by a sparse triangular solve over the steps it
+    reaches (as Gilbert and Peierls's; a row in L's column k is pivoted after
+    step k, so the steps in increasing order are a topological one), with
+    partial pivoting that keeps the diagonal while it is within a factor of 10
+    of the largest candidate.  A zero pivot is kept (the solves then give Inf
+    or NaN, as MATLAB's do, with its warning)"""
+    n = S.n
+    dt = np.complex128 if S.pr.dtype.kind == "c" else np.float64
+    vals = _fvals(S).astype(dt)
+    jc, ir = S.jc, S.ir
+    pinv = np.full(n, -1, dtype=_I)
+    reached = np.zeros(n, dtype=bool)
+    prow = [0] * n
+    lrow, lval = [None] * n, [None] * n
+    ustep, uval = [None] * n, [None] * n
+    udiag = np.zeros(n, dtype=dt)
+    x = np.zeros(n, dtype=dt)
+    free = 0  # (no row before it is unpivoted)
+    fill = work = 0
+    for j in range(n):
+        a0, a1 = int(jc[j]), int(jc[j + 1])
+        rows = ir[a0:a1]
+        x[rows] = vals[a0:a1]
+        # (the steps this column reaches through L, level by level)
+        levels = []
+        f = pinv[rows]
+        f = f[f >= 0]
+        while f.size:
+            f = np.unique(f[~reached[f]])
+            if not f.size:
+                break
+            reached[f] = True
+            levels.append(f)
+            nxt = [lrow[k] for k in f.tolist() if lrow[k].size]
+            if not nxt:
+                break
+            f = pinv[np.concatenate(nxt)]
+            f = f[f >= 0]
+        order = np.sort(np.concatenate(levels)).tolist() if levels else []
+        if levels:
+            reached[order] = False
+        touched = [rows]
+        uv = np.zeros(len(order), dtype=dt)
+        for t, k in enumerate(order):
+            xk = x[prow[k]]
+            uv[t] = xk
+            if xk != 0 and lrow[k].size:
+                x[lrow[k]] -= lval[k] * xk
+            touched.append(lrow[k])
+            work += lrow[k].size
+        if work > MAX_LU_WORK:
+            raise _too_much_fill(n)
+        ustep[j] = np.array(order, dtype=_I)
+        uval[j] = uv
+        allr = np.unique(np.concatenate(touched)) if len(touched) > 1 else np.unique(rows)
+        cand = allr[pinv[allr] < 0]
+        cv = x[cand]
+        amax = float(np.max(np.abs(cv))) if cand.size else 0.0
+        if amax > 0:
+            if pinv[j] < 0 and abs(x[j]) >= 0.1 * amax:
+                p = j
+            else:
+                p = int(cand[int(np.argmax(np.abs(cv)))])
+        else:
+            while pinv[free] >= 0:
+                free += 1
+            p = j if pinv[j] < 0 else int(free)
+        pinv[p] = j
+        prow[j] = p
+        udiag[j] = x[p]
+        keep = (cand != p) & (cv != 0)
+        lrow[j] = cand[keep]
+        lval[j] = cv[keep] / x[p] if amax > 0 else cv[keep]
+        x[allr] = 0
+        fill += lrow[j].size + len(order) + 1
+        if fill > MAX_LU_FILL:
+            raise _too_much_fill(n)
+    F = _LU()
+    F.n = n
+    F.prow = np.array(prow, dtype=_I)
+    F.lrow, F.lval, F.ustep, F.uval, F.udiag = lrow, lval, ustep, uval, udiag
+    F.lstep = [pinv[r] for r in lrow]
+    F.singular = bool(np.any(udiag == 0))
+    return F
+
+
 def mldivide(a, b):
-    """a \\ b with a sparse a (not scalar): through the full matrix when small, else banded"""
+    """a \\ b with a sparse a (not scalar): through the full matrix when small;
+    beyond, by its diagonal, its band, or its sparse LU factorization"""
     A = a
     if A.m != _m._dims(b)[0]:
         raise _err("Matrix dimensions must agree.", "MATLAB:dimagree")
@@ -1207,11 +1347,16 @@ def mldivide(a, b):
         return from_full(r) if type(b) is Sparse else r
     if A.m == A.n and A.n > MAX_DENSE_SOLVE:
         kl, ku = bandwidths(A)
-        if (2 * kl + ku + 1) * A.n <= MAX_FULL:
-            Bm = _m._mat(full(b) if type(b) is Sparse else b)
+        Bm = _m._mat(full(b) if type(b) is Sparse else b)
+        if (2 * kl + ku + 1) * A.n <= MAX_FULL and A.n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK:
             X = _band_solve(A, Bm)
-            r = _m._unmat(X)
-            return from_full(r) if type(b) is Sparse else r
+        else:
+            F = _sparse_lu(A)
+            if F.singular:
+                _m.warning_("Matrix is singular to working precision.")
+            X = F.solve(Bm)
+        r = _m._unmat(X)
+        return from_full(r) if type(b) is Sparse else r
     r = _m.mldivide(full(a), full(b))
     return from_full(r) if type(b) is Sparse and _m._isnumlike(r) else r
 
@@ -1286,7 +1431,8 @@ def _normest_b(nargout, S, tol=None):
 
 def _condest_b(nargout, A, *args):
     """the 1-norm condition number, estimated: norm(A, 1) times Hager's estimate
-    of norm(inv(A), 1), which takes a few solves with A and A' (never inv(A))"""
+    of norm(inv(A), 1), which takes a few solves with A and A' (never inv(A);
+    a large sparse A by its sparse LU factorization)"""
     d = _m._dims(A)
     if len(d) != 2 or d[0] != d[1]:
         raise _err("Matrix must be square.")
@@ -1299,10 +1445,17 @@ def _condest_b(nargout, A, *args):
     else:
         norm1 = float(np.max(np.sum(np.abs(_m._mat(A)), axis=0)))
 
-    def solve(M, v):
-        with np.errstate(all="ignore"):
-            r = _m.mldivide(M, _m._unmat(v.reshape((-1, 1))))
-        return _m._mat(full(r) if type(r) is Sparse else r).reshape(-1)
+    if type(A) is Sparse and n > MAX_DENSE_SOLVE:
+        # (one factorization, for the solves with A and with A')
+        F = _sparse_lu(A)
+
+        def solve(M, v):
+            return F.solve(v.reshape((-1, 1)), trans=M is At).reshape(-1)
+    else:
+        def solve(M, v):
+            with np.errstate(all="ignore"):
+                r = _m.mldivide(M, _m._unmat(v.reshape((-1, 1))))
+            return _m._mat(full(r) if type(r) is Sparse else r).reshape(-1)
     warn = _m.warning_
     _m.warning_ = lambda *a, **k: None  # (the solves' own warnings: the estimate says it)
     try:
@@ -1446,7 +1599,17 @@ def _sprandsym_b(nargout, n, density=None, *rest):
         want = int(round(_density(density) * n * n))
         keys = np.zeros(0, dtype=_I)
         count = 0
+        places = n * (n + 1) // 2
         while count < want:
+            if 2 * keys.size >= places:
+                # (most places taken: the rest from the ones still free, in a
+                # random order, rather than sampling until they turn up)
+                free = np.setdiff1d(_lower_keys(n), keys, assume_unique=True)
+                order = _m._arr(_m._B["randperm"].f(1, float(free.size))).reshape(-1).astype(_I) - 1
+                keys = np.concatenate([keys, free[order]])
+                weight = np.where(keys // n == keys % n, 1, 2)
+                keys = keys[:int(np.searchsorted(np.cumsum(weight), want)) + 1]
+                break
             k = max(16, want - count)
             i = _m._arr(_m._B["randi"].f(1, float(n), float(k), 1.0)).reshape(-1).astype(_I) - 1
             j = _m._arr(_m._B["randi"].f(1, float(n), float(k), 1.0)).reshape(-1).astype(_I) - 1
@@ -1465,6 +1628,12 @@ def _sprandsym_b(nargout, n, density=None, *rest):
         keys = np.sort(keys)
         R = make(n, n, keys // n, keys % n, _rand_values("randn", keys.size) if keys.size else np.zeros(0))
     return binop("plus", R, transpose(tri(R, -1, True)))
+
+
+def _lower_keys(n):
+    """row * n + column of each place on or below the diagonal of an n-by-n matrix"""
+    k = np.arange(n * n, dtype=_I)  # (already in order)
+    return k[k // n >= k % n]
 
 
 def _like_proto(args):

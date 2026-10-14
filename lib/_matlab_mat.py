@@ -43,6 +43,8 @@ class MatError(Exception):
 # most nonzeros a sparse matrix in it may reserve.
 MAX_INFLATED = 1 << 28
 MAX_NZMAX = 1 << 27
+# the most unused row indices a saved sparse matrix holds room for
+MAX_SAVED_PAD = 1 << 20
 try:
     import os as _os
     MAX_INFLATED = int(_os.environ.get("SAGEBRUSH_MAT_MAX_INFLATED", MAX_INFLATED))  # (lower for tests)
@@ -278,9 +280,10 @@ def _sparse(r, e, dims, nzmax, is_complex, is_logical):
     elif single:
         vals = vals.astype(np.complex64 if is_complex else np.float32)
     S = sp.make(m, n, ir, cols, vals)
-    if nzmax < nz or nzmax > MAX_NZMAX:
-        nzmax = nz
-    S.cap = int(min(nzmax, max(ir.size, nz)))
+    # (the declared reservation kept, whether or not the file holds room for
+    # it, as Octave's files do not: it is only a number, nothing is allocated
+    # for it; one beyond MAX_NZMAX is not believed)
+    S.cap = int(nzmax) if nz <= nzmax <= MAX_NZMAX else nz
     return S
 
 
@@ -363,11 +366,14 @@ def _array(name, v):
     if t is _m.Sparse:
         import _matlab_sparse as sp
         nzmax = min(sp.nzmax(v), max(MAX_NZMAX, sp.nnz(v)))
+        # (room for the reservation, as MATLAB writes it, when it is modest;
+        # beyond, just the row indices in use, as Octave writes them)
+        pad = nzmax - v.ir.size if nzmax - v.ir.size <= MAX_SAVED_PAD else 0
         fl = (0x02 if sp.islogical(v) else 0) | (0x08 if v.pr.dtype.kind == "c" else 0)
         body = (_elem(miUINT32, struct.pack("<II", 5 | (fl << 8), nzmax)) + _elem(miINT32, _pack("i", dims))
                 + _elem(miINT8, name.encode("latin1")))
-        ir = [int(x) for x in v.ir] + [0] * (nzmax - v.ir.size)
-        body += _elem(miINT32, _pack("i", ir)) + _elem(miINT32, _pack("i", [int(x) for x in v.jc]))
+        ir = _pack("i", [int(x) for x in v.ir]) + bytes(4 * pad)
+        body += _elem(miINT32, ir) + _elem(miINT32, _pack("i", [int(x) for x in v.jc]))
         vals = v.pr.astype(np.float64) if v.pr.dtype.kind == "b" else v.pr
         if vals.dtype.kind == "c":
             body += _elem(miDOUBLE, _pack("d", [float(x) for x in vals.real])) + _elem(miDOUBLE, _pack("d", [float(x) for x in vals.imag]))
