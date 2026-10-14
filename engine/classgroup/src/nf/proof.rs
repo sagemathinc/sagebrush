@@ -76,6 +76,17 @@ impl Default for Limits {
     }
 }
 
+/// The saturation steps work modulo primes l below 2^24, with characters
+/// at primes p = 1 mod l below 2^32 (sagebrush_poly::factor_mod's range),
+/// so that every residue and every sum of two residues fits a u64 (and a
+/// signed i64), and p = j l + 1 has j up to 2^8, enough candidates: a unit
+/// index bound or a prime factor of h* at or above PRIME_MAX is refused
+/// before any arithmetic modulo it (daybreak's CORR-A83-1 and HARD-A83-2).
+pub const PRIME_MAX: u64 = 1 << 24;
+
+/// The bound on the character primes p (see PRIME_MAX).
+const CHAR_PRIME_MAX: u64 = 1 << 32;
+
 /// The prefix of the errors that are refusals (beyond `Limits`), not
 /// failures.
 pub const REFUSED: &str = "beyond the limits of the unconditional certificate";
@@ -203,6 +214,9 @@ pub fn certify(f: &[BigInt], limits: &Limits) -> Result<Proof, String> {
             if bnd > BigInt::from(limits.index_max) {
                 return Err(refuse("the bound on the index of the units found in the unit group (regulator found / Zimmert's lower bound)", &bnd, limits.index_max));
             }
+            if bnd >= BigInt::from(PRIME_MAX) {
+                return Err(refuse("the bound on the index of the units found in the unit group (regulator found / Zimmert's lower bound)", &bnd, PRIME_MAX - 1));
+            }
             (bnd.to_u64().unwrap(), u.exps.clone())
         }
     };
@@ -214,7 +228,8 @@ pub fn certify(f: &[BigInt], limits: &Limits) -> Result<Proof, String> {
     // step 2: l <= B
     let mut unit_primes = 0;
     if r > 0 {
-        for l in primes_up_to(index_bound) {
+        // (each prime l <= B < PRIME_MAX = 2^24, found by trial: no sieve)
+        for l in (2..=index_bound).filter(|&l| is_prime_u64(l)) {
             sagebrush_interrupt::check();
             unit_saturated(&chars, &unit_exps, w, l)?;
             unit_primes += 1;
@@ -226,7 +241,10 @@ pub fn certify(f: &[BigInt], limits: &Limits) -> Result<Proof, String> {
     if !hstar.is_one() {
         for (l, _) in crate::api::factor_integer(&hstar)? {
             sagebrush_interrupt::check();
-            let lu = l.to_u64().ok_or("a prime factor of h* beyond 64 bits")?;
+            let lu = match l.to_u64() {
+                Some(lu) if lu < PRIME_MAX => lu,
+                _ => return Err(refuse("a prime factor of h* (each is checked modulo itself)", &l, PRIME_MAX - 1)),
+            };
             class_saturated(&chars, &dense, c, r, w, lu)?;
             class_primes.push(l);
         }
@@ -248,20 +266,26 @@ fn upper_f64(b: &Ball) -> f64 {
     Ball::exact(m, e).to_f64_approx()
 }
 
-/// The factor base is every prime ideal of norm below its bound (step 1
-/// relies on it): as many as decompose finds, each of norm below it.
+/// The factor base is every prime ideal of norm below its bound, each
+/// once (step 1 relies on it): as a multiset of (p, e, f, HNF basis), it
+/// equals what decompose finds (daybreak's AUDIT-A83-3: comparing counts
+/// and norms alone let a duplicate stand in for a missing prime).
 fn check_factor_base(o: &Order, rel: &Relations) -> Result<(), String> {
     let dk = o.disc();
-    let mut count = 0;
+    let key = |q: &PrimeIdeal| (q.p, q.e, q.f, q.basis.clone());
+    let mut want = vec![];
     for p in primes_up_to(rel.bound.saturating_sub(1)) {
         for q in decompose_checked(o, &dk, p)? {
             if q.norm() < BigInt::from(rel.bound) {
-                count += 1;
+                want.push(key(&q));
             }
         }
     }
-    if count != rel.fb.len() || rel.fb.iter().any(|q| q.norm() >= BigInt::from(rel.bound)) {
-        return Err(format!("the factor base is not every prime ideal of norm below {}", rel.bound));
+    let mut have: Vec<_> = rel.fb.iter().map(key).collect();
+    want.sort();
+    have.sort();
+    if want != have {
+        return Err(format!("the factor base is not every prime ideal of norm below {}, each once", rel.bound));
     }
     Ok(())
 }
@@ -269,11 +293,16 @@ fn check_factor_base(o: &Order, rel: &Relations) -> Result<(), String> {
 /// Every relation checked exactly: (e_i) = prod P^v, by v_P(e_i) = v for
 /// each P listed and |N(e_i)| = prod N(P)^v (so no other prime divides).
 fn check_relations(o: &Order, rel: &Relations) -> Result<(), String> {
+    if rel.rels.len() != rel.elems.len() {
+        return Err("the relations and their elements differ in number".into());
+    }
     for (rl, x) in rel.rels.iter().zip(&rel.elems) {
         sagebrush_interrupt::check();
         let mut prod = BigInt::one();
         for &(i, v) in rl {
-            let q = &rel.fb[i];
+            let Some(q) = rel.fb.get(i) else {
+                return Err("a relation names a prime outside the factor base".into());
+            };
             if v <= 0 || valuation(o, q, x) as i64 != v {
                 return Err(format!("a relation's valuation at a prime above {} is wrong", q.p));
             }
@@ -746,10 +775,11 @@ impl Chars {
     }
 
     /// The primes Q for l: (p, a) with p = 1 mod l, from the smallest p
-    /// >= start on.
+    /// >= start on, below CHAR_PRIME_MAX (the iterator ends there; j l + 1
+    /// is computed with checked arithmetic).
     fn primes(&self, l: u64) -> impl Iterator<Item = (u64, u64)> + '_ {
         let j0 = self.start.div_ceil(l).max(1);
-        (j0..).map(move |j| j * l + 1).filter(move |&p| {
+        (j0..).map_while(move |j| j.checked_mul(l).and_then(|x| x.checked_add(1)).filter(|&p| p < CHAR_PRIME_MAX)).filter(move |&p| {
             is_prime_u64(p) && !(&self.disc_f % p).is_zero() && !(&self.den % p).is_zero()
         }).flat_map(move |p| {
             sagebrush_poly::factor_mod(&self.f, p).into_iter().filter(|(g, _)| g.len() == 2).map(move |(g, _)| {
@@ -859,6 +889,9 @@ impl Echelon {
 /// (compact: prod e_i^E_i, with exponents reduced modulo p - 1) reach rank
 /// r + [l | w].
 fn unit_saturated(ch: &Chars, units: &[Vec<BigInt>], w: u32, l: u64) -> Result<(), String> {
+    if !(2..PRIME_MAX).contains(&l) {
+        return Err(format!("the certificate refuses l = {}: saturation needs a prime below 2^24", l));
+    }
     let with_zeta = w as u64 % l == 0;
     let need = units.len() + with_zeta as usize;
     let support: Vec<usize> = (0..ch.elems.len()).filter(|&i| units.iter().any(|u| !u[i].is_zero())).collect();
@@ -894,7 +927,7 @@ fn unit_saturated(ch: &Chars, units: &[Vec<BigInt>], w: u32, l: u64) -> Result<(
             return Ok(());
         }
     }
-    unreachable!("the primes 1 mod l are infinite")
+    Err(format!("the certificate failed at l = {}: no character primes below 2^32 gave the rank needed", l))
 }
 
 /// The null space {x : A x = 0} over F_l of a matrix with `ncols` columns.
@@ -939,8 +972,11 @@ fn nullspace_mod(mut a: Vec<Vec<u64>>, ncols: usize, l: u64) -> Vec<Vec<u64>> {
 /// i.e. the characters restricted to the left kernel K of M~ mod l reach
 /// rank c + r + [l | w] - rank_l M~ there.
 fn class_saturated(ch: &Chars, dense: &[Vec<i64>], c: usize, r: usize, w: u32, l: u64) -> Result<(), String> {
+    if !(2..PRIME_MAX).contains(&l) {
+        return Err(format!("the certificate refuses l = {}: saturation needs a prime below 2^24", l));
+    }
     let k = dense.len();
-    let bl = l as i64;
+    let bl = l as i64; // (exact: l < PRIME_MAX = 2^24, checked above)
     // the transpose of M~ (c x (k + 1)); its null space is K
     let mt: Vec<Vec<u64>> = (0..c).map(|j| (0..=k).map(|i| if i < k { dense[i][j].rem_euclid(bl) as u64 } else { 0 }).collect()).collect();
     let kern = nullspace_mod(mt, k + 1, l);
@@ -970,7 +1006,7 @@ fn class_saturated(ch: &Chars, dense: &[Vec<i64>], c: usize, r: usize, w: u32, l
             return Ok(());
         }
     }
-    unreachable!("the primes 1 mod l are infinite")
+    Err(format!("the certificate failed at l = {}: no character primes below 2^32 gave the rank needed", l))
 }
 
 #[cfg(test)]
@@ -1110,5 +1146,47 @@ mod tests {
             let res = prove_generation(&o, &emb, &dk, 2, m.to_u64().unwrap(), &[]);
             assert_eq!(res.is_ok(), ok, "{:?}: {:?}", f, res);
         }
+    }
+
+    /// Daybreak's CORR-A83-1 and HARD-A83-2: primes at or above 2^24 (and
+    /// at and above 2^63, where `l as i64` would turn negative) are refused
+    /// before any arithmetic, by both saturation steps.
+    #[test]
+    fn saturation_refuses_large_primes() {
+        let (rel, dense, sel, emb, w, reg) = setup(&[-10, 0, 1]);
+        let o = &rel.order;
+        let c = rel.fb.len();
+        let r = emb.r1 + emb.r2 - 1;
+        let units = units_near(o, &emb, &rel.elems, &dense, &sel, r, reg).unwrap();
+        let zeta = root_of_unity_generator(o, &emb, w).unwrap();
+        let ch = Chars::new(o, &rel.elems, &zeta, rel.bound);
+        for l in [PRIME_MAX, PRIME_MAX + 11, (1u64 << 63) - 25, 1u64 << 63, (1u64 << 63) + 29, u64::MAX - 58] {
+            assert!(class_saturated(&ch, &dense, c, r, w, l).is_err(), "class l = {}", l);
+            assert!(unit_saturated(&ch, &units.exps, w, l).is_err(), "unit l = {}", l);
+        }
+        // the largest prime below the bound still works
+        let l = (2..PRIME_MAX).rev().find(|&l| is_prime_u64(l)).unwrap();
+        assert!(class_saturated(&ch, &dense, c, r, w, l).is_ok());
+        assert!(unit_saturated(&ch, &units.exps, w, l).is_ok());
+    }
+
+    /// Daybreak's AUDIT-A83-3: a factor base with one prime replaced by a
+    /// duplicate of another of the same norm, or relations and elements of
+    /// different numbers, are refused.
+    #[test]
+    fn checks_refuse_corrupted_inputs() {
+        // Q(sqrt -5)... 2 ramifies; x^2 + 1 at 5 splits into two primes of norm 5
+        let (rel, _, _, _, _, _) = setup(&[1, 0, 1]);
+        let o = &rel.order;
+        assert!(check_factor_base(o, &rel).is_ok() && check_relations(o, &rel).is_ok());
+        let i = rel.fb.iter().position(|q| q.p == 5).unwrap();
+        let j = rel.fb.iter().rposition(|q| q.p == 5).unwrap();
+        assert_ne!(i, j);
+        let mut bad = rel.clone();
+        bad.fb[j] = bad.fb[i].clone();
+        assert!(check_factor_base(o, &bad).is_err(), "a duplicate prime accepted");
+        let mut bad = rel.clone();
+        bad.elems.pop();
+        assert!(check_relations(o, &bad).is_err(), "relations and elements of different numbers accepted");
     }
 }
