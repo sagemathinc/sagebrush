@@ -7427,7 +7427,16 @@ def case_match(v, c):
 
 @_bs("magic")
 def magic_(n):
-    """MATLAB's magic squares (odd, doubly even and singly even orders)"""
+    """magic squares by the classical constructions: de la Loubere's
+    (siamese) method for odd n, from the middle of the top row stepping up
+    and to the right, wrapping, and down one where a cell is taken; for n a
+    multiple of 4, 1..n^2 in rows with each cell on the diagonals of its 4-by-4
+    block replaced by n^2 + 1 - itself; for other even n, Strachey's method
+    (W. W. Rouse Ball, "Mathematical Recreations and Essays"): an odd square
+    A of order p = n/2 in quadrants [A, A + 2p^2; A + 3p^2, A + p^2], then
+    the leftmost k = (n-2)/4 columns exchanged between the top and bottom
+    halves (in the middle row, the k columns from the second), and the
+    rightmost k - 1 columns too"""
     n = _int_arg(n)
     if n < 1:
         return np.zeros((0, 0))
@@ -7435,32 +7444,33 @@ def magic_(n):
         return _unmat(np.array([[4.0, 3.0], [1.0, 2.0]]))
     M = np.zeros((n, n))
     if n % 2 == 1:
-        # (MATLAB: J + 1 and I + 1 column/row shifts of the siamese method)
-        for i in range(n):
-            for j in range(n):
-                a = (i + 1 + j + 1 - (n + 3) // 2) % n
-                b = (i + 1 + 2 * (j + 1) - 2) % n
-                M[i, j] = n * a + b + 1
-    elif n % 4 == 0:
+        i, j = 0, n // 2
+        for v in range(1, n * n + 1):
+            M[i, j] = v
+            ni, nj = (i - 1) % n, (j + 1) % n
+            if M[ni, nj]:
+                ni, nj = (i + 1) % n, j
+            i, j = ni, nj
+        return _unmat(M)
+    if n % 4 == 0:
         for i in range(n):
             for j in range(n):
                 v = i * n + j + 1
-                keep = ((i + 1) % 4 // 2) == ((j + 1) % 4 // 2)
-                M[i, j] = n * n + 1 - v if keep else v
-    else:
-        p = n // 2
-        A = _mat(magic_(float(p)))
-        M[:p, :p] = A
-        M[p:, p:] = A + p * p
-        M[:p, p:] = A + 2 * p * p
-        M[p:, :p] = A + 3 * p * p
-        k = (n - 2) // 4
-        cols = list(range(k)) + list(range(n - k + 1, n))
-        for i in range(p):
-            for j in cols:
-                M[i, j], M[i + p, j] = M[i + p, j], M[i, j]
-        for j in (0, k):
-            M[k, j], M[k + p, j] = M[k + p, j], M[k, j]
+                on_diagonal = (i % 4 == j % 4) or (i % 4 + j % 4 == 3)
+                M[i, j] = n * n + 1 - v if on_diagonal else v
+        return _unmat(M)
+    p = n // 2
+    A = _mat(magic_(float(p)))
+    M[:p, :p] = A
+    M[p:, p:] = A + p * p
+    M[:p, p:] = A + 2 * p * p
+    M[p:, :p] = A + 3 * p * p
+    k = (n - 2) // 4
+    for i in range(p):
+        cols = list(range(1, k + 1)) if i == p // 2 else list(range(k))
+        cols += list(range(n - k + 1, n))
+        for j in cols:
+            M[i, j], M[i + p, j] = M[i + p, j], M[i, j]
     return _unmat(M)
 
 
