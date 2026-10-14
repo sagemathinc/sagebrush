@@ -8427,7 +8427,7 @@ def _lazy_plot(name):
 
 
 _PLOT_FNS = ("figure gcf gca groot clf cla close hold ishold subplot plot plot3 semilogx semilogy loglog line scatter bar barh "
-             "histogram hist stairs stem area errorbar fill patch pie imagesc image imshow colorbar colormap caxis clim "
+             "histogram hist stairs stem area errorbar fill patch pie imagesc image imshow colorbar colormap caxis spy clim "
              "contour contourf surf mesh title subtitle sgtitle xlabel ylabel zlabel legend grid box axis xlim ylim zlim "
              "xticks yticks xticklabels yticklabels text set get drawnow print saveas exportgraphics xline yline view "
              "isgraphics ishandle ishghandle shg refresh rotate3d zoom pan linkaxes daspect pbaspect "

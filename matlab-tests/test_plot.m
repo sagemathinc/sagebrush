@@ -84,3 +84,11 @@ show(get(gcf, 'Number'));
 close(f2);
 show(get(gcf, 'Number'));
 close all
+% spy: a marker at each nonzero, rows down (its label and default marker differ: MATLAB's "nz = 5" and '.')
+figure('visible', 'off');
+spy(sparse([3 2 3 4 1], [1 2 2 3 4], [1 2 3 4 5], 4, 6));
+h = get(gca, 'Children');
+show(get(gca, 'YDir')); show(get(gca, 'XLim')); show(get(gca, 'YLim')); show(get(h, 'XData')); show(get(h, 'YData')); show(get(h, 'LineStyle'));
+spy(speye(3), 'r.', 12);
+h = get(gca, 'Children');
+show(get(h, 'Color')); show(get(h, 'MarkerSize')); show(get(h, 'Marker'));

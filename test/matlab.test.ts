@@ -238,3 +238,21 @@ test("sparse single matrices stay single when a result is empty; whos marks spar
   assert.match(out, /\n  B +1000000x1000000 +8000024  double +sparse\n/);
   assert.match(out, /\n  C +2x2 +72  double +sparse, complex\n/);
 });
+
+test("sparse matrices in .mat files: logical ones saved and loaded, and read as Octave writes them", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "sparse-mat-"));
+  writeFileSync(join(dir, "s.m"), [
+    "L = sparse([1 0 1; 0 0 1]) > 0; A = spalloc(4, 4, 6); A(2, 3) = 7;",
+    "f = [tempname '.mat']; save(f, 'L', 'A'); clear L A; load(f);",
+    "fprintf('%d %d %d %d %d\\n', issparse(L), islogical(L), issparse(A), nnz(A), full(A(2, 3)));",
+    "disp(mat2str(full(L)));",
+    `load('${join(__dirname, "..", "..", "matlab-tests", "data", "octave_sparse_logical.mat")}');`,
+    "fprintf('%d %d\\n', issparse(spl), islogical(spl)); disp(mat2str(full(spl)));",
+  ].join("\n"));
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1 1 1 1 7", "[true false true;false false true]", "1 1", "[true false true;false false true]"]);
+});
