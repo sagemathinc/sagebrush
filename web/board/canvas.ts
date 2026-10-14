@@ -22,7 +22,7 @@
 // (the tour, a page's intro, a note's outline) is left out, and counted.
 
 import type { Edge, Item } from "./board";
-import { pageCount, pageOf, type BoardDoc, type BoardPage, type DocEdge, type DocNote } from "./doc";
+import { lookOf, pageCount, pageOf, shownPages, type BoardDoc, type BoardPage, type DocEdge, type DocNote } from "./doc";
 import { COLORS } from "./colors";
 import { nest } from "./nest";
 
@@ -145,15 +145,18 @@ export function toCanvas(doc: BoardDoc, laid: (page: number) => { items: Item[];
   const leave = (k: string, n = 1) => { if (n > 0) left[k] = (left[k] ?? 0) + n; };
   const mode = doc.mode === "sage" ? "sage" : "python";
   const n = pageCount(doc), paged = !!doc.pages?.length && n > 1;
+  // (a template's own page left out, said so: its items are on the pages made from it, as `laid` gives them)
+  const shown = new Set(shownPages(doc));
   let y0 = 0;
   for (let i = 0; i < n; i++) {
-    const page: BoardPage = pageOf(doc, i);
+    if (!shown.has(i)) { leave("template"); continue; }
+    const page: BoardPage = pageOf(doc, i), look = lookOf(doc, i);
     const { items, edges: es } = laid(i);
     const id = (s: string) => (paged ? `p${i + 1}-${s}` : s);
     leave("step", page.steps?.length ?? 0);
     leave("intro", page.intro ? 1 : 0);
-    leave("slidecard", page.slide ? 1 : 0);
-    leave("pagebg", page.background ? 1 : 0);
+    leave("slidecard", look.slide ? 1 : 0);
+    leave("pagebg", look.background ? 1 : 0);
     leave("edge", (page.edges ?? []).filter((e) => e.hidden).length);
     if (!items.length) continue;
     const x0 = Math.min(...items.map((it) => it.x)), top = Math.min(...items.map((it) => it.y));
@@ -184,6 +187,7 @@ const WORDS: Record<string, [string, string]> = {
   card: ["card of a kind a board doesn't have", "cards of kinds a board doesn't have"], background: ["group's background picture", "groups' background pictures"],
   edge: ["connection to something left out", "connections to something left out"], step: ["step of the tour", "steps of the tour"],
   intro: ["page's intro", "pages' intros"], outline: ["note's outline", "notes' outlines"], picture: ["picture not in this browser", "pictures not in this browser"],
+  template: ["template page (its items are on the pages made from it)", "template pages (their items are on the pages made from them)"],
   ink: ["pen stroke", "pen strokes"], slidecard: ["slide's card", "slides' cards"], pagebg: ["page's background", "pages' backgrounds"],
 };
 /** What was left out, in words ("4 steps of the tour and 1 page's intro"), or "" if nothing. */

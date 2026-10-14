@@ -1241,7 +1241,7 @@ const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px
 // (a note that is only a picture: shown as the picture alone; as doc.ts's onlyImage)
 const onlyImage = (it: Content) => !!it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref;
 // What an element shows (kept when this is unchanged).
-const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image]);
+const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image, it.inert]);
 // (a double-click in the item being edited selects a word, as in any field)
 const editingAt = (e: Event) => !!(e.target as Element | null)?.closest?.(".board-editing");
 // A code item's output, in the box that gives it the notebook's styles.

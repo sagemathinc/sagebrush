@@ -185,6 +185,14 @@ export function pageOf(d: BoardDoc, i: number): BoardPage {
   return d.pages[Math.max(0, Math.min(d.pages.length - 1, i))];
 }
 
+/** The pages shown as pages (Present, JSON Canvas): those that are not
+ * templates (a template is shown on the pages made from it), or, when all
+ * are templates, all of them. */
+export function shownPages(d: BoardDoc): number[] {
+  const all = [...Array(pageCount(d)).keys()], own = all.filter((p) => !d.pages?.length || !pageOf(d, p).template);
+  return own.length ? own : all;
+}
+
 /** The template page that page i is made from (its index), or -1. */
 export function templateOf(d: BoardDoc, i: number): number {
   if (!d.pages?.length) return -1;
