@@ -334,6 +334,11 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   as Octave's are, and they give `contourc` and `[C,h] = contour(...)`
   MATLAB's contour matrix. Closed lines repeat their first point, exactly
   as Octave's do.
+  - The automatic levels, whose rule MATLAB does not document, are
+    Sagebrush's: multiples of a round step (1, 2 or 5 times a power of 10)
+    near a seventh of the data's span, within its range, and for `contourf`
+    the data's minimum too. They give the published fcontour example's
+    0.2:0.2:1.4. `contour(Z, n)` has n levels evenly spaced inside the range.
   - Line colors are the level's colormap color; `clabel` writes the
     levels.
   - `contourf` draws flat bands as one pixelated PNG (Z interpolated

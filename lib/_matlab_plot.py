@@ -1722,7 +1722,7 @@ def _contour(args, filled, nargout=1):
         Y = _colvec(list(range(1, d[0] + 1)))
         levels = pos[1] if len(pos) > 1 else None
     ax.newplot()
-    L = _levels(Z, levels)
+    L = _levels(Z, levels, filled)
     c = Contour(ax, XData=_m.cp(X), YData=_m.cp(Y), ZData=_m.cp(Z), LevelList=_colvec(L), Fill=_m.Char("on" if filled else "off"))
     if filled:
         c.props["LineColor"] = _rgb_value((0, 0, 0))
@@ -1867,8 +1867,14 @@ def contourc_(nargout, args):
     return contour_matrix(contour_lines(X, Y, Z, _levels(Z, levels)))
 
 
-def _levels(Z, levels):
-    """contour's levels: given, n of them, or chosen (round values across the data)"""
+def _levels(Z, levels, filled=False):
+    """contour's levels: given; n of them, evenly spaced inside the data's
+    range; or chosen automatically, which MATLAB documents without its rule.
+    Sagebrush's rule: a round step, 1, 2 or 5 times a power of 10 (rounded at
+    the geometric means sqrt 2, sqrt 10, sqrt 50), near a seventh of the
+    data's span, and the levels its multiples within the data's range; a
+    filled contour also has the data's minimum, so that its lowest band is
+    filled.  It gives the published fcontour example's LevelList, 0.2:0.2:1.4"""
     zs = [v for v in _vec(Z) if v == v]
     if not zs:
         return []
@@ -1880,9 +1886,20 @@ def _levels(Z, levels):
     if levels is not None:
         n = int(_f(levels))
         return [lo + (hi - lo) * (k + 1) / (n + 1) for k in range(n)]
-    a, b = _nice_limits(lo, hi)
-    step = (b - a) / 10
-    return [a + k * step for k in range(11) if lo <= a + k * step <= hi]
+    raw = (hi - lo) / 7
+    e = 10.0 ** math.floor(math.log10(raw))
+    x = raw / e
+    step = (1 if x < math.sqrt(2) else 2 if x < math.sqrt(10) else 5 if x < math.sqrt(50) else 10) * e
+    k = math.floor(lo / step)
+    while k * step < lo:
+        k += 1
+    out = []
+    while k * step <= hi:
+        out.append(k * step + 0.0)
+        k += 1
+    if filled and (not out or out[0] > lo):
+        out.insert(0, lo)
+    return out
 
 
 @_fn("clabel")
