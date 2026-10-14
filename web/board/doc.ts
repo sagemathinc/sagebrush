@@ -12,6 +12,23 @@ import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
 import { inkOutline } from "./ink";
 
+// A stroke's outline, made once: by its id, size and points (a hash of
+// them), not again at each layout (5000 strokes: 90 ms each time).  At
+// most OUTLINES kept; past that, the cache starts again.
+const OUTLINES = 50_000;
+const outlines = new Map<string, number[]>();
+function outlineOf(n: DocInk): number[] {
+  let h = 0x811c9dc5;
+  for (const v of n.points) h = Math.imul(h ^ Math.round(v * 100), 16777619);
+  const size = n.size ?? INK_SIZE, k = `${n.id}\0${size}\0${n.points.length}\0${h >>> 0}`;
+  let o = outlines.get(k);
+  if (!o) {
+    if (outlines.size >= OUTLINES) outlines.clear();
+    outlines.set(k, (o = inkOutline(n.points, { size, streamline: 0, last: true })));
+  }
+  return o;
+}
+
 // Every note has the same optional parts, shown (and edited) in this order:
 // its title, its picture, its text, its code with the code's output, its
 // detail, its link.  A note that is only a picture is shown as the picture.
@@ -546,9 +563,10 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       return b;
     }
     const kids = n.children.map((c) => ({ c, b: sizeOf(c) }));
+    // (its members: once, not once an edge, which on a large board was a set of every item for each edge)
+    const members = new Set(n.children.map((c) => c.id));
     const pos = arrange(kids.map((k) => ({ id: k.c.id, ...k.b, fixed: k.c.x !== undefined && k.c.y !== undefined ? { x: k.c.x!, y: k.c.y! } : null })), n.layout ?? "graph", n.direction ?? "TB", n.columns,
       edges.flatMap((e) => {
-        const members = new Set(n.children.map((c) => c.id));
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
         return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
       }));
@@ -573,9 +591,9 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
     return b;
   };
   const top = roots.map((n) => ({ id: n.id, ...sizeOf(n), fixed: n.x !== undefined && n.y !== undefined ? { x: n.x!, y: n.y! } : null }));
+  const rootIds = new Set(roots.map((n) => n.id));
   const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", doc.columns, edges.flatMap((e) => {
-    const members = new Set(roots.map((n) => n.id));
-    const a = memberOf(e.from, members), b = memberOf(e.to, members);
+    const a = memberOf(e.from, rootIds), b = memberOf(e.to, rootIds);
     return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
   }));
 
@@ -592,7 +610,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       items.push({ id: n.id, kind: "sticker", x, y, w: b.w, h: b.h, ...(n.emoji ? { emoji: n.emoji } : {}), ...(n.icon ? { icon: n.icon } : {}), color: n.color, depth, parent });
     } else if (n.kind === "ink") {
       // (its outline, from its corner)
-      items.push({ id: n.id, kind: "ink", x, y, w: b.w, h: b.h, outline: inkOutline(n.points, { size: n.size ?? INK_SIZE, streamline: 0, last: true }), width: n.size ?? INK_SIZE, color: n.color, depth, parent, ...(n.opacity !== undefined ? { opacity: n.opacity } : {}) });
+      items.push({ id: n.id, kind: "ink", x, y, w: b.w, h: b.h, outline: outlineOf(n), width: n.size ?? INK_SIZE, color: n.color, depth, parent, ...(n.opacity !== undefined ? { opacity: n.opacity } : {}) });
     } else {
       const img = imgOf(n);
       items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}) } : {}) });
@@ -619,7 +637,9 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
   if (!edges.length) return;
   const roots = doc.nodes ?? [];
   const byId = new Map(items.map((it) => [it.id, it]));
-  const rect = (id: string): Rect => { const it = byId.get(id)!; return { x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h }; };
+  // (each item's box made once, shared by every edge's obstacles)
+  const rects = new Map<string, Rect>();
+  const rect = (id: string): Rect => { let r = rects.get(id); if (!r) { const it = byId.get(id)!; rects.set(id, (r = { x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h })); } return r; };
   const ancestors = (id: string) => { const s = new Set<string>(); for (let p = parentOf.get(id); p; p = parentOf.get(p)) s.add(p); return s; };
   const groups = new Map<string, DocGroup>();
   const walk = (ns: DocNode[]) => { for (const n of ns) if (n.kind === "group") { groups.set(n.id, n); walk(n.children); } };
@@ -636,7 +656,10 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
     return { x0: it.x, y0: it.y, x1: it.x + Math.min(it.w, w), y1: it.inner.y - 10 };
   };
   const reqs: RouteRequest[] = [];
+  let made = 0;
   for (const e of edges) {
+    // (between frames, a large board's every 32: each scans the page)
+    if (++made % 32 === 0) yield;
     const A = ancestors(e.from), B = ancestors(e.to);
     if (A.has(e.to) || B.has(e.from)) continue; // a group and its member: no line
     const obstacles: Rect[] = [];
