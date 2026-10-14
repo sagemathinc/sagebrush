@@ -111,7 +111,10 @@ const records = (rs: any[]) => {
 export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc: BoardDoc; conflicts: Conflict[] } {
   const baseRecs = toRecords(base);
   const by = (rs: any[]) => new Map(rs.map((r) => [recKey(r), r]));
-  const B = by(baseRecs), O = by(aligned(baseRecs, toRecords(ours), "o")), T = by(aligned(baseRecs, toRecords(theirs), "t")), out: any[] = [], conflicts: Conflict[] = [];
+  const oRecs = aligned(baseRecs, toRecords(ours), "o"), tRecs = aligned(baseRecs, toRecords(theirs), "t");
+  // (pages that cannot be told apart: ours, and said so, CORR-EB9-2)
+  if (!oRecs || !tRecs) return { doc: cleanDoc(ours), conflicts: [{ type: "page", page: "", id: "", field: "pages" }] };
+  const B = by(baseRecs), O = by(oRecs), T = by(tRecs), out: any[] = [], conflicts: Conflict[] = [];
   for (const k of new Set([...B.keys(), ...O.keys(), ...T.keys()])) {
     const b = B.get(k), o = O.get(k), t = T.get(k);
     let r: any;
@@ -162,38 +165,37 @@ export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc:
   return { doc: cleanDoc(doc), conflicts };
 }
 
-// A side's pages without ids, keyed as the base's they are (CORR-891-2):
-// records key such a page by its place, which another side's page put in
-// front of it changes.  Each is matched to the base's page holding most of
-// the same items (its title as well, one to one); pages with neither, by
-// their order among such pages; those left, in the same order, if as many
-// are left on both; any other is a page added (a key of its own) or
-// removed.  Pages with ids keep them.
-function aligned(baseRecs: any[], recs: any[], side: string): any[] {
-  const anonPages = (rs: any[]) => rs.filter((r) => r.type === "page" && r.anon === true).sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0));
-  const bp = anonPages(baseRecs), sp = anonPages(recs);
+// A side's pages without ids (a document from elsewhere: the store gives
+// its own pages ids, CORR-EB9-2), keyed as the base's they are: records key
+// such a page by its place, which a page put in front of it changes
+// (CORR-891-2).  Each is matched, one to one, to the base page (one this
+// side does not have by its id) it shares most with: its items, its title,
+// and each of its other fields (intro, slide, background, tour, template)
+// with the same value.  A page matching none is a page added, if no base
+// page is left for it; if some are, which it is cannot be told: null (the
+// caller keeps ours, and says so), never a guess.
+function aligned(baseRecs: any[], recs: any[], side: string): any[] | null {
+  const pagesOf = (rs: any[]) => rs.filter((r) => r.type === "page").sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0));
+  const sp = pagesOf(recs).filter((r) => r.anon === true);
   if (!sp.length) return recs;
+  const own = new Set(pagesOf(recs).filter((r) => r.anon !== true).map((r) => r.page));
+  const bp = pagesOf(baseRecs).filter((r) => !own.has(r.page));
   const itemsOf = (rs: any[], pid: string) => new Set(rs.filter((r) => r.type === "item" && r.page === pid).map((r) => r.id));
   const bItems = bp.map((p) => itemsOf(baseRecs, p.page)), sItems = sp.map((p) => itemsOf(recs, p.page));
+  const fields = (r: any) => Object.entries(r).filter(([k]) => !["type", "page", "id", "pos", "anon", "title"].includes(k));
   const pairs: [number, number, number][] = [];
   sp.forEach((p, j) => bp.forEach((q, i) => {
     let score = 0;
     for (const id of sItems[j]) if (bItems[i].has(id)) score++;
     if (p.title && p.title === q.title) score += 0.5;
+    for (const [k, v] of fields(p)) if (k in q && same(v, q[k])) score += 0.25;
     if (score > 0) pairs.push([score, j, i]);
   }));
   pairs.sort((a, b) => b[0] - a[0] || Math.abs(a[1] - a[2]) - Math.abs(b[1] - b[2]));
   const to = new Map<number, number>(), taken = new Set<number>();
   for (const [, j, i] of pairs) if (!to.has(j) && !taken.has(i)) { to.set(j, i); taken.add(i); }
-  let restS = sp.map((_, j) => j).filter((j) => !to.has(j)), restB = bp.map((_, i) => i).filter((i) => !taken.has(i));
-  // (pages content cannot tell apart, with no items and no title: by their
-  // order among such pages, never one taken twice, CORR-C06-2)
-  const blank = (p: any, items: Set<string>) => !items.size && !p.title;
-  const blankS = restS.filter((j) => blank(sp[j], sItems[j])), blankB = restB.filter((i) => blank(bp[i], bItems[i]));
-  blankS.forEach((j, k) => { if (k < blankB.length) { to.set(j, blankB[k]); taken.add(blankB[k]); } });
-  restS = restS.filter((j) => !to.has(j));
-  restB = restB.filter((i) => !taken.has(i));
-  if (restS.length === restB.length) restS.forEach((j, k) => to.set(j, restB[k]));
+  // (one matching none while a base page is left: which it is cannot be told)
+  if (sp.some((_, j) => !to.has(j)) && bp.some((_, i) => !taken.has(i))) return null;
   // (keys: the base page's; a new page's, none any page has)
   const used = new Set([...baseRecs, ...recs].filter((r) => r.type === "page").map((r) => r.page));
   const key = new Map<string, string>();
@@ -209,6 +211,15 @@ function aligned(baseRecs: any[], recs: any[], side: string): any[] {
 export const mergedNotice = (n: number) => `**This board was changed elsewhere while you edited it.** The changes are merged; where both changed the same thing (${n}), yours is kept.`;
 
 // ---- the store --------------------------------------------------------------
+
+/** `d` with an id for each page without one (the file keeps them: a page's
+ * identity in a merge, CORR-EB9-2); `d` itself if every page has one. */
+export function identified(d: BoardDoc): BoardDoc {
+  if (!d.pages?.some((p) => p.id == null)) return d;
+  const taken = new Set(d.pages.map((p) => p.id).filter((x) => x != null) as string[]);
+  const fresh = () => { let k; do k = "p" + Math.random().toString(36).slice(2, 10); while (taken.has(k)); taken.add(k); return k; };
+  return { ...d, pages: d.pages.map((p) => (p.id == null ? { ...p, id: fresh() } : p)) };
+}
 
 /** How the store's first load ended, once the remote has answered (or not). */
 export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offline";
@@ -289,12 +300,14 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       if (theirHash === entry.hash && dirty()) await sent(theirs, theirHash);
       s = "same";
     } else if (!entry || !dirty()) {
-      await keep(theirs, theirHash);
-      present(theirs);
+      // (its pages given ids, if it came without: the copy's, and the remote's next)
+      const doc = identified(theirs);
+      await keep(doc, theirHash, canonical(theirs));
+      present(doc);
       s = "replaced";
     } else {
       // (edits here the remote has not seen, or a save of them on its way: merged)
-      const { doc, conflicts } = merge3(parse(entry.base ?? entry.json), parse(entry.json), theirs);
+      const m = merge3(parse(entry.base ?? entry.json), parse(entry.json), theirs), doc = identified(m.doc), conflicts = m.conflicts;
       await keep(doc, theirHash, canonical(theirs));
       present(doc, conflicts.length ? mergedNotice(conflicts.length) : undefined);
       s = "merged";
@@ -303,23 +316,39 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     return s;
   }
 
-  // the remote asked whether it has the copy's version: its answers, each a step
+  // The remote asked whether it has the copy's version: its answers, each a
+  // step.  An answer to a question asked before a change made elsewhere
+  // came is older than that change: not taken (it, a step of its own, is
+  // the remote's newer document, CORR-EB9-1).
+  let heard = 0, lastHeard: Synced = "same";
   function ask() {
+    const asked = heard;
+    const stale = () => {
+      if (heard === asked) return false;
+      online = true;
+      push();
+      resolveSynced(lastHeard);
+      return true;
+    };
     remote.hash().then((h) => step(async () => {
+      if (stale()) return;
       online = true;
       if (h !== null && h === entry!.remoteHash) { const was = dirty(); push(); resolveSynced(was ? "pushed" : "same"); return; }
+      const loading = heard;
       remote.load().then((t) => step(async () => {
+        if (heard !== loading) { stale(); return; }
         // (the remote has none: the copy is its first)
         if (!t) { entry = { ...entry!, remoteHash: null }; push(); resolveSynced("pushed"); return; }
         resolveSynced(await arrived(cleanDoc(t), h ?? (await docHash(t))));
-      }), () => step(async () => { online = false; resolveSynced("offline"); }));
-    }), () => step(async () => resolveSynced("offline")));
+      }), () => step(async () => { if (!stale()) { online = false; resolveSynced("offline"); } }));
+    }), () => step(async () => { if (!stale()) resolveSynced("offline"); }));
   }
 
-  // a change made elsewhere: a step
+  // a change made elsewhere: a step (and, as it comes, newer than any answer asked for before it)
   function changed(d: BoardDoc) {
     const doc = cleanDoc(d);
-    step(async () => { await arrived(doc, await docHash(doc)); });
+    heard++;
+    step(async () => { lastHeard = await arrived(doc, await docHash(doc)); });
   }
   let offRemote: (() => void) | undefined;
 
@@ -328,7 +357,13 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     async load() {
       const c = await step(async () => cache.get(key).catch(() => null));
       if (c) {
-        await step(async () => { entry ??= c; view = parse(entry.json); });
+        await step(async () => {
+          entry ??= c;
+          // (pages without ids, from before: given them, in the copy)
+          const doc = parse(entry.json), withIds = identified(doc);
+          if (withIds !== doc) await keep(withIds, entry.remoteHash, entry.hash === entry.remoteHash ? entry.json : entry.base ?? entry.json);
+          view = withIds;
+        });
         ask();
         return { doc: view! };
       }
@@ -339,8 +374,8 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
         online = true;
         if (!entry) {
           if (!d) { resolveSynced("fresh"); return null; }
-          const doc = cleanDoc(d);
-          await keep(doc, await docHash(doc));
+          const doc = cleanDoc(d), withIds = identified(doc);
+          await keep(withIds, await docHash(doc), canonical(doc));
         }
         view = parse(entry!.json);
         resolveSynced("fresh");
@@ -352,7 +387,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       const from = view;
       view = d;
       step(async () => {
-        const doc = from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d;
+        const doc = identified(from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d);
         const base = dirty() ? entry!.base ?? entry!.json : entry?.json;
         await keep(doc, entry?.remoteHash ?? null, base);
         if (doc !== d) present(doc);
