@@ -5,7 +5,7 @@ with Sagebrush's matplotlib (SVG) when a program or a notebook cell ends.
 Semantics kept from MATLAB:
 - hold off by default: a plotting function replaces what the axes held (and
   their title, labels, limits and color order);
-- MATLAB's color order and LineSpec strings ('r--o'); name-value
+- the color order of MATLAB releases before R2025a, LineSpec strings ('r--o'); name-value
   properties (LineWidth=2, 'Color', [1 0 0]);
 - matrices are MATLAB's: plot(Y) draws a line per column of Y, imagesc(C)
   shows C's rows top to bottom.  Arrays cross into matplotlib through
@@ -21,7 +21,8 @@ import numpy as np
 
 import _matlab as _m
 
-# MATLAB's default line colors (its "lines" colormap)
+# the default line colors of MATLAB releases before R2025a (the "lines" colormap);
+# current MATLAB's default "gem" palette differs, and Sagebrush keeps these
 COLOR_ORDER = [(0.0, 0.4470, 0.7410), (0.8500, 0.3250, 0.0980), (0.9290, 0.6940, 0.1250), (0.4940, 0.1840, 0.5560),
                (0.4660, 0.6740, 0.1880), (0.3010, 0.7450, 0.9330), (0.6350, 0.0780, 0.1840)]
 _NAMED = {"r": (1, 0, 0), "g": (0, 1, 0), "b": (0, 0, 1), "c": (0, 1, 1), "m": (1, 0, 1), "y": (1, 1, 0), "k": (0, 0, 0), "w": (1, 1, 1),
