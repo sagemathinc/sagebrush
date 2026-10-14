@@ -161,6 +161,10 @@ export class RunnerWorker {
       try {
         f.contentWindow?.postMessage({ sagebrushRunner: 1, name, base: this.base, script: await script }, "*", [ch.port2]);
       } catch (e) {
+        // (not this runner's to say once it is given up or closed: a fallback
+        // runs now, CORR-FED-2; before that, with one, it is given up)
+        if (this.closed || this.inner) return;
+        if (fallback) return giveUp();
         this.onerror?.({ message: String(e?.message ?? e) });
       }
     }, { once: true });
