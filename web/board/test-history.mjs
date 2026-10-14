@@ -124,6 +124,9 @@ try {
   // a history per document (William): New board, Revert and another document loaded each start one afresh, the one before gone; kept across a reload
   const groups = () => ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-board-history"); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => { const by = {}; for (const row of q.result) by[row.nb] = (by[row.nb] ?? 0) + 1; r.result.close(); res(by); }; }; })`);
   check(Object.keys(await groups()).length === 1, "(one board's history so far: " + JSON.stringify(await groups()) + ")");
+  // (reloaded, the history not opened before the next document: CORR-F75-1, daybreak)
+  await send("Page.reload");
+  await until(`${B}?.snapshot().items.length > 0`, 60000);
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
   await until(`${B}.snapshot().doc.title === "Untitled board"`, 5000);
   await sleep(500);
@@ -137,7 +140,9 @@ try {
   await send("Page.reload");
   await until(`${B}?.snapshot().doc?.title === "Untitled board"`, 60000);
   check((await count()) === 2, "reloaded: the new board's history is still its own: " + await count());
-  // Revert (the original again): a history afresh
+  // Revert (the original again): a history afresh (reloaded first, the history not opened)
+  await send("Page.reload");
+  await until(`${B}?.snapshot().doc?.title === "Untitled board"`, 60000);
   await ev("document.querySelector('[data-sbb=revert]').click(), 1");
   await until(`${B}.snapshot().doc.title !== "Untitled board"`, 5000);
   await sleep(500);

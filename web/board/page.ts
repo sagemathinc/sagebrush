@@ -40,6 +40,8 @@ const q = new URLSearchParams(location.search);
 // (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
 const source = embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
 const saveKey = "sagebrush-board:" + source;
+// (a document's history in this browser: by its source and its name beside it)
+const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
 const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
 // (an exported file: the engine its code runs with, and the site it comes from)
@@ -116,7 +118,12 @@ const host: BoardHost = {
   // (each document its own: by its name beside it in this browser)
   history: file ? undefined : async (id) => {
     const [mod, db] = await Promise.all([import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule>, openBoardHistoryDb()]);
-    return db ? new BoardHistory(mod, new IdbPatchStore(db, "board:" + source + (id ? ":" + id : ""))).init() : null;
+    return db ? new BoardHistory(mod, new IdbPatchStore(db, historyKey(id))).init() : null;
+  },
+  // (a document replaced: its versions, without opening its history)
+  dropHistory: file ? undefined : async (id) => {
+    const db = await openBoardHistoryDb();
+    if (db) await new IdbPatchStore(db, historyKey(id)).drop();
   },
   address: {
     get: () => location.hash,
