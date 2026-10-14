@@ -11,4 +11,7 @@ z = [1+2i, -3.5i; 4, 0];
 cel = {1, 'two'; [1 2 3], {4, 'five'}};
 st(1).name = 'Ada'; st(1).v = [1 2]; st(2).name = 'Bob'; st(2).v = 3;
 e = [];
-save('data/sagebrush.mat', 'A', 'T', 'i8', 's32', 'L', 'C', 'z', 'cel', 'st', 'e');
+sp = sparse([3 2 3 4 1], [1 2 2 3 4], [1 2 3 4 5], 4, 4);
+spz = sparse([1 2], [2 1], [1+2i, -3], 2, 3);
+spe = sparse(3, 2);
+save('data/sagebrush.mat', 'A', 'T', 'i8', 's32', 'L', 'C', 'z', 'cel', 'st', 'e', 'sp', 'spz', 'spe');

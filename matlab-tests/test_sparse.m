@@ -61,6 +61,32 @@ show(b(sparse([1 0 1 0]) > 0)); show(b(sparse([2 3])));
 % everything else sees the full matrix
 show(full(sum(S))); show(full(max(S))); show(full(S * [1; 2; 3; 4])); show(full(S + 1)); show(full(abs(-S)));
 show(mat2str(full(S)));
+% storage: whos's bytes (never expanding the matrix), nzmax's reserved capacity
+B = sparse(1e6, 1e6); w = whos('B'); show(w.bytes);
+S4 = S; w = whos('S4'); show(w.bytes); show(w.class);
+show(nzmax(spalloc(10, 10, 7))); show(nzmax(sparse([], [], [], 10, 10, 7))); show(nzmax(S)); show(nzmax(sparse(3, 3)));
+% a scalar with an empty: no entries
+sp(sparse([], [], 1, 2, 3)); sp(sparse(1, [], [], 2, 3)); sp(sparse([], [], 1)); sp(sparse(1, 1, []));
+sp(sparse([], 2, [])); sp(sparse(2, [], 5, 3, 4));
+% find's direction: first or last only
+S2 = sparse([1 3], [1 1], [2 4], 3, 1);
+show(find(S2, 1, 'first')); show(find(S2, 1, 'last')); show(find(S2, 1, "last"));
+for d = {'banana', "banana", 'firstly'}
+  try
+    find(S2, 1, d{1});
+    disp('accepted');
+  catch
+    disp('refused');
+  end
+end
+% a NaN in a condition, in either part
+for z = {sparse(1 + NaN * 1i), sparse(NaN), 1 + NaN * 1i}
+  try
+    if z{1}, disp('true'), else, disp('false'), end
+  catch
+    disp('refused');
+  end
+end
 % conditions and loops
 if sparse(1), disp('yes'), end
 if sparse([1 0]), disp('yes'), else, disp('no'), end

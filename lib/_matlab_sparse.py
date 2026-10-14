@@ -36,6 +36,7 @@ MAX_FULL = 1 << 28
 def _new(m, n, jc, ir, pr):
     S = Sparse.__new__(Sparse)
     S.m, S.n, S.jc, S.ir, S.pr = m, n, jc, ir, pr
+    S.cap = 0
     activate()
     return S
 
@@ -120,8 +121,25 @@ def from_full(v, name="sparse"):
     return _new(m, n, _jc(nz[0].astype(_I), n), nz[1].astype(_I), _canon_vals(np.array(a[nz])))
 
 
-def zeros(m, n, logical=False):
-    return _new(m, n, np.zeros(n + 1, dtype=_I), np.zeros(0, dtype=_I), np.zeros(0, dtype=bool if logical else np.float64))
+def zeros(m, n, like=None):
+    """an all-zero m-by-n sparse matrix, of the class of like (a sparse matrix) or double"""
+    dt = like.pr.dtype if type(like) is Sparse else np.float64
+    return _new(m, n, np.zeros(n + 1, dtype=_I), np.zeros(0, dtype=_I), np.zeros(0, dtype=dt))
+
+
+def nzmax(S):
+    return max(S.cap, nnz(S), 1)
+
+
+def isreal(v):
+    if type(v) is Sparse:
+        return v.pr.dtype.kind != "c"
+    return _m._arr(v).dtype.kind != "c"
+
+
+def nbytes(S):
+    """MATLAB's storage of a sparse matrix: its column starts, and a row index and a value for each of nzmax places"""
+    return (S.n + 1) * 8 + nzmax(S) * (8 + S.pr.dtype.itemsize)
 
 
 def _too_big(m, n):
@@ -162,7 +180,7 @@ def nnz(S):
 
 def transpose(S, conj=False):
     if not S.pr.size:
-        return zeros(S.n, S.m, islogical(S))
+        return zeros(S.n, S.m, S)
     vals = S.pr
     if conj and vals.dtype.kind == "c":
         # (a real element's imaginary part stays 0, not -0)
@@ -298,7 +316,7 @@ def _submatrix(S, I, J):
     cnt = hi - lo
     tot = int(np.sum(cnt)) if cnt.size else 0
     if tot == 0:
-        return zeros(I.size, J.size, islogical(S))
+        return zeros(I.size, J.size, S)
     offs = np.cumsum(cnt) - cnt
     place = np.arange(tot, dtype=_I) - np.repeat(offs, cnt) + np.repeat(lo, cnt)
     return make(I.size, J.size, order[place], np.repeat(oc, cnt), np.repeat(vals, cnt))
@@ -323,8 +341,8 @@ def truth(S):
     """S as the condition of if or while: nonempty, every element nonzero"""
     if S.m * S.n == 0 or nnz(S) != S.m * S.n:
         return False
-    vals = S.pr.real if S.pr.dtype.kind == "c" else S.pr
-    if vals.dtype.kind == "f" and np.any(np.isnan(vals)):
+    if S.pr.dtype.kind in "fc" and np.any(np.isnan(S.pr)):
+        # (a NaN in either part of a complex value)
         raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
     return True
 
@@ -402,7 +420,7 @@ def delete(S, args):
     if len(args) == 1:
         a = args[0]
         if a is COLON:
-            return zeros(0, 0, islogical(S))
+            return zeros(0, 0, S)
         R = np.unique(_m._ivec(a, m * n, -1, False)[0])
         keep = ~np.isin(key, R)
         k = key[keep] - np.searchsorted(R, key[keep])
@@ -415,7 +433,7 @@ def delete(S, args):
     for k in range(2, len(args)):
         _m._ivec(args[k], 1, k, False)
     if not which:
-        return zeros(0, n, islogical(S))
+        return zeros(0, n, S)
     if len(which) > 1:
         raise _err("A null assignment can have only one non-colon index.", "MATLAB:nullAssignmentNonColonIndex")
     k = which[0]
@@ -758,6 +776,8 @@ def _matrix_op(name, a, b, cls, keep):
         return binop("rdivide", a, b)
     if name == "mldivide" and _is_scalar(a):
         return binop("ldivide", a, b)
+    if name == "mldivide" and type(a) is Sparse:
+        return _finish(mldivide(a, b), cls)
     if name == "mpower" and _is_scalar(b) and not _is_scalar(a):
         p = _m._scalar(b)
         if p == _math.floor(p) and p >= 0:
@@ -919,7 +939,7 @@ def kron_(A, B):
 
 def repmat_(S, r, c):
     if r == 0 or c == 0 or not S.pr.size:
-        return zeros(S.m * r, S.n * c, islogical(S))
+        return zeros(S.m * r, S.n * c, S)
     rows, cols = S.ir, _cols(S)
     k = S.pr.size
     br = np.repeat(np.arange(r, dtype=_I), k)
@@ -1051,6 +1071,7 @@ _SPARSE_OUT = {
     "var": (0,), "dot": (0,), "circshift": (0,), "rot90": (0,), "permute": (0,), "squeeze": (0,),
     "blkdiag": (0,), "sort": (0,), "unique": (0,), "sum": (0,), "any": (0,), "all": (0,), "mean": (0,),
     "diag": (0,), "tril": (0,), "triu": (0,), "repmat": (0,), "reshape": (0,),
+    "inv": (0,), "lu": (0, 1, 2), "chol": (0,), "qr": (0, 1),
 }
 _SPARSE_OUT_FN = {}
 
@@ -1101,6 +1122,369 @@ _SPECIAL = {
 }
 
 
+# ------------------------------------------------------------------ linear algebra
+
+# the largest square matrix solved through its full form (beyond, a banded one)
+MAX_DENSE_SOLVE = 4000
+
+
+def bandwidths(S):
+    """(lower, upper) bandwidths"""
+    if not S.pr.size:
+        return 0, 0
+    d = _cols(S) - S.ir
+    return int(max(0, -int(np.min(d)))), int(max(0, int(np.max(d))))
+
+
+def _band_solve(S, B):
+    """S \\ B for a square sparse S of small bandwidth: LU with partial pivoting
+    in LAPACK's band storage (gbtrf, then the two triangular solves); B a
+    MATLAB-oriented full matrix"""
+    n = S.n
+    kl, ku = bandwidths(S)
+    ldab = 2 * kl + ku + 1
+    cplx = S.pr.dtype.kind == "c" or B.dtype.kind == "c"
+    dt = np.complex128 if cplx else np.float64
+    AB = np.zeros((ldab, n), dtype=dt)
+    rows, cols = S.ir, _cols(S)
+    AB[kl + ku + rows - cols, cols] = _fvals(S)
+    X = np.array(B, dtype=dt)
+    piv = np.zeros(n, dtype=_I)
+    singular = False
+    for k in range(n):
+        last = min(n - 1, k + kl)
+        col = AB[kl + ku: kl + ku + last - k + 1, k]
+        p = int(np.argmax(np.abs(col))) + k
+        piv[k] = p
+        if AB[kl + ku + p - k, k] == 0:
+            singular = True
+            continue
+        hi = min(n - 1, k + kl + ku)
+        cs = np.arange(k, hi + 1, dtype=_I)
+        if p != k:
+            a = AB[kl + ku + k - cs, cs].copy()
+            AB[kl + ku + k - cs, cs] = AB[kl + ku + p - cs, cs]
+            AB[kl + ku + p - cs, cs] = a
+            X[[k, p]] = X[[p, k]]
+        if last > k:
+            rs = np.arange(k + 1, last + 1, dtype=_I)
+            l = AB[kl + ku + rs - k, k] / AB[kl + ku, k]
+            AB[kl + ku + rs - k, k] = l
+            if hi > k:
+                c2 = cs[1:]
+                urow = AB[kl + ku + k - c2, c2]
+                AB[kl + ku + rs.reshape((-1, 1)) - c2.reshape((1, -1)), c2.reshape((1, -1))] -= l.reshape((-1, 1)) * urow.reshape((1, -1))
+            X[k + 1:last + 1] -= l.reshape((-1, 1)) * X[k].reshape((1, -1))
+    if singular:
+        _m.warning_("Matrix is singular to working precision.")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for k in range(n - 1, -1, -1):
+            hi = min(n - 1, k + kl + ku)
+            if hi > k:
+                c2 = np.arange(k + 1, hi + 1, dtype=_I)
+                X[k] -= (AB[kl + ku + k - c2, c2].reshape((-1, 1)) * X[k + 1:hi + 1]).sum(axis=0)
+            X[k] /= AB[kl + ku, k]
+    return X
+
+
+def mldivide(a, b):
+    """a \\ b with a sparse a (not scalar): through the full matrix when small, else banded"""
+    A = a
+    if A.m != _m._dims(b)[0]:
+        raise _err("Matrix dimensions must agree.", "MATLAB:dimagree")
+    if A.m == A.n and A.n > MAX_DENSE_SOLVE:
+        kl, ku = bandwidths(A)
+        if (2 * kl + ku + 1) * A.n <= MAX_FULL:
+            Bm = _m._mat(full(b) if type(b) is Sparse else b)
+            X = _band_solve(A, Bm)
+            r = _m._unmat(X)
+            return from_full(r) if type(b) is Sparse else r
+    r = _m.mldivide(full(a), full(b))
+    return from_full(r) if type(b) is Sparse and _m._isnumlike(r) else r
+
+
+def _eig_b(nargout, x, *args):
+    if type(x) is Sparse:
+        if x.pr.dtype.kind == "c" or x.m != x.n or nnz(binop("ne", x, transpose(x))) != 0:
+            raise _err("Input matrix must be real and symmetric when matrix is sparse. Use eigs to compute a subset of eigenvectors and eigenvalues of a sparse matrix.", "MATLAB:eig:useEigsForSparseStandard")
+    return _FULL["eig"](nargout, *[full(a) if type(a) is Sparse else a for a in (x,) + args])
+
+
+def _svd_b(nargout, x, *args):
+    if type(x) is Sparse:
+        raise _err("SVD does not support sparse matrices. Use SVDS to compute a subset of the singular values and vectors of a sparse matrix.", "MATLAB:svd:noSVDsparse")
+    return _FULL["svd"](nargout, x, *args)
+
+
+def _norm_b(nargout, x, p=None):
+    if type(x) is Sparse:
+        vec = x.m == 1 or x.n == 1
+        two = p is None or (not _m._istext(p) and _m._scalar(p) == 2)
+        if two and not vec:
+            raise _err("Sparse norm(S,2) is not available.", "MATLAB:norm:spNorm2notAvailable")
+        if not vec and p is not None and not _m._istext(p) and _m._scalar(p) in (1.0, _math.inf):
+            # (on the nonzeros: column or row sums of magnitudes)
+            d = 1 if _m._scalar(p) == 1 else 2
+            v = np.abs(_fvals(x))
+            sums = _group_sum(_cols(x) if d == 1 else x.ir, v, x.n if d == 1 else x.m)
+            return float(np.max(sums)) if sums.size else 0.0
+        if not vec and p is not None and _m._istext(p) and _m._text(p) == "fro":
+            v = np.abs(_fvals(x))
+            sc = float(np.max(v)) if v.size else 0.0
+            return 0.0 if sc == 0 else float(sc * np.sqrt(np.sum((v / sc) ** 2)))
+    args = [full(x)] + ([] if p is None else [full(p)])
+    return _FULL["norm"](nargout, *args)
+
+
+def _normest_b(nargout, S, tol=None):
+    """MATLAB's normest: the power method on S'S, to a relative tol (1e-6)"""
+    tol = 1e-6 if tol is None else _m._scalar(tol)
+    x = np.abs(_m._mat(full(S) if type(S) is Sparse else S))
+    x = x.sum(axis=0).reshape((-1, 1))
+    A = S
+
+    def mul(M, v):
+        return _m._mat(_m.mtimes(M, _m._unmat(v)))
+    e = float(np.sqrt(np.sum(x * x)))
+    if e == 0:
+        return (0.0, 0.0) if nargout > 1 else 0.0
+    x = x / e
+    e0 = 0.0
+    cnt = 0
+    At = _m.ctranspose(A)
+    while abs(e - e0) > tol * e:
+        e0 = e
+        Sx = mul(A, x)
+        if not np.any(Sx):
+            Sx = np.array(_m._mat(_m._B["rand"].f(1, float(Sx.shape[0]), float(Sx.shape[1]))))
+        x = mul(At, Sx)
+        normx = float(np.sqrt(np.sum(np.abs(x) ** 2)))
+        e = normx / float(np.sqrt(np.sum(np.abs(Sx) ** 2)))
+        x = x / normx
+        cnt += 1
+        if cnt > 100:
+            _m.warning_("NORMEST did not converge for 100 iterations with tolerance %g" % tol)
+            break
+    return [e, float(cnt)] if nargout > 1 else e
+
+
+def _condest_b(nargout, A, *args):
+    """the 1-norm condition number, which MATLAB's condest estimates (exactly here)"""
+    M = _m._mat(full(A) if type(A) is Sparse else A)
+    if M.shape[0] != M.shape[1]:
+        raise _err("Matrix must be square.")
+    try:
+        inv = np.linalg.inv(M)
+    except np.linalg.LinAlgError:
+        return _math.inf
+    return float(np.max(np.sum(np.abs(M), axis=0)) * np.max(np.sum(np.abs(inv), axis=0)))
+
+
+# ------------------------------------------------------------------ the sparse functions
+
+def _spfun_b(nargout, f, S):
+    S = _as_sparse(S)
+    r = _m._call(f, [_m._box(np.array(_fvals(S).reshape((1, -1))))])
+    vals = _m._arr(r).reshape(-1)
+    if vals.size != S.pr.size:
+        raise _err("SPFUN: the function must return as many values as it is given.")
+    return make(S.m, S.n, S.ir, _cols(S), vals)
+
+
+def _diag_index(m, n, d):
+    """the rows and columns of diagonal d, and each one's row of spdiags's B
+    (B's rows go with A's columns when m >= n, else with its rows)"""
+    i0, j0 = max(0, -d), max(0, d)
+    length = max(0, min(m - i0, n - j0))
+    i = np.arange(i0, i0 + length, dtype=_I)
+    j = np.arange(j0, j0 + length, dtype=_I)
+    return i, j, (j if m >= n else i)
+
+
+def _spdiags_b(nargout, *args):
+    if len(args) <= 2:
+        # B = spdiags(A), [B, d] = spdiags(A), B = spdiags(A, d)
+        A = _as_sparse(args[0])
+        m, n = A.m, A.n
+        if len(args) == 2:
+            ds = [int(float(x)) for x in _m._arr(args[1]).reshape(-1)]
+        else:
+            ds = sorted(set(int(x) for x in (_cols(A) - A.ir)[_fvals(A) != 0]))
+        k = min(m, n)
+        out = np.zeros((len(ds), k), dtype=np.complex128 if A.pr.dtype.kind == "c" else np.float64)
+        F = None
+        key = _keys(A)
+        vals = _fvals(A)
+        for c, d in enumerate(ds):
+            i, j, b = _diag_index(m, n, d)
+            p = j * m + i
+            pos = np.searchsorted(key, p)
+            pc = np.minimum(pos, max(key.size - 1, 0))
+            found = (pos < key.size) & (key[pc] == p) if key.size else np.zeros(p.size, dtype=bool)
+            out[c, b[found]] = vals[pc[found]]
+        B = _m._box(out)
+        if nargout >= 2:
+            return [B, _m._box(np.array([[float(d) for d in ds]]))]
+        return B
+    B = _m._mat(full(args[0]) if type(args[0]) is Sparse else args[0])
+    ds = [int(float(x)) for x in _m._arr(args[1]).reshape(-1)]
+    if len(args) == 3:
+        # S = spdiags(B, d, A): A with diagonals d replaced
+        A = _as_sparse(args[2])
+        m, n = A.m, A.n
+        drop = np.isin(_cols(A) - A.ir, np.array(ds, dtype=_I))
+        rows, cols, vals = [A.ir[~drop]], [_cols(A)[~drop]], [_fvals(A)[~drop]]
+    else:
+        m, n = int(_m._scalar(args[2])), int(_m._scalar(args[3]))
+        rows, cols, vals = [], [], []
+    if B.shape[0] == 1 and len(ds) > 1 or B.ndim == 1:
+        B = B.reshape((-1, len(ds)))
+    for c, d in enumerate(ds):
+        i, j, b = _diag_index(m, n, d)
+        ok = b < B.shape[0]
+        rows.append(i[ok])
+        cols.append(j[ok])
+        vals.append(B[b[ok], c if B.shape[1] > 1 else 0])
+    return make(m, n, np.concatenate(rows) if rows else np.zeros(0, dtype=_I), np.concatenate(cols) if cols else np.zeros(0, dtype=_I),
+                np.concatenate(vals) if vals else np.zeros(0))
+
+
+def _rand_values(name, k):
+    return _m._arr(_m._B[name].f(1, float(k), 1.0)).reshape(-1)
+
+
+def _sprand(name, args):
+    if len(args) == 1:
+        S = _as_sparse(args[0])
+        return make(S.m, S.n, S.ir, _cols(S), _rand_values(name, S.pr.size) if S.pr.size else np.zeros(0))
+    m, n = int(_m._scalar(args[0])), int(_m._scalar(args[1]))
+    density = _m._scalar(args[2])
+    want = int(round(m * n * min(max(density, 0.0), 1.0))) if m * n else 0
+    if want == 0:
+        return zeros(m, n)
+    # (as MATLAB's: random places, the repeated ones once, in order, then their values)
+    i = _m._arr(_m._B["randi"].f(1, float(m), float(want), 1.0)).reshape(-1).astype(_I) - 1
+    j = _m._arr(_m._B["randi"].f(1, float(n), float(want), 1.0)).reshape(-1).astype(_I) - 1
+    key = np.unique(i * n + j)
+    vals = _rand_values(name, key.size)
+    return make(m, n, key // n, key % n, vals)
+
+
+def _sprand_b(nargout, *args):
+    return _sprand("rand", args)
+
+
+def _sprandn_b(nargout, *args):
+    return _sprand("randn", args)
+
+
+def _sprandsym_b(nargout, n, density=None, *rest):
+    if density is None:
+        S = _as_sparse(n)
+        L = tri(S, 0, True)
+        R = make(S.m, S.n, L.ir, _cols(L), _rand_values("randn", L.pr.size))
+    else:
+        n = int(_m._scalar(n))
+        R = tri(_sprand("randn", (float(n), float(n), _m._scalar(density) / 2)), 0, True)
+    return binop("plus", R, transpose(tri(R, -1, True)))
+
+
+def _like_proto(args):
+    if len(args) >= 2 and _m._istext(args[-2]) and _m._text(args[-2]).lower() == "like":
+        return args[-1]
+    return None
+
+
+def _like_fn(name, ok):
+    f = _FULL[name]
+
+    def g(nargout, *args):
+        proto = _like_proto(args)
+        if type(proto) is Sparse:
+            if not ok:
+                raise _err('Sparse input following "like" is not supported.', "MATLAB:%s:sparsePrototype" % name)
+            r = f(nargout, *(args[:-1] + (full(proto),)))
+            return from_full(r)
+        return f(nargout, *args)
+    return g
+
+
+def _cast_b(nargout, x, *args):
+    """cast(x, class), cast(x, 'like', p): p's class, sparsity and complexity"""
+    if len(args) == 2 and _m._istext(args[0]) and _m._text(args[0]).lower() == "like":
+        p = args[1]
+        cls = _m.class_(p)
+        r = _m._B[cls].f(1, full(x) if type(x) is Sparse else x) if cls in _m._B else x
+        if type(p) is Sparse:
+            r = from_full(r)
+        if _m._isnumlike(p) and _m._arr(full(p) if type(p) is Sparse else p).dtype.kind == "c":
+            r = _m.plus(r, complex(0, 0)) if type(r) is not Sparse else _new(r.m, r.n, r.jc, r.ir, r.pr.astype(np.complex128))
+        return r
+    if len(args) != 1 or not _m._istext(args[0]):
+        raise _err("Unsupported data type for conversion.")
+    cls = _m._text(args[0])
+    if cls not in _m._B:
+        raise _err("Unsupported data type for conversion: '%s'." % cls)
+    return _m._B[cls].f(1, x)
+
+
+def _accumarray_b(nargout, *args):
+    sparse_ = len(args) >= 6 and _m._numel(args[5]) == 1 and _m.cond(args[5])
+    r = _FULL["accumarray"](nargout, *[full(a) if type(a) is Sparse else a for a in args])
+    return from_full(r) if sparse_ else r
+
+
+# matrix structure: for full matrices too
+def _structure(S):
+    S = _as_sparse(S)
+    return S, S.ir, _cols(S)
+
+
+def _issymmetric_b(nargout, x, *args):
+    if not (_m._isnumlike(x) or type(x) is Sparse) or len(_m._dims(x)) > 2:
+        return False
+    S = _as_sparse(x)
+    if S.m != S.n:
+        return False
+    skew = bool(args) and _m._istext(args[0]) and _m._text(args[0]).lower() == "skew"
+    T = transpose(S)
+    return nnz(binop("ne", S, unop("uminus", T) if skew else T)) == 0
+
+
+def _ishermitian_b(nargout, x, *args):
+    if not (_m._isnumlike(x) or type(x) is Sparse) or len(_m._dims(x)) > 2:
+        return False
+    S = _as_sparse(x)
+    if S.m != S.n:
+        return False
+    return nnz(binop("ne", S, transpose(S, conj=True))) == 0
+
+
+def _bandwidth_b(nargout, x, which=None):
+    kl, ku = bandwidths(_as_sparse(x))
+    if which is not None:
+        w = _m._text(which).lower()
+        return float(kl if w == "lower" else ku)
+    return [float(kl), float(ku)] if nargout > 1 else float(kl)
+
+
+def _isbanded_b(nargout, x, lower, upper):
+    kl, ku = bandwidths(_as_sparse(x))
+    return kl <= _m._scalar(lower) and ku <= _m._scalar(upper)
+
+
+def _istril_b(nargout, x):
+    return bandwidths(_as_sparse(x))[1] == 0
+
+
+def _istriu_b(nargout, x):
+    return bandwidths(_as_sparse(x))[0] == 0
+
+
+def _isdiag_b(nargout, x):
+    return bandwidths(_as_sparse(x)) == (0, 0)
+
+
 # ------------------------------------------------------------------ built-in functions
 
 def _int(x, what="Sparse matrix sizes", clip=False):
@@ -1132,17 +1516,29 @@ def sparse_(nargout, *args):
         if v.dtype.kind == "c" or (v.size and (np.any(v != np.floor(v)) or np.any(v < 1))):
             raise _err("Index into matrix must be positive.", "MATLAB:sparsfcn:nonPosIndex") if v.size and np.all(v == np.floor(v)) else \
                 _err("Sparse matrix indices must be positive integers.", "MATLAB:sparsfcn:nonIntegerIndex")
-    k = max(iv.size, jv.size, vv.size)
+    sizes = [v.size for v in (iv, jv, vv)]
+    if 0 in sizes and max(sizes) <= 1:
+        # (a scalar with an empty: no entries; the scalar indices still give the size)
+        k = 0
+    else:
+        k = max(sizes)
     parts = []
     for v in (iv, jv, vv):
-        if v.size not in (1, k):
+        if v.size not in (1, k) and not (k == 0 and v.size == 1):
             raise _err("Vectors must be the same length.", "MATLAB:samelen")
         parts.append(np.repeat(v, k) if v.size == 1 and k != 1 else v)
-    iv, jv, vv = parts
+    if k == 0:
+        m0 = int(np.max(iv)) if iv.size else 0
+        n0 = int(np.max(jv)) if jv.size else 0
+        iv, jv, vv = (np.zeros(0) for _ in range(3))
+    else:
+        iv, jv, vv = parts
     if n >= 5:
         m, nn = _int(args[3]), _int(args[4])
         if iv.size and (int(np.max(iv)) > m or int(np.max(jv)) > nn):
             raise _err("Index exceeds array bounds.", "MATLAB:sparsfcn:indexOutOfRange")
+    elif k == 0:
+        m, nn = m0, n0
     else:
         m = int(np.max(iv)) if iv.size else 0
         nn = int(np.max(jv)) if jv.size else 0
@@ -1150,7 +1546,10 @@ def sparse_(nargout, *args):
         raise _err("Requested %dx%d sparse matrix exceeds the maximum allowed size." % (m, nn))
     if vv.dtype.kind == "c" and not np.any(vv.imag):
         vv = np.array(vv.real)
-    return make(m, nn, iv.astype(_I) - 1, jv.astype(_I) - 1, vv)
+    S = make(m, nn, iv.astype(_I) - 1, jv.astype(_I) - 1, vv)
+    if n == 6:
+        S.cap = _int(args[5], "nzmax")
+    return S
 
 
 def full_b(nargout, x):
@@ -1178,7 +1577,10 @@ def speye_(nargout, *args):
 
 
 def spalloc_(nargout, m, n, nzmax=None):
-    return zeros(_int(m), _int(n))
+    S = zeros(_int(m), _int(n))
+    if nzmax is not None:
+        S.cap = _int(nzmax, "nzmax")
+    return S
 
 
 def spones_(nargout, S):
@@ -1198,7 +1600,7 @@ def nnz_(nargout, x):
 
 def nzmax_(nargout, x):
     if type(x) is Sparse:
-        return float(max(nnz(x), 1))
+        return float(nzmax(x))
     return float(_m._numel(x))
 
 
@@ -1223,7 +1625,10 @@ def find_(nargout, x, k=None, direction=None):
     sel = np.arange(key.size, dtype=_I)
     if k is not None:
         kk = _int(k, "Second argument")
-        last = direction is not None and _m._text(direction, "direction").lower() == "last"
+        d = "first" if direction is None else _m._text(direction, "direction").lower()
+        if d not in ("first", "last"):
+            raise _err('Invalid search direction. Use "first" or "last".', "MATLAB:find:InvalidDirection")
+        last = d == "last"
         sel = sel[-kk:] if last and kk else sel[:kk] if not last else sel[:0]
     key, vals = key[sel], vals[sel]
     row = S.m == 1 and S.n != 1
@@ -1322,6 +1727,19 @@ def activate():
 
 def _register():
     _m._B["blkdiag"] = _m.Builtin(blkdiag_b, "blkdiag")
+    for name, f in (("spfun", _spfun_b), ("spdiags", _spdiags_b), ("sprand", _sprand_b), ("sprandn", _sprandn_b),
+                    ("sprandsym", _sprandsym_b), ("normest", _normest_b), ("condest", _condest_b), ("cast", _cast_b),
+                    ("issymmetric", _issymmetric_b), ("ishermitian", _ishermitian_b), ("bandwidth", _bandwidth_b),
+                    ("isbanded", _isbanded_b), ("istril", _istril_b), ("istriu", _istriu_b), ("isdiag", _isdiag_b)):
+        if name not in _m._B:
+            _m._B[name] = _m.Builtin(f, name)
+            _PASS.add(name)
+    for name, f in (("eig", _eig_b), ("svd", _svd_b), ("norm", _norm_b), ("accumarray", _accumarray_b)):
+        _FULL[name] = _m._B[name].f
+        _NATIVE[name] = f
+    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("rand", False), ("randn", False), ("randi", False)):
+        _FULL[name] = _m._B[name].f
+        _NATIVE[name] = _like_fn(name, ok)
     for name in sorted(_ZERO_KEEPING | _SPARSE_FULL):
         if name in _m._B:
             _FULL[name] = _m._B[name].f

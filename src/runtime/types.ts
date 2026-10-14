@@ -728,7 +728,14 @@ function floatFromHex(s: string): number {
   const bad = () => raise(T.ValueError, "invalid hexadecimal floating-point string");
   const t = String(s).replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, "");
   const special = /^([+-]?)(inf|infinity|nan)$/i.exec(t);
-  if (special) return special[2].toLowerCase() === "nan" ? NaN : special[1] === "-" ? -Infinity : Infinity;
+  if (special) {
+    if (special[2].toLowerCase() !== "nan") return special[1] === "-" ? -Infinity : Infinity;
+    // (-nan keeps its sign bit, as CPython's)
+    if (special[1] !== "-") return NaN;
+    const dv = new DataView(new ArrayBuffer(8));
+    dv.setBigUint64(0, 0xfff8000000000000n);
+    return dv.getFloat64(0);
+  }
   const m = /^([+-]?)(?:0x)?([0-9a-f]*)(?:\.([0-9a-f]*))?(?:p([+-]?\d+))?$/i.exec(t);
   if (!m || !(m[2] + (m[3] ?? ""))) bad();
   const neg = m![1] === "-", frac = m![3] ?? "";
@@ -752,6 +759,7 @@ function floatFromHex(s: string): number {
   return neg ? -v : v;
 }
 float.$dict.set("fromhex", new PyClassMethod(pyfn((c: any, s: any) => {
+  if (s instanceof StrLayout) s = s.$v; // (a str subclass)
   if (typeof s !== "string") raise(T.TypeError, `bad argument type for built-in operation`);
   const f = O.mkfloat(floatFromHex(s));
   return c === float ? f : c(f);

@@ -195,15 +195,18 @@ test("reactive notebook: a MATLAB cell's definitions and references (src/dataflo
 
 test("MATLAB consoles wait for the end of an open block (is_complete, the session's check)", async () => {
   const { matlabIsIncomplete } = require("../src/matlab");
-  for (const t of ["if true", "for k = 1:3\n  disp(k)", "x = [1 2", "x = 1 + ...", "%{\na note", "while x < 3\n  if x"]) assert.equal(matlabIsIncomplete(t), true, t);
-  for (const t of ["x = 1", "if true\n  x = 1;\nend", "x = 1 +* 2", "x = )", "%{\n%}\nx = 1"]) assert.equal(matlabIsIncomplete(t), false, t);
+  for (const t of ["if true", "for k = 1:3\n  disp(k)", "x = [1 2", "x = 1 + ...", "%{\na note", "while x < 3\n  if x",
+    "x = 1 ...", "disp(1) ... % continue", "x = 1 ...\n"]) assert.equal(matlabIsIncomplete(t), true, t);
+  for (const t of ["x = 1", "if true\n  x = 1;\nend", "x = 1 +* 2", "x = )", "%{\n%}\nx = 1", "x = 1 ...\n+ 2"]) assert.equal(matlabIsIncomplete(t), false, t);
   const { notebookSession } = require("../src/notebook-session");
   const msgs: any[] = [];
   const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
   await s.ready;
   await s.handle({ id: 1, check: "if true", matlab: true });
   await s.handle({ id: 2, check: "if true\n  x = 1;\nend", matlab: true });
-  assert.deepEqual([1, 2].map((id) => msgs.find((m) => m.id === id).more), [true, false]);
+  await s.handle({ id: 3, check: "x = 1 ...", matlab: true });
+  await s.handle({ id: 4, check: "disp(1) ... % continue", matlab: true });
+  assert.deepEqual([1, 2, 3, 4].map((id) => msgs.find((m) => m.id === id).more), [true, false, true, true]);
 });
 
 test("a .m file whose outer block comment holds := runs as MATLAB (the CLI's guess)", () => {
@@ -214,4 +217,42 @@ test("a .m file whose outer block comment holds := runs as MATLAB (the CLI's gue
   const f = join(mkdtempSync(join(tmpdir(), "sb-mfile-")), "nested.m");
   writeFileSync(f, "%{\nouter\n%{\ninner\n%}\n:= only in the outer comment\n%}\nx = 6 * 7\n");
   assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", f], { encoding: "utf8" }), "\nx =\n\n    42\n\n");
+});
+
+test("sparse single matrices stay single when a result is empty; whos marks sparse and complex", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "sparse-"));
+  writeFileSync(join(dir, "s.m"), [
+    "S = sparse(single(zeros(2, 3))); T = sparse(single([0 2; 0 0]));",
+    "c = {class(S), class(S.'), class(T), class(T(1,1)), class(T(1,:)), class(T([], :)), class(repmat(S, 2, 2)), class(T(:, []))};",
+    "fprintf('%s ', c{:}); fprintf('\\n');",
+    "C = sparse([1 2], [1 2], [1i 2]); B = sparse(1e6, 1e6);",
+    "whos B C",
+  ].join("\n"));
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8" });
+  const lines = out.split("\n");
+  assert.equal(lines[0], "single single single single single single single single ");
+  assert.match(out, /\n  B +1000000x1000000 +8000024  double +sparse\n/);
+  assert.match(out, /\n  C +2x2 +72  double +sparse, complex\n/);
+});
+
+test("sparse matrices in .mat files: logical ones saved and loaded, and read as Octave writes them", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "sparse-mat-"));
+  writeFileSync(join(dir, "s.m"), [
+    "L = sparse([1 0 1; 0 0 1]) > 0; A = spalloc(4, 4, 6); A(2, 3) = 7;",
+    "f = [tempname '.mat']; save(f, 'L', 'A'); clear L A; load(f);",
+    "fprintf('%d %d %d %d %d\\n', issparse(L), islogical(L), issparse(A), nnz(A), full(A(2, 3)));",
+    "disp(mat2str(full(L)));",
+    `load('${join(__dirname, "..", "..", "matlab-tests", "data", "octave_sparse_logical.mat")}');`,
+    "fprintf('%d %d\\n', issparse(spl), islogical(spl)); disp(mat2str(full(spl)));",
+  ].join("\n"));
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1 1 1 1 7", "[true false true;false false true]", "1 1", "[true false true;false false true]"]);
 });

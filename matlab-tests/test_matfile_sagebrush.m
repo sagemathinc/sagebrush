@@ -11,3 +11,5 @@ show(S.z);
 show(S.cel);
 show(S.st);
 show(S.e);
+show([issparse(S.sp) issparse(S.spz) issparse(S.spe)]);
+show(full(S.sp)); show(full(S.spz)); show(full(S.spe));

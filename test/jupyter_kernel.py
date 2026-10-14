@@ -166,6 +166,9 @@ check("matlab is_complete (an open if: incomplete)", c["status"] == "incomplete"
 kc.is_complete("if true\n  x = 1;\nend")
 c = kc.get_shell_msg(timeout=10)["content"]
 check("matlab is_complete (complete)", c["status"] == "complete", c)
+kc.is_complete("x = 1 ...")
+c = kc.get_shell_msg(timeout=10)["content"]
+check("matlab is_complete (a line ending in ...: incomplete)", c["status"] == "incomplete", c)
 km.shutdown_kernel(now=True)
 
 out = subprocess.run(cmd + ["--uninstall-jupyter-kernel", "--mode", "all"], capture_output=True, text=True).stdout
