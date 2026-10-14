@@ -12,7 +12,7 @@ import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
-import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { getattr } from "./runtime/object";
@@ -118,10 +118,14 @@ function matlabSource(src: string, file: string): string | null {
   }
 }
 
-/** Magma source as Python, or null after reporting a syntax error. */
-function magmaSource(src: string, file: string): string | null {
+/**
+ * Magma source as Python, or null after reporting a syntax error.  A file
+ * runs up to its first syntax error; input from stdin is a session, which
+ * reports errors and goes on (src/magma.ts, Recover).
+ */
+function magmaSource(src: string, file: string, recover: Recover = "file"): string | null {
   try {
-    return magmaToPython(src, file);
+    return magmaToPython(src, file, { recover });
   } catch (e) {
     if (!(e instanceof MagmaSyntaxError)) throw e;
     const line = src.split("\n")[e.line - 1] ?? "";
@@ -379,6 +383,11 @@ async function main() {
     code = guarded(() => {
       main = execModule(source, file!, "__main__", false, sage || file!.endsWith(".sage"));
     });
+  } else if (!interactive && isMagma(null)) {
+    // Magma on stdin: a session, as `magma < file` is
+    main = mainModule("<stdin>");
+    const py = magmaSource(readFileSync(0, "utf8"), "<stdin>", "session");
+    if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive) {
     // program on stdin
     const source = readFileSync(0, "utf8");

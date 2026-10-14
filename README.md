@@ -163,8 +163,10 @@ that character (`'\U00010000'`), where CPython keeps them apart.
   arguments, `$$`, `select`, comprehensions, ranges, multiple return
   values, value semantics), Magma's printing (wrapped at 80 columns), and
   integers, sequences, sets, tuples, reals to 30 digits, polynomials,
-  modular symbols, newforms and elliptic curves. `magma-tests/` checks
-  500 lines against Magma itself.
+  modular symbols, newforms and elliptic curves. As in Magma, a file stops
+  at its first runtime or syntax error, while input on stdin
+  (`sagebrush --magma < f.m`) is a session that reports errors and goes on.
+  `magma-tests/` checks 600 lines against Magma itself.
 - **Number fields and integer matrices:** in Sage mode, `K.<a> =
   NumberField(x^3 - 11)`, `QuadraticField`, `CyclotomicField`, with
   `discriminant`, `signature`, `integral_basis`, `maximal_order`,
