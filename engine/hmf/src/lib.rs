@@ -12,18 +12,22 @@
 //! * `p1`: P^1(O_F/N) as a product of local projective lines;
 //! * `quat`: the icosian ring and its 120 units;
 //! * `split`: local splittings R/P^e R = M_2(O_F/P^e), from idempotents;
-//! * `orbits`: the orbits of the units on P^1(O_F/N).
+//! * `orbits`: the orbits of the units on P^1(O_F/N);
+//! * `theta`: the Hecke elements Theta(p), by lattice enumeration;
+//! * Hecke operators T_p for p not dividing N (`Space::hecke_matrix`).
 //!
 //! Invalid input is an `Err`, never a panic.
 
 pub mod field;
+mod par;
 pub mod orbits;
 pub mod p1;
 pub mod quat;
 pub mod residue;
 pub mod split;
+pub mod theta;
 
-use field::{Elt, Ideal};
+use field::{Elt, Ideal, Prime};
 use orbits::Orbits;
 use p1::P1;
 use residue::LocalRing;
@@ -73,5 +77,88 @@ impl Space {
     /// M_2^B(N) is the constant functions.
     pub fn cusp_dimension(&self) -> usize {
         self.orbits.len() - 1
+    }
+
+    /// The matrices, one per factor of the level, by which the elements
+    /// conj(alpha), alpha in Theta(p), act; conj(alpha) = pi alpha^-1 acts on
+    /// P^1 as alpha^-1 does (PSAGE: hecke_elements(P) = [~a for a in alphas]).
+    fn hecke_action(&self, p: &Prime) -> Result<Vec<Vec<p1::Mat>>, String> {
+        if self.level.factors.iter().any(|(q, _)| q == p) {
+            return Err(format!("T_p for p = ({}) dividing the level is not implemented", p.gen));
+        }
+        let th = theta::theta(p)?;
+        Ok(th
+            .iter()
+            .map(|a| {
+                let b = quat::Quat::from_e(a).conj().to_e().expect("conj(alpha) lies in R");
+                self.p1.locals.iter().zip(&self.splittings).map(|(l, s)| s.image(&l.ring, &b)).collect()
+            })
+            .collect())
+    }
+
+    fn hecke_row_with(&self, mats: &[Vec<p1::Mat>], i: usize) -> Vec<(u32, u32)> {
+        let r = self.p1.locals.len();
+        let mut digits = vec![0u64; r];
+        let mut image = vec![0u64; r];
+        self.p1.digits(self.orbits.reps[i], &mut digits);
+        let mut js: Vec<u32> = Vec::with_capacity(mats.len());
+        for m in mats {
+            for k in 0..r {
+                image[k] = self.p1.locals[k].act(&m[k], digits[k]).expect("conj(alpha) is invertible modulo N");
+            }
+            js.push(self.orbits.orbit[self.p1.combine(&image) as usize]);
+        }
+        js.sort_unstable();
+        let mut row: Vec<(u32, u32)> = vec![];
+        for j in js {
+            match row.last_mut() {
+                Some((c, n)) if *c == j => *n += 1,
+                _ => row.push((j, 1)),
+            }
+        }
+        row
+    }
+
+    /// The matrix of T_p on the basis of orbits, acting on the right: row i
+    /// is the image of the i-th basis element (PSAGE's hecke_matrix), for a
+    /// prime p not dividing N. Its rows sum to N(p) + 1. Rows are computed in
+    /// parallel with the `parallel` feature.
+    pub fn hecke_matrix(&self, p: &Prime) -> Result<HeckeMatrix, String> {
+        let mats = self.hecke_action(p)?;
+        let rows = par::map_range(self.dimension(), |i| self.hecke_row_with(&mats, i));
+        Ok(HeckeMatrix { dim: self.dimension(), rows })
+    }
+
+    /// Row i of the matrix of T_p alone (PSAGE's
+    /// hecke_operator_on_basis_element), as (column, entry) pairs.
+    pub fn hecke_row(&self, p: &Prime, i: usize) -> Result<Vec<(u32, u32)>, String> {
+        if i >= self.dimension() {
+            return Err(format!("basis index {} out of range", i));
+        }
+        let mats = self.hecke_action(p)?;
+        Ok(self.hecke_row_with(&mats, i))
+    }
+}
+
+/// A Hecke matrix with sparse rows: rows[i] lists (column, entry), sorted.
+/// Row i has at most N(p) + 1 nonzero entries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeckeMatrix {
+    pub dim: usize,
+    pub rows: Vec<Vec<(u32, u32)>>,
+}
+
+impl HeckeMatrix {
+    pub fn dense(&self) -> Vec<Vec<i64>> {
+        let mut t = vec![vec![0i64; self.dim]; self.dim];
+        for (i, row) in self.rows.iter().enumerate() {
+            for &(j, n) in row {
+                t[i][j as usize] = n as i64;
+            }
+        }
+        t
+    }
+    pub fn trace(&self) -> i64 {
+        self.rows.iter().enumerate().map(|(i, row)| row.iter().find(|&&(j, _)| j as usize == i).map_or(0, |&(_, n)| n as i64)).sum()
     }
 }
