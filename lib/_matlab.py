@@ -5573,10 +5573,15 @@ def poly_(r):
 def conv_(a, b, shape=None):
     A = _farr(a).reshape(-1)
     B = _farr(b).reshape(-1)
-    r = np.convolve(A, B)
-    if shape is not None and _text(shape) == "same":
+    r = np.convolve(A, B) if A.size and B.size else np.zeros(max(A.size + B.size - 1, 0))
+    s = "full" if shape is None else (_text(shape).lower() if _istext(shape) else None)
+    if s == "same":
         st = B.size // 2
         r = r[st:st + A.size]
+    elif s == "valid":
+        r = r[B.size - 1:A.size] if A.size >= B.size else np.zeros(0)
+    elif s != "full":
+        raise _err("SHAPE must be 'full', 'same', or 'valid'.")
     col = _dims(a)[1] == 1 and _dims(a)[0] > 1
     return _box(r.reshape((1, -1)) if col else r.reshape((-1, 1)))
 
@@ -9061,3 +9066,4 @@ def _handle_blocks(v):
 
 import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
 import _matlab_numeric  # noqa: E402,F401  (more numerical built-ins)
+import _matlab_data  # noqa: E402,F401  (data analysis and signal functions)
