@@ -64,6 +64,78 @@ function cap(x: number, y: number, r: number, vx: number, vy: number, from: numb
   }
 }
 
+/**
+ * A stroke as it is drawn: each point the pen goes through, streamlined (a
+ * shaky hand steadied), with its pressure (the pen's, or for a mouse or a
+ * finger, one from its speed: faster is thinner), a point closer than half a
+ * unit to the last dropped, and where the pen left kept as it was; when it
+ * leaves, the points a curve doesn't need dropped too (simplifyInk: a word
+ * three times smaller, its outline moved a tenth of a unit).  `unit` is a
+ * screen pixel in board units (1 / zoom): drawn zoomed in, a stroke keeps
+ * finer detail.  What is kept is what a document keeps (doc.ts inkNode), so
+ * a stroke is drawn from it as it is (inkOutline with streamline 0): a later
+ * change here changes new strokes, not old ones.
+ */
+export class InkCapture {
+  readonly points: number[] = [];
+  private p = 0.5;
+  private raw: [number, number, number] | null = null;
+  /** `simplify`: how far (in screen pixels) a dropped point may be from the curve (default 0.2; 0: none) */
+  constructor(private o: { size: number; streamline?: number; simulate: boolean; unit?: number; simplify?: number }) {}
+  /** The pen at (x, y), with its pressure (a pen's; ignored when simulated). */
+  add(x: number, y: number, pressure = 0.5) {
+    const ps = this.points, n = ps.length;
+    if (!n) {
+      this.p = this.o.simulate ? 0.5 : pressure;
+      ps.push(x, y, this.p);
+      return;
+    }
+    const t = 0.15 + (1 - (this.o.streamline ?? 0.5)) * 0.85;
+    const lx = ps[n - 3], ly = ps[n - 2];
+    const sx = lerp(lx, x, t), sy = lerp(ly, y, t), d = Math.hypot(sx - lx, sy - ly);
+    this.raw = [x, y, pressure];
+    if (d < 0.5 * (this.o.unit ?? 1)) return;
+    if (this.o.simulate) {
+      const sp = Math.min(1, d / this.o.size), rp = Math.min(1, 1 - sp);
+      this.p = Math.min(1, this.p + (rp - this.p) * sp * 0.275);
+    } else this.p = pressure;
+    ps.push(sx, sy, this.p);
+  }
+  /** The pen left: its last point, as it was; the points a curve doesn't need, dropped. */
+  end(): number[] {
+    const ps = this.points, n = ps.length, r = this.raw;
+    if (r && n && Math.hypot(r[0] - ps[n - 3], r[1] - ps[n - 2]) >= 0.5 * (this.o.unit ?? 1)) ps.push(r[0], r[1], this.o.simulate ? this.p : r[2]);
+    const tol = this.o.simplify ?? 0.2;
+    return tol ? simplifyInk(ps, tol * (this.o.unit ?? 1)) : ps;
+  }
+}
+
+/** Points (x, y, pressure, ...) without those a curve doesn't need: none is
+ * further than `eps` from the line through the points kept around it, nor
+ * its pressure more than `peps` from theirs (Ramer, Douglas and Peucker). */
+export function simplifyInk(ps: number[], eps: number, peps = 0.05): number[] {
+  const n = ps.length / 3;
+  if (n < 3) return ps.slice();
+  const keep = new Uint8Array(n);
+  keep[0] = keep[n - 1] = 1;
+  const todo: [number, number][] = [[0, n - 1]];
+  while (todo.length) {
+    const [a, b] = todo.pop()!;
+    const ax = ps[a * 3], ay = ps[a * 3 + 1], bx = ps[b * 3], by = ps[b * 3 + 1], len = Math.hypot(bx - ax, by - ay) || 1;
+    let worst = 1, at = -1;
+    for (let i = a + 1; i < b; i++) {
+      const d = Math.abs((bx - ax) * (ay - ps[i * 3 + 1]) - (ax - ps[i * 3]) * (by - ay)) / len;
+      const dp = Math.abs(ps[i * 3 + 2] - lerp(ps[a * 3 + 2], ps[b * 3 + 2], (i - a) / (b - a)));
+      const e = Math.max(d / eps, dp / peps);
+      if (e > worst) { worst = e; at = i; }
+    }
+    if (at >= 0) { keep[at] = 1; todo.push([a, at], [at, b]); }
+  }
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(ps[i * 3], ps[i * 3 + 1], ps[i * 3 + 2]);
+  return out;
+}
+
 /** The outline of a stroke through `points` (x, y, pressure, ... in 0 to
  * 1), as x0, y0, x1, y1, ...: a closed shape to fill. */
 export function inkOutline(points: ArrayLike<number>, opts: InkOptions): number[] {
