@@ -17,6 +17,10 @@ and runs on a runtime library with MATLAB's semantics:
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics);
+  - **lib/_matlab_funfun.py**: function functions: the optimization options
+    (optimset, optimget, from their documentation pages: the eight
+    documented options, each solver's documented defaults, a default that
+    depends on the problem left empty for the solver to apply);
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
