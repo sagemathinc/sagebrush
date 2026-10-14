@@ -74,7 +74,9 @@ try {
   await sleep(100);
   await ev("(() => { const r = window.board.clientRect('about'); const x = r.left + 30, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
   check(await until("!!document.querySelector('.ip-bar')", 3000), "a note of the page's board is being written");
+  await send("Input.insertText", { text: "Kept at destroy" });
   await ev("import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)");
+  check(await ev("Object.keys(localStorage).some((k) => k.startsWith('sagebrush-board:') && localStorage.getItem(k).includes('Kept at destroy'))"), "what was being written when the board was destroyed is saved (though no longer drawn)");
   const start = await census();
   check(start.frames === 0 && start.workers === 0 && !(await ev("!!document.querySelector('.board-code-engine, .ip-bar, .board-toolbar-panel, style[data-sbb]')")), "destroy() takes the board, its engine, frame and workers away: " + JSON.stringify(start));
   for (let i = 0; i < ROUNDS; i++) {

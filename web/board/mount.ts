@@ -231,16 +231,26 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     };
   }
 
+  // (each load is a new generation: a show() of an earlier one, resuming
+  // from an await, then does nothing more; nor does any once the board is
+  // destroyed, CORR-C08-1)
+  let loadGen = 0, destroyed = false;
   /** Lay out and draw a document, the camera where it is (`view`: a version
-   * being looked at in TimeTravel, which is not the document and does not run). */
-  async function show(d: BoardDoc, view = false) {
+   * being looked at in TimeTravel, which is not the document and does not
+   * run).  False if it was overtaken (another document loaded, the board
+   * destroyed) and drew nothing. */
+  async function show(d: BoardDoc, view = false): Promise<boolean> {
+    const g = loadGen, over = () => destroyed || g !== loadGen;
+    if (over()) return false;
     const bad = formatError(d);
     if (bad) throw new Error(bad);
     if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
     // (only data: whatever it came from, REACT-XSS)
     d = cleanDoc(d);
     await images.absorb(d);
+    if (over()) return false;
     await images.ensure(Object.keys(d.images ?? {}));
+    if (over()) return false;
     if (!view) doc = d;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
@@ -249,6 +259,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // KaTeX: the host's, loaded the first time a board has math
       mathModule ??= host.math();
       const m = await mathModule;
+      if (over()) return false;
       board.typeset = (el) => m.typeset(el);
     }
     // (edges' routes are found between frames: large boards show at once,
@@ -305,9 +316,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // order, or the format's name and version added, are no edit)
     if (original && originalKey?.[0] !== original) originalKey = [original, shownKey(cleanDoc(original))];
     $("revert").hidden = view || !original || originalKey![1] === shownKey(d);
+    return true;
   }
-  /** Draw again what is shown: the document, or the version being looked at. */
-  const redraw = () => (viewing ? show(viewing, true) : doc ? show(doc) : Promise.resolve());
+  /** Draw again what is shown: the document, or the version being looked at (false: nothing drawn). */
+  const redraw = () => (viewing ? show(viewing, true) : doc ? show(doc) : Promise.resolve(false));
   // (a board's pictures aside: carried, or kept here, they are the same)
   const shownKey = (d: BoardDoc) => JSON.stringify({ ...d, images: undefined });
   let originalKey: [BoardDoc, string] | null = null;
@@ -395,11 +407,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
   async function load(d: BoardDoc, stored = false) {
     loads++;
+    loadGen++;
     newOutputs(!stored);
     const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(host.address?.get() ?? "");
     pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
     closeTimeTravel(false);
-    await show(d);
+    if (!(await show(d))) return;
     if (boardHistory) remember();
     at = -1;
     const n = Number(m?.[2] ?? m?.[3] ?? 0);
@@ -412,7 +425,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (first: what is being written is kept on its own page)
     editor.clear();
     pageIx = Math.max(0, Math.min(pageCount(viewing ?? doc) - 1, i));
-    await redraw();
+    if (!(await redraw())) return;
     step(-1, true);
   }
 
@@ -479,8 +492,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     else if (e.key === "ArrowLeft") step(at - 1);
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
     else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") step(-1);
-    else if (e.key === "PageDown") page(pageIx + 1);
-    else if (e.key === "PageUp") page(pageIx - 1);
+    else if (e.key === "PageDown") page(pageIx + 1).catch(fail);
+    else if (e.key === "PageUp") page(pageIx - 1).catch(fail);
     else if (e.key === "+" || e.key === "=") board.zoomAt(1.25, board.el.clientWidth / 2, board.el.clientHeight / 2);
     else if (e.key === "-") board.zoomAt(0.8, board.el.clientWidth / 2, board.el.clientHeight / 2);
     else return;
@@ -488,6 +501,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   });
 
   function fail(e: unknown) {
+    if (destroyed) return;
     $("tour").hidden = false;
     caption("**This board could not be shown:** " + String((e as Error)?.message ?? e).replace(/[<>&]/g, ""), "");
   }
@@ -505,8 +519,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (an edit, an agent's say, while a version is looked at: the board as it is)
     closeTimeTravel(false);
     notice = "";
-    const prev = doc;
-    await show(d);
+    const prev = doc, g = loadGen;
+    // (not drawn, the board destroyed meanwhile: the edit is still saved; another board loaded: not)
+    if (!(await show(d))) { if (destroyed && g === loadGen) host.store?.save(cleanDoc(d)); return; }
     // (the document as shown: its pictures' bytes are kept apart, by the host's images)
     host.store?.save(doc!);
     remember(prev);
@@ -607,9 +622,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) {
     b.onclick = () => editor.commit((d) => { if (b.dataset.mode === "sage") d.mode = "sage"; else delete d.mode; });
   }
-  $("pgprev").onclick = () => page(pageIx - 1);
-  $("pgnext").onclick = () => page(pageIx + 1);
-  ($("pgsel") as HTMLSelectElement).onchange = (e) => { page(Number((e.target as HTMLSelectElement).value)); (e.target as HTMLElement).blur(); };
+  $("pgprev").onclick = () => page(pageIx - 1).catch(fail);
+  $("pgnext").onclick = () => page(pageIx + 1).catch(fail);
+  ($("pgsel") as HTMLSelectElement).onchange = (e) => { page(Number((e.target as HTMLSelectElement).value)).catch(fail); (e.target as HTMLElement).blur(); };
   // a document's own nodes, edges and tour become its first page
   const PAGE_KEYS = ["intro", "layout", "columns", "direction", "slide", "background", "nodes", "edges", "steps"] as const;
   function paged(d: BoardDoc): BoardPage[] {
@@ -977,8 +992,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // (the page drawn, not its whole view: the frame says where the camera goes)
       editor.clear();
       pageIx = f.page;
-      await redraw();
-      if (g !== presentGen || presenting !== P || !doc) return;
+      if (!(await redraw()) || g !== presentGen || presenting !== P || !doc) return;
     }
     P.i = k;
     const v = pageView(doc, pageIx), s = lookOf(doc, pageIx).slide, st = f.step >= 0 ? v.steps?.[f.step] : undefined;
@@ -1020,13 +1034,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     clearTimeout(idle);
     idle = window.setTimeout(() => root.classList.add("sbb-idle"), 2500);
   }
-  $("present").onclick = () => present(true);
-  $("pr-prev").onclick = () => showFrame((presenting?.i ?? 0) - 1);
-  $("pr-next").onclick = () => showFrame((presenting?.i ?? 0) + 1);
-  $("pr-exit").onclick = () => present(false);
+  $("present").onclick = () => present(true).catch(fail);
+  $("pr-prev").onclick = () => showFrame((presenting?.i ?? 0) - 1).catch(fail);
+  $("pr-next").onclick = () => showFrame((presenting?.i ?? 0) + 1).catch(fail);
+  $("pr-exit").onclick = () => present(false).catch(fail);
   on(root, "pointermove", () => { if (presenting) wake(); });
   // (the screen's size changed: full screen, a phone turned: the frame fitted again)
-  on(window, "resize", () => { if (presenting) requestAnimationFrame(() => presenting && showFrame(presenting.i, true)); });
+  on(window, "resize", () => { if (presenting) requestAnimationFrame(() => presenting && showFrame(presenting.i, true).catch(fail)); });
   // (leaving the full screen a presentation entered, by the browser's own Esc
   // say, leaves Present; an Esc that left Present itself has left full screen
   // too: nothing more happens; full screen granted once Present was left is left)
@@ -1036,17 +1050,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (one granted late, asked for by an earlier presentation, when this one could not ask: left)
     if (full && !presenting.asked) return void document.exitFullscreen?.().catch(() => {});
     if (full) presenting.fs = true;
-    else if (presenting.fs) return void present(false);
-    requestAnimationFrame(() => presenting && showFrame(presenting.i, true));
+    else if (presenting.fs) return void present(false).catch(fail);
+    requestAnimationFrame(() => presenting && showFrame(presenting.i, true).catch(fail));
   });
   on(window, "keydown", (e: KeyboardEvent) => {
     if (!presenting || !mine() || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
     const i = presenting.i, k = e.key;
-    if (k === "ArrowRight" || k === " " || k === "PageDown" || k === "Enter") showFrame(i + 1);
-    else if (k === "ArrowLeft" || k === "PageUp" || k === "Backspace") showFrame(i - 1);
-    else if (k === "Home") showFrame(0);
-    else if (k === "End") showFrame(presenting.frames.length - 1);
-    else if (k === "Escape") present(false);
+    if (k === "ArrowRight" || k === " " || k === "PageDown" || k === "Enter") showFrame(i + 1).catch(fail);
+    else if (k === "ArrowLeft" || k === "PageUp" || k === "Backspace") showFrame(i - 1).catch(fail);
+    else if (k === "Home") showFrame(0).catch(fail);
+    else if (k === "End") showFrame(presenting.frames.length - 1).catch(fail);
+    else if (k === "Escape") present(false).catch(fail);
     else return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -1173,6 +1187,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
      * interpreter, TimeTravel's history, its elements; its stylesheet with
      * the last board on the page). */
     async destroy() {
+      // (first, at once: whatever is waiting draws nothing more, CORR-C08-1;
+      // what is being written is still kept, saved though not drawn)
+      destroyed = true;
+      presenting = null;
+      presentGen++;
+      routingGen++;
       await editor.destroy();
       for (const f of offs.splice(0)) f();
       toolbar.destroy();
