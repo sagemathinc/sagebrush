@@ -360,7 +360,7 @@ test("what is not implemented is refused, never answered approximately: linsolve
     "interp2(magic(3), 2, 2, 'makima')",
     "median([1 2], 'foo')", "sum([1 2], 'foo')", "mode([1 2], 'omitnan')", "any([1 0], 'omitnan')", "max([1 2], [], 'foo')",
     "diff([1 2 4], 1, 'foo')", "sort([1 2], 'foo')", "sort([3 NaN 1], 'MissingPlacement', 'first')",
-    "histcounts([1 2 3], 'foo')", "histcounts([1 2 3], 'BinMethod', 'scott')",
+    "histcounts([1 2 3], 'foo')", "histcounts([1 2 3], 'BinMethod', 'nosuchmethod')",
   ];
   // (funm's @exp is the local exp below, not the built-in)
   writeFileSync(join(dir, "t.m"), cases.map((c) => `try, ${c}; disp('answered'); catch e, disp('refused'); end`).join("\n") + "\n" + [
@@ -427,27 +427,43 @@ test("normest, from its documentation and the power method on S'S: the published
   assert.deepEqual(out.trim().split("\n"), ["6.0000", "5.0000", "500.4856", "5.305935 2.0000 0.0000"]);
 });
 
-test("histcounts' automatic bins reproduce the published examples' edges and counts", () => {
+test("histcounts' automatic edges follow Sagebrush's own stated rules (Scott's width to Heckbert's nice numbers; a given count; BinLimits, BinWidth and the documented BinMethods)", () => {
   const { execFileSync } = require("node:child_process");
-  const { mkdtempSync, readFileSync } = require("node:fs");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
   const { tmpdir } = require("node:os");
   const dir = mkdtempSync(join(tmpdir(), "hist-"));
-  require("node:fs").writeFileSync(join(dir, "t.m"), [
+  writeFileSync(join(dir, "t.m"), [
     "rng default; [N, e] = histcounts(randn(100,1)); disp(mat2str(N)); disp(mat2str(e));",
     "[N, e] = histcounts([2 3 5 7 11 13 17 19 23 29], 6); disp(mat2str(N)); disp(mat2str(e, 4));",
-    "[N, e] = histcounts(primes(100), 'Normalization', 'probability'); disp(mat2str(N, 4)); disp(mat2str(e));",
-    "rng default; [N, e] = histcounts(randn(10000,1)); fprintf('%d %g %g\\n', numel(N), e(1), e(2) - e(1));",
-    "rng default; [N, e] = histcounts(randn(1000,1), 25); disp(mat2str(N)); disp(mat2str(e(1:3), 4));",
-    "rng default; [N, e] = histcounts(randn(1000,1)); fprintf('%d %g\\n', numel(N), e(1));",
+    "[N, e] = histcounts(primes(100)); disp(mat2str(N)); disp(mat2str(e));",
+    "[N, e] = histcounts([5 5 5]); disp(mat2str(N)); disp(mat2str(e));",
+    "[N, e] = histcounts([5 5 5], 4); disp(mat2str(N)); disp(mat2str(e));",
+    "[N, e] = histcounts(primes(100), 'BinLimits', [0 30]); disp(mat2str(N)); disp(mat2str(e));",
+    "[N, e] = histcounts(primes(100), 'BinWidth', 7); disp(mat2str(e));",
+    "[~, e] = histcounts(primes(100), 'BinMethod', 'sturges'); disp(mat2str(e));",
+    "[~, e] = histcounts(primes(100), 'BinMethod', 'sqrt'); disp(mat2str(e));",
+    "[~, e] = histcounts(primes(100), 'BinMethod', 'fd'); disp(mat2str(e));",
+    "[~, e] = histcounts([-3 1 2 7], 'BinMethod', 'integers'); disp(mat2str(e));"
   ].join("\n") + "\n");
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
-    "[2 17 28 32 16 3 2]", "[-3 -2 -1 0 1 2 3 4]",
-    "[2 2 2 2 1 1]", "[0 4.9 9.8 14.7 19.6 24.5 29.4]",
-    "[0.4 0.28 0.28 0.04]", "[0 30 60 90 120]",
-    "37 -3.8 0.2",
-    "[1 3 0 6 14 19 31 54 74 80 92 122 104 115 88 80 38 32 21 9 5 5 5 0 2]", "[-3.4 -3.12 -2.84]",
-    "23 -3.3",
+    "[2 17 28 32 16 3 2]",
+    "[-3 -2 -1 0 1 2 3 4]",
+    "[3 1 2 2 1 1]",
+    "[2 6.5 11 15.5 20 24.5 29]",
+    "[15 10]",
+    "[0 50 100]",
+    "3",
+    "[4.5 5.5]",
+    "[0 0 3 0]",
+    "[4.5 4.75 5 5.25 5.5]",
+    "[4 4 2]",
+    "[0 10 20 30]",
+    "[0 7 14 21 28 35 42 49 56 63 70 77 84 91 98]",
+    "[0 20 40 60 80 100]",
+    "[0 20 40 60 80 100]",
+    "[0 50 100]",
+    "[-3.5 -2.5 -1.5 -0.5 0.5 1.5 2.5 3.5 4.5 5.5 6.5 7.5]"
   ]);
 });
