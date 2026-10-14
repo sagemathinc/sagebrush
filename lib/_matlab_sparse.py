@@ -1089,6 +1089,8 @@ def _sparse_out(name):
         keep = which
         if name == "lu" and any(_m._istext(a) and _m._text(a).lower() == "vector" for a in args):
             keep = (0, 1)  # (a permutation vector is full)
+        elif name == "qr" and len(args) > 1 and type(args[1]) is not Sparse and not _m._istext(args[1]) and _m._numel(args[1]) != 1:
+            keep = (1,)  # ([C, R] = qr(S, B): C = Q'*B is full for a full B)
         multi = type(r) is list
         outs = r if multi else [r]
         outs = [from_full(o) if k in keep and _m._isnumlike(o) and _m.class_(o) in ("double", "single", "logical")

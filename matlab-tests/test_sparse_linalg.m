@@ -65,6 +65,21 @@ for d = [-0.1 1.1]
 end
 show(r(condest(sparse([4 1; 1 3]))));
 
+% [C, R] = qr(S, B): C = Q'*B, and X = R\C solves S*X = B in the least-squares
+% sense (R's signs are the factorization's own: compared through X and |C|)
+S = sparse([1 0 2; 0 3 0; 4 0 5; 0 6 1; 7 0 0]);
+b = [1; 2; 3; 4; 5];
+[C, R] = qr(S, b, 'econ');
+show(size(C)); show(size(R)); show(issparse(R)); show(issparse(C));
+show(r(full(R \ C)));
+show(r(norm(C)^2));
+[C, R] = qr(S, b);
+show(size(C)); show(size(R)); show(r(norm(C)^2));
+[C, R] = qr(S, [b 2*b], 0);
+show(r(full(R \ C)));
+A = [1 2; 3 4; 5 6];
+[Q, R] = qr(A, 0); show(size(Q)); show(size(R)); show(r(abs(R)));
+[Q, R] = qr(A, 'econ'); show(size(Q)); show(size(R));
 function sp(x)
 fprintf('sparse=%d ', issparse(x));
 show(full(x));

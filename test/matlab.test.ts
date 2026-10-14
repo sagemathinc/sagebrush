@@ -543,3 +543,15 @@ test("lu's 'vector' form gives P as a row, as the published whos output shows (1
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["[1 4]", "1", "[1 4]", "0",
     "lu: the column permutation Q and the scaling D are not supported in Sagebrush.", "lu: pivoting thresholds are not supported in Sagebrush."]);
 });
+
+test("qr(S, B) gives C = Q'*B for least squares, as documented (the corpus's sparse example's identity t1 + t2 = 1), and qr refuses what it lacks", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "S = sprand(500, 20, 0.1); b = ones(500, 1); [C, R] = qr(S, b, 'econ'); x = R\\C;",
+    "t1 = norm(S*x - b)^2/norm(b)^2; t2 = norm(C)^2/norm(b)^2; disp(abs(t1 + t2 - 1) < 1e-12); disp(norm(x - full(S)\\b) < 1e-10);",
+    "try, [Q, R, P] = qr(magic(3)); catch e, disp(e.message), end",
+    "try, C = qr(S, b); catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["1", "1",
+    "qr: the column permutation P is not supported in Sagebrush.", "qr(S, B) returns C and R: call it with two outputs."]);
+});

@@ -5647,7 +5647,35 @@ def lu_(nargout, x, *args):
 
 @_bi("qr")
 def qr_(nargout, x, *args):
-    Q, R = np.linalg.qr(_mat(x), mode="reduced" if args else "complete")
+    """qr as documented: R = qr(A), [Q, R] = qr(A) with A = Q*R, "econ" (or
+    0) for the first n columns of Q and rows of R when m > n, and
+    [C, R] = qr(S, B) with C = Q'*B, from which X = R\\C solves S*X = B in
+    the least-squares sense.  The column permutation P is refused."""
+    args = list(args)
+    B = None
+    if args and not _istext(args[0]) and not (_numel(args[0]) == 1 and _scalar(args[0]) == 0):
+        B = args.pop(0)
+    econ = False
+    for o in args:
+        if _istext(o) and _text(o).lower() == "econ":
+            econ = True
+        elif _istext(o) and _text(o).lower() in ("vector", "matrix"):
+            pass  # (the form of P, which is not returned)
+        elif not _istext(o) and _numel(o) == 1 and _scalar(o) == 0:
+            econ = True
+        else:
+            raise _err("qr: the option is not supported in Sagebrush.")
+    if nargout >= 3:
+        raise _err("qr: the column permutation P is not supported in Sagebrush.")
+    M = _mat(x)
+    Q, R = np.linalg.qr(M, mode="reduced" if econ else "complete")
+    if B is not None:
+        Bm = _mat(B)
+        if Bm.shape[0] != M.shape[0]:
+            raise _err("A and B must have the same number of rows.")
+        if nargout < 2:
+            raise _err("qr(S, B) returns C and R: call it with two outputs.")
+        return [_unmat(np.conj(Q.T) @ Bm), _unmat(R)]
     if nargout <= 1:
         return _unmat(R)
     return [_unmat(Q), _unmat(R)]
