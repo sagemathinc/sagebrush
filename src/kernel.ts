@@ -238,7 +238,8 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
           else if (m.clear && !current.silent) send(iopub, "clear_output", { wait: false }, current.msg);
           else if (m.error) {
             current.error = true;
-            send(iopub, "error", m.error, current.msg);
+            // (the run's done message carries its error again, for the reply: sent once)
+            if (!m.done) send(iopub, "error", m.error, current.msg);
           }
         }
         const f = pending.get(m.id);
@@ -394,8 +395,11 @@ export function kernelWorker(mode: Mode) {
   // stdout and stderr to the main thread, at least every 100 ms during a run
   // (timed from the start of the cell)
   let last = 0;
+  // (the end of what the cell printed: a Magma error's own words, for Jupyter's error reply)
+  let printed = "";
   for (const [stream, name] of [[R.stdout, "stdout"], [R.stderr, "stderr"]] as [any, string][]) {
     stream.write = function (s: string) {
+      if (name === "stdout") printed = (printed + s).slice(-4096);
       this.buf.push(s);
       this.size += s.length;
       const now = Date.now();
@@ -442,6 +446,16 @@ export function kernelWorker(mode: Mode) {
       if (!R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
         const tb = R.formatException(exc).replace(/\n$/, "");
         errorReported = { ename: typeName(exc), evalue: R.str(exc), traceback: tb.split("\n") };
+        if (current !== null) port.postMessage({ id: current, error: errorReported });
+      } else {
+        // exit() just ends the cell; an exit with a failure's status is an
+        // error: Magma's in a cell (lib/_magma.py raises SystemExit(1) once
+        // it has printed it: its line is the error's value, and no traceback,
+        // the text being on stdout already), or sys.exit(1)
+        const c = exc.code;
+        if (c === null || c === undefined || c === 0 || c === false) return;
+        const said = mode === "magma" ? printed.split("\n").reverse().find((l) => /^(User|Runtime) error\b/.test(l)) : undefined;
+        errorReported = said !== undefined ? { ename: "MagmaError", evalue: said, traceback: [] } : { ename: "SystemExit", evalue: R.str(c), traceback: [`SystemExit: ${R.str(c)}`] };
         if (current !== null) port.postMessage({ id: current, error: errorReported });
       }
     }
@@ -490,6 +504,7 @@ export function kernelWorker(mode: Mode) {
     current = m.id;
     last = Date.now();
     errorReported = null;
+    printed = "";
     R.INTR[0] = 0;
     if (mode === "magma") {
       let py: string | null = null;
