@@ -120,6 +120,10 @@ export interface BoardPage {
   slide?: SlideRect;
   /** the page's background: a color (on the card, or behind the whole board); a picture (on a slide's card) */
   background?: PageBackground;
+  /** a template: other pages can be made from it (it needs an id) */
+  template?: boolean;
+  /** made from this template page (its id): its card, background and items under the page's own */
+  uses?: string;
   nodes: DocNode[];
   edges?: DocEdge[];
   steps?: DocStep[];
@@ -179,6 +183,20 @@ export const pageCount = (d: BoardDoc) => (d.pages?.length ? d.pages.length : 1)
 export function pageOf(d: BoardDoc, i: number): BoardPage {
   if (!d.pages?.length) return d as BoardPage;
   return d.pages[Math.max(0, Math.min(d.pages.length - 1, i))];
+}
+
+/** The template page that page i is made from (its index), or -1. */
+export function templateOf(d: BoardDoc, i: number): number {
+  if (!d.pages?.length) return -1;
+  const p = pageOf(d, i);
+  if (!p.uses || p.template) return -1;
+  return d.pages.findIndex((q, k) => k !== i && q.template && q.id === p.uses);
+}
+
+/** Page i's slide and background: its own, else its template's. */
+export function lookOf(d: BoardDoc, i: number): { slide?: SlideRect; background?: PageBackground } {
+  const p = pageOf(d, i), t = templateOf(d, i), q = t >= 0 ? d.pages![t] : undefined;
+  return { slide: p.slide ?? q?.slide, background: p.background ?? q?.background };
 }
 
 /** Page i as a one-page document, for layout() (the document's title, refBase and pictures). */
@@ -252,7 +270,7 @@ export function cleanDoc(d: any): BoardDoc {
   };
   const page = (p: any) => strip({
     id: str(p?.id), title: str(p?.title), intro: str(p?.intro), layout: one(p?.layout, LAYOUTS), columns: num(p?.columns), direction: one(p?.direction, DIRS),
-    slide: slideRect(p?.slide), background: background(p?.background),
+    slide: slideRect(p?.slide), background: background(p?.background), template: p?.template === true ? true : undefined, uses: str(p?.uses),
     nodes: Array.isArray(p?.nodes) ? p.nodes.map(node).filter((n: DocNode | null): n is DocNode => !!n) : undefined,
     edges: Array.isArray(p?.edges) ? p.edges.filter((e: any) => e && e.from != null && e.to != null).map((e: any) => strip({ from: String(e.from), to: String(e.to), label: str(e.label),
       hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
