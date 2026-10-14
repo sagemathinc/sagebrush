@@ -577,8 +577,10 @@ def _xy_data(x, y):
 
 
 def _spline_pp(x, y):
-    """MATLAB's spline: not-a-knot (2 points: the line; 3: the parabola), or
-    clamped when y has two values more than x (the end slopes)"""
+    """spline: the not-a-knot cubic spline, or clamped when y has two values
+    more than x (the end slopes), as MATLAB documents; with 2 or 3 points,
+    as it also documents, linear or quadratic interpolation, each one
+    polynomial piece over [x(1), x(end)] (the form Octave's spline gives)"""
     X, Y, vec = _xy_data(x, y)
     n = X.size
     dim = Y.shape[0]
@@ -597,11 +599,13 @@ def _spline_pp(x, y):
             order = 2
             rows.append(np.array([[(yv[1] - yv[0]) / (X[1] - X[0]), yv[0]]]))
         elif n == 3:
-            # (the parabola through the three points, in its two pieces)
+            # (the parabola through the three points by Newton's divided
+            # differences, in powers of x - x(1): f123 t^2 + (f12 - f123 (x2 - x1)) t + y1)
             order = 3
-            d = _m._spline_slopes(list(X), [complex(t) if np.iscomplexobj(yv) else float(t) for t in yv])
-            c = _cubic_coefs(X, yv, np.array(d))
-            rows.append(c[:, 1:])
+            f12 = (yv[1] - yv[0]) / (X[1] - X[0])
+            f23 = (yv[2] - yv[1]) / (X[2] - X[1])
+            f123 = (f23 - f12) / (X[2] - X[0])
+            rows.append(np.array([[f123, f12 - f123 * (X[1] - X[0]), yv[0]]]))
         else:
             d = _m._spline_slopes(list(X), [float(t) for t in yv]) if not np.iscomplexobj(yv) else \
                 [complex(a, b) for a, b in zip(_m._spline_slopes(list(X), [float(t) for t in yv.real]), _m._spline_slopes(list(X), [float(t) for t in yv.imag]))]
@@ -610,6 +614,8 @@ def _spline_pp(x, y):
     C = np.zeros((pieces * dim, rows[0].shape[1]), dtype=np.result_type(*[r.dtype for r in rows]))
     for di in range(dim):
         C[di::dim] = rows[di]
+    if n == 3 and not clamped:
+        X = np.array([X[0], X[-1]])
     return X, C, dim, vec
 
 
