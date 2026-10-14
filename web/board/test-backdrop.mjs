@@ -4,7 +4,10 @@
 // whole board; a picture covers a card (its name renamed as a picture's is,
 // taken in); printing shows a slide as its card; the board's file keeps
 // them; a JSON Canvas says it left them out; a board downloaded as HTML
-// draws them.  Serve web/dist first (python3 web/serve.py 8765), then
+// draws them.  In Edit, Page… makes a page a slide (a 16:9 card around what
+// it holds), gives it a color and a picture, and names a page of a board
+// with pages; one undo takes it back; the card is dragged by its edge and
+// resized by its corner, keeping its shape.  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-backdrop.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -89,6 +92,69 @@ try {
   check(/"slide": \{\n\s+"x": 0,/.test(file) && /"background": \{\n\s+"color": "#d7e6fa"/.test(file), "the board's file keeps a page's slide and background");
   const cv = await ev(`${B}.canvas()`);
   check(/2 slides' cards/.test(cv.left) && /3 pages' backgrounds/.test(cv.left), "a JSON Canvas leaves the cards and backgrounds out, and says so: " + cv.left);
+  // Page…: a board of one page made a slide, colored, given a picture; one undo each
+  const mouse = (type, x, y) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+  const toClient = (x, y) => ev(`(() => { const r = window.board.el.getBoundingClientRect(), c = window.board.camera; return { x: r.left + (${x} - c.x) * c.z, y: r.top + (${y} - c.y) * c.z }; })()`);
+  const dragFrom = async (x, y, dx, dy) => { await mouse("mousePressed", x, y); for (let k = 1; k <= 8; k++) await mouse("mouseMoved", x + (dx * k) / 8, y + (dy * k) / 8); await mouse("mouseReleased", x + dx, y + dy); await sleep(300); };
+  const undo = async () => { await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1"); await sleep(300); };
+  const docNow = () => ev(`${B}.snapshot().doc`);
+  await ev(`${B}.load({ title: "One page", nodes: [{ id: "a", title: "A", x: 0, y: 0 }, { id: "b", title: "B", x: 400, y: 260 }] }).then(() => 1)`);
+  await ev("document.querySelector('[data-sbb=edit]').click(), 1");
+  await view();
+  await ev("document.querySelector('[data-sbb=pageprops]').click(), 1");
+  check(await ev("document.querySelector('[data-sbb=pgdlg]').open && document.querySelector('[data-sbb=pg-title-set]').hidden && !document.querySelector('[data-sbb=pg-slide]').checked && document.querySelector('[data-sbb=pg-pic-set]').hidden"), "Page… opens: no title for a board of one page, not a slide, no picture to choose");
+  await ev("document.querySelector('[data-sbb=pg-slide]').click(), document.querySelector('[data-sbb=pg-colors] [title=Blue]').click(), 1");
+  check(await ev("!document.querySelector('[data-sbb=pg-pic-set]').hidden"), "...a slide can have a picture");
+  await ev("document.querySelector('[data-sbb=pg-go]').click(), 1");
+  await sleep(300);
+  let d1 = await docNow();
+  const items = await ev(`${B}.snapshot().items.map((i) => [i.x, i.y, i.x + i.w, i.y + i.h])`);
+  check(d1.slide && Math.abs(d1.slide.w / d1.slide.h - 16 / 9) < 0.01 && items.every(([x0, y0, x1, y1]) => x0 >= d1.slide.x && y0 >= d1.slide.y && x1 <= d1.slide.x + d1.slide.w && y1 <= d1.slide.y + d1.slide.h) && d1.background?.color === "#d7e6fa", "a slide: a 16:9 card around what the page holds, in its color: " + JSON.stringify([d1.slide, d1.background]));
+  await undo();
+  d1 = await docNow();
+  check(!d1.slide && !d1.background, "one undo takes it back");
+  await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true })), 1");
+  await sleep(300);
+  // a picture, chosen
+  const png = join(profile, "red.png");
+  writeFileSync(png, Buffer.from(RED.split(",")[1], "base64"));
+  await ev("document.querySelector('[data-sbb=pageprops]').click(), document.querySelector('[data-sbb=pg-pic]').click(), 1");
+  const root = await send("DOM.getDocument", { depth: -1 });
+  const inp = await send("DOM.querySelector", { nodeId: root.root.nodeId, selector: "input.sb-fileinput" });
+  await send("DOM.setFileInputFiles", { files: [png], nodeId: inp.nodeId });
+  await until("/picture covers/.test(document.querySelector('[data-sbb=pg-pic-on]').textContent)", 5000);
+  await ev("document.querySelector('[data-sbb=pg-go]').click(), 1");
+  await sleep(500);
+  d1 = await docNow();
+  const s1 = d1.slide;
+  check(d1.background?.image && d1.images?.[d1.background.image]?.w === 4 && d1.background.color === "#d7e6fa", "a picture chosen covers the card: " + JSON.stringify(d1.background));
+  check(near(await pixel(s1.x + s1.w - 20, s1.y + s1.h - 20), [255, 0, 0], 12), "...drawn on it");
+  // the card dragged by its edge, resized by its corner (keeping its shape)
+  // (its left edge: its top may be under the Edit toolbar)
+  const top = await toClient(s1.x, s1.y + s1.h / 2);
+  const z = (await ev("window.board.camera.z"));
+  await dragFrom(top.x, top.y, 60, 40);
+  const s2 = (await docNow()).slide;
+  check(Math.abs(s2.x - s1.x - 60 / z) < 1.5 && Math.abs(s2.y - s1.y - 40 / z) < 1.5 && s2.w === s1.w, `the card dragged by its edge: moved by (${(s2.x - s1.x).toFixed(1)}, ${(s2.y - s1.y).toFixed(1)})`);
+  const corner = await toClient(s2.x + s2.w, s2.y + s2.h);
+  await dragFrom(corner.x, corner.y, 120, 10);
+  const s3 = (await docNow()).slide;
+  check(Math.abs(s3.w - s2.w - 120 / z) < 2 && Math.abs(s3.w / s3.h - s2.w / s2.h) < 0.01 && s3.x === s2.x && s3.y === s2.y, `the card resized by its corner, keeping its shape: ${JSON.stringify([s2, s3])}`);
+  // not a slide any more: its picture goes, its color stays, behind the whole board
+  await ev("document.querySelector('[data-sbb=pageprops]').click(), document.querySelector('[data-sbb=pg-slide]').click(), document.querySelector('[data-sbb=pg-go]').click(), 1");
+  await sleep(300);
+  d1 = await docNow();
+  check(!d1.slide && JSON.stringify(d1.background) === '{"color":"#d7e6fa"}', "no longer a slide: its picture goes, its color stays: " + JSON.stringify(d1.background));
+  // a board with pages: Page… names the page
+  await ev(`${B}.load(${JSON.stringify(DOC)}).then(() => 1)`);
+  await ev("document.querySelector('[data-sbb=pageprops]').click(), 1");
+  check(await ev("!document.querySelector('[data-sbb=pg-title-set]').hidden && document.querySelector('[data-sbb=pg-title]').value === 'A slide' && document.querySelector('[data-sbb=pg-slide]').checked"), "Page… on a board with pages: the page's title, and its being a slide");
+  await ev("(() => { const t = document.querySelector('[data-sbb=pg-title]'); t.value = 'Renamed'; document.querySelector('[data-sbb=pg-go]').click(); return 1; })()");
+  await sleep(300);
+  check((await docNow()).pages[0].title === "Renamed" && !(await ev("!!document.querySelector('[data-sbb=namepage]')")), "...renames it (Rename this page… is no more: it is here)");
+  await ev("document.querySelector('[data-sbb=edit]').click(), 1");
+  await ev(`${B}.load(${JSON.stringify(DOC)}).then(() => 1)`);
+
   // downloaded as HTML: drawn there too
   const html = await ev(`${B}.exportHtml()`);
   const f = join(profile, "slides.html");

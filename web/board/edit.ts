@@ -117,7 +117,9 @@ export class Editor {
     // (the resize handle's cursor)
     board.el.addEventListener("pointermove", (e) => {
       const at = this.on && !this.panel && e.pointerType === "mouse" && this.atHandle(e);
-      board.el.style.cursor = at ? "nwse-resize" : "";
+      // (and a slide's card: its edge moves it, its corner resizes it)
+      const card = !at && this.on && !this.panel && e.pointerType === "mouse" && !this.drawing.value && !this.erasing.value ? this.cardAt(e) : null;
+      board.el.style.cursor = at || card === "corner" ? "nwse-resize" : card === "edge" ? "move" : "";
     });
     this.listen(window, "keydown", (e) => this.key(e));
     // copying, cutting and pasting items (the page's own clipboard events: no permission asked)
@@ -243,6 +245,8 @@ export class Editor {
   // holds; a click (not a drag, which pans) selects nothing.
   private backgroundDown(e: PointerEvent): boolean {
     if (!this.on || this.panel || this.connecting.value) return false;
+    const card = this.cardAt(e);
+    if (card) return this.moveCard(card, e);
     // (the resize handle reaches past its item's corner)
     const h = this.atHandle(e);
     if (h) return this.resize(h, e);
@@ -270,6 +274,39 @@ export class Editor {
     addEventListener("pointerup", up);
     return true;
   }
+  // A slide's card, in Edit: a press on its edge (within a few pixels)
+  // drags it, on its bottom right corner resizes it, keeping its shape.
+  private cardAt(e: { clientX: number; clientY: number }): "edge" | "corner" | null {
+    const s = this.board.backdrop?.slide;
+    if (!s) return null;
+    const w = this.board.toWorld(e.clientX, e.clientY), t = 7 / this.board.camera.z;
+    if (Math.abs(w.x - s.x - s.w) <= 2 * t && Math.abs(w.y - s.y - s.h) <= 2 * t) return "corner";
+    const inX = w.x >= s.x - t && w.x <= s.x + s.w + t, inY = w.y >= s.y - t && w.y <= s.y + s.h + t;
+    const onX = Math.abs(w.x - s.x) <= t || Math.abs(w.x - s.x - s.w) <= t, onY = Math.abs(w.y - s.y) <= t || Math.abs(w.y - s.y - s.h) <= t;
+    return (onX && inY) || (onY && inX) ? "edge" : null;
+  }
+  private moveCard(how: "edge" | "corner", e: PointerEvent): boolean {
+    const s0 = { ...this.board.backdrop!.slide! }, a = this.board.toWorld(e.clientX, e.clientY);
+    let now = s0;
+    const move = (m: PointerEvent) => {
+      const b = this.board.toWorld(m.clientX, m.clientY), dx = b.x - a.x, dy = b.y - a.y;
+      if (how === "edge") now = { ...s0, x: s0.x + dx, y: s0.y + dy };
+      else { const w = Math.max(160, s0.w + Math.max(dx, (dy * s0.w) / s0.h)); now = { ...s0, w, h: (w * s0.h) / s0.w }; }
+      this.board.backdrop = { ...this.board.backdrop, slide: now };
+      this.board.request();
+    };
+    const up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      if (now === s0) return;
+      const r = (v: number) => Math.round(v * 10) / 10;
+      this.commit((d) => { this.pg(d).slide = { x: r(now.x), y: r(now.y), w: r(now.w), h: r(now.h) }; });
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    return true;
+  }
+
   // (an edge is selected by its index in the document, and drawn so by its
   // id in the layout, found again after each layout)
   private selectEdge(src: number | null) {
