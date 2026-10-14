@@ -429,7 +429,8 @@ fn prove_generation(o: &Order, emb: &Embeddings, dk: &BigInt, bound: u64, mbound
     let mut cache: HashMap<u64, Vec<PrimeIdeal>> = HashMap::new();
     // the prime ideals to show, by increasing norm
     let mut todo: Vec<(u64, u64, usize)> = vec![];
-    for p in primes_up_to(mbound) {
+    let plist = primes_up_to(mbound);
+    for &p in &plist {
         sagebrush_interrupt::check();
         let ps = decompose_checked(o, dk, p)?;
         for (i, q) in ps.iter().enumerate() {
@@ -476,7 +477,7 @@ fn prove_generation(o: &Order, emb: &Embeddings, dk: &BigInt, bound: u64, mbound
                 continue;
             }
             let x: Vec<BigInt> = (0..n).map(|k| coef.iter().zip(&red).map(|(&ci, row)| &row[k] * ci).sum()).collect();
-            if shows(o, dk, &mut cache, &x, np, p, i, bound, &shown)? {
+            if shows(o, dk, &mut cache, &x, np, p, i, bound, &shown, &plist)? {
                 done = true;
                 break;
             }
@@ -513,7 +514,7 @@ fn decompose_cached<'a>(cache: &'a mut HashMap<u64, Vec<PrimeIdeal>>, o: &Order,
 /// norm < bound or is in `shown`, the factorization being complete
 /// (sum over Q | q of v_Q f_Q = v_q(N x) for every prime q).
 #[allow(clippy::too_many_arguments)]
-fn shows(o: &Order, dk: &BigInt, cache: &mut HashMap<u64, Vec<PrimeIdeal>>, x: &[BigInt], np: u64, p: u64, i: usize, bound: u64, shown: &HashSet<(u64, usize)>) -> Result<bool, String> {
+fn shows(o: &Order, dk: &BigInt, cache: &mut HashMap<u64, Vec<PrimeIdeal>>, x: &[BigInt], np: u64, p: u64, i: usize, bound: u64, shown: &HashSet<(u64, usize)>, primes: &[u64]) -> Result<bool, String> {
     let nx = o.norm(x).abs();
     if nx.is_zero() {
         return Ok(false);
@@ -526,7 +527,7 @@ fn shows(o: &Order, dk: &BigInt, cache: &mut HashMap<u64, Vec<PrimeIdeal>>, x: &
     // larger one has a larger norm, not yet shown)
     let mut qs: Vec<u64> = vec![p];
     let mut rest = m;
-    for (q, _) in small_factors(&rest, np)? {
+    for (q, _) in small_factors(&rest, np, primes)? {
         qs.push(q);
         while (&rest % q).is_zero() {
             rest /= q;
@@ -572,37 +573,38 @@ fn shows(o: &Order, dk: &BigInt, cache: &mut HashMap<u64, Vec<PrimeIdeal>>, x: &
 }
 
 /// The prime factors of m if all are at most `max` (else whatever was
-/// found: the caller checks that they account for m): trial division up to
-/// 2^16, then the general factorization.
-fn small_factors(m: &BigInt, max: u64) -> Result<Vec<(u64, u32)>, String> {
+/// found: the caller checks that they account for m).  `primes`: every
+/// prime up to at least max, ascending.  For m below 2^128, trial division
+/// by those primes while p^2 <= the cofactor, which is then 1 or prime;
+/// beyond, the general factorization.
+fn small_factors(m: &BigInt, max: u64, primes: &[u64]) -> Result<Vec<(u64, u32)>, String> {
     let mut out = vec![];
-    let mut t = m.clone();
-    let mut d = 2u64;
-    while d < 1 << 16 && d <= max {
-        if t.is_one() {
-            return Ok(out);
+    let Some(mut t) = m.to_u128() else {
+        for (q, e) in crate::api::factor_integer(m)? {
+            match q.to_u64() {
+                Some(q) if q <= max => out.push((q, e)),
+                _ => return Ok(out),
+            }
         }
-        if (&t % d).is_zero() {
+        return Ok(out);
+    };
+    for &p in primes {
+        if p > max || (p as u128) * (p as u128) > t {
+            break;
+        }
+        if t % p as u128 == 0 {
             let mut e = 0;
-            while (&t % d).is_zero() {
-                t /= d;
+            while t % p as u128 == 0 {
+                t /= p as u128;
                 e += 1;
             }
-            out.push((d, e));
+            out.push((p, e));
         }
-        d += 1 + (d > 2) as u64;
     }
-    if t.is_one() {
-        return Ok(out);
-    }
-    if t > BigInt::from(max).pow(4) {
-        return Ok(out); // a factor beyond max is certain
-    }
-    for (q, e) in crate::api::factor_integer(&t)? {
-        match q.to_u64() {
-            Some(q) if q <= max => out.push((q, e)),
-            _ => return Ok(out),
-        }
+    // t is 1, prime (no prime up to its square root divides it), or has
+    // only prime factors above max (the loop stopped at max): then t > max
+    if t > 1 && t <= max as u128 {
+        out.push((t as u64, 1));
     }
     Ok(out)
 }
@@ -1188,5 +1190,24 @@ mod tests {
         let mut bad = rel.clone();
         bad.elems.pop();
         assert!(check_relations(o, &bad).is_err(), "relations and elements of different numbers accepted");
+    }
+
+    /// small_factors: complete exactly when every prime factor is at most
+    /// max (a cofactor left above the square root is prime).
+    #[test]
+    fn small_factors_cases() {
+        let primes = primes_up_to(1000);
+        let f = |m: u128, max: u64| small_factors(&BigInt::from(m), max, &primes).unwrap();
+        assert_eq!(f(1, 1000), vec![]);
+        assert_eq!(f(2 * 2 * 3 * 997, 1000), vec![(2, 2), (3, 1), (997, 1)]);
+        assert_eq!(f(997 * 991, 1000), vec![(991, 1), (997, 1)]);
+        // 1009 > max: not reported, so the caller sees the factors fall short
+        assert_eq!(f(6 * 1009, 1000), vec![(2, 1), (3, 1)]);
+        assert_eq!(f(1009 * 1013, 1000), vec![]);
+        // a cofactor prime at most max after the square-root stop
+        assert_eq!(f(4 * 991, 1000), vec![(2, 2), (991, 1)]);
+        // beyond 2^128: the general factorization
+        let big = BigInt::from(1u128 << 100) * BigInt::from(1u128 << 100) * BigInt::from(3);
+        assert_eq!(small_factors(&big, 1000, &primes).unwrap(), vec![(2, 200), (3, 1)]);
     }
 }
