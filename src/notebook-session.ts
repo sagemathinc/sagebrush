@@ -56,6 +56,21 @@ export interface RunHooks {
   end(): Record<string, unknown>;
 }
 
+/** A SystemExit's status as text (a cell exiting with a message): at most
+ * STATUS_MAX characters, the rest said not written (HARD-8E4-1); a fixed
+ * text if it can't be made text, its __str__ raising (CORR-8E4-2).  Also
+ * the Jupyter kernel's (src/kernel.ts). */
+export const STATUS_MAX = 4096;
+export function exitText(code: unknown): string {
+  let t: string;
+  try {
+    t = String(R.str(code));
+  } catch {
+    return "(an exit status that could not be written as text)";
+  }
+  return t.length > STATUS_MAX ? `${t.slice(0, STATUS_MAX)}… (${t.length - STATUS_MAX} more characters)` : t;
+}
+
 // post: sends a message to the page.  captureStreams: replace sys.stdout and
 // sys.stderr's writers (the browser's fs shim captures them instead).
 export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks } = {}): Session {
@@ -167,7 +182,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
         const c = exc.code;
         if (c === null || c === undefined || c === 0 || c === false) return true;
-        if (typeof c !== "number" && typeof c !== "boolean") R.stderr.write(R.str(c) + "\n");
+        if (typeof c !== "number" && typeof c !== "boolean") R.stderr.write(exitText(c) + "\n");
         return false;
       }
       // (a cell's renamed `_` names are shown as written)
