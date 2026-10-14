@@ -1281,3 +1281,157 @@ def exp_integral_ei(x):
     6.12.2 above 40, and -E1(-x) for x < 0.  PoleError at 0.  Largest
     relative error found against mpmath: 1e-15 for |x| <= 700"""
     return _elementwise(_ei1, x)
+
+
+# ------------------------------------------------------------------ Lambert W
+
+# (e as a sum of two doubles)
+_E_HI, _E_LO = 2.718281828459045, 1.4456468917292502e-16
+
+
+def _two_prod(a, b):
+    """a*b as p + err exactly (Dekker's product, by Veltkamp's splitting)"""
+    p = a * b
+    c = 134217729.0  # 2^27 + 1
+    t = c * a
+    ah = t - (t - a)
+    al = a - ah
+    t = c * b
+    bh = t - (t - b)
+    bl = b - bh
+    return p, ((ah * bh - p) + ah * bl + al * bh) + al * bl
+
+
+def _e_z_plus_1(z):
+    """e z + 1, its real part without the cancellation near z = -1/e"""
+    x, y = z.real, z.imag
+    p, err = _two_prod(_E_HI, x)
+    return complex((p + 1) + (err + _E_LO * x), (_E_HI + _E_LO) * y)
+
+
+_W_BRANCH = []
+
+
+def _w_branch_coeffs():
+    """the coefficients c_1, c_2, ... of W = -1 + sum c_n p^n about the
+    branch point, p^2 = 2 (e z + 1) (DLMF 4.13.9_1's series in
+    (e z + 1)^(1/2), rescaled: c_1 = 1, c_2 = -1/3, c_3 = 11/72), by exact
+    series reversion: with w = -1 + v, w e^w = z is
+    (1 - v) e^v = 1 - p^2/2, that is sum_{n >= 2} (n - 1)/n! v^n = p^2/2"""
+    if not _W_BRANCH:
+        N = 24
+        c = [_Fraction(0), _Fraction(1)]
+        for m in range(2, N + 1):
+            # (the p^(m+1) coefficient of sum (n-1)/n! v^n, with c_m unknown,
+            # must vanish; v^2's part gives 2 c_1 c_m / 2 = c_m)
+            v = c + [_Fraction(0)]
+            pw = [_Fraction(0)] * (m + 2)
+            pw[0] = _Fraction(1)
+            total = _Fraction(0)
+            for n in range(1, m + 2):
+                new = [_Fraction(0)] * (m + 2)
+                for i, a in enumerate(pw):
+                    if a:
+                        for j in range(1, min(len(v), m + 2 - i)):
+                            new[i + j] += a * v[j]
+                pw = new
+                if n >= 2:
+                    total += _Fraction(n - 1, _math.factorial(n)) * pw[m + 1]
+            target = _Fraction(1, 2) if m + 1 == 2 else _Fraction(0)
+            c.append(target - total)
+        _W_BRANCH.extend(float(x) for x in c[1:])
+    return _W_BRANCH
+
+
+def _lambertw_upper(z, k):
+    """W_k(z) for Im z >= +0"""
+    d = abs(z + 1 / _math.e)
+    if (k == 0 and d <= 1) or (k == -1 and d <= 0.3):
+        # (about the branch point -1/e: p = +-sqrt(2 (e z + 1)), + for W_0
+        # and - for W_-1 in the upper half plane (W_-1's start only within
+        # 0.3, beyond which it can lead to another branch); for |p| < 0.2
+        # the series itself to p^24, since Halley's residual loses accuracy
+        # there)
+        p = _cmath.sqrt(2 * _e_z_plus_1(z))
+        if k == -1:
+            p = -p
+        cs = _w_branch_coeffs()
+        if abs(p) < 0.2:
+            v = 0j
+            for c in reversed(cs):
+                v = (v + c) * p
+            return -1 + v
+        w = -1 + p * (cs[0] + p * (cs[1] + p * cs[2]))
+    elif k == 0 and abs(z) <= 3:
+        w = _cmath.log(1 + z)
+    elif k == -1 and z.imag == 0 and -0.1 < z.real < 0:
+        # (the real branch W_-1 on (-1/e, 0): DLMF 4.13.11's leading terms
+        # with L1 = log(-x), L2 = log(-L1))
+        L1 = _math.log(-z.real)
+        L2 = _math.log(-L1)
+        w = complex(L1 - L2 + L2 / L1, 0.0)
+    else:
+        # (DLMF 4.13.10's leading terms: W_k ~ L1 - L2 + L2/L1, with
+        # L1 = log z + 2 pi i k, L2 = log L1)
+        L1 = _cmath.log(z) + 2j * _PI * k
+        L2 = _cmath.log(L1)
+        w = L1 - L2 + L2 / L1
+    # (Halley's iteration on w - z e^-w, which does not overflow)
+    for _ in range(100):
+        t = w - z * _cmath.exp(-w)
+        if t == 0:
+            break
+        w1 = w + 1
+        if w1 == 0:
+            break
+        dw = t / (w1 - (w + 2) * t / (2 * w1))
+        w -= dw
+        if abs(dw) <= 4 * _EPS * abs(w):
+            break
+    return w
+
+
+def _lambertw1(z, k):
+    if isinstance(k, complex) or k != _math.floor(k):
+        raise ValueError("lambert_w: k must be an integer")
+    k = int(k)
+    real_in = not isinstance(z, complex)
+    zc = complex(z)
+    if not (_math.isfinite(zc.real) and _math.isfinite(zc.imag)):
+        if _isnan(z):
+            return _nan_like(z)
+        if real_in and z == _math.inf and k == 0:
+            return _math.inf
+        raise NotCovered("lambert_w: Sagebrush covers finite arguments (and +inf for k = 0)")
+    if zc == 0:
+        if k == 0:
+            return z
+        raise PoleError("W_%d has a logarithmic singularity at 0" % k)
+    if zc.imag < 0 or (zc.imag == 0 and _signbit(zc.imag) and not real_in):
+        # (the symmetry W_k(conj z) = conj W_-k(z); a zero imaginary part's
+        # sign picks the side of a cut, -0 the lower one)
+        w = _lambertw_upper(complex(zc.real, -zc.imag), -k).conjugate()
+    else:
+        w = _lambertw_upper(complex(zc.real, 0.0) if zc.imag == 0 else zc, k)
+    if real_in and w.imag == 0 and ((k == 0 and z >= -1 / _math.e) or (k == -1 and -1 / _math.e <= z < 0)):
+        return w.real
+    return w
+
+
+def lambert_w(z, k=0):
+    """the Lambert W function: the branch W_k(z) of the solution of
+    w e^w = z, with DLMF 4.13's branches (W_0 has its cut along
+    (-inf, -1/e), the other branches along (-inf, 0); W_0 is real on
+    [-1/e, inf), and W_-1(x + 0i) = W_1(x - 0i) is real on [-1/e, 0), DLMF
+    4.13.2 and 4.13.3).  On a cut the value is the limit from above, or
+    from below when the imaginary part is -0; scipy.special.lambertw
+    agrees except at W_-1(x - 0i) on (-1/e, 0), which it makes the real
+    value.  Halley's iteration on w - z e^-w from the series about the
+    branch point (DLMF 4.13.9_1), the asymptotic series (DLMF 4.13.10,
+    4.13.11) or log(1 + z); e z + 1 is formed in double-double near the
+    branch point.
+    A float for real z where W_k is real, else complex.  PoleError at
+    z = 0 for k != 0.  Largest relative error found against mpmath: 9e-16,
+    for every branch tried (|k| <= 10^6, 1e-300 <= |z| <= 1e300, next to
+    the branch point and the cuts)"""
+    return _elementwise(_lambertw1, z, k)
