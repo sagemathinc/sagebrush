@@ -1,7 +1,8 @@
 // A hostile board (as ?doc= may load from anywhere): markup and script in
 // every field, numbers that are strings, colors that are CSS, links that are
-// javascript:.  Shown, edited, printed and exported: nothing runs, and no
-// element the document did not ask for appears.  Serve web/dist first
+// javascript:.  Shown, edited, printed, exported and presented (a step's
+// words, a page's title): nothing runs, and no element the document did not
+// ask for appears.  Serve web/dist first
 // (python3 web/serve.py 8765), then
 //   node web/board/test-xss.mjs
 import { spawn } from "node:child_process";
@@ -10,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
-const port = 9456, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const port = Number(process.env.CDP_PORT ?? 9456), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-xss-prof-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;
@@ -78,6 +79,14 @@ try {
   await sleep(800);
   const html = await ev("window.sagebrush.board.exportHtml()");
   check(typeof html === "string" && html.length > 1000, "the board exports");
+  // presented: the step's words (Present's own caption, the tour's renderer)
+  const next = "document.querySelector('[data-sbb=pr-next]').click(), 1";
+  await ev("window.sagebrush.board.present().then(() => 1)");
+  await sleep(400);
+  await ev(next);
+  await sleep(800);
+  check(await ev("!document.querySelector('[data-sbb=pr-say]').hidden"), "Present shows the hostile step's words");
+  await ev("window.sagebrush.board.present(false).then(() => 1)");
   // nothing ran
   check(!dialogs.length, `dialogs: ${dialogs.join(", ")}`);
   const ran = await ev("window.__xss");
@@ -98,6 +107,28 @@ try {
   const d = await ev("window.sagebrush.board.snapshot().doc");
   check(d.nodes[0].x === undefined && d.nodes[0].color === undefined && d.nodes[0].shape === undefined, `hostile fields kept: ${JSON.stringify({ x: d.nodes[0].x, color: d.nodes[0].color, shape: d.nodes[0].shape })}`);
   check(await ev("document.querySelectorAll('.board-item span[style]').length") >= 1, "the safe formatting (a colored span) is kept");
+  // a board with pages: a hostile page title (the picker, Page..., printing) and step, presented; a hostile background
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: X("deck"), pages: [
+    { title: X("page-title"), slide: { x: 0, y: 0, w: "1280\"><img src=x onerror=\"window.__xss.push('slide')\">", h: 720 }, background: { color: "red;background:url(javascript:window.__xss.push('bg'))", image: "../../x\" onerror=\"window.__xss.push('bgimg')" }, nodes: [{ id: "p", title: X("p") }], steps: [{ focus: "p", say: X("pstep") }] },
+    { title: X("page-two"), slide: { x: 0, y: 0, w: 640, h: 360 }, background: { color: "#123456" }, nodes: [{ id: "q", title: "Q" }] },
+  ] })}).then(() => 1)`);
+  await sleep(800);
+  await ev("window.sagebrush.board.editing(true), document.querySelector('[data-sbb=pageprops]').click(), document.querySelector('[data-sbb=pgdlg]').close(), 1");
+  await ev("window.sagebrush.board.print({ dialog: false }).then(() => 1)");
+  await ev("window.sagebrush.board.present().then(() => 1)");
+  await sleep(600);
+  // (Present starts where the board is: at the step, or before it)
+  let shown = await ev("!document.querySelector('[data-sbb=pr-say]').hidden");
+  if (!shown) { await ev(next); await sleep(800); shown = await ev("!document.querySelector('[data-sbb=pr-say]').hidden"); }
+  check(shown, "Present shows the board with pages' hostile step: " + await ev("document.querySelector('[data-sbb=pr-where]').textContent"));
+  await ev(next);
+  await sleep(600);
+  await ev("window.sagebrush.board.present(false).then(() => 1)");
+  const pd = await ev("window.sagebrush.board.snapshot().doc");
+  check(!pd.pages[0].slide && !pd.pages[0].background && pd.pages[1].background?.color === "#123456", "a hostile card and background are not kept; a sound one is: " + JSON.stringify([pd.pages[0].slide, pd.pages[0].background, pd.pages[1].background]));
+  check(!dialogs.length && (await ev("window.__xss")).length === 0, `with pages, presented: script ran: ${JSON.stringify(await ev("window.__xss"))} ${dialogs.join(", ")}`);
+  const found2 = await ev(`[...document.querySelectorAll("*")].flatMap((el) => [...el.attributes].filter((a) => /^on/i.test(a.name)).map((a) => el.tagName + "[" + a.name + "]"))`);
+  check(found2.length === 0, `with pages, presented: elements: ${found2.join(", ")}`);
   // outputs that would load from another site (SEC-983-3, -4, -5): none may make a request
   await send("Network.enable");
   await send("Page.navigate", { url: base });
