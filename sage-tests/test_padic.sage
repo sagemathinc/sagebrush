@@ -1,0 +1,57 @@
+# p-adic numbers: Zp and Qp with capped relative precision, O(p^n), their
+# arithmetic and precision, functions (log, exp, sqrt, teichmuller), print
+# modes and power series over them.
+R = Zp(5); K = Qp(5); R6 = Zp(5, 6); K6 = Qp(5, 6)
+print(R, K, Zp(5, 10), Qp(7, 3), Zp(2), Qp(3, 1))
+print(R(7), R(0), R(25), R6(-1), R(1/3), R(10^30), R6(5^30), R(2^100), Qp(5, 3)(10^-7))
+print(K(1/25), K6(3/10), R(7, 3), R(7, absprec=3), R(7, relprec=3), R6(0, 3), K6(0, -2), R6(23, 0), R6(23, 1), K6(23/5, 1))
+print(R(Mod(3, 25)), R(Integers(25)(3)), R6(1/2), K6(1/2), K6(2/5), K6(-2/125), R6(123456789), Zp(3, 5)(-1), Zp(2, 8)(-1))
+print(O(5^3), O(5^-2), O(25), 1 + O(5^3), 5 + O(5^3), 3/5 + O(5^3), O(5^3) + O(5^2), Zp(5, 4)(1) + O(5^9))
+print((1 + O(5^3))*(5 + O(5^2)), (1 + O(5^3)) - (1 + O(5^3)), (5 + O(5^3)) - 5, (1 + O(5^3))/(5 + O(5^2)))
+print((2 + O(5^3))^5, (2 + O(5^3))^25, (2 + O(5^3))^10, (2 + O(5^3))^-5, (5 + O(5^3))^5, (10 + O(5^4))^5)
+print((1 + O(2^3))^2, (1 + O(2^3))^4, (3 + O(2^3))^2, (1 + O(2^1))^2, (1 + O(2^2))^2, (1 + O(3^2))^3, (1 + O(3))^3, (2 + O(3))^3)
+print(O(5^3)^0, (5 + O(5^3))^0, R6(2)^0, O(5^3)^2, O(5^3)*O(5^2), O(5^3)*7, O(5^3)/5, -O(5^3), R6(23) - 23, R6(23) * 0, R6(23) + 0)
+print(R(3)/R(5), R(3)/5, K(3)/5, Zp(5, 4)(2)/3, Zp(5, 4)(10)*Zp(5, 4)(10), R(2)^10, R6(2)^-1, R6(25)^-1)
+print(R6(23) + 1/5, R6(23)*(1/5), 1/5 + R6(23), R6(23) + K6(1/5), Zp(5, 8)(1/3) + Zp(5, 4)(1), Zp(5, 8)(1/3)*Qp(5, 4)(5))
+for a, b in [(Zp(5, 6), Qp(5, 8)), (Zp(5, 8), Qp(5, 4)), (Qp(5, 4), Qp(5, 8)), (Zp(5, 8), Zp(5, 4)), (Qp(5, 8), Zp(5, 4))]:
+    print(parent(a(1) * b(1)))
+print(R6(0) == O(5^3), O(5^3) == 0, R6(5) + O(5^3) == 5, R6(23) == 23, R6(23) == 1/5, hash(R6(23)) == hash(23))
+print(R6(5) < R6(1), R6(24) < R6(5), R6(1) < R6(-1))
+# functions
+print(R6(1 + 5).log(), R6(4).log(), R6(2).log(), Zp(2, 10)(3).log(), Zp(2, 10)(5).log(), Zp(2, 10)(-1).log(), Zp(3, 6)(2).log(), Zp(3, 6)(4).log())
+print(Zp(2, 10)(1, 1).log(), Zp(2, 10)(3, 2).log(), R6(2, 1).log(), R6(1 + 5, 2).log(), R6(23).log(p_branch=0), K6(5).log(p_branch=0))
+print(R6(2).log(p_branch=5), R6(10).log(p_branch=5), K6(2/5).log(p_branch=1), R6(10).log(p_branch=R6(5)), R6(10).log(0))
+print(R6(5).exp(), R6(25).exp(), Zp(3, 6)(3).exp(), Zp(2, 10)(4).exp(), Zp(2, 10)(8).exp(), Zp(3, 6)(9).exp(), R6(5, 3).exp(), R6(0, 3).exp(), R6(0).exp())
+print(R6(2).log().exp(), R6(1 + 5).log().exp())
+print(R6(6).sqrt(), R6(-1).sqrt(), R6(25*6).sqrt(), Zp(2, 10)(17).sqrt(), R6(4).sqrt(), R6(9).sqrt(), R6(11).sqrt(), R6(-4).sqrt(), R6(16).sqrt(), R6(14).sqrt())
+print(Zp(7, 4)(2).sqrt(), Zp(7, 4)(-3).sqrt(), Zp(11, 4)(3).sqrt(), Zp(13, 4)(10).sqrt(), Zp(2, 10)(9).sqrt(), Zp(2, 10)(25).sqrt(), Zp(2, 10)(-7).sqrt(), Zp(2, 10)(4*17).sqrt())
+print(Zp(3, 6)(7).sqrt(), Zp(3, 6)(4).sqrt(), (4 + O(5^3)).sqrt(), R6(0).sqrt(), R6(4).sqrt(all=True))
+for r in [3, 4, 5, 8]:
+    print([Zp(2, 20)(u, r).sqrt() for u in [1, 9, 17, 33, 57]])
+print(R6(25).is_square(), R6(5).is_square(), Zp(2, 10)(17).is_square(), Zp(2, 10)(5).is_square(), R6(23).is_square(), R6(2).is_square())
+print(R6.teichmuller(2), Zp(2, 10).teichmuller(3), Zp(3, 6).teichmuller(2), R6.teichmuller(3, 3), Zp(3, 10).teichmuller(0), R6.teichmuller(R6(7, 2)), R6.teichmuller_system())
+# queries
+print(R(75).valuation(), R(75).unit_part(), R6(75).precision_absolute(), R6(75).precision_relative(), R6(75).lift(), R6(-1).lift(), R6(0).valuation())
+print(R6(-1).residue(), R6(-1).residue(2), R6(5).residue(), list(R6(23).expansion()), R6(23).expansion(1), list(K6(2/25).expansion()), K6(2/25).expansion(-2), list(R6(23, 2).expansion()))
+print(K6(2/25).valuation(), K6(2/25).lift(), K6(2/25).unit_part(), K6(2/5).rational_reconstruction(), R6(1/3).rational_reconstruction(), R6(23).ordp())
+print(R6(0, 3).valuation(), R6(0, 3).unit_part(), R6(0, 3).precision_relative(), R6(0).precision_absolute(), R6(0).precision_relative(), R6(23, 2).lift(), R6(0, 3).lift())
+print(R6(23).norm(), R6(23).trace(), R6(23).abs(), K6(2/5).abs(), R6(23).add_bigoh(2), R6(23).add_bigoh(10), R6(2, 3).lift_to_precision(5), R6(2, 3).lift_to_precision())
+print(R6(23).is_zero(), O(5^2).is_zero(), bool(O(5^2)), R6(5).is_unit(), R6(2).is_unit(), K6(5).is_unit(), R6(23).is_equal_to(23, 2), R6(2).multiplicative_order(), R6.teichmuller(2).multiplicative_order())
+print(R6(23) % 5, R6(23) // 5, R6(2).inverse_of_unit(), ZZ(R6(23)), QQ(K6(2/5)), R6(Qp(5, 6)(1/5)*5))
+# the rings
+print(R6.prime(), R6.precision_cap(), R6.residue_field(), R6.fraction_field(), K6.integer_ring(), R6.zero(), R6.one(), R6.gen(), R.uniformizer())
+print(R.is_field(), K.is_field(), R.characteristic(), R.residue_characteristic(), R6.absolute_degree(), R6.ngens(), R6.is_finite(), R6.cardinality(), Zp(5) is Zp(5), Zp(5) == Zp(5, 20))
+print(latex(R6(23)), latex(K6(2/25)), latex(R6(0, 3)), latex(R6(0)), latex(R6(-1)), latex(Zp(5)), latex(Qp(5, 6)))
+# print modes
+print(Zp(5, 6, print_mode='terse')(23), Zp(5, 6, print_mode='terse')(-1), Zp(5, 6, print_mode='terse')(0, 3), Qp(5, 6, print_mode='terse')(-2/125), Qp(5, 6, print_mode='terse')(2/5), Zp(5, 6, print_mode='terse')(25), Qp(5, 6, print_mode='terse')(1/5))
+print(Zp(5, 6, print_mode='val-unit')(75), Zp(5, 6, print_mode='val-unit')(23), Zp(5, 6, print_mode='val-unit')(5), Zp(5, 6, print_mode='val-unit')(-5), Qp(5, 6, print_mode='val-unit')(2/25), Zp(5, 6, print_mode='val-unit')(0), Zp(5, 6, print_mode='val-unit')(0, 3), Zp(5, 6, print_mode='val-unit')(25*3, 4))
+print(Zp(5, 6, print_mode='digits')(23), Zp(5, 6, print_mode='digits')(-1), Qp(5, 6, print_mode='digits')(2/25), Zp(5, 6, print_mode='digits')(75), Zp(5, 6, print_mode='digits')(0, 3), Zp(5, 6, print_mode='digits')(0), Qp(5, 6, print_mode='digits')(2/5^8), Zp(5, 6, print_mode='digits')(5^9))
+print(Zp(5, 6, print_mode='bars')(23), Zp(5, 6, print_mode='bars')(75), Qp(5, 6, print_mode='bars')(2/25), Zp(11, 4, print_mode='bars')(23), Zp(5, 6, print_mode='bars')(0, 3))
+print(Zp(5, 6, print_pos=False)(23), Zp(5, 6, print_pos=False)(-1), Zp(5, 6, print_pos=False)(23 + 3*125), Zp(5, 6, print_pos=False)(-23), Zp(5, 6, print_pos=False)(2*5), Zp(5, 6, print_pos=False)(3*5), Zp(5, 6, print_pos=False)(-5))
+print(Zp(5, 6, print_max_terms=3)(-1), Zp(5, 6, print_max_terms=3)(23), Zp(5, 6, print_max_terms=1)(-1), Zp(13, 4)(-1), Zp(13, 4)(12*13))
+print(Zp(5, 6, print_mode='val-unit', print_pos=False)(-5), Zp(5, 6, print_mode='terse', print_pos=False)(-1), Zp(5, 6, print_mode='terse') == Zp(5, 6))
+# power series over the p-adics
+S.<T> = PowerSeriesRing(Zp(5, 4))
+f = (5 + O(5^4)) + O(5)*T + (4*5 + O(5^2))*T^2 + O(T^5)
+print(f)
+print(S.gen(), f^2, f*T + 1)

@@ -95,6 +95,8 @@ class _Ring:
             return _sa()._QQ(x, d)
         if d is not None:
             raise TypeError("ZZ takes one argument")
+        if hasattr(x, "_integer_") and not isinstance(x, (int, _F)):
+            return x._integer_()
         if isinstance(x, _F) and x.denominator != 1:
             raise TypeError("no conversion of this rational to integer")
         return _sa().Integer(x)

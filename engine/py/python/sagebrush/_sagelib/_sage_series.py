@@ -315,6 +315,9 @@ def _exact_quo(x, c, B):
 
 
 def _is_zero(c):
+    # (a p-adic coefficient O(p^n) is kept, as Sage prints it: O(5)*T)
+    if hasattr(c, "_x") and type(c).__name__ == "pAdicCappedRelativeElement":
+        return c._x.is_exact_zero()
     try:
         return not c
     except Exception:
@@ -576,10 +579,23 @@ class Series:
         return self._over(base, laurent=laurent, dp=dp)
 
     def _target_base(self, o):
-        """The coefficient ring of self's parent with o: the fraction field
+        """The coefficient ring of self's parent with o: for p-adic bases the
+        pushout of the two (as Sage: Zp(5, 4)[[T]] times an element of Zp(5)
+        lands in Zp(5, 20)[[T]], a field's in Qp's); else the fraction field
         of the base when o needs it (ZZ[[z]] meets 1/2 or a series over QQ
         in QQ[[z]]), else the base."""
         B = self._R._base
+        if _is_padic(B):
+            if isinstance(o, Series):
+                P = o._R._base
+            elif type(o).__name__ == "pAdicCappedRelativeElement":
+                P = o.parent()
+            else:
+                return B
+            if P is B or not _is_padic(P) or P.prime() != B.prime():
+                return B
+            from _sage_padic import _pushout
+            return _pushout(B, P)
         F = _frac(B)
         if F is B:
             return B
@@ -635,7 +651,8 @@ class Series:
                 c[k] = c[k] + x
         return Series(self._ring_for(o, v), v, c, p)
 
-    __radd__ = __add__
+    def __radd__(self, o):
+        return self.__add__(o)
 
     def __neg__(self):
         return Series(self._R, self._v, [-c for c in self._c], self._prec)
@@ -685,7 +702,8 @@ class Series:
                 c[i + j] = c[i + j] + x * y
         return Series(self._ring_for(o, v), v, c, p)
 
-    __rmul__ = __mul__
+    def __rmul__(self, o):
+        return self.__mul__(o)
 
     def _check_var(self, o, op):
         """Series in different variables do not meet (Sage refuses)."""
@@ -1116,10 +1134,11 @@ def _term(c, e, name):
     neg = s.startswith("-")
     if neg:
         s = s[1:]
+    if e == 0:
+        # (Sage never parenthesizes the constant term: 5 + O(5^4) + O(5)*T)
+        return neg, s
     if " + " in s or " - " in s:
         s = "(" + s + ")"
-    if e == 0:
-        return neg, s
     m = _mono(name, e)
     if s == "1":
         return neg, m
@@ -1142,7 +1161,8 @@ def O(x):
         R = x.parent()
         S = PowerSeriesRing(R.base_ring(), R.variable_name())
         return Series(S, 0, [], int(x.degree()))
-    if type(x).__name__ in ("Integer", "int") or isinstance(x, int):
-        from sage_all import Integer
-        raise NotImplementedError("p-adic big-oh O(p^n) is not available in sagebrush yet")
+    if isinstance(x, (int, _F)) and not isinstance(x, bool):
+        # O(p^n): an inexact zero of Zp(p) (Qp(p) for n < 0)
+        from _sage_padic import _bigoh
+        return _bigoh(x)
     raise NotImplementedError("O(%r)" % (x,))

@@ -15,6 +15,9 @@ const cdpPort = Number(process.env.CDP_PORT ?? 9337);
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
+// (a script copying this harness must close ws at its end, as the finally
+// below does: an open WebSocket keeps node running, and piped output is
+// then held back until exit, which looks like a hang)
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
