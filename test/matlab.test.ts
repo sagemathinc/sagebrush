@@ -621,3 +621,23 @@ test("repelem takes a string scalar and string arrays, and only numeric scalar o
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["string", "[1 3]", "x", "b", "[1 1 2 2]",
     "Replication factors must be scalars or vectors.", "Replication factors must be numeric.", "Replication factors must be numeric."]);
 });
+
+test("numgrid and delsq reproduce the published L-shaped grids, counts and nonzeros, and refuse the regions nothing pins", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "g = numgrid('L',10); disp(mat2str(g(2:9, 2:9)));",
+    "G = numgrid('L',32); disp(sum(G(:)>0));",
+    "A = delsq(numgrid('L',65)); disp(mat2str(size(A))); disp(nnz(A)); disp(issparse(A));",
+    "disp(size(delsq(numgrid('L',12)), 1)); disp(nnz(delsq(numgrid('S',200))));",
+    "disp(mat2str(full(delsq(numgrid('S',4)))));",
+    "try, numgrid('C', 10), catch e, disp(e.message), end",
+    "try, numgrid('Q', 10), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[1 5 9 13 17 25 33 41;2 6 10 14 18 26 34 42;3 7 11 15 19 27 35 43;4 8 12 16 20 28 36 44;0 0 0 0 21 29 37 45;0 0 0 0 22 30 38 46;0 0 0 0 23 31 39 47;0 0 0 0 24 32 40 48]",
+    "675", "[2945 2945]", "14473", "1", "75", "195228",
+    "[4 -1 -1 0;-1 4 0 -1;-1 0 4 -1;0 -1 -1 4]",
+    "numgrid: the region 'C' is not supported in Sagebrush (only 'S' and 'L').",
+    "numgrid: unknown region 'Q'.",
+  ]);
+});
