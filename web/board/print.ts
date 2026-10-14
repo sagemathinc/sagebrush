@@ -37,6 +37,11 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 // Groups (outer first) and edges as SVG, in world coordinates.
 function backSvg(items: Item[], edges: Edge[], box: Sheet["box"]): string {
+  const w = box.x1 - box.x0, h = box.y1 - box.y0;
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="pr-back" style="position:absolute;left:${box.x0}px;top:${box.y0}px;overflow:visible" width="${w}" height="${h}" viewBox="${box.x0} ${box.y0} ${w} ${h}" font-family="system-ui, sans-serif">${backShapes(items, edges, box)}</svg>`;
+}
+/** Groups' boxes (outer first), then edges and their labels, as SVG elements in world coordinates (also svg.ts's). */
+export function backShapes(items: Item[], edges: Edge[], box: Sheet["box"]): string {
   const byId = new Map(items.map((it) => [it.id, it]));
   const out: string[] = [];
   // (clipped here to the sheet: Chrome's PDFs do not always clip shapes far
@@ -84,8 +89,7 @@ function backSvg(items: Item[], edges: Edge[], box: Sheet["box"]): string {
       labels.push(`<rect x="${x - w / 2}" y="${y - 9}" width="${w}" height="18" fill="#fafaf7" fill-opacity=".95"/><text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="12" fill="#3d4a37">${esc(e.label)}</text>`);
     }
   }
-  const w = box.x1 - box.x0, h = box.y1 - box.y0;
-  return `<svg xmlns="http://www.w3.org/2000/svg" class="pr-back" style="position:absolute;left:${box.x0}px;top:${box.y0}px;overflow:visible" width="${w}" height="${h}" viewBox="${box.x0} ${box.y0} ${w} ${h}" font-family="system-ui, sans-serif">${out.join("")}${labels.join("")}</svg>`;
+  return out.join("") + labels.join("");
 }
 
 /**
