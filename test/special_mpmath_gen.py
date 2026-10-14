@@ -70,6 +70,17 @@ points["zeta"] = points["zeta"] + [(complex(0.5495278737588145, -946.93937058355
 points["exp_integral_e1"] = points["exp_integral_e1"] + [
     (complex(349.99049601561853, -316.93605952131946),), (complex(-327.52218011370275, -320.3024594333194),)] + [
     (cmath.rect(500, U(-math.pi, math.pi)),) for _ in range(20)]
+# (Lambert W: every branch, near the branch point -1/e and close above and
+# below the cuts, from 1e-300 to 1e300)
+points["lambert_w"] = (
+    [(cz(5), k) for k in (-3, -1, 0, 1, 2) for _ in range(15)]
+    + [(complex(-1 / math.e + U(-0.05, 0.05), U(-0.05, 0.05)), k) for k in (-1, 0, 1) for _ in range(15)]
+    + [(complex(-1 / math.e + random.choice((1, -1)) * LU(1e-14, 1e-3), random.choice((1, -1)) * LU(1e-30, 1e-8)), k)
+       for k in (-1, 0, 1) for _ in range(10)]
+    + [(complex(U(-3, 3), random.choice((1, -1)) * LU(1e-30, 1e-3)), k) for k in (-1, 0, 1) for _ in range(10)]
+    + [(cmath.rect(LU(1e-300, 1e300), U(-math.pi, math.pi)), k) for k in (-2, 0, 1, 57) for _ in range(10)]
+    + [(U(-1 / math.e, 0), k) for k in (-1, 0) for _ in range(10)] + [(LU(1e-300, 1e300), 0) for _ in range(10)]
+)
 
 
 def faddeeva(z):
@@ -88,6 +99,7 @@ ref = {
     "hurwitz_zeta": mp.zeta, "beta": mp.beta, "betaln": lambda a, b: mp.log(mp.beta(a, b)), "faddeeva": faddeeva,
     "erf": mp.erf, "erfc": mp.erfc, "erfi": mp.erfi, "erfcx": lambda z: mp.exp(mp.mpmathify(z) ** 2) * mp.erfc(z),
     "erfinv": lambda y: mp.erfinv(y), "erfcinv": erfcinv, "exp_integral_e1": mp.e1, "exp_integral_ei": mp.ei,
+    "lambert_w": lambda z, k: mp.lambertw(z, k),
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}

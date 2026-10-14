@@ -30,6 +30,7 @@ precision, with no MATLAB types:
 | `faddeeva(z)`, `erf`, `erfc`, `erfi`, `erfcx` | w(z) by the trapezoidal rule on 7.7.2 with the pole's residue added (Im z < 6), Laplace's continued fraction 7.9.3 beyond; 7.2.3, 7.4.3, the Taylor series 7.6.1 |
 | `erfinv(y)`, `erfcinv(q)` | Halley's iteration on erf, and Newton's on log erfc = log erfcx - x^2, which reaches the smallest subnormal q |
 | `exp_integral_e1(z)`, `exp_integral_ei(x)` | the series 6.6.1 and 6.6.2, the continued fraction 6.9.1, the asymptotic series 6.12.1 and 6.12.2, a Taylor series about Ei's zero (6.13.1) |
+| `lambert_w(z, k)` | every branch, with DLMF 4.13's branches and cuts (4.13.2, 4.13.3: the real values of W_-1 are W_-1(x + 0i), and W_1(x - 0i) gives them too); Halley's iteration from the series in (e z + 1)^(1/2) about the branch point (4.13.9_1, whose coefficients are computed by exact series reversion and summed directly near -1/e) or the asymptotic series (4.13.10, 4.13.11); on a cut the sign of a zero imaginary part picks the side (scipy.special.lambertw agrees except at W_-1(x - 0i) on (-1/e, 0), where it gives the real value) |
 
 The trapezoidal rule for w(z) is derived in its comment: summing
 π cot(π(t/h - d)) f(t) round the nodes gives the rule plus the residue at
@@ -58,7 +59,7 @@ to 10 digits, on the examples from their documentation pages and more.
   14). The phase convention (Condon-Shortley) will be stated for each
   normalization.
 - Bessel and Airy functions, after Amos's papers (ACM TOMS 644).
-- polylog, dilog and lambert_w.
+- polylog and dilog.
 - Complex beta, complex erfinv, hurwitz_zeta for complex a (the summation
   cancels catastrophically, and DLMF 25.11.5 is stated for real a) or
   non-integer Re s <= -1, polygamma for n > 100, |Im s| > 1e5 for zeta:
