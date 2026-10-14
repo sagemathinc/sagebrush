@@ -5,7 +5,11 @@
 // cell per code item, in the board's reading order, and does everything a
 // notebook does (the reactive scheduler, page-order scoping, the budget,
 // stale marks, per-cell seeds, interacts, widgets, plots, math, 3D).  Each
-// cell's output element is shown inside its code item on the board.
+// cell's output element is shown inside its code item on the board.  The
+// board's language (BoardDoc.mode: Python, Sage, Magma or MATLAB) is the
+// notebook's.
+
+import type { BoardMode } from "./doc";
 
 /** "": up to date; "error": cannot run (a syntax error, a name defined twice, a cycle); "failed": raised an exception; "cancelled": not run, as one it reads failed */
 export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed" | "cancelled" | "interrupted";
@@ -103,7 +107,7 @@ export class BoardCode {
     this.nb = mod.createNotebook(root, { kernel, reactive: true, analyzer, ...this.parts.assets() });
     this.nb.load({ mode: "python", cells: [], autorun: "always" });
     if (this.pictures) this.nb.usePictures?.(this.pictures);
-    this.highlight = (src) => mod.highlight(src, this.mode === "sage");
+    this.highlight = (src) => (this.mode === "matlab" ? mod.highlightMatlab(src) : mod.highlight(src, this.mode === "sage"));
     // (a cell's state is its element's class: queued, running, stale, error, cancelled)
     this.observer = new MutationObserver(() => this.changed());
     this.observer.observe(root, { attributes: true, attributeFilter: ["class"], subtree: true });
@@ -160,7 +164,7 @@ export class BoardCode {
    * changes what others read: those rerun), and the new ones and those whose
    * code changed run, then what depends on them.  Resolves to the ids run.
    */
-  sync(items: { id: string; code: string; preview?: Preview }[], mode: "python" | "sage" = "python", seed?: string): Promise<string[]> {
+  sync(items: { id: string; code: string; preview?: Preview }[], mode: BoardMode = "python", seed?: string): Promise<string[]> {
     // (one after another: a sync sees what the one before it did)
     const p = this.last.then(() => this.syncNow(items, mode, seed ?? BOARD_SEED));
     this.last = p.catch(() => {});
@@ -168,10 +172,10 @@ export class BoardCode {
   }
   private last: Promise<unknown> = Promise.resolve();
   /** the board's language (BoardDoc.mode) */
-  mode: "python" | "sage" = "python";
+  mode: BoardMode = "python";
   /** the board's seed (BoardDoc.seed) */
   seed = BOARD_SEED;
-  private async syncNow(items: { id: string; code: string; preview?: Preview }[], mode: "python" | "sage", seed: string): Promise<string[]> {
+  private async syncNow(items: { id: string; code: string; preview?: Preview }[], mode: BoardMode, seed: string): Promise<string[]> {
     if (!(await this.ready)) return [];
     const nb = this.nb;
     const now = nb.cells().filter((c: any) => c.type === "code");

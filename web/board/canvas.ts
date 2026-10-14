@@ -22,7 +22,7 @@
 // (the tour, a page's intro, a note's outline) is left out, and counted.
 
 import type { Edge, Item } from "./board";
-import { lookOf, pageCount, pageOf, shownPages, type BoardDoc, type BoardPage, type DocEdge, type DocNote } from "./doc";
+import { lookOf, pageCount, pageOf, shownPages, type BoardDoc, type BoardMode, type BoardPage, type DocEdge, type DocNote } from "./doc";
 import { COLORS } from "./colors";
 import { nest } from "./nest";
 
@@ -65,14 +65,14 @@ function colorOut(c: string | undefined): string | undefined {
   return p ? p[0] : /^#[0-9a-f]{6}$/i.test(c) ? c : undefined;
 }
 
-// a text card's Markdown as a note: its title (a first-line heading) and its code (a last python or sage block)
-function noteOf(text: string): Pick<DocNote, "title" | "text" | "code"> & { sage?: boolean } {
-  let t = text.replace(/\r\n/g, "\n").trim(), title: string | undefined, code: string | undefined, sage = false;
+// a text card's Markdown as a note: its title (a first-line heading) and its code (a last python, sage, magma or matlab block)
+function noteOf(text: string): Pick<DocNote, "title" | "text" | "code"> & { lang?: BoardMode } {
+  let t = text.replace(/\r\n/g, "\n").trim(), title: string | undefined, code: string | undefined, lang: BoardMode | undefined;
   const h = /^#{1,3} +(.+)(\n|$)/.exec(t);
   if (h) { title = h[1].trim(); t = t.slice(h[0].length).trim(); }
-  const c = /(^|\n)```(python|py|sage)\n([\s\S]*?)\n?```\s*$/.exec(t);
-  if (c) { code = c[3]; sage = c[2] === "sage"; t = t.slice(0, c.index).trim(); }
-  return { ...(title ? { title } : {}), ...(t ? { text: t } : {}), ...(code !== undefined ? { code } : {}), ...(sage ? { sage } : {}) };
+  const c = /(^|\n)```(python|py|sage|magma|matlab)\n([\s\S]*?)\n?```\s*$/.exec(t);
+  if (c) { code = c[3]; lang = c[2] === "py" ? "python" : (c[2] as BoardMode); t = t.slice(0, c.index).trim(); }
+  return { ...(title ? { title } : {}), ...(t ? { text: t } : {}), ...(code !== undefined ? { code } : {}), ...(lang && lang !== "python" ? { lang } : {}) };
 }
 
 /** A JSON Canvas as a board, and what was left out (by kind: how many). */
@@ -98,7 +98,8 @@ export function fromCanvas(text: string): { doc: BoardDoc; left: Record<string, 
     if (!["text", "file", "link", "group"].includes(n.type)) leave("card");
     else if (n.type === "group" && n.background) leave("background");
   }
-  let sage = false;
+  // (the board's language: the first code block's that is not Python)
+  let mode: BoardMode | undefined;
   const note = ({ n, w }: { n: CanvasNode; w: number }): DocNote => {
     const color = colorIn(n.color);
     const base: DocNote = { id: n.id, w, ...(color ? { color } : {}) };
@@ -107,8 +108,8 @@ export function fromCanvas(text: string): { doc: BoardDoc; left: Record<string, 
       const file = String(n.file ?? "");
       return { ...base, title: file.split("/").pop() || file, ref: file + (typeof n.subpath === "string" ? n.subpath : "") };
     }
-    const { sage: s, ...m } = noteOf(String(n.text ?? ""));
-    if (s) sage = true;
+    const { lang, ...m } = noteOf(String(n.text ?? ""));
+    if (lang && !mode) mode = lang;
     return { ...base, ...m };
   };
   const tree = nest(frames, cards, ({ n }) => ({ id: n.id, ...(n.label?.trim() ? { title: n.label.trim() } : {}), ...(colorIn(n.color) ? { color: colorIn(n.color) } : {}) }), note);
@@ -122,7 +123,7 @@ export function fromCanvas(text: string): { doc: BoardDoc; left: Record<string, 
     if (from && !to) edges.push({ from: e.toNode, to: e.fromNode, ...label });
     else edges.push({ from: e.fromNode, to: e.toNode, ...label, ...(from && to ? { arrow: "both" as const } : !to ? { arrow: "none" as const } : {}) });
   }
-  return { doc: { ...(sage ? { mode: "sage" as const } : {}), nodes: tree, edges }, left };
+  return { doc: { ...(mode ? { mode } : {}), nodes: tree, edges }, left };
 }
 
 // a note as a text card's Markdown
@@ -143,7 +144,7 @@ function markdownOf(it: Item, mode: string): string {
 export function toCanvas(doc: BoardDoc, laid: (page: number) => { items: Item[]; edges: Edge[] }): { canvas: Canvas; left: Record<string, number> } {
   const nodes: CanvasNode[] = [], edges: CanvasEdge[] = [], left: Record<string, number> = {};
   const leave = (k: string, n = 1) => { if (n > 0) left[k] = (left[k] ?? 0) + n; };
-  const mode = doc.mode === "sage" ? "sage" : "python";
+  const mode = doc.mode ?? "python";
   const n = pageCount(doc), paged = !!doc.pages?.length && n > 1;
   // (a template's own page left out, said so: its items are on the pages made from it, as `laid` gives them)
   const shown = new Set(shownPages(doc));

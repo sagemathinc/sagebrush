@@ -1,6 +1,7 @@
 // sagebrush-notebook.js: Sagebrush's notebook as a component (web/build.ts
 // bundles this file).  See web/notebook/README.md and web/embed/index.html.
 export { createNotebook, highlight } from "./notebook.js";
+export { highlightMatlab } from "./highlight-matlab.js";
 export { WorkerKernel } from "./worker-kernel.js";
 export { RunnerWorker } from "./runner-worker.js";
 export { MemoryStore, IdbStore, IdbPatchStore, openDb, openHistoryDb } from "./stores.js";

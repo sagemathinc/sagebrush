@@ -29,7 +29,7 @@
 // told what was.  Outputs are not
 // kept: a board's code runs when it is opened.
 
-import { ICON_NAME, inkNode, inkSize, type BoardDoc, type BoardPage, type DocEdge, type DocInk, type DocNote, type DocSticker } from "./doc";
+import { ICON_NAME, inkNode, inkSize, type BoardDoc, type BoardMode, type BoardPage, type DocEdge, type DocInk, type DocNote, type DocSticker } from "./doc";
 import { simplifyInk } from "./ink";
 import { nest } from "./nest";
 
@@ -105,7 +105,7 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
   };
   const pages = Array.from({ length: count }, () => ({ items: [] as El[], frames: [] as El[], edges: [] as El[], slide: null as El | null }));
   const strokes = new Map<string, DocInk>();
-  let sage = false;
+  let mode: BoardMode | undefined;
   for (const e of els) {
     if (e.type === "page" || e.type === "selection") continue; // (a page is made below; a selection is not content)
     if (e.invisible && e.type !== "speaker_notes") { leave(e.type); continue; }
@@ -123,7 +123,9 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
   const note = (e: El): DocNote => {
     const { w } = box(e);
     if (e.type === "code") {
-      if (/sage/i.test(String(e.data?.kernel ?? ""))) sage = true;
+      // (the board's language: the first code cell's kernel that is not Python's)
+      const k = String(e.data?.kernel ?? "");
+      if (!mode) mode = /sage/i.test(k) ? "sage" : /magma/i.test(k) ? "magma" : /matlab|octave/i.test(k) ? "matlab" : undefined;
       return { id: e.id, code: typeof e.str === "string" ? e.str : "", ...(e.data?.hideInput ? { hideCode: true } : {}), w };
     }
     return { id: e.id, text: markdown(e.str), ...(e.type === "note" ? { color: typeof e.data?.color === "string" ? e.data.color : NOTE_COLOR } : {}), w };
@@ -151,8 +153,8 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
   });
 
   const doc: BoardDoc = count === 1
-    ? { ...(sage ? { mode: "sage" as const } : {}), ...(converted[0].slide ? { slide: converted[0].slide } : {}), nodes: converted[0].nodes, edges: converted[0].edges }
-    : { ...(sage ? { mode: "sage" as const } : {}), pages: converted.map((p, i) => ({ title: `Page ${i + 1}`, ...p })) };
+    ? { ...(mode ? { mode } : {}), ...(converted[0].slide ? { slide: converted[0].slide } : {}), nodes: converted[0].nodes, edges: converted[0].edges }
+    : { ...(mode ? { mode } : {}), pages: converted.map((p, i) => ({ title: `Page ${i + 1}`, ...p })) };
   return { doc, left };
 }
 

@@ -151,13 +151,17 @@ export interface BoardPage {
 export const FORMAT = "sagebrush-board";
 export const VERSION = 1;
 
+/** a board's language (BoardDoc.mode) */
+export type BoardMode = "python" | "sage" | "magma" | "matlab";
+const MODES = ["sage", "magma", "matlab"] as const;
+
 export interface BoardDoc {
   format?: typeof FORMAT;
   /** the format's version: 1 */
   version?: number;
   title?: string;
-  /** the language of its code items: Python (the default) or Sage (one per board) */
-  mode?: "python" | "sage";
+  /** the language of its code items: Python (the default), Sage, Magma or MATLAB (one per board) */
+  mode?: BoardMode;
   /** in a downloaded file (export.ts, engine.ts), the engine its code runs
    * with: the latest, when online; else (the default) the one it was saved with */
   engine?: "latest";
@@ -306,7 +310,7 @@ export function cleanDoc(d: any): BoardDoc {
       hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
     steps: Array.isArray(p?.steps) ? p.steps.filter((t: any) => t && (typeof t.focus === "string" || Array.isArray(t.focus))).map((t: any) => strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) })) : undefined,
   });
-  const out: any = strip({ format: FORMAT, version: VERSION, ...page(d), title: str(d?.title), mode: d?.mode === "sage" ? "sage" : undefined, engine: d?.engine === "latest" ? "latest" : undefined, seed: typeof d?.seed === "string" && /^[0-9a-f]{64}$/.test(d.seed) ? d.seed : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
+  const out: any = strip({ format: FORMAT, version: VERSION, ...page(d), title: str(d?.title), mode: one(d?.mode, MODES), engine: d?.engine === "latest" ? "latest" : undefined, seed: typeof d?.seed === "string" && /^[0-9a-f]{64}$/.test(d.seed) ? d.seed : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
   delete out.id;
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
   // (previews: at most DOC_MAX in all, every page's, SEC-14C-2)

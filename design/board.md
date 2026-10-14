@@ -131,8 +131,12 @@ and per-cell seeds all apply unchanged. Widgets on a board are two-way, as
 planned for the notebook: one model, any number of views.
 
 A board has one language, `mode` in the document: Python (the default, not
-written) or Sage, chosen in the ⋯ menu ("Code: Python | Sage"), as an edit.
-Changing it runs every code item again, in the new language.
+written), Sage, Magma or MATLAB, chosen in the ⋯ menu ("Code: Python | Sage
+| Magma | MATLAB"), as an edit. Changing it runs every code item again, in
+the new language. Magma and MATLAB are translated to Python, as in the
+notebook (src/magma.ts, src/matlab.ts). In a JSON Canvas a code block's
+fence names the language (```matlab), and a CoCalc whiteboard's code cells
+their kernel.
 
 ## Fast
 

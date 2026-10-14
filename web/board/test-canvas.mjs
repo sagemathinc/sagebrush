@@ -64,6 +64,14 @@ check(by.get("t1").color === "#ffbfbf" && by.get("outer").color === "#dbeed3", "
 check(left.background === 1 && left.card === 1 && left.edge === 1 && doc.edges.length === 4, "what a board has nothing like is counted: " + JSON.stringify(left));
 check(canvasLeftOut(left) === "1 group's background picture, 1 card of a kind a board doesn't have and 1 connection to something left out", "...in words: " + canvasLeftOut(left));
 check(fromCanvas(JSON.stringify({ nodes: [{ id: "s", type: "text", x: 0, y: 0, width: 100, height: 50, text: "```sage\nfactor(12)\n```" }] })).doc.mode === "sage", "a sage block makes the board Sage");
+{
+  const card = (id, text) => ({ id, type: "text", x: 0, y: 0, width: 100, height: 50, text });
+  const m = fromCanvas(JSON.stringify({ nodes: [card("a", "```python\nx = 1\n```"), card("b", "## Sum\n```matlab\ns = sum(1:10)\n```")] })).doc;
+  check(m.mode === "matlab" && m.nodes.find((n) => n.id === "b").code === "s = sum(1:10)", "a matlab block makes the board MATLAB (a python one leaves it to the next)");
+  check(fromCanvas(JSON.stringify({ nodes: [card("g", "```magma\nFactorization(12);\n```")] })).doc.mode === "magma", "a magma block makes the board Magma");
+  const out = toCanvas({ mode: "matlab", nodes: [{ id: "c", title: "C", code: "disp(1)" }] }, () => layout({ mode: "matlab", nodes: [{ id: "c", title: "C", code: "disp(1)" }] })).canvas;
+  check(out.nodes.some((n) => n.type === "text" && n.text.includes("```matlab\ndisp(1)\n```")), "a MATLAB board's code is written as matlab blocks");
+}
 // read through Open (boardFromText): converted, and said so
 let said = "";
 const opened = boardFromText(text, "Ideas.canvas", (m) => { said = m; });
