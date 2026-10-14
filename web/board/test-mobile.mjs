@@ -6,7 +6,8 @@
 // The page does not zoom (double taps are the board's), and the tour's
 // caption is a line until tapped.  Two fingers, the first on a note in
 // Edit, pinch: the board zooms, the note stays.  Presenting, the faded
-// controls come back with a tap, and a tap on one only shows it.  Serve web/dist first (python3
+// controls come back with a tap, and a tap on one only shows it; a phone
+// turned fits the frame to the turned screen.  Serve web/dist first (python3
 // web/serve.py 8765), then
 //   node web/board/test-mobile.mjs
 import { spawn } from "node:child_process";
@@ -194,6 +195,15 @@ try {
     await sleep(500);
     const f2 = await where();
     check(faded && back && fadedAgain && f1 === f0 && shown && f2 !== f0, "Present on a phone: the faded controls come back with a tap; a tap on a faded control only shows it, the next presses it: " + JSON.stringify({ faded, back, fadedAgain, f0, f1, shown, f2 }));
+    // the phone turned on a step: the step's item fitted again, whole and in the middle of the turned screen
+    await ev("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })), 1");
+    await ev("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })), 1");
+    await sleep(700);
+    await send("Emulation.setDeviceMetricsOverride", { width: H, height: W, deviceScaleFactor: 2, mobile: true });
+    await sleep(700);
+    const fit = await ev("(() => { const r = window.board.clientRect('t'), b = window.board.el.getBoundingClientRect(); return { inside: r.left >= b.left - 1 && r.top >= b.top - 1 && r.left + r.width <= b.right + 1 && r.top + r.height <= b.bottom + 1, dx: Math.round(r.left + r.width / 2 - (b.left + b.width / 2)), dy: Math.round(r.top + r.height / 2 - (b.top + b.height / 2)), w: b.width }; })()");
+    check(fit.inside && Math.abs(fit.dx) < 40 && Math.abs(fit.dy) < 40 && fit.w === H, "Present, a phone turned on a step: its item fitted again to the turned screen, whole and in the middle: " + JSON.stringify(fit));
+    await send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 3, mobile: true });
     await ev("window.sagebrush.board.present(false).then(() => 1)");
   }
   check(!errors.length, "errors: " + errors.join(" | "));
