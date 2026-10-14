@@ -1120,7 +1120,7 @@ _GK_GAUSS[1::2] = [0.1294849661688697, 0.27970539148927664, 0.3818300505051189, 
                    0.3818300505051189, 0.27970539148927664, 0.1294849661688697]
 
 
-def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
+def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning, warn=None):
     """Shampine's vectorized global adaptive quadrature (L. F. Shampine,
     "Vectorized adaptive quadrature in MATLAB", J. Comput. Appl. Math. 211,
     2008, sections 3 to 6) of F over [breaks[0], breaks[-1]] in the
@@ -1136,6 +1136,7 @@ def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
     (section 3), when a subinterval's ends in x are within 100*eps of each
     other relatively (section 6), or when a value is Inf or NaN after the
     first evaluation (an error on the first, section 6).  Returns (Q, E)"""
+    warn = warn or _m.warning_
     A, B = breaks[0], breaks[-1]
     subs = list(zip(breaks[:-1], breaks[1:]))
     if len(subs) < 10:
@@ -1158,7 +1159,7 @@ def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
             if first:
                 raise _err("%s: the integrand is Inf or NaN at the first points tried; no approximation of the integral "
                            "is possible." % solver)
-            _m.warning_("%s: the integrand is Inf or NaN at some points; the last approximation is returned. "
+            warn("%s: the integrand is Inf or NaN at some points; the last approximation is returned. "
                         "Approximate bound on error is %.1e." % (solver, E))
             return Q, E
         first = False
@@ -1179,10 +1180,10 @@ def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
             return Q, E
         if 2 * len(subs) > maxint:
             if nocount_warning:
-                _m.warning_("%s: Reached the limit on the maximum number of intervals in use. Approximate bound on error "
+                warn("%s: Reached the limit on the maximum number of intervals in use. Approximate bound on error "
                             "is %.1e. The tolerances were not met." % (solver, E))
             else:
-                _m.warning_("Reached the limit on the maximum number of intervals in use. Approximate bound on error "
+                warn("Reached the limit on the maximum number of intervals in use. Approximate bound on error "
                             "is %.1e." % E)
             return Q, E
         subs = [p for lo_, hi_ in subs for p in ((lo_, (lo_ + hi_) / 2), ((lo_ + hi_) / 2, hi_))]
@@ -1194,7 +1195,7 @@ def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
         dx = np.abs(np.diff(xs))[fin]
         scale = np.maximum(np.abs(xs[:-1]), np.abs(xs[1:]))[fin]
         if np.any(dx <= 100 * _EPS * scale):
-            _m.warning_("%s: a subinterval became too short for the precision of the arithmetic. Approximate bound on "
+            warn("%s: a subinterval became too short for the precision of the arithmetic. Approximate bound on "
                         "error is %.1e. The tolerances may not be met." % (solver, E))
             return Q, E
 
@@ -1413,3 +1414,151 @@ def quadgk_(nargout, fun=None, a=None, b=None, *opts):
     if nargout > 2:
         raise _err("Too many output arguments.")
     return _integrate(nargout, "quadgk", fun, a, b, list(opts))
+
+
+# ------------------------------------------------------------------ integral2, integral3
+
+def _quad1(g, a, b, atol, rtol, solver, warn):
+    """the integral of g (a function of a numpy array of points) from a to b
+    by integral's method (_gk_path, _gk_core)"""
+    if a == b:
+        return 0.0
+    breaks, X, D, sign = _gk_path(a, b, [])
+
+    def F(t):
+        return np.asarray(g(X(t)), dtype=float).reshape(-1) * D(t)
+    Q, _ = _gk_core(F, breaks, lambda t: X(np.asarray(t, dtype=float)), atol, rtol, 650.0, solver, True, warn)
+    return float(Q) * sign
+
+
+def _multi(nargout, solver, fun, lims, opts):
+    """integral2 and integral3 by the iterated method their pages describe:
+    integral over x of the integral over y (of the integral over z), each
+    by integral's method, the inner limits functions of the outer
+    variables or numbers"""
+    f = _m._fn_arg(fun)
+    names = {"abstol": "AbsTol", "absolutetolerance": "AbsTol", "reltol": "RelTol", "relativetolerance": "RelTol",
+             "method": "Method", "vectorized": "Vectorized", "waypoints": "Waypoints"}
+    if len(opts) % 2:
+        raise _err("%s: name-value arguments must come in pairs." % solver)
+    o = {}
+    for k in range(0, len(opts), 2):
+        if not _istext(opts[k]) or _text(opts[k]).lower() not in names:
+            raise _err("%s: unknown option%s." % (solver, " '%s'" % _text(opts[k]) if _istext(opts[k]) else ""))
+        o[names[_text(opts[k]).lower()]] = opts[k + 1]
+
+    def num(name, default):
+        if name not in o:
+            return default
+        v = o[name]
+        if type(v) is _m.Char or not _m._isnumlike(v) or _m._numel(v) != 1 or np.iscomplexobj(_m._arr(v)) \
+                or not _m._scalar(v) >= 0:
+            raise _err("%s: %s must be a nonnegative real scalar." % (solver, name))
+        return float(_m._scalar(v))
+    atol, rtol = num("AbsTol", 1e-10), num("RelTol", 1e-6)
+    if rtol > 0:
+        rtol = max(rtol, 100 * _EPS)
+    method = _text(o["Method"]).lower() if "Method" in o and _istext(o["Method"]) else "auto"
+    if method not in ("auto", "tiled", "iterated"):
+        raise _err("%s: Method must be \"auto\", \"tiled\" or \"iterated\"." % solver)
+    if method == "tiled":
+        raise _err("%s: the \"tiled\" method is not supported in Sagebrush; use \"iterated\" (which \"auto\" uses)." % solver)
+    if "Waypoints" in o:
+        raise _err("%s: Waypoints are not supported in Sagebrush." % solver)
+    vectorized = not ("Vectorized" in o and not bool(_m._logical_val(o["Vectorized"])))
+    single = False
+    lim = []
+    for v in lims:
+        if _m._iscallable(v) or _istext(v):
+            lim.append(_m._fn_arg(v))
+        else:
+            if type(v) is _m.Char or not _m._isnumlike(v) or _m._numel(v) != 1 or np.iscomplexobj(_m._arr(v)):
+                raise _err("%s: the limits must be real scalars or function handles." % solver)
+            single = single or _m.class_(v) == "single"
+            x = float(_m._scalar(v))
+            if x != x:
+                raise _err("%s: the limits must not be NaN." % solver)
+            lim.append(x)
+    for v in lim[:2]:
+        if callable(getattr(v, "call", None)):
+            raise _err("%s: xmin and xmax must be real scalars." % solver)
+    failed = []
+
+    def warn(msg):
+        failed.append(msg)
+
+    def call(fn, args):
+        """fn at arrays of points: vectorized, or one point at a time"""
+        n = args[0].size
+        if vectorized:
+            r = _m._call(fn, [_m._box(np.array(a, dtype=float).reshape((-1, 1))) for a in args])
+            y = np.array(_m._arr(r), dtype=float).reshape(-1) if _m._isnumlike(r) and type(r) is not _m.Char else None
+            if y is None or y.size != n:
+                raise _err("%s: the integrand and limit functions must return arrays the size of their inputs; use "
+                           "array operators (.*, ./, .^) or set Vectorized to false." % solver)
+            return y
+        out = np.empty(n)
+        for i in range(n):
+            r = _m._call(fn, [float(a[i]) for a in args])
+            if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != 1:
+                raise _err("%s: with Vectorized false, the integrand and limit functions must return scalars." % solver)
+            out[i] = float(_m._scalar(r))
+        return out
+
+    def limit(v, args):
+        return call(v, args) if not isinstance(v, float) else np.full(args[0].size, v)
+    if len(lim) == 4:
+        def outer(xs):
+            lo, hi = limit(lim[2], [xs]), limit(lim[3], [xs])
+            return np.array([_quad1(lambda ys, x=x: call(f, [np.full(ys.size, x), ys]), lo[i], hi[i], atol, rtol,
+                                    solver, warn) for i, x in enumerate(xs)])
+    else:
+        def outer(xs):
+            lo, hi = limit(lim[2], [xs]), limit(lim[3], [xs])
+            vals = []
+            for i, x in enumerate(xs):
+                def middle(ys, x=x):
+                    xv = np.full(ys.size, x)
+                    zl, zu = limit(lim[4], [xv, ys]), limit(lim[5], [xv, ys])
+                    return np.array([_quad1(lambda zs, y=y: call(f, [np.full(zs.size, x), np.full(zs.size, y), zs]),
+                                            zl[j], zu[j], atol, rtol, solver, warn) for j, y in enumerate(ys)])
+                vals.append(_quad1(middle, lo[i], hi[i], atol, rtol, solver, warn))
+            return np.array(vals)
+    q = _quad1(outer, lim[0], lim[1], atol, rtol, solver, warn)
+    if failed:
+        _m.warning_("%s: %s" % (solver, failed[-1].split(": ", 1)[-1] if failed[-1].startswith(solver) else failed[-1]))
+    if single:
+        return _m._canon(np.array([[q]], dtype=np.float32))
+    return q
+
+
+@_bi("integral2")
+def integral2_(nargout, fun=None, xmin=None, xmax=None, ymin=None, ymax=None, *opts):
+    """integral2 as its documentation page describes it: the integral of
+    fun(x, y) over xmin <= x <= xmax, ymin(x) <= y <= ymax(x) (limits
+    numbers, possibly infinite, or functions of x), with AbsoluteTolerance
+    (AbsTol, 1e-10), RelativeTolerance (RelTol, 1e-6), Method and
+    Vectorized.  The method is the page's "iterated" one: integral over x
+    of integral over y, each by integral's (Shampine 2008).  Sagebrush's
+    own choices: "auto" is "iterated" (the "tiled" method, Shampine's 2-D
+    program, which its page cites, is not available here, and is refused),
+    the inner integrals use the same tolerances, and their warnings are
+    reported once; Waypoints are refused"""
+    if ymax is None:
+        raise _err("Not enough input arguments.")
+    if nargout > 1:
+        raise _err("Too many output arguments.")
+    return _multi(nargout, "integral2", fun, [xmin, xmax, ymin, ymax], list(opts))
+
+
+@_bi("integral3")
+def integral3_(nargout, fun=None, xmin=None, xmax=None, ymin=None, ymax=None, zmin=None, zmax=None, *opts):
+    """integral3 as its documentation page describes it: the integral of
+    fun(x, y, z) over xmin <= x <= xmax, ymin(x) <= y <= ymax(x),
+    zmin(x, y) <= z <= zmax(x, y), with the options and the iterated method
+    of integral2 (and its own choices)"""
+    if zmax is None:
+        raise _err("Not enough input arguments.")
+    if nargout > 1:
+        raise _err("Too many output arguments.")
+    return _multi(nargout, "integral3", fun, [xmin, xmax, ymin, ymax, zmin, zmax], list(opts))

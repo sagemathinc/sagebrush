@@ -1049,3 +1049,26 @@ test("ode45, ode23, odeset, odeget and deval: the pages' published examples, eve
     "odeset: RelTol must be a positive scalar.",
   ]);
 });
+
+test("integral2 and integral3 reproduce their published examples by the iterated method, and refuse the tiled one", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "fun = @(x,y) 1./(sqrt(x+y).*(1+x+y).^2); fprintf('%.4f\\n', integral2(fun,0,1,0,@(x) 1 - x));",
+    "polarfun = @(theta,r) fun(r.*cos(theta),r.*sin(theta)).*r; fprintf('%.4f\\n', integral2(polarfun,0,pi/2,0,@(theta) 1./(sin(theta)+cos(theta))));",
+    "a = 3; b = 5; fprintf('%.15e\\n', integral2(@(x,y) a*x.^2+b*y.^2,0,5,-5,0,Method=\"iterated\",AbsoluteTolerance=0,RelativeTolerance=1e-10));",
+    "fprintf('%.4f\\n', integral2(@(x,y) log(x^2+y^2),0,2,0,2,Vectorized=false));",
+    "fprintf('%.4f\\n', integral3(@(x,y,z) y.*sin(x)+z.*cos(x),0,pi,0,1,-1,1));",
+    "fprintf('%.4f\\n', integral3(@(x,y,z) x.*cos(y)+x.^2.*cos(z),-1,1,@(x)-sqrt(1-x.^2),@(x) sqrt(1-x.^2),@(x,y)-sqrt(1-x.^2-y.^2),@(x,y) sqrt(1-x.^2-y.^2)));",
+    "try, integral2(@(x,y) x.*y,0,1,0,1,Method=\"tiled\"), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) x.*y,0,1,0,1,Waypoints={0.5, 0.5}), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) 1,0,1,0,1), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) x,0,1,0,1,0,1,'Bogus',1), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "0.2854", "0.2854", "1.666666666666667e+03", "2.6010", "2.0000", "0.7796",
+    "integral2: the \"tiled\" method is not supported in Sagebrush; use \"iterated\" (which \"auto\" uses).",
+    "integral2: Waypoints are not supported in Sagebrush.",
+    "integral2: the integrand and limit functions must return arrays the size of their inputs; use array operators (.*, ./, .^) or set Vectorized to false.",
+    "integral3: unknown option 'Bogus'.",
+  ]);
+});
