@@ -20,7 +20,11 @@ and runs on a runtime library with MATLAB's semantics:
   - **lib/_matlab_funfun.py**: function functions: the optimization options
     (optimset, optimget, from their documentation pages: the eight
     documented options, each solver's documented defaults, a default that
-    depends on the problem left empty for the solver to apply);
+    depends on the problem left empty for the solver to apply) and the
+    solvers: fzero is Brent's method (Brent 1973, chapter 4; Forsythe,
+    Malcolm and Moler 1976, section 7.2), which its page cites, after an
+    outward search for a sign change whose steps the published iterative
+    displays fix;
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -567,6 +571,13 @@ The rest:
   it picks "nice" edges, so Sagebrush's rules are its own (Scott's width
   rounded to Heckbert's nice numbers, 1, 2, 5 or 10 times a power of 10)
   and its edges can differ from MATLAB's;
+- fzero's details that neither its page nor a published display fixes are
+  Sagebrush's own: the search's first step from x0 = 0 (1/50), the end of
+  a search that would overflow (exitflag -6), never giving exitflag -5
+  (its page says what it means, a possible singular point, but not how it
+  is detected; a sign change at a pole ends like any other), an error for
+  a NaN or complex value inside the interval, when output functions are called, and the messages
+  other than "Zero found in the interval [a, b]". PlotFcns is refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
