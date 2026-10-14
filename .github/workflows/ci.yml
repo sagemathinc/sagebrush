@@ -96,6 +96,7 @@ jobs:
           CHROME=google-chrome node web/board/test-inplace.mjs
           CHROME=google-chrome node web/board/test-blocks.mjs
           CHROME=google-chrome node web/board/test-history.mjs
+          CHROME=google-chrome node web/board/test-history-order.mjs
           CHROME=google-chrome node web/board/test-cocalc.mjs
           CHROME=google-chrome node web/board/test-mount.mjs
           (cd packages/sagebrush-board && bun build.mjs && CHROME=google-chrome node test.mjs)
