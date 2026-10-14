@@ -90,18 +90,15 @@ fn check_rational(bound: u64) -> usize {
         let forms = ns.rational_newforms().unwrap();
         let mut got: Vec<Vec<(Hnf, i64)>> = forms
             .iter()
-            .map(|f| f.aplist(ns.top(), 50).unwrap().into_iter().filter_map(|(p, a)| a.map(|a| (p.hnf, a))).collect())
+            .map(|f| f.aplist(ns.top(), 50).unwrap().into_iter().map(|(p, a)| (p.hnf, a)).collect())
             .collect();
         let mut theirs: Vec<Vec<(Hnf, i64)>> = want
             .iter()
             .filter(|(_, h, _)| *h == n.hnf)
             .map(|(_, _, aps)| {
-                // our aplist omits primes exactly dividing N (+-1, not yet computed)
-                let mut v: Vec<(Hnf, i64)> = aps
-                    .iter()
-                    .filter(|(p, _)| n.factors.iter().all(|(q, e)| q.hnf != *p || *e >= 2))
-                    .cloned()
-                    .collect();
+                // every prime, those dividing N included (U_P: the LMFDB
+                // stores a_P there, -1 times the Atkin-Lehner eigenvalue)
+                let mut v = aps.clone();
                 v.sort();
                 v
             })
@@ -117,8 +114,8 @@ fn check_rational(bound: u64) -> usize {
     count
 }
 
-/// Rational newforms and their a_P at the primes of norm <= 50, at every
-/// level of norm <= 400.
+/// Rational newforms and their a_P at the primes of norm <= 50, those
+/// dividing the level included (U_P), at every level of norm <= 400.
 #[test]
 fn rational_newforms_vs_lmfdb() {
     assert!(check_rational(400) > 50);
