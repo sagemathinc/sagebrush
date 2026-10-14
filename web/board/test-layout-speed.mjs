@@ -2,7 +2,7 @@
 // sizes) is quick: 1000 notes, 5000 pen strokes and 500 edges laid out in
 // well under a second, the edges' routes deferred; laid out again (as after
 // each edit), quicker still (strokes' outlines kept); the routes' first
-// steps each short.
+// steps each short; edges cross pen strokes, so every edge is routed, soon.
 //   bun web/board/test-layout-speed.mjs
 import { layout } from "./doc.ts";
 
@@ -35,6 +35,22 @@ check(l1.items.length === N + S && l1.edges.length === E, "everything laid out")
 check(first < 600, `1000 notes, 5000 strokes and 500 edges laid out in under 600 ms: ${first.toFixed(0)} ms`);
 check(again < first && again < 300, `laid out again: quicker, under 300 ms: ${again.toFixed(0)} ms`);
 check(longest < 150, `each of the routes' first steps is short (under 150 ms): ${longest.toFixed(1)} ms`);
+
+// edges cross pen strokes: not routed around them (design/board.md), so
+// every edge of the large board is routed, and soon
+{
+  const t0 = performance.now();
+  const l = layout(doc, undefined, { deferRoutes: true });
+  let longestStep = 0;
+  for (;;) { const t = performance.now(); const r = l.routing.next(); longestStep = Math.max(longestStep, performance.now() - t); if (r.done || performance.now() - t0 > 60000) break; }
+  const routed = l.edges.filter((e) => e.points).length, took = performance.now() - t0;
+  console.log(`routed ${routed} of ${E} edges in ${took.toFixed(0)} ms, the longest step ${longestStep.toFixed(0)} ms`);
+  check(routed === E && took < 15000 && longestStep < 200, `every edge routed (pen strokes crossed, not avoided), in under 15 s, each step under 200 ms: ${routed} of ${E}, ${took.toFixed(0)} ms, ${longestStep.toFixed(0)} ms`);
+  // (a stroke across an edge's straight path: the edge goes straight through it)
+  const small = layout({ nodes: [{ id: "a", title: "A", x: 0, y: 0, w: 200 }, { id: "b", title: "B", x: 600, y: 0, w: 200 }, { id: "s", kind: "ink", x: 350, y: -100, points: [0, 0, 0.5, 0, 300, 0.5], size: 40 }], edges: [{ from: "a", to: "b" }] });
+  const p = small.edges[0].points ?? [];
+  check(p.length === 4 && p[1] === p[3], "an edge with a pen stroke across its way goes straight through it: " + JSON.stringify(p));
+}
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);

@@ -326,9 +326,18 @@ go around boxes. The method is after Excalidraw's elbow arrows
 - a stub out of each box.
 
 Theirs avoid only the arrow's own two ends. Ours avoid:
-- every note;
+- every note (and sticker);
 - every group an edge doesn't belong to;
 - the titles of the groups it enters.
+
+Not pen strokes (Oct 14, 2026): an edge crosses them, as in Excalidraw and
+tldraw. Strokes are annotations, often drawn over or around connections,
+and going around each made detours. On a large board it also made the
+search impossible: 1,000 notes, 500 edges and 5,000 strokes routed 49 of
+the 500 edges in 20 s; without the strokes, all 500 in 1.8 s.
+test-layout-speed.mjs checks it. A route whose search grid would pass
+500,000 points is not searched (the edge stays straight), so a page cannot
+run out of memory routing one.
 
 They also keep 16 px clear, and prefer the middles of the gaps (channels).
 Running along an earlier route costs 2.5 times its length. The ends that

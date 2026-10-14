@@ -629,7 +629,8 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   return { items, edges: out, routing };
 }
 
-// Each edge's route around everything it does not belong to: the outermost
+// Each edge's route around everything it does not belong to (not pen
+// strokes, which it crosses): the outermost
 // boxes not holding either end (a group holding an end is entered, and its
 // other members are what to go around), along the axis of the layout of the
 // smallest group holding both ends.
@@ -665,7 +666,8 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
     const obstacles: Rect[] = [];
     const scan = (ns: DocNode[]) => {
       for (const n of ns) {
-        if (n.id === e.from || n.id === e.to) continue;
+        // (not pen strokes: an edge crosses them, design/board.md)
+        if (n.id === e.from || n.id === e.to || n.kind === "ink") continue;
         if (A.has(n.id) || B.has(n.id)) {
           const hd = header(n.id);
           if (hd) obstacles.push(hd);
