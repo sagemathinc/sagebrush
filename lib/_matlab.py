@@ -597,23 +597,114 @@ def mtimes(a, b):
     return _finish(np.matmul(B, A), cls)
 
 
+def _lu_factors(A):
+    """(L, U) with P A = L U by Gaussian elimination with partial pivoting (the
+    first largest pivot in each column), or None if a pivot is zero"""
+    n = A.shape[0]
+    U = np.array(A, dtype=np.complex128 if A.dtype.kind == "c" else np.float64)
+    L = np.eye(n, dtype=U.dtype)
+    for k in range(n):
+        p = int(np.argmax(np.abs(U[k:, k]))) + k
+        if U[p, k] == 0:
+            return None
+        if p != k:
+            U[[k, p], :] = U[[p, k], :]
+            L[[k, p], :k] = L[[p, k], :k]
+        if k + 1 < n:
+            l = U[k + 1:, k] / U[k, k]
+            L[k + 1:, k] = l
+            U[k + 1:, k:] -= l.reshape((-1, 1)) * U[k, k:].reshape((1, -1))
+            U[k + 1:, k] = 0
+    return L, U
+
+
+def _tri_solve(T, b, lower, transpose=False):
+    """T x = b (or T' x = b, conjugated) for triangular T"""
+    n = T.shape[0]
+    M = np.conj(T.T) if transpose else T
+    low = lower != transpose
+    x = np.array(b, dtype=np.result_type(M.dtype, b.dtype))
+    order = range(n) if low else range(n - 1, -1, -1)
+    for i in order:
+        if low:
+            s_ = x[i] - np.dot(M[i, :i], x[:i])
+        else:
+            s_ = x[i] - np.dot(M[i, i + 1:], x[i + 1:])
+        x[i] = s_ / M[i, i]
+    return x
+
+
+def _rcond_estimate(A):
+    """the 1-norm reciprocal condition number, estimated as rcond and the
+    "close to singular" warning document it: 1/(||A||_1 est), est Higham's
+    estimate of ||A^-1||_1 (N. J. Higham, "FORTRAN codes for estimating the
+    one-norm of a real or complex matrix", ACM TOMS 14, 1988, Algorithm 674;
+    as LAPACK's dgecon uses it), from the LU factors: ||A^-1||_1 is the
+    1-norm of U^-1 L^-1, the row permutation aside; 0 if A is singular"""
+    n = A.shape[0]
+    anorm = float(np.max(np.sum(np.abs(A), axis=0)))
+    if anorm == 0:
+        return 0.0
+    f = _lu_factors(A)
+    if f is None:
+        return 0.0
+    L, U = f
+    cplx = U.dtype.kind == "c"
+
+    def B(x):
+        return _tri_solve(U, _tri_solve(L, x, True), False)
+
+    def Bt(x):
+        return _tri_solve(L, _tri_solve(U, x, False, True), True, True)
+
+    def sgn(x):
+        if cplx:
+            a = np.abs(x)
+            return np.where(a == 0, 1.0, x / np.where(a == 0, 1.0, a))
+        return np.where(x >= 0, 1.0, -1.0)
+    with np.errstate(all="ignore"):
+        x = B(np.full(n, 1.0 / n, dtype=U.dtype))
+        est = float(np.sum(np.abs(x)))
+        if n > 1 and np.isfinite(est):
+            xi = sgn(x)
+            x = Bt(xi)
+            j = int(np.argmax(np.abs(x)))
+            it = 2
+            while True:
+                e = np.zeros(n, dtype=U.dtype)
+                e[j] = 1.0
+                x = B(e)
+                old = est
+                est = float(np.sum(np.abs(x)))
+                new = sgn(x)
+                if (not cplx and np.all(new == xi)) or est <= old:
+                    break
+                xi = new
+                x = Bt(xi)
+                last = j
+                j = int(np.argmax(np.abs(x)))
+                if np.real(x[last]) == np.abs(x[j]) or it >= 5:
+                    break
+                it += 1
+            # (Higham's extra estimate from the alternating vector 1, -(1 + 1/(n-1)), ...)
+            alt = np.array([(-1.0) ** i * (1.0 + i / (n - 1)) for i in range(n)], dtype=U.dtype)
+            t = 2.0 * float(np.sum(np.abs(B(alt)))) / (3.0 * n)
+            est = max(est, t)
+    if not np.isfinite(est) or est == 0:
+        return 0.0
+    return (1.0 / est) / anorm
+
+
 def _rcond_warning(A, Ainv=None):
-    """MATLAB's warning when A is close to singular: rcond(A) (the 1-norm
-    reciprocal condition number) below eps.  (Measured exactly, so only for
-    matrices of up to 500 rows.)"""
+    """the warning when A is close to singular: the estimated rcond
+    (_rcond_estimate) between 0 and eps, the threshold MATLAB's mldivide
+    documentation states ("When rcond is between 0 and eps, MATLAB issues a
+    nearly singular warning").  (Only for matrices of up to 500 rows.)"""
     n = A.shape[0]
     if n == 0 or n > 500:
         return
-    try:
-        Ai = np.linalg.inv(A) if Ainv is None else Ainv
-    except np.linalg.LinAlgError:
-        return
-    na = float(np.max(np.sum(np.abs(A), axis=0)))
-    ni = float(np.max(np.sum(np.abs(Ai), axis=0)))
-    if not (na and np.isfinite(ni)):
-        return
-    rc = 1.0 / (na * ni)
-    if rc < 2.220446049250313e-16:
+    rc = _rcond_estimate(A)
+    if 0 < rc < 2.220446049250313e-16:
         warning_("Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = %e." % rc)
 
 

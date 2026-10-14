@@ -502,3 +502,10 @@ test("linspace as MATLAB documents it: n <= 0, n = 1, a non-integer n, NaN, comp
   assert.equal(run("linspace(1+2i, 10+10i, 8)"), "[1+2i 2.2857+3.1429i 3.5714+4.2857i 4.8571+5.4286i 6.1429+6.5714i 7.4286+7.7143i 8.7143+8.8571i 10+10i]");
   assert.equal(run("class(linspace(single(0), 1, 3))"), "'single'");
 });
+
+test("the close-to-singular warning prints Higham's estimated RCOND, as the published magic(4) example shows", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c",
+    "lastwarn(''); x = magic(4) \\ [34; 34; 34; 34]; disp(lastwarn)"], { encoding: "utf8" });
+  assert.equal(out.trim(), "Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = 1.306145e-17.");
+});

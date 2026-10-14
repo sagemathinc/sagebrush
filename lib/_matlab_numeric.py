@@ -380,7 +380,8 @@ def orth_(x):
 
 @_bs("rcond")
 def rcond_(x):
-    """the reciprocal of the 1-norm condition number (0 for a singular matrix)"""
+    """the 1-norm reciprocal condition number, estimated (Higham's estimator,
+    as _matlab._rcond_estimate): MATLAB documents rcond as an estimate"""
     A = _mat(x)
     _square(A, "rcond")
     n = A.shape[0]
@@ -388,15 +389,7 @@ def rcond_(x):
         return _math.inf
     if not np.all(np.isfinite(A)):
         return _math.nan
-    na = float(np.max(np.sum(np.abs(A), axis=0)))
-    if na == 0:
-        return 0.0
-    try:
-        Ai = np.linalg.inv(A) if A.dtype.kind != "c" else _m._lu_solve_through(A, np.eye(n, dtype=np.complex128))
-    except np.linalg.LinAlgError:
-        return 0.0
-    ni = float(np.max(np.sum(np.abs(Ai), axis=0)))
-    return 0.0 if not np.isfinite(ni) or ni == 0 else 1.0 / (na * ni)
+    return _m._rcond_estimate(A)
 
 
 _LINSOLVE_OPTS = ("LT", "UT", "UHESS", "SYM", "POSDEF", "RECT", "TRANSA")
