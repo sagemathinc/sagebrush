@@ -16,8 +16,11 @@
 // script, a notebook cell), a name not assigned yet may still be a variable
 // of the workspace, so it is looked up when it runs.  See design/matlab.md.
 
+import { inBlockComment } from "./m-file";
+
 export class MatlabSyntaxError extends Error {
-  constructor(msg: string, public line: number, public col: number) {
+  /** atEnd: the input ended where more was needed (an open block, bracket or continuation) */
+  constructor(msg: string, public line: number, public col: number, public atEnd = false) {
     super(msg);
   }
 }
@@ -312,7 +315,7 @@ class Parser {
     if (!this.at(v)) { const t = this.peek(); this.fail(`expected '${v}' but found ${desc(t)}`); }
     return this.next();
   }
-  fail(msg: string, t = this.peek()): never { throw new MatlabSyntaxError(msg, t.line, t.col); }
+  fail(msg: string, t = this.peek()): never { throw new MatlabSyntaxError(msg, t.line, t.col, t.t === "eof"); }
   ident() {
     const t = this.next();
     if (t.t !== "id") this.fail(`expected a name but found ${desc(t)}`, t);
@@ -1536,6 +1539,23 @@ export function matlabFunctions(src: string): string[] {
 
 // (.m files are Magma's and MATLAB's: src/m-file.ts tells them apart)
 export { looksLikeMagma } from "./m-file";
+
+/**
+ * Whether MATLAB text is incomplete, so that a console (Jupyter's
+ * is_complete, the page's console) waits for more lines: it ends inside a
+ * block (`if` without `end`), a bracket, a `...` continuation or a block
+ * comment.  Text with a real syntax error is complete: running it reports
+ * the error.
+ */
+export function matlabIsIncomplete(src: string): boolean {
+  if (inBlockComment(src)) return true;
+  try {
+    new Parser(lex(src)).program();
+    return false;
+  } catch (e) {
+    return e instanceof MatlabSyntaxError && e.atEnd;
+  }
+}
 
 /** A syntax error as MATLAB reports it (for stderr). */
 export function matlabSyntaxMessage(e: MatlabSyntaxError, src: string, file: string): string {

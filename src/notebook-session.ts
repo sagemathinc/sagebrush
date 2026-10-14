@@ -37,7 +37,7 @@
 import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
-import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps } from "./matlab";
+import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 
@@ -180,8 +180,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     const { id } = m;
     const { main, host } = await ready;
     if (m.check !== undefined) {
-      // Magma's and MATLAB's consoles run each line as it is entered
-      post({ id, more: m.magma || m.matlab ? false : needsMore(m.check, { sage: !!m.sage }) });
+      // Magma's console runs each line as it is entered; MATLAB's waits for the end of an open block
+      post({ id, more: m.magma ? false : m.matlab ? matlabIsIncomplete(m.check) : needsMore(m.check, { sage: !!m.sage }) });
       return;
     }
     if (m.complete !== undefined) {
