@@ -2,8 +2,10 @@
 // Publish the engine web/build.ts made (web/dist/engine/<id>/) to R2, where
 // the site's Worker serves it at sagebrush.space/engine/<id>/ forever
 // (web/engines.ts, design/engines.md).  An engine already there is left as
-// it is: its files never change.  The manifest goes last, so an engine is
-// served only once all its files are in.  Run before deploying the site
+// it is (its files never change) if its manifest is this one; if it isn't
+// (an id is its manifest's content, web/engine-id.mts, so it can't be),
+// this fails loudly rather than leave the old one served (SEC-CAC-2).  The
+// manifest goes last, so an engine is served only once all its files are in.  Run before deploying the site
 // (whose /engine/latest.json then names this engine).
 //
 //   node scripts/publish-engine.mjs           what it would do
@@ -12,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const apply = process.argv.includes("--apply");
@@ -22,13 +25,18 @@ const man = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
 const env = { ...process.env, NO_COLOR: "1", CF_SEND_TELEMETRY: "false" };
 const cf = (...args) => execFileSync("cf", args, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 });
 
-let exists = false;
+let published = null;
 try {
-  cf("r2", "objects", "get", `engine/${id}/manifest.json`, "--bucket-name", BUCKET);
-  exists = true;
+  published = cf("r2", "objects", "get", `engine/${id}/manifest.json`, "--bucket-name", BUCKET);
 } catch {}
-if (exists) {
-  console.log(`engine ${id} is already published`);
+if (published !== null) {
+  let same = false;
+  try { same = isDeepStrictEqual(JSON.parse(published), man); } catch {}
+  if (!same) {
+    console.error(`engine ${id} is published with ANOTHER manifest: not overwriting it.  Compare engine/${id}/manifest.json in ${BUCKET} with ${join(dir, "manifest.json")}.`);
+    process.exit(1);
+  }
+  console.log(`engine ${id} is already published, with this manifest`);
   process.exit(0);
 }
 const files = [...Object.keys(man.files), "manifest.json"];

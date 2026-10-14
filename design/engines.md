@@ -12,10 +12,10 @@ An **engine** is what runs code in the browser:
 - **`web/build.ts`** writes `web/dist/engine/<id>/`:
   - the files;
   - a `manifest.json`: `{format: "sagebrush-engine", id, api, files: {name: {sha256, size, headers}}}`.
-  - `<id>` is the first 20 hex digits of the SHA-256 of the files' names and hashes, so a build that changes no engine file makes the same id.
+  - `<id>` is the first 20 hex digits of the SHA-256 of the manifest's content: the format, `api`, and each file's name, SHA-256, size and response headers (web/engine-id.mts). A build that changes no engine file and no header makes the same id. A change of headers alone, such as a tighter runner policy, is a new engine (SEC-CAC-2).
   - `headers` is what each file is served with: its type, and for the runner's page its Content-Security-Policy (no network) and cross-origin isolation.
 - **`web/dist/engine/latest.json`** (`{id, api}`) is the deployed engine, a static file of the site, cached for a minute.
-- **`scripts/publish-engine.mjs`** uploads a new engine to R2 (the `sagebrush-releases` bucket, under `engine/<id>/`), manifest last. An id already there is left alone: its files never change. It runs before each deploy of the site.
+- **`scripts/publish-engine.mjs`** uploads a new engine to R2 (the `sagebrush-releases` bucket, under `engine/<id>/`), manifest last. An id already there is left alone if its manifest is this one (its files never change); if it is another, the script fails rather than leave the old one served. It runs before each deploy of the site.
 - **`web/engines.ts`** is the site Worker's route for `/engine/<id>/<file>`. It serves the file from R2 with the manifest's headers, plus:
   - `Cache-Control: immutable`;
   - `Access-Control-Allow-Origin: *`, so pages and downloaded files anywhere can read it;
@@ -41,7 +41,7 @@ A board downloaded as one HTML file can embed the engine. A `file://` page is ne
 
 ## Integrity
 
-A page that loads an engine by id checks each file against the SHA-256 built into it (the board's export does this). Neither a changed server nor an edited file can substitute an engine. The latest engine is trusted as the site is, over HTTPS.
+A page that loads an engine by id checks each file against the SHA-256 built into it (the board's export does this). Neither a changed server nor a file whose engine parts were edited can substitute an engine. The latest engine is trusted as the site is, over HTTPS: its manifest must have latest.json's id and api, and its content must give that id (HARD-CAC-4). The file itself is not signed, so an edited file can name another site or carry another script.
 
 ## Testing
 

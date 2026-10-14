@@ -11,7 +11,11 @@ interface R2Obj { body: ReadableStream; size: number }
 export interface EnginesEnv { ENGINES?: { get(key: string): Promise<R2Obj | null> } }
 interface Manifest { files: Record<string, { sha256: string; size: number; headers: Record<string, string> }> }
 
-const manifests = new Map<string, Manifest | null>();
+const manifests = new Map<string, Manifest>();
+// (ids with no manifest, briefly: each would cost an R2 read (HARD-CAC-5),
+// and one may be published at any time)
+const missing = new Map<string, number>();
+const MISSING_MS = 60_000, MISSING_MAX = 1000;
 
 const COMMON: Record<string, string> = {
   "Cache-Control": "public, max-age=31536000, immutable",
@@ -21,11 +25,20 @@ const COMMON: Record<string, string> = {
 };
 
 async function manifest(env: EnginesEnv, id: string): Promise<Manifest | null> {
-  if (manifests.has(id)) return manifests.get(id)!;
+  const known = manifests.get(id);
+  if (known) return known;
+  const t = missing.get(id);
+  if (t !== undefined && Date.now() - t < MISSING_MS) return null;
   const o = await env.ENGINES!.get(`engine/${id}/manifest.json`);
   const m = o ? ((await new Response(o.body).json()) as Manifest) : null;
-  if (m) manifests.set(id, m);
-  return m;
+  if (m && m.files && typeof m.files === "object") {
+    missing.delete(id);
+    manifests.set(id, m);
+    return m;
+  }
+  if (missing.size >= MISSING_MAX) missing.delete(missing.keys().next().value!);
+  missing.set(id, Date.now());
+  return null;
 }
 
 /** The response for an engine's file, or null if the request is not for one. */
@@ -42,7 +55,8 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
     if (hit) return hit;
   }
   const man = await manifest(env, id);
-  const entry = file === "manifest.json" ? { headers: { "Content-Type": "application/json" } } : man?.files[file];
+  // (its own entries only: not "constructor" or the like, SEC-CAC-3)
+  const entry = file === "manifest.json" ? { headers: { "Content-Type": "application/json" } } : man && Object.hasOwn(man.files, file) ? man.files[file] : undefined;
   if (!man || !entry) return new Response("no such engine file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
   const o = await env.ENGINES.get(`engine/${id}/${file}`);
   if (!o) return new Response("no such engine file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
