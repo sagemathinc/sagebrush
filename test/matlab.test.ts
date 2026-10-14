@@ -390,7 +390,7 @@ test("format's two-word forms (format long g) are its one-word ones; an unknown 
   assert.deepEqual(lines.slice(4, 6), ["Invalid format option 'foo'.", "refused"]);
 });
 
-test("data functions where Octave differs from MATLAB: prctile down a column vector, mov* with a numeric Endpoints fill, sprand's places, corrcoef's range and conjugate", () => {
+test("data functions where Octave differs from MATLAB: prctile down a column vector, mov* with a numeric Endpoints fill, sprand's published nonzero count, corrcoef's range and conjugate", () => {
   const { execFileSync } = require("node:child_process");
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
