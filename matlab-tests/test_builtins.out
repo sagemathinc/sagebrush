@@ -178,3 +178,17 @@ double 1x1 NaN
 double 1x1 Inf
 double 1x1 -Inf
 double 1x3 [NaN Inf -3]
+double 1x12 [1 1 1 2 2 2 3 3 3 4 4 4]
+double 1x10 [1 1 2 2 3 3 3 4 4 4]
+double 8x1 [1;1;2;2;3;3;4;4]
+double 6x4 [1 1 2 2;1 1 2 2;1 1 2 2;3 3 4 4;3 3 4 4;3 3 4 4]
+double 2x5 [1 1 2 2 2;3 3 4 4 4]
+double 1x4 [1 1 2 2]
+double 1x3 [5 5 5]
+char 1x4 ['aabb']
+int8 1x3 [2 2 2]
+logical 1x4 [true true true true]
+double 1x2 [1 0]
+double 1x2 [1 4]
+char 1x1 ['x']
+double 1x3 [2 2 6]
