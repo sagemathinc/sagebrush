@@ -897,7 +897,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (which version it runs is the board's: kept in it)
     const use = f.get("engine") === "latest" ? "latest" : undefined;
     if (doc && use !== doc.engine) await editor.commit((d) => { if (use) d.engine = use; else delete d.engine; });
-    await downloadHtml(f.get("python") === "on", f.get("outputs") === "on" ? carried : []);
+    // (the outputs as they are now: not as when the dialog opened, another board perhaps, CORR-2D0-1)
+    await downloadHtml(f.get("python") === "on", f.get("outputs") === "on" && carried.length ? ((await code?.carry().catch(() => [])) ?? []) : []);
   };
   async function downloadHtml(python: boolean, outputs: CachedOutputs[] = []) {
     if (!doc) return;

@@ -364,17 +364,31 @@ export class BoardCode {
   async carry(): Promise<CachedOutputs[]> {
     if (!(await this.ready)) return [];
     await this.last;
-    const keys = await this.nb.outputKeys();
-    const out: CachedOutputs[] = [];
-    for (const c of this.nb.cells()) {
-      const id = c.id, k = keys?.[id], state = this.state(id), e = this.shown.get(id);
-      if (!k?.key || k.widget || k.reads) continue;
-      // (one shown from the cache is held, so marked stale: still its key's)
-      if (e) {
-        if (e.key === k.key && (state === "" || state === "failed" || state === "stale")) out.push({ key: e.key, outputs: e.outputs, at: e.at, ms: e.ms, total: e.total, ...(e.engine ? { engine: e.engine } : {}) });
-      } else if ((state === "" || state === "failed") && !this.held.has(id) && this.ranAt.has(id) && k.fromRoot > this.cacheMs) {
-        out.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at: this.ranAt.get(id)!, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot) });
+    // (each output read between two readings of the keys, with no run
+    // finished meanwhile: an item whose key is the same in both is of its
+    // key, CORR-2D0-1; else, read again)
+    let out: CachedOutputs[] = [];
+    for (let tries = 0; ; tries++) {
+      if (tries === 5) return [];
+      const runs = this.runs, gens = new Map(this.gens);
+      const keys = await this.nb.outputKeys();
+      if (this.closed) return [];
+      out = [];
+      const ids: string[] = [];
+      for (const c of this.nb.cells()) {
+        const id = c.id, k = keys?.[id], state = this.state(id), e = this.shown.get(id);
+        if (!k?.key || k.widget || k.reads || this.generation(id) !== (gens.get(id) ?? 0)) continue;
+        // (one shown from the cache is held, so marked stale: still its key's)
+        if (e) {
+          if (e.key !== k.key || !(state === "" || state === "failed" || state === "stale")) continue;
+          out.push({ key: e.key, outputs: e.outputs, at: e.at, ms: e.ms, total: e.total, ...(e.engine ? { engine: e.engine } : {}) });
+        } else if ((state === "" || state === "failed") && !this.held.has(id) && this.ranAt.has(id) && k.fromRoot > this.cacheMs) {
+          out.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at: this.ranAt.get(id)!, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot) });
+        } else continue;
+        ids.push(id);
       }
+      const again = await this.nb.outputKeys();
+      if (this.runs === runs && ids.every((id, i) => again?.[id]?.key === out[i].key)) break;
     }
     out.sort((a, b) => b.total - a.total);
     let total = 0;
