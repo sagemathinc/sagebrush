@@ -509,3 +509,15 @@ test("the close-to-singular warning prints Higham's estimated RCOND, as the publ
     "lastwarn(''); x = magic(4) \\ [34; 34; 34; 34]; disp(lastwarn)"], { encoding: "utf8" });
   assert.equal(out.trim(), "Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = 1.306145e-17.");
 });
+
+test("lu's 'vector' form gives P as a row, as the published whos output shows (1x1000 for a 1000-by-1000 A), and lu refuses the sparse-only forms", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "A = magic(4); [L, U, p] = lu(A, 'vector'); disp(mat2str(size(p))); disp(norm(A(p, :) - L*U) < 1e-12);",
+    "[L, U, p] = lu(sparse(A), 'vector'); disp(mat2str(size(p))); disp(issparse(p));",
+    "try, [L, U, P, Q] = lu(sparse(A)); catch e, disp(e.message), end",
+    "try, [L, U, P] = lu(sparse(A), 0.5); catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["[1 4]", "1", "[1 4]", "0",
+    "lu: the column permutation Q and the scaling D are not supported in Sagebrush.", "lu: pivoting thresholds are not supported in Sagebrush."]);
+});

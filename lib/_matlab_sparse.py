@@ -1086,9 +1086,12 @@ def _sparse_out(name):
         if not _has_sparse(args):
             return f(nargout, *args)
         r = f(nargout, *[full(a) if type(a) is Sparse else a for a in args])
+        keep = which
+        if name == "lu" and any(_m._istext(a) and _m._text(a).lower() == "vector" for a in args):
+            keep = (0, 1)  # (a permutation vector is full)
         multi = type(r) is list
         outs = r if multi else [r]
-        outs = [from_full(o) if k in which and _m._isnumlike(o) and _m.class_(o) in ("double", "single", "logical")
+        outs = [from_full(o) if k in keep and _m._isnumlike(o) and _m.class_(o) in ("double", "single", "logical")
                 and len(_m._dims(o)) == 2 else o for k, o in enumerate(outs)]
         return outs if multi else outs[0]
     return g
