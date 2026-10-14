@@ -814,3 +814,73 @@ test("fminbnd reproduces its published examples, and its exits and refusals", ()
     "fminbnd: the PlotFcns option is not supported in Sagebrush.",
   ]);
 });
+
+test("fminsearch reproduces its published examples: the iterative display, results, and an output function's history", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const objectivefcn1 = "\nfunction f = objectivefcn1(x)\nf = 0;\nfor k = -10:10\n    f = f + exp(-(x(1)-x(2))^2 - 2*x(1)^2)*cos(x(2))*sin(2*x(2));\nend\nend";
+  const rows = [
+    [0, 1, "-6.70447", ""], [1, 3, "-6.89837", "initial simplex"], [2, 5, "-7.34101", "expand"], [3, 7, "-7.91894", "expand"],
+    [4, 9, "-9.07939", "expand"], [5, 11, "-10.5047", "expand"], [6, 13, "-12.4957", "expand"], [7, 15, "-12.6957", "reflect"],
+    [8, 17, "-12.8052", "contract outside"], [9, 19, "-12.8052", "contract inside"], [10, 21, "-13.0189", "expand"],
+    [11, 23, "-13.0189", "contract inside"], [12, 25, "-13.0374", "reflect"], [13, 27, "-13.122", "reflect"],
+    [14, 28, "-13.122", "reflect"], [15, 29, "-13.122", "reflect"], [16, 31, "-13.122", "contract outside"],
+    [17, 33, "-13.1279", "contract inside"], [18, 35, "-13.1279", "contract inside"], [19, 37, "-13.1296", "contract inside"],
+    [20, 39, "-13.1301", "contract inside"], [21, 41, "-13.1305", "reflect"], [22, 43, "-13.1306", "contract inside"],
+    [23, 45, "-13.1309", "contract inside"], [24, 47, "-13.1309", "contract inside"], [25, 49, "-13.131", "reflect"],
+    [26, 51, "-13.131", "contract inside"], [27, 53, "-13.131", "contract inside"], [28, 55, "-13.131", "contract inside"],
+    [29, 57, "-13.131", "contract outside"], [30, 59, "-13.131", "contract inside"], [31, 61, "-13.131", "contract inside"],
+    [32, 63, "-13.131", "contract inside"], [33, 65, "-13.131", "contract outside"], [34, 67, "-13.131", "contract inside"],
+    [35, 69, "-13.131", "contract inside"],
+  ].map(([i, n, f, p]) => (String(i).padStart(6) + String(n).padStart(13) + String(f).padStart(17) + "         " + p).trimEnd());
+  assert.deepEqual(run("options = optimset(Display=\"iter\"); [x,fval,exitflag,output] = fminsearch(@objectivefcn1,[0.25,-0.25],options);"
+    + " fprintf('%.4f %.4f %.4f %d %d %d\\n', x, fval, exitflag, output.iterations, output.funcCount); disp(output.algorithm);" + objectivefcn1), [
+    " Iteration   Func-count         f(x)         Procedure", ...rows,
+    "Optimization terminated:",
+    " the current x satisfies the termination criteria using OPTIONS.TolX of 1.000000e-04",
+    " and F(X) satisfies the convergence criteria using OPTIONS.TolFun of 1.000000e-04",
+    "-0.1696 -0.5086 -13.1310 1 35 69", "Nelder-Mead simplex direct search"]);
+  assert.deepEqual(run([
+    "fun = @(x)100*(x(2) - x(1)^2)^2 + (1 - x(1))^2; fprintf('%.4f %.4f\\n', fminsearch(fun,[-1.2,1]));",
+    "f = @(x,a)100*(x(2) - x(1)^2)^2 + (a-x(1))^2; a = 3; fprintf('%.4f %.4f\\n', fminsearch(@(x)f(x,a),[-1,1.9]));",
+    "x0 = [1,2,3]; fun = @(x)-norm(x+x0)^2*exp(-norm(x-x0)^2 + sum(x)); [x,fval] = fminsearch(fun,x0); fprintf('%.4f %.4f %.4f %.4e\\n', x, fval);",
+    "a = fminsearch(@(v) v(1).^2 + 2.5*sin(v(2)) - v(3)^2*v(1)^2*v(2)^2, [-0.6,-1.2,0.135]); fprintf('%.4f %.4f %.4f\\n', abs(a(1)), a(2:3));",
+    // (the nested output function's recorded history: its first four points and the solution)
+    "o = optimset('OutputFcn', @(x,v,s) isequal(s, 'iter') && isempty(fprintf('%.4f %.4f\\n', x)));",
+    "objfun = @(x) exp(x(1))*(4*x(1)^2+2*x(2)^2+x(1)*x(2)+2*x(2)); [x fval] = fminsearch(objfun, [-1 1], o); fprintf('= %.4f %.4f %.4f\\n', x, fval);",
+  ].join("\n")).filter((s: string, i: number, all: string[]) => i < 8 || s.startsWith("=") || all[i + 1]?.startsWith("=")), [
+    "1.0000 1.0000", "3.0000 9.0000", "1.5359 2.5645 3.5932 -5.9565e+04", "0.0000 -1.5708 0.1803",
+    "-1.0000 1.0000", "-1.0000 1.0000", "-1.0750 0.9000", "-1.0125 0.8500", "0.1290 -0.5323", "= 0.1290 -0.5323 -0.5689"]);
+});
+
+test("fminsearch's limits, x0's shape, the problem structure and its refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "r = @(x)100*(x(2) - x(1)^2)^2 + (1 - x(1))^2; o = optimset('Display', 'off');",
+    "[x,f,e,s] = fminsearch(r, [-1.2 1], optimset(o, 'MaxIter', 10)); disp(mat2str([e s.iterations s.funcCount]));",
+    "[x,f,e,s] = fminsearch(r, [-1.2 1], optimset(o, 'MaxFunEvals', 10)); disp(mat2str([e s.iterations s.funcCount]));",
+    "[x,f,e,s] = fminsearch(r, [-1.2 1], optimset(o, 'OutputFcn', @(x,v,s) v.iteration >= 5)); disp(mat2str([e s.iterations]));",
+    "x = fminsearch(@(x) sum((x - [1 2; 3 4]).^2, 'all'), zeros(2)); disp(mat2str(round(x * 1e3) / 1e3));",
+    "x = fminsearch(@(x) abs(x(1)) + abs(x(2) - 1), [1; 3]); disp(mat2str(size(x)));",
+    // (the initial simplex takes x0's components in linear-index order)
+    "x = fminsearch(@(x) numel(fprintf('%s\\n', mat2str(x))), [1 2; 3 4], optimset(o, 'MaxFunEvals', 3));",
+    "p.objective = @(x) (x-1)^2; p.x0 = 5; p.solver = 'fminsearch'; disp(round(fminsearch(p) * 1e3) / 1e3);",
+    "x = fminsearch(r, [-1.2 1], optimset('MaxIter', 3));",
+    "try, fminsearch(@(x) sqrt(x), -1), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) x, []), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) x, int8(1)), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) [x x], 1), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) NaN, 1, optimset('FunValCheck', 'on')), catch err, disp(err.message), end",
+    "p = optimset(); p.PlotFcns = @optimplotfval; try, fminsearch(@(x) x, 1, p), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[0 10 21]", "[0 5 11]", "[-1 5]", "[1 2;3 4]", "[2 1]", "[1 2;3 4]", "[1.05 2;3 4]", "[1 2;3.15 4]", "[1 2.1;3 4]", "[1 2;3 4.2]", "1",
+    "fminsearch stopped: it reached the MaxIter limit of 3 before meeting TolX and TolFun.",
+    "fminsearch: the objective function returned a complex value; only real values can be minimized.",
+    "fminsearch: x0 must be a nonempty double array.", "fminsearch: x0 must be a nonempty double array.",
+    "fminsearch: the objective function must return a numeric scalar.",
+    "fminsearch: the objective function returned NaN (FunValCheck is on).",
+    "fminsearch: the PlotFcns option is not supported in Sagebrush.",
+  ]);
+});

@@ -704,3 +704,154 @@ def fminbnd_(nargout, *args):
         if outs and _call_output(outs, x, {"funccount": float(count), "fval": fx, "iteration": float(it),
                                            "procedure": _m.Char("golden" if golden else "parabolic")}, "iter"):
             return result(x, fx, -1, "fminbnd stopped: an output function asked it to stop.")
+
+
+# ------------------------------------------------------------------ fminsearch
+
+@_bi("fminsearch")
+def fminsearch_(nargout, *args):
+    """fminsearch as its documentation page describes it:
+    fminsearch(fun, x0), fminsearch(fun, x0, options) and
+    fminsearch(problem), with outputs [x, fval, exitflag, output]; fun gets
+    x in x0's shape.  The method is the Nelder-Mead simplex search of
+    Lagarias, Reeds, Wright and Wright (SIAM J. Optim. 9, 1998, section 2,
+    with its standard coefficients 1, 2, 1/2 and 1/2), in the form MATLAB's
+    "fminsearch Algorithm" page spells out step by step: the initial
+    simplex adds 5% to each component of x0 in turn (0.00025 for a zero
+    one); each iteration reflects the worst point through the centroid m of
+    the others, then expands, accepts the reflection, contracts outside or
+    inside, or shrinks toward the best point, with that page's tests.  The
+    points are kept sorted by value, a new point after any it ties with
+    (Lagarias et al.'s rule).  As the published display shows, building the
+    initial simplex is iteration 1.
+
+    It stops when both tolerances hold, as the page says it must; the
+    measures are Sagebrush's own: every vertex within TolX of the best in
+    each component, and every value within TolFun of the best value.  The
+    other options are Display, FunValCheck, MaxFunEvals and MaxIter (each
+    200 times the number of variables by default) and OutputFcn; PlotFcns
+    is refused.  Also Sagebrush's own: a complex value is an error even with
+    FunValCheck off; output functions are called after each iteration
+    (x0, iteration 0, with state 'init' and then 'iter'); and the messages
+    other than the converged one"""
+    fun, x0, options = _problem(args, "fminsearch", ["objective", "x0"], 2)
+    if nargout > 4:
+        raise _err("Too many output arguments.")
+    options = _options_arg(options, "fminsearch")
+    f = _m._fn_arg(fun)
+    disp = _display(options, "fminsearch")
+    outs = _output_fcns(options, "fminsearch")
+    check = _opt(options, "FunValCheck", "fminsearch") == "on"
+    if type(x0) is _m.Char or not _m._isnumlike(x0) or _m.class_(x0) != "double" or _m._numel(x0) == 0:
+        raise _err("fminsearch: x0 must be a nonempty double array.")
+    a0 = _m._arr(x0)
+    if np.iscomplexobj(a0):
+        if np.any(a0.imag != 0):
+            raise _err("fminsearch: x0 must be real.")
+        a0 = a0.real
+    shape = a0.shape
+    start = np.array(a0, dtype=float).reshape(-1)  # (x0(:): the storage is transposed, so C order is MATLAB's)
+    n = start.size
+    tolx = float(_m._scalar(_opt(options, "TolX", "fminsearch")))
+    tolf = float(_m._scalar(_opt(options, "TolFun", "fminsearch")))
+    mf, mi = _opt(options, "MaxFunEvals"), _opt(options, "MaxIter")
+    maxfun = 200.0 * n if mf is None else float(_m._scalar(mf))
+    maxit = 200.0 * n if mi is None else float(_m._scalar(mi))
+    show = disp == "iter"
+    algorithm = "Nelder-Mead simplex direct search"
+
+    def shaped(v):
+        return _m._box(np.array(v, dtype=float).reshape(shape))
+
+    count = [0]
+
+    def value(v):
+        count[0] += 1
+        return _real_value(f, shaped(v), "fminsearch", check)
+
+    def row(it, fbest, proc):
+        if show:
+            _m._write("%6.0f%13.0f%17.6g         %s\n" % (it, count[0], fbest, proc))
+
+    def output(state, it, x, fx, proc):
+        return outs and _call_output(outs, shaped(x), {"funccount": float(count[0]), "fval": fx,
+                                                         "iteration": float(it), "procedure": _m.Char(proc)}, state)
+
+    def result(x, fx, it, flag, msg):
+        if outs:
+            output("done", it, x, fx, "")
+        if disp == "iter" or disp == "final" or (disp == "notify" and flag != 1):
+            _m._write(("\n" if show else "") + msg + "\n")
+        out = [shaped(x), fx, float(flag), _m._struct1({"iterations": float(it), "funcCount": float(count[0]),
+                                                        "algorithm": _m.Char(algorithm), "message": _m.Char(msg)})]
+        return out[0] if nargout <= 1 else out[:nargout]
+
+    stopped = "fminsearch stopped: an output function asked it to stop."
+    if show:
+        _m._write(" Iteration   Func-count         f(x)         Procedure\n")
+    pts = [start.copy()]
+    vals = [value(start)]
+    row(0, vals[0], "")
+    if output("init", 0, pts[0], vals[0], ""):
+        return result(pts[0], vals[0], 0, -1, stopped)
+    for i in range(n):
+        y = start.copy()
+        y[i] = 1.05 * y[i] if y[i] != 0 else 0.00025
+        pts.append(y)
+        vals.append(value(y))
+
+    def order():
+        idx = sorted(range(n + 1), key=lambda k: vals[k])
+        pts[:] = [pts[k] for k in idx]
+        vals[:] = [vals[k] for k in idx]
+
+    order()
+    it = 1
+    row(it, vals[0], "initial simplex")
+    if output("iter", it, pts[0], vals[0], "initial simplex"):
+        return result(pts[0], vals[0], it, -1, stopped)
+    while True:
+        best = pts[0]
+        if (max(float(np.max(np.abs(p - best))) for p in pts[1:]) <= tolx
+                and max(abs(v - vals[0]) for v in vals[1:]) <= tolf):
+            return result(best, vals[0], it, 1,
+                          "Optimization terminated:\n the current x satisfies the termination criteria using OPTIONS.TolX of %e \n"
+                          " and F(X) satisfies the convergence criteria using OPTIONS.TolFun of %e " % (tolx, tolf))
+        if count[0] >= maxfun or it >= maxit:
+            which, lim = ("MaxFunEvals", maxfun) if count[0] >= maxfun else ("MaxIter", maxit)
+            return result(best, vals[0], it, 0,
+                          "fminsearch stopped: it reached the %s limit of %d before meeting TolX and TolFun." % (which, lim))
+        it += 1
+        worst, fworst = pts[n], vals[n]
+        m = np.sum(np.array(pts[:n]), axis=0) / n
+        r = 2 * m - worst
+        fr = value(r)
+        if vals[0] <= fr < vals[n - 1]:
+            new, fnew, proc = r, fr, "reflect"
+        elif fr < vals[0]:
+            s = m + 2 * (m - worst)
+            fs = value(s)
+            new, fnew, proc = (s, fs, "expand") if fs < fr else (r, fr, "reflect")
+        else:
+            new = None
+            if fr < fworst:
+                c = m + (r - m) / 2
+                fc = value(c)
+                if fc < fr:
+                    new, fnew, proc = c, fc, "contract outside"
+            else:
+                cc = m + (worst - m) / 2
+                fcc = value(cc)
+                if fcc < fworst:
+                    new, fnew, proc = cc, fcc, "contract inside"
+            if new is None:
+                proc = "shrink"
+                for i in range(1, n + 1):
+                    pts[i] = pts[0] + (pts[i] - pts[0]) / 2
+                    vals[i] = value(pts[i])
+        if new is not None:
+            pts[n], vals[n] = new, fnew
+        order()
+        row(it, vals[0], proc)
+        if output("iter", it, pts[0], vals[0], proc):
+            return result(pts[0], vals[0], it, -1, stopped)

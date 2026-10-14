@@ -26,7 +26,9 @@ and runs on a runtime library with MATLAB's semantics:
     outward search for a sign change whose steps the published iterative
     displays fix; fminbnd is Brent's localmin (Brent 1973, chapter 5;
     Forsythe, Malcolm and Moler 1976, section 8.2), with the tolerance
-    whose bound its page gives;
+    whose bound its page gives; fminsearch is the Nelder-Mead method of
+    Lagarias, Reeds, Wright and Wright (1998) in the steps MATLAB's
+    "fminsearch Algorithm" page spells out;
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -584,6 +586,11 @@ The rest:
   fun, a complex value is an error even with FunValCheck off, MaxFunEvals
   and MaxIter are checked after the convergence test, and the messages
   other than the converged one are Sagebrush's own. PlotFcns is refused;
+- fminsearch's likewise: the page says it stops when both TolX and TolFun
+  hold, and the measures are Sagebrush's (every vertex within TolX of the
+  best in each component, every value within TolFun of the best), as are
+  a complex value being an error and the messages other than the
+  converged one. PlotFcns is refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula

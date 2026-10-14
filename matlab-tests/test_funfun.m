@@ -39,3 +39,12 @@ show(round(fminbnd(@(x) -x.*exp(-3*x), 0, 2, t) * 1e6) / 1e6);  % (a flat minimu
 [x, fval] = fminbnd(@(x) cos(x), 2, 4, t); show(r8([x fval]));
 show(r8(fminbnd(@(x) x.^2, 3, 3)));
 show(abs(fminbnd(@sin, 0, 2*pi) - 3*pi/2) < 1e-4);
+% fminsearch (to 6 digits with tight tolerances)
+r6 = @(x) round(x * 1e6) / 1e6 + 0;
+t = optimset('TolX', 1e-10, 'TolFun', 1e-12, 'MaxIter', 5000, 'MaxFunEvals', 10000);
+show(r6(fminsearch(@(x) 100*(x(2) - x(1)^2)^2 + (1 - x(1))^2, [-1.2, 1], t)));
+show(r6(fminsearch(@(x) 100*(x(2) - x(1)^2)^2 + (3 - x(1))^2, [-1, 1.9], t)));
+show(r6(fminsearch(@(x) (x - 3)^2 + 1, 0, t)));
+show(r6(fminsearch(@(x) sum((x - [1 2; 3 4]).^2, 'all'), zeros(2), t)));
+show(r6(fminsearch(@(x) (x(1) - 1)^2 + 10*(x(2) + 2)^2 + abs(x(3)), [0; 0; 1], t)));
+[x, fval] = fminsearch(@(x) exp(x(1)) * (4*x(1)^2 + 2*x(2)^2 + x(1)*x(2) + 2*x(2)), [-1 1], t); show(r6([x fval]));
