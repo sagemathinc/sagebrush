@@ -102,6 +102,8 @@ try {
   };
   pg.nodes.forEach(walk);
   // notes' text fits (fully zoomed in, at the whole board's camera, every mounted note)
+  // (once the page's fonts are in, KaTeX's among them, and the board laid out again for them)
+  await ev("document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1)))))");
   await ev("window.sagebrush.board.step(-1)");
   await shot("board");
   // (every note mounted: the camera on the whole board, at full size; boards
