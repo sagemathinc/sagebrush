@@ -35,6 +35,7 @@ interface Tok {
   col: number;
   sp: boolean; // whitespace (or a continuation) right before it
   args?: string[]; // a command's words (format long)
+  cont?: boolean; // (the end of input) the input ended in a continuation, `...`
 }
 
 const KEYWORDS = new Set(
@@ -59,11 +60,13 @@ export function lex(src: string): Tok[] {
   const stack: string[] = []; // open brackets
   let stmtStart = true;
   let argBlock = false; // inside an arguments block (no command syntax: `a double`)
+  let cont = false; // a continuation since the last token
   const col = () => i - lineStart + 1;
   const push = (t: TokT, v: string, L: number, C: number, extra: Partial<Tok> = {}) => {
     out.push({ t, v, line: L, col: C, sp, ...extra });
     sp = false;
     stmtStart = false;
+    cont = false;
   };
   const prevValue = () => {
     const p = out[out.length - 1];
@@ -97,6 +100,7 @@ export function lex(src: string): Tok[] {
       while (i < n && src[i] !== "\n") i++;
       if (i < n) newline();
       sp = true;
+      cont = true;
       continue;
     }
     if ((c === "%" || c === "#") && (src[i + 1] === "{") && lineOnly(c + "{", i)) {
@@ -252,7 +256,7 @@ export function lex(src: string): Tok[] {
     if (startOfStmt) stmtStart = true;
     i += op === "~=" && src[i] === "!" ? 2 : op === "~" && src[i] === "!" ? 1 : op.length;
   }
-  out.push({ t: "eof", v: "", line, col: col(), sp });
+  out.push({ t: "eof", v: "", line, col: col(), sp, ...(cont ? { cont: true } : {}) });
   return out;
 }
 
@@ -1550,7 +1554,10 @@ export { looksLikeMagma } from "./m-file";
 export function matlabIsIncomplete(src: string): boolean {
   if (inBlockComment(src)) return true;
   try {
-    new Parser(lex(src)).program();
+    const toks = lex(src);
+    // (x = 1 ... parses, but its continuation says more follows)
+    if (toks[toks.length - 1].cont) return true;
+    new Parser(toks).program();
     return false;
   } catch (e) {
     return e instanceof MatlabSyntaxError && e.atEnd;
