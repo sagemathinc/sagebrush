@@ -128,6 +128,28 @@ try {
   const shownC = await ev("document.querySelectorAll('.board-item img[src^=\"data:image/png\"]').length");
   check(shownC === 2, "board C: of its three 30 MP pictures (one an output kept from B), two shown: " + shownC);
 
+  // a picture kept from the last board, its type in capitals (an HTML
+  // output's data:IMAGE/PNG): counted again all the same (SEC-A48-1)
+  const html30 = (w) => `from IPython.display import HTML, display\ndisplay(HTML('<img src="data:IMAGE/PNG;base64,${png(w, 5000)}">'))`;
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "D", nodes: [{ id: "h", code: html30(6005) }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '')", 60000);
+  await ev("window.board.focus(['h'], true), window.board.render(), 1");
+  check(await until("!!document.querySelector('[data-code=h] .board-code-out img[src^=\"data:IMAGE/PNG\"]')", 10000), "board D shows its HTML output's data:IMAGE/PNG picture");
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "E", nodes: [{ id: "h", code: html30(6005) }, { id: "n6", text: `![n6](data:image/png;base64,${png(6006, 5000)})` }, { id: "n7", text: `![n7](data:image/png;base64,${png(6007, 5000)})` }] })}).then(() => 1)`);
+  await sleep(1500);
+  await ev("window.board.focus(undefined, true), window.board.render(), 1");
+  await sleep(300);
+  const shownE = await ev("document.querySelectorAll('.board-item img[src^=\"data:image/png\" i]').length");
+  check(shownE === 2, "board E: of its three 30 MP pictures (one kept from D, IMAGE/PNG), two shown: " + shownE);
+  // a small held preview after a board whose pictures nearly filled its budget: shown (CORR-A48-2)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "F", nodes: [{ id: "f1", code: show30(7950) }, { id: "f2", code: show30(7951) }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000);
+  const smallPreview = { at: "2026-10-14T00:00:00.000Z", ms: 12000, total: 12000, outputs: [{ output_type: "display_data", data: { "image/png": png(640, 1280), "text/plain": "small" }, metadata: {} }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "G", nodes: [{ id: "g1", code: "print('slow')", preview: smallPreview }] })}).then(() => 1)`);
+  await sleep(1000);
+  await ev("window.board.focus(['g1'], true), window.board.render(), 1");
+  check(await until("!!document.querySelector('[data-code=g1] .board-code-out img') && !document.querySelector('[data-code=g1] .big-picture')", 10000), "board G's small preview shows, in its own pixels, not board F's");
+
   // a board from elsewhere: its notes' remote pictures shown when clicked; a new board's, at once
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "remote", nodes: [{ id: "r", title: "remote", text: remoteMd }] })}).then(() => 1)`);
   await ev("window.board.focus(['r'], true), window.board.render(), 1");

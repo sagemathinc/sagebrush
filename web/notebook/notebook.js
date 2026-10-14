@@ -18,7 +18,7 @@ import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
 import { BlockEditor } from "../board/blocks.ts";
 import { loadRemotePicture, safeHtml } from "../safe-html.ts";
-import { PixelBudget, imageSize, pictureKey } from "../image-size.ts";
+import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size.ts";
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
@@ -336,8 +336,12 @@ export function createNotebook(root, opts = {}) {
     box.appendChild(el);
   }
   // A picture past the document's pixels: says why, and shows it when asked.
-  function bigPicture(why, show) {
+  // (`src`: the picture's data: address, to show it when counted again in
+  // another budget it fits: recountPictures)
+  function bigPicture(why, show, src = null) {
     const p = h("div", "big-picture");
+    p.sbShow = show;
+    p.sbSrc = src;
     p.textContent = `A picture not shown: ${why}. `;
     const go = h("button");
     go.type = "button";
@@ -349,19 +353,25 @@ export function createNotebook(root, opts = {}) {
   // The pictures the code cells show, counted again in the budget now (a
   // board shows another document with them kept, SEC-4DF-1): those past it
   // become placeholders, kept as they were for saving.
+  // (each picture's key as it was counted when shown: a figure's raster by
+  // its bytes, a Markdown or HTML picture by its address)
+  const keyOf = (d, src, inFigure) => d.type + "\n" + (inFigure ? d.base64 : pictureKey(src));
   function recountPictures() {
     for (const c of cells()) {
       if (c.type !== "code") continue;
       for (const img of [...c.out.querySelectorAll("img")]) {
-        const src = img.getAttribute("src") ?? "", m = /^data:(image\/(?:png|jpeg|gif|webp));base64,([\s\S]*)$/.exec(src);
-        if (!m) continue;
+        const src = img.getAttribute("src") ?? "", d = dataUrl(src);
+        if (!d) continue;
         const fig = img.parentElement?.tagName === "FIGURE" ? img.parentElement : null;
-        const why = pixels.take(imageSize(m[1], m[2]), m[1] + "\n" + (fig ? m[2] : src));
+        const why = pixels.take(imageSize(d.type, d.base64), keyOf(d, src, !!fig));
         if (!why) continue;
-        if (fig) {
-          fig.sbBundle ??= { [m[1]]: m[2], "text/plain": img.alt };
-          img.replaceWith(bigPicture(why, () => img));
-        } else img.replaceWith(document.createTextNode(img.alt));
+        if (fig) fig.sbBundle ??= { [d.type]: d.base64, "text/plain": img.alt };
+        img.replaceWith(bigPicture(why, () => img, src));
+      }
+      // (and a picture not shown before, that fits now: shown, CORR-A48-2)
+      for (const p of [...c.out.querySelectorAll(".big-picture")]) {
+        const d = p.sbSrc ? dataUrl(p.sbSrc) : null;
+        if (d && pixels.take(imageSize(d.type, d.base64), keyOf(d, p.sbSrc, p.parentElement?.tagName === "FIGURE")) === null) p.replaceWith(p.sbShow());
       }
       for (const im of [...c.out.querySelectorAll("svg image")]) {
         const href = im.getAttribute("href") ?? im.getAttributeNS(XLINK_NS, "href") ?? "", m = RASTER_URL.exec(href);
@@ -396,7 +406,7 @@ export function createNotebook(root, opts = {}) {
       if (!why) fig.appendChild(show());
       else {
         fig.sbBundle = { ...b };
-        fig.appendChild(bigPicture(why, show));
+        fig.appendChild(bigPicture(why, show, `data:${raster[0]};base64,${raster[1]}`));
       }
     }
     else if (typeof b["text/html"] === "string" && !b["application/json"]) return appendHtml(box, b);
@@ -2048,7 +2058,9 @@ export function createNotebook(root, opts = {}) {
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
     /** Count this document's pictures in `budget` (a board's: shared by its
      * pictures, notes and code, afresh for each document shown, image-size.ts). */
-    usePictures(budget) { pixels = budget; recountPictures(); },
+    usePictures(budget) { pixels = budget; },
+    /** Count the pictures the code cells show in the budget now (another document shown, keeping them): past it, placeholders; placeholders that fit, shown. */
+    recountPictures,
     /** The next run's prompt number less one (after TimeTravel replayed runs). */
     setExecCount(k) { if (kernel) kernel.execCount = k; else execCount = k; },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */

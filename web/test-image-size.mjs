@@ -36,6 +36,7 @@ const takes = [budget.take({ w: 6000, h: 5000 }), budget.take({ w: 6000, h: 5000
 const again = new PixelBudget();
 check(again.take({ w: 6000, h: 5000 }, "k") === null && again.take({ w: 6000, h: 5000 }, "k") === null && again.take({ w: 6000, h: 5000 }, "k") === null && again.used === 30_000_000, "the same picture is counted once");
 check(takes[0] === null && takes[1] === null && /in all/.test(takes[2] ?? "") && takes[3] === null && budget.used <= LOAD_PIXELS, "a document's pictures: 80 MP in all, then not shown (a small one still fits): " + JSON.stringify(takes));
+check(JSON.stringify([dataUrl("data:IMAGE/PNG;base64,AAAA"), dataUrl("data:image/jpg;base64,AAAA"), dataUrl("data:Image/JPEG;base64,AAAA")]) === JSON.stringify([{ type: "image/png", base64: "AAAA" }, { type: "image/jpeg", base64: "AAAA" }, { type: "image/jpeg", base64: "AAAA" }]), "one grammar for data: pictures: any case, jpg as jpeg (SEC-A48-1)");
 check(JSON.stringify(dataUrl("data:image/png;base64," + png(2, 2))) === JSON.stringify({ type: "image/png", base64: png(2, 2) }) && dataUrl("data:image/svg+xml;base64,AAAA") === null && dataUrl("https://x/a.png") === null, "data: URLs read");
 
 // Markdown's pictures (safe-html.ts): within the bounds, or their alt text

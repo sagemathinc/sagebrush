@@ -12,7 +12,7 @@
 // url() or expression() in a style, no SVG, MathML, forms, frames or
 // objects: nothing a browser could be talked into running.
 
-import { PixelBudget, imageSize, pictureKey } from "./image-size";
+import { PixelBudget, dataUrl, imageSize, pictureKey } from "./image-size";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -78,10 +78,9 @@ const DATA_IMG = /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i;
 // (a raster data: image within image-size.ts's bounds by its header: a small
 // file can say it is huge; else not shown, its alt text instead)
 function shownSize(url: string, o: SafeOptions): boolean {
-  const m = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\s]*)$/i.exec(url);
-  if (!m) return false;
-  const type = "image/" + m[1].toLowerCase().replace("jpg", "jpeg");
-  return (o.pixels ?? new PixelBudget(Infinity)).take(imageSize(type, m[2]), type + "\n" + pictureKey(url)) === null;
+  const d = dataUrl(url);
+  if (!d) return false;
+  return (o.pixels ?? new PixelBudget(Infinity)).take(imageSize(d.type, d.base64), d.type + "\n" + pictureKey(url)) === null;
 }
 export function safeLink(href: string): string | null {
   const h = href.replace(/[\u0000- \u007f-\u009f]/g, "");

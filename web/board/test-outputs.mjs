@@ -297,6 +297,30 @@ try {
   await sleep(800);
   const keptOut = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idTwo)}, ${JSON.stringify(t2key)}]); g.onsuccess = () => { db.close(); res(JSON.stringify(g.result?.outputs ?? null)); }; }; })`);
   check(keptOut.includes(newer.trim()), "t2's cached output is the newer run's: " + JSON.stringify([newer, keptOut.slice(0, 120)]));
+
+  // A sweep after the writes marks the items' keys as they are then, not as
+  // before: with the board over its cap, a newer run's entry, written while
+  // the older run's were held, stays (CORR-A48-3).  (Five large entries,
+  // used more recently than anything, put it over 64 MB.)
+  await ev("window.__holdPut = 0, window.__released = [], 1");
+  // (code of their own: the last board's items, with the same ids, would not run again)
+  const swept = { title: "swept", seed: SEED_C, nodes: [
+    { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1 swept')" },
+    { id: "t2", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2 swept', os.urandom(8).hex())" },
+  ] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(swept)}).then(() => 1)`);
+  const idSwept = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result, t = db.transaction(['entries', 'docs'], 'readwrite'); for (let i = 0; i < 5; i++) t.objectStore('entries').put({ doc: ${JSON.stringify(idSwept)}, key: 'big-' + i, outputs: [], at: '2026-10-14T00:00:00.000Z', ms: 1, total: 1, bytes: 16000000, used: Date.now() + 1e9 }); t.objectStore('docs').put({ doc: ${JSON.stringify(idSwept)}, bytes: 80000000, used: Date.now() }); t.oncomplete = () => { db.close(); res(1); }; }; })`);
+  await ev("window.__holdPut = 1, 1");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000), "the board ran");
+  check(await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "the older run's first write is held: " + JSON.stringify([await ev("window.__holdPut"), await countFor(idSwept), await keys()]).slice(0, 400));
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "t2").code += "\\n2"; }).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === '') && /\\n2$/.test(os.find((o) => o.id === 't2').code))", 60000), "t2, changed, ran again");
+  const newKey = (await keys()).t2.key;
+  await ev("window.__released.splice(0).forEach((f) => f()), 1");
+  await sleep(2500);
+  const hasNew = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idSwept)}, ${JSON.stringify(newKey)}]); g.onsuccess = () => { db.close(); res(!!g.result); }; }; })`);
+  check(hasNew, "the newer run's entry survives the older run's sweep");
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

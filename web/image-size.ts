@@ -79,8 +79,10 @@ export function imageSize(type: string, base64: string): { w: number; h: number 
 
 /** A data: URL's type and base64, or null. */
 export function dataUrl(src: string): { type: string; base64: string } | null {
-  const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=\s]*)$/.exec(src);
-  return m ? { type: m[1], base64: m[2] } : null;
+  // (the grammar a browser takes: the type in any case, and jpg for jpeg; one
+  // parser for every place a data: picture is shown or counted, SEC-A48-1)
+  const m = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]*)$/i.exec(src);
+  return m ? { type: "image/" + m[1].toLowerCase().replace("jpg", "jpeg"), base64: m[2] } : null;
 }
 
 /** A picture's name, to count it once however often it is drawn: all of it
