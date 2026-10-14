@@ -10,6 +10,11 @@
 // drawn on a canvas behind the notes; notes show Markdown with math, and
 // their detail (semantic zoom) only when zoomed in.
 
+import { inkPath } from "./ink";
+
+/** Ink's color, unless a stroke says. */
+export const INK = "#1d241a";
+
 export interface Item {
   id: string;
   kind: "note" | "shape" | "ink" | "group";
@@ -20,9 +25,13 @@ export interface Item {
   title?: string;
   text?: string;
   color?: string;
-  /** ink: points relative to (x, y), as x0, y0, x1, y1, ... */
+  /** ink: points relative to (x, y), as x0, y0, x1, y1, ... (a line as wide as `width`) */
   points?: Float32Array;
   width?: number;
+  /** ink: its outline relative to (x, y), x0, y0, ...: a shape to fill (ink.ts) */
+  outline?: number[];
+  /** ink: below 1, a highlighter's */
+  opacity?: number;
   /** notes: Markdown shown only when zoomed in */
   detail?: string;
   /** notes: a link, shown at the note's foot */
@@ -89,7 +98,7 @@ const BUDGET = 4; // ms of building notes' elements per frame; the rest wait, dr
 const PER_FRAME = 30; // and at most this many elements added (each costs the browser's layout too)
 const MARGIN = 0.5; // mounted: the viewport plus this fraction around it
 const CLOSE = 1.1; // from this zoom: notes' details
-const GROUP = "#eef2ea", INK = "#2a6f2f", EDGE = "#5f7457";
+const GROUP = "#eef2ea", EDGE = "#5f7457";
 
 // A uniform grid: each item is in the cells its box overlaps.
 class Grid {
@@ -776,15 +785,28 @@ export class Board {
       if (lw * c.z < 0.5) continue;
       let p = this.paths.get(it.id);
       if (!p) {
-        p = new Path2D();
-        const pts = it.points!;
-        p.moveTo(it.x + pts[0], it.y + pts[1]);
-        for (let i = 2; i < pts.length; i += 2) p.lineTo(it.x + pts[i], it.y + pts[i + 1]);
+        if (it.outline) {
+          const o = it.outline.map((v, i) => v + (i % 2 ? it.y : it.x));
+          p = new Path2D(inkPath(o));
+        } else {
+          p = new Path2D();
+          const pts = it.points!;
+          p.moveTo(it.x + pts[0], it.y + pts[1]);
+          for (let i = 2; i < pts.length; i += 2) p.lineTo(it.x + pts[i], it.y + pts[i + 1]);
+        }
         this.paths.set(it.id, p);
       }
-      ctx.strokeStyle = it.color ?? "#2a6f2f";
-      ctx.lineWidth = lw;
-      ctx.stroke(p);
+      if (it.outline) {
+        // (a pen's stroke: its outline, filled; a highlighter's, see-through)
+        ctx.fillStyle = it.color ?? INK;
+        ctx.globalAlpha = it.opacity ?? 1;
+        ctx.fill(p);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.strokeStyle = it.color ?? "#2a6f2f";
+        ctx.lineWidth = lw;
+        ctx.stroke(p);
+      }
       n++;
     }
     // the selection rectangle being drawn, and a drag's alignment guides

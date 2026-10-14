@@ -8,6 +8,7 @@
 import type { Item, Edge } from "./board";
 import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
+import { inkOutline } from "./ink";
 
 // Every note has the same optional parts, shown (and edited) in this order:
 // its title, its picture, its text, its code with the code's output, its
@@ -59,7 +60,26 @@ export interface DocGroup {
   y?: number;
 }
 
-export type DocNode = DocNote | DocGroup;
+// A pen stroke (ink.ts): where the pen went, with its pressure, drawn as
+// an outline whose width follows it.  (x, y) is the corner of its box, the
+// points' extent and the pen's size around it; the points are measured from
+// that corner.
+export interface DocInk {
+  id: string;
+  kind: "ink";
+  /** x, y, pressure (0 to 1), ...: as drawn (streamlined, a mouse's
+   * pressure from its speed: ink.ts InkCapture), so drawn as they are */
+  points: number[];
+  /** the pen's width (each stroke says: a later default changes no old one) */
+  size?: number;
+  color?: string;
+  /** below 1: a highlighter's, which what is under it shows through */
+  opacity?: number;
+  x: number;
+  y: number;
+}
+
+export type DocNode = DocNote | DocGroup | DocInk;
 
 export interface DocEdge {
   from: string;
@@ -184,6 +204,14 @@ export function cleanDoc(d: any): BoardDoc {
       return strip({ id: String(n.id), kind: "group" as const, title: str(n.title), text: str(n.text), layout: one(n.layout, LAYOUTS), columns: num(n.columns), direction: one(n.direction, DIRS),
         children: (Array.isArray(n.children) ? n.children : []).map(node).filter((c: DocNode | null): c is DocNode => !!c), color: safeColor(n.color), x: num(n.x), y: num(n.y) });
     }
+    // (a stroke: its points as numbers, three a point, and its place; else none)
+    if (n.kind === "ink") {
+      const ps = Array.isArray(n.points) ? n.points.slice(0, n.points.length - (n.points.length % 3)) : [];
+      if (!ps.length || !ps.every((v: unknown) => typeof v === "number" && Number.isFinite(v)) || num(n.x) === undefined || num(n.y) === undefined) return null;
+      const size = num(n.size), opacity = num(n.opacity);
+      const world = ps.map((v: number, i: number) => (i % 3 === 0 ? v + n.x : i % 3 === 1 ? v + n.y : v));
+      return inkNode(String(n.id), world, { size: size !== undefined && size > 0 && size <= 200 ? size : undefined, color: safeColor(n.color), opacity: opacity !== undefined && opacity > 0 && opacity < 1 ? opacity : undefined });
+    }
     // (kind "code": the code items of documents before every note could have code)
     const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
     return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
@@ -270,6 +298,31 @@ export type MeasuredNote = DocNote & { img?: ImageInfo & { key: string } };
 
 // A note's size: given, measured, or estimated from its text's length (about
 // 7 px a character, 20 px a line), with room for the title and the link.
+/** A pen's width, unless a stroke says. */
+export const INK_SIZE = 3;
+
+// a stroke's box: its points, and the pen's size around them
+const inkSize = (n: DocInk): Box => {
+  const pad = n.size ?? INK_SIZE;
+  let w = 0, h = 0;
+  for (let i = 0; i + 2 < n.points.length; i += 3) { w = Math.max(w, n.points[i]); h = Math.max(h, n.points[i + 1]); }
+  return { w: w + pad, h: h + pad };
+};
+
+/** A stroke through `points` (x, y, pressure, ... on the board, as
+ * InkCapture keeps them): its
+ * corner where its box is, its points measured from there (to a tenth;
+ * pressure to a hundredth), as a document keeps it. */
+export function inkNode(id: string, points: ArrayLike<number>, o: { size?: number; color?: string; opacity?: number } = {}): DocInk {
+  const pad = o.size ?? INK_SIZE;
+  let x0 = Infinity, y0 = Infinity;
+  for (let i = 0; i + 2 < points.length; i += 3) { x0 = Math.min(x0, points[i]); y0 = Math.min(y0, points[i + 1]); }
+  const r = (v: number, k = 10) => Math.round(v * k) / k;
+  const pts: number[] = [];
+  for (let i = 0; i + 2 < points.length; i += 3) pts.push(r(points[i] - x0 + pad), r(points[i + 1] - y0 + pad), r(Math.min(1, Math.max(0, points[i + 2])), 100));
+  return { id, kind: "ink", x: r(x0 - pad), y: r(y0 - pad), points: pts, size: pad, ...(o.color ? { color: o.color } : {}), ...(o.opacity !== undefined && o.opacity < 1 ? { opacity: o.opacity } : {}) };
+}
+
 function noteSize(n: DocNote, measure?: Measure, img?: ImageInfo): Box {
   if (n.w && n.h && !n.fit) return { w: n.w, h: n.h };
   // (only a picture: its width, or at most 480; its height from its shape)
@@ -294,7 +347,7 @@ function noteSize(n: DocNote, measure?: Measure, img?: ImageInfo): Box {
 export const onlyImage = (n: { image?: string | object; title?: string; text?: string; code?: string; detail?: string; ref?: string }) =>
   !!n.image && !n.title && !n.text && n.code === undefined && !n.detail && !n.ref;
 
-const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.code !== undefined));
+const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.kind !== "ink" && n.code !== undefined));
 /** Whether a board has code items, on any page. */
 export const anyCode = (d: BoardDoc) => Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i)).some((v) => hasCode(v.nodes ?? []));
 
@@ -368,6 +421,11 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   const rel = new Map<string, { x: number; y: number }>();
   const innerTop = new Map<string, number>(); // a group's members' origin, below its title
   const sizeOf = (n: DocNode): Box => {
+    if (n.kind === "ink") {
+      const b = inkSize(n);
+      size.set(n.id, b);
+      return b;
+    }
     if (n.kind !== "group") {
       const b = noteSize(n, measure && Object.assign((m: DocNote, w: number) => measure({ ...m, ref: refOf(m), img: imgOf(m) }, w), { width: measure.width && ((m: DocNote, w: number) => measure.width!({ ...m, ref: refOf(m), img: imgOf(m) }, w)) }), imgOf(n));
       size.set(n.id, b);
@@ -416,6 +474,9 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         const p = rel.get(c.id)!;
         place(c, x + p.x, y + p.y, depth + 1, n.id);
       }
+    } else if (n.kind === "ink") {
+      // (its outline, from its corner)
+      items.push({ id: n.id, kind: "ink", x, y, w: b.w, h: b.h, outline: inkOutline(n.points, { size: n.size ?? INK_SIZE, streamline: 0, last: true }), width: n.size ?? INK_SIZE, color: n.color, depth, parent, ...(n.opacity !== undefined ? { opacity: n.opacity } : {}) });
     } else {
       const img = imgOf(n);
       items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}) } : {}) });
