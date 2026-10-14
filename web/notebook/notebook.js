@@ -1971,13 +1971,11 @@ export function createNotebook(root, opts = {}) {
       if (!r || !crypto.subtle) return null;
       const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
       const keys = await r.keys({ mode, seed: (id) => `${meta.seed ?? ""}:${id}`, hash: async (t) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t))) });
-      const out = {};
-      for (const c of cells()) {
-        if (c.type !== "code") continue;
+      // (built from entries: an id is any string, "__proto__" too, SEC-781-1)
+      return Object.fromEntries(cells().filter((c) => c.type === "code").map((c) => {
         const { ms, untimed } = r.fromRoot(c.id);
-        out[c.id] = { key: keys.get(c.id) ?? null, ms: r.times.get(c.id) ?? null, fromRoot: ms, untimed, widget: r.widgetDriven.has(c.id) };
-      }
-      return out;
+        return [c.id, { key: keys.get(c.id) ?? null, ms: r.times.get(c.id) ?? null, fromRoot: ms, untimed, widget: r.widgetDriven.has(c.id) }];
+      }));
     },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
     runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },

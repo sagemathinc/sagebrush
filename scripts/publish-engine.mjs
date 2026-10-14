@@ -25,10 +25,16 @@ const man = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
 const env = { ...process.env, NO_COLOR: "1", CF_SEND_TELEMETRY: "false" };
 const cf = (...args) => execFileSync("cf", args, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 });
 
+// (absent only when R2 says so: any other failure stops here)
 let published = null;
 try {
   published = cf("r2", "objects", "get", `engine/${id}/manifest.json`, "--bucket-name", BUCKET);
-} catch {}
+} catch (e) {
+  if (!/\[10007\]|specified key does not exist/.test(String(e?.stderr ?? ""))) {
+    console.error(`could not tell whether engine ${id} is published:\n${String(e?.stderr ?? e).slice(-2000)}`);
+    process.exit(1);
+  }
+}
 if (published !== null) {
   let same = false;
   try { same = isDeepStrictEqual(JSON.parse(published), man); } catch {}
