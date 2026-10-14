@@ -1001,3 +1001,51 @@ test("integral and quadgk: infinite and reversed limits, waypoints, warnings and
     "Contour integration requires all limits and waypoints to be finite.",
   ]);
 });
+
+test("ode45, ode23, odeset, odeget and deval: the pages' published examples, events, output functions and refusals", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (deval's published example: ode23's cubic interpolant is exact for t^3/3)
+    "sol = ode23(@(t,y) t^2, [0 3], 0); x = linspace(0,3,7); [y,yp] = deval(sol,x); disp(mat2str(round(y * 1e4) / 1e4)); disp(mat2str(round(yp * 1e4) / 1e4));",
+    // (the solution structure's fields, as the ode45 page's example shows them)
+    "vdp1 = @(t,y) [y(2); (1-y(1)^2)*y(2)-y(1)]; sol = ode45(vdp1,[0 20],[2 0]); disp(strjoin(fieldnames(sol)', ' ')); disp(mat2str(size(sol.y, 1)));",
+    "y = deval(sol, [5 10], 1); disp(mat2str(size(y)));",
+    // (odeset's published structure: its 23 fields in order, \"on\" stored as 'on')
+    "o = odeset(RelTol=1e-8,AbsTol=1e-10); o = odeset(o,AbsTol=1e-9); f = fieldnames(o); disp(numel(f)); disp([f{1} ' ' f{end}]); disp(o.AbsTol); disp(o.RelTol);",
+    "o = odeset(RelTol=1e-8,AbsTol=1e-9,Stats=\"on\"); disp(class(o.Stats)); disp(odeget(o, 'Stats')); disp(odeget(o, 'MaxStep', 0.5));",
+    // (Refine: 4 by default for ode45, 1 for ode23, the points between each step's ends)
+    "[t,y] = ode45(@(t,y) -y, [0 1], 1); [t1,y1] = ode45(@(t,y) -y, [0 1], 1, odeset('Refine', 1)); disp(numel(t) - 1 == 4 * (numel(t1) - 1));",
+    "[t,y] = ode45(@(t,y) -y, [0 0.5 1], 1); disp(mat2str(t')); disp(max(abs(y - exp(-t))) < 1e-5);",
+    // (a terminal event with a direction: a falling ball reaching the ground)
+    "ev = @(t,y) deal(y(1), 1, -1); o = odeset('Events', ev, 'RelTol', 1e-8, 'AbsTol', 1e-10);",
+    "[t,y,te,ye,ie] = ode45(@(t,y) [y(2); -9.8], [0 10], [10; 0], o); disp(abs(te - sqrt(20/9.8)) < 1e-8); disp(ie); disp(t(end) == te);",
+    "opts = odeset('Stats','on'); [t,y] = ode23(@(t,y) -y, [0 1], 1, opts);",
+    // (a pole at t = 1: the steps shrink to the smallest the precision allows,
+    // and the integration ends there with a warning instead of stepping across)
+    "lastwarn(''); [t,y] = ode45(@(t,y) 1/(1-t), [0 2], 0); disp(t(end) < 1 && t(end) > 1 - 1e-10); disp(~isempty(lastwarn));",
+    "lastwarn(''); [t,y] = ode23(@(t,y) 1/(1-t), [0 2], 0); disp(t(end) < 1 && t(end) > 1 - 1e-10); disp(~isempty(lastwarn));",
+    "try, ode45(@(t,y) -y, [0 1], 1, odeset('Mass', 1)), catch e, disp(e.message), end",
+    "try, ode45(@(t,y) [y; y], [0 1], 1), catch e, disp(e.message), end",
+    "try, ode45(@(t,y) -y, [0 1 0.5], 1), catch e, disp(e.message), end",
+    "try, odeset('Bogus', 1), catch e, disp(e.message), end",
+    "try, odeset('RelTol', -1), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  const lines = r.stdout.trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines.slice(0, 13), [
+    "[0 0.0417 0.3333 1.125 2.6667 5.2083 9]", "[0 0.25 1 2.25 4 6.25 9]",
+    "solver extdata x y stats idata", "2", "[1 2]",
+    "23", "AbsTol InitialSlope", "1.0000e-09", "1.0000e-08", "char", "on", "0.5000", "1",
+  ]);
+  assert.deepEqual(lines.slice(13, 18), ["[0 0.5 1]", "1", "1", "1", "1"]);
+  assert.match(lines[18], /^\d+ successful steps$/);
+  assert.match(lines[19], /^\d+ failed attempts$/);
+  assert.match(lines[20], /^\d+ function evaluations$/);
+  assert.deepEqual(lines.slice(21, 25), ["1", "1", "1", "1"]);
+  assert.match(r.stderr, /ode45: at t = 1 the step size fell below its minimum/);
+  assert.deepEqual(lines.slice(25), [
+    "ode45: the Mass option is not supported in Sagebrush.",
+    "ode45: the ODE function must return a vector of length 1 (as y0).",
+    "ode45: the entries of tspan must be strictly increasing or strictly decreasing.",
+    "odeset: unrecognized property name 'Bogus'.",
+    "odeset: RelTol must be a positive scalar.",
+  ]);
+});

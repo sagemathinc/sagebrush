@@ -17,6 +17,20 @@ and runs on a runtime library with MATLAB's semantics:
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics);
+  - **lib/_matlab_ode.py**: odeset, odeget, ode45, ode23 and deval:
+    the Dormand-Prince (1980) and Bogacki-Shampine (1989) pairs, with
+    Shampine's (1986) interpolant for ode45 and cubic Hermite
+    interpolation for ode23; the step size control is SciPy's (BSD, from
+    Hairer, Norsett and Wanner II.4; see NOTICE.md), Sagebrush's choice,
+    so steps and Stats counts differ from MATLAB's published ones while
+    solutions agree to the tolerances; the error test is odeset's
+    documented one. Also Sagebrush's own: RelTol raised to 100*eps,
+    events located by regula falsi on the interpolant, the smallest step
+    (100 spacings of the floating-point numbers at t, so that a step
+    cannot straddle a pole where the error estimates of its two sides
+    cancel) and the warning when a step must be smaller, a plot after (not during) the
+    integration when there is no output, and sol.idata's contents. Mass,
+    NonNegative and the DAE options are refused;
   - **lib/_matlab_funfun.py**: function functions: the optimization options
     (optimset, optimget, from their documentation pages: the eight
     documented options, each solver's documented defaults, a default that
