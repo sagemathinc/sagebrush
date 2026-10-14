@@ -115,8 +115,12 @@ test("safe HTML: XSS payloads come out harmless, as a browser parses them", () =
 test("safe HTML: what Jupyter notebooks use survives", () => {
   assert.equal(safeHtml('<span style="color:green">'), '<span style="color: green">');
   assert.equal(safeHtml("<b>bold</b> <u>under</u> <i>it</i>"), "<b>bold</b> <u>under</u> <i>it</i>");
-  const att = { "a.png": { "image/png": "iVBORw0KGgo=" } };
-  assert.equal(safeHtml('<img src="attachment:a.png" width="600px">', { attachments: att }), '<img src="data:image/png;base64,iVBORw0KGgo=" width="600px">');
+  // (a 1 x 1 PNG: a picture is shown only if its header says its size, image-size.ts)
+  const px = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const att = { "a.png": { "image/png": px }, "b.png": { "image/png": "iVBORw0KGgo=" } };
+  assert.equal(safeHtml('<img src="attachment:a.png" width="600px">', { attachments: att }), `<img src="data:image/png;base64,${px}" width="600px">`);
+  // (one whose size can't be read: not shown)
+  assert.equal(safeHtml('<img src="attachment:b.png">', { attachments: att }), "");
   assert.equal(safeHtml('<a href="https://x.example/p">x</a>'), '<a href="https://x.example/p" target="_blank" rel="noopener noreferrer">x</a>');
   assert.match(safeHtml("<table border=1><tr><th colspan=2>h</th></tr><tr><td>1</td><td>2</td></tr></table>"), /^<table border="1"><tr><th colspan="2">h<\/th>/);
   // (remote images: kept for what a person wrote, not for what code made)
