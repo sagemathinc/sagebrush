@@ -358,6 +358,9 @@ test("what is not implemented is refused, never answered approximately: linsolve
     "funm([1 1; 0 1], @exp)",
     "interp2([1 3 2], 1:3, magic(3), 2, 2)",
     "interp2(magic(3), 2, 2, 'makima')",
+    "median([1 2], 'foo')", "sum([1 2], 'foo')", "mode([1 2], 'omitnan')", "any([1 0], 'omitnan')", "max([1 2], [], 'foo')",
+    "diff([1 2 4], 1, 'foo')", "sort([1 2], 'foo')", "sort([3 NaN 1], 'MissingPlacement', 'first')",
+    "histcounts([1 2 3], 'foo')", "histcounts([1 2 3], 'BinMethod', 'scott')",
   ];
   // (funm's @exp is the local exp below, not the built-in)
   writeFileSync(join(dir, "t.m"), cases.map((c) => `try, ${c}; disp('answered'); catch e, disp('refused'); end`).join("\n") + "\n" + [
@@ -385,4 +388,19 @@ test("format's two-word forms (format long g) are its one-word ones; an unknown 
   assert.equal(lines[2], lines[3]);
   assert.notEqual(lines[0], lines[2]);
   assert.deepEqual(lines.slice(4, 6), ["Invalid format option 'foo'.", "refused"]);
+});
+
+test("data functions where Octave differs from MATLAB: prctile down a column vector, mov* with a numeric Endpoints fill", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "data-"));
+  writeFileSync(join(dir, "t.m"), [
+    "disp(mat2str(prctile([3 1 4 1 5 9 2 6]', [10 90])))",
+    "disp(mat2str(prctile(7, [10 50 90])))",
+    "disp(mat2str(movmax([4 8 6 -1 -2 -3 -1 3 4 5], 4, 'Endpoints', 0)))",
+  ].join("\n") + "\n");
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["[1;8.1]", "[7;7;7]", "[0 0 8 8 6 -1 3 4 5 0]"]);
 });

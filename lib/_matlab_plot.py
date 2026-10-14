@@ -2479,8 +2479,17 @@ def _hc_args(args):
         else:
             edges = _vec(e)
     opts = {}
+    if len(rest) % 2:
+        raise _m._err("Name-value arguments must come in pairs.")
     for i in range(0, len(rest) - 1, 2):
-        opts[_m._text(rest[i]).lower()] = rest[i + 1]
+        k = _m._text(rest[i]).lower() if _m._istext(rest[i]) else None
+        if k not in ("binedges", "numbins", "binlimits", "binwidth", "binmethod", "normalization"):
+            raise _m._err("histcounts: the option '%s' is not supported in Sagebrush." % (_m._text(rest[i]) if k else "?"))
+        opts[k] = rest[i + 1]
+    if "binmethod" in opts and _m._text(opts["binmethod"]).lower() not in ("auto", "integers"):
+        raise _m._err("histcounts: 'BinMethod', '%s' is not supported in Sagebrush." % _m._text(opts["binmethod"]))
+    if "normalization" in opts and _m._text(opts["normalization"]).lower() not in ("count", "probability", "pdf", "countdensity", "cumcount", "cdf"):
+        raise _m._err("Invalid 'Normalization' value '%s'." % _m._text(opts["normalization"]))
     if "binedges" in opts:
         edges = _vec(opts["binedges"])
     if "numbins" in opts:
