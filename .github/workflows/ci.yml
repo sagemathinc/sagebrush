@@ -73,6 +73,7 @@ jobs:
           CHROME=google-chrome node web/test-kernels.mjs
           CHROME=google-chrome node web/test-reactive.mjs
           CHROME=google-chrome node web/test-notebook-blocks.mjs
+          CHROME=google-chrome node web/test-doclang.mjs
           CHROME=google-chrome node web/test-big-pictures.mjs
           CHROME=google-chrome node web/board/bench.mjs
           CHROME=google-chrome node web/test-board.mjs
