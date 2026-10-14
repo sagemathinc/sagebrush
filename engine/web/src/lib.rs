@@ -504,8 +504,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 v.get(k).and_then(Value::as_array).ok_or_else(|| format!("missing list '{}'", k))?.iter().map(|x| pair(x, k)).collect()
             };
             let aps: Vec<(u64, i64)> = list("aps")?.into_iter().map(|(q, a)| if q > 1 { Ok((q as u64, a)) } else { Err("each a_q needs a prime q".to_string()) }).collect::<Result<_, _>>()?;
-            let (zero, vals) = sagebrush_modsym::ec_modsym_values(n, &aps, &list("cusps")?)?;
-            Ok(json!({ "zero": zero.to_string(), "values": vals.iter().map(|x| x.to_string()).collect::<Vec<_>>() }))
+            let (zero, cycles, vals) = sagebrush_modsym::ec_modsym_values(n, &aps, &list("cusps")?)?;
+            Ok(json!({ "zero": zero.to_string(), "cycles": cycles.to_string(), "values": vals.iter().map(|x| x.to_string()).collect::<Vec<_>>() }))
         }
         "hecke_charpoly" => {
             let (n, q) = (level(v)?, u(v, "q")?);
