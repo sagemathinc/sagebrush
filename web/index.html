@@ -1114,7 +1114,24 @@ $("#addmd").onclick = () => nb.addCell("", null, true, "markdown");
 $("#keysbtn").onclick = () => nb.showKeys();
 $("#stop").onclick = () => nb.interrupt();
 $("#restart").onclick = () => nb.restart();
-modeEl.onchange = () => setMode(modeEl.value);
+// A notebook's language changes only when its user chooses another, and for
+// one with code only once they confirm it: its code is written in the old
+// language and won't run in the new one until rewritten.  Nothing else
+// changes it (search, an agent): only opening or receiving a document.
+const LANG_NAME = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma" };
+const hasCode = () => cells().some((c) => c.type === "code" && c.ta.value.trim());
+modeEl.onchange = () => {
+  const to = modeEl.value, from = nb.mode;
+  if (to === from) return;
+  if (hasCode() && !confirm(`Change this notebook's language from ${LANG_NAME[from] ?? from} to ${LANG_NAME[to] ?? to}?\n\nIts code is written in ${LANG_NAME[from] ?? from}: it won't run as ${LANG_NAME[to] ?? to} until it is rewritten.`)) {
+    modeEl.value = from;
+    return;
+  }
+  setMode(to);
+  // (the search's results were the old language's)
+  docInput.value = "";
+  hideDocList();
+};
 // File > Examples…: by language; each opens as a new notebook (yours stays saved)
 const exDlg = $("#exdlg");
 {
@@ -1588,15 +1605,20 @@ addEventListener("dragleave", (e) => { if (!e.relatedTarget) filesEl.classList.r
 addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventDefault(); filesEl.classList.remove("drop"); addFiles([...e.dataTransfer.files]); } });
 
 // ------------------------------------------------------------ documentation search
-// Every public function of Sagebrush's Sage library with its signature and
-// docstring (docs-index.json, made by lib/_pyjs_docsearch.py at build time),
-// ranked as there: every word must match; the name counts most.
-let docIndex = null;
-function loadDocIndex() {
-  docIndex ??= fetch("docs-index.json").then((r) => r.json()).then((d) => d.map((e) => ({
-    ...e, _name: e.name.toLowerCase(), _words: new Set(docWords(e.name)), _sum: e.summary.toLowerCase(), _doc: e.doc.toLowerCase(),
+// The functions the notebook's language has, and only those: Sage's, every
+// public function of Sagebrush's Sage library with its signature and
+// docstring (docs-index.json, made by lib/_pyjs_docsearch.py at build time);
+// MATLAB's, its built-ins (docs-index-matlab.json, lib/_matlab_docsearch.py).
+// Ranked as lib/_pyjs_docsearch.py ranks: every word must match; the name
+// counts most.  Python and Magma have no index yet, and say so.
+const DOC_INDEX = { sage: "docs-index.json", matlab: "docs-index-matlab.json" };
+const docIndexes = {};
+function loadDocIndex(lang = nb.mode) {
+  if (!DOC_INDEX[lang]) return Promise.resolve(null);
+  docIndexes[lang] ??= fetch(DOC_INDEX[lang]).then((r) => r.json()).then((d) => d.map((e) => ({
+    ...e, lang, _name: e.name.toLowerCase(), _words: new Set(docWords(e.name)), _sum: e.summary.toLowerCase(), _doc: e.doc.toLowerCase(),
   })));
-  return docIndex;
+  return docIndexes[lang];
 }
 const docWords = (s) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 function docScore(e, words, phrase) {
@@ -1618,17 +1640,18 @@ async function searchDocs(query, limit = 20) {
   if (!words.length) return [];
   const phrase = query.trim().toLowerCase();
   const idx = await loadDocIndex();
+  if (!idx) return null;
   return idx.map((e) => [docScore(e, words, phrase), e]).filter(([s]) => s > 0)
     .sort((a, b) => b[0] - a[0] || a[1].name.length - b[1].name.length || (a[1].name < b[1].name ? -1 : 1))
     .slice(0, limit).map(([, e]) => e);
 }
 const docInput = $("#docsearch"), docList = $("#docresults"), docDlg = $("#docdlg");
-let docHits = [], docSel = 0, docSeq = 0;
+let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false;
 const docHead = (e) => e.name + (e.signature || (e.kind === "class" ? "" : "()"));
 function showDocList() {
   docList.innerHTML = docHits.length
     ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e.examples ? `<span class="badge">${e.examples} example${e.examples > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
-    : `<li class="none">No function's documentation has all of these words.</li>`;
+    : `<li class="none">${docNoIndex ? `There is no function search for ${LANG_NAME[nb.mode] ?? nb.mode} notebooks yet: it has Sage's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>`;
   docList.hidden = false;
   docInput.setAttribute("aria-expanded", "true");
   if (docHits.length) docInput.setAttribute("aria-activedescendant", "doc" + docSel);
@@ -1644,7 +1667,8 @@ docInput.addEventListener("input", async () => {
   if (!q.trim()) return hideDocList();
   const hits = await searchDocs(q);
   if (seq !== docSeq) return; // a later keystroke won
-  docHits = hits;
+  docHits = hits ?? [];
+  docNoIndex = hits === null;
   docSel = 0;
   showDocList();
 });
@@ -1686,7 +1710,8 @@ function openDoc(e) {
   docOpen = e;
   $("#doctitle").textContent = docHead(e);
   $("#docbody").textContent = (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}`;
-  $("#docinsert").hidden = !e.examples;
+  // (its examples go into a notebook of its own language only: inserting never changes the notebook's)
+  $("#docinsert").hidden = !e.examples || e.lang !== nb.mode;
   docDlg.showModal();
 }
 // the sage: lines of a docstring (with their ....: continuations), as a cell
@@ -1704,8 +1729,7 @@ $("#docclose").onclick = () => docDlg.close();
 $("#docinsert").onclick = () => {
   const code = docExamples(docOpen?.doc ?? "");
   docDlg.close();
-  if (!code) return;
-  setMode("sage");
+  if (!code || docOpen.lang !== nb.mode) return;
   const cell = nb.addCell(code, null, true);
   cell.el.scrollIntoView({ block: "center" });
   announce(`Inserted the examples of ${docOpen.name} into a new cell`);
@@ -1739,9 +1763,12 @@ const tools = [
       required: ["code"],
     },
     async execute({ code, sage, magma, matlab }) {
-      if (magma) setMode("magma");
-      else if (matlab) setMode("matlab");
-      else if (sage !== undefined) setMode(sage ? "sage" : "python");
+      // (an agent changes the language only of a notebook with no code yet)
+      const want = magma ? "magma" : matlab ? "matlab" : sage !== undefined ? (sage ? "sage" : "python") : nb.mode;
+      if (want !== nb.mode) {
+        if (hasCode()) return { isError: true, content: [{ type: "text", text: `This notebook is ${LANG_NAME[nb.mode] ?? nb.mode} and has code, so its language isn't changed: run ${LANG_NAME[nb.mode] ?? nb.mode} code, or ask the person using the page to change its language.` }] };
+        setMode(want);
+      }
       const last = cells().at(-1);
       const cell = last && last.type === "code" && last.ta.value.trim() === "" ? last : nb.addCell("");
       nb.setInput(cell, code);

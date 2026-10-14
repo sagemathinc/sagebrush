@@ -129,7 +129,8 @@ try {
   await ev("(() => { const t = document.querySelectorAll('.cell textarea')[1]; t.value = 'import math\\nprint(math.pi)'; t.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.cell .runb')[1].click(); })()");
   await until("document.querySelectorAll('.cell')[1].querySelector('.out').textContent.includes('3.14159')");
   // a 3D plot prints as a picture of its current view (a WebGL canvas would print blank)
-  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
+  // (changing the language of a notebook with code asks first: yes)
+  await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
   await ev("(() => { document.querySelector('#add').click(); const t = [...document.querySelectorAll('.cell textarea')].at(-1); t.value = \"x, y = var('x y')\\nplot3d(sin(x*y), (x, -2, 2), (y, -2, 2))\"; t.dispatchEvent(new Event('input', { bubbles: true })); [...document.querySelectorAll('.cell .runb')].at(-1).click(); })()");
   await until("document.querySelector('figure.plot3d svg')", 60000);
   const gl = await until("document.querySelector('figure.plot3d canvas')", 8000).catch(() => false);
