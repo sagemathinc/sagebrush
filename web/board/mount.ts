@@ -920,6 +920,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     } else {
       const was = presenting!.was;
       presenting = null;
+      presentGen++;
       board.onRender = null;
       root.classList.remove("sbb-present");
       for (const id of ["pr-bar", "pr-say", "pr-mask"]) $(id).hidden = true;
@@ -931,12 +932,21 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       if (was.editing) editor.setOn(true);
     }
   }
+  // (each move, and leaving, is a new generation: a move whose page took
+  // a while to draw, overtaken by a later one, then does nothing more)
+  let presentGen = 0;
   async function showFrame(i: number, now = false) {
-    const P = presenting;
+    const P = presenting, g = ++presentGen;
     if (!P || !doc) return;
-    P.i = Math.max(0, Math.min(P.frames.length - 1, i));
-    const f = P.frames[P.i];
-    if (f.page !== pageIx) await page(f.page);
+    const k = Math.max(0, Math.min(P.frames.length - 1, i)), f = P.frames[k];
+    if (f.page !== pageIx) {
+      // (the page drawn, not its whole view: the frame says where the camera goes)
+      editor.clear();
+      pageIx = f.page;
+      await redraw();
+      if (g !== presentGen || presenting !== P || !doc) return;
+    }
+    P.i = k;
     const v = pageView(doc, pageIx), s = lookOf(doc, pageIx).slide, st = f.step >= 0 ? v.steps?.[f.step] : undefined;
     at = f.step;
     board.insets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -1136,6 +1146,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       boardHistory?.close?.();
       cancelAnimationFrame(relayoutFrame);
       clearTimeout(idle);
+      presenting = null;
+      presentGen++; // (no more of Present's moves)
       cancelAnimationFrame(ttFrame);
       routingGen++; // (no more routing)
       board.destroy();
