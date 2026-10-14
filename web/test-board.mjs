@@ -119,8 +119,12 @@ try {
     check(!overflow.length && !overflow2.length, `text overflows: ${[...overflow, ...overflow2].join(", ")}`);
     await ev(`window.board.el.style.cssText = "", window.board.focus(undefined, true)`);
   } else {
-    // (a large board: a region of it, close up, its math typeset)
-    await ev(`window.board.setCamera({ x: ${b.x0}, y: ${b.y0}, z: 1 })`);
+    // (a large board: a region of it, close up, its math typeset: the
+    // window's worth with the most notes, not its corner, which for a
+    // generated board, source.json being the repository's files, changes
+    // as the repository does)
+    const at = await ev(`(() => { const its = window.sagebrush.board.snapshot().items.filter((i) => i.kind === "note"), W = window.board.el.clientWidth, H = window.board.el.clientHeight; let best = { x: ${b.x0}, y: ${b.y0} }, most = -1; for (const a of its) { const x = a.x - 8, y = a.y - 8, n = its.filter((i) => i.x >= x && i.y >= y && i.x + i.w <= x + W && i.y + i.h <= y + H).length; if (n > most) { most = n; best = { x, y }; } } return best; })()`);
+    await ev(`window.board.setCamera({ x: ${at.x}, y: ${at.y}, z: 1 })`);
     await until("window.board.math.length === 0 && !window.board.unbuilt", 20000).catch(() => {});
     await sleep(300);
     const over = await ev("[...document.querySelectorAll('.board-note')].filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => e.querySelector('b')?.textContent)");
