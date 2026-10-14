@@ -141,3 +141,60 @@ print(re.search(r'aria-label="([^"]*)"', fig._repr_svg_()).group(1))
     "Plot: line through 6 points, 6 points, line through 3 points; x from 0.9 to 3.1, y from 1.695 to 6.205",
   ]);
 });
+
+test("colorbar of any mappable: images, scatters colored by values, ScalarMappable, contour sets; pyplot's current image", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
+import numpy as np
+fig, ax = plt.subplots()
+ax.imshow(np.array([[0.0, 1.0], [3.0, 4.0]]))
+try:
+    plt.colorbar()
+except RuntimeError as e:
+    print("ax.imshow is not current:", e)
+fig = plt.figure()
+plt.imshow(np.array([[0.0, 1.0], [3.0, 4.0]]))
+cb = plt.colorbar()
+print("imshow", tuple(float(v) for v in cb.ax.get_ylim()))
+fig = plt.figure()
+plt.scatter([1, 2], [1, 2], c=[2.0, 3.0])
+plt.plot([1, 2])
+cb = plt.colorbar()
+print("plt.scatter", tuple(float(v) for v in cb.ax.get_ylim()))
+fig, ax = plt.subplots()
+sc = ax.scatter([1, 2, 3], [1, 2, 3], c=[5.0, 7.0, 9.0], cmap="plasma")
+cb = fig.colorbar(sc, ax=ax)
+print("scatter", tuple(float(v) for v in cb.ax.get_ylim()))
+fig, ax = plt.subplots()
+sc = ax.scatter([1, 2, 3], [1, 2, 3], c=[5.0, 7.0, 9.0], vmin=0, vmax=20)
+cb = fig.colorbar(sc)
+print("scatter vmin", tuple(float(v) for v in cb.ax.get_ylim()))
+fig, ax = plt.subplots()
+sm = cm.ScalarMappable(norm=Normalize(0, 10), cmap="viridis")
+cb = fig.colorbar(sm, ax=ax)
+print("sm", tuple(float(v) for v in cb.ax.get_ylim()), sm.get_clim())
+fig, ax = plt.subplots()
+cs = ax.contourf(np.array([[0.0, 1.0], [2.0, 3.0]]), levels=[0, 1, 2, 3])
+cb = plt.colorbar(cs)
+print("contourf", tuple(float(v) for v in cb.ax.get_ylim()))
+fig, ax = plt.subplots()
+ax.plot([1, 2])
+try:
+    plt.colorbar()
+except RuntimeError as e:
+    print(e)
+`);
+  const none = "No mappable was found to use for colorbar creation. First define a mappable such as an image (with imshow) or a contour set (with contourf).";
+  assert.deepEqual(out.trim().split("\n"), [
+    "ax.imshow is not current: " + none,
+    "imshow (0.0, 4.0)",
+    "plt.scatter (2.0, 3.0)",
+    "scatter (5.0, 9.0)",
+    "scatter vmin (0.0, 20.0)",
+    "sm (0.0, 10.0) (0.0, 10.0)",
+    "contourf (0.0, 3.0)",
+    none,
+  ]);
+});
