@@ -135,8 +135,11 @@ try {
   check(ss.length === 2 && ss.every((s) => s.y > 300), `the eraser removes the strokes a drag goes across: ${ss.length} left: ${JSON.stringify(ss.map((s) => [s.x, s.y]))}`);
   await key("z", 90, 2);
   check((await strokes()).length === 4, "one Undo brings them all back");
-  // Esc: no more drawing or erasing
+  // Esc: no more drawing or erasing (and the camera stays where it is)
+  const before = await camera();
   await key("Escape", 27);
+  const after = await camera();
+  check(JSON.stringify(before) === JSON.stringify(after), `Esc stopping a tool leaves the camera where it is: ${JSON.stringify(before)} then ${JSON.stringify(after)}`);
   check(await ev("document.querySelector('.ink-row').hidden && !window.board.el.classList.contains('erasing') && !window.board.el.classList.contains('drawing')"), "Esc stops erasing (and drawing): the row goes");
   // with Draw off, a stroke is an item: picked on it, 3 pixels from it, not in a loop's empty middle
   const pen = (await strokes()).find((s) => s.points.length && s.points[2] < 0.2);
