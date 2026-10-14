@@ -38,7 +38,7 @@ import { Board, type Camera, type Edge, type Item } from "./board";
 import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
-import type { OutputCache } from "./outcache";
+import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
 import { PixelBudget } from "../image-size";
 import { loadRemotePicture } from "../safe-html";
 import { Toolbar, defaultTools } from "./toolbar";
@@ -108,8 +108,9 @@ export interface BoardHost {
   /** where slow code items' outputs are kept between visits (outcache.ts; design/outputs.md) */
   outputs?: OutputCache;
   /** the board as one HTML file (Download as HTML); with `python`, the file
-   * carries the code's engine, so its code runs without the network */
-  exportHtml?(d: BoardDoc, o?: { python?: boolean }): Promise<string>;
+   * carries the code's engine, so its code runs without the network; with
+   * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
+  exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
   /** whether exportHtml can carry the engine, and about how much more that is ("6 MB") */
   exportPython?(d: BoardDoc): string | null;
 }
@@ -145,6 +146,7 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <dialog data-sbb="htmldlg"><h3>Download as HTML</h3><form data-sbb="htmlform" method="dialog">
 <p class="prnote">One file, which opens in any browser. To run its code, it loads Sagebrush from the web, unless in offline mode.</p>
 <fieldset data-sbb="html-py-set"><label><input type="checkbox" name="python" data-sbb="html-py"> Offline mode: code runs without the network <span data-sbb="html-size"></span></label></fieldset>
+<fieldset data-sbb="html-out-set"><label><input type="checkbox" name="outputs" data-sbb="html-out" checked> Slow code's outputs, so they show at once <span data-sbb="html-out-size"></span></label></fieldset>
 <fieldset><legend>Its code runs with</legend><label><input type="radio" name="engine" value="pinned" checked> the version of Sagebrush it was saved with</label><label><input type="radio" name="engine" value="latest"> the latest version, when online (else that one)</label></fieldset>
 <div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="html-go" class="be-done">Download</button></div></form></dialog>
 <dialog data-sbb="prdlg"><h3>Print or save as PDF</h3><form data-sbb="prform" method="dialog">
@@ -812,13 +814,20 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // asks first whether the file carries Sagebrush (offline mode: every
   // language's runtime), and which version it runs
   const htmldlg = $("htmldlg") as HTMLDialogElement;
-  $("html").onclick = () => {
+  // (the outputs it would carry, as they were when the dialog opened)
+  let carried: CachedOutputs[] = [];
+  $("html").onclick = async () => {
     if (!doc) return;
     if (!anyCode(doc)) return void downloadHtml(false);
     const size = host.exportPython?.(doc) ?? null;
     $("html-py-set").hidden = !size;
     ($("html-py") as HTMLInputElement).checked = false;
     $("html-size").textContent = size ? `(the file is about ${size} larger)` : "";
+    carried = (await code?.carry().catch(() => [])) ?? [];
+    const bytes = carried.reduce((s, e) => s + sizeOf(e.outputs), 0);
+    $("html-out-set").hidden = !carried.length;
+    ($("html-out") as HTMLInputElement).checked = true;
+    $("html-out-size").textContent = `(${bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1e3))} kB` : `${(bytes / 1e6).toFixed(1)} MB`})`;
     for (const r of root.querySelectorAll<HTMLInputElement>("[data-sbb=htmlform] input[name=engine]")) r.checked = r.value === (doc.engine ?? "pinned");
     htmldlg.showModal();
   };
@@ -829,13 +838,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (which version it runs is the board's: kept in it)
     const use = f.get("engine") === "latest" ? "latest" : undefined;
     if (doc && use !== doc.engine) await editor.commit((d) => { if (use) d.engine = use; else delete d.engine; });
-    await downloadHtml(f.get("python") === "on");
+    await downloadHtml(f.get("python") === "on", f.get("outputs") === "on" ? carried : []);
   };
-  async function downloadHtml(python: boolean) {
+  async function downloadHtml(python: boolean, outputs: CachedOutputs[] = []) {
     if (!doc) return;
     try {
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(doc), { python })], { type: "text/html" }));
+      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(doc), { python, outputs })], { type: "text/html" }));
       a.download = fileName().replace(/\.board\.json$/, ".html");
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -1275,8 +1284,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       step,
       /** A Mermaid flowchart (or Markdown with some) as a board document, to load(), or to edit first. */
       fromMermaid: (text: string) => boardFromText(text),
-      /** The board as one self-contained HTML file (its text). */
-      exportHtml: async (o?: { python?: boolean }) => host.exportHtml!(await images.inline(doc!), o),
+      /** The board as one self-contained HTML file (its text); with `outputs`, carrying its slow items' outputs. */
+      exportHtml: async (o?: { python?: boolean; outputs?: boolean }) =>
+        host.exportHtml!(await images.inline(doc!), { python: o?.python, outputs: o?.outputs ? ((await code?.carry()) ?? []) : [] }),
       /** the document as a file carries it: with its pictures (data: URLs) */
       portable: () => images.inline(doc!),
       /** the board's file (foo.board.json), as Download JSON writes it */

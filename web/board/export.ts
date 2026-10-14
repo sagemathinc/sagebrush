@@ -13,6 +13,7 @@
 // own copies (#sb-template, #sb-board, #sb-math, #sb-katex).
 
 import type { BoardDoc } from "./doc";
+import type { CachedOutputs } from "./outcache";
 import { OWN_ENGINE, checked, embeddedText, engineFiles, fetched, pack, type EngineRef } from "./engine";
 
 /** Whether this page is an exported file (its document embedded). */
@@ -23,6 +24,15 @@ export function engineRef(): EngineRef | null {
   try {
     const r = JSON.parse(document.getElementById("sb-engine-ref")?.textContent ?? "null");
     return r && typeof r.site === "string" && typeof r.id === "string" && /^https?:/.test(r.site) ? { site: r.site, id: r.id } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The outputs an exported file carries (#sb-outputs), as they are: outcache.ts carriedOutputs() checks them. */
+export function fileOutputs(): unknown {
+  try {
+    return JSON.parse(document.getElementById("sb-outputs")?.textContent ?? "null");
   } catch {
     return null;
   }
@@ -69,7 +79,7 @@ async function katexCss(base: URL): Promise<string> {
 
 /** The board page as one HTML file holding `doc`; with `python`, the code's
  * engine too (engine.ts), compressed, so its code runs without the network. */
-export async function exportHtml(doc: BoardDoc, o: { python?: boolean } = {}): Promise<string> {
+export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?: CachedOutputs[] } = {}): Promise<string> {
   const own = (id: string) => document.getElementById(id)?.textContent ?? null;
   const here = new URL(".", location.href); // (the board's directory: /board/)
   const site = new URL("..", here);
@@ -96,8 +106,11 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean } = {}): P
   // (the template rides along for exporting again, its scripts' ends escaped
   // as everything inline is, and unescaped when used)
   const json = JSON.stringify(doc).replace(/</g, "\\u003c");
+  // (the slow items' outputs, keyed by what produced them: outcache.ts, carriedOutputs())
+  const outputs = o.outputs?.length ? JSON.stringify(o.outputs.map(({ where: _w, ...e }) => e)).replace(/</g, "\\u003c") : null;
   const parts = [
     `<script type="application/json" id="sb-doc">${json}</script>`,
+    outputs ? `<script type="application/json" id="sb-outputs">${outputs}</script>` : "",
     `<script type="text/plain" id="sb-template">${inline(template)}</script>`,
     mathJs ? `<script type="text/plain" id="sb-math">${inlineJs(mathJs)}</script>` : "",
     mathCss ? `<style id="sb-katex">${inline(mathCss)}</style>` : "",
