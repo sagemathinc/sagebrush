@@ -38,6 +38,7 @@ import { Board, type Camera } from "./board";
 import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, type BoardDoc, type BoardPage, type MeasuredNote } from "./doc";
 import type { BoardCode } from "./code";
 import { Toolbar, defaultTools } from "./toolbar";
+import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
@@ -448,11 +449,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     { id: "image", label: "Image", icon: "▨", title: "Add pictures (or paste one, or drop files on the board)", run: () => pickImages() },
     { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y); } },
     { id: "connect", label: "Connect", icon: "⤳", title: "Connect notes: tap one, then another (or shift-drag from one to the other); Esc to stop", toggle: editor.connecting },
+    { id: "draw", label: "Draw", icon: "✎", title: "Draw: drag to draw (a pen's pressure counts; once a pen has drawn, a finger pans); Esc to stop", toggle: editor.drawing },
+    { id: "erase", label: "Erase", icon: "⌫", title: "Erase: drag across strokes to remove them; Esc to stop", toggle: editor.erasing },
     { id: "page", label: "Page", icon: "⧉", title: "Add a page after this one", run: () => $("addpage").click() },
     { id: "undo", label: "↶", icon: "↶", title: "Undo (Ctrl+Z)", run: () => editor.undo() },
     { id: "redo", label: "↷", icon: "↷", title: "Redo (Ctrl+Shift+Z)", run: () => editor.redo() },
   // (which tools a board shows is a setting, not an edit to undo)
   ], editor.editing, (ids) => editor.commit((d) => { d.tools = ids; }, false, false));
+  // the pen row: the pen's color and width, a highlighter, the eraser (pen.ts)
+  const pen = new PenRow(root, editor.drawing, editor.erasing, () => toolbar.el);
+  editor.penStyle = () => pen.style();
   // pictures chosen from files (or the camera, on a phone), added in the middle of the view
   function pickImages() {
     const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp", multiple: true });
@@ -830,6 +836,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       await editor.destroy();
       for (const f of offs.splice(0)) f();
       toolbar.destroy();
+      pen.destroy();
       code?.close();
       code = null;
       boardHistory?.close?.();

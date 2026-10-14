@@ -5,7 +5,7 @@
 // each point.  With bun:
 //   bun web/board/test-ink.mjs        (SVG=file.svg: the strokes, to look at)
 import { writeFileSync } from "node:fs";
-import { InkCapture, inkBox, inkOutline, inkPath } from "./ink.ts";
+import { InkCapture, inkBox, inkHit, inkOutline, inkPath } from "./ink.ts";
 import { canonical, cleanDoc, inkNode, layout } from "./doc.ts";
 
 const fails = [];
@@ -131,6 +131,10 @@ const ofull = inkOutline(inkNode("f", full, { size: 3 }).points, { size: 3, stre
 let moved = 0;
 for (let i = 0; i < ofull.length; i += 2) { let m = Infinity; for (let j = 0; j < osimple.length; j += 2) { const k = (j + 2) % osimple.length; m = Math.min(m, segd(ofull[i], ofull[i + 1], osimple[j], osimple[j + 1], osimple[k], osimple[k + 1])); } moved += m; }
 check(moved / (ofull.length / 2) < 0.15, `simplified, the word's outline moved ${(moved / (ofull.length / 2)).toFixed(3)} units on average`);
+
+// picking a stroke: on it, or within a few units of its edge; not the empty middle of a loop
+const loop = inkOutline(pts((i) => [50 + Math.cos((i / 40) * 2 * Math.PI) * 40, 50 + Math.sin((i / 40) * 2 * Math.PI) * 40, 0.5], 41), { size: 3, streamline: 0, last: true });
+check(inkHit(loop, 90, 50, 2) && inkHit(loop, 93.2, 50, 2) && !inkHit(loop, 96, 50, 2) && !inkHit(loop, 50, 50, 2), "a stroke is picked on it and within a few units of it, not in a loop's empty middle");
 
 if (process.env.SVG) {
   const paths = strokes.map((o, i) => `<path transform="translate(20 ${40 + i * 70})" d="${inkPath(o)}" fill="#1d241a"/>`).join("");

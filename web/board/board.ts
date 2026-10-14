@@ -10,7 +10,10 @@
 // drawn on a canvas behind the notes; notes show Markdown with math, and
 // their detail (semantic zoom) only when zoomed in.
 
-import { inkPath } from "./ink";
+import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
+
+/** How a pen draws: its width, its color, and below 1 a highlighter's opacity. */
+export interface InkStyle { size: number; color: string; opacity?: number }
 
 /** Ink's color, unless a stroke says. */
 export const INK = "#1d241a";
@@ -170,6 +173,18 @@ export class Board {
   imageUrl: ((name: string) => string | undefined) | null = null;
   /** a press on an item (not a link): return true to take it (the board does not pan) */
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
+  /** Drawing (the Draw tool): the pen's style, asked at each press (null:
+   * the press doesn't draw); a stroke drawn, its points as InkCapture keeps them */
+  pen: (() => InkStyle | null) | null = null;
+  onStroke: ((points: number[], style: InkStyle) => void) | null = null;
+  /** Erasing (the Erase tool): asked at each press; the strokes a drag went across */
+  eraser: (() => boolean) | null = null;
+  onErase: ((ids: string[]) => void) | null = null;
+  /** a pen (not a finger) has drawn on this board: from then on a finger
+   * pans, so the palm resting on the screen while writing draws nothing */
+  penSeen = false;
+  private live: { id: number; touch: boolean; cap: InkCapture; style: InkStyle } | null = null;
+  private erased: { id: number; touch: boolean; ids: Set<string> } | null = null;
   /** a double click: on an item, or (null) on the background at world (x, y); return true when handled */
   onDoubleClick: ((it: Item | null, x: number, y: number) => boolean) | null = null;
   /** a press, or a double click, on an edge (not over a note): return true to take it */
@@ -797,9 +812,15 @@ export class Board {
         this.paths.set(it.id, p);
       }
       if (it.outline) {
-        // (a pen's stroke: its outline, filled; a highlighter's, see-through)
+        // (a pen's stroke: its outline, filled; a highlighter's, see-through;
+        // one being erased, faded; a selected one, outlined)
+        if (this.selection.has(it.id)) {
+          ctx.strokeStyle = "rgba(42, 111, 47, .9)";
+          ctx.lineWidth = 3 / c.z;
+          ctx.stroke(p);
+        }
         ctx.fillStyle = it.color ?? INK;
-        ctx.globalAlpha = it.opacity ?? 1;
+        ctx.globalAlpha = (it.opacity ?? 1) * (this.erased?.ids.has(it.id) ? 0.2 : 1);
         ctx.fill(p);
         ctx.globalAlpha = 1;
       } else {
@@ -808,6 +829,14 @@ export class Board {
         ctx.stroke(p);
       }
       n++;
+    }
+    // the stroke being drawn (its outline as it is now: it changes only at its end as it goes on)
+    if (this.live) {
+      const { cap, style } = this.live;
+      ctx.fillStyle = style.color;
+      ctx.globalAlpha = style.opacity ?? 1;
+      ctx.fill(new Path2D(inkPath(inkOutline(cap.points, { size: style.size, streamline: 0 }))));
+      ctx.globalAlpha = 1;
     }
     // the selection rectangle being drawn, and a drag's alignment guides
     if (this.marquee) {
@@ -891,11 +920,14 @@ export class Board {
     for (const id of ids) {
       const it = this.byId.get(id);
       if (!it) continue;
-      this.boxes.remove(it);
+      // (a stroke: in the strokes' grid, and its path, which is where it was, made again)
+      const grid = it.kind === "ink" ? this.strokes : this.boxes;
+      grid.remove(it);
       it.x += dx;
       it.y += dy;
       if (it.inner) it.inner = { x: it.inner.x + dx, y: it.inner.y + dy };
-      this.boxes.add(it);
+      grid.add(it);
+      if (it.kind === "ink") this.paths.delete(it.id);
       const el = this.cache.get(it.id);
       if (el) { el.style.left = it.x + "px"; el.style.top = it.y + "px"; }
     }
@@ -917,11 +949,11 @@ export class Board {
   itemsIn(x0: number, y0: number, x1: number, y1: number): Item[] {
     return this.near(x0, y0, x1, y1).filter((it) => it.x >= x0 && it.y >= y0 && it.x + it.w <= x1 && it.y + it.h <= y1);
   }
-  /** The notes and groups overlapping a world rectangle (a large one: every item, not the grid's cells). */
+  /** The notes, groups and strokes overlapping a world rectangle (a large one: every item, not the grid's cells). */
   near(x0: number, y0: number, x1: number, y1: number): Item[] {
     const big = ((x1 - x0) / CELL) * ((y1 - y0) / CELL) > 4 * this.byId.size + 64;
-    const its = big ? [...this.byId.values()] : [...this.boxes.query(x0, y0, x1, y1, new Set())];
-    return its.filter((it) => (it.kind === "note" || it.kind === "group") && it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0);
+    const its = big ? [...this.byId.values()] : [...this.boxes.query(x0, y0, x1, y1, new Set()), ...this.strokes.query(x0, y0, x1, y1, new Set())];
+    return its.filter((it) => (it.kind === "note" || it.kind === "group" || it.kind === "ink") && it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0);
   }
 
   /** An edge's route, or its straight line from border to border (world coordinates). */
@@ -959,6 +991,27 @@ export class Board {
   /** The groups holding a world point, innermost first, leaving out `except`. */
   groupsAt(x: number, y: number, except: Set<string> = new Set()): Item[] {
     return [...this.boxes.query(x, y, x + 0.01, y + 0.01, new Set())].filter((it) => it.kind === "group" && !except.has(it.id)).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+  }
+
+  // (erasing: the stroke at a page point goes, shown faded until the drag ends)
+  private eraseAt(cx: number, cy: number) {
+    const r = this.el.getBoundingClientRect(), it = this.inkAt(cx - r.left, cy - r.top, 8);
+    if (it && this.erased && !this.erased.ids.has(it.id)) {
+      this.erased.ids.add(it.id);
+      this.request();
+    }
+  }
+
+  /** The stroke at a screen point, the topmost: on it, or within `tol`
+   * screen pixels of its edge (not in a loop's empty middle). */
+  inkAt(sx: number, sy: number, tol = 5): Item | null {
+    const c = this.camera, x = c.x + sx / c.z, y = c.y + sy / c.z, t = tol / c.z;
+    const hits = [...this.strokes.query(x - t, y - t, x + t, y + t, new Set())];
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const it = hits[i];
+      if (it.outline && inkHit(it.outline, x - it.x, y - it.y, t)) return it;
+    }
+    return null;
   }
 
   /** The note or group at a screen point, innermost first. */
@@ -1001,8 +1054,40 @@ export class Board {
       // edited, stay theirs; its frame drags it, as any item's does)
       if ((e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
       cancelAnimationFrame(this.flight);
+      const touch = e.pointerType === "touch";
+      if (e.pointerType === "pen") this.penSeen = true;
+      // (a second finger while a finger draws or erases: that is dropped, and the two pinch)
+      if (touch && this.live?.touch) { this.live = null; this.request(); }
+      if (touch && this.erased?.touch) { this.erased = null; this.request(); }
+      // drawing, or erasing: the first pointer (a finger, only while no pen has been seen)
+      if (down.size === 0 && e.isPrimary && e.button === 0 && !(touch && this.penSeen)) {
+        const style = this.pen?.();
+        if (style) {
+          const w = this.toWorld(e.clientX, e.clientY);
+          const cap = new InkCapture({ size: style.size, simulate: e.pointerType !== "pen", unit: 1 / this.camera.z });
+          cap.add(w.x, w.y, e.pressure);
+          this.live = { id: e.pointerId, touch, cap, style };
+          e.preventDefault();
+          down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          this.el.setPointerCapture(e.pointerId);
+          this.request();
+          return;
+        }
+        if (this.eraser?.()) {
+          this.erased = { id: e.pointerId, touch, ids: new Set() };
+          this.eraseAt(e.clientX, e.clientY);
+          e.preventDefault();
+          down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          this.el.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
       if (this.onItemDown && down.size === 0 && e.isPrimary) {
-        const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
+        const r = this.el.getBoundingClientRect();
+        // (a stroke, drawn over the notes, before the note under it)
+        const ink = this.inkAt(e.clientX - r.left, e.clientY - r.top);
+        if (ink && this.onItemDown(ink, e)) return;
+        const it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
         // (an edge, drawn over groups and under notes, before the group it crosses)
         const ed = it?.kind !== "note" && this.onEdgeDown ? this.edgeAt(e.clientX - r.left, e.clientY - r.top) : null;
         if (ed && this.onEdgeDown!(ed, e)) return;
@@ -1015,6 +1100,21 @@ export class Board {
     this.el.addEventListener("pointermove", (e) => {
       const last = down.get(e.pointerId);
       if (!last) return;
+      // (drawing: every point the pointer went through since the last event)
+      if (this.live?.id === e.pointerId) {
+        down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        for (const c of e.getCoalescedEvents?.() ?? [e]) {
+          const w = this.toWorld(c.clientX, c.clientY);
+          this.live.cap.add(w.x, w.y, c.pressure);
+        }
+        this.request();
+        return;
+      }
+      if (this.erased?.id === e.pointerId) {
+        down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        for (const c of e.getCoalescedEvents?.() ?? [e]) this.eraseAt(c.clientX, c.clientY);
+        return;
+      }
       if (down.size === 2) {
         const r = this.el.getBoundingClientRect(), a = mid();
         down.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1026,7 +1126,23 @@ export class Board {
         down.set(e.pointerId, { x: e.clientX, y: e.clientY });
       }
     });
-    for (const t of ["pointerup", "pointercancel"]) this.el.addEventListener(t, (e) => { down.delete((e as PointerEvent).pointerId); });
+    for (const t of ["pointerup", "pointercancel"]) this.el.addEventListener(t, (e) => {
+      const id = (e as PointerEvent).pointerId;
+      down.delete(id);
+      // (a stroke ends, or is dropped; what a drag erased goes)
+      if (this.live?.id === id) {
+        const { cap, style } = this.live;
+        this.live = null;
+        if (t === "pointerup") this.onStroke?.(cap.end(), style);
+        this.request();
+      }
+      if (this.erased?.id === id) {
+        const ids = [...this.erased.ids];
+        this.erased = null;
+        if (t === "pointerup" && ids.length) this.onErase?.(ids);
+        this.request();
+      }
+    });
     // (a double tap: touch screens' double-click, which not every browser
     // makes into a dblclick; one it does make is then ignored)
     let tap: { t: number; x: number; y: number } | null = null, start: { t: number; x: number; y: number } | null = null, doubled = 0;

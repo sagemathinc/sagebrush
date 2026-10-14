@@ -243,3 +243,16 @@
 [data-sbb=where] { color: #667; font-size: 12px; white-space: nowrap; }
 [data-sbb=nav] { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 [data-sbb=nav] div { display: flex; gap: 4px; }
+
+/* the pen row (pen.ts): under the Edit toolbar while Draw or Erase is on */
+.sbb .ink-row { position: absolute; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 1px; padding: 3px 5px; background: #fff; border: 1px solid rgba(0, 0, 0, .12); border-radius: 9px; box-shadow: 0 2px 8px rgba(0, 0, 0, .1); }
+.sbb .ink-row[hidden] { display: none; }
+.sbb .ink-row button { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 4px; border-color: transparent; background: none; color: #33402f; }
+.sbb .ink-row button:hover { background: #eef2ea; }
+.sbb .ink-row button[aria-pressed="true"] { border-color: #2a6f2f; background: #eef2ea; }
+.sbb .ink-row .ink-c span { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--c); }
+.sbb .ink-row .ink-s span { display: block; border-radius: 50%; background: currentColor; }
+.sbb .ink-row .ink-sep { width: 1px; height: 20px; margin: 0 3px; background: rgba(0, 0, 0, .12); }
+.sbb .ink-row svg { width: 18px; height: 18px; }
+@media (max-width: 600px) { .sbb .ink-row { padding: 2px 3px; } .sbb .ink-row button { min-width: 30px; height: 34px; padding: 0 2px; } }
+.sbb .board.drawing, .sbb .board.erasing { cursor: crosshair; }
