@@ -6,7 +6,8 @@
 // workers and listeners (on window and document) it had before.  (What a page
 // gets once, whatever it shows, is there before: the shared stylesheets, the
 // notebook's module.  So the page's own board is used as the rounds use theirs
-// before the count starts.)  Serve
+// before the count starts.)  Also: a document loaded while the page's store
+// is still opening its own stays.  Serve
 // web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-mount.mjs
 import { spawn } from "node:child_process";
@@ -23,10 +24,11 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = [];
+let n = 0; const waiting = new Map(); const errors = [], held = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.method === "Fetch.requestPaused") held.push(m.params.requestId);
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -64,6 +66,19 @@ try {
       terminate() { if (this.__live) { this.__live = false; live--; } super.terminate(); }
     };
   })();` });
+  // a document loaded while the page's store is still opening its own (its
+  // file held, through CDP): it stays; the store's, arriving later, is not
+  // shown over it (the start of several tests, on CI)
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*examples/primes.json*" }] });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
+  await until("!!window.sagebrush?.board?.load", 60000);
+  for (let i = 0; i < 100 && !held.length; i++) await sleep(20);
+  const wasHeld = held.length > 0;
+  await ev(`window.sagebrush.board.load({ title: "Loaded meanwhile", nodes: [{ id: "m", title: "Mine" }] }).then(() => 1)`);
+  for (const id of held.splice(0)) await send("Fetch.continueRequest", { requestId: id });
+  await send("Fetch.disable");
+  await sleep(1500);
+  check(wasHeld && (await ev("window.sagebrush.board.snapshot().doc.title")) === "Loaded meanwhile", "a document loaded while the store opens its own stays: " + await ev("window.sagebrush.board.snapshot().doc.title"));
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear()");

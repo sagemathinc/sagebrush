@@ -82,8 +82,6 @@ export interface BoardTimeTravel {
   docAt(time: string): BoardDoc;
   on(f: () => void): () => void;
   close?(): void;
-  /** Close it and forget its versions (another document is shown in its place). */
-  drop?(): Promise<void>;
 }
 export interface BoardHost {
   store?: BoardStore;
@@ -97,6 +95,8 @@ export interface BoardHost {
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
   history?: (id: string | null) => Promise<BoardTimeTravel | null>;
+  /** Forget the versions of the document named `id` (another document is shown in its place), opened or not. */
+  dropHistory?: (id: string | null) => Promise<void>;
   /** where the page and step shown are kept (#p2-3: the address's hash) */
   address?: { get(): string; set(hash: string): void };
   /** the board's title changed (the page's title follows it) */
@@ -234,7 +234,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     code?.usePictures(docPixels);
     board.epoch++;
     // (and its history: another document's, the one before gone with what it recorded)
-    if (fresh || docId !== was) newHistory(fresh);
+    // (the document replaced: its name, if it had one, or none where the host names none)
+    if (fresh || docId !== was) newHistory(fresh && (was !== null || docId === null) ? was : undefined);
   }
 
   // a page made from a template: the template's items and edges under its
@@ -534,8 +535,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
 
   // the document: the host's (none: nothing is shown until load(), as for the benchmark's boards)
+  // (a document the host or an agent loads meanwhile wins: the store's,
+  // arriving later, is not shown over it)
+  const opening = loads;
   host.store?.load().then((r) => {
-    if (!r) return;
+    if (!r || loads !== opening) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
     return load(r.doc, true).then(sayConverted);
@@ -1146,15 +1150,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }));
   }
   // Another document is shown: its own history, opened when it is next
-  // needed; the one before closed, and (`forget`) its versions dropped
-  function newHistory(forget: boolean) {
+  // needed; the one before closed, and the versions of the document it
+  // replaced (`forget`, its name) dropped, whether its history was opened
+  // or not (CORR-F75-1: after a reload it is opened only when needed)
+  function newHistory(forget?: string | null) {
     closeTimeTravel(false);
     const old = historyReady;
     historyReady = null;
     boardHistory = null;
     remembered = false;
     replaced = doc;
-    if (old) historyGone = old.then((h) => (forget && h?.drop ? h.drop() : h?.close?.())).catch((e) => console.warn("board: TimeTravel:", e));
+    historyGone = Promise.all([historyGone, old?.then((h) => h?.close?.())])
+      .then(() => (forget !== undefined ? host.dropHistory?.(forget) : undefined))
+      .catch((e) => console.warn("board: TimeTravel:", e));
   }
   // Keep the board as a version (and, the first time, the board as it was
   // before this change, if the history does not have it yet: not the
