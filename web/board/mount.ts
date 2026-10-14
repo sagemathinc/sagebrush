@@ -46,7 +46,8 @@ import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText } from "./mermaid";
 import { canvasLeftOut, toCanvas } from "./canvas";
 import { render as markdown } from "../markdown";
-import { IMAGE_TYPES, type ImageStore } from "./images";
+import { IMAGE_TYPES, prepare, type ImageStore } from "./images";
+import { COLORS } from "./colors";
 import type { Version } from "./history";
 import { track, active } from "./focus";
 import css from "./board.css" with { type: "text" };
@@ -109,11 +110,17 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="namepage" hidden>Rename this page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" disabled>←</button><button data-sbb="next" title="Next (→)">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
+<dialog data-sbb="pgdlg"><h3>Page</h3><form data-sbb="pgform" method="dialog">
+<fieldset data-sbb="pg-title-set"><label>Title <input type="text" data-sbb="pg-title" maxlength="200"></label></fieldset>
+<fieldset><label><input type="checkbox" data-sbb="pg-slide"> A slide (16:9): a card it is arranged on, which Present shows</label></fieldset>
+<fieldset><legend>Background</legend><div data-sbb="pg-colors" role="group" aria-label="Background color"></div></fieldset>
+<fieldset data-sbb="pg-pic-set"><button type="button" data-sbb="pg-pic">Picture…</button><button type="button" data-sbb="pg-nopic">No picture</button><span data-sbb="pg-pic-on"></span></fieldset>
+<div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="pg-go" class="be-done">Done</button></div></form></dialog>
 <dialog data-sbb="htmldlg"><h3>Download as HTML</h3><form data-sbb="htmlform" method="dialog">
 <p class="prnote">One file, which opens in any browser. To run its code, it loads Python from the web, unless Python is included.</p>
 <fieldset data-sbb="html-py-set"><label><input type="checkbox" name="python" data-sbb="html-py"> Include Python, so its code runs without the network <span data-sbb="html-size"></span></label></fieldset>
@@ -362,7 +369,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     sel.value = String(pageIx);
     ($("pgprev") as HTMLButtonElement).disabled = pageIx <= 0;
     ($("pgnext") as HTMLButtonElement).disabled = pageIx >= n - 1;
-    $("rmpage").hidden = $("namepage").hidden = n < 2;
+    $("rmpage").hidden = n < 2;
   }
 
   /** The steps of the page shown. */
@@ -560,10 +567,80 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     await page(n);
     if (!editor.on) editBtn.click();
   };
-  $("namepage").onclick = () => {
-    const name = prompt("This page's title", pageOf(doc!, pageIx).title ?? "");
-    if (name !== null) editor.commit((d) => { pageOf(d, pageIx).title = name.trim() || undefined; });
+  // Page…: the page's title (a board with pages), whether it is a slide,
+  // its background color, a slide's picture; Done is one undo step
+  const pgdlg = $("pgdlg") as HTMLDialogElement;
+  let pend: { color?: string; image?: string; info?: { w: number; h: number } } = {};
+  const swatches = $("pg-colors");
+  for (const [name, c] of [["None", ""], ["White", "#ffffff"], ...COLORS] as [string, string][]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pg-c";
+    b.title = name;
+    b.setAttribute("aria-label", name);
+    b.dataset.color = c;
+    if (c) b.style.setProperty("--c", c);
+    b.onclick = () => { pend.color = c || undefined; pgShow(); };
+    swatches.append(b);
+  }
+  const pgShow = () => {
+    const slide = ($("pg-slide") as HTMLInputElement).checked;
+    for (const b of swatches.querySelectorAll<HTMLButtonElement>("button")) b.setAttribute("aria-pressed", String((b.dataset.color || undefined) === pend.color));
+    $("pg-pic-set").hidden = !slide;
+    $("pg-nopic").hidden = !pend.image;
+    $("pg-pic-on").textContent = pend.image ? "a picture covers the card" : "";
   };
+  $("pg-slide").onchange = pgShow;
+  $("pageprops").onclick = () => {
+    if (!doc) return;
+    const p = pageOf(doc, pageIx);
+    $("pg-title-set").hidden = !doc.pages?.length;
+    ($("pg-title") as HTMLInputElement).value = p.title ?? "";
+    ($("pg-slide") as HTMLInputElement).checked = !!p.slide;
+    pend = { color: p.background?.color, image: p.background?.image };
+    pgShow();
+    pgdlg.showModal();
+  };
+  $("pg-pic").onclick = () => {
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp" });
+    input.className = "sb-fileinput";
+    input.style.cssText = "position:fixed;left:-9999px";
+    input.onchange = async () => {
+      input.remove();
+      const f = input.files?.[0], p = f && (await prepare(f));
+      if (!p) return;
+      pend.image = await images.put(p.blob);
+      pend.info = { w: p.w, h: p.h };
+      pgShow();
+    };
+    for (const old of document.querySelectorAll("input.sb-fileinput")) old.remove();
+    document.body.append(input);
+    input.click();
+  };
+  $("pg-nopic").onclick = () => { pend.image = undefined; pgShow(); };
+  $("pg-go").onclick = async (e) => {
+    e.preventDefault();
+    pgdlg.close();
+    const title = ($("pg-title") as HTMLInputElement).value.trim(), slide = ($("pg-slide") as HTMLInputElement).checked;
+    const card = slide && !pageOf(doc!, pageIx).slide ? cardAround() : null;
+    await editor.commit((d) => {
+      const p = pageOf(d, pageIx);
+      if (d.pages?.length) p.title = title || undefined;
+      if (!slide) delete p.slide;
+      else if (card) p.slide = card;
+      const bg = { ...(pend.color ? { color: pend.color } : {}), ...(slide && pend.image ? { image: pend.image } : {}) };
+      if (Object.keys(bg).length) p.background = bg;
+      else delete p.background;
+      if (slide && pend.image && pend.info) (d.images ??= {})[pend.image] = pend.info;
+    });
+  };
+  // a new slide's card: 16:9, around what the page holds (or the view, on an empty page), with a margin
+  function cardAround() {
+    const b = board.bounds() ?? board.view(), m = Math.max(40, (b.x1 - b.x0) * 0.06);
+    const bw = b.x1 - b.x0 + 2 * m, bh = b.y1 - b.y0 + 2 * m;
+    const w = Math.round(Math.max(bw, (bh * 16) / 9)), h = Math.round((w * 9) / 16);
+    return { x: Math.round((b.x0 + b.x1) / 2 - w / 2), y: Math.round((b.y0 + b.y1) / 2 - h / 2), w, h };
+  }
   $("rmpage").onclick = async () => {
     const p = pageOf(doc!, pageIx);
     if (pageCount(doc!) < 2 || (p.nodes?.length && !confirm(`Delete the page “${p.title || "Page " + (pageIx + 1)}” and everything on it? (Undo brings it back.)`))) return;
