@@ -48,3 +48,17 @@ show(r6(fminsearch(@(x) (x - 3)^2 + 1, 0, t)));
 show(r6(fminsearch(@(x) sum((x - [1 2; 3 4]).^2, 'all'), zeros(2), t)));
 show(r6(fminsearch(@(x) (x(1) - 1)^2 + 10*(x(2) + 2)^2 + abs(x(3)), [0; 0; 1], t)));
 [x, fval] = fminsearch(@(x) exp(x(1)) * (4*x(1)^2 + 2*x(2)^2 + x(1)*x(2) + 2*x(2)), [-1 1], t); show(r6([x fval]));
+% lsqnonneg
+C = [0.0372 0.2869; 0.6861 0.7071; 0.6233 0.6245; 0.6344 0.6170]; d = [0.8587; 0.1781; 0.0747; 0.8405];
+[x, resnorm, residual] = lsqnonneg(C, d); show(r(x)); show(r(resnorm)); show(r(residual));
+show(r(lsqnonneg([1 0; 0 1], [1; 2])));
+show(r(lsqnonneg([1 0; 0 1], [-1; 2])));
+show(r(lsqnonneg([1 2; 3 4; 5 6], [-1; -2; -3])));
+show(r(lsqnonneg([1 2 3; 4 5 6; 7 8 10; 1 0 1], [1; -2; 3; 4])));
+show(r(lsqnonneg(magic(5), [1; -1; 2; -2; 3])));
+show(r(lsqnonneg([magic(4); 1 -1 1 -1], [10; -5; 3; 8; 0])));
+show(r(lsqnonneg(hilb(6), [1; -1; 1; -1; 1; -1])));
+show(r(lsqnonneg([1 1; 1 1], [1; 1])));
+show(r(lsqnonneg([1 2 3], 4)));
+show(r(lsqnonneg([2 -1 0; -1 2 -1; 0 -1 2; 1 1 1], [1; 0; -3; 2])));
+[x, rn, res, ef, out, lambda] = lsqnonneg([1 2; 3 4; 5 6], [3; -1; 2]); show(r(x)); show(r(lambda));
