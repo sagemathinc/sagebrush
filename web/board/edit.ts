@@ -112,6 +112,8 @@ export class Editor {
       return true;
     };
     board.onBackgroundDown = (e) => this.backgroundDown(e);
+    // (a second finger during a drag or a resize: dropped, the board pinches)
+    board.onTouchJoin = () => { if (!this.gesture) return false; this.cancelGesture(); return true; };
     // drawing and erasing: the board follows the pointer (board.ts); a
     // stroke drawn goes at the page's top level, over what is there
     board.pen = () => (this.on && this.drawing.value && !this.space && !this.panel ? this.penStyle() : null);
