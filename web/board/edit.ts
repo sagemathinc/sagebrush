@@ -227,6 +227,14 @@ export class Editor {
 
   /** Nothing selected, no note open (another page is shown). */
   clear() { this.select(null); this.selectEdge(null); this.close(); }
+  /** Another document is shown: what is being written belonged to the one
+   * before, and is dropped, not kept in this one (CORR-A48-4); nothing
+   * selected, no panel open. */
+  drop() {
+    this.inplace?.abandon();
+    this.inplace = null;
+    this.clear();
+  }
   private select(ids: string | string[] | null) {
     this.selected = ids === null ? [] : typeof ids === "string" ? [ids] : [...new Set(ids)];
     this.board.select(this.selected);

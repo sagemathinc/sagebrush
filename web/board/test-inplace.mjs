@@ -279,6 +279,22 @@ try {
   await type("<img src=x onerror=window.__pwn=1>");
   await outside();
   check(await until("[...document.querySelectorAll('.board-note b')].some((b) => b.textContent === '<img src=x onerror=window.__pwn=1>')", 3000) && await ev("!window.__pwn && !document.querySelector('.board-note b img')"), "markup typed in a title stays text");
+  // another document shown while a note is being written, with an item of the same id (CORR-A48-4, daybreak): what was being written is dropped, not written into the new one
+  const one = (title) => ({ title: "Doc " + title, nodes: [{ id: "same-edit", title, x: 0, y: 0, w: 300 }] });
+  await ev(`window.sagebrush.board.load(${JSON.stringify(one("OLD A"))}).then(() => window.sagebrush.board.editing(true)).then(() => 1)`);
+  await show("same-edit");
+  const ra = await rect("same-edit");
+  await dblclick(ra.left + 40, ra.top + 14);
+  check(await until("window.board.editing === 'same-edit' && !!document.querySelector('.ip-bar')", 3000), "a note of the first document is being written");
+  await ev(`window.sagebrush.board.load(${JSON.stringify(one("NEW B"))}).then(() => 1)`);
+  await sleep(300);
+  const shownB = await ev(`({ editing: window.board.editing, bar: !!document.querySelector('.ip-bar'), fields: document.querySelectorAll('.board-item textarea, .board-item input').length, text: window.board.cache.get('same-edit')?.textContent ?? null })`);
+  check(shownB.editing === null && !shownB.bar && !shownB.fields && /NEW B/.test(shownB.text ?? "") && !/OLD A/.test(shownB.text ?? ""), "another document shown: the note is no longer being written, and shows the new document's: " + JSON.stringify(shownB));
+  await ev("window.sagebrush.board.editing(false), 1");
+  await sleep(400);
+  check((await node("same-edit"))?.title === "NEW B", "...and leaving Edit writes nothing of the old document into the new one: " + JSON.stringify(await node("same-edit")));
+  // (and the board itself: an item edited where it is is not kept as edited into another epoch)
+  check(await ev("(() => { const b = window.board; b.editElement('same-edit'); b.epoch++; b.setItems(b.itemsIn(-1e9, -1e9, 1e9, 1e9), b.edgeList()); b.render(); return b.editing === null && b.cache.get('same-edit')?.dataset.key.startsWith(b.epoch + '['); })()"), "the board: an element being edited is not kept into another epoch");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
