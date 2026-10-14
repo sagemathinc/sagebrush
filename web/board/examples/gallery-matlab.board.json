@@ -1,0 +1,52 @@
+{
+ "format": "sagebrush-board",
+ "version": 1,
+ "title": "MATLAB",
+ "mode": "matlab",
+ "intro": "MATLAB code, in the reader's browser: matrices, a linear system, eigenvalues, a fit, a loop, a function and a plot. Variables carry from item to item, in reading order.",
+ "layout": "grid",
+ "columns": 3,
+ "nodes": [
+  {
+   "id": "matrix",
+   "title": "A matrix",
+   "code": "A = [4 -2; 1 1];\ndet(A)"
+  },
+  {
+   "id": "eig",
+   "title": "Its eigenvalues",
+   "code": "[V, D] = eig(A)"
+  },
+  {
+   "id": "solve",
+   "title": "A linear system",
+   "code": "x = A \\ [2; 3]"
+  },
+  {
+   "id": "fit",
+   "title": "A quadratic fit",
+   "code": "t = linspace(0, 1, 5);\ny = 3 * t.^2 + 1;\np = polyfit(t, y, 2);\nfprintf('%.4f ', p); fprintf('\\n');"
+  },
+  {
+   "id": "loop",
+   "title": "A loop",
+   "text": "The partial sum $\\sum_{k=1}^{100} 1/k^2$.",
+   "code": "s = 0;\nfor k = 1:100\n  s = s + 1/k^2;\nend\nfprintf('%.6f\\n', s)"
+  },
+  {
+   "id": "function",
+   "title": "A function",
+   "code": "function r = hyp(a, b)\n  r = sqrt(a^2 + b^2);\nend"
+  },
+  {
+   "id": "use",
+   "title": "Using it",
+   "code": "hyp(3, 4)"
+  },
+  {
+   "id": "plot",
+   "title": "A plot",
+   "code": "u = linspace(0, 2*pi, 100);\nplot(u, sin(u))\ntitle('sin')"
+  }
+ ]
+}
