@@ -905,7 +905,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // speaker notes).  → Space PageDown next, ← PageUp back, Home End, Esc
   // leaves, the page, step and camera as they were.  Code items run as
   // ever: a slide is live.
-  let presenting: { frames: { page: number; step: number }[]; i: number; fs?: boolean; was: { camera: Camera; page: number; at: number; editing: boolean; insets: typeof board.insets } } | null = null;
+  let presenting: { frames: { page: number; step: number }[]; i: number; fs?: boolean; asked?: boolean; was: { camera: Camera; page: number; at: number; editing: boolean; insets: typeof board.insets } } | null = null;
   let idle = 0;
   const prMask = $("pr-mask");
   async function present(on: boolean) {
@@ -922,6 +922,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       editor.setOn(false);
       root.classList.add("sbb-present");
       for (const id of ["pr-bar", "pr-say"]) $(id).hidden = false;
+      presenting.asked = !!root.requestFullscreen;
       root.requestFullscreen?.().catch(() => {});
       board.onRender = placeMask;
       wake();
@@ -1010,6 +1011,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   on(document, "fullscreenchange", () => {
     const full = document.fullscreenElement === root;
     if (!presenting) { if (full) document.exitFullscreen?.().catch(() => {}); return; }
+    // (one granted late, asked for by an earlier presentation, when this one could not ask: left)
+    if (full && !presenting.asked) return void document.exitFullscreen?.().catch(() => {});
     if (full) presenting.fs = true;
     else if (presenting.fs) return void present(false);
     requestAnimationFrame(() => presenting && showFrame(presenting.i, true));
