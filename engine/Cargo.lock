@@ -645,6 +645,7 @@ dependencies = [
  "sagebrush-classgroup",
  "sagebrush-galois",
  "sagebrush-group",
+ "sagebrush-hmf",
  "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-mpoly",
