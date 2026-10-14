@@ -12,6 +12,7 @@
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
 import { magmaToPython } from "./magma";
+import { matlabToPython } from "./matlab";
 import { helpSyntax } from "./help-syntax";
 
 type Node = { _type: string; [field: string]: any };
@@ -454,14 +455,17 @@ class Visitor {
  * Magma cells after translation to Python, as they run.  In Sage, a top-level
  * `var('x y')` (or `function('f')`) defines its names, as running it does.
  */
-export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma"; strict?: boolean } = {}): CellAnalysis {
+export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" | "matlab"; strict?: boolean } = {}): CellAnalysis {
   // (marimo: some frontends send non-breaking spaces)
   source = source.replaceAll(" ", " ");
   // (IPython's obj? help lines, as the notebook runs them)
-  if (opts.mode !== "magma") source = helpSyntax(source);
+  if (opts.mode !== "magma" && opts.mode !== "matlab") source = helpSyntax(source);
   if (opts.mode === "sage") source = preparse(source);
   // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)
   else if (opts.mode === "magma") source = magmaToPython(source, "<cell>").replace(/^from _magma import \*\n/, "");
+  // (MATLAB's translation, in cell mode: its two first lines are the runtime's,
+  // and its own names (_m, _L, temporaries) start with _, the cell's own)
+  else if (opts.mode === "matlab") source = matlabToPython(source, "<cell>", { cell: true }).replace(/^import _matlab as _m\n_m\.begin\([^\n]*\)\n/, "");
   const tree = parse(source, "exec") as Node;
   const handlers = exceptNames(tree);
   const injected = opts.mode === "sage" ? sageInjected(tree) : [];
@@ -476,6 +480,12 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
     if (!isLocal(n)) defs.add(n);
   }
   const refs = new Set([...v.refs.keys()].filter((n) => !injected.includes(n)));
+  if (opts.mode === "matlab") {
+    // (MATLAB's ans is every bare expression's value: no cell's to share; and
+    // the translation's own machinery reads globals(), locals(), BaseException)
+    defs.delete("ans");
+    for (const n of ["ans", "globals", "locals", "BaseException"]) refs.delete(n);
+  }
   return {
     defs,
     refs,

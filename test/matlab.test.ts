@@ -170,3 +170,22 @@ test("notebook session: MATLAB cells share variables and functions; an error fai
   // (z was never assigned: cell 2 failed)
   assert.match(out(9, "stderr"), /Unrecognized function or variable 'z'/);
 });
+
+test("reactive notebook: a MATLAB cell's definitions and references (src/dataflow.ts); no renaming", () => {
+  const { analyzeCell } = require("../src/dataflow");
+  const { renameInCell, forwardRefers } = require("../src/rename");
+  const names = (src: string) => {
+    const a = analyzeCell(src, "c", { mode: "matlab" });
+    return [[...a.defs].sort(), [...a.refs].sort()];
+  };
+  assert.deepEqual(names("x = 3;\ny = x * 2"), [["x", "y"], []]);
+  assert.deepEqual(names("z = y + w;\nplot(z)"), [["z"], ["plot", "w", "y"]]);
+  // (a function's body sees its own workspace only: q is not the notebook's)
+  assert.deepEqual(names("function r = f(a)\n  r = a + q;\nend"), [["f"], []]);
+  // (ans is every bare expression's: no cell's to share)
+  assert.deepEqual(names("f(y)\n3 + 4\nans"), [[], ["f", "y"]]);
+  assert.deepEqual(names("for k = 1:n\n  s = s + k;\nend"), [["k", "s"], ["n", "s"]]);
+  assert.throws(() => analyzeCell("x = [1 2", "c", { mode: "matlab" }), MatlabSyntaxError);
+  assert.equal(renameInCell("x = 1", "x", "x_2", { mode: "matlab" }), null);
+  assert.equal(forwardRefers("x = 1", "x", "matlab"), false);
+});
