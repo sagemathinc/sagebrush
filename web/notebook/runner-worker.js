@@ -18,6 +18,8 @@
 // the notebook page still works with the user's own notebooks.  A page
 // running someone else's code (a shared collection) gives no fallback.
 
+import { FILES_RUNNER } from "./files-runner.js";
+
 const OWN = /\/sagebrush-(engine\.wasm|precompiled\.json)$/;
 
 // Files mode: the runner for a page that has the engine's files itself (a
@@ -28,37 +30,8 @@ const OWN = /\/sagebrush-(engine\.wasm|precompiled\.json)$/;
 // library by fetch; __SB_FILES__ in web/worker.ts).  Its policy allows no
 // network but those blob: URLs.  No interrupt flag: Stop restarts the
 // worker.  (A srcdoc frame also inherits its parent's policy: the page must
-// allow inline scripts in it, as a downloaded file, with no policy, does.)
-// (its script tags built at run time: this module is bundled into pages'
-// inline scripts, where a literal </script ends the page's script, and a
-// literal <script after a <!-- makes the parser skip the page's own end tag)
-const LT = String.fromCharCode(60);
-const SCRIPT = LT + "script>", END_SCRIPT = LT + "/script>";
-const FILES_RUNNER = `<!doctype html><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src blob:; base-uri 'none'; form-action 'none'">
-${SCRIPT}
-(() => {
-  let started = false;
-  addEventListener("message", (e) => {
-    if (started || e.source !== parent || !e.data || e.data.sagebrushRunnerFiles !== 1 || e.ports.length !== 1) return;
-    started = true;
-    const port = e.ports[0], f = e.data.files || {};
-    try {
-      const url = (name, type) => URL.createObjectURL(new Blob([f[name]], { type }));
-      const files = { "sagebrush-engine.wasm": url("sagebrush-engine.wasm", "application/wasm"), "sagebrush-precompiled.json": url("sagebrush-precompiled.json", "application/json") };
-      const script = new Blob(["self.__SB_FILES__ = " + JSON.stringify(files) + ";\\n", f["sagebrush-worker.js"]], { type: "text/javascript" });
-      const w = new Worker(URL.createObjectURL(script), { name: String(e.data.name || "") });
-      w.onmessage = (m) => { let d = m.data; if (d && d.ready) d = { ...d, interrupt: null }; port.postMessage(d); };
-      w.onerror = (ev) => port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
-      port.onmessage = (m) => w.postMessage(m.data);
-      port.postMessage({ runnerReady: true });
-    } catch (err) {
-      port.postMessage({ runnerError: String((err && err.message) || err) });
-    }
-  });
-})();
-${END_SCRIPT}`;
-
+// allow its inline script, as a downloaded file, with no policy, does, and
+// the frame other sites show a board in does by its hash: files-runner.js.)
 export class RunnerWorker {
   /**
    * @param {string} src the runner page's URL
