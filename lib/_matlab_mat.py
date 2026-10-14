@@ -8,8 +8,9 @@ bytes; -v7 compresses each variable with zlib (miCOMPRESSED).  Arrays are
 stored column-major, which is the C order of lib/_matlab.py's arrays (their
 axes are reversed), so data needs no transposing at this boundary.
 
-Not supported: MATLAB 7.3 files (HDF5), objects (strings, tables, ...), and
-sparse matrices are read as full ones.
+Not supported: MATLAB 7.3 files (HDF5) and objects (strings, tables, ...).
+Sparse matrices are read and written as sparse (single ones are written as
+double).
 """
 
 import struct
@@ -98,6 +99,17 @@ def _stored(dims):
     return tuple(reversed(d))
 
 
+def _count(r):
+    """the number of data elements left in a reader (without reading them)"""
+    q = _Reader(r.d, r.p, r.end_)
+    q.e = r.e
+    k = 0
+    while not q.done():
+        q.element()
+        k += 1
+    return k
+
+
 def _matrix(payload, e):
     """a miMATRIX element's (name, value, global)"""
     if len(payload) == 0:
@@ -105,7 +117,7 @@ def _matrix(payload, e):
     r = _Reader(payload, 0, len(payload))
     r.e = e
     t, raw = r.element()
-    w = struct.unpack_from(e + "I", raw, 0)[0]
+    w, w2 = struct.unpack_from(e + "II", raw, 0)
     cls = w & 0xFF
     flags = (w >> 8) & 0xFF
     is_complex, is_global, is_logical = bool(flags & 0x08), bool(flags & 0x04), bool(flags & 0x02)
@@ -116,6 +128,10 @@ def _matrix(payload, e):
     n = 1
     for d in dims:
         n *= d
+    if cls == 9 and is_logical and _count(r) >= 3:
+        # (a logical sparse matrix as Octave writes one: class uint8, then ir, jc and pr,
+        # where a full array has its data alone)
+        cls = 5
     if cls in _CLASS:
         dt = _CLASS[cls][0]
         t, raw = r.element()
@@ -162,25 +178,32 @@ def _matrix(payload, e):
                 d[f] = _matrix(raw, e)[1]
             elems.append(d)
         return name, _m.Struct(elems, dims, names), is_global
-    if cls == 5:  # sparse: read as a full matrix
-        t, raw = r.element()
-        ir = _numbers(t, raw, e)
-        t, raw = r.element()
-        jc = _numbers(t, raw, e)
-        t, raw = r.element()
-        pr = _numbers(t, raw, e)
-        pi = None
-        if is_complex:
+    if cls == 5:  # sparse: ir (nzmax row indices), jc (column starts), pr and pi (the nonzeros)
+        import _matlab_sparse as sp
+        ir = jc = np.zeros(0, dtype=np.int64)
+        if not r.done():
             t, raw = r.element()
-            pi = _numbers(t, raw, e)
-        rows, cols = dims[0], dims[1]
-        full = np.zeros((cols, rows), dtype=np.complex128 if pi else np.float64)
-        for j in range(cols):
-            for k in range(jc[j], jc[j + 1]):
-                full[j, ir[k]] = complex(pr[k], pi[k]) if pi else pr[k]
+            ir = np.array(_numbers(t, raw, e), dtype=np.int64)
+        if not r.done():
+            t, raw = r.element()
+            jc = np.array(_numbers(t, raw, e), dtype=np.int64)
+        if jc.size != dims[1] + 1:
+            jc = np.zeros(dims[1] + 1, dtype=np.int64)
+        nz = int(jc[-1]) if jc.size else 0
+        vals = np.zeros(0)
+        if not r.done():
+            t, raw = r.element()
+            vals = np.array(_numbers(t, raw, e)[:nz], dtype=np.float64)
+        if is_complex and not r.done():
+            t, raw = r.element()
+            im = np.array(_numbers(t, raw, e)[:nz], dtype=np.float64)
+            vals = _m._cplx(vals, im)
         if is_logical:
-            full = full != 0
-        return name, _m._box(full), is_global
+            vals = vals != 0
+        rows, cols = dims[0], dims[1]
+        S = sp.make(rows, cols, ir[:nz], np.repeat(np.arange(cols, dtype=np.int64), np.diff(jc)), vals)
+        S.cap = int(w2)
+        return name, S, is_global
     raise MatError("variable '%s' is an object (class %d), which Sagebrush cannot load" % (name, cls))
 
 
@@ -255,6 +278,20 @@ def _array(name, v):
         for d in v.a:
             for f in fields:
                 body += _array("", d[f])
+        return _elem(miMATRIX, body)
+    if t is _m.Sparse:
+        import _matlab_sparse as sp
+        nzmax = sp.nzmax(v)
+        fl = (0x02 if sp.islogical(v) else 0) | (0x08 if v.pr.dtype.kind == "c" else 0)
+        body = (_elem(miUINT32, struct.pack("<II", 5 | (fl << 8), nzmax)) + _elem(miINT32, _pack("i", dims))
+                + _elem(miINT8, name.encode("latin1")))
+        ir = [int(x) for x in v.ir] + [0] * (nzmax - v.ir.size)
+        body += _elem(miINT32, _pack("i", ir)) + _elem(miINT32, _pack("i", [int(x) for x in v.jc]))
+        vals = v.pr.astype(np.float64) if v.pr.dtype.kind == "b" else v.pr
+        if vals.dtype.kind == "c":
+            body += _elem(miDOUBLE, _pack("d", [float(x) for x in vals.real])) + _elem(miDOUBLE, _pack("d", [float(x) for x in vals.imag]))
+        else:
+            body += _elem(miDOUBLE, _pack("d", [float(x) for x in vals]))
         return _elem(miMATRIX, body)
     if _m._iscallable(v):
         raise MatError("function handles cannot be saved")

@@ -242,7 +242,6 @@ sample data files that come with MATLAB.
 
 **Not yet:**
 - `classdef`, tables, `datetime` and `categorical`;
-- sparse matrices (next);
 - ODE solvers;
 - lighting in 3-D.
 
