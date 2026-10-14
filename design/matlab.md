@@ -580,6 +580,13 @@ The rest:
   doubles, so `intmax('int64')` shows 9223372036854775808 and
   `intmax('uint64')` 18446744073709551616;
 - sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`);
+- `eig` of complex matrices (Sagebrush's numpy has no complex eigenvalue
+  routines yet), and `eig(A, B)` where it needs the QZ algorithm: "qz", a
+  singular B (the pencil may have infinite eigenvalues), or a badly
+  conditioned one (Sagebrush's rule: cond(B)*eps > 1e-8). A symmetric A
+  with a symmetric positive definite B is the page's "chol" algorithm;
+  another pair is solved as B \ A, with V's and W's columns of 2-norm 1
+  (Sagebrush's choice; the page leaves their norms open);
 - the random sparse matrices' exact places and values: `sprand`'s and
   `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
   construction is Sagebrush's own (exactly the requested number of
