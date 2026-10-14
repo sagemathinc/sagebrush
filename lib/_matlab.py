@@ -597,21 +597,126 @@ def mtimes(a, b):
     return _finish(np.matmul(B, A), cls)
 
 
+def _rcond_warning(A, Ainv=None):
+    """MATLAB's warning when A is close to singular: rcond(A) (the 1-norm
+    reciprocal condition number) below eps.  (Measured exactly, so only for
+    matrices of up to 500 rows.)"""
+    n = A.shape[0]
+    if n == 0 or n > 500:
+        return
+    try:
+        Ai = np.linalg.inv(A) if Ainv is None else Ainv
+    except np.linalg.LinAlgError:
+        return
+    na = float(np.max(np.sum(np.abs(A), axis=0)))
+    ni = float(np.max(np.sum(np.abs(Ai), axis=0)))
+    if not (na and np.isfinite(ni)):
+        return
+    rc = 1.0 / (na * ni)
+    if rc < 2.220446049250313e-16:
+        warning_("Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = %e." % rc)
+
+
+def _lu_solve_through(A, B, report=False):
+    """A \\ B by elimination with partial pivoting that, as LAPACK's does,
+    goes on past a zero pivot: the back substitution then divides by it, so
+    the result has the Inf and NaN that MATLAB's has"""
+    n = A.shape[0]
+    cplx = A.dtype.kind == "c" or B.dtype.kind == "c"
+    U = np.array(A, dtype=np.complex128 if cplx else np.float64)
+    X = np.array(B, dtype=np.complex128 if cplx else np.float64)
+    singular = False
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        for k in range(n):
+            p = int(np.argmax(np.abs(U[k:, k]))) + k
+            if p != k:
+                U[[k, p]] = U[[p, k]]
+                X[[k, p]] = X[[p, k]]
+            if U[k, k] == 0:
+                singular = True
+            elif k + 1 < n:
+                l = U[k + 1:, k] / U[k, k]
+                U[k + 1:, k:] -= l.reshape((-1, 1)) * U[k, k:].reshape((1, -1))
+                X[k + 1:] -= l.reshape((-1, 1)) * X[k].reshape((1, -1))
+        for k in range(n - 1, -1, -1):
+            if k + 1 < n:
+                X[k] -= (U[k, k + 1:].reshape((-1, 1)) * X[k + 1:]).sum(axis=0)
+            X[k] = X[k] / U[k, k]
+    return (X, singular) if report else X
+
+
 def _solve(A, B):
-    """A \\ B for MATLAB-oriented numpy matrices"""
+    """A \\ B for MATLAB-oriented numpy matrices: square ones by LU with
+    MATLAB's warnings (its results when singular), others by least squares"""
     m, n = A.shape
     if B.shape[0] != m:
         raise _err("Matrix dimensions must agree.", "MATLAB:dimagree")
     if m == n:
+        if A.dtype.kind == "c" or B.dtype.kind == "c":
+            # (numpy.linalg here is real only: this LU takes complex matrices)
+            X, singular = _lu_solve_through(A, B, True)
+            if singular:
+                warning_("Matrix is singular to working precision.")
+            return X
         try:
-            if m and np.linalg.cond(A) > 1e16:
-                raise np.linalg.LinAlgError("singular")
-            return np.linalg.solve(A, B)
+            X = np.linalg.solve(A, B)
         except np.linalg.LinAlgError:
             warning_("Matrix is singular to working precision.")
-            with np.errstate(divide="ignore", invalid="ignore"):
-                return np.full((n, B.shape[1]), np.inf)
-    return np.linalg.lstsq(A, B, rcond=None)[0]
+            return _lu_solve_through(A, B)
+        _rcond_warning(A)
+        return X
+    return _qr_solve(A, B)
+
+
+def _qr_solve(A, B):
+    """A \\ B for a rectangular A as MATLAB solves it: Householder QR with
+    column pivoting (LAPACK's dgeqp3 and dlarfg conventions), the rank where
+    |R(k,k)| falls to max(m,n) eps |R(1,1)| or below, and the basic solution:
+    the free variables 0, with MATLAB's warning when the rank is short"""
+    m, n = A.shape
+    cplx = A.dtype.kind == "c" or B.dtype.kind == "c"
+    dt = np.complex128 if cplx else np.float64
+    R = np.array(A, dtype=dt)
+    Y = np.array(B, dtype=dt)
+    perm = np.arange(n)
+    k = min(m, n)
+    norms = np.sqrt(np.sum(np.abs(R) ** 2, axis=0)) if m else np.zeros(n)
+    for j in range(k):
+        # (the remaining column of largest norm first)
+        if j < n - 1:
+            q = j + int(np.argmax(norms[j:]))
+            if q != j:
+                R[:, [j, q]] = R[:, [q, j]]
+                perm[[j, q]] = perm[[q, j]]
+                norms[[j, q]] = norms[[q, j]]
+        x = R[j:, j].copy()
+        alpha = x[0]
+        xnorm = float(np.sqrt(np.sum(np.abs(x[1:]) ** 2))) if x.size > 1 else 0.0
+        if xnorm == 0 and (not cplx or alpha.imag == 0):
+            continue
+        beta = -_math.copysign(float(np.sqrt(abs(alpha) ** 2 + xnorm ** 2)), alpha.real)
+        tau = (beta - alpha) / beta
+        v = x / (alpha - beta)
+        v[0] = 1.0
+        # (apply I - tau v v^H to R's remaining columns and to the right side)
+        R[j:, j:] -= np.conj(tau) * np.outer(v, np.conj(v) @ R[j:, j:]) if cplx else tau * np.outer(v, v @ R[j:, j:])
+        Y[j:] -= np.conj(tau) * np.outer(v, np.conj(v) @ Y[j:]) if cplx else tau * np.outer(v, v @ Y[j:])
+        R[j, j] = beta
+        R[j + 1:, j] = 0
+        if j + 1 < n:
+            norms[j + 1:] = np.sqrt(np.sum(np.abs(R[j + 1:, j + 1:]) ** 2, axis=0))
+    d = np.abs(np.diag(R[:k, :k])) if k else np.zeros(0)
+    tol = max(m, n) * 2.220446049250313e-16 * (float(d[0]) if d.size else 0.0)
+    r = int(np.sum(d > tol))
+    if r < min(m, n):
+        warning_("Rank deficient, rank = %d, tol = %e." % (r, tol))
+    Z = np.zeros((n, Y.shape[1]), dtype=dt)
+    for i in range(r - 1, -1, -1):
+        s_ = Y[i] - (R[i, i + 1:r].reshape((-1, 1)) * Z[i + 1:r]).sum(axis=0) if i + 1 < r else Y[i]
+        Z[i] = s_ / R[i, i]
+    X = np.zeros((n, Y.shape[1]), dtype=dt)
+    X[perm] = Z
+    return X
 
 
 def mldivide(a, b):
@@ -5149,12 +5254,13 @@ def inv_(x):
     M = _mat(x)
     _square(M)
     try:
-        if M.size and np.linalg.cond(M) > 1e16:
-            raise np.linalg.LinAlgError("singular")
-        return _unmat(np.linalg.inv(M))
+        Mi = np.linalg.inv(M)
     except np.linalg.LinAlgError:
+        # (MATLAB's: Inf throughout)
         warning_("Matrix is singular to working precision.")
         return _unmat(np.full(M.shape, np.inf))
+    _rcond_warning(M, Mi)
+    return _unmat(Mi)
 
 
 @_bs("pinv")
