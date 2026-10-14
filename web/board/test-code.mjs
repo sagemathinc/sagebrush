@@ -215,6 +215,18 @@ try {
   await mouse("mousePressed", m0.x, m0.y);
   for (let i = 1; i <= 10; i++) { await mouse("mouseMoved", m0.x + 15 * i, m0.y); await sleep(40); }
   await mouse("mouseReleased", m0.x + 150, m0.y);
+  // (let go further than the last move came: where it was let go, as when a browser coalesced the last move away; CI, Oct 14)
+  {
+    const y0 = (await item("mover")).x, s0 = await ev("(() => { const r = window.board.clientRect('mover'); return { x: r.left + r.width / 2, y: r.top + 15 }; })()");
+    await mouse("mousePressed", s0.x, s0.y);
+    for (let i = 1; i <= 5; i++) { await mouse("mouseMoved", s0.x + 15 * i, s0.y); await sleep(40); }
+    await mouse("mouseReleased", s0.x + 150, s0.y);
+    check(await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${y0 + 150}) <= 8`, 3000), "let go past the last move, the note lands where it was let go: " + JSON.stringify([y0, (await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x"))]));
+    await mouse("mousePressed", s0.x + 150, s0.y);
+    for (let i = 1; i <= 10; i++) { await mouse("mouseMoved", s0.x + 150 - 15 * i, s0.y); await sleep(40); }
+    await mouse("mouseReleased", s0.x, s0.y);
+    await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${y0}) <= 8`, 3000);
+  }
   check(await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${x0 + 150}) <= 8`, 3000), "dragged while another output changes every frame, the note lands where it was let go: " + JSON.stringify([x0, (await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover')"))?.x]));
   // the wide item's output as tall as a third of its width (as a 3D view is), and it resized by its corner
   await ev("(() => { const o = document.querySelector('[data-code=wide] .board-code-out .out'); o.style.aspectRatio = '3 / 1'; return 1; })()");
