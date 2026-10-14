@@ -220,6 +220,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (whether the document was written in this browser: its remote pictures shown at once)
   let writtenHere = false;
   function newOutputs(fresh: boolean) {
+    // (first: what is being written was the document's before, CORR-A48-4)
+    editor.drop();
     const old = outputsId;
     outputsId = host.outputs && host.store?.outputsId ? host.store.outputsId(fresh) : null;
     if (fresh && old && old !== outputsId) host.outputs?.drop(old).catch(() => {});
