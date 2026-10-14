@@ -63,6 +63,10 @@ export interface BoardStore {
   save(doc: BoardDoc): void;
   /** Forget the edits: the original is the document again (Revert). */
   revert?(): void;
+  /** The name of this document's output cache (outcache.ts), kept beside
+   * the document, not in it; `fresh`: another document is shown here, so
+   * a new name (SEC-B88-1).  None: no cache. */
+  outputsId?(fresh: boolean): string;
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
@@ -196,6 +200,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let original: BoardDoc | null = null;
   // (documents loaded: a preview computed for one is not kept in another)
   let loads = 0;
+  // The name of the shown document's output cache (outcache.ts): the host
+  // store's, beside the document and not in it, since a document's seed is
+  // portable and anyone can copy it (SEC-B88-1).  Another document shown
+  // here (loaded, opened, a new board, reverted) gets a new one, and the
+  // old one's outputs go (SEC-B88-3).
+  let outputsId: string | null = null;
+  function newOutputs(fresh: boolean) {
+    const old = outputsId;
+    outputsId = host.outputs && host.store?.outputsId ? host.store.outputsId(fresh) : null;
+    if (fresh && old && old !== outputsId) host.outputs?.drop(old).catch(() => {});
+    if (code) code.cacheId = outputsId;
+  }
 
   // a page made from a template: the template's items and edges under its
   // `own` (inert: shown, not the page's to edit; their code shown on the
@@ -333,6 +349,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.onChange = () => { board.codeStates(); relayout(); };
     c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
     c.cache = host.outputs ?? null;
+    c.cacheId = outputsId;
     c.ready.then((ok) => {
       // (it could not start: the caption says why, until the next edit)
       if (!ok) {
@@ -376,8 +393,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
 
   /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
-  async function load(d: BoardDoc) {
+  async function load(d: BoardDoc, stored = false) {
     loads++;
+    newOutputs(!stored);
     const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(host.address?.get() ?? "");
     pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
     closeTimeTravel(false);
@@ -479,7 +497,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!r) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
-    return load(r.doc).then(sayConverted);
+    return load(r.doc, true).then(sayConverted);
   }).catch(fail);
 
   // editing, and keeping what was edited
@@ -788,6 +806,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (bad) throw new Error(bad);
     if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
     pageIx = 0;
+    newOutputs(true);
     await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
     board.focus(undefined, true);
     sayConverted();
@@ -841,14 +860,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       $("mmerr").textContent = String((err as Error)?.message ?? err);
     }
   };
-  $("newboard").onclick = () => editor.commit((d) => {
+  $("newboard").onclick = () => (newOutputs(true), editor.commit((d) => {
     for (const k of Object.keys(d)) delete (d as any)[k];
     Object.assign(d, { title: "Untitled board", seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join(""), nodes: [] });
     pageIx = 0;
-  }).then(() => { if (!editor.on) editBtn.click(); });
+  })).then(() => { if (!editor.on) editBtn.click(); });
   $("revert").onclick = async () => {
     if (!original) return;
     pageIx = 0;
+    newOutputs(true);
     await editor.commit((d) => { for (const k of Object.keys(d)) delete (d as any)[k]; Object.assign(d, JSON.parse(JSON.stringify(original))); });
     // (the original again: no edits of it are kept)
     host.store?.revert?.();

@@ -205,12 +205,16 @@ try {
   let kept = false;
   for (let i = 0; i < 100 && !kept; i++) { kept = (await cacheCount()) >= n0 + 2; if (!kept) await sleep(100); }
   check(kept, "s and d (over 2 s from root) are kept in the cache; f isn't: " + (await cacheCount()) + " from " + n0);
-  // opened again, in a fresh page of this browser (its saved board cleared: the cache alone)
-  await ev("localStorage.clear(), 1");
+  // (kept in this browser as an edited board is: an edit saves it, with its cache's name beside it)
+  await ev(`window.sagebrush.board.edit((d) => { d.title = "Cached, kept"; }).then(() => 1)`);
+  const idKey = "sagebrush-board:examples/live.json#outputs";
+  const id1 = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  check(/^[0-9a-f]{32}$/.test(id1 ?? "") && !(id1 ?? "").includes("c".repeat(8)), "the cache's name is the store's, not the board's seed: " + id1);
+  const countFor = (id) => ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const c = db.transaction('entries').objectStore('entries').index('doc').count(${JSON.stringify(id)}); c.onsuccess = () => { db.close(); res(c.result); }; }; })`);
+  check((await countFor(id1)) === 2, "...and the entries are under it");
+  // opened again, in a fresh page of this browser: the board kept, and its cache
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
-  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
-
-  await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
+  await until("window.sagebrush?.board?.snapshot().doc.title === 'Cached, kept'", 60000);
   check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'f')?.state === '')", 60000), "the fast item ran");
   const again = await outputs();
   check(again.s.output === first.s.output && again.d.output === first.d.output && /^s ran: [0-9a-f]{16}/.test(first.s.output), "s and d show their cached outputs (the same run's stamp): " + JSON.stringify([first.s.output, again.s.output]));
@@ -220,12 +224,40 @@ try {
   await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = ${JSON.stringify(slowStamp + "\n1")}; }).then(() => 1)`);
   check(await until(`window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === '') && os.find((o) => o.id === 's').output !== ${JSON.stringify(first.s.output)})`, 60000), "changed, s runs again, and d with it");
   check(await ev("!document.querySelector('[data-cached]')"), "...and no longer says it is cached");
-  // a board without a seed keeps nothing
-  const nSeedless = await cacheCount();
-  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "no seed", nodes: [{ id: "s", code: slowStamp }] })}).then(() => 1)`);
-  await until("window.sagebrush.board.outputs().then((os) => os[0]?.state === '')", 60000);
-  await sleep(1000);
-  check((await cacheCount()) === nSeedless, "a board without a seed keeps nothing in the cache");
+  // New board: the old board's cache goes (SEC-B88-3)
+  for (let i = 0; i < 100 && (await countFor(id1)) < 3; i++) await sleep(100);
+  check((await countFor(id1)) > 0, "the changed board's outputs are kept too");
+  await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
+  await sleep(500);
+  const id2 = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  check(id2 !== id1 && (await countFor(id1)) === 0, "New board: a new name, and the old board's entries gone");
+  // another document with the same seed, ids and code (anyone can copy a
+  // board's), opened in a clean page where its items are new: its own
+  // cache, so nothing of another's (SEC-B88-1).  First, a board whose
+  // outputs are kept; then its copy.
+  await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "a board runs");
+  const orig = await outputs();
+  const id3 = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  for (let i = 0; i < 100 && (await countFor(id3)) < 2; i++) await sleep(100);
+  check((await countFor(id3)) === 2, "...and its outputs are kept");
+  await ev("localStorage.clear(), 1");
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  await until("window.sagebrush.board.outputs().then((os) => os.length > 0 && os.every((o) => o.state === ''))", 60000);
+  await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "a copy of it runs");
+  const copy = await outputs();
+  check(copy.s.output !== orig.s.output && !(await ev("!!document.querySelector('[data-cached]')")), "...its own outputs, none from the other's cache: " + JSON.stringify([orig.s.output, copy.s.output]));
+  // what reads a file, or reads what read one, is not kept (its key doesn't say the file's bytes: SEC-B88-2)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "files", seed: SEED_C, nodes: [
+    { id: "a", code: "import os, time\nopen('cache-test.bin', 'wb').write(os.urandom(8))\nt0 = time.time()\nwhile time.time() - t0 < 2.2:\n    pass\nsecret = open('cache-test.bin', 'rb').read().hex()" },
+    { id: "b", code: "print('B', secret)" },
+  ] })}).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === '') && /^B [0-9a-f]{16}/.test(os[1].output))", 60000), "a board whose item reads a file ran");
+  const fk = await keys(), idFiles = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  await sleep(1500);
+  check(fk.a.reads > 0 && fk.b.reads > 0 && (await countFor(idFiles)) === 0, "neither the item reading the file nor the one reading it is kept: " + JSON.stringify([fk.a.reads, fk.b.reads]));
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

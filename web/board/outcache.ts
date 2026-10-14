@@ -4,7 +4,9 @@
 // seed, the language and the keys of what it reads: src/notebook-reactive.ts
 // keys()), so opening the board again shows them at once, without running it.
 //
-// One cache per board (its seed names it), never shared between boards, so
+// One cache per board, named by its host's store beside the board (not by
+// anything in the board, which anyone can copy: SEC-B88-1), never shared
+// between boards, and dropped when the board is replaced, so
 // nothing is counted: a board's entries are collected by mark and sweep (the
 // mark: its items' keys now) when it is over DOC_CAP, and the boards of a
 // browser used least recently go whole when all are over ALL_CAP.

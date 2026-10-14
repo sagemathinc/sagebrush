@@ -70,6 +70,17 @@ const host: BoardHost = {
     revert() {
       try { localStorage.removeItem(saveKey); } catch {}
     },
+    // (the name of its outputs' cache: random, kept beside it in this browser)
+    outputsId(fresh) {
+      const k = saveKey + "#outputs";
+      let id: string | null = null;
+      try { id = fresh ? null : localStorage.getItem(k); } catch {}
+      if (!id || !/^[0-9a-f]{32}$/.test(id)) {
+        id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        try { localStorage.setItem(k, id); } catch {}
+      }
+      return id;
+    },
   },
   // pictures: kept in this browser by name
   images: new Images(),
