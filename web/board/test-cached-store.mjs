@@ -26,7 +26,9 @@
 // expects no document, and one made meanwhile is merged (CORR-6B0-1); saves
 // refused again and again stop, busy (PERF-6B0-2); an older store's save
 // landing never writes over a newer store's copy (CORR-67E-1); edits made
-// while the remote is asked wait for its answer (PERF-67E-2).
+// while the remote is asked wait for its answer (PERF-67E-2); an edit whose
+// writes to the copy are refused again and again is kept, never dropped
+// (CORR-1EC-1).
 //   bun web/board/test-cached-store.mjs
 import { adopted, cachedStore, merge3 } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
@@ -560,6 +562,38 @@ for (const closeA of [true, false]) {
   hashGate.open();
   await tick(150);
   check(stoppedAt === 2 && wasBusy && !store.busy?.() && R.doc.nodes[0].title === "edit B" && R.doc.title === "T" + k && titleOf(cache.m.get("y3").json) === "edit B", "stopped, then two edits as the remote is asked: the latest, merged with the remote's newer document, saved once it answers: " + JSON.stringify({ stoppedAt, wasBusy, busy: store.busy?.(), attempts, remote: [R.doc.title, R.doc.nodes[0].title], cached: titleOf(cache.m.get("y3").json) }));
+}
+
+// CORR-1EC-1: this store's writes of an edit refused twelve times running (another store writing the copy each time): never dropped; busy meanwhile; written on closing (or after a wait), and there when opened again
+for (const closeAtOnce of [true, false]) {
+  const cache = memCache(), base = cleanDoc(doc("base")), key = closeAtOnce ? "z1" : "z2";
+  await cache.put({ key, json: canonical(base), hash: await hashOf(base), remoteHash: await hashOf(base), at: 0 });
+  let refusals = 0;
+  const put0 = cache.put;
+  cache.put = async (c, expected) => {
+    if (expected !== undefined && refusals < 12) {
+      // (another store writes the copy: the board's title, the next version)
+      refusals++;
+      const cur = cache.m.get(c.key), o = cleanDoc({ title: "other " + refusals, nodes: [{ id: "n", title: "base" }] });
+      cache.m.set(c.key, { ...cur, json: canonical(o), hash: await hashOf(o), v: (cur.v ?? 0) + 1 });
+      return false;
+    }
+    return put0(c, expected);
+  };
+  const R = fakeRemote(base);
+  R.holds.hash = held();
+  const store = cachedStore(R, key, cache, FAST);
+  const off = store.subscribe(() => {});
+  await store.load();
+  store.save(cleanDoc({ title: "T", nodes: [{ id: "n", title: "LOCAL" }] }));
+  await tick(30);
+  const first = { refusals, busy: store.busy(), cached: titleOf(cache.m.get(key).json) };
+  if (closeAtOnce) off();
+  await tick(400);
+  if (!closeAtOnce) off();
+  const again = cachedStore(fakeRemote(base), key, cache, FAST);
+  const got = await again.load();
+  check(first.refusals === 10 && first.busy && first.cached === "base" && got?.doc.nodes[0].title === "LOCAL" && got.doc.title === "other 12", `an edit whose writes are refused more than ten times (${closeAtOnce ? "closed at once" : "left open"}): busy, kept, written ${closeAtOnce ? "on closing" : "after a wait"}, there when opened again: ` + JSON.stringify({ first, refusals, reopened: got && [got.doc.title, got.doc.nodes[0].title] }));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
