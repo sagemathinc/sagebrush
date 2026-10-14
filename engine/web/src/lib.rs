@@ -464,6 +464,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!({ "dim": sp.dimension(), "ell": sp.p, "zeta": sp.zeta, "charpoly": sp.hecke_charpoly(q)? }))
         }
         // ---- sagebrush.modsym: weight 2, trivial character, sign +1 ----
+        "ec_modsym" => {
+            let n = level(v)?;
+            let pair = |x: &Value, what: &str| -> Result<(i64, i64), String> {
+                let a = x.as_array().filter(|a| a.len() == 2).ok_or_else(|| format!("each {} must be a pair", what))?;
+                let f = |y: &Value| y.as_i64().or_else(|| y.as_str().and_then(|s| s.parse().ok())).ok_or_else(|| format!("each {} must be a pair of integers", what));
+                Ok((f(&a[0])?, f(&a[1])?))
+            };
+            let list = |k: &str| -> Result<Vec<(i64, i64)>, String> {
+                v.get(k).and_then(Value::as_array).ok_or_else(|| format!("missing list '{}'", k))?.iter().map(|x| pair(x, k)).collect()
+            };
+            let aps: Vec<(u64, i64)> = list("aps")?.into_iter().map(|(q, a)| if q > 1 { Ok((q as u64, a)) } else { Err("each a_q needs a prime q".to_string()) }).collect::<Result<_, _>>()?;
+            let (zero, vals) = sagebrush_modsym::ec_modsym_values(n, &aps, &list("cusps")?)?;
+            Ok(json!({ "zero": zero.to_string(), "values": vals.iter().map(|x| x.to_string()).collect::<Vec<_>>() }))
+        }
         "hecke_charpoly" => {
             let (n, q) = (level(v)?, u(v, "q")?);
             let p = u(v, "p").unwrap_or(67108859);
