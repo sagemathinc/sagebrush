@@ -36,6 +36,7 @@ MAX_FULL = 1 << 28
 def _new(m, n, jc, ir, pr):
     S = Sparse.__new__(Sparse)
     S.m, S.n, S.jc, S.ir, S.pr = m, n, jc, ir, pr
+    S.cap = 0
     activate()
     return S
 
@@ -120,8 +121,25 @@ def from_full(v, name="sparse"):
     return _new(m, n, _jc(nz[0].astype(_I), n), nz[1].astype(_I), _canon_vals(np.array(a[nz])))
 
 
-def zeros(m, n, logical=False):
-    return _new(m, n, np.zeros(n + 1, dtype=_I), np.zeros(0, dtype=_I), np.zeros(0, dtype=bool if logical else np.float64))
+def zeros(m, n, like=None):
+    """an all-zero m-by-n sparse matrix, of the class of like (a sparse matrix) or double"""
+    dt = like.pr.dtype if type(like) is Sparse else np.float64
+    return _new(m, n, np.zeros(n + 1, dtype=_I), np.zeros(0, dtype=_I), np.zeros(0, dtype=dt))
+
+
+def nzmax(S):
+    return max(S.cap, nnz(S), 1)
+
+
+def isreal(v):
+    if type(v) is Sparse:
+        return v.pr.dtype.kind != "c"
+    return _m._arr(v).dtype.kind != "c"
+
+
+def nbytes(S):
+    """MATLAB's storage of a sparse matrix: its column starts, and a row index and a value for each of nzmax places"""
+    return (S.n + 1) * 8 + nzmax(S) * (8 + S.pr.dtype.itemsize)
 
 
 def _too_big(m, n):
@@ -162,7 +180,7 @@ def nnz(S):
 
 def transpose(S, conj=False):
     if not S.pr.size:
-        return zeros(S.n, S.m, islogical(S))
+        return zeros(S.n, S.m, S)
     vals = S.pr
     if conj and vals.dtype.kind == "c":
         # (a real element's imaginary part stays 0, not -0)
@@ -298,7 +316,7 @@ def _submatrix(S, I, J):
     cnt = hi - lo
     tot = int(np.sum(cnt)) if cnt.size else 0
     if tot == 0:
-        return zeros(I.size, J.size, islogical(S))
+        return zeros(I.size, J.size, S)
     offs = np.cumsum(cnt) - cnt
     place = np.arange(tot, dtype=_I) - np.repeat(offs, cnt) + np.repeat(lo, cnt)
     return make(I.size, J.size, order[place], np.repeat(oc, cnt), np.repeat(vals, cnt))
@@ -323,8 +341,8 @@ def truth(S):
     """S as the condition of if or while: nonempty, every element nonzero"""
     if S.m * S.n == 0 or nnz(S) != S.m * S.n:
         return False
-    vals = S.pr.real if S.pr.dtype.kind == "c" else S.pr
-    if vals.dtype.kind == "f" and np.any(np.isnan(vals)):
+    if S.pr.dtype.kind in "fc" and np.any(np.isnan(S.pr)):
+        # (a NaN in either part of a complex value)
         raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
     return True
 
@@ -402,7 +420,7 @@ def delete(S, args):
     if len(args) == 1:
         a = args[0]
         if a is COLON:
-            return zeros(0, 0, islogical(S))
+            return zeros(0, 0, S)
         R = np.unique(_m._ivec(a, m * n, -1, False)[0])
         keep = ~np.isin(key, R)
         k = key[keep] - np.searchsorted(R, key[keep])
@@ -415,7 +433,7 @@ def delete(S, args):
     for k in range(2, len(args)):
         _m._ivec(args[k], 1, k, False)
     if not which:
-        return zeros(0, n, islogical(S))
+        return zeros(0, n, S)
     if len(which) > 1:
         raise _err("A null assignment can have only one non-colon index.", "MATLAB:nullAssignmentNonColonIndex")
     k = which[0]
@@ -921,7 +939,7 @@ def kron_(A, B):
 
 def repmat_(S, r, c):
     if r == 0 or c == 0 or not S.pr.size:
-        return zeros(S.m * r, S.n * c, islogical(S))
+        return zeros(S.m * r, S.n * c, S)
     rows, cols = S.ir, _cols(S)
     k = S.pr.size
     br = np.repeat(np.arange(r, dtype=_I), k)
@@ -1498,17 +1516,29 @@ def sparse_(nargout, *args):
         if v.dtype.kind == "c" or (v.size and (np.any(v != np.floor(v)) or np.any(v < 1))):
             raise _err("Index into matrix must be positive.", "MATLAB:sparsfcn:nonPosIndex") if v.size and np.all(v == np.floor(v)) else \
                 _err("Sparse matrix indices must be positive integers.", "MATLAB:sparsfcn:nonIntegerIndex")
-    k = max(iv.size, jv.size, vv.size)
+    sizes = [v.size for v in (iv, jv, vv)]
+    if 0 in sizes and max(sizes) <= 1:
+        # (a scalar with an empty: no entries; the scalar indices still give the size)
+        k = 0
+    else:
+        k = max(sizes)
     parts = []
     for v in (iv, jv, vv):
-        if v.size not in (1, k):
+        if v.size not in (1, k) and not (k == 0 and v.size == 1):
             raise _err("Vectors must be the same length.", "MATLAB:samelen")
         parts.append(np.repeat(v, k) if v.size == 1 and k != 1 else v)
-    iv, jv, vv = parts
+    if k == 0:
+        m0 = int(np.max(iv)) if iv.size else 0
+        n0 = int(np.max(jv)) if jv.size else 0
+        iv, jv, vv = (np.zeros(0) for _ in range(3))
+    else:
+        iv, jv, vv = parts
     if n >= 5:
         m, nn = _int(args[3]), _int(args[4])
         if iv.size and (int(np.max(iv)) > m or int(np.max(jv)) > nn):
             raise _err("Index exceeds array bounds.", "MATLAB:sparsfcn:indexOutOfRange")
+    elif k == 0:
+        m, nn = m0, n0
     else:
         m = int(np.max(iv)) if iv.size else 0
         nn = int(np.max(jv)) if jv.size else 0
@@ -1516,7 +1546,10 @@ def sparse_(nargout, *args):
         raise _err("Requested %dx%d sparse matrix exceeds the maximum allowed size." % (m, nn))
     if vv.dtype.kind == "c" and not np.any(vv.imag):
         vv = np.array(vv.real)
-    return make(m, nn, iv.astype(_I) - 1, jv.astype(_I) - 1, vv)
+    S = make(m, nn, iv.astype(_I) - 1, jv.astype(_I) - 1, vv)
+    if n == 6:
+        S.cap = _int(args[5], "nzmax")
+    return S
 
 
 def full_b(nargout, x):
@@ -1544,7 +1577,10 @@ def speye_(nargout, *args):
 
 
 def spalloc_(nargout, m, n, nzmax=None):
-    return zeros(_int(m), _int(n))
+    S = zeros(_int(m), _int(n))
+    if nzmax is not None:
+        S.cap = _int(nzmax, "nzmax")
+    return S
 
 
 def spones_(nargout, S):
@@ -1564,7 +1600,7 @@ def nnz_(nargout, x):
 
 def nzmax_(nargout, x):
     if type(x) is Sparse:
-        return float(max(nnz(x), 1))
+        return float(nzmax(x))
     return float(_m._numel(x))
 
 
@@ -1589,7 +1625,10 @@ def find_(nargout, x, k=None, direction=None):
     sel = np.arange(key.size, dtype=_I)
     if k is not None:
         kk = _int(k, "Second argument")
-        last = direction is not None and _m._text(direction, "direction").lower() == "last"
+        d = "first" if direction is None else _m._text(direction, "direction").lower()
+        if d not in ("first", "last"):
+            raise _err('Invalid search direction. Use "first" or "last".', "MATLAB:find:InvalidDirection")
+        last = d == "last"
         sel = sel[-kk:] if last and kk else sel[:kk] if not last else sel[:0]
     key, vals = key[sel], vals[sel]
     row = S.m == 1 and S.n != 1
