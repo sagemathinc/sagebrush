@@ -15,6 +15,7 @@ GF(p) with p < 2^32 factor in the Rust engine (Berlekamp-free
 Cantor-Zassenhaus, sagebrush.poly); the others by Cantor-Zassenhaus here.
 """
 
+import array as _array
 import math as _m
 import random as _random
 from fractions import Fraction as _F
@@ -745,6 +746,10 @@ class IntegerMod:
 
             sage: a = Mod(3, 23); a.log(Mod(5, 23)), Mod(5, 23)^16
             (16, 3)
+            sage: Mod(3, 7).log(Mod(6, 7))
+            Traceback (most recent call last):
+            ...
+            ValueError: no logarithm of 3 found to base 6 modulo 7
         """
         n = self._parent._n
         if b is None:
@@ -752,7 +757,7 @@ class IntegerMod:
         b = self._parent(b)
         k = _dlog(self._v, b._v, n, _order_mod(b._v, n), lambda x, y: x * y % n, 1)
         if k is None:
-            raise ValueError("no logarithm of %s found to base %s" % (self, b))
+            raise ValueError("no logarithm of %s found to base %s modulo %d" % (self, b, n))
         return _Integer(k)
 
     def minimal_polynomial(self, var="x"):
@@ -1330,6 +1335,7 @@ class FiniteField_ext:
         self._q = p ** n
         self._prime_field = GF(p)
         self._primitive = None
+        self._logs = None                  # (generator, log table), _log_table
 
     def __pow__(self, n):
         """The vector space F^n (for a field).
@@ -1531,7 +1537,9 @@ class FiniteField_ext:
                 return x
             if x._parent._p == self._p and x.is_in_prime_field():
                 return self._make([x._c[0]])
-            raise TypeError("unable to coerce %r into %r" % (x, self))
+            # Sage's message for givaro fields (q < 2^16, checked with the
+            # Sage oracle); Sage's other backends word it differently
+            raise TypeError("unable to coerce from a finite field other than the prime subfield")
         if isinstance(x, IntegerMod):
             if x._parent._n == self._p:
                 return self._make([x._v])
@@ -1570,6 +1578,60 @@ class FiniteField_ext:
         for e in self:
             if e and e.multiplicative_order() == self._q - 1:
                 return e
+
+    # discrete logarithms by table lookup up to this size; BSGS beyond.
+    # The table is a packed array of 32-bit ints: 4 bytes per element,
+    # 256 KiB at 2^16, kept with the field (and fields are kept by _RINGS).
+    _LOG_TABLE_MAX = 2 ** 16
+
+    def _index(self, x):
+        """The element x as an integer in [0, q): its coefficients as base-p
+        digits."""
+        k = 0
+        for c in reversed(x._c):
+            k = k * self._p + c
+        return k
+
+    def _log_table(self):
+        """(g, logs) for q <= 2^16, built on first use: g is the
+        multiplicative generator and logs[self._index(g^k)] = k for
+        0 <= k < q - 1.  None for larger fields.
+
+        EXAMPLES::
+
+            sage: F.<z> = GF(2^4)
+            sage: g, logs = F._log_table()  # sagebrush only
+            sage: g == z, logs[F._index(z^7)], len(logs)  # sagebrush only
+            (True, 7, 16)
+            sage: GF(2^17, 'a')._log_table() is None  # sagebrush only
+            True
+        """
+        if self._q > self._LOG_TABLE_MAX:
+            return None
+        if self._logs is None:
+            p, n, f = self._p, self._n, self._f
+            g = self.multiplicative_generator()
+            logs = _array.array("i", [-1]) * self._q
+            if self._primitive:
+                # g is the root of f: multiplying by it shifts the
+                # coefficients up and reduces x^n by f (monic)
+                c = [1] + [0] * (n - 1)
+                for k in range(self._q - 1):
+                    idx = 0
+                    for d in reversed(c):
+                        idx = idx * p + d
+                    logs[idx] = k
+                    top = c[-1]
+                    c = [0] + c[:-1]
+                    if top:
+                        c = [(c[i] - top * f[i]) % p for i in range(n)]
+            else:
+                x = self.one()
+                for k in range(self._q - 1):
+                    logs[self._index(x)] = k
+                    x = x * g
+            self._logs = (g, logs)
+        return self._logs
 
     def __iter__(self):
         """0, then the powers of the generator (Sage's order), or all
@@ -2010,21 +2072,77 @@ class FiniteFieldElement:
     square_root = sqrt
 
     def log(self, base=None):
-        """k with base^k = self (base: the multiplicative generator).
+        """k with base^k = self (base: the multiplicative generator), the
+        least such k >= 0.  Up to 2^16 elements by a table of the powers of
+        the generator, built once per field (_log_table); beyond that by
+        baby-step giant-step.  (Sage's GF(p^n) requires base; here it
+        defaults to the multiplicative generator.)  The base is checked
+        first (a zero base is a ValueError); then the logarithm of 0 is 0
+        in fields with fewer than 2^16 elements, as in Sage's (givaro)
+        fields, and an ArithmeticError at 2^16, as Sage's.  Beyond the
+        table, "no logarithm exists" is Sagebrush's wording (Sage's differs
+        by backend).
 
         EXAMPLES::
 
             sage: F.<z> = GF(3^4); (z^7).log(z)
             7
+            sage: (z^6).log(z^2), (z^79).log(z), (z^20).log(z^60)
+            (3, 79, 3)
+            sage: z.log(z^2)
+            Traceback (most recent call last):
+            ...
+            ValueError: no logarithm exists
+            sage: K.<a> = GF(2^20); (a^1000).log(a)
+            1000
+            sage: GF(9, 'a')(0).log(GF(9, 'a').gen()), GF(9, 'a')(0).log(1)
+            (0, 0)
+            sage: GF(9, 'a')(0).log(GF(9, 'a')(0))
+            Traceback (most recent call last):
+            ...
+            ValueError
+            sage: GF(9, 'a')(0).log(GF(25, 'b').gen())
+            Traceback (most recent call last):
+            ...
+            TypeError: unable to coerce from a finite field other than the prime subfield
+            sage: GF(9, 'a')(0).log("bogus")
+            Traceback (most recent call last):
+            ...
+            NameError: name 'bogus' is not defined
+            sage: F.<c> = GF(2^16); F(0).log(c)
+            Traceback (most recent call last):
+            ...
+            ArithmeticError: Multiplicative order of 0 not defined.
         """
         K = self._parent
+        table = K._log_table()
+        if table is not None:
+            # small fields: base^k = self <=> k log(base) = log(self) mod q - 1
+            g, logs = table
+            # the base first: a foreign or invalid one is an error, as in Sage
+            base = g if base is None else K(base)
+            if not base:
+                raise ValueError()
+            if not self:
+                if K._q < 2 ** 16:
+                    return _Integer(0)  # Sage's convention (givaro, q < 2^16)
+                raise ArithmeticError("Multiplicative order of 0 not defined.")
+            lx = logs[K._index(self)]
+            if base == g:
+                return _Integer(lx)
+            if base:
+                lb, m = logs[K._index(base)], K._q - 1
+                d = _m.gcd(lb, m)
+                if lx % d == 0:
+                    return _Integer(lx // d * pow(lb // d, -1, m // d) % (m // d))
+            raise ValueError("no logarithm exists")
         if base is None:
             base = K.multiplicative_generator()
         base = K(base)
         order = int(base.multiplicative_order())
         k = _dlog(self, base, None, order, lambda x, y: x * y, K.one())
         if k is None:
-            raise ValueError("no logarithm of %s to base %s" % (self, base))
+            raise ValueError("no logarithm exists")
         return _Integer(k)
 
     def nth_root(self, k, all=False):
