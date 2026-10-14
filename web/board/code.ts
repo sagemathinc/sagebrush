@@ -35,6 +35,9 @@ export function siteEngine(base: URL, runner = true): EngineParts {
   };
 }
 
+/** The seed of a board without one of its own (BoardDoc.seed). */
+export const BOARD_SEED = "0".repeat(64);
+
 export class BoardCode {
   /** resolves when the interpreter and the notebook are ready (false: they could not be loaded) */
   readonly ready: Promise<boolean>;
@@ -153,28 +156,32 @@ export class BoardCode {
    * changes what others read: those rerun), and the new ones and those whose
    * code changed run, then what depends on them.  Resolves to the ids run.
    */
-  sync(items: { id: string; code: string }[], mode: "python" | "sage" = "python"): Promise<string[]> {
+  sync(items: { id: string; code: string }[], mode: "python" | "sage" = "python", seed?: string): Promise<string[]> {
     // (one after another: a sync sees what the one before it did)
-    const p = this.last.then(() => this.syncNow(items, mode));
+    const p = this.last.then(() => this.syncNow(items, mode, seed ?? BOARD_SEED));
     this.last = p.catch(() => {});
     return p;
   }
   private last: Promise<unknown> = Promise.resolve();
   /** the board's language (BoardDoc.mode) */
   mode: "python" | "sage" = "python";
-  private async syncNow(items: { id: string; code: string }[], mode: "python" | "sage"): Promise<string[]> {
+  /** the board's seed (BoardDoc.seed) */
+  seed = BOARD_SEED;
+  private async syncNow(items: { id: string; code: string }[], mode: "python" | "sage", seed: string): Promise<string[]> {
     if (!(await this.ready)) return [];
     const nb = this.nb;
     const now = nb.cells().filter((c: any) => c.type === "code");
     const before = new Map<string, string>(now.map((c: any) => [c.id, c.ta.value]));
-    // (another language: every item runs again, in it)
-    const relang = mode !== this.mode;
+    // (another language or seed: every item runs again, in it)
+    const relang = mode !== this.mode || seed !== this.seed;
     this.mode = mode;
+    this.seed = seed;
     const changed = items.filter((it) => relang || before.get(it.id) !== it.code).map((it) => it.id);
     const same = now.length === items.length && items.every((it, i) => now[i].id === it.id);
     if (changed.length || !same) {
       nb.applyRemote({
         mode,
+        seed,
         cells: items.map((it) => {
           const c = this.cell(it.id);
           return { id: it.id, code: it.code, ...(c ? { outputs: nb.saveOutputs(c.out) } : {}) };
@@ -223,6 +230,13 @@ export class BoardCode {
   private analyzer: Worker | null = null;
   private root: HTMLElement | null = null;
   private outputs: ResizeObserver[] = [];
+  /** Each code item's output key, time from root and whether a widget moved
+   * since it ran (design/outputs.md; the notebook's outputKeys()). */
+  async outputKeys(): Promise<Record<string, { key: string | null; ms: number | null; fromRoot: number; untimed: number; widget: boolean }> | null> {
+    if (!(await this.ready)) return null;
+    await this.last;
+    return this.nb.outputKeys();
+  }
   /** A code item's output as text (pictures by their descriptions), for agents. */
   text(id: string): string {
     const c = this.cell(id);

@@ -1960,6 +1960,25 @@ export function createNotebook(root, opts = {}) {
     setManual,
     /** Files changed outside the notebook's cells (uploaded, deleted): the cells that read them rerun (the reactive notebook). */
     filesChanged(paths) { return reactive() && kernel.reactive ? kernel.reactive.filesChanged(paths) : Promise.resolve(null); },
+    /**
+     * Each code cell's output key, time from root and whether a widget moved
+     * since it ran (design/outputs.md): {id: {key, ms, fromRoot, untimed,
+     * widget}}, or null when the notebook is not reactive.  A key is null for
+     * a cell with an error, or reading from one.
+     */
+    async outputKeys() {
+      const r = reactive() ? kernel.reactive : null;
+      if (!r || !crypto.subtle) return null;
+      const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+      const keys = await r.keys({ mode, seed: (id) => `${meta.seed ?? ""}:${id}`, hash: async (t) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t))) });
+      const out = {};
+      for (const c of cells()) {
+        if (c.type !== "code") continue;
+        const { ms, untimed } = r.fromRoot(c.id);
+        out[c.id] = { key: keys.get(c.id) ?? null, ms: r.times.get(c.id) ?? null, fromRoot: ms, untimed, widget: r.widgetDriven.has(c.id) };
+      }
+      return out;
+    },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
     runCells(ids, o = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map(run)); },
     applyEdits, graph, verify, fixRedefinitions,

@@ -139,6 +139,10 @@ export class Reactive {
   files = new Map<string, { reads: string[]; writes: string[] }>();
   /** ms of automatic runs allowed after an action; Infinity = autorun, 0 = lazy */
   budget = 2000;
+  /** cells run because a widget moved, and what depends on them: their
+   * outputs are for the widgets' values now, which their keys don't say, so
+   * they are not cached (design/outputs.md) until the interpreter restarts */
+  widgetDriven = new Set<string>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(readonly host: ReactiveHost) {}
@@ -183,6 +187,7 @@ export class Reactive {
       this.stale.clear();
       this.outcome.clear();
       this.files.clear();
+      this.widgetDriven.clear();
       this.graph = new NotebookGraph();
       this.scoped = new Map();
       return this.loadNow({ stale: true });
@@ -202,6 +207,7 @@ export class Reactive {
   /** The interpreter restarted: every cell is stale. */
   restarted(): void {
     this.outcome.clear();
+    this.widgetDriven.clear();
     this.cancelledBy.clear();
     for (const id of this.graph.ids) if (!this.errors.has(id)) this.markStale(id, "restart");
   }
@@ -254,8 +260,47 @@ export class Reactive {
       const readers = this.graph.ids.filter((id) => !exclude.includes(id) && !this.errors.has(id) && names.some((n) => this.registered.get(id)?.analysis?.refs.has(n)));
       if (!readers.length) return this.report([], [], [], []);
       const optional = [...this.graph.closure(readers)].filter((id) => !exclude.includes(id) && !this.errors.has(id));
+      for (const id of optional) this.widgetDriven.add(id);
       return this.execute(new Set(), optional, this.budget, false);
     });
+  }
+
+  /**
+   * A cell's time from root (design/outputs.md): its last run time and that
+   * of every cell it depends on, directly or not, each counted once; what a
+   * fresh interpreter takes to show it.  `untimed`: how many of them have
+   * never run here (counted as 0).
+   */
+  fromRoot(id: string): { ms: number; untimed: number } {
+    let ms = 0, untimed = 0;
+    for (const c of this.graph.closure([id], { children: false })) {
+      const t = this.times.get(c);
+      if (t === undefined) untimed++;
+      else ms += t;
+    }
+    return { ms, untimed };
+  }
+
+  /**
+   * Each cell's output key (design/outputs.md): the hash of the language,
+   * the code that runs, the cell's seed and the keys of the cells it reads
+   * from, so a key changes exactly when the cell or anything upstream does.
+   * null for a cell that has an error, or reads from one.
+   */
+  async keys(opts: { mode: string; seed: (id: string) => string; hash: (text: string) => string | Promise<string> }): Promise<Map<string, string | null>> {
+    const out = new Map<string, string | null>();
+    for (const id of this.graph.order(this.graph.ids)) {
+      const code = this.registered.get(id)?.code;
+      const parents = [...this.graph.parents(id)].map((p) => out.get(p));
+      if (code === undefined || this.errors.has(id) || parents.some((k) => !k)) {
+        out.set(id, null);
+        continue;
+      }
+      out.set(id, await opts.hash(JSON.stringify(["sagebrush-output-key/1", opts.mode, code, opts.seed(id), (parents as string[]).sort()])));
+    }
+    // (cells on a cycle are not in the order)
+    for (const id of this.graph.ids) if (!out.has(id)) out.set(id, null);
+    return out;
   }
 
   /** The stale cells, in run order, and their predicted time. */
