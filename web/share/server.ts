@@ -83,8 +83,8 @@ const DAY = 86400;
 const SESSION_DAYS = 30;
 /** sessions an account may have at once (the oldest go: a sign-in loop can't pile them up) */
 const SESSIONS_MAX = 20;
-/** records of deleted collections: how long, and at most how many per account */
-const DELETION_RECORD_DAYS = 30, DELETION_RECORDS_MAX = 1000;
+/** records of finished deletions: how long (collections and self-deletions; account deletions), and at most how many collection records per account */
+const DELETION_RECORD_DAYS = 30, ADMIN_RECORD_DAYS = 365, DELETION_RECORDS_MAX = 1000;
 const LIMITS_TTL = 600;
 /** how long an upload may take before its reservation is reclaimed */
 const RESERVE_SECONDS = 3600;
@@ -213,7 +213,7 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
       db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES (?1, ?2, ?3, ?4)").bind(await sha256Hex(token), who.account_id, t, t + SESSION_DAYS * DAY),
       // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
-      db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND token_hash NOT IN (SELECT token_hash FROM sessions WHERE account_id = ?1 ORDER BY created DESC, token_hash LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
+      db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
   } catch {
     return null;
@@ -697,8 +697,11 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   await drain(env, 500);
   await reconcile(env);
   await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
-  // records of deleted collections, after their time (HARD-SHARE-3)
-  await db.prepare("DELETE FROM purges WHERE kind = 'collection' AND finished < ?1").bind(t - DELETION_RECORD_DAYS * DAY).run();
+  // records of finished deletions, after their time (HARD-SHARE-3, HARD-E55-2):
+  // a collection's and a self-deletion's after DELETION_RECORD_DAYS; an
+  // account deletion's (CoCalc may ask about it again by its request id)
+  // after ADMIN_RECORD_DAYS.  Tombstones stay: they keep a deleted account out.
+  await db.prepare("DELETE FROM purges WHERE status = 'done' AND ((kind IN ('collection', 'self') AND finished < ?1) OR (kind = 'admin' AND finished < ?2))").bind(t - DELETION_RECORD_DAYS * DAY, t - ADMIN_RECORD_DAYS * DAY).run();
 }
 
 /**
@@ -778,7 +781,7 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
     const h = await accountHash(id);
     await env.SHARE_DB.batch([
       env.SHARE_DB.prepare("INSERT INTO purges (request_id, account_hash, collection, kind, status, collections, bytes, created, finished) VALUES (?1, ?2, ?3, 'collection', 'done', 1, ?4, ?5, ?5)").bind(crypto.randomUUID(), h, g[1], r.bytes, now()),
-      env.SHARE_DB.prepare("DELETE FROM purges WHERE kind = 'collection' AND account_hash = ?1 AND request_id NOT IN (SELECT request_id FROM purges WHERE kind = 'collection' AND account_hash = ?1 ORDER BY created DESC, request_id LIMIT ?2)").bind(h, DELETION_RECORDS_MAX),
+      env.SHARE_DB.prepare("DELETE FROM purges WHERE kind = 'collection' AND account_hash = ?1 AND rowid NOT IN (SELECT rowid FROM purges WHERE kind = 'collection' AND account_hash = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(h, DELETION_RECORDS_MAX),
     ]);
     ctx.waitUntil(drain(env));
     return json({ ok: true });
