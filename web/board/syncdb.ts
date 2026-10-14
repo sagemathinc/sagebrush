@@ -19,7 +19,7 @@
 
 import { canonical, cleanDoc, type BoardDoc } from "./doc";
 import { fromRecords, toRecords } from "./history";
-import { docHash, IdbDocCache, records, versionOf, type DocCache, type CachedDoc, type RemoteBoard } from "./cached";
+import { docHash, identified, IdbDocCache, merge3, records, versionOf, type DocCache, type CachedDoc, type RemoteBoard } from "./cached";
 import type { BoardStore } from "./mount";
 
 /** The parts of CoCalc's SyncDB (@cocalc/sync/editor/db) the adapter uses,
@@ -110,16 +110,29 @@ export function syncdbStore(db: SyncDbLike, key: string, cache: DocCache = new I
   const step = <T>(f: () => Promise<T>) => { const p = queue.then(f); queue = p.catch((e) => console.warn("board: the syncdb store:", e)); return p; };
   const parse = (json: string) => cleanDoc(JSON.parse(json));
 
-  // (written only over the version read or written last: another store's newer copy is not overwritten, but taken)
+  // The copy written, only over the version read or written last: written,
+  // true (null: the cache failed, kept here only); refused, false: another
+  // store wrote it since, and its copy is taken (the caller merges what it
+  // was writing into it, CORR-78A-2).
   let ver: number | null = null;
-  async function keep(d: BoardDoc, base: BoardDoc | null) {
+  async function keep(d: BoardDoc, base: BoardDoc | null): Promise<boolean | null> {
     const json = canonical(d), hash = await docHash(d), baseHash = base ? await docHash(base) : null;
     const next: CachedDoc = { key, json, hash, remoteHash: baseHash, ...(base && hash !== baseHash ? { base: canonical(base) } : {}), at: Date.now() };
     const ok = await cache.put(next, ver).catch((e) => { console.warn("board: the copy:", e); return null; });
-    if (ok === false) { entry = await cache.get(key).catch(() => null); ver = versionOf(entry); return; }
+    if (ok === false) { entry = await cache.get(key).catch(() => null); ver = versionOf(entry); return false; }
     entry = next;
     if (ok) ver = (ver ?? 0) + 1;
+    return ok;
   }
+  // (the copy's edits the syncdb has not seen, another store's taken among them: written into it as what they changed)
+  function flushCopy() {
+    if (!open || entry?.base === undefined) return;
+    db.from_str(jsonl(parse(entry.json)), { base: jsonl(parse(entry.base)) });
+    db.commit();
+  }
+  // (an edit made before the syncdb was open that its copy could not take:
+  // written into the syncdb when it opens, from what this store had read)
+  let unwritten: { base: BoardDoc; doc: BoardDoc } | null = null;
   // (documents given the board one at a time, each once the one before is shown)
   function present(d: BoardDoc) {
     if (!listeners.size) { unsent.push(d); return; }
@@ -128,10 +141,14 @@ export function syncdbStore(db: SyncDbLike, key: string, cache: DocCache = new I
   }
   // the syncdb's document, as it is now, kept and (if not what the board shows) shown
   async function heard() {
-    const d = boardOf(db);
-    if (!d) return;
-    await keep(d, d);
-    if (!view || canonical(view) !== canonical(d)) present(d);
+    for (let tries = 0; tries < 10; tries++) {
+      const d = boardOf(db);
+      if (!d) return;
+      if ((await keep(d, d)) !== false) { if (!view || canonical(view) !== canonical(d)) present(d); return; }
+      // (refused: another store's copy taken; its edits into the syncdb, then again)
+      flushCopy();
+    }
+    console.error("board: this browser's copy could not be written: another store kept writing it");
   }
   const onChange = () => { if (open) step(heard); };
 
@@ -147,11 +164,9 @@ export function syncdbStore(db: SyncDbLike, key: string, cache: DocCache = new I
     await db.wait_until_ready();
     await step(async () => {
       // (edits kept in the copy before it was open: written as what they changed)
-      if (entry?.base !== undefined) {
-        db.from_str(jsonl(parse(entry.json)), { base: jsonl(parse(entry.base)) });
-        db.commit();
-      }
       open = true;
+      flushCopy();
+      if (unwritten) { db.from_str(jsonl(unwritten.doc), { base: jsonl(unwritten.base) }); db.commit(); unwritten = null; }
       db.on("change", onChange);
       await heard();
     });
@@ -174,14 +189,22 @@ export function syncdbStore(db: SyncDbLike, key: string, cache: DocCache = new I
         if (open) {
           db.from_str(jsonl(d), from ? { base: jsonl(from) } : undefined);
           db.commit();
-          const now = boardOf(db);
-          await keep(now ?? d, now);
-          // (merged with a change from elsewhere: shown as the syncdb has it)
-          if (now && canonical(now) !== canonical(d)) present(now);
+          // (kept, and, merged with a change from elsewhere, shown as the syncdb has it)
+          await heard();
         } else {
-          // (before it is open: kept, based on the syncdb's document the copy was)
-          const base = entry ? (entry.base !== undefined ? parse(entry.base) : parse(entry.json)) : null;
-          await keep(d, base);
+          // (before it is open: kept, based on the syncdb's document the copy
+          // was; refused, merged into the other store's copy, from what this
+          // store had read, and written again, CORR-78A-2)
+          let last = entry ? parse(entry.json) : from ?? cleanDoc({}), ours = d;
+          for (let tries = 0; ; tries++) {
+            const base = entry ? (entry.base !== undefined ? parse(entry.base) : parse(entry.json)) : null;
+            if ((await keep(ours, base)) !== false) break;
+            const theirs = entry ? parse(entry.json) : cleanDoc({});
+            ours = identified(merge3(last, ours, theirs).doc);
+            last = theirs;
+            if (tries >= 9) { unwritten = { base: last, doc: ours }; console.error("board: an edit could not be kept in this browser's copy: another store kept writing it"); break; }
+          }
+          if (canonical(ours) !== canonical(d)) present(ours);
         }
       });
     },

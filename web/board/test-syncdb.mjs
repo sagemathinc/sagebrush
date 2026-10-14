@@ -322,6 +322,36 @@ for (const [name, make] of Object.entries(designs)) {
   const c = await converged([project, db1], [A]);
   check(r?.doc && note(r.doc, "n1").x === 55 && !!c && note(c, "n1").x === 55 && note(JSON.parse(cache.m.get("k").json), "n1").x === 55, "the syncdb ready before the copy is read: the copy's edit written into it, everywhere, and kept: " + JSON.stringify({ loaded: r?.doc && note(r.doc, "n1").x, now: c && note(c, "n1").x, cache: note(JSON.parse(cache.m.get("k").json), "n1").x }));
 }
+// CORR-78A-2: before the syncdb opens, this store's edit and another store's (each its own note), the other's written to the copy just as this one's is: both, in the syncdb and the copy
+{
+  const hub = new Hub(), project = await replica(hub, "project");
+  loadFile(project, start());
+  const cache = memCache(), s = start();
+  await cache.put({ key: "k", json: canonical(s), hash: await docHash(s), remoteHash: await docHash(s), at: 0 });
+  let raced = false;
+  const put0 = cache.put;
+  cache.put = async (c, expected) => {
+    if (expected !== undefined && !raced) {
+      raced = true;
+      // (another store, before it too is open: the second note retitled, written first)
+      const other = start();
+      note(other, "n2").title = "OTHER";
+      const cur = cache.m.get("k");
+      cache.m.set("k", { ...cur, json: canonical(other), hash: await docHash(other), base: canonical(s), v: (cur.v ?? 0) + 1 });
+      return false;
+    }
+    return put0(c, expected);
+  };
+  const db1 = new FakeSyncDb(hub, "b1");
+  const store = syncdbStore(db1, "k", cache), A = board(store);
+  await A.open();
+  A.edit((d) => { note(d, "n1").title = "LOCAL"; });
+  await settle();
+  await db1.start();
+  await store.opened;
+  const c = await converged([project, db1], [A]), copy = JSON.parse(cache.m.get("k").json);
+  check(raced && !!c && note(c, "n1").title === "LOCAL" && note(c, "n2").title === "OTHER" && note(copy, "n1").title === "LOCAL" && note(copy, "n2").title === "OTHER", "two stores' edits before the syncdb opens, the other's written to the copy just as this one's: both, in the syncdb and the copy: " + JSON.stringify({ raced, syncdb: c?.nodes.map((n) => n.title), copy: copy.nodes.map((n) => n.title) }));
+}
 // CORR-B5C-2: the replica read A, then B, then A again: a save expecting B's hash is refused (what is hashed is what is compared and written over)
 {
   const doc = (t) => cleanDoc({ title: t, nodes: [{ id: "n", title: t }] });

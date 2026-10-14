@@ -393,7 +393,8 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   // a refusal then is not counted (PERF-67E-2).
   let saving = false, refused = 0, waiting: ReturnType<typeof setTimeout> | null = null, stalled = false, busy = false, asking = 0;
   function push() {
-    if (closed || !online || saving || waiting || stalled || asking || !dirty()) return;
+    // (an edit not yet in the copy: the copy is not what to send)
+    if (closed || !online || saving || waiting || stalled || asking || pending || !dirty()) return;
     saving = true;
     const d = parse(entry!.json), expected = entry!.remoteHash;
     remote.save(d, expected).then(
@@ -457,8 +458,35 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       present(doc, conflicts.length ? mergedNotice(conflicts.length) : undefined);
       s = "merged";
     }
+    // (an edit not yet in the copy: merged into it now, and shown)
+    if (pending) await writePending();
     push();
     return s;
+  }
+
+  // An edit not yet in the copy (CORR-1EC-1): the latest document, and what
+  // the board showed when the first edit not yet in it was made.  Written
+  // as any edit is (merged into the copy as it is now), tried ten times at a
+  // time; refused each time (another store keeps writing the copy), it is
+  // kept here, the store busy and not pushing, and tried again: after a
+  // wait, with the next edit, and when the store is closed.
+  let pending: { from: BoardDoc | null; doc: BoardDoc } | null = null, pendingTimer: ReturnType<typeof setTimeout> | null = null, pendingWaits = 0;
+  async function writePending(): Promise<boolean> {
+    for (let tries = 0; tries < 10 && pending; tries++) {
+      const { from, doc: d } = pending;
+      const doc = identified(from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d);
+      const base = dirty() ? entry!.base ?? (entry!.remoteHash === null ? undefined : entry!.json) : entry?.json;
+      if (await keep(doc, entry?.remoteHash ?? null, base)) {
+        // (a later edit made meanwhile: it is written next, and shown; else this one, merged, shown)
+        if (pending?.doc === d) { pending = null; if (doc !== d) present(doc); }
+        pendingWaits = 0;
+        return !pending || writePending();
+      }
+    }
+    if (!pending) return true;
+    // (still refused: tried again after a wait, doubling, eight times; then with the next edit, or on closing)
+    if (!pendingTimer && pendingWaits < 8) pendingTimer = setTimeout(() => { pendingTimer = null; step(async () => { if (pending && (await writePending()) && !closed) push(); }); }, 50 * 2 ** pendingWaits++);
+    return false;
   }
 
   // The remote asked whether it has the copy's version: its answers, each a
@@ -529,7 +557,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     synced,
     /** Whether the copy holds what the remote has not taken, and it is not
      * trying now: busy (opened busy, or its saves refused `tries` times). */
-    busy: () => busy,
+    busy: () => busy || !!pending,
     async load() {
       const c = await step(async () => cache.get(key).catch(() => null)), copy = c && parse(c.json);
       await step(async () => { ver = versionOf(c); });
@@ -568,17 +596,13 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       // (made from what the board showed when it was made)
       const from = view;
       view = d;
+      // (an edit not yet in the copy before this one: this one, made from it, holds it too)
+      pending = { from: pending ? pending.from : from, doc: d };
       step(async () => {
         // (a newer copy written by another store meanwhile: the edit merged
-        // into that one, as into one shown later, and written again)
-        let doc = d;
-        for (let tries = 0; tries < 10; tries++) {
-          doc = identified(from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d);
-          const base = dirty() ? entry!.base ?? (entry!.remoteHash === null ? undefined : entry!.json) : entry?.json;
-          if (await keep(doc, entry?.remoteHash ?? null, base)) break;
-        }
-        if (closed) return;
-        if (doc !== d) present(doc);
+        // into that one, as into one shown later, and written again; still
+        // refused, kept: never dropped, CORR-1EC-1)
+        if (!pending || !(await writePending()) || closed) return;
         // (stopped: the remote asked first, its newer document merged, then pushed)
         if (kick()) ask();
         else push();
@@ -589,7 +613,14 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       for (const [d, n] of unsent.splice(0)) present(d, n);
       offRemote ??= remote.subscribe?.(changed);
       // (none left: no more listening, nor a retry waiting)
-      return () => { listeners.delete(f); if (!listeners.size) { closed = true; offRemote?.(); offRemote = undefined; if (waiting) { clearTimeout(waiting); waiting = null; } } };
+      return () => {
+        listeners.delete(f);
+        if (listeners.size) return;
+        closed = true; offRemote?.(); offRemote = undefined;
+        if (waiting) { clearTimeout(waiting); waiting = null; }
+        // (an edit not yet in the copy: tried once more; still refused, said)
+        if (pending) step(async () => { if (pending && !(await writePending())) console.error("board: an edit could not be kept in this browser's copy: another store kept writing it"); });
+      };
     },
   };
 }
