@@ -191,6 +191,8 @@ export class BoardCode {
     for (const it of held) this.held.add(it.id);
     // (an item held whose code changed: run, as any edit, and what it holds with it)
     this.release(changed.filter((id) => before.has(id) && this.held.has(id)));
+    // (another document: its outputs drawn in its pictures' pixels, not the last one's, CORR-A48-2)
+    if (this.recount && this.pictures) nb.usePictures?.(this.pictures);
     if (changed.length || !same) {
       nb.applyRemote({
         mode,
@@ -207,10 +209,12 @@ export class BoardCode {
       const c = this.cell(it.id);
       if (c) c.out.dataset.preview = previewLabel(it.preview!);
     }
-    // (another document: the outputs kept, counted in its pictures' pixels, SEC-4DF-1)
+    // (another document: the outputs kept counted in its pictures' pixels,
+    // once its own are in place, SEC-4DF-1; and those are drawn in them, not
+    // in the last document's, CORR-A48-2)
     if (this.recount && this.pictures) {
       this.recount = false;
-      nb.usePictures?.(this.pictures);
+      nb.recountPictures?.();
     }
     if (!changed.length) return changed;
     let report: any;
@@ -329,7 +333,11 @@ export class BoardCode {
       if (this.generation(id) !== gens.get(id)) continue;
       await cache.put(ns, e);
     }
-    if (entries.length && this.cacheDoc() === ns) await cache.sweep(ns, new Set(Object.values(keys).map((k: any) => k.key).filter(Boolean)));
+    // (marking the items' keys as they are now, not as they were before the
+    // writes: a newer run's entry is live, CORR-A48-3)
+    if (!entries.length) return;
+    const now = await this.nb.outputKeys();
+    if (now && this.cacheDoc() === ns) await cache.sweep(ns, new Set(Object.values(now).map((k: any) => k.key).filter(Boolean)));
   }
   /** an item over this many ms from root keeps a preview (preview.ts) */
   previewMs = PREVIEW_MS;
