@@ -26,7 +26,7 @@ import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
-import { exitText } from "./notebook-session";
+import { exitStatus } from "./notebook-session";
 
 export type Mode = "sage" | "python" | "magma" | "matlab";
 
@@ -464,9 +464,9 @@ export function kernelWorker(mode: Mode) {
         // error: Magma's in a cell (lib/_magma.py raises SystemExit(1) once
         // it has printed it: its line is the error's value, and no traceback,
         // the text being on stdout already), or sys.exit(1)
-        const c = exc.code;
-        if (c === null || c === undefined || c === 0 || c === false) return;
-        const said = mode === "magma" ? magmaError : null, t = said === null ? exitText(c) : "";
+        const s = exitStatus(exc.code);
+        if (s.ok) return;
+        const said = mode === "magma" ? magmaError : null, t = said === null ? s.text ?? R.str(exc.code) : "";
         errorReported = said !== null ? { ename: "MagmaError", evalue: said, traceback: [] } : { ename: "SystemExit", evalue: t, traceback: [`SystemExit: ${t}`] };
         if (current !== null) port.postMessage({ id: current, error: errorReported });
       }
