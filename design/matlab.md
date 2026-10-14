@@ -295,20 +295,25 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     and so do name-value properties;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
-  - colormaps `parula`, `jet`, `hot`, `gray`, `turbo` and the others. `jet`
-    and `hot` are MATLAB's formulas (they agree with Octave). `parula` and
-    `turbo` are interpolated from their published anchor colors.
+  - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,
+    `cool`, `spring`, `summer`, `autumn` and `winter` give the same values
+    as Octave's (checked for every size up to 40, and 63 to 65, 100, 255
+    and 256); `turbo` is Google's published Turbo table, interpolated
+    linearly for other sizes, as Octave's is;
+    `parula` is approximated by interpolating eight colors.
 - **Automatic limits** are computed by the axes, and every axes is drawn
   with its own limits (not the shim's padded ones), so the picture agrees
   with `get(gca, 'XLim')`:
-  - The tick step is a fifth of the span, rounded to the nearest 1, 2, 5
-    or 10 times a power of 10 on a log scale (Octave's rule). The limits
-    are the multiples of that step around the data.
+  - The tick step is a fifth of the span, rounded to 1, 2, 5 or 10 times a
+    power of 10 at the geometric means (√2, √10, √50). The limits are the
+    multiples of that step around the data. This is Sagebrush's rule; it
+    agrees with Octave's limits for most spans, not all (Octave gives
+    [−10 10] for data from −6.55 to 8.08, Sagebrush [−8 10]).
   - A 3-D axes' z axis uses a third of the span, which gives `surf(peaks)`
     MATLAB's [−10 10].
   - Images, contours, bars along their axis, and surfaces seen from above
     are tight to the data.
-  - test_plot_limits pins all of this against Octave.
+  - test_plot_limits pins the cases where they agree against Octave.
 - **3-D** (`surf`, `mesh`, `plot3`, `scatter3`, `stem3`, `sphere`): an
   orthographic projection with MATLAB's view matrix for (az, el) (default
   (−37.5, 30)):
@@ -342,7 +347,12 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - `histcounts` and `discretize` share this binning (test_hist,
     `.matlab.out`, from the documentation's outputs).
 - **Bars:**
-  - grouped bars sit side by side in a group min(0.8, n/(n+1.5)) wide;
+  - grouped bars sit side by side, a group of n taking 0.8 of the spacing
+    in n equal slots, each bar `BarWidth` of its slot (so at width 1 they
+    touch, as documented). This is Sagebrush's rule: MATLAB documents
+    `GroupWidth`, but not how its default auto mode chooses the value;
+    Sagebrush always uses 0.8, and MATLAB's groups are narrower (three
+    series at ±0.222 of the spacing, not ±0.267);
   - stacked bars sit on the series before them;
   - `XEndPoints`/`YEndPoints` give the bar tips;
   - a string array of names places the bars in that order.
@@ -358,6 +368,9 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - a colorbar is the shim's contourf colorbar, given the colormap as
     bands;
   - a reversed y axis is drawn by negating y and relabeling the ticks.
+- `sphere`'s columns run from θ = 0 to 2π, as Octave's do (MATLAB documents
+  only the size), and `pie` labels each slice with its rounded percentage at
+  1.2 times the radius, as Octave does ("0%" for a sliver).
 - **Not yet:**
   - lighting (`camlight`, `lighting` and `material` do nothing);
   - polar axes, `annotation`, `uifigure` and apps, `animatedline`;

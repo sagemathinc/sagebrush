@@ -139,6 +139,13 @@ John Cremona's ecdata, https://github.com/JohnCremona/ecdata, under the
 Artistic License 2.0 (LICENSE-Artistic-2.0.txt, ecdata's LICENSE file):
 label, minimal a-invariants, rank and torsion order, unchanged.
 
+### Google's Turbo colormap (Apache-2.0)
+
+The Turbo colormap's table (`_matlab_turbo.py`, which MATLAB programs' `turbo`
+interpolates) is the 256-entry table published by Anton Mikhailov,
+Copyright 2019 Google LLC, under the Apache License 2.0 (LICENSE-APACHE),
+unchanged.
+
 == Rust crates compiled into the engines (28) ==
 
 Sagebrush's own crates: sagebrush-ap, sagebrush-arith, sagebrush-ball, sagebrush-bigint, sagebrush-classgroup, sagebrush-galois, sagebrush-group, sagebrush-interrupt, sagebrush-modsym, sagebrush-mpoly, sagebrush-poly, sagebrush-sym, sagebrush-web. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.

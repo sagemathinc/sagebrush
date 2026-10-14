@@ -47,6 +47,7 @@ const PARTS = {
   marimo: () => section("marimo"),
   smalljac: () => section("smalljac"),
   cremona: () => "### John Cremona's ecdata (Artistic License 2.0)\n\nThe elliptic curves of conductor below 1000 (`_cremona_small.py`) are from\nJohn Cremona's ecdata, https://github.com/JohnCremona/ecdata, under the\nArtistic License 2.0 (LICENSE-Artistic-2.0.txt, ecdata's LICENSE file):\nlabel, minimal a-invariants, rank and torsion order, unchanged.",
+  turbo: () => "### Google's Turbo colormap (Apache-2.0)\n\nThe Turbo colormap's table (`_matlab_turbo.py`, which MATLAB programs' `turbo`\ninterpolates) is the 256-entry table published by Anton Mikhailov,\nCopyright 2019 Google LLC, under the Apache License 2.0 (LICENSE-APACHE),\nunchanged.",
 };
 
 const PACKAGES = [
@@ -55,7 +56,7 @@ const PACKAGES = [
   // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
   // plugins, the platforms' bindings); its page carries the notebook's notices
   { file: "app/THIRD-PARTY-NOTICES-native.txt", what: "the desktop app's native code (app/src-tauri)", manifest: "app/src-tauri", crates: ["sagebrush-app"], parts: [], mpl: true, native: true },
-  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web"], parts: ["cpython", "numpy", "arm", "fdlibm", "marimo", "smalljac", "cremona"], artistic: "packages/sagebrush", web: true },
+  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web"], parts: ["cpython", "numpy", "arm", "fdlibm", "marimo", "smalljac", "cremona", "turbo"], artistic: "packages/sagebrush", web: true },
 ];
 
 const metas = new Map();
