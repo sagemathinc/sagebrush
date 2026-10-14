@@ -2041,6 +2041,10 @@ def _assign_paren(cur, args, v, brace=False):
     if isinstance(cur, Undef):
         cur = None
     tv = type(v)
+    if type(cur) is Sparse and not brace:
+        if tv is np.ndarray and v.size == 0 and v.shape == (0, 0) and v.dtype == np.float64:
+            return _sp.delete(cur, args)
+        return _sp.assign(cur, args, v)
     # deletion: x(i) = []
     if not brace and tv is np.ndarray and v.size == 0 and v.shape == (0, 0) and v.dtype == np.float64 and cur is not None and not _isempty_double(cur) or (not brace and tv is np.ndarray and v.size == 0 and v.shape == (0, 0) and cur is not None and type(cur) is Cell):
         return _delete(cur, args)
@@ -2373,6 +2377,12 @@ def _cat_class(vals):
 
 def _cat(vals, dim):
     """concatenation along MATLAB dimension dim (1 or more)"""
+    for v in vals:
+        if type(v) is Sparse:
+            r = _sp.cat(vals, dim)
+            if r is not None:
+                return r
+            break
     cls = _cat_class(vals)
     # empty values do not take part (but count for the class)
     parts = [v for v in vals if _numel(v) != 0]
@@ -2987,6 +2997,8 @@ def _disp_text(v):
     if t is Cell and not v.a:
         return ""
     sep = "\n\n" if _format["spacing"] == "loose" else "\n"
+    if t is Sparse and sep == "\n\n":
+        return sep.join(body) + "\n\n"
     return sep.join(body) + "\n"
 
 # ------------------------------------------------------------------ function handles' text
