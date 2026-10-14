@@ -17,7 +17,7 @@ import type { BoardDoc, DocGroup, DocNote } from "./doc";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { highlight as highlightPython, highlightMarkdown } from "../notebook/highlight.js";
 import { icon } from "./icons";
-import { BlockEditor } from "./blocks";
+import { BlockEditor, fitHeight } from "./blocks";
 import { COLORS } from "./colors";
 
 export interface InPlaceHost {
@@ -52,6 +52,7 @@ export class InPlace {
   private pic: { key: string; info: ImageInfo } | null = null;
   private picEl: HTMLElement | null = null;
   private hasCode = false;
+  private headHeight = 0; // (an untitled code item's head, as shown)
   private hideCode = false;
   private color: string | undefined;
   private stepped = false; // whether this visit has an undo step (what it keeps next joins it)
@@ -139,8 +140,19 @@ export class InPlace {
     this.title = area("be-title", n.title ?? "", "Title");
     this.title.rows = 1;
     if (head) {
+      if (!head.querySelector(":scope > b")) this.headHeight = parseFloat(getComputedStyle(head).height) || 0;
       head.querySelector(":scope > b")?.remove();
       head.insertBefore(this.title, head.querySelector(".board-code-toggle"));
+      // (▶ and { } stay where they are, so the title and the code do not
+      // move: here they run and hide the code as it is written)
+      const run = head.querySelector<HTMLElement>(".board-code-run"), toggle = head.querySelector<HTMLElement>(".board-code-toggle");
+      if (run) run.onclick = (e) => { e.stopPropagation(); this.run(); };
+      if (toggle) toggle.onclick = (e) => { e.stopPropagation(); this.toggleCode(); };
+      for (const b of [run, toggle]) b?.addEventListener("mousedown", (e) => e.preventDefault());
+    } else if (!n.title && n.text && !this.fresh) {
+      // (an item with text and no title shows none: its field only once
+      // + Title asks for it, the text staying where it was)
+      this.title.hidden = true;
     }
     const { board } = this.host;
     this.text = new BlockEditor(n.text ?? "", {
@@ -241,6 +253,7 @@ export class InPlace {
     const sw = button("ip-color", "Color");
     sw.append(Object.assign(document.createElement("span"), { className: "ip-swatch" }));
     sw.onclick = () => this.palette();
+    b.append(tool("ip-title", "Add a title", "title", () => this.addPart("title"), true));
     if (!this.group) {
       b.append(
         tool("ip-run", "Run (Shift+Enter), and what depends on it", "run", () => this.run()),
@@ -261,6 +274,10 @@ export class InPlace {
   // What the toolbar offers now.
   private refresh() {
     const q = (s: string) => this.bar.querySelector<HTMLElement>(s);
+    q(".ip-title")!.hidden = !this.title.hidden;
+    const toggle = this.el.querySelector<HTMLElement>(":scope > .board-code-head > .board-code-toggle");
+    toggle?.classList.toggle("off", this.hideCode);
+    toggle?.setAttribute("aria-pressed", String(!this.hideCode));
     if (!this.group) {
       q(".ip-run")!.hidden = !this.hasCode;
       q(".ip-hide")!.hidden = !this.hasCode;
@@ -278,9 +295,12 @@ export class InPlace {
     else this.el.style.removeProperty("--c");
   }
 
-  private addPart(k: "code" | "detail" | "ref") {
+  private addPart(k: "title" | "code" | "detail" | "ref") {
     let f: HTMLTextAreaElement | HTMLInputElement;
-    if (k === "code") {
+    if (k === "title") {
+      this.title.hidden = false;
+      f = this.title;
+    } else if (k === "code") {
       this.hasCode = true;
       // (a code item now: its state and output show in it once it runs, board.ts codeStates)
       this.el.dataset.code = this.id;
@@ -397,9 +417,10 @@ export class InPlace {
     for (const ta of this.el.querySelectorAll<HTMLTextAreaElement>("textarea")) {
       // (a hidden field has no height to measure: measured when it shows)
       if (!ta.offsetParent) continue;
-      ta.style.height = "auto";
-      ta.style.height = ta.scrollHeight + "px";
+      fitHeight(ta);
     }
+    // (an untitled code item's head as tall as it was while its title is empty: the code below stays where it was)
+    if (this.headHeight) this.title.style.maxHeight = this.title.value ? "" : this.headHeight + "px";
   }
 
   /** The toolbar above the item (below it if there is no room), or, on a
@@ -424,12 +445,14 @@ export class InPlace {
     b.style.left = Math.round(Math.max(8, Math.min(innerWidth - bw - 8, r.left))) + "px";
   }
 
-  // Room for the toolbar above the item, so that it covers nothing of it
-  // (on a phone it is under the Edit toolbar): the board moves down if need be.
+  // Room for the toolbar above the item or below it, so that it covers
+  // nothing of it (on a phone it is under the Edit toolbar): the board moves
+  // down only if there is room for it in neither place (William: the text
+  // being written stays where it was as editing starts, if it can).
   private room() {
     if (phone()) return;
-    const top = this.el.getBoundingClientRect().top, need = clearTop() + this.bar.offsetHeight + 8;
-    if (top < need) this.host.board.panBy(0, top - need);
+    const r = this.el.getBoundingClientRect(), bh = this.bar.offsetHeight, need = clearTop() + bh + 8;
+    if (r.top < need && r.bottom + 8 + bh > innerHeight) this.host.board.panBy(0, r.top - need);
     this.host.board.render();
   }
 
