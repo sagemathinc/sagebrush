@@ -534,8 +534,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
 
   // the document: the host's (none: nothing is shown until load(), as for the benchmark's boards)
+  // (a document the host or an agent loads meanwhile wins: the store's,
+  // arriving later, is not shown over it)
+  const opening = loads;
   host.store?.load().then((r) => {
-    if (!r) return;
+    if (!r || loads !== opening) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
     return load(r.doc, true).then(sayConverted);

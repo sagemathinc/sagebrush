@@ -62,9 +62,11 @@ const DOC = {
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `${base}board/` });
-  await until("!!window.sagebrush?.board?.load", 60000);
+  // (the page's own board shown first, then the test's, and that one checked: as on CI once, the page's arriving later replaced it)
+  if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the page's board was not shown");
   await ev("localStorage.clear()");
   await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
+  if (!(await until(`window.sagebrush.board.snapshot().doc?.title === ${JSON.stringify(DOC.title)} && !!window.board?.item("a")`, 20000))) throw new Error("the test's board was not shown: " + await ev("window.sagebrush.board.snapshot().doc?.title"));
   await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].output === '42\\n')", 60000);
   await ev("window.sagebrush.board.editing(true)");
 
