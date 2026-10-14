@@ -8996,3 +8996,4 @@ def _handle_blocks(v):
 # ------------------------------------------------------------------ sparse matrices (lib/_matlab_sparse.py)
 
 import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
+import _matlab_numeric  # noqa: E402,F401  (more numerical built-ins)
