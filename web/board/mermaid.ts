@@ -18,7 +18,7 @@
 
 import { fromCocalcBoard, isCocalcBoard, leftOut } from "./cocalc";
 import { canvasLeftOut, fromCanvas, isCanvas } from "./canvas";
-import type { BoardDoc, DocEdge, DocGroup, DocNode, DocNote, NoteShape } from "./doc";
+import { pageCount, pageView, type BoardDoc, type DocEdge, type DocGroup, type DocNode, type DocNote, type NoteShape } from "./doc";
 
 /** Whether a text looks like a Mermaid flowchart. */
 export function isMermaid(text: string): boolean {
@@ -105,15 +105,17 @@ const NAMED: Record<string, NoteShape> = {
 
 const ENTITIES: Record<string, string> = { quot: '"', amp: "&", lt: "<", gt: ">", nbsp: " ", apos: "'", copy: "©", reg: "®", hellip: "…", mdash: "—", ndash: "–", larr: "←", rarr: "→", uarr: "↑", darr: "↓", harr: "↔", hearts: "♥", infin: "∞", deg: "°", times: "×", divide: "÷", plusmn: "±", ne: "≠", le: "≤", ge: "≥", alpha: "α", beta: "β", gamma: "γ", delta: "δ", pi: "π", sigma: "σ", lambda: "λ", mu: "μ" };
 
-// Mermaid's entity codes (#35; #quot;) and HTML entities as characters
-const entities = (s: string) => s.replace(/&?#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-  .replace(/[#&]([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m);
+// Mermaid's entity codes (#35; #quot;) and HTML entities as characters, in
+// one pass (what one decodes is not decoded again: #35;quot; is "#quot;")
+const entities = (s: string) => s.replace(/&#x([0-9a-f]+);|&?#(\d+);|[#&]([a-z]+);/gi, (m, hex, n, name) =>
+  hex ? String.fromCodePoint(parseInt(hex, 16)) : n ? String.fromCodePoint(Number(n)) : ENTITIES[name.toLowerCase()] ?? m);
 
 // A node's label as Markdown: <br> (and \n) breaks a line, <b>/<i>/<code>
 // become Markdown, other tags and Font Awesome icons are dropped; a plain
 // label's *, _ and line-starting list or heading marks are text.
 function label(raw: string, markdown = false): string {
-  if (markdown) return raw.replace(/\\n/g, "\n").trim();
+  // (a Markdown string: its entity codes too, as Mermaid reads them)
+  if (markdown) return entities(raw.replace(/\\n/g, "\n")).trim();
   // (math, $$...$$ or $...$, is left as it is)
   const s = entities(raw).split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+\$)/).map((part, i) => i % 2 ? part : part
     .replace(/\\n|<br\s*\/?>/gi, "\n").replace(/\bfa[bsrl]?:fa-[\w-]+\s*/g, "")
@@ -128,7 +130,8 @@ function label(raw: string, markdown = false): string {
 const HTML_TAGS = "a|abbr|b|big|blockquote|br|center|cite|code|del|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|mark|ol|p|pre|q|s|samp|small|span|strike|strong|sub|sup|table|tbody|td|th|thead|tr|tt|u|ul|var";
 
 // An edge's label: one line of plain text (drawn on the canvas)
-const plain = (raw: string) => entities(raw).replace(/\\n|<br\s*\/?>/gi, " ").replace(/<\/?[a-z][^>]*>/gi, "").replace(/^"`?|`?"$/g, "").replace(/\s+/g, " ").trim();
+// (tags dropped before entity codes are read: a coded <b> is text)
+const plain = (raw: string) => entities(raw.replace(/\\n|<br\s*\/?>/gi, " ").replace(/<\/?[a-z][^>]*>/gi, "").replace(/^\s*"`?|`?"\s*$/g, "")).replace(/\s+/g, " ").trim();
 
 // a CSS color from Mermaid styles ("fill:#f9f,stroke:#333"): the fill,
 // made light enough for dark text when it is dark
@@ -156,7 +159,8 @@ interface Sub { id: string; title?: string; md?: boolean; direction?: string; me
 
 /** A Mermaid flowchart as a board document (throws on what it cannot read, saying where). */
 export function fromMermaid(text: string): BoardDoc {
-  const title = /^\s*---\s*\n[\s\S]*?^\s*title\s*:\s*(.+?)\s*$[\s\S]*?\n\s*---/m.exec(text.replace(/^﻿/, ""))?.[1]?.replace(/^["']|["']$/g, "");
+  const t0 = /^\s*---\s*\n[\s\S]*?^\s*title\s*:\s*(.+?)\s*$[\s\S]*?\n\s*---/m.exec(text.replace(/^﻿/, ""))?.[1]?.replace(/^["']|["']$/g, "");
+  const title = t0 === undefined ? undefined : entities(t0);
   const src = stripPreamble(text);
   const verts = new Map<string, Vertex>();
   const subs = new Map<string, Sub>();
@@ -324,6 +328,13 @@ export function fromMermaid(text: string): BoardDoc {
           md = !!q[1];
           j = end + q[1].length + 1;
           while (s[j] === " ") j++;
+          // (a parallelogram's or trapezoid's closing slant says which it is)
+          if ((open === "[/" || open === "[\\") && s.startsWith(open === "[/" ? "\\]" : "/]", j)) {
+            v.shape = open === "[/" ? "trapezoid" : "inv-trapezoid";
+            v.text = label(text, md);
+            i = j + 2;
+            break;
+          }
           if (!s.startsWith(close, j)) fail(`expected ${close}`);
           j += close.length;
         } else {
@@ -473,4 +484,116 @@ export function fromMermaid(text: string): BoardDoc {
   const doc: BoardDoc = { layout: "graph", direction: dir(direction), nodes, edges };
   if (title) doc.title = title;
   return doc;
+}
+
+// ---- a board as Mermaid ------------------------------------------------------
+//
+// toMermaid(doc) writes a page as a flowchart: groups as subgraphs (with
+// their direction), notes as nodes with their shapes, colors and web links,
+// edges with their labels, arrowheads and lines; fromMermaid reads it back
+// as the same graph.  What a flowchart has nothing like (places, sizes, pen
+// strokes, stickers, code, pictures, details, tours) is left out, and said.
+// Every text is untrusted: labels are Markdown strings whose <, >, ", `, #,
+// &, | and \ are Mermaid's entity codes, so no renderer (HTML labels or not)
+// meets a tag or a quote, and ids that are not plain words are renamed.
+
+const SHAPE_OF: Record<NoteShape, [string, string]> = {
+  rect: ["[", "]"], round: ["(", ")"], stadium: ["([", "])"], circle: ["((", "))"], diamond: ["{", "}"], hexagon: ["{{", "}}"],
+  cylinder: ["[(", ")]"], subroutine: ["[[", "]]"], "lean-right": ["[/", "/]"], "lean-left": ["[\\", "\\]"],
+  trapezoid: ["[/", "\\]"], "inv-trapezoid": ["[\\", "/]"], flag: [">", "]"],
+};
+const CODES: Record<string, string> = { "#": "#35;", "&": "#38;", "<": "#60;", ">": "#62;", '"': "#34;", "`": "#96;", "|": "#124;", "\\": "#92;" };
+/** A text as Mermaid's entity codes where it could end a string or be read as markup. */
+const coded = (s: string) => s.replace(/[#&<>"`|\\]/g, (c) => CODES[c]);
+// (Mermaid's words, and what its lexer could read as part of a link)
+const RESERVED = /^(end|graph|flowchart|subgraph|style|class|classdef|click|linkstyle|direction|default|call|href|interpolate|accTitle|accDescr|title)$/i;
+
+/** A page of a board (`page`, the first by default) as a Mermaid flowchart; `left`: what it has that a flowchart cannot say. */
+export function toMermaid(doc: BoardDoc, page = 0): { text: string; left: string[] } {
+  const v = pageView(doc, page), left = new Set<string>();
+  if (pageCount(doc) > 1) left.add("other pages");
+  const out: string[] = [];
+  if (v.title) out.push("---", `title: "${coded(v.title.replace(/[\r\n]+/g, " "))}"`, "---");
+  const axis = (layout?: DocGroup["layout"], direction?: "TB" | "LR") => {
+    if (layout === "row") { left.add("layouts other than a graph's"); return "LR"; }
+    if (layout === "column" || layout === "grid") { left.add("layouts other than a graph's"); return "TB"; }
+    if (!layout) left.add("places");
+    return direction ?? "TB";
+  };
+  out.push("flowchart " + axis(v.layout, v.direction));
+  // ids: a plain word as it is; else (or taken) a new one
+  const ids = new Map<string, string>(), taken = new Set<string>();
+  const idOf = (id: string) => {
+    let m = ids.get(id);
+    if (m) return m;
+    // (words, joined by single hyphens: as Mermaid's lexer and fromMermaid read an id)
+    m = /^[A-Za-z_]\w*(?:-\w+)*$/.test(id) && !RESERVED.test(id) && !taken.has(id) ? id : "";
+    for (let k = 1; !m; k++) if (!taken.has("n" + k) && !ids.has("n" + k)) m = "n" + k;
+    ids.set(id, m);
+    taken.add(m);
+    return m;
+  };
+  const shown = new Set<string>(), styles: string[] = [];
+  const color = (id: string, c?: string) => { if (c && /^(#[0-9a-f]{3,8}|[a-z]+)$/i.test(c)) styles.push(`style ${id} fill:${c}`); };
+  const md = (s: string) => '"`' + coded(s) + '`"';
+  const walk = (ns: DocNode[], indent: string) => {
+    for (const n of ns) {
+      if (n.kind === "ink") { left.add("pen strokes"); continue; }
+      if (n.kind === "sticker") { left.add("stickers"); continue; }
+      if (n.x !== undefined || n.y !== undefined) left.add("places");
+      const id = idOf(n.id);
+      shown.add(n.id);
+      if (n.kind === "group") {
+        out.push(`${indent}subgraph ${id}[${md(n.title ?? " ")}]`);
+        if (n.text) left.add("groups' text");
+        const dir = axis(n.layout ?? "graph", n.direction);
+        if (n.layout !== undefined || n.direction) out.push(`${indent}  direction ${dir}`);
+        walk(n.children, indent + "  ");
+        out.push(`${indent}end`);
+        color(id, n.color);
+        continue;
+      }
+      const note = n as DocNote;
+      if (note.code !== undefined) left.add("code");
+      if (note.image) left.add("pictures");
+      if (note.detail) left.add("details");
+      if (note.w !== undefined || note.h !== undefined) left.add("sizes");
+      // (a title, Markdown's special characters as text, then the text)
+      const title = note.title?.replace(/([\\*_[\]~])/g, "\\$1");
+      const label = title && note.text ? `**${title}**\n${note.text}` : title ?? note.text ?? (note.code !== undefined ? "code" : "");
+      const [open, close] = SHAPE_OF[note.shape ?? "rect"] ?? SHAPE_OF.rect;
+      out.push(`${indent}${id}${open}${md(label || " ")}${close}`);
+      color(id, note.color);
+      if (note.ref) {
+        if (/^https?:\/\/[^\s"<>`]+$/i.test(note.ref)) out.push(`${indent}click ${id} href ${JSON.stringify(note.ref)}`);
+        else left.add("links that are not web addresses");
+      }
+    }
+  };
+  walk(v.nodes ?? [], "  ");
+  for (const e of v.edges ?? []) {
+    if (!shown.has(e.from) || !shown.has(e.to)) continue;
+    const a = idOf(e.from), b = idOf(e.to);
+    const body = e.line === "thick" ? "==" : e.line === "dotted" ? "-.-" : "--";
+    const link = e.hidden ? "~~~" : e.arrow === "none" ? (e.line === "dotted" ? "-.-" : body + (e.line === "thick" ? "=" : "-")) : (e.arrow === "both" ? "<" : "") + (e.line === "dotted" ? "-.->" : body + ">");
+    // (quoted: what is in it is a label's text, never the flowchart's syntax)
+    const lab = e.label && !e.hidden ? `|"${coded(e.label.replace(/\s+/g, " "))}"|` : "";
+    out.push(`  ${a} ${link}${lab} ${b}`);
+  }
+  if (v.steps?.length) left.add("tours");
+  if (v.intro) left.add("the introduction");
+  out.push(...styles.map((s) => "  " + s));
+  return { text: out.join("\n") + "\n", left: [...left] };
+}
+
+/** Every page of a board as Markdown: a heading and a flowchart each (boardFromText reads it back as pages). */
+export function toMermaidMarkdown(doc: BoardDoc): { text: string; left: string[] } {
+  const n = pageCount(doc), left = new Set<string>(), parts: string[] = [];
+  if (doc.title) parts.push("# " + doc.title.replace(/[\r\n]+/g, " "), "");
+  for (let i = 0; i < n; i++) {
+    const { text, left: l } = toMermaid({ ...pageView(doc, i), title: undefined }, 0);
+    l.filter((x) => x !== "other pages").forEach((x) => left.add(x));
+    parts.push(`## ${(doc.pages?.[i]?.title ?? `Page ${i + 1}`).replace(/[\r\n]+/g, " ")}`, "", "```mermaid", text.trimEnd(), "```", "");
+  }
+  return { text: parts.join("\n"), left: [...left] };
 }
