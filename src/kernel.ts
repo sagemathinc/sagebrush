@@ -23,7 +23,7 @@ import { ZSocket } from "./zmtp";
 import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
-import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps } from "./matlab";
+import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
 
@@ -357,7 +357,7 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
         const r = mode === "magma" || mode === "matlab" ? { matches: [], prefix: "" } : await ask({ complete: code.slice(start, pos) });
         send(sock, "complete_reply", { status: "ok", matches: r.matches, cursor_start: pos - r.prefix.length, cursor_end: pos, metadata: {} }, msg, msg.idents);
       } else if (t === "is_complete_request") {
-        const r = mode === "magma" || mode === "matlab" ? { more: false } : await ask({ check: msg.content.code ?? "" });
+        const r = mode === "magma" ? { more: false } : mode === "matlab" ? { more: matlabIsIncomplete(msg.content.code ?? "") } : await ask({ check: msg.content.code ?? "" });
         send(sock, "is_complete_reply", r.more ? { status: "incomplete", indent: "" } : { status: "complete" }, msg, msg.idents);
       } else if (t === "inspect_request") {
         send(sock, "inspect_reply", { status: "ok", found: false, data: {}, metadata: {} }, msg, msg.idents);
