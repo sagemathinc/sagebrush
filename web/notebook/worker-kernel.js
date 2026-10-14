@@ -128,7 +128,7 @@ export class WorkerKernel {
 
   /**
    * Run code; `sink` receives what happens to it.
-   * opts: {mode: "python"|"sage"|"magma", repl, cell (the notebook cell's id,
+   * opts: {mode: "python"|"sage"|"magma"|"matlab", repl, cell (the notebook cell's id,
    * for the journal), clock (TimeTravel replay: the clock values to replay),
    * forget (global names to delete first: the reactive notebook), mangle
    * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
@@ -144,7 +144,7 @@ export class WorkerKernel {
     const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
     const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
     this.track(id, run);
-    this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget });
+    this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget });
   }
 
   // The journal (TimeTravel): "execute" as a run is asked for (the page
@@ -173,7 +173,7 @@ export class WorkerKernel {
       if (!this.worker) return resolve(fallback);
       const id = this.nextId++;
       this.pending.set(id, { reply: resolve, stopped: () => resolve(fallback) });
-      this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", ...msg });
+      this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg });
     });
   }
 

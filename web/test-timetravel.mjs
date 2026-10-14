@@ -12,9 +12,11 @@ import { join } from "node:path";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-timetravel-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9340", "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+// (the DevTools port: CDP_PORT, so that runs of several agents do not collide)
+const cdpPort = Number(process.env.CDP_PORT ?? 9340);
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch("http://127.0.0.1:9340/json")).json(); break; } catch { await sleep(100); } }
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
 async function tab(wsUrl) {
   const ws = new WebSocket(wsUrl);
@@ -34,7 +36,7 @@ try {
   const a = await tab(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   // ---- an older page (another tab, the installed app) holds the database
   // open at version 1: the page must not wait for it
-  const tx = await (await fetch("http://127.0.0.1:9340/json/new?" + encodeURIComponent(new URL("articles/", base).href), { method: "PUT" })).json();
+  const tx = await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?` + encodeURIComponent(new URL("articles/", base).href), { method: "PUT" })).json();
   const x = await tab(tx.webSocketDebuggerUrl);
   await x.until(`location.origin === ${JSON.stringify(new URL(base).origin)} && document.readyState === 'complete'`);
   await x.ev(`new Promise((res) => { const r = indexedDB.open("sagebrush", 1); r.onupgradeneeded = () => { r.result.createObjectStore("notebooks", { keyPath: "id" }); r.result.createObjectStore("files"); }; r.onsuccess = () => { window.held = r.result; res(true); }; })`);
@@ -52,7 +54,7 @@ try {
   x.ws.close();
   // close it, and bring this tab back to the front: a background tab's timers
   // run at most once a second, which would merge edits made 800 ms apart
-  await fetch("http://127.0.0.1:9340/json/close/" + tx.id);
+  await fetch(`http://127.0.0.1:${cdpPort}/json/close/` + tx.id);
   await a.send("Page.bringToFront");
   await a.send("Page.reload");
   await a.until("window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && document.querySelector('#status').textContent.startsWith('ready')");
@@ -132,7 +134,7 @@ try {
   ok((await a.ev(mainCells)) === "a = 1", "Clear history forgets the versions, not the notebook");
 
   // the same notebook in another tab: the page says so
-  const tb = await (await fetch("http://127.0.0.1:9340/json/new?" + encodeURIComponent(base), { method: "PUT" })).json();
+  const tb = await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?` + encodeURIComponent(base), { method: "PUT" })).json();
   const b = await tab(tb.webSocketDebuggerUrl);
   await b.until("window.sagebrush && document.querySelector('#nbname').value === 'Untitled'");
   await a.until("document.querySelector('#tabs').textContent.includes('another tab')", 5000);

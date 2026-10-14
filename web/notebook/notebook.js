@@ -28,6 +28,7 @@ const STOP_MESSAGE = "\nStopped (it did not respond to the interrupt, so the int
 // ------------------------------------------------------------ highlighting
 // (web/notebook/highlight.js, which the board's editor uses too)
 import { esc, highlight, highlightMarkdown } from "./highlight.js";
+import { highlightMatlab } from "./highlight-matlab.js";
 export { esc, highlight, highlightMarkdown };
 
 // ------------------------------------------------------------ page-wide pieces
@@ -233,7 +234,7 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
  * @param {HTMLElement} root
  * @param {object} [opts]
  * @param {import("./types").Kernel} [opts.kernel] runs code (none: cells cannot run)
- * @param {"python"|"sage"|"magma"} [opts.mode]
+ * @param {"python"|"sage"|"magma"|"matlab"} [opts.mode]
  * @param {string} [opts.assetBase] where sagebrush-math.js and sagebrush-viewer3d.js are (default: the page)
  * @param {(name: string) => string | undefined} [opts.assetUrl] the URL of one of them, if not under assetBase (a blob: in a downloaded file)
  * @param {boolean} [opts.readOnly]
@@ -260,6 +261,7 @@ export function createNotebook(root, opts = {}) {
   const emit = (event, ...args) => { for (const f of listeners[event] ?? []) f(...args); };
   const isSage = () => mode === "sage";
   const isMagma = () => mode === "magma";
+  const isMatlab = () => mode === "matlab";
 
   root.classList.add("sbnb");
   root.replaceChildren();
@@ -284,7 +286,7 @@ export function createNotebook(root, opts = {}) {
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
-    cell.hl.innerHTML = cell.type === "code" ? highlight(cell.ta.value, isSage()) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
     // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
     if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
@@ -1150,7 +1152,7 @@ export function createNotebook(root, opts = {}) {
   const indentLines = (ls) => ls.map((l) => (l.trim() ? "    " + l : l));
   const dedentLines = (ls) => ls.map((l) => l.replace(/^( {1,4}|\t)/, ""));
   function commentLines(ls) {
-    const cm = isMagma() ? "//" : "#", full = ls.filter((l) => l.trim());
+    const cm = isMagma() ? "//" : isMatlab() ? "%" : "#", full = ls.filter((l) => l.trim());
     if (!full.length) return ls;
     if (full.every((l) => l.trimStart().startsWith(cm))) return ls.map((l) => l.replace(new RegExp(`^(\\s*)${cm} ?`), "$1"));
     const ind = Math.min(...full.map((l) => /^\s*/.exec(l)[0].length));
@@ -1242,7 +1244,7 @@ export function createNotebook(root, opts = {}) {
       const v = ta.value, p = ta.selectionStart, line = v.slice(v.lastIndexOf("\n", p - 1) + 1, p);
       let ind = /^[ \t]*/.exec(line)[0];
       const atEol = ta.selectionEnd === (v.indexOf("\n", p) < 0 ? v.length : v.indexOf("\n", p));
-      if (!isMagma() && /:\s*(#.*)?$/.test(line)) ind += "    ";
+      if (isMatlab() ? /^\s*(if|for|parfor|while|function|switch|case|otherwise|try|catch|else|elseif)\b(?!.*\bend\b)/.test(line) : !isMagma() && /:\s*(#.*)?$/.test(line)) ind += "    ";
       else if (atEol && /^\s*(return|pass|break|continue|raise)\b/.test(line)) ind = ind.slice(0, Math.max(0, ind.length - 4));
       document.execCommand("insertText", false, "\n" + ind);
     } else if (e.key === "Backspace" && !mod && !e.altKey && ta.selectionStart === ta.selectionEnd) {
@@ -1405,7 +1407,8 @@ export function createNotebook(root, opts = {}) {
   // (or 200 ms, whichever is first: a hidden page, e.g. a background tab, does not paint)
   const afterPaint = () => new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   // Highlight fenced Python/Sage code in Markdown as in code cells.
-  const mdHighlight = (code, lang) => (!lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
+  const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
+    : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
     cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures() }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
@@ -1826,7 +1829,7 @@ export function createNotebook(root, opts = {}) {
   }
   function setMode(m, notify = true) {
     const before = mode;
-    mode = ["python", "sage", "magma"].includes(m) ? m : "python";
+    mode = ["python", "sage", "magma", "matlab"].includes(m) ? m : "python";
     for (const c of cells()) paint(c);
     if (notify) { emit("mode", mode); schedule(); }
     // (the reactive notebook: its cells are analyzed again in the new language, and stale)

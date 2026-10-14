@@ -14,7 +14,7 @@ const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 // model, still there with ?reactive=0; the reactive notebook resumes a version
 // by computing it again: web/test-reactive.mjs)
 const start = new URL("?reactive=0", base).href;
-const port = 9343;
+const port = Number(process.env.CDP_PORT ?? 9343); // (CDP_PORT: several agents' runs do not collide)
 const profile = mkdtempSync(join(tmpdir(), "sb-replay-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });

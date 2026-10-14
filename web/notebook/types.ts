@@ -28,7 +28,7 @@ export interface Cell {
 }
 
 export interface NotebookDoc {
-  mode: "python" | "sage" | "magma";
+  mode: "python" | "sage" | "magma" | "matlab";
   cells: Cell[];
   /** Anything else (name, id, updated, ...) is kept as it is. */
   [key: string]: unknown;
