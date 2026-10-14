@@ -1,0 +1,120 @@
+Mapping from: Integer Ring to Integer Ring given by a rule [no inverse]
+30 42 Map
+Integer Ring
+Integer Ring
+5/2
+Mapping from: Integer Ring to Rational Field
+Composition of Mapping from: Integer Ring to Integer Ring given by a rule [no 
+inverse] and
+Mapping from: Integer Ring to Rational Field given by a rule [no inverse]
+5
+[ 0, 0, 2, 6, 12, 20 ]
+{ 0, 2, 6 }
+Mapping from: Integer Ring to Integer Ring given by a rule
+11 11 20
+Mapping from: Integer Ring to Integer Ring
+Mapping from: Integer Ring to Integer Ring given by a rule
+Mapping from: Integer Ring to Integer Ring
+Composition of Mapping from: Integer Ring to Integer Ring and
+Mapping from: Integer Ring to Integer Ring
+20
+21
+Mapping from: SetEnum: Dom to SetEnum: Cod
+    <1, 5>
+    <3, 6>
+    <2, 5>
+6 5
+{ 5, 6 }
+Mapping from: SetEnum: Dom to SetEnum: Cod
+    <2, 6>
+    <1, 6>
+    <3, 5>
+6
+Mapping from: SetEnum: Dom to SetEnum: Cod
+    <2, 6>
+6
+Mapping from: RngInt: Z to RngInt: Z given by a rule [no inverse]
+Mapping from: { 4, 5 } to RngInt: Z
+    <4, 0>
+    <5, 1>
+
+>> map< Dom -> Cod | [ <1, 5>, <2, 6> ] >;
+      ^
+Runtime error in map< ... >: Not enough images given to constructor
+
+
+>> map< Dom -> Cod | [ <1, 5>, <2, 9>, <3, 5> ] >;
+      ^
+Runtime error in map< ... >: argument 1 does not yield a pair or a set or 
+sequence of pairs in the map's graph
+
+
+>> map< Dom -> Cod | [ <1, 5>, <1, 6>, <2, 5>, <3, 6> ] >;
+      ^
+Runtime error in map< ... >: More than one image is given for a single element 
+of the domain
+
+
+>> pmap< Dom -> Cod | [ <2, 5>, <2, 6> ] >;
+       ^
+Runtime error in pmap< ... >: More than one image is given for a single element 
+of the domain
+
+
+>> map< [1..4] -> Z | [ <1, 0>, <2, 0>, <3, 0> ] >;
+      ^
+Runtime error in map< ... >: Not enough images given to constructor
+
+1
+
+>> map< Z -> Z | [ <1, 2> ] >;
+      ^
+Runtime error in map< ... >: Domain of map has no cardinality algorithm
+
+3 7 2
+109
+3
+5
+
+>> (1/2) @@ dbl;
+         ^
+Runtime error in '@@': Element is not in the codomain of the map
+
+2
+
+>> 3 @@ hlf;
+     ^
+Runtime error in '@@': Element is not in the codomain of the map
+
+5 5
+
+>> 3 @@ g;
+     ^
+Runtime error in '@@': Map has no inverse
+
+13
+4
+8 4
+15
+60
+0
+5
+5
+2
+3
+0 3 4
+11
+-2
+2
+14
+
+>> fc := map< Z -> Z | y :-> va + (assigned va select 1 else 0) >;
+                                   ^
+User error: Imported environment value 'va' cannot be used as a local
+
+>> fc(1);
+   ^
+User error: Identifier 'fc' has not been declared or assigned
+0
+4
+0

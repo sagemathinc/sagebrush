@@ -550,15 +550,21 @@ def _recformat(fields, pos=None):
     return MRecFormat(fields)
 
 
-def _format_name(fmt):
-    """How a record prints its format: the first (oldest) global variable
-    that holds the format now, else the format itself (checked against
-    Magma: after `B := X; A := X; delete X;` a record prints rec<B | ...>)."""
+def _global_name(obj):
+    """The first (oldest) global variable that holds obj now, or None.
+    Magma names structures this way where it prints them inside others
+    (checked against Magma: after `B := X; A := X; delete X;` a record of
+    format X prints rec<B | ...>)."""
     main = _sys.modules.get("__main__")
     for k, v in (vars(main).items() if main is not None else ()):
-        if v is fmt and not k.startswith("_"):
+        if v is obj and not k.startswith("_"):
             return k[:-1] if k.endswith("_") and k[:-1] in _PYKW else k
-    return repr(fmt)
+    return None
+
+
+def _format_name(fmt):
+    """How a record prints its format."""
+    return _global_name(fmt) or repr(fmt)
 
 
 # Python keywords: a Magma name that is one gets a trailing _ (src/magma.ts pyName)
@@ -672,6 +678,216 @@ def Format(r):
     if isinstance(r, MRec):
         return r.fmt
     raise MagmaError("Bad argument types", "'Format'")
+
+
+# ------------------------------------------------------------------ maps
+
+def _struct_name(S):
+    """A map's domain or codomain as Magma prints it in the map: "RngInt: x"
+    when a global variable x holds it, else the structure itself."""
+    n = _global_name(S)
+    return "%s: %s" % (Type(S), n) if n is not None else _inline(S)
+
+
+class MMap:
+    """A map made by map< A -> B | ... >, pmap< ... > or hom< ... > (rule
+    forms), from Magma's documentation (Mappings) and checked against
+    Magma: given by a rule x :-> e(x) (optionally with an inverse rule) or
+    by its graph (pairs <x, y> or x -> y); also inverses and compositions."""
+
+    def __init__(self, dom, cod, rule=None, inv=None, graph=None, partial=False, parts=None, inverse_of=None):
+        self.dom, self.cod = dom, cod
+        self.rule, self.inv, self.graph, self.partial = rule, inv, graph, partial
+        self.parts = parts            # (f, g): the composition, f first
+        self.inverse_of = inverse_of  # the map this is the inverse of
+
+    def __repr__(self):
+        head = "Mapping from: %s to %s" % (_struct_name(self.dom), _struct_name(self.cod))
+        if self.parts is not None:
+            f, g = self.parts
+            return head + "\n" + _wrap("Composition of %r and" % f, 0, 0) + "\n" + repr(g)
+        if self.graph is not None:
+            return head + "".join("\n    " + _inline(MTuple([x, y])) for x, y in self.graph)
+        if self.rule is not None:
+            return head + " given by a rule" + ("" if self.inv is not None else " [no inverse]")
+        return head
+
+    def __call__(self, x):
+        if isinstance(x, MSet) and not _in(x, self.dom):
+            # the image of a set of elements
+            return _set([self(y) for y in x.ordered()])
+        if self.parts is not None:
+            return self.parts[1](self.parts[0](x))
+        if self.inverse_of is not None:
+            return self.inverse_of._preimage(x, "map application")
+        if self.graph is not None:
+            for a, b in self.graph:
+                if _eq(a, x):
+                    return b
+            raise MagmaError("Application of map failed", "map application")
+        if not _in(x, self.dom):
+            raise MagmaError("Element is not in the domain of the map", "map application")
+        y = self.rule(x)
+        if not _in(y, self.cod):
+            raise MagmaError("Element is not in the codomain of the map", "map application")
+        return _coerce(self.cod, y) if hasattr(self.cod, "_magma_coerce") else y
+
+    def _preimage(self, y, where):
+        """The preimage of y, as Magma computes it: through the inverses of
+        the parts of a composition (the last part first); by the inverse
+        rule, checking that y is in the codomain and the result in the
+        domain (Magma's message is the same for both), and coercing it."""
+        if self.parts is not None:
+            f, g = self.parts
+            return f._preimage(g._preimage(y, where), where)
+        if self.inverse_of is not None:
+            return self.inverse_of(y)
+        if self.graph is not None:
+            raise MagmaError("Map has no inverse", where)
+        if self.inv is None:
+            raise MagmaError("There is no rule for calculating the preimage", where)
+        if not _in(y, self.cod):
+            raise MagmaError("Element is not in the codomain of the map", where)
+        x = self.inv(y)
+        if not _in(x, self.dom):
+            raise MagmaError("Element is not in the codomain of the map", where)
+        return _coerce(self.dom, x) if hasattr(self.dom, "_magma_coerce") else x
+
+    def __mul__(self, g):
+        if not isinstance(g, MMap):
+            return NotImplemented
+        if not (g.dom is self.cod or _eq(g.dom, self.cod)):
+            raise MagmaError("The codomain of the first map is not the domain of the second", "'*'")
+        return MMap(self.dom, g.cod, parts=(self, g))
+
+    def _inverse(self, where):
+        if self.parts is not None:
+            f, g = self.parts
+            return MMap(self.cod, self.dom, parts=(g._inverse(where), f._inverse(where)))
+        if self.inverse_of is not None:
+            return self.inverse_of
+        if self.graph is not None:
+            raise MagmaError("Map has no inverse", where)
+        return MMap(self.cod, self.dom, inverse_of=self)
+
+
+def _map(kind, dom, cod, rule=None, inv=None, graph=None, pairs=None, pos=None):
+    """map< A -> B | ... > (kind "map", "pmap" or "hom").  A graph gives at
+    most one image for each element, and a map's (not a pmap's) gives one
+    for every element of its domain, which must then be finite (Magma's
+    errors, checked against Magma)."""
+    where = "%s< ... >" % kind
+    try:
+        if pairs is not None:
+            graph = [tuple(p) for p in pairs]
+        elif graph is not None:
+            items = graph.ordered() if isinstance(graph, MSet) else list(graph)
+            if not all(isinstance(t, MTuple) and len(t) == 2 for t in items):
+                raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
+            graph = [tuple(t) for t in items]
+        if graph is not None:
+            for k, (a, b) in enumerate(graph):
+                if any(_eq(a, a2) for a2, _ in graph[:k]):
+                    raise MagmaError("More than one image is given for a single element of the domain", where)
+            for a, b in graph:
+                if not _in(a, dom) or not _in(b, cod):
+                    raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
+            if kind != "pmap":
+                if dom is _ZZ or dom is _QQ:
+                    raise MagmaError("Domain of map has no cardinality algorithm", where)
+                if not isinstance(dom, (MSet, MSeq, MRange)):
+                    raise MagmaError("a map given by a graph on this domain is not supported yet", where)
+                if not all(any(_eq(a, x) for a, _ in graph) for x in _iter(dom)):
+                    raise MagmaError("Not enough images given to constructor", where)
+        return MMap(dom, cod, rule, inv, graph, kind == "pmap")
+    except MagmaError as e:
+        e.pos = e.pos or pos
+        raise
+
+
+def _preimage(f, y, pos=None):
+    """y @@ f; an error points at the @@ (pos)."""
+    try:
+        if isinstance(f, MMap):
+            return f._preimage(y, "'@@'")
+        raise MagmaError("Bad argument types", "'@@'")
+    except MagmaError as e:
+        e.pos = e.pos or pos
+        raise
+
+
+def Domain(f):
+    """The domain of a map."""
+    return f.dom
+
+
+def Codomain(f):
+    """The codomain of a map."""
+    return f.cod
+
+
+def Inverse(f):
+    """The inverse of a map (applying it needs an inverse rule)."""
+    if isinstance(f, MMap):
+        return f._inverse("'Inverse'")
+    raise MagmaError("Bad argument types", "'Inverse'")
+
+
+def Image(f):
+    """The image of a map given by its graph."""
+    if isinstance(f, MMap) and f.graph is not None:
+        return _set([b for _, b in f.graph])
+    raise MagmaError("Image of this map is not supported yet", "'Image'")
+
+
+class _Unset:
+    def __repr__(self):
+        return "<unassigned>"
+
+
+_UNSET = _Unset()  # a map rule's snapshot of a name not assigned then
+
+
+_CAPTURED = set()  # the names map rules have captured
+
+
+def _snap(read, name):
+    """A map rule's snapshot of a free variable when the map is made: its
+    value (copied, value semantics), or _UNSET if it is not assigned."""
+    _CAPTURED.add(name)
+    try:
+        return _own(read())
+    except NameError:
+        return _UNSET
+
+
+def _delete_check(name):
+    """delete x: in Magma a map rule that captured x sees it unassigned
+    afterwards (though a later assignment doesn't reach the rule); that
+    isn't modelled, so deleting a captured variable is refused."""
+    if name in _CAPTURED:
+        raise MagmaError("deleting a variable that a map rule has captured is not supported yet")
+
+
+def _val(v, name):
+    """A captured variable read in a map rule: an error (as Magma's) only
+    if it was not assigned when the map was made."""
+    if v is _UNSET:
+        raise MagmaError("Variable '%s' has not been initialized" % (name[:-1] if name.endswith("_") and name[:-1] in _PYKW else name))
+    return v
+
+
+def _enclosing_unset(name):
+    """A map rule made inside another rule reads a name that is a local of
+    the enclosing rule (tested there by `assigned` first), never assigned:
+    Magma's error when the inner map is made."""
+    raise MagmaError("Variable '%s' in enclosing environment has not been assigned to"
+                     % (name[:-1] if name.endswith("_") and name[:-1] in _PYKW else name))
+
+
+def _not_supported(what, pos=None):
+    """Something the translator parses but Sagebrush doesn't do yet."""
+    raise MagmaError("%s is not supported yet" % what, None, True, pos)
 
 
 def _unsupported(name, pos=None):
@@ -1346,6 +1562,12 @@ def _type_name(x):
         return "Rec"
     if isinstance(x, MRecFormat):
         return "RecFrmt"
+    if isinstance(x, MMap):
+        return "Map"
+    if x is _ZZ:
+        return "RngInt"
+    if x is _QQ:
+        return "FldRat"
     if type(x).__name__ == "MList":
         return "List"
     return None
