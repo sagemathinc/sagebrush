@@ -4406,15 +4406,30 @@ def _default_dim(d):
     return 1
 
 
-def _dim_arg(args, d):
-    """(dim or 'all', flags) from a reduction's extra arguments"""
+# the options of each reduction ('all' aside); another is refused
+_OUTTYPE = ("double", "native", "default")
+_NANFLAG = ("omitnan", "includenan")
+_REDUCE_FLAGS = {
+    "sum": _OUTTYPE + _NANFLAG, "prod": _OUTTYPE + _NANFLAG, "mean": _OUTTYPE + _NANFLAG,
+    "median": _NANFLAG, "var": _NANFLAG, "mode": (), "any": (), "all": (),
+    "cumsum": _NANFLAG + ("reverse", "forward"), "cumprod": _NANFLAG + ("reverse", "forward"),
+    "cummax": _NANFLAG + ("reverse", "forward"), "cummin": _NANFLAG + ("reverse", "forward"),
+}
+
+
+def _dim_arg(args, d, name=None):
+    """(dim or 'all', flags) from a reduction's extra arguments; with the
+    reduction's name, an option it does not take is refused"""
     dim = None
     flags = []
     for a in args:
         if _istext(a):
             s = _text(a).lower()
+            s = {"omitmissing": "omitnan", "includemissing": "includenan"}.get(s, s)
             if s == "all":
                 dim = "all"
+            elif name is not None and s not in _REDUCE_FLAGS.get(name, ()):
+                raise _err("%s: invalid option '%s'." % (name, _text(a)))
             else:
                 flags.append(s)
         elif _numel(a) == 0:
@@ -4443,7 +4458,7 @@ def _collapse(A, dims):
 def _reduce(x, args, f, name, empty_value=0.0, out_cls=None):
     """f(A, axis) along MATLAB dimension dim of x (that dimension becomes 1)"""
     d = _dims(x)
-    dim, flags = _dim_arg(args, d)
+    dim, flags = _dim_arg(args, d, name)
     cls = class_(x)
     A = _farr(x, name)
     # (MATLAB: double, except single stays single; 'native' keeps an integer class)
@@ -4474,7 +4489,7 @@ def _reduce(x, args, f, name, empty_value=0.0, out_cls=None):
 
 
 def _nan_flags(args):
-    return any(_istext(a) and _text(a).lower() == "omitnan" for a in args)
+    return any(_istext(a) and _text(a).lower() in ("omitnan", "omitmissing") for a in args)
 
 
 @_bs("sum")
@@ -4488,6 +4503,8 @@ def sum_(x, *args):
 
 @_bs("prod")
 def prod_(x, *args):
+    if _nan_flags(args):
+        return _reduce(x, args, lambda A, ax: np.prod(np.where(np.isnan(A), 1, A), axis=ax), "prod", 1.0)
     return _reduce(x, args, lambda A, ax: np.prod(A, axis=ax), "prod", 1.0)
 
 
@@ -4518,10 +4535,21 @@ def median_(x, *args):
     if _dims(x) == (0, 0) and not args:
         return _math.nan
 
+    omit = _nan_flags(args)
+
     def med(A, ax):
         n = A.shape[ax]
         if n == 0:
             return _nanfull(A, ax)
+        if omit:
+            # (each slice's own count of numbers; the NaN sort last)
+            m = np.sum(~np.isnan(A), axis=ax, keepdims=True)
+            S = np.sort(np.where(np.isnan(A), np.inf, A), axis=ax)
+            hi = _take_along(S, np.maximum(m // 2, 0), ax)
+            lo = _take_along(S, np.maximum((m - 1) // 2, 0), ax)
+            with np.errstate(invalid="ignore"):
+                r = np.where(m % 2 == 0, lo + (hi - lo) / 2, lo)
+            return np.squeeze(np.where(m == 0, _math.nan, r), axis=ax)
         S = np.sort(A, axis=ax)
         lo = np.take(S, (n - 1) // 2, axis=ax)
         hi = np.take(S, n // 2, axis=ax)
@@ -4553,11 +4581,22 @@ def _var_impl(x, args, sq):
         rest = list(args[1:])
     if _dims(x) == (0, 0) and not rest:
         return _math.nan
+    omit = _nan_flags(rest)
 
     def v(A, ax):
         n = A.shape[ax]
         if n == 0:
             return _nanfull(A, ax)
+        if omit:
+            ok = ~np.isnan(A)
+            c = np.sum(ok, axis=ax, keepdims=True)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                m = np.sum(np.where(ok, A, 0), axis=ax, keepdims=True) / c
+                dev = np.where(ok, np.abs(A - m) ** 2, 0)
+                den = np.where((w == 0) & (c > 1), c - 1, c)
+                r = np.sum(dev, axis=ax, keepdims=True) / den
+            r = np.squeeze(np.where(c == 0, _math.nan, r), axis=ax)
+            return np.sqrt(r) if sq else r
         m = np.sum(A, axis=ax, keepdims=True) / n
         dev = np.abs(A - m) ** 2
         den = n - 1 if (w == 0 and n > 1) else n
@@ -4603,11 +4642,11 @@ def all_(x, *args):
 
 def _cum(x, args, f, name):
     d = _dims(x)
-    dim, flags = _dim_arg(args, d)
+    dim, flags = _dim_arg(args, d, name)
     cls = class_(x)
     oc = "double" if cls in ("logical", "char") else cls
     A = _farr(x, name)
-    if "omitnan" in flags or "omitmissing" in flags:
+    if "omitnan" in flags:
         A = np.where(np.isnan(A), 1.0 if name == "cumprod" else 0.0, A)
     if dim == "all" or dim > A.ndim:
         return _finish(A.copy(), oc)
@@ -4785,6 +4824,8 @@ def cummin_(x, *args):
 
 @_bs("diff")
 def diff_(x, n=1.0, dim=None):
+    if _istext(n) or _istext(dim):
+        raise _err("diff: the order and dimension must be numbers.")
     n = _int_arg(n)
     r = x
     for _ in range(n):
@@ -4806,6 +4847,9 @@ def _minmax(nargout, args, which):
     'omitnan' (the default) and 'includenan'; [m, i] outputs"""
     big = which == "max"
     flags = [_text(a).lower() for a in args[1:] if _istext(a)]
+    for fl in flags:
+        if fl not in ("omitnan", "includenan", "omitmissing", "includemissing", "linear", "all"):
+            raise _err("%s: the option '%s' is not supported in Sagebrush." % (which, fl))
     nums = [a for a in args[1:] if not _istext(a)]
     include = "includenan" in flags or "includemissing" in flags
     if nums and _numel(nums[0]) > 0:
@@ -4902,6 +4946,7 @@ def sort_(nargout, x, *args):
     desc = False
     dim = None
     method = "auto"
+    placement = "auto"
     args = list(args)
     while args:
         a = args.pop(0)
@@ -4911,10 +4956,19 @@ def sort_(nargout, x, *args):
                 desc = t == "descend"
             elif t == "comparisonmethod" and args:
                 method = _text(args.pop(0)).lower()
+                if method not in ("auto", "abs", "real"):
+                    raise _err("Invalid 'ComparisonMethod' value.")
             elif t == "missingplacement" and args:
-                args.pop(0)
+                placement = _text(args.pop(0)).lower()
+            else:
+                raise _err("sort: the option '%s' is not supported in Sagebrush." % _text(a))
         else:
             dim = _int_arg(a)
+    # (NaN go last ascending and first descending: the other placement is not implemented)
+    if placement not in ("auto", "last" if not desc else "first"):
+        raise _err("sort: 'MissingPlacement', '%s' is not supported in Sagebrush." % placement)
+    if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and not _isvec(x):
+        raise _err("sort: 'ComparisonMethod', 'real' is supported only for vectors in Sagebrush.")
     if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and _isvec(x):
         vals = list(_arr(x).reshape(-1))
         order = sorted(range(len(vals)), key=lambda k: (vals[k].real, vals[k].imag), reverse=desc)
@@ -5573,10 +5627,15 @@ def poly_(r):
 def conv_(a, b, shape=None):
     A = _farr(a).reshape(-1)
     B = _farr(b).reshape(-1)
-    r = np.convolve(A, B)
-    if shape is not None and _text(shape) == "same":
+    r = np.convolve(A, B) if A.size and B.size else np.zeros(max(A.size + B.size - 1, 0))
+    s = "full" if shape is None else (_text(shape).lower() if _istext(shape) else None)
+    if s == "same":
         st = B.size // 2
         r = r[st:st + A.size]
+    elif s == "valid":
+        r = r[B.size - 1:A.size] if A.size >= B.size else np.zeros(0)
+    elif s != "full":
+        raise _err("SHAPE must be 'full', 'same', or 'valid'.")
     col = _dims(a)[1] == 1 and _dims(a)[0] > 1
     return _box(r.reshape((1, -1)) if col else r.reshape((-1, 1)))
 
@@ -7850,7 +7909,8 @@ def setdiff_n(nargout, a, b, *opts):
 
 @_bi("bounds")
 def bounds_n(nargout, x, *args):
-    return [min_(1, x, np.zeros((0, 0)), *args), max_(1, x, np.zeros((0, 0)), *args)] if args else [min_(1, x), max_(1, x)]
+    out = [min_(1, x, np.zeros((0, 0)), *args), max_(1, x, np.zeros((0, 0)), *args)] if args else [min_(1, x), max_(1, x)]
+    return out if nargout > 1 else out[0]
 
 
 @_bs("getfield")
@@ -9061,3 +9121,4 @@ def _handle_blocks(v):
 
 import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
 import _matlab_numeric  # noqa: E402,F401  (more numerical built-ins)
+import _matlab_data  # noqa: E402,F401  (data analysis and signal functions)
