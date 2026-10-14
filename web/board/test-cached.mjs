@@ -126,7 +126,7 @@ try {
   check(offEntry.doc.nodes[0].title === "Written offline" && offEntry.hash !== offEntry.remoteHash && !(await ev("window.R.calls.includes('save')")), "...an edit is kept in the copy (not yet the remote's)");
   await ev(`(window.R.offline = false, window.R.calls = [], 1)`);
   await ev(`openWith("k1", window.R)`);
-  check((await synced()) === "pushed" && (await ev("window.R.doc.nodes[0].title")) === "Written offline", "back online: the edit made offline goes to the remote: " + await synced());
+  check((await synced()) === "pushed" && (await until("window.R.doc.nodes[0].title === 'Written offline'", D * 3)), "back online: the edit made offline goes to the remote: " + await synced());
 
   // an edit before the remote answers, and a change there meanwhile: merged
   await ev(`(window.R.doc.nodes[0].text = "their text", window.R.doc.nodes.push({ id: "n2", title: "Theirs", x: 400, y: 0 }), 1)`);

@@ -165,9 +165,10 @@ export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc:
 // A side's pages without ids, keyed as the base's they are (CORR-891-2):
 // records key such a page by its place, which another side's page put in
 // front of it changes.  Each is matched to the base's page holding most of
-// the same items (its title as well, one to one); those left, in the same
-// order, if as many are left on both; any other is a page added (a key of
-// its own) or removed.  Pages with ids keep them.
+// the same items (its title as well, one to one); pages with neither, by
+// their order among such pages; those left, in the same order, if as many
+// are left on both; any other is a page added (a key of its own) or
+// removed.  Pages with ids keep them.
 function aligned(baseRecs: any[], recs: any[], side: string): any[] {
   const anonPages = (rs: any[]) => rs.filter((r) => r.type === "page" && r.anon === true).sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0));
   const bp = anonPages(baseRecs), sp = anonPages(recs);
@@ -184,7 +185,14 @@ function aligned(baseRecs: any[], recs: any[], side: string): any[] {
   pairs.sort((a, b) => b[0] - a[0] || Math.abs(a[1] - a[2]) - Math.abs(b[1] - b[2]));
   const to = new Map<number, number>(), taken = new Set<number>();
   for (const [, j, i] of pairs) if (!to.has(j) && !taken.has(i)) { to.set(j, i); taken.add(i); }
-  const restS = sp.map((_, j) => j).filter((j) => !to.has(j)), restB = bp.map((_, i) => i).filter((i) => !taken.has(i));
+  let restS = sp.map((_, j) => j).filter((j) => !to.has(j)), restB = bp.map((_, i) => i).filter((i) => !taken.has(i));
+  // (pages content cannot tell apart, with no items and no title: by their
+  // order among such pages, never one taken twice, CORR-C06-2)
+  const blank = (p: any, items: Set<string>) => !items.size && !p.title;
+  const blankS = restS.filter((j) => blank(sp[j], sItems[j])), blankB = restB.filter((i) => blank(bp[i], bItems[i]));
+  blankS.forEach((j, k) => { if (k < blankB.length) { to.set(j, blankB[k]); taken.add(blankB[k]); } });
+  restS = restS.filter((j) => !to.has(j));
+  restB = restB.filter((i) => !taken.has(i));
   if (restS.length === restB.length) restS.forEach((j, k) => to.set(j, restB[k]));
   // (keys: the base page's; a new page's, none any page has)
   const used = new Set([...baseRecs, ...recs].filter((r) => r.type === "page").map((r) => r.page));
@@ -211,34 +219,41 @@ export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offl
  * account and project, or an immutable document id).  `synced`: how the
  * first load ended, once the remote has answered.
  *
- * Two orders: the copy's writes, in the order they are made (each reads the
- * copy as the one before left it, CORR-3D2-1), and the work with the
- * remote, in order.  Whatever the copy holds that the remote has not seen
- * is pushed, the copy as it is then: never an older edit over a newer one.
+ * One queue of steps, each finished before the next starts: an edit, the
+ * remote's answer to a question, a change made elsewhere.  No step waits on
+ * the remote or the screen: what the remote is asked (its hash, its
+ * document, a save) is answered by a step of its own, in the order the
+ * answers come, so an edit reaches the copy at once, whatever the remote.
+ * One save is on its way at a time: whatever the copy holds that the remote
+ * has not seen goes next, the copy as it is then; a change made elsewhere
+ * while a save is on its way is merged with the copy before it (and goes
+ * with the next one, CORR-C06-1).  The documents given the board are given
+ * one at a time, each once the one before is shown (CORR-C06-3).
  */
 export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = new IdbDocCache()): BoardStore & { synced: Promise<Synced> } {
   let entry: CachedDoc | null = null;
-  // (the remote has answered: edits go to it too; the first load is over)
-  let online = false, settled = false;
-  let copying: Promise<unknown> = Promise.resolve(), queue: Promise<unknown> = Promise.resolve();
-  const inOrder = <T>(f: () => Promise<T>) => { const p = copying.then(f); copying = p.catch(() => {}); return p; };
-  const later = <T>(f: () => Promise<T>) => { const p = queue.then(f); queue = p.catch(() => {}); return p; };
+  // (the remote has answered: edits go to it too)
+  let online = false;
+  let queue: Promise<unknown> = Promise.resolve();
+  const step = <T>(f: () => Promise<T>) => { const p = queue.then(f); queue = p.catch((e) => console.warn("board: the store:", e)); return p; };
   let resolveSynced!: (s: Synced) => void;
   const synced = new Promise<Synced>((ok) => (resolveSynced = ok));
 
-  // What the board shows (its edits are made from it): what it loaded, its
-  // own edits, and each document given it once it says it is shown (it shows
-  // them in the order given).  The copy may be ahead of it: documents given
-  // and not yet shown, CORR-891-3.
+  // What the board shows (its edits are made from it): what it loaded, each
+  // edit it made (when made), and each document given it, once it says it is
+  // shown.  The copy may be ahead of what an edit was made from (documents
+  // given and not yet shown, CORR-891-3): the edit is merged with it.
   const listeners = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
-  let shown: BoardDoc | null = null;
-  let unsent: [BoardDoc, string | undefined] | null = null;
-  function give(d: BoardDoc, notice?: string, to = [...listeners]) {
-    Promise.all(to.map((f) => f(d, notice))).then(() => { shown = d; }, (e) => console.warn("board: shown:", e));
+  let view: BoardDoc | null = null;
+  const unsent: [BoardDoc, string | undefined][] = [];
+  let showing: Promise<unknown> = Promise.resolve();
+  function present(d: BoardDoc, notice?: string) {
+    if (!listeners.size) { unsent.push([d, notice]); return; }
+    const to = [...listeners];
+    showing = showing.then(() => Promise.all(to.map((f) => f(d, notice)))).then(() => { view = d; }, (e) => console.warn("board: shown:", e));
   }
-  const emit = (d: BoardDoc, notice?: string) => { if (listeners.size) give(d, notice); else unsent = [d, notice]; };
 
-  // the copy as it is now, based on the remote version `remoteHash` (`base` while they differ); in order only
+  // the copy as it is now, based on the remote version `remoteHash` (`base` while they differ)
   async function keep(d: BoardDoc, remoteHash: string | null, base?: string) {
     const json = canonical(d), hash = await docHash(d);
     entry = { key, json, hash, remoteHash, ...(hash !== remoteHash && base !== undefined ? { base } : {}), at: Date.now() };
@@ -246,123 +261,109 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   }
   const parse = (json: string) => cleanDoc(JSON.parse(json));
   const dirty = () => !!entry && entry.hash !== entry.remoteHash;
-  // (the remote has `d` now: the copy is based on it; in order only)
+  // (the remote has `d` now: the copy is based on it)
   async function sent(d: BoardDoc, h: string) {
     if (!entry) return;
     entry = entry.hash === h ? (({ base: _b, ...e }) => ({ ...e, remoteHash: h }))(entry) : { ...entry, remoteHash: h, base: canonical(d) };
     await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
   }
 
-  // the copy, if it holds what the remote has not seen: to the remote (with the remote's work)
-  async function push(): Promise<boolean> {
-    if (!online) return false;
-    const d = await inOrder(async () => (dirty() ? parse(entry!.json) : null));
-    if (!d) return false;
-    await remote.save(d);
-    const h = await docHash(d);
-    await inOrder(() => sent(d, h));
-    return true;
+  // The copy, if it holds what the remote has not seen, to the remote: one
+  // save on its way at a time, the next once it is done (from a step)
+  let saving = false;
+  function push() {
+    if (!online || saving || !dirty()) return;
+    saving = true;
+    const d = parse(entry!.json);
+    remote.save(d).then(
+      async () => { const h = await docHash(d); step(async () => { await sent(d, h); saving = false; push(); }); },
+      (e) => step(async () => { saving = false; console.warn("board: the remote:", e); }),
+    );
   }
 
-  // the remote has a document other than the copy's base: replace, or merge (with the remote's work)
+  // the remote's document `theirs` (from a step)
   async function arrived(theirs: BoardDoc, theirHash: string): Promise<Synced> {
-    const r = await inOrder(async () => {
-      // (what the copy is based on, or shows, already: our own save, come back)
-      if (entry && (theirHash === entry.remoteHash || theirHash === entry.hash)) {
-        if (theirHash === entry.hash && dirty()) await sent(theirs, theirHash);
-        return { s: "same" as const };
-      }
-      if (!entry || !dirty()) {
-        await keep(theirs, theirHash);
-        return { s: "replaced" as const, doc: theirs };
-      }
+    let s: Synced;
+    // (what the copy is based on, or shows, already: our own save, come back)
+    if (entry && (theirHash === entry.remoteHash || theirHash === entry.hash)) {
+      if (theirHash === entry.hash && dirty()) await sent(theirs, theirHash);
+      s = "same";
+    } else if (!entry || !dirty()) {
+      await keep(theirs, theirHash);
+      present(theirs);
+      s = "replaced";
+    } else {
+      // (edits here the remote has not seen, or a save of them on its way: merged)
       const { doc, conflicts } = merge3(parse(entry.base ?? entry.json), parse(entry.json), theirs);
       await keep(doc, theirHash, canonical(theirs));
-      return { s: "merged" as const, doc, notice: conflicts.length ? mergedNotice(conflicts.length) : undefined };
-    });
-    if (r.doc) emit(r.doc, r.notice);
-    if (r.s === "merged") await push();
-    return r.s;
+      present(doc, conflicts.length ? mergedNotice(conflicts.length) : undefined);
+      s = "merged";
+    }
+    push();
+    return s;
   }
 
-  async function sync(): Promise<Synced> {
-    let h: string | null;
-    try { h = await remote.hash(); } catch { return "offline"; }
-    // (the copy as the edits made before the remote answered left it)
-    const known = await inOrder(async () => entry!.remoteHash);
-    online = true;
-    // (a change made elsewhere meanwhile: the remote's latest, merged before anything is pushed, CORR-891-1)
-    const meanwhile = () => { const d = waiting; waiting = null; return d; };
-    let m = meanwhile();
-    if (m) return arrived(m, await docHash(m));
-    if (h !== null && h === known) return (await push()) ? "pushed" : "same";
-    let theirs: BoardDoc | null;
-    try { theirs = await remote.load(); } catch { online = false; return "offline"; }
-    m = meanwhile();
-    if (m) return arrived(m, await docHash(m));
-    // (the remote has none: the copy is its first)
-    if (!theirs) { await inOrder(async () => { if (entry) entry = { ...entry, remoteHash: null }; }); await push(); return "pushed"; }
-    return arrived(cleanDoc(theirs), h ?? (await docHash(theirs)));
+  // the remote asked whether it has the copy's version: its answers, each a step
+  function ask() {
+    remote.hash().then((h) => step(async () => {
+      online = true;
+      if (h !== null && h === entry!.remoteHash) { const was = dirty(); push(); resolveSynced(was ? "pushed" : "same"); return; }
+      remote.load().then((t) => step(async () => {
+        // (the remote has none: the copy is its first)
+        if (!t) { entry = { ...entry!, remoteHash: null }; push(); resolveSynced("pushed"); return; }
+        resolveSynced(await arrived(cleanDoc(t), h ?? (await docHash(t))));
+      }), () => step(async () => { online = false; resolveSynced("offline"); }));
+    }), () => step(async () => resolveSynced("offline")));
   }
 
-  // the first load over: a change made elsewhere meanwhile, the latest, now (CORR-3D2-2)
-  // (during the first sync it is part of the sync, CORR-891-1)
-  let waiting: BoardDoc | null = null;
-  function settle(s: Synced) {
-    settled = true;
-    resolveSynced(s);
-    if (waiting) { const d = waiting; waiting = null; later(async () => { await arrived(d, await docHash(d)); }); }
+  // a change made elsewhere: a step
+  function changed(d: BoardDoc) {
+    const doc = cleanDoc(d);
+    step(async () => { await arrived(doc, await docHash(doc)); });
   }
+  let offRemote: (() => void) | undefined;
 
   return {
     synced,
     async load() {
-      const c = await cache.get(key).catch(() => null);
+      const c = await step(async () => cache.get(key).catch(() => null));
       if (c) {
-        entry = c;
-        const doc = parse(c.json);
-        shown = doc;
-        // (the copy now; the remote asked meanwhile, edits waiting for it)
-        later(async () => settle(await sync().catch((e) => { console.warn("board: the remote:", e); online = false; return "offline" as const; })));
-        return { doc };
+        await step(async () => { entry ??= c; view = parse(entry.json); });
+        ask();
+        return { doc: view! };
       }
-      // (no copy: the remote's)
+      // (no copy: the remote's; a change made elsewhere meanwhile, after it)
       let d: BoardDoc | null;
-      try { d = await remote.load(); } catch (e) { settle("offline"); throw e; }
-      online = true;
-      if (!d) { settle("fresh"); return null; }
-      const doc = cleanDoc(d);
-      await inOrder(async () => keep(doc, await docHash(doc)));
-      shown = doc;
-      settle("fresh");
-      return { doc };
+      try { d = await remote.load(); } catch (e) { resolveSynced("offline"); throw e; }
+      return step(async () => {
+        online = true;
+        if (!entry) {
+          if (!d) { resolveSynced("fresh"); return null; }
+          const doc = cleanDoc(d);
+          await keep(doc, await docHash(doc));
+        }
+        view = parse(entry!.json);
+        resolveSynced("fresh");
+        return { doc: view };
+      });
     },
     save(d) {
-      // (in the copy, in order; made from what the board showed before a
-      // document given it was shown: merged with that one, and shown)
-      inOrder(async () => {
-        // (made from what the board showed, while the copy was ahead of it:
-        // merged with the copy, and the merge given it, CORR-891-3)
-        const before = shown;
-        shown = d;
-        const doc = before && entry && entry.json !== canonical(before) ? merge3(before, d, parse(entry.json)).doc : d;
+      // (made from what the board showed when it was made)
+      const from = view;
+      view = d;
+      step(async () => {
+        const doc = from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d;
         const base = dirty() ? entry!.base ?? entry!.json : entry?.json;
         await keep(doc, entry?.remoteHash ?? null, base);
-        if (doc !== d) emit(doc);
+        if (doc !== d) present(doc);
+        push();
       });
-      // (to the remote, once it has answered: the copy as it is then)
-      later(() => push().catch((e) => { console.warn("board: the remote:", e); return false; }));
     },
     subscribe(f) {
       listeners.add(f);
-      if (unsent) { const [d, n] = unsent; unsent = null; give(d, n, [f]); }
-      // (the remote's changes made elsewhere: after the first load, the latest of those made during it)
-      const off = remote.subscribe?.((d) => {
-        const doc = cleanDoc(d);
-        if (!settled) { waiting = doc; return; }
-        later(async () => { await arrived(doc, await docHash(doc)); });
-      });
-      return () => { listeners.delete(f); off?.(); };
+      for (const [d, n] of unsent.splice(0)) present(d, n);
+      offRemote ??= remote.subscribe?.(changed);
+      return () => { listeners.delete(f); if (!listeners.size) { offRemote?.(); offRemote = undefined; } };
     },
   };
 }
