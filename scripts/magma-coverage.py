@@ -138,8 +138,8 @@ def classify(cell, r):
             return "timeout", "Sagebrush timed out"
         if "SyntaxError" in err:
             return "invalid Python", "the translation is not valid Python"
-        last = [l for l in err.strip().split("\n") if l.strip()]
-        return "crash", re.sub(r"\d+", "N", last[-1][:80]) if last else "no output"
+        # a fixed category: nothing from stderr goes into the map
+        return "crash", "Sagebrush stopped (crash)"
     for e in ERRORS.finditer(s):
         if e.group(0) in m:
             continue
@@ -150,7 +150,10 @@ def classify(cell, r):
             return "syntax", "syntax: end of input"
         if e.group(1):
             return "undeclared", e.group(1)
-        msg = re.sub(r"'[^']*'", "'X'", e.group(2))
+        # only the message's shape: quoted text, numbers and anything that
+        # could be a path are replaced
+        msg = re.sub(r"'[^']*'|\"[^\"]*\"", "'X'", e.group(2))
+        msg = re.sub(r"\S*[/\\]\S*", "X", msg)
         return "runtime", re.sub(r"\d+", "N", msg)[:70]
     if re.sub(r"\s+", "", s) == re.sub(r"\s+", "", m):
         return "whitespace", "line breaks or spaces differ"
