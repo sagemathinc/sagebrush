@@ -97,6 +97,40 @@ try {
     check(!errors.filter((e) => !(s0.code && engine.test(e))).length, `${doc}: errors in the file: ${errors.slice(0, 3).join(" | ")}`);
     console.log(`${doc}: ${(html.length / 1024).toFixed(0)} KB, ${s1.items} items, ${s1.pages} page(s), ${sheets} sheet(s)`);
   }
+
+  // Ctrl/Cmd+S: Download as HTML, not the page's own Save (William)
+  errors = [];
+  await send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  const keyS = async (modifiers) => {
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "s", code: "KeyS", windowsVirtualKeyCode: 83, modifiers });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "s", code: "KeyS", windowsVirtualKeyCode: 83, modifiers });
+  };
+  const dialogOpen = () => ev("document.querySelector('[data-sbb=htmldlg]').open");
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  for (const [mod, name] of [[2, "Ctrl"], [4, "Cmd"]]) {
+    await keyS(mod);
+    await until("document.querySelector('[data-sbb=htmldlg]').open", 3000).catch(() => {});
+    check(await dialogOpen(), `${name}+S on a board with code does not open Download as HTML's dialog`);
+    await ev("document.querySelector('[data-sbb=htmldlg]').close(), 1");
+  }
+  // (a board without code: the file at once; the links clicked to download, counted)
+  const S = { title: "Saved", nodes: [{ id: "n", title: "Note", text: "Its text", x: 0, y: 0, w: 300 }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => 1)`);
+  await ev("window.__got = []; HTMLAnchorElement.prototype.click = function () { window.__got.push(this.download); }; 1");
+  await keyS(2);
+  await until("window.__got.length === 1", 5000).catch(() => {});
+  check((await ev("window.__got.join()")).endsWith(".html") && !(await dialogOpen()), "Ctrl+S on a board without code does not download its HTML at once: " + await ev("window.__got.join()"));
+  // (a note being written: what is written is kept first, and is in the file)
+  await ev("window.sagebrush.board.editing(true), 1");
+  await ev("(() => { const r = window.board.clientRect('n'); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  await until("window.board.editing === 'n' && document.activeElement === document.querySelector('.board-editing .be-title')", 3000);
+  await ev("(() => { const t = document.querySelector('.board-editing .be-title'); t.setSelectionRange(t.value.length, t.value.length); return 1; })()");
+  await send("Input.insertText", { text: " kept" });
+  await keyS(2);
+  await until("window.__got.length === 2", 5000).catch(() => {});
+  check(await ev("window.__got.length === 2 && !window.board.editing && window.sagebrush.board.snapshot().doc.nodes[0].title === 'Note kept'"), "Ctrl+S while a note is written: not kept first, or not downloaded: " + JSON.stringify(await ev("({ got: window.__got, editing: window.board.editing, title: window.sagebrush.board.snapshot().doc.nodes[0].title })")));
+  check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
   if (errors.length) fails.push("page errors: " + errors.join(" | "));
