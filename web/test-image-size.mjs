@@ -67,6 +67,11 @@ check(/^<button type="button" class="remote-picture" data-load-src="https:\/\/x\
 check(/<img src="data:image\/png/.test(render(`![s](data:image/png;base64,${png(10, 10)})`, { remote: "click" })), "a data: picture is shown at once (it is measured)");
 check(["HTTPS://x.example/a.png", "Https://x.example/a.png", "hTtP://x.example/a.png"].every((u) => { const r = safeHtml(`<img src="${u}" alt="upper">`, { remote: "click" }) + render(`![m](${u})`, { remote: "click" }); return !/<img/.test(r) && (r.match(/class="remote-picture"/g) ?? []).length === 2; }), "any case of the scheme: still a button (SEC-3BC-1)");
 
+// a board's carried pictures in the same grammar (CORR-68B-1)
+const { cleanDoc } = await import("./board/doc.ts");
+const carried = cleanDoc({ images: { p: { w: 1, h: 1, src: "data:IMAGE/PNG;base64," + png(1, 1) }, q: { w: 1, h: 1, src: "data:image/jpg;base64," + jpeg(1, 1) }, r: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+" } }, nodes: [{ id: "n", image: "p" }] });
+check(Object.keys(carried.images ?? {}).sort().join() === "p,q", "a board keeps its IMAGE/PNG and image/jpg pictures (not an SVG): " + Object.keys(carried.images ?? {}));
+
 if (fails.length) {
   console.log(`${fails.length} of ${checks} checks failed:\n  ` + fails.join("\n  "));
   process.exit(1);

@@ -279,6 +279,7 @@ export class BoardCode {
   onRan: ((ids: string[]) => void) | null = null;
   private ran(report: any) {
     const ids: string[] = Array.isArray(report?.ran) ? report.ran : [];
+    if (ids.length) this.runs++;
     for (const id of ids) {
       this.gens.set(id, this.generation(id) + 1);
       const c = this.cell(id);
@@ -339,14 +340,19 @@ export class BoardCode {
     }
     // (marking the items' keys as they are now, not as they were before the
     // writes: a newer run's entry is live, CORR-A48-3)
+    // (and none if any item ran while they were found: that run sweeps with
+    // newer ones, and this sweep's could miss its entry, CORR-68B-2)
     if (!entries.length) return;
+    const runs = this.runs;
     const now = await this.nb.outputKeys();
-    if (now && this.cacheDoc() === ns) await cache.sweep(ns, new Set(Object.values(now).map((k: any) => k.key).filter(Boolean)));
+    if (now && this.cacheDoc() === ns && this.runs === runs) await cache.sweep(ns, new Set(Object.values(now).map((k: any) => k.key).filter(Boolean)));
   }
   /** an item over this many ms from root keeps a preview (preview.ts) */
   previewMs = PREVIEW_MS;
   /** how many times each item has run here: a preview is of one run (SEC-14C-1) */
   private gens = new Map<string, number>();
+  /** runs finished here, of any item (a sweep's mark is of one moment: keepOutputs) */
+  private runs = 0;
   generation(id: string): number {
     return this.gens.get(id) ?? 0;
   }

@@ -162,6 +162,11 @@ try {
   await ev("window.board.focus(['n'], true), window.board.render(), 1");
   check(await until("!!document.querySelector('.board-item img[src=\"https://pictures.invalid/r.png\"]') && !document.querySelector('.board-item button.remote-picture')", 5000), "a new board, written here: its note's remote picture at once");
 
+  // a board carrying a picture whose type is in capitals: taken in and shown (CORR-68B-1)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "caps", images: { p: { w: 1, h: 1, src: "data:IMAGE/PNG;base64," + real.toString("base64") } }, nodes: [{ id: "cp", title: "caps", image: "p" }] })}).then(() => 1)`);
+  const capsDoc = JSON.parse(await ev("window.sagebrush.board.json()"));
+  check(Object.keys(capsDoc.images ?? {}).length === 1 && capsDoc.nodes[0].image === Object.keys(capsDoc.images)[0], "a board's data:IMAGE/PNG picture is taken in: " + JSON.stringify([Object.keys(capsDoc.images ?? {}), capsDoc.nodes[0].image]));
+
   // a board carrying a huge picture doesn't take it in; a small one, it does
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
