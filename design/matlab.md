@@ -17,6 +17,21 @@ and runs on a runtime library with MATLAB's semantics:
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics);
+  - **lib/_matlab_eigs.py**: eigs, a direct (thick) Ritz-vector
+    restarted Arnoldi method, the Lanczos form for a Hermitian operator,
+    with the interface of its documentation page. The Arnoldi extension and
+    the Ritz estimate follow Lehoucq and Sorensen (Rice CAAM TR94-13,
+    sections 2-3); the restart is Sagebrush's own, which retains, under the
+    stated hypotheses, the wanted range their exact-shift restart retains
+    (no locking or deflation is claimed). Also Sagebrush's own: the
+    convergence test (each wanted Ritz estimate, and its actual residual,
+    at most Tolerance times max(|theta|, eps ||H||), or at rounding level),
+    the start vector from a fixed stream of its own, a dense solution when
+    the subspace would be the whole space (Cholesky-reduced for a symmetric
+    A with a symmetric positive definite B), single precision computed in
+    double, the order for a numeric sigma (nearest first), which the page
+    leaves open, IsSymmetricDefinite required for a sparse B of more than
+    2000 rows, and the messages;
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -554,7 +569,10 @@ The rest:
 - `int64` and `uint64` beyond 2^53: Sagebrush's numpy stores them in
   doubles, so `intmax('int64')` shows 9223372036854775808 and
   `intmax('uint64')` 18446744073709551616;
-- sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`);
+- `svds` and iterative solvers (`pcg`, `gmres`); `eigs` of complex
+  matrices, with complex shifts or start vectors (Sagebrush's numpy has
+  no complex eigenvalue or QR routines yet, which `eig` of a complex
+  matrix lacks too);
 - the random sparse matrices' exact places and values: `sprand`'s and
   `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
   construction is Sagebrush's own (exactly the requested number of
