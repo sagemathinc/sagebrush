@@ -537,6 +537,8 @@ The rest:
 - `sprandsym`'s numbers: its construction is Sagebrush's own (exactly the
   requested number of nonzeros), not MATLAB's (sprand's and sprandn's are
   MATLAB's);
-- `normest`'s iteration count: MATLAB documents the power iteration but
-  not its starting vector, so Sagebrush's (the ones vector) can take a
-  different number of iterations to the same estimate.
+- `normest`'s estimates on the way and its count: it is Higham's power
+  method (the estimate ||S x|| for a unit x) with MATLAB's documented
+  stopping rule, and MATLAB documents neither its own estimate formula
+  nor its starting vector, so the iterations, and an estimate stopped
+  early by a loose tolerance, can differ from MATLAB's.
