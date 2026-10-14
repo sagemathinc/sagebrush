@@ -1098,3 +1098,318 @@ def quad_(nargout, fun, *args):
     q = result
     out = _m._canon(np.array([[q]], dtype=np.complex64 if cplx[0] else np.float32)) if single else q
     return out if nargout <= 1 else [out, float(count[0])][:nargout]
+
+
+# ------------------------------------------------------------------ integral, quadgk
+
+# (the Gauss-Kronrod (7, 15) pair on [-1, 1] that Shampine's paper uses,
+# computed for Sagebrush from its definition: the 7 Gauss-Legendre nodes,
+# the 8 Kronrod nodes as the zeros of the Stieltjes polynomial of degree 8
+# for the weight P7, and the weights from exactness for polynomials of
+# degree 22, all in 60-digit arithmetic, then rounded)
+_GK_NODES = np.array([-0.9914553711208126, -0.9491079123427585, -0.8648644233597691, -0.7415311855993945,
+                      -0.5860872354676911, -0.4058451513773972, -0.20778495500789848, 0.0, 0.20778495500789848,
+                      0.4058451513773972, 0.5860872354676911, 0.7415311855993945, 0.8648644233597691,
+                      0.9491079123427585, 0.9914553711208126])
+_GK_KRONROD = np.array([0.022935322010529224, 0.06309209262997856, 0.10479001032225019, 0.14065325971552592,
+                        0.1690047266392679, 0.19035057806478542, 0.20443294007529889, 0.20948214108472782,
+                        0.20443294007529889, 0.19035057806478542, 0.1690047266392679, 0.14065325971552592,
+                        0.10479001032225019, 0.06309209262997856, 0.022935322010529224])
+_GK_GAUSS = np.zeros(15)
+_GK_GAUSS[1::2] = [0.1294849661688697, 0.27970539148927664, 0.3818300505051189, 0.4179591836734694,
+                   0.3818300505051189, 0.27970539148927664, 0.1294849661688697]
+
+
+def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
+    """Shampine's vectorized global adaptive quadrature (L. F. Shampine,
+    "Vectorized adaptive quadrature in MATLAB", J. Comput. Appl. Math. 211,
+    2008, sections 3 to 6) of F over [breaks[0], breaks[-1]] in the
+    transformed variable t: F(t) gives the integrand's values (times dt's
+    factor) at a 1-D array of t, as an array of len(t) rows.  All active
+    subintervals are sampled at once, 15 points each; each one's integral
+    is the Kronrod value and its error estimate the difference from the
+    Gauss value.  With tol = max(atol, rtol*|Q|), the computation ends when
+    the summed estimates are at most tol; otherwise the subintervals whose
+    estimates are at most tol times their share of the interval's length
+    are accepted, and the rest bisected (section 3).  It stops, with a
+    warning, when bisecting would make more than maxint subintervals
+    (section 3), when a subinterval's ends in x are within 100*eps of each
+    other relatively (section 6), or when a value is Inf or NaN after the
+    first evaluation (an error on the first, section 6).  Returns (Q, E)"""
+    A, B = breaks[0], breaks[-1]
+    subs = list(zip(breaks[:-1], breaks[1:]))
+    if len(subs) < 10:
+        # (at least 10 subintervals at the start, section 5: each break
+        # interval cut into equal pieces, which gives the paper's 150
+        # samples for one interval)
+        k = -(-10 // len(subs))
+        subs = [(lo + (hi - lo) * j / k, lo + (hi - lo) * (j + 1) / k) for lo, hi in subs for j in range(k)]
+    QOK, EOK = 0.0, 0.0
+    first = True
+    Q = E = None
+    while True:
+        lo = np.array([s[0] for s in subs])
+        hi = np.array([s[1] for s in subs])
+        mid = (lo + hi) / 2
+        hh = (hi - lo) / 2
+        t = (mid[:, None] + hh[:, None] * _GK_NODES[None, :]).reshape(-1)
+        y = F(t)
+        if not np.all(np.isfinite(y)):
+            if first:
+                raise _err("%s: the integrand is Inf or NaN at the first points tried; no approximation of the integral "
+                           "is possible." % solver)
+            _m.warning_("%s: the integrand is Inf or NaN at some points; the last approximation is returned. "
+                        "Approximate bound on error is %.1e." % (solver, E))
+            return Q, E
+        first = False
+        y = y.reshape((len(subs), 15) + y.shape[1:])
+        Qs = np.tensordot(y, _GK_KRONROD, axes=([1], [0])) * (hh if y.ndim == 2 else hh[:, None])
+        Gs = np.tensordot(y, _GK_GAUSS, axes=([1], [0])) * (hh if y.ndim == 2 else hh[:, None])
+        Es = np.abs(Qs - Gs) if y.ndim == 2 else np.max(np.abs(Qs - Gs), axis=1)
+        Q = QOK + np.sum(Qs, axis=0)
+        E = EOK + np.sum(Es)
+        tol = max(atol, rtol * float(np.max(np.abs(Q))))
+        if E <= tol:
+            return Q, E
+        ok = Es <= (2 / (B - A)) * hh * tol
+        QOK = QOK + np.sum(Qs[ok], axis=0)
+        EOK = EOK + np.sum(Es[ok])
+        subs = [s for s, k in zip(subs, ok) if not k]
+        if not subs:
+            return Q, E
+        if 2 * len(subs) > maxint:
+            if nocount_warning:
+                _m.warning_("%s: Reached the limit on the maximum number of intervals in use. Approximate bound on error "
+                            "is %.1e. The tolerances were not met." % (solver, E))
+            else:
+                _m.warning_("Reached the limit on the maximum number of intervals in use. Approximate bound on error "
+                            "is %.1e." % E)
+            return Q, E
+        subs = [p for lo_, hi_ in subs for p in ((lo_, (lo_ + hi_) / 2), ((lo_ + hi_) / 2, hi_))]
+        ends = np.array([s[0] for s in subs] + [subs[-1][1]])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            xs = xmap(ends)
+        # (an infinite end of the interval, x at t = 1, is not a short subinterval)
+        fin = np.isfinite(xs[:-1]) & np.isfinite(xs[1:])
+        dx = np.abs(np.diff(xs))[fin]
+        scale = np.maximum(np.abs(xs[:-1]), np.abs(xs[1:]))[fin]
+        if np.any(dx <= 100 * _EPS * scale):
+            _m.warning_("%s: a subinterval became too short for the precision of the arithmetic. Approximate bound on "
+                        "error is %.1e. The tolerances may not be met." % (solver, E))
+            return Q, E
+
+
+def _gk_path(a, b, ways):
+    """the integration path from a to b through the waypoints, as
+    (breaks in t, x(t), dx/dt(t), sign): the changes of variable of
+    Shampine's section 4.2 for a real interval (finite: Davis and
+    Rabinowitz's x = (b-a)/4 t (3 - t^2) + (b+a)/2 on [-1, 1]; [a, Inf):
+    x = a + (t/(1-t))^2 on [0, 1); (-Inf, b] the same reflected), and for
+    (-Inf, Inf) Sagebrush's own x = t/(1-t^2) on [-1, 1].  Waypoints become
+    breaks by inverting the map (Newton's method from alpha/3 for the
+    finite one, as section 5 says).  A complex path, Sagebrush's own way,
+    is piecewise linear through the waypoints in a parameter s, one unit
+    per segment, with the finite map applied to s"""
+    pts = [a] + list(ways) + [b]
+    if any(isinstance(p, complex) for p in pts):
+        if not all(_math.isfinite(abs(p)) for p in pts):
+            raise _err("Contour integration requires all limits and waypoints to be finite.")
+        P = np.array(pts, dtype=complex)
+        nseg = len(pts) - 1
+
+        def lin(s):
+            k = np.clip(np.floor(s).astype(int), 0, nseg - 1)
+            return P[k] + (P[k + 1] - P[k]) * (s - k), P[k + 1] - P[k]
+        X = lambda t: lin(0.25 * nseg * t * (3 - t * t) + 0.5 * nseg)[0]
+        D = lambda t: lin(0.25 * nseg * t * (3 - t * t) + 0.5 * nseg)[1] * (0.75 * nseg * (1 - t * t))
+        breaks = [-1.0] + [_cubic_inverse(4 * (j - 0.5 * nseg) / nseg) for j in range(1, nseg)] + [1.0]
+        return breaks, X, D, 1.0
+    a, b = float(a), float(b)
+    sign = 1.0
+    if a > b:
+        a, b, sign = b, a, -1.0
+        ways = list(reversed(ways))
+    ways = sorted(float(w) for w in ways)
+    if any(not (a < w < b) for w in ways):
+        raise _err("Waypoints must lie strictly between the limits of integration.")
+    if _math.isfinite(a) and _math.isfinite(b):
+        X = lambda t: 0.25 * (b - a) * t * (3 - t * t) + 0.5 * (b + a)
+        D = lambda t: 0.75 * (b - a) * (1 - t * t)
+        breaks = [-1.0] + [_cubic_inverse(4 * (w - 0.5 * (b + a)) / (b - a)) for w in ways] + [1.0]
+    elif _math.isfinite(a):
+        X = lambda t: a + (t / (1 - t)) ** 2
+        D = lambda t: 2 * t / (1 - t) ** 3
+        breaks = [0.0] + [_math.sqrt(w - a) / (1 + _math.sqrt(w - a)) for w in ways] + [1.0]
+    elif _math.isfinite(b):
+        X = lambda t: b - (t / (1 - t)) ** 2
+        D = lambda t: 2 * t / (1 - t) ** 3
+        breaks = [0.0] + sorted(_math.sqrt(b - w) / (1 + _math.sqrt(b - w)) for w in ways) + [1.0]
+    else:
+        X = lambda t: t / (1 - t * t)
+        D = lambda t: (1 + t * t) / (1 - t * t) ** 2
+        breaks = [-1.0] + [2 * w / (1 + _math.sqrt(1 + 4 * w * w)) for w in ways] + [1.0]
+    return breaks, X, D, sign
+
+
+def _cubic_inverse(alpha):
+    """the t in (-1, 1) with t^3 - 3t + alpha = 0, |alpha| < 2: Newton's
+    method from alpha/3, which converges monotonically (Shampine, section 5)"""
+    t = alpha / 3.0
+    for _ in range(100):
+        nt = t - (t ** 3 - 3 * t + alpha) / (3 * t * t - 3)
+        if nt == t:
+            break
+        t = nt
+    return t
+
+
+def _scalar_limit(v, solver):
+    if type(v) is _m.Char or not _m._isnumlike(v) or _m._numel(v) != 1 or _m.class_(v) not in ("double", "single"):
+        raise _err("%s: the limits must be double or single scalars." % solver)
+    e = _m._arr(v).reshape(-1)[0]
+    if np.iscomplexobj(e) and e.imag != 0:
+        return complex(e)
+    e = float(e.real)
+    if e != e:
+        raise _err("%s: the limits must not be NaN." % solver)
+    return e
+
+
+def _integrate(nargout, solver, fun, a, b, opts):
+    f = _m._fn_arg(fun)
+    single = _m.class_(a) == "single" or _m.class_(b) == "single"
+    A0, B0 = _scalar_limit(a, solver), _scalar_limit(b, solver)
+    names = {"abstol": "AbsTol", "reltol": "RelTol", "waypoints": "Waypoints"}
+    if solver == "integral":
+        names.update({"absolutetolerance": "AbsTol", "relativetolerance": "RelTol", "arrayvalued": "ArrayValued",
+                      "vectorized": "Vectorized"})
+    else:
+        names["maxintervalcount"] = "MaxIntervalCount"
+    if len(opts) % 2:
+        raise _err("%s: name-value arguments must come in pairs." % solver)
+    o = {}
+    for k in range(0, len(opts), 2):
+        if not _istext(opts[k]) or _text(opts[k]).lower() not in names:
+            raise _err("%s: unknown option%s." % (solver, " '%s'" % _text(opts[k]) if _istext(opts[k]) else ""))
+        o[names[_text(opts[k]).lower()]] = opts[k + 1]
+
+    def num(name, default):
+        if name not in o:
+            return default
+        v = o[name]
+        if type(v) is _m.Char or not _m._isnumlike(v) or _m._numel(v) != 1 or np.iscomplexobj(_m._arr(v)) \
+                or not _m._scalar(v) >= 0:
+            raise _err("%s: %s must be a nonnegative real scalar." % (solver, name))
+        return float(_m._scalar(v))
+    sgl = single and solver == "quadgk"
+    atol = num("AbsTol", 1e-5 if sgl else 1e-10)
+    rtol = num("RelTol", 1e-4 if sgl else 1e-6)
+    if rtol > 0:
+        rtol = max(rtol, 100 * (1.1920928955078125e-07 if single else _EPS))
+    maxint = num("MaxIntervalCount", 650.0)
+    arrayvalued = "ArrayValued" in o and bool(_m._logical_val(o["ArrayValued"]))
+    vectorized = not ("Vectorized" in o and not bool(_m._logical_val(o["Vectorized"])))
+    ways = []
+    if "Waypoints" in o:
+        w = o["Waypoints"]
+        if type(w) is _m.Char or not _m._isnumlike(w):
+            raise _err("%s: Waypoints must be a vector of numbers." % solver)
+        wa = _m._arr(w).reshape(-1)
+        ways = [complex(v) if np.iscomplexobj(wa) and v.imag != 0 else float(v.real) for v in wa]
+        if any(isinstance(v, float) and not _math.isfinite(v) for v in ways):
+            raise _err("%s: Waypoints must be finite." % solver)
+    if A0 == B0 and not any(isinstance(v, complex) for v in ways):
+        q, e = 0.0, 0.0
+        shape = None
+        if arrayvalued:
+            r = _m._call(f, [A0 if not isinstance(A0, complex) else complex(A0)])
+            shape = _m._arr(r).shape
+            q = np.zeros(shape)
+        return _finish_integral(nargout, q, e, single, shape)
+    breaks, X, D, sign = _gk_path(A0, B0, ways)
+    shape = [None]
+
+    def F(t):
+        x = X(t)
+        if arrayvalued or not vectorized:
+            vals = []
+            for xv in x:
+                r = _m._call(f, [complex(xv) if np.iscomplexobj(x) else float(xv)])
+                if not _m._isnumlike(r) or type(r) is _m.Char:
+                    raise _err("%s: the integrand must return numbers." % solver)
+                ra = np.array(_m._arr(r))
+                if shape[0] is None:
+                    shape[0] = ra.shape
+                    if not arrayvalued and _m._numel(r) != 1:
+                        raise _err("%s: with Vectorized false, the integrand must return a scalar; set ArrayValued for "
+                                   "array values." % solver)
+                elif ra.shape != shape[0]:
+                    raise _err("%s: the integrand's output must have the same size at every point." % solver)
+                vals.append(ra.reshape(-1))
+            y = np.array(vals)
+            if not arrayvalued:
+                y = y.reshape(-1)
+        else:
+            xin = _m._box(np.array(x).reshape((-1, 1)))
+            r = _m._call(f, [xin])
+            if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != len(x):
+                raise _err("%s: the integrand must return an array the size of its input; use array operators "
+                           "(.*, ./, .^) or set ArrayValued." % solver)
+            y = np.array(_m._arr(r)).reshape(-1)
+        nonlocal single
+        if (arrayvalued or not vectorized) is False and _m.class_(r) == "single":
+            single = True
+        d = D(t)
+        return y * (d if y.ndim == 1 else d[:, None])
+    Q, E = _gk_core(F, breaks, lambda t: X(np.asarray(t, dtype=float)), atol, rtol, maxint, solver, solver == "integral")
+    Q = Q * sign
+    return _finish_integral(nargout, Q, E, single, shape[0] if arrayvalued else None)
+
+
+def _finish_integral(nargout, Q, E, single, shape):
+    Q = np.asarray(Q)
+    if shape is not None:
+        Q = Q.reshape(shape)
+        out = _m._canon(Q.astype(np.complex64 if Q.dtype.kind == "c" else np.float32)) if single else _m._box(np.array(Q))
+    else:
+        q = complex(Q) if Q.dtype.kind == "c" else float(Q)
+        if isinstance(q, complex) and q.imag == 0:
+            q = q.real
+        out = _m._canon(np.array([[q]], dtype=np.complex64 if isinstance(q, complex) else np.float32)) if single else q
+    return out if nargout <= 1 else [out, float(E)][:nargout]
+
+
+@_bi("integral")
+def integral_(nargout, fun=None, a=None, b=None, *opts):
+    """integral as its documentation page describes it: integral(fun, xmin,
+    xmax) and the name-value options AbsoluteTolerance (AbsTol, default
+    1e-10), RelativeTolerance (RelTol, 1e-6), ArrayValued, Vectorized and
+    Waypoints; infinite limits, and complex limits or waypoints for a
+    straight-line contour.  The method is the one the page cites,
+    Shampine's vectorized adaptive Gauss-Kronrod quadrature (_gk_core,
+    _gk_path), with up to 650 subintervals.  Sagebrush's own choices: the
+    map for (-Inf, Inf) and the parametrization of a complex path
+    (_gk_path), the infinity norm for an array-valued integrand's error, a
+    result for xmin > xmax as minus the integral from xmax to xmin, and the
+    wording of the warnings"""
+    if b is None:
+        raise _err("Not enough input arguments.")
+    if nargout > 1:
+        raise _err("Too many output arguments.")
+    return _integrate(nargout, "integral", fun, a, b, list(opts))
+
+
+@_bi("quadgk")
+def quadgk_(nargout, fun=None, a=None, b=None, *opts):
+    """quadgk as its documentation page describes it: [q, errbnd] =
+    quadgk(fun, a, b, Name, Value) with AbsTol (1e-10, or 1e-5 for
+    single), RelTol (1e-6, or 1e-4), Waypoints and MaxIntervalCount (650);
+    RelTol at least 100*eps of the class unless it is 0.  The same method
+    as integral (Shampine 2008, the page's reference), whose own choices
+    apply here too; the warning on reaching MaxIntervalCount begins as the
+    page's published one"""
+    if b is None:
+        raise _err("Not enough input arguments.")
+    if nargout > 2:
+        raise _err("Too many output arguments.")
+    return _integrate(nargout, "quadgk", fun, a, b, list(opts))

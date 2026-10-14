@@ -31,7 +31,9 @@ and runs on a runtime library with MATLAB's semantics:
     "fminsearch Algorithm" page spells out; lsqnonneg is Lawson and
     Hanson's NNLS (1974, chapter 23); quad is Gander and Gautschi's
     adaptive Simpson step (2000, section 3) with the page's absolute
-    tolerance per subinterval;
+    tolerance per subinterval; integral and quadgk are Shampine's
+    vectorized adaptive Gauss-Kronrod quadrature (2008), with the (7, 15)
+    pair computed for Sagebrush from its definition;
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -603,6 +605,13 @@ The rest:
   subdivided (with a warning), at most 10000 evaluations (with a warning),
   the trace's number format, and a single result for single limits or
   values;
+- integral's and quadgk's likewise: how the initial 10 subintervals are
+  made (each break interval cut into equal pieces, the paper's 150
+  samples for one interval), the change of variable for (-Inf, Inf)
+  (x = t/(1-t^2)), the parametrization of a complex path, the infinity
+  norm for an array-valued integrand's error, minus the reversed integral
+  for xmin > xmax, and the warnings' wording past the published start of
+  quadgk's interval-limit warning;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
