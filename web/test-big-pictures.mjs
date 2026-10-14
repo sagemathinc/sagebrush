@@ -94,6 +94,18 @@ try {
   const mdsvg = await ev(`[...${C("mdsvg")}.el.querySelectorAll(".mdout img")].map((i) => i.alt).join()`);
   check(mdsvg === "plain", "a data: SVG carrying a raster isn't shown; one of vectors is: " + mdsvg);
 
+  // remote pictures: in a document from elsewhere, each shown when clicked;
+  // in one written here (a new notebook), at once (William: click-to-load)
+  const remoteMd = "![a remote one](https://pictures.invalid/r.png)";
+  await ev(`sagebrush.notebook.load(${JSON.stringify({ mode: "python", cells: [{ id: "rm", type: "markdown", code: remoteMd }] })}), 1`);
+  await ev(`sagebrush.notebook.renderMd(${C("rm")}), 1`);
+  check(await ev(`(() => { const el = ${C("rm")}.el.querySelector(".mdout"); const b = el.querySelector("button.remote-picture"); return !!b && !el.querySelector("img") && /pictures\.invalid/.test(b.textContent); })()`), "a notebook from elsewhere: its remote picture is a button naming the site");
+  await ev(`${C("rm")}.el.querySelector(".mdout button.remote-picture").click(), 1`);
+  check(await ev(`(() => { const i = ${C("rm")}.el.querySelector(".mdout img"); return !!i && i.src === "https://pictures.invalid/r.png" && i.alt === "a remote one"; })()`), "...clicked, the picture");
+  await ev(`sagebrush.notebook.load(${JSON.stringify({ mode: "python", here: true, cells: [{ id: "rm", type: "markdown", code: remoteMd }] })}), 1`);
+  await ev(`sagebrush.notebook.renderMd(${C("rm")}), 1`);
+  check(await ev(`!!${C("rm")}.el.querySelector(".mdout img") && !${C("rm")}.el.querySelector("button.remote-picture")`), "a notebook written here: its remote picture at once");
+
   // a board's code: each board's pictures counted afresh (CORR-89C-4)
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
@@ -104,6 +116,18 @@ try {
   await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].id === 'b1' && os[0].state === '')", 60000);
   await ev("window.board.focus(['b1'], true), window.board.render(), 1");
   check(await until("!!document.querySelector('[data-code=b1] .board-code-out img') && !document.querySelector('[data-code=b1] .big-picture')", 10000), "board B's picture shows: its own document's pixels, not board A's");
+
+  // a board from elsewhere: its notes' remote pictures shown when clicked; a new board's, at once
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "remote", nodes: [{ id: "r", title: "remote", text: remoteMd }] })}).then(() => 1)`);
+  await ev("window.board.focus(['r'], true), window.board.render(), 1");
+  check(await until("!!document.querySelector('[data-id=r] button.remote-picture, .board-item button.remote-picture') && !document.querySelector('.board-item img[src^=\"https://pictures\"]')", 5000), "a board from elsewhere: its note's remote picture is a button");
+  await ev("document.querySelector('.board-item button.remote-picture').click(), 1");
+  check(await until("!!document.querySelector('.board-item img[src=\"https://pictures.invalid/r.png\"]')", 5000), "...clicked, the picture");
+  await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
+  await sleep(300);
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes = [{ id: "n", title: "mine", text: ${JSON.stringify(remoteMd)} }]; }).then(() => 1)`);
+  await ev("window.board.focus(['n'], true), window.board.render(), 1");
+  check(await until("!!document.querySelector('.board-item img[src=\"https://pictures.invalid/r.png\"]') && !document.querySelector('.board-item button.remote-picture')", 5000), "a new board, written here: its note's remote picture at once");
 
   // a board carrying a huge picture doesn't take it in; a small one, it does
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });

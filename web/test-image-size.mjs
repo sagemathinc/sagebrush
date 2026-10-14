@@ -2,7 +2,7 @@
 // the bounds (MAX_SIDE, MAX_PIXELS each, LOAD_PIXELS in all), and Markdown's
 // data: images held to them (safe-html.ts).   bun web/test-image-size.mjs
 import { LOAD_PIXELS, MAX_PIXELS, MAX_SIDE, PixelBudget, dataUrl, imageSize } from "./image-size.ts";
-import { safeImage } from "./safe-html.ts";
+import { safeHtml, safeImage } from "./safe-html.ts";
 import { render } from "./markdown.ts";
 
 let checks = 0;
@@ -51,6 +51,14 @@ const three = [6000, 6001, 6002].map((w) => safeImage("data:image/png;base64," +
 check(three[0] && three[1] && three[2] === null && safeImage("data:image/png;base64," + png(6000, 5000), { pixels: shared }) !== null, "a document's Markdown pictures share its pixels; one drawn again isn't counted again");
 const svgB64 = (t) => "data:image/svg+xml;base64," + Buffer.from(t).toString("base64");
 check(safeImage(svgB64(`<svg xmlns="http://www.w3.org/2000/svg"><image href="data:image/png;base64,${png(9000, 9000)}"/></svg>`)) === null && safeImage("data:image/svg+xml," + encodeURIComponent('<svg><IMAGE href="x"/></svg>')) === null && safeImage(svgB64('<svg xmlns="http://www.w3.org/2000/svg"><circle r="2"/></svg>')) !== null, "a data: SVG carrying a raster isn't shown; one of vectors is");
+
+// remote pictures in a document not written here: each a button, shown when clicked (William: click-to-load)
+const md = render("![a logo](https://x.example/logo.png)", { remote: "click" });
+check(/^<p><button type="button" class="remote-picture" data-load-src="https:\/\/x\.example\/logo\.png" data-alt="a logo" title="https:\/\/x\.example\/logo\.png">Load picture from x\.example<\/button><\/p>/.test(md), "Markdown: a remote picture, click to load: " + md);
+check(/<img src="https:\/\/x\.example\/logo\.png"/.test(render("![a](https://x.example/logo.png)", { remote: true })) && !/<img|button/.test(render("![a](https://x.example/logo.png)", { remote: false })), "...shown at once in a document written here, never for what code made");
+const h = safeHtml('<img src="https://x.example/i.png" alt="x&quot; onerror=&quot;alert(1)">', { remote: "click" });
+check(/^<button type="button" class="remote-picture" data-load-src="https:\/\/x\.example\/i\.png" data-alt="x&quot; onerror=&quot;alert\(1\)"/.test(h) && !/<img/.test(h), "HTML: the same, its alt text escaped: " + h);
+check(/<img src="data:image\/png/.test(render(`![s](data:image/png;base64,${png(10, 10)})`, { remote: "click" })), "a data: picture is shown at once (it is measured)");
 
 if (fails.length) {
   console.log(`${fails.length} of ${checks} checks failed:\n  ` + fails.join("\n  "));

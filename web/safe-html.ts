@@ -60,8 +60,11 @@ export function decodeEntities(s: string): string {
 export interface SafeOptions {
   /** a cell's attachments (`attachment:name` images), name -> {mime: base64} */
   attachments?: Record<string, Record<string, string>> | null;
-  /** whether images may come from other sites (https:); false for what code produced, which could otherwise send data away in an image's address */
-  remote?: boolean;
+  /** whether images may come from other sites (https:); false for what code
+   * produced, which could otherwise send data away in an image's address;
+   * "click": each shown only when clicked (a document not written in this
+   * browser: a remote picture can't be measured before it is decoded) */
+  remote?: boolean | "click";
   /** the document's pictures' pixels (image-size.ts): the data: pictures shown here are counted in it; none, each on its own */
   pixels?: PixelBudget;
 }
@@ -90,6 +93,23 @@ export function safeLink(href: string): string | null {
   const h = href.replace(/[\u0000- \u007f-\u009f]/g, "");
   return SAFE_LINK.test(h) && !/^[\w.~-]*:/.test(h.replace(/^(https?|mailto):/i, "")) ? h : null;
 }
+/** A remote picture shown only when clicked (SafeOptions.remote "click"): a
+ * button naming its site; loadRemotePicture() shows it. */
+export function remotePicture(src: string, alt: string): string {
+  let host = "";
+  try { host = new URL(src).host; } catch {}
+  return `<button type="button" class="remote-picture" data-load-src="${esc(src)}" data-alt="${esc(alt)}" title="${esc(src)}">Load picture from ${esc(host || "another site")}</button>`;
+}
+/** A click on a remote picture's button (remotePicture): the picture, in its place. */
+export function loadRemotePicture(e: Event): void {
+  const b = (e.target as Element | null)?.closest?.("button[data-load-src]") as HTMLButtonElement | null;
+  const src = b?.dataset.loadSrc ?? "";
+  if (!b || !/^https?:\/\/[^\s"'<>\\]+$/i.test(src)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  b.replaceWith(Object.assign(document.createElement("img"), { src, alt: b.dataset.alt ?? "" }));
+}
+
 export function safeImage(src: string, o: SafeOptions = {}): string | null {
   const s = src.trim();
   const a = /^attachment:(.+)$/.exec(s);
@@ -179,6 +199,11 @@ export function safeHtml(html: string, o: SafeOptions = {}): string {
     // (an outside link opens in another tab, without a handle on this one)
     if (name === "a" && /^https?:/i.test(/ href="([^"]*)"/.exec(attrs)?.[1] ?? "")) attrs += ' target="_blank" rel="noopener noreferrer"';
     if (name === "img" && !/ src="/.test(attrs)) continue;
+    const remote = name === "img" && o.remote === "click" ? /^ src="(https?:[^"]*)"/.exec(attrs.match(/ src="[^"]*"/)![0]) : null;
+    if (remote) {
+      out += remotePicture(decodeEntities(remote[1]), decodeEntities(/ alt="([^"]*)"/.exec(attrs)?.[1] ?? ""));
+      continue;
+    }
     out += `<${name}${attrs}>`;
   }
   text(html.slice(last));

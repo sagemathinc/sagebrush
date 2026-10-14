@@ -1201,11 +1201,15 @@ async function open(store, id, kind = "browser") {
 }
 // cells: code strings, or {md: text} for Markdown (examples, share links)
 const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } : c.md !== undefined ? { type: "markdown", code: c.md } : c) });
-async function openDocument(doc) {
+// (a document from elsewhere: never written here, whatever it says, so its
+// remote pictures are shown when clicked: notebook.js remotePictures)
+async function openDocument(doc, here = false) {
   const id = newId();
-  return open(new IdbStore(db, id, { ...doc, id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id);
+  const { here: _h, ...rest } = doc;
+  return open(new IdbStore(db, id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id);
 }
-const openNew = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) });
+// (here: a new notebook, written in this browser; else examples and share links)
+const openNew = (name, mode, codes, here = false) => openDocument({ name, mode, cells: codes.map(asCell) }, here);
 async function openId(id) {
   const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
   if (!doc) return false;
@@ -1379,7 +1383,7 @@ fileMenu.addEventListener("click", async (e) => {
       exDlg.showModal();
       exDlg.querySelector("#exlist button")?.focus();
       break;
-    case "new": saveNow(); await openNew("Untitled", nb.mode, [""]); cells()[0].ta.focus(); break;
+    case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
     case "open": await showOpen(); break;
     case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, share_id: undefined, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
@@ -1418,7 +1422,7 @@ fileMenu.addEventListener("click", async (e) => {
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, current.id).drop();
       const rest = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
-      if (rest.length) await openId(rest[0].id); else await openNew("Untitled", nb.mode, [""]);
+      if (rest.length) await openId(rest[0].id); else await openNew("Untitled", nb.mode, [""], true);
       announce("Notebook deleted");
       break;
     }
@@ -1469,7 +1473,8 @@ async function openBundle(bytes) {
   }
   const id = newId();
   if (hdb) await idb(hdb, "history", "readwrite", (st) => { let r = null; for (const env of b.history) if (env?.time) r = st.put({ nb: id, time: env.time, env }); return r; });
-  const { id: _i, rev: _r, updated: _u, ...doc } = b.notebook;
+  // (never written here, whatever it says: notebook.js remotePictures)
+  const { id: _i, rev: _r, updated: _u, here: _h, ...doc } = b.notebook;
   // (the cells keep their ids: the journal refers to them)
   await open(new IdbStore(db, id, { ...doc, id }), id);
   return id;

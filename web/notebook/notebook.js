@@ -17,7 +17,7 @@
 import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
 import { BlockEditor } from "../board/blocks.ts";
-import { safeHtml } from "../safe-html.ts";
+import { loadRemotePicture, safeHtml } from "../safe-html.ts";
 import { PixelBudget, imageSize, pictureKey } from "../image-size.ts";
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
@@ -249,6 +249,12 @@ export function createNotebook(root, opts = {}) {
   let meta = {}; // the document's other fields (name, ...), kept as they are
   // (the pixels of the pictures this document shows: image-size.ts)
   let pixels = new PixelBudget();
+  // Remote pictures in Markdown: shown at once in a document written in this
+  // browser (its host's store says so: `here`, which a document from
+  // elsewhere never brings, index.html's openDocument), else each when
+  // clicked, as one can't be measured before it is decoded (William, SEC-89C-3)
+  const remotePictures = () => (opts.remotePictures ?? (meta.here === true ? true : "click"));
+  root.addEventListener("click", loadRemotePicture);
   let execCount = 0;
   const listeners = {};
   const emit = (event, ...args) => { for (const f of listeners[event] ?? []) f(...args); };
@@ -1365,7 +1371,7 @@ export function createNotebook(root, opts = {}) {
   const mdHighlight = (code, lang) => (!lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
-    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
+    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures() }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
     if (cell.md.querySelector(".math")) {
       await afterPaint(); // the text shows first; KaTeX (275 KB) typesets the math after
@@ -1389,7 +1395,7 @@ export function createNotebook(root, opts = {}) {
   function openBlocks(cell) {
     if (cell.blocks || opts.readOnly) return cell.blocks;
     const b = new BlockEditor(cell.ta.value, {
-      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels }),
+      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures() }),
       typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",

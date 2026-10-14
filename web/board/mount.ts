@@ -40,6 +40,7 @@ import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import type { OutputCache } from "./outcache";
 import { PixelBudget } from "../image-size";
+import { loadRemotePicture } from "../safe-html";
 import { Toolbar, defaultTools } from "./toolbar";
 import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
@@ -68,6 +69,10 @@ export interface BoardStore {
    * the document, not in it; `fresh`: another document is shown here, so
    * a new name (SEC-B88-1).  None: no cache. */
   outputsId?(fresh: boolean): string;
+  /** Whether the document was written in this browser (a new board), kept
+   * beside it; `set`: so it is now.  Its notes' remote pictures show at
+   * once; else each when clicked (William, SEC-89C-3). */
+  writtenHere?(set?: boolean): boolean;
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
@@ -172,6 +177,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   root.classList.add("sbb");
   const board = new Board(root);
   root.insertAdjacentHTML("beforeend", CHROME);
+  // (a remote picture shown when clicked: safe-html.ts remotePicture)
+  root.addEventListener("click", loadRemotePicture, true);
   // (the parts, found within root by their data-sbb: no ids, which two
   // boards on a page, or the host's own elements, would share)
   const $ = (part: string) => root.querySelector<HTMLElement>(`[data-sbb="${part}"]`)!;
@@ -209,6 +216,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let outputsId: string | null = null;
   // (the pictures in the notes' Markdown: one document's pixels, image-size.ts)
   let notePixels = new PixelBudget();
+  // (whether the document was written in this browser: its remote pictures shown at once)
+  let writtenHere = false;
   function newOutputs(fresh: boolean) {
     const old = outputsId;
     outputsId = host.outputs && host.store?.outputsId ? host.store.outputsId(fresh) : null;
@@ -257,7 +266,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view) doc = d;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
-    board.markdown = (s) => markdown(s, { pixels: notePixels });
+    board.markdown = (s) => markdown(s, { pixels: notePixels, remote: writtenHere ? true : "click" });
     if (host.math && hasMath(JSON.stringify(d))) {
       // KaTeX: the host's, loaded the first time a board has math
       mathModule ??= host.math();
@@ -413,6 +422,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     loadGen++;
     newOutputs(!stored);
     notePixels = new PixelBudget();
+    // (a document loaded from elsewhere was not written here; the one kept, as it says)
+    writtenHere = stored ? host.store?.writtenHere?.() ?? false : host.store?.writtenHere?.(false) ?? false;
     const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(host.address?.get() ?? "");
     pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
     closeTimeTravel(false);
@@ -826,6 +837,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
     pageIx = 0;
     newOutputs(true);
+    writtenHere = host.store?.writtenHere?.(false) ?? false;
     await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
     board.focus(undefined, true);
     sayConverted();
@@ -879,7 +891,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       $("mmerr").textContent = String((err as Error)?.message ?? err);
     }
   };
-  $("newboard").onclick = () => (newOutputs(true), editor.commit((d) => {
+  $("newboard").onclick = () => (newOutputs(true), (writtenHere = host.store?.writtenHere?.(true) ?? false), editor.commit((d) => {
     for (const k of Object.keys(d)) delete (d as any)[k];
     Object.assign(d, { title: "Untitled board", seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join(""), nodes: [] });
     pageIx = 0;
@@ -888,6 +900,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!original) return;
     pageIx = 0;
     newOutputs(true);
+    writtenHere = host.store?.writtenHere?.(false) ?? false;
     await editor.commit((d) => { for (const k of Object.keys(d)) delete (d as any)[k]; Object.assign(d, JSON.parse(JSON.stringify(original))); });
     // (the original again: no edits of it are kept)
     host.store?.revert?.();
@@ -922,7 +935,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function printBoard(o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) {
     if (!doc) return null;
     // (math typeset in sheets too)
-    return printSheets(board, sheets(o.mode), { ...o, markdown: (s) => markdown(s, { pixels: notePixels }) });
+    return printSheets(board, sheets(o.mode), { ...o, markdown: (s) => markdown(s, { pixels: notePixels, remote: writtenHere ? true : "click" }) });
   }
   const prdlg = $("prdlg") as HTMLDialogElement;
   $("print").onclick = () => {
@@ -1018,7 +1031,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     prMask.hidden = !s;
     if (cam) { if (now) board.setCamera(cam); else board.flyTo(cam, 350); }
     const say = $("pr-say");
-    say.innerHTML = st?.say ? markdown(st.say, { pixels: notePixels }) : "";
+    say.innerHTML = st?.say ? markdown(st.say, { pixels: notePixels, remote: writtenHere ? true : "click" }) : "";
     if (st?.say && board.typeset && hasMath(st.say)) board.typeset(say);
     say.hidden = !st?.say;
     $("pr-where").textContent = `${P.i + 1} / ${P.frames.length}`;
