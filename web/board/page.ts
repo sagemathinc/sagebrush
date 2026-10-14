@@ -154,6 +154,8 @@ requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).firstP
 
 // (for tests: mount and unmount boards on this page with its host: test-mount.mjs)
 export { mountBoard, host, mounted };
+// (for a host whose documents are kept elsewhere: a copy in this browser first; the tests' fake remote)
+export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
 
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
