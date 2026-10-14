@@ -209,6 +209,15 @@ const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush
   const gen = Bun.spawnSync(["node", join(here, "..", "scripts", "board-examples.mjs"), join(here, "dist", "board", "examples")]);
   if (gen.exitCode !== 0) { console.error(gen.stderr.toString()); process.exit(1); }
 }
+// The frame other sites show a board in (/frame/board/, design/frame.md):
+// the exported board's page with every part inline but the document, which
+// its parent posts (export.ts frameHtml)
+{
+  const { frameHtml, katexFontsInline } = await import("./board/export.ts");
+  const css = katexFontsInline(readFileSync(join(here, "dist", "katex", "katex.min.css"), "utf8"), (f) => "data:font/woff2;base64," + readFileSync(join(here, "dist", "katex", f)).toString("base64"));
+  mkdirSync(join(here, "dist", "frame", "board"), { recursive: true });
+  writeFileSync(join(here, "dist", "frame", "board", "index.html"), frameHtml(readFileSync(join(here, "board", "index.html"), "utf8"), readFileSync(join(here, "dist", "board", "board.js"), "utf8"), readFileSync(join(here, "dist", "sagebrush-math.js"), "utf8"), css));
+}
 // The npm packages the bundles above contain (their metafiles' inputs) and
 // KaTeX (its stylesheet and fonts, copied): web/js-dependencies.json, from
 // which scripts/third-party-notices.mjs writes their notices; the page and
@@ -277,6 +286,8 @@ writeFileSync(join(here, "site", "src", "build-id.ts"), `// written by web/build
 // boards (/board/)
 rmSync(join(here, "site", "public", "board"), { recursive: true, force: true });
 cpSync(join(here, "dist", "board"), join(here, "site", "public", "board"), { recursive: true });
+rmSync(join(here, "site", "public", "frame"), { recursive: true, force: true });
+cpSync(join(here, "dist", "frame"), join(here, "site", "public", "frame"), { recursive: true });
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
 // the 3D viewer, loaded by the page when a Graphics3d is shown
 // The app (PWA): manifest, icons, and the service worker with the files it
