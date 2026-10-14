@@ -33,3 +33,17 @@ print(repr(g.reshape(-1, 1).sum(axis=0)), repr(g.reshape(-1, 1, 1).sum(axis=(0, 
 for n in [1, 5, 8, 9, 100, 128, 129, 1000, 4097, 100003]:
     x = np.random.randn(n) * 1e3 + 7
     print(n, repr(x.var()), repr(x.std()), repr(np.var(x, ddof=1)), repr(x.reshape(-1, 1).std()))
+
+# var/std when the mean is a whole number (an integral float is boxed: it
+# must not become NaN), and floats refused where an integer is needed
+for k in range(1, 10):
+    a = np.array([float(i) for i in range(k)])
+    print(k, repr(np.var(a)), repr(np.std(a)), repr(np.var(a + 0.5)), repr(np.std(a, ddof=1) if k > 1 else 0.0))
+print(repr(np.arange(5.0).std()), repr(np.arange(5.0).var()), repr(np.array([2.0, 4.0, 6.0]).std()), repr(np.zeros(4).var()))
+for f in (lambda: np.zeros([2.0, 3]), lambda: np.zeros((2, 3.5)), lambda: np.arange(6.0).reshape([2.0, 3]),
+          lambda: np.arange(6.0).reshape(2, 3).item(1.0), lambda: np.arange(6.0).reshape(2, 3).sum(axis=1.0),
+          lambda: np.arange(6.0).reshape(2, 3).argmax(axis=1.0)):
+    try:
+        print(repr(f()))
+    except TypeError:
+        print("TypeError")
