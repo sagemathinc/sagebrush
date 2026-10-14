@@ -44,3 +44,10 @@ B = [1 2; 3 4; 5 6];
 Z = [1+2i 3; 4 5-1i];
 [L, U, P] = lu(Z); show(r(L)); show(r(U)); show(P);
 [L, U, p] = lu(sparse(A), 'vector'); show(issparse(L)); show(issparse(p)); show(p(:)');
+% lu with a pivot below the smallest normal number (divided, not inverted),
+% and a single matrix factored in single precision
+A = [1e-310 1; 5e-311 2];
+[L, U, P] = lu(A); show(L); show(U); show(P); show(P*A - L*U);
+As = single([4 3; 6 3]);
+[L, U, P] = lu(As); show(L); show(U); show(class(P));
+[L, U] = lu(As); show(L); show(class(lu(As)));
