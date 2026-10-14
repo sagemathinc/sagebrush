@@ -64,7 +64,6 @@ test("constructors name< ... > parse; those not implemented yet raise at run tim
     "Q, f := quo< G | H >;",
     "G<a, b> := Group< a, b | a^2 = b^3, (a*b)^5 >;",
     "P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;",
-    "f := map< A -> B | x :-> x^2 >;",
     "h := hom< A -> B | <1, 2>, <2, 4> >;",
     "I := ideal< R | x^2 - y, sub< S | 1 > >;",
   ]) {
@@ -83,4 +82,32 @@ test("constructors name< ... > parse; those not implemented yet raise at run tim
   assert.match(py("r``s;"), /_m\._getattr\(r, s, \(1, 2\)\)/);
   assert.match(py("assigned r`a;"), /_m\._assigned\(r, "a"\)/);
   assert.match(py("delete r`a;"), /_m\._assign_path\(r, \[\("attr", "a", \(1, 9\)\)\], _m\._DELETE\)/);
+});
+
+test("maps: rules, graphs, arrow pairs and preimages", () => {
+  assert.match(py("f := map< A -> B | x :-> x^2 >;"), /_m\._map\("map", A, B, rule=lambda x: _m\._pow\(x, 2\), inv=None, pos=\(1, 9\)\)/);
+  assert.match(py("f := map< A -> B | x :-> x + 1, y :-> y - 1 >;"), /inv=lambda y: \(y - 1\)/);
+  assert.match(py("f := pmap< A -> B | [ <1, 2> ] >;"), /_m\._map\("pmap", A, B, graph=_m\._seq\(\[_m\.MTuple\(\[1, 2\]\)\]/);
+  assert.match(py("f := map< A -> B | [ 1 -> 2, 3 -> 4 ] >;"), /graph=_m\._seq\(\[_m\.MTuple\(\[1, 2\]\), _m\.MTuple\(\[3, 4\]\)\]/);
+  assert.match(py("f := map< A -> B | 1 -> 2, 3 -> 4 >;"), /pairs=\[\(1, 2\), \(3, 4\)\]/);
+  // hom< > by the images of generators depends on the domain: not yet
+  assert.match(py("h := hom< A -> B | [ 1, 2 ] >;"), /_m\._unsupported\("hom"/);
+  assert.match(py("y @@ f;"), /_m\._preimage\(f, y, \(1, 3\)\)/);
+  // a rule takes its free variables' values when the map is made
+  assert.match(py("f := map< A -> B | x :-> x + a >;"), /rule=lambda x, a=_m\._snap\(lambda: a, "a"\): \(x \+ _m\._val\(a, "a"\)\)/);
+  // ... but not the variables it binds itself, nor field names or named arguments
+  const r = py("f := map< A -> B | x :-> #[ j : j in S | j gt x ] + r`n + Foo(x : Bar := 1) >;");
+  assert.match(r, /rule=lambda x, S=_m\._snap\(lambda: S, "S"\), r=_m\._snap\(lambda: r, "r"\), Foo=_m\._snap\(lambda: Foo, "Foo"\): /);
+  assert.doesNotMatch(r, /j=_m|n=_m|Bar=_m|\u0000/);
+  // by scope: a comprehension's j shadows only inside it; a func's parameter is its own
+  assert.match(py("f := map< A -> B | x :-> j + &+[ j : j in [1..x] ] >;"), /rule=lambda x, j=_m\._snap\(lambda: j, "j"\): \(_m\._val\(j, "j"\) \+ /);
+  assert.match(py("f := map< A -> B | x :-> (func<j | j + 1>)(x) >;"), /rule=lambda x: /);
+  // `assigned a` first makes a the rule's own local, never assigned: nothing
+  // is captured, the test is false, and a read is the unassigned error
+  assert.match(py("f := map< A -> B | x :-> assigned a select a else 0 >;"), /rule=lambda x: \(_m\._val\(_m\._UNSET, "a"\) if _m\._bool\(False\) else 0\)/);
+  // a read first imports a, and a later `assigned a` is rejected
+  assert.match(py("f := map< A -> B | x :-> a + (assigned a select 1 else 0) >;"), /^_m\._compile_error\(1, 31, "Imported environment value 'a' cannot be used as a local"\)$/m);
+  assert.match(py("delete a;"), /_m\._delete_check\("a"\)\n\s*del a/);
+  // a function expression would be hoisted out of the rule: refused
+  assert.match(py("f := map< A -> B | x :-> (function(y) return y; end function)(x) >;"), /_m\._not_supported\("a function expression inside a map rule"/);
 });
