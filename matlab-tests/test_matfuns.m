@@ -23,3 +23,4 @@ o = struct('UT', true, 'TRANSA', true); show(r(linsolve([2 1; 9 4], [2; 5], o)))
 % (funm of a defective matrix: the Jordan block's derivatives)
 show(r(funm([1 1; 0 1], @exp))); show(r(funm([1 1; 0 1], @cos))); show(r(funm([1 1; 0 1], @sin)));
 show(r(funm([2 1; 0 2], @cosh))); show(r(funm([2 1; 0 2], @sinh))); show(r(funm([2 1; 0 2], @log)));
+show(invhilb(9)); A = invhilb(12); show(A(6:7, 11:12));
