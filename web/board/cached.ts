@@ -106,8 +106,8 @@ export interface Conflict { type: string; page: string; id: string; field: strin
 // (a record's key: its type, page and id, whatever they hold, CORR-3D2-3)
 const recKey = (r: any) => JSON.stringify([r.type, r.page, r.id]);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-// (records as fromRecords reads them)
-const records = (rs: any[]) => {
+/** Records (a list) as fromRecords reads them. */
+export const records = (rs: any[]) => {
   const match = (where: any) => (r: any) => Object.entries(where).every(([k, v]) => r[k] === v);
   return { get: (w: object) => rs.filter(match(w)), getOne: (w: object) => rs.find(match(w)), set: () => { throw new Error("read only"); }, delete: () => { throw new Error("read only"); }, isEqual: () => false } as any;
 };
