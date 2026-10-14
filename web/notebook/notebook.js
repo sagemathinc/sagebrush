@@ -1962,9 +1962,10 @@ export function createNotebook(root, opts = {}) {
     /** Files changed outside the notebook's cells (uploaded, deleted): the cells that read them rerun (the reactive notebook). */
     filesChanged(paths) { return reactive() && kernel.reactive ? kernel.reactive.filesChanged(paths) : Promise.resolve(null); },
     /**
-     * Each code cell's output key, time from root and whether a widget moved
-     * since it ran (design/outputs.md): {id: {key, ms, fromRoot, untimed,
-     * widget}}, or null when the notebook is not reactive.  A key is null for
+     * Each code cell's output key, time from root, whether a widget moved
+     * since it ran, and how many files its last run read (design/outputs.md):
+     * {id: {key, ms, fromRoot, untimed, widget, reads}}, or null when the
+     * notebook is not reactive.  A key is null for
      * a cell with an error, or reading from one.
      */
     async outputKeys() {
@@ -1975,7 +1976,7 @@ export function createNotebook(root, opts = {}) {
       // (built from entries: an id is any string, "__proto__" too, SEC-781-1)
       return Object.fromEntries(cells().filter((c) => c.type === "code").map((c) => {
         const { ms, untimed } = r.fromRoot(c.id);
-        return [c.id, { key: keys.get(c.id) ?? null, ms: r.times.get(c.id) ?? null, fromRoot: ms, untimed, widget: r.widgetDriven.has(c.id) }];
+        return [c.id, { key: keys.get(c.id) ?? null, ms: r.times.get(c.id) ?? null, fromRoot: ms, untimed, widget: r.widgetDriven.has(c.id), reads: r.files.get(c.id)?.reads?.length ?? 0 }];
       }));
     },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */

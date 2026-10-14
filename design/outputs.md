@@ -1,6 +1,6 @@
 # Outputs: what is kept, where, and for how long
 
-*Status: decided (William, October 14 2026). Steps 1 and 2 are built (web/board/preview.ts, code.ts); the rest follow.*
+*Status: decided (William, October 14 2026). Steps 1 to 3 are built for boards (web/board/preview.ts, outcache.ts, code.ts); the rest follow.*
 
 A code item's output (or a reactive notebook cell's) is a function of its
 code and its inputs. So an output is something to recompute, not to store.
@@ -70,8 +70,10 @@ running it.
   the cell's id). The key changes when the code changes, or when anything
   upstream does, as a Merkle tree.
 - **Files are checked, not keyed.** An entry records the SHA-256 of each file
-  its run read, and is used only if those files are unchanged. Widget values
-  a cell reads are part of its key.
+  its run read, and is used only if those files are unchanged. Outputs
+  computed after a widget moved (and what depends on them) are not kept
+  until the interpreter restarts: their keys don't say where the widgets
+  are.
 - **What is cached:** the full outputs of the cells whose time from root is
   over the document's budget (2 s by default). These are the cells that would
   not rerun by themselves on open.
@@ -81,6 +83,11 @@ running it.
   outputs as up to date, marked "cached" with its date. It is not run. Its
   values are not in the interpreter, so running a cell that reads it runs
   it first, as for any stale ancestor.
+- **A cell that read files is not cached yet:** its entry would need the
+  files' hashes, which come with the files' own store.
+- **Which cache:** the board's seed names it, so a board without one (an
+  example) keeps none, and a copy of a board shares its cache in the same
+  browser, which only means the same outputs for the same keys.
 - **The engine's version is recorded, not keyed.** A new engine (every
   deploy) would otherwise empty every cache. `verify()` recomputes from
   scratch and compares, as it does for shown outputs.

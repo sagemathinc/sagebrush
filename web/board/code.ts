@@ -36,6 +36,8 @@ export function siteEngine(base: URL, runner = true): EngineParts {
 }
 
 import { PREVIEW_MS, makePreview, previewLabel, type Preview } from "./preview";
+import { CACHE_MS, cachedLabel, type CachedOutputs, type OutputCache } from "./outcache";
+import { OWN_ENGINE } from "./engine";
 
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
@@ -187,8 +189,8 @@ export class BoardCode {
     const held = items.filter((it) => it.preview && !before.has(it.id));
     if (relang) for (const id of [...this.held]) if (before.has(id)) this.held.delete(id);
     for (const it of held) this.held.add(it.id);
-    // (an item held whose code changed: run, as any edit)
-    for (const id of changed) if (!held.some((it) => it.id === id)) this.held.delete(id);
+    // (an item held whose code changed: run, as any edit, and what it holds with it)
+    this.release(changed.filter((id) => before.has(id) && this.held.has(id)));
     if (changed.length || !same) {
       nb.applyRemote({
         mode,
@@ -207,11 +209,39 @@ export class BoardCode {
     }
     if (!changed.length) return changed;
     let report: any;
-    if (held.length && nb.reactive) {
-      // (every item registered, those not changed kept as they are; then the
-      // others run, but not what reads a held one, which would run it)
+    const fresh = items.filter((it) => !before.has(it.id)), ns = this.cacheDoc();
+    if (nb.reactive && (held.length || (this.cache && ns && fresh.length))) {
+      // (every item registered, those not changed kept as they are)
       await nb.reactive.load({ stale: true, fresh: new Set(items.filter((it) => !changed.includes(it.id)).map((it) => it.id)) });
-      const blocked: Set<string> = nb.reactive.graph.closure(held.map((it) => it.id));
+      // items new here whose outputs the board's cache has, under their keys
+      // now (outcache.ts): shown as computed, and held as previews are
+      const hits = new Map<string, CachedOutputs>();
+      if (this.cache && ns && fresh.length) {
+        const keys = await nb.outputKeys();
+        const want = new Map(fresh.map((it) => [keys?.[it.id]?.key, it.id]).filter(([k]) => !!k) as [string, string][]);
+        const got = await this.cache.get(ns, [...want.keys()]).catch(() => new Map<string, CachedOutputs>());
+        for (const [k, e] of got) hits.set(want.get(k)!, e);
+      }
+      if (hits.size) {
+        for (const id of hits.keys()) this.held.add(id);
+        nb.applyRemote({
+          mode,
+          seed,
+          cells: items.map((it) => {
+            const c = this.cell(it.id), e = hits.get(it.id);
+            const manual = this.held.has(it.id) ? { metadata: { sagebrush: { manual: true } } } : {};
+            if (e) return { id: it.id, code: it.code, outputs: e.outputs, ms: e.ms, ...manual };
+            if (held.includes(it)) return { id: it.id, code: it.code, outputs: it.preview!.outputs, ms: it.preview!.ms, ...manual };
+            return { id: it.id, code: it.code, ...(c ? { outputs: nb.saveOutputs(c.out) } : {}), ...manual };
+          }),
+        }, false);
+        for (const [id, e] of hits) {
+          const c = this.cell(id);
+          if (c) Object.assign(c.out.dataset, { preview: cachedLabel(e), cached: "1" });
+        }
+      }
+      // (then the others run, but not what reads a held one, which would run it)
+      const blocked: Set<string> = nb.reactive.graph.closure([...held.map((it) => it.id), ...hits.keys()]);
       report = await nb.runCells(changed.filter((id) => !blocked.has(id))).finally(() => this.changed());
     } else report = await nb.runCells(changed).finally(() => this.changed());
     this.ran(report);
@@ -239,9 +269,44 @@ export class BoardCode {
     for (const id of ids) {
       this.gens.set(id, this.generation(id) + 1);
       const c = this.cell(id);
-      if (c) delete c.out.dataset.preview;
+      if (c) {
+        delete c.out.dataset.preview;
+        delete c.out.dataset.cached;
+      }
     }
-    if (ids.length) this.onRan?.(ids);
+    if (ids.length) {
+      this.onRan?.(ids);
+      this.keepOutputs(ids).catch((e) => console.warn("board: the outputs' cache:", e));
+    }
+  }
+
+  /** the board's output cache (outcache.ts: the host's), if any */
+  cache: OutputCache | null = null;
+  /** an item over this many ms from root keeps its outputs in the cache */
+  cacheMs = CACHE_MS;
+  /** the cache's name for this board: its seed (a board without one keeps none) */
+  private cacheDoc(): string | null {
+    return this.seed !== BOARD_SEED ? this.seed : null;
+  }
+  /** After a run: the outputs of the items that ran and are slow from root
+   * into the cache (each of one run, as previews are), then the board's
+   * cache swept, its items' keys now marked. */
+  private async keepOutputs(ids: string[]) {
+    const cache = this.cache, ns = this.cacheDoc();
+    if (!cache || !ns) return;
+    const gens = new Map(ids.map((id) => [id, this.generation(id)]));
+    const keys = await this.nb.outputKeys();
+    if (!keys || this.cacheDoc() !== ns) return;
+    const at = new Date().toISOString();
+    const entries: CachedOutputs[] = [];
+    for (const id of ids) {
+      const c = this.cell(id), k = keys[id], state = this.state(id);
+      // (not: running again, interrupted, after a widget moved, or one that read files, whose bytes its key doesn't say)
+      if (!c || !k?.key || k.widget || k.reads || (state !== "" && state !== "failed") || this.generation(id) !== gens.get(id) || k.fromRoot <= this.cacheMs) continue;
+      entries.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot), ...(OWN_ENGINE ? { engine: OWN_ENGINE.id } : {}) });
+    }
+    for (const e of entries) await cache.put(ns, e);
+    if (entries.length) await cache.sweep(ns, new Set(Object.values(keys).map((k: any) => k.key).filter(Boolean)));
   }
   /** an item over this many ms from root keeps a preview (preview.ts) */
   previewMs = PREVIEW_MS;

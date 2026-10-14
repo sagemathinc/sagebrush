@@ -38,6 +38,7 @@ import { Board, type Camera, type Edge, type Item } from "./board";
 import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, templateOf, lookOf, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
+import type { OutputCache } from "./outcache";
 import { Toolbar, defaultTools } from "./toolbar";
 import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
@@ -89,6 +90,8 @@ export interface BoardHost {
   home?: string;
   /** the example boards (Examples…) */
   examples?: { list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]> };
+  /** where slow code items' outputs are kept between visits (outcache.ts; design/outputs.md) */
+  outputs?: OutputCache;
   /** the board as one HTML file (Download as HTML); with `python`, the file
    * carries the code's engine, so its code runs without the network */
   exportHtml?(d: BoardDoc, o?: { python?: boolean }): Promise<string>;
@@ -321,6 +324,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const c = (code = host.code(doc!));
     c.onChange = () => { board.codeStates(); relayout(); };
     c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
+    c.cache = host.outputs ?? null;
     c.ready.then((ok) => {
       // (it could not start: the caption says why, until the next edit)
       if (!ok) {
