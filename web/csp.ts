@@ -63,7 +63,10 @@ export function headersFor(dir: string): string {
     }
   }
   const base = readFileSync(join(here, "_headers"), "utf8").trimEnd();
-  return `${base}\n# every page's Content-Security-Policy (written by web/csp.ts)\n${rules.map(([pattern, csp]) => `${pattern}\n  Content-Security-Policy: ${csp}`).join("\n")}\n`;
+  // (the runner's page exactly as built: no-transform keeps Cloudflare from
+  // adding its analytics script to it, which its policy would refuse anyway)
+  const extra = (pattern: string) => (pattern === "/runner/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "");
+  return `${base}\n# every page's Content-Security-Policy (written by web/csp.ts)\n${rules.map(([pattern, csp]) => `${pattern}\n  Content-Security-Policy: ${csp}${extra(pattern)}`).join("\n")}\n`;
 }
 
 export function writeHeaders() {
