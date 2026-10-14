@@ -457,6 +457,11 @@ async function purgeStatus(rid) {
   for (let i = 0; i < 24; i++) last = (await signIn(S)).session;
   const n = (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(S).first()).n;
   ok(n === 20 && (await api(last).get("/api/share/me")).status === 200, `at most 20 sessions per account, the newest kept: ${n}`);
+  // (20 sessions made in this same second, with the lowest hashes: the new one is still kept, CORR-E55-1)
+  const sec = Math.floor(Date.now() / 1000);
+  await db.batch(Array.from({ length: 20 }, (_, i) => db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES (?1, ?2, ?3, ?4)").bind(i.toString(16).padStart(64, "0"), S, sec, sec + 86400)));
+  const tied = (await signIn(S)).session;
+  ok((await api(tied).get("/api/share/me")).status === 200, "a session made in the same second as 20 others is the one kept");
   // records of deleted collections: at most 1000 per account, and 30 days
   const hA = sha("sagebrush-account\n" + A);
   const old = Math.floor(Date.now() / 1000) - 40 * 86400;
@@ -468,7 +473,15 @@ async function purgeStatus(rid) {
   const kept = (await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND account_hash = ?1").bind(hA).first()).n;
   const newest = await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND account_hash = ?1 AND collection = ?2").bind(hA, col.id).first();
   ok(kept === 1000 && newest.n === 1, `at most 1000 records of deleted collections per account, the newest kept: ${kept}`);
+  // (and finished self-deletions after 30 days, account deletions after a year, HARD-E55-2)
+  await db.batch([
+    db.prepare("INSERT INTO purges (request_id, account_hash, kind, status, created, finished) VALUES ('old-self', ?1, 'self', 'done', ?2, ?2)").bind(hA, old),
+    db.prepare("INSERT INTO purges (request_id, account_hash, kind, status, created, finished) VALUES ('old-admin', ?1, 'admin', 'done', ?2, ?2)").bind(hA, old),
+    db.prepare("INSERT INTO purges (request_id, account_hash, kind, status, created, finished) VALUES ('older-admin', ?1, 'admin', 'done', ?2, ?2)").bind(hA, old - 400 * 86400),
+  ]);
   await tick();
+  const kinds = (await db.prepare("SELECT request_id FROM purges WHERE request_id IN ('old-self', 'old-admin', 'older-admin')").all()).results.map((r) => r.request_id);
+  ok(kinds.join() === "old-admin", `finished self-deletions go after 30 days, account deletions after a year: ${kinds.join()}`);
   const stale = (await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND finished < ?1").bind(Math.floor(Date.now() / 1000) - 30 * 86400).first()).n;
   const fresh = await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND collection = ?1").bind(col.id).first();
   ok(stale === 0 && fresh.n === 1, `records older than 30 days go with the daily job, newer ones stay: ${stale} old left`);
