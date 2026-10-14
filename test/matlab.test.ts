@@ -677,3 +677,41 @@ test("eig uses B, its options and the left eigenvectors as documented, and refus
     ...Array(2).fill("eig: the \"chol\" algorithm needs a symmetric A and a symmetric positive definite B; Sagebrush does not fall back to another algorithm when it is asked for."),
   ]);
 });
+
+test("psi, beta, betaln, erfcx, erfinv, erfcinv and expint keep their documented domains and Sagebrush's choices", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (values where Octave's are less accurate: mpmath's are 26.2094699605161, 15.0655747025926, 6.60158062235514)
+    "fprintf('%.14g %.14g %.14g\\n', erfcinv(1e-300), erfcinv(1e-100), erfcinv(1e-20));",
+    "fprintf('%.16g %.16g\\n', -psi(1), psi(1, 2));",
+    // (the right-hand limits at 0, and psi(Inf), where Octave gives NaN and -0.5772)
+    "disp([psi(0) psi(1, 0) psi(2, 0) psi(Inf) psi(1, Inf)]);",
+    "try, psi(-1), catch e, disp(e.message), end",
+    "try, psi(1i), catch e, disp(e.message), end",
+    "try, psi(1.5, 2), catch e, disp(e.message), end",
+    "try, psi([1 2], 2), catch e, disp(e.message), end",
+    "try, psi(101, 2), catch e, disp(e.message), end",
+    "try, beta(-1, 2), catch e, disp(e.message), end",
+    "try, betaln(2, -0.5), catch e, disp(e.message), end",
+    "try, beta([1 2], [1 2 3]), catch e, disp(e.message), end",
+    "try, erfinv(0.5i), catch e, disp(e.message), end",
+    "try, erfcx(int8(3)), catch e, disp(e.message), end",
+    "disp(class(expint(single(2)))); disp(isreal(expint(2))); disp(isreal(expint(-2)));",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim().replace(/\s+/g, " ")), [
+    "26.209469960516 15.065574702593 6.6015806223551",
+    "0.5772156649015329 0.6449340668482264",
+    "-Inf Inf -Inf Inf 0",
+    "psi: X must be real and nonnegative.",
+    "psi: X must be real and nonnegative.",
+    "psi: k must be a nonnegative integer scalar.",
+    "psi: k must be a nonnegative integer scalar.",
+    "psi: Sagebrush covers k <= 100.",
+    "beta: Z must be real and nonnegative.",
+    "betaln: W must be real and nonnegative.",
+    "beta: Z and W must be the same size, or one of them a scalar.",
+    "erfinv: x must be real.",
+    "Undefined function 'erfcx' for input arguments of type 'int8'.",
+    "single", "1", "0",
+  ]);
+});

@@ -587,6 +587,13 @@ The rest:
   with a symmetric positive definite B is the page's "chol" algorithm;
   another pair is solved as B \ A, with V's and W's columns of 2-norm 1
   (Sagebrush's choice; the page leaves their norms open);
+- `psi`, `beta` and `betaln` of negative arguments (their pages ask for
+  real nonnegative ones; Octave answers), and `psi(k, X)` for k > 100. Where
+  the pages say nothing, `psi(k, 0)` is the limit from the right (-Inf for
+  even k, Inf for odd k) and `psi(Inf)` is Inf; Octave gives NaN and
+  -0.5772. These functions, `erfcx`, `erfinv`, `erfcinv` and `expint` are
+  thin wrappers (lib/_matlab_special.py) over the shared numerics in
+  lib/_special.py (design/special.md);
 - the random sparse matrices' exact places and values: `sprand`'s and
   `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
   construction is Sagebrush's own (exactly the requested number of
