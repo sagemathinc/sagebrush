@@ -163,9 +163,11 @@ export class Editor {
     t.addEventListener(type, f);
     this.offs.push(() => t.removeEventListener(type, f));
   }
-  /** Stop (the board is unmounted): what is being written is kept first; then
-   * no more listening to the page, and its effects disposed. */
+  /** Stop (the board is unmounted): a drag or resize under way is dropped,
+   * nothing of it kept (CORR-1D9-1); what is being written is kept; then no
+   * more listening to the page, and its effects disposed. */
   async destroy() {
+    this.cancelGesture();
     await this.inplace?.end();
     this.close();
     for (const f of [...this.offs.splice(0), ...this.effects.splice(0)]) f();
