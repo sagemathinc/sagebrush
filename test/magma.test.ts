@@ -118,3 +118,20 @@ test("notebook session: a Magma cell's error fails its cell, said as Magma says 
   // (the session goes on, x as it was)
   assert.equal(out(11, "stdout"), "42\n");
 });
+
+test("notebook session: an exit status as text is at most 4096 characters, and one that can't be text still ends its cell, failed (HARD-8E4-1, CORR-8E4-2)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  await s.handle({ id: 1, code: "import sys\nsys.exit('x' * 1000000)" });
+  await s.handle({ id: 2, code: "import sys\nclass Bad:\n    def __str__(self):\n        raise RuntimeError('string failed')\nsys.exit(Bad())" });
+  await s.handle({ id: 3, code: "print('after')" });
+  const out = (id: number, stream: string) => msgs.filter((m) => m.id === id && m.stream === stream).map((m) => m.text).join("");
+  const done = (id: number) => msgs.find((m) => m.id === id && m.done);
+  assert.equal(out(1, "stderr"), "x".repeat(4096) + "… (995904 more characters)\n");
+  assert.ok(done(1)?.error);
+  assert.equal(out(2, "stderr"), "(an exit status that could not be written as text)\n");
+  assert.ok(done(2)?.error, "it ends, failed");
+  assert.equal(out(3, "stdout"), "after\n");
+});

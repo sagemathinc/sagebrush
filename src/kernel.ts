@@ -26,6 +26,7 @@ import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
+import { exitText } from "./notebook-session";
 
 export type Mode = "sage" | "python" | "magma" | "matlab";
 
@@ -395,11 +396,22 @@ export function kernelWorker(mode: Mode) {
   // stdout and stderr to the main thread, at least every 100 ms during a run
   // (timed from the start of the cell)
   let last = 0;
-  // (the end of what the cell printed: a Magma error's own words, for Jupyter's error reply)
-  let printed = "";
+  // (the line being printed, its start, however it comes in pieces, and the
+  // last Magma error line's start: Jupyter's error reply says it, CORR-396-1)
+  const LINE_MAX = 1000;
+  let line = "", lineLength = 0, magmaError: string | null = null;
+  const printed = (s: string) => {
+    const parts = s.split("\n");
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) { line = ""; lineLength = 0; }
+      lineLength += parts[i].length;
+      if (line.length < LINE_MAX) line = (line + parts[i]).slice(0, LINE_MAX);
+      if (/^(User|Runtime) error\b/.test(line)) magmaError = lineLength > LINE_MAX ? line + "…" : line;
+    }
+  };
   for (const [stream, name] of [[R.stdout, "stdout"], [R.stderr, "stderr"]] as [any, string][]) {
     stream.write = function (s: string) {
-      if (name === "stdout") printed = (printed + s).slice(-4096);
+      if (name === "stdout") printed(s);
       this.buf.push(s);
       this.size += s.length;
       const now = Date.now();
@@ -454,8 +466,8 @@ export function kernelWorker(mode: Mode) {
         // the text being on stdout already), or sys.exit(1)
         const c = exc.code;
         if (c === null || c === undefined || c === 0 || c === false) return;
-        const said = mode === "magma" ? printed.split("\n").reverse().find((l) => /^(User|Runtime) error\b/.test(l)) : undefined;
-        errorReported = said !== undefined ? { ename: "MagmaError", evalue: said, traceback: [] } : { ename: "SystemExit", evalue: R.str(c), traceback: [`SystemExit: ${R.str(c)}`] };
+        const said = mode === "magma" ? magmaError : null, t = said === null ? exitText(c) : "";
+        errorReported = said !== null ? { ename: "MagmaError", evalue: said, traceback: [] } : { ename: "SystemExit", evalue: t, traceback: [`SystemExit: ${t}`] };
         if (current !== null) port.postMessage({ id: current, error: errorReported });
       }
     }
@@ -504,7 +516,9 @@ export function kernelWorker(mode: Mode) {
     current = m.id;
     last = Date.now();
     errorReported = null;
-    printed = "";
+    line = "";
+    lineLength = 0;
+    magmaError = null;
     R.INTR[0] = 0;
     if (mode === "magma") {
       let py: string | null = null;
