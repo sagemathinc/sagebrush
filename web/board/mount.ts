@@ -1241,9 +1241,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let historyReady: Promise<BoardTimeTravel | null> | null = null;
   // (the history before, being forgotten: the next one opens once it is)
   let historyGone: Promise<unknown> = Promise.resolve();
+  // (each document shown its generation: an open finishing after another
+  // document was shown is not the board's history; the one replacing it
+  // records into it what was its, and closes it, CORR-CA3-2)
+  let historyGen = 0, historyShut = false;
   function timeTravel(): Promise<BoardTimeTravel | null> {
-    if (!host.history) return Promise.resolve(null);
-    return (historyReady ??= historyGone.then(() => host.history!(docId)).then((h) => {
+    if (!host.history || historyShut) return Promise.resolve(null);
+    if (historyReady) return historyReady;
+    const g = historyGen;
+    return (historyReady = historyGone.then(() => host.history!(docId)).then((h) => {
+      if (g !== historyGen) return h;
       h?.on(() => { if (!$("tt").hidden) ttUpdate(); });
       return (boardHistory = h);
     }, (e) => {
@@ -1258,6 +1265,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function newHistory(forget?: string | null) {
     closeTimeTravel(false);
     const old = historyReady;
+    historyGen++;
     historyReady = null;
     boardHistory = null;
     remembered = false;
@@ -1280,20 +1288,34 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!remembered && prev && prev !== replaced) toRecord.push(prev);
     remembered = true;
     if (doc) toRecord.push(doc);
-    if (!recordFrame) recordFrame = requestAnimationFrame(() => setTimeout(() => { recordFrame = 0; recordNow().catch((e) => console.warn("board: TimeTravel:", e)); }, 0));
+    if (!recordFrame) recordFrame = requestAnimationFrame(() => setTimeout(() => { recordFrame = 0; if (toRecord.length) recordNow().catch((e) => console.warn("board: TimeTravel:", e)); }, 0));
   }
-  async function recordNow() {
-    const h = await timeTravel();
-    const list = toRecord.splice(0);
-    if (h && !destroyed) for (const d of list) h.record(d);
-    return h;
+  // The versions waiting, recorded: taken with their history (the
+  // document's as it is now) before anything is waited for (CORR-CA3-1)
+  function recordNow(): Promise<BoardTimeTravel | null> {
+    const list = toRecord.splice(0), ready = timeTravel();
+    return ready.then((h) => { if (h) for (const d of list) h.record(d); return h; });
+  }
+  // (and when the page goes away or out of sight: recorded, CORR-CA3-3)
+  const recordPending = () => { if (toRecord.length) recordNow().catch((e) => console.warn("board: TimeTravel:", e)); };
+  on(window, "pagehide", recordPending);
+  on(document, "visibilitychange", () => { if (document.visibilityState === "hidden") recordPending(); });
+  // (the history of the document shown, its versions recorded; another shown meanwhile: its)
+  async function currentHistory(): Promise<BoardTimeTravel | null> {
+    for (;;) {
+      const g = historyGen, h = await recordNow();
+      if (g === historyGen) return h;
+    }
   }
   // The bar: a slider over the versions (the newest at the right), when, Revert, ✕.
   let viewing: BoardDoc | null = null;
   let liveCode: Board["code"] = null;
   const slider = $("ttslider") as HTMLInputElement;
   async function openTimeTravel() {
+    const g = historyGen;
     const h = await recordNow();
+    // (another document shown meanwhile: nothing more, CORR-CA3-2)
+    if (g !== historyGen || destroyed) return;
     if (!h || !doc) { fail(new Error("TimeTravel is not available here (it keeps its history in this browser's storage)")); return; }
     h.record(doc);
     remembered = true;
@@ -1363,6 +1385,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       pen.destroy();
       code?.close();
       code = null;
+      // (the versions waiting, recorded first, CORR-CA3-3)
+      cancelAnimationFrame(recordFrame);
+      if (toRecord.length) await recordNow().catch((e) => console.warn("board: TimeTravel:", e));
+      historyShut = true;
       boardHistory?.close?.();
       cancelAnimationFrame(relayoutFrame);
       clearTimeout(idle);
@@ -1423,9 +1449,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** Turn Edit mode on or off. */
       editing: (on: boolean) => editor.setOn(on),
       /** TimeTravel: the versions kept in this browser, oldest first ({index, ms}). */
-      versions: async () => (await recordNow())?.versions().map(({ index, ms }) => ({ index, ms })) ?? [],
+      versions: async () => (await currentHistory())?.versions().map(({ index, ms }) => ({ index, ms })) ?? [],
       /** The board at version i (a document, as load() takes it). */
-      version: async (i: number) => { const h = await recordNow(), v = h?.versions()[i]; return v ? h!.docAt(v.time) : null; },
+      version: async (i: number) => { const h = await currentHistory(), v = h?.versions()[i]; return v ? h!.docAt(v.time) : null; },
     },
   };
 }
