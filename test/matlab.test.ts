@@ -411,3 +411,18 @@ test("data functions where Octave differs from MATLAB: prctile down a column vec
   // documented one-observation cases: corrcoef(5) NaN, corrcoef(1, 2) 1, corrcoef(1, 1) NaN)
   assert.deepEqual(out.trim().split("\n"), ["[1;8.1]", "[7;7;7]", "[0 0 8 8 6 -1 3 4 5 0]", "47663 47663", "1 1", "-0.6250 -0.3750", "[NaN 1 NaN]", "1"]);
 });
+
+test("normest, from its documentation and the power method on S'S: the published examples' estimates, complex matrices, a matrix that annihilates the start", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "normest-"));
+  writeFileSync(join(dir, "t.m"), [
+    "d = sqrt((1:6).*(6:-1:1)); S = diag(d,1) + diag(d,-1); fprintf('%.4f\\n', normest(S));",
+    "fprintf('%.4f\\n', normest(sparse(1:5,1:5,1:5))); rng default; S = rand(1000); fprintf('%.4f\\n', normest(S, 1e-4));",
+    "fprintf('%.6f %.4f %.4f\\n', normest([1 2i; 3 4]), normest(sparse([1 -1; 1 -1])), normest(zeros(3)));",
+  ].join("\n") + "\n");
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8", timeout: 120000 });
+  assert.deepEqual(out.trim().split("\n"), ["6.0000", "5.0000", "500.4856", "5.305935 2.0000 0.0000"]);
+});

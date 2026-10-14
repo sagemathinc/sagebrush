@@ -536,4 +536,7 @@ The rest:
 - sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`);
 - `sprandsym`'s numbers: its construction is Sagebrush's own (exactly the
   requested number of nonzeros), not MATLAB's (sprand's and sprandn's are
-  MATLAB's).
+  MATLAB's);
+- `normest`'s iteration count: MATLAB documents the power iteration but
+  not its starting vector, so Sagebrush's (the ones vector) can take a
+  different number of iterations to the same estimate.

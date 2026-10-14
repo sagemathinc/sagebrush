@@ -1395,36 +1395,52 @@ def _norm_b(nargout, x, p=None):
 
 
 def _normest_b(nargout, S, tol=None):
-    """MATLAB's normest: the power method on S'S, to a relative tol (1e-6)"""
-    tol = 1e-6 if tol is None else _m._scalar(tol)
-    if type(S) is Sparse:
-        # (the column sums of |S|, from the nonzeros)
-        x = np.asarray(_group_sum(_cols(S), np.abs(_fvals(S)), S.n), dtype=np.float64).reshape((-1, 1))
-    else:
-        x = np.abs(_m._mat(S)).sum(axis=0).reshape((-1, 1))
-    A = S
+    """[nrm, count] = normest(S, tol): the 2-norm estimated, as MATLAB documents
+    it, by the power iteration with S and S' until two successive estimates
+    agree to within the relative tolerance tol (1e-6).  The iteration is the
+    power method on S'S (Higham, "Accuracy and Stability of Numerical
+    Algorithms", 2nd ed., section 15.2), each estimate ||S'S x|| / ||S x||;
+    its start is the vector of ones (or, should S annihilate that, the
+    column of S with the largest norm, a unit vector there)"""
+    tol = 1e-6 if tol is None else float(_m._scalar(tol))
+    d = _m._dims(S)
+    n = d[1] if len(d) == 2 else int(np.prod(d[1:]))
+    if n == 0 or (type(S) is Sparse and not S.pr.size):
+        return [0.0, 0.0] if nargout > 1 else 0.0
+    At = _m.ctranspose(S)
 
     def mul(M, v):
-        return _m._mat(_m.mtimes(M, _m._unmat(v)))
-    e = float(np.sqrt(np.sum(x * x)))
-    if e == 0:
-        return [0.0, 0.0] if nargout > 1 else 0.0
-    x = x / e
-    e0 = 0.0
-    cnt = 0
-    At = _m.ctranspose(A)
-    while abs(e - e0) > tol * e:
-        e0 = e
-        Sx = mul(A, x)
-        if not np.any(Sx):
-            Sx = np.array(_m._mat(_m._B["rand"].f(1, float(Sx.shape[0]), float(Sx.shape[1]))))
-        x = mul(At, Sx)
-        normx = float(np.sqrt(np.sum(np.abs(x) ** 2)))
-        e = normx / float(np.sqrt(np.sum(np.abs(Sx) ** 2)))
-        x = x / normx
+        r = np.asarray(_m._mat(_m.mtimes(M, _m._unmat(v))))
+        return r if r.dtype.kind == "c" else r.astype(np.float64)
+
+    def norm2(v):
+        a = np.abs(v)
+        m = float(np.max(a)) if a.size else 0.0
+        return 0.0 if m == 0 else m * float(np.sqrt(np.sum((a / m) ** 2)))
+    x = np.ones((n, 1))
+    if norm2(mul(S, x)) == 0:
+        cn = (_group_sum(_cols(S), np.abs(_fvals(S)) ** 2, S.n) if type(S) is Sparse
+              else np.sum(np.abs(_m._mat(S)) ** 2, axis=0))
+        x = np.zeros((n, 1))
+        x[int(np.argmax(np.asarray(cn).reshape(-1)))] = 1.0
+    x = x / norm2(x)
+    est, cnt = 0.0, 0
+    while True:
+        Sx = mul(S, x)
+        nsx = norm2(Sx)
+        if nsx == 0:
+            e = 0.0
+        else:
+            z = mul(At, Sx)
+            nz = norm2(z)
+            e = nz / nsx
+            x = z / nz if nz else z
         cnt += 1
-        if cnt > 100:
-            _m.warning_("NORMEST did not converge for 100 iterations with tolerance %g" % tol)
+        if abs(e - est) <= tol * e or e == 0:
+            break
+        est = e
+        if cnt >= 1000:
+            _m.warning_("normest: no convergence within 1000 iterations to the tolerance %g." % tol)
             break
     return [e, float(cnt)] if nargout > 1 else e
 
