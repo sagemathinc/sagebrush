@@ -11,6 +11,14 @@ and runs on a runtime library with MATLAB's semantics:
   built-in functions, over Sagebrush's numpy.
 - **lib/_matlab_files.py** loads function files (`name.m` in the program's
   folder).
+- More built-ins, registered in the same table:
+  - **lib/_matlab_numeric.py**: special matrices, matrix functions,
+    polynomials and interpolation;
+  - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
+    gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
+    moving statistics);
+  - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
+    (below).
 
 ## The translator
 
