@@ -340,7 +340,43 @@ double sparse nnz=5 1x16
 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
 double 16x16
 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 2 3 0 0 0 0 0 0 2 3 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 4 0 0 0 0 5 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 2 0 2 0 3 0 3 0 0 0 0 0 0 0 0 0 0 4 6 0 0 6 9 0 0 0 0 0 0 0 0 0 0 0 0 8 0 0 0 12 0 0 0 0 0 0 0 0 10 0 0 0 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8 12 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 16 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 5 0 5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 10 15 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+double sparse nnz=11 4x8
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 1 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=11 4x8
+1 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=11 8x4
+0 0 1 0 1 0 1 0 0 2 3 0 0 2 3 0 0 0 0 4 0 0 0 4 5 0 0 0 5 0 0 0 
+double sparse nnz=10 4x8
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=10 8x4
+0 0 1 0 0 0 1 0 0 2 3 0 0 2 3 0 0 0 0 4 0 0 0 4 5 0 0 0 5 0 0 0 
 ERROR MATLAB:catenate:dimensionMismatch: Dimensions of arrays being concatenated are not consistent.
+double sparse nnz=2 1x5
+0 0 0 5 7 
+logical sparse nnz=6 4x8
+0 0 0 0 0 0 1 0 0 0 0 1 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 1 0 0 0 
+double sparse nnz=8 4x8
+0 0 0 0 0 0 1 0 0 0 0 1 1 0 0 0 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=9 4x8
+0 0 0 0 0 0 1 0 0 0 0 1 1 0 0 0 1 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=8 4x8
+re 0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 1 0 0 0 0 0 0 0 0 -3 0 0 0 0 0 0 
+im 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 
+double sparse nnz=5 4x4
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+double sparse nnz=5 4x4
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+single sparse nnz=11 4x8
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 1 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+ERROR MATLAB:UnableToConvert: The following error occurred converting from double to int8:
+Attempt to convert to unimplemented sparse type
+ERROR MATLAB:UnableToConvert: The following error occurred converting from double to char:
+Attempt to convert to unimplemented sparse type
+double sparse nnz=11 8x4
+0 0 1 0 1 0 1 0 0 2 3 0 0 2 3 0 0 0 0 4 0 0 0 4 5 0 0 0 5 0 0 0 
+double sparse nnz=11 4x8
+0 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 1 0 1 0 0 2 3 0 0 0 0 4 5 0 0 0 
+ERROR MATLAB:catenate:sparseDimensionBad: Dimension for sparse matrix concatenation must be <= 2.
 double sparse nnz=1 1x1
 2 
 double sparse nnz=0 1x1

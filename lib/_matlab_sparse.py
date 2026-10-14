@@ -329,6 +329,138 @@ def truth(S):
     return True
 
 
+# ------------------------------------------------------------------ assignment and concatenation
+
+def _rhs_values(v, cls):
+    """the values assigned into a sparse matrix of class cls, column-major"""
+    c = _m.class_(v)
+    if c in ("cell", "struct", "string", "function_handle") or not (_m._isnumlike(v) or type(v) is Sparse):
+        raise _err("Conversion to %s from %s is not possible." % (cls, c), "MATLAB:invalidConversion")
+    a = _m._farr(full(v) if type(v) is Sparse else v).reshape(-1)
+    if cls == "logical":
+        if a.dtype.kind == "c":
+            a = a.real
+        if np.any(np.isnan(a)):
+            raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
+        return a != 0
+    return a
+
+
+def assign(S, args, v):
+    """S(args) = v: sparse, its class kept (complex if a complex value goes in)"""
+    args = [index_arg(a) for a in args]
+    cls = class_(S)
+    vals = _rhs_values(v, cls)
+    dims = (S.m, S.n)
+    try:
+        nd = _m._grow_dims(dims, args, _m._dims(v))
+    except _m.MatlabError as e:
+        if e.identifier == "MATLAB:indexed_matrix_cannot_be_resized":
+            raise _err("In an assignment  A(I) = B, a matrix A cannot be resized.", "MATLAB:indexed_matrix_cannot_be_resized")
+        raise
+    if len(nd) > 2:
+        raise _err("N-dimensional sparse arrays are not supported.")
+    m, n = nd
+    if len(args) == 1:
+        a = args[0]
+        if a is COLON:
+            tk = np.arange(m * n, dtype=_I)
+        else:
+            tk, _, _ = _m._ivec(a, m * n, -1, True)
+    else:
+        for k in range(2, len(args)):
+            _m._ivec(args[k], 1, k, False)
+        I = np.arange(m, dtype=_I) if args[0] is COLON else _m._ivec(args[0], m, 0, True)[0]
+        J = np.arange(n, dtype=_I) if args[1] is COLON else _m._ivec(args[1], n, 1, True)[0]
+        tk = (J.reshape((-1, 1)) * m + I.reshape((1, -1))).reshape(-1)
+    if vals.size != 1 and vals.size != tk.size:
+        raise _err("Unable to perform assignment because the indices on the left side are not compatible with the size of the right side.", "MATLAB:subsassigndimmismatch")
+    # the old nonzeros, where nothing is assigned, and the assigned values (the last one at a place)
+    old = _cols(S) * m + S.ir
+    keep = ~np.isin(old, tk) if tk.size else np.ones(old.size, dtype=bool)
+    new = np.repeat(vals, tk.size) if vals.size == 1 else vals
+    ov = S.pr[keep]
+    if ov.dtype.kind != new.dtype.kind or ov.dtype != new.dtype:
+        if cls == "logical":
+            new = new.astype(bool)
+        else:
+            dt = np.result_type(ov.dtype if ov.size else np.float64, new.dtype)
+            if dt.kind == "b":
+                dt = np.float64
+            ov, new = ov.astype(dt), new.astype(dt)
+    keys = np.concatenate([old[keep], tk])
+    allv = np.concatenate([ov, new])
+    r = make(m, n, keys % m if m else keys, keys // m if m else keys, allv, combine="last")
+    return _cast(r, cls) if cls != "logical" else r
+
+
+def delete(S, args):
+    """S(args) = []"""
+    args = [index_arg(a) for a in args]
+    m, n = S.m, S.n
+    key = _keys(S)
+    if len(args) == 1:
+        a = args[0]
+        if a is COLON:
+            return zeros(0, 0, islogical(S))
+        R = np.unique(_m._ivec(a, m * n, -1, False)[0])
+        keep = ~np.isin(key, R)
+        k = key[keep] - np.searchsorted(R, key[keep])
+        total = m * n - R.size
+        if n == 1 and m != 1:
+            return make(total, 1, k, np.zeros(k.size, dtype=_I), S.pr[keep])
+        return make(1, total, np.zeros(k.size, dtype=_I), k, S.pr[keep])
+    d = [m, n]
+    which = [k for k in range(2) if not (args[k] is COLON or _m._covers(args[k], d[k]))]
+    for k in range(2, len(args)):
+        _m._ivec(args[k], 1, k, False)
+    if not which:
+        return zeros(0, n, islogical(S))
+    if len(which) > 1:
+        raise _err("A null assignment can have only one non-colon index.", "MATLAB:nullAssignmentNonColonIndex")
+    k = which[0]
+    R = np.unique(_m._ivec(args[k], d[k], k, False)[0])
+    rows, cols = S.ir, _cols(S)
+    sub = rows if k == 0 else cols
+    keep = ~np.isin(sub, R)
+    sub = sub[keep] - np.searchsorted(R, sub[keep])
+    if k == 0:
+        return make(m - R.size, n, sub, cols[keep], S.pr[keep])
+    return make(m, n - R.size, rows[keep], sub, S.pr[keep])
+
+
+def cat(vals, dim):
+    """[...] with a sparse part: sparse; None for cells and other containers"""
+    cls = _m._cat_class(vals)
+    if cls in ("cell", "struct", "string", "handle"):
+        return None
+    if dim > 2:
+        raise _err("Dimension for sparse matrix concatenation must be <= 2.", "MATLAB:catenate:sparseDimensionBad")
+    if cls in _m._INTS or cls == "char":
+        raise _err("The following error occurred converting from double to %s:\nAttempt to convert to unimplemented sparse type" % cls, "MATLAB:UnableToConvert")
+    parts = [v for v in vals if _m._numel(v) != 0]
+    if not parts:
+        v = next(v for v in vals if type(v) is Sparse)
+        return v
+    mats = [_as_sparse(v) for v in parts]
+    for A in mats[1:]:
+        if (dim == 2 and A.m != mats[0].m) or (dim == 1 and A.n != mats[0].n):
+            raise _err("Dimensions of arrays being concatenated are not consistent.", "MATLAB:catenate:dimensionMismatch")
+    rows, cols, vs = [], [], []
+    off = 0
+    for A in mats:
+        r, c = A.ir, _cols(A)
+        rows.append(r + off if dim == 1 else r)
+        cols.append(c + off if dim == 2 else c)
+        vs.append(A.pr)
+        off += A.m if dim == 1 else A.n
+    m = off if dim == 1 else mats[0].m
+    n = off if dim == 2 else mats[0].n
+    allv = np.concatenate([x.astype(np.float64) if x.dtype.kind == "b" and cls != "logical" else x for x in vs]) if vs else np.zeros(0)
+    r = make(m, n, np.concatenate(rows), np.concatenate(cols), allv)
+    return _cast(r, cls) if cls != "logical" else r
+
+
 # ------------------------------------------------------------------ arithmetic
 
 def _is_scalar(x):
@@ -355,7 +487,8 @@ def _sparse_result(name, a, b):
     if name == "ldivide":
         return sb
     if name == "mtimes":
-        return (sa and sb) or (sa and _is_scalar(b)) or (sb and _is_scalar(a))
+        # (with a scalar, as .*)
+        return (sa and sb) or _is_scalar(a) or _is_scalar(b)
     if name == "mrdivide":
         return (sa and sb) or (sa and _is_scalar(b))
     if name == "mldivide":
@@ -876,7 +1009,7 @@ _PASS = set("""size numel length ndims isempty isscalar isvector ismatrix isrow 
 isnumeric isfloat islogical isinteger ischar iscell isstruct isstring iscellstr isobject is_function_handle
 disp display feval struct cell deal isfield whos exist clear
 plus minus times rdivide ldivide power mtimes mrdivide mldivide mpower eq ne lt le gt ge and or not uminus uplus
-transpose ctranspose""".split())
+transpose ctranspose cat horzcat vertcat""".split())
 _FULL = {}  # the built-ins as they were, for full arguments
 _active = [False]
 
