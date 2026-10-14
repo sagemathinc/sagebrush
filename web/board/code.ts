@@ -237,6 +237,7 @@ export class BoardCode {
   private ran(report: any) {
     const ids: string[] = Array.isArray(report?.ran) ? report.ran : [];
     for (const id of ids) {
+      this.gens.set(id, this.generation(id) + 1);
       const c = this.cell(id);
       if (c) delete c.out.dataset.preview;
     }
@@ -244,19 +245,32 @@ export class BoardCode {
   }
   /** an item over this many ms from root keeps a preview (preview.ts) */
   previewMs = PREVIEW_MS;
+  /** how many times each item has run here: a preview is of one run (SEC-14C-1) */
+  private gens = new Map<string, number>();
+  generation(id: string): number {
+    return this.gens.get(id) ?? 0;
+  }
   /**
    * Previews of these items' outputs as they are now: an item over previewMs
-   * from root, its preview; under it, null (it needs none).  Absent: an item
-   * whose output is not one to keep (running, interrupted, a widget moved).
+   * from root, its preview; under it, null (it needs none); each with the
+   * run it is of (generation()), so a preview finished after a later run
+   * can be dropped.  Absent: an item whose output is not one to keep
+   * (running, interrupted, a widget moved, or run again meanwhile).
    */
-  async previews(ids: string[]): Promise<Map<string, Preview | null>> {
-    const out = new Map<string, Preview | null>();
+  async previews(ids: string[]): Promise<Map<string, { preview: Preview | null; gen: number }>> {
+    const out = new Map<string, { preview: Preview | null; gen: number }>();
     if (!(await this.ready)) return out;
+    const gens = new Map(ids.map((id) => [id, this.generation(id)]));
     const keys = await this.nb.outputKeys();
-    for (const id of ids) {
+    // (every output taken now, before any picture is drawn again)
+    const now = ids.flatMap((id) => {
       const c = this.cell(id), k = keys?.[id], state = this.state(id);
-      if (!c || !k || k.widget || (state !== "" && state !== "failed")) continue;
-      out.set(id, k.fromRoot > this.previewMs ? await makePreview(this.nb.saveOutputs(c.out), { at: new Date().toISOString(), ms: k.ms ?? 0, total: k.fromRoot }) : null);
+      if (!c || !k || k.widget || (state !== "" && state !== "failed") || this.generation(id) !== gens.get(id)) return [];
+      return [{ id, k, gen: gens.get(id)!, outputs: k.fromRoot > this.previewMs ? this.nb.saveOutputs(c.out) : null }];
+    });
+    const at = new Date().toISOString();
+    for (const { id, k, gen, outputs } of now) {
+      out.set(id, { preview: outputs ? await makePreview(outputs, { at, ms: k.ms ?? 0, total: k.fromRoot }) : null, gen });
     }
     return out;
   }

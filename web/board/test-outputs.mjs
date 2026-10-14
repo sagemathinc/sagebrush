@@ -141,6 +141,8 @@ try {
   await ev("window.board.focus(['s'], true), window.board.render(), 1");
   check(await until("(() => { const el = document.querySelector('[data-code=s] .board-code-out > [data-preview]'); return !!el && getComputedStyle(el, '::before').content.includes('Preview, computed') && getComputedStyle(el, '::before').content.includes('Run to update.'); })()", 5000), "a preview says so");
   check(Date.now() - t0 < 30000, "shown without waiting for them");
+  await ev("window.board.focus(['p'], true), window.board.render(), 1");
+  check(await until("(() => { const img = document.querySelector('[data-code=p] .board-code-out img'); return !!img && /^data:image\\/(webp|png);base64,/.test(img.src) && img.naturalWidth > 0 && img.naturalWidth <= 640; })()", 5000), "the plot's preview shows as a picture, at most 640 wide (CORR-14C-3)");
   // run it: the preview's label goes, and what reads it runs too
   await ev("window.sagebrush.board.run(['s']).then(() => 1)");
   check(await doneAll(), "run, the slow item and what reads it are up to date");
@@ -148,6 +150,36 @@ try {
   // made fast: its preview, and its readers', go
   await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = "x = 42\\nprint('slow done', x)"; }).then(() => 1)`);
   check(await until("window.sagebrush.board.json().then((t) => JSON.parse(t).nodes.every((n) => !n.preview))", 30000), "fast now: no previews: " + JSON.stringify(Object.values(await nodesOf()).map((n) => [n.id, !!n.preview])));
+
+  // A preview is of one run: one whose picture is still being drawn when the
+  // item runs again is dropped, whether the later run keeps a preview or
+  // none (SEC-14C-1).  Pictures are held (decode() waits) to make it so.
+  await ev("window.__held = []; (() => { const decode = HTMLImageElement.prototype.decode; HTMLImageElement.prototype.decode = function () { const p = decode.call(this); return window.__holding ? new Promise((res, rej) => window.__held.push(() => p.then(res, rej))) : p; }; })(), 1");
+  const loop = "import time\nt0 = time.time()\nwhile time.time() - t0 < 1.3:\n    pass\n";
+  const plot = (label) => loop + `import matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\nplt.show()\nprint("${label}")`;
+  const setG = (code) => ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "g").code = ${JSON.stringify(code)}; }).then(() => 1)`);
+  const gPreview = () => ev("window.sagebrush.board.json().then((t) => JSON.stringify(JSON.parse(t).nodes.find((n) => n.id === 'g').preview ?? null))");
+  await ev("window.__holding = false, 1");
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "race", seed: SEED_A, nodes: [{ id: "g", code: "print('start')" }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os[0]?.state === '')", 30000);
+  await ev("window.sagebrush.board.setPreviewThreshold(1000), window.__holding = true, 1");
+  await setG(plot("OLD"));
+  check(await until("window.__held.length > 0", 30000), "the first run's picture is held");
+  await setG(loop + "print('NEW')");
+  check(await until("window.sagebrush.board.json().then((t) => /NEW/.test(JSON.stringify(JSON.parse(t).nodes.find((n) => n.id === 'g').preview ?? '')))", 30000), "the later run's preview is kept");
+  await ev("window.__holding = false, window.__held.splice(0).forEach((f) => f()), 1");
+  await sleep(1500);
+  const after = await gPreview();
+  check(/NEW/.test(after) && !/OLD/.test(after), "...and the earlier one, finished after it, doesn't replace it: " + after.slice(0, 160));
+  // the later run fast (no preview): the earlier one doesn't bring one back
+  await ev("window.__holding = true, 1");
+  await setG(plot("OLD2"));
+  check(await until("window.__held.length > 0", 30000), "another picture held");
+  await setG("print('FAST')");
+  check(await until("window.sagebrush.board.json().then((t) => !JSON.parse(t).nodes.find((n) => n.id === 'g').preview)", 30000), "fast now: no preview");
+  await ev("window.__holding = false, window.__held.splice(0).forEach((f) => f()), 1");
+  await sleep(1500);
+  check((await gPreview()) === "null", "...and the earlier run's, finished after, doesn't come back: " + (await gPreview()).slice(0, 160));
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

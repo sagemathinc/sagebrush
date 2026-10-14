@@ -5,7 +5,7 @@
 // into positioned items for the renderer (board.ts): an item with x and y
 // keeps them (a person moved it), the rest are placed.
 
-import { cleanPreview, type Preview } from "./preview";
+import { capPreviews, cleanPreview, type Preview } from "./preview";
 import type { Item, Edge } from "./board";
 import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
@@ -261,6 +261,12 @@ export function cleanDoc(d: any): BoardDoc {
   const out: any = strip({ format: FORMAT, version: VERSION, ...page(d), title: str(d?.title), mode: d?.mode === "sage" ? "sage" : undefined, engine: d?.engine === "latest" ? "latest" : undefined, seed: typeof d?.seed === "string" && /^[0-9a-f]{64}$/.test(d.seed) ? d.seed : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
   delete out.id;
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
+  // (previews: at most DOC_MAX in all, every page's, SEC-14C-2)
+  const notes: DocNote[] = [];
+  const walk = (ns: DocNode[] | undefined) => { for (const n of ns ?? []) n.kind === "group" ? walk(n.children) : n.kind !== "ink" && n.preview && notes.push(n); };
+  walk(out.nodes);
+  for (const p of out.pages ?? []) walk(p.nodes);
+  capPreviews(notes);
   return out as BoardDoc;
 }
 

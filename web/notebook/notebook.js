@@ -327,7 +327,7 @@ export function createNotebook(root, opts = {}) {
   }
   function appendDisplay(box, b) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
-    if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"]) return appendMarkdown(box, b);
+    if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
     const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
     if (svg && b[SCENE3D]) {
@@ -338,7 +338,8 @@ export function createNotebook(root, opts = {}) {
       mount3d(fig, b[SCENE3D]);
       return;
     }
-    const raster = b["image/png"] ? ["image/png", b["image/png"]] : b["image/jpeg"] ? ["image/jpeg", b["image/jpeg"]] : null;
+    // (WebP: a board's previews of pictures, web/board/preview.ts)
+    const raster = ["image/png", "image/jpeg", "image/webp"].map((t) => [t, b[t]]).find(([, v]) => typeof v === "string") ?? null;
     if (svg) {
       fig.appendChild(svg);
       if (svg.classList.contains("sb-anim")) player(fig, svg);
