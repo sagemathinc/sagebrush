@@ -35,6 +35,8 @@ interface Records {
   set(r: object): Records;
   delete(where: object): Records;
   isEqual(o: Records): boolean;
+  /** (patchflow's immer-db document: the same document with these records, its indexes made once) */
+  withRecords?(records: any[]): Records;
 }
 interface PatchHistoryLike {
   init(): Promise<unknown>;
@@ -127,10 +129,23 @@ export class BoardHistory {
   on(f: () => void) { return this.h.on(f); }
   /** Keep the board as it is now as a version (nothing if it has not changed): only what changed. */
   record(d: BoardDoc) {
-    const cur = this.h.committed();
+    const cur = this.h.committed(), recs = toRecords(d);
+    // (the version: its records, as inserting or patching each would leave
+    // them, made at once; the patch is what changed, computed from the two.
+    // Made one record at a time, each remade the document's indexes: a
+    // large board's first version, or an item removed (every later one's
+    // place changed), took seconds)
+    if (cur.withRecords) {
+      return this.h.commit(cur.withRecords(recs.map((r) => {
+        const o = { ...r };
+        for (const k of Object.keys(o)) if (o[k] === null || (SCHEMA.stringCols.includes(k) && Array.isArray(o[k]))) delete o[k];
+        return o;
+      })));
+    }
     let next = cur;
-    const key = (r: any) => `${r.type}\0${r.page}\0${r.id}`;
-    const want = new Map(toRecords(d).map((r) => [key(r), r]));
+    // (a record's key: its type, page and id, whatever they hold, CORR-3D2-3)
+    const key = (r: any) => JSON.stringify([r.type, r.page, r.id]);
+    const want = new Map(recs.map((r) => [key(r), r]));
     for (const t of TYPES) for (const r of cur.get({ type: t })) if (!want.has(key(r))) next = next.delete({ type: r.type, page: r.page, id: r.id });
     for (const r of want.values()) {
       const old = cur.getOne({ type: r.type, page: r.page, id: r.id });
