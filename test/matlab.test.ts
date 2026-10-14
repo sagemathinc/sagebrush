@@ -361,3 +361,21 @@ test("what is not implemented is refused, never answered approximately: linsolve
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), cases.map(() => "refused"));
 });
+
+test("format's two-word forms (format long g) are its one-word ones; an unknown option is an error", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "format-"));
+  writeFileSync(join(dir, "t.m"), [
+    "format longG", "disp(pi)", "format long g", "disp(pi)", "format short e", "disp(pi)", "format shortE", "disp(pi)", "format",
+    "try, format foo, catch e, disp(e.message), end", "try, format longEng, catch e, disp('refused'), end",
+  ].join("\n") + "\n");
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
+  const lines = out.split("\n");
+  assert.equal(lines[0], lines[1]);
+  assert.equal(lines[2], lines[3]);
+  assert.notEqual(lines[0], lines[2]);
+  assert.deepEqual(lines.slice(4, 6), ["Invalid format option 'foo'.", "refused"]);
+});
