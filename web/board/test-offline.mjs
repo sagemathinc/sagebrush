@@ -24,8 +24,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".json": "application/json", ".wasm": "application/wasm", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
 // the site: web/dist, and what a check puts in its place (path: bytes)
 const overrides = new Map();
+// (an engine not published at the site's engine/<id>/, as on a dev site)
+let unpublished = false;
 const server = createServer((req, res) => {
   const path = decodeURIComponent(req.url.split("?")[0]);
+  if (unpublished && path.startsWith("/engine/")) { res.writeHead(404); return res.end(); }
   let body = overrides.get(path);
   if (!body) {
     const f = normalize(join(dist, path.endsWith("/") ? path + "index.html" : path));
@@ -94,6 +97,11 @@ try {
 
   // the two files: with Python, and without
   const withPy = await ev("window.sagebrush.board.exportHtml({ python: true })"), withoutPy = await ev("window.sagebrush.board.exportHtml()");
+  // (its engine not published at the site's engine/<id>/: the file with Python is made from this page's own files, the same)
+  unpublished = true;
+  const fromOwn = await ev("window.sagebrush.board.exportHtml({ python: true }).catch((e) => 'failed: ' + e.message)");
+  unpublished = false;
+  check(fromOwn === withPy, "with its engine not published (a dev site), the file with Python is made all the same: " + String(fromOwn).slice(0, 80));
   const fa = join(dir, "with-python.html"), fb = join(dir, "without-python.html");
   writeFileSync(fa, withPy); writeFileSync(fb, withoutPy);
   check(parts(withPy).sort().join() === ["sagebrush-analyze.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-viewer3d.js", "sagebrush-worker.js"].join(), "the file with Python carries the engine's parts (not the Sage library, for a Python board): " + parts(withPy).join());

@@ -18,7 +18,8 @@ const missing = new Map<string, number>();
 const MISSING_MS = 60_000, MISSING_MAX = 1000;
 
 const COMMON: Record<string, string> = {
-  "Cache-Control": "public, max-age=31536000, immutable",
+  // (no-transform: served exactly as published, nothing added by Cloudflare)
+  "Cache-Control": "public, max-age=31536000, immutable, no-transform",
   "Access-Control-Allow-Origin": "*",
   "Cross-Origin-Resource-Policy": "cross-origin",
   "X-Content-Type-Options": "nosniff",

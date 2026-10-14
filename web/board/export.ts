@@ -85,7 +85,11 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean } = {}): P
   const engine: string[] = [];
   if (ref) engine.push(`<script type="application/json" id="sb-engine-ref">${JSON.stringify(ref).replace(/</g, "\\u003c")}</script>`);
   if (ref && o.python && OWN_ENGINE) {
-    const have = embeddedText(), get = checked(fetched(new URL(`engine/${OWN_ENGINE.id}/`, ref.site).href), OWN_ENGINE.files);
+    // (from the files beside this page, this build's, each checked against
+    // its SHA-256; else, a page older than the site's files, from the engine's
+    // own address: an engine not published there can still be carried)
+    const local = checked(fetched(site.href), OWN_ENGINE.files), published = checked(fetched(new URL(`engine/${OWN_ENGINE.id}/`, ref.site).href), OWN_ENGINE.files);
+    const have = embeddedText(), get = (name: string) => (ex ? published(name) : local(name).catch(() => published(name)));
     for (const name of engineFiles(doc.mode === "sage")) engine.push(`<script type="application/octet-stream" data-sb-engine="${name}">${have.get(name) ?? (await pack(await get(name)))}</script>`);
   }
   // (the template rides along for exporting again, its scripts' ends escaped
