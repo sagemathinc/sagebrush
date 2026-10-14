@@ -6,6 +6,7 @@
 // carries them in `images`, as data: URLs, and opening one puts them back.
 
 import type { BoardDoc, DocNode } from "./doc";
+import { PixelBudget, dataUrl, imageSize } from "../image-size";
 
 export interface ImageInfo {
   /** its size in pixels */
@@ -200,9 +201,14 @@ export class Images {
     const carried = Object.entries(d.images ?? {}).filter(([, v]) => v.src?.startsWith("data:"));
     if (!carried.length) return false;
     const rename = new Map<string, string>();
+    // (each within the bounds its header gives, and all within the
+    // document's pixels: image-size.ts; a picture past them is not taken)
+    const pixels = new PixelBudget();
     for (const [name, v] of carried) {
-      const blob = toBlob(v.src!);
+      const u = dataUrl(v.src!), why = pixels.take(u ? imageSize(u.type, u.base64) : null);
+      const blob = why ? null : toBlob(v.src!);
       delete d.images![name];
+      if (why) console.warn(`board: a picture not taken: ${why}`);
       if (!blob) continue;
       const real = await this.put(blob);
       d.images![real] = { w: v.w, h: v.h };

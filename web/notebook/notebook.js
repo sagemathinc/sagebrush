@@ -18,6 +18,7 @@ import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
 import { BlockEditor } from "../board/blocks.ts";
 import { safeHtml } from "../safe-html.ts";
+import { PixelBudget, imageSize } from "../image-size.ts";
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
@@ -245,6 +246,8 @@ export function createNotebook(root, opts = {}) {
   const asset = (name) => opts.assetUrl?.(name) ?? new URL(name, new URL(opts.assetBase ?? "./", location.href)).href;
   let mode = opts.mode ?? "python";
   let meta = {}; // the document's other fields (name, ...), kept as they are
+  // (the pixels of the pictures this document shows: image-size.ts)
+  let pixels = new PixelBudget();
   let execCount = 0;
   const listeners = {};
   const emit = (event, ...args) => { for (const f of listeners[event] ?? []) f(...args); };
@@ -344,7 +347,24 @@ export function createNotebook(root, opts = {}) {
       fig.appendChild(svg);
       if (svg.classList.contains("sb-anim")) player(fig, svg);
     }
-    else if (raster) fig.appendChild(Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }));
+    else if (raster) {
+      // (within the bounds its header gives, and this document's pixels in
+      // all: image-size.ts; else a placeholder, the picture kept as it was)
+      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" });
+      const why = pixels.take(imageSize(raster[0], raster[1]));
+      if (!why) fig.appendChild(show());
+      else {
+        fig.sbBundle = { ...b };
+        const p = h("div", "big-picture");
+        p.textContent = `A picture not shown: ${why}. `;
+        const go = h("button");
+        go.type = "button";
+        go.textContent = "Show it";
+        go.onclick = () => p.replaceWith(show());
+        p.append(go);
+        fig.appendChild(p);
+      }
+    }
     else if (typeof b["text/html"] === "string" && !b["application/json"]) return appendHtml(box, b);
     else {
       // nothing to draw: shown as text (JSON pretty-printed), and the whole
@@ -1594,6 +1614,7 @@ export function createNotebook(root, opts = {}) {
   // Show a document, replacing what is there.
   function load(doc) {
     loading = true;
+    pixels = new PixelBudget();
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     meta = rest;
     setMode(m ?? mode, false);

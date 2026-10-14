@@ -12,6 +12,8 @@
 // url() or expression() in a style, no SVG, MathML, forms, frames or
 // objects: nothing a browser could be talked into running.
 
+import { PixelBudget, imageSize } from "./image-size";
+
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // tags kept, with the attributes each may have (besides the global ones)
@@ -66,6 +68,14 @@ export interface SafeOptions {
 const SAFE_LINK = /^(https?:|mailto:|#|\/(?!\/)|\.{1,2}\/|[\w.~-]+(?:[/?#]|$))/i;
 // (an SVG in an <img> runs no script: an image element never does)
 const DATA_IMG = /^data:image\/(?:png|jpe?g|gif|webp|svg\+xml)[;,]/i;
+// (a raster data: image within image-size.ts's bounds by its header: a small
+// file can say it is huge; else not shown, its alt text instead)
+function shownSize(url: string): boolean {
+  const m = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\s]*)$/i.exec(url);
+  if (!m) return !/^data:image\/(?:png|jpe?g|gif|webp)/i.test(url);
+  const type = "image/" + m[1].toLowerCase().replace("jpg", "jpeg");
+  return new PixelBudget(Infinity).take(imageSize(type, m[2])) === null;
+}
 export function safeLink(href: string): string | null {
   const h = href.replace(/[\u0000- \u007f-\u009f]/g, "");
   return SAFE_LINK.test(h) && !/^[\w.~-]*:/.test(h.replace(/^(https?|mailto):/i, "")) ? h : null;
@@ -78,9 +88,9 @@ export function safeImage(src: string, o: SafeOptions = {}): string | null {
     if (!att) return null;
     const [mime, b64] = Object.entries(att)[0] ?? [];
     const url = `data:${mime};base64,${b64}`;
-    return DATA_IMG.test(url) ? url : null;
+    return DATA_IMG.test(url) && shownSize(url) ? url : null;
   }
-  if (DATA_IMG.test(s)) return s;
+  if (DATA_IMG.test(s)) return shownSize(s) ? s : null;
   if (o.remote !== false && /^https?:\/\/[^\s"'<>\\]+$/i.test(s)) return s;
   return null;
 }
