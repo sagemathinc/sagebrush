@@ -11,6 +11,8 @@
 // their detail (semantic zoom) only when zoomed in.
 
 import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
+import { iconEmoji } from "./stickers";
+import { ICON_NAME } from "./doc";
 
 /** A page's backdrop (doc.ts BoardPage's slide and background). */
 export interface Backdrop { slide?: { x: number; y: number; w: number; h: number }; color?: string; image?: string }
@@ -23,7 +25,10 @@ export const INK = "#1d241a";
 
 export interface Item {
   id: string;
-  kind: "note" | "shape" | "ink" | "group";
+  kind: "note" | "shape" | "ink" | "group" | "sticker";
+  /** stickers: an emoji, or a CoCalc icon's name (drawn by the host, else as an emoji: stickers.ts) */
+  emoji?: string;
+  icon?: string;
   x: number;
   y: number;
   w: number;
@@ -62,7 +67,7 @@ export interface Item {
 }
 
 /** What an item's element shows. */
-export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "image" | "inert">>;
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "image" | "inert" | "emoji" | "icon" | "color">>;
 
 /** Code items' engine (code.ts, through page.ts): their output, state and running. */
 export interface CodeHost {
@@ -174,6 +179,8 @@ export class Board {
   code: CodeHost | null = null;
   /** a code item's { } (show or hide its code) was clicked */
   onToggleCode: ((id: string) => void) | null = null;
+  /** a CoCalc icon by its name, as the host draws it (stickers: none, an emoji close to it: stickers.ts) */
+  icon: ((name: string) => Element | null) | null = null;
   /** where a picture's bytes are, by its name (images.ts) */
   imageUrl: ((name: string) => string | undefined) | null = null;
   /** The page's backdrop (mount.ts, from the page): a slide's card (white,
@@ -512,8 +519,28 @@ export class Board {
     if (this.math.length) this.mathFrame = requestAnimationFrame(() => this.typesetSome());
   }
 
+  // a sticker's element: its icon (the host's element, as given; or an emoji
+  // close to it; or a mark named by its tooltip), or its emoji; no frame
+  private sticker(it: Content): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "board-item board-sticker" + (it.inert ? " board-inert" : "");
+    const drawn = it.icon && ICON_NAME.test(it.icon) ? this.icon?.(it.icon) : null;
+    if (drawn) {
+      el.append(drawn);
+    } else {
+      const g = document.createElement("span");
+      g.className = "board-sticker-glyph";
+      g.textContent = it.emoji || (it.icon && iconEmoji(it.icon)) || "●";
+      if (!it.emoji && it.icon && !iconEmoji(it.icon) && it.color) g.style.color = it.color;
+      el.append(g);
+    }
+    if (it.icon) el.title = it.icon;
+    return el;
+  }
+
   /** An item's element, unplaced (also for measuring a note's height at a width: `now`, math typeset at once). */
   content(it: Content, now = false): HTMLElement {
+    if (it.kind === "sticker") return this.sticker(it);
     const el = document.createElement("div");
     el.className = `board-item board-${it.kind}` + (it.shape && it.shape !== "rect" ? ` board-shape board-shape-${it.shape}` : it.shape ? " board-shape" : "") + (it.code !== undefined ? " board-code" : "") + (it.inert ? " board-inert" : "");
     // a code item: its place in the reading order and ▶ before the title
@@ -782,6 +809,15 @@ export class Board {
       const inView = new Set([...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind !== "group"));
       const byColor = new Map<string, Item[]>();
       for (const it of inView) {
+        // (a sticker's emoji: drawn itself)
+        if (it.kind === "sticker") {
+          ctx.font = `${it.h * 0.8}px system-ui, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = it.color ?? INK;
+          ctx.fillText(it.emoji || (it.icon && iconEmoji(it.icon)) || "●", it.x + it.w / 2, it.y + it.h / 2);
+          continue;
+        }
         // (a picture: drawn itself, once it is decoded)
         if (it.image) {
           const im = this.picture(it.image);
@@ -1003,7 +1039,7 @@ export class Board {
   near(x0: number, y0: number, x1: number, y1: number): Item[] {
     const big = ((x1 - x0) / CELL) * ((y1 - y0) / CELL) > 4 * this.byId.size + 64;
     const its = big ? [...this.byId.values()] : [...this.boxes.query(x0, y0, x1, y1, new Set()), ...this.strokes.query(x0, y0, x1, y1, new Set())];
-    return its.filter((it) => (it.kind === "note" || it.kind === "group" || it.kind === "ink") && !it.inert && it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0);
+    return its.filter((it) => (it.kind === "note" || it.kind === "group" || it.kind === "ink" || it.kind === "sticker") && !it.inert && it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0);
   }
 
   /** An edge's route, or its straight line from border to border (world coordinates). */
@@ -1139,7 +1175,7 @@ export class Board {
         if (ink && this.onItemDown(ink, e)) return;
         const it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
         // (an edge, drawn over groups and under notes, before the group it crosses)
-        const ed = it?.kind !== "note" && this.onEdgeDown ? this.edgeAt(e.clientX - r.left, e.clientY - r.top) : null;
+        const ed = it?.kind !== "note" && it?.kind !== "sticker" && this.onEdgeDown ? this.edgeAt(e.clientX - r.left, e.clientY - r.top) : null;
         if (ed && this.onEdgeDown!(ed, e)) return;
         if (it && this.onItemDown(it, e)) return;
         if (!it && !ed && this.onBackgroundDown?.(e)) return;
@@ -1241,7 +1277,7 @@ const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px
 // (a note that is only a picture: shown as the picture alone; as doc.ts's onlyImage)
 const onlyImage = (it: Content) => !!it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref;
 // What an element shows (kept when this is unchanged).
-const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image, it.inert]);
+const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image, it.emoji, it.icon, it.kind === "sticker" ? it.color : undefined, it.inert]);
 // (a double-click in the item being edited selects a word, as in any field)
 const editingAt = (e: Event) => !!(e.target as Element | null)?.closest?.(".board-editing");
 // A code item's output, in the box that gives it the notebook's styles.

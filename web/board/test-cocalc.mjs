@@ -46,7 +46,7 @@ const jsonl = (els) => els.map((e) => JSON.stringify(e)).join("\n") + "\n";
 // a current CoCalc board: two pages; on the first, a frame holding a note,
 // a highlighter's stroke and a frame holding a code cell; texts, math, an
 // edge, a pen stroke and an edge to it, and things a board has nothing like
-// (a timer, an icon, a hidden note), a selection (not content), speaker notes
+// (a timer, a hidden note), a selection (not content), speaker notes; an icon (a sticker)
 const CURRENT = jsonl([
   { id: "p1", type: "page", z: 0, data: { pos: 0, schemaVersion: 1 } },
   { id: "p2", type: "page", z: 0, data: { pos: 1, schemaVersion: 1 } },
@@ -98,11 +98,14 @@ try {
   // pen strokes: strokes, as wide as CoCalc drew them (2 radius), their color, a highlighter's opacity, in their frame's group
   const pen1 = p1.nodes.find((x) => x.id === "pen1"), pen2 = f1?.children?.find((x) => x.id === "pen2");
   check(pen1?.kind === "ink" && pen1.size === 2 && pen1.color === "#000" && pen2?.kind === "ink" && pen2.size === 6 && pen2.color === "#c0392b" && pen2.opacity === 0.4, "pen strokes are strokes: their width (2 radius), color, a highlighter's opacity, in their frame's group: " + JSON.stringify([pen1, pen2]).slice(0, 300));
+  // an icon: a sticker, its name kept, its color and size
+  const ic = p1.nodes.find((x) => x.id === "ic");
+  check(ic?.kind === "sticker" && ic.icon === "star" && ic.w === 50, "an icon is a sticker, its name and size kept: " + JSON.stringify(ic));
   const at2 = await ev(`(() => { const it = window.board.item("pen2"); return it && [it.x, it.y]; })()`);
   check(at2 && Math.abs(at2[0] + pen2.points[0] - 300) < 1 && Math.abs(at2[1] + pen2.points[1] - 500) < 1, "...each where it was on CoCalc's board: its first point at " + JSON.stringify(at2 && [at2[0] + pen2.points[0], at2[1] + pen2.points[1]]));
   check(d.pages[1].nodes.map((x) => x.id).join() === "n3", "the second page has its note");
   const said = await ev("document.querySelector('[data-sbb=say]').textContent");
-  check(!(await ev("document.querySelector('[data-sbb=tour]').hidden")) && /Converted from a CoCalc whiteboard file/.test(said) && !/pen stroke/.test(said) && /1 timer/.test(said) && /1 icon/.test(said) && !/connection/.test(said) && /1 hidden note/.test(said) && /speaker notes/.test(said) && !/selection/.test(said), "the caption says it was converted, and what was left out: " + said);
+  check(!(await ev("document.querySelector('[data-sbb=tour]').hidden")) && /Converted from a CoCalc whiteboard file/.test(said) && !/pen stroke/.test(said) && /1 timer/.test(said) && !/icon/.test(said) && !/connection/.test(said) && /1 hidden note/.test(said) && /speaker notes/.test(said) && !/selection/.test(said), "the caption says it was converted, and what was left out: " + said);
   // shown where they were: a member of a group at its place on CoCalc's board
   await until(`!!window.board.item("n1") && !!window.board.item("c1")`, 5000);
   const at = await ev(`["n1", "c1", "t1", "f1"].map((id) => { const it = window.board.item(id); return it && [id, Math.round(it.x), Math.round(it.y), it.parent ?? ""]; })`);
