@@ -1190,6 +1190,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("pr-next").onclick = () => showFrame((presenting?.i ?? 0) + 1).catch(fail);
   $("pr-exit").onclick = () => present(false).catch(fail);
   on(root, "pointermove", () => { if (presenting) wake(); });
+  // (and with any pointer put down, a finger's tap too; a tap on a control
+  // faded out only brings them back, it does not press it unseen)
+  let woken = false;
+  on(root, "pointerdown", (e: PointerEvent) => {
+    if (!presenting) return;
+    woken = root.classList.contains("sbb-idle") && !!(e.target as Element).closest?.("[data-sbb=pr-bar]");
+    wake();
+  }, true);
+  on($("pr-bar"), "click", (e: MouseEvent) => { if (woken) { woken = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
   // (the screen's size changed: full screen, a phone turned: the frame fitted again)
   on(window, "resize", () => { if (presenting) requestAnimationFrame(() => presenting && showFrame(presenting.i, true).catch(fail)); });
   // (leaving the full screen a presentation entered, by the browser's own Esc

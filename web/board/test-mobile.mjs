@@ -5,7 +5,8 @@
 // half the screen; typing and Run work; the toolbar's Note opens one too.
 // The page does not zoom (double taps are the board's), and the tour's
 // caption is a line until tapped.  Two fingers, the first on a note in
-// Edit, pinch: the board zooms, the note stays.  Serve web/dist first (python3
+// Edit, pinch: the board zooms, the note stays.  Presenting, the faded
+// controls come back with a tap, and a tap on one only shows it.  Serve web/dist first (python3
 // web/serve.py 8765), then
 //   node web/board/test-mobile.mjs
 import { spawn } from "node:child_process";
@@ -171,6 +172,29 @@ try {
     const z1 = await ev("window.board.camera.z"), at1 = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start'))");
     // (the fingers 44 px apart, then 156: the board zooms by about that, the note where it was)
     check(Math.abs(z1 / z0 - 156 / 44) < 0.2 && at1 === at0 && !(await ev("document.querySelector('.board-item.dragging')")), "a pinch that starts on a note, in Edit: the board zooms, the note stays: " + JSON.stringify({ zoom: z1 / z0, note: at1 === at0 ? "the same" : [at0, at1] }));
+  }
+  // Present on a phone: the controls, faded while nothing moves, come back with a tap; a tap where a faded control is only brings them back
+  {
+    const deck = { title: "A talk", pages: [{ title: "Slide", slide: { x: 0, y: 0, w: 1280, h: 720 }, nodes: [{ id: "t", title: "The title", x: 60, y: 60 }], steps: [{ focus: "t", say: "The title" }] }, { title: "Two", nodes: [{ id: "p", title: "Page two" }] }] };
+    await ev(`window.sagebrush.board.load(${JSON.stringify(deck)}).then(() => 1)`);
+    await sleep(500);
+    await ev("window.sagebrush.board.present().then(() => 1)");
+    await sleep(2900);
+    const idle = () => ev("document.querySelector('.sbb').classList.contains('sbb-idle')"), where = () => ev("document.querySelector('[data-sbb=pr-where]').textContent");
+    const faded = await idle();
+    await tap(W / 2, H / 3);
+    await sleep(200);
+    const back = !(await idle());
+    await sleep(2900);
+    const f0 = await where(), fadedAgain = await idle();
+    await tapEl("[data-sbb=pr-next]");
+    await sleep(500);
+    const f1 = await where(), shown = !(await idle());
+    await tapEl("[data-sbb=pr-next]");
+    await sleep(500);
+    const f2 = await where();
+    check(faded && back && fadedAgain && f1 === f0 && shown && f2 !== f0, "Present on a phone: the faded controls come back with a tap; a tap on a faded control only shows it, the next presses it: " + JSON.stringify({ faded, back, fadedAgain, f0, f1, shown, f2 }));
+    await ev("window.sagebrush.board.present(false).then(() => 1)");
   }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
