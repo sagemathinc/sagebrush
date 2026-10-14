@@ -167,6 +167,13 @@ try {
   const capsDoc = JSON.parse(await ev("window.sagebrush.board.json()"));
   check(Object.keys(capsDoc.images ?? {}).length === 1 && capsDoc.nodes[0].image === Object.keys(capsDoc.images)[0], "a board's data:IMAGE/PNG picture is taken in: " + JSON.stringify([Object.keys(capsDoc.images ?? {}), capsDoc.nodes[0].image]));
 
+  // a picture whose scheme is in capitals (DATA:, Data:) is checked all the
+  // same: one past the bounds isn't taken in, nor shown (SEC-1D8-1)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "scheme", images: { u: { w: 8193, h: 1, src: "DATA:image/png;base64," + png(8193, 1) }, m: { w: 8193, h: 1, src: "Data:IMAGE/PNG;base64," + png(8194, 1) }, ok: { w: 1, h: 1, src: "DATA:image/png;base64," + real.toString("base64") } }, nodes: [{ id: "su", title: "u", image: "u" }, { id: "sm", title: "m", image: "m" }, { id: "so", title: "ok", image: "ok" }] })}).then(() => 1)`);
+  const schemeDoc = JSON.parse(await ev("window.sagebrush.board.json()"));
+  const keptScheme = Object.entries(schemeDoc.images ?? {});
+  check(keptScheme.length === 1 && !keptScheme.some(([, v]) => /^data:/i.test(v.src ?? "") && v.w > 8192) && !(await ev("[...document.querySelectorAll('.board-item img')].some((i) => /^data:/i.test(i.getAttribute('src') ?? '') && i.naturalWidth > 8192)")), "a DATA: or Data: picture past the bounds is not taken in, a small one is: " + JSON.stringify(keptScheme.map(([k, v]) => [k, v.w, (v.src ?? "").slice(0, 12)])));
+
   // a board carrying a huge picture doesn't take it in; a small one, it does
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
