@@ -91,7 +91,8 @@ try {
   ok((await run("from fractions import Fraction\nprint(Fraction(1, 3) + Fraction(1, 6))")).includes("1/2"), "printing works");
   ok((await run("import numpy as np\nprint(np.arange(6).reshape(2, 3).sum(axis=0))")).includes("[3 5 7]"), "numpy works");
   // (the engine and the precompiled library: fetched by the page, handed through the frame)
-  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change', {bubbles: true})); })()");
+  // (changing the language of a notebook with code asks first: yes)
+  await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change', {bubbles: true})); })()");
   await sleep(500);
   const f = (await run("factor(2^64 + 1)")).trim();
   ok(f === "274177 * 67280421310721", "Sage mode and the engine work, with no network in the runner: " + f);

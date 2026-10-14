@@ -1594,6 +1594,7 @@ def _bs(*names):
         def g(nargout, *args):
             r = f(*args)
             return NOVAL if r is None else r
+        g.__doc__ = f.__doc__  # (its documentation: the search box's, _matlab_docsearch)
         for n in names:
             _B[n] = Builtin(g, n)
         return f
