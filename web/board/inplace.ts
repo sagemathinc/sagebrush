@@ -18,12 +18,7 @@ import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { highlight as highlightPython, highlightMarkdown } from "../notebook/highlight.js";
 import { icon } from "./icons";
 import { BlockEditor } from "./blocks";
-
-/** A note's colors: light tints, under which text reads as on white. */
-export const COLORS: [string, string][] = [
-  ["Yellow", "#fff2bf"], ["Orange", "#ffe1c7"], ["Red", "#fbd4d1"], ["Pink", "#f7d6ea"],
-  ["Purple", "#e5dcf6"], ["Blue", "#d7e6fa"], ["Teal", "#d1eeea"], ["Green", "#dbeed3"],
-];
+import { COLORS } from "./colors";
 
 export interface InPlaceHost {
   board: Board;

@@ -8,4 +8,5 @@ export { FORMAT, VERSION, cleanDoc, canonical, formatError, isBoard, layout, pag
 export { BoardHistory, SCHEMA, toRecords, fromRecords, type HistoryModule, type Version } from "./history";
 export { boardFromText, fromMermaid } from "./mermaid";
 export { fromCocalcBoard, isCocalcBoard, leftOut } from "./cocalc";
+export { fromCanvas, toCanvas, isCanvas, canvasLeftOut, type Canvas } from "./canvas";
 export { BlockEditor, splitBlocks, joinBlocks, kindOf, type Block, type BlockEditorOptions } from "./blocks";

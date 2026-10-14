@@ -69,7 +69,8 @@ caption.
 - **TimeTravel's records:** `toRecords` and `fromRecords` (a board as records
   keyed by type, page and id), `BoardHistory`, `SCHEMA`.
 - **Other formats:** `boardFromText` and `fromMermaid` (JSON, Mermaid);
-  `fromCocalcBoard` (a CoCalc whiteboard, one way).
+  `fromCocalcBoard` (a CoCalc whiteboard, one way); `fromCanvas` and
+  `toCanvas` (JSON Canvas, Obsidian's `.canvas`, both ways).
 - **The block Markdown editor:** `BlockEditor` (also used by the notebook's
   Markdown cells).
 

@@ -42,6 +42,7 @@ import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText } from "./mermaid";
+import { canvasLeftOut, toCanvas } from "./canvas";
 import { render as markdown } from "../markdown";
 import { IMAGE_TYPES, type ImageStore } from "./images";
 import type { Version } from "./history";
@@ -106,7 +107,7 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="namepage" hidden>Rename this page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="namepage" hidden>Rename this page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" disabled>←</button><button data-sbb="next" title="Next (→)">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
@@ -532,6 +533,27 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
+  // Download JSON Canvas (canvas.ts): the board as it is laid out, each page
+  // below the one before; what a canvas has nothing like is said in the caption
+  async function canvasText() {
+    const d = await images.inline(doc!);
+    const { canvas, left } = toCanvas(d, (i) => layout(pageView(d, i), measure));
+    return { text: JSON.stringify(canvas, null, "\t") + "\n", left: canvasLeftOut(left) };
+  }
+  $("canvas").onclick = async () => {
+    if (!doc) return;
+    try {
+      const { text, left } = await canvasText();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      a.download = fileName().replace(/\.board\.json$/, ".canvas");
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      if (left) say(`Downloaded as JSON Canvas. Left out, as a canvas has nothing like them: ${left}.`);
+    } catch (e) {
+      fail(e);
+    }
+  };
   // Download as HTML: the board in one file (export.ts); a board with code
   // asks first whether the file carries Python, and which version it runs
   const htmldlg = $("htmldlg") as HTMLDialogElement;
@@ -837,6 +859,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       portable: () => images.inline(doc!),
       /** the board's file (foo.board.json), as Download JSON writes it */
       json: async () => canonical(await images.inline(doc!)),
+      /** the board as a JSON Canvas (Download JSON Canvas), and what that left out, in words */
+      canvas: () => canvasText(),
       /** Show page n (0-based). */
       page,
       /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */
