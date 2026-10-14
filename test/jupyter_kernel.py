@@ -105,6 +105,7 @@ check("show() typesets a factorization", any("\\left(x - 1\\right)" in c["data"]
 r, m = run(kc, "1/0")
 e = of(m, "error")
 check("error", r["status"] == "error" and e and e[0]["ename"] == "ZeroDivisionError", (r, e))
+check("an error is one error message", len(e) == 1, e)
 c = kc.complete("fact", 4, reply=True)["content"]
 check("complete", "factor" in c["matches"] and c["cursor_start"] == 0, c)
 kc.is_complete("for i in range(3):")
@@ -139,6 +140,15 @@ km, kc = kernel("sagebrush-magma")
 r, m = run(kc, "x := 2^10;\nx;\nFactorization(2026);")
 s = "".join(c["text"] for c in of(m, "stream"))
 check("magma mode", "1024" in s and "<2, 1>" in s and "<1013, 1>" in s, s)
+# (an error: Magma says it, and Jupyter is told the cell failed; quit is no error)
+r, m = run(kc, "y := NotAnIntrinsic(2);")
+e = of(m, "error")
+check("magma error: an error reply", r["status"] == "error" and r["ename"] == "MagmaError" and "has not been declared" in r["evalue"] and r["traceback"] == [] and len(e) == 1, (len(e), e))
+r, m = run(kc, "z := 1 div 0;")
+check("magma runtime error: an error reply", r["status"] == "error" and r["evalue"].startswith("Runtime error"), r)
+r, m = run(kc, "print x + 1;\nquit;")
+s = "".join(c["text"] for c in of(m, "stream"))
+check("magma quit: no error", r["status"] == "ok" and s == "1025\n" and not of(m, "error"), (r, s))
 km.shutdown_kernel(now=True)
 
 # ---- MATLAB mode
