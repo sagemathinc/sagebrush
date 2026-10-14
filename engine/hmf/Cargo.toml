@@ -1,0 +1,11 @@
+[package]
+name = "sagebrush-hmf"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Hilbert modular forms over Q(sqrt 5) by the definite (icosian) method, ported from William Stein's PSAGE code with his permission"
+publish = false
+# LMFDB data (CC BY-SA 4.0) stays out of any package: see NOTICE.md
+exclude = ["tests/lmfdb*", "tests/fixtures/lmfdb*"]
+
+[dependencies]
