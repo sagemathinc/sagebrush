@@ -1052,8 +1052,14 @@ def _scalar(v, what="value"):
 
 
 def _colon_values(a, d, b):
-    """MATLAB's a:d:b, as its colon computes it (the second half counted
-    back from the end point, so that a symmetric range is symmetric)"""
+    """a:d:b.  This is the original implementation, unchanged, and its
+    details were not taken from a published source.  One part is consistent
+    with MATLAB's observed output: the second half of the elements is
+    counted back from the end point ((0:0.1:0.5)(4) is exactly 0.3 in
+    MATLAB, where 0 + 3*0.1 is 0.30000000000000004).  The count's tolerance
+    (2 eps max(|a|, |b|)), snapping the last element to b within it, and the
+    exact middle element (a + last)/2 are not sourced and need not be
+    MATLAB's"""
     if a != a or d != d or b != b:
         return [_math.nan]
     if d == 0 or (a < b and d < 0) or (b < a and d > 0):
