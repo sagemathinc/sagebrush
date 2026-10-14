@@ -26,7 +26,9 @@ export interface Preview {
 /** an item whose time from root is over this keeps a preview */
 export const PREVIEW_MS = 10_000;
 export const CELL_MAX = 32 * 1024, DOC_MAX = 512 * 1024;
-const HEAD = 4096, TAIL = 1024, IMAGE_W = 640;
+const HEAD = 4096, TAIL = 1024;
+/** a preview's picture: at most this wide and this tall (pixels) */
+export const IMAGE_W = 640, IMAGE_H = 1280;
 const TEXTS = ["text/plain", "text/latex", "text/markdown"];
 const IMAGES = ["image/png", "image/jpeg", "image/webp"];
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -53,7 +55,7 @@ export const pageRaster: Raster = async (src, maxWidth) => {
     const img = new Image();
     img.src = src;
     await img.decode();
-    const w0 = img.naturalWidth || 640, h0 = img.naturalHeight || 480, s = Math.min(1, maxWidth / w0);
+    const w0 = img.naturalWidth || 640, h0 = img.naturalHeight || 480, s = Math.min(1, maxWidth / w0, IMAGE_H / h0);
     const c = document.createElement("canvas");
     c.width = Math.max(1, Math.round(w0 * s));
     c.height = Math.max(1, Math.round(h0 * s));
@@ -92,7 +94,7 @@ export async function makePreview(outputs: any[], o: { at: string; ms: number; t
         if (src) {
           // (drawn again, at most IMAGE_W wide, whatever it was)
           const small = await raster(src, IMAGE_W);
-          if (small) {
+          if (small && fits(small[0], small[1])) {
             data[small[0]] = small[1];
             picture = true;
           }
@@ -107,9 +109,57 @@ export async function makePreview(outputs: any[], o: { at: string; ms: number; t
   return { at: o.at, ms: Math.round(o.ms), total: Math.round(o.total), outputs: out };
 }
 
+/**
+ * A picture's size in pixels, from its header (PNG, JPEG, WebP), or null if
+ * it can't be read.  (A small file can say it is huge, and decoding it would
+ * take that much memory: SEC-B00-1.)
+ */
+export function imageSize(type: string, base64: string): { w: number; h: number } | null {
+  let b: Uint8Array;
+  try {
+    const s = atob(base64);
+    b = Uint8Array.from(s, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  const u16 = (i: number) => (b[i] << 8) | b[i + 1], le16 = (i: number) => b[i] | (b[i + 1] << 8), le24 = (i: number) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16);
+  const u32 = (i: number) => ((b[i] << 24) >>> 0) + ((b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]);
+  const ascii = (i: number, n: number) => String.fromCharCode(...b.subarray(i, i + n));
+  if (type === "image/png") {
+    if (b.length < 24 || b[0] !== 0x89 || ascii(1, 3) !== "PNG" || ascii(12, 4) !== "IHDR") return null;
+    return { w: u32(16), h: u32(20) };
+  }
+  if (type === "image/jpeg") {
+    if (b[0] !== 0xff || b[1] !== 0xd8) return null;
+    for (let i = 2; i + 9 < b.length; ) {
+      if (b[i] !== 0xff) return null;
+      const m = b[i + 1];
+      if (m === 0xff) { i++; continue; }
+      if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { i += 2; continue; }
+      // (a start of frame: its height and width)
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { w: u16(i + 7), h: u16(i + 5) };
+      i += 2 + u16(i + 2);
+    }
+    return null;
+  }
+  if (type === "image/webp") {
+    if (b.length < 30 || ascii(0, 4) !== "RIFF" || ascii(8, 4) !== "WEBP") return null;
+    const kind = ascii(12, 4);
+    if (kind === "VP8 " && b[23] === 0x9d && b[24] === 0x01 && b[25] === 0x2a) return { w: le16(26) & 0x3fff, h: le16(28) & 0x3fff };
+    if (kind === "VP8L" && b[20] === 0x2f) return { w: 1 + (b[21] | ((b[22] & 0x3f) << 8)), h: 1 + ((b[22] >> 6) | (b[23] << 2) | ((b[24] & 0x0f) << 10)) };
+    if (kind === "VP8X") return { w: 1 + le24(24), h: 1 + le24(27) };
+    return null;
+  }
+  return null;
+}
+const fits = (type: string, base64: string) => {
+  const s = imageSize(type, base64);
+  return !!s && s.w > 0 && s.h > 0 && s.w <= IMAGE_W && s.h <= IMAGE_H;
+};
+
 /** A preview as a file may hold it: well formed, and held to what a preview
- * written here is (texts cut, one picture, CELL_MAX), else undefined.  (A
- * picture's width is not checked here: its bytes are bounded.) */
+ * written here is (texts cut, one picture, its header saying at most
+ * IMAGE_W by IMAGE_H, CELL_MAX), else undefined. */
 export function cleanPreview(p: any): Preview | undefined {
   if (!p || typeof p !== "object" || typeof p.at !== "string" || !ISO.test(p.at)) return undefined;
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : null);
@@ -122,7 +172,7 @@ export function cleanPreview(p: any): Preview | undefined {
     else if (x?.output_type === "display_data" && x.data && typeof x.data === "object") {
       const data: Record<string, string> = {};
       for (const t of TEXTS) if (typeof x.data[t] === "string") data[t] = cut(x.data[t]);
-      const img = picture ? undefined : IMAGES.find((t) => typeof x.data[t] === "string" && BASE64.test(x.data[t]));
+      const img = picture ? undefined : IMAGES.find((t) => typeof x.data[t] === "string" && BASE64.test(x.data[t]) && fits(t, x.data[t]));
       if (img) {
         data[img] = x.data[img];
         picture = true;
