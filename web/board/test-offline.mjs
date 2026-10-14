@@ -246,6 +246,19 @@ try {
   // changed in the file, s runs: its own output, no longer the carried one
   await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = ${JSON.stringify(slowStamp + "\n1")}; }).then(() => 1)`);
   check(await until(`window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === '') && os.find((o) => o.id === 's').output !== ${JSON.stringify(before.s.output)})`, 60000), "changed in the file, s runs again, and d with it");
+  // an item changed and run while what is carried is being found: its new
+  // output is never carried under its old key (CORR-2D0-1; the first hash
+  // held until the run is over)
+  const oldKey = (await ev("window.sagebrush.board.outputKeys()")).s.key;
+  await ev(`(() => { const d = crypto.subtle.digest.bind(crypto.subtle); let armed = true; window.__gate = null; crypto.subtle.digest = (a, b) => { if (!armed) return d(a, b); armed = false; return new Promise((res) => { window.__gate = () => res(d(a, b)); }); }; window.__carry = window.sagebrush.board.exportHtml({ outputs: true }); })(), 1`);
+  check(await until("!!window.__gate", 10000), "(the carry is held, hashing)");
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = ${JSON.stringify(slowStamp.replace("s ran:", "NEW s ran:"))}; }).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => /NEW/.test(os.find((o) => o.id === 's').output) && os.every((o) => o.state === ''))", 60000);
+  await ev("window.__gate(), 1");
+  const raced = carriedOf(await ev("window.__carry"));
+  const newKey = (await ev("window.sagebrush.board.outputKeys()")).s.key;
+  const bad = raced.filter((e) => (e.key === oldKey && JSON.stringify(e.outputs).includes("NEW")) || (e.key === newKey && !JSON.stringify(e.outputs).includes("NEW")));
+  check(newKey !== oldKey && !bad.length, "changed and run while the outputs to carry were found: each carried output is its key's: " + raced.map((e) => (e.key === oldKey ? "old" : e.key === newKey ? "new" : "other") + ":" + /NEW/.test(JSON.stringify(e.outputs))).join());
 } catch (e) {
   fails.push(String(e?.stack ?? e));
 } finally {
