@@ -587,3 +587,23 @@ test("contour's automatic levels: round multiples of a step near a seventh of th
     "[0.2 0.4 0.6 0.8 1 1.2 1.4]", "[-6 -4 -2 0 2 4 6 8]", "[1 2 3 4 5 6 7 8]", "[1 2 4 6 8 10 12 14 16]", "[2 4 6 8 10 12 14 16]", "3",
   ]);
 });
+
+test("deconv and qr validate as documented: RegularizationFactor one real number, an empty h for 'same' and 'valid', qr's scalar B and refused outputForm", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "try, deconv([1 2 3], [1 1], Method='least-squares', RegularizationFactor=[1 2]), catch e, disp(e.message), end",
+    "try, deconv([1 2 3], [1 1], Method='least-squares', RegularizationFactor=1i), catch e, disp(e.message), end",
+    "[x, r] = deconv([1 2 3], [], 'valid', Method='least-squares'); disp(mat2str(x)); disp(mat2str(r));",
+    "[x, r] = deconv([1 2 3], [], 'same', Method='least-squares'); disp(mat2str(x));",
+    "S = sparse([2 3]); [C, R] = qr(S, 1, 'econ'); disp(mat2str([issparse(C) issparse(R)]));",
+    "[Q, R] = qr(sparse([1 2; 3 4]), 0); disp(mat2str([issparse(Q) issparse(R)]));",
+    // (a purely imaginary scalar is a right side, not the economy flag 0)
+    "S = sparse([2 3]); [C, R] = qr(S, 2i); disp(mat2str([issparse(C) real(C) == 0 abs(abs(C) - 2) < 1e-14]));",
+    "try, [Q, R] = qr([1 2; 3 4], 'vector'), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "RegularizationFactor must be a real number.", "RegularizationFactor must be a real number.",
+    "[0 0 0]", "[1 2 3]", "[0 0 0]", "[false true]", "[true true]", "[false true true]",
+    "qr: the outputForm argument needs the column permutation P, which is not supported in Sagebrush.",
+  ]);
+});
