@@ -39,8 +39,27 @@ export function imageSizeOf(type: string, b: Uint8Array): { w: number; h: number
     return null;
   }
   if (type === "image/gif") {
-    if (b.length < 10 || ascii(0, 4) !== "GIF8") return null;
-    return { w: le16(6), h: le16(8) };
+    // (the logical screen, and every frame's place and size: a frame may be
+    // larger than the screen it says, and is decoded at its own size, SEC-89C-1)
+    if (b.length < 13 || ascii(0, 4) !== "GIF8") return null;
+    let w = le16(6), h = le16(8), frames = 0, i = 13;
+    if (b[10] & 0x80) i += 3 * (2 << (b[10] & 7));
+    const skipBlocks = () => { while (i < b.length && b[i]) i += b[i] + 1; i++; };
+    while (i < b.length) {
+      const t = b[i];
+      if (t === 0x3b) break;
+      if (t === 0x21) { i += 2; skipBlocks(); continue; }
+      if (t !== 0x2c || i + 10 > b.length) return null;
+      w = Math.max(w, le16(i + 1) + le16(i + 5));
+      h = Math.max(h, le16(i + 3) + le16(i + 7));
+      frames++;
+      const f = b[i + 9];
+      i += 10;
+      if (f & 0x80) i += 3 * (2 << (f & 7));
+      i++;
+      skipBlocks();
+    }
+    return frames ? { w, h } : null;
   }
   return null;
 }
@@ -48,8 +67,10 @@ export function imageSizeOf(type: string, b: Uint8Array): { w: number; h: number
 /** The same, from base64 (as a notebook's outputs and data: URLs carry them). */
 export function imageSize(type: string, base64: string): { w: number; h: number } | null {
   try {
-    // (the header is in the first bytes; a JPEG's frame may come after its metadata)
-    const s = atob(type === "image/jpeg" ? base64.replace(/\s/g, "") : base64.replace(/\s/g, "").slice(0, 64));
+    // (a PNG's or a WebP's header is in its first bytes; a JPEG's frame may
+    // come after its metadata, and a GIF's frames are all through it)
+    const b64 = base64.replace(/\s/g, "");
+    const s = atob(type === "image/png" || type === "image/webp" ? b64.slice(0, 64) : b64);
     return imageSizeOf(type, Uint8Array.from(s, (c) => c.charCodeAt(0)));
   } catch {
     return null;
@@ -62,16 +83,24 @@ export function dataUrl(src: string): { type: string; base64: string } | null {
   return m ? { type: m[1], base64: m[2] } : null;
 }
 
+/** A short name for a picture, to count it once however often it is drawn. */
+export const pictureKey = (src: string) => `${src.length}:${src.slice(0, 96)}:${src.slice(-96)}`;
+
 /** The pictures of one document: each within MAX_SIDE and MAX_PIXELS, and all within LOAD_PIXELS. */
 export class PixelBudget {
   used = 0;
+  private seen = new Set<string>();
   constructor(readonly total = LOAD_PIXELS) {}
-  /** Whether a picture of this size may be shown (and if so, it is counted); why not, if not. */
-  take(size: { w: number; h: number } | null): string | null {
+  /** Whether a picture of this size may be shown (and if so, it is counted,
+   * once for its `key`: drawn again, as a cell is, it isn't counted again);
+   * why not, if not. */
+  take(size: { w: number; h: number } | null, key?: string): string | null {
+    if (key && this.seen.has(key)) return null;
     if (!size || !(size.w > 0) || !(size.h > 0)) return "its size can't be read";
     if (size.w > MAX_SIDE || size.h > MAX_SIDE || size.w * size.h > MAX_PIXELS) return `it is ${size.w} × ${size.h} pixels`;
     if (this.used + size.w * size.h > this.total) return "this document's pictures are too many pixels in all";
     this.used += size.w * size.h;
+    if (key) this.seen.add(key);
     return null;
   }
 }

@@ -12,7 +12,7 @@
 // url() or expression() in a style, no SVG, MathML, forms, frames or
 // objects: nothing a browser could be talked into running.
 
-import { PixelBudget, imageSize } from "./image-size";
+import { PixelBudget, imageSize, pictureKey } from "./image-size";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -62,6 +62,8 @@ export interface SafeOptions {
   attachments?: Record<string, Record<string, string>> | null;
   /** whether images may come from other sites (https:); false for what code produced, which could otherwise send data away in an image's address */
   remote?: boolean;
+  /** the document's pictures' pixels (image-size.ts): the data: pictures shown here are counted in it; none, each on its own */
+  pixels?: PixelBudget;
 }
 
 // whether a link or an image address is harmless (control characters and spaces, which browsers ignore inside a scheme, are taken out first)
@@ -70,11 +72,19 @@ const SAFE_LINK = /^(https?:|mailto:|#|\/(?!\/)|\.{1,2}\/|[\w.~-]+(?:[/?#]|$))/i
 const DATA_IMG = /^data:image\/(?:png|jpe?g|gif|webp|svg\+xml)[;,]/i;
 // (a raster data: image within image-size.ts's bounds by its header: a small
 // file can say it is huge; else not shown, its alt text instead)
-function shownSize(url: string): boolean {
+function shownSize(url: string, o: SafeOptions): boolean {
+  // (an SVG carrying a raster picture: not shown, as that picture can't be
+  // measured here, SEC-89C-3; an SVG of vectors is drawn at the size shown)
+  const svg = /^data:image\/svg\+xml(;base64)?,(.*)$/is.exec(url);
+  if (svg) {
+    let text = "";
+    try { text = svg[1] ? atob(svg[2].replace(/\s/g, "")) : decodeURIComponent(svg[2]); } catch { return false; }
+    return !/<image\b|data:image\/(?!svg)/i.test(text);
+  }
   const m = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\s]*)$/i.exec(url);
-  if (!m) return !/^data:image\/(?:png|jpe?g|gif|webp)/i.test(url);
+  if (!m) return false;
   const type = "image/" + m[1].toLowerCase().replace("jpg", "jpeg");
-  return new PixelBudget(Infinity).take(imageSize(type, m[2])) === null;
+  return (o.pixels ?? new PixelBudget(Infinity)).take(imageSize(type, m[2]), pictureKey(url)) === null;
 }
 export function safeLink(href: string): string | null {
   const h = href.replace(/[\u0000- \u007f-\u009f]/g, "");
@@ -88,9 +98,9 @@ export function safeImage(src: string, o: SafeOptions = {}): string | null {
     if (!att) return null;
     const [mime, b64] = Object.entries(att)[0] ?? [];
     const url = `data:${mime};base64,${b64}`;
-    return DATA_IMG.test(url) && shownSize(url) ? url : null;
+    return DATA_IMG.test(url) && shownSize(url, o) ? url : null;
   }
-  if (DATA_IMG.test(s)) return shownSize(s) ? s : null;
+  if (DATA_IMG.test(s)) return shownSize(s, o) ? s : null;
   if (o.remote !== false && /^https?:\/\/[^\s"'<>\\]+$/i.test(s)) return s;
   return null;
 }

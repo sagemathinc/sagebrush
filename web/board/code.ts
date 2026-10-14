@@ -190,6 +190,8 @@ export class BoardCode {
     for (const it of held) this.held.add(it.id);
     // (an item held whose code changed: run, as any edit, and what it holds with it)
     this.release(changed.filter((id) => before.has(id) && this.held.has(id)));
+    // (every item new: another board, whose pictures are counted afresh, CORR-89C-4)
+    if (items.length && items.every((it) => !before.has(it.id))) nb.newPictures?.();
     if (changed.length || !same) {
       nb.applyRemote({
         mode,
