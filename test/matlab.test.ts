@@ -476,3 +476,15 @@ test("colon counts a range's second half back from its end, as MATLAB's output s
     "x = 0:0.1:0.5; fprintf('%d %d %d\\n', x(4) == 0.3, x(end) == 0.5, numel(x));"], { encoding: "utf8" });
   assert.equal(out.trim(), "1 1 6");
 });
+
+test("rank-deficient least squares: the published examples' tolerances and basic solutions", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "A = magic(8); A = A(:,1:6); lastwarn(''); x = A \\ (260*ones(8,1)); disp(lastwarn); disp(mat2str(round(x' * 1e4) / 1e4));",
+    "C = [1 0; 2 0; 1 0]; D = [1 2]; lastwarn(''); x = D/C; disp(lastwarn); disp(mat2str(x));",
+  ].join(" ")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), [
+    "Rank deficient, rank = 3, tol = 1.882938e-13.", "[3 4 0 0 1 0]",
+    "Rank deficient, rank = 1, tol = 1.332268e-15.", "[0 0.5 0]",
+  ]);
+});
