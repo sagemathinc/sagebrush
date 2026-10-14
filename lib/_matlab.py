@@ -526,6 +526,8 @@ def _scalar_div(a, b):
 def plus(a, b):
     if type(a) is float and type(b) is float:
         return a + b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("plus", a, b)
     if type(a) is Str or type(b) is Str or type(a) is StrArr or type(b) is StrArr:
         return _str_plus(a, b)
     return _elementwise(a, b, _add, "plus")
@@ -534,22 +536,30 @@ def plus(a, b):
 def minus(a, b):
     if type(a) is float and type(b) is float:
         return a - b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("minus", a, b)
     return _elementwise(a, b, _sub, "minus")
 
 
 def times(a, b):
     if type(a) is float and type(b) is float:
         return a * b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("times", a, b)
     return _elementwise(a, b, _mul, "times")
 
 
 def rdivide(a, b):
     if type(a) is float and type(b) is float:
         return _scalar_div(a, b)
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("rdivide", a, b)
     return _elementwise(a, b, _div, "rdivide")
 
 
 def ldivide(a, b):
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("ldivide", a, b)
     return rdivide(b, a)
 
 
@@ -564,12 +574,16 @@ def power(a, b):
         if type(r) is complex:
             return r if r.imag != 0 else r.real
         return r
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("power", a, b)
     return _elementwise(a, b, _pow, "power")
 
 
 def mtimes(a, b):
     if type(a) is float and type(b) is float:
         return a * b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("mtimes", a, b)
     if _isscalar(a) or _isscalar(b):
         return _elementwise(a, b, _mul, "mtimes")
     cls = _arith_class(a, b, "mtimes")
@@ -603,6 +617,8 @@ def _solve(A, B):
 def mldivide(a, b):
     if type(a) is float and type(b) is float:
         return _scalar_div(b, a)
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("mldivide", a, b)
     if _isscalar(a):
         return _elementwise(b, a, _div, "mldivide")
     cls = _arith_class(a, b, "mldivide")
@@ -612,6 +628,8 @@ def mldivide(a, b):
 def mrdivide(a, b):
     if type(a) is float and type(b) is float:
         return _scalar_div(a, b)
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("mrdivide", a, b)
     if _isscalar(b):
         return _elementwise(a, b, _div, "mrdivide")
     cls = _arith_class(a, b, "mrdivide")
@@ -625,6 +643,8 @@ def mrdivide(a, b):
 def mpower(a, b):
     if type(a) is float and type(b) is float:
         return power(a, b)
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("mpower", a, b)
     if _isscalar(a) and _isscalar(b):
         return power(a, b)
     if not _isscalar(b):
@@ -653,6 +673,8 @@ def mpower(a, b):
 
 def uminus(a):
     t = type(a)
+    if t is Sparse:
+        return _sp.unop("uminus", a)
     if t is float:
         return -a
     if t is bool:
@@ -665,6 +687,8 @@ def uminus(a):
 
 def uplus(a):
     t = type(a)
+    if t is Sparse:
+        return _sp.unop("uplus", a)
     if t is float or t is complex:
         return a
     if t is bool:
@@ -700,36 +724,48 @@ def _cmp(a, b, f, name):
 def eq(a, b):
     if type(a) is float and type(b) is float:
         return a == b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("eq", a, b)
     return _cmp(a, b, lambda x, y: x == y, "eq")
 
 
 def ne(a, b):
     if type(a) is float and type(b) is float:
         return a != b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("ne", a, b)
     return _cmp(a, b, lambda x, y: x != y, "ne")
 
 
 def lt(a, b):
     if type(a) is float and type(b) is float:
         return a < b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("lt", a, b)
     return _cmp(a, b, lambda x, y: x < y, "lt")
 
 
 def le(a, b):
     if type(a) is float and type(b) is float:
         return a <= b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("le", a, b)
     return _cmp(a, b, lambda x, y: x <= y, "le")
 
 
 def gt(a, b):
     if type(a) is float and type(b) is float:
         return a > b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("gt", a, b)
     return _cmp(a, b, lambda x, y: x > y, "gt")
 
 
 def ge(a, b):
     if type(a) is float and type(b) is float:
         return a >= b
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("ge", a, b)
     return _cmp(a, b, lambda x, y: x >= y, "ge")
 
 
@@ -744,6 +780,8 @@ def _logical_arr(v, name):
 
 
 def and_(a, b):
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("and", a, b)
     if type(a) is bool and type(b) is bool:
         return a and b
     if type(a) is float and type(b) is float:
@@ -752,6 +790,8 @@ def and_(a, b):
 
 
 def or_(a, b):
+    if type(a) is Sparse or type(b) is Sparse:
+        return _sp.binop("or", a, b)
     if type(a) is bool and type(b) is bool:
         return a or b
     if type(a) is float and type(b) is float:
@@ -761,6 +801,8 @@ def or_(a, b):
 
 def not_(a):
     t = type(a)
+    if t is Sparse:
+        return _sp.unop("not", a)
     if t is bool:
         return not a
     if t is float:
@@ -1999,6 +2041,10 @@ def _assign_paren(cur, args, v, brace=False):
     if isinstance(cur, Undef):
         cur = None
     tv = type(v)
+    if type(cur) is Sparse and not brace:
+        if tv is np.ndarray and v.size == 0 and v.shape == (0, 0) and v.dtype == np.float64:
+            return _sp.delete(cur, args)
+        return _sp.assign(cur, args, v)
     # deletion: x(i) = []
     if not brace and tv is np.ndarray and v.size == 0 and v.shape == (0, 0) and v.dtype == np.float64 and cur is not None and not _isempty_double(cur) or (not brace and tv is np.ndarray and v.size == 0 and v.shape == (0, 0) and cur is not None and type(cur) is Cell):
         return _delete(cur, args)
@@ -2331,6 +2377,12 @@ def _cat_class(vals):
 
 def _cat(vals, dim):
     """concatenation along MATLAB dimension dim (1 or more)"""
+    for v in vals:
+        if type(v) is Sparse:
+            r = _sp.cat(vals, dim)
+            if r is not None:
+                return r
+            break
     cls = _cat_class(vals)
     # empty values do not take part (but count for the class)
     parts = [v for v in vals if _numel(v) != 0]
@@ -2945,6 +2997,8 @@ def _disp_text(v):
     if t is Cell and not v.a:
         return ""
     sep = "\n\n" if _format["spacing"] == "loose" else "\n"
+    if t is Sparse and sep == "\n\n":
+        return sep.join(body) + "\n\n"
     return sep.join(body) + "\n"
 
 # ------------------------------------------------------------------ function handles' text

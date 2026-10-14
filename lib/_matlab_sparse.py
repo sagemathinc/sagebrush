@@ -329,10 +329,784 @@ def truth(S):
     return True
 
 
+# ------------------------------------------------------------------ assignment and concatenation
+
+def _rhs_values(v, cls):
+    """the values assigned into a sparse matrix of class cls, column-major"""
+    c = _m.class_(v)
+    if c in ("cell", "struct", "string", "function_handle") or not (_m._isnumlike(v) or type(v) is Sparse):
+        raise _err("Conversion to %s from %s is not possible." % (cls, c), "MATLAB:invalidConversion")
+    a = _m._farr(full(v) if type(v) is Sparse else v).reshape(-1)
+    if cls == "logical":
+        if a.dtype.kind == "c":
+            a = a.real
+        if np.any(np.isnan(a)):
+            raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
+        return a != 0
+    return a
+
+
+def assign(S, args, v):
+    """S(args) = v: sparse, its class kept (complex if a complex value goes in)"""
+    args = [index_arg(a) for a in args]
+    cls = class_(S)
+    vals = _rhs_values(v, cls)
+    dims = (S.m, S.n)
+    try:
+        nd = _m._grow_dims(dims, args, _m._dims(v))
+    except _m.MatlabError as e:
+        if e.identifier == "MATLAB:indexed_matrix_cannot_be_resized":
+            raise _err("In an assignment  A(I) = B, a matrix A cannot be resized.", "MATLAB:indexed_matrix_cannot_be_resized")
+        raise
+    if len(nd) > 2:
+        raise _err("N-dimensional sparse arrays are not supported.")
+    m, n = nd
+    if len(args) == 1:
+        a = args[0]
+        if a is COLON:
+            tk = np.arange(m * n, dtype=_I)
+        else:
+            tk, _, _ = _m._ivec(a, m * n, -1, True)
+    else:
+        for k in range(2, len(args)):
+            _m._ivec(args[k], 1, k, False)
+        I = np.arange(m, dtype=_I) if args[0] is COLON else _m._ivec(args[0], m, 0, True)[0]
+        J = np.arange(n, dtype=_I) if args[1] is COLON else _m._ivec(args[1], n, 1, True)[0]
+        tk = (J.reshape((-1, 1)) * m + I.reshape((1, -1))).reshape(-1)
+    if vals.size != 1 and vals.size != tk.size:
+        raise _err("Unable to perform assignment because the indices on the left side are not compatible with the size of the right side.", "MATLAB:subsassigndimmismatch")
+    # the old nonzeros, where nothing is assigned, and the assigned values (the last one at a place)
+    old = _cols(S) * m + S.ir
+    keep = ~np.isin(old, tk) if tk.size else np.ones(old.size, dtype=bool)
+    new = np.repeat(vals, tk.size) if vals.size == 1 else vals
+    ov = S.pr[keep]
+    if ov.dtype.kind != new.dtype.kind or ov.dtype != new.dtype:
+        if cls == "logical":
+            new = new.astype(bool)
+        else:
+            dt = np.result_type(ov.dtype if ov.size else np.float64, new.dtype)
+            if dt.kind == "b":
+                dt = np.float64
+            ov, new = ov.astype(dt), new.astype(dt)
+    keys = np.concatenate([old[keep], tk])
+    allv = np.concatenate([ov, new])
+    r = make(m, n, keys % m if m else keys, keys // m if m else keys, allv, combine="last")
+    return _cast(r, cls) if cls != "logical" else r
+
+
+def delete(S, args):
+    """S(args) = []"""
+    args = [index_arg(a) for a in args]
+    m, n = S.m, S.n
+    key = _keys(S)
+    if len(args) == 1:
+        a = args[0]
+        if a is COLON:
+            return zeros(0, 0, islogical(S))
+        R = np.unique(_m._ivec(a, m * n, -1, False)[0])
+        keep = ~np.isin(key, R)
+        k = key[keep] - np.searchsorted(R, key[keep])
+        total = m * n - R.size
+        if n == 1 and m != 1:
+            return make(total, 1, k, np.zeros(k.size, dtype=_I), S.pr[keep])
+        return make(1, total, np.zeros(k.size, dtype=_I), k, S.pr[keep])
+    d = [m, n]
+    which = [k for k in range(2) if not (args[k] is COLON or _m._covers(args[k], d[k]))]
+    for k in range(2, len(args)):
+        _m._ivec(args[k], 1, k, False)
+    if not which:
+        return zeros(0, n, islogical(S))
+    if len(which) > 1:
+        raise _err("A null assignment can have only one non-colon index.", "MATLAB:nullAssignmentNonColonIndex")
+    k = which[0]
+    R = np.unique(_m._ivec(args[k], d[k], k, False)[0])
+    rows, cols = S.ir, _cols(S)
+    sub = rows if k == 0 else cols
+    keep = ~np.isin(sub, R)
+    sub = sub[keep] - np.searchsorted(R, sub[keep])
+    if k == 0:
+        return make(m - R.size, n, sub, cols[keep], S.pr[keep])
+    return make(m, n - R.size, rows[keep], sub, S.pr[keep])
+
+
+def cat(vals, dim):
+    """[...] with a sparse part: sparse; None for cells and other containers"""
+    cls = _m._cat_class(vals)
+    if cls in ("cell", "struct", "string", "handle"):
+        return None
+    if dim > 2:
+        raise _err("Dimension for sparse matrix concatenation must be <= 2.", "MATLAB:catenate:sparseDimensionBad")
+    if cls in _m._INTS or cls == "char":
+        raise _err("The following error occurred converting from double to %s:\nAttempt to convert to unimplemented sparse type" % cls, "MATLAB:UnableToConvert")
+    parts = [v for v in vals if _m._numel(v) != 0]
+    if not parts:
+        v = next(v for v in vals if type(v) is Sparse)
+        return v
+    mats = [_as_sparse(v) for v in parts]
+    for A in mats[1:]:
+        if (dim == 2 and A.m != mats[0].m) or (dim == 1 and A.n != mats[0].n):
+            raise _err("Dimensions of arrays being concatenated are not consistent.", "MATLAB:catenate:dimensionMismatch")
+    rows, cols, vs = [], [], []
+    off = 0
+    for A in mats:
+        r, c = A.ir, _cols(A)
+        rows.append(r + off if dim == 1 else r)
+        cols.append(c + off if dim == 2 else c)
+        vs.append(A.pr)
+        off += A.m if dim == 1 else A.n
+    m = off if dim == 1 else mats[0].m
+    n = off if dim == 2 else mats[0].n
+    allv = np.concatenate([x.astype(np.float64) if x.dtype.kind == "b" and cls != "logical" else x for x in vs]) if vs else np.zeros(0)
+    r = make(m, n, np.concatenate(rows), np.concatenate(cols), allv)
+    return _cast(r, cls) if cls != "logical" else r
+
+
+# ------------------------------------------------------------------ arithmetic
+
+def _is_scalar(x):
+    return _m._numel(x) == 1
+
+
+def _value_class(a, b, name):
+    """the class of a ⊕ b with a sparse operand: double, single or logical"""
+    for x in (a, b):
+        if _m.class_(x) in _m._INTS:
+            raise _err("Sparse integer array arithmetic operations are not supported.", "MATLAB:sparseInteger")
+    return _m._arith_class(a, b, name)
+
+
+def _sparse_result(name, a, b):
+    """whether MATLAB keeps a ⊕ b sparse"""
+    sa, sb = type(a) is Sparse, type(b) is Sparse
+    if name in ("plus", "minus", "or", "xor"):
+        return sa and sb
+    if name == "times":
+        return True
+    if name in ("rdivide", "power"):
+        return sa
+    if name == "ldivide":
+        return sb
+    if name == "mtimes":
+        # (with a scalar, as .*)
+        return (sa and sb) or _is_scalar(a) or _is_scalar(b)
+    if name == "mrdivide":
+        return (sa and sb) or (sa and _is_scalar(b))
+    if name == "mldivide":
+        return (sa and sb) or (sb and _is_scalar(a))
+    if name == "mpower":
+        return sa
+    return True  # comparisons, and
+
+
+def _as_sparse(x):
+    return x if type(x) is Sparse else from_full(x)
+
+
+def _cast(S, cls):
+    """S with its values in class cls (double or single; logical kept)"""
+    k = S.pr.dtype.kind
+    if k == "b" and cls != "logical":
+        return _new(S.m, S.n, S.jc, S.ir, S.pr.astype(np.float32 if cls == "single" else np.float64))
+    if cls == "single" and k in "fc" and S.pr.dtype.itemsize == (4 if k == "f" else 8) * 2:
+        return _new(S.m, S.n, S.jc, S.ir, S.pr.astype(np.complex64 if k == "c" else np.float32))
+    return S
+
+
+def _fvals(S):
+    """S's nonzeros as float64 or complex128"""
+    v = S.pr
+    if v.dtype.kind == "b":
+        return v.astype(np.float64)
+    return v.astype(np.complex128) if v.dtype.kind == "c" else v.astype(np.float64)
+
+
+def _with(S, vals, cls):
+    """S's pattern with new values (zeros dropped), in class cls"""
+    vals = np.asarray(vals)
+    if cls == "logical":
+        vals = vals.astype(bool)
+    elif cls == "single":
+        vals = vals.astype(np.complex64 if vals.dtype.kind == "c" else np.float32)
+    keep = vals != 0
+    if np.all(keep):
+        return _new(S.m, S.n, S.jc, S.ir, _canon_vals(np.array(vals)))
+    return make(S.m, S.n, S.ir[keep], _cols(S)[keep], vals[keep])
+
+
+def _scalar_value(x):
+    a = _m._farr(x).reshape(-1)
+    v = a[0]
+    return complex(v) if a.dtype.kind == "c" else float(v)
+
+
+def _finite(z):
+    return z == z and abs(z) != _math.inf
+
+
+def _union(A, B):
+    """the union of two same-sized sparse matrices' patterns: (keys, A's values there, B's)"""
+    ka, kb = _keys(A), _keys(B)
+    keys = np.unique(np.concatenate([ka, kb]))
+    va = np.zeros(keys.size, dtype=np.complex128 if A.pr.dtype.kind == "c" else np.float64)
+    vb = np.zeros(keys.size, dtype=np.complex128 if B.pr.dtype.kind == "c" else np.float64)
+    if ka.size:
+        va[np.searchsorted(keys, ka)] = _fvals(A)
+    if kb.size:
+        vb[np.searchsorted(keys, kb)] = _fvals(B)
+    return keys, va, vb
+
+
+def _from_keys(m, n, keys, vals, cls):
+    vals = np.asarray(vals)
+    if cls == "logical":
+        vals = vals.astype(bool)
+    elif cls == "single":
+        vals = vals.astype(np.complex64 if vals.dtype.kind == "c" else np.float32)
+    keep = vals != 0
+    keys, vals = keys[keep], vals[keep]
+    return make(m, n, keys % m if m else keys, keys // m if m else keys, vals)
+
+
+_ELEM = {
+    "plus": _m._add, "minus": _m._sub, "times": _m._mul, "rdivide": _m._div,
+    "ldivide": lambda A, B: _m._div(B, A), "power": _m._pow,
+}
+_CMP = {
+    "eq": lambda x, y: x == y, "ne": lambda x, y: x != y, "lt": lambda x, y: x < y,
+    "le": lambda x, y: x <= y, "gt": lambda x, y: x > y, "ge": lambda x, y: x >= y,
+}
+
+
+def _native(name, a, b, cls):
+    """a ⊕ b on the sparse storage, when the result is sparse and that is exact; else None"""
+    sa, sb = type(a) is Sparse, type(b) is Sparse
+    same = _m._dims(a) == _m._dims(b)
+    if name in ("plus", "minus") and sa and sb and same:
+        rows = np.concatenate([a.ir, b.ir])
+        cols = np.concatenate([_cols(a), _cols(b)])
+        vb = _fvals(b)
+        vals = np.concatenate([_fvals(a).astype(np.complex128) if vb.dtype.kind == "c" else _fvals(a),
+                               -vb if name == "minus" else vb])
+        r = make(a.m, a.n, rows, cols, vals)
+        return _cast(r, cls)
+    if name == "times" and (sa != sb) and _is_scalar(b if sa else a) and not (sa and sb):
+        S, k = (a, b) if sa else (b, a)
+        z = _scalar_value(k)
+        if _finite(z):
+            return _with(S, _m._mul(_fvals(S), np.array([z])), cls)
+        return None
+    if name in ("rdivide", "ldivide") and (sa if name == "rdivide" else sb):
+        S, k = (a, b) if name == "rdivide" else (b, a)
+        if type(k) is not Sparse and _is_scalar(k):
+            z = _scalar_value(k)
+            if z != 0 and z == z:
+                return _with(S, _m._div(_fvals(S), np.array([z])), cls)
+        return None
+    if name == "times" and same:
+        if sa and sb:
+            keys, va, vb = _union(a, b)
+            return _from_keys(a.m, a.n, keys, _m._mul(va, vb), cls)
+        S, F = (a, b) if sa else (b, a)
+        f = _m._farr(F).reshape(-1)
+        if np.all(np.isfinite(f)):
+            return _with(S, _m._mul(_fvals(S), f[_keys(S)]), cls)
+        return None
+    if name == "power" and sa and type(b) is not Sparse and _is_scalar(b):
+        z = _scalar_value(b)
+        if type(z) is float and z > 0:
+            return _with(a, _m._pow(_fvals(a), np.array([z])), cls)
+        return None
+    if name in _CMP:
+        f = _CMP[name]
+        if (sa != sb) and _is_scalar(b if sa else a):
+            S, k = (a, b) if sa else (b, a)
+            z = _scalar_value(k)
+            z = z.real if type(z) is complex and name not in ("eq", "ne") else z
+            g = f if sa else (lambda x, y: f(y, x))
+            if not g(0.0, z):
+                vals = _fvals(S)
+                if vals.dtype.kind == "c" and name not in ("eq", "ne"):
+                    vals = vals.real
+                return _with(S, g(vals, z), "logical")
+            return None
+        if sa and sb and same and not f(0.0, 0.0):
+            keys, va, vb = _union(a, b)
+            if name not in ("eq", "ne"):
+                va, vb = va.real, vb.real
+            return _from_keys(a.m, a.n, keys, f(va, vb), "logical")
+        return None
+    if name == "and" and same:
+        if sa and sb:
+            keys, va, vb = _union(a, b)
+            return _from_keys(a.m, a.n, keys, (va != 0) & (vb != 0), "logical")
+        S, F = (a, b) if sa else (b, a)
+        f = _m._logical_arr(F, "and").reshape(-1)
+        return _with(S, f[_keys(S)], "logical")
+    if name in ("or", "xor") and sa and sb and same:
+        keys, va, vb = _union(a, b)
+        x, y = va != 0, vb != 0
+        return _from_keys(a.m, a.n, keys, (x | y) if name == "or" else (x != y), "logical")
+    return None
+
+
+def _full_pm(name, a, b):
+    """S + F, S - F, F - S with a full matrix F the same size: full, as MATLAB
+    computes it (F, or -F, with S's nonzeros added: -0 where S is zero in S - F)"""
+    S, F = (a, b) if type(a) is Sparse else (b, a)
+    out = _m._farr(F).astype(np.complex128 if S.pr.dtype.kind == "c" else _m._farr(F).dtype)
+    if S.pr.dtype.kind == "c" and out.dtype.kind != "c":
+        out = out.astype(np.complex128)
+    flat = np.array(out).reshape(-1)
+    k = _keys(S)
+    fk = flat[k]
+    sv = _fvals(S)
+    if name == "plus":
+        flat[k] = sv + fk
+    elif type(a) is Sparse:  # S - F
+        flat = -flat
+        flat[k] = sv - fk
+    else:  # F - S
+        flat[k] = fk - sv
+    return _m._box(flat.reshape(out.shape))
+
+
+def binop(name, a, b):
+    """a ⊕ b (an operator) with a sparse operand"""
+    cls = _value_class(a, b, name) if name not in _CMP and name not in ("and", "or", "xor") else "logical"
+    if name in ("and", "or", "xor"):
+        for x in (a, b):
+            if _m.class_(x) in ("cell", "struct", "string", "function_handle"):
+                raise _err("Operator '%s' is not supported for operands of type '%s'." % (_m._OPSYM.get(name, name), _m.class_(x)))
+    elif name in _CMP:
+        for x in (a, b):
+            if _m.class_(x) in _m._INTS:
+                raise _err("Sparse integer array arithmetic operations are not supported.", "MATLAB:sparseInteger")
+    keep = _sparse_result(name, a, b)
+    if keep:
+        r = _native(name, a, b, cls)
+        if r is not None:
+            return r
+    if name in ("mtimes", "mrdivide", "mldivide", "mpower"):
+        return _matrix_op(name, a, b, cls, keep)
+    if name in ("plus", "minus") and not keep and _m._dims(a) == _m._dims(b) and not (type(a) is Sparse and type(b) is Sparse):
+        return _finish(_full_pm(name, a, b), cls)
+    r = _dense(name, full(a), full(b))
+    return _finish(from_full(r) if keep else r, cls)
+
+
+def _finish(r, cls):
+    if type(r) is Sparse:
+        return _cast(r, cls)
+    if cls == "single" and _m.class_(r) == "double":
+        a = _m._farr(r)
+        return _m._canon(a.astype(np.complex64 if a.dtype.kind == "c" else np.float32))
+    return r
+
+
+def _dense(name, a, b):
+    if name == "xor":
+        return _FULL["xor"](1, a, b)
+    return getattr(_m, {"and": "and_", "or": "or_"}.get(name, name))(a, b)
+
+
+def _matmul(A, B):
+    """A * B for 2-D values with a sparse one (neither scalar): sparse if both are"""
+    if _m._dims(A)[1] != _m._dims(B)[0]:
+        raise _err("Incorrect dimensions for matrix multiplication. Check that the number of columns in the first matrix matches the number of rows in the second matrix. To operate on each element of the matrix individually, use TIMES (.*) for elementwise multiplication.", "MATLAB:innerdim")
+    if type(A) is Sparse and type(B) is Sparse:
+        # each nonzero B(k,j) times column k of A
+        e, oc = _gather(A, B.ir)
+        vals = _fvals(A)[e] * _fvals(B)[oc]
+        return make(A.m, B.n, A.ir[e], _cols(B)[oc], vals)
+    if type(A) is Sparse:
+        # (each column of B: sums over A's nonzeros, row by row, in column order)
+        Bf = _m._farr(B)  # stored transposed: Bf[j] is column j
+        av = _fvals(A)
+        ac = _cols(A)
+        cplx = av.dtype.kind == "c" or Bf.dtype.kind == "c"
+        out = np.zeros((Bf.shape[0], A.m), dtype=np.complex128 if cplx else np.float64)
+        for j in range(Bf.shape[0]):
+            prod = av * Bf[j][ac]
+            if cplx:
+                out[j] = _m._cplx(np.bincount(A.ir, weights=prod.real, minlength=A.m), np.bincount(A.ir, weights=prod.imag, minlength=A.m))
+            else:
+                out[j] = np.bincount(A.ir, weights=prod, minlength=A.m)
+        return _m._box(out)
+    # full * sparse: each column of B a sum over its nonzeros
+    Af = _m._farr(A)  # (n, m) stored: Af[:, i] is row i of A... (stored transposed)
+    M = Af.T  # m-by-k, MATLAB orientation
+    bv = _fvals(B)
+    bc = _cols(B)
+    cplx = bv.dtype.kind == "c" or M.dtype.kind == "c"
+    out = np.zeros((B.n, M.shape[0]), dtype=np.complex128 if cplx else np.float64)
+    for i in range(M.shape[0]):
+        prod = M[i][B.ir] * bv
+        if cplx:
+            out[:, i] = _m._cplx(np.bincount(bc, weights=prod.real, minlength=B.n), np.bincount(bc, weights=prod.imag, minlength=B.n))
+        else:
+            out[:, i] = np.bincount(bc, weights=prod, minlength=B.n)
+    return _m._box(out)
+
+
+def _matrix_op(name, a, b, cls, keep):
+    if name == "mtimes":
+        if _is_scalar(a) or _is_scalar(b):
+            r = binop("times", a, b)
+            return r if keep or type(r) is not Sparse else full(r)
+        return _finish(_matmul(a, b), cls)
+    if name == "mrdivide" and _is_scalar(b):
+        return binop("rdivide", a, b)
+    if name == "mldivide" and _is_scalar(a):
+        return binop("ldivide", a, b)
+    if name == "mpower" and _is_scalar(b) and not _is_scalar(a):
+        p = _m._scalar(b)
+        if p == _math.floor(p) and p >= 0:
+            if a.m != a.n:
+                raise _err("Incorrect dimensions for raising a matrix to a power. Check that the matrix is square and the power is a scalar. To operate on each element of the matrix individually, use POWER (.^) for elementwise power.")
+            k = np.arange(a.n, dtype=_I)
+            R = make(a.n, a.n, k, k, np.ones(a.n))
+            A = a
+            p = int(p)
+            while p:
+                if p & 1:
+                    R = _matmul(R, A)
+                A = _matmul(A, A)
+                p >>= 1
+            return _cast(R, cls)
+    r = getattr(_m, name)(full(a), full(b))
+    return _finish(from_full(r) if keep and _m._isnumlike(r) else r, cls)
+
+
+def unop(name, a):
+    """-S, +S, ~S"""
+    if name == "uminus":
+        if islogical(a):
+            return _with(a, -_fvals(a), "double")
+        return _new(a.m, a.n, a.jc, a.ir, -a.pr)
+    if name == "uplus":
+        return _cast(a, "double") if islogical(a) else a
+    # not: true where S is zero
+    vals = a.pr.real if a.pr.dtype.kind == "c" else a.pr
+    if vals.dtype.kind == "f" and np.any(np.isnan(vals)):
+        raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
+    return from_full(np.logical_not(full_arr(a) != 0))
+
+
+# ------------------------------------------------------------------ elementwise functions
+
+# f(0) = 0: applied to the nonzeros alone
+_ZERO_KEEPING = set("""abs sqrt sign round floor ceil fix real imag conj angle sin tan asin atan sinh tanh asinh
+atanh expm1 log1p deg2rad rad2deg isnan isinf nthroot cbrt""".split())
+# kept sparse, though most of their values are nonzero: computed on the full matrix
+_SPARSE_FULL = set("""exp cos log log2 log10 cosh acos acosh sec csc cot asec acsc acot sech csch coth asech acsch
+acoth gamma mod rem atan2 double logical single""".split())
+
+
+def _elementwise_fn(name):
+    f = _FULL[name]
+
+    def g(nargout, *args):
+        if not _has_sparse(args):
+            return f(nargout, *args)
+        x = args[0]
+        if name in _ZERO_KEEPING and len(args) == 1 and type(x) is Sparse:
+            col = _m._box(np.array(x.pr.reshape((1, -1))))
+            r = f(1, col)
+            vals = _m._arr(r).reshape(-1)
+            if vals.dtype.kind == "c":
+                # (a zero imaginary part is 0, not -0)
+                vals = _m._cplx(vals.real, np.where(vals.imag == 0, 0.0, vals.imag)).astype(vals.dtype)
+            out = make(x.m, x.n, x.ir, _cols(x), vals) if vals.size == x.pr.size else from_full(r)
+            return out
+        r = f(nargout, *[full(a) if type(a) is Sparse else a for a in args])
+        if type(x) is Sparse and _m._isnumlike(r) and _m.class_(r) in ("double", "single", "logical") and len(_m._dims(r)) == 2:
+            return from_full(r)
+        return r
+    return g
+
+
+# ------------------------------------------------------------------ reductions and shape
+
+def _dim_arg(S, args):
+    """sum(S), sum(S, dim), sum(S, 'all'): 1, 2, 3+ (S itself), "all"; None for other options"""
+    if not args:
+        return 2 if S.m == 1 else 1
+    if len(args) > 1:
+        return None
+    a = args[0]
+    if type(a) is _m.Char or type(a) is _m.Str:
+        return "all" if _m._text(a).lower() == "all" else None
+    if not _is_scalar(a):
+        return None
+    d = _m._scalar(a)
+    if d != _math.floor(d) or d < 1:
+        return None
+    return int(d)
+
+
+def _group_sum(groups, vals, n):
+    if vals.dtype.kind == "c":
+        return _m._cplx(np.bincount(groups, weights=vals.real, minlength=n), np.bincount(groups, weights=vals.imag, minlength=n))
+    return np.bincount(groups, weights=vals, minlength=n)
+
+
+def _reduced(S, d, vals):
+    """a sum along dimension d (1, 2 or "all") as a sparse matrix"""
+    k = np.arange(S.n if d == 1 else S.m if d == 2 else 1, dtype=_I)
+    z = np.zeros(k.size, dtype=_I)
+    if d == 1:
+        return make(1, S.n, z, k, vals)
+    if d == 2:
+        return make(S.m, 1, k, z, vals)
+    return make(1, 1, z, z, vals)
+
+
+def sum_(S, d):
+    v = _fvals(S)
+    if d == "all":
+        r = _reduced(S, d, np.array([_group_sum(np.zeros(v.size, dtype=_I), v, 1)[0]]))
+    else:
+        r = _reduced(S, d, _group_sum(_cols(S) if d == 1 else S.ir, v, S.n if d == 1 else S.m))
+    return _cast(r, "single" if class_(S) == "single" else "double")
+
+
+def anyall(S, d, is_all):
+    v = S.pr.real if S.pr.dtype.kind == "c" else S.pr
+    if is_all:
+        nz = np.ones(v.size, dtype=bool)
+    else:
+        nz = ~np.isnan(v) if v.dtype.kind == "f" else np.ones(v.size, dtype=bool)
+    if d == "all":
+        g, size, full_n = np.zeros(v.size, dtype=_I), 1, S.m * S.n
+    elif d == 1:
+        g, size, full_n = _cols(S), S.n, S.m
+    else:
+        g, size, full_n = S.ir, S.m, S.n
+    cnt = np.bincount(g[nz], minlength=size) if g.size else np.zeros(size, dtype=_I)
+    vals = (cnt == full_n) if is_all else (cnt > 0)
+    return _reduced(S, d, vals)
+
+
+def diag_(S, k=0):
+    k = int(k)
+    if S.m == 1 or S.n == 1:
+        # a vector: the matrix with it on diagonal k
+        n = S.m * S.n + abs(k)
+        p = _keys(S)
+        return make(n, n, p + max(-k, 0), p + max(k, 0), S.pr)
+    rows, cols = S.ir, _cols(S)
+    on = (cols - rows) == k
+    length = max(0, min(S.m + min(k, 0), S.n - max(k, 0)))
+    r = rows[on] - max(-k, 0)
+    return make(length, 1, r, np.zeros(r.size, dtype=_I), S.pr[on])
+
+
+def tri(S, k, lower):
+    rows, cols = S.ir, _cols(S)
+    keep = (cols - rows <= k) if lower else (cols - rows >= k)
+    return make(S.m, S.n, rows[keep], cols[keep], S.pr[keep])
+
+
+def kron_(A, B):
+    A, B = _as_sparse(A), _as_sparse(B)
+    na, nb = A.pr.size, B.pr.size
+    ra, ca = np.repeat(A.ir, nb), np.repeat(_cols(A), nb)
+    rb, cb = np.tile(B.ir, na), np.tile(_cols(B), na)
+    vals = np.repeat(_fvals(A), nb) * np.tile(_fvals(B), na)
+    r = make(A.m * B.m, A.n * B.n, ra * B.m + rb, ca * B.n + cb, vals)
+    return r if not (islogical(A) and islogical(B)) else r
+
+
+def repmat_(S, r, c):
+    if r == 0 or c == 0 or not S.pr.size:
+        return zeros(S.m * r, S.n * c, islogical(S))
+    rows, cols = S.ir, _cols(S)
+    k = S.pr.size
+    br = np.repeat(np.arange(r, dtype=_I), k)
+    allr = np.tile(rows, r) + br * S.m
+    allc = np.tile(cols, r)
+    vals = np.tile(S.pr, r)
+    bc = np.repeat(np.arange(c, dtype=_I), allr.size)
+    return make(S.m * r, S.n * c, np.tile(allr, c), np.tile(allc, c) + bc * S.n, np.tile(vals, c))
+
+
+def flip(S, lr):
+    rows, cols = S.ir, _cols(S)
+    if lr:
+        return make(S.m, S.n, rows, S.n - 1 - cols, S.pr)
+    return make(S.m, S.n, S.m - 1 - rows, cols, S.pr)
+
+
+def _size_list(args):
+    """reshape's sizes: (m, n), one of them [] for 'whatever fits'"""
+    if len(args) == 1:
+        d = [float(x) for x in _m._arr(args[0]).reshape(-1)]
+        return d
+    out = []
+    for a in args:
+        out.append(None if _m._numel(a) == 0 else float(_m._scalar(a)))
+    return out
+
+
+def _reshape_b(nargout, S, *args):
+    if type(S) is not Sparse:
+        return _SPARSE_OUT_FN["reshape"](nargout, S, *args)
+    d = _size_list(args)
+    if len(d) > 2:
+        if all(x == 1 for x in d[2:] if x is not None) and None not in d[2:]:
+            d = d[:2]
+        else:
+            raise _err("N-D sparse arrays are not supported.", "MATLAB:reshape:sparseNDmatrix")
+    total = S.m * S.n
+    if None in d:
+        known = [x for x in d if x is not None]
+        other = int(known[0]) if known else 1
+        d = [total // other if x is None else int(x) for x in d]
+    return reshape(S, int(d[0]), int(d[1]))
+
+
+def _sum_b(nargout, x, *args):
+    if type(x) is Sparse:
+        d = _dim_arg(x, args)
+        if d is not None:
+            return x if d not in (1, 2, "all") else sum_(x, d)
+    return _SPARSE_OUT_FN["sum"](nargout, x, *args)
+
+
+def _anyall_b(is_all):
+    name = "all" if is_all else "any"
+
+    def g(nargout, x, *args):
+        if type(x) is Sparse:
+            d = _dim_arg(x, args)
+            if d is not None:
+                if d not in (1, 2, "all"):
+                    return _with(x, x.pr != 0, "logical") if not islogical(x) else x
+                return anyall(x, d, is_all)
+        return _SPARSE_OUT_FN[name](nargout, x, *args)
+    return g
+
+
+def _mean_b(nargout, x, *args):
+    if type(x) is Sparse and x.m * x.n:
+        d = _dim_arg(x, args)
+        if d in (1, 2, "all"):
+            n = x.m if d == 1 else x.n if d == 2 else x.m * x.n
+            return binop("rdivide", sum_(x, d), float(n))
+    return _SPARSE_OUT_FN["mean"](nargout, x, *args)
+
+
+def _diag_b(nargout, x, k=0.0):
+    if type(x) is Sparse:
+        return diag_(x, _m._scalar(k))
+    return _SPARSE_OUT_FN["diag"](nargout, x, k)
+
+
+def _tri_b(lower):
+    name = "tril" if lower else "triu"
+
+    def g(nargout, x, k=0.0):
+        if type(x) is Sparse:
+            return tri(x, int(_m._scalar(k)), lower)
+        return _SPARSE_OUT_FN[name](nargout, x, k)
+    return g
+
+
+def _kron_b(nargout, a, b):
+    if type(a) is Sparse or type(b) is Sparse:
+        for x in (a, b):
+            if _m.class_(x) in _m._INTS:
+                raise _err("Sparse integer array arithmetic operations are not supported.", "MATLAB:sparseInteger")
+        r = kron_(a, b)
+        return _cast(r, _m._arith_class(a, b, "times")) if not (islogical(r) and False) else r
+    return _FULL["kron"](nargout, a, b)
+
+
+def _repmat_b(nargout, x, *args):
+    if type(x) is Sparse:
+        if len(args) == 1:
+            d = [int(float(v)) for v in _m._arr(args[0]).reshape(-1)]
+            d = d * 2 if len(d) == 1 else d
+        else:
+            d = [int(_m._scalar(a)) for a in args]
+        if len(d) == 2 or all(v == 1 for v in d[2:]):
+            return repmat_(x, max(d[0], 0), max(d[1], 0))
+    return _SPARSE_OUT_FN["repmat"](nargout, x, *args)
+
+
+def _flip_b(lr):
+    name = "fliplr" if lr else "flipud"
+
+    def g(nargout, x):
+        if type(x) is Sparse:
+            return flip(x, lr)
+        return _FULL[name](nargout, x)
+    return g
+
+
+# built-ins MATLAB keeps sparse, computed on the full matrix: which of their
+# outputs are sparse (the others, such as max's indices, full)
+_SPARSE_OUT = {
+    "prod": (0,), "cumsum": (0,), "cumprod": (0,), "max": (0,), "min": (0,), "median": (0,), "std": (0,),
+    "var": (0,), "dot": (0,), "circshift": (0,), "rot90": (0,), "permute": (0,), "squeeze": (0,),
+    "blkdiag": (0,), "sort": (0,), "unique": (0,), "sum": (0,), "any": (0,), "all": (0,), "mean": (0,),
+    "diag": (0,), "tril": (0,), "triu": (0,), "repmat": (0,), "reshape": (0,),
+}
+_SPARSE_OUT_FN = {}
+
+
+def _sparse_out(name):
+    f = _FULL[name]
+    which = _SPARSE_OUT[name]
+
+    def g(nargout, *args):
+        if not _has_sparse(args):
+            return f(nargout, *args)
+        r = f(nargout, *[full(a) if type(a) is Sparse else a for a in args])
+        multi = type(r) is list
+        outs = r if multi else [r]
+        outs = [from_full(o) if k in which and _m._isnumlike(o) and _m.class_(o) in ("double", "single", "logical")
+                and len(_m._dims(o)) == 2 else o for k, o in enumerate(outs)]
+        return outs if multi else outs[0]
+    return g
+
+
+def blkdiag_b(nargout, *args):
+    """blkdiag(A, B, ...): the matrices along the diagonal; sparse if one is"""
+    if not args:
+        return np.zeros((0, 0))
+    mats = []
+    for a in args:
+        if not (_m._isnumlike(a) or type(a) is Sparse) or len(_m._dims(a)) > 2:
+            raise _err("Inputs must be 2-D numeric or logical arrays.")
+        mats.append(_as_sparse(a) if _m.class_(a) in ("double", "single", "logical") else from_full(_m._farr(a)))
+    rows, cols, vals = [], [], []
+    m = n = 0
+    for A in mats:
+        rows.append(A.ir + m)
+        cols.append(_cols(A) + n)
+        vals.append(_fvals(A))
+        m += A.m
+        n += A.n
+    r = make(m, n, np.concatenate(rows), np.concatenate(cols), np.concatenate(vals))
+    cls = "single" if any(_m.class_(a) == "single" for a in args) else "double"
+    r = _cast(r, cls)
+    return r if _has_sparse(args) else full(r)
+
+
+_SPECIAL = {
+    "sum": _sum_b, "any": _anyall_b(False), "all": _anyall_b(True), "mean": _mean_b, "diag": _diag_b,
+    "tril": _tri_b(True), "triu": _tri_b(False), "kron": _kron_b, "repmat": _repmat_b, "reshape": _reshape_b,
+    "fliplr": _flip_b(True), "flipud": _flip_b(False),
+}
+
+
 # ------------------------------------------------------------------ built-in functions
 
-def _int(x, what="Sparse matrix sizes"):
+def _int(x, what="Sparse matrix sizes", clip=False):
     v = _m._scalar(x)
+    if clip and v < 0:
+        return 0
     if v != v or v != _math.floor(v) or v < 0 or v == _math.inf:
         raise _err("%s must be nonnegative integers." % what)
     return int(v)
@@ -380,8 +1154,6 @@ def sparse_(nargout, *args):
 
 
 def full_b(nargout, x):
-    if not _m._isnumlike(x) and type(x) is not Sparse:
-        raise _err("Undefined function 'full' for input arguments of type '%s'." % _m.class_(x), "MATLAB:UndefinedFunction")
     return full(x)
 
 
@@ -391,12 +1163,12 @@ def _size_args(args, name):
     if len(args) == 1:
         d = [float(x) for x in _m._arr(args[0]).reshape(-1)]
         if len(d) == 1:
-            k = _int(d[0], "Size inputs")
+            k = _int(d[0], "Size inputs", True)
             return k, k
         if len(d) == 2:
-            return _int(d[0], "Size inputs"), _int(d[1], "Size inputs")
+            return _int(d[0], "Size inputs", True), _int(d[1], "Size inputs", True)
         raise _err("N-dimensional sparse arrays are not supported.")
-    return _int(args[0], "Size inputs"), _int(args[1], "Size inputs")
+    return _int(args[0], "Size inputs", True), _int(args[1], "Size inputs", True)
 
 
 def speye_(nargout, *args):
@@ -468,12 +1240,30 @@ def find_(nargout, x, k=None, direction=None):
     return out
 
 
-def _no_sparse(name):
-    f = _FULL.get(name)
+def _operator_fn(name):
+    f = _FULL[name]
+    op = getattr(_m, name)
+
+    def g(nargout, *args):
+        if len(args) == 2 and _has_sparse(args):
+            return op(*args)
+        return f(nargout, *args)
+    return g
+
+
+def _xor(nargout, a, b):
+    if type(a) is Sparse or type(b) is Sparse:
+        return binop("xor", a, b)
+    return _FULL["xor"](nargout, a, b)
+
+
+def _refusing(name, msg, ident):
+    """a built-in MATLAB does not take sparse arguments to"""
+    f = _FULL[name]
 
     def g(nargout, *args):
         if _has_sparse(args):
-            raise _err("Function is not defined for sparse inputs.", "MATLAB:printf:invalidInputAttribute")
+            raise _err(msg, ident)
         return f(nargout, *args)
     return g
 
@@ -493,7 +1283,9 @@ _NATIVE = {
 # class, or pass it on
 _PASS = set("""size numel length ndims isempty isscalar isvector ismatrix isrow iscolumn issquare class isa
 isnumeric isfloat islogical isinteger ischar iscell isstruct isstring iscellstr isobject is_function_handle
-disp display feval struct cell deal isfield whos exist clear""".split())
+disp display feval struct cell deal isfield whos exist clear
+plus minus times rdivide ldivide power mtimes mrdivide mldivide mpower eq ne lt le gt ge and or not uminus uplus
+transpose ctranspose cat horzcat vertcat""".split())
 _FULL = {}  # the built-ins as they were, for full arguments
 _active = [False]
 
@@ -529,9 +1321,33 @@ def activate():
 
 
 def _register():
+    _m._B["blkdiag"] = _m.Builtin(blkdiag_b, "blkdiag")
+    for name in sorted(_ZERO_KEEPING | _SPARSE_FULL):
+        if name in _m._B:
+            _FULL[name] = _m._B[name].f
+            _NATIVE[name] = _elementwise_fn(name)
+    for name in _SPARSE_OUT:
+        if name in _m._B:
+            _FULL[name] = _m._B[name].f
+            _SPARSE_OUT_FN[name] = _sparse_out(name)
+            _NATIVE[name] = _SPARSE_OUT_FN[name]
+    for name, f in _SPECIAL.items():
+        if name in _m._B:
+            _FULL.setdefault(name, _m._B[name].f)
+            _NATIVE[name] = f
+    for name in ("plus", "minus", "times", "rdivide", "power"):
+        _FULL[name] = _m._B[name].f
+        _NATIVE[name] = _operator_fn(name)
+    for name in list(_m._INTS) + ["char"]:
+        _FULL[name] = _m._B[name].f
+        _NATIVE[name] = _refusing(name, "Attempt to convert to unimplemented sparse type", "MATLAB:unimplementedSparseType")
+    _FULL["arrayfun"] = _m._B["arrayfun"].f
+    _NATIVE["arrayfun"] = _refusing("arrayfun", "Sparse inputs are not supported by ARRAYFUN.", "MATLAB:arrayfun:SparseInputNotSupported")
+    _NATIVE["xor"] = _xor
+    _FULL["xor"] = _m._B["xor"].f
     for name in ("sprintf", "fprintf"):
         _FULL[name] = _m._B[name].f
-        _NATIVE[name] = _no_sparse(name)
+        _NATIVE[name] = _refusing(name, "Function is not defined for sparse inputs.", "MATLAB:printf:invalidInputAttribute")
     for name, f in _NATIVE.items():
         if name in _m._B:
             _FULL[name] = _m._B[name].f
