@@ -16,15 +16,18 @@ D = sparse([1 2],[1 2],[123456 0.5])
 D = sparse([1 2],[1 2],[-1e-3 -1e3])
 C = sparse([1 2 4],[1 3 4],[1+2i, -3, 2i],4,4)
 L = sparse([true false; false true])
+L = S > 2
 x = sparse(1,1,5)
 x = S(2,2)
 x = S(1,1)
 c = sparse([1 2 3],1,[10 200 3000])
 r = sparse(1,[2 5],[7 8],1,6)
 T = speye(3)
+T = -speye(2)
 S'
 S(:,2)
 K = sparse([1 1 2],[1 1 2],[2 3 4])
+E = sparse([1 2],[1 2],[1 -1]) + sparse([1 2],[1 2],[-1 1])
 G = sparse(magic(4))
 format loose; format long
 S = sparse([3 2 3 4 1],[1 2 2 3 4],[1 2 3 4 5],4,4)
