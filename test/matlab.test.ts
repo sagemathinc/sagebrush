@@ -390,7 +390,7 @@ test("format's two-word forms (format long g) are its one-word ones; an unknown 
   assert.deepEqual(lines.slice(4, 6), ["Invalid format option 'foo'.", "refused"]);
 });
 
-test("data functions where Octave differs from MATLAB: prctile down a column vector, mov* with a numeric Endpoints fill, corrcoef's range and conjugate", () => {
+test("data functions where Octave differs from MATLAB: prctile down a column vector, mov* with a numeric Endpoints fill, sprand's places, corrcoef's range and conjugate", () => {
   const { execFileSync } = require("node:child_process");
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
@@ -400,6 +400,7 @@ test("data functions where Octave differs from MATLAB: prctile down a column vec
     "disp(mat2str(prctile([3 1 4 1 5 9 2 6]', [10 90])))",
     "disp(mat2str(prctile(7, [10 50 90])))",
     "disp(mat2str(movmax([4 8 6 -1 -2 -3 -1 3 4 5], 4, 'Endpoints', 0)))",
+    "rng default; a = nnz(sprand(500, 1000, 0.1)); rng default; b = nnz(sprandn(500, 1000, 0.1)); fprintf('%d %d\\n', a, b);",
     "x = [1 2 3 4]'; R = corrcoef(x, 2*x); fprintf('%.17g %.17g\\n', R(1, 2), R(2, 1));",
     "R = corrcoef([1+1i 2 3-1i; 2 1i 1; 0 1 2]); fprintf('%.4f %.4f\\n', real(R(1, 3)), imag(R(1, 3)));",
     "disp(mat2str([corrcoef(5) corrcoef(1, 2) corrcoef(1, 1)])); disp(mat2str(corrcoef([5 5 5])));",
@@ -408,5 +409,5 @@ test("data functions where Octave differs from MATLAB: prctile down a column vec
   // (corrcoef: the documented range, |r| <= 1, where Octave gives 1.0000000000000002; and the
   // documented conj(A - mean A) .* (B - mean B), where Octave's entry is the conjugate; and its
   // documented one-observation cases: corrcoef(5) NaN, corrcoef(1, 2) 1, corrcoef(1, 1) NaN)
-  assert.deepEqual(out.trim().split("\n"), ["[1;8.1]", "[7;7;7]", "[0 0 8 8 6 -1 3 4 5 0]", "1 1", "-0.6250 -0.3750", "[NaN 1 NaN]", "1"]);
+  assert.deepEqual(out.trim().split("\n"), ["[1;8.1]", "[7;7;7]", "[0 0 8 8 6 -1 3 4 5 0]", "47663 47663", "1 1", "-0.6250 -0.3750", "[NaN 1 NaN]", "1"]);
 });

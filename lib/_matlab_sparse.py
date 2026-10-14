@@ -1564,7 +1564,11 @@ def _sprand(name, args):
     want = int(round(m * n * density)) if m * n else 0
     if want == 0:
         return zeros(m, n)
-    # (as MATLAB's: random places, the repeated ones once, in order, then their values)
+    # (MATLAB documents "approximately density*m*n uniformly distributed nonzero
+    # entries", "significantly fewer ... if m*n is small or density is large":
+    # places drawn with replacement, a repeated one kept once.  Rows, then
+    # columns, then the values, from the one stream: published output pins
+    # this order, nnz(sprand(500, 1000, 0.1)) being 47663 from the default state)
     i = _m._arr(_m._B["randi"].f(1, float(m), float(want), 1.0)).reshape(-1).astype(_I) - 1
     j = _m._arr(_m._B["randi"].f(1, float(n), float(want), 1.0)).reshape(-1).astype(_I) - 1
     key = np.unique(i * n + j)

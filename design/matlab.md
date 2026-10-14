@@ -533,4 +533,7 @@ The rest:
 - `int64` and `uint64` beyond 2^53: Sagebrush's numpy stores them in
   doubles, so `intmax('int64')` shows 9223372036854775808 and
   `intmax('uint64')` 18446744073709551616;
-- sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`).
+- sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`);
+- `sprandsym`'s numbers: its construction is Sagebrush's own (exactly the
+  requested number of nonzeros), not MATLAB's (sprand's and sprandn's are
+  MATLAB's).
