@@ -74,7 +74,7 @@ const host: BoardHost = {
   // pictures: kept in this browser by name
   images: new Images(),
   // slow code items' outputs, kept in this browser (outcache.ts); not in an exported file
-  outputs: file || bench ? undefined : new IdbOutputCache(),
+  outputs: file || bench ? undefined : new IdbOutputCache(OWN_ENGINE?.id),
   // the engine of code items: the site's, Python in the runner, an
   // opaque-origin sandboxed frame, as on the notebook page (design/runner.md);
   // an exported file's, carried in it or fetched from its site, by its id or
