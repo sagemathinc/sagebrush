@@ -81,7 +81,17 @@ export function fromCanvas(text: string): { doc: BoardDoc; left: Record<string, 
   const left: Record<string, number> = {};
   const leave = (k: string) => { left[k] = (left[k] ?? 0) + 1; };
   const boxed = (n: CanvasNode, z: number) => ({ id: n.id, x: num(n.x), y: num(n.y), w: Math.max(1, num(n.width)), h: Math.max(1, num(n.height)), z, n });
-  const nodes = (c.nodes ?? []).filter(isNode);
+  // (ids are a canvas's own, and unique, by its spec, but not always: the
+  // first keeps its id, the next ones are id-2, id-3, ...; an edge naming one
+  // goes to the first)
+  const taken = new Set((c.nodes ?? []).filter(isNode).map((n) => n.id)), used = new Set<string>();
+  const nodes = (c.nodes ?? []).filter(isNode).map((n) => {
+    if (!used.has(n.id)) { used.add(n.id); return n; }
+    let k = 2;
+    while (taken.has(`${n.id}-${k}`) || used.has(`${n.id}-${k}`)) k++;
+    used.add(`${n.id}-${k}`);
+    return { ...n, id: `${n.id}-${k}` };
+  });
   const frames = nodes.map(boxed).filter((b) => b.n.type === "group");
   const cards = nodes.map(boxed).filter((b) => ["text", "file", "link"].includes(b.n.type));
   for (const n of nodes) {
@@ -156,7 +166,7 @@ export function toCanvas(doc: BoardDoc, laid: (page: number) => { items: Item[];
     }
     for (const it of items.filter((x) => x.kind === "note")) {
       const color = colorOut(it.color);
-      if (it.shape) leave("outline");
+      if (it.shape && it.shape !== "rect") leave("outline");
       if (it.image && !it.image.src) leave("picture");
       const onlyLink = it.ref && /^https?:\/\//.test(it.ref) && !it.title && !it.text && it.code === undefined && !it.detail && !it.image;
       nodes.push(onlyLink ? { id: id(it.id), type: "link", ...at(it), url: it.ref!, ...(color ? { color } : {}) } : { id: id(it.id), type: "text", ...at(it), text: markdownOf(it, mode), ...(color ? { color } : {}) });
