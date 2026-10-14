@@ -25,7 +25,7 @@ try {
   const page = await (await get("/nb/probe.ipynb/")).text();
   if (!/<html/i.test(page)) throw new Error("no notebook page: " + page.slice(0, 200));
   // every sagebrush-*.js the page names, KaTeX's stylesheet, the notices
-  const names = [...new Set(page.match(/sagebrush-[a-z0-9]+\.js/g) ?? [])].filter((n) => !["sagebrush-worker.js", "sagebrush-notebook.js"].includes(n));
+  const names = [...new Set(page.match(/sagebrush-[a-z0-9]+\.js\b/g) ?? [])].filter((n) => !["sagebrush-worker.js", "sagebrush-notebook.js"].includes(n));
   // (and the files it fetches: the documentation search index)
   for (const f of [...names, "katex/katex.min.css", "THIRD-PARTY-NOTICES.txt", ...new Set(page.match(/fetch\("([\w.-]+\.json)"\)/g)?.map((m) => /"(.+)"/.exec(m)[1]) ?? [])]) {
     for (const p of [`/${f}`, `/nb/probe.ipynb/${f}`]) {
