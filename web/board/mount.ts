@@ -214,8 +214,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // here (loaded, opened, a new board, reverted) gets a new one, and the
   // old one's outputs go (SEC-B88-3).
   let outputsId: string | null = null;
-  // (the pictures in the notes' Markdown: one document's pixels, image-size.ts)
-  let notePixels = new PixelBudget();
+  // (one document's pictures' pixels, image-size.ts: the pictures it
+  // carries, its notes' and its code's, afresh for each document shown, CORR-71A-2)
+  let docPixels = new PixelBudget();
   // (whether the document was written in this browser: its remote pictures shown at once)
   let writtenHere = false;
   function newOutputs(fresh: boolean) {
@@ -223,6 +224,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     outputsId = host.outputs && host.store?.outputsId ? host.store.outputsId(fresh) : null;
     if (fresh && old && old !== outputsId) host.outputs?.drop(old).catch(() => {});
     if (code) code.cacheId = outputsId;
+    docPixels = new PixelBudget();
+    code?.usePictures(docPixels);
   }
 
   // a page made from a template: the template's items and edges under its
@@ -259,14 +262,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
     // (only data: whatever it came from, REACT-XSS)
     d = cleanDoc(d);
-    await images.absorb(d);
+    await images.absorb(d, docPixels);
     if (over()) return false;
     await images.ensure(Object.keys(d.images ?? {}));
     if (over()) return false;
     if (!view) doc = d;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
-    board.markdown = (s) => markdown(s, { pixels: notePixels, remote: writtenHere ? true : "click" });
+    board.markdown = (s) => markdown(s, { pixels: docPixels, remote: writtenHere ? true : "click" });
     if (host.math && hasMath(JSON.stringify(d))) {
       // KaTeX: the host's, loaded the first time a board has math
       mathModule ??= host.math();
@@ -374,6 +377,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
     c.cache = host.outputs ?? null;
     c.cacheId = outputsId;
+    c.usePictures(docPixels);
     c.ready.then((ok) => {
       // (it could not start: the caption says why, until the next edit)
       if (!ok) {
@@ -421,7 +425,6 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     loads++;
     loadGen++;
     newOutputs(!stored);
-    notePixels = new PixelBudget();
     // (a document loaded from elsewhere was not written here; the one kept, as it says)
     writtenHere = stored ? host.store?.writtenHere?.() ?? false : host.store?.writtenHere?.(false) ?? false;
     const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(host.address?.get() ?? "");
@@ -935,7 +938,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function printBoard(o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) {
     if (!doc) return null;
     // (math typeset in sheets too)
-    return printSheets(board, sheets(o.mode), { ...o, markdown: (s) => markdown(s, { pixels: notePixels, remote: writtenHere ? true : "click" }) });
+    return printSheets(board, sheets(o.mode), { ...o, markdown: (s) => markdown(s, { pixels: docPixels, remote: writtenHere ? true : "click" }) });
   }
   const prdlg = $("prdlg") as HTMLDialogElement;
   $("print").onclick = () => {
@@ -1031,7 +1034,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     prMask.hidden = !s;
     if (cam) { if (now) board.setCamera(cam); else board.flyTo(cam, 350); }
     const say = $("pr-say");
-    say.innerHTML = st?.say ? markdown(st.say, { pixels: notePixels, remote: writtenHere ? true : "click" }) : "";
+    say.innerHTML = st?.say ? markdown(st.say, { pixels: docPixels, remote: writtenHere ? true : "click" }) : "";
     if (st?.say && board.typeset && hasMath(st.say)) board.typeset(say);
     say.hidden = !st?.say;
     $("pr-where").textContent = `${P.i + 1} / ${P.frames.length}`;

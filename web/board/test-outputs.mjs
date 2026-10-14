@@ -258,6 +258,25 @@ try {
   const fk = await keys(), idFiles = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await sleep(1500);
   check(fk.a.reads > 0 && fk.b.reads > 0 && (await countFor(idFiles)) === 0, "neither the item reading the file nor the one reading it is kept: " + JSON.stringify([fk.a.reads, fk.b.reads]));
+
+  // A board replaced while its outputs are being kept: nothing of it is kept
+  // after its cache is dropped (SEC-975-4).  (The first write's completion is
+  // held; meanwhile another board is loaded, which drops this one's cache;
+  // then it is released: no second write may follow.)
+  await ev(`(() => { window.__holdPut = 0; window.__released = []; const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (value, key) { const r = put.call(this, value, key); if (window.__holdPut === 1 && this.name === "entries" && value && Array.isArray(value.outputs)) { window.__holdPut = 2; const t = this.transaction; let h = null; Object.defineProperty(t, "oncomplete", { configurable: true, set(f) { h = f; }, get() { return h; } }); t.addEventListener("complete", (e) => window.__released.push(() => h && h.call(t, e))); } return r; }; })(), 1`);
+  const twoSlow = { title: "two slow", seed: SEED_C, nodes: [
+    { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1')" },
+    { id: "t2", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2')" },
+  ] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(twoSlow)}).then(() => 1)`);
+  const idHeld = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  await ev("window.__holdPut = 1, 1");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000), "two slow items ran");
+  check(await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "the first write is held");
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "next", nodes: [{ id: "x", code: "print('x')" }] })}).then(() => 1)`);
+  await ev("window.__released.splice(0).forEach((f) => f()), 1");
+  await sleep(1500);
+  check((await countFor(idHeld)) === 0, "the replaced board's cache stays dropped: " + (await countFor(idHeld)));
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

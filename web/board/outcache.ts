@@ -86,6 +86,14 @@ const done = (t: IDBTransaction) => new Promise<void>((res, rej) => { t.oncomple
  */
 export class IdbOutputCache implements OutputCache {
   private db: Promise<IDBDatabase> | null = null;
+  // (each operation after the one before it, in the order asked: a drop
+  // asked after a put is never overtaken by it, SEC-975-4)
+  private queue: Promise<unknown> = Promise.resolve();
+  private inOrder<T>(f: () => Promise<T>): Promise<T> {
+    const p = this.queue.then(f);
+    this.queue = p.catch(() => {});
+    return p;
+  }
   /** @param engine the id of the engine computing what is put (recorded with each entry) */
   constructor(readonly engine?: string, readonly name = "sagebrush-outputs", readonly caps = { doc: DOC_CAP, all: ALL_CAP }) {}
   private open(): Promise<IDBDatabase> {
@@ -100,7 +108,19 @@ export class IdbOutputCache implements OutputCache {
       r.onerror = () => rej(r.error);
     }));
   }
-  async get(doc: string, keys: string[]): Promise<Map<string, CachedOutputs>> {
+  get(doc: string, keys: string[]): Promise<Map<string, CachedOutputs>> {
+    return this.inOrder(() => this.getNow(doc, keys));
+  }
+  put(doc: string, entry: CachedOutputs): Promise<void> {
+    return this.inOrder(() => this.putNow(doc, entry));
+  }
+  sweep(doc: string, live: Set<string>): Promise<void> {
+    return this.inOrder(() => this.sweepNow(doc, live));
+  }
+  drop(doc: string): Promise<void> {
+    return this.inOrder(() => this.dropNow(doc));
+  }
+  private async getNow(doc: string, keys: string[]): Promise<Map<string, CachedOutputs>> {
     const out = new Map<string, CachedOutputs>();
     if (!keys.length) return out;
     const db = await this.open(), t = db.transaction(["entries", "docs"], "readwrite"), es = t.objectStore("entries"), now = Date.now();
@@ -118,7 +138,7 @@ export class IdbOutputCache implements OutputCache {
     await done(t);
     return out;
   }
-  async put(doc: string, entry: CachedOutputs): Promise<void> {
+  private async putNow(doc: string, entry: CachedOutputs): Promise<void> {
     const bytes = sizeOf(entry.outputs);
     if (bytes > ENTRY_MAX) return;
     const db = await this.open(), t = db.transaction(["entries", "docs"], "readwrite"), es = t.objectStore("entries"), ds = t.objectStore("docs"), now = Date.now();
@@ -128,7 +148,7 @@ export class IdbOutputCache implements OutputCache {
     ds.put({ doc, bytes: d.bytes - (old?.bytes ?? 0) + bytes, used: now });
     await done(t);
   }
-  async sweep(doc: string, live: Set<string>): Promise<void> {
+  private async sweepNow(doc: string, live: Set<string>): Promise<void> {
     const db = await this.open();
     {
       const t = db.transaction(["entries", "docs"], "readwrite"), es = t.objectStore("entries"), ds = t.objectStore("docs");
@@ -141,9 +161,9 @@ export class IdbOutputCache implements OutputCache {
       await done(t);
     }
     const docs: any[] = await req(db.transaction("docs").objectStore("docs").getAll());
-    for (const other of dropOrder(docs, doc, this.caps.all)) await this.drop(other);
+    for (const other of dropOrder(docs, doc, this.caps.all)) await this.dropNow(other);
   }
-  async drop(doc: string): Promise<void> {
+  private async dropNow(doc: string): Promise<void> {
     const db = await this.open(), t = db.transaction(["entries", "docs"], "readwrite"), es = t.objectStore("entries");
     for (const k of await req(es.index("doc").getAllKeys(doc))) es.delete(k);
     t.objectStore("docs").delete(doc);

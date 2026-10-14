@@ -102,6 +102,7 @@ export class BoardCode {
     document.body.append(root);
     this.nb = mod.createNotebook(root, { kernel, reactive: true, analyzer, ...this.parts.assets() });
     this.nb.load({ mode: "python", cells: [], autorun: "always" });
+    if (this.pictures) this.nb.usePictures?.(this.pictures);
     this.highlight = (src) => mod.highlight(src, this.mode === "sage");
     // (a cell's state is its element's class: queued, running, stale, error, cancelled)
     this.observer = new MutationObserver(() => this.changed());
@@ -190,8 +191,6 @@ export class BoardCode {
     for (const it of held) this.held.add(it.id);
     // (an item held whose code changed: run, as any edit, and what it holds with it)
     this.release(changed.filter((id) => before.has(id) && this.held.has(id)));
-    // (every item new: another board, whose pictures are counted afresh, CORR-89C-4)
-    if (items.length && items.every((it) => !before.has(it.id))) nb.newPictures?.();
     if (changed.length || !same) {
       nb.applyRemote({
         mode,
@@ -285,6 +284,13 @@ export class BoardCode {
   cache: OutputCache | null = null;
   /** an item over this many ms from root keeps its outputs in the cache */
   cacheMs = CACHE_MS;
+  /** The board's pictures' pixels (image-size.ts): its code's are counted
+   * in it too (mount.ts gives a new one for each document shown, CORR-71A-2). */
+  usePictures(budget: unknown) {
+    this.pictures = budget;
+    this.nb?.usePictures?.(budget);
+  }
+  private pictures: unknown = null;
   /** the cache's name for the board shown, from its host's store (mount.ts
    * outputsId: not the board's seed, which is portable); none, no cache */
   cacheId: string | null = null;
@@ -295,6 +301,8 @@ export class BoardCode {
    * into the cache (each of one run, as previews are), then the board's
    * cache swept, its items' keys now marked. */
   private async keepOutputs(ids: string[]) {
+    // (the cache's name checked again after every wait: another board shown
+    // meanwhile has dropped this one's, which nothing may write again, SEC-975-4)
     const cache = this.cache, ns = this.cacheDoc();
     if (!cache || !ns) return;
     const gens = new Map(ids.map((id) => [id, this.generation(id)]));
@@ -308,8 +316,11 @@ export class BoardCode {
       if (!c || !k?.key || k.widget || k.reads || (state !== "" && state !== "failed") || this.generation(id) !== gens.get(id) || k.fromRoot <= this.cacheMs) continue;
       entries.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot) });
     }
-    for (const e of entries) await cache.put(ns, e);
-    if (entries.length) await cache.sweep(ns, new Set(Object.values(keys).map((k: any) => k.key).filter(Boolean)));
+    for (const e of entries) {
+      if (this.cacheDoc() !== ns) return;
+      await cache.put(ns, e);
+    }
+    if (entries.length && this.cacheDoc() === ns) await cache.sweep(ns, new Set(Object.values(keys).map((k: any) => k.key).filter(Boolean)));
   }
   /** an item over this many ms from root keeps a preview (preview.ts) */
   previewMs = PREVIEW_MS;
