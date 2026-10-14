@@ -47,7 +47,8 @@ and runs on a runtime library with MATLAB's semantics:
     adaptive Simpson step (2000, section 3) with the page's absolute
     tolerance per subinterval; integral and quadgk are Shampine's
     vectorized adaptive Gauss-Kronrod quadrature (2008), with the (7, 15)
-    pair computed for Sagebrush from its definition;
+    pair computed for Sagebrush from its definition; integral2 and
+    integral3 iterate it;
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -626,6 +627,11 @@ The rest:
   norm for an array-valued integrand's error, minus the reversed integral
   for xmin > xmax, and the warnings' wording past the published start of
   quadgk's interval-limit warning;
+- integral2's and integral3's: "auto" is the page's "iterated" method
+  (integral over x of integral over y, and z), since the "tiled" method,
+  Shampine's 2-D program, is not available here and is refused; the inner
+  integrals use the same tolerances, and their warnings are reported
+  once. Waypoints are refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula

@@ -89,3 +89,11 @@ show(r(quadgk(@(x) exp(x).*log(x), 0, 1, t{:})));
 show(r(quadgk(@(z) 1./(2.*z - 1), 1, 1, 'Waypoints', [1+1i 0+1i 0-1i 1-1i], t{:})));
 show(r(quadgk(@(x) cos(x), 0, pi/2, 'Waypoints', [0.5 1], t{:})));
 show(integral(@(x) x, 2, 2));
+% integral2 and integral3 (to 8 digits with tight tolerances)
+t = {'AbsTol', 1e-12, 'RelTol', 1e-10};
+show(r8(integral2(@(x,y) 1./(sqrt(x+y).*(1+x+y).^2), 0, 1, 0, @(x) 1 - x, t{:})));
+show(r8(integral2(@(x,y) 3*x.^2 + 5*y.^2, 0, 5, -5, 0, t{:})));
+show(r8(integral2(@(x,y) exp(-x.^2 - y.^2), -Inf, Inf, -Inf, Inf, t{:})));
+show(r8(integral2(@(x,y) x.*y, 0, 1, @(x) x.^2, @(x) sqrt(x), t{:})));
+show(r8(integral3(@(x,y,z) y.*sin(x) + z.*cos(x), 0, pi, 0, 1, -1, 1, t{:})));
+show(r8(integral3(@(x,y,z) x + y.*z, 0, 1, 0, @(x) x, 0, @(x,y) x + y, t{:})));
