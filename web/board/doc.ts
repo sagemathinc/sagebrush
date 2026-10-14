@@ -493,8 +493,8 @@ export const anyCode = (d: BoardDoc) => Array.from({ length: pageCount(d) }, (_,
  * together, where the group is.  The positions are those of a layout with
  * estimated sizes, so that the order does not change as outputs grow.
  */
-export function codeOrder(d: BoardDoc): { id: string; code: string }[] {
-  const out: { id: string; code: string }[] = [];
+export function codeOrder(d: BoardDoc): CodeCell[] {
+  const out: CodeCell[] = [];
   for (let i = 0; i < pageCount(d); i++) {
     const v = pageView(d, i);
     if (!hasCode(v.nodes ?? [])) continue;
@@ -502,10 +502,20 @@ export function codeOrder(d: BoardDoc): { id: string; code: string }[] {
     const kids = new Map<string | undefined, Item[]>();
     for (const it of items) if (it.kind === "note" || it.kind === "group") (kids.get(it.parent) ?? kids.set(it.parent, []).get(it.parent)!).push(it);
     const visit = (parent: string | undefined): Item[] => rows(kids.get(parent) ?? []).flatMap((it) => (it.kind === "group" ? visit(it.id) : [it]));
-    for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code });
+    for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code, page: i, item: it.id });
   }
+  // (an id is one item's on its page, and may be another's on another
+  // page: on one interpreter, those cells are told apart by their page)
+  const count = new Map<string, number>();
+  for (const c of out) count.set(c.item, (count.get(c.item) ?? 0) + 1);
+  for (const c of out) if (count.get(c.item)! > 1) c.id = `${c.item}@p${c.page + 1}`;
   return out;
 }
+
+/** A code item as a cell of the board's interpreter: `id`, the cell's (its
+ * item's id, or, for an id that items on several pages have, `id@pN`, N
+ * its page from 1); `page` (from 0) and `item`, the item's on its page. */
+export interface CodeCell { id: string; code: string; page: number; item: string }
 
 // Boxes in rows (a box whose top is above the middle of the row's shortest
 // box so far joins it), top to bottom, each row left to right.

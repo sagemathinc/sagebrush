@@ -182,6 +182,14 @@ export class BoardCode {
     const before = new Map<string, string>(now.map((c: any) => [c.id, c.ta.value]));
     // (another language or seed: every item runs again, in it)
     const relang = mode !== this.mode || seed !== this.seed;
+    // (another language: a new interpreter, nothing of the last one's left
+    // in it, such as Sage's pi in a MATLAB board's code; once it has run anything)
+    if (mode !== this.mode && this.runs) {
+      const k = this.kernel, ready = new Promise<void>((resolve) => { const off = k.on("ready", () => { off(); resolve(); }); });
+      k.restart();
+      await ready;
+      if (this.closed) return [];
+    }
     this.mode = mode;
     this.seed = seed;
     const changed = items.filter((it) => relang || before.get(it.id) !== it.code).map((it) => it.id);

@@ -275,6 +275,34 @@ try {
     const b = await ev("(() => { const d = window.sagebrush.board.snapshot().doc, n = d.nodes.find((x) => x.id === 'mover'), o = d.nodes.find((x) => x.id === 'other'); return { title: d.title, x: n?.x, y: n?.y, ox: o?.x, oy: o?.y, drawn: window.board.item('mover')?.x }; })()");
     check(b.title === "B" && b.x === 1000 && b.y === 5300 && b.ox === 0 && b.oy === 5000 && b.drawn === 1000, "another document loaded during a drag: drawn, and nothing of the drag in it: " + JSON.stringify(b));
   }
+  // an id on two pages (ids are a page's): two cells, each page's item showing its own output, once
+  {
+    await ev("window.sagebrush.board.editing(false), 1");
+    const page = (title, said) => ({ title, nodes: [{ id: "same", title, code: `print(${JSON.stringify(said)})`, x: 0, y: 0, w: 300 }] });
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Pages", pages: [page("One", "first"), page("Two", "second")] })}).then(() => 1)`);
+    const ran = await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === '' && o.output))", 30000);
+    const os = await ev("window.sagebrush.board.outputs().then((os) => os.map((o) => [o.id, o.output]))");
+    check(ran && JSON.stringify(os) === JSON.stringify([["same@p1", "first\n"], ["same@p2", "second\n"]]), "an id on two pages: two cells, each with its own output: " + JSON.stringify(os));
+    // (each page's item shows its own output, in one box, which stays one: no render loop)
+    const boxes = () => ev("[...document.querySelectorAll('.board-world .board-code-out')].map((e) => e.textContent)");
+    await sleep(1000);
+    const p1 = await boxes();
+    await sleep(1500);
+    check(JSON.stringify(p1) === JSON.stringify(["first\n"]) && JSON.stringify(await boxes()) === JSON.stringify(p1), "page 1 shows its item's output, once: " + JSON.stringify([p1, await boxes()]));
+    await ev("window.sagebrush.board.page(1)");
+    await sleep(1000);
+    const p2 = await boxes();
+    await sleep(1500);
+    check(JSON.stringify(p2) === JSON.stringify(["second\n"]) && JSON.stringify(await boxes()) === JSON.stringify(p2), "page 2 shows its item's output, once: " + JSON.stringify([p2, await boxes()]));
+  }
+
+  // a board in another language after one in Sage, in the same page: a new interpreter, nothing of Sage's left (Sage's pi in MATLAB's 2*pi)
+  {
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Sage", mode: "sage", nodes: [{ id: "s", code: "x = var('x')\ndiff(sin(x), x)", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+    check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].output === 'cos(x)\\n')", 60000), "a Sage board runs: " + JSON.stringify(await outputs()));
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "MATLAB", mode: "matlab", nodes: [{ id: "m", code: "t = 2*pi", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+    check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /6\\.2832/.test(os[0].output))", 60000), "then a MATLAB board in the same page: 2*pi is MATLAB's: " + JSON.stringify(await outputs()));
+  }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
