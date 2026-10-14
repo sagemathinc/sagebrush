@@ -41,11 +41,18 @@ export interface RemoteBoard {
 
 /** A copy kept in this browser: the canonical JSON shown, its hash, and the
  * remote version it is based on (its hash; while it holds edits the remote
- * has not seen, the version itself). */
-export interface CachedDoc { key: string; json: string; hash: string; remoteHash: string | null; base?: string; at: number }
+ * has not seen, the version itself); `v`, how many times it was written
+ * (the cache's: put() sets it). */
+export interface CachedDoc { key: string; json: string; hash: string; remoteHash: string | null; base?: string; at: number; v?: number }
+/** A copy's version as put() compares it: null, none; else how many times it was written. */
+export const versionOf = (c: CachedDoc | null | undefined) => (c ? c.v ?? 0 : null);
 export interface DocCache {
   get(key: string): Promise<CachedDoc | null>;
-  put(c: CachedDoc): Promise<void>;
+  /** Keep `c`, only if the copy kept now is version `expected` (null: none),
+   * checked and written as one step (one transaction): its version is then
+   * `expected + 1`.  False if another (a store of this tab's or another's)
+   * wrote it since (CORR-67E-1). */
+  put(c: CachedDoc, expected: number | null): Promise<boolean>;
 }
 
 /** The SHA-256 of a document's canonical JSON, in hex ("" where there is no crypto.subtle: never the same as a remote's). */
@@ -77,16 +84,18 @@ export class IdbDocCache implements DocCache {
     }));
   }
   async get(key: string): Promise<CachedDoc | null> {
-    const db = await this.open();
-    const c = (await req(db.transaction("docs").objectStore("docs").get(key))) as CachedDoc | undefined;
+    const db = await this.open(), st = db.transaction("docs", "readwrite").objectStore("docs");
+    const c = (await req(st.get(key))) as CachedDoc | undefined;
     if (!c) return null;
-    // (opened now: the last to be dropped)
-    db.transaction("docs", "readwrite").objectStore("docs").put({ ...c, at: Date.now() });
+    // (opened now: the last to be dropped; in the same transaction, so never over a newer copy)
+    st.put({ ...c, at: Date.now() });
     return c;
   }
-  async put(c: CachedDoc): Promise<void> {
+  async put(c: CachedDoc, expected: number | null): Promise<boolean> {
     const db = await this.open(), t = db.transaction("docs", "readwrite"), st = t.objectStore("docs");
-    st.put(c);
+    const done = new Promise<void>((ok, no) => { t.oncomplete = () => ok(); t.onerror = () => no(t.error); t.onabort = () => no(t.error); });
+    if (versionOf((await req(st.get(c.key))) as CachedDoc | undefined) !== expected) { await done; return false; }
+    st.put({ ...c, v: (expected ?? 0) + 1 });
     const n = await req(st.count());
     if (n > this.max) {
       // (the least recently opened beyond the limit)
@@ -94,7 +103,8 @@ export class IdbDocCache implements DocCache {
       const cur = st.index("at").openCursor();
       cur.onsuccess = () => { const k = cur.result; if (k && extra-- > 0) { k.delete(); k.continue(); } };
     }
-    await new Promise<void>((ok, no) => { t.oncomplete = () => ok(); t.onerror = () => no(t.error); });
+    await done;
+    return true;
   }
 }
 
@@ -312,6 +322,11 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   let online = false;
   let queue: Promise<unknown> = Promise.resolve();
   const step = <T>(f: () => Promise<T>) => { const p = queue.then(f); queue = p.catch((e) => console.warn("board: the store:", e)); return p; };
+  // (closed: its last listener gone; what the remote or a timer answers
+  // after that is dropped, never written over a newer store's copy,
+  // CORR-67E-1; an edit made before is still kept)
+  let closed = false;
+  const later = <A extends unknown[]>(f: (...a: A) => Promise<void>) => (...a: A) => { step(async () => { if (!closed) await f(...a); }); };
   let resolveSynced!: (s: Synced) => void;
   const synced = new Promise<Synced>((ok) => (resolveSynced = ok));
 
@@ -329,11 +344,27 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     showing = showing.then(() => Promise.all(to.map((f) => f(d, notice)))).then(() => { view = d; }, (e) => console.warn("board: shown:", e));
   }
 
+  // The copy written, only over the version this store read or wrote last
+  // (`ver`): written, true; another store wrote it since (this tab's or
+  // another's), false, and that copy is this store's now (CORR-67E-1).
+  let ver: number | null = null;
+  async function write(next: CachedDoc): Promise<boolean> {
+    let ok: boolean;
+    try { ok = await cache.put(next, ver); } catch (e) { console.warn("board: the copy:", e); entry = next; return true; }
+    if (ok) { entry = { ...next, v: (ver ?? 0) + 1 }; ver = entry.v!; return true; }
+    entry = await cache.get(key).catch(() => null);
+    ver = versionOf(entry);
+    return false;
+  }
+  // (a newer copy taken: shown, if it is not what the board shows, and pushed)
+  function adopt() {
+    if (entry && (!view || canonical(view) !== entry.json)) present(parse(entry.json));
+    push();
+  }
   // the copy as it is now, based on the remote version `remoteHash` (`base` while they differ)
-  async function keep(d: BoardDoc, remoteHash: string | null, base?: string) {
+  async function keep(d: BoardDoc, remoteHash: string | null, base?: string): Promise<boolean> {
     const json = canonical(d), hash = await docHash(d);
-    entry = { key, json, hash, remoteHash, ...(hash !== remoteHash && base !== undefined ? { base } : {}), at: Date.now() };
-    await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
+    return write({ key, json, hash, remoteHash, ...(hash !== remoteHash && base !== undefined ? { base } : {}), at: Date.now() });
   }
   const parse = (json: string) => cleanDoc(JSON.parse(json));
   const dirty = () => !!entry && entry.hash !== entry.remoteHash;
@@ -343,10 +374,9 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   // elsewhere meanwhile are merged, not one taken over the other
   const baseOf = (e: CachedDoc) => (e.base !== undefined ? parse(e.base) : e.remoteHash === null ? cleanDoc({}) : parse(e.json));
   // (the remote has `d` now: the copy is based on it)
-  async function sent(d: BoardDoc, h: string) {
-    if (!entry) return;
-    entry = entry.hash === h ? (({ base: _b, ...e }) => ({ ...e, remoteHash: h }))(entry) : { ...entry, remoteHash: h, base: canonical(d) };
-    await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
+  async function sent(d: BoardDoc, h: string): Promise<boolean> {
+    if (!entry) return true;
+    return write(entry.hash === h ? (({ base: _b, v: _v, ...e }) => ({ ...e, remoteHash: h }))(entry) : { ...entry, remoteHash: h, base: canonical(d) });
   }
 
   // The copy, if it holds what the remote has not seen, to the remote: one
@@ -358,31 +388,41 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   // merged, then pushed; refused `tries` times running, no more: the copy
   // kept, busy, and each edit or change from elsewhere one more try
   // (PERF-6B0-2).
-  let saving = false, refused = 0, waiting: ReturnType<typeof setTimeout> | null = null, stalled = false, busy = false;
+  // While the remote is being asked (`asking`), no save starts: edits are
+  // kept in the copy meanwhile, and the latest goes once it has answered;
+  // a refusal then is not counted (PERF-67E-2).
+  let saving = false, refused = 0, waiting: ReturnType<typeof setTimeout> | null = null, stalled = false, busy = false, asking = 0;
   function push() {
-    if (!online || saving || waiting || stalled || !dirty()) return;
+    if (closed || !online || saving || waiting || stalled || asking || !dirty()) return;
     saving = true;
     const d = parse(entry!.json), expected = entry!.remoteHash;
     remote.save(d, expected).then(
       async (ok) => {
         if (ok === false) {
-          step(async () => {
+          later(async () => {
             saving = false;
+            if (asking) return;
             if (++refused >= retry.tries) { stalled = true; busy = true; resolveSynced("busy"); return; }
             const ms = Math.min(retry.max, retry.first * 2 ** (refused - 1)) * (0.75 + Math.random() / 2);
-            waiting = setTimeout(() => step(async () => {
+            waiting = setTimeout(later(async () => {
               waiting = null;
               // (a change heard meanwhile, merged: pushed; else the remote asked)
               if (entry!.remoteHash !== expected) push();
               else ask();
             }), ms);
-          });
+          })();
           return;
         }
         const h = await docHash(d);
-        step(async () => { await sent(d, h); refused = 0; busy = false; saving = false; push(); });
+        later(async () => {
+          saving = false;
+          // (a newer copy, another store's, taken instead: it is what goes next)
+          if (!(await sent(d, h))) { adopt(); return; }
+          refused = 0; busy = false;
+          push();
+        })();
       },
-      (e) => step(async () => { saving = false; console.warn("board: the remote:", e); }),
+      (e) => later(async () => { saving = false; console.warn("board: the remote:", e); })(),
     );
   }
   // (an edit, or a change from elsewhere: once stopped, one more try; true
@@ -396,25 +436,24 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     // which is which cannot be told: ours kept, and said, the remote given ours)
     const t = entry && !(theirHash === entry.remoteHash || theirHash === entry.hash) ? adopted(baseOf(entry), theirs) : theirs;
     if (!t) {
-      entry = { ...entry!, remoteHash: theirHash, base: canonical(theirs) };
-      await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
-      present(parse(entry.json), mergedNotice(1));
+      if (!(await write({ ...entry!, remoteHash: theirHash, base: canonical(theirs) }))) { adopt(); return "same"; }
+      present(parse(entry!.json), mergedNotice(1));
       push();
       return "merged";
     }
     theirs = t;
     // (what the copy is based on, or shows, already: our own save, come back)
     if (entry && (theirHash === entry.remoteHash || theirHash === entry.hash)) {
-      if (theirHash === entry.hash && dirty()) await sent(theirs, theirHash);
+      if (theirHash === entry.hash && dirty() && !(await sent(theirs, theirHash))) { adopt(); return "same"; }
       s = "same";
     } else if (!entry || !dirty()) {
-      await keep(theirs, theirHash, canonical(theirs));
+      if (!(await keep(theirs, theirHash, canonical(theirs)))) { adopt(); return "same"; }
       present(theirs);
       s = "replaced";
     } else {
       // (edits here the remote has not seen, or a save of them on its way: merged)
       const m = merge3(baseOf(entry), parse(entry.json), theirs), doc = identified(m.doc), conflicts = m.conflicts;
-      await keep(doc, theirHash, canonical(theirs));
+      if (!(await keep(doc, theirHash, canonical(theirs)))) { adopt(); return "same"; }
       present(doc, conflicts.length ? mergedNotice(conflicts.length) : undefined);
       s = "merged";
     }
@@ -429,25 +468,31 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   let heard = 0, lastHeard: Synced = "same";
   function ask() {
     const asked = heard;
+    asking++;
+    // (answered, however: saves may start again)
+    let open = true;
+    const answered = () => { if (open) { open = false; asking--; } };
     const stale = () => {
       if (heard === asked) return false;
+      answered();
       online = true;
       push();
       resolveSynced(lastHeard);
       return true;
     };
-    remote.hash().then((h) => step(async () => {
+    remote.hash().then(later(async (h: string | null) => {
       if (stale()) return;
       online = true;
-      if (h !== null && h === entry!.remoteHash) { const was = dirty(); push(); resolveSynced(was ? "pushed" : "same"); return; }
+      if (h !== null && h === entry!.remoteHash) { answered(); const was = dirty(); push(); resolveSynced(was ? "pushed" : "same"); return; }
       const loading = heard;
-      remote.load().then((t) => step(async () => {
+      remote.load().then(later(async (t: BoardDoc | null) => {
         if (heard !== loading) { stale(); return; }
+        answered();
         // (the remote has none: the copy is its first)
         if (!t) { entry = { ...entry!, remoteHash: null }; push(); resolveSynced("pushed"); return; }
         resolveSynced(await arrived(cleanDoc(t), h ?? (await docHash(t))));
-      }), () => step(async () => { if (!stale()) { online = false; resolveSynced("offline"); } }));
-    }), () => step(async () => { if (!stale()) resolveSynced("offline"); }));
+      }), later(async () => { if (!stale()) { answered(); online = false; resolveSynced("offline"); } }));
+    }), later(async () => { if (!stale()) { answered(); resolveSynced("offline"); } }));
   }
 
   // a change made elsewhere: a step (and, as it comes, newer than any answer
@@ -459,7 +504,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     heard++;
     if (!opened) return;
     const doc = cleanDoc(d);
-    step(async () => { kick(); lastHeard = await arrived(doc, await docHash(doc)); });
+    later(async () => { kick(); lastHeard = await arrived(doc, await docHash(doc)); })();
   }
 
   // The remote's document, its pages given ids, saved over it only if it
@@ -487,6 +532,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
     busy: () => busy,
     async load() {
       const c = await step(async () => cache.get(key).catch(() => null)), copy = c && parse(c.json);
+      await step(async () => { ver = versionOf(c); });
       // (a copy whose pages have ids: shown at once, the remote asked meanwhile)
       if (c && copy && identified(copy) === copy) {
         await step(async () => { entry = c; view = copy; opened = true; });
@@ -503,16 +549,15 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
         // (busy: the copy holds the ids the remote has not seen, based on its
         // version given them; they go with the next save, by compare-and-swap)
         if (got.busy) {
-          await keep(got.doc, got.hash, canonical(got.doc));
+          // (another store wrote a copy meanwhile: that one)
+          view = (await keep(got.doc, got.hash, canonical(got.doc))) ? got.doc : entry ? parse(entry.json) : got.doc;
           busy = true;
-          view = got.doc;
           resolveSynced("busy");
           // (a change heard since it was asked for: as any)
           if (heard !== got.at) ask();
           return { doc: view };
         }
-        await keep(got.doc, got.hash);
-        view = got.doc;
+        view = (await keep(got.doc, got.hash)) ? got.doc : entry ? parse(entry.json) : got.doc;
         resolveSynced("fresh");
         // (a change since: as any)
         ask();
@@ -524,9 +569,15 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       const from = view;
       view = d;
       step(async () => {
-        const doc = identified(from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d);
-        const base = dirty() ? entry!.base ?? (entry!.remoteHash === null ? undefined : entry!.json) : entry?.json;
-        await keep(doc, entry?.remoteHash ?? null, base);
+        // (a newer copy written by another store meanwhile: the edit merged
+        // into that one, as into one shown later, and written again)
+        let doc = d;
+        for (let tries = 0; tries < 10; tries++) {
+          doc = identified(from && entry && entry.json !== canonical(from) ? merge3(from, d, parse(entry.json)).doc : d);
+          const base = dirty() ? entry!.base ?? (entry!.remoteHash === null ? undefined : entry!.json) : entry?.json;
+          if (await keep(doc, entry?.remoteHash ?? null, base)) break;
+        }
+        if (closed) return;
         if (doc !== d) present(doc);
         // (stopped: the remote asked first, its newer document merged, then pushed)
         if (kick()) ask();
@@ -538,7 +589,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       for (const [d, n] of unsent.splice(0)) present(d, n);
       offRemote ??= remote.subscribe?.(changed);
       // (none left: no more listening, nor a retry waiting)
-      return () => { listeners.delete(f); if (!listeners.size) { offRemote?.(); offRemote = undefined; if (waiting) { clearTimeout(waiting); waiting = null; } } };
+      return () => { listeners.delete(f); if (!listeners.size) { closed = true; offRemote?.(); offRemote = undefined; if (waiting) { clearTimeout(waiting); waiting = null; } } };
     },
   };
 }

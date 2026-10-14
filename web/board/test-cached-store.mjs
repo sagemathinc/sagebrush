@@ -24,7 +24,9 @@
 // taken only if mutual (CORR-DAF-3); a remote changing at every try opens,
 // busy, and its ids go with the next save (CORR-DAF-4); a first save
 // expects no document, and one made meanwhile is merged (CORR-6B0-1); saves
-// refused again and again stop, busy (PERF-6B0-2).
+// refused again and again stop, busy (PERF-6B0-2); an older store's save
+// landing never writes over a newer store's copy (CORR-67E-1); edits made
+// while the remote is asked wait for its answer (PERF-67E-2).
 //   bun web/board/test-cached-store.mjs
 import { adopted, cachedStore, merge3 } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
@@ -41,7 +43,8 @@ const titleOf = (json) => JSON.parse(json).nodes[0].title;
 const FAST = { first: 5, max: 40, tries: 8 };
 
 // an in-memory copy, and a remote whose calls can be held
-const memCache = () => { const m = new Map(); return { m, get: async (k) => m.get(k) ?? null, put: async (c) => { m.set(c.key, { ...c }); } }; };
+// (put as IdbDocCache's: only over the version expected; the tests' own, without one, as they are)
+const memCache = () => { const m = new Map(); return { m, get: async (k) => (m.has(k) ? { ...m.get(k) } : null), put: async (c, expected) => { const cur = m.get(c.key), v = cur ? cur.v ?? 0 : null; if (expected !== undefined && v !== expected) return false; m.set(c.key, { ...c, v: (v ?? 0) + 1 }); return true; } }; };
 const fakeRemote = (d, o = {}) => {
   const r = { doc: d && copy(d), calls: [], holds: {}, fs: new Set(), saves: 0, cas: o.cas ?? true };
   const gate = async (name) => { r.calls.push(name); const h = r.holds[name]; if (h) { delete r.holds[name]; await h.p; } };
@@ -495,6 +498,68 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   store.save(cleanDoc({ ...JSON.parse(cache.m.get("x2").json), nodes: [{ id: "n", title: "ours, quiet" }] }));
   await tick(300);
   check(!store.busy?.() && R.doc.nodes[0].title === "ours, quiet" && R.doc.title === JSON.parse(cache.m.get("x2").json).title, "...the remote quiet, an edit: saved, merged with the remote's last, not busy: " + JSON.stringify({ attempts, busy: store.busy?.(), remote: [R.doc.title, R.doc.nodes[0].title] }));
+}
+
+// CORR-67E-1: store A's save on its way; A closed (or not); store B opens the same copy, edits it, closes; then A's save lands: B's edit stays the copy, and reaches the remote
+for (const closeA of [true, false]) {
+  const cache = memCache(), base = cleanDoc(doc("base")), key = closeA ? "y1" : "y2";
+  await cache.put({ key, json: canonical(base), hash: await hashOf(base), remoteHash: await hashOf(base), at: 0 });
+  const R = fakeRemote(base);
+  const A = cachedStore(R, key, cache, FAST);
+  const offA = A.subscribe(() => {});
+  await A.load();
+  await A.synced;
+  R.holds.save = held();
+  const saveGate = R.holds.save;
+  A.save(cleanDoc(doc("edit A")));
+  for (let k = 0; k < 50 && !R.calls.includes("save"); k++) await tick(10);
+  if (closeA) offA();
+  R.holds.hash = held();
+  const hashGate = R.holds.hash;
+  const B = cachedStore(R, key, cache, FAST);
+  const offB = B.subscribe(() => {});
+  const got = await B.load();
+  B.save(cleanDoc(doc("edit B")));
+  await tick(30);
+  offB();
+  saveGate.open();
+  await tick(80);
+  const cached = titleOf(cache.m.get(key).json);
+  hashGate.open();
+  await tick(50);
+  // (opened again: B's edit, kept, goes to the remote)
+  const C = cachedStore(R, key, cache, FAST);
+  C.subscribe(() => {});
+  await C.load();
+  await C.synced;
+  await tick(100);
+  check(got?.doc.nodes[0].title === "edit A" && cached === "edit B" && R.doc.nodes[0].title === "edit B" && titleOf(cache.m.get(key).json) === "edit B", `store A's save landing after store B's edit (A ${closeA ? "closed" : "still open"}): B's edit stays the copy, and reaches the remote: ` + JSON.stringify({ bOpened: got?.doc.nodes[0].title, cached, remote: R.doc.nodes[0].title, after: titleOf(cache.m.get(key).json) }));
+}
+
+// PERF-67E-2: stopped (busy); an edit asks the remote (its answer held); a second edit meanwhile; the remote quiet, the answer let go: the latest edit, merged, saved
+{
+  const cache = memCache(), base = cleanDoc(doc("base")), ours = cleanDoc(doc("ours"));
+  await cache.put({ key: "y3", json: canonical(ours), hash: await hashOf(ours), remoteHash: await hashOf(base), base: canonical(base), at: 0 });
+  const R = fakeRemote(base);
+  let contend = true, attempts = 0, k = 0;
+  const save0 = R.save;
+  R.save = (x, expected) => { attempts++; if (contend) R.doc = { title: "T" + ++k, nodes: [{ id: "n", title: "base" }] }; return save0(x, expected); };
+  const store = cachedStore(R, "y3", cache, { first: 1, max: 1, tries: 2 });
+  store.subscribe(() => {});
+  await store.load();
+  await store.synced;
+  await tick(100);
+  const stoppedAt = attempts, wasBusy = store.busy?.();
+  contend = false;
+  R.holds.hash = held();
+  const hashGate = R.holds.hash;
+  store.save(cleanDoc({ ...JSON.parse(cache.m.get("y3").json), nodes: [{ id: "n", title: "edit A" }] }));
+  await tick(30);
+  store.save(cleanDoc({ ...JSON.parse(cache.m.get("y3").json), nodes: [{ id: "n", title: "edit B" }] }));
+  await tick(30);
+  hashGate.open();
+  await tick(150);
+  check(stoppedAt === 2 && wasBusy && !store.busy?.() && R.doc.nodes[0].title === "edit B" && R.doc.title === "T" + k && titleOf(cache.m.get("y3").json) === "edit B", "stopped, then two edits as the remote is asked: the latest, merged with the remote's newer document, saved once it answers: " + JSON.stringify({ stoppedAt, wasBusy, busy: store.busy?.(), attempts, remote: [R.doc.title, R.doc.nodes[0].title], cached: titleOf(cache.m.get("y3").json) }));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
