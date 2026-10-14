@@ -40,7 +40,8 @@ its eigenvalues a_P at the primes P of norm <= RATIONAL_PRIME_NORM (at P | N
 the LMFDB's value, related to the Atkin-Lehner eigenvalue).
 
 lmfdb-2.2.5.1-hecke.txt, for every level N of norm <= HECKE_LEVEL_NORM and
-every prime P of norm <= HECKE_PRIME_NORM not dividing N:
+every prime P of norm <= HECKE_PRIME_NORM not dividing N, and for P = N
+when N is prime (then T_P is U_P):
 
     a b c | pa pb pc | f_0 f_1 ... f_d
 
@@ -209,17 +210,21 @@ def hecke_fixture():
     import json
 
     primes = json.loads(psql(Q_PRIMES)[0][0])
-    pl = [(i, ideal_hnf(s)) for i, s in enumerate(primes)]
-    pl = [(i, h) for i, (n, h) in pl if n <= HECKE_PRIME_NORM]
+    allp = [(i, ideal_hnf(s)) for i, s in enumerate(primes)]
+    index = {h: i for i, (n, h) in allp}
+    pl = [(i, h) for i, (n, h) in allp if n <= HECKE_PRIME_NORM]
     table = {}
     for level, poly, eigs in psql(Q_HECKE):
         _, h = ideal_hnf(level)
         f = parse_poly(poly, "x")
         assert f[-1] == 1
         eigs = json.loads(eigs)
-        for i, ph in pl:
-            # P divides N exactly when N is contained in P
-            if contains(ph, h):
+        # at a prime level P = N, also a_P (the eigenvalue of U_P)
+        extra = [(index[h], h)] if h in index and all(ph != h for _, ph in pl) else []
+        for i, ph in pl + extra:
+            # P divides N exactly when N is contained in P; of those, only
+            # P = N (prime levels) is kept
+            if contains(ph, h) and ph != h:
                 continue
             g = charpoly_of_element(parse_poly(eigs[i], "e"), f)
             key = (h, ph)

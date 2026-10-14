@@ -399,20 +399,17 @@ fn derivative(f: &[BigInt]) -> Vec<BigInt> {
 
 /// The a_p of several rational newforms of the same level, for all primes
 /// of norm at most bound (as RationalNewform::aplist), computing the action
-/// of each T_p once for all of them, primes in parallel.
-pub fn aplists(space: &Space, forms: &[RationalNewform], bound: u64) -> Result<Vec<Vec<(Prime, Option<i64>)>>, String> {
+/// of each T_p (U_p for p dividing the level) once for all of them, primes
+/// in parallel.
+pub fn aplists(space: &Space, forms: &[RationalNewform], bound: u64) -> Result<Vec<Vec<(Prime, i64)>>, String> {
     let primes = primes_of_bounded_norm(bound);
     let rows: Vec<usize> = forms.iter().map(|f| f.i).collect();
-    let per_prime: Vec<Result<Vec<Option<i64>>, String>> = crate::par::map_range(primes.len(), |k| {
+    let per_prime: Vec<Result<Vec<i64>, String>> = crate::par::map_range(primes.len(), |k| {
         let p = &primes[k];
-        let e = space.level.factors.iter().find(|(q, _)| q == p).map_or(0, |(_, e)| *e);
-        if e > 0 {
-            return Ok(forms.iter().map(|_| if e == 1 { None } else { Some(0) }).collect());
-        }
         let rs = space.hecke_rows(p, &rows)?;
-        forms.iter().zip(&rs).map(|(f, r)| f.ap_from_row(p, r).map(Some)).collect()
+        forms.iter().zip(&rs).map(|(f, r)| f.ap_from_row(p, r)).collect()
     });
-    let per_prime: Vec<Vec<Option<i64>>> = per_prime.into_iter().collect::<Result<_, _>>()?;
+    let per_prime: Vec<Vec<i64>> = per_prime.into_iter().collect::<Result<_, _>>()?;
     Ok((0..forms.len()).map(|t| primes.iter().zip(&per_prime).map(|(p, v)| (*p, v[t])).collect()).collect())
 }
 
@@ -444,13 +441,19 @@ pub struct RationalNewform {
 }
 
 impl RationalNewform {
-    /// a_p for a prime p not dividing the level: (T_p w)_i / w_i, from row i
-    /// of T_p alone.
+    /// a_p for a prime p: (T_p w)_i / w_i from row i of T_p alone, where
+    /// T_p is U_p if p divides the level. The eigenvector w of the separating
+    /// operator spans a joint eigenspace of the T_q (q not dividing N) of
+    /// dimension one (multiplicity one), which U_p preserves since it
+    /// commutes with them; so w is an eigenvector of U_p too.
     pub fn ap(&self, space: &Space, p: &Prime) -> Result<i64, String> {
         self.ap_from_row(p, &space.hecke_row(p, self.i)?)
     }
 
-    /// a_p from row i of T_p.
+    /// a_p from row i of T_p (U_p if p divides the level). Checked: the
+    /// Ramanujan bound |a_p| <= 2 sqrt(N(p)) for p not dividing N; for p
+    /// dividing N, a_p = +-1 if p exactly divides N and a_p = 0 if p^2 does,
+    /// as for every newform of weight 2 with trivial character.
     pub fn ap_from_row(&self, p: &Prime, row: &[(u32, u32)]) -> Result<i64, String> {
         let md = Modulus::new(ELL);
         let mut s = 0u64;
@@ -459,27 +462,23 @@ impl RationalNewform {
         }
         let x = md.mul(s, md.inv(self.w[self.i]).unwrap());
         let a = if x > ELL / 2 { x as i64 - ELL as i64 } else { x as i64 };
-        if (a as i128 * a as i128) > 4 * p.norm as i128 {
-            return Err(format!("a_p = {} modulo ELL violates the Ramanujan bound at N(p) = {}: not an eigenvector", a, p.norm));
+        let e = self.level.factors.iter().find(|(q, _)| q == p).map_or(0, |(_, e)| *e);
+        let ok = match e {
+            0 => (a as i128 * a as i128) <= 4 * p.norm as i128,
+            1 => a == 1 || a == -1,
+            _ => a == 0,
+        };
+        if !ok {
+            return Err(format!("a_p = {} modulo ELL at N(p) = {} (p^{} || N) is impossible for a newform: not an eigenvector", a, p.norm, e));
         }
         Ok(a)
     }
 
     /// a_p for all primes of norm at most bound, in the order of
-    /// primes_of_bounded_norm; None at primes dividing the level, except
-    /// Some(0) where p^2 divides it (additive reduction; PSAGE's ap).
-    pub fn aplist(&self, space: &Space, bound: u64) -> Result<Vec<(Prime, Option<i64>)>, String> {
-        primes_of_bounded_norm(bound)
-            .into_iter()
-            .map(|p| {
-                let e = self.level.factors.iter().find(|(q, _)| *q == p).map_or(0, |(_, e)| *e);
-                let a = match e {
-                    0 => Some(self.ap(space, &p)?),
-                    1 => None,
-                    _ => Some(0),
-                };
-                Ok((p, a))
-            })
-            .collect()
+    /// primes_of_bounded_norm (the eigenvalues of U_p at primes dividing the
+    /// level: -1 times the Atkin-Lehner eigenvalue where p exactly divides
+    /// it, 0 where p^2 does).
+    pub fn aplist(&self, space: &Space, bound: u64) -> Result<Vec<(Prime, i64)>, String> {
+        primes_of_bounded_norm(bound).into_iter().map(|p| Ok((p, self.ap(space, &p)?))).collect()
     }
 }

@@ -100,3 +100,26 @@ fn hecke_charpolys_vs_lmfdb() {
     }
     assert!(checked > 3000);
 }
+
+/// U_P at prime levels N = P of norm <= 1000, all newform orbits (rational
+/// or not): M_2(P) is the constant function (U_P eigenvalue N(P): rows sum to
+/// N(P)) plus S_2^new(P) (S_2(1) = 0), so
+///   charpoly(U_P | M_2(P)) = (x - N(P)) g_P(x),
+/// with g_P the product over the orbits of the charpoly of a_P (LMFDB).
+#[test]
+fn up_at_prime_levels_vs_lmfdb() {
+    let table = fixture();
+    let mut checked = 0;
+    for n in ideals_of_bounded_norm(1000) {
+        let [(p, 1)] = n.factors.as_slice() else { continue };
+        let Some(g) = table.get(&(n.hnf, p.hnf)) else { continue };
+        let s = Space::from_ideal(n.clone()).unwrap();
+        let t = s.hecke_matrix(p).unwrap().dense();
+        let rows = t.iter().map(|r| r.iter().map(|&x| BigInt::from(x)).collect()).collect();
+        let got = charpoly(&ZMat::from_rows(rows));
+        let want = mul(&vec![BigInt::from(-(p.norm as i64)), BigInt::from(1i64)], g);
+        assert!(got == want, "U_P at the prime level {} (norm {})", n.gen, n.norm());
+        checked += 1;
+    }
+    assert!(checked >= 150, "{} prime levels", checked);
+}
