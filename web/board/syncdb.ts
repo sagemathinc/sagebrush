@@ -19,7 +19,7 @@
 
 import { canonical, cleanDoc, type BoardDoc } from "./doc";
 import { fromRecords, toRecords } from "./history";
-import { docHash, IdbDocCache, records, type DocCache, type CachedDoc, type RemoteBoard } from "./cached";
+import { docHash, IdbDocCache, records, versionOf, type DocCache, type CachedDoc, type RemoteBoard } from "./cached";
 import type { BoardStore } from "./mount";
 
 /** The parts of CoCalc's SyncDB (@cocalc/sync/editor/db) the adapter uses,
@@ -40,11 +40,13 @@ export interface SyncDbLike {
 
 /** A board as the syncdb's JSON lines. */
 export const jsonl = (d: BoardDoc) => toRecords(d).map((r) => JSON.stringify(r)).join("\n");
-/** The board a syncdb holds; null if it holds none. */
-export function boardOf(db: SyncDbLike): BoardDoc | null {
-  const rs = db.to_str().split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+/** The board in a syncdb's JSON lines; null if they hold none. */
+export function boardFrom(lines: string): BoardDoc | null {
+  const rs = lines.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
   return rs.length ? cleanDoc(fromRecords(records(rs))) : null;
 }
+/** The board a syncdb holds; null if it holds none. */
+export const boardOf = (db: SyncDbLike) => boardFrom(db.to_str());
 
 // ---- a RemoteBoard for cachedStore -----------------------------------------
 
@@ -65,16 +67,14 @@ export function syncdbRemote(db: SyncDbLike): RemoteBoard {
     async load() { await db.wait_until_ready(); return now(); },
     async save(doc, expected) {
       await db.wait_until_ready();
-      // (read and hashed, then compared and written, with no other step between:
-      // the hash's await is the only one, and the document is read again after it)
-      for (;;) {
-        const before = db.to_str(), d = now(), h = d ? await docHash(d) : null;
-        if (db.to_str() !== before) continue;
-        if (h !== expected) return false;
-        db.from_str(jsonl(doc));
-        db.commit();
-        return true;
-      }
+      // (read once; that reading hashed; then, with no step between, the
+      // replica compared with that same reading and written: changed
+      // meanwhile, refused, and the store merges and tries again, CORR-B5C-2)
+      const read = db.to_str(), d = boardFrom(read), h = d ? await docHash(d) : null;
+      if (h !== expected || db.to_str() !== read) return false;
+      db.from_str(jsonl(doc));
+      db.commit();
+      return true;
     },
     subscribe(f) {
       const on = () => { const d = now(); if (d) f(d); };
@@ -110,10 +110,15 @@ export function syncdbStore(db: SyncDbLike, key: string, cache: DocCache = new I
   const step = <T>(f: () => Promise<T>) => { const p = queue.then(f); queue = p.catch((e) => console.warn("board: the syncdb store:", e)); return p; };
   const parse = (json: string) => cleanDoc(JSON.parse(json));
 
+  // (written only over the version read or written last: another store's newer copy is not overwritten, but taken)
+  let ver: number | null = null;
   async function keep(d: BoardDoc, base: BoardDoc | null) {
     const json = canonical(d), hash = await docHash(d), baseHash = base ? await docHash(base) : null;
-    entry = { key, json, hash, remoteHash: baseHash, ...(base && hash !== baseHash ? { base: canonical(base) } : {}), at: Date.now() };
-    await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
+    const next: CachedDoc = { key, json, hash, remoteHash: baseHash, ...(base && hash !== baseHash ? { base: canonical(base) } : {}), at: Date.now() };
+    const ok = await cache.put(next, ver).catch((e) => { console.warn("board: the copy:", e); return null; });
+    if (ok === false) { entry = await cache.get(key).catch(() => null); ver = versionOf(entry); return; }
+    entry = next;
+    if (ok) ver = (ver ?? 0) + 1;
   }
   // (documents given the board one at a time, each once the one before is shown)
   function present(d: BoardDoc) {
@@ -130,7 +135,15 @@ export function syncdbStore(db: SyncDbLike, key: string, cache: DocCache = new I
   }
   const onChange = () => { if (open) step(heard); };
 
+  // (the copy read and taken as one step, queued before anything else: the
+  // syncdb, once open, finds a copy's edits already there, CORR-B5C-1)
+  const init = step(async () => {
+    const c = await cache.get(key).catch(() => null);
+    ver = versionOf(c);
+    if (c) { entry = c; view = parse(c.json); }
+  });
   const opened = (async () => {
+    await init;
     await db.wait_until_ready();
     await step(async () => {
       // (edits kept in the copy before it was open: written as what they changed)
@@ -148,11 +161,8 @@ export function syncdbStore(db: SyncDbLike, key: string, cache: DocCache = new I
   return {
     opened,
     async load() {
-      const c = await step(async () => cache.get(key).catch(() => null));
-      if (c) {
-        await step(async () => { entry = c; view = parse(c.json); });
-        return { doc: view! };
-      }
+      await init;
+      if (view) return { doc: view };
       await opened;
       return step(async () => (view ? { doc: view } : null));
     },

@@ -90,6 +90,25 @@ This browser's IndexedDB copy stays, for two things only:
   syncdb's document they were made from (`base`), and written with
   `from_str(copy, {base})` once it opens, merged like any edit.
 
+**The copy's key** (DOC-DC9-4). In B a copy's pending edits are written
+into the live syncdb, so a copy must never meet another document. Its key
+names exactly one document:
+
+- the site, the account, the project, and an **immutable document id**,
+  not the path alone;
+- that id is the document's own, made when the syncdb's document is first
+  created (say, a `uid` the project writes into the `doc` record when it
+  first loads a file without one), and kept in the file;
+- a different document at the same path (the file deleted and made again,
+  or replaced wholesale by another program) has a different id, so a new
+  key: the old copy is never written into it, and is retired (deleted from
+  this browser) when that is seen;
+- signing out clears this browser's copies.
+
+The copies are written by compare-and-swap on a version (`DocCache.put(c,
+expected)`, one IndexedDB transaction), so two stores on one key, in this
+tab or another, never write over each other (CORR-67E-1).
+
 Page ids: in B, the project gives pages ids (`identified()`) when it loads
 the file into the syncdb, before any browser sees it. The project is the
 only writer at that moment, so there is no race and no compare-and-swap.
@@ -136,6 +155,9 @@ for the first paint and for edits made before the syncdb opens.**
 `cachedStore` (A) stays for hosts whose remote keeps whole documents
 (a plain file or object store, perhaps sagebrush.space later). There,
 compare-and-swap plus `merge3` is the only option.
+
+Until William decides, both stores (`cachedStore` and `syncdbStore`) are
+frozen: no work on either beyond correctness fixes.
 
 What B gives up, for William to accept or not:
 

@@ -12,6 +12,7 @@ import { canonical, cleanDoc } from "./doc.ts";
 import { SCHEMA } from "./history.ts";
 import { cachedStore } from "./cached.ts";
 import { boardOf, jsonl, syncdbRemote, syncdbStore } from "./syncdb.ts";
+import { docHash } from "./cached.ts";
 
 const fails = [];
 let checks = 0;
@@ -19,7 +20,8 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const tick = (n = 10) => new Promise((r) => setTimeout(r, n));
 const settle = async () => { for (let i = 0; i < 8; i++) await tick(10); };
 const copy = (x) => JSON.parse(JSON.stringify(x));
-const memCache = () => { const m = new Map(); return { m, get: async (k) => m.get(k) ?? null, put: async (c) => { m.set(c.key, { ...c }); } }; };
+// (put as IdbDocCache's: only over the version expected; the tests' own, without one, as they are)
+const memCache = () => { const m = new Map(); return { m, get: async (k) => (m.has(k) ? { ...m.get(k) } : null), put: async (c, expected) => { const cur = m.get(c.key), v = cur ? cur.v ?? 0 : null; if (expected !== undefined && v !== expected) return false; m.set(c.key, { ...c, v: (v ?? 0) + 1 }); return true; } }; };
 
 // ---- a records merge3, from CoCalc's documented rules -----------------------
 // (fields merged one by one: changed on one side, that side's; on both,
@@ -185,8 +187,9 @@ for (const [name, make] of Object.entries(designs)) {
     const c = await converged([project, db1, db2], [A, B]);
     report[name + " typing, arriving"] = c && note(c, "n1").text;
     // (the syncdb as the merge: both kept; as cachedStore's remote: the store's merge3 keeps ours, the field whole: the outcome, for the design note)
+    // (the design note's table, asserted: the syncdb as the merge keeps both; cachedStore's merge3 keeps ours, the field whole, theirs lost, TEST-DC9-3)
     if (name === "merge") check(!!c && note(c, "n1").text === "hello brave world!", `${name}: typing as another's typing in the same note arrives: both kept: ` + JSON.stringify(c && note(c, "n1").text));
-    else check(!!c, `${name}: typing as another's typing in the same note arrives: every replica and board the same: ` + JSON.stringify(c && note(c, "n1").text));
+    else check(!!c && note(c, "n1").text === "hello brave world", `${name}: typing as another's typing in the same note arrives: ours, theirs lost (the note's table), everywhere: ` + JSON.stringify(c && note(c, "n1").text));
   }
   // a delete from elsewhere reaches this browser's replica just as it moves the note (from the document it showed)
   {
@@ -204,7 +207,7 @@ for (const [name, make] of Object.entries(designs)) {
     const n1 = c && note(c, "n1");
     report[name + " delete arriving/moves"] = c ? (n1 ? n1 : "deleted") : "not converged";
     if (name === "merge") check(!!c && !n1, `${name}: a delete arrives as this browser moves the note: deleted, everywhere (CoCalc's rule): ` + JSON.stringify(report[name + " delete arriving/moves"]));
-    else check(!!c, `${name}: a delete arrives as this browser moves the note: every replica and board the same: ` + JSON.stringify(report[name + " delete arriving/moves"]));
+    else check(!!c && n1?.x === 999 && n1.title === "One" && n1.text === "hello world" && n1.y === 0, `${name}: a delete arrives as this browser moves the note: brought back, moved, whole (the note's table), everywhere: ` + JSON.stringify(report[name + " delete arriving/moves"]));
   }
   // one browser deletes an item as the other moves it; then deletes one as the other types in it
   for (const [what, edit, kept] of [["moves", (n) => { n.x = 999; }, false], ["types in", (n) => { n.text = "hello world, typed"; }, true]]) {
@@ -297,6 +300,40 @@ for (const [name, make] of Object.entries(designs)) {
   hub.release("project");
   const c = await converged([project, db1], [A]);
   check(!!c && note(c, "n1").title === "One, by an agent" && note(c, "n2").x === 444, "an agent rewrites the file as a browser moves another note: both, everywhere: " + JSON.stringify(c?.nodes.map((n) => [n.id, n.x, n.title])));
+}
+
+// CORR-B5C-1: a copy with an edit made before the syncdb opened; the syncdb ready at once, the copy's reading held: the edit is not passed over, but written into the syncdb
+{
+  const hub = new Hub(), project = await replica(hub, "project");
+  loadFile(project, start());
+  const cache = memCache(), s = start(), mine = start();
+  note(mine, "n1").x = 55;
+  await cache.put({ key: "k", json: canonical(mine), hash: await docHash(mine), remoteHash: await docHash(s), base: canonical(s), at: 0 });
+  const db1 = await replica(hub, "b1");
+  let release;
+  const gate = new Promise((r) => (release = r)), get0 = cache.get;
+  cache.get = async (k) => { await gate; return get0(k); };
+  const store = syncdbStore(db1, "k", cache), A = board(store);
+  const opening = A.open();
+  await settle();
+  release();
+  const r = await opening;
+  await store.opened;
+  const c = await converged([project, db1], [A]);
+  check(r?.doc && note(r.doc, "n1").x === 55 && !!c && note(c, "n1").x === 55 && note(JSON.parse(cache.m.get("k").json), "n1").x === 55, "the syncdb ready before the copy is read: the copy's edit written into it, everywhere, and kept: " + JSON.stringify({ loaded: r?.doc && note(r.doc, "n1").x, now: c && note(c, "n1").x, cache: note(JSON.parse(cache.m.get("k").json), "n1").x }));
+}
+// CORR-B5C-2: the replica read A, then B, then A again: a save expecting B's hash is refused (what is hashed is what is compared and written over)
+{
+  const doc = (t) => cleanDoc({ title: t, nodes: [{ id: "n", title: t }] });
+  const A = jsonl(doc("A")), B = jsonl(doc("B"));
+  // (read A, B, A expecting B: daybreak's; read A, then B, expecting A: changed between the hash and the write)
+  for (const [seq, want] of [[[A, B, A], "B"], [[A, B], "A"]]) {
+    let i = 0, writes = 0;
+    const fake = { isReady: () => true, wait_until_ready: async () => {}, to_str: () => seq[Math.min(i++, seq.length - 1)], from_str: () => { writes++; }, commit: () => true, on() {}, removeListener() {} };
+    // (the hash of the board as the replica holds it, read back from its lines)
+    const ok = await syncdbRemote(fake).save(doc("C"), await docHash(boardOf({ to_str: () => (want === "A" ? A : B) })));
+    check(ok === false && writes === 0, `the replica read ${seq.map((x) => (x === A ? "A" : "B")).join(", ")}: a save expecting ${want} refused, nothing written: ` + JSON.stringify({ ok, writes }));
+  }
 }
 
 console.log("outcomes:", JSON.stringify(report));
