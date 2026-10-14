@@ -1,0 +1,93 @@
+// Pictures whose headers say they are huge (image-size.ts) in headless Chrome:
+// a notebook output over the bounds shows a placeholder ("Show it" shows it),
+// is saved as it was, and a document's pictures stop at 80 MP in all; a
+// Markdown cell shows a huge data: picture as its alt text; a board doesn't
+// take in a huge picture it carries.  Serve web/dist first (python3
+// web/serve.py 8765), then   node web/test-big-pictures.mjs
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
+const port = +(process.env.CDP_PORT ?? 9466), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const profile = mkdtempSync(join(tmpdir(), "sb-bigpic-"));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,900", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let targets;
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
+const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+await new Promise((r) => (ws.onopen = r));
+let n = 0; const waiting = new Map(); const errors = [];
+ws.onmessage = (e) => {
+  const m = JSON.parse(e.data);
+  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
+};
+const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
+const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
+const fails = [];
+let checks = 0;
+const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
+
+// pictures' headers: a real 1 x 1 PNG's bytes, its size in the header changed
+const real = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+const png = (w, h) => { const b = Buffer.from(real); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); return b.toString("base64"); };
+const out = (b64, text) => [{ output_type: "display_data", data: { "image/png": b64, "text/plain": text }, metadata: {} }];
+
+try {
+  for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  await send("Page.navigate", { url: base });
+  check(await until("!!window.sagebrush?.notebook?.cells", 60000), "the notebook page");
+  // (after the page has shown its own notebook, which would replace ours)
+  await until("sagebrush.notebook.cells().length > 0", 30000);
+  await sleep(1500);
+  const doc = { mode: "python", cells: [
+    { id: "huge", code: "", outputs: out(png(8192, 8192), "huge") },
+    { id: "ok", code: "", outputs: out(real.toString("base64"), "small") },
+    { id: "p1", code: "", outputs: out(png(6000, 5000), "thirty MP") },
+    { id: "p2", code: "", outputs: out(png(6000, 5000), "thirty MP more") },
+    { id: "p3", code: "", outputs: out(png(6000, 5000), "past eighty") },
+    { id: "md", type: "markdown", code: `![a huge one](data:image/png;base64,${png(9000, 9000)}) and ![a small one](data:image/png;base64,${real.toString("base64")})` },
+  ] };
+  await ev(`sagebrush.notebook.load(${JSON.stringify(doc)}), 1`);
+  const C = (id) => `sagebrush.notebook.cells().find((c) => c.id === ${JSON.stringify(id)})`;
+  await until(`!!${C("huge")}?.out.querySelector('.big-picture, img')`, 10000);
+  const shown = await ev(`Object.fromEntries(["huge", "ok", "p1", "p2", "p3"].map((id) => { const o = ${C("ID")}.out; return [id, { img: !!o.querySelector("img"), placeholder: o.querySelector(".big-picture")?.textContent ?? null }]; }))`.replace('"ID"', "id"));
+  check(!shown.huge.img && /8192 × 8192 pixels/.test(shown.huge.placeholder ?? ""), "a picture whose header says 8192 x 8192: a placeholder saying why: " + JSON.stringify(shown.huge));
+  check(shown.ok.img && !shown.ok.placeholder, "a small one: shown");
+  check(shown.p1.img && shown.p2.img && !shown.p3.img && /in all/.test(shown.p3.placeholder ?? ""), "30 MP pictures: two shown, the third past 80 MP in all not: " + JSON.stringify([shown.p1, shown.p2, shown.p3]));
+  // saved as it was
+  const saved = await ev(`JSON.stringify(sagebrush.notebook.snapshot().cells.find((c) => c.id === "huge").outputs)`);
+  check(saved.includes(png(8192, 8192)) && saved.includes('"huge"'), "the placeholder's picture is saved as it was");
+  // Show it: the picture, on request
+  await ev(`${C("huge")}.out.querySelector(".big-picture button").click(), 1`);
+  check(await ev(`!!${C("huge")}.out.querySelector("img") && !${C("huge")}.out.querySelector(".big-picture")`), "Show it shows it");
+  // Markdown: the huge one as its alt text, the small one shown
+  await ev(`sagebrush.notebook.renderMd(${C("md")}), 1`);
+  await until(`!!${C("md")}.el.querySelector(".mdout img")`, 5000);
+  const md = await ev(`(() => { const el = ${C("md")}.el.querySelector(".mdout"); return { imgs: el.querySelectorAll("img").length, text: el.textContent }; })()`);
+  check(md.imgs === 1 && /a huge one/.test(md.text), "Markdown: the huge data: picture as its alt text, the small one shown: " + JSON.stringify(md));
+
+  // a board carrying a huge picture doesn't take it in; a small one, it does
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  const board = { title: "pictures", images: { big: { w: 100, h: 100, src: "data:image/png;base64," + png(20000, 20000) }, small: { w: 1, h: 1, src: "data:image/png;base64," + real.toString("base64") } },
+    nodes: [{ id: "a", image: "big", title: "big" }, { id: "b", image: "small", title: "small" }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(board)}).then(() => 1)`);
+  const kept = JSON.parse(await ev("window.sagebrush.board.json()"));
+  const names = Object.keys(kept.images ?? {});
+  check(names.length === 1 && kept.nodes.find((x) => x.id === "b").image === names[0], "a board takes in the small picture, not the huge one: " + JSON.stringify(names));
+  check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 300));
+} catch (e) {
+  fails.push(String(e?.stack ?? e));
+} finally {
+  chrome.kill();
+  await sleep(200);
+  rmSync(profile, { recursive: true, force: true });
+}
+if (fails.length) {
+  console.log(`${fails.length} of ${checks} checks failed:\n  ` + fails.join("\n  "));
+  process.exit(1);
+}
+console.log(`${checks}/${checks} checks passed`);
