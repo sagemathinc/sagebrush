@@ -14,11 +14,16 @@
 //! * `split`: local splittings R/P^e R = M_2(O_F/P^e), from idempotents;
 //! * `orbits`: the orbits of the units on P^1(O_F/N);
 //! * `theta`: the Hecke elements Theta(p), by lattice enumeration;
-//! * Hecke operators T_p for p not dividing N (`Space::hecke_matrix`).
+//! * Hecke operators T_p for p not dividing N (`Space::hecke_matrix`);
+//! * `degeneracy`: PSAGE's degeneracy maps from level N to N/p;
+//! * `newspace`: new dimensions and characteristic polynomials, Galois
+//!   orbits of newforms, rational newforms and their a_p.
 //!
 //! Invalid input is an `Err`, never a panic.
 
+pub mod degeneracy;
 pub mod field;
+pub mod newspace;
 mod par;
 pub mod orbits;
 pub mod p1;
@@ -64,6 +69,11 @@ impl Space {
     pub fn from_ideal(level: Ideal) -> Result<Space, String> {
         let rings: Vec<LocalRing> = level.factors.iter().map(|&(p, e)| LocalRing::new(p, e)).collect::<Result<_, _>>()?;
         let splittings: Vec<LocalSplitting> = rings.iter().map(LocalSplitting::new).collect::<Result<_, _>>()?;
+        Space::from_parts(level, rings, splittings)
+    }
+    /// The space with the given local splittings (one per factor of the
+    /// level, in order), e.g. reductions of those of a multiple of the level.
+    pub fn from_parts(level: Ideal, rings: Vec<LocalRing>, splittings: Vec<LocalSplitting>) -> Result<Space, String> {
         let p1 = P1::new(rings)?;
         let orbits = Orbits::new(&p1, &splittings, &icosian_generators())?;
         Ok(Space { level, p1, splittings, orbits })
@@ -127,6 +137,15 @@ impl Space {
         let mats = self.hecke_action(p)?;
         let rows = par::map_range(self.dimension(), |i| self.hecke_row_with(&mats, i));
         Ok(HeckeMatrix { dim: self.dimension(), rows })
+    }
+
+    /// Some rows of the matrix of T_p, sharing the work for p.
+    pub fn hecke_rows(&self, p: &Prime, rows: &[usize]) -> Result<Vec<Vec<(u32, u32)>>, String> {
+        if let Some(&i) = rows.iter().find(|&&i| i >= self.dimension()) {
+            return Err(format!("basis index {} out of range", i));
+        }
+        let mats = self.hecke_action(p)?;
+        Ok(rows.iter().map(|&i| self.hecke_row_with(&mats, i)).collect())
     }
 
     /// Row i of the matrix of T_p alone (PSAGE's

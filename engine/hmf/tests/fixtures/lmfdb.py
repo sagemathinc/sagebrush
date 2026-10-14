@@ -25,6 +25,20 @@ where (a, b, c) is the Hermite normal form Z a + Z (b + c w) of N and
 newdim = dim S_2^new(N) = the sum of the dimensions of the newform orbits
 of level N.
 
+lmfdb-2.2.5.1-orbits.txt, for every level N of norm <= 4999 with newforms:
+
+    a b c | d_1 d_2 ...
+
+the dimensions of its newform orbits, sorted.
+
+lmfdb-2.2.5.1-rational.txt, for every rational newform (orbit of dimension
+1) of level norm <= RATIONAL_LEVEL_NORM:
+
+    label | a b c | pa pb pc:a_P ...
+
+its eigenvalues a_P at the primes P of norm <= RATIONAL_PRIME_NORM (at P | N
+the LMFDB's value, related to the Atkin-Lehner eigenvalue).
+
 lmfdb-2.2.5.1-hecke.txt, for every level N of norm <= HECKE_LEVEL_NORM and
 every prime P of norm <= HECKE_PRIME_NORM not dividing N:
 
@@ -46,6 +60,18 @@ FIELD = "2.2.5.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 Q_IDEALS = f"select ideals from hmf_fields where label = '{FIELD}'"
+RATIONAL_LEVEL_NORM = 1831  # Bober et al. 2012 tabulated curves up to here
+RATIONAL_PRIME_NORM = 50
+Q_ORBITS = (
+    "select level_ideal, dimension from hmf_forms "
+    f"where field_label = '{FIELD}' and weight = '[2, 2]' and level_norm <= 4999"
+)
+Q_RATIONAL = (
+    "select f.label, f.level_ideal, h.hecke_eigenvalues from hmf_forms f "
+    "join hmf_hecke h on h.label = f.label "
+    f"where f.field_label = '{FIELD}' and f.weight = '[2, 2]' and f.dimension = 1 "
+    f"and f.level_norm <= {RATIONAL_LEVEL_NORM}"
+)
 HECKE_LEVEL_NORM = 1000
 HECKE_PRIME_NORM = 30
 Q_PRIMES = f"select primes from hmf_fields where label = '{FIELD}'"
@@ -209,6 +235,48 @@ def hecke_fixture():
     print(f"wrote {len(table)} (level, prime) pairs to {path}")
 
 
+def header(out, *queries):
+    out.write(f"# LMFDB (https://www.lmfdb.org), field {FIELD}, weight [2, 2]; CC BY-SA, tests only\n")
+    out.write(f"# generated {datetime.date.today().isoformat()} by engine/hmf/tests/fixtures/lmfdb.py\n")
+    for q in queries:
+        out.write(f"# query: {q}\n")
+
+
+def orbit_fixture():
+    orbits = {}
+    for level, d in psql(Q_ORBITS):
+        orbits.setdefault(ideal_hnf(level)[1], []).append(int(d))
+    path = os.path.join(HERE, f"lmfdb-{FIELD}-orbits.txt")
+    with open(path, "w") as out:
+        header(out, Q_ORBITS)
+        out.write("# level HNF | dimensions of the newform orbits\n")
+        for h, ds in sorted(orbits.items()):
+            out.write(f"{h[0]} {h[1]} {h[2]} | {' '.join(map(str, sorted(ds)))}\n")
+    print(f"wrote {len(orbits)} levels to {path}")
+
+
+def rational_fixture():
+    import json
+
+    primes = json.loads(psql(Q_PRIMES)[0][0])
+    pl = [(i, ideal_hnf(s)) for i, s in enumerate(primes)]
+    pl = [(i, h) for i, (n, h) in pl if n <= RATIONAL_PRIME_NORM]
+    rows = []
+    for label, level, eigs in psql(Q_RATIONAL):
+        eigs = json.loads(eigs)
+        h = ideal_hnf(level)[1]
+        aps = " ".join(f"{ph[0]} {ph[1]} {ph[2]}:{int(eigs[i])}" for i, ph in pl)
+        rows.append((h[0] * h[2], label, h, aps))
+    rows.sort()
+    path = os.path.join(HERE, f"lmfdb-{FIELD}-rational.txt")
+    with open(path, "w") as out:
+        header(out, Q_PRIMES, Q_RATIONAL)
+        out.write("# label | level HNF | prime HNF:a_P ...\n")
+        for _, label, h, aps in rows:
+            out.write(f"{label} | {h[0]} {h[1]} {h[2]} | {aps}\n")
+    print(f"wrote {len(rows)} rational newforms to {path}")
+
+
 def contains(big, small):
     """Whether the ideal with HNF small is contained in the one with HNF big."""
     a, b, c = big
@@ -222,6 +290,8 @@ def main():
     import json
 
     hecke_fixture()
+    orbit_fixture()
+    rational_fixture()
 
     ideals = json.loads(psql(Q_IDEALS)[0][0])
     dims = {}

@@ -526,6 +526,7 @@ dependencies = [
  "rayon",
  "sagebrush-arith",
  "sagebrush-bigint",
+ "sagebrush-poly",
 ]
 
 [[package]]

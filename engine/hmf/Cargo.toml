@@ -14,7 +14,6 @@ parallel = ["dep:rayon"]
 
 [dependencies]
 rayon = { version = "1.10", optional = true }
-
-[dev-dependencies]
 sagebrush-arith = { path = "../arith" }
 sagebrush-bigint = { path = "../bigint" }
+sagebrush-poly = { path = "../poly" }
