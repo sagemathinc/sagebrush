@@ -522,6 +522,11 @@ dependencies = [
 [[package]]
 name = "sagebrush-hmf"
 version = "0.1.0"
+dependencies = [
+ "rayon",
+ "sagebrush-arith",
+ "sagebrush-bigint",
+]
 
 [[package]]
 name = "sagebrush-interrupt"

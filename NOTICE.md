@@ -226,7 +226,8 @@ gives permission. Nothing else in PSAGE is covered.
 - `bench/pyperformance/`: from pyperformance (MIT;
   `LICENSE.pyperformance`).
 - `engine/hmf/tests/fixtures/lmfdb-*.txt`: numbers (dimensions of spaces of
-  Hilbert modular newforms over $\mathbb{Q}(\sqrt 5)$) from The LMFDB
+  Hilbert modular newforms over $\mathbb{Q}(\sqrt 5)$, and characteristic
+  polynomials of Hecke operators computed from their eigenvalues) from The LMFDB
   Collaboration, *The L-functions and modular forms database*,
   https://www.lmfdb.org, licensed under the Creative Commons
   Attribution-ShareAlike 4.0 International License
