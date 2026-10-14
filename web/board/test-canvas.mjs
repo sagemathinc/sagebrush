@@ -12,7 +12,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canvasLeftOut, fromCanvas, isCanvas, toCanvas } from "./canvas.ts";
-import { layout, pageCount, pageView } from "./doc.ts";
+import { formatError, layout, pageCount, pageView } from "./doc.ts";
 import { boardFromText } from "./mermaid.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -68,6 +68,36 @@ check(fromCanvas(JSON.stringify({ nodes: [{ id: "s", type: "text", x: 0, y: 0, w
 let said = "";
 const opened = boardFromText(text, "Ideas.canvas", (m) => { said = m; });
 check(opened.title === "Ideas" && /JSON Canvas/.test(said) && /background picture/.test(said), "Open reads a .canvas, and says what it left out: " + said);
+
+// ids used twice (unique by the spec, not always in fact): every card kept, at its own place;
+// the first keeps the id (an edge naming it goes there), the next ones id-2, id-3, ...
+const dup = {
+  nodes: [
+    { id: "x", type: "group", x: 0, y: 0, width: 400, height: 300, label: "G" },
+    { id: "x", type: "text", x: 50, y: 80, width: 200, height: 60, text: "in the group, with its id" },
+    { id: "t", type: "text", x: 600, y: 0, width: 200, height: 60, text: "first" },
+    { id: "t", type: "text", x: 600, y: 300, width: 200, height: 60, text: "second" },
+    { id: "t-2", type: "text", x: 900, y: 0, width: 200, height: 60, text: "its own t-2" },
+    { id: "t", type: "text", x: 900, y: 300, width: 200, height: 60, text: "third" },
+  ],
+  edges: [{ id: "e", fromNode: "x", toNode: "t" }],
+};
+const dd = fromCanvas(JSON.stringify(dup)).doc;
+const dby = walk(dd.nodes, null);
+const texts = [...dby.values()].filter((n) => n.kind !== "group").map((n) => n.text).sort();
+check(texts.join("|") === ["first", "in the group, with its id", "its own t-2", "second", "third"].sort().join("|") && dby.get("x")?.kind === "group", "a group and a card with the same id, and three cards with another: every one kept: " + texts.join("|"));
+check(dby.get("t")?.text === "first" && dby.get("t-2")?.text === "its own t-2" && [...dby.values()].some((n) => n.text === "second" && n.id === "t-3") && [...dby.values()].some((n) => n.text === "third" && n.id === "t-4"), "...the first keeps its id, the next ones id-2, id-3, ... (not one already used): " + [...dby.values()].map((n) => n.id + "=" + (n.text ?? n.title)).join(", "));
+check(dd.edges.length === 1 && dd.edges[0].from === "x" && dd.edges[0].to === "t", "...an edge naming a repeated id goes to the first");
+const dl = new Map(layout(dd).items.map((it) => [it.id, it]));
+for (const n of dup.nodes.filter((n) => n.type === "text")) {
+  const it = [...dl.values()].find((i) => i.text === n.text);
+  check(it && Math.abs(it.x - n.x) <= 1 && Math.abs(it.y - n.y) <= 1, `"${n.text}" laid out at its own place: (${it?.x}, ${it?.y}), not (${n.x}, ${n.y})`);
+}
+// (a board's own file with an id twice on a page: refused, saying which; on two pages, fine)
+check(/two items have the id "a"/.test(formatError({ nodes: [{ id: "a" }, { id: "g", kind: "group", children: [{ id: "a" }] }] }) ?? "") && formatError({ pages: [{ nodes: [{ id: "a" }] }, { nodes: [{ id: "a" }] }] }) === null && /on page 2/.test(formatError({ pages: [{ nodes: [{ id: "a" }] }, { nodes: [{ id: "b" }, { id: "b" }] }] }) ?? ""), "a board with an id twice on a page is refused, saying which (twice on two pages is fine)");
+// (a note drawn as a plain rectangle loses no outline in a canvas)
+const shaped = (shape) => { const d = { nodes: [{ id: "s", title: "S", shape }] }; return toCanvas(d, () => layout(d)).left.outline; };
+check(shaped("rect") === undefined && shaped("diamond") === 1, "a rectangle is not an outline left out (a diamond is)");
 
 // every example as a canvas: valid, and the same board read back
 const examples = readdirSync(join(here, "examples")).filter((f) => /\.(json|md)$/.test(f) && f !== "index.json").map((f) => [f, boardFromText(readFileSync(join(here, "examples", f), "utf8"), f, () => {})]);
