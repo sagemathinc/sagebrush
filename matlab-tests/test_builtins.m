@@ -199,3 +199,12 @@ show(S.df);
 show(round(S.normr * 1e9) / 1e9);
 % round of NaN and Inf scalars: themselves
 show(round(NaN)); show(round(Inf)); show(round(-Inf)); show(round([NaN Inf -2.5]));
+% repelem: the documentation's examples, and other classes and shapes
+v = [1 2 3 4];
+show(repelem(v, 3)); show(repelem(v, [2 2 3 3])); show(repelem(v', 2));
+A = [1 2; 3 4];
+show(repelem(A, 3, 2)); show(repelem(A, 1, [2 3])); show(repelem(A, [1 0], 2));
+show(repelem(5, 3)); show(repelem('ab', 2)); show(repelem(int8([1 2]), [0 3]));
+show(repelem(true(1, 2), 2)); show(size(repelem(zeros(1, 0), 3)));
+c = repelem({1, 'x'}, 2); show(size(c)); show(c{3});
+show(size(repelem(ones(2, 2, 2), 1, 1, 3)));
