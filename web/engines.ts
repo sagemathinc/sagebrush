@@ -24,6 +24,8 @@ const COMMON: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
 };
 
+// (requests for one id at the same time each read it: a Worker can't share
+// a promise between requests)
 async function manifest(env: EnginesEnv, id: string): Promise<Manifest | null> {
   const known = manifests.get(id);
   if (known) return known;
@@ -50,9 +52,10 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
   const [, id, file] = m;
   const cache = (globalThis as any).caches?.default as Cache | undefined;
   const key = new Request(`${url.origin}/engine/${id}/${file}`);
-  if (req.method === "GET" && cache) {
+  // (HEAD from the GET kept at the edge too)
+  if (cache) {
     const hit = await cache.match(key);
-    if (hit) return hit;
+    if (hit) return req.method === "HEAD" ? new Response(null, { status: hit.status, headers: hit.headers }) : hit;
   }
   const man = await manifest(env, id);
   // (its own entries only: not "constructor" or the like, SEC-CAC-3)

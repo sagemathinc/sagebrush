@@ -65,6 +65,11 @@ ok((await get(`/engine/${unknown}/sagebrush-worker.js`)).status === 404, "an unk
 // (published just after: still 404 for a minute, as R2 isn't asked again)
 for (const f of [...Object.keys(man.files), "manifest.json"]) await bucket.put(`engine/${unknown}/${f}`, readFileSync(join(dir, f)));
 ok((await get(`/engine/${unknown}/sagebrush-worker.js`)).status === 404, "an unknown id asked for again soon: answered without reading R2");
+// HEAD after a GET: from the edge's copy, with the same headers
+const g = await get(`/engine/${id}/sagebrush-engine.wasm`);
+await g.arrayBuffer();
+const h2 = await get(`/engine/${id}/sagebrush-engine.wasm`, { method: "HEAD" });
+ok(h2.status === 200 && h2.headers.get("content-type") === "application/wasm" && !(await h2.arrayBuffer()).byteLength, "HEAD after GET: the headers, no body");
 ok((await get(`/engine/latest.json`)).status === 418 && (await get(`/other`)).status === 418, "other paths are not the route's");
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);

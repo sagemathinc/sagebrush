@@ -8,7 +8,7 @@
 export interface EngineFile { sha256: string; size: number; headers: Record<string, string> }
 export interface EngineManifest { format: "sagebrush-engine"; id: string; api: number; files: Record<string, EngineFile> }
 
-const byName = <T>(o: Record<string, T>): [string, T][] => Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+const byName = <T,>(o: Record<string, T>): [string, T][] => Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
 /** The text whose SHA-256 the id is. */
 export function engineIdText(api: number, files: Record<string, EngineFile>): string {
