@@ -621,3 +621,56 @@ test("repelem takes a string scalar and string arrays, and only numeric scalar o
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["string", "[1 3]", "x", "b", "[1 1 2 2]",
     "Replication factors must be scalars or vectors.", "Replication factors must be numeric.", "Replication factors must be numeric."]);
 });
+
+test("eigs: the page's output orders, k beyond n, failure treatment and flag, option structures, a Cholesky B, and the refusals", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "n = 100; e = ones(n,1); T = spdiags([-e 2*e -e], -1:1, n, n);",
+    "disp(mat2str(round(eigs(T, 3, 'smallestabs')' * 1e6) / 1e6));",
+    "disp(mat2str(round(eigs(T, 3, 'smallestreal')' * 1e6) / 1e6));",
+    "disp(mat2str(round(eigs(diag(1:10), 5, 'bothendsreal')')));",
+    "R = [0 -5; 5 0]; C = blkdiag(R, 2*R, diag(1:20));",
+    "disp(mat2str(round(imag(eigs(C, 3, 'bothendsimag', 'SubspaceDimension', 12))')));",
+    "disp(mat2str(round(imag(eigs(C, 2, 'largestimag', 'SubspaceDimension', 12))')));",
+    "disp(mat2str(size(eigs(diag(1:5), 9))));",
+    "d = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8); disp(mat2str(isnan(d')));",
+    "[V, D, flag] = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8); disp(flag);",
+    "d = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8, 'FailureTreatment', 'drop'); disp(numel(d) < 6);",
+    "d = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8, 'FailureTreatment', 'keep'); disp(any(isnan(d)));",
+    "opts.tol = 1e-10; opts.p = 30; disp(round(eigs(T, 1, 'largestabs', opts) * 1e6) / 1e6);",
+    "B = spdiags([e 4*e e], -1:1, n, n); Rb = chol(full(B)); d1 = eigs(T, B, 3); d2 = eigs(T, Rb, 3, 'largestabs', 'IsCholesky', true); disp(max(abs(d1 - d2)) < 1e-10);",
+    "disp(class(eigs(single(diag(1:30)), 2)));",
+    "try, eigs(T, 3, 'bogus'), catch err, disp(err.message), end",
+    "try, eigs(T, 3, 'si'), catch err, disp(err.message), end",
+    "try, eigs(T, 10, 'largestabs', 'SubspaceDimension', 10), catch err, disp(err.message), end",
+    "try, eigs(T + 1i*speye(n), 3), catch err, disp(err.message), end",
+    "try, eigs(diag(1:20), 3, 4), catch err, disp(err.message), end",
+    "try, eigs(T, 3, 'largestabs', 'Tolerance', -1), catch err, disp(err.message), end",
+    // (the smallest subspace the page allows, k+1 (Hermitian) or k+2: the vectors returned match the values)
+    "[V,D,flag] = eigs(T,6,'largestabs','SubspaceDimension',7,'FailureTreatment','keep'); disp(max(abs(diag(V'*T*V) - diag(D))) < 1e-10);",
+    "N = spdiags([(1:60)' ones(60,1) -ones(60,1)], [0 1 -1], 60, 60); [V,D,flag] = eigs(N,3,'largestabs','SubspaceDimension',5,'FailureTreatment','keep');",
+    "r = 0; for j = 1:3, r = max(r, norm(N*V(:,j) - D(j,j)*V(:,j))); end, disp(r < 1e-6 || flag == 1);",
+    "try, eigs(diag(1:10),2,'largestimag'), catch err, disp(err.message), end",
+    // (shift-invert needs no inverse of B, which may then be singular; tiny but nonsingular A - sigma*B is fine)
+    "disp(eigs(diag([1 2 3 4]), diag([1 1 0 0]), 1, 0.5, 'IsSymmetricDefinite', true));",
+    "disp(mat2str(eigs(diag([1 2 3 4]*1e-100), 2, 0)' * 1e100, 6));",
+    // (a repeated eigenvalue: V is still B-orthonormal)
+    "Bm = [2 1 0;1 2 1;0 1 2]; [V,D] = eigs(3*Bm, Bm, 3); disp(max(max(abs(V'*Bm*V - eye(3)))) < 1e-12);",
+    // (single precision from A, B, StartVector or Afun's result only)
+    "disp(class(eigs(diag(1:30), single(2)))); disp(class(eigs(diag(1:30), 2, 'largestabs', 'StartVector', single(ones(30,1)))));",
+    "disp(class(eigs(@(x) single(diag(1:30))*x, 30, 2)));",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), [
+    "[0.000967 0.003869 0.008701]", "[0.000967 0.003869 0.008701]", "[1 2 8 9 10]", "[10 -10 5]", "[10 5]", "[5 1]",
+    "[true true true true true true]", "1", "1", "0", "3.9990", "1", "single",
+    "eigs: unknown sigma 'bogus'.",
+    "eigs: unknown sigma 'si' (for a real A, 'si' is not one of the page's names).",
+    "eigs: SubspaceDimension must be at least k+1 (k+2 when the problem is not Hermitian).",
+    "eigs: complex matrices, shifts and start vectors are not supported in Sagebrush.",
+    "eigs: the shifted operator A - sigma*B is singular; sigma may not be an eigenvalue. Use a sigma near the eigenvalue instead.",
+    "eigs: Tolerance must be a positive number.",
+    "1", "1", "eigs: 'largestimag' is for nonsymmetric problems; a symmetric (Hermitian) problem's eigenvalues are real.",
+    "1", "[1 2]", "1", "double", "single", "single",
+  ]);
+  // (the warning when not every value converged and flag is not asked for)
+  assert.equal((r.stderr.match(/Warning: eigs: 0 of the 6 requested eigenvalues converged\./g) || []).length, 3);
+});
