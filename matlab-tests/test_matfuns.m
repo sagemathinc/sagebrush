@@ -30,3 +30,17 @@ r10 = @(x) round(x ./ 10.^floor(log10(abs(x))) * 1e9) / 1e9 .* 10.^floor(log10(a
 show(r10([rcond([4 -2 1; 3 6 -4; 2 1 8]) rcond(vander(1:6)) rcond(toeplitz([4 1 0 0 2])) rcond([1 2 3; 4 5 6; 7 8 10])]));
 show(r10([rcond([2 -1 0 0; -1 2 -1 0; 0 -1 2 -1; 0 0 -1 2]) rcond(pascal(7)) rcond([1+2i 3; 4i 5-1i]) rcond(magic(6) + eye(6))]));
 show(rcond(eye(3))); show(rcond(zeros(2)));
+% lu: the documented forms, rectangular and complex matrices, and 'vector'
+% (its p compared as a row: MATLAB's is a row, Octave's a column)
+r = @(M) round(M * 1e12) / 1e12;
+A = [10 -7 0; -3 2 6; 5 -1 5];
+[L, U] = lu(A); show(r(L)); show(r(U));
+[L, U, P] = lu(A); show(r(L)); show(r(U)); show(P);
+[L, U, p] = lu(A, 'vector'); show(p(:)'); show(r(A(p, :) - L*U));
+show(r(lu(A)));
+B = [1 2; 3 4; 5 6];
+[L, U, P] = lu(B); show(r(L)); show(r(U)); show(P);
+[L, U, P] = lu(B'); show(r(L)); show(r(U)); show(P);
+Z = [1+2i 3; 4 5-1i];
+[L, U, P] = lu(Z); show(r(L)); show(r(U)); show(P);
+[L, U, p] = lu(sparse(A), 'vector'); show(issparse(L)); show(issparse(p)); show(p(:)');
