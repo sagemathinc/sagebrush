@@ -81,6 +81,10 @@ export interface Limits { storage_bytes: number; max_file_bytes: number; private
 
 const DAY = 86400;
 const SESSION_DAYS = 30;
+/** sessions an account may have at once (the oldest go: a sign-in loop can't pile them up) */
+const SESSIONS_MAX = 20;
+/** records of deleted collections: how long, and at most how many per account */
+const DELETION_RECORD_DAYS = 30, DELETION_RECORDS_MAX = 1000;
 const LIMITS_TTL = 600;
 /** how long an upload may take before its reservation is reclaimed */
 const RESERVE_SECONDS = 3600;
@@ -163,7 +167,9 @@ export function returnPath(p: string | null, origin: string): string {
   if (!p || p.length > 1000 || /[\u0000- \u007f\\]/.test(p) || !p.startsWith("/") || p.startsWith("//")) return "/";
   try {
     const u = new URL(p, origin);
-    return u.origin === origin ? u.pathname + u.search + u.hash : "/";
+    // (and checked again as normalized: /%2e%2e//host is //host, another site, SEC-SHARE-1)
+    const out = u.pathname + u.search + u.hash;
+    return u.origin === origin && out.startsWith("/") && !out.startsWith("//") ? out : "/";
   } catch {
     return "/";
   }
@@ -206,6 +212,8 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
       ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND deleting IS NOT NULL)`, h, who.account_id),
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
       db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES (?1, ?2, ?3, ?4)").bind(await sha256Hex(token), who.account_id, t, t + SESSION_DAYS * DAY),
+      // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
+      db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND token_hash NOT IN (SELECT token_hash FROM sessions WHERE account_id = ?1 ORDER BY created DESC, token_hash LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
   } catch {
     return null;
@@ -602,13 +610,15 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
       if (left.objects.length || uploading) continue; // (again next time)
       // done: every purge of this account (they coalesce) is.  An account deleted
       // in CoCalc (it has a tombstone, whichever purge got here first) is gone;
-      // one that only deleted its shared data can share again.
+      // one that only deleted its shared data can share again.  (Which one is
+      // decided in the batch itself: a tombstone written meanwhile counts,
+      // PRIV-SHARE-2.)
       const h = await accountHash(r.account_id!);
-      const admin = await db.prepare("SELECT 1 AS x FROM tombstones WHERE account_hash = ?1").bind(h).first();
       await db.batch([
         db.prepare("DELETE FROM r2_deletes WHERE key = ?1").bind(r.key),
         db.prepare("DELETE FROM reservations WHERE account_id = ?1").bind(r.account_id),
-        admin ? db.prepare("DELETE FROM accounts WHERE account_id = ?1").bind(r.account_id) : db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1").bind(r.account_id),
+        db.prepare("DELETE FROM accounts WHERE account_id = ?1 AND EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
+        db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1 AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(r.account_id),
         db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL, lease = NULL WHERE account_hash = ?1 AND status <> 'done' AND kind <> 'collection'").bind(h, now()),
       ]);
@@ -687,6 +697,8 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   await drain(env, 500);
   await reconcile(env);
   await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
+  // records of deleted collections, after their time (HARD-SHARE-3)
+  await db.prepare("DELETE FROM purges WHERE kind = 'collection' AND finished < ?1").bind(t - DELETION_RECORD_DAYS * DAY).run();
 }
 
 /**
@@ -762,7 +774,12 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
     const c = await env.SHARE_DB.prepare("SELECT owner FROM collections WHERE id = ?1").bind(g[1]).first<{ owner: string }>();
     if (!c || c.owner !== id) return err(404, "no such collection");
     const r = await deleteCollection(env, id, g[1]);
-    await env.SHARE_DB.prepare("INSERT INTO purges (request_id, account_hash, collection, kind, status, collections, bytes, created, finished) VALUES (?1, ?2, ?3, 'collection', 'done', 1, ?4, ?5, ?5)").bind(crypto.randomUUID(), await accountHash(id), g[1], r.bytes, now()).run();
+    // (a record of it, kept DELETION_RECORD_DAYS and at most DELETION_RECORDS_MAX per account, HARD-SHARE-3)
+    const h = await accountHash(id);
+    await env.SHARE_DB.batch([
+      env.SHARE_DB.prepare("INSERT INTO purges (request_id, account_hash, collection, kind, status, collections, bytes, created, finished) VALUES (?1, ?2, ?3, 'collection', 'done', 1, ?4, ?5, ?5)").bind(crypto.randomUUID(), h, g[1], r.bytes, now()),
+      env.SHARE_DB.prepare("DELETE FROM purges WHERE kind = 'collection' AND account_hash = ?1 AND request_id NOT IN (SELECT request_id FROM purges WHERE kind = 'collection' AND account_hash = ?1 ORDER BY created DESC, request_id LIMIT ?2)").bind(h, DELETION_RECORDS_MAX),
+    ]);
     ctx.waitUntil(drain(env));
     return json({ ok: true });
   }

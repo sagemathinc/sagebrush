@@ -5,7 +5,7 @@
 //
 //   node web/share/serve-dev.mjs [sitePort=8790] [filesPort=8791]
 import { createServer } from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -49,7 +49,8 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     }],
   }));
   const db = await mf.getD1Database("SHARE_DB");
-  for (const s of readFileSync(join(here, "migrations/0001_init.sql"), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
+  for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql")).sort())
+    for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
   if (limits) for (const [id, l] of Object.entries(limits)) await db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3)").bind(id, JSON.stringify(l), 4e9).run();
   const rules = headerRules();
   const log = { files: [] };
