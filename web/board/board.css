@@ -288,3 +288,9 @@
 .sbb .board-sticker-glyph { font-size: 80cqh; line-height: 1; user-select: none; -webkit-user-select: none; }
 .sbb .board-sticker > img, .sbb .board-sticker > svg { width: 100%; height: 100%; object-fit: contain; }
 .sbb .board-item.board-sticker.selected { outline: 2px solid #2a6f2f; outline-offset: 3px; border-radius: 6px; }
+
+/* the sticker picker (edit.ts): the emoji, eight to a row */
+.board-sticker-picker .bs-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.board-sticker-picker .bs-emoji { font: 22px/1 system-ui, sans-serif; padding: 6px 0; border: 0; border-radius: 6px; background: none; cursor: pointer; }
+.board-sticker-picker .bs-emoji:hover, .board-sticker-picker .bs-emoji:focus-visible, .board-sticker-picker .bs-emoji.on { background: #eef2ea; }
+.board-sticker-picker .bs-emoji.on { box-shadow: inset 0 0 0 1.5px #2a6f2f; }

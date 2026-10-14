@@ -9,7 +9,8 @@
 
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
-import { inkNode, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { inkNode, STICKER_SIZE, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
 
@@ -87,6 +88,8 @@ export class Editor {
   highlight: (() => ((src: string) => string) | null) | null = null;
   /** where pictures are kept (images.ts) */
   images: ImageStore | null = null;
+  /** choose pictures to add (mount.ts): "Picture…" in the sticker picker, a note that is only a picture */
+  onPickPicture: (() => void) | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -227,8 +230,8 @@ export class Editor {
   private select(ids: string | string[] | null) {
     this.selected = ids === null ? [] : typeof ids === "string" ? [ids] : [...new Set(ids)];
     this.board.select(this.selected);
-    // (one note selected, in Edit: its corner resizes it)
-    this.board.handle = this.on && !this.inplace && this.selected.length === 1 && this.board.item(this.selected[0])?.kind === "note" ? this.selected[0] : null;
+    // (one note or sticker selected, in Edit: its corner resizes it)
+    this.board.handle = this.on && !this.inplace && this.selected.length === 1 && sized(this.board.item(this.selected[0])) ? this.selected[0] : null;
     this.board.request();
     if (this.selected.length) this.selectEdge(null);
   }
@@ -469,23 +472,24 @@ export class Editor {
     return true;
   }
 
-  // Resizing: one selected note (a picture, or any note) has a handle at its
-  // bottom right corner (the board draws it): dragging it sets the note's
-  // width; a picture keeps its shape, and a note's height follows its text.
+  // Resizing: one selected note (a picture, or any note) or sticker has a
+  // handle at its bottom right corner (the board draws it): dragging it sets
+  // the width; a picture keeps its shape, a sticker stays square, and a
+  // note's height follows its text.
   private atHandle(e: PointerEvent): Item | null {
     if (this.selected.length !== 1) return null;
-    const it = this.board.item(this.selected[0]), r = it && it.kind === "note" ? this.board.clientRect(it.id) : null;
+    const it = this.board.item(this.selected[0]), r = it && sized(it) ? this.board.clientRect(it.id) : null;
     if (!it || !r) return null;
     const reach = e.pointerType === "touch" ? 22 : 10;
     return Math.abs(e.clientX - (r.left + r.width)) <= reach && Math.abs(e.clientY - (r.top + r.height)) <= reach ? it : null;
   }
   private resize(it: Item, e: PointerEvent): boolean {
     e.preventDefault();
-    const z = this.board.camera.z, x0 = e.clientX, w0 = it.w, ratio = it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref ? it.image.h / it.image.w : 0;
+    const z = this.board.camera.z, x0 = e.clientX, w0 = it.w, ratio = it.kind === "sticker" ? 1 : it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref ? it.image.h / it.image.w : 0;
     let w = w0;
     this.hold(true);
     const move = (m: PointerEvent) => {
-      w = Math.max(ratio ? 24 : 120, Math.round(w0 + (m.clientX - x0) / z));
+      w = Math.max(it.kind === "sticker" ? 16 : ratio ? 24 : 120, Math.round(w0 + (m.clientX - x0) / z));
       this.board.resizeItem(it.id, w, ratio ? Math.round(w * ratio) : undefined);
     };
     const up = () => {
@@ -496,8 +500,9 @@ export class Editor {
       if (w === w0) return;
       this.commit((d) => {
         const g = find(this.pg(d), it.id);
-        if (!g || g.node.kind === "group") return;
+        if (!g || g.node.kind === "group" || g.node.kind === "ink") return;
         this.freezeUp(d, g);
+        if (g.node.kind === "sticker") { g.node.w = w; this.contain(g.parent, g.siblings); return; }
         const n = g.node as DocNote;
         n.w = w;
         // (its height follows: its text's, or its picture's shape; and it no longer fits its text)
@@ -807,6 +812,8 @@ export class Editor {
    * written, as one undo step (with `fresh`, one with adding it).
    */
   open(id: string, fresh = false, at?: { x: number; y: number }) {
+    // (a sticker: its picker)
+    if (this.board.item(id)?.kind === "sticker") return this.pickSticker({ id });
     // (already being written: a touch's tap on it selected and its double tap both say so)
     if (this.inplace?.id === id && this.inplace.active) return;
     this.close();
@@ -832,6 +839,77 @@ export class Editor {
       highlight: () => this.highlight?.() ?? null,
       get images() { return ed.images; },
     };
+  }
+
+  /**
+   * The sticker picker: the emoji to choose from, by the sticker `id` to
+   * change it (an icon becomes the emoji chosen), or for a new one at `at`
+   * (the world; the top level), below `under` (the toolbar), with "Picture…" too (a note that is only a
+   * picture: the pictures chosen, as Image adds them).  Esc or a press
+   * outside it closes it.
+   */
+  pickSticker(o: { id?: string; at?: { x: number; y: number }; under?: HTMLElement }) {
+    this.close();
+    const it = o.id ? this.board.item(o.id) : null;
+    if (o.id ? !it : !o.at) return;
+    const p = document.createElement("div");
+    p.className = "board-editor board-sticker-picker sbb-layer";
+    p.dataset.sbb = "stickers";
+    p.setAttribute("role", "dialog");
+    p.setAttribute("aria-label", it ? "Change the sticker" : "Add a sticker");
+    const grid = document.createElement("div");
+    grid.className = "bs-grid";
+    const choose = (emoji: string) => {
+      this.close();
+      if (it) {
+        this.commit((d) => {
+          const g = find(this.pg(d), it.id);
+          if (g?.node.kind !== "sticker") return;
+          g.node.emoji = emoji;
+          delete g.node.icon;
+          delete g.node.color;
+        });
+        return;
+      }
+      const id = "k" + Math.random().toString(36).slice(2, 8), at = o.at!;
+      this.commit((d) => { const pg = this.pg(d); pg.nodes ??= []; this.freeze(d, null, pg.nodes); pg.nodes.push({ id, kind: "sticker", emoji, x: Math.round(at.x - STICKER_SIZE / 2), y: Math.round(at.y - STICKER_SIZE / 2) }); })
+        .then(() => this.select(id));
+    };
+    for (const e of EMOJI) {
+      const b = document.createElement("button");
+      b.className = "bs-emoji" + (it?.emoji === e ? " on" : "");
+      b.textContent = e;
+      b.setAttribute("aria-label", e);
+      b.onclick = () => choose(e);
+      grid.append(b);
+    }
+    const row = document.createElement("div");
+    row.className = "be-row";
+    if (!it) {
+      const pic = Object.assign(document.createElement("button"), { className: "bs-picture", textContent: "Picture…", title: "Add pictures: each a note that is only the picture" });
+      pic.onclick = () => { this.close(); this.onPickPicture?.(); };
+      row.append(pic);
+    }
+    const cancel = Object.assign(document.createElement("button"), { className: "be-cancel", textContent: "Cancel" });
+    cancel.onclick = () => this.close();
+    row.append(document.createElement("span"), cancel);
+    p.append(grid, row);
+    // (by the sticker, below it; a new one's, below the toolbar, in the middle of the board)
+    const w = Math.min(innerWidth - 16, 340), r = this.board.el.getBoundingClientRect(), at = it && this.board.clientRect(it.id), under = o.under?.getBoundingClientRect();
+    this.place(p, () => {
+      p.style.width = w + "px";
+      p.style.left = Math.max(8, Math.min(innerWidth - w - 8, at ? at.left + at.width / 2 - w / 2 : r.left + r.width / 2 - w / 2)) + "px";
+      p.style.top = Math.max(52, Math.min(innerHeight - 260, at ? at.top + at.height + 10 : (under?.height ? under.bottom : r.top) + 10)) + "px";
+    });
+    document.body.append(p);
+    this.panel = p;
+    // (a press outside it, or Esc: closed)
+    const outside = (e: PointerEvent) => { if (!p.contains(e.target as Node)) this.close(); };
+    setTimeout(() => { if (this.panel === p) addEventListener("pointerdown", outside, true); }, 0);
+    const unplace = this.unplace;
+    this.unplace = () => { unplace?.(); removeEventListener("pointerdown", outside, true); };
+    p.addEventListener("keydown", (k) => { k.stopPropagation(); if (k.key === "Escape") this.close(); });
+    (grid.querySelector<HTMLElement>(".on") ?? (grid.firstElementChild as HTMLElement | null))?.focus();
   }
 
   // On a small or touch screen a panel is a sheet: as wide as the screen, at
@@ -888,6 +966,9 @@ export class Editor {
     e.stopImmediatePropagation();
   }
 }
+
+// (an item resized by its corner: a note, or a sticker)
+const sized = (it: Item | null | undefined) => it?.kind === "note" || it?.kind === "sticker";
 
 /** Remove a node (a group with its members) and the edges to and from it. */
 export function remove(d: BoardDoc | BoardPage, id: string) {
