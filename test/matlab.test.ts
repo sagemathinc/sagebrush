@@ -341,3 +341,23 @@ test("sparse: single kept by spdiags and cast-like; 'like', cast, normest, conde
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8", timeout: 120000 });
   assert.deepEqual(out.trim().split("\n"), ["single single", "single 1 1", "single 0", "double 1 2 2 | 1 1", "1 0", "1 1", "0 0", "1 0.200", "1 40000", "2.625", "0 0"]);
 });
+
+test("what is not implemented is refused, never answered approximately: linsolve options, funm of a defective matrix, interp2's grids and methods", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "refuse-"));
+  const cases = [
+    "linsolve([1 2; 3 4], [1; 2], struct('FOO', true))",
+    "linsolve([1 2; 3 4], [1; 2], struct('SYM', true))",
+    "linsolve([1 2; 3 4], [1; 2], struct('LT', true, 'UT', true))",
+    "funm([1 1; 0 1], @(x) x.^2)",
+    "interp2([1 2 4 5], 1:4, magic(4), 2, 2, 'cubic')",
+    "interp2([1 3 2], 1:3, magic(3), 2, 2)",
+    "interp2(magic(3), 2, 2, 'makima')",
+  ];
+  writeFileSync(join(dir, "t.m"), cases.map((c) => `try, ${c}; disp('answered'); catch e, disp('refused'); end`).join("\n") + "\n");
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), cases.map(() => "refused"));
+});
