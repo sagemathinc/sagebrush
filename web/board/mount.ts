@@ -274,6 +274,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function show(d: BoardDoc, view = false): Promise<boolean> {
     const g = loadGen, over = () => destroyed || g !== loadGen;
     if (over()) return false;
+    // (another document than the one shown, during a drag or resize: the
+    // gesture dropped, nothing of it kept in this one, CORR-59E-1; the same
+    // one laid out again waits for its release, below)
+    const replacing = !view && d !== doc;
+    if (replacing && editor.moving) editor.cancelGesture();
     const bad = formatError(d);
     if (bad) throw new Error(bad);
     if (!isBoard(d)) throw new Error("board: a document needs nodes (or pages of them)");
@@ -324,7 +329,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     codeHeights.clear();
     // (an item being dragged or resized: not put back where the document has
     // it; the board laid out again once it is let go, CI Oct 14)
-    if (editor.moving && !view) { relayoutHeld = true; return true; }
+    if (editor.moving && !view && !replacing) { relayoutHeld = true; return true; }
     board.setItems([...under.items, ...items], [...under.edges, ...edges]);
     // (the page's slide and background, or its template's)
     const look = lookOf(d, pageIx);
