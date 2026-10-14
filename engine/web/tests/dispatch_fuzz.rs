@@ -62,6 +62,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "hmf_primes", "bound": 30}),
         json!({"fn": "hmf_dimension", "level": [[-2, 5]]}),
         json!({"fn": "hmf_hecke_matrix", "level": [[-2, 5]], "p": [[2, 0]]}),
+        json!({"fn": "hmf_hecke_matrix", "level": [[6, 0]], "p": [[2, 0]]}),
         json!({"fn": "hmf_hecke_rows", "level": [[-2, 5]], "p": [[3, 0]], "rows": [0, 1]}),
         json!({"fn": "hmf_degeneracy", "level": [[6, 0]], "p": [[2, 0]]}),
         json!({"fn": "hmf_new_dimension", "level": [[6, 0]]}),

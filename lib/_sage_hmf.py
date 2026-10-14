@@ -21,7 +21,10 @@ Differences from PSAGE:
   NotImplementedError. PSAGE's new_subspace() was the kernel of one
   degeneracy map per prime, which is too large when forms of level N/p
   occur twice; new_dimension() gives the true dimension.
-* T_P for P dividing the level is not implemented (nor was it in PSAGE).
+* For a prime P dividing the level, hecke_matrix(P) is U_P (PSAGE did not
+  implement it), and ap(P) is the eigenvalue of U_P on the newform: +-1 if P
+  exactly divides the level (-1 times the Atkin-Lehner eigenvalue), 0 if P^2
+  divides it. PSAGE returned '?' in the first case.
 
 EXAMPLES::
 
@@ -391,8 +394,8 @@ class HilbertModularForms:
 
     def hecke_matrix(self, n):
         """The matrix of T_P, acting on the right on the basis of orbits (row
-        i is the image of the i-th basis element), for a prime P not
-        dividing the level. Rows sum to N(P) + 1.
+        i is the image of the i-th basis element). Rows sum to N(P) + 1. For
+        P dividing the level it is U_P, whose rows sum to N(P).
 
         EXAMPLES::
 
@@ -404,6 +407,12 @@ class HilbertModularForms:
             sage: H.T(3).charpoly().factor()  # sagebrush only
             (x - 10) * (x^2 + 3*x - 9) * (x^4 - 5*x^3 + 3*x^2 + 6*x - 4)
 
+        At the prime level itself, U_P: the constant function has eigenvalue
+        N(P) = 389, and the newforms +-1 (minus their Atkin-Lehner signs)::
+
+            sage: H.hecke_matrix(H.level()).charpoly().factor()  # sagebrush only
+            (x - 389) * (x - 1)^2 * (x + 1)^4
+
         Matrices are dense, so their dimension is limited::
 
             sage: HilbertModularForms(1000).hecke_matrix(3)  # sagebrush only
@@ -412,8 +421,6 @@ class HilbertModularForms:
             ValueError: the space has dimension 25000: Sagebrush's matrices are dense, and hecke_matrix() is limited to dimension 2000 (hecke_operator_on_basis_element() gives single rows)
         """
         P = _prime(n)
-        if P.divides(self._level):
-            raise NotImplementedError("computation of T_P for P dividing the level is not implemented")
         if self._dimension > _MAX_DENSE:
             raise ValueError("the space has dimension %d: Sagebrush's matrices are dense, and hecke_matrix() "
                              "is limited to dimension %d (hecke_operator_on_basis_element() gives single rows)"
@@ -609,7 +616,7 @@ class HilbertModularForms:
         return [EllipticCurveFactor(self, k) for k in range(len(self._rational_newforms(0)))]
 
     def _rational_newforms(self, B):
-        """For each rational newform, [(P, a_P or None)] for the primes of
+        """For each rational newform, [(P, a_P)] for the primes of
         norm <= B, computed once for all the forms."""
         B = _exact_int(B, "the bound")
         if B not in self._rational:
@@ -732,8 +739,10 @@ class EllipticCurveFactor:
         return self._H._rational_newforms(B)[self._number]
 
     def ap(self, P):
-        """The trace of Frobenius a_P at the prime P: 0 if P^2 divides the
-        conductor, '?' (as in PSAGE) if P exactly divides it.
+        """The trace of Frobenius a_P at the prime P. At a prime dividing the
+        conductor it is the eigenvalue of U_P: +-1 if P exactly divides the
+        conductor (-1 times the Atkin-Lehner eigenvalue; PSAGE returned
+        '?'), 0 if P^2 divides it.
 
         EXAMPLES::
 
@@ -741,11 +750,15 @@ class EllipticCurveFactor:
             sage: E = HilbertModularForms(SqrtFiveIdeal([[-2, 5]])).elliptic_curve_factors()[0]  # sagebrush only
             sage: E.ap(2), E.ap(SqrtFiveIdeal([[2, 1]])), E.ap(7)  # sagebrush only
             (-3, -2, 2)
+            sage: E.ap(E.conductor())  # sagebrush only
+            -1
+            sage: HilbertModularForms(SqrtFiveIdeal([[24, 0]])).elliptic_curve_factors()[0].ap(2)  # sagebrush only
+            0
         """
         P = _prime(P)
         for Q, a in self._data(P.norm()):
             if Q == P:
-                return "?" if a is None else a
+                return a
         raise ValueError("%s is not a prime" % (P,))
 
     def aplist(self, B, dual_bound=None, algorithm="dual"):
@@ -760,6 +773,8 @@ class EllipticCurveFactor:
             sage: E = HilbertModularForms(primes_of_bounded_norm(72)[-1]).elliptic_curve_factors()[0]  # sagebrush only
             sage: E.aplist(50)  # sagebrush only
             [-1, 0, -2, 0, 0, 2, -4, 6, -6, 8, 2, 6, 12, -4]
+            sage: HilbertModularForms(6).elliptic_curve_factors()[0].aplist(12)  # sagebrush only
+            [-1, -4, -1, 2, 2]
             sage: E.aplist(101/2)  # sagebrush only
             Traceback (most recent call last):
             ...
@@ -768,4 +783,4 @@ class EllipticCurveFactor:
         B = _exact_int(B, "the bound")
         if B <= 2:
             return []
-        return ["?" if a is None else a for _, a in self._data(B - 1)]
+        return [a for _, a in self._data(B - 1)]
