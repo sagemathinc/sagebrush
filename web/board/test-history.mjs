@@ -3,7 +3,8 @@
 // this browser's IndexedDB, in a database of the board's own; moving an item
 // is a tiny patch; any version comes back as it was; the ⋯ menu's TimeTravel
 // shows a bar (a slider, Revert, ✕) to look at a version, read only, its code
-// not run, and to revert to it (undoable).  Serve web/dist first (python3
+// not run, and to revert to it (undoable); each document its own history
+// (New board, Revert, another loaded: one afresh).  Serve web/dist first (python3
 // web/serve.py 8765), then
 //   node web/board/test-history.mjs
 import { spawn } from "node:child_process";
@@ -46,7 +47,6 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
   await until(`${B}?.snapshot().items.length > 0`, 60000);
-  await ev("localStorage.clear()");
   const d0 = await docOf();
   check(d0.pages?.length === 3, "primes.json has pages");
   check((await count()) === 0, "no versions before any change");
@@ -68,7 +68,8 @@ try {
   check(await until(`${B}.versions().then((v) => v.length === 3)`, 5000), "the drag, when it ends, is a version: " + await count());
   const moved = noteOn(0, id)(await docOf());
   // moving an item: a tiny patch (its x and y), nothing of the other items
-  const kept = await rows("board:examples/primes.json");
+  // (the board's history: by the board's name in this browser, kept beside it)
+  const kept = await rows("board:examples/primes.json:" + (await ev("localStorage.getItem('sagebrush-board:examples/primes.json#outputs')")));
   const last = kept?.[kept.length - 1] ?? "";
   check(kept?.length === 3 && last.length < 700, `moving an item is a tiny patch: ${last.length} bytes`);
   check(last.includes(String(moved.x)) && !last.includes("Euclid") && !last.includes("Renamed"), "...holding its new place, not the other items' text: " + last.slice(0, 300));
@@ -119,6 +120,32 @@ try {
   check(dbs.includes("sagebrush-board-history"), "the board's history has its own database: " + dbs);
   const nb = await ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-history"); r.onupgradeneeded = () => {}; r.onsuccess = () => { const db = r.result; if (!db.objectStoreNames.contains("history")) return res(0); const q = db.transaction("history").objectStore("history").count(); q.onsuccess = () => res(q.result); }; r.onerror = () => res(-1); })`);
   check(nb === 0, "no board patch is in the notebook's history: " + nb);
+
+  // a history per document (William): New board, Revert and another document loaded each start one afresh, the one before gone; kept across a reload
+  const groups = () => ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-board-history"); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => { const by = {}; for (const row of q.result) by[row.nb] = (by[row.nb] ?? 0) + 1; r.result.close(); res(by); }; }; })`);
+  check(Object.keys(await groups()).length === 1, "(one board's history so far: " + JSON.stringify(await groups()) + ")");
+  await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
+  await until(`${B}.snapshot().doc.title === "Untitled board"`, 5000);
+  await sleep(500);
+  const afterNew = await count();
+  check(afterNew <= 1 && (await ev("document.querySelector('[data-sbb=tt]').hidden")), "New board: TimeTravel has only the new board's versions: " + afterNew + " of " + nv + " before");
+  await ev(`${B}.edit((d) => { d.nodes.push({ id: "fresh", title: "Fresh" }); }).then(() => 1)`);
+  check(await until(`${B}.versions().then((v) => v.length === 2)`, 5000), "...an edit of it: its second version: " + await count());
+  await sleep(300);
+  const g1 = await groups();
+  check(Object.keys(g1).length === 1, "...and the old board's history is gone: " + JSON.stringify(g1));
+  await send("Page.reload");
+  await until(`${B}?.snapshot().doc?.title === "Untitled board"`, 60000);
+  check((await count()) === 2, "reloaded: the new board's history is still its own: " + await count());
+  // Revert (the original again): a history afresh
+  await ev("document.querySelector('[data-sbb=revert]').click(), 1");
+  await until(`${B}.snapshot().doc.title !== "Untitled board"`, 5000);
+  await sleep(500);
+  check((await count()) <= 1 && Object.keys(await groups()).length <= 1, "Revert: a history afresh: " + await count() + " " + JSON.stringify(await groups()));
+  // another document loaded (the agent's load): its own
+  await ev(`${B}.load({ title: "Another", nodes: [{ id: "x", title: "X" }] }).then(() => 1)`);
+  await sleep(300);
+  check((await count()) === 0, "another document loaded: no versions yet: " + await count());
 
   // a board with code: a version is shown with its code, not run
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });

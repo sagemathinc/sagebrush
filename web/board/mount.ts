@@ -65,10 +65,11 @@ export interface BoardStore {
   save(doc: BoardDoc): void;
   /** Forget the edits: the original is the document again (Revert). */
   revert?(): void;
-  /** The name of this document's output cache (outcache.ts), kept beside
-   * the document, not in it; `fresh`: another document is shown here, so
-   * a new name (SEC-B88-1).  None: no cache. */
-  outputsId?(fresh: boolean): string;
+  /** This document's name in this browser, kept beside it, not in it: its
+   * output cache's (outcache.ts) and its history's; `fresh`: another
+   * document is shown here, so a new name (SEC-B88-1; each its own
+   * TimeTravel).  None: no cache, one history. */
+  documentId?(fresh: boolean): string;
   /** Whether the document was written in this browser (a new board), kept
    * beside it; `set`: so it is now.  Its notes' remote pictures show at
    * once; else each when clicked (William, SEC-89C-3). */
@@ -81,6 +82,8 @@ export interface BoardTimeTravel {
   docAt(time: string): BoardDoc;
   on(f: () => void): () => void;
   close?(): void;
+  /** Close it and forget its versions (another document is shown in its place). */
+  drop?(): Promise<void>;
 }
 export interface BoardHost {
   store?: BoardStore;
@@ -93,7 +96,7 @@ export interface BoardHost {
   /** KaTeX, loaded the first time a board has math */
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
-  history?: () => Promise<BoardTimeTravel | null>;
+  history?: (id: string | null) => Promise<BoardTimeTravel | null>;
   /** where the page and step shown are kept (#p2-3: the address's hash) */
   address?: { get(): string; set(hash: string): void };
   /** the board's title changed (the page's title follows it) */
@@ -213,7 +216,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // portable and anyone can copy it (SEC-B88-1).  Another document shown
   // here (loaded, opened, a new board, reverted) gets a new one, and the
   // old one's outputs go (SEC-B88-3).
-  let outputsId: string | null = null;
+  let outputsId: string | null = null, docId: string | null = null;
   // (one document's pictures' pixels, image-size.ts: the pictures it
   // carries, its notes' and its code's, afresh for each document shown, CORR-71A-2)
   let docPixels = new PixelBudget();
@@ -222,13 +225,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function newOutputs(fresh: boolean) {
     // (first: what is being written was the document's before, CORR-A48-4)
     editor.drop();
-    const old = outputsId;
-    outputsId = host.outputs && host.store?.outputsId ? host.store.outputsId(fresh) : null;
+    const old = outputsId, was = docId;
+    docId = host.store?.documentId?.(fresh) ?? null;
+    outputsId = host.outputs ? docId : null;
     if (fresh && old && old !== outputsId) host.outputs?.drop(old).catch(() => {});
     if (code) code.cacheId = outputsId;
     docPixels = new PixelBudget();
     code?.usePictures(docPixels);
     board.epoch++;
+    // (and its history: another document's, the one before gone with what it recorded)
+    if (fresh || docId !== was) newHistory(fresh);
   }
 
   // a page made from a template: the template's items and edges under its
@@ -1127,9 +1133,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // time it is needed: the first edit, or the menu's TimeTravel.
   let boardHistory: BoardTimeTravel | null = null;
   let historyReady: Promise<BoardTimeTravel | null> | null = null;
+  // (the history before, being forgotten: the next one opens once it is)
+  let historyGone: Promise<unknown> = Promise.resolve();
   function timeTravel(): Promise<BoardTimeTravel | null> {
     if (!host.history) return Promise.resolve(null);
-    return (historyReady ??= host.history().then((h) => {
+    return (historyReady ??= historyGone.then(() => host.history!(docId)).then((h) => {
       h?.on(() => { if (!$("tt").hidden) ttUpdate(); });
       return (boardHistory = h);
     }, (e) => {
@@ -1137,13 +1145,25 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       return null;
     }));
   }
+  // Another document is shown: its own history, opened when it is next
+  // needed; the one before closed, and (`forget`) its versions dropped
+  function newHistory(forget: boolean) {
+    closeTimeTravel(false);
+    const old = historyReady;
+    historyReady = null;
+    boardHistory = null;
+    remembered = false;
+    replaced = doc;
+    if (old) historyGone = old.then((h) => (forget && h?.drop ? h.drop() : h?.close?.())).catch((e) => console.warn("board: TimeTravel:", e));
+  }
   // Keep the board as a version (and, the first time, the board as it was
-  // before this change, if the history does not have it yet).
-  let remembered = false;
+  // before this change, if the history does not have it yet: not the
+  // document it replaced, New board, Open…, Revert, which was another's).
+  let remembered = false, replaced: BoardDoc | null = null;
   function remember(prev?: BoardDoc | null) {
     timeTravel().then((h) => {
       if (!h) return;
-      if (!remembered && prev) h.record(prev);
+      if (!remembered && prev && prev !== replaced) h.record(prev);
       remembered = true;
       if (doc) h.record(doc);
     });
