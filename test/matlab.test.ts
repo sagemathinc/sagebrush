@@ -402,9 +402,11 @@ test("data functions where Octave differs from MATLAB: prctile down a column vec
     "disp(mat2str(movmax([4 8 6 -1 -2 -3 -1 3 4 5], 4, 'Endpoints', 0)))",
     "x = [1 2 3 4]'; R = corrcoef(x, 2*x); fprintf('%.17g %.17g\\n', R(1, 2), R(2, 1));",
     "R = corrcoef([1+1i 2 3-1i; 2 1i 1; 0 1 2]); fprintf('%.4f %.4f\\n', real(R(1, 3)), imag(R(1, 3)));",
+    "disp(mat2str([corrcoef(5) corrcoef(1, 2) corrcoef(1, 1)])); disp(mat2str(corrcoef([5 5 5])));",
   ].join("\n") + "\n");
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
   // (corrcoef: the documented range, |r| <= 1, where Octave gives 1.0000000000000002; and the
-  // documented conj(A - mean A) .* (B - mean B), where Octave's entry is the conjugate)
-  assert.deepEqual(out.trim().split("\n"), ["[1;8.1]", "[7;7;7]", "[0 0 8 8 6 -1 3 4 5 0]", "1 1", "-0.6250 -0.3750"]);
+  // documented conj(A - mean A) .* (B - mean B), where Octave's entry is the conjugate; and its
+  // documented one-observation cases: corrcoef(5) NaN, corrcoef(1, 2) 1, corrcoef(1, 1) NaN)
+  assert.deepEqual(out.trim().split("\n"), ["[1;8.1]", "[7;7;7]", "[0 0 8 8 6 -1 3 4 5 0]", "1 1", "-0.6250 -0.3750", "[NaN 1 NaN]", "1"]);
 });

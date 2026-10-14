@@ -394,6 +394,13 @@ def corrcoef_(nargout, x, *args):
     if len(args) > 1:
         raise _err("Too many input arguments.")
     y = args[0] if args else None
+    # (one observation, as MATLAB documents it: corrcoef(A) of a scalar is
+    # NaN; of two scalars, 1, or NaN when they are equal)
+    if _m._numel(x) == 1 and (y is None or _m._numel(y) == 1):
+        if y is None:
+            return _math.nan
+        a, b = _vec(x)[0], _vec(y)[0]
+        return 1.0 if a != b and a == a and b == b else _math.nan
     C = _cov(_variables(x, y), 0)
     # (as MATLAB documents: R(i, j) = C(i, j) / (sigma_i sigma_j), the
     # coefficients between -1 and 1, and the diagonal 1 by convention, also
