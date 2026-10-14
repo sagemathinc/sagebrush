@@ -22,7 +22,9 @@
 // pages without ids arriving later get the ids of the pages they are; a
 // remote without compare-and-swap is refused (CORR-DAF-2); a page match is
 // taken only if mutual (CORR-DAF-3); a remote changing at every try opens,
-// busy, and its ids go with the next save (CORR-DAF-4).
+// busy, and its ids go with the next save (CORR-DAF-4); a first save
+// expects no document, and one made meanwhile is merged (CORR-6B0-1); saves
+// refused again and again stop, busy (PERF-6B0-2).
 //   bun web/board/test-cached-store.mjs
 import { adopted, cachedStore, merge3 } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
@@ -35,6 +37,8 @@ const held = () => { let open; const p = new Promise((r) => (open = r)); return 
 const copy = (x) => JSON.parse(JSON.stringify(x));
 const doc = (title, extra = {}) => ({ title: "T", nodes: [{ id: "n", title }], ...extra });
 const titleOf = (json) => JSON.parse(json).nodes[0].title;
+// (a refused save's retries, quick: a test's wait)
+const FAST = { first: 5, max: 40, tries: 8 };
 
 // an in-memory copy, and a remote whose calls can be held
 const memCache = () => { const m = new Map(); return { m, get: async (k) => m.get(k) ?? null, put: async (c) => { m.set(c.key, { ...c }); } }; };
@@ -44,8 +48,8 @@ const fakeRemote = (d, o = {}) => {
   // (the hash of the document it has when asked, answered when let go)
   r.hash = async () => { const h = r.doc ? await hashOf(r.doc) : null; await gate("hash"); return h; };
   r.load = async () => { const d0 = r.doc && copy(r.doc); await gate("load"); return d0; };
-  // (with cas: only over the document whose hash it is given, as it is when the save is done)
-  r.save = async (x, ifHash) => { await gate("save"); if (r.cas && ifHash && (r.doc ? await hashOf(r.doc) : null) !== ifHash) return false; r.doc = copy(x); r.saves++; };
+  // (compare-and-swap: only over the document whose hash it is given, null: none, as it is when the save is done)
+  r.save = async (x, expected) => { await gate("save"); if ((r.doc ? await hashOf(r.doc) : null) !== expected) return false; r.doc = copy(x); r.saves++; return true; };
   r.subscribe = (f) => { r.fs.add(f); return () => r.fs.delete(f); };
   r.change = (x) => { r.doc = copy(x); for (const f of r.fs) f(copy(x)); };
   return r;
@@ -235,7 +239,7 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   const R = fakeRemote(base);
   R.holds.save = held();
   const saveGate = R.holds.save;
-  const store = cachedStore(R, "k6", cache);
+  const store = cachedStore(R, "k6", cache, FAST);
   const shown = [];
   store.subscribe((d) => { shown.push(d.nodes.map((x) => x.title).join("+")); });
   await store.load();
@@ -408,7 +412,7 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   let loads = 0, busy = true;
   const load0 = R.load;
   R.load = async () => { loads++; const d = await load0(); if (busy) R.doc = { pages: [{ title: "One", nodes: [{ id: "a", title: "v" + loads }] }] }; return d; };
-  const store = cachedStore(R, "m5", cache);
+  const store = cachedStore(R, "m5", cache, FAST);
   store.subscribe(() => {});
   let got = null, err = "";
   try { got = await store.load(); } catch (e) { err = String(e); }
@@ -445,6 +449,52 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   await tick(100);
   const cp = JSON.parse(cache.m.get("m6")?.json ?? "{}").pages;
   check(s1 === "busy" && shown.at(-1) === "late" && cp?.[0].nodes[0].title === "late" && R.doc.pages[0].id === got?.doc.pages[0].id && !!R.doc.pages[0].id, "busy, a change made elsewhere heard during the last try: shown, kept, and the ids saved with it: " + JSON.stringify({ s1, shown, copy: cp, remote: R.doc.pages, calls: R.calls }));
+}
+
+// CORR-6B0-1: a copy with an edit, the remote with no document; one made elsewhere while the copy's first save is on its way (no change event): refused (none expected), then the two merged
+{
+  const cache = memCache(), mine = cleanDoc({ title: "T", nodes: [{ id: "mine", title: "local" }] });
+  await cache.put({ key: "x1", json: canonical(mine), hash: await hashOf(mine), remoteHash: null, at: 0 });
+  const R = fakeRemote(null);
+  R.holds.save = held();
+  const saveGate = R.holds.save;
+  const args = [];
+  const save0 = R.save;
+  R.save = (x, expected) => { args.push(expected); return save0(x, expected); };
+  const store = cachedStore(R, "x1", cache, FAST);
+  store.subscribe(() => {});
+  await store.load();
+  for (let k = 0; k < 50 && !R.calls.includes("save"); k++) await tick(10);
+  R.doc = { title: "T", nodes: [{ id: "their", title: "their edit" }] };
+  saveGate.open();
+  await tick(200);
+  const ids = (d) => d.nodes.map((n) => n.id).sort().join("+"), copyIds = ids(JSON.parse(cache.m.get("x1").json));
+  check(args[0] === null && ids(R.doc) === "mine+their" && copyIds === "mine+their", "the remote with no document, one made elsewhere during the first save: refused (null expected: none), then merged, both kept: " + JSON.stringify({ args, remote: ids(R.doc), copy: copyIds }));
+}
+
+// PERF-6B0-2: the remote changing at every save: retried with a wait, then no more (busy, the copy kept); an edit, one more try; quiet, saved
+{
+  const cache = memCache(), base = cleanDoc(doc("base")), ours = cleanDoc(doc("ours"));
+  await cache.put({ key: "x2", json: canonical(ours), hash: await hashOf(ours), remoteHash: await hashOf(base), base: canonical(base), at: 0 });
+  const R = fakeRemote(base);
+  let contend = true, attempts = 0, k = 0;
+  const save0 = R.save;
+  R.save = (x, expected) => { attempts++; if (contend) R.doc = { title: "T" + ++k, nodes: [{ id: "n", title: "base" }] }; return save0(x, expected); };
+  const store = cachedStore(R, "x2", cache, { first: 5, max: 20, tries: 5 });
+  store.subscribe(() => {});
+  await store.load();
+  await store.synced;
+  await tick(400);
+  const stopped = attempts;
+  await tick(300);
+  check(stopped === 5 && attempts === 5 && store.busy?.() && titleOf(cache.m.get("x2").json) === "ours", "the remote changing at every save: five tries, waits between, then no more; busy, the copy kept: " + JSON.stringify({ stopped, after: attempts, busy: store.busy?.(), copy: titleOf(cache.m.get("x2").json) }));
+  store.save(cleanDoc({ ...JSON.parse(cache.m.get("x2").json), nodes: [{ id: "n", title: "ours again" }] }));
+  await tick(300);
+  check(attempts === 6 && store.busy?.(), "...an edit: one more try, refused, busy again: " + JSON.stringify({ attempts, busy: store.busy?.() }));
+  contend = false;
+  store.save(cleanDoc({ ...JSON.parse(cache.m.get("x2").json), nodes: [{ id: "n", title: "ours, quiet" }] }));
+  await tick(300);
+  check(!store.busy?.() && R.doc.nodes[0].title === "ours, quiet" && R.doc.title === JSON.parse(cache.m.get("x2").json).title, "...the remote quiet, an edit: saved, merged with the remote's last, not busy: " + JSON.stringify({ attempts, busy: store.busy?.(), remote: [R.doc.title, R.doc.nodes[0].title] }));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);

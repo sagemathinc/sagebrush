@@ -51,8 +51,8 @@ const SETUP = `(async () => {
     r.wait = () => new Promise((ok, no) => setTimeout(() => (r.offline ? no(new Error("offline")) : ok()), r.delay));
     r.hash = async () => { r.calls.push("hash"); await r.wait(); return r.doc ? m.docHash(r.doc) : null; };
     r.load = async () => { r.calls.push("load"); await r.wait(); return r.doc && JSON.parse(JSON.stringify(r.doc)); };
-    // (compare-and-swap: only over the document whose hash it is given, as it is when the save is done)
-    r.save = async (x, ifHash) => { r.calls.push("save"); await r.wait(); if (ifHash && (r.doc ? await m.docHash(r.doc) : null) !== ifHash) return false; r.doc = JSON.parse(JSON.stringify(x)); };
+    // (compare-and-swap: only over the document whose hash it is given, null: none, as it is when the save is done)
+    r.save = async (x, expected) => { r.calls.push("save"); await r.wait(); if ((r.doc ? await m.docHash(r.doc) : null) !== expected) return false; r.doc = JSON.parse(JSON.stringify(x)); return true; };
     r.subscribe = (f) => { r.fs.add(f); return () => r.fs.delete(f); };
     r.change = (x) => { r.doc = JSON.parse(JSON.stringify(x)); for (const f of r.fs) f(JSON.parse(JSON.stringify(x))); };
     return r;
