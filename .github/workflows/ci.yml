@@ -92,6 +92,7 @@ jobs:
           (cd packages/sagebrush-board && bun build.mjs && CHROME=google-chrome node test.mjs)
           CHROME=google-chrome node web/board/test-xss.mjs
           bun web/board/test-format.mjs
+          bun web/board/test-canvas.mjs
       - name: Mermaid flowcharts on boards, against Mermaid's own parser (its e2e and docs flowcharts)
         run: |
           git clone -q --depth 1 --branch mermaid@12.1.0 --filter=blob:none --sparse https://github.com/mermaid-js/mermaid.git /tmp/mermaid-src

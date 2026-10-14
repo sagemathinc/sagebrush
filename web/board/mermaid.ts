@@ -17,6 +17,7 @@
 // Mermaid's flow.jison (MIT); mermaidBlocks() finds the diagrams in Markdown.
 
 import { fromCocalcBoard, isCocalcBoard, leftOut } from "./cocalc";
+import { canvasLeftOut, fromCanvas, isCanvas } from "./canvas";
 import type { BoardDoc, DocEdge, DocGroup, DocNode, DocNote, NoteShape } from "./doc";
 
 /** Whether a text looks like a Mermaid flowchart. */
@@ -43,6 +44,12 @@ export function boardFromText(text: string, name?: string, note?: (md: string) =
   if (isCocalcBoard(t)) {
     const c = fromCocalcBoard(t), l = leftOut(c.left);
     note?.(`Converted from a CoCalc ${/\.slides$/i.test(name ?? "") ? "slides" : "whiteboard"} file.` + (l ? ` Left out, as a board has nothing like them yet: ${l}.` : ""));
+    return titled(c.doc);
+  }
+  // (a JSON Canvas: Obsidian's .canvas, canvas.ts)
+  if (isCanvas(t)) {
+    const c = fromCanvas(t), l = canvasLeftOut(c.left);
+    note?.("Converted from a JSON Canvas file." + (l ? ` Left out, as a board has nothing like them: ${l}.` : ""));
     return titled(c.doc);
   }
   if (t.startsWith("{")) return JSON.parse(t) as BoardDoc;

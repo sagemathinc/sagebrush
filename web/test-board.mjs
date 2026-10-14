@@ -619,6 +619,21 @@ try {
     const dl = await ev(`new Promise((resolve) => { const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { HTMLAnchorElement.prototype.click = click; fetch(this.href).then((r) => r.text()).then((text) => resolve({ name: this.download, text })); }; document.querySelector("[data-sbb=download]").click(); })`);
     const file = await ev("window.sagebrush.board.json()");
     check(/\.board\.json$/.test(dl.name) && dl.text === file && file.startsWith('{\n  "format": "sagebrush-board",\n  "version": 1,\n'), `Download JSON is not the board's file, foo.board.json, in canonical JSON: ${dl.name} ${JSON.stringify(dl.text.slice(0, 60))}`);
+    // Download JSON Canvas: foo.canvas, the board as a canvas (canvas.ts; test-canvas.mjs), and what it left out said;
+    // opened again (Open…), the board's notes and groups
+    const dc = await ev(`new Promise((resolve) => { const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { HTMLAnchorElement.prototype.click = click; fetch(this.href).then((r) => r.text()).then((text) => resolve({ name: this.download, text })); }; document.querySelector("[data-sbb=canvas]").click(); })`);
+    const cv = await ev("window.sagebrush.board.canvas()");
+    const steps = await ev("(() => { const d = window.sagebrush.board.snapshot().doc; return (d.pages ?? [d]).reduce((n, p) => n + (p.steps?.length ?? 0), 0); })()");
+    check(/\.canvas$/.test(dc.name) && dc.text === cv.text && JSON.parse(dc.text).nodes.length > 0, `Download JSON Canvas is not the board as a canvas: ${dc.name}`);
+    check(steps > 0 && (await waits(`/Downloaded as JSON Canvas/.test(document.querySelector("[data-sbb=say]").textContent) && document.querySelector("[data-sbb=say]").textContent.includes("${steps} step${steps === 1 ? "" : "s"} of the tour")`, 3000)), `Download JSON Canvas does not say it left out the tour (${steps} steps)`);
+    const before = await ev("window.sagebrush.board.snapshot().items.filter((i) => i.kind === 'note' || i.kind === 'group').map((i) => i.id).sort().join()");
+    const cf = join(profile, "board.canvas");
+    writeFileSync(cf, dc.text);
+    await ev("document.querySelector('[data-sbb=open]').click(), 1");
+    const droot = await send("DOM.getDocument", { depth: -1 });
+    const picker = await send("DOM.querySelector", { nodeId: droot.root.nodeId, selector: "[data-sbb=openfile]" });
+    await send("DOM.setFileInputFiles", { files: [cf], nodeId: picker.nodeId });
+    check(await waits(`window.sagebrush.board.snapshot().items.filter((i) => i.kind === 'note' || i.kind === 'group').map((i) => i.id).sort().join() === ${JSON.stringify(before)} && /JSON Canvas/.test(document.querySelector("[data-sbb=say]").textContent)`, 5000), "a .canvas opened (Open…) is not the board's notes and groups again, or doesn't say it was converted");
     await ev(`window.sagebrush.board.load({ title: "Old", nodes: [{ id: "o1", title: "Written before versions" }] })`);
     check((await docOf()).version === 1 && (await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "o1", "a board without a version is not read as version 1");
     for (const [bad, says] of [[{ format: "sagebrush-board", version: 2, nodes: [{ id: "n2" }] }, "version 2"], [{ format: "excalidraw", nodes: [{ id: "x" }] }, "excalidraw"]]) {

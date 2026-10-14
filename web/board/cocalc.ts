@@ -24,7 +24,8 @@
 // left out, and counted, so the person is told what was.  Outputs are not
 // kept: a board's code runs when it is opened.
 
-import { GROUP_PAD, GROUP_TITLE, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import type { BoardDoc, BoardPage, DocEdge, DocNote } from "./doc";
+import { nest } from "./nest";
 
 const TYPES = new Set(["chat", "code", "edge", "frame", "icon", "note", "page", "pen", "selection", "slide", "stopwatch", "terminal", "text", "timer", "speaker_notes"]);
 const NOTE_COLOR = "#fff9c4"; // (CoCalc's note, without a color of its own)
@@ -99,48 +100,12 @@ export function fromCocalcBoard(text: string): Converted {
   };
 
   const converted = pages.map(({ items, frames, edges }): BoardPage => {
-    // each frame inside the smallest frame holding it whole; each item in the smallest frame holding its middle
-    const area = (e: El) => box(e).w * box(e).h;
-    const fs = frames.slice().sort((a, b) => area(b) - area(a));
-    const holds = (f: El, x: number, y: number) => { const b = box(f); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; };
-    const parent = new Map<string, El | null>();
-    fs.forEach((f, i) => {
-      const b = box(f);
-      parent.set(f.id, fs.slice(0, i).reverse().find((g) => g !== f && holds(g, b.x, b.y) && holds(g, b.x + b.w, b.y + b.h)) ?? null);
-    });
-    for (const e of items) {
-      const b = box(e), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-      parent.set(e.id, fs.slice().reverse().find((f) => holds(f, cx, cy)) ?? null);
-    }
-    // Places.  A group fits what it holds (its members start at its origin,
-    // below its padding and title: doc.ts layout), so each note stays where
-    // it was on CoCalc's board, and a group is where its members make it.
-    const members = (f: El) => [...fs.filter((g) => parent.get(g.id) === f), ...items.filter((e) => parent.get(e.id) === f)];
-    const top = (f: El) => GROUP_PAD + (typeof f.str === "string" && f.str.trim() ? GROUP_TITLE : 0);
-    const abs = new Map<string, { x: number; y: number }>();
-    const absOf = (e: El): { x: number; y: number } => {
-      let a = abs.get(e.id);
-      if (a) return a;
-      const ms = e.type === "frame" ? members(e).map(absOf) : [];
-      const b = box(e);
-      a = ms.length ? { x: Math.min(...ms.map((m) => m.x)) - GROUP_PAD, y: Math.min(...ms.map((m) => m.y)) - top(e) } : { x: b.x, y: b.y };
-      abs.set(e.id, a);
-      return a;
-    };
-    const place = (e: El) => {
-      const a = absOf(e), p = parent.get(e.id);
-      if (!p) return { x: num(a.x), y: num(a.y) };
-      const o = absOf(p);
-      return { x: num(a.x - o.x - GROUP_PAD), y: num(a.y - o.y - top(p)) };
-    };
-    const byZ = (a: El, b: El) => num(a.z) - num(b.z);
-    const children = (f: El | null): DocNode[] => [
-      ...fs.filter((g) => (parent.get(g.id) ?? null) === f).sort(byZ).map((g): DocGroup => {
-        const title = typeof g.str === "string" ? g.str.trim() : "";
-        return { id: g.id, kind: "group", ...(title ? { title } : {}), children: children(g), ...place(g) };
-      }),
-      ...items.filter((e) => (parent.get(e.id) ?? null) === f).sort(byZ).map((e) => ({ ...note(e), ...place(e) })),
-    ];
+    // (each frame a group holding what is inside it, each note where it was: nest.ts)
+    const boxed = (e: El) => ({ ...box(e), id: e.id, z: num(e.z), e });
+    const nodes = nest(frames.map(boxed), items.map(boxed), ({ e }) => {
+      const title = typeof e.str === "string" ? e.str.trim() : "";
+      return { id: e.id, ...(title ? { title } : {}) };
+    }, ({ e }) => note(e));
     const ids = new Set([...items, ...frames].map((e) => e.id));
     const es: DocEdge[] = [];
     for (const e of edges) {
@@ -148,7 +113,7 @@ export function fromCocalcBoard(text: string): Converted {
       if (typeof from === "string" && typeof to === "string" && ids.has(from) && ids.has(to)) es.push({ from, to });
       else leave("edge");
     }
-    return { nodes: children(null), edges: es };
+    return { nodes, edges: es };
   });
 
   const doc: BoardDoc = count === 1
