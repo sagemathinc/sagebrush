@@ -5304,6 +5304,58 @@ def repmat_(x, *args):
     return Char(out) if t is Char else _box(out)
 
 
+@_bs("repelem")
+def repelem_(x, *args):
+    """repelem as documented: repelem(v, n) repeats each element of the
+    scalar or vector v n times, or v(k) n(k) times for a vector n as long as
+    v (the result oriented as v, a row for a scalar); repelem(A, r1, ..., rN)
+    repeats the elements of A along dimension k r_k times each, r_k a scalar
+    or one count per index of that dimension"""
+    if not args:
+        raise _err("Not enough input arguments.")
+    if type(x) is Str:
+        x = StrArr([x.s], (1, 1))
+    t = type(x)
+    d = list(_dims(x))
+
+    def counts(v, size):
+        # (integer-valued numeric scalars or vectors, as documented: not
+        # char, logical or a matrix)
+        if class_(v) not in ("double", "single") and class_(v) not in _INTS:
+            raise _err("Replication factors must be numeric.")
+        if not (_numel(v) == 1 or _isvec(v)):
+            raise _err("Replication factors must be scalars or vectors.")
+        c = _farr(v).reshape(-1)
+        if c.dtype.kind == "c" or not np.all(np.isfinite(c)) or np.any(c < 0) or np.any(c != np.floor(c)):
+            raise _err("Replication factors must be nonnegative integers.")
+        c = [int(e) for e in c]
+        if len(c) == 1:
+            return c * size
+        if len(c) != size:
+            raise _err("A vector of replication factors must have one for each element along its dimension.")
+        return c
+    if len(args) == 1:
+        if not (_isvec(x) or _numel(x) <= 1):
+            raise _err("For two input arguments, the first must be a scalar or a vector.")
+        n = _numel(x)
+        idx = np.repeat(np.arange(n, dtype=np.int64), counts(args[0], n))
+        col = len(d) == 2 and d[1] == 1 and d[0] != 1
+        shape = (idx.size, 1) if col else (1, idx.size)
+    else:
+        nd = max(len(d), len(args))
+        d = d + [1] * (nd - len(d))
+        idx = np.arange(int(np.prod(d)), dtype=np.int64).reshape(tuple(reversed(d)))
+        for k in range(nd):
+            idx = np.repeat(idx, counts(args[k] if k < len(args) else 1, d[k]), axis=nd - 1 - k)
+        shape = tuple(reversed(idx.shape))
+    flat = idx.reshape(-1)
+    if t is Cell or t is Struct or t is StrArr:
+        return x._like([cp(x.a[int(k)]) for k in flat], shape)
+    out = _arr(x).reshape(-1)[flat].reshape(tuple(reversed(shape)))
+    out = _canon(_contig(out))
+    return Char(out) if t is Char else _box(out)
+
+
 @_bs("cat")
 def cat_(dim, *args):
     return _cat(list(args), _int_arg(dim)) if args else np.zeros((0, 0))
