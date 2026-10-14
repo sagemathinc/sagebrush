@@ -1527,21 +1527,8 @@ export function matlabFunctions(src: string): string[] {
   return p.functions.map((f) => f.name);
 }
 
-/**
- * Whether a .m file is Magma rather than MATLAB.  Both use the extension.
- * Magma assigns with `:=`, which is never MATLAB syntax, so a file with
- * `:=` outside comments and string literals (of either language) is Magma.
- * A MATLAB file that has `:=` only in a comment or a string is MATLAB.
- */
-export function looksLikeMagma(src: string): boolean {
-  const code = src
-    .replace(/^[ \t]*%\{[ \t]*$[\s\S]*?^[ \t]*%\}[ \t]*$/gm, " ") // MATLAB block comments
-    .replace(/\/\*[\s\S]*?\*\//g, " ") // Magma block comments
-    .replace(/"(?:[^"\\\n]|\\.)*"/g, '""') // strings of both languages
-    .replace(/(^|[^\w)\]}.'])'(?:[^'\n]|'')*'/g, "$1''") // MATLAB character vectors (not transposes)
-    .replace(/(\/\/|%|#).*$/gm, ""); // line comments of both
-  return /:=/.test(code);
-}
+// (.m files are Magma's and MATLAB's: src/m-file.ts tells them apart)
+export { looksLikeMagma } from "./m-file";
 
 /** A syntax error as MATLAB reports it (for stderr). */
 export function matlabSyntaxMessage(e: MatlabSyntaxError, src: string, file: string): string {
