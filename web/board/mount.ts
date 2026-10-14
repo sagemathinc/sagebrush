@@ -110,7 +110,8 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
+<div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" disabled>←</button><button data-sbb="next" title="Next (→)">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
@@ -398,7 +399,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     at = Math.max(-1, Math.min(ss.length - 1, i));
     if (at < 0) {
       caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
-      board.focus(undefined, now);
+      // (a slide: its card)
+      const s = doc && pageView(doc, pageIx).slide;
+      if (s) { const c = board.cameraFor(s.x, s.y, s.x + s.w, s.y + s.h); if (now) board.setCamera(c); else board.flyTo(c); }
+      else board.focus(undefined, now);
     } else {
       const s = ss[at];
       caption(s.say ?? "", `${at + 1} / ${ss.length}`);
@@ -841,6 +845,122 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     prdlg.close();
     await printBoard({ mode: f.get("mode") as "pages" | "tour", paper: f.get("paper") as "letter" | "a4", orientation: f.get("orient") as "landscape" | "portrait" });
   };
+  // Present (⋯): a slideshow, the whole screen: each page (a slide's card,
+  // fitted, the rest dark around it; or the page whole), then its tour's
+  // steps, each step's words under it (not the page's intro: a slide's
+  // speaker notes).  → Space PageDown next, ← PageUp back, Home End, Esc
+  // leaves, the page, step and camera as they were.  Code items run as
+  // ever: a slide is live.
+  let presenting: { frames: { page: number; step: number }[]; i: number; fs?: boolean; was: { camera: Camera; page: number; at: number; editing: boolean; insets: typeof board.insets } } | null = null;
+  let idle = 0;
+  const prMask = $("pr-mask");
+  async function present(on: boolean) {
+    if (!doc || !!presenting === on) return;
+    if (on) {
+      const frames: { page: number; step: number }[] = [];
+      for (let p = 0; p < pageCount(doc); p++) {
+        frames.push({ page: p, step: -1 });
+        (pageView(doc, p).steps ?? []).forEach((_, k) => frames.push({ page: p, step: k }));
+      }
+      presenting = { frames, i: 0, was: { camera: { ...board.camera }, page: pageIx, at, editing: editor.on, insets: { ...board.insets } } };
+      editor.setOn(false);
+      root.classList.add("sbb-present");
+      for (const id of ["pr-bar", "pr-say"]) $(id).hidden = false;
+      root.requestFullscreen?.().catch(() => {});
+      board.onRender = placeMask;
+      wake();
+      // (where it was: the frame of the page and step shown)
+      const i = frames.findIndex((f) => f.page === pageIx && f.step === Math.max(-1, at));
+      await showFrame(Math.max(0, i));
+    } else {
+      const was = presenting!.was;
+      presenting = null;
+      board.onRender = null;
+      root.classList.remove("sbb-present");
+      for (const id of ["pr-bar", "pr-say", "pr-mask"]) $(id).hidden = true;
+      if (document.fullscreenElement === root) document.exitFullscreen?.().catch(() => {});
+      if (was.page !== pageIx) await page(was.page);
+      step(was.at, true);
+      board.insets = was.insets;
+      board.setCamera(was.camera);
+      if (was.editing) editor.setOn(true);
+    }
+  }
+  async function showFrame(i: number, now = false) {
+    const P = presenting;
+    if (!P || !doc) return;
+    P.i = Math.max(0, Math.min(P.frames.length - 1, i));
+    const f = P.frames[P.i];
+    if (f.page !== pageIx) await page(f.page);
+    const v = pageView(doc, pageIx), s = v.slide, st = f.step >= 0 ? v.steps?.[f.step] : undefined;
+    at = f.step;
+    board.insets = { top: 0, right: 0, bottom: 0, left: 0 };
+    // (a slide's card fills the screen one way, the rest dark: letterboxed)
+    const W = board.el.clientWidth, H = board.el.clientHeight;
+    let cam: Camera | null = null;
+    if (st) {
+      const ids = typeof st.focus === "string" ? [st.focus] : st.focus, b = board.bounds(ids);
+      if (b) cam = board.cameraFor(b.x0, b.y0, b.x1, b.y1, 2);
+    } else if (s) {
+      const z = Math.min(W / s.w, H / s.h);
+      cam = { x: s.x - (W / z - s.w) / 2, y: s.y - (H / z - s.h) / 2, z };
+    } else {
+      const b = board.bounds();
+      if (b) cam = board.cameraFor(b.x0, b.y0, b.x1, b.y1);
+    }
+    prMask.hidden = !s;
+    if (cam) { if (now) board.setCamera(cam); else board.flyTo(cam, 350); }
+    const say = $("pr-say");
+    say.innerHTML = st?.say ? markdown(st.say) : "";
+    if (st?.say && board.typeset && hasMath(st.say)) board.typeset(say);
+    say.hidden = !st?.say;
+    $("pr-where").textContent = `${P.i + 1} / ${P.frames.length}`;
+    ($("pr-prev") as HTMLButtonElement).disabled = P.i <= 0;
+    ($("pr-next") as HTMLButtonElement).disabled = P.i >= P.frames.length - 1;
+  }
+  // (the dark around a slide's card: where the card is on the screen, as the camera moves)
+  function placeMask() {
+    const s = doc && presenting ? pageView(doc, pageIx).slide : undefined;
+    if (!s) return;
+    const c = board.camera;
+    Object.assign(prMask.style, { left: (s.x - c.x) * c.z + "px", top: (s.y - c.y) * c.z + "px", width: s.w * c.z + "px", height: s.h * c.z + "px" });
+  }
+  // (the controls fade while the pointer is still)
+  function wake() {
+    root.classList.remove("sbb-idle");
+    clearTimeout(idle);
+    idle = window.setTimeout(() => root.classList.add("sbb-idle"), 2500);
+  }
+  $("present").onclick = () => present(true);
+  $("pr-prev").onclick = () => showFrame((presenting?.i ?? 0) - 1);
+  $("pr-next").onclick = () => showFrame((presenting?.i ?? 0) + 1);
+  $("pr-exit").onclick = () => present(false);
+  on(root, "pointermove", () => { if (presenting) wake(); });
+  // (the screen's size changed: full screen, a phone turned: the frame fitted again)
+  on(window, "resize", () => { if (presenting) requestAnimationFrame(() => presenting && showFrame(presenting.i, true)); });
+  // (leaving the full screen a presentation entered, by the browser's own Esc
+  // say, leaves Present; an Esc that left Present itself has left full screen
+  // too: nothing more happens; full screen granted once Present was left is left)
+  on(document, "fullscreenchange", () => {
+    const full = document.fullscreenElement === root;
+    if (!presenting) { if (full) document.exitFullscreen?.().catch(() => {}); return; }
+    if (full) presenting.fs = true;
+    else if (presenting.fs) return void present(false);
+    requestAnimationFrame(() => presenting && showFrame(presenting.i, true));
+  });
+  on(window, "keydown", (e: KeyboardEvent) => {
+    if (!presenting || !mine() || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
+    const i = presenting.i, k = e.key;
+    if (k === "ArrowRight" || k === " " || k === "PageDown" || k === "Enter") showFrame(i + 1);
+    else if (k === "ArrowLeft" || k === "PageUp" || k === "Backspace") showFrame(i - 1);
+    else if (k === "Home") showFrame(0);
+    else if (k === "End") showFrame(presenting.frames.length - 1);
+    else if (k === "Escape") present(false);
+    else return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+
   // (⌘P prints the sheets, not the screen)
   on(window, "keydown", (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc && mine()) { e.preventDefault(); $("print").click(); }
@@ -970,6 +1090,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       code = null;
       boardHistory?.close?.();
       cancelAnimationFrame(relayoutFrame);
+      clearTimeout(idle);
       cancelAnimationFrame(ttFrame);
       routingGen++; // (no more routing)
       board.destroy();
@@ -1004,6 +1125,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** Show page n (0-based). */
       page,
       /** Lay out the sheets to print (mode "pages" or "tour"; paper "letter" or "a4"; orientation) and open the print dialog, unless dialog: false. */
+      /** Present (a slideshow): on or off; the frame shown, and how many */
+      present: async (on = true) => { await present(on); return presenting ? { frame: presenting.i, of: presenting.frames.length } : null; },
       print: async (o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) => { const r = await printBoard(o); return r?.querySelectorAll(".pr-sheet").length ?? 0; },
       /** The document, the tour's step, the camera, and the laid out items' boxes. */
       snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
