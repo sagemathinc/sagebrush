@@ -6,6 +6,7 @@ arguments) and its printing, checked against Magma by magma-tests/.
 """
 
 import math as _math
+import re as _re
 import sys as _sys
 from fractions import Fraction as _Fraction
 
@@ -19,7 +20,19 @@ WIDTH = 80
 
 
 class MagmaError(Exception):
-    pass
+    """A Magma runtime error; `where` names what failed, as in Magma's
+    "Runtime error in assert: ...".  Magma follows most runtime errors with
+    an empty line, but not those of assert, coercion (!) or a call with the
+    wrong number of arguments (`blank`)."""
+
+    def __init__(self, msg="", where=None, blank=True):
+        super().__init__(msg)
+        self.where = where
+        self.blank = blank
+
+
+class _UserError(MagmaError):
+    """Raised by Magma's `error` statement: reported without the source line."""
 
 
 _pos = [0, 0]
@@ -29,21 +42,77 @@ def _here(line, col):
     _pos[0], _pos[1] = line, col
 
 
-_src = ["<magma>", []]
+_src = ["<magma>", [], None]  # name, lines, mode
 
 
-def _source(name, text):
-    _src[0], _src[1] = name, text.split("\n")
+def _source(name, text, mode=None):
+    """How errors behave (src/magma.ts Recover), checked against Magma 2.18:
+    "session" (input from stdin, as Magma's interactive session reads it):
+    every error is reported and the input goes on; "file": a runtime or
+    syntax error stops it, an undeclared identifier does not; None (no
+    recovery: notebook and kernel cells): every error stops it."""
+    if mode not in (None, "file", "session"):
+        raise ValueError("unknown mode %r" % (mode,))
+    _src[0], _src[1], _src[2] = name, text.split("\n"), mode
+
+
+def _where(line, col):
+    """The source line with a caret under column `col`, after Magma's
+    'In file' header (which a session leaves out)."""
+    text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
+    head = "" if _src[2] == "session" else 'In file "%s", line %d, column %d:\n' % (_src[0], line, col)
+    return "\n%s>> %s\n%s^\n" % (head, text, " " * (col + 2))
+
+
+def _undeclared(name, line, col):
+    """Where `name` is first used at or after (line, col), as Magma points at
+    an undeclared identifier."""
+    rx = _re.compile(r"(?<![A-Za-z0-9_'])%s(?![A-Za-z0-9_])" % _re.escape(name))
+    for k in range(line - 1, len(_src[1])):
+        start = col - 1 if k == line - 1 else 0
+        m = rx.search(_src[1][k], start)
+        if m:
+            return k + 1, m.start() + 1
+    return line, col
 
 
 def _report(e, line, col):
-    """A runtime error, reported as Magma does; then the program stops."""
+    """A runtime error, reported as Magma does; then a file stops and a
+    session goes on."""
     if isinstance(e, SystemExit):
         raise e
-    msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
-    text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
-    _sys.stdout.write('\nIn file "%s", line %d, column %d:\n>> %s\n%s^\nRuntime error: %s\n\n' % (_src[0], line, col, text, " " * (col + 2), msg))
-    raise SystemExit(1)
+    m = _re.match(r"name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", str(e)) if isinstance(e, NameError) else None
+    if m:
+        # Magma rejects a statement that uses an undeclared identifier
+        # (before running it) and goes on, in a file too
+        name = m.group(1)
+        name = name[:-1] if name.endswith("_") else name
+        line, col = _undeclared(name, line, col)
+        _sys.stdout.write("%sUser error: Identifier '%s' has not been declared or assigned\n" % (_where(line, col), name))
+        if _src[2] is None:
+            raise SystemExit(1)  # no recovery: a cell stops, as before
+        return
+    if isinstance(e, _UserError):
+        _sys.stdout.write("Runtime error: %s\n" % e)
+    else:
+        msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
+        where = getattr(e, "where", None)
+        blank = "\n" if getattr(e, "blank", True) else ""
+        _sys.stdout.write("%sRuntime error%s: %s\n%s" % (_where(line, col), " in " + where if where else "", msg, blank))
+    if _src[2] != "session":
+        raise SystemExit(1)
+
+
+def _syntax_error(line, col, detail):
+    """A syntax error at (line, col) (line 0: at the end of the input), in
+    Magma's words on stdout; the parser's reason goes to stderr."""
+    if line:
+        _sys.stdout.write("%sUser error: bad syntax\n" % _where(line, col))
+    else:
+        _sys.stdout.write("\nUser error: syntax error at end of input\n")
+    _sys.stderr.write("sagebrush: bad syntax: %s (%s, line %d)\n" % (detail, _src[0], line or len(_src[1])))
+    if _src[2] != "session" or not line:
+        raise SystemExit(1)
 
 
 def _quit():
@@ -51,12 +120,12 @@ def _quit():
 
 
 def _error(args):
-    raise MagmaError(" ".join(_str(a) for a in args))
+    raise _UserError(" ".join(_str(a) for a in args))
 
 
 def _assert(c):
     if not _bool(c):
-        raise MagmaError("Assertion failed")
+        raise MagmaError("Assertion failed", "assert", False)
 
 
 # ------------------------------------------------------------------ return values

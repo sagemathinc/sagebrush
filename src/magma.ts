@@ -20,7 +20,7 @@ export class MagmaSyntaxError extends Error {
 
 // ------------------------------------------------------------------ lexer
 
-type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "eof"; v: string; line: number; col: number };
+type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number };
 
 const KEYWORDS = new Set(
   ("and or not xor eq ne lt le gt ge in notin subset notsubset cat div mod join meet diff sdiff is cmpeq cmpne " +
@@ -102,7 +102,13 @@ export function lex(src: string): Tok[] {
     }
     if (src.startsWith("cat:=", i)) { out.push({ t: "op", v: "cat:=", line: L, col: C }); adv(5); continue; }
     const op = OPS.find((o) => src.startsWith(o, i));
-    if (!op) throw new MagmaSyntaxError(`unexpected character '${c}'`, L, C);
+    if (!op) {
+      // reported by the parser when it reaches it, so that the statements
+      // before it still run (Magma parses one statement at a time)
+      out.push({ t: "bad", v: c, line: L, col: C });
+      adv(1);
+      continue;
+    }
     out.push({ t: "op", v: op, line: L, col: C });
     adv(op.length);
   }
@@ -132,7 +138,7 @@ class Parser {
   private fns: Fn[] = [];
   private hoisted: string[][] = []; // definitions to emit before the current statement
 
-  constructor(private toks: Tok[], private filename: string, private src = "") {}
+  constructor(private toks: Tok[], private filename: string, private src = "", private recover: Recover | null = null) {}
 
   // -------- tokens
   peek(k = 0) { return this.toks[this.i + k]; }
@@ -172,18 +178,37 @@ class Parser {
   program(): string {
     this.emit("from _magma import *");
     this.emit("import _magma as _m");
-    this.emit(`_m._source(${JSON.stringify(this.filename)}, ${JSON.stringify(this.toks.length ? this.src : "")})`);
+    // how errors behave at run time: stop (no recovery: notebook and kernel
+    // cells, as before), "file" or "session" (lib/_magma.py _source)
+    const mode = this.recover === null ? "" : `, ${JSON.stringify(this.recover)}`;
+    this.emit(`_m._source(${JSON.stringify(this.filename)}, ${JSON.stringify(this.toks.length ? this.src : "")}${mode})`);
     while (this.peek().t !== "eof") {
       const t = this.peek();
-      // each top-level statement on its own, as Magma runs them: an error
-      // is reported and the next statement runs
-      this.emit("try:");
-      this.block(() => {
-        this.emit(`_m._here(${t.line}, ${t.col})`);
-        this.statement(true);
-      });
-      this.emit("except Exception as _e:");
-      this.block(() => this.emit(`_m._report(_e, ${t.line}, ${t.col})`));
+      const saved = { out: this.out, n: this.out.length, ind: this.ind, fns: this.fns.length };
+      try {
+        // each top-level statement on its own, as Magma runs them; what an
+        // error does is up to _m._report (a file stops, a session goes on)
+        this.emit("try:");
+        this.block(() => {
+          this.emit(`_m._here(${t.line}, ${t.col})`);
+          this.statement(true);
+        });
+        this.emit("except Exception as _e:");
+        this.block(() => this.emit(`_m._report(_e, ${t.line}, ${t.col})`));
+      } catch (e) {
+        if (!(e instanceof MagmaSyntaxError) || this.recover === null) throw e;
+        // Magma's rule: the statements before a syntax error have run; the
+        // error is reported; a file stops there, and a session drops the
+        // statement and the rest of the line, and goes on with the next line
+        this.out = saved.out;
+        this.out.length = saved.n;
+        this.ind = saved.ind;
+        this.fns.length = saved.fns;
+        const atEnd = this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
+        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)})`);
+        if (this.recover === "file" || atEnd) break;
+        while (this.peek().t !== "eof" && this.peek().line <= e.line) this.i++;
+      }
     }
     return this.out.join("\n") + "\n";
   }
@@ -900,7 +925,17 @@ interface Target {
   name?: string;
 }
 
+/**
+ * How a syntax error is handled.  Without one, magmaToPython throws
+ * MagmaSyntaxError and nothing runs.  With "file" (a program file) the
+ * statements before the error run, then the error is reported and the
+ * program stops; with "session" (input from stdin, like Magma's interactive
+ * session) the statement and the rest of its line are dropped and the input
+ * goes on, and a runtime error does not stop it either (lib/_magma.py).
+ */
+export type Recover = "file" | "session";
+
 /** Magma source -> Python source (for lib/_magma.py). */
-export function magmaToPython(src: string, filename = "<magma>"): string {
-  return new Parser(lex(src), filename, src).program();
+export function magmaToPython(src: string, filename = "<magma>", opts: { recover?: Recover } = {}): string {
+  return new Parser(lex(src), filename, src, opts.recover ?? null).program();
 }
