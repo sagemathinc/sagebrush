@@ -81,6 +81,23 @@ points["lambert_w"] = (
     + [(cmath.rect(LU(1e-300, 1e300), U(-math.pi, math.pi)), k) for k in (-2, 0, 1, 57) for _ in range(10)]
     + [(U(-1 / math.e, 0), k) for k in (-1, 0) for _ in range(10)] + [(LU(1e-300, 1e300), 0) for _ in range(10)]
 )
+# (polylogarithms of integer order: inside, on and outside the unit circle,
+# next to 1 and to the cut (1, inf), and real arguments below 1)
+points["polylog"] = (
+    [(n, cz(3)) for n in (-20, -7, -2, -1, 0, 1, 2, 3, 4, 7, 25, 100) for _ in range(12)]
+    + [(n, cmath.rect(U(0.4, 2.2), U(-math.pi, math.pi))) for n in (-12, -3, 1, 2, 3, 10) for _ in range(12)]
+    + [(n, cmath.rect(LU(1e-5, 1e5), U(-math.pi, math.pi))) for n in (-5, 1, 2, 5, 30) for _ in range(10)]
+    + [(n, complex(1 + U(-0.01, 0.01), U(-0.01, 0.01))) for n in (-1, 2, 3, 6) for _ in range(6)]
+    + [(n, complex(U(1.01, 50), random.choice((1, -1)) * LU(1e-30, 1e-5))) for n in (2, 3, 5) for _ in range(6)]
+    + [(n, U(-30, 0.99)) for n in (-4, 1, 2, 3, 8) for _ in range(8)]
+)
+points["dilog"] = [(cz(4),) for _ in range(20)] + [(U(-50, 0.99),) for _ in range(10)]
+# (fixed large orders with large |z|, daybreak's TEST-E24-2 point first; no
+# random draws, so that the cases after these stay as they were)
+points["polylog"] = points["polylog"] + [
+    (100, complex(4.918943795749446e47, -8.631356821706026e47)), (99, complex(-3.1e120, 2.7e119)),
+    (95, complex(1.3e15, 9.9e14)), (90, complex(-7.7e200, -1.1e201)), (80, complex(2.5e30, -4.0e29)),
+    (50, complex(6.0e8, 8.0e8)), (20, complex(-1.0e300, 3.0e299)), (100, complex(25.0, -10.0))]
 
 
 def faddeeva(z):
@@ -100,6 +117,7 @@ ref = {
     "erf": mp.erf, "erfc": mp.erfc, "erfi": mp.erfi, "erfcx": lambda z: mp.exp(mp.mpmathify(z) ** 2) * mp.erfc(z),
     "erfinv": lambda y: mp.erfinv(y), "erfcinv": erfcinv, "exp_integral_e1": mp.e1, "exp_integral_ei": mp.ei,
     "lambert_w": lambda z, k: mp.lambertw(z, k),
+    "polylog": lambda n, z: mp.polylog(n, z), "dilog": lambda z: mp.polylog(2, z),
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}
