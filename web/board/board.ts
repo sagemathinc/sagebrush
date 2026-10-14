@@ -230,6 +230,8 @@ export class Board {
   private editingEl: HTMLElement | null = null;
   /** after each frame drawn (the camera may have moved): what floats over the board follows */
   onRender: (() => void) | null = null;
+  /** The board's size changed (a phone turned, full screen): its canvas, and so cameraFor(), already the new size. */
+  onResize: (() => void) | null = null;
   camera: Camera = { x: 0, y: 0, z: 1 };
   /** screen space that focus() keeps clear (a toolbar, a caption) */
   insets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -380,6 +382,7 @@ export class Board {
     }
     this.mountedFor = null;
     this.request();
+    this.onResize?.();
   }
 
   /** The world rectangle in view. */

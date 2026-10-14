@@ -5,7 +5,9 @@
 // half the screen; typing and Run work; the toolbar's Note opens one too.
 // The page does not zoom (double taps are the board's), and the tour's
 // caption is a line until tapped.  Two fingers, the first on a note in
-// Edit, pinch: the board zooms, the note stays.  Serve web/dist first (python3
+// Edit, pinch: the board zooms, the note stays.  Presenting, the faded
+// controls come back with a tap, and a tap on one only shows it; a phone
+// turned fits the frame to the turned screen.  Serve web/dist first (python3
 // web/serve.py 8765), then
 //   node web/board/test-mobile.mjs
 import { spawn } from "node:child_process";
@@ -171,6 +173,38 @@ try {
     const z1 = await ev("window.board.camera.z"), at1 = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start'))");
     // (the fingers 44 px apart, then 156: the board zooms by about that, the note where it was)
     check(Math.abs(z1 / z0 - 156 / 44) < 0.2 && at1 === at0 && !(await ev("document.querySelector('.board-item.dragging')")), "a pinch that starts on a note, in Edit: the board zooms, the note stays: " + JSON.stringify({ zoom: z1 / z0, note: at1 === at0 ? "the same" : [at0, at1] }));
+  }
+  // Present on a phone: the controls, faded while nothing moves, come back with a tap; a tap where a faded control is only brings them back
+  {
+    const deck = { title: "A talk", pages: [{ title: "Slide", slide: { x: 0, y: 0, w: 1280, h: 720 }, nodes: [{ id: "t", title: "The title", x: 60, y: 60 }], steps: [{ focus: "t", say: "The title" }] }, { title: "Two", nodes: [{ id: "p", title: "Page two" }] }] };
+    await ev(`window.sagebrush.board.load(${JSON.stringify(deck)}).then(() => 1)`);
+    await sleep(500);
+    await ev("window.sagebrush.board.present().then(() => 1)");
+    await sleep(2900);
+    const idle = () => ev("document.querySelector('.sbb').classList.contains('sbb-idle')"), where = () => ev("document.querySelector('[data-sbb=pr-where]').textContent");
+    const faded = await idle();
+    await tap(W / 2, H / 3);
+    await sleep(200);
+    const back = !(await idle());
+    await sleep(2900);
+    const f0 = await where(), fadedAgain = await idle();
+    await tapEl("[data-sbb=pr-next]");
+    await sleep(500);
+    const f1 = await where(), shown = !(await idle());
+    await tapEl("[data-sbb=pr-next]");
+    await sleep(500);
+    const f2 = await where();
+    check(faded && back && fadedAgain && f1 === f0 && shown && f2 !== f0, "Present on a phone: the faded controls come back with a tap; a tap on a faded control only shows it, the next presses it: " + JSON.stringify({ faded, back, fadedAgain, f0, f1, shown, f2 }));
+    // the phone turned on a step: the step's item fitted again, whole and in the middle of the turned screen
+    await ev("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })), 1");
+    await ev("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })), 1");
+    await sleep(700);
+    await send("Emulation.setDeviceMetricsOverride", { width: H, height: W, deviceScaleFactor: 2, mobile: true });
+    await sleep(700);
+    const fit = await ev("(() => { const r = window.board.clientRect('t'), b = window.board.el.getBoundingClientRect(); return { inside: r.left >= b.left - 1 && r.top >= b.top - 1 && r.left + r.width <= b.right + 1 && r.top + r.height <= b.bottom + 1, dx: Math.round(r.left + r.width / 2 - (b.left + b.width / 2)), dy: Math.round(r.top + r.height / 2 - (b.top + b.height / 2)), w: b.width }; })()");
+    check(fit.inside && Math.abs(fit.dx) < 40 && Math.abs(fit.dy) < 40 && fit.w === H, "Present, a phone turned on a step: its item fitted again to the turned screen, whole and in the middle: " + JSON.stringify(fit));
+    await send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 3, mobile: true });
+    await ev("window.sagebrush.board.present(false).then(() => 1)");
   }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {

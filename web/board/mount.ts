@@ -1190,8 +1190,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("pr-next").onclick = () => showFrame((presenting?.i ?? 0) + 1).catch(fail);
   $("pr-exit").onclick = () => present(false).catch(fail);
   on(root, "pointermove", () => { if (presenting) wake(); });
-  // (the screen's size changed: full screen, a phone turned: the frame fitted again)
-  on(window, "resize", () => { if (presenting) requestAnimationFrame(() => presenting && showFrame(presenting.i, true).catch(fail)); });
+  // (and with any pointer put down, a finger's tap too; a tap on a control
+  // faded out only brings them back, it does not press it unseen)
+  let woken = false;
+  on(root, "pointerdown", (e: PointerEvent) => {
+    if (!presenting) return;
+    woken = root.classList.contains("sbb-idle") && !!(e.target as Element).closest?.("[data-sbb=pr-bar]");
+    wake();
+  }, true);
+  on($("pr-bar"), "click", (e: MouseEvent) => { if (woken) { woken = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+  // (the board's size changed: full screen, a phone turned: the frame fitted
+  // again, once the board has its new size: a window's resize comes first,
+  // and a camera fitted then is fitted to the old one)
+  board.onResize = () => { if (presenting) showFrame(presenting.i, true).catch(fail); };
   // (leaving the full screen a presentation entered, by the browser's own Esc
   // say, leaves Present; an Esc that left Present itself has left full screen
   // too: nothing more happens; full screen granted once Present was left is left)
