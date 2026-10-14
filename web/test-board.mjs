@@ -640,7 +640,18 @@ try {
     const droot = await send("DOM.getDocument", { depth: -1 });
     const picker = await send("DOM.querySelector", { nodeId: droot.root.nodeId, selector: "[data-sbb=openfile]" });
     await send("DOM.setFileInputFiles", { files: [cf], nodeId: picker.nodeId });
-    check(await waits(`window.sagebrush.board.snapshot().items.filter((i) => i.kind === 'note' || i.kind === 'group').map((i) => i.id).sort().join() === ${JSON.stringify(before)} && /JSON Canvas/.test(document.querySelector("[data-sbb=say]").textContent)`, 5000), "a .canvas opened (Open…) is not the board's notes and groups again, or doesn't say it was converted");
+    check(await waits(`window.sagebrush.board.snapshot().items.filter((i) => i.kind === 'note' || i.kind === 'group').map((i) => i.id).sort().join() === ${JSON.stringify(before)} && /Converted from a JSON Canvas/.test(document.querySelector("[data-sbb=say]").textContent)`, 5000), "a .canvas opened (Open…) is not the board's notes and groups again, or doesn't say it was converted");
+    // a document loaded while a file opened is still being read: the load, newer, wins; the file is not opened over it
+    await ev("(() => { const t = File.prototype.text; File.prototype.text = function () { return new Promise((r) => { window.__release = () => { File.prototype.text = t; r(t.call(this)); }; }); }; return 1; })()");
+    await ev("document.querySelector('[data-sbb=open]').click(), 1");
+    const droot2 = await send("DOM.getDocument", { depth: -1 });
+    const picker2 = await send("DOM.querySelector", { nodeId: droot2.root.nodeId, selector: "[data-sbb=openfile]" });
+    await send("DOM.setFileInputFiles", { files: [cf], nodeId: picker2.nodeId });
+    await waits("!!window.__release", 5000);
+    await ev(`window.sagebrush.board.load({ title: "Meanwhile", nodes: [{ id: "m1", title: "Loaded while the file was read" }] })`);
+    await ev("window.__release(), 1");
+    await sleep(1500);
+    check((await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "m1", "a file whose reading ends after a document was loaded is opened over it: " + (await ev("window.sagebrush.board.snapshot().items.length")) + " items");
     await ev(`window.sagebrush.board.load({ title: "Old", nodes: [{ id: "o1", title: "Written before versions" }] })`);
     check((await docOf()).version === 1 && (await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "o1", "a board without a version is not read as version 1");
     for (const [bad, says] of [[{ format: "sagebrush-board", version: 2, nodes: [{ id: "n2" }] }, "version 2"], [{ format: "excalidraw", nodes: [{ id: "x" }] }, "excalidraw"]]) {

@@ -992,10 +992,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   const picker = $("openfile") as HTMLInputElement;
   $("open").onclick = () => picker.click();
+  // (a file read while another document is loaded, by an agent or the
+  // host: that one, newer, wins; the file, read too late, is not opened
+  // over it)
   picker.onchange = async () => {
-    const f = picker.files?.[0];
-    if (f) await openText(await f.text(), f.name).catch(fail);
+    const f = picker.files?.[0], g = loadGen;
     picker.value = "";
+    if (!f) return;
+    const text = await f.text().catch(fail);
+    if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   };
   // (files dropped on this board)
   on(root, "dragover", (e: DragEvent) => e.preventDefault());
@@ -1010,8 +1015,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       await editor.addImages(pics, w.x, w.y).catch(fail);
       return;
     }
-    const f = files[0];
-    if (f) await openText(await f.text(), f.name).catch(fail);
+    const f = files[0], g = loadGen;
+    if (!f) return;
+    const text = await f.text().catch(fail);
+    if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   });
   // Import Mermaid…: a flowchart pasted in
   const mmdlg = $("mmdlg") as HTMLDialogElement, mmtext = $("mmtext") as HTMLTextAreaElement;
