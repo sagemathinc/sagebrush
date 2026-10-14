@@ -179,11 +179,11 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
 - **`colon`** computes `a:d:b` as MATLAB does: the second half of the
   elements is counted back from the end point. **`linspace`** uses MATLAB's
   formula. **`rand`** gives MATLAB's numbers: the Mersenne twister seeded
-  with 5489, as `rng default` does, and so do `randi`, `randperm(n)` and
-  `sprand`, which are built on it as MATLAB's are. (`sprand` and `sprandn`
-  draw their places with replacement and keep each place once, as
-  MATLAB's do, so a matrix has somewhat fewer nonzeros than the density
-  asks; Octave's sample without replacement.) **`randn`** is MATLAB's
+  with 5489, as `rng default` does, and so do `randi` and `randperm(n)`.
+  (`sprand` and `sprandn` draw their places with replacement and keep each
+  place once, so a matrix has somewhat fewer nonzeros than the density
+  asks, as MATLAB documents; Octave's sample without replacement. Their
+  exact places and values are not claimed to be MATLAB's.) **`randn`** is MATLAB's
   ziggurat on the same stream:
   - 256 layers (Marsaglia and Tsang's), each draw two 32-bit words a and b;
   - the layer is 255 - (b >> 24);
@@ -534,9 +534,10 @@ The rest:
   doubles, so `intmax('int64')` shows 9223372036854775808 and
   `intmax('uint64')` 18446744073709551616;
 - sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`);
-- `sprandsym`'s numbers: its construction is Sagebrush's own (exactly the
-  requested number of nonzeros), not MATLAB's (sprand's and sprandn's are
-  MATLAB's);
+- the random sparse matrices' exact places and values: `sprand`'s and
+  `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
+  construction is Sagebrush's own (exactly the requested number of
+  nonzeros);
 - `normest`'s iteration count: MATLAB documents the power iteration but
   not its starting vector, so Sagebrush's (the ones vector) can take a
   different number of iterations to the same estimate.
