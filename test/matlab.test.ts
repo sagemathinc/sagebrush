@@ -476,3 +476,17 @@ test("colon counts a range's second half back from its end, as MATLAB's output s
     "x = 0:0.1:0.5; fprintf('%d %d %d\\n', x(4) == 0.3, x(end) == 0.5, numel(x));"], { encoding: "utf8" });
   assert.equal(out.trim(), "1 1 6");
 });
+
+test("linspace as MATLAB documents it: n <= 0, n = 1, a non-integer n, NaN, complex ends, single, and the published examples", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (e: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", `x = ${e}; disp(mat2str(x, 5))`], { encoding: "utf8" }).trim();
+  assert.equal(run("linspace(1, 2, 0)"), "zeros(1,0)");
+  assert.equal(run("linspace(1, 2, -3)"), "zeros(1,0)");
+  assert.equal(run("linspace(1, 2, 1)"), "2");
+  assert.equal(run("linspace(1, 2, 3.7)"), "[1 1.5 2]");
+  assert.equal(run("linspace(1, 2, NaN)"), "NaN");
+  assert.equal(run("size(linspace(0, 1))"), "[1 100]");
+  assert.equal(run("linspace(-5, 5, 7)"), "[-5 -3.3333 -1.6667 0 1.6667 3.3333 5]");
+  assert.equal(run("linspace(1+2i, 10+10i, 8)"), "[1+2i 2.2857+3.1429i 3.5714+4.2857i 4.8571+5.4286i 6.1429+6.5714i 7.4286+7.7143i 8.7143+8.8571i 10+10i]");
+  assert.equal(run("class(linspace(single(0), 1, 3))"), "'single'");
+});
