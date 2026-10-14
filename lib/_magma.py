@@ -25,10 +25,12 @@ class MagmaError(Exception):
     an empty line, but not those of assert, coercion (!) or a call with the
     wrong number of arguments (`blank`)."""
 
-    def __init__(self, msg="", where=None, blank=True):
+    def __init__(self, msg="", where=None, blank=True, pos=None):
+        # (pyjs: exceptions take positional arguments only)
         super().__init__(msg)
         self.where = where
         self.blank = blank
+        self.pos = pos  # (line, col) of the failing operation, if known
 
 
 class _UserError(MagmaError):
@@ -98,8 +100,20 @@ def _report(e, line, col):
         msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
         where = getattr(e, "where", None)
         blank = "\n" if getattr(e, "blank", True) else ""
-        _sys.stdout.write("%sRuntime error%s: %s\n%s" % (_where(line, col), " in " + where if where else "", msg, blank))
+        line, col = getattr(e, "pos", None) or (line, col)
+        # Magma wraps the message at 80 columns, as it prints values
+        text = "Runtime error%s: %s" % (" in " + where if where else "", msg)
+        _sys.stdout.write("%s%s\n%s" % (_where(line, col), _wrap(text, 0, 0), blank))
     if _src[2] != "session":
+        raise SystemExit(1)
+
+
+def _compile_error(line, col, msg):
+    """A statement Magma rejects before running it ("User error: ..."):
+    reported, and the next statement runs (in a file too); a cell (no
+    recovery) stops."""
+    _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: " + msg, 0, 0)))
+    if _src[2] is None:
         raise SystemExit(1)
 
 
@@ -372,6 +386,8 @@ def _own(v, name=None):
         return s
     if isinstance(v, MTuple):
         return MTuple(_own(x) for x in v)
+    if isinstance(v, MRec):
+        return v._copy()
     return v
 
 
@@ -425,14 +441,22 @@ def _index(s, i):
 
 
 _UNDEF = object()
+_DELETE = object()  # assigned along a path by `delete r`a`
 
 
 def _assign_path(obj, path, val):
     """x[i][j] := v (sequences: also one past the end, filling undefined)."""
     if not path:
-        return _own(val)
-    kind, i = path[0]
+        return val if val is _DELETE else _own(val)
+    kind, i = path[0][:2]
+    pos = path[0][2] if len(path[0]) > 2 else None
     if kind == "attr":
+        if isinstance(obj, MRec):
+            if len(path) == 1:
+                obj._set(i, val, pos)
+            else:
+                obj._set(i, _assign_path(obj._get(i, pos), path[1:], val), pos)
+            return obj
         setattr(obj, i, _assign_path(getattr(obj, i, None), path[1:], val))
         return obj
     if isinstance(obj, MRange):
@@ -454,8 +478,206 @@ def _assign_path(obj, path, val):
     raise MagmaError("cannot assign into %s" % _str(obj))
 
 
-def _getattr(x, name):
+def _getattr(x, name, pos=None):
+    """x`name (and x``s, with s a string)."""
+    if isinstance(x, MRec):
+        return x._get(name, pos)
+    if not isinstance(name, str):
+        raise MagmaError("Bad argument types", "`", True, pos)
     return getattr(x, name)
+
+
+def _assigned(x, name):
+    """assigned x`name."""
+    if isinstance(x, MRec):
+        x._field(name, None)
+        return name in x.vals
+    return hasattr(x, name)
+
+
+def _assigned_name(read):
+    """assigned x, for a variable x."""
+    try:
+        read()
+        return True
+    except NameError:
+        return False
+
+
+# ------------------------------------------------------------------ records
+
+def _magma_str(x):
+    """A structure or category as Magma prints it where it must be read
+    back (the fields of a record format): IntegerRing(), RationalField()."""
+    if x is _ZZ:
+        return "IntegerRing()"
+    if x is _QQ:
+        return "RationalField()"
+    return _inline(x)
+
+
+class MRecFormat:
+    """recformat< n : Integers(), misc, seq : SeqEnum >: field names, each
+    with an optional structure (values are coerced into it) or category
+    (values must have it).  Behaviour from Magma's documentation (Records)
+    and checked against Magma."""
+
+    def __init__(self, fields):
+        self.fields = [(n, c) for n, c in fields]
+        self.names = [n for n, _ in fields]
+
+    def __repr__(self):
+        return "recformat<%s>" % ", ".join(n if c is None else "%s: %s" % (n, _magma_str(c)) for n, c in self.fields)
+
+    def _constraint(self, name):
+        for n, c in self.fields:
+            if n == name:
+                return c
+        raise KeyError(name)
+
+
+def _recformat(fields, pos=None):
+    """recformat< ... >: each restriction must be a structure or a category
+    (Magma's "Expression for field a is not a category or structure")."""
+    for name, c in fields:
+        if c is None or isinstance(c, _Cat) or c is _ZZ or c is _QQ:
+            continue
+        if isinstance(c, (MSeq, MSet, MRange)) or hasattr(c, "_magma_coerce") or hasattr(c, "_magma_contains"):
+            # a structure, but its use (and printing) as a restriction isn't done
+            raise MagmaError("this structure as the restriction of field %s is not supported yet" % name,
+                             "recformat< ... >", True, pos)
+        raise MagmaError("Expression for field %s is not a category or structure" % name, "elt< ... >", True, pos)
+    return MRecFormat(fields)
+
+
+def _format_name(fmt):
+    """How a record prints its format: the first (oldest) global variable
+    that holds the format now, else the format itself (checked against
+    Magma: after `B := X; A := X; delete X;` a record prints rec<B | ...>)."""
+    main = _sys.modules.get("__main__")
+    for k, v in (vars(main).items() if main is not None else ()):
+        if v is fmt and not k.startswith("_"):
+            return k[:-1] if k.endswith("_") and k[:-1] in _PYKW else k
+    return repr(fmt)
+
+
+# Python keywords: a Magma name that is one gets a trailing _ (src/magma.ts pyName)
+_PYKW = set(("False None True and as assert async await break class continue def del elif else except finally for from global "
+             "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split())
+
+
+class MRec:
+    """A record: values for some of its format's fields."""
+
+    def __init__(self, fmt, vals=None):
+        self.fmt = fmt
+        self.vals = dict(vals or {})
+
+    def _field(self, name, pos):
+        if not isinstance(name, str):
+            raise MagmaError("Bad argument types", "`", True, pos)
+        if name not in self.fmt.names:
+            raise MagmaError("Field '%s' does not exist in this record" % name, "`", True, pos)
+        return name
+
+    def _get(self, name, pos=None):
+        self._field(name, pos)
+        if name not in self.vals:
+            raise MagmaError("Field '%s' is not assigned" % name, "`", True, pos)
+        return self.vals[name]
+
+    def _check(self, name, v):
+        """v as stored in field `name`, or None if it doesn't fit."""
+        c = self.fmt._constraint(name)
+        if c is None:
+            return v
+        if isinstance(c, _Cat):
+            return v if Type(v) == c else None
+        try:
+            return _coerce(c, v)
+        except Exception:
+            return None
+
+    def _set(self, name, v, pos=None):
+        self._field(name, pos)
+        if v is _DELETE:
+            self.vals.pop(name, None)
+            return
+        w = self._check(name, v)
+        if w is None:
+            raise MagmaError("RHS value invalid for field '%s'" % name, ":=", False, pos)
+        self.vals[name] = w
+
+    def _copy(self):
+        return MRec(self.fmt, {k: _own(v) for k, v in self.vals.items()})
+
+    def _str(self, indent):
+        head = "rec<%s | " % _format_name(self.fmt)
+        names = [n for n in self.fmt.names if n in self.vals]
+        if not names:
+            return head + ">"
+        pad = " " * (indent + 4)
+        lines = []
+        for n in names:
+            start = "%s := " % n
+            v = self.vals[n]
+            # a record or a list of structures nests 4 deeper; a value that
+            # wraps (a long sequence or string) continues 8 deeper
+            deep = isinstance(v, MRec) or (isinstance(v, (MSeq, MSet)) and not all(_atomic(x) for x in v))
+            lines.append(pad + start + _str(v, indent + (4 if deep else 8), indent + 4 + len(start)))
+        return head + "\n" + ",\n".join(lines) + ">"
+
+
+def _rec(fmt, assigns, pos=None):
+    """rec< F | name := value, ... >."""
+    try:
+        return _make_rec(fmt, assigns)
+    except MagmaError as e:
+        e.pos = e.pos or pos
+        raise
+
+
+def _make_rec(fmt, assigns):
+    if not isinstance(fmt, MRecFormat):
+        raise MagmaError("Bad argument types", "rec< ... >")
+    r = MRec(fmt)
+    seen = set()
+    for name, v in assigns:
+        # in order, as Magma checks them: unknown, given twice, then the value
+        if name not in fmt.names:
+            raise MagmaError("Field '%s' is not in the format" % name, "rec< ... >")
+        if name in seen:
+            raise MagmaError("Field '%s' given more than once" % name, "rec< ... >")
+        seen.add(name)
+        w = r._check(name, v)
+        if w is None:
+            c = fmt._constraint(name)
+            raise MagmaError("Value for field '%s' should have category %s" % (name, c) if isinstance(c, _Cat)
+                             else "Value for field '%s' not in structure given by format" % name, "rec< ... >")
+        r.vals[name] = _own(w)
+    return r
+
+
+def Names(x):
+    """The field names of a record format or of a record."""
+    if isinstance(x, MRec):
+        x = x.fmt
+    if isinstance(x, MRecFormat):
+        return MSeq(list(x.names))
+    raise MagmaError("Bad argument types", "'Names'")
+
+
+def Format(r):
+    """The format of a record."""
+    if isinstance(r, MRec):
+        return r.fmt
+    raise MagmaError("Bad argument types", "'Format'")
+
+
+def _unsupported(name, pos=None):
+    """A constructor name< ... > the translator parses but Sagebrush doesn't
+    implement yet: an error, never a guess."""
+    raise MagmaError("%s< ... > is not supported yet" % name, None, True, pos)
 
 
 # ------------------------------------------------------------------ operators
@@ -509,6 +731,9 @@ def _pow(a, b):
 
 
 def _eq(a, b):
+    if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
+        # Magma has no equality of record formats
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (Type(a), Type(b)), "'eq'")
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) == MReal.of(b)
     if isinstance(a, (MSeq, MRange)) and isinstance(b, (MSeq, MRange)):
@@ -828,7 +1053,7 @@ def _inline(v, in_tuple=False):
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, str):
-        return '"' + v + '"' if in_tuple else v
+        return '"' + v + '"' if in_tuple and not isinstance(v, _Cat) else v
     if isinstance(v, MTuple):
         return "<" + ", ".join(_inline(x, True) for x in v) + ">"
     if isinstance(v, MRange):
@@ -891,11 +1116,13 @@ def _str(v, indent=0, col=None):
             return o.strip() + c.strip()
         if all(_atomic(x) or x is _UNDEF for x in raw):
             items = _items(v)
-            # wrapped at WIDTH: an item fits when the line, it and ", " do
+            # wrapped at WIDTH: an item fits when the line (from the column
+            # it starts at), it and ", " do
             lines, line = [], o
             for k, it in enumerate(items):
                 piece = it + (", " if k < len(items) - 1 else c)
-                if line.strip() and len(line) + len(it) + 2 > WIDTH:
+                start = col if not lines else indent
+                if line.strip() and start + len(line) + len(it) + 2 > WIDTH:
                     lines.append(line)
                     line = ""
                 line += piece
@@ -904,6 +1131,8 @@ def _str(v, indent=0, col=None):
         pad = " " * (indent + 4)
         inner = [pad + _str(x, indent + 4) for x in raw]
         return o.strip() + "\n" + ",\n".join(inner) + "\n" + " " * indent + c.strip()
+    if isinstance(v, MRec):
+        return v._str(indent)
     if getattr(v, "_magma_nowrap", False):
         return _inline(v)
     return _wrap(_inline(v), col, indent + _extra(v), indent)
@@ -1097,7 +1326,36 @@ def Parent(x):
     raise MagmaError("Parent: unknown structure")
 
 
+class _Cat(str):
+    """A category (the type of an object, as Type returns it): prints as its
+    name, without quotes."""
+
+
+# Categories bound as names (RngIntElt, SeqEnum, ...), for Type(x) eq
+# RngIntElt and record formats such as recformat< n : RngIntElt >.
+_CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum SetIndx SetMulti Tup "
+               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map").split()
+for _c in _CATEGORIES:
+    globals()[_c] = _Cat(_c)
+
+
+def _type_name(x):
+    if isinstance(x, _Cat):
+        return "Cat"
+    if isinstance(x, MRec):
+        return "Rec"
+    if isinstance(x, MRecFormat):
+        return "RecFrmt"
+    if type(x).__name__ == "MList":
+        return "List"
+    return None
+
+
 def Type(x):
+    return _Cat(_type_name(x) or _type(x))
+
+
+def _type(x):
     if isinstance(x, bool):
         return "BoolElt"
     if isinstance(x, int):
@@ -2358,3 +2616,4 @@ def Rank(x):
 
 __all__ = [n for n, v in list(globals().items())
            if not n.startswith("_") and (callable(v) or isinstance(v, type)) and getattr(v, "__module__", None) == __name__]
+__all__ += _CATEGORIES
