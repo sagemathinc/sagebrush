@@ -81,8 +81,9 @@ const host: BoardHost = {
         return false;
       }
     },
-    // (the name of its outputs' cache: random, kept beside it in this browser)
-    outputsId(fresh) {
+    // (its name in this browser, its outputs' cache's and its history's:
+    // random, kept beside it; under the key it had as the cache's alone)
+    documentId(fresh) {
       const k = saveKey + "#outputs";
       let id: string | null = null;
       try { id = fresh ? null : localStorage.getItem(k); } catch {}
@@ -110,9 +111,10 @@ const host: BoardHost = {
     return import(own ? URL.createObjectURL(new Blob([own], { type: "text/javascript" })) : new URL("../sagebrush-math.js", import.meta.url).href);
   },
   // TimeTravel: patchflow (in sagebrush-history.js) and a database of its own; not in an exported file
-  history: file ? undefined : async () => {
+  // (each document its own: by its name beside it in this browser)
+  history: file ? undefined : async (id) => {
     const [mod, db] = await Promise.all([import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule>, openBoardHistoryDb()]);
-    return db ? new BoardHistory(mod, new IdbPatchStore(db, "board:" + source)).init() : null;
+    return db ? new BoardHistory(mod, new IdbPatchStore(db, "board:" + source + (id ? ":" + id : ""))).init() : null;
   },
   address: {
     get: () => location.hash,
