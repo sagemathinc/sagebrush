@@ -130,6 +130,8 @@ try {
   // opened again, in a fresh page: the previews show, marked, and the slow items don't run; the fast one does
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  // (without the cache of step 3, whose full outputs would show instead)
+  await ev("new Promise((res) => { const r = indexedDB.deleteDatabase('sagebrush-outputs'); r.onsuccess = r.onerror = r.onblocked = () => res(1); })");
   const t0 = Date.now();
   await ev(`window.sagebrush.board.load(${JSON.stringify(JSON.parse(file1))}).then(() => 1)`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'f')?.state === '' && /fast/.test(os.find((o) => o.id === 'f').output))", 60000), "the fast item ran");
@@ -180,6 +182,50 @@ try {
   await ev("window.__holding = false, window.__held.splice(0).forEach((f) => f()), 1");
   await sleep(1500);
   check((await gPreview()) === "null", "...and the earlier run's, finished after, doesn't come back: " + (await gPreview()).slice(0, 160));
+
+  // Step 3: the cache beside the board (outcache.ts).  An item over 2 s from
+  // root keeps its full outputs in this browser; opened again, it shows them
+  // as computed, without running, and what reads it too; changed, it runs.
+  const SEED_C = "c".repeat(64);
+  const cboard = (sCode) => ({ title: "Cached", seed: SEED_C, nodes: [
+    { id: "s", code: sCode }, { id: "d", code: "print('d sees', stamp)" }, { id: "f", code: "print('fast')" },
+  ] });
+  // (os.urandom: not the seed's, so each run's stamp is its own)
+  const slowStamp = "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.3:\n    pass\nstamp = os.urandom(8).hex()\nprint('s ran:', stamp)";
+  // (counted without creating the database, which would stop the app from making its stores)
+  const cacheCount = () => ev("indexedDB.databases().then((ds) => !ds.some((d) => d.name === 'sagebrush-outputs') ? 0 : new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const c = db.transaction('entries').objectStore('entries').count(); c.onsuccess = () => { db.close(); res(c.result); }; }; }))");
+  // (a clean start: no board kept in this browser from the steps above, previews at their usual 10 s)
+  await ev("localStorage.clear(), 1");
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  const n0 = await cacheCount();
+  await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "the board ran");
+  const first = await outputs();
+  let kept = false;
+  for (let i = 0; i < 100 && !kept; i++) { kept = (await cacheCount()) >= n0 + 2; if (!kept) await sleep(100); }
+  check(kept, "s and d (over 2 s from root) are kept in the cache; f isn't: " + (await cacheCount()) + " from " + n0);
+  // opened again, in a fresh page of this browser (its saved board cleared: the cache alone)
+  await ev("localStorage.clear(), 1");
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+
+  await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'f')?.state === '')", 60000), "the fast item ran");
+  const again = await outputs();
+  check(again.s.output === first.s.output && again.d.output === first.d.output && /^s ran: [0-9a-f]{16}/.test(first.s.output), "s and d show their cached outputs (the same run's stamp): " + JSON.stringify([first.s.output, again.s.output]));
+  await ev("window.board.focus(['s'], true), window.board.render(), 1");
+  check(await until("(() => { const el = document.querySelector('[data-code=s] .board-code-out > [data-cached]'); return !!el && getComputedStyle(el, '::before').content.includes('kept in this browser') && getComputedStyle(el.parentElement).opacity === '1'; })()", 5000), "a cached output says so, and isn't greyed");
+  // changed, it runs (another key), and its reader with it
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = ${JSON.stringify(slowStamp + "\n1")}; }).then(() => 1)`);
+  check(await until(`window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === '') && os.find((o) => o.id === 's').output !== ${JSON.stringify(first.s.output)})`, 60000), "changed, s runs again, and d with it");
+  check(await ev("!document.querySelector('[data-cached]')"), "...and no longer says it is cached");
+  // a board without a seed keeps nothing
+  const nSeedless = await cacheCount();
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "no seed", nodes: [{ id: "s", code: slowStamp }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os[0]?.state === '')", 60000);
+  await sleep(1000);
+  check((await cacheCount()) === nSeedless, "a board without a seed keeps nothing in the cache");
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

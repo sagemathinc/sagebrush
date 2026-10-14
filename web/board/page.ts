@@ -11,6 +11,7 @@
 // - store: the document from the address (or the file), and this browser's
 //   edits of it, kept in localStorage per source until Revert;
 // - images: pictures in this browser's IndexedDB (images.ts);
+// - outputs: slow code items' outputs, kept between visits (outcache.ts);
 // - code: the notebook's engine (code.ts), Python in the runner, an
 //   opaque-origin sandboxed frame (?runner=0: a plain worker);
 // - math: KaTeX (sagebrush-math.js, or an exported file's own copy);
@@ -27,6 +28,7 @@ import { synthetic } from "./board";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { OWN_ENGINE, chooseEngine, fileEngine } from "./engine";
+import { IdbOutputCache } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
 import { embedded, engineRef, exportHtml } from "./export";
 import { Images } from "./images";
@@ -71,6 +73,8 @@ const host: BoardHost = {
   },
   // pictures: kept in this browser by name
   images: new Images(),
+  // slow code items' outputs, kept in this browser (outcache.ts); not in an exported file
+  outputs: file || bench ? undefined : new IdbOutputCache(),
   // the engine of code items: the site's, Python in the runner, an
   // opaque-origin sandboxed frame, as on the notebook page (design/runner.md);
   // an exported file's, carried in it or fetched from its site, by its id or

@@ -78,6 +78,8 @@
 .board-code.code-queued .board-code-n::after { content: " waiting"; font-weight: 400; color: #5d645f; }
 .board-code.code-stale .board-code-out, .board-code.code-cancelled .board-code-out { opacity: .55; }
 /* a slow item's preview, kept in the file (preview.ts): said so until it runs */
+/* (outputs from the cache are as computed: not greyed) */
+.board-code.code-stale .board-code-out:has(> [data-cached]) { opacity: 1; }
 .board-code.code-stale .board-code-out > [data-preview]::before { content: attr(data-preview); display: block; font: italic 12px system-ui, sans-serif; color: #555; margin: 0 0 4px; }
 .board-code.code-error, .board-code.code-failed { border-color: #b3261e; box-shadow: 0 0 0 1px #b3261e; }
 /* { }: show or hide an item's code (its output stays) */
