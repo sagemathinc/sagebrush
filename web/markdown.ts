@@ -7,7 +7,7 @@
 // attachments (attachment:name), as in Jupyter.
 import type { PixelBudget } from "./image-size";
 import { Marked, type Tokens } from "marked";
-import { safeHtml, safeImage, safeLink } from "./safe-html";
+import { remotePicture, safeHtml, safeImage, safeLink } from "./safe-html";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -18,7 +18,7 @@ export interface Options {
   attachments?: Record<string, Record<string, string>> | null;
   // false for what code produced: no images from other sites (an image's
   // address could carry away what the code read)
-  remote?: boolean;
+  remote?: boolean | "click";
   // the document's pictures' pixels (image-size.ts), counting its data: pictures
   pixels?: PixelBudget;
 }
@@ -79,6 +79,7 @@ export function render(src: string, opts: Options = {}): string {
       image(t: Tokens.Image) {
         const src = safeImage(t.href, opts);
         if (src === null) return esc(t.text);
+        if (opts.remote === "click" && /^https?:/i.test(src)) return remotePicture(src, t.text);
         return `<img src="${esc(src)}" alt="${esc(t.text)}"${t.title ? ` title="${esc(t.title)}"` : ""}>`;
       },
       code(t: Tokens.Code) {

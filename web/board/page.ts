@@ -70,6 +70,17 @@ const host: BoardHost = {
     revert() {
       try { localStorage.removeItem(saveKey); } catch {}
     },
+    // (whether it was written here, a new board: kept beside it, never in it)
+    writtenHere(set) {
+      const k = saveKey + "#here";
+      try {
+        if (set === true) localStorage.setItem(k, "1");
+        else if (set === false) localStorage.removeItem(k);
+        return localStorage.getItem(k) === "1";
+      } catch {
+        return false;
+      }
+    },
     // (the name of its outputs' cache: random, kept beside it in this browser)
     outputsId(fresh) {
       const k = saveKey + "#outputs";
