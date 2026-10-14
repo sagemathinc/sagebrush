@@ -137,8 +137,8 @@ print(re.search(r'aria-label="([^"]*)"', fig._repr_svg_()).group(1))
     "'yerr' (shape: (2, 2)) must be a scalar or a 1D or (2, n) array-like whose shape matches 'y' (shape: (3,))",
     "'yerr' must not contain negative values",
     "'xerr' (shape: (3, 3)) must be a scalar or a 1D or (2, n) array-like whose shape matches 'x' (shape: (3,))",
-    // (the bars, their 6 caps, and the data as a line)
-    "Plot: line through 6 points, 6 points, line through 3 points; x from 0.9 to 3.1, y from 1.695 to 6.205",
+    // (the bars, their lower and their upper caps, as matplotlib's two caplines, and the data as a line)
+    "Plot: line through 6 points, 3 points, 3 points, line through 3 points; x from 0.9 to 3.1, y from 1.695 to 6.205",
   ]);
 });
 
@@ -196,5 +196,98 @@ except RuntimeError as e:
     "sm (0.0, 10.0) (0.0, 10.0)",
     "contourf (0.0, 3.0)",
     none,
+  ]);
+});
+
+test("imshow takes a norm's vmin and vmax each, the data's range for the one it leaves None", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+import numpy as np
+for kw in [{"vmax": 10}, {"vmin": -3}, {"vmin": -3, "vmax": 10}, {}]:
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.array([[0.0, 1.0]]), norm=Normalize(**kw))
+    print(kw, tuple(float(v) for v in im.get_clim()))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "{'vmax': 10} (0.0, 10.0)",
+    "{'vmin': -3} (-3.0, 1.0)",
+    "{'vmin': -3, 'vmax': 10} (-3.0, 10.0)",
+    "{} (0.0, 1.0)",
+  ]);
+});
+
+test("clearing the axes of pyplot's current image clears it; another axes' cla does not", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import numpy as np
+A = np.array([[0.0, 1.0]])
+none = lambda: plt.gci() is None
+plt.figure()
+plt.imshow(A)
+plt.cla()
+print("plt.cla", none())
+try:
+    plt.colorbar()
+except RuntimeError as e:
+    print("colorbar:", e)
+fig = plt.figure()
+ax = fig.gca()
+plt.imshow(A)
+ax.clear()
+print("ax.clear", none())
+fig, (a, b) = plt.subplots(1, 2)
+im = plt.imshow(A)
+a.cla()
+print("another axes' cla", plt.gci() is im)
+b.cla()
+print("its own axes' cla", none())
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "plt.cla True",
+    "colorbar: No mappable was found to use for colorbar creation. First define a mappable such as an image (with imshow) or a contour set (with contourf).",
+    "ax.clear True",
+    "another axes' cla True",
+    "its own axes' cla True",
+  ]);
+});
+
+test("a colorbar of a ScalarMappable with no limits is 0 to 1, as matplotlib's; set_array still scales it", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
+for name, sm in [("default", cm.ScalarMappable()), ("vmin only", cm.ScalarMappable(norm=Normalize(vmin=2))), ("set_array", cm.ScalarMappable())]:
+    if name == "set_array":
+        sm.set_array([2.0, 5.0])
+    fig, ax = plt.subplots()
+    cb = fig.colorbar(sm, ax=ax)
+    print(name, tuple(float(v) for v in cb.ax.get_ylim()), tuple(float(v) for v in sm.get_clim()))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "default (0.0, 1.0) (0.0, 1.0)",
+    "vmin only (0.0, 1.0) (0.0, 1.0)",
+    "set_array (2.0, 5.0) (2.0, 5.0)",
+  ]);
+});
+
+test("errorbar returns matplotlib's ErrorbarContainer: (data line or None, caplines, barlinecols), fmt='none' too", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+c = ax.errorbar([1], [2], fmt="none")
+print(type(c).__name__, len(c), c[0], len(c[1]), len(c[2]))
+c = plt.errorbar([1, 2], [2, 3], yerr=[0.5, 0.5], fmt="none")
+print(type(c).__name__, len(c), c[0], len(c[1]), len(c[2]))
+c = ax.errorbar([1, 2], [2, 3], yerr=0.5, capsize=2)
+print(type(c).__name__, len(c), c[0] is not None, len(c[1]), len(c[2]))
+c = ax.errorbar([1, 2], [2, 3], xerr=0.1, yerr=0.5, capsize=2)
+print(type(c).__name__, len(c), c[0] is not None, len(c[1]), len(c[2]), c.has_xerr, c.has_yerr)
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "ErrorbarContainer 3 None 0 0",
+    "ErrorbarContainer 3 None 0 1",
+    "ErrorbarContainer 3 True 2 1",
+    "ErrorbarContainer 3 True 4 2 True True",
   ]);
 });
