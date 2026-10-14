@@ -2,7 +2,7 @@
 // the format of CoCalc's Jupyter documents (cocalc-ai: jupyter/redux/sync.ts,
 // primary keys type and id, string column input):
 //
-//   {type: "settings", kernel: "python3" | "sagemath" | "magma"}
+//   {type: "settings", kernel: "python3" | "sagemath" | "magma" | "matlab"}
 //   {type: "cell", id, pos, input, cell_type: "code" | "markdown" | "raw"}
 //
 // Outputs are not kept: only what was typed.  Each change is a patch with its
@@ -35,8 +35,8 @@ export { PatchHistory, createImmerDbCodec };
 
 export const SCHEMA = { primaryKeys: ["type", "id"], stringCols: ["input"] };
 const codec = createImmerDbCodec(SCHEMA);
-const KERNEL = { python: "python3", sage: "sagemath", magma: "magma" };
-const MODE = { python3: "python", sagemath: "sage", magma: "magma" };
+const KERNEL = { python: "python3", sage: "sagemath", magma: "magma", matlab: "matlab" };
+const MODE = { python3: "python", sagemath: "sage", magma: "magma", matlab: "matlab" };
 
 function cellRecord(c, i) {
   // (a Markdown cell's attachments are part of its content: restored with it)

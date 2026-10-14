@@ -1,16 +1,21 @@
 // .ipynb round trips keep what Sagebrush does not use (audit F8): notebook
 // and cell metadata (widgets, tags, provenance), raw cells, attachments, the
 // original kernelspec.  node web/test-ipynb.mjs
-import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
 // (ES modules the browser loads; copies for node, in a directory of ES modules)
-const tmp = mkdtempSync(join(tmpdir(), "sb-ipynb-"));
-writeFileSync(join(tmp, "package.json"), '{"type": "module"}');
+// (laid out as in the repository: ipynb.js imports ../../src/m-file.ts)
+const root = mkdtempSync(join(tmpdir(), "sb-ipynb-"));
+const tmp = join(root, "web", "notebook");
+mkdirSync(tmp, { recursive: true });
+mkdirSync(join(root, "src"));
+writeFileSync(join(root, "package.json"), '{"type": "module"}');
 for (const f of ["ipynb.js", "marimo.js"]) copyFileSync(new URL("./notebook/" + f, import.meta.url), join(tmp, f));
+copyFileSync(new URL("../src/m-file.ts", import.meta.url), join(root, "src", "m-file.ts"));
 const { fromFile, toIpynb, toScript } = await import(pathToFileURL(join(tmp, "ipynb.js")));
 
 const original = {
@@ -87,4 +92,23 @@ console.log(`${pass} passed`);
   const d = fromFile("nb.py", text);
   assert.deepEqual(d.cells.map((c) => [c.type ?? "code", c.code]), [["markdown", "# Title"], ["code", "x = 1"]]);
   console.log("ok   a marimo notebook (.py) opens as its cells");
+}
+
+// .m files: MATLAB's "%%" sections, or Magma's (:= or "// %%"); MATLAB notebooks' kernels
+{
+  const text = "%% Data\nx = 1:3;\n\n%% [markdown]\n% # Results\n% the *sum*\n\n%%\ns = sum(x)\n";
+  const d = fromFile("a.m", text);
+  assert.equal(d.mode, "matlab");
+  assert.deepEqual(d.cells.map((c) => [c.type ?? "code", c.code]), [["code", "% Data\nx = 1:3;"], ["markdown", "# Results\nthe *sum*"], ["code", "s = sum(x)"]]);
+  assert.equal(toScript(d), "%%\n% Data\nx = 1:3;\n\n%% [markdown]\n% # Results\n% the *sum*\n\n%%\ns = sum(x)\n");
+  assert.deepEqual(fromFile("a.m", toScript(d)).cells.map((c) => c.code), d.cells.map((c) => c.code));
+  // (a MATLAB script without sections is one cell; := in a comment does not make it Magma)
+  assert.deepEqual([fromFile("b.m", "% x := 1 in Magma\nx = 1").mode, fromFile("c.m", "x := 1;\nx;").mode, fromFile("d.m", "// %%\nprint 1;").mode, fromFile("e.mag", "print 1;").mode],
+    ["matlab", "magma", "magma", "magma"]);
+  const j = JSON.parse(toIpynb({ mode: "matlab", cells: [{ id: "a", code: "x = 1" }] }));
+  assert.deepEqual([j.metadata.kernelspec.language, j.metadata.language_info.name], ["matlab", "matlab"]);
+  const modeOfKernel = (kernelspec, info) => fromFile("k.ipynb", JSON.stringify({ cells: [], metadata: { kernelspec, language_info: info }, nbformat: 4, nbformat_minor: 5 })).mode;
+  assert.deepEqual([modeOfKernel({ name: "jupyter_matlab_kernel", display_name: "MATLAB Kernel", language: "matlab" }, { name: "matlab" }),
+    modeOfKernel({ name: "octave", language: "octave" }, { name: "octave" }), modeOfKernel({ name: "magma", language: "magma" })], ["matlab", "matlab", "magma"]);
+  console.log("ok   MATLAB .m scripts (%% sections) and notebooks; Magma's .m told apart");
 }
