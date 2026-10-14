@@ -264,3 +264,16 @@
 .sbb .ink-row svg { width: 18px; height: 18px; }
 @media (max-width: 600px) { .sbb .ink-row { padding: 2px 3px; } .sbb .ink-row button { min-width: 30px; height: 34px; padding: 0 2px; } }
 .sbb .board.drawing, .sbb .board.erasing { cursor: crosshair; }
+
+/* Present (mount.ts): the board fills the screen (or the window), none of its other parts showing;
+   around a slide's card, dark; a step's words under it; the controls fading while the pointer is still */
+.sbb.sbb-present { position: fixed; inset: 0; z-index: 2147483000; }
+.sbb.sbb-present :is([data-sbb=top], [data-sbb=tour], [data-sbb=tt], .board-toolbar, .ink-row) { display: none !important; }
+.sbb :is([data-sbb=pr-mask], [data-sbb=pr-say], [data-sbb=pr-bar])[hidden] { display: none; }
+.sbb [data-sbb=pr-mask] { position: absolute; z-index: 4; pointer-events: none; box-shadow: 0 0 0 100vmax #16181a; }
+.sbb [data-sbb=pr-say] { position: absolute; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); box-sizing: border-box; max-width: min(900px, calc(100% - 48px)); padding: 10px 16px; border-radius: 10px; background: rgba(20, 22, 24, .84); color: #fff; font-size: 18px; line-height: 1.4; }
+.sbb [data-sbb=pr-say] p { margin: 0; }
+.sbb [data-sbb=pr-bar] { position: absolute; z-index: 6; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 9px; background: rgba(255, 255, 255, .92); box-shadow: 0 2px 10px rgba(0, 0, 0, .2); transition: opacity .4s; }
+.sbb [data-sbb=pr-bar] button { min-width: 32px; border-color: transparent; background: none; font-size: 18px; line-height: 1; padding: 4px 8px; }
+.sbb [data-sbb=pr-where] { min-width: 52px; text-align: center; font-size: 13px; color: #556; }
+.sbb.sbb-idle [data-sbb=pr-bar] { opacity: 0; }
