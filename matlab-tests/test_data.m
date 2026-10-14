@@ -43,6 +43,7 @@ X = [1 2 3; 2 4 1; 3 5 7; 4 1 2];
 show(r(cov([1 2 3 4]))); show(r(cov(X))); show(r(cov(X, 1))); show(r(cov([1 2 3 4], [2 4 5 9])));
 show(r(cov([1 2 3 4]', [4 3 2 1]', 1))); show(r(cov(5))); show(r(cov([1+1i 2 3-1i])));
 show(r(corrcoef(X))); show(r(corrcoef([1 2 3 4], [2 4 5 9]))); show(r(corrcoef([1 2 3 4]', [4 3 2 1]')));
+show(corrcoef([1 2 3 4]', [5 5 5 5]')); show(corrcoef([1 NaN 3 4]', [2 4 5 9]')); show(r(del2([1 2 4]))); show(del2([1 5])); show(r(del2([1 2 4; 3 5 9; 2 2 2])));
 % prctile and quantile
 v = [3 1 4 1 5 9 2 6];
 show(r(prctile(v, 50))); show(r(prctile(v, [0 25 50 75 100])));

@@ -238,21 +238,29 @@ def gradient_(nargout, F, *h):
     return outs if nargout > 1 else outs[0]
 
 
+def _extrapolate(xe, xa, ga, xb, gb):
+    """the line through (xa, ga) and (xb, gb), at xe"""
+    return ga + (xe - xa) * (gb - ga) / (xb - xa)
+
+
 def _del2_1(F, x):
-    """del2's term along axis 0: half the second derivative (centered
-    differences inside, linear extrapolation at the ends)"""
+    """del2's term along axis 0: half the second derivative, by centered
+    differences at the interior points; at the two ends, as MATLAB documents,
+    the interior's second differences extrapolated linearly (from the two
+    nearest; with one interior point, its value; with none, 0, as Octave's)"""
     n = F.shape[0]
     G = np.zeros(F.shape, dtype=F.dtype)
+    if n < 3:
+        return G
     shp = (-1,) + (1,) * (F.ndim - 1)
     h = np.diff(x).reshape(shp)
-    if n > 2:
-        G[1:-1] = ((F[2:] - F[1:-1]) / h[1:] - (F[1:-1] - F[:-2]) / h[:-1]) / (h[:-1] + h[1:])
-    if n > 3:
-        G[0] = G[1] * (h[0] + h[1]) / h[1] - G[2] * h[0] / h[1]
-        G[-1] = -G[-3] * h[-1] / h[-2] + G[-2] * (h[-1] + h[-2]) / h[-2]
-    elif n == 3:
-        G[0] = G[1]
-        G[-1] = G[1]
+    # (the three-point second derivative, halved: ((F+ - F)/h+ - (F - F-)/h-) / (h- + h+))
+    G[1:-1] = ((F[2:] - F[1:-1]) / h[1:] - (F[1:-1] - F[:-2]) / h[:-1]) / (h[:-1] + h[1:])
+    if n == 3:
+        G[0] = G[-1] = G[1]
+    else:
+        G[0] = _extrapolate(x[0], x[1], G[1], x[2], G[2])
+        G[-1] = _extrapolate(x[-1], x[-2], G[-2], x[-3], G[-3])
     return G
 
 
@@ -333,12 +341,20 @@ def _variables(x, y=None):
 
 
 def _cov(X, w):
-    n = X.shape[0]
+    """the covariance of the columns, as MATLAB documents it:
+    C(i, j) = sum(conj(x_i - mean x_i) .* (x_j - mean x_j)) / (n - 1), or / n
+    with w = 1 (and with one observation); each entry from its own two
+    columns, so a NaN in one variable leaves the others' entries alone"""
+    n, k = X.shape
     if n == 0:
-        return np.full((X.shape[1], X.shape[1]), _math.nan)
-    Xc = X - X.mean(axis=0)
+        return np.full((k, k), _math.nan)
+    Xc = X - np.sum(X, axis=0) / n
     den = n - 1 if (w == 0 and n > 1) else n
-    return (np.conj(Xc.T) @ Xc) / den
+    C = np.zeros((k, k), dtype=Xc.dtype)
+    for i in range(k):
+        for j in range(k):
+            C[i, j] = np.sum(np.conj(Xc[:, i]) * Xc[:, j]) / den
+    return C
 
 
 def _cov_args(x, args, fname):
@@ -379,14 +395,17 @@ def corrcoef_(nargout, x, *args):
         raise _err("Too many input arguments.")
     y = args[0] if args else None
     C = _cov(_variables(x, y), 0)
-    d = np.sqrt(np.real(np.diag(C)))
+    # (as MATLAB documents: R(i, j) = C(i, j) / (sigma_i sigma_j), the
+    # coefficients between -1 and 1, and the diagonal 1 by convention, also
+    # for a constant variable; NaN for a variable with NaN, as Octave's)
+    s = np.sqrt(np.real(np.diag(C)))
     with np.errstate(invalid="ignore", divide="ignore"):
-        R = C / d.reshape((-1, 1)) / d.reshape((1, -1))
-    # (round-off: |r| at most 1, the diagonal exactly 1, NaN kept)
-    big = np.abs(R) > 1
-    R = np.where(big, R / np.where(big, np.abs(R), 1.0), R)
-    k = np.arange(R.shape[0])
-    R[k, k] = np.sign(np.real(R[k, k]))
+        R = C / (s.reshape((-1, 1)) * s.reshape((1, -1)))
+    m = np.abs(R)
+    R = np.where(m > 1, R / np.where(m > 1, m, 1.0), R)
+    ok = ~np.isnan(s)
+    for i in range(R.shape[0]):
+        R[i, i] = 1.0 if ok[i] else _math.nan
     return _m._finish(_m._contig(R.T), _cls(x, *([y] if y is not None else [])))
 
 
