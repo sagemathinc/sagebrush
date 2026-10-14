@@ -41,9 +41,11 @@ export async function boardCommand(argv: string[]): Promise<number> {
   }
   const pages = pageCount(doc);
   if (!Number.isInteger(page) || page < 1 || page > pages) { process.stderr.write(`sagebrush board render: --page: from 1 to ${pages}\n`); return 2; }
-  const { svg, left } = boardSvg(doc, { page: page - 1 });
+  const { svg, left, overflow } = boardSvg(doc, { page: page - 1 });
   if (out === null) process.stdout.write(svg);
   else writeFileSync(out, svg);
   if (left.length) process.stderr.write(`sagebrush board render: shown only in part: ${left.join(", ")}\n`);
+  // (the notes' ids, quoted as JSON: a board's text never reaches the terminal as control characters, CORR-974-1)
+  if (overflow.length) process.stderr.write(`sagebrush board render: text cut to its note's box (a note of a given size): ${overflow.map((id) => JSON.stringify(id)).join(", ")}\n`);
   return 0;
 }

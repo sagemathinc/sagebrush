@@ -247,8 +247,8 @@ function repl(main: any, quiet: boolean): Promise<number> {
 
 async function main() {
   const argv = process.argv.slice(2);
-  // (a board's command: loaded only then, src/board-cli.ts)
-  if (argv[0] === "board") {
+  // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2)
+  if (argv[0] === "board" && argv[1] === "render") {
     const { boardCommand } = await import("./board-cli");
     process.exitCode = await boardCommand(argv.slice(1));
     return;
