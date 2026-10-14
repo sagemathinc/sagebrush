@@ -715,3 +715,40 @@ test("psi, beta, betaln, erfcx, erfinv, erfcinv and expint keep their documented
     "single", "1", "0",
   ]);
 });
+
+test("ellipke, ellipj and legendre keep their documented domains", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a high order next to 1, where Octave's value is less accurate: mpmath's is 4.83973510425242e-18)
+    "Q = legendre(12, 0.999999); fprintf('%.14g\\n', Q(11));",
+    "[K, E] = ellipke(1); disp([K E]);",
+    "try, ellipke(-0.1), catch e, disp(e.message), end",
+    "try, ellipke(2), catch e, disp(e.message), end",
+    "try, ellipke(0.5, -1), catch e, disp(e.message), end",
+    "try, ellipj(1, 1.5), catch e, disp(e.message), end",
+    "try, ellipj(1i, 0.5), catch e, disp(e.message), end",
+    "try, ellipj([1 2], [0.1 0.2 0.3]), catch e, disp(e.message), end",
+    "try, legendre(2, 1.5), catch e, disp(e.message), end",
+    "try, legendre(-1, 0.5), catch e, disp(e.message), end",
+    "try, legendre(1.5, 0.5), catch e, disp(e.message), end",
+    "try, legendre(2, 0.5, 'bogus'), catch e, disp(e.message), end",
+    "try, ellipj(Inf, 0.5), catch e, disp(e.message), end",
+    "disp(class(legendre(2, single(0.3)))); [s, c, d] = ellipj(single(1), 0.5); disp(class(d));",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim().replace(/\s+/g, " ")), [
+    "4.8397351042524e-18",
+    "Inf 1",
+    "ellipke: M must be in the range 0 <= M <= 1.",
+    "ellipke: M must be in the range 0 <= M <= 1.",
+    "ellipke: tol must be a nonnegative real scalar.",
+    "ellipj: M must be in the range 0 <= M <= 1.",
+    "ellipj: U must be real.",
+    "ellipj: U and M must be the same size, or one of them a scalar.",
+    "legendre: X must be real and in the range -1 <= X <= 1.",
+    "legendre: n must be a nonnegative integer scalar.",
+    "legendre: n must be a nonnegative integer scalar.",
+    "legendre: normalization must be 'unnorm', 'sch' or 'norm'.",
+    "ellipj: U must be finite in Sagebrush.",
+    "single", "single",
+  ]);
+});

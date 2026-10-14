@@ -1435,3 +1435,697 @@ def lambert_w(z, k=0):
     for every branch tried (|k| <= 10^6, 1e-300 <= |z| <= 1e300, next to
     the branch point and the cuts)"""
     return _elementwise(_lambertw1, z, k)
+
+
+# ------------------------------------------------------------------ polylogarithm
+
+def _zeta_int(m):
+    """zeta(m) at an integer m != 1: 1 + (zeta(m) - 1) for m >= 2, and
+    -B_(1-m)/(1-m) (DLMF 25.6.3) for m <= 0, exactly rounded"""
+    if m >= 2:
+        return 1 + _zeta_minus_1(m)
+    if m == 0:
+        return -0.5
+    n = 1 - m
+    return float(-_bernoulli_upto(n)[n] / n)
+
+
+def _bernoulli_poly_c(n, x):
+    """the Bernoulli polynomial B_n(x) at complex x (DLMF 24.2.5)"""
+    B = _bernoulli_upto(n)
+    s = 0j
+    for k in range(n + 1):
+        s = s * x + _math.comb(n, k) * float(B[k])
+    return s
+
+
+def _polylog_series(n, z):
+    """DLMF 25.12.10: Li_n(z) = sum_{k >= 1} z^k / k^n, |z| <= 1"""
+    s = 0j
+    p = 1 + 0j
+    k = 0
+    while True:
+        k += 1
+        p *= z
+        t = p / float(k) ** n
+        s += t
+        if abs(t) <= 1e-17 * abs(s) or k > 100000:
+            break
+    return s
+
+
+def _polylog_mu(n, z):
+    """Li_n(e^mu) for |mu| < 2 pi, mu = log z: for n <= 0 DLMF 25.12.12,
+    Gamma(1-n) (-mu)^(n-1) + sum_k zeta(n-k) mu^k/k!; for n >= 1 its limit
+    at the integer, where Gamma(1-s) and zeta(s-k) at k = n-1 have poles
+    that cancel: mu^(n-1)/(n-1)! (H_(n-1) - log(-mu)) +
+    sum_{k != n-1} zeta(n-k) mu^k/k!"""
+    mu = _cmath.log(z)
+    if mu == 0:
+        if n >= 2:
+            return complex(_zeta_int(n))
+        raise PoleError("Li_%d has a pole at 1" % n)
+    s = 0j
+    t = 1 + 0j  # mu^k / k!
+    k = 0
+    while True:
+        if k != n - 1:
+            u = _zeta_int(n - k) * t
+            s += u
+            # (zeta's trivial zeros make every other term 0 past k = n)
+            if k > n + 1 and u != 0 and abs(u) <= 1e-17 * abs(s):
+                break
+        k += 1
+        if k > 250:
+            break
+        t *= mu / k
+    if n >= 1:
+        H = _math.fsum(1.0 / j for j in range(1, n))
+        s += mu ** (n - 1) / _math.factorial(n - 1) * (H - _cmath.log(-mu))
+    else:
+        s += _math.factorial(-n) * (-mu) ** (n - 1)
+    return s
+
+
+def _polylog1(s, z):
+    if isinstance(s, complex) or s != _math.floor(s):
+        raise NotCovered("polylog: Sagebrush covers integer orders s")
+    n = int(s)
+    real_in = not isinstance(z, complex)
+    zc = complex(z)
+    if not (_math.isfinite(zc.real) and _math.isfinite(zc.imag)):
+        if _isnan(z):
+            return _nan_like(z)
+        raise NotCovered("polylog: Sagebrush covers finite arguments")
+    if real_in:
+        zc = complex(zc.real, 0.0)
+    if zc == 1 and n <= 1:
+        raise PoleError("Li_%d has a pole at 1" % n)
+    r = abs(zc)
+    if n < -20 or n > 100:
+        # (beyond, the methods here cancel or overflow)
+        raise NotCovered("polylog: Sagebrush covers integer orders -20 <= s <= 100")
+    try:
+        v = complex(_polylog_value(n, zc, r))
+    except (OverflowError, ZeroDivisionError):
+        v = complex(_math.inf, 0.0)
+    if not (_math.isfinite(v.real) and _math.isfinite(v.imag)):
+        # (next to the pole at 1, Li_s(z) of a finite z can exceed the double
+        # range; refused rather than given as some infinity)
+        raise NotCovered("polylog: Sagebrush covers values within the double range (|Li_s(z)| is too large here)")
+    if real_in and (zc.real <= 1 or n <= 0):
+        # (real on the real axis below 1, by the symmetry Li(conj z) = conj Li(z))
+        return v.real
+    return v
+
+
+_EULERIAN = {}
+
+
+def _eulerian(m):
+    """the coefficients <m, 0..m-1> of the Eulerian polynomial A_m (A_0 = 1):
+    <m, k> = sum_j (-1)^j C(m+1, j) (k+1-j)^m, DLMF 26.14.6"""
+    if m not in _EULERIAN:
+        if m == 0:
+            _EULERIAN[m] = [1.0]
+        else:
+            _EULERIAN[m] = [float(sum((-1) ** j * _math.comb(m + 1, j) * (k + 1 - j) ** m for j in range(k + 2)))
+                            for k in range(m)]
+    return _EULERIAN[m]
+
+
+def _polylog_value(n, zc, r):
+    """Li_n(zc) for an integer order -20 <= n <= 100 and finite zc != 1, |zc| = r"""
+    if n < 0 and r >= 2:
+        # (the inversion for n < 0, DLMF 25.12.13 with 1/Gamma(n) = 0:
+        # Li_n(z) = -(-1)^n Li_n(1/z))
+        return -(-1) ** n * _polylog1(float(n), 1 / zc)
+    elif n < 0 and 0.2 <= r and zc != 1:
+        return _polylog_mu(n, zc)
+    elif n <= 0:
+        # (Li_-m(z) = sum_k k^m z^k = z A_m(z) / (1 - z)^(m+1), with the
+        # Eulerian polynomial A_m(z) = sum_k <m, k> z^k, from the Eulerian
+        # numbers' generating function DLMF 26.14.4; exact integer
+        # coefficients, DLMF 26.14.6)
+        A = _eulerian(-n)
+        a = 0j
+        for c in reversed(A):
+            a = a * zc + c
+        return zc * a / (1 - zc) ** (1 - n)
+    elif r <= 0.5 or (r <= 1 and n >= 8):
+        return _polylog_series(n, zc)
+    elif n == 1:
+        # (Li_1(z) = -log(1 - z), DLMF 25.12.10's series summed)
+        return -_cmath.log(1 - zc)
+    elif r < 20:
+        return _polylog_mu(n, zc)
+    else:
+        # (the inversion DLMF 25.12.13 at an integer n, whose Hurwitz zeta
+        # is then a Bernoulli polynomial (DLMF 25.11.14): Li_n(z) + (-1)^n
+        # Li_n(1/z) = -(2 pi i)^n / n! B_n(1/2 + log(-z)/(2 pi i)), written
+        # with log(-z) so that it holds for every z off [0, inf) and, as a
+        # limit, on (1, inf); a zero imaginary part's sign carries into
+        # log(-z))
+        b = _bernoulli_poly_c(n, 0.5 + _cmath.log(-zc) / (2j * _PI))
+        return -(2j * _PI) ** n / _math.factorial(n) * b - (-1) ** n * _polylog1(float(n), 1 / zc)
+
+
+def polylog(s, z):
+    """the polylogarithm Li_s(z) = sum_{k >= 1} z^k / k^s (DLMF 25.12.10) and
+    its continuation, for integer orders -20 <= s <= 100 and complex z,
+    principal branch (cut along (1, inf) for s >= 1; on it the value is
+    the limit from above, or from below when the imaginary part is -0).
+    The series for |z| <= 1/2 (and |z| <= 1 when s >= 8); the expansion in
+    mu = log z (DLMF 25.12.12 and its limit at integers) for |z| < 20
+    (0.2 <= |z| < 2 for s < 0); the inversion DLMF 25.12.13 beyond; for
+    s <= 0 also Li_-m(z) = z A_m(z) / (1 - z)^(m+1) with the Eulerian
+    polynomials (DLMF 26.14).  A float for real z where Li_s is real.
+    PoleError at z = 1 for s <= 1; NotCovered for other orders, and next to
+    the pole where |Li_s(z)| exceeds the double range.  Largest relative
+    error found against mpmath: 2e-14 for 1 <= s <= 100 (largest at large
+    orders and large |z|), growing for negative orders to 1e-13 at s = -20
+    (and near Li_s's zeros)"""
+    return _elementwise(_polylog1, s, z)
+
+
+def dilog(z):
+    """the dilogarithm Li_2(z) (DLMF 25.12.1), as polylog(2, z)"""
+    return _elementwise(_polylog1, 2.0, z)
+
+
+# ------------------------------------------------------------------ elliptic integrals and functions
+
+def _ldexp(x, e):
+    """x 2^e for a float x and an integer e, rounded once, as CPython's
+    math.ldexp (OverflowError beyond the largest double); Sagebrush's own
+    multiplies by 2^e, which is 0 or inf for large |e| before x counts"""
+    if x == 0 or not _math.isfinite(x):
+        return x
+    m, ex = _math.frexp(x)  # (x = m 2^ex, 1/2 <= |m| < 1)
+    t = ex + e
+    if t > 1024:
+        raise OverflowError("math range error")
+    if t >= -1021:
+        return (m * 2.0) * 2.0 ** (t - 1)  # (both exact: the result is normal)
+    # (a subnormal result: m 2^t = (m 2^j) 2^-1074, with m 2^j exact, rounded
+    # once to an integer, ties to even)
+    j = t + 1074
+    if j < -1:
+        return _math.copysign(0.0, x)
+    q = round(m * 2.0 ** j)
+    return _math.copysign(float(abs(q)) * 5e-324, x)
+
+
+def _agm_c(m):
+    """the AGM of 1 and sqrt(1 - m), m < 1 (DLMF 19.8.1, 22.20.1): the
+    final mean and the sum of 2^(n-1) c_n^2 from c_0^2 = m"""
+    a, g = 1.0, _math.sqrt(1 - m)
+    s = 0.5 * m
+    p = 0.5
+    for _ in range(60):
+        c = 0.5 * (a - g)
+        a, g = 0.5 * (a + g), _math.sqrt(a * g)
+        p *= 2
+        s += p * c * c
+        if abs(c) <= 1e-17 * a:
+            break
+    return a, s
+
+
+def _ellipk1(m):
+    if isinstance(m, complex):
+        raise NotCovered("ellipk: Sagebrush covers real m")
+    if _math.isnan(m):
+        return m
+    if m == 1:
+        raise PoleError("K has a logarithmic singularity at m = 1")
+    if m > 1:
+        raise NotCovered("ellipk: Sagebrush covers m <= 1")
+    if m == -_math.inf:
+        return 0.0
+    # (DLMF 19.8.5: K = pi / (2 M(1, sqrt(1 - m))))
+    return _PI / (2 * _agm_c(m)[0])
+
+
+def _ellipe1(m):
+    if isinstance(m, complex):
+        raise NotCovered("ellipe: Sagebrush covers real m")
+    if _math.isnan(m):
+        return m
+    if m == 1:
+        return 1.0
+    if m > 1:
+        raise NotCovered("ellipe: Sagebrush covers m <= 1")
+    if m == -_math.inf:
+        return _math.inf
+    if m < 0:
+        # (the imaginary-modulus transformation DLMF 19.7.2, E(ik/k') =
+        # E(k)/k', in parameters: E(m) = sqrt(1 - m) E(m/(m - 1)); the AGM
+        # sum cancels for m < 0)
+        return _math.sqrt(1 - m) * _ellipe1(m / (m - 1))
+    if m > 0.5:
+        # (DLMF 19.8.6's AGM form K (1 - sum 2^(n-1) c_n^2) cancels; the
+        # series DLMF 19.12.2 in m1 = 1 - m, exact for m >= 1/2, does not)
+        return _ellipe_near_1(1 - m)
+    # (DLMF 19.5.2: E = (pi/2) 2F1(-1/2, 1/2; 1; m), whose terms after the
+    # first all have one sign)
+    t = 1.0
+    s = 1.0
+    for n in range(200):
+        t *= (n - 0.5) * (n + 0.5) / ((n + 1) * (n + 1)) * m
+        s += t
+        if abs(t) <= 1e-17 * s:
+            break
+    return _PI / 2 * s
+
+
+def _ellipe_near_1(m1):
+    """E for m = 1 - m1, 0 < m1 < 1/2: DLMF 19.12.2,
+    E = 1 + (1/2) sum_{n >= 0} (1/2)_n (3/2)_n / ((2)_n n!) m1^(n+1)
+    (log(1/k') + d(n) - 1/((2n+1)(2n+2))), k'^2 = m1, with d(0) = 2 log 2
+    and d(n+1) = d(n) - 2/((2n+1)(2n+2))"""
+    L = -0.5 * _math.log(m1)
+    d = 2 * _math.log(2.0)
+    c = m1
+    s = 0.0
+    for n in range(200):
+        t = c * (L + d - 1.0 / ((2 * n + 1) * (2 * n + 2)))
+        s += t
+        if abs(t) <= 1e-17 * abs(s):
+            break
+        d -= 2.0 / ((2 * n + 1) * (2 * n + 2))
+        c *= (0.5 + n) * (1.5 + n) / ((2 + n) * (n + 1)) * m1
+    return 1 + 0.5 * s
+
+
+def ellipk(m):
+    """the complete elliptic integral of the first kind K(m) =
+    int_0^(pi/2) (1 - m sin^2 t)^(-1/2) dt, parameter m <= 1 (DLMF 19.2.8,
+    m = k^2): pi / (2 AGM(1, sqrt(1 - m))), DLMF 19.8.5.  PoleError at
+    m = 1.  Largest relative error found against mpmath: 5e-16, from
+    m = -1e260 to 1 - 1e-16"""
+    return _elementwise(_ellipk1, m)
+
+
+def ellipe(m):
+    """the complete elliptic integral of the second kind E(m) =
+    int_0^(pi/2) (1 - m sin^2 t)^(1/2) dt, parameter m <= 1: the series
+    DLMF 19.5.2 for 0 <= m <= 1/2 and DLMF 19.12.2 (in 1 - m) above, and
+    the imaginary-modulus transformation DLMF 19.7.2 for m < 0 (DLMF
+    19.8.6's AGM sum cancels).  Largest relative error found against
+    mpmath: 7e-16, from m = -1e260 to 1"""
+    return _elementwise(_ellipe1, m)
+
+
+def _jacobi_agm(u, m):
+    """sn, cn, dn by DLMF 22.20's AGM: phi_N = 2^N a_N u (22.20.3), then
+    phi_(n-1) = (phi_n + arcsin(c_n/a_n sin phi_n))/2 (22.20.4), sn = sin
+    phi_0 and cn = cos phi_0 (22.20.5); dn as sqrt(cn^2 + (1 - m) sn^2),
+    which does not cancel.  Also K = pi/(2 a_N)."""
+    a, b, c = [1.0], [_math.sqrt(1 - m)], [_math.sqrt(m)]
+    while abs(c[-1]) > 1e-17 * a[-1] and len(a) < 60:
+        a.append(0.5 * (a[-1] + b[-1]))
+        b.append(_math.sqrt(a[-2] * b[-1]))
+        c.append(0.5 * (a[-2] - b[-2]))
+    N = len(a) - 1
+    phi = 2.0 ** N * a[N] * u
+    for n in range(N, 0, -1):
+        phi = 0.5 * (phi + _math.asin(c[n] / a[n] * _math.sin(phi)))
+    sn, cn = _math.sin(phi), _math.cos(phi)
+    return sn, cn, _math.sqrt(cn * cn + (1 - m) * sn * sn)
+
+
+def _jacobi_ascending(z, k, kp):
+    """sn, cn, dn for 0 <= z <= K/2 and k near 1 (k' = sqrt(1 - k^2)), by
+    DLMF 22.7's ascending Landen transformation, k2 = 2 sqrt(k)/(1 + k)
+    with its complement k2' = (1 - k)/(1 + k) = k'^2/(1 + k)^2, until k' is
+    below 1e-17, where sn = tanh, cn = dn = sech (DLMF Table 22.5.4) to
+    within k'^2 e^(2z) <= 4 k'; the AGM's arcsines lose accuracy there"""
+    if kp < 1e-17:
+        return _math.tanh(z), 1 / _math.cosh(z), 1 / _math.cosh(z)
+    rk = _math.sqrt(k)
+    k2 = 2 * rk / (1 + k)
+    k2p = kp * kp / ((1 + k) * (1 + k))
+    s, c, d = _jacobi_ascending(z / (1 + k2p), k2, k2p)
+    return ((1 + k2p) * s * c / d, (1 + k2p) * (d * d - k2p) / (k2 * k2 * d),
+            (1 - k2p) * (d * d + k2p) / (k2 * k2 * d))
+
+
+def _jacobi_base(v, m):
+    if v < 1e-3:
+        # (DLMF 22.10.1-22.10.3, the Maclaurin series: their next terms are
+        # below 1e-24 relative here, and the AGM loses a few ulps for tiny v)
+        v2 = v * v
+        sn = v * (1 - v2 / 6 * ((1 + m) - v2 / 20 * ((1 + 14 * m + m * m)
+                                                        - v2 / 42 * (1 + 135 * m + 135 * m * m + m ** 3))))
+        cn = 1 - v2 / 2 * (1 - v2 / 12 * ((1 + 4 * m) - v2 / 30 * (1 + 44 * m + 16 * m * m)))
+        dn = 1 - m * v2 / 2 * (1 - v2 / 12 * ((4 + m) - v2 / 30 * (16 + 44 * m + m * m)))
+        return sn, cn, dn
+    if m > 0.9:
+        return _jacobi_ascending(v, _math.sqrt(m), _math.sqrt(1 - m))
+    return _jacobi_agm(v, m)
+
+
+def _ellipj1(u, m):
+    if isinstance(u, complex) or isinstance(m, complex):
+        raise NotCovered("ellipj: Sagebrush covers real u and m")
+    if _math.isnan(u) or _math.isnan(m):
+        return (_math.nan,) * 3
+    if not 0 <= m <= 1:
+        raise NotCovered("ellipj: Sagebrush covers 0 <= m <= 1")
+    if not _math.isfinite(u):
+        raise NotCovered("ellipj: Sagebrush covers finite u")
+    if m == 0:
+        return _math.sin(u), _math.cos(u), 1.0
+    if m == 1:
+        # (DLMF Table 22.5.4: sn = tanh, cn = dn = sech)
+        sech = 1 / _math.cosh(u) if abs(u) < 710 else 0.0
+        return _math.tanh(u), sech, sech
+    K = _ellipk1(m)
+    kp = _math.sqrt(1 - m)
+    # (the periods, DLMF Table 22.4.3's translations: sn and cn have period
+    # 4K, sn(-u) = -sn(u); sn(2K - u) = sn(u), cn(2K - u) = -cn(u),
+    # dn(2K - u) = dn(u); and from u = K - v, sn = cd(v), cn = k' sd(v),
+    # dn = k' nd(v), so that cn stays accurate next to K)
+    if abs(u) <= 8 * K:
+        v, ssign, csign, shifted = _jacobi_fold_float(u, K)
+    else:
+        v, ssign, csign, shifted = _jacobi_fold_exact(u, m)
+    if shifted:
+        s1, c1, d1 = _jacobi_base(v, m)
+        sn, cn, dn = c1 / d1, kp * s1 / d1, kp / d1
+    else:
+        sn, cn, dn = _jacobi_base(v, m)
+    return ssign * sn, csign * cn, dn
+
+
+def _jacobi_fold_float(u, K):
+    """u reduced to v in [0, K/2] for |u| <= 8K, where K's rounding moves
+    the result by a few ulps of K at most: (v, sign of sn, sign of cn,
+    whether v = K - r)"""
+    r = _math.fmod(u, 4 * K)
+    if r > 2 * K:
+        r -= 4 * K
+    elif r < -2 * K:
+        r += 4 * K
+    ssign = 1.0
+    if r < 0:
+        r, ssign = -r, -1.0
+    csign = 1.0
+    if r > K:
+        r, csign = 2 * K - r, -1.0
+    if r > K / 2:
+        return K - r, ssign, csign, True
+    return r, ssign, csign, False
+
+
+def _pi_fixed(P):
+    """pi 2^P, rounded down, by Machin's formula pi = 16 atan(1/5) -
+    4 atan(1/239) in integers, with 20 guard bits"""
+    Q = P + 20
+    def atan_inv(x):
+        t = (1 << Q) // x
+        s, k, x2 = t, 1, x * x
+        while t:
+            t //= x2
+            s += -(t // (2 * k + 1)) if k % 2 else t // (2 * k + 1)
+            k += 1
+        return s
+    return (16 * atan_inv(5) - 4 * atan_inv(239)) >> 20
+
+
+def _jacobi_fold_exact(u, m):
+    """the same as _jacobi_fold_float for large |u|, in exact integer fixed
+    point with P bits after the point, P well beyond log2(|u|/K): K 2^P by
+    the AGM (DLMF 19.8.5) with integer square roots, and u and m taken as
+    the exact binary fractions they are, so that the reduction's error
+    stays below 2^-60 K however large u is"""
+    eu = _math.frexp(u)[1]
+    P = max(0, eu) + 130
+    S = 1 << P
+    mf = _Fraction(m)
+    one_m = 1 - mf
+    a = S
+    b = _math.isqrt(one_m.numerator * S * S // one_m.denominator)
+    while abs(a - b) > 1:
+        a, b = (a + b) // 2, _math.isqrt(a * b)
+    K = _pi_fixed(P) * S // (2 * a)  # (K 2^P)
+    uf = _Fraction(abs(u))
+    U = uf.numerator * S // uf.denominator
+    four = 4 * K
+    r = U % four
+    if r > 2 * K:
+        r -= four
+    ssign = 1.0 if u >= 0 else -1.0
+    if r < 0:
+        r, ssign = -r, -ssign
+    csign = 1.0
+    if r > K:
+        r, csign = 2 * K - r, -1.0
+    shifted = 2 * r > K
+    if shifted:
+        r = K - r
+    sh = max(0, r.bit_length() - 60)
+    return _ldexp(float(r >> sh), sh - P), ssign, csign, shifted
+
+
+def ellipj(u, m):
+    """the Jacobian elliptic functions (sn, cn, dn) of finite real u and
+    parameter 0 <= m <= 1 (DLMF 22.2, m = k^2), as a tuple of three
+    results: DLMF 22.20's AGM after reducing u by the periods to [0, K/2]
+    (DLMF Table 22.4.3's translations by K and 2K, so that cn keeps its
+    relative accuracy next to its zeros; for |u| > 8K the reduction is in
+    exact integer fixed point, with K by the AGM to some 130 bits beyond
+    log2(|u|/K), so that it is right however large u is), the Maclaurin
+    series DLMF 22.10.1-22.10.3 below 1e-3, and for m > 0.9 the ascending
+    Landen transformation (DLMF 22.7), where the AGM's arcsines lose
+    accuracy; m = 0 and m = 1 are sin, cos, 1 and tanh, sech, sech (DLMF
+    Tables 22.5.3, 22.5.4).  ValueError for infinite u.
+    Largest error found against mpmath: 5 eps (1 + |u f'(u)/f(u)|) for
+    each of the three, from |u| = 1e-300 to 1.7e308: the bound that u's
+    own rounding sets (so the relative error is larger next to the zeros
+    of sn and cn, and grows with |u|)"""
+    if all(np.ndim(a) == 0 for a in (u, m)):
+        return _ellipj1(_scalar(u), _scalar(m))
+    arrs = np.broadcast_arrays(np.asarray(u, dtype=float), np.asarray(m, dtype=float))
+    vals = [_ellipj1(float(a), float(b)) for a, b in zip(arrs[0].reshape(-1), arrs[1].reshape(-1))]
+    return tuple(np.array([v[i] for v in vals] if vals else [], dtype=float).reshape(arrs[0].shape) for i in range(3))
+
+
+# ------------------------------------------------------------------ Legendre functions
+
+def _legendre_p1(n, x):
+    if isinstance(n, complex) or n != _math.floor(n) or n < 0:
+        raise NotCovered("legendre_p: Sagebrush covers integer degrees n >= 0")
+    n = int(n)
+    # (DLMF 14.10.3 with mu = 0, the polynomials' three-term recurrence:
+    # (k + 1) P_(k+1) = (2k + 1) x P_k - k P_(k-1))
+    p0, p1 = 1.0, x
+    if n == 0:
+        return 1.0 if not isinstance(x, complex) else 1 + 0j
+    for k in range(1, n):
+        p0, p1 = p1, ((2 * k + 1) * x * p1 - k * p0) / (k + 1)
+    return p1
+
+
+def legendre_p(n, x):
+    """the Legendre polynomial P_n(x) (DLMF 14.7.1, 18.3), integer n >= 0,
+    real or complex x, by the recurrence DLMF 14.10.3.  Largest error found
+    against mpmath: 1e-15 of max(1, |P_n(x)|) for n <= 1000, |x| <= 1"""
+    return _elementwise(_legendre_p1, n, x)
+
+
+def _legendre_column(n, x):
+    """the Ferrers functions P_n^m(x), m = 0..n, each as (y, E) with
+    P = y 2^E: the degree recurrence DLMF 14.10.3, (k - m + 1) P_(k+1)^m =
+    (2k + 1) x P_k^m - (k + m) P_(k-1)^m, whose coefficients are exact,
+    from the diagonal P_m^m = (-1)^m (2m - 1)!! (1 - x^2)^(m/2) (DLMF
+    14.7.8); the power of 2 kept apart, and rescaling only by powers of 2,
+    so that nothing overflows or underflows on the way"""
+    s = _math.sqrt(max(0.0, (1 - x) * (1 + x)))
+    out = []
+    d, E = 1.0, 0  # (|P_m^m| = d 2^E)
+    for m in range(n + 1):
+        if m:
+            if s == 0:
+                out.extend([(0.0, 0)] * (n + 1 - m))
+                break
+            d, e = _math.frexp(d * (2 * m - 1) * s)
+            E += e
+        y0, y1, F = 0.0, (-d if m % 2 else d), E
+        for k in range(m, n):
+            y0, y1 = y1, ((2 * k + 1) * x * y1 - (k + m) * y0) / (k - m + 1)
+            # (on both: at x = 0 every other value is an exact 0)
+            if max(abs(y0), abs(y1)) > 2.0 ** 600:
+                y0, y1, F = _ldexp(y0, -600), _ldexp(y1, -600), F + 600
+        out.append((y1, F))
+    return out
+
+
+def _legendre_column_near_1(n, x):
+    """the same as _legendre_column, for n^2 (1 - |x|)/2 <= 1: next to +-1
+    the recurrence's rounding grows like the second solution Q_n, and
+    there the terminating hypergeometric form converges in a few terms:
+    P_n^-m(x) = ((1-x)/(1+x))^(m/2) 2F1(-n, n+1; 1+m; t)/m!, t = (1-x)/2
+    (DLMF 14.3.1 with mu = -m), P_n^m = (-1)^m (n+m)!/(n-m)! P_n^-m (DLMF
+    14.9.3), and P_n^m(-x) = (-1)^(n-m) P_n^m(x) (DLMF 14.7.17)"""
+    flip = x < 0
+    t = (1 + x) / 2 if flip else (1 - x) / 2
+    q = _math.sqrt(t / (1 - t))
+    out = []
+    qm, Eq = 1.0, 0  # (q^m = qm 2^Eq)
+    for m in range(n + 1):
+        if m:
+            if q == 0:
+                out.extend([(0.0, 0)] * (n + 1 - m))
+                break
+            qm, e = _math.frexp(qm * q)
+            Eq += e
+        S, term = 1.0, 1.0
+        for k in range(n):
+            term *= (k - n) * (n + 1 + k) / ((m + 1 + k) * (k + 1)) * t
+            S += term
+            if abs(term) <= 1e-17 * abs(S):
+                break
+        G = _math.perm(n + m, 2 * m) // _math.factorial(m)  # (n+m)!/((n-m)! m!), exact
+        sh = max(0, G.bit_length() - 60)
+        y = float(G >> sh) * qm * S
+        if m % 2:
+            y = -y
+        if flip and (n - m) % 2:
+            y = -y
+        out.append((y, Eq + sh))
+    return out
+
+
+def _sqrt_ratio(num, den):
+    """sqrt(num/den) for positive integers or floats of any size, as (f, e)
+    with the value f 2^e"""
+    def split(v):
+        if isinstance(v, int):
+            sh = max(0, v.bit_length() - 60)
+            return float(v >> sh), sh
+        return v, 0
+    a, ea = split(num)
+    b, eb = split(den)
+    e = ea - eb
+    q = a / b
+    if e % 2:
+        q *= 2
+        e -= 1
+    return _math.sqrt(q), e // 2
+
+
+_LEGENDRE_NORMS = ("unnorm", "sch", "norm")
+
+
+def legendre_all(n, x, normalization="unnorm"):
+    """the associated Legendre functions of degree n and orders m = 0..n at
+    a real x in [-1, 1], as a list, in the three normalizations MATLAB's
+    legendre names (lib/_matlab_special.py):
+    - "unnorm": the Ferrers functions P_n^m(x) = (-1)^m (1 - x^2)^(m/2)
+      d^m P_n/dx^m (DLMF 14.7.8), with the Condon-Shortley phase (-1)^m;
+    - "sch": Schmidt's seminormalized S_n^m = (-1)^m sqrt(2 (n-m)!/(n+m)!)
+      P_n^m for m > 0, S_n^0 = P_n: without the phase;
+    - "norm": N_n^m = (-1)^m sqrt((n + 1/2)(n-m)!/(n+m)!) P_n^m, whose
+      squares integrate to 1 over [-1, 1]: without the phase.
+    By the degree recurrence DLMF 14.10.3 (stable upward on [-1, 1]) from
+    the diagonal (DLMF 14.7.8), and where n^2 (1 - |x|)/2 <= 1 by the
+    terminating hypergeometric series DLMF 14.3.1 (with 14.9.3 and
+    14.7.17), with the scale kept as an exact power of 2
+    and the factorial ratios exact integers, so that a value is finite and
+    nonzero whenever it is representable; the unnormalized values overflow
+    to +-Inf for large n.  Largest error found against mpmath: 1e-14 of the
+    largest |value| of the column for n <= 200"""
+    if isinstance(n, complex) or n != _math.floor(n) or n < 0:
+        raise NotCovered("legendre_all: Sagebrush covers integer degrees n >= 0")
+    if normalization not in _LEGENDRE_NORMS:
+        raise ValueError("legendre_all: normalization must be one of %s" % ", ".join(_LEGENDRE_NORMS))
+    x = _scalar(x)
+    if not isinstance(x, complex) and x != x:
+        return [_math.nan] * (int(n) + 1)
+    if isinstance(x, complex) or not -1 <= x <= 1:
+        raise NotCovered("legendre_all: Sagebrush covers real x in [-1, 1]")
+    n = int(n)
+    res = []
+    near = n * n * (1 - abs(x)) / 2 <= 1
+    col = _legendre_column_near_1(n, x) if near else _legendre_column(n, x)
+    for m, (y, E) in enumerate(col):
+        if normalization == "unnorm" or y == 0:
+            try:
+                res.append(_ldexp(y, E))
+            except OverflowError:
+                res.append(_math.copysign(_math.inf, y))
+            continue
+        R = _math.perm(n + m, 2 * m)  # (n + m)!/(n - m)!, exact
+        if normalization == "norm":
+            f, e = _sqrt_ratio(n + 0.5, R)
+        elif m == 0:
+            f, e = 1.0, 0
+        else:
+            f, e = _sqrt_ratio(2, R)
+        v = (-1) ** m * y * f
+        try:
+            res.append(_ldexp(v, E + e))
+        except OverflowError:
+            res.append(_math.copysign(_math.inf, v))
+    return res
+
+
+def _assoc_legendre_p1(n, m, x):
+    if any(isinstance(v, complex) for v in (n, m)) or n != _math.floor(n) or m != _math.floor(m) or n < 0:
+        raise NotCovered("assoc_legendre_p: Sagebrush covers integers n >= 0 and m")
+    if not isinstance(x, complex) and _scalar(x) != _scalar(x):
+        return _math.nan
+    n, m = int(n), int(m)
+    if abs(m) > n:
+        return 0.0  # (DLMF 14.7.16)
+    if m >= 0:
+        return legendre_all(n, x)[m]
+    x = _scalar(x)
+    if isinstance(x, complex) or not -1 <= x <= 1:
+        raise NotCovered("assoc_legendre_p: Sagebrush covers real x in [-1, 1]")
+    k = -m
+    col = _legendre_column_near_1(n, x) if n * n * (1 - abs(x)) / 2 <= 1 else _legendre_column(n, x)
+    y, E = col[k]
+    # (DLMF 14.9.3: P_n^(-k) = (-1)^k (n-k)!/(n+k)! P_n^k, from the
+    # column's y 2^E and the exact integer ratio, rounded once, so that
+    # values beyond P_n^k's range, and subnormal ones, are kept)
+    if y == 0:
+        return 0.0
+    num, den = abs(y).as_integer_ratio()
+    r = _round_ratio(num, den * _math.perm(n + k, 2 * k), E)
+    if (y < 0) != (k % 2 == 1):
+        r = -r
+    return r
+
+
+def _round_ratio(N, D, e):
+    """N/D 2^e for positive integers N and D, rounded once to the nearest
+    double (ties to even), subnormals and overflow included"""
+    s = 64 + D.bit_length() - N.bit_length()
+    q, rem = divmod(N << s, D) if s >= 0 else divmod(N, D << -s)
+    exp = e - s  # (N/D 2^e = (q + rem/D') 2^exp)
+    nb = q.bit_length()
+    top = nb + exp
+    if top > 1024:
+        return _math.inf
+    prec = 53 if top >= -1021 else 53 - (-1021 - top)
+    drop = nb - prec
+    if drop <= 0:
+        return _ldexp(float(q), exp)
+    keep = q >> drop
+    low = q - (keep << drop)
+    half = 1 << (drop - 1)
+    if low > half or (low == half and (rem or keep & 1)):
+        keep += 1
+    return _ldexp(float(keep), exp + drop)
+
+
+def assoc_legendre_p(n, m, x):
+    """the Ferrers function (associated Legendre function on the cut)
+    P_n^m(x) = (-1)^m (1 - x^2)^(m/2) d^m P_n/dx^m, DLMF 14.7.8, with the
+    Condon-Shortley phase (-1)^m, for integers n >= 0 and m (0 for
+    |m| > n; negative m by DLMF 14.9.3) and real x in [-1, 1]; from
+    legendre_all"""
+    return _elementwise(_assoc_legendre_p1, n, m, x)

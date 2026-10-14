@@ -81,6 +81,100 @@ points["lambert_w"] = (
     + [(cmath.rect(LU(1e-300, 1e300), U(-math.pi, math.pi)), k) for k in (-2, 0, 1, 57) for _ in range(10)]
     + [(U(-1 / math.e, 0), k) for k in (-1, 0) for _ in range(10)] + [(LU(1e-300, 1e300), 0) for _ in range(10)]
 )
+# (polylogarithms of integer order: inside, on and outside the unit circle,
+# next to 1 and to the cut (1, inf), and real arguments below 1)
+points["polylog"] = (
+    [(n, cz(3)) for n in (-20, -7, -2, -1, 0, 1, 2, 3, 4, 7, 25, 100) for _ in range(12)]
+    + [(n, cmath.rect(U(0.4, 2.2), U(-math.pi, math.pi))) for n in (-12, -3, 1, 2, 3, 10) for _ in range(12)]
+    + [(n, cmath.rect(LU(1e-5, 1e5), U(-math.pi, math.pi))) for n in (-5, 1, 2, 5, 30) for _ in range(10)]
+    + [(n, complex(1 + U(-0.01, 0.01), U(-0.01, 0.01))) for n in (-1, 2, 3, 6) for _ in range(6)]
+    + [(n, complex(U(1.01, 50), random.choice((1, -1)) * LU(1e-30, 1e-5))) for n in (2, 3, 5) for _ in range(6)]
+    + [(n, U(-30, 0.99)) for n in (-4, 1, 2, 3, 8) for _ in range(8)]
+)
+points["dilog"] = [(cz(4),) for _ in range(20)] + [(U(-50, 0.99),) for _ in range(10)]
+# (fixed large orders with large |z|, daybreak's TEST-E24-2 point first; no
+# random draws, so that the cases after these stay as they were)
+points["polylog"] = points["polylog"] + [
+    (100, complex(4.918943795749446e47, -8.631356821706026e47)), (99, complex(-3.1e120, 2.7e119)),
+    (95, complex(1.3e15, 9.9e14)), (90, complex(-7.7e200, -1.1e201)), (80, complex(2.5e30, -4.0e29)),
+    (50, complex(6.0e8, 8.0e8)), (20, complex(-1.0e300, 3.0e299)), (100, complex(25.0, -10.0))]
+# (elliptic integrals and Jacobian functions: m from -1e300 to within 1e-16
+# of 1, u across many periods and next to the quarter periods)
+points["ellipk"] = [(U(-100, 1),) for _ in range(30)] + [(1 - math.exp(U(-36, 0)),) for _ in range(30)] + [(-math.exp(U(0, 600)),) for _ in range(10)]
+points["ellipe"] = list(points["ellipk"]) + [(U(0.4, 0.6),) for _ in range(10)]
+
+
+def _jac_points():
+    out = []
+    for _ in range(120):
+        r = random.random()
+        if r < 0.3:
+            out.append((U(-10, 10), U(0, 1)))
+        elif r < 0.5:
+            out.append((U(-40, 40), 1 - math.exp(U(-36, -1))))
+        elif r < 0.7:
+            out.append((U(-1e3, 1e3), U(0, 1)))
+        else:
+            m = U(0, 1)
+            out.append((float(mp.ellipk(m)) * random.choice((0.5, 1, 1.5, 2, 3)) + U(-1e-3, 1e-3), m))
+    return out
+
+
+points["ellipj"] = _jac_points()
+# (Legendre columns, m = 0..n, in each normalization; the reference is the
+# unnormalized recurrence at 80 digits, where its rounding does not matter)
+points["legendre_all"] = [(float(random.choice((0, 1, 2, 3, 5, 10, 30, 80, 150, 200))),
+                           random.choice((U(-1, 1), 1 - math.exp(U(-30, -1)), -1 + math.exp(U(-30, -1)), 0.0, 1.0, -1.0)),
+                           float(random.randint(0, 2))) for _ in range(40)]
+
+
+# (u from 1e-300 to 1.7e308: the series for tiny u, the exact reduction for
+# large u, and daybreak's case CORR-027-1)
+points["ellipj"] = points["ellipj"] + [(random.choice((1, -1)) * LU(1e-300, 1e-2), random.choice((U(0, 1), 1 - LU(1e-16, 0.1))))
+                                       for _ in range(30)] + [
+    (random.choice((1, -1)) * LU(1e3, 1.7e308), random.choice((U(0, 1), 1 - LU(1e-16, 0.1)))) for _ in range(30)] + [
+    (314159265358979328.0, 0.9999999990686774)]
+
+
+def ferrers_column(n, x):
+    with mp.workdps(80):
+        x = mp.mpf(x)
+        s = mp.sqrt(1 - x * x)
+        out = []
+        pmm = mp.mpf(1)
+        for m in range(n + 1):
+            if m:
+                pmm *= -(2 * m - 1) * s
+            if n == m:
+                out.append(+pmm)
+                continue
+            p0, p1 = pmm, (2 * m + 1) * x * pmm
+            for k in range(m + 1, n):
+                p0, p1 = p1, ((2 * k + 1) * x * p1 - (k + m) * p0) / (k - m + 1)
+            out.append(+p1)
+        return out
+
+
+def legendre_all(n, x, norm):
+    n, norm = int(n), ("unnorm", "sch", "norm")[int(norm)]
+    col = ferrers_column(n, x)
+    with mp.workdps(80):
+        out = []
+        for m, P in enumerate(col):
+            if norm == "unnorm" or (norm == "sch" and m == 0):
+                v = P
+            elif norm == "sch":
+                v = (-1) ** m * mp.sqrt(2 * mp.factorial(n - m) / mp.factorial(n + m)) * P
+            else:
+                v = (-1) ** m * mp.sqrt((n + mp.mpf(1) / 2) * mp.factorial(n - m) / mp.factorial(n + m)) * P
+            out.append(float(v) if abs(v) < mp.mpf(10) ** 308 else (math.inf if v > 0 else -math.inf))
+        return out
+
+
+def ellipj_ref(u, m):
+    # (enough digits to reduce u by the period exactly)
+    with mp.workdps(40 + max(0, int(math.log10(abs(u) + 1)))):
+        return [float(mp.ellipfun(f, mp.mpf(u), m=mp.mpf(m))) for f in ("sn", "cn", "dn")]
 
 
 def faddeeva(z):
@@ -100,6 +194,10 @@ ref = {
     "erf": mp.erf, "erfc": mp.erfc, "erfi": mp.erfi, "erfcx": lambda z: mp.exp(mp.mpmathify(z) ** 2) * mp.erfc(z),
     "erfinv": lambda y: mp.erfinv(y), "erfcinv": erfcinv, "exp_integral_e1": mp.e1, "exp_integral_ei": mp.ei,
     "lambert_w": lambda z, k: mp.lambertw(z, k),
+    "polylog": lambda n, z: mp.polylog(n, z), "dilog": lambda z: mp.polylog(2, z),
+    "ellipk": mp.ellipk, "ellipe": mp.ellipe,
+    "ellipj": lambda u, m: ellipj_ref(u, m),
+    "legendre_all": legendre_all,
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}
@@ -107,6 +205,9 @@ out = []
 for name, pts in points.items():
     for args in pts:
         v = ref[name](*args)
+        if isinstance(v, list):
+            out.append([name, [enc(a) for a in args], [repr(t) for t in v]])
+            continue
         c = complex(v)
         wc = any(isinstance(a, complex) for a in args) or name in complex_valued or c.imag != 0
         out.append([name, [enc(a) for a in args], enc(val(v, wc))])

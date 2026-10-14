@@ -591,9 +591,13 @@ The rest:
   real nonnegative ones; Octave answers), and `psi(k, X)` for k > 100. Where
   the pages say nothing, `psi(k, 0)` is the limit from the right (-Inf for
   even k, Inf for odd k) and `psi(Inf)` is Inf; Octave gives NaN and
-  -0.5772. These functions, `erfcx`, `erfinv`, `erfcinv` and `expint` are
-  thin wrappers (lib/_matlab_special.py) over the shared numerics in
-  lib/_special.py (design/special.md);
+  -0.5772. These functions, `erfcx`, `erfinv`, `erfcinv`, `expint`,
+  `ellipke`, `ellipj` and `legendre` are thin wrappers
+  (lib/_matlab_special.py) over the shared numerics in lib/_special.py
+  (design/special.md). `ellipke` and `ellipj` refuse M outside [0, 1], as
+  their pages require (Octave answers), and accept `tol` but always
+  compute to full accuracy; `ellipj` also refuses an infinite U, where
+  Octave gives NaN;
 - the random sparse matrices' exact places and values: `sprand`'s and
   `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
   construction is Sagebrush's own (exactly the requested number of
