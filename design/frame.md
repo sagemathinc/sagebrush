@@ -12,9 +12,11 @@ site, with every part inline except the document: the board's script, KaTeX
 and its fonts, and the board page as its template, so that Download as HTML
 works from it too.  web/build.ts makes it (`frameHtml`).  Its code runs as a
 downloaded file's does (web/board/engine.ts): Python in the runner's files
-mode, a sandboxed srcdoc frame with no network, and the engine the page was
-built with, fetched from `<this site>/engine/<id>/`, each part checked
-against the SHA-256 built into the script.  No cross-origin isolation is
+mode, a sandboxed srcdoc frame with no network, and always the engine the
+page was built with, fetched from `<this site>/engine/<id>/`, each part
+checked against the SHA-256 built into the script.  A posted board that asks
+for the latest engine (`engine: "latest"`) gets the built-with one all the
+same.  No cross-origin isolation is
 needed, so the embedding page needn't have any.
 
 As in a downloaded file, there is no TimeTravel, outputs are kept only while
@@ -28,10 +30,14 @@ All are objects with `version: 1`.
 - The parent: `{ sagebrush: "board", version: 1, text, name? }`, where `text`
   is a file's contents (JSON, a Mermaid flowchart, Markdown with flowcharts,
   a CoCalc whiteboard or a JSON Canvas, as Open… takes) and `name` its file
-  name.  The first shows; a later one replaces it.
+  name.
 - The frame, for a text that isn't a board:
   `{ sagebrush: "error", version: 1, message }`.  The board shown stays.
 
+A later board starts the frame afresh: it reloads, a new page with a new
+interpreter, so that nothing the first board's code did (a module changed,
+a file written, a run still going) reaches the next; and it says `ready`
+again.  So a parent answers every `ready` with the board it wants shown.
 Only messages from `window.parent` count.  What the frame posts is no secret,
 so it posts to any parent (`"*"`).  Opened on its own, the page shows an
 empty board that says what it is for.
@@ -57,9 +63,13 @@ site.  The script policy allows what a downloaded file runs:
   web/notebook/files-runner.js so that web/csp.ts can hash it.
 
 `frame-ancestors *`: any page may embed it.  It holds nothing an embedder
-could take by framing it.  `Cross-Origin-Resource-Policy: cross-origin`
-(web/_headers), so that a cross-origin isolated page can embed it too.  The
-Cache-Control `no-transform` keeps the host from adding its analytics script.
+could take by framing it.  `Cross-Origin-Resource-Policy: cross-origin`, so
+that a cross-origin isolated page can embed it too.  The Cache-Control
+`no-transform` keeps the host from adding its analytics script.  All three
+are in the one `/frame/*` rule web/csp.ts writes: Cloudflare keeps only the
+last rule given for a path, so csp.ts refuses a path given twice.  The local
+server (web/serve.py) does the same, and matches rules against the decoded,
+normalized path, so no spelling of the frame's path is served without them.
 
 web/board/test-frame.mjs checks:
 - the policy;
@@ -67,7 +77,9 @@ web/board/test-frame.mjs checks:
 - no storage;
 - the board shown and its code run;
 - only the parent's messages counting;
-- replacement;
+- replacement, in a new interpreter (the first board's mark on `builtins`
+  gone);
+- one `/frame/*` rule with all its headers, and other spellings of the path;
 - the error;
 - the page opened on its own.
 
@@ -79,6 +91,7 @@ web/board/test-frame.mjs checks:
 const f = document.querySelector("iframe");
 addEventListener("message", (e) => {
   if (e.source !== f.contentWindow) return;
+  // (on every ready: the frame starts afresh for each later board)
   if (e.data?.sagebrush === "ready") f.contentWindow.postMessage({ sagebrush: "board", version: 1, text, name: "foo.board.json" }, "*");
 });
 </script>

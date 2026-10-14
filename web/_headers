@@ -22,7 +22,3 @@
   Cross-Origin-Resource-Policy: cross-origin
 /engine/latest.json
   Cache-Control: max-age=60
-# the frame other sites show a board in (design/frame.md): any page may embed
-# it, even a cross-origin isolated one
-/frame/*
-  Cross-Origin-Resource-Policy: cross-origin
