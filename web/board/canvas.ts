@@ -152,6 +152,8 @@ export function toCanvas(doc: BoardDoc, laid: (page: number) => { items: Item[];
     const id = (s: string) => (paged ? `p${i + 1}-${s}` : s);
     leave("step", page.steps?.length ?? 0);
     leave("intro", page.intro ? 1 : 0);
+    leave("slidecard", page.slide ? 1 : 0);
+    leave("pagebg", page.background ? 1 : 0);
     leave("edge", (page.edges ?? []).filter((e) => e.hidden).length);
     if (!items.length) continue;
     const x0 = Math.min(...items.map((it) => it.x)), top = Math.min(...items.map((it) => it.y));
@@ -182,7 +184,7 @@ const WORDS: Record<string, [string, string]> = {
   card: ["card of a kind a board doesn't have", "cards of kinds a board doesn't have"], background: ["group's background picture", "groups' background pictures"],
   edge: ["connection to something left out", "connections to something left out"], step: ["step of the tour", "steps of the tour"],
   intro: ["page's intro", "pages' intros"], outline: ["note's outline", "notes' outlines"], picture: ["picture not in this browser", "pictures not in this browser"],
-  ink: ["pen stroke", "pen strokes"],
+  ink: ["pen stroke", "pen strokes"], slidecard: ["slide's card", "slides' cards"], pagebg: ["page's background", "pages' backgrounds"],
 };
 /** What was left out, in words ("4 steps of the tour and 1 page's intro"), or "" if nothing. */
 export function canvasLeftOut(left: Record<string, number>): string {

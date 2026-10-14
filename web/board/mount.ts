@@ -202,6 +202,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view && (order.length || code)) engine()?.sync(order, d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     board.setItems(items, edges);
+    // (the page's slide and background)
+    board.backdrop = v.slide || v.background ? { slide: v.slide, ...v.background } : null;
     toolbar.tools.value = d.tools ?? defaultTools();
     shownPage = pageIx;
     const gen = ++routingGen;
@@ -502,7 +504,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("pgnext").onclick = () => page(pageIx + 1);
   ($("pgsel") as HTMLSelectElement).onchange = (e) => { page(Number((e.target as HTMLSelectElement).value)); (e.target as HTMLElement).blur(); };
   // a document's own nodes, edges and tour become its first page
-  const PAGE_KEYS = ["intro", "layout", "columns", "direction", "nodes", "edges", "steps"] as const;
+  const PAGE_KEYS = ["intro", "layout", "columns", "direction", "slide", "background", "nodes", "edges", "steps"] as const;
   function paged(d: BoardDoc): BoardPage[] {
     if (!d.pages?.length) {
       const p: any = { title: "Page 1" };
@@ -685,10 +687,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         return { x0: Math.min(...its.map((it) => it.x)), y0: Math.min(...its.map((it) => it.y)), x1: Math.max(...its.map((it) => it.x + it.w)), y1: Math.max(...its.map((it) => it.y + it.h)) };
       };
       const title = d.pages?.length ? [d.title, pageOf(d, i).title || `Page ${i + 1}`].filter(Boolean).join(" — ") : d.title;
+      // (a slide: its sheet is its card; and its backdrop under it all)
+      const backdrop = v.slide || v.background ? { slide: v.slide, ...v.background } : undefined;
+      const whole = v.slide ? { x0: v.slide.x, y0: v.slide.y, x1: v.slide.x + v.slide.w, y1: v.slide.y + v.slide.h } : box();
       const where = n > 1 ? `page ${i + 1} of ${n}` : "";
       const ss = mode === "tour" ? v.steps ?? [] : [];
-      if (!ss.length || v.intro) out.push({ items, edges, box: box(), title, caption: mode === "tour" ? v.intro : undefined, folio: where });
-      ss.forEach((s, k) => out.push({ items, edges, box: box(typeof s.focus === "string" ? [s.focus] : s.focus), title, caption: s.say, folio: [where, `step ${k + 1} of ${ss.length}`].filter(Boolean).join(", ") }));
+      if (!ss.length || v.intro) out.push({ items, edges, box: whole, title, caption: mode === "tour" ? v.intro : undefined, folio: where, backdrop });
+      ss.forEach((s, k) => out.push({ items, edges, box: box(typeof s.focus === "string" ? [s.focus] : s.focus), title, caption: s.say, folio: [where, `step ${k + 1} of ${ss.length}`].filter(Boolean).join(", "), backdrop }));
     }
     return out;
   }

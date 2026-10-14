@@ -12,6 +12,9 @@
 
 import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
 
+/** A page's backdrop (doc.ts BoardPage's slide and background). */
+export interface Backdrop { slide?: { x: number; y: number; w: number; h: number }; color?: string; image?: string }
+
 /** How a pen draws: its width, its color, and below 1 a highlighter's opacity. */
 export interface InkStyle { size: number; color: string; opacity?: number }
 
@@ -171,6 +174,12 @@ export class Board {
   onToggleCode: ((id: string) => void) | null = null;
   /** where a picture's bytes are, by its name (images.ts) */
   imageUrl: ((name: string) => string | undefined) | null = null;
+  /** The page's backdrop (mount.ts, from the page): a slide's card (white,
+   * with a soft shadow: what Present shows), and a background color, on
+   * the card or, without one, behind the whole board; a picture covers the
+   * card (only a slide has one: a board without edges has nothing to cover). */
+  backdrop: Backdrop | null = null;
+  private backImage: { name: string; img: HTMLImageElement } | null = null;
   /** a press on an item (not a link): return true to take it (the board does not pan) */
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
   /** Drawing (the Draw tool): the pen's style, asked at each press (null:
@@ -611,13 +620,52 @@ export class Board {
     return w;
   }
 
+  // the page's backdrop: the slide's card, its background color and picture
+  private drawBackdrop(ctx: CanvasRenderingContext2D, v: { x0: number; y0: number; x1: number; y1: number }) {
+    const b = this.backdrop, s = b?.slide;
+    if (!b) return;
+    if (s) {
+      ctx.save();
+      ctx.shadowColor = "rgba(0, 0, 0, .18)";
+      ctx.shadowBlur = 12 * this.dpr;
+      ctx.shadowOffsetY = 2 * this.dpr;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(s.x, s.y, s.w, s.h);
+      ctx.restore();
+    }
+    const r = s ?? { x: v.x0, y: v.y0, w: v.x1 - v.x0, h: v.y1 - v.y0 };
+    if (b.color) {
+      ctx.fillStyle = b.color;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    // (a picture, once loaded: covering the card, cut to it)
+    const url = s && b.image ? this.imageUrl?.(b.image) : undefined;
+    if (!url || !s) return;
+    if (this.backImage?.name !== b.image + "\n" + url) {
+      const img = new Image();
+      img.onload = () => this.request();
+      img.src = url;
+      this.backImage = { name: b.image + "\n" + url, img };
+    }
+    const img = this.backImage!.img;
+    if (!img.complete || !img.naturalWidth) return;
+    const k = Math.max(s.w / img.naturalWidth, s.h / img.naturalHeight), w = img.naturalWidth * k, h = img.naturalHeight * k;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(s.x, s.y, s.w, s.h);
+    ctx.clip();
+    ctx.drawImage(img, s.x + (s.w - w) / 2, s.y + (s.h - h) / 2, w, h);
+    ctx.restore();
+  }
+
   // behind the notes: groups (outer first) and edges
   private drawBack(v: { x0: number; y0: number; x1: number; y1: number }, far: boolean) {
     const ctx = this.bctx, c = this.camera, d = this.dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.back.width, this.back.height);
-    if (!this.edges.length && !this.byId.size) return;
     ctx.setTransform(c.z * d, 0, 0, c.z * d, -c.x * c.z * d, -c.y * c.z * d);
+    this.drawBackdrop(ctx, v);
+    if (!this.edges.length && !this.byId.size) return;
     const groups = [...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind === "group").sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
     for (const g of groups) {
       ctx.beginPath();

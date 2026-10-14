@@ -50,6 +50,13 @@ check(t.includes('"images": {\n    "a-picture": {\n      "w": 30,\n      "h": 20
 // pages: the same, page by page
 const p = canonical({ title: "Paged", pages: [{ title: "One", nodes: [{ id: "a", title: "A" }] }, { title: "Two", nodes: [{ id: "b", title: "B" }], steps: [{ focus: "b" }] }] });
 check(canonical(JSON.parse(p)) === p && Object.keys(JSON.parse(p)).join() === "format,version,title,pages", "a document with pages: " + Object.keys(JSON.parse(p)).join());
+// a page's slide and background: kept when sound (before the content in the file), else dropped
+const bg = cleanDoc({ title: "Deck", slide: { x: -525, y: -492, w: 1050, h: 591 }, background: { color: "#fff2bf", image: "a-picture" }, nodes: [], pages: [{ title: "One", slide: { x: 0, y: 0, w: -5, h: 10 }, background: { color: "red;background:url(x)", image: "../x" }, nodes: [] }, { title: "Two", slide: { x: "1", y: 0, w: 5, h: 5 }, background: { color: "#123456" }, nodes: [] }] });
+check(JSON.stringify(bg.slide) === '{"x":-525,"y":-492,"w":1050,"h":591}' && JSON.stringify(bg.background) === '{"color":"#fff2bf","image":"a-picture"}', "a slide's card and a background are kept: " + JSON.stringify([bg.slide, bg.background]));
+check(!bg.pages[0].slide && !bg.pages[0].background && !bg.pages[1].slide && JSON.stringify(bg.pages[1].background) === '{"color":"#123456"}', "...not a card without a size or with a place not a number, a color that isn't one, a picture's name that isn't one: " + JSON.stringify(bg.pages));
+const bt = canonical({ title: "Deck", nodes: [{ id: "a" }], slide: { x: 0, y: 0, w: 160, h: 90 }, background: { color: "#ffffff" } });
+check(Object.keys(JSON.parse(bt)).join() === "format,version,title,slide,background,nodes" && canonical(JSON.parse(bt)) === bt, "in the file, the slide and background come before the content: " + Object.keys(JSON.parse(bt)).join());
+
 // what the board does not keep is not in its file
 check(!canonical({ nodes: [{ id: "a", title: "A", junk: 1 }], junk: 2 }).includes("junk"), "what a board does not keep is left out of its file");
 
