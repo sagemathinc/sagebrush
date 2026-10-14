@@ -1,6 +1,6 @@
 # Outputs: what is kept, where, and for how long
 
-*Status: decided (William, October 14 2026). Steps 1 to 3 are built for boards (web/board/preview.ts, outcache.ts, code.ts); the rest follow.*
+*Status: decided (William, October 14 2026). Steps 1 to 3 are built for boards (web/board/preview.ts, outcache.ts, code.ts), and step 4 for Download as HTML; the rest follow.*
 
 A code item's output (or a reactive notebook cell's) is a function of its
 code and its inputs. So an output is something to recompute, not to store.
@@ -158,6 +158,16 @@ cached, or a preview.
    order; a deleted board's cache goes with it.
 4. **Publish and download:** outputs in shared versions and in Download as
    HTML. Tests through the share API's Miniflare suite and the export test.
+   - *Built for Download as HTML:* the file carries, in `#sb-outputs`, what
+     the cache would keep for the board's items as they are now (computed
+     here or shown from the cache; BoardCode.carry()), the slowest first, at
+     most DOC_CAP. The dialog offers it, on, with its size. Opened, the file
+     uses them as its cache, in memory (MemoryOutputCache), each entry
+     checked (carriedOutputs()) and labelled "carried in this file"; exported
+     again, it carries them again. Tests: test-outcache, test-offline.
+   - *Shared versions:* shared collections hold notebooks only so far, and a
+     notebook keeps its outputs inline (section 4). This part comes with
+     sharing boards.
 5. **Notebooks (later):** Sagebrush's own notebook documents keep every
    output inline today, as `.ipynb` does. Whether they move to previews and
    the cache will be decided once boards have used it for a while.

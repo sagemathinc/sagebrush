@@ -40,7 +40,7 @@ export function siteEngine(base: URL, runner = true): EngineParts {
 }
 
 import { PREVIEW_MS, makePreview, previewLabel, type Preview } from "./preview";
-import { CACHE_MS, cachedLabel, type CachedOutputs, type OutputCache } from "./outcache";
+import { CACHE_MS, DOC_CAP, ENTRY_MAX, cachedLabel, sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
 
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
@@ -251,6 +251,7 @@ export class BoardCode {
         for (const [id, e] of hits) {
           const c = this.cell(id);
           if (c) Object.assign(c.out.dataset, { preview: cachedLabel(e), cached: "1" });
+          this.shown.set(id, e);
         }
       }
       // (then the others run, but not what reads a held one, which would run it)
@@ -280,8 +281,11 @@ export class BoardCode {
   private ran(report: any) {
     const ids: string[] = Array.isArray(report?.ran) ? report.ran : [];
     if (ids.length) this.runs++;
+    const at = new Date().toISOString();
     for (const id of ids) {
       this.gens.set(id, this.generation(id) + 1);
+      this.shown.delete(id);
+      this.ranAt.set(id, at);
       const c = this.cell(id);
       if (c) {
         delete c.out.dataset.preview;
@@ -346,6 +350,40 @@ export class BoardCode {
     const runs = this.runs;
     const now = await this.nb.outputKeys();
     if (now && this.cacheDoc() === ns && this.runs === runs) await cache.sweep(ns, new Set(Object.values(now).map((k: any) => k.key).filter(Boolean)));
+  }
+  // the entries shown from the cache, by item, until it runs; when each item last ran
+  private shown = new Map<string, CachedOutputs>();
+  private ranAt = new Map<string, string>();
+  /**
+   * What a downloaded board carries (design/outputs.md, section 3): the
+   * outputs the cache would keep for its items as they are now (over
+   * cacheMs from root; up to date or failed; none after a widget moved or
+   * that read files), computed here or shown from the cache, the slowest
+   * first, at most DOC_CAP in all.  Previews are in the board already.
+   */
+  async carry(): Promise<CachedOutputs[]> {
+    if (!(await this.ready)) return [];
+    await this.last;
+    const keys = await this.nb.outputKeys();
+    const out: CachedOutputs[] = [];
+    for (const c of this.nb.cells()) {
+      const id = c.id, k = keys?.[id], state = this.state(id), e = this.shown.get(id);
+      if (!k?.key || k.widget || k.reads) continue;
+      // (one shown from the cache is held, so marked stale: still its key's)
+      if (e) {
+        if (e.key === k.key && (state === "" || state === "failed" || state === "stale")) out.push({ key: e.key, outputs: e.outputs, at: e.at, ms: e.ms, total: e.total, ...(e.engine ? { engine: e.engine } : {}) });
+      } else if ((state === "" || state === "failed") && !this.held.has(id) && this.ranAt.has(id) && k.fromRoot > this.cacheMs) {
+        out.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at: this.ranAt.get(id)!, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot) });
+      }
+    }
+    out.sort((a, b) => b.total - a.total);
+    let total = 0;
+    return out.filter((e) => {
+      const n = sizeOf(e.outputs);
+      if (n > ENTRY_MAX || total + n > DOC_CAP) return false;
+      total += n;
+      return true;
+    });
   }
   /** an item over this many ms from root keeps a preview (preview.ts) */
   previewMs = PREVIEW_MS;

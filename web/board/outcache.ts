@@ -23,6 +23,8 @@ export interface CachedOutputs {
   total: number;
   /** the engine that computed it (design/engines.md), if known: recorded, not keyed */
   engine?: string;
+  /** where it is kept, for its label (the cache that gave it says, never the entry's source) */
+  where?: "file";
 }
 
 export interface OutputCache {
@@ -45,11 +47,70 @@ export const DOC_CAP = 64 * 1024 * 1024, ALL_CAP = 512 * 1024 * 1024;
 export function cachedLabel(e: CachedOutputs): string {
   const d = new Date(e.at), s = e.total / 1000;
   const when = isNaN(+d) ? "" : ` ${d.toLocaleDateString(undefined, { month: "long", day: "numeric" })}`;
-  return `Computed${when} (${s < 60 ? `${s.toFixed(s < 10 ? 1 : 0)} s` : `${Math.round(s / 60)} min`}), kept in this browser. Run to recompute.`;
+  return `Computed${when} (${s < 60 ? `${s.toFixed(s < 10 ? 1 : 0)} s` : `${Math.round(s / 60)} min`}), ${e.where === "file" ? "carried in this file" : "kept in this browser"}. Run to recompute.`;
 }
 
 const utf8 = new TextEncoder();
 export const sizeOf = (outputs: unknown) => utf8.encode(JSON.stringify(outputs)).length;
+
+/**
+ * The outputs a downloaded board carries (design/outputs.md, section 3),
+ * from its #sb-outputs: the well-formed entries, each at most ENTRY_MAX, at
+ * most DOC_CAP in all (the rest dropped), marked as the file's.  They are
+ * the file's to say, as its code and previews are: shown as its code's
+ * outputs are, through the same bounds.
+ */
+export function carriedOutputs(json: unknown): CachedOutputs[] {
+  const out: CachedOutputs[] = [];
+  if (!Array.isArray(json)) return out;
+  let total = 0;
+  for (const e of json) {
+    if (!e || typeof e !== "object" || typeof e.key !== "string" || !/^[0-9a-f]{64}$/.test(e.key) || !Array.isArray(e.outputs)) continue;
+    const num = (x: unknown) => (typeof x === "number" && isFinite(x) && x >= 0 ? x : 0);
+    const bytes = sizeOf(e.outputs);
+    if (bytes > ENTRY_MAX || total + bytes > DOC_CAP) continue;
+    total += bytes;
+    out.push({ key: e.key, outputs: e.outputs, at: typeof e.at === "string" ? e.at.slice(0, 40) : "", ms: num(e.ms), total: num(e.total), ...(typeof e.engine === "string" ? { engine: e.engine.slice(0, 64) } : {}), where: "file" });
+  }
+  return out;
+}
+
+/**
+ * A cache in memory, for a downloaded board: the outputs it carries
+ * (carriedOutputs()) are the cache of the first board shown that asks for
+ * them, the one the file holds; what runs meanwhile is kept until the page
+ * closes.  Another board shown in its place drops them, as any cache's.
+ */
+export class MemoryOutputCache implements OutputCache {
+  private docs = new Map<string, Map<string, CachedOutputs>>();
+  constructor(private carried: CachedOutputs[] = []) {}
+  private of(doc: string): Map<string, CachedOutputs> {
+    let m = this.docs.get(doc);
+    if (!m) {
+      m = new Map(this.carried.map((e) => [e.key, e]));
+      this.carried = [];
+      this.docs.set(doc, m);
+    }
+    return m;
+  }
+  async get(doc: string, keys: string[]): Promise<Map<string, CachedOutputs>> {
+    const m = this.of(doc), out = new Map<string, CachedOutputs>();
+    for (const k of keys) if (m.has(k)) out.set(k, m.get(k)!);
+    return out;
+  }
+  async put(doc: string, entry: CachedOutputs): Promise<void> {
+    if (sizeOf(entry.outputs) <= ENTRY_MAX) this.of(doc).set(entry.key, { ...entry, where: undefined });
+  }
+  async sweep(doc: string, live: Set<string>): Promise<void> {
+    const m = this.of(doc);
+    const entries = [...m.values()].map((e, i) => ({ key: e.key, bytes: sizeOf(e.outputs), used: i }));
+    for (const k of sweepOrder(entries, live, DOC_CAP)) m.delete(k);
+  }
+  async drop(doc: string): Promise<void> {
+    this.of(doc);
+    this.docs.delete(doc);
+  }
+}
 
 /** The entries of one board to remove to fit `cap`: unmarked ones, least recently used first; marked ones only if they alone are over it. */
 export function sweepOrder(entries: { key: string; bytes: number; used: number }[], live: Set<string>, cap: number): string[] {

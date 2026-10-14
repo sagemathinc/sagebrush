@@ -212,6 +212,40 @@ try {
   check(await ran(), "the latest with another api: the file runs its code: " + await caption());
   check(!requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`) || u.startsWith(`${site}engine/${other}/manifest.json`) || u === `${site}engine/latest.json`));
   overrides.clear();
+
+  // Outputs carried (design/outputs.md, section 3): a board's slow items'
+  // outputs go in the file; opened, it shows them at once, marked as the
+  // file's, and runs the rest; exported again, it carries them again
+  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  await ev("localStorage.clear(), 1");
+  const slowStamp = "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.3:\n    pass\nstamp = os.urandom(8).hex()\nprint('s ran:', stamp)";
+  const slow = { title: "Carried", seed: "c".repeat(64), nodes: [{ id: "s", code: slowStamp }, { id: "d", code: "print('d sees', stamp)" }, { id: "f", code: "print('fast')" }] };
+  const outs = async () => Object.fromEntries((await ev("window.sagebrush.board.outputs()")).map((o) => [o.id, o]));
+  await ev(`window.sagebrush.board.load(${JSON.stringify(slow)}).then(() => 1)`);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "a board with a slow item ran");
+  const before = await outs();
+  await ev("document.querySelector('[data-sbb=html]').click(), 1");
+  check(await until("document.querySelector('[data-sbb=htmldlg]').open && !document.querySelector('[data-sbb=html-out-set]').hidden", 5000) && (await ev("document.querySelector('[data-sbb=html-out]').checked && /kB/.test(document.querySelector('[data-sbb=html-out-size]').textContent)")), "Download as HTML offers its slow items' outputs (on), and their size");
+  await ev("document.querySelector('[data-sbb=htmldlg]').close(), 1");
+  const withOut = await ev("window.sagebrush.board.exportHtml({ outputs: true })"), noOut = await ev("window.sagebrush.board.exportHtml()");
+  // (the tag itself: board.js, inline in the file, has its template too)
+  const carriedOf = (html) => JSON.parse(/<script type="application\/json" id="sb-outputs">(\[[^<]*\])<\/script>/.exec(html)?.[1] ?? "[]");
+  const carried = carriedOf(withOut);
+  check(carried.length === 2 && carried.every((e) => /^[0-9a-f]{64}$/.test(e.key) && e.total > 2000) && !carriedOf(noOut).length, "the file carries s's and d's outputs (over 2 s from root), not f's; without, none: " + carried.map((e) => e.total).join());
+  const fc = join(dir, "carried.html");
+  writeFileSync(fc, withOut);
+  await open(fc);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'f')?.state === '' && /fast/.test(os.find((o) => o.id === 'f').output))", 90000), "opened, the file runs its fast item: " + await caption());
+  const inFile = await outs();
+  check(inFile.s.output === before.s.output && inFile.d.output === before.d.output && /^s ran: [0-9a-f]{16}/.test(inFile.s.output), "...and shows the slow ones' outputs it carries, not run again: " + JSON.stringify([before.s.output, inFile.s.output]));
+  await ev("window.board.focus(['s'], true), window.board.render(), 1");
+  check(await until("(() => { const el = document.querySelector('[data-code=s] .board-code-out > [data-cached]'); return !!el && getComputedStyle(el, '::before').content.includes('carried in this file'); })()", 5000), "...saying they were carried in the file");
+  const again = carriedOf(await ev("window.sagebrush.board.exportHtml({ outputs: true })"));
+  check(again.map((e) => e.key).sort().join() === carried.map((e) => e.key).sort().join(), "exported again from the file, it carries them again: " + again.length);
+  // changed in the file, s runs: its own output, no longer the carried one
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = ${JSON.stringify(slowStamp + "\n1")}; }).then(() => 1)`);
+  check(await until(`window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === '') && os.find((o) => o.id === 's').output !== ${JSON.stringify(before.s.output)})`, 60000), "changed in the file, s runs again, and d with it");
 } catch (e) {
   fails.push(String(e?.stack ?? e));
 } finally {

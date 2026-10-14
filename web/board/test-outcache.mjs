@@ -3,7 +3,7 @@
 // first; marked ones only if they alone are over it), and which boards a
 // browser over its cap drops whole (least recently used, never the one in
 // use).   bun web/board/test-outcache.mjs
-import { cachedLabel, dropOrder, sizeOf, sweepOrder } from "./outcache.ts";
+import { DOC_CAP, ENTRY_MAX, MemoryOutputCache, cachedLabel, carriedOutputs, dropOrder, sizeOf, sweepOrder } from "./outcache.ts";
 
 let checks = 0;
 const fails = [];
@@ -25,6 +25,24 @@ check(!dropOrder(docs, "me", 0).includes("me"), "never the board in use");
 
 check(sizeOf([{ text: "é" }]) === JSON.stringify([{ text: "é" }]).length + 1, "sizes are bytes of UTF-8");
 check(/^Computed .+ \(12 s\), kept in this browser\. Run to recompute\.$/.test(cachedLabel({ key: "k", outputs: [], at: "2026-10-13T12:00:00.000Z", ms: 1, total: 12345 })), "its label");
+
+// what a downloaded board carries (section 3): checked, bounded, marked as the file's
+const K = (c) => c.repeat(64);
+const good = { key: K("a"), outputs: [{ output_type: "stream", name: "stdout", text: "hi\n" }], at: "2026-10-14T00:00:00.000Z", ms: 2100, total: 2100, where: "browser" };
+const got = carriedOutputs([good, { key: "zz", outputs: [] }, { key: K("b"), outputs: "no" }, null, 7, { key: K("c"), outputs: [], ms: -5, total: NaN, at: 9 }, { key: K("d"), outputs: ["x".repeat(ENTRY_MAX + 1)] }]);
+check(got.map((e) => e.key).join() === [K("a"), K("c")].join(), "carried outputs: only well-formed entries, none over ENTRY_MAX: " + got.length);
+check(got.every((e) => e.where === "file") && got[1].ms === 0 && got[1].total === 0 && got[1].at === "", "...marked as the file's (whatever the file says), numbers and dates checked");
+check(carriedOutputs({ key: K("a") }).length === 0 && carriedOutputs(null).length === 0, "...and nothing from what isn't a list");
+const big = Array.from({ length: 6 }, (_, i) => ({ key: K(String(i)), outputs: ["x".repeat(15e6)] }));
+check(carriedOutputs(big).length === Math.floor(DOC_CAP / sizeOf(big[0].outputs)), "...at most DOC_CAP in all: " + carriedOutputs(big).length);
+check(/carried in this file/.test(cachedLabel(got[0])), "...and labelled so");
+const mem = new MemoryOutputCache(got);
+check((await mem.get("doc1", [K("a"), K("z")])).size === 1, "in memory: the carried outputs are the first board's that asks");
+check((await mem.get("doc2", [K("a")])).size === 0, "...not another's");
+await mem.drop("doc1");
+check((await mem.get("doc1", [K("a")])).size === 0, "...and gone with it");
+await mem.put("doc3", { key: K("e"), outputs: [], at: "", ms: 1, total: 3000 });
+check((await mem.get("doc3", [K("e")])).get(K("e"))?.where === undefined, "what runs is kept until the page closes, as computed here");
 
 if (fails.length) {
   console.log(`${fails.length} of ${checks} checks failed:\n  ` + fails.join("\n  "));

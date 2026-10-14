@@ -28,9 +28,9 @@ import { synthetic } from "./board";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { OWN_ENGINE, chooseEngine, fileEngine } from "./engine";
-import { IdbOutputCache } from "./outcache";
+import { IdbOutputCache, MemoryOutputCache, carriedOutputs } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
-import { embedded, engineRef, exportHtml } from "./export";
+import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
 import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
@@ -98,8 +98,9 @@ const host: BoardHost = {
   },
   // pictures: kept in this browser by name
   images: new Images(),
-  // slow code items' outputs, kept in this browser (outcache.ts); not in an exported file
-  outputs: file || bench ? undefined : new IdbOutputCache(OWN_ENGINE?.id),
+  // slow code items' outputs, kept in this browser (outcache.ts); in an
+  // exported file, those it carries (and what runs, until the page closes)
+  outputs: bench ? undefined : file ? new MemoryOutputCache(carriedOutputs(fileOutputs())) : new IdbOutputCache(OWN_ENGINE?.id),
   // the engine of code items: the site's, Python in the runner, an
   // opaque-origin sandboxed frame, as on the notebook page (design/runner.md);
   // an exported file's, carried in it or fetched from its site, by its id or
