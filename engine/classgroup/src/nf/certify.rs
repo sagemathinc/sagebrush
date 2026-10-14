@@ -160,8 +160,36 @@ pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: 
         let vq: Vec<BigRational> = v.iter().map(|x| BigRational::from_integer(x.clone())).collect();
         vec_mat(&vq, qi).iter().map(|q| q.round().to_integer()).collect()
     }).collect();
-    let rows: ZMat = coords.iter().enumerate().map(|(k, c)| c.iter().cloned().chain((0..m).map(|j| BigInt::from((j == k) as i32))).collect()).collect();
-    let t: Vec<Vec<BigInt>> = hnf(&rows).into_iter().filter(|row| row[..r].iter().any(|x| !x.is_zero())).map(|row| row[r..].to_vec()).collect();
+    // only the lambdas whose coordinates change the HNF of those before
+    // them: they generate the same lattice, and the HNF of [C | I] below
+    // stays small (over all 1467 lambdas of a sextic field it took 37 s)
+    let mut chosen: Vec<usize> = vec![];
+    let mut h: ZMat = vec![];
+    for (k, cv) in coords.iter().enumerate() {
+        if cv.iter().all(|x| x.is_zero()) {
+            continue;
+        }
+        let mut trial = h.clone();
+        trial.push(cv.clone());
+        let ht = hnf(&trial);
+        if ht != h {
+            h = ht;
+            chosen.push(k);
+            if h.len() == r && (0..r).all(|i| h[i][i].is_one()) {
+                break; // all of Z^r: no other lambda can add anything
+            }
+        }
+    }
+    let mc = chosen.len();
+    let rows: ZMat = chosen.iter().enumerate().map(|(k, &i)| coords[i].iter().cloned().chain((0..mc).map(|j| BigInt::from((j == k) as i32))).collect()).collect();
+    // T over all the lambdas (zero outside `chosen`)
+    let t: Vec<Vec<BigInt>> = hnf(&rows).into_iter().filter(|row| row[..r].iter().any(|x| !x.is_zero())).map(|row| {
+        let mut full = vec![BigInt::zero(); m];
+        for (j, &i) in chosen.iter().enumerate() {
+            full[i] = row[r + j].clone();
+        }
+        full
+    }).collect();
     if t.len() != r {
         return Err(false);
     }
