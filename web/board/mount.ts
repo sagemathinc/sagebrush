@@ -904,13 +904,28 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const use = f.get("engine") === "latest" ? "latest" : undefined;
     if (doc && use !== doc.engine) await editor.commit((d) => { if (use) d.engine = use; else delete d.engine; });
     // (the outputs as they are now: not as when the dialog opened, another board perhaps, CORR-2D0-1)
-    await downloadHtml(f.get("python") === "on", f.get("outputs") === "on" && carried.length ? ((await code?.carry().catch(() => [])) ?? []) : []);
+    await downloadHtml(f.get("python") === "on", f.get("outputs") === "on" && carried.length > 0);
   };
-  async function downloadHtml(python: boolean, outputs: CachedOutputs[] = []) {
+  /** The document to export and, with `outputs`, its slow items' outputs:
+   * of the same moment, the notebook's code that of this document (else read
+   * again), so a file never carries an output of code it doesn't have
+   * (CORR-2D0-1, CORR-2BF-1). */
+  async function toExport(outputs: boolean): Promise<{ d: BoardDoc; outputs: CachedOutputs[] }> {
+    for (let i = 0; i < 5; i++) {
+      const d = doc!;
+      if (!outputs || !code) return { d, outputs: [] };
+      const got = await code.carry({ mode: d.mode ?? "python", seed: d.seed, items: codeOrder(d) }).catch(() => []);
+      if (got && doc === d) return { d, outputs: got };
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return { d: doc!, outputs: [] };
+  }
+  async function downloadHtml(python: boolean, outputs = false) {
     if (!doc) return;
     try {
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(doc), { python, outputs })], { type: "text/html" }));
+      const x = await toExport(outputs);
+      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(x.d), { python, outputs: x.outputs })], { type: "text/html" }));
       a.download = fileName().replace(/\.board\.json$/, ".html");
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -1351,8 +1366,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** A Mermaid flowchart (or Markdown with some) as a board document, to load(), or to edit first. */
       fromMermaid: (text: string) => boardFromText(text),
       /** The board as one self-contained HTML file (its text); with `outputs`, carrying its slow items' outputs. */
-      exportHtml: async (o?: { python?: boolean; outputs?: boolean }) =>
-        host.exportHtml!(await images.inline(doc!), { python: o?.python, outputs: o?.outputs ? ((await code?.carry()) ?? []) : [] }),
+      exportHtml: async (o?: { python?: boolean; outputs?: boolean }) => {
+        const x = await toExport(!!o?.outputs);
+        return host.exportHtml!(await images.inline(x.d), { python: o?.python, outputs: x.outputs });
+      },
       /** the document as a file carries it: with its pictures (data: URLs) */
       portable: () => images.inline(doc!),
       /** the board's file (foo.board.json), as Download JSON writes it */

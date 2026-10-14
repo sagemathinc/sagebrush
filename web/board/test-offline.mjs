@@ -255,7 +255,11 @@ try {
   await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = ${JSON.stringify(slowStamp.replace("s ran:", "NEW s ran:"))}; }).then(() => 1)`);
   await until("window.sagebrush.board.outputs().then((os) => /NEW/.test(os.find((o) => o.id === 's').output) && os.every((o) => o.state === ''))", 60000);
   await ev("window.__gate(), 1");
-  const raced = carriedOf(await ev("window.__carry"));
+  const racedHtml = await ev("window.__carry"), raced = carriedOf(racedHtml);
+  // (and the file's source is the same moment's: an output of the new code only beside the new code, CORR-2BF-1)
+  const racedDoc = JSON.parse(/<script type="application\/json" id="sb-doc">([^<]*)<\/script>/.exec(racedHtml)[1]);
+  const newSource = /NEW/.test(racedDoc.nodes.find((x) => x.id === "s").code);
+  check(raced.every((e) => !JSON.stringify(e.outputs).includes("NEW") || newSource), "...and the file's source is theirs: no output of code the file doesn't have (source " + (newSource ? "new" : "old") + ")");
   const newKey = (await ev("window.sagebrush.board.outputKeys()")).s.key;
   const bad = raced.filter((e) => (e.key === oldKey && JSON.stringify(e.outputs).includes("NEW")) || (e.key === newKey && !JSON.stringify(e.outputs).includes("NEW")));
   check(newKey !== oldKey && !bad.length, "changed and run while the outputs to carry were found: each carried output is its key's: " + raced.map((e) => (e.key === oldKey ? "old" : e.key === newKey ? "new" : "other") + ":" + /NEW/.test(JSON.stringify(e.outputs))).join());
