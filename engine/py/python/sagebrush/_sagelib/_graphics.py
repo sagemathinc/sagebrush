@@ -471,6 +471,9 @@ def _marker(m, x, y, r, color, edge=None):
     if m in ("s", "square"):
         return '<rect x="%s" y="%s" width="%s" height="%s" fill="%s"%s/>' % (
             _fmt(x - r), _fmt(y - r), _fmt(2 * r), _fmt(2 * r), c, st)
+    if m in ("_", "|"):
+        d = "M%s %sH%s" % (_fmt(x - r), Y, _fmt(x + r)) if m == "_" else "M%s %sV%s" % (X, _fmt(y - r), _fmt(y + r))
+        return '<path d="%s" stroke="%s" stroke-width="1.2" fill="none"/>' % (d, c)
     if m in ("+", "x"):
         if m == "+":
             d = "M%s %sH%sM%s %sV%s" % (_fmt(x - r), Y, _fmt(x + r), X, _fmt(y - r), _fmt(y + r))

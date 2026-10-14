@@ -326,28 +326,70 @@ class Axes:
                     alpha=0.5 if alpha is None else alpha, label=label)
         return _Artist(self._add(p), "collections.PolyCollection")
 
-    def errorbar(self, x, y, yerr=None, xerr=None, fmt="", color=None, capsize=3, label=None, **kw):
+    def errorbar(self, x, y, yerr=None, xerr=None, fmt="", ecolor=None, elinewidth=None, capsize=None, color=None,
+                 label=None, **kw):
+        """Error bars as matplotlib's: each of yerr and xerr a scalar, N values (both
+        ways) or a (2, N) array of the lower and upper errors; fmt '' draws the data
+        as a line, 'o' (a marker alone) as markers, 'none' not at all; caps only with
+        capsize > 0 (matplotlib's default is 0)."""
+        import numpy as np
         xs, ys = _list(x), _list(y)
-        col = self._color(color or _parse_fmt(fmt)[0])
-        segs_x, segs_y = [], []
+        if not isinstance(xs, list):
+            xs = [xs]
+        if not isinstance(ys, list):
+            ys = [ys]
+        n = len(xs)
+
+        def lohi(err, name):
+            if err is None:
+                return None
+            a = np.asarray(err, dtype=float)
+            if a.ndim == 0 or (a.ndim == 1 and a.shape[0] == 1 and n != 1):
+                v = float(a.reshape(-1)[0])
+                lo = hi = [v] * n
+            elif a.ndim == 1 and a.shape[0] == n:
+                lo = hi = [float(v) for v in a]
+            elif a.ndim == 2 and a.shape[0] == 2 and a.shape[1] == n:
+                lo, hi = [float(v) for v in a[0]], [float(v) for v in a[1]]
+            else:
+                raise ValueError("'%s' (shape: %s) must be a scalar or a 1D or (2, n) array-like whose shape matches "
+                                 "'%s' (shape: (%d,))" % (name, tuple(a.shape), "y" if name == "yerr" else "x", n))
+            if any(v < 0 for v in lo + hi):
+                raise ValueError("'%s' must not contain negative values" % name)
+            return lo, hi
+        ye, xe = lohi(yerr, "yerr"), lohi(xerr, "xerr")
+        fcolor, marker, ls = _parse_fmt(fmt) if fmt not in ("none", "None") else (None, None, None)
+        col = self._color(color or fcolor)
+        ecol = to_color(ecolor) if ecolor is not None else col
+        sx, sy = [], []
+        caps = ([], [], [], [])  # (x, y) of horizontal caps (on y bars), then of vertical ones
         for i, (xi, yi) in enumerate(zip(xs, ys)):
-            for err, vertical in ((yerr, True), (xerr, False)):
-                if err is None:
-                    continue
-                e = err if isinstance(err, (int, float)) else _list(err)[i]
-                if vertical:
-                    segs_x += [xi, xi, None]
-                    segs_y += [yi - e, yi + e, None]
-                else:
-                    segs_x += [xi - e, xi + e, None]
-                    segs_y += [yi, yi, None]
-        self._add(Line(segs_x, segs_y, color=col, thickness=1.2))
-        m = _parse_fmt(fmt)[1] or "o"
-        ls = _parse_fmt(fmt)[2]
-        if ls and ls != "None":
-            self._add(Line(xs, ys, color=col, thickness=1.5 * PT, marker=m, markersize=3, label=label))
-        else:
-            self._add(Points(xs, ys, color=col, marker=m, size=3.5, label=label))
+            if ye is not None:
+                sx += [xi, xi, None]
+                sy += [yi - ye[0][i], yi + ye[1][i], None]
+                caps[0].extend([xi, xi])
+                caps[1].extend([yi - ye[0][i], yi + ye[1][i]])
+            if xe is not None:
+                sx += [xi - xe[0][i], xi + xe[1][i], None]
+                sy += [yi, yi, None]
+                caps[2].extend([xi - xe[0][i], xi + xe[1][i]])
+                caps[3].extend([yi, yi])
+        if sx:
+            self._add(Line(sx, sy, color=ecol, thickness=(float(elinewidth) if elinewidth is not None else 1.5) * PT))
+        if capsize:
+            r = float(capsize) * PT
+            if caps[0]:
+                self._add(Points(caps[0], caps[1], color=ecol, marker="_", size=r))
+            if caps[2]:
+                self._add(Points(caps[2], caps[3], color=ecol, marker="|", size=r))
+        if fmt not in ("none", "None"):
+            if ls is None:
+                ls = "-"
+            if ls != "None":
+                self._add(Line(xs, ys, color=col, thickness=1.5 * PT, marker=marker, markersize=3, label=label))
+            else:
+                self._add(Points(xs, ys, color=col, marker=marker or "o", size=3.5, label=label))
+        return _Artist(self._prims[-1], "container.ErrorbarContainer")
 
     def step(self, x, y, *args, where="pre", **kw):
         xs, ys = _list(x), _list(y)

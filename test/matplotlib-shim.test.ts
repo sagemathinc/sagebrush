@@ -106,3 +106,38 @@ print(fig._repr_svg_())
   assert.equal(edges.length, 2);
   assert.ok(Math.abs(edges[0] - 0.25) < 0.01 && Math.abs(edges[1] - 0.75) < 0.01, String(edges));
 });
+
+test("errorbar: scalar, 1-D and (2, N) errors as matplotlib's (limits, errors); fmt '' a line", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import numpy as np
+import re
+x = np.array([1.0, 2.0, 3.0]); y = np.array([2.0, 4.0, 3.0])
+for kw in [{"yerr": 0.5}, {"yerr": [0.1, 0.2, 0.3]}, {"yerr": [[0.1, 0.2, 0.3], [1.0, 2.0, 3.0]]}, {"xerr": [[0.5, 0.5, 0.5], [0.1, 0.1, 2.0]], "yerr": 0.2},
+           {"yerr": np.array([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0]])}]:
+    fig, ax = plt.subplots()
+    ax.errorbar(x, y, fmt="o", **kw)
+    print(tuple(round(float(v), 6) for v in ax.get_xlim()), tuple(round(float(v), 6) for v in ax.get_ylim()))
+fig, ax = plt.subplots()
+for kw in [{"yerr": [[1, 2], [3, 4]]}, {"yerr": [-1, 0, 1]}, {"xerr": [[0.1, 0.2, 0.3]] * 3}]:
+    try:
+        ax.errorbar([1, 2, 3], [1, 2, 3], **kw)
+    except ValueError as e:
+        print(e)
+fig, ax = plt.subplots()
+ax.errorbar([1, 2, 3], [2, 4, 3], yerr=[[0.1, 0.2, 0.3], [1, 2, 3]], capsize=3)
+print(re.search(r'aria-label="([^"]*)"', fig._repr_svg_()).group(1))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "(0.9, 3.1) (1.35, 4.65)",
+    "(0.9, 3.1) (1.785, 4.315)",
+    "(0.9, 3.1) (1.695, 6.205)",
+    "(0.275, 5.225) (1.68, 4.32)",
+    "(0.9, 3.1) (0.85, 4.15)",
+    "'yerr' (shape: (2, 2)) must be a scalar or a 1D or (2, n) array-like whose shape matches 'y' (shape: (3,))",
+    "'yerr' must not contain negative values",
+    "'xerr' (shape: (3, 3)) must be a scalar or a 1D or (2, n) array-like whose shape matches 'x' (shape: (3,))",
+    // (the bars, their 6 caps, and the data as a line)
+    "Plot: line through 6 points, 6 points, line through 3 points; x from 0.9 to 3.1, y from 1.695 to 6.205",
+  ]);
+});
