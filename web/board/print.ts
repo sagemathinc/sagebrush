@@ -3,7 +3,8 @@
 // selectable, their math KaTeX's, both vector in a PDF); groups and edges,
 // which the screen draws on a canvas, are SVG here, so nothing is a bitmap.
 
-import { farLabel, plainTitle, type Board, type Item, type Edge } from "./board";
+import { INK, farLabel, plainTitle, type Board, type Item, type Edge } from "./board";
+import { inkPath } from "./ink";
 
 export interface Sheet {
   items: Item[];
@@ -182,9 +183,11 @@ export async function printSheets(board: Board, sheets: Sheet[], o: PrintOptions
         el.style.cssText = `left:${it.x}px;top:${it.y}px;width:${w}px;height:${h}px;` + (it.color && it.kind !== "group" ? `--c:${it.color};` : "");
         world.append(el);
       }
-      const ink = shown.filter((it) => it.kind === "ink" && it.points);
+      const ink = shown.filter((it) => it.kind === "ink" && (it.points || it.outline));
       if (ink.length) {
         const paths = ink.map((it) => {
+          // (a pen's stroke: its outline, filled)
+          if (it.outline) return `<path d="${inkPath(it.outline.map((v, i) => v + (i % 2 ? it.y : it.x)), 1)}" fill="${esc(it.color ?? INK)}"${it.opacity !== undefined ? ` fill-opacity="${it.opacity}"` : ""}/>`;
           const p = it.points!;
           let d = "";
           for (let i = 0; i < p.length; i += 2) d += (i ? "L" : "M") + (it.x + p[i]).toFixed(1) + " " + (it.y + p[i + 1]).toFixed(1);
