@@ -5,7 +5,12 @@
 // uncached load is shown after it (CORR-3D2-2); merge3(d, d, d) is d, for
 // ids holding anything (CORR-3D2-3); a picture removed on one side stays
 // removed (CORR-3D2-4); an edit made from the view before a document given
-// the board was shown is merged with it.
+// the board was shown is merged with it; a change made elsewhere during the
+// first sync is merged before a copy's edits are pushed (CORR-891-1); pages
+// without ids keep their identity when another is put in front
+// (CORR-891-2); an edit made from the first of two documents given the
+// board is merged with the second (CORR-891-3); a picture removed here and
+// changed there stays removed (CORR-891-4).
 //   bun web/board/test-cached-store.mjs
 import { cachedStore, merge3 } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
@@ -24,7 +29,8 @@ const memCache = () => { const m = new Map(); return { m, get: async (k) => m.ge
 const fakeRemote = (d) => {
   const r = { doc: d && copy(d), calls: [], holds: {}, fs: new Set() };
   const gate = async (name) => { r.calls.push(name); const h = r.holds[name]; if (h) { delete r.holds[name]; await h.p; } };
-  r.hash = async () => { await gate("hash"); return r.doc ? hashOf(r.doc) : null; };
+  // (the hash of the document it has when asked, answered when let go)
+  r.hash = async () => { const h = r.doc ? await hashOf(r.doc) : null; await gate("hash"); return h; };
   r.load = async () => { const d0 = r.doc && copy(r.doc); await gate("load"); return d0; };
   r.save = async (x) => { await gate("save"); r.doc = copy(x); };
   r.subscribe = (f) => { r.fs.add(f); return () => r.fs.delete(f); };
@@ -134,6 +140,75 @@ const freeDigest = () => { crypto.subtle.digest = realDigest; };
   check(shown.at(-1) === "mine+theirs", "...and the merge shown: " + shown.join(" | "));
   await tick(50);
   check(R.doc.nodes.map((x) => x.title).join("+") === "mine+theirs", "...and the remote's: " + R.doc.nodes.map((x) => x.title).join("+"));
+}
+
+// CORR-891-1: a copy with an edit the remote has not seen; a change made elsewhere while the remote's hash is asked
+{
+  const cache = memCache(), base = cleanDoc({ title: "T", nodes: [{ id: "n", title: "base" }] }), ours = cleanDoc({ title: "T", nodes: [{ id: "n", title: "ours" }] });
+  await cache.put({ key: "k4", json: canonical(ours), hash: await hashOf(ours), remoteHash: await hashOf(base), base: canonical(base), at: 0 });
+  const R = fakeRemote(base);
+  R.holds.hash = held();
+  const hashGate = R.holds.hash;
+  const store = cachedStore(R, "k4", cache);
+  const shown = [];
+  store.subscribe((d) => { shown.push(d.nodes.map((x) => x.title).join("+")); });
+  await store.load();
+  await tick();
+  R.change({ title: "T", nodes: [{ id: "n", title: "base" }, { id: "t", title: "theirs" }] });
+  hashGate.open();
+  await store.synced;
+  await tick(50);
+  const copyNow = JSON.parse(cache.m.get("k4").json).nodes.map((x) => x.title).join("+"), remoteNow = R.doc.nodes.map((x) => x.title).join("+");
+  check(copyNow === "ours+theirs" && remoteNow === "ours+theirs" && shown.at(-1) === "ours+theirs", "a change made elsewhere during the first sync is merged before the copy is pushed: " + JSON.stringify({ copy: copyNow, remote: remoteNow, shown }));
+}
+
+// CORR-891-2: pages without ids, one put in front on one side, another's edited on the other
+{
+  const A = { title: "A", nodes: [{ id: "a", title: "A1" }] }, B = { title: "B", nodes: [{ id: "b", title: "B1" }] }, X = { title: "X", nodes: [{ id: "x", title: "X1" }] };
+  const base = cleanDoc({ pages: [A, B] });
+  const ours = cleanDoc({ pages: [{ ...A, intro: "mine" }, B] });
+  const theirs = cleanDoc({ pages: [X, A, B] });
+  const { doc: m, conflicts } = merge3(base, ours, theirs);
+  const pages = m.pages.map((p) => p.title + (p.intro ? ":" + p.intro : "")).join(",");
+  check(pages === "X,A:mine,B" && !conflicts.length, "pages without ids: one put in front there, another edited here: each edit on its own page: " + pages);
+  // (and a page removed there, its neighbour edited here)
+  const t2 = cleanDoc({ pages: [B] });
+  const r2 = merge3(base, cleanDoc({ pages: [A, { ...B, intro: "mine" }] }), t2);
+  check(r2.doc.pages.map((p) => p.title + (p.intro ? ":" + p.intro : "")).join(",") === "B:mine", "...a page removed there, the next edited here: " + r2.doc.pages.map((p) => p.title + (p.intro ? ":" + p.intro : "")).join(","));
+}
+
+// CORR-891-3: two documents given the board, the first shown, the second not yet; an edit made from the first
+{
+  const cache = memCache(), base = cleanDoc({ title: "base", nodes: [{ id: "n", title: "N" }] });
+  await cache.put({ key: "k5", json: canonical(base), hash: await hashOf(base), remoteHash: await hashOf(base), at: 0 });
+  const R = fakeRemote(base);
+  const store = cachedStore(R, "k5", cache);
+  const gates = [], given = [];
+  store.subscribe((d) => { given.push(d.title + "/" + d.nodes[0].title); const g = held(); gates.push(g); return g.p; });
+  await store.load();
+  await store.synced;
+  R.change({ title: "r1", nodes: [{ id: "n", title: "N" }] });
+  await tick(30);
+  R.change({ title: "r2", nodes: [{ id: "n", title: "N" }] });
+  await tick(30);
+  gates[0].open();
+  await tick(30);
+  store.save(cleanDoc({ title: "r1", nodes: [{ id: "n", title: "mine" }] }));
+  await tick(50);
+  const kept = JSON.parse(cache.m.get("k5").json);
+  check(kept.title === "r2" && kept.nodes[0].title === "mine", "an edit made from the first of two documents given: merged with the second, not over it: " + JSON.stringify({ title: kept.title, n: kept.nodes[0].title }));
+  for (const g of gates) g.open();
+  await tick(50);
+  check(given.at(-1) === "r2/mine" && R.doc.title === "r2" && R.doc.nodes[0].title === "mine", "...given the board, and the remote's: " + JSON.stringify({ given, remote: [R.doc.title, R.doc.nodes[0].title] }));
+}
+
+// CORR-891-4: a picture removed here and changed there: ours, removed
+{
+  const base = cleanDoc({ images: { a: { w: 10, h: 10 } }, nodes: [{ id: "n" }] });
+  const ours = copy(base); delete ours.images;
+  const theirs = copy(base); theirs.images.a = { w: 30, h: 30 };
+  const { doc: m, conflicts } = merge3(base, ours, theirs);
+  check(!m.images?.a && conflicts.length === 1, "a picture removed here and changed there: ours, removed, listed: " + JSON.stringify([m.images, conflicts.length]));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
