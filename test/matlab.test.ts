@@ -945,3 +945,59 @@ test("quad: its published example, the evaluation count, trace, warnings and ref
     "quad: tol must be a nonnegative scalar.",
   ]);
 });
+
+test("integral and quadgk reproduce their published examples", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "fprintf('%.15f\\n', integral(@(x) log(x),0,1));",
+    "fprintf('%.15f\\n', integral(@(x) log(x),0,1,AbsoluteTolerance=1e-12,RelativeTolerance=0));",
+    // (published: -14.999999999998360; Sagebrush's last digits differ)
+    "q = integral(@(x) x.^5.*exp(-x).*sin(x),0,Inf,AbsoluteTolerance=1e-13,RelativeTolerance=1e-8); fprintf('%.12f\\n', q);",
+    "fprintf('%.4f\\n', integral(@(x) exp(-x.^2).*log(x).^2,0,Inf));",
+    "fun = @(x,c) 1./(x.^3-2*x-c); fprintf('%.4f\\n', integral(@(x) fun(x,5),0,2));",
+    "q = integral(@(z) 1./(2*z-1),0,0,Waypoints=[1+1i,1-1i]); fprintf('%.4f %.4f\\n', abs(real(q)), imag(q));",
+    "fprintf('%.4f ', integral(@(x) sin((1:5)*x),0,1,ArrayValued=true)); fprintf('\\n');",
+    "fprintf('%.4f\\n', integral(@(x) 2*x-x^2,0,1,Vectorized=false));",
+    "fprintf('%.4f\\n', quadgk(@(x) exp(x).*log(x),0,1));",
+    "q = quadgk(@(z) 1./(2.*z-1),1,1,'Waypoints',[1+1i 0+1i 0-1i 1-1i]); fprintf('%.4f %.4f\\n', abs(real(q)), imag(q));",
+    "[Q,errbnd] = quadgk(@(x) sin(2e4*pi*x),0,pi); fprintf('%.4f %.4f\\n', Q, errbnd);",
+    // (published: errbnd 2.6323e-12; Sagebrush's estimate is 2.5e-11, below the tolerance too)
+    "[Q,errbnd] = quadgk(@(x) sin(2e4*pi*x),0,pi,'MaxIntervalCount',1e5); fprintf('%.4e %d\\n', Q, errbnd < 1e-10);",
+  ].join("\n")], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  assert.deepEqual(out.trim().split("\n"), [
+    "-1.000000010959678", "-1.000000000000010", "-14.999999999998", "1.9475", "-0.4605", "0.0000 -3.1416",
+    "0.4597 0.7081 0.6633 0.4134 0.1433 ", "0.6667", "-1.3179", "0.0000 3.1416", "-0.0082 0.5723", "1.6656e-06 1"]);
+});
+
+test("integral and quadgk: infinite and reversed limits, waypoints, warnings and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "disp(abs(integral(@(x) exp(-x.^2), -Inf, Inf) - sqrt(pi)) < 1e-8);",
+    "disp(abs(integral(@(x) exp(x), -Inf, 2, 'Waypoints', [-5 0]) - exp(2)) < 1e-9);",
+    "disp(abs(integral(@(x) exp(x), 1, 0) + (exp(1) - 1)) < 1e-12);",
+    "disp(integral(@(x) x, 2, 2)); disp(class(quadgk(@(x) x, single(0), 1)));",
+    "lastwarn(''); [q, e] = quadgk(@(x) sin(2e4*pi*x), 0, pi); disp(lastwarn);",
+    "lastwarn(''); q = integral(@(x) sin(2e4*pi*x), 0, pi); disp(lastwarn);",
+    "try, integral(@(x) 1, 0, 1), catch err, disp(err.message), end",
+    "try, integral(@(x) x, 0, 1, 'MaxIntervalCount', 10), catch err, disp(err.message), end",
+    "try, quadgk(@(x) x, 0, 1, 'ArrayValued', true), catch err, disp(err.message), end",
+    "try, integral(@(x) x, 0, 1, 'AbsTol', -1), catch err, disp(err.message), end",
+    "try, integral(@(x) x, 0, 1, 'Waypoints', 2), catch err, disp(err.message), end",
+    "try, integral(@(x) NaN*x, 0, 1), catch err, disp(err.message), end",
+    "lastwarn(''); q = integral(@(x) 1./x, 0, 1); disp(lastwarn);",
+    "try, integral(@(x) x, 0, Inf, 'Waypoints', 1i), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), [
+    "1", "1", "1", "0", "single",
+    "Reached the limit on the maximum number of intervals in use. Approximate bound on error is 5.7e-01.",
+    "integral: Reached the limit on the maximum number of intervals in use. Approximate bound on error is 5.7e-01. The tolerances were not met.",
+    "integral: the integrand must return an array the size of its input; use array operators (.*, ./, .^) or set ArrayValued.",
+    "integral: unknown option 'MaxIntervalCount'.",
+    "quadgk: unknown option 'ArrayValued'.",
+    "integral: AbsTol must be a nonnegative real scalar.",
+    "Waypoints must lie strictly between the limits of integration.",
+    "integral: the integrand is Inf or NaN at the first points tried; no approximation of the integral is possible.",
+    "integral: the integrand is Inf or NaN at some points; the last approximation is returned. Approximate bound on error is 2.4e+00.",
+    "Contour integration requires all limits and waypoints to be finite.",
+  ]);
+});
