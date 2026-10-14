@@ -428,6 +428,8 @@ export class Editor {
       }
     };
     const up = (u: PointerEvent) => {
+      // (where it was let go: the last move may not have come, coalesced away)
+      if (u.type === "pointerup") move(u);
       removeEventListener("pointermove", move);
       removeEventListener("pointerup", up);
       removeEventListener("pointercancel", up);
@@ -502,7 +504,9 @@ export class Editor {
       w = Math.max(it.kind === "sticker" ? 16 : ratio ? 24 : 120, Math.round(w0 + (m.clientX - x0) / z));
       this.board.resizeItem(it.id, w, ratio ? Math.round(w * ratio) : undefined);
     };
-    const up = () => {
+    const up = (u: PointerEvent) => {
+      // (where it was let go: the last move may not have come)
+      if (u.type === "pointerup") move(u);
       removeEventListener("pointermove", move);
       removeEventListener("pointerup", up);
       removeEventListener("pointercancel", up);
