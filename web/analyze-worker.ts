@@ -3,7 +3,7 @@
 // (src/notebook-graph.ts).  Not in the page, whose script stays small, and
 // not in the interpreter's worker, which is busy while a cell runs.
 //
-// In:  {id, code, mode}   mode: "python" | "sage" | "magma"
+// In:  {id, code, mode}   mode: "python" | "sage" | "magma" | "matlab"
 // Out: {id, defs, refs, deleted, mutations} (arrays of names), or {id, error: {kind, message}}
 //      (kind "syntax" or "import-star")
 //      {id, rename: {name, cells: [{id, code, defines, reads}], taken, mode, sep?}}

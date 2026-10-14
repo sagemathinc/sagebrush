@@ -14,7 +14,7 @@
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
 
-type Mode = "python" | "sage" | "magma";
+type Mode = "python" | "sage" | "magma" | "matlab";
 
 interface Occurrence {
   line: number; // 1-based
@@ -1130,7 +1130,7 @@ export function takeInitLines(code: string): { code: string; inits: [string, str
  * attribute or an item, are never evaluated.
  */
 export function forwardRefers(code: string, name: string, mode: Mode = "python"): boolean {
-  if (mode === "magma" || !code.includes(name)) return false;
+  if (mode === "magma" || mode === "matlab" || !code.includes(name)) return false;
   let tree: any;
   try {
     tree = parse(mode === "sage" ? preparse(code) : code, "exec");
@@ -1179,11 +1179,11 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
  * every occurrence (a cell reading the renamed definition); "definition"
  * keeps the occurrences before the cell first binds the name, and the reads
  * in the statement that binds it (`x = x + 1` -> `x_2 = x + 1`).  Returns the
- * new source, or null if it cannot be done reliably (Magma; a Sage cell
+ * new source, or null if it cannot be done reliably (Magma, MATLAB; a Sage cell
  * whose occurrences do not correspond after preparsing; a syntax error).
  */
 export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
-  if (opts.mode === "magma") return null;
+  if (opts.mode === "magma" || opts.mode === "matlab") return null;
   const analyzed = opts.mode === "sage" ? preparse(source) : source;
   let tree: any;
   try {
