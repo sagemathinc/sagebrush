@@ -7,7 +7,8 @@
 // gets once, whatever it shows, is there before: the shared stylesheets, the
 // notebook's module.  So the page's own board is used as the rounds use theirs
 // before the count starts.)  Also: a document loaded while the page's store
-// is still opening its own stays.  Serve
+// is still opening its own stays; a board destroyed during a drag takes the
+// drag's listeners with it.  Serve
 // web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-mount.mjs
 import { spawn } from "node:child_process";
@@ -111,6 +112,25 @@ try {
       check(await until("!document.querySelector('#board [data-sbb=tt]').hidden", 5000), `round ${i + 1}: TimeTravel's bar is open`);
     }
     await ev("window.__b.destroy().then(() => { window.__b = null; return 1; })");
+  }
+  // a board destroyed while one of its notes is dragged (CORR-1D9-1, daybreak): the drag's listeners go with it, and letting go afterwards does nothing
+  {
+    const mouse = (type, x, y) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+    await ev("import('/board/board.js').then((m) => { window.__b = m.mountBoard(document.getElementById('board'), m.host); return 1; })");
+    check(await until("window.__b.agent.snapshot().items.length > 0", 30000), "a board to drag in");
+    await ev("window.__b.agent.editing(true), window.__b.board.focus(['about'], true), window.__b.board.render(), 1");
+    await sleep(300);
+    const p = await ev("(() => { const r = window.__b.board.clientRect('about'); return { x: r.left + r.width / 2, y: r.top + 12, x0: window.__b.board.item('about').x }; })()");
+    await mouse("mousePressed", p.x, p.y);
+    for (let i = 1; i <= 4; i++) { await mouse("mouseMoved", p.x + 15 * i, p.y); await sleep(40); }
+    const moved = await ev("window.__b.board.item('about').x");
+    await ev("window.__b.destroy().then(() => { window.__b = null; return 1; })");
+    const held = await census();
+    check(JSON.stringify(held) === JSON.stringify(start), "destroyed with the button still down, the page holds what it did: " + JSON.stringify({ start, held }));
+    for (let i = 5; i <= 8; i++) { await mouse("mouseMoved", p.x + 15 * i, p.y); await sleep(40); }
+    await mouse("mouseReleased", p.x + 120, p.y);
+    await sleep(400);
+    check(moved > p.x0, `the note was being dragged when the board was destroyed: ${p.x0} -> ${moved}`);
   }
   await sleep(500);
   const end = await census();
