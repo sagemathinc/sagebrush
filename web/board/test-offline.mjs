@@ -72,6 +72,8 @@ const open = async (file) => {
 };
 // live.json's code, run: its last items' outputs
 const ran = (ms = 90000) => until("window.sagebrush.board.outputs().then((os) => os.length === 5 && os.every((o) => o.state === '') && /^111 steps/.test(os.find((o) => o.id === 'path').output))", ms);
+// (what a check of the requests says: how many there were, and the ones it didn't expect)
+const odd = (ok) => { const bad = requests.filter((u) => !ok(u)); return `${requests.length} requests, ${bad.length} unexpected${bad.length ? ": " + bad.slice(0, 6).join(", ") : ""}`; };
 const caption = () => ev("document.querySelector('[data-sbb=say]').textContent");
 // (the engine's parts a file carries; board.js, in it too, has the tag's template)
 const parts = (html) => [...html.matchAll(/<script type="application\/octet-stream" data-sb-engine="(sagebrush-[^"]+)">/g)].map((m) => m[1]);
@@ -112,7 +114,7 @@ try {
   await online(true);
   await open(fb);
   check(await ran(), "the file without Python runs its code, with its engine from the site: " + await caption());
-  check(requests.length > 0 && requests.every((u) => u.startsWith(`${site}engine/${own.id}/`)), "...only the engine it was made with: " + requests.slice(0, 4).join(", "));
+  check(requests.length > 0 && requests.every((u) => u.startsWith(`${site}engine/${own.id}/`)), "...only the engine it was made with: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`)));
   // ...and with the network off, it says why it can't
   await online(false);
   await open(fb);
@@ -169,7 +171,7 @@ try {
   overrides.set("/engine/latest.json", Buffer.from(JSON.stringify({ id: other, api: own.api })));
   await open(fl);
   check(await ran(), "set to the latest, the file runs its code: " + await caption());
-  check(requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && !requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with the site's latest engine: " + requests.slice(0, 4).join(", "));
+  check(requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && !requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with the site's latest engine: " + odd((u) => u.startsWith(`${site}engine/${other}/`) || u === `${site}engine/latest.json`));
   // a manifest whose content doesn't give its id: not taken (HARD-CAC-4)
   const forged = "0123456789abcdef0123";
   for (const f of Object.keys(manifest.files)) overrides.set(`/engine/${forged}/${f}`, readFileSync(join(ownDir, f)));
@@ -177,11 +179,11 @@ try {
   overrides.set("/engine/latest.json", Buffer.from(JSON.stringify({ id: forged, api: own.api })));
   await open(fl);
   check(await ran(), "the latest with a manifest that isn't its id's: the file runs its code: " + await caption());
-  check(!requests.some((u) => u.startsWith(`${site}engine/${forged}/`) && !u.endsWith("/manifest.json")) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + requests.slice(0, 4).join(", "));
+  check(!requests.some((u) => u.startsWith(`${site}engine/${forged}/`) && !u.endsWith("/manifest.json")) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`) || u.startsWith(`${site}engine/${forged}/manifest.json`) || u === `${site}engine/latest.json`));
   overrides.set("/engine/latest.json", Buffer.from(JSON.stringify({ id: other, api: own.api + 1 })));
   await open(fl);
   check(await ran(), "the latest with another api: the file runs its code: " + await caption());
-  check(!requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + requests.slice(0, 4).join(", "));
+  check(!requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`) || u.startsWith(`${site}engine/${other}/manifest.json`) || u === `${site}engine/latest.json`));
   overrides.clear();
 } catch (e) {
   fails.push(String(e?.stack ?? e));
