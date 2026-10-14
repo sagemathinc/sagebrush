@@ -3709,23 +3709,31 @@ def randperm_(n, k=None):
 
 @_bs("linspace")
 def linspace_(a, b, n=100.0):
-    # (MATLAB's formula: d1 + k*(d2-d1)/(n-1), the ends exact)
-    d1 = _scalar(a)
-    d2 = _scalar(b)
-    n = int(_math.floor(_scalar(n)))
+    """linspace(x1, x2, n) as MATLAB documents it: n points from x1 to x2,
+    both included, spaced (x2 - x1)/(n - 1), so x1 + k h with the last point
+    x2 itself; 100 points by default; for n = 1, x2; for n <= 0 a 1-by-0
+    row; a non-integer n rounded down; NaN for n NaN; complex x1 and x2 too"""
+    nv = _scalar(n)
+    if nv != nv:
+        return _math.nan
+    if _math.isinf(nv):
+        raise _err("Maximum variable size allowed by the program is exceeded.")
+    n = int(_math.floor(nv))
+    A, B = _farr(a).reshape(-1), _farr(b).reshape(-1)
+    if A.size != 1 or B.size != 1:
+        raise _err("Inputs must be scalars.")
+    cplx = A.dtype.kind == "c" or B.dtype.kind == "c"
+    x1 = complex(A[0]) if cplx else float(A[0])
+    x2 = complex(B[0]) if cplx else float(B[0])
+    cls = "single" if "single" in (class_(a), class_(b)) else "double"
     if n < 1:
-        return np.zeros((0, 1))
+        return _finish(np.zeros((0, 1), dtype=np.complex128 if cplx else np.float64), cls)
     if n == 1:
-        return d2
-    n1 = n - 1
-    k = np.arange(n, dtype=np.float64)
-    y = d1 + k * (d2 - d1) / n1
-    if d1 == d2:
-        y[:] = d1
-    else:
-        y[0] = d1
-        y[-1] = d2
-    return y.reshape((n, 1))
+        return _finish(np.array([[x2]]), cls)
+    h = (x2 - x1) / (n - 1)
+    y = x1 + np.arange(n, dtype=np.float64) * h
+    y[-1] = x2
+    return _finish(y.reshape((n, 1)), cls)
 
 
 @_bs("logspace")
