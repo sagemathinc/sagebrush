@@ -554,6 +554,18 @@ function isIntLike(k: any): boolean {
   return false;
 }
 
+// An integer argument (a shape, an axis, an index) as a JS number.  A float
+// is refused, as NumPy refuses it: an integral one is a FloatBox, which
+// Number() would make NaN.
+function intNum(x: any): number {
+  const v = Obj.unbox(x);
+  if (typeof v === "number" && Number.isInteger(v)) return v;
+  if (typeof v === "bigint") return Number(v);
+  if (typeof v === "boolean") return +v;
+  if (v !== null && typeof v === "object" && v.$npscalar !== undefined && v.$npscalar !== v) return intNum(v.$npscalar);
+  return raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
+}
+
 function resolveIndex(a: NDArray, key: any): IndexResult {
   let items: any[] = Array.isArray(key) && (key as any).$t ? key.slice() : [key];
   // Ellipsis expands to the axes the other entries do not consume
@@ -691,9 +703,9 @@ function intIndex(k: any, n: number, axis: number): number {
     if (f === undefined) raise(T.IndexError, "only integers, slices (`:`), ellipsis (`...`), numpy.newaxis (`None`) and integer or boolean arrays are valid indices");
     k = f(k);
   }
-  let i = Number(Obj.unbox(k));
+  let i = intNum(k);
   if (i < 0) i += n;
-  if (i < 0 || i >= n) raise(T.IndexError, `index ${Number(Obj.unbox(k))} is out of bounds for axis ${axis} with size ${n}`);
+  if (i < 0 || i >= n) raise(T.IndexError, `index ${intNum(k)} is out of bounds for axis ${axis} with size ${n}`);
   return i;
 }
 
@@ -1360,8 +1372,8 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
 
 function axesArg(axis: any, nd: number): number[] | null {
   if (axis === null || axis === undefined) return null;
-  if (Array.isArray(axis)) return axis.map((x) => normAxis(Number(Obj.unbox(x)), nd));
-  return [normAxis(Number(Obj.unbox(axis)), nd)];
+  if (Array.isArray(axis)) return axis.map((x) => normAxis(intNum(x), nd));
+  return [normAxis(intNum(axis), nd)];
 }
 
 function sumType(dt: DType): DType {
@@ -1427,7 +1439,7 @@ function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean): any {
 
 function argminmax(a: NDArray, axis: any, isMax: boolean): any {
   if (axis === null || axis === undefined) a = ravel(a);
-  const ax = axis === null || axis === undefined ? 0 : normAxis(Number(Obj.unbox(axis)), a.ndim);
+  const ax = axis === null || axis === undefined ? 0 : normAxis(intNum(axis), a.ndim);
   if (a.shape[ax] === 0) raise(T.ValueError, `attempt to get ${isMax ? "argmax" : "argmin"} of an empty sequence`);
   const t = moveAxisToEnd(a, ax);
   const outShape = t.shape.slice(0, -1);
@@ -1466,7 +1478,7 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
     else for (let i = 0; i < n; i++) od[i] = acc = isProd ? acc * d[a.offset + i] : acc + d[a.offset + i];
     return out;
   }
-  const ax = axis === null || axis === undefined ? 0 : normAxis(Number(Obj.unbox(axis)), a.ndim);
+  const ax = axis === null || axis === undefined ? 0 : normAxis(intNum(axis), a.ndim);
   const rt = dtype !== null && dtype !== undefined ? toDtype(dtype) : sumType(a.dt);
   const out = empty(a.shape, rt);
   const t = moveAxisToEnd(a, ax), o = moveAxisToEnd(out, ax);
@@ -2081,8 +2093,8 @@ newBuiltinModule("_numpy", (m) => {
   M("item", (a: NDArray, ...idx: any[]) => {
     if (idx.length === 0) return scalarOf(a);
     const c = ascontig(a);
-    let i = Number(Obj.unbox(idx.length === 1 ? idx[0] : 0));
-    if (idx.length > 1) i = idx.reduce((acc: number, v: any, d: number) => acc * a.shape[d] + Number(Obj.unbox(v)), 0);
+    let i = intNum(idx.length === 1 ? idx[0] : 0);
+    if (idx.length > 1) i = idx.reduce((acc: number, v: any, d: number) => acc * a.shape[d] + intNum(v), 0);
     if (i < 0) i += a.size;
     return pyPlain(a.dt, c.data, i);
   });
@@ -2103,11 +2115,9 @@ newBuiltinModule("_numpy", (m) => {
   m.ndarray = A;
 
   const shapeArg = (s: any): number[] => {
-    if (Array.isArray(s)) return s.map((x: any) => Number(Obj.unbox(x)));
-    if (s instanceof NDArray) return tolist(ravel(s)).map(Number);
-    const n = Number(Obj.unbox(s));
-    if (!Number.isInteger(n)) raise(T.TypeError, `'${typeName(s)}' object cannot be interpreted as an integer`);
-    return [n];
+    if (Array.isArray(s)) return s.map((x: any) => intNum(x));
+    if (s instanceof NDArray) return tolist(ravel(s)).map((x: any) => intNum(x));
+    return [intNum(s)];
   };
   const conj = (a: NDArray) => {
     if (!a.dt.cplx) return copy(a);
@@ -2210,7 +2220,7 @@ newBuiltinModule("_numpy", (m) => {
   fn("sqdev_sum", (x: any, m: any) => {
     const a = asarray(x);
     if (a.dt !== D.float64 || !a.isC() || a.size === 0) return null;
-    return 0 + pairwiseSqDev(a.data, a.offset, a.size, Number(Obj.unbox(m)));
+    return 0 + pairwiseSqDev(a.data, a.offset, a.size, toNum(m));
   });
   fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => {
     const x = asarray(a);
