@@ -93,7 +93,7 @@ export function safeSvg(text, pixels = new PixelBudget(Infinity)) {
       let keep = null;
       if (isHref(a)) {
         // (an inline raster within the bounds its header gives, counted in the document's pixels: image-size.ts, SEC-89C-3)
-        if (el.localName === "image") { const m = RASTER_URL.exec(value); keep = m && pixels.take(imageSize("image/" + m[1], value.slice(value.indexOf(",") + 1)), pictureKey(value)) === null ? value : null; }
+        if (el.localName === "image") { const m = RASTER_URL.exec(value); keep = m && pixels.take(imageSize("image/" + m[1], value.slice(value.indexOf(",") + 1)), "image/" + m[1] + "\n" + pictureKey(value)) === null ? value : null; }
         else keep = /^#[\w.-]+$/.test(value) ? "#" + pre + value.slice(1) : null;
       } else if (a.namespaceURI === XML_NS) keep = n === "space" || n === "lang" ? svgValue(value, pre) : null;
       else if (a.namespaceURI === null && /^[a-z_][\w.-]*$/i.test(n) && !/^on/i.test(n) && !SVG_NO_PROPS.test(n)) {
@@ -358,7 +358,7 @@ export function createNotebook(root, opts = {}) {
       // (within the bounds its header gives, and this document's pixels in
       // all: image-size.ts; else a placeholder, the picture kept as it was)
       const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" });
-      const why = pixels.take(imageSize(raster[0], raster[1]), pictureKey(raster[1]));
+      const why = pixels.take(imageSize(raster[0], raster[1]), raster[0] + "\n" + pictureKey(raster[1]));
       if (!why) fig.appendChild(show());
       else {
         fig.sbBundle = { ...b };
@@ -2019,8 +2019,9 @@ export function createNotebook(root, opts = {}) {
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
     load, snapshot, applyRemote, replace, flush,
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
-    /** Another document is shown (a board's code, without load()): its pictures are counted afresh (image-size.ts). */
-    newPictures() { pixels = new PixelBudget(); },
+    /** Count this document's pictures in `budget` (a board's: shared by its
+     * pictures, notes and code, afresh for each document shown, image-size.ts). */
+    usePictures(budget) { pixels = budget; },
     /** The next run's prompt number less one (after TimeTravel replayed runs). */
     setExecCount(k) { if (kernel) kernel.execCount = k; else execCount = k; },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */

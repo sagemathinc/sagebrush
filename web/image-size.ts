@@ -83,8 +83,10 @@ export function dataUrl(src: string): { type: string; base64: string } | null {
   return m ? { type: m[1], base64: m[2] } : null;
 }
 
-/** A short name for a picture, to count it once however often it is drawn. */
-export const pictureKey = (src: string) => `${src.length}:${src.slice(0, 96)}:${src.slice(-96)}`;
+/** A picture's name, to count it once however often it is drawn: all of it
+ * (a part could be the same for another picture, SEC-71A-1).  (The string
+ * is the one already in memory: kept, not copied.) */
+export const pictureKey = (src: string) => src;
 
 /** The pictures of one document: each within MAX_SIDE and MAX_PIXELS, and all within LOAD_PIXELS. */
 export class PixelBudget {
@@ -95,9 +97,10 @@ export class PixelBudget {
    * once for its `key`: drawn again, as a cell is, it isn't counted again);
    * why not, if not. */
   take(size: { w: number; h: number } | null, key?: string): string | null {
-    if (key && this.seen.has(key)) return null;
+    // (each picture within the bounds, whether counted already or not)
     if (!size || !(size.w > 0) || !(size.h > 0)) return "its size can't be read";
     if (size.w > MAX_SIDE || size.h > MAX_SIDE || size.w * size.h > MAX_PIXELS) return `it is ${size.w} × ${size.h} pixels`;
+    if (key && this.seen.has(key)) return null;
     if (this.used + size.w * size.h > this.total) return "this document's pictures are too many pixels in all";
     this.used += size.w * size.h;
     if (key) this.seen.add(key);

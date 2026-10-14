@@ -71,23 +71,17 @@ export interface SafeOptions {
 
 // whether a link or an image address is harmless (control characters and spaces, which browsers ignore inside a scheme, are taken out first)
 const SAFE_LINK = /^(https?:|mailto:|#|\/(?!\/)|\.{1,2}\/|[\w.~-]+(?:[/?#]|$))/i;
-// (an SVG in an <img> runs no script: an image element never does)
-const DATA_IMG = /^data:image\/(?:png|jpe?g|gif|webp|svg\+xml)[;,]/i;
+// (raster pictures only: an SVG picture can carry rasters that can't be
+// measured without parsing it as XML, namespaces and entities and all,
+// SEC-71A-3; an SVG output goes through the notebook's safeSvg instead)
+const DATA_IMG = /^data:image\/(?:png|jpe?g|gif|webp)[;,]/i;
 // (a raster data: image within image-size.ts's bounds by its header: a small
 // file can say it is huge; else not shown, its alt text instead)
 function shownSize(url: string, o: SafeOptions): boolean {
-  // (an SVG carrying a raster picture: not shown, as that picture can't be
-  // measured here, SEC-89C-3; an SVG of vectors is drawn at the size shown)
-  const svg = /^data:image\/svg\+xml(;base64)?,(.*)$/is.exec(url);
-  if (svg) {
-    let text = "";
-    try { text = svg[1] ? atob(svg[2].replace(/\s/g, "")) : decodeURIComponent(svg[2]); } catch { return false; }
-    return !/<image\b|data:image\/(?!svg)/i.test(text);
-  }
   const m = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\s]*)$/i.exec(url);
   if (!m) return false;
   const type = "image/" + m[1].toLowerCase().replace("jpg", "jpeg");
-  return (o.pixels ?? new PixelBudget(Infinity)).take(imageSize(type, m[2]), pictureKey(url)) === null;
+  return (o.pixels ?? new PixelBudget(Infinity)).take(imageSize(type, m[2]), type + "\n" + pictureKey(url)) === null;
 }
 export function safeLink(href: string): string | null {
   const h = href.replace(/[\u0000- \u007f-\u009f]/g, "");
@@ -102,9 +96,10 @@ export function remotePicture(src: string, alt: string): string {
 }
 /** A click on a remote picture's button (remotePicture): the picture, in its place. */
 export function loadRemotePicture(e: Event): void {
-  const b = (e.target as Element | null)?.closest?.("button[data-load-src]") as HTMLButtonElement | null;
+  const b = (e.target as Element | null)?.closest?.("button.remote-picture[data-load-src]") as HTMLButtonElement | null;
   const src = b?.dataset.loadSrc ?? "";
-  if (!b || !/^https?:\/\/[^\s"'<>\\]+$/i.test(src)) return;
+  // (only one inside the element listening: closest() can climb above it)
+  if (!b || !(e.currentTarget as Node | null)?.contains?.(b) || !/^https?:\/\/[^\s"'<>\\]+$/i.test(src)) return;
   e.preventDefault();
   e.stopPropagation();
   b.replaceWith(Object.assign(document.createElement("img"), { src, alt: b.dataset.alt ?? "" }));
@@ -185,7 +180,7 @@ export function safeHtml(html: string, o: SafeOptions = {}): string {
       if (!VOID.has(name)) out += `</${name}>`;
       continue;
     }
-    let attrs = "";
+    let attrs = "", src = "", alt = "";
     const seen = new Set<string>();
     for (const a of (m[3] ?? "").matchAll(ATTR)) {
       const an = a[1].toLowerCase();
@@ -194,14 +189,16 @@ export function safeHtml(html: string, o: SafeOptions = {}): string {
       const raw = a[2] === undefined ? "" : a[2][0] === '"' || a[2][0] === "'" ? a[2].slice(1, -1) : a[2];
       const v = attribute(name, an, decodeEntities(raw), o);
       if (v === null) continue;
+      if (an === "src") src = v;
+      if (an === "alt") alt = v;
       attrs += v === "" && (an === "reversed" || an === "open") ? ` ${an}` : ` ${an}="${esc(v)}"`;
     }
     // (an outside link opens in another tab, without a handle on this one)
     if (name === "a" && /^https?:/i.test(/ href="([^"]*)"/.exec(attrs)?.[1] ?? "")) attrs += ' target="_blank" rel="noopener noreferrer"';
     if (name === "img" && !/ src="/.test(attrs)) continue;
-    const remote = name === "img" && o.remote === "click" ? /^ src="(https?:[^"]*)"/.exec(attrs.match(/ src="[^"]*"/)![0]) : null;
-    if (remote) {
-      out += remotePicture(decodeEntities(remote[1]), decodeEntities(/ alt="([^"]*)"/.exec(attrs)?.[1] ?? ""));
+    // (the address as checked, any case of its scheme: SEC-3BC-1)
+    if (name === "img" && o.remote === "click" && /^https?:/i.test(src)) {
+      out += remotePicture(src, alt);
       continue;
     }
     out += `<${name}${attrs}>`;

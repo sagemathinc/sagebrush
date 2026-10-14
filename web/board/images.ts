@@ -154,8 +154,9 @@ export interface ImageStore {
   put(blob: Blob): Promise<string>;
   /** have these at hand to show */
   ensure(names: Iterable<string>): Promise<unknown>;
-  /** take in the pictures a document carries (data: URLs), under their own names */
-  absorb(d: BoardDoc): Promise<unknown>;
+  /** take in the pictures a document carries (data: URLs), under their own
+   * names, counted in its pictures' pixels if given (image-size.ts) */
+  absorb(d: BoardDoc, pixels?: PixelBudget): Promise<unknown>;
   /** the document with its pictures in it (data: URLs), as a file carries it */
   inline(d: BoardDoc): Promise<BoardDoc>;
 }
@@ -197,13 +198,13 @@ export class Images {
    * here, named by their content, and the document says only their sizes
    * (its notes renamed to match).  Resolves to whether it changed.
    */
-  async absorb(d: BoardDoc): Promise<boolean> {
+  async absorb(d: BoardDoc, budget?: PixelBudget): Promise<boolean> {
     const carried = Object.entries(d.images ?? {}).filter(([, v]) => v.src?.startsWith("data:"));
     if (!carried.length) return false;
     const rename = new Map<string, string>();
     // (each within the bounds its header gives, and all within the
     // document's pixels: image-size.ts; a picture past them is not taken)
-    const pixels = new PixelBudget();
+    const pixels = budget ?? new PixelBudget();
     for (const [name, v] of carried) {
       const u = dataUrl(v.src!), why = pixels.take(u ? imageSize(u.type, u.base64) : null);
       const blob = why ? null : toBlob(v.src!);

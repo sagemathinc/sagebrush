@@ -92,7 +92,7 @@ try {
   const md3again = await ev(`${C("md3")}.el.querySelectorAll(".mdout img").length`);
   check(md3 === 2 && md3again === 2, "Markdown's pictures count in the document's pixels: two of three 30 MP shown, the same two when drawn again (SEC-89C-2): " + [md3, md3again]);
   const mdsvg = await ev(`[...${C("mdsvg")}.el.querySelectorAll(".mdout img")].map((i) => i.alt).join()`);
-  check(mdsvg === "plain", "a data: SVG carrying a raster isn't shown; one of vectors is: " + mdsvg);
+  check(mdsvg === "", "no data: SVG picture in Markdown (it could carry rasters, SEC-71A-3): " + mdsvg);
 
   // remote pictures: in a document from elsewhere, each shown when clicked;
   // in one written here (a new notebook), at once (William: click-to-load)
@@ -112,10 +112,12 @@ try {
   const show30 = (w) => `from IPython.display import Image, display\nimport base64\ndisplay(Image(data=base64.b64decode(${JSON.stringify(png(w, 5000))})))`;
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "A", nodes: [{ id: "a1", code: show30(6000) }, { id: "a2", code: show30(6001) }] })}).then(() => 1)`);
   await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000);
-  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "B", nodes: [{ id: "b1", code: show30(6002) }] })}).then(() => 1)`);
-  await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].id === 'b1' && os[0].state === '')", 60000);
-  await ev("window.board.focus(['b1'], true), window.board.render(), 1");
-  check(await until("!!document.querySelector('[data-code=b1] .board-code-out img') && !document.querySelector('[data-code=b1] .big-picture')", 10000), "board B's picture shows: its own document's pixels, not board A's");
+  // (board B reuses an item's id of A's: still another document, CORR-71A-2)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "B", nodes: [{ id: "a1", code: show30(6002) }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].id === 'a1' && os[0].state === '' && os[0].code.includes('Image'))", 60000);
+  await sleep(500);
+  await ev("window.board.focus(['a1'], true), window.board.render(), 1");
+  check(await until("!!document.querySelector('[data-code=a1] .board-code-out img') && !document.querySelector('[data-code=a1] .big-picture')", 10000), "board B's picture shows, though it reuses an id of A's: its own document's pixels, not board A's");
 
   // a board from elsewhere: its notes' remote pictures shown when clicked; a new board's, at once
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "remote", nodes: [{ id: "r", title: "remote", text: remoteMd }] })}).then(() => 1)`);
