@@ -1,10 +1,10 @@
-// A Jupyter kernel for Sagebrush: the pyjs runtime (Sage, Python or Magma
-// syntax) with its engines and SVG graphics, over the Jupyter messaging
+// A Jupyter kernel for Sagebrush: the pyjs runtime (Sage, Python, Magma or
+// MATLAB syntax) with its engines and SVG graphics, over the Jupyter messaging
 // protocol 5.3 (https://jupyter-client.readthedocs.io/en/latest/messaging.html)
 // on a pure-JavaScript ZeroMQ transport (./zmtp), so installing it needs
 // neither Python nor a native library:
 //
-//   sagebrush --install-jupyter-kernel [--user | --sys-prefix | --prefix P] [--mode sage|python|magma|all]
+//   sagebrush --install-jupyter-kernel [--user | --sys-prefix | --prefix P] [--mode sage|python|magma|matlab|all]
 //   sagebrush --uninstall-jupyter-kernel [...the same options]
 //   sagebrush --jupyter-kernel CONNECTION_FILE [--mode sage]   (what kernel.json runs)
 //
@@ -23,10 +23,11 @@ import { ZSocket } from "./zmtp";
 import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps } from "./matlab";
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
 
-export type Mode = "sage" | "python" | "magma";
+export type Mode = "sage" | "python" | "magma" | "matlab";
 
 const SPECS: Record<Mode, { dir: string; display: string; language: string; info: any }> = {
   sage: {
@@ -46,6 +47,13 @@ const SPECS: Record<Mode, { dir: string; display: string; language: string; info
     display: "Sagebrush (Magma)",
     language: "magma",
     info: { name: "magma", version: "", mimetype: "text/x-magma", file_extension: ".m" },
+  },
+  matlab: {
+    dir: "sagebrush-matlab",
+    display: "Sagebrush (MATLAB)",
+    language: "matlab",
+    // (as the MathWorks kernel describes MATLAB: Jupyter's front ends highlight it as Octave)
+    info: { name: "matlab", version: "", mimetype: "text/x-matlab", file_extension: ".m", codemirror_mode: "octave", pygments_lexer: "matlab" },
   },
 };
 
@@ -105,8 +113,8 @@ function bundleFile(): string | null {
 function modes(args: string[]): Mode[] {
   const i = args.indexOf("--mode");
   const m = i >= 0 ? args[i + 1] : "sage";
-  if (m === "all") return ["sage", "python", "magma"];
-  if (m !== "sage" && m !== "python" && m !== "magma") throw new Error(`--mode must be sage, python, magma or all, not ${m}`);
+  if (m === "all") return ["sage", "python", "magma", "matlab"];
+  if (m !== "sage" && m !== "python" && m !== "magma" && m !== "matlab") throw new Error(`--mode must be sage, python, magma, matlab or all, not ${m}`);
   return [m];
 }
 
@@ -346,10 +354,10 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
         const pos: number = msg.content.cursor_pos ?? code.length;
         // the line up to the cursor
         const start = code.lastIndexOf("\n", pos - 1) + 1;
-        const r = mode === "magma" ? { matches: [], prefix: "" } : await ask({ complete: code.slice(start, pos) });
+        const r = mode === "magma" || mode === "matlab" ? { matches: [], prefix: "" } : await ask({ complete: code.slice(start, pos) });
         send(sock, "complete_reply", { status: "ok", matches: r.matches, cursor_start: pos - r.prefix.length, cursor_end: pos, metadata: {} }, msg, msg.idents);
       } else if (t === "is_complete_request") {
-        const r = mode === "magma" ? { more: false } : await ask({ check: msg.content.code ?? "" });
+        const r = mode === "magma" || mode === "matlab" ? { more: false } : await ask({ check: msg.content.code ?? "" });
         send(sock, "is_complete_reply", r.more ? { status: "incomplete", indent: "" } : { status: "complete" }, msg, msg.idents);
       } else if (t === "inspect_request") {
         send(sock, "inspect_reply", { status: "ok", found: false, data: {}, metadata: {} }, msg, msg.idents);
@@ -410,6 +418,8 @@ export function kernelWorker(mode: Mode) {
     R.stderr.flush();
   };
   R.host = {
+    // (MATLAB: a function file, name.m, found on the path, as Python)
+    ...matlabHostOps(),
     display(bundle: Record<string, string>) {
       if (current === null) return false;
       flush();
@@ -493,6 +503,28 @@ export function kernelWorker(mode: Mode) {
         port.postMessage({ id: m.id, error: errorReported });
       }
       if (py !== null) run(py, main, "exec", "<cell>");
+    } else if (mode === "matlab") {
+      // MATLAB: translated in cell mode (src/matlab.ts); its error message is Jupyter's error
+      let py: string | null = null;
+      try {
+        py = matlabToPython(m.code, "<cell>", { cell: true });
+      } catch (e: any) {
+        if (!(e instanceof MatlabSyntaxError)) throw e;
+        const text = matlabSyntaxMessage(e, m.code, "<cell>").replace(/\n$/, "");
+        errorReported = { ename: "MATLAB:syntax", evalue: e.message, traceback: text.split("\n") };
+        port.postMessage({ id: m.id, error: errorReported });
+      }
+      if (py !== null) {
+        const M = R.importModule("_matlab");
+        R.callObj(R.getattr(M, "host_shows_errors"), []);
+        run(py, main, "exec", "<cell>");
+        const text = R.callObj(R.getattr(M, "cell_error"), []);
+        if (typeof text === "string" && errorReported === null) {
+          const lines = text.replace(/\n$/, "").split("\n");
+          errorReported = { ename: "MATLAB", evalue: lines[0], traceback: lines };
+          port.postMessage({ id: m.id, error: errorReported });
+        }
+      }
     } else run(helpSyntax(m.code) + "\n", main, "cell", "<cell>", { sage: mode === "sage" });
     run(FLUSH, host, "exec", "<figures>");
     flush();

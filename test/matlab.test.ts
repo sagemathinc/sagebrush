@@ -148,3 +148,25 @@ test("hex and binary literals are integers (0x87u32, 0b101)", () => {
   assert.match(py("x = 0b101;"), /_m\.intlit\("101", 2, ""\)/);
   assert.match(py("x = 0xFFs8;"), /_m\.intlit\("FF", 16, "int8"\)/);
 });
+
+test("notebook session: MATLAB cells share variables and functions; an error fails its cell only", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = ["x = 3;\ny = x * 2", "z = y + undefined_thing", "function r = f(a)\n  r = a + 1;\nend", "f(y)",
+    "format long\npi", "pi", "x = [1 2", "plot(1:3)", "disp(z)"];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const out = (id: number, stream: string) => msgs.filter((m) => m.id === id && m.stream === stream).map((m) => m.text).join("");
+  const failed = (id: number) => !!msgs.find((m) => m.id === id && m.done)?.error;
+  assert.equal(out(1, "stdout"), "\ny =\n\n     6\n\n");
+  assert.equal(out(2, "stderr"), "Unrecognized function or variable 'undefined_thing'.\n");
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8, 9].map(failed), [false, true, false, false, false, false, true, false, true]);
+  assert.equal(out(4, "stdout"), "\nans =\n\n     7\n\n");
+  // (format long stays for the next cell, as in a MATLAB session)
+  assert.equal(out(6, "stdout"), "\nans =\n\n   3.141592653589793\n\n");
+  assert.match(out(7, "stderr"), /^line 1\nunexpected end of input\n/);
+  assert.ok(msgs.some((m) => m.id === 8 && m.display && m.display["image/svg+xml"]));
+  // (z was never assigned: cell 2 failed)
+  assert.match(out(9, "stderr"), /Unrecognized function or variable 'z'/);
+});

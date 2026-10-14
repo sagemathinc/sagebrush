@@ -39,7 +39,7 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --search QUERY [--json]
            search the documentation of every function (name, signature,
            docstring): what Sagebrush can do; obj? in a session shows one
-  --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|all]
+  --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|matlab|all]
            register Sagebrush as a Jupyter kernel (no Python needed)
   --uninstall-jupyter-kernel [the same options]
   notebook [DIR] [--port N] [--no-browser]

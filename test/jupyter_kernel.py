@@ -1,7 +1,7 @@
 """End-to-end test of the Sagebrush Jupyter kernel with Jupyter's own client
 (jupyter_client, over pyzmq): signed messages, execution and results,
 streams, SVG display, errors, completion, is_complete, interrupts of Python
-loops and of the engines, Magma and Python modes, and shutdown.
+loops and of the engines, Magma, MATLAB and Python modes, and shutdown.
 
     pip install jupyter_client
     python test/jupyter_kernel.py [path to the sagebrush bundle or executable]
@@ -25,7 +25,7 @@ data = tempfile.mkdtemp(prefix="sagebrush-jupyter-")
 os.environ["JUPYTER_DATA_DIR"] = data
 os.environ["JUPYTER_PATH"] = data
 out = subprocess.run(cmd + ["--install-jupyter-kernel", "--mode", "all"], capture_output=True, text=True, check=True).stdout
-assert out.count("installed the Jupyter kernel") == 3, out
+assert out.count("installed the Jupyter kernel") == 4, out
 
 failures = []
 
@@ -141,8 +141,29 @@ s = "".join(c["text"] for c in of(m, "stream"))
 check("magma mode", "1024" in s and "<2, 1>" in s and "<1013, 1>" in s, s)
 km.shutdown_kernel(now=True)
 
+# ---- MATLAB mode
+km, kc = kernel("sagebrush-matlab")
+info = kc.kernel_info(reply=True)["content"]
+check("matlab kernel_info", info["language_info"]["name"] == "matlab" and info["language_info"]["file_extension"] == ".m", info)
+r, m = run(kc, "x = 2^10\nA = magic(3);")
+s = "".join(c["text"] for c in of(m, "stream"))
+check("matlab mode", r["status"] == "ok" and s == "\nx =\n\n        1024\n\n", repr(s))
+r, m = run(kc, "function y = twice(v)\n  y = 2 * v;\nend")
+r, m = run(kc, "twice(A(2, :))")
+s = "".join(c["text"] for c in of(m, "stream"))
+check("matlab state and functions persist", "ans =" in s and "6    10    14" in s, repr(s))
+r, m = run(kc, "y = undefined_thing + 1")
+e = of(m, "error")
+check("matlab error", r["status"] == "error" and e and e[0]["traceback"] == ["Unrecognized function or variable 'undefined_thing'."], (r, e))
+r, m = run(kc, "plot(1:3)")
+check("matlab figure", any("image/svg+xml" in c["data"] for c in of(m, "display_data")), [list(c["data"]) for c in of(m, "display_data")])
+r, m = run(kc, "x = [1 2")
+e = of(m, "error")
+check("matlab syntax error", r["status"] == "error" and e and e[0]["ename"] == "MATLAB:syntax", (r, e))
+km.shutdown_kernel(now=True)
+
 out = subprocess.run(cmd + ["--uninstall-jupyter-kernel", "--mode", "all"], capture_output=True, text=True).stdout
-check("uninstall", out.count("removed the Jupyter kernel") == 3, out)
+check("uninstall", out.count("removed the Jupyter kernel") == 4, out)
 shutil.rmtree(data, ignore_errors=True)
 print("%d failures" % len(failures))
 sys.exit(1 if failures else 0)

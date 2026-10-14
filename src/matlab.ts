@@ -941,7 +941,7 @@ class Emitter {
   tmp = 0;
   fnNames = new Set<string>();
 
-  constructor(private funcs: FuncDef[], private filename: string) {
+  constructor(private funcs: FuncDef[], private filename: string, private cell = false) {
     for (const f of funcs) this.fnNames.add(f.name);
   }
 
@@ -976,7 +976,8 @@ class Emitter {
       this.emit("_m.end_program()");
     });
     this.emit("except BaseException as _e:");
-    this.indent(() => this.emit("_m.report(_e, _L)"));
+    // (a notebook cell's error is reported without ending the session: lib/_matlab.py's report_cell)
+    this.indent(() => this.emit(this.cell ? "_m.report_cell(_e, _L)" : "_m.report(_e, _L)"));
     return this.out.join("\n") + "\n";
   }
 
@@ -1506,10 +1507,16 @@ export function unparse(e: Expr, prec = 0): string {
 // ------------------------------------------------------------------ entry points
 
 /** MATLAB source -> Python source (for lib/_matlab.py). */
-export function matlabToPython(src: string, filename = "<matlab>"): string {
+/**
+ * A MATLAB program as Python on lib/_matlab.py.  With `cell`, a notebook cell:
+ * its variables and functions stay in the session's globals for the next
+ * cells, and an error is reported (MATLAB's message on stderr) without ending
+ * the session; `_matlab.cell_failed()` then says the cell failed.
+ */
+export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?: boolean } = {}): string {
   const p = new Parser(lex(src));
   const stmts = p.program();
-  return new Emitter(p.functions, filename).program(stmts, src);
+  return new Emitter(p.functions, filename, !!opts.cell).program(stmts, src);
 }
 
 /** A function file (found on the path) as Python defining its functions. */

@@ -298,6 +298,22 @@ Tests:
 - The pictures themselves were checked by eye: rendered SVG, screenshotted
   in Chromium.
 
+## Notebooks and Jupyter
+
+A notebook cell, or a Jupyter cell, is translated in cell mode
+(`matlabToPython(code, "<cell>", {cell: true})`):
+- variables and functions stay in the session's globals for the next cells,
+  and so do `format`, the random state and the figures, as in a MATLAB
+  session;
+- a cell's figures are shown when it ends.
+- An error is MATLAB's message, on stderr in the Sagebrush notebook
+  (src/notebook-session.ts), or as Jupyter's error with the message as its
+  traceback (src/kernel.ts, `--mode matlab`). It fails that cell only:
+  lib/_matlab.py's `report_cell` records it, and `cell_failed()` and
+  `cell_error()` tell the host.
+- Function files (`name.m`) load through the same host operation as in the
+  CLI, where there is a file system.
+
 ## MATLAB's documentation as a test
 
 MathWorks' PDF documentation for R2026b (the Function Reference: 21,120
@@ -424,7 +440,7 @@ time, and `str2func` of an anonymous function's text is not supported.
 ## Not yet
 
 - polar axes, lighting and apps (see Graphics);
-- MATLAB as a notebook and board language (it works from the CLI only);
+- MATLAB in the notebook's and the board's language menus (the session and the Jupyter kernel run it);
 - `eval`;
 - `classdef` and nested functions;
 - string arrays beyond the basics;
