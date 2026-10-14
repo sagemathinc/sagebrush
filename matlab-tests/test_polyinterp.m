@@ -20,3 +20,13 @@ show(r(interp2(X, Y, V, 1.5, 2.5))); show(r(interp2(X, Y, V, [1.5 2.5], [1.5 3.5
 show(r(interp2(V, 2.2, 3.7))); show(r(interp2(V, 2.6, 1.2, 'nearest'))); show(isnan(interp2(V, 4, 1)));
 show(r(interp2(V, 4, 1, 'linear', -1))); show(size(interp2(V))); show(r(interp2(V, 1)));
 show(r(interp2(1:3, 1:4, V, 2.5, 2.5, 'spline')));
+% (cubic convolution, not the spline; the spline extrapolates; decreasing grids)
+V = [1 2 4 8; 2 3 7 9; 4 5 6 12; 8 7 10 15];
+show(r(interp2(V, 2.3, 2.7, 'cubic'))); show(r(interp2(V, [1 3.9 4], [1 1.2 4], 'cubic'))); show(r(interp2(V, 1, 'cubic')));
+show(isnan(interp2(V, 0.5, 2, 'cubic'))); show(r(interp2(10:-2:4, 1:4, V, 7.1, 2.2, 'cubic')));
+show(r(interp2(V, 0.5, 2.7, 'spline'))); show(r(interp2(V, 0.5, 2.7, 'spline', -1)));
+W = [1 4 9; 2 5 10; 3 6 11];
+show(r(interp2([3 2 1], [3 2 1], W, 2.5, 2.5))); show(r(interp2([3 2 1], [1 2 3], W, [2.5 1.2], [2.5 2.9], 'nearest')));
+show(r(interp2(1:4, 4:-1:1, V, 2.2, 3.1, 'spline'))); show(r(interp2(1:4, 4:-1:1, V, 2.2, 3.1)));
+% (pchip of complex values)
+show(r(pchip([1 2 3], [1+1i 2-1i 4+2i], 1.5))); pp = pchip([1 2 3], [1+1i 2-1i 4+2i]); show(r(ppval(pp, [1.2 2.8])));

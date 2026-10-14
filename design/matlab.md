@@ -505,6 +505,15 @@ time, and `str2func` of an anonymous function's text is not supported.
 
 ## Not yet
 
+What is not implemented is refused with an error, never answered with
+something plausible. Examples:
+- `linsolve` options other than TRANSA, LT, UT and RECT, and UHESS, SYM or
+  POSDEF for a matrix without that property;
+- `funm` of a defective matrix except by exp, cos, sin, cosh, sinh, log and
+  sqrt;
+- `interp2`'s 'cubic' on a non-uniform grid, and 'makima' and 'pchip'.
+
+The rest:
 - polar axes, lighting and apps (see Graphics);
 - MATLAB in the notebook's and the board's language menus (the session and the Jupyter kernel run it);
 - `eval`;

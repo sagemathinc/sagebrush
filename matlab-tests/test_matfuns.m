@@ -16,3 +16,10 @@ show(r(rcond(magic(3)))); show(rcond([1 2; 2 4])); show(rcond(eye(3))); show(r(r
 show(r(linsolve([4 -2; 1 1], [2; 3])));
 show(r(sqrtm([2 1; 0 2]))); show(r(sqrtm([1 1 0; 0 1 1; 0 0 1]))); show(r(logm([2 1; 0 2]))); show(r(logm([1 1; 0 1])));
 show(r(sqrtm([3 1; -1 1]))); show(r(logm([3 1; -1 1])));
+% (linsolve's options change the equation: A', or one triangle of A)
+o = struct('TRANSA', true); show(r(linsolve([1 2; 3 5], [7; 11], o)));
+o = struct('LT', true); show(r(linsolve([2 9; 1 4], [2; 5], o)));
+o = struct('UT', true, 'TRANSA', true); show(r(linsolve([2 1; 9 4], [2; 5], o)));
+% (funm of a defective matrix: the Jordan block's derivatives)
+show(r(funm([1 1; 0 1], @exp))); show(r(funm([1 1; 0 1], @cos))); show(r(funm([1 1; 0 1], @sin)));
+show(r(funm([2 1; 0 2], @cosh))); show(r(funm([2 1; 0 2], @sinh))); show(r(funm([2 1; 0 2], @log)));

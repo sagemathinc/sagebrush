@@ -319,12 +319,46 @@ def logm_(x):
     return _box(np.array(_real_if(L, A.dtype.kind == "c", n).T))
 
 
+def _expm(M):
+    return _mat(_m.expm_(_unmat(np.array(M, dtype=np.complex128))))
+
+
+def _by_expm(name, A):
+    """the functions with a closed form in exp(A) and exp(+-iA)"""
+    if name == "exp":
+        return _expm(A)
+    if name in ("cos", "sin"):
+        P, Q = _expm(1j * A), _expm(-1j * A)
+        return (P + Q) / 2 if name == "cos" else (P - Q) / 2j
+    P, Q = _expm(A), _expm(-A)
+    return (P + Q) / 2 if name == "cosh" else (P - Q) / 2
+
+
 @_bs("funm")
 def funm_(x, f):
-    def g(w):
-        r = _m._call(f, [_box(np.array(w.reshape((1, -1))))])
-        return _arr(r).reshape(-1).astype(np.complex128)
-    return _fun_of_matrix(x, g, "funm")
+    """f(A): by A's eigenvectors when they are a well-conditioned basis.  Else
+    (a defective or nearly defective A, whose f(A) needs f's derivatives) only
+    for the functions with a matrix algorithm of their own, as named handles:
+    exp, cos, sin, cosh, sinh (by expm), log (logm) and sqrt (sqrtm)"""
+    A = _mat(x)
+    _square(A, "funm")
+    if A.shape[0] == 0 or _well_diagonalizable(A):
+        def g(w):
+            r = _m._call(f, [_box(np.array(w.reshape((1, -1))))])
+            return _arr(r).reshape(-1).astype(np.complex128)
+        return _fun_of_matrix(x, g, "funm")
+    name = f.name if type(f) is _m.Handle else None
+    if name in ("exp", "cos", "sin", "cosh", "sinh"):
+        F = _by_expm(name, A)
+        if A.dtype.kind != "c":
+            F = np.real(F)  # (f real on the real line, so f(A) is real)
+        return _box(np.array(np.asarray(F).T))
+    if name == "log":
+        return logm_(x)
+    if name == "sqrt":
+        return sqrtm_(x)
+    raise _err("funm: this matrix is defective or nearly so (its eigenvectors are an ill-conditioned basis), "
+               "and Sagebrush has no Schur-Parlett method for it: only @exp, @cos, @sin, @cosh, @sinh, @log and @sqrt are supported here.")
 
 
 @_bs("orth")
@@ -360,9 +394,47 @@ def rcond_(x):
     return 0.0 if not np.isfinite(ni) or ni == 0 else 1.0 / (na * ni)
 
 
+_LINSOLVE_OPTS = ("LT", "UT", "UHESS", "SYM", "POSDEF", "RECT", "TRANSA")
+
+
 @_bs("linsolve")
 def linsolve_(a, b, opts=None):
-    return _m.mldivide(a, b)
+    """A \\ B, or with opts: TRANSA solves A' X = B; LT and UT use only the
+    lower or upper triangle (as LAPACK's triangular solve, which reads no
+    other part); RECT, and UHESS, SYM and POSDEF when A has that property
+    (they choose an algorithm, not the equation)"""
+    if type(a) is _m.Sparse or type(b) is _m.Sparse:
+        raise _err("Sparse inputs are not supported.", "MATLAB:linsolve:SparseInput")
+    if opts is None:
+        return _m.mldivide(a, b)
+    if type(opts) is not _m.Struct:
+        raise _err("Third argument must be a struct.", "MATLAB:linsolve:opts")
+    d = opts.a[0] if opts.a else {}
+    flags = {}
+    for k in d:
+        if k not in _LINSOLVE_OPTS:
+            raise _err("Invalid field name '%s' in options structure." % k, "MATLAB:linsolve:InvalidFieldName")
+        flags[k] = bool(_scalar(d[k]))
+    A = _mat(a)
+    if flags.get("LT") and flags.get("UT"):
+        raise _err("Invalid option combination: LT and UT cannot both be true.", "MATLAB:linsolve:CombinationOfFieldsNotCurrentlySupported")
+    if (flags.get("LT") or flags.get("UT") or flags.get("UHESS") or flags.get("SYM") or flags.get("POSDEF")) and A.shape[0] != A.shape[1]:
+        raise _err("Matrix must be square for the options given.", "MATLAB:linsolve:SquareMatrixRequired")
+    if flags.get("LT"):
+        A = np.tril(A)
+    elif flags.get("UT"):
+        A = np.triu(A)
+    else:
+        for k, ok in (("UHESS", lambda M: np.array_equal(M, np.triu(M, -1))),
+                      ("SYM", lambda M: np.array_equal(M, np.conj(M.T))),
+                      ("POSDEF", lambda M: np.array_equal(M, np.conj(M.T)))):
+            if flags.get(k) and not ok(A):
+                raise _err("linsolve: the matrix is not %s, which Sagebrush's linsolve does not assume." %
+                           {"UHESS": "upper Hessenberg", "SYM": "symmetric (Hermitian)", "POSDEF": "Hermitian"}[k],
+                           "MATLAB:linsolve:unsupported")
+    if flags.get("TRANSA"):
+        A = np.conj(A.T)
+    return _m.mldivide(_unmat(A), b)
 
 
 # ------------------------------------------------------------------ polynomials
@@ -559,9 +631,15 @@ def _pchip_pp(x, y):
     if Y.shape[1] != X.size:
         raise _err("The number of sites, %d, is incompatible with the number of values, %d." % (X.size, Y.shape[1]))
     dim = Y.shape[0]
-    rows = [_cubic_coefs(X, Y[di], np.array(_m._pchip_slopes(list(X), [float(t) for t in Y[di]]))) for di in range(dim)]
+
+    def slopes(yv):
+        # (complex values: the real and imaginary parts' own pchip slopes)
+        if np.iscomplexobj(yv):
+            return np.array(slopes(yv.real)) + 1j * np.array(slopes(yv.imag))
+        return np.array(_m._pchip_slopes(list(X), [float(t) for t in yv]))
+    rows = [_cubic_coefs(X, Y[di], slopes(Y[di])) for di in range(dim)]
     pieces = rows[0].shape[0]
-    C = np.zeros((pieces * dim, 4))
+    C = np.zeros((pieces * dim, 4), dtype=np.result_type(*[r.dtype for r in rows]))
     for di in range(dim):
         C[di::dim] = rows[di]
     return X, C, dim, vec
@@ -628,17 +706,18 @@ def unmkpp_(nargout, pp):
 @_bs("interp2")
 def interp2_(*args):
     """interp2(X, Y, V, Xq, Yq[, method[, extrapval]]), interp2(V, Xq, Yq), interp2(V[, k]):
-    linear (the default), nearest or spline (a tensor-product not-a-knot spline)"""
+    linear (the default), nearest, cubic (Keys's cubic convolution, on a
+    uniform grid) or spline (a tensor-product not-a-knot spline, which
+    extrapolates unless given extrapval); the grid increasing or decreasing"""
     args = list(args)
-    method, extrap = "linear", _math.nan
+    method, extrap = "linear", None
     if args and not _istext(args[-1]) and len(args) >= 2 and _istext(args[-2]):
         extrap = _scalar(args.pop())
     if args and _istext(args[-1]):
         method = _text(args.pop()).lower().lstrip("*")
-    if method == "cubic":
-        method = "spline"
-    if method not in ("linear", "nearest", "spline"):
-        raise _err("Invalid interpolation method.")
+    if method not in ("linear", "nearest", "cubic", "spline"):
+        raise _err("Invalid interpolation method." if method not in ("makima", "pchip") else
+                   "interp2: the '%s' method is not supported in Sagebrush." % method)
     if len(args) in (1, 2):
         V = _mat(args[0])
         k = int(_scalar(args[1])) if len(args) == 2 else 1
@@ -660,6 +739,17 @@ def interp2_(*args):
     y = np.asarray(y, dtype=np.float64)
     if V.shape != (y.size, x.size):
         raise _err("The lengths of X and Y must match the size of V.")
+    # (a decreasing grid: the same data, increasing)
+    for axis, g in ((1, x), (0, y)):
+        dg = np.diff(g)
+        if dg.size and not np.all(dg > 0):
+            if not np.all(dg < 0):
+                raise _err("The grid vectors must be strictly monotonic.", "MATLAB:griddedInterpolant:NonMonotonicCompVecsErrId")
+            V = V[:, ::-1] if axis == 1 else V[::-1, :]
+            if axis == 1:
+                x = x[::-1]
+            else:
+                y = y[::-1]
     # (a vector of x queries and one of y queries, of different orientations: their grid)
     if Xq.shape[0] == 1 and Yq.shape[1] == 1 and Xq.size > 1 and Yq.size > 1:
         Xq, Yq = np.meshgrid(Xq.reshape(-1), Yq.reshape(-1))
@@ -667,7 +757,12 @@ def interp2_(*args):
     xq, yq = Xq.reshape(-1).astype(np.float64), Yq.reshape(-1).astype(np.float64)
     out = np.full(xq.size, np.nan, dtype=V.dtype if V.dtype.kind == "c" else np.float64)
     inside = (xq >= x[0]) & (xq <= x[-1]) & (yq >= y[0]) & (yq <= y[-1])
-    if method == "spline":
+    if method == "spline" and extrap is None:
+        # (the spline's own extrapolation, where the query is a number)
+        inside = ~(np.isnan(xq) | np.isnan(yq))
+    if method == "cubic":
+        out[inside] = _cubic_conv2(x, y, V, xq[inside], yq[inside])
+    elif method == "spline":
         # (along x for each row, then along y)
         res = np.zeros(xq.size, dtype=out.dtype)
         rowsplines = [_spline_pp(_box(np.array(x.reshape((-1, 1)))), _box(np.array(V[i].reshape((-1, 1)))))[:2] for i in range(y.size)]
@@ -690,5 +785,47 @@ def interp2_(*args):
                 ty = np.where(j1 > j, (yq - y[j]) / (y[j1] - y[j]), 0.0)
             res = (V[j, i] * (1 - tx) * (1 - ty) + V[j, i1] * tx * (1 - ty) + V[j1, i] * (1 - tx) * ty + V[j1, i1] * tx * ty)
         out[inside] = res[inside]
-    out[~inside] = extrap
+    out[~inside] = _math.nan if extrap is None else extrap
     return _unmat(out.reshape(shape))
+
+
+def _keys(t):
+    """Keys's cubic convolution kernel (a = -1/2)"""
+    t = np.abs(t)
+    return np.where(t <= 1, (1.5 * t - 2.5) * t * t + 1,
+                    np.where(t < 2, ((-0.5 * t + 2.5) * t - 4) * t + 2, 0.0))
+
+
+def _keys_extend(V, axis):
+    """V with a point more at each end of an axis, by Keys's boundary
+    condition (the cubic through the end values): 3 f0 - 3 f1 + f2"""
+    M = np.moveaxis(V, axis, 0)
+    lo = 3 * M[0] - 3 * M[1] + M[2]
+    hi = 3 * M[-1] - 3 * M[-2] + M[-3]
+    return np.moveaxis(np.concatenate([lo[None], M, hi[None]], axis=0), 0, axis)
+
+
+def _uniform_step(g, what):
+    if g.size < 3:
+        raise _err("interp2: the 'cubic' method needs at least 3 grid points in each dimension.")
+    h = (g[-1] - g[0]) / (g.size - 1)
+    if np.max(np.abs(np.diff(g) - h)) > 1e-12 * max(abs(g[0]), abs(g[-1]), abs(h)):
+        raise _err("interp2: the 'cubic' method needs uniformly spaced %s grid points (Sagebrush has no other cubic)." % what)
+    return h
+
+
+def _cubic_conv2(x, y, V, xq, yq):
+    """bicubic convolution: at each query, the 4-by-4 neighbours, each
+    weighted by the kernel along x times along y"""
+    hx, hy = _uniform_step(x, "x"), _uniform_step(y, "y")
+    E = _keys_extend(_keys_extend(V, 1), 0)
+    u, w = (xq - x[0]) / hx, (yq - y[0]) / hy
+    i = np.clip(np.floor(u).astype(np.int64), 0, x.size - 2)
+    j = np.clip(np.floor(w).astype(np.int64), 0, y.size - 2)
+    tu, tw = u - i, w - j
+    res = np.zeros(xq.size, dtype=E.dtype)
+    for a in range(-1, 3):
+        wy = _keys(tw - a)
+        for b in range(-1, 3):
+            res = res + E[j + a + 1, i + b + 1] * (wy * _keys(tu - b))
+    return res
