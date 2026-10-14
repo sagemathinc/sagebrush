@@ -13,6 +13,7 @@ from fractions import Fraction as _Fraction
 import sage_all as _sa
 from sage_all import Rational as _Rational, _intdiv
 import _sage_poly as _sp
+import _sage_ff as _sff
 
 __all__ = []  # filled at the end: every intrinsic
 
@@ -1152,6 +1153,9 @@ def _unsupported(name, pos=None):
 def _bool(v):
     if isinstance(v, bool):
         return v
+    if isinstance(v, Multi):
+        # an intrinsic with several values (IsSquare): its first counts
+        return _bool(v[0])
     raise MagmaError("Bad argument types: expected a boolean, got %s" % _type_of(v))
 
 
@@ -1226,12 +1230,81 @@ def _value_base(x):
     return None
 
 
+def _ff_operands(a, b):
+    """a and b, a finite field's element's partner coerced into its field
+    (a rational, or the prime field's element into an extension), once
+    _ff_check has let them meet; others as they are."""
+    fa, fb = _is_ff(a), _is_ff(b)
+    if not (fa or fb):
+        return a, b
+    if fa and fb:
+        if a.parent() is b.parent():
+            return a, b
+        Ka, Kb = _ffwrap(a.parent()), _ffwrap(b.parent())
+        return (Kb._magma_coerce(a), b) if Ka.n == 1 else (a, Ka._magma_coerce(b))
+    if fa and isinstance(b, _Fraction):
+        return a, _ffwrap(a.parent())._magma_coerce(b)
+    if fb and isinstance(a, _Fraction):
+        return _ffwrap(b.parent())._magma_coerce(a), b
+    return a, b
+
+
+def _ff_eq(a, b):
+    """a eq b for a finite field's element and what it meets (_ff_check):
+    in the larger field."""
+    x, y = (a, b) if _is_ff(a) else (b, a)
+    if _is_ff(y) and x.parent() is not y.parent():
+        Kx, Ky = _ffwrap(x.parent()), _ffwrap(y.parent())
+        x, y = (Ky._magma_coerce(x), y) if Kx.n == 1 else (x, Kx._magma_coerce(y))
+        return x == y
+    return x == _ffwrap(x.parent())._magma_coerce(y)
+
+
+def _ff_check(op, a, b, pos):
+    """Magma's rules for a finite field's element with another value (an
+    operation or a comparison), checked against Magma 2.18: True if they
+    meet (the operation goes ahead), False if neither is such an element;
+    else Magma's error, or "not supported yet" for what Magma computes but
+    Sagebrush doesn't.  An integer meets any finite field, and a rational
+    one whose denominator is prime to p; the same field, or the prime field
+    with an extension of it, meet; another characteristic is "not
+    compatible"; reals, polynomials over Z or Q and number fields don't
+    meet them."""
+    fa, fb = _is_ff(a), _is_ff(b)
+    if not (fa or fb):
+        return False
+    x, y = (a, b) if fa else (b, a)
+    o = op[:-2] if op.endswith(":=") else op
+    Kx = _ffwrap(x.parent())
+    if _is_ff(y):
+        Ky = _ffwrap(y.parent())
+        if x.parent() is y.parent() or (Kx.p == Ky.p and 1 in (Kx.n, Ky.n)):
+            return True
+        if Kx.p != Ky.p:
+            raise _incompatible("C", o, a, b, pos)
+        # (Magma computes in a field containing both)
+        raise MagmaError("arithmetic of two finite fields of characteristic %d, neither the prime field, is not supported yet" % Kx.p, "'%s'" % o, True, pos)
+    if isinstance(y, int) and not isinstance(y, bool):
+        return True
+    if isinstance(y, _Fraction):
+        if y.denominator % Kx.p == 0:
+            raise _bad_types(o, (a, b), pos)
+        return True
+    if isinstance(y, _smat.Matrix):
+        raise MagmaError("arithmetic of a finite field's element and a matrix is not supported yet", "'%s'" % o, True, pos)
+    if isinstance(y, (bool, str, MReal, _sp.Polynomial, _snf.NumberFieldElement)):
+        raise _bad_types(o, (a, b), pos)
+    return False
+
+
 def _arith_rule(op, a, b, pos):
     """Raises Magma's error for a op b (op one of + - * / div mod ^ and
     their op-assignments), if Magma has one; checked against Magma 2.18 pair
     by pair (test/magma-compare.test.ts).  What Magma computes but Sagebrush
     doesn't model is refused ("not supported yet")."""
     o = op[:-2] if op.endswith(":=") else op
+    if _ff_check(op, a, b, pos):
+        return
     A, B = _ak(a), _ak(b)
     err = lambda code: _incompatible(code, o, a, b, pos)
     unsupported = lambda what: MagmaError("%s is not supported yet" % what, "'%s'" % o, True, pos)
@@ -1454,6 +1527,7 @@ def _add(a, b, pos=None, op="+"):
     if type(a) is int and type(b) is int:
         return a + b
     _arith(op, (a, b), pos)
+    a, b = _ff_operands(a, b)
     try:
         return a + b
     except TypeError:
@@ -1464,6 +1538,7 @@ def _sub(a, b, pos=None, op="-"):
     if type(a) is int and type(b) is int:
         return a - b
     _arith(op, (a, b), pos)
+    a, b = _ff_operands(a, b)
     try:
         return a - b
     except TypeError:
@@ -1476,6 +1551,7 @@ def _mul(a, b, pos=None, op="*"):
     if type(a) is str and type(b) is str:
         return a + b  # Magma's * joins strings
     _arith(op, (a, b), pos)
+    a, b = _ff_operands(a, b)
     try:
         return a * b
     except TypeError:
@@ -1508,6 +1584,7 @@ def _div(a, b, pos=None, op="/"):
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) / MReal.of(b)
+    a, b = _ff_operands(a, b)
     return a / b
 
 
@@ -1774,6 +1851,8 @@ def _eq(a, b, pos=None, op="eq"):
     if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
         # Magma has no equality of record formats
         raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(a), _type_of(b)), "'%s'" % op, True, pos)
+    if _ff_check(op, a, b, pos):
+        return _ff_eq(a, b)
     da, db = _desc(a), _desc(b)
     if da is not None and db is not None:
         code = _common(da, db)
@@ -2347,7 +2426,7 @@ def RealField(prec=30):
 # ------------------------------------------------------------------ printing
 
 def _atomic(v):
-    if isinstance(v, (bool, int, str, _Fraction, MReal)):
+    if isinstance(v, (bool, int, str, _Fraction, MReal)) or _is_ff(v):
         return True
     if isinstance(v, MTuple):
         return all(_atomic(x) for x in v)
@@ -2372,6 +2451,8 @@ def _inline(v, in_tuple=False):
         return o + ", ".join(items) + c
     if v is None:
         return "None"
+    if _is_ff(v):
+        return _ff_str(v)
     return repr(v)
 
 
@@ -2704,6 +2785,8 @@ _ZZ, _QQ = _IntegerRing(), _RationalField()
 def _coerce_int(x):
     if isinstance(x, int) and not isinstance(x, bool):
         return x
+    if _is_ff(x) and _ffwrap(x.parent()).n == 1:
+        return int(x)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
     if isinstance(x, (bool, str)):
@@ -2720,6 +2803,8 @@ def Integers(K=None):
         return MaximalOrder(K)
     if isinstance(K, int) and not isinstance(K, bool):
         raise MagmaError("Integers(m), the integers modulo m, is not supported yet", "'Integers'")
+    if isinstance(K, _MFinField):
+        raise MagmaError("Bad argument types\nArgument types given: FldFin", "'Integers'")
     raise MagmaError("Integers of a %s is not supported yet" % _type_of(K), "'Integers'")
 
 
@@ -2736,6 +2821,8 @@ RationalField = Rationals
 def Parent(x):
     if hasattr(x, "_magma_parent"):
         return x._magma_parent()
+    if _is_ff(x):
+        return _ffwrap(x.parent())
     if isinstance(x, bool):
         raise MagmaError("Parent of a boolean")
     if isinstance(x, int):
@@ -2759,7 +2846,7 @@ class _Cat(str):
 # Categories bound as names (RngIntElt, SeqEnum, ...), for Type(x) eq
 # RngIntElt and record formats such as recformat< n : RngIntElt >.
 _CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum SetIndx SetMulti Tup "
-               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map").split()
+               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt").split()
 for _c in _CATEGORIES:
     globals()[_c] = _Cat(_c)
 
@@ -2773,6 +2860,10 @@ def _type_name(x):
         return "RecFrmt"
     if isinstance(x, MMap):
         return "Map"
+    if _is_ff(x):
+        return "FldFinElt"
+    if isinstance(x, _MFinField):
+        return "FldFin"
     if x is _ZZ:
         return "RngInt"
     if x is _QQ:
@@ -3133,6 +3224,8 @@ def Fibonacci(n):
 
 
 def IsSquare(n):
+    if _is_ff(n):
+        return _multi([True, _ff_sqrt(n)]) if n.is_square() else False
     if isinstance(n, int) and n >= 0:
         r = _math.isqrt(n)
         if r * r == n:
@@ -3150,7 +3243,37 @@ def Isqrt(n):
     return _math.isqrt(n)
 
 
+def _ff_sqrt(x):
+    """The square root of a square x that Magma returns (measured against
+    Magma 2.18):
+    - in characteristic 2 the root is unique;
+    - in GF(p^n), n > 1, the root with the smaller logarithm to the
+      generator (every square tested, in fields up to 3^12 elements);
+    - in GF(p), p = 3 mod 4, x^((p+1)/4), the root that is itself a square
+      (Lagrange's formula; every square tested for p < 1100);
+    - in GF(p), p = 1 mod 4, Magma's choice follows no rule found (neither
+      Tonelli-Shanks with the least non-residue nor the smaller logarithm
+      to PrimitiveElement), so Sagebrush returns the root whose integer
+      representative is smaller: a correct root, possibly not Magma's."""
+    if not x:
+        return x
+    F = _ffwrap(x.parent())
+    if F.p == 2:
+        return x.sqrt()
+    if F.n > 1:
+        r = x.sqrt()
+        return min((r, -r), key=lambda y: int(y.log(F.K.gen())))
+    if F.p % 4 == 3:
+        return x ** ((F.p + 1) // 4)
+    r = int(x.sqrt())
+    return F.K(min(r, F.p - r))
+
+
 def Sqrt(x):
+    if _is_ff(x):
+        if not x.is_square():
+            raise MagmaError("Argument must be a square", "'Sqrt'")
+        return _ff_sqrt(x)
     if isinstance(x, MReal):
         return _rsqrt(x)
     return _rsqrt(MReal.of(x))
@@ -3189,6 +3312,15 @@ def Exp(x):
 
 
 def Log(x, b=None):
+    if _is_ff(x):
+        # Log(x): to the primitive element; Log(b, x): to the base b
+        base, y = (x, b) if b is not None else (PrimitiveElement(_ffwrap(x.parent())), x)
+        if not y:
+            raise MagmaError("Can not take log of zero element", "'Log'")
+        try:
+            return int(y.log(base))
+        except ValueError:
+            return -1  # as Magma: Log(w^2, w) is -1 in GF(9)
     if b is not None:
         return Log(x) / Log(b)
     x = MReal.of(x)
@@ -3387,6 +3519,184 @@ def Sprint(x):
 
 def Sprintf(fmt, *args):
     return _sprintf(fmt, *args, where="'Sprintf'")
+
+
+# ------------------------------------------------------------------ finite fields
+
+def _is_ff(x):
+    """An element of a finite field (lib/_sage_ff.py)."""
+    if isinstance(x, _sff.FiniteFieldElement):
+        return True
+    return isinstance(x, _sff.IntegerMod) and getattr(x.parent(), "_prime", False)
+
+
+_FF = {}  # id(_sage_ff field) -> its _MFinField
+
+# Magma prints the nonzero elements of a field with at most this many
+# elements as powers of its generator, and of larger fields as polynomials
+# in it (checked against Magma: GF(2^20) and GF(1021^2) by powers,
+# GF(1031^2) and GF(3^13) by polynomials).
+_FF_POWERS_MAX = 2 ** 20
+
+
+class _MFinField:
+    """GF(q) in Magma mode: Magma's names, printing, iteration and
+    coercions over the field of lib/_sage_ff.py, which does the arithmetic.
+    Like Magma's, GF(q) is one object: naming its generator (F<w> := GF(9))
+    names it everywhere.  From Magma's documentation (Finite Fields) and
+    checked against Magma."""
+
+    def __init__(self, K):
+        self.K = K
+        self.q, self.p, self.n = int(K.order()), int(K.characteristic()), int(K.degree())
+        self.name = None  # the generator's name, once assigned
+
+    def __repr__(self):
+        return "Finite field of size %d" % self.p if self.n == 1 else "Finite field of size %d^%d" % (self.p, self.n)
+
+    def _gen_name(self):
+        if self.name is not None:
+            return self.name
+        v = _global_name(self)
+        return "%s.1" % v if v is not None else "$.1"
+
+    def _magma_names(self, names):
+        if names:
+            self.name = names[0]
+
+    def _magma_gen(self, i):
+        if i != 1:
+            raise MagmaError("Bad argument types", "'.'")
+        return self.K.gen()
+
+    def _magma_card(self):
+        return self.q
+
+    def _magma_degree(self):
+        return self.n
+
+    def _magma_contains(self, x):
+        return _is_ff(x) and x.parent() is self.K
+
+    def _magma_coerce(self, x):
+        if _is_ff(x):
+            if x.parent() is self.K:
+                return x
+            if _ffwrap(x.parent()).n == 1 and int(x.parent().order()) == self.p:
+                return self.K(int(x))  # from the prime field
+            raise MagmaError("Illegal coercion")
+        if isinstance(x, bool):
+            raise MagmaError("Illegal coercion")
+        if isinstance(x, int):
+            return self.K(x)
+        if isinstance(x, _Fraction):
+            if x.denominator % self.p == 0:
+                raise MagmaError("Illegal coercion")
+            return self.K(x.numerator) / self.K(x.denominator)
+        if isinstance(x, MSeq) and self.n > 1 and len(x) == self.n:
+            # from the coefficients on the power basis (Eltseq)
+            return sum((self._magma_coerce(c) * self.K.gen() ** i for i, c in enumerate(x)), self.K(0))
+        raise MagmaError("Illegal coercion")
+
+    def __iter__(self):
+        # Magma's order: 0, 1, ..., p - 1 for a prime field; else 1, w,
+        # w^2, ..., w^(q-2) and then 0
+        if self.n == 1:
+            return iter([self.K(i) for i in range(self.p)])
+        def powers():
+            g, x = self.K.gen(), self.K(1)
+            for _ in range(self.q - 1):
+                yield x
+                x = x * g
+            yield self.K(0)
+        return powers()
+
+
+def _ffwrap(K):
+    w = _FF.get(id(K))
+    if w is None:
+        w = _FF[id(K)] = _MFinField(K)
+    return w
+
+
+def GF(q, n=None):
+    """GF(q) or GF(p, n): the finite field with q = p^n elements, defined
+    (as in Magma) by the Conway polynomial."""
+    q = _coerce_int(q)
+    if n is not None:
+        q = q ** _coerce_int(n)
+    if q < 2 or _sff._is_prime_power(q) is None:
+        raise MagmaError("Argument 1 (%d) is not a prime power" % q, "'GF'")
+    try:
+        K = _sff.GF(q)
+    except NotImplementedError:
+        # Magma uses other polynomials beyond its tables: not known yet
+        raise MagmaError("GF(%d): the defining polynomial of this field is not supported yet" % q, "'GF'")
+    return _ffwrap(K)
+
+
+FiniteField = GaloisField = GF
+
+
+def _ff_str(x):
+    """A finite field element as Magma prints it: an integer in a prime
+    field; else 0, an element of the prime field as an integer, a power of
+    the generator (fields of at most 2^20 elements), or a polynomial in
+    it."""
+    F = _ffwrap(x.parent())
+    if F.n == 1:
+        return str(int(x))
+    c = [int(a) for a in x.list()]
+    if not any(c[1:]):
+        return str(c[0])
+    name = F._gen_name()
+    if F.q <= _FF_POWERS_MAX:
+        k = int(x.log(F.K.gen()))
+        return name if k == 1 else "%s^%d" % (name, k)
+    terms = []
+    for i in range(len(c) - 1, -1, -1):
+        if c[i]:
+            mon = "1" if i == 0 else name if i == 1 else "%s^%d" % (name, i)
+            terms.append(mon if c[i] == 1 and i else ("%d" % c[i] if i == 0 else "%d*%s" % (c[i], mon)))
+    return " + ".join(terms)
+
+
+def _ff_field(x, what):
+    if isinstance(x, _MFinField):
+        return x
+    raise MagmaError("Bad argument types", "'%s'" % what)
+
+
+def Characteristic(F):
+    """The characteristic of a ring."""
+    if isinstance(F, _MFinField):
+        return F.p
+    if F is _ZZ or F is _QQ:
+        return 0
+    raise MagmaError("Bad argument types", "'Characteristic'")
+
+
+def PrimitiveElement(F):
+    """A generator of the multiplicative group of a finite field (for
+    GF(p^n): its generator, a root of the Conway polynomial)."""
+    F = _ff_field(F, "PrimitiveElement")
+    return F.K.multiplicative_generator()
+
+
+def Order(x):
+    """The multiplicative order of a nonzero finite field element."""
+    if _is_ff(x):
+        if not x:
+            raise MagmaError("Argument 1 must be non-zero", "'Order'")
+        return int(x.multiplicative_order())
+    raise MagmaError("Order of this argument is not supported yet", "'Order'")
+
+
+def IsPrimitive(x):
+    """Whether a finite field element generates the multiplicative group."""
+    if _is_ff(x):
+        return bool(x) and int(x.multiplicative_order()) == int(x.parent().order()) - 1
+    raise MagmaError("IsPrimitive of this argument is not supported yet", "'IsPrimitive'")
 
 
 # ------------------------------------------------------------------ sequences and sets
@@ -3628,6 +3938,13 @@ def Set(s):
 def Eltseq(x):
     if isinstance(x, _sp.Polynomial):
         return Coefficients(x)
+    if _is_ff(x):
+        # coefficients on the power basis, in the prime field
+        F = _ffwrap(x.parent())
+        if F.n == 1:
+            return MSeq([x])
+        P = _sff.GF(F.p)
+        return MSeq([P(int(c)) for c in x.list()])
     return MSeq(x)
 
 
@@ -4269,12 +4586,16 @@ def Decomposition(O, p):
 def Norm(x):
     if hasattr(x, "_magma_norm"):
         return x._magma_norm()
+    if _is_ff(x):
+        return x.norm()
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.norm())
     return x * x
 
 
 def Trace(x):
+    if _is_ff(x):
+        return x.trace()
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.trace())
     if hasattr(x, "trace"):

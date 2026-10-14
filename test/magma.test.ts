@@ -98,6 +98,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "SetSeed(1);",
     "Random(1, 4);",
     "Universe({ {1} });",
+    "H<h> := GF(9); J<j> := GF(81); h + j;",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -117,6 +118,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
+    "Runtime error in '+': arithmetic of two finite fields of characteristic 3, neither the prime field, is not supported yet",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
