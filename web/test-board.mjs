@@ -381,7 +381,8 @@ try {
     await ev("document.querySelector('[data-sbb=revert]').click()");
     await sleep(400);
     check(!(await docOf()).nodes.some((n) => n.title === "A new note"), "Revert did not restore the original");
-    check(await ev("localStorage.length === 0"), "Revert left the edits saved");
+    // (no saved board; its outputs' cache keeps a name beside it, page.ts)
+    check(await ev("Object.keys(localStorage).every((k) => k.endsWith('#outputs'))"), "Revert left the edits saved");
     // Tidy forgets positions
     await ev("window.sagebrush.board.edit((d) => { d.nodes[0].x = 5000; d.nodes[0].y = 5000; })");
     await ev("document.querySelector('[data-sbb=tidy]').click()");
