@@ -354,10 +354,35 @@ test("what is not implemented is refused, never answered approximately: linsolve
     "linsolve([1 2; 3 4], [1; 2], struct('LT', true, 'UT', true))",
     "funm([1 1; 0 1], @(x) x.^2)",
     "interp2([1 2 4 5], 1:4, magic(4), 2, 2, 'cubic')",
+    "interp2(1e12 + [0 1 3 4], 1:4, magic(4), 1e12 + 2, 2.5, 'cubic')",
+    "funm([1 1; 0 1], @exp)",
     "interp2([1 3 2], 1:3, magic(3), 2, 2)",
     "interp2(magic(3), 2, 2, 'makima')",
   ];
-  writeFileSync(join(dir, "t.m"), cases.map((c) => `try, ${c}; disp('answered'); catch e, disp('refused'); end`).join("\n") + "\n");
+  // (funm's @exp is the local exp below, not the built-in)
+  writeFileSync(join(dir, "t.m"), cases.map((c) => `try, ${c}; disp('answered'); catch e, disp('refused'); end`).join("\n") + "\n" + [
+    "V = magic(4); a = interp2(0:3, 1:4, V, 1.3, 2.5, 'cubic'); b = interp2(1e12 + (0:3), 1:4, V, 1e12 + 1.3, 2.5, 'cubic');",
+    "fprintf('%d %d\\n', abs(a - b) < 1e-3, isequal(funm([1 0; 0 2], @exp), [1 0; 0 4]));",
+    "function y = exp(x)", "  y = x.^2;", "end",
+  ].join("\n") + "\n");
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
-  assert.deepEqual(out.trim().split("\n"), cases.map(() => "refused"));
+  assert.deepEqual(out.trim().split("\n"), [...cases.map(() => "refused"), "1 1"]);
+});
+
+test("format's two-word forms (format long g) are its one-word ones; an unknown option is an error", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "format-"));
+  writeFileSync(join(dir, "t.m"), [
+    "format longG", "disp(pi)", "format long g", "disp(pi)", "format short e", "disp(pi)", "format shortE", "disp(pi)", "format",
+    "try, format foo, catch e, disp(e.message), end", "try, format longEng, catch e, disp('refused'), end",
+  ].join("\n") + "\n");
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
+  const lines = out.split("\n");
+  assert.equal(lines[0], lines[1]);
+  assert.equal(lines[2], lines[3]);
+  assert.notEqual(lines[0], lines[2]);
+  assert.deepEqual(lines.slice(4, 6), ["Invalid format option 'foo'.", "refused"]);
 });

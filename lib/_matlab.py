@@ -7139,8 +7139,14 @@ def format_(nargout, *args):
         _format["num"] = "short"
         _format["spacing"] = "loose"
         return NOVAL
-    for a in args:
-        s = _text(a).lower()
+    words = [_text(a).lower() for a in args]
+    k = 0
+    while k < len(words):
+        s = words[k]
+        # (the older two-word forms: format long g, format short e)
+        if s in ("short", "long") and k + 1 < len(words) and words[k + 1] in ("g", "e", "eng"):
+            k += 1
+            s += words[k]
         if s in ("compact", "loose"):
             _format["spacing"] = s
         elif s == "default":
@@ -7148,6 +7154,11 @@ def format_(nargout, *args):
             _format["spacing"] = "loose"
         elif s in _FORMAT_NAMES:
             _format["num"] = _FORMAT_NAMES[s]
+        elif s in ("shorteng", "longeng"):
+            raise _err("format %s is not supported in Sagebrush." % ("shortEng" if s == "shorteng" else "longEng"))
+        else:
+            raise _err("Invalid format option '%s'." % _text(args[k]))
+        k += 1
     return NOVAL
 
 
