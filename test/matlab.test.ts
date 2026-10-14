@@ -569,3 +569,21 @@ test("grouped bars by Sagebrush's rule (a group 0.8 of the spacing, BarWidth of 
   ].join(" ")], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["[0.733333 1.73333 2.73333]", "[1.26667 2.26667 3.26667]", "[1.4 3.4 5.4]", "67% 33% 0%", "1", "99% 0%"]);
 });
+
+test("contour's automatic levels: round multiples of a step near a seventh of the span (the published fcontour example's 0.2:0.2:1.4), and a filled contour's minimum", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "f = figure('visible', 'off');",
+    "v = linspace(-5, 5, 71); [X, Y] = meshgrid(v); Z = exp(-(X/3).^2-(Y/3).^2) + exp(-(X+2).^2-(Y+2).^2);",
+    "[C, h] = contour(X, Y, Z); disp(mat2str(h.LevelList, 4));",
+    "[C, h] = contour(peaks); disp(mat2str(h.LevelList));",
+    "[C, h] = contour(magic(5)/3); disp(mat2str(h.LevelList));",
+    "[C, h] = contourf(magic(4)); disp(mat2str(h.LevelList));",
+    "[C, h] = contour(magic(4)); disp(mat2str(h.LevelList));",
+    "[C, h] = contour(peaks, 3); disp(numel(h.LevelList));",
+    "close all",
+  ].join(" ")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[0.2 0.4 0.6 0.8 1 1.2 1.4]", "[-6 -4 -2 0 2 4 6 8]", "[1 2 3 4 5 6 7 8]", "[1 2 4 6 8 10 12 14 16]", "[2 4 6 8 10 12 14 16]", "3",
+  ]);
+});
