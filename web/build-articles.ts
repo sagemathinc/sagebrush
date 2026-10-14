@@ -182,7 +182,7 @@ const seriesList: { slug: string; title: string; description: string; count: num
 rmSync(join(out, "articles"), { recursive: true, force: true });
 const adir = join(root, "articles");
 // the series in this order, then any others alphabetically
-const ORDER = ["notebook", "groebner", "number-theory", "foundations"];
+const ORDER = ["notebook", "matlab", "groebner", "number-theory", "foundations"];
 const rank = (s: string) => (ORDER.indexOf(s) < 0 ? ORDER.length : ORDER.indexOf(s));
 for (const series of existsSync(adir) ? readdirSync(adir).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) : []) {
   const sdir = join(adir, series);
