@@ -641,3 +641,39 @@ test("numgrid and delsq reproduce the published L-shaped grids, counts and nonze
     "numgrid: unknown region 'Q'.",
   ]);
 });
+
+test("eig uses B, its options and the left eigenvectors as documented, and refuses what it cannot do", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (the page's examples: left eigenvectors, a generalized pair with complex eigenvalues)
+    "A = [1 7 3; 2 9 12; 5 22 7]; [V,D,W] = eig(A); disp(mat2str(round(sort(diag(D))' * 1e4) / 1e4)); disp(max(max(abs(W'*A - D*W'))) < 1e-12);",
+    "A = [1/sqrt(2) 0; 0 1]; B = [0 1; -1/sqrt(2) 0]; [V,D] = eig(A,B); disp(mat2str(round(imag(diag(D))'))); disp(max(max(abs(A*V - B*V*D))) < 1e-12);",
+    "T = [2 -1 0; -1 2 -1; 0 -1 2]; Bs = [4 1 0; 1 4 1; 0 1 4]; [V, D, W] = eig(T, Bs); disp(max(max(abs(V'*Bs*V - eye(3)))) < 1e-12); disp(isequal(V, W));",
+    "disp(mat2str(size(eig(T, 'matrix')))); [V, D] = eig(T, 'vector'); disp(mat2str(size(D)));",
+    "try, eig(eye(2), [3 6; 4 8]), catch e, disp(e.message), end",
+    "try, eig(eye(2), eye(2), 'qz'), catch e, disp(e.message), end",
+    "try, eig([1 1i; 2 3]), catch e, disp(e.message), end",
+    "try, eig(eye(2), 'bogus'), catch e, disp(e.message), end",
+    "try, eig(eye(2), 'chol'), catch e, disp(e.message), end",
+    "try, eig([1 NaN; 0 1]), catch e, disp(e.message), end",
+    "try, eig([1 2;3 4],[1 1;1 1+1e-12]), catch e, disp(e.message), end",
+    // (single inputs give single outputs; a symmetric but indefinite pencil's W is not V)
+    "disp(class(eig(single([1 2;3 4])))); disp(class(eig(single([1 0;0 2]), single(eye(2)))));",
+    "[V,D,W] = eig(single([1 2;3 4])); disp([class(V) ' ' class(D) ' ' class(W)]);",
+    "[V,D,W] = eig([0 1;1 0],[1 0;0 -1]); disp(isequal(V,W)); disp(max(max(abs(W'*[0 1;1 0] - D*W'*[1 0;0 -1]))) < 1e-12);",
+    // ("chol" is refused, not replaced by B \\ A, when A is not symmetric or B not positive definite)
+    "try, eig([1 2; 3 4], eye(2), 'chol'), catch e, disp(e.message), end",
+    "try, eig(eye(2), diag([1 -1]), 'chol'), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[-7.9759 -0.5789 25.5548]", "1", "[1 -1]", "1", "1", "1", "[3 3]", "[3 1]",
+    "eig: B is singular, so the pencil may have infinite eigenvalues, which need the QZ algorithm; it is not supported in Sagebrush.",
+    "eig: the QZ algorithm is not supported in Sagebrush.",
+    "eig: complex matrices are not supported in Sagebrush.",
+    "eig: invalid option 'bogus'.", "eig: invalid option 'chol'.",
+    "eig: the input must not contain Inf or NaN.",
+    "eig: B is badly conditioned (cond(B)*eps > 1e-8, Sagebrush's limit for solving through B \\ A), and the QZ algorithm it needs is not supported in Sagebrush.",
+    "single", "single", "single single single", "0", "1",
+    ...Array(2).fill("eig: the \"chol\" algorithm needs a symmetric A and a symmetric positive definite B; Sagebrush does not fall back to another algorithm when it is asked for."),
+  ]);
+});
