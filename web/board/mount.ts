@@ -39,6 +39,7 @@ import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, c
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import type { OutputCache } from "./outcache";
+import { PixelBudget } from "../image-size";
 import { Toolbar, defaultTools } from "./toolbar";
 import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
@@ -206,6 +207,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // here (loaded, opened, a new board, reverted) gets a new one, and the
   // old one's outputs go (SEC-B88-3).
   let outputsId: string | null = null;
+  // (the pictures in the notes' Markdown: one document's pixels, image-size.ts)
+  let notePixels = new PixelBudget();
   function newOutputs(fresh: boolean) {
     const old = outputsId;
     outputsId = host.outputs && host.store?.outputsId ? host.store.outputsId(fresh) : null;
@@ -254,7 +257,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view) doc = d;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
-    board.markdown = (s) => markdown(s);
+    board.markdown = (s) => markdown(s, { pixels: notePixels });
     if (host.math && hasMath(JSON.stringify(d))) {
       // KaTeX: the host's, loaded the first time a board has math
       mathModule ??= host.math();
@@ -409,6 +412,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     loads++;
     loadGen++;
     newOutputs(!stored);
+    notePixels = new PixelBudget();
     const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(host.address?.get() ?? "");
     pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
     closeTimeTravel(false);
@@ -918,7 +922,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function printBoard(o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) {
     if (!doc) return null;
     // (math typeset in sheets too)
-    return printSheets(board, sheets(o.mode), { ...o, markdown: (s) => markdown(s) });
+    return printSheets(board, sheets(o.mode), { ...o, markdown: (s) => markdown(s, { pixels: notePixels }) });
   }
   const prdlg = $("prdlg") as HTMLDialogElement;
   $("print").onclick = () => {
@@ -1014,7 +1018,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     prMask.hidden = !s;
     if (cam) { if (now) board.setCamera(cam); else board.flyTo(cam, 350); }
     const say = $("pr-say");
-    say.innerHTML = st?.say ? markdown(st.say) : "";
+    say.innerHTML = st?.say ? markdown(st.say, { pixels: notePixels }) : "";
     if (st?.say && board.typeset && hasMath(st.say)) board.typeset(say);
     say.hidden = !st?.say;
     $("pr-where").textContent = `${P.i + 1} / ${P.frames.length}`;

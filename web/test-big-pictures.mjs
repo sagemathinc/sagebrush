@@ -46,8 +46,8 @@ try {
     { id: "huge", code: "", outputs: out(png(8192, 8192), "huge") },
     { id: "ok", code: "", outputs: out(real.toString("base64"), "small") },
     { id: "p1", code: "", outputs: out(png(6000, 5000), "thirty MP") },
-    { id: "p2", code: "", outputs: out(png(6000, 5000), "thirty MP more") },
-    { id: "p3", code: "", outputs: out(png(6000, 5000), "past eighty") },
+    { id: "p2", code: "", outputs: out(png(6001, 5000), "thirty MP more") },
+    { id: "p3", code: "", outputs: out(png(6002, 5000), "past eighty") },
     { id: "md", type: "markdown", code: `![a huge one](data:image/png;base64,${png(9000, 9000)}) and ![a small one](data:image/png;base64,${real.toString("base64")})` },
   ] };
   await ev(`sagebrush.notebook.load(${JSON.stringify(doc)}), 1`);
@@ -68,6 +68,42 @@ try {
   await until(`!!${C("md")}.el.querySelector(".mdout img")`, 5000);
   const md = await ev(`(() => { const el = ${C("md")}.el.querySelector(".mdout"); return { imgs: el.querySelectorAll("img").length, text: el.textContent }; })()`);
   check(md.imgs === 1 && /a huge one/.test(md.text), "Markdown: the huge data: picture as its alt text, the small one shown: " + JSON.stringify(md));
+
+  // a second document: its pictures counted afresh, and with them its
+  // Markdown's, HTML's and SVGs' (SEC-89C-2, -3); a GIF's frames (SEC-89C-1)
+  const gifBig = Buffer.from([...Buffer.from("GIF89a"), 1, 0, 1, 0, 0, 0, 0, 0x2c, 0, 0, 0, 0, 0x28, 0x23, 0x88, 0x13, 0, 2, 2, 0x4c, 0x01, 0, 0x3b]).toString("base64");
+  const svgWith = (b64) => `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image href="data:image/png;base64,${b64}" width="10" height="10"/><circle cx="5" cy="5" r="3"/></svg>`;
+  const doc2 = { mode: "python", cells: [
+    { id: "gif", type: "markdown", code: `![a big frame](data:image/gif;base64,${gifBig})` },
+    { id: "svg", code: "", outputs: [{ output_type: "display_data", data: { "image/svg+xml": svgWith(png(8192, 8192)), "text/plain": "an svg" }, metadata: {} }] },
+    { id: "md3", type: "markdown", code: [6000, 6001, 6002].map((w, i) => `![p${i}](data:image/png;base64,${png(w, 5000)})`).join(" ") },
+    { id: "mdsvg", type: "markdown", code: `![carried](data:image/svg+xml;base64,${Buffer.from(svgWith(real.toString("base64"))).toString("base64")}) ![plain](data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><circle r="2"/></svg>').toString("base64")})` },
+  ] };
+  await ev(`sagebrush.notebook.load(${JSON.stringify(doc2)}), 1`);
+  await until(`!!${C("svg")}?.out.querySelector('svg')`, 10000);
+  await ev(`sagebrush.notebook.renderMd(${C("gif")}), 1`);
+  check(await ev(`!${C("gif")}.el.querySelector(".mdout img") && /a big frame/.test(${C("gif")}.el.querySelector(".mdout").textContent)`), "a GIF whose frame is larger than its screen: not shown, its frame's size counts (SEC-89C-1)");
+  check(await ev(`(() => { const s = ${C("svg")}.out.querySelector("svg"); return !!s && !s.querySelector("image") && !!s.querySelector("circle"); })()`), "an SVG output's huge inline raster is dropped, its vectors kept (SEC-89C-3)");
+  for (const id of ["md3", "mdsvg"]) await ev(`sagebrush.notebook.renderMd(${C(id)}), 1`);
+  await until(`!!${C("md3")}.el.querySelector(".mdout img")`, 5000);
+  const md3 = await ev(`${C("md3")}.el.querySelectorAll(".mdout img").length`);
+  await ev(`sagebrush.notebook.renderMd(${C("md3")}), 1`);
+  await sleep(200);
+  const md3again = await ev(`${C("md3")}.el.querySelectorAll(".mdout img").length`);
+  check(md3 === 2 && md3again === 2, "Markdown's pictures count in the document's pixels: two of three 30 MP shown, the same two when drawn again (SEC-89C-2): " + [md3, md3again]);
+  const mdsvg = await ev(`[...${C("mdsvg")}.el.querySelectorAll(".mdout img")].map((i) => i.alt).join()`);
+  check(mdsvg === "plain", "a data: SVG carrying a raster isn't shown; one of vectors is: " + mdsvg);
+
+  // a board's code: each board's pictures counted afresh (CORR-89C-4)
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  const show30 = (w) => `from IPython.display import Image, display\nimport base64\ndisplay(Image(data=base64.b64decode(${JSON.stringify(png(w, 5000))})))`;
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "A", nodes: [{ id: "a1", code: show30(6000) }, { id: "a2", code: show30(6001) }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000);
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "B", nodes: [{ id: "b1", code: show30(6002) }] })}).then(() => 1)`);
+  await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].id === 'b1' && os[0].state === '')", 60000);
+  await ev("window.board.focus(['b1'], true), window.board.render(), 1");
+  check(await until("!!document.querySelector('[data-code=b1] .board-code-out img') && !document.querySelector('[data-code=b1] .big-picture')", 10000), "board B's picture shows: its own document's pixels, not board A's");
 
   // a board carrying a huge picture doesn't take it in; a small one, it does
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });

@@ -18,7 +18,7 @@ import css from "./notebook.css" with { type: "text" };
 import { render as renderMarkdown } from "../markdown.ts";
 import { BlockEditor } from "../board/blocks.ts";
 import { safeHtml } from "../safe-html.ts";
-import { PixelBudget, imageSize } from "../image-size.ts";
+import { PixelBudget, imageSize, pictureKey } from "../image-size.ts";
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
@@ -79,7 +79,7 @@ function svgStyle(v, pre) {
   return out.join(";");
 }
 let svgCount = 0;
-export function safeSvg(text) {
+export function safeSvg(text, pixels = new PixelBudget(Infinity)) {
   const root = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
   if (root.namespaceURI !== SVG_NS || root.localName !== "svg") return null;
   const pre = `s${++svgCount}-`;
@@ -92,7 +92,8 @@ export function safeSvg(text) {
       const { localName: n, value } = a;
       let keep = null;
       if (isHref(a)) {
-        if (el.localName === "image") keep = RASTER_URL.test(value) ? value : null;
+        // (an inline raster within the bounds its header gives, counted in the document's pixels: image-size.ts, SEC-89C-3)
+        if (el.localName === "image") { const m = RASTER_URL.exec(value); keep = m && pixels.take(imageSize("image/" + m[1], value.slice(value.indexOf(",") + 1)), pictureKey(value)) === null ? value : null; }
         else keep = /^#[\w.-]+$/.test(value) ? "#" + pre + value.slice(1) : null;
       } else if (a.namespaceURI === XML_NS) keep = n === "space" || n === "lang" ? svgValue(value, pre) : null;
       else if (a.namespaceURI === null && /^[a-z_][\w.-]*$/i.test(n) && !/^on/i.test(n) && !SVG_NO_PROPS.test(n)) {
@@ -315,7 +316,7 @@ export function createNotebook(root, opts = {}) {
     const el = h("div", "md-out");
     el.sbBundle = { "text/markdown": b["text/markdown"], "text/plain": b["text/plain"] ?? b["text/markdown"] };
     // (no images from other sites: code made this, and an image's address could carry away what it read)
-    el.innerHTML = renderMarkdown(b["text/markdown"], { highlight: mdHighlight, remote: false });
+    el.innerHTML = renderMarkdown(b["text/markdown"], { highlight: mdHighlight, remote: false, pixels });
     box.appendChild(el);
     if (el.querySelector(".math")) loadMath().then((mm) => mm.typeset(el)).catch(() => {});
   }
@@ -325,14 +326,14 @@ export function createNotebook(root, opts = {}) {
   function appendHtml(box, b) {
     const el = h("div", "html-out");
     el.sbBundle = { ...b };
-    el.innerHTML = safeHtml(b["text/html"], { remote: false });
+    el.innerHTML = safeHtml(b["text/html"], { remote: false, pixels });
     box.appendChild(el);
   }
   function appendDisplay(box, b) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
     if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
-    const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"]);
+    const svg = b["image/svg+xml"] && safeSvg(b["image/svg+xml"], pixels);
     if (svg && b[SCENE3D]) {
       fig.classList.add("plot3d");
       fig.sbBundle = { [SCENE3D]: b[SCENE3D], "image/svg+xml": b["image/svg+xml"], "text/plain": b["text/plain"] ?? "3D plot" };
@@ -351,7 +352,7 @@ export function createNotebook(root, opts = {}) {
       // (within the bounds its header gives, and this document's pixels in
       // all: image-size.ts; else a placeholder, the picture kept as it was)
       const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" });
-      const why = pixels.take(imageSize(raster[0], raster[1]));
+      const why = pixels.take(imageSize(raster[0], raster[1]), pictureKey(raster[1]));
       if (!why) fig.appendChild(show());
       else {
         fig.sbBundle = { ...b };
@@ -1364,7 +1365,7 @@ export function createNotebook(root, opts = {}) {
   const mdHighlight = (code, lang) => (!lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
-    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
+    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
     if (cell.md.querySelector(".math")) {
       await afterPaint(); // the text shows first; KaTeX (275 KB) typesets the math after
@@ -1388,7 +1389,7 @@ export function createNotebook(root, opts = {}) {
   function openBlocks(cell) {
     if (cell.blocks || opts.readOnly) return cell.blocks;
     const b = new BlockEditor(cell.ta.value, {
-      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments }),
+      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels }),
       typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
@@ -2012,6 +2013,8 @@ export function createNotebook(root, opts = {}) {
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
     load, snapshot, applyRemote, replace, flush,
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
+    /** Another document is shown (a board's code, without load()): its pictures are counted afresh (image-size.ts). */
+    newPictures() { pixels = new PixelBudget(); },
     /** The next run's prompt number less one (after TimeTravel replayed runs). */
     setExecCount(k) { if (kernel) kernel.execCount = k; else execCount = k; },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */

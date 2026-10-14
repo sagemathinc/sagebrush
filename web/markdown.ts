@@ -5,6 +5,7 @@
 // keep only harmless URLs, and math ($...$, $$...$$, \(...\), \[...\]) becomes elements the page
 // typesets with KaTeX (web/math.ts).  Images may refer to a cell's
 // attachments (attachment:name), as in Jupyter.
+import type { PixelBudget } from "./image-size";
 import { Marked, type Tokens } from "marked";
 import { safeHtml, safeImage, safeLink } from "./safe-html";
 
@@ -18,6 +19,8 @@ export interface Options {
   // false for what code produced: no images from other sites (an image's
   // address could carry away what the code read)
   remote?: boolean;
+  // the document's pictures' pixels (image-size.ts), counting its data: pictures
+  pixels?: PixelBudget;
 }
 
 function mathExtension() {
