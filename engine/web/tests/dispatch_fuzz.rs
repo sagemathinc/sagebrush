@@ -27,6 +27,8 @@ fn requests() -> Vec<Value> {
         json!({"fn": "nf_data", "f": [2, 0, 1]}),
         json!({"fn": "primes_above", "f": [2, 0, 1], "p": 3}),
         json!({"fn": "bnf", "f": [5, 0, 1]}),
+        json!({"fn": "bnf_certify", "f": [5, 0, 1]}),
+        json!({"fn": "bnf_certify", "f": [5, 0, 1], "norm_max": 100, "index_max": 100}),
         json!({"fn": "bnf_relations", "f": [5, 0, 1], "extra": [7]}),
         json!({"fn": "quadratic_class_group", "d": "-20"}),
         json!({"fn": "hermite_form", "m": [[1, 2], [3, 4]]}),

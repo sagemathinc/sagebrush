@@ -544,6 +544,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes) }))
         }
+        "bnf_certify" => {
+            let opt = |k: &str| -> Result<Option<u64>, String> {
+                match v.get(k) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(x) => x.as_u64().map(Some).ok_or_else(|| format!("'{}' must be a nonnegative integer", k)),
+                }
+            };
+            let b = sagebrush_classgroup::api::bnf_certify(&bigs(v.get("f"))?, opt("norm_max")?, opt("index_max")?)?;
+            Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w,
+                       "norm_bound": b.norm_bound.to_string(), "norm_bound_kind": b.norm_bound_kind, "fb_bound": b.fb_bound,
+                       "primes_shown": b.primes_shown, "reg_lower": b.reg_lower, "index_bound": b.index_bound,
+                       "unit_primes": b.unit_primes, "class_primes": big(&b.class_primes) }))
+        }
         "bnf_relations" => {
             let bad = || "extra must be a list of primes".to_string();
             let extra: Vec<u64> = match v.get("extra") {
