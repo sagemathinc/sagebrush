@@ -211,6 +211,9 @@ export class Board {
   onDoubleClick: ((it: Item | null, x: number, y: number) => boolean) | null = null;
   /** a press, or a double click, on an edge (not over a note): return true to take it */
   onEdgeDown: ((e: Edge, ev: PointerEvent) => boolean) | null = null;
+  /** A second finger came while the first drags or resizes an item (edit.ts):
+   * that dropped, true if there was one; the two fingers then pinch. */
+  onTouchJoin: (() => boolean) | null = null;
   onEdgeDoubleClick: ((e: Edge) => boolean) | null = null;
   /** an edge drawn selected, and a group outlined as where a dragged item would go */
   selectedEdge: string | null = null;
@@ -1151,6 +1154,10 @@ export class Board {
       scale = e.scale;
     });
     const down = new Map<number, { x: number; y: number }>();
+    // (every finger on the board, where it is: one an item's drag took is still here)
+    const touches = new Map<number, { x: number; y: number }>();
+    for (const t of ["pointerdown", "pointermove"]) this.el.addEventListener(t, (e) => { const p = e as PointerEvent; if (p.pointerType === "touch") touches.set(p.pointerId, { x: p.clientX, y: p.clientY }); }, true);
+    for (const t of ["pointerup", "pointercancel"]) this.el.addEventListener(t, (e) => { touches.delete((e as PointerEvent).pointerId); }, true);
     const mid = () => {
       const [p, q] = [...down.values()];
       return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, d: Math.hypot(p.x - q.x, p.y - q.y) };
@@ -1165,6 +1172,12 @@ export class Board {
       // (a second finger while a finger draws or erases: that is dropped, and the two pinch)
       if (touch && this.live?.touch) { this.live = null; this.request(); }
       if (touch && this.erased?.touch) { this.erased = null; this.request(); }
+      // (a second finger while the first drags or resizes an item: that is
+      // dropped, nothing of it kept, and the two pinch)
+      if (touch && !e.isPrimary && down.size === 0) {
+        const first = [...touches].find(([id]) => id !== e.pointerId);
+        if (first && this.onTouchJoin?.()) down.set(first[0], first[1]);
+      }
       // drawing, or erasing: the first pointer (a finger, only while no pen has been seen)
       if (down.size === 0 && e.isPrimary && e.button === 0 && !(touch && this.penSeen)) {
         const style = this.pen?.();

@@ -4,7 +4,8 @@
 // are a thin row under the Edit toolbar, in view when the keyboard takes
 // half the screen; typing and Run work; the toolbar's Note opens one too.
 // The page does not zoom (double taps are the board's), and the tour's
-// caption is a line until tapped.  Serve web/dist first (python3
+// caption is a line until tapped.  Two fingers, the first on a note in
+// Edit, pinch: the board zooms, the note stays.  Serve web/dist first (python3
 // web/serve.py 8765), then
 //   node web/board/test-mobile.mjs
 import { spawn } from "node:child_process";
@@ -154,6 +155,23 @@ try {
   check(await until("document.activeElement?.closest?.('.mb-edit') && document.activeElement.value === 'Third block'", 3000), "a tap on another block writes in that one: " + await ev("document.activeElement?.value"));
   await tapEl("[data-sbb=top]");
   check(await until("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'about').text === 'First\\n\\nblock, now two\\n\\nSecond block\\n\\nThird block'", 3000), "what was written is kept: " + await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'about').text)"));
+  // in Edit, two fingers, the first on a note: a pinch (the board zooms), not a drag of the note
+  {
+    const touch = (type, pts) => send("Input.dispatchTouchEvent", { type, touchPoints: pts.map(([x, y], i) => ({ x, y, id: i + 1 })) });
+    await ev("window.sagebrush.board.editing(true), window.board.focus(['start'], true)");
+    await sleep(500);
+    const z0 = await ev("window.board.camera.z"), at0 = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start'))");
+    const p = await ev("(() => { const r = window.board.clientRect('start'); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
+    await touch("touchStart", [[p.x - 20, p.y]]);
+    await touch("touchMove", [[p.x - 24, p.y]]);
+    await touch("touchStart", [[p.x - 24, p.y], [p.x + 20, p.y]]);
+    for (let k = 1; k <= 8; k++) { await touch("touchMove", [[p.x - 24 - 7 * k, p.y], [p.x + 20 + 7 * k, p.y]]); await sleep(16); }
+    await touch("touchEnd", []);
+    await sleep(400);
+    const z1 = await ev("window.board.camera.z"), at1 = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'start'))");
+    // (the fingers 44 px apart, then 156: the board zooms by about that, the note where it was)
+    check(Math.abs(z1 / z0 - 156 / 44) < 0.2 && at1 === at0 && !(await ev("document.querySelector('.board-item.dragging')")), "a pinch that starts on a note, in Edit: the board zooms, the note stays: " + JSON.stringify({ zoom: z1 / z0, note: at1 === at0 ? "the same" : [at0, at1] }));
+  }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
