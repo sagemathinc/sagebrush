@@ -664,6 +664,13 @@ try {
     check(counts.one === 0 && counts.many >= 1 && counts.many <= 3, "a board's notes are measured together, not one layout each: " + JSON.stringify(counts));
     const mismatched = await ev(`(() => { const d = window.sagebrush.board.snapshot().doc, bad = []; for (const n of d.nodes) { if (n.kind === "group") continue; const it = window.board.item(n.id); const h = Math.max(60, Math.ceil(window.board.measure({ kind: "note", title: n.title, text: n.text, detail: n.detail, ref: n.ref }, it.w)) + 2); if (h !== it.h) bad.push([n.id, it.w, it.h, h]); } return bad; })()`);
     check(mismatched.length === 0, "notes measured all at once have the sizes measuring each alone gives: " + JSON.stringify(mismatched.slice(0, 5)));
+    // (and its template's code items: PERF-F2A-1, daybreak)
+    const templated = { title: "Templated", pages: [{ id: "t", template: true, nodes: Array.from({ length: 40 }, (_, i) => ({ id: "c" + i, title: "Code " + i, code: "x" + i + " = " + i, x: (i % 8) * 400, y: Math.floor(i / 8) * 260 })) }, { uses: "t", nodes: [{ id: "o", title: "Own", x: 0, y: 1600 }] }] };
+    await ev("(() => { const b = window.board; window.__counts = { one: 0, many: 0 }; for (const k of ['measure', 'measureWidth']) { const f = b[k].bind(b); b[k] = (...a) => (window.__counts.one++, f(...a)); } if (b.measureMany) { const g = b.measureMany.bind(b); b.measureMany = (l) => (window.__counts.many++, g(l)); } return 1; })()");
+    await ev(`window.sagebrush.board.load(${JSON.stringify(templated)}).then(() => window.sagebrush.board.page(1)).then(() => 1)`);
+    const tcounts = await ev("window.__counts");
+    await ev("(() => { for (const k of ['measure', 'measureWidth', 'measureMany']) delete window.board[k]; return 1; })()");
+    check(tcounts.one === 0, "a template's code items are measured with the rest, not one layout each: " + JSON.stringify(tcounts));
     await ev("localStorage.clear()");
   }
   check(!errors.length, "page errors: " + errors.join(" | "));
