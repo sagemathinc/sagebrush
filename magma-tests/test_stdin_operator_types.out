@@ -1,0 +1,509 @@
+
+>> s := 3 * [4, 5];
+          ^
+Runtime error in '*': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> t := "xy" * 2;
+             ^
+Runtime error in '*': Bad argument types
+Argument types given: MonStgElt, RngIntElt
+
+
+>> u := "xy" + "z";
+             ^
+Runtime error in '+': Bad argument types
+Argument types given: MonStgElt, MonStgElt
+
+
+>> v := [6] + [7, 8];
+            ^
+Runtime error in '+': Bad argument types
+Argument types given: SeqEnum[RngIntElt], SeqEnum[RngIntElt]
+
+
+>> w := <2, 3> * 3;
+               ^
+Runtime error in '*': Bad argument types
+Argument types given: Tup, RngIntElt
+
+
+>> b := false + 2;
+              ^
+Runtime error in '+': Bad argument types
+Argument types given: BoolElt, RngIntElt
+
+
+>> c := [] - 1;
+           ^
+Runtime error in '-': Bad argument types
+Argument types given: SeqEnum[Any], RngIntElt
+
+
+>> d := 5 - {@ 1 @};
+          ^
+Runtime error in '-': Bad argument types
+Argument types given: RngIntElt, SetIndx[RngIntElt]
+
+
+>> e := {* 2, 2 *} * 1/2;
+                   ^
+Runtime error in '*': Bad argument types
+Argument types given: SetMulti[RngIntElt], RngIntElt
+
+
+>> f := -[9];
+        ^
+Runtime error in '-': Bad argument types
+Argument types given: SeqEnum[RngIntElt]
+
+
+>> g := -false;
+        ^
+Runtime error in '-': Bad argument types
+Argument types given: BoolElt
+
+
+>> h := 10 div true;
+           ^
+Runtime error in 'div': Bad argument types
+Argument types given: RngIntElt, BoolElt
+
+
+>> k := true mod 3;
+             ^
+Runtime error in 'mod': Bad argument types
+Argument types given: BoolElt, RngIntElt
+
+
+>> m := 4 / false;
+          ^
+Runtime error in '/': Bad argument types
+Argument types given: RngIntElt, BoolElt
+
+
+>> n := 3 ^ true;
+          ^
+Runtime error in '^': Bad argument types
+Argument types given: RngIntElt, BoolElt
+
+
+>> p := 2 + <"a">;
+          ^
+Runtime error in '+': Bad argument types
+Argument types given: RngIntElt, Tup
+
+
+>> q := [[1, 2]] * 2;
+                 ^
+Runtime error in '*': Bad argument types
+Argument types given: SeqEnum[SeqEnum[RngIntElt]], RngIntElt
+
+
+>> r := 7 + [1/3, 2];
+          ^
+Runtime error in '+': Bad argument types
+Argument types given: RngIntElt, SeqEnum[FldRatElt]
+
+
+>> 3 eq "3";
+     ^
+Runtime error in 'eq': Bad argument types
+Argument types given: RngIntElt, MonStgElt
+
+
+>> "3" ne 3;
+       ^
+Runtime error in 'ne': Bad argument types
+Argument types given: MonStgElt, RngIntElt
+
+
+>> false eq 0;
+         ^
+Runtime error in 'eq': Bad argument types
+Argument types given: BoolElt, RngIntElt
+
+
+>> [2] eq 2;
+       ^
+Runtime error in 'eq': Bad argument types
+Argument types given: SeqEnum[RngIntElt], RngIntElt
+
+
+>> <1> eq [1];
+       ^
+Runtime error in 'eq': Bad argument types
+Argument types given: Tup, SeqEnum[RngIntElt]
+
+
+>> x +:= "a";
+     ^
+Runtime error in '+:=': Bad argument types
+
+
+>> x -:= [2];
+     ^
+Runtime error in '-:=': Bad argument types
+
+
+>> x *:= true;
+     ^
+Runtime error in '*:=': Bad argument types
+
+11
+
+>> &+ ["p", "q"];
+   ^
+Runtime error in '&+': Operation not defined on elements of type MonStgElt
+
+
+>> &* [true, false];
+   ^
+Runtime error in '&*': Operation not defined on elements of type BoolElt
+
+
+>> &+ [[1], [2, 3]];
+   ^
+Runtime error in '&+': Operation not defined on elements of type SeqEnum
+
+
+>> &and [0, 1];
+   ^
+Runtime error in '&and': Bad argument types
+Argument types given: SeqEnum[RngIntElt]
+
+only
+abcd
+ababab
+true
+
+>> "ab" ^ -2;
+        ^
+Runtime error in '^': Argument 2 (-2) should be >= 0
+
+27/2
+-27/2
+5
+5
+1
+1/4
+3.00000000000000000000000000000
+6
+2
+false
+true
+true
+true
+t^2 - 1
+-t + 2
+
+>> z * [1];
+     ^
+Runtime error in '*': Bad argument types
+Argument types given: RngUPolElt[FldRat], SeqEnum[RngIntElt]
+
+
+>> +"pq";
+   ^
+Runtime error in '+': Bad argument types
+Argument types given: MonStgElt
+
+
+>> +true;
+   ^
+Runtime error in '+': Bad argument types
+Argument types given: BoolElt
+
+
+>> +[3];
+   ^
+Runtime error in '+': Bad argument types
+Argument types given: SeqEnum[RngIntElt]
+
+
+>> +<3>;
+   ^
+Runtime error in '+': Bad argument types
+Argument types given: Tup
+
+7
+2/3
+
+>> {3} eq {* 3 *};
+       ^
+Runtime error in 'eq': Bad argument types
+Argument types given: SetEnum[RngIntElt], SetMulti[RngIntElt]
+
+
+>> {@ 3 @} ne {* 3 *};
+           ^
+Runtime error in 'ne': Bad argument types
+Argument types given: SetIndx[RngIntElt], SetMulti[RngIntElt]
+
+true
+false
+true
+
+>> Type(3) eq "RngIntElt";
+           ^
+Runtime error in 'eq': Bad argument types
+Argument types given: Cat[RngIntElt], MonStgElt
+
+true
+
+>> 3 eq Integers();
+     ^
+Runtime error in 'eq': Bad argument types
+Argument types given: RngIntElt, RngInt
+
+false
+
+>> <3> eq <3, 4>;
+       ^
+Runtime error in 'eq': Arguments are not compatible
+Argument types given: Tup, Tup
+
+
+>> <3, 4> eq <3, "x">;
+          ^
+Runtime error in 'eq': Arguments are not compatible
+Argument types given: Tup, Tup
+
+true
+true
+true
+false
+
+>> 3 eq Matrix(Integers(), 1, 2, [3, 0]);
+     ^
+Runtime error in 'eq': Bad argument types
+Argument types given: RngIntElt, ModMatRngElt[RngInt]
+
+
+>> 4 in ["4"];
+     ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> "4" in [4];
+       ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> false in [4];
+         ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> 4 in [[4]];
+     ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> 4 notin {"x"};
+     ^
+Runtime error in 'notin': No valid universe containing all elements
+
+
+>> 4 in {* "4" *};
+     ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> 4 in <4, "4">;
+     ^
+Runtime error in 'in': Bad argument types
+Argument types given: RngIntElt, Tup
+
+false
+false
+false
+true
+true
+
+>> +Integers();
+   ^
+Runtime error in '+': Bad argument types
+Argument types given: RngInt
+
+
+>> +P;
+   ^
+Runtime error in '+': Bad argument types
+Argument types given: RngUPol[RngInt]
+
+
+>> +rr;
+   ^
+Runtime error in '+': Bad argument types
+Argument types given: Rec
+
+w
+[4]
+
+>> 1 eq P;
+     ^
+Runtime error in 'eq': Bad argument types
+Argument types given: RngIntElt, RngUPol[RngInt]
+
+
+>> P eq Integers();
+     ^
+Runtime error in 'eq': Bad argument types
+Argument types given: RngUPol[RngInt], RngInt
+
+
+>> P eq P2;
+     ^
+Runtime error in 'eq': Arguments are not compatible
+Argument types given: RngUPol[RngInt], RngUPol[FldRat]
+
+true
+true
+
+>> rr eq rr;
+      ^
+Runtime error in 'eq': Bad argument types
+Argument types given: Rec, Rec
+
+
+>> 1 eq rr;
+     ^
+Runtime error in 'eq': Bad argument types
+Argument types given: RngIntElt, Rec
+
+
+>> Matrix(Integers(), 1, 1, [4]) eq P;
+                                 ^
+Runtime error in 'eq': Bad argument types
+Argument types given: AlgMatElt[RngInt], RngUPol[RngInt]
+
+false
+true
+false
+true
+w
+-w
+
+>> w / 3;
+     ^
+Runtime error in '/': Argument 2 is not a unit
+
+1/3*v
+
+>> "4" in E;
+       ^
+Runtime error in 'in': No valid universe containing all elements
+
+false
+false
+
+>> "4" notin F;
+       ^
+Runtime error in 'notin': No valid universe containing all elements
+
+false
+true
+[ 2.50000000000000000000000000000, 4.00000000000000000000000000000 ]
+[ 5, 2 ]
+[ 1/3, 2 ]
+[ 7, 2 ]
+[
+    {* 1 *},
+    {* 2 *}
+]
+true
+false
+false
+true
+true
+true
+true
+true
+true
+
+>> [1, 5] ge ["q"];
+          ^
+Runtime error in 'ge': Incompatible sequences
+
+
+>> Matrix(Integers(), 2, 2, [1, 2, 3, 4]) lt Matrix(Integers(), 1, 1, [5]);
+                                          ^
+Runtime error in 'lt': Arguments have incompatible degrees
+
+
+>> {4, 5} lt {6};
+          ^
+Runtime error in 'lt': No comparison algorithm exists for given objects
+
+
+>> <1, 2> gt <1, 2, 3>;
+          ^
+Runtime error in 'gt': Arguments are not compatible
+Argument types given: Tup, Tup
+
+
+>> [1] cat ["b"];
+       ^
+Runtime error in 'cat': Incompatible sequences
+
+
+>> "ab" cat 3;
+        ^
+Runtime error in 'cat': Bad argument types
+Argument types given: MonStgElt, RngIntElt
+
+
+>> {7} join {* 7 *};
+       ^
+Runtime error in 'join': Bad argument types
+Argument types given: SetEnum[RngIntElt], SetMulti[RngIntElt]
+
+
+>> {2} join {"z"};
+       ^
+Runtime error in 'join': No valid universe containing all elements
+
+
+>> {2} subset {"z"};
+       ^
+Runtime error in 'subset': Arguments 1 and 2 have incompatible universal sets
+
+
+>> (w + 1) div (3/4);
+           ^
+Runtime error in 'div': Bad argument types
+Argument types given: RngUPolElt[RngInt], FldRatElt
+
+
+>> Matrix(Integers(), 1, 4, [1, 2, 3, 4])^2;
+                                         ^
+Runtime error in '^': Argument 1 is not square
+
+
+>> Matrix(Integers(), 2, 2, [1, 2, 3, 4]) / 3;
+                                          ^
+Runtime error in '/': Argument 2 is not a unit
+
+
+>> B * B;
+     ^
+Runtime error in '*': Arguments have incompatible degrees
+
+[ 7]
+[16]
+
+>> w / 2.5;
+     ^
+Runtime error in '/': Cannot create rational function field over ring with no 
+exact polynomial GCD algorithm
+
+(-1 : -4 : 1)
+(342 : 6324 : 1)
+(-1 : -4 : 1)
+
+>> B * Matrix(Rationals(), 2, 2, [1, 0, 0, 1]);
+     ^
+Runtime error in '*': Arguments have incompatible coefficient rings
+

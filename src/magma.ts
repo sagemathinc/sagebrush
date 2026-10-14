@@ -403,14 +403,17 @@ class Parser {
       }
       const opa = ["+:=", "-:=", "*:=", "/:=", "^:=", "cat:="].find((o) => this.at(o));
       if (opa && lhs.length === 1) {
-        this.next();
+        const ot = this.next();
         const e = this.expr();
         this.expect(";");
         const op = opa.slice(0, -2);
         const target = lhs[0];
         if (target.kind === "name") this.declareGlobal(target.py);
         const cur = target.read;
-        const val = op === "+" ? `(${cur} + ${e})` : op === "-" ? `(${cur} - ${e})` : op === "*" ? `(${cur} * ${e})` : op === "/" ? `_m._div(${cur}, ${e})` : op === "^" ? `_m._pow(${cur}, ${e})` : `_m._cat(${cur}, ${e})`;
+        // an error points at the operator and is named after it ('+:=')
+        const at = `(${ot.line}, ${ot.col}), ${JSON.stringify(opa)}`;
+        const helper = { "+": "_add", "-": "_sub", "*": "_mul", "/": "_div", "^": "_pow" }[op];
+        const val = helper ? `_m.${helper}(${cur}, ${e}, ${at})` : `_m._cat(${cur}, ${e})`;
         this.store(target, val);
         return;
       }
@@ -819,6 +822,9 @@ class Parser {
     if (t.t === "kw" && ops[t.v]) {
       this.next();
       const r = this.catExpr();
+      // eq, ne, in and notin refuse values of different kinds, pointing at
+      // the operator
+      if (t.v !== "cmpeq" && t.v !== "cmpne") return `_m.${ops[t.v]}(${l}, ${r}, (${t.line}, ${t.col}))`;
       return `_m.${ops[t.v]}(${l}, ${r})`;
     }
     if (this.at("is")) this.fail("'is' is not supported");
@@ -827,18 +833,26 @@ class Parser {
 
   catExpr(): string {
     let l = this.addExpr();
-    while (this.eat("cat")) l = `_m._cat(${l}, ${this.addExpr()})`;
+    while (this.at("cat")) {
+      const t = this.next();
+      l = `_m._cat(${l}, ${this.addExpr()}, (${t.line}, ${t.col}))`;
+    }
     return l;
   }
 
+  // + - * / div mod ^ go through runtime helpers, which refuse what only
+  // Python gives a meaning ("ab" * 3, [1] + [2], true + 1) with Magma's
+  // error at the operator
   addExpr(): string {
     let l = this.mulExpr();
     while (true) {
-      if (this.eat("+")) l = `(${l} + ${this.mulExpr()})`;
-      else if (this.eat("-")) l = `(${l} - ${this.mulExpr()})`;
-      else if (this.eat("join")) l = `_m._join(${l}, ${this.mulExpr()})`;
-      else if (this.eat("diff")) l = `_m._diff(${l}, ${this.mulExpr()})`;
-      else if (this.eat("sdiff")) l = `_m._sdiff(${l}, ${this.mulExpr()})`;
+      if (this.at("+") || this.at("-")) {
+        const t = this.next();
+        l = `_m.${t.v === "+" ? "_add" : "_sub"}(${l}, ${this.mulExpr()}, (${t.line}, ${t.col}))`;
+      } else if (this.at("join") || this.at("diff") || this.at("sdiff")) {
+        const t = this.next();
+        l = `_m._${t.v}(${l}, ${this.mulExpr()}, (${t.line}, ${t.col}))`;
+      }
       else return l;
     }
   }
@@ -846,25 +860,39 @@ class Parser {
   mulExpr(): string {
     let l = this.unary();
     while (true) {
-      if (this.eat("*")) l = `(${l} * ${this.unary()})`;
-      else if (this.eat("/")) l = `_m._div(${l}, ${this.unary()})`;
-      else if (this.eat("div")) l = `_m._idiv(${l}, ${this.unary()})`;
-      else if (this.eat("mod")) l = `_m._mod(${l}, ${this.unary()})`;
-      else if (this.eat("meet")) l = `_m._meet(${l}, ${this.unary()})`;
+      if (this.at("*") || this.at("/") || this.at("div") || this.at("mod")) {
+        const t = this.next();
+        const helper = { "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod" }[t.v];
+        l = `_m.${helper}(${l}, ${this.unary()}, (${t.line}, ${t.col}))`;
+      } else if (this.at("meet")) {
+        const t = this.next();
+        l = `_m._meet(${l}, ${this.unary()}, (${t.line}, ${t.col}))`;
+      }
       else return l;
     }
   }
 
   unary(): string {
-    if (this.eat("-")) return `(-${this.unary()})`;
-    if (this.eat("+")) return this.unary();
+    if (this.at("-")) {
+      const t = this.next();
+      const e = this.unary();
+      return /^\d+$/.test(e) ? `(-${e})` : `_m._neg(${e}, (${t.line}, ${t.col}))`;
+    }
+    if (this.at("+")) {
+      const t = this.next();
+      const e = this.unary();
+      return /^\d+$/.test(e) ? e : `_m._uplus(${e}, (${t.line}, ${t.col}))`;
+    }
     if (this.eat("#")) return `_m._card(${this.unary()})`;
     return this.power();
   }
 
   power(): string {
     const b = this.postfix();
-    if (this.eat("^")) return `_m._pow(${b}, ${this.unary()})`;
+    if (this.at("^")) {
+      const t = this.next();
+      return `_m._pow(${b}, ${this.unary()}, (${t.line}, ${t.col}))`;
+    }
     return b;
   }
 
@@ -979,11 +1007,12 @@ class Parser {
       this.expect(">");
       return `_m.MTuple([${parts.join(", ")}])`;
     }
-    if (this.eat("&")) {
+    if (this.at("&")) {
       // &+ S, &* S, &cat S, &and S, &or S, &join S, &meet S
+      const amp = this.next();
       const op = this.next();
       const s = this.unary();
-      return `_m._reduce(${JSON.stringify(op.v)}, ${s})`;
+      return `_m._reduce(${JSON.stringify(op.v)}, ${s}, (${amp.line}, ${amp.col}))`;
     }
     if (this.at("func") || this.at("proc")) {
       const kind = this.next().v;
