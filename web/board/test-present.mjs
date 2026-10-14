@@ -139,9 +139,14 @@ try {
   await ev(`${B}.present().then(() => document.querySelector('[data-sbb=pr-exit]').click()).then(() => 1)`);
   check(await until("!document.querySelector('.sbb').classList.contains('sbb-present')", 3000), "✕ leaves too");
   // no full screen (an iPhone's Safari): the window, all of it; Esc leaves
-  await ev("Element.prototype.requestFullscreen = undefined, 1");
+  // (and a full screen asked for by an earlier presentation, granted late
+  // during this one, as CI's google-chrome does: left, not taken up)
+  await until("!document.fullscreenElement", 3000);
+  await ev("window.__rf = Element.prototype.requestFullscreen, Element.prototype.requestFullscreen = undefined, Object.defineProperty(document, 'fullscreenEnabled', { get: () => false }), 1");
   await ev(`${B}.present()`);
-  await sleep(500);
+  const late = await send("Runtime.evaluate", { expression: "window.__rf.call(document.querySelector('.sbb')).then(() => 'granted', (e) => String(e))", awaitPromise: true, returnByValue: true, userGesture: true });
+  check(late.result?.value === "granted", "(the late full screen is granted: " + late.result?.value + ")");
+  await sleep(800);
   check(await ev("!document.fullscreenElement && (() => { const r = document.querySelector('.sbb').getBoundingClientRect(); return r.left === 0 && r.top === 0 && r.width === innerWidth && r.height === innerHeight; })()"), "without full screen, Present fills the window: " + await ev("JSON.stringify({ fs: !!document.fullscreenElement, r: document.querySelector('.sbb').getBoundingClientRect(), inner: [innerWidth, innerHeight], present: document.querySelector('.sbb').classList.contains('sbb-present') })"));
   check(await ev("document.querySelector('.sbb').classList.contains('sbb-present')"), "...and stays presenting (a full screen left earlier doesn't end it)");
   if (process.env.SHOT) { await key("ArrowRight", 39); const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOT, Buffer.from(r.data, "base64")); }
