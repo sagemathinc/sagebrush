@@ -36,3 +36,7 @@ This package (`dist/sagebrush.cjs` and `bin/sagebrush.cjs`) bundles:
 6. **John Cremona's elliptic curves** of conductor below 1000 (embedded as
    `_cremona_small.py`), from ecdata, under the Artistic License 2.0
    (`LICENSE-Artistic-2.0.txt`).
+
+7. **Google's Turbo colormap**: its 256-entry table (embedded as
+   `_matlab_turbo.py`), by Anton Mikhailov, Copyright 2019 Google LLC,
+   under the Apache License 2.0 (`LICENSE-APACHE`).
