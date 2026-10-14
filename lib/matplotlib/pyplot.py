@@ -152,6 +152,18 @@ class _Artist:
         return "<matplotlib.%s object at 0x%x>" % (self._kind, id(self) & 0xffffffffffff)
 
 
+class ErrorbarContainer(tuple):
+    """What errorbar returns: (data_line, caplines, barlinecols), data_line None with fmt='none'."""
+
+    def __new__(cls, lines, has_xerr=False, has_yerr=False):
+        self = tuple.__new__(cls, lines)
+        self.lines, self.has_xerr, self.has_yerr = tuple(lines), has_xerr, has_yerr
+        return self
+
+    def __repr__(self):
+        return "<ErrorbarContainer object of %d artists>" % len(self)
+
+
 class Axes:
     def __init__(self, fig, rect):
         self.figure = fig
@@ -367,35 +379,34 @@ class Axes:
         fcolor, marker, ls = _parse_fmt(fmt) if fmt not in ("none", "None") else (None, None, None)
         col = self._color(color or fcolor)
         ecol = to_color(ecolor) if ecolor is not None else col
-        sx, sy = [], []
-        caps = ([], [], [], [])  # (x, y) of horizontal caps (on y bars), then of vertical ones
-        for i, (xi, yi) in enumerate(zip(xs, ys)):
-            if ye is not None:
-                sx += [xi, xi, None]
-                sy += [yi - ye[0][i], yi + ye[1][i], None]
-                caps[0].extend([xi, xi])
-                caps[1].extend([yi - ye[0][i], yi + ye[1][i]])
-            if xe is not None:
-                sx += [xi - xe[0][i], xi + xe[1][i], None]
-                sy += [yi, yi, None]
-                caps[2].extend([xi - xe[0][i], xi + xe[1][i]])
-                caps[3].extend([yi, yi])
-        if sx:
-            self._add(Line(sx, sy, color=ecol, thickness=(float(elinewidth) if elinewidth is not None else 1.5) * PT))
-        if capsize:
-            r = float(capsize) * PT
-            if caps[0]:
-                self._add(Points(caps[0], caps[1], color=ecol, marker="_", size=r))
-            if caps[2]:
-                self._add(Points(caps[2], caps[3], color=ecol, marker="|", size=r))
+        # (matplotlib's ErrorbarContainer: the data line or None, the caps (each
+        # direction's lower ones, then its upper ones) and each direction's bars)
+        caplines, barlines = [], []
+        thick = (float(elinewidth) if elinewidth is not None else 1.5) * PT
+        for err, cap in ((ye, "_"), (xe, "|")):
+            if err is None:
+                continue
+            lo = [(xi, yi - err[0][i]) if cap == "_" else (xi - err[0][i], yi) for i, (xi, yi) in enumerate(zip(xs, ys))]
+            hi = [(xi, yi + err[1][i]) if cap == "_" else (xi + err[1][i], yi) for i, (xi, yi) in enumerate(zip(xs, ys))]
+            sx, sy = [], []
+            for a, b in zip(lo, hi):
+                sx += [a[0], b[0], None]
+                sy += [a[1], b[1], None]
+            barlines.append(_Artist(self._add(Line(sx, sy, color=ecol, thickness=thick)), "collections.LineCollection"))
+            if capsize:
+                for ends in (lo, hi):
+                    p = Points([e[0] for e in ends], [e[1] for e in ends], color=ecol, marker=cap, size=float(capsize) * PT)
+                    caplines.append(_Artist(self._add(p), "lines.Line2D"))
+        data = None
         if fmt not in ("none", "None"):
             if ls is None:
                 ls = "-"
             if ls != "None":
-                self._add(Line(xs, ys, color=col, thickness=1.5 * PT, marker=marker, markersize=3, label=label))
+                p = Line(xs, ys, color=col, thickness=1.5 * PT, marker=marker, markersize=3, label=label)
             else:
-                self._add(Points(xs, ys, color=col, marker=marker or "o", size=3.5, label=label))
-        return _Artist(self._prims[-1], "container.ErrorbarContainer")
+                p = Points(xs, ys, color=col, marker=marker or "o", size=3.5, label=label)
+            data = _Artist(self._add(p), "lines.Line2D")
+        return ErrorbarContainer((data, tuple(caplines), tuple(barlines)), has_xerr=xe is not None, has_yerr=ye is not None)
 
     def step(self, x, y, *args, where="pre", **kw):
         xs, ys = _list(x), _list(y)
@@ -509,9 +520,10 @@ class Axes:
         else:
             F = A.astype(float)
             finite = F[np.isfinite(F)]
-            if norm is not None and getattr(norm, "vmin", None) is not None:
-                vmin = norm.vmin if vmin is None else vmin
-                vmax = norm.vmax if vmax is None else vmax
+            # (a norm's vmin and vmax each, the data's range for the one it leaves None)
+            if norm is not None:
+                vmin = getattr(norm, "vmin", None) if vmin is None else vmin
+                vmax = getattr(norm, "vmax", None) if vmax is None else vmax
             lo = float(vmin) if vmin is not None else (float(finite.min()) if finite.size else 0.0)
             hi = float(vmax) if vmax is not None else (float(finite.max()) if finite.size else 1.0)
             name = cmap or "viridis"
@@ -707,6 +719,9 @@ class Axes:
 
     def cla(self):
         self._prims, self._opts, self._ci = [], {}, 0
+        # (pyplot's current image goes with the axes it was in)
+        if getattr(getattr(self.figure, "_gci", None), "_ax", None) is self:
+            self.figure._gci = None
 
     clear = cla
 
@@ -1201,7 +1216,13 @@ class Colorbar:
             lo, hi = L[0], L[-1]
         else:
             import numpy as np
-            lo, hi = (float(v) for v in mappable.get_clim())
+            lo, hi = mappable.get_clim()
+            if lo is None or hi is None:
+                # (an unscaled norm, as a ScalarMappable's without set_array: matplotlib's colorbar makes it 0 to 1)
+                lo, hi = 0.0, 1.0
+                if hasattr(mappable, "set_clim"):
+                    mappable.set_clim(lo, hi)
+            lo, hi = float(lo), float(hi)
             if not hi > lo:
                 lo, hi = lo - 0.5, hi + 0.5
             # (256 rows of the colormap, the highest value at the top)
