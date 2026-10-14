@@ -128,8 +128,9 @@ const host: BoardHost = {
     },
   },
   exportHtml: (d, o) => exportHtml(d, o),
-  // (the engine's parts, compressed: about 5 MB, and the Sage library 2.8 MB more)
-  exportPython: (d) => (OWN_ENGINE ? (d.mode === "sage" ? "8 MB" : "5 MB") : null),
+  // (the engine's parts, compressed, with the Sage library: every language
+  // runs, after the board's is changed too)
+  exportPython: () => (OWN_ENGINE ? "8 MB" : null),
 };
 
 const mounted = mountBoard(document.getElementById("board")!, host);

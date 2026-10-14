@@ -1,5 +1,5 @@
 // A board with code downloaded as HTML (export.ts, engine.ts): its code runs
-// in the file.  With "Include Python" the file carries the engine and runs
+// in the file.  In offline mode the file carries the engine and runs
 // with the network off; without, it fetches the engine it was made with from
 // the site, by its id, and says so when the site can't be reached.  An engine
 // whose bytes are not its own (an edited file, a changed server) is refused.
@@ -104,7 +104,7 @@ try {
   check(fromOwn === withPy, "with its engine not published (a dev site), the file with Python is made all the same: " + String(fromOwn).slice(0, 80));
   const fa = join(dir, "with-python.html"), fb = join(dir, "without-python.html");
   writeFileSync(fa, withPy); writeFileSync(fb, withoutPy);
-  check(parts(withPy).sort().join() === ["sagebrush-analyze.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-viewer3d.js", "sagebrush-worker.js"].join(), "the file with Python carries the engine's parts (not the Sage library, for a Python board): " + parts(withPy).join());
+  check(parts(withPy).sort().join() === ["sagebrush-analyze.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-precompiled.json", "sagebrush-viewer3d.js", "sagebrush-worker.js"].join(), "the file in offline mode carries every part, the Sage library too (a Python board may become a Sage one): " + parts(withPy).join());
   check(!parts(withoutPy).length && withoutPy.includes(`"id":"${own.id}"`) && withoutPy.includes(JSON.stringify(site)), "the file without carries none, only where its engine is: the site and the engine's id");
   console.log(`with Python ${(withPy.length / 1e6).toFixed(1)} MB, without ${(withoutPy.length / 1e3).toFixed(0)} KB`);
 
@@ -117,9 +117,28 @@ try {
   check(await ev("(() => { const f = [...document.querySelectorAll('iframe')]; return f.length === 1 && f[0].getAttribute('sandbox') === 'allow-scripts' && f[0].hasAttribute('srcdoc'); })()"), "...Python running in the runner's sandboxed frame (allow-scripts only), not in the file's page");
   // exported again from that file, with Python: the same file
   check((await ev("window.sagebrush.board.exportHtml({ python: true })")) === withPy, "exported again from the file with Python: the same file");
+  // offline, its board made a Sage board and the page reloaded: its code
+  // runs, in Sage, from what the file carries (William's report)
+  await ev("window.sagebrush.board.edit((d) => { d.mode = 'sage'; const walk = (ns) => { for (const x of ns) { if (x.id === 'path') x.code = 'path = [1] * 111\\nprint(len(path), \"steps\", factor(2^64 + 1))'; if (x.children) walk(x.children); } }; walk(d.nodes ?? []); }).then(() => 1)");
+  await sleep(500);
+  requests = []; errors = [];
+  await send("Page.reload", {});
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 30000);
+  check(await until("window.sagebrush.board.outputs().then((os) => /274177 \\* 67280421310721/.test(os.find((o) => o.id === 'path')?.output ?? ''))", 120000), "offline, made a Sage board and reloaded, the file runs its code in Sage: " + await caption());
+  check(!requests.length, "...asking the network for nothing: " + requests.slice(0, 3).join(", "));
+
+  // a file made before offline mode carried every language's runtime (no Sage
+  // library), made a Sage board: the library from the site, by the engine's id
+  await online(true);
+  const older = withPy.replace(/<script type="application\/octet-stream" data-sb-engine="sagebrush-precompiled\.json">[^<]*<\/script>\n?/, "");
+  check(!parts(older).includes("sagebrush-precompiled.json") && parts(older).length === 5, "(an older file: no Sage library)");
+  const fo = join(dir, "older.html");
+  writeFileSync(fo, older.replace('"nodes":[', '"mode":"sage","nodes":['));
+  await open(fo);
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 5 && os.every((o) => o.state === ''))", 120000), "an older file made a Sage board runs online, the Sage library from the site: " + await caption());
+  check(requests.length > 0 && requests.every((u) => u === `${site}engine/${own.id}/sagebrush-precompiled.json`), "...only the Sage library: " + odd((u) => u === `${site}engine/${own.id}/sagebrush-precompiled.json`));
 
   // without Python: its engine from the site, by its id
-  await online(true);
   await open(fb);
   check(await ran(), "the file without Python runs its code, with its engine from the site: " + await caption());
   check(requests.length > 0 && requests.every((u) => u.startsWith(`${site}engine/${own.id}/`)), "...only the engine it was made with: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`)));
