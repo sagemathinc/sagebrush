@@ -61,6 +61,10 @@ export class Editor {
   get on() { return this.editing.value; }
   /** whether items are selected in Edit (the arrow keys then move them) */
   get hasSelection() { return this.on && this.selected.length > 0; }
+  /** whether Esc is the editor's now: a tool on, something selected, an edge's panel open (else it is the page's: the whole board) */
+  get escapes() {
+    return this.on && (this.edgeSel !== null || this.selected.length > 0 || !!this.panel || this.drawing.value || this.erasing.value || this.connecting.value || this.selecting.value);
+  }
   private undos: string[] = [];
   private redos: string[] = [];
   private selected: string[] = [];

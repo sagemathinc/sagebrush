@@ -370,7 +370,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (editor.on && e.key === " ") return;
     if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
     else if (e.key === "ArrowLeft") step(at - 1);
-    else if (e.key === "Escape" || e.key === "0") step(-1);
+    // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
+    else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") step(-1);
     else if (e.key === "PageDown") page(pageIx + 1);
     else if (e.key === "PageUp") page(pageIx - 1);
     else if (e.key === "+" || e.key === "=") board.zoomAt(1.25, board.el.clientWidth / 2, board.el.clientHeight / 2);
