@@ -1,13 +1,12 @@
-"""Run the examples of MATLAB's Function Reference and compare with their documented output.
+"""Run a corpus of published MATLAB examples and compare with their printed output.
 
     python3 matlab-tests/docs.py [--examples FILE] [--out RESULTS.json] [-j N] [name ...]
 
-The examples (code and the output MATLAB printed, in the documentation's
-layout) are extracted from MathWorks' PDF documentation, which is not part
-of this repository: see design/matlab.md.  Each example runs under
-`sagebrush --matlab` with SAGEBRUSH_MATLAB_DISPLAY=doc (the documentation's
-layout: `x = 1×3` and the values, no blank lines), and each step's output
-is compared token by token (whitespace is the PDF's, not MATLAB's).
+The examples (code and the output MATLAB printed) are kept outside this
+repository: see design/matlab.md.  Each example runs under
+`sagebrush --matlab` with SAGEBRUSH_MATLAB_DISPLAY=doc (`x = 1×3` and the
+values, no blank lines), and each step's output is compared token by token
+(the corpus's whitespace is not MATLAB's).
 
 Results: pass, diff (the first step that differs), missing (a function
 Sagebrush lacks) and error.  Examples with figures run too (their pictures
