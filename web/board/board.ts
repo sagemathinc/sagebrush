@@ -644,6 +644,20 @@ export class Board {
     return h;
   }
 
+  /** Notes' heights at their widths (or, `width`, the widths their text needs, at most `w`), as measure() and measureWidth() give them, all read after one layout. */
+  measureMany(list: { it: Content; w: number; width?: boolean }[]): number[] {
+    const els = list.map(({ it, w, width }) => {
+      const el = this.content(it, true);
+      el.style.cssText = width ? `left:0;top:0;width:max-content;max-width:${w}px;visibility:hidden;` : `left:0;top:0;width:${w}px;visibility:hidden;`;
+      el.classList.add("board-measure");
+      return el;
+    });
+    this.world.append(...els);
+    const out = els.map((el, i) => (list[i].width ? el.offsetWidth + 1 : el.offsetHeight));
+    for (const el of els) el.remove();
+    return out;
+  }
+
   /** The width a note's text needs, at most `max` (its longest line, or `max` if it wraps). */
   measureWidth(it: Content, max: number): number {
     const el = this.content(it, true);
