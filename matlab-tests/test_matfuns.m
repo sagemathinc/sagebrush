@@ -24,3 +24,4 @@ o = struct('UT', true, 'TRANSA', true); show(r(linsolve([2 1; 9 4], [2; 5], o)))
 show(r(funm([1 1; 0 1], @exp))); show(r(funm([1 1; 0 1], @cos))); show(r(funm([1 1; 0 1], @sin)));
 show(r(funm([2 1; 0 2], @cosh))); show(r(funm([2 1; 0 2], @sinh))); show(r(funm([2 1; 0 2], @log)));
 show(invhilb(9)); A = invhilb(12); show(A(6:7, 11:12));
+show(magic(5)); show(magic(6)); show(magic(8)); show(magic(10)); show(magic(14)); show(sum(magic(18)) - sum(magic(18), 2)');
