@@ -172,6 +172,62 @@ def report(e, line):
     raise SystemExit(1)
 
 
+_cell_failed = [False]
+# (the last cell's error text, and whether the host shows it itself, as a Jupyter error)
+_cell_error = [None, False]
+
+
+def report_cell(e, line):
+    """An error that stops a notebook cell: reported as in report(), without the
+    cell's own frame and without ending the session (cell_failed() tells the
+    session the cell failed)."""
+    if isinstance(e, ScriptReturn):
+        return
+    if isinstance(e, (SystemExit, KeyboardInterrupt)):
+        raise e
+    try:
+        end_program()
+    except Exception:
+        pass
+    _sys.stdout.flush()
+    if _os.environ.get("SAGEBRUSH_MATLAB_TRACEBACK") and not isinstance(e, MatlabError):
+        import traceback
+        traceback.print_exception(type(e), e, e.__traceback__)
+    st = list(getattr(e, "_mstack", None) or [])
+    out = [_message(e)]
+    if getattr(e, "_using", False) and st:
+        out = ["Error using %s" % st[0][0], _message(e)]
+    for fname, ln in st:
+        out.append("")
+        out.append("Error in %s (line %d)" % (fname, ln))
+    text = "\n".join(out) + "\n"
+    if _cell_error[1]:
+        _cell_error[0] = text
+    else:
+        _sys.stderr.write(text)
+    _cell_failed[0] = True
+
+
+def cell_failed():
+    """whether the last cell stopped on an error (and forget it)"""
+    f = _cell_failed[0]
+    _cell_failed[0] = False
+    return f
+
+
+def host_shows_errors():
+    """a cell's error is kept for cell_error() rather than written to stderr (the Jupyter kernel)"""
+    _cell_error[1] = True
+
+
+def cell_error():
+    """the last cell's error message, or None (and forget it)"""
+    t = _cell_error[0]
+    _cell_error[0] = None
+    _cell_failed[0] = False
+    return t
+
+
 def _write(s):
     _sys.stdout.write(s)
 

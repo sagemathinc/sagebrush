@@ -3,9 +3,10 @@
 // notebook` runs it in a Node worker thread behind a local server
 // (src/notebook.ts).  The protocol:
 //
-// In:  {id, code, sage?, magma?, repl?, clock?, forget?}  run code (`sage`: Sage
+// In:  {id, code, sage?, magma?, matlab?, repl?, clock?, forget?}  run code (`sage`: Sage
 //                                 mode, with sage_all imported; `magma`: Magma,
-//                                 translated to Python; `repl`: display every
+//                                 translated to Python; `matlab`: MATLAB, the
+//                                 same (src/matlab.ts); `repl`: display every
 //                                 expression statement, as at a prompt, not just
 //                                 the last; `forget`: global names to delete
 //                                 first, the reactive notebook's invalidation;
@@ -17,7 +18,7 @@
 //                                 the run's entropy (RunHooks), and Python's
 //                                 random and numpy.random are reseeded from it)
 //      {id, interact, values}     an @interact control changed: rerun it
-//      {id, check, sage?}         -> {id, more}: is this input incomplete?
+//      {id, check, sage?, magma?, matlab?}  -> {id, more}: is this input incomplete?
 //      {id, complete}             -> {id, matches, prefix}: Tab completion
 // Out: {id, start}, then any of
 //      {id, target, stream: "stdout" | "stderr", text}
@@ -36,6 +37,7 @@
 import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, helpSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 
@@ -90,6 +92,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     R.stderr.flush();
   };
   R.host = {
+    // (MATLAB: a function file, name.m, found on the path, as Python)
+    ...matlabHostOps(),
     display(bundle: Record<string, string>) {
       if (current === null) return false;
       flush();
@@ -176,8 +180,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     const { id } = m;
     const { main, host } = await ready;
     if (m.check !== undefined) {
-      // Magma's console runs each line as it is entered
-      post({ id, more: m.magma ? false : needsMore(m.check, { sage: !!m.sage }) });
+      // Magma's and MATLAB's consoles run each line as it is entered
+      post({ id, more: m.magma || m.matlab ? false : needsMore(m.check, { sage: !!m.sage }) });
       return;
     }
     if (m.complete !== undefined) {
@@ -240,6 +244,21 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         }
         if (py !== null) ok = run(py, main, "exec", "<cell>");
         else ok = false;
+      } else if (m.matlab) {
+        // MATLAB: translated to Python (src/matlab.ts) in cell mode: variables and
+        // functions stay for the next cells; MATLAB prints its own values, and an
+        // error is MATLAB's message on stderr (lib/_matlab.py report_cell)
+        let py: string | null = null;
+        try {
+          py = matlabToPython(m.code, m.repl ? "<stdin>" : "<cell>", { cell: true });
+        } catch (e) {
+          if (!(e instanceof MatlabSyntaxError)) throw e;
+          R.stderr.write(matlabSyntaxMessage(e, m.code, "<cell>"));
+        }
+        if (py !== null) {
+          ok = run(py, main, "exec", "<cell>");
+          if (ok && R.callObj(R.getattr(R.importModule("_matlab"), "cell_failed"), []) === true) ok = false;
+        } else ok = false;
       } else {
         // "cell" mode: the value of a final expression is displayed, as in Jupyter.
         const mangle = typeof m.mangle === "string" && /^[A-Za-z0-9]+$/.test(m.mangle) ? m.mangle : null;
