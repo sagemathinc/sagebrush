@@ -296,9 +296,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     // (edges' routes are found between frames: large boards show at once,
     // their edges straight until routed)
-    premeasure(v);
+    const laid = premeasure(v);
     if (templateOf(d, pageIx) >= 0) premeasure(pageView(d, templateOf(d, pageIx)));
-    const { items, edges, routing } = layout(v, measure, { deferRoutes: true });
+    const { items, edges, routing } = laid ?? layout(v, measure, { deferRoutes: true });
     // (laid out again after an edit: an edge whose ends did not move keeps its
     // route until the new ones are ready, so only the moved items' edges are
     // straight meanwhile; the new routes replace them all at once)
@@ -339,7 +339,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       }
       setTimeout(() => work(12), 0);
     };
-    work(40);
+    // (routed now if that is quick: 40 ms; laid out again after an edit,
+    // the routes it had kept meanwhile, 8: the edit is drawn first)
+    work(before.size ? 8 : 40);
     placed = items.map(({ id, kind, x, y, w, h }) => ({ id, kind, x, y, w, h }));
     host.title?.(d.title ?? "");
     // (not while it is being renamed)
@@ -401,16 +403,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // each (a large board's first drawing: 1000 notes, 250 ms of the 440).
   // Found by laying it out with a measure that only notes what it is asked:
   // the widths first (a fitted note's height is measured at its width), then
-  // the heights.
-  function premeasure(v: BoardDoc) {
+  // the heights.  Nothing to measure (an edit, every note measured before):
+  // that layout is the board's, given back, not made twice.
+  function premeasure(v: BoardDoc): ReturnType<typeof layout> | undefined {
     for (let pass = 0; pass < 2; pass++) {
       const hs = new Map<string, [MeasuredNote, number]>(), ws = new Map<string, [MeasuredNote, number]>();
       const ask = Object.assign((n: MeasuredNote, w: number) => {
-        const k = n.code !== undefined ? n.id + "\0" + heightKey(n, w) : heightKey(n, w);
-        if (!(n.code !== undefined ? codeHeights : heights).has(k)) hs.set(k, [n, w]);
-        return 60;
+        const k = n.code !== undefined ? n.id + "\0" + heightKey(n, w) : heightKey(n, w), h = (n.code !== undefined ? codeHeights : heights).get(k);
+        if (h === undefined) hs.set(k, [n, w]);
+        return h ?? 60;
       }, { width: (n: MeasuredNote, max: number) => { const k = widthKey(n, max), w = heights.get(k); if (w === undefined) ws.set(k, [n, max]); return w ?? max; } });
-      layout(v, ask, { deferRoutes: true });
+      const laid = layout(v, ask, { deferRoutes: true });
+      if (!pass && !ws.size && !hs.size) return laid;
       if (ws.size) {
         const got = board.measureMany([...ws.values()].map(([n, max]) => ({ it: { ...n, kind: "note" as const, image: n.img }, w: max, width: true })));
         [...ws.keys()].forEach((k, i) => heights.set(k, got[i]));
@@ -420,8 +424,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         const got = board.measureMany([...hs.values()].map(([n, w]) => ({ it: { ...n, kind: "note" as const, image: n.img, ...(n.code !== undefined ? { order: 1 } : {}) }, w })));
         [...hs].forEach(([k, [n]], i) => (n.code !== undefined ? codeHeights : heights).set(k, got[i]));
       }
-      return;
+      return undefined;
     }
+    return undefined;
   }
 
   // The engine of code items: the host's (none: the code shows, as text, as in an exported file)
@@ -1253,7 +1258,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     boardHistory = null;
     remembered = false;
     replaced = doc;
-    historyGone = Promise.all([historyGone, old?.then((h) => h?.close?.())])
+    // (the versions it was yet to record: the one before's, recorded there before it is closed)
+    const pending = toRecord.splice(0);
+    historyGone = Promise.all([historyGone, old?.then((h) => { if (h) for (const d of pending) h.record(d); h?.close?.(); })])
       .then(() => (forget !== undefined ? host.dropHistory?.(forget) : undefined))
       .catch((e) => console.warn("board: TimeTravel:", e));
   }
@@ -1261,20 +1268,28 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // before this change, if the history does not have it yet: not the
   // document it replaced, New board, Open…, Revert, which was another's).
   let remembered = false, replaced: BoardDoc | null = null;
+  // (recorded once the edit is drawn, not before: a large board's version
+  // is a moment's work, its first one, the whole board, longer; in order,
+  // and at once when the history is read)
+  let toRecord: BoardDoc[] = [], recordFrame = 0;
   function remember(prev?: BoardDoc | null) {
-    timeTravel().then((h) => {
-      if (!h) return;
-      if (!remembered && prev && prev !== replaced) h.record(prev);
-      remembered = true;
-      if (doc) h.record(doc);
-    });
+    if (!remembered && prev && prev !== replaced) toRecord.push(prev);
+    remembered = true;
+    if (doc) toRecord.push(doc);
+    if (!recordFrame) recordFrame = requestAnimationFrame(() => setTimeout(() => { recordFrame = 0; recordNow().catch((e) => console.warn("board: TimeTravel:", e)); }, 0));
+  }
+  async function recordNow() {
+    const h = await timeTravel();
+    const list = toRecord.splice(0);
+    if (h && !destroyed) for (const d of list) h.record(d);
+    return h;
   }
   // The bar: a slider over the versions (the newest at the right), when, Revert, ✕.
   let viewing: BoardDoc | null = null;
   let liveCode: Board["code"] = null;
   const slider = $("ttslider") as HTMLInputElement;
   async function openTimeTravel() {
-    const h = await timeTravel();
+    const h = await recordNow();
     if (!h || !doc) { fail(new Error("TimeTravel is not available here (it keeps its history in this browser's storage)")); return; }
     h.record(doc);
     remembered = true;
@@ -1404,9 +1419,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** Turn Edit mode on or off. */
       editing: (on: boolean) => editor.setOn(on),
       /** TimeTravel: the versions kept in this browser, oldest first ({index, ms}). */
-      versions: async () => (await timeTravel())?.versions().map(({ index, ms }) => ({ index, ms })) ?? [],
+      versions: async () => (await recordNow())?.versions().map(({ index, ms }) => ({ index, ms })) ?? [],
       /** The board at version i (a document, as load() takes it). */
-      version: async (i: number) => { const h = await timeTravel(), v = h?.versions()[i]; return v ? h!.docAt(v.time) : null; },
+      version: async (i: number) => { const h = await recordNow(), v = h?.versions()[i]; return v ? h!.docAt(v.time) : null; },
     },
   };
 }
