@@ -299,7 +299,6 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     premeasure(v);
     if (templateOf(d, pageIx) >= 0) premeasure(pageView(d, templateOf(d, pageIx)));
     const { items, edges, routing } = layout(v, measure, { deferRoutes: true });
-    codeHeights.clear();
     // (laid out again after an edit: an edge whose ends did not move keeps its
     // route until the new ones are ready, so only the moved items' edges are
     // straight meanwhile; the new routes replace them all at once)
@@ -321,6 +320,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (a template's under the page's own)
     const under = underlay(d, pageIx, { items, edges });
+    // (code items' heights were for these two layouts, the page's and its template's: PERF-F2A-1)
+    codeHeights.clear();
     board.setItems([...under.items, ...items], [...under.edges, ...edges]);
     // (the page's slide and background, or its template's)
     const look = lookOf(d, pageIx);
