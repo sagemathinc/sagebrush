@@ -390,6 +390,16 @@ export function formatError(d: any): string | null {
     walk(pages[i]?.nodes);
     if (twice !== null) return `not a board this page can show: two items${pages.length > 1 ? ` on page ${i + 1}` : ""} have the id "${String(twice).slice(0, 40)}"`;
   }
+  // (and a page's id is one page's: a page made from a template names it, CORR-3D2-3)
+  if (Array.isArray(d?.pages)) {
+    const seen = new Set<string>();
+    for (const p of d.pages) {
+      if (p?.id == null) continue;
+      const id = String(p.id);
+      if (seen.has(id)) return `not a board this page can show: two pages have the id "${id.slice(0, 40)}"`;
+      seen.add(id);
+    }
+  }
   return null;
 }
 

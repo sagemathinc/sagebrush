@@ -92,7 +92,8 @@ export class IdbDocCache implements DocCache {
 /** What both sides changed: kept as ours. */
 export interface Conflict { type: string; page: string; id: string; field: string }
 
-const recKey = (r: any) => `${r.type}\0${r.page}\0${r.id}`;
+// (a record's key: its type, page and id, whatever they hold, CORR-3D2-3)
+const recKey = (r: any) => JSON.stringify([r.type, r.page, r.id]);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 // (records as fromRecords reads them)
 const records = (rs: any[]) => {
@@ -122,7 +123,19 @@ export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc:
       for (const f of new Set([...Object.keys(b ?? {}), ...Object.keys(o), ...Object.keys(t)])) {
         const fb = b?.[f], fo = o[f], ft = t[f];
         let v: unknown;
-        if (f === "images" && o.type === "doc") v = { ...(fb ?? {}), ...(ft ?? {}), ...(fo ?? {}) };
+        if (f === "images" && o.type === "doc") {
+          // (by name: added on either side, removed on one, changed on both differently: ours, CORR-3D2-4)
+          const out: Record<string, unknown> = {};
+          for (const name of new Set([...Object.keys(fb ?? {}), ...Object.keys(fo ?? {}), ...Object.keys(ft ?? {})])) {
+            const ib = fb?.[name], io = fo?.[name], it = ft?.[name];
+            let x: unknown;
+            if (same(io, ib)) x = it;
+            else if (same(it, ib) || same(io, it)) x = io;
+            else { x = io ?? it; conflicts.push({ type: "doc", page: "", id: "", field: "images." + name }); }
+            if (x !== undefined) out[name] = x;
+          }
+          v = Object.keys(out).length ? out : undefined;
+        }
         else if (same(fo, fb)) v = ft;
         else if (same(ft, fb) || same(fo, ft)) v = fo;
         else { v = fo; conflicts.push({ type: o.type, page: o.page, id: o.id, field: f }); }
@@ -134,12 +147,17 @@ export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc:
   // (a page removed on one side: its items, kept by the other, go to the first page; a group removed: its members to the top level)
   const pages = new Set(out.filter((r) => r.type === "page").map((r) => r.page)), paged = out.some((r) => r.type === "doc" && r.paged);
   const first = out.filter((r) => r.type === "page").sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0))[0]?.page ?? "";
-  const groups = new Set(out.filter((r) => r.type === "item" && r.kind === "group").map((r) => `${r.page}\0${r.id}`));
+  const groups = new Set(out.filter((r) => r.type === "item" && r.kind === "group").map((r) => JSON.stringify([r.page, r.id])));
   for (const r of out) {
     if ((r.type === "item" || r.type === "edge") && paged && !pages.has(r.page)) r.page = first;
-    if (r.type === "item" && r.parent && !groups.has(`${r.page}\0${r.parent}`)) r.parent = "";
+    if (r.type === "item" && r.parent && !groups.has(JSON.stringify([r.page, r.parent]))) r.parent = "";
   }
-  return { doc: cleanDoc(fromRecords(records(out))), conflicts };
+  // (no edges where ours had none: the records always give a list)
+  const doc = fromRecords(records(out)) as any;
+  const bare = (m: any, o: any) => { if (m && Array.isArray(m.edges) && !m.edges.length && !o?.edges) delete m.edges; };
+  bare(doc, ours);
+  (doc.pages ?? []).forEach((p: any, i: number) => bare(p, ours.pages?.find((q) => q.id !== undefined && q.id === p.id) ?? (p.id === undefined ? ours.pages?.[i] : undefined)));
+  return { doc: cleanDoc(doc), conflicts };
 }
 
 /** The caption's words for a merge with conflicts. */
@@ -151,23 +169,38 @@ export const mergedNotice = (n: number) => `**This board was changed elsewhere w
 export type Synced = "fresh" | "same" | "pushed" | "replaced" | "merged" | "offline";
 
 /**
- * A BoardStore for `remote`, its copy in `cache` under `key` (CoCalc's:
- * account, project and path).  `synced`: how the first load ended, once
- * the remote has answered.
+ * A BoardStore for `remote`, its copy in `cache` under `key` (see
+ * board-in-cocalc.md: the key names one document, scoped to its site,
+ * account and project, or an immutable document id).  `synced`: how the
+ * first load ended, once the remote has answered.
+ *
+ * Two orders: the copy's writes, in the order they are made (each reads the
+ * copy as the one before left it, CORR-3D2-1), and the work with the
+ * remote, in order.  Whatever the copy holds that the remote has not seen
+ * is pushed, the copy as it is then: never an older edit over a newer one.
  */
 export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = new IdbDocCache()): BoardStore & { synced: Promise<Synced> } {
   let entry: CachedDoc | null = null;
-  // (the remote has answered: edits go to it too)
-  let online = false;
-  let queue: Promise<unknown> = Promise.resolve();
+  // (the remote has answered: edits go to it too; the first load is over)
+  let online = false, settled = false;
+  let copying: Promise<unknown> = Promise.resolve(), queue: Promise<unknown> = Promise.resolve();
+  const inOrder = <T>(f: () => Promise<T>) => { const p = copying.then(f); copying = p.catch(() => {}); return p; };
   const later = <T>(f: () => Promise<T>) => { const p = queue.then(f); queue = p.catch(() => {}); return p; };
-  const listeners = new Set<(d: BoardDoc, notice?: string) => void>();
-  let unsent: [BoardDoc, string | undefined] | null = null;
-  const emit = (d: BoardDoc, notice?: string) => { if (listeners.size) for (const f of listeners) f(d, notice); else unsent = [d, notice]; };
   let resolveSynced!: (s: Synced) => void;
   const synced = new Promise<Synced>((ok) => (resolveSynced = ok));
 
-  // the copy as it is now, based on the remote version `remoteHash` (`base` while they differ)
+  // What the board shows (its edits are made from it), and a document given
+  // it and not yet shown: an edit made meanwhile was made from the one before
+  const listeners = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
+  let shown: BoardDoc | null = null, showing: { from: BoardDoc | null; to: BoardDoc } | null = null;
+  let unsent: [BoardDoc, string | undefined] | null = null;
+  function give(d: BoardDoc, notice?: string, to = [...listeners]) {
+    showing = { from: showing?.from ?? shown, to: d };
+    Promise.all(to.map((f) => f(d, notice))).then(() => { if (showing?.to === d) { shown = d; showing = null; } }, (e) => console.warn("board: shown:", e));
+  }
+  const emit = (d: BoardDoc, notice?: string) => { if (listeners.size) give(d, notice); else unsent = [d, notice]; };
+
+  // the copy as it is now, based on the remote version `remoteHash` (`base` while they differ); in order only
   async function keep(d: BoardDoc, remoteHash: string | null, base?: string) {
     const json = canonical(d), hash = await docHash(d);
     entry = { key, json, hash, remoteHash, ...(hash !== remoteHash && base !== undefined ? { base } : {}), at: Date.now() };
@@ -175,45 +208,65 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   }
   const parse = (json: string) => cleanDoc(JSON.parse(json));
   const dirty = () => !!entry && entry.hash !== entry.remoteHash;
+  // (the remote has `d` now: the copy is based on it; in order only)
+  async function sent(d: BoardDoc, h: string) {
+    if (!entry) return;
+    entry = entry.hash === h ? (({ base: _b, ...e }) => ({ ...e, remoteHash: h }))(entry) : { ...entry, remoteHash: h, base: canonical(d) };
+    await cache.put(entry).catch((e) => console.warn("board: the copy:", e));
+  }
 
-  // the remote has a document other than the copy's base: replace, or merge
+  // the copy, if it holds what the remote has not seen: to the remote (with the remote's work)
+  async function push(): Promise<boolean> {
+    if (!online) return false;
+    const d = await inOrder(async () => (dirty() ? parse(entry!.json) : null));
+    if (!d) return false;
+    await remote.save(d);
+    const h = await docHash(d);
+    await inOrder(() => sent(d, h));
+    return true;
+  }
+
+  // the remote has a document other than the copy's base: replace, or merge (with the remote's work)
   async function arrived(theirs: BoardDoc, theirHash: string): Promise<Synced> {
-    // (what the copy shows already: our own save, come back)
-    if (entry && theirHash && theirHash === entry.hash) { if (dirty()) await keep(theirs, theirHash); return "same"; }
-    if (!entry || !dirty()) {
-      await keep(theirs, theirHash);
-      emit(theirs);
-      return "replaced";
-    }
-    const base = parse(entry.base ?? entry.json), ours = parse(entry.json);
-    const { doc, conflicts } = merge3(base, ours, theirs);
-    emit(doc, conflicts.length ? mergedNotice(conflicts.length) : undefined);
-    await remote.save(doc);
-    await keep(doc, await docHash(doc));
-    return "merged";
+    const r = await inOrder(async () => {
+      // (what the copy is based on, or shows, already: our own save, come back)
+      if (entry && (theirHash === entry.remoteHash || theirHash === entry.hash)) {
+        if (theirHash === entry.hash && dirty()) await sent(theirs, theirHash);
+        return { s: "same" as const };
+      }
+      if (!entry || !dirty()) {
+        await keep(theirs, theirHash);
+        return { s: "replaced" as const, doc: theirs };
+      }
+      const { doc, conflicts } = merge3(parse(entry.base ?? entry.json), parse(entry.json), theirs);
+      await keep(doc, theirHash, canonical(theirs));
+      return { s: "merged" as const, doc, notice: conflicts.length ? mergedNotice(conflicts.length) : undefined };
+    });
+    if (r.doc) emit(r.doc, r.notice);
+    if (r.s === "merged") await push();
+    return r.s;
   }
 
   async function sync(): Promise<Synced> {
     let h: string | null;
     try { h = await remote.hash(); } catch { return "offline"; }
-    if (h !== null && h === entry!.remoteHash) {
-      if (!dirty()) return "same";
-      // (edits the copy holds, made offline: to the remote)
-      const d = parse(entry!.json);
-      await remote.save(d);
-      await keep(d, entry!.hash);
-      return "pushed";
-    }
+    // (the copy as the edits made before the remote answered left it)
+    const known = await inOrder(async () => entry!.remoteHash);
+    online = true;
+    if (h !== null && h === known) return (await push()) ? "pushed" : "same";
     let theirs: BoardDoc | null;
-    try { theirs = await remote.load(); } catch { return "offline"; }
-    if (!theirs) {
-      // (the remote has none: the copy is its first)
-      const d = parse(entry!.json);
-      await remote.save(d);
-      await keep(d, entry!.hash);
-      return "pushed";
-    }
+    try { theirs = await remote.load(); } catch { online = false; return "offline"; }
+    // (the remote has none: the copy is its first)
+    if (!theirs) { await inOrder(async () => { if (entry) entry = { ...entry, remoteHash: null }; }); await push(); return "pushed"; }
     return arrived(cleanDoc(theirs), h ?? (await docHash(theirs)));
+  }
+
+  // the first load over: a change made elsewhere meanwhile, the latest, now (CORR-3D2-2)
+  let waiting: BoardDoc | null = null;
+  function settle(s: Synced) {
+    settled = true;
+    resolveSynced(s);
+    if (waiting) { const d = waiting; waiting = null; later(async () => { await arrived(d, await docHash(d)); }); }
   }
 
   return {
@@ -222,45 +275,47 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
       const c = await cache.get(key).catch(() => null);
       if (c) {
         entry = c;
+        const doc = parse(c.json);
+        shown = doc;
         // (the copy now; the remote asked meanwhile, edits waiting for it)
-        later(async () => {
-          const s = await sync().catch((e) => { console.warn("board: the remote:", e); return "offline" as const; });
-          online = s !== "offline";
-          resolveSynced(s);
-        });
-        return { doc: parse(c.json) };
+        later(async () => settle(await sync().catch((e) => { console.warn("board: the remote:", e); online = false; return "offline" as const; })));
+        return { doc };
       }
       // (no copy: the remote's)
-      const d = await remote.load();
+      let d: BoardDoc | null;
+      try { d = await remote.load(); } catch (e) { settle("offline"); throw e; }
       online = true;
-      if (!d) { resolveSynced("fresh"); return null; }
+      if (!d) { settle("fresh"); return null; }
       const doc = cleanDoc(d);
-      await keep(doc, await docHash(doc));
-      resolveSynced("fresh");
+      await inOrder(async () => keep(doc, await docHash(doc)));
+      shown = doc;
+      settle("fresh");
       return { doc };
     },
     save(d) {
-      // (in the copy at once; to the remote once it has answered, in order:
-      // an edit made before it answered is the merge's, or the push's, not
-      // sent again over it)
-      const base = dirty() ? entry!.base ?? entry!.json : entry?.json, after = online;
-      const p = keep(d, entry?.remoteHash ?? null, base);
-      later(async () => {
-        await p;
-        if (!after || !online) return;
-        try {
-          await remote.save(d);
-          await keep(d, await docHash(d));
-        } catch (e) {
-          console.warn("board: the remote:", e);
+      // (in the copy, in order; made from what the board showed before a
+      // document given it was shown: merged with that one, and shown)
+      inOrder(async () => {
+        let doc = d;
+        if (showing?.from) {
+          doc = merge3(showing.from, d, showing.to).doc;
+          emit(doc);
         }
+        const base = dirty() ? entry!.base ?? entry!.json : entry?.json;
+        await keep(doc, entry?.remoteHash ?? null, base);
       });
+      // (to the remote, once it has answered: the copy as it is then)
+      later(() => push().catch((e) => { console.warn("board: the remote:", e); return false; }));
     },
     subscribe(f) {
       listeners.add(f);
-      if (unsent) { const [d, n] = unsent; unsent = null; f(d, n); }
-      // (the remote's changes made elsewhere, once it has answered)
-      const off = remote.subscribe?.((d) => { later(async () => { if (online) await arrived(cleanDoc(d), await docHash(d)); }); });
+      if (unsent) { const [d, n] = unsent; unsent = null; give(d, n, [f]); }
+      // (the remote's changes made elsewhere: after the first load, the latest of those made during it)
+      const off = remote.subscribe?.((d) => {
+        const doc = cleanDoc(d);
+        if (!settled) { waiting = doc; return; }
+        later(async () => { await arrived(doc, await docHash(doc)); });
+      });
       return () => { listeners.delete(f); off?.(); };
     },
   };
