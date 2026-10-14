@@ -347,7 +347,14 @@ def funm_(x, f):
             r = _m._call(f, [_box(np.array(w.reshape((1, -1))))])
             return _arr(r).reshape(-1).astype(np.complex128)
         return _fun_of_matrix(x, g, "funm")
-    name = f.name if type(f) is _m.Handle else None
+    name = None
+    if type(f) is _m.Handle:
+        # (the function the handle calls, resolved as a call resolves it: a
+        # local function named exp is not the built-in exp)
+        if f.target is None:
+            f.target = _m.fn(f.name)
+        if f.target is _m._B.get(f.name):
+            name = f.name
     if name in ("exp", "cos", "sin", "cosh", "sinh"):
         F = _by_expm(name, A)
         if A.dtype.kind != "c":
@@ -358,7 +365,7 @@ def funm_(x, f):
     if name == "sqrt":
         return sqrtm_(x)
     raise _err("funm: this matrix is defective or nearly so (its eigenvectors are an ill-conditioned basis), "
-               "and Sagebrush has no Schur-Parlett method for it: only @exp, @cos, @sin, @cosh, @sinh, @log and @sqrt are supported here.")
+               "and Sagebrush has no Schur-Parlett method for it: only the built-in @exp, @cos, @sin, @cosh, @sinh, @log and @sqrt are supported here.")
 
 
 @_bs("orth")
@@ -809,7 +816,10 @@ def _uniform_step(g, what):
     if g.size < 3:
         raise _err("interp2: the 'cubic' method needs at least 3 grid points in each dimension.")
     h = (g[-1] - g[0]) / (g.size - 1)
-    if np.max(np.abs(np.diff(g) - h)) > 1e-12 * max(abs(g[0]), abs(g[-1]), abs(h)):
+    # (relative to the step, with a few units in the last place of the
+    # coordinates for their rounding: the same answer wherever the grid is)
+    tol = 64 * 2.220446049250313e-16 * abs(h) + 4 * 2.220446049250313e-16 * max(abs(g[0]), abs(g[-1]))
+    if np.max(np.abs(np.diff(g) - h)) > tol:
         raise _err("interp2: the 'cubic' method needs uniformly spaced %s grid points (Sagebrush has no other cubic)." % what)
     return h
 
