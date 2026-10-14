@@ -69,8 +69,15 @@ export function headersFor(dir: string): string {
   const base = readFileSync(join(here, "_headers"), "utf8").trimEnd();
   // (the runner's page and the frame's exactly as built: no-transform keeps
   // Cloudflare from adding its analytics script to them, which the runner's
-  // policy would refuse anyway, and which a frame in others' pages shouldn't have)
-  const extra = (pattern: string) => (pattern === "/runner/*" || pattern === "/frame/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "");
+  // policy would refuse anyway, and which a frame in others' pages shouldn't
+  // have; the frame may be embedded by any page, even a cross-origin isolated
+  // one: CORP)
+  const extra = (pattern: string) => (pattern === "/runner/*" || pattern === "/frame/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "") + (pattern === "/frame/*" ? "\n  Cross-Origin-Resource-Policy: cross-origin" : "");
+  // (Cloudflare keeps one rule per path, the last: a path given twice would
+  // lose the first rule's headers, HDR-A75-1)
+  const paths = [...base.split("\n").filter((l) => l && !/^\s|^#/.test(l)), ...rules.map(([p]) => p)];
+  const twice = paths.filter((p, i) => paths.indexOf(p) !== i);
+  if (twice.length) throw new Error(`csp: _headers gives ${twice.join(", ")} more than one rule`);
   return `${base}\n# every page's Content-Security-Policy (written by web/csp.ts)\n${rules.map(([pattern, csp]) => `${pattern}\n  Content-Security-Policy: ${csp}${extra(pattern)}`).join("\n")}\n`;
 }
 

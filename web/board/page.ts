@@ -62,9 +62,12 @@ const ref = file ? engineRef() : null;
 // A frame's document: the first its parent posts, as
 // { sagebrush: "board", version: 1, text, name? } (a file's contents and
 // name: JSON, Mermaid, Markdown, a CoCalc whiteboard or a JSON Canvas, as
-// Open… takes); a later one replaces it.  Only the parent's messages count.
-// The frame says { sagebrush: "ready", version: 1 } when it listens, and
+// Open… takes).  Only the parent's messages count.  The frame says
+// { sagebrush: "ready", version: 1 } when it listens, and
 // { sagebrush: "error", version: 1, message } for a text that isn't a board.
+// A later board starts the frame afresh, a new page with a new interpreter
+// (nothing the first board's code did reaches it: ISO-A75-2), which says
+// ready again: its parent answers each ready with the board to show.
 // Opened on its own, it shows an empty board that says what it is for.
 let fromParentDoc: (d: { doc: BoardDoc; notice: string }) => void = () => {};
 const parentDoc = new Promise<{ doc: BoardDoc; notice: string }>((r) => (fromParentDoc = r));
@@ -86,7 +89,7 @@ if (fromParent) {
         return;
       }
       if (first) fromParentDoc({ doc, notice });
-      else void mounted.agent.load(doc);
+      else location.reload();
       first = false;
     });
     say({ sagebrush: "ready" });
@@ -158,7 +161,8 @@ const host: BoardHost = {
   // (?runner=0 only on a loopback host, for tests: elsewhere a link could add
   // it to someone else's code; only in Chromium, as on the notebook page)
   code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__))
-    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
+    // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
+    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
