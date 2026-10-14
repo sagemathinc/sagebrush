@@ -671,6 +671,17 @@ try {
     const tcounts = await ev("window.__counts");
     await ev("(() => { for (const k of ['measure', 'measureWidth', 'measureMany']) delete window.board[k]; return 1; })()");
     check(tcounts.one === 0, "a template's code items are measured with the rest, not one layout each: " + JSON.stringify(tcounts));
+    // fonts arriving after the notes were measured (KaTeX's, on a slow line): measured again, the text fits
+    await ev(`window.sagebrush.board.load({ title: "Fonts", nodes: [{ id: "f", title: "Late font", text: "Text whose font comes later, " + "and is larger. ".repeat(6), x: 0, y: 0, w: 260 }] }).then(() => 1)`);
+    await ev("window.board.setCamera({ x: -40, y: -40, z: 1 }), window.board.render(), 1");
+    await sleep(200);
+    const h0 = await ev("window.board.item('f').h");
+    await ev("(() => { const s = document.createElement('style'); s.id = 'late-font'; s.textContent = '.sbb .board-note { font-size: 22px !important; }'; document.head.append(s); document.fonts.dispatchEvent(new Event('loadingdone')); return 1; })()");
+    const grew = await until(`window.board.item('f').h > ${h0 + 20}`, 3000).then(() => true, () => false);
+    await sleep(200);
+    const fits = await ev("(() => { const e = window.board.cache.get('f'); return !!e && e.scrollHeight <= e.clientHeight + 1; })()");
+    await ev("document.getElementById('late-font').remove(), document.fonts.dispatchEvent(new Event('loadingdone')), 1");
+    check(grew && fits, "a font arriving after the notes were measured: measured again, the text fits: " + JSON.stringify({ h0, h: await ev("window.board.item('f').h"), fits }));
     await ev("localStorage.clear()");
   }
   check(!errors.length, "page errors: " + errors.join(" | "));

@@ -475,6 +475,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (editor.moving) { relayoutHeld = true; return; }
     if (!relayoutFrame) relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; redraw().catch(fail); });
   }
+  // (fonts that came after notes were measured, KaTeX's among them: the
+  // notes measured again, or their text would overflow them)
+  if (document.fonts) on(document.fonts, "loadingdone", () => { heights.clear(); relayout(); });
 
   /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
   async function load(d: BoardDoc, stored = false) {
