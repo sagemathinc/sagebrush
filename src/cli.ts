@@ -308,6 +308,18 @@ async function main() {
     }
     argv.shift();
   }
+  // (a file that can't be read: CPython's message and exit status, not a stack trace)
+  if (file !== null && file !== "-") {
+    try {
+      readFileSync(file, "utf8");
+    } catch (e: any) {
+      const why: Record<string, [number, string]> = { ENOENT: [2, "No such file or directory"], EACCES: [13, "Permission denied"], EISDIR: [21, "Is a directory"] };
+      const [n, msg] = why[e?.code] ?? [Math.abs(e?.errno ?? 0), String(e?.code ?? e)];
+      process.stderr.write(`sagebrush: can't open file ${JSON.stringify(resolve(file)).replace(/^"|"$/g, "'")}: [Errno ${n}] ${msg}\n`);
+      process.exitCode = 2;
+      return;
+    }
+  }
   await initParser();
   if (emit) {
     if (file === null) {
