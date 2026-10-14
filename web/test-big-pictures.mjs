@@ -119,6 +119,15 @@ try {
   await ev("window.board.focus(['a1'], true), window.board.render(), 1");
   check(await until("!!document.querySelector('[data-code=a1] .board-code-out img') && !document.querySelector('[data-code=a1] .big-picture')", 10000), "board B's picture shows, though it reuses an id of A's: its own document's pixels, not board A's");
 
+  // board C keeps an item of B's as it was (its output kept, not run again)
+  // and adds two 30 MP pictures in notes: all three in its pixels (SEC-4DF-1)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "C", nodes: [{ id: "a1", code: show30(6002) }, { id: "n1", text: `![n1](data:image/png;base64,${png(6003, 5000)})` }, { id: "n2", text: `![n2](data:image/png;base64,${png(6004, 5000)})` }] })}).then(() => 1)`);
+  await sleep(1500);
+  await ev("window.board.focus(undefined, true), window.board.render(), 1");
+  await sleep(300);
+  const shownC = await ev("document.querySelectorAll('.board-item img[src^=\"data:image/png\"]').length");
+  check(shownC === 2, "board C: of its three 30 MP pictures (one an output kept from B), two shown: " + shownC);
+
   // a board from elsewhere: its notes' remote pictures shown when clicked; a new board's, at once
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "remote", nodes: [{ id: "r", title: "remote", text: remoteMd }] })}).then(() => 1)`);
   await ev("window.board.focus(['r'], true), window.board.render(), 1");

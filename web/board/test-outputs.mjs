@@ -277,6 +277,26 @@ try {
   await ev("window.__released.splice(0).forEach((f) => f()), 1");
   await sleep(1500);
   check((await countFor(idHeld)) === 0, "the replaced board's cache stays dropped: " + (await countFor(idHeld)));
+  // An older run's entries, held, don't overwrite a newer run's: t1's write
+  // is held, t2 runs again meanwhile, then it is released (CORR-4DF-2)
+  const twoStamps = { title: "two stamps", seed: SEED_C, nodes: [
+    { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1')" },
+    { id: "t2", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2', os.urandom(8).hex())" },
+  ] };
+  await ev("window.__holdPut = 0, window.__released = [], 1");
+  await ev(`window.sagebrush.board.load(${JSON.stringify(twoStamps)}).then(() => 1)`);
+  const idTwo = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  await ev("window.__holdPut = 1, 1");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000), "two items ran");
+  check(await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "t1's write is held");
+  await ev("window.sagebrush.board.run(['t2']).then(() => 1)");
+  const newer = (await outputs()).t2.output, t2key = (await keys()).t2.key;
+  await sleep(500);
+  await ev("window.__released.splice(0).forEach((f) => f()), 1");
+  for (let i = 0; i < 50 && (await countFor(idTwo)) < 2; i++) await sleep(100);
+  await sleep(800);
+  const keptOut = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idTwo)}, ${JSON.stringify(t2key)}]); g.onsuccess = () => { db.close(); res(JSON.stringify(g.result?.outputs ?? null)); }; }; })`);
+  check(keptOut.includes(newer.trim()), "t2's cached output is the newer run's: " + JSON.stringify([newer, keptOut.slice(0, 120)]));
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

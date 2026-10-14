@@ -154,6 +154,10 @@ class Grid {
 
 export class Board {
   readonly el: HTMLElement;
+  /** Items' elements are kept from one drawing to the next only within an
+   * epoch: another document shown starts one (mount.ts), so its notes are
+   * drawn, and their pictures counted, afresh (SEC-4DF-1). */
+  epoch = 0;
   private world: HTMLElement;
   private canvas: HTMLCanvasElement; // in front of the notes: ink, and everything far out
   private ctx: CanvasRenderingContext2D;
@@ -280,7 +284,7 @@ export class Board {
         // (being edited: kept whatever it now shows, as tall as its fields)
         el.style.cssText = placement(it) + `height:auto;min-height:${+it.h}px;`;
         this.cache.set(it.id, el);
-      } else if (el && el.dataset.key === contentKey(it)) {
+      } else if (el && el.dataset.key === this.epoch + contentKey(it)) {
         el.style.cssText = placement(it);
         this.cache.set(it.id, el);
       }
@@ -474,7 +478,7 @@ export class Board {
   private itemEl(it: Item): HTMLElement {
     const el = this.content(it);
     el.style.cssText = placement(it);
-    el.dataset.key = contentKey(it);
+    el.dataset.key = this.epoch + contentKey(it);
     return el;
   }
 

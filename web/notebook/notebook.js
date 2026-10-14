@@ -335,6 +335,40 @@ export function createNotebook(root, opts = {}) {
     el.innerHTML = safeHtml(b["text/html"], { remote: false, pixels });
     box.appendChild(el);
   }
+  // A picture past the document's pixels: says why, and shows it when asked.
+  function bigPicture(why, show) {
+    const p = h("div", "big-picture");
+    p.textContent = `A picture not shown: ${why}. `;
+    const go = h("button");
+    go.type = "button";
+    go.textContent = "Show it";
+    go.onclick = () => p.replaceWith(show());
+    p.append(go);
+    return p;
+  }
+  // The pictures the code cells show, counted again in the budget now (a
+  // board shows another document with them kept, SEC-4DF-1): those past it
+  // become placeholders, kept as they were for saving.
+  function recountPictures() {
+    for (const c of cells()) {
+      if (c.type !== "code") continue;
+      for (const img of [...c.out.querySelectorAll("img")]) {
+        const src = img.getAttribute("src") ?? "", m = /^data:(image\/(?:png|jpeg|gif|webp));base64,([\s\S]*)$/.exec(src);
+        if (!m) continue;
+        const fig = img.parentElement?.tagName === "FIGURE" ? img.parentElement : null;
+        const why = pixels.take(imageSize(m[1], m[2]), m[1] + "\n" + (fig ? m[2] : src));
+        if (!why) continue;
+        if (fig) {
+          fig.sbBundle ??= { [m[1]]: m[2], "text/plain": img.alt };
+          img.replaceWith(bigPicture(why, () => img));
+        } else img.replaceWith(document.createTextNode(img.alt));
+      }
+      for (const im of [...c.out.querySelectorAll("svg image")]) {
+        const href = im.getAttribute("href") ?? im.getAttributeNS(XLINK_NS, "href") ?? "", m = RASTER_URL.exec(href);
+        if (!m || pixels.take(imageSize("image/" + m[1], href.slice(href.indexOf(",") + 1)), "image/" + m[1] + "\n" + pictureKey(href)) !== null) im.remove();
+      }
+    }
+  }
   function appendDisplay(box, b) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
     if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
@@ -362,14 +396,7 @@ export function createNotebook(root, opts = {}) {
       if (!why) fig.appendChild(show());
       else {
         fig.sbBundle = { ...b };
-        const p = h("div", "big-picture");
-        p.textContent = `A picture not shown: ${why}. `;
-        const go = h("button");
-        go.type = "button";
-        go.textContent = "Show it";
-        go.onclick = () => p.replaceWith(show());
-        p.append(go);
-        fig.appendChild(p);
+        fig.appendChild(bigPicture(why, show));
       }
     }
     else if (typeof b["text/html"] === "string" && !b["application/json"]) return appendHtml(box, b);
@@ -2021,7 +2048,7 @@ export function createNotebook(root, opts = {}) {
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
     /** Count this document's pictures in `budget` (a board's: shared by its
      * pictures, notes and code, afresh for each document shown, image-size.ts). */
-    usePictures(budget) { pixels = budget; },
+    usePictures(budget) { pixels = budget; recountPictures(); },
     /** The next run's prompt number less one (after TimeTravel replayed runs). */
     setExecCount(k) { if (kernel) kernel.execCount = k; else execCount = k; },
     /** Use a store: show its document, save changes to it, apply its changes from elsewhere. */
