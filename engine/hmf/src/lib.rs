@@ -93,9 +93,6 @@ impl Space {
     /// conj(alpha), alpha in Theta(p), act; conj(alpha) = pi alpha^-1 acts on
     /// P^1 as alpha^-1 does (PSAGE: hecke_elements(P) = [~a for a in alphas]).
     fn hecke_action(&self, p: &Prime) -> Result<Vec<Vec<p1::Mat>>, String> {
-        if self.level.factors.iter().any(|(q, _)| q == p) {
-            return Err(format!("T_p for p = ({}) dividing the level is not implemented", p.gen));
-        }
         let th = theta::theta(p)?;
         Ok(th
             .iter()
@@ -112,9 +109,15 @@ impl Space {
         let mut image = vec![0u64; r];
         self.p1.digits(self.orbits.reps[i], &mut digits);
         let mut js: Vec<u32> = Vec::with_capacity(mats.len());
-        for m in mats {
+        'theta: for m in mats {
             for k in 0..r {
-                image[k] = self.p1.locals[k].act(&m[k], digits[k]).expect("conj(alpha) is invertible modulo N");
+                // conj(alpha) is invertible at every factor prime to p; at the
+                // factor P^e with P = p it is degenerate (not primitive) on
+                // exactly one alpha (see hecke_matrix), which U_p omits
+                match self.p1.locals[k].act(&m[k], digits[k]) {
+                    Some(j) => image[k] = j,
+                    None => continue 'theta,
+                }
             }
             js.push(self.orbits.orbit[self.p1.combine(&image) as usize]);
         }
@@ -130,9 +133,19 @@ impl Space {
     }
 
     /// The matrix of T_p on the basis of orbits, acting on the right: row i
-    /// is the image of the i-th basis element (PSAGE's hecke_matrix), for a
-    /// prime p not dividing N. Its rows sum to N(p) + 1. Rows are computed in
-    /// parallel with the `parallel` feature.
+    /// is the image of the i-th basis element (PSAGE's hecke_matrix). Rows are
+    /// computed in parallel with the `parallel` feature.
+    ///
+    /// For p not dividing N, the rows sum to N(p) + 1. For p dividing N this
+    /// is U_p (PSAGE did not implement it), with rows summing to N(p): with
+    /// alpha_z the element of Theta(p) whose reduction has image the line z,
+    /// conj(alpha_z) alpha_z = pi = 0 modulo p, so conj(alpha_z) modulo p
+    /// kills exactly z; a point x of P^1(O_F/p^e) lies over exactly one line
+    /// z, and the sum runs over the other N(p) elements, those whose action
+    /// on x is nondegenerate (Dembélé 2005, section 3: "one must restrict
+    /// the summation to the u whose action is nondegenerate"). These are the
+    /// N(p) single cosets of the double coset of diag(pi, 1) for the
+    /// Eichler order of level p^e, so this is the usual U_p.
     pub fn hecke_matrix(&self, p: &Prime) -> Result<HeckeMatrix, String> {
         let mats = self.hecke_action(p)?;
         let rows = par::map_range(self.dimension(), |i| self.hecke_row_with(&mats, i));

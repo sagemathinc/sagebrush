@@ -83,7 +83,7 @@ fn psage_aplists() {
         let ns = Newspaces::new(Ideal::principal(p71.gen).unwrap()).unwrap();
         let f = ns.rational_newforms().unwrap();
         assert_eq!(f.len(), 1);
-        let got: Vec<i64> = f[0].aplist(ns.top(), 50).unwrap().into_iter().map(|(_, a)| a.unwrap()).collect();
+        let got: Vec<i64> = f[0].aplist(ns.top(), 50).unwrap().into_iter().map(|(_, a)| a).collect();
         assert_eq!(got.len(), psage.len());
         let mut by_norm: HashMap<u64, (Vec<i64>, Vec<i64>)> = HashMap::new();
         for k in 0..got.len() {
