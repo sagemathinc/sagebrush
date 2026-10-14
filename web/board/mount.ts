@@ -46,7 +46,7 @@ import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
-import { boardFromText } from "./mermaid";
+import { boardFromText, toMermaid, toMermaidMarkdown } from "./mermaid";
 import { canvasLeftOut, toCanvas } from "./canvas";
 import { render as markdown } from "../markdown";
 import { IMAGE_TYPES, prepare, type ImageStore } from "./images";
@@ -1445,6 +1445,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       json: async () => canonical(await images.inline(doc!)),
       /** the board as a JSON Canvas (Download JSON Canvas), and what that left out, in words */
       canvas: () => canvasText(),
+      /** the page shown as a Mermaid flowchart (with `all`, every page, as Markdown), and what that left out, in words */
+      mermaid: (o?: { all?: boolean }) => (doc ? (o?.all ? toMermaidMarkdown(doc) : toMermaid(doc, pageIx)) : null),
       /** Code items slower than this from root (ms; default 10 s) keep a preview of their output in the document (design/outputs.md). */
       setPreviewThreshold(ms: number) { const c = engine(); if (c && Number.isFinite(ms) && ms >= 0) c.previewMs = ms; },
       /** each code item's output key, time from root, and whether a widget moved since it ran (design/outputs.md) */
