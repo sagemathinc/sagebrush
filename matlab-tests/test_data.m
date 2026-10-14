@@ -59,3 +59,9 @@ b = [1 NaN 3 4 NaN 6];
 show(r(movmean(b, 3))); show(r(movmean(b, 3, 'omitnan'))); show(r(movsum(b, 3, 'omitnan'))); show(r(movmax(b, 2, 'omitnan')));
 show(r(movmedian(b, 3, 'omitnan')));
 show(r(movmean(magic(4), 3))); show(r(movmean(magic(4), 3, 2))); show(r(movsum(magic(4)', [1 1])));
+% the reductions' 'omitnan'
+X = [1 NaN 3; 4 5 NaN; NaN 8 9; 2 2 2];
+show(median(X, 'omitnan')); show(median(X, 2, 'omitnan')); show(r(var(X, 0, 'omitnan'))); show(r(std(X, 1, 2, 'omitnan')));
+show(prod(X, 'omitnan')); show(median([NaN NaN], 'omitnan')); show(var([NaN 5], 0, 'omitnan')); show(median(X, 'all', 'omitnan'));
+show(r(var(X, 0, 'all', 'omitnan'))); show(sum(X, 'omitmissing')); show(median(X)); show(var(X));
+[lo, hi] = bounds([3 1 4 1 5]); show([lo hi]); show(bounds([3 1 4]));
