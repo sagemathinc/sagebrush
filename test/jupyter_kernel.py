@@ -160,6 +160,12 @@ check("matlab figure", any("image/svg+xml" in c["data"] for c in of(m, "display_
 r, m = run(kc, "x = [1 2")
 e = of(m, "error")
 check("matlab syntax error", r["status"] == "error" and e and e[0]["ename"] == "MATLAB:syntax", (r, e))
+kc.is_complete("if true")
+c = kc.get_shell_msg(timeout=10)["content"]
+check("matlab is_complete (an open if: incomplete)", c["status"] == "incomplete", c)
+kc.is_complete("if true\n  x = 1;\nend")
+c = kc.get_shell_msg(timeout=10)["content"]
+check("matlab is_complete (complete)", c["status"] == "complete", c)
 km.shutdown_kernel(now=True)
 
 out = subprocess.run(cmd + ["--uninstall-jupyter-kernel", "--mode", "all"], capture_output=True, text=True).stdout

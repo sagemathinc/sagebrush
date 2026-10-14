@@ -136,6 +136,15 @@ try {
   const said2 = await ev("document.querySelector('[data-sbb=say]').textContent");
   check(JSON.stringify(d.pages?.[0]?.slide) === JSON.stringify({ x: -295.5, y: -492, w: 1050, h: 591 }) && JSON.stringify(d.pages?.[1]?.slide) === JSON.stringify({ x: -600, y: -500, w: 1200, h: 675 }) && JSON.stringify(d.pages?.[2]?.slide) === JSON.stringify({ x: -295.5, y: -492, w: 1050, h: 591 }), "a slides file's pages are slides: CoCalc's card (an empty page too), or the page's own: " + JSON.stringify(d.pages?.map((p) => p.slide)));
   check(/Converted from a CoCalc slides file/.test(said2) && !/Left out/.test(said2), "...and the caption leaves nothing out: " + said2);
+  // the language of Sagebrush's own kernels, whose names have "sage" in them, and of others'
+  for (const [kernel, want] of [["sagebrush-matlab", "matlab"], ["sagebrush-magma", "magma"], ["octave", "matlab"], ["magma", "magma"], ["sagebrush", "sage"], ["python3", undefined]]) {
+    await open(`k-${kernel}.board`, jsonl([
+      { id: "p1", type: "page", z: 0, data: { pos: 0, schemaVersion: 1 } },
+      { id: "c1", type: "code", x: 0, y: 0, w: 300, h: 100, z: 1, page: "p1", str: "x = 1", data: { kernel } },
+    ]));
+    d = await docOf();
+    check(d.mode === want, `a ${kernel} kernel makes the board ${want ?? "Python"}: ${d.mode}`);
+  }
   // a one-line JSON board is still a board, not taken for CoCalc's
   await open("one.json", JSON.stringify({ title: "One line", nodes: [{ id: "solo", title: "Solo" }] }));
   d = await docOf();
