@@ -283,9 +283,11 @@ export class BoardCode {
   cache: OutputCache | null = null;
   /** an item over this many ms from root keeps its outputs in the cache */
   cacheMs = CACHE_MS;
-  /** the cache's name for this board: its seed (a board without one keeps none) */
+  /** the cache's name for the board shown, from its host's store (mount.ts
+   * outputsId: not the board's seed, which is portable); none, no cache */
+  cacheId: string | null = null;
   private cacheDoc(): string | null {
-    return this.seed !== BOARD_SEED ? this.seed : null;
+    return this.cacheId;
   }
   /** After a run: the outputs of the items that ran and are slow from root
    * into the cache (each of one run, as previews are), then the board's

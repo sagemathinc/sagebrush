@@ -1984,7 +1984,8 @@ export function createNotebook(root, opts = {}) {
     filesChanged(paths) { return reactive() && kernel.reactive ? kernel.reactive.filesChanged(paths) : Promise.resolve(null); },
     /**
      * Each code cell's output key, time from root, whether a widget moved
-     * since it ran, and how many files its last run read (design/outputs.md):
+     * since it ran, and how many files its last run, and those of the cells
+     * it depends on, read (design/outputs.md):
      * {id: {key, ms, fromRoot, untimed, widget, reads}}, or null when the
      * notebook is not reactive.  A key is null for
      * a cell with an error, or reading from one.
@@ -1997,7 +1998,10 @@ export function createNotebook(root, opts = {}) {
       // (built from entries: an id is any string, "__proto__" too, SEC-781-1)
       return Object.fromEntries(cells().filter((c) => c.type === "code").map((c) => {
         const { ms, untimed } = r.fromRoot(c.id);
-        return [c.id, { key: keys.get(c.id) ?? null, ms: r.times.get(c.id) ?? null, fromRoot: ms, untimed, widget: r.widgetDriven.has(c.id), reads: r.files.get(c.id)?.reads?.length ?? 0 }];
+        // (files read by it or by anything it depends on: its key doesn't say their bytes, SEC-B88-2)
+        let reads = 0;
+        for (const a of r.graph.closure([c.id], { children: false })) reads += r.files.get(a)?.reads?.length ?? 0;
+        return [c.id, { key: keys.get(c.id) ?? null, ms: r.times.get(c.id) ?? null, fromRoot: ms, untimed, widget: r.widgetDriven.has(c.id), reads }];
       }));
     },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */

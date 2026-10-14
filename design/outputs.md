@@ -83,11 +83,14 @@ running it.
   outputs as up to date, marked "cached" with its date. It is not run. Its
   values are not in the interpreter, so running a cell that reads it runs
   it first, as for any stale ancestor.
-- **A cell that read files is not cached yet:** its entry would need the
-  files' hashes, which come with the files' own store.
-- **Which cache:** the board's seed names it, so a board without one (an
-  example) keeps none, and a copy of a board shares its cache in the same
-  browser, which only means the same outputs for the same keys.
+- **A cell that read files, or depends on one that did, is not cached yet:**
+  its entry would need the files' hashes, which come with the files' own
+  store.
+- **Which cache:** the host's store names it, beside the document and not
+  in it (a board's seed is portable: anyone can copy a board, seed and
+  all, and must not get another document's outputs). Another document
+  shown in the same place (loaded, opened, a new board, reverted) gets a
+  new name, and the old one's entries are dropped.
 - **The engine's version is recorded, not keyed.** A new engine (every
   deploy) would otherwise empty every cache. `verify()` recomputes from
   scratch and compares, as it does for shown outputs.
