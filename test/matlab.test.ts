@@ -509,3 +509,25 @@ test("the close-to-singular warning prints Higham's estimated RCOND, as the publ
     "lastwarn(''); x = magic(4) \\ [34; 34; 34; 34]; disp(lastwarn)"], { encoding: "utf8" });
   assert.equal(out.trim(), "Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = 1.306145e-17.");
 });
+
+test("deconv as documented: long division, least squares for each shape (the least-norm solution), regularization, orientation and the refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "[x, r] = deconv([2 7 4 9], [1 0 1]); disp(mat2str(x)); disp(mat2str(r));",
+    "[x, r] = deconv([2 7 4 9]', [1 0 1]); disp(mat2str(size(x))); disp(mat2str(size(r)));",
+    "[x, r] = deconv([1 2], [1 2 3]); disp(mat2str(x)); disp(mat2str(r));",
+    "y = conv([-1 2], [2 5], 'valid'); [x, r] = deconv(y, [2 5], 'valid', Method='least-squares'); disp(mat2str(x, 4)); disp(abs(r) < 1e-14);",
+    "disp(mat2str(conv(x, [2 5]), 4));",
+    "xin = [-1 2 3 -2 0 1 2]; h = [2 4 -1 1]; y = conv(xin, h, 'same'); [x, r] = deconv(y, h, 'same', Method='least-squares'); disp(max(abs(x - xin)) < 1e-12); disp(max(abs(r)) < 1e-12);",
+    "y = conv([1 2 3], [1 -1 2]); x = deconv(y, [1 -1 2], Method='least-squares'); disp(max(abs(x - [1 2 3])) < 1e-12);",
+    "x = deconv(y, [1 -1 2], Method='least-squares', RegularizationFactor=1); disp(norm(x) < norm([1 2 3]));",
+    "disp(class(deconv(single([2 7 4 9]), [1 0 1])));",
+    "try, deconv([1 2 3], [1 1], 'same'), catch e, disp(e.message), end",
+    "try, deconv([1 2 3], [0 1]), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[2 7]", "[0 0 2 2]", "[2 1]", "[4 1]", "0", "[1 2]",
+    "[-0.1724 -0.06897]", "1", "[-0.3448 -1 -0.3448]", "1", "1", "1", "1", "single",
+    "The shape must be \"full\" when Method is \"long-division\".", "First coefficient of h must be non-zero.",
+  ]);
+});
