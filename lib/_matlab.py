@@ -657,6 +657,11 @@ def _solve(A, B):
             X, singular = _lu_solve_through(A, B, True)
             if singular:
                 warning_("Matrix is singular to working precision.")
+            elif A.dtype.kind == "c":
+                if n <= 500:
+                    _rcond_warning(A, _lu_solve_through(A, np.eye(n)))
+            else:
+                _rcond_warning(A)
             return X
         try:
             X = np.linalg.solve(A, B)
@@ -668,6 +673,22 @@ def _solve(A, B):
     return _qr_solve(A, B)
 
 
+# LAPACK's safe minimum over eps (dlamch('S') / dlamch('E')), and its reciprocal
+_SAFMIN = 2.2250738585072014e-308 / 1.1102230246251565e-16
+_RSAFMIN = 1.0 / _SAFMIN
+
+
+def _col_norms(M):
+    """the 2-norm of each column, scaled by its largest magnitude (as LAPACK's
+    dnrm2), so neither overflowing near 1e154 nor underflowing near 1e-154"""
+    a = np.abs(M)
+    if not a.shape[0]:
+        return np.zeros(a.shape[1])
+    s = np.max(a, axis=0)
+    t = np.where(s > 0, s, 1.0)
+    return s * np.sqrt(np.sum((a / t.reshape((1, -1))) ** 2, axis=0))
+
+
 def _qr_solve(A, B):
     """A \\ B for a rectangular A as MATLAB solves it: Householder QR with
     column pivoting (LAPACK's dgeqp3 and dlarfg conventions), the rank where
@@ -676,11 +697,15 @@ def _qr_solve(A, B):
     m, n = A.shape
     cplx = A.dtype.kind == "c" or B.dtype.kind == "c"
     dt = np.complex128 if cplx else np.float64
+    if A.size and not np.all(np.isfinite(A)):
+        # (NaN or Inf in A: no meaningful factorization, so NaN, never a
+        # plausible zero)
+        return np.full((n, B.shape[1]), _math.nan, dtype=dt)
     R = np.array(A, dtype=dt)
     Y = np.array(B, dtype=dt)
     perm = np.arange(n)
     k = min(m, n)
-    norms = np.sqrt(np.sum(np.abs(R) ** 2, axis=0)) if m else np.zeros(n)
+    norms = _col_norms(R)
     for j in range(k):
         # (the remaining column of largest norm first)
         if j < n - 1:
@@ -691,20 +716,31 @@ def _qr_solve(A, B):
                 norms[[j, q]] = norms[[q, j]]
         x = R[j:, j].copy()
         alpha = x[0]
-        xnorm = float(np.sqrt(np.sum(np.abs(x[1:]) ** 2))) if x.size > 1 else 0.0
+        xnorm = float(_col_norms(x[1:].reshape((-1, 1)))[0]) if x.size > 1 else 0.0
         if xnorm == 0 and (not cplx or alpha.imag == 0):
             continue
-        beta = -_math.copysign(float(np.sqrt(abs(alpha) ** 2 + xnorm ** 2)), alpha.real)
+        beta = -_math.copysign(_math.hypot(abs(alpha), xnorm), alpha.real)
+        knt = 0
+        while abs(beta) < _SAFMIN and knt < 20:
+            # (dlarfg: a tiny column rescaled, so v and tau keep their precision)
+            knt += 1
+            x = x * _RSAFMIN
+            alpha = x[0]
+            beta = beta * _RSAFMIN
+        if knt:
+            xnorm = float(_col_norms(x[1:].reshape((-1, 1)))[0]) if x.size > 1 else 0.0
+            beta = -_math.copysign(_math.hypot(abs(alpha), xnorm), alpha.real)
         tau = (beta - alpha) / beta
         v = x / (alpha - beta)
         v[0] = 1.0
+        beta = beta * _SAFMIN ** knt
         # (apply I - tau v v^H to R's remaining columns and to the right side)
         R[j:, j:] -= np.conj(tau) * np.outer(v, np.conj(v) @ R[j:, j:]) if cplx else tau * np.outer(v, v @ R[j:, j:])
         Y[j:] -= np.conj(tau) * np.outer(v, np.conj(v) @ Y[j:]) if cplx else tau * np.outer(v, v @ Y[j:])
         R[j, j] = beta
         R[j + 1:, j] = 0
         if j + 1 < n:
-            norms[j + 1:] = np.sqrt(np.sum(np.abs(R[j + 1:, j + 1:]) ** 2, axis=0))
+            norms[j + 1:] = _col_norms(R[j + 1:, j + 1:])
     d = np.abs(np.diag(R[:k, :k])) if k else np.zeros(0)
     tol = max(m, n) * 2.220446049250313e-16 * (float(d[0]) if d.size else 0.0)
     r = int(np.sum(d > tol))
@@ -3296,7 +3332,12 @@ def _write_err(s):
     _sys.stderr.write(s)
 
 
+# the last warning's message and identifier, for lastwarn
+_lastwarn = ["", ""]
+
+
 def warning_(msg, ident=""):
+    _lastwarn[0], _lastwarn[1] = msg, ident
     _write_err("Warning: %s\n" % msg)
 
 # ================================================================== built-in functions
@@ -6998,6 +7039,16 @@ def warning_b(nargout, *args):
     if msg:
         warning_(msg, ident)
     return NOVAL
+
+
+@_bi("lastwarn")
+def lastwarn_(nargout, *args):
+    """[msg, id] = lastwarn; lastwarn(msg) and lastwarn(msg, id) set them"""
+    out = [Char(_lastwarn[0]), Char(_lastwarn[1])]
+    if args:
+        _lastwarn[0] = _text(args[0])
+        _lastwarn[1] = _text(args[1]) if len(args) > 1 else ""
+    return out if nargout > 1 else out[0]
 
 
 @_bs("MException")

@@ -16,3 +16,12 @@ show(r(inv(magic(3))));
 show(r([1+2i 2; 3 4-1i] \ [1; 1i]));
 show(r(3 \ [6 9]));
 show(r([6 9] / 3));
+% (scales where squared entries overflow or underflow; a NaN in the matrix)
+show(r([1e154; 2e154] \ [1e154; 1e154]));
+show(r([1e-308; 2e-308] \ [1e-308; 1e-308]));
+show(r([3e200 1; 4e200 2; 0 1] \ [3e200; 4e200; 1]));
+show([NaN; 1] \ [1; 2]);
+% (the close-to-singular warning whatever the class of either side)
+lastwarn(''); x = [1+1i 0; 0 1e-20] \ [1; 1]; show(~isempty(lastwarn));
+lastwarn(''); x = [1 0; 0 1e-20] \ [1i; 1]; show(~isempty(lastwarn));
+lastwarn(''); x = [1+1i 0; 0 1] \ [1; 1i]; show(isempty(lastwarn));
