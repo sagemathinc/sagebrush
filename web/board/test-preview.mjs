@@ -2,7 +2,7 @@
 // bounded (text cut to its head and tail, one picture, never SVG, HTML or
 // scripts), read back only when well formed, and a board over its total
 // drops the previews closest to the line first.   bun web/board/test-preview.mjs
-import { CELL_MAX, DOC_MAX, cleanPreview, cut, makePreview, overCap, previewLabel, sameOutputs } from "./preview.ts";
+import { CELL_MAX, DOC_MAX, bytes, cleanPreview, cut, makePreview, overCap, previewLabel, sameOutputs } from "./preview.ts";
 import { cleanDoc, canonical } from "./doc.ts";
 
 let checks = 0;
@@ -29,12 +29,14 @@ check(p && p.ms === 12346 && p.total === 23457 && p.at === at, "when, and how lo
 check(p.outputs[0].text.length < 6000, "the stream is cut");
 check(p.outputs[1].data["image/webp"] === "UklGRg==" && !text.includes("svg") && !text.includes("<script"), "an SVG picture is drawn again (WebP), never kept as SVG");
 check(!p.outputs[2].data["image/png"] && p.outputs[2].data["text/plain"] === "a second figure", "one picture a preview: the second keeps its text");
+const small = await makePreview([{ output_type: "display_data", data: { "image/png": "iVBORw0KGgoAAAA=" }, metadata: {} }], { at, ms: 1, total: 1 }, async (src, w) => (w === 640 ? ["image/webp", "UklGRgAA"] : null));
+check(small?.outputs[0].data["image/webp"] === "UklGRgAA", "a picture, however small, is drawn again at most 640 wide");
 check(!text.includes("text/html") && !text.includes("onerror") && p.outputs[3].data["text/plain"] === "a table", "no HTML: its text instead");
 check(!text.includes("scene3d"), "no 3D scene");
 check(JSON.stringify(p.outputs).length <= CELL_MAX, "at most CELL_MAX");
 check((await makePreview([], { at, ms: 1, total: 1 }, raster)) === null, "no output: no preview");
 const huge = await makePreview(Array.from({ length: 40 }, (_, i) => ({ output_type: "display_data", data: { "text/plain": "x".repeat(3000) + i }, metadata: {} })), { at, ms: 1, total: 1 }, raster);
-check(huge && JSON.stringify(huge.outputs).length <= CELL_MAX && huge.outputs.length < 40, "many outputs: the last go, to fit");
+check(huge && bytes(huge.outputs) <= CELL_MAX && huge.outputs.length < 40, "many outputs: the last go, to fit");
 
 // reading one back: only as written
 check(JSON.stringify(cleanPreview(p)) === JSON.stringify(p), "a preview reads back as it was");
@@ -44,12 +46,16 @@ const bad = [
   { ...p, outputs: [{ output_type: "display_data", data: { "text/html": "<b>x</b>" }, metadata: {} }] },
   { ...p, outputs: [{ output_type: "display_data", data: { "image/png": "not base64!<script>" }, metadata: {} }] },
   { ...p, outputs: [{ output_type: "execute_result", data: { "text/plain": "1" } }] },
-  { ...p, outputs: [{ output_type: "stream", name: "stdout", text: "x".repeat(CELL_MAX + 1) }] },
+  { ...p, outputs: Array.from({ length: 12 }, () => ({ output_type: "display_data", data: { "text/plain": "é".repeat(2000) }, metadata: {} })) },
   "a string", null,
 ];
 check(bad.every((b) => cleanPreview(b) === undefined), "a malformed or unbounded preview is dropped: " + bad.map((b) => !!cleanPreview(b)).join());
 const mixed = cleanPreview({ ...p, outputs: [{ output_type: "display_data", data: { "text/plain": "ok", "text/html": "<i>x</i>", "image/svg+xml": "<svg/>" }, metadata: {} }] });
 check(mixed && Object.keys(mixed.outputs[0].data).join() === "text/plain", "only text and raster pictures are read");
+// read back held to what is written: texts cut, one picture (SEC-14C-2)
+const wide = cleanPreview({ ...p, outputs: [{ output_type: "stream", name: "stdout", text: "y".repeat(20000) }, { output_type: "display_data", data: { "image/png": "iVBORw0KGgo=" }, metadata: {} }, { output_type: "display_data", data: { "image/jpeg": "/9j/4AAQ", "text/plain": "two" }, metadata: {} }] });
+check(wide && wide.outputs[0].text.length < 6000 && wide.outputs[1].data["image/png"] && !wide.outputs[2].data["image/jpeg"] && wide.outputs[2].data["text/plain"] === "two", "a file's preview: its text cut, its second picture dropped: " + JSON.stringify(wide).length);
+check(bytes("é") === 4 && bytes("e") === 3, "sizes are bytes of UTF-8");
 
 // in a board's file: on code notes only, last in the node
 const doc = cleanDoc({ nodes: [{ id: "a", code: "x = 1", preview: p, x: 1, y: 2 }, { id: "b", text: "no code", preview: p }] });
@@ -64,6 +70,15 @@ const drop = overCap(many);
 let left = 0;
 for (const [id, v] of many) if (!drop.includes(id)) left += JSON.stringify(v).length;
 check(drop.length > 0 && left <= DOC_MAX && !drop.includes("a") && drop[0] === "n0", "over the board's total: the fastest go first: " + drop.slice(0, 3));
+// and a file over it: cleanDoc holds it to DOC_MAX, on every page and in groups
+// (7 outputs of 4,000 characters: about 28 KB, under CELL_MAX, and not cut)
+const fat = (total) => ({ at, ms: 1, total, outputs: Array.from({ length: 7 }, () => ({ output_type: "display_data", data: { "text/plain": "z".repeat(4000) }, metadata: {} })) });
+const heavy = cleanDoc({ pages: [
+  { nodes: [{ id: "a", code: "1", preview: fat(50_000) }, { id: "g", kind: "group", children: Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, code: "1", preview: fat(11_000 + i) })) }] },
+  { nodes: Array.from({ length: 10 }, (_, i) => ({ id: `q${i}`, code: "1", preview: fat(12_000 + i) })) },
+] });
+const kept = [heavy.pages[0].nodes[0], ...heavy.pages[0].nodes[1].children, ...heavy.pages[1].nodes].filter((n) => n.preview);
+check(kept.reduce((s, n) => s + bytes(n.preview), 0) <= DOC_MAX && heavy.pages[0].nodes[0].preview && !heavy.pages[0].nodes[1].children[0].preview && kept.length < 20, "a file over the board's total is held to it when read: " + kept.length);
 check(overCap(new Map([["a", sized(1, 10)]])).length === 0, "under it: none");
 check(sameOutputs(p, { ...p, at: "2026-10-14T00:00:00.000Z", ms: 1 }) && !sameOutputs(p, huge), "the same outputs, whenever computed");
 check(/^Preview, computed .+ \(23 s\)\. Run to update\.$/.test(previewLabel(p)), "its label: " + previewLabel(p));

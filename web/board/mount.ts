@@ -185,6 +185,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const heights = new Map<string, number>();
   // (the document as it came, before this browser's or this person's edits: Revert)
   let original: BoardDoc | null = null;
+  // (documents loaded: a preview computed for one is not kept in another)
+  let loads = 0;
 
   /** Lay out and draw a document, the camera where it is (`view`: a version
    * being looked at in TimeTravel, which is not the document and does not run). */
@@ -314,14 +316,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // Previews of slow code items (preview.ts, design/outputs.md): after a run,
   // an item that ran keeps one if it is slow from root and loses it if not,
   // written only when what it shows changed, and not as a step to undo
+  // (each of one run: dropped if its item ran again, or another board was
+  // loaded, while its picture was drawn, SEC-14C-1)
   async function keepPreviews(c: BoardCode, ids: string[]) {
+    const loaded = loads;
     const got = await c.previews(ids);
-    if (!got.size || code !== c) return;
+    if (!got.size || code !== c || loads !== loaded) return;
     await editor.commit((d) => {
       const notes = codeNotes(d);
-      for (const [id, p] of got) {
+      for (const [id, { preview: p, gen }] of got) {
         const n = notes.get(id);
-        if (!n) continue;
+        if (!n || c.generation(id) !== gen) continue;
         if (p === null) delete n.preview;
         else if (!sameOutputs(p, n.preview)) n.preview = p;
       }
@@ -341,6 +346,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
 
   /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
   async function load(d: BoardDoc) {
+    loads++;
     const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(host.address?.get() ?? "");
     pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
     closeTimeTravel(false);
