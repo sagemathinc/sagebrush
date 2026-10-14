@@ -43,6 +43,8 @@ jobs:
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
           node web/test-cli-assets.mjs build/cli/pyjs.cjs
+      - name: llms.txt and the board format page link only to pages the site serves, and the format's example renders
+        run: node web/test-llms.mjs
       - name: shared collections (the share API and the files Worker in Miniflare; sharing from the page in headless Chrome)
         run: |
           (cd web/site && npm ci --silent)
