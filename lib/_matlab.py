@@ -5597,8 +5597,11 @@ def svd_(nargout, x, *args):
 def lu_(nargout, x, *args):
     """lu as documented for an m-by-n matrix, real or complex: Gaussian
     elimination with partial pivoting (the first largest magnitude in the
-    column; the multipliers by the pivot's reciprocal, as LAPACK's dgetf2
-    forms them).  Y = lu(A) holds U and L's multipliers in one matrix;
+    column), in single precision for a single A.  As reference LAPACK's
+    dgetf2 forms them, the multipliers are by the pivot's reciprocal when
+    the pivot is at least the smallest normal number, and by division below
+    it, where the reciprocal would overflow.  Y = lu(A) holds U and L's
+    multipliers in one matrix;
     [L, U] = lu(A) has L = P'*L, so that A = L*U; [L, U, P] = lu(A) has
     P*A = L*U, and with outputForm 'vector' P is the vector with
     A(P,:) = L*U.  The sparse forms with a column permutation Q, a scaling
@@ -5612,7 +5615,10 @@ def lu_(nargout, x, *args):
     if nargout > 3:
         raise _err("lu: the column permutation Q and the scaling D are not supported in Sagebrush.")
     A = _mat(x)
-    dt = np.complex128 if A.dtype.kind == "c" else np.float64
+    single = class_(x) == "single"
+    dt = (np.complex64 if single else np.complex128) if A.dtype.kind == "c" else (np.float32 if single else np.float64)
+    # (the smallest normal number of the precision: LAPACK's sfmin)
+    sfmin = 1.1754943508222875e-38 if single else 2.2250738585072014e-308
     m, n = A.shape
     k = min(m, n)
     U = np.array(A, dtype=dt)
@@ -5626,9 +5632,10 @@ def lu_(nargout, x, *args):
             perm[j], perm[p] = perm[p], perm[j]
         L[j, j] = 1.0
         if U[j, j] != 0:
-            r = 1.0 / U[j, j]
+            recip = abs(U[j, j]) >= sfmin
+            r = (np.ones(1, dtype=dt) / U[j, j])[0] if recip else None
             for i in range(j + 1, m):
-                L[i, j] = U[i, j] * r
+                L[i, j] = U[i, j] * r if recip else U[i, j] / U[j, j]
                 U[i, j + 1:] = U[i, j + 1:] - L[i, j] * U[j, j + 1:]
                 U[i, j] = 0.0
     U = U[:k, :]
@@ -5640,9 +5647,21 @@ def lu_(nargout, x, *args):
         return _unmat(Y)
     P = np.eye(m)[perm, :]
     if nargout == 2:
-        return [_unmat(P.T @ L), _unmat(U)]
+        # (P'*L, by moving L's rows: exact, and in L's precision)
+        PL = np.zeros_like(L)
+        PL[perm, :] = L
+        return [_unmat(PL), _unmat(U)]
     Pout = _box(np.array([float(i + 1) for i in perm]).reshape((m, 1))) if form == "vector" else _unmat(P)
     return [_unmat(L), _unmat(U), Pout]
+
+
+def _qr_econ_flag(v):
+    """qr's economy flag: the scalar 0 itself (a complex scalar is zero only
+    with both its parts zero, so qr(S, 2i) has the right side 2i)"""
+    if _istext(v) or _numel(v) != 1:
+        return False
+    z = _farr(v).reshape(-1)[0]
+    return complex(z) == 0
 
 
 @_bi("qr")
@@ -5653,15 +5672,16 @@ def qr_(nargout, x, *args):
     the least-squares sense.  The column permutation P is refused."""
     args = list(args)
     B = None
-    if args and not _istext(args[0]) and not (_numel(args[0]) == 1 and _scalar(args[0]) == 0):
+    if args and not _istext(args[0]) and not _qr_econ_flag(args[0]):
         B = args.pop(0)
     econ = False
     for o in args:
         if _istext(o) and _text(o).lower() == "econ":
             econ = True
         elif _istext(o) and _text(o).lower() in ("vector", "matrix"):
-            pass  # (the form of P, which is not returned)
-        elif not _istext(o) and _numel(o) == 1 and _scalar(o) == 0:
+            # (the form of the permutation P, which is refused)
+            raise _err("qr: the outputForm argument needs the column permutation P, which is not supported in Sagebrush.")
+        elif _qr_econ_flag(o):
             econ = True
         else:
             raise _err("qr: the option is not supported in Sagebrush.")
@@ -5830,7 +5850,11 @@ def deconv_(nargout, y, h, *args):
             if method not in ("long-division", "least-squares"):
                 raise _err("Method must be \"long-division\" or \"least-squares\".")
         elif name == "regularizationfactor":
-            alpha = _scalar(args[k + 1])
+            v = args[k + 1]
+            # (one real number, double or single, as documented)
+            if class_(v) not in ("double", "single") or _numel(v) != 1 or not isreal_(v):
+                raise _err("RegularizationFactor must be a real number.")
+            alpha = _scalar(v)
         else:
             raise _err("deconv: the option '%s' is not supported." % (_text(args[k]) if name else "?"))
     if method == "long-division" and shape != "full":
@@ -5861,6 +5885,13 @@ def deconv_(nargout, y, h, *args):
             for j in range(len(H)):
                 r[k + j] -= c * H[j]
         out = [orient(q), orient(r)]
+    elif H.size == 0:
+        # (as documented, with an empty h a "valid" y is as long as x, and so is
+        # a "same" one: the convolution is 0, so x = 0 and r = y; a full
+        # convolution with an empty h has no defined length)
+        if shape == "full":
+            raise _err("h must not be empty for the \"full\" shape.")
+        out = [orient(np.zeros(Y.size)), orient(Y)]
     else:
         nh = H.size
         nx = {"full": Y.size - nh + 1, "same": Y.size, "valid": Y.size + nh - 1}[shape]
