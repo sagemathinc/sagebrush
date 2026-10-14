@@ -76,8 +76,9 @@ export interface BoardStore {
   writtenHere?(set?: boolean): boolean;
   /** The document as it is elsewhere, when it changes there (another person;
    * or newer than the copy load() gave at once: cached.ts), with a notice
-   * for the caption (a merge's); shown in place.  Returns: stop. */
-  subscribe?(f: (doc: BoardDoc, notice?: string) => void): () => void;
+   * for the caption (a merge's); shown in place, `f` resolving once it is
+   * (edits made before were made from the one before).  Returns: stop. */
+  subscribe?(f: (doc: BoardDoc, notice?: string) => void | Promise<void>): () => void;
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
@@ -607,8 +608,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // document (its camera, outputs and history kept), once the first is; the
   // undo steps before it forgotten, so that an undo cannot write the older
   // document back over it
+  // (one after another: an older one never drawn over a newer; resolved once shown, for the store)
+  let elsewhere: Promise<unknown> = opened ?? Promise.resolve();
   const unsubscribe = host.store?.subscribe?.((d, note) => {
-    (opened ?? Promise.resolve()).then(async () => {
+    const shown = elsewhere.then(async () => {
       if (destroyed || !doc) return;
       closeTimeTravel(false);
       const prev = doc;
@@ -616,7 +619,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       if (!(await show(d))) return;
       remember(prev);
       if (note) say(note);
-    }).catch(fail);
+    });
+    elsewhere = shown.catch(fail);
+    return shown;
   });
   if (unsubscribe) offs.push(unsubscribe);
   // The board's title: in Edit, a click renames it where it is (Enter, or

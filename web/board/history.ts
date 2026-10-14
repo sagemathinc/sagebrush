@@ -14,8 +14,9 @@
 //                                      fields (x and y among them)
 //   {type: "edge", page, id}           from, to, pos, label, arrows, line
 //
-// (A page without an id is "#" and its place; an edge is "from→to", then
-// "#2" and so on for more between the same two.)  The text fields are string
+// (A page without an id is "#" and its place, marked `anon`, and not an id
+// another page has; an edge is the JSON of its ends and which of those
+// between the same two it is.)  The text fields are string
 // columns, patched character by character, and a changed record is patched
 // in place, so moving an item is a tiny patch (its x and y) and so is typing
 // a letter.  Every change kept is a version: a drag when it ends.  Not
@@ -72,16 +73,20 @@ export function toRecords(d: BoardDoc): any[] {
     walk(p.nodes ?? [], "");
     const seen = new Map<string, number>();
     (p.edges ?? []).forEach((e, pos) => {
-      const k = `${e.from}→${e.to}`, c = (seen.get(k) ?? 0) + 1;
+      // (its ends, and which of those between them: unambiguous whatever the ids hold, CORR-3D2-3)
+      const k = JSON.stringify([e.from, e.to]), c = (seen.get(k) ?? 0) + 1;
       seen.set(k, c);
-      out.push({ type: "edge", page: pid, ...e, id: c > 1 ? `${k}#${c}` : k, pos });
+      out.push({ type: "edge", page: pid, ...e, id: JSON.stringify([e.from, e.to, c]), pos });
     });
   };
   if (pages?.length) {
+    // (a page without an id: "#" and its place, marked as made so; never an id another page has)
+    const taken = new Set(pages.map((p) => p.id).filter((x) => x != null).map(String));
     pages.forEach((p, i) => {
       const { nodes: _n, edges: _e, id, ...rest } = p as any;
-      const pid = id ?? `#${i}`;
-      out.push({ type: "page", page: pid, ...rest, id: "", pos: i });
+      let pid = id ?? `#${i}`;
+      if (id == null) while (taken.has(pid)) pid += "#";
+      out.push({ type: "page", page: pid, ...rest, ...(id == null ? { anon: true } : /^#\d+#*$/.test(id) ? { anon: false } : {}), id: "", pos: i });
       page(p, pid);
     });
   } else page({ nodes, edges } as BoardPage, "");
@@ -105,8 +110,9 @@ export function fromRecords(rs: Records): BoardDoc {
   };
   if (paged) {
     d.pages = rs.get({ type: "page" }).slice().sort(byPos).map((p) => {
-      const { type: _a, page: pid, id: _c, pos: _d, ...rest } = plain(p);
-      return { ...(pid.startsWith("#") ? {} : { id: pid }), ...rest, ...build(pid) };
+      const { type: _a, page: pid, id: _c, pos: _d, anon, ...rest } = plain(p);
+      // (an id made for a page without one: marked so; records from before the mark, by its form)
+      return { ...((anon ?? /^#\d+#*$/.test(pid)) ? {} : { id: pid }), ...rest, ...build(pid) };
     });
   } else Object.assign(d, build(""));
   return d as BoardDoc;
