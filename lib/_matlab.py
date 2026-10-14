@@ -307,6 +307,8 @@ def _arr(v):
         return v.a
     if t is int:
         return np.array([[float(v)]])
+    if t is Sparse:
+        return _sp.full_arr(v)
     raise _err("Expected a numeric value, not %s." % class_(v))
 
 
@@ -330,6 +332,8 @@ def _farr(v, name="the operation"):
         return v.a
     if t is int:
         return np.array([[float(v)]])
+    if t is Sparse:
+        return _farr(_sp.full(v), name)
     raise _optype(name, v)
 
 
@@ -339,7 +343,7 @@ def _optype(name, *vals):
 
 def _isnumlike(v):
     t = type(v)
-    return t is float or t is bool or t is complex or t is np.ndarray or t is Char or t is int
+    return t is float or t is bool or t is complex or t is np.ndarray or t is Char or t is int or t is Sparse
 
 
 def _dims(v):
@@ -352,6 +356,8 @@ def _dims(v):
         return tuple(reversed(v.a.shape))
     if t is Cell or t is Struct or t is StrArr or t is HandleArr:
         return v.shape
+    if t is Sparse:
+        return (v.m, v.n)
     if isinstance(v, Undef):
         raise _undefined(v.name or "?")
     return (1, 1)
@@ -367,6 +373,8 @@ def _numel(v):
         return v.a.size
     if t is Cell or t is Struct or t is StrArr or t is HandleArr:
         return len(v.a)
+    if t is Sparse:
+        return v.m * v.n
     return 1
 
 
@@ -789,6 +797,8 @@ def cond(v):
         raise _err("Conversion to logical from string is not possible.")
     if not _isnumlike(v):
         raise _err("Conversion to logical from %s is not possible." % class_(v))
+    if t is Sparse:
+        return _sp.truth(v)
     if _numel(v) == 0:
         return False
     A = _arr(v)
@@ -817,6 +827,8 @@ def transpose(a):
         return out
     if t is Str:
         return a
+    if t is Sparse:
+        return _sp.transpose(a)
     raise _optype("transpose", a)
 
 
@@ -828,6 +840,8 @@ def ctranspose(a):
         return a.conjugate()
     if t is np.ndarray and a.dtype.kind == "c":
         return _box(np.conj(transpose(a)))
+    if t is Sparse:
+        return _sp.transpose(a, conj=True)
     return transpose(a)
 
 # ------------------------------------------------------------------ the colon operator
@@ -943,6 +957,9 @@ def columns(v):
     if t is Cell or t is Struct or t is StrArr:
         for j in range(ncol):
             yield v._like([cp(x) for x in v.a[j * r:(j + 1) * r]], (r, 1))
+        return
+    if t is Sparse:
+        yield from _sp.columns(v)
         return
     yield v
 
@@ -1125,6 +1142,15 @@ class Struct:
 
     def _like(self, a, shape):
         return Struct(a, shape, list(self.fields))
+
+
+class Sparse:
+    """A sparse matrix (double or logical): lib/_matlab_sparse.py.  m-by-n,
+    compressed sparse column (jc, ir, pr), as MATLAB stores it; immutable."""
+    __slots__ = ("m", "n", "jc", "ir", "pr")
+
+    def __repr__(self):
+        return "<%dx%d sparse, %d nonzeros>" % (self.m, self.n, self.pr.size)
 
 
 def _struct1(d):
@@ -1513,6 +1539,8 @@ def _ivec(arg, n, pos, grow):
         return idx, shape, False
     if t is Str or t is StrArr or t is Cell or t is Struct or _iscallable(arg):
         raise _err("Unable to use a value of type %s as an index." % class_(arg), "MATLAB:badsubscript")
+    if t is Sparse:
+        return _ivec(_sp.full(arg), n, pos, grow)
     a = _arr(arg)
     if a.dtype.kind == "c":
         raise _err("Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
@@ -1620,6 +1648,8 @@ def index(obj, args):
         pos, out = _positions(obj.shape, args)
         items = [cp(obj.a[int(k)]) for k in pos.reshape(-1)]
         return obj._like(items, out)
+    if t is Sparse:
+        return _sp.index(obj, args)
     if isinstance(obj, HandleObj):
         pos, out = _positions((1, 1), args)
         return obj if pos.size == 1 else HandleArr([obj] * pos.size, out)
@@ -2241,6 +2271,8 @@ def class_(v):
         return v.a[0]._mclass if v.a else "matlab.graphics.Graphics"
     if t is int:
         return "double"
+    if t is Sparse:
+        return _sp.class_(v)
     if isinstance(v, Undef):
         raise _undefined(v.name)
     return t.__name__
@@ -2776,6 +2808,9 @@ def _blocks(v):
     t = type(v)
     if t is float or t is bool or t is complex or t is np.ndarray:
         h, b = _numeric_blocks(v)
+        return h, b, False
+    if t is Sparse:
+        h, b = _sp.blocks(v)
         return h, b, False
     if t is Char:
         d = _dims(v)
@@ -8358,3 +8393,7 @@ def _handle_blocks(v):
     w = max([len(k) for k in keys] + [0])
     lines = ["    %s: %s" % (k.rjust(w), _brief(v.props[k], False) if v.props[k] is not None else "[]") for k in keys]
     return ["  %s with properties:" % name], ["\n".join(lines)] if lines else []
+
+# ------------------------------------------------------------------ sparse matrices (lib/_matlab_sparse.py)
+
+import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
