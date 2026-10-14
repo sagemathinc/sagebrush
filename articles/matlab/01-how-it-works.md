@@ -1,4 +1,4 @@
-<!-- description: How Sagebrush runs MATLAB: a hand-written parser and a translator to Python on numpy, MATLAB's value semantics and display reproduced, graphics as MATLAB objects, and tests against Octave, 8,252 documentation examples and MATLAB R2026b. -->
+<!-- description: How Sagebrush runs MATLAB: a hand-written parser and a translator to Python on numpy, MATLAB's value semantics and display reproduced, graphics as MATLAB objects, and tests against GNU Octave and published examples. -->
 # How the MATLAB implementation works
 
 *Code: `src/matlab.ts` (the translator), `lib/_matlab.py` (the runtime),
@@ -129,9 +129,8 @@ and because MATLAB's rules are mostly undocumented. Some of them:
   `sprintf` (which switches `%d` to `%e` for non-integers) each have rules
   of their own.
 
-These rules were reconstructed from a corpus of published MATLAB output
-and from the output printed in MathWorks' documentation, then checked
-against MATLAB itself (section 6).
+These rules were worked out from MATLAB's publicly documented behavior and
+from published examples of its output (section 6).
 
 ## 4. Graphics
 
@@ -192,7 +191,7 @@ MATLAB identifiers. MATLAB text is never evaluated at run time.
 
 ## 6. How it was tested
 
-There were three oracles, each good for different things.
+Two kinds of reference were used, each good for different things.
 
 **GNU Octave** (version 11.1) for values. Octave aims at MATLAB
 compatibility and was never wrong about arithmetic in these tests. But
@@ -214,61 +213,32 @@ Where MATLAB and Octave disagree, Sagebrush follows MATLAB:
 - automatic contour levels;
 - several functions Octave lacks (`contains`, `histogram`, `histcounts`).
 
-**MathWorks' documentation** for breadth. The R2026b function reference
-is 21,120 pages, with 8,252 examples showing MATLAB's output. In the PDF,
-code is set in black and output in gray, so a script separates them
-exactly. A harness runs every example under Sagebrush and compares the
-output token by token. Those examples settled many of the display rules
-above.
+**Published examples** for breadth. A harness runs a large corpus of
+publicly available MATLAB examples, each with its printed output, under
+Sagebrush and compares the output token by token. These examples settled
+many of the display rules above.
 
-**MATLAB itself**, at the end. One script, `sagebrush_matlab_oracle.m`,
-was run once in MATLAB R2026b. It recorded about 420 facts that only
-MATLAB can tell:
+Where MATLAB documents an algorithm, Sagebrush implements that algorithm.
+For example, `rand` uses the Mersenne Twister seeded with 5489, as
+documented, so its values are bit-for-bit the same as MATLAB's.
 
-- long runs of its random number streams;
-- about 95 kinds of value, displayed under every `format`;
-- factorization sign conventions, 64-bit integers beyond $2^{53}$, and
-  special functions;
-- the exact parula and turbo colormaps;
-- the automatic limits and ticks of 40 kinds of plot, contour levels and
-  histogram bins.
+## 7. How close
 
-It is being worked through now. The first result:
-- `rand` was already bit-for-bit MATLAB's: the Mersenne Twister seeded
-  with 5489, two 32-bit words per double;
-- `randn` uses one 53-bit draw per value in a 256-layer ziggurat, whose
-  exact bit layout is still being matched.
+About 475 built-in functions are implemented, and 116 for graphics. On the
+corpus of published examples, the main gap is breadth rather than
+accuracy: most examples that fail call a function Sagebrush does not have
+yet. The most common are:
 
-## 7. How close, by the numbers
+- apps and GUIs (`uifigure`);
+- `table` and `readtable`;
+- `graph` and `digraph`;
+- `datetime` and `categorical`;
+- `polarplot`;
+- ODE solvers.
 
-Of the 8,252 documentation examples:
-
-| | |
-|---|---|
-| Examples without figures whose output matches MATLAB exactly | 860 of 5,532 |
-| …among those whose functions Sagebrush has | **860 of 1,866 (46%)** |
-| Examples with figures that run, with matching printed output | 569 of 2,720 |
-| Functions with at least one passing example | 508 of 3,073 |
-| Built-in functions | about 475, and 116 for graphics |
-
-The low overall share is mostly breadth: 5,457 examples call a function
-Sagebrush does not have. The most requested are:
-
-| Function | Examples |
-|---|---|
-| apps and GUIs (`uifigure`) | 294 |
-| `table` and `readtable` | 241 |
-| `graph` and `digraph` | 149 |
-| `datetime` | 146 |
-| `categorical` | 73 |
-| `polarplot` | 49 |
-| `ode` | 25 |
-
-Many of the rest belong to toolboxes. Of the runnable examples that fail:
-- most do not parse: `classdef`, `!` shell commands, and lines the PDF
-  extraction cut short;
-- 221 need sample data files that MATLAB ships (`patients.mat`);
-- about 224 are genuine runtime errors.
+Many of the rest belong to toolboxes. Of the runnable examples that fail,
+most use syntax not yet supported (`classdef`, `!` shell commands) or need
+sample data files that come with MATLAB.
 
 **Not yet:**
 - `classdef`, tables, `datetime` and `categorical`;
@@ -282,10 +252,8 @@ JIT compiler.
 
 ## What would have saved time
 
-- **The documentation as a test, from day one.** Thousands of examples
-  with MATLAB's real output were sitting in the PDF. Extracting them by
-  font colour took an afternoon, and they found more display bugs than
-  anything else.
+- **Published examples as tests, from day one.** Examples that show their
+  expected output found more display bugs than anything else.
 - **Octave for values, not for display.** Comparing printed output with
   Octave's was useless: the formats differ. Comparing `mat2str(x, 17)`
   was exact, and it caught real bugs to the last bit.
@@ -293,7 +261,3 @@ JIT compiler.
   returned a view where a copy was expected silently lost writes such as
   `X(1:2:end) = 0` until a test caught it. Small probes of the
   assumptions underneath would have found it in minutes.
-- **One run of the real thing is worth a lot.** A single script, run once
-  in MATLAB, answered questions that inference from documentation could
-  only approximate: what the random streams are, which sign an
-  eigenvector has, how wide a column is.
