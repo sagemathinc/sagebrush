@@ -194,6 +194,9 @@ fn residue_estimate(split: &[(u64, Vec<(u32, u32)>)], x: u64) -> f64 {
 /// (continued fractions, with a tolerance from the error), and the basis
 /// replaced by that of the lattice they generate (HNF).  None if an
 /// identification fails (precision too low) or the rank stays below r.
+/// The error is true when every vector was used and the rank stayed below
+/// r (more relations are needed; more precision rarely helps), false when
+/// an identification failed.
 /// Is v (approximately) an integer combination of the rows of `basis`, by
 /// coordinates from the f64 inverse?  The rounded combination is checked
 /// exactly: the residual must be within the error, as the f64 coordinates
@@ -213,7 +216,7 @@ fn in_lattice_f64(basis: &ZMat, inv: &[Vec<f64>], v: &[BigInt], err: &BigInt, pr
     })
 }
 
-fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option<(ZMat, BigInt)> {
+fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Result<(ZMat, BigInt), bool> {
     let p = prec as usize;
     let small = err * 64;
     let uld = std::env::var("QCL_UL").is_ok();
@@ -249,7 +252,7 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
         }
         let Some(c) = solve_rows(&basis, v) else {
             if uld { eprintln!("      UL: solve_rows failed (k = {})", k); }
-            return None;
+            return Err(false);
         };
         // identify each c_j: first convergent within the tolerance
         let bf: Vec<Vec<f64>> = basis.iter().map(|row| row.iter().map(|x| to_f64(x, prec)).collect()).collect();
@@ -264,7 +267,7 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
                 Some(q) => rats.push(q),
                 None => {
                     if uld { eprintln!("      UL: identify failed: c ~ {:.3e}, tol {:.3e}", cj.to_f64().unwrap_or(f64::NAN), tol); }
-                    return None;
+                    return Err(false);
                 }
             }
         }
@@ -278,7 +281,7 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
         let h = hnf(&gens);
         if h.len() != k {
             if uld { eprintln!("      UL: hnf rank {} != {}", h.len(), k); }
-            return None;
+            return Err(false);
         }
         // new basis = (H B) / D
         basis = h.iter().map(|hrow| {
@@ -292,11 +295,11 @@ fn unit_lattice(vs: &[Vec<BigInt>], r: usize, err: &BigInt, prec: u32) -> Option
     }
     if basis.len() < r {
         if uld { eprintln!("      UL: rank {} < {} after {} vectors", basis.len(), r, vs.len()); }
-        return None;
+        return Err(true);
     }
     let det = crate::linalg::det(&basis).abs();
     let _ = p;
-    Some((basis, det))
+    Ok((basis, det))
 }
 
 /// The inverse of a square fixed-point matrix in f64 (None if not finite:
@@ -1014,6 +1017,7 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
     let mut lattice: Option<(BigInt, Vec<BigInt>)> = None;
     let mut last_r: Option<f64> = None;
     let mut cert_tries = 0;
+    let mut rank_short = 0u32;
     for _ in 0..12 {
         sagebrush_interrupt::check();
         let extras: Vec<usize> = if c == 0 || others.is_empty() { vec![] } else { (0..n_extra.min(others.len())).map(|t| others[t * 7919 % others.len()]).collect() };
@@ -1042,7 +1046,8 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
         let lambdas = unit_logs(fld, rels, elems, nfb, core_rows, sel, &det, &ys, &extras, r, prec, cache)?;
         let err = BigInt::one() << err_bits as usize;
         let res = unit_lattice(&lambdas, r, &err, prec);
-        let verified = res.as_ref().map(|(basis, cov)| {
+        rank_short += (res == Err(true)) as u32;
+        let verified = res.as_ref().ok().map(|(basis, cov)| {
             let reg = to_f64(&(cov >> (prec as usize * (r - 1))), prec);
             let inv = inverse_f64(basis, prec);
             let ok = reg > 0.2 && lambdas.iter().all(|v| {
@@ -1078,6 +1083,12 @@ fn try_units(fld: &Field, rels: &[Relation], elems: &[Vec<BigInt>], nfb: usize, 
                 // rank below r (need more units) or identification failed
                 if lambdas.len() < 4 * r + 8 {
                     n_extra *= 2;
+                } else if rank_short >= 2 {
+                    // many units of rank below r twice: the relations
+                    // lack units, which the next round's relations bring
+                    // (more precision did not: the cubic of discriminant
+                    // 923277 spent 20 s reaching 12304 bits)
+                    break;
                 }
                 prec = prec * 3 / 2;
                 continue;
