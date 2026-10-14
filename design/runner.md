@@ -33,7 +33,7 @@ The runner moves the interpreter somewhere with **no storage, no page and no net
 
 **Where it is used:**
 - **Always** on the shared-collection page (someone else's code), with no fallback.
-- **By default** on the notebook page and on boards, where the page is cross-origin isolated and not the desktop app. There, if the frame doesn't answer within a few seconds, a plain worker is used instead. Offline, a service worker doesn't serve a sandboxed frame. `?runner=0` turns the runner off.
+- **By default** on the notebook page and on boards, where the page is cross-origin isolated and not the desktop app. There, if the frame doesn't answer within a few seconds, a plain worker is used instead. Offline, a service worker doesn't serve a sandboxed frame. `?runner=0` turns the runner off, on a loopback host only (for tests): on the site, a link could add it to someone else's code, which would then run with the site's origin, its storage and its sign-in cookie.
 
 ## Measured
 

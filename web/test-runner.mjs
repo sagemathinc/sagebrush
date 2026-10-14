@@ -24,8 +24,10 @@ const contexts = [];
 const workers = []; // sessionIds of attached workers
 const frames = []; // and of frames in their own process
 const violations = [];
+let paused = null; // a request held by Fetch interception, and what to do with it
 ws.onmessage = (e) => {
   const m = JSON.parse(e.data);
+  if (m.method === "Fetch.requestPaused") paused?.(m.params);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.executionContextCreated") contexts.push({ ...m.params.context, sessionId: m.sessionId });
   if (m.method === "Target.attachedToTarget") {
@@ -118,6 +120,27 @@ try {
   await sleep(500);
   ok(inWorker.precompiled, "the precompiled library reached the worker (checked by its SHA-256 without crypto.subtle: the runner's worker is not a secure context)");
   ok(violations.length > 0 && violations.some((v) => /example\.com\/beacon/.test(v)), `the attempts were blocked by the runner's policy, the beacon too (${violations.length} CSP reports)`);
+
+  // A runner that answers but whose worker never starts (as in WebKit, where
+  // the page doesn't use it now): the notebook page falls back to a plain
+  // worker, and code runs, rather than waiting forever
+  if (!process.env.NO_RUNNER) {
+    const stuck = `<!doctype html><script>addEventListener("message", (e) => { if (e.data && e.data.sagebrushRunner === 1) e.ports[0].postMessage({ runnerReady: true }); });</script>`;
+    paused = (p) => {
+      if (!/\/runner\/(index\.html)?(\?.*)?$/.test(p.request.url)) return send("Fetch.continueRequest", { requestId: p.requestId });
+      const headers = [["content-type", "text/html; charset=utf-8"], ["cross-origin-embedder-policy", "require-corp"], ["cross-origin-resource-policy", "cross-origin"]].map(([name, value]) => ({ name, value }));
+      return send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200, responseHeaders: headers, body: Buffer.from(stuck).toString("base64") });
+    };
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*runner*", requestStage: "Request" }] });
+    await send("Page.navigate", { url: new URL("./", base).href });
+    await sleep(500);
+    await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000).catch(() => {});
+    const t = Date.now();
+    const out = (await run("6 * 7").catch((e) => e.message)).trim();
+    ok(out === "42", `a runner whose worker doesn't start: the code runs in a plain worker instead (${out}, after ${((Date.now() - t) / 1000).toFixed(1)} s)`);
+    await send("Fetch.disable");
+    paused = null;
+  }
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

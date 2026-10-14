@@ -22,7 +22,10 @@ createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`);
   const request = new Request(url, { headers: req.headers });
   let r = await asset(url.pathname);
+  // (every static file is cross-origin isolated on the site, by web/_headers;
+  // the atlas's own pages must say so themselves, as there)
+  const isolated = r.status === 404 ? {} : { "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp" };
   if (r.status === 404) r = (await handleAtlas(request, asset)) ?? r;
-  res.writeHead(r.status, Object.fromEntries(r.headers));
+  res.writeHead(r.status, { ...isolated, ...Object.fromEntries(r.headers) });
   res.end(Buffer.from(await r.arrayBuffer()));
 }).listen(port, () => console.log(`http://localhost:${port}/atlas/`));

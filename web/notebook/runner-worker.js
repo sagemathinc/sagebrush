@@ -76,9 +76,18 @@ export class RunnerWorker {
     this.interruptible = false;
     this.closed = false;
     this.inner = null;
+    // (whether the interpreter has said anything: until then, what was sent
+    // is kept in the queue too, for a fallback to be given)
+    this.alive = false;
+    this.keep = !!fallback;
+    this.watchdog = null;
     const giveUp = () => {
-      if (this.port || this.closed || this.inner || !fallback) return;
+      if (this.alive || this.closed || this.inner || !fallback) return;
       console.warn("sagebrush: the runner did not start; Python runs in a plain worker");
+      clearTimeout(this.timer);
+      clearTimeout(this.watchdog);
+      this.port?.close();
+      this.port = null;
       this.frame.remove();
       const w = (this.inner = fallback());
       w.onmessage = (e) => this.onmessage?.(e);
@@ -87,6 +96,11 @@ export class RunnerWorker {
       this.queue = [];
     };
     this.timer = fallback ? setTimeout(giveUp, 10000) : null;
+    // a frame that answered but whose interpreter says nothing once it has
+    // something to do (a browser where the worker can't start in it: WebKit)
+    this.watch = () => {
+      if (fallback && !this.alive && !this.watchdog) this.watchdog = setTimeout(giveUp, 8000);
+    };
     // what the interpreter may ask this page to fetch: its own files under
     // base, and the files it was told to mount (by URL); in files mode,
     // nothing: it has its files already, and this page fetches nothing for
@@ -103,8 +117,16 @@ export class RunnerWorker {
         clearTimeout(this.timer);
         this.port = ch.port1;
         for (const m of this.queue) this.port.postMessage(m);
-        this.queue = [];
+        if (!fallback) this.queue = [];
+        else if (this.queue.length) this.watch();
         return;
+      }
+      // (an error before the interpreter said anything: it didn't start)
+      if (typeof d.runnerError === "string" && !this.alive && fallback) return giveUp();
+      if (!this.alive) {
+        this.alive = true;
+        clearTimeout(this.watchdog);
+        this.queue = [];
       }
       if (typeof d.runnerFetch === "number") return void this.fetchFor(d.runnerFetch, d.url);
       if (typeof d.runnerError === "string") return this.onerror?.({ message: d.runnerError });
@@ -161,8 +183,13 @@ export class RunnerWorker {
     if (this.inner) return this.inner.postMessage(m);
     // (a shared collection's files: the interpreter may ask for these)
     if (m && Array.isArray(m.mount)) for (const [, r] of m.mount) if (r && typeof r.url === "string") this.mounted.add(new URL(r.url).href);
-    if (this.port) this.port.postMessage(m);
-    else this.queue.push(m);
+    if (!this.port) return void this.queue.push(m);
+    this.port.postMessage(m);
+    if (!this.alive && this.keep) {
+      // (kept for a fallback, until the interpreter answers)
+      this.queue.push(m);
+      this.watch();
+    }
   }
   /** Stop the run with this id (KeyboardInterrupt), if the frame has the flag. */
   get interrupt() {
@@ -172,6 +199,7 @@ export class RunnerWorker {
   terminate() {
     this.closed = true;
     clearTimeout(this.timer);
+    clearTimeout(this.watchdog);
     this.inner?.terminate();
     this.port?.close();
     this.frame.remove();
