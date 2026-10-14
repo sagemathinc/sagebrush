@@ -176,8 +176,10 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
   - concatenation takes the leftmost integer class, then char, then single;
   - `sum` and `prod` of integers are double unless `'native'` is given (as
     MATLAB's documentation says).
-- **`colon`** computes `a:d:b` as MATLAB does: the second half of the
-  elements is counted back from the end point. **`linspace`** uses MATLAB's
+- **`colon`** computes `a:d:b` with the second half of the elements
+  counted back from the end point, consistent with MATLAB's observed
+  output (`0:0.1:0.5` holds exactly 0.3); its tolerance and middle element
+  are Sagebrush's and need not be MATLAB's. **`linspace`** uses MATLAB's
   formula. **`rand`** gives MATLAB's numbers: the Mersenne twister seeded
   with 5489, as `rng default` does, and so do `randi` and `randperm(n)`.
   (`sprand` and `sprandn` draw their places with replacement and keep each

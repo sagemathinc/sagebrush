@@ -469,3 +469,10 @@ test("histcounts' automatic edges follow Sagebrush's own stated rules (Scott's w
     "[-3.5 -2.5 -1.5 -0.5 0.5 1.5 2.5 3.5 4.5 5.5 6.5 7.5]"
   ]);
 });
+
+test("colon counts a range's second half back from its end, as MATLAB's output shows: (0:0.1:0.5)(4) is exactly 0.3", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c",
+    "x = 0:0.1:0.5; fprintf('%d %d %d\\n', x(4) == 0.3, x(end) == 0.5, numel(x));"], { encoding: "utf8" });
+  assert.equal(out.trim(), "1 1 6");
+});
