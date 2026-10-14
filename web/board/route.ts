@@ -84,8 +84,10 @@ class Used {
       else if (x0 === x1) this.put(this.v, x0, Math.min(y0, y1), Math.max(y0, y1));
     }
   }
-  overlap(horizontal: boolean, at: number, p: number, q: number): number {
-    const list = (horizontal ? this.h : this.v).get(Math.round(at));
+  /** The segments on one line (looked up once per line, by a search). */
+  line(horizontal: boolean, at: number): number[] | undefined { return (horizontal ? this.h : this.v).get(Math.round(at)); }
+  /** How much of p..q the segments `list` (one line's) cover. */
+  static along(list: number[] | undefined, p: number, q: number): number {
     if (!list) return 0;
     const lo = p < q ? p : q, hi = p < q ? q : p;
     let o = 0;
@@ -114,8 +116,11 @@ class Heap {
     }
     a[n] = i; b[n] = k;
   }
-  pop(): [number, number] {
-    const a = this.idx, b = this.key, top: [number, number] = [a[0], b[0]];
+  /** The top's key, as pop() leaves it (no pair made per pop). */
+  topKey = 0;
+  pop(): number {
+    const a = this.idx, b = this.key, top = a[0];
+    this.topKey = b[0];
     const li = a.pop()!, lk = b.pop()!;
     if (a.length) {
       let n = 0;
@@ -221,6 +226,7 @@ function routeOne(a: Rect, b: Rect, given: Rect[], region: Rect, used: Used, pen
   const G = (st: number) => (seen[st] === stamp ? g[st] : Infinity);
   const goals = new Map<number, typeof stubB[number]>();
   for (const t of stubB) { const i = xi.get(t.x), j = yi.get(t.y); if (i !== undefined && j !== undefined) goals.set(j * nx + i, t); }
+  const goalKs = [...goals.keys()], goalVs = [...goals.values()];
   const bx = stubB.map((t) => t.x), by = stubB.map((t) => t.y), bin = stubB.map((t) => (t.s + 2) % 4);
   // the distance to b's nearest stub, and the bends still needed to arrive
   // heading into b (after Excalidraw's estimateSegmentCount): none if it is
@@ -237,6 +243,8 @@ function routeOne(a: Rect, b: Rect, given: Rect[], region: Rect, used: Used, pen
     }
     return m;
   };
+  // (the earlier routes' segments along each grid line, looked up once)
+  const rowUsed = ys.map((y) => used.line(true, y)), colUsed = xs.map((x) => used.line(false, x));
   const heap = new Heap();
   for (const s of stubA) {
     const i = xi.get(s.x), j = yi.get(s.y);
@@ -248,14 +256,16 @@ function routeOne(a: Rect, b: Rect, given: Rect[], region: Rect, used: Used, pen
   let best = Infinity, bestState = -1, bestGoal: typeof stubB[number] | null = null;
   let pops = 0;
   while (heap.size) {
-    const [st, f] = heap.pop();
+    const st = heap.pop(), f = heap.topKey;
     if (f >= best) break;
     // (a bound on the work: the best found by then, or none)
     if (++pops > 60000) break;
     if (S.done[st] === stamp) continue;
     S.done[st] = stamp;
     const d = st & 3, k = st >> 2, i = k % nx, j = (k / nx) | 0;
-    const goal = goals.get(k);
+    // (b's stubs: at most four, compared rather than looked up)
+    let goal: typeof stubB[number] | undefined;
+    for (let q = 0; q < goalKs.length; q++) if (goalKs[q] === k) { goal = goalVs[q]; break; }
     if (goal) {
       // arriving at b's stub heading into b: straight in; else a bend
       const into = (goal.s + 2) % 4;
@@ -268,7 +278,7 @@ function routeOne(a: Rect, b: Rect, given: Rect[], region: Rect, used: Used, pen
       if (ni < 0 || nj < 0 || ni >= nx || nj >= ny || !free(ni, nj) || segBlocked(i, j, nd)) continue;
       const len = Math.abs(xs[ni] - xs[i]) + Math.abs(ys[nj] - ys[j]);
       const horizontal = nd === 1 || nd === 3;
-      const share = horizontal ? used.overlap(true, ys[j], xs[i], xs[ni]) : used.overlap(false, xs[i], ys[j], ys[nj]);
+      const share = horizontal ? Used.along(rowUsed[j], xs[i], xs[ni]) : Used.along(colUsed[i], ys[j], ys[nj]);
       const c = g[st] + len + (nd !== d ? BEND : 0) + SHARE * share;
       const ns = (nj * nx + ni) * 4 + nd;
       if (c < G(ns)) {
