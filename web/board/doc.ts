@@ -242,6 +242,15 @@ export function formatError(d: any): string | null {
   if (d?.format !== undefined && d.format !== FORMAT) return `not a Sagebrush board: its format is "${String(d.format).slice(0, 40)}"`;
   if (d?.version !== undefined && !(Number.isInteger(d.version) && d.version >= 1)) return "not a Sagebrush board: its version is not a number";
   if (d?.version > VERSION) return `this board is in version ${d.version} of the format, from a later Sagebrush; this page reads version ${VERSION}: reload it, or update the app`;
+  // (on a page, an id is one item's: an edge names it)
+  const pages: any[] = Array.isArray(d?.pages) ? d.pages : [d];
+  for (let i = 0; i < pages.length; i++) {
+    const seen = new Set<string>();
+    let twice: string | null = null;
+    const walk = (ns: unknown) => { if (Array.isArray(ns)) for (const n of ns) { if (!n || typeof n !== "object" || n.id == null || twice) continue; const id = String(n.id); if (seen.has(id)) twice = id; seen.add(id); walk(n.children); } };
+    walk(pages[i]?.nodes);
+    if (twice !== null) return `not a board this page can show: two items${pages.length > 1 ? ` on page ${i + 1}` : ""} have the id "${String(twice).slice(0, 40)}"`;
+  }
   return null;
 }
 
