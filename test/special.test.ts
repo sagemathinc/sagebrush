@@ -52,6 +52,7 @@ const TOL: Record<string, [number, number, number?]> = {
   faddeeva: [4e-15, 1e-300], erf: [6e-15, 1e-300], erfc: [8e-15, 1e-300], erfi: [1.5e-13, 1e-300],
   erfcx: [6e-14, 1e-300], erfinv: [1e-15, 1e-300], erfcinv: [1e-15, 1e-300],
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
+  polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
 };
 
 test("lib/_special.py agrees with mpmath within each function's stated error", () => {
@@ -96,7 +97,9 @@ for f, a in [(S.loggamma, (0,)), (S.loggamma, (-3.0,)), (S.gamma, (complex(-2, 0
              (S.exp_integral_e1, (0.0,)), (S.exp_integral_ei, (0.0,)),
              (S.hurwitz_zeta, (-1.5, 0.5)), (S.hurwitz_zeta, (2.0, -0.5)), (S.zeta, (complex(0.5, 2e5),)),
              (S.polygamma, (101, 2.0)), (S.polygamma, (1.5, 2.0)), (S.beta, (1j, 2.0)), (S.erfinv, (0.5j,)),
-             (S.lambert_w, (0.0, 1)), (S.lambert_w, (complex(0, 0), -1)), (S.lambert_w, (2.0, 0.5))]:
+             (S.lambert_w, (0.0, 1)), (S.lambert_w, (complex(0, 0), -1)), (S.lambert_w, (2.0, 0.5)),
+             (S.polylog, (1, 1.0)), (S.polylog, (-2, complex(1, 0))), (S.polylog, (2.5, 0.3)), (S.polylog, (-21, 0.3)),
+             (S.polylog, (-20, complex(1.0000000000000002, 1e-300))), (S.polylog, (-20, 0.999999999999999))]:
     print(kind(f, *a))
 print(S.hurwitz_zeta(-3.0, 0.25), S.beta(-3.0, 2.0), S.beta(-0.5, -0.5), S.loggamma(complex(-2.5, -0.0)).imag)
 print(S.erfinv(2.0), S.erfinv(-1.0), S.erfcinv(0.0), S.exp_integral_e1(-2.0).imag)
@@ -120,6 +123,8 @@ print(" ".join(type(v).__name__ for v in (S.zeta(2.5), S.zeta(-1.5), S.zeta(0.3)
 for z, k in [(-1.0, 0), (complex(-1, -0.0), 0), (-0.2, -1), (complex(-0.2, -0.0), -1), (complex(-0.2, -0.0), 1), (-0.2, 1), (1.0, 0), (0.0, 0)]:
     print(repr(S.lambert_w(z, k)))
 print(repr(S.lambert_w(nan)), kind(S.lambert_w, complex(inf, 1)))
+# (polylog on its cut (1, inf), from above and from below, and real below 1)
+print(repr(S.polylog(2, 50.0)), repr(S.polylog(2, complex(50, -0.0))), repr(S.dilog(-1.0)), repr(S.polylog(2, 1.0)))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -132,6 +137,11 @@ print(repr(S.lambert_w(nan)), kind(S.lambert_w, complex(inf, 1)))
     "NotCovered: beta: Sagebrush covers real arguments",
     "NotCovered: erfinv: Sagebrush covers real arguments",
     "PoleError", "PoleError", "ValueError: lambert_w: k must be an integer",
+    "PoleError", "PoleError", "NotCovered: polylog: Sagebrush covers integer orders s",
+    "NotCovered: polylog: Sagebrush covers integer orders -20 <= s <= 100",
+    // (next to the pole the true values, about 1.3e347 and 2.5e333, exceed the double range)
+    "NotCovered: polylog: Sagebrush covers values within the double range (|Li_s(z)| is too large here)",
+    "NotCovered: polylog: Sagebrush covers values within the double range (|Li_s(z)| is too large here)",
     // (zeta(-3, 1/4) = -B_4(1/4)/4 exactly; B(-3, 2) = 1/((-3)(-2)); Gamma(-1) in the denominator)
     "-0.0004557291666666667 0.16666666666666666 0.0 9.42477796076938",
     "nan -inf inf -3.141592653589793",
@@ -148,5 +158,7 @@ print(repr(S.lambert_w(nan)), kind(S.lambert_w, complex(inf, 1)))
     "-2.542641357773526", "(-3.722320484923165-7.387230210574593j)", "(-2.542641357773526-0j)",
     "(-3.722320484923165+7.387230210574593j)", "0.5671432904097838", "0.0",
     "nan NotCovered: lambert_w: Sagebrush covers finite arguments (and +inf for k = 0)",
+    // (mpmath: Li_2(50 + 0i) = -4.382194762821773 + 12.289982734527328i; -pi^2/12; pi^2/6)
+    "(-4.382194762821774+12.289982734527328j) (-4.382194762821774-12.289982734527328j) -0.8224670334241129 1.6449340668482264",
   ]);
 });
