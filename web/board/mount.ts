@@ -74,6 +74,10 @@ export interface BoardStore {
    * beside it; `set`: so it is now.  Its notes' remote pictures show at
    * once; else each when clicked (William, SEC-89C-3). */
   writtenHere?(set?: boolean): boolean;
+  /** The document as it is elsewhere, when it changes there (another person;
+   * or newer than the copy load() gave at once: cached.ts), with a notice
+   * for the caption (a merge's); shown in place.  Returns: stop. */
+  subscribe?(f: (doc: BoardDoc, notice?: string) => void): () => void;
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
@@ -538,7 +542,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (a document the host or an agent loads meanwhile wins: the store's,
   // arriving later, is not shown over it)
   const opening = loads;
-  host.store?.load().then((r) => {
+  const opened = host.store?.load().then((r) => {
     if (!r || loads !== opening) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
@@ -558,6 +562,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
+  // a document from elsewhere (the store's: another person's change, or the
+  // remote's, newer than the copy shown first): shown in place, the same
+  // document (its camera, outputs and history kept), once the first is; the
+  // undo steps before it forgotten, so that an undo cannot write the older
+  // document back over it
+  const unsubscribe = host.store?.subscribe?.((d, note) => {
+    (opened ?? Promise.resolve()).then(async () => {
+      if (destroyed || !doc) return;
+      closeTimeTravel(false);
+      const prev = doc;
+      editor.forget();
+      if (!(await show(d))) return;
+      remember(prev);
+      if (note) say(note);
+    }).catch(fail);
+  });
+  if (unsubscribe) offs.push(unsubscribe);
   // The board's title: in Edit, a click renames it where it is (Enter, or
   // leaving, keeps the name, as an edit; Esc does not)
   const titleEl = $("title");
