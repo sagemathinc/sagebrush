@@ -13,7 +13,9 @@ and runs on a runtime library with MATLAB's semantics:
   folder).
 - More built-ins, registered in the same table:
   - **lib/_matlab_numeric.py**: special matrices, matrix functions,
-    polynomials and interpolation;
+    polynomials and interpolation, numgrid and delsq (numgrid's 'S' and
+    'L' only: the other regions are described only in words, which do not
+    fix their shapes on the grid, so they are refused);
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics);
