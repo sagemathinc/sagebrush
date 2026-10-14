@@ -38,6 +38,42 @@ class MatError(Exception):
     pass
 
 
+# A .mat file is untrusted input: the most decompressed data one file may
+# expand to (a small compressed element can expand without bound), and the
+# most nonzeros a sparse matrix in it may reserve.
+MAX_INFLATED = 1 << 28
+MAX_NZMAX = 1 << 27
+try:
+    import os as _os
+    MAX_INFLATED = int(_os.environ.get("SAGEBRUSH_MAT_MAX_INFLATED", MAX_INFLATED))  # (lower for tests)
+except Exception:
+    pass
+
+
+def _inflate(payload, budget):
+    """a miCOMPRESSED element's data: one complete zlib stream, nothing after it,
+    at most budget bytes"""
+    data = bytes(payload)
+    try:
+        if hasattr(zlib, "_decompress_limited"):
+            out, end = zlib._decompress_limited(data, budget)
+        else:  # (CPython)
+            d = zlib.decompressobj()
+            out = d.decompress(data, budget + 1)
+            if len(out) > budget:
+                raise MatError("the file's compressed data expands to more than %d bytes" % MAX_INFLATED)
+            if not d.eof:
+                raise MatError("a compressed variable is truncated")
+            end = len(data) - len(d.unused_data)
+    except zlib.error as e:
+        if "more than" in str(e):
+            raise MatError("the file's compressed data expands to more than %d bytes" % MAX_INFLATED)
+        raise MatError("a compressed variable is corrupt (%s)" % e)
+    if end != len(data):
+        raise MatError("unexpected data after a compressed variable")
+    return out
+
+
 # ------------------------------------------------------------------ reading
 
 
@@ -52,15 +88,21 @@ class _Reader:
 
     def element(self):
         """(type, payload bytes) of the next data element"""
+        if self.end_ - self.p < 8:
+            raise MatError("the file ends inside a data element")
         t, n = struct.unpack_from(self.e + "II", self.d, self.p)
         if t >> 16:
             # small data element: the type in the low half, the size in the high half
             n = t >> 16
             t &= 0xFFFF
+            if n > 4:
+                raise MatError("a malformed small data element")
             data = self.d[self.p + 4:self.p + 4 + n]
             self.p += 8
             return t, data
         start = self.p + 8
+        if n > self.end_ - start:
+            raise MatError("a data element runs past the end of the file")
         data = self.d[start:start + n]
         self.p = start + n + ((-n) % 8 if t != miCOMPRESSED else 0)
         return t, data
@@ -179,32 +221,67 @@ def _matrix(payload, e):
             elems.append(d)
         return name, _m.Struct(elems, dims, names), is_global
     if cls == 5:  # sparse: ir (nzmax row indices), jc (column starts), pr and pi (the nonzeros)
-        import _matlab_sparse as sp
-        ir = jc = np.zeros(0, dtype=np.int64)
-        if not r.done():
-            t, raw = r.element()
-            ir = np.array(_numbers(t, raw, e), dtype=np.int64)
-        if not r.done():
-            t, raw = r.element()
-            jc = np.array(_numbers(t, raw, e), dtype=np.int64)
-        if jc.size != dims[1] + 1:
-            jc = np.zeros(dims[1] + 1, dtype=np.int64)
-        nz = int(jc[-1]) if jc.size else 0
-        vals = np.zeros(0)
-        if not r.done():
-            t, raw = r.element()
-            vals = np.array(_numbers(t, raw, e)[:nz], dtype=np.float64)
-        if is_complex and not r.done():
-            t, raw = r.element()
-            im = np.array(_numbers(t, raw, e)[:nz], dtype=np.float64)
-            vals = _m._cplx(vals, im)
-        if is_logical:
-            vals = vals != 0
-        rows, cols = dims[0], dims[1]
-        S = sp.make(rows, cols, ir[:nz], np.repeat(np.arange(cols, dtype=np.int64), np.diff(jc)), vals)
-        S.cap = int(w2)
-        return name, S, is_global
+        return (name,) + (_sparse(r, e, dims, w2, is_complex, is_logical),) + (is_global,)
     raise MatError("variable '%s' is an object (class %d), which Sagebrush cannot load" % (name, cls))
+
+
+def _sparse(r, e, dims, nzmax, is_complex, is_logical):
+    """a sparse matrix's subelements, every invariant checked before anything
+    is allocated from them (they are untrusted)"""
+    import _matlab_sparse as sp
+    bad = lambda what: MatError("a malformed sparse matrix: %s" % what)
+    if len(dims) != 2 or dims[0] < 0 or dims[1] < 0 or dims[0] >= 2 ** 31 or dims[1] >= 2 ** 31:
+        raise bad("its size")
+    m, n = dims
+    parts = []
+    for _ in range(4 if is_complex else 3):
+        if r.done():
+            break
+        parts.append(r.element())
+    if len(parts) < 3 or (is_complex and len(parts) < 4):
+        raise bad("missing data")
+    (ti, ri), (tj, rj), (tr, rr) = parts[:3]
+    if ti not in (miINT32, miUINT32, miINT16, miUINT16, miINT8, miUINT8) or tj not in (miINT32, miUINT32, miINT16, miUINT16, miINT8, miUINT8):
+        raise bad("its index types")
+    jc = np.array(_numbers(tj, rj, e), dtype=np.int64)  # (as long as the data that holds it)
+    if jc.size != n + 1:
+        raise bad("its column starts")
+    if jc.size and (jc[0] != 0 or np.any(np.diff(jc) < 0)):
+        raise bad("its column starts")
+    nz = int(jc[-1])
+    ir = np.array(_numbers(ti, ri, e), dtype=np.int64)
+    if nz > ir.size:
+        raise bad("more nonzeros than row indices")
+    ir = ir[:nz]
+    if nz and (np.any(ir < 0) or np.any(ir >= m)):
+        raise bad("a row index out of range")
+    cols = np.repeat(np.arange(n, dtype=np.int64), np.diff(jc))
+    if nz > 1 and np.any((cols[1:] == cols[:-1]) & (ir[1:] <= ir[:-1])):
+        raise bad("row indices out of order")
+    if tr not in _MI_FMT:
+        raise bad("its value type")
+    re_ = _numbers(tr, rr, e)
+    if len(re_) < nz:
+        raise bad("fewer values than nonzeros")
+    single = tr == miSINGLE
+    vals = np.array(re_[:nz], dtype=np.float64)
+    if is_complex:
+        tm, rm = parts[3]
+        if tm not in _MI_FMT:
+            raise bad("its value type")
+        im = _numbers(tm, rm, e)
+        if len(im) < nz:
+            raise bad("fewer imaginary parts than nonzeros")
+        vals = _m._cplx(vals, np.array(im[:nz], dtype=np.float64))
+    if is_logical:
+        vals = vals != 0
+    elif single:
+        vals = vals.astype(np.complex64 if is_complex else np.float32)
+    S = sp.make(m, n, ir, cols, vals)
+    if nzmax < nz or nzmax > MAX_NZMAX:
+        nzmax = nz
+    S.cap = int(min(nzmax, max(ir.size, nz)))
+    return S
 
 
 def read(data):
@@ -222,13 +299,17 @@ def read(data):
     r = _Reader(data, 128, len(data))
     r.e = e
     out = []
+    budget = MAX_INFLATED
     while not r.done():
         t, payload = r.element()
         if t == miCOMPRESSED:
-            inner = zlib.decompress(bytes(payload))
+            inner = _inflate(payload, budget)
+            budget -= len(inner)
             ir = _Reader(inner, 0, len(inner))
             ir.e = e
             t, payload = ir.element()
+            if ir.p < len(inner):
+                raise MatError("a compressed variable holds more than one data element")
         if t == miMATRIX:
             out.append(_matrix(payload, e))
     return out
@@ -281,7 +362,7 @@ def _array(name, v):
         return _elem(miMATRIX, body)
     if t is _m.Sparse:
         import _matlab_sparse as sp
-        nzmax = sp.nzmax(v)
+        nzmax = min(sp.nzmax(v), max(MAX_NZMAX, sp.nnz(v)))
         fl = (0x02 if sp.islogical(v) else 0) | (0x08 if v.pr.dtype.kind == "c" else 0)
         body = (_elem(miUINT32, struct.pack("<II", 5 | (fl << 8), nzmax)) + _elem(miINT32, _pack("i", dims))
                 + _elem(miINT8, name.encode("latin1")))

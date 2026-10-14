@@ -256,3 +256,62 @@ test("sparse matrices in .mat files: logical ones saved and loaded, and read as 
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), ["1 1 1 1 7", "[true false true;false false true]", "1 1", "[true false true;false false true]"]);
 });
+
+test(".mat files are untrusted: decompression is bounded, sparse metadata is checked before use", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const zlib = require("node:zlib");
+  const dir = mkdtempSync(join(tmpdir(), "mat-"));
+  const header = Buffer.alloc(128, 32);
+  header.write("MATLAB 5.0 MAT-file", 0);
+  header.writeUInt16LE(0x0100, 124);
+  header.write("IM", 126);
+  const el = (t: number, p: Buffer) => {
+    const pad = (8 - (p.length % 8)) % 8;
+    const b = Buffer.alloc(8 + p.length + pad);
+    b.writeUInt32LE(t, 0);
+    b.writeUInt32LE(p.length, 4);
+    p.copy(b, 8);
+    return b;
+  };
+  const ints = (a: number[]) => { const b = Buffer.alloc(4 * a.length); a.forEach((v, k) => b.writeInt32LE(v, 4 * k)); return b; };
+  const dbls = (a: number[]) => { const b = Buffer.alloc(8 * a.length); a.forEach((v, k) => b.writeDoubleLE(v, 8 * k)); return b; };
+  const sngs = (a: number[]) => { const b = Buffer.alloc(4 * a.length); a.forEach((v, k) => b.writeFloatLE(v, 4 * k)); return b; };
+  const flags = (cls: number, nzmax: number) => { const b = Buffer.alloc(8); b.writeUInt32LE(cls, 0); b.writeUInt32LE(nzmax >>> 0, 4); return b; };
+  const sparse = (m: number, n: number, ir: number[], jc: number[], pr: Buffer, prType = 9, nzmax = ir.length) =>
+    el(14, Buffer.concat([el(6, flags(5, nzmax)), el(5, ints([m, n])), el(1, Buffer.from("S")), el(5, ints(ir)), el(5, ints(jc)), el(prType, pr)]));
+  const file = (name: string, ...els: Buffer[]) => { writeFileSync(join(dir, name), Buffer.concat([header, ...els])); return name; };
+  const compressed = (b: Buffer) => el(15, zlib.deflateSync(b)).subarray(0, 8 + zlib.deflateSync(b).length);
+  const ok = sparse(2, 2, [0, 1], [0, 1, 2], dbls([1, 2]));
+  const files = [
+    file("bomb.mat", compressed(Buffer.alloc(2 * 1048576))),
+    file("junk.mat", compressed(Buffer.alloc(65536))),
+    file("trailing.mat", el(15, Buffer.concat([zlib.deflateSync(ok), Buffer.from("junk")]))),
+    file("row.mat", sparse(1, 1, [5000000], [0, 1], dbls([1]))),
+    file("jc.mat", sparse(1, 1, [0], [0], dbls([1]))),
+    file("nz.mat", sparse(3, 1, [0], [0, 3], dbls([1, 2, 3]))),
+    file("order.mat", sparse(3, 1, [2, 0], [0, 2], dbls([1, 2]))),
+    file("nzmax.mat", sparse(2, 2, [0, 1], [0, 1, 2], dbls([1, 2]), 9, 0xffffffff)),
+    file("short.mat", ok.subarray(0, ok.length - 12)),
+    file("single.mat", sparse(2, 2, [0, 1], [0, 1, 2], sngs([1.25, 2]), 7)),
+    file("fine.mat", compressed(ok)),
+  ];
+  const lines = files.map((f) => `try, S = load('${join(dir, f)}'); x = S.S; fprintf('${f}: %s %d %d %g\\n', class(x), issparse(x), nzmax(x), full(sum(x(:)))); save('${join(dir, "out.mat")}', 'x'); catch e, fprintf('${f}: %s\\n', e.message); end`);
+  writeFileSync(join(dir, "t.m"), lines.join("\n") + "\n");
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")],
+    { encoding: "utf8", timeout: 120000, env: { ...process.env, SAGEBRUSH_MAT_MAX_INFLATED: String(1048576) } });
+  const msg = (f: string) => out.split("\n").find((l: string) => l.startsWith(f + ":"))!.replace(/Unable to read MAT-file \S+: /, "");
+  assert.equal(msg("bomb.mat"), "bomb.mat: the file's compressed data expands to more than 1048576 bytes.");
+  assert.equal(msg("junk.mat"), "junk.mat: a compressed variable holds more than one data element.");
+  assert.equal(msg("trailing.mat"), "trailing.mat: unexpected data after a compressed variable.");
+  assert.equal(msg("row.mat"), "row.mat: a malformed sparse matrix: a row index out of range.");
+  assert.equal(msg("jc.mat"), "jc.mat: a malformed sparse matrix: its column starts.");
+  assert.equal(msg("nz.mat"), "nz.mat: a malformed sparse matrix: more nonzeros than row indices.");
+  assert.equal(msg("order.mat"), "order.mat: a malformed sparse matrix: row indices out of order.");
+  assert.equal(msg("nzmax.mat"), "nzmax.mat: double 1 2 3");
+  assert.equal(msg("short.mat"), "short.mat: a data element runs past the end of the file.");
+  assert.equal(msg("single.mat"), "single.mat: single 1 2 3.25");
+  assert.equal(msg("fine.mat"), "fine.mat: double 1 2 3");
+});

@@ -71,8 +71,8 @@ function fixed(): [Huff, Huff] {
 
 /** Inflate a raw deflate stream starting at `pos`; returns the data and
  *  the position after the final block. */
-function inflateRaw(src: Uint8Array, pos: number): [Uint8Array, number] {
-  let out = new Uint8Array(Math.max(1024, src.length * 4));
+function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] {
+  let out = new Uint8Array(Math.min(Math.max(1024, src.length * 4), limit + 1));
   let op = 0;
   let bitbuf = 0, bitcnt = 0;
   const need = (n: number) => {
@@ -102,6 +102,8 @@ function inflateRaw(src: Uint8Array, pos: number): [Uint8Array, number] {
     return e >> 4;
   };
   const grow = (n: number) => {
+    // (a caller's limit on the output: a small stream can expand without bound)
+    if (op + n > limit) raise(ZlibError, `Error -5 while decompressing data: more than ${limit} bytes`);
     if (op + n <= out.length) return;
     let m = out.length * 2;
     while (m < op + n) m *= 2;
@@ -239,6 +241,17 @@ export function decompress(data: Uint8Array, wbits = 15): Uint8Array {
   return out;
 }
 
+/** A zlib stream's data, at most `limit` bytes of it (else an error), and the
+ *  position after the stream's trailer: for readers of untrusted files. */
+export function decompressLimited(data: Uint8Array, limit: number): [Uint8Array, number] {
+  if (data.length < 2 || ((data[0] << 8) | data[1]) % 31 !== 0 || (data[0] & 15) !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  const [out, end] = inflateRaw(data, 2, limit);
+  if (end + 4 > data.length) raise(ZlibError, TRUNCATED);
+  const a = ((data[end] << 24) | (data[end + 1] << 16) | (data[end + 2] << 8) | data[end + 3]) >>> 0;
+  if (a !== adler32(out)) raise(ZlibError, "Error -3 while decompressing data: incorrect data check");
+  return [out, end + 4];
+}
+
 /** A valid zlib stream of stored (uncompressed) blocks. */
 export function compress(data: Uint8Array): Uint8Array {
   const nblocks = Math.max(1, Math.ceil(data.length / 65535));
@@ -281,6 +294,12 @@ newBuiltinModule("zlib", (m) => {
   // multi-member files, which zlib.decompress stops after the first of)
   fn("_gzip_member", (data: any, start: any = 0) => {
     const [out, end] = gunzipMember(bytesOf(data), Number(start));
+    return tuple([new PyBytes(out), end]);
+  });
+  // (Sagebrush's: decompress with a bound on the output, and the offset
+  // after the stream, so that a reader can refuse what follows it)
+  fn("_decompress_limited", (data: any, limit: any) => {
+    const [out, end] = decompressLimited(bytesOf(data), Number(limit));
     return tuple([new PyBytes(out), end]);
   });
   fn("crc32", (data: any, start: any = 0) => crc32(bytesOf(data), Number(start)));
