@@ -85,6 +85,11 @@ export interface DocInk {
 
 export type DocNode = DocNote | DocGroup | DocInk;
 
+/** A slide's card on its page (board coordinates). */
+export interface SlideRect { x: number; y: number; w: number; h: number }
+/** A page's background: a color; a picture's name in `images`. */
+export interface PageBackground { color?: string; image?: string }
+
 export interface DocEdge {
   from: string;
   to: string;
@@ -111,6 +116,10 @@ export interface BoardPage {
   layout?: DocGroup["layout"];
   columns?: number;
   direction?: DocGroup["direction"];
+  /** a slide: the card (16:9, say) the page is arranged on, which Present shows */
+  slide?: SlideRect;
+  /** the page's background: a color (on the card, or behind the whole board); a picture (on a slide's card) */
+  background?: PageBackground;
   nodes: DocNode[];
   edges?: DocEdge[];
   steps?: DocStep[];
@@ -152,6 +161,10 @@ export interface BoardDoc {
   layout?: DocGroup["layout"];
   columns?: number;
   direction?: DocGroup["direction"];
+  /** a slide: the card (16:9, say) the page is arranged on, which Present shows */
+  slide?: SlideRect;
+  /** the page's background: a color (on the card, or behind the whole board); a picture (on a slide's card) */
+  background?: PageBackground;
   /** (a document with pages has none of its own) */
   nodes?: DocNode[];
   edges?: DocEdge[];
@@ -172,7 +185,7 @@ export function pageOf(d: BoardDoc, i: number): BoardPage {
 export function pageView(d: BoardDoc, i: number): BoardDoc {
   const p = pageOf(d, i);
   if (p === (d as BoardPage)) return d;
-  return { title: d.title, refBase: d.refBase, images: d.images, intro: p.intro, layout: p.layout, columns: p.columns, direction: p.direction, nodes: p.nodes, edges: p.edges, steps: p.steps };
+  return { title: d.title, refBase: d.refBase, images: d.images, intro: p.intro, layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
 }
 
 /** Whether something is a board document. */
@@ -206,6 +219,16 @@ function cleanImages(m: any): Record<string, ImageInfo> | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
+// a slide's card: four finite numbers, a size; a background: a color, a picture's name
+const slideRect = (r: any): SlideRect | undefined => {
+  const x = num(r?.x), y = num(r?.y), w = num(r?.w), h = num(r?.h);
+  return x !== undefined && y !== undefined && w !== undefined && h !== undefined && w > 0 && h > 0 ? { x, y, w, h } : undefined;
+};
+const background = (b: any): PageBackground | undefined => {
+  const color = safeColor(b?.color), image = typeof b?.image === "string" && IMAGE_NAME.test(b.image) ? b.image : undefined;
+  return color || image ? { ...(color ? { color } : {}), ...(image ? { image } : {}) } : undefined;
+};
+
 export function cleanDoc(d: any): BoardDoc {
   const node = (n: any): DocNode | null => {
     if (!n || typeof n !== "object" || n.id == null) return null;
@@ -229,6 +252,7 @@ export function cleanDoc(d: any): BoardDoc {
   };
   const page = (p: any) => strip({
     id: str(p?.id), title: str(p?.title), intro: str(p?.intro), layout: one(p?.layout, LAYOUTS), columns: num(p?.columns), direction: one(p?.direction, DIRS),
+    slide: slideRect(p?.slide), background: background(p?.background),
     nodes: Array.isArray(p?.nodes) ? p.nodes.map(node).filter((n: DocNode | null): n is DocNode => !!n) : undefined,
     edges: Array.isArray(p?.edges) ? p.edges.filter((e: any) => e && e.from != null && e.to != null).map((e: any) => strip({ from: String(e.from), to: String(e.to), label: str(e.label),
       hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
@@ -242,7 +266,7 @@ export function cleanDoc(d: any): BoardDoc {
 
 // A document's keys in a file, in this order: what it is, its settings, its
 // content, and its pictures (data: URLs, possibly large) last.
-const DOC_KEYS = ["format", "version", "title", "mode", "engine", "seed", "refBase", "tools", "intro", "layout", "columns", "direction", "nodes", "edges", "steps", "pages", "images"];
+const DOC_KEYS = ["format", "version", "title", "mode", "engine", "seed", "refBase", "tools", "intro", "layout", "columns", "direction", "slide", "background", "nodes", "edges", "steps", "pages", "images"];
 
 /**
  * A document as its file holds it (foo.board.json): cleaned (cleanDoc), its
@@ -310,8 +334,8 @@ export type MeasuredNote = DocNote & { img?: ImageInfo & { key: string } };
 /** A pen's width, unless a stroke says. */
 export const INK_SIZE = 3;
 
-// a stroke's box: its points, and the pen's size around them
-const inkSize = (n: DocInk): Box => {
+/** A stroke's box: its points, and the pen's size around them. */
+export const inkSize = (n: DocInk): Box => {
   const pad = n.size ?? INK_SIZE;
   let w = 0, h = 0;
   for (let i = 0; i + 2 < n.points.length; i += 3) { w = Math.max(w, n.points[i]); h = Math.max(h, n.points[i + 1]); }

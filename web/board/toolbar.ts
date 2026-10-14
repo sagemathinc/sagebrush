@@ -22,7 +22,7 @@ export interface Tool {
   run?: () => void;
 }
 
-export const DEFAULT_TOOLS = ["note", "code", "image", "group", "connect"];
+export const DEFAULT_TOOLS = ["note", "code", "image", "group", "connect", "draw"];
 const DEFAULT_KEY = "sagebrush-board-tools";
 
 /** The person's default tools for new boards (on a touch screen, with no

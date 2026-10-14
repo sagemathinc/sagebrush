@@ -211,3 +211,19 @@ export function inkBox(outline: ArrayLike<number>): { x0: number; y0: number; x1
   }
   return { x0, y0, x1, y1 };
 }
+
+/** Whether (x, y) is on a stroke: inside its outline, or within `tol` of
+ * its edge (a thin stroke can be picked; the empty middle of a loop is not
+ * the stroke's). */
+export function inkHit(outline: ArrayLike<number>, x: number, y: number, tol: number): boolean {
+  const n = outline.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = outline[i * 2], yi = outline[i * 2 + 1], xj = outline[j * 2], yj = outline[j * 2 + 1];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    const dx = xi - xj, dy = yi - yj, l = dx * dx + dy * dy;
+    const t = l ? Math.max(0, Math.min(1, ((x - xj) * dx + (y - yj) * dy) / l)) : 0;
+    if (Math.hypot(x - xj - t * dx, y - yj - t * dy) <= tol) return true;
+  }
+  return inside;
+}
