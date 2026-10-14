@@ -1151,6 +1151,34 @@ for _k in ("semilogx", "semilogy", "loglog"):
     _FUNCS[_k] = _semilog(_k)
 
 
+@_fn("spy")
+def spy_(nargout, args):
+    """spy(S), spy(S, LineSpec), spy(S, MarkerSize), spy(S, LineSpec, MarkerSize): a marker at
+    each nonzero (its column across, its row down), the limits 0 to n + 1 and 0 to m + 1,
+    equal axes, and the count of nonzeros as the x label"""
+    import _matlab_sparse as sp
+    ax, args = _axes_arg(args)
+    if not args:
+        raise _m._err("Not enough input arguments.")
+    S = sp._as_sparse(args[0]) if type(args[0]) is not _m.Sparse else args[0]
+    spec, size = "b.", None
+    for a in args[1:]:
+        if _m._istext(a):
+            spec = _m._text(a)
+        else:
+            size = _m._scalar(a)
+    rows = (S.ir + 1).astype(np.float64).reshape((1, -1))
+    cols = (sp._cols(S) + 1).astype(np.float64).reshape((1, -1))
+    line = _line_args(ax, [_m._box(cols), _m._box(rows), _m.Char(spec), _m.Char("MarkerSize"), size if size is not None else 6.0])
+    ax.props["YDir"] = _m.Char("reverse")
+    ax.mset("XLim", _colvec([0.0, S.n + 1.0]))
+    ax.mset("YLim", _colvec([0.0, S.m + 1.0]))
+    ax.props["DataAspectRatioMode"] = _m.Char("manual")
+    ax.get_prop("XLabel").props["String"] = _m.Char("nz = %d" % sp.nnz(S))
+    ax.touch()
+    return _harr(line) if nargout else None
+
+
 @_fn("plot3")
 def plot3_(nargout, args):
     ax, args = _axes_arg(args)

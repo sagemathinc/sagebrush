@@ -520,8 +520,13 @@ class Axes:
         else:
             F = A.astype(float)
             finite = F[np.isfinite(F)]
-            # (a norm's vmin and vmax each, the data's range for the one it leaves None)
+            # (a norm's vmin and vmax each; one it leaves None is set from the data,
+            # on the norm itself, as matplotlib's autoscaling does)
             if norm is not None:
+                if getattr(norm, "vmin", None) is None and finite.size:
+                    norm.vmin = float(finite.min())
+                if getattr(norm, "vmax", None) is None and finite.size:
+                    norm.vmax = float(finite.max())
                 vmin = getattr(norm, "vmin", None) if vmin is None else vmin
                 vmax = getattr(norm, "vmax", None) if vmax is None else vmax
             lo = float(vmin) if vmin is not None else (float(finite.min()) if finite.size else 0.0)

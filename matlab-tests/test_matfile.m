@@ -13,6 +13,9 @@ show(cel);
 show(st);
 show(e);
 show(ec);
+% sparse matrices: sparse when loaded
+show([issparse(sp) issparse(spz) issparse(spe)]);
+show(full(sp)); show(full(spz)); show(full(spe)); show(nnz(sp));
 S = load('data/octave.mat');
 show(sort(fieldnames(S))');
 S2 = load('data/octave.mat', 'A', 'cel');

@@ -112,6 +112,27 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
   - **linear algebra** (`_mat`/`_unmat`): `\`, `/`, `inv`, `eig`, `lu`,
     `qr` and `chol` on non-symmetric input, in test_linalg;
   - **later** `.mat` files and plotting, which are not done yet.
+- **Sparse matrices** (lib/_matlab_sparse.py) are stored as MATLAB stores
+  them, in compressed sparse column form: m-by-n, column starts, row indices
+  and the nonzeros (double, single or logical, real or complex). They are
+  immutable, so never copied.
+  - Construction, queries, display, indexing, assignment, concatenation,
+    arithmetic, comparisons, the zero-preserving elementwise functions, the
+    common reductions and shape functions, and every matrix product work on
+    that storage. So large matrices are never expanded.
+  - `S\b` with a large square matrix of small bandwidth is solved by a
+    banded LU, in LAPACK's band storage.
+  - Every other function sees the full matrix a sparse one stands for. The
+    first sparse matrix a program makes wraps the built-ins for this, so
+    programs without one pay nothing. Those MATLAB keeps sparse convert
+    their results back.
+  - Which results are sparse follows MATLAB:
+    - `+` and `-` when both operands are sparse;
+    - `.*` when either is;
+    - `./` and `.^` when the numerator or base is;
+    - `*` for sparse times sparse or a scalar;
+    - comparisons always;
+    - most elementwise functions, reductions and shape functions.
 - **Other classes:** `Char` stores its character codes the same way.
   `Cell`, `Struct` (one dict per element, fields in order) and `StrArr` keep
   their elements in column-major order. Function handles are `Anon`,
@@ -141,8 +162,9 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
 - **`colon`** computes `a:d:b` as MATLAB does: the second half of the
   elements is counted back from the end point. **`linspace`** uses MATLAB's
   formula. **`rand`** gives MATLAB's numbers: the Mersenne twister seeded
-  with 5489, as `rng default` does. `randn` and `randi` do not, since
-  MATLAB's algorithms for them differ from numpy's.
+  with 5489, as `rng default` does, and so do `randi` and `sprand`, which
+  are built on it as MATLAB's are. `randn` does not, since MATLAB's
+  algorithm for it differs from numpy's.
 
 ## Display
 
@@ -179,6 +201,8 @@ writes up to `-v7`, in lib/_matlab_mat.py, following MathWorks' "MAT-File
 Format":
 - numeric, logical, char, cell and struct arrays, including N-D, complex and
   every integer class;
+- sparse matrices, kept sparse with their nzmax (and a logical one also in
+  the form Octave writes);
 - compressed (`-v7`, the default) or not (`-v6`);
 - `S = load(f)`, `load(f, 'x', 'y')`, `save(f, 'x', '-append')` and
   `save(f, '-struct', 's')`;
@@ -194,7 +218,7 @@ both directions:
   file.
 
 Not supported: MATLAB 7.3 (HDF5) files and objects (strings are saved as
-char arrays, with a warning). Sparse matrices are read as full ones.
+char arrays, with a warning). Single sparse matrices are saved as double.
 
 ## Graphics
 
@@ -410,6 +434,13 @@ since it compares against the committed outputs.
   Octave needs them before they are called.
 - **Display:** Octave prints `x = 5` on one line, and its matrix columns are
   narrower.
+- **Sparse matrices:**
+  - `max(S, F)`, `dot`, `unique`, and `lu`'s permutation are sparse in
+    MATLAB and full in Octave;
+  - `S - F` is MATLAB's `-F` with S's nonzeros added (so `-0` where S is
+    zero);
+  - `spy`'s label is `nz = 5` (Octave: `nnz = 5`);
+  - single sparse matrices are MATLAB's alone.
 
 Where MATLAB's behaviour is not documented and no published output shows
 it, Sagebrush follows Octave, which aims at MATLAB compatibility. For
@@ -434,5 +465,6 @@ time, and `str2func` of an anonymous function's text is not supported.
 - `eval`;
 - `classdef` and nested functions;
 - string arrays beyond the basics;
-- `containers.Map`, sparse matrices, file I/O beyond `fprintf`, `input`;
-- `randn` and `randi` matching MATLAB's streams.
+- `containers.Map`, file I/O beyond `fprintf`, `input`;
+- `randn` matching MATLAB's stream;
+- sparse `eigs`, `svds` and iterative solvers (`pcg`, `gmres`).

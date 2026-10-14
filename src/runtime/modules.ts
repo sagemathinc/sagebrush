@@ -341,8 +341,12 @@ newBuiltinModule("math", (m) => {
   fn(m, "atan2", (y: any, x: any) => O.mkfloat(FD.atan2(F(y), F(x))));
   fn(m, "hypot", (...xs: any[]) => O.mkfloat(FD.v8hypot(...xs.map(F))));
   fn(m, "copysign", (x: any, y: any) => {
-    const a = Math.abs(F(x)), b = F(y);
-    return O.mkfloat(b < 0 || Object.is(b, -0) ? -a : a);
+    // (through the bits: y's sign bit, a NaN's too, on x's magnitude)
+    const dv = new DataView(new ArrayBuffer(16));
+    dv.setFloat64(0, F(x));
+    dv.setFloat64(8, F(y));
+    dv.setUint8(0, (dv.getUint8(0) & 0x7f) | (dv.getUint8(8) & 0x80));
+    return O.mkfloat(dv.getFloat64(0));
   });
   fn(m, "fmod", (x: any, y: any) => {
     const b = F(y);
