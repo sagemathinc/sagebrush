@@ -1305,57 +1305,94 @@ _FUNCS["bar"] = lambda nargout, args: _bar(args, False)
 _FUNCS["barh"] = lambda nargout, args: _bar(args, True)
 
 
-def _binpick(lo, hi, raw, nbins=None):
-    """bin edges over [lo, hi].  MATLAB documents that its edges fall on "nice"
-    numbers without giving the rule, so these rules are Sagebrush's, chosen
-    to reproduce the published examples' edges exactly (histcounts of
-    randn(100,1), randn(10), randn(1000,1) and randn(10000,1) from the
-    default state, of primes(100), and histcounts([2 3 5 7 11 13 17 19 23
-    29], 6)'s 0:4.9:29.4):
-    - with no bin count, the raw width rounded to the nearest of 1, 2, 3, 5
-      or 10 times its power of 10, the left edge the multiple of it at or
-      below lo, and as many bins as reach hi;
-    - with a bin count n, the left edge lo rounded down to a multiple of the
-      raw width cut to one significant digit, and the width a multiple of
-      the largest power of 10 that fits in the interval of widths for which
-      n bins, but not n - 1, reach hi from that edge.
-    Data all at one value get the bins of [v - 1/2, v + 1/2]."""
-    if hi - lo <= math.sqrt(2.0 ** (math.frexp(max(abs(lo), abs(hi)))[1] - 53)):
-        n = nbins or 1
-        a, b = lo - 0.5, hi + 0.5
-        return [a + (b - a) * i / n for i in range(n + 1)]
-    unit = 10.0 ** math.floor(math.log10(raw))
-    lead = raw / unit  # (in [1, 10))
-    if nbins is None:
-        nice = min((1.0, 2.0, 3.0, 5.0, 10.0), key=lambda c: abs(lead - c))
-        w = nice * unit
-        left = min(w * math.floor(lo / w), lo)
-        n = max(1, int(math.ceil((hi - left) / w - 1e-9)))
-        return [left + i * w for i in range(n)] + [max(left + n * w, hi)]
-    n = nbins
-    cut = math.floor(lead) * unit
-    left = min(cut * math.floor(lo / cut), lo)
-    if n == 1:
-        return [left, max(hi, left + cut)]
-    shortest, longest = (hi - left) / n, (hi - left) / (n - 1)
-    q = 10.0 ** math.floor(math.log10(longest - shortest))
-    w = q * math.ceil(shortest / q)
-    return [left + i * w for i in range(n)] + [max(left + n * w, hi)]
+def _nice(x, round_to_nearest):
+    """Heckbert's "nice number" (Graphics Gems, 1990) for x > 0: 1, 2, 5 or
+    10 times x's power of 10, the nearest (thresholds 1.5, 3, 7), or the
+    smallest at least x"""
+    e = math.floor(math.log10(x))
+    f = x / 10.0 ** e
+    if round_to_nearest:
+        nf = 1.0 if f < 1.5 else 2.0 if f < 3.0 else 5.0 if f < 7.0 else 10.0
+    else:
+        nf = 1.0 if f <= 1.0 else 2.0 if f <= 2.0 else 5.0 if f <= 5.0 else 10.0
+    return nf * 10.0 ** e
 
 
-def _auto_edges(data, nbins=None):
-    """histogram's and histcounts' bins: Scott's rule (3.5 sigma n^(-1/3)), or nbins of them, on round numbers"""
+def _hist_edges(data, nbins=None, method="auto", limits=None, width=None):
+    """histogram's and histcounts' bin edges.  MATLAB documents what its bins
+    do (uniform widths covering the data, "nice" edges, the BinMethod
+    formulas) but not how its edges are chosen, so these rules are
+    Sagebrush's own:
+    - the width: BinWidth if given; else for 'auto' (as for 'scott') Scott's
+      3.5 std(x) n^(-1/3), for 'fd' 2 iqr(x) n^(-1/3), and for 'sturges'
+      and 'sqrt' the data's range over ceil(1 + log2 n) or ceil(sqrt(n))
+      bins (the documented formulas), rounded to the nearest nice number;
+    - the edges: multiples of the width from the one at or below the
+      smallest value, as many as reach the largest;
+    - with a bin count, exactly that many bins, their width the raw one
+      rounded up to two significant digits and widened by units of the
+      second digit until they cover the data from a left edge on a
+      multiple of the first digit's unit;
+    - BinLimits: that interval, in as many equal bins as a nice width needs
+      (or as given);
+    - data all at one value: bins of total width 1 centred on it (as the
+      documented 'integers' method bins an integer)."""
     data = [v for v in data if v == v and abs(v) != math.inf]
+    if limits is not None:
+        a, b = limits
+        inside = [v for v in data if a <= v <= b]
+        if nbins is None:
+            w = _hist_width(inside, method) if len(set(inside)) > 1 else (b - a)
+            nbins = max(1, int(math.ceil((b - a) / w - 1e-9))) if w > 0 else 1
+        return [a + (b - a) * i / nbins for i in range(nbins)] + [b]
     if not data:
-        return [0.0, 1.0] if nbins is None else [i / nbins for i in range(nbins + 1)]
+        n = nbins or 1
+        return [i / n for i in range(n + 1)]
     lo, hi = min(data), max(data)
+    if lo == hi:
+        n = nbins or 1
+        return [lo - 0.5 + i / n for i in range(n)] + [lo + 0.5]
+    if width is not None:
+        w = width
+    elif nbins is not None:
+        # (the raw width rounded up to two significant digits, from a left
+        # edge on its leading digit's unit, widened by a unit of its second
+        # digit until the bins reach the largest value)
+        raw = (hi - lo) / nbins
+        unit = 10.0 ** math.floor(math.log10(raw))
+        step = unit / 10.0
+        left = math.floor(lo / unit) * unit
+        w = math.ceil(raw / step - 1e-9) * step
+        while left + nbins * w < hi:
+            w += step
+        return [left + i * w for i in range(nbins)] + [left + nbins * w]
+    else:
+        w = _nice(_hist_width(data, method), True)
+    left = math.floor(lo / w) * w
+    n = max(1, int(math.ceil((hi - left) / w - 1e-9)))
+    if left + n * w < hi:
+        n += 1
+    return [left + i * w for i in range(n)] + [left + n * w]
+
+
+def _hist_width(data, method):
+    """the raw bin width of a BinMethod's documented formula"""
     n = len(data)
-    if nbins is not None:
-        return _binpick(lo, hi, (hi - lo) / nbins, nbins)
-    mean = sum(data) / n
-    sd = math.sqrt(sum((v - mean) ** 2 for v in data) / max(1, n - 1))
-    raw = 3.5 * sd * n ** (-1 / 3) if sd > 0 else (hi - lo) / 10 or 1.0
-    return _binpick(lo, hi, raw)
+    lo, hi = min(data), max(data)
+    if method in ("auto", "scott"):
+        mean = sum(data) / n
+        sd = math.sqrt(sum((v - mean) ** 2 for v in data) / max(1, n - 1))
+        return 3.5 * sd * n ** (-1.0 / 3.0) if sd > 0 else (hi - lo)
+    if method == "fd":
+        q = sorted(data)
+        def quant(p):
+            t = n * p + 0.5
+            k = min(max(int(math.floor(t)), 1), n - 1)
+            return q[k - 1] + (min(max(t - k, 0.0), 1.0)) * (q[k] - q[k - 1]) if n > 1 else q[0]
+        iqr = quant(0.75) - quant(0.25)
+        return 2 * iqr * n ** (-1.0 / 3.0) if iqr > 0 else 0.2 * (hi - lo) * n ** (-1.0 / 3.0)
+    bins = max(1, int(math.ceil(1 + math.log2(n)))) if method == "sturges" else max(1, int(math.ceil(math.sqrt(n))))
+    return (hi - lo) / bins
 
 
 def _counts(data, edges):
@@ -1382,6 +1419,7 @@ def histogram_(nargout, args):
     data = [v for v in _vec(pos[0]) if v == v]
     edges = None
     nbins = None
+    width = None
     if len(pos) > 1:
         e = pos[1]
         if _m._numel(e) == 1:
@@ -1396,12 +1434,10 @@ def histogram_(nargout, args):
             edges = _vec(v)
             del props[k]
         elif k.lower() == "binwidth":
-            w = _f(v)
-            lo = math.floor(min(data) / w) * w
-            edges = [lo + i * w for i in range(int(math.ceil((max(data) - lo) / w)) + 2) if lo + (i - 1) * w <= max(data)]
+            width = _f(v)
             del props[k]
     if edges is None:
-        edges = _auto_edges(data, nbins)
+        edges = _hist_edges(data, nbins, width=width)
     vals = _counts(data, edges)
     norm = "count"
     for k, v in list(props.items()):
@@ -2494,7 +2530,7 @@ def _hc_args(args):
         if k not in ("binedges", "numbins", "binlimits", "binwidth", "binmethod", "normalization"):
             raise _m._err("histcounts: the option '%s' is not supported in Sagebrush." % (_m._text(rest[i]) if k else "?"))
         opts[k] = rest[i + 1]
-    if "binmethod" in opts and _m._text(opts["binmethod"]).lower() not in ("auto", "integers"):
+    if "binmethod" in opts and _m._text(opts["binmethod"]).lower() not in ("auto", "integers", "scott", "fd", "sturges", "sqrt"):
         raise _m._err("histcounts: 'BinMethod', '%s' is not supported in Sagebrush." % _m._text(opts["binmethod"]))
     if "normalization" in opts and _m._text(opts["normalization"]).lower() not in ("count", "probability", "pdf", "countdensity", "cumcount", "cdf"):
         raise _m._err("Invalid 'Normalization' value '%s'." % _m._text(opts["normalization"]))
@@ -2502,21 +2538,16 @@ def _hc_args(args):
         edges = _vec(opts["binedges"])
     if "numbins" in opts:
         nbins = int(_f(opts["numbins"]))
+    method = _m._text(opts.get("binmethod", _m.Char("auto"))).lower()
     if edges is None and "binlimits" in opts:
         lo, hi = _vec(opts["binlimits"])
-        data = [v for v in data if lo <= v <= hi]
-        n = nbins or max(1, len(_auto_edges(data)) - 1)
-        edges = [lo + (hi - lo) * i / n for i in range(n + 1)]
-    if edges is None and "binwidth" in opts:
-        w = _f(opts["binwidth"])
-        lo = w * math.floor(min(data) / w) if data else 0.0
-        n = max(1, int(math.ceil((max(data) - lo) / w))) if data else 1
-        edges = [lo + i * w for i in range(n + 1)]
-    if edges is None and _m._text(opts.get("binmethod", _m.Char("auto"))).lower() == "integers":
+        edges = _hist_edges(data, nbins, method if method != "integers" else "auto", limits=(lo, hi))
+    if edges is None and method == "integers":
+        # (as documented: a bin per integer, the edges halfway between)
         lo, hi = (min(data), max(data)) if data else (0.0, 0.0)
         edges = [math.floor(lo) - 0.5 + i for i in range(int(math.floor(hi) - math.floor(lo)) + 2)]
     if edges is None:
-        edges = _auto_edges(data, nbins)
+        edges = _hist_edges(data, nbins, method, width=_f(opts["binwidth"]) if "binwidth" in opts else None)
     return X, edges, opts
 
 
