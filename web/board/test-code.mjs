@@ -228,6 +228,20 @@ try {
     await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${y0}) <= 8`, 3000);
   }
   check(await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${x0 + 150}) <= 8`, 3000), "dragged while another output changes every frame, the note lands where it was let go: " + JSON.stringify([x0, (await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover')"))?.x]));
+  // (fonts arriving as a drag starts, and while it goes on, KaTeX's on CI: the
+  // board laid out again only once it is let go, Oct 14)
+  {
+    const z0 = (await item("mover")).x, p0 = await ev("(() => { const r = window.board.clientRect('mover'); return { x: r.left + r.width / 2, y: r.top + 15 }; })()");
+    await ev("document.fonts.dispatchEvent(new Event('loadingdone')), 1");
+    await mouse("mousePressed", p0.x, p0.y);
+    for (let i = 1; i <= 10; i++) { await mouse("mouseMoved", p0.x + 15 * i, p0.y); if (i === 5) await ev("document.fonts.dispatchEvent(new Event('loadingdone')), 1"); await sleep(40); }
+    await mouse("mouseReleased", p0.x + 150, p0.y);
+    check(await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${z0 + 150}) <= 8`, 3000), "fonts arriving as a drag starts and while it goes on: the note lands where it was let go: " + JSON.stringify([z0, (await ev("window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x"))]));
+    await mouse("mousePressed", p0.x + 150, p0.y);
+    for (let i = 1; i <= 10; i++) { await mouse("mouseMoved", p0.x + 150 - 15 * i, p0.y); await sleep(40); }
+    await mouse("mouseReleased", p0.x, p0.y);
+    await until(`Math.abs(window.sagebrush.board.snapshot().doc.nodes.find((x) => x.id === 'mover').x - ${z0}) <= 8`, 3000);
+  }
   // the wide item's output as tall as a third of its width (as a 3D view is), and it resized by its corner
   await ev("(() => { const o = document.querySelector('[data-code=wide] .board-code-out .out'); o.style.aspectRatio = '3 / 1'; return 1; })()");
   const wr = await ev("(() => { const r = window.board.clientRect('wide'); return { x: r.left, y: r.top, w: r.width }; })()");
