@@ -56,3 +56,31 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(runtime.status, 1);
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
 });
+
+test("constructors name< ... > parse; those not implemented yet raise at run time", () => {
+  // Magma has no `<` operator: an identifier followed by `<` starts a constructor
+  for (const src of [
+    "H := sub< G | x, y >;",
+    "Q, f := quo< G | H >;",
+    "G<a, b> := Group< a, b | a^2 = b^3, (a*b)^5 >;",
+    "P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;",
+    "f := map< A -> B | x :-> x^2 >;",
+    "h := hom< A -> B | <1, 2>, <2, 4> >;",
+    "I := ideal< R | x^2 - y, sub< S | 1 > >;",
+  ]) {
+    const out = py(src);
+    assert.match(out, /_m\._unsupported\("[A-Za-z]+", \(1, \d+\)\)/, src);
+  }
+  assert.match(py("r := rec< F | a := 1, b := <2, 3> >;"), /_m\._rec\(F, \[\("a", 1\), \("b", _m\.MTuple\(\[2, 3\]\)\)\], \(1, 6\)\)/);
+  assert.match(py("F := recformat< a : Integers(), b >;"), /_m\._recformat\(\[\("a", Integers\(\)\), \("b", None\)\], \(1, 6\)\)/);
+  // statements Magma rejects before running them: only the rejection is emitted
+  assert.match(py("F := recformat< a, a >;"), /^_m\._compile_error\(1, 20, "Field 'a' is repeated"\)$/m);
+  assert.doesNotMatch(py("F := recformat< a, a >;"), /_recformat/);
+  assert.match(py("assigned s[2];"), /_m\._compile_error\(1, 1, "Argument to 'assigned' should be identifier, record field, or attribute"\)/);
+  assert.match(py("delete s[2];"), /_m\._compile_error\(1, 9, "Bad delete argument"\)/);
+  assert.doesNotMatch(py("delete s[2];"), /_DELETE/);
+  // fields: x`f, x``s, assigned, delete
+  assert.match(py("r``s;"), /_m\._getattr\(r, s, \(1, 2\)\)/);
+  assert.match(py("assigned r`a;"), /_m\._assigned\(r, "a"\)/);
+  assert.match(py("delete r`a;"), /_m\._assign_path\(r, \[\("attr", "a", \(1, 9\)\)\], _m\._DELETE\)/);
+});

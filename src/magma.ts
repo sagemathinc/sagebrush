@@ -137,6 +137,13 @@ class Parser {
   private tmp = 0;
   private fns: Fn[] = [];
   private hoisted: string[][] = []; // definitions to emit before the current statement
+  // a statement Magma rejects before running it ("User error: ..."): the
+  // first such error of the current top-level statement
+  private rejected: { line: number; col: number; msg: string } | null = null;
+
+  reject(t: Tok, msg: string) {
+    if (!this.rejected) this.rejected = { line: t.line, col: t.col, msg };
+  }
 
   constructor(private toks: Tok[], private filename: string, private src = "", private recover: Recover | null = null) {}
 
@@ -188,6 +195,7 @@ class Parser {
       try {
         // each top-level statement on its own, as Magma runs them; what an
         // error does is up to _m._report (a file stops, a session goes on)
+        this.rejected = null;
         this.emit("try:");
         this.block(() => {
           this.emit(`_m._here(${t.line}, ${t.col})`);
@@ -195,6 +203,13 @@ class Parser {
         });
         this.emit("except Exception as _e:");
         this.block(() => this.emit(`_m._report(_e, ${t.line}, ${t.col})`));
+        if (this.rejected) {
+          // Magma rejects the whole statement and goes on with the next one
+          // (in a file too; a cell stops: lib/_magma.py _compile_error)
+          const r = this.rejected as { line: number; col: number; msg: string };
+          this.out.length = saved.n;
+          this.emit(`_m._compile_error(${r.line}, ${r.col}, ${JSON.stringify(r.msg)})`);
+        }
       } catch (e) {
         if (!(e instanceof MagmaSyntaxError) || this.recover === null) throw e;
         // Magma's rule: the statements before a syntax error have run; the
@@ -266,7 +281,18 @@ class Parser {
         case "function": case "procedure": return this.namedFunction();
         case "forward": this.next(); do this.ident(); while (this.eat(",")); this.expect(";"); return;
         case "local": this.next(); do this.ident(); while (this.eat(",")); this.expect(";"); return;
-        case "delete": { this.next(); const v = pyName(this.ident()); this.expect(";"); this.declareGlobal(v); this.emit(`del ${v}`); return; }
+        case "delete": {
+          this.next();
+          const target = this.tryLhs();
+          if (!target || target.kind === "gens") this.fail("expected a variable or a record field after 'delete'");
+          this.expect(";");
+          const last = target.path?.[target.path.length - 1];
+          if (last && last.kind === "idx") this.reject(last.tok, "Bad delete argument");
+          // delete r`f: the field becomes unassigned (lib/_magma.py _DELETE)
+          if (target.kind === "path") this.store(target, "_m._DELETE");
+          else this.emit(`del ${target.py}`);
+          return;
+        }
         case "quit": case "exit": this.next(); this.eat(";"); this.emit("_m._quit()"); return;
         case "time": { this.next(); this.emit("_m._time_start()"); this.stmt(); this.emit("_m._time_end()"); return; }
       }
@@ -361,25 +387,32 @@ class Parser {
       return null;
     }
     let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : pyName(name), read: pyName(name), name };
-    const path: string[] = [];
+    const path: PathEl[] = [];
     while (this.at("[") || this.at("`")) {
-      if (this.eat("`")) {
-        const a = this.ident();
-        path.push(`attr:${a}`);
+      if (this.at("`")) {
+        path.push(this.field());
         continue;
       }
-      this.next();
+      const lb = this.next();
       const idx = [this.expr()];
       while (this.eat(",")) idx.push(this.expr());
       this.expect("]");
-      path.push(idx.length === 1 ? idx[0] : `_m.MTuple([${idx.join(", ")}])`);
+      path.push({ kind: "idx", code: idx.length === 1 ? idx[0] : `_m.MTuple([${idx.join(", ")}])`, tok: lb });
     }
     if (path.length) target = { kind: "path", py: target.py, path, read: this.readPath(target.py, path) };
     return target;
   }
 
-  readPath(base: string, path: string[]) {
-    return path.reduce((acc, p) => (p.startsWith("attr:") ? `_m._getattr(${acc}, ${JSON.stringify(p.slice(5))})` : `_m._index(${acc}, ${p})`), base);
+  readPath(base: string, path: PathEl[]) {
+    return path.reduce((acc, p) => (p.kind === "attr" ? `_m._getattr(${acc}, ${p.code}, (${p.line}, ${p.col}))` : `_m._index(${acc}, ${p.code})`), base);
+  }
+
+  /** `name or ``expr (the field name as a string), at the backtick. */
+  field(): PathEl {
+    const t = this.expect("`");
+    // r``s: the field named by the string s
+    const code = this.eat("`") ? this.primary() : JSON.stringify(this.ident());
+    return { kind: "attr", code, line: t.line, col: t.col };
   }
 
   store(t: Target, val: string) {
@@ -391,7 +424,7 @@ class Parser {
       this.declareGlobal(t.py);
       // x[i][j] := v: rebuild along the path (sequences have value semantics)
       const path = t.path!;
-      const enc = path.map((p) => (p.startsWith("attr:") ? `("attr", ${JSON.stringify(p.slice(5))})` : `("idx", ${p})`)).join(", ");
+      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code})`)).join(", ");
       this.emit(`${t.py} = _m._assign_path(${t.py}, [${enc}], ${val})`);
     }
   }
@@ -787,8 +820,8 @@ class Parser {
         this.next();
         e = `_m._gen(${e}, ${this.next().v})`;
       } else if (this.at("`")) {
-        this.next();
-        e = `_m._getattr(${e}, ${JSON.stringify(this.ident())})`;
+        const f = this.field() as { code: string; line: number; col: number };
+        e = `_m._getattr(${e}, ${f.code}, (${f.line}, ${f.col}))`;
       } else if (this.at("!")) {
         this.next();
         e = `_m._coerce(${e}, ${this.unary()})`;
@@ -804,7 +837,9 @@ class Parser {
     if (t.t === "num") { this.next(); return t.v; }
     if (t.t === "real") { this.next(); return `_m._real(${JSON.stringify(t.v)})`; }
     if (t.t === "str") { this.next(); return JSON.stringify(t.v); }
+    if (t.t === "id" && this.at("<", 1)) return this.ctorExpr();
     if (t.t === "id") { this.next(); return pyName(t.v); }
+    if (this.at("assigned")) return this.assignedExpr(this.next());
     if (this.eat("true")) return "True";
     if (this.eat("false")) return "False";
     if (this.eat("$$")) {
@@ -865,6 +900,74 @@ class Parser {
     this.fail(t.t === "eof" ? "unexpected end of input" : `unexpected '${t.v}'`);
   }
 
+  /**
+   * name< ... >: a constructor (Magma has no `<` operator, so an identifier
+   * followed by `<` always starts one).  Records are implemented; the
+   * others (sub, quo, ext, ideal, map, hom, Group, ...) are parsed and
+   * raise a runtime error until Sagebrush has them.
+   */
+  ctorExpr(): string {
+    const t = this.next();
+    this.expect("<");
+    const pos = `(${t.line}, ${t.col})`;
+    if (t.v === "recformat") {
+      // recformat< name, name : structure or category, ... > (also empty)
+      const fields: string[] = [];
+      const names = new Set<string>();
+      if (!this.at(">")) {
+        do {
+          const nt = this.peek();
+          const name = this.ident();
+          if (names.has(name)) this.reject(nt, `Field '${name}' is repeated`);
+          names.add(name);
+          fields.push(`(${JSON.stringify(name)}, ${this.eat(":") ? this.expr() : "None"})`);
+        } while (this.eat(","));
+      }
+      this.expect(">");
+      return `_m._recformat([${fields.join(", ")}], ${pos})`;
+    }
+    if (t.v === "rec") {
+      // rec< F | name := value, ... >
+      const fmt = this.expr();
+      this.expect("|");
+      const assigns: string[] = [];
+      if (!this.at(">")) {
+        do {
+          const name = this.ident();
+          this.expect(":=");
+          assigns.push(`(${JSON.stringify(name)}, ${this.expr()})`);
+        } while (this.eat(","));
+      }
+      this.expect(">");
+      return `_m._rec(${fmt}, [${assigns.join(", ")}], ${pos})`;
+    }
+    // not implemented yet: skip to the matching '>' (tuples and nested
+    // constructors are the only other uses of < and >)
+    let depth = 1;
+    while (depth > 0) {
+      const k = this.next();
+      if (k.t === "eof") this.fail("unexpected end of input", k);
+      if (k.t === "op" && k.v === "<") depth++;
+      else if (k.t === "op" && k.v === ">") depth--;
+    }
+    return `_m._unsupported(${JSON.stringify(t.v)}, ${pos})`;
+  }
+
+  /** assigned x, assigned r`f, assigned s[i]. */
+  assignedExpr(kw: Tok): string {
+    const t = this.tryLhs();
+    if (!t || t.kind === "gens") this.fail("expected a variable after 'assigned'");
+    if (t.kind === "name") return `_m._assigned_name(lambda: ${t.read})`;
+    const path = t.path!;
+    const last = path[path.length - 1];
+    const base = this.readPath(t.py, path.slice(0, -1));
+    if (last.kind === "idx") {
+      this.reject(kw, "Argument to 'assigned' should be identifier, record field, or attribute");
+      return "None";
+    }
+    return `_m._assigned(${base}, ${last.code})`;
+  }
+
   /** A tuple element: an expression up to , or > (no comparisons with > in Magma). */
   tupleElem(): string {
     return this.selectExpr();
@@ -915,11 +1018,14 @@ class Parser {
   }
 }
 
+/** A step of an assignment target: x`f (code: the field name's Python) or x[i]. */
+type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok };
+
 interface Target {
   kind: "name" | "path" | "gens";
   py: string;
   read: string;
-  path?: string[];
+  path?: PathEl[];
   gens?: string[];
   names?: string[];
   name?: string;
