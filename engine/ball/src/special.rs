@@ -192,6 +192,126 @@ pub fn e1(x: &Ball, prec: u64) -> Option<Ball> {
     Some(v.add_error(x.rad().mul(d)).rounded(prec))
 }
 
+/// The largest precision lgamma and digamma accept: the Stirling series
+/// below needs about 0.2 prec exact Bernoulli numbers.
+pub const GAMMA_PREC_MAX: u64 = 1 << 12;
+
+/// The Stirling series of log Gamma (`log`) or digamma at an exact z > 0,
+/// with z large enough for 2^-wp:
+///
+///   log Gamma(z) = (z - 1/2) log z - z + log(2 pi)/2
+///                  + sum_(k<K) B_2k / (2k (2k-1) z^(2k-1)) + R_K,
+///   psi(z) = log z - 1/(2z) - sum_(k<K) B_2k / (2k z^2k) + R_K,
+///
+/// where for real z > 0 the remainder R_K is bounded in magnitude by the
+/// first neglected term (DLMF 5.11.1, 5.11.2 and 5.11(ii)).  The terms
+/// shrink until k is about pi z, the smallest near e^(-2 pi z).
+fn stirling(z: &Ball, log: bool, wp: u64) -> Option<Ball> {
+    let lz = z.log(wp)?;
+    let zinv = z.recip(wp)?;
+    let zinv2 = zinv.sqr(wp);
+    let mut sum = if log {
+        let half_log_2pi = pi(wp).mul_2exp(1).log(wp)?.mul_2exp(-1);
+        z.sub(&Ball::exact(BigInt::one(), -1), wp).mul(&lz, wp).sub(z, wp).add(&half_log_2pi, wp)
+    } else {
+        lz.sub(&zinv.mul_2exp(-1), wp)
+    };
+    let goal = Mag::pow2(-(wp as i64));
+    // z^-(2k-1) for log Gamma, z^-2k for psi
+    let mut pw = if log { zinv } else { zinv2.clone() };
+    let mut k = 1usize;
+    loop {
+        let b = &bernoulli(2 * k)[2 * k];
+        let den = if log { (2 * k * (2 * k - 1)) as i64 } else { (2 * k) as i64 };
+        let t = rat_ball(b, wp).div_i64(den, wp).mul(&pw, wp);
+        let tb = t.upper_abs();
+        if tb <= goal {
+            // (the remainder after k - 1 terms is at most |term k|)
+            return Some(sum.add_error(tb));
+        }
+        if k > 4 * (wp as usize) {
+            return None; // (z too small for wp: not reached from the callers)
+        }
+        sum = if log { sum.add(&t, wp) } else { sum.sub(&t, wp) };
+        pw = pw.mul(&zinv2, wp);
+        k += 1;
+    }
+}
+
+/// log Gamma(x) or psi(x) at an exact dyadic x > 0: the Stirling series at
+/// z = x + N, z >= wp/2 + 4, and the recurrences
+///   log Gamma(x) = log Gamma(x + N) - log(x (x + 1) ... (x + N - 1)),
+///   psi(x) = psi(x + N) - sum_(j<N) 1/(x + j).
+/// (z >= 0.12 wp would do, the smallest term being about e^(-2 pi z), but
+/// then about 0.4 wp terms are needed; at z >= wp/2 about 0.1 wp, and the
+/// exact Bernoulli numbers, not the N steps, dominate the cost.)
+fn gamma_point(x: &Ball, log: bool, wp: u64) -> Option<Ball> {
+    let target = wp / 2 + 4;
+    let (m, e) = x.mid();
+    // floor(x) (x > 0), capped: only whether it reaches target matters
+    let fl = if e >= 0 { if m.bits() as i64 + e > 64 { target } else { num_traits::ToPrimitive::to_u64(&(&m << e as u64)).unwrap_or(target) } } else { num_traits::ToPrimitive::to_u64(&(&m >> (-e) as u64)).unwrap_or(target) };
+    let n = target.saturating_sub(fl);
+    let z = x.add(&Ball::from_i64(n as i64), u64::MAX);
+    let s = stirling(&z, log, wp)?;
+    if n == 0 {
+        return Some(s);
+    }
+    if log {
+        let mut prod = x.clone();
+        for j in 1..n {
+            prod = prod.mul(&x.add(&Ball::from_i64(j as i64), u64::MAX), wp);
+        }
+        Some(s.sub(&prod.log(wp)?, wp))
+    } else {
+        let mut acc = Ball::zero();
+        for j in 0..n {
+            acc = acc.add(&x.add(&Ball::from_i64(j as i64), u64::MAX).recip(wp)?, wp);
+        }
+        Some(s.sub(&acc, wp))
+    }
+}
+
+/// log Gamma(x) for a ball x that is certainly positive (None otherwise,
+/// or for prec > GAMMA_PREC_MAX).  At the midpoint by gamma_point; the
+/// radius r adds r sup |psi| over the ball, which is max(|psi(lo)|,
+/// |psi(hi)|) as psi increases.
+pub fn lgamma(x: &Ball, prec: u64) -> Option<Ball> {
+    gamma_fn(x, true, prec)
+}
+
+/// The digamma function psi(x) = Gamma'(x)/Gamma(x) for a ball x that is
+/// certainly positive (None otherwise, or for prec > GAMMA_PREC_MAX).  At
+/// the midpoint by gamma_point; the radius r adds r sup psi' over the ball,
+/// and psi'(t) = sum_(k>=0) 1/(t+k)^2 <= 1/t^2 + 1/t, decreasing.
+pub fn digamma(x: &Ball, prec: u64) -> Option<Ball> {
+    gamma_fn(x, false, prec)
+}
+
+fn gamma_fn(x: &Ball, log: bool, prec: u64) -> Option<Ball> {
+    if prec > GAMMA_PREC_MAX || !x.is_finite() || !x.is_positive() {
+        return None;
+    }
+    // (extra bits for the cancellation in the recurrence: the balls keep
+    // the result rigorous anyway, these keep it tight)
+    let wp = prec + 64;
+    let (m, e) = x.mid();
+    let v = gamma_point(&Ball::exact(m, e), log, wp)?;
+    if x.is_exact() {
+        return Some(v.rounded(prec));
+    }
+    let (lm, le) = x.lower();
+    let sup = if log {
+        let (um, ue) = x.upper();
+        let a = gamma_point(&Ball::exact(lm, le), false, 64)?.upper_abs();
+        let b = gamma_point(&Ball::exact(um, ue), false, 64)?.upper_abs();
+        a.max(b)
+    } else {
+        let inv = Mag::pow2(0).div(Mag::from_bigint_down(&lm, le));
+        inv.mul(inv).add(inv)
+    };
+    Some(v.add_error(x.rad().mul(sup)).rounded(prec))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
