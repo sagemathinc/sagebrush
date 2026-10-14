@@ -73,7 +73,8 @@ export class Toolbar {
       // (its name; on a narrow screen, its icon)
       // (a tool named by its glyph, as undo: its icon everywhere)
       b.append(glyph(t, "tb-i"), t.label === t.icon ? glyph(t, "tb-l") : Object.assign(document.createElement("span"), { className: "tb-l", textContent: t.label }));
-      b.setAttribute("aria-label", t.label);
+      // (a tool named by its glyph, as undo: named by its title, without its keys, to a screen reader)
+      b.setAttribute("aria-label", t.label === t.icon ? t.title.replace(/\s*\([^)]*\)\s*$/, "") : t.label);
       b.title = t.title;
       b.dataset.tool = t.id;
       this.use(b, t);
@@ -83,6 +84,7 @@ export class Toolbar {
     more.className = "tb-more";
     more.title = "Every tool; check the ones to keep on the toolbar";
     more.setAttribute("aria-haspopup", "menu");
+    more.setAttribute("aria-label", "More tools");
     // (a mode on that is not on the toolbar: its icon on "⋯")
     this.bound.push(effect(() => {
       const on = this.all.filter((t) => t.toggle?.value && !this.tools.value.includes(t.id));

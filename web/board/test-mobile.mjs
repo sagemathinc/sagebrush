@@ -7,7 +7,8 @@
 // caption is a line until tapped.  Two fingers, the first on a note in
 // Edit, pinch: the board zooms, the note stays.  Presenting, the faded
 // controls come back with a tap, and a tap on one only shows it; a phone
-// turned fits the frame to the turned screen.  Serve web/dist first (python3
+// turned fits the frame to the turned screen.  Every control has a name in
+// words for a screen reader.  Serve web/dist first (python3
 // web/serve.py 8765), then
 //   node web/board/test-mobile.mjs
 import { spawn } from "node:child_process";
@@ -75,6 +76,13 @@ try {
   await until("!document.querySelector('.board-toolbar').hidden", 5000);
   check(await inView(".board-toolbar"), "the toolbar is in view");
   check(await ev("!!document.querySelector('.board-toolbar [data-tool=undo]')"), "Undo is in the toolbar on a touch screen");
+  // every control a screen reader meets has a name in words, not a glyph (✎, ⤢, ⋯, ←, ↶, ▶, { })
+  {
+    await send("Accessibility.enable");
+    const { nodes } = await send("Accessibility.getFullAXTree");
+    const glyphs = nodes.filter((x) => !x.ignored && ["button", "combobox", "link", "menuitem", "slider", "checkbox"].includes(x.role?.value) && !/[A-Za-z]{2}/.test(x.name?.value ?? "")).map((x) => x.role.value + " " + JSON.stringify(x.name?.value ?? ""));
+    check(!glyphs.length && nodes.some((x) => x.role?.value === "button" && x.name?.value === "Run"), "every control has a name in words for a screen reader: " + glyphs.join(", "));
+  }
   // its tools are drawn icons, at least 22 px, in buttons at least 40 px
   check(await ev("[...document.querySelectorAll('.board-toolbar button[data-tool]')].every((b) => { const s = b.querySelector('.tb-i svg')?.getBoundingClientRect(), r = b.getBoundingClientRect(); return s && s.width >= 22 && r.width >= 40 && r.height >= 40; })"), "the toolbar's icons are drawings of a readable size");
   // the top bar's ⋯ menu opens over the toolbar, not under it

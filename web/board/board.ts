@@ -569,6 +569,7 @@ export class Board {
         run.className = "board-code-run";
         run.textContent = "▶";
         run.title = "Run (and what depends on it)";
+        run.setAttribute("aria-label", "Run");
         run.onclick = (e) => { e.stopPropagation(); this.code?.run(id); };
         head.append(run);
       }
@@ -579,6 +580,7 @@ export class Board {
         t.textContent = "{ }";
         t.title = it.hideCode ? "Show the code" : "Hide the code (its output stays)";
         t.setAttribute("aria-pressed", String(!it.hideCode));
+        t.setAttribute("aria-label", "Show the code");
         t.onclick = (e) => { e.stopPropagation(); this.onToggleCode?.(id); };
         head.append(t);
       }
