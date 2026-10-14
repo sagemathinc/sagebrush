@@ -226,6 +226,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (code) code.cacheId = outputsId;
     docPixels = new PixelBudget();
     code?.usePictures(docPixels);
+    board.epoch++;
   }
 
   // a page made from a template: the template's items and edges under its

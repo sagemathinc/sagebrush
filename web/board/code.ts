@@ -207,6 +207,11 @@ export class BoardCode {
       const c = this.cell(it.id);
       if (c) c.out.dataset.preview = previewLabel(it.preview!);
     }
+    // (another document: the outputs kept, counted in its pictures' pixels, SEC-4DF-1)
+    if (this.recount && this.pictures) {
+      this.recount = false;
+      nb.usePictures?.(this.pictures);
+    }
     if (!changed.length) return changed;
     let report: any;
     const fresh = items.filter((it) => !before.has(it.id)), ns = this.cacheDoc();
@@ -288,9 +293,11 @@ export class BoardCode {
    * in it too (mount.ts gives a new one for each document shown, CORR-71A-2). */
   usePictures(budget: unknown) {
     this.pictures = budget;
-    this.nb?.usePictures?.(budget);
+    this.recount = true;
   }
   private pictures: unknown = null;
+  // (the outputs shown to be counted in it, once the new document's items are in place)
+  private recount = false;
   /** the cache's name for the board shown, from its host's store (mount.ts
    * outputsId: not the board's seed, which is portable); none, no cache */
   cacheId: string | null = null;
@@ -309,15 +316,17 @@ export class BoardCode {
     const keys = await this.nb.outputKeys();
     if (!keys || this.cacheDoc() !== ns) return;
     const at = new Date().toISOString();
-    const entries: CachedOutputs[] = [];
+    const entries: (CachedOutputs & { id: string })[] = [];
     for (const id of ids) {
       const c = this.cell(id), k = keys[id], state = this.state(id);
       // (not: running again, interrupted, after a widget moved, or one that read files, whose bytes its key doesn't say)
       if (!c || !k?.key || k.widget || k.reads || (state !== "" && state !== "failed") || this.generation(id) !== gens.get(id) || k.fromRoot <= this.cacheMs) continue;
-      entries.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot) });
+      entries.push({ id, key: k.key, outputs: this.nb.saveOutputs(c.out), at, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot) });
     }
-    for (const e of entries) {
+    // (and each item's run again: a later run's entry, written meanwhile, isn't overwritten by this one's, CORR-4DF-2)
+    for (const { id, ...e } of entries) {
       if (this.cacheDoc() !== ns) return;
+      if (this.generation(id) !== gens.get(id)) continue;
       await cache.put(ns, e);
     }
     if (entries.length && this.cacheDoc() === ns) await cache.sweep(ns, new Set(Object.values(keys).map((k: any) => k.key).filter(Boolean)));
