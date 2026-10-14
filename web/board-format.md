@@ -61,89 +61,182 @@ authoritative.
   each entry of `"pages": [...]` instead of the top level. A page with a
   `slide` rectangle (16:9, say) is a slide, and Present shows it.
 
+<!-- fields: written by scripts/board-format-fields.mjs from the doc comments of web/board/doc.ts; edit those, not this -->
 ## Fields
+
+Each kind of thing in a board, its fields, their types and what they mean. A type in words (item, edge, page, ...) is the section of that name; `[x]` is a list of them, `{name: x}` an object of them by name.
 
 ### The document
 
-| field | meaning |
-|---|---|
-| `format`, `version` | `"sagebrush-board"`, `1` (write them first) |
-| `title` | the board's title (plain text) |
-| `mode` | `python` (default), `sage`, `magma`, `matlab` |
-| `intro` | Markdown shown before the tour starts |
-| `layout`, `columns`, `direction` | how the top-level items are laid out (defaults: `graph`, square, `TB`) |
-| `nodes`, `edges`, `steps` | the items, the edges, the tour (a one-page board) |
-| `pages` | several pages (below); a document with pages has no `nodes`, `edges` or `steps` of its own |
-| `images` | pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL) |
-| `refBase` | the base URL for `ref` links that are paths (e.g. a repository's blob URL) |
-| `seed` | 64 hex digits: the seed of the code's random numbers; without it a fixed default is used, so a board's random numbers are always repeatable |
-| `slide`, `background` | as for a page |
-| `engine` | `"latest"` only, in a downloaded file: run with the newest engine when online (written by Sagebrush) |
-| `tools` | the toolbar's tools in Edit mode, in order (written by Sagebrush) |
+A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`).
+
+| field | type | meaning |
+|---|---|---|
+| `format` | `"sagebrush-board"` | `"sagebrush-board"`: write it first |
+| `version` | number | `1`: write it second |
+| `title` | string | the board's title (plain text) |
+| `mode` | `"python"` \| `"sage"` \| `"magma"` \| `"matlab"` | the language of its code items, one per board (default `python`) |
+| `engine` | `"latest"` | `"latest"`, in a downloaded file: run with the newest engine when online (written by Sagebrush) |
+| `seed` | string | 64 hex digits: the seed of its code's random numbers; without it a fixed default is used, so a board's random numbers are always repeatable |
+| `tools` | [string] | the toolbar's tools in Edit mode, in order (written by Sagebrush) |
+| `images` | {name: picture} | pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL) |
+| `pages` | [page] | several pages; a document with pages has no `nodes`, `edges` or `steps` of its own |
+| `intro` | string | Markdown shown before the tour starts |
+| `refBase` | string | the base URL for `ref` links that are paths (e.g. a repository's blob URL) |
+| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how the top-level items are laid out (default `graph`) |
+| `columns` | number | as for a group |
+| `direction` | `"TB"` \| `"LR"` | as for a group |
+| `slide` | card | as for a page |
+| `background` | background | as for a page |
+| `nodes` | [item] | the items of a one-page board |
+| `edges` | [edge] | the edges among them |
+| `steps` | [step] | its tour |
 
 ### A page (in `pages`)
 
-| field | meaning |
-|---|---|
-| `id` | needed by templates; unique among the pages |
-| `title` | the page's title (plain text) |
-| `intro` | Markdown shown before the page's tour |
-| `layout`, `columns`, `direction` | as for the document |
-| `nodes`, `edges`, `steps` | the page's items, edges and tour |
-| `slide` | `{x, y, w, h}`: the card the page is arranged on (board coordinates); Present shows it |
-| `background` | `{color, image}`: a color, or a picture's name in `images` (on a slide's card) |
-| `template` | `true`: other pages can be made from this one (it needs an `id`) |
-| `uses` | the id of a template page: its card, background and items appear under this page's own |
+A page of a board: its own items, edges and tour.
+
+| field | type | meaning |
+|---|---|---|
+| `id` | string | needed by templates; unique among the pages |
+| `title` | string | the page's title (plain text) |
+| `intro` | string | Markdown shown before the page's tour |
+| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how the page's items are laid out (default `graph`) |
+| `columns` | number | as for a group |
+| `direction` | `"TB"` \| `"LR"` | as for a group |
+| `slide` | card | the card the page is arranged on, a slide, which Present shows |
+| `background` | background | the page's background |
+| `template` | boolean | `true`: other pages can be made from it (it needs an `id`) |
+| `uses` | string | a template page's id: its card, background and items appear under this page's own |
+| `nodes` | [item] | required: the page's items |
+| `edges` | [edge] | the edges among them |
+| `steps` | [step] | its tour |
 
 ### A note (the default item)
 
-| field | meaning |
-|---|---|
-| `id` | required |
-| `title` | a heading (math allowed) |
-| `text` | Markdown with math, shown at every zoom |
-| `code` | code in the board's language; makes the note a code item |
-| `hideCode` | show only the output |
-| `detail` | Markdown shown only when zoomed in |
-| `ref` | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` |
-| `image` | a picture's name in `images` |
-| `color` | a color |
-| `shape` | `rect`, `round`, `stadium`, `circle`, `diamond`, `hexagon`, `cylinder`, `subroutine`, `lean-right`, `lean-left`, `trapezoid`, `inv-trapezoid`, `flag` |
-| `fit` | as wide as its text needs, up to `w` |
-| `w`, `h` | its width (default 260, or 440 for a code item) and height |
-| `x`, `y` | its position, kept once a person moves it; leave them out |
-| `preview` | a slow item's saved output, shown before it runs (written by Sagebrush) |
+A note: the default item. Every part is optional; a note with `code` is a code item.
+
+| field | type | meaning |
+|---|---|---|
+| `id` | string | required: unique on its page (an edge names it) |
+| `kind` | `"note"` | `"note"`, or left out |
+| `title` | string | a heading (plain text, math allowed) |
+| `image` | string | a picture: its name in the document's `images` |
+| `text` | string | Markdown with math (`$...$`), shown at every zoom |
+| `code` | string | code in the board's language (`mode`), run in the reader's browser, its output under it; it makes the note a code item |
+| `hideCode` | boolean | `true`: show only the code's output, not the code |
+| `preview` | preview | a slow code item's output, kept to show before it runs (written by Sagebrush) |
+| `detail` | string | Markdown shown only when zoomed in |
+| `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` |
+| `color` | string | a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) |
+| `shape` | `"rect"` \| `"round"` \| `"stadium"` \| `"circle"` \| `"diamond"` \| `"hexagon"` \| `"cylinder"` \| `"subroutine"` \| `"lean-right"` \| `"lean-left"` \| `"trapezoid"` \| `"inv-trapezoid"` \| `"flag"` | its outline (a flowchart's); its text is then centered |
+| `fit` | boolean | `true`: as wide as its text needs, up to `w` |
+| `x` | number | its position, kept once a person moves it: leave it out, and the board places it |
+| `y` | number | as `x` |
+| `w` | number | its width (default 260, or 440 for a code item) |
+| `h` | number | its height (default: as tall as what it shows) |
 
 ### A group
 
-| field | meaning |
-|---|---|
-| `id`, `kind: "group"` | required |
-| `title`, `text` | a heading (math allowed) and Markdown |
-| `layout`, `columns`, `direction` | how its children are laid out |
-| `children` | its items (groups nest) |
-| `color` | a color |
-| `x`, `y` | its position, kept once a person moves it |
+A group: items laid out together, under a title. Groups nest; an edge may join any two items on a page, in any groups.
 
-An edge may join any two items on a page, in any groups.
+| field | type | meaning |
+|---|---|---|
+| `id` | string | required: unique on its page |
+| `kind` | `"group"` | required: `"group"` |
+| `title` | string | a heading (plain text, math allowed) |
+| `text` | string | Markdown with math, under the title |
+| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how its items are laid out (default `graph`: in layers along the edges among them) |
+| `columns` | number | `grid` layout: how many columns (default: as square as can be) |
+| `direction` | `"TB"` \| `"LR"` | `graph` layout: layers top to bottom (`TB`, the default) or left to right (`LR`) |
+| `children` | [item] | required: its items (notes, groups, stickers) |
+| `color` | string | a color |
+| `x` | number | its position, kept once a person moves it: leave it out |
+| `y` | number | as `x` |
 
 ### An edge
 
-`{"from": id, "to": id, "label", "arrow": "none" | "both", "line": "dotted" | "thick", "hidden"}`.
-The arrowhead is at the end unless `arrow` says otherwise. A `hidden` edge
-only guides the layout.
+An edge between two items on a page, drawn as an arrow from `from` to `to`.
+
+| field | type | meaning |
+|---|---|---|
+| `from` | string | required: an item's id |
+| `to` | string | required: an item's id |
+| `label` | string | a label on it (plain text) |
+| `hidden` | boolean | `true`: not drawn, only used to lay out (to place one box below another) |
+| `arrow` | `"none"` \| `"both"` | arrowheads: at the end (when left out), `none`, or `both` ends |
+| `line` | `"dotted"` \| `"thick"` | `dotted` or `thick` (default: a thin line) |
 
 ### A tour step
 
-`{"focus": id or [ids], "say": "Markdown"}`. The camera shows the items while
-the caption explains them.
+A step of a tour: the camera shows these items while the caption explains them.
 
-### Stickers and ink
+| field | type | meaning |
+|---|---|---|
+| `focus` | string \| [string] | required: an item's id, or several |
+| `say` | string | the caption (Markdown with math) |
 
-- A sticker: `{"id", "kind": "sticker", "emoji"}` (one emoji) or `"icon"` (one
-  of CoCalc's icons, by name) with `color`; `w` (default 64), `x`, `y`.
-- Ink: `{"id", "kind": "ink", "points", "size", "color", "opacity", "x", "y"}`,
-  pen strokes drawn by people. Don't write these.
+### A sticker
+
+A sticker: one emoji, or one of CoCalc's icons, shown without a frame.
+
+| field | type | meaning |
+|---|---|---|
+| `id` | string | required: unique on its page |
+| `kind` | `"sticker"` | required: `"sticker"` |
+| `emoji` | string | one emoji |
+| `icon` | string | one of CoCalc's icons, by name (a converted CoCalc board), with `color` |
+| `color` | string | an icon's color |
+| `x` | number | its position: leave it out, and the board places it |
+| `y` | number | as `x` |
+| `w` | number | its width (default 64) |
+
+### Ink
+
+A pen stroke, drawn by a person. Don't write these.
+
+| field | type | meaning |
+|---|---|---|
+| `id` | string | required: unique on its page |
+| `kind` | `"ink"` | required: `"ink"` |
+| `points` | [number] | required: x, y and pressure (0 to 1) of each point, from the corner (`x`, `y`) |
+| `size` | number | the pen's width |
+| `color` | string | its color |
+| `opacity` | number | below 1: a highlighter's, which what is under it shows through |
+| `x` | number | required: the corner of its box |
+| `y` | number | required: as `x` |
+
+### A slide's card (`slide`)
+
+A slide's card on its page, in board coordinates.
+
+| field | type | meaning |
+|---|---|---|
+| `x` | number | required: its left edge |
+| `y` | number | required: its top edge |
+| `w` | number | required: its width |
+| `h` | number | required: its height (16:9 with `w`, say) |
+
+### A background (`background`)
+
+A page's background.
+
+| field | type | meaning |
+|---|---|---|
+| `color` | string | a color: on a slide's card, or behind the whole board |
+| `image` | string | a picture's name in `images`, on a slide's card |
+
+### A picture (in `images`)
+
+A picture a note shows, by its name in the document's `images`.
+
+| field | type | meaning |
+|---|---|---|
+| `w` | number | required: its width in pixels |
+| `h` | number | required: its height in pixels |
+| `src` | string | its bytes: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address |
+
+<!-- /fields -->
 
 ## Checking a board before you hand it over
 

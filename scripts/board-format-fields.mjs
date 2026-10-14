@@ -1,0 +1,168 @@
+// The board format's field reference: the "Fields" section of
+// web/board-format.md (served at /board-format.md), between its "fields"
+// markers, written from the doc comments of the format's interfaces
+// (web/board/doc.ts, and images.ts's ImageInfo), so the published
+// reference can't drift from the code.  Every field needs a doc comment
+// saying what it means to a writer, which starts "required" exactly when
+// the field is required.
+//
+//   node scripts/board-format-fields.mjs           write the section
+//   node scripts/board-format-fields.mjs --check   exit 1 if it is not as written
+//   node scripts/board-format-fields.mjs --stdout  print it
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const cell = (s) => s.replace(/\|/g, "\\|");
+
+// (BOARD_FORMAT_ROOT: another tree than this one, for its test)
+const root = process.env.BOARD_FORMAT_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
+const PAGE = join(root, "web", "board-format.md");
+const BEGIN = "<!-- fields: written by scripts/board-format-fields.mjs from the doc comments of web/board/doc.ts; edit those, not this -->";
+const END = "<!-- /fields -->";
+
+// [file, interface, heading]: the sections, in order
+const SECTIONS = [
+  ["web/board/doc.ts", "BoardDoc", "The document"],
+  ["web/board/doc.ts", "BoardPage", "A page (in `pages`)"],
+  ["web/board/doc.ts", "DocNote", "A note (the default item)"],
+  ["web/board/doc.ts", "DocGroup", "A group"],
+  ["web/board/doc.ts", "DocEdge", "An edge"],
+  ["web/board/doc.ts", "DocStep", "A tour step"],
+  ["web/board/doc.ts", "DocSticker", "A sticker"],
+  ["web/board/doc.ts", "DocInk", "Ink"],
+  ["web/board/doc.ts", "SlideRect", "A slide's card (`slide`)"],
+  ["web/board/doc.ts", "PageBackground", "A background (`background`)"],
+  ["web/board/images.ts", "ImageInfo", "A picture (in `images`)"],
+];
+// (a type that is a section: named as the section's item)
+const NAMES = { DocNode: "item", DocNote: "note", DocGroup: "group", DocEdge: "edge", DocStep: "step", BoardPage: "page", SlideRect: "card", PageBackground: "background", ImageInfo: "picture", Preview: "preview" };
+
+const problems = [];
+
+// The interfaces of a file as its source writes them (TypeScript 7 has no
+// compiler API for scripts, and these files keep to one plain style: a doc
+// comment, `//` notes, `name?: type;` a line; anything else is a problem):
+// {name: {doc, fields: [{name, optional, type, doc}]}}, its type aliases, its constants.
+const files = new Map();
+function parse(file) {
+  if (files.has(file)) return files.get(file);
+  const lines = readFileSync(join(root, file), "utf8").split("\n");
+  const interfaces = {}, aliases = {}, consts = {};
+  let pending = null, current = null;
+  // (a doc comment: one line, or several; its text as one line)
+  const docAt = (i) => {
+    let text = "", k = i;
+    for (; k < lines.length; k++) {
+      text += " " + lines[k].trim();
+      if (lines[k].includes("*/")) break;
+    }
+    return [text.replace(/^\s*\/\*\*/, "").replace(/\*\/\s*$/, "").replace(/\s*\n?\s*\*(?!\/)\s?/g, " ").replace(/\s+/g, " ").trim(), k];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i], t = l.trim();
+    if (current) {
+      if (t === "}") { current = null; pending = null; continue; }
+      if (t.startsWith("/**")) { const [d, k] = docAt(i); pending = d; i = k; continue; }
+      if (t.startsWith("//") || t === "") continue;
+      const m = /^([A-Za-z_]\w*)(\?)?:\s*(.+);$/.exec(t);
+      if (!m) { current.unread.push(`${file}:${i + 1}: a line the field reference can't read: ${t}`); continue; }
+      current.fields.push({ name: m[1], optional: !!m[2], type: m[3], doc: pending });
+      pending = null;
+      continue;
+    }
+    if (t.startsWith("/**")) { const [d, k] = docAt(i); pending = d; i = k; continue; }
+    if (t.startsWith("//") || t === "") continue;
+    let m = /^export interface (\w+) \{$/.exec(t);
+    if (m) { current = interfaces[m[1]] = { doc: pending, fields: [], unread: [] }; pending = null; continue; }
+    m = /^export type (\w+) = (.+);$/.exec(t);
+    if (m) aliases[m[1]] = m[2];
+    m = /^export const (\w+) = (.+);$/.exec(t);
+    if (m) consts[m[1]] = m[2];
+    pending = null;
+  }
+  const out = { interfaces, aliases, consts };
+  files.set(file, out);
+  return out;
+}
+
+// (the parts of a type at its top level, split at `sep`)
+function split(text, sep) {
+  const out = [];
+  let depth = 0, quote = null, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) { if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") quote = c;
+    else if ("<[(".includes(c)) depth++;
+    else if (">])".includes(c)) depth--;
+    else if (c === sep && depth === 0) { out.push(text.slice(start, i).trim()); start = i + 1; }
+  }
+  out.push(text.slice(start).trim());
+  return out;
+}
+// A type as a reader writes it: keywords, literals (aliases of them inlined), [lists], {name: value}, and the sections' items.
+function typeText(type, f) {
+  const parts = split(type, "|");
+  if (parts.length > 1) return parts.map((p) => typeText(p, f)).join(" | ");
+  const t = type.trim();
+  if (["string", "number", "boolean"].includes(t)) return t;
+  if (/^"[^"]*"$/.test(t) || /^\d+$/.test(t)) return "`" + t + "`";
+  let m = /^(.+)\[\]$/.exec(t);
+  if (m) return `[${typeText(m[1], f)}]`;
+  m = /^typeof (\w+)$/.exec(t);
+  if (m && f.consts[m[1]]) return typeText(f.consts[m[1]], f);
+  m = /^(\w+)\["(\w+)"\]$/.exec(t);
+  if (m) { const field = f.interfaces[m[1]]?.fields.find((x) => x.name === m[2]); if (field) return typeText(field.type, f); }
+  m = /^Record<string, (.+)>$/.exec(t);
+  if (m) return `{name: ${typeText(m[1], f)}}`;
+  if (NAMES[t]) return NAMES[t];
+  if (f.aliases[t]) return typeText(f.aliases[t], f);
+  problems.push(`a type the field reference can't write out: ${t}`);
+  return t;
+}
+
+const out = [BEGIN, "## Fields", ""];
+out.push("Each kind of thing in a board, its fields, their types and what they mean. A type in words (item, edge, page, ...) is the section of that name; `[x]` is a list of them, `{name: x}` an object of them by name.", "");
+for (const [file, name, heading] of SECTIONS) {
+  const f = parse(file), i = f.interfaces[name];
+  if (!i) { problems.push(`no interface ${name} in ${file}`); continue; }
+  problems.push(...i.unread);
+  out.push(`### ${heading}`, "");
+  if (i.doc) out.push(i.doc, "");
+  else problems.push(`${name}: no doc comment`);
+  out.push("| field | type | meaning |", "|---|---|---|");
+  for (const { name: field, optional, type, doc } of i.fields) {
+    if (!doc) { problems.push(`${name}.${field}: no doc comment`); continue; }
+    if (!optional !== /^required\b/.test(doc)) problems.push(`${name}.${field}: ${optional ? "optional, but its comment starts \"required\"" : "required, but its comment doesn't start \"required\""}`);
+    out.push(`| \`${field}\` | ${cell(typeText(type, f))} | ${cell(doc)} |`);
+  }
+  out.push("");
+}
+out.push(END);
+const section = out.join("\n");
+
+if (problems.length) {
+  process.stderr.write(`board-format-fields: ${problems.length} problem(s):\n  ${problems.join("\n  ")}\n`);
+  process.exit(1);
+}
+if (process.argv.includes("--stdout")) {
+  process.stdout.write(section + "\n");
+  process.exit(0);
+}
+const page = readFileSync(PAGE, "utf8"), a = page.indexOf(BEGIN), b = page.indexOf(END);
+if (a < 0 || b < a) {
+  process.stderr.write(`board-format-fields: ${PAGE} has no fields markers (${BEGIN} ... ${END})\n`);
+  process.exit(1);
+}
+const next = page.slice(0, a) + section + page.slice(b + END.length);
+if (process.argv.includes("--check")) {
+  if (next !== page) {
+    process.stderr.write("board-format-fields: web/board-format.md's Fields are not as web/board/doc.ts says: run node scripts/board-format-fields.mjs\n");
+    process.exit(1);
+  }
+  console.log("web/board-format.md's Fields are as web/board/doc.ts says");
+} else if (next !== page) {
+  writeFileSync(PAGE, next);
+  console.log("wrote web/board-format.md's Fields");
+} else console.log("web/board-format.md's Fields were already as web/board/doc.ts says");

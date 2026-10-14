@@ -8,12 +8,14 @@
 import type { BoardDoc, DocNode } from "./doc";
 import { PixelBudget, dataUrl, imageSize } from "../image-size";
 
+/** A picture a note shows, by its name in the document's `images`. */
 export interface ImageInfo {
-  /** its size in pixels */
+  /** required: its width in pixels */
   w: number;
+  /** required: its height in pixels */
   h: number;
-  /** where its bytes are, when not in this browser: a data: URL (a board
-   * that left the browser), or an https: address */
+  /** its bytes: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address */
+  // (left out while it is in this browser's IndexedDB; a board that left the browser carries it)
   src?: string;
 }
 

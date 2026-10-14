@@ -32,53 +32,77 @@ function outlineOf(n: DocInk): number[] {
 // Every note has the same optional parts, shown (and edited) in this order:
 // its title, its picture, its text, its code with the code's output, its
 // detail, its link.  A note that is only a picture is shown as the picture.
+// (The doc comments of these interfaces are the format's published field
+// reference, web/board-format.md: scripts/board-format-fields.mjs writes it
+// from them, so each field needs one, saying what it means to a writer.)
+/** A note: the default item. Every part is optional; a note with `code` is a code item. */
 export interface DocNote {
+  /** required: unique on its page (an edge names it) */
   id: string;
+  /** `"note"`, or left out */
   kind?: "note";
+  /** a heading (plain text, math allowed) */
   title?: string;
-  /** a picture: its name in the document's `images` (images.ts) */
+  /** a picture: its name in the document's `images` */
   image?: string;
-  /** Markdown with math ($...$), shown at every zoom */
+  /** Markdown with math (`$...$`), shown at every zoom */
   text?: string;
-  /** Python, run on the board's interpreter (reactive, as a notebook's cells:
-   * web/board/code.ts), its output under it: a note with code is a code item.
-   * (Documents before October 13, 2026 also said `kind: "code"`.) */
+  /** code in the board's language (`mode`), run in the reader's browser,
+   * its output under it; it makes the note a code item */
+  // (one interpreter for the board, reactive as a notebook's cells:
+  // web/board/code.ts; documents before October 13, 2026 also said
+  // `kind: "code"`)
   code?: string;
-  /** show only the code's output, not the code */
+  /** `true`: show only the code's output, not the code */
   hideCode?: boolean;
-  /** a slow code item's output, kept to show before it runs (preview.ts,
-   * design/outputs.md); last in the file */
+  /** a slow code item's output, kept to show before it runs (written by Sagebrush) */
+  // (preview.ts, design/outputs.md; last in the file)
   preview?: Preview;
-  /** Markdown shown only when zoomed in (semantic zoom) */
+  /** Markdown shown only when zoomed in */
   detail?: string;
-  /** a link: a source file (path#Lline), a paper, a page */
+  /** a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` */
   ref?: string;
+  /** a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) */
   color?: string;
-  /** its outline (a flowchart's: Mermaid's shapes); its text is then centered */
+  /** its outline (a flowchart's); its text is then centered */
   shape?: NoteShape;
-  /** as wide as its text needs, up to `w` (default 260), rather than `w` */
+  /** `true`: as wide as its text needs, up to `w` */
   fit?: boolean;
+  /** its position, kept once a person moves it: leave it out, and the board places it */
   x?: number;
+  /** as `x` */
   y?: number;
+  /** its width (default 260, or 440 for a code item) */
   w?: number;
+  /** its height (default: as tall as what it shows) */
   h?: number;
 }
 
 export type NoteShape = "rect" | "round" | "stadium" | "circle" | "diamond" | "hexagon" | "cylinder" | "subroutine" | "lean-right" | "lean-left" | "trapezoid" | "inv-trapezoid" | "flag";
 
+/** A group: items laid out together, under a title. Groups nest; an edge may join any two items on a page, in any groups. */
 export interface DocGroup {
+  /** required: unique on its page */
   id: string;
+  /** required: `"group"` */
   kind: "group";
+  /** a heading (plain text, math allowed) */
   title?: string;
+  /** Markdown with math, under the title */
   text?: string;
+  /** how its items are laid out (default `graph`: in layers along the edges among them) */
   layout?: "row" | "column" | "grid" | "graph";
-  /** grid layout: how many columns (default: as square as can be) */
+  /** `grid` layout: how many columns (default: as square as can be) */
   columns?: number;
-  /** graph layout: layers top to bottom (TB, the default) or left to right (LR) */
+  /** `graph` layout: layers top to bottom (`TB`, the default) or left to right (`LR`) */
   direction?: "TB" | "LR";
+  /** required: its items (notes, groups, stickers) */
   children: DocNode[];
+  /** a color */
   color?: string;
+  /** its position, kept once a person moves it: leave it out */
   x?: number;
+  /** as `x` */
   y?: number;
 }
 
@@ -86,80 +110,122 @@ export interface DocGroup {
 // an outline whose width follows it.  (x, y) is the corner of its box, the
 // points' extent and the pen's size around it; the points are measured from
 // that corner.
+/** A pen stroke, drawn by a person. Don't write these. */
 export interface DocInk {
+  /** required: unique on its page */
   id: string;
+  /** required: `"ink"` */
   kind: "ink";
-  /** x, y, pressure (0 to 1), ...: as drawn (streamlined, a mouse's
-   * pressure from its speed: ink.ts InkCapture), so drawn as they are */
+  /** required: x, y and pressure (0 to 1) of each point, from the corner (`x`, `y`) */
+  // (as drawn: streamlined, a mouse's pressure from its speed, ink.ts InkCapture)
   points: number[];
-  /** the pen's width (each stroke says: a later default changes no old one) */
+  /** the pen's width */
+  // (each stroke says: a later default changes no old one)
   size?: number;
+  /** its color */
   color?: string;
   /** below 1: a highlighter's, which what is under it shows through */
   opacity?: number;
+  /** required: the corner of its box */
   x: number;
+  /** required: as `x` */
   y: number;
 }
 
 // A sticker (stickers.ts): an emoji, or a CoCalc icon by name, shown
-// without a frame, as wide as `w` (default 64).  (A picture alone is a
-// note with only a picture.)
+// without a frame.  (A picture alone is a note with only a picture.)
+/** A sticker: one emoji, or one of CoCalc's icons, shown without a frame. */
 export interface DocSticker {
+  /** required: unique on its page */
   id: string;
+  /** required: `"sticker"` */
   kind: "sticker";
-  /** one emoji (one grapheme) */
+  /** one emoji */
   emoji?: string;
-  /** one of CoCalc's icons, by name (a converted CoCalc board), and its color */
+  /** one of CoCalc's icons, by name (a converted CoCalc board), with `color` */
   icon?: string;
+  /** an icon's color */
   color?: string;
+  /** its position: leave it out, and the board places it */
   x?: number;
+  /** as `x` */
   y?: number;
+  /** its width (default 64) */
   w?: number;
 }
 
 export type DocNode = DocNote | DocGroup | DocInk | DocSticker;
 
-/** A slide's card on its page (board coordinates). */
-export interface SlideRect { x: number; y: number; w: number; h: number }
-/** A page's background: a color; a picture's name in `images`. */
-export interface PageBackground { color?: string; image?: string }
+/** A slide's card on its page, in board coordinates. */
+export interface SlideRect {
+  /** required: its left edge */
+  x: number;
+  /** required: its top edge */
+  y: number;
+  /** required: its width */
+  w: number;
+  /** required: its height (16:9 with `w`, say) */
+  h: number;
+}
+/** A page's background. */
+export interface PageBackground {
+  /** a color: on a slide's card, or behind the whole board */
+  color?: string;
+  /** a picture's name in `images`, on a slide's card */
+  image?: string;
+}
 
+/** An edge between two items on a page, drawn as an arrow from `from` to `to`. */
 export interface DocEdge {
+  /** required: an item's id */
   from: string;
+  /** required: an item's id */
   to: string;
+  /** a label on it (plain text) */
   label?: string;
-  /** used to lay out, not drawn (to place one box below another) */
+  /** `true`: not drawn, only used to lay out (to place one box below another) */
   hidden?: boolean;
-  /** arrowheads: at the end (the default), none, or both ends */
+  /** arrowheads: at the end (when left out), `none`, or `both` ends */
   arrow?: "none" | "both";
+  /** `dotted` or `thick` (default: a thin line) */
   line?: "dotted" | "thick";
 }
 
 /** A step of a tour: the camera shows these items while the caption explains them. */
 export interface DocStep {
+  /** required: an item's id, or several */
   focus: string | string[];
-  /** Markdown */
+  /** the caption (Markdown with math) */
   say?: string;
 }
 
-/** A page of a board: its own notes, edges and tour. */
+/** A page of a board: its own items, edges and tour. */
 export interface BoardPage {
+  /** needed by templates; unique among the pages */
   id?: string;
+  /** the page's title (plain text) */
   title?: string;
+  /** Markdown shown before the page's tour */
   intro?: string;
+  /** how the page's items are laid out (default `graph`) */
   layout?: DocGroup["layout"];
+  /** as for a group */
   columns?: number;
+  /** as for a group */
   direction?: DocGroup["direction"];
-  /** a slide: the card (16:9, say) the page is arranged on, which Present shows */
+  /** the card the page is arranged on, a slide, which Present shows */
   slide?: SlideRect;
-  /** the page's background: a color (on the card, or behind the whole board); a picture (on a slide's card) */
+  /** the page's background */
   background?: PageBackground;
-  /** a template: other pages can be made from it (it needs an id) */
+  /** `true`: other pages can be made from it (it needs an `id`) */
   template?: boolean;
-  /** made from this template page (its id): its card, background and items under the page's own */
+  /** a template page's id: its card, background and items appear under this page's own */
   uses?: string;
+  /** required: the page's items */
   nodes: DocNode[];
+  /** the edges among them */
   edges?: DocEdge[];
+  /** its tour */
   steps?: DocStep[];
 }
 
@@ -173,43 +239,51 @@ export const VERSION = 1;
 export type BoardMode = "python" | "sage" | "magma" | "matlab";
 const MODES = ["sage", "magma", "matlab"] as const;
 
+/** A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`). */
 export interface BoardDoc {
+  /** `"sagebrush-board"`: write it first */
   format?: typeof FORMAT;
-  /** the format's version: 1 */
+  /** `1`: write it second */
   version?: number;
+  /** the board's title (plain text) */
   title?: string;
-  /** the language of its code items: Python (the default), Sage, Magma or MATLAB (one per board) */
+  /** the language of its code items, one per board (default `python`) */
   mode?: BoardMode;
-  /** in a downloaded file (export.ts, engine.ts), the engine its code runs
-   * with: the latest, when online; else (the default) the one it was saved with */
+  /** `"latest"`, in a downloaded file: run with the newest engine when online (written by Sagebrush) */
+  // (export.ts, engine.ts: else the one it was saved with)
   engine?: "latest";
-  /** the seed of its code's random numbers (64 hex digits): each code item
-   * draws from the hash of it and the item's id, so the same board draws the
-   * same numbers, and its outputs can be cached (design/outputs.md); a board
-   * without one uses BOARD_SEED */
+  /** 64 hex digits: the seed of its code's random numbers; without it a fixed
+   * default is used, so a board's random numbers are always repeatable */
+  // (each code item draws from the hash of it and the item's cell id, and its
+  // outputs can be cached: design/outputs.md; BOARD_SEED without one)
   seed?: string;
-  /** the toolbar's tools in Edit mode (toolbar.ts), in order; else the person's default */
+  /** the toolbar's tools in Edit mode, in order (written by Sagebrush) */
+  // (toolbar.ts; else the person's default)
   tools?: string[];
-  /** the pictures notes show, by name: each one's size (and its bytes, as a
-   * data: URL, in a board that left the browser: images.ts) */
+  /** pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL) */
+  // (their bytes as data: URLs in a board that left the browser: images.ts)
   images?: Record<string, ImageInfo>;
-  /** pages, each with its own nodes, edges and steps; without them the
-   * document is one page (its own nodes, edges and steps) */
+  /** several pages; a document with pages has no `nodes`, `edges` or `steps` of its own */
   pages?: BoardPage[];
-  /** Markdown, shown before the tour starts */
+  /** Markdown shown before the tour starts */
   intro?: string;
-  /** links' base for refs that are paths (e.g. a repository's blob URL) */
+  /** the base URL for `ref` links that are paths (e.g. a repository's blob URL) */
   refBase?: string;
+  /** how the top-level items are laid out (default `graph`) */
   layout?: DocGroup["layout"];
+  /** as for a group */
   columns?: number;
+  /** as for a group */
   direction?: DocGroup["direction"];
-  /** a slide: the card (16:9, say) the page is arranged on, which Present shows */
+  /** as for a page */
   slide?: SlideRect;
-  /** the page's background: a color (on the card, or behind the whole board); a picture (on a slide's card) */
+  /** as for a page */
   background?: PageBackground;
-  /** (a document with pages has none of its own) */
+  /** the items of a one-page board */
   nodes?: DocNode[];
+  /** the edges among them */
   edges?: DocEdge[];
+  /** its tour */
   steps?: DocStep[];
 }
 
