@@ -179,8 +179,9 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
 - **`colon`** computes `a:d:b` with the second half of the elements
   counted back from the end point, consistent with MATLAB's observed
   output (`0:0.1:0.5` holds exactly 0.3); its tolerance and middle element
-  are Sagebrush's and need not be MATLAB's. **`linspace`** uses MATLAB's
-  formula. **`rand`** gives MATLAB's numbers: the Mersenne twister seeded
+  are Sagebrush's and need not be MATLAB's. **`linspace`** follows its
+  documentation: the spacing (x2 - x1)/(n - 1), both ends included.
+  **`rand`** gives MATLAB's numbers: the Mersenne twister seeded
   with 5489, as `rng default` does, and so do `randi` and `randperm(n)`.
   (`sprand` and `sprandn` draw their places with replacement and keep each
   place once, so a matrix has somewhat fewer nonzeros than the density
