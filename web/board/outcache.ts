@@ -84,7 +84,8 @@ const done = (t: IDBTransaction) => new Promise<void>((res, rej) => { t.oncomple
  */
 export class IdbOutputCache implements OutputCache {
   private db: Promise<IDBDatabase> | null = null;
-  constructor(readonly name = "sagebrush-outputs", readonly caps = { doc: DOC_CAP, all: ALL_CAP }) {}
+  /** @param engine the id of the engine computing what is put (recorded with each entry) */
+  constructor(readonly engine?: string, readonly name = "sagebrush-outputs", readonly caps = { doc: DOC_CAP, all: ALL_CAP }) {}
   private open(): Promise<IDBDatabase> {
     return (this.db ??= new Promise((res, rej) => {
       const r = indexedDB.open(this.name, 1);
@@ -120,7 +121,7 @@ export class IdbOutputCache implements OutputCache {
     if (bytes > ENTRY_MAX) return;
     const db = await this.open(), t = db.transaction(["entries", "docs"], "readwrite"), es = t.objectStore("entries"), ds = t.objectStore("docs"), now = Date.now();
     const old = await req(es.get([doc, entry.key]));
-    es.put({ ...entry, doc, bytes, used: now });
+    es.put({ ...entry, ...(this.engine && !entry.engine ? { engine: this.engine } : {}), doc, bytes, used: now });
     const d = (await req(ds.get(doc))) ?? { doc, bytes: 0, used: now };
     ds.put({ doc, bytes: d.bytes - (old?.bytes ?? 0) + bytes, used: now });
     await done(t);

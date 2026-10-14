@@ -37,7 +37,6 @@ export function siteEngine(base: URL, runner = true): EngineParts {
 
 import { PREVIEW_MS, makePreview, previewLabel, type Preview } from "./preview";
 import { CACHE_MS, cachedLabel, type CachedOutputs, type OutputCache } from "./outcache";
-import { OWN_ENGINE } from "./engine";
 
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
@@ -303,7 +302,7 @@ export class BoardCode {
       const c = this.cell(id), k = keys[id], state = this.state(id);
       // (not: running again, interrupted, after a widget moved, or one that read files, whose bytes its key doesn't say)
       if (!c || !k?.key || k.widget || k.reads || (state !== "" && state !== "failed") || this.generation(id) !== gens.get(id) || k.fromRoot <= this.cacheMs) continue;
-      entries.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot), ...(OWN_ENGINE ? { engine: OWN_ENGINE.id } : {}) });
+      entries.push({ key: k.key, outputs: this.nb.saveOutputs(c.out), at, ms: Math.round(k.ms ?? 0), total: Math.round(k.fromRoot) });
     }
     for (const e of entries) await cache.put(ns, e);
     if (entries.length) await cache.sweep(ns, new Set(Object.values(keys).map((k: any) => k.key).filter(Boolean)));
