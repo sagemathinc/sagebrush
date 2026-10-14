@@ -280,8 +280,10 @@ export class Board {
     this.cache = new Map();
     for (const it of items) {
       const el = old.get(it.id);
-      if (el && it.id === this.editingId) {
-        // (being edited: kept whatever it now shows, as tall as its fields)
+      // (being edited: kept whatever it now shows, as tall as its fields; not
+      // into another document's epoch, CORR-A48-4: no longer edited)
+      if (el && it.id === this.editingId && !el.dataset.key?.startsWith(this.epoch + "[")) { this.editingId = null; this.editingEl = null; }
+      else if (el && it.id === this.editingId) {
         el.style.cssText = placement(it) + `height:auto;min-height:${+it.h}px;`;
         this.cache.set(it.id, el);
       } else if (el && el.dataset.key === this.epoch + contentKey(it)) {
