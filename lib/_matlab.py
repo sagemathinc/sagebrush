@@ -5592,28 +5592,55 @@ def svd_(nargout, x, *args):
 
 
 @_bi("lu")
-def lu_(nargout, x):
-    A = _mat(x).astype(np.float64)
-    n = A.shape[0]
-    U = A.copy()
-    L = np.eye(n)
-    P = np.eye(n)
-    for k in range(n - 1):
-        p = int(np.argmax(np.abs(U[k:, k]))) + k
-        if p != k:
-            U[[k, p], :] = U[[p, k], :]
-            P[[k, p], :] = P[[p, k], :]
-            L[[k, p], :k] = L[[p, k], :k]
-        if U[k, k] != 0:
-            for i in range(k + 1, n):
-                L[i, k] = U[i, k] / U[k, k]
-                U[i, :] = U[i, :] - L[i, k] * U[k, :]
-                U[i, k] = 0.0
+def lu_(nargout, x, *args):
+    """lu as documented for an m-by-n matrix, real or complex: Gaussian
+    elimination with partial pivoting (the first largest magnitude in the
+    column; the multipliers by the pivot's reciprocal, as LAPACK's dgetf2
+    forms them).  Y = lu(A) holds U and L's multipliers in one matrix;
+    [L, U] = lu(A) has L = P'*L, so that A = L*U; [L, U, P] = lu(A) has
+    P*A = L*U, and with outputForm 'vector' P is the vector with
+    A(P,:) = L*U.  The sparse forms with a column permutation Q, a scaling
+    D or pivoting thresholds are refused."""
+    form = "matrix"
+    for o in args:
+        if _istext(o) and _text(o).lower() in ("vector", "matrix"):
+            form = _text(o).lower()
+        else:
+            raise _err("lu: pivoting thresholds are not supported in Sagebrush.")
+    if nargout > 3:
+        raise _err("lu: the column permutation Q and the scaling D are not supported in Sagebrush.")
+    A = _mat(x)
+    dt = np.complex128 if A.dtype.kind == "c" else np.float64
+    m, n = A.shape
+    k = min(m, n)
+    U = np.array(A, dtype=dt)
+    L = np.zeros((m, k), dtype=dt)
+    perm = list(range(m))
+    for j in range(k):
+        p = int(np.argmax(np.abs(U[j:, j]))) + j
+        if p != j:
+            U[[j, p], :] = U[[p, j], :]
+            L[[j, p], :j] = L[[p, j], :j]
+            perm[j], perm[p] = perm[p], perm[j]
+        L[j, j] = 1.0
+        if U[j, j] != 0:
+            r = 1.0 / U[j, j]
+            for i in range(j + 1, m):
+                L[i, j] = U[i, j] * r
+                U[i, j + 1:] = U[i, j + 1:] - L[i, j] * U[j, j + 1:]
+                U[i, j] = 0.0
+    U = U[:k, :]
     if nargout <= 1:
-        return _unmat(U + L - np.eye(n))
+        Y = np.zeros((m, n), dtype=dt)
+        Y[:k, :] = U
+        for j in range(k):
+            Y[j + 1:, j] = L[j + 1:, j]
+        return _unmat(Y)
+    P = np.eye(m)[perm, :]
     if nargout == 2:
         return [_unmat(P.T @ L), _unmat(U)]
-    return [_unmat(L), _unmat(U), _unmat(P)]
+    Pout = _box(np.array([float(i + 1) for i in perm]).reshape((m, 1))) if form == "vector" else _unmat(P)
+    return [_unmat(L), _unmat(U), Pout]
 
 
 @_bi("qr")
