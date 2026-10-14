@@ -248,13 +248,15 @@ test("sparse matrices in .mat files: logical ones saved and loaded, and read as 
   writeFileSync(join(dir, "s.m"), [
     "L = sparse([1 0 1; 0 0 1]) > 0; A = spalloc(4, 4, 6); A(2, 3) = 7;",
     "f = [tempname '.mat']; save(f, 'L', 'A'); clear L A; load(f);",
-    "fprintf('%d %d %d %d %d\\n', issparse(L), islogical(L), issparse(A), nnz(A), full(A(2, 3)));",
+    "fprintf('%d %d %d %d %d %d\\n', issparse(L), islogical(L), issparse(A), nzmax(A), nnz(A), full(A(2, 3)));",
     "disp(mat2str(full(L)));",
     `load('${join(__dirname, "..", "..", "matlab-tests", "data", "octave_sparse_logical.mat")}');`,
     "fprintf('%d %d\\n', issparse(spl), islogical(spl)); disp(mat2str(full(spl)));",
+    `S = load('${join(__dirname, "..", "..", "matlab-tests", "data", "octave_sparse_nzmax.mat")}');`,
+    "fprintf('%d %d %d\\n', nzmax(S.A), nnz(S.A), full(S.A(2, 3)));",
   ].join("\n"));
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8" });
-  assert.deepEqual(out.trim().split("\n"), ["1 1 1 1 7", "[true false true;false false true]", "1 1", "[true false true;false false true]"]);
+  assert.deepEqual(out.trim().split("\n"), ["1 1 1 6 1 7", "[true false true;false false true]", "1 1", "[true false true;false false true]", "6 1 7"]);
 });
 
 test(".mat files are untrusted: decompression is bounded, sparse metadata is checked before use", () => {
@@ -316,7 +318,7 @@ test(".mat files are untrusted: decompression is bounded, sparse metadata is che
   assert.equal(msg("fine.mat"), "fine.mat: double 1 2 3");
 });
 
-test("sparse: single kept by spdiags and cast-like; 'like', cast, normest and condest never expand; sprandsym's density", () => {
+test("sparse: single kept by spdiags and cast-like; 'like', cast, normest, condest and large solves never expand; sprandsym's density", () => {
   const { execFileSync } = require("node:child_process");
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
@@ -332,7 +334,10 @@ test("sparse: single kept by spdiags and cast-like; 'like', cast, normest and co
     "E = speye(1e5); fprintf('%g %g\\n', normest(E), condest(E));",
     "[n, c] = normest(sparse(3, 3)); fprintf('%g %g\\n', n, c);",
     "rng(1); R = sprandsym(1000, 0.2); fprintf('%d %.3f\\n', isequal(R, R'), nnz(R) / 1e6);",
+    "rng(1); R = sprandsym(200, 1); fprintf('%d %d\\n', isequal(R, R'), nnz(R));",
+    "n = 20000; A = speye(n); A(1, n) = -0.5; A(n, 2) = -0.5; fprintf('%g\\n', condest(A));",
+    "b = (1:n)'; x = A \\ b; y = A' \\ b; fprintf('%.3g %.3g\\n', max(abs(A * x - b)), max(abs(A' * y - b)));",
   ].join("\n"));
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "s.m")], { encoding: "utf8", timeout: 120000 });
-  assert.deepEqual(out.trim().split("\n"), ["single single", "single 1 1", "single 0", "double 1 2 2 | 1 1", "1 0", "1 1", "0 0", "1 0.200"]);
+  assert.deepEqual(out.trim().split("\n"), ["single single", "single 1 1", "single 0", "double 1 2 2 | 1 1", "1 0", "1 1", "0 0", "1 0.200", "1 40000", "2.625", "0 0"]);
 });

@@ -120,8 +120,17 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
     arithmetic, comparisons, the zero-preserving elementwise functions, the
     common reductions and shape functions, and every matrix product work on
     that storage. So large matrices are never expanded.
-  - `S\b` with a large square matrix of small bandwidth is solved by a
-    banded LU, in LAPACK's band storage.
+  - `S\b` with a large square matrix (n > 4000) is solved without the
+    full matrix:
+    - a diagonal one row by row;
+    - one of small bandwidth by a banded LU, in LAPACK's band storage;
+    - any other by a sparse LU (left-looking, partial pivoting that
+      prefers the diagonal).
+
+    There is no fill-reducing column ordering, as UMFPACK has. So a matrix
+    whose factors fill in too far is refused with `MATLAB:nomem`, rather
+    than run for minutes. `condest` of a large sparse matrix uses the same
+    LU.
   - Every other function sees the full matrix a sparse one stands for. The
     first sparse matrix a program makes wraps the built-ins for this, so
     programs without one pay nothing. Those MATLAB keeps sparse convert
