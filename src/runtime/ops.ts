@@ -558,7 +558,8 @@ const BIN: Record<string, (a: any, b: any) => any> = { add, sub, mul, truediv, f
 export function iadd(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return add(a, b);
   if (typeof a === "string" && typeof b === "string") return a + b;
-  if (Array.isArray(a) && (a as any).$t !== true) {
+  // (a Python subclass of list with its own __iadd__ goes through it)
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__iadd__")) {
     if (Array.isArray(b)) {
       const n = b.length;
       for (let i = 0; i < n; i++) a.push(b[i]);
@@ -574,7 +575,7 @@ export function isub(a: any, b: any): any {
 }
 export function imul(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return mul(a, b);
-  if (Array.isArray(a) && (a as any).$t !== true && repeatCount(b) !== undefined) {
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && repeatCount(b) !== undefined) {
     const r = repeatArray(a, repeatCount(b)!);
     a.length = 0;
     for (const v of r) a.push(v);

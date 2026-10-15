@@ -471,6 +471,25 @@ class Rational(_Fraction):
         """
         return _CallableInt(self._numerator)
 
+    def valuation(self, p):
+        """The exponent of the prime p in self (+Infinity for 0).
+
+        EXAMPLES::
+
+            sage: QQ(9/4).valuation(3), QQ(9/4).valuation(2), QQ(-50/7).valuation(5), QQ(0).valuation(3)
+            (2, -2, 2, +Infinity)
+            sage: QQ(32/3).valuation(4), QQ(12/5).valuation(2.0)
+            (2, 2)
+            sage: QQ(1/2).valuation(1)
+            Traceback (most recent call last):
+            ...
+            ValueError: You can only compute the valuation with respect to a integer larger than 1.
+        """
+        p = _valuation_base(p)
+        if self._numerator == 0:
+            return oo
+        return Integer(valuation(self, p))
+
     @property
     def denominator(self):
         """The denominator.
@@ -1128,6 +1147,32 @@ def is_square(n):
     return n >= 0 and isqrt(n) ** 2 == n
 
 
+def _valuation_base(p):
+    """p as an int, an integer > 1 (composite allowed, as Sage): integral
+    rationals and reals accepted; TypeError for a fractional value, ValueError
+    for p < 2 (it is checked before any loop: base 1 never terminated)."""
+    if isinstance(p, bool):
+        p = int(p)
+    if not isinstance(p, int):
+        if isinstance(p, _Fraction):
+            if p.denominator != 1:
+                raise TypeError("no conversion of this rational to integer")
+            p = p.numerator
+        else:
+            try:
+                from _sage_padic import _exact_number
+                q = _exact_number(p)
+            except (TypeError, ValueError, OverflowError):
+                raise TypeError("unable to convert %r to an integer" % (p,))
+            if q.denominator != 1:
+                raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
+            p = q.numerator
+    p = int(p)
+    if p < 2:
+        raise ValueError("You can only compute the valuation with respect to a integer larger than 1.")
+    return p
+
+
 def valuation(n, p):
     """The exponent of the prime p in n.
 
@@ -1136,6 +1181,7 @@ def valuation(n, p):
         sage: valuation(48, 2), valuation(3/8, 2), valuation(50, 5)
         (4, -3, 2)
     """
+    p = _valuation_base(p)
     if isinstance(n, _Fraction) and n.denominator != 1:
         return valuation(n.numerator, p) - valuation(n.denominator, p)
     n, v = int(n), 0
