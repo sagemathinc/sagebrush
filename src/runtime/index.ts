@@ -588,6 +588,7 @@ export const R: any = {
   NotImplemented: Obj.NotImplemented,
   Ellipsis: Obj.Ellipsis,
   tuple,
+  sumAcc: (start: any) => new B.SumAcc(start),
   raise,
   raiseExc: Obj.raiseExc,
   toPyExc: Obj.toPyExc,

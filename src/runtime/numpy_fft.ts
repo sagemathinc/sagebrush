@@ -14,6 +14,20 @@ const RADIX_CONSTS = Float64Array.from([3, 5].flatMap((R) => [
   FD.cos((2 * Math.PI) / R), FD.sin((2 * Math.PI) / R), FD.cos((4 * Math.PI) / R), FD.sin((4 * Math.PI) / R),
 ]));
 
+// cos and sin of 2 pi k/n, from the angle reduced to the first octant, as
+// pocketfft computes its twiddles: quarter turns are exact (cos(pi/2) is 0,
+// not 6e-17) and the table is symmetric, so a real input's transform has no
+// rounding noise where NumPy's has none.
+export function cs2pi(k: number, n: number): [number, number] {
+  k %= n;
+  const q = Math.floor((4 * k) / n), r = 4 * k - q * n; // 2 pi k/n = q pi/2 + (pi/2) r/n
+  let c: number, s: number;
+  if (r === 0) [c, s] = [1, 0];
+  else if (2 * r <= n) [c, s] = [FD.cos((Math.PI / 2) * (r / n)), FD.sin((Math.PI / 2) * (r / n))];
+  else [c, s] = [FD.sin((Math.PI / 2) * ((n - r) / n)), FD.cos((Math.PI / 2) * ((n - r) / n))];
+  return q === 0 ? [c, s] : q === 1 ? [-s, c] : q === 2 ? [-c, -s] : [s, -c];
+}
+
 // Per-size tables: twiddles cos/sin(2*pi*k/n) for k < n/2 and the bit-reversal permutation.
 const tables = new Map<number, { c: Float64Array; s: Float64Array; rev: Uint32Array }>();
 function table(n: number) {
@@ -21,8 +35,7 @@ function table(n: number) {
   if (!t) {
     const c = new Float64Array(n >> 1), s = new Float64Array(n >> 1);
     for (let k = 0; k < n >> 1; k++) {
-      c[k] = FD.cos((2 * Math.PI * k) / n);
-      s[k] = FD.sin((2 * Math.PI * k) / n);
+      [c[k], s[k]] = cs2pi(k, n);
     }
     const rev = new Uint32Array(n);
     for (let i = 1, j = 0; i < n; i++) {
@@ -122,8 +135,7 @@ function twiddle(n: number) {
   if (!t) {
     const c = new Float64Array(n), s = new Float64Array(n);
     for (let k = 0; k < n; k++) {
-      c[k] = FD.cos((2 * Math.PI * k) / n);
-      s[k] = FD.sin((2 * Math.PI * k) / n);
+      [c[k], s[k]] = cs2pi(k, n);
     }
     t = { c, s };
     if (twiddles.size > 32) twiddles.clear();
