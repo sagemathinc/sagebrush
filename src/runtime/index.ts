@@ -442,10 +442,17 @@ B.builtins.locals = Obj.builtin(() => raise(T.RuntimeError, "locals() called ind
 // by the time it is called, so it receives a stand-in body function.
 export const defaultBuildClass = Obj.builtin((..._a: any[]) => raise(T.NotImplementedError, "calling __build_class__ directly is not supported"), "__build_class__");
 B.builtins.__build_class__ = defaultBuildClass;
-export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any>, kwNames: string[], kwValues: any[]): any {
+export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any>, kwNames: string[], kwValues: any[], cell?: Ty.PyCell): any {
   const bc = B.builtins.__build_class__;
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
-  return Ty.makeClass(name, bases, ns, module, qualname, kwNames, kwValues);
+  const cls = Ty.makeClass(name, bases, ns, module, qualname, kwNames, kwValues);
+  // CPython's __build_class__: type.__new__ must have set the class cell
+  // (a metaclass may drop __classcell__ on the way)
+  if (cell !== undefined && Obj.isType(cls) && cell.v !== cls) {
+    if (cell.v === undefined) raise(T.RuntimeError, `__class__ not set defining ${F.repr(name)} as ${F.repr(cls)}. Was __classcell__ propagated to type.__new__?`);
+    raise(T.TypeError, `__class__ set to ${F.repr(cell.v)} defining ${F.repr(name)} as ${F.repr(cls)}`);
+  }
+  return cls;
 }
 
 // ------------------------------------------------------------------ tracebacks
@@ -599,6 +606,10 @@ export const R: any = {
   newDict: Obj.newDict,
   typeOf: Obj.typeOf,
   superOf: Ty.superOf,
+  superNoArgs: Ty.superNoArgs,
+  superAttr: Ty.superAttr,
+  newCell: Ty.newCell,
+  classCellGet: Ty.classCellGet,
   makeRange: Ty.makeRange,
   PyRange: Ty.PyRange,
   defn,
