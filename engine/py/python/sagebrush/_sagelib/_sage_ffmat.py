@@ -49,8 +49,9 @@ class FFVector:
     __slots__ = ("_base", "_e")
 
     def __init__(self, base, entries):
+        from _sage_matrix import _bounded_list
         self._base = base
-        self._e = [base(x) for x in entries]
+        self._e = [base(x) for x in _bounded_list(entries)]
 
     def __repr__(self):
         return "(" + ", ".join(repr(x) for x in self._e) + ")"
@@ -305,12 +306,14 @@ class FFMatrix:
     __slots__ = ("_base", "_rows", "_ncols")
 
     def __init__(self, base, rows, ncols=None):
-        from _sage_matrix import _shape
+        from _sage_matrix import _shape, _read_rows
+        # read boundedly and check the shape before converting anything
+        rows = _read_rows(rows)
+        ncols = ncols if ncols is not None else (len(rows[0]) if rows else 0)
+        _shape(len(rows), ncols)
         self._base = base
         self._rows = [[base(x) for x in r] for r in rows]
-        self._ncols = ncols if ncols is not None else (len(self._rows[0]) if self._rows else 0)
-        # (a backstop: every path checks the shape before building rows)
-        _shape(len(self._rows), self._ncols)
+        self._ncols = ncols
 
     # ---- data
     def parent(self):

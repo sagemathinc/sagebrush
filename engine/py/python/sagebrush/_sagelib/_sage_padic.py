@@ -1386,11 +1386,14 @@ class PadicMatrix:
     def __init__(self, base, rows, ncols=None):
         # (rows: lists, already read; entries converted into base: integers,
         # rationals and p-adic numbers of the same prime, as Sage converts)
+        from _sage_matrix import _read_rows
         self._base = base
+        # read boundedly and check the shape before converting anything
+        rows = _read_rows(rows, _PADIC_MATRIX_MAX_ENTRIES)
         ncols = ncols if ncols is not None else (len(rows[0]) if rows else 0)
+        _check_entries(len(rows), ncols)
         if any(len(r) != ncols for r in rows):
             raise ValueError("the rows of a matrix must all have the same length")
-        _check_entries(len(rows), ncols)
         self._rows = [[base(x) for x in r] for r in rows]
         self._ncols = ncols
 

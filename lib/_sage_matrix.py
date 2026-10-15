@@ -36,6 +36,10 @@ class Vector(list):
         ((2, 4, 6), (2, 4, 6), 14)
     """
 
+    def __init__(self, entries=()):
+        # (read boundedly: a Vector is built from any iterable)
+        list.__init__(self, _bounded_list(entries))
+
     def __repr__(self):
         return "(" + ", ".join(repr(x) for x in self) + ")"
 
@@ -524,6 +528,9 @@ class Matrix:
     __slots__ = ("_base", "_rows", "_subdiv", "_nc", "_immutable")
 
     def __init__(self, base, rows, ncols=None):
+        # read boundedly and check the shape before converting anything
+        rows = _read_rows(rows)
+        _shape(len(rows), len(rows[0]) if rows else (ncols or 0))
         self._rows = [[_norm(x) for x in r] for r in rows]
         # rows of one length (a ragged [[1, 2], [3]] lost the 2 on
         # transposing: the systematic review's API-F6)
@@ -533,8 +540,6 @@ class Matrix:
         # the number of columns, kept when there are no rows (a 0 x 3
         # matrix was 0 x 0: the systematic review's LIN-F4)
         self._nc = len(self._rows[0]) if self._rows else (ncols or 0)
-        # (a backstop: every path checks the shape before building rows)
-        _shape(len(self._rows), self._nc)
         if base is _sa().ZZ and any(not isinstance(x, int) for r in self._rows for x in r):
             raise TypeError("matrix entries are not all integers")
         self._base = base
@@ -757,11 +762,12 @@ class Matrix:
             sage: A.subdivisions()
             ([1], [1])
         """
-        def norm(x):
+        def norm(x, n):
             if x is None:
                 return []
-            return sorted(int(t) for t in ([x] if isinstance(x, int) else x))
-        r, c = norm(row_lines), norm(col_lines)
+            # (at most one line per row or column boundary, read boundedly)
+            return sorted(int(t) for t in ([x] if isinstance(x, int) else _bounded_list(x, n + 1)))
+        r, c = norm(row_lines, self.nrows()), norm(col_lines, self.ncols())
         self._subdiv = (r, c) if r or c else None
 
     def subdivisions(self):
@@ -1909,6 +1915,23 @@ def _shape(m, n, limit=None):
     if m > limit or n > limit or m * n > limit:
         raise NotImplementedError("a %d x %d matrix exceeds sagebrush's limit of %d entries (and rows, columns)" % (m, n, limit))
     return m, n
+
+
+def _read_rows(rows, limit=None):
+    """The rows of a matrix, each a list: read boundedly (at most limit
+    entries, and rows, in all; every row must be an iterable), so that a
+    constructor can check the shape before converting anything."""
+    if limit is None:
+        limit = _MAX_ENTRIES
+    rows = _bounded_list(rows, limit, "rows")
+    out, used = [], 0
+    for r in rows:
+        if isinstance(r, str):
+            raise TypeError("a row of a matrix must be a list, not a string")
+        r = _bounded_list(r, limit - used)
+        used += len(r)
+        out.append(r)
+    return out
 
 
 def _bounded_rows(obj, limit=None):
