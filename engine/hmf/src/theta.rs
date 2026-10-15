@@ -130,6 +130,14 @@ pub(crate) fn lll(b: &mut Vec<V8>, g: &[[i128; 8]; 8]) {
 /// Z^8 for the form g) with Q(x) = B(x, x)/2 <= bound, passed to f until it
 /// returns true (Fincke-Pohst). Returns whether f accepted one.
 pub(crate) fn enumerate(b: &[V8], g: &[[i128; 8]; 8], bound: i128, f: &mut dyn FnMut(&V8) -> bool) -> bool {
+    let mut unlimited = u64::MAX;
+    enumerate_limited(b, g, bound, &mut unlimited, f).expect("no node budget")
+}
+
+/// `enumerate` with a budget of search nodes (each step of a coordinate),
+/// decremented as they are visited: None if it runs out, so the search was
+/// incomplete.
+pub(crate) fn enumerate_limited(b: &[V8], g: &[[i128; 8]; 8], bound: i128, nodes: &mut u64, f: &mut dyn FnMut(&V8) -> bool) -> Option<bool> {
     let n = b.len();
     // Cholesky decomposition of the Gram matrix of b for Q = B/2 (Cohen 2.7.5)
     let mut q = vec![vec![0.0f64; n]; n];
@@ -164,11 +172,20 @@ pub(crate) fn enumerate(b: &[V8], g: &[[i128; 8]; 8], bound: i128, f: &mut dyn F
     };
     init(i, &t, &u, &mut x, &mut upper, &q);
     loop {
+        if *nodes == 0 {
+            return None;
+        }
+        *nodes -= 1;
+        // cancellable (Ctrl-C, or the page's Stop in wasm): check() at every
+        // node, one relaxed load (sagebrush_interrupt asks the wasm host on
+        // every 1024th call, so about every 1.6 ms of search in wasm; daybreak's
+        // HOLD on f2057ff: checking only every 4096 nodes asked it every 4M)
+        sagebrush_interrupt::check();
         x[i] += 1;
         if x[i] > upper[i] {
             i += 1;
             if i >= n {
-                return false;
+                return Some(false);
             }
             continue;
         }
@@ -190,7 +207,7 @@ pub(crate) fn enumerate(b: &[V8], g: &[[i128; 8]; 8], bound: i128, f: &mut dyn F
             }
         }
         if f(&v) {
-            return true;
+            return Some(true);
         }
     }
 }
