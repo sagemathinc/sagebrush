@@ -104,7 +104,7 @@ try {
   }
 } finally {
   ws.close(); chrome.kill(); server.close();
-  try { rmSync(profile, { recursive: true, force: true }); rmSync(dir, { recursive: true, force: true }); } catch {}
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); rmSync(dir, { recursive: true, force: true }); } catch {}
 }
 for (const s of shown.slice(0, process.env.VERBOSE ? 1e9 : 25)) console.log(s.slice(0, 600));
 console.log(JSON.stringify({ corpus: corpus.length, ...tally, differIn: kinds }));

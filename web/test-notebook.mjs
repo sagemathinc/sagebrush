@@ -366,5 +366,5 @@ try {
 } finally {
   ws.close();
   chrome.kill();
-  setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500);
+  setTimeout(() => rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }), 500);
 }
