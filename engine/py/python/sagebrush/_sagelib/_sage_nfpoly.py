@@ -99,7 +99,8 @@ class PolynomialRing_nf_:
             sage: latex(NumberField(x^2 - 5, 'a')['y']), latex(QuadraticField(2, 'b')['t'])
             (\\Bold{Q}[a]/(a^{2} - 5)[y], \\Bold{Q}(\\sqrt{2})[t])
         """
-        return "%s[%s]" % (self._base._latex_(), self._name)
+        from _sage_poly import _latex_variable_name
+        return "%s[%s]" % (self._base._latex_(), _latex_variable_name(self._name))
 
     def __eq__(self, other):
         return isinstance(other, PolynomialRing_nf_) and other._base == self._base and other._name == self._name
@@ -509,7 +510,8 @@ class Polynomial_nf:
             sage: R.<y> = K[]; latex((a + 1)*y^2 - a*y + 1/3)
             \\left(a + 1\\right) y^{2} - a y + \\frac{1}{3}
         """
-        name = self._ring._name
+        from _sage_poly import _latex_variable_name
+        name = _latex_variable_name(self._ring._name)
         out = []
         for i in range(len(self._c) - 1, -1, -1):
             c = self._c[i]
