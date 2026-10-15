@@ -1,0 +1,50 @@
+[  1]
+[ 34]
+[ 67]
+[100]
+[133]
+[1  ]
+[34 ]
+[67 ]
+[100]
+[133]
+[1][ 1][  1][   1][    1]
+[   7][7   ][5][12345]
+53.211% of 123.20 is 65.556
+[   3.142][2.00    ][7][1/3][abcdef]
+[0xFF][0x1000][0xA][-0xFF]
+[s][t][[ 1, 2 ]]
+[1]
+[ {   1<->1   }, {  10<->10  }, { 100<->100 }, {1000<->1000} ]
+
+>> printf "%o %o\n", 1;
+   ^
+Runtime error in printf: Not enough arguments for % conversions
+
+>> printf "[%d]\n", 5;
+   ^
+Runtime error in printf: Bad percent character 'd' in format string
+
+>> printf "%";
+   ^
+Runtime error in printf: Bad percent character '' in format string
+
+>> printf "[%h]\n", 2.5;
+   ^
+Runtime error in printf: Non-integer argument for %h
+
+>> printf "[%O]\n", 5, "Bogus";
+   ^
+Runtime error in printf: Bad print level for %O conversion
+
+>> printf "[%O]\n", 5;
+   ^
+Runtime error in printf: Not enough arguments for %O conversion
+
+>> printf "[%*o]\n", "x", 5;
+   ^
+Runtime error in printf: Argument 2 for * is not a small integer
+
+>> printf 5;
+   ^
+Runtime error in printf: Argument 1 should be a format string

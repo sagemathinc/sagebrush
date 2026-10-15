@@ -2480,30 +2480,112 @@ def _show_values(v):
     _print_line([v])
 
 
-def _sprintf(fmt, *args):
+def _fixed(x, n):
+    """x (a real) with n digits after the point, as printf's %.no prints it,
+    or None where Sagebrush can't be sure of Magma's digits.  Magma's reals
+    are binary: a value at a rounding tie (0.125, 0.25) rounds by its binary
+    form, which Sagebrush's decimal reals don't have.  Under 1, past 10^20,
+    or when rounding adds a digit (99.999 to 100.00), Magma may print
+    1.E2-style; and with no digit after the point its rules differ again.
+    Those are refused rather than guessed."""
+    if n < 1 or x.m == 0:
+        return None
+    v = _Fraction(x.m) * _Fraction(10) ** x.e
+    a = abs(v)
+    if not (1 <= a < 10 ** 20):
+        return None
+    q, r = divmod(a * 10 ** n, 1)
+    # (a tie, within the real's own precision: its binary value decides)
+    if abs(r - _Fraction(1, 2)) * 10 ** x.prec <= a * 10 ** (n + 2):
+        return None
+    q = int(q) + (1 if r > _Fraction(1, 2) else 0)
+    digits = str(q).rjust(n + 1, "0")
+    whole, frac = digits[:-n], digits[-n:]
+    if len(whole) != len(str(int(a))):
+        return None
+    return ("-" if v < 0 else "") + whole + "." + frac
+
+
+def _sprintf(fmt, *args, where="printf"):
+    """printf's and Sprintf's format: %o (an object, default printing), %O
+    (in the printing level the next argument names), %m (Magma's level),
+    %h (an integer in hexadecimal), %%; a field width after the %, digits
+    (negative: left-justified) or * (the next argument); a precision .n
+    for a real (n digits after the point).  As Magma 2.18's Handbook says
+    and Magma does, with its words for a bad format."""
+    blank = where != "printf"  # (Magma follows Sprintf's errors with an empty line, not printf's)
+
+    def bad(msg):
+        return MagmaError(msg, where, blank)
+
+    if not isinstance(fmt, str):
+        raise bad("Argument 1 should be a format string")
     out, k, i = [], 0, 0
+
+    def take(what="% conversions"):
+        nonlocal k
+        if k >= len(args):
+            raise bad("Not enough arguments for %s" % what)
+        k += 1
+        return args[k - 1]
+
     while i < len(fmt):
         c = fmt[i]
-        if c == "%" and i + 1 < len(fmt):
-            d = fmt[i + 1]
-            i += 2
-            if d == "%":
-                out.append("%")
-            elif d in "omh":
-                out.append(_str(args[k]) if d != "h" else hex(args[k])[2:])
-                k += 1
-            else:
-                # %3o and the like
-                j = i - 1
-                while j < len(fmt) and fmt[j].isdigit():
-                    j += 1
-                w = int(fmt[i - 1:j]) if j > i - 1 else 0
-                out.append(_str(args[k]).rjust(w))
-                k += 1
-                i = j + 1
+        if c != "%":
+            out.append(c)
+            i += 1
             continue
-        out.append(c)
         i += 1
+        if fmt[i:i + 1] == "%":
+            out.append("%")
+            i += 1
+            continue
+        # the field width: -digits, digits or *
+        width = 0
+        if fmt[i:i + 1] == "*":
+            w = take()
+            if not isinstance(w, int) or isinstance(w, bool) or abs(w) >= 2 ** 30:
+                raise bad("Argument %d for * is not a small integer" % (k + 1))
+            width, i = w, i + 1
+        else:
+            j = i + 1 if fmt[i:i + 1] == "-" else i
+            while j < len(fmt) and fmt[j].isdigit():
+                j += 1
+            if j > i and fmt[i:j] != "-":
+                width = int(fmt[i:j])
+                i = j
+        prec = None
+        if fmt[i:i + 1] == "." and fmt[i + 1:i + 2].isdigit():
+            j = i + 1
+            while j < len(fmt) and fmt[j].isdigit():
+                j += 1
+            prec, i = int(fmt[i + 1:j]), j
+        d = fmt[i:i + 1]
+        if d not in ("o", "O", "m", "h"):
+            raise bad("Bad percent character '%s' in format string" % d)
+        i += 1
+        x = take()
+        if d == "h":
+            # (a field width doesn't apply to %h)
+            if not isinstance(x, int) or isinstance(x, bool):
+                raise bad("Non-integer argument for %h")
+            out.append(("-" if x < 0 else "") + "0x" + format(abs(x), "X"))
+            continue
+        if d == "O":
+            level = take("%O conversion")
+            if level not in ("Default", "Minimal", "Maximal", "Magma"):
+                raise bad("Bad print level for %O conversion")
+            if level != "Default":
+                raise MagmaError("printing in the level %s (%%O) is not supported yet" % level, where, blank)
+        elif d == "m":
+            raise MagmaError("printing in the level Magma (%m) is not supported yet", where, blank)
+        if prec is not None and isinstance(x, MReal):
+            t = _fixed(x, prec)
+            if t is None:
+                raise MagmaError("printf's precision (%%.%do) for this real is not supported yet" % prec, where, blank)
+        else:
+            t = _str(x)
+        out.append(t.ljust(-width) if width < 0 else t.rjust(width))
     return "".join(out)
 
 
@@ -3259,7 +3341,7 @@ def Sprint(x):
 
 
 def Sprintf(fmt, *args):
-    return _sprintf(fmt, *args)
+    return _sprintf(fmt, *args, where="'Sprintf'")
 
 
 # ------------------------------------------------------------------ sequences and sets
