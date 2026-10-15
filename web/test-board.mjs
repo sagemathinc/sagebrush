@@ -206,6 +206,45 @@ try {
     await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }))");
     await sleep(300);
     check((await ev("window.sagebrush.board.snapshot().page")) === s.pages - 2, "PageUp did not go back a page");
+    // → alone goes through every page's intro and tour, ← back again;
+    // the caption's arrows stop only at the board's ends (William's B4)
+    {
+      const seq = [];
+      for (let p = 0; p < s.pages; p++) for (let i = -1; i < (s.doc.pages[p].steps?.length ?? 0); i++) seq.push([p, i]);
+      const where = () => ev("(() => { const s = window.sagebrush.board.snapshot(); return [s.page, s.step]; })()");
+      const press = (key) => ev(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '${key}', bubbles: true })), 1`);
+      // (this file's until throws on a timeout: here, true or false)
+      const reach = (w) => until(`(() => { const s = window.sagebrush.board.snapshot(); return s.page === ${w[0]} && s.step === ${w[1]}; })()`, 10000).then(() => true, () => false);
+      await ev("window.sagebrush.board.page(0)");
+      check(await reach(seq[0]), "B4: (the first page, from its start)");
+      const disabled = (b) => ev(`document.querySelector('[data-sbb=${b}]').disabled`);
+      check(await disabled("prev"), "B4: at the board's start ← is disabled");
+      let ok = true;
+      for (let k = 1; k < seq.length && ok; k++) {
+        await press("ArrowRight");
+        if (!(await reach(seq[k]))) { ok = false; check(false, `B4: → from ${JSON.stringify(seq[k - 1])} went to ${JSON.stringify(await where())}, not ${JSON.stringify(seq[k])}`); }
+      }
+      if (ok) check(true, "B4: → went through every page's intro and steps: " + seq.length);
+      check(await disabled("next"), "B4: at the board's end → is disabled");
+      await press("ArrowRight");
+      await sleep(300);
+      check(JSON.stringify(await where()) === JSON.stringify(seq.at(-1)), "B4: → at the board's end stays");
+      ok = true;
+      for (let k = seq.length - 2; k >= 0 && ok; k--) {
+        await press("ArrowLeft");
+        if (!(await reach(seq[k]))) { ok = false; check(false, `B4: ← from ${JSON.stringify(seq[k + 1])} went to ${JSON.stringify(await where())}, not ${JSON.stringify(seq[k])}`); }
+      }
+      if (ok) check(true, "B4: ← went back through them all");
+      // (the caption's → at a page's last step: the next page's start)
+      const last0 = s.doc.pages[0].steps?.length ?? 0;
+      await ev(`window.sagebrush.board.step(${last0 - 1})`);
+      await reach([0, last0 - 1]);
+      check(!(await disabled("next")), "B4: at a page's last step the caption's → is not disabled");
+      await ev("document.querySelector('[data-sbb=next]').click(), 1");
+      check(await reach([1, -1]), "B4: ...and it goes to the next page's start: " + JSON.stringify(await where()));
+      await ev("document.querySelector('[data-sbb=prev]').click(), 1");
+      check(await reach([0, last0 - 1]), "B4: the caption's ← there goes back to the last step: " + JSON.stringify(await where()));
+    }
     // the address opens the page and step
     // (a new hash alone does not reload the page)
     await send("Page.navigate", { url: url + `#p${s.pages}-1` });
