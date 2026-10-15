@@ -507,12 +507,12 @@ def _ziv_eval(R, fn, extra=40, limit=None, overflow=False, exact=None):
     round alike, else extra doubles.
 
     limit: past that many extra bits the interval still holds a rounding
-    boundary c (the value's nearest (p + 1)-bit number): exact(c) (a
-    Fraction) tells whether the value is exactly c (True: c is rounded, the
-    correct rounding), is not (False: the extra bits keep doubling, up to
-    _ZIV_CAP(p, limit), as the value is then not a boundary), or cannot be
-    told within its budget (None): NotImplementedError, never an unproved
-    rounding."""
+    boundary c = cm 2^ce (the value's nearest (p + 1)-bit number):
+    exact(cm, ce) tells whether the value is exactly c (True: c is rounded,
+    the correct rounding), is not (False: the extra bits keep doubling, up
+    to _ZIV_CAP(p, limit), as the value is then not a boundary), or cannot
+    be told within its budget (None): NotImplementedError, never an
+    unproved rounding.  (c stays a pair: 2^ce is never formed.)"""
     p = R._prec
     checked = False
     while True:
@@ -542,10 +542,9 @@ def _ziv_eval(R, fn, extra=40, limit=None, overflow=False, exact=None):
             if not checked:
                 checked = True
                 cm, ce = _round_int(v._m, v._e, p + 1, "RNDN")
-                c = _F(cm) * _F(2) ** ce
-                t = exact(c) if exact is not None else None
+                t = exact(cm, ce) if exact is not None else None
                 if t:
-                    return RealNumberMP(R, *_round_q(c.numerator, c.denominator, p, R._rnd))
+                    return RealNumberMP(R, *_round_int(cm, ce, p, R._rnd))
                 if t is None:
                     raise NotImplementedError("the correct rounding of this value to %d bits is not decided within %d extra bits (it may be a rounding boundary) in sagebrush yet" % (p, extra))
             if extra > _ZIV_CAP(p, limit):
@@ -560,29 +559,68 @@ def _ZIV_CAP(p, limit):
     return max(16 * limit, 8 * p)
 
 
-def _lg(n):
-    """log2 of the positive integer n, of any size (a float of n would
-    overflow)."""
-    k = max(0, n.bit_length() - 60)
-    return k + math.log2(n >> k)
+def _odd2(n, d=1, s=0):
+    """(N, D, t) with n/d 2^s = N/D 2^t, N and D odd and coprime (n, d >
+    0 integers)."""
+    g = math.gcd(n, d)
+    n, d = n // g, d // g
+    a, b = (n & -n).bit_length() - 1, (d & -d).bit_length() - 1
+    return n >> a, d >> b, s + a - b
 
 
-def _pow_eq(a, n1, b, n2, budget=1 << 22):
-    """Whether a^n1 == b^n2 (a, b positive Fractions, n1 > 0, n2 integers),
-    or None when the powers exceed budget bits."""
-    if a <= 0 or b <= 0 or n1 <= 0:
+def _iroot(n, k):
+    """The integer k-th root of n >= 1, rounded down (Newton's method from
+    above)."""
+    if k == 1:
+        return n
+    x = 1 << -(-n.bit_length() // k)
+    while True:
+        y = ((k - 1) * x + n // x ** (k - 1)) // k
+        if y >= x:
+            return x
+        x = y
+
+
+def _ipow_eq(A, m1, B, m2):
+    """Whether A^m1 == B^m2, for odd A, B >= 1 and coprime m1, m2 >= 1:
+    exactly when A = C^m2 and B = C^m1 for an integer C, so only roots no
+    larger than A and B are formed (C >= 3 when A > 1, so m2 < bitlen(A))."""
+    if A == 1 or B == 1:
+        return A == B
+    if m2 >= A.bit_length() or m1 >= B.bit_length():
+        return False
+    C = _iroot(A, m2)
+    if C ** m2 != A or (C.bit_length() - 1) * m1 >= B.bit_length():
+        return False
+    return C ** m1 == B
+
+
+def _pow_eq(a, n1, b, n2):
+    """Whether a^n1 == b^n2, exactly, for positive rationals a, b given as
+    _odd2 triples (N, D, t) and integers n1 > 0, n2 of any size: the odd
+    numerators and denominators and the powers of 2 must agree separately
+    (unique factorization), and an equality of odd powers is decided by
+    integer roots no larger than the operands (no float, no power formed)."""
+    if n2 < 0:
+        b, n2 = (b[1], b[0], -b[2]), -n2
+    if n2 == 0:
+        return a == (1, 1, 0)
+    if a[2] * n1 != b[2] * n2:
+        return False
+    g = math.gcd(n1, n2)
+    m1, m2 = n1 // g, n2 // g
+    return _ipow_eq(a[0], m1, b[0], m2) and _ipow_eq(a[1], m1, b[1], m2)
+
+
+def _dyadic_ratio(m, e):
+    """(n, d) with m 2^e = n/d (m != 0), or None when |e| (after m's
+    trailing zeros) exceeds _EXACT_BITS: an exponent of that size is not
+    formed as an integer."""
+    t = (abs(m) & -abs(m)).bit_length() - 1
+    m, e = m >> t, e + t
+    if abs(e) > _EXACT_BITS:
         return None
-    sa = a.numerator.bit_length() + a.denominator.bit_length()
-    sb = b.numerator.bit_length() + b.denominator.bit_length()
-    if n1 * sa > budget or abs(n2) * sb > budget:
-        # (equal powers have equal sizes up to their exponents' rounding:
-        # when the magnitudes differ, they are not equal)
-        la = n1 * (_lg(a.numerator) - _lg(a.denominator))
-        lb = n2 * (_lg(b.numerator) - _lg(b.denominator))
-        if abs(la - lb) > 1e-6 * max(1.0, abs(la), abs(lb)) + 4:
-            return False
-        return None
-    return a ** n1 == b ** n2
+    return (m << e, 1) if e >= 0 else (m, 1 << -e)
 
 
 def _huge(m, e):
@@ -1748,13 +1786,12 @@ class RealNumberMP:
             H = RealField(F._prec + mag)
             return F((H(y) * H(x).log()).exp())
 
-        def exact(c):
+        def exact(cm, ce):
             # x^y == c, y = n/d (d a power of 2)  <=>  c^d == x^n
-            try:
-                yq, xq = y._q(), x._q()
-            except NotImplementedError:
+            nd = _dyadic_ratio(y._m, y._e)
+            if nd is None or cm <= 0:
                 return None
-            return _pow_eq(c, yq.denominator, xq, yq.numerator)
+            return _pow_eq(_odd2(cm, 1, ce), nd[1], _odd2(x._m, 1, x._e), nd[0])
         return _ziv_eval(R, fn, limit=4096, overflow=True, exact=exact)
 
     def __rpow__(self, b):
@@ -2056,14 +2093,27 @@ class RealNumberMP:
             k = _exact_log(self, base)
             if k is not None:
                 return R(k)
-            def exact(c):
+            def exact(cm, ce):
                 # log_b x == c = n/d  <=>  x^d == b^n
-                try:
-                    xq = self._q()
-                    bq = base._q() if isinstance(base, RealNumberMP) else _F(base)
-                except (NotImplementedError, TypeError, ValueError):
+                if cm == 0:
+                    return self == 1
+                nd = _dyadic_ratio(cm, ce)
+                b = _rr_big_mp(base) or base
+                if nd is None:
                     return None
-                return _pow_eq(xq, c.denominator, bq, c.numerator)
+                if isinstance(b, RealNumberMP):
+                    if b._special or b._m <= 0:
+                        return None
+                    bt = _odd2(b._m, 1, b._e)
+                else:
+                    try:
+                        bq = _F(b)
+                    except (TypeError, ValueError):
+                        return None
+                    if bq <= 0:
+                        return None
+                    bt = _odd2(bq.numerator, bq.denominator)
+                return _pow_eq(_odd2(self._m, 1, self._e), nd[1], bt, nd[0])
             return _ziv_eval(R, lambda F: F(self).log() / F(base).log(), limit=4096, exact=exact)
         return R._ziv(lambda W: _log_fx(self._m, self._e, W), W)
 

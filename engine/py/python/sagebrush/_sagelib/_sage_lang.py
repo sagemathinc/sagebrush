@@ -792,9 +792,14 @@ class _RealBig(RealNumber):
             m = _rr_operand(o)
             if m is None:
                 if isinstance(o, complex) and op in ("__eq__", "__ne__"):
-                    # (CC(0) == RR(2)^-1100 is False: by value, not by the
-                    # double)
-                    eq = o.imag == 0 and self._mp == _rr_mp()(o.real)
+                    if type(o) is complex:
+                        # a Python complex: Sage converts to it (doubles), so
+                        # RR(2)^-1100 == complex(0), from either side
+                        eq = complex(float(self)) == o
+                    else:
+                        # CC(0) == RR(2)^-1100 is False: by value, not by the
+                        # double
+                        eq = o.imag == 0 and self._mp == _rr_mp()(o.real)
                     return eq if op == "__eq__" else not eq
                 return NotImplemented
             return getattr(self._mp, op)(m)
