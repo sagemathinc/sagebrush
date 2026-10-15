@@ -346,6 +346,14 @@ export function boardLink(d: BoardDoc, from: number, href: string): { page: numb
   return null;
 }
 
+/** A link's words as a note shows them: a GitHub file's path in its
+ * repository, else its address without the scheme; decoded where it can be
+ * (round 0's 10: every note read "https://github.com/sagemathinc/sag…"). */
+export function refLabel(ref: string): string {
+  const s = ref.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\//, "").replace(/^https?:\/\//, "");
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
 /** Page i as a one-page document, for layout() (the document's title, refBase and pictures; and
  * on the first page, without an intro of its own, the document's: friction 7). */
 export function pageView(d: BoardDoc, i: number): BoardDoc {

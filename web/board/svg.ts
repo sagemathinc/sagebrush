@@ -13,7 +13,7 @@
 // colors.
 
 import { Lexer, type Token, type Tokens } from "marked";
-import { cleanDoc, layout, lookOf, pageView, type BoardDoc, type Measure, type MeasuredNote } from "./doc";
+import { cleanDoc, layout, lookOf, pageView, refLabel, type BoardDoc, type Measure, type MeasuredNote } from "./doc";
 import { backShapes, edgeLabelBox, xmlEscape } from "./print";
 import { inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
@@ -142,6 +142,13 @@ function ellipsis(r: Run, size: number, w: number): string {
   while (cs.length && width({ ...r, t: cs.join("") + "…" }, size) > w) cs.pop();
   return cs.join("") + "…";
 }
+// a run's text cut to fit w at its start, with an ellipsis: its end kept
+function ellipsisStart(r: Run, size: number, w: number): string {
+  if (width(r, size) <= w) return r.t;
+  const cs = [...r.t];
+  while (cs.length && width({ ...r, t: "…" + cs.join("") }, size) > w) cs.shift();
+  return "…" + cs.join("");
+}
 const heightOf = (ls: Line[]) => ls.reduce((h, l) => h + l.lh + l.gap, 0);
 const lineWidth = (l: Line) => l.indent + l.runs.reduce((w, r) => w + width(r, l.size), 0);
 
@@ -166,7 +173,8 @@ function content(n: { title?: string; text?: string; code?: string; hideCode?: b
   }
   if (n.code !== undefined) ls.push({ runs: [{ t: "(its output: in the board)", i: true }], size: 11, lh: 16, indent: 0, gap: 4, color: "#667" });
   // (a link: one line, cut with an ellipsis, as on the board; text only)
-  if (n.ref) ls.push({ runs: [{ t: ellipsis({ t: n.ref, m: true }, 11, w), m: true }], size: 11, lh: 16, indent: 0, gap: 6, color: "#2a6f2f" });
+  // (its words as on the board, and too long, its start cut, not its end: the file's name is the part a reader wants, round 0's 10)
+  if (n.ref) ls.push({ runs: [{ t: "↗ " + ellipsisStart({ t: refLabel(n.ref), m: true }, 11, w - width({ t: "↗ ", m: true }, 11)), m: true }], size: 11, lh: 16, indent: 0, gap: 6, color: "#2a6f2f" });
   return { ls, pic };
 }
 /** The measure layout() asks for: a note's height at a width, and its natural width. */
