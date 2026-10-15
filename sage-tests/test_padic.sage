@@ -1048,3 +1048,19 @@ try:
     print(3, 'Pm(1)/wm', '=>', r.parent(), '|', r)
 except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
     print(3, 'Pm(1)/wm', '=>', type(ex).__name__, ex)
+
+# Different default precisions over Zp and Qp, both orders (review CORR-BFC-1)
+import itertools
+for (b1, b2) in itertools.product([Zp(5, 6), Qp(5, 6), Zp(5, 3)], [Zp(5, 6), Qp(5, 6)]):
+    for (k1, k2) in itertools.product([PowerSeriesRing, LaurentSeriesRing], [PowerSeriesRing, LaurentSeriesRing]):
+        for d1, d2 in [(5, 9), (9, 5)]:
+            R1 = k1(b1, 'z', default_prec=d1); R2 = k2(b2, 'z', default_prec=d2)
+            for op in ['+', '*', '/']:
+                a, b = R1(1) + R1.gen(), R2(1) + R2.gen()
+                r = a + b if op == '+' else (a * b if op == '*' else a / b)
+                print(R1, d1, op, R2, d2, '=>', r.parent(), r.parent().default_prec(), '|', r)
+Pp = PowerSeriesRing(Qp(5, 4), 'z', default_prec=5); Lp = LaurentSeriesRing(Zp(5, 4), 'z', default_prec=9)
+qp = Pp.gen(); wp = Lp.gen()
+rp = (1 + qp)/(1 + wp)
+print(rp.parent(), rp.parent().default_prec(), rp)
+print(1/(qp + Lp(1)))
