@@ -3,7 +3,9 @@
 // click goes to that page; `#page-id/item-id` to an item on it, in view;
 // `#p2-1` to a page's step; a Markdown link in a note's text, and in the
 // caption, the same; one naming nothing does nothing; refBase is not put
-// before one.  Serve web/dist first (python3 web/serve.py 8765), then
+// before one.  A link to the page shown goes to its start and intro too
+// (UI-07E-1), and a link whose page is still being drawn when another
+// document is loaded or dropped does nothing there (UI-07E-2).  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-links.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -93,6 +95,46 @@ try {
   await clickLink("[data-sbb=say] a[href='#rel']");
   w = await where();
   check(w.page === 2 && w.hash === "#p3", "a link in the caption: its page: " + JSON.stringify(w));
+
+  // (astra's probes, UI-07E-1 and 2)
+  const TOUR = { title: "Original", pages: [
+    { id: "ov", title: "Overview", intro: "Overview intro", nodes: [{ id: "a", title: "A", text: "[this page](#ov) [numbered page](#p1)", ref: "#ov" }], steps: [{ focus: "a", say: "Original first" }, { focus: "a", say: "Original second" }] },
+    { id: "target", title: "Target", nodes: [{ id: "b", title: "B" }], steps: [{ focus: "b", say: "Target first" }, { focus: "b", say: "Target second" }] },
+  ] };
+  const NEW = { title: "Replacement", pages: [{ id: "new", title: "New", intro: "New intro", nodes: [{ id: "x", title: "X" }], steps: [{ focus: "x", say: "New first" }, { focus: "x", say: "New second" }] }, { id: "end", title: "End", nodes: [{ id: "y", title: "Y" }] }] };
+  const clearHash = "history.replaceState(null, '', location.pathname + location.search)";
+  const open = async (d) => { await ev(clearHash); await ev(`${B}.load(${JSON.stringify(d)}).then(() => 1)`); await ev(`${B}.editing(false)`); await sleep(300); };
+  const state = () => ev(`(() => { const s = ${B}.snapshot(); return { title: s.doc.title, page: s.page, step: s.step, hash: location.hash, say: document.querySelector('[data-sbb=say]').textContent.trim() }; })()`);
+  // a link to the page shown, from its tour's second step: its start, its intro (as from another page)
+  for (const sel of [".board-ref[href='#ov']", ".board-item a[href='#ov']:not(.board-ref)", ".board-item a[href='#p1']"]) {
+    await open(TOUR); await ev(`${B}.step(1)`); await sleep(400);
+    check(await clickLink(sel), `(${sel} clicked)`);
+    const s = await state();
+    check(s.page === 0 && s.step === -1 && s.hash === "" && s.say === "Overview intro", `UI-07E-1: a link to the page shown (${sel}), from its tour: the page's start and intro: ` + JSON.stringify(s));
+  }
+  // a link to another page's step, its page still being drawn (a picture held)
+  // when another document is loaded or dropped: nothing of it done there
+  const holdOne = () => ev(`(async () => { const im = (await import(new URL('board.js', location.href).href)).host.images; const old = im.ensure.bind(im); window.__releaseOne = null; im.ensure = (names) => { im.ensure = old; return new Promise((ok) => (window.__releaseOne = () => old(names).then(ok))); }; return 1; })()`);
+  for (const how of ["loaded", "dropped"]) {
+    const race = structuredClone(TOUR);
+    race.pages[0].nodes[0].ref = "#p2-2";
+    await open(race); await holdOne();
+    check(await clickLink(".board-ref[href='#p2-2']"), `(the link to #p2-2 clicked, ${how})`);
+    if (!(await until("!!window.__releaseOne"))) { check(false, `(${how}: page 2 did not wait on its pictures)`); continue; }
+    await ev(clearHash);
+    if (how === "loaded") await ev(`${B}.load(${JSON.stringify(NEW)}).then(() => 1)`);
+    else await ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(JSON.stringify(NEW))}], "replacement.board.json", { type: "application/json" })); document.querySelector(".board-world").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true, clientX: 300, clientY: 300 })); return 1; })()`);
+    check(await until(`${B}.snapshot().doc.title === 'Replacement'`), `(${how}: the replacement shown)`);
+    await sleep(250); await ev(`${B}.step(0)`); await sleep(250);
+    const before = await state();
+    await ev("window.__releaseOne(), 1"); await sleep(700);
+    const after = await state();
+    check(JSON.stringify(after) === JSON.stringify(before) && before.step === 0, `UI-07E-2: another document ${how} while a link's page is drawn: the link does nothing there: ` + JSON.stringify({ before, after }));
+    // (and the new one's own moves still go)
+    await ev(`${B}.step(1)`); await sleep(300);
+    const own = await state();
+    check(own.title === "Replacement" && own.step === 1 && own.say === "New second", `(${how}: the replacement's own tour still moves) ` + JSON.stringify(own));
+  }
 
   check(!errors.length, "no errors: " + errors.join(" | "));
 } catch (e) {
