@@ -570,6 +570,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     editor.clear();
     pageIx = Math.max(0, Math.min(pageCount(viewing ?? doc) - 1, i));
     if (!(await redraw())) return;
+    // (Find's item outlined and marked only on its own page: another item
+    // there may have its id, CORR-8CE-1)
+    if (found[foundAt] && found[foundAt].page !== pageIx) unmark();
     step(-1, true);
   }
 
@@ -1368,12 +1371,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     foundAt = found.length ? Math.max(0, found.findIndex((e) => e.page >= pageIx)) : -1;
     showFound().catch(fail);
   }
-  // (the next or the previous, from the one shown; the document may have changed since)
+  // (the next or the previous, from the one shown, by its page and id, ids
+  // being unique only on a page; the document may have changed since, CORR-8CE-1)
   function findStep(dir: 1 | -1) {
     if (!findDoc()) return;
-    const id = found[foundAt]?.id;
+    const was = found[foundAt];
     found = findIn(index(), findQ.value);
-    const k = id ? found.findIndex((e) => e.id === id) : -1;
+    const k = was ? found.findIndex((e) => e.id === was.id && e.page === was.page) : -1;
     foundAt = !found.length ? -1 : k < 0 ? (dir > 0 ? 0 : found.length - 1) : (k + dir + found.length) % found.length;
     showFound().catch(fail);
   }

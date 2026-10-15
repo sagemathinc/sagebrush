@@ -125,6 +125,40 @@ try {
   console.log(`5,000 notes: the first search ${first.ms.toFixed(1)} ms (the index made), the next ${again.ms.toFixed(1)} ms`);
   check(again.says === "1 of 1" && s.id === "n4321" && s.inView && s.marked === 1, "on a large board, the one note that says it: " + JSON.stringify(s));
   check(first.ms < 500 && again.ms < 50, `searched quickly: ${first.ms.toFixed(1)} ms, then ${again.ms.toFixed(1)} ms`);
+  // ids repeat across pages (unique only on a page): Enter and Shift+Enter
+  // step through every match by its page and id; a page changed by hand
+  // leaves no other item outlined or marked (CORR-8CE-1)
+  await escape();
+  const REP = { title: "Repeated", pages: [
+    { title: "P1", nodes: [{ id: "a", title: "kiwi one", x: 0, y: 0, w: 260 }, { id: "z", title: "plain", x: 400, y: 0, w: 260 }] },
+    { title: "P2", nodes: [{ id: "a", title: "plum", x: 0, y: 0, w: 260 }, { id: "b", title: "kiwi two", x: 400, y: 0, w: 260 }] },
+    { title: "P3", nodes: [{ id: "a", title: "kiwi three", x: 0, y: 0, w: 260 }] },
+  ] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(REP)}).then(() => 1)`);
+  await sleep(300);
+  await ctrlF();
+  await ev("(() => { const q = document.querySelector('[data-sbb=findq]'); q.value = 'kiwi'; q.dispatchEvent(new Event('input')); return 1; })()");
+  await sleep(500);
+  const seen = [];
+  let st = await state();
+  seen.push([st.says, st.page, st.id]);
+  for (let i = 0; i < 3; i++) { await enter(); await sleep(400); st = await state(); seen.push([st.says, st.page, st.id]); }
+  check(JSON.stringify(seen) === JSON.stringify([["1 of 3", 0, "a"], ["2 of 3", 1, "b"], ["3 of 3", 2, "a"], ["1 of 3", 0, "a"]]), "Enter through matches whose ids repeat on other pages: " + JSON.stringify(seen));
+  await enter(true);
+  await sleep(400);
+  st = await state();
+  check(st.says === "3 of 3" && st.page === 2 && st.id === "a", "Shift+Enter back to the last: " + JSON.stringify(st));
+  // (page 2 chosen by hand, whose "a" says plum)
+  await ev("(() => { const p = document.querySelector('[data-sbb=pgsel]'); p.value = '1'; p.dispatchEvent(new Event('change')); return 1; })()");
+  await sleep(600);
+  st = await state();
+  check(st.page === 1 && st.found === 0 && st.marked === 0, "a page changed by hand: no item on it outlined or marked: " + JSON.stringify(st));
+  await enter();
+  await sleep(400);
+  st = await state();
+  check(st.says === "1 of 3" && st.page === 0, "...and Enter goes on from the match it left: " + JSON.stringify(st));
+  await escape();
+
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
