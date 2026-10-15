@@ -277,6 +277,30 @@ class SeriesRing_:
             return False
 
 
+def _is_padic(B):
+    return type(B).__name__ in ("pAdicRingCappedRelative", "pAdicFieldCappedRelative")
+
+
+def _frac(B):
+    """The fraction field of the base B (QQ for ZZ, Qp for Zp); B itself
+    for a field."""
+    sa = _sa()
+    if B is sa.ZZ:
+        return sa.QQ
+    if _is_padic(B) and not B._field:
+        return B.fraction_field()
+    return B
+
+
+def _is_unit(c, B):
+    """Whether the coefficient c is a unit of the base B."""
+    if B is _sa().ZZ:
+        return c == 1 or c == -1
+    if _is_padic(B):
+        return not c.is_zero() and (B._field or c.valuation() == 0)
+    return not _is_zero(c)
+
+
 def _is_zero(c):
     try:
         return not c
@@ -514,6 +538,33 @@ class Series:
         except (TypeError, ValueError, ArithmeticError):
             return None
 
+    def _lift_base(self, o):
+        """self, moved to the series ring over the fraction field of its base
+        when o needs it (as Sage: ZZ[[z]] meets 1/2 or a series over QQ in
+        QQ[[z]]); else self."""
+        B = self._R._base
+        F = _frac(B)
+        if F is B:
+            return self
+        if isinstance(o, Series):
+            return self._over(F) if o._R._base is F else self
+        try:
+            B(o)
+            return self
+        except (TypeError, ValueError, ArithmeticError):
+            pass
+        try:
+            F(o)
+        except (TypeError, ValueError, ArithmeticError):
+            return self
+        return self._over(F)
+
+    def _over(self, base, laurent=None):
+        """self in the series ring over base (a Laurent series ring if asked)."""
+        R = self._R
+        lau = R._laurent if laurent is None else laurent
+        return (LaurentSeriesRing if lau else PowerSeriesRing)(base, R._name, R._dp)(self)
+
     def _ring_for(self, o, v):
         R = self._R
         if isinstance(o, Series) and o._R._laurent:
@@ -523,6 +574,9 @@ class Series:
         return R
 
     def __add__(self, o):
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__add__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
@@ -548,18 +602,27 @@ class Series:
         return Series(self._R, self._v, [-c for c in self._c], self._prec)
 
     def __sub__(self, o):
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__sub__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
         return self + (-o)
 
     def __rsub__(self, o):
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__rsub__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
         return o + (-self)
 
     def __mul__(self, o):
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__mul__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
@@ -584,18 +647,72 @@ class Series:
     __rmul__ = __mul__
 
     def __truediv__(self, o):
+        B = self._R._base
+        F = _frac(B)
+        if F is not B and not isinstance(o, Series):
+            # by a scalar: over the fraction field (Sage: z/2 and z/1 are in
+            # QQ[[z]])
+            s = self._over(F)
+            c = F(o)
+            if _is_zero(c):
+                raise ZeroDivisionError("division by zero")
+            return Series(s._R, s._v, [s._R._div(x, c) for x in s._c], s._prec)
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__truediv__(o)
         o2 = self._coerce(o)
         if o2 is None:
             return NotImplemented
         if not o2._c:
             raise ZeroDivisionError("division by zero series")
+        if F is not B:
+            return self._ring_div(o2)
         if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None:
             # exact division by a constant stays exact
             return Series(self._R, self._v, [self._R._div(c, o2._c[0]) for c in self._c], None)
         return self * o2.inverse()
 
+    def _ring_div(self, g):
+        """self / g over a base that is not a field (ZZ, Zp), as Sage: by an
+        exact monomial c z^v it stays over the base when c is a unit and the
+        quotient is a power series, else it is a Laurent series over the
+        fraction field (z/(2 z) = 1/2, 1/z); by anything else the constant
+        term of g / z^v must be a unit (else ValueError), and the quotient
+        stays over the base unless it needs negative powers in a power
+        series ring (then: Laurent over the fraction field)."""
+        R = self._R
+        B = R._base
+        vg = g._v
+        vf = self._v if self._c else (self._prec if self._prec is not None else vg)
+        laurent = R._laurent or g._R._laurent
+        if g._prec is None and len(g._c) == 1:
+            c = g._c[0]
+            if _is_unit(c, B) and (vf >= vg or laurent):
+                ci = R._div(1, c)
+                return Series(self._R if (vf >= vg or R._laurent) else g._R, self._v - vg, [x * ci for x in self._c],
+                              None if self._prec is None else self._prec - vg)
+            if R._laurent:
+                # (Sage: a Laurent series over ZZ divided by 2 w)
+                raise ArithmeticError("division not defined")
+        else:
+            c0 = g._c[0]
+            if not _is_unit(c0, B):
+                raise ValueError("constant term %r is not a unit" % (c0,))
+            if vf >= vg or laurent:
+                u = Series(g._R, 0, g._c, None if g._prec is None else g._prec - vg)
+                f = Series(R if (vf >= vg or R._laurent) else g._R, self._v - vg, self._c,
+                           None if self._prec is None else self._prec - vg)
+                return f * u.inverse()
+        F = _frac(B)
+        return self._over(F, laurent=True) / g._over(F, laurent=True)
+
     def __rtruediv__(self, o):
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__rtruediv__(o)
         o = self._coerce(o)
+        if o is None:
+            return NotImplemented
         return o / self
 
     def inverse(self):
@@ -605,10 +722,38 @@ class Series:
 
             sage: R.<q> = QQ[[]]; (1 + q + O(q^3)).inverse(), (q^2 + q^3 + O(q^5))^-1
             (1 - q + q^2 + O(q^3), q^-2 - q^-1 + 1 + O(q))
+
+        Over ZZ the constant term must be a unit; an exact monomial is
+        inverted in the fraction field::
+
+            sage: Z.<z> = ZZ[[]]; (1 - z + O(z^4))^-1, z^-1, ~Z(2)
+            (1 + z + z^2 + z^3 + O(z^4), z^-1, 1/2)
+            sage: (2 + z)^-1
+            Traceback (most recent call last):
+            ...
+            ValueError: constant term 2 is not a unit
+            sage: z/2, (2*z)/z, z/(2*z), (1/z).parent()
+            (1/2*z, 2, 1/2, Laurent Series Ring in z over Rational Field)
         """
         if not self._c:
             raise ZeroDivisionError("division by zero series")
         R = self._R
+        B = R._base
+        if self._prec is None and len(self._c) == 1:
+            # an exact monomial has an exact inverse (Sage: 1/z is z^-1;
+            # 1/2 in ZZ[[z]] is the Laurent series 1/2 over QQ)
+            v = -self._v
+            c = self._c[0]
+            if not _is_unit(c, B):
+                if v != 0:
+                    raise ValueError("constant term %r is not a unit" % (c,))
+                return Series(LaurentSeriesRing(_frac(B), R._name, R._dp), 0, [_frac(B)(1) / _frac(B)(c)], None)
+            if v < 0 and not R._laurent:
+                R = R.laurent_series_ring()
+            return Series(R, v, [R._div(1, c)], None)
+        if not _is_unit(self._c[0], B):
+            # over ZZ (or Zp) the constant term must be a unit, as Sage
+            raise ValueError("constant term %r is not a unit" % (self._c[0],))
         rel = (self._prec - self._v) if self._prec is not None else R._dp
         c0inv = R._div(1, self._c[0])
         a = self._c + [R._zero()] * rel
