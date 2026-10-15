@@ -78,6 +78,30 @@ def _undeclared(name, line, col):
     return line, col
 
 
+_ARITY = _re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\(\) (takes|missing|got an unexpected keyword argument '([A-Za-z_][A-Za-z0-9_]*)'|got multiple values)")
+
+
+def _unsupported_call(e):
+    """A Python exception that says Sagebrush lacks something, in those
+    words, or None.  An intrinsic called with arguments or a parameter
+    its Python function doesn't take (Random(1, 4), Newforms(I, S),
+    Order(G : Strategy := "Easy")) is a form Sagebrush doesn't have yet,
+    not a Python TypeError; so is a NotImplementedError, and the
+    curve-table LookupError.  (Python's message names the function: this
+    runtime has no traceback to tell a call's boundary.)"""
+    if isinstance(e, NotImplementedError):
+        return "not supported yet: %s" % e if str(e) else "not supported yet"
+    if type(e) is LookupError:
+        return "not supported yet: %s" % e
+    if isinstance(e, TypeError):
+        m = _ARITY.match(str(e))
+        if m and not m.group(1).startswith("_") and callable(globals().get(m.group(1))):
+            if m.group(3):
+                return "%s with the parameter %s is not supported yet" % (m.group(1), m.group(3))
+            return "%s with these arguments is not supported yet" % m.group(1)
+    return None
+
+
 def _report(e, line, col):
     """A runtime error, reported as Magma does; then a file stops and a
     session goes on."""
@@ -90,6 +114,8 @@ def _report(e, line, col):
         name = m.group(1)
         name = name[:-1] if name.endswith("_") else name
         line, col = getattr(e, "_mpos", None) or _undeclared(name, line, col)
+        if name in ("SetSeed", "GetSeed"):
+            _SEEDED.append(True)
         if _is_intrinsic_name(name):
             # one of Magma's intrinsics that Sagebrush doesn't have: said so,
             # not as an undeclared name (Magma has it)
@@ -108,7 +134,7 @@ def _report(e, line, col):
             v = um.group(1)
             msg = "Variable '%s' has not been initialized" % (v[:-1] if v.endswith("_") and v[:-1] in _PYKW else v)
         else:
-            msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
+            msg = str(e) if isinstance(e, MagmaError) else _unsupported_call(e) or "%s: %s" % (type(e).__name__, e)
         where = getattr(e, "where", None)
         blank = "\n" if getattr(e, "blank", True) else ""
         line, col = getattr(e, "pos", None) or (line, col)
@@ -637,8 +663,7 @@ def _assign_path(obj, path, val):
             else:
                 obj._set(i, _assign_path(obj._get(i, pos), path[1:], val), pos)
             return obj
-        setattr(obj, i, _assign_path(getattr(obj, i, None), path[1:], val))
-        return obj
+        raise _no_attributes(i, pos)
     if isinstance(obj, MRange):
         obj = MSeq(obj)
     if obj is None:
@@ -664,7 +689,12 @@ def _getattr(x, name, pos=None):
         return x._get(name, pos)
     if not isinstance(name, str):
         raise MagmaError("Bad argument types", "`", True, pos)
-    return getattr(x, name)
+    # (never Python's attributes: x`__class__, 5`real)
+    raise _no_attributes(name, pos)
+
+
+def _no_attributes(name, pos=None):
+    return MagmaError("the attribute %s of this object (not a record) is not supported yet" % name, "`", True, pos)
 
 
 def _assigned(x, name):
@@ -672,7 +702,7 @@ def _assigned(x, name):
     if isinstance(x, MRec):
         x._field(name, None)
         return name in x.vals
-    return hasattr(x, name)
+    raise _no_attributes(name)
 
 
 def _assigned_name(read):
@@ -750,6 +780,30 @@ def _format_name(fmt):
 # Python keywords: a Magma name that is one gets a trailing _ (src/magma.ts pyName)
 _PYKW = set(("False None True and as assert async await break class continue def del elif else except finally for from global "
              "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split())
+# Python's builtins (CPython 3.14's), which src/magma.ts's pyName also
+# renames (PY_BUILTINS): a Magma name is never Python's ord, len or list
+_PYBUILTINS = set((
+    "ArithmeticError AssertionError AttributeError BaseException BaseExceptionGroup "
+    "BlockingIOError BrokenPipeError BufferError BytesWarning ChildProcessError "
+    "ConnectionAbortedError ConnectionError ConnectionRefusedError ConnectionResetError "
+    "DeprecationWarning EOFError Ellipsis EncodingWarning EnvironmentError Exception "
+    "ExceptionGroup False FileExistsError FileNotFoundError FloatingPointError FutureWarning "
+    "GeneratorExit IOError ImportError ImportWarning IndentationError IndexError "
+    "InterruptedError IsADirectoryError KeyError KeyboardInterrupt LookupError MemoryError "
+    "ModuleNotFoundError NameError None NotADirectoryError NotImplemented NotImplementedError "
+    "OSError OverflowError PendingDeprecationWarning PermissionError ProcessLookupError "
+    "PythonFinalizationError RecursionError ReferenceError ResourceWarning RuntimeError "
+    "RuntimeWarning StopAsyncIteration StopIteration SyntaxError SyntaxWarning SystemError "
+    "SystemExit TabError TimeoutError True TypeError UnboundLocalError UnicodeDecodeError "
+    "UnicodeEncodeError UnicodeError UnicodeTranslateError UnicodeWarning UserWarning "
+    "ValueError Warning ZeroDivisionError abs aiter all anext any ascii bin bool breakpoint "
+    "bytearray bytes callable chr classmethod compile complex copyright credits delattr dict "
+    "dir divmod enumerate eval exec exit filter float format frozenset getattr globals hasattr "
+    "hash help hex id input int isinstance issubclass iter len license list locals map max "
+    "memoryview min next object oct open ord pow print property quit range repr reversed round "
+    "set setattr slice sorted staticmethod str sum super tuple type vars zip "
+).split())
+_PYKW |= _PYBUILTINS
 
 
 class MRec:
@@ -2062,10 +2116,29 @@ def _gen(R, i):
     return R.gen(i - 1)
 
 
-def _coerce(R, x):
-    if hasattr(R, "_magma_coerce"):
-        return R._magma_coerce(x)
-    return R(x)
+def _coerce(R, x, pos=None):
+    try:
+        if hasattr(R, "_magma_coerce"):
+            return R._magma_coerce(x)
+        if isinstance(R, _sp.PolynomialRing_) and isinstance(x, (MSeq, MRange)):
+            # P ! [c0, c1, ...]: each coefficient coerced into the base
+            # ring as ! would (Q ! [1, 2] is 1/2)
+            K = _ZZ if R.base_ring() is _sp.ZZ else _QQ
+            cs = []
+            for k, c in enumerate(x):
+                try:
+                    cs.append(_coerce(K, c, pos))
+                except MagmaError:
+                    raise MagmaError("Cannot coerce sequence element %d into the coefficient ring" % (k + 1), "'!'", True, pos)
+            return R(cs)
+        if not callable(R):
+            raise MagmaError("coercion (!) into this structure is not supported yet", "'!'")
+        return R(x)
+    except MagmaError as e:
+        # (a coercion's error is at its !, as Magma shows it)
+        if e.pos is None and e.where == "'!'":
+            e.pos = pos
+        raise
 
 
 def _apply(f, x):
@@ -2474,7 +2547,23 @@ class _RationalField:
     def __call__(self, x):
         if isinstance(x, (bool, str)):
             raise MagmaError("Illegal coercion\nLHS: FldRat\nRHS: %s" % _type(x), "'!'", False)
-        return _sa._q(_Fraction(x)) if not isinstance(x, int) else x
+        if isinstance(x, int):
+            return x
+        if isinstance(x, (MSeq, MRange)):
+            # Q ! [n, d] is n/d (Magma's words for the rest)
+            rhs = "[%s]" % _elt_type(x)
+            v = list(x)
+            if len(v) != 2:
+                raise MagmaError("Sequence must have length 2 to lift into this field\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
+            if not all(isinstance(c, int) and not isinstance(c, bool) for c in v):
+                raise MagmaError("Should be a sequence of integers\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
+            if v[1] == 0:
+                raise MagmaError("Division by zero\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
+            return _m_num(_sa._q(_Fraction(v[0], v[1])))
+        try:
+            return _sa._q(_Fraction(x))
+        except (TypeError, ValueError):
+            raise MagmaError("coercion of a %s into the rationals is not supported yet" % _type_of(x), "'!'", False)
 
     _magma_coerce = __call__
 
@@ -2496,8 +2585,15 @@ def _coerce_int(x):
     raise MagmaError("Illegal coercion")
 
 
-def Integers():
-    return _ZZ
+def Integers(K=None):
+    """Integers(): the ring of integers; Integers(K): K's maximal order."""
+    if K is None:
+        return _ZZ
+    if isinstance(K, (_MNumberField, _MOrder)):
+        return MaximalOrder(K)
+    if isinstance(K, int) and not isinstance(K, bool):
+        raise MagmaError("Integers(m), the integers modulo m, is not supported yet", "'Integers'")
+    raise MagmaError("Integers of a %s is not supported yet" % _type_of(K), "'Integers'")
 
 
 IntegerRing = Integers
@@ -2661,6 +2757,9 @@ def _bad_types(name, args, pos=None):
 
 def PolynomialRing(R, n=1):
     """A new polynomial ring; its variable prints as $.1 until named."""
+    # (one variable only: PolynomialRing(Q, 3) is not a univariate ring)
+    if n != 1 or isinstance(n, bool):
+        raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing: only over Integers() and Rationals() so far")
@@ -2806,12 +2905,18 @@ def NthPrime(n):
     return _sa.nth_prime(n)
 
 
+def _int_arg(name, n):
+    if not isinstance(n, int) or isinstance(n, bool):
+        raise MagmaError("%s of a %s is not supported yet" % (name, _type_of(n)), "'%s'" % name)
+    return n
+
+
 def PrimeDivisors(n):
-    return MSeq(p for p, _ in _sa.factor(abs(n)))
+    return MSeq(p for p, _ in _sa.factor(abs(_int_arg("PrimeDivisors", n))))
 
 
 def Divisors(n):
-    return MSeq(_sa.divisors(abs(n)))
+    return MSeq(_sa.divisors(abs(_int_arg("Divisors", n))))
 
 
 def NumberOfDivisors(n):
@@ -3411,9 +3516,24 @@ def Universe(s):
     return None
 
 
-def Random(s):
+# Magma's random generator can't be reproduced: a program that uses SetSeed
+# or GetSeed (intrinsics Sagebrush doesn't have; _report notes them) expects
+# Magma's numbers, so from then on Random refuses rather than give others
+_SEEDED = []
+
+
+def Random(s, b=None):
     import random
-    return random.choice(list(_iter(s)))
+    if _SEEDED:
+        raise MagmaError("Random after SetSeed or GetSeed is not supported yet: Sagebrush can't reproduce Magma's random numbers", "'Random'")
+    if b is None:
+        return random.choice(list(_iter(s)))
+    # Random(a, b): an integer in [a, b]
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (s, b)):
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(s), _type_of(b)), "'Random'")
+    if s > b:
+        raise MagmaError("Random(a, b) with a > b is not supported yet", "'Random'")
+    return random.randint(s, b)
 
 
 # ------------------------------------------------------------------ modular forms
@@ -3449,7 +3569,11 @@ def Gamma0(N):
 
 
 def _level(N):
-    return N.N if isinstance(N, MGamma0) else N
+    if isinstance(N, MGamma0):
+        return N.N
+    if not isinstance(N, int) or isinstance(N, bool):
+        raise MagmaError("a space of modular forms or symbols from a %s is not supported yet" % _type_of(N))
+    return N
 
 
 class MModSym:
@@ -3484,7 +3608,7 @@ class MModSym:
 
 
 def ModularSymbols(N, k=2, sign=0):
-    return MModSym(_level(N), int(k), int(sign))
+    return MModSym(_level(N), _int_arg("ModularSymbols", k), _int_arg("ModularSymbols", sign))
 
 
 def Dimension(M):
@@ -3494,12 +3618,16 @@ def Dimension(M):
 
 
 def CuspidalSubspace(M):
+    if not isinstance(M, MModSym):
+        raise MagmaError("CuspidalSubspace of a %s is not supported yet" % _type_of(M), "'CuspidalSubspace'")
     if M.kind not in ("full", "cuspidal"):
         return M
     return MModSym(M.N, M.k, M.sign, "cuspidal")
 
 
 def NewSubspace(M):
+    if not isinstance(M, MModSym):
+        raise MagmaError("NewSubspace of a %s is not supported yet" % _type_of(M), "'NewSubspace'")
     if M.kind == "full":
         raise MagmaError("The given space must be contained in the cuspidal subspace")
     return MModSym(M.N, M.k, M.sign, "new")
@@ -3531,7 +3659,15 @@ def _cusp_poly(M, p):
     return g
 
 
+def _msym(name, M):
+    """M, a space of modular symbols: what these functions handle so far."""
+    if not isinstance(M, MModSym):
+        raise MagmaError("%s of a %s (not a space of modular symbols) is not supported yet" % (name, _type_of(M)), "'%s'" % name)
+    return M
+
+
 def HeckePolynomial(M, p):
+    _msym("HeckePolynomial", M)
     R = _qx("x" if M.kind != "full" else None)
     if M.kind == "full":
         f = M._sage().hecke_polynomial(p)
@@ -3554,7 +3690,7 @@ class _HeckeOp:
 
 
 def HeckeOperator(M, p):
-    return _HeckeOp(M, p)
+    return _HeckeOp(_msym("HeckeOperator", M), p)
 
 
 def CharacteristicPolynomial(T):
@@ -3564,6 +3700,7 @@ def CharacteristicPolynomial(T):
 
 
 def NewformDecomposition(M):
+    _msym("NewformDecomposition", M)
     if M.kind not in ("cuspidal", "new"):
         M = NewSubspace(CuspidalSubspace(M))
     if M.kind == "cuspidal":
@@ -3596,11 +3733,11 @@ class MModForms:
 
 
 def CuspForms(N, k=2):
-    return MModForms(_level(N), int(k))
+    return MModForms(_level(N), _int_arg("CuspForms", k))
 
 
 def ModularForms(N, k=2):
-    return MModForms(_level(N), int(k), cusp=False)
+    return MModForms(_level(N), _int_arg("ModularForms", k), cusp=False)
 
 
 class MNewform:
@@ -3663,6 +3800,11 @@ def EllipticCurve(a, b=None):
     if b is not None and (isinstance(a, str) or _num(a) and _num(b)):
         # a label is one argument, and a curve's coefficients come in a sequence
         raise _bad_types("EllipticCurve", (a, b))
+    if isinstance(a, (MSeq, MRange)):
+        bad = next((c for c in a if not (isinstance(c, (int, _Fraction)) and not isinstance(c, bool))), None)
+        if bad is not None:
+            # (over the rationals only, so far)
+            raise MagmaError("EllipticCurve with a coefficient in a %s is not supported yet" % _type_of(bad), "'EllipticCurve'")
     try:
         return _smod.EllipticCurve(list(a) if isinstance(a, (MSeq, MRange)) else a, b)
     except (ValueError, ArithmeticError) as e:
@@ -3787,7 +3929,13 @@ class _MNumberField(_snf.NumberField_absolute):
         return _m_num(self.polynomial().discriminant())
 
     def _magma_coerce(self, x):
-        return self(x)
+        try:
+            return self(x)
+        except TypeError as e:
+            if isinstance(x, _MNFElt) and x.parent() is not self:
+                # (an element of another number field: Magma's words)
+                raise MagmaError("Arguments are not compatible\nLHS: %s\nRHS: %s" % (_type_of(self), _type_of(x)), "'!'", False)
+            raise MagmaError("coercion of a %s into this number field is not supported yet" % _type_of(x), "'!'", False)
 
     def __repr__(self):
         kind = "Quadratic Field" if self._quadratic else "Number Field"

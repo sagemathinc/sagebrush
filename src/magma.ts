@@ -121,8 +121,30 @@ export function lex(src: string): Tok[] {
 const PYKW = new Set(("False None True and as assert async await break class continue def del elif else except finally for from global " +
   "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split(" "));
 
+// Python's builtins (CPython 3.14's): a Magma name never reaches them.  An
+// unassigned ord, len, sum or list is undeclared, as in Magma, not Python's
+// function or class; lib/_magma.py's _PYBUILTINS is the same list.
+export const PY_BUILTINS = new Set(("ArithmeticError AssertionError AttributeError BaseException BaseExceptionGroup BlockingIOError " +
+  "BrokenPipeError BufferError BytesWarning ChildProcessError ConnectionAbortedError " +
+  "ConnectionError ConnectionRefusedError ConnectionResetError DeprecationWarning EOFError Ellipsis " +
+  "EncodingWarning EnvironmentError Exception ExceptionGroup False FileExistsError " +
+  "FileNotFoundError FloatingPointError FutureWarning GeneratorExit IOError ImportError " +
+  "ImportWarning IndentationError IndexError InterruptedError IsADirectoryError KeyError " +
+  "KeyboardInterrupt LookupError MemoryError ModuleNotFoundError NameError None NotADirectoryError " +
+  "NotImplemented NotImplementedError OSError OverflowError PendingDeprecationWarning " +
+  "PermissionError ProcessLookupError PythonFinalizationError RecursionError ReferenceError " +
+  "ResourceWarning RuntimeError RuntimeWarning StopAsyncIteration StopIteration SyntaxError " +
+  "SyntaxWarning SystemError SystemExit TabError TimeoutError True TypeError UnboundLocalError " +
+  "UnicodeDecodeError UnicodeEncodeError UnicodeError UnicodeTranslateError UnicodeWarning " +
+  "UserWarning ValueError Warning ZeroDivisionError abs aiter all anext any ascii bin bool " +
+  "breakpoint bytearray bytes callable chr classmethod compile complex copyright credits delattr " +
+  "dict dir divmod enumerate eval exec exit filter float format frozenset getattr globals hasattr " +
+  "hash help hex id input int isinstance issubclass iter len license list locals map max memoryview " +
+  "min next object oct open ord pow print property quit range repr reversed round set setattr slice " +
+  "sorted staticmethod str sum super tuple type vars zip").split(" "));
+
 /** A Magma identifier as a Python one. */
-export const pyName = (s: string) => (PYKW.has(s) || s.startsWith("_m") || /^__/.test(s) ? s + "_" : s);
+export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.startsWith("_m") || /^__/.test(s) ? s + "_" : s);
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
@@ -1175,8 +1197,8 @@ class Parser {
         const f = this.field() as { code: string; line: number; col: number };
         e = `_m._getattr(${e}, ${f.code}, (${f.line}, ${f.col}))`;
       } else if (this.at("!")) {
-        this.next();
-        e = `_m._coerce(${e}, ${this.unary()})`;
+        const t = this.next();
+        e = `_m._coerce(${e}, ${this.unary()}, (${t.line}, ${t.col}))`;
       } else if (this.at("@")) {
         this.next();
         e = `_m._apply(${this.unary()}, ${e})`;
@@ -1447,7 +1469,7 @@ class Parser {
     if (this.eat(":")) {
       // [ e : x in S, y in T | cond ]
       const h1 = this.uses.length;
-      const loops: [string, string][] = [];
+      const loops: string[] = [];
       const bound: string[] = [];
       const sets: { vars: string[]; from: number; to: number }[] = [];
       do {
@@ -1456,7 +1478,14 @@ class Parser {
         bound.push(...vars);
         this.expect("in");
         const from = this.uses.length;
-        loops.push([vars.length === 1 ? vars[0] : `(${vars.join(", ")})`, this.expr()]);
+        const set = this.expr();
+        // x, y in S: each over S (evaluated once), x the outer loop, as
+        // Magma does ([ <a, b> : a, b in [1..2] ] is <1,1>, <1,2>, <2,1>, <2,2>)
+        if (vars.length === 1) loops.push(`for ${vars[0]} in _m._iter(${set})`);
+        else {
+          const t = this.fresh();
+          loops.push([`for ${t} in (${set},)`, ...vars.map((v) => `for ${v} in _m._iter(${t})`)].join(" "));
+        }
         sets.push({ vars, from, to: this.uses.length });
       } while (this.eat(","));
       const c0 = this.uses.length;
@@ -1469,7 +1498,7 @@ class Parser {
       sets.forEach((st, k) => this.bindUses(st.from, st.to, sets.slice(k + 1).flatMap((t) => t.vars)));
       this.expect(close);
       // the first variable varies fastest: the last loop is the outermost
-      const gen = `${first} ${loops.reverse().map(([v, s]) => `for ${v} in _m._iter(${s})`).join(" ")}${cond ? ` if _m._bool(${cond})` : ""}`;
+      const gen = `${first} ${loops.reverse().join(" ")}${cond ? ` if _m._bool(${cond})` : ""}`;
       return `${ctor}([${gen}], universe=${universe})`;
     }
     // x -> y: an arrow pair, as in a map's graph [ 1 -> 30, 2 -> 20 ]
