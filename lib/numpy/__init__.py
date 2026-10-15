@@ -108,6 +108,16 @@ def _arith(cls):
     for py, op in (("lt", "less"), ("le", "less_equal"), ("gt", "greater"), ("ge", "greater_equal"),
                    ("eq", "equal"), ("ne", "not_equal")):
         setattr(cls, "__%s__" % py, _binop(op))
+    # (divmod as NumPy's: floor_divide and remainder, nan and inf, no error)
+    fd, rm = _binop("floor_divide"), _binop("remainder")
+    rfd, rrm = _binop("floor_divide", True), _binop("remainder", True)
+    def divmod_(f, g):
+        def h(self, o):
+            q = f(self, o)
+            return NotImplemented if q is NotImplemented else (q, g(self, o))
+        return h
+    cls.__divmod__ = divmod_(fd, rm)
+    cls.__rdivmod__ = divmod_(rfd, rrm)
     cls.__neg__ = _unop("negative")
     cls.__pos__ = _unop("positive")
     cls.__abs__ = _unop("absolute")

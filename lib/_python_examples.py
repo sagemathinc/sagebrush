@@ -392,6 +392,8 @@ ENTRIES = [
     ("math.isinf", "(x)", "Whether x is infinite.", ["math.isinf(-math.inf)"]),
     ("math.copysign", "(x, y)", "The magnitude of x with the sign of y.", ["math.copysign(3, -0.0)"]),
     ("math.fmod", "(x, y)", "The remainder of x / y with the sign of x (C's fmod).", ["math.fmod(-7, 3)", "-7 % 3"]),
+    ("math.remainder", "(x, y)", "The IEEE 754 remainder of x by y: x - n*y with n the integer nearest x / y (ties to even).",
+     ["math.remainder(7, 3)", "math.remainder(7.5, 2)"]),
     ("math.modf", "(x)", "The fractional and integer parts of x.", ["math.modf(3.75)"]),
     ("math.frexp", "(x)", "The mantissa and exponent of x: x = m * 2**e.", ["math.frexp(40.0)"]),
     ("math.ldexp", "(x, i)", "x * 2**i.", ["math.ldexp(0.625, 6)"]),
@@ -1253,6 +1255,10 @@ OUTPUTS = {
         '-1.0\n',
     '-7 % 3':
         '2\n',
+    'math.remainder(7, 3)':
+        '1.0\n',
+    'math.remainder(7.5, 2)':
+        '-0.5\n',
     'math.modf(3.75)':
         '(0.75, 3.0)\n',
     'math.frexp(40.0)':

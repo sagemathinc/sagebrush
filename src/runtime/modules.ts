@@ -30,6 +30,7 @@ export function newBuiltinModule(name: string, fill: (m: any) => void) {
 
 function fn(m: any, name: string, f: any) {
   builtin(f, name);
+  f.__module__ = m.__name__; // (as CPython's: math.isclose.__module__ is 'math')
   m[name] = f;
 }
 
@@ -350,10 +351,13 @@ newBuiltinModule("math", (m) => {
     dv.setUint8(0, (dv.getUint8(0) & 0x7f) | (dv.getUint8(8) & 0x80));
     return O.mkfloat(dv.getFloat64(0));
   });
+  // (CPython's math_fmod_impl: JS's % is C's fmod; a nan from operands
+  // that are not is outside the domain)
   fn(m, "fmod", (x: any, y: any) => {
-    const b = F(y);
-    if (b === 0) domain();
-    return O.mkfloat(F(x) % b);
+    const a = F(x), b = F(y);
+    const r = a % b;
+    if (Number.isNaN(r) && !Number.isNaN(a) && !Number.isNaN(b)) domain();
+    return O.mkfloat(r);
   });
   const toInt = (v: number) => {
     if (v !== v) raise(T.ValueError, "cannot convert float NaN to integer");
@@ -372,14 +376,53 @@ newBuiltinModule("math", (m) => {
   fn(m, "isfinite", (x: any) => Number.isFinite(F(x)));
   fn(m, "isinf", (x: any) => Math.abs(F(x)) === Infinity);
   fn(m, "isnan", (x: any) => F(x) !== F(x));
-  fn(m, "isclose", (a: any, b: any) => {
-    const x = F(a), y = F(b);
-    return x === y || Math.abs(x - y) <= Math.max(1e-9 * Math.max(Math.abs(x), Math.abs(y)), 0);
-  });
+  // (CPython's math_isclose_impl: rel_tol and abs_tol keyword-only)
+  const isclose = (a: any, b: any, relTol = 1e-9, absTol = 0.0) => {
+    if (relTol < 0.0 || absTol < 0.0) raise(T.ValueError, "tolerances must be non-negative");
+    if (a === b) return true;
+    if (a === Infinity || a === -Infinity || b === Infinity || b === -Infinity) return false;
+    const diff = Math.abs(b - a);
+    return diff <= Math.abs(relTol * b) || diff <= Math.abs(relTol * a) || diff <= absTol;
+  };
+  fn(m, "isclose", (a: any, b: any) => isclose(F(a), F(b)));
+  m.isclose.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (pos.length !== 2) raise(T.TypeError, `isclose() takes exactly 2 positional arguments (${pos.length} given)`);
+    let relTol = 1e-9, absTol = 0.0;
+    names.forEach((n, i) => {
+      if (n === "rel_tol") relTol = F(values[i]);
+      else if (n === "abs_tol") absTol = F(values[i]);
+      else raise(T.TypeError, `isclose() got an unexpected keyword argument '${n}'`);
+    });
+    return isclose(F(pos[0]), F(pos[1]), relTol, absTol);
+  };
+  // (CPython's math_modf_impl: the parts keep x's sign, an infinity's
+  // fractional part is a signed zero)
   fn(m, "modf", (x: any) => {
     const v = F(x);
+    if (v === Infinity || v === -Infinity) return tuple([O.mkfloat(Math.sign(v) * 0), O.mkfloat(v)]);
     const i = Math.trunc(v);
-    return tuple([O.mkfloat(v - i), O.mkfloat(i)]);
+    const f = v - i;
+    return tuple([O.mkfloat(f === 0 ? (v < 0 || Object.is(v, -0) ? -0 : 0) : f), O.mkfloat(i)]);
+  });
+  // (CPython's m_remainder: the IEEE 754 remainder, x - n*y with n the
+  // integer nearest x/y, ties to even; exact)
+  fn(m, "remainder", (a: any, b: any) => {
+    const x = F(a), y = F(b);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      if (y === 0) raise(T.ValueError, "math domain error");
+      const ax = Math.abs(x), ay = Math.abs(y);
+      const md = ax % ay;
+      const c = ay - md;
+      let r: number;
+      if (md < c) r = md;
+      else if (md > c) r = -c;
+      else r = md - 2.0 * ((0.5 * (ax - md)) % ay);
+      return O.mkfloat((x < 0 || Object.is(x, -0) ? -1 : 1) * r);
+    }
+    if (Number.isNaN(x)) return O.mkfloat(x);
+    if (Number.isNaN(y)) return O.mkfloat(y);
+    if (x === Infinity || x === -Infinity) raise(T.ValueError, "math domain error");
+    return O.mkfloat(x);
   });
   fn(m, "frexp", (x: any) => {
     let v = F(x);
@@ -478,23 +521,58 @@ newBuiltinModule("math", (m) => {
     for (let i = n - k + 1n; i <= n; i++) r *= i;
     return O.normBig(r);
   });
+  // CPython's math_fsum_impl (Modules/mathmodule.c, ported: NOTICE.md):
+  // Shewchuk's exact partials, infinities and nans summed apart, an
+  // intermediate overflow an error, and the partials added from the top with
+  // half-even rounding carried across them
   fn(m, "fsum", (it: any) => {
-    // Shewchuk's algorithm, as CPython's math.fsum.
-    const partials: number[] = [];
+    const p: number[] = [];
+    let n = 0, specialSum = 0.0, infSum = 0.0;
     O.forEach(it, (v) => {
       let x = F(v);
+      const xsave = x;
       let i = 0;
-      for (let y of partials) {
+      for (let j = 0; j < n; j++) {
+        let y = p[j];
         if (Math.abs(x) < Math.abs(y)) [x, y] = [y, x];
         const hi = x + y;
         const lo = y - (hi - x);
-        if (lo) partials[i++] = lo;
+        if (lo !== 0.0) p[i++] = lo;
         x = hi;
       }
-      partials.length = i;
-      partials.push(x);
+      n = i;
+      if (x !== 0.0) {
+        if (!Number.isFinite(x)) {
+          // (from an infinity or nan among the items, or an overflow)
+          if (Number.isFinite(xsave)) raise(T.OverflowError, "intermediate overflow in fsum");
+          if (xsave === Infinity || xsave === -Infinity) infSum += xsave;
+          specialSum += xsave;
+          n = 0;
+        } else p[n++] = x;
+      }
     });
-    return O.mkfloat(partials.reduce((a, b) => a + b, 0));
+    if (specialSum !== 0.0) {
+      if (Number.isNaN(infSum)) raise(T.ValueError, "-inf + inf in fsum");
+      return O.mkfloat(specialSum);
+    }
+    let hi = 0.0, lo = 0.0;
+    if (n > 0) {
+      hi = p[--n];
+      // (the partials from the top, while their sum is exact)
+      while (n > 0) {
+        const x = hi, y = p[--n];
+        hi = x + y;
+        lo = y - (hi - x);
+        if (lo !== 0.0) break;
+      }
+      // (half-even rounding across partials)
+      if (n > 0 && ((lo < 0.0 && p[n - 1] < 0.0) || (lo > 0.0 && p[n - 1] > 0.0))) {
+        const y = lo * 2.0;
+        const x = hi + y;
+        if (y === x - hi) hi = x;
+      }
+    }
+    return O.mkfloat(hi);
   });
   fn(m, "prod", (it: any) => {
     let r: any = 1;

@@ -292,14 +292,92 @@ ref = {
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}
 out = []
+
+
+def add(name, args, v):
+    if isinstance(v, list):
+        out.append([name, [enc(a) for a in args], [repr(t) for t in v]])
+        return
+    c = complex(v)
+    wc = any(isinstance(a, complex) for a in args) or name in complex_valued or c.imag != 0
+    out.append([name, [enc(a) for a in args], enc(val(v, wc))])
+
+
 for name, pts in points.items():
     for args in pts:
-        v = ref[name](*args)
-        if isinstance(v, list):
-            out.append([name, [enc(a) for a in args], [repr(t) for t in v]])
-            continue
-        c = complex(v)
-        wc = any(isinstance(a, complex) for a in args) or name in complex_valued or c.imag != 0
-        out.append([name, [enc(a) for a in args], enc(val(v, wc))])
+        add(name, args, ref[name](*args))
+
+# (astra's review of special-hardening, CORR-957-1 and CORR-957-2, and the
+# value-comparing edge sweep: beta with a large negative argument, nearly
+# cancelling or not, both negative, a + b next to a pole of Gamma; polygamma
+# whose powers of 1/w underflow before the factorials restore them; erf
+# where the rounding of 2xy turned e^(-z^2)'s phase; zeta(2, a) for huge a.
+# Appended after the cases above, which stay as they were; beta's at
+# digits enough that a + b is exact)
+random.seed(957)
+
+
+def _noint(v):
+    return v if v != math.floor(v) else v + 0.5
+
+
+_neg_beta = [(-999999999999.5, 1000000000016.0), (-999999999.5, 1000000016.0), (-285980934477808.94, 0.10104657144202031),
+             (-0.003665719805022444, -8.996799190458725), (-0.012782929186446497, -952087114464834.6)]
+for _ in range(8):
+    _neg_beta += [(-_noint(LU(1e-3, 1e15)), LU(1e-3, 1e15)), (-_noint(LU(15, 1e15)), 0.0), (-_noint(LU(1e-3, 1e15)), -_noint(LU(1e-3, 1e15))),
+                  (-_noint(U(0, 40)), U(0, 60))]
+_neg_beta = [(a, b if b else -a + U(-30, 30)) for a, b in _neg_beta]
+
+
+def _beta_hi(a, b, log=False):
+    with mp.workdps(60 + 2 * int(math.log10(abs(a) + abs(b) + 1))):
+        v = mp.beta(mp.mpf(a), mp.mpf(b))
+        return mp.log(abs(v)) if log else +v
+
+
+for a, b in _neg_beta:
+    v = _beta_hi(a, b)
+    if mp.mpf(1e-300) < abs(v) < mp.mpf(1e300):
+        add("beta", (a, b), v)
+    add("betaln", (a, b), _beta_hi(a, b, True))
+for n, z in [(50, 1e7), (100, 1e4), (100, 290.0), (80, 2e3), (100, complex(1000, 1000)), (60, complex(3e5, -2e5)), (30, 1e9)]:
+    with mp.workdps(60):
+        add("polygamma", (n, z), mp.polygamma(n, z))
+for name, z in [("erf", complex(3e7, 3e7)), ("erf", complex(1e8, 1e8)), ("erfc", complex(3e7, 3e7)), ("erfi", complex(3e7, -3e7)),
+                ("erf", complex(4e5, -3e5)), ("erfc", complex(3e3, 2999.9))]:
+    add(name, (z,), ref[name](z))
+for s_, a in [(2.0, 1e300), (2.0, 1e308), (3.0, 1e100), (1.5, 1e50)]:
+    add("hurwitz_zeta", (s_, a), mp.zeta(s_, a))
+# (astra's review of d691440, CORR-D69-1: polygamma next to the negative
+# real axis, where the recurrence's terms either side of a pole cancel;
+# her two examples, and a grid of orders, real parts and small imaginary
+# parts, at digits enough for the cancellation)
+_pg = [(40, complex(-0.5, 1e-9)), (30, complex(-1.5, 1e-9))]
+_pg += [(n, complex(x, y)) for n in (10, 40, 100) for x in (-0.5, -3.5, -37.5, -0.25, -12.3)
+        for y in (1e-3, -1e-9, 1e-15)]
+_pg += [(100, complex(-1.5, 0.0)), (20, complex(-2.75, 0.5)), (5, complex(-30.2, -0.9))]
+for n, z in _pg:
+    with mp.workdps(320):
+        add("polygamma", (n, z), mp.polygamma(n, mp.mpc(z.real, z.imag)))
+# (astra's zeta(-0.5, 4e205), about -1.69e308, whose power a^1.5 overflows
+# before the quotient by s - 1 brings it back: Euler-Maclaurin's terms
+# a^(1-s)/(s-1) + a^-s/2 + s a^(-s-1)/12, at a = 4e205 the rest below 1e-600
+# of them; mpmath's zeta takes too long there)
+with mp.workdps(60):
+    _a, _s = mp.mpf(4e205), mp.mpf(-0.5)
+    add("hurwitz_zeta", (-0.5, 4e205), _a ** (1 - _s) / (_s - 1) + _a ** (-_s) / 2 + _s * _a ** (-_s - 1) / 12)
+# (Hankel's expansion at huge x, found by the edge sweep: the prefactor
+# sqrt(2/(pi x)) overflowed or went subnormal, J_0(1e308) was 0, and the
+# phase pi (nu/2 + 1/4) lost its 1/4 for nu >= 2^52; at 400 digits, for x's
+# phase; appended after everything above, which stays as it was)
+for nu, x in [(0.0, 1e308), (0.5, 1.7976931348623157e308), (3.0, -1e308), (170.5, 1e308), (0.0, 3e305), (1e20, 1e200),
+              (1e20, 1e300), (2.0 ** 53, 1e40), (1e5, 1e12),
+              # (and the series' Gamma(nu + 1) at the rounded nu + 1: 2.9e-14 off)
+              (63.589762425754834, 6.476702183150906), (63.985572465086086, 8.957063545130058),
+              # (astra's CORR-7AA-1: Hankel's coefficients, whose k 8 x and 4 nu^2 overflowed, near nu = sqrt(x))
+              (1e153, 1e308), (5.477225575051661e153, 3e307), (4.1079191812887456e153, 3e307),
+              (6.703903964971298e153, 1.7976931348623157e308)]:
+    with mp.workdps(400):
+        add("besselj", (nu, x), mp.besselj(nu, x))
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")

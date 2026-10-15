@@ -548,6 +548,17 @@ class _RealLiteral(RealNumber):
     def __reduce__(self):
         return (RealNumber, (float(self),))
 
+    def __neg__(self):
+        # -1.1 is still the literal, digits and all, as in Sage:
+        # RealField(100)(-1.1) is -1.1000...0, not the negated double
+        r = _RealLiteral(-float(self))
+        lit = self._lit
+        r._lit = lit[1:] if lit.startswith("-") else "-" + lit.lstrip("+")
+        return r
+
+    def __pos__(self):
+        return self
+
 
 class _RealDigits(RealNumber):
     """An element of RR shown to more digits than 53 bits carry (from
@@ -1167,7 +1178,7 @@ def _install_int_methods(sa):
         "xgcd": lambda n, m: sa.xgcd(n, m),
         "mod": lambda n, m: n % m,
         "quo_rem": quo_rem,
-        "valuation": lambda n, p: sa.valuation(n, p),
+        "valuation": lambda n, p: sa.oo if (sa._valuation_base(p) and n == 0) else sa.valuation(n, p),
         "euler_phi": lambda n: sa.euler_phi(n),
         "sigma": lambda n, k=1: sa.sigma(n, k),
         "moebius": lambda n: sa.moebius(n),

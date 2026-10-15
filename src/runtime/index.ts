@@ -18,6 +18,7 @@ import "./numpy_random";
 import "./numpy_linalg";
 import "./numpy_fft";
 import "./engine";
+import "./raster";
 import * as Cx from "./complex";
 O.complexHooks.pow = Cx.complexPow;
 
@@ -104,28 +105,64 @@ export function kwdflt(f: any, name: string): any {
 
 // ------------------------------------------------------------------ calls with *args / **kwargs
 
-// Merge a call's keyword pieces: names/values for k=v, and mappings for **m.
-export function kwMerge(names: string[], values: any[], mapping: any): void {
+// CPython's _PyObject_FunctionStr, which names the callee in keyword errors:
+// "module.qualname()", or "qualname()" for a builtin's
+function funcStr(f: any): string {
+  let qual: any, mod: any;
+  try {
+    qual = Obj.getattr(f, "__qualname__", null);
+    mod = Obj.getattr(f, "__module__", null);
+  } catch {
+    qual = null;
+  }
+  if (typeof qual !== "string") return typeName(f) + " object";
+  return typeof mod === "string" && mod !== "builtins" ? `${mod}.${qual}()` : `${qual}()`;
+}
+
+// Merge a call's keyword pieces: names/values for k=v, and mappings for **m,
+// as CPython's DICT_MERGE: a name given twice, also by a mapping that is not
+// a dict, is a TypeError, keys must be strings, and a KeyError from the
+// mapping's __getitem__ reads as a name given twice (format_kwargs_error).
+export function kwMerge(names: string[], values: any[], mapping: any, f?: any): void {
+  const who = () => (f === undefined ? "" : funcStr(f) + " ");
+  const twice = (key: string) => raise(T.TypeError, `${who()}got multiple values for keyword argument '${key}'`);
   if (mapping instanceof Obj.PyDict) {
     for (const [k, v] of mapping.$m) {
       const key = Obj.dictKeyOf(mapping, k);
       if (typeof key !== "string") raise(T.TypeError, "keywords must be strings");
-      if (names.includes(key)) raise(T.TypeError, `got multiple values for keyword argument '${key}'`);
+      if (names.includes(key)) twice(key);
       names.push(key);
       values.push(v);
     }
     return;
   }
   const keys = Ty.lookupDunder(mapping, "keys");
-  if (keys === undefined) raise(T.TypeError, `argument after ** must be a mapping, not ${typeName(mapping)}`);
+  if (keys === undefined) raise(T.TypeError, `${who()}argument after ** must be a mapping, not ${typeName(mapping)}`);
   O.forEach(keys(mapping), (k) => {
+    // (a name given twice is refused before its value is fetched, as
+    // CPython's dict_merge; a key that is not a string, after)
+    if (typeof k === "string" && names.includes(k)) twice(k);
+    let v: any;
+    try {
+      v = O.getitem(mapping, k);
+    } catch (e: any) {
+      const x = Obj.toPyExc(e);
+      if (!Obj.isinstance(x, T.KeyError)) throw e;
+      const args = Obj.getattr(x, "args", null);
+      const a = Array.isArray(args) && args.length === 1 ? args[0] : undefined;
+      if (a === undefined) throw e;
+      if (typeof a !== "string") raise(T.TypeError, "keywords must be strings");
+      twice(a);
+    }
+    if (typeof k !== "string") raise(T.TypeError, "keywords must be strings");
+    if (names.includes(k)) twice(k);
     names.push(k);
-    values.push(O.getitem(mapping, k));
+    values.push(v);
   });
 }
 
 export function callEx(f: any, pos: any[], names: string[], values: any[], maps: any[]): any {
-  for (const m of maps) kwMerge(names, values, m);
+  for (const m of maps) kwMerge(names, values, m, f);
   return Obj.callKw(f, pos, names, values);
 }
 

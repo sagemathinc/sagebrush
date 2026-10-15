@@ -40,3 +40,12 @@
 {"fn":"ec_modsym","n":18446743979220271189,"aps":[],"cusps":[]}
 {"fn":"ec_modsym","n":18446744073709551615,"aps":[],"cusps":[]}
 {"fn":"ec_modsym","n":2147483649,"aps":[],"cusps":[]}
+{"fn":"hmfq_newform_eigenvalues","d":10,"level":[[5,0],[0,1]],"orbit":4294967296,"bound":5}
+{"fn":"hmf_newform_eigenvalues","level":[[-5,18]],"orbit":4294967296,"bound":30}
+{"fn":"hmf_weight_newform_eigenvalues","level":[[7,2]],"weight":[2,4],"orbit":4294967296,"bound":20}
+{"fn":"hmf_hecke_rows","level":[[-2,5]],"p":[[3,0]],"rows":[4294967296]}
+{"fn":"hmfq_field","d":9223372036854775807}
+{"fn":"hmfq_field","d":1099511627791}
+{"fn":"hmfq_squarefree","n":4611686018427387905}
+{"fn":"hmfq_dimension","d":5,"level":[[16384,0]]}
+{"fn":"hmfq_dimension","d":5,"level":[[363660,0],[230736,2508]]}
