@@ -1,0 +1,73 @@
+char 1x5 ['10111']
+char 1x8 ['00010111']
+char 1x5 ['10111']
+char 3x10 ['1111111111';'0001111010';'0000001110']
+char 4x3 ['001';'011';'010';'100']
+char 1x1 ['0']
+char 1x1 ['0']
+char 1x4 ['1100']
+char 1x54 ['100000000000000000000000000000000000000000000000000000']
+char 1x8 ['11111111']
+char 1x1 ['1']
+char 1x8 ['11111111']
+char 1x8 ['11110000']
+char 1x8 ['10000000']
+char 1x16 ['1111111101111111']
+char 1x32 ['11111111111111110111111111111111']
+char 1x64 ['1111111111111111111111111111111101111111111111111111111111111111']
+char 1x8 ['11111111']
+char 1x12 ['111111111111']
+char 2x8 ['11111111';'00000101']
+char 2x16 ['1111111111111111';'0000000100101100']
+char 2x16 ['1111111111111111';'0000000010000000']
+char 2x10 ['1111111111';'0000000011']
+char 1x3 ['3FF']
+char 1x6 ['0003FF']
+char 3x3 ['3FF';'07A';'00E']
+char 1x2 ['FF']
+char 1x2 ['F0']
+char 1x4 ['FF38']
+char 1x4 ['FFFF']
+char 2x4 ['FFFF';'00FF']
+char 1x4 ['00FF']
+double 1x1 23
+double 1x1 5
+double 2x1 [1;2]
+double 3x1 [1;2;7]
+double 1x1 9007199254740991
+double 1x1 1023
+double 1x1 255
+double 2x1 [10;31]
+double 2x1 [255;10]
+double 1x4 [4 5 6 7]
+double 1x4 [3 4 5 6]
+double 1x1 14
+double 2x1 [7;11]
+double 2x2 [10 11;3 4]
+double 1x1 4
+double 1x1 2
+double 1x1 5
+double 1x4 [3 1 2 3]
+double 1x4 [1 2 2 2]
+double 1x4 [1 2 1 2]
+double 1x4 [2 2 1 1]
+double 1x4 [1 1 2 2]
+double 1x3 [2 1 2]
+double 1x8 [1 2 1 2 1 2 1 2]
+double 1x8 [1 1 2 2 3 3 4 4]
+double 1x8 [1 2 3 4 5 6 7 8]
+double 1x4 [3 2 1 2]
+double 1x4 [3 4 5 5]
+double 1x3 [1 1 2]
+double 2x2 [1 2;3 3]
+double 2x2 [1 2;3 4]
+cell 2x2 {double 2x3 [1 2 3;6 7 8], double 2x3 [11 12 13;16 17 18], double 2x2 [4 5;9 10], double 2x2 [14 15;19 20]}
+cell 2x1 {double 1x5 [1 2 3 4 5], double 3x5 [6 7 8 9 10;11 12 13 14 15;16 17 18 19 20]}
+cell 2x1 {double 1x5 [1 2 3 4 5], double 3x5 [6 7 8 9 10;11 12 13 14 15;16 17 18 19 20]}
+cell 2x2 {double 2x2 [16 2;5 11], double 2x2 [9 7;4 14], double 2x2 [3 13;10 8], double 2x2 [6 12;15 1]}
+cell 1x2 {char 1x2 ['ab'], char 1x2 ['cd']}
+cell 1x2 {cell 1x1 {double 1x1 1}, cell 1x2 {char 1x3 ['two'], double 1x1 3}}
+cell 1x2 {double 1x0 [], double 1x4 [1 2 3 4]}
+cell 1x2x2 {double 2x1 [1;2], double 2x1 [3;4], double 2x1 [5;6], double 2x1 [7;8]}
+cell 1x2 {logical 1x2 [true false], logical 1x1 true}
+cell 2x1 {int8 1x2 [1 2], int8 1x2 [3 4]}
