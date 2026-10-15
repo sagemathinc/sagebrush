@@ -1,0 +1,233 @@
+gamma(5) -> 24
+gamma(1/2) -> sqrt(pi)
+gamma(-1/2) -> -2*sqrt(pi)
+gamma(1/3) -> gamma(1/3)
+gamma(0) -> Infinity
+log_gamma(1) -> 0
+log_gamma(5) -> log(24)
+log_gamma(0) -> +Infinity
+log_gamma(1/2) -> log_gamma(1/2)
+psi(1) -> -euler_gamma
+psi(2) -> -euler_gamma + 1
+psi(5) -> -euler_gamma + 25/12
+psi(1/3) -> psi(1/3)
+psi(1, 1) -> 1/6*pi^2
+psi(2, 1) -> -2*zeta(3)
+psi(1, 2) -> 1/6*pi^2 - 1
+psi(1, 3/2) -> 1/2*pi^2 - 4
+psi(3, 1/2) -> pi^4
+psi(1, 1/2) -> 1/2*pi^2
+psi(0, x) -> psi(x)
+psi(1, x) -> psi(1, x)
+zeta(2) -> 1/6*pi^2
+zeta(4) -> 1/90*pi^4
+zeta(3) -> zeta(3)
+zeta(0) -> -1/2
+zeta(-1) -> -1/12
+zeta(-2) -> 0
+zeta(-3) -> 1/120
+zeta(1/2) -> zeta(1/2)
+zeta(1) -> Infinity
+hurwitz_zeta(2, 1) -> 1/6*pi^2
+hurwitz_zeta(2, 1/2) -> 1/2*pi^2
+hurwitz_zeta(3, 2) -> zeta(3) - 1
+hurwitz_zeta(3, 1/2) -> 7*zeta(3)
+hurwitz_zeta(4, 1/2) -> 1/6*pi^4
+hurwitz_zeta(-1, 2) -> -13/12
+hurwitz_zeta(x, 1) -> zeta(x)
+beta(2, 3) -> 1/12
+beta(1, x) -> 1/x
+beta(x, 1) -> 1/x
+beta(1/2, 1) -> 2
+beta(3/2, 2) -> beta(3/2, 2)
+beta(-1/2, 1/2) -> 0
+erfc(0) -> 1
+erfc(oo) -> 0
+erfc(-oo) -> 2
+erfi(0) -> 0
+erf(oo) -> 1
+erf(-oo) -> -1
+erfinv(0) -> 0
+erfinv(1) -> Infinity
+erfinv(x) -> erfinv(x)
+dilog(0) -> 0
+dilog(1) -> 1/6*pi^2
+dilog(-1) -> -1/12*pi^2
+polylog(2, x) -> dilog(x)
+polylog(1, x) -> -log(-x + 1)
+polylog(s, 1) -> zeta(s)
+polylog(3, 1) -> zeta(3)
+polylog(4, 1) -> 1/90*pi^4
+polylog(3, -1) -> -3/4*zeta(3)
+polylog(2, -1) -> -1/12*pi^2
+polylog(1, 1/2) -> -log(1/2)
+lambert_w(0) -> 0
+lambert_w(e) -> 1
+lambert_w(1) -> lambert_w(1)
+lambert_w(0, x) -> lambert_w(x)
+lambert_w(1, x) -> lambert_w(1, x)
+elliptic_kc(0) -> 1/2*pi
+elliptic_ec(0) -> 1/2*pi
+elliptic_ec(1) -> 1
+elliptic_kc(1/2) -> elliptic_kc(1/2)
+exp_integral_e1(1) -> exp_integral_e1(1)
+Ei(1) -> Ei(1)
+zetaderiv(1, 2) -> zetaderiv(1, 2)
+legendre_P(4, x) -> 35/8*x^4 - 15/4*x^2 + 3/8
+legendre_P(5, 1/2) -> 23/256
+legendre_P(-1, x) -> 1
+gen_legendre_P(2, 2, x) -> -3*x^2 + 3
+gen_legendre_P(3, 3, x) -> -15*(-x^2 + 1)^(3/2)
+gen_legendre_P(3, 1, x) -> -3/2*(5*x^2 - 1)*sqrt(-x^2 + 1)
+gen_legendre_P(1, 1, x) -> -sqrt(-x^2 + 1)
+gen_legendre_P(2, -1, x) -> 1/2*sqrt(-x^2 + 1)*x
+gen_legendre_P(2, 3, x) -> 0
+psi(0) !! ValueError
+psi(-1) !! ValueError
+psi(1, 0) !! ValueError
+beta(-1, 2) !! ValueError
+hurwitz_zeta(2, 0) !! ValueError
+diff gamma(x) -> gamma(x)*psi(x)
+diff gamma(x^2) -> 2*x*gamma(x^2)*psi(x^2)
+diff log_gamma(x) -> psi(x)
+diff psi(x) -> psi(1, x)
+diff psi(x^2) -> 2*x*psi(1, x^2)
+diff psi(1, x) -> psi(2, x)
+diff zeta(x) -> zetaderiv(1, x)
+diff zeta(2*x) -> 2*zetaderiv(1, 2*x)
+diff zetaderiv(2, x) -> zetaderiv(3, x)
+diff hurwitz_zeta(2, x) -> psi(2, x)
+diff hurwitz_zeta(3, x) -> -1/2*psi(3, x)
+diff hurwitz_zeta(s, x) -> -s*hurwitz_zeta(s + 1, x)
+diff beta(x, y) -> -(psi(x + y) - psi(x))*beta(x, y)
+diff erf(x) -> 2*e^(-x^2)/sqrt(pi)
+diff erfc(x) -> -2*e^(-x^2)/sqrt(pi)
+diff erfi(x) -> 2*e^(x^2)/sqrt(pi)
+diff erfinv(x) -> 1/2*sqrt(pi)*e^(erfinv(x)^2)
+diff exp_integral_e1(x) -> -e^(-x)/x
+diff exp_integral_e1(2*x) -> -e^(-2*x)/x
+diff Ei(x) -> e^x/x
+diff dilog(x) -> -log(-x + 1)/x
+diff polylog(3, x) -> dilog(x)/x
+diff lambert_w(x) -> lambert_w(x)/(x*lambert_w(x) + x)
+diff lambert_w(1, x) -> lambert_w(1, x)/(x*lambert_w(1, x) + x)
+diff elliptic_kc(x) -> -1/2*((x - 1)*elliptic_kc(x) + elliptic_ec(x))/((x - 1)*x)
+diff elliptic_ec(x) -> 1/2*(elliptic_ec(x) - elliptic_kc(x))/x
+diff legendre_P(3, x) -> 15/2*x^2 - 3/2
+psi(1, x).subs(x=1) -> 1/6*pi^2
+integrate(psi(x), x) -> log_gamma(x)
+integrate(erfc(x), x) -> x*erfc(x) - e^(-x^2)/sqrt(pi)
+limit(erfc(x), x=oo) -> 0
+taylor(psi(1 + x), x, 0, 2) coefficients -> [-euler_gamma, 1/6*pi^2, -zeta(3)]
+latex gamma(x) -> \Gamma\left(x\right)
+latex psi(x) -> \psi\left(x\right)
+latex psi(1, x) -> \psi\left(1, x\right)
+latex log_gamma(x) -> \log\Gamma\left(x\right)
+latex zeta(x) -> \zeta(x)
+latex hurwitz_zeta(s, x) -> \zeta\left(s, x\right)
+latex beta(x, y) -> \operatorname{B}\left(x, y\right)
+latex erf(x) -> \operatorname{erf}\left(x\right)
+latex erfc(x) -> \operatorname{erfc}\left(x\right)
+latex erfi(x) -> \operatorname{erfi}\left(x\right)
+latex erfinv(x) -> \operatorname{erfinv}\left(x\right)
+latex exp_integral_e1(x) -> E_{1}\left(x\right)
+latex Ei(x) -> {\rm Ei}\left(x\right)
+latex dilog(x) -> {\rm Li}_2\left(x\right)
+latex polylog(3, x) -> {\rm Li}_{3}(x)
+latex lambert_w(x) -> \operatorname{W}({x})
+latex lambert_w(1, x) -> \operatorname{W_{1}}({x})
+latex elliptic_kc(x) -> K\left(x\right)
+latex elliptic_ec(x) -> E\left(x\right)
+latex zetaderiv(1, x) -> \zeta^\prime\left(1, x\right)
+gamma(2.5) -> 1.32934038818
+gamma(-1.5) -> 2.36327180121
+gamma(1e-300) -> 1e+300
+gamma(1+I).n() -> 0.498015668118 -0.154949828302i
+gamma(2.5+1.0*I) -> 0.774762104551 +0.70763120438i
+gamma(1/3).n() -> 2.67893853471
+log_gamma(10.0) -> 12.8018274801
+log_gamma(-2.5) -> -0.0562437164977 -9.42477796077i
+log_gamma(1+I).n() -> -0.650923199302 -0.301640320468i
+log_gamma(3).n() -> 0.69314718056
+psi(2.5) -> 0.703156640645
+psi(-0.5) -> 0.0364899739786
+psi(1/3).n() -> -3.13203378002
+psi(1+I).n() -> 0.0946503206225 +1.07667404747i
+psi(1, 2.5).n() -> 0.4903577561
+psi(2, 1).n() -> -2.40411380632
+zeta(3).n() -> 1.20205690316
+zeta(1/2).n() -> -1.46035450881
+zeta(-1.5) -> -0.0254852018898
+zeta(0.5) -> -1.46035450881
+zeta(2.0) -> 1.64493406685
+zeta(1/2+14*I).n() -> 0.02224114261 -0.103258123266i
+zeta(2.5+1.0*I) -> 1.14171616782 -0.250678908154i
+zeta(I).n() -> 0.00330022368532 -0.418155449141i
+(2*zeta(3)+1).n() -> 3.40411380632
+hurwitz_zeta(2.0, 0.5) -> 4.93480220054
+hurwitz_zeta(3, 1/3).n() -> 27.5610611997
+hurwitz_zeta(2.5, 1) -> 1.34148725725
+beta(2.5, 1.5) -> 0.196349540849
+beta(1/3, 1/3).n() -> 5.29991625086
+beta(1.0+1.0*I, 2.0) -> 0.1 -0.3i
+erf(1.0) -> 0.84270079295
+erf(1+I).n() -> 1.3161512817 +0.190453469238i
+erfc(1.0) -> 0.15729920705
+erfc(1+I).n() -> -0.316151281698 -0.190453469238i
+erfi(1.0) -> 1.6504257588
+erfi(1).n() -> 1.6504257588
+erfinv(0.5) -> 0.476936276204
+erfinv(1/2).n() -> 0.476936276204
+exp_integral_e1(1.0) -> 0.219383934396
+exp_integral_e1(-1.0) -> -1.89511781636 -3.14159265359i
+exp_integral_e1(1+I).n() -> 0.000281624451981 -0.179324535039i
+Ei(1.0) -> 1.89511781636
+Ei(-1.0) -> -0.219383934396
+exp_integral_ei(1.0) -> 1.89511781636
+dilog(0.5) -> 0.582240526465
+dilog(-1.0) -> -0.822467033424
+dilog(2.0) -> 2.46740110027 -2.1775860903i
+dilog(I).n() -> -0.205616758356 +0.915965594177i
+polylog(3, 0.5) -> 0.537213193608
+polylog(3, 1/2).n() -> 0.537213193608
+polylog(2, 2.0) -> 2.46740110027 -2.1775860903i
+polylog(2, 0.5+0.5*I) -> 0.45398526915 +0.643767332889i
+lambert_w(1.0) -> 0.56714329041
+lambert_w(1).n() -> 0.56714329041
+lambert_w(-0.5) -> -0.794023632345 +0.77011175051i
+lambert_w(-1, -0.1) -> -3.57715206396
+lambert_w(-1, -0.5) -> -0.794023632345 -0.77011175051i
+lambert_w(1, 1.0) -> -1.53391331979 +4.37518515306i
+lambert_w(1+I).n() -> 0.65696606923 +0.325450339413i
+elliptic_kc(0.5) -> 1.8540746773
+elliptic_kc(-1.0) -> 1.31102877715
+elliptic_ec(0.5) -> 1.35064388105
+elliptic_ec(-1.0) -> 1.91009889451
+elliptic_kc(1/2).n() -> 1.8540746773
+legendre_P(3, 0.5) -> -0.4375
+legendre_P(3, 2.0) -> 17
+gen_legendre_P(4, 2, 0.3) -> -2.52525
+gen_legendre_P(2, 1, 0.5) -> -1.29903810568
+(gamma(1/3)*psi(1/4)).n() -> -11.3250881742
+sin(gamma(1/3)).n() -> 0.446324770365
+RR(zeta(3)) -> 1.20205690316
+CC(gamma(1+I)) -> 0.498015668118 -0.154949828302i
+N(psi(1/3)) -> -3.13203378002
+psi(x).subs(x=2.5) -> 0.703156640645
+gamma(x).subs(x=2.5) -> 1.32934038818
+zeta(x).subs(x=3.0) -> 1.20205690316
+polylog(2, x).subs(x=0.5) -> 0.582240526465
+gamma(-1.0) -> NaN
+gamma(0.0) -> +infinity
+gamma(-0.0) -> -infinity
+psi(-1.0) -> NaN
+psi(0.0) -> NaN
+zeta(1.0) -> +infinity
+log_gamma(0.0) -> +infinity
+beta(-1.0, 2.0) -> NaN
+exp_integral_e1(0.0) -> +infinity
+Ei(0.0) -> -infinity
+elliptic_kc(1.0) -> +infinity
+erfinv(1.0) -> +infinity
+psi(1, 2.5) -> psi(1, 2.50000000000000)
+erfinv(1.5) -> erfinv(1.50000000000000)

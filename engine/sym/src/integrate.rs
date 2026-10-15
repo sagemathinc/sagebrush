@@ -580,10 +580,13 @@ impl<'a> Ctx<'a> {
                     Fun::Acosh => sub(&mul2(u, &fun1(Fun::Acosh, u)), &sqrt(&sub(&pow(u, &int(2)), &one()))),
                     Fun::Atanh => add2(&mul2(u, &fun1(Fun::Atanh, u)), &div(&log(&sub(&one(), &pow(u, &int(2)))), &int(2))),
                     Fun::Erf => add2(&mul2(u, &fun1(Fun::Erf, u)), &div(&exp(&neg(&pow(u, &int(2)))), &sqrt(&pi()))),
+                    Fun::Erfc => sub(&mul2(u, &fun1(Fun::Erfc, u)), &div(&exp(&neg(&pow(u, &int(2)))), &sqrt(&pi()))),
+                    Fun::Erfi => sub(&mul2(u, &fun1(Fun::Erfi, u)), &div(&exp(&pow(u, &int(2))), &sqrt(&pi()))),
+                    Fun::Psi => fun1(Fun::LogGamma, u),
                     _ => return None,
                 };
                 let rule = match g {
-                    Fun::Log | Fun::Atan | Fun::Asin | Fun::Acos | Fun::Asinh | Fun::Acosh | Fun::Atanh | Fun::Erf => "table (by parts)",
+                    Fun::Log | Fun::Atan | Fun::Asin | Fun::Acos | Fun::Asinh | Fun::Acosh | Fun::Atanh | Fun::Erf | Fun::Erfc | Fun::Erfi => "table (by parts)",
                     _ => "table",
                 };
                 step(rule, f, x, || Some(div(&r, &a)))

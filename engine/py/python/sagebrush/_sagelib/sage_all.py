@@ -42,6 +42,8 @@ __all__ = [
     "arccot", "arcsec", "arccsc", "atan2", "arctan2", "sinh", "cosh", "tanh", "coth", "sech", "csch",
     "arcsinh", "arccosh", "arctanh", "asinh", "acosh", "atanh", "exp", "log", "ln", "floor", "ceil",
     "ceiling", "gamma", "erf", "sgn", "sign", "heaviside",
+    "psi", "log_gamma", "zetaderiv", "hurwitz_zeta", "beta", "erfc", "erfi", "erfinv", "exp_integral_e1", "Ei",
+    "exp_integral_ei", "dilog", "polylog", "lambert_w", "elliptic_kc", "elliptic_ec", "legendre_P", "gen_legendre_P",
     "diff", "derivative", "integrate", "integral", "integrate_steps", "numerical_integral",
     "desolve", "desolve_rk4",
     "taylor", "limit", "lim", "solve", "expand",
@@ -65,6 +67,9 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
                         tanh, coth, sech, csch, arcsinh, arccosh, arctanh, asinh, acosh, atanh, exp,
                         log, ln, floor, ceil, ceiling, gamma, erf, sgn, sign, heaviside, diff,
+                        psi, log_gamma, zeta, zetaderiv, hurwitz_zeta, beta, erfc, erfi, erfinv, exp_integral_e1,
+                        Ei, exp_integral_ei, dilog, polylog, lambert_w, elliptic_kc, elliptic_ec, legendre_P,
+                        gen_legendre_P,
                         derivative, integrate, integral, integrate_steps, numerical_integral, desolve,
                         desolve_rk4, taylor, limit,
                         lim, solve, expand, simplify,
@@ -1419,57 +1424,6 @@ def bernoulli(n):
             break
         a = a[:]
     return _q(a[0])
-
-
-def zeta(s):
-    """The Riemann zeta function: exact at even and nonpositive integers,
-    numerical for real numbers, symbolic otherwise.
-
-    EXAMPLES::
-
-        sage: zeta(2), zeta(4), zeta(0), zeta(-1)
-        (1/6*pi^2, 1/90*pi^4, -1/2, -1/12)
-        sage: zeta(3.0)
-        1.20205690315959
-        sage: zeta(3)
-        zeta(3)
-    """
-    from _sage_expr import Expression, _expr
-    if isinstance(s, float):
-        from _sage_lang import RealNumber
-        return RealNumber(_zeta_float(float(s)))
-    try:
-        k = int(s) if (isinstance(s, int) or (isinstance(s, Expression) and s.is_integer())) else None
-    except Exception:
-        k = None
-    if k is not None:
-        if k == 1:
-            raise ValueError("zeta has a pole at 1")
-        if k == 0:
-            return _q(_Fraction(-1, 2))
-        if k < 0:
-            return -bernoulli(1 - k) / (1 - k)
-        if k % 2 == 0:
-            c = (-1) ** (k // 2 + 1) * _Fraction(bernoulli(k)) * 2 ** k / (2 * _math.factorial(k))
-            return _q(c) * pi ** k
-    from _sage_expr import function as _fn
-    return _fn("zeta")(_expr(s))
-
-
-def _zeta_float(s, n=40):
-    """zeta(s) for real s != 1 (Borwein's alternating series; the
-    functional equation for s < 1/2)."""
-    if s < 0.5:
-        return 2 ** s * _math.pi ** (s - 1) * _math.sin(_math.pi * s / 2) * _math.gamma(1 - s) * _zeta_float(1 - s, n)
-    d = [0.0] * (n + 1)
-    tot = 0.0
-    for i in range(n + 1):
-        tot += _math.factorial(n + i - 1) * 4 ** i / (_math.factorial(n - i) * _math.factorial(2 * i)) if i else 1.0 / n
-        d[i] = n * tot
-    acc = 0.0
-    for k in range(n):
-        acc += (-1) ** k * (d[k] - d[n]) / (k + 1) ** s
-    return -acc / (d[n] * (1 - 2 ** (1 - s)))
 
 
 def factorial(n):

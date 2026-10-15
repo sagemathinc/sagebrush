@@ -403,6 +403,16 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             vec![format!("{:e}", x), format!("{:e}", y)]
         }
         "pysrc" => vec![pysrc(&d(arg(0)))],
+        // the calls of special functions whose values the front end
+        // computes: mode "float", those with numeric arguments, a float among
+        // them, that Sage evaluates at once (gamma(2.5), not psi(1, 2.5));
+        // mode "const", the outermost ones without symbols (for n())
+        "special_calls" => {
+            let mut out = vec![];
+            special_calls(&d(arg(0)), arg(1) == "const", &mut out);
+            out.dedup();
+            out.iter().map(encode).collect()
+        }
         // a certified enclosure of a real constant (interval.rs: outward
         // rounding, LIBM's allowance), ends as round-tripping doubles; empty
         // when there is none
@@ -573,7 +583,7 @@ pub fn pysrc(e: &Expr) -> String {
             let args: Vec<String> = a.iter().map(pysrc).collect();
             let name = match f {
                 Fun::Sin | Fun::Cos | Fun::Tan | Fun::Asin | Fun::Acos | Fun::Atan | Fun::Sinh | Fun::Cosh | Fun::Tanh | Fun::Asinh | Fun::Acosh | Fun::Atanh
-                | Fun::Floor | Fun::Ceil | Fun::Erf => format!("_m.{}", match f {
+                | Fun::Floor | Fun::Ceil => format!("_m.{}", match f {
                     Fun::Asin => "asin",
                     Fun::Acos => "acos",
                     Fun::Atan => "atan",
@@ -585,7 +595,7 @@ pub fn pysrc(e: &Expr) -> String {
                 Fun::Atan2 => "_m.atan2".into(),
                 Fun::Log => "_m.log".into(),
                 Fun::Abs => "abs".into(),
-                Fun::Gamma => "_gamma".into(),
+                Fun::Gamma => return format!("_sp(\"gamma\", {})", args.join(", ")),
                 Fun::Factorial => return format!("_gamma({} + 1)", args[0]),
                 Fun::Cot => return format!("(1 / _m.tan({}))", args[0]),
                 Fun::Sec => return format!("(1 / _m.cos({}))", args[0]),
@@ -596,11 +606,36 @@ pub fn pysrc(e: &Expr) -> String {
                 Fun::Csch => return format!("(1 / _m.sinh({}))", args[0]),
                 Fun::Sign => return format!("_sgn({})", args[0]),
                 Fun::Heaviside => return format!("(1.0 if {} > 0 else 0.0)", args[0]),
+                f if f == &Fun::Erf || crate::special::is_special(f) => return format!("_sp({:?}, {})", f.name(), args.join(", ")),
                 _ => return format!("_undefined({:?})", f.name()),
             };
             format!("{}({})", name, args.join(", "))
         }
         Kind::Rel(..) => "_undefined('relation')".into(),
+    }
+}
+
+fn special_calls(e: &Expr, konst: bool, out: &mut Vec<Expr>) {
+    if let Kind::Fun(f, a) = &e.kind {
+        if crate::special::is_special(f) || matches!(f, Fun::Gamma | Fun::Erf) {
+            let hit = if konst {
+                free_symbols(e).is_empty()
+            } else {
+                a.iter().all(|t| t.is_num())
+                    && a.iter().any(|t| t.is_float())
+                    && !(matches!(f, Fun::Psi) && a.len() == 2)
+                    && !matches!(f, Fun::ZetaDeriv)
+            };
+            if hit {
+                if !out.contains(e) {
+                    out.push(e.clone());
+                }
+                return;
+            }
+        }
+    }
+    for c in e.children() {
+        special_calls(&c, konst, out);
     }
 }
 

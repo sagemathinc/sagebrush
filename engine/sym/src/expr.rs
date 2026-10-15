@@ -99,6 +99,27 @@ pub enum Fun {
     /// the principal argument, in (-pi, pi]
     Arg,
     Heaviside,
+    // special functions (special.rs: exact values, canonical forms and
+    // derivatives; their numerical values come from the front end)
+    /// psi(x) or psi(n, x), the digamma and polygamma functions
+    Psi,
+    LogGamma,
+    Zeta,
+    /// zetaderiv(n, s), the n-th derivative of zeta
+    ZetaDeriv,
+    HurwitzZeta,
+    Beta,
+    Erfc,
+    Erfi,
+    Erfinv,
+    ExpIntegralE1,
+    Ei,
+    Dilog,
+    Polylog,
+    /// lambert_w(z) or lambert_w(k, z), the branch k
+    LambertW,
+    EllipticKc,
+    EllipticEc,
     /// a symbolic function f(x, ...)
     User(Arc<str>),
     /// the derivative D[i, j, ...](f) of a symbolic function, applied
