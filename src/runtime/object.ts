@@ -549,10 +549,21 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any
       }
     }
     if (dflt !== undefined) return dflt;
-    raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'`);
+    const own = Object.prototype.hasOwnProperty.call(o, "__sagebrush_missing__") ? o.__sagebrush_missing__ : undefined;
+    raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'${missingHint(own, name)}`);
   }
   if (dflt !== undefined) return dflt;
-  raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'`);
+  raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'${missingHint(lookupType(t, "__sagebrush_missing__"), name)}`);
+}
+
+// What a library class or module of Sagebrush's adds to the AttributeError
+// for a name it lacks: its __sagebrush_missing__(name), a plain function
+// (lib/matplotlib/pyplot.py: a name of matplotlib's that Sagebrush does not
+// have yet, and where to search for what it has), or "".
+function missingHint(h: any, name: string): string {
+  if (h === undefined || name.startsWith("_")) return "";
+  const r = callObj(h, [name]);
+  return typeof r === "string" ? r : "";
 }
 
 // An AttributeError from a descriptor's __get__ falls back to __getattr__.

@@ -1064,6 +1064,11 @@ class Panel:
                     yhi = val
         xlo, xhi = _mpl_set_lim(xlo, xhi) if mx else _range(xlo, xhi, xlog)
         ylo, yhi = _mpl_set_lim(ylo, yhi) if my else _range(ylo, yhi, ylog)
+        # (matplotlib's invert_xaxis/invert_yaxis of an autoscaled axis)
+        if o.get("xinvert"):
+            xlo, xhi = xhi, xlo
+        if o.get("yinvert"):
+            ylo, yhi = yhi, ylo
         ar = o.get("aspect_ratio")
         # (fit_aspect with all four limits set: the box takes the shape, the limits stay, as matplotlib's adjustable='box')
         boxed = o.get("fit_aspect") and None not in (o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax"))
