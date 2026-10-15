@@ -39,9 +39,9 @@ fn main() {
         } else {
             let p = &primes[0];
             let cp = es.charpoly_of(&ns.eigenvalue(&es, p).unwrap()).unwrap();
-            println!("  orbit {} (dimension {}): charpoly of a_P at N(P) = {}: {:?}", k, g.len() - 1, p.norm, cp.iter().map(|c| c.to_string()).collect::<Vec<_>>());
+            println!("  orbit {} (dimension {}): charpoly of a_P at N(P) = {}: {:?}", k, g.len() - 1, p.norm(), cp.iter().map(|c| c.to_string()).collect::<Vec<_>>());
         }
     }
-    println!("primes: {:?}", primes.iter().map(|p| (p.norm, p.ideal.hnf())).collect::<Vec<_>>());
+    println!("primes: {:?}", primes.iter().map(|p| (p.norm(), p.ideal().hnf())).collect::<Vec<_>>());
     println!("{:.2} s", t.elapsed().as_secs_f64());
 }

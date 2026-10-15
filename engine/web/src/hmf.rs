@@ -49,6 +49,13 @@ fn weight_newspaces(n: &Ideal, w: Weight) -> Result<Rc<WeightNewspaces>, String>
     Ok(x)
 }
 
+/// The orbit number, as a usize without truncation on 32-bit targets
+/// (API-3AE-5).
+fn orbit(v: &Value) -> Result<usize, String> {
+    let x = v.get("orbit").and_then(Value::as_u64).ok_or("missing integer argument 'orbit'")?;
+    usize::try_from(x).map_err(|_| format!("orbit {} out of range", x))
+}
+
 fn fint_json(c: &FInt) -> Value {
     json!([c.a.to_string(), c.b.to_string()])
 }
@@ -151,7 +158,8 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
         }
         "hmf_hecke_rows" => {
             let s = space(&ideal(v, "level")?)?;
-            let rows: Vec<usize> = v.get("rows").and_then(Value::as_array).ok_or("missing argument 'rows'")?.iter().map(|x| x.as_u64().map(|x| x as usize).ok_or("rows are indices")).collect::<Result<_, _>>()?;
+            // checked: x as usize would truncate on 32-bit targets (API-3AE-5)
+            let rows: Vec<usize> = v.get("rows").and_then(Value::as_array).ok_or("missing argument 'rows'")?.iter().map(|x| x.as_u64().and_then(|x| usize::try_from(x).ok()).ok_or("rows are indices")).collect::<Result<_, _>>()?;
             Ok(rows_json(&s.hecke_rows(&prime(v, "p")?, &rows)?))
         }
         "hmf_degeneracy" => {
@@ -171,7 +179,7 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
         // a root theta of the orbit's polynomial g, num / den
         "hmf_newform_eigenvalues" => {
             let ns = newspaces(&ideal(v, "level")?)?;
-            let k = v.get("orbit").and_then(Value::as_u64).ok_or("missing integer argument 'orbit'")? as usize;
+            let k = orbit(v)?;
             let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
             if bound > 100_000 {
                 return Err("bound must be at most 10^5".into());
@@ -225,7 +233,7 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
         // a_p = h(theta)/g'(theta)
         "hmf_weight_newform_eigenvalues" => {
             let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
-            let k = v.get("orbit").and_then(Value::as_u64).ok_or("missing integer argument 'orbit'")? as usize;
+            let k = orbit(v)?;
             let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
             if bound > 10_000 {
                 return Err("bound must be at most 10^4".into());

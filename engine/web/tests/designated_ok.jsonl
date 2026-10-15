@@ -3,3 +3,6 @@
 {"fn":"factor_mod","f":[1,0,1],"p":4294967291}
 {"fn":"rational_newforms","n":11,"bound":20,"details":true}
 {"fn":"ec_modsym","n":11,"aps":[[2,-2],[3,-1],[1073741789,0]],"cusps":[[1,7]]}
+{"fn":"hmfq_ideal","d":5,"gens":[[1073741789,0]]}
+{"fn":"hmfq_squarefree","n":4611686018427387904}
+{"fn":"hmfq_newform_eigenvalues","d":10,"level":[[5,0],[0,1]],"orbit":0,"bound":5}

@@ -30,7 +30,8 @@
 //!
 //! All results are proven, given the facts cited; nothing is heuristic.
 
-use crate::definite::{divisors, DefiniteSpace};
+use crate::definite::{divisor_census, divisors, DefiniteSpace, MAX_HECKE_TERMS, MAX_TOTAL_POINTS};
+use crate::quatalg::BElt;
 use crate::eigen::{orbit_eigenspace_core, Eigenvalue, ModData, OrbitEigenspace};
 use crate::classes::ClassSet;
 use crate::newspace::{ELL, MAX_OP_BOUND};
@@ -49,6 +50,14 @@ use std::sync::{Arc, Mutex};
 
 /// A Hecke operator sum c_i T_(P_i).
 pub type Op = Vec<(QPrime, i64)>;
+
+/// The most modular work of the characteristic polynomials of one request,
+/// in multiply-adds: a dense characteristic polynomial modulo a prime costs
+/// about dim^3 per divisor space (measured at 1.6 ns per dim^3 natively,
+/// dimensions 200 to 1252), so about 15 s at the limit. Checked before
+/// new_charpoly's primes are used, and cumulatively over the attempts of
+/// the separating-operator search (daybreak HARD-3AE-4).
+pub const MAX_MODULAR_WORK: u128 = 1 << 33;
 
 type OpKey = Vec<((i128, i128, i128), i64)>;
 
@@ -112,6 +121,15 @@ pub struct Newspaces {
     spaces: HashMap<QIdeal, DefiniteSpace>,
     /// The divisors M of N, each with d(N/M).
     divisors: Vec<(QIdeal, usize)>,
+    /// The sum over the divisor spaces of dim^3: the modular work of one
+    /// characteristic polynomial of each.
+    cube_work: u128,
+    /// For each divisor M, its proper divisors M' with d(M/M').
+    old: HashMap<QIdeal, Vec<(QIdeal, usize)>>,
+    /// The sum of the dimensions of the divisor spaces.
+    total_dim: u128,
+    /// The neighbour elements of each prime, shared by the divisor spaces.
+    theta: Mutex<HashMap<QIdeal, Arc<Vec<Vec<(usize, BElt)>>>>>,
     hecke: Mutex<HashMap<(QIdeal, QIdeal), Arc<HeckeMatrix>>>,
     orbits: Mutex<Option<Orbits>>,
     charpoly_mod: Mutex<HashMap<(OpKey, u64), Arc<ModData>>>,
@@ -120,21 +138,61 @@ pub struct Newspaces {
 impl Newspaces {
     /// The newspaces of level N for the maximal order O (one class set,
     /// with reduced norms prime to N(N), serves every divisor).
+    ///
+    /// All the divisor spaces are built, so their number and size are
+    /// checked first, from the factorization of N alone (at most
+    /// definite::MAX_DIVISORS divisors and MAX_TOTAL_P1 points of P^1 in
+    /// all), and H times the points (MAX_TOTAL_POINTS) right after the class
+    /// set (daybreak HARD-3AE-4).
     pub fn new(order: &MaximalOrder, level: &QIdeal) -> Result<Newspaces, String> {
         let f = *order.alg().field();
         f.check(level)?;
+        let (_, total) = divisor_census(&f.factor(level)?)?;
         let nn = f.principal(&QElt::int(level.norm().to_i64().ok_or("level too large")?))?;
         let classes = Arc::new(ClassSet::coprime_to(order, &nn)?);
+        if total * classes.len() as u128 > MAX_TOTAL_POINTS {
+            return Err("H #P^1(O_F/M) over the divisors M of the level is too large (unsupported)".into());
+        }
+        // d(Q) from the exponents of Q
+        let sigma0 = |q: &QIdeal| -> Result<usize, String> { Ok(f.factor(q)?.iter().map(|(_, e)| *e as usize + 1).product()) };
+        let all = divisors(&f, level)?;
         let mut spaces = HashMap::new();
         let mut divs = vec![];
-        for m in divisors(&f, level)? {
+        let mut old = HashMap::new();
+        let mut total_dim: u128 = 0;
+        let mut cube_work: u128 = 0;
+        for m in &all {
             sagebrush_interrupt::check();
-            let q = f.ideal_div(level, &m)?.ok_or("internal error: not a divisor")?;
-            divs.push((m, divisors(&f, &q)?.len()));
-            spaces.insert(m, DefiniteSpace::with_classes(classes.clone(), &m)?);
+            let q = f.ideal_div(level, m)?.ok_or("internal error: not a divisor")?;
+            divs.push((*m, sigma0(&q)?));
+            let mut below = vec![];
+            for m2 in &all {
+                if m2 != m {
+                    if let Some(q2) = f.ideal_div(m, m2)? {
+                        below.push((*m2, sigma0(&q2)?));
+                    }
+                }
+            }
+            old.insert(*m, below);
+            let sp = DefiniteSpace::with_classes(classes.clone(), m)?;
+            total_dim += sp.dimension() as u128;
+            cube_work += (sp.dimension() as u128).pow(3);
+            spaces.insert(*m, sp);
         }
         divs.sort_by_key(|(m, _)| (m.norm(), m.hnf()));
-        Ok(Newspaces { level: *level, field: f, spaces, divisors: divs, hecke: Mutex::new(HashMap::new()), orbits: Mutex::new(None), charpoly_mod: Mutex::new(HashMap::new()) })
+        Ok(Newspaces {
+            level: *level,
+            field: f,
+            spaces,
+            divisors: divs,
+            cube_work,
+            old,
+            total_dim,
+            theta: Mutex::new(HashMap::new()),
+            hecke: Mutex::new(HashMap::new()),
+            orbits: Mutex::new(None),
+            charpoly_mod: Mutex::new(HashMap::new()),
+        })
     }
 
     pub fn space(&self, m: &QIdeal) -> Result<&DefiniteSpace, String> {
@@ -148,11 +206,31 @@ impl Newspaces {
     }
 
     /// The matrix of T_P (U_P if P divides M) on M_2^B(M), computed once.
+    /// T_P is applied on every divisor space, so its terms are counted over
+    /// all of them (MAX_HECKE_TERMS) before the neighbour search, which is
+    /// done once for P and shared (HARD-3AE-4).
     pub fn hecke(&self, m: &QIdeal, p: &QPrime) -> Result<Arc<HeckeMatrix>, String> {
         if let Some(t) = self.hecke.lock().unwrap().get(&(*m, p.ideal)) {
             return Ok(t.clone());
         }
-        let t = Arc::new(self.space(m)?.hecke_matrix(p)?);
+        let sp = self.space(m)?;
+        sp.check_hecke(p, 1)?;
+        if self.total_dim * (p.norm as u128 + 1) > MAX_HECKE_TERMS {
+            return Err(format!("T_P at a prime of norm {} on the spaces of the divisors of the level is too large a computation (unsupported)", p.norm));
+        }
+        let theta = match self.theta.lock().unwrap().get(&p.ideal) {
+            Some(t) => Some(t.clone()),
+            None => None,
+        };
+        let theta = match theta {
+            Some(t) => t,
+            None => {
+                let t = Arc::new(sp.neighbour_elements(p)?);
+                self.theta.lock().unwrap().insert(p.ideal, t.clone());
+                t
+            }
+        };
+        let t = Arc::new(sp.hecke_matrix_with(p, &theta)?);
         self.hecke.lock().unwrap().insert((*m, p.ideal), t.clone());
         Ok(t)
     }
@@ -161,10 +239,16 @@ impl Newspaces {
     pub fn op_matrix(&self, m: &QIdeal, op: &Op) -> Result<Vec<Vec<i64>>, String> {
         eigenvalue_bound(op)?;
         let d = self.space(m)?.dimension();
-        let mut out = vec![vec![0i64; d]; d];
+        // row by row, with checks: up to 4000^2 entries
+        let mut out = Vec::with_capacity(d);
+        for _ in 0..d {
+            sagebrush_interrupt::check();
+            out.push(vec![0i64; d]);
+        }
         for (p, c) in op {
             let t = self.hecke(m, p)?;
             for (i, row) in t.rows.iter().enumerate() {
+                sagebrush_interrupt::check();
                 for &(j, n) in row {
                     let e = &mut out[i][j as usize];
                     *e = c.checked_mul(n as i64).and_then(|x| e.checked_add(x)).ok_or("a Hecke operator matrix entry overflows i64")?;
@@ -185,6 +269,7 @@ impl Newspaces {
         let mut block = vec![vec![BigInt::from(0); hp]; hp];
         let mut seen = vec![vec![false; hp]; hp];
         for b in 0..n {
+            sagebrush_interrupt::check();
             let mut sums = vec![0i128; hp];
             for j in 0..n {
                 sums[fiber[j]] += a[b][j] as i128;
@@ -214,16 +299,18 @@ impl Newspaces {
         for (m, _) in &self.divisors {
             sagebrush_interrupt::check();
             let a = self.op_matrix(m, op)?;
-            let rows: Vec<Vec<u64>> = a.iter().map(|r| r.iter().map(|&x| md.from_i64(x)).collect()).collect();
+            let rows: Vec<Vec<u64>> = a
+                .iter()
+                .map(|r| {
+                    sagebrush_interrupt::check();
+                    r.iter().map(|&x| md.from_i64(x)).collect()
+                })
+                .collect();
             let full = Mat::from_rows(&rows, md).charpoly();
             let mut old = red(&eis[m]);
-            let q_all = divisors(&self.field, m)?;
-            for m2 in &q_all {
-                if m2 != m {
-                    let q = self.field.ideal_div(m, m2)?.ok_or("internal error: not a divisor")?;
-                    for _ in 0..divisors(&self.field, &q)?.len() {
-                        old = nmod_poly::mul(&old, &new[m2], &md);
-                    }
+            for (m2, mult) in &self.old[m] {
+                for _ in 0..*mult {
+                    old = nmod_poly::mul(&old, &new[m2], &md);
                 }
             }
             let (q, r) = nmod_poly::divrem(&full, &old, &md);
@@ -262,11 +349,8 @@ impl Newspaces {
         let mut nd: HashMap<QIdeal, usize> = HashMap::new();
         for (m, _) in &self.divisors {
             let mut old = 0;
-            for m2 in divisors(&self.field, m)? {
-                if m2 != *m {
-                    let q = self.field.ideal_div(m, &m2)?.ok_or("internal error: not a divisor")?;
-                    old += divisors(&self.field, &q)?.len() * nd[&m2];
-                }
+            for (m2, mult) in &self.old[m] {
+                old += mult * nd[m2];
             }
             let cusp = self.space(m)?.cusp_dimension();
             nd.insert(*m, cusp.checked_sub(old).ok_or("internal error: negative new dimension")?);
@@ -283,7 +367,6 @@ impl Newspaces {
     /// (a coefficient of a polynomial of degree d is at most 2^d L^d).
     pub fn new_charpoly(&self, op: &Op) -> Result<Vec<BigInt>, String> {
         self.check_op(op)?;
-        let eis = self.eisenstein_charpolys(op)?;
         let d = self.new_dimension()?;
         let bits = d as f64 * (1.0 + (eigenvalue_bound(op)? as f64).max(1.0).log2()) + 2.0;
         let mut primes = vec![];
@@ -295,10 +378,21 @@ impl Newspaces {
                 break;
             }
         }
+        self.check_modular(primes.len() as u128)?;
+        let eis = self.eisenstein_charpolys(op)?;
         let res: Vec<Vec<u64>> = primes.iter().map(|&p| Ok(self.new_charpolys_mod(op, &eis, Modulus::new(p))?.0.remove(&self.level).unwrap())).collect::<Result<_, String>>()?;
         let crt = MultiCrt::new(&primes);
         let deg = res[0].len();
         Ok((0..deg).map(|t| crt.reconstruct(&res.iter().map(|r| r.get(t).copied().unwrap_or(0)).collect::<Vec<u64>>())).collect())
+    }
+
+    /// Refuses `count` characteristic polynomials of every divisor space
+    /// above MAX_MODULAR_WORK.
+    fn check_modular(&self, count: u128) -> Result<(), String> {
+        if self.cube_work.saturating_mul(count) > MAX_MODULAR_WORK {
+            return Err(format!("the characteristic polynomials of the newspaces of this level need about {} operations, above the limit of {} (unsupported)", self.cube_work.saturating_mul(count), MAX_MODULAR_WORK));
+        }
+        Ok(())
     }
 
     /// Whether op separates the newforms (modulo 2^61 - 1; monic, so this
@@ -327,6 +421,8 @@ impl Newspaces {
             seed
         };
         for attempt in 0..48usize {
+            // the attempts so far, and this one, within the modular budget
+            self.check_modular(attempt as u128 + 1)?;
             let k = (1 + attempt).min(primes.len());
             let range = [9u64, 101, 1001, 20001][(attempt / 4).min(3)];
             let op: Op = (0..k)
@@ -389,5 +485,23 @@ impl Newspaces {
             }
         }
         Ok(a)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quatalg::QuatAlg;
+
+    /// For tests/wasm-stop.mjs (the Stop button in wasm): the newspaces of
+    /// level (210) over Q(sqrt 5) (16 divisor spaces) and their newform
+    /// orbits, which must notice Stop and trap.
+    #[test]
+    #[ignore]
+    fn stop_newspaces() {
+        let f = QuadField::new(5).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let ns = Newspaces::new(&o, &f.principal(&QElt::int(210)).unwrap()).unwrap();
+        println!("not interrupted: {:?}", ns.newform_orbits().map(|o| o.dimensions()));
     }
 }

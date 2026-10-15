@@ -46,7 +46,7 @@ use crate::residue::Res;
 use crate::rqf::{QElt, QFrac, QIdeal, QPrime, QuadField};
 use crate::HeckeMatrix;
 use num_integer::Integer;
-use num_traits::{One, ToPrimitive, Zero};
+use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_arith::zmat::{charpoly, ZMat};
 use sagebrush_bigint::BigInt;
 use std::collections::{HashMap, HashSet};
@@ -60,6 +60,46 @@ pub const MAX_POINTS: u64 = 1 << 22;
 /// The largest dimension whose Hecke matrices are formed and whose
 /// characteristic polynomials are computed (as weightnew.rs).
 pub const MAX_DIMENSION: usize = 4000;
+/// The most divisors of a level whose spaces are built together (newspaces).
+pub const MAX_DIVISORS: u128 = 256;
+/// The most points of P^1(O_F/M) over all the divisors M of a level, and
+/// times the number of classes (newspaces build a space for every divisor;
+/// daybreak HARD-3AE-4).
+pub const MAX_TOTAL_P1: u128 = 1 << 21;
+pub const MAX_TOTAL_POINTS: u128 = 1 << 23;
+/// The most terms (an action on P^1 each) of one Hecke matrix: a row per
+/// basis element with N(P) + 1 terms (or N(P)), checked before the
+/// neighbour search; for newspaces, over all the divisor spaces together.
+/// Measured at about 2 microseconds a term natively (S_2((210)) over
+/// Q(sqrt 5), dimension 1252, and S_2((120)) over Q(sqrt 2), dimension
+/// 1040), so a few seconds at the limit; the neighbour search has its own
+/// node budget (classes.rs).
+pub const MAX_HECKE_TERMS: u128 = 1 << 21;
+
+/// #P^1(O_F/P^e) = q^e + q^(e - 1), q = N(P), e >= 1 (None on overflow).
+pub fn p1_size(q: i128, e: u32) -> Option<u128> {
+    let q = u128::try_from(q).ok()?;
+    let a = q.checked_pow(e - 1)?;
+    a.checked_mul(q)?.checked_add(a)
+}
+
+/// For the factorization of a level: its number of divisors, and the sum
+/// over its divisors M of #P^1(O_F/M), the product over P^e of 1 + sum
+/// over k = 1..e of #P^1(O_F/P^k) (#P^1 is multiplicative); an Err above
+/// MAX_DIVISORS or MAX_TOTAL_P1, computed from the exponents alone, before
+/// anything is built (daybreak HARD-3AE-4).
+pub fn divisor_census(fac: &[(QPrime, u32)]) -> Result<(u128, u128), String> {
+    let (mut count, mut total) = (1u128, 1u128);
+    for (p, e) in fac {
+        count = count.checked_mul(*e as u128 + 1).filter(|&c| c <= MAX_DIVISORS).ok_or_else(|| format!("the level has more than {} divisors (unsupported)", MAX_DIVISORS))?;
+        let mut s = 1u128;
+        for k in 1..=*e {
+            s = p1_size(p.norm, k).and_then(|x| s.checked_add(x)).filter(|&x| x <= MAX_TOTAL_P1).ok_or("P^1(O_F/M) over the divisors M of the level is too large (unsupported)")?;
+        }
+        total = total.checked_mul(s).filter(|&x| x <= MAX_TOTAL_P1).ok_or("P^1(O_F/M) over the divisors M of the level is too large (unsupported)")?;
+    }
+    Ok((count, total))
+}
 
 /// P^1(O_F/P^e): the points (a : 1), a in O_F/P^e, then (1 : b), b in P/P^e.
 #[derive(Clone, Debug)]
@@ -70,12 +110,15 @@ struct LocalP1 {
 }
 
 impl LocalP1 {
+    /// Built only after its size is checked against MAX_P1 (with_classes).
     fn new(ring: QLocalRing) -> LocalP1 {
         let mut points = vec![];
         for i in 0..ring.card() {
+            sagebrush_interrupt::check();
             points.push((ring.element(i), ring.one()));
         }
         for i in 0..ring.card() {
+            sagebrush_interrupt::check();
             let b = ring.element(i);
             if ring.in_p(b) {
                 points.push((ring.one(), b));
@@ -178,25 +221,34 @@ impl DefiniteSpace {
                 return Err("a class representative has reduced norm not prime to N(N)".into());
             }
         }
+        // the sizes from the factorization, checked before any ring or
+        // point is built (daybreak HARD-3AE-3)
+        let fac = f.factor(level)?;
+        let mut size: u128 = 1;
+        for (p, e) in &fac {
+            size = p1_size(p.norm, *e).and_then(|s| size.checked_mul(s)).filter(|&s| s <= MAX_P1 as u128).ok_or("P^1(O_F/N) is too large (unsupported)")?;
+        }
+        if size * (classes.len() as u128) > MAX_POINTS as u128 {
+            return Err("H #P^1(O_F/N) is too large (unsupported)".into());
+        }
         let mut locals = vec![];
         let mut splittings = vec![];
-        let mut size: u64 = 1;
-        for (p, e) in f.factor(level)? {
+        for (p, e) in fac {
             let ring = QLocalRing::new(&f, p, e)?;
             let l = LocalP1::new(ring);
-            size = size.checked_mul(l.size()).filter(|&s| s <= MAX_P1).ok_or("P^1(O_F/N) is too large (unsupported)")?;
+            if Some(l.size() as u128) != p1_size(p.norm, e) {
+                return Err("internal error: P^1(O_F/P^e) has the wrong size".into());
+            }
             splittings.push(order.local_splitting(p, e)?);
             locals.push(l);
-        }
-        if (size as u128) * (classes.len() as u128) > MAX_POINTS as u128 {
-            return Err("H #P^1(O_F/N) is too large (unsupported)".into());
         }
         let mut sp = DefiniteSpace { classes, level: *level, locals, splittings, orbit: vec![], reps: vec![], offset: vec![], dim: 0 };
         for j in 0..sp.classes.len() {
             let c = &sp.classes.classes()[j];
             let n = BigInt::from(c.ideal().nrd().norm());
             let units: Vec<BElt> = c.units_one().iter().chain(c.units_eps()).cloned().collect();
-            let mats: Vec<Vec<Mat>> = units.iter().map(|u| sp.images(u, &n)).collect::<Result<_, _>>()?;
+            let gens = unit_generators(&sp.classes, &units)?;
+            let mats: Vec<Vec<Mat>> = gens.iter().map(|u| sp.images(u, &n)).collect::<Result<_, _>>()?;
             let (orbit, reps) = sp.orbits(&mats)?;
             sp.offset.push(sp.dim);
             sp.dim += reps.len();
@@ -283,16 +335,6 @@ impl DefiniteSpace {
         x
     }
 
-    /// The image of the global point x under the matrices (one per factor).
-    fn act(&self, m: &[Mat], x: u64) -> Result<u64, String> {
-        let d = self.digits(x);
-        let mut e = vec![0u32; d.len()];
-        for k in 0..d.len() {
-            e[k] = self.locals[k].act(&m[k], d[k]).ok_or("internal error: an element acted singularly on P^1")?;
-        }
-        Ok(self.combine(&e))
-    }
-
     /// The image of x, or None if the matrix is singular on x at the factor
     /// `degenerate` (an Err at any other factor).
     fn act_or_degenerate(&self, m: &[Mat], x: u64, degenerate: Option<usize>) -> Result<Option<u64>, String> {
@@ -308,11 +350,35 @@ impl DefiniteSpace {
         Ok(Some(self.combine(&e)))
     }
 
+    /// The orbits on P^1(O_F/N) of the group generated by the given
+    /// elements (their images at N, one matrix per local factor): each
+    /// generator's permutation of each local P^1 is computed once, and the
+    /// search applies the generators through these tables (orbits under a
+    /// group are orbits under its generators; unit_generators).
     fn orbits(&self, mats: &[Vec<Mat>]) -> Result<(Vec<u32>, Vec<u64>), String> {
         let n = self.size() as usize;
+        let k = self.locals.len();
+        let mut gens: Vec<Vec<Vec<u32>>> = vec![];
+        for m in mats {
+            let mut pm = Vec::with_capacity(k);
+            for (l, mk) in self.locals.iter().zip(m) {
+                let mut v = Vec::with_capacity(l.size() as usize);
+                for i in 0..l.size() as u32 {
+                    sagebrush_interrupt::check();
+                    v.push(l.act(mk, i).ok_or("internal error: an element acted singularly on P^1")?);
+                }
+                pm.push(v);
+            }
+            gens.push(pm);
+        }
+        let mut radix = vec![1u64; k];
+        for i in 1..k {
+            radix[i] = radix[i - 1] * self.locals[i - 1].size();
+        }
         let mut orbit = vec![u32::MAX; n];
         let mut reps = vec![];
         let mut stack = vec![];
+        let mut digits = vec![0usize; k];
         for start in 0..n {
             if orbit[start] != u32::MAX {
                 continue;
@@ -323,8 +389,11 @@ impl DefiniteSpace {
             stack.push(start as u64);
             while let Some(x) = stack.pop() {
                 sagebrush_interrupt::check();
-                for m in mats {
-                    let y = self.act(m, x)? as usize;
+                for (i, l) in self.locals.iter().enumerate() {
+                    digits[i] = ((x / radix[i]) % l.size()) as usize;
+                }
+                for g in &gens {
+                    let y = (0..k).map(|i| g[i][digits[i]] as u64 * radix[i]).sum::<u64>() as usize;
                     if orbit[y] == u32::MAX {
                         orbit[y] = id;
                         stack.push(y as u64);
@@ -419,15 +488,40 @@ impl DefiniteSpace {
     /// order of level P^e (Dembélé 2005, section 3: "one must restrict the
     /// summation to the u whose action is nondegenerate").
     pub fn hecke_matrix(&self, p: &QPrime) -> Result<HeckeMatrix, String> {
+        self.check_hecke(p, 1)?;
+        let theta = self.neighbour_elements(p)?;
+        self.hecke_matrix_with(p, &theta)
+    }
+
+    /// Refuses T_P where the matrix (dimension at most MAX_DIMENSION), with
+    /// `spaces` such matrices of this size, would exceed MAX_HECKE_TERMS
+    /// terms: before the neighbour search.
+    pub(crate) fn check_hecke(&self, p: &QPrime, spaces: u128) -> Result<(), String> {
+        self.field().check(&p.ideal)?;
+        if self.dim > MAX_DIMENSION {
+            return Err(format!("dimension {} is above {} (unsupported)", self.dim, MAX_DIMENSION));
+        }
+        let terms = (self.dim as u128) * (p.norm as u128 + 1) * spaces;
+        if terms > MAX_HECKE_TERMS {
+            return Err(format!("T_P at a prime of norm {} on a space of dimension {} is too large a computation (unsupported)", p.norm, self.dim));
+        }
+        Ok(())
+    }
+
+    /// hecke_matrix with the neighbour elements of P given (they depend only
+    /// on the classes and P, so newspaces share them across divisors).
+    pub(crate) fn hecke_matrix_with(&self, p: &QPrime, theta: &[Vec<(usize, BElt)>]) -> Result<HeckeMatrix, String> {
         let f = self.field();
         f.check(&p.ideal)?;
+        if theta.len() != self.classes.len() {
+            return Err("internal error: neighbour elements of another class set".into());
+        }
         // the factor of P^e in N, if P divides N
         let degenerate = self.locals.iter().position(|l| l.ring.prime().ideal == p.ideal);
         let want = if degenerate.is_some() { p.norm } else { p.norm + 1 };
         if self.dim > MAX_DIMENSION {
             return Err(format!("dimension {} is above {} (unsupported)", self.dim, MAX_DIMENSION));
         }
-        let theta = self.neighbour_elements(p)?;
         let alg = self.classes.order().alg();
         let mut rows = vec![vec![]; self.dim];
         for (i, list) in theta.iter().enumerate() {
@@ -440,9 +534,10 @@ impl DefiniteSpace {
                 })
                 .collect::<Result<_, String>>()?;
             for (k, &x) in self.reps[i].iter().enumerate() {
-                sagebrush_interrupt::check();
                 let mut cols: Vec<u32> = vec![];
                 for (j, m) in &mats {
+                    // a check per term: rows have N(P) + 1 terms
+                    sagebrush_interrupt::check();
                     if let Some(y) = self.act_or_degenerate(m, x, degenerate)? {
                         cols.push((self.offset[*j] + self.orbit[*j][y as usize] as usize) as u32);
                     }
@@ -466,7 +561,12 @@ impl DefiniteSpace {
 
     /// The characteristic polynomial of T_P on M_2^B(N) (constant term first).
     pub fn charpoly(&self, p: &QPrime) -> Result<Vec<BigInt>, String> {
-        let t = self.hecke_matrix(p)?;
+        self.check_hecke(p, 1)?;
+        self.charpoly_with(p, &self.neighbour_elements(p)?)
+    }
+
+    fn charpoly_with(&self, p: &QPrime, theta: &[Vec<(usize, BElt)>]) -> Result<Vec<BigInt>, String> {
+        let t = self.hecke_matrix_with(p, theta)?;
         let rows: Vec<Vec<BigInt>> = t.dense().into_iter().map(|r| r.into_iter().map(BigInt::from).collect()).collect();
         Ok(charpoly(&ZMat::from_rows(rows)))
     }
@@ -476,7 +576,12 @@ impl DefiniteSpace {
     /// dividing N (U_P) the factor is (x^m - N(P)^m)^(h+/m): the N(P) terms
     /// of a row all move the narrow class of nrd by [P].
     pub fn cusp_charpoly(&self, p: &QPrime) -> Result<Vec<BigInt>, String> {
-        let full = self.charpoly(p)?;
+        self.check_hecke(p, 1)?;
+        self.cusp_charpoly_with(p, &self.neighbour_elements(p)?)
+    }
+
+    fn cusp_charpoly_with(&self, p: &QPrime, theta: &[Vec<(usize, BElt)>]) -> Result<Vec<BigInt>, String> {
+        let full = self.charpoly_with(p, theta)?;
         let cg = self.classes.class_group();
         let m = cg.class_order(&p.ideal, true)?;
         let hp = cg.narrow_h();
@@ -493,10 +598,65 @@ impl DefiniteSpace {
     }
 }
 
-/// The divisors of the ideal N (from its factorization).
+/// Generators of O_j^x / O_F^x among its units (of reduced norm 1 and
+/// eps), chosen greedily: each unit not in the group generated so far is
+/// added. Elements are compared up to sign, and a product of reduced norm
+/// eps^2 is divided by the central eps (classes.rs: eps is totally positive
+/// when N(eps) = 1). The group is finite, a subgroup of B^x / F^x inside
+/// SO(3) at a real place, of order at most 60 (checked), so there are at
+/// most 6 generators.
+fn unit_generators(classes: &ClassSet, units: &[BElt]) -> Result<Vec<BElt>, String> {
+    let alg = classes.order().alg();
+    let f = *alg.field();
+    let cg = classes.class_group();
+    let eps2 = f.mul(&cg.eps, &cg.eps).frac();
+    let eps_inv = central(&f.conj(&cg.eps));
+    let canon = |x: BElt| -> BElt {
+        let x = if cg.eps_norm == 1 && alg.nrd(&x) == eps2 { alg.mul(&x, &eps_inv) } else { x };
+        match x.c.iter().find(|c| !c.is_zero()) {
+            Some(c) if c.is_negative() => alg.neg(&x),
+            _ => x,
+        }
+    };
+    let mut gens: Vec<BElt> = vec![];
+    let mut group: HashSet<BElt> = HashSet::new();
+    group.insert(canon(BElt::one()));
+    for u in units {
+        if group.contains(&canon(u.clone())) {
+            continue;
+        }
+        gens.push(u.clone());
+        let mut elements = vec![canon(BElt::one())];
+        group.clear();
+        group.insert(elements[0].clone());
+        let mut i = 0;
+        while i < elements.len() {
+            for g in &gens {
+                sagebrush_interrupt::check();
+                let c = canon(alg.mul(g, &elements[i]));
+                if group.insert(c.clone()) {
+                    elements.push(c);
+                    if elements.len() > 60 {
+                        return Err("internal error: a unit group has more than 60 elements modulo the center".into());
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+    Ok(gens)
+}
+
+/// The divisors of the ideal N (from its factorization); an Err above
+/// MAX_DIVISORS, before they are built.
 pub fn divisors(f: &QuadField, n: &QIdeal) -> Result<Vec<QIdeal>, String> {
+    let fac = f.factor(n)?;
+    let mut count = 1u128;
+    for (_, e) in &fac {
+        count = count.checked_mul(*e as u128 + 1).filter(|&c| c <= MAX_DIVISORS).ok_or_else(|| format!("the level has more than {} divisors (unsupported)", MAX_DIVISORS))?;
+    }
     let mut out = vec![f.unit_ideal()];
-    for (p, e) in f.factor(n)? {
+    for (p, e) in fac {
         let mut next = vec![];
         for d in &out {
             let mut x = *d;
@@ -517,16 +677,34 @@ pub fn divisors(f: &QuadField, n: &QIdeal) -> Result<Vec<QIdeal>, String> {
 /// sigma_0(N/M) times at level N.
 pub fn new_charpoly(order: &MaximalOrder, level: &QIdeal, p: &QPrime) -> Result<Vec<BigInt>, String> {
     let f = *order.alg().field();
+    f.check(&p.ideal)?;
+    // the size of all the divisor spaces, before the class set (HARD-3AE-4)
+    let (_, total) = divisor_census(&f.factor(level)?)?;
     let divs = divisors(&f, level)?;
     // all levels use the classes prime to N(N)
     let nn = f.principal(&QElt::int(level.norm().to_i64().ok_or("level too large")?))?;
     let classes = Arc::new(ClassSet::coprime_to(order, &nn)?);
+    if total * classes.len() as u128 > MAX_TOTAL_POINTS {
+        return Err("H #P^1(O_F/M) over the divisors M of the level is too large (unsupported)".into());
+    }
     let mut sorted = divs.clone();
     sorted.sort_by_key(|d| d.norm());
     let mut new: HashMap<QIdeal, Vec<BigInt>> = HashMap::new();
+    // the neighbour elements once (they depend only on the classes and P),
+    // and the Hecke terms counted over all the divisor spaces
+    let mut theta = None;
+    let mut terms: u128 = 0;
     for m in &sorted {
         let sp = DefiniteSpace::with_classes(classes.clone(), m)?;
-        let mut cp = sp.cusp_charpoly(p)?;
+        sp.check_hecke(p, 1)?;
+        terms += sp.dimension() as u128 * (p.norm as u128 + 1);
+        if terms > MAX_HECKE_TERMS {
+            return Err(format!("T_P at a prime of norm {} on the spaces of the divisors of the level is too large a computation (unsupported)", p.norm));
+        }
+        if theta.is_none() {
+            theta = Some(sp.neighbour_elements(p)?);
+        }
+        let mut cp = sp.cusp_charpoly_with(p, theta.as_ref().unwrap())?;
         for d in &sorted {
             if d == m || f.ideal_div(m, d)?.is_none() {
                 continue;
