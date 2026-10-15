@@ -21,6 +21,16 @@ def _is_ff(base):
     return isinstance(base, (_ff.IntegerModRing_, _ff.FiniteField_ext)) or getattr(base, "_is_generic_field", False)
 
 
+def _field_elements(base):
+    """The elements of a finite field, for iterating over its vector
+    spaces (refused beyond the entry limit rather than listed)."""
+    from _sage_matrix import _MAX_ENTRIES
+    q = int(base.order())
+    if q > _MAX_ENTRIES:
+        raise NotImplementedError("iterating over a vector space over a field of %d elements is not available in sagebrush yet" % q)
+    return list(base)
+
+
 def _field(base):
     return isinstance(base, _ff.FiniteField_ext) or getattr(base, "_is_generic_field", False) or (isinstance(base, _ff.IntegerModRing_) and base.is_field())
 
@@ -70,7 +80,8 @@ class FFVector:
             sage: vector(GF(7), [1, 2, 3]).cross_product(vector(GF(7), [4, 5, 6]))
             (4, 6, 4)
         """
-        a, b = list(self), list(other)
+        from _sage_matrix import _bounded_list
+        a, b = list(self), _bounded_list(other, 3)
         if len(a) != 3 or len(b) != 3:
             raise TypeError("the cross product is defined for vectors of length 3")
         return FFVector(self._base, [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]])
@@ -294,9 +305,12 @@ class FFMatrix:
     __slots__ = ("_base", "_rows", "_ncols")
 
     def __init__(self, base, rows, ncols=None):
+        from _sage_matrix import _shape
         self._base = base
         self._rows = [[base(x) for x in r] for r in rows]
         self._ncols = ncols if ncols is not None else (len(self._rows[0]) if self._rows else 0)
+        # (a backstop: every path checks the shape before building rows)
+        _shape(len(self._rows), self._ncols)
 
     # ---- data
     def parent(self):
@@ -510,6 +524,8 @@ class FFMatrix:
         if isinstance(o, FFMatrix):
             if self._ncols != o.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), o.parent()))
+            from _sage_matrix import _shape
+            _shape(self.nrows(), o.ncols())  # (the product's shape before it is built)
             cols = o.columns()
             z = self._base.zero()
             out = []
@@ -760,9 +776,12 @@ class FFMatrix:
             import _sage_rdf
             return _sage_rdf._solve_right(self, b)
         if isinstance(b, FFMatrix):
+            from _sage_matrix import _shape
+            _shape(self._ncols, b.ncols())
             cols = [self.solve_right(c) for c in b.columns()]
             return FFMatrix(self._base, [[c[i] for c in cols] for i in range(self._ncols)], len(cols))
-        b = [self._base(x) for x in b]
+        from _sage_matrix import _bounded_list
+        b = [self._base(x) for x in _bounded_list(b, self.nrows())]
         aug = [r + [bi] for r, bi in zip(self._rows, b)]
         m, piv, d = _echelon(aug, self._base, self._ncols + 1)
         if self._ncols in piv:
@@ -905,8 +924,12 @@ class FFMatrix:
             sage: matrix(GF(2), [[1, 0]]).augment(matrix(GF(2), [[1]]))
             [1 0 1]
         """
+        from _sage_matrix import _shape
         if isinstance(other, FFVector):
             other = FFMatrix(self._base, [[x] for x in other])
+        if other.nrows() != self.nrows():
+            raise TypeError("number of rows must be the same, %d != %d" % (self.nrows(), other.nrows()))
+        _shape(self.nrows(), self._ncols + other.ncols())
         return FFMatrix(self._base, [r + s for r, s in zip(self._rows, other._rows)], self._ncols + other.ncols())
 
     def stack(self, other):
@@ -918,8 +941,12 @@ class FFMatrix:
             [1 0]
             [0 1]
         """
+        from _sage_matrix import _shape
         if isinstance(other, FFVector):
             other = FFMatrix(self._base, [other._e])
+        if other.ncols() != self._ncols:
+            raise TypeError("number of columns must be the same, %d != %d" % (self._ncols, other.ncols()))
+        _shape(self.nrows() + other.nrows(), self._ncols)
         return FFMatrix(self._base, self._rows + other._rows, self._ncols)
 
     def change_ring(self, R):
@@ -1247,6 +1274,8 @@ class FFVectorSpace:
             (0, 1)
             ]
         """
+        from _sage_matrix import _shape
+        _shape(self._n, self._n)  # (VectorSpace(GF(2), 5000).basis(): 2.5 10^7 entries)
         one, zero = self._base.one(), self._base.zero()
         return _Basis([FFVector(self._base, [one if i == j else zero for j in range(self._n)]) for i in range(self._n)])
 
@@ -1301,7 +1330,7 @@ class FFVectorSpace:
         return _sa().Integer(int(self._base.order()) ** self._n)
 
     def __iter__(self):
-        els = list(self._base)
+        els = _field_elements(self._base)
         q = len(els)
         for idx in range(q ** self._n):
             c = []
@@ -1410,7 +1439,7 @@ class FFSubspace(FFVectorSpace):
         return len(_echelon(rows, self._base, self._n)[1]) == len(self._basis)
 
     def __iter__(self):
-        els = list(self._base)
+        els = _field_elements(self._base)
         q = len(els)
         k = len(self._basis)
         zero = self._base.zero()

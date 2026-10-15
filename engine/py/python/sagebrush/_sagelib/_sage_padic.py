@@ -1758,6 +1758,7 @@ def padic_matrix(base, *args):
             if m == 0 or len(e) % m:
                 raise ValueError("entries do not fill a matrix with %d rows" % m)
             n = len(e) // m
+            _check_entries(m, n)  # (matrix(K, 10^9, []): 10^9 empty rows)
         if len(e) != m * n:
             raise ValueError("entries has the wrong length")
         return PadicMatrix(base, [e[i * n:(i + 1) * n] for i in range(m)], n)
