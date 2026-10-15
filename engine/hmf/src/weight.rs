@@ -71,6 +71,9 @@ use std::collections::HashMap;
 /// black box and Dembélé's Table 1: weight (2, 4) at level (3 + w) has
 /// a_2 = 4w - 12). In the model above, u acts as itself on the factor of
 /// weight k2 and through its conjugate on that of weight k1.
+/// The largest dimension (k1 - 1)(k2 - 1) of L_k handled.
+pub const MAX_REP_DIM: u64 = 256;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Weight {
     pub k: [u32; 2],
@@ -86,6 +89,12 @@ impl Weight {
         }
         if k1 > 200 || k2 > 200 {
             return Err("weights above 200 are not supported".into());
+        }
+        // the coefficient module L_k has dimension (k1 - 1)(k2 - 1), and the
+        // Hecke action builds dense matrices on it
+        let rep = (k1 as u64 - 1) * (k2 as u64 - 1);
+        if rep > MAX_REP_DIM {
+            return Err(format!("weight ({}, {}) has a coefficient module of dimension {}, above the limit of {}", k1, k2, rep, MAX_REP_DIM));
         }
         Ok(Weight { k: [k1, k2] })
     }

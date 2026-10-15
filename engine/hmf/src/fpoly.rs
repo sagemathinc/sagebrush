@@ -204,26 +204,46 @@ impl PairCrt {
     }
 }
 
-/// Enough pairs of places above distinct primes for coefficients of at most
-/// `bits` bits (|a|, |b| < 2^bits): their product exceeds 2^(bits + 1).
-pub fn pairs_for_bits(bits: f64) -> Vec<(Place, Place)> {
-    let mut out = vec![];
-    let mut have = 0.0;
-    for pp in place_pairs() {
-        have += (pp.0.p() as f64).log2();
-        out.push(pp);
-        if have > bits + 2.0 {
-            break;
-        }
-    }
-    out
+/// The largest recovery this module undertakes, in bits per coefficient:
+/// a request whose proven bound needs more is refused (daybreak
+/// HARD-DDD-1), before any modular work. About 4300 pairs of places.
+pub const MAX_BITS: u64 = 1 << 18;
+
+/// Every modulus is a prime above 2^61: Primes descends from 2^62, and
+/// MAX_BITS needs far fewer of them than lie in (2^61, 2^62). Checked.
+const MIN_PRIME_BITS: u64 = 61;
+
+/// The bit length of x >= 0: x < 2^bitlen(x).
+pub fn bitlen(x: &BigInt) -> u64 {
+    x.bits()
 }
 
-/// log2 of a bound for the coefficients (under both real embeddings) of a
-/// monic polynomial of degree d whose roots have absolute value at most b
-/// under every embedding: binom(d, i) b^i <= (1 + b)^d.
-pub fn coefficient_bits(d: usize, b: f64) -> f64 {
-    d as f64 * (1.0 + b).log2() + 1.0
+/// The number of pairs of places that suffice for coefficients a, b with
+/// |a|, |b| < 2^bits: k primes above 2^61 have a product
+/// >= 2^(61 k) >= 2^(bits + 2) > 2 max(|a|, |b|) + 1. An Err above
+/// MAX_BITS.
+pub fn pairs_needed(bits: u64) -> Result<usize, String> {
+    if bits > MAX_BITS {
+        return Err(format!("this computation needs {} bits per coefficient, more than the limit of {}", bits, MAX_BITS));
+    }
+    Ok(((bits + 2 + MIN_PRIME_BITS - 1) / MIN_PRIME_BITS) as usize)
+}
+
+/// Enough pairs of places above distinct primes for coefficients of fewer
+/// than `bits` bits (|a|, |b| < 2^bits).
+pub fn pairs_for_bits(bits: u64) -> Result<Vec<(Place, Place)>, String> {
+    let k = pairs_needed(bits)?;
+    let out: Vec<(Place, Place)> = place_pairs().take(k).collect();
+    assert!(out.iter().all(|pp| pp.0.p() >> MIN_PRIME_BITS >= 1), "a modulus below 2^61");
+    Ok(out)
+}
+
+/// An integer upper bound for log2 of the coefficient bound of a monic
+/// polynomial of degree d whose roots have absolute value at most b under
+/// every embedding: binom(d, i) b^i <= (1 + b)^d < 2^(d bitlen(1 + b)).
+/// Exact integer arithmetic (daybreak PROOF-DDD-2).
+pub fn coefficient_bits(d: usize, b: &BigInt) -> u64 {
+    d as u64 * bitlen(&(b + BigInt::one()))
 }
 
 /// The monic gcd over F of f (monic, in O_F[x]) and h (monic, in Z[x]),
@@ -232,7 +252,7 @@ pub fn coefficient_bits(d: usize, b: f64) -> f64 {
 /// reductions has the right degree except at finitely many places (those
 /// of least degree are kept), recovered with the coefficient bound, and
 /// checked to divide f and h exactly.
-pub fn gcd_with_z(f: &[FInt], h: &[BigInt], root_bound: f64) -> Result<FPoly, String> {
+pub fn gcd_with_z(f: &[FInt], h: &[BigInt], root_bound: &BigInt) -> Result<FPoly, String> {
     let hf = from_z(h);
     let mut kept: Vec<((Place, Place), Vec<u64>, Vec<u64>)> = vec![];
     let mut deg = usize::MAX;
@@ -260,9 +280,9 @@ pub fn gcd_with_z(f: &[FInt], h: &[BigInt], root_bound: f64) -> Result<FPoly, St
         if deg == 0 {
             return Ok(vec![FInt::one()]);
         }
-        let bits = coefficient_bits(deg, root_bound);
-        let have: f64 = kept.iter().map(|(pp, _, _)| (pp.0.p() as f64).log2()).sum();
-        if have < bits + 2.0 || kept.len() < checked_with * 2 {
+        let need = pairs_needed(coefficient_bits(deg, root_bound))?;
+        assert!(pp.0.p() >> MIN_PRIME_BITS >= 1, "a modulus below 2^61");
+        if kept.len() < need || kept.len() < checked_with * 2 {
             continue;
         }
         checked_with = kept.len();
@@ -283,7 +303,7 @@ pub fn gcd_with_z(f: &[FInt], h: &[BigInt], root_bound: f64) -> Result<FPoly, St
 /// Algorithm 3.6.4): for the first k = 0, 1, -1, 2, ... with
 /// N(x) = norm(f(x - k w)) squarefree over Q, the irreducible factors over F
 /// of f(x - k w) are its gcds with the irreducible factors of N over Q.
-pub fn factor_squarefree(f: &[FInt], root_bound: f64) -> Result<Vec<FPoly>, String> {
+pub fn factor_squarefree(f: &[FInt], root_bound: &BigInt) -> Result<Vec<FPoly>, String> {
     let f = trim(f.to_vec());
     if f.len() <= 1 {
         return Ok(vec![]);
@@ -301,13 +321,14 @@ pub fn factor_squarefree(f: &[FInt], root_bound: f64) -> Result<Vec<FPoly>, Stri
         if zpoly::gcd(&n, &dn).len() != 1 {
             continue;
         }
-        let bound = root_bound + 2.0 * (k.abs() as f64);
+        // |w| < 2 under both embeddings
+        let bound = root_bound + BigInt::from(2 * k.abs());
         let mut out = vec![];
         for (h, e) in sagebrush_poly::factor(&n).1 {
             if e != 1 {
                 return Err("the norm is not squarefree".into());
             }
-            let g = gcd_with_z(&fk, &h, bound)?;
+            let g = gcd_with_z(&fk, &h, &bound)?;
             if g.len() > 1 {
                 // back: g(x + k w)
                 out.push(shift(&g, &FInt::new(BigInt::zero(), BigInt::from(k))));
@@ -343,7 +364,7 @@ mod tests {
 
     #[test]
     fn pair_reconstruction() {
-        let pairs = pairs_for_bits(100.0);
+        let pairs = pairs_for_bits(100).unwrap();
         let crt = PairCrt::new(&pairs);
         for c in [fi(3, -7), fi(-123456789012, 98765432109), fi(0, 1), fi(-1, 0)] {
             let res: Vec<(u64, u64)> = pairs.iter().map(|(a, b)| (c.red(a), c.red(b))).collect();
@@ -360,13 +381,13 @@ mod tests {
         let c = vec![fi(3, 0), fi(0, 1), fi(1, 0)];
         let d = vec![fi(-2, 0), fi(0, 0), fi(1, 0)];
         let f = mul(&mul(&mul(&a, &b), &c), &d);
-        let mut got = factor_squarefree(&f, 10.0).unwrap();
+        let mut got = factor_squarefree(&f, &BigInt::from(10)).unwrap();
         let mut want = vec![a, b, c, d];
         got.sort();
         want.sort();
         assert_eq!(got, want);
         // x^2 - 5 = (x - (2w - 1))(x + (2w - 1)) over F
         let g = vec![fi(-5, 0), fi(0, 0), fi(1, 0)];
-        assert_eq!(factor_squarefree(&g, 3.0).unwrap().len(), 2);
+        assert_eq!(factor_squarefree(&g, &BigInt::from(3)).unwrap().len(), 2);
     }
 }

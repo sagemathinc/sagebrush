@@ -81,6 +81,23 @@ for g in [3+w, 2*(3+w), 6+0*w, 5+0*w, 7+2*w, 3*(3+w), 4+0*w] do
     end for;
   end for;
 end for;
+// More H lines (daybreak TEST-DDD-3): the full-space characteristic
+// polynomials, where HeckeOperator works, at the 42 spaces at prime levels
+// where NewSubspace or Eigenform raised an error (the E lines below), so
+// that Sagebrush's old and new parts there are checked against Magma; and
+// the swapped weight (4, 2) at level (3 + w), whose T_2 is the conjugate of
+// that in weight (2, 4).
+espaces := [<2, 0, 6, 6>, <1, -2, 6, 6>, <3, 0, 6, 6>, <1, -3, 6, 6>, <2, -3, 6, 6>, <3, -4, 6, 6>, <1, -4, 6, 6>, <6, -1, 2, 6>, <6, -1, 6, 6>, <5, 1, 2, 6>, <5, 1, 6, 6>, <2, -5, 6, 6>, <3, -5, 6, 6>, <-7, 1, 2, 6>, <-7, 1, 6, 6>, <5, -6, 2, 6>, <5, -6, 6, 6>, <7, 0, 6, 6>, <-5, 7, 6, 6>, <-9, 2, 6, 6>, <-10, 3, 2, 6>, <-10, 3, 6, 6>, <-7, -3, 2, 6>, <-7, -3, 6, 6>, <-9, 1, 2, 4>, <-9, 1, 4, 2>, <-9, 1, 6, 6>, <7, -8, 2, 4>, <7, -8, 4, 2>, <7, -8, 6, 6>, <-11, 3, 2, 4>, <-11, 3, 4, 2>, <-11, 3, 2, 6>, <-11, 3, 6, 6>, <-5, 8, 2, 4>, <-5, 8, 4, 2>, <-5, 8, 2, 6>, <-5, 8, 6, 6>, <-1, -10, 2, 4>, <-1, -10, 4, 2>, <-1, -10, 2, 6>, <-1, -10, 6, 6>, <3, 1, 4, 2>];
+for t in espaces do
+  N := (t[1] + t[2]*w)*O;
+  k := [t[3], t[4]];
+  M := HilbertCuspForms(F, N, k);
+  for P in Ps do
+    c := CharacteristicPolynomial(HeckeOperator(M, P));
+    cs := [toF(a) : a in Coefficients(c)];
+    printf "H %o | %o %o | %o | %o\n", gen(N), k[1], k[2], gen(P), js([Sprintf("%o,%o", e[1], e[2]) : e in cs], ";");
+  end for;
+end for;
 Qs := PrimesUpTo(30, F);
 for P in PrimesUpTo(100, F) do
   for k in [[2,4],[4,2],[4,4],[2,6],[6,6]] do
