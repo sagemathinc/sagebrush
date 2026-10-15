@@ -139,6 +139,9 @@ export function kwMerge(names: string[], values: any[], mapping: any, f?: any): 
   const keys = Ty.lookupDunder(mapping, "keys");
   if (keys === undefined) raise(T.TypeError, `${who()}argument after ** must be a mapping, not ${typeName(mapping)}`);
   O.forEach(keys(mapping), (k) => {
+    // (a name given twice is refused before its value is fetched, as
+    // CPython's dict_merge; a key that is not a string, after)
+    if (typeof k === "string" && names.includes(k)) twice(k);
     let v: any;
     try {
       v = O.getitem(mapping, k);

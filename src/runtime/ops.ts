@@ -1246,9 +1246,12 @@ export function forEach(x: any, f: (v: any) => void) {
     return;
   }
   const it = iter(x);
-  let n = 0;
-  for (let v = it.$next(); v !== DONE; v = it.$next()) {
-    if ((++n & 1023) === 0) pollInterrupt();
+  // (polled before the next item is taken: an iterator stopped here resumes
+  // with the item after the last one used, none lost)
+  for (let n = 1; ; n++) {
+    if ((n & 1023) === 0) pollInterrupt();
+    const v = it.$next();
+    if (v === DONE) return;
     f(v);
   }
 }
