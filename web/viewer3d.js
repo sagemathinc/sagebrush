@@ -698,9 +698,14 @@
       return false;
     };
     const refused = (why) => explain("This is a still picture: the interactive 3D view was not shown, because the scene " + why + ".");
-    // (checked before a WebGL context is taken; built after, charged as it goes)
-    const bad = checkScene(scene);
-    if (bad) return refused(bad);
+    // (checked and built, once, before a WebGL context is taken: its arrays
+    // are decoded by the check and reused by build)
+    let geo;
+    try {
+      geo = geometry(scene);
+    } catch (e) {
+      return refused(e instanceof Refused ? e.message : "is malformed");
+    }
     const canvas = document.createElement("canvas");
     const opts = { antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true };
     let gl = canvas.getContext("webgl2", opts);
@@ -711,13 +716,6 @@
     const deriv = gl2 || !!gl.getExtension("OES_standard_derivatives");
     const prog = program(gl, gl2, deriv);
     if (!prog) return explain("This is a still picture: the interactive 3D view could not start on this browser's graphics (its shaders did not compile).");
-    let geo;
-    try {
-      geo = geometry(scene);
-    } catch (e) {
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
-      return refused(e instanceof Refused ? e.message : "is malformed");
-    }
     const buf = (data, target = gl.ARRAY_BUFFER) => {
       const b = gl.createBuffer();
       gl.bindBuffer(target, b);
