@@ -571,8 +571,13 @@ The rest:
   it picks "nice" edges, so Sagebrush's rules are its own (Scott's width
   rounded to Heckbert's nice numbers, 1, 2, 5 or 10 times a power of 10)
   and its edges can differ from MATLAB's;
+- fzero's search from x0 = 0, where the published displays' step (x0/50)
+  is none, is on Octave's scale for a zero start, 0.1 (step 0.1/50):
+  Octave's fzero tries the same multiples of x0 from any start (0.99 x0,
+  1.025 x0, 0.95 x0, ...) and from 0 exactly those of 0.1 (0.099, 0.1025,
+  0.095, ...), as observed with Octave 11.1;
 - fzero's details that neither its page nor a published display fixes are
-  Sagebrush's own: the search's first step from x0 = 0 (1/50), the end of
+  Sagebrush's own: the end of
   a search that would overflow (exitflag -6), never giving exitflag -5
   (its page says what it means, a possible singular point, but not how it
   is detected; a sign change at a pole ends like any other), an error for
