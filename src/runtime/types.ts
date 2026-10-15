@@ -5,7 +5,7 @@ import {
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
+  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
@@ -108,6 +108,33 @@ getset(type, "__module__", (c) => c.$dict.get("__module__") ?? c.$module, (c, v)
 getset(type, "__mro__", (c) => tuple(c.$mro.slice()));
 getset(type, "__bases__", (c) => tuple(c.$bases.slice()));
 getset(type, "__base__", (c) => c.$bases[0] ?? null);
+// types.MappingProxyType: a read-only view of a mapping, as CPython's (what
+// a class's __dict__ is)
+export class MappingProxy {
+  constructor(public m: any) {}
+}
+const isMappingLike = (m: any) =>
+  m instanceof PyDict || (!isinstance(m, T.list) && !isinstance(m, T.tuple) && lookupType(typeOf(m), "__getitem__") !== undefined && lookupType(typeOf(m), "keys") !== undefined);
+export const mappingproxy = builtinType("mappingproxy", [object], (m: any) => {
+  if (!isMappingLike(m)) raise(T.TypeError, `mappingproxy() argument must be a mapping, not ${typeName(m)}`);
+  return new MappingProxy(m);
+});
+bindClass(MappingProxy, mappingproxy);
+const viaMapping = (name: string) => (p: MappingProxy, ...a: any[]) => callObj(getattr(p.m, name), a);
+method(mappingproxy, "__getitem__", (p: MappingProxy, k: any) => O.getitem(p.m, k));
+method(mappingproxy, "__contains__", (p: MappingProxy, k: any) => O.contains(p.m, k));
+method(mappingproxy, "__iter__", (p: MappingProxy) => O.iter(p.m));
+method(mappingproxy, "__len__", (p: MappingProxy) => O.len(p.m));
+method(mappingproxy, "__reversed__", (p: MappingProxy) => callObj(getattr(p.m, "__reversed__"), []));
+for (const n of ["keys", "values", "items", "copy"]) method(mappingproxy, n, viaMapping(n));
+method(mappingproxy, "get", (p: MappingProxy, k: any, dflt: any = null) => callObj(getattr(p.m, "get"), [k, dflt]));
+method(mappingproxy, "__repr__", (p: MappingProxy) => `mappingproxy(${repr(p.m)})`);
+method(mappingproxy, "__str__", (p: MappingProxy) => str(p.m));
+method(mappingproxy, "__eq__", (p: MappingProxy, o: any) => O.eq(p.m, o));
+method(mappingproxy, "__or__", (p: MappingProxy, o: any) => O.or(callObj(getattr(p.m, "copy"), []), o));
+method(mappingproxy, "__ror__", (p: MappingProxy, o: any) => O.or(o, callObj(getattr(p.m, "copy"), [])));
+method(mappingproxy, "__hash__", (p: MappingProxy) => O.hashExact(p.m)); // (as CPython's: the mapping's hash)
+
 getset(type, "__dict__", (c) => {
   const d = new PyDict();
   // (a builtin method leaves the type's dict as its receiver-checking form, so
@@ -117,7 +144,8 @@ getset(type, "__dict__", (c) => {
   if (c.$ctor !== null && c !== object && !c.$dict.has("__slots__") && !c.$dict.has("__dict__") && c.$bases.every((b: any) => b.$ctor === null || b === object || b.$jsBase !== null)) {
     dictSet(d, "__dict__", object.$dict.get("__dict__"));
   }
-  return d;
+  // (read-only, as CPython's: a class's attributes are set with setattr)
+  return new MappingProxy(d);
 });
 getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null, (c, v) => void c.$dict.set("__doc__", v));
 method(type, "__repr__", (c: any) => repr(c));
@@ -1142,6 +1170,53 @@ method(S, "zfill", (s: string, w: any) => {
   const n = Number(w) - s.length;
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
+// str.translate and str.maketrans, as CPython's (their messages included)
+method(S, "translate", (s: string, table: any) => {
+  const out: string[] = [];
+  for (const ch of s) {
+    let r: any;
+    try {
+      r = O.getitem(table, ch.codePointAt(0)!);
+    } catch (e: any) {
+      if (isinstance(toPyExc(e), T.LookupError)) {
+        out.push(ch);
+        continue;
+      }
+      throw e;
+    }
+    if (r === null) continue;
+    if (typeof r === "string") out.push(r);
+    else if (O.isPyInt(r) && typeof r !== "boolean") {
+      const n = Number(r);
+      if (!(n >= 0 && n < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
+      out.push(String.fromCodePoint(n));
+    } else raise(T.TypeError, "character mapping must return integer, None or str");
+  }
+  return out.join("");
+});
+S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
+  if (a.length === 0) raise(T.TypeError, "maketrans expected at least 1 argument, got 0");
+  if (a.length > 3) raise(T.TypeError, `maketrans expected at most 3 arguments, got ${a.length}`);
+  const d = new PyDict();
+  if (a.length === 1) {
+    if (!(a[0] instanceof PyDict)) raise(T.TypeError, "if you give only one argument to maketrans it must be a dict");
+    for (const k of O.toArray(a[0])) {
+      const v = O.getitem(a[0], k);
+      if (typeof k === "string") {
+        if ([...k].length !== 1) raise(T.ValueError, "string keys in translatetable must be of length 1");
+        dictSet(d, k.codePointAt(0)!, v);
+      } else if (O.isPyInt(k)) dictSet(d, k, v);
+      else raise(T.TypeError, "keys in translate table mustbe strings or integers");
+    }
+    return d;
+  }
+  for (let i = 0; i < a.length; i++) if (typeof a[i] !== "string") raise(T.TypeError, `maketrans() argument ${i + 1} must be str, not ${typeName(a[i])}`);
+  const x = [...a[0]], y = [...a[1]];
+  if (x.length !== y.length) raise(T.ValueError, "the first two maketrans arguments must have equal length");
+  x.forEach((c, i) => dictSet(d, c.codePointAt(0)!, y[i].codePointAt(0)!));
+  if (a.length === 3) for (const c of a[2]) dictSet(d, c.codePointAt(0)!, null);
+  return d;
+}, "maketrans")));
 method(S, "partition", (s: string, sep: string) => {
   if (needStr(sep) === "") raise(T.ValueError, "empty separator");
   const i = s.indexOf(sep);
@@ -1871,6 +1946,8 @@ function iteratorType(name: string, jsClass: any, call?: (...a: any[]) => any): 
 }
 iteratorType("list_iterator", O.ListIter);
 iteratorType("range_iterator", O.RangeIter);
+// (a range too long for doubles: CPython's type of its iterator, not object)
+iteratorType("longrange_iterator", BigRangeIter);
 iteratorType("str_ascii_iterator", O.StrIter);
 iteratorType("dict_keyiterator", O.DictIter);
 iteratorType("bytes_iterator", O.BytesIter);
