@@ -607,13 +607,19 @@ impl QuadField {
     /// One continued fraction step from (a, b) (a != 0): (a1, b1, gamma)
     /// with J = gamma J_1 as lattices.
     ///
-    /// Bounds: with s = floor(sqrt D), b1 lies in (s - 2|a|, s], so |b1| <=
-    /// 2|a| + s, and |a1| = |D - b1^2|/(4|a|) <= max(D/(4|a|), |a|) (if
-    /// 2|a| >= s then |b1| <= 2|a|, otherwise 0 < b1 <= s). By induction a
-    /// reduction from (a_0, b_0) with |b_0| <= 2|a_0| + 1 keeps |a| <=
-    /// max(|a_0|, D/4) < 2^60 and |b| < 2^62 for ideals of norm < 2^60
-    /// (D < 2^42), so every product below is below 2^126. They are checked
-    /// all the same: an overflow would be a bug, never a wrapped value.
+    /// Bounds (with the correction of @sagebrush-astra's review of 6635080).
+    /// For a > 0, b1 lies in (sqrt D - 2a, sqrt D), so |b1| < 2a + sqrt D;
+    /// a positive a1 then satisfies a1 < D/(4a). A negative a1 = -c can only
+    /// follow a > 0 with b1 = -B, sqrt D < B < 2a - sqrt D, so c = (B^2 -
+    /// D)/(4a) < a - sqrt D. For a = -c < 0 the interval is different: b2
+    /// lies in (sqrt D, sqrt D + 2c), above sqrt D (for example (11, 3 + w)
+    /// in Q(sqrt 5) reaches (a, b) = (-1, -7), whose next b is 3 > floor(sqrt
+    /// 5)), and the next a2 = (b2^2 - D)/(4c) is positive with a2 < c + sqrt
+    /// D < a. So, over each pair of steps, a reduction from (a_0, b_0) with
+    /// |b_0| <= 2|a_0| + 1 keeps |a| <= max(|a_0|, D/4) < 2^60 and |b| <
+    /// 2^62 for ideals of norm < 2^60 (D < 2^42), and every product below is
+    /// below 2^126. They are checked all the same: an overflow would be a
+    /// bug, never a wrapped value.
     fn step(&self, a: i128, b: i128) -> (i128, i128, QFrac) {
         let s = isqrt(self.disc as i128);
         let a2 = ck(a.checked_mul(2));
