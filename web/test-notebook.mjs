@@ -209,6 +209,18 @@ try {
   await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'matlab'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("A = magic(3);\nb = A(2, :)");
   ok(out.includes("b =") && /3\s+5\s+7/.test(out), "MATLAB mode prints as MATLAB: " + JSON.stringify(out.trim()));
+  // the search box in MATLAB mode: a function's examples, after MATLAB's prompt, and into a new cell
+  await ev("(() => { const i = document.querySelector('#docsearch'); i.focus(); i.value = 'magic'; i.dispatchEvent(new Event('input')); })()");
+  await until("document.querySelectorAll('#docresults li[role=option]').length > 0");
+  ok((await ev("document.querySelector('#docresults li .sig').textContent")).startsWith("magic(") && (await ev("document.querySelector('#docresults li .badge')?.textContent")) === "1 example",
+    "MATLAB mode's search finds magic, with an example");
+  await ev("document.querySelector('#docsearch').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))");
+  await until("document.querySelector('#docdlg').open");
+  ok((await ev("document.querySelector('#docbody').textContent")).includes(">> magic(3)\n\nans =\n\n     8     1     6"), "its documentation shows the example and its output");
+  const mcells = await ev("document.querySelectorAll('.cell').length");
+  await ev("document.querySelector('#docinsert').click()");
+  ok((await ev("document.querySelectorAll('.cell').length")) === mcells + 1 && (await ev("[...document.querySelectorAll('.cell textarea')].at(-1).value")) === "magic(3)", "its example goes into a new cell");
+  await ev("(() => { const t = [...document.querySelectorAll('.cell textarea')].at(-1); t.value = ''; t.dispatchEvent(new Event('input', {bubbles: true})); })()");
   await runCode("function y = twice(x)\n  y = 2 * x; % doubled\nend");
   out = await runCode("twice(b)");
   ok(/6\s+10\s+14/.test(out), "a MATLAB function defined in a cell works in the next: " + JSON.stringify(out.trim()));
