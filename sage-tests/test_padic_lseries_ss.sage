@@ -113,3 +113,134 @@ S = PowerSeriesRing(Q, 'U')
 U = S.gen()
 g = S([Q(1, 2), Q(3)], 4)
 t('Qp g == g', lambda: (g == g, g == g + O(U^1), g == g + 9, g == g + 3, S([Q(0, 2)], 3) == 0))
+# Dp_valued_series: v with (1 - phi)^-2 L_p = v[0] omega + v[1] phi(omega).
+# Sage reports some coefficients to more digits than L_alpha's stated
+# precision supports (it reads inexact-zero coordinates as exact zeros), so
+# each coefficient is compared to the precision proven from L_alpha's: the
+# error lattice alpha^k O mapped by (1 - Phi)^-2 (G + a_p H, -p H), computed
+# here in the number field Q(alpha) (k_j by series()'s rule, c = 0)
+def proven_precisions(E, p, n, prec):
+    ap = E.ap(p)
+    x = polygen(QQ)
+    K = NumberField(x^2 - ap*x + p, 'a')
+    a = K.gen()
+    Phi = matrix(QQ, [[0, -1/p], [1, ap/p]])
+    M = (1 - Phi)^-2
+    cap = 2 * ceil((n + 2) / 2)
+    es = [None]
+    e = None
+    for j in range(1, prec):
+        b = binomial(p^(n - 1), j).valuation(p)
+        e = b if e is None else min(e, b)
+        if e == 0:
+            break
+        es.append(e)
+    out = []
+    for j in range(len(es)):
+        k = min(2*n - 4, cap - n - 1) if j == 0 else min(2*es[j] - n - 2, cap - n - 1)
+        imgs = []
+        for g in [a^k, a^(k + 1)]:
+            gg, hh = g.list()
+            w = M * vector(QQ, [gg + ap*hh, -p*hh])
+            imgs.append(w)
+        P1 = min(w[0].valuation(p) for w in imgs if w[0] != 0)
+        P2 = min(w[1].valuation(p) for w in imgs if w[1] != 0)
+        out.append((P1, P2))
+    return out
+for label, a_inv, p, ns in [('14a1', [1,0,1,4,-6], 5, [2, 3, 4]), ('11a1', [0,-1,1,-10,-20], 19, [2, 3]), ('17a1', [1,-1,1,-1,-14], 3, [2, 3, 4, 5]), ('37a1', [0,0,1,-1,0], 3, [2, 3, 4]), ('19a1', [0,1,1,-9,-15], 23, [2, 3]), ('15a1', [1,1,1,-10,-10], 7, [2, 3])]:
+    E = EllipticCurve(a_inv)
+    if E.ap(p) % p:
+        continue
+    L = E.padic_lseries(p)
+    for n in ns:
+        v = L.Dp_valued_series(n, prec=5)
+        Ps = proven_precisions(E, p, n, 5)
+        rows = [(v[0][j].add_bigoh(P1), v[1][j].add_bigoh(P2)) for j, (P1, P2) in enumerate(Ps)]
+        print(label, p, 'n', n, rows, flush=True)
+L = EllipticCurve('14a1').padic_lseries(5)
+t('Dp parent', lambda: L.Dp_valued_series(3).parent())
+t('Dp prec=1', lambda: L.Dp_valued_series(3, prec=1))
+t('Dp prec=2', lambda: L.Dp_valued_series(3, prec=2)[0])
+t('Dp n=1', lambda: L.Dp_valued_series(1))
+# supporting APIs: vectors over a power series ring (entries coerced, the
+# ring kept by arithmetic, the module's rank and call), valuation bases,
+# Matrix + scalar
+R = PowerSeriesRing(Qp(5, 6), 'T'); T = R.gen()
+v = vector(R, [T, 1])
+t('v', lambda: v)
+t('parent v[1]', lambda: parent(v[1]))
+t('v+v parent', lambda: (v + v).parent())
+t('2*v', lambda: (2*v, (2*v).parent()))
+t('-v, v-v', lambda: (-v, v - v, (v - v).parent()))
+t('v*T', lambda: (v * T, (T*v).parent()))
+t('nonsense', lambda: vector(R, ['nonsense', 1]))
+S = PowerSeriesRing(ZZ, 's')
+t('ZZ 1/2', lambda: vector(S, [1/2, 1]))
+t('ZZ parent', lambda: vector(S, [1, 2]).parent())
+t('QQ parent', lambda: vector(PowerSeriesRing(QQ, 'u'), [1, 2]).parent())
+M = v.parent()
+t('rank', lambda: (M.rank(), M.base_ring(), M.dimension() if hasattr(M, 'dimension') else None, M.degree()))
+t('M([1,2])', lambda: (M([1, 2]), M([1, 2]).parent() == M))
+t('M.zero', lambda: M.zero())
+t('v.dot', lambda: v.dot_product(v))
+t('v == v', lambda: (v == v, v == vector(R, [T, 1])))
+t('v list', lambda: (v.list(), len(v), v[0]))
+for b in [-2, 2.5, 0, 1, -1, 4, 2.0, 1/2, 6]:
+    t('valuation %s' % b, lambda: ((QQ(12)/5).valuation(b), QQ(0).valuation(b) if True else 0))
+    t('int valuation %s' % b, lambda: (ZZ(48).valuation(b), ZZ(0).valuation(b)))
+t('QQ(0).valuation(0)', lambda: QQ(0).valuation(0))
+t('QQ(32/3).valuation(4)', lambda: (QQ(32/3).valuation(4), QQ(3/32).valuation(4), ZZ(32).valuation(4)))
+t('valuation(1/2, 1)', lambda: (QQ(1)/2).valuation(1))
+t('valuation fn', lambda: valuation(48, 2))
+v = EllipticCurve('14a1').padic_lseries(5).Dp_valued_series(3)
+t('2v parent', lambda: (2*v).parent())
+t('-v', lambda: (-v)[0])
+t('v-v', lambda: ((v - v).parent(), (v - v) == 0 * v))
+t('rank', lambda: (v.parent().rank(), v.parent()([1, 2])))
+t('v[0] parent', lambda: v[0].parent())
+for M in [matrix(ZZ, [[1, 2], [3, 4]]), matrix(QQ, [[1, 2], [3, 4]]), matrix(ZZ, 2, 3, range(6)), matrix(QQ, 0, 3, [])]:
+    for c in [0, 1, 2, 1/2, True, False]:
+        t('matrix %s %s' % (M.dimensions(), c), lambda: (M + c, c + M, M - c, c - M))
+# second review: in-place arithmetic, assignment and both matrix products keep
+# a series vector in R^n; adding or negating keeps a matrix's dimensions
+S = PowerSeriesRing(ZZ, 's'); s = S.gen()
+def inplace_add():
+    v = vector(S, [s, 1]); w = v; v += v
+    return v, v.parent(), w
+def inplace_sub():
+    v = vector(S, [s, 1]); v -= vector(S, [1, 1])
+    return v, v.parent()
+def inplace_mul():
+    v = vector(S, [s, 1]); v *= 2
+    return v, v.parent()
+def inplace_mul_series():
+    v = vector(S, [s, 1]); v *= s
+    return v, v.parent()
+def assign(x):
+    v = vector(S, [s, 1]); v[0] = x
+    return v, v[0].parent(), v.parent()
+t('v += v', inplace_add)
+t('v -= w', inplace_sub)
+t('v *= 2', inplace_mul)
+t('v *= s', inplace_mul_series)
+t('v[0] = 2', lambda: assign(2))
+t('v[0] = s^2', lambda: assign(s^2))
+t('v[0] = 1/2', lambda: assign(1/2))
+def assign_last():
+    v = vector(S, [s, 1]); v[-1] = 3
+    return v, v[1].parent()
+t('v[-1] = 3', assign_last)
+for A in [identity_matrix(ZZ, 2), matrix(ZZ, [[1, 2], [3, 4]]), matrix(ZZ, 3, 2, range(6))]:
+    t('A*v %s' % (A.dimensions(),), lambda: (A * vector(S, [s, 1]), (A * vector(S, [s, 1])).parent()))
+for A in [identity_matrix(ZZ, 2), matrix(ZZ, [[1, 2], [3, 4]]), matrix(ZZ, 2, 3, range(6))]:
+    t('v*A %s' % (A.dimensions(),), lambda: (vector(S, [s, 1]) * A, (vector(S, [s, 1]) * A).parent()))
+t('QQ matrix * series vector over QQ', lambda: (matrix(QQ, [[1/2, 2], [3, 4]]) * vector(PowerSeriesRing(QQ, 'u'), [1, 2])).parent())
+t('A*v size', lambda: matrix(ZZ, 2, 3, range(6)) * vector(S, [s, 1]))
+t('v*A size', lambda: vector(S, [s, 1]) * matrix(ZZ, 3, 2, range(6)))
+for M in [matrix(QQ, 0, 3, []), matrix(ZZ, 3, 0, []), matrix(ZZ, 0, 0, []), matrix(QQ, 2, 3, range(6))]:
+    for c in [0, False]:
+        t('dims %s %s' % (M.dimensions(), c), lambda: [(X.dimensions(), X.parent()) for X in (M + c, c + M, M - c, c - M)])
+    t('dims %s neg, 2M, M*2' % (M.dimensions(),), lambda: [(X.dimensions(), X.parent()) for X in (-M, 2*M, M*2)])
+t('dims 0x3 * 3x2', lambda: (matrix(QQ, 0, 3, []) * matrix(QQ, 3, 2, range(6))).dimensions())
+t('dims 2x0 * 0x3', lambda: (matrix(QQ, 2, 0, []) * matrix(QQ, 0, 3, [])).dimensions())
+t('dims 0x3 + 0x3', lambda: (matrix(QQ, 0, 3, []) + matrix(QQ, 0, 3, [])).dimensions())

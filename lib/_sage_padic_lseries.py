@@ -694,20 +694,41 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
         if quadratic_twist != 1 or eta != 0:
             raise NotImplementedError("twisted p-adic L-series (quadratic_twist, eta) are not available in sagebrush yet")
         sa = _sa()
+        n, prec = self._check_n_prec(n, prec)
+        F, nterms, rows = self._coefficients(n, prec)
+        if prec == 1:
+            # the constant term alone: it is exact (a_(n+1,0) = a_(n,0)), so
+            # it is given to the relative cap of Qp(p, 20)(alpha), as Sage
+            (U, V, _), = rows
+            x = self._value(F, U, V, n)
+            return sa.PowerSeriesRing(F, "T", default_prec=1)([] if x.is_zero() else [x], 1)
+        coeffs = [self._value(F, U, V, n, k) for U, V, k in rows]
+        # every coefficient is kept with its precision, O(alpha^k) included,
+        # trailing ones too (Sage drops trailing ones, which then read as
+        # exact zeros: 37a1 at p = 3, n = 2)
+        PS = sa.PowerSeriesRing(F, "T", default_prec=prec)
+        return PS(coeffs, nterms)
+
+    def _check_n_prec(self, n, prec):
         if isinstance(prec, float):
             raise TypeError("%r cannot be interpreted as an integer" % (prec,))
-        p, n, prec = self._p, _integer(n), _integer(prec)
+        n, prec = _integer(n), _integer(prec)
         if n < 2:
             raise ValueError("n (=%s) must be at least 2 at a supersingular prime" % n)
         if prec < 1:
             raise ValueError("Insufficient precision (%s)" % prec)
+        return n, prec
+
+    def _coefficients(self, n, prec):
+        """(F, nterms, rows): P_n's coefficient of T^j is alpha^-n U_j -
+        alpha^-(n+1) V_j (exact rationals), proven to absolute alpha-adic
+        precision k_j (the class docstring's bound, or Sage's smaller one);
+        rows = [(U_j, V_j, k_j)], F the coefficient field.  With prec = 1
+        only the constant term, exact (k_0 = None), in Qp(p, 20)(alpha)."""
+        p = self._p
         if prec == 1:
-            # the constant term alone: it is exact (a_(n+1,0) = a_(n,0)), so
-            # it is given to the relative cap of Qp(p, 20)(alpha), as Sage
-            F = self._field(20)
             (U, V), = self._sums(n, 1)
-            x = self._value(F, U, V, n)
-            return sa.PowerSeriesRing(F, "T", default_prec=1)([] if x.is_zero() else [x], 1)
+            return self._field(20), 1, [(U, V, None)]
         c = self._c()
         pn1 = p ** (n - 1)
         es = [None]
@@ -721,25 +742,118 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
         nterms = len(es)
         F = self._field(-(-(n + 2) // 2))
         cap = int(F.precision_cap())
-        sums = self._sums(n, nterms)
-        coeffs = []
-        for j, (U, V) in enumerate(sums):
+        rows = []
+        for j, (U, V) in enumerate(self._sums(n, nterms)):
             if j == 0:
-                absprec = min(2 * n - 4, cap - n - 1)
+                k = min(2 * n - 4, cap - n - 1)
             else:
-                absprec = min(2 * es[j] - n - 2 - 2 * c, cap - n - 1)
-            coeffs.append(self._value(F, U, V, n, absprec))
-        # every coefficient is kept with its precision, O(alpha^k) included,
-        # trailing ones too (Sage drops trailing ones, which then read as
-        # exact zeros: 37a1 at p = 3, n = 2)
-        PS = sa.PowerSeriesRing(F, "T", default_prec=prec)
-        return PS(coeffs, nterms)
+                k = min(2 * es[j] - n - 2 - 2 * c, cap - n - 1)
+            rows.append((U, V, k))
+        return F, nterms, rows
+
+    def _pair(self, F, U, V, n):
+        """(g, h), rationals with alpha^-n U - alpha^-(n+1) V = g + h alpha."""
+        E = F._E
+        ia, ib = E.inverse(0, 1)
+        a, b = 1, 0
+        for _ in range(n):
+            a, b = E.mul(a, b, ia, ib)
+        va, vb = E.mul(ia, ib, _F(V), 0)
+        g, h = E.mul(a, b, _F(U) - va, -vb)
+        return _F(g), _F(h)
 
     power_series = series
 
     def Dp_valued_series(self, n=3, quadratic_twist=+1, prec=5):
-        """Not available yet: it needs the Frobenius on de Rham cohomology."""
-        raise NotImplementedError("the D_p-valued series needs the Frobenius matrix (Kedlaya's algorithm), which is not available in sagebrush yet")
+        """The D_p-valued series: v with (1 - phi)^-2 L_p(E, T) = v[0] omega
+        + v[1] phi(omega) in the Dieudonne module D_p(E) (Stein and
+        Wuthrich, Math. Comp. 82 (2013), 3.5; Sage's normalization).
+
+        With L_alpha(E, T) = G(T) + alpha H(T), L_p(E, T) = (G + a_p H) omega
+        - p H phi(omega).  On the basis {omega, phi(omega)} the normalized
+        Frobenius phi acts by Phi = [[0, -1/p], [1, a_p/p]], the companion
+        matrix of its characteristic polynomial X^2 - (a_p/p) X + 1/p, so
+
+            v = (1 - Phi)^-2 (G + a_p H, -p H),
+
+        an exact rational map (det(1 - Phi) = (p + 1 - a_p)/p, a unit over
+        p): no Frobenius matrix is needed.  Precision: a coefficient of
+        L_alpha known modulo alpha^k (the bound of series()) is c + delta
+        with c exact (the Riemann sum, g + h alpha with rationals g, h) and
+        delta in alpha^k O = Z_p alpha^k + Z_p alpha^(k+1); the map is
+        linear, so each coordinate of v is known to the least valuation of
+        that coordinate of the images of alpha^k and alpha^(k+1).  This is
+        sharp coordinate by coordinate (with a_p = 0 it is p^ceil(k/2) for G
+        and p^floor(k/2) for H).  The constant terms are exact (a_(n+1,0) =
+        a_(n,0)), and (1 - phi)^-2 L_p(E, 0) is a rational multiple of omega
+        (interpolation): its phi(omega) coordinate is exactly 0, which is
+        checked (an error is raised otherwise).
+
+        EXAMPLES::
+
+            sage: L = EllipticCurve('14a1').padic_lseries(5)
+            sage: v = L.Dp_valued_series(3); v[0]
+            1 + 4*5 + O(5^2) + (4 + O(5))*T + (1 + O(5))*T^2 + (4 + O(5))*T^3 + (2 + O(5))*T^4 + O(T^5)
+            sage: v.parent()
+            Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 3
+
+        Sage prints more digits in the second component than L_alpha's
+        precision determines: the coefficients of T, T^2, T^3 of L_alpha are
+        known modulo alpha^-1, which leaves the phi(omega) coordinate known
+        modulo 5 only (Sage: O(5^2), 4*5 + O(5^2), 2*5 + O(5^2); its
+        alpha-adic coefficients read inexact-zero coordinates as exact
+        zeros).  The values agree to the proven precision::
+
+            sage: v[1]  # sagebrush only (Sage: O(5^3) + O(5^2)*T + (4*5 + O(5^2))*T^2 + (2*5 + O(5^2))*T^3 + (2 + 3*5 + O(5^2))*T^4 + O(T^5))
+            O(5^3) + O(5)*T + O(5)*T^2 + O(5)*T^3 + (2 + O(5))*T^4 + O(T^5)
+
+        With n = 4 Sage prints the second constant term as 5^2 + O(5^3).
+        That contradicts its n = 3 value O(5^3) above, and the exact value,
+        0 (the phi(omega) coordinate of (1 - phi)^-2 L_p(E, 0)); Sagebrush
+        gives the proven O(5^2)::
+
+            sage: L.Dp_valued_series(4)[1][0]  # sagebrush only (Sage: 5^2 + O(5^3))
+            O(5^2)
+        """
+        if quadratic_twist != 1:
+            raise NotImplementedError("the D_p-valued series of a quadratic twist is not available in sagebrush yet")
+        sa = _sa()
+        n, prec = self._check_n_prec(n, prec)
+        p, ap = self._p, self._ap
+        F, nterms, rows = self._coefficients(n, prec)
+        # (1 - Phi)^-2, exactly
+        a, b, c, d = _F(1), _F(1, p), _F(-1), 1 - _F(ap, p)   # 1 - Phi
+        det = a * d - b * c
+        i00, i01, i10, i11 = d / det, -b / det, -c / det, a / det
+        M = (i00 * i00 + i01 * i10, i00 * i01 + i01 * i11,
+             i10 * i00 + i11 * i10, i10 * i01 + i11 * i11)
+
+        def image(g, h):
+            # (g + h alpha) -> the coordinates of (1 - phi)^-2 of its L_p
+            x, y = g + ap * h, -p * h
+            return M[0] * x + M[1] * y, M[2] * x + M[3] * y
+
+        E = F._E
+        K = sa.Qp(p, 20 if prec == 1 else -(-(n + 2) // 2))
+        v1, v2 = [], []
+        for j, (U, V, k) in enumerate(rows):
+            e1, e2 = image(*self._pair(F, U, V, n))
+            if j == 0 and e2 != 0:
+                raise ArithmeticError("internal error: the phi(omega) coordinate of (1 - phi)^-2 L_p(E, 0) is %s, not 0" % e2)
+            if k is None:
+                v1.append(K(e1))
+                v2.append(K(e2))
+                continue
+            # the error lies in alpha^k O = Z_p alpha^k + Z_p alpha^(k+1);
+            # each coordinate is known to the least valuation of the images
+            # of those two generators (sharp, coordinate by coordinate)
+            gens = [image(*map(_F, E.shift(1, 0, k))), image(*map(_F, E.shift(1, 0, k + 1)))]
+            k1 = min(_vp(t[0], p) for t in gens if t[0])
+            k2 = min(_vp(t[1], p) for t in gens if t[1])
+            v1.append(K(e1, absprec=k1))
+            v2.append(K(e2, absprec=k2))
+        PS = sa.PowerSeriesRing(K, "T", default_prec=prec)
+        return sa.vector(PS, [PS(v1, nterms), PS(v2, nterms)])
 
     def frobenius(self, prec=20, algorithm="mw"):
         """Not available yet (Kedlaya's algorithm)."""

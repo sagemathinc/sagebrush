@@ -574,7 +574,11 @@ class Series:
             e = self._v + i
             parts.append(_term(c, e, name, self._R._laurent))
         if self._prec is not None:
-            parts.append((False, "O(%s)" % (_mono(name, self._prec) if self._prec != 0 else "1")))
+            if not parts:
+                # (a bare O() shows its exponent: O(t^1), O(t^0), as Sage)
+                parts.append((False, "O(%s^%d)" % (name, self._prec)))
+            else:
+                parts.append((False, "O(%s)" % (_mono(name, self._prec) if self._prec != 0 else "1")))
         if not parts:
             return "0"
         s = ("-" if parts[0][0] else "") + parts[0][1]
