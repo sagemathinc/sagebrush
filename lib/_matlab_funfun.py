@@ -986,6 +986,12 @@ def lsqnonneg_(nargout, *args):
 
 # ------------------------------------------------------------------ quad
 
+# quad's evaluation limit: GNU Octave's for its adaptive Simpson quadrature,
+# quadv, observed with Octave 11.1 (it stops at exactly 10001 evaluations,
+# whatever the integrand, warning "maximum iteration count reached")
+_QUAD_MAX_EVALS = 10001
+
+
 @_bi("quad")
 def quad_(nargout, fun, *args):
     """quad as its documentation page describes it: quad(fun, a, b),
@@ -1005,10 +1011,15 @@ def quad_(nargout, fun, *args):
     otherwise its halves are integrated in turn.  There is no limit on the
     recursion depth, as the paper argues.
 
+    At most 10001 evaluations, the limit of GNU Octave's adaptive Simpson
+    quadrature (quadv: observed, it stops at exactly 10001 whatever the
+    integrand): a subinterval whose step or halves would go beyond it is
+    accepted with the value it has, with a warning that the tolerance may
+    not be met; the count never goes beyond it.
+
     Sagebrush's own choices, where the page fixes nothing: a subinterval
     with an Inf or NaN value is not subdivided further, and the warning
-    says the integrand is not finite; at most 10000 evaluations, after
-    which the remaining subintervals are accepted with a warning; the
+    says the integrand is not finite; the
     trace's number format; and single precision: a single a, b or value
     gives a single result, computed in double"""
     if len(args) < 2:
@@ -1074,14 +1085,24 @@ def quad_(nargout, fun, *args):
         flo, fmid, fhi = fr["f"]
         m = (lo + hi) / 2
         h = (hi - lo) / 4
-        fml, fmr = values([lo + h, hi - h])
-        i1 = h / 1.5 * (flo + 4 * fmid + fhi)
-        i2 = h / 3 * (flo + 4 * (fml + fmr) + 2 * fmid + fhi)
-        i1 = (16 * i2 - i1) / 15
-        finite = all(_math.isfinite(abs(v)) for v in (flo, fmid, fhi, fml, fmr))
-        met = abs(i1 - i2) <= tol
-        tiny = m <= min(lo, hi) or max(lo, hi) <= m
-        if not (met or tiny or not finite or count[0] >= 10000):
+        if count[0] + 2 > _QUAD_MAX_EVALS:
+            # (no evaluations left for this interval's step: its Simpson
+            # value from the three it has)
+            i1 = h / 1.5 * (flo + 4 * fmid + fhi)
+            finite = all(_math.isfinite(abs(v)) for v in (flo, fmid, fhi))
+            met = tiny = False
+            full = True
+        else:
+            fml, fmr = values([lo + h, hi - h])
+            i1 = h / 1.5 * (flo + 4 * fmid + fhi)
+            i2 = h / 3 * (flo + 4 * (fml + fmr) + 2 * fmid + fhi)
+            i1 = (16 * i2 - i1) / 15
+            finite = all(_math.isfinite(abs(v)) for v in (flo, fmid, fhi, fml, fmr))
+            met = abs(i1 - i2) <= tol
+            tiny = m <= min(lo, hi) or max(lo, hi) <= m
+            # (no evaluations left for its halves' steps: this value)
+            full = count[0] + 2 > _QUAD_MAX_EVALS
+        if not (met or tiny or not finite or full):
             fr["state"] = "left"
             fr["mid"] = (fml, fmr)
             stack.append({"lo": lo, "hi": m, "f": (flo, fml, fmid), "state": "new"})
@@ -1091,7 +1112,7 @@ def quad_(nargout, fun, *args):
         elif tiny and not met:
             warn("tiny", "quad: a subinterval holds no more machine numbers; the tolerance may not be met.")
         elif not met:
-            warn("count", "quad: the limit of 10000 function evaluations was reached; the tolerance may not be met.")
+            warn("count", "quad: the limit of %d function evaluations was reached; the tolerance may not be met." % _QUAD_MAX_EVALS)
         if trace:
             _m._write("%10d %21.14g %21.14g %21.14g\n" % (count[0], lo, hi - lo, i1.real))
         q = i1
