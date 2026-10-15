@@ -14,7 +14,7 @@ export interface ImageInfo {
   w: number;
   /** required: its height in pixels */
   h: number;
-  /** its bytes: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address */
+  /** its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address */
   // (left out while it is in this browser's IndexedDB; a board that left the browser carries it)
   src?: string;
 }

@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { layout } from "../web/board/doc";
+import { cleanDoc, layout } from "../web/board/doc";
 
 // The board format's field reference (web/board-format.md's Fields) is
 // written from web/board/doc.ts's doc comments by
@@ -79,4 +79,16 @@ test("a note's width as the reference says it: 260, 440 for code, a picture-only
   assert.deepEqual(size("small"), [200, 100]);
   assert.equal(size("text")[0], 260);
   assert.equal(size("code")[0], 440);
+});
+
+test("a picture's name as the reference says it, letters, digits, _ and -, at most 100 characters, and what cleanDoc keeps (DOC-EC7-3)", () => {
+  const r = run(["--stdout"]);
+  assert.match(r.stdout, /\| `images` \| \{name: picture\} \| pictures by name: .*A name is letters, digits, `_` and `-`, at most 100 characters \(`plot-1`, not `plot 1` or `figure\.png`\)/);
+  assert.match(r.stdout, /\| `image` \| string \| a picture: its name in the document's `images` \(letters, digits, `_` and `-`, at most 100 characters\) \|/);
+  assert.match(r.stdout, /\| `src` \| string \| its bytes, which a file needs to show the picture:/);
+  const src = "data:image/png;base64,iVBORw0KGgo=", pic = { w: 10, h: 10, src };
+  const names = ["plot-1", "plot_2", "x".repeat(100), "plot 1", "figure.png", "x".repeat(101)];
+  const d = cleanDoc({ nodes: names.map((n, i) => ({ id: "n" + i, image: n })), images: Object.fromEntries(names.map((n) => [n, pic])) } as any);
+  assert.deepEqual(Object.keys(d.images ?? {}), names.slice(0, 3));
+  assert.deepEqual((d.nodes ?? []).map((n: any) => n.image ?? null), [...names.slice(0, 3), null, null, null]);
 });
