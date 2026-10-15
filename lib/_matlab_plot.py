@@ -3890,6 +3890,10 @@ def _scene_within(scene):
     texts = [scene["title"] or "", scene["subtitle"] or ""] + scene["labels"] + [o["text"] for o in scene["objects"] if o["type"] == "text"]
     if any(n > 2000 or k > 200 for n, k in map(size, texts)) or len(texts) - 5 > 2000:
         return False
+    # (the styled runs in all: the viewer's spans, LIMITS.spans)
+    rich = [t for t in texts + [s for t in scene["box"]["ticklabels"] for s in t] if not isinstance(t, str)]
+    if sum(len(t) for t in rich) > 20000:
+        return False
     box = scene["box"]
     if any(len(t) > 100 for t in box["ticks"]) or any(n > 200 or k > 200 for t in box["ticklabels"] for n, k in map(size, t)):
         return False

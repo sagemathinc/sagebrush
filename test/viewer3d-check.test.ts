@@ -96,6 +96,16 @@ test("checkScene refuses hostile scenes: malformed, not finite, out of range, or
     ["a run too big", variant((s) => { s.labels[0] = [{ t: "x", s: 100 }]; }), /malformed label size/],
     ["a run's color", variant((s) => { s.box.ticklabels[0][0] = [{ t: "1", c: "red" }]; }), /#rrggbb/],
     ["a run that is not text", variant((s) => { s.title = [{ t: 5 }]; }), /malformed title/],
+    // (styled axis labels: MATLAB's axes' (with a box) only; runs counted over the whole scene)
+    ["a styled label with a box", variant((s) => { s.labels[0] = [{ t: "x", i: true }]; }), null as any],
+    ["a styled label without a box", variant((s) => { delete s.box; s.labels[0] = [{ t: "x" }]; }), /malformed or too long label/],
+    ["2000 texts of 200 runs", variant((s) => {
+      s.objects = Array.from({ length: LIMITS.texts }, () => ({ type: "text", pos: [0, 0, 0], text: Array.from({ length: LIMITS.runs }, () => ({ t: "" })) }));
+    }), /more than 20000 runs of styled text/],
+    ["the runs at the budget", variant((s) => {
+      s.title = "t";
+      s.objects = Array.from({ length: LIMITS.spans / LIMITS.runs }, () => ({ type: "text", pos: [0, 0, 0], text: Array.from({ length: LIMITS.runs }, () => ({ t: "" })) }));
+    }), null as any],
     ["an unknown object", variant((s) => { s.objects.push({ type: "script" }); }), /unknown type/],
     ["too many objects", variant((s) => { s.objects = Array.from({ length: LIMITS.objects + 1 }, () => ({ type: "points", pos: [0, 0, 0], color: "#000000" })); }), /too many objects/],
     ["too many texts", variant((s) => { s.objects = Array.from({ length: LIMITS.texts + 1 }, () => ({ type: "text", pos: [0, 0, 0], text: "t" })); }), /more than 2000 texts/],

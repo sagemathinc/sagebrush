@@ -97,7 +97,7 @@
   }
   // k3d's axis labels are LaTeX-like: x^+ -> x⁺
   const SUP = { "+": "⁺", "-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹" };
-  const axisLabel = (s) => s.replace(/^\$(.*)\$$/, "$1").replace(/\^\{?([+\-0-9]+)\}?/g, (_, t) => [...t].map((c) => SUP[c] ?? c).join(""));
+  const axisLabel = (s) => (typeof s !== "string" ? s : s.replace(/^\$(.*)\$$/, "$1").replace(/\^\{?([+\-0-9]+)\}?/g, (_, t) => [...t].map((c) => SUP[c] ?? c).join("")));
 
   // ------------------------------------------------------------------ data
 
@@ -451,6 +451,7 @@
     texts: 2000, // text objects (each a label placed on every frame)
     text: 2000, // characters in a title, a label or a text
     runs: 200, // runs of styled text in one (setRich's)
+    spans: 20000, // runs in all the scene's texts: the spans setRich makes
     description: 100000,
     ticks: 100, // MATLAB axes' ticks per axis
     tickLabel: 200,
@@ -484,9 +485,13 @@
     const str = (v, max, what) => { if (typeof v !== "string" || v.length > max) no("has a malformed or too long " + what); };
     const optStr = (v, max, what) => { if (given(v)) str(v, max, what); };
     // a text: a string, or runs (setRich's), of at most max characters in all
+    let spans = 0;
     const rich = (v, max, what) => {
       if (typeof v === "string") return str(v, max, what);
       if (!Array.isArray(v) || v.length > LIMITS.runs) no("has a malformed " + what);
+      // (a span each, whatever its text: counted over the whole scene)
+      spans += v.length;
+      if (spans > LIMITS.spans) no("has more than " + LIMITS.spans + " runs of styled text");
       let len = 0;
       for (const r of v) {
         if (!isObj(r) || typeof r.t !== "string") no("has a malformed " + what);
@@ -541,7 +546,8 @@
     optStr(scene.description, LIMITS.description, "description");
     if (given(scene.labels)) {
       if (!Array.isArray(scene.labels) || scene.labels.length > 3) no("has malformed labels");
-      for (const s of scene.labels) optRich(s, LIMITS.text, "label");
+      // (styled labels are MATLAB's axes' only: the other axes' labels are text)
+      for (const s of scene.labels) (given(scene.box) ? optRich : optStr)(s, LIMITS.text, "label");
     }
     within(scene.azimuth, -1e6, 1e6, "azimuth");
     within(scene.elevation, -1e6, 1e6, "elevation");
