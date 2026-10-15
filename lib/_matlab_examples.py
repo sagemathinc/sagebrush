@@ -254,6 +254,18 @@ CODES = [
     ("deal", "[a, b] = deal(7)"),
     ("cumsum", "cumsum([1 2; 3 4], 2)"),
     ("abs", "abs(3 + 4i)"),
+    # text and number bases
+    ("split", "split(\"red,green,blue\", \",\")"),
+    ("replace", "replace(\"cats and cats\", \"cats\", \"dogs\")"),
+    ("dec2bin", "dec2bin(10)"),
+    ("dec2bin", "dec2bin(5, 8)"),
+    ("bin2dec", "bin2dec('1010')"),
+    ("dec2hex", "dec2hex(255)"),
+    ("hex2dec", "hex2dec('FF')"),
+    # subscripts and cells
+    ("sub2ind", "sub2ind([3 4], 2, 3)"),
+    ("ind2sub", "[r, c] = ind2sub([3 4], 8)"),
+    ("mat2cell", "c = mat2cell([1 2 3 4], 1, [1 3])"),
 ]
 
 # ---- outputs (matlab-tests/doc_examples.py --update) ----
@@ -470,5 +482,15 @@ OUTPUTS = {
 "histcounts([1 2 2 3 5], [0 2 4 6])": "\nans =\n\n     1     3     1\n\n",
 "[a, b] = deal(7)": "\na =\n\n     7\n\n\nb =\n\n     7\n\n",
 "cumsum([1 2; 3 4], 2)": "\nans =\n\n     1     3\n     3     7\n\n",
-"abs(3 + 4i)": "\nans =\n\n     5\n\n"
+"abs(3 + 4i)": "\nans =\n\n     5\n\n",
+"split(\"red,green,blue\", \",\")": "\nans = \n\n  3\u00d71 string array\n\n    \"red\"  \n    \"green\"\n    \"blue\" \n\n",
+"replace(\"cats and cats\", \"cats\", \"dogs\")": "\nans = \n\n    \"dogs and dogs\"\n\n",
+"dec2bin(10)": "\nans =\n\n    '1010'\n\n",
+"dec2bin(5, 8)": "\nans =\n\n    '00000101'\n\n",
+"bin2dec('1010')": "\nans =\n\n    10\n\n",
+"dec2hex(255)": "\nans =\n\n    'FF'\n\n",
+"hex2dec('FF')": "\nans =\n\n   255\n\n",
+"sub2ind([3 4], 2, 3)": "\nans =\n\n     8\n\n",
+"[r, c] = ind2sub([3 4], 8)": "\nr =\n\n     2\n\n\nc =\n\n     3\n\n",
+"c = mat2cell([1 2 3 4], 1, [1 3])": "\nc =\n\n  1\u00d72 cell array\n\n    {[1]}    {[2 3 4]}\n\n"
 }
