@@ -7,11 +7,19 @@ import { execFileSync } from "node:child_process";
 // methods, static and class methods, nested functions, lambdas,
 // comprehensions, generator expressions, exec'd and local classes.
 const CASES = __dirname + "/../../test/class_cell_cases.py";
+// the review's probes (nested class bodies, nonlocal __class__, a deleted
+// first argument, references to super) and metaclass controls
+const EDGES = __dirname + "/../../test/class_cell_edges.py";
 const cli = (args: string[]) => execFileSync(process.execPath, [__dirname + "/../src/cli.js", ...args], { encoding: "utf8" });
 
 test("__class__ and super() behave as in CPython", () => {
   const want = execFileSync("python3", [CASES], { encoding: "utf8" });
   assert.equal(cli([CASES]), want);
+});
+
+test("__class__ and super() at the edges behave as in CPython", () => {
+  const want = execFileSync("python3", [EDGES], { encoding: "utf8" });
+  assert.equal(cli([EDGES]), want);
 });
 
 test("super without arguments, called other than directly, is refused", () => {

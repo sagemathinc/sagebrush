@@ -607,6 +607,7 @@ export const R: any = {
   typeOf: Obj.typeOf,
   superOf: Ty.superOf,
   superNoArgs: Ty.superNoArgs,
+  superAttr: Ty.superAttr,
   newCell: Ty.newCell,
   classCellGet: Ty.classCellGet,
   makeRange: Ty.makeRange,

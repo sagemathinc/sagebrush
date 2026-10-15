@@ -52,10 +52,10 @@ export function allocator(owner: PyType, f: (cls: any, ...args: any[]) => any, k
 
 // A data descriptor computed by JS: type `getset_descriptor`.
 export class GetSet {
-  constructor(public owner: PyType, public name: string, public get: (o: any) => any, public set: ((o: any, v: any) => void) | null = null) {}
+  constructor(public owner: PyType, public name: string, public get: (o: any) => any, public set: ((o: any, v: any) => void) | null = null, public del: ((o: any) => void) | null = null) {}
 }
-export function getset(cls: PyType, name: string, get: (o: any) => any, set: ((o: any, v: any) => void) | null = null) {
-  cls.$dict.set(name, new GetSet(cls, name, get, set));
+export function getset(cls: PyType, name: string, get: (o: any) => any, set: ((o: any, v: any) => void) | null = null, del: ((o: any) => void) | null = null) {
+  cls.$dict.set(name, new GetSet(cls, name, get, set, del));
 }
 // A get/set descriptor applies only to an instance of the type it is for; a
 // wrong receiver reaches a JavaScript property of an opaque object otherwise
@@ -180,6 +180,14 @@ method(getsetType, "__set__", (d: GetSet, o: any, v: any) => {
   descrReceiver(d, o);
   if (d.set === null) raise(T.AttributeError, `attribute '${d.name}' of '${d.owner.$name}' objects is not writable`);
   d.set(o, v);
+  return null;
+});
+// (a get/set descriptor without a deleter cannot be deleted, as CPython's
+// read-only ones: del (1).real)
+method(getsetType, "__delete__", (d: GetSet, o: any) => {
+  descrReceiver(d, o);
+  if (d.del === null) raise(T.AttributeError, `attribute '${d.name}' of '${d.owner.$name}' objects is not writable`);
+  d.del(o);
   return null;
 });
 
@@ -311,7 +319,7 @@ const cellType = builtinType("cell", [object], (...a: any[]) => {
   return new PyCell(a[0]);
 });
 bindClass(PyCell, cellType);
-getset(cellType, "cell_contents", (c: PyCell) => (c.v === undefined ? raise(T.ValueError, "Cell is empty") : c.v), (c: PyCell, v: any) => void (c.v = v));
+getset(cellType, "cell_contents", (c: PyCell) => (c.v === undefined ? raise(T.ValueError, "Cell is empty") : c.v), (c: PyCell, v: any) => void (c.v = v), (c: PyCell) => void (c.v = undefined));
 export const newCell = (v?: any) => new PyCell(v);
 // A function's free __class__, from its class's cell
 export function classCellGet(c: PyCell): any {
@@ -320,13 +328,19 @@ export function classCellGet(c: PyCell): any {
 }
 // Zero-argument super() compiles to superOf(cell, firstArg): the cell
 // holding the function's __class__ (null when it has none) and its first
-// argument, as CPython's super_init_without_args.  A function without a
-// positional argument compiles to superNoArgs() instead.
+// argument (undefined when deleted), as CPython's super_init_without_args.
+// A function without a positional argument compiles to superNoArgs()
+// instead, and super().x to superAttr(__class__, firstArg) (both loaded).
 export function superOf(cell: PyCell | null, obj: any): PySuper {
+  if (obj === undefined) raise(T.RuntimeError, "super(): arg[0] deleted");
   if (cell === null) raise(T.RuntimeError, "super(): __class__ cell not found");
   if (cell.v === undefined) raise(T.RuntimeError, "super(): empty __class__ cell");
   if (!isType(cell.v)) raise(T.RuntimeError, `super(): __class__ is not a type (${typeName(cell.v)})`);
   return superChecked(cell.v, obj);
+}
+export function superAttr(cls: any, obj: any): PySuper {
+  if (!isType(cls)) raise(T.RuntimeError, `super(): __class__ is not a type (${typeName(cls)})`);
+  return superChecked(cls, obj);
 }
 export function superNoArgs(): never {
   raise(T.RuntimeError, "super(): no arguments");
