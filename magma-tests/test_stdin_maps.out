@@ -118,3 +118,8 @@ User error: Identifier 'fc' has not been declared or assigned
 0
 4
 0
+
+>> fg := map< Z -> Z | y :-> assigned rg``(assigned rg select "p" else "q") >;
+                                           ^
+User error: Imported environment value 'rg' cannot be used as a local
+1 2

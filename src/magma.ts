@@ -187,6 +187,8 @@ class Parser {
   program(): string {
     this.emit("from _magma import *");
     this.emit("import _magma as _m");
+    // (what a function captures for an intrinsic Sagebrush lacks: a read of it is an error, live())
+    this.emit("from _magma import _UNDECLARED as _mU");
     // how errors behave at run time: stop (no recovery: notebook and kernel
     // cells, as before), "file" or "session" (lib/_magma.py _source)
     const mode = this.recover === null ? "" : `, ${JSON.stringify(this.recover)}`;
@@ -230,6 +232,12 @@ class Parser {
     return this.out.join("\n") + "\n";
   }
 
+  // The lexical scopes: 0 is the program, and each function body gets a
+  // new id (a forward belongs to the scope it is declared in).
+  private scopeCount = 0;
+  private scopeIds: number[] = [0];
+  private get scopeId() { return this.scopeIds[this.scopeIds.length - 1]; }
+
   globals = new Set<string>();
 
   statements(ends: string[]) {
@@ -244,6 +252,7 @@ class Parser {
   private top = false;
 
   statement(top: boolean) {
+    if (!this.at("local")) this.localsOpen = false;
     const saved = this.top;
     this.top = top || (this.top && this.fns.length === 0);
     const mark = this.out.length;
@@ -258,36 +267,45 @@ class Parser {
     }
   }
 
-  declareGlobal(name: string) {
-    // top-level code is module code: nothing to declare; but inside a map
-    // rule an assigned name is local to its function (see freeIn)
-    if (this.capturing) this.assigned.push(name);
+  declareGlobal(name: string, tok?: Tok, kind: "w" | "p" = "w") {
+    // top-level code is module code: nothing to declare; inside a function
+    // (or a rule) an assignment makes the name local, in the order the
+    // reads and writes occur (see classify): "w" assigns the name, "p" an
+    // element or field of it (x[i] := v), which needs x local already
+    if (this.capturing) {
+      this.assigned.push(name);
+      this.uses.push({ name, bound: false, kind, tok: tok ?? this.peek() });
+    }
   }
 
-  // ---- free variables of map rules
-  // Magma's rule x :-> e takes the values e's free variables have when the
-  // map is made.  While a rule is parsed, every variable read is recorded
-  // in `uses` and emitted as a placeholder; each construct that binds names
-  // (a comprehension, a nested rule, func< >, a function's parameters and
-  // locals) marks the reads in its own scope as bound.  When the rule is
-  // done, its free names are taken in the order they occur, as Magma does
-  // (checked against Magma 2.18):
-  // - a name first read is imported: the snapshot is captured, and a read
-  //   is its value (_m._val: an error only if it was not assigned when the
-  //   map was made); a later `assigned name` in the same rule is rejected
-  //   ("Imported environment value 'a' cannot be used as a local");
-  // - a name first tested by `assigned` is a local of the rule, never
-  //   assigned: `assigned` is false, a later read is "Variable 'a' has not
+  // ---- free variables of map rules and functions
+  // Magma's rule x :-> e, function, procedure and func< > take the values
+  // their free variables have when they are made.  While one is parsed,
+  // every variable read is recorded in `uses` and emitted as a placeholder,
+  // and so is every assignment; each construct that binds names (a
+  // comprehension, a nested rule, func< >, parameters) marks the reads in
+  // its own scope as bound.  When it is done, its free names are taken in
+  // the order they occur, as Magma does (checked against Magma 2.18):
+  // - a name first read is imported: its value is captured when the rule
+  //   or function is made (in a function an unassigned one is Magma's
+  //   "Identifier 'a' has not been declared or assigned" there); a later
+  //   `assigned name` or assignment to it is rejected ("Imported
+  //   environment value 'a' cannot be used as a local");
+  // - a name first assigned is a local: reads and `assigned` see it;
+  // - a name first tested by `assigned`, never assigned, is a local with no
+  //   value: `assigned` is false, a later read is "Variable 'a' has not
   //   been initialized", and a rule nested after it can't import it;
-  // - a nested rule's own reads don't count in the enclosing rule's order,
-  //   but its snapshot of a name imports it ("s").
+  // - a nested rule's or function's own reads don't count in the
+  //   enclosing order, but its snapshot of a name imports it ("s").
   private capturing = 0;
-  private uses: { name: string; bound: boolean; kind: "r" | "a" | "s"; tok?: Tok; done?: boolean; res?: string }[] = [];
+  private ruleDepth = 0; // map rules being parsed (capturing counts functions too)
+  private uses: { name: string; bound: boolean; kind: "r" | "a" | "s" | "w" | "p" | "l" | "d"; tok?: Tok; done?: boolean; res?: string; post?: string }[] = [];
   private assigned: string[] = [];
 
-  /** A placeholder for a variable read inside a map rule ("r"), for the
-   * test `assigned name` ("a", at token tok), or for a nested rule's
-   * snapshot of it ("s"), resolved by resolveUses. */
+  /** A placeholder for a variable read inside a map rule or function
+   * ("r"), for the test `assigned name` ("a", at token tok), or for a
+   * nested rule's or function's snapshot of it ("s"), resolved by
+   * resolveUses. */
   useVar(name: string, kind: "r" | "a" | "s" = "r", tok?: Tok): string {
     const k = this.uses.length;
     this.uses.push({ name, bound: false, kind, tok });
@@ -303,45 +321,117 @@ class Parser {
   /** The free variables (the snapshots to take) of a rule parsed by
    * `parse`, in the order of their first reads, besides the names in
    * `bound`; and its code with every placeholder resolved. */
-  freeIn(parse: () => string, bound: string[]): { value: string; free: string[] } {
+  freeIn(parse: () => string, bound: string[]): { value: string; free: string[]; toks: Map<string, Tok> } {
     this.capturing++;
+    this.ruleDepth++;
     const u0 = this.uses.length, a0 = this.assigned.length;
     let value: string;
     try {
       value = parse();
     } finally {
       this.capturing--;
+      this.ruleDepth--;
     }
     const u1 = this.uses.length;
-    this.bindUses(u0, u1, [...bound, ...this.assigned.slice(a0)]);
-    const free: string[] = [];
-    const state = new Map<string, "imported" | "local">();
-    for (let k = u0; k < u1; k++) {
-      const u = this.uses[k];
-      if (u.done) continue; // a nested rule's, resolved there
-      u.done = true;
-      const n = u.name, q = JSON.stringify(n);
-      if (u.bound) {
-        u.res = u.kind === "a" ? `_m._assigned_name(lambda: ${n})` : n;
-        continue;
-      }
-      const local = state.get(n) === "local";
-      if (u.kind === "a") {
-        if (state.get(n) === "imported") this.reject(u.tok!, `Imported environment value '${magmaName(n)}' cannot be used as a local`);
-        else state.set(n, "local");
-        u.res = "False";
-      } else if (local) {
-        u.res = u.kind === "r" ? `_m._val(_m._UNSET, ${q})` : `_m._enclosing_unset(${q})`;
-      } else {
-        if (u.kind === "r") state.set(n, "imported");
-        if (!free.includes(n)) free.push(n);
-        u.res = u.kind === "r" ? `_m._val(${n}, ${q})` : n;
-      }
+    const free = this.classify(u0, u1, bound, "rule");
+    // where each free name is first read (for an undeclared one's error)
+    const toks = new Map<string, Tok>();
+    for (const n of free) {
+      const t = this.uses.slice(u0, u1).find((u) => u.name === n && !u.bound && u.tok)?.tok;
+      if (t) toks.set(n, t);
     }
     value = this.resolveUses(value, u0, u1);
     this.assigned.length = a0;
     if (!this.capturing) this.uses.length = 0;
-    return { value, free };
+    return { value, free, toks };
+  }
+
+  /** Resolves the uses[u0, u1) of one rule or function (its own: those of
+   * nested ones are done already) in the order they occur, and returns
+   * the names it imports.  In a rule a captured read checks for an
+   * unassigned snapshot (_m._val); in a function the capture itself does,
+   * so a read is the plain name. */
+  classify(u0: number, u1: number, bound: string[], mode: "rule" | "fn"): string[] {
+    this.bindUses(u0, u1, bound);
+    const written = new Set<string>(), deleted = new Set<string>();
+    for (let k = u0; k < u1; k++) {
+      const u = this.uses[k];
+      if (u.done || u.bound) continue;
+      if (u.kind === "w" || u.kind === "p" || u.kind === "d") written.add(u.name);
+      if (u.kind === "d") deleted.add(u.name);
+    }
+    const free: string[] = [];
+    const state = new Map<string, "imported" | "local" | "unset">();
+    const imported = (n: string, tok: Tok) => this.reject(tok, `Imported environment value '${magmaName(n)}' cannot be used as a local`);
+    for (let k = u0; k < u1; k++) {
+      const u = this.uses[k];
+      if (u.done) continue; // a nested rule's or function's, resolved there
+      u.done = true;
+      const n = u.name, q = JSON.stringify(n), st = state.get(n);
+      if (u.bound) {
+        u.res = u.kind === "a" ? `_m._assigned_name(lambda: ${n})` : n;
+        continue;
+      }
+      if (deleted.has(n)) {
+        // deleted somewhere in the function: its local throughout (Magma's
+        // `delete x` needs x seen first in the function)
+        if (u.kind === "d" && st === undefined) this.reject(u.tok!, `Identifier '${magmaName(n)}' has not been declared or assigned`);
+        state.set(n, "local");
+        u.res = u.kind === "a" ? `_m._assigned_name(lambda: ${n})` : n;
+        continue;
+      }
+      if (u.kind === "l") {
+        // local x: the function's own; with no value unless it assigns it
+        state.set(n, written.has(n) ? "local" : "unset");
+        continue;
+      }
+      if (u.kind === "w" || u.kind === "p") {
+        if (st === "imported") imported(n, u.tok!);
+        else if (u.kind === "p" && st !== "local") this.reject(u.tok!, `Identifier '${magmaName(n)}' has not been declared or assigned`);
+        state.set(n, "local");
+        continue;
+      }
+      if (written.has(n) && st !== "imported") {
+        // a local of this function (assigned in it): read as it is
+        if (u.kind === "r" && st === undefined) {
+          // read before any assignment: imported, and the assignment is
+          // rejected when it comes
+          state.set(n, "imported");
+          if (!free.includes(n)) free.push(n);
+          u.res = mode === "fn" ? this.live(n, u.tok) : this.ruleRead(n, u.tok);
+          continue;
+        }
+        if (st === undefined) state.set(n, "local");
+        u.res = u.kind === "a" ? `_m._assigned_name(lambda: ${n})` : n;
+        continue;
+      }
+      if (u.kind === "a") {
+        if (st === "imported") imported(n, u.tok!);
+        else state.set(n, "unset");
+        u.res = "False";
+      } else if (st === "unset") {
+        u.res = u.kind === "r" ? `_m._val(_m._UNSET, ${q})` : `_m._enclosing_unset(${q})`;
+      } else {
+        if (u.kind === "r") state.set(n, "imported");
+        if (!free.includes(n)) free.push(n);
+        u.res = u.kind === "r" ? (mode === "rule" ? this.ruleRead(n, u.tok) : this.live(n, u.tok)) : n;
+      }
+    }
+    return free;
+  }
+
+  /** A function's read of a name it captures: the value, unless the
+   * capture is an intrinsic Sagebrush lacks, whose read is the error, where
+   * it is (lib/_magma.py _UNDECLARED; CORR-55A-1).  An identity test; the
+   * error's arguments are built only when it is one. */
+  live(n: string, tok?: Tok): string {
+    return `(${n} if ${n} is not _mU else _m._missing(${JSON.stringify(n)}, ${tok ? `(${tok.line}, ${tok.col})` : "None"}))`;
+  }
+
+  /** A map rule's read of a name it captures (lib/_magma.py _val), with
+   * where it is, for the error of an intrinsic Sagebrush lacks. */
+  ruleRead(n: string, tok?: Tok): string {
+    return `_m._val(${n}, ${JSON.stringify(n)}${tok ? `, (${tok.line}, ${tok.col})` : ""})`;
   }
 
   /** The placeholders of uses[u0, u1) in code, replaced by their
@@ -349,7 +439,7 @@ class Parser {
   resolveUses(code: string, u0: number, u1: number): string {
     return code.replace(/\u0000([ras])(\d+)\u0000/g, (m, _kind: string, ks: string) => {
       const k = Number(ks);
-      return k < u0 || k >= u1 ? m : this.uses[k].res!;
+      return k < u0 || k >= u1 ? m : this.uses[k].res! + (this.uses[k].post ?? "");
     });
   }
 
@@ -372,8 +462,38 @@ class Parser {
         case "error": return this.errorStmt();
         case "assert": { this.next(); const e = this.expr(); this.expect(";"); this.emit(`_m._assert(${e})`); return; }
         case "function": case "procedure": return this.namedFunction();
-        case "forward": this.next(); do this.ident(); while (this.eat(",")); this.expect(";"); return;
-        case "local": this.next(); do this.ident(); while (this.eat(",")); this.expect(";"); return;
+        case "forward": {
+          // each execution binds the name to a fresh cell, an unresolved
+          // forward (as in Magma, also when the name had a value); functions
+          // made before the name's definition capture the cell, which the
+          // next definition of the name in that scope fills (at the top
+          // level also in a later input or notebook cell: _m._define_top)
+          this.next();
+          do {
+            const t = this.peek();
+            const n = pyName(this.ident());
+            const cell = this.fresh("_mfw");
+            this.emit(`${cell} = ${n} = _m._Cell(${JSON.stringify(n)})`);
+            this.declareGlobal(cell, t);
+            this.declareGlobal(n, t);
+            this.forwards.set(n, { cell, scope: this.scopeId });
+          } while (this.eat(","));
+          this.expect(";");
+          return;
+        }
+        case "local": {
+          // local x, ...: only at the start of a function; x is the
+          // function's own, with no value until assigned
+          const lt = this.next();
+          if (!this.fns.length || !this.localsOpen) throw new MagmaSyntaxError("'local' only at the start of a function", lt.line, lt.col);
+          do {
+            const t = this.peek();
+            const n = pyName(this.ident());
+            if (this.capturing) this.uses.push({ name: n, bound: false, kind: "l", tok: t });
+          } while (this.eat(","));
+          this.expect(";");
+          return;
+        }
         case "delete": {
           this.next();
           const target = this.tryLhs();
@@ -384,7 +504,8 @@ class Parser {
           // delete r`f: the field becomes unassigned (lib/_magma.py _DELETE)
           if (target.kind === "path") this.store(target, "_m._DELETE");
           else {
-            this.emit(`_m._delete_check(${JSON.stringify(target.py)})`);
+            // in a function the name is its local, for the whole function
+            if (this.capturing) this.uses.push({ name: target.py, bound: false, kind: "d", tok: target.tok });
             this.emit(`del ${target.py}`);
           }
           return;
@@ -408,7 +529,7 @@ class Parser {
         this.expect(";");
         const op = opa.slice(0, -2);
         const target = lhs[0];
-        if (target.kind === "name") this.declareGlobal(target.py);
+        if (target.kind === "name") this.declareGlobal(target.py, target.tok);
         const cur = target.read;
         // an error points at the operator and is named after it ('+:=')
         const at = `(${ot.line}, ${ot.col}), ${JSON.stringify(opa)}`;
@@ -485,7 +606,7 @@ class Parser {
       this.i = save;
       return null;
     }
-    let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : pyName(name), read: pyName(name), name };
+    let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : pyName(name), read: pyName(name), name, tok: t };
     const path: PathEl[] = [];
     while (this.at("[") || this.at("`")) {
       if (this.at("`")) {
@@ -498,7 +619,7 @@ class Parser {
       this.expect("]");
       path.push({ kind: "idx", code: idx.length === 1 ? idx[0] : `_m.MTuple([${idx.join(", ")}])`, tok: lb });
     }
-    if (path.length) target = { kind: "path", py: target.py, path, read: this.readPath(target.py, path) };
+    if (path.length) target = { kind: "path", py: target.py, path, read: this.readPath(target.py, path), tok: t };
     return target;
   }
 
@@ -516,11 +637,12 @@ class Parser {
 
   store(t: Target, val: string) {
     if (t.kind === "name") {
-      this.declareGlobal(t.py);
+      this.declareGlobal(t.py, t.tok);
       // the name lets structures print as Magma does (2*C.1 = 0)
       this.emit(t.name ? `${t.py} = _m._own(${val}, ${JSON.stringify(t.name)})` : `${t.py} = _m._own(${val})`);
     } else if (t.kind === "path") {
-      this.declareGlobal(t.py);
+      const p0 = t.path![0];
+      this.declareGlobal(t.py, p0.kind === "idx" ? p0.tok : ({ line: p0.line, col: p0.col } as Tok), "p");
       // x[i][j] := v: rebuild along the path (sequences have value semantics)
       const path = t.path!;
       const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code})`)).join(", ");
@@ -548,7 +670,13 @@ class Parser {
     }
     const tmp = this.fresh();
     this.emit(`${tmp} = _m._values(${e.code}, ${lhs.length})`);
-    lhs.forEach((t, k) => { if (t.py !== "_m_discard") this.store(t, `${tmp}[${k}]`); });
+    lhs.forEach((t, k) => {
+      if (t.py === "_m_discard") return;
+      if (t.kind !== "name") return this.store(t, `_m._present(${tmp}[${k}])`);
+      // a missing return value (return x, _;) leaves the variable unassigned
+      this.store(t, `${tmp}[${k}]`);
+      this.emit(`if ${t.py} is _m._NOVAL: del ${t.py}`);
+    });
   }
 
   // ---- control
@@ -651,9 +779,18 @@ class Parser {
     const fn = this.fns[this.fns.length - 1];
     if (!fn) this.fail("return outside a function");
     const vals: string[] = [];
+    // _ is a missing value (lib/_magma.py _NOVAL), not a variable
+    const val = () => {
+      const t = this.peek();
+      if (t.t === "id" && t.v === "_" && (this.at(",", 1) || this.at(";", 1))) {
+        this.next();
+        return "_m._NOVAL";
+      }
+      return this.expr();
+    };
     if (!this.at(";")) {
-      vals.push(this.expr());
-      while (this.eat(",")) vals.push(this.expr());
+      vals.push(val());
+      while (this.eat(",")) vals.push(val());
     }
     this.expect(";");
     if (fn.procedure) this.emit(`return ${this.procReturn(fn)}`);
@@ -705,8 +842,8 @@ class Parser {
   }
 
   // ---- functions
-  params(close: string): { py: string[]; refs: string[]; opts: string[] } {
-    const py: string[] = [], refs: string[] = [], opts: string[] = [];
+  params(close: string): { py: string[]; refs: string[]; opts: string[]; optNames: string[] } {
+    const py: string[] = [], refs: string[] = [], opts: string[] = [], optNames: string[] = [];
     if (!this.at(close) && !this.at(":")) {
       do {
         const ref = this.eat("~");
@@ -721,50 +858,119 @@ class Parser {
       do {
         const name = pyName(this.ident());
         this.expect(":=");
+        optNames.push(name);
         opts.push(`${name}=${this.expr()}`);
       } while (this.eat(","));
     }
-    return { py, refs, opts };
+    return { py, refs, opts, optNames };
   }
 
-  /** function/procedure ... end function; as a Python def named `name`. */
-  functionBody(kind: "function" | "procedure", name: string, explicitName = false) {
+  /** Names declared by `forward` and not defined yet: a function reads
+   * them when it is called (the definition fills the cell, _m._FWD). */
+  // forward f: name -> its cell's variable and the scope it was declared in
+  private forwards = new Map<string, { cell: string; scope: number }>();
+  private localsOpen = false; // a function's `local` declarations may still come
+
+  /**
+   * function/procedure ... end function; as a Python def named `name`.
+   * Its free names are captured when the def runs (keyword-only default
+   * arguments, copied): Magma's functions take their values when they are
+   * made.  `own` is the function's Magma name, which its body reads as the
+   * function itself (recursion).
+   */
+  functionBody(kind: "function" | "procedure", name: string, own?: string) {
     this.expect("(");
     const p = this.params(")");
     this.expect(")");
     const fn: Fn = { name, refs: p.refs, procedure: kind === "procedure" };
-    const lines: string[] = [];
+    let lines: string[] = [];
     const u0 = this.uses.length, a0 = this.assigned.length;
     const saveOut = this.out, saveInd = this.ind;
     this.out = lines;
     this.ind = "";
-    this.emit(`def ${name}(${[...p.py, ...(p.opts.length ? ["*", ...p.opts] : [])].join(", ")}):`);
+    this.emit("def"); // the signature, once the captures are known
     this.fns.push(fn);
-    this.block(() => {
-      // value semantics: arguments are the callee's own copies
-      for (const v of p.py) if (!p.refs.includes(v)) this.emit(`${v} = _m._own(${v})`);
-      this.statements(["end"]);
-      if (fn.procedure) this.emit(`return ${this.procReturn(fn)}`);
-    });
-    this.fns.pop();
+    this.capturing++;
+    this.scopeIds.push(++this.scopeCount);
+    const saveForwards = new Map(this.forwards), saveLocals = this.localsOpen;
+    this.localsOpen = true;
+    try {
+      this.block(() => {
+        // value semantics: arguments are the callee's own copies
+        for (const v of p.py) if (!p.refs.includes(v)) this.emit(`${v} = _m._own(${v})`);
+        this.statements(["end"]);
+        if (fn.procedure) this.emit(`return ${this.procReturn(fn)}`);
+      });
+    } finally {
+      this.capturing--;
+      this.fns.pop();
+      this.scopeIds.pop();
+      this.forwards = saveForwards;
+      this.localsOpen = saveLocals;
+      this.out = saveOut;
+      this.ind = saveInd;
+    }
     this.expect("end");
     this.expect(kind);
-    this.out = saveOut;
-    this.ind = saveInd;
-    // inside a map rule: the parameters and locals are bound in the body
-    this.bindUses(u0, this.uses.length, [...p.py, ...this.assigned.slice(a0)]);
+    const u1 = this.uses.length;
+    const locals = new Set<string>(); // the body's own variables (it assigns them)
+    for (let k = u0; k < u1; k++) {
+      const u = this.uses[k];
+      if (!u.done && (u.kind === "w" || u.kind === "p" || u.kind === "l" || u.kind === "d")) locals.add(u.name);
+    }
+    for (let k = u0; k < u1; k++) {
+      const u = this.uses[k];
+      if (u.done || u.bound || locals.has(u.name) || (u.kind !== "r" && u.kind !== "s")) continue;
+      // (a forward name is captured like a variable: it holds the cell)
+      if (u.name === own) [u.res, u.done] = [name, true];
+    }
+    const free = this.classify(u0, u1, [...p.py, ...p.optNames], "fn");
+    // the captures: a name not assigned when the function is made raises
+    // here (Magma's compile-time error for the definition)
+    const caps = free.map((n) => this.capture(n, u0, u1));
+    const sig = [...p.py, ...(p.opts.length || caps.length ? ["*", ...p.opts, ...caps] : [])];
+    lines[0] = `def ${name}(${sig.join(", ")}):`;
+    lines = lines.map((l) => this.resolveUses(l, u0, u1));
     this.assigned.length = a0;
+    if (!this.capturing) this.uses.length = 0;
     return lines;
+  }
+
+  /** A function's capture of the free name n (its uses are uses[u0, u1)):
+   * a keyword-only default argument, taken when the function is made; a
+   * name not assigned then is Magma's undeclared-identifier error at its
+   * first read. */
+  capture(n: string, u0: number, u1: number): string {
+    const t = this.uses.slice(u0, u1).find((u) => u.name === n && !u.bound && u.tok)?.tok;
+    const read = this.capturing ? this.useVar(n, "s") : n;
+    return `${n}=_m._capture(lambda: ${read}, ${JSON.stringify(n)}${t ? `, (${t.line}, ${t.col})` : ", None"})`;
   }
 
   namedFunction() {
     const kind = this.next().v as "function" | "procedure";
+    const t = this.peek();
     const name = pyName(this.ident());
-    const lines = this.functionBody(kind, name, true);
+    // a def name of its own, so that a later function of the same name
+    // doesn't change what this one calls recursively
+    const def = this.fresh("_mf");
+    const lines = this.functionBody(kind, def, name);
     this.expect(";");
+    lines.push(`_m._named(${def}, ${JSON.stringify(name)})`);
+    // fills the cell of a forward of this name declared in the same scope;
+    // at the top level, the unresolved forward the name holds (from a
+    // forward in this input or an earlier one); a local definition never
+    // fills an outer forward
+    const fw = this.forwards.get(name);
+    if (this.scopeId === 0) {
+      this.forwards.delete(name);
+      lines.push(`_m._define_top(globals(), ${JSON.stringify(name)}, ${def})`);
+    } else if (fw && fw.scope === this.scopeId) {
+      this.forwards.delete(name);
+      lines.push(`${fw.cell}.set(${def})`);
+    }
     for (const l of lines) this.emit(l);
-    this.declareGlobal(name);
-    this.emit(`${name} = _m._named(${name}, ${JSON.stringify(name)})`);
+    this.declareGlobal(name, t);
+    this.emit(`${name} = ${def}`);
   }
 
   // ---- expressions: Python source strings
@@ -973,7 +1179,7 @@ class Parser {
     if (t.t === "id") {
       this.next();
       const n = pyName(t.v);
-      return this.capturing ? this.useVar(n) : n;
+      return this.capturing ? this.useVar(n, "r", t) : n;
     }
     if (this.at("assigned")) return this.assignedExpr(this.next());
     if (this.eat("true")) return "True";
@@ -1020,11 +1226,23 @@ class Parser {
       const p = this.params("|");
       this.expect("|");
       if (kind === "func") {
+        // its free names are captured when it is made, as a function's
+        this.capturing++;
         const b0 = this.uses.length;
-        const body = this.expr();
-        this.bindUses(b0, this.uses.length, p.py);
+        let body: string;
+        try {
+          body = this.expr();
+        } finally {
+          this.capturing--;
+        }
+        const b1 = this.uses.length;
+        const free = this.classify(b0, b1, [...p.py, ...p.optNames], "fn");
+        body = this.resolveUses(body, b0, b1);
+        const caps = free.map((n) => this.capture(n, b0, b1));
+        if (!this.capturing) this.uses.length = 0;
         this.expect(">");
-        return `(lambda ${[...p.py, ...(p.opts.length ? ["*", ...p.opts] : [])].join(", ")}: ${body})`;
+        const sig = [...p.py, ...(p.opts.length || caps.length ? ["*", ...p.opts, ...caps] : [])];
+        return `(lambda ${sig.join(", ")}: ${body})`;
       }
       this.fail("proc<...> is not supported yet");
     }
@@ -1033,7 +1251,7 @@ class Parser {
       const kind = this.next().v as "function" | "procedure";
       const name = this.fresh("_mf");
       const lines = this.functionBody(kind, name);
-      if (this.capturing) {
+      if (this.ruleDepth) {
         // its definition would be hoisted out of the rule and read later
         // globals: refuse rather than capture wrongly
         return `_m._not_supported("a function expression inside a map rule", (${ft.line}, ${ft.col}))`;
@@ -1122,12 +1340,14 @@ class Parser {
         // Magma's rule takes the values its free variables have when the
         // map is made (a later a := 10 doesn't change it): they are bound
         // as default arguments, copied (value semantics)
-        const { value: body, free } = this.freeIn(() => this.expr(), [v]);
-        // the snapshot: the value, or _m._UNSET for a name not assigned;
-        // in an enclosing rule, the name read is that rule's own snapshot,
-        // passed through as it is (_m._UNSET too: the inner rule may test
-        // it with `assigned` and never read it)
-        const snap = (n: string) => `${n}=_m._snap(lambda: ${this.capturing ? this.useVar(n, "s") : n}, ${JSON.stringify(n)})`;
+        const { value: body, free, toks } = this.freeIn(() => this.expr(), [v]);
+        // the snapshot: the value (a name not assigned is Magma's
+        // undeclared-identifier error where it is first read); in an
+        // enclosing rule, the name read is that rule's own snapshot
+        const snap = (n: string) => {
+          const t = toks.get(n);
+          return `${n}=_m._snap(lambda: ${this.capturing ? this.useVar(n, "s") : n}, ${JSON.stringify(n)}, ${t ? `(${t.line}, ${t.col})` : "None"})`;
+        };
         return `lambda ${[v, ...free.map(snap)].join(", ")}: ${body}`;
       };
       const r = rule();
@@ -1156,12 +1376,16 @@ class Parser {
 
   /** assigned x, assigned r`f, assigned s[i]. */
   assignedExpr(kw: Tok): string {
+    // assigned r`f: the record r is read before anything in the path (a
+    // computed field r``e), in the order free names are taken (classify)
+    const id = this.peek();
+    const baseUse = this.capturing && id.t === "id" && (this.at("`", 1) || this.at("[", 1)) ? this.useVar(pyName(id.v), "r", id) : null;
     const t = this.tryLhs();
     if (!t || t.kind === "gens") this.fail("expected a variable after 'assigned'");
     if (t.kind === "name") return this.capturing ? this.useVar(t.py, "a", kw) : `_m._assigned_name(lambda: ${t.read})`;
     const path = t.path!;
     const last = path[path.length - 1];
-    const base = this.readPath(this.capturing ? this.useVar(t.py) : t.py, path.slice(0, -1));
+    const base = this.readPath(baseUse ?? (this.capturing ? this.useVar(t.py) : t.py), path.slice(0, -1));
     if (last.kind === "idx") {
       this.reject(kw, "Argument to 'assigned' should be identifier, record field, or attribute");
       return "None";
@@ -1204,19 +1428,24 @@ class Parser {
       const h1 = this.uses.length;
       const loops: [string, string][] = [];
       const bound: string[] = [];
+      const sets: { vars: string[]; from: number; to: number }[] = [];
       do {
         const vars = [pyName(this.ident())];
         while (this.eat(",")) vars.push(pyName(this.ident()));
         bound.push(...vars);
         this.expect("in");
+        const from = this.uses.length;
         loops.push([vars.length === 1 ? vars[0] : `(${vars.join(", ")})`, this.expr()]);
+        sets.push({ vars, from, to: this.uses.length });
       } while (this.eat(","));
       const c0 = this.uses.length;
       const cond = this.eat("|") ? this.expr() : null;
-      // the loop variables are bound in the head and the condition, not in
-      // the sets they run over
+      // the loop variables are bound in the head and the condition; a set
+      // sees the variables of the loops after it (they are the outer
+      // loops), not its own or those before it
       this.bindUses(h0, h1, bound);
       this.bindUses(c0, this.uses.length, bound);
+      sets.forEach((st, k) => this.bindUses(st.from, st.to, sets.slice(k + 1).flatMap((t) => t.vars)));
       this.expect(close);
       // the first variable varies fastest: the last loop is the outermost
       const gen = `${first} ${loops.reverse().map(([v, s]) => `for ${v} in _m._iter(${s})`).join(" ")}${cond ? ` if _m._bool(${cond})` : ""}`;
@@ -1238,6 +1467,7 @@ interface Target {
   kind: "name" | "path" | "gens";
   py: string;
   read: string;
+  tok?: Tok; // the name's token
   path?: PathEl[];
   gens?: string[];
   names?: string[];
