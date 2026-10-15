@@ -694,9 +694,10 @@ def polygamma(n, z):
     Largest relative error found against mpmath for n = 1..20: 4.6e-15
     for real x in [-40, 50], 4.3e-15 for complex |z| <= 420, 1e-14 next to
     the negative real axis; for n up to 100 and |z| up to 1e12, 4e-14
-    (largest for negative Re z), and below 1e-12 wherever the bound
-    accepts (8e-13 at psi^(100)(-0.5 - 0.0311i), where 101 arg(0.5 +
-    0.0311i) is near 2 pi and the value's leading part nearly vanishes)"""
+    (largest for negative Re z), and about 1e-12 at most where the bound
+    accepts (1.1e-12 at an order-75 point astra found; 8e-13 at
+    psi^(100)(-0.5 - 0.0311i), where 101 arg(0.5 + 0.0311i) is near 2 pi
+    and the value's leading part nearly vanishes)"""
     def one(n, z):
         if isinstance(n, complex) or n != _math.floor(n) or n < 0:
             raise ValueError("polygamma: n must be an integer >= 0")
@@ -1494,6 +1495,15 @@ def _cexp(u):
     if re < -745:
         return 0j
     if re > 709:
+        # (e^re itself is a double up to 709.78: E1(-716 + i) and
+        # E1(-1400 + 1e300 i), whose exponents with log |z| folded in are
+        # about 709.4, were refused as overflowing)
+        try:
+            v = _cmath.exp(u)
+            if _math.isfinite(v.real) and _math.isfinite(v.imag):
+                return v
+        except OverflowError:
+            pass
         m = _math.inf
         c, s = _math.cos(im), _math.sin(im)
         return complex(m * c if c else 0.0, m * s if s else 0.0)
@@ -1958,9 +1968,9 @@ def _e1_asym(z):
     lzi = _math.atan2(z.imag, z.real)
     v = _cexp(complex(-z.real - lzr, -z.imag)) * _cmath.exp(complex(0.0, -lzi)) * s
     if _bad(v):
-        # (e^-z beyond the doubles: an infinite part, or its phase's parts
-        # times it, inf * 0)
-        raise NotCovered("exp_integral_e1: |E1(z)| is beyond the doubles at z = %r" % (z,))
+        # (e^-z / z, the leading term, beyond the doubles: an infinite part,
+        # or its phase's parts times it, inf * 0)
+        raise NotCovered("exp_integral_e1: e^-z/z, E1's leading term, is beyond the doubles at z = %r" % (z,))
     if z.real < 0 and z.imag == 0:
         v = complex(v.real, -_math.copysign(_PI, z.imag))
     return v
