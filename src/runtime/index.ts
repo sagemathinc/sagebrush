@@ -279,7 +279,8 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
   if (locals !== undefined && locals !== null && !(locals instanceof Obj.PyDict) && Ty.lookupDunder(locals, "__getitem__") === undefined) raise(T.TypeError, `locals must be a mapping or None, not ${typeName(locals)}`);
   if (globals !== undefined && globals !== null) {
     if (!(globals instanceof Obj.PyDict)) raise(T.TypeError, `globals must be a dict, not ${typeName(globals)}`);
-    if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", B.builtins);
+    // (as CPython's exec/eval: the builtins module's dict, not the module)
+    if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", Obj.instanceDict(B.builtins));
     const ns = Obj.namespaceOf(globals);
     return locals !== undefined && locals !== null && locals !== globals ? layered(Obj.namespaceOf(locals), ns) : ns;
   }
@@ -291,7 +292,7 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
 // Reads see `front` then `back`; writes go to `front`.
 function layered(front: any, back: any): any {
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k in front && front[k] !== undefined ? front[k] : back[k]),
+    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === Obj.NS_DICT ? undefined : k in front && front[k] !== undefined ? front[k] : back[k]),
     set: (_t, k, v) => { if (typeof k === "string" && k.charCodeAt(0) === 36) raise(T.TypeError, `name '${k}' is reserved`); front[k] = v; return true; },
     has: (_t, k) => k in front || k in back,
     deleteProperty: (_t, k) => (delete front[k], true),
@@ -332,7 +333,7 @@ export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals
 function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
   const [text] = sourceOf(src, "compile");
   if (mode !== "exec" && mode !== "eval" && mode !== "single") raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
-  M.loader.exec(text, null, mode === "eval" ? "check-eval" : "check", String(filename));
+  M.loader.exec(text, null, mode === "eval" ? "check-eval" : mode === "single" ? "check-single" : "check", String(filename));
   return new CodeObject(text, String(filename), mode);
 }
 Obj.builtin(compileBuiltin, "compile");
@@ -556,7 +557,8 @@ function formatOne(e: any): string {
   const t = Obj.typeOf(e);
   let msg: string;
   try {
-    msg = F.str(e);
+    // (a SyntaxError's line shows its message: the location is above it)
+    msg = Obj.isinstance(e, T.SyntaxError) && typeof e.msg === "string" ? e.msg : F.str(e);
   } catch {
     msg = "<exception str() failed>";
   }
@@ -652,6 +654,7 @@ export const R: any = {
   PyRange: Ty.PyRange,
   defn,
   globalsDict: Obj.globalsDict,
+  moduleLocals: Obj.moduleLocals,
   localsDict,
   sortedKeys,
   execIn,

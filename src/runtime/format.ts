@@ -39,6 +39,30 @@ function decompose(x: number): [bigint, number] {
   return [m | (1n << 52n), e - 1075];
 }
 
+// CPython's limit on an int's decimal conversions (sys.set_int_max_str_digits;
+// 0: none).  Python mode keeps CPython's default; Sage, Magma and MATLAB set
+// 0 when their libraries load (lib/sage_all.py, lib/_magma.py, lib/_matlab.py).
+export const intDigits = { max: 4300 };
+
+// The decimal digits of an int, or CPython's ValueError past the limit.
+export function decimalOf(a: bigint): string {
+  const m = intDigits.max;
+  if (m > 0) {
+    const abs = a < 0n ? -a : a;
+    // (a lower bound from the hex digits first: a huge value is refused
+    // without being converted)
+    if (Math.floor((abs.toString(16).length - 1) * Math.log10(16)) + 1 > m) tooManyDigits();
+    const s = abs.toString();
+    if (s.length > m) tooManyDigits();
+    return a < 0n ? "-" + s : s;
+  }
+  return a.toString();
+}
+
+function tooManyDigits(): never {
+  raise(T.ValueError, `Exceeds the limit (${intDigits.max} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`);
+}
+
 // |x| rounded half-even to `p` digits after the point: [integer digits, fraction digits].
 function fixedDigits(x: number, p: number): [string, string] {
   const [m, e] = decompose(x);
@@ -162,7 +186,7 @@ export function repr(x: any): string {
     case "number":
       return isInt(x) ? String(x) : floatRepr(x);
     case "bigint":
-      return x.toString();
+      return decimalOf(x);
     case "boolean":
       return x ? "True" : "False";
     case "function":
@@ -248,7 +272,7 @@ export function str(x: any): string {
     case "number":
       return isInt(x) ? String(x) : floatRepr(x);
     case "bigint":
-      return x.toString();
+      return decimalOf(x);
     case "boolean":
       return x ? "True" : "False";
   }
@@ -353,7 +377,7 @@ function formatInt(v: bigint, s: Spec): string {
     case "":
     case "d":
     case "n":
-      digits = a.toString();
+      digits = decimalOf(a);
       break;
     default:
       return formatFloat(Number(v), s);
@@ -424,7 +448,7 @@ export function format(v: any, spec: string): string {
   }
   if (typeof v === "boolean" && spec === "") return v ? "True" : "False";
   if (isPyInt(v)) {
-    if (spec === "") return typeof v === "bigint" ? v.toString() : String(+v);
+    if (spec === "") return typeof v === "bigint" ? decimalOf(v) : String(+v);
     return formatInt(typeof v === "bigint" ? v : BigInt(+v), parseSpec(spec));
   }
   if (typeof v === "number" || v instanceof FloatBox) {
@@ -602,7 +626,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         const v = intOf(nextArg(), type, "oxX".includes(type));
         const neg = v < 0n;
         const a = neg ? -v : v;
-        let digits = type === "o" ? a.toString(8) : type === "x" ? a.toString(16) : type === "X" ? a.toString(16).toUpperCase() : a.toString();
+        let digits = type === "o" ? a.toString(8) : type === "x" ? a.toString(16) : type === "X" ? a.toString(16).toUpperCase() : decimalOf(a);
         if (precision > digits.length) digits = "0".repeat(precision - digits.length) + digits;
         const prefix = flags.includes("#") && "oxX".includes(type) ? "0" + type : "";
         body = padW(digits, true, (neg ? "-" : sign) + prefix);
