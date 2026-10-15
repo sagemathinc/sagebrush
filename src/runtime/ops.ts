@@ -101,15 +101,60 @@ function typeDunder(t: any, name: string): any {
 // (__iadd__ = None, __add__ = None) raises CPython's TypeError, not a JS
 // error; for __contains__ and __iter__, None means the operation is not
 // available, with no fallback to iteration or __getitem__.
+//
+// One wrapper per attribute object and name (WRAPPED), so that a class and
+// its subclass inheriting the same attribute see the same wrapper.  The
+// descriptor protocol is looked up when the wrapper is called, not when it
+// is made: replacing, deleting or adding the type's __get__ takes effect
+// (CPython's slot does the same).  The getter is called as Python calls
+// any object, so a callable instance works and None raises TypeError.
+const WRAPPED = new WeakMap<object, Record<string, any>>();
+const NONE_WRAPPED: Record<string, any> = Object.create(null);
 function nonFunctionDunder(g: any, name: string): any {
   if (g === null) {
-    if (name === "__contains__") return (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not a container`);
-    if (name === "__iter__") return (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not iterable`);
-    return () => callObj(g, []);
+    let w = NONE_WRAPPED[name];
+    if (w === undefined) {
+      if (name === "__contains__") w = (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not a container`);
+      else if (name === "__iter__") w = (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not iterable`);
+      else if (name === "__bool__") w = (self: any) => raise(T.TypeError, `'${typeName(self)}' cannot be interpreted as a boolean`);
+      else w = () => callObj(null, []);
+      NONE_WRAPPED[name] = w;
+    }
+    return w;
   }
-  const get = lookupType(typeOf(g), "__get__");
-  if (get !== undefined) return (self: any, ...args: any[]) => callObj(get(g, self, typeOf(self)), args);
-  return (_self: any, ...args: any[]) => callObj(g, args);
+  const isObj = typeof g === "object" || typeof g === "function";
+  let byName = isObj ? WRAPPED.get(g) : undefined;
+  if (byName !== undefined && byName[name] !== undefined) return byName[name];
+  const w = (self: any, ...args: any[]) => {
+    const get = lookupType(typeOf(g), "__get__");
+    if (get !== undefined) return callObj(callObj(get, [g, self, typeOf(self)]), args);
+    return callObj(g, args);
+  };
+  if (isObj) {
+    const m: Record<string, any> = byName ?? Object.create(null);
+    if (byName === undefined) WRAPPED.set(g, m);
+    m[name] = w;
+  }
+  return w;
+}
+
+// getattr(t, name) for deciding whether a subclass overrides a reflected
+// method, as CPython's method_is_overloaded: the type's attribute, bound
+// through its descriptor __get__(None, t) when it has one (a classmethod
+// binds to each class differently).
+function typeAttr(t: any, name: string): any {
+  const v = lookupType(t, name);
+  if (v === undefined || v === null || typeof v === "function") return v;
+  const get = lookupType(typeOf(v), "__get__");
+  return get === undefined ? v : callObj(get, [v, null, t]);
+}
+function overloaded(ta: any, tb: any, name: string): boolean {
+  // (the right operand's type first, as CPython)
+  const b = typeAttr(tb, name);
+  const a = typeAttr(ta, name);
+  if (a === b) return false;
+  if (a === undefined || b === undefined) return true;
+  return truth(richCompare(a, b, "__ne__"));
 }
 
 const OPS: Record<string, [string, string, string]> = table({
@@ -158,7 +203,7 @@ export function binaryDunder(a: any, b: any, op: string): any {
   const ta = typeOf(a), tb = typeOf(b);
   const fa = special(a, name);
   const fb = ta === tb ? undefined : special(b, rname);
-  if (fb !== undefined && tb.$mro.includes(ta) && fb !== special(a, rname)) {
+  if (fb !== undefined && tb.$mro.includes(ta) && overloaded(ta, tb, rname)) {
     // A subclass's reflected method gets priority.
     const r = settle(fb, fb(b, a));
     if (r !== NotImplemented) return r;
@@ -651,7 +696,8 @@ export function invert(a: any): any {
 function unaryDunder(a: any, name: string, sym: string): any {
   const f = special(a, name);
   if (f !== undefined) return settle(f, f(a));
-  raise(T.TypeError, `bad operand type for unary ${sym}: '${typeName(a)}'`);
+  // (abs() is a function, not an operator, in CPython 3.14's message)
+  raise(T.TypeError, sym === "abs()" ? `bad operand type for abs(): '${typeName(a)}'` : `bad operand type for unary ${sym}: '${typeName(a)}'`);
 }
 
 export function abs(a: any): any {
