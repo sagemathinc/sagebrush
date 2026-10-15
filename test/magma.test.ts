@@ -52,9 +52,46 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(undeclared.status, 1);
   assert.match(undeclared.stdout, /^1\n[\s\S]*Identifier 'Foo' has not been declared or assigned\n$/);
   assert.doesNotMatch(undeclared.stdout, /\n2\n/);
+  // one of Magma's intrinsics that Sagebrush lacks: said so, also when a
+  // function reads it (where the function reads it), and never run
+  const lacking = run("function f(E) return HyperellipticCurve(E); end function;\nf(1);\n");
+  assert.equal(lacking.status, 1);
+  assert.match(lacking.stdout, /^\nIn file "<cell>", line 1, column 22:\n>> function f\(E\) return HyperellipticCurve\(E\); end function;\n {24}\^\nUser error: 'HyperellipticCurve' is a Magma intrinsic not implemented in Sagebrush\n$/);
   const runtime = run("1;\nerror \"stop\";\n2;\n");
   assert.equal(runtime.status, 1);
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
+});
+
+test("functions take the values of their free variables when they are defined", () => {
+  // a capture is a keyword-only default argument: taken once, when the def runs
+  // (an unbound name is decided when the def runs: lib/_magma.py _capture)
+  assert.match(py("function f(n) return n + a; end function;"), /def _mf\d+\(n, \*, a=_m\._capture\(lambda: a, "a", \(1, 26\)\)\):/);
+  assert.match(py("function f(n) return n + a; end function;"), /return _m\._add\(n, \(a if a is not _mU else _m\._missing\("a", \(1, 26\)\)\), \(1, 24\)\)/);
+  assert.match(py("function f(n) return n + a; end function;"), /^\s*_m\._named\((_mf\d+), "f"\)\n[\s\S]*^\s*f = \1$/m);
+  // the function's own name is the function itself; parameters and locals are not captured
+  const rec = py("function f(n) x := n; return f(x - 1); end function;");
+  assert.match(rec, /def (_mf\d+)\(n\):[\s\S]*\1\(/);
+  // forward: each execution binds the name to a new cell (an unresolved
+  // forward); f captures it through the name; g's top-level definition
+  // fills the cell the name holds; inside a function, the cell of the
+  // forward in that scope
+  const fw = py("forward g;\nfunction f(n) return g(n); end function;\nfunction g(n) return n; end function;");
+  assert.match(fw, /_mfw\d+ = g = _m\._Cell\("g"\)/);
+  assert.match(fw, /def _mf\d+\(n, \*, g=_m\._capture\(lambda: g, "g", \(2, \d+\)\)\):/);
+  assert.match(fw, /_m\._define_top\(globals\(\), "g", (_mf\d+)\)\n[\s\S]*g = \1/);
+  const inner = py("function B()\n  forward w;\n  function v(n) return w(n); end function;\n  function w(n) return n; end function;\n  return v;\nend function;");
+  assert.match(inner, /(_mfw\d+) = w = _m\._Cell\("w"\)[\s\S]*\1\.set\(_mf\d+\)/);
+  assert.doesNotMatch(inner, /_define_top\(globals\(\), "w"/);
+  // local and delete make a function's own variable
+  assert.match(py("function f() delete x; return 1; end function;"), /^_m\._compile_error\(1, 21, "Identifier 'x' has not been declared or assigned"\)$/m);
+  assert.throws(() => magmaToPython("function f() t := 1; local x; return t; end function;"), MagmaSyntaxError);
+  assert.throws(() => magmaToPython("local x;"), MagmaSyntaxError);
+  // func< > likewise
+  assert.match(py("h := func< t | t + c >;\nc := 2;"), /\(lambda t, \*, c=_m\._capture\(lambda: c, "c", \(1, 20\)\): _m\._add\(t, \(c if c is not _mU else _m\._missing\("c", \(1, 20\)\)\), \(1, 18\)\)\)/);
+  // assigned of a global is false; read first, then assigned: rejected
+  assert.match(py("function f() return assigned a; end function;"), /return _m\._first\(False\)|return False/);
+  assert.match(py("function f() x := a; a := 1; return x; end function;"), /^_m\._compile_error\(1, 22, "Imported environment value 'a' cannot be used as a local"\)$/m);
+  assert.match(py("function f() s[1] := 0; return s; end function;"), /^_m\._compile_error\(1, 15, "Identifier 's' has not been declared or assigned"\)$/m);
 });
 
 test("constructors name< ... > parse; those not implemented yet raise at run time", () => {
@@ -94,20 +131,21 @@ test("maps: rules, graphs, arrow pairs and preimages", () => {
   assert.match(py("h := hom< A -> B | [ 1, 2 ] >;"), /_m\._unsupported\("hom"/);
   assert.match(py("y @@ f;"), /_m\._preimage\(f, y, \(1, 3\)\)/);
   // a rule takes its free variables' values when the map is made
-  assert.match(py("f := map< A -> B | x :-> x + a >;"), /rule=lambda x, a=_m\._snap\(lambda: a, "a"\): _m\._add\(x, _m\._val\(a, "a"\), \(1, 28\)\)/);
+  assert.match(py("f := map< A -> B | x :-> x + a >;"), /rule=lambda x, a=_m\._snap\(lambda: a, "a", \(1, \d+\)\): _m\._add\(x, _m\._val\(a, "a", \(1, \d+\)\), \(1, 28\)\)/);
   // ... but not the variables it binds itself, nor field names or named arguments
   const r = py("f := map< A -> B | x :-> #[ j : j in S | j gt x ] + r`n + Foo(x : Bar := 1) >;");
-  assert.match(r, /rule=lambda x, S=_m\._snap\(lambda: S, "S"\), r=_m\._snap\(lambda: r, "r"\), Foo=_m\._snap\(lambda: Foo, "Foo"\): /);
+  assert.match(r, /rule=lambda x, S=_m\._snap\(lambda: S, "S", \(1, \d+\)\), r=_m\._snap\(lambda: r, "r", \(1, \d+\)\), Foo=_m\._snap\(lambda: Foo, "Foo", \(1, \d+\)\): /);
   assert.doesNotMatch(r, /j=_m|n=_m|Bar=_m|\u0000/);
   // by scope: a comprehension's j shadows only inside it; a func's parameter is its own
-  assert.match(py("f := map< A -> B | x :-> j + &+[ j : j in [1..x] ] >;"), /rule=lambda x, j=_m\._snap\(lambda: j, "j"\): _m\._add\(_m\._val\(j, "j"\), /);
+  assert.match(py("f := map< A -> B | x :-> j + &+[ j : j in [1..x] ] >;"), /rule=lambda x, j=_m\._snap\(lambda: j, "j", \(1, \d+\)\): _m\._add\(_m\._val\(j, "j", \(1, \d+\)\), /);
   assert.match(py("f := map< A -> B | x :-> (func<j | j + 1>)(x) >;"), /rule=lambda x: /);
   // `assigned a` first makes a the rule's own local, never assigned: nothing
   // is captured, the test is false, and a read is the unassigned error
   assert.match(py("f := map< A -> B | x :-> assigned a select a else 0 >;"), /rule=lambda x: \(_m\._val\(_m\._UNSET, "a"\) if _m\._bool\(False\) else 0\)/);
   // a read first imports a, and a later `assigned a` is rejected
   assert.match(py("f := map< A -> B | x :-> a + (assigned a select 1 else 0) >;"), /^_m\._compile_error\(1, 31, "Imported environment value 'a' cannot be used as a local"\)$/m);
-  assert.match(py("delete a;"), /_m\._delete_check\("a"\)\n\s*del a/);
+  // a later delete doesn't reach a map's snapshot (value semantics)
+  assert.match(py("delete a;"), /^\s*del a$/m);
   // a function expression would be hoisted out of the rule: refused
   assert.match(py("f := map< A -> B | x :-> (function(y) return y; end function)(x) >;"), /_m\._not_supported\("a function expression inside a map rule"/);
 });
@@ -283,4 +321,36 @@ test("membership in a set is a keyed lookup: a large set costs as much as a smal
   ].join("\n"));
   const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8" });
   assert.equal(r.stdout, "ok\n", r.stderr);
+});
+
+test("an intrinsic Sagebrush lacks, captured by a function, never acts as a value: every intrinsic and every construct refuses it (CORR-55A-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const names: string[] = JSON.parse(spawnSync(process.execPath, [cli, "-c", "import json, _magma_docsearch as D; print(json.dumps(D.bound_names()))"], { encoding: "utf8" }).stdout);
+  assert.ok(names.length > 100);
+  const X = "HyperellipticCurve";
+  // (each use in a function of its own, called; a marker before each)
+  const uses = [
+    ...names.flatMap((n) => [`${n}(${X})`, `${n}(1, ${X})`]),
+    `[${X}]`, `{${X}}`, `{@ ${X} @}`, `{* ${X} *}`, `<${X}, 1>`, `#[${X}]`, `${X} eq 1`, `${X} ne 1`, `${X} cmpeq 1`, `${X} cmpne 1`,
+    `"a" cat ${X}`, `${X} select 1 else 2`, `true select ${X} else 2`, `rec< recformat< u > | u := ${X} >`, `func< | ${X} >()`, `${X}`,
+  ];
+  const prog = [
+    ...uses.map((u, k) => `function F${k}() return ${u}; end function;\nprint "@@${k}";\nF${k}();`),
+    `function P() print ${X}; end function;\nprint "@@print";\nP();`,
+    `function N() return func< | ${X} >; end function;\nprint "@@nested";\ng := N(); g();`,
+    `print "@@end";`,
+  ].join("\n") + "\n";
+  const out = spawnSync(process.execPath, [cli, "--magma"], { input: prog, encoding: "utf8", maxBuffer: 1 << 26 }).stdout;
+  const parts = out.split(/^@@(\S+)\n/m).slice(1);
+  const bad: string[] = [];
+  for (let i = 0; i < parts.length - 2; i += 2) {
+    const [mark, text] = [parts[i], parts[i + 1]];
+    const said = text.match(/is a Magma intrinsic not implemented in Sagebrush/g)?.length ?? 0;
+    const other = text.split("\n").filter((l) => l.trim() && !/^>>|^\s*\^$|is a Magma intrinsic not implemented in Sagebrush/.test(l));
+    if (said !== 1 || other.length) bad.push(`${mark === "print" || mark === "nested" ? mark : uses[Number(mark)]}: ${JSON.stringify(text.slice(0, 200))}`);
+  }
+  assert.equal(parts.length / 2 - 1, uses.length + 2);
+  assert.deepEqual(bad, []);
 });
