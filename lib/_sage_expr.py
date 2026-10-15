@@ -1696,7 +1696,8 @@ def _beta_complex(a, b):
     try:
         ga, gb, gs = g(a), g(b), g(a + b)
         r = ga * (gb / gs)
-    except OverflowError:
+    except (OverflowError, _sf.NotCovered):
+        # (_special's complex gamma refuses with NotCovered where |Gamma| leaves the doubles)
         ga = r = float("inf")
         gb = gs = 1.0
     if not all(_cmath.isfinite(v) and v != 0 for v in (ga, gb, gs, r)):

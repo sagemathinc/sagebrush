@@ -7,6 +7,7 @@ import {
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
 } from "./object";
 import { glibcPow } from "./libm";
+import { INTR } from "./interrupt";
 
 const isInt = Number.isInteger;
 const isSafe = Number.isSafeInteger;
@@ -93,6 +94,7 @@ const OPS: Record<string, [string, string, string]> = table({
   floordiv: ["__floordiv__", "__rfloordiv__", "//"],
   mod: ["__mod__", "__rmod__", "%"],
   pow: ["__pow__", "__rpow__", "** or pow()"],
+  divmod: ["__divmod__", "__rdivmod__", "divmod()"],
   lshift: ["__lshift__", "__rlshift__", "<<"],
   rshift: ["__rshift__", "__rrshift__", ">>"],
   and: ["__and__", "__rand__", "&"],
@@ -270,7 +272,7 @@ function truedivSlow(a: any, b: any): any {
   }
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float division by zero");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     return mkfloat(x / y);
   }
   return binaryDunder(a, b, "truediv");
@@ -343,7 +345,7 @@ export function floordiv(a: any, b: any): any {
 function floordivSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) {
     const x = big(a), y = big(b);
-    if (y === 0n) raise(T.ZeroDivisionError, "integer division or modulo by zero");
+    if (y === 0n) raise(T.ZeroDivisionError, "division by zero");
     // One BigInt division; flooring only matters when the signs differ.
     let q = x / y;
     if (x < 0n !== y < 0n && q * y !== x) q -= 1n;
@@ -351,17 +353,19 @@ function floordivSlow(a: any, b: any): any {
   }
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float floor division by zero");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     return mkfloat(floatDivmod(x, y)[0]);
   }
   return binaryDunder(a, b, "floordiv");
 }
 
-// CPython's _float_div_mod.
+// CPython's _float_div_mod.  (C's `if (mod)` is true for a nan, which JS's
+// `if (mod)` is not: the tests are `!== 0`, so an infinite or nan operand
+// gives nan, as in CPython, not 0.0.)
 export function floatDivmod(vx: number, wx: number): [number, number] {
   let mod = vx % wx;
   let div = (vx - mod) / wx;
-  if (mod) {
+  if (mod !== 0) {
     if (wx < 0 !== mod < 0) {
       mod += wx;
       div -= 1.0;
@@ -370,7 +374,7 @@ export function floatDivmod(vx: number, wx: number): [number, number] {
     mod = wx < 0 ? -0.0 : 0.0;
   }
   let floordiv: number;
-  if (div) {
+  if (div !== 0) {
     floordiv = Math.floor(div);
     if (div - floordiv > 0.5) floordiv += 1.0;
   } else {
@@ -404,14 +408,14 @@ export function mod(a: any, b: any): any {
 function modSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) {
     const x = big(a), y = big(b);
-    if (y === 0n) raise(T.ZeroDivisionError, "integer modulo by zero");
+    if (y === 0n) raise(T.ZeroDivisionError, "division by zero");
     let r = x % y;
     if (r !== 0n && r < 0n !== y < 0n) r += y;
     return normBig(r);
   }
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float modulo by zero");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     return mkfloat(floatDivmod(x, y)[1]);
   }
   return binaryDunder(a, b, "mod");
@@ -421,16 +425,13 @@ export function divmod(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return tuple([floordiv(a, b), mod(a, b)]);
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float divmod()");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     const [q, r] = floatDivmod(x, y);
     return tuple([mkfloat(q), mkfloat(r)]);
   }
-  const f = special(a, "__divmod__");
-  if (f !== undefined) {
-    const r = f(a, b);
-    if (r !== NotImplemented) return r;
-  }
-  raise(T.TypeError, `unsupported operand type(s) for divmod(): '${typeName(a)}' and '${typeName(b)}'`);
+  // (the binary protocol: a subclass's __rdivmod__ first, then __divmod__,
+  // then the other operand's __rdivmod__)
+  return binaryDunder(a, b, "divmod");
 }
 
 export function pow(a: any, b: any, m?: any): any {
@@ -558,7 +559,8 @@ const BIN: Record<string, (a: any, b: any) => any> = { add, sub, mul, truediv, f
 export function iadd(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return add(a, b);
   if (typeof a === "string" && typeof b === "string") return a + b;
-  if (Array.isArray(a) && (a as any).$t !== true) {
+  // (a Python subclass of list with its own __iadd__ goes through it)
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__iadd__")) {
     if (Array.isArray(b)) {
       const n = b.length;
       for (let i = 0; i < n; i++) a.push(b[i]);
@@ -574,7 +576,7 @@ export function isub(a: any, b: any): any {
 }
 export function imul(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return mul(a, b);
-  if (Array.isArray(a) && (a as any).$t !== true && repeatCount(b) !== undefined) {
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && repeatCount(b) !== undefined) {
     const r = repeatArray(a, repeatCount(b)!);
     a.length = 0;
     for (const v of r) a.push(v);
@@ -1234,13 +1236,32 @@ export function stopIteration(value: any): any {
   return T.StopIteration(...(value === undefined || value === null ? [] : [value]));
 }
 
+// (Stop is polled every 1024 items: a builtin consuming a long iterable,
+// math.fsum(range(10**12)) say, can be interrupted)
 export function forEach(x: any, f: (v: any) => void) {
   if (Array.isArray(x)) {
-    for (let i = 0; i < x.length; i++) f(x[i]);
+    for (let i = 0; i < x.length; i++) {
+      if ((i & 1023) === 1023) pollInterrupt();
+      f(x[i]);
+    }
     return;
   }
   const it = iter(x);
-  for (let v = it.$next(); v !== DONE; v = it.$next()) f(v);
+  // (polled before the next item is taken: an iterator stopped here resumes
+  // with the item after the last one used, none lost)
+  for (let n = 1; ; n++) {
+    if ((n & 1023) === 0) pollInterrupt();
+    const v = it.$next();
+    if (v === DONE) return;
+    f(v);
+  }
+}
+
+function pollInterrupt() {
+  if (INTR[0]) {
+    INTR[0] = 0;
+    raise(T.KeyboardInterrupt);
+  }
 }
 
 export function toArray(x: any): any[] {

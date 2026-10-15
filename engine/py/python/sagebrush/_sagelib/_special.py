@@ -50,6 +50,27 @@ def _elementwise(f, *args):
     return np.array(vals, dtype=complex if cplx else float).reshape(shape)
 
 
+def _cabs(z):
+    """|z|, inf where it is beyond the doubles (abs raises OverflowError
+    there: abs(1.7e308 + 1.7e308j))"""
+    try:
+        return abs(z)
+    except OverflowError:
+        return _math.inf
+
+
+def _modulus_within(name, f, i):
+    """f, refusing a finite complex argument i whose modulus is beyond the
+    doubles (NotCovered), where f's methods take |z| or log z: abs and
+    cmath.log raise OverflowError there"""
+    def g(*a):
+        z = a[i]
+        if isinstance(z, complex) and not _bad(z) and _cabs(z) == _math.inf:
+            raise NotCovered("%s: Sagebrush covers complex arguments whose modulus is within the doubles" % name)
+        return f(*a)
+    return g
+
+
 def _bad(z):
     """whether a float or complex has a NaN or infinite part"""
     if isinstance(z, complex):
@@ -215,8 +236,11 @@ def _loggamma_near_2(w):
         p *= -w
         t = _zeta_minus_1(k) * p / k
         s += t
-        if abs(t) <= 1e-18 * abs(s) or k > 80:
+        if abs(t) <= 1e-18 * abs(s):
             break
+        if k > 80:
+            # (for |w| <= 1 the terms are below 2^-k |w|^k: not reached)
+            raise NotCovered("loggamma: the series about 2 did not converge at w = %r" % (w,))
         k += 1
     return w * (1 - _EULER_GAMMA) + s
 
@@ -268,7 +292,7 @@ def loggamma(z):
     1e3 outside |z| < 15, and up to 1.6e-14 (an absolute error, from the
     recurrence) for |z| < 15 where |log Gamma(z)| < 1, except within 1 of
     z = 1 and z = 2, where the relative error stays near 1e-16"""
-    return _elementwise(_loggamma1, z)
+    return _elementwise(_modulus_within("loggamma", _loggamma1, 0), z)
 
 
 def _loggamma1(z):
@@ -283,7 +307,11 @@ def _loggamma1(z):
     if isinstance(z, complex):
         return _loggamma_c(z)
     if z > 0:
-        return _math.lgamma(z)
+        try:
+            return _math.lgamma(z)
+        except OverflowError:
+            # (log Gamma(x) beyond the doubles, x near 2^1024 / 709: inf, as Gamma's is)
+            return _math.inf
     if z == _math.floor(z):
         raise PoleError("log Gamma has a pole at %r" % (z,))
     # (the value at x + 0i: log|Gamma(x)| - i pi k, where Gamma(x) has k
@@ -297,7 +325,7 @@ def gamma(z):
     found against mpmath: real x 6e-16 for |x| <= 171; complex z 3.6e-14
     for |z| <= 42, growing in proportion to |log Gamma(z)| (the exponential
     turns loggamma's absolute error into a relative one)"""
-    return _elementwise(_gamma1, z)
+    return _elementwise(_modulus_within("gamma", _gamma1, 0), z)
 
 
 def _gamma1(z):
@@ -310,13 +338,26 @@ def _gamma1(z):
             raise ValueError("gamma has no limit at -inf")
         raise NotCovered("gamma: Sagebrush covers finite arguments (and +inf)")
     if isinstance(z, complex):
-        return _cmath.exp(_loggamma_c(z))
+        lg = _loggamma_c(z)
+        if lg.real < -746:
+            # (|Gamma(z)| below half the least subnormal, whatever its phase)
+            return 0j
+        if not (_math.isfinite(lg.real) and _math.isfinite(lg.imag)):
+            raise NotCovered("gamma: Sagebrush covers complex z whose log Gamma is within the doubles")
+        try:
+            return _cmath.exp(lg)
+        except OverflowError:
+            raise NotCovered("gamma: |Gamma(z)| is beyond the doubles here")
     if z <= 0 and z == _math.floor(z):
         raise PoleError("Gamma has a pole at %r" % (z,))
     try:
         return _math.gamma(z)
     except OverflowError:
-        return _math.inf if z > 0 else (0.0 if _sinpi(z) > 0 else -0.0)
+        # (beyond the doubles: 1/z near 0, -1e-310 too; and below -171,
+        # where |Gamma| underflows, a signed 0)
+        if z > -1:
+            return _math.copysign(_math.inf, z)
+        return 0.0 if _sinpi(z) > 0 else -0.0
 
 
 # ------------------------------------------------------------------ psi, polygamma
@@ -380,8 +421,10 @@ def _psi_near_2(w):
         p *= -w
         t = _zeta_minus_1(k) * p
         s += t
-        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3 or k > 90:
+        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3:
             break
+        if k > 90:
+            raise NotCovered("psi: the series about 2 did not converge at w = %r" % (w,))
         k += 1
     return (1 - _EULER_GAMMA) + s
 
@@ -397,8 +440,10 @@ def _psi_near_1(w):
         p *= -w
         t = (1 + _zeta_minus_1(k)) * p
         s += t
-        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3 or k > 90:
+        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3:
             break
+        if k > 90:
+            raise NotCovered("psi: the series about 1 did not converge at w = %r" % (w,))
         k += 1
     return s - _EULER_GAMMA
 
@@ -412,7 +457,7 @@ def psi(z):
     Largest error found against mpmath, as a fraction of max(1, |psi(z)|):
     1.3e-15 for real x in [-50, 100], 1.6e-15 for complex |z| <= 140;
     the relative error is larger near psi's zeros"""
-    return _elementwise(_psi1, z)
+    return _elementwise(_modulus_within("psi", _psi1, 0), z)
 
 
 def _polygamma1(n, z):
@@ -441,6 +486,18 @@ def _polygamma1(n, z):
         for coef in reversed(_cot_derivative_poly(n)):
             v = v * c + coef
         return sgn * _polygamma1(n, 1 - x) - _PI ** (n + 1) * v
+    if x < 0 and abs(z.imag) < _POLYGAMMA_Y:
+        # (the same reflection next to the negative real axis, where the
+        # recurrence's terms on either side of a pole cancel: 0.056 off at
+        # psi^(100)(-0.5 + 1e-15i).  cot(pi z) = (sin 2 pi x - i sinh 2 pi y) /
+        # (2 (sin^2 pi x + sinh^2 pi y)), its denominator without the
+        # cancellation of cosh 2 pi y - cos 2 pi x.  For complex c, P_n's
+        # terms can cancel (c near the imaginary axis, |c| ~ 1): the sum of
+        # their moduli bounds the rounding, and where it would lose more than
+        # three digits the recurrence below is taken instead)
+        v = _polygamma_reflect(n, z)
+        if v is not None:
+            return v
     if x < 0.5 and abs(z.imag) >= _POLYGAMMA_Y:
         if z.imag < 0:
             return _polygamma1(n, z.conjugate()).conjugate()
@@ -449,43 +506,101 @@ def _polygamma1(n, z):
         # powers of q: d^n/dz^n cot(pi z) = -2i (2 pi i)^n sum j^n q^j)
         r, y = _reduce(x), z.imag
         S = 0j
+        Sabs = 0.0
         j = 1
         jpeak = n / (2 * _PI * y)
         while True:
             t = j ** n * _math.exp(-2 * _PI * j * y) * _cmath.exp(2j * _PI * _reduce(j * r))
             S += t
+            Sabs += abs(t)
             if j > jpeak and abs(t) <= 1e-17 * abs(S):
                 break
+            if j > jpeak + 10000 or not _cmath.isfinite(S):
+                # (the ratio of successive terms is (1 + 1/j)^n e^(-2 pi y), near 1
+                # just beyond the peak j = n/(2 pi y) <= 16, but below e^(-pi y) <=
+                # e^-pi (y >= 1 here) from twice the peak on)
+                raise NotCovered("polygamma: the q-series did not converge at n = %r, z = %r" % (n, z))
             j += 1
         D = -2j * (2j * _PI) ** n * S
-        return sgn * _polygamma1(n, 1 - z) - _PI * D
+        q = _polygamma1(n, 1 - z)
+        v = sgn * q - _PI * D
+        # (the two parts cancel next to the value's zeros: their roundings,
+        # bounded by (n + 2) eps times the moduli, against 1e-11 of the
+        # result, as the reflection and the recurrence do; psi^(100)(-0.5 +
+        # 1.0000000000000002i) was 7.9e-11 off)
+        bound = (n + 2) * 2.2e-16 * (abs(q) + 2 * _PI * (2 * _PI) ** n * Sabs)
+        if _bad(v) or not _math.isfinite(bound) or bound > 1e-11 * abs(v):
+            raise NotCovered("polygamma: the reflection cancels beyond the doubles' accuracy at n = %r, z = %r" % (n, z))
+        return v
     # (DLMF 5.15.5: psi^(n)(z+1) = psi^(n)(z) + (-1)^n n! / z^(n+1),
     # upward to Re z >= R, then DLMF 5.15.9's asymptotic series)
     R = _STIRLING_R + 2 * n
     m = max(0, int(_math.ceil(R - x)))
     fact_n = float(_math.factorial(n))
     sign = -1.0 if n % 2 else 1.0
-    s = 0j if cplx else 0.0
+    rec = 0j if cplx else 0.0
+    rec_abs = 0.0
     if m > 10 ** 6:
         raise NotCovered("polygamma: Sagebrush covers Re z >= -1e6 when |Im z| < %g" % _POLYGAMMA_Y)
     if m:
         k = np.arange(m, dtype=float)
         w = (z + k) if cplx else (x + k)
-        s = complex(np.sum(w ** (-(n + 1)))) if cplx else float(np.sum(w ** (-(n + 1.0))))
+        i0 = int(np.argmin(np.abs(w)))
+        if cplx:
+            # (sum_k n!/w_k^(n+1) as 2^(-e(n+1)) n! sum_k (2^e/w_k)^(n+1), 2^e
+            # from the largest part of the w_k of least modulus, so that no
+            # (2^e/w_k)^(n+1) leaves the doubles (|2^e/w_k| <= 2): a power of
+            # two changes no rounding, so the terms either side of the real
+            # axis cancel exactly as unscaled, where a common complex factor
+            # w0^(n+1) mixed the parts, 2e-9 off at psi^(40)(-0.5 + 1e-9i),
+            # astra's CORR-D69-1.  w 2^-e in two factors, as 2^-e alone leaves
+            # the doubles for e near +-1074, and 2^1024 itself overflows)
+            w0 = complex(w[i0])
+            _, ex = _math.frexp(max(abs(w0.real), abs(w0.imag)))
+            e1 = -ex // 2
+            ws = (w * 2.0 ** e1) * 2.0 ** (-ex - e1)
+            r = fact_n * complex(np.sum((1.0 / ws) ** (n + 1)))
+            # (and the sum of the terms' moduli, for the rounding bound below)
+            ra = fact_n * float(np.sum(np.abs(1.0 / ws) ** (n + 1)))
+            try:
+                rec = complex(_ldexp(r.real, -ex * (n + 1)), _ldexp(r.imag, -ex * (n + 1)))
+                rec_abs = _ldexp(ra, -ex * (n + 1))
+            except OverflowError:
+                raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
+        else:
+            # (real w_k > 0, no cancellation: n!/w0^(n+1) sum_k (w0/w_k)^(n+1),
+            # w0 the least, whose ratio is exactly 1, so that the largest term
+            # is one rounded power, not 1/w0's rounding raised to the n+1,
+            # 8.5e-15 at psi^(100)(0.1885); n!/w0^(n+1) scaled by _c_wpow)
+            w0 = float(w[i0])
+            r = float(np.sum((w0 / w) ** (n + 1.0)))
+            rec = _c_wpow(fact_n * r, w0, n + 1)
     w = z + m
     # (DLMF 5.15.9: (-1)^(n+1) [ (n-1)!/w^n + n!/(2 w^(n+1))
-    #   + sum_k B_2k (2k+n-1)! / ((2k)! w^(2k+n)) ])
-    a = float(_math.factorial(n - 1)) / w ** n + fact_n / (2 * w ** (n + 1))
-    winv2 = 1 / (w * w)
-    wp = 1 / w ** n
+    #   + sum_k B_2k (2k+n-1)! / ((2k)! w^(2k+n)) ]; each term c w^-k scaled
+    # by _c_wpow, as w^k overflows and w^-k underflows before c restores it)
+    a = _c_wpow(float(_math.factorial(n - 1)), w, n) + _c_wpow(fact_n / 2, w, n + 1)
     for k in range(1, 20):
-        wp *= winv2
-        t = _B2K[k - 1] * float(_math.factorial(2 * k + n - 1) // _math.factorial(2 * k)) * wp
+        t = _c_wpow(_B2K[k - 1] * float(_math.factorial(2 * k + n - 1) // _math.factorial(2 * k)), w, 2 * k + n)
         a += t
         if abs(t) < 1e-18 * abs(a):
             break
     asym = -sign * a
-    return asym - sign * fact_n * s
+    v = asym - sign * rec
+    if cplx:
+        if _bad(v):
+            # (|psi^(n)(z)| beyond the doubles, from the sum or the series: an
+            # infinite or nan part is refused, as the scaled recurrence's
+            # overflow is)
+            raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
+        # (the terms' roundings, each about (n + 2) eps of the term with the
+        # powers, bounded by the sum of their moduli: where that exceeds
+        # 1e-11 of the result the terms cancel beyond the doubles' accuracy,
+        # next to the zeros of the dominant terms (psi^(100)(-0.5 + 0.0468i)
+        # was off by 54 times its value), and the value is refused, not given)
+        if (n + 2) * 2.2e-16 * (rec_abs + abs(a)) > 1e-11 * abs(v):
+            raise NotCovered("polygamma: the recurrence cancels beyond the doubles' accuracy at n = %r, z = %r" % (n, z))
+    return v
 
 
 # (complex z with Re z < 1/2 and |Im z| at least this use the reflection,
@@ -493,6 +608,58 @@ def _polygamma1(n, z):
 _POLYGAMMA_Y = 1.0
 
 _COT_POLYS = [[0, 1]]
+
+
+def _c_wpow(c, w, k):
+    """c w^-k, for w != 0 and k <= 140, without the spurious
+    underflow of w^-k before c multiplies it (psi^(50)(1e7) is 6e-288,
+    while 1e7^-50 is below the doubles): |w| = m 2^e with 1/2 <= m < 1, so
+    c / m^k stays within the doubles (m^k >= 2^-140) and 2^-ek is applied
+    once, rounding once (_ldexp); a complex w is scaled the same way by its
+    larger part, u = w 2^-e with 1/2 <= |u| < 2, and each part of c u^-k
+    then by 2^-ek (abs and phase would overflow and underflow: abs(1.7e308
+    + 1.7e308j), phase(1e308 + 1e-300j))"""
+    if isinstance(w, complex):
+        _, ex = _math.frexp(max(abs(w.real), abs(w.imag)))
+        u = complex(_ldexp(w.real, -ex), _ldexp(w.imag, -ex))  # (exact, or a part
+        # rounded at 2^-1074, negligible beside the other)
+        v = c * (1 / u) ** k
+        return complex(_ldexp(v.real, -ex * k), _ldexp(v.imag, -ex * k))
+    m, ex = _math.frexp(w)
+    try:
+        return _ldexp(c / m ** k, -ex * k)
+    except OverflowError:
+        return _math.inf
+
+
+def _polygamma_reflect(n, z):
+    """psi^(n)(z) by DLMF 5.15.6 for complex z with Re z < 0, or None where
+    the rounding of pi^(n+1) P_n(cot pi z) - (-1)^n psi^(n)(1 - z), bounded
+    by eps times the sum of the terms' moduli, exceeds 1e-13 of the result"""
+    x, y = z.real, z.imag
+    sh = _math.sinh(_PI * y)
+    sx = _sinpi(x)
+    den = 2 * (sx * sx + sh * sh)
+    if den == 0:
+        # (z within 1e-154 of a pole: |psi^(n)(z)| >= n!/|z + k|^(n+1) is
+        # beyond the doubles)
+        raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
+    c = complex(_sinpi(2 * x) / den, -_math.sinh(2 * _PI * y) / den)
+    v = 0j
+    a = 0.0
+    ac = abs(c)
+    for coef in reversed(_cot_derivative_poly(n)):
+        v = v * c + coef
+        a = a * ac + abs(coef)
+    p = _PI ** (n + 1)
+    q = _polygamma1(n, 1 - z)
+    r = (-1.0 if n % 2 else 1.0) * q - complex(p * v.real, p * v.imag)
+    bound = 4 * n * 2.2e-16 * (p * a + abs(q))
+    # (finite first: where P_n's terms or the result overflow, inf <= inf
+    # would accept an infinite or nan value, astra's CORR-7E4-1)
+    if _bad(r) or not _math.isfinite(bound) or not bound <= 1e-13 * abs(r):
+        return None
+    return r
 
 
 def _cot_derivative_poly(n):
@@ -513,13 +680,24 @@ def polygamma(n, z):
     """psi^(n)(z), the n-th derivative of psi, for integers n >= 0 and real
     or complex z: the recurrence DLMF 5.15.5 upward to Re z >= 15 + 2n and
     the asymptotic series DLMF 5.15.9, and the reflection DLMF 5.15.6 for
-    real z < 0 and for complex z with Re z < 1/2 and |Im z| >= 1 (nearer
-    the real axis the recurrence, which takes -Re z terms, so ValueError
-    below Re z = -1e6 there).  ValueError for n > 100.  PoleError at 0,
-    -1, -2, ...
-    Largest relative error found against mpmath for n = 1..20: 3.7e-15
-    for real x in [-40, 50], 4.3e-15 for complex |z| <= 420; larger near
-    the zeros"""
+    real z < 0 and for complex z with Re z < 0 (with cot's derivatives as a
+    polynomial in cot for |Im z| < 1, or else the recurrence where that
+    polynomial would lose more than three digits, and as a q-series for
+    |Im z| >= 1, Re z < 1/2; the recurrence takes -Re z terms, so
+    NotCovered below Re z = -1e6 there).  NotCovered for n > 100, where
+    |psi^(n)(z)| or |z| is beyond the doubles, and for complex z where the
+    method's terms cancel so that the bound on their rounding, (n + 2) eps
+    times the sum of their moduli, exceeds 1e-11 of the value: next to the
+    zeros of the dominant terms, where each of the recurrence and the
+    reflection lost up to the whole value (psi^(100)(-0.5 + 0.0468i)).
+    PoleError at 0, -1, -2, ...
+    Largest relative error found against mpmath for n = 1..20: 4.6e-15
+    for real x in [-40, 50], 4.3e-15 for complex |z| <= 420, 1e-14 next to
+    the negative real axis; for n up to 100 and |z| up to 1e12, 4e-14
+    (largest for negative Re z), and about 1e-12 at most where the bound
+    accepts (1.1e-12 at an order-75 point astra found; 8e-13 at
+    psi^(100)(-0.5 - 0.0311i), where 101 arg(0.5 + 0.0311i) is near 2 pi
+    and the value's leading part nearly vanishes)"""
     def one(n, z):
         if isinstance(n, complex) or n != _math.floor(n) or n < 0:
             raise ValueError("polygamma: n must be an integer >= 0")
@@ -528,7 +706,7 @@ def polygamma(n, z):
             # evaluation is not written)
             raise NotCovered("polygamma: Sagebrush covers n <= 100")
         return _polygamma1(int(n), z)
-    return _elementwise(one, n, z)
+    return _elementwise(_modulus_within("polygamma", one, 1), n, z)
 
 
 # ------------------------------------------------------------------ zeta functions
@@ -539,26 +717,77 @@ def _em_tail(s, a, N, m=12):
     + sum_{j=1..m} B_2j/(2j)! (s)_{2j-1} (N+a)^(1-s-2j)"""
     v = N + a
     if isinstance(v, complex) or isinstance(s, complex):
-        p = _cmath.exp(-s * _cmath.log(v))
+        p1 = _cmath.exp((1 - s) * _cmath.log(v))
     else:
-        # (real s and a give a real tail, and a real zeta)
-        p = _math.exp(-s * _math.log(v))
-    t = p * v / (s - 1) + p / 2
+        # (real s and a give a real tail, and a real zeta; the power rounded
+        # once, where exp(log) rounded |log| times larger, 2.4e-14 at 1e300)
+        try:
+            p1 = v ** (1 - s)
+        except OverflowError:
+            p1 = None
+    if p1 is not None and p1 == 0:
+        # (v = N + a >= 20: with (N+a)^(1-s) below the doubles every term is,
+        # their logarithms (1-s) log v + O(m log |s|); and (s)_(2j-1), which
+        # overflows for huge s, would make 0 * inf = nan)
+        return 0j if isinstance(p1, complex) else 0.0
+    # (the terms as (N+a)^(1-s) times their ratios to it: (N+a)^-s itself
+    # underflows where the first term does not, zeta(2, 1e300) = 1e-300)
+    t = 1 / (s - 1) + 0.5 / v
     poch = s
     vinv2 = 1 / (v * v)
-    q = p / v
+    q = vinv2
     fact = 1.0
     for j in range(1, m + 1):
         fact *= (2 * j - 1) * (2 * j)
         t += _B2K[j - 1] / fact * poch * q
         poch *= (s + 2 * j - 1) * (s + 2 * j)
         q *= vinv2
-    return t
+    if p1 is None:
+        # ((N+a)^(1-s) beyond the doubles, s < 1 and a near the largest:
+        # the power in halves, so that the quotient by s - 1 can bring the
+        # product back, zeta(-0.5, 4e205) = -1.69e308; inf where it cannot)
+        h = v ** ((1 - s) / 2)
+        return (h * t) * h
+    return p1 * t
 
 
 # (the summation takes 20 + |Im s| terms, and the rounding of their phases
 # |Im s| log k grows with |Im s|; past this Sagebrush refuses)
 _ZETA_MAX_T = 1e5
+
+
+def _expm1_c(z):
+    """e^z - 1 without cancellation, real or complex: for z = x + iy,
+    expm1(x) cos y - 2 sin^2(y/2) + i e^x sin y"""
+    if not isinstance(z, complex):
+        return _math.expm1(z)
+    x, y = z.real, z.imag
+    h = _math.sin(0.5 * y)
+    return complex(_math.expm1(x) * _math.cos(y) - 2 * h * h, _math.exp(x) * _math.sin(y))
+
+
+def _zeta_near0(s):
+    """zeta(s) for 0 < |s| < 0.05, real or complex, by Euler-Maclaurin
+    summation (DLMF 25.2.9) at s itself, with N = 10 and 12 Bernoulli
+    corrections: the functional equation's 1 - s rounds to 1 for tiny s,
+    losing about eps/|s| (zeta(1e-16) came out -0.4504, and 1e-17 raised
+    PoleError; 1e-13 at |s| = 1e-3); this is the better of the two below
+    |s| = 0.05 (2.3e-15 at most, against mpmath).  With k^-s = 1 + expm1(-s log k), the integer parts of the
+    sum, of N^(1-s)/(s - 1) and of N^-s/2 add up to exactly -1/2, and every
+    other term is O(s), so nothing cancels; the first neglected correction,
+    about 2 |s| 24!/((2 pi)^26 N^25), is below 1e-22.  (@sagebrush-sage's
+    method, from Sage mode's lib/_sage_expr.py.)"""
+    N = 10
+    e = [0.0] + [_expm1_c(-s * _math.log(k)) for k in range(1, N + 1)]
+    # (sum_(k<N) k^-s + N^(1-s)/(s-1) + N^-s/2 + 1/2)
+    t = sum(e[1:N]) - N * s / (1 - s) - N * e[N] / (1 - s) + e[N] / 2
+    # (+ sum_j B_2j/(2j)! s (s+1) ... (s+2j-2) N^(-s-2j+1))
+    poch, fact = s, 2.0
+    for j in range(1, 13):
+        t += _B2K[j - 1] / fact * poch * (1 + e[N]) / N ** (2 * j - 1)
+        poch *= (s + 2 * j - 1) * (s + 2 * j)
+        fact *= (2 * j + 1) * (2 * j + 2)
+    return t - 0.5
 
 
 def _zeta1(s):
@@ -576,6 +805,8 @@ def _zeta1(s):
     if s == 0:
         # (DLMF 25.6.1; the trivial zeros, DLMF 25.6.4, start at -2)
         return complex(-0.5, 0.0) if cplx else -0.5
+    if abs(s) < 0.05:
+        return _zeta_near0(s)
     sr = s.real
     if sr < 0.5:
         # (DLMF 25.4.2, the functional equation, in logarithms:
@@ -618,7 +849,7 @@ def zeta(s):
     (from the rounding of the phases Im s log k: 1.5e-12 at |Im s| = 1e3,
     1.8e-11 at 1e4), so the relative error is larger where |zeta| is small,
     near its zeros"""
-    return _elementwise(_zeta1, s)
+    return _elementwise(_modulus_within("zeta", _zeta1, 0), s)
 
 
 def _hurwitz1(s, a):
@@ -660,7 +891,14 @@ def _hurwitz1(s, a):
         head = complex(np.sum(np.exp(-s * np.log(k + a))))
     else:
         head = float(np.sum((k + a) ** (-s)))
-    return head + _em_tail(s, a, N)
+        if head == _math.inf:
+            # (every term is positive for real s: a sum beyond the doubles,
+            # a^-s for large s and a < 1, is inf, not the nan of inf - inf)
+            return _math.inf
+    v = head + _em_tail(s, a, N)
+    if _isnan(v):
+        raise NotCovered("hurwitz_zeta: the sum left the doubles at s = %r, a = %r" % (s, a))
+    return v
 
 
 def hurwitz_zeta(s, a):
@@ -722,6 +960,138 @@ def _is_nonpos_int(x):
     return x <= 0 and x == _math.floor(x)
 
 
+def _lgamma_diff(b, d):
+    """log Gamma(b) - log Gamma(b + d) for b, b + d >= 15, by Stirling's
+    series (DLMF 5.11.1) with its large terms combined, as in _betaln_pos:
+    -(b - 1/2) log(1 + d/b) - d log(b + d) + d + mu(b) - mu(b + d).  The
+    offset d enters exactly (not as the difference of b and a rounded b + d),
+    neither log Gamma, which can overflow, is formed, and their cancellation
+    does not lose digits"""
+    v = b + d
+    return -(b - 0.5) * _math.log1p(d / b) - d * _math.log(v) + d + _stirling_mu(b) - _stirling_mu(v)
+
+
+def _two_sum(a, b):
+    """(s, e) with s = fl(a + b) and s + e = a + b exactly (Knuth's TwoSum)"""
+    s = a + b
+    bb = s - a
+    return s, (a - (s - bb)) + (b - bb)
+
+
+def _betaln_pos_off(x, dx, y, dy):
+    """log B(x + dx, y + dy) for x, y > 0 and offsets dx, dy of a rounding
+    (|dx| <= eps |x|): log B(x, y) plus the offsets times log B's partial
+    derivatives psi(x) - psi(x + y) and psi(y) - psi(x + y) (DLMF 5.12.1,
+    5.2.2); the second-order terms, dx^2 psi'(x)/2 and the like, are below
+    eps^2 there"""
+    v = _betaln_pos(x, y)
+    if dx or dy:
+        pxy = _psi1(x + y)
+        if dx:
+            v += dx * (_psi1(x) - pxy)
+        if dy:
+            v += dy * (_psi1(y) - pxy)
+    return v
+
+
+def _sinpi_sum(s, e):
+    """sin(pi (s + e)) for |e| <= half a unit of s: sin(pi s) cos(pi e) + cos(pi s) sin(pi e)"""
+    if e == 0:
+        return _sinpi(s)
+    return _sinpi(s) * _cospi(e) + _cospi(s) * _sinpi(e)
+
+
+def _lgamma_sum(s, e):
+    """(log |Gamma(s + e)|, its sign) for moderate s (|s| < 16) and |e| at
+    most half a unit of s: for s > 0 to first order in e, psi(s) e (the
+    second order is below eps^2); for s < 0 by the reflection DLMF 5.5.3,
+    Gamma(s + e) = pi / (sin(pi (s + e)) Gamma(1 - s - e)), since next to a
+    pole psi is as large as 1/|s + n| and e alone moved B(-0.0037, -8.9968)
+    by 1.3e-13"""
+    if s > 0:
+        return _math.lgamma(s) + (e * _psi1(s) if e else 0.0), 1.0
+    ss = _sinpi_sum(s, e)
+    q, eq = _two_sum(1.0, -s)
+    lq = _math.lgamma(q) + ((eq - e) * _psi1(q) if eq != e else 0.0)
+    return _math.log(_PI) - _math.log(abs(ss)) - lq, (1.0 if ss > 0 else -1.0)
+
+
+def _betaln_signed(a, b):
+    """(log |B(a, b)|, sign of B) for finite real a, b, not both positive.
+    PoleError where Gamma(a) or Gamma(b) has a pole that Gamma(a + b) does
+    not cancel; (-inf, 0) where only Gamma(a + b) has one.
+
+    For arguments of moderate size (below 15) log |Gamma| directly.  For a
+    larger negative argument the log Gammas are huge and cancel (B(-1e12 +
+    0.5, 1e12 + 16) is about 6e173 while each log Gamma is near 2.7e13), so
+    every Gamma of a negative argument is reflected (DLMF 5.5.3) and B is
+    written through a beta of positive arguments, which _betaln_pos
+    computes without cancellation:
+      a < 0 < b, a + b > 0:  B(a, b) = pi / (sin(pi a) b B(1 - a, a + b));
+      a < 0 < b, a + b < 0:  B(a, b) = B(b, 1 - a - b) sin(pi (a + b)) / sin(pi a);
+      a, b < 0:  B(a, b) = pi sin(pi (a + b)) / (sin(pi a) sin(pi b) (1 - a - b) B(1 - a, 1 - b))
+    (each from Gamma(p) Gamma(q) = B(p, q) Gamma(p + q) and Gamma(x + 1) =
+    x Gamma(x)).  The arguments a + b, 1 - a, 1 - b and 1 - a - b are each
+    a rounded sum and its exact error (_two_sum); the errors enter through
+    log B's derivatives (_betaln_pos_off) and the sine's addition formula
+    (_sinpi_sum), so no rounding of a sum counts: sin(pi (a + b)) to first
+    order in the error was 0.3% off at a + b near -2.9e14, where half a unit
+    is 0.03.  With b positive and |a| small, the Stirling difference with
+    the exact offset a (_lgamma_diff)."""
+    if _is_nonpos_int(a) or _is_nonpos_int(b):
+        if a > b:
+            a, b = b, a
+        if b == _math.floor(b) and b > 0 and a + b <= 0:
+            # (a = -m, b = n with n <= m: Gamma(a)/Gamma(a+b) = 1 / (a (a+1)
+            # ... (a+b-1)), so B(-m, n) = (-1)^n Gamma(n) Gamma(m-n+1) /
+            # Gamma(m+1) = (-1)^n B(n, m - n + 1), without a product over n
+            # factors)
+            return _betaln_pos(b, -a - b + 1), (-1.0 if int(b) % 2 else 1.0)
+        raise PoleError("beta has a pole at (%r, %r)" % (a, b))
+    if b < a:
+        a, b = b, a
+    s, e = _two_sum(a, b)
+    if e == 0 and _is_nonpos_int(s):
+        return -_math.inf, 0.0
+    R = _STIRLING_R
+    if a > -R and abs(s) < R and b < R:
+        # (all moderate: log |Gamma| directly, the signs from the floors and
+        # for a + b from _lgamma_sum)
+        ls, sign = _lgamma_sum(s, e)
+        for v in (a, b):
+            if v < 0 and int(_math.floor(v)) % 2:
+                sign = -sign
+        return _math.lgamma(a) + _math.lgamma(b) - ls, sign
+    sa = _sinpi(a)
+    p, ep = _two_sum(1.0, -a)  # (1 - a = p + ep)
+    if b > 0:
+        if a > -R:
+            # (|a| small, b >= 15 or a + b >= 15: Gamma(a) directly, and
+            # log Gamma(b) - log Gamma(b + a) by Stirling with the exact offset)
+            sign = -1.0 if int(_math.floor(a)) % 2 else 1.0
+            if b >= R and s >= R:
+                return _math.lgamma(a) + _lgamma_diff(b, a), sign
+            ls, ssign = _lgamma_sum(s, e)
+            return _math.lgamma(a) + _math.lgamma(b) - ls, sign * ssign
+        if s > 0:
+            lb = _betaln_pos_off(p, ep, s, e)
+            return _math.log(_PI) - _math.log(abs(sa)) - _math.log(b) - lb, (1.0 if sa > 0 else -1.0)
+        q, eq = _two_sum(1.0, -s)  # (1 - a - b = q + eq - e)
+        lb = _betaln_pos_off(b, 0.0, q, eq - e)
+        ss = _sinpi_sum(s, e)
+        return lb + _math.log(abs(ss)) - _math.log(abs(sa)), (1.0 if (ss > 0) == (sa > 0) else -1.0)
+    # (a <= b < 0, one of them at most -15)
+    sb = _sinpi(b)
+    ss = _sinpi_sum(s, e)
+    r, er = _two_sum(1.0, -b)
+    q, eq = _two_sum(1.0, -s)
+    lb = _betaln_pos_off(p, ep, r, er)
+    L = (_math.log(_PI) + _math.log(abs(ss)) - _math.log(abs(sa)) - _math.log(abs(sb))
+         - (_math.log(q) + _math.log1p((eq - e) / q)) - lb)
+    sign = 1.0 if (ss > 0) == ((sa > 0) == (sb > 0)) else -1.0
+    return L, sign
+
+
 def _beta1(a, b):
     if isinstance(a, complex) or isinstance(b, complex):
         raise NotCovered("beta: Sagebrush covers real arguments")
@@ -737,29 +1107,25 @@ def _beta1(a, b):
         if a + b < 20:
             # (the Gamma functions are accurate to a few ulp only for small
             # arguments; exp(betaln) is accurate while |betaln| is small)
-            g = _math.gamma(a) * _math.gamma(b)
+            try:
+                g = _math.gamma(a) * _math.gamma(b)
+            except OverflowError:
+                # (Gamma of a subnormal argument is beyond the doubles)
+                g = _math.inf
             if _math.isfinite(g):
                 return g / _math.gamma(a + b)
-        return _math.exp(_betaln_pos(a, b))
+        return _exp_or_inf(_betaln_pos(a, b))
     # (DLMF 5.12.1, B = Gamma(a) Gamma(b) / Gamma(a + b), continued to the
     # negative arguments)
-    if _is_nonpos_int(a) or _is_nonpos_int(b):
-        if a > b:
-            a, b = b, a
-        if b == _math.floor(b) and b > 0 and a + b <= 0:
-            # (a = -m, b = n with n <= m: Gamma(a)/Gamma(a+b) = 1 / (a (a+1) ... (a+b-1)))
-            p = 1.0
-            for j in range(int(b)):
-                p *= a + j
-            return _math.gamma(b) / p
-        raise PoleError("beta has a pole at (%r, %r)" % (a, b))
-    if _is_nonpos_int(a + b):
+    lo, hi = min(a, b), max(a, b)
+    if _is_nonpos_int(lo) and hi > 0 and hi == _math.floor(hi) and lo + hi <= 0:
+        # (B(-m, n) = (-1)^n B(n, m - n + 1), as _betaln_signed, through the
+        # positive path, exact for small arguments: B(-3, 2) = 1/6)
+        return (-1.0 if int(hi) % 2 else 1.0) * _beta1(hi, -lo - hi + 1)
+    lb, sign = _betaln_signed(a, b)
+    if sign == 0:
         return 0.0
-    sign = 1.0
-    for v in (a, b, a + b):
-        if v < 0 and int(_math.floor(v)) % 2:
-            sign = -sign
-    return sign * _math.exp(_math.lgamma(a) + _math.lgamma(b) - _math.lgamma(a + b))
+    return sign * _exp_or_inf(lb)
 
 
 def beta(a, b):
@@ -769,7 +1135,9 @@ def beta(a, b):
     PoleError where Gamma(a) or Gamma(b) has a pole that Gamma(a + b) does
     not cancel (and when both a and b are integers <= 0); 0 where only
     Gamma(a + b) has one.  Largest relative error found against mpmath:
-    see betaln for positive arguments, 4e-15 for negative ones"""
+    see betaln for positive arguments; for negative ones (|a|, |b| from
+    1e-3 to 1e15, nearly cancelling ones too) 7e-15 of max(1, |betaln|),
+    as exp turns betaln's absolute error into a relative one"""
     return _elementwise(_beta1, a, b)
 
 
@@ -782,8 +1150,10 @@ def _betaln1(a, b):
         if a == _math.inf or b == _math.inf:
             return -_math.inf
         return _betaln_pos(a, b)
-    v = _beta1(a, b)
-    return _math.log(abs(v)) if v != 0 else -_math.inf
+    if a == _math.inf or b == _math.inf or a == -_math.inf or b == -_math.inf:
+        v = _beta1(a, b)
+        return _math.log(abs(v)) if v != 0 else -_math.inf
+    return _betaln_signed(a, b)[0]
 
 
 def betaln(a, b):
@@ -792,7 +1162,8 @@ def betaln(a, b):
     series (DLMF 5.11.1) with its large terms combined analytically above,
     so that large arguments do not cancel.  Errors as beta's.  Largest
     error found against mpmath for a, b in (0, 1e6]: 4e-16 of
-    max(1, |betaln|)"""
+    max(1, |betaln|); for negative arguments (through _betaln_signed's
+    reflections) 7e-15 of it"""
     return _elementwise(_betaln1, a, b)
 
 
@@ -1124,6 +1495,15 @@ def _cexp(u):
     if re < -745:
         return 0j
     if re > 709:
+        # (e^re itself is a double up to 709.78: E1(-716 + i) and
+        # E1(-1400 + 1e300 i), whose exponents with log |z| folded in are
+        # about 709.4, were refused as overflowing)
+        try:
+            v = _cmath.exp(u)
+            if _math.isfinite(v.real) and _math.isfinite(v.imag):
+                return v
+        except OverflowError:
+            pass
         m = _math.inf
         c, s = _math.cos(im), _math.sin(im)
         return complex(m * c if c else 0.0, m * s if s else 0.0)
@@ -1133,7 +1513,63 @@ def _cexp(u):
 def _minus_square(z):
     """-z^2, its real part as (y - x)(y + x) so that it is accurate"""
     x, y = z.real, z.imag
+    if abs(x) > 1e300 or abs(y) > 1e300:
+        # (halved first, as y + x or y - x would overflow: inf times a 0
+        # difference made nan at 1e308 + 1e308i)
+        return complex(4 * ((0.5 * y - 0.5 * x) * (0.5 * y + 0.5 * x)), -2 * x * y)
     return complex((y - x) * (y + x), -2 * x * y)
+
+
+def _phase_lost(z):
+    """whether e^(-z^2)'s phase -2xy is beyond the doubles while its modulus
+    e^(y^2 - x^2) is not below them"""
+    u = _minus_square(z)
+    return u.real >= -745 and not _math.isfinite(u.imag)
+
+
+def _exp_minus_square(z, name):
+    """e^(-z^2) with its phase -2xy and its exponent y^2 - x^2 taken
+    exactly, each as rounded products plus their rounding errors (Dekker's
+    product): the rounded phase alone is off by up to half a unit, a radian
+    at 2^52, and erf(3e7 + 3e7i) was off by 3e-9.  NotCovered where the
+    phase is lost (_phase_lost)"""
+    u = _minus_square(z)
+    if u.real < -745:
+        return 0j
+    if not _math.isfinite(u.imag):
+        raise NotCovered("%s: the phase of e^(-z^2) is beyond the doubles at z = %r" % (name, z))
+    x, y = z.real, z.imag
+    if abs(x) < abs(y):
+        x, y = y, x
+    if abs(x) > 1e290:
+        # (Veltkamp's splitting overflows above 1e300: the product kept, as
+        # |y| < 1e19 here)
+        x, y = _math.ldexp(x, -200), _math.ldexp(y, 200)
+    p, err = _two_prod(x, y)
+    if not _math.isfinite(err):
+        err = 0.0
+    re, re_err = u.real, 0.0
+    if abs(x) < 1e150:
+        # (and y^2 - x^2 exactly too, as the sum of the squares' exact parts:
+        # its rounding, up to 745 eps, was 9e-15 of erfc(3000 + 2999.9i))
+        yy, yy_err = _two_prod(z.imag, z.imag)
+        xx, xx_err = _two_prod(z.real, z.real)
+        re, d = _two_sum(yy, -xx)
+        re_err = d + (yy_err - xx_err)
+    e = _cexp(complex(re, -2 * p))
+    if err == 0 and re_err == 0:
+        return e
+    return e * _cmath.exp(complex(re_err, -2 * err))
+
+
+def _erfc_negligible(z):
+    """whether |erfc z| < 2^-55 for Re z >= 0 and |z| >= 2^26 (where the
+    phase can be lost): |erfc z| = |e^(-z^2)| |w(iz)|, and |w(iz)| is at
+    most 1/(sqrt(pi) |z|) to within 1 + O(|z|^-2) there (DLMF 7.12.1)"""
+    x, y = abs(z.real), abs(z.imag)
+    big, small = max(x, y), min(x, y)
+    logz = _math.log(big) + 0.5 * _math.log1p((small / big) ** 2)
+    return _minus_square(z).real - logz - 0.5 * _math.log(_PI) < -39
 
 
 _W_H = 0.5
@@ -1148,7 +1584,15 @@ def _faddeeva_upper(z):
         f = z
         for k in range(40, 0, -1):
             f = z - (k / 2) / f
-        return 1j / _math.sqrt(_PI) / f
+        c = 1j / _math.sqrt(_PI)
+        if max(abs(f.real), abs(f.imag)) > 1e300:
+            # (the complex division's own scaling overflows there, and a
+            # subnormal w(z) came out 0 at z = -1e308 + 1e308i: f scaled by
+            # 2^-600 first, part by part, as f * 2.0**-600 makes inf * 0 = nan
+            # in Sagebrush's complex arithmetic; the quotient back once)
+            v = c / complex(f.real * 2.0 ** -600, f.imag * 2.0 ** -600)
+            return complex(_ldexp(v.real, -600), _ldexp(v.imag, -600))
+        return c / f
     # (the trapezoidal rule, step h = 1/2, for DLMF 7.7.2,
     # w(z) = (i/pi) int e^(-t^2)/(z - t) dt, on nodes placed so that x is
     # midway between two, plus the residue of the pole at t = z that the rule
@@ -1183,7 +1627,11 @@ def _faddeeva(z):
         raise NotCovered("faddeeva: Sagebrush covers finite arguments (and real +-inf)")
     if z.imag < 0:
         # (DLMF 7.4.3: w(-z) = 2 e^(-z^2) - w(z))
-        return 2 * _cexp(_minus_square(z)) - _faddeeva_upper(-z)
+        v = 2 * _exp_minus_square(z, "faddeeva") - _faddeeva_upper(-z)
+        if _isnan(v):
+            # (e^(-z^2) infinite: its parts' products are inf * 0 or inf - inf)
+            raise NotCovered("faddeeva: |w(z)| is beyond the doubles at z = %r" % (z,))
+        return v
     return _faddeeva_upper(z)
 
 
@@ -1193,9 +1641,10 @@ def faddeeva(z):
     pole's residue added (Im z < 6) and Laplace's continued fraction DLMF
     7.9.3 (Im z >= 6 or |Re z| >= 1e4); below the real axis DLMF 7.4.3;
     on the real axis the real part is e^(-x^2) itself, so w(0) = 1.
-    Largest relative error found against mpmath: 1.2e-15 for Im z >= 0;
-    below the axis it grows with e^(-z^2)'s exponent, as the function's
-    condition does"""
+    Largest relative error found against mpmath: 1.2e-15, for |z| up to
+    1e9 on both sides of the axis (below it e^(-z^2)'s exponent and phase
+    are taken exactly, _exp_minus_square); NotCovered below the axis where
+    that phase, -2xy, is beyond the doubles"""
     return _elementwise(lambda z: _faddeeva(z), z)
 
 
@@ -1212,22 +1661,43 @@ def _erf_taylor(z):
         s += u
         if abs(u) <= 1e-17 * abs(s):
             break
+        if n > 200:
+            # (for |z| < 1/2 the terms fall by 1/(4n) each: not reached)
+            raise NotCovered("erf: the Taylor series did not converge at z = %r" % (z,))
     return 2 / _math.sqrt(_PI) * s
 
 
 def _erfc_c(z):
     if z.real >= 0:
         # (DLMF 7.2.3 with z -> iz: erfc z = e^(-z^2) w(iz))
-        return _cexp(_minus_square(z)) * _faddeeva_upper(1j * z)
-    return 2 - _erfc_c(-z)
+        v = _exp_minus_square(z, "erfc") * _faddeeva_upper(1j * z)
+        if _isnan(v):
+            # (e^(-z^2) infinite: the product's parts are inf - inf)
+            raise NotCovered("erf, erfc, erfi: |e^(-z^2)| is beyond the doubles at z = %r" % (z,))
+        return v
+    v = _erfc_right(-z, "erfc")
+    # (the zero parts' signs set here, as 2 - 0j's differ between runtimes)
+    return complex(2.0, -0.0) if v is None else 2 - v
 
 
-def _erf_c(z):
-    if abs(z) < 0.5:
+def _erfc_right(z, name):
+    """erfc z for Re z >= 0 where only 1 - erfc z or 2 - erfc z is wanted:
+    None where e^(-z^2)'s phase is lost but |erfc z| is negligible beside 1"""
+    if _phase_lost(z):
+        if _erfc_negligible(z):
+            return None
+        raise NotCovered("%s: the phase of e^(-z^2) is beyond the doubles at z = %r" % (name, z))
+    return _erfc_c(z)
+
+
+def _erf_c(z, name="erf"):
+    if _cabs(z) < 0.5:
         return _erf_taylor(z)
     if z.real >= 0:
-        return 1 - _erfc_c(z)
-    return -(1 - _erfc_c(-z))
+        v = _erfc_right(z, name)
+        return complex(1.0, -0.0) if v is None else 1 - v
+    v = _erfc_right(-z, name)
+    return complex(-1.0, 0.0) if v is None else -(1 - v)
 
 
 def _erf_bad(name, z):
@@ -1240,6 +1710,14 @@ def _erf1(z):
     if isinstance(z, complex):
         if _bad(z):
             return _erf_bad("erf", z)
+        # (on the axes exactly: erf(iy) = i erfi(y) and erf(x + 0i) = erf(x),
+        # DLMF 7.2.4 and 7.4.1, the zero part keeping the argument's sign, as
+        # erf is odd and erf(conj z) = conj erf(z); the general formula left
+        # a real part of 1e-16 at 2i)
+        if z.real == 0:
+            return complex(z.real, _erfi1(z.imag))
+        if z.imag == 0:
+            return complex(_math.erf(z.real), z.imag)
         return _erf_c(z)
     return _math.erf(z)
 
@@ -1248,6 +1726,11 @@ def _erfc1(z):
     if isinstance(z, complex):
         if _bad(z):
             return _erf_bad("erfc", z)
+        # (on the axes exactly: erfc(iy) = 1 - i erfi(y), erfc(x + 0i) = erfc(x))
+        if z.real == 0:
+            return complex(1.0, -_erfi1(z.imag))
+        if z.imag == 0:
+            return complex(_math.erfc(z.real), -z.imag)
         return _erfc_c(z)
     return _math.erfc(z)
 
@@ -1256,9 +1739,10 @@ def erf(z):
     """the error function, real or complex: the math library's erf for
     real x; for complex z the Taylor series DLMF 7.6.1 when |z| < 1/2, and
     1 - erfc(z) otherwise (with erf(-z) = -erf(z)).  Largest relative
-    error found against mpmath for complex |z| <= 30: 2e-15 (of
-    max(1e-300, |erf|)), larger near erf's complex zeros and growing with
-    |z|^2 where e^(-z^2) is large"""
+    error found against mpmath for complex |z| up to 1e9: 1e-15 (of
+    max(1e-300, |erf|)), larger near erf's complex zeros.  NotCovered
+    where e^(-z^2)'s phase -2xy is beyond the doubles, unless erfc z is
+    negligible beside 1 there (erf(1e308 + 1e308i) is 1)"""
     return _elementwise(_erf1, z)
 
 
@@ -1292,9 +1776,8 @@ def _erfcx1(z):
 def erfcx(z):
     """the scaled complementary error function e^(z^2) erfc(z) = w(iz), real
     or complex (DLMF 7.2.3).  Largest relative error found against mpmath:
-    8e-16 for real x in [-26, 1e10], 1.2e-15 for complex z with Re z >= 0;
-    for Re z < 0 it grows with e^(z^2)'s exponent, as the function's
-    condition does"""
+    8e-16 for real x in [-26, 1e10], 1.2e-15 for complex z; for real
+    x < -26 it grows with x^2, the rounding of e^(x^2)'s exponent"""
     return _elementwise(_erfcx1, z)
 
 
@@ -1302,7 +1785,14 @@ def _erfi1(z):
     if isinstance(z, complex):
         if _bad(z):
             return _erf_bad("erfi", z)
-        return -1j * _erf_c(1j * z)
+        # (on the axes exactly: erfi(iy) = i erf(y) and erfi(x + 0i) = erfi(x),
+        # DLMF 7.5.1; the general formula left a real part of 1e-19 at i)
+        if z.real == 0:
+            return complex(z.real, _math.erf(z.imag))
+        if z.imag == 0:
+            return complex(_erfi1(z.real), z.imag)
+        v = _erf_c(1j * z, "erfi")
+        return complex(v.imag, -v.real)  # (-i v, exactly)
     if _math.isnan(z):
         return z
     if abs(z) < 0.5:
@@ -1333,7 +1823,8 @@ def erfi(z):
     """the imaginary error function erfi z = -i erf(iz), real or complex:
     for real x the Taylor series for |x| < 1/2 and e^(x^2) Im w(x) beyond;
     for complex z from erf.  Largest relative error found against mpmath:
-    as erf's"""
+    for complex z as erf's; for real x in [-26, 26] 7e-14, growing with
+    x^2 (the rounding of e^(x^2)'s exponent)"""
     return _elementwise(_erfi1, z)
 
 
@@ -1429,8 +1920,11 @@ def _e1_series(z):
         t *= -z / n
         u = t / n
         s += u
-        if abs(u) <= 1e-17 * abs(s) or n > 4000:
+        if abs(u) <= 1e-17 * abs(s):
             break
+        if n > 4000:
+            # (|z| <= 700 here: the terms fall below eps by n = 2100)
+            raise NotCovered("E1: the series did not converge at z = %r" % (z,))
     return -_EULER_GAMMA - _cmath.log(z) - s
 
 
@@ -1463,7 +1957,20 @@ def _e1_asym(z):
         if abs(t) <= 1e-17 * abs(s):
             s += t
             break
-    v = _cexp(-z - _cmath.log(z)) * s
+    # (e^-z / z with the phases -Im z and -arg z apart: their sum rounded
+    # -arg z away at Im z = 1e308, E1(1e308 i) off by a factor i)
+    # (log |z| from the larger part, as Sagebrush's cmath.log forms |z| first
+    # and is inf beyond 1.8e308: e^(1.7e308 - inf) made E1(-1.7e308 + 1.7e308i)
+    # 0, astra's CORR-7E4-2)
+    x, y = abs(z.real), abs(z.imag)
+    big, small = max(x, y), min(x, y)
+    lzr = _math.log(big) + 0.5 * _math.log1p((small / big) ** 2)
+    lzi = _math.atan2(z.imag, z.real)
+    v = _cexp(complex(-z.real - lzr, -z.imag)) * _cmath.exp(complex(0.0, -lzi)) * s
+    if _bad(v):
+        # (e^-z / z, the leading term, beyond the doubles: an infinite part,
+        # or its phase's parts times it, inf * 0)
+        raise NotCovered("exp_integral_e1: e^-z/z, E1's leading term, is beyond the doubles at z = %r" % (z,))
     if z.real < 0 and z.imag == 0:
         v = complex(v.real, -_math.copysign(_PI, z.imag))
     return v
@@ -1473,7 +1980,7 @@ def _e1_c(z):
     x, y = z.real, z.imag
     if z == 0:
         raise PoleError("E1 has a logarithmic singularity at 0")
-    r = abs(z)
+    r = _cabs(z)
     if r <= 2 or (r + x <= 3 and r <= 700):
         # (the series loses e^(|z| + Re z) to cancellation, so it serves
         # near 0 and next to the negative real axis, where the continued
@@ -1572,6 +2079,9 @@ def _ei1(x):
             s += u
             if u <= 1e-17 * s:
                 break
+            if n > 1000:
+                # (x <= 40 here: the terms fall below eps by n = 150)
+                raise NotCovered("Ei: the series did not converge at x = %r" % (x,))
         return _EULER_GAMMA + _math.log(x) + s
     # (DLMF 6.12.2: Ei(x) ~ e^x/x sum k!/x^k, to its smallest term)
     s = 0.0
@@ -1681,7 +2191,7 @@ def _lambertw_upper(z, k):
                 v = (v + c) * p
             return -1 + v
         w = -1 + p * (cs[0] + p * (cs[1] + p * cs[2]))
-    elif k == 0 and abs(z) <= 3:
+    elif k == 0 and _cabs(z) <= 3:
         w = _cmath.log(1 + z)
     elif k == -1 and z.imag == 0 and -0.1 < z.real < 0:
         # (the real branch W_-1 on (-1/e, 0): DLMF 4.13.11's leading terms
@@ -1696,8 +2206,15 @@ def _lambertw_upper(z, k):
         L2 = _cmath.log(L1)
         w = L1 - L2 + L2 / L1
     # (Halley's iteration on w - z e^-w, which does not overflow)
+    lz = None
     for _ in range(100):
-        t = w - z * _cmath.exp(-w)
+        try:
+            t = w - z * _cmath.exp(-w)
+        except OverflowError:
+            # (tiny |z|: z e^-w = e^(log z - w), whose exponent is moderate)
+            if lz is None:
+                lz = _cmath.log(z)
+            t = w - _cmath.exp(lz - w)
         if t == 0:
             break
         w1 = w + 1
@@ -1753,7 +2270,7 @@ def lambert_w(z, k=0):
     z = 0 for k != 0.  Largest relative error found against mpmath: 9e-16,
     for every branch tried (|k| <= 10^6, 1e-300 <= |z| <= 1e300, next to
     the branch point and the cuts)"""
-    return _elementwise(_lambertw1, z, k)
+    return _elementwise(_modulus_within("lambert_w", _lambertw1, 0), z, k)
 
 
 # ------------------------------------------------------------------ polylogarithm
@@ -1788,8 +2305,12 @@ def _polylog_series(n, z):
         p *= z
         t = p / float(k) ** n
         s += t
-        if abs(t) <= 1e-17 * abs(s) or k > 100000:
+        if abs(t) <= 1e-17 * abs(s):
             break
+        if k > 2000:
+            # (|z| <= 1/2, or |z| <= 1 with n >= 8, here: about 57 and 130
+            # terms; on the unit circle |Li_n| >= 1 - sum_{k>=2} k^-8 > 0.99)
+            raise NotCovered("polylog: the series did not converge at n = %r, z = %r" % (n, z))
     return s
 
 
@@ -1814,9 +2335,14 @@ def _polylog_mu(n, z):
             # (zeta's trivial zeros make every other term 0 past k = n)
             if k > n + 1 and u != 0 and abs(u) <= 1e-17 * abs(s):
                 break
+        if t == 0:
+            # (mu^k/k! has underflowed: every later term is 0; for tiny
+            # mu the test above, needing a nonzero term, never passed)
+            break
         k += 1
         if k > 250:
-            break
+            # (|mu| <= 4.3 < 2 pi here, the terms falling like (|mu|/(2 pi))^k: not reached)
+            raise NotCovered("polylog: the series in log z did not converge at n = %r, z = %r" % (n, z))
         t *= mu / k
     if n >= 1:
         H = _math.fsum(1.0 / j for j in range(1, n))
@@ -1924,12 +2450,12 @@ def polylog(s, z):
     error found against mpmath: 2e-14 for 1 <= s <= 100 (largest at large
     orders and large |z|), growing for negative orders to 1e-13 at s = -20
     (and near Li_s's zeros)"""
-    return _elementwise(_polylog1, s, z)
+    return _elementwise(_modulus_within("polylog", _polylog1, 1), s, z)
 
 
 def dilog(z):
     """the dilogarithm Li_2(z) (DLMF 25.12.1), as polylog(2, z)"""
-    return _elementwise(_polylog1, 2.0, z)
+    return _elementwise(_modulus_within("dilog", _polylog1, 1), 2.0, z)
 
 
 # ------------------------------------------------------------------ elliptic integrals and functions
@@ -2263,11 +2789,22 @@ def _besselj_series(nu, x):
         # (x^nu 2^-nu: 0.5 x would underflow first for the least subnormals,
         # and these results round once into the subnormals, to 0 where they
         # are below half the least)
-        return x ** nu * 0.5 ** nu / _math.gamma(nu + 1) * s
+        return x ** nu * 0.5 ** nu / _gamma_nu1(nu) * s
     pw = (0.5 * x) ** nu
     if 1e-290 < pw < 1e290:
-        return pw / _math.gamma(nu + 1) * s
-    return _math.exp(nu * (_math.log(x) - _math.log(2.0)) - _math.lgamma(nu + 1)) * s
+        return pw / _gamma_nu1(nu) * s
+    lg = _math.lgamma(nu) + _math.log(nu) if nu >= 1 else _math.lgamma(nu + 1)
+    return _math.exp(nu * (_math.log(x) - _math.log(2.0)) - lg) * s
+
+
+def _gamma_nu1(nu):
+    """Gamma(nu + 1) for 0 < nu <= 170: nu Gamma(nu) from nu >= 1, as nu + 1
+    rounds there (by up to half an ulp of nu + 1, times psi(nu + 1) in
+    Gamma: J_63.59(6.48) was 2.9e-14 off); below 1, nu + 1 loses only bits
+    beyond an ulp of 1, where psi is at most 0.42"""
+    if nu >= 1:
+        return nu * _math.gamma(nu)
+    return _math.gamma(nu + 1)
 
 
 def _besselj_hankel(nu, x):
@@ -2277,15 +2814,23 @@ def _besselj_hankel(nu, x):
     (4 nu^2 - 9) ... (4 nu^2 - (2k - 1)^2)) / (k! 8^k) (DLMF 10.17.1);
     cos w and sin w from cos x, sin x and the exactly reduced cos and sin of
     pi (nu/2 + 1/4).  None if the terms stop falling before eps"""
-    m = 4 * nu * nu
     p = 1.0
     qv = 0.0
     a = 1.0
     k = 0
     prev = 1.0
+    nu2 = 2 * nu
     while True:
         k += 1
-        a *= (m - (2 * k - 1) ** 2) / (k * 8 * x)
+        # (a_k / a_(k-1) = (4 nu^2 - (2k-1)^2) / (8 k x), as the factors
+        # ((2 nu - (2k-1)) / x) ((2 nu + (2k-1)) / (8 k)): k 8 x overflowed for
+        # x near 1e308 and 4 nu^2 for nu above 6.7e153 (here nu <= sqrt(x)),
+        # making a representable coefficient 0 that then passed the
+        # convergence test, J_(1e153)(1e308) 0.5% off (astra's CORR-7AA-1);
+        # each factor is a double here, and nu near a half-integer no longer
+        # cancels in 4 nu^2 - (2k-1)^2)
+        j = 2 * k - 1
+        a *= ((nu2 - j) / x) * ((nu2 + j) / (8 * k))
         if abs(a) > prev:
             return None
         prev = abs(a)
@@ -2298,12 +2843,22 @@ def _besselj_hankel(nu, x):
             break
         if k > 200:
             return None
-    r = 0.5 * nu + 0.25
-    cr, sr = _cospi(r), _sinpi(r)
+    # (cos and sin of pi (nu/2 + 1/4) by the addition formula from those of
+    # pi nu/2, exact, as nu/2 + 1/4 rounded as one double drops the 1/4 for
+    # nu >= 2^52: J_(1e20)(1e200) was 3.4e-2 off)
+    h = 0.5 * nu
+    ch, shh = _cospi(h), _sinpi(h)
+    cr, sr = (ch - shh) * _SQRT_HALF, (shh + ch) * _SQRT_HALF
     cx, sx = _math.cos(x), _math.sin(x)
     cw = cx * cr + sx * sr
     sw = sx * cr - cx * sr
-    return _math.sqrt(2 / (_PI * x)) * (cw * p - sw * qv)
+    # (sqrt(2/pi) / sqrt(x), as pi x overflows beyond 5.7e307 and 2/(pi x)
+    # is subnormal from 2.8e305 on: J_0(1e308) was 0, not -2.5e-155)
+    return _SQRT_2_PI / _math.sqrt(x) * (cw * p - sw * qv)
+
+
+_SQRT_HALF = 0.7071067811865476   # (sqrt(1/2), correctly rounded)
+_SQRT_2_PI = 0.7978845608028654   # (sqrt(2/pi), correctly rounded)
 
 
 def _bessel_dd_step(mu, m, x, xh, xl, fh, fl, gh, gl):
@@ -2447,7 +3002,10 @@ def _besselj_pos(nu, x):
         # Stirling (DLMF 5.11.1, its correction positive), log J_nu(x) <=
         # nu log(x/2) - (nu + 1/2) log(nu + 1) + nu + 1 - log(2 pi)/2 here,
         # as the series' sum is below 1 where its terms fall from the first)
-        if nu * (_math.log(x) - _math.log(2.0)) - (nu + 0.5) * _math.log(nu + 1) + nu + 1 < -800:
+        # (as nu (log(x/2) - log(nu + 1) + 1) - log(nu + 1)/2 + 1, whose first
+        # product is negative here (x <= sqrt(2 (nu + 1)), nu > 170): the terms
+        # apart were inf - inf = nan at nu = 1e308, x = 1e100)
+        if nu * (_math.log(x) - _math.log(2.0) - _math.log(nu + 1) + 1) - 0.5 * _math.log(nu + 1) + 1 < -800:
             return 0.0
         return _besselj_miller(nu, x)
     if x >= 25 and nu <= _math.sqrt(x):
@@ -2506,9 +3064,10 @@ def besselj(nu, x):
     steps.  Both recurrences run in double-double arithmetic, as in doubles
     their roundings accumulated over the oscillating steps (to 4.4e-14 at
     nu = 1213).  Largest error found against mpmath (nu up to 3000, x up
-    to 1e6), as a fraction of the envelope sqrt(2/(pi x)) where J
-    oscillates (|x| > nu) and of |J| below: 5e-15 (scipy.special.jv's
-    errors below the turning point are up to 4.5e-13)."""
+    to 1e6, and Hankel's region up to x = 1.8e308), as a fraction of the
+    envelope sqrt(2/(pi x)) where J oscillates (|x| > nu) and of |J| below:
+    5e-15 (scipy.special.jv's errors below the turning point are up to
+    4.5e-13)."""
     return _elementwise(_besselj1, nu, x)
 
 

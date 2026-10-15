@@ -114,11 +114,24 @@ impl Newspaces {
     /// sequences (0: none, Horner evaluation instead).
     fn orbit_eigenspace_with(&self, orbits: &NewformOrbits, k: usize, budget: usize) -> Result<OrbitEigenspace, String> {
         let g = orbits.orbits.get(k).ok_or("no such orbit")?.clone();
+        let t = self.op_matrix(&self.level, &orbits.op)?;
+        let key: Vec<(crate::field::Hnf, i64)> = orbits.op.iter().map(|(q, c)| (q.hnf, *c)).collect();
+        orbit_eigenspace_core(&t, g, &key, &self.charpoly_mod, budget)
+    }
+}
+
+/// The eigenspace data of the orbit with factor g of the separating operator
+/// whose matrix on M_2(N) is t (the algorithm of the module documentation).
+/// Data modulo primes is cached in `cache` under (key, prime), shared by the
+/// orbits of one operator, keeping at most `budget` residues of Krylov
+/// sequences. Used by Newspaces (Q(sqrt 5)) and by the general newspaces
+/// (defnew.rs).
+pub(crate) fn orbit_eigenspace_core<K: std::hash::Hash + Eq + Clone>(t: &[Vec<i64>], g: Vec<BigInt>, key: &K, cache: &std::sync::Mutex<std::collections::HashMap<(K, u64), std::sync::Arc<ModData>>>, budget: usize) -> Result<OrbitEigenspace, String> {
+    {
         let d = g.len() - 1;
         if g[d] != BigInt::one() {
             return Err("the orbit's polynomial must be monic".into());
         }
-        let t = self.op_matrix(&self.level, &orbits.op)?;
         let n = t.len();
         let mut primes: Vec<u64> = vec![];
         let mut attempts = 0usize;
@@ -138,12 +151,13 @@ impl Newspaces {
             let md = Modulus::new(p);
             let rows: Vec<Vec<u64>> = t.iter().map(|r| r.iter().map(|&x| md.from_i64(x)).collect()).collect();
             let tm = Mat::from_rows(&rows, md);
-            let key = (orbits.op.iter().map(|(q, c)| (q.hnf, *c)).collect::<Vec<_>>(), p);
-            let cached = self.charpoly_mod.lock().unwrap().get(&key).cloned();
+            sagebrush_interrupt::check();
+            let key = (key.clone(), p);
+            let cached = cache.lock().unwrap().get(&key).cloned();
             let data = match cached {
                 Some(f) => f,
                 None => {
-                    let mut cache = self.charpoly_mod.lock().unwrap();
+                    let mut cache = cache.lock().unwrap();
                     let used: usize = cache.values().map(|e| e.krylov.as_ref().map_or(0, |k| k.len() * n)).sum();
                     let krylov = if used + n * n <= budget {
                         let mut k = vec![u.clone()];
@@ -293,7 +307,7 @@ impl Newspaces {
             }
             let mut acc = vec![BigInt::zero(); n];
             for cg in g.iter().rev() {
-                acc = matvec(&t, &acc);
+                acc = matvec(t, &acc);
                 for i in 0..n {
                     acc[i] += cg * &w[i];
                 }
@@ -304,7 +318,7 @@ impl Newspaces {
             // the exact Krylov basis and the inverse on the pivot coordinates
             let mut krylov = vec![w];
             for _ in 1..d {
-                let next = matvec(&t, krylov.last().unwrap());
+                let next = matvec(t, krylov.last().unwrap());
                 krylov.push(next);
             }
             let pv = pivots.unwrap();
@@ -330,7 +344,15 @@ impl OrbitEigenspace {
     /// a_P = c(theta) for the operator T_P (U_P if P divides the level),
     /// proven by the identity T_P v = sum_j c_j T^j v checked in integers.
     pub fn eigenvalue(&self, ns: &Newspaces, p: &Prime) -> Result<Eigenvalue, String> {
-        let t = ns.hecke(&ns.level, p)?;
+        self.eigenvalue_from(&*ns.hecke(&ns.level, p)?)
+    }
+
+    /// a_P = c(theta) for a Hecke operator with matrix t on M_2(N) (one that
+    /// commutes with the separating operator), proven the same way.
+    pub fn eigenvalue_from(&self, t: &crate::HeckeMatrix) -> Result<Eigenvalue, String> {
+        if t.dim != self.krylov[0].len() {
+            return Err("the Hecke matrix is of another space".into());
+        }
         let n = self.krylov[0].len();
         let d = self.degree();
         // y = T_P v: in i128 when the Krylov basis is small (|v| < 2^62 and

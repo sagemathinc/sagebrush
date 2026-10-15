@@ -8,8 +8,8 @@ import { readFileSync } from "node:fs";
 // from test/special_mpmath_gen.py.  Each function's tolerance is a little
 // above the largest error measured in Sagebrush, as a fraction of
 // max(floor, |value|); the large ones are where the function's own
-// condition is large (|Im s| for zeta, |z|^2 for the error functions near
-// their growth, |x| for E1 and Ei), as the docstrings say.
+// condition is large (|Im s| for zeta, x^2 for the real erfi and erfcx
+// near their growth, |x| for E1 and Ei), as the docstrings say.
 const cases: [string, any[], any][] = JSON.parse(readFileSync(__dirname + "/../../test/special-mpmath.json", "utf8"));
 
 const program = `
@@ -54,7 +54,7 @@ const pair = (v: any): [number, number] => (Array.isArray(v) ? [num(v[0]), num(v
 const TOL: Record<string, [number, number, number?]> = {
   loggamma: [2e-14, 1], gamma: [6e-14, 1e-300], psi: [3e-15, 1], polygamma: [8e-15, 1e-300],
   zeta: [3e-14, 1, 2.5e-15], hurwitz_zeta: [3e-14, 1, 5e-15], beta: [3e-14, 1e-300], betaln: [1e-15, 1],
-  faddeeva: [4e-15, 1e-300], erf: [6e-15, 1e-300], erfc: [8e-15, 1e-300], erfi: [1.5e-13, 1e-300],
+  faddeeva: [1.5e-15, 1e-300], erf: [1.5e-15, 1e-300], erfc: [1.5e-15, 1e-300], erfi: [1.5e-13, 1e-300],
   erfcx: [6e-14, 1e-300], erfinv: [1e-15, 1e-300], erfcinv: [1e-15, 1e-300],
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
@@ -70,9 +70,17 @@ const besselFloor = (args: any[]): number => {
   return x > nu ? Math.sqrt(2 / (Math.PI * Math.max(1, x))) : 1e-300;
 };
 // (P's and Q's relative error grows with the size of their exponent, the
-// rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda):
-// it is measured per unit max(1, |log value|))
-const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled"]);
+// rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda),
+// and beta's with |betaln|, as exp(betaln) turns its absolute error into a
+// relative one: it is measured per unit max(1, |log |value||))
+const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled", "beta"]);
+// (betaln of negative arguments, through _betaln_signed's reflections: a
+// bound of its own, the positive arguments' staying as small as it is)
+const NEG_TOL: Record<string, number> = { betaln: 2.5e-15 };
+// (polygamma of orders above 20: a bound of its own, as Horner's rule over
+// P_n's n/2 terms and the recurrence's n-fold powers round in proportion to
+// n; 9574afa's values at these cases reach 2e-14 too)
+const HIGH_ORDER_TOL = 2.5e-14;
 
 test("lib/_special.py agrees with mpmath within each function's stated error", () => {
   const worst: Record<string, number> = {};
@@ -105,7 +113,17 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
     }
     const [gr, gi] = pair(g), [wr, wi] = pair(want);
     let e = Math.hypot(gr - wr, gi - wi) / Math.max(name === "besselj" ? besselFloor(args) : TOL[name][1], Math.hypot(wr, wi));
-    if (LOG_SCALED.has(name) && wr > 0) e /= Math.max(1, Math.abs(Math.log(wr)));
+    if (LOG_SCALED.has(name) && wr !== 0) e /= Math.max(1, Math.abs(Math.log(Math.abs(wr))));
+    if (name === "polygamma" && num(args[0]) > 20) {
+      const key = "polygamma (n > 20)";
+      worst[key] = Math.max(worst[key] ?? 0, e);
+      return;
+    }
+    if (name in NEG_TOL && args.some((a) => !Array.isArray(a) && num(a) < 0)) {
+      const key = name + " (negative arguments)";
+      worst[key] = Math.max(worst[key] ?? 0, e);
+      return;
+    }
     if (TOL[name][2] !== undefined && Array.isArray(args[0])) {
       const key = name + " (complex s, per unit |Im s|)";
       worst[key] = Math.max(worst[key] ?? 0, e / Math.max(1, Math.abs(num(args[0][1]))));
@@ -113,6 +131,13 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
     }
     worst[name] = Math.max(worst[name] ?? 0, e);
   });
+  assert.ok("polygamma (n > 20)" in worst, "polygamma (n > 20) has no cases");
+  assert.ok(worst["polygamma (n > 20)"] <= HIGH_ORDER_TOL, `polygamma (n > 20): ${worst["polygamma (n > 20)"]} > ${HIGH_ORDER_TOL}`);
+  for (const [name, tol] of Object.entries(NEG_TOL)) {
+    const key = name + " (negative arguments)";
+    assert.ok(key in worst, key + " has no cases");
+    assert.ok(worst[key] <= tol, `${key}: ${worst[key]} > ${tol}`);
+  }
   for (const name of Object.keys(TOL)) {
     assert.ok(name in worst, name + " has no cases");
     assert.ok(worst[name] <= TOL[name][0], `${name}: ${worst[name]} > ${TOL[name][0]}`);
@@ -202,6 +227,48 @@ print(S.gammainc(m, m), S.gammaincc(m, m), abs(S.gammainc_scaled(m, m) / r - 1) 
       S.gammainc_scaled(m, 0.9 * m, True), abs(S.gammainc_scaled(1.7e308, 1.79e308, True) * 0.09 / 1.7 - 1) < 4e-15,
       S.gammainc_scaled(1.7e308, 1.79e308), abs(S.gammainc_scaled(m, 0.3 * m) - 1 / 0.7) < 4e-15)
 print(kind(S.gammaincc, 1e307, 1e308))
+# (every series stops at its cap with NotCovered, never a silent value: each pushed outside the domain its caller keeps it in;
+# _polylog_mu's cap is not probed here, as reaching it takes exact Bernoulli numbers to B_248, some 18 s)
+print(" | ".join(kind(f, *a).split(" at ")[0] for f, a in [(S._erf_taylor, (30.0,)), (S._loggamma_near_2, (1.9,)), (S._psi_near_1, (1.9,)), (S._psi_near_2, (1.95,)),
+                                          (S._polylog_series, (2, 1 + 0j))]))
+# (arguments at the ends of the doubles, which raised OverflowError, ValueError or hung: each gives its value (checked
+# against mpmath), its limit beyond the doubles (inf, 0), or NotCovered)
+g = "%.12g"
+print(S.loggamma(1e308), S.gamma(complex(1, 1e308)), S.polygamma(1, 1e300), S.polygamma(5, complex(1, 1e308)), S.beta(0.5, 5e-324),
+      g % S.beta(-1.5, 1e308), S.beta(1e20, -1e308), g % S.beta(-2.5, 1e15), g % S.betaln(-1.5, 5e-324),
+      "%.12g%+.12gj" % (S.lambert_w(5e-324, -1).real, S.lambert_w(5e-324, -1).imag), S.hurwitz_zeta(1e300, 0.5), S.hurwitz_zeta(1e300, 1.0),
+      S.hurwitz_zeta(1e300, 2.0), g % S.dilog(complex(1, 1e-300)).real, g % S.beta(-3.0, 2.0))
+# (zeta near 0, @sagebrush-sage's report: the functional equation lost about eps/|s|, zeta(1e-16) was -0.4504 and
+# zeta(-1e-17) raised PoleError; now Euler-Maclaurin at s for |s| < 0.05.  mpmath's values at 30 digits)
+zref = [(1e-16, -0.50000000000000009189), (-1e-17, -0.49999999999999999081), (complex(1e-5, 1e-5), complex(-0.50000918938533004512, -9.1895859696938894166e-6)),
+        (0.03, -0.52849887255537702034), (-0.049, -0.45726839624509547995), (complex(-0.02, 0.03), complex(-0.48116447625400678751, -0.026374490214081654222)),
+        (5e-324, -0.5)]
+print([abs(S.zeta(z) - r) <= 3e-15 * abs(r) for z, r in zref], repr(S.zeta(1e-16)), repr(S.zeta(5e-324)))
+# (the error functions on the axes, exactly: erf(iy) = i erfi(y), erfi(iy) = i erf(y), erfc(iy) = 1 - i erfi(y), and on
+# the real axis their real values, each zero part with the argument's sign: @sagebrush-sage's report of erf(2i) =
+# 1.1e-16 + 18.56i and erfi(i) = 1.1e-19 + 0.84i)
+print(repr(S.erf(2j)), repr(S.erfi(1j)), repr(S.erfc(2j)), repr(S.erf(complex(-0.0, 2))), repr(S.erf(complex(1.5, -0.0))),
+      repr(S.erfi(complex(0.7, 0.0))), repr(S.erfc(complex(0.5, 0.0))))
+# (astra's CORR-957-2, the complex reciprocal: psi'(1e308 + 1e308i) = 1/w to within 1e-308, 5e-309 - 5e-309i, not 0j; and
+# the value-comparing sweep's: Gamma of a tiny negative x is -inf, not -0.0; erf next to 1e308 (1 + 1e-309i) and the
+# erfc whose phase there is beyond the doubles; E1 and erfcx near 1e308, subnormal, against mpmath's values)
+print(repr(S.polygamma(1, complex(1e308, 1e308))), repr(S.gamma(-5e-324)), repr(S.gamma(-1e-310)), repr(S.erf(complex(1e308, 1e308))),
+      repr(S.erfc(complex(-1e308, 1e308))), kind(S.erfc, complex(1e308, 1e308)).split(" at ")[0], kind(S.erf, complex(1e8, 2e8)).split(" at ")[0])
+sub = [(S.exp_integral_e1(1e308j), complex(-4.5339649050164911158e-309, 8.9130893768703339812e-309)),
+       (S.erfcx(complex(1e308, 1e308)), complex(2.8209479177387814038e-309, -2.8209479177387814038e-309))]
+print([abs(v - r) < 1e-321 for v, r in sub])
+# (astra's CORR-7E4-1 and 7E4-2, in the CLI: the reflection's overflowing terms (inf <= inf accepted nan + inf i), E1 of
+# a growing argument beyond the doubles (0j, as Sagebrush's cmath.log is inf there), and next to a zero of the dominant
+# terms, where the recurrence was off by 54 times the value: each refused)
+print(" | ".join(kind(S.polygamma, n, z).split(" at ")[0] for n, z in [(2, complex(-1, 1e-150)), (100, complex(-1, 0.01)),
+      (100, complex(-1e20, 0.01)), (100, complex(-0.5, 0.046793214736766446)), (100, complex(-0.5, 1.0000000000000002))]))
+print(" | ".join(kind(S.exp_integral_e1, z).split(" at ")[0] for z in [complex(-1.7e308, 1.7e308), complex(-1.7e308, -1.7e308)]),
+      repr(S.exp_integral_e1(complex(1.7e308, 1.7e308))))
+# (astra's review of 31f1ea2: E1 where e^-z overflows but e^-z/z does not, against mpmath at 400 digits; each was
+# refused as overflowing)
+e1ref = [(complex(-716, 1), complex(-6.8253476368320043e307, 1.0597220277097455e308)),
+         (complex(-1400, 1e300), complex(8.4132785550751173e307, 5.9188051048798075e307))]
+print([abs(S.exp_integral_e1(z) - r) <= 1e-13 * abs(r) for z, r in e1ref])
 # (Bessel J: its edges, the side of the cut for negative x, and what it does not cover)
 print(repr(S.besselj(0.0, 0.0)), repr(S.besselj(2.5, 0.0)), repr(S.besselj(-3.0, 0.0)), repr(S.besselj(1.0, inf)), "%.12gj" % S.besselj(0.5, -2.0).imag, repr(S.besselj(nan, 1.0)))
 print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-0.5, 1.0)), (S.besselj, (1.0, 1 + 2j)), (S.besselj, (inf, 1.0)), (S.besselj, (6e5, 6e5))]))
@@ -261,6 +328,27 @@ print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.bes
     "0.001 0.002002 inf 5e-324 1.0 1.0 1e-320",
     "0.5 0.5 True True True inf True inf True",
     "NotCovered: gammainc: the continued fraction overflowed at a = 1e+307, x = 1e+308",
+    "NotCovered: erf: the Taylor series did not converge | NotCovered: loggamma: the series about 2 did not converge | " +
+      "NotCovered: psi: the series about 1 did not converge | NotCovered: psi: the series about 2 did not converge | " +
+      "NotCovered: polylog: the series did not converge",
+    // (mpmath at 400 digits: B(-1.5, 1e308) = 2.36327180120735e462, beyond the doubles (30 digits round 1e308 - 1.5 to
+    // 1e308 and give 2.36); B(-2.5, 1e15) = -2.98932864874555e37, log B(-1.5, 2^-1074) =
+    // 744.440071921381, W_-1(2^-1074) = -751.061568323038 - 3.14578107543527i, Li_2(1 + 1e-300 i) = pi^2/6 + ...)
+    "inf 0j 1e-300 0j inf inf 0.0 -2.98932864875e+37 744.440071921 -751.061568323-3.14578107544j inf 1.0 0.0 1.64493406685 0.166666666667",
+    "[True, True, True, True, True, True, True] -0.5000000000000001 -0.5",
+    // (mpmath: erfi(2) = 18.5648024145755526, erf(1) = 0.842700792949714869)
+    "18.564802414575553j 0.8427007929497149j (1-18.564802414575553j) (-0+18.564802414575553j) (0.9661051464753108-0j) " +
+      "(0.9402829338335074+0j) (0.4795001221869535-0j)",
+    "(5e-309-5e-309j) -inf -inf (1-0j) (2-0j) NotCovered: erfc: the phase of e^(-z^2) is beyond the doubles " +
+      "NotCovered: erf, erfc, erfi: |e^(-z^2)| is beyond the doubles",
+    "[True, True]",
+    "NotCovered: polygamma: |psi^(n)(z)| is beyond the doubles here | NotCovered: polygamma: |psi^(n)(z)| is beyond the doubles here | " +
+      "NotCovered: polygamma: Sagebrush covers Re z >= -1e6 when |Im z| < 1 | " +
+      "NotCovered: polygamma: the recurrence cancels beyond the doubles' accuracy | " +
+      "NotCovered: polygamma: the reflection cancels beyond the doubles' accuracy",
+    "NotCovered: exp_integral_e1: e^-z/z, E1's leading term, is beyond the doubles | " +
+      "NotCovered: exp_integral_e1: e^-z/z, E1's leading term, is beyond the doubles 0j",
+    "[True, True]",
     // (J_(1/2)(-2) = e^(i pi/2) J_(1/2)(2) = i sqrt(2/(2 pi)) sin 2 = 0.5130161365618278i)
     "1.0 0.0 -0.0 0.0 0.513016136562j nan",
     "NotCovered: besselj: Sagebrush covers negative orders only when they are integers " +
