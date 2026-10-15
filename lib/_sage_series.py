@@ -1217,6 +1217,9 @@ def O(x):
         R = x.parent()
         S = PowerSeriesRing(R.base_ring(), R.variable_name())
         return Series(S, 0, [], int(x.degree()))
+    if type(x).__name__ == "EisensteinExtensionElement":
+        # O(alpha^n): an inexact zero of the extension
+        return x.parent()(0).add_bigoh(x.valuation())
     if isinstance(x, (int, _F)) and not isinstance(x, bool):
         # O(p^n): an inexact zero of Zp(p) (Qp(p) for n < 0)
         from _sage_padic import _bigoh
