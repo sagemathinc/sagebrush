@@ -507,7 +507,19 @@ class Series:
         return all(not c for c in self._c)
 
     def __bool__(self):
-        return bool(self._c)
+        """False exactly when is_zero() (p-adic coefficients O(p^k) count as
+        0, as in Sage).
+
+        EXAMPLES::
+
+            sage: K = Qp(3, 5)
+            sage: S.<T> = K[[]]
+            sage: bool(K(0, 2) + K(0, 1)*T + O(T^3)), bool(K(0, 2) + K(1, 1)*T + O(T^3))
+            (False, True)
+            sage: R.<t> = QQ[[]]; bool(O(t^3)), bool(t)
+            (False, True)
+        """
+        return not self.is_zero()
 
     def is_unit(self):
         """Whether invertible in the power series ring.
