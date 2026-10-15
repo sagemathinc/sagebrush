@@ -52,7 +52,11 @@
 [data-sbb=title] input { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid rgba(0, 0, 0, .25); border-radius: 5px; padding: 1px 6px; background: #fff; }
 :where(.sbb, .sbb-layer) button { font: inherit; border: 1px solid rgba(0, 0, 0, .18); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 :where(.sbb, .sbb-layer) button:disabled { opacity: .4; cursor: default; }
-[data-sbb=hint] { color: #667; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* Help (B5): a ? in the top bar, but on a phone in ⋯ */
+[data-sbb=help] { font-weight: 600; min-width: 32px; }
+[data-sbb=helpdlg] ul { margin: 0 0 12px; padding-left: 20px; line-height: 1.5; }
+[data-sbb=helpdlg] h4 { margin: 10px 0 4px; font-size: 14px; }
+[data-sbb=helpdlg] kbd { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid rgba(0, 0, 0, .2); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: #fafaf7; }
 [data-sbb=edit][aria-pressed="true"] { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
 :where(.sbb, .sbb-layer) .menuwrap { position: relative; }
 :where(.sbb, .sbb-layer) .menu { position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); padding: 4px; display: flex; flex-direction: column; min-width: 200px; }
@@ -204,7 +208,7 @@
 .be-done { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
 .board-edge-editor select { font: inherit; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 4px 6px; background: #fff; }
 .board-edge-editor .be-rev.on { background: #eef2ea; border-color: #2a6f2f; }
-@media (max-width: 700px) { [data-sbb=hint] { display: none; } }
+@media (max-width: 600px) { [data-sbb=help] { display: none; } }
 [data-sbb=exdlg] { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; max-width: min(560px, calc(100% - 32px)); box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
 [data-sbb=exdlg] h3 { margin: 0 0 10px; }
 [data-sbb=exlist] a { display: block; padding: 8px 10px; margin: 0 -10px; border-radius: 8px; color: inherit; text-decoration: none; }
@@ -216,8 +220,8 @@
 [data-sbb=pages][hidden] { display: none; }
 [data-sbb=pgsel] { font: inherit; max-width: 34vw; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 3px 4px; background: #fff; }
 [data-sbb=pages] button { padding: 4px 8px; }
-:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(520px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
-:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) h3 { margin: 0 0 10px; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg], [data-sbb=helpdlg]) { border: 1px solid rgba(0, 0, 0, .15); border-radius: 12px; padding: 16px 18px; width: min(520px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, .2); }
+:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg], [data-sbb=helpdlg]) h3 { margin: 0 0 10px; }
 :is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) fieldset { border: 0; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 :is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
 :is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) fieldset:first-of-type label { flex-basis: 100%; }

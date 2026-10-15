@@ -162,11 +162,33 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
+<dialog data-sbb="helpdlg" aria-label="Using a board"><h3>Using a board</h3>
+<h4>Looking</h4><ul>
+<li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>0</kbd> or <kbd>Esc</kbd>: the whole board</li>
+<li>Drag the background to move about; <kbd>+</kbd> <kbd>−</kbd>, Ctrl and the wheel, or two fingers to zoom</li>
+<li><kbd>PageDown</kbd> <kbd>PageUp</kbd>: the next and previous page</li>
+<li><kbd>Ctrl</kbd>+<kbd>F</kbd> (<kbd>⌘</kbd><kbd>F</kbd>): find words in the board</li>
+</ul>
+<h4>Editing (✎ Edit)</h4><ul>
+<li>Drag an item to move it, into a group or out of one</li>
+<li>Double-click an item to write in it; the background, to add a note there; an edge, to label it</li>
+<li>Shift-drag from one note to another to connect them</li>
+<li>Shift-click to select several, or shift-drag a rectangle over the background; <kbd>Ctrl</kbd>+<kbd>A</kbd>: everything</li>
+<li>The arrow keys move what is selected (with Shift, ten at a time); <kbd>Delete</kbd> removes it; <kbd>Enter</kbd> writes in it</li>
+<li>A code item's <kbd>Shift</kbd>+<kbd>Enter</kbd> runs it, and what depends on it</li>
+<li><kbd>Ctrl</kbd>+<kbd>Z</kbd> (<kbd>⌘</kbd><kbd>Z</kbd>) undoes; with Shift, redoes</li>
+</ul>
+<h4>More</h4><ul>
+<li><a href="https://sagebrush.space/board-format.md" target="_blank" rel="noopener">The board format</a>: what a board's file holds, for people and agents writing one</li>
+<li><a href="https://sagebrush.space/articles/notebook/01-how-cells-run" target="_blank" rel="noopener">How cells run</a>: a board's code items run as a notebook's cells do</li>
+<li><a href="https://sagebrush.space/articles/" target="_blank" rel="noopener">All the articles</a></li>
+</ul>
+<form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
 <dialog data-sbb="pgdlg"><h3>Page</h3><form data-sbb="pgform" method="dialog">
@@ -724,6 +746,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     else if (e.key === "ArrowLeft") go(back);
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
     else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") go(() => step(-1));
+    else if (e.key === "?") help();
     else if (e.key === "PageDown") go(() => page(pageIx + 1));
     else if (e.key === "PageUp") go(() => page(pageIx - 1));
     else if (e.key === "+" || e.key === "=") board.zoomAt(1.25, board.el.clientWidth / 2, board.el.clientHeight / 2);
@@ -836,7 +859,6 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
   offs.push(effect(() => {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
-    $("hint").hidden = !editor.editing.value;
     root.classList.toggle("sbb-editing", editor.editing.value);
     // (Find's bar under the Edit toolbar, once it is shown or gone)
     requestAnimationFrame(placeFind);
@@ -887,6 +909,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   on(window, "click", () => { for (const [, m] of menus) m.hidden = true; });
   // (foo.board.json: the board's file, canonical JSON)
   const fileName = () => ((doc?.title ?? "board").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "board") + ".board.json";
+  // Help: what the keys and gestures do, and where to read more (the ? in
+  // the top bar, ⋯'s Help, or ?), where the hint once was (William's B5)
+  const help = () => { const h = $("helpdlg") as HTMLDialogElement; if (!h.open) h.showModal(); };
+  $("help").onclick = help;
+  $("helpitem").onclick = help; // (the menu closes, as at any click)
   $("examples").onclick = async () => {
     const list = $("exlist");
     try {
