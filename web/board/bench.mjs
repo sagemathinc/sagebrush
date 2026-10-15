@@ -62,7 +62,7 @@ try {
 } finally {
   ws.close();
   chrome.kill();
-  try { rmSync(profile, { recursive: true, force: true }); } catch {}
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
 // budgets (design/board.md): 60 fps (the render's own work well under a
 // frame: 8 ms at the 95th percentile, so the browser has the rest), first
