@@ -135,6 +135,25 @@ points["ellipj"] = points["ellipj"] + [(random.choice((1, -1)) * LU(1e-300, 1e-2
     (random.choice((1, -1)) * LU(1e3, 1.7e308), random.choice((U(0, 1), 1 - LU(1e-16, 0.1)))) for _ in range(30)] + [
     (314159265358979328.0, 0.9999999990686774)]
 
+# (the regularized incomplete gamma functions P and Q: every region of
+# lib/_special.py's (series, continued fraction, Gautschi's small-x Q,
+# Temme's expansion for large a near x) and the boundaries between them;
+# drawn last, so that the cases above stay as they were)
+_gi = ([(LU(1e-6, 1e4), None) for _ in range(60)] + [(LU(12, 1e6), "near") for _ in range(40)]
+       + [(LU(1e-8, 2), "small") for _ in range(30)])
+_gi_pts = []
+for a, kind in _gi:
+    if kind is None:
+        x = a * LU(0.05, 20)
+    elif kind == "near":
+        x = a * (1 + U(-0.4, 0.4))
+    else:
+        x = LU(1e-6, 1.5)
+    _gi_pts.append((a, x))
+_gi_pts += [(a, x) for a in (0.5, 1.0, 1.5, 11.9, 12.0, 15.0, 100.0) for x in (0.2, 0.26, 1.5, 1.6, a + 0.25, a * 0.6, a * 1.6)]
+points["gammainc"] = _gi_pts
+points["gammaincc"] = list(_gi_pts)
+
 
 def ferrers_column(n, x):
     with mp.workdps(80):
@@ -177,6 +196,22 @@ def ellipj_ref(u, m):
         return [float(mp.ellipfun(f, mp.mpf(u), m=mp.mpf(m))) for f in ("sn", "cn", "dn")]
 
 
+def _gammainc_ref(a, x, upper):
+    a, x = mp.mpf(a), mp.mpf(x)
+    with mp.workdps(80):
+        if x < a:
+            # (P = x^a e^-x / Gamma(a+1) 1F1(1; a+1; x), DLMF 8.7.1 and 13.2.2)
+            p = mp.exp(a * mp.log(x) - x - mp.loggamma(a + 1)) * mp.hyp1f1(1, a + 1, x, maxterms=10 ** 7)
+            return 1 - p if upper else p
+        try:
+            q = mp.gammainc(a, x, mp.inf, regularized=True)
+        except mp.libmp.libhyper.NoConvergence:
+            # (then 1 - P from the series, with digits enough for Q's size)
+            with mp.workdps(400):
+                q = 1 - mp.exp(a * mp.log(x) - x - mp.loggamma(a + 1)) * mp.hyp1f1(1, a + 1, x, maxterms=10 ** 7)
+        return q if upper else 1 - q
+
+
 def faddeeva(z):
     z = mp.mpc(z)
     return mp.exp(-z * z) * mp.erfc(-1j * z)
@@ -198,6 +233,7 @@ ref = {
     "ellipk": mp.ellipk, "ellipe": mp.ellipe,
     "ellipj": lambda u, m: ellipj_ref(u, m),
     "legendre_all": legendre_all,
+    "gammainc": lambda a, x: _gammainc_ref(a, x, False), "gammaincc": lambda a, x: _gammainc_ref(a, x, True),
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}
