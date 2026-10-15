@@ -33,6 +33,8 @@ pub struct EcMap {
     pub x: Vec<BigInt>,
     /// the primes q whose Hecke relations were checked
     pub hecke_primes: Vec<u64>,
+    /// X on the closed cycles: X(H_1(X_0(N), Z)) = cycles * Z (cycles.rs)
+    pub cycles: BigInt,
 }
 
 fn kernel_mod(rows: &[Vec<u64>], d: usize, p: u64) -> Vec<Vec<u64>> {
@@ -200,7 +202,9 @@ pub fn ec_map(n: u64, aps: &[(u64, i64)]) -> Result<EcMap, String> {
                 }
                 if verify(&pres, &x, qs) {
                     all_eigenvalues_match(&pres, &x, &aps, p0, sturm)?;
-                    return Ok(EcMap { n, p1: P1List::new(n), x, hecke_primes: qs.iter().map(|e| e.0).collect() });
+                    let p1 = P1List::new(n);
+                    let cycles = crate::cycles::cycle_content(&p1, &x);
+                    return Ok(EcMap { n, p1, x, hecke_primes: qs.iter().map(|e| e.0).collect(), cycles });
                 }
             }
             last = Some(rec);
@@ -381,6 +385,33 @@ mod tests {
         b[0].1 += 1;
         assert!(ec_map(37, &b).is_err());
         assert!(ec_map(37, &aps([0, 0, 1, -1, 0], 37)).is_ok());
+    }
+
+    /// X(H_1(X_0(N), Z)) = cycles * Z: every {0, b/d} with gcd(d, N) = 1
+    /// is a closed path, so its value is a multiple of the generator, and
+    /// the multiples found reach the generator itself (gcd 1).  For 11a1
+    /// the lattice is 5Z in X's units, (1/2)Z for Sage's normalization.
+    #[test]
+    fn closed_paths_lie_in_the_cycle_lattice() {
+        for (a, n) in [([0, -1, 1, -10, -20], 11u64), ([0, 0, 1, -1, 0], 37), ([1, 0, 1, 4, -6], 14), ([0, 1, 1, -2, 0], 389)] {
+            let m = ec_map(n, &aps(a, n)).unwrap();
+            assert!(!m.cycles.is_zero());
+            let mut g = BigInt::zero();
+            for d in 1..60i64 {
+                if crate::p1::gcd(d as u64, n) != 1 {
+                    continue;
+                }
+                for b in 0..d {
+                    if crate::p1::gcd(b as u64, d as u64) == 1 {
+                        let v = m.eval(b, d);
+                        assert!((&v % &m.cycles).is_zero(), "{}: {}/{}", n, b, d);
+                        g = gcd_big(&g, &v);
+                    }
+                }
+            }
+            assert_eq!(g, m.cycles, "{}", n);
+        }
+        assert_eq!(ec_map(11, &aps([0, -1, 1, -10, -20], 11)).unwrap().cycles, BigInt::from(5));
     }
 
     /// Bad pairs are refused before any modular work: q = 2^30 (heilbronn's
