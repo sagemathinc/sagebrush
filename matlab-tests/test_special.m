@@ -1,4 +1,4 @@
-% psi, beta, betaln, erfcx, erfinv, erfcinv and expint: the examples on
+% psi, beta, betaln, erfcx, erfinv, erfcinv, expint and gammainc: the examples on
 % their documentation pages and values across their ranges, to 10
 % significant digits (the last digits of special functions differ between
 % implementations; test/matlab.test.ts checks the precision, and the
@@ -18,6 +18,14 @@ p(expint([1e-8 0.5 3 30 -0.5 -3 -30 Inf -Inf]));
 p(expint([1+1i; -2-0.1i; 0.5i; -40+20i; 100; 3-700i]));
 p(beta(0, 0)); p(beta(0, 2)); p(betaln(0, 2)); p(expint(0)); p(psi(0));
 fprintf('%s %s %s %s\n', class(psi(single(2))), class(beta(single(2), 3)), class(erfinv(single(0.5))), class(expint(single(-1))));
+% gammainc: lower, upper and scaled, across the regions, and at 0
+p(gammainc([0.05 0.5 1 2 5 10], 2)); p(gammainc([0.05 0.5 1 2 5 10], 2, 'upper'));
+p(gammainc([1e-4 0.3 1.5 3], 1e-3)); p(gammainc([1e-4 0.3 1.5 3], 1e-3, 'upper'));
+p(gammainc([90 100 110], 100)); p(gammainc([90 100 110], 100, 'upper')); p(gammainc(1e4 + [-100 0 100], 1e4));
+p(gammainc([0.01 0.5 3], 1.5, 'scaledlower')); p(gammainc([0.5 3 30], 1.5, 'scaledupper'));
+p(gammainc([0 1 Inf], 2)); p(gammainc(0, [0 1])); p(gammainc([2; 7], [1.5; 6]));
+p(gammainc(700, 50, 'upper')); p(gammainc(1e-3, 30));
+fprintf('%s\n', class(gammainc(single(1), 2)));
 p(double(psi(single(0.3))));
 
 function p(x)

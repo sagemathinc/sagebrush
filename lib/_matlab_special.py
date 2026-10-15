@@ -1,4 +1,4 @@
-"""MATLAB's special functions psi, beta, betaln, erfcx, erfinv, erfcinv,
+"""MATLAB's special functions psi, beta, betaln, gammainc, erfcx, erfinv, erfcinv,
 expint, ellipke, ellipj and legendre, for lib/_matlab.py: thin wrappers that give the numerics in
 lib/_special.py (shared with Sagebrush's scipy.special and Sage) MATLAB's
 argument rules, classes and values at the poles, as the functions'
@@ -136,6 +136,48 @@ def _betaln_value(z, w):
 
 _binary("beta", _beta_value)
 _binary("betaln", _betaln_value)
+
+
+# ------------------------------------------------------------------ gammainc
+
+_GAMMAINC_TYPES = {"lower": (False, False), "upper": (True, False), "scaledlower": (False, True), "scaledupper": (True, True)}
+
+
+@_bi("gammainc")
+def gammainc_(nargout, *args):
+    """Y = gammainc(X, A), gammainc(X, A, type): the regularized lower
+    incomplete gamma function P(x, a) (type 'lower', the default), the upper
+    one Q(x, a) ('upper', computed directly, so accurate where it is small),
+    or either times Gamma(a + 1) e^x / x^a ('scaledlower', 'scaledupper'),
+    as the documentation page describes them.  X and A real, A
+    nonnegative, the same size or one of them a scalar; lib/_special.py's
+    gammainc (DLMF chapter 8, Gautschi's regions, Temme's uniform
+    expansion).  P(x, 0) = 1.  Sagebrush does not compute negative X (the
+    page's values there are complex) or infinite A"""
+    if not 2 <= len(args) <= 3:
+        raise _err("Too many input arguments." if len(args) > 3 else "Not enough input arguments.")
+    kind = "lower"
+    if len(args) == 3:
+        if not _m._istext(args[2]) or _m._text(args[2]).lower() not in _GAMMAINC_TYPES:
+            raise _err("gammainc: type must be 'lower', 'upper', 'scaledlower' or 'scaledupper'.")
+        kind = _m._text(args[2]).lower()
+    upper, scaled = _GAMMAINC_TYPES[kind]
+    (X, cx), (A, ca) = _values("gammainc", args[0]), _values("gammainc", args[1])
+    _real("gammainc", X, "X")
+    _real("gammainc", A, "A", True)
+    if X.size and np.any(X < 0):
+        raise _err("gammainc: Sagebrush does not compute negative X (the incomplete gamma function's values there are complex).")
+    if A.size and np.any(np.isinf(A)):
+        raise _err("gammainc: Sagebrush does not compute infinite A.")
+    if X.size != 1 and A.size != 1 and X.shape != A.shape:
+        raise _err("gammainc: X and A must be the same size, or one of them a scalar.")
+    Xb, Ab = np.broadcast_arrays(X, A)
+    try:
+        flat = [_sf._gammainc1(float(a), float(x), upper=upper, scaled=scaled) for x, a in zip(Xb.reshape(-1), Ab.reshape(-1))]
+    except ValueError as e:
+        raise _err("gammainc: %s." % str(e).split(": ", 1)[-1])
+    r = np.array(flat if flat else [], dtype=float).reshape(Xb.shape)
+    return _m._finish(r, "single" if "single" in (cx, ca) else "double")
 
 
 # ------------------------------------------------------------------ error functions
