@@ -339,10 +339,20 @@ export function bindMethod(f: any, self: any): any {
   return m;
 }
 
+// The __call__ of f's type when it is not a function, bound as CPython's
+// call slot binds it: through its own type's __get__(c, f, type(f)) when
+// that exists (a classmethod, property or descriptor), else c itself
+// (None then raises TypeError when called).
+function callSlot(c: any, f: any): any {
+  if (c === null) return null;
+  const get = lookupType(typeOf(c), "__get__");
+  return get !== undefined ? callObj(get, [c, f, typeOf(f)]) : c;
+}
+
 export function callObj(f: any, args: any[]): any {
   if (typeof f === "function") return f(...args);
   const c = lookupType(typeOf(f), "__call__");
-  if (c !== undefined) return c(f, ...args);
+  if (c !== undefined) return typeof c === "function" ? c(f, ...args) : callObj(callSlot(c, f), args);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
@@ -354,7 +364,7 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
     raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
   }
   const c = lookupType(typeOf(f), "__call__");
-  if (c !== undefined) return callKw(c, [f, ...pos], names, values);
+  if (c !== undefined) return typeof c === "function" ? callKw(c, [f, ...pos], names, values) : callKw(callSlot(c, f), pos, names, values);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 

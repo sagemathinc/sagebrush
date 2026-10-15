@@ -167,3 +167,439 @@ l = [1]; m = l
 l += (2, 3)
 l *= 2
 print(l, l is m)
+
+# A special method set to None, or to a callable that is not a function:
+# None raises TypeError ('NoneType' object is not callable; for __contains__
+# and __iter__ the operation is unavailable), a callable instance is called
+# without self, as CPython does
+class Called:
+    def __call__(self, *a):
+        return ("called", len(a))
+
+
+class Dunders:
+    __add__ = Called()
+    __iadd__ = Called()
+    __neg__ = Called()
+
+
+class Nones(list):
+    __iadd__ = None
+    __imul__ = None
+
+
+class NoneOps:
+    __add__ = None
+    __isub__ = None
+    __neg__ = None
+    __eq__ = None
+    __lt__ = None
+    __len__ = None
+    __contains__ = None
+    __iter__ = None
+
+    def __getitem__(self, i):
+        return i
+
+
+def attempt(f):
+    try:
+        return f()
+    except TypeError as e:
+        return "TypeError: %s" % e
+
+
+def iadd(a, b):
+    a += b
+    return a
+
+
+def imul(a, b):
+    a *= b
+    return a
+
+
+def isub(a, b):
+    a -= b
+    return a
+
+
+d = Dunders()
+print(d + 1, iadd(Dunders(), 1), -d)
+n = NoneOps()
+for f in (lambda: iadd(Nones([1]), [2]), lambda: imul(Nones([1]), 2), lambda: n + 1, lambda: isub(NoneOps(), 1),
+          lambda: -n, lambda: n == 1, lambda: n < 1, lambda: len(n), lambda: 1 in n, lambda: list(n)):
+    print(attempt(f))
+
+# (review) reflected priority sees an inherited None or shared callable as
+# not overridden; descriptors are looked up at each call; getters and
+# __call__ are called as Python calls objects
+class Hook:
+    def __call__(self, other):
+        return "right"
+
+
+class LeftNone:
+    def __add__(self, other):
+        return 42
+
+    def __mul__(self, other):
+        return 43
+
+    __radd__ = None
+    __rmul__ = None
+
+
+class RightNone(LeftNone):
+    pass
+
+
+class LeftHook:
+    def __add__(self, other):
+        return "left"
+
+    __radd__ = Hook()
+
+
+class RightHook(LeftHook):
+    pass
+
+
+class RightOwn(LeftHook):
+    __radd__ = Hook()
+
+
+print(LeftNone() + RightNone(), LeftNone() * RightNone(), LeftHook() + RightHook(), LeftHook() + RightOwn())
+
+
+class Desc:
+    def __get__(self, obj, cls):
+        return lambda other: "old"
+
+
+class UsesDesc:
+    __add__ = Desc()
+
+
+u = UsesDesc()
+seen = [u + 1]
+Desc.__get__ = lambda self, obj, cls: lambda other: "new"
+seen.append(u + 1)
+del Desc.__get__
+seen.append(attempt(lambda: u + 1))
+Desc.__get__ = lambda self, obj, cls: lambda other: "added"
+seen.append(u + 1)
+print(seen)
+
+
+class Getter:
+    def __call__(self, desc, obj, cls):
+        return lambda other: 99
+
+
+class G1:
+    __get__ = Getter()
+
+
+class G2:
+    __get__ = staticmethod(lambda desc, obj, cls: lambda other: 98)
+
+
+class G3:
+    __get__ = None
+
+
+class UsesG:
+    __add__ = G1()
+    __sub__ = G2()
+    __mul__ = G3()
+
+
+g = UsesG()
+print(g + 1, g - 1, attempt(lambda: g * 1))
+
+
+class CallNone:
+    __call__ = None
+
+
+class UsesCallNone:
+    __neg__ = CallNone()
+
+
+class BoolNone:
+    __bool__ = None
+
+
+print(attempt(lambda: -UsesCallNone()), attempt(lambda: bool(BoolNone())), attempt(lambda: abs(object())), attempt(lambda: -object()))
+
+# (review) the override test is CPython's optional class-attribute lookup
+# (an AttributeError from a class-level __get__ means absent; a metaclass
+# __getattribute__ is used), it runs before the methods are fetched, and a
+# non-function __call__ is bound through its own __get__
+class Hidden:
+    def __get__(self, obj, cls):
+        if obj is None:
+            raise AttributeError("hidden")
+        return lambda other: 99
+
+
+class HA:
+    def __add__(self, other):
+        return 42
+
+
+class HB(HA):
+    __radd__ = Hidden()
+
+
+class MetaNone(type):
+    def __getattribute__(cls, name):
+        if name == "__radd__":
+            return None
+        return type.__getattribute__(cls, name)
+
+
+class MA(metaclass=MetaNone):
+    def __add__(self, other):
+        return "left"
+
+    def __radd__(self, other):
+        return "base"
+
+
+class MB(MA):
+    def __radd__(self, other):
+        return "right"
+
+
+class Swap:
+    def __call__(self, other):
+        return "right"
+
+    def __ne__(self, other):
+        SA.__add__ = lambda self, other: "new"
+        return False
+
+
+class SA:
+    __radd__ = Swap()
+
+    def __add__(self, other):
+        return "old"
+
+
+class SB(SA):
+    __radd__ = Swap()
+
+
+print(HA() + HB(), MA() + MB(), SA() + SB())
+
+
+class CallClass:
+    __call__ = classmethod(lambda cls, *a, **k: (cls.__name__, a, k))
+
+
+class CallProp:
+    __call__ = property(lambda self: lambda *a, **k: ("prop", a, k))
+
+
+class CallStatic:
+    __call__ = staticmethod(lambda *a, **k: ("static", a, k))
+
+
+print(CallClass()(1, k=2), CallProp()(1, k=2), CallStatic()(1, k=2), staticmethod(lambda **k: k)(k=3))
+
+
+# sagebrush-astra on 866d675: __get__ added to the attribute's type after
+# the override test has seen it (CORR-866-1: distinct, shared, inherited
+# attributes), and a metaclass __getattribute__/__getattr__ that is not a
+# plain function, bound through its __get__ (CORR-866-2).
+def _rget(label, f):
+    try:
+        return f()
+    except Exception as e:
+        return label + ":" + type(e).__name__
+
+
+class GHook:
+    def __call__(self, other):
+        return "raw right"
+
+
+class GA:
+    __radd__ = GHook()
+
+    def __add__(self, other):
+        return "left"
+
+
+class GB(GA):
+    __radd__ = GHook()
+
+
+class GHook2:
+    def __call__(self, other):
+        return "raw right"
+
+    def __eq__(self, other):
+        return False
+
+    def __ne__(self, other):
+        return True
+
+    __hash__ = object.__hash__
+
+
+_gh = GHook2()
+
+
+class GC:
+    __radd__ = _gh
+
+    def __add__(self, other):
+        return "left"
+
+
+class GD(GC):
+    __radd__ = _gh
+
+
+class GHook3:
+    def __call__(self, other):
+        return "raw right"
+
+
+class GE:
+    __radd__ = GHook3()
+
+    def __add__(self, other):
+        return "left"
+
+
+class GF(GE):
+    pass
+
+
+_before = [GA() + GB(), GC() + GD(), GE() + GF()]
+GHook.__get__ = lambda self, obj, cls: (lambda other: "bound right") if obj is not None else None
+GHook2.__get__ = lambda self, obj, cls: (lambda other: "bound right") if obj is not None else self
+GHook3.__get__ = lambda self, obj, cls: (lambda other: "bound right") if obj is not None else object()
+_after = [GA() + GB(), GC() + GD(), GE() + GF()]
+del GHook.__get__
+print(_before, _after, GA() + GB())
+
+
+def _meta_pair(hook, name="__getattribute__", base=type):
+    class Meta(base):
+        pass
+
+    class A(metaclass=Meta):
+        def __add__(self, other):
+            return "left"
+
+        def __radd__(self, other):
+            return "base right"
+
+    class B(A):
+        def __radd__(self, other):
+            return "right"
+
+    setattr(Meta, name, hook)
+    return _rget("meta", lambda: A() + B())
+
+
+class _NoAttrMeta(type):
+    def __getattribute__(cls, name):
+        raise AttributeError(name)
+
+
+_seen = []
+
+
+class _Getter:
+    def __call__(self, *a):
+        _seen.append(len(a))
+        return object()
+
+
+print(
+    _meta_pair(staticmethod(lambda name: object())),
+    _meta_pair(classmethod(lambda mcls, name: _seen.append(mcls.__name__) or object())),
+    _meta_pair(_Getter()),
+    _meta_pair(staticmethod(lambda name: "same"), "__getattr__", _NoAttrMeta),
+    _seen,
+)
+
+
+# A metaclass with only __getattr__ (type's own __getattribute__): the
+# override test falls back to it, and an error other than AttributeError
+# propagates (astra's category (b) on 866d675).
+def _getattr_only(mode):
+    log = []
+
+    class Meta(type):
+        def __getattr__(cls, name):
+            if name == "__radd__":
+                log.append(cls.__name__)
+                if mode == "hide":
+                    raise AttributeError(name)
+                if mode == "value":
+                    raise ValueError("visible")
+                if mode == "mutation":
+                    A.__add__ = lambda s, o: "new left"
+                return cls.__name__
+            raise AttributeError(name)
+
+    class A(metaclass=Meta):
+        def __add__(self, other):
+            return "left"
+
+    class B(A):
+        pass
+
+    return _rget(mode, lambda: A() + B()), log
+
+
+print([_getattr_only(m) for m in ["different", "hide", "value", "mutation"]])
+
+
+# The attribute object's own type changing after the override test has
+# seen it (astra's CORR-3DF-1 on 3df3bc0): a.__class__ = Descriptor, and back.
+class RPlain:
+    def __call__(self, other):
+        return "raw right"
+
+
+class RDesc:
+    def __call__(self, other):
+        return "raw right"
+
+    def __get__(self, obj, cls):
+        return None if obj is None else (lambda other: "bound right")
+
+
+_ra, _rb = RPlain(), RPlain()
+
+
+class RA:
+    __radd__ = _ra
+
+    def __add__(self, other):
+        return "left"
+
+
+class RB(RA):
+    __radd__ = _rb
+
+
+_seq = [RA() + RB()]
+_ra.__class__ = RDesc
+_rb.__class__ = RDesc
+_seq.append(RA() + RB())
+_ra.__class__ = RPlain
+_rb.__class__ = RPlain
+_seq.append(RA() + RB())
+_rb.__class__ = RDesc
+_seq.append(_rget("one", lambda: RA() + RB()))
+print(_seq)
