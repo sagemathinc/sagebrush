@@ -265,8 +265,16 @@ pub(crate) struct Budget {
     nodes: std::sync::atomic::AtomicU64,
 }
 
-/// Fincke-Pohst nodes for one computation.
-pub(crate) const MAX_NODES: u64 = 4_000_000_000;
+/// Fincke-Pohst nodes for one computation (a class set, or a Hecke
+/// operator), calibrated by measurement (the ignored test node_cost). In
+/// the worst case, where nearly every node is a leaf, a node costs about
+/// 420 ns natively and 1550 ns in wasm32-wasip1 (Node's WASI). So the
+/// budget runs out within about 1 s natively and 4 s in wasm. That is about
+/// 5 times the most any class set of the 121 fields with d <= 200 uses
+/// (475084 nodes, at d = 195). The searches also check the interrupt flag
+/// (the Stop button) every 4096 nodes, and the enumeration of classes once
+/// per neighbour.
+pub(crate) const MAX_NODES: u64 = 2_500_000;
 /// Vectors kept by one search.
 const MAX_RESULTS: usize = 100_000;
 /// Bits of the entries of a Gram matrix given to the exact LLL.
@@ -282,6 +290,9 @@ impl Budget {
     fn put(&self, n: u64) {
         self.nodes.store(n, std::sync::atomic::Ordering::Relaxed);
     }
+    fn left(&self) -> u64 {
+        self.nodes.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 /// Tr_{F/Q} of an element of F, as a rational.
@@ -289,91 +300,184 @@ fn trace_q(f: &QuadField, x: &QFrac) -> Rat {
     Rat::new(&x.a * BigInt::from(2) + &x.b * BigInt::from(f.t), x.den.clone())
 }
 
-/// The vectors x != 0 of the lattice with basis `basis` with
-/// Tr_{F/Q}(nrd(x) mu) <= bound (mu totally positive), passed to `keep`;
-/// the search stops at the first x that `keep` accepts if `first`.
-fn short_vectors(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64, first: bool, budget: &Budget, keep: &mut dyn FnMut(&BElt) -> bool) -> Result<Vec<BElt>, String> {
-    let f = alg.field();
-    // the Gram matrix of B(x, y) = Tr(trd(x conj y) mu), with Q(x) = B(x, x)/2
-    let mut gram = vec![vec![Rat::zero(); 8]; 8];
-    for s in 0..8 {
-        for t in s..8 {
-            let tr = alg.trd(&alg.mul(&basis[s], &alg.conj(&basis[t])));
-            let v = trace_q(f, &f.fmul(&tr, mu));
-            gram[s][t] = v.clone();
-            gram[t][s] = v;
-        }
-    }
-    let l = gram.iter().flatten().fold(BigInt::one(), |l, r| l.lcm(&r.den));
-    let ints: Vec<Vec<BigInt>> = gram.iter().map(|row| row.iter().map(|r| &r.num * (&l / &r.den)).collect()).collect();
-    let bound_l = BigInt::from(bound) * &l;
-    let c = ints.iter().flatten().fold(bound_l.clone(), |g, x| g.gcd(x));
-    let ints: Vec<Vec<BigInt>> = ints.iter().map(|row| row.iter().map(|x| x / &c).collect()).collect();
-    // reduce exactly first: the form can be very skewed (a large fundamental
-    // unit), beyond the floating-point LLL of theta.rs
-    let red = lll_exact(&ints)?;
-    let lim = BigInt::from(1i64 << 60);
-    let mut g = [[0i128; 8]; 8];
-    for s in 0..8 {
-        for t in 0..8 {
-            let v = dot(&ints, &red[s], &red[t]);
-            if v.abs() >= lim {
-                return Err("the reduced quadratic form is too large (unsupported)".into());
+/// A lattice search prepared exactly: the form Tr_{F/Q}(nrd(x) mu) on the
+/// lattice with basis `basis`, scaled to an integral Gram matrix g with
+/// v^T g v = 2 Q(x) L/c for x = sum v_s rb_s (rb the exactly reduced basis),
+/// and the search bound L bound/c.
+struct Search {
+    g: [[i128; 8]; 8],
+    b: Vec<[i128; 8]>,
+    rb: Vec<BElt>,
+    l: BigInt,
+    c: BigInt,
+    bound_c: i128,
+}
+
+impl Search {
+    fn new(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64) -> Result<Search, String> {
+        let f = alg.field();
+        // the Gram matrix of B(x, y) = Tr(trd(x conj y) mu), with Q(x) = B(x, x)/2
+        let mut gram = vec![vec![Rat::zero(); 8]; 8];
+        for s in 0..8 {
+            for t in s..8 {
+                let tr = alg.trd(&alg.mul(&basis[s], &alg.conj(&basis[t])));
+                let v = trace_q(f, &f.fmul(&tr, mu));
+                gram[s][t] = v.clone();
+                gram[t][s] = v;
             }
-            g[s][t] = v.to_i128().unwrap();
         }
-    }
-    let bound_c = (&bound_l / &c).to_i128().filter(|b| *b < 1 << 60).ok_or("the bound is too large (unsupported)")?;
-    // the reduced basis, as elements
-    let rb: Vec<BElt> = red
-        .iter()
-        .map(|v| {
-            let mut x = BElt::integral(std::array::from_fn(|_| BigInt::zero()));
-            for (s, vs) in v.iter().enumerate() {
-                if !vs.is_zero() {
-                    x = alg.add(&x, &BElt::new(basis[s].c.clone().map(|c| c * vs), basis[s].den.clone()));
+        let l = gram.iter().flatten().fold(BigInt::one(), |l, r| l.lcm(&r.den));
+        let ints: Vec<Vec<BigInt>> = gram.iter().map(|row| row.iter().map(|r| &r.num * (&l / &r.den)).collect()).collect();
+        let bound_l = BigInt::from(bound) * &l;
+        let c = ints.iter().flatten().fold(bound_l.clone(), |g, x| g.gcd(x));
+        let ints: Vec<Vec<BigInt>> = ints.iter().map(|row| row.iter().map(|x| x / &c).collect()).collect();
+        // reduce exactly first: the form can be very skewed (a large fundamental
+        // unit), beyond the floating-point LLL of theta.rs
+        let red = lll_exact(&ints)?;
+        let lim = BigInt::from(1i64 << 60);
+        let mut g = [[0i128; 8]; 8];
+        for s in 0..8 {
+            for t in 0..8 {
+                let v = dot(&ints, &red[s], &red[t]);
+                if v.abs() >= lim {
+                    return Err("the reduced quadratic form is too large (unsupported)".into());
                 }
+                g[s][t] = v.to_i128().unwrap();
             }
-            x
-        })
-        .collect();
-    let mut b: Vec<[i128; 8]> = (0..8)
-        .map(|s| {
-            let mut v = [0i128; 8];
-            v[s] = 1;
-            v
-        })
-        .collect();
-    crate::theta::lll(&mut b, &g);
-    let mut out = vec![];
-    let mut overflow = false;
-    let mut nodes = budget.take();
-    let done = crate::theta::enumerate_limited(&b, &g, bound_c, &mut nodes, &mut |v| {
+        }
+        let bound_c = (&bound_l / &c).to_i128().filter(|b| *b < 1 << 60).ok_or("the bound is too large (unsupported)")?;
+        // the reduced basis, as elements
+        let rb: Vec<BElt> = red
+            .iter()
+            .map(|v| {
+                let mut x = BElt::integral(std::array::from_fn(|_| BigInt::zero()));
+                for (s, vs) in v.iter().enumerate() {
+                    if !vs.is_zero() {
+                        x = alg.add(&x, &BElt::new(basis[s].c.clone().map(|c| c * vs), basis[s].den.clone()));
+                    }
+                }
+                x
+            })
+            .collect();
+        let mut b: Vec<[i128; 8]> = (0..8)
+            .map(|s| {
+                let mut v = [0i128; 8];
+                v[s] = 1;
+                v
+            })
+            .collect();
+        crate::theta::lll(&mut b, &g);
+        Ok(Search { g, b, rb, l, c, bound_c })
+    }
+
+    /// v^T g v = 2 Q L/c for the value Q = t, if it is an integer.
+    fn target(&self, t: i64) -> Option<i128> {
+        let n = BigInt::from(2 * t) * &self.l;
+        if (&n % &self.c).is_zero() {
+            (&n / &self.c).to_i128()
+        } else {
+            None
+        }
+    }
+
+    /// v^T g v exactly (in big integers if it does not fit i128).
+    fn value(&self, v: &[i128; 8]) -> BigInt {
+        let mut acc: Option<i128> = Some(0);
+        for i in 0..8 {
+            if v[i] == 0 {
+                continue;
+            }
+            for j in 0..8 {
+                acc = acc.and_then(|a| v[i].checked_mul(self.g[i][j]).and_then(|x| x.checked_mul(v[j])).and_then(|x| a.checked_add(x)));
+            }
+        }
+        match acc {
+            Some(a) => BigInt::from(a),
+            None => {
+                let mut s = BigInt::zero();
+                for i in 0..8 {
+                    for j in 0..8 {
+                        s += BigInt::from(v[i]) * BigInt::from(self.g[i][j]) * BigInt::from(v[j]);
+                    }
+                }
+                s
+            }
+        }
+    }
+
+    fn element(&self, alg: &QuatAlg, v: &[i128; 8]) -> BElt {
         let mut x = BElt::integral(std::array::from_fn(|_| BigInt::zero()));
         for (s, &vs) in v.iter().enumerate() {
             if vs != 0 {
-                let term = BElt::new(rb[s].c.clone().map(|c| c * BigInt::from(vs)), rb[s].den.clone());
-                x = alg.add(&x, &term);
+                x = alg.add(&x, &BElt::new(self.rb[s].c.clone().map(|c| c * BigInt::from(vs)), self.rb[s].den.clone()));
             }
         }
+        x
+    }
+
+    /// Runs Fincke-Pohst over the vectors with Q <= bound, passing each to
+    /// leaf with its exact value v^T g v, until leaf returns true; the nodes
+    /// come out of the budget, and running out is an error.
+    fn run(&self, budget: &Budget, leaf: &mut dyn FnMut(&[i128; 8], BigInt) -> bool) -> Result<(), String> {
+        let mut nodes = budget.take();
+        let done = crate::theta::enumerate_limited(&self.b, &self.g, self.bound_c, &mut nodes, &mut |v| leaf(v, self.value(v)));
+        budget.put(nodes);
+        if done.is_none() {
+            return Err("the lattice search exceeded its work budget (unsupported)".into());
+        }
+        Ok(())
+    }
+}
+
+/// The vectors x of the lattice with basis `basis` with Tr_{F/Q}(nrd(x) mu)
+/// = bound exactly (mu totally positive) that `keep` accepts; the search
+/// stops at the first one if `first`. Other vectors are rejected on their
+/// exact integral value, without being built.
+pub(crate) fn short_vectors(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64, first: bool, budget: &Budget, keep: &mut dyn FnMut(&BElt) -> bool) -> Result<Vec<BElt>, String> {
+    short_vectors_capped(alg, basis, mu, bound, first, budget, MAX_RESULTS, keep)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn short_vectors_capped(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64, first: bool, budget: &Budget, max_results: usize, keep: &mut dyn FnMut(&BElt) -> bool) -> Result<Vec<BElt>, String> {
+    let search = Search::new(alg, basis, mu, bound)?;
+    let Some(target) = search.target(bound) else { return Ok(vec![]) };
+    let target = BigInt::from(target);
+    let mut out = vec![];
+    let mut overflow = false;
+    search.run(budget, &mut |v, val| {
+        if val != target {
+            return false;
+        }
+        let x = search.element(alg, v);
         if keep(&x) {
             out.push(x);
-            if out.len() >= MAX_RESULTS {
+            if out.len() > max_results {
                 overflow = true;
                 return true;
             }
             return first;
         }
         false
-    });
-    budget.put(nodes);
-    if done.is_none() {
-        return Err("the lattice search exceeded its work budget (unsupported)".into());
-    }
+    })?;
     if overflow {
-        return Err(format!("a lattice search found more than {} vectors (unsupported)", MAX_RESULTS));
+        return Err(format!("a lattice search found more than {} vectors (unsupported)", max_results));
     }
     Ok(out)
+}
+
+/// The numbers of x in the lattice with Tr_{F/Q}(nrd(x) mu) = t for t = 1,
+/// ..., max, counted on their exact integral values (no element is built).
+fn form_counts(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, max: i64, budget: &Budget) -> Result<Vec<usize>, String> {
+    let search = Search::new(alg, basis, mu, max)?;
+    let targets: Vec<Option<BigInt>> = (1..=max).map(|t| search.target(t).map(BigInt::from)).collect();
+    let mut counts = vec![0usize; max as usize];
+    search.run(budget, &mut |_, val| {
+        if let Some(k) = targets.iter().position(|t| t.as_ref() == Some(&val)) {
+            counts[k] += 1;
+        }
+        false
+    })?;
+    Ok(counts)
 }
 
 /// u^T G v.
@@ -437,6 +541,9 @@ fn lll_exact(g: &[Vec<BigInt>]) -> Result<Vec<Vec<BigInt>>, String> {
     let mut steps = 0u64;
     while k < n {
         steps += 1;
+        if steps % 64 == 0 {
+            sagebrush_interrupt::check();
+        }
         if steps > 1_000_000 {
             return Err("internal error: LLL did not terminate".into());
         }
@@ -553,6 +660,7 @@ impl ClassSet {
                     done[i] += 1;
                     let ideal = set.classes[i].ideal.clone();
                     for j in set.neighbours(&ideal, &q, &e)? {
+                        sagebrush_interrupt::check();
                         let c = set.make_class(j)?;
                         if set.find(&c)?.is_none() {
                             sum = sum.add(&Rat::new(BigInt::one(), BigInt::from(c.weight())));
@@ -595,6 +703,10 @@ impl ClassSet {
     /// The mass 2^(1-n) zeta_F(-1) h_F, the sum of the 1/weights.
     pub fn mass(&self) -> &Rat {
         &self.mass
+    }
+    /// The Fincke-Pohst search nodes used (out of the budget).
+    pub fn work(&self) -> u64 {
+        MAX_NODES - self.budget.left()
     }
     /// The primes whose neighbours were used.
     pub fn primes(&self) -> &[QPrime] {
@@ -643,16 +755,9 @@ impl ClassSet {
         if units_one.is_empty() || (units_one.len() + units_eps.len()) % 2 != 0 {
             return Err("internal error: the unit group is inconsistent".into());
         }
+        let counts = form_counts(alg, left_order.basis(), &one, THETA as i64 + 2, &self.budget)?;
         let mut theta = [0usize; THETA];
-        short_vectors(alg, left_order.basis(), &one, THETA as i64 + 2, false, &self.budget, &mut |x| {
-            let t = trace_q(f, &alg.nrd(x));
-            if let Some(v) = t.num.to_usize().filter(|_| t.den.is_one()) {
-                if (3..THETA + 3).contains(&v) {
-                    theta[v - 3] += 1;
-                }
-            }
-            false
-        })?;
+        theta.copy_from_slice(&counts[2..THETA + 2]);
         Ok(IdealClass { ideal, left_order, units_one, units_eps, inverse: inv, theta })
     }
 
@@ -894,14 +999,32 @@ mod tests {
         assert!(short_vectors(o.alg(), o.basis(), &one, 40, false, &tiny, &mut |_| true).is_err());
         let ample = Budget::new(MAX_NODES);
         assert_eq!(short_vectors(o.alg(), o.basis(), &one, 2, false, &ample, &mut |x| o.alg().nrd(x) == one).unwrap().len(), 120);
-        // too many results is an error
-        assert!(short_vectors(o.alg(), o.basis(), &one, 400, false, &ample, &mut |_| true).unwrap_err().contains("more than"));
+        // more results than the cap is an error (the 120 units, cap 100)
+        assert!(short_vectors_capped(o.alg(), o.basis(), &one, 2, false, &ample, 100, &mut |_| true).unwrap_err().contains("more than 100"));
+        assert_eq!(short_vectors_capped(o.alg(), o.basis(), &one, 2, false, &ample, 120, &mut |_| true).unwrap().len(), 120);
         // the exact LLL refuses oversized input before reducing
         let mut g = vec![vec![BigInt::zero(); 8]; 8];
         for (i, row) in g.iter_mut().enumerate() {
             row[i] = BigInt::from(1) << 5000usize;
         }
         assert!(lll_exact(&g).unwrap_err().contains("too large"));
+    }
+
+    /// The time to exhaust a budget of NODES search nodes, for calibrating
+    /// MAX_NODES (run natively and in wasm32-wasip1).
+    #[test]
+    #[ignore]
+    fn node_cost() {
+        const NODES: u64 = 10_000_000;
+        let f = QuadField::new(5).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let one = QFrac::one();
+        let b = Budget::new(NODES);
+        let t = std::time::Instant::now();
+        let r = short_vectors(o.alg(), o.basis(), &one, 1 << 40, false, &b, &mut |_| false);
+        assert!(r.is_err());
+        let s = t.elapsed().as_secs_f64();
+        println!("{} nodes exhausted in {:.3} s ({:.1} ns per node)", NODES, s, s * 1e9 / NODES as f64);
     }
 
     #[test]

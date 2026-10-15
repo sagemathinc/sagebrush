@@ -75,3 +75,21 @@ fn dembele_voight_example_8_6() {
     }
     assert_eq!(seen.len(), 2);
 }
+
+#[test]
+#[ignore]
+fn work_used() {
+    // the search nodes used by each class set of the fixture (to calibrate
+    // the budget)
+    let mut max = (0u64, 0i64);
+    for l in include_str!("fixtures/magma-classes.txt").lines().filter(|l| !l.starts_with('#')) {
+        let d: i64 = l.split('|').next().unwrap().trim().parse().unwrap();
+        let t = std::time::Instant::now();
+        let cs = class_set(d);
+        println!("d = {}: H = {}, {} nodes, {:.2} s", d, cs.len(), cs.work(), t.elapsed().as_secs_f64());
+        if cs.work() > max.0 {
+            max = (cs.work(), d);
+        }
+    }
+    println!("max {} nodes at d = {}", max.0, max.1);
+}
