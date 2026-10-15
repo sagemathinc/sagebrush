@@ -773,7 +773,11 @@ impl MaximalOrder {
         let red = |x: &BElt| self.reduce_mod(x, m);
         // Step 1: an element with split separable characteristic polynomial
         let mut found = None;
+        // check_coarse in these loops: each step is tens of microseconds of
+        // quaternion arithmetic in big integers, and a splitting is built for
+        // every divisor space (daybreak's Stop measurements on a9598c6)
         for n in 1..6561u32 {
+            sagebrush_interrupt::check_coarse();
             let mut v = [0i128; 8];
             let mut t = n;
             for s in 0..8 {
@@ -794,6 +798,7 @@ impl MaximalOrder {
         // Step 2: Newton's iteration for eps^2 = eps
         let mut steps = 0;
         loop {
+            sagebrush_interrupt::check_coarse();
             let e2 = alg.mul(&eps, &eps);
             if self.in_pe(&ring, &alg.sub(&e2, &eps)) {
                 break;
@@ -823,6 +828,7 @@ impl MaximalOrder {
             .basis
             .iter()
             .map(|z| {
+                sagebrush_interrupt::check_coarse();
                 let zij = |i: usize, j: usize| self.trd_mod(&ring, &alg.mul(&alg.mul(rows[i], z), cols[j]));
                 [zij(0, 0), zij(0, 1), zij(1, 0), zij(1, 1)]
             })
@@ -836,6 +842,7 @@ impl MaximalOrder {
         }
         for (s, x) in self.basis.iter().enumerate() {
             for (t, y) in self.basis.iter().enumerate() {
+                sagebrush_interrupt::check_coarse();
                 let xy = self.coordinates(&alg.mul(x, y)).unwrap();
                 if sp.image(&xy) != mat_mul(r, &sp.images[s], &sp.images[t]) {
                     return Err("internal error: the splitting is not multiplicative".into());
