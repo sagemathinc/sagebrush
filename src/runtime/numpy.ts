@@ -787,22 +787,27 @@ function transpose(a: NDArray, axes: number[] | null): NDArray {
 type Bin = (x: number, y: number) => number;
 type CBin = (ar: number, ai: number, br: number, bi: number) => [number, number];
 
-// Python-semantics floor division and modulo for floats (as NumPy's npy_divmod).
+// Python-semantics floor division and modulo for floats (as NumPy's
+// npy_divmod).  (C's `if (mod)` is true for a nan, which JS's is not: the
+// tests are `!== 0`, so an infinite or nan operand gives nan, not 0.)
 function fdivmod(a: number, b: number): [number, number] {
   if (b === 0) return [a / b, NaN];
   let mod = a % b;
   let div = (a - mod) / b;
-  if (mod) {
+  if (mod !== 0) {
     if (b < 0 !== mod < 0) {
       mod += b;
       div -= 1;
     }
   } else mod = b < 0 ? -0 : 0;
   let floordiv: number;
-  if (div) {
+  if (div !== 0) {
     floordiv = Math.floor(div);
     if (div - floordiv > 0.5) floordiv += 1;
-  } else floordiv = (a / b < 0 ? -0 : 0);
+  } else {
+    const q = a / b; // (its sign: copysign(0, a / b), -0.0 included)
+    floordiv = q < 0 || Object.is(q, -0) ? -0 : 0;
+  }
   return [floordiv, mod];
 }
 
