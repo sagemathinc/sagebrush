@@ -665,10 +665,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // The reader's moves (the arrows, keys, the page picker), one after
   // another: one asked for while a page is still being drawn is made from
   // where that page lands, never from the old page's step (astra's
-  // UI-118-1); one still waiting as another document loads is dropped
-  let moving: Promise<unknown> = Promise.resolve(), waiting = 0;
+  // UI-118-1); one still waiting as another document loads (or a file is
+  // opened, or dropped) is dropped, and a new document's moves don't wait
+  // for the last one's (astra, on 3df6006)
+  let moving: Promise<unknown> = Promise.resolve(), waiting = 0, movesOf = 0;
   function go(move: () => unknown) {
     const g = loadGen;
+    if (movesOf !== g) { movesOf = g; moving = Promise.resolve(); waiting = 0; }
     const run = () => (g === loadGen && !destroyed ? move() : undefined);
     if (!waiting) {
       const r = run();
@@ -676,7 +679,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       moving = r;
     } else moving = moving.then(run);
     waiting++;
-    moving = moving.catch(fail).finally(() => waiting--);
+    moving = moving.catch(fail).finally(() => { if (movesOf === g) waiting--; });
   }
   /** What the caption says before a page's tour: its intro, or else its title, as text (friction 9). */
   function intro(): string | HTMLElement {
@@ -1128,6 +1131,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     pageIx = 0;
     newOutputs(true);
     writtenHere = host.store?.writtenHere?.(false) ?? false;
+    // (another document: what the last one was still drawing (a page, an
+    // edit) not shown over it, its reader's moves dropped, as for a load;
+    // astra, on 3df6006)
+    loadGen++;
     pageGen++;
     await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
     // (its own caption from its start: not the last document's intro and

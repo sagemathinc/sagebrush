@@ -6,7 +6,8 @@
 // /board/ has its own caption, not the welcome's (friction 7); and the
 // reader's moves made while a page is still being drawn are made in turn,
 // from where it lands, the caption, page, picker and address agreeing
-// (astra's UI-118-1).  Serve web/dist first (python3 web/serve.py 8765), then
+// (astra's UI-118-1), and none of them made, nor its page drawn, in another
+// document loaded or dropped meanwhile.  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-tour.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -160,6 +161,33 @@ try {
   await sleep(800);
   check(agrees(await state(), 0, -1, "X"), "another document loaded: from its start, no move of the last one made in it: " + JSON.stringify(await state()));
 
+  // another document (loaded, or a file dropped) while the last one's page
+  // is still drawn: that page not drawn over it, the last one's waiting
+  // move dropped, and the new one's moves not waiting for it (astra's
+  // replacement probe, on 3df6006)
+  {
+  const original={title:'Original',pages:[{title:'A',nodes:[note('a')],steps:[step('a')]},{title:'B',nodes:[note('b')],steps:[step('b'),step('b','2')]}]};
+  const replacement={title:'Replacement',pages:[{title:'X',intro:'Replacement intro',nodes:[note('x')],steps:[step('x')]},{title:'Y',nodes:[note('y')]}]};
+  const fullState=async()=>({...await state(), title:await ev(`${B}.snapshot().doc.title`),items:await ev(`${B}.snapshot().items.map(x=>x.id)`) });
+  const holdOne=()=>ev(`(async()=>{const im=(await import(new URL('board.js',location.href).href)).host.images;const old=im.ensure.bind(im); window.__releaseOne=null; im.ensure=(names)=>{im.ensure=old;return new Promise(ok=>window.__releaseOne=()=>old(names).then(ok))};return 1})()`);
+  const releaseOne=()=>ev('window.__releaseOne(),1');
+  for(const kind of ['api','drop']){
+    await load(original); await ev(`${B}.step(0)`);await at(0,0);
+    await holdOne();await right();await until('!!window.__releaseOne');await right();
+    await ev(unaddress);
+    if(kind==='api')await ev(`${B}.load(${JSON.stringify(replacement)}).then(()=>1)`);
+    else await ev(`(()=>{const dt=new DataTransfer();dt.items.add(new File([${JSON.stringify(JSON.stringify(replacement))}],'replacement.board.json',{type:'application/json'}));document.querySelector('.board-world').dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true,cancelable:true,clientX:300,clientY:300}));return 1})()`);
+    check(await until(`${B}.snapshot().doc.title==='Replacement'`),kind+' replacement appears before old transition releases');
+    await sleep(200);console.log(kind,'replacement shown',JSON.stringify(await fullState()));
+    if(kind==='api'){
+      await right(); await sleep(300);const pending=await fullState();console.log(kind,'new Right while old transition held',JSON.stringify(pending));
+      check(pending.step===0&&pending.say==='Step x', 'new document navigation is independent of the old pending transition');
+    }
+    await releaseOne();await sleep(700);const landed=await fullState();console.log(kind,'after release',JSON.stringify(landed));
+    check(landed.title==='Replacement'&&landed.items.includes('x'),kind+' replacement is not overwritten by old page rendering');
+    check(landed.page===0&&landed.step===(kind==='api'?0:-1),kind+' old queued move is dropped');
+  }
+  }
   check(!errors.length, "no errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
