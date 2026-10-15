@@ -533,6 +533,8 @@ class Matrix:
         # the number of columns, kept when there are no rows (a 0 x 3
         # matrix was 0 x 0: the systematic review's LIN-F4)
         self._nc = len(self._rows[0]) if self._rows else (ncols or 0)
+        # (a backstop: every path checks the shape before building rows)
+        _shape(len(self._rows), self._nc)
         if base is _sa().ZZ and any(not isinstance(x, int) for r in self._rows for x in r):
             raise TypeError("matrix entries are not all integers")
         self._base = base
@@ -795,7 +797,8 @@ class Matrix:
         if right.nrows() != self.nrows():
             raise TypeError("number of rows must be the same, %d != %d" % (self.nrows(), right.nrows()))
         base = self._base if self._base is right._base else _sa().QQ
-        m = Matrix(base, [list(r) + list(t) for r, t in zip(self._rows, right._rows)])
+        _shape(self.nrows(), self.ncols() + right.ncols())
+        m = Matrix(base, [list(r) + list(t) for r, t in zip(self._rows, right._rows)], self.ncols() + right.ncols())
         if subdivide:
             m._subdiv = ([], [self.ncols()])
         return m
@@ -818,7 +821,8 @@ class Matrix:
         if bottom.ncols() != self.ncols():
             raise TypeError("number of columns must be the same, %d != %d" % (self.ncols(), bottom.ncols()))
         base = self._base if self._base is bottom._base else _sa().QQ
-        m = Matrix(base, [list(r) for r in self._rows] + [list(r) for r in bottom._rows])
+        _shape(self.nrows() + bottom.nrows(), self.ncols())
+        m = Matrix(base, [list(r) for r in self._rows] + [list(r) for r in bottom._rows], self.ncols())
         if subdivide:
             m._subdiv = ([self.nrows()], [])
         return m
@@ -898,6 +902,9 @@ class Matrix:
         if isinstance(other, Matrix):
             if self.ncols() != other.nrows():
                 raise TypeError("unsupported operand parent(s) for *: matrices of incompatible sizes")
+            # the product's shape before it is built (4096 x 1 times
+            # 1 x 4096 has 2^24 entries)
+            _shape(self.nrows(), other.ncols())
             if self._base is _sa().ZZ and other._base is _sa().ZZ and self.nrows() * self.ncols() * other.ncols() > 4096:
                 from sagebrush import linalg
                 return Matrix(_sa().ZZ, linalg.matmul(self._rows, other._rows))
@@ -1054,11 +1061,12 @@ class Matrix:
             (-4, 9/2)
         """
         is_vec = not isinstance(B, Matrix)
-        Bm = Matrix(_sa().QQ, [[x] for x in B]) if is_vec else B
+        Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())]) if is_vec else B
         if Bm.nrows() != self.nrows():
             raise ValueError("number of rows of self must equal number of rows of right-hand side")
         from sagebrush import linalg
         n = self.ncols()
+        _shape(n, Bm.ncols())  # (the solution is n x k)
         if self.is_square() and n and self.rank() == n:
             X = linalg.solve(self._rows, Bm._rows)
         else:
@@ -1966,6 +1974,10 @@ def _ff_base_of(entries):
 def _smith_uv(a):
     """Smith form with transforms over ZZ: (D, U, V), U a V = D."""
     m, n = len(a), len(a[0]) if a else 0
+    # (the transforms are m x m and n x n: a 2^22 x 1 matrix would ask
+    # for 2^44 entries)
+    _shape(m, m)
+    _shape(n, n)
     A = [list(r) for r in a]
     U = [[int(i == j) for j in range(m)] for i in range(m)]
     V = [[int(i == j) for j in range(n)] for i in range(n)]
@@ -2117,6 +2129,7 @@ def matrix(*args, **kwds):
             if r == 0 or len(ent) % r:
                 raise ValueError("entries do not fill a matrix with %d rows" % r)
             c = len(ent) // r
+            _shape(r, c)  # (matrix(QQ, 10^9, []): 10^9 empty rows)
             rows = [ent[i * c:(i + 1) * c] for i in range(r)]
     elif len(args) == 1 and isinstance(args[0], int):
         n, _ = _shape(args[0], args[0])
@@ -2194,6 +2207,7 @@ def block_matrix(*args, **kwds):
         if nr == 0 or len(flat) % nr:
             raise ValueError("the blocks do not fill %d rows" % nr)
         nc = len(flat) // nr
+        _shape(nr, nc)  # (block_matrix(10^9, []): 10^9 empty grid rows)
         grid = [flat[i * nc:(i + 1) * nc] for i in range(nr)]
     else:
         L = _bounded_list(args[0], what="blocks")
