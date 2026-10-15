@@ -129,24 +129,12 @@ export async function boardRun(argv: string[]): Promise<number> {
   }
   const mode = doc.mode ?? "python";
   const seed = typeof doc.seed === "string" && /^[0-9a-f]{64}$/.test(doc.seed) ? doc.seed : BOARD_SEED;
-  // the code items, page by page, each page in reading order (as doc.ts
-  // codeOrder runs them); an id is one item's on a page, and may be
-  // another's on another page: those are cells by their page (`key`), as
-  // the board's (doc.ts codeOrder): id@pN, or, when that is taken (an
-  // item's id, or a cell already), id@pN~2, ~3, ...: one cell for each code
-  // item, whatever ids a board has (CORR-CD6-1, CORR-239-1)
+  // the code items, as the board runs them (doc.ts codeOrder): page by page,
+  // each page in reading order; one cell for each, `key` (an id items on
+  // several pages have is told apart by its page: its cell's id is id@pN, or
+  // id@pN~2, ~3, ..., CORR-CD6-1, CORR-239-1), `id` its item's
   const pages = pageCount(doc);
-  const all = Array.from({ length: pages }, (_, page) => codeOrder(pageView(doc, page)).map((it) => ({ ...it, page }))).flat();
-  const count = new Map<string, number>();
-  for (const it of all) count.set(it.id, (count.get(it.id) ?? 0) + 1);
-  const taken = new Set(all.map((it) => it.id));
-  const items = all.map((it) => {
-    if (count.get(it.id)! < 2) return { ...it, key: it.id };
-    let key = `${it.id}@p${it.page + 1}`;
-    for (let k = 2; taken.has(key); k++) key = `${it.id}@p${it.page + 1}~${k}`;
-    taken.add(key);
-    return { ...it, key };
-  });
+  const items = codeOrder(doc).map(({ id, item, code, page }) => ({ key: id, id: item, code, page }));
   const notes = new Map<string, DocNote>();
   for (let page = 0; page < pages; page++) {
     const on = codeNotes(pageView(doc, page));
