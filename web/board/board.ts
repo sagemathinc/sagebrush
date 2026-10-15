@@ -106,6 +106,8 @@ export interface Camera {
 
 const CELL = 512; // the spatial grid's cell, in world units
 const FAR = 0.5; // below this zoom: rectangles on the canvas, no DOM (text under 7 px is not read)
+/** The least zoom a board opens at (its notes' 14 px text at 8.4 px): a larger board opens at it, from its start. */
+export const LEGIBLE = 0.6;
 // ...unless few items are in view: then their text shows down to this zoom
 // (6 px: small but still read; few elements cost nothing to show)
 const FEW_FAR = 0.35, FEW = 300;
@@ -360,6 +362,24 @@ export class Board {
       x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h);
     }
     return x0 <= x1 ? { x0, y0, x1, y1 } : null;
+  }
+
+  /** The board as it opens: all of it, or, when that would make its notes'
+   * text too small to read (a zoom under LEGIBLE), at that zoom, centered
+   * along an axis it fits, else from its start (its left, its top): the rest
+   * a scroll away (friction 6, 12); smoothly unless `now`. */
+  overview(now = false) {
+    const b = this.bounds();
+    if (!b) return;
+    let c = this.cameraFor(b.x0, b.y0, b.x1, b.y1, 1.5);
+    if (c.z < LEGIBLE) {
+      const W = this.canvas.width / this.dpr, H = this.canvas.height / this.dpr, i = this.insets, z = LEGIBLE;
+      const w = Math.max(50, W - i.left - i.right), h = Math.max(50, H - i.top - i.bottom), m = Math.min(32, w / 12);
+      const at = (lo: number, hi: number, start: number, room: number) => ((hi - lo) * z <= room - 2 * m ? (lo + hi) / 2 - (start + room / 2) / z : lo - (start + m) / z);
+      c = { x: at(b.x0, b.x1, i.left, w), y: at(b.y0, b.y1, i.top, h), z };
+    }
+    if (now) this.setCamera(c);
+    else this.flyTo(c);
   }
 
   /** Move the camera to show these items (all when none are given), smoothly unless `now`. */

@@ -102,6 +102,7 @@ jobs:
           CHROME=google-chrome node web/board/test-inplace.mjs
           CHROME=google-chrome node web/board/test-find.mjs
           CHROME=google-chrome node web/board/test-titles.mjs
+          CHROME=google-chrome node web/board/test-fit.mjs
           CHROME=google-chrome node web/board/test-local.mjs
           CHROME=google-chrome node web/board/test-blocks.mjs
           CHROME=google-chrome node web/board/test-history.mjs
