@@ -89,6 +89,13 @@ test("checkScene refuses hostile scenes: malformed, not finite, out of range, or
     ["too many ticks", variant((s) => { s.box.ticks[2] = Array.from({ length: LIMITS.ticks + 1 }, (_, i) => i); }), /too many ticks/],
     ["a tick label that is not text", variant((s) => { s.box.ticklabels[0][0] = { x: 1 }; }), /tick label/],
     ["a long title", variant((s) => { s.title = "x".repeat(LIMITS.text + 1); }), /too long title/],
+    // (styled text, MATLAB's TeX markup, as runs)
+    ["a title of runs", variant((s) => { s.title = [{ t: "x" }, { t: "2", s: 0.7, r: 0.385 }, { t: "y", b: true, i: false, c: "#008080", f: "Courier New" }]; }), null as any],
+    ["a run's font that is CSS", variant((s) => { s.title = [{ t: "x", f: "a;background:url(x)" }]; }), /malformed title font/],
+    ["too many runs", variant((s) => { s.title = Array.from({ length: LIMITS.runs + 1 }, () => ({ t: "x" })); }), /malformed title/],
+    ["a run too big", variant((s) => { s.labels[0] = [{ t: "x", s: 100 }]; }), /malformed label size/],
+    ["a run's color", variant((s) => { s.box.ticklabels[0][0] = [{ t: "1", c: "red" }]; }), /#rrggbb/],
+    ["a run that is not text", variant((s) => { s.title = [{ t: 5 }]; }), /malformed title/],
     ["an unknown object", variant((s) => { s.objects.push({ type: "script" }); }), /unknown type/],
     ["too many objects", variant((s) => { s.objects = Array.from({ length: LIMITS.objects + 1 }, () => ({ type: "points", pos: [0, 0, 0], color: "#000000" })); }), /too many objects/],
     ["too many texts", variant((s) => { s.objects = Array.from({ length: LIMITS.texts + 1 }, () => ({ type: "text", pos: [0, 0, 0], text: "t" })); }), /more than 2000 texts/],

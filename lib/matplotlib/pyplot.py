@@ -861,10 +861,10 @@ class Figure:
 
     def _frame(self):
         """This figure as one animation frame: (SVG body, description)."""
-        return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle)
+        return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
 
     def _svg(self):
-        return render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle)
+        return render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
 
     def _repr_svg_(self):
         anim = getattr(self, "_animation", None)
