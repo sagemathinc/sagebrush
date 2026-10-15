@@ -450,7 +450,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.ready.then((ok) => {
       // (it could not start: the caption says why, until the next edit)
       if (!ok) {
-        if (code === c && c.error) say(`**The code can't run here:** ${c.error}`);
+        if (code === c && c.error) say(plain("The code can't run here:", c.error));
         return;
       }
       board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(id, copy), state: (id) => c.state(id), run: (id) => { c.run([id]); } });
@@ -535,11 +535,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const steps = () => (doc ? pageView(doc, pageIx).steps ?? [] : []);
   const hashFor = (i: number) => (pageIx ? `#p${pageIx + 1}${i >= 0 ? "-" + (i + 1) : ""}` : i >= 0 ? `#${i + 1}` : "");
 
-  function caption(md: string, where: string) {
+  function caption(md: string | HTMLElement, where: string) {
     const el = $("say");
     el.classList.remove("open");
-    el.innerHTML = markdown(md);
-    if (board.typeset && hasMath(md)) board.typeset(el);
+    if (typeof md === "string") {
+      el.innerHTML = markdown(md);
+      if (board.typeset && hasMath(md)) board.typeset(el);
+    } else el.replaceChildren(md);
     $("where").textContent = where;
     // the camera keeps clear of the title bar and the caption
     board.insets = { top: 44, right: 0, left: 0, bottom: $("tour").hidden ? 0 : $("tour").offsetHeight + 18 };
@@ -594,7 +596,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function fail(e: unknown) {
     if (destroyed) return;
     $("tour").hidden = false;
-    caption("**This board could not be shown:** " + String((e as Error)?.message ?? e).replace(/[<>&]/g, ""), "");
+    // (as text, not Markdown: an error says what a file said, its format or
+    // an id, which is anyone's: as Markdown, a picture in it was fetched, SEC-36E-1)
+    caption(plain("This board could not be shown:", String((e as Error)?.message ?? e)), "");
+  }
+  // A caption of a bold head and text, as text.
+  function plain(head: string, text: string): HTMLElement {
+    const p = document.createElement("p"), b = document.createElement("strong");
+    b.textContent = head;
+    p.append(b, " " + text);
+    return p;
   }
 
   // the document: the host's (none: nothing is shown until load(), as for the benchmark's boards)
@@ -978,14 +989,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   // (a CoCalc board, converted: said in the caption, with what was left out,
   // until the next edit)
-  let converted = "", notice = "";
+  let converted = "", notice: string | HTMLElement = "";
   function sayConverted() {
     if (!converted) return;
     say(converted);
     converted = "";
   }
   /** A notice in the caption, until the next edit. */
-  function say(md: string) {
+  function say(md: string | HTMLElement) {
     notice = md;
     $("tour").hidden = false;
     caption(notice, "");
