@@ -431,3 +431,117 @@ Pn.<sn> = PowerSeriesRing(Kn)
 print((-an - 1)*sn + O(sn^3), '|', 1 + (-an + 1)*sn^2, '|', tn^-1 - an - 1 + O(tn^2), '|', (an + 1) + sn + O(sn^3))
 Mu.<u5> = LaurentSeriesRing(Qp(5, 3))
 print(u5^-1 + Qp(5, 3)(6) + O(u5), '|', -Qp(5, 3)(6) + u5)
+
+# Division over Zp by the ring rule shared with ZZ (review D9E-2): an exact
+# monomial is inverted in Qp; any other divisor needs a unit constant term
+M5.<u5r> = LaurentSeriesRing(Zp(5, 6))
+try:
+    r = T/(5*T + T^2)
+    print('T/(5*T + T^2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('T/(5*T + T^2)', '=>', type(ex).__name__, ex)
+try:
+    r = ~S(5)
+    print('~S(5)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('~S(5)', '=>', type(ex).__name__, ex)
+try:
+    r = S(5)^-1
+    print('S(5)^-1', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('S(5)^-1', '=>', type(ex).__name__, ex)
+try:
+    r = 1/(5*T)
+    print('1/(5*T)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('1/(5*T)', '=>', type(ex).__name__, ex)
+try:
+    r = T/(5*T)
+    print('T/(5*T)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('T/(5*T)', '=>', type(ex).__name__, ex)
+try:
+    r = T/(A(5)*T + O(T^3))
+    print('T/(A(5)*T + O(T^3))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('T/(A(5)*T + O(T^3))', '=>', type(ex).__name__, ex)
+try:
+    r = (A(5)*T + O(T^3))^-1
+    print('(A(5)*T + O(T^3))^-1', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(A(5)*T + O(T^3))^-1', '=>', type(ex).__name__, ex)
+try:
+    r = S(A(5))^-1
+    print('S(A(5))^-1', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('S(A(5))^-1', '=>', type(ex).__name__, ex)
+try:
+    r = 1/S(A(5))
+    print('1/S(A(5))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('1/S(A(5))', '=>', type(ex).__name__, ex)
+try:
+    r = T^2/(5*T)
+    print('T^2/(5*T)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('T^2/(5*T)', '=>', type(ex).__name__, ex)
+try:
+    r = T^2/(5*T + T^2)
+    print('T^2/(5*T + T^2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('T^2/(5*T + T^2)', '=>', type(ex).__name__, ex)
+try:
+    r = (5*T + T^2)^-1
+    print('(5*T + T^2)^-1', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(5*T + T^2)^-1', '=>', type(ex).__name__, ex)
+try:
+    r = u5r/(5*u5r)
+    print('u5r/(5*u5r)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('u5r/(5*u5r)', '=>', type(ex).__name__, ex)
+try:
+    r = u5r/(5 + u5r)
+    print('u5r/(5 + u5r)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('u5r/(5 + u5r)', '=>', type(ex).__name__, ex)
+try:
+    r = 1/u5r
+    print('1/u5r', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('1/u5r', '=>', type(ex).__name__, ex)
+try:
+    r = u5r^-1
+    print('u5r^-1', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('u5r^-1', '=>', type(ex).__name__, ex)
+try:
+    r = (3 + u5r)^-1
+    print('(3 + u5r)^-1', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(3 + u5r)^-1', '=>', type(ex).__name__, ex)
+try:
+    r = u5r/(3*u5r + u5r^2)
+    print('u5r/(3*u5r + u5r^2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('u5r/(3*u5r + u5r^2)', '=>', type(ex).__name__, ex)
+try:
+    r = (T^2 + T^3)/(T + 2*T^2)
+    print('(T^2 + T^3)/(T + 2*T^2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(T^2 + T^3)/(T + 2*T^2)', '=>', type(ex).__name__, ex)
+try:
+    r = 1/(1 + T + O(T^3))
+    print('1/(1 + T + O(T^3))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('1/(1 + T + O(T^3))', '=>', type(ex).__name__, ex)
+try:
+    r = A(3)/(T + O(T^2))
+    print('A(3)/(T + O(T^2))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('A(3)/(T + O(T^2))', '=>', type(ex).__name__, ex)
+try:
+    r = T/(T + 5*T^2)
+    print('T/(T + 5*T^2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('T/(T + 5*T^2)', '=>', type(ex).__name__, ex)
