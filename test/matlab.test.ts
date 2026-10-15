@@ -950,6 +950,16 @@ test("quad: its published example, the evaluation count, trace, warnings and ref
   ]);
 });
 
+test("quad stops at GNU Octave's adaptive Simpson limit, 10001 evaluations exactly, with a warning", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "[q, n] = quad(@(x) sin(1000*x), 0, 1, 1e-14); disp(n);",
+    "[q, n] = quad(@(x) 1./(x + 1e-12), 0, 1, 1e-14); disp(n);",
+    "[q, n] = quad(@(x) exp(x), 0, 1); disp(n < 10001);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), ["10001", "10001", "1"]);
+  assert.equal((r.stderr.match(/Warning: quad: the limit of 10001 function evaluations was reached; the tolerance may not be met\./g) || []).length, 2);
+});
+
 test("lsqnonneg keeps a solution of any scale: positivity tested exactly, as Lawson and Hanson's steps 6 to 11", () => {
   const { execFileSync } = require("node:child_process");
   const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [

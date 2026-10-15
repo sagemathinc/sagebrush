@@ -607,10 +607,14 @@ The rest:
   unset (Lawson and Hanson's 3 times the number of variables), what
   counts as an iteration (a least-squares solve), and the message for
   exitflag 0. Display 'iter', which its page does not list, is refused;
-- quad's likewise: a subinterval with an Inf or NaN value is not
-  subdivided (with a warning), at most 10000 evaluations (with a warning),
-  the trace's number format, and a single result for single limits or
-  values;
+- quad's evaluation limit is GNU Octave's for its adaptive Simpson
+  quadrature, quadv: observed with Octave 11.1, it stops at exactly 10001
+  evaluations, whatever the integrand. Sagebrush's quad never goes beyond
+  10001: a subinterval whose step or halves would is accepted with the
+  value it has, and a warning says the tolerance may not be met;
+- quad's own choices: a subinterval with an Inf or NaN value is not
+  subdivided (with a warning), the trace's number format, and a single
+  result for single limits or values;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
