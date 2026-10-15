@@ -133,7 +133,7 @@ A note: the default item. Every part is optional; a note with `code` is a code i
 | `fit` | boolean | `true`: as wide as its text needs, up to `w` |
 | `x` | number | its position, kept once a person moves it: leave it out, and the board places it |
 | `y` | number | as `x` |
-| `w` | number | its width (default 260, or 440 for a code item) |
+| `w` | number | its width (default 260; 440 for a code item; for a note with only a picture, the picture's width, up to 480, its height then from the picture's shape) |
 | `h` | number | its height (default: as tall as what it shows) |
 
 ### A group
