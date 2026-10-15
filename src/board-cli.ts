@@ -7,12 +7,19 @@
 import { readFileSync, writeFileSync } from "fs";
 import { boardFromText } from "../web/board/mermaid";
 import { boardSvg } from "../web/board/svg";
-import { pageCount } from "../web/board/doc";
+import { formatError, pageCount } from "../web/board/doc";
 
 const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
   a board as an SVG file (to OUT, else to standard output); --page N: its
   Nth page (from 1)
 `;
+
+/** The command line as a reader of boards, in what it says of one it can't
+ * read: which sagebrush refused it, and what to do (formatError). */
+export const CLI_READER = { reader: `this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"})`, remedy: "update sagebrush (npx sagebrush@latest)" };
+
+// (text for a terminal: a file's name and what a board says are anyone's; no control characters but newlines and tabs)
+const safe = (s: string) => s.replace(/[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 
 /** The `board` command; returns the exit code. */
 export async function boardCommand(argv: string[]): Promise<number> {
@@ -35,8 +42,13 @@ export async function boardCommand(argv: string[]): Promise<number> {
   try {
     const text = readFileSync(file === "-" ? 0 : file, "utf8");
     doc = boardFromText(text, file === "-" ? undefined : file.split(/[\\/]/).pop());
+    // (a document the board would not show, as the board says it: a later
+    // version of the format than this one reads, another format, an id
+    // twice on a page; no SVG of it)
+    const bad = formatError(doc, CLI_READER);
+    if (bad) throw new Error(bad);
   } catch (e: any) {
-    process.stderr.write(`sagebrush board render: ${file}: ${e?.message ?? e}\n`);
+    process.stderr.write(`sagebrush board render: ${safe(String(file))}: ${safe(String(e?.message ?? e))}\n`);
     return 1;
   }
   const pages = pageCount(doc);
