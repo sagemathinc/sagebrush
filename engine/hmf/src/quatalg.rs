@@ -277,10 +277,12 @@ fn ext_gcd(u: &BigInt, v: &BigInt) -> (BigInt, BigInt, BigInt) {
     }
 }
 
-/// A Z-lattice (1/den) (row span of h) in B, in the coordinates of [`BElt`],
-/// containing Lambda = Z^8; h is in Hermite normal form (upper triangular,
-/// positive diagonal, entries above the diagonal reduced modulo it) and den
-/// is least. Made only by `from_gens` (the fields are private to the crate).
+/// A Z-lattice (1/den) (row span of h) in B of full rank, in the
+/// coordinates of [`BElt`], containing m Lambda for some integer m > 0
+/// (Lambda = Z^8; m = 1 for orders containing Lambda); h is in Hermite
+/// normal form (upper triangular, positive diagonal, entries above the
+/// diagonal reduced modulo it) and den is least. Made only by `from_gens`
+/// and `from_gens_containing` (the fields are private to the crate).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Lattice {
     pub(crate) den: BigInt,
@@ -297,10 +299,18 @@ impl Lattice {
     }
     /// Lambda + Z gens.
     pub fn from_gens(gens: &[BElt]) -> Lattice {
+        Lattice::from_gens_containing(gens, &BigInt::one())
+    }
+    /// m Lambda + Z gens, for an integer m > 0: the Z-span of gens when it
+    /// contains m Lambda (the Hermite normal form is computed from the rows
+    /// m den e_i, which keeps it exact without a determinant).
+    pub fn from_gens_containing(gens: &[BElt], m: &BigInt) -> Lattice {
+        assert!(m.is_positive(), "m must be positive");
         let den = gens.iter().fold(BigInt::one(), |d, g| d.lcm(&g.den));
+        let md = m * &den;
         let mut h: [[BigInt; 8]; 8] = std::array::from_fn(|i| {
             let mut r = zero8();
-            r[i] = den.clone();
+            r[i] = md.clone();
             r
         });
         for g in gens {
@@ -349,7 +359,14 @@ impl Lattice {
         true
     }
 
-    /// The index [L : Lambda] = den^8 / prod h_ii.
+    /// The covolume of L relative to Lambda, prod h_ii / den^8 (as numerator
+    /// and denominator, not reduced): [Lambda : L] when L is inside Lambda,
+    /// and 1/[L : Lambda] when L contains it.
+    pub fn covolume(&self) -> (BigInt, BigInt) {
+        let d = (0..8).fold(BigInt::one(), |d, i| d * &self.h[i][i]);
+        (d, self.den.pow(8))
+    }
+    /// The index [L : Lambda] = den^8 / prod h_ii, for L containing Lambda.
     pub fn index(&self) -> BigInt {
         let mut n = BigInt::one();
         for _ in 0..8 {
@@ -503,14 +520,27 @@ impl MaximalOrder {
         det_bareiss(&trace_gram(&self.alg, &self.basis)).abs()
     }
 
-    /// Checks that the lattice is a ring containing Lambda (so an order) and
-    /// that its Z-discriminant is d_F^4 (so it is maximal and B is
+    /// The maximal order with the given lattice, certified (an error if the
+    /// lattice is not an O_F-order of reduced discriminant O_F), e.g. the left
+    /// order of an ideal.
+    pub fn from_lattice(alg: &QuatAlg, lattice: Lattice) -> Result<MaximalOrder, String> {
+        let o = MaximalOrder { alg: alg.clone(), basis: lattice.basis(), lattice };
+        o.certify()?;
+        Ok(o)
+    }
+
+    /// Checks that the lattice is a ring containing 1 and w (so an O_F-order)
+    /// and that its Z-discriminant is d_F^4 (so it is maximal and B is
     /// unramified at every finite place).
     pub fn certify(&self) -> Result<(), String> {
+        let w = BElt::from_coords([QElt::new(0, 1), QElt::int(0), QElt::int(0), QElt::int(0)]);
+        if !self.lattice.contains(&BElt::one()) || !self.lattice.contains(&w) {
+            return Err("the lattice does not contain O_F".into());
+        }
         for x in &self.basis {
             for y in &self.basis {
                 if !self.lattice.contains(&self.alg.mul(x, y)) {
-                    return Err("internal error: the lattice is not closed under multiplication".into());
+                    return Err("the lattice is not closed under multiplication".into());
                 }
             }
         }
@@ -630,6 +660,8 @@ pub struct OrderSplitting {
     pub(crate) ring: QLocalRing,
     /// The images of the basis elements of the order.
     pub(crate) images: Vec<Mat>,
+    /// Lifts to the order of the matrix units e11, e12, e21, e22.
+    pub(crate) units: [BElt; 4],
 }
 
 impl OrderSplitting {
@@ -639,6 +671,11 @@ impl OrderSplitting {
     /// The images of the basis elements of the order.
     pub fn images(&self) -> &[Mat] {
         &self.images
+    }
+    /// Lifts to the order of the matrix units e11, e12, e21, e22 (e22 = 1 -
+    /// e11); e11 is an idempotent modulo P^e of rank one.
+    pub fn matrix_units(&self) -> &[BElt; 4] {
+        &self.units
     }
     /// The image of the element with the given coordinates in the basis.
     pub fn image(&self, coords: &[BigInt; 8]) -> Mat {
@@ -742,7 +779,8 @@ impl MaximalOrder {
                 [zij(0, 0), zij(0, 1), zij(1, 0), zij(1, 1)]
             })
             .collect();
-        let sp = OrderSplitting { ring, images };
+        let e22 = alg.sub(&BElt::one(), &eps);
+        let sp = OrderSplitting { ring, images, units: [eps.clone(), e12.clone(), e21.clone(), e22] };
         // the check: unital and multiplicative on the basis
         let r = &sp.ring;
         if sp.image(&self.coordinates(&BElt::one()).unwrap()) != [r.one(), r.zero(), r.zero(), r.one()] {
