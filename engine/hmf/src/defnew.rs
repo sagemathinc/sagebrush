@@ -25,7 +25,8 @@
 //!   its irreducible factors over Q are the Galois orbits of newforms.
 //! - The eigenvalue of T_P (U_P for P dividing N) on an orbit is c(theta) in
 //!   K = Q[x]/(g), by the Krylov method of eigen.rs (shared code), each one
-//!   proven by an identity checked in integers.
+//!   proven by an identity checked in integers. (U_P eigenvalues where P
+//!   exactly divides N need not be +-1 when P is not narrowly principal.)
 //!
 //! All results are proven, given the facts cited; nothing is heuristic.
 
@@ -367,18 +368,24 @@ impl Newspaces {
         orbit_eigenspace_core(&t, g, &key(&orbits.op), &self.charpoly_mod, 1 << 23)
     }
 
-    /// a_P on an orbit, in its coefficient field (U_P for P dividing N).
-    /// Checked: for P dividing N, the characteristic polynomial of a_P is
-    /// (x -+ 1)^d if P exactly divides N and x^d if P^2 does (weight 2,
-    /// trivial character).
+    /// a_P on an orbit, in its coefficient field (U_P for P dividing N),
+    /// proven by eigen.rs's identity in integers. One consistency check: if
+    /// P^2 divides N, a_P = 0. That holds for newforms whose central
+    /// character is unramified (here a character of Cl+(F)): a local
+    /// representation with a nonzero U_P eigenvalue and conductor exponent at
+    /// least 2 would be a principal series pi(mu1, mu2) with mu1 unramified
+    /// and mu2 ramified, and then the central character mu1 mu2 would be
+    /// ramified. Where P exactly divides N, a_P depends on the normalization
+    /// of U_P when P is not narrowly principal: it need not be +-1 (Q(sqrt
+    /// 10), N = (5, sqrt 10): a_P^2 = -1, as in Magma; @sagebrush-astra's
+    /// CORR-6F0-1), and it is not checked.
     pub fn eigenvalue(&self, es: &OrbitEigenspace, p: &QPrime) -> Result<Eigenvalue, String> {
         let a = es.eigenvalue_from(&*self.hecke(&self.level, p)?)?;
         if let Some((_, e)) = self.field.factor(&self.level)?.into_iter().find(|(q, _)| q.ideal == p.ideal) {
             let cp = es.charpoly_of(&a)?;
             let d = es.degree();
-            let ok = if e == 1 { cp == power_of_linear(1, d) || cp == power_of_linear(-1, d) } else { cp == power_of_linear(0, d) };
-            if !ok {
-                return Err("U_P has an impossible eigenvalue on a newform".into());
+            if e >= 2 && cp != power_of_linear(0, d) {
+                return Err("U_P has a nonzero eigenvalue on a newform with P^2 dividing the level".into());
             }
         }
         Ok(a)

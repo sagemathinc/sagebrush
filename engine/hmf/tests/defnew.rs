@@ -81,6 +81,28 @@ fn dembele_voight_example_8_6_newforms() {
     assert_eq!(rows, want);
 }
 
+/// CORR-6F0-1 (astra): over Q(sqrt 10), N = P = (5, sqrt 10) (not narrowly
+/// principal), the new space has one orbit of dimension 4, and U_P has
+/// characteristic polynomial (x^2 + 1)^2 on it, as Magma's
+/// NewSubspace(HilbertCuspForms(F, P)) gives: a_P^2 = -1, not +-1.
+#[test]
+fn up_eigenvalue_at_a_non_principal_prime() {
+    let f = QuadField::new(10).unwrap();
+    let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+    let p = f.primes_above(5).unwrap()[0];
+    let ns = Newspaces::new(&o, &p.ideal).unwrap();
+    assert_eq!(ns.new_dimension().unwrap(), 4);
+    let orbits = ns.newform_orbits().unwrap();
+    assert_eq!(orbits.dimensions(), vec![4]);
+    let es = ns.orbit_eigenspace(&orbits, 0).unwrap();
+    let a = ns.eigenvalue(&es, &p).unwrap();
+    let cp: Vec<i64> = es.charpoly_of(&a).unwrap().iter().map(|c| c.to_string().parse().unwrap()).collect();
+    assert_eq!(cp, vec![1, 0, 2, 0, 1]);
+    // the whole cusp space, against Magma: x^8 + 4x^6 + 30x^4 + 52x^2 + 25
+    let cusp: Vec<i64> = ns.top().cusp_charpoly(&p).unwrap().iter().map(|c| c.to_string().parse().unwrap()).collect();
+    assert_eq!(cusp, vec![25, 0, 52, 0, 30, 0, 4, 0, 1]);
+}
+
 #[test]
 fn agrees_with_the_sqrt5_newforms() {
     use sagebrush_hmf::field::{ideals_of_bounded_norm, primes_of_bounded_norm};
