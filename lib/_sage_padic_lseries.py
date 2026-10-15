@@ -142,7 +142,7 @@ def padic_lseries(E, p, normalize=None, implementation="eclib", precision=None):
         raise NotImplementedError("p (=%d) must be a prime of semi-stable reduction" % p)
     ap = int(Em.ap(p))
     if N % p != 0 and ap % p == 0:
-        raise NotImplementedError("p-adic L-series at supersingular primes (here p = %d, a_p = %d) are not available in sagebrush yet" % (p, ap))
+        return pAdicLseriesSupersingular(E, p)
     return pAdicLseriesOrdinary(E, p)
 
 
@@ -492,3 +492,233 @@ class pAdicLseriesOrdinary:
                     return _sa().Integer(r)
             n += 1
         raise NotImplementedError("the coefficient of T^%d of the %d-adic L-series is 0 to the precision reached (n = %d); the order of vanishing exceeds the rank %d only if Sha(E/Q)[%d^oo] is infinite or the %d-adic height pairing is degenerate" % (r, p, n - 1, r, p, p))
+
+
+class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
+    """The p-adic L-series of an elliptic curve over Q at a prime p >= 3 of
+    good supersingular reduction (p | a_p, so a_p = 0 for p >= 5 and a_p
+    = 0 or +-3 for p = 3): L_alpha(E, T), alpha the root of x^2 - a_p x + p
+    named alpha (both roots have valuation 1/2; Sage's choice), with
+    coefficients in the Eisenstein extension Qp(alpha) (lib/_sage_padic_ext.py).
+
+    The precision.  The measure, its Riemann sums P_n(T) and Stein and
+    Wuthrich's Lemma 3.2, Corollary 3.3, Lemma 3.4 and Proposition 3.5
+    (Math. Comp. 82 (2013), section 3) hold for this measure as for an
+    ordinary one: they use only the distribution property and coefficients
+    in the ring of integers of a finite extension of Qp.  So a_(n+1,0) =
+    a_(n,0) (the constant term is exact) and ord_p(a_(m+1,j) - a_(m,j)) >=
+    e_(m-1,j) - max(c_m, c_(m+1)).  What changes is that the c_m are not
+    bounded: mu(b + p^m Zp) = alpha^-m [b/p^m]^+ - alpha^-(m+1) [b/p^(m-1)]^+
+    (times the number of real components, a unit for p odd), so with p^c
+    [r]^+ integral (c as for the ordinary series, from [0]^+ and the cycle
+    lattice) every coefficient of P_m, a sum of such values times
+    binomials, has ord_p >= -(m+1)/2 - c: c_m <= (m+1)/2 + c.  And
+    e_(m,j) >= e_(m-1,j) + 1 (v_p(binomial(p^m, i)) = m - v_p(i) for
+    1 <= i <= p^m, Kummer).  So e_(m-1,j) - (m+2)/2 - c increases with m,
+    and summing the differences from m = n on gives, for j >= 1,
+
+        ord_p(a_j - a_(n,j)) >= e_(n-1,j) - (n+2)/2 - c,
+
+    that is 2 e_(n-1,j) - n - 2 - 2c in powers of alpha.  The coefficients
+    are reported to that precision, or to Sage's smaller one where Sage
+    reports less (cap - n - 1, cap the precision cap of Sage's coefficient
+    field Qp(p, ceil((n+2)/2))(alpha); 2n - 4 for the constant term), as
+    Sage reports them.
+
+    EXAMPLES::
+
+        sage: L = EllipticCurve('11a1').padic_lseries(19); L
+        19-adic L-series of Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+        sage: L.is_supersingular(), L.alpha(5)
+        (True, alpha + O(alpha^11))
+    """
+
+    def is_ordinary(self):
+        """False.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').padic_lseries(19).is_ordinary()
+            False
+        """
+        return False
+
+    def is_supersingular(self):
+        """True.
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').padic_lseries(19).is_supersingular()
+            True
+        """
+        return True
+
+    def _field(self, prec):
+        """Qp(p, prec)(alpha), alpha^2 - a_p alpha + p = 0."""
+        import _sage_padic_ext
+        return _sage_padic_ext._extension(_sa().Qp(self._p, prec), -self._ap, self._p, "alpha", "x")
+
+    def alpha(self, prec=20):
+        """alpha, a root of x^2 - a_p x + p, in Qp(p, prec)(alpha).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').padic_lseries(19).alpha(5)
+            alpha + O(alpha^11)
+        """
+        prec = _integer(prec)
+        if prec < 1:
+            raise ValueError("prec_cap must be positive")
+        return self._field(prec).gen()
+
+    def _value(self, F, U, V, n, absprec=None):
+        """The element alpha^-n U - alpha^-(n+1) V (U, V rationals) of F,
+        exactly, then to absolute precision absprec (relative cap if
+        None)."""
+        import _sage_padic_ext as X
+        E = F._E
+        ia, ib = E.inverse(0, 1)
+        a, b = 1, 0
+        for _ in range(n):
+            a, b = E.mul(a, b, ia, ib)
+        # alpha^-n (U - V alpha^-1)
+        va, vb = E.mul(ia, ib, _F(V), 0)
+        x, y = E.mul(a, b, _F(U) - va, -vb)
+        if x == 0 and y == 0 and absprec is not None:
+            # a zero known to absprec, not an exact zero (Sage: O(alpha^2))
+            return F._element(X._Val(absprec, 0, 0, 0))
+        return F._element(X._make(E, x, y, absprec, F._prec))
+
+    def measure(self, a, n, prec, quadratic_twist=+1, sign=+1):
+        """mu(a + p^n Z_p) in Qp(p, prec)(alpha), for integers a, n >= 1 and
+        prec >= 1, to the relative precision cap (it is exact).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').padic_lseries(19).measure(1, 2, 5)
+            6*alpha^-3 + 3*alpha^-2 + 6*alpha^-1 + 4 + 6*alpha + 4*alpha^2 + 6*alpha^3 + 4*alpha^4 + 6*alpha^5 + 4*alpha^6 + O(alpha^7)
+            sage: EllipticCurve('37a1').padic_lseries(3).measure(2, 3, 4)
+            2*alpha^-4 + 2*alpha^-3 + alpha^-2 + O(alpha^4)
+        """
+        if sign != 1 or quadratic_twist != 1:
+            raise NotImplementedError("twisted or sign -1 measures are not available in sagebrush yet")
+        p, n, prec = self._p, _integer(n), _integer(prec)
+        if n < 1:
+            raise ValueError("n (=%s) must be a positive integer" % n)
+        if prec < 1:
+            raise ValueError("prec (=%s) must be a positive integer" % prec)
+        a = _integer(a)
+        A, B = self._plus([(a, p ** n), (a, p ** (n - 1))])
+        # (times the number of real components, as Sage's measure, here as
+        # for ordinary primes; its supersingular series leaves it out)
+        cinf = self._ms._components()
+        return self._value(self._field(prec), A * cinf, B * cinf, n)
+
+    def _sums(self, n, nterms):
+        """(U_j, V_j) for j < nterms: P_n's coefficient of T^j is
+        alpha^-n U_j - alpha^-(n+1) V_j (rationals, Sage's normalization)."""
+        from _padic import Padic
+        p = self._p
+        scale, zero = self._ms._normalization()
+        # (Sage's supersingular series uses Stein and Wuthrich's [r]^+, with
+        # no factor for the real components, unlike its ordinary one: 37a1
+        # at p = 17)
+        cinf = 1
+        pn, pn1 = p ** n, p ** (n - 1)
+        teich = [Padic.teichmuller(p, a, n) for a in range(p)]
+        xs, g = [], 1
+        for j in range(pn1):
+            for a in range(1, p):
+                xs.append(teich[a] * g % pn)
+            g = g * (1 + p) % pn
+        cusps = [(x, pn) for x in xs] + [(x % pn1, pn1) for x in xs]
+        _, vals = self._ms._raw(cusps)
+        nx = len(xs)
+        u, v = [], []
+        for j in range(pn1):
+            t0, t1 = j * (p - 1), (j + 1) * (p - 1)
+            u.append(sum(vals[t] - zero for t in range(t0, t1)))
+            v.append(sum(vals[nx + t] - zero for t in range(t0, t1)))
+        out = []
+        for i in range(nterms):
+            U = sum(_binomial(j, i) * u[j] for j in range(i, pn1))
+            V = sum(_binomial(j, i) * v[j] for j in range(i, pn1))
+            out.append((scale * cinf * U, scale * cinf * V))
+        return out
+
+    def series(self, n=3, quadratic_twist=+1, prec=5, eta=0):
+        """L_alpha(E, T) to the n-th approximation P_n(T), each coefficient
+        to the precision proven in the class docstring (or Sage's smaller
+        one).
+
+        EXAMPLES::
+
+            sage: L = EllipticCurve('11a1').padic_lseries(19)
+            sage: L.series(3)
+            4*alpha^-2 + 11*alpha^-1 + 8 + 12*alpha + O(alpha^2) + (4*alpha^-2 + O(alpha^-1))*T + (4*alpha^-2 + O(alpha^-1))*T^2 + (O(alpha^-1))*T^3 + (13*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+
+        With prec=1, the exact constant term alone, to the relative cap of
+        Qp(19, 20)(alpha)::
+
+            sage: L.series(2, prec=1).list()[0].precision_absolute()
+            38
+        """
+        if quadratic_twist != 1 or eta != 0:
+            raise NotImplementedError("twisted p-adic L-series (quadratic_twist, eta) are not available in sagebrush yet")
+        sa = _sa()
+        if isinstance(prec, float):
+            raise TypeError("%r cannot be interpreted as an integer" % (prec,))
+        p, n, prec = self._p, _integer(n), _integer(prec)
+        if n < 2:
+            raise ValueError("n (=%s) must be at least 2 at a supersingular prime" % n)
+        if prec < 1:
+            raise ValueError("Insufficient precision (%s)" % prec)
+        if prec == 1:
+            # the constant term alone: it is exact (a_(n+1,0) = a_(n,0)), so
+            # it is given to the relative cap of Qp(p, 20)(alpha), as Sage
+            F = self._field(20)
+            (U, V), = self._sums(n, 1)
+            x = self._value(F, U, V, n)
+            return sa.PowerSeriesRing(F, "T", default_prec=1)([] if x.is_zero() else [x], 1)
+        c = self._c()
+        pn1 = p ** (n - 1)
+        es = [None]
+        e = None
+        for j in range(1, prec):
+            b = _vp(_binomial(pn1, j), p)
+            e = b if e is None else min(e, b)
+            if e == 0:
+                break
+            es.append(e)
+        nterms = len(es)
+        F = self._field(-(-(n + 2) // 2))
+        cap = int(F.precision_cap())
+        sums = self._sums(n, nterms)
+        coeffs = []
+        for j, (U, V) in enumerate(sums):
+            if j == 0:
+                absprec = min(2 * n - 4, cap - n - 1)
+            else:
+                absprec = min(2 * es[j] - n - 2 - 2 * c, cap - n - 1)
+            coeffs.append(self._value(F, U, V, n, absprec))
+        # trailing coefficients that are 0 to their precision are left out,
+        # as Sage leaves them out (its polynomials over an extension drop
+        # them); the others are kept, O(alpha^k) included
+        while coeffs and coeffs[-1].is_zero():
+            coeffs.pop()
+        PS = sa.PowerSeriesRing(F, "T", default_prec=prec)
+        return PS(coeffs, nterms)
+
+    power_series = series
+
+    def Dp_valued_series(self, n=3, quadratic_twist=+1, prec=5):
+        """Not available yet: it needs the Frobenius on de Rham cohomology."""
+        raise NotImplementedError("the D_p-valued series needs the Frobenius matrix (Kedlaya's algorithm), which is not available in sagebrush yet")
+
+    def frobenius(self, prec=20, algorithm="mw"):
+        """Not available yet (Kedlaya's algorithm)."""
+        raise NotImplementedError("the Frobenius matrix on de Rham cohomology (Kedlaya's algorithm) is not available in sagebrush yet")
+
+    def order_of_vanishing(self):
+        """Not available at supersingular primes (as in Sage)."""
+        raise NotImplementedError("the order of vanishing at a supersingular prime is not available")
