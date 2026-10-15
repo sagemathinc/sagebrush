@@ -26,8 +26,8 @@ precision, with no MATLAB types:
 | `gamma(z)` | the math library for real x, exp(loggamma) for complex z |
 | `psi(z)`, `polygamma(n, z)` | 5.11.2 and 5.15.9 asymptotics, recurrences 5.5.2 and 5.15.5, reflections 5.5.4 and 5.15.6 (cot's derivatives as a polynomial in cot for real z, as a q-series for complex z), the series 5.7.4 about 1 |
 | `zeta(s)`, `hurwitz_zeta(s, a)` | Euler-Maclaurin 25.2.9 / 25.11.5, functional equation 25.4.2, Bernoulli polynomials 25.11.14 (exact rationals) at the integers s <= 0 |
-| `beta(a, b)`, `betaln(a, b)` | 5.12.1, with Stirling's series' large terms combined analytically for large arguments |
-| `faddeeva(z)`, `erf`, `erfc`, `erfi`, `erfcx` | w(z) by the trapezoidal rule on 7.7.2 with the pole's residue added (Im z < 6), Laplace's continued fraction 7.9.3 beyond; 7.2.3, 7.4.3, the Taylor series 7.6.1 |
+| `beta(a, b)`, `betaln(a, b)` | 5.12.1, with Stirling's series' large terms combined analytically for large arguments; for a large negative argument each Gamma of a negative argument reflected (5.5.3), so that B is a beta of positive arguments times sines, with the rounding errors of a + b, 1 - a, 1 - b and 1 - a - b carried exactly (TwoSum) into log B's derivatives and the sine's addition formula |
+| `faddeeva(z)`, `erf`, `erfc`, `erfi`, `erfcx` | w(z) by the trapezoidal rule on 7.7.2 with the pole's residue added (Im z < 6), Laplace's continued fraction 7.9.3 beyond; 7.2.3, 7.4.3, the Taylor series 7.6.1; e^(-z^2) with its exponent y^2 - x^2 and phase -2xy exact (Dekker's product) |
 | `erfinv(y)`, `erfcinv(q)` | Halley's iteration on erf, and Newton's on log erfc = log erfcx - x^2, which reaches the smallest subnormal q |
 | `exp_integral_e1(z)`, `exp_integral_ei(x)` | the series 6.6.1 and 6.6.2, the continued fraction 6.9.1, the asymptotic series 6.12.1 and 6.12.2, a Taylor series about Ei's zero (6.13.1) |
 | `lambert_w(z, k)` | every branch, with DLMF 4.13's branches and cuts (4.13.2, 4.13.3: the real values of W_-1 are W_-1(x + 0i), and W_1(x - 0i) gives them too); Halley's iteration from the series in (e z + 1)^(1/2) about the branch point (4.13.9_1, whose coefficients are computed by exact series reversion and summed directly near -1/e) or the asymptotic series (4.13.10, 4.13.11); on a cut the sign of a zero imaginary part picks the side (scipy.special.lambertw agrees except at W_-1(x - 0i) on (-1/e, 0), where it gives the real value) |
@@ -55,9 +55,14 @@ functions are within a few units in the last place. The larger errors
 follow the functions' own condition numbers or the method's: for complex s,
 zeta's and hurwitz_zeta's absolute error grows with |Im s| (about
 8 |Im s| eps of max(1, |zeta|), from the rounding of the phases Im s log k),
-the error functions' with |z|^2, E1's and Ei's with |x|, and the
-incomplete gamma functions' with the size of their exponent (about
-4e-15 max(1, |log value|), the rounding of log x^a e^-x / Gamma(a+1)).
+the real erfi's and erfcx's with x^2 (the rounding of e^(x^2)'s exponent;
+for complex z e^(-z^2) is exact, and the error functions are within 1e-15
+for |z| up to 1e9), E1's and Ei's with |x|, and the incomplete gamma
+functions' with the size of their exponent (about 4e-15 max(1, |log
+value|), the rounding of log x^a e^-x / Gamma(a+1)); beta's grows with
+|betaln| likewise (7e-15 max(1, |betaln|) for negative arguments).
+scripts/special-edge-sweep.py --oracle compares every function's values at
+the ends of the doubles with mpmath's.
 matlab-tests/test_special.m checks the MATLAB functions against GNU Octave,
 to 10 digits, on the examples from their documentation pages and more.
 

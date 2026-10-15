@@ -8,8 +8,8 @@ import { readFileSync } from "node:fs";
 // from test/special_mpmath_gen.py.  Each function's tolerance is a little
 // above the largest error measured in Sagebrush, as a fraction of
 // max(floor, |value|); the large ones are where the function's own
-// condition is large (|Im s| for zeta, |z|^2 for the error functions near
-// their growth, |x| for E1 and Ei), as the docstrings say.
+// condition is large (|Im s| for zeta, x^2 for the real erfi and erfcx
+// near their growth, |x| for E1 and Ei), as the docstrings say.
 const cases: [string, any[], any][] = JSON.parse(readFileSync(__dirname + "/../../test/special-mpmath.json", "utf8"));
 
 const program = `
@@ -54,7 +54,7 @@ const pair = (v: any): [number, number] => (Array.isArray(v) ? [num(v[0]), num(v
 const TOL: Record<string, [number, number, number?]> = {
   loggamma: [2e-14, 1], gamma: [6e-14, 1e-300], psi: [3e-15, 1], polygamma: [8e-15, 1e-300],
   zeta: [3e-14, 1, 2.5e-15], hurwitz_zeta: [3e-14, 1, 5e-15], beta: [3e-14, 1e-300], betaln: [1e-15, 1],
-  faddeeva: [4e-15, 1e-300], erf: [6e-15, 1e-300], erfc: [8e-15, 1e-300], erfi: [1.5e-13, 1e-300],
+  faddeeva: [1.5e-15, 1e-300], erf: [1.5e-15, 1e-300], erfc: [1.5e-15, 1e-300], erfi: [1.5e-13, 1e-300],
   erfcx: [6e-14, 1e-300], erfinv: [1e-15, 1e-300], erfcinv: [1e-15, 1e-300],
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
@@ -62,9 +62,13 @@ const TOL: Record<string, [number, number, number?]> = {
   gammainc: [6e-15, 1e-300], gammaincc: [6e-15, 1e-300], gammainc_scaled: [6e-15, 1e-300],
 };
 // (P's and Q's relative error grows with the size of their exponent, the
-// rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda):
-// it is measured per unit max(1, |log value|))
-const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled"]);
+// rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda),
+// and beta's with |betaln|, as exp(betaln) turns its absolute error into a
+// relative one: it is measured per unit max(1, |log |value||))
+const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled", "beta"]);
+// (betaln of negative arguments, through _betaln_signed's reflections: a
+// bound of its own, the positive arguments' staying as small as it is)
+const NEG_TOL: Record<string, number> = { betaln: 2.5e-15 };
 
 test("lib/_special.py agrees with mpmath within each function's stated error", () => {
   const worst: Record<string, number> = {};
@@ -97,7 +101,12 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
     }
     const [gr, gi] = pair(g), [wr, wi] = pair(want);
     let e = Math.hypot(gr - wr, gi - wi) / Math.max(TOL[name][1], Math.hypot(wr, wi));
-    if (LOG_SCALED.has(name) && wr > 0) e /= Math.max(1, Math.abs(Math.log(wr)));
+    if (LOG_SCALED.has(name) && wr !== 0) e /= Math.max(1, Math.abs(Math.log(Math.abs(wr))));
+    if (name in NEG_TOL && args.some((a) => !Array.isArray(a) && num(a) < 0)) {
+      const key = name + " (negative arguments)";
+      worst[key] = Math.max(worst[key] ?? 0, e);
+      return;
+    }
     if (TOL[name][2] !== undefined && Array.isArray(args[0])) {
       const key = name + " (complex s, per unit |Im s|)";
       worst[key] = Math.max(worst[key] ?? 0, e / Math.max(1, Math.abs(num(args[0][1]))));
@@ -105,6 +114,11 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
     }
     worst[name] = Math.max(worst[name] ?? 0, e);
   });
+  for (const [name, tol] of Object.entries(NEG_TOL)) {
+    const key = name + " (negative arguments)";
+    assert.ok(key in worst, key + " has no cases");
+    assert.ok(worst[key] <= tol, `${key}: ${worst[key]} > ${tol}`);
+  }
   for (const name of Object.keys(TOL)) {
     assert.ok(name in worst, name + " has no cases");
     assert.ok(worst[name] <= TOL[name][0], `${name}: ${worst[name]} > ${TOL[name][0]}`);
@@ -216,6 +230,14 @@ print([abs(S.zeta(z) - r) <= 3e-15 * abs(r) for z, r in zref], repr(S.zeta(1e-16
 # 1.1e-16 + 18.56i and erfi(i) = 1.1e-19 + 0.84i)
 print(repr(S.erf(2j)), repr(S.erfi(1j)), repr(S.erfc(2j)), repr(S.erf(complex(-0.0, 2))), repr(S.erf(complex(1.5, -0.0))),
       repr(S.erfi(complex(0.7, 0.0))), repr(S.erfc(complex(0.5, 0.0))))
+# (astra's CORR-957-2, the complex reciprocal: psi'(1e308 + 1e308i) = 1/w to within 1e-308, 5e-309 - 5e-309i, not 0j; and
+# the value-comparing sweep's: Gamma of a tiny negative x is -inf, not -0.0; erf next to 1e308 (1 + 1e-309i) and the
+# erfc whose phase there is beyond the doubles; E1 and erfcx near 1e308, subnormal, against mpmath's values)
+print(repr(S.polygamma(1, complex(1e308, 1e308))), repr(S.gamma(-5e-324)), repr(S.gamma(-1e-310)), repr(S.erf(complex(1e308, 1e308))),
+      repr(S.erfc(complex(-1e308, 1e308))), kind(S.erfc, complex(1e308, 1e308)).split(" at ")[0], kind(S.erf, complex(1e8, 2e8)).split(" at ")[0])
+sub = [(S.exp_integral_e1(1e308j), complex(-4.5339649050164911158e-309, 8.9130893768703339812e-309)),
+       (S.erfcx(complex(1e308, 1e308)), complex(2.8209479177387814038e-309, -2.8209479177387814038e-309))]
+print([abs(v - r) < 1e-321 for v, r in sub])
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -279,5 +301,8 @@ print(repr(S.erf(2j)), repr(S.erfi(1j)), repr(S.erfc(2j)), repr(S.erf(complex(-0
     // (mpmath: erfi(2) = 18.5648024145755526, erf(1) = 0.842700792949714869)
     "18.564802414575553j 0.8427007929497149j (1-18.564802414575553j) (-0+18.564802414575553j) (0.9661051464753108-0j) " +
       "(0.9402829338335074+0j) (0.4795001221869535-0j)",
+    "(5e-309-5e-309j) -inf -inf (1-0j) (2-0j) NotCovered: erfc: the phase of e^(-z^2) is beyond the doubles " +
+      "NotCovered: erf, erfc, erfi: |e^(-z^2)| is beyond the doubles",
+    "[True, True]",
   ]);
 });
