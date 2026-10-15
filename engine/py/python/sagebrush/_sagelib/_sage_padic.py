@@ -491,14 +491,18 @@ class pAdicFieldCappedRelative(pAdicGeneric_):
 def _exact_number(n):
     """The exact rational value of an integer, rational, real (of any
     precision: its exact binary value, never rounded through a double) or
-    numeric symbolic constant; TypeError for anything else, an infinity or
-    NaN."""
+    numeric symbolic constant (validated by the number it wraps); TypeError
+    for anything else, an infinity or NaN (a Python float infinity or NaN
+    raises OverflowError or ValueError, as in Sage)."""
     if isinstance(n, (int, _F)):
         return _F(n)
     if isinstance(n, float):
         if n in (float("inf"), float("-inf")) and type(n) is float:
             # (Sage's error for a Python infinity; TypeError for a real one)
             raise OverflowError("cannot convert float infinity to integer")
+        if n != n and type(n) is float:
+            # (Sage's error for a Python NaN)
+            raise ValueError("cannot convert float NaN to integer")
         if n != n or n in (float("inf"), float("-inf")):
             raise TypeError("unable to convert %r to an integer" % (n,))
         return _F(n)
@@ -515,8 +519,10 @@ def _exact_number(n):
             v = n.pyobject()
         except (TypeError, ValueError, AttributeError):
             raise TypeError("unable to convert %r to an integer" % (n,))
-        if isinstance(v, (int, _F)):
-            return _F(v)
+        # (the wrapped number, validated by its own exact value: SR(RR(2))
+        # holds a double, SR(RealField(100)(...)) a 100-bit real)
+        if type(v).__name__ != "Expression":
+            return _exact_number(v)
     raise TypeError("unable to convert %r to an integer" % (n,))
 
 

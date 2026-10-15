@@ -866,12 +866,30 @@ add_bigoh SR(2) -> 1 + O(3^2)
 absprec SR(3)/2 !! TypeError
 relprec SR(3)/2 !! TypeError
 add_bigoh SR(3)/2 !! TypeError
+absprec SR(RR(2)) -> 1 + O(3^2)
+relprec SR(RR(2)) -> 1 + O(3^2)
+add_bigoh SR(RR(2)) -> 1 + O(3^2)
+absprec SR(RR(1.5)) !! TypeError
+relprec SR(RR(1.5)) !! TypeError
+add_bigoh SR(RR(1.5)) !! TypeError
 absprec RR(oo) !! TypeError
 relprec RR(oo) !! TypeError
 add_bigoh RR(oo) !! TypeError
 absprec float(oo) !! OverflowError
 relprec float(oo) !! OverflowError
 add_bigoh float(oo) !! OverflowError
+absprec RR(-oo) !! TypeError
+relprec RR(-oo) !! TypeError
+add_bigoh RR(-oo) !! TypeError
+absprec float(-oo) !! OverflowError
+relprec float(-oo) !! OverflowError
+add_bigoh float(-oo) !! OverflowError
+absprec float(nan) !! ValueError
+relprec float(nan) !! ValueError
+add_bigoh float(nan) !! ValueError
+absprec RR(NaN) !! TypeError
+relprec RR(NaN) !! TypeError
+add_bigoh RR(NaN) !! TypeError
 base -> 3-adic Ring with capped relative precision 6
 absprec H(1)+2^-80 !! TypeError
 relprec H(1)+2^-80 !! TypeError
@@ -906,12 +924,30 @@ add_bigoh SR(2) -> 1 + O(3^2)
 absprec SR(3)/2 !! TypeError
 relprec SR(3)/2 !! TypeError
 add_bigoh SR(3)/2 !! TypeError
+absprec SR(RR(2)) -> 1 + O(3^2)
+relprec SR(RR(2)) -> 1 + O(3^2)
+add_bigoh SR(RR(2)) -> 1 + O(3^2)
+absprec SR(RR(1.5)) !! TypeError
+relprec SR(RR(1.5)) !! TypeError
+add_bigoh SR(RR(1.5)) !! TypeError
 absprec RR(oo) !! TypeError
 relprec RR(oo) !! TypeError
 add_bigoh RR(oo) !! TypeError
 absprec float(oo) !! OverflowError
 relprec float(oo) !! OverflowError
 add_bigoh float(oo) !! OverflowError
+absprec RR(-oo) !! TypeError
+relprec RR(-oo) !! TypeError
+add_bigoh RR(-oo) !! TypeError
+absprec float(-oo) !! OverflowError
+relprec float(-oo) !! OverflowError
+add_bigoh float(-oo) !! OverflowError
+absprec float(nan) !! ValueError
+relprec float(nan) !! ValueError
+add_bigoh float(nan) !! ValueError
+absprec RR(NaN) !! TypeError
+relprec RR(NaN) !! TypeError
+add_bigoh RR(NaN) !! TypeError
 base -> 3-adic Eisenstein Extension Field in a defined by x^2 + 3
 absprec H(1)+2^-80 !! TypeError
 relprec H(1)+2^-80 !! TypeError
@@ -946,6 +982,30 @@ add_bigoh SR(2) -> a + O(a^2)
 absprec SR(3)/2 !! TypeError
 relprec SR(3)/2 !! TypeError
 add_bigoh SR(3)/2 !! TypeError
+absprec SR(RR(2)) -> 1 + O(a^2)
+relprec SR(RR(2)) -> 1 + O(a^2)
+add_bigoh SR(RR(2)) -> a + O(a^2)
+absprec SR(RR(1.5)) !! TypeError
+relprec SR(RR(1.5)) !! TypeError
+add_bigoh SR(RR(1.5)) !! TypeError
+absprec RR(oo) !! TypeError
+relprec RR(oo) !! TypeError
+add_bigoh RR(oo) -> a + O(a^13)
+absprec float(oo) !! OverflowError
+relprec float(oo) !! OverflowError
+add_bigoh float(oo) -> a + O(a^13)
+absprec RR(-oo) !! TypeError
+relprec RR(-oo) !! TypeError
+add_bigoh RR(-oo) !! TypeError
+absprec float(-oo) !! OverflowError
+relprec float(-oo) !! OverflowError
+add_bigoh float(-oo) !! OverflowError
+absprec float(nan) !! ValueError
+relprec float(nan) !! ValueError
+add_bigoh float(nan) !! ValueError
+absprec RR(NaN) !! TypeError
+relprec RR(NaN) !! TypeError
+add_bigoh RR(NaN) !! TypeError
 add_bigoh H(-9007199254740993) precision -> -9007199254740993
 s^H(2) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
 s^H(1)+2^-80 !! TypeError
@@ -953,3 +1013,5 @@ s^H(2)-2^-90 !! TypeError
 s^SR(2) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
 s^SR(3)/2 !! TypeError
 s^RR(2) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
+s^SR(RR(2)) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
+s^SR(RR(1.5)) !! TypeError
