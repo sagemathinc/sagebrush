@@ -250,3 +250,11 @@ test("board run: a Magma item that fails fails its cell; what reads it is not ru
   assert.match(report.items[1].stdout, /Runtime error/);
   assert.equal(report.items[3].stdout, "7\n");
 });
+
+test("board run: pictures the board leaves out for their names are named on stderr, and the board still runs", () => {
+  const pic = { w: 10, h: 10, src: "data:image/png;base64,iVBORw0KGgo=" };
+  const r = run(["-"], board([{ id: "a", image: "figure.png" }, { id: "c", code: "print(1)" }], { images: { "figure.png": pic } }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /1\n/);
+  assert.equal(r.stderr, 'sagebrush board run: pictures left out: a picture\'s name is letters, digits, _ and -, at most 100 characters (plot-1, not "plot 1" or "figure.png"), and this one is not: "figure.png"\n');
+});
