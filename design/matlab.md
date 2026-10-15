@@ -19,6 +19,38 @@ and runs on a runtime library with MATLAB's semantics:
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics);
+  - **lib/_matlab_ode.py**: odeset, odeget, ode45, ode23 and deval:
+    the Dormand-Prince (1980) and Bogacki-Shampine (1989) pairs, with
+    Shampine's (1986) interpolant for ode45 and cubic Hermite
+    interpolation for ode23; the step size control is SciPy's (BSD, from
+    Hairer, Norsett and Wanner II.4; see NOTICE.md), Sagebrush's choice,
+    so steps and Stats counts differ from MATLAB's published ones while
+    solutions agree to the tolerances; the error test is odeset's
+    documented one. Also Sagebrush's own: RelTol raised to 100*eps,
+    events located by regula falsi on the interpolant, the smallest step
+    (100 spacings of the floating-point numbers at t, so that a step
+    cannot straddle a pole where the error estimates of its two sides
+    cancel) and the warning when a step must be smaller, a plot after (not during) the
+    integration when there is no output, and sol.idata's contents. Mass,
+    NonNegative and the DAE options are refused;
+  - **lib/_matlab_funfun.py**: function functions: the optimization options
+    (optimset, optimget, from their documentation pages: the eight
+    documented options, each solver's documented defaults, a default that
+    depends on the problem left empty for the solver to apply) and the
+    solvers: fzero is Brent's method (Brent 1973, chapter 4; Forsythe,
+    Malcolm and Moler 1976, section 7.2), which its page cites, after an
+    outward search for a sign change whose steps the published iterative
+    displays fix; fminbnd is Brent's localmin (Brent 1973, chapter 5;
+    Forsythe, Malcolm and Moler 1976, section 8.2), with the tolerance
+    whose bound its page gives; fminsearch is the Nelder-Mead method of
+    Lagarias, Reeds, Wright and Wright (1998) in the steps MATLAB's
+    "fminsearch Algorithm" page spells out; lsqnonneg is Lawson and
+    Hanson's NNLS (1974, chapter 23); quad is Gander and Gautschi's
+    adaptive Simpson step (2000, section 3) with the page's absolute
+    tolerance per subinterval; integral and quadgk are Shampine's
+    vectorized adaptive Gauss-Kronrod quadrature (2008), with the (7, 15)
+    pair computed for Sagebrush from its definition; integral2 and
+    integral3 iterate it;
   - **lib/_matlab_eigs.py**: eigs, a direct (thick) Ritz-vector
     restarted Arnoldi method, the Lanczos form for a Hermitian operator,
     with the interface of its documentation page. The Arnoldi extension and
@@ -714,6 +746,61 @@ The rest:
   it picks "nice" edges, so Sagebrush's rules are its own (Scott's width
   rounded to Heckbert's nice numbers, 1, 2, 5 or 10 times a power of 10)
   and its edges can differ from MATLAB's;
+- fzero's search from x0 = 0, where the published displays' step (x0/50)
+  is none, is on Octave's scale for a zero start, 0.1 (step 0.1/50):
+  Octave's fzero tries the same multiples of x0 from any start (0.99 x0,
+  1.025 x0, 0.95 x0, ...) and from 0 exactly those of 0.1 (0.099, 0.1025,
+  0.095, ...), as observed with Octave 11.1;
+- fzero's details that neither its page nor a published display fixes are
+  Sagebrush's own: the end of
+  a search that would overflow (exitflag -6), never giving exitflag -5
+  (its page says what it means, a possible singular point, but not how it
+  is detected; a sign change at a pole ends like any other), an error for
+  a NaN or complex value inside the interval, when output functions are called, and the messages
+  other than "Zero found in the interval [a, b]". PlotFcns is refused;
+- fminbnd's likewise: x1 > x2 returns NaN (exitflag -2) without calling
+  fun, a complex value is an error even with FunValCheck off, MaxFunEvals
+  and MaxIter are checked after the convergence test, and the messages
+  other than the converged one are Sagebrush's own. PlotFcns is refused;
+- fminsearch's likewise: the page says it stops when both TolX and TolFun
+  hold, and the measures are Sagebrush's (every vertex within TolX of the
+  best in each component, every value within TolFun of the best), as are
+  a complex value being an error and the messages other than the
+  converged one. PlotFcns is refused;
+- lsqnonneg's likewise: TolX as the threshold for entering (a dual
+  tolerance; a passive solution's positivity is tested exactly and the
+  variable limiting the step back reaches 0 exactly, as in Lawson and
+  Hanson's steps 6 to 11, so that a solution of any scale is kept), the
+  iteration limit when MaxIter is
+  unset (Lawson and Hanson's 3 times the number of variables), what
+  counts as an iteration (a least-squares solve), and the message for
+  exitflag 0. Display 'iter', which its page does not list, is refused;
+- quad's evaluation limit is GNU Octave's for its adaptive Simpson
+  quadrature, quadv: observed with Octave 11.1, it stops at exactly 10001
+  evaluations, whatever the integrand. Sagebrush's quad never goes beyond
+  10001: a subinterval whose step or halves would is accepted with the
+  value it has, and a warning says the tolerance may not be met;
+- quad's own choices: a subinterval with an Inf or NaN value is not
+  subdivided (with a warning), the trace's number format, and a single
+  result for single limits or values;
+- integral's error test for an array-valued integrand is component by
+  component, each component's error estimate against its own tolerance,
+  as the page's abs(q - Q) <= max(AbsoluteTolerance,
+  RelativeTolerance*abs(q)) reads for each element: a large component does
+  not hide a small one's error (Octave's integral too gets the small one
+  right);
+- integral's and quadgk's likewise: how the initial 10 subintervals are
+  made (each break interval cut into equal pieces, the paper's 150
+  samples for one interval), the change of variable for (-Inf, Inf)
+  (x = t/(1-t^2)), the parametrization of a complex path, minus the reversed integral
+  for xmin > xmax, and the warnings' wording past the published start of
+  quadgk's interval-limit warning;
+- integral2's and integral3's: "auto" is the page's "iterated" method
+  (integral over x of integral over y, and z), since the "tiled" method,
+  Shampine's 2-D program, is not available here and is refused; the inner
+  integrals use the same tolerances, and their warnings are reported
+  once. Waypoints, complex integrands and limits, and a Method that is
+  not text are refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
