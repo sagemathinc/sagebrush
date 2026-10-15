@@ -2194,6 +2194,11 @@ def _ev(s, R, prec):
         from _sage_expr import _SPECIAL_NAMES
         if name in _SPECIAL_NAMES and not (name in ("gamma", "log_gamma") and len(args) == 1 and not isinstance(a, ComplexNumberMP)):
             raise NotImplementedError("%s at more than 53 bits is not available in sagebrush yet" % name)
+        # log Gamma at negative reals: Sage's branch (the principal log Gamma,
+        # -2 pi i k on (-2k - 1, -2k + 1)) is not log(gamma(a)), which is
+        # all this precision has
+        if name == "log_gamma" and a < 0:
+            raise NotImplementedError("log_gamma of a negative real at more than 53 bits is not available in sagebrush yet")
         if name in ("abs",):
             return a.abs() if isinstance(a, ComplexNumberMP) else abs(a)
         if isinstance(a, ComplexNumberMP):
