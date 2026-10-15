@@ -9,11 +9,13 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort } from "../test-port.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
-const port = Number(process.env.CDP_PORT ?? 9472), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let port = Number(process.env.CDP_PORT) || 0, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-titles-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1200,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
@@ -55,8 +57,13 @@ try {
     return out;
   })()`);
   const box = (id) => ev(`(() => { const i = window.board.item(${JSON.stringify(id)}); return i && { x: i.x, y: i.y, w: i.w, h: i.h, inner: i.inner, depth: i.depth ?? 0 }; })()`);
+  // (far out, the whole board on screen: zoom 0.3, not the fitted zoom, which
+  // a compact layout puts near, where titles are the page's)
+  const zoomTo = (z) => ev(`(() => { const b = window.board.bounds(), c = window.board.cameraFor(b.x0, b.y0, b.x1, b.y1); window.board.setCamera({ x: (b.x0 + b.x1) / 2 - window.board.el.clientWidth / 2 / ${z}, y: (b.y0 + b.y1) / 2 - window.board.el.clientHeight / 2 / ${z}, z: ${z} }); window.board.render(); return 1; })()`);
+  await zoomTo(0.3);
   const z = await ev("window.board.camera.z");
-  check(z < 0.35, "(fitted, far out: drawn on the canvas) " + z);
+  const fits = await ev("(() => { const b = window.board.bounds(); return (b.x1 - b.x0) * 0.3 <= window.board.el.clientWidth && (b.y1 - b.y0) * 0.3 <= window.board.el.clientHeight; })()");
+  check(z === 0.3 && fits, "(far out, the whole board on screen: drawn on the canvas) " + z + " " + fits);
   const texts = await drawn();
   for (const [id, full] of Object.entries(TITLES)) {
     const g = await box(id), t = texts.find((d) => d.t === full || (d.t.endsWith("…") && full.startsWith(d.t.slice(0, -1)) && d.x >= g.x && d.x < g.x + 20 / z && d.y > g.y && d.y < g.inner.y));
@@ -87,7 +94,6 @@ try {
   // UI-0CC-1: far out, the band too small on screen, a title is never drawn
   // over its group's members: above the group where nothing is, else not
   // at all (zooms 0.3 down to 0.05; astra's group, its child 600 and 2000 wide)
-  const zoomTo = (z) => ev(`(() => { const b = window.board.bounds(), c = window.board.cameraFor(b.x0, b.y0, b.x1, b.y1); window.board.setCamera({ x: (b.x0 + b.x1) / 2 - window.board.el.clientWidth / 2 / ${z}, y: (b.y0 + b.y1) / 2 - window.board.el.clientHeight / 2 / ${z}, z: ${z} }); window.board.render(); return 1; })()`);
   for (const w of [600, 2000]) {
     const LOW = { title: "Low", nodes: [{ id: "g", kind: "group", title: "Group title above its child", children: [{ id: "a", title: "Child", w, h: 300 }] }] };
     await ev(`window.sagebrush.board.load(${JSON.stringify(LOW)}).then(() => 1)`);
