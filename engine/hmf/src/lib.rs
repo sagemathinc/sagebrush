@@ -19,13 +19,16 @@
 //! * `newspace`: new dimensions and characteristic polynomials, Galois
 //!   orbits of newforms, rational newforms and their a_p;
 //! * `eigen`: the Hecke eigenvalues of every newform, in its coefficient
-//!   field.
+//!   field;
+//! * `weight`: weights (k1, k2) other than (2, 2), with coefficients in
+//!   the representation L_k.
 //!
 //! Invalid input is an `Err`, never a panic.
 
 pub mod degeneracy;
 pub mod eigen;
 pub mod field;
+pub mod fpoly;
 pub mod newspace;
 mod par;
 pub mod orbits;
@@ -34,6 +37,8 @@ pub mod quat;
 pub mod residue;
 pub mod split;
 pub mod theta;
+pub mod weight;
+pub mod weightnew;
 
 use field::{Elt, Ideal, Prime};
 use orbits::Orbits;
@@ -43,7 +48,7 @@ use split::LocalSplitting;
 
 /// The generators of the icosian group used for the orbit search (PSAGE
 /// sqrt5.py, icosian_gens).
-fn icosian_generators() -> Vec<quat::Quat> {
+pub(crate) fn icosian_generators() -> Vec<quat::Quat> {
     use field::{ONE, W, ZERO};
     use quat::Quat;
     vec![
