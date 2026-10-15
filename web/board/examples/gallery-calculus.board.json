@@ -3,7 +3,7 @@
  "version": 1,
  "title": "Calculus in Sage",
  "mode": "sage",
- "intro": "Symbolic calculus: derivatives, integrals, series, limits, a sum and a differential equation, and a plot. One item defines the variable $x$; the others read it.",
+ "intro": "Symbolic calculus: derivatives, integrals, series, limits, a sum and a differential equation, and a plot. One item defines the variable $x$; the others that use it read it.",
  "nodes": [
   {
    "id": "calculus",
@@ -91,7 +91,7 @@
  "steps": [
   {
    "focus": "var",
-   "say": "`x` is defined here, once; every other item reads it."
+   "say": "`x` is defined here, once; every other item that uses it reads it (the Basel sum has its own `n`)."
   },
   {
    "focus": [
