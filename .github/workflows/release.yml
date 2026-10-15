@@ -31,6 +31,11 @@ jobs:
         with:
           deno-version: v2.x
       - uses: oven-sh/setup-bun@v2
+      # The conformance oracle is CPython 3.14 itself, as in ci.yml; the
+      # runner's own python3 is older and evaluates annotations eagerly.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
       - name: npm with trusted publishing (needs npm >= 11.5)
         run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
