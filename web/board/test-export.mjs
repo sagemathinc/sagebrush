@@ -112,9 +112,12 @@ try {
   const dialogOpen = () => ev("document.querySelector('[data-sbb=htmldlg]').open");
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  // (its code run first: the dialog shows what the file would carry, so it
+  // opens only when what was asked for has run, which under load is slow)
+  check(await until("window.sagebrush.board.outputs().then((os) => os.length > 0)", 90000).then(() => true, () => false), "examples/live.json's code did not run");
   for (const [mod, name] of [[2, "Ctrl"], [4, "Cmd"]]) {
     await keyS(mod);
-    await until("document.querySelector('[data-sbb=htmldlg]').open", 3000).catch(() => {});
+    await until("document.querySelector('[data-sbb=htmldlg]').open", 10000).catch(() => {});
     check(await dialogOpen(), `${name}+S on a board with code does not open Download as HTML's dialog`);
     await ev("document.querySelector('[data-sbb=htmldlg]').close(), 1");
   }
