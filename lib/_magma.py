@@ -203,11 +203,14 @@ def _named(f, name):
 class MSeq(list):
     """A Magma sequence: 1-based, printed [ 1, 2, 3 ]."""
 
-    __slots__ = ("universe",)
+    __slots__ = ("universe", "sample")
 
-    def __init__(self, it=(), universe=None):
+    def __init__(self, it=(), universe=None, sample=None):
         list.__init__(self, it)
         self.universe = universe
+        # an element that stands for the universe when none is declared, kept
+        # when the sequence is emptied (Magma's sequence keeps its universe)
+        self.sample = sample if sample is not None or not len(self) else self[0]
 
     def __repr__(self):
         return _str(self)
@@ -301,7 +304,12 @@ class MSet:
             return list(self.items)
 
     def __eq__(self, other):
-        return isinstance(other, MSet) and set(self.keys) == set(other.keys)
+        if not isinstance(other, MSet):
+            return False
+        if self.kind == "multi" or other.kind == "multi":
+            # a multiset counts its elements
+            return self.kind == other.kind and {k: v[1] for k, v in self.keys.items()} == {k: v[1] for k, v in other.keys.items()}
+        return set(self.keys) == set(other.keys)
 
     def __hash__(self):
         return hash(frozenset(self.keys))
@@ -326,6 +334,8 @@ def _key(x):
         return ("set", frozenset(x.keys))
     if isinstance(x, bool):
         return ("bool", x)
+    if isinstance(x, _smat.Matrix):
+        return ("mat", x.nrows(), x.ncols(), tuple(_m_num(v) for v in x.list()))
     return x
 
 
@@ -340,16 +350,25 @@ def _seq(items, universe=None):
     return MSeq(items, universe)
 
 
+def _set_universe(items):
+    """Magma refuses a set of values with no hashing algorithm (records,
+    Rationals(), real fields, polynomial rings)."""
+    for x in items:
+        if isinstance(x, (MRec, _RationalField, RealField_, _sp.PolynomialRing_)):
+            raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }")
+    return items
+
+
 def _set(items, universe=None):
-    return MSet(items, "set", universe)
+    return MSet(_set_universe(list(items)), "set", universe)
 
 
 def _iset(items, universe=None):
-    return MSet(items, "indexed", universe)
+    return MSet(_set_universe(list(items)), "indexed", universe)
 
 
 def _mset(items, universe=None):
-    return MSet(items, "multi", universe)
+    return MSet(_set_universe(list(items)), "multi", universe)
 
 
 def _range(a, b, c, open_):
@@ -377,7 +396,7 @@ def _own(v, name=None):
     if name is not None and hasattr(v, "_magma_assigned"):
         v._magma_assigned(name)
     if isinstance(v, MSeq):
-        return MSeq((_own(x) for x in v), v.universe)
+        return MSeq((_own(x) for x in v), v.universe, getattr(v, "sample", None))
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
         s.items = [_own(x) for x in v.items]
@@ -397,7 +416,7 @@ def _iter(s):
     if isinstance(s, MSet):
         return iter(list(s))
     if isinstance(s, str):
-        return iter(s)
+        raise MagmaError("Iteration is not possible over this object", "for")
     if hasattr(s, "__iter__"):
         return iter(s)
     raise MagmaError("cannot iterate over %s" % _str(s))
@@ -908,73 +927,733 @@ def _num(x):
     return isinstance(x, (int, _Fraction)) and not isinstance(x, bool)
 
 
-def _div(a, b):
-    if isinstance(a, int) and isinstance(b, int) and not isinstance(a, bool):
+# Values Python's operators give a meaning Magma's don't ("ab" * 3,
+# [1] + [2], true + 1): arithmetic on them is Magma's error, never a value.
+_NOARITH = (bool, str, list, tuple, set, frozenset, dict, MSet, MRange)
+
+
+def _int(x):
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+def _arith(op, args, pos):
+    o = op[:-2] if op.endswith(":=") else op
+    if len(args) == 2:
+        a, b = args
+        if isinstance(a, MTuple) and isinstance(b, MTuple) and o == "+":
+            raise MagmaError("arithmetic of tuples is not supported yet", "'%s'" % o, True, pos)
+        if o == "*" and isinstance(b, MSeq) and not len(b) and not isinstance(a, (bool, str, MSeq, MSet, MTuple, MRange)):
+            if _value_base(a) in ("Z", "Q") and not isinstance(a, _snf.NumberFieldElement):
+                raise MagmaError("a number times the empty sequence is not supported yet", "'*'", True, pos)
+            k = _ak(a)
+            if k is not None and (k[0] in ("N", "P", "F") or (k[0] == "M" and k[1] == k[2])):
+                raise MagmaError("Argument 1 must be an integer, rational", "'*'", True, pos)
+    for a in args:
+        if isinstance(a, _NOARITH):
+            raise _bad_types(op, args, pos)
+    if len(args) == 2:
+        _arith_rule(op, args[0], args[1], pos)
+
+
+def _ak(x):
+    """An operand of arithmetic, as Magma's rules see it: ("N", base) for a
+    number (base Z, Q or R; a rational element of a number field counts as
+    its value), ("P", base) a polynomial over Z or Q, ("F", field) a
+    number field element, ("M", rows, columns, base) a matrix, ("S", x) a
+    structure, ("map",); None for anything else."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, int):
+        return ("N", "Z")
+    if isinstance(x, _Fraction):
+        return ("N", "Q")
+    if isinstance(x, MReal):
+        return ("N", "R")
+    if isinstance(x, _sp.Polynomial):
+        b = _base(x.parent().base_ring())
+        return ("P", b) if b else None
+    if isinstance(x, _snf.NumberFieldElement):
+        return ("F", id(x.parent()))
+    if isinstance(x, _smat.Matrix):
+        return ("M", x.nrows(), x.ncols(), _base(x.base_ring()))
+    if _is_struct(x):
+        return ("S", x)
+    if isinstance(x, MMap):
+        return ("map",)
+    return None
+
+
+def _value_base(x):
+    """The smallest of Z, Q a number lies in, by value (2/1 and K!1 are
+    integers), or R."""
+    v = _rational(x) if isinstance(x, _snf.NumberFieldElement) else x
+    if isinstance(v, MReal):
+        return "R"
+    if isinstance(v, (int, _Fraction)):
+        return "Z" if _Fraction(v).denominator == 1 else "Q"
+    return None
+
+
+def _arith_rule(op, a, b, pos):
+    """Raises Magma's error for a op b (op one of + - * / div mod ^ and
+    their op-assignments), if Magma has one; checked against Magma 2.18 pair
+    by pair (test/magma-compare.test.ts).  What Magma computes but Sagebrush
+    doesn't model is refused ("not supported yet")."""
+    o = op[:-2] if op.endswith(":=") else op
+    A, B = _ak(a), _ak(b)
+    err = lambda code: _incompatible(code, o, a, b, pos)
+    unsupported = lambda what: MagmaError("%s is not supported yet" % what, "'%s'" % o, True, pos)
+    if A is None or B is None:
+        if isinstance(a, (MTuple, MRec)) or isinstance(b, (MTuple, MRec)):
+            raise err("B")
+        return  # parents these rules don't model (points, ideals, groups): the operation decides
+    ka, kb = A[0], B[0]
+    if ka == "map" or kb == "map":
+        if o == "*" and ka == kb == "map":
+            return
+        if o == "^" and ka == "map" and kb == "N" and _value_base(b) == "Z":
+            raise unsupported("a power of a map")
+        raise err("B")
+    if ka == "S" or kb == "S":
+        if ka == kb == "S":
+            ca, cb = _struct_cat(A[1]), _struct_cat(B[1])
+            if ca == cb == "RngUPol":
+                if _base(A[1].base_ring()) != _base(B[1].base_ring()):
+                    if o == "/":
+                        raise MagmaError("Incompatible arguments", "'/'", True, pos)
+                    raise err("C" if o in ("+", "*") else "B")
+                if o in ("+", "*") or (o == "/" and _base(A[1].base_ring()) == "Q"):
+                    raise unsupported("arithmetic of polynomial rings")
+                if o == "/":
+                    raise MagmaError("Illegal coercion", "quo< ... >", True, pos)
+            if ca == cb == "ModMat":
+                if A[1].nrows() == B[1].nrows() and A[1].ncols() == B[1].ncols() and \
+                        _base(A[1].base_ring()) != _base(B[1].base_ring()) and o in ("+", "*", "/"):
+                    raise err("C")
+                if _struct_eq_quiet(A[1], B[1]):
+                    if o == "/" and _base(A[1].base_ring()) == "Z":
+                        raise MagmaError("Coefficient ring of argument 1 is not a field", "'/'", True, pos)
+                    if o in ("+", "*", "/"):
+                        raise unsupported("arithmetic of matrix spaces")
+            if ca == cb == "RngInt" and o in ("+", "*", "/"):
+                raise unsupported("arithmetic of the ring of integers (ideals)")
+        if ka == "S" and kb == "N" and o == "^" and _struct_cat(A[1]) == "RngInt" and _value_base(b) == "Z":
+            raise unsupported("powers of the ring of integers (modules)")
+        if ka == "N" and kb == "S" and o == "*" and _struct_cat(B[1]) == "RngInt" and _value_base(a) == "Z":
+            raise unsupported("ideals of the integers")
+        raise err("B")
+    if o in ("+", "-"):
+        _rule_add(A, B, a, b, err, unsupported)
+    elif o == "*":
+        _rule_mul(A, B, a, b, err, pos, unsupported)
+    elif o == "/":
+        _rule_div(A, B, a, b, err, pos, unsupported)
+    elif o in ("div", "mod"):
+        _rule_quo(o, A, B, a, b, err, pos, unsupported)
+    elif o == "^":
+        _rule_pow(A, B, a, b, err, pos, unsupported)
+
+
+def _sq(M):
+    return M[1] == M[2]
+
+
+def _rule_add(A, B, a, b, err, unsupported):
+    for X, Y in ((A, B), (B, A)):
+        kx, ky = X[0], Y[0]
+        if kx == "N" and ky == "P" and X[1] == "Q" and Y[1] == "Z":
+            raise err("B")
+        if kx == "N" and ky == "F" and X[1] == "R":
+            raise err("B")
+        if kx == "P" and ky == "F":
+            raise err("B")
+        if ky == "M" and kx != "M":
+            if not _sq(Y):
+                raise err("B")
+            if kx == "P" and X[1] == "Z" and Y[3] == "Q":
+                raise err("C")
+    if A[0] == B[0] == "F" and A[1] != B[1]:
+        raise err("C")
+    if A[0] == B[0] == "M" and (A[1], A[2]) != (B[1], B[2]):
+        raise err("C" if _sq(A) and _sq(B) else "B")
+    if (A[0] == "M") != (B[0] == "M"):
+        raise unsupported("adding a scalar to a matrix")
+    _poly_rings(A, B, a, b, unsupported)
+
+
+def _poly_rings(A, B, a, b, unsupported):
+    """Refused: polynomials of two rings (Magma maps generator to
+    generator) and polynomials with real numbers (over the reals)."""
+    if A[0] == B[0] == "P" and a.parent() is not b.parent() and a.parent() != b.parent():
+        raise unsupported("arithmetic of polynomials of two rings")
+    if {A[0], B[0]} == {"P", "N"} and "R" in (A[1], B[1]):
+        raise unsupported("polynomials over the real numbers")
+
+
+def _rule_mul(A, B, a, b, err, pos, unsupported):
+    for X, Y, x in ((A, B, a), (B, A, b)):
+        kx, ky = X[0], Y[0]
+        if kx == "N" and ky == "P" and X[1] == "Q" and Y[1] == "Z":
+            raise err("B")
+        if kx == "N" and ky == "F" and X[1] == "R":
+            raise err("B")
+        if kx == "P" and ky == "F":
+            raise err("B")
+        if ky == "M" and kx != "M":
+            if kx == "P" and X[1] == "Z" and Y[3] == "Q":
+                raise err("C")
+            if not _sq(Y):
+                # a scalar of the matrix's base ring (by value) only
+                vb = _value_base(x)
+                if vb is None or (vb == "Q" and Y[3] == "Z") or vb == "R":
+                    raise err("C")
+    if A[0] == B[0] == "F" and A[1] != B[1]:
+        raise err("C")
+    if A[0] == B[0] == "M":
+        if A[2] == B[1]:
+            if A[3] != B[3] and not (_sq(A) and _sq(B)):
+                raise MagmaError("Arguments have incompatible coefficient rings", "'*'", True, pos)
+            return
+        if A[3] != B[3] and not (_sq(A) and _sq(B)):
+            raise MagmaError("Arguments have incompatible coefficient rings", "'*'", True, pos)
+        raise err("C" if _sq(A) and _sq(B) else "G")
+    _poly_rings(A, B, a, b, unsupported)
+
+
+def _rule_div(A, B, a, b, err, pos, unsupported):
+    ka, kb = A[0], B[0]
+    if kb == "M":
+        raise err("C" if _sq(B) else "B")
+    if ka == "M":
+        vb = _value_base(b) if kb in ("N", "F") else None
+        if vb == "Z" and A[3] == "Z" and _rational(b) not in (1, -1):
+            raise MagmaError("Argument 2 is not a unit", "'/'", True, pos)
+        if vb in ("Z",) or (vb == "Q" and A[3] == "Q"):
+            raise unsupported("dividing a matrix by a scalar")
+        raise err("C")
+    if ka == "N" and kb == "N":
+        return
+    if "F" in (ka, kb):
+        if ka == kb == "F":
+            if A[1] != B[1]:
+                raise err("C")
+            return
+        other = B if ka == "F" else A
+        if other[0] == "P":
+            if kb == "F" and _value_base(b) in ("Z", "Q"):
+                raise unsupported("dividing a polynomial by a number field element")
+            raise err("B") if kb == "P" else err("C")
+        if other[0] == "N" and other[1] == "R":
+            raise err("B")
+        return
+    # numbers and polynomials
+    if "N" in (ka, kb) and "R" in (A[1], B[1]):
+        raise MagmaError("Cannot create rational function field over ring with no exact polynomial GCD algorithm",
+                         "'/'", True, pos)
+    if ka == "N" and kb == "P" and A[1] == "Q" and B[1] == "Z":
+        raise err("B")
+    _poly_rings(A, B, a, b, unsupported)
+    if ka == "P" and kb == "N":
+        vb = _value_base(b)
+        if B[1] == "Q" and A[1] == "Z" and vb == "Q":
+            raise err("C")
+        if A[1] == "Z" and _rational(b) not in (1, -1):
+            raise MagmaError("Argument 2 is not a unit", "'/'", True, pos)
+
+
+def _rule_quo(o, A, B, a, b, err, pos, unsupported):
+    ka, kb = A[0], B[0]
+    if o == "div" and (ka == "M" or kb == "M"):
+        if kb == "M" and not _sq(B):
+            raise err("B")
+        if ka == "M" and A[3] == "Q" and ((kb == "F" and _value_base(b) is not None) or (kb == "N" and _value_base(b) == "Q")):
+            raise MagmaError("Division failed: Runtime error in 'div': Bad argument types\n"
+                             "Argument types given: FldRatElt, FldRatElt", "'div'", True, pos)
+        if ka == "M" and kb in ("N", "F") and _value_base(b) == "Z":
+            if A[3] == "Q":
+                raise MagmaError("Coefficient ring must be Z", "'div'", True, pos)
+            raise unsupported("div of a matrix")
+        if ka == "M" and kb == "M":
+            raise MagmaError("Scalar not in base ring of matrix", "'div'", True, pos)
+        if kb == "M" and ka == "P" and B[3] == "Q" and A[1] == "Z":
+            raise err("B")
+        raise MagmaError("Scalar not in base ring of matrix", "'div'", True, pos)
+    if ka in ("M", "F") or kb in ("M", "F"):
+        raise err("B")
+    if ka == kb == "N":
+        if A[1] != "Z" or B[1] != "Z":
+            raise err("B")
+        return
+    # numbers and polynomials: integers, rationals into Q[x], reals refused
+    for X, Y in ((A, B), (B, A)):
+        if X[0] == "N" and X[1] == "Q" and Y[0] == "P" and Y[1] == "Z":
+            raise err("B")
+        if X[0] == "N" and X[1] == "R":
+            raise unsupported("%s with a real number and a polynomial" % o)
+    _poly_rings(A, B, a, b, unsupported)
+    # what is modelled: polynomials of one ring, a polynomial over Q by a number
+    if ka == "N":
+        raise unsupported("%s of a number by a polynomial" % o)
+    if kb == "N" and A[1] == "Z":
+        raise unsupported("%s of a polynomial over the integers by a number" % o)
+
+
+def _rule_pow(A, B, a, b, err, pos, unsupported):
+    ka, kb = A[0], B[0]
+    if ka == "N":
+        if kb != "N":
+            raise err("B")
+        return
+    if kb != "N" or B[1] != "Z":
+        if ka == "P" and kb == "M":
+            # Magma's errors, by the matrix's shape (checked against Magma)
+            if A[1] == "Z" and B[3] == "Q" and min(B[1], B[2]) >= 2:
+                raise MagmaError("Bad argument types\nArgument types given: FldRatElt, RngMPolElt", "'*'", True, pos)
+            if B[2] == 1 or B[1] == 1:
+                raise MagmaError("Index %d (2) should be in the range [1 .. 1]" % (2 if B[2] == 1 else 1), "'[]'", True, pos)
+            raise unsupported("a polynomial to the power of a matrix")
+        raise err("B")
+    if ka == "M" and not _sq(A):
+        raise MagmaError("Argument 1 is not square", "'^'", True, pos)
+
+
+
+def _add(a, b, pos=None, op="+"):
+    if type(a) is int and type(b) is int:
+        return a + b
+    _arith(op, (a, b), pos)
+    try:
+        return a + b
+    except TypeError:
+        raise _bad_types(op, (a, b), pos)
+
+
+def _sub(a, b, pos=None, op="-"):
+    if type(a) is int and type(b) is int:
+        return a - b
+    _arith(op, (a, b), pos)
+    try:
+        return a - b
+    except TypeError:
+        raise _bad_types(op, (a, b), pos)
+
+
+def _mul(a, b, pos=None, op="*"):
+    if type(a) is int and type(b) is int:
+        return a * b
+    if type(a) is str and type(b) is str:
+        return a + b  # Magma's * joins strings
+    _arith(op, (a, b), pos)
+    try:
+        return a * b
+    except TypeError:
+        raise _bad_types(op, (a, b), pos)
+
+
+def _uplus(a, pos=None):
+    """+a: numbers and the elements of structures (matrices too)."""
+    if _eq_kind(a) != "elt":
+        raise _bad_types("+", (a,), pos)
+    return a
+
+
+def _neg(a, pos=None):
+    if type(a) is int:
+        return -a
+    _arith("-", (a,), pos)
+    try:
+        return -a
+    except TypeError:
+        raise _bad_types("-", (a,), pos)
+
+
+def _div(a, b, pos=None, op="/"):
+    if _int(a) and _int(b):
         return _intdiv(a, b)
+    _arith(op, (a, b), pos)
+    if isinstance(a, _sp.Polynomial) and _num(b) and b not in (1, -1) and a.parent().base_ring() == _sp.ZZ:
+        # over the integers a number divides only if it is a unit
+        raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) / MReal.of(b)
     return a / b
 
 
-def _idiv(a, b):
-    if isinstance(a, int) and isinstance(b, int):
+def _idiv(a, b, pos=None):
+    if _int(a) and _int(b):
         if b == 0:
             raise MagmaError("Division by zero")
         return a // b
+    _arith("div", (a, b), pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[0]
     return a // b
 
 
-def _mod(a, b):
-    if isinstance(a, int) and isinstance(b, int):
+def _mod(a, b, pos=None):
+    if _int(a) and _int(b):
         if b == 0:
             raise MagmaError("Division by zero")
         return a % b
+    _arith("mod", (a, b), pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[1]
     return a % b
 
 
-def _pow(a, b):
-    if isinstance(a, int) and isinstance(b, int) and not isinstance(a, bool):
+def _pow(a, b, pos=None, op="^"):
+    if _int(a) and _int(b):
         if b < 0:
             return _intdiv(1, a ** -b)
         return a ** b
+    if type(a) is str and type(b) is int:
+        # Magma's s^n repeats a string
+        if b < 0:
+            raise MagmaError("Argument 2 (%d) should be >= 0" % b, "'%s'" % op, True, pos)
+        return a * b
+    _arith(op, (a, b), pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) ** b
     return a ** b
 
 
-def _eq(a, b):
-    if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
-        # Magma has no equality of record formats
-        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (Type(a), Type(b)), "'eq'")
+def _is_struct(x):
+    """A structure (a ring or field, a polynomial ring, a matrix space)."""
+    return isinstance(x, (_IntegerRing, _RationalField, RealField_, _sp.PolynomialRing_, _snf.NumberField_absolute,
+                          _smat.MatrixSpace_))
+
+
+def _struct_cat(x):
+    """A structure's category: structures of one category go in one
+    sequence, and compare by their defining data."""
+    for cls, cat in ((_IntegerRing, "RngInt"), (_RationalField, "FldRat"), (RealField_, "FldRe"),
+                     (_sp.PolynomialRing_, "RngUPol"), (_snf.NumberField_absolute, "FldNum"),
+                     (_smat.MatrixSpace_, "ModMat")):
+        if isinstance(x, cls):
+            return cat
+    return None
+
+
+def _eq_kind(x):
+    """What x can be compared with or coerced to: only values of the same
+    kind.  "elt": numbers and the elements of structures, whose parents
+    decide (_desc, _common); a value of no known kind only meets its own
+    type."""
+    if isinstance(x, bool):
+        return "bool"
+    if isinstance(x, (int, _Fraction, MReal)):
+        return "elt"
+    if isinstance(x, _Cat):
+        return "cat"
+    if isinstance(x, str):
+        return "str"
+    if isinstance(x, (MSeq, MRange)):
+        return "seq"
+    if isinstance(x, MSet):
+        return "mset" if x.kind == "multi" else "set"
+    if isinstance(x, MTuple):
+        return "tup"
+    if isinstance(x, MRec):
+        return "rec"
+    if isinstance(x, MMap):
+        return "map"
+    if _is_struct(x):
+        return "struct"
+    if hasattr(x, "parent"):
+        return "elt"
+    return "other " + type(x).__name__
+
+
+# ---- parents and Magma's coercions between them (checked against Magma
+# 2.18 pair by pair: magma-tests/test_stdin_compare.m)
+
+_BASES = ("Z", "Q", "R")
+
+
+def _base(b):
+    return "Z" if b == _sp.ZZ else "Q" if b == _sp.QQ else None
+
+
+def _desc(x):
+    """The parent of an element, as the coercion rules see it: ("Z",),
+    ("Q",), ("R",), ("ZX",)/("QX",) (polynomials over Z or Q), ("NF", id)
+    (a number field), ("Mat", rows, columns, base), ("Str",), ("Bool",);
+    None for a value that is not an element."""
+    if isinstance(x, bool):
+        return ("Bool",)
+    if isinstance(x, _Cat):
+        return None
+    if isinstance(x, str):
+        return ("Str",)
+    if isinstance(x, int):
+        return ("Z",)
+    if isinstance(x, _Fraction):
+        return ("Q",)
+    if isinstance(x, MReal):
+        return ("R",)
+    if isinstance(x, _sp.Polynomial):
+        b = _base(x.parent().base_ring())
+        return ("ZX",) if b == "Z" else ("QX",) if b == "Q" else ("poly", id(x.parent()))
+    if isinstance(x, _snf.NumberFieldElement):
+        return ("NF", id(x.parent()))
+    if isinstance(x, _smat.Matrix):
+        return ("Mat", x.nrows(), x.ncols(), _base(x.base_ring()))
+    if _eq_kind(x) == "elt":
+        return ("elt", type(x).__name__)
+    return None
+
+
+def _udesc(u):
+    """The parent descriptor of the elements of the structure u (a
+    universe), or None."""
+    if u is _ZZ:
+        return ("Z",)
+    if u is _QQ:
+        return ("Q",)
+    if isinstance(u, RealField_):
+        return ("R",)
+    if isinstance(u, _sp.PolynomialRing_):
+        b = _base(u.base_ring())
+        return ("ZX",) if b == "Z" else ("QX",) if b == "Q" else None
+    if isinstance(u, _snf.NumberField_absolute):
+        return ("NF", id(u))
+    if isinstance(u, _smat.MatrixSpace_):
+        return ("Mat", u.nrows(), u.ncols(), _base(u.base_ring()))
+    return None
+
+
+def _common(d, e):
+    """Whether elements with parents d and e meet in a structure Magma's
+    coercions reach: None if they do, else Magma's error, "B" (bad argument
+    types), "C" (not compatible) or "G" (incompatible degrees)."""
+    if d == e:
+        return None
+    for p, q in ((d, e), (e, d)):
+        a, b = p[0], q[0]
+        if a in _BASES and b in _BASES:
+            return None
+        if a in _BASES and b == "ZX":
+            return None if a != "Q" else "B"
+        if a in _BASES and b == "QX":
+            return None
+        if a in ("ZX", "QX") and b in ("ZX", "QX"):
+            return None
+        if a in ("Z", "Q") and b == "NF":
+            return None
+        if a == "NF" and b == "NF":
+            return "C"
+        if b == "Mat":
+            n, m = q[1], q[2]
+            if a == "Mat":
+                if (p[1], p[2]) == (n, m):
+                    return None
+                return "C" if p[1] == p[2] and n == m else "G"
+            if n != m:
+                return "B"
+            if a in _BASES or a in ("QX", "NF"):
+                return None
+            if a == "ZX":
+                return None if q[3] == "Z" else "B"
+    return "B"
+
+
+def _scalar(x):
+    """x as a number, if it is one (a constant polynomial, a rational
+    element of a number field), else None."""
+    if isinstance(x, (int, _Fraction, MReal)) and not isinstance(x, bool):
+        return x
+    if isinstance(x, _sp.Polynomial):
+        c = list(x.list())
+        return (_m_num(c[0]) if c else 0) if len(c) <= 1 else None
+    if isinstance(x, _snf.NumberFieldElement):
+        c = list(x.list())
+        return _m_num(c[0]) if all(v == 0 for v in c[1:]) else None
+    return None
+
+
+def _num_eq(a, b):
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) == MReal.of(b)
-    if isinstance(a, (MSeq, MRange)) and isinstance(b, (MSeq, MRange)):
-        return list(a) == list(b)
     return a == b
 
 
-def _ne(a, b):
-    return not _eq(a, b)
+def _elt_eq(a, b):
+    """Equality of elements whose parents meet (_common)."""
+    m = a if isinstance(a, _smat.Matrix) else b if isinstance(b, _smat.Matrix) else None
+    if m is not None:
+        o = b if m is a else a
+        if isinstance(o, _smat.Matrix):
+            return m == o
+        # a scalar matrix equals its scalar
+        s = _scalar(o)
+        if s is None:
+            return False
+        rows = [list(r) for r in m.rows()]
+        n = len(rows)
+        return all(_num_eq(_m_num(rows[i][j]), s if i == j else 0) for i in range(n) for j in range(n))
+    if isinstance(a, _sp.Polynomial) and isinstance(b, _sp.Polynomial):
+        # one univariate ring coerces into the other, generator to generator
+        return list(a.list()) == list(b.list())
+    if isinstance(a, _sp.Polynomial) or isinstance(b, _sp.Polynomial):
+        sa, sb = _scalar(a), _scalar(b)
+        return sa is not None and sb is not None and _num_eq(sa, sb)
+    if isinstance(a, MReal) or isinstance(b, MReal):
+        sa, sb = _scalar(a), _scalar(b)
+        return sa is not None and sb is not None and _num_eq(sa, sb)
+    return a == b
 
 
-def _lt(a, b):
-    return a < b
+def _incompatible(code, op, a, b, pos):
+    if code == "C":
+        return MagmaError("Arguments are not compatible\nArgument types given: %s, %s" % (_ext_type(a), _ext_type(b)),
+                          "'%s'" % op, True, pos)
+    if code == "G":
+        return MagmaError("Arguments have incompatible degrees", "'%s'" % op, True, pos)
+    return _bad_types(op, (a, b), pos)
 
 
-def _le(a, b):
-    return a <= b
+def _struct_eq(a, b, op, pos):
+    """Equality of structures: by category and defining data, as Magma."""
+    ca, cb = _struct_cat(a), _struct_cat(b)
+    if a is b:
+        return True
+    if ca == cb:
+        if ca == "FldRe":
+            return a.prec == b.prec
+        if ca == "RngUPol":
+            if _base(a.base_ring()) == _base(b.base_ring()):
+                return True
+            raise _incompatible("C", op, a, b, pos)
+        if ca == "ModMat":
+            if (a.nrows(), a.ncols(), _base(a.base_ring())) == (b.nrows(), b.ncols(), _base(b.base_ring())):
+                return True
+            raise _incompatible("C", op, a, b, pos)
+        return False  # number fields made apart differ
+    if {ca, cb} in ({"RngInt", "FldRat"}, {"FldRat", "FldNum"}):
+        return False
+    raise _bad_types(op, (a, b), pos)
 
 
-def _gt(a, b):
-    return a > b
+def _eq(a, b, pos=None, op="eq"):
+    if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
+        # Magma has no equality of record formats
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (Type(a), Type(b)), "'%s'" % op, True, pos)
+    da, db = _desc(a), _desc(b)
+    if da is not None and db is not None:
+        code = _common(da, db)
+        if code:
+            raise _incompatible(code, op, a, b, pos)
+        return _elt_eq(a, b)
+    ka, kb = _eq_kind(a), _eq_kind(b)
+    if ka != kb:
+        # 1 eq "1", [1] eq 1, {1} eq {* 1 *}, 1 eq Integers(): Magma's error
+        raise _bad_types(op, (a, b), pos)
+    if ka == "rec":
+        # Magma has no equality of records, not even r eq r
+        raise _bad_types(op, (a, b), pos)
+    if ka == "struct":
+        return _struct_eq(a, b, op, pos)
+    if ka == "map":
+        if a is b:
+            return True
+        raise MagmaError("Cannot test equality for those maps", "'%s'" % op, True, pos)
+    if ka == "tup":
+        # tuples of one length whose entries compare
+        if len(a) != len(b) or any(_eq_kind(x) != _eq_kind(y) for x, y in zip(a, b)):
+            raise MagmaError("Arguments are not compatible\nArgument types given: Tup, Tup", "'%s'" % op, True, pos)
+        return all(_eq(x, y) for x, y in zip(a, b))
+    if ka == "seq":
+        if len(a) and len(b):
+            d, e = _desc(a[0]), _desc(b[0])
+            if (d is None) != (e is None) or (d is not None and _common(d, e)) or (d is None and _eq_kind(a[0]) != _eq_kind(b[0])):
+                raise MagmaError("Incompatible sequences", "'%s'" % op, True, pos)
+        return len(a) == len(b) and all(_cmpeq(x, y) for x, y in zip(a, b))
+    return a == b
 
 
-def _ge(a, b):
-    return a >= b
+def _ne(a, b, pos=None):
+    return not _eq(a, b, pos, "ne")
+
+
+def _order(a, b, op, pos):
+    """-1, 0 or 1: a against b, where Magma orders them (numbers with
+    numbers, strings, booleans, sequences lexicographically, tuples of one
+    length, Integers() with itself); Magma's error where it has none.  The
+    orders Magma has on polynomials and matrices are not modelled: refused."""
+    da, db = _desc(a), _desc(b)
+    num = ("Z", "Q", "R")
+    if da is not None and db is not None and da[0] in num and db[0] in num:
+        fa, fb = (MReal.of(a), MReal.of(b)) if "R" in (da[0], db[0]) else (a, b)
+        return (fa > fb) - (fa < fb)
+    if da == db == ("Str",) or da == db == ("Bool",):
+        return (a > b) - (a < b)
+    if da is not None and db is not None:
+        if da[0] == db[0] == "Mat" and (da[1], da[2]) != (db[1], db[2]):
+            raise MagmaError("Arguments have incompatible degrees", "'%s'" % op, True, pos)
+        code = _common(da, db)
+        if code:
+            raise _incompatible(code, op, a, b, pos)
+        if "NF" in (da[0], db[0]) and "Mat" not in (da[0], db[0]):
+            raise MagmaError("No comparison algorithm exists for given objects", "'%s'" % op, True, pos)
+        if da[0] == db[0] == "Mat" and (da[1], da[2]) != (db[1], db[2]):
+            raise MagmaError("Arguments have incompatible degrees", "'%s'" % op, True, pos)
+        raise MagmaError("ordering of polynomials and matrices is not supported yet", "'%s'" % op, True, pos)
+    ka, kb = _eq_kind(a), _eq_kind(b)
+    if op == "ge" and ka == "tup" and type(b) is int:
+        raise _UserError("")
+    if ka == kb == "seq":
+        if len(a) and len(b):
+            d, e = _desc(a[0]), _desc(b[0])
+            if (d is None) != (e is None) or (d is not None and _common(d, e)):
+                raise MagmaError("Incompatible sequences", "'%s'" % op, True, pos)
+        for x, y in zip(a, b):
+            c = _order(x, y, op, pos)
+            if c:
+                return c
+        return (len(a) > len(b)) - (len(a) < len(b))
+    if ka == kb == "tup":
+        if len(a) != len(b):
+            raise MagmaError("Arguments are not compatible\nArgument types given: Tup, Tup", "'%s'" % op, True, pos)
+        for x, y in zip(a, b):
+            c = _order(x, y, op, pos)
+            if c:
+                return c
+        return 0
+    if ka == kb == "struct" and a is _ZZ and b is _ZZ:
+        return 0
+    if ka == kb == "struct":
+        if _struct_cat(a) == _struct_cat(b):
+            if _struct_cat(a) in ("RngUPol", "ModMat") and not _struct_eq_quiet(a, b):
+                raise _incompatible("C", op, a, b, pos)
+            raise MagmaError("No comparison algorithm exists for given objects", "'%s'" % op, True, pos)
+    if ka == kb and ka in ("set", "rec", "map"):
+        raise MagmaError("No comparison algorithm exists for given objects", "'%s'" % op, True, pos)
+    if ka == kb == "mset":
+        raise MagmaError("ordering of multisets is not supported yet", "'%s'" % op, True, pos)
+    raise _bad_types(op, (a, b), pos)
+
+
+def _struct_eq_quiet(a, b):
+    try:
+        return _struct_eq(a, b, "eq", None)
+    except MagmaError:
+        return False
+
+
+def _lt(a, b, pos=None):
+    return _order(a, b, "lt", pos) < 0
+
+
+def _le(a, b, pos=None):
+    return _order(a, b, "le", pos) <= 0
+
+
+def _gt(a, b, pos=None):
+    return _order(a, b, "gt", pos) > 0
+
+
+def _ge(a, b, pos=None):
+    return _order(a, b, "ge", pos) >= 0
 
 
 def _cmpeq(a, b):
@@ -988,24 +1667,154 @@ def _cmpne(a, b):
     return not _cmpeq(a, b)
 
 
-def _in(x, s):
+_NOCOERCE = object()
+
+
+def _universe(s):
+    """What decides the universe of the sequence or set s: ("struct", u)
+    for one made with a structure ([ Integers() | ]), ("elt", y) for a
+    first element y, None when empty.  One element is looked at, not the
+    whole collection."""
+    u = getattr(s, "universe", None)
+    if u is not None and _is_struct(u):
+        return ("struct", u)
+    if isinstance(s, MRange):
+        return ("elt", s.a) if len(s) else None
+    if isinstance(s, MSet):
+        return ("elt", s.items[0]) if s.items else None
+    if len(s):
+        return ("elt", s[0])
+    sample = getattr(s, "sample", None)
+    return ("elt", sample) if sample is not None else None
+
+
+def _rational(x):
+    """A rational element of a number field as the number it is (Magma
+    coerces such an element by value); anything else unchanged."""
+    if isinstance(x, _snf.NumberFieldElement):
+        v = _scalar(x)
+        if v is not None:
+            return int(v) if _Fraction(v).denominator == 1 else _Fraction(v)
+    return x
+
+
+def _meets(x, s):
+    """Whether x and the elements of the sequence or set s have a common
+    universe, as `in` and Index need: None if so, "U" (no valid universe)
+    or "N" (records: no equality) if not."""
+    w = _universe(s)
+    if w is None:
+        return None
+    dx = _desc(x)
+    if w[0] == "struct":
+        if dx and dx[0] == "NF" and _udesc(w[1]) != dx:
+            dx = _desc(_rational(x))
+        dy = _udesc(w[1])
+    else:
+        y = w[1]
+        if isinstance(y, MRec):
+            return "N"
+        dy = _desc(y)
+        if dx and dx[0] == "NF" and dy != dx:
+            dx = _desc(_rational(x))
+        if dy is None:
+            # not elements: structures of one category, sets of any kind,
+            # maps; sequences whose elements compare
+            if dx is not None:
+                return "U"
+            kx, ky = _eq_kind(x), _eq_kind(y)
+            if kx == "struct" and ky == "struct":
+                return None if _struct_cat(x) == _struct_cat(y) else "U"
+            if {kx, ky} <= {"set", "mset"} or kx == ky == "map":
+                return None
+            if kx == ky == "tup":
+                return None if len(x) == len(y) else "U"
+            if kx == ky == "seq":
+                try:
+                    _eq(x, y)
+                except MagmaError:
+                    return "U"
+                return None
+            return None if kx == ky else "U"
+    if dx is None or dy is None:
+        return "U"
+    if dy == ("Str",) and type(x) is int and x == 1:
+        return None  # 1 is the empty string in a universe of strings
+    return None if _common(dx, dy) is None else "U"
+
+
+def _in(x, s, pos=None, op="in"):
     if hasattr(s, "_magma_contains"):
         return s._magma_contains(x)
     if isinstance(s, str):
         return x in s
-    return any(_eq(x, y) for y in s) if isinstance(s, (MSeq, MRange, MTuple)) else x in s
+    if isinstance(s, MTuple):
+        raise _bad_types(op, (x, s), pos)
+    if isinstance(s, (MSeq, MRange, MSet)):
+        code = _meets(x, s)
+        if code == "N":
+            raise MagmaError("No equality algorithm for sequence elements", "'%s'" % op, True, pos)
+        if code:
+            raise MagmaError("No valid universe containing all elements", "'%s'" % op, True, pos)
+        w = _universe(s)
+        if w and w[0] == "elt" and _desc(w[1]) == ("Str",) and type(x) is int and x == 1:
+            x = ""
+        if isinstance(x, _smat.Matrix) and w and w[0] == "elt" and not isinstance(w[1], _smat.Matrix):
+            return False  # Magma: a matrix is never in a collection of scalars
+        if isinstance(s, MSet) and _desc(x) in (("Z",), ("Str",), ("Bool",), None):
+            return x in s  # a keyed lookup
+        return any(_cmpeq(x, y) for y in s)
+    return x in s
 
 
-def _notin(x, s):
-    return not _in(x, s)
+def _notin(x, s, pos=None):
+    return not _in(x, s, pos, "notin")
 
 
-def _subset(a, b):
-    return all(_in(x, b) for x in a)
+def _compatible(x, y):
+    """Whether values x and y can be elements of one sequence or set (a
+    common universe, without the membership coercion of 1 into strings)."""
+    dx, dy = _desc(x), _desc(y)
+    if dx is not None and dy is not None:
+        return _common(dx, dy) is None
+    if (dx is None) != (dy is None):
+        return False
+    kx, ky = _eq_kind(x), _eq_kind(y)
+    if kx != ky:
+        return False
+    if kx == "struct":
+        return _struct_cat(x) == _struct_cat(y)
+    if kx == "tup":
+        return len(x) == len(y) and all(_compatible(u, v) for u, v in zip(x, y))
+    if kx == "seq":
+        return not (len(x) and len(y)) or _compatible(x[0], y[0])
+    return True
 
 
-def _notsubset(a, b):
-    return not _subset(a, b)
+def _set_pair(op, a, b, pos, message):
+    """The operands of a set operation: two sets (a multiset only with a
+    multiset) of compatible universes (Magma's errors: "Bad argument
+    types", then `message`)."""
+    if not isinstance(a, MSet) or not isinstance(b, MSet) or (a.kind == "multi") != (b.kind == "multi"):
+        raise _bad_types(op, (a, b), pos)
+    if a.items and b.items and not _compatible(a.items[0], b.items[0]):
+        if op == "join" and _eq_kind(a.items[0]) == "set" and _eq_kind(b.items[0]) == "mset":
+            raise MagmaError("joining sets of sets with sets of multisets is not supported yet", "'join'", True, pos)
+        raise MagmaError(message, "'%s'" % op, True, pos)
+
+
+def _subset(a, b, pos=None, op="subset"):
+    _set_pair(op, a, b, pos, "Arguments 1 and 2 have incompatible universal sets")
+    return all(_cmpeq_in(x, b) for x in a)
+
+
+def _notsubset(a, b, pos=None):
+    return not _subset(a, b, pos, "notsubset")
+
+
+def _cmpeq_in(x, s):
+    """x in the set s, both of one universe."""
+    return x in s or any(_cmpeq(x, y) for y in s.items)
 
 
 def _card(s):
@@ -1014,32 +1823,53 @@ def _card(s):
     return len(s)
 
 
-def _cat(a, b):
+def _cat(a, b, pos=None):
     if isinstance(a, str) and isinstance(b, str):
         return a + b
     if isinstance(a, (MSeq, MRange)) and isinstance(b, (MSeq, MRange)):
-        return MSeq(list(a) + list(b), getattr(a, "universe", None))
-    raise MagmaError("Bad argument types for cat: %s, %s" % (Type(a), Type(b)))
+        ua, ub = _universe(a), _universe(b)
+        if ua and ub:
+            if ua[0] == "elt" and ub[0] == "elt":
+                ok = _compatible(ua[1], ub[1])
+            elif ua[0] == ub[0] == "struct":
+                ok = _udesc(ua[1]) == _udesc(ub[1])
+            else:
+                e, u = (ua[1], ub[1]) if ua[0] == "elt" else (ub[1], ua[1])
+                d, du = _desc(e), _udesc(u)
+                ok = d is not None and du is not None and _common(d, du) is None
+            if not ok:
+                raise MagmaError("Incompatible sequences", "'cat'", True, pos)
+        return MSeq(list(a) + list(b), getattr(a, "universe", None) or getattr(b, "universe", None),
+                    getattr(a, "sample", None) or getattr(b, "sample", None))
+    raise _bad_types("cat", (a, b), pos)
 
 
-def _join(a, b):
-    return MSet(list(a) + list(b))
+def _join(a, b, pos=None):
+    _set_pair("join", a, b, pos, "No valid universe containing all elements")
+    k = a.kind if a.kind == b.kind else "set"
+    return MSet(list(a) + list(b), k)
 
 
-def _meet(a, b):
-    return MSet(x for x in a if _in(x, b))
+def _meet(a, b, pos=None):
+    _set_pair("meet", a, b, pos, "No valid universe containing all elements")
+    return MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
 
 
-def _diff(a, b):
-    return MSet(x for x in a if not _in(x, b))
+def _diff(a, b, pos=None):
+    _set_pair("diff", a, b, pos, "No valid universe containing all elements")
+    return MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
 
 
-def _sdiff(a, b):
-    return MSet([x for x in a if not _in(x, b)] + [x for x in b if not _in(x, a)])
+def _sdiff(a, b, pos=None):
+    _set_pair("sdiff", a, b, pos, "No valid universe containing all elements")
+    return MSet([x for x in a if not _cmpeq_in(x, b)] + [x for x in b if not _cmpeq_in(x, a)],
+                a.kind if a.kind == b.kind else "set")
 
 
-def _reduce(op, s):
+def _reduce(op, s, pos=None):
     items = list(_iter(s))
+    if op in ("and", "or") and not all(isinstance(x, bool) for x in items):
+        raise _bad_types("&" + op, (s,), pos)
     if not items:
         if op == "+":
             return 0
@@ -1054,10 +1884,11 @@ def _reduce(op, s):
         raise MagmaError("Illegal null sequence")
     r = items[0]
     for x in items[1:]:
-        if op == "+":
-            r = r + x
-        elif op == "*":
-            r = r * x
+        if op in ("+", "*"):
+            for y in (r, x):
+                if isinstance(y, _NOARITH):
+                    raise MagmaError("Operation not defined on elements of type %s" % _type(y), "'&%s'" % op, True, pos)
+            r = _add(r, x, pos, "&+") if op == "+" else _mul(r, x, pos, "&*")
         elif op == "cat":
             r = _cat(r, x)
         elif op == "and":
@@ -1489,6 +2320,8 @@ class _RationalField:
         return "Rational Field"
 
     def __call__(self, x):
+        if isinstance(x, (bool, str)):
+            raise MagmaError("Illegal coercion\nLHS: FldRat\nRHS: %s" % _type(x), "'!'", False)
         return _sa._q(_Fraction(x)) if not isinstance(x, int) else x
 
     _magma_coerce = __call__
@@ -1505,8 +2338,9 @@ def _coerce_int(x):
         return x
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
-    if isinstance(x, str):
-        return int(x)
+    if isinstance(x, (bool, str)):
+        # Python would read "7" as 7 and true as 1
+        raise MagmaError("Illegal coercion\nLHS: RngInt\nRHS: %s" % _type(x), "'!'", False)
     raise MagmaError("Illegal coercion")
 
 
@@ -1570,6 +2404,10 @@ def _type_name(x):
         return "FldRat"
     if type(x).__name__ == "MList":
         return "List"
+    if x is _ZZ:
+        return "RngInt"
+    if x is _QQ:
+        return "FldRat"
     return None
 
 
@@ -1597,6 +2435,60 @@ def _type(x):
     if isinstance(x, _sp.Polynomial):
         return "RngUPolElt"
     return type(x).__name__
+
+
+def _ext_type(x):
+    """x's type as Magma's "Argument types given" shows it: a sequence or
+    set with the type of its elements (SeqEnum[RngIntElt], SeqEnum[Any]
+    when empty), a polynomial with its coefficient ring."""
+    if isinstance(x, (MSeq, MRange, MSet)):
+        return "%s[%s]" % (_type(x), _elt_type(x))
+    if isinstance(x, _sp.Polynomial):
+        return "RngUPolElt[%s]" % _ring_cat(x.parent().base_ring())
+    if isinstance(x, _smat.Matrix):
+        return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
+    if isinstance(x, _Cat):
+        return "Cat[%s]" % x
+    if isinstance(x, _MNumberField):
+        return "FldNum[FldRat]"
+    if isinstance(x, _sp.PolynomialRing_):
+        return "RngUPol[%s]" % _ring_cat(x.base_ring())
+    if isinstance(x, MMap):
+        return "Map[%s, %s]" % (_ext_type(x.dom), _ext_type(x.cod))
+    if isinstance(x, MRec):
+        return "Rec"
+    return str(Type(x))
+
+
+def _ring_cat(b):
+    return "RngInt" if b == _sp.ZZ else "FldRat" if b == _sp.QQ else "Any"
+
+
+def _elt_type(s):
+    u = getattr(s, "universe", None)
+    if isinstance(s, MRange) or u is _ZZ:
+        return "RngIntElt"
+    if u is _QQ:
+        return "FldRatElt"
+    types = []
+    for y in _iter(s):
+        t = _ext_type(y)
+        if t not in types:
+            types.append(t)
+    if not types:
+        return "Any"
+    if len(types) == 1:
+        return types[0]
+    return "FldRatElt" if set(types) <= {"RngIntElt", "FldRatElt"} else "Any"
+
+
+def _bad_types(name, args, pos=None):
+    """Magma's error for arguments no signature of `name` accepts."""
+    if name.endswith(":="):
+        # x +:= y: Magma doesn't list the types
+        return MagmaError("Bad argument types", "'%s'" % name, True, pos)
+    return MagmaError("Bad argument types\nArgument types given: " + ", ".join(_ext_type(a) for a in args),
+                      "'%s'" % name, True, pos)
 
 
 # ------------------------------------------------------------------ polynomials
@@ -1713,19 +2605,24 @@ Factorization = Factorisation = _factorization
 # Sage mode; by default a prime above 3.3e24 is a BPSW probable prime,
 # not proven as Magma's default would promise: the systematic review's
 # ASR-F1)
-def IsPrime(n, Proof=None):
+def IsPrime(n, *, Proof=None):
     return _sa.is_prime(n, proof=Proof)
 
 
-def IsProbablePrime(n, Bases=None):
+def IsProbablePrime(n, *, Bases=None):
+    if Bases is not None and Bases <= 0:
+        raise MagmaError("Value for 'Bases' must be small and positive", "'IsProbablePrime'")
+    # the exact answer: a prime passes for any bases, and Magma's bases are
+    # not the first primes (strong pseudoprimes to those, such as 2047
+    # with Bases := 1 or 3215031751 with Bases := 4, are composite there)
     return _sa.is_prime(n)
 
 
-def NextPrime(n, Proof=None):
+def NextPrime(n, *, Proof=None):
     return _sa.next_prime(n, proof=Proof)
 
 
-def PreviousPrime(n, Proof=None):
+def PreviousPrime(n, *, Proof=None):
     return _sa.previous_prime(n, proof=Proof)
 
 
@@ -2039,10 +2936,16 @@ def Denominator(x):
 
 
 def Intseq(n, b=10):
+    if b < 2:
+        raise MagmaError("Argument 2 (%d) should be >= 2" % b, "'Intseq'")
+    if n < 0:
+        raise MagmaError("Argument 1 (%d) should be >= 0" % n, "'Intseq'")
     return MSeq(_sa.digits(n, b))
 
 
 def Seqint(s, b=10):
+    if b < 2:
+        raise MagmaError("Argument 2 (%d) should be >= 2" % b, "'Seqint'")
     r = 0
     for d in reversed(list(s)):
         r = r * b + d
@@ -2062,6 +2965,8 @@ CRT = ChineseRemainderTheorem
 
 
 def IntegerToString(n, b=10):
+    if not 2 <= b <= 36:
+        raise MagmaError("Argument 2 (%d) should be in the range [2 .. 36]" % b, "'IntegerToString'")
     if b == 10:
         return str(n)
     digs = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -2090,44 +2995,155 @@ def Sprintf(fmt, *args):
 # sequence, and the statement Append(~S, x) assigns it back to S.
 
 def Append(s, x):
-    s = MSeq(_own(MSeq(s)))
+    x = _lift("Append", s, x, "Cannot coerce element into the universe")
+    s = _own(s) if isinstance(s, MSeq) else MSeq(s)
     s.append(x)
     return s
 
 
+def _into(x, d, ring):
+    """x converted into the parent d (of ring, the universe or a sample
+    element's parent), as Include and Exclude need: Magma's coercion, by
+    value (3/4 doesn't go into the integers, 2/1 does); _NOCOERCE if not."""
+    if _desc(x) != d and d != ("Str",):
+        x = _rational(x)  # a rational element of a number field goes in by value
+    dx = _desc(x)
+    if dx is None:
+        return _NOCOERCE
+    t = d[0]
+    num = isinstance(x, (int, _Fraction)) and not isinstance(x, bool)
+    if t == "Z":
+        return int(x) if num and _Fraction(x).denominator == 1 else _NOCOERCE
+    if t == "Q":
+        return x if num else _NOCOERCE
+    if t == "R":
+        return MReal.of(x) if num or isinstance(x, MReal) else _NOCOERCE
+    if t in ("ZX", "QX"):
+        if num:
+            return x if t == "QX" or _Fraction(x).denominator == 1 else _NOCOERCE
+        if isinstance(x, _sp.Polynomial) and dx[0] in ("ZX", "QX"):
+            c = [_m_num(v) for v in x.list()]
+            if t == "ZX" and any(_Fraction(v).denominator != 1 for v in c):
+                return _NOCOERCE
+            return ring(c) if ring is not None and hasattr(ring, "gen") else x
+        return _NOCOERCE
+    if t == "NF":
+        if num:
+            return x
+        return x if dx == d else _NOCOERCE
+    if t == "Mat":
+        n, m, base = d[1], d[2], d[3]
+        if dx[0] == "Mat":
+            if (dx[1], dx[2]) != (n, m):
+                return _NOCOERCE
+            if dx[3] == base or dx[3] == "Z":
+                return x
+            # rational entries go into the integers when they are integers
+            rows = [[_m_num(v) for v in r] for r in x.rows()]
+            if all(_Fraction(v).denominator == 1 for r in rows for v in r):
+                return x.change_ring(_sp.ZZ)
+            return _NOCOERCE
+        if num and n == m and (base == "Q" or _Fraction(x).denominator == 1):
+            return _smat.identity_matrix(_sp.QQ if base == "Q" else _sp.ZZ, n) * x
+        return _NOCOERCE
+    if t == "Str":
+        if isinstance(x, str):
+            return x
+        return "" if type(x) is int and x == 1 else _NOCOERCE
+    return x if dx == d else _NOCOERCE
+
+
+def _lift(name, s, x, cannot="Cannot lift element into sequence"):
+    """x converted into the universe of s, for Include, Exclude, Append and
+    Insert (the declared universe, else that of an element); Magma's
+    errors if not."""
+    w = _universe(s)
+    if w is None:
+        return x
+    if w[0] == "struct":
+        y = _into(x, _udesc(w[1]) or ("?",), w[1])
+    else:
+        e = w[1]
+        if isinstance(e, MRec):
+            if name in ("Append", "Insert"):
+                if isinstance(x, MRec):
+                    return x
+                raise MagmaError(cannot, "'%s'" % name)
+            raise MagmaError("No equality algorithm for sequence elements", "'%s'" % name)
+        if isinstance(s, MSeq) and not len(s) and isinstance(e, MSeq) and not len(e):
+            # the universe of a sequence emptied of [] takes anything
+            if isinstance(x, MRec) and name in ("Include", "Exclude"):
+                raise MagmaError("No equality algorithm for sequence elements", "'%s'" % name)
+            return x
+        de = _desc(e)
+        if de is not None:
+            y = _into(x, de, e.parent() if hasattr(e, "parent") and isinstance(e, _sp.Polynomial) else None)
+        else:
+            kx, ke = _eq_kind(x), _eq_kind(e)
+            ok = ((kx == ke == "struct" and _struct_cat(x) == _struct_cat(e))
+                  or (kx in ("set", "mset") and ke in ("set", "mset") and not (kx == "mset" and ke == "set"))
+                  or (kx == ke == "map")
+                  or (kx == ke == "tup" and len(x) == len(e)))
+            if ke == "seq" and not len(e) and name == "Index" and not (kx == "seq" and not len(x)):
+                raise MagmaError(cannot, "'%s'" % name)
+            if ke == "seq" and kx != "seq" and not len(e):
+                raise MagmaError("Sequence mutation failed", "'%s'" % name)
+            if kx in ("set", "mset") and ke in ("set", "mset") and ok:
+                y = MSet(list(x), e.kind)  # into the kind of set the elements are
+            elif kx == ke == "seq":
+                # a sequence goes in if its elements go into the element's universe
+                try:
+                    y = MSeq([_lift(name, e, v) for v in x]) if len(e) else x
+                    ok = True
+                except MagmaError:
+                    ok = False
+            elif not (kx in ("set", "mset") and ke in ("set", "mset")):
+                y = x
+            if not ok:
+                y = _NOCOERCE
+    if y is _NOCOERCE:
+        if isinstance(s, MSet):
+            raise MagmaError("Illegal coercion", "'%s'" % name, False)
+        raise MagmaError(cannot, "'%s'" % name)
+    return y
+
+
 def Include(s, x):
+    x = _lift("Include", s, x)
     if isinstance(s, MSet):
         t = _own(s)
         t.add(x)
         return t
     s = _own(MSeq(s))
-    if not any(_eq(x, y) for y in s):
+    if not any(_cmpeq(x, y) for y in s):
         s.append(x)
     return s
 
 
 def Exclude(s, x):
+    x = _lift("Exclude", s, x)
     if isinstance(s, MSet):
         t = _own(s)
         t.remove(x)
         return t
     s = _own(MSeq(s))
     for k, y in enumerate(s):
-        if _eq(x, y):
+        if _cmpeq(x, y):
             del s[k]
             break
     return s
 
 
 def Remove(s, i):
-    s = MSeq(s)
+    s = _own(s) if isinstance(s, MSeq) else MSeq(s)
     _check_index(len(s), i)
     del s[i - 1]
     return s
 
 
 def Insert(s, i, x):
-    s = MSeq(s)
+    x = _lift("Insert", s, x, "Cannot coerce element into the universe")
+    s = _own(s) if isinstance(s, MSeq) else MSeq(s)
     s.insert(i - 1, x)
     return s
 
@@ -2135,7 +3151,7 @@ def Insert(s, i, x):
 def Reverse(s):
     if isinstance(s, str):
         return s[::-1]
-    return MSeq(reversed(list(s)))
+    return MSeq(reversed(list(s)), getattr(s, "universe", None), getattr(s, "sample", None))
 
 
 class Perm(tuple):
@@ -2165,14 +3181,25 @@ def Sort(s, f=None):
     return _multi([MSeq(items[i] for i in order), Perm(i + 1 for i in order)])
 
 
-def Index(s, x):
+def _index_of(name, s, x):
+    if isinstance(s, str):
+        # in a string: where the substring x first starts (0: nowhere)
+        if not isinstance(x, str):
+            raise _bad_types(name, (s, x))
+        return s.find(x) + 1
+    x = _lift(name, s, x, "Cannot coerce element into the universe")
     for k, y in enumerate(_iter(s)):
-        if _eq(x, y):
+        if _cmpeq(x, y):
             return k + 1
     return 0
 
 
-Position = Index
+def Index(s, x):
+    return _index_of("Index", s, x)
+
+
+def Position(s, x):
+    return _index_of("Position", s, x)
 
 
 def IsEmpty(s):
@@ -2468,6 +3495,9 @@ class _PowerSeries(str):
 # ------------------------------------------------------------------ elliptic curves
 
 def EllipticCurve(a, b=None):
+    if b is not None and (isinstance(a, str) or _num(a) and _num(b)):
+        # a label is one argument, and a curve's coefficients come in a sequence
+        raise _bad_types("EllipticCurve", (a, b))
     try:
         return _smod.EllipticCurve(list(a) if isinstance(a, (MSeq, MRange)) else a, b)
     except (ValueError, ArithmeticError) as e:
@@ -2623,7 +3653,7 @@ def _field(x):
     raise MagmaError("Bad argument types: a number field or its maximal order is expected")
 
 
-def NumberField(f, Check=True):
+def NumberField(f, *, Check=True):
     if not isinstance(f, _sp.Polynomial):
         raise MagmaError("NumberField: a polynomial is expected")
     try:
@@ -2681,7 +3711,12 @@ class _ClassGroupMap:
         return "Mapping from: %r to %s" % (self.G, target)
 
 
-def ClassGroup(K, Bound=None, Proof=None):
+def ClassGroup(K, *, Bound=None, Proof=None):
+    if isinstance(Proof, str) and Proof.lower() not in ("full", "grh", "bound", "subgroup", "current"):
+        raise MagmaError("Bad value for parameter 'Proof' (%s)\nArgument types given: %s" % (Proof, _ext_type(K)), "'ClassGroup'")
+    if Bound is not None:
+        # Magma's bound for the generators isn't modelled
+        raise MagmaError("ClassGroup with the parameter Bound is not supported yet")
     F = _field(K)
     # Proof (true or "Full") is forwarded: proven or an error ("GRH",
     # "Subgroup" or none: the GRH result)
@@ -2807,7 +3842,10 @@ def ElementaryDivisors(M):
     return MSeq(d for d in M.elementary_divisors() if d)
 
 
-def LLL(M, Delta=None):
+def LLL(M, *, Delta=None):
+    if Delta is not None:
+        # the reduced basis depends on Delta, which isn't passed on
+        raise MagmaError("LLL with the parameter Delta is not supported yet")
     return _multi([_mmat(M.LLL())], show=1)
 
 
@@ -2834,6 +3872,78 @@ def Rank(x):
     if isinstance(x, _smat.Matrix):
         return x.rank()
     return x.rank()
+
+
+# ------------------------------------------------------------------ argument guard
+
+# Python and Sage read the string "7" as 7 and true as 1, where Magma's
+# intrinsics have no signature for them: every intrinsic refuses a string
+# or a boolean argument with Magma's error, except in the positions listed
+# here (None: any position).  Checked against Magma.
+_STR_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None, "Index": None, "Position": None,
+             "Append": {1}, "Include": {1}, "Exclude": {1}, "Insert": {2},
+             "Reverse": {0}, "StringToInteger": {0}, "EllipticCurve": {0}}
+_BOOL_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None,
+              "Append": {1}, "Include": {1}, "Exclude": {1}, "Insert": {2}, "Index": {1}, "Position": {1}}
+
+
+# Magma's named parameters (intrinsic(x : Param := v)): the type each
+# takes, and what else is checked; as Magma 2.18 reports them.
+def _param_bool(v):
+    return isinstance(v, bool)
+
+
+def _param_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _param_real(v):
+    return _num(v) or isinstance(v, MReal)
+
+
+_PARAMS = {
+    "IsPrime": {"Proof": _param_bool}, "NextPrime": {"Proof": _param_bool}, "PreviousPrime": {"Proof": _param_bool},
+    "IsProbablePrime": {"Bases": _param_int}, "NumberField": {"Check": _param_bool},
+    "ClassGroup": {"Proof": lambda v: isinstance(v, str), "Bound": _param_int}, "LLL": {"Delta": _param_real},
+}
+
+
+def _check_params(name, f, args, kw):
+    known = f.__code__.co_varnames[f.__code__.co_argcount:f.__code__.co_argcount + f.__code__.co_kwonlyargcount]
+    types = ", ".join(_ext_type(a) for a in args)
+    for p, v in kw.items():
+        if p not in known:
+            raise MagmaError("Parameter '%s' is not defined for this function\nArgument types given: %s" % (p, types),
+                             "'%s'" % name)
+        check = _PARAMS.get(name, {}).get(p)
+        if check is None or not check(v):
+            raise MagmaError("Bad type for parameter '%s'\nArgument types given: %s" % (p, types), "'%s'" % name)
+
+
+def _guarded(name, f):
+    strs, bools = _STR_ARGS.get(name, ()), _BOOL_ARGS.get(name, ())
+
+    def intrinsic(*args, **kw):
+        for i, a in enumerate(args):
+            if isinstance(a, bool):
+                if bools is not None and i not in bools:
+                    raise _bad_types(name, args)
+            elif isinstance(a, str) and strs is not None and i not in strs:
+                raise _bad_types(name, args)
+        if kw:
+            _check_params(name, f, args, kw)
+        return f(*args, **kw)
+
+    intrinsic.__name__ = f.__name__
+    intrinsic.__doc__ = f.__doc__
+    intrinsic.__wrapped__ = f  # for help: the signature and source are f's
+    return intrinsic
+
+
+for _n, _f in list(globals().items()):
+    if _n[:1].isupper() and not _n.endswith("_") and type(_f) is type(_guarded) \
+            and getattr(_f, "__module__", None) == __name__:
+        globals()[_n] = _guarded(_n, _f)
 
 
 __all__ = [n for n, v in list(globals().items())
