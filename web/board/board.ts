@@ -12,7 +12,7 @@
 
 import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
-import { ICON_NAME, GROUP_PAD, GROUP_TITLE } from "./doc";
+import { ICON_NAME, GROUP_PAD, GROUP_TITLE, refLabel } from "./doc";
 
 /** A page's backdrop (doc.ts BoardPage's slide and background). */
 export interface Backdrop { slide?: { x: number; y: number; w: number; h: number }; color?: string; image?: string }
@@ -691,7 +691,7 @@ export class Board {
       a.href = it.ref;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
-      a.textContent = "↗ " + decodeURIComponent(it.ref.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\//, "").replace(/^https?:\/\//, ""));
+      a.textContent = "↗ " + refLabel(it.ref);
       el.append(a);
     }
     if (this.typeset && el.querySelector(".math")) {
