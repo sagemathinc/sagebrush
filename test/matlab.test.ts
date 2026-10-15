@@ -174,6 +174,60 @@ test("notebook session: MATLAB cells share variables and functions; an error fai
   assert.match(out(9, "stderr"), /Unrecognized function or variable 'z'/);
 });
 
+test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view) with the SVG; other figures the SVG alone", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    "[X,Y] = meshgrid(-3:3);\nsurf(X,Y,peaks(X,Y))\ntitle(\"Original Sampling\")",
+    "mesh(peaks(5))",
+    "t = 0:0.5:5; plot3(sin(t), cos(t), t, 'r-o'); xlabel('x'); view(30, 20)",
+    "subplot(1,2,1); surf(peaks(5)); subplot(1,2,2); plot(1:3)",
+    "surf(peaks(5)); legend('p')",
+    "surf(peaks(300))",
+    "plot(1:3); set(gcf, 'Color', [0.94 0.94 0.94])",
+    "plot(1:2); title(\"currentColor label\")",
+    // (250,000 vertices given, 4.5 million drawn as the viewer's tubes)
+    "t = linspace(0, 1, 125001); plot3(t, t, t, 'LineWidth', 2)",
+    "plot3([0 1], [0 1], [0 1]); view([1 1 1]); [caz, cel] = view; fprintf('%.4f %.4f\\n', caz, cel); [caz, cel] = view([-5 -2 5]); fprintf('%.4f %.4f\\n', caz, cel); view(gca, 2); [caz, cel] = view(gca); fprintf('%g %g\\n', caz, cel); try, v = view; catch e, disp(e.message), end; try, view, catch e, disp(e.message), end",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const shown = (id: number) => msgs.find((m) => m.id === id && m.display)?.display;
+  const scene = (id: number) => {
+    const t = shown(id)?.["application/vnd.sagebrush.scene3d+json"];
+    return t ? JSON.parse(t) : null;
+  };
+  const a = scene(1);
+  assert.ok(a && shown(1)["image/svg+xml"], "surf: a scene and its SVG");
+  assert.deepEqual([a.lo, a.hi, a.azimuth, a.elevation, a.projection, a.background, a.title], [[-3, -3, -5], [3, 3, 10], -127.5, 30, "orthographic", "#ffffff", "Original Sampling"]);
+  assert.deepEqual(a.box.ticks[2], [-5, 0, 5, 10]);
+  const mesh = a.objects.find((o: any) => o.type === "mesh");
+  // (36 faces, flat colors: 4 vertices each, unlit, under black edges)
+  assert.deepEqual([mesh.pos.length / 3, mesh.lit, mesh.offset], [144, false, true]);
+  assert.deepEqual(a.objects.filter((o: any) => o.type === "lines").map((o: any) => [o.color, o.pos.length / 6]), [["#000000", 84]]);
+  // (mesh: white faces under edges colored by the colormap)
+  const b = scene(2);
+  assert.equal(new Set(b.objects.find((o: any) => o.type === "mesh").colors).size, 1);
+  assert.ok(b.objects.filter((o: any) => o.type === "lines").length > 1);
+  const c = scene(3);
+  assert.deepEqual([c.azimuth, c.elevation, c.labels[0]], [-60, 20, "x"]);
+  assert.deepEqual(c.objects.map((o: any) => [o.type, o.color, o.pos.length / 3]), [["lines", "#ff0000", 20], ["points", "#ff0000", 11]]);
+  // (view(v): [x y z] toward the camera, as the documented example's angles; [caz, cel] = view(...); view(ax, 2);
+  // one output, not the documented [caz, cel], refused)
+  assert.equal(msgs.filter((m) => m.id === 10 && m.stream).map((m) => m.text).join(""), "135.0000 35.2644\n-68.1986 42.8760\n0 90\n" + "view: one output is not supported; use [caz, cel] = view.\n".repeat(2));
+  for (const id of [4, 5, 6, 7, 8, 9, 10]) {
+    assert.ok(shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": the SVG only");
+  }
+  // (the figure's Color behind the SVG; MATLAB's dark gray, not the page's color)
+  assert.match(shown(1)["image/svg+xml"], /^<svg[^>]*><rect width="100%" height="100%" fill="#ffffff"\/>/);
+  assert.match(shown(7)["image/svg+xml"], /<rect width="100%" height="100%" fill="#f0f0f0"\/>/);
+  // (the ink: the root's color, for the shim's currentColor; the text itself untouched)
+  for (const id of [1, 7]) assert.match(shown(id)["image/svg+xml"], /^<svg [^>]*style="color:#262626;--sb-legend-bg:#ffffff"/);
+  assert.match(shown(8)["image/svg+xml"], />currentColor label</);
+  assert.match(shown(8)["image/svg+xml"], /aria-label="[^"]*currentColor label/);
+});
+
 test("reactive notebook: a MATLAB cell's definitions and references (src/dataflow.ts); no renaming", () => {
   const { analyzeCell } = require("../src/dataflow");
   const { renameInCell, forwardRefers } = require("../src/rename");
@@ -845,6 +899,96 @@ test("ellipke, ellipj and legendre keep their documented domains", () => {
     "ellipj: U must be finite in Sagebrush.",
     "single", "single",
   ]);
+});
+
+test("a legend in 3-D axes is drawn: surfaces' swatches (colormapped at the middle of CLim), lines, markers, stems", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    // (the colormap's middle color: row floor(m / 2) + 1 of m)
+    // (close all: the session's figures are those earlier tests left)
+    "close all; surf(peaks(20)); legend('peaks'); cm = colormap; fprintf('#%02x%02x%02x %d\\n', round(cm(floor(size(cm, 1) / 2) + 1, :) * 255), size(cm, 1))",
+    "mesh(peaks(20)); legend('m')",
+    "surf(peaks(5)); shading interp; legend('i')",
+    "surf(peaks(5), 'FaceColor', 'r'); hold on; t = 0:0.1:5; plot3(t, t, t, 'k--'); scatter3([1 2], [1 2], [1 2], 'filled');\n" +
+      "stem3([1 2], [2 1], [3 4]); legend('surface', 'line', 'points', 'stems', 'Location', 'northwest'); hold off",
+    "plot3(1:3, 1:3, 1:3); legend('a'); legend('off')",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const legend = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return svg.match(/<g class="sb-legend">.*?<\/g>/)?.[0] ?? null;
+  };
+  const swatch = (id: number) => legend(id)?.match(/<rect x="[^"]*" y="[^"]*" width="22" height="10"([^/]*)\/>/)?.[1].trim();
+  const [mid, rows] = msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join("").trim().split(" ");
+  assert.match(mid, /^#[0-9a-f]{6}$/);
+  assert.equal(rows, "256");
+  assert.equal(swatch(1), `fill="${mid}" stroke="#000000" stroke-width="1"`);
+  assert.match(legend(1)!, />peaks<\/text>/);
+  assert.equal(swatch(2), `fill="#ffffff" stroke="${mid}" stroke-width="1"`);
+  assert.equal(swatch(3), `fill="${mid}"`);
+  const four = legend(4)!;
+  assert.deepEqual([...four.matchAll(/>([a-z]+)<\/text>/g)].map((m) => m[1]), ["surface", "line", "points", "stems"]);
+  assert.match(four, /<rect x="27" y="28" width="22" height="10" fill="#ff0000" stroke="#000000"/);
+  assert.match(four, /stroke="#000000" stroke-width="[\d.]+" stroke-dasharray/);
+  assert.equal((four.match(/<circle /g) ?? []).length, 2);
+  assert.equal(legend(5), null);
+});
+
+test("titles are bold by default (TitleFontWeight), subtitles not, on a line under the title; title(t, s)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    // (close all: the session's figures are those earlier tests left)
+    "close all; plot(1:3); title('Two'); disp(get(get(gca, 'Title'), 'FontWeight')); disp(get(get(gca, 'Subtitle'), 'FontWeight'))",
+    "surf(peaks(5)); title('Three')",
+    "plot(1:3); title('Main'); subtitle('Sub')",
+    "plot(1:3); title('Plain', 'FontWeight', 'normal')",
+    "plot(1:3); subtitle('Only')",
+    "plot(1:3); [t, s] = title('Top', 'Below', 'Color', 'r'); disp(t.String), disp(s.String), disp(t.Color), disp(s.Color)",
+    "plot(1:3); title('Top')",
+    "xlabel('a', 'b')",
+    "surf(peaks(5)); title('Top', 'Below')",
+    "surf(peaks(5)); [t, s] = title('Top', 'Below'); s.FontWeight = 'bold';",
+    // (plain cla keeps the title's formatting; cla reset and a new plot reset it)
+    "plot(1:3); t = title('Old', 'Color', 'r'); cla; disp(t.Color); cla reset; disp(t.Color); try, cla('again'), catch e, disp(e.message), end",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const title = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return svg.match(/<text [^>]*text-anchor="middle" font-size="[^"]*"[^>]*>(?:(?!<\/text>).)*<\/text>/g)?.find((t: string) => !/rotate/.test(t))
+      ?.replace(/^<text [^>]*?font-size="[^"]*"/, "<text");
+  };
+  assert.equal(msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join(""), "bold\nnormal\n");
+  assert.equal(title(1), '<text font-weight="bold">Two</text>');
+  assert.equal(title(2), '<text font-weight="bold">Three</text>');
+  // (the subtitle: a second line, under the title, which stays where it was; the axes one line shorter)
+  const texts = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle"[^>]*>([A-Za-z]+)<\/text>/g)].map((m) => [m[3], +m[2]]);
+  };
+  const [[t3, y3], [s3, ys3]] = texts(3);
+  assert.deepEqual([t3, s3, ys3 > y3], ["Main", "Sub", true]);
+  assert.equal(texts(7)[0][1], y3);
+  assert.equal(title(3), '<text font-weight="bold">Main</text>');
+  assert.match(msgs.find((m) => m.id === 3 && m.display).display["image/svg+xml"], /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="[\d.]+">Sub<\/text>/);
+  // (title(titletext, subtitletext, Name, Value): the properties are both lines', as the documented example's Color)
+  assert.equal(msgs.filter((m) => m.id === 6 && m.stream === "stdout").map((m) => m.text).join(""), "Top\nBelow\n     1     0     0\n     1     0     0\n");
+  assert.deepEqual(texts(6).map((t) => t[0]), ["Top", "Below"]);
+  assert.match(msgs.filter((m) => m.id === 8 && m.stream === "stderr").map((m) => m.text).join(""), /Too many input arguments/);
+  // (the interactive 3-D view: the subtitle a line of its own too; a new plot's title is bold
+  // again, the axes reset as NextPlot 'replace' says)
+  const scene = JSON.parse(msgs.find((m) => m.id === 9 && m.display).display["application/vnd.sagebrush.scene3d+json"]);
+  assert.deepEqual([scene.title, scene.subtitle, scene.title_weight, scene.subtitle_weight], ["Top", "Below", "bold", "normal"]);
+  const bolder = JSON.parse(msgs.find((m) => m.id === 10 && m.display).display["application/vnd.sagebrush.scene3d+json"]);
+  assert.equal(bolder.subtitle_weight, "bold");
+  assert.equal(msgs.filter((m) => m.id === 11 && m.stream).map((m) => m.text).join(""), "     1     0     0\n     0     0     0\ncla: the only option is 'reset'.\n");
+  assert.equal(title(4), "<text>Plain</text>");
+  assert.equal(title(5), "<text>Only</text>");
 });
 
 test("a newline in a struct's text field or a string array's element is displayed as ↵, as MATLAB's published displays show it", () => {

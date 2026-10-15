@@ -216,6 +216,70 @@ try {
   ok(out.trim() === "Unrecognized function or variable 'nothere'.", "a MATLAB error is MATLAB's message: " + JSON.stringify(out.trim()));
   await runCode("plot(1:3, [2 4 3])");
   ok(await ev("!![...document.querySelectorAll('.cell')].at(-1).querySelector('.out svg, .out img')"), "a MATLAB figure is shown");
+  // stacked scripts in the SVG, as rendered: a pair's two scripts start where its base ends, the text after
+  // starts where the wider ends (narrow/wide both ways, nested)
+  await runCode("plot(1:3)\nxlabel('a_{iiii}^W b')\ntitle('x^{a_1^2}_b c')\ntext(1.5, 2, 'a^{WWWW}_{iiii} b')");
+  const stacked = await ev(`(() => {
+    const svg = [...document.querySelectorAll('.cell')].at(-1).querySelector('.out svg');
+    const find = (s) => [...svg.querySelectorAll('text')].find((t) => t.textContent === s);
+    const at = (t, i) => [t.getStartPositionOfChar(i).x, t.getEndPositionOfChar(i).x];
+    const near = (a, b) => Math.abs(a - b) < 0.05;
+    const out = [];
+    let t = find('a iiiiW b');
+    if (!t) t = find('aiiiiW b');
+    out.push(!!t && near(at(t, 1)[0], at(t, 0)[1]) && near(at(t, 5)[0], at(t, 1)[0]) && near(at(t, 6)[0], Math.max(at(t, 4)[1], at(t, 5)[1])));
+    t = find('xa12b c');
+    out.push(!!t && near(at(t, 1)[0], at(t, 0)[1]) && near(at(t, 3)[0], at(t, 2)[0]) && near(at(t, 4)[0], at(t, 1)[0]) && near(at(t, 5)[0], Math.max(at(t, 3)[1], at(t, 4)[1])));
+    t = find('aWWWWiiii b');
+    out.push(!!t && near(at(t, 5)[0], at(t, 1)[0]) && near(at(t, 9)[0], Math.max(at(t, 4)[1], at(t, 8)[1])));
+    return out.join(' ');
+  })()`);
+  ok(stacked === "true true true", "MATLAB TeX: a stacked pair's scripts share their place, and the text after follows the wider (as rendered): " + stacked);
+  // a MATLAB 3-D figure: the 3D view over its SVG, which a drag rotates
+  await runCode("[X,Y] = meshgrid(-3:3);\nsurf(X,Y,peaks(X,Y))\ntitle(\"Original Sampling\")");
+  const m3d = "[...document.querySelectorAll('.cell')].at(-1).querySelector('figure.plot3d')";
+  ok(await ev(`!!${m3d}?.querySelector('svg')`), "a MATLAB 3-D figure shows as a 3D figure with its SVG");
+  await sleep(500);
+  // a scene the viewer refuses (a saved document's is untrusted): the SVG stays, saying why
+  const refused = await ev(`(() => {
+    const d = document.createElement('div');
+    d.innerHTML = '<svg></svg>';
+    document.body.appendChild(d);
+    const r = window.SagebrushViewer3d.mount(d, { version: 1, lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2],
+      objects: [{ type: 'lines', color: '#000000', width: 2, pos: new Array(6 * 125000).fill(0) }] });
+    const why = d.querySelector('.sb3d-why')?.textContent ?? '';
+    const still = d.querySelector('svg').style.display !== 'none' && !d.querySelector('canvas');
+    d.remove();
+    return r === false && still ? why : 'mounted';
+  })()`);
+  ok(/more than 2000000 vertices/.test(refused), "...a scene too big once drawn is refused: the SVG stays, saying why: " + JSON.stringify(refused.slice(0, 120)));
+  // (mounting decodes each of a scene's base64 arrays once)
+  const decodes = await ev(`(() => {
+    const real = window.atob, b = (a) => btoa(String.fromCharCode(...new Uint8Array(a.buffer)));
+    let n = 0;
+    window.atob = (t) => { n++; return real(t); };
+    const d = document.createElement('div');
+    d.innerHTML = '<svg></svg>';
+    document.body.appendChild(d);
+    try {
+      window.SagebrushViewer3d.mount(d, { version: 2, lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2], objects: [{ type: 'mesh2', color: '#ff0000',
+        positions: b(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])), indices: b(new Uint32Array([0, 1, 2])) }] });
+    } finally {
+      window.atob = real;
+      d.remove();
+    }
+    return n;
+  })()`);
+  ok(decodes === 2, "...a scene's base64 arrays are decoded once each when it is mounted: " + decodes);
+  if (await ev(`!!${m3d}.querySelector('canvas')`)) {
+    const at = await ev(`(() => { const c = ${m3d}.querySelector('canvas'); c.scrollIntoView(); const r = c.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, az: c.sagebrush.view.az }; })()`);
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
+    for (let k = 1; k <= 10; k++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x + 12 * k, y: at.y, button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x + 120, y: at.y, button: "left", clickCount: 1 });
+    await sleep(300);
+    const az = await ev(`${m3d}.querySelector('canvas').sagebrush.view.az`);
+    ok(Math.abs(az - at.az) > 5, `...a drag rotates it (azimuth ${at.az} to ${az.toFixed(1)})`);
+  }
   ok(await ev("[...document.querySelectorAll('.cell')].some(c => [...c.querySelectorAll('.hc')].some(e => e.textContent === '% doubled') && [...c.querySelectorAll('.hf')].some(e => e.textContent === 'twice'))"),
     "MATLAB code is highlighted as MATLAB (% comments, the function's name)");
   await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");

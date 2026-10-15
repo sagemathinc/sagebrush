@@ -33,6 +33,23 @@ show(get(gca, 'View'));
 h = scatter3([1 2 3], [4 5 6], [7 8 9]);
 show(numel(get(h, 'ZData')));
 show(get(gca, 'View'));
+% view: (az, el), [az el], [x y z] toward the camera, 2 and 3, an axes first; its outputs
+view(30, 20);
+show(get(gca, 'View'));
+view([-45 60]);
+[caz, cel] = view;
+show([caz cel]);
+view([1 1 1]);
+show(round(get(gca, 'View') * 1e6) / 1e6);
+view([-5 -2 5]);
+show(round(get(gca, 'View') * 1e4) / 1e4);
+view([0 -2 0]);
+show(get(gca, 'View'));
+view(gca, 2);
+show(get(gca, 'View'));
+view(gca, 3);
+[caz, cel] = view(gca);
+show([caz cel]);
 % hold on keeps a 2-D view
 plot(1:3);
 hold on
