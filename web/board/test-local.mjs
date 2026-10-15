@@ -68,7 +68,7 @@ try {
   await go(a.search);
   const items = (m) => ev(`[...document.querySelectorAll('[data-sbb=${m}] > button')].map((b) => b.dataset.sbb)`);
   check(JSON.stringify(await items("filemenu")) === JSON.stringify(["newboard", "open", "mermaid", "examples", "duplicate", "html", "download", "canvas", "copyjson", "print", "revert"]), "File: " + JSON.stringify(await items("filemenu")));
-  check(JSON.stringify(await items("menu")) === JSON.stringify(["addpage", "pageprops", "rmpage", "tidy", "present", "timetravel"]) && await ev("!!document.querySelector('[data-sbb=menu] [data-sbb=lang]')"), "⋯: " + JSON.stringify(await items("menu")));
+  check(JSON.stringify(await items("menu")) === JSON.stringify(["addpage", "pageprops", "rmpage", "tidy", "present", "timetravel", "helpitem"]) && await ev("!!document.querySelector('[data-sbb=menu] [data-sbb=lang]')"), "⋯: " + JSON.stringify(await items("menu")));
   await ev("document.querySelector('[data-sbb=menubtn]').click(), document.querySelector('[data-sbb=filebtn]').click(), 1");
   check(await ev("!document.querySelector('[data-sbb=filemenu]').hidden && document.querySelector('[data-sbb=menu]').hidden"), "one menu open at a time");
   await ev("document.body.click(), 1");
