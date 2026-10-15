@@ -332,3 +332,80 @@ class BoolNone:
 
 
 print(attempt(lambda: -UsesCallNone()), attempt(lambda: bool(BoolNone())), attempt(lambda: abs(object())), attempt(lambda: -object()))
+
+# (review) the override test is CPython's optional class-attribute lookup
+# (an AttributeError from a class-level __get__ means absent; a metaclass
+# __getattribute__ is used), it runs before the methods are fetched, and a
+# non-function __call__ is bound through its own __get__
+class Hidden:
+    def __get__(self, obj, cls):
+        if obj is None:
+            raise AttributeError("hidden")
+        return lambda other: 99
+
+
+class HA:
+    def __add__(self, other):
+        return 42
+
+
+class HB(HA):
+    __radd__ = Hidden()
+
+
+class MetaNone(type):
+    def __getattribute__(cls, name):
+        if name == "__radd__":
+            return None
+        return type.__getattribute__(cls, name)
+
+
+class MA(metaclass=MetaNone):
+    def __add__(self, other):
+        return "left"
+
+    def __radd__(self, other):
+        return "base"
+
+
+class MB(MA):
+    def __radd__(self, other):
+        return "right"
+
+
+class Swap:
+    def __call__(self, other):
+        return "right"
+
+    def __ne__(self, other):
+        SA.__add__ = lambda self, other: "new"
+        return False
+
+
+class SA:
+    __radd__ = Swap()
+
+    def __add__(self, other):
+        return "old"
+
+
+class SB(SA):
+    __radd__ = Swap()
+
+
+print(HA() + HB(), MA() + MB(), SA() + SB())
+
+
+class CallClass:
+    __call__ = classmethod(lambda cls, *a, **k: (cls.__name__, a, k))
+
+
+class CallProp:
+    __call__ = property(lambda self: lambda *a, **k: ("prop", a, k))
+
+
+class CallStatic:
+    __call__ = staticmethod(lambda *a, **k: ("static", a, k))
+
+
+print(CallClass()(1, k=2), CallProp()(1, k=2), CallStatic()(1, k=2), staticmethod(lambda **k: k)(k=3))

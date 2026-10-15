@@ -3,7 +3,7 @@
 // types, so their V8 feedback stays clean when inlined into compiled code.
 
 import {
-  T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj,
+  T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -138,22 +138,74 @@ function nonFunctionDunder(g: any, name: string): any {
   return w;
 }
 
-// getattr(t, name) for deciding whether a subclass overrides a reflected
-// method, as CPython's method_is_overloaded: the type's attribute, bound
-// through its descriptor __get__(None, t) when it has one (a classmethod
-// binds to each class differently).
-function typeAttr(t: any, name: string): any {
-  const v = lookupType(t, name);
-  if (v === undefined || v === null || typeof v === "function") return v;
-  const get = lookupType(typeOf(v), "__get__");
-  return get === undefined ? v : callObj(get, [v, null, t]);
+// Whether the right operand's type overrides the reflected method name of
+// the left operand's (CPython's method_is_overloaded): the optional class
+// attribute lookup getattr(type, name), through the metaclass's own
+// __getattribute__ (and __getattr__) when it has one, where only an
+// AttributeError means absent.  The right type is looked up first: absent
+// there means not overridden (the left is not looked up); present there and
+// absent on the left means overridden; otherwise the two are compared with
+// !=.  For plain classes holding functions (or nothing) the lookup has no
+// user code and is just the raw one, compared by identity.
+const ABSENT = {};
+function classAttrOpt(cls: any, name: string): any {
+  const meta = cls.$meta ?? T.type;
+  try {
+    if (meta !== T.type) {
+      const ga = lookupType(meta, "__getattribute__");
+      if (ga !== undefined && ga !== lookupType(T.type, "__getattribute__")) {
+        try {
+          return callObj(ga, [cls, name]);
+        } catch (e) {
+          const gf = isinstance(e, T.AttributeError) ? lookupType(meta, "__getattr__") : undefined;
+          if (gf === undefined) throw e;
+          return callObj(gf, [cls, name]);
+        }
+      }
+    }
+    return getattr(cls, name);
+  } catch (e) {
+    if (isinstance(e, T.AttributeError)) return ABSENT;
+    throw e;
+  }
+}
+// The class attribute name of t as getattr(t, name) gives it when that
+// runs no user code (a plain metaclass, an attribute whose type has no
+// __get__: functions, None, callable instances), else NEEDS_GET; cached
+// per type version, as special()'s lookups.
+const NEEDS_GET = {};
+function plainClassAttr(t: any, name: string): any {
+  let c = t.$rc;
+  if (c === undefined || t.$rcVer !== t.$ver) {
+    c = t.$rc = Object.create(null);
+    t.$rcVer = t.$ver;
+  }
+  let v = c[name];
+  if (v === undefined) {
+    const raw = lookupType(t, name);
+    v = raw === undefined ? MISSING
+      : raw === null || typeof raw === "function" || lookupType(typeOf(raw), "__get__") === undefined ? raw
+      : NEEDS_GET;
+    c[name] = v;
+  }
+  return v;
 }
 function overloaded(ta: any, tb: any, name: string): boolean {
-  // (the right operand's type first, as CPython)
-  const b = typeAttr(tb, name);
-  const a = typeAttr(ta, name);
+  if ((ta.$meta ?? T.type) === T.type && (tb.$meta ?? T.type) === T.type) {
+    const rb = plainClassAttr(tb, name);
+    if (rb === MISSING) return false;
+    if (rb !== NEEDS_GET) {
+      const ra = plainClassAttr(ta, name);
+      if (ra === MISSING) return true;
+      // (two functions compare by identity, without user code)
+      if (ra !== NEEDS_GET) return ra !== rb && ((typeof ra === "function" && typeof rb === "function") || truth(richCompare(ra, rb, "__ne__")));
+    }
+  }
+  const b = classAttrOpt(tb, name);
+  if (b === ABSENT) return false;
+  const a = classAttrOpt(ta, name);
+  if (a === ABSENT) return true;
   if (a === b) return false;
-  if (a === undefined || b === undefined) return true;
   return truth(richCompare(a, b, "__ne__"));
 }
 
@@ -201,24 +253,33 @@ export const truedivT = (a: any, b: any, w: number): any => reuse("truediv", a, 
 export function binaryDunder(a: any, b: any, op: string): any {
   const [name, rname, sym] = OPS[op];
   const ta = typeOf(a), tb = typeOf(b);
-  const fa = special(a, name);
-  const fb = ta === tb ? undefined : special(b, rname);
-  if (fb !== undefined && tb.$mro.includes(ta) && overloaded(ta, tb, rname)) {
+  // As CPython's slot: the override test first (it may run user code that
+  // replaces a method), then each method fetched when it is called.
+  if (ta !== tb && tb.$mro.includes(ta) && (lookupType(tb, rname) !== undefined || lookupType(tb, name) !== undefined)
+      && overloaded(ta, tb, rname)) {
     // A subclass's reflected method gets priority.
-    const r = settle(fb, fb(b, a));
-    if (r !== NotImplemented) return r;
+    const fb = special(b, rname);
+    if (fb !== undefined) {
+      const r = settle(fb, fb(b, a));
+      if (r !== NotImplemented) return r;
+    }
+    const fa = special(a, name);
     if (fa !== undefined) {
       const r2 = settle(fa, fa(a, b));
       if (r2 !== NotImplemented) return r2;
     }
   } else {
+    const fa = special(a, name);
     if (fa !== undefined) {
       const r = settle(fa, fa(a, b));
       if (r !== NotImplemented) return r;
     }
-    if (fb !== undefined) {
-      const r = settle(fb, fb(b, a));
-      if (r !== NotImplemented) return r;
+    if (ta !== tb) {
+      const fb = special(b, rname);
+      if (fb !== undefined) {
+        const r = settle(fb, fb(b, a));
+        if (r !== NotImplemented) return r;
+      }
     }
   }
   raise(T.TypeError, `unsupported operand type(s) for ${sym}: '${ta.$name}' and '${tb.$name}'`);
