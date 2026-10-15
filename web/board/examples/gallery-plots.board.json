@@ -1,0 +1,31 @@
+{
+ "format": "sagebrush-board",
+ "version": 1,
+ "title": "Plots with matplotlib",
+ "intro": "Figures drawn with matplotlib show under their code. Random numbers come from the board's seed, so every reader sees the same picture.",
+ "layout": "grid",
+ "columns": 2,
+ "nodes": [
+  {
+   "id": "waves",
+   "title": "Two waves",
+   "code": "import numpy as np\nimport matplotlib.pyplot as plt\nt = np.linspace(0, 2 * np.pi, 200)\nplt.plot(t, np.sin(t), label=\"sin\")\nplt.plot(t, np.cos(t), label=\"cos\")\nplt.legend()\nplt.show()"
+  },
+  {
+   "id": "histogram",
+   "title": "A histogram",
+   "text": "1000 draws from the normal distribution.",
+   "code": "plt.hist(np.random.normal(size=1000), bins=30)\nplt.show()"
+  },
+  {
+   "id": "scatter",
+   "title": "A scatter plot",
+   "code": "u, v = np.random.random(60), np.random.random(60)\nplt.scatter(u, v, c=u + v)\nplt.colorbar()\nplt.show()"
+  },
+  {
+   "id": "panels",
+   "title": "Two panels",
+   "code": "fig, ax = plt.subplots(1, 2, figsize=(8, 3))\nax[0].bar([\"a\", \"b\", \"c\"], [3, 1, 2])\nax[1].plot([1, 2, 3, 4], [1, 4, 9, 16], \"o-\")\nplt.show()"
+  }
+ ]
+}
