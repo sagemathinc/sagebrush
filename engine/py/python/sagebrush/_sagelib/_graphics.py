@@ -759,7 +759,7 @@ class Image(Primitive):
         if sx != 1 or sy != 1:
             flip = ' transform="matrix(%d 0 0 %d %s %s)"' % (sx, sy, _fmt(2 * x + w if sx < 0 else 0), _fmt(2 * y + h if sy < 0 else 0))
         return '<image href="%s" x="%s" y="%s" width="%s" height="%s" preserveAspectRatio="none"%s%s/>' % (
-            self.href, _fmt(x), _fmt(y), _fmt(w), _fmt(h),
+            _esc(self.href), _fmt(x), _fmt(y), _fmt(w), _fmt(h),
             ' style="image-rendering:pixelated"' if o.get("pixelated") else "", flip)
 
     def describe(self):
@@ -1083,7 +1083,7 @@ class Panel:
             ty = P.top - max(8, tts * 0.6 + 4)
             out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
                 _fmt(P.left + pw / 2), _fmt(ty - sub_h), _fmt(tts),
-                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", rich(title, tts)))
+                ' font-weight="%s"' % _esc(o.get("title_weight", "600")) if o.get("title_weight", "600") != "normal" else "", rich(title, tts)))
             if sub:
                 out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
                     _fmt(P.left + pw / 2), _fmt(ty), _fmt(tts), ' font-weight="bold"' if sub[1] == "bold" else "", rich(sub[0], tts)))
