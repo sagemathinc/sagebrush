@@ -868,7 +868,7 @@ class Matrix:
         the zero matrix of any shape)."""
         n = self.nrows()
         if c == 0:
-            return Matrix(self._base, [[0] * self.ncols() for _ in range(n)])
+            return Matrix(self._base, [[0] * self.ncols() for _ in range(n)], self.ncols())
         if n != self.ncols():
             raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), _sa().parent(c) if hasattr(_sa(), "parent") else type(c)))
         I = Matrix(self._base, [[int(i == j) for j in range(n)] for i in range(n)])
@@ -884,6 +884,8 @@ class Matrix:
             [3/2   2]  [ 0 -2]
             [  3 9/2], [-3 -3]
             )
+            sage: Z = matrix(QQ, 0, 3, []); (Z + 0).dimensions(), (0 - Z).dimensions(), (-Z).dimensions()
+            ((0, 3), (0, 3), (0, 3))
         """
         g = self._generic(other)
         if g is not None:
@@ -892,7 +894,7 @@ class Matrix:
             return self + self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+")
         if not isinstance(other, Matrix):
             return NotImplemented
-        return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)])
+        return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
         if isinstance(other, (int, _F)):
@@ -907,7 +909,7 @@ class Matrix:
             return self - self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-")
         if not isinstance(other, Matrix):
             return NotImplemented
-        return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)])
+        return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
         if isinstance(other, (int, _F)):
@@ -915,7 +917,7 @@ class Matrix:
         return NotImplemented
 
     def __neg__(self):
-        return Matrix(self._base, [[-a for a in r] for r in self._rows])
+        return Matrix(self._base, [[-a for a in r] for r in self._rows], self.ncols())
 
     def __mul__(self, other):
         g = self._generic(other)
@@ -928,19 +930,21 @@ class Matrix:
                 from sagebrush import linalg
                 return Matrix(_sa().ZZ, linalg.matmul(self._rows, other._rows))
             cols = other.columns()
-            return Matrix(self._same(other), [[sum((a * b for a, b in zip(r, c)), 0) for c in cols] for r in self._rows])
+            return Matrix(self._same(other), [[sum((a * b for a, b in zip(r, c)), 0) for c in cols] for r in self._rows], other.ncols())
+        if isinstance(other, SeriesVector):
+            return other._matvec(self)
         if isinstance(other, Vector):
             return Vector(_norm(sum((a * b for a, b in zip(r, other)), 0)) for r in self._rows)
         if isinstance(other, (list, tuple)):
             return [sum((a * b for a, b in zip(r, other)), 0) for r in self._rows]
         base = self._base if isinstance(other, int) else _sa().QQ
-        return Matrix(base, [[a * other for a in r] for r in self._rows])
+        return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
     def __rmul__(self, other):
         if isinstance(other, (list, tuple)):
             return [sum((other[i] * self._rows[i][j] for i in range(self.nrows())), 0) for j in range(self.ncols())]
         base = self._base if isinstance(other, int) else _sa().QQ
-        return Matrix(base, [[other * a for a in r] for r in self._rows])
+        return Matrix(base, [[other * a for a in r] for r in self._rows], self.ncols())
 
     def __xor__(self, other):
         # plain Python (sagebrush.sage under CPython): ^ is xor, with the
@@ -1914,6 +1918,14 @@ class SeriesVector(Vector):
         sage: R = PowerSeriesRing(QQ, 'T'); T = R.gen(); v = vector(R, [T, 1])
         sage: v + v, -v, T*v, v.parent()
         ((2*T, 2), (-T, -1), (T^2, T), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over Rational Field)
+        sage: v += v; v *= T; v, matrix(ZZ, [[1, 2], [3, 4]]) * v
+        ((2*T^2, 2*T), (4*T + 2*T^2, 8*T + 6*T^2))
+        sage: v[0] = 1/2; v
+        (1/2, 2*T)
+        sage: w = vector(PowerSeriesRing(ZZ, 's'), [1, 2]); w[0] = 1/2  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert 1/2 to an element of Power Series Ring in s over Integer Ring
     """
 
     def __init__(self, R, entries):
@@ -1947,13 +1959,72 @@ class SeriesVector(Vector):
         if isinstance(other, (list, tuple)):
             return self.dot_product(other)
         if isinstance(other, Matrix):
-            raise NotImplementedError("vector-matrix products over power series rings are not available in sagebrush yet")
+            # v M: entries of M converted into R (refused when they are not
+            # in it), the result in R^ncols
+            if other.nrows() != len(self):
+                raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), other.parent()))
+            R = self._ring
+            rows = self._matrix_entries(other)
+            out = []
+            for j in range(other.ncols()):
+                t = R(0)
+                for i in range(len(self)):
+                    t = t + self[i] * rows[i][j]
+                out.append(t)
+            return SeriesVector(R, out)
+        if type(other).__name__ in ("FFMatrix", "PadicMatrix", "FFVector", "Vector"):
+            raise NotImplementedError("products of vectors over power series rings with %s are not available in sagebrush yet" % type(other).__name__)
         c = _series_entry(self._ring, other)
         return SeriesVector(self._ring, [a * c for a in self])
 
     def __rmul__(self, other):
+        if type(other).__name__ in ("FFMatrix", "PadicMatrix"):
+            raise NotImplementedError("products of %s with vectors over power series rings are not available in sagebrush yet" % type(other).__name__)
         c = _series_entry(self._ring, other)
         return SeriesVector(self._ring, [c * a for a in self])
+
+    def _matvec(self, M):
+        """M v for a matrix M over ZZ or QQ: M's entries converted into R
+        (refused when they are not in it), the result in R^nrows."""
+        if M.ncols() != len(self):
+            raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (M.parent(), self.parent()))
+        R = self._ring
+        out = []
+        for r in self._matrix_entries(M):
+            t = R(0)
+            for a, b in zip(r, self):
+                t = t + a * b
+            out.append(t)
+        return SeriesVector(R, out)
+
+    def _matrix_entries(self, M):
+        """M's entries in R; a matrix over QQ with R's coefficients not in
+        QQ would need a larger ring (Sage: QQ[[s]] for ZZ[[s]]): refused."""
+        R = self._ring
+        if M._base is not _sa().ZZ and R._base is not M._base:
+            raise NotImplementedError("products of a matrix over %r with a vector over %r are not available in sagebrush yet" % (M._base, R))
+        return [[_series_entry(R, x) for x in r] for r in M._rows]
+
+    # in place: the vector operations (a new vector, as Sage's v += w), never
+    # list concatenation or repetition
+    def __iadd__(self, other):
+        return self + other
+
+    def __isub__(self, other):
+        return self - other
+
+    def __imul__(self, other):
+        return self * other
+
+    def __setitem__(self, i, x):
+        if isinstance(i, slice):
+            raise NotImplementedError("slice assignment in vectors over power series rings is not available in sagebrush yet")
+        list.__setitem__(self, i, _series_entry(self._ring, x))
+
+    def _fixed_length(self, *args, **kwds):
+        raise TypeError("a vector has a fixed length")
+
+    append = extend = insert = pop = remove = clear = __delitem__ = _fixed_length
 
     def __truediv__(self, other):
         raise NotImplementedError("division of vectors over power series rings is not available in sagebrush yet")

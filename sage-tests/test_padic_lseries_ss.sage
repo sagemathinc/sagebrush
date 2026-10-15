@@ -201,3 +201,46 @@ t('v[0] parent', lambda: v[0].parent())
 for M in [matrix(ZZ, [[1, 2], [3, 4]]), matrix(QQ, [[1, 2], [3, 4]]), matrix(ZZ, 2, 3, range(6)), matrix(QQ, 0, 3, [])]:
     for c in [0, 1, 2, 1/2, True, False]:
         t('matrix %s %s' % (M.dimensions(), c), lambda: (M + c, c + M, M - c, c - M))
+# second review: in-place arithmetic, assignment and both matrix products keep
+# a series vector in R^n; adding or negating keeps a matrix's dimensions
+S = PowerSeriesRing(ZZ, 's'); s = S.gen()
+def inplace_add():
+    v = vector(S, [s, 1]); w = v; v += v
+    return v, v.parent(), w
+def inplace_sub():
+    v = vector(S, [s, 1]); v -= vector(S, [1, 1])
+    return v, v.parent()
+def inplace_mul():
+    v = vector(S, [s, 1]); v *= 2
+    return v, v.parent()
+def inplace_mul_series():
+    v = vector(S, [s, 1]); v *= s
+    return v, v.parent()
+def assign(x):
+    v = vector(S, [s, 1]); v[0] = x
+    return v, v[0].parent(), v.parent()
+t('v += v', inplace_add)
+t('v -= w', inplace_sub)
+t('v *= 2', inplace_mul)
+t('v *= s', inplace_mul_series)
+t('v[0] = 2', lambda: assign(2))
+t('v[0] = s^2', lambda: assign(s^2))
+t('v[0] = 1/2', lambda: assign(1/2))
+def assign_last():
+    v = vector(S, [s, 1]); v[-1] = 3
+    return v, v[1].parent()
+t('v[-1] = 3', assign_last)
+for A in [identity_matrix(ZZ, 2), matrix(ZZ, [[1, 2], [3, 4]]), matrix(ZZ, 3, 2, range(6))]:
+    t('A*v %s' % (A.dimensions(),), lambda: (A * vector(S, [s, 1]), (A * vector(S, [s, 1])).parent()))
+for A in [identity_matrix(ZZ, 2), matrix(ZZ, [[1, 2], [3, 4]]), matrix(ZZ, 2, 3, range(6))]:
+    t('v*A %s' % (A.dimensions(),), lambda: (vector(S, [s, 1]) * A, (vector(S, [s, 1]) * A).parent()))
+t('QQ matrix * series vector over QQ', lambda: (matrix(QQ, [[1/2, 2], [3, 4]]) * vector(PowerSeriesRing(QQ, 'u'), [1, 2])).parent())
+t('A*v size', lambda: matrix(ZZ, 2, 3, range(6)) * vector(S, [s, 1]))
+t('v*A size', lambda: vector(S, [s, 1]) * matrix(ZZ, 3, 2, range(6)))
+for M in [matrix(QQ, 0, 3, []), matrix(ZZ, 3, 0, []), matrix(ZZ, 0, 0, []), matrix(QQ, 2, 3, range(6))]:
+    for c in [0, False]:
+        t('dims %s %s' % (M.dimensions(), c), lambda: [(X.dimensions(), X.parent()) for X in (M + c, c + M, M - c, c - M)])
+    t('dims %s neg, 2M, M*2' % (M.dimensions(),), lambda: [(X.dimensions(), X.parent()) for X in (-M, 2*M, M*2)])
+t('dims 0x3 * 3x2', lambda: (matrix(QQ, 0, 3, []) * matrix(QQ, 3, 2, range(6))).dimensions())
+t('dims 2x0 * 0x3', lambda: (matrix(QQ, 2, 0, []) * matrix(QQ, 0, 3, [])).dimensions())
+t('dims 0x3 + 0x3', lambda: (matrix(QQ, 0, 3, []) + matrix(QQ, 0, 3, [])).dimensions())
