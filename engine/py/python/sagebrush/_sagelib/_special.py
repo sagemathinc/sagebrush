@@ -2814,15 +2814,23 @@ def _besselj_hankel(nu, x):
     (4 nu^2 - 9) ... (4 nu^2 - (2k - 1)^2)) / (k! 8^k) (DLMF 10.17.1);
     cos w and sin w from cos x, sin x and the exactly reduced cos and sin of
     pi (nu/2 + 1/4).  None if the terms stop falling before eps"""
-    m = 4 * nu * nu
     p = 1.0
     qv = 0.0
     a = 1.0
     k = 0
     prev = 1.0
+    nu2 = 2 * nu
     while True:
         k += 1
-        a *= (m - (2 * k - 1) ** 2) / (k * 8 * x)
+        # (a_k / a_(k-1) = (4 nu^2 - (2k-1)^2) / (8 k x), as the factors
+        # ((2 nu - (2k-1)) / x) ((2 nu + (2k-1)) / (8 k)): k 8 x overflowed for
+        # x near 1e308 and 4 nu^2 for nu above 6.7e153 (here nu <= sqrt(x)),
+        # making a representable coefficient 0 that then passed the
+        # convergence test, J_(1e153)(1e308) 0.5% off (astra's CORR-7AA-1);
+        # each factor is a double here, and nu near a half-integer no longer
+        # cancels in 4 nu^2 - (2k-1)^2)
+        j = 2 * k - 1
+        a *= ((nu2 - j) / x) * ((nu2 + j) / (8 * k))
         if abs(a) > prev:
             return None
         prev = abs(a)
@@ -2994,7 +3002,10 @@ def _besselj_pos(nu, x):
         # Stirling (DLMF 5.11.1, its correction positive), log J_nu(x) <=
         # nu log(x/2) - (nu + 1/2) log(nu + 1) + nu + 1 - log(2 pi)/2 here,
         # as the series' sum is below 1 where its terms fall from the first)
-        if nu * (_math.log(x) - _math.log(2.0)) - (nu + 0.5) * _math.log(nu + 1) + nu + 1 < -800:
+        # (as nu (log(x/2) - log(nu + 1) + 1) - log(nu + 1)/2 + 1, whose first
+        # product is negative here (x <= sqrt(2 (nu + 1)), nu > 170): the terms
+        # apart were inf - inf = nan at nu = 1e308, x = 1e100)
+        if nu * (_math.log(x) - _math.log(2.0) - _math.log(nu + 1) + 1) - 0.5 * _math.log(nu + 1) + 1 < -800:
             return 0.0
         return _besselj_miller(nu, x)
     if x >= 25 and nu <= _math.sqrt(x):
