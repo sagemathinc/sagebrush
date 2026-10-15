@@ -18,11 +18,12 @@ const KNOWN = new Set(["$schema", "$id", "$ref", "$defs", "title", "description"
   "exclusiveMinimum", "exclusiveMaximum", "minItems", "properties", "required", "additionalProperties", "propertyNames", "items", "anyOf", "not",
   "dependentRequired"]);
 
-// (a path step: .name, or ["odd name"] for a name that isn't a plain word)
-const step = (path: string, key: string | number) =>
+/** A path's next step: .name, or ["odd name"] for a name that isn't a plain word. */
+export const step = (path: string, key: string | number) =>
   typeof key === "number" ? `${path}[${key}]` : /^[A-Za-z_$][\w$]*$/.test(key) ? (path ? `${path}.${key}` : key) : `${path}[${JSON.stringify(key)}]`;
 const show = (v: unknown) => {
-  const s = JSON.stringify(v);
+  if (v && typeof v === "object") return kindOf(v);
+  const s = JSON.stringify(typeof v === "string" && v.length > 60 ? v.slice(0, 57) : v);
   return s === undefined ? String(v) : s.length > 60 ? s.slice(0, 57) + "..." : s;
 };
 const kindOf = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "a list" : typeof v === "object" ? "an object" : typeof v === "string" ? "a string" : typeof v === "number" ? "a number" : typeof v === "boolean" ? "true or false" : typeof v);

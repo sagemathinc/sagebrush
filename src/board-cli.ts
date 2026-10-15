@@ -16,7 +16,13 @@ const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
        sagebrush board run FILE [--json] [--timeout S] [--store-previews]
   run its code items as the board does, and report each one's output or
   error (sagebrush board run --help)
+       sagebrush board check FILE [--json] [--no-run] [--timeout S]
+  check a board before anyone opens it: the format, ids, edges, steps,
+  pictures, and its code items run; every problem in one report
+  (sagebrush board check --help)
 `;
+/** The board commands this sagebrush has. */
+const COMMANDS = ["render", "run", "check"];
 
 /** The command line as a reader of boards, in what it says of one it can't
  * read: which sagebrush refused it, and what to do (formatError). */
@@ -36,6 +42,14 @@ export function pictureWarning(d: unknown): string | null {
 export async function boardCommand(argv: string[]): Promise<number> {
   // (sagebrush board run: src/board-run.ts)
   if (argv[0] === "run") return (await import("./board-run")).boardRun(argv.slice(1));
+  // (sagebrush board check: src/board-check.ts)
+  if (argv[0] === "check") return (await import("./board-check")).boardCheck(argv.slice(1));
+  // (a command this sagebrush doesn't have: said so, with the ones it has,
+  // not taken as a file's name, agent-UX R0-3)
+  if (argv.length && !COMMANDS.includes(argv[0]) && !["-h", "--help"].includes(argv[0])) {
+    process.stderr.write(`sagebrush board: unknown board command ${oneLine(JSON.stringify(argv[0]))}: this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"}) has ${COMMANDS.join(", ")}\n${USAGE}`);
+    return 2;
+  }
   if (argv[0] !== "render" || argv.includes("-h") || argv.includes("--help")) {
     (argv[0] === "render" || !argv.length ? process.stdout : process.stderr).write(USAGE);
     return argv[0] === "render" || !argv.length ? 0 : 2;
