@@ -3,7 +3,7 @@
  "version": 1,
  "title": "Number theory in Sage",
  "mode": "sage",
- "intro": "Sage's number theory, in the reader's browser: primes, factorizations, congruences, arithmetic functions, class numbers and an elliptic curve. Each item is Sage code; its output shows under it.",
+ "intro": "Sage's number theory, in the reader's browser: primes, factorizations, congruences, arithmetic functions, class numbers and an elliptic curve. Each code item is Sage code; its output shows under it.",
  "layout": "graph",
  "direction": "LR",
  "nodes": [
