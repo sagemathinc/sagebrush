@@ -116,6 +116,42 @@ check(ct.includes('"points": [4, 4, 0.33, 44, 23.9, 0.9]') && canonical(JSON.par
 const laidG = layout({ nodes: [{ id: "g", kind: "group", title: "G", children: [nd, { id: "n", title: "N", x: 0, y: 200 }] }] });
 const li = laidG.items.find((i) => i.id === "s1"), lg = laidG.items.find((i) => i.id === "g"), ob = inkBox(li.outline);
 check(li.kind === "ink" && ob.x0 >= 0 && ob.y0 >= 0 && ob.x1 <= li.w && ob.y1 <= li.h && li.x >= lg.x && li.x + li.w <= lg.x + lg.w && li.y + li.h <= lg.y + lg.h, "laid out, a stroke's box holds its outline, and its group holds it: " + JSON.stringify([li.x, li.y, li.w, li.h, ob, lg.x, lg.y, lg.w, lg.h]));
+// a stroke takes no part in the layout (William's B1): drawn anywhere on a
+// page laid out as a graph, a row, a column or a grid, with positioned items
+// or not, in a group laid out or not, it moves nothing already shown, and it
+// is where it was drawn
+{
+  const note = (id, extra = {}) => ({ id, title: "Note " + id, text: "Some text", ...extra });
+  const pages = {
+    graph: { layout: "graph", nodes: [note("a"), note("b"), note("c")], edges: [{ from: "a", to: "b" }, { from: "a", to: "c" }] },
+    row: { layout: "row", nodes: [note("a"), note("b"), note("c")] },
+    column: { layout: "column", nodes: [note("a"), note("b"), note("c")] },
+    grid: { layout: "grid", columns: 2, nodes: [note("a"), note("b"), note("c"), note("d"), note("e")] },
+    "grid, some positioned": { layout: "grid", columns: 2, nodes: [note("a", { x: -400, y: 0 }), note("b"), note("c"), note("d")] },
+    "nested groups": { layout: "row", nodes: [note("a"), { id: "g", kind: "group", title: "G", layout: "grid", columns: 2, children: [note("g1"), note("g2"), { id: "h", kind: "group", title: "H", layout: "column", children: [note("h1"), note("h2")] }] }, note("b")] },
+  };
+  const at = (laid) => Object.fromEntries(laid.items.filter((i) => i.kind !== "ink").map((i) => [i.id, [i.x, i.y, i.w, i.h]]));
+  for (const [name, page] of Object.entries(pages)) {
+    const before = at(layout(page));
+    for (const [sx, sy] of [[-300, -200], [150, 80], [5000, 40], [200, 3000]]) {
+      const s = inkNode("s", [sx, sy, 0.5, sx + 400, sy + 250, 0.5]);
+      const laid = layout({ ...page, nodes: [...page.nodes, s] });
+      const after = at(laid), ink = laid.items.find((i) => i.id === "s");
+      check(JSON.stringify(after) === JSON.stringify(before), `${name}: a stroke drawn at (${sx}, ${sy}) moves nothing: ` + JSON.stringify(Object.keys(before).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k])).map((k) => [k, before[k], after[k]])));
+      check(ink && ink.x === s.x && ink.y === s.y, `${name}: ...and it is where it was drawn: ` + JSON.stringify([ink?.x, ink?.y, s.x, s.y]));
+    }
+  }
+  // (in a group: its members stay where they are, a stroke among them or
+  // beyond them; one above or left of them moves the group's corner, as any
+  // member there does, which the editor makes up for: Editor.contain, UI-FD2-1)
+  const g = { layout: "graph", nodes: [{ id: "g", kind: "group", title: "G", layout: "row", children: [note("g1", { x: 0, y: 0 }), note("g2", { x: 300, y: 0 })] }] };
+  const gb = at(layout(g));
+  for (const [sx, sy] of [[100, 40], [700, 300]]) {
+    const s = inkNode("s", [sx, sy, 0.5, sx + 100, sy + 60, 0.5]);
+    const ga = at(layout({ ...g, nodes: [{ ...g.nodes[0], children: [...g.nodes[0].children, s] }] }));
+    check(["g", "g1", "g2"].every((k) => ga[k][0] === gb[k][0] && ga[k][1] === gb[k][1]), `a stroke in a group at (${sx}, ${sy}) moves neither the group nor its members: ` + JSON.stringify([gb, ga]));
+  }
+}
 // what a handwritten word costs in a file: "hello", five letters of loops, drawn with a mouse at 60 frames a second
 const word = [];
 for (let i = 0; i <= 300; i++) { const t = i / 300, x = 10 + t * 150, a = t * 5 * 2 * Math.PI; word.push(x + Math.sin(a) * 8, 30 - Math.abs(Math.cos(a / 2)) * 22 + (i % 7) * 0.05, 0.5); }

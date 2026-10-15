@@ -696,12 +696,13 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
     const kids = n.children.map((c) => ({ c, b: sizeOf(c) }));
     // (its members: once, not once an edge, which on a large board was a set of every item for each edge)
     const members = new Set(n.children.map((c) => c.id));
-    const pos = arrange(kids.map((k) => ({ id: k.c.id, ...k.b, fixed: k.c.x !== undefined && k.c.y !== undefined ? { x: k.c.x!, y: k.c.y! } : null })), n.layout ?? "graph", n.direction ?? "TB", n.columns,
+    const pos = arrange(kids.map((k) => ({ id: k.c.id, ...k.b, fixed: k.c.x !== undefined && k.c.y !== undefined ? { x: k.c.x!, y: k.c.y! } : null, ink: k.c.kind === "ink" })), n.layout ?? "graph", n.direction ?? "TB", n.columns,
       edges.flatMap((e) => {
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
         return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
       }));
-    // (a group's members start at its origin)
+    // (a group's members start at its origin: all of them, strokes too, as
+    // the editor keeps a group around its members, Editor.contain, UI-FD2-1)
     const minX = Math.min(...[...pos.values()].map((p) => p.x)), minY = Math.min(...[...pos.values()].map((p) => p.y));
     if (kids.length) for (const [id, p] of pos) pos.set(id, { x: p.x - minX, y: p.y - minY });
     let w = 0, h = 0;
@@ -721,7 +722,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
     size.set(n.id, b);
     return b;
   };
-  const top = roots.map((n) => ({ id: n.id, ...sizeOf(n), fixed: n.x !== undefined && n.y !== undefined ? { x: n.x!, y: n.y! } : null }));
+  const top = roots.map((n) => ({ id: n.id, ...sizeOf(n), fixed: n.x !== undefined && n.y !== undefined ? { x: n.x!, y: n.y! } : null, ink: n.kind === "ink" }));
   const rootIds = new Set(roots.map((n) => n.id));
   const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", doc.columns, edges.flatMap((e) => {
     const a = memberOf(e.from, rootIds), b = memberOf(e.to, rootIds);
@@ -827,7 +828,9 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
   }
 }
 
-interface Node { id: string; w: number; h: number; fixed: { x: number; y: number } | null }
+// (`ink`: a pen stroke, which takes no part in the layout: where it was
+// drawn, never laid out, and never what the others are placed beside, B1)
+interface Node { id: string; w: number; h: number; fixed: { x: number; y: number } | null; ink?: boolean }
 
 // Positions (top left, relative) for boxes in one container.
 // an edge between two boxes laid out together: from, to, its label's width
@@ -838,7 +841,7 @@ export const labelWidth = (e: { label?: string; hidden?: boolean }) => (e.label 
 function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: Link[]): Map<string, { x: number; y: number }> {
   const out = new Map<string, { x: number; y: number }>();
   // (positioned boxes keep their places; the others are laid out among themselves)
-  const nodes = all.filter((n) => !n.fixed), free = new Set(nodes.map((n) => n.id));
+  const nodes = all.filter((n) => !n.fixed && !n.ink), free = new Set(nodes.map((n) => n.id));
   const links = allLinks.filter(([a, b]) => free.has(a) && free.has(b));
   if (kind === "row" || kind === "column") {
     let at = 0;
@@ -858,13 +861,15 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
   } else {
     for (const [id, p] of layered(nodes, links, dir)) out.set(id, p);
   }
-  // (placed beside the positioned ones, when there are both)
-  const fixed = all.filter((n) => n.fixed);
+  // (placed beside the positioned ones, when there are both: not beside a
+  // pen stroke, which would move them all when one is drawn, B1)
+  const fixed = all.filter((n) => n.fixed && !n.ink);
   if (fixed.length && nodes.length) {
     const right = Math.max(...fixed.map((n) => n.fixed!.x + n.w)) + GAP * 2, top = Math.min(...fixed.map((n) => n.fixed!.y));
     for (const [id, p] of out) out.set(id, { x: p.x + right, y: p.y + top });
   }
-  for (const n of fixed) out.set(n.id, n.fixed!);
+  for (const n of all) if (n.fixed) out.set(n.id, n.fixed);
+  for (const n of all) if (n.ink && !n.fixed) out.set(n.id, { x: 0, y: 0 });
   return out;
 }
 
