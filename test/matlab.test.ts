@@ -174,6 +174,53 @@ test("notebook session: MATLAB cells share variables and functions; an error fai
   assert.match(out(9, "stderr"), /Unrecognized function or variable 'z'/);
 });
 
+test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view) with the SVG; other figures the SVG alone", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    "[X,Y] = meshgrid(-3:3);\nsurf(X,Y,peaks(X,Y))\ntitle(\"Original Sampling\")",
+    "mesh(peaks(5))",
+    "t = 0:0.5:5; plot3(sin(t), cos(t), t, 'r-o'); xlabel('x'); view(30, 20)",
+    "subplot(1,2,1); surf(peaks(5)); subplot(1,2,2); plot(1:3)",
+    "surf(peaks(5)); legend('p')",
+    "surf(peaks(300))",
+    "plot(1:3); set(gcf, 'Color', [0.94 0.94 0.94])",
+    "plot3([0 1], [0 1], [0 1]); view([1 1 1]); [caz, cel] = view; fprintf('%.4f %.4f\\n', caz, cel); [caz, cel] = view([-5 -2 5]); fprintf('%.4f %.4f\\n', caz, cel); view(gca, 2); caz = view; [~, cel] = view(gca); fprintf('%g %g\\n', caz, cel)",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const shown = (id: number) => msgs.find((m) => m.id === id && m.display)?.display;
+  const scene = (id: number) => {
+    const t = shown(id)?.["application/vnd.sagebrush.scene3d+json"];
+    return t ? JSON.parse(t) : null;
+  };
+  const a = scene(1);
+  assert.ok(a && shown(1)["image/svg+xml"], "surf: a scene and its SVG");
+  assert.deepEqual([a.lo, a.hi, a.azimuth, a.elevation, a.projection, a.background, a.title], [[-3, -3, -5], [3, 3, 10], -127.5, 30, "orthographic", "#ffffff", "Original Sampling"]);
+  assert.deepEqual(a.box.ticks[2], [-5, 0, 5, 10]);
+  const mesh = a.objects.find((o: any) => o.type === "mesh");
+  // (36 faces, flat colors: 4 vertices each, unlit, under black edges)
+  assert.deepEqual([mesh.pos.length / 3, mesh.lit, mesh.offset], [144, false, true]);
+  assert.deepEqual(a.objects.filter((o: any) => o.type === "lines").map((o: any) => [o.color, o.pos.length / 6]), [["#000000", 84]]);
+  // (mesh: white faces under edges colored by the colormap)
+  const b = scene(2);
+  assert.equal(new Set(b.objects.find((o: any) => o.type === "mesh").colors).size, 1);
+  assert.ok(b.objects.filter((o: any) => o.type === "lines").length > 1);
+  const c = scene(3);
+  assert.deepEqual([c.azimuth, c.elevation, c.labels[0]], [-60, 20, "x"]);
+  assert.deepEqual(c.objects.map((o: any) => [o.type, o.color, o.pos.length / 3]), [["lines", "#ff0000", 20], ["points", "#ff0000", 11]]);
+  // (view(v): [x y z] toward the camera, as the documented example's angles; [caz, cel] = view(...); view(ax, 2))
+  assert.equal(msgs.filter((m) => m.id === 8 && m.stream).map((m) => m.text).join(""), "135.0000 35.2644\n-68.1986 42.8760\n0 90\n");
+  for (const id of [4, 5, 6, 7, 8]) {
+    assert.ok(shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": the SVG only");
+  }
+  // (the figure's Color behind the SVG; MATLAB's dark gray, not the page's color)
+  assert.match(shown(1)["image/svg+xml"], /^<svg[^>]*><rect width="100%" height="100%" fill="#ffffff"\/>/);
+  assert.match(shown(7)["image/svg+xml"], /<rect width="100%" height="100%" fill="#f0f0f0"\/>/);
+  for (const id of [1, 7]) assert.doesNotMatch(shown(id)["image/svg+xml"], /currentColor/);
+});
+
 test("reactive notebook: a MATLAB cell's definitions and references (src/dataflow.ts); no renaming", () => {
   const { analyzeCell } = require("../src/dataflow");
   const { renameInCell, forwardRefers } = require("../src/rename");

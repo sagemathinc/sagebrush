@@ -216,6 +216,20 @@ try {
   ok(out.trim() === "Unrecognized function or variable 'nothere'.", "a MATLAB error is MATLAB's message: " + JSON.stringify(out.trim()));
   await runCode("plot(1:3, [2 4 3])");
   ok(await ev("!![...document.querySelectorAll('.cell')].at(-1).querySelector('.out svg, .out img')"), "a MATLAB figure is shown");
+  // a MATLAB 3-D figure: the 3D view over its SVG, which a drag rotates
+  await runCode("[X,Y] = meshgrid(-3:3);\nsurf(X,Y,peaks(X,Y))\ntitle(\"Original Sampling\")");
+  const m3d = "[...document.querySelectorAll('.cell')].at(-1).querySelector('figure.plot3d')";
+  ok(await ev(`!!${m3d}?.querySelector('svg')`), "a MATLAB 3-D figure shows as a 3D figure with its SVG");
+  await sleep(500);
+  if (await ev(`!!${m3d}.querySelector('canvas')`)) {
+    const at = await ev(`(() => { const c = ${m3d}.querySelector('canvas'); c.scrollIntoView(); const r = c.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, az: c.sagebrush.view.az }; })()`);
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
+    for (let k = 1; k <= 10; k++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x + 12 * k, y: at.y, button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x + 120, y: at.y, button: "left", clickCount: 1 });
+    await sleep(300);
+    const az = await ev(`${m3d}.querySelector('canvas').sagebrush.view.az`);
+    ok(Math.abs(az - at.az) > 5, `...a drag rotates it (azimuth ${at.az} to ${az.toFixed(1)})`);
+  }
   ok(await ev("[...document.querySelectorAll('.cell')].some(c => [...c.querySelectorAll('.hc')].some(e => e.textContent === '% doubled') && [...c.querySelectorAll('.hf')].some(e => e.textContent === 'twice'))"),
     "MATLAB code is highlighted as MATLAB (% comments, the function's name)");
   await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");
