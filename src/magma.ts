@@ -194,6 +194,71 @@ class Parser {
   }
   fresh(base = "_mt") { return `${base}${++this.tmp}`; }
 
+  // The loops being parsed, innermost last (a function's body starts its
+  // own): for `break x` / `continue x`, which leave or go on with the for
+  // loop of x through the loops inside it.  Such a jump sets
+  // _mlb = (target, 0 | 1) and breaks; after each loop it passes, the loop
+  // around it breaks again, until the target's body, which takes it
+  // (break, or continue).  `escapes`: the targets outside a loop that a jump
+  // inside it is going to; `target`: whether a jump goes to this loop (it
+  // then starts with _mlb = None).
+  loops: { v: string | null; id: number; mark: number; ind: string; escapes: Set<number>; target: boolean }[] = [];
+  loopIds = 0;
+  loop(v: string | null, emitHead: () => void, body: () => void) {
+    const L = { v, id: ++this.loopIds, mark: this.out.length, ind: this.ind, escapes: new Set<number>(), target: false };
+    emitHead();
+    this.loops.push(L);
+    try {
+      body();
+    } finally {
+      this.loops.pop();
+    }
+    if (L.escapes.size) {
+      // (in the body of the loop around this one)
+      const P = this.loops[this.loops.length - 1];
+      for (const [k, word] of [[0, "break"], [1, "continue"]] as [number, string][]) {
+        if (!L.escapes.has(P.id)) break;
+        this.emit(`if _mlb == (${P.id}, ${k}):`);
+        this.block(() => { this.emit("_mlb = None"); this.emit(word); });
+      }
+      const further = [...L.escapes].filter((t) => t !== P.id);
+      if (further.length) {
+        this.emit("if _mlb is not None:");
+        this.block(() => this.emit("break"));
+        for (const t of further) P.escapes.add(t);
+      }
+    }
+    if (L.target) this.out.splice(L.mark, 0, L.ind + "_mlb = None");
+  }
+  /** break; continue; break x; continue x (x a for loop's variable). */
+  jump(word: "break" | "continue") {
+    const w = this.next();
+    if (this.peek().t !== "id") {
+      this.expect(";");
+      this.emit(word);
+      return;
+    }
+    const t = this.next();
+    this.expect(";");
+    const v = pyName(t.v);
+    let j = this.loops.length - 1;
+    while (j >= 0 && this.loops[j].v !== v) j--;
+    if (j < 0) {
+      this.reject(w, `Cannot do (${word} ${t.v}) since '${t.v}' is not a loop variable`);
+      this.emit(word);
+      return;
+    }
+    if (j === this.loops.length - 1) {
+      this.emit(word);
+      return;
+    }
+    const T = this.loops[j];
+    T.target = true;
+    this.loops[this.loops.length - 1].escapes.add(T.id);
+    this.emit(`_mlb = (${T.id}, ${word === "break" ? 0 : 1})`);
+    this.emit("break");
+  }
+
   // -------- output
   emit(line: string) { this.out.push(this.ind + line); }
   block(f: () => void) {
@@ -475,8 +540,8 @@ class Parser {
         case "while": return this.whileStmt();
         case "repeat": return this.repeatStmt();
         case "case": return this.caseStmt();
-        case "break": this.next(); if (this.peek().t === "id") this.next(); this.expect(";"); this.emit("break"); return;
-        case "continue": this.next(); if (this.peek().t === "id") this.next(); this.expect(";"); this.emit("continue"); return;
+        case "break": return this.jump("break");
+        case "continue": return this.jump("continue");
         case "return": return this.returnStmt();
         case "print": return this.printStmt();
         case "printf": return this.printfStmt();
@@ -734,14 +799,13 @@ class Parser {
       const b = this.expr();
       const by = this.eat("by") ? this.expr() : "1";
       this.expect("do");
-      this.emit(`for ${v} in _m._to(${a}, ${b}, ${by}):`);
+      this.loop(v, () => this.emit(`for ${v} in _m._to(${a}, ${b}, ${by}):`), () => this.block(() => this.statements(["end"])));
     } else {
       this.expect("in");
       const s = this.expr();
       this.expect("do");
-      this.emit(`for ${v} in _m._iter(${s}):`);
+      this.loop(v, () => this.emit(`for ${v} in _m._iter(${s}):`), () => this.block(() => this.statements(["end"])));
     }
-    this.block(() => this.statements(["end"]));
     this.expect("end");
     this.expect("for");
     this.expect(";");
@@ -751,8 +815,7 @@ class Parser {
     this.expect("while");
     const c = this.expr();
     this.expect("do");
-    this.emit(`while _m._bool(${c}):`);
-    this.block(() => this.statements(["end"]));
+    this.loop(null, () => this.emit(`while _m._bool(${c}):`), () => this.block(() => this.statements(["end"])));
     this.expect("end");
     this.expect("while");
     this.expect(";");
@@ -760,15 +823,14 @@ class Parser {
 
   repeatStmt() {
     this.expect("repeat");
-    this.emit("while True:");
-    this.block(() => {
+    this.loop(null, () => this.emit("while True:"), () => this.block(() => {
       this.statements(["until"]);
       this.expect("until");
       const c = this.expr();
       this.expect(";");
       this.emit(`if _m._bool(${c}):`);
       this.block(() => this.emit("break"));
-    });
+    }));
   }
 
   caseStmt() {
@@ -908,9 +970,10 @@ class Parser {
     const fn: Fn = { name, refs: p.refs, procedure: kind === "procedure" };
     let lines: string[] = [];
     const u0 = this.uses.length, a0 = this.assigned.length;
-    const saveOut = this.out, saveInd = this.ind;
+    const saveOut = this.out, saveInd = this.ind, saveLoops = this.loops;
     this.out = lines;
     this.ind = "";
+    this.loops = [];
     this.emit("def"); // the signature, once the captures are known
     this.fns.push(fn);
     this.capturing++;
@@ -932,6 +995,7 @@ class Parser {
       this.localsOpen = saveLocals;
       this.out = saveOut;
       this.ind = saveInd;
+      this.loops = saveLoops;
     }
     this.expect("end");
     this.expect(kind);
@@ -1443,6 +1507,7 @@ class Parser {
 
   /** [ ... ], { ... }: elements, a range a..b [by c], or a comprehension. */
   collection(open: string, close: string, ctor: string): string {
+    const ot = this.peek();
     this.expect(open);
     if (this.eat(close)) return `${ctor}([])`;
     let universe = "None";
@@ -1464,7 +1529,8 @@ class Parser {
       const b = this.expr();
       const by = this.eat("by") ? this.expr() : "1";
       this.expect(close);
-      return `_m._range(${first}, ${b}, ${by}, ${JSON.stringify(open)})`;
+      // ([ U | a..b ]: the universe too, which Magma checks)
+      return `_m._range(${first}, ${b}, ${by}, ${JSON.stringify(open)}${universe !== "None" ? `, ${universe}, (${ot.line}, ${ot.col})` : ""})`;
     }
     if (this.eat(":")) {
       // [ e : x in S, y in T | cond ]

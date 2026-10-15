@@ -556,14 +556,34 @@ def _mset(items, universe=None):
     return MSet(_set_universe(list(items)), "multi", universe)
 
 
-def _range(a, b, c, open_):
+def _still_range(v):
+    """Whether a set made by a range still has exactly the range's elements
+    (Include, Exclude and the like change its elements, not its range)."""
+    lo, hi, step = v.range
+    n = (hi - lo) // step + 1
+    return len(v.items) == n and all(isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi and (x - lo) % step == 0 for x in v.items)
+
+
+def _range(a, b, c, open_, universe=None, pos=None):
+    if universe is not None and universe is not _ZZ:
+        # (a range's elements are integers: Magma refuses another universe)
+        if open_ == "[":
+            raise MagmaError("Invalid sequence universe", "[ ... ]", True, pos)
+        if open_ == "{":
+            raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }", True, pos)
+        raise MagmaError("a range with a universe in %s ... is not supported yet" % open_)
     if open_ == "[":
         if isinstance(a, int) and isinstance(b, int) and isinstance(c, int):
             return MRange(a, b, c)
         return MSeq(_sa.srange(a, b + c if c > 0 else b - c, c) if False else _frange(a, b, c))
     s = MSet(MRange(a, b, c) if isinstance(a, int) and isinstance(b, int) else _frange(a, b, c), {"{": "set", "{@": "indexed", "{*": "multi"}[open_])
-    if open_ == "{" and isinstance(a, int) and isinstance(b, int) and c == 1 and b >= a:
-        s.range = (a, b)
+    if open_ == "{" and all(isinstance(v, int) and not isinstance(v, bool) for v in (a, b, c)) and c != 0:
+        # printed as Magma prints a range set, { 2 .. 6 by 2 } (lowest to
+        # highest), while its elements are still that range (_str checks)
+        n = len(range(a, b + (1 if c > 0 else -1), c))
+        if n >= 2:
+            lo, hi = (a, a + (n - 1) * c) if c > 0 else (a + (n - 1) * c, a)
+            s.range = (lo, hi, abs(c))
     return s
 
 
@@ -1731,6 +1751,10 @@ def _struct_eq(a, b, op, pos):
             if (a.nrows(), a.ncols(), _base(a.base_ring())) == (b.nrows(), b.ncols(), _base(b.base_ring())):
                 return True
             raise _incompatible("C", op, a, b, pos)
+        if ca == "FldNum" and getattr(a, "_quadratic", False) and getattr(b, "_quadratic", False):
+            # (QuadraticField(5) eq QuadraticField(45): Magma's quadratic
+            # fields are the same field for the same squarefree part)
+            return list(a._f) == list(b._f)
         return False  # number fields made apart differ
     if {ca, cb} in ({"RngInt", "FldRat"}, {"FldRat", "FldNum"}):
         return False
@@ -2273,8 +2297,9 @@ class MReal:
         e = self.e + len(str(abs(self.m))) - 1  # value = d[0].d[1:] * 10^e
         if 0 <= e < p:
             return sign + d[: e + 1] + "." + d[e + 1:]
-        if e == -1:
-            return sign + "0." + d
+        if -4 <= e <= -1:
+            # (Magma: 0.0005000000000 in RealField(10), 5.000000000E-5)
+            return sign + "0." + "0" * (-e - 1) + d
         return sign + d[0] + "." + d[1:] + "E" + str(e)
 
 
@@ -2368,6 +2393,16 @@ def _str(v, indent=0, col=None):
     """Magma's printing of v (possibly over several lines), starting at
     column `col` (default: the indentation)."""
     col = indent if col is None else col
+    if isinstance(v, _smat.MatrixSpace_):
+        # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
+        # Sage's "Full MatrixSpace of ... dense matrices")
+        R = v.base_ring()
+        name = "Integer Ring" if R == _sp.ZZ else "Rational Field" if R == _sp.QQ else None
+        if name is None:
+            raise MagmaError("printing this matrix space is not supported yet")
+        if v.nrows() == v.ncols():
+            return "Full Matrix Algebra of degree %d over %s" % (v.nrows(), name)
+        return "Full %sMatrixSpace of %d by %d matrices over %s" % ("R" if R == _sp.ZZ else "K", v.nrows(), v.ncols(), name)
     if type(v).__name__ == "MList":
         if not v:
             return "[* *]"
@@ -2379,8 +2414,9 @@ def _str(v, indent=0, col=None):
         return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]"
     if isinstance(v, MRange):
         return _range_str(v)
-    if isinstance(v, MSet) and v.range is not None and v.kind == "set":
-        return "{ %d .. %d }" % v.range
+    if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
+        lo, hi, step = v.range
+        return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step)
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
@@ -3591,11 +3627,17 @@ def Universe(s):
     if u is not None:
         return u
     items = list(_iter(s))
+    if not items:
+        if isinstance(s, (MSeq, MRange)):
+            raise MagmaError("Illegal null sequence", "'Universe'")
+        raise MagmaError("Universe of an empty set is not supported yet", "'Universe'")
     if all(isinstance(x, int) and not isinstance(x, bool) for x in items):
         return _ZZ
-    if all(isinstance(x, (int, _Fraction)) for x in items):
+    if all(isinstance(x, (int, _Fraction)) and not isinstance(x, bool) for x in items):
         return _QQ
-    return None
+    # (never None, which printed nothing: a set of sets is Magma's "Set of
+    # subsets of Integer Ring", which Sagebrush doesn't model)
+    raise MagmaError("Universe of this %s is not supported yet" % _type_of(s), "'Universe'")
 
 
 # Magma's random generator can't be reproduced: a program that uses SetSeed
@@ -3918,7 +3960,10 @@ class _AbGroup:
 
     def __init__(self, invs):
         # finite invariants > 1, and 0 for each copy of Z
-        self.invs = [d for d in invs if d > 1] + [0 for d in invs if d == 0]
+        # (Magma lists the invariants from the smallest, Z/2 + Z/2 + Z/10,
+        # where Sage's class group lists them from the largest; every group
+        # made here is in that form, each dividing the next)
+        self.invs = sorted(d for d in invs if d > 1) + [0 for d in invs if d == 0]
         self.name = "$"
 
     def _magma_assigned(self, name):
