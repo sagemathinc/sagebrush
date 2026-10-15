@@ -720,6 +720,10 @@ test("fzero reproduces its published examples: results, output structures and it
     "x = fzero(@(x) x - 2, [0 4], optimset('Display', 'final')); x = fzero(@(x) x - 2, [0 4]); x = fzero(@(x) x - 2, [0 4], optimset('Display', 'off'));",
     "[x,f,e,o] = fzero(@cos, [1 2], optimset('OutputFcn', @(x, v, s) v.iteration >= 2, 'Display', 'off')); fprintf('%d %d\\n', e, o.iterations);",
   ].join("\n")), ["1.8115", "Zero found in the interval [0, 4]", "-1 2"]);
+  // (from x0 = 0: Octave's scale for a zero start, 0.1, in the published step, dx = 0.1/50 times sqrt(2)^k)
+  const zero = run("x = fzero(@(x) x - 1, 0, optimset('Display', 'iter'));");
+  assert.ok(zero.includes("    3     -0.00282843      -1.00283    0.00282843     -0.997172               search"), zero.slice(0, 5).join("\n"));
+  assert.ok(zero.includes("    5          -0.004        -1.004         0.004        -0.996               search"));
 });
 
 test("fzero's other exits: no sign change, overflow, a sign change at a pole (never -5), and its refusals", () => {

@@ -282,8 +282,12 @@ def _fzero_search(F, x0, show, outs):
     published iterative displays show, step k tries a = x0 - dx*sqrt(2)^k
     and then b = x0 + dx*sqrt(2)^k, with dx = x0/50, and stops at the first
     value whose sign differs from the other end's.  For x0 = 0, where that
-    rule gives no step, dx = 1/50 is Sagebrush's own choice, as is ending
-    the search (exitflag -6) when the next a or b would overflow.  Returns
+    rule gives no step, the search is on the scale of 0.1: dx = 0.1/50.
+    That scale is GNU Octave's (observed: Octave's fzero tries the same
+    multiples of x0 from any start, 0.99 x0, 1.025 x0, 0.95 x0, ..., and
+    from x0 = 0 exactly those multiples of 0.1: 0.099, 0.1025, 0.095, ...).
+    Ending the search (exitflag -6) when the next a or b would overflow is
+    Sagebrush's own choice.  Returns
     (a, fa, b, fb, k, flag, x, fx) where flag is None when it found a sign
     change"""
     fx0 = F(x0)
@@ -306,7 +310,7 @@ def _fzero_search(F, x0, show, outs):
     fa = fb = fx0
     if fx0 == 0:
         return a, fa, b, fb, 0, None, x0, fx0
-    dx = x0 / 50 if x0 != 0 else 1 / 50
+    dx = (x0 if x0 != 0 else 0.1) / 50
     k = 0
     while True:
         k += 1
