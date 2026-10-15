@@ -154,3 +154,178 @@ f == f -> (True, True, False, False)
 O(T^3) == 0 -> True
 zero to precision == 0 -> (True, True, False, False, True)
 Qp g == g -> (True, True, True, False, True)
+14a1 5 n 2 [(1 + O(5), O(5^2)), (O(5^0), O(5)), (O(5^0), O(5)), (O(5^0), O(5)), (O(5^0), 2 + O(5))]
+14a1 5 n 3 [(1 + 4*5 + O(5^2), O(5^3)), (4 + O(5), O(5)), (1 + O(5), O(5)), (4 + O(5), O(5)), (2 + O(5), 2 + O(5))]
+14a1 5 n 4 [(1 + 4*5 + O(5^2), O(5^2)), (4 + O(5), O(5^2)), (1 + O(5), 4*5 + O(5^2)), (4 + O(5), 2*5 + O(5^2)), (2 + O(5), 2 + 2*5 + O(5^2))]
+11a1 19 n 2 [(4 + O(19), O(19^2)), (O(19^0), O(19)), (O(19^0), O(19)), (O(19^0), O(19)), (O(19^0), O(19))]
+11a1 19 n 3 [(4 + 15*19 + O(19^2), O(19^3)), (4 + O(19), O(19)), (4 + O(19), O(19)), (O(19), O(19)), (13 + O(19), O(19))]
+17a1 3 n 2 [(1 + O(3), O(3^2)), (O(3^0), O(3)), (O(3^0), 2 + O(3))]
+17a1 3 n 3 [(1 + 2*3 + O(3^2), O(3^3)), (O(3), O(3)), (1 + O(3), 2 + O(3)), (O(3^0), O(3^0)), (O(3^0), O(3^0))]
+17a1 3 n 4 [(1 + 2*3 + O(3^2), O(3^2)), (O(3), O(3^2)), (1 + O(3), 2 + 3 + O(3^2)), (O(3^0), 1 + O(3)), (O(3^0), 2 + O(3))]
+17a1 3 n 5 [(1 + 2*3 + O(3^2), O(3^3)), (3 + O(3^2), O(3^2)), (1 + O(3^2), 2 + 3 + O(3^2)), (O(3), 1 + O(3)), (2 + O(3), 2 + O(3))]
+37a1 3 n 2 [(O(3), O(3^2)), (O(3^0), O(3)), (O(3^0), O(3))]
+37a1 3 n 3 [(O(3^2), O(3^3)), (1 + O(3), O(3)), (1 + O(3), O(3)), (O(3^0), O(3^0)), (O(3^0), O(3^0))]
+37a1 3 n 4 [(O(3^2), O(3^2)), (1 + O(3), 3 + O(3^2)), (1 + O(3), 3 + O(3^2)), (O(3^0), O(3)), (O(3^0), O(3))]
+19a1 23 n 2 [(8 + O(23), O(23^2)), (O(23^0), O(23)), (O(23^0), O(23)), (O(23^0), O(23)), (O(23^0), O(23))]
+19a1 23 n 3 [(8 + 15*23 + O(23^2), O(23^3)), (22 + O(23), O(23)), (9 + O(23), O(23)), (7 + O(23), O(23)), (14 + O(23), O(23))]
+15a1 7 n 2 [(1 + O(7), O(7^2)), (O(7^0), O(7)), (O(7^0), O(7)), (O(7^0), O(7)), (O(7^0), O(7))]
+15a1 7 n 3 [(1 + 6*7 + O(7^2), O(7^3)), (6 + O(7), O(7)), (O(7), O(7)), (1 + O(7), O(7)), (2 + O(7), O(7))]
+Dp parent -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 3
+Dp prec=1 -> (1 + 4*5 + 4*5^3 + 4*5^5 + 4*5^7 + 4*5^9 + 4*5^11 + 4*5^13 + 4*5^15 + 4*5^17 + 4*5^19 + O(5^20) + O(T), O(T^1))
+Dp prec=2 -> 1 + 4*5 + O(5^2) + (4 + O(5))*T + O(T^2)
+Dp n=1 !! ValueError
+v -> ((1 + O(5^6))*T, 1 + O(5^6))
+parent v[1] -> Power Series Ring in T over 5-adic Field with capped relative precision 6
+v+v parent -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6
+2*v -> (((2 + O(5^6))*T, 2 + O(5^6)), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6)
+-v, v-v -> (((4 + 4*5 + 4*5^2 + 4*5^3 + 4*5^4 + 4*5^5 + O(5^6))*T, 4 + 4*5 + 4*5^2 + 4*5^3 + 4*5^4 + 4*5^5 + O(5^6)), (0, 0), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6)
+v*T -> (((1 + O(5^6))*T^2, (1 + O(5^6))*T), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6)
+nonsense !! TypeError
+ZZ 1/2 !! TypeError
+ZZ parent -> Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring
+QQ parent -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in u over Rational Field
+rank -> (2, Power Series Ring in T over 5-adic Field with capped relative precision 6, 2, 2)
+M([1,2]) -> ((1 + O(5^6), 2 + O(5^6)), True)
+M.zero -> (0, 0)
+v.dot -> 1 + O(5^6) + (1 + O(5^6))*T^2
+v == v -> (True, True)
+v list -> ([(1 + O(5^6))*T, 1 + O(5^6)], 2, (1 + O(5^6))*T)
+valuation -2 !! ValueError
+int valuation -2 !! ValueError
+valuation 2.50000000000000 !! TypeError
+int valuation 2.50000000000000 !! TypeError
+valuation 0 !! ValueError
+int valuation 0 !! ValueError
+valuation 1 !! ValueError
+int valuation 1 !! ValueError
+valuation -1 !! ValueError
+int valuation -1 !! ValueError
+valuation 4 -> (1, +Infinity)
+int valuation 4 -> (2, +Infinity)
+valuation 2.00000000000000 -> (2, +Infinity)
+int valuation 2.00000000000000 -> (4, +Infinity)
+valuation 1/2 !! TypeError
+int valuation 1/2 !! TypeError
+valuation 6 -> (1, +Infinity)
+int valuation 6 -> (1, +Infinity)
+QQ(0).valuation(0) !! ValueError
+QQ(32/3).valuation(4) -> (2, -2, 2)
+valuation(1/2, 1) !! ValueError
+valuation fn -> 4
+2v parent -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 3
+-v -> 4 + O(5^2) + (1 + O(5))*T + (4 + O(5))*T^2 + (1 + O(5))*T^3 + (3 + O(5))*T^4 + O(T^5)
+v-v -> (Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 3, True)
+rank -> (2, (1 + O(5^3), 2 + O(5^3)))
+v[0] parent -> Power Series Ring in T over 5-adic Field with capped relative precision 3
+matrix (2, 2) 0 -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 2) 1 -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) 2 -> ([3 2]
+[3 6], [3 2]
+[3 6], [-1  2]
+[ 3  2], [ 1 -2]
+[-3 -2])
+matrix (2, 2) 1/2 -> ([3/2   2]
+[  3 9/2], [3/2   2]
+[  3 9/2], [1/2   2]
+[  3 7/2], [-1/2   -2]
+[  -3 -7/2])
+matrix (2, 2) True -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) False -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 2) 0 -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 2) 1 -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) 2 -> ([3 2]
+[3 6], [3 2]
+[3 6], [-1  2]
+[ 3  2], [ 1 -2]
+[-3 -2])
+matrix (2, 2) 1/2 -> ([3/2   2]
+[  3 9/2], [3/2   2]
+[  3 9/2], [1/2   2]
+[  3 7/2], [-1/2   -2]
+[  -3 -7/2])
+matrix (2, 2) True -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) False -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 3) 0 -> ([0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [ 0 -1 -2]
+[-3 -4 -5])
+matrix (2, 3) 1 !! TypeError
+matrix (2, 3) 2 !! TypeError
+matrix (2, 3) 1/2 !! TypeError
+matrix (2, 3) True !! TypeError
+matrix (2, 3) False -> ([0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [ 0 -1 -2]
+[-3 -4 -5])
+matrix (0, 3) 0 -> ([], [], [], [])
+matrix (0, 3) 1 !! TypeError
+matrix (0, 3) 2 !! TypeError
+matrix (0, 3) 1/2 !! TypeError
+matrix (0, 3) True !! TypeError
+matrix (0, 3) False -> ([], [], [], [])
+v += v -> ((2*s, 2), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring, (s, 1))
+v -= w -> ((-1 + s, 0), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+v *= 2 -> ((2*s, 2), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+v *= s -> ((s^2, s), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+v[0] = 2 -> ((2, 1), Power Series Ring in s over Integer Ring, Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+v[0] = s^2 -> ((s^2, 1), Power Series Ring in s over Integer Ring, Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+v[0] = 1/2 !! TypeError
+v[-1] = 3 -> ((s, 3), Power Series Ring in s over Integer Ring)
+A*v (2, 2) -> ((s, 1), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+A*v (2, 2) -> ((2 + s, 4 + 3*s), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+A*v (3, 2) -> ((1, 3 + 2*s, 5 + 4*s), Ambient free module of rank 3 over the integral domain Power Series Ring in s over Integer Ring)
+v*A (2, 2) -> ((s, 1), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+v*A (2, 2) -> ((3 + s, 4 + 2*s), Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring)
+v*A (2, 3) -> ((3, 4 + s, 5 + 2*s), Ambient free module of rank 3 over the integral domain Power Series Ring in s over Integer Ring)
+QQ matrix * series vector over QQ -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in u over Rational Field
+A*v size !! TypeError
+v*A size !! TypeError
+dims (0, 3) 0 -> [((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field)]
+dims (0, 3) False -> [((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field)]
+dims (0, 3) neg, 2M, M*2 -> [((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field), ((0, 3), Full MatrixSpace of 0 by 3 dense matrices over Rational Field)]
+dims (3, 0) 0 -> [((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring)]
+dims (3, 0) False -> [((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring)]
+dims (3, 0) neg, 2M, M*2 -> [((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring), ((3, 0), Full MatrixSpace of 3 by 0 dense matrices over Integer Ring)]
+dims (0, 0) 0 -> [((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring)]
+dims (0, 0) False -> [((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring)]
+dims (0, 0) neg, 2M, M*2 -> [((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring), ((0, 0), Full MatrixSpace of 0 by 0 dense matrices over Integer Ring)]
+dims (2, 3) 0 -> [((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field)]
+dims (2, 3) False -> [((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field)]
+dims (2, 3) neg, 2M, M*2 -> [((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field), ((2, 3), Full MatrixSpace of 2 by 3 dense matrices over Rational Field)]
+dims 0x3 * 3x2 -> (0, 2)
+dims 2x0 * 0x3 -> (2, 3)
+dims 0x3 + 0x3 -> (0, 3)

@@ -253,7 +253,7 @@ try {
 } finally {
   ws.close();
   chrome.kill();
-  try { rmSync(profile, { recursive: true, force: true }); if (!process.env.KEEP) rmSync(dir, { recursive: true, force: true }); else console.log("files in", dir); } catch {}
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); if (!process.env.KEEP) rmSync(dir, { recursive: true, force: true }); else console.log("files in", dir); } catch {}
 }
 if (fails.length) { console.log("FAIL\n  " + fails.join("\n  ")); process.exit(1); }
 console.log("ok");

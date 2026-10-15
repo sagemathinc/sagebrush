@@ -133,3 +133,37 @@ for x in xs:
         except (ValueError, OverflowError) as e:
             out.append(type(e).__name__)
     print(*out)
+
+# += and *= on a subclass of list: its own __iadd__/__imul__ when it defines
+# them (a vector that adds entrywise), list's in-place extension otherwise
+class Vec(list):
+    def __add__(self, o):
+        return Vec(a + b for a, b in zip(self, o))
+
+    def __mul__(self, k):
+        return Vec(a * k for a in self)
+
+    def __iadd__(self, o):
+        return self + o
+
+    def __imul__(self, k):
+        return self * k
+
+
+class Plain(list):
+    pass
+
+
+v = Vec([1, 2]); w = v
+v += v
+print(v, type(v).__name__, w, v is w)
+v = Vec([1, 2]); v *= 3
+print(v, type(v).__name__)
+p = Plain([1, 2]); q = p
+p += [3]
+p *= 2
+print(p, type(p).__name__, p is q)
+l = [1]; m = l
+l += (2, 3)
+l *= 2
+print(l, l is m)

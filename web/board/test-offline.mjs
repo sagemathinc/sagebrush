@@ -270,7 +270,7 @@ try {
   chrome.kill();
   server.close();
   await sleep(200);
-  try { rmSync(profile, { recursive: true, force: true }); if (!process.env.KEEP) rmSync(dir, { recursive: true, force: true }); else console.log("files in", dir); } catch {}
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); if (!process.env.KEEP) rmSync(dir, { recursive: true, force: true }); else console.log("files in", dir); } catch {}
 }
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);
