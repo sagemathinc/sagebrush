@@ -180,8 +180,9 @@ function classAttrOpt(cls: any, name: string): any {
 // runs no user code (a plain metaclass, an attribute whose type has no
 // __get__: functions, None, callable instances), else NEEDS_GET.  Cached
 // per version of t, as special()'s lookups, and, for an attribute that is
-// an object, per version of the attribute's own type: that type can gain or
-// lose __get__ without t changing.
+// an object, per identity and version of the attribute's own type: that
+// type can gain or lose __get__, or the object change its type, without t
+// changing.
 const NEEDS_GET = {};
 type RawAttr = { raw: any; at: any; atVer: number; plain: boolean };
 function plainClassAttr(t: any, name: string): any {
@@ -196,9 +197,14 @@ function plainClassAttr(t: any, name: string): any {
     const at = raw === undefined || raw === null || typeof raw === "function" ? null : typeOf(raw);
     e = c[name] = { raw: raw === undefined ? MISSING : raw, at, atVer: -1, plain: at === null };
   }
-  if (e.at !== null && e.atVer !== e.at.$ver) {
-    e.plain = lookupType(e.at, "__get__") === undefined;
-    e.atVer = e.at.$ver;
+  if (e.at !== null) {
+    // (the attribute's type itself can change: a.__class__ = Descriptor)
+    const at = typeOf(e.raw);
+    if (at !== e.at || e.atVer !== at.$ver) {
+      e.plain = lookupType(at, "__get__") === undefined;
+      e.at = at;
+      e.atVer = at.$ver;
+    }
   }
   return e.plain ? e.raw : NEEDS_GET;
 }

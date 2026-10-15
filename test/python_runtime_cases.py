@@ -562,3 +562,44 @@ def _getattr_only(mode):
 
 
 print([_getattr_only(m) for m in ["different", "hide", "value", "mutation"]])
+
+
+# The attribute object's own type changing after the override test has
+# seen it (astra's CORR-3DF-1 on 3df3bc0): a.__class__ = Descriptor, and back.
+class RPlain:
+    def __call__(self, other):
+        return "raw right"
+
+
+class RDesc:
+    def __call__(self, other):
+        return "raw right"
+
+    def __get__(self, obj, cls):
+        return None if obj is None else (lambda other: "bound right")
+
+
+_ra, _rb = RPlain(), RPlain()
+
+
+class RA:
+    __radd__ = _ra
+
+    def __add__(self, other):
+        return "left"
+
+
+class RB(RA):
+    __radd__ = _rb
+
+
+_seq = [RA() + RB()]
+_ra.__class__ = RDesc
+_rb.__class__ = RDesc
+_seq.append(RA() + RB())
+_ra.__class__ = RPlain
+_rb.__class__ = RPlain
+_seq.append(RA() + RB())
+_rb.__class__ = RDesc
+_seq.append(_rget("one", lambda: RA() + RB()))
+print(_seq)
