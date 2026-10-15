@@ -500,6 +500,9 @@ def MatrixSpace(base, nrows, ncols=None, sparse=False):
     import _sage_ffmat
     if _sage_ffmat._is_ff(base):
         return _sage_ffmat.MatrixSpace(base, nrows, ncols)
+    if _is_padic(base):
+        import _sage_padic
+        return _sage_padic.PadicMatrixSpace(base, nrows, nrows if ncols is None else ncols)
     return MatrixSpace_(base, nrows, nrows if ncols is None else ncols)
 
 
@@ -1832,6 +1835,8 @@ def vector(*args):
     import _sage_ffmat
     if len(args) == 2 and _sage_ffmat._is_ff(args[0]):
         return _sage_ffmat.vector(args[0], args[1])
+    if args and _is_padic(args[0]):
+        raise NotImplementedError("vectors over %r are not available in sagebrush yet" % (args[0],))
     ring = None
     if len(args) == 2:
         ring, args = args[0], args[1:]
@@ -1917,6 +1922,31 @@ def _smith_uv(a):
     return Matrix(ZZ, A), Matrix(ZZ, U), Matrix(ZZ, V)
 
 
+def _is_padic(R):
+    """Whether R is Zp(p) or Qp(p) (lib/_sage_padic.py)."""
+    import _sage_padic
+    return _sage_padic._is_padic_ring(R)
+
+
+def _padic_base_of(rows):
+    """The parent of the p-adic entries of rows (a list of rows or a flat
+    list), when every entry is a p-adic number of one parent, an integer or
+    a rational; else None."""
+    import _sage_padic
+    flat = [x for r in rows for x in (r if isinstance(r, (list, tuple)) else [r])]
+    parents = {x.parent() for x in flat if isinstance(x, _sage_padic.pAdicCappedRelativeElement)}
+    if len(parents) != 1:
+        return None
+    if all(isinstance(x, (_sage_padic.pAdicCappedRelativeElement, int, _F)) or type(x).__name__ in ("Integer", "Rational") for x in flat):
+        return parents.pop()
+    return None
+
+
+def _is_parent(R):
+    """Whether R is a ring or other parent rather than a list of rows."""
+    return callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows")
+
+
 def matrix(*args, **kwds):
     """matrix([[1, 2], [3, 4]]), matrix(ZZ, rows), matrix(QQ, 2, 2, entries),
     matrix(ZZ, 3, 3, range(9)).
@@ -1940,8 +1970,20 @@ def matrix(*args, **kwds):
         ff = _ff_base_of(args[0])
         if ff is not None:
             return _sage_ffmat.matrix(ff, args[0])
+    if args and _is_padic(args[0]):
+        import _sage_padic
+        return _sage_padic.padic_matrix(*args)
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        pb = _padic_base_of(args[0])
+        if pb is not None:
+            import _sage_padic
+            return _sage_padic.padic_matrix(pb, args[0])
     if args and args[0] in (sa.ZZ, sa.QQ):
         base, args = args[0], args[1:]
+    if base is None and args and not isinstance(args[0], (list, tuple, range)) and _is_parent(args[0]):
+        # a ring this function does not know: never iterated (Zp's K[0],
+        # K[1], ... would build polynomial rings forever)
+        raise NotImplementedError("matrices over %r are not available in sagebrush yet" % (args[0],))
     if len(args) >= 2 and isinstance(args[0], int) and isinstance(args[1], int):
         r, c = args[0], args[1]
         ent = args[2] if len(args) > 2 else 0
@@ -2122,6 +2164,8 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
         sage: random_matrix(QQ, 3, algorithm='unimodular').det()
         1
     """
+    if _is_padic(base):
+        raise NotImplementedError("random matrices over %r are not available in sagebrush yet" % (base,))
     import random as _r
     sa = _sa()
     n = nrows if ncols is None else ncols
@@ -2178,6 +2222,9 @@ def identity_matrix(base, n=None):
     import _sage_ffmat
     if _sage_ffmat._is_ff(base):
         return _sage_ffmat.identity_matrix(base, n)
+    if _is_padic(base):
+        import _sage_padic
+        return _sage_padic.padic_matrix(base, n, n, 1)
     return Matrix(base, [[int(i == j) for j in range(n)] for i in range(n)])
 
 
@@ -2196,6 +2243,9 @@ def zero_matrix(base, nrows=None, ncols=None):
     import _sage_ffmat
     if _sage_ffmat._is_ff(base):
         return _sage_ffmat.matrix(base, nrows, nrows if ncols is None else ncols, 0)
+    if _is_padic(base):
+        import _sage_padic
+        return _sage_padic.padic_matrix(base, nrows, nrows if ncols is None else ncols, 0)
     if base not in (sa.ZZ, sa.QQ):
         # zero_matrix(n) or zero_matrix(m, n)
         base, nrows, ncols = sa.ZZ, base, nrows
