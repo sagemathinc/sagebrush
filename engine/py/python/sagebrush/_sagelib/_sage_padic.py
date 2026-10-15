@@ -1238,3 +1238,412 @@ def _ratrec(a, m):
     if s1 == 0 or abs(s1) > bound:
         return None
     return _F(r1, s1)
+
+
+# ------------------------------------------------------------------ matrices
+# Dense matrices over Zp and Qp (capped relative precision): the ring
+# operations, entry by entry in the field's own arithmetic, so every entry
+# carries the precision its computation proves (an inexact zero O(p^k) is
+# kept, never skipped as 0).  Gaussian elimination (rank, inverse, kernels,
+# echelon forms) would decide pivots on inexact entries and is not
+# available: it raises NotImplementedError.
+
+_PADIC_MATRIX_ELIMINATION = (
+    "rank", "inverse", "echelon_form", "echelonize", "rref", "pivots", "kernel", "right_kernel",
+    "left_kernel", "right_kernel_matrix", "left_kernel_matrix", "image", "column_space", "row_space",
+    "solve_right", "solve_left", "is_invertible", "is_singular", "minpoly", "minimal_polynomial",
+    "eigenvalues", "eigenvectors_right", "eigenvectors_left", "eigenspaces_right", "eigenspaces_left",
+    "smith_form", "elementary_divisors", "hermite_form", "hessenberg_form", "jordan_form",
+    "adjugate", "LU", "QR", "nullity", "rows", "columns", "row", "column", "change_ring",
+)
+
+
+def _is_padic_ring(R):
+    return isinstance(R, pAdicGeneric_)
+
+
+class PadicMatrix:
+    """A dense matrix over Zp or Qp.
+
+    EXAMPLES::
+
+        sage: K = Qp(5, 5)
+        sage: A = matrix(K, 2, 2, [1, 2, 3, 4]); A
+        [1 + O(5^5) 2 + O(5^5)]
+        [3 + O(5^5) 4 + O(5^5)]
+        sage: A.parent()
+        Full MatrixSpace of 2 by 2 dense matrices over 5-adic Field with capped relative precision 5
+        sage: B = matrix(K, 2, 2, [K(0, 3), 1, 1, K(0, 2)]); B^2
+        [1 + O(5^5)     O(5^2)]
+        [    O(5^2) 1 + O(5^4)]
+        sage: B.det(), B.trace()
+        (4 + 4*5 + 4*5^2 + 4*5^3 + 4*5^4 + O(5^5), O(5^2))
+
+    Elimination decides pivots on inexact entries, so it is refused here.
+    Rows, vectors, other bases, and scalars outside the ring are refused as
+    well (Sage computes all of these)::
+
+        sage: A.rank()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: rank of a matrix over 5-adic Field with capped relative precision 5 is not available in sagebrush yet
+        sage: A^-1  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the inverse of a matrix over 5-adic Field with capped relative precision 5 is not available in sagebrush yet
+        sage: A[0]  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: rows, slices and vectors of a matrix over 5-adic Field with capped relative precision 5 are not available in sagebrush yet
+        sage: matrix(Zp(5, 4), 2, 2, [1, 2, 3, 4]) * (1/5)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the scalar 1/5 with a matrix over 5-adic Ring with capped relative precision 4 is not available in sagebrush yet
+    """
+
+    __hash__ = None
+
+    def __init__(self, base, rows, ncols=None):
+        self._base = base
+        self._rows = [[base(x) for x in r] for r in rows]
+        self._ncols = ncols if ncols is not None else (len(self._rows[0]) if self._rows else 0)
+        if any(len(r) != self._ncols for r in self._rows):
+            raise ValueError("the rows of a matrix must all have the same length")
+
+    def _new(self, rows, ncols=None):
+        return PadicMatrix(self._base, rows, self._ncols if ncols is None else ncols)
+
+    # ---- data
+    def parent(self):
+        return PadicMatrixSpace(self._base, self.nrows(), self._ncols)
+
+    def base_ring(self):
+        return self._base
+
+    def nrows(self):
+        return len(self._rows)
+
+    def ncols(self):
+        return self._ncols
+
+    def dimensions(self):
+        return (self.nrows(), self._ncols)
+
+    def is_square(self):
+        return self.nrows() == self._ncols
+
+    def __repr__(self):
+        if not self._rows or not self._ncols:
+            return "[]"
+        cells = [[repr(x) for x in r] for r in self._rows]
+        # one width for every entry, as Sage prints matrices over Zp and Qp
+        w = max(len(c) for r in cells for c in r)
+        return "\n".join("[" + " ".join(c.rjust(w) for c in r) + "]" for r in cells)
+
+    def _latex_(self):
+        return "\\left(\\begin{array}{%s}%s\\end{array}\\right)" % (
+            "r" * self._ncols, " \\\\\n".join(" & ".join(x._latex_() for x in r) for r in self._rows))
+
+    def _index(self, ij):
+        if not (isinstance(ij, tuple) and len(ij) == 2 and all(isinstance(k, int) or type(k).__name__ == "Integer" for k in ij)):
+            raise NotImplementedError("rows, slices and vectors of a matrix over %r are not available in sagebrush yet" % (self._base,))
+        i, j = int(ij[0]), int(ij[1])
+        n, m = self.nrows(), self._ncols
+        if not (-n <= i < n and -m <= j < m):
+            raise IndexError("matrix index out of range")
+        return i % n, j % m
+
+    def __getitem__(self, ij):
+        i, j = self._index(ij)
+        return self._rows[i][j]
+
+    def __setitem__(self, ij, v):
+        i, j = self._index(ij)
+        self._rows[i][j] = self._base(v)
+
+    def list(self):
+        return [x for r in self._rows for x in r]
+
+    def diagonal(self):
+        return [self._rows[i][i] for i in range(min(self.nrows(), self._ncols))]
+
+    def transpose(self):
+        return self._new([[r[j] for r in self._rows] for j in range(self._ncols)], self.nrows())
+
+    T = property(transpose)
+
+    def copy(self):
+        return self._new([list(r) for r in self._rows])
+
+    __copy__ = copy
+
+    def is_zero(self):
+        return all(x.is_zero() for r in self._rows for x in r)
+
+    # ---- arithmetic
+    def _same(self, o):
+        """o as a matrix over this ring, None if it is not one."""
+        if isinstance(o, PadicMatrix):
+            if o._base != self._base:
+                raise NotImplementedError("combining matrices over %r and %r is not available in sagebrush yet" % (self._base, o._base))
+            return o
+        return None
+
+    def _scalar(self, c):
+        try:
+            return self._base(c)
+        except (TypeError, ValueError, ZeroDivisionError):
+            raise NotImplementedError("the scalar %r with a matrix over %r is not available in sagebrush yet" % (c, self._base))
+
+    def _scalar_matrix(self, c):
+        if not self.is_square():
+            raise TypeError("a scalar can only be added to a square matrix")
+        c = self._scalar(c)
+        z = self._base(0)
+        return self._new([[c if i == j else z for j in range(self._ncols)] for i in range(self.nrows())])
+
+    def __add__(self, o):
+        m = self._same(o)
+        if m is None:
+            m = self._scalar_matrix(o)
+        if m.dimensions() != self.dimensions():
+            raise TypeError("unsupported operand parent(s) for +: '%r' and '%r'" % (self.parent(), m.parent()))
+        return self._new([[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, m._rows)])
+
+    __radd__ = __add__
+
+    def __neg__(self):
+        return self._new([[-a for a in r] for r in self._rows])
+
+    def __sub__(self, o):
+        m = self._same(o)
+        if m is None:
+            m = self._scalar_matrix(o)
+        return self + (-m)
+
+    def __rsub__(self, o):
+        return (-self) + o
+
+    def __mul__(self, o):
+        m = self._same(o)
+        if m is None:
+            if type(o).__name__ in ("Vector", "FFVector", "SeriesVector", "Matrix", "FFMatrix"):
+                raise TypeError("a matrix over %r times %s is not available in sagebrush yet" % (self._base, type(o).__name__))
+            c = self._scalar(o)
+            return self._new([[a * c for a in r] for r in self._rows])
+        if self._ncols != m.nrows():
+            raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), m.parent()))
+        out = []
+        for r in self._rows:
+            row = []
+            for j in range(m._ncols):
+                s = self._base(0)
+                for k in range(self._ncols):
+                    s = s + r[k] * m._rows[k][j]
+                row.append(s)
+            out.append(row)
+        return self._new(out, m._ncols)
+
+    def __rmul__(self, o):
+        c = self._scalar(o)
+        return self._new([[c * a for a in r] for r in self._rows])
+
+    def __pow__(self, e):
+        e = int(e)
+        if not self.is_square():
+            raise ArithmeticError("self must be a square matrix")
+        if e < 0:
+            raise NotImplementedError("the inverse of a matrix over %r is not available in sagebrush yet" % (self._base,))
+        r = self._scalar_matrix(1)
+        b = self
+        while e:
+            if e & 1:
+                r = r * b
+            e >>= 1
+            if e:
+                b = b * b
+        return r
+
+    def __invert__(self):
+        raise NotImplementedError("the inverse of a matrix over %r is not available in sagebrush yet" % (self._base,))
+
+    def __truediv__(self, o):
+        raise NotImplementedError("division of a matrix over %r is not available in sagebrush yet" % (self._base,))
+
+    def __eq__(self, o):
+        if isinstance(o, PadicMatrix):
+            if o._base != self._base:
+                return False
+            m = o
+        else:
+            try:
+                m = self._scalar_matrix(o)
+            except TypeError:
+                return False
+        return m.dimensions() == self.dimensions() and all(a == b for r, s in zip(self._rows, m._rows) for a, b in zip(r, s))
+
+    def __ne__(self, o):
+        return not self == o
+
+    # ---- invariants without division
+    def trace(self):
+        s = self._base(0)
+        for x in self.diagonal():
+            s = s + x
+        return s
+
+    def det(self):
+        """The determinant, by its expansion (n <= 3): no pivot is chosen.
+
+        EXAMPLES::
+
+            sage: matrix(Qp(5, 5), 3, 3, [2, 0, 1, 1, 5, 0, 0, 1, 25]).det()
+            1 + 2*5^3 + O(5^5)
+        """
+        if not self.is_square():
+            raise ValueError("self must be a square matrix")
+        n = self.nrows()
+        a = self._rows
+        if n == 0:
+            return self._base(1)
+        if n == 1:
+            return a[0][0]
+        if n == 2:
+            return a[0][0] * a[1][1] - a[0][1] * a[1][0]
+        if n == 3:
+            return (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+                    - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+                    + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+        raise NotImplementedError("the determinant of a %d x %d matrix over %r is not available in sagebrush yet" % (n, n, self._base))
+
+    determinant = det
+
+    def charpoly(self, var="x"):
+        """The characteristic polynomial (n <= 2).
+
+        EXAMPLES::
+
+            sage: matrix(Qp(5, 5), 2, 2, [1, 2, 3, 4]).charpoly()
+            (1 + O(5^5))*x^2 + (4*5 + 4*5^2 + 4*5^3 + 4*5^4 + O(5^5))*x + 3 + 4*5 + 4*5^2 + 4*5^3 + 4*5^4 + O(5^5)
+        """
+        if not self.is_square():
+            raise ValueError("self must be a square matrix")
+        n = self.nrows()
+        if n > 2:
+            raise NotImplementedError("the characteristic polynomial of a %d x %d matrix over %r is not available in sagebrush yet" % (n, n, self._base))
+        import _sage_padic_ext
+        P = _sage_padic_ext.PolynomialRing_padic(self._base, str(var))
+        if n == 0:
+            return P([self._base(1)])
+        if n == 1:
+            return P([-self._rows[0][0], self._base(1)])
+        return P([self.det(), -self.trace(), self._base(1)])
+
+    characteristic_polynomial = charpoly
+
+    def __getattr__(self, name):
+        if name in _PADIC_MATRIX_ELIMINATION:
+            base = object.__getattribute__(self, "_base")
+            def unavailable(*args, **kwds):
+                raise NotImplementedError("%s of a matrix over %r is not available in sagebrush yet" % (name, base))
+            return unavailable
+        raise AttributeError("'PadicMatrix' object has no attribute '%s'" % name)
+
+
+class PadicMatrixSpace:
+    """The m x n matrices over Zp or Qp.
+
+    EXAMPLES::
+
+        sage: M = MatrixSpace(Zp(5, 4), 2); M
+        Full MatrixSpace of 2 by 2 dense matrices over 5-adic Ring with capped relative precision 4
+        sage: M([1, 5, 25, 7])
+        [    1 + O(5^4)     5 + O(5^5)]
+        [  5^2 + O(5^6) 2 + 5 + O(5^4)]
+    """
+
+    def __init__(self, base, nrows, ncols):
+        self._base, self._nrows, self._ncols = base, int(nrows), int(ncols)
+
+    def __repr__(self):
+        return "Full MatrixSpace of %d by %d dense matrices over %r" % (self._nrows, self._ncols, self._base)
+
+    def __eq__(self, o):
+        return isinstance(o, PadicMatrixSpace) and (o._base, o._nrows, o._ncols) == (self._base, self._nrows, self._ncols)
+
+    def __ne__(self, o):
+        return not self == o
+
+    def __hash__(self):
+        return hash((repr(self._base), self._nrows, self._ncols))
+
+    def base_ring(self):
+        return self._base
+
+    def nrows(self):
+        return self._nrows
+
+    def ncols(self):
+        return self._ncols
+
+    def dims(self):
+        return (self._nrows, self._ncols)
+
+    def zero(self):
+        return padic_matrix(self._base, self._nrows, self._ncols, 0)
+
+    def identity_matrix(self):
+        if self._nrows != self._ncols:
+            raise TypeError("identity matrix must be square")
+        return padic_matrix(self._base, self._nrows, self._ncols, 1)
+
+    def __call__(self, entries=0):
+        if isinstance(entries, PadicMatrix):
+            if entries.dimensions() != (self._nrows, self._ncols):
+                raise TypeError("the matrix has the wrong dimensions")
+            return PadicMatrix(self._base, entries._rows, self._ncols)
+        return padic_matrix(self._base, self._nrows, self._ncols, entries)
+
+
+def padic_matrix(base, *args):
+    """matrix(K, rows), matrix(K, m, n, entries or scalar), matrix(K, n, entries)
+    for K = Zp(p) or Qp(p) (lib/_sage_matrix.py dispatches here)."""
+    args = list(args)
+    _int = lambda v: isinstance(v, int) or type(v).__name__ == "Integer"
+    if not args:
+        return PadicMatrix(base, [], 0)
+    if len(args) == 1 and not _int(args[0]):
+        rows = args[0]
+        if isinstance(rows, PadicMatrix):
+            return PadicMatrix(base, rows._rows, rows.ncols())
+        rows = [list(r) for r in rows]
+        return PadicMatrix(base, rows, len(rows[0]) if rows else 0)
+    m = int(args[0])
+    if len(args) == 1:
+        n, ent = m, 0
+    elif _int(args[1]):
+        n = int(args[1])
+        ent = args[2] if len(args) > 2 else 0
+    else:
+        n, ent = None, args[1]
+    if isinstance(ent, (list, tuple, range)) or (hasattr(ent, "__iter__") and not isinstance(ent, (str, pAdicCappedRelativeElement))):
+        e = list(ent)
+        if e and isinstance(e[0], (list, tuple)):
+            rows = [list(r) for r in e]
+            if len(rows) != m:
+                raise ValueError("entries do not fill a matrix with %d rows" % m)
+            return PadicMatrix(base, rows, n if n is not None else (len(rows[0]) if rows else 0))
+        if n is None:
+            if m == 0 or len(e) % m:
+                raise ValueError("entries do not fill a matrix with %d rows" % m)
+            n = len(e) // m
+        if len(e) != m * n:
+            raise ValueError("entries has the wrong length")
+        return PadicMatrix(base, [e[i * n:(i + 1) * n] for i in range(m)], n)
+    if n is None:
+        n = m
+    c = base(ent)
+    if not c.is_zero() and m != n:
+        raise TypeError("nonzero scalar matrix must be square")
+    zero = base(0)
+    return PadicMatrix(base, [[c if i == j else zero for j in range(n)] for i in range(m)], n)
