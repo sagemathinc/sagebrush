@@ -1826,42 +1826,238 @@ def geterr():
 
 # ------------------------------------------------------------------ printing
 
+def _index(v):
+    """operator.index, with CPython's TypeError"""
+    if isinstance(v, bool) or not hasattr(type(v), "__index__"):
+        if isinstance(v, bool):
+            return int(v)
+        raise TypeError("'%s' object cannot be interpreted as an integer" % type(v).__name__)
+    return type(v).__index__(v)
+
+
+_PRINT_DEFAULTS = {"edgeitems": 3, "threshold": 1000, "floatmode": "maxprec", "precision": 8, "suppress": False,
+                   "linewidth": 75, "nanstr": "nan", "infstr": "inf", "sign": "-", "formatter": None,
+                   "legacy": False, "override_repr": None}
+_printopts = dict(_PRINT_DEFAULTS)
+_FLOATMODES = ("fixed", "unique", "maxprec", "maxprec_equal")
+
+
+def _formatter_functions(formatter):
+    """formatter's functions for the kinds Sagebrush's arrays have: (bool,
+    int, float, complex), by NumPy's precedence ('all', then the *_kind
+    groups, then the type's own key); keys for other kinds do nothing, as in
+    NumPy."""
+    out = {"bool": None, "int": None, "float": None, "complexfloat": None}
+    if not formatter:
+        return out
+    f = {k: v for k, v in formatter.items() if v is not None}
+    if "all" in f:
+        for k in out:
+            out[k] = f["all"]
+    for group, keys in (("int_kind", ["int"]), ("float_kind", ["float"]), ("complex_kind", ["complexfloat"])):
+        if group in f:
+            for k in keys:
+                out[k] = f[group]
+    for k in out:
+        if k in f:
+            out[k] = f[k]
+    return out
+
+
+def _push_printoptions():
+    o = _printopts
+    fs = _formatter_functions(o["formatter"])
+    _np.set_printoptions(o["precision"], o["threshold"], o["edgeitems"], o["linewidth"], o["suppress"], o["sign"],
+                         o["floatmode"], o["nanstr"], o["infstr"], fs["bool"], fs["int"], fs["float"],
+                         fs["complexfloat"], o["override_repr"])
+
+
+def _checked_printoptions(precision=None, threshold=None, edgeitems=None, linewidth=None, suppress=None,
+                          nanstr=None, infstr=None, formatter=None, sign=None, floatmode=None, legacy=None,
+                          override_repr=None):
+    """The options after these changes (None: unchanged), validated as NumPy does."""
+    new = dict(_printopts)
+    if legacy is not None and legacy is not False:
+        raise NotImplementedError("legacy=%r (NumPy's older printing) is not implemented in Sagebrush" % (legacy,))
+    if precision is not None:
+        try:
+            precision = _index(precision)
+        except TypeError:
+            raise TypeError("precision must be an integer") from None
+        if precision < 0:
+            raise ValueError("precision must be >= 0")
+        new["precision"] = precision
+    if threshold is not None:
+        if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+            raise TypeError("threshold must be numeric")
+        if threshold != threshold:
+            raise ValueError("threshold must be non-NAN, try sys.maxsize for untruncated representation")
+        new["threshold"] = threshold
+    for name, v in (("edgeitems", edgeitems), ("linewidth", linewidth)):
+        if v is not None:
+            new[name] = _index(v)
+    if suppress is not None:
+        new["suppress"] = _builtins.bool(suppress)
+    for name, v in (("nanstr", nanstr), ("infstr", infstr)):
+        if v is not None:
+            if not isinstance(v, str):
+                raise TypeError("%s must be a string" % name)
+            new[name] = v
+    if sign is not None:
+        if sign not in ("-", "+", " "):
+            raise ValueError("sign option must be one of ' ', '+', or '-'")
+        new["sign"] = sign
+    if floatmode is not None:
+        if floatmode not in _FLOATMODES:
+            raise ValueError('floatmode option must be one of "fixed", "unique", "maxprec", "maxprec_equal"')
+        new["floatmode"] = floatmode
+    if formatter is not None:
+        if not isinstance(formatter, dict):
+            raise TypeError("formatter must be a dict")
+        for k, v in formatter.items():
+            if v is not None and not callable(v):
+                raise TypeError("formatter[%r] must be callable" % (k,))
+    # (formatter and override_repr: None resets them, as in NumPy)
+    new["formatter"] = formatter
+    if override_repr is not None and not callable(override_repr):
+        raise TypeError("override_repr must be callable")
+    new["override_repr"] = override_repr
+    return new
+
+
 def set_printoptions(precision=None, threshold=None, edgeitems=None, linewidth=None, suppress=None,
-                     nanstr=None, infstr=None, formatter=None, sign=None, floatmode=None, legacy=None, override_repr=None):
-    _np.set_printoptions(precision, threshold, edgeitems, linewidth, suppress)
+                     nanstr=None, infstr=None, formatter=None, sign=None, floatmode=None, *, legacy=None,
+                     override_repr=None):
+    """How arrays print (NumPy's options; legacy is not implemented)."""
+    global _printopts
+    _printopts = _checked_printoptions(precision, threshold, edgeitems, linewidth, suppress, nanstr, infstr,
+                                       formatter, sign, floatmode, legacy, override_repr)
+    _push_printoptions()
 
 
 def get_printoptions():
-    return {k: _np.printopt(k) for k in ("precision", "threshold", "edgeitems", "linewidth", "suppress")}
+    return dict(_printopts)
 
 
 class printoptions:
-    def __init__(self, **kw):
-        self.kw = kw
+    """with np.printoptions(...) as opts: the options inside the block only."""
+
+    def __init__(self, *args, **kw):
+        self.args, self.kw = args, kw
 
     def __enter__(self):
-        self.saved = get_printoptions()
-        set_printoptions(**self.kw)
+        global _printopts
+        self.saved = dict(_printopts)
+        set_printoptions(*self.args, **self.kw)
+        return get_printoptions()
 
     def __exit__(self, *exc):
-        set_printoptions(**self.saved)
+        global _printopts
+        _printopts = self.saved
+        _push_printoptions()
         return False
 
 
-def array2string(a, max_line_width=None, precision=None, suppress_small=None, separator=" ", **kw):
-    return str(asarray(a)) if separator == " " else repr(asarray(a))[6:-1]
+def array2string(a, max_line_width=None, precision=None, suppress_small=None, separator=" ", prefix="",
+                 formatter=None, threshold=None, edgeitems=None, sign=None, floatmode=None, suffix="", *,
+                 legacy=None):
+    """The text of an array's elements, NumPy's way, with these options for it only."""
+    with printoptions(precision=precision, threshold=threshold, edgeitems=edgeitems, linewidth=max_line_width,
+                      suppress=suppress_small, formatter=formatter if formatter is not None else _printopts["formatter"],
+                      sign=sign, floatmode=floatmode, legacy=legacy,
+                      override_repr=_printopts["override_repr"]):
+        return _np.array_text(asarray(a), separator, prefix, suffix)
 
 
 def array_repr(arr, max_line_width=None, precision=None, suppress_small=None):
-    return repr(asarray(arr))
+    with printoptions(precision=precision, linewidth=max_line_width, suppress=suppress_small,
+                      formatter=_printopts["formatter"], override_repr=_printopts["override_repr"]):
+        return _np.array_repr(asarray(arr))
 
 
 def array_str(a, max_line_width=None, precision=None, suppress_small=None):
-    return str(asarray(a))
+    with printoptions(precision=precision, linewidth=max_line_width, suppress=suppress_small,
+                      formatter=_printopts["formatter"], override_repr=_printopts["override_repr"]):
+        return _np.array_str(asarray(a))
 
 
-def format_float_positional(x, precision=None, unique=True, fractional=True, trim="k", sign=False, pad_left=None, pad_right=None, min_digits=None):
-    return _np.format_float(x)
+_TRIMS = ("k", ".", "0", "-")
+
+
+def _dragon4_args(x, precision, unique, trim, min_digits):
+    if not unique and precision is None:
+        raise TypeError("in non-unique mode `precision` must be supplied")
+    if trim not in _TRIMS:
+        raise TypeError("if supplied, trim must be 'k', '.', '0' or '-' found `%s`" % (trim,))
+    if precision is not None:
+        precision = _index(precision)
+        if precision < 0:
+            raise ValueError("precision must be >= 0")
+    if min_digits is not None:
+        min_digits = _index(min_digits)
+        if precision is not None and min_digits > precision:
+            raise ValueError("min_digits must be less than or equal to precision")
+    f32 = isinstance(x, float32) or (isinstance(x, ndarray) and x.dtype == float32)
+    return float(x), precision, min_digits, f32
+
+
+def format_float_positional(x, precision=None, unique=True, fractional=True, trim="k", sign=False,
+                            pad_left=None, pad_right=None, min_digits=None):
+    """A float in positional notation: NumPy's Dragon4 (shortest unique
+    digits, or exactly rounded ones, half to even)."""
+    v, precision, min_digits, f32 = _dragon4_args(x, precision, unique, trim, min_digits)
+    if not fractional and precision == 0:
+        raise ValueError("precision must be greater than 0 if fractional=False")
+    return _np.format_float_positional(v, precision, _builtins.bool(unique), _builtins.bool(fractional), trim, _builtins.bool(sign),
+                                       pad_left, pad_right, min_digits, f32)
+
+
+def format_float_scientific(x, precision=None, unique=True, trim="k", sign=False, pad_left=None,
+                            exp_digits=None, min_digits=None):
+    """A float in scientific notation: NumPy's Dragon4."""
+    v, precision, min_digits, f32 = _dragon4_args(x, precision, unique, trim, min_digits)
+    return _np.format_float_scientific(v, precision, _builtins.bool(unique), trim, _builtins.bool(sign), pad_left, exp_digits,
+                                       min_digits, f32)
+
+
+def isscalar(element):
+    """Whether element is a scalar: a NumPy scalar, or a Python number, str,
+    bytes or memoryview (not a 0-d array)."""
+    import numbers
+    if element is None or isinstance(element, ndarray):
+        return False
+    return (isinstance(element, generic) or isinstance(element, (int, float, complex, bool, str, bytes, memoryview))
+            or isinstance(element, numbers.Number))
+
+
+def _nextafter32(a, b):
+    import struct
+    if a != a or b != b:
+        return float("nan")
+    if a == b:
+        return b
+    if a == 0.0:
+        tiny = struct.unpack("<f", struct.pack("<I", 1))[0]
+        return tiny if b > 0 else -tiny
+    i = struct.unpack("<I", struct.pack("<f", a))[0]
+    i = i + 1 if (b > a) == (a > 0) else i - 1
+    return struct.unpack("<f", struct.pack("<I", i))[0]
+
+
+def nextafter(x1, x2, out=None, **kw):
+    """The next floating-point value after x1 towards x2, elementwise (float32
+    when both are float32)."""
+    if kw:
+        raise NotImplementedError("nextafter: %s are not implemented in Sagebrush" % ", ".join(sorted(kw)))
+    a, b = asarray(x1), asarray(x2)
+    if a.dtype.kind == "c" or b.dtype.kind == "c":
+        raise TypeError("ufunc 'nextafter' not supported for the input types")
+    dt = float32 if (a.dtype == float32 and b.dtype == float32) else float64
+    a, b = broadcast_arrays(a.astype(dt), b.astype(dt))
+    step = _nextafter32 if dt is float32 else _math.nextafter
+    vals = [step(p, q) for p, q in zip(a.ravel().tolist(), b.ravel().tolist())]
+    res = array(vals, dtype=dt).reshape(a.shape)
+    return _out(res[()] if res.ndim == 0 else res, out)
 
 
 # ------------------------------------------------------------------ ndarray methods with keyword arguments

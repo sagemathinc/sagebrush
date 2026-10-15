@@ -140,6 +140,38 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### Dragon4 (MIT, Ryan Juckett's, as NumPy has it)
+
+`src/runtime/numpy.ts` (`dragon4Positional`, `dragon4Scientific` and their
+digit rules) follows NumPy's `numpy/_core/src/multiarray/dragon4.c`: the
+formatting of `FormatPositional` and `FormatScientific` (NumPy's rewrite,
+BSD 3-Clause as above) and the digits `Dragon4` produces (cutoffs,
+`min_digits`, rounding half to even, carries), which is Ryan Juckett's
+Dragon4 as modified in NumPy, used under the MIT license with his
+permission:
+
+```
+Copyright (c) 2014 Ryan Juckett
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+```
+
 ### Arm Optimized Routines (MIT, as glibc's exp, log and pow)
 
 `src/runtime/libm.ts`, `src/runtime/exp_data.ts`, `src/runtime/log_data.ts`,
