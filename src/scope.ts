@@ -21,7 +21,12 @@ export class Scope {
   nonlocalLines = new Map<string, number>();
   isGenerator = false;
   isAsync = false;
-  usesSuper = false;
+  // the JS name of this class's cell, once a function of the class uses its
+  // __class__ (by name, or by naming super): the class body makes the cell
+  // and passes it as __classcell__ (set while the class's functions are
+  // compiled; each class its own name, so an inner class's cell never hides
+  // an outer one's)
+  cellName: string | null = null;
   children = new Map<object, Scope>();
   constructor(
     public kind: ScopeKind,
@@ -41,12 +46,15 @@ export type Resolution =
   | { kind: "local" } // a JS `let` in the current JS function
   | { kind: "free"; scope: Scope } // a JS `let` in an enclosing JS function
   | { kind: "global" }
-  | { kind: "class"; outer: Resolution }; // class namespace, falling back to `outer`
+  | { kind: "class"; outer: Resolution } // class namespace, falling back to `outer`
+  | { kind: "classcell"; scope: Scope }; // __class__ in a function of a class: that class's cell
 
 export function resolve(scope: Scope, name: string): Resolution {
   if (scope.globals.has(name)) return { kind: "global" };
   if (scope.kind === "module") return { kind: "global" };
   if (scope.nonlocals.has(name)) {
+    // (nonlocal __class__: the nearest class's cell, or a function between's)
+    if (name === "__class__") return resolveFree(scope.parent!, name);
     const s = findEnclosing(scope.parent, name);
     return s === null ? { kind: "global" } : { kind: "free", scope: s };
   }
@@ -62,7 +70,18 @@ export function resolve(scope: Scope, name: string): Resolution {
 
 // A name not bound in some inner scope: the nearest enclosing function or
 // comprehension binding it (class scopes are skipped), else global.
+// __class__ is the exception: the nearest class gives its functions an
+// implicit __class__ (CPython's class cell), unless a function between binds
+// the name.
 function resolveFree(scope: Scope, name: string): Resolution {
+  if (name === "__class__") {
+    for (let s: Scope | null = scope; s !== null; s = s.parent) {
+      if (s.kind === "class") return { kind: "classcell", scope: s };
+      if (s.kind === "module" || s.globals.has(name)) return { kind: "global" };
+      if (s.bound.has(name) && !s.nonlocals.has(name)) return { kind: "free", scope: s };
+    }
+    return { kind: "global" };
+  }
   const s = findEnclosing(scope, name);
   return s === null ? { kind: "global" } : { kind: "free", scope: s };
 }
@@ -100,7 +119,8 @@ export function analyze(mod: A.Module): Scope {
 
 function checkNonlocals(s: Scope) {
   for (const [n, line] of s.nonlocalLines) {
-    if (findEnclosing(s.parent, n) === null) throw new SyntaxErr(`no binding for nonlocal '${n}' found`, line);
+    const found = n === "__class__" ? resolveFree(s.parent!, n).kind !== "global" : findEnclosing(s.parent, n) !== null;
+    if (!found) throw new SyntaxErr(`no binding for nonlocal '${n}' found`, line);
   }
   for (const c of s.children.values()) checkNonlocals(c);
 }
@@ -292,9 +312,6 @@ class Collector {
     switch (e.k) {
       case "Name":
         this.mark(this.s, e.id, USE);
-        if (e.id === "super" || e.id === "__class__") {
-          for (let s: Scope | null = this.s; s !== null && s.kind !== "class"; s = s.parent) s.usesSuper = true;
-        }
         return;
       case "Const":
         return;
