@@ -296,14 +296,24 @@ pub fn theirs(field: &str, aps: &[&str]) -> (Field, Vec<Vec<Q>>) {
 
 #[test]
 fn counterexample_is_rejected() {
-    // daybreak's example in Q(sqrt 2): conjugating a1 and a2 but not a3
-    // keeps every characteristic polynomial and z = 2 a1 + 3 a2 + 4 a3
+    // daybreak (TEST-656-1), in Q(sqrt 2): a = (2 sqrt 2, -sqrt 2, 1 + sqrt 2)
+    // and b = (-2 sqrt 2, sqrt 2, 1 + sqrt 2) have the same characteristic
+    // polynomial at every prime and the same z_1 = a1 + 2 a2 + 3 a3
+    // = 3 + 3 sqrt 2, which generates the field; but no one automorphism
+    // carries a to b, so the comparison must reject it at the coordinates
     let k = Field::new(vec![Q::int(-2), Q::int(0), Q::int(1)]);
-    let a = vec![vec![Q::int(0), Q::int(3)], vec![Q::int(0), Q::int(-2)], vec![Q::int(1), Q::int(1)]];
-    let b = vec![vec![Q::int(0), Q::int(-3)], vec![Q::int(0), Q::int(2)], vec![Q::int(1), Q::int(1)]];
-    assert!(joint(&k, &a, &k, &b).is_err());
+    let a = vec![vec![Q::int(0), Q::int(2)], vec![Q::int(0), Q::int(-1)], vec![Q::int(1), Q::int(1)]];
+    let b = vec![vec![Q::int(0), Q::int(-2)], vec![Q::int(0), Q::int(1)], vec![Q::int(1), Q::int(1)]];
+    for (x, y) in a.iter().zip(&b) {
+        assert_eq!(charpoly(&k, x), charpoly(&k, y));
+    }
+    let (z, z2) = (combination(&k, &a, 1), combination(&k, &b, 1));
+    assert_eq!(z, vec![Q::int(3), Q::int(3)]);
+    assert_eq!(charpoly(&k, &z), charpoly(&k, &z2));
+    let e = joint(&k, &a, &k, &b).unwrap_err();
+    assert!(e.starts_with("a_P at the prime"), "rejected before the coordinate comparison: {}", e);
     // a genuine conjugation of all three, and the identity, are accepted
-    let c = vec![vec![Q::int(0), Q::int(-3)], vec![Q::int(0), Q::int(2)], vec![Q::int(1), Q::int(-1)]];
+    let c = vec![vec![Q::int(0), Q::int(-2)], vec![Q::int(0), Q::int(1)], vec![Q::int(1), Q::int(-1)]];
     assert_eq!(joint(&k, &a, &k, &c), Ok(1));
     assert_eq!(joint(&k, &a, &k, &a), Ok(1));
 }
