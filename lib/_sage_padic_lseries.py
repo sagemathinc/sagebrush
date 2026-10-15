@@ -662,6 +662,34 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
 
             sage: L.series(2, prec=1).list()[0].precision_absolute()
             38
+
+        Coefficients that are zero to their precision are kept, trailing
+        ones too, so approximations for different n agree to their common
+        precision.  (Sage drops trailing ones, which then read as exact
+        zeros, though the coefficient of T below is nonzero.  A series all
+        of whose coefficients are zero to their precision prints as O(T^n),
+        as Sage prints such series over Qp; its list() keeps them.)::
+
+            sage: L = EllipticCurve('37a1').padic_lseries(3)
+            sage: s2, s4 = L.series(2, prec=5), L.series(4, prec=5)
+            sage: s2
+            O(T^3)
+            sage: s2.list()  # sagebrush only
+            [O(alpha^0), O(alpha^-2), O(alpha^-2)]
+            sage: s4[1]
+            alpha^-2 + O(alpha^0)
+            sage: all((s2[j] - s4[j]).is_zero() for j in range(3))  # sagebrush only
+            True
+
+        Series compare at their common precision.  The coefficient of T^4
+        of the n = 3 series is O(alpha^-3), which contains 1 (Sage drops it
+        and answers False)::
+
+            sage: s3 = L.series(3, prec=5); T = s3.parent().gen()
+            sage: s3 == s3, s3 == s3 + 1
+            (True, False)
+            sage: s3[4], s3 == s3 + T^4  # sagebrush only
+            (O(alpha^-3), True)
         """
         if quadratic_twist != 1 or eta != 0:
             raise NotImplementedError("twisted p-adic L-series (quadratic_twist, eta) are not available in sagebrush yet")
@@ -701,11 +729,9 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
             else:
                 absprec = min(2 * es[j] - n - 2 - 2 * c, cap - n - 1)
             coeffs.append(self._value(F, U, V, n, absprec))
-        # trailing coefficients that are 0 to their precision are left out,
-        # as Sage leaves them out (its polynomials over an extension drop
-        # them); the others are kept, O(alpha^k) included
-        while coeffs and coeffs[-1].is_zero():
-            coeffs.pop()
+        # every coefficient is kept with its precision, O(alpha^k) included,
+        # trailing ones too (Sage drops trailing ones, which then read as
+        # exact zeros: 37a1 at p = 3, n = 2)
         PS = sa.PowerSeriesRing(F, "T", default_prec=prec)
         return PS(coeffs, nterms)
 

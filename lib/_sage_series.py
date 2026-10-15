@@ -924,11 +924,22 @@ class Series:
         return (self.log() * self._R._base(e)).exp()
 
     def __eq__(self, o):
+        """Whether the difference is zero to the common precision: its
+        coefficients are all 0, p-adic ones O(p^k) included, as for p-adic
+        elements (so s == s for a series with inexact coefficients).
+
+        EXAMPLES::
+
+            sage: R.<t> = QQ[[]]; 1 + t + O(t^3) == 1 + t + t^3, 1 + t + O(t^3) == 1 + 2*t
+            (True, False)
+            sage: S.<T> = Qp(3, 5)[[]]; g = S([Qp(3, 5)(1, 2), 3], 4)
+            sage: g == g, g == g + 9, g == g + 3, S([Qp(3, 5)(0, 2)], 3) == 0
+            (True, True, False, True)
+        """
         o = self._coerce(o)
         if o is None:
             return False
-        d = self - o
-        return not d._c
+        return (self - o).is_zero()
 
     def __ne__(self, o):
         return not self == o
