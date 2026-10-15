@@ -881,7 +881,8 @@ class SymbolicFunction:
         if self._vec:
             if args:
                 return self._each(lambda e: e.diff(*args))
-            from _sage_matrix import Matrix
+            from _sage_matrix import Matrix, _shape
+            _shape(len(self._expr), len(self._args))  # (the Jacobian's shape before its cells)
             return Matrix(_sa.SR, [[SymbolicFunction(e.diff(v), self._args) for v in self._args] for e in self._expr])
         if args:
             return self._wrap(self._expr.diff(*args))
@@ -922,7 +923,8 @@ class SymbolicFunction:
             [(x, y) |--> 2*x   (x, y) |--> 0]
         """
         import sage_all as _sa
-        from _sage_matrix import Matrix
+        from _sage_matrix import Matrix, _shape
+        _shape(len(self._args), len(self._args))  # (the Hessian's shape before its cells)
         return Matrix(_sa.SR, [[SymbolicFunction(self._expr.diff(a).diff(b), self._args) for b in self._args] for a in self._args])
 
     def integral(self, *args, **kw):
