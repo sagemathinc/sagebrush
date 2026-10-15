@@ -3154,6 +3154,9 @@ def _brief(v, in_cell):
             # (a missing string: <missing>, unquoted, as a string array shows it)
             return "[<missing>]" if in_cell else "<missing>"
         return '["%s"]' % v.s if in_cell else '"%s"' % _newlines_shown(v.s)
+    if t is StrArr:
+        # (as a table's or cell's element shows a string array: {5×1 string})
+        return "%s string" % _dimstr(d) if in_cell else "[%s string]" % _dimstr(d)
     if t is Cell:
         if not in_cell and len(v.a) == 1 and _isnumlike(v.a[0]) and _numel(v.a[0]) == 1:
             # (a struct's field holding a 1-by-1 cell of a scalar: its element, b: {[1]})
@@ -3345,8 +3348,19 @@ def _doc_layout():
 
 
 def _nd_pages(v):
-    """an N-D numeric, logical or char array's pages: [(index text, 2-D value)]"""
+    """an N-D numeric, logical, char, cell or string array's pages: [(index text, 2-D value)]"""
     out = []
+    if type(v) is Cell or type(v) is StrArr:
+        d = v.shape
+        r, c = d[0], d[1]
+        for p in range(_prod(d[2:])):
+            idx, k = [], p
+            for x in d[2:]:
+                idx.append(k % x + 1)
+                k //= x
+            page = v.a[p * r * c:(p + 1) * r * c]
+            out.append(("(:,:,%s)" % ",".join(str(i) for i in idx), Cell(page, (r, c)) if type(v) is Cell else _strarr(page, (r, c))))
+        return out
     for suffix, p in _pages(v):
         pv = Char(_contig(p)) if type(v) is Char else _box(_contig(p))
         out.append((suffix, pv))
@@ -3354,7 +3368,10 @@ def _nd_pages(v):
 
 
 def _is_nd(v):
-    return (type(v) is np.ndarray or type(v) is Char) and _arr(v).ndim > 2 and _numel(v) > 0
+    t = type(v)
+    if t is Cell or t is StrArr:
+        return len(v.shape) > 2 and len(v.a) > 0
+    return (t is np.ndarray or t is Char) and _arr(v).ndim > 2 and _numel(v) > 0
 
 
 def display(name, v):
@@ -9574,3 +9591,4 @@ import _matlab_ode  # noqa: E402,F401  (odeset, odeget, ode45, ode23, deval)
 import _matlab_funfun  # noqa: E402,F401  (function functions: optimization options and solvers)
 import _matlab_eigs  # noqa: E402,F401  (eigs)
 import _matlab_special  # noqa: E402,F401  (special functions)
+import _matlab_more  # noqa: E402,F401  (split, replace, dec2bin and the others, sub2ind, ind2sub, mat2cell)
