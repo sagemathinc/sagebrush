@@ -417,21 +417,28 @@ _NO_SUBSPACES = ("Sagebrush does not construct subspaces of spaces of Hilbert mo
 
 def _hmf_args(args, kwds):
     """(F, level, weight) from HilbertModularForms(level, weight=None) or
-    HilbertModularForms(F, level, weight=None), F a number field."""
+    HilbertModularForms(F, level, weight=None), F a number field; level and
+    weight may be given by keyword, but not twice (CORR-EA6-1; examples in
+    HilbertModularForms).
+    """
     args = list(args)
-    weight = kwds.pop("weight", None)
-    if kwds:
-        raise TypeError("unexpected arguments %s" % ", ".join(sorted(kwds)))
+    kwds = dict(kwds)
     F = None
     if args and _is_field(args[0]):
         F = args.pop(0)
-    if not args or len(args) > 2:
+    if len(args) > 2:
         raise TypeError("HilbertModularForms(level, weight=None) or HilbertModularForms(F, level, weight=None)")
-    if len(args) == 2:
-        if weight is not None:
-            raise TypeError("the weight is given twice")
-        weight = args[1]
-    return F, args[0], weight
+    for name, value in zip(("level", "weight"), args):
+        if name in kwds:
+            raise TypeError("HilbertModularForms() got multiple values for argument '%s'" % name)
+        kwds[name] = value
+    level = kwds.pop("level", None)
+    weight = kwds.pop("weight", None)
+    if kwds:
+        raise TypeError("HilbertModularForms() got unexpected arguments %s" % ", ".join(sorted(kwds)))
+    if level is None:
+        raise TypeError("HilbertModularForms() missing the argument 'level'")
+    return F, level, weight
 
 
 def _is_sqrt5(F):
@@ -454,6 +461,37 @@ class HilbertModularForms:
         Hilbert modular forms of dimension 2, level -2*a+7 (of norm 31=31) over QQ(sqrt(5))
         sage: HilbertModularForms(3)  # sagebrush only
         Hilbert modular forms of dimension 1, level 3 (of norm 9=3^2) over QQ(sqrt(5))
+
+    The level and the weight may be given by keyword (but not twice), over
+    Q(sqrt(5)) and over other fields::
+
+        sage: HilbertModularForms(level=3).level()  # sagebrush only
+        Fractional ideal (3)
+        sage: HilbertModularForms(level=3, weight=4).weight()  # sagebrush only
+        (4, 4)
+        sage: HilbertModularForms(3, weight=(2, 4)).weight()  # sagebrush only
+        (2, 4)
+        sage: K.<a> = QuadraticField(10)
+        sage: HilbertModularForms(K, level=2).cuspidal_dimension()  # sagebrush only
+        8
+        sage: HilbertModularForms(K, level=K.ideal(3), weight=2).level()  # sagebrush only
+        (Fractional ideal (3, a + 1)) * (Fractional ideal (3, a + 2))
+        sage: HilbertModularForms(3, level=3)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: HilbertModularForms() got multiple values for argument 'level'
+        sage: HilbertModularForms(3, 4, weight=2)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: HilbertModularForms() got multiple values for argument 'weight'
+        sage: HilbertModularForms(weight=2)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: HilbertModularForms() missing the argument 'level'
+        sage: HilbertModularForms(3, wieght=2)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: HilbertModularForms() got unexpected arguments wieght
     """
 
     def __new__(cls, *args, **kwds):
