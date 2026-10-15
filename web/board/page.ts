@@ -307,6 +307,24 @@ const host: BoardHost = {
       return ex.map((e) => ({ title: e.title, about: e.about, href: `?doc=${encodeURIComponent("examples/" + e.file)}`, current: source === "examples/" + e.file }));
     },
   },
+  // (which Sagebrush: the site's /version.json, each field checked, as data;
+  // an exported file, or a site without it, the engine it was built with or carries)
+  version: async () => {
+    const own = ref?.id ?? OWN_ENGINE?.id, v: { version?: string; build?: string; engine?: string } = {};
+    if (!file) {
+      try {
+        const r = await fetch(new URL("/version.json", location.href), { cache: "no-store" });
+        const j = r.ok ? await r.json() : null;
+        if (j && typeof j === "object") {
+          if (typeof j.version === "string" && /^[\w.+-]{1,40}$/.test(j.version)) v.version = j.version;
+          if (typeof j.build === "string" && /^[0-9a-f]{6,64}$/.test(j.build)) v.build = j.build;
+          if (typeof j.engine === "string" && /^[0-9a-f]{6,64}$/.test(j.engine)) v.engine = j.engine;
+        }
+      } catch {}
+    }
+    v.engine ??= own && /^[0-9a-f]{6,64}$/.test(own) ? own : undefined;
+    return v.version || v.build || v.engine ? v : null;
+  },
   exportHtml: (d, o) => exportHtml(d, o),
   // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
   saveKey: !file,
