@@ -1824,6 +1824,46 @@ def _kernel(a, base):
     return FreeModule_(base, n, [r for r in R if any(x != 0 for x in r)])
 
 
+# The most entries a constructor reads from an input (a list, a generator,
+# any object Python can iterate): never more, so an endless input is an
+# error, not a hang (Python's sequence protocol iterates any __getitem__).
+_MAX_ENTRIES = 1 << 22
+
+
+def _bounded_list(obj, limit=None, what="entries"):
+    """list(obj), reading at most limit + 1 items: more than limit is a
+    ValueError."""
+    if limit is None:
+        limit = _MAX_ENTRIES
+    if isinstance(obj, (list, tuple)):
+        if len(obj) > limit:
+            raise ValueError("more than %d %s" % (limit, what))
+        return list(obj)
+    if isinstance(obj, (str, bytes)):
+        raise TypeError("%r is not a list of %s" % (obj, what))
+    import itertools
+    out = list(itertools.islice(iter(obj), limit + 1))
+    if len(out) > limit:
+        raise ValueError("more than %d %s" % (limit, what))
+    return out
+
+
+def _bounded_rows(obj, limit=None):
+    """Rows (each a list), at most limit entries and rows in all."""
+    if limit is None:
+        limit = _MAX_ENTRIES
+    rows = _bounded_list(obj, limit, "rows")
+    out, used = [], 0
+    for r in rows:
+        if isinstance(r, (list, tuple)) or (hasattr(r, "__iter__") and not isinstance(r, str)) or type(r).__name__ in ("Vector", "FFVector"):
+            r = _bounded_list(r, limit - used)
+        else:
+            r = [r]
+        used += len(r)
+        out.append(r)
+    return out
+
+
 def vector(*args):
     """vector([1, 2, 3]) or vector(QQ, [1/2, 1]).
 
@@ -1834,16 +1874,19 @@ def vector(*args):
     """
     import _sage_ffmat
     if len(args) == 2 and _sage_ffmat._is_ff(args[0]):
-        return _sage_ffmat.vector(args[0], args[1])
+        return _sage_ffmat.vector(args[0], _bounded_list(args[1]))
     if args and _is_padic(args[0]):
         raise NotImplementedError("vectors over %r are not available in sagebrush yet" % (args[0],))
     ring = None
     if len(args) == 2:
         ring, args = args[0], args[1:]
-    ff = _ff_base_of(args[0])
+    # read once, boundedly (a generator was read twice: by the finite-field
+    # test, then empty)
+    entries = _bounded_list(args[0])
+    ff = _ff_base_of(entries)
     if ff is not None:
-        return _sage_ffmat.vector(ff, args[0])
-    v = Vector(_norm(x) for x in args[0])
+        return _sage_ffmat.vector(ff, entries)
+    v = Vector(_norm(x) for x in entries)
     sa = _sa()
     if ring is sa.QQ or ring is sa.ZZ:
         if ring is sa.ZZ and any(not isinstance(x, int) for x in v):
@@ -1929,17 +1972,27 @@ def _is_padic(R):
 
 
 def _padic_base_of(rows):
-    """The parent of the p-adic entries of rows (a list of rows or a flat
-    list), when every entry is a p-adic number of one parent, an integer or
-    a rational; else None."""
+    """The ring of a matrix with p-adic entries (rows: a list of rows or a
+    flat list): Sage's pushout of the entries' parents (a field if one is,
+    the larger cap), None when no entry is p-adic.  Different primes are a
+    TypeError (as Sage); other entries than integers and rationals with
+    p-adic ones are refused."""
     import _sage_padic
     flat = [x for r in rows for x in (r if isinstance(r, (list, tuple)) else [r])]
-    parents = {x.parent() for x in flat if isinstance(x, _sage_padic.pAdicCappedRelativeElement)}
-    if len(parents) != 1:
+    parents = [x.parent() for x in flat if isinstance(x, _sage_padic.pAdicCappedRelativeElement)]
+    if not parents:
         return None
-    if all(isinstance(x, (_sage_padic.pAdicCappedRelativeElement, int, _F)) or type(x).__name__ in ("Integer", "Rational") for x in flat):
-        return parents.pop()
-    return None
+    P = parents[0]
+    for Q in parents[1:]:
+        if Q._p != P._p:
+            raise TypeError("unable to find a common ring for all elements")
+        P = _sage_padic._pushout(P, Q)
+    for x in flat:
+        if not (isinstance(x, (_sage_padic.pAdicCappedRelativeElement, int, _F)) or type(x).__name__ in ("Integer", "Rational")):
+            raise NotImplementedError("matrices of p-adic numbers and %r are not available in sagebrush yet" % (x,))
+        if (isinstance(x, _F) or type(x).__name__ == "Rational") and not P._field:
+            P = P.fraction_field()
+    return P
 
 
 def _is_parent(R):
@@ -1991,17 +2044,20 @@ def matrix(*args, **kwds):
         if isinstance(ent, (int, _F)) or type(ent).__name__ == "Rational":
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
         else:
-            ent = list(ent)
+            # at most r c + 1 entries are read (r rows of a list of rows)
+            ent = _bounded_list(ent, max(r * c, r))
             if ent and isinstance(ent[0], (list, tuple)):
-                rows = [list(x) for x in ent]
+                rows = _bounded_rows(ent, max(r * c, r))
             else:
+                if len(ent) != r * c:
+                    raise ValueError("entries has the wrong length")
                 rows = [ent[i * c:(i + 1) * c] for i in range(r)]
     elif len(args) == 2 and isinstance(args[0], int) and not isinstance(args[1], int):
         # matrix(QQ, nrows, entries): the number of columns from the entries
-        ent = list(args[1])
+        ent = _bounded_list(args[1])
         r = args[0]
         if ent and isinstance(ent[0], (list, tuple)):
-            rows = [list(x) for x in ent]
+            rows = _bounded_rows(ent)
         else:
             if r == 0 or len(ent) % r:
                 raise ValueError("entries do not fill a matrix with %d rows" % r)
@@ -2010,10 +2066,18 @@ def matrix(*args, **kwds):
     elif len(args) == 1 and isinstance(args[0], int):
         rows = [[0] * args[0] for _ in range(args[0])]
     else:
-        rows = list(args[0] if args else [])
+        rows = _bounded_list(args[0] if args else [], what="rows")
         if rows and not any(isinstance(r, (list, tuple)) or hasattr(r, "__iter__") and not isinstance(r, str) for r in rows):
             rows = [rows]  # matrix([1, 2, 3]): one row
-        rows = [list(r) for r in rows]
+        rows = _bounded_rows(rows)
+    pb = _padic_base_of(rows)
+    if pb is not None:
+        # p-adic entries: a matrix over their ring (matrix(2, 2, [K(1), ...]));
+        # over ZZ or QQ they are refused (Sage converts them by lifting)
+        if base is not None:
+            raise NotImplementedError("matrices over %r with p-adic entries are not available in sagebrush yet" % (base,))
+        import _sage_padic
+        return _sage_padic.padic_matrix(pb, rows)
     if base is None:
         def kind(x):
             try:
