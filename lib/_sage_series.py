@@ -319,7 +319,7 @@ def _exact_quo(x, c, B):
 
 def _is_zero(c):
     # (a p-adic coefficient O(p^n) is kept, as Sage prints it: O(5)*T)
-    if hasattr(c, "_x") and type(c).__name__ == "pAdicCappedRelativeElement":
+    if hasattr(c, "_x") and type(c).__name__ in ("pAdicCappedRelativeElement", "EisensteinExtensionElement"):
         return c._x.is_exact_zero()
     try:
         return not c
@@ -431,10 +431,14 @@ class Series:
 
         EXAMPLES::
 
-            sage: R.<t> = QQ[[]]; (t + 2*t^3 + O(t^5)).list()
-            [0, 1, 0, 2]
+            sage: R.<t> = QQ[[]]; (t + 2*t^3 + O(t^5)).list(), O(t^3).list()
+            ([0, 1, 0, 2], [])
         """
         out = self._R._base
+        if not self._c:
+            # (no coefficients known, as in O(t^3): [] as Sage gives, but
+            # [0] over Qp and Zp, whose series list like their polynomials)
+            return [_out(self._R._zero())] if _is_padic(self._R._base) else []
         if self._v >= 0:
             return [_out(c) for c in [self._R._zero()] * self._v + self._c]
         return [_out(c) for c in self._c]
@@ -1172,7 +1176,7 @@ def _mono(name, e):
 
 def _term(c, e, name, laurent=False):
     """(negative, text) of the term c*x^e."""
-    if type(c).__name__ == "pAdicCappedRelativeElement":
+    if type(c).__name__ in ("pAdicCappedRelativeElement", "EisensteinExtensionElement"):
         # (Sage: a p-adic coefficient is not atomic: it is parenthesized
         # whenever it shows a + or a -, as (O(5^-1))*T, and so is the
         # constant term of a Laurent series then)
