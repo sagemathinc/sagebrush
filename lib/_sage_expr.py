@@ -5049,8 +5049,8 @@ class _Latex:
 
         sage: latex(x^2/2), latex(sqrt(x)), latex(1/2)
         (\\frac{1}{2} \\, x^{2}, \\sqrt{x}, \\frac{1}{2})
-        sage: latex(QQ), latex('a string')
-        (\\Bold{Q}, \\text{\\texttt{a{ }string}})
+        sage: latex(QQ), latex('a string'), latex(latex(1/2))
+        (\\Bold{Q}, \\text{\\texttt{a{ }string}}, \\frac{1}{2})
         sage: latex.matrix_delimiters(left='[', right=']'); latex(matrix(ZZ, 2, 2, range(4)))
         \\left[\\begin{array}{rr}
         0 & 1 \\\\
@@ -5069,10 +5069,14 @@ class _Latex:
         self._engine = "latex"
 
     def __call__(self, v):
-        if isinstance(v, str):
-            return _LatexExpr(_latex_text(v))
+        # LaTeX already, and the _latex_ protocol (also of a str subclass),
+        # before a string is escaped as text
+        if isinstance(v, _LatexExpr):
+            return v
         if hasattr(v, "_latex_"):
             return _LatexExpr(v._latex_())
+        if isinstance(v, str):
+            return _LatexExpr(_latex_text(v))
         if isinstance(v, _Fraction):
             return _LatexExpr(_expr(v)._latex_())
         if isinstance(v, (list, tuple)):

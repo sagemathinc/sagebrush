@@ -685,7 +685,8 @@ class MPolynomialRing_:
     def has_coerce_map_from(self, S):
         """Whether S coerces into this ring: the ring itself, what coerces
         into the base ring, and polynomial rings whose variables are among
-        this ring's, over a base that coerces.
+        this ring's, over a base that coerces; NotImplementedError where
+        that is not known here (never a guessed False).
 
         EXAMPLES::
 
@@ -694,6 +695,10 @@ class MPolynomialRing_:
             (True, False)
             sage: R1.has_coerce_map_from(ZZ), R1.has_coerce_map_from(QQ), R1.has_coerce_map_from(ZZ['x'])
             (True, False, True)
+            sage: K = QuadraticField(2, 'a'); K['x', 'y'].has_coerce_map_from(QQ['x', 'y']), QQ['x', 'y'].has_coerce_map_from(int)
+            (True, True)
+            sage: GF(9, 'b')['x', 'y'].has_coerce_map_from(GF(3)), Zmod(4)['x', 'y'].has_coerce_map_from(Zmod(12)['x', 'y'])
+            (True, True)
         """
         return _coerces_into(S, self)
 
@@ -720,6 +725,13 @@ class MPolynomialRing_:
             sage: R.<x,y> = QQ[]
             sage: R(3), R('x^2 + y'), R({(1, 2): 5})
             (3, x^2 + y, 5*x*y^2)
+            sage: ZZ['z', 'x'](x + 2*y), ZZ['y', 'x', 'w'](x*y)
+            (z + 2*x, y*x)
+            sage: f = PolynomialRing(ZZ, 2, 'x,y')({(i, 0): 1 for i in range(1000)})
+            sage: PolynomialRing(ZZ, 1100, 'z')(f)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: converting 1000 terms into a ring of 1100 generators exceeds sagebrush's limit of 1048576 exponent entries
         """
         dom = self._dom
         if isinstance(x, MPolynomial):
@@ -763,6 +775,7 @@ class MPolynomialRing_:
             name = str(x.variable_name())
             cs = list(x.list())
             if name in self._names:
+                _admit_conversion(len(cs), self)
                 i = self._names.index(name)
                 d = {}
                 for k, c in enumerate(cs):
@@ -790,17 +803,71 @@ class MPolynomialRing_:
         return MPolynomial(self, {(0,) * self._n: c})
 
 
-def _base_coerces(S, B):
-    """Whether the ring S coerces into the base ring B (ZZ into every ring,
-    QQ into QQ and the real and complex fields, a ring into itself)."""
+def _ring_kind(R):
+    """The kind of a base ring, for deciding coercions between them: "ZZ",
+    "QQ", "mod" (Zmod(n), GF(p)), "ff" (GF(p^k), k > 1), "nf", "real",
+    "complex", "float", or None (not known here)."""
     sa = _sa()
+    if R is sa.ZZ or R is int:
+        return "ZZ"
+    if R is sa.QQ:
+        return "QQ"
+    if R is float:
+        return "float"
+    t = type(R).__name__
+    if t == "IntegerModRing_":
+        return "mod"
+    if t == "FiniteField_ext":
+        return "ff"
+    if t == "NumberField_absolute":
+        return "nf"
+    if t in ("_RealField", "RealField_", "RealDoubleField_"):
+        return "real"
+    if t in ("ComplexField_", "ComplexDoubleField_"):
+        return "complex"
+    return None
+
+
+def _base_coerces(S, B):
+    """Whether the ring S coerces into the base ring B: True or False where
+    that is known (ZZ into every ring; QQ into the fields of characteristic
+    0, not into ZZ or a ring of characteristic p; Zmod(m) into Zmod(n) or
+    GF(p^k) when n or p divides m; nothing of characteristic p into
+    characteristic 0 or another p), else NotImplementedError rather than a
+    wrong False (the review's CORR-0FE-5: int, QQ into a number field and
+    GF(3) into GF(9) were denied)."""
     if S is B or S == B:
         return True
-    if S is sa.ZZ:
+    ks, kb = _ring_kind(S), _ring_kind(B)
+    if ks == "ZZ":
         return True
-    if S is sa.QQ:
-        return B is sa.QQ or repr(B).startswith(("Real Field", "Complex Field", "Real Double", "Complex Double"))
-    return False
+    if ks is not None and kb == "ZZ":
+        return False
+    char0 = ("QQ", "nf", "real", "complex")
+    if ks == "QQ":
+        if kb in char0 or type(B).__name__ in ("_AlgebraicField", "_AlgebraicRealField"):
+            return True
+        if kb in ("mod", "ff"):
+            return False
+    if ks in ("mod", "ff") and kb is not None:
+        if kb not in ("mod", "ff"):
+            return False  # characteristic p into characteristic 0
+        m, n = int(S.characteristic()), int(B.characteristic())
+        if m % n:
+            return False
+        if ks == "mod" and kb == "mod":
+            return m % n == 0
+        if ks == "mod" and kb == "ff":
+            return True  # through Zmod(p), its prime subfield
+        if ks == "ff" and kb == "mod":
+            return False
+    if ks in ("nf", "real", "complex", "float") and kb in ("mod", "ff"):
+        return False
+    if ks == "nf" and kb == "QQ":
+        return False
+    if ks in ("real", "complex", "float") and kb in ("QQ", "nf"):
+        return False
+    raise NotImplementedError("whether %s coerces into %s is not known in sagebrush yet" % (S, B))
 
 
 def _coerces_into(S, R):
@@ -808,12 +875,22 @@ def _coerces_into(S, R):
     if S is R or S == R:
         return True
     B = R.base_ring()
+    if S is B or S == B:
+        return True
     names = list(R._names) if hasattr(R, "_names") else [R._name]
     if hasattr(S, "_names") and hasattr(S, "_dom"):
-        return all(n in names for n in S._names) and _base_coerces(S.base_ring(), B)
-    if hasattr(S, "_name") and callable(getattr(S, "base_ring", None)) and callable(getattr(S, "gen", None)):
-        return S._name in names and _base_coerces(S.base_ring(), B)
-    return _base_coerces(S, B)
+        snames = list(S._names)
+    elif hasattr(S, "_name") and callable(getattr(S, "base_ring", None)) and callable(getattr(S, "gen", None)):
+        snames = [S._name]
+    else:
+        return _base_coerces(S, B)
+    if not all(n in names for n in snames):
+        # a variable that is not R's: no coercion, unless the base ring
+        # (itself perhaps polynomial) takes S, which is not decided here
+        if _ring_kind(B) is None:
+            raise NotImplementedError("whether %s coerces into %s is not known in sagebrush yet" % (S, R))
+        return False
+    return _base_coerces(S.base_ring(), B)
 
 
 def _integral(R, d):
@@ -825,12 +902,38 @@ def _integral(R, d):
     return d
 
 
+# The most exponent entries (terms times the target's generators) a
+# conversion between polynomial rings writes: each term becomes a tuple of
+# the target's arity (4000 terms into 4000 generators exhausted the heap,
+# the review's HARD-0FE-1).
+_MAX_CONVERT_ENTRIES = 1 << 20
+
+
+def _admit_conversion(nterms, R, n0=1):
+    """Refuse, before anything is allocated, a conversion of nterms terms
+    with n0 exponents each into R that grows them past
+    _MAX_CONVERT_ENTRIES exponent entries (into as many generators or fewer
+    it writes no more than the source holds)."""
+    if R._n > n0 and nterms * R._n > _MAX_CONVERT_ENTRIES:
+        raise NotImplementedError("converting %d terms into a ring of %d generators exceeds sagebrush's limit of %d exponent entries" % (nterms, R._n, _MAX_CONVERT_ENTRIES))
+
+
+def _by_name(R, f):
+    """f in the ring R, a polynomial of another ring by variable name: what
+    arithmetic, ideals and monomial lookups use (R(f) converts by position
+    when the names differ, which only an explicit conversion may do)."""
+    if isinstance(f, MPolynomial):
+        return f if f._ring is R else _map_vars(f, R)
+    return R(f)
+
+
 def _map_vars(f, R, convert=False):
     """f in the ring R, matching variables by name.  convert (R(f), a
     conversion, not a coercion): by position instead when not all of f's
     ring's names are R's and it has no more generators (ZZ['z', 'x'](x) is
     z, as in Sage; arithmetic and == still match names)."""
     S = f._ring
+    _admit_conversion(len(f._d), R, S._n)
     if convert and not all(n in R._names for n in S._names) and S._n <= R._n:
         d = {}
         for e, c in f._d.items():
@@ -1224,10 +1327,10 @@ class MPolynomial:
         """
         R = self._ring
         if isinstance(degrees, MPolynomial):
-            # a monomial of another parent is read by variable name (its
+            # a monomial of another parent is refused, as in Sage (its
             # exponents were taken positionally: MUL-F6)
-            if degrees._ring is not self._ring:
-                degrees = self._ring(degrees)
+            if degrees._ring != R:
+                raise TypeError("The input degrees must be a dictionary of variables to exponents.")
             e = degrees._leading()[0]
             fixed = {i: e[i] for i in range(R._n) if e[i]}
         elif isinstance(degrees, dict):
@@ -1252,8 +1355,10 @@ class MPolynomial:
             3
         """
         dom = self._ring._dom
-        if isinstance(mon, MPolynomial) and mon._ring is not self._ring:
-            mon = self._ring(mon)  # by variable name (MUL-F6)
+        if not isinstance(mon, MPolynomial):
+            raise TypeError("Argument 'mon' has incorrect type (expected a multivariate polynomial, got %s)" % type(mon).__name__)
+        if mon._ring != self._ring:
+            raise TypeError("mon must have same parent as self.")  # (MUL-F6)
         return dom._out(self._d.get(mon._leading()[0], dom.zero))
 
     # ---- printing
@@ -1322,7 +1427,7 @@ class MPolynomial:
             if isinstance(o, MPolynomial):
                 # a polynomial over a larger base: compute in its ring (both
                 # are MPolynomial, so Python does not reflect the operation)
-                return (o._ring(self), o) if o._ring._base is not _sa().ZZ else None
+                return (_by_name(o._ring, self), o) if o._ring._base is not _sa().ZZ else None
             Q = R.change_ring(_sa().QQ)
             return Q(self), Q(o)
         except (TypeError, ValueError, AttributeError):
@@ -1419,6 +1524,13 @@ class MPolynomial:
 
     def __truediv__(self, o):
         R = self._ring
+        if isinstance(o, MPolynomial) and o._ring is not R:
+            # in the common ring, as + does (x/z was 1)
+            o2 = self._coerce(o)
+            if o2 is None:
+                p = self._over_qq(o)
+                return p[0] / p[1] if p is not None else NotImplemented
+            o = o2
         if isinstance(o, MPolynomial) and not o.is_constant():
             return R.fraction_field()(self, o)
         if isinstance(o, MFraction):
@@ -2895,8 +3007,10 @@ class _FractionField:
         R = self._R
         if isinstance(num, MFraction) and den is None:
             return num
-        num = R(num) if not isinstance(num, MPolynomial) else num
-        den = R.one() if den is None else (R(den) if not isinstance(den, MPolynomial) else den)
+        # (a polynomial of another ring was kept as it was, its exponents
+        # read positionally: x/z was 1 for x in ZZ[x, y], z in QQ[z, x])
+        num = _by_name(R, num)
+        den = R.one() if den is None else _by_name(R, den)
         return MFraction(num, den)
 
     def ring(self):
@@ -3667,12 +3781,12 @@ class MPolynomialIdeal:
 
     def _here(self, J):
         """The generators of the ideal J as elements of this ring (converted
-        by variable name, as R(f) does: the exponent tuples of another
+        by variable name, as arithmetic does: the exponent tuples of another
         parent were copied positionally, so QQ['y,x']'s x acted as y, the
         second review's R2-GB-F2)."""
         if J._ring is self._ring:
             return list(J._gens)
-        return [self._ring(g) for g in J._gens]
+        return [_by_name(self._ring, g) for g in J._gens]
 
     def __add__(self, o):
         if isinstance(o, MPolynomialIdeal):

@@ -75,3 +75,29 @@ residues :: [1, 1, 3, 5, 3, 2]
 residues + :: TypeError
 basis :: ValueError
 basis copy :: [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
+mixed x, z :: [z + x, -z + x, z*x, False]
+mixed z, x :: [z + x, z - x, z*x, False]
+mixed x, t.z :: TypeError
+mixed t.z, x :: TypeError
+mixed / :: [z/x, z/x]
+mixed conversion :: [z, z, Ideal (z) of Multivariate Polynomial Ring in z, x over Rational Field, True]
+monomial of another parent :: TypeError
+mod :: [3/4, 0, 0, 2]
+mod refused :: TypeError
+round None :: [0, 2, 4, 0, -2, 2, -2, 2, -2, 0]
+round toward :: [0, 2, 4, 0, -2, 1, -1, 2, -2, 0]
+round away :: [1, 3, 5, -1, -3, 2, -2, 2, -2, 0]
+round up :: [1, 3, 5, 0, -2, 2, -1, 2, -2, 0]
+round down :: [0, 2, 4, -1, -3, 1, -2, 2, -2, 0]
+round even :: [0, 2, 4, 0, -2, 2, -2, 2, -2, 0]
+round odd :: [1, 3, 5, -1, -3, 1, -1, 2, -2, 0]
+round refused :: ValueError
+sqrt :: [0, 2, 3/2, 1, 100000000000000000000, sqrt(2), 2*I, 3/2*I, 1/2*sqrt(3)]
+sqrt parents :: [Rational Field, Rational Field, Rational Field, Rational Field, Symbolic Ring, Rational Field]
+sqrt quo_rem :: (2/3, 0)
+sqrt options :: [1.4142136, [2, -2], [0], [], 2.0000000*I]
+sqrt not rational :: ValueError
+sqrt negative :: ValueError
+latex :: [\frac{1}{2}, \mathcal{CUSTOM}, \left[x^{2}, \text{\texttt{a{\char`\_}b}}\right]]
+coercion maps :: [True, True, True, True, True, False, True, True, False, False, False, False]
+coerce :: [1/2, y]
