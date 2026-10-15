@@ -10,12 +10,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { devtoolsPort } from "./test-port.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DIST = join(here, "dist");
 const PAGE = `<!doctype html><meta charset="utf-8"><body><script type="module">
 import { WorkerKernel, RunnerWorker } from "/sagebrush-notebook.js";
-import { devtoolsPort } from "./test-port.mjs";
 const bytes = async (n) => (await fetch("/" + n)).arrayBuffer();
 const files = { "sagebrush-worker.js": await bytes("sagebrush-worker.js"), "sagebrush-engine.wasm": await bytes("sagebrush-engine.wasm"), "sagebrush-precompiled.json": await bytes("sagebrush-precompiled.json") };
 const kernel = new WorkerKernel({ createWorker: () => new RunnerWorker(null, { files }) });
