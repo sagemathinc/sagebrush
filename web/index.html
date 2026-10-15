@@ -1735,13 +1735,18 @@ function openDoc(e) {
   docDlg.showModal();
 }
 // the sage: lines of a docstring (with their ....: continuations), as a cell;
-// for MATLAB's, the lines after its prompt, >> (lib/_matlab_docsearch.py)
+// for MATLAB's, the lines after its prompt, >> (lib/_matlab_docsearch.py);
+// for Magma's, the lines after its prompt, "> " (lib/_magma_docsearch.py)
 function docExamples(doc, lang) {
   const out = [];
   for (const line of doc.split("\n")) {
     const t = line.trim();
     if (lang === "matlab") {
       if (line.startsWith(">> ")) out.push(line.slice(3));
+      continue;
+    }
+    if (lang === "magma") {
+      if (t.startsWith("> ")) out.push(t.slice(2));
       continue;
     }
     if (t.startsWith("sage: ")) out.push(t.slice(6));
