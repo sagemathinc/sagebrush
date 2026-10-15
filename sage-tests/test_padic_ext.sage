@@ -527,3 +527,143 @@ t('L(2*19^41)', lambda: L(2*19^41))
 t('L(1/(3*19^31))', lambda: L(1/(3*19^31)))
 t('L(Qp(19, 5)(19^71))', lambda: L(Qp(19, 5)(19^71)))
 t('(L(2*19^41)*(1+alpha)).norm()', lambda: (L(2*19^41)*(1+alpha)).norm())
+# review cases: rational defining coefficients, zero and inexact-zero
+# polynomial coefficients, nonintegral exponents, parent promotion,
+# precision arguments, hashing, precision limited by the polynomial's
+K = Qp(3, 6)
+x = polygen(QQ)
+t('ext x^2+3/2', lambda: K.extension(x^2 + QQ(3)/2, names='a'))
+t('ext x^2+(3/2)x+3', lambda: K.extension(x^2 + QQ(3)/2*x + 3, names='a'))
+t('ext x^2-(6/5)x+3/7', lambda: K.extension(x^2 - QQ(6)/5*x + QQ(3)/7, names='a'))
+for f in [x^2 + QQ(3)/2, x^2 + QQ(3)/2*x + 3, x^2 - QQ(6)/5*x + QQ(3)/7]:
+    L = K.extension(f, names='a')
+    a = L.gen()
+    t('def exact', lambda: L.defining_polynomial(exact=True))
+    t('def exact parent', lambda: L.defining_polynomial(exact=True).parent())
+    t('def', lambda: L.defining_polynomial())
+    t('f(a)', lambda: f(a))
+    t('f(a).is_zero()', lambda: f(a).is_zero())
+    t('a^2', lambda: a^2)
+    t('a^-3', lambda: a^-3)
+    t('L(3)', lambda: L(3))
+    t('L(1/2)*a', lambda: L(1/2)*a)
+    t('(1+a)^-1', lambda: (1 + a)^-1)
+    t('(2+a)^5', lambda: (2 + a)^5)
+    t('a.norm()', lambda: a.norm())
+    t('(1+a).norm()', lambda: (1 + a).norm())
+L4 = Zp(3, 6).extension(x^2 - QQ(3)/2, names='d')
+d = L4.gen()
+t('L4', lambda: L4)
+t('d^2, d^-1, L4(1/2)', lambda: (d^2, d^-1, L4(1/2)))
+L = K.extension(polygen(K)^2 + 3, names='b')
+b = L.gen()
+for e in [1.5, 2.0, QQ(3)/2, float(1.5)]:
+    t('(b+1)^%s' % e, lambda: (b + 1)^e)
+R.<s> = K[]
+for e in [QQ(3)/2, 1.5, float(1.5), 2.0, QQ(4)/2]:
+    t('s^%s' % e, lambda: s^e)
+cases = [
+ ('s-s', s - s),
+ ('R(0)', R(0)),
+ ('[1,0]', R([K(1), K(0)])),
+ ('[1,O(3^2)]', R([K(1), K(0, 2)])),
+ ('s^2+3', s^2 + 3),
+ ('s^2-s^2+3s', s^2 - s^2 + 3*s),
+ ('c0=O(3)', R([K(0,1), K(3), K(1)])),
+ ('c0=O(3^2)', R([K(0,2), K(3), K(1)])),
+ ('c0=O(3^0)', R([K(0,0), K(3), K(1)])),
+ ('c0=0', R([K(0), K(3), K(1)])),
+ ('c0=3+O(3^2)', R([K(3,2), K(3), K(1)])),
+ ('c1=O(1)', R([K(3), K(0, 0), K(1)])),
+ ('c1=O(3)', R([K(3), K(0, 1), K(1)])),
+ ('c1=O(3^-1)', R([K(3), K(0, -1), K(1)])),
+ ('deg3 mid O(1)', R([K(3), K(0,2), K(0,0), K(1)])),
+ ('lead O(3^2)', R([K(3), K(3), K(0,2)])),
+ ('lead 3', R([K(3), K(3), K(3)])),
+ ('lead 1/3', R([K(3), K(3), K(1)/3])),
+ ('mid 1/3', R([K(3), K(1)/3, K(1)])),
+ ('s+3', s + 3),
+ ('s', s),
+ ('O(3^3)s^2+s+3', R([K(3), K(1), K(0,3)])),
+ ('Zp', Zp(3,6)['s']([3, 3, 1])),
+]
+for k, f in cases:
+    t(k, lambda: f)
+    t(k + ' degree', lambda: f.degree())
+    t(k + ' degree secure', lambda: f.degree(secure=True))
+    t(k + ' lc', lambda: f.leading_coefficient())
+    t(k + ' coefficients', lambda: f.coefficients())
+    t(k + ' coefficients dense', lambda: f.coefficients(sparse=False))
+    t(k + ' list', lambda: f.list())
+    if k != 'R(0)':
+        t(k + ' is_eisenstein', lambda: f.is_eisenstein())
+        t(k + ' is_eisenstein secure', lambda: f.is_eisenstein(secure=True))
+for B in [Qp(3,6), Zp(3,6)]:
+    R = PolynomialRing(B, 'u')
+    u = R.gen()
+    t('base', lambda: B)
+    for q in [u/1, u/3, u + 1/3, u + 1/2, u*Zp(3,6)(3), u*Qp(3,8)(1), u*Zp(3,8)(1), u + 1, 3*u, u - Qp(3,6)(1)/9]:
+        t('promote', lambda: (q, q.parent().base_ring()))
+    t('R(u/3)', lambda: R(u/3))
+    t('R(u/1)', lambda: R(u/1))
+    t('u/3 coefficient parent', lambda: (u/3)[1].parent())
+    t('u/0', lambda: u/0)
+S = PolynomialRing(Zp(3, 6), 'u')
+T = PolynomialRing(Qp(3, 6), 'u')
+t('S+T', lambda: (S.gen() + T.gen()).parent())
+t('S==T', lambda: S.gen() == T.gen())
+t('hash zero', lambda: (R.zero() == u - u, hash(R.zero()) == hash(u - u), len(set([R.zero(), u - u]))))
+t('hash one', lambda: (hash(R(1)) == hash(1), hash(R(1)) == hash(Zp(3,6)(1)), len(set([R(1), R(1)]))))
+t('hash u+1', lambda: (hash(u + 1) == hash(u + 1), len(set([u + 1, u + 1, u + 2]))))
+L = K.extension(polygen(K)^2 + 3, names='a')
+a = L.gen()
+t('hash element', lambda: hash(L(1)))
+t('set element', lambda: set([L(1), 1]))
+for v in [-1, 0, 1, 2]:
+    t('relprec %d' % v, lambda: (L(1, relprec=v), L(1, relprec=v).valuation(), L(1, relprec=v).is_zero(), L(1, relprec=v).precision_relative(), L(1, relprec=v).precision_absolute()))
+    t('relprec %d 3a' % v, lambda: L(3*a, relprec=v))
+for v in [-1, 0, 2, 2.0, QQ(4)/2, 1.5, QQ(3)/2, oo]:
+    t('absprec %s' % v, lambda: L(1, absprec=v))
+    t('relprec %s' % v, lambda: L(1, relprec=v))
+    t('add_bigoh %s' % v, lambda: L(1).add_bigoh(v))
+    t('add_bigoh %s a^-3' % v, lambda: (a^-3).add_bigoh(v))
+t('absprec 3 relprec 2', lambda: L(1, absprec=3, relprec=2))
+t('Qp relprec -1', lambda: K(1, relprec=-1))
+t('Qp relprec 1.5', lambda: K(1, relprec=1.5))
+t('Qp absprec 1.5', lambda: K(1, absprec=1.5))
+t('Qp relprec 2.0', lambda: K(1, relprec=2.0))
+t('Qp add_bigoh 1.5', lambda: K(1).add_bigoh(1.5))
+t('Qp add_bigoh 3/2', lambda: K(1).add_bigoh(QQ(3)/2))
+t('Qp add_bigoh oo', lambda: K(1).add_bigoh(oo))
+t('Qp ^1.5', lambda: K(4)^1.5)
+t('ring O(a^-2)', lambda: L.integer_ring()(L(0).add_bigoh(-2)))
+t('1/O(a^6)', lambda: 1/L(0).add_bigoh(6))
+t('a.sqrt()', lambda: a.sqrt())
+# the precision of an extension is limited by its polynomial's
+for P, Q in [(Qp(3,10), Qp(3,6)), (Qp(3,6), Qp(3,4)), (Qp(3,6), Qp(3,10)), (Zp(3,6), Qp(3,4)), (Qp(3,6), Zp(3,4))]:
+    y = Q['x'].gen()
+    M = P.extension(y^2 - 3*y + 3, names='a')
+    a = M.gen()
+    t('ext', lambda: (M, M.precision_cap()))
+    t('a^2, a^-1, (1+a)^-1', lambda: (a^2, a^-1, (1 + a)^-1))
+    t('M(-1), M(1/3)', lambda: (M(-1), M(1/3)))
+    t('defining', lambda: M.defining_polynomial())
+y = K['x'].gen()
+for c0, c1 in [(K(6, absprec=2), 0), (K(3, absprec=4), 0), (K(3), K(0, absprec=3)), (K(3), K(3, absprec=2)), (K(-3, absprec=5), K(9, absprec=4))]:
+    M = K.extension(y^2 + c1*y + c0, names='a')
+    a = M.gen()
+    t('low ext', lambda: (M, M.precision_cap()))
+    t('a^2, a^-1, (2+a)^-1, M(5)', lambda: (a^2, a^-1, (2 + a)^-1, M(5)))
+    N = M.integer_ring()
+    t('integer_ring', lambda: (N, N.precision_cap(), N.gen()^3))
+    t('mixed', lambda: (a + Qp(3, 4)(1), a + Zp(3, 2)(1), a*Zp(3, 10)(2), (a*Zp(3, 10)(2)).parent().precision_cap()))
+# large valuations with rational defining coefficients
+x = polygen(QQ)
+for f in [x^2 + QQ(3)/2, x^2 - QQ(6)/5*x + QQ(3)/7]:
+    L = Qp(3, 6).extension(f, names='a'); a = L.gen()
+    t('L(3^50)', lambda: L(3^50))
+    t('L(2*3^41)', lambda: L(2*3^41))
+    t('L(1/(5*3^31))', lambda: L(1/(5*3^31)))
+    t('L(Qp(3,6)(3^71))', lambda: L(Qp(3, 6)(3^71)))
+    t('L(3^50) + 1', lambda: L(3^50) + 1)
+    t('L(3^20)*(1+a)', lambda: L(3^20)*(1 + a))
