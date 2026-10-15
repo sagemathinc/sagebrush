@@ -544,8 +544,8 @@ class Parser {
     const e = this.exprStatement();
     if (this.at(",") && !e.refs.length) {
       // a, b; prints the values on one line, as print a, b; does
-      const vals = [e.code];
-      while (this.eat(",")) vals.push(this.expr());
+      const vals = [this.all(e.code)];
+      while (this.eat(",")) vals.push(this.all(this.expr()));
       this.expect(";");
       this.emit(`_m._print_line(_m._flat([${vals.join(", ")}]))`);
       return;
@@ -559,7 +559,7 @@ class Parser {
       if (names.length === 1) this.store(names[0], `_m._ref1(${tmp})`);
       else names.forEach((r, k) => this.store(r, `_m._refk(${tmp}, ${k})`));
     } else {
-      this.emit(`_m._show_values(${e.code})`);
+      this.emit(`_m._show_values(${this.all(e.code)})`);
     }
   }
 
@@ -665,11 +665,11 @@ class Parser {
     const e = this.exprStatement();
     this.expect(";");
     if (lhs.length === 1) {
-      this.store(lhs[0], `_m._first(${e.code})`);
+      this.store(lhs[0], `_m._first(${this.all(e.code)})`);
       return;
     }
     const tmp = this.fresh();
-    this.emit(`${tmp} = _m._values(${e.code}, ${lhs.length})`);
+    this.emit(`${tmp} = _m._values(${this.all(e.code)}, ${lhs.length})`);
     lhs.forEach((t, k) => {
       if (t.py === "_m_discard") return;
       if (t.kind !== "name") return this.store(t, `_m._present(${tmp}[${k}])`);
@@ -794,7 +794,7 @@ class Parser {
     }
     this.expect(";");
     if (fn.procedure) this.emit(`return ${this.procReturn(fn)}`);
-    else if (vals.length === 1) this.emit(`return ${vals[0]}`);
+    else if (vals.length === 1) this.emit(`return ${this.all(vals[0])}`);
     else this.emit(`return _m.Multi([${vals.join(", ")}])`);
   }
 
@@ -808,7 +808,8 @@ class Parser {
     // print x: Magma level; print x: Maximal etc. are ignored
     if (this.eat(":")) this.ident();
     this.expect(";");
-    this.emit(`_m._print_line([${vals.map((v) => `_m._first(${v})`).join(", ")}])`);
+    // (each value's all, as for a, b; at a statement)
+    this.emit(`_m._print_line(_m._flat([${vals.map((v) => this.all(v)).join(", ")}]))`);
   }
 
   printStmt() {
@@ -974,6 +975,18 @@ class Parser {
   }
 
   // ---- expressions: Python source strings
+  // A call's several return values (return x, y;): in an expression, its
+  // first (Magma's [ f(2) ], f(2) + 1, Abs(f(2))); all of them where the
+  // call is all there is to a statement (f(2); and print f(2), 7;), to a
+  // return, to func< >'s body, or to a multiple assignment's right side
+  // (checked against Magma 2.18).  A call is emitted as _m._first(CALL),
+  // and `calls` maps that text (and the text of it in parentheses) to the
+  // bare call, for those contexts (all()).
+  private calls = new Map<string, string>();
+  all(code: string): string {
+    return this.calls.get(code) ?? code;
+  }
+
   exprStatement(): { code: string; refs: Target[] } {
     const refs: Target[] = [];
     this.refSink = refs;
@@ -1135,7 +1148,12 @@ class Parser {
           if (!this.refSink) this.fail("reference arguments (~x) are only allowed in a procedure call statement");
           this.refSink.push(...a.refs);
         }
-        e = `${e}(${a.code})`;
+        if (a.refs.length) e = `${e}(${a.code})`; // a procedure statement's call
+        else {
+          const call = `${e}(${a.code})`;
+          e = `_m._first(${call})`;
+          this.calls.set(e, call);
+        }
       } else if (this.at("[")) {
         this.next();
         const idx = [this.expr()];
@@ -1199,6 +1217,8 @@ class Parser {
         return `_m.MTuple([${rest.join(", ")}])`;
       }
       this.expect(")");
+      // ((f(2)); is all of f(2)'s values, as f(2); is)
+      if (this.calls.has(e)) this.calls.set(`(${e})`, `(${this.calls.get(e)})`);
       return `(${e})`;
     }
     if (this.at("[")) return this.collection("[", "]", "_m._seq");
@@ -1237,7 +1257,8 @@ class Parser {
         }
         const b1 = this.uses.length;
         const free = this.classify(b0, b1, [...p.py, ...p.optNames], "fn");
-        body = this.resolveUses(body, b0, b1);
+        // (all of a call's values first: its text as the call was emitted)
+        body = this.resolveUses(this.all(body), b0, b1);
         const caps = free.map((n) => this.capture(n, b0, b1));
         if (!this.capturing) this.uses.length = 0;
         this.expect(">");
