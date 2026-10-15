@@ -159,6 +159,27 @@ try {
   check(st.says === "1 of 3" && st.page === 0, "...and Enter goes on from the match it left: " + JSON.stringify(st));
   await escape();
 
+  // another document loaded while Find is open: the old matches gone (no
+  // stale count, no word of the new one marked), the query asked of the new
+  // one (CORR-F33-1)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "First", nodes: [{ id: "a", title: "apple", x: 0, y: 0, w: 260 }] })}).then(() => 1)`);
+  await sleep(300);
+  await ctrlF();
+  await ev("(() => { const q = document.querySelector('[data-sbb=findq]'); q.value = 'apple'; q.dispatchEvent(new Event('input')); return 1; })()");
+  await sleep(500);
+  st = await state();
+  check(st.says === "1 of 1" && st.marked === 1, "apple, found: " + JSON.stringify(st));
+  const marks = () => ev("(() => { const h = CSS.highlights.get('sb-find'); return h ? [...h].map((r) => r.toString()) : []; })()");
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Second", nodes: [{ id: "a", title: "banana", x: 0, y: 0, w: 260 }] })}).then(() => 1)`);
+  await sleep(600);
+  st = await state();
+  check(st.says === "No matches" && st.found === 0 && JSON.stringify(await marks()) === "[]", "another document loaded: no stale count, nothing of it marked: " + JSON.stringify([st, await marks()]));
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Third", nodes: [{ id: "a", title: "crab apple", x: 0, y: 0, w: 260 }] })}).then(() => 1)`);
+  await sleep(600);
+  st = await state();
+  check(st.says === "1 of 1" && JSON.stringify(await marks()) === JSON.stringify(["apple"]), "...and one that says it: found in it: " + JSON.stringify([st, await marks()]));
+  await escape();
+
   // two boards on one page: each its own marked words in the page's one
   // highlight; one destroyed takes its own, and only its own (CORR-8CE-2)
   await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);

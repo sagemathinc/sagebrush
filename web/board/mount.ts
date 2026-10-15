@@ -543,6 +543,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function load(d: BoardDoc, stored = false) {
     loads++;
     loadGen++;
+    // (Find's matches were the old document's: gone, before its items are
+    // drawn again, CORR-F33-1; its query asked of the new one once shown)
+    forgetFound();
     byPage.clear();
     newOutputs(!stored);
     // (a document loaded from elsewhere was not written here; the one kept, as it says)
@@ -555,6 +558,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     at = -1;
     const n = Number(m?.[2] ?? m?.[3] ?? 0);
     step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
+    if (!findBar.hidden && findQ.value) findNow();
     refitAfterRun().catch(fail);
   }
 
@@ -1372,6 +1376,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   function closeFind() {
     findBar.hidden = true;
+    forgetFound();
+  }
+  // (no match: none counted, outlined or marked, and a mark still coming dropped)
+  function forgetFound() {
     found = [];
     foundAt = -1;
     findGen++;
@@ -1618,8 +1626,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
      * the last board on the page). */
     async destroy() {
       // (first, at once: whatever is waiting draws nothing more, CORR-C08-1;
-      // what is being written is still kept, saved though not drawn)
+      // what is being written is still kept, saved though not drawn; Find's
+      // mark still coming dropped, F33)
       destroyed = true;
+      findGen++;
       presenting = null;
       presentGen++;
       routingGen++;
