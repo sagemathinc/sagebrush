@@ -56,9 +56,9 @@ functions are within a few units in the last place. The larger errors
 follow the functions' own condition numbers or the method's: for complex s,
 zeta's and hurwitz_zeta's absolute error grows with |Im s| (about
 8 |Im s| eps of max(1, |zeta|), from the rounding of the phases Im s log k),
-the real erfi's and erfcx's with x^2 (the rounding of e^(x^2)'s exponent;
-for complex z e^(-z^2) is exact, and the error functions are within 1e-15
-for |z| up to 1e9), E1's and Ei's with |x|, and the incomplete gamma
+the error functions' not at all (e^(-z^2) and e^(x^2) are taken with
+exact exponents and scaled, so they are within 1e-15 for |z| up to 1e9),
+E1's and Ei's with |x|, and the incomplete gamma
 functions' with the size of their exponent (about 4e-15 max(1, |log
 value|), the rounding of log x^a e^-x / Gamma(a+1)); beta's grows with
 |betaln| likewise (7e-15 max(1, |betaln|) for negative arguments).

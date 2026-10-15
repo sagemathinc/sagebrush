@@ -8,8 +8,8 @@ import { readFileSync } from "node:fs";
 // from test/special_mpmath_gen.py.  Each function's tolerance is a little
 // above the largest error measured in Sagebrush, as a fraction of
 // max(floor, |value|); the large ones are where the function's own
-// condition is large (|Im s| for zeta, x^2 for the real erfi and erfcx
-// near their growth, |x| for E1 and Ei), as the docstrings say.
+// condition is large (|Im s| for zeta, |x| for E1 and Ei), as the
+// docstrings say.
 const cases: [string, any[], any][] = JSON.parse(readFileSync(__dirname + "/../../test/special-mpmath.json", "utf8"));
 
 const program = `
@@ -54,8 +54,8 @@ const pair = (v: any): [number, number] => (Array.isArray(v) ? [num(v[0]), num(v
 const TOL: Record<string, [number, number, number?]> = {
   loggamma: [2e-14, 1], gamma: [6e-14, 1e-300], psi: [3e-15, 1], polygamma: [8e-15, 1e-300],
   zeta: [3e-14, 1, 2.5e-15], hurwitz_zeta: [3e-14, 1, 5e-15], beta: [3e-14, 1e-300], betaln: [1e-15, 1],
-  faddeeva: [1.5e-15, 1e-300], erf: [1.5e-15, 1e-300], erfc: [1.5e-15, 1e-300], erfi: [1.5e-13, 1e-300],
-  erfcx: [6e-14, 1e-300], erfinv: [1e-15, 1e-300], erfcinv: [1e-15, 1e-300],
+  faddeeva: [1.5e-15, 1e-300], erf: [1.5e-15, 1e-300], erfc: [1.5e-15, 1e-300], erfi: [1.5e-15, 1e-300],
+  erfcx: [1.5e-15, 1e-300], erfinv: [1e-15, 1e-300], erfcinv: [1e-15, 1e-300],
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
@@ -298,6 +298,11 @@ print(" | ".join(kind(f, a).split(" at ")[0] for f, a in [(S.erfc, z), (S.erf, z
                                                           (S.erfcx, -1j * z.conjugate())]))
 print(abs(S._exp_mul(-1000.0, 1.7e308) / 8.62913012583407619e-127 - 1) < 1e-14, abs(S._cexp_mul(complex(-1000.0, 0), 1.7e308).real / 8.62913012583407619e-127 - 1) < 1e-14,
       repr(S._exp_mul(710.0, 0.0)), repr(S._cexp_mul(complex(710.0, 1), 0.0)))
+# (astra's note on f938c7d: each part of the multiplier scaled by its own exponent, so a small part beside a huge one
+# survives; and both parts of each product, cos and sin, by their own)
+v = S._cexp_mul(complex(-1000.0, 0.5), complex(1e-300, 1.7e308))
+r = complex(-4.137025358263756e-127, 7.572774122714864e-127)   # (mpmath at 400 digits)
+print(repr(S._cexp_mul(0j, complex(1e308, 1e-100))), abs(v - r) <= 1e-15 * abs(r))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -385,5 +390,6 @@ print(abs(S._exp_mul(-1000.0, 1.7e308) / 8.62913012583407619e-127 - 1) < 1e-14, 
       "NotCovered: erf, erfc, erfi: |erfc z| is beyond the doubles | NotCovered: faddeeva: |w(z)| is beyond the doubles | " +
       "NotCovered: faddeeva: |w(z)| is beyond the doubles",
     "True True 0.0 0j",
+    "(1e+308+1e-100j) True",
   ]);
 });
