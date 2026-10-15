@@ -47,6 +47,7 @@ def _ellipsis(args, step, infinite):
     out = []
     cur = 1 if step is None else step
     hit = False
+    first = True  # no Ellipsis processed yet (constant state: no rescan of the prefix)
     i = 0
     while i < n:
         if args[i] is not Ellipsis:
@@ -61,10 +62,11 @@ def _ellipsis(args, step, infinite):
         else:
             shared = False
             out.pop()  # start was appended as a plain value
-            if step is None and i >= 2 and not any(a is Ellipsis for a in args[:i]):
+            if step is None and i >= 2 and first:
                 a = out.pop()
                 cur = start - a
                 start = a
+        first = False
         if i + 1 >= n:
             if not infinite:
                 raise IndexError("Ellipsis range must have an endpoint, use (n..) for infinite sequence.")

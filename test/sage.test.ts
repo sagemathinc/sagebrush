@@ -43,3 +43,11 @@ test("pickling an int/float/str/bytes/tuple subclass instance keeps its value", 
     "print(pickle.loads(pickle.dumps(b)).tag)";
   assert.equal(cli("-c", src), "1\n");
 });
+
+// many ranges in one ellipsis list stay linear: whether an ellipsis is the
+// first is a flag, not a rescan of the prefix (astra's PERF-CF3-1 on cf3b4f2:
+// 16,000 ranges took 12.9 s copying 512 million prefix entries, against 0.09 s)
+test("ellipsis_range with 16,000 ranges is linear", () => {
+  const out = cli("--sage", "-c", "import time\na = [0, Ellipsis, -1] + [1, 2, Ellipsis, 1]*16000\nt = time.perf_counter(); v = ellipsis_range(*a); t = time.perf_counter() - t\nprint(v == [1]*16000, len(v), t < 1.0 or t)");
+  assert.equal(out, "True 16000 True\n");
+});
