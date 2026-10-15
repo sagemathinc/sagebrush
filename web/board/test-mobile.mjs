@@ -220,6 +220,8 @@ try {
     await send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 3, mobile: true });
     await ev("window.sagebrush.board.present(false).then(() => 1)");
   }
+  // Help on a phone (B5): not in the crowded top bar, but in ⋯
+  check(await ev("!document.querySelector('[data-sbb=help]').offsetParent && !!document.querySelector('[data-sbb=menu] [data-sbb=helpitem]')"), "B5: on a phone Help is in ⋯, not the top bar");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
