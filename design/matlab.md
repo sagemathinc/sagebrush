@@ -578,8 +578,13 @@ The rest:
   it picks "nice" edges, so Sagebrush's rules are its own (Scott's width
   rounded to Heckbert's nice numbers, 1, 2, 5 or 10 times a power of 10)
   and its edges can differ from MATLAB's;
+- fzero's search from x0 = 0, where the published displays' step (x0/50)
+  is none, is on Octave's scale for a zero start, 0.1 (step 0.1/50):
+  Octave's fzero tries the same multiples of x0 from any start (0.99 x0,
+  1.025 x0, 0.95 x0, ...) and from 0 exactly those of 0.1 (0.099, 0.1025,
+  0.095, ...), as observed with Octave 11.1;
 - fzero's details that neither its page nor a published display fixes are
-  Sagebrush's own: the search's first step from x0 = 0 (1/50), the end of
+  Sagebrush's own: the end of
   a search that would overflow (exitflag -6), never giving exitflag -5
   (its page says what it means, a possible singular point, but not how it
   is detected; a sign change at a pole ends like any other), an error for
@@ -594,8 +599,11 @@ The rest:
   best in each component, every value within TolFun of the best), as are
   a complex value being an error and the messages other than the
   converged one. PlotFcns is refused;
-- lsqnonneg's likewise: how TolX enters the tests (for entering, for a
-  positive entry and for reaching 0), the iteration limit when MaxIter is
+- lsqnonneg's likewise: TolX as the threshold for entering (a dual
+  tolerance; a passive solution's positivity is tested exactly and the
+  variable limiting the step back reaches 0 exactly, as in Lawson and
+  Hanson's steps 6 to 11, so that a solution of any scale is kept), the
+  iteration limit when MaxIter is
   unset (Lawson and Hanson's 3 times the number of variables), what
   counts as an iteration (a least-squares solve), and the message for
   exitflag 0. Display 'iter', which its page does not list, is refused;
