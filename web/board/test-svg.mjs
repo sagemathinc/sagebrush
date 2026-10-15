@@ -59,7 +59,7 @@ function inspect(svg) {
 
 // ---- the example boards: every page; the same each time; nothing overflows --
 const HASHES = {
-  "sagebrush-0": "2f5f2011255f7238", "live-0": "ad4092bfdcbd68b2", "primes-0": "a50e6755a7c6348b", "primes-1": "bed8b854ba59fee4", "primes-2": "3df9c7d962b85d2a", "polynomials-0": "a1b832249bae1ceb", "museum-tour-0": "999888d248719e81",
+  "sagebrush-0": "d52b0abf831946d0", "live-0": "ad4092bfdcbd68b2", "primes-0": "a50e6755a7c6348b", "primes-1": "bed8b854ba59fee4", "primes-2": "3df9c7d962b85d2a", "polynomials-0": "ec66434ad33df5a0", "museum-tour-0": "999888d248719e81",
 };
 const got = {};
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
@@ -164,6 +164,7 @@ if (process.env.UPDATE) console.log(JSON.stringify(got));
   const r = boardSvg({ nodes: [{ id: "g", kind: "group", title: long, x: 0, y: 0, children: [{ id: "a", x: 0, y: 0, w: 200, title: "A" }] }] });
   const t = [...r.svg.matchAll(/<text[^>]*>([^<]*(?:<tspan[^>]*>[^<]*<\/tspan>[^<]*)*)<\/text>/g)].map((m) => m[1].replace(/<[^>]*>/g, "")).filter((x) => x.startsWith("Workbench"));
   check(t.length === 1 && t[0].endsWith("…") && long.startsWith(t[0].slice(0, -1)), "a long group title, one line cut with …: " + JSON.stringify(t));
+  check(r.svg.includes(`<g><title>${long}</title>`), "...its whole title kept, as the group's <title> (UI-0CC-2)");
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
