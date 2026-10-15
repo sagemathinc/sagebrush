@@ -377,10 +377,13 @@ export function canonical(d: BoardDoc): string {
 
 /** Why this cannot be shown as a board of this format (another format, or a
  * later version than this page reads), or null. */
-export function formatError(d: any): string | null {
+/** Why a document can't be shown, or null.  `reader` and `remedy` name the
+ * program reading it and what to do about a later version: the page's by
+ * default; the command line says its own (src/board-cli.ts). */
+export function formatError(d: any, o: { reader?: string; remedy?: string } = {}): string | null {
   if (d?.format !== undefined && d.format !== FORMAT) return `not a Sagebrush board: its format is "${String(d.format).slice(0, 40)}"`;
   if (d?.version !== undefined && !(Number.isInteger(d.version) && d.version >= 1)) return "not a Sagebrush board: its version is not a number";
-  if (d?.version > VERSION) return `this board is in version ${d.version} of the format, from a later Sagebrush; this page reads version ${VERSION}: reload it, or update the app`;
+  if (d?.version > VERSION) return `this board is in version ${d.version} of the format, from a later Sagebrush; ${o.reader ?? "this page"} reads version ${VERSION}: ${o.remedy ?? "reload it, or update the app"}`;
   // (on a page, an id is one item's: an edge names it)
   const pages: any[] = Array.isArray(d?.pages) ? d.pages : [d];
   for (let i = 0; i < pages.length; i++) {

@@ -117,7 +117,8 @@ export async function boardRun(argv: string[]): Promise<number> {
   let doc: BoardDoc;
   try {
     const d = boardFromText(readFileSync(file === "-" ? 0 : file, "utf8"), file === "-" ? undefined : basename(file));
-    const bad = formatError(d);
+    // (as the board says it, in the command line's words: which sagebrush can't read it, and what to do)
+    const bad = formatError(d, { reader: `this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"})`, remedy: "update sagebrush (npx sagebrush@latest)" });
     if (bad) throw new Error(bad);
     if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
     doc = cleanDoc(d);
