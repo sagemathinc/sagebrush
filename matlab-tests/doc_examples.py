@@ -35,7 +35,7 @@ OCTAVE_SKIP = {
     "replace": "not in Octave 11",
 }
 # (compared to 12 significant digits: Octave's and Sagebrush's last bits differ)
-OCTAVE_ROUND = {"inv", "polyfit", "linsolve", "gamma"}
+OCTAVE_ROUND = {"inv", "polyfit", "linsolve", "gamma", "gammainc"}
 
 
 def codes():
